@@ -28,6 +28,7 @@
 #include <chrono>
 #include <cmath>
 #include <iostream>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -602,16 +603,6 @@ int runGemm(size_t             m,
             = roc::host_validation::convertValues<AccumulateT>(std::span<const AccumulateT>(c));
         std::vector<AccumulateT> dRef(d.size());
 
-        // If the storage type is wider than the compute-input type, the GPU
-        // (and slow-path validator) quantize the operand down before the MAC.
-        // Mirror that here so the golden GEMM reflects the same model.
-        roc::host_validation::QuantizeFunction<AccumulateT> quantA
-            = (computeInputA != dtypeEnumA) ? hostValidationQuantizerFor<AccumulateT>(computeInputA)
-                                            : nullptr;
-        roc::host_validation::QuantizeFunction<AccumulateT> quantB
-            = (computeInputB != dtypeEnumB) ? hostValidationQuantizerFor<AccumulateT>(computeInputB)
-                                            : nullptr;
-
 #ifndef _WIN32
         size_t mxsaBatchStride = 0, mxsbBatchStride = 0;
         size_t mxsaStrideM = 0, mxsaStrideKBlk = 0;
@@ -635,76 +626,129 @@ int runGemm(size_t             m,
         }
 #endif
 
-        // Run the golden reference per-batch.
-        // When isTF32, use XFloat32 as OperandMathOpT so the golden ref
-        // truncates each A/B element to 10-bit mantissa before multiply.
-        auto runGoldenRef = [&](auto mathOpTag) {
-            using MathOpT = decltype(mathOpTag);
-            for(size_t batch = 0; batch < batchCount; ++batch)
+        // Run the runtime-typed golden reference per batch. The host buffers
+        // remain caller-owned; the validation component sees affine tensor
+        // views and product-independent scalar types.
+        for(size_t batch = 0; batch < batchCount; ++batch)
+        {
+            using namespace roc::host_validation;
+
+            const AccumulateT* aPtr = aRef.data() + batch * numA;
+            const AccumulateT* bPtr = bRef.data() + batch * numB;
+            const AccumulateT* cPtr = cRef.data() + batch * numC;
+            AccumulateT*       dPtr = dRef.data() + batch * numC;
+
+            const ptrdiff_t strideARow    = transA ? static_cast<ptrdiff_t>(k) : 1;
+            const ptrdiff_t strideAColumn = transA ? 1 : static_cast<ptrdiff_t>(m);
+            const ptrdiff_t strideBRow    = transB ? static_cast<ptrdiff_t>(n) : 1;
+            const ptrdiff_t strideBColumn = transB ? 1 : static_cast<ptrdiff_t>(k);
+
+            GemmOperand operandA(TensorView::fromNative<AccumulateT>(
+                Layout(Shape{m, k}, {strideARow, strideAColumn}),
+                std::span<const AccumulateT>(aPtr, numA)));
+            GemmOperand operandB(TensorView::fromNative<AccumulateT>(
+                Layout(Shape{k, n}, {strideBRow, strideBColumn}),
+                std::span<const AccumulateT>(bPtr, numB)));
+            if(computeInputA != dtypeEnumA)
+                operandA.computeType = toHostValidationScalarType(computeInputA);
+            if(computeInputB != dtypeEnumB)
+                operandB.computeType = toHostValidationScalarType(computeInputB);
+
+            GemmProblem problem(std::move(operandA),
+                                std::move(operandB),
+                                TensorView::fromNative<AccumulateT>(
+                                    Layout(Shape{m, n}, {1, static_cast<ptrdiff_t>(m)}),
+                                    std::span<const AccumulateT>(cPtr, numC)),
+                                MutableTensorView::fromNative<AccumulateT>(
+                                    Layout(Shape{m, n}, {1, static_cast<ptrdiff_t>(m)}),
+                                    std::span<AccumulateT>(dPtr, numC)),
+                                nativeScalarType<AccumulateT>);
+
+            problem.epilogue.alpha
+                = {static_cast<double>(
+                       (useScaleAB == "Scalar") ? alpha * scaleABuf[0] * scaleBBuf[0] : alpha),
+                   0.0};
+            problem.epilogue.beta       = {static_cast<double>(beta), 0.0};
+            problem.epilogue.activation = toHostValidationActivation(activation);
+            problem.mathMode            = isTF32 ? MathMode::XFloat32 : MathMode::Default;
+
+            if(useBias)
             {
-                const AccumulateT* aPtr = aRef.data() + batch * numA;
-                const AccumulateT* bPtr = bRef.data() + batch * numB;
-                const AccumulateT* cPtr = cRef.data() + batch * numC;
-                AccumulateT*       dPtr = dRef.data() + batch * numC;
+                problem.epilogue.bias = VectorBinding{
+                    TensorView::fromNative<AccumulateT>(
+                        Layout::contiguous(Shape{m}),
+                        std::span<const AccumulateT>(biasVec.data() + batch * m, m)),
+                    MatrixAxis::Row};
+            }
+            if(useScaleAlphaVec)
+            {
+                problem.epilogue.scaleAlpha
+                    = VectorBinding{TensorView::fromNative<AccumulateT>(
+                                        Layout::contiguous(Shape{scaleAlphaVecBuf.size()}),
+                                        std::span<const AccumulateT>(scaleAlphaVecBuf)),
+                                    factorDim == 0 ? MatrixAxis::Row : MatrixAxis::Column};
+            }
+            if(useScaleAB == "Vector")
+            {
+                problem.epilogue.scaleA = TensorView::fromNative<AccumulateT>(
+                    Layout::contiguous(Shape{scaleABuf.size()}),
+                    std::span<const AccumulateT>(scaleABuf));
+                problem.epilogue.scaleB = TensorView::fromNative<AccumulateT>(
+                    Layout::contiguous(Shape{scaleBBuf.size()}),
+                    std::span<const AccumulateT>(scaleBBuf));
+            }
 
-                auto invocation = makeHostValidationColumnMajorGemm<AccumulateT,
-                                                                    AccumulateT,
-                                                                    AccumulateT,
-                                                                    AccumulateT,
-                                                                    AccumulateT>(
-                    aPtr, bPtr, cPtr, dPtr, m, n, k, transA, transB);
-
-                invocation.alpha = static_cast<AccumulateT>(
-                    (useScaleAB == "Scalar") ? alpha * scaleABuf[0] * scaleBBuf[0] : alpha);
-                invocation.beta            = static_cast<AccumulateT>(beta);
-                invocation.factorDimension = factorDim;
-                invocation.activation      = toHostValidationActivation(activation);
-                invocation.quantizeA       = quantA;
-                invocation.quantizeB       = quantB;
-
-                if(useBias)
-                    invocation.bias = roc::host_validation::ConstVectorView<AccumulateT>(
-                        biasVec.data() + batch * m, m);
-                if(useScaleAlphaVec)
-                    invocation.scaleAlpha = roc::host_validation::ConstVectorView<AccumulateT>(
-                        scaleAlphaVecBuf.data(), scaleAlphaVecBuf.size());
-                if(useScaleAB == "Vector")
-                {
-                    invocation.scaleA = roc::host_validation::ConstVectorView<AccumulateT>(
-                        scaleABuf.data(), scaleABuf.size());
-                    invocation.scaleB = roc::host_validation::ConstVectorView<AccumulateT>(
-                        scaleBBuf.data(), scaleBBuf.size());
-                }
-
+            std::optional<Tensor> runtimeBlockScaleA;
+            std::optional<Tensor> runtimeBlockScaleB;
 #ifndef _WIN32
-                if constexpr(isFP4)
+            if constexpr(isFP4)
+            {
+                if(mxBlockA > 0)
                 {
-                    if(mxBlockA > 0)
+                    const size_t scaleABase  = batch * mxsaBatchStride;
+                    const size_t scaleBBase  = batch * mxsbBatchStride;
+                    const size_t blockCountA = k / static_cast<size_t>(mxBlockA)
+                                               + (k % static_cast<size_t>(mxBlockA) != 0 ? 1 : 0);
+                    const size_t blockCountB = k / static_cast<size_t>(mxBlockB)
+                                               + (k % static_cast<size_t>(mxBlockB) != 0 ? 1 : 0);
+                    runtimeBlockScaleA.emplace(ScalarType::Float32,
+                                               Layout(Shape{m, blockCountA},
+                                                      {static_cast<ptrdiff_t>(mxsaStrideM),
+                                                       static_cast<ptrdiff_t>(mxsaStrideKBlk)}));
+                    runtimeBlockScaleB.emplace(ScalarType::Float32,
+                                               Layout(Shape{n, blockCountB},
+                                                      {static_cast<ptrdiff_t>(mxsbStrideN),
+                                                       static_cast<ptrdiff_t>(mxsbStrideKBlk)}));
+                    for(size_t row = 0; row < m; ++row)
                     {
-                        invocation.blockScaleA
-                            = roc::host_validation::makeBlockScaleView<AccumulateT>(
-                                mxsa.data() + batch * mxsaBatchStride,
-                                static_cast<size_t>(mxBlockA),
-                                mxsaStrideM,
-                                mxsaStrideKBlk);
-                        invocation.blockScaleB
-                            = roc::host_validation::makeBlockScaleView<AccumulateT>(
-                                mxsb.data() + batch * mxsbBatchStride,
-                                static_cast<size_t>(mxBlockB),
-                                mxsbStrideN,
-                                mxsbStrideKBlk);
+                        for(size_t block = 0; block < blockCountA; ++block)
+                        {
+                            const size_t index
+                                = scaleABase + row * mxsaStrideM + block * mxsaStrideKBlk;
+                            runtimeBlockScaleA->mutableView().storeFrom(
+                                {row, block}, static_cast<float>(mxsa[index]));
+                        }
                     }
+                    for(size_t column = 0; column < n; ++column)
+                    {
+                        for(size_t block = 0; block < blockCountB; ++block)
+                        {
+                            const size_t index
+                                = scaleBBase + column * mxsbStrideN + block * mxsbStrideKBlk;
+                            runtimeBlockScaleB->mutableView().storeFrom(
+                                {column, block}, static_cast<float>(mxsb[index]));
+                        }
+                    }
+                    problem.a.blockScale = BlockScaleBinding{runtimeBlockScaleA->view(),
+                                                             static_cast<size_t>(mxBlockA)};
+                    problem.b.blockScale = BlockScaleBinding{runtimeBlockScaleB->view(),
+                                                             static_cast<size_t>(mxBlockB)};
                 }
+            }
 #endif
 
-                roc::host_validation::referenceGemm<MathOpT>(invocation);
-            }
-        };
-
-        if(isTF32)
-            runGoldenRef(XFloat32{});
-        else
-            runGoldenRef(AccumulateT{});
+            referenceGemm(problem);
+        }
 
         // Compare results — reduced-precision types need wider tolerance.
         // TF32 loses 13 of 23 mantissa bits; errors accumulate over K.
