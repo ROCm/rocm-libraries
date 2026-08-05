@@ -28,8 +28,6 @@ add_library(roc::host-validation-core ALIAS host-validation-core)
 
 add_library(host-validation INTERFACE)
 add_library(roc::host-validation ALIAS host-validation)
-add_library(host-validation-adapters INTERFACE)
-add_library(roc::host-validation-adapters ALIAS host-validation-adapters)
 
 target_compile_features(host-validation-core INTERFACE cxx_std_20)
 target_include_directories(host-validation-core
@@ -54,16 +52,6 @@ target_include_directories(host-validation
 target_link_libraries(host-validation
     INTERFACE
         roc::host-validation-core
-)
-
-target_compile_features(host-validation-adapters INTERFACE cxx_std_20)
-target_include_directories(host-validation-adapters
-    INTERFACE
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/adapters/include>
-)
-target_link_libraries(host-validation-adapters
-    INTERFACE
-        roc::host-validation
 )
 
 target_sources(host-validation
