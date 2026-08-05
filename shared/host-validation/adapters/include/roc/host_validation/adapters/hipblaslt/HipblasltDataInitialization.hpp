@@ -6,7 +6,7 @@
 #include <cmath>
 #include <cstddef>
 #include <hipblaslt_datatype2string.hpp>
-#include <roc/host_validation/data_generation.hpp>
+#include <roc/host_validation/validation.hpp>
 #include <span>
 
 namespace roc::host_validation::hipblaslt_adapter {

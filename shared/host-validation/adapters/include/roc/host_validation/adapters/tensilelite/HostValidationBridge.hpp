@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include <roc/host_validation/reference_gemm.hpp>
+#include <roc/host_validation/validation.hpp>
 
 #include <Tensile/Activation.hpp>
 #include <Tensile/DataTypes.hpp>

@@ -4,7 +4,7 @@
 #pragma once
 
 #include <cstdint>
-#include <roc/host_validation/data_generation.hpp>
+#include <roc/host_validation/validation.hpp>
 
 namespace roc::host_validation::tensilelite_adapter {
 inline int nextUniformInteger(int lower, int upper) {

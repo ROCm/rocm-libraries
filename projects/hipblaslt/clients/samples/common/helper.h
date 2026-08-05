@@ -27,7 +27,7 @@
 #include <functional>
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt.h>
-#include <roc/host_validation/data_generation.hpp>
+#include <roc/host_validation/validation.hpp>
 
 #ifndef CHECK_HIP_ERROR
 #define CHECK_HIP_ERROR(error)                    \

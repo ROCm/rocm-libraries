@@ -5,6 +5,7 @@ cmake_minimum_required(VERSION 3.25.2)
 project(ROCHostValidation VERSION 0.1.0 LANGUAGES CXX)
 
 include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
 
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     set(HOST_VALIDATION_STANDALONE ON)
@@ -16,17 +17,37 @@ option(HOST_VALIDATION_BUILD_TESTING
        "Build host-validation tests."
        ${HOST_VALIDATION_STANDALONE})
 
+add_library(host-validation-core INTERFACE)
+add_library(roc::host-validation-core ALIAS host-validation-core)
+
 add_library(host-validation INTERFACE)
 add_library(roc::host-validation ALIAS host-validation)
-
 add_library(host-validation-adapters INTERFACE)
 add_library(roc::host-validation-adapters ALIAS host-validation-adapters)
+
+target_compile_features(host-validation-core INTERFACE cxx_std_20)
+target_include_directories(host-validation-core
+    INTERFACE
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+)
+target_sources(host-validation-core
+    INTERFACE
+        FILE_SET HEADERS
+        BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/include"
+        FILES
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/tensor.hpp"
+)
 
 target_compile_features(host-validation INTERFACE cxx_std_20)
 target_include_directories(host-validation
     INTERFACE
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+)
+target_link_libraries(host-validation
+    INTERFACE
+        roc::host-validation-core
 )
 
 target_compile_features(host-validation-adapters INTERFACE cxx_std_20)
@@ -44,10 +65,10 @@ target_sources(host-validation
         FILE_SET HEADERS
         BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/include"
         FILES
-            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/comparison.hpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/data_generation.hpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/reference_gemm.hpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/tensor.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/detail/comparison.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/detail/data_generation.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/detail/reference_gemm.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/detail/tensor_views.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/validation.hpp"
 )
 
@@ -56,15 +77,38 @@ if(HOST_VALIDATION_BUILD_TESTING)
     add_subdirectory(tests)
 endif()
 
-install(TARGETS host-validation
+install(TARGETS host-validation-core host-validation
     EXPORT host-validation-targets
     FILE_SET HEADERS
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
         COMPONENT devel
 )
 
+set(HOST_VALIDATION_INSTALL_CMAKEDIR
+    "${CMAKE_INSTALL_LIBDIR}/cmake/ROCHostValidation"
+)
+
+configure_package_config_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/ROCHostValidationConfig.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/ROCHostValidationConfig.cmake"
+    INSTALL_DESTINATION "${HOST_VALIDATION_INSTALL_CMAKEDIR}"
+)
+write_basic_package_version_file(
+    "${CMAKE_CURRENT_BINARY_DIR}/ROCHostValidationConfigVersion.cmake"
+    VERSION "${PROJECT_VERSION}"
+    COMPATIBILITY SameMajorVersion
+)
+
 install(EXPORT host-validation-targets
-    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/host-validation"
+    FILE ROCHostValidationTargets.cmake
+    DESTINATION "${HOST_VALIDATION_INSTALL_CMAKEDIR}"
     NAMESPACE roc::
+    COMPONENT devel
+)
+install(
+    FILES
+        "${CMAKE_CURRENT_BINARY_DIR}/ROCHostValidationConfig.cmake"
+        "${CMAKE_CURRENT_BINARY_DIR}/ROCHostValidationConfigVersion.cmake"
+    DESTINATION "${HOST_VALIDATION_INSTALL_CMAKEDIR}"
     COMPONENT devel
 )
