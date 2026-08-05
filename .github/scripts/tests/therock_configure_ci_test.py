@@ -368,6 +368,63 @@ class ConfigureCITest(unittest.TestCase):
         self.assertGreater(len(projects), 0)
         self.assertEqual(test_type, "comprehensive")
 
+    @patch("therock_configure_ci.collect_projects_to_run")
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_pr_labels_not_forwarded_for_nightly(self, mock_get_modified, mock_collect):
+        # Labels are only meaningful for pushes and pull requests. A nightly must
+        # not forward them, so a label-gated cmake option cannot leak into a
+        # nightly build even when pr_labels is populated in the args.
+        mock_get_modified.return_value = []
+        mock_collect.return_value = []
+
+        therock_configure_ci.retrieve_projects(
+            {
+                "is_nightly": True,
+                "base_ref": "HEAD^",
+                "pr_labels": '{"labels": [{"name": "ci:some-flag"}]}',
+            }
+        )
+
+        mock_collect.assert_called_once()
+        self.assertEqual(mock_collect.call_args.args[1], [])
+
+    @patch("therock_configure_ci.collect_projects_to_run")
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_pr_labels_not_forwarded_for_workflow_dispatch(
+        self, mock_get_modified, mock_collect
+    ):
+        mock_get_modified.return_value = []
+        mock_collect.return_value = []
+
+        therock_configure_ci.retrieve_projects(
+            {
+                "is_workflow_dispatch": True,
+                "input_projects": "projects/rocprim",
+                "pr_labels": '{"labels": [{"name": "ci:some-flag"}]}',
+            }
+        )
+
+        mock_collect.assert_called_once()
+        self.assertEqual(mock_collect.call_args.args[1], [])
+
+    @patch("therock_configure_ci.collect_projects_to_run")
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_pr_labels_forwarded_for_pull_request(
+        self, mock_get_modified, mock_collect
+    ):
+        mock_get_modified.return_value = ["projects/rocblas/src/main.cpp"]
+        mock_collect.return_value = []
+
+        therock_configure_ci.retrieve_projects(
+            {
+                "is_pull_request": True,
+                "pr_labels": '{"labels": [{"name": "ci:some-flag"}]}',
+            }
+        )
+
+        mock_collect.assert_called_once()
+        self.assertIn("ci:some-flag", mock_collect.call_args.args[1])
+
 
 if __name__ == "__main__":
     unittest.main()

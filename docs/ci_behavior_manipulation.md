@@ -16,6 +16,24 @@ Here are additional labels that manipulate the CI behavior. The labels we provid
 
 - `skip-therockci`: The CI will skip all builds and tests
 
+### Label-gated cmake options
+
+A label can also turn on a cmake option for a single project's superbuild, so a branch
+can exercise a feature flag in CI without changing the default build for everyone else.
+The option is added only when the label is on the pull request *and* that project is
+already being built; it never applies to pushes to `develop`, nightly runs, or workflow
+dispatch.
+
+These labels are declared in
+[`LABEL_GATED_CMAKE_OPTIONS`](../.github/scripts/therock_matrix.py) — one entry per
+label, naming the target project and the options to inject. The map is empty by default;
+adding an entry requires a code change plus a matching label in the repository's label
+set, since these labels are applied by hand and are not assigned by `labeler.yml`.
+
+The gated build replaces the normal one for that project rather than running alongside
+it, so there is no second job and no duplicate artifact — but it also means the
+flag-off configuration is not built while the label is applied.
+
 ## Workflow dispatch behavior
 
 For `workflow_dispatch`, you are able to trigger CI in [GitHub's therock-ci.yml workflow page](https://github.com/ROCm/rocm-libraries/actions/workflows/therock-ci.yml). To trigger a workflow dispatch, click "Run workflow" and fill in the fields accordingly.

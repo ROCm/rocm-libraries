@@ -191,16 +191,50 @@ SUBTREE_EXTRA_MATRIX_PROJECTS = {
 # job-name clash.
 #
 # To add an entry, map a (manually applied) GitHub label to a project and the
-# cmake option to inject. The label must exist in the repo's label set; it is not
+# cmake options to inject. The label must exist in the repo's label set; it is not
 # auto-applied via labeler.yml. Example:
 #
 #   LABEL_GATED_CMAKE_OPTIONS = {
 #       "ci:my-feature": {
 #           "project": "myproject",
-#           "cmake_option": "-DTHEROCK_FLAG_MY_FEATURE=ON",
+#           "cmake_options": ["-DTHEROCK_FLAG_MY_FEATURE=ON"],
 #       },
 #   }
+#
+# `project` must name an entry in `project_map` or `additional_options`; anything
+# else is rejected up front by `validate_label_gated_cmake_options` rather than
+# failing obscurely later. Injected options are appended after the project's
+# defaults and option order is preserved end to end, so injecting a value that
+# contradicts a default reliably wins (cmake takes the last -D for a given name).
 LABEL_GATED_CMAKE_OPTIONS = {}
+
+
+def validate_label_gated_cmake_options(gated_options=None):
+    """Check LABEL_GATED_CMAKE_OPTIONS entries before they are used.
+
+    This map is hand-edited and its only feedback channel is a CI run, so a typo
+    would otherwise surface as a confusing mid-run failure or, worse, as a green
+    build that silently did not get the flag. Fail loudly and early instead.
+    """
+    if gated_options is None:
+        gated_options = LABEL_GATED_CMAKE_OPTIONS
+    valid_projects = set(project_map) | set(additional_options)
+    for label, gated in gated_options.items():
+        for key in ("project", "cmake_options"):
+            if key not in gated:
+                raise ValueError(
+                    f"LABEL_GATED_CMAKE_OPTIONS['{label}'] is missing required key '{key}'"
+                )
+        if gated["project"] not in valid_projects:
+            raise ValueError(
+                f"LABEL_GATED_CMAKE_OPTIONS['{label}'] targets unknown project "
+                f"'{gated['project']}'. Valid projects: {sorted(valid_projects)}"
+            )
+        if isinstance(gated["cmake_options"], str):
+            raise ValueError(
+                f"LABEL_GATED_CMAKE_OPTIONS['{label}']['cmake_options'] must be a "
+                "list of options, not a string"
+            )
 
 
 def collect_projects_to_run(subtrees, pr_labels=None):
@@ -218,6 +252,30 @@ def collect_projects_to_run(subtrees, pr_labels=None):
         extra_matrix = SUBTREE_EXTRA_MATRIX_PROJECTS.get(subtree)
         if extra_matrix:
             projects.add(extra_matrix)
+
+    # Inject label-gated cmake options into their target project's options. This
+    # runs before the merge passes below so the options travel with the project
+    # wherever it ends up: an optional component merges its options into its
+    # `project_to_add` parent, and a dependency merges into the project that
+    # absorbs it. Injecting afterwards would miss both and silently drop the flag.
+    # Options are appended to whichever map owns the target, since optional
+    # components live in `additional_options` and never in `project_map`.
+    validate_label_gated_cmake_options()
+    for label in pr_labels or []:
+        gated = LABEL_GATED_CMAKE_OPTIONS.get(label)
+        if not gated:
+            continue
+        target = gated["project"]
+        # Only inject when the target is actually being built, so the default
+        # build is untouched.
+        if target not in projects:
+            continue
+        owner = (
+            local_additional_options
+            if target in local_additional_options
+            else local_project_map
+        )
+        owner[target]["cmake_options"].extend(gated["cmake_options"])
 
     for project in list(projects):
         # Check if an optional math component was included.
@@ -264,16 +322,6 @@ def collect_projects_to_run(subtrees, pr_labels=None):
         projects.remove(to_remove_item)
         del local_project_map[to_remove_item]
 
-    # Inject label-gated cmake options into their target project's build. Only
-    # applied when the gating label is present and that project is actually being
-    # built, so the default build is untouched. See LABEL_GATED_CMAKE_OPTIONS.
-    for label in pr_labels or []:
-        gated = LABEL_GATED_CMAKE_OPTIONS.get(label)
-        if gated and gated["project"] in projects:
-            local_project_map[gated["project"]]["cmake_options"].append(
-                gated["cmake_option"]
-            )
-
     # retrieve the subtrees to checkout, cmake options to build, and projects to test
     project_to_run = []
     for project in projects:
@@ -291,12 +339,16 @@ def collect_projects_to_run(subtrees, pr_labels=None):
 
             # To save time, only build what is needed
             project_map_data["cmake_options"].extend(["-DTHEROCK_ENABLE_ALL=OFF"])
-            # To ensure uniqueness of flags and tests
+            # To ensure uniqueness of flags and tests. dict.fromkeys dedupes while
+            # preserving insertion order; set() does not, and its iteration order
+            # varies with PYTHONHASHSEED between runs. Order matters because cmake
+            # takes the last -D for a given name, so a set() here would make an
+            # option that overrides an earlier default resolve nondeterministically.
             project_map_data["cmake_options"] = list(
-                set(project_map_data["cmake_options"])
+                dict.fromkeys(project_map_data["cmake_options"])
             )
             project_map_data["projects_to_test"] = list(
-                set(project_map_data["projects_to_test"])
+                dict.fromkeys(project_map_data["projects_to_test"])
             )
 
             cmake_flag_options = " ".join(project_map_data["cmake_options"])
