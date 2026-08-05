@@ -1326,9 +1326,10 @@ class TestAttentionHelpers(unittest.TestCase):
         (dequant-bound, wants more warps), so it stays at nw=4. bf16 full-causal
         sink prefill is intercepted earlier by the tuned cohort (nw=2, see
         test_gfx942_sink_prefill_tuned_cohort). This branch is the production
-        geometry change; pin it so a refactor can't silently revert it. The C++
-        selector mirrors this exactly (see attention_unified_selectors.cpp); the
-        run_all.py byte-identity gate enforces the two agree.
+        geometry change; pin it so a refactor can't silently revert it. The
+        Python selectors are authoritative for production geometry; the C++
+        selectors in attention_unified_selectors.cpp are a hand-maintained mirror
+        kept in sync for parity (not exercised by production dispatch).
         """
         import kernels.common.attention_unified as au
 
@@ -1404,7 +1405,9 @@ class TestAttentionHelpers(unittest.TestCase):
 
             # Decode (q==1) routes to the 3D path, not the 2D spec builder; the
             # cohort gate must still exclude it.
-            self.assertFalse(au._enable_gfx942_sink_prefill_tuned(_make_problem(max_seqlen_q=1)))
+            self.assertFalse(
+                au._enable_gfx942_sink_prefill_tuned(_make_problem(max_seqlen_q=1))
+            )
 
     def test_gfx950_sink_prefill_wpe3_cohort(self):
         """gfx950 full-causal bf16 sink prefill selects waves_per_eu=3 (occupancy
@@ -1444,7 +1447,9 @@ class TestAttentionHelpers(unittest.TestCase):
                 with self.subTest(near_miss=label):
                     self.assertFalse(au._enable_gfx950_sink_prefill_wpe3(p))
             # Decode (q==1) routes to 3D; gate must still exclude it.
-            self.assertFalse(au._enable_gfx950_sink_prefill_wpe3(_make_problem(max_seqlen_q=1)))
+            self.assertFalse(
+                au._enable_gfx950_sink_prefill_wpe3(_make_problem(max_seqlen_q=1))
+            )
             # gfx942 must not hit the gfx950 gate.
             with _patch_resolved_arch("gfx942"):
                 self.assertFalse(au._enable_gfx950_sink_prefill_wpe3(_make_problem()))

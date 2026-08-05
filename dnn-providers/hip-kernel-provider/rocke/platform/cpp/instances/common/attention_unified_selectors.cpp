@@ -419,6 +419,24 @@ static bool enable_gfx942_l4(const rocke_unified_attn_problem_t* p)
     return enable_gfx942_d128_fp16_flash(p);
 }
 
+/* Python: _enable_gfx942_sink_prefill_tuned(problem). gfx942 full-causal bf16
+ * attention-sink prefill -> nw2/mw16/T32 + register_pv. */
+static bool enable_gfx942_sink_prefill_tuned(const rocke_unified_attn_problem_t* p)
+{
+    return arch_is("gfx942") && strcmp(p->dtype, "bf16") == 0 && !p->use_fp8 && p->head_size == 64
+           && p->block_size == 16 && p->num_seqs <= 1 && p->max_seqlen_q > 1 && p->use_sinks
+           && p->sliding_window == 0 && p->softcap == 0 && !p->use_alibi && !p->use_qq_bias;
+}
+
+/* Python: _enable_gfx950_sink_prefill_wpe3(problem). gfx950 full-causal bf16
+ * attention-sink prefill -> waves_per_eu=3 (occupancy hint only). */
+static bool enable_gfx950_sink_prefill_wpe3(const rocke_unified_attn_problem_t* p)
+{
+    return arch_is("gfx950") && strcmp(p->dtype, "bf16") == 0 && !p->use_fp8 && p->head_size == 64
+           && p->block_size == 16 && p->num_seqs <= 1 && p->max_seqlen_q > 1 && p->use_sinks
+           && p->sliding_window == 0 && p->softcap == 0 && !p->use_alibi && !p->use_qq_bias;
+}
+
 /* Python: _gfx942_flash_wide_setting(). The HIPDNN_GFX942_FLASH_WIDE env knob
  * defaults to 4 (off/2/4 overrides). The static port honours the default; env
  * override is a host-runtime concern.
@@ -461,6 +479,11 @@ static int select_2d_tile_size(const rocke_unified_attn_problem_t* p)
     if(p->use_fp8 && p->sliding_window > 0 && p->max_seqlen_q > 256)
     {
         return p->block_size;
+    }
+    /* gfx942 full-causal sink prefill: T=2*block_size (paired with mw16). */
+    if(enable_gfx942_sink_prefill_tuned(p))
+    {
+        return 2 * p->block_size;
     }
     /* gfx942 D64. */
     if(arch_is("gfx942") && p->head_size == 64)
@@ -538,6 +561,12 @@ int rocke_unified_attn_select_2d_num_warps(const rocke_unified_attn_problem_t* p
     if(enable_gfx942_l4(p))
     {
         return select_gfx942_flash_num_warps(p);
+    }
+    /* gfx942 full-causal sink prefill: nw2 (with mw16/T32/register_pv) beats the
+       nw4 D64 oracle up to 1.46x. */
+    if(enable_gfx942_sink_prefill_tuned(p))
+    {
+        return 2;
     }
     /* gfx942 D64 oracle. */
     if(arch_is("gfx942") && p->head_size == 64)
@@ -710,6 +739,10 @@ int rocke_unified_attn_select_2d_block_m_per_warp(const rocke_unified_attn_probl
     {
         return 16;
     }
+    if(enable_gfx942_sink_prefill_tuned(p))
+    {
+        return 16;
+    }
     if(arch_is("gfx942") && p->head_size == 64)
     {
         return 32;
@@ -770,6 +803,13 @@ bool rocke_unified_attn_select_2d_waves_per_eu(const rocke_unified_attn_problem_
     {
         wpe = 3;
     }
+    /* gfx950 full-causal sink prefill: wpe=3 is a consistent 1.07-1.15x at
+       Sq>=1024 over the shipped wpe=2 (same nw4/mw16/T64 geometry). Occupancy
+       hint only, output-preserving. */
+    else if(enable_gfx950_sink_prefill_wpe3(p))
+    {
+        wpe = 3;
+    }
     if(out_wpe != NULL)
     {
         *out_wpe = wpe;
@@ -786,7 +826,7 @@ static bool enable_register_pv(const rocke_unified_attn_problem_t* p)
     {
         return false;
     }
-    if(p->use_sinks)
+    if(p->use_sinks && !enable_gfx942_sink_prefill_tuned(p))
     {
         return false;
     }
