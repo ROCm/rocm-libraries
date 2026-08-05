@@ -22,6 +22,18 @@ copyright = "Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights res
 version = version_number
 release = version_number
 
+html_theme = "rocm_docs_theme"
+html_theme_options = {
+    "flavor": "rocm",
+    "repository_url": "https://github.com/ROCm/rocm-libraries",
+    "repository_branch": "develop",
+    "path_to_docs": "projects/<project>/docs",
+    "use_repository_button": True,
+    "use_issues_button": True,
+    "use_source_button": True,
+    "use_download_button": True,
+}
+
 external_toc_path = "./sphinx/_toc.yml"
 
 docs_core = ROCmDocs(left_nav_title)

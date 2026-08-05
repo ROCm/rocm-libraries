@@ -3,6 +3,10 @@
 root: index
 subtrees:
 
+  - entries:
+    - file: about/hipCUB-cccl-updates
+      title: CCCL 3.0.3 updates
+
   - caption: Install
     entries:
     - file: install/install
