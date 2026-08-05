@@ -180,6 +180,7 @@ the API.
 - F16, BF16, F32, F64, I32, complex-F32, and complex-F64 accumulation;
 - arbitrary runtime storage types supported by the tensor codecs;
 - distinct compute-input types for A and B;
+- optional scalar operand scaling before compute-input quantization;
 - default and XFloat32 operand math;
 - alpha/beta;
 - explicit row- or column-axis bias and scale-alpha bindings;
@@ -202,7 +203,9 @@ compute all outputs and report the actual count through `GemmRunInfo`.
 `TiledGemmBackend` implements the same object-oriented interface without BLAS
 or product dependencies. It reuses decoded A/B tiles across output elements
 and is the migration target for TensileLite's product-local fast CPU path.
-Block-scaled MX tiling remains a bounded compatibility fallback.
+It also supports block-scaled MX operands when both block sizes and K align to
+the backend's eight-element reduction tile, and it preserves partial-output
+selection by committing only selected epilogues.
 
 F16 and BF16 accumulator modes execute with a float host register but quantize
 the product and accumulated sum after each arithmetic step. They therefore

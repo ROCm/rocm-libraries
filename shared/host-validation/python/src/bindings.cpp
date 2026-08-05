@@ -113,7 +113,9 @@ Tensor referenceGemmOwned(const Tensor& a, const Tensor& b, const Tensor& c, Sca
                           Activation activation, double activationParameter0,
                           double activationParameter1, OutputSelection outputSelection,
                           GemmBackend backend, std::optional<Tensor> blockScaleA,
-                          std::optional<Tensor> blockScaleB, size_t blockSizeA, size_t blockSizeB) {
+                          std::optional<Tensor> blockScaleB, size_t blockSizeA, size_t blockSizeB,
+                          std::optional<Tensor> preQuantizationScaleA,
+                          std::optional<Tensor> preQuantizationScaleB) {
     if (a.shape().rank() != 2 || b.shape().rank() != 2)
         throw std::invalid_argument("Python reference_gemm requires rank-2 A and B tensors.");
 
@@ -122,6 +124,8 @@ Tensor referenceGemmOwned(const Tensor& a, const Tensor& b, const Tensor& c, Sca
     GemmOperand operandB(b.view());
     operandA.computeType = computeTypeA;
     operandB.computeType = computeTypeB;
+    if (preQuantizationScaleA) operandA.preQuantizationScale = preQuantizationScaleA->view();
+    if (preQuantizationScaleB) operandB.preQuantizationScale = preQuantizationScaleB->view();
     if (blockScaleA || blockScaleB) {
         if (!blockScaleA || !blockScaleB || blockSizeA == 0 || blockSizeB == 0)
             throw std::invalid_argument(
@@ -474,7 +478,8 @@ NB_MODULE(_roc_host_validation, module) {
                "activation_parameter1"_a = 0.0, "output_selection"_a = OutputSelection::all(),
                "backend"_a = GemmBackend::Canonical, "block_scale_a"_a = std::optional<Tensor>{},
                "block_scale_b"_a = std::optional<Tensor>{}, "block_size_a"_a = 0,
-               "block_size_b"_a = 0);
+               "block_size_b"_a = 0, "pre_quantization_scale_a"_a = std::optional<Tensor>{},
+               "pre_quantization_scale_b"_a = std::optional<Tensor>{});
     module.def("reference_epilogue", &referenceEpilogueOwned, "input"_a, "output_type"_a,
                "compute_type"_a, "bias"_a = std::optional<Tensor>{},
                "bias_axis"_a = MatrixAxis::Row, "activation"_a = Activation::None,
