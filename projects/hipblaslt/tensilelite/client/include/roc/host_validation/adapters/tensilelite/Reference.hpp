@@ -194,6 +194,9 @@ namespace TensileLite
         bool tryRuntimeCanonicalGemm(ContractionProblemGemm const& problem,
                                      ContractionInputs const&      inputs,
                                      size_t                        elementsToValidate);
+        bool tryRuntimeTiledGemm(ContractionProblemGemm const& problem,
+                                 ContractionInputs const&      inputs,
+                                 size_t                        elementsToValidate);
 
         // Check whether a given contraction problem is eligible for the fast CPU GEMM path.
         // This inspects problem geometry, data types, and feature flags but does not
