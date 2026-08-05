@@ -39,7 +39,7 @@ hiptensorStatus_t hiptensorCreate(hiptensorHandle_t* handle)
     using hiptensor::Logger;
     auto& logger = Logger::instance();
 
-    // Log API access
+    // Log API trace
     char msg[128];
     snprintf(
         msg, sizeof(msg), "handle=0x%0*llX", 2 * (int)sizeof(void*), (unsigned long long)handle);
@@ -79,7 +79,7 @@ hiptensorStatus_t hiptensorCreate(hiptensorHandle_t* handle)
         return HIPTENSOR_STATUS_INVALID_VALUE;
     }
 
-    if (hiptensor::checkEnvironmentVariableEnabled("HIPTENSOR_DISABLE_PLAN_CACHE"))
+    if(hiptensor::checkEnvironmentVariableEnabled("HIPTENSOR_DISABLE_PLAN_CACHE"))
     {
         snprintf(msg, sizeof(msg), "Plan Cache is disabled.");
         logger->logAPITrace("hiptensorCreate", msg);
@@ -100,7 +100,7 @@ hiptensorStatus_t hiptensorDestroy(hiptensorHandle_t handle)
     using hiptensor::Logger;
     auto& logger = Logger::instance();
 
-    // Log API access
+    // Log API trace
     char msg[128];
     snprintf(
         msg, sizeof(msg), "handle=0x%0*llX", 2 * (int)sizeof(void*), (unsigned long long)handle);
@@ -170,7 +170,7 @@ hiptensorStatus_t hiptensorCreateTensorDescriptor(const hiptensorHandle_t      h
     using hiptensor::Logger;
     auto& logger = Logger::instance();
 
-    // Log API access
+    // Log API trace
     char msg[256];
     snprintf(msg,
              sizeof(msg),
@@ -637,11 +637,12 @@ hiptensorStatus_t contractionGetWorkspaceSize(const hiptensorHandle_t           
                                               const hiptensorPlanPreference_t      planPref,
                                               const hiptensorWorksizePreference_t  workspacePref,
                                               uint64_t* workspaceSizeEstimate);
-hiptensorStatus_t contractionTrinaryGetWorkspaceSize(const hiptensorHandle_t              handle,
+hiptensorStatus_t
+                  contractionTrinaryGetWorkspaceSize(const hiptensorHandle_t              handle,
                                                      const hiptensorOperationDescriptor_t desc,
                                                      const hiptensorPlanPreference_t      planPref,
                                                      const hiptensorWorksizePreference_t  workspacePref,
-                                                     uint64_t* workspaceSizeEstimate);
+                                                     uint64_t*                            workspaceSizeEstimate);
 hiptensorStatus_t hiptensorEstimateWorkspaceSize(const hiptensorHandle_t              handle,
                                                  const hiptensorOperationDescriptor_t desc,
                                                  const hiptensorPlanPreference_t      planPref,
@@ -671,7 +672,7 @@ hiptensorStatus_t contractionTrinaryInitPlan(const hiptensorHandle_t            
                                              hiptensorPlan_t                      plan,
                                              const hiptensorOperationDescriptor_t desc,
                                              const hiptensorPlanPreference_t      pref,
-                                             uint64_t                             workspaceSizeLimit);
+                                             uint64_t workspaceSizeLimit);
 hiptensorStatus_t hiptensorCreatePlan(const hiptensorHandle_t              handle,
                                       hiptensorPlan_t*                     plan,
                                       const hiptensorOperationDescriptor_t desc,
@@ -679,7 +680,7 @@ hiptensorStatus_t hiptensorCreatePlan(const hiptensorHandle_t              handl
                                       uint64_t                             workspaceSizeLimit)
 {
     (*plan)                     = new hiptensorPlan();
-    hiptensorPlan_t             newPlan = *plan;
+    hiptensorPlan_t newPlan     = *plan;
     newPlan->mRequiredWorkspace = workspaceSizeLimit;
 
     // Deep-copy the tensor descriptors referenced by the operation descriptor
@@ -704,7 +705,7 @@ hiptensorStatus_t hiptensorCreatePlan(const hiptensorHandle_t              handl
         newPlan->mOwnedDescE = std::make_unique<hiptensorTensorDescriptor>(*desc->mDescE);
     }
 
-    newPlan->mOwnedOpDesc  = std::make_unique<hiptensorOperationDescriptor>(*desc);
+    newPlan->mOwnedOpDesc         = std::make_unique<hiptensorOperationDescriptor>(*desc);
     newPlan->mOwnedOpDesc->mDescA = newPlan->mOwnedDescA.get();
     newPlan->mOwnedOpDesc->mDescB = newPlan->mOwnedDescB.get();
     newPlan->mOwnedOpDesc->mDescC = newPlan->mOwnedDescC.get();
@@ -718,11 +719,13 @@ hiptensorStatus_t hiptensorCreatePlan(const hiptensorHandle_t              handl
 
     if(desc->mOperationType == HIPTENSOR_CONTRACTION)
     {
-        return contractionInitPlan(handle, newPlan, newPlan->mOpDesc, newPlan->mPref, workspaceSizeLimit);
+        return contractionInitPlan(
+            handle, newPlan, newPlan->mOpDesc, newPlan->mPref, workspaceSizeLimit);
     }
     if(desc->mOperationType == HIPTENSOR_CONTRACTION_TRINARY)
     {
-        return contractionTrinaryInitPlan(handle, newPlan, newPlan->mOpDesc, newPlan->mPref, workspaceSizeLimit);
+        return contractionTrinaryInitPlan(
+            handle, newPlan, newPlan->mOpDesc, newPlan->mPref, workspaceSizeLimit);
     }
     return HIPTENSOR_STATUS_SUCCESS;
 }
@@ -738,7 +741,7 @@ const char* hiptensorGetErrorString(const hiptensorStatus_t error)
     using hiptensor::Logger;
     auto& logger = Logger::instance();
 
-    // Log API access
+    // Log API trace
     char msg[128];
     snprintf(msg, sizeof(msg), "error=0x%0*llX", 2 * (int)sizeof(void*), (unsigned long long)error);
     logger->logAPITrace("hiptensorGetErrorString", msg);
@@ -778,7 +781,7 @@ hiptensorStatus_t hiptensorLoggerSetCallback(hiptensorLoggerCallback_t callback)
     using hiptensor::Logger;
     auto& logger = Logger::instance();
 
-    // Log API access
+    // Log API trace
     char msg[128];
     snprintf(msg,
              sizeof(msg),
@@ -807,7 +810,7 @@ hiptensorStatus_t hiptensorLoggerSetFile(FILE* file)
     using hiptensor::Logger;
     auto& logger = Logger::instance();
 
-    // Log API access
+    // Log API trace
     char msg[128];
     snprintf(msg, sizeof(msg), "file=0x%0*llX", 2 * (int)sizeof(void*), (unsigned long long)file);
     logger->logAPITrace("hiptensorLoggerSetFile", msg);
