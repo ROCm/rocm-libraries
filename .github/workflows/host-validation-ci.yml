@@ -1,0 +1,97 @@
+name: Host validation standalone CI
+
+on:
+  pull_request:
+    paths:
+      - "shared/host-validation/**"
+      - ".github/workflows/host-validation-ci.yml"
+  push:
+    branches:
+      - develop
+    paths:
+      - "shared/host-validation/**"
+      - ".github/workflows/host-validation-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: host-validation-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  standalone:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install host dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes libopenblas-dev ninja-build
+          python -m pip install --upgrade pip
+          python -m pip install nanobind numpy
+
+      - name: Configure
+        run: |
+          cmake -S shared/host-validation \
+            -B "${RUNNER_TEMP}/host-validation-build" \
+            -G Ninja \
+            -DHOST_VALIDATION_BUILD_TESTING=ON \
+            -DHOST_VALIDATION_BUILD_PYTHON=ON \
+            -DHOST_VALIDATION_BUILD_BLAS_BACKEND=ON \
+            -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build and test
+        run: |
+          cmake --build "${RUNNER_TEMP}/host-validation-build" --parallel 2
+          ctest \
+            --test-dir "${RUNNER_TEMP}/host-validation-build" \
+            --output-on-failure
+
+      - name: Install and test package consumers
+        run: |
+          cmake --install "${RUNNER_TEMP}/host-validation-build" \
+            --prefix "${RUNNER_TEMP}/host-validation-install"
+          cmake -S shared/host-validation/tests/package \
+            -B "${RUNNER_TEMP}/host-validation-package-test" \
+            -G Ninja \
+            -DCMAKE_PREFIX_PATH="${RUNNER_TEMP}/host-validation-install"
+          cmake --build "${RUNNER_TEMP}/host-validation-package-test" --parallel 2
+          "${RUNNER_TEMP}/host-validation-package-test/host-validation-package-test"
+          "${RUNNER_TEMP}/host-validation-package-test/host-validation-operations-package-test"
+          "${RUNNER_TEMP}/host-validation-package-test/host-validation-blas-package-test"
+          PYTHONPATH="$(find "${RUNNER_TEMP}/host-validation-install" \
+            -type d -path '*/site-packages' -print -quit)" \
+            python -c "import roc_host_validation"
+
+  sanitizers:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install host dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes libopenblas-dev ninja-build
+
+      - name: Configure, build, and test with sanitizers
+        run: |
+          cmake -S shared/host-validation \
+            -B "${RUNNER_TEMP}/host-validation-sanitizers" \
+            -G Ninja \
+            -DHOST_VALIDATION_BUILD_TESTING=ON \
+            -DHOST_VALIDATION_BUILD_PYTHON=OFF \
+            -DHOST_VALIDATION_BUILD_BLAS_BACKEND=ON \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+          cmake --build "${RUNNER_TEMP}/host-validation-sanitizers" --parallel 2
+          ctest \
+            --test-dir "${RUNNER_TEMP}/host-validation-sanitizers" \
+            --output-on-failure
