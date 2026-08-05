@@ -3,6 +3,12 @@
 Documentation for rocRAND is available at
 [https://rocm.docs.amd.com/projects/rocRAND/en/latest/](https://rocm.docs.amd.com/projects/rocRAND/en/latest/)
 
+## rocRAND 5.0.0 for ROCm 10.0.0
+
+### Removed
+
+* Removed `h_scrambled_sobol(32|64)_constants`, `rocrand_h_scrambled_sobol(32|64)_direction_vectors`, `rocrand_h_sobol(32|64)_direction_vectors` from public namespace.
+
 ## rocRAND 4.5.0 for ROCm 7.14
 
 ### Added
@@ -30,6 +36,9 @@ Documentation for rocRAND is available at
 ### Changed
 
 * Optimized `xorwow` generator performance for `gfx908` and `gfx942` architectures.
+* Benchmarking now requires [AMD SMI](https://rocm.docs.amd.com/projects/amdsmi/en/latest/) to be installed.
+  * rocRAND now uses the new single-header library 'primbench' for benchmarks, rather than Google Benchmark. primbench requires AMD SMI.
+  * See `shared/primbench/README.md` for the primbench documentation.
 
 ## rocRAND 4.2.0 for ROCm 7.2
 

@@ -5,6 +5,7 @@ cmake_minimum_required( VERSION 3.15 )
 
 #Add a name for the rocm-libraries location
 set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../")
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 if (POLICY CMP0074)
   cmake_policy(SET CMP0074 NEW)
@@ -32,7 +33,6 @@ macro(set_if_bools_are_different var in1 in2)
 endmacro()
 
 get_property(MIOPEN_GENERATOR_IS_MULTI_CONFIG GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
-
 # This has to be initialized before the project() command appears
 # Set the default of CMAKE_BUILD_TYPE to be release, unless user specifies with -D.
 if(MIOPEN_GENERATOR_IS_MULTI_CONFIG)
@@ -155,7 +155,7 @@ if(MIOPEN_STRIP_SYMBOLS AND NOT WIN32 AND NOT APPLE)
     set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -s")
 endif()
 
-rocm_setup_version(VERSION 3.5.2)
+rocm_setup_version(VERSION 3.6.0)
 
 include(TargetFlags)
 
@@ -167,13 +167,12 @@ endif()
 
 ############################################################
 # OPTION - MIOpen Backend
-# - OpenCL
 # - HIP
 check_cxx_compiler_flag("--cuda-host-only -x hip" HAS_HIP)
 if(HAS_HIP)
     set(MIOPEN_DEFAULT_BACKEND "HIP")
 else()
-    set(MIOPEN_DEFAULT_BACKEND "OpenCL")
+    message(FATAL_ERROR "HIP compiler support is required but not detected.")
 endif()
 
 if(NOT WIN32)
@@ -224,38 +223,11 @@ endif()
 set( MIOPEN_BACKEND ${MIOPEN_DEFAULT_BACKEND} CACHE STRING
     "Which of MIOpens's backends to use?" )
 set_property( CACHE MIOPEN_BACKEND PROPERTY STRINGS
-    OpenCL HIP HIPOC HIPNOGPU)
+    HIP HIPOC HIPNOGPU)
 
 set_var_to_condition(MIOPEN_BUILD_DRIVER_DEFAULT (NOT MIOPEN_EMBED_BUILD) AND (NOT (MIOPEN_BACKEND STREQUAL "HIPNOGPU")))
 option(MIOPEN_BUILD_DRIVER "Build MIOpenDriver (and use it in tests)" ${MIOPEN_BUILD_DRIVER_DEFAULT})
 message(STATUS "MIOPEN_BUILD_DRIVER: ${MIOPEN_BUILD_DRIVER}" )
-
-# OpenCL 1.2
-if( MIOPEN_BACKEND STREQUAL "OpenCL")
-    set(MIOPEN_BACKEND_OPENCL 1)
-    find_package( OpenCL REQUIRED )
-    find_program(MIOPEN_HIP_COMPILER clang++
-        PATH_SUFFIXES bin
-        PATHS
-            /opt/rocm/llvm
-            ${CMAKE_INSTALL_PREFIX}/llvm
-    )
-    if(MIOPEN_HIP_COMPILER)
-        message(STATUS "hip compiler: ${MIOPEN_HIP_COMPILER}")
-    else()
-        message(FATAL_ERROR "hip compiler not found")
-    endif()
-
-    # TODO (priority_low) Use to build HIP and ASM kernels.
-    if(MIOPEN_USE_COMGR)
-        message(FATAL_ERROR "comgr cannot be used with OpenCL backend")
-    endif()
-
-    # This is to pass all necessary build flags to HIP compiler
-    # for device code compilation. Used within "find_package(hip...".
-    # See https://github.com/ROCm-Developer-Tools/HIP/pull/2035#issuecomment-616861118.
-    set (HIP_CXX_COMPILER ${MIOPEN_HIP_COMPILER})
-endif()
 
 # HIP SDK on Windows does not detect platform correctly, defaulting to "amd"
 if(NOT HIP_PLATFORM AND CMAKE_SYSTEM_NAME STREQUAL "Windows")
@@ -296,16 +268,13 @@ endif()
 # (src/ck_impl, itself arch-gated) and the CK-header-dependent gtest; the host configures and builds
 # cleanly whether or not a CK package is found, so no per-arch build gating of this flag is needed.
 option(MIOPEN_USE_COMPOSABLEKERNEL "Enable MIOpen to use composable kernels for various operations" On)
-if(MIOPEN_BACKEND_OPENCL)
-    set(MIOPEN_USE_COMPOSABLEKERNEL OFF)
-endif()
 option(MIOPEN_CK_UNBUNDLE_PER_ARCH
     "Generate per-architecture CK static archives for MIOpenCKGroupedConv_<arch> shared libraries"
     OFF)
 message(STATUS "Enable Composable Kernels: ${MIOPEN_USE_COMPOSABLEKERNEL}")
 message(STATUS "Enable per-arch CK unbundling: ${MIOPEN_CK_UNBUNDLE_PER_ARCH}")
 
-set_var_to_condition(MIOPEN_USE_COMGR_DEFAULT (NOT DEFINED MIOPEN_BACKEND_OPENCL) AND (NOT (MIOPEN_BACKEND STREQUAL "HIPNOGPU")))
+set_var_to_condition(MIOPEN_USE_COMGR_DEFAULT NOT (MIOPEN_BACKEND STREQUAL "HIPNOGPU"))
 option(MIOPEN_USE_COMGR "Use comgr to build kernels instead of offline tools" ${MIOPEN_USE_COMGR_DEFAULT})
 
 set(MIOPEN_hip_VERSION ${MIOPEN_hip_VERSION_MAJOR}.${MIOPEN_hip_VERSION_MINOR}.${MIOPEN_hip_VERSION_PATCH})
@@ -462,20 +431,6 @@ if( MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_B
     endif()
     set(MIOPEN_BACKEND_HIP 1)
 
-    find_program(HIP_OC_COMPILER NAMES amdclang clang
-        PATH_SUFFIXES bin
-        PATHS
-            /opt/rocm
-            ${CMAKE_INSTALL_PREFIX}
-        ENV HIP_PATH
-    )
-    if(HIP_OC_COMPILER)
-        message(STATUS "OpenCL compiler: ${HIP_OC_COMPILER}")
-        set(HIP_OC_COMPILER "${HIP_OC_COMPILER}")
-    else()
-        message(STATUS "OpenCL compiler not found")
-    endif()
-
         # Hcc's clang always defines __HCC__ even when not using hcc driver
         add_definitions(-U__HCC__)
 
@@ -574,8 +529,6 @@ find_program(MIOPEN_AMDGCN_ASSEMBLER
         ${CMAKE_INSTALL_PREFIX}
         ${CMAKE_INSTALL_PREFIX}/llvm
     PATH_SUFFIXES
-        /opencl/bin/x86_64
-        /opencl/bin
         /bin
 )
 message(STATUS "AMDGCN assembler: ${MIOPEN_AMDGCN_ASSEMBLER}")
@@ -681,18 +634,6 @@ set(MIOPEN_PACKAGE_REQS "${MIOPEN_PACKAGE_REQS}, rocrand")
 if(MIOPEN_BACKEND STREQUAL "HIP")
     set(CPACK_DEBIAN_PACKAGE_DEPENDS "${MIOPEN_PACKAGE_REQS}")
     set(CPACK_RPM_PACKAGE_REQUIRES "${MIOPEN_PACKAGE_REQS}")
-
-    # Make backends explicitly conflict
-    set(CPACK_DEBIAN_PACKAGE_CONFLICTS miopen-opencl)
-    set(CPACK_RPM_PACKAGE_CONFLICTS miopen-opencl)
-
-elseif(MIOPEN_BACKEND STREQUAL "OpenCL")
-    set(CPACK_DEBIAN_PACKAGE_DEPENDS "${MIOPEN_PACKAGE_REQS}, rocm-opencl-dev")
-    set(CPACK_RPM_PACKAGE_REQUIRES "${MIOPEN_PACKAGE_REQS}, rocm-opencl-devel")
-
-    # Make backends explicitly conflict
-    set(CPACK_DEBIAN_PACKAGE_CONFLICTS miopen-hip)
-    set(CPACK_RPM_PACKAGE_CONFLICTS miopen-hip)
 endif()
 
 set(KERNELS_SOURCE_DIR ${PROJECT_SOURCE_DIR}/src/kernels)
@@ -785,7 +726,7 @@ endfunction()
 # The default behaviour when no list of AMDGPU targets is supplied should be to
 # install for all targets; this was the behaviour before MIOPEN_INSTALL_GPU_DATABASES
 # was added.
-set(ALL_GPU_DATABASES gfx803 gfx900 gfx906 gfx908 gfx90a gfx942 gfx950 gfx1030)
+set(ALL_GPU_DATABASES gfx803 gfx900 gfx906 gfx908 gfx90a gfx942 gfx950 gfx1030 gfx1100 gfx1102 gfx1201)
 set(MIOPEN_INSTALL_GPU_DATABASES "${ALL_GPU_DATABASES}" CACHE LIST "List of AMDGPU targets for which to install databases")
 
 # This list should be updated when a new KDB file is added to the project
@@ -815,7 +756,7 @@ if(NOT ROCM_LIBS_SUPERBUILD)
         DESCRIPTION "AMD DNN Library"
         MAINTAINER "MIOpen Maintainer <miopen-lib.support@amd.com>"
         LDCONFIG
-        # DEPENDS rocm-opencl hip-rocclr tinygemm
+        # DEPENDS hip-rocclr tinygemm
     )
 endif()
 
@@ -954,6 +895,7 @@ if(NOT MIOPEN_USE_SQLITE_PERFDB)
     add_subdirectory(tools/sqlite2txt)
 endif()
 add_subdirectory(addkernels)
+include(${CMAKE_CURRENT_LIST_DIR}/cmake/MiopenCkCompileDefs.cmake)
 add_subdirectory(src)
 if(MIOPEN_BUILD_DRIVER)
     add_subdirectory(driver)

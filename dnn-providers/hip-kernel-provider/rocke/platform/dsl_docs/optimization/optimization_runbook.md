@@ -46,6 +46,36 @@ For the specific shape you are optimizing:
    has told you which config to redesign *from* and against which resource
    budget.
 
+> **Caveat — the shipped preset bench is NOT this sweep.** The live benchmark
+> most people reach for
+> (`library/benchmarks/gfx{942,950}/attention/prefill/benchmark_prefill2d_live.py`)
+> sweeps a *curated menu of named presets* (`_variant_flags`:
+> `prod`/`combo`/`fallback`/`r4_t32`/…), **not** the full lever space above. That
+> grammar exposes geometry (`num_warps`, `tile_size`, `block_m_per_warp`, MFMA
+> atom, transpose flags) but **cannot express several default-off flags** —
+> notably `use_softmax_mfma_interleave` (+ `softmax_interleave_mode` /
+> `softmax_interleave_groups`), `use_k_single_buffer`, and `use_register_pv`. So
+> running the preset bench does **not** satisfy Step 0: it systematically skips
+> exactly the default-off levers this step flags as most likely mis-picked. The
+> space it measures is `union(preset menu, production-dispatcher output)`;
+> anything outside that — including winning configs — stays invisible until a
+> human adds it as a candidate.
+>
+> To actually exhaust the space, sweep the **raw flags**, bypassing both the
+> preset grammar and the dispatcher: build the spec from arbitrary flags and
+> launch it directly
+> ([`utilities/tools/dsl_probes/probe_config_sweep.py`](utilities/tools/dsl_probes/probe_config_sweep.py),
+> or the `_select_2d_*` monkey-patch pattern in [§4.3 Attention](#43-attention)),
+> or drive the autotuner ([§12 Autotune](#12-autotuning-strategy)) over the full
+> cartesian product.
+>
+> *Real failure:* the D256 gfx950 softmax↔MFMA interleave win (+9–10% at
+> Sq 4096/8192, correctness-clean) was invisible to the preset-bench sweep for a
+> full optimization loop, because `use_softmax_mfma_interleave` is not in the
+> `_variant_flags` grammar. A raw-lever direct-launch sweep found it in one pass
+> once the profiler pointed at the exposed softmax on a low-occupancy
+> (4 waves/CU) kernel.
+
 This ordering is not optional. Real failures from skipping it: a selector
 routed a shape to a ~2× slower configuration that an exhaustive sweep beat
 immediately; a gap assumed "structural" turned out to be a single mis-set
@@ -253,15 +283,15 @@ from cheapest to most expensive:
 3. `python -m rocke.run_manifest <hsaco> <manifest>.json --verify` —
    per-kernel verification: loads HSACO, builds inputs, runs the
    kernel, compares against the in-process NumPy/torch reference.
-4. `python Python/rocke/examples/common/ck_tile_parity.py --op all` — small
+4. `python python/rocke/examples/common/ck_tile_parity.py --op all` — small
    ops vs torch reference (20 cases, deterministic with seed=0).
-5. `python Python/rocke/examples/common/parity_extended_kernels.py --op all`
+5. `python python/rocke/examples/common/parity_extended_kernels.py --op all`
    — MoE / Block-scale / MX and non-attention extended kernels.
    FMHA / sage / sparse attention coverage moved to the library:
    `PYTHONPATH=rocke/library python3 -m builders.common.parity_fmha_extended --arch <arch>`
-6. `python Python/rocke/examples/gfx950/attention/parity_unified_attention.py`
+6. `python python/rocke/examples/gfx950/attention/parity_unified_attention.py`
    — attention parity (Triton + ref vs CK DSL paths).
-7. `python Python/rocke/examples/common/hip_lowering_parity.py` — production
+7. `python python/rocke/examples/common/hip_lowering_parity.py` — production
    LLVM lowering vs HIP-debug lowering audit (non-attention specs).
    Attention lowering audit:
    `PYTHONPATH=rocke/library python3 -m builders.common.hip_lowering_attention_parity`
@@ -1988,8 +2018,8 @@ moved measured throughput by under 1 % on direct-conv kernels.
 | `no_fence` context manager | `runtime/launcher.py` | Skip per-call sync inside an event-timed loop (graph-style) |
 | `time_launches(fn, warmup, iters, stream)` | `runtime/launcher.py` | The canonical HIP-event timer |
 | `StreamConfig` | `runtime/launcher.py` | Mirror of CK Tile `stream_config` |
-| `resolve_stream(stream=0)` | `runtime/torch_module.py` | Substitute torch's current stream to keep allocator coherent |
-| `pack_args` vs `pack_args_kernelparams` | `runtime/torch_module.py` | AMDGPU kernarg buffer vs the safer `kernelParams` path |
+| `resolve_stream(stream=0)` | `runtime/torch_interop.py` | Substitute torch's current stream to keep allocator coherent |
+| `pack_args` vs `pack_args_kernelparams` | `runtime/packing.py` | AMDGPU kernarg buffer vs the safer `kernelParams` path |
 | HIP graph capture | torch | Amortizes launch overhead — pair with `no_fence` and many iters |
 | `rocm-smi --setperflevel high && --setsclk 7` | shell | Lock clocks to avoid thermal / DVFS noise during measurement |
 
@@ -3165,14 +3195,14 @@ importable — the conventional layout is to set it to the
 From the `composablekernel` checkout root:
 
 ```bash
-export PYTHONPATH=Python
+export PYTHONPATH=python
 ```
 
 ### 19.2 The single validation block
 
 ```bash
 cd <composablekernel-checkout>
-export PYTHONPATH=Python
+export PYTHONPATH=python
 
 PYTHONDONTWRITEBYTECODE=1 python tests/test_rocke.py
 PYTHONDONTWRITEBYTECODE=1 python python/test/test_rocke_examples.py
@@ -3181,13 +3211,13 @@ OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
 python -m rocke.examples.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
 python -m rocke.run_manifest "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
 
-python Python/rocke/examples/common/distribution_reduce_demo.py --M 32 --N 4096
-python Python/rocke/examples/common/distribution_2d_add_demo.py --H 64 --W 128
-python Python/rocke/examples/common/ck_tile_parity.py --op all
+python python/rocke/examples/common/distribution_reduce_demo.py --M 32 --N 4096
+python python/rocke/examples/common/distribution_2d_add_demo.py --H 64 --W 128
+python python/rocke/examples/common/ck_tile_parity.py --op all
 
 export AITER_PATH=<aiter-checkout>
-PYTHONPATH="Python:${AITER_PATH}" python \
-  Python/rocke/examples/gfx950/attention/parity_unified_attention.py \
+PYTHONPATH="python:${AITER_PATH}" python \
+  python/rocke/examples/gfx950/attention/parity_unified_attention.py \
   --scenario decode_d128_b16 --attempts 1 --warmup 0 --paths auto,2d,3d
 ```
 
