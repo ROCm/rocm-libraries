@@ -133,6 +133,9 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
             passFeatureConfig.dagFeatures.globalReadQueueDepth = moduleOptions.GlobalReadQueueDepth;
             passFeatureConfig.dagFeatures.globalReadDrainLatency =
                 moduleOptions.GlobalReadDrainLatency;
+            // Gates the scheduler's cluster-barrier SCC rule on the same option that
+            // decides whether InsertClusterBarrierPass runs below.
+            passFeatureConfig.dagFeatures.clusterBarrier = moduleOptions.ClusterBarrier;
             if (moduleOptions.DsReadPerWmma >= 0)
                 passFeatureConfig.dagFeatures.dsReadPerWmma = moduleOptions.DsReadPerWmma;
             if (moduleOptions.DsReadOrder >= 0)
