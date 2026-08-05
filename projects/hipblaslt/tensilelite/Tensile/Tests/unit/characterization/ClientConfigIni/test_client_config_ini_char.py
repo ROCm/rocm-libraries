@@ -512,6 +512,19 @@ class TestWriteClientConfigIniPlain:
                              })
         assert "num-elements-to-validate=-1" in content
 
+    @pytest.mark.parametrize("enabled", [True, False])
+    def test_check_streamk_sync_reaches_the_client(self, tmp_path, monkeypatch, enabled):
+        """CheckStreamKSync must always be emitted.
+
+        The client's own default is false, so a dropped or renamed parameter
+        would silently disable the StreamK Synchronizer check in every YAML
+        that asks for it, and those tests would keep passing.
+        """
+        pt = _make_problem_type(_PLAIN_GEMM_PT_DICT)
+        content = _write_ini(tmp_path, monkeypatch, pt, _PLAIN_GEMM_PT_DICT,
+                             extra_gp={"CheckStreamKSync": enabled})
+        assert f"check-streamk-sync={enabled}" in content
+
     def test_print_tensor_flags_written_when_set(self, tmp_path, monkeypatch):
         """Lines 667-686: PrintTensor* flags written to INI when enabled."""
         pt = _make_problem_type(_PLAIN_GEMM_PT_DICT)
