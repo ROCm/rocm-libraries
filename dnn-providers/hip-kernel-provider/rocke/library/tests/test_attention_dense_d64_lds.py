@@ -15,6 +15,10 @@ lock the properties that make that safe:
 * the pad participates in ``kernel_name()``, so two layouts cannot collide on one
   symbol name (or one launcher-cache entry).
 
+Every invariant is checked on both allowed dtypes: they share the packed
+group-pad path and are both 2 bytes wide, so bf16 passing does not by itself
+establish fp16.
+
 Pure text lowering -- no GPU and no comgr required.
 """
 
@@ -27,9 +31,10 @@ from kernels.gfx950.attention_dense import AttentionDenseSpec, build_attention_d
 
 _NBUF = 2  # module-private double-buffer depth, mirrored here for the LDS math
 _POOL_RE = re.compile(r"addrspace\(3\)\s+global\s+\[(\d+) x i8\]")
+_DTYPES = ("bf16", "fp16")
 
 
-def _spec(head_size, *, pad=8, persistent=False, block_n=64):
+def _spec(head_size, *, pad=8, persistent=False, block_n=64, dtype="bf16"):
     return AttentionDenseSpec(
         batch=1,
         seqlen_q=512,
@@ -38,7 +43,7 @@ def _spec(head_size, *, pad=8, persistent=False, block_n=64):
         num_kv_heads=8,
         head_size=head_size,
         causal=True,
-        dtype="bf16",
+        dtype=dtype,
         block_n=block_n,
         persistent=persistent,
         num_persistent=256,
@@ -79,65 +84,75 @@ def test_misaligned_pad_is_rejected(bad):
         _spec(64, pad=bad)
 
 
+@pytest.mark.parametrize("dtype", _DTYPES)
 @pytest.mark.parametrize("persistent", [False, True])
 @pytest.mark.parametrize("pad", [0, 8, 32])
-def test_pad_is_inert_at_d128(persistent, pad):
+def test_pad_is_inert_at_d128(persistent, pad, dtype):
     """head_size=128 packs one row per DMA instr and keeps its own per-row pad, so
     the group pad must not perturb its IR at all."""
-    base = _sha(_spec(128, pad=0, persistent=persistent))
-    assert _sha(_spec(128, pad=pad, persistent=persistent)) == base, (
-        f"lds_k_group_pad={pad} changed the head_size=128 IR "
+    base = _sha(_spec(128, pad=0, persistent=persistent, dtype=dtype))
+    assert _sha(_spec(128, pad=pad, persistent=persistent, dtype=dtype)) == base, (
+        f"lds_k_group_pad={pad} changed the head_size=128 {dtype} IR "
         f"(persistent={persistent}); that path must be byte-identical across "
         "group-pad changes"
     )
 
 
+@pytest.mark.parametrize("dtype", _DTYPES)
 @pytest.mark.parametrize("persistent", [False, True])
-def test_pad_is_live_at_d64(persistent):
+def test_pad_is_live_at_d64(persistent, dtype):
     """Sanity counterpart: the pad must actually reach the D=64 codegen."""
-    unpadded = _sha(_spec(64, pad=0, persistent=persistent))
+    unpadded = _sha(_spec(64, pad=0, persistent=persistent, dtype=dtype))
     assert (
-        _sha(_spec(64, pad=16, persistent=persistent)) != unpadded
-    ), f"lds_k_group_pad had no effect on the D=64 IR (persistent={persistent})"
+        _sha(_spec(64, pad=16, persistent=persistent, dtype=dtype)) != unpadded
+    ), f"lds_k_group_pad had no effect on the D=64 {dtype} IR (persistent={persistent})"
 
 
+@pytest.mark.parametrize("dtype", _DTYPES)
 @pytest.mark.parametrize("persistent", [False, True])
 @pytest.mark.parametrize("block_n", [32, 64, 128])
 @pytest.mark.parametrize("pad", [8, 16, 32])
-def test_d64_lds_grows_by_one_pad_per_row_group(block_n, pad, persistent):
+def test_d64_lds_grows_by_one_pad_per_row_group(block_n, pad, persistent, dtype):
     """One pad per DMA row-group, on the K tile only. 128//head_size = 2 at 64, so
     the group count is block_n // 2 and the growth is
     NBUF * (block_n // 2) * pad * 2 bytes. Checked on both builders -- the
-    persistent one is the configuration that ships for long sequences."""
-    base = _lds_pool_bytes(_spec(64, pad=0, block_n=block_n, persistent=persistent))
-    grown = _lds_pool_bytes(_spec(64, pad=pad, block_n=block_n, persistent=persistent))
+    persistent one is the configuration that ships for long sequences. Both dtypes
+    are 2 bytes wide, so the expected growth is the same for each."""
+    base = _lds_pool_bytes(
+        _spec(64, pad=0, block_n=block_n, persistent=persistent, dtype=dtype)
+    )
+    grown = _lds_pool_bytes(
+        _spec(64, pad=pad, block_n=block_n, persistent=persistent, dtype=dtype)
+    )
     rows_per_instr = 128 // 64
     expect = _NBUF * (block_n // rows_per_instr) * pad * 2
     assert grown - base == expect, (
-        f"D=64 block_n={block_n} pad={pad} persistent={persistent}: LDS grew "
-        f"{grown - base} bytes, expected {expect} (one pad per K row-group, "
-        "V untouched)"
+        f"D=64 block_n={block_n} pad={pad} persistent={persistent} dtype={dtype}: "
+        f"LDS grew {grown - base} bytes, expected {expect} (one pad per K "
+        "row-group, V untouched)"
     )
 
 
+@pytest.mark.parametrize("dtype", _DTYPES)
 @pytest.mark.parametrize("pad", [8, 16, 32])
-def test_d128_lds_unchanged_by_pad(pad):
-    base = _lds_pool_bytes(_spec(128, pad=0))
+def test_d128_lds_unchanged_by_pad(pad, dtype):
+    base = _lds_pool_bytes(_spec(128, pad=0, dtype=dtype))
     assert (
-        _lds_pool_bytes(_spec(128, pad=pad)) == base
-    ), f"lds_k_group_pad={pad} changed the head_size=128 LDS footprint"
+        _lds_pool_bytes(_spec(128, pad=pad, dtype=dtype)) == base
+    ), f"lds_k_group_pad={pad} changed the head_size=128 {dtype} LDS footprint"
 
 
-def test_pad_is_part_of_the_kernel_identity():
+@pytest.mark.parametrize("dtype", _DTYPES)
+def test_pad_is_part_of_the_kernel_identity(dtype):
     """Two D=64 layouts must not share a symbol name -- kernel_name() is also the
     launcher-cache key, so a collision would silently reuse the wrong binary."""
-    n0 = _spec(64, pad=0).kernel_name()
-    n8 = _spec(64, pad=8).kernel_name()
+    n0 = _spec(64, pad=0, dtype=dtype).kernel_name()
+    n8 = _spec(64, pad=8, dtype=dtype).kernel_name()
     assert n0 != n8, f"pad absent from kernel_name(): {n0}"
     assert "kpad8" in n8 and "kpad0" in n0
 
     # ... and it must stay out of the head_size=128 name, which is unchanged.
-    n128a = _spec(128, pad=0).kernel_name()
-    n128b = _spec(128, pad=32).kernel_name()
+    n128a = _spec(128, pad=0, dtype=dtype).kernel_name()
+    n128b = _spec(128, pad=32, dtype=dtype).kernel_name()
     assert n128a == n128b, "group pad leaked into the head_size=128 kernel name"
     assert "kpad" not in n128a
