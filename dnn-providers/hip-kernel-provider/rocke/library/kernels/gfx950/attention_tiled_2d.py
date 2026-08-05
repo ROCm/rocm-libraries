@@ -364,6 +364,15 @@ class UnifiedAttention2DTiledSpec:
     # Compute query-row mask invariants once per KV iteration for the
     # transposed 32x32 path, instead of once per score register.
     use_transposed_mask_once: bool = False
+    # Use the native single-instruction exp (``v_exp_f32`` via ``exp2_fast``)
+    # for the online-softmax P = exp2(S - m_new) and the alpha = exp2(m_old -
+    # m_new) rescale, instead of the guarded ``exp2`` (which emits the ~5-VALU
+    # range-reduction/overflow clamp). Safe here: the argument is always <= 0
+    # (m_new is the running row max, so S - m_new <= 0 and m_old - m_new <= 0;
+    # the all-masked -inf sentinel flushes to 0 either way). Trims VALU in the
+    # softmax window -- the measured bottleneck -- with no memory-path change.
+    # Golden-safe OFF; the dispatcher enables it where it wins.
+    use_exp2_fast: bool = False
     # Experiment: orient PV so each 32-lane half consumes only P rows it owns
     # and read matching V rows through two half-local transpose LDS reads. This
     # targets the transposed path's lane^32 P fetches.
@@ -862,6 +871,7 @@ class UnifiedAttention2DTiledSpec:
             "mask1" if self.use_transposed_mask_once else "",
             "hoist" if self.use_transposed_invariant_hoist else "",
             "hlpv" if self.use_transposed_half_local_pv else "",
+            "exp2f" if self.use_exp2_fast else "",
             "skipqreg" if self.use_mfma32_skip_legacy_qreg else "",
             "mlim" if self.use_transposed_mask_limit else "",
             "gkv2" if self.use_grouped_kv2_softmax else "",
@@ -1110,6 +1120,7 @@ def build_unified_attention_2d_tiled(
     # is optimal; native fp8 QK stays disabled.
     FP8_NATIVE_QK = False
     REGISTER_PV = spec.use_register_pv
+    USE_EXP2_FAST = spec.use_exp2_fast
     TRANSPOSED_QK_32X32 = spec.use_transposed_qk_32x32
     KQ_XOR_SWIZZLE = getattr(spec, "use_kq_xor_swizzle", False)
     # Slab-granularity K_lds pad. The async DMA writes one WAVE_BYTES (=1024 B =
@@ -1181,6 +1192,9 @@ def build_unified_attention_2d_tiled(
 
     name = spec.kernel_name()
     b = IRBuilder(name)
+    # Bind the softmax exp once: native v_exp_f32 when enabled (the online-
+    # softmax argument is <= 0 by construction), else the guarded exp2.
+    _exp2 = b.exp2_fast if USE_EXP2_FAST else b.exp2
     b.kernel.attrs["max_workgroup_size"] = THREADS
     if spec.waves_per_eu is not None:
         b.kernel.attrs["waves_per_eu"] = spec.waves_per_eu
@@ -3512,7 +3526,7 @@ def build_unified_attention_2d_tiled(
                 for group_idx in range(len(st_groups)):
                     for n in range(QK_N_TILES):
                         for reg in range(16):
-                            p_t = b.exp2(
+                            p_t = _exp2(
                                 b.fsub(st_scores[(group_idx, n, reg)], st_m_new)
                             )
                             PT32_groups[group_idx][n][reg] = p_t
@@ -3741,7 +3755,7 @@ def build_unified_attention_2d_tiled(
                 row = hoist_row[reg]
                 sum_p = zero_f
                 for n in range(QK_N_TILES):
-                    p = b.exp2(b.fsub(s_local[(reg, n)], m_new[reg]))
+                    p = _exp2(b.fsub(s_local[(reg, n)], m_new[reg]))
                     col = _mfma_32x32_c_col(b, lane, n)
                     b.smem_store_vN(P_lds, [row, col], b.cast_f32_to(p, dtype), 1)
                     sum_p = b.fadd(sum_p, p)
@@ -3835,7 +3849,7 @@ def build_unified_attention_2d_tiled(
             for reg in range(REGS_PER_LANE):
                 sum_p = zero_f
                 for n in range(QK_N_TILES):
-                    p = b.exp2(b.fsub(s_local[(reg, n)], m_new[reg]))
+                    p = _exp2(b.fsub(s_local[(reg, n)], m_new[reg]))
                     p_regs_f32[reg][n] = p
                     if not REGISTER_PV:
                         row = hoist_row[reg]
@@ -3855,7 +3869,7 @@ def build_unified_attention_2d_tiled(
 
         # alpha and L update (still per-lane registers; matches FA-2 paper)
         alpha_regs = [
-            b.exp2(b.fsub(m_vals[r], m_new[r])) for r in range(SOFTMAX_STATE_SLOTS)
+            _exp2(b.fsub(m_vals[r], m_new[r])) for r in range(SOFTMAX_STATE_SLOTS)
         ]
         new_l_vals = [
             b.fadd(b.fmul(l_vals[r], alpha_regs[r]), l_local[r])
