@@ -117,19 +117,27 @@ namespace TensileLite
             // merely unreported.
             if(bytes < tensor.totalAllocatedElements() * sizeof(int))
             {
+                // Thrown, not reported: this is a client configuration limit, not
+                // a kernel that failed to self-clean.
                 std::ostringstream msg;
-                msg << "Synchronizer is declared with a type narrower than int ("
-                    << bytes << " bytes for " << tensor.totalAllocatedElements()
-                    << " elements), so the dirty-buffer check cannot cover the range the "
-                       "kernel uses.\n";
-                m_reporter->log(LogLevel::Error, msg.str());
-                return false;
+                msg << "Synchronizer is declared with a type narrower than int (" << bytes
+                    << " bytes for " << tensor.totalAllocatedElements()
+                    << " elements), so --check-streamk-sync cannot cover the range the kernel "
+                       "uses.";
+                throw std::runtime_error(msg.str());
             }
 
             // Runs once per solution, so the copy is hot: pinned staging avoids
             // the pageable bounce buffer.
             uint8_t* host = stagingBuffer(bytes);
             HIP_CHECK_EXC(hipMemcpy(host, deviceSynchronizer, bytes, hipMemcpyDeviceToHost));
+
+            // The client zeroes the Synchronizer only on the first
+            // prepareGPUInputs -- it is not an output tensor, so the per-solution
+            // resetOutput skips it. Restoring the baseline here scopes each check
+            // to the launches since the last one, instead of blaming whichever
+            // solution follows the one that left residue.
+            HIP_CHECK_EXC(hipMemset(deviceSynchronizer, 0, bytes));
 
             // Raw bytes, not the tensor type: the buffer is declared with the alpha
             // type but holds integer counters. Word-at-a-time on the clean path;
@@ -167,12 +175,6 @@ namespace TensileLite
                 << "): " << nonzero << "/" << ints << " ints nonzero, first at int offset "
                 << first << " -- the kernel did not self-clean its work-queue state.\n";
             m_reporter->log(LogLevel::Error, msg.str());
-
-            // Only reached when residue was found, so the clean path pays nothing.
-            // The client zeroes the Synchronizer once per problem (it is not an
-            // output tensor, so the per-solution resetOutput skips it), so without
-            // this every later solution would inherit and re-report this residue.
-            HIP_CHECK_EXC(hipMemset(deviceSynchronizer, 0, bytes));
 
             return false;
         }
