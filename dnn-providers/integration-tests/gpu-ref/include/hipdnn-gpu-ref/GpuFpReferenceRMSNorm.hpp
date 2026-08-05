@@ -387,15 +387,18 @@ private:
         validateConsistentLayouts(inputDims, input.strides(), otherTensorProps);
 
         // Validate data types
-        static_assert(IS_SUPPORTED_DATA_TYPE<InputDataType>,
-                      "RMSNorm forward supports only float, half, and bfloat16 input data types.");
-        static_assert(IS_SUPPORTED_DATA_TYPE<OutputDataType>,
-                      "RMSNorm forward supports only float, half, and bfloat16 output data types.");
-        static_assert(IS_SUPPORTED_DATA_TYPE<ScaleDataType>,
-                      "RMSNorm forward supports only float, half, and bfloat16 scale data types.");
+        static_assert(
+            IS_SUPPORTED_DATA_TYPE<InputDataType>,
+            "RMSNorm forward supports only double, float, half, and bfloat16 input data types.");
+        static_assert(
+            IS_SUPPORTED_DATA_TYPE<OutputDataType>,
+            "RMSNorm forward supports only double, float, half, and bfloat16 output data types.");
+        static_assert(
+            IS_SUPPORTED_DATA_TYPE<ScaleDataType>,
+            "RMSNorm forward supports only double, float, half, and bfloat16 scale data types.");
         static_assert(
             IS_SUPPORTED_DATA_TYPE<ComputeDataType>,
-            "RMSNorm forward supports only float, half, and bfloat16 compute data types.");
+            "RMSNorm forward supports only double, float, half, and bfloat16 compute data types.");
     }
 
     template <class GradOutputDataType,
@@ -449,19 +452,21 @@ private:
         validateConsistentLayouts(inputDims, input.strides(), otherTensorProps);
 
         // Validate data types
+        static_assert(IS_SUPPORTED_DATA_TYPE<GradOutputDataType>,
+                      "RMSNorm backward supports only double, float, half, and bfloat16 gradOutput "
+                      "data types.");
         static_assert(
-            IS_SUPPORTED_DATA_TYPE<GradOutputDataType>,
-            "RMSNorm backward supports only float, half, and bfloat16 gradOutput data types.");
-        static_assert(IS_SUPPORTED_DATA_TYPE<InputDataType>,
-                      "RMSNorm backward supports only float, half, and bfloat16 input data types.");
-        static_assert(IS_SUPPORTED_DATA_TYPE<ScaleDataType>,
-                      "RMSNorm backward supports only float, half, and bfloat16 scale data types.");
+            IS_SUPPORTED_DATA_TYPE<InputDataType>,
+            "RMSNorm backward supports only double, float, half, and bfloat16 input data types.");
         static_assert(
-            IS_SUPPORTED_DATA_TYPE<GradInputDataType>,
-            "RMSNorm backward supports only float, half, and bfloat16 gradInput data types.");
+            IS_SUPPORTED_DATA_TYPE<ScaleDataType>,
+            "RMSNorm backward supports only double, float, half, and bfloat16 scale data types.");
+        static_assert(IS_SUPPORTED_DATA_TYPE<GradInputDataType>,
+                      "RMSNorm backward supports only double, float, half, and bfloat16 gradInput "
+                      "data types.");
         static_assert(
             IS_SUPPORTED_DATA_TYPE<ComputeDataType>,
-            "RMSNorm backward supports only float, half, and bfloat16 compute data types.");
+            "RMSNorm backward supports only double, float, half, and bfloat16 compute data types.");
     }
 
     // --- Helpers ---
