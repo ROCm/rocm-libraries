@@ -80,7 +80,7 @@ include(ROCMExportTargetsHeaderOnly)
 if(HIP_COMPILER STREQUAL "clang")
   rocm_export_targets_header_only(
     TARGETS hip::hipcub
-    DEPENDS PACKAGE rocprim
+    DEPENDS PACKAGE rocprim PACKAGE libhipcxx
     NAMESPACE hip::
   )
 else()

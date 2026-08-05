@@ -281,6 +281,7 @@
 #endif
 
 #ifndef ROCPRIM_NAVI
+    
     #if defined(__HIP_DEVICE_COMPILE__) \
         && (defined(__GFX10__) || defined(__GFX11__) || defined(__GFX12__))
         #define ROCPRIM_NAVI 1

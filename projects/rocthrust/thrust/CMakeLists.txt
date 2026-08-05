@@ -64,7 +64,7 @@ if(${LINK_HIP_DEVICE_LIBS})
   # Export targets
   rocm_export_targets_header_only(
     TARGETS roc::rocthrust
-    DEPENDS PACKAGE rocprim
+    DEPENDS PACKAGE rocprim PACKAGE libhipcxx
     NAMESPACE roc::
   )
 else()
