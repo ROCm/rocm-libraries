@@ -1,0 +1,99 @@
+#include <gtest/gtest.h>
+#include <rpp/rpp.h>
+
+#include <string>
+#include <vector>
+
+#include "framework/backend_memory.hpp"
+#include "framework/config_param.hpp"
+#include "framework/generic_tensor_setup.hpp"
+#include "framework/tensor_setup.hpp"
+#include "framework/voxel_tensor_setup.hpp"
+#include "reference/arithmetic_scalar_ref.hpp"
+
+using namespace rpptest;
+
+namespace {
+
+struct AddScalarParams {
+    float add;
+    std::string name() const { return "add" + num_token(add); }
+};
+
+// The op is exact in float; the only per-element error is the golden accumulating in double and
+// storing float.
+double abs_tolerance(DType) { return 1e-5; }
+
+double rel_tolerance(DType) { return 1e-6; }
+
+template <typename T>
+void run_add_scalar(const VoxelConfig& cfg, const AddScalarParams& p) {
+    GenericDescriptor desc(cfg.backend, voxel_dims(cfg.size, cfg.layout), cfg.dtype,
+                           to_rpp_layout_3d(cfg.layout));
+    const std::size_t count = generic_element_count(*desc);
+    const std::size_t bytes = generic_byte_size(*desc, cfg.dtype);
+
+    std::vector<T> input(count);
+    fill_input_nd<T>(input.data(), *desc, cfg.dtype, 0);
+
+    // A distinct addend per sample, so a kernel that applied param[0] to the whole batch is caught.
+    PinnedArray<Rpp32f> add(cfg.backend, cfg.size.n);
+    for (Rpp32u i = 0; i < cfg.size.n; ++i) add[i] = p.add * static_cast<Rpp32f>(i + 1);
+
+    // The golden and the comparator read roiHost, never the pinned copy: the HIP op rewrites the
+    // caller's ROI tensor in place.
+    const std::vector<RpptROI3D> roiHost = make_voxel_roi(cfg.size, cfg.roi, cfg.roiType);
+    PinnedArray<RpptROI3D> roi(cfg.backend, cfg.size.n);
+    for (Rpp32u i = 0; i < cfg.size.n; ++i) roi[i] = roiHost[i];
+
+    // (1) Host golden model. Both sides start at the sentinel so a voxel the op never writes stays
+    // obviously unwritten rather than plausibly zero.
+    std::vector<T> golden(count, nd_slack_poison<T>(cfg.dtype));
+    std::vector<T> actual = golden;
+    arithmetic_scalar_reference<T>(input.data(), golden.data(), *desc, roiHost.data(), cfg.roiType,
+                                   ScalarArithmeticOp::Add, add.data());
+
+    // (2) Run RPP on the configured backend.
+    DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
+    src.write(input.data(), bytes);
+    dst.write(actual.data(), bytes);
+
+    RppHandle handle(cfg.backend, cfg.size.n);
+    ASSERT_EQ(rppt_add_scalar(src.ptr(), desc.get(), dst.ptr(), desc.get(), add.data(), roi.data(),
+                              to_rpp_roi3d_type(cfg.roiType), handle.get(), cfg.backend),
+              RPP_SUCCESS);
+
+    handle.sync();  // drain the op's stream before copying results back
+    dst.read(actual.data(), bytes);
+
+    // (3) Compare the voxels inside the ROI box.
+    EXPECT_TRUE(compare_voxel_roi<T>(actual.data(), golden.data(), *desc, roiHost.data(),
+                                     cfg.roiType, abs_tolerance(cfg.dtype),
+                                     rel_tolerance(cfg.dtype)));
+}
+
+}  // namespace
+
+// Full name:
+// Voxel_Arithmetic/AddScalarTest.Correctness/<Backend>_F32toF32_<Layout>_<Roi>_<Roi3DType>_<Shape>_<Add>
+class AddScalarTest : public ::testing::TestWithParam<VoxelWithParams<AddScalarParams>> {};
+
+TEST_P(AddScalarTest, Correctness) {
+    const auto& p = GetParam();
+    ASSERT_EQ(p.cfg.dtype, DType::F32) << "add_scalar is F32 only";
+    run_add_scalar<Rpp32f>(p.cfg, p.op);
+}
+
+// f32 -> f32 is the op's only documented conversion.
+//
+// The fill spans [0, 1] and the addend is 40 (the value the legacy voxel harness uses), so every
+// result lands far outside [0, 1]: a kernel that clamped to the image-intensity range would show.
+INSTANTIATE_TEST_SUITE_P(Voxel_Arithmetic, AddScalarTest,
+                         ::testing::ValuesIn(voxel_with_params<AddScalarParams>(
+                             make_voxel_configs({DType::F32},
+                                                {VoxelLayout::NCDHW1, VoxelLayout::NCDHW3,
+                                                 VoxelLayout::NDHWC3},
+                                                {Roi::Full, Roi::Partial},
+                                                {Roi3D::XYZWHD, Roi3D::LTFRBB}),
+                             {{40.0f}})),
+                         voxel_op_config_name<AddScalarParams>);

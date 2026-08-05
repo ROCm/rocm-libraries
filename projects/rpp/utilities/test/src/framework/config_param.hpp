@@ -264,6 +264,94 @@ struct BroadcastParams {
     std::string name() const { return broadcast_name(mode); }
 };
 
+// ---- Voxel (3D) grid axes ---------------------------------------------------
+//
+// The voxel ops take a 5D RpptGenericDesc (NCDHW / NDHWC) plus an RpptROI3D box instead of the
+// image domain's RpptDesc + XYWH ROI. The layout slot carries the 3D layout together with its
+// channel count, and the ROI slot gains a second token for the ROI3D encoding, so the label keeps
+// the same structural slots: "<Backend>_<DTypeConv>_<Layout>_<Roi>_<Roi3DType>_<Shape>".
+// Descriptor construction, traversal and comparison live in framework/voxel_tensor_setup.hpp.
+
+enum class VoxelLayout { NCDHW1, NCDHW3, NDHWC3 };
+enum class Roi3D { XYZWHD, LTFRBB };
+
+// Spatial extent of the test volume; the channel count comes from VoxelLayout.
+struct VoxelSize {
+    Rpp32u n, d, h, w;
+};
+
+inline std::string voxel_layout_name(VoxelLayout l) {
+    switch (l) {
+        case VoxelLayout::NCDHW1: return "NCDHW1";
+        case VoxelLayout::NCDHW3: return "NCDHW3";
+        case VoxelLayout::NDHWC3: return "NDHWC3";
+    }
+    return "UNK";
+}
+
+inline std::string roi3d_name(Roi3D t) { return t == Roi3D::XYZWHD ? "XYZWHD" : "LTFRBB"; }
+
+inline std::string voxel_size_name(VoxelSize s) {
+    return std::to_string(s.n) + "x" + std::to_string(s.d) + "x" + std::to_string(s.h) + "x" +
+           std::to_string(s.w);
+}
+
+struct VoxelConfig {
+    RppBackend backend;
+    DType dtype;
+    VoxelLayout layout;
+    Roi roi;
+    Roi3D roiType;
+    VoxelSize size;
+};
+
+inline std::string voxel_config_name(const VoxelConfig& c) {
+    return backend_name(c.backend) + "_" + dtype_name(c.dtype) + "to" + dtype_name(c.dtype) + "_" +
+           voxel_layout_name(c.layout) + "_" + roi_name(c.roi) + "_" + roi3d_name(c.roiType) + "_" +
+           voxel_size_name(c.size);
+}
+
+inline std::vector<VoxelConfig> make_voxel_configs(const std::vector<DType>& dtypes,
+                                                   const std::vector<VoxelLayout>& layouts,
+                                                   const std::vector<Roi>& rois,
+                                                   const std::vector<Roi3D>& roiTypes,
+                                                   const std::vector<VoxelSize>& sizes = {
+                                                       {2, 4, 12, 16}}) {
+    std::vector<VoxelConfig> configs;
+    for (RppBackend backend : available_backends())
+        for (DType dtype : dtypes)
+            for (VoxelLayout layout : layouts)
+                for (Roi roi : rois)
+                    for (Roi3D roiType : roiTypes)
+                        for (VoxelSize size : sizes)
+                            configs.push_back({backend, dtype, layout, roi, roiType, size});
+    return configs;
+}
+
+// The voxel counterpart of WithParams. P must provide std::string name() const.
+template <typename P>
+struct VoxelWithParams {
+    VoxelConfig cfg;
+    P op;
+};
+
+template <typename P>
+inline std::vector<VoxelWithParams<P>> voxel_with_params(const std::vector<VoxelConfig>& base,
+                                                         const std::vector<P>& params) {
+    std::vector<VoxelWithParams<P>> out;
+    out.reserve(base.size() * params.size());
+    for (const auto& c : base)
+        for (const auto& p : params) out.push_back({c, p});
+    return out;
+}
+
+template <typename P>
+inline std::string voxel_op_config_name(
+    const ::testing::TestParamInfo<VoxelWithParams<P>>& info) {
+    const std::string suffix = info.param.op.name();
+    return voxel_config_name(info.param.cfg) + (suffix.empty() ? "" : "_" + suffix);
+}
+
 }  // namespace rpptest
 
 #endif  // RPP_TEST_CONFIG_PARAM_H
