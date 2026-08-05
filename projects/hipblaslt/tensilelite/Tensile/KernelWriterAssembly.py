@@ -14373,11 +14373,12 @@ class KernelWriterAssembly(KernelWriter):
     # no-op there (Alpha*1*1), so skipping the ~per-element muls is the whole win. When
     # not eligible we keep applyAlpha=True (always correct). beta==0 and full-tile are
     # guaranteed by the front guard, so no C-read/edge path is added.
-    # PLSIN: by default apply alpha IN the fused store (weave per-element _applyAlpha,
-    # VALU woven under the terminal MFMAs) so alpha!=1 and scalar scaleA*scaleB are
-    # handled here instead of forcing the PLAIN path. The eff-alpha==1 fold is dropped
-    # from the front guard (computePostLoopFusedStore) in the same mode, so alpha!=1 WGs
-    # now reach this store. TENSILE_PLSIN_APPLY_ALPHA=0 restores the old skip fast path.
+    # PLSIN: by default SKIP the in-store alpha multiply on the fp32 fast path -- the
+    # front guard (computePostLoopFusedStore) gates on eff-alpha==1, so only WGs whose
+    # effective alpha is 1 (and scale pointers null) reach this store and the per-element
+    # multiply is dropped from the store's critical path. Set TENSILE_PLSIN_APPLY_ALPHA=1
+    # to instead apply alpha IN the fused store (weave per-element _applyAlpha, VALU woven
+    # under the terminal MFMAs), letting alpha!=1 / scalar scaleA*scaleB WGs fuse too.
     skipAlpha = self._plsinAlphaSkipEligible(kernel) and not self._plsinApplyAlphaInFused(kernel)
     storeModule, _ = self.globalWriteElements(
       kernel, tPA, tPB,
@@ -15596,10 +15597,13 @@ class KernelWriterAssembly(KernelWriter):
     MFMAs, so it overlaps matrix compute (the same _weaveReadBeforeEpilogue machinery
     the bias / ScaleAlphaVec epilogue already rides). Only meaningful on the fp32 fast
     path (_plsinAlphaSkipEligible); the non-fp32 fused store already keeps
-    applyAlpha=True. Default ON; TENSILE_PLSIN_APPLY_ALPHA=0 restores the old
-    eff-alpha==1-gated skip (applyAlpha=False fast path + Alpha==1 front-guard fold)."""
+    applyAlpha=True. Default OFF: the fp32 fast path skips the in-store alpha multiply
+    and gates on eff-alpha==1 (applyAlpha=False + the Alpha==1 front-guard fold), which
+    shortens the store critical path and is the measured-faster default. Set
+    TENSILE_PLSIN_APPLY_ALPHA=1 to apply the effective alpha inside the fused store
+    instead, so alpha!=1 / scalar-scaled WGs fuse too rather than routing to PLAIN."""
     return self._plsinAlphaSkipEligible(kernel) and \
-           plsinDebugEnv("TENSILE_PLSIN_APPLY_ALPHA", "1") != "0"
+           plsinDebugEnv("TENSILE_PLSIN_APPLY_ALPHA", "0") != "0"
 
   def _plsinFusedNoGuards(self):
     """True inside the FULL-TILE fused NLL store, where every per-store bounds check
