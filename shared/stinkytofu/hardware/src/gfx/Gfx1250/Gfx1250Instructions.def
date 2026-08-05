@@ -389,6 +389,7 @@ DEF_BATCH(.format = SOP1,
 
 // Scalar ALU — SOPP
 DEF_T(SEndpgmInst, "s_endpgm", .format = SOPP, .flags = {HasSideEffect}, .logical = "SEndpgm")
+DEF_T(STtraceDataInst, "s_ttracedata", .format = SOPP, .flags = {HasSideEffect}, .logical = "STtraceData")
 DEF_T(SNopInst, "s_nop", .format = SOPP_WAIT16, .flags = {HasSideEffect}, .logical = "SNop")
 DEF_T(SSetprioInst, "s_setprio", .format = SOPP_WAIT16, .flags = {HasSideEffect}, .logical = "SSetPrior")
 DEF_T(SDelayAluInst, "s_delay_alu", .format = SOPP, .flags = {HasSideEffect}, .logical = "SDelayAlu",
@@ -826,6 +827,13 @@ DEF_BATCH(.format = VOP3P,
             {S0, src0, src, 32},
             {S1, src1, src, 32},
             {S2, src2, src, 32},
+        },
+    VPkFmaF32Inst, "v_pk_fma_f32", .logical = "VFmaPKF32", .flags = {Commutative},
+        .operand_fields = {
+            {D0, vdst, vgpr, 64},
+            {S0, src0, src, 64},
+            {S1, src1, src, 64},
+            {S2, src2, src, 64},
         },
     VPkMulF16Inst, "v_pk_mul_f16", .logical = "VMulPKF16", .flags = {Commutative},
     VPkMulF32Inst, "v_pk_mul_f32", .logical = {"VMulPKF32S", "VMulPKF32", "_VMulPKF32"}, .flags = {Commutative},

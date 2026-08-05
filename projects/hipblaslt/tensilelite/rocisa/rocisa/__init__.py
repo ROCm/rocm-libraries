@@ -179,10 +179,67 @@ def _find_stale_sources(so_path, source_roots, build_dir):
     return stale
 
 
-def _stinkytofu_available() -> bool:
-    """Return True only if the stinkytofu Python module was built and is importable."""
-    import importlib.util
-    return importlib.util.find_spec("stinkytofu") is not None
+_FALLBACK = "; falling back to native rocisa backend."
+
+
+def _stinkytofu_available() -> "tuple[bool, str]":
+    """Probe the standalone stinkytofu binding (_stinkytofu.so) by importing it.
+
+    Returns ``(True, "")`` iff ``import stinkytofu`` succeeds; otherwise
+    ``(False, <cause-specific message>)`` so ``_resolve_backend`` can emit a
+    *distinct* warning per failure mode rather than one generic message.
+
+    The adapter's logical-IR path (``lower_logical_module`` -> ``StinkyAsmModule``
+    -> ``emitAssembly``) is backed entirely by the standalone ``_stinkytofu.so``
+    (built from ``shared/stinkytofu/python_module``), NOT by ``_rocisa.so``'s
+    in-process ``init_stinkytofu`` bindings.
+
+    We must *actually import* stinkytofu here rather than use
+    ``importlib.util.find_spec("stinkytofu")``, for two reasons:
+      1. ``find_spec`` only locates the package's ``__init__.py`` *source*; it
+         does not execute it, so it returns truthy even when ``_stinkytofu.so``
+         was never built (the source tree is always present).
+      2. Importing the adapter package does NOT surface a missing
+         ``_stinkytofu.so`` either -- ``rocisa_stinkytofu_adaptor/__init__.py``
+         swaps ``StinkyAsmModule`` for a dummy on ImportError. So the switch
+         would appear to succeed and only fail later, mid-lowering.
+    ``import stinkytofu`` eagerly loads ``_stinkytofu.so`` (see that package's
+    ``from ._stinkytofu import *``). This probe runs only when
+    ``ROCISA_BACKEND=stinkytofu`` is requested."""
+    import importlib
+
+    _req = "ROCISA_BACKEND=stinkytofu requested but "
+    try:
+        importlib.import_module("stinkytofu")
+    except ModuleNotFoundError as exc:
+        # The stinkytofu package or its ``_stinkytofu.so`` extension is not on
+        # the path at all -- i.e. the standalone binding was never built.
+        return False, (
+            f"{_req}the standalone stinkytofu binding is not built/importable "
+            f"(_stinkytofu.so missing: {exc}){_FALLBACK}"
+        )
+    except ImportError as exc:
+        # ImportError (but not ModuleNotFoundError): either the deliberate
+        # staleness guard in stinkytofu/__init__.py (sources newer than the
+        # built .so) or a .so that is present but failed to load (missing
+        # symbols / ABI mismatch). Distinguish so the developer knows whether
+        # to *rebuild* or to investigate a broken binding.
+        _msg = str(exc)
+        if "newer than the built _stinkytofu.so" in _msg or "bindings are stale" in _msg:
+            return False, (
+                f"{_req}the stinkytofu binding is stale and must be rebuilt "
+                f"({_msg}){_FALLBACK}"
+            )
+        return False, (
+            f"{_req}the stinkytofu binding is present but failed to load "
+            f"({exc!r}){_FALLBACK}"
+        )
+    except Exception as exc:  # noqa: BLE001 -- any import-time error disables it
+        return False, (
+            f"{_req}importing the stinkytofu binding raised an unexpected error "
+            f"({exc!r}){_FALLBACK}"
+        )
+    return True, ""
 
 
 def _resolve_backend(requested, available_fn, load_fn, warn=warnings.warn) -> bool:
@@ -190,23 +247,23 @@ def _resolve_backend(requested, available_fn, load_fn, warn=warnings.warn) -> bo
 
     Emits a warning *only* when the stinkytofu backend was explicitly requested
     but we have to fall back to native — so an unnoticed silent fallback becomes
-    visible, with the reason attached. Requesting anything else (or unset) selects
-    native without touching the availability/load probes and without warning.
+    visible, with a cause-specific reason attached. ``available_fn`` and
+    ``load_fn`` share the same ``(ok, reason)`` contract; the reason is surfaced
+    verbatim so each distinct failure mode produces its own warning. Requesting
+    anything else (or unset) selects native without touching the probes and
+    without warning.
     """
     if requested != "stinkytofu":
         return False
-    if not available_fn():
-        warn(
-            "ROCISA_BACKEND=stinkytofu requested but the stinkytofu Python module "
-            "is not built/available; falling back to native rocisa backend.",
-            stacklevel=2,
-        )
+    available, avail_reason = available_fn()
+    if not available:
+        warn(avail_reason, stacklevel=2)
         return False
     ok, reason = load_fn()
     if not ok:
         warn(
             f"ROCISA_BACKEND=stinkytofu requested but the adapter failed to load "
-            f"({reason}); falling back to native rocisa backend.",
+            f"({reason}){_FALLBACK}",
             stacklevel=2,
         )
         return False
@@ -254,30 +311,50 @@ else:
         from pathlib import Path
 
         _so = Path(_rocisa.__file__)
-        # Scan rocisa sources and stinkytofu asm-IR sources (since _rocisa.so
-        # links libstinkytofu.so for the toStinkyTofuModule / emitAssembly path).
-        # Both roots are populated by CMake; an empty one signals a malformed
-        # _build_info.py. Warn (rather than scan Path("") == the CWD) and skip it,
-        # so a regression surfaces instead of silently disabling the check.
-        # Excluded from the stinkytofu scan:
-        #   - tests/         — test code is never compiled into .so
-        #   - python_module/ — only compiled into _stinkytofu.so (Python bindings)
-        #   - src/ir/logical  — logical IR is only used by _stinkytofu.so (left
-        #                       path); _rocisa.so never touches logical modules.
+        # Scan exactly the sources compiled into _rocisa.so so its scan set
+        # matches what the binary is built from:
+        #   - rocisa bindings:  <SOURCE_ROOT>  (rocisa/rocisa/**, the _rocisa TUs)
+        #   - stinkytofu:       the sources that make up libstinkytofu.so (which
+        #     _rocisa.so links for toStinkyTofuModule / emitAssembly) plus the
+        #     src/conversion/rocisa glue compiled directly into _rocisa.so:
+        #       src/        libstinkytofu core + rocisa glue (src/conversion)
+        #       include/    headers
+        #       hardware/, tools/tablegen/   generators whose generated output
+        #                   is compiled into libstinkytofu
+        # Not scanned (never compiled into _rocisa.so): tests/, examples/,
+        # python_module/ (-> _stinkytofu.so only) and the standalone tools/
+        # (stinkytofu-opt, -check, -cfg, intrinsic-compiler, waitcnt-check).
+        # Roots come from CMake; an empty one signals a malformed _build_info.py,
+        # so warn (rather than scan Path("") == the CWD) and skip it.
         _roots = []
-        for _name, _root in (("rocisa", _bi.SOURCE_ROOT), ("stinkytofu", _bi.STINKYTOFU_SOURCE_ROOT)):
-            if _root:
-                _roots.append(Path(_root))
-            else:
-                warnings.warn(
-                    f"rocisa staleness check: {_name} source root is unset in "
-                    f"_build_info.py; skipping it. Rebuild with: invoke rocisa",
-                    stacklevel=2,
-                )
+        _rocisa_root = Path(_bi.SOURCE_ROOT) if _bi.SOURCE_ROOT else None
+        if _rocisa_root:
+            _roots.append(_rocisa_root)
+        else:
+            warnings.warn(
+                "rocisa staleness check: rocisa source root is unset in "
+                "_build_info.py; skipping it. Rebuild with: invoke rocisa",
+                stacklevel=2,
+            )
         _st_root = Path(_bi.STINKYTOFU_SOURCE_ROOT) if _bi.STINKYTOFU_SOURCE_ROOT else None
-        _st_skip = {_st_root / "tests", _st_root / "src" / "ir" / "logical", _st_root / "python_module"} if _st_root else set()
-        _all_stale = _find_stale_sources(_so, _roots, _bi.BUILD_DIR)
-        _stale = [s for s in _all_stale if not any(Path(s).is_relative_to(sk) for sk in _st_skip)]
+        if _st_root:
+            _roots.extend(
+                d
+                for d in (
+                    _st_root / "src",
+                    _st_root / "include",
+                    _st_root / "hardware",
+                    _st_root / "tools" / "tablegen",
+                )
+                if d.is_dir()
+            )
+        else:
+            warnings.warn(
+                "rocisa staleness check: stinkytofu source root is unset in "
+                "_build_info.py; skipping it. Rebuild with: invoke rocisa",
+                stacklevel=2,
+            )
+        _stale = _find_stale_sources(_so, _roots, _bi.BUILD_DIR)
         if _stale:
             _preview = _stale[:3] + (["..."] if len(_stale) > 3 else [])
             raise ImportError(
@@ -285,7 +362,7 @@ else:
                 f"  Modified: {', '.join(_preview)}\n"
                 "  Rebuild:  invoke rocisa"
             )
-        del _bi, _so, _stale, _all_stale, _roots, _name, _root, _st_root, _st_skip, Path
+        del _bi, _so, _stale, _roots, _rocisa_root, _st_root, Path
 
 
 def hasStinkyTofuBackend() -> bool:
