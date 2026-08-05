@@ -1359,11 +1359,12 @@ namespace TensileLite
             const size_t n = problem.freeSizeB(0);
             const size_t k = problem.boundSize(0);
             const size_t batches = problem.batchSize(0);
-            const OutputSelection globalSelection
-                = OutputSelection::primeStride(problem.d().totalLogicalElements(),
-                                               problem.d().totalAllocatedElements(),
-                                               elementsToValidate);
-            if (useStandaloneEpilogue && !globalSelection.selectsAll()) return false;
+            const OutputSelection globalSelection =
+                problem.useGradient() && problem.useBias()
+                    ? OutputSelection::all()
+                    : OutputSelection::primeStride(problem.d().totalLogicalElements(),
+                                                   problem.d().totalAllocatedElements(),
+                                                   elementsToValidate);
             std::vector<std::vector<size_t>> selectedByBatch;
             if(!globalSelection.selectsAll())
             {
@@ -1661,6 +1662,7 @@ namespace TensileLite
                     epilogue.activationParameter0 = activationParameter0;
                     epilogue.activationParameter1 = activationParameter1;
                     epilogue.outputScale = outputScale;
+                    epilogue.outputSelection = runtimeProblem.outputSelection;
                     std::optional<Tensor> biasWorkspace;
                     if (problem.useGradient() && problem.useBias() &&
                         problem.biasSrc() == ContractionProblemGemm::D) {
