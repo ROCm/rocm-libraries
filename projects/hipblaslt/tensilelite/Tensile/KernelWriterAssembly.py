@@ -8426,13 +8426,29 @@ class KernelWriterAssembly(KernelWriter):
       sgpxIdxVec = self.defineMultiSgprIndex(self.states.numStoreSgprNames, self.states.numStoreSgprNameSizes, align=4)
       for name in self.states.numStoreSgprNames:
           module.add(RegSet("s", "sgpr"+name, self.sgprs[name]))
-      if noSkipLoad and kernel["GlobalSplitU"] != 0:
-        gsuLabel = Label(label=self.labels.getNameInc("GSU"), comment="")
+      # A shared "skip the store-kernarg reload" join. Two independent skip
+      # conditions target it (OR semantics):
+      #   * GSU != 1 (existing): a GSU partial-accumulation kernel does not store.
+      #   * PostLoopStoreInNll fused owner (new): a full-tile fused owner already
+      #     loaded + consumed the store kernargs inside the FUSED NLL
+      #     (loadFusedEpilogueStoreSgprs) and its post-loop store body is skipped by
+      #     the dedup guard, so re-loading them here is dead work. Gated on
+      #     _plsinAlphaSkipEligible because PostLoopFusedStore is only defined for
+      #     fp32-compute PLSIN kernels (see KernelWriter.defineSgpr).
+      emitGsuSkip = noSkipLoad and kernel["GlobalSplitU"] != 0
+      emitPlsinSkip = self._plsinAlphaSkipEligible(kernel)
+      skipStoreLoadLabel = None
+      if emitGsuSkip or emitPlsinSkip:
+        skipStoreLoadLabel = Label(label=self.labels.getNameInc("SkipStoreSgprLoad"), comment="")
+      if emitGsuSkip:
         with self.allocTmpSgpr(1, tag="endSummation_tmpSgprGSU") as tmpSgprGSU:
           module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=self.gsuMaskHex(kernel), comment="Restore GSU"))
           module.add(SCmpEQU32(src0=sgpr(tmpSgprGSU.idx), src1=1, comment="GSU == 1 ?"))
         if (kernel["_GlobalAccumulation"] != 'MultipleBufferSingleKernel'):
-          module.add(SCBranchSCC0(labelName=gsuLabel.getLabelName(), comment="branch if GSU != 1"))
+          module.add(SCBranchSCC0(labelName=skipStoreLoadLabel.getLabelName(), comment="branch if GSU != 1"))
+      if emitPlsinSkip:
+        module.add(SCmpEQU32(src0=sgpr("PostLoopFusedStore"), src1=1, comment="PostLoopStoreInNll: fused owner already loaded store kernargs?"))
+        module.add(SCBranchSCC1(labelName=skipStoreLoadLabel.getLabelName(), comment="PostLoopStoreInNll: skip redundant store-kernarg reload for fused owner"))
       if kernel["ProblemType"]["SupportUserArgs"]:
         extReadEpilogueLabel    = Label(label=self.labels.getNameInc("LoadExternalEpilogueStruct"), comment="")
         extReadEpilogueLabelEnd = Label(label=self.labels.getNameInc("LoadExternalEpilogueStructEnd"), comment="")
@@ -8540,8 +8556,8 @@ class KernelWriterAssembly(KernelWriter):
         loadModule = module.addModuleAsFlatItems(self.argLoader.loadAllKernArg(startVgprName, "KernArgAddress", numStoreSgprToLoad))
         self.states.numStoreSgprInst = countSMemLoad(loadModule)
         self.argLoader.setOffset(argOffset) # Restore offset
-      if noSkipLoad and kernel["GlobalSplitU"] != 0:
-        module.add(gsuLabel)
+      if skipStoreLoadLabel is not None:
+        module.add(skipStoreLoadLabel)
 
     ########################################
     # Load kernel args needed by global write batch
@@ -15964,6 +15980,39 @@ class KernelWriterAssembly(KernelWriter):
     fold the epilogue applies asserts a single-register alpha). Everything else keeps
     the always-correct applyAlpha=True path."""
     return bool(kernel["PostLoopStoreInNll"]) and kernel["ProblemType"]["ComputeDataType"].isSingle()
+
+  def _plsinCanBypassEndSummation(self, kernel):
+    """PostLoopStoreInNll Phase 3: may a fused full-tile owner branch its NLL exit
+    STRAIGHT past endSummation + the post-loop dedup guard (to the post-loop store's
+    SkipPostLoopStore join), instead of routing through SkipToEnd -> endSummation ->
+    re-evaluate the dedup guard?
+
+    endSummation is almost entirely compile-time bookkeeping (defineSgpr / RegSet
+    '.set' directives and self.codes.* code-object assignment emitted later); those
+    take effect at assemble time regardless of runtime control flow, so skipping them
+    at runtime is a no-op. The store-kernarg reload it performs is already dead for a
+    fused owner (skipped by the PostLoopFusedStore branch added to the reload block,
+    and only consumed by the dedup-skipped store body). The ONLY runtime side effects
+    that a fused owner would still need -- and which therefore BLOCK the bypass -- are:
+      * the bias-gradient reduction write (Gradient && UseBias && BiasSrc in A/B),
+        which is an independent output, not part of the D store;
+      * the SuppressNoLoadLoop wait-for-summation s_waitcnt (memory ordering);
+      * the GSU AddressTD / Synchronizer kernarg loads (numStoreSgprToLoad2 > 0, i.e.
+        _GlobalAccumulation MultipleBufferSingleKernel / AdaptiveGemmGSUA), consumed by
+        the GSU-sync path after the store.
+    When any is present, keep fusedExitLabel = SkipToEnd (endSummation runs and the
+    dedup guard then skips only the redundant store body). Also requires
+    _plsinAlphaSkipEligible (the whole fused-flag machinery)."""
+    if not self._plsinAlphaSkipEligible(kernel):
+      return False
+    pt = kernel["ProblemType"]
+    if pt["Gradient"] and pt["UseBias"] and (pt["BiasSrc"] == "A" or pt["BiasSrc"] == "B"):
+      return False
+    if kernel["SuppressNoLoadLoop"]:
+      return False
+    if kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel" or kernel["AdaptiveGemmGSUA"] == 1:
+      return False
+    return plsinDebugEnv("TENSILE_PLSIN_BYPASS_ENDSUM", "1") != "0"
 
   def _plsinApplyAlphaInFused(self, kernel):
     """PostLoopStoreInNll: apply the effective alpha (and folded scalar scaleA*scaleB)
