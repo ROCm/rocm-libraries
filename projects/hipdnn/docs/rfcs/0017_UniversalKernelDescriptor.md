@@ -1033,7 +1033,7 @@ also belong in different packs, because a UDD carries one formula per launch qua
 substitution reconciles two different shapes. A grid sized `ceil_div($q.seqlen_q, <tile>)` over
 graph dimensions and a fixed one-dimensional grid whose extent is a per-kernel constant with no
 graph dimension are two shapes, not two values, even with identical argument lists. The
-[worked example](./0017_UniversalKernelDescriptor_WorkedExample.md) uses this case: two cohorts
+[worked example](./examples/0017_UniversalKernelDescriptor_WorkedExample.md) uses this case: two cohorts
 of one real kernel family, same five-argument ABI,
 different grid shape, split across two KDPs sharing one matcher and one engine. Splitting costs
 little, since a KDP's matcher, engine, heuristic, and metadata schema are all shared by ID.
@@ -1577,7 +1577,7 @@ encodes those conditions as data or exposes a gap in the format.
 
 Because that walkthrough runs to several hundred lines of descriptor data, it lives in its own
 document:
-**[RFC 0017 Worked Example: SDPA as a UKD](./0017_UniversalKernelDescriptor_WorkedExample.md)**.
+**[RFC 0017 Worked Example: SDPA as a UKD](./examples/0017_UniversalKernelDescriptor_WorkedExample.md)**.
 It covers the complete matcher,
 the mask-mode classifier encoded as criteria data, one accept and two declines traced end to end,
 the dispatch geometry for both of the family's performance cohorts, and the engine, metadata
@@ -1611,7 +1611,7 @@ ranking picks it only once retrained to expose it, or if it is the only kernel m
 **Standing up a new family costs more, and that example is one.** Everything the companion walks
 through is the first-time case: `attention_dense` has no engine in hipDNN today, so its
 descriptors are the whole set, not one UKD added to something existing. That is one UMD
-([the matcher](./0017_UniversalKernelDescriptor_WorkedExample.md#2-the-matcher), the largest
+([the matcher](./examples/0017_UniversalKernelDescriptor_WorkedExample.md#2-the-matcher), the largest
 single artifact), one KMD, one UED, one UHD, two UDDs because the cohorts differ in grid shape,
 two KDPs to bind them, and two UKDs. Ten descriptors, of which eight are authored once for the
 family and shared by every kernel that joins it.
@@ -2065,14 +2065,14 @@ follow-up RFCs.
 5. **Static versus dynamic shared memory:** a dispatch descriptor's `shared_mem_bytes` describes the
    dynamic allocation passed at launch, but a kernel may instead size its LDS internally at build
    time, in which case the launch value is zero and the real figure is invisible to the descriptor
-   ([the worked example's dispatch geometry](./0017_UniversalKernelDescriptor_WorkedExample.md#5-dispatch-geometry-from-kernel)
+   ([the worked example's dispatch geometry](./examples/0017_UniversalKernelDescriptor_WorkedExample.md#5-dispatch-geometry-from-kernel)
    is such a kernel). Should the dispatch
    descriptor distinguish the two, so an operator can see a kernel's true LDS footprint, or is the
    launch value the only thing dispatch needs?
 6. **Deriving a conventional default versus requiring it explicitly:** where an operation defines a
    conventional default for an attribute, such as SDPA's `1/sqrt(head_size)` scale, a pack may either
    derive it or require the graph to supply it
-   ([the worked example's matcher](./0017_UniversalKernelDescriptor_WorkedExample.md#2-the-matcher)). Deriving accepts
+   ([the worked example's matcher](./examples/0017_UniversalKernelDescriptor_WorkedExample.md#2-the-matcher)). Deriving accepts
    more graphs; requiring keeps the pack's contract narrow and its dispatch free of derived values.
    Should this be an author's choice per pack, as it is today, or a convention the schema settles
    once for every operation?
@@ -2146,7 +2146,7 @@ choices; none is a dependency.
   configuration, which a UDD encodes as data.
 - **SDPA:** scaled dot-product attention, the running example operation used throughout this
   document ([Section 13](#13-worked-example-sdpa-as-a-ukd) summarizes it, and the
-  [worked example](./0017_UniversalKernelDescriptor_WorkedExample.md) walks it in full).
+  [worked example](./examples/0017_UniversalKernelDescriptor_WorkedExample.md) walks it in full).
 - **Engine-selection heuristic / kernel-selection heuristic:** the two selection levels; the
   engine-selection heuristic (existing) picks the engine, the kernel-selection heuristic (a UHD)
   picks the kernel within it.

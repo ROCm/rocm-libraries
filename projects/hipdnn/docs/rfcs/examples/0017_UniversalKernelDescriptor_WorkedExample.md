@@ -1,7 +1,7 @@
 # RFC 0017 Worked Example: SDPA as a UKD
 
 This document is the long-form companion to
-[RFC 0017: Universal Kernel Descriptors](./0017_UniversalKernelDescriptor.md). It carries the
+[RFC 0017: Universal Kernel Descriptors](../0017_UniversalKernelDescriptor.md). It carries the
 full worked example the main RFC summarises: the complete matcher for a real SDPA forward
 kernel, the mask-mode classifier encoded as criteria data, one accept and two declines traced
 end to end, the dispatch geometry for both performance cohorts, and the engine, metadata
@@ -382,7 +382,7 @@ The persistent UDD, the measured ~940-970 TFLOPS path (PR #9480):
 This is the real, complete 5-argument ABI (`attention_dense_signature`), with no stride or seqlen
 scalars, because every shape quantity is a Python-level compile-time constant baked into the IR
 rather than a runtime argument. This is the tradeoff "a prebuilt match is exact" argues for
-([RFC 0017 §5](./0017_UniversalKernelDescriptor.md#5-matching-and-the-umd)): the kernel author's own docstring for
+([RFC 0017 §5](../0017_UniversalKernelDescriptor.md#5-matching-and-the-umd)): the kernel author's own docstring for
 `AttentionDenseSpec` confirms it in the same words, that the functional fields "are baked into the
 kernel as constants, this is a dense, statically-sized ABI".
 
