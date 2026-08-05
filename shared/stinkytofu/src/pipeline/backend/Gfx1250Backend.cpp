@@ -128,6 +128,8 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
             passFeatureConfig.dagFeatures.distributeGlobalRead = true;
             passFeatureConfig.dagFeatures.dsReadQueueDepth = moduleOptions.DsReadQueueDepth;
             passFeatureConfig.dagFeatures.dsReadDrainLatency = moduleOptions.DsReadDrainLatency;
+            passFeatureConfig.dagFeatures.dsReadThrottleLatency =
+                moduleOptions.DsReadThrottleLatency;
             passFeatureConfig.dagFeatures.globalReadQueueDepth = moduleOptions.GlobalReadQueueDepth;
             passFeatureConfig.dagFeatures.globalReadDrainLatency =
                 moduleOptions.GlobalReadDrainLatency;
@@ -164,9 +166,7 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
     // the module opts in. Must precede InsertVgprMsbPass so the new
     // branches/labels are present when MSB configuration is materialized.
     if (moduleOptions.ClusterBarrier) {
-        pm.addPass(createInsertClusterBarrierPass(/*isKernelScope=*/true,
-                                                  /*pgrValue=*/moduleOptions.PrefetchGlobalRead,
-                                                  /*plrValue=*/moduleOptions.PrefetchLocalRead));
+        pm.addPass(createInsertClusterBarrierPass());
     }
 
     // Build the CFG after the flat region splice-backs so RegionClonePass can match its
