@@ -12,10 +12,6 @@ Documentation for rocThrust available at
     * `thrust::tuple` and `thrust::pair`: some features may differ from CCCL/thrust v3.0.3.
     * `thrust::zip_iterator`: some iterator concepts present in CCCL/thrust v3.0.3 are missing.
 
-### Removed
-
-* rocThrust compatibility with PyTorch v2.9 and v2.10 has been removed in this release.  Please use PyTorch v2.11 or later.
-
 ## rocThrust 4.5.0 for ROCm 7.14
 
 ### Added
