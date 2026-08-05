@@ -65,9 +65,15 @@ inline roc::host_validation::Activation toHostValidationActivation(ActivationTyp
             return roc::host_validation::Activation::None;
         case ActivationType::Relu:
             return roc::host_validation::Activation::Relu;
+        case ActivationType::Gelu:
+            return roc::host_validation::Activation::Gelu;
+        case ActivationType::Silu:
+        case ActivationType::Swish:
+            return roc::host_validation::Activation::Silu;
+        case ActivationType::Clamp:
+            return roc::host_validation::Activation::Clamp;
         default:
-            throw std::invalid_argument(
-                "The host-validation POC bridge supports None and Relu activations.");
+            throw std::invalid_argument("Activation has no runtime host-validation mapping.");
     }
 }
 }  // namespace TensileLite::Client
