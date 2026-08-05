@@ -451,6 +451,7 @@ def from_dataframe(
         lib = None
         sols = []
         sizes = []
+        tuned_sols = {}
         for _, row in group.iterrows():  # Each size
             lib_path = lib_dir / row["lib"]  # We need the lib.name to load the lib
 
@@ -463,13 +464,16 @@ def from_dataframe(
                 raise ValueError(f"{size_} not found in '{lib_path}'")
 
             size = copy.deepcopy(size[0])
-            sol = copy.deepcopy(lib.solutions[size[1][0]])
-
-            kidx = len(sols)
-            sol["SolutionIndex"] = kidx
+            src_kidx = size[1][0]
+            if src_kidx in tuned_sols:
+                kidx = tuned_sols[src_kidx]
+            else:
+                sol = copy.deepcopy(lib.solutions[src_kidx])
+                kidx = len(sols)
+                sol["SolutionIndex"] = kidx
+                sols.append(sol)
+                tuned_sols[src_kidx] = kidx
             size[1][0] = kidx
-
-            sols.append(sol)
             sizes.append(size)
 
         lib.solutions = sols
@@ -532,6 +536,7 @@ def from_full_dataframe(
         lib = None
         sols = []
         sizes = []
+        tuned_sols = {}
         ref_sols = {}
         for _, row in group.iterrows():  # Each size
             lib_path = lib_dir / row["lib"]  # We need the lib.name to load the lib
@@ -547,10 +552,15 @@ def from_full_dataframe(
                     raise ValueError(f"{size_} not found in '{lib_path}'")
 
                 size = copy.deepcopy(size[0])
-                sol = copy.deepcopy(lib.solutions[size[1][0]])
-                sol["SolutionIndex"] = kidx
-                sols.append(sol)
-
+                src_kidx = size[1][0]
+                if src_kidx in tuned_sols:
+                    kidx = tuned_sols[src_kidx]
+                else:
+                    kidx = len(sols)
+                    tuned_sols[src_kidx] = kidx
+                    sol = copy.deepcopy(lib.solutions[src_kidx])
+                    sol["SolutionIndex"] = kidx
+                    sols.append(sol)
             elif row["winner"] == "reference":
                 ref_gsi = int(row["solutionIdx_reference"])
                 if ref_gsi not in match_table:
@@ -572,7 +582,6 @@ def from_full_dataframe(
                     sols.append(sol)
                 else:  # Existing solution, retrieve its index
                     kidx = ref_sols[ref_gsi]
-
             else:
                 raise ValueError(f"Unknown winner type '{row['winner']}' for size {size_}")
 
