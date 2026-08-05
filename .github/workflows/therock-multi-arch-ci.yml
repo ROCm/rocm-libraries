@@ -14,14 +14,19 @@
 
 name: TheRock Multi-Arch CI
 
-# TheRock ref: the resolve_therock_ref job picks one concrete ROCm/TheRock SHA
-# for the whole run. On pull_request events it pins to the tip of TheRock@main
-# as it existed at the PR branch's merge-base time, so the pin stays stable
-# while a PR is authored and only advances when the base branch is merged/
-# rebased in (see .github/scripts/resolve_therock_ref.py). Other events use the
-# live tip of main. The setup job checks that ref out and re-exports it as
+# TEST OVERRIDE: This workflow is temporarily pointed at the fork
+# endurthiabhilash/TheRock@users/aendurth/support-dynamic-subproject-testing-e2e
+# to test cross-repo artifact reuse with a forced changed-project override.
+# TODO(aendurth): Revert all fork refs back to ROCm/TheRock@main after testing.
+#
+# TheRock ref: the resolve_therock_ref job picks one concrete TheRock SHA
+# for the whole run. On pull_request events it pins to the tip of the TheRock
+# branch as it existed at the PR branch's merge-base time, so the pin stays
+# stable while a PR is authored and only advances when the base branch is
+# merged/rebased in (see .github/scripts/resolve_therock_ref.py). Other events
+# use the live tip. The setup job checks that ref out and re-exports it as
 # needs.setup.outputs.ref; every downstream build/test/summary job consumes that
-# one SHA. The `uses: ROCm/TheRock/...@main` lines below are the
+# one SHA. The `uses: .../...@<branch>` lines below are the
 # workflow-definition ref (Actions requires a literal there) and are
 # deliberately separate from the build-source `ref:` inputs.
 
@@ -91,8 +96,8 @@ jobs:
       - name: Checkout TheRock for configure script
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          repository: ROCm/TheRock
-          ref: main
+          repository: endurthiabhilash/TheRock
+          ref: users/aendurth/support-dynamic-subproject-testing-e2e
           path: _therock
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
@@ -101,6 +106,9 @@ jobs:
         id: configure
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          # TEST OVERRIDE: Force rocsolver as changed project to test filtering
+          # TODO(aendurth): Remove after testing cross-repo artifact reuse
+          TEST_OVERRIDE_CHANGED_PROJECTS: "projects/rocsolver"
         run: |
           python3 _therock/build_tools/github_actions/configure_external_repo_ci.py \
             --event-name "${{ github.event_name }}" \
@@ -135,12 +143,18 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          THEROCK_REF_OVERRIDE: ${{ inputs.therock_ref_override || '' }}
+          # TEST OVERRIDE: Pin the whole run to the fork branch tip so the
+          # resolved SHA exists on the fork used by all downstream TheRock jobs.
+          # The override short-circuits merge-base/live-tip resolution and looks
+          # the ref up on THEROCK_REPO. A manual dispatch input still wins.
+          # TODO(aendurth): Remove after testing cross-repo artifact reuse
+          THEROCK_REPO: endurthiabhilash/TheRock
+          THEROCK_REF_OVERRIDE: ${{ inputs.therock_ref_override || 'users/aendurth/support-dynamic-subproject-testing-e2e' }}
         run: python .github/scripts/resolve_therock_ref.py
 
   setup:
     needs: [configure, resolve_therock_ref]
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@main
+    uses: endurthiabhilash/TheRock/.github/workflows/setup_multi_arch.yml@users/aendurth/support-dynamic-subproject-testing-e2e
     with:
       build_variant: "release"
       # Limit GPU families for rocm-libraries CI
@@ -154,7 +168,7 @@ jobs:
       # TODO(geomin12): Enable automatic stage reuse once dry-run mode issues resolved
       prebuilt_stages: ${{ inputs.prebuilt_stages || 'runtime-tests,comm-libs,storage-libs,debug-tools,dctools-core,profiler-apps,media-libs,wsl-rocdxg' }}
       baseline_run_id: ${{ inputs.baseline_run_id || '30989762651' }}
-      repository: ROCm/TheRock
+      repository: endurthiabhilash/TheRock
       # Concrete SHA resolved once by resolve_therock_ref; setup re-exports the
       # checked-out commit as needs.setup.outputs.ref for downstream jobs.
       ref: ${{ needs.resolve_therock_ref.outputs.therock_ref }}
@@ -169,7 +183,7 @@ jobs:
         needs.setup.outputs.enable_build_jobs == 'true' &&
         needs.configure.outputs.skip_tests != 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@main
+    uses: endurthiabhilash/TheRock/.github/workflows/multi_arch_ci_linux.yml@users/aendurth/support-dynamic-subproject-testing-e2e
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
@@ -179,7 +193,7 @@ jobs:
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       # Empty string when run_all_tests=true triggers full test run in downstream workflow
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
-      repository: ROCm/TheRock
+      repository: endurthiabhilash/TheRock
       # Concrete SHA resolved once by setup; do not re-resolve main here.
       ref: ${{ needs.setup.outputs.ref }}
     permissions:
@@ -195,7 +209,7 @@ jobs:
         needs.setup.outputs.enable_build_jobs == 'true' &&
         needs.configure.outputs.skip_tests != 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@main
+    uses: endurthiabhilash/TheRock/.github/workflows/multi_arch_ci_windows.yml@users/aendurth/support-dynamic-subproject-testing-e2e
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.windows_build_config }}
@@ -205,7 +219,7 @@ jobs:
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       # Empty string when run_all_tests=true triggers full test run in downstream workflow
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
-      repository: ROCm/TheRock
+      repository: endurthiabhilash/TheRock
       # Concrete SHA resolved once by setup; do not re-resolve main here.
       ref: ${{ needs.setup.outputs.ref }}
     permissions:
@@ -224,7 +238,7 @@ jobs:
       - name: Checkout TheRock repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          repository: "ROCm/TheRock"
+          repository: "endurthiabhilash/TheRock"
           # Concrete SHA resolved once by setup; do not re-resolve main here.
           ref: ${{ needs.setup.outputs.ref }}
           sparse-checkout: build_tools/github_actions
