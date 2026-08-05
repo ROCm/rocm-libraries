@@ -172,7 +172,7 @@ the API.
 
 `GemmProblem` currently supports:
 
-- F32, F64, I32, complex-F32, and complex-F64 accumulation;
+- F16, BF16, F32, F64, I32, complex-F32, and complex-F64 accumulation;
 - arbitrary runtime storage types supported by the tensor codecs;
 - distinct compute-input types for A and B;
 - default and XFloat32 operand math;
@@ -193,6 +193,11 @@ The optional `BlasGemmBackend` implements the same interface for dense
 F32/F64/complex GEMM and is selected through `GemmRunOptions`.
 The canonical backend computes only selected outputs. Accelerated backends may
 compute all outputs and report the actual count through `GemmRunInfo`.
+
+F16 and BF16 accumulator modes execute with a float host register but quantize
+the product and accumulated sum after each arithmetic step. They therefore
+model low-precision accumulation rather than silently substituting F32
+accumulation.
 
 ## Runtime reference epilogue
 
@@ -295,7 +300,7 @@ The NumPy suite independently checks:
 - affine layout decoding;
 - deterministic generation, logical index ordering, complex component
   recipes, and structured comparison;
-- F32, F64, I32, and complex GEMM against NumPy;
+- F16 stepwise, F32, F64, I32, and complex GEMM against NumPy;
 - mixed FP8-storage/FP4-compute-input quantization;
 - selected-output GEMM and prime-stride selection;
 - forward and ReLU/GELU-gradient epilogues against NumPy; and
