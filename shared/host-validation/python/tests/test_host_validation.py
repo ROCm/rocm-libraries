@@ -325,6 +325,81 @@ class TensorAndGemmTests(unittest.TestCase):
             [0, 3, 6, 9],
         )
 
+    def test_reference_epilogue_matches_numpy(self):
+        values = np.asarray([[-2.0, 1.0], [3.0, -4.0]], dtype=np.float32)
+        bias = np.asarray([1.0, 2.0], dtype=np.float32)
+        result = hv.reference_epilogue(
+            hv.from_numpy(values),
+            hv.ScalarType.Float16,
+            hv.ScalarType.Float32,
+            bias=hv.from_numpy(bias),
+            bias_axis=hv.MatrixAxis.Row,
+            activation=hv.Activation.Relu,
+            auxiliary_output_type=hv.ScalarType.BFloat16,
+            output_scale=2.0,
+            auxiliary_scale=3.0,
+            include_raw_output=True,
+            include_amax=True,
+        )
+        pre_activation = values + bias[:, None]
+        activated = np.maximum(pre_activation, 0.0)
+        np.testing.assert_array_equal(
+            hv.to_numpy(result.output, np.float32), activated * 2.0
+        )
+        np.testing.assert_array_equal(
+            hv.to_numpy(result.raw_output), activated * 2.0
+        )
+        np.testing.assert_array_equal(
+            hv.to_numpy(result.auxiliary_output), pre_activation * 3.0
+        )
+        np.testing.assert_array_equal(
+            hv.to_numpy(result.amax), np.asarray([5.0], dtype=np.float32)
+        )
+
+    def test_reference_gradient_epilogue_matches_numpy(self):
+        gradient = np.asarray([[10.0, 20.0], [30.0, 40.0]], dtype=np.float32)
+        activation_input = np.asarray(
+            [[-1.0, 1.0], [2.0, -2.0]], dtype=np.float32
+        )
+        result = hv.reference_epilogue(
+            hv.from_numpy(gradient),
+            hv.ScalarType.Float32,
+            hv.ScalarType.Float32,
+            activation=hv.Activation.Relu,
+            activation_application=hv.ActivationApplication.Gradient,
+            auxiliary_input=hv.from_numpy(activation_input),
+        )
+        expected = gradient * (activation_input > 0)
+        np.testing.assert_array_equal(hv.to_numpy(result.output), expected)
+
+        gelu = hv.reference_epilogue(
+            hv.from_numpy(gradient),
+            hv.ScalarType.Float32,
+            hv.ScalarType.Float32,
+            activation=hv.Activation.Gelu,
+            activation_application=hv.ActivationApplication.Gradient,
+            auxiliary_input=hv.from_numpy(activation_input),
+        )
+        coefficient0 = np.float32(0.7978845608028654)
+        coefficient1 = np.float32(0.044715)
+        activation_argument = coefficient0 * activation_input * (
+            1.0 + coefficient1 * activation_input * activation_input
+        )
+        gelu_derivative = 0.5 * (1.0 + np.tanh(activation_argument))
+        gelu_derivative += (
+            0.5
+            * activation_input
+            * (1.0 - np.tanh(activation_argument) ** 2)
+            * coefficient0
+            * (1.0 + 3.0 * coefficient1 * activation_input * activation_input)
+        )
+        np.testing.assert_allclose(
+            hv.to_numpy(gelu.output),
+            gradient * gelu_derivative,
+            rtol=5e-6,
+            atol=2e-5,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
