@@ -59,75 +59,246 @@ static bool isWorkgroupBarrier(const StinkyInstruction& inst) {
     return true;
 }
 
+static bool writesScc(const StinkyInstruction& inst) {
+    for (const StinkyRegister& reg : inst.getDestRegs())
+        if (reg.isRegister() && reg.reg.type == RegType::SCC) return true;
+    return false;
+}
+
+static bool readsScc(const StinkyInstruction& inst) {
+    for (const StinkyRegister& reg : inst.getSrcRegs())
+        if (reg.isRegister() && reg.reg.type == RegType::SCC) return true;
+    return false;
+}
+
+// A workgroup barrier that guards a tensor_load, i.e. one InsertClusterBarrierPass
+// will pick as a handshake anchor. `signal` and `wait` are the same node for a legacy
+// single-instruction s_barrier.
+struct GuardingBarrier {
+    DAGNode* signal = nullptr;
+    DAGNode* wait = nullptr;
+};
+
+// One SCC value: the def plus every reader of it inside the region, in program order.
+// `def` is null when the value was defined in an earlier region (its readers can still
+// be moved across a barrier, so it still needs pinning). `liveOut` marks a value with a
+// reader outside the region -- the loop terminator, a later region, or a successor.
+struct SccChain {
+    DAGNode* def = nullptr;
+    std::vector<DAGNode*> readers;
+    bool liveOut = false;
+};
+
+// Mirrors InsertClusterBarrierPass::findPrecedingWorkgroupBarrierSignalInSegment: a
+// tensor_load anchors on the nearest preceding workgroup barrier signal. Segment
+// boundaries (labels, branches, calls) have side effects, so they already end the
+// region -- scanning within the region is the same scan.
+static std::vector<GuardingBarrier> collectGuardingBarriers(DAGNodeList& dagNodes) {
+    std::vector<GuardingBarrier> guarding;
+    GuardingBarrier pending;
+    bool recorded = false;
+
+    for (DAGNode& node : dagNodes) {
+        const StinkyInstruction& inst = *node.inst;
+        if (isWorkgroupBarrier(inst)) {
+            if (isBarrierWait(inst)) {
+                if (pending.signal != nullptr) pending.wait = &node;
+            } else {
+                // A signal (or a legacy s_barrier, which is its own wait) opens a pair.
+                pending.signal = &node;
+                pending.wait = isBarrierSignal(inst) ? nullptr : &node;
+                recorded = false;
+            }
+            continue;
+        }
+        if (recorded || pending.signal == nullptr || !isTensorLoad(inst)) continue;
+        guarding.push_back({pending.signal, pending.wait ? pending.wait : pending.signal});
+        recorded = true;
+    }
+    return guarding;
+}
+
+static std::vector<SccChain> collectSccChains(
+    DAGNodeList& dagNodes, const std::unordered_map<StinkyInstruction*, unsigned>& instToId) {
+    std::vector<SccChain> chains;
+    for (DAGNode& node : dagNodes) {
+        StinkyInstruction& inst = *node.inst;
+        // Read before write: an instruction that does both (s_addc, s_subb) closes the
+        // current value and opens the next one.
+        if (readsScc(inst)) {
+            if (chains.empty()) chains.push_back(SccChain{});
+            chains.back().readers.push_back(&node);
+        }
+        if (!writesScc(inst)) continue;
+
+        SccChain chain;
+        chain.def = &node;
+        chains.push_back(std::move(chain));
+    }
+
+    // Only the region's last SCC def can still be live when the region ends; every
+    // earlier one is killed by the def that follows it. Note getUsers() is a flat, per
+    // instruction list covering every destination -- `s_sub_u32 s0, s0, 1` writes both
+    // an SGPR and SCC, and its SGPR users would otherwise make every such decrement look
+    // live-out -- so it has to be narrowed to the users that actually read SCC.
+    if (!chains.empty() && chains.back().def != nullptr) {
+        SccChain& last = chains.back();
+        for (StinkyInstruction* user : last.def->inst->getUsers()) {
+            if (!readsScc(*user) || instToId.count(user) != 0) continue;
+            last.liveOut = true;
+            break;
+        }
+    }
+    return chains;
+}
+
+// Nodes reachable from \p start by following DAG edges, i.e. everything that cannot be
+// scheduled before it.
+static std::vector<char> reachableFrom(unsigned start,
+                                       const std::vector<std::unordered_set<unsigned>>& dagGraph) {
+    std::vector<char> seen(dagGraph.size(), 0);
+    std::vector<unsigned> stack{start};
+    seen[start] = 1;
+    while (!stack.empty()) {
+        const unsigned cur = stack.back();
+        stack.pop_back();
+        for (unsigned succ : dagGraph[cur]) {
+            if (seen[succ]) continue;
+            seen[succ] = 1;
+            stack.push_back(succ);
+        }
+    }
+    return seen;
+}
+
 // --- Special rule: cluster-barrier SCC protection (ClusterBarrier kernels only) ---
 //
-// InsertClusterBarrierPass runs at kernel scope AFTER this pass. For every
-// tensor_load it finds the nearest preceding `s_barrier_signal -1` in the same
-// segment and expands a handshake around it:
+// InsertClusterBarrierPass runs at kernel scope AFTER this pass. For every tensor_load
+// it finds the nearest preceding `s_barrier_signal -1` in the same segment and expands
+// a handshake at or before it:
 //
 //     s_cmp_eq_u32   sgprWaveIdx, 0
 //     s_cbranch_scc0 label_skipCBPreSignal_<hash>
 //     s_barrier_signal -3
 //   label_skipCBPreSignal_<hash>:
 //
-// planted at or before that barrier's signal. The sequence clobbers SCC, so any SCC
-// value live across the barrier is destroyed. InsertClusterBarrierPass can sometimes
-// rematerialize the producer (findLiveRestorableSccCmpUpstream), but it gives up as
-// soon as another SCC reader sits in between.
+// The sequence clobbers SCC, so an SCC value whose live range spans that barrier is
+// destroyed. The pass can sometimes rematerialize the producer
+// (findLiveRestorableSccCmpUpstream), but it gives up as soon as a second SCC reader
+// sits in between -- exactly the shape an unrolled loop body produces.
 //
-// The value at risk here is the one the region terminator consumes -- the unroll
-// loop's `s_cmp_eq_i32 LoopCounterL, 0` feeding `s_cbranch_scc0`. This rule pins that
-// def below the last workgroup barrier in the region, which is past every possible
-// handshake anchor, so the clobber can never land inside its live range.
+// So no def..last-reader range may contain a guarding barrier. Note what that does and
+// does not forbid: the chain may still schedule wholly before or wholly after the
+// barrier, and may still move as a whole in either direction. Only splitting it is
+// illegal. That is a disjunction, which a DAG edge cannot express -- an edge would fix
+// one side at graph-build time and cost the freedom to hoist. So the common case is
+// enforced dynamically instead: the nodes are tagged here and CDNA5ReadyQueue refuses
+// to issue a guarding barrier while a chain is open.
 //
-// Scope: only the region-boundary (live-out) SCC value. SCC chains that are born and
-// die inside the region can still straddle a barrier; protecting those needs the
-// barrier itself to be modeled as an SCC def+use, which is a separate change.
+// A lock can only work when every reader is free to issue without the barrier going
+// first, so a chain with a reader that depends on a guarding barrier is pinned after it
+// with an ordinary edge instead. Those edges, and the live-out ones below, always run
+// from a lower to a higher program-order id, as does every other edge in the region
+// (the RAW/WAR/WAW loop above only ever links an earlier node to the node it is
+// visiting), so program order stays a valid topological order and the graph stays
+// acyclic.
+//
+// Barriers that do not guard a tensor_load are left alone: the pass plants nothing
+// there, so SCC chains may straddle them at no cost.
 static void applyClusterBarrierSccRule(DAGNodeList& dagNodes,
                                        const std::unordered_map<StinkyInstruction*, unsigned>& instToId,
-                                       const std::map<StinkyRegister, DAGNode*>& lastWrite,
                                        std::vector<std::unordered_set<unsigned>>& dagGraph) {
-    auto itScc = lastWrite.find(StinkyRegister::getSCCRegister());
-    if (itScc == lastWrite.end()) return;
-    DAGNode* sccDef = itScc->second;
+    const std::vector<GuardingBarrier> guarding = collectGuardingBarriers(dagNodes);
+    if (guarding.empty()) return;
 
-    // Live-out when some user sits outside this region -- the terminator that closed
-    // the region, a later region, or a successor block.
-    bool sccLiveOut = false;
-    for (StinkyInstruction* user : sccDef->inst->getUsers()) {
-        if (instToId.count(user) == 0) {
-            sccLiveOut = true;
-            break;
+    for (const GuardingBarrier& barrier : guarding) {
+        barrier.signal->guardingBarrier = true;
+        barrier.wait->guardingBarrier = true;
+    }
+
+    std::vector<std::vector<char>> reach;
+    reach.reserve(guarding.size());
+    for (const GuardingBarrier& barrier : guarding)
+        reach.push_back(reachableFrom(barrier.signal->id, dagGraph));
+
+    unsigned nextChainId = 0;
+    for (const SccChain& chain : collectSccChains(dagNodes, instToId)) {
+        // Nothing reads the value inside the region and nothing outside does either:
+        // it is dead here, so a clobber cannot hurt it.
+        if (chain.readers.empty() && !chain.liveOut) continue;
+
+        DAGNode* first = chain.def ? chain.def : chain.readers.front();
+        DAGNode* last = chain.readers.empty() ? first : chain.readers.back();
+
+        // A live-out value is read past the end of the region (the loop terminator, a
+        // later region, a successor), so there is no reader here for the queue to close
+        // the chain on, and no freedom to preserve either -- that reader is fixed at the
+        // region end. Pin the def after every guarding barrier it already follows.
+        if (chain.liveOut) {
+            for (const GuardingBarrier& barrier : guarding) {
+                if (barrier.wait->id >= first->id) continue;
+                addEdgeById(barrier.wait, first, dagGraph);
+                PASS_DEBUG(std::cerr << "[DAG schedule] cluster-barrier SCC rule: pinned live-out"
+                                     << " chain (dagId=" << first->id << ") after barrier wait"
+                                     << " (dagId=" << barrier.wait->id << ")\n");
+            }
+            continue;
         }
-    }
-    if (!sccLiveOut) return;
 
-    // Only bind when this region actually feeds the pass: a tensor_load preceded by a
-    // workgroup barrier is exactly what makes it plant a handshake.
-    DAGNode* lastWgBarrier = nullptr;
-    bool barrierGuardsTensorLoad = false;
-    for (DAGNode& node : dagNodes) {
-        if (isWorkgroupBarrier(*node.inst))
-            lastWgBarrier = &node;
-        else if (isTensorLoad(*node.inst) && lastWgBarrier != nullptr)
-            barrierGuardsTensorLoad = true;
-    }
-    if (!barrierGuardsTensorLoad) return;
+        bool alreadySplit = false;
+        bool needsLock = false;
+        std::vector<const GuardingBarrier*> pinAfter;
+        for (size_t i = 0; i < guarding.size(); ++i) {
+            const GuardingBarrier& barrier = guarding[i];
+            if (barrier.signal->id > first->id && barrier.signal->id < last->id) {
+                alreadySplit = true;
+                break;
+            }
+            // The def already depends on the barrier, so the whole chain follows it and
+            // there is nothing to keep apart.
+            if (reach[i][first->id]) continue;
 
-    // Forward edge only. The loop-close compare already follows every barrier in
-    // program order, so this never closes a cycle; bail out rather than risk a
-    // topological sort that cannot drain if that ever stops holding.
-    if (lastWgBarrier->id >= sccDef->id) {
-        PASS_DEBUG(std::cerr << "[DAG schedule] live-out SCC def (dagId=" << sccDef->id
-                             << ") precedes the last workgroup barrier (dagId="
-                             << lastWgBarrier->id << "); skipping cluster-barrier SCC rule\n");
-        return;
-    }
+            bool readerDependsOnBarrier = false;
+            for (const DAGNode* reader : chain.readers) {
+                if (!reach[i][reader->id]) continue;
+                readerDependsOnBarrier = true;
+                break;
+            }
+            if (readerDependsOnBarrier)
+                pinAfter.push_back(&barrier);
+            else
+                needsLock = true;
+        }
 
-    addEdgeById(lastWgBarrier, sccDef, dagGraph);
-    PASS_DEBUG(std::cerr << "[DAG schedule] cluster-barrier SCC rule: pinned live-out SCC def"
-                         << " (dagId=" << sccDef->id << ") after workgroup barrier (dagId="
-                         << lastWgBarrier->id << ")\n");
+        if (alreadySplit) {
+            // The incoming order already spans the barrier, so the scheduler is not what
+            // broke it and no ordering it can pick will put it back together.
+            PASS_DEBUG(std::cerr << "[DAG schedule] cluster-barrier SCC rule: chain ["
+                                 << first->id << ".." << last->id
+                                 << "] already spans a guarding barrier; leaving it to the"
+                                    " barrier pass\n");
+            continue;
+        }
+
+        for (const GuardingBarrier* barrier : pinAfter) {
+            if (barrier->wait->id >= first->id) continue;
+            addEdgeById(barrier->wait, first, dagGraph);
+            PASS_DEBUG(std::cerr << "[DAG schedule] cluster-barrier SCC rule: chain [" << first->id
+                                 << ".." << last->id << "] has a reader depending on barrier (dagId="
+                                 << barrier->signal->id << "); pinned after it instead of locking\n");
+        }
+
+        if (!needsLock) continue;
+
+        const unsigned chainId = ++nextChainId;
+        chain.def->sccChainId = chainId;
+        chain.def->sccChainDef = true;
+        chain.def->sccChainReaders = static_cast<unsigned>(chain.readers.size());
+        for (DAGNode* reader : chain.readers) reader->sccChainId = chainId;
+        PASS_DEBUG(std::cerr << "[DAG schedule] cluster-barrier SCC rule: chain [" << first->id
+                             << ".." << last->id << "] locked as chain " << chainId << " ("
+                             << chain.readers.size() << " readers)\n");
+    }
 }
 
 // --- Region scheduler (does NOT move fences) ---
@@ -166,7 +337,7 @@ static void scheduleRegionWithMovableSideEffects(
     if (regionSize == 0) return;
 
     if (readyQueue.getPassContext().getPassFeatureConfig().dagFeatures.clusterBarrier)
-        applyClusterBarrierSccRule(dagNodes, instToId, lastWrite, dagGraph);
+        applyClusterBarrierSccRule(dagNodes, instToId, dagGraph);
 
     // Pre-scan: assign dsReadPriority to each ds_read based on WMMA affinity
     // and DsReadOrder config. Lower priority = pick first.
