@@ -24,10 +24,11 @@
  *
  *******************************************************************************/
 
+#include "utility.hpp"
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <cmath>
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
 #include <hipblaslt/hipblaslt.h>
@@ -35,12 +36,12 @@
 #include <hipblaslt_vector.hpp>
 #include <iostream>
 #include <limits>
+#include <roc/host_validation/adapters/hipblaslt/GroupedGemmDataInitialization.hpp>
+#include <roc/host_validation/adapters/hipblaslt/Types.hpp>
 #include <roc/host_validation/validation.hpp>
 #include <stdexcept>
 #include <string>
 #include <vector>
-#include <roc/host_validation/adapters/hipblaslt/GroupedGemmDataInitialization.hpp>
-#include "utility.hpp"
 
 #ifndef CHECK_HIP_ERROR
 #define CHECK_HIP_ERROR(error)                    \
@@ -885,38 +886,58 @@ int test_hipblaslt(hipDataType                 in_datatype,
                 bool passed = true;
                 for(int i3 = 0; i3 < batch_count[i]; i3++)
                 {
-                    auto invocation
-                        = roc::host_validation::GemmInvocation<Tin, Tin, Tout, Tout, float>{
-                            roc::host_validation::ConstMatrixView<Tin>(
-                                a_ptr + i3 * stride_a[i],
-                                size_t(m[i]),
-                                size_t(k[i]),
-                                a_stride_1[i],
-                                a_stride_2[i]),
-                            roc::host_validation::ConstMatrixView<Tin>(
-                                b_ptr + i3 * stride_b[i],
-                                size_t(k[i]),
-                                size_t(n[i]),
-                                b_stride_1[i],
-                                b_stride_2[i]),
-                            roc::host_validation::ConstMatrixView<Tout>(
-                                c_ptr + i3 * stride_c[i], size_t(m[i]), size_t(n[i]), 1, ldc[i]),
-                            roc::host_validation::MatrixView<Tout>(
-                                d_ptr + i3 * stride_d[i], size_t(m[i]), size_t(n[i]), 1, ldd[i])};
-                    invocation.alpha      = alpha[i];
-                    invocation.beta       = beta[i];
-                    invocation.activation = toHostValidationActivation(actType[i]);
+                    using namespace roc::host_validation;
+                    using namespace roc::host_validation::hipblaslt_adapter;
+                    auto storageElements = [](size_t    rows,
+                                              size_t    columns,
+                                              ptrdiff_t rowStride,
+                                              ptrdiff_t columnStride) {
+                        if(rows == 0 || columns == 0)
+                            return size_t(0);
+                        return size_t(1) + (rows - 1) * size_t(std::abs(rowStride))
+                               + (columns - 1) * size_t(std::abs(columnStride));
+                    };
+
+                    const size_t aElements
+                        = storageElements(size_t(m[i]), size_t(k[i]), a_stride_1[i], a_stride_2[i]);
+                    const size_t bElements
+                        = storageElements(size_t(k[i]), size_t(n[i]), b_stride_1[i], b_stride_2[i]);
+                    const size_t cElements = storageElements(size_t(m[i]), size_t(n[i]), 1, ldc[i]);
+                    const size_t dElements = storageElements(size_t(m[i]), size_t(n[i]), 1, ldd[i]);
+
+                    GemmProblem problem(
+                        GemmOperand(tensorView(a_ptr + i3 * stride_a[i],
+                                               aElements,
+                                               Layout(Shape{size_t(m[i]), size_t(k[i])},
+                                                      {a_stride_1[i], a_stride_2[i]}))),
+                        GemmOperand(tensorView(b_ptr + i3 * stride_b[i],
+                                               bElements,
+                                               Layout(Shape{size_t(k[i]), size_t(n[i])},
+                                                      {b_stride_1[i], b_stride_2[i]}))),
+                        tensorView(c_ptr + i3 * stride_c[i],
+                                   cElements,
+                                   Layout(Shape{size_t(m[i]), size_t(n[i])}, {1, ldc[i]})),
+                        mutableTensorView(d_ptr + i3 * stride_d[i],
+                                          dElements,
+                                          Layout(Shape{size_t(m[i]), size_t(n[i])}, {1, ldd[i]})),
+                        ScalarType::Float32);
+                    problem.epilogue.alpha      = {static_cast<double>(alpha[i]), 0.0};
+                    problem.epilogue.beta       = {static_cast<double>(beta[i]), 0.0};
+                    problem.epilogue.activation = toHostValidationActivation(actType[i]);
                     if(bias_ptr)
-                        invocation.bias = roc::host_validation::ConstVectorView<float>(
-                            bias_ptr, size_t(m[i]));
+                        problem.epilogue.bias
+                            = VectorBinding{TensorView::fromNative<float>(
+                                                Layout::contiguous(Shape{size_t(m[i])}),
+                                                std::span<const float>(bias_ptr, size_t(m[i]))),
+                                            MatrixAxis::Row};
                     if(actType[i] == ActivationType::SWISH)
-                        invocation.activationParameter0 = 1.0f;
+                        problem.epilogue.activationParameter0 = 1.0;
                     else if(actType[i] == ActivationType::CLAMP)
                     {
-                        invocation.activationParameter0 = -1.0f;
-                        invocation.activationParameter1 = 1.0f;
+                        problem.epilogue.activationParameter0 = -1.0;
+                        problem.epilogue.activationParameter1 = 1.0;
                     }
-                    roc::host_validation::referenceGemm(invocation);
+                    referenceGemm(problem);
 
                     const auto comparison = roc::host_validation::compare(
                         roc::host_validation::ConstMatrixView<Tout>(

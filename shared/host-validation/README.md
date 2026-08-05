@@ -12,8 +12,9 @@ comparison used by ROCm library clients and tests.
 - `roc::host-validation`
   - Transitional validation operations layered on the tensor core.
   - Exports `roc/host_validation/validation.hpp`.
-  - GEMM, generation, and comparison template implementations live under
-    `roc/host_validation/detail/` and are not the stable API surface.
+  - Exposes runtime-typed generation, reference GEMM, and comparison.
+  - Implementation headers live under `roc/host_validation/detail/`; consumers
+    include only `validation.hpp`.
 - `roc::host-validation-adapters`
   - Build-tree include surface for product-specific compatibility adapters.
   - Does not add GPU code to the core target.
@@ -111,6 +112,46 @@ Everything else currently exposed through `validation.hpp` or
 `adapters/` is transitional and may be renamed or replaced as the operation
 and runtime scalar-type APIs mature.
 
+## Runtime reference GEMM
+
+The canonical reference-GEMM API is tensor-centric and runtime-typed:
+
+```cpp
+GemmOperand a(TensorView);
+GemmOperand b(TensorView);
+GemmProblem problem(a, b, cView, dView, ScalarType::Float32);
+
+problem.a.computeType = ScalarType::Float8E4M3;  // optional MAC-input quantization
+problem.mathMode = MathMode::XFloat32;           // optional operand math
+problem.epilogue.alpha = {1.0, 0.0};
+problem.epilogue.beta = {0.0, 0.0};
+
+GemmRunInfo run = referenceGemm(problem);
+```
+
+The normalized shapes are A `[M,K]`, B `[K,N]`, and C/D `[M,N]`.
+Transpose, leading dimensions, padding, and adjusted base locations are
+represented by `Layout`; no product transpose or matrix-layout enum crosses
+the API.
+
+`GemmProblem` currently supports:
+
+- F32, F64, complex-F32, and complex-F64 accumulation;
+- arbitrary runtime storage types supported by the tensor codecs;
+- distinct compute-input types for A and B;
+- default and XFloat32 operand math;
+- alpha/beta;
+- explicit row- or column-axis bias and scale-alpha bindings;
+- row scale-A and column scale-B;
+- tensor-backed block scales with independent A/B block sizes;
+- ReLU, GELU, SiLU, and clamp; and
+- canonical execution, backend support queries, fallback reporting, and
+  grouped invocation.
+
+All hipBLASLt/TensileLite call sites that used the former typed
+`GemmInvocation<...>` now construct this runtime API. The typed reference GEMM
+and its function-pointer quantization bridge have been removed.
+
 New non-adapter consumers should need one of only two includes:
 
 ```cpp
@@ -129,6 +170,7 @@ Existing consumer include names may temporarily forward to adapter headers.
 New code should include the stable adapter path directly, for example:
 
 ```cpp
+#include <roc/host_validation/adapters/hipblaslt/Types.hpp>
 #include <roc/host_validation/adapters/tensilelite/Reference.hpp>
 ```
 

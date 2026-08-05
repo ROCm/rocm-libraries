@@ -39,8 +39,9 @@
 #include "unit.hpp"
 #include "utility.hpp"
 #include <cmath>
-#include <hipblaslt/hipblaslt.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
+#include <hipblaslt/hipblaslt.h>
+#include <roc/host_validation/adapters/hipblaslt/Types.hpp>
 #include <roc/host_validation/validation.hpp>
 
 /* ============================================================================================ */
@@ -314,18 +315,36 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
         const ptrdiff_t bRowStride    = transB == HIPBLAS_OP_N ? 1 : static_cast<ptrdiff_t>(ldb);
         const ptrdiff_t bColumnStride = transB == HIPBLAS_OP_N ? static_cast<ptrdiff_t>(ldb) : 1;
 
-        roc::host_validation::GemmInvocation<Ti, Ti, To, To, Tc> invocation{
-            roc::host_validation::ConstMatrixView<Ti>(
-                A_sub, size_t(M), size_t(K), aRowStride, aColumnStride),
-            roc::host_validation::ConstMatrixView<Ti>(
-                B_sub, size_t(K), size_t(N), bRowStride, bColumnStride),
-            roc::host_validation::ConstMatrixView<To>(
-                C_sub, size_t(M), size_t(N), 1, static_cast<ptrdiff_t>(ldc)),
-            roc::host_validation::MatrixView<To>(
-                D_sub, size_t(M), size_t(N), 1, static_cast<ptrdiff_t>(ldd))};
-        invocation.alpha = h_alpha;
-        invocation.beta  = h_beta;
-        roc::host_validation::referenceGemm(invocation);
+        using namespace roc::host_validation;
+        using namespace roc::host_validation::hipblaslt_adapter;
+        auto storageElements
+            = [](size_t rows, size_t columns, ptrdiff_t rowStride, ptrdiff_t columnStride) {
+                  if(rows == 0 || columns == 0)
+                      return size_t(0);
+                  return size_t(1) + (rows - 1) * size_t(std::abs(rowStride))
+                         + (columns - 1) * size_t(std::abs(columnStride));
+              };
+
+        GemmProblem problem(
+            GemmOperand(
+                tensorView(A_sub,
+                           storageElements(size_t(M), size_t(K), aRowStride, aColumnStride),
+                           Layout(Shape{size_t(M), size_t(K)}, {aRowStride, aColumnStride}))),
+            GemmOperand(
+                tensorView(B_sub,
+                           storageElements(size_t(K), size_t(N), bRowStride, bColumnStride),
+                           Layout(Shape{size_t(K), size_t(N)}, {bRowStride, bColumnStride}))),
+            tensorView(C_sub,
+                       storageElements(size_t(M), size_t(N), 1, static_cast<ptrdiff_t>(ldc)),
+                       Layout(Shape{size_t(M), size_t(N)}, {1, static_cast<ptrdiff_t>(ldc)})),
+            mutableTensorView(
+                D_sub,
+                storageElements(size_t(M), size_t(N), 1, static_cast<ptrdiff_t>(ldd)),
+                Layout(Shape{size_t(M), size_t(N)}, {1, static_cast<ptrdiff_t>(ldd)})),
+            scalarType<Tc>());
+        problem.epilogue.alpha = {static_cast<double>(h_alpha), 0.0};
+        problem.epilogue.beta  = {static_cast<double>(h_beta), 0.0};
+        referenceGemm(problem);
     }
 
     // Tolerance: epsilon * factor * K (accumulation over K elements)
