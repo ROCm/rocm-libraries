@@ -1233,6 +1233,11 @@ namespace TensileLite
             } catch (std::invalid_argument const&) {
                 return false;
             }
+            if (backendImplementation != nullptr &&
+                backendImplementation->backend() == GemmBackend::Tiled &&
+                (accumulatorType == ScalarType::Float16 ||
+                 accumulatorType == ScalarType::BFloat16))
+                accumulatorType = ScalarType::Float32;
             if (accumulatorType != ScalarType::Float16 &&
                 accumulatorType != ScalarType::BFloat16 &&
                 accumulatorType != ScalarType::Float32 && accumulatorType != ScalarType::Float64 &&
@@ -1244,8 +1249,12 @@ namespace TensileLite
                 accumulatorType != ScalarType::Float64 &&
                 accumulatorType != ScalarType::Int32)
                 return false;
-            if ((problem.useScaleAB() == "Scalar" || problem.useScaleAB() == "Vector") &&
-                (computeTypeA != typeA || computeTypeB != typeB))
+            const bool preQuantizationScaleA =
+                scalarTypeInfo(typeA).storageBits > scalarTypeInfo(computeTypeA).storageBits;
+            const bool preQuantizationScaleB =
+                scalarTypeInfo(typeB).storageBits > scalarTypeInfo(computeTypeB).storageBits;
+            if (problem.useScaleAB() == "Vector" &&
+                (preQuantizationScaleA || preQuantizationScaleB))
                 return false;
 
             auto scalarValue = [](rocisa::DataType type,
@@ -1316,9 +1325,12 @@ namespace TensileLite
             } catch (std::invalid_argument const&) {
                 return false;
             }
-            if (problem.useScaleAB() == "Scalar")
-                alpha *= scalarFromStorage(alphaType, inputs.scaleA) *
-                         scalarFromStorage(alphaType, inputs.scaleB);
+            if (problem.useScaleAB() == "Scalar") {
+                if (!preQuantizationScaleA)
+                    alpha *= scalarFromStorage(alphaType, inputs.scaleA);
+                if (!preQuantizationScaleB)
+                    alpha *= scalarFromStorage(alphaType, inputs.scaleB);
+            }
 
             std::complex<double> outputScale = {1.0, 0.0};
             if (problem.useScaleCD()) {
@@ -1559,6 +1571,16 @@ namespace TensileLite
                     TensorView(typeB, layoutB, currentBStorage));
                 if (computeTypeA != typeA) operandA.computeType = computeTypeA;
                 if (computeTypeB != typeB) operandB.computeType = computeTypeB;
+                if (problem.useScaleAB() == "Scalar" && preQuantizationScaleA)
+                    operandA.preQuantizationScale = TensorView(
+                        alphaType,
+                        Layout::contiguous(Shape{1}),
+                        storageSpan(alphaType, inputs.scaleA, 1));
+                if (problem.useScaleAB() == "Scalar" && preQuantizationScaleB)
+                    operandB.preQuantizationScale = TensorView(
+                        alphaType,
+                        Layout::contiguous(Shape{1}),
+                        storageSpan(alphaType, inputs.scaleB, 1));
                 operandA.conjugate = aConjugate;
                 operandB.conjugate = bConjugate;
                 std::optional<Tensor> runtimeScaleA;

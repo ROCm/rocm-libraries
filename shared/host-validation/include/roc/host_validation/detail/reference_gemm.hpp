@@ -43,6 +43,7 @@ struct GemmOperand {
 
     TensorView values;
     std::optional<ScalarType> computeType;
+    std::optional<TensorView> preQuantizationScale;
     std::optional<BlockScaleBinding> blockScale;
     bool conjugate = false;
 };
@@ -229,6 +230,16 @@ inline void validateRuntimeGemm(const GemmProblem& problem) {
     };
     validateComputeType(problem.a, "A");
     validateComputeType(problem.b, "B");
+    auto validatePreQuantizationScale = [&](const GemmOperand& operand, const char* name) {
+        if (!operand.preQuantizationScale) return;
+        validateRuntimeVector(*operand.preQuantizationScale, 1, "Reference GEMM", name);
+        if (!complexAccumulator && isComplexScalarType(operand.preQuantizationScale->type()))
+            throw std::invalid_argument(
+                std::string("Reference GEMM real accumulator cannot consume complex ") + name +
+                ".");
+    };
+    validatePreQuantizationScale(problem.a, "A pre-quantization scale");
+    validatePreQuantizationScale(problem.b, "B pre-quantization scale");
 
     if (problem.mathMode == MathMode::XFloat32 && problem.accumulatorType != ScalarType::Float32)
         throw std::invalid_argument("XFloat32 math mode requires a Float32 accumulator.");
@@ -308,12 +319,16 @@ GemmRunInfo referenceRuntimeCanonical(const GemmProblem& problem) {
     };
 
     std::optional<RuntimeVectorReader<Accumulator>> bias;
+    std::optional<RuntimeVectorReader<Accumulator>> preScaleA;
+    std::optional<RuntimeVectorReader<Accumulator>> preScaleB;
     std::optional<RuntimeVectorReader<Accumulator>> scaleAlpha;
     std::optional<RuntimeVectorReader<Accumulator>> scaleA;
     std::optional<RuntimeVectorReader<Accumulator>> scaleB;
     std::optional<RuntimeMatrixReader<Accumulator>> blockScaleA;
     std::optional<RuntimeMatrixReader<Accumulator>> blockScaleB;
     if (problem.epilogue.bias) bias.emplace(problem.epilogue.bias->values);
+    if (problem.a.preQuantizationScale) preScaleA.emplace(*problem.a.preQuantizationScale);
+    if (problem.b.preQuantizationScale) preScaleB.emplace(*problem.b.preQuantizationScale);
     if (problem.epilogue.scaleAlpha) scaleAlpha.emplace(problem.epilogue.scaleAlpha->values);
     if (problem.epilogue.scaleA) scaleA.emplace(*problem.epilogue.scaleA);
     if (problem.epilogue.scaleB) scaleB.emplace(*problem.epilogue.scaleB);
@@ -351,6 +366,8 @@ GemmRunInfo referenceRuntimeCanonical(const GemmProblem& problem) {
                     Accumulator aValue = conjugateIfNeeded(a(row, reduction), problem.a.conjugate);
                     Accumulator bValue =
                         conjugateIfNeeded(b(reduction, column), problem.b.conjugate);
+                    if (preScaleA) aValue *= (*preScaleA)[0];
+                    if (preScaleB) bValue *= (*preScaleB)[0];
                     aValue = operandMath(quantizeA(aValue));
                     bValue = operandMath(quantizeB(bValue));
                     blockSum = addAccumulator(blockSum, multiplyAccumulator(aValue, bValue));
@@ -366,6 +383,8 @@ GemmRunInfo referenceRuntimeCanonical(const GemmProblem& problem) {
             for (size_t reduction = 0; reduction < k; ++reduction) {
                 Accumulator aValue = conjugateIfNeeded(a(row, reduction), problem.a.conjugate);
                 Accumulator bValue = conjugateIfNeeded(b(reduction, column), problem.b.conjugate);
+                if (preScaleA) aValue *= (*preScaleA)[0];
+                if (preScaleB) bValue *= (*preScaleB)[0];
                 aValue = operandMath(quantizeA(aValue));
                 bValue = operandMath(quantizeB(bValue));
                 sum = addAccumulator(sum, multiplyAccumulator(aValue, bValue));
