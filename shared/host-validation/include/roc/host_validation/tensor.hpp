@@ -754,180 +754,148 @@ inline int64_t signExtend(uint32_t value, uint32_t bits) {
     return static_cast<int32_t>((value ^ sign) - sign);
 }
 
-template <typename Target>
-Target decodeScalar(ScalarType type, std::span<const std::byte> storage, ptrdiff_t logicalOffset) {
-    const uint64_t offsetBits = bitOffset(type, logicalOffset);
+template <ScalarType Type, typename Target>
+Target decodeScalarKnown(std::span<const std::byte> storage, ptrdiff_t logicalOffset) {
+    static_assert(Type != ScalarType::Count);
+    const uint64_t offsetBits = bitOffset(Type, logicalOffset);
     const size_t offsetBytes = static_cast<size_t>(offsetBits / 8);
 
-    switch (type) {
-        case ScalarType::Boolean:
-            return static_cast<Target>(readNative<uint8_t>(storage, offsetBytes) != 0);
-        case ScalarType::UInt8:
-            return static_cast<Target>(readNative<uint8_t>(storage, offsetBytes));
-        case ScalarType::Int8:
-            return static_cast<Target>(readNative<int8_t>(storage, offsetBytes));
-        case ScalarType::UInt16:
-            return static_cast<Target>(readNative<uint16_t>(storage, offsetBytes));
-        case ScalarType::Int16:
-            return static_cast<Target>(readNative<int16_t>(storage, offsetBytes));
-        case ScalarType::UInt32:
-            return static_cast<Target>(readNative<uint32_t>(storage, offsetBytes));
-        case ScalarType::Int32:
-            return static_cast<Target>(readNative<int32_t>(storage, offsetBytes));
-        case ScalarType::UInt64:
-            return static_cast<Target>(readNative<uint64_t>(storage, offsetBytes));
-        case ScalarType::Int64:
-            return static_cast<Target>(readNative<int64_t>(storage, offsetBytes));
-        case ScalarType::Float16:
-            return static_cast<Target>(decodeFloat16(readNative<uint16_t>(storage, offsetBytes)));
-        case ScalarType::BFloat16:
-            return static_cast<Target>(decodeBFloat16(readNative<uint16_t>(storage, offsetBytes)));
-        case ScalarType::Float32:
-            return static_cast<Target>(readNative<float>(storage, offsetBytes));
-        case ScalarType::Float64:
-            return static_cast<Target>(readNative<double>(storage, offsetBytes));
-        case ScalarType::ComplexFloat32: {
-            if constexpr (!RuntimeIsComplexV<Target>)
-                throw std::invalid_argument("Complex tensor value requires a complex target.");
-            else {
-                const auto value = readNative<std::complex<float>>(storage, offsetBytes);
-                return Target(value.real(), value.imag());
-            }
+    if constexpr (Type == ScalarType::Boolean)
+        return static_cast<Target>(readNative<uint8_t>(storage, offsetBytes) != 0);
+    else if constexpr (Type == ScalarType::UInt8)
+        return static_cast<Target>(readNative<uint8_t>(storage, offsetBytes));
+    else if constexpr (Type == ScalarType::Int8)
+        return static_cast<Target>(readNative<int8_t>(storage, offsetBytes));
+    else if constexpr (Type == ScalarType::UInt16)
+        return static_cast<Target>(readNative<uint16_t>(storage, offsetBytes));
+    else if constexpr (Type == ScalarType::Int16)
+        return static_cast<Target>(readNative<int16_t>(storage, offsetBytes));
+    else if constexpr (Type == ScalarType::UInt32)
+        return static_cast<Target>(readNative<uint32_t>(storage, offsetBytes));
+    else if constexpr (Type == ScalarType::Int32)
+        return static_cast<Target>(readNative<int32_t>(storage, offsetBytes));
+    else if constexpr (Type == ScalarType::UInt64)
+        return static_cast<Target>(readNative<uint64_t>(storage, offsetBytes));
+    else if constexpr (Type == ScalarType::Int64)
+        return static_cast<Target>(readNative<int64_t>(storage, offsetBytes));
+    else if constexpr (Type == ScalarType::Float16)
+        return static_cast<Target>(decodeFloat16(readNative<uint16_t>(storage, offsetBytes)));
+    else if constexpr (Type == ScalarType::BFloat16)
+        return static_cast<Target>(decodeBFloat16(readNative<uint16_t>(storage, offsetBytes)));
+    else if constexpr (Type == ScalarType::Float32)
+        return static_cast<Target>(readNative<float>(storage, offsetBytes));
+    else if constexpr (Type == ScalarType::Float64)
+        return static_cast<Target>(readNative<double>(storage, offsetBytes));
+    else if constexpr (Type == ScalarType::ComplexFloat32) {
+        if constexpr (!RuntimeIsComplexV<Target>)
+            throw std::invalid_argument("Complex tensor value requires a complex target.");
+        else {
+            const auto value = readNative<std::complex<float>>(storage, offsetBytes);
+            return Target(value.real(), value.imag());
         }
-        case ScalarType::ComplexFloat64: {
-            if constexpr (!RuntimeIsComplexV<Target>)
-                throw std::invalid_argument("Complex tensor value requires a complex target.");
-            else {
-                const auto value = readNative<std::complex<double>>(storage, offsetBytes);
-                return Target(value.real(), value.imag());
-            }
+    } else if constexpr (Type == ScalarType::ComplexFloat64) {
+        if constexpr (!RuntimeIsComplexV<Target>)
+            throw std::invalid_argument("Complex tensor value requires a complex target.");
+        else {
+            const auto value = readNative<std::complex<double>>(storage, offsetBytes);
+            return Target(value.real(), value.imag());
         }
-        case ScalarType::Int4:
-            return static_cast<Target>(signExtend(readPackedBits(storage, offsetBits, 4), 4));
-        case ScalarType::Int12:
-            return static_cast<Target>(signExtend(readPackedBits(storage, offsetBits, 12), 12));
-        case ScalarType::Float4E2M1:
-        case ScalarType::Float6E2M3:
-        case ScalarType::Float6E3M2:
-        case ScalarType::Float8E4M3:
-        case ScalarType::Float8E5M2:
-        case ScalarType::Float8E4M3Fnuz:
-        case ScalarType::Float8E5M2Fnuz:
-        case ScalarType::E5M3:
-            return static_cast<Target>(decodeBinaryFloat(
-                type, readPackedBits(storage, offsetBits, scalarTypeInfo(type).storageBits)));
-        case ScalarType::E8M0: {
-            const uint8_t value = readNative<uint8_t>(storage, offsetBytes);
-            return static_cast<Target>(decodeE8M0(value));
-        }
-        case ScalarType::Count:
-            break;
-    }
-    throw std::invalid_argument("Invalid ScalarType.");
+    } else if constexpr (Type == ScalarType::Int4)
+        return static_cast<Target>(signExtend(readPackedBits(storage, offsetBits, 4), 4));
+    else if constexpr (Type == ScalarType::Int12)
+        return static_cast<Target>(signExtend(readPackedBits(storage, offsetBits, 12), 12));
+    else if constexpr (Type == ScalarType::Float4E2M1 || Type == ScalarType::Float6E2M3 ||
+                       Type == ScalarType::Float6E3M2 || Type == ScalarType::Float8E4M3 ||
+                       Type == ScalarType::Float8E5M2 || Type == ScalarType::Float8E4M3Fnuz ||
+                       Type == ScalarType::Float8E5M2Fnuz || Type == ScalarType::E5M3)
+        return static_cast<Target>(decodeBinaryFloat(
+            Type, readPackedBits(storage, offsetBits, scalarTypeInfo(Type).storageBits)));
+    else if constexpr (Type == ScalarType::E8M0)
+        return static_cast<Target>(decodeE8M0(readNative<uint8_t>(storage, offsetBytes)));
+}
+
+template <typename Target>
+Target decodeScalar(ScalarType type, std::span<const std::byte> storage, ptrdiff_t logicalOffset) {
+    return visitScalarType(type, [&]<typename Tag>() {
+        return decodeScalarKnown<Tag::type, Target>(storage, logicalOffset);
+    });
+}
+
+template <ScalarType Type, typename Source>
+void encodeScalarKnown(std::span<std::byte> storage, ptrdiff_t logicalOffset, Source source) {
+    static_assert(Type != ScalarType::Count);
+    const uint64_t offsetBits = bitOffset(Type, logicalOffset);
+    const size_t offsetBytes = static_cast<size_t>(offsetBits / 8);
+    const auto scalar = realComponent(source);
+
+    if constexpr (Type == ScalarType::Boolean)
+        writeNative<uint8_t>(storage, offsetBytes, scalar != 0 ? 1U : 0U);
+    else if constexpr (Type == ScalarType::UInt8)
+        writeNative<uint8_t>(storage, offsetBytes, static_cast<uint8_t>(scalar));
+    else if constexpr (Type == ScalarType::Int8)
+        writeNative<int8_t>(storage, offsetBytes, static_cast<int8_t>(scalar));
+    else if constexpr (Type == ScalarType::UInt16)
+        writeNative<uint16_t>(storage, offsetBytes, static_cast<uint16_t>(scalar));
+    else if constexpr (Type == ScalarType::Int16)
+        writeNative<int16_t>(storage, offsetBytes, static_cast<int16_t>(scalar));
+    else if constexpr (Type == ScalarType::UInt32)
+        writeNative<uint32_t>(storage, offsetBytes, static_cast<uint32_t>(scalar));
+    else if constexpr (Type == ScalarType::Int32)
+        writeNative<int32_t>(storage, offsetBytes, static_cast<int32_t>(scalar));
+    else if constexpr (Type == ScalarType::UInt64)
+        writeNative<uint64_t>(storage, offsetBytes, static_cast<uint64_t>(scalar));
+    else if constexpr (Type == ScalarType::Int64)
+        writeNative<int64_t>(storage, offsetBytes, static_cast<int64_t>(scalar));
+    else if constexpr (Type == ScalarType::Float16)
+        writeNative<uint16_t>(storage, offsetBytes, encodeFloat16(static_cast<float>(scalar)));
+    else if constexpr (Type == ScalarType::BFloat16)
+        writeNative<uint16_t>(storage, offsetBytes, encodeBFloat16(static_cast<float>(scalar)));
+    else if constexpr (Type == ScalarType::Float32)
+        writeNative<float>(storage, offsetBytes, static_cast<float>(scalar));
+    else if constexpr (Type == ScalarType::Float64)
+        writeNative<double>(storage, offsetBytes, static_cast<double>(scalar));
+    else if constexpr (Type == ScalarType::ComplexFloat32) {
+        if constexpr (RuntimeIsComplexV<Source>)
+            writeNative<std::complex<float>>(
+                storage, offsetBytes,
+                std::complex<float>(static_cast<float>(source.real()),
+                                    static_cast<float>(source.imag())));
+        else
+            writeNative<std::complex<float>>(storage, offsetBytes,
+                                             std::complex<float>(static_cast<float>(scalar), 0.0f));
+    } else if constexpr (Type == ScalarType::ComplexFloat64) {
+        if constexpr (RuntimeIsComplexV<Source>)
+            writeNative<std::complex<double>>(
+                storage, offsetBytes,
+                std::complex<double>(static_cast<double>(source.real()),
+                                     static_cast<double>(source.imag())));
+        else
+            writeNative<std::complex<double>>(
+                storage, offsetBytes, std::complex<double>(static_cast<double>(scalar), 0.0));
+    } else if constexpr (Type == ScalarType::Int4) {
+        const int64_t value =
+            std::max<int64_t>(-8, std::min<int64_t>(7, static_cast<int64_t>(scalar)));
+        writePackedBits(storage, offsetBits, 4, static_cast<uint32_t>(value) & 0xfU);
+    } else if constexpr (Type == ScalarType::Int12) {
+        const int64_t value =
+            std::max<int64_t>(-2048, std::min<int64_t>(2047, static_cast<int64_t>(scalar)));
+        writePackedBits(storage, offsetBits, 12, static_cast<uint32_t>(value) & 0xfffU);
+    } else if constexpr (Type == ScalarType::Float4E2M1 || Type == ScalarType::Float6E2M3 ||
+                         Type == ScalarType::Float6E3M2 || Type == ScalarType::Float8E4M3 ||
+                         Type == ScalarType::Float8E5M2 || Type == ScalarType::Float8E4M3Fnuz ||
+                         Type == ScalarType::Float8E5M2Fnuz || Type == ScalarType::E5M3)
+        writePackedBits(storage, offsetBits, scalarTypeInfo(Type).storageBits,
+                        encodeBinaryFloat(Type, static_cast<float>(scalar)));
+    else if constexpr (Type == ScalarType::E8M0)
+        writeNative<uint8_t>(storage, offsetBytes, encodeE8M0(static_cast<float>(scalar)));
 }
 
 template <typename Source>
 void encodeScalar(ScalarType type, std::span<std::byte> storage, ptrdiff_t logicalOffset,
                   Source source) {
-    const uint64_t offsetBits = bitOffset(type, logicalOffset);
-    const size_t offsetBytes = static_cast<size_t>(offsetBits / 8);
-    const auto scalar = realComponent(source);
-
-    switch (type) {
-        case ScalarType::Boolean:
-            writeNative<uint8_t>(storage, offsetBytes, scalar != 0 ? 1U : 0U);
-            return;
-        case ScalarType::UInt8:
-            writeNative<uint8_t>(storage, offsetBytes, static_cast<uint8_t>(scalar));
-            return;
-        case ScalarType::Int8:
-            writeNative<int8_t>(storage, offsetBytes, static_cast<int8_t>(scalar));
-            return;
-        case ScalarType::UInt16:
-            writeNative<uint16_t>(storage, offsetBytes, static_cast<uint16_t>(scalar));
-            return;
-        case ScalarType::Int16:
-            writeNative<int16_t>(storage, offsetBytes, static_cast<int16_t>(scalar));
-            return;
-        case ScalarType::UInt32:
-            writeNative<uint32_t>(storage, offsetBytes, static_cast<uint32_t>(scalar));
-            return;
-        case ScalarType::Int32:
-            writeNative<int32_t>(storage, offsetBytes, static_cast<int32_t>(scalar));
-            return;
-        case ScalarType::UInt64:
-            writeNative<uint64_t>(storage, offsetBytes, static_cast<uint64_t>(scalar));
-            return;
-        case ScalarType::Int64:
-            writeNative<int64_t>(storage, offsetBytes, static_cast<int64_t>(scalar));
-            return;
-        case ScalarType::Float16:
-            writeNative<uint16_t>(storage, offsetBytes, encodeFloat16(static_cast<float>(scalar)));
-            return;
-        case ScalarType::BFloat16:
-            writeNative<uint16_t>(storage, offsetBytes, encodeBFloat16(static_cast<float>(scalar)));
-            return;
-        case ScalarType::Float32:
-            writeNative<float>(storage, offsetBytes, static_cast<float>(scalar));
-            return;
-        case ScalarType::Float64:
-            writeNative<double>(storage, offsetBytes, static_cast<double>(scalar));
-            return;
-        case ScalarType::ComplexFloat32: {
-            if constexpr (RuntimeIsComplexV<Source>) {
-                writeNative<std::complex<float>>(
-                    storage, offsetBytes,
-                    std::complex<float>(static_cast<float>(source.real()),
-                                        static_cast<float>(source.imag())));
-            } else {
-                writeNative<std::complex<float>>(
-                    storage, offsetBytes, std::complex<float>(static_cast<float>(scalar), 0.0f));
-            }
-            return;
-        }
-        case ScalarType::ComplexFloat64: {
-            if constexpr (RuntimeIsComplexV<Source>) {
-                writeNative<std::complex<double>>(
-                    storage, offsetBytes,
-                    std::complex<double>(static_cast<double>(source.real()),
-                                         static_cast<double>(source.imag())));
-            } else {
-                writeNative<std::complex<double>>(
-                    storage, offsetBytes, std::complex<double>(static_cast<double>(scalar), 0.0));
-            }
-            return;
-        }
-        case ScalarType::Int4: {
-            const int64_t value =
-                std::max<int64_t>(-8, std::min<int64_t>(7, static_cast<int64_t>(scalar)));
-            writePackedBits(storage, offsetBits, 4, static_cast<uint32_t>(value) & 0xfU);
-            return;
-        }
-        case ScalarType::Int12: {
-            const int64_t value =
-                std::max<int64_t>(-2048, std::min<int64_t>(2047, static_cast<int64_t>(scalar)));
-            writePackedBits(storage, offsetBits, 12, static_cast<uint32_t>(value) & 0xfffU);
-            return;
-        }
-        case ScalarType::Float4E2M1:
-        case ScalarType::Float6E2M3:
-        case ScalarType::Float6E3M2:
-        case ScalarType::Float8E4M3:
-        case ScalarType::Float8E5M2:
-        case ScalarType::Float8E4M3Fnuz:
-        case ScalarType::Float8E5M2Fnuz:
-        case ScalarType::E5M3:
-            writePackedBits(storage, offsetBits, scalarTypeInfo(type).storageBits,
-                            encodeBinaryFloat(type, static_cast<float>(scalar)));
-            return;
-        case ScalarType::E8M0: {
-            writeNative<uint8_t>(storage, offsetBytes, encodeE8M0(static_cast<float>(scalar)));
-            return;
-        }
-        case ScalarType::Count:
-            break;
-    }
-    throw std::invalid_argument("Invalid ScalarType.");
+    visitScalarType(type, [&]<typename Tag>() {
+        encodeScalarKnown<Tag::type>(storage, logicalOffset, std::move(source));
+    });
 }
 }  // namespace detail
 
