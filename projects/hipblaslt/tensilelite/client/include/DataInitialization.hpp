@@ -115,6 +115,13 @@ namespace TensileLite
             Count
         };
 
+        bool tryHostValidationInitialize(
+            rocisa::DataType dataType, InitMode mode, void* array, size_t elements);
+        bool tryHostValidationInitialize(rocisa::DataType        dataType,
+                                         InitMode                 mode,
+                                         void*                    array,
+                                         TensorDescriptor const& descriptor);
+
         static int getThreadLocalRandInt()
         {
             return static_cast<int>(
@@ -443,6 +450,9 @@ namespace TensileLite
             template <typename S>
             void initArray(rocisa::DataType dataType, InitMode initMode, void* array, S descriptor)
             {
+                if(tryHostValidationInitialize(dataType, initMode, array, descriptor))
+                    return;
+
                 switch(dataType)
                 {
                 case rocisa::DataType::Float:
