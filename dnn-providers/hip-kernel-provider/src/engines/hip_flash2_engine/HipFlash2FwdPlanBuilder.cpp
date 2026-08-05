@@ -40,7 +40,8 @@ bool HipFlash2FwdPlanBuilder::isApplicable(const Handle& handle,
     {
         archId = getDeviceString(handle.getStream());
         HIP_KERNEL_RETURN_FALSE_IF(archId != "gfx942",
-                                   "Device not supported (actual: " + archId + "); only gfx942 is supported");
+                                   "Device not supported (actual: " + archId
+                                       + "); only gfx942 is supported");
     }
     catch(const std::exception& e)
     {
@@ -71,9 +72,10 @@ bool HipFlash2FwdPlanBuilder::isApplicable(const Handle& handle,
     // K2: reject mask types the kernel does not implement
     {
         const auto maskType = asm_sdpa_engine::plan_utils::getMaskType(attrs);
-        HIP_KERNEL_RETURN_FALSE_IF(maskType != asm_sdpa_engine::plan_utils::MaskType::NO_MASK
-                                       && maskType != asm_sdpa_engine::plan_utils::MaskType::TOP_LEFT_CAUSAL,
-                                   "Only NO_MASK and TOP_LEFT_CAUSAL are supported");
+        HIP_KERNEL_RETURN_FALSE_IF(
+            maskType != asm_sdpa_engine::plan_utils::MaskType::NO_MASK
+                && maskType != asm_sdpa_engine::plan_utils::MaskType::TOP_LEFT_CAUSAL,
+            "Only NO_MASK and TOP_LEFT_CAUSAL are supported");
     }
     HIP_KERNEL_RETURN_FALSE_IF(attrs.seq_len_q_tensor_uid().has_value()
                                    || attrs.seq_len_kv_tensor_uid().has_value(),
