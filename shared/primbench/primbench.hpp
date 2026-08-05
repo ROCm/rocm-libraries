@@ -2017,12 +2017,7 @@ public:
         // Query wall clock rate once (constant per device).
         int device_id;
         PRIMBENCH_CHECK(hipGetDevice(&device_id));
-        int wall_clk_rate_k_hz = 0;
-        PRIMBENCH_CHECK(
-            hipDeviceGetAttribute(&wall_clk_rate_k_hz, hipDeviceAttributeWallClockRate, device_id));
-
-        m_wall_clock_rate
-            = wall_clk_rate_k_hz != 0 ? wall_clk_rate_k_hz : measure_wall_clk_rate_k_hz();
+        m_wall_clock_rate = measure_wall_clk_rate_k_hz();
 
 #endif
     }
