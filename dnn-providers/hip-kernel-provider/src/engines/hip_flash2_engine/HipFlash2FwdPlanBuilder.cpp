@@ -69,6 +69,14 @@ bool HipFlash2FwdPlanBuilder::isApplicable(const Handle& handle,
     HIP_KERNEL_RETURN_FALSE_IF(attrs.page_table_v_tensor_uid(), "page_table_v not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.generate_stats().value_or(false),
                                "LSE stats output not supported");
+    // K2: reject mask types the kernel does not implement
+    {
+        const auto maskType = plan_utils::getMaskType(attrs);
+        HIP_KERNEL_RETURN_FALSE_IF(
+            maskType != plan_utils::MaskType::NO_MASK
+                && maskType != plan_utils::MaskType::TOP_LEFT_CAUSAL,
+            "Only NO_MASK and TOP_LEFT_CAUSAL are supported");
+    }
     HIP_KERNEL_RETURN_FALSE_IF(attrs.seq_len_q_tensor_uid().has_value()
                                    || attrs.seq_len_kv_tensor_uid().has_value(),
                                "variable-length (group) batch mode not supported");
