@@ -31,6 +31,7 @@
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/ir/asm/VgprMsbEncoding.hpp"
 #include "stinkytofu/support/CFGTraversal.hpp"
 #include "stinkytofu/support/LoopDetection.hpp"
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
@@ -335,6 +336,10 @@ static void scheduleRegionWithMovableSideEffects(
         StinkyInstruction* prod = dagNodes[i].inst;
         int bestDeadline = INT_MAX;
 
+        // MSB-affinity tiebreak input (see DAGNode::requiredMsb); -1 = no MSB opinion.
+        auto [msbVal, msbHasVgpr] = computeRequiredMsb(prod);
+        dagNodes[i].requiredMsb = msbHasVgpr ? msbVal : -1;
+
         for (int ruleIdx = 0; ruleIdx < kNumCdna5HazardRules; ++ruleIdx) {
             const HazardRule& rule = kCdna5HazardRules[ruleIdx];
             if (!rule.isProducer(*prod)) continue;
@@ -388,8 +393,12 @@ static void scheduleRegionWithMovableSideEffects(
                 // too late relative to X.
                 const int producerCost =
                     isMatrixInstruction(*prod) ? prod->latencyCycles : prod->issueCycles;
-                bestDeadline =
-                    std::min(bestDeadline, cumCycles[ruleConsumerId] - rule.cycles - producerCost);
+                // rule.cycles == -1: "hoist as far as possible" mode. Force the deadline
+                // to 0 so decidePromote() issues this producer the instant it is free,
+                // maximizing its distance from the consumer instead of targeting a fixed gap.
+                const int deadline =
+                    rule.cycles < 0 ? 0 : cumCycles[ruleConsumerId] - rule.cycles - producerCost;
+                bestDeadline = std::min(bestDeadline, deadline);
             }
         }
 

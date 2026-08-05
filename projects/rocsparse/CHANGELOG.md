@@ -3,12 +3,25 @@
 Documentation for rocSPARSE is available at
 [https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/](https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/).
 
+## (Unreleased) rocSPARSE 5.1.0
+
+### Added
+* Added batched support to the SpMM algorithm `rocsparse_spmm_alg_csr_nnz_split`.
+
+### Resolved issues
+* Fixed `rocsparse_spmm` with the segmented atomic COO algorithm, which failed with `hipErrorInvalidConfiguration` for batch counts exceeding 65535 because the batch dimension of the kernel launch grid exceeded the maximum grid dimension.
+* Fixed `rocsparse_spmm` with the row-split CSR algorithm, which failed with `hipErrorInvalidConfiguration` for batch counts exceeding 65535 because the batch dimension of the kernel launch grid exceeded the maximum grid dimension.
+
 ## (Unreleased) rocSPARSE 5.0.0
 
 ### Added
+* Added the `rocsparse_spmat_scale` generic routine for sparse matrix scaling (`C = alpha * A`). It writes to `C` `alpha` times the values of `A` and does not copy the sparsity pattern (`C` is assumed to already have the same sparsity pattern as `A`). `alpha` is passed as a self-describing scalar dense vector descriptor that can reside in host or device memory, so no temporary storage buffer is required.  In-place operation (`C == A`) is supported.  COO, COO AoS, CSR, CSC, BSR, ELL, Blocked ELL, and SELL formats are supported.
+* Added the `rocsparse_dnvec_descr_create_scalar` auxiliary routine, which creates a size-one dense vector descriptor for a host or device scalar.
 * Added Blocked ELL format support to the `rocsparse_dense_to_sparse` routine, including the new `rocsparse_bell_set_pointers` function to set the Blocked ELL array pointers.
 * Added CSC format support to `rocsparse_spsv` and `rocsparse_sptrsv`.
 * Added CSC format support to `rocsparse_spsm` and `rocsparse_sptrsm`.
+* Added `rocsparse_handle_create` to create a handle associated with a user-provided stream. All internal device memory allocation and initialization are stream-ordered on that stream, so handle creation never blocks the calling thread or other GPU streams.
+* Added `rocsparse_handle_destroy` to destroy a handle created by `rocsparse_handle_create`, with an optional error descriptor argument.
 
 ### Changed
 * `rocsparse_spmm` with CSR/CSC and the default algorithm (`rocsparse_spmm_alg_default` or `rocsparse_spmm_alg_csr`) now automatically selects a load-balanced (nnz-split) kernel for strongly skewed matrices (those containing a single very long row for CSR, or column for transposed CSC). Behavior is unchanged for non-skewed matrices and for explicit algorithm choices (`rocsparse_spmm_alg_csr_row_split`, `rocsparse_spmm_alg_csr_nnz_split`, `rocsparse_spmm_alg_csr_merge_path`).
@@ -19,25 +32,23 @@ Documentation for rocSPARSE is available at
 ### Removed
 * The deprecated `rocsparse_indextype_u16` enum.
 
-### Deprecated
-* Deprecated the `rocsparse_spildlt0_input_diag` enum value. It was used to dump the diagonal `D` of the ILDLT(0) factorization, which is now stored in-place on the diagonal entries of the `L` factor. 
+### Upcoming changes
+* Deprecated the `rocsparse_spildlt0_input_diag` enum value. It was used to dump the diagonal `D` of the ILDLT(0) factorization, which is now stored in-place on the diagonal entries of the `L` factor. It will be removed in a future release.
 
 ## rocSPARSE 4.7.0 for ROCm 7.14
 
 ### Added
 * Added the `rocsparse_spildlt0` routine for incomplete LDL' factorization with zero fill-in (ILDLT(0)) for symmetric (real) or hermitian (complex) sparse matrices in CSR format, with strided batched computations enabled.
 
-### Upcoming changes
-* Deprecated the `rocsparse_indextype_u16` index type. It is  no longer supported and will be removed in a future release. Users should use `rocsparse_indextype_i32` or `rocsparse_indextype_i64` going forward.
-
 ### Known issues
 * The HIP graph capture/launch path for the factorization routines `bsric0`, `bsrilu0`, `csric0` and `csrilu0` can fail with `hipErrorOutOfMemory` at `hipGraphLaunch` on memory-constrained GPUs such as the gfx110X family. The corresponding `graph_test` cases are marked `known_bug` and excluded from the standard test suites until the fix lands.
+
+### Upcoming changes
+* Deprecated the `rocsparse_indextype_u16` index type. It will be removed in a future release. Users should use `rocsparse_indextype_i32` or `rocsparse_indextype_i64` going forward.
 
 ## rocSPARSE 4.6.0 for ROCm 7.13.0
 
 ### Added
-* Added `rocsparse_handle_create` to create a handle associated with a user-provided stream. All internal device memory allocation and initialization are stream-ordered on that stream, so handle creation never blocks the calling thread or other GPU streams.
-* Added `rocsparse_handle_destroy` to destroy a handle created by `rocsparse_handle_create`, with an optional error descriptor argument.
 * Added the `rocsparse_create_const_bsr_descr` routine for creating a const sparse BSR matrix descriptor.
 * Added the `rocsparse_spic0` and `rocsparse_spilu0` routines for incomplete factorizations, with strided batched computations enabled.
 * Added the `rocsparse_sptrsv_descr_create` and the `rocsparse_sptrsv_descr_destroy` routines.

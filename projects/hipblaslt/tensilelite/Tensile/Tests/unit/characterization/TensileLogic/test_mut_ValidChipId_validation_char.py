@@ -219,3 +219,31 @@ def test_validate_chip_id_reports_placement_error(monkeypatch, capsys):
 
     assert V._validateChipId(Path("placed.yaml"), report_path=Path("report.yaml")) is False
     assert capsys.readouterr().err == "Error: bad placement (file: report.yaml)\n"
+
+
+def test_validate_chip_id_accepts_dict_format_logic(tmp_path):
+    logic = tmp_path / "logic.yaml"
+    logic.write_text(
+        "\n".join(
+            [
+                "MinimumRequiredVersion: 5.0.0",
+                "ScheduleName: gfx950",
+                "ArchitectureName: gfx950",
+                "CUCount: 256",
+                "DeviceNames: [Device 75a0]",
+                "ProblemType: {}",
+                "DefaultSolution: {}",
+                "Solutions: []",
+                "IndexOrder: [2, 3, 0, 1]",
+                "ExactLogic: []",
+                "RangeLogic: null",
+                "TileSelectionIndices: null",
+                "PerfMetric: DeviceEfficiency",
+                "LibraryType: Equality",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    assert V._validateChipId(logic, logic_relative_path=Path("gfx950/Equality/logic.yaml")) is True
