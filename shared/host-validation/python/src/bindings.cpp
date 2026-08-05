@@ -138,7 +138,7 @@ PythonEpilogueResult referenceEpilogueOwned(
     std::optional<Tensor> auxiliaryInput, std::optional<ScalarType> auxiliaryOutputType,
     std::optional<Tensor> gateResidual, std::complex<double> outputScale,
     std::complex<double> auxiliaryScale, double activationParameter0, double activationParameter1,
-    bool includeRawOutput, bool includeAmax) {
+    bool includeRawOutput, bool includeAmax, OutputSelection outputSelection) {
     Tensor output(outputType, input.shape());
     std::optional<Tensor> rawOutput;
     std::optional<Tensor> auxiliaryOutput;
@@ -160,6 +160,7 @@ PythonEpilogueResult referenceEpilogueOwned(
     problem.activationApplication = activationApplication;
     problem.activationParameter0 = activationParameter0;
     problem.activationParameter1 = activationParameter1;
+    problem.outputSelection = std::move(outputSelection);
     referenceEpilogue(problem);
     return {
         .output = std::move(output),
@@ -456,7 +457,8 @@ NB_MODULE(_roc_host_validation, module) {
                "output_scale"_a = std::complex<double>(1.0, 0.0),
                "auxiliary_scale"_a = std::complex<double>(1.0, 0.0),
                "activation_parameter0"_a = 0.0, "activation_parameter1"_a = 0.0,
-               "include_raw_output"_a = false, "include_amax"_a = false);
+               "include_raw_output"_a = false, "include_amax"_a = false,
+               "output_selection"_a = OutputSelection::all());
     module.def("reference_sum", &referenceSumOwned, "input"_a, "output_type"_a,
                "accumulator_type"_a, "axes"_a);
 }

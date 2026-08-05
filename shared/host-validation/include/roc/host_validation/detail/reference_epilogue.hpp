@@ -36,6 +36,7 @@ struct EpilogueProblem {
     ActivationApplication activationApplication = ActivationApplication::Forward;
     double activationParameter0 = 0.0;
     double activationParameter1 = 0.0;
+    OutputSelection outputSelection = OutputSelection::all();
 };
 
 struct EpilogueRunInfo {
@@ -105,6 +106,7 @@ inline void validateEpilogue(const EpilogueProblem& problem) {
     }
     if (problem.amax && problem.amax->shape().elementCount() != 1)
         throw std::invalid_argument("Reference epilogue AMax output must contain one element.");
+    (void)problem.outputSelection.selectedCount(problem.output.shape().elementCount());
 }
 
 template <typename Accumulator>
@@ -132,35 +134,48 @@ EpilogueRunInfo referenceEpilogueTyped(const EpilogueProblem& problem) {
 
     const size_t rows = problem.output.shape()[0];
     const size_t columns = problem.output.shape()[1];
-    for (size_t row = 0; row < rows; ++row) {
-        for (size_t column = 0; column < columns; ++column) {
-            Accumulator value = input(row, column);
-            if (bias) {
-                const MatrixAxis axis = problem.bias->axis;
-                value += (*bias)[axis == MatrixAxis::Row ? row : column];
-            }
-
-            if (auxiliaryOutput) auxiliaryOutput->store(row, column, value * auxiliaryScale);
-
-            if (problem.activationApplication == ActivationApplication::Gradient) {
-                const Accumulator factor = activationGradientFactor(
-                    problem.activation, (*auxiliaryInput)(row, column), parameter0, parameter1);
-                value *= factor;
-            } else {
-                value = applyActivation(problem.activation, value, parameter0, parameter1);
-            }
-
-            if (problem.amax)
-                maximum = std::max(maximum, static_cast<Accumulator>(std::abs(value)));
-
-            value *= outputScale;
-            if (rawOutput) rawOutput->store(row, column, value);
-            if (gateResidual) {
-                const Accumulator gate = (*gateResidual)(row, column);
-                value = gate * value + gate;
-            }
-            output.store(row, column, value);
+    auto computeOutput = [&](size_t row, size_t column) {
+        Accumulator value = input(row, column);
+        if (bias) {
+            const MatrixAxis axis = problem.bias->axis;
+            value += (*bias)[axis == MatrixAxis::Row ? row : column];
         }
+
+        if (auxiliaryOutput) auxiliaryOutput->store(row, column, value * auxiliaryScale);
+
+        if (problem.activationApplication == ActivationApplication::Gradient) {
+            const Accumulator factor = activationGradientFactor(
+                problem.activation, (*auxiliaryInput)(row, column), parameter0, parameter1);
+            value *= factor;
+        } else {
+            value = applyActivation(problem.activation, value, parameter0, parameter1);
+        }
+
+        if (problem.amax) maximum = std::max(maximum, static_cast<Accumulator>(std::abs(value)));
+
+        value *= outputScale;
+        if (rawOutput) rawOutput->store(row, column, value);
+        if (gateResidual) {
+            const Accumulator gate = (*gateResidual)(row, column);
+            value = gate * value + gate;
+        }
+        output.store(row, column, value);
+    };
+
+    const size_t logicalElements = problem.output.shape().elementCount();
+    size_t computedElements = 0;
+    if (problem.outputSelection.selectsAll()) {
+        for (size_t row = 0; row < rows; ++row) {
+            for (size_t column = 0; column < columns; ++column) {
+                computeOutput(row, column);
+                ++computedElements;
+            }
+        }
+    } else {
+        const auto selected = problem.outputSelection.indices(logicalElements);
+        for (const size_t logicalIndex : selected)
+            computeOutput(logicalIndex / columns, logicalIndex % columns);
+        computedElements = selected.size();
     }
 
     if (problem.amax) {
@@ -168,7 +183,7 @@ EpilogueRunInfo referenceEpilogueTyped(const EpilogueProblem& problem) {
         problem.amax->storeFrom(std::span<const size_t>(indices), maximum);
     }
 
-    return {.outputElementsComputed = problem.output.shape().elementCount()};
+    return {.outputElementsComputed = computedElements};
 }
 }  // namespace detail
 

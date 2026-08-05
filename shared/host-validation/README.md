@@ -225,7 +225,9 @@ adapter and is not compiled by this component.
 
 An optional gate-residual tensor applies `gate * value + gate` after output
 scaling. `rawOutput`, when requested, captures the scaled value before the
-gate; AMax is measured before output scaling and the gate.
+gate; AMax is measured before output scaling and the gate. `OutputSelection`
+can restrict the elementwise program to the same explicit or prime-stride
+logical subset used by reference GEMM.
 
 ## Runtime tensor reduction
 
@@ -303,7 +305,7 @@ The NumPy suite independently checks:
 - F16 stepwise, F32, F64, I32, and complex GEMM against NumPy;
 - mixed FP8-storage/FP4-compute-input quantization;
 - selected-output GEMM and prime-stride selection;
-- forward and ReLU/GELU-gradient epilogues against NumPy; and
+- full/selected forward and ReLU/GELU-gradient epilogues against NumPy; and
 - multi-axis tensor reduction against `numpy.sum`.
 
 The first binding deliberately copies between NumPy and `Tensor`. A follow-up
