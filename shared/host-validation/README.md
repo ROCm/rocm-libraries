@@ -39,22 +39,29 @@ adapters/tensilelite/
 
 The core layer is GEMM- and AMDGPU-agnostic. It contains only:
 
+- `ScalarType` and `ScalarTypeInfo`;
 - `Shape`;
 - `Layout`;
-- owning `Tensor<T>`;
-- `TensorView<T>`; and
-- `MutableTensorView<T>`.
+- owning, runtime-typed `Tensor`;
+- non-owning, runtime-typed `TensorView`; and
+- non-owning, runtime-typed `MutableTensorView`.
 
 The core public header must not include or name GEMM, HIP, AMDGPU, hipBLASLt,
 TensileLite, rocisa, GTest, BLAS, GPU runtimes, generation policies, comparison
 policies, or validation operations. Product enums, packed types, compatibility
-entry points, and accelerated product backends belong in `adapters/`.
+entry points, and accelerated product backends belong in `adapters/`. Scalar
+formats and their host codecs belong in the core because they are properties
+of tensor storage, not of a validation operation or GPU product.
 
 ## Core API contract
 
 The intended stable C++ surface is:
 
 ```cpp
+scalarTypeInfo(ScalarType);
+scalarTypeName(ScalarType);
+visitScalarType(ScalarType, visitor);
+
 Shape::Shape(std::vector<size_t>);
 Shape::rank();
 Shape::dimensions();
@@ -67,18 +74,38 @@ Layout::strides();
 Layout::offset();
 Layout::elementOffset(indices);
 
-Tensor<T>::Tensor(Shape);
-Tensor<T>::Tensor(Shape, value);
-Tensor<T>::Tensor(Shape, std::vector<T>);
-Tensor<T>::shape();
-Tensor<T>::layout();
-Tensor<T>::values();
-Tensor<T>::view();
-Tensor<T>::mutableView();
+Tensor::Tensor(ScalarType, Shape);
+Tensor::Tensor(ScalarType, Layout);
+Tensor::fromStorage(ScalarType, Layout, std::vector<std::byte>);
+Tensor::fromValues(ScalarType, Shape, values);
+Tensor::fromNativeValues(Shape, nativeValues);
+Tensor::type();
+Tensor::shape();
+Tensor::layout();
+Tensor::storage();
+Tensor::view();
+Tensor::mutableView();
 
-TensorView<T>::at(indices);
-MutableTensorView<T>::at(indices);
+TensorView::fromNative(Layout, nativeValues);
+TensorView::type();
+TensorView::shape();
+TensorView::layout();
+TensorView::storage();
+TensorView::loadAs<T>(indices);
+
+MutableTensorView::fromNative(Layout, nativeValues);
+MutableTensorView::loadAs<T>(indices);
+MutableTensorView::storeFrom(indices, value);
 ```
+
+`Tensor` owns its bytes and has value semantics: copying it performs a deep
+copy. Views never own storage. Layout strides and offsets are measured in
+logical scalar elements, including for sub-byte formats; the tensor layer
+performs the element-to-bit addressing internally.
+
+`visitScalarType` dispatches a runtime scalar type once to a unique semantic
+tag. Operations should dispatch at their boundary and run typed inner loops;
+they should not switch on `ScalarType` for every element.
 
 Everything else currently exposed through `validation.hpp` or
 `adapters/` is transitional and may be renamed or replaced as the operation
@@ -113,7 +140,3 @@ cmake -S shared/host-validation -B build/host-validation \
 cmake --build build/host-validation
 ctest --test-dir build/host-validation --output-on-failure
 ```
-
-The next core API question is whether `Tensor<T>` remains typed or gains a
-runtime scalar type and byte-backed storage. That decision should be made
-before adding the matching Python API and NumPy differential tests.

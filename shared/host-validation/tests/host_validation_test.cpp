@@ -172,6 +172,19 @@ void testGenerationAndComparison() {
             "Matrix generation produced incorrect logical values.");
     require(generated[0] == -1 && generated[3] == -1 && generated[7] == -1,
             "Matrix generation modified padding.");
+
+    Tensor runtimeExpected(ScalarType::Float32, Shape{2, 3});
+    RandomGenerator runtimeGenerator(7);
+    fill(runtimeExpected.mutableView(), DataPattern::UniformInteger, runtimeGenerator, -2, 2);
+    Tensor runtimeObserved = runtimeExpected;
+    runtimeObserved.mutableView().storeFrom({1, 2},
+                                            runtimeExpected.view().loadAs<float>({1, 2}) + 1.0f);
+    const auto runtimeComparison =
+        compare(runtimeObserved.view(), runtimeExpected.view(),
+                {.absoluteTolerance = 0.0, .maxReportedMismatches = 2});
+    require(runtimeComparison.compared == 6 && runtimeComparison.mismatches == 1 &&
+                runtimeComparison.reportedMismatches[0].index == 5,
+            "Runtime tensor generation/comparison mismatch.");
 }
 }  // namespace
 

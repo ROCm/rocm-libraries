@@ -43,12 +43,39 @@ enum class DataPattern {
     Constant,
 };
 
+namespace detail {
+template <typename Function>
+void forEachIndex(const Shape& shape, Function&& function) {
+    const size_t count = shape.elementCount();
+    std::vector<size_t> indices(shape.rank(), 0);
+    for (size_t linearIndex = 0; linearIndex < count; ++linearIndex) {
+        function(std::span<const size_t>(indices), linearIndex);
+        for (size_t dimension = shape.rank(); dimension > 0; --dimension) {
+            const size_t index = dimension - 1;
+            if (++indices[index] < shape[index]) break;
+            indices[index] = 0;
+        }
+    }
+}
+}  // namespace detail
+
 template <typename T, typename Generator>
 void generate(MatrixView<T> destination, Generator&& generator) {
     for (size_t column = 0; column < destination.columns(); ++column) {
         for (size_t row = 0; row < destination.rows(); ++row)
             destination(row, column) = static_cast<T>(generator(row, column));
     }
+}
+
+template <typename Generator>
+void generate(MutableTensorView destination, Generator&& generator) {
+    detail::forEachIndex(destination.shape(), [&](std::span<const size_t> indices,
+                                                  size_t linearIndex) {
+        if constexpr (std::is_invocable_v<Generator&, std::span<const size_t>, size_t>)
+            destination.storeFrom(indices, generator(indices, linearIndex));
+        else
+            destination.storeFrom(indices, generator(indices));
+    });
 }
 
 /**
@@ -140,6 +167,35 @@ void fill(std::span<T> values, DataPattern pattern, RandomGenerator& generator,
         }
         values[index] = static_cast<T>(value);
     }
+}
+
+inline void fill(MutableTensorView destination, DataPattern pattern,
+                 RandomGenerator& generator, double parameter0 = 0.0,
+                 double parameter1 = 0.0) {
+    generate(destination, [&](std::span<const size_t>, size_t linearIndex) {
+        switch (pattern) {
+            case DataPattern::Zero:
+                return 0.0;
+            case DataPattern::RandomInteger:
+                return static_cast<double>(generator.uniformInteger<int>(1, 10));
+            case DataPattern::UniformInteger:
+                return static_cast<double>(generator.uniformInteger<int>(
+                    static_cast<int>(parameter0), static_cast<int>(parameter1)));
+            case DataPattern::AlternatingRandomInteger: {
+                double value = generator.uniformInteger<int>(1, 10);
+                return (linearIndex & 1) == 0 ? -value : value;
+            }
+            case DataPattern::UniformReal:
+                return generator.uniformReal<double>(parameter0, parameter1);
+            case DataPattern::Sine:
+                return std::sin(static_cast<double>(linearIndex));
+            case DataPattern::Cosine:
+                return std::cos(static_cast<double>(linearIndex));
+            case DataPattern::Constant:
+                return parameter0;
+        }
+        throw std::invalid_argument("Unsupported DataPattern.");
+    });
 }
 
 template <typename Destination, typename Source>

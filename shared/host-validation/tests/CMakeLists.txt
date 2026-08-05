@@ -9,6 +9,10 @@ add_executable(host-validation-core-tests tensor_core_test.cpp)
 target_link_libraries(host-validation-core-tests PRIVATE roc::host-validation-core)
 add_test(NAME host-validation-core-tests COMMAND host-validation-core-tests)
 
+add_executable(host-validation-scalar-codec-tests scalar_codec_test.cpp)
+target_link_libraries(host-validation-scalar-codec-tests PRIVATE roc::host-validation-core)
+add_test(NAME host-validation-scalar-codec-tests COMMAND host-validation-scalar-codec-tests)
+
 add_test(
     NAME host-validation-core-boundary
     COMMAND
