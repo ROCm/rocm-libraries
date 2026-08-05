@@ -163,8 +163,10 @@ target_link_libraries(app PRIVATE roc::host-validation-core)
 
 ## Python and NumPy oracle
 
-An optional nanobind module mirrors the runtime scalar, shape, layout, tensor,
-and reference-GEMM concepts:
+The standalone component build includes a required nanobind module that
+mirrors the runtime scalar, shape, layout, tensor, and reference-GEMM
+concepts. Embedding projects may disable the artifact explicitly so that a
+C++ consumer does not acquire a Python build dependency:
 
 ```bash
 source .venv/bin/activate
