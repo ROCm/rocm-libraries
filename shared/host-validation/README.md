@@ -136,6 +136,7 @@ the API.
 - explicit row- or column-axis bias and scale-alpha bindings;
 - row scale-A and column scale-B;
 - tensor-backed block scales with independent A/B block sizes;
+- all, explicit-index, and prime-stride output selection;
 - ReLU, GELU, SiLU, and clamp; and
 - canonical execution, pluggable object-oriented backend implementations,
   backend support queries, fallback reporting, and grouped invocation.
@@ -146,6 +147,8 @@ have been removed.
 
 The optional `BlasGemmBackend` implements the same interface for dense
 F32/F64/complex GEMM and is selected through `GemmRunOptions`.
+The canonical backend computes only selected outputs. Accelerated backends may
+compute all outputs and report the actual count through `GemmRunInfo`.
 
 Consumers should need one of only two includes:
 
@@ -195,8 +198,9 @@ The NumPy suite independently checks:
 - the OCP E8M0 no-zero contract;
 - affine layout decoding;
 - deterministic generation and structured comparison;
-- F32, F64, and complex GEMM against NumPy; and
-- mixed FP8-storage/FP4-compute-input quantization.
+- F32, F64, and complex GEMM against NumPy;
+- mixed FP8-storage/FP4-compute-input quantization; and
+- selected-output GEMM and prime-stride selection.
 
 The first binding deliberately copies between NumPy and `Tensor`. A follow-up
 should expose lifetime-safe non-owning NumPy-backed `TensorView` objects.

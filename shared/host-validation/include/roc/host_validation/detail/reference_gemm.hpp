@@ -10,6 +10,7 @@
 #include <complex>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <roc/host_validation/tensor.hpp>
 #include <span>
@@ -43,6 +44,111 @@ enum class GemmBackend {
     Canonical,
     Tiled,
     Blas,
+};
+
+enum class OutputSelectionKind {
+    All,
+    Strided,
+    Explicit,
+};
+
+class OutputSelection {
+   public:
+    static OutputSelection all() {
+        return {};
+    }
+
+    static OutputSelection strided(size_t first, size_t stride) {
+        if (stride == 0) throw std::invalid_argument("Output selection stride must be nonzero.");
+        OutputSelection result;
+        result.m_kind = OutputSelectionKind::Strided;
+        result.m_first = first;
+        result.m_stride = stride;
+        return result;
+    }
+
+    static OutputSelection explicitIndices(std::vector<size_t> indices) {
+        OutputSelection result;
+        result.m_kind = OutputSelectionKind::Explicit;
+        result.m_indices = std::move(indices);
+        return result;
+    }
+
+    static OutputSelection primeStride(size_t logicalElements, size_t allocatedElements,
+                                       size_t requestedElements) {
+        if (requestedElements == 0 || requestedElements >= logicalElements) return all();
+        const size_t candidate = std::max<size_t>(1, allocatedElements / requestedElements);
+        return strided(0, nextPrime(candidate));
+    }
+
+    OutputSelectionKind kind() const {
+        return m_kind;
+    }
+
+    bool selectsAll() const {
+        return m_kind == OutputSelectionKind::All;
+    }
+
+    std::vector<size_t> indices(size_t logicalElements) const {
+        switch (m_kind) {
+            case OutputSelectionKind::All: {
+                std::vector<size_t> result(logicalElements);
+                for (size_t index = 0; index < logicalElements; ++index) result[index] = index;
+                return result;
+            }
+            case OutputSelectionKind::Strided: {
+                std::vector<size_t> result;
+                if (m_first >= logicalElements) return result;
+                const size_t count = 1 + (logicalElements - 1 - m_first) / m_stride;
+                result.reserve(count);
+                for (size_t index = m_first; index < logicalElements;) {
+                    result.push_back(index);
+                    if (index > std::numeric_limits<size_t>::max() - m_stride) break;
+                    index += m_stride;
+                }
+                return result;
+            }
+            case OutputSelectionKind::Explicit:
+                for (size_t index : m_indices) {
+                    if (index >= logicalElements)
+                        throw std::out_of_range(
+                            "Explicit output selection index exceeds output shape.");
+                }
+                return m_indices;
+        }
+        throw std::invalid_argument("Invalid output selection kind.");
+    }
+
+    size_t selectedCount(size_t logicalElements) const {
+        if (m_kind == OutputSelectionKind::All) return logicalElements;
+        return indices(logicalElements).size();
+    }
+
+   private:
+    static bool isPrime(size_t value) {
+        if (value < 2) return false;
+        if (value % 2 == 0) return value == 2;
+        for (size_t divisor = 3; divisor <= value / divisor; divisor += 2) {
+            if (value % divisor == 0) return false;
+        }
+        return true;
+    }
+
+    static size_t nextPrime(size_t value) {
+        if (value <= 2) return 2;
+        size_t candidate = value % 2 == 0 ? value + 1 : value;
+        while (!isPrime(candidate)) {
+            if (candidate > std::numeric_limits<size_t>::max() - 2)
+                throw std::overflow_error("Prime-stride output selection overflow.");
+            candidate += 2;
+        }
+        return candidate;
+    }
+
+    OutputSelectionKind m_kind = OutputSelectionKind::All;
+    size_t m_first = 0;
+    size_t m_stride = 1;
+    std::vector<size_t> m_indices;
 };
 
 struct VectorBinding {
@@ -92,6 +198,7 @@ struct GemmProblem {
     ScalarType accumulatorType;
     MathMode mathMode = MathMode::Default;
     GemmEpilogue epilogue;
+    OutputSelection outputSelection = OutputSelection::all();
 };
 
 struct GemmSupportInfo {
@@ -471,6 +578,7 @@ inline void validateRuntimeGemm(const GemmProblem& problem) {
         if (complexAccumulator)
             throw std::invalid_argument("Complex reference GEMM does not support block scaling.");
     }
+    (void)problem.outputSelection.selectedCount(problem.d.shape().elementCount());
 }
 
 template <typename Accumulator>
@@ -509,69 +617,84 @@ GemmRunInfo referenceRuntimeCanonical(const GemmProblem& problem) {
     const Accumulator activationParameter1 =
         static_cast<Accumulator>(problem.epilogue.activationParameter1);
 
-    for (size_t row = 0; row < m; ++row) {
-        for (size_t column = 0; column < n; ++column) {
-            Accumulator sum = Accumulator(0);
+    auto computeOutput = [&](size_t row, size_t column) {
+        Accumulator sum = Accumulator(0);
 
-            if (blockScaleA) {
-                const size_t blockSizeA = problem.a.blockScale->blockSize;
-                const size_t blockSizeB = problem.b.blockScale->blockSize;
-                size_t blockBase = 0;
-                while (blockBase < k) {
-                    const size_t remainingA = blockSizeA - blockBase % blockSizeA;
-                    const size_t remainingB = blockSizeB - blockBase % blockSizeB;
-                    const size_t blockLength = std::min({k - blockBase, remainingA, remainingB});
-                    const size_t blockEnd = blockBase + blockLength;
-                    Accumulator blockSum = Accumulator(0);
-                    for (size_t reduction = blockBase; reduction < blockEnd; ++reduction) {
-                        Accumulator aValue =
-                            conjugateIfNeeded(a(row, reduction), problem.a.conjugate);
-                        Accumulator bValue =
-                            conjugateIfNeeded(b(reduction, column), problem.b.conjugate);
-                        aValue = operandMath(quantizeA(aValue));
-                        bValue = operandMath(quantizeB(bValue));
-                        blockSum += aValue * bValue;
-                    }
-
-                    const Accumulator scale = (*blockScaleA)(row, blockBase / blockSizeA) *
-                                              (*blockScaleB)(column, blockBase / blockSizeB);
-                    sum += blockSum * scale;
-                    blockBase = blockEnd;
-                }
-            } else {
-                for (size_t reduction = 0; reduction < k; ++reduction) {
+        if (blockScaleA) {
+            const size_t blockSizeA = problem.a.blockScale->blockSize;
+            const size_t blockSizeB = problem.b.blockScale->blockSize;
+            size_t blockBase = 0;
+            while (blockBase < k) {
+                const size_t remainingA = blockSizeA - blockBase % blockSizeA;
+                const size_t remainingB = blockSizeB - blockBase % blockSizeB;
+                const size_t blockLength = std::min({k - blockBase, remainingA, remainingB});
+                const size_t blockEnd = blockBase + blockLength;
+                Accumulator blockSum = Accumulator(0);
+                for (size_t reduction = blockBase; reduction < blockEnd; ++reduction) {
                     Accumulator aValue = conjugateIfNeeded(a(row, reduction), problem.a.conjugate);
                     Accumulator bValue =
                         conjugateIfNeeded(b(reduction, column), problem.b.conjugate);
                     aValue = operandMath(quantizeA(aValue));
                     bValue = operandMath(quantizeB(bValue));
-                    sum += aValue * bValue;
+                    blockSum += aValue * bValue;
                 }
-            }
 
-            Accumulator effectiveAlpha = alpha;
-            if (scaleA) effectiveAlpha *= (*scaleA)[row];
-            if (scaleB) effectiveAlpha *= (*scaleB)[column];
-            if (scaleAlpha) {
-                const MatrixAxis axis = problem.epilogue.scaleAlpha->axis;
-                effectiveAlpha *= (*scaleAlpha)[axis == MatrixAxis::Row ? row : column];
+                const Accumulator scale = (*blockScaleA)(row, blockBase / blockSizeA) *
+                                          (*blockScaleB)(column, blockBase / blockSizeB);
+                sum += blockSum * scale;
+                blockBase = blockEnd;
             }
-
-            Accumulator result = effectiveAlpha * sum + beta * c(row, column);
-            if (bias) {
-                const MatrixAxis axis = problem.epilogue.bias->axis;
-                result += (*bias)[axis == MatrixAxis::Row ? row : column];
+        } else {
+            for (size_t reduction = 0; reduction < k; ++reduction) {
+                Accumulator aValue = conjugateIfNeeded(a(row, reduction), problem.a.conjugate);
+                Accumulator bValue = conjugateIfNeeded(b(reduction, column), problem.b.conjugate);
+                aValue = operandMath(quantizeA(aValue));
+                bValue = operandMath(quantizeB(bValue));
+                sum += aValue * bValue;
             }
-            result = applyActivation(problem.epilogue.activation, result, activationParameter0,
-                                     activationParameter1);
-            d.store(row, column, result);
         }
+
+        Accumulator effectiveAlpha = alpha;
+        if (scaleA) effectiveAlpha *= (*scaleA)[row];
+        if (scaleB) effectiveAlpha *= (*scaleB)[column];
+        if (scaleAlpha) {
+            const MatrixAxis axis = problem.epilogue.scaleAlpha->axis;
+            effectiveAlpha *= (*scaleAlpha)[axis == MatrixAxis::Row ? row : column];
+        }
+
+        Accumulator result = effectiveAlpha * sum + beta * c(row, column);
+        if (bias) {
+            const MatrixAxis axis = problem.epilogue.bias->axis;
+            result += (*bias)[axis == MatrixAxis::Row ? row : column];
+        }
+        result = applyActivation(problem.epilogue.activation, result, activationParameter0,
+                                 activationParameter1);
+        d.store(row, column, result);
+    };
+
+    const size_t logicalElements = problem.d.shape().elementCount();
+    size_t computedElements = 0;
+    if (problem.outputSelection.selectsAll()) {
+        for (size_t row = 0; row < m; ++row) {
+            for (size_t column = 0; column < n; ++column) {
+                computeOutput(row, column);
+                ++computedElements;
+            }
+        }
+    } else {
+        const auto selected = problem.outputSelection.indices(logicalElements);
+        for (size_t logicalIndex : selected) {
+            const size_t row = logicalIndex / n;
+            const size_t column = logicalIndex % n;
+            computeOutput(row, column);
+        }
+        computedElements = selected.size();
     }
 
     return {
         .backendUsed = GemmBackend::Canonical,
         .fallbackReason = std::nullopt,
-        .outputElementsComputed = problem.d.shape().elementCount(),
+        .outputElementsComputed = computedElements,
     };
 }
 }  // namespace detail

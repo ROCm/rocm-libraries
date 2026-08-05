@@ -304,6 +304,27 @@ class TensorAndGemmTests(unittest.TestCase):
             hv.to_numpy(observed, np.float32), np.asarray([[9.0]], np.float32)
         )
 
+    def test_selected_output_gemm(self):
+        a = np.asarray([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)
+        b = np.asarray([[5.0, 6.0], [7.0, 8.0]], dtype=np.float32)
+        c = np.zeros((2, 2), dtype=np.float32)
+        observed = hv.reference_gemm(
+            hv.from_numpy(a),
+            hv.from_numpy(b),
+            hv.from_numpy(c),
+            hv.ScalarType.Float32,
+            hv.ScalarType.Float32,
+            output_selection=hv.OutputSelection.explicit_indices([0, 3]),
+        )
+        np.testing.assert_array_equal(
+            hv.to_numpy(observed),
+            np.asarray([[19.0, 0.0], [0.0, 50.0]], dtype=np.float32),
+        )
+        self.assertEqual(
+            hv.OutputSelection.prime_stride(10, 10, 3).indices(10),
+            [0, 3, 6, 9],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
