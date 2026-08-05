@@ -81,8 +81,16 @@ def parseArguments():
         type=Path,
         default=None,
         metavar="FILE",
-        help="YAML file listing (path, solution_index) pairs to skip validation for "
-        "(documented exceptions; paths relative to LogicPath)",
+        help="YAML file listing (path, solution_name) pairs to skip validation for "
+        "(documented exceptions; paths relative to LogicPath). solution_name is the "
+        "solution's SolutionNameMin, which is stable across library re-tuning",
+    )
+    argParser.add_argument(
+        "--strict-known-bugs",
+        dest="StrictKnownBugs",
+        action="store_true",
+        help="exit non-zero when a known-bugs entry no longer fails validation "
+        "(a landed fix); use in CI to force removal of stale entries",
     )
     args = argParser.parse_args()
 
