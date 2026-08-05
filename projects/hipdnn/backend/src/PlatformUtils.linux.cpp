@@ -6,8 +6,10 @@
 #if defined(__linux__)
 
 #include "HipdnnException.hpp"
+#include <cerrno>
 #include <dlfcn.h>
 #include <spdlog/fmt/fmt.h>
+#include <sys/random.h>
 #include <sys/utsname.h>
 
 namespace hipdnn_backend::platform_utilities
@@ -77,6 +79,35 @@ std::string getSystemInfo()
         buffer.release,
         buffer.version,
         buffer.machine);
+}
+
+std::array<uint8_t, 16> generateUuidV4()
+{
+    std::array<uint8_t, 16> bytes{};
+    size_t filled = 0;
+    while(filled < bytes.size())
+    {
+        const auto result = getrandom(bytes.data() + filled, bytes.size() - filled, 0);
+        if(result < 0)
+        {
+            if(errno == EINTR)
+            {
+                continue;
+            }
+            throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR,
+                                  "Failed to generate graph UUID using getrandom.");
+        }
+        if(result == 0)
+        {
+            throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR,
+                                  "Failed to generate graph UUID: getrandom returned no data.");
+        }
+        filled += static_cast<size_t>(result);
+    }
+
+    bytes[6] = static_cast<uint8_t>((bytes[6] & 0x0fU) | 0x40U);
+    bytes[8] = static_cast<uint8_t>((bytes[8] & 0x3fU) | 0x80U);
+    return bytes;
 }
 
 }

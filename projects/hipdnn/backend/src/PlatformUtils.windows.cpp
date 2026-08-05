@@ -6,6 +6,7 @@
 #ifdef _WIN32
 
 #include "HipdnnException.hpp"
+#include <bcrypt.h>
 #include <spdlog/fmt/fmt.h>
 #include <winternl.h>
 
@@ -140,6 +141,22 @@ std::string getSystemInfo()
         "Version: unknown, Machine: {}}}",
         computerName.data(),
         architecture);
+}
+
+std::array<uint8_t, 16> generateUuidV4()
+{
+    std::array<uint8_t, 16> bytes{};
+    const auto result = BCryptGenRandom(
+        nullptr, bytes.data(), static_cast<ULONG>(bytes.size()), BCRYPT_USE_SYSTEM_PREFERRED_RNG);
+    if(result < 0)
+    {
+        throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR,
+                              "Failed to generate graph UUID using BCryptGenRandom.");
+    }
+
+    bytes[6] = static_cast<uint8_t>((bytes[6] & 0x0fU) | 0x40U);
+    bytes[8] = static_cast<uint8_t>((bytes[8] & 0x3fU) | 0x80U);
+    return bytes;
 }
 
 }

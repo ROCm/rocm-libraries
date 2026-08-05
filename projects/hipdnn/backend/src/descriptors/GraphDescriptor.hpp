@@ -5,6 +5,7 @@
 
 #include "BackendDescriptor.hpp"
 #include "IGraphOperation.hpp"
+#include <array>
 #include <flatbuffers/detached_buffer.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
@@ -36,6 +37,9 @@ private:
     // Cached serialized graph buffer. Populated by finalize() or buildSerializedGraph().
     // Cleared by invalidateCache() when operations are mutated.
     flatbuffers::DetachedBuffer _graphSerializedBuffer;
+
+    // Stable identity of immutable graph contents. Absent for legacy and unfinalized graphs.
+    std::optional<std::array<uint8_t, 16>> _graphId;
 
     // Source of truth for the graph's operations. Populated via setOperations() (C-API flow)
     // or eagerly from deserializeGraph() (FlatBuffer flow).

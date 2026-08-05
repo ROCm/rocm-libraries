@@ -5,6 +5,7 @@
 #ifndef HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/BatchnormAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/BatchnormBackwardAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/BatchnormInferenceAttributes.hpp>
@@ -151,6 +152,10 @@ inline void to_json(nlohmann::json& graphJson, const data_objects::Graph& graph)
     {
         graphJson["preferred_engine_id"] = graph.preferred_engine_id().value();
     }
+    if(graph.id() != nullptr)
+    {
+        graphJson["id"] = utilities::formatUuid(utilities::toUuidBytes(*graph.id()));
+    }
 }
 
 }
@@ -236,6 +241,16 @@ inline auto to<data_objects::Graph>(flatbuffers::FlatBufferBuilder& builder,
         preferredEngineId = entry["preferred_engine_id"].get<int64_t>();
     }
     const bool isOverrideShapeEnabled = entry.value("is_override_shape_enabled", false);
+    std::unique_ptr<data_objects::Uuid> id;
+    if(entry.contains("id"))
+    {
+        if(!entry["id"].is_string())
+        {
+            throw std::runtime_error("Graph id must be a canonical UUID string");
+        }
+        id = std::make_unique<data_objects::Uuid>(
+            utilities::toFlatbufferUuid(utilities::parseUuid(entry["id"].get<std::string>())));
+    }
 
     auto nodes = toVector<Node>(builder, entry.at("nodes"));
     auto tensors = toVector<TensorAttributes>(builder, entry.at("tensors"));
@@ -247,7 +262,9 @@ inline auto to<data_objects::Graph>(flatbuffers::FlatBufferBuilder& builder,
                                            &tensors,
                                            &nodes,
                                            preferredEngineId,
-                                           isOverrideShapeEnabled);
+                                           isOverrideShapeEnabled,
+                                           nullptr,
+                                           id.get());
 }
 
 }

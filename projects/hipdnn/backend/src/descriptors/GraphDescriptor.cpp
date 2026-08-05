@@ -9,8 +9,10 @@
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnException.hpp"
 #include "NodeFactory.hpp"
+#include "PlatformUtils.hpp"
 
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/Graph.hpp>
 #include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
 #include <logging/GraphLogger.hpp>
@@ -33,8 +35,25 @@ void GraphDescriptor::finalize()
                   HIPDNN_STATUS_BAD_PARAM,
                   "GraphDescriptor::finalize: no operations set");
 
-    invalidateCache();
-    buildSerializedGraph();
+    const bool needsId = !_graphId.has_value();
+    if(needsId)
+    {
+        _graphId = platform_utilities::generateUuidV4();
+    }
+
+    try
+    {
+        invalidateCache();
+        buildSerializedGraph();
+    }
+    catch(...)
+    {
+        if(needsId)
+        {
+            _graphId.reset();
+        }
+        throw;
+    }
 
     HipdnnBackendDescriptorImpl<GraphDescriptor>::finalize();
 
@@ -58,6 +77,11 @@ std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT>
     graph->preferred_engine_id = _preferredEngineId;
     graph->is_override_shape_enabled = _isOverrideShapeEnabled;
     graph->name = _name;
+    if(_graphId.has_value())
+    {
+        graph->id = std::make_unique<hipdnn_flatbuffers_sdk::data_objects::Uuid>(
+            hipdnn_flatbuffers_sdk::utilities::toFlatbufferUuid(*_graphId));
+    }
 
     std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>> seenTensors;
 
@@ -375,6 +399,7 @@ void GraphDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeName,
     if(invalidate)
     {
         invalidateCache();
+        _graphId.reset();
     }
 }
 
@@ -386,9 +411,6 @@ void GraphDescriptor::deserializeGraph(const uint8_t* serializedGraph, size_t gr
     THROW_IF_TRUE(graphByteSize == 0,
                   HIPDNN_STATUS_BAD_PARAM,
                   "GraphDescriptor::deserializeGraph: graphByteSize is 0");
-
-    invalidateCache();
-
     // Parse FlatBuffer and eagerly unpack into _operations
     std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT> graph;
     flatbuffer_utilities::convertSerializedGraphToGraph(serializedGraph, graphByteSize, graph);
@@ -401,7 +423,26 @@ void GraphDescriptor::deserializeGraph(const uint8_t* serializedGraph, size_t gr
         HIPDNN_STATUS_NOT_SUPPORTED,
         "Serialized graph requires a newer engine plugin API version than this build supports.");
 
-    // Extract graph-level attributes
+    std::optional<std::array<uint8_t, 16>> graphId;
+    if(graph->id)
+    {
+        const auto id = hipdnn_flatbuffers_sdk::utilities::toUuidBytes(*graph->id);
+        THROW_IF_FALSE(hipdnn_flatbuffers_sdk::utilities::isUuidV4(id),
+                       HIPDNN_STATUS_BAD_PARAM,
+                       "Serialized graph id must be an RFC 4122 version 4 UUID.");
+        graphId = id;
+    }
+
+    auto tensorMap = NodeFactory::buildTensorMap(graph->tensors);
+    std::vector<std::shared_ptr<IBackendDescriptor>> unpacked;
+    unpacked.reserve(graph->nodes.size());
+    for(const auto& nodeT : graph->nodes)
+    {
+        unpacked.push_back(NodeFactory::createOperationFromNode(*nodeT, tensorMap));
+    }
+
+    // Commit only after every validation and conversion succeeds.
+    invalidateCache();
     _computeDataType = graph->compute_data_type;
     _intermediateDataType = graph->intermediate_data_type;
     _ioDataType = graph->io_data_type;
@@ -410,15 +451,7 @@ void GraphDescriptor::deserializeGraph(const uint8_t* serializedGraph, size_t gr
     _isRuntimePassByValueEnabled = requiredVersion >= hipdnn_data_sdk::utilities::Version{
                                        hipdnn_plugin_sdk::K_PASS_BY_VALUE_MIN_API_VERSION};
     _name = graph->name;
-
-    // Populate _operations from the deserialized graph nodes
-    auto tensorMap = NodeFactory::buildTensorMap(graph->tensors);
-    std::vector<std::shared_ptr<IBackendDescriptor>> unpacked;
-    unpacked.reserve(graph->nodes.size());
-    for(const auto& nodeT : graph->nodes)
-    {
-        unpacked.push_back(NodeFactory::createOperationFromNode(*nodeT, tensorMap));
-    }
+    _graphId = graphId;
     _operations = std::move(unpacked);
 }
 

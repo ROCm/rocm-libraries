@@ -6,15 +6,19 @@
 #include <flatbuffers/flatbuffer_builder.h>
 #include <gtest/gtest.h>
 
+#include <array>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/Common.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/Graph.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/TensorAttributes.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+#include <string>
+#include <vector>
 
 using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -58,6 +62,90 @@ void toJsonAndBackTestSuite(const hipdnn_flatbuffers_sdk::data_objects::Graph* g
 }
 
 } // namespace
+
+TEST(TestUuid, FormatsAndParsesCanonicalText)
+{
+    const auto bytes
+        = hipdnn_flatbuffers_sdk::utilities::parseUuid("01234567-89AB-4DEF-8123-456789ABCDEF");
+    EXPECT_EQ(hipdnn_flatbuffers_sdk::utilities::formatUuid(bytes),
+              "01234567-89ab-4def-8123-456789abcdef");
+    EXPECT_TRUE(hipdnn_flatbuffers_sdk::utilities::isUuidV4(bytes));
+
+    const auto flatbufferUuid = hipdnn_flatbuffers_sdk::utilities::toFlatbufferUuid(bytes);
+    EXPECT_EQ(hipdnn_flatbuffers_sdk::utilities::toUuidBytes(flatbufferUuid), bytes);
+}
+
+TEST(TestUuid, RejectsMalformedOrNonV4Text)
+{
+    const std::vector<std::string> invalidIds{
+        "",
+        "01234567-89ab-4def-8123-456789abcde",
+        "01234567_89ab-4def-8123-456789abcdef",
+        "g1234567-89ab-4def-8123-456789abcdef",
+        "01234567-89ab-3def-8123-456789abcdef",
+        "01234567-89ab-4def-4123-456789abcdef",
+        "00000000-0000-0000-0000-000000000000",
+    };
+
+    for(const auto& id : invalidIds)
+    {
+        EXPECT_THROW((void)hipdnn_flatbuffers_sdk::utilities::parseUuid(id), std::invalid_argument)
+            << id;
+    }
+}
+
+TEST(TestJson, GraphUuidRoundTripsAsCanonicalString)
+{
+    auto builder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
+    auto graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(builder.GetBufferPointer());
+    const auto id
+        = hipdnn_flatbuffers_sdk::utilities::parseUuid("01234567-89AB-4DEF-8123-456789ABCDEF");
+    const auto uuid = hipdnn_flatbuffers_sdk::utilities::toFlatbufferUuid(id);
+
+    auto graphT = std::unique_ptr<GraphT>(graph->UnPack());
+    graphT->id = std::make_unique<Uuid>(uuid);
+    flatbuffers::FlatBufferBuilder identifiedBuilder;
+    identifiedBuilder.Finish(Graph::Pack(identifiedBuilder, graphT.get()));
+    const auto* identifiedGraph = GetGraph(identifiedBuilder.GetBufferPointer());
+
+    const nlohmann::json graphJson = *identifiedGraph;
+    ASSERT_TRUE(graphJson.contains("id"));
+    EXPECT_EQ(graphJson.at("id"), "01234567-89ab-4def-8123-456789abcdef");
+
+    flatbuffers::FlatBufferBuilder roundTripBuilder;
+    roundTripBuilder.Finish(hipdnn_flatbuffers_sdk::json::to<Graph>(roundTripBuilder, graphJson));
+    const auto* roundTripped = GetGraph(roundTripBuilder.GetBufferPointer());
+    ASSERT_NE(roundTripped->id(), nullptr);
+    EXPECT_EQ(hipdnn_flatbuffers_sdk::utilities::toUuidBytes(*roundTripped->id()), id);
+}
+
+TEST(TestJson, LegacyGraphOmitsUuidAndStillRoundTrips)
+{
+    auto builder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
+    const auto* graph = GetGraph(builder.GetBufferPointer());
+    const nlohmann::json graphJson = *graph;
+    EXPECT_FALSE(graphJson.contains("id"));
+
+    flatbuffers::FlatBufferBuilder roundTripBuilder;
+    roundTripBuilder.Finish(hipdnn_flatbuffers_sdk::json::to<Graph>(roundTripBuilder, graphJson));
+    EXPECT_EQ(GetGraph(roundTripBuilder.GetBufferPointer())->id(), nullptr);
+}
+
+TEST(TestJson, RejectsInvalidGraphUuid)
+{
+    auto builder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
+    const auto* graph = GetGraph(builder.GetBufferPointer());
+    auto graphJson = nlohmann::json(*graph);
+
+    for(const auto& id :
+        nlohmann::json::array({42, "not-a-uuid", "01234567-89ab-3def-8123-456789abcdef"}))
+    {
+        graphJson["id"] = id;
+        flatbuffers::FlatBufferBuilder invalidBuilder;
+        EXPECT_THROW((void)hipdnn_flatbuffers_sdk::json::to<Graph>(invalidBuilder, graphJson),
+                     std::exception);
+    }
+}
 
 TEST(TestJson, GraphToJsonAndBack)
 {

@@ -133,17 +133,29 @@ TEST_F(TestGraphLogger, GraphLoggedWhenEnabled)
     EXPECT_TRUE(j.contains("name"));
 }
 
-TEST_F(TestGraphLogger, DuplicateGraphNotLoggedTwice)
+TEST_F(TestGraphLogger, IndependentlyFinalizedGraphsAreLoggedSeparately)
 {
     hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_GRAPH_DIR", _tempDirStr.c_str());
     hipdnn_backend::logging::loggerShutdown();
 
-    // Finalize the same graph twice
+    // Equivalent graph contents represent distinct finalized graph identities.
     auto descriptor1 = createAndFinalizeGraph();
     auto descriptor2 = createAndFinalizeGraph();
 
     auto jsonFiles = getJsonFilesInDir(_tempDir);
-    EXPECT_EQ(jsonFiles.size(), 1u);
+    EXPECT_EQ(jsonFiles.size(), 2u);
+}
+
+TEST_F(TestGraphLogger, ReLoggingSameFinalizedGraphIsDeduplicated)
+{
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_GRAPH_DIR", _tempDirStr.c_str());
+    hipdnn_backend::logging::loggerShutdown();
+
+    auto descriptor = createAndFinalizeGraph();
+    const auto serialized = descriptor.getSerializedGraph();
+    logging::GraphLogger::logGraph(static_cast<const uint8_t*>(serialized.ptr), serialized.size);
+
+    EXPECT_EQ(getJsonFilesInDir(_tempDir).size(), 1u);
 }
 
 TEST_F(TestGraphLogger, DifferentGraphsLoggedSeparately)
