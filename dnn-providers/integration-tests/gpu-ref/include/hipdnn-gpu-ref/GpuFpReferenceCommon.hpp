@@ -100,153 +100,156 @@ struct HipDeviceBuffer
 
 } // namespace detail
 
-class GpuFpReferenceTensor
+namespace gpu_fp_reference_tensor
 {
+static constexpr unsigned int BLOCK_SIZE = 256;
 
-public:
-    static constexpr unsigned int BLOCK_SIZE = 256;
-
-    template <class T>
-    static void fillWithRandomValues(hipdnn_data_sdk::utilities::TensorBase<T>& tensor,
-                                     T minValue,
-                                     T maxValue,
-                                     unsigned int seed)
-    {
 #if defined(USE_ROCRAND)
-        gpuFillWithRandomValues(tensor, minValue, maxValue, seed);
-#else
-        tensor.fillWithRandomValues(minValue, maxValue, seed);
-#endif
-    }
-
-private:
-#if defined(USE_ROCRAND)
-
-    template <class T>
-    static void gpuFillWithRandomValues(hipdnn_data_sdk::utilities::TensorBase<T>& tensor,
-                                        T minValue,
-                                        T maxValue,
-                                        unsigned int seed)
+template <class T>
+static void
+    launchScaleUniform(const void* srcPtr, void* dstPtr, size_t count, T minValue, T maxValue)
+{
+    if(count == 0)
     {
-        const auto count = tensor.elementCount();
-        auto* dstPtr = tensor.memory().deviceData();
-
-        const detail::RocRandGenerator gen(ROCRAND_RNG_PSEUDO_XORWOW);
-
-        detail::throwOnRocRandError(rocrand_set_seed(gen.generator, seed), "rocrand_set_seed");
-
-        // Launch the appropriate rocrand_generate_uniform function based on the data type
-        if constexpr(std::is_same_v<T, hipdnn_data_sdk::types::bfloat16>)
-        {
-            const detail::HipDeviceBuffer<float> scratch(count);
-
-            detail::throwOnRocRandError(
-                rocrand_generate_uniform(gen.generator, scratch.data, count),
-                "rocrand_generate_uniform");
-
-            launchScaleUniform<T>(scratch.data, dstPtr, count, minValue, maxValue);
-        }
-        else if constexpr(std::is_same_v<T, double>)
-        {
-            detail::throwOnRocRandError(
-                rocrand_generate_uniform_double(gen.generator, static_cast<double*>(dstPtr), count),
-                "rocrand_generate_uniform_double");
-
-            launchScaleUniform<T>(dstPtr, dstPtr, count, minValue, maxValue);
-        }
-        else if constexpr(std::is_same_v<T, hipdnn_data_sdk::types::half>)
-        {
-            detail::throwOnRocRandError(
-                rocrand_generate_uniform_half(gen.generator, static_cast<half*>(dstPtr), count),
-                "rocrand_generate_uniform_half");
-
-            launchScaleUniform<T>(dstPtr, dstPtr, count, minValue, maxValue);
-        }
-        else // float or other unsupported types
-        {
-            static_assert(std::is_same_v<T, float>, "Unsupported type for gpuFillWithRandomValues");
-
-            detail::throwOnRocRandError(
-                rocrand_generate_uniform(gen.generator, static_cast<float*>(dstPtr), count),
-                "rocrand_generate_uniform");
-
-            launchScaleUniform<T>(dstPtr, dstPtr, count, minValue, maxValue);
-        }
-
-        tensor.memory().markDeviceModified();
+        return;
     }
 
-    template <class T>
-    static void
-        launchScaleUniform(const void* srcPtr, void* dstPtr, size_t count, T minValue, T maxValue)
+    // For bfloat16, we use float as the source type as we generate random floats
+    // and then convert them to bfloat16
+    using SrcType
+        = std::conditional_t<std::is_same_v<T, hipdnn_data_sdk::types::bfloat16>, float, T>;
+
+    const std::vector<std::string> defines{
+        std::string("-DTARGET_TYPE=") + HipRtcTypeName<T>::VALUE,
+        std::string("-DSOURCE_TYPE=") + HipRtcTypeName<SrcType>::VALUE,
+        std::string("-DCOMPUTE_TYPE=") + HipRtcTypeName<double>::VALUE};
+
+    auto& compiler = GpuRefKernelCompiler::instance();
+    const auto& kernel = compiler.getOrCompile("GpuRefScaleUniform.cpp", defines, "ScaleUniform");
+
+    ScaleUniformArgs args{srcPtr,
+                          dstPtr,
+                          static_cast<long long>(count),
+                          static_cast<double>(minValue),
+                          static_cast<double>(maxValue)};
+    size_t argsSize = sizeof(args);
+
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays)
+    void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER,
+                      &args,
+                      HIP_LAUNCH_PARAM_BUFFER_SIZE,
+                      &argsSize,
+                      HIP_LAUNCH_PARAM_END};
+
+    // Check the device limits for grid size
+    int deviceId;
+    throwOnHipError(hipGetDevice(&deviceId), "hipGetDevice failed");
+
+    hipDeviceProp_t deviceProps;
+    throwOnHipError(hipGetDeviceProperties(&deviceProps, deviceId),
+                    "hipGetDeviceProperties failed");
+
+    const size_t gridSize = (count + BLOCK_SIZE - 1) / BLOCK_SIZE;
+
+    if(gridSize > static_cast<size_t>(deviceProps.maxGridSize[0]))
     {
-        if(count == 0)
-        {
-            return;
-        }
-
-        // For bfloat16, we use float as the source type as we generate random floats
-        // and then convert them to bfloat16
-        using SrcType
-            = std::conditional_t<std::is_same_v<T, hipdnn_data_sdk::types::bfloat16>, float, T>;
-
-        const std::vector<std::string> defines{
-            std::string("-DTARGET_TYPE=") + HipRtcTypeName<T>::VALUE,
-            std::string("-DSOURCE_TYPE=") + HipRtcTypeName<SrcType>::VALUE,
-            std::string("-DCOMPUTE_TYPE=") + HipRtcTypeName<double>::VALUE};
-
-        auto& compiler = GpuRefKernelCompiler::instance();
-        const auto& kernel
-            = compiler.getOrCompile("GpuRefScaleUniform.cpp", defines, "ScaleUniform");
-
-        ScaleUniformArgs args{srcPtr,
-                              dstPtr,
-                              static_cast<long long>(count),
-                              static_cast<double>(minValue),
-                              static_cast<double>(maxValue)};
-        size_t argsSize = sizeof(args);
-
-        // NOLINTNEXTLINE(modernize-avoid-c-arrays)
-        void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER,
-                          &args,
-                          HIP_LAUNCH_PARAM_BUFFER_SIZE,
-                          &argsSize,
-                          HIP_LAUNCH_PARAM_END};
-
-        // Check the device limits for grid size
-        int deviceId;
-        throwOnHipError(hipGetDevice(&deviceId), "hipGetDevice failed");
-
-        hipDeviceProp_t deviceProps;
-        throwOnHipError(hipGetDeviceProperties(&deviceProps, deviceId),
-                        "hipGetDeviceProperties failed");
-
-        const size_t gridSize = (count + BLOCK_SIZE - 1) / BLOCK_SIZE;
-
-        if(gridSize > static_cast<size_t>(deviceProps.maxGridSize[0]))
-        {
-            throw std::runtime_error("Grid size exceeds device limit: " + std::to_string(gridSize)
-                                     + " > " + std::to_string(deviceProps.maxGridSize[0]));
-        }
-
-        throwOnHipError(hipModuleLaunchKernel(kernel.function(),
-                                              static_cast<unsigned int>(gridSize),
-                                              1,
-                                              1,
-                                              BLOCK_SIZE,
-                                              1,
-                                              1,
-                                              0,
-                                              nullptr,
-                                              nullptr,
-                                              config),
-                        "hipModuleLaunchKernel failed");
-        throwOnHipError(hipDeviceSynchronize(), "hipDeviceSynchronize failed");
+        throw std::runtime_error("Grid size exceeds device limit: " + std::to_string(gridSize)
+                                 + " > " + std::to_string(deviceProps.maxGridSize[0]));
     }
 
+    throwOnHipError(hipModuleLaunchKernel(kernel.function(),
+                                          static_cast<unsigned int>(gridSize),
+                                          1,
+                                          1,
+                                          BLOCK_SIZE,
+                                          1,
+                                          1,
+                                          0,
+                                          nullptr,
+                                          nullptr,
+                                          config),
+                    "hipModuleLaunchKernel failed");
+    throwOnHipError(hipDeviceSynchronize(), "hipDeviceSynchronize failed");
+}
+
+template <class T>
+static void gpuFillWithRandomValues(hipdnn_data_sdk::utilities::TensorBase<T>& tensor,
+                                    T minValue,
+                                    T maxValue,
+                                    unsigned int seed)
+{
+    tensor.memory().markDeviceModified();
+
+    const auto count = tensor.elementCount();
+    auto* dstPtr = tensor.memory().deviceData();
+
+    const detail::RocRandGenerator gen(ROCRAND_RNG_PSEUDO_DEFAULT);
+
+    detail::throwOnRocRandError(rocrand_set_seed(gen.generator, seed), "rocrand_set_seed");
+
+    // Launch the appropriate rocrand_generate_uniform function based on the data type
+    if constexpr(std::is_same_v<T, hipdnn_data_sdk::types::bfloat16>)
+    {
+        const detail::HipDeviceBuffer<float> scratch(count);
+
+        detail::throwOnRocRandError(rocrand_generate_uniform(gen.generator, scratch.data, count),
+                                    "rocrand_generate_uniform");
+
+        launchScaleUniform<T>(scratch.data, dstPtr, count, minValue, maxValue);
+    }
+    else if constexpr(std::is_same_v<T, double>)
+    {
+        detail::throwOnRocRandError(
+            rocrand_generate_uniform_double(gen.generator, static_cast<double*>(dstPtr), count),
+            "rocrand_generate_uniform_double");
+
+        if(minValue != 0.0 || maxValue != 1.0)
+        {
+            launchScaleUniform<T>(dstPtr, dstPtr, count, minValue, maxValue);
+        }
+    }
+    else if constexpr(std::is_same_v<T, hipdnn_data_sdk::types::half>)
+    {
+        detail::throwOnRocRandError(
+            rocrand_generate_uniform_half(gen.generator, static_cast<half*>(dstPtr), count),
+            "rocrand_generate_uniform_half");
+
+        if(minValue != static_cast<hipdnn_data_sdk::types::half>(0.0f)
+           || maxValue != static_cast<hipdnn_data_sdk::types::half>(1.0f))
+        {
+            launchScaleUniform<T>(dstPtr, dstPtr, count, minValue, maxValue);
+        }
+    }
+    else // float or other unsupported types
+    {
+        static_assert(std::is_same_v<T, float>, "Unsupported type for gpuFillWithRandomValues");
+
+        detail::throwOnRocRandError(
+            rocrand_generate_uniform(gen.generator, static_cast<float*>(dstPtr), count),
+            "rocrand_generate_uniform");
+
+        if(minValue != 0.0f || maxValue != 1.0f)
+        {
+            launchScaleUniform<T>(dstPtr, dstPtr, count, minValue, maxValue);
+        }
+    }
+}
 #endif // USE_ROCRAND
 
-}; // class GpuFpReferenceTensor
+template <class T>
+static void fillWithRandomValues(hipdnn_data_sdk::utilities::TensorBase<T>& tensor,
+                                 T minValue,
+                                 T maxValue,
+                                 unsigned int seed = std::random_device{}())
+{
+#if defined(USE_ROCRAND)
+    gpuFillWithRandomValues(tensor, minValue, maxValue, seed);
+#else
+    tensor.fillWithRandomValues(minValue, maxValue, seed);
+#endif
+}
+
+}; // namespace gpu_fp_reference_tensor
 
 } // namespace common
 

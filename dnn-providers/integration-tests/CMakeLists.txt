@@ -58,7 +58,14 @@ endif()
 
 option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
 
-option(USE_ROCRAND "Use rocRAND for random GPU data generation" ON)
+set(RANDOMIZATION_LIBRARY "rocrand"  CACHE STRING "Name of the randomization library")
+
+# Derive USE_ROCRAND as a boolean based on the RANDOMIZATION_LIBRARY value
+if(RANDOMIZATION_LIBRARY STREQUAL "rocrand")
+    set(USE_ROCRAND TRUE)
+else()
+    set(USE_ROCRAND FALSE)
+endif()
 
 include(GNUInstallDirs)
 include(ClangTidy)
