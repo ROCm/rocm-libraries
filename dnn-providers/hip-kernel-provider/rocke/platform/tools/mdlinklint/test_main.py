@@ -63,6 +63,10 @@ class MarkdownLinkLinterTest(unittest.TestCase):
             [("a b.md", 12), ("dir/a_(b).md", 30), ("yes.md", 70)],
         )
 
+    def test_reference_style_links_are_outside_the_inline_link_scope(self) -> None:
+        self.assertEqual(links_in_line("[guide][guide-ref]"), [])
+        self.assertEqual(links_in_line("[guide-ref]: guide.md"), [])
+
     def test_resolves_paths_fragments_directories_and_external_links(self) -> None:
         self.write(
             "guide.md",
@@ -156,6 +160,11 @@ class MarkdownLinkLinterTest(unittest.TestCase):
         self.assertEqual(len(diagnostics), 1)
         self.assertIn("cannot resolve local link", diagnostics[0].message)
 
+    def test_unescapes_ascii_punctuation_in_destination(self) -> None:
+        self.write("foo(bar).md", "# Target\n")
+        source = self.write("index.md", r"[escaped](foo\(bar\).md)" + "\n")
+        self.assertEqual(self.linter().lint_file(source), [])
+
     def test_skips_fenced_and_inline_code(self) -> None:
         source = self.write(
             "index.md",
@@ -164,6 +173,46 @@ class MarkdownLinkLinterTest(unittest.TestCase):
         linter = self.linter()
         self.assertEqual(linter.lint_file(source), [])
         self.assertEqual(linter.checked_links, 0)
+
+    def test_matches_code_delimiter_runs_and_preserves_columns(self) -> None:
+        first_line = "``[inline](missing.md)`` [outside](first.md)"
+        source = self.write(
+            "index.md",
+            first_line
+            + "\n````text\n```\n[fenced](missing.md)\n````\n"
+            + "```text\n~~~\n[still-fenced](missing.md)\n```\n"
+            + "[outside](second.md)\n",
+        )
+
+        diagnostics = self.linter().lint_file(source)
+        self.assertEqual(
+            [(item.line, item.message) for item in diagnostics],
+            [
+                (1, 'unresolved local link "first.md" (resolved to first.md)'),
+                (10, 'unresolved local link "second.md" (resolved to second.md)'),
+            ],
+        )
+        self.assertEqual(diagnostics[0].column, first_line.index("first.md") + 1)
+
+    def test_unmatched_backtick_does_not_hide_a_link(self) -> None:
+        source = self.write("index.md", "` literal [missing](missing.md)\n")
+        diagnostics = self.linter().lint_file(source)
+        self.assertEqual(len(diagnostics), 1)
+        self.assertEqual(diagnostics[0].column, 21)
+
+    def test_heading_scanner_ignores_fenced_code(self) -> None:
+        self.write(
+            "guide.md",
+            "````text\n```\n# Hidden\n````\n\n# Visible `Code`\n",
+        )
+        source = self.write(
+            "index.md",
+            "[hidden](guide.md#hidden)\n[visible](guide.md#visible-code)\n",
+        )
+
+        diagnostics = self.linter().lint_file(source)
+        self.assertEqual(len(diagnostics), 1)
+        self.assertIn("unresolved fragment #hidden", diagnostics[0].message)
 
     def test_github_anchor_unicode_punctuation_and_spacing(self) -> None:
         self.assertEqual(

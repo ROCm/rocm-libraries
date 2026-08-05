@@ -1,13 +1,14 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Report unresolved local Markdown links without external dependencies."""
+"""Report unresolved local inline Markdown links without external dependencies."""
 
 from __future__ import annotations
 
 import argparse
 import os
 import stat
+import string
 import sys
 import unicodedata
 import urllib.parse
@@ -17,6 +18,7 @@ from pathlib import Path
 
 MAX_MARKDOWN_BYTES = 4 << 20
 _HEX_DIGITS = frozenset("0123456789abcdefABCDEF")
+_MARKDOWN_ESCAPABLE = frozenset(string.punctuation)
 
 
 @dataclass(frozen=True)
@@ -54,14 +56,9 @@ class Linter:
             return [self._diagnostic(file, 1, 1, f"cannot read file: {error}")]
 
         diagnostics: list[Diagnostic] = []
-        in_fence = False
-        for line_number, text in enumerate(contents.split("\n"), start=1):
-            if is_fence(text):
-                in_fence = not in_fence
-                continue
-            if in_fence:
-                continue
-            for candidate in links_in_line(text):
+        masked_contents = mask_code_regions(contents)
+        for line_number, text in enumerate(masked_contents.split("\n"), start=1):
+            for candidate in _links_in_masked_line(text):
                 self.checked_links += 1
                 message = self._check_link(file, candidate.target)
                 if message:
@@ -81,6 +78,8 @@ class Linter:
         return Diagnostic(display, line, column, message)
 
     def _check_link(self, source: Path, target: str) -> str:
+        original_target = target
+        target = markdown_unescape(target)
         if is_external(target):
             return ""
 
@@ -90,18 +89,18 @@ class Linter:
         try:
             decoded_path = path_unescape(path_part)
         except ValueError:
-            return f'invalid percent-encoding in local link "{target}"'
+            return f'invalid percent-encoding in local link "{original_target}"'
 
         local_path = decoded_path.replace("/", os.sep)
         if os.path.isabs(local_path):
-            return f'absolute local link "{target}" is not portable'
+            return f'absolute local link "{original_target}" is not portable'
 
         resolved = source
         if decoded_path:
             resolved = Path(os.path.normpath(source.parent / local_path))
         if not path_within(self.link_root, resolved):
             return (
-                f'local link "{target}" escapes link root '
+                f'local link "{original_target}" escapes link root '
                 f"{display_path(self.root, self.link_root)}"
             )
 
@@ -109,35 +108,41 @@ class Linter:
             canonical = resolved.resolve(strict=True)
         except FileNotFoundError:
             return (
-                f'unresolved local link "{target}" '
+                f'unresolved local link "{original_target}" '
                 f"(resolved to {display_path(self.root, resolved)})"
             )
         except (OSError, ValueError) as error:
-            return f'cannot resolve local link "{target}": {error}'
+            return f'cannot resolve local link "{original_target}": {error}'
 
         if not path_within(self.link_root, canonical):
-            return f'local link "{target}" escapes link root through a symbolic link'
+            return (
+                f'local link "{original_target}" escapes link root through a '
+                "symbolic link"
+            )
 
         try:
             target_stat = canonical.stat()
         except OSError as error:
-            return f'cannot inspect local link "{target}": {error}'
+            return f'cannot inspect local link "{original_target}": {error}'
 
         if has_fragment and fragment and resolved.suffix.lower() == ".md":
             try:
                 decoded_fragment = path_unescape(fragment)
             except ValueError:
-                return f'invalid percent-encoding in fragment "{target}"'
+                return f'invalid percent-encoding in fragment "{original_target}"'
             if not stat.S_ISREG(target_stat.st_mode):
-                return f'Markdown fragment target "{target}" is not a regular file'
+                return (
+                    f'Markdown fragment target "{original_target}" is not a regular '
+                    "file"
+                )
             try:
                 anchors = self._anchors(canonical)
             except (OSError, UnicodeError, ValueError) as error:
-                return f'cannot read link target "{target}": {error}'
+                return f'cannot read link target "{original_target}": {error}'
             if decoded_fragment not in anchors:
                 return (
                     f"unresolved fragment #{decoded_fragment} "
-                    f'in local link "{target}"'
+                    f'in local link "{original_target}"'
                 )
         return ""
 
@@ -148,7 +153,8 @@ class Linter:
 
         anchors: set[str] = set()
         counts: dict[str, int] = {}
-        for line in read_markdown(file).split("\n"):
+        contents = mask_code_regions(read_markdown(file), mask_inline=False)
+        for line in contents.split("\n"):
             heading = heading_text(line)
             if heading is None:
                 continue
@@ -214,6 +220,108 @@ def read_markdown(file: Path) -> str:
     return file.read_bytes().decode("utf-8", errors="replace")
 
 
+def mask_code_regions(contents: str, *, mask_inline: bool = True) -> str:
+    """Blank fenced and inline code while preserving offsets and newlines."""
+    characters = list(contents)
+    fence: tuple[str, int] | None = None
+    offset = 0
+    for line in contents.splitlines(keepends=True):
+        body = line.rstrip("\r\n")
+        if fence is not None:
+            _mask_range(characters, offset, offset + len(body))
+            if _is_fence_closer(body, *fence):
+                fence = None
+        else:
+            opening = _fence_opening(body)
+            if opening is not None:
+                _mask_range(characters, offset, offset + len(body))
+                fence = opening
+        offset += len(line)
+
+    masked = "".join(characters)
+    if mask_inline:
+        masked = _mask_inline_code(masked)
+    return masked
+
+
+def _fence_opening(line: str) -> tuple[str, int] | None:
+    """Return a CommonMark-style fence character and opening run length."""
+    indent = len(line) - len(line.lstrip(" "))
+    if indent > 3 or indent == len(line):
+        return None
+    marker = line[indent]
+    if marker not in "`~":
+        return None
+    end = indent
+    while end < len(line) and line[end] == marker:
+        end += 1
+    run_length = end - indent
+    if run_length < 3:
+        return None
+    if marker == "`" and "`" in line[end:]:
+        return None
+    return marker, run_length
+
+
+def _is_fence_closer(line: str, marker: str, opening_length: int) -> bool:
+    """Return whether line closes the active fenced-code block."""
+    indent = len(line) - len(line.lstrip(" "))
+    if indent > 3 or indent == len(line) or line[indent] != marker:
+        return False
+    end = indent
+    while end < len(line) and line[end] == marker:
+        end += 1
+    return end - indent >= opening_length and not line[end:].strip(" \t")
+
+
+def _mask_inline_code(contents: str) -> str:
+    """Blank code spans paired by equal-length backtick delimiter runs."""
+    characters = list(contents)
+    runs: list[tuple[int, int]] = []
+    index = 0
+    while index < len(contents):
+        if contents[index] != "`":
+            index += 1
+            continue
+        if escaped(contents, index):
+            index += 1
+            continue
+        end = index + 1
+        while end < len(contents) and contents[end] == "`":
+            end += 1
+        runs.append((index, end))
+        index = end
+
+    next_same_length: list[int | None] = [None] * len(runs)
+    next_run: dict[int, int] = {}
+    for run_index in range(len(runs) - 1, -1, -1):
+        start, end = runs[run_index]
+        run_length = end - start
+        next_same_length[run_index] = next_run.get(run_length)
+        next_run[run_length] = run_index
+
+    run_index = 0
+    while run_index < len(runs):
+        closing_index = next_same_length[run_index]
+        if closing_index is None:
+            run_index += 1
+            continue
+        _mask_range(
+            characters,
+            runs[run_index][0],
+            runs[closing_index][1],
+        )
+        run_index = closing_index + 1
+    return "".join(characters)
+
+
+def _mask_range(characters: list[str], start: int, end: int) -> None:
+    """Replace non-newline characters in a half-open range with spaces."""
+    for index in range(start, end):
+        if characters[index] not in "\r\n":
+            characters[index] = " "
+
+
 def path_unescape(value: str) -> str:
     """Decode URL path escapes while rejecting malformed percent sequences."""
     index = 0
@@ -231,6 +339,24 @@ def path_unescape(value: str) -> str:
     return urllib.parse.unquote_to_bytes(value).decode(
         "utf-8", errors="surrogateescape"
     )
+
+
+def markdown_unescape(value: str) -> str:
+    """Remove Markdown backslashes before escapable ASCII punctuation."""
+    output: list[str] = []
+    index = 0
+    while index < len(value):
+        if (
+            value[index] == "\\"
+            and index + 1 < len(value)
+            and value[index + 1] in _MARKDOWN_ESCAPABLE
+        ):
+            output.append(value[index + 1])
+            index += 2
+            continue
+        output.append(value[index])
+        index += 1
+    return "".join(output)
 
 
 def display_path(root: Path, path: Path) -> str:
@@ -254,12 +380,6 @@ def is_external(target: str) -> bool:
     """Return whether a destination is intentionally outside local linting."""
     lowered = target.strip().lower()
     return lowered.startswith(("//", "http:", "https:", "mailto:", "tel:", "data:"))
-
-
-def is_fence(line: str) -> bool:
-    """Recognize the fenced-code markers supported by the original linter."""
-    trimmed = line.lstrip(" \t")
-    return trimmed.startswith(("```", "~~~"))
 
 
 def heading_text(line: str) -> str | None:
@@ -292,15 +412,15 @@ def github_anchor(heading: str) -> str:
 
 def links_in_line(line: str) -> list[Link]:
     """Extract inline Markdown links outside the linter's inline-code model."""
+    return _links_in_masked_line(mask_code_regions(line))
+
+
+def _links_in_masked_line(line: str) -> list[Link]:
+    """Extract inline Markdown links from a line whose code is already blanked."""
     links: list[Link] = []
-    code_ticks = False
     index = 0
     while index < len(line):
-        if line[index] == "`" and not escaped(line, index):
-            code_ticks = not code_ticks
-            index += 1
-            continue
-        if code_ticks or line[index] != "[" or escaped(line, index):
+        if line[index] != "[" or escaped(line, index):
             index += 1
             continue
 

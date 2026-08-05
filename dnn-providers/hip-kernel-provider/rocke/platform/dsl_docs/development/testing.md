@@ -68,10 +68,10 @@ These tests do not require a GPU. They prove IR builds, LLVM text shape, and hel
 
 ## Documentation Link Lint
 
-`tools/mdlinklint` catches navigation drift caused by moved files, directories,
-or headings. The code-level tests above do not traverse Markdown links, while
-this static check needs only the Python standard library; it does not require
-ROCm or a GPU environment. From `platform`, run:
+`tools/mdlinklint` catches navigation drift in inline Markdown links caused by
+moved files, directories, or headings. The code-level tests above do not
+traverse Markdown links, while this static check needs only the Python standard
+library; it does not require ROCm or a GPU environment. From `platform`, run:
 
 ```bash
 python tools/mdlinklint/main.py --root dsl_docs --link-root ..
@@ -83,7 +83,7 @@ nonzero for unresolved local targets (files or directories) or Markdown heading
 fragments. `--link-root ..` allows links throughout the rocKE tree while rejecting
 lexical and symbolic-link escapes outside it. Fragment targets must be regular
 Markdown files no larger than 4 MiB. The linter deliberately skips external URLs,
-mail links, and non-Markdown fragments.
+mail links, non-Markdown fragments, and reference-style Markdown links.
 
 ## Byte-identity gate (cross-engine)
 
