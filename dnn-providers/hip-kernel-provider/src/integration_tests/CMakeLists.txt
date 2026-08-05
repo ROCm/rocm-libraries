@@ -69,7 +69,11 @@ if(ENABLE_HIP_MLOPS_ENGINE)
 endif()
 
 if(ENABLE_HIP_FLASH2_ENGINE)
-    add_subdirectory(hip_flash2_engine)
+    if(NOT HIPDNN_ENABLE_SDPA)
+        message(WARNING "ENABLE_HIP_FLASH2_ENGINE=ON requires HIPDNN_ENABLE_SDPA=ON for Flash2 integration tests")
+    else()
+        add_subdirectory(hip_flash2_engine)
+    endif()
 endif()
 
 clang_tidy_check(hip_kernel_provider_integration_tests)
