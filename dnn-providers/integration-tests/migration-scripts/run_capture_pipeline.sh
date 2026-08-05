@@ -69,9 +69,14 @@ python3 "$SCRIPT_DIR/verify_migration.py" \
 
 echo ""
 echo "--- Supporting: real binary smoke (bundle loader) ---"
-"$BINARY" --allow-bundles --gd "$OUT" --gtest_filter="$BUNDLE_FILTER" || {
+SMOKE_LOG="$WORK/smoke.log"
+if ! "$BINARY" --allow-bundles --gd "$OUT" --gtest_filter="$BUNDLE_FILTER" 2>&1 | tee "$SMOKE_LOG"; then
+    if grep -q "Failed to load bundle" "$SMOKE_LOG"; then
+        echo "  FAIL: a bundle failed to load — this is a real regression, not a missing-GPU skip" >&2
+        exit 1
+    fi
     echo "  WARN: smoke returned non-zero (may need GPU)" >&2
-}
+fi
 
 # ── Supporting layer: idempotency ───────────────────────────────────────
 

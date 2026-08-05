@@ -59,9 +59,11 @@ class TestGemmFp16Dispatch(unittest.TestCase):
         self.assertEqual(a.cache_key, b.cache_key)
 
     def test_rejects_unsupported_dtype_and_layout(self):
-        with self.assertRaisesRegex(ValueError, "fp16 only"):
+        # dtype and layout are declared coverage, so the capability prefilter
+        # rejects them before the residual predicate is consulted.
+        with self.assertRaisesRegex(ValueError, r"dtype 'bf16' not in \('fp16',\)"):
             dispatch_gemm_fp16(GemmRequest(M=1, N=1, K=1, arch="gfx950", dtype="bf16"))
-        with self.assertRaisesRegex(ValueError, "RCR only"):
+        with self.assertRaisesRegex(ValueError, r"layout 'RRR' not in \('RCR',\)"):
             dispatch_gemm_fp16(GemmRequest(M=1, N=1, K=1, arch="gfx950", layout="RRR"))
         with self.assertRaisesRegex(ValueError, "algorithm"):
             dispatch_gemm_fp16(
