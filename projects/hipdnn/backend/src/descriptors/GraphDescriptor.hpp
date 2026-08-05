@@ -38,7 +38,8 @@ private:
     // Cleared by invalidateCache() when operations are mutated.
     flatbuffers::DetachedBuffer _graphSerializedBuffer;
 
-    // Stable identity of immutable graph contents. Absent for legacy and unfinalized graphs.
+    // Stable identity of one graph object, not its contents. Newly generated values use UUID v4;
+    // deserialized values are preserved as opaque 128-bit IDs.
     std::optional<std::array<uint8_t, 16>> _graphId;
 
     // Source of truth for the graph's operations. Populated via setOperations() (C-API flow)

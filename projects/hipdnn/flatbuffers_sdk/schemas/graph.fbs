@@ -67,7 +67,8 @@ struct EngineApiVersion {
 	patch: uint;
 }
 
-// Opaque 128-bit graph identity.
+// Opaque 128-bit graph identity. hipDNN generates UUID v4 values, but readers preserve
+// any 128-bit value without enforcing a UUID version or variant.
 struct Uuid {
 	bytes: [ubyte:16];
 }
