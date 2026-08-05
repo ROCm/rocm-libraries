@@ -283,12 +283,22 @@ endif()
 if(NOT TARGET roc::host-validation)
     block(SCOPE_FOR VARIABLES)
         set(HOST_VALIDATION_BUILD_TESTING OFF)
+        set(HOST_VALIDATION_BUILD_BLAS_BACKEND ${HIPBLASLT_ENABLE_CLIENT})
         add_subdirectory(
             "${CMAKE_CURRENT_SOURCE_DIR}/../../shared/host-validation"
             "${CMAKE_CURRENT_BINARY_DIR}/host-validation"
             EXCLUDE_FROM_ALL
         )
     endblock()
+endif()
+if(HIPBLASLT_ENABLE_CLIENT AND NOT TARGET roc::host-validation-blas)
+    if(COMMAND roc_host_validation_enable_blas_backend)
+        roc_host_validation_enable_blas_backend()
+    else()
+        message(FATAL_ERROR
+            "hipBLASLt clients require the optional roc::host-validation-blas target."
+        )
+    endif()
 endif()
 
 add_library(hipblaslt-headers INTERFACE)

@@ -19,6 +19,9 @@ option(HOST_VALIDATION_BUILD_TESTING
 option(HOST_VALIDATION_BUILD_PYTHON
        "Build the host-validation nanobind module."
        OFF)
+option(HOST_VALIDATION_BUILD_BLAS_BACKEND
+       "Build the optional host-validation CBLAS GEMM backend."
+       OFF)
 
 add_library(host-validation-core INTERFACE)
 add_library(roc::host-validation-core ALIAS host-validation-core)
@@ -74,6 +77,54 @@ target_sources(host-validation
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/detail/tensor_views.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/validation.hpp"
 )
+
+function(roc_host_validation_enable_blas_backend)
+    if(TARGET host-validation-blas)
+        return()
+    endif()
+
+    set(_host_validation_source_dir "${CMAKE_CURRENT_FUNCTION_LIST_DIR}")
+    find_package(BLAS REQUIRED)
+
+    add_library(host-validation-blas STATIC
+        "${_host_validation_source_dir}/src/backends/blas.cpp"
+    )
+    add_library(roc::host-validation-blas ALIAS host-validation-blas)
+    target_compile_features(host-validation-blas PUBLIC cxx_std_20)
+    target_link_libraries(host-validation-blas
+        PUBLIC
+            roc::host-validation
+    )
+    if(TARGET BLAS::BLAS)
+        target_link_libraries(host-validation-blas PRIVATE BLAS::BLAS)
+    else()
+        target_link_libraries(host-validation-blas PRIVATE ${BLAS_LIBRARIES})
+    endif()
+    target_sources(host-validation-blas
+        PUBLIC
+            FILE_SET HEADERS
+            BASE_DIRS "${_host_validation_source_dir}/include"
+            FILES
+                "${_host_validation_source_dir}/include/roc/host_validation/backends/blas.hpp"
+    )
+    set_target_properties(host-validation-blas
+        PROPERTIES
+            POSITION_INDEPENDENT_CODE ON
+    )
+    install(TARGETS host-validation-blas
+        EXPORT host-validation-targets
+        ARCHIVE
+            DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+            COMPONENT runtime
+        FILE_SET HEADERS
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+            COMPONENT devel
+    )
+endfunction()
+
+if(HOST_VALIDATION_BUILD_BLAS_BACKEND)
+    roc_host_validation_enable_blas_backend()
+endif()
 
 if(HOST_VALIDATION_BUILD_TESTING)
     enable_testing()

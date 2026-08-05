@@ -13,6 +13,16 @@ add_executable(host-validation-scalar-codec-tests scalar_codec_test.cpp)
 target_link_libraries(host-validation-scalar-codec-tests PRIVATE roc::host-validation-core)
 add_test(NAME host-validation-scalar-codec-tests COMMAND host-validation-scalar-codec-tests)
 
+if(TARGET host-validation-blas)
+    add_executable(host-validation-blas-tests blas_backend_test.cpp)
+    target_link_libraries(
+        host-validation-blas-tests
+        PRIVATE
+            roc::host-validation-blas
+    )
+    add_test(NAME host-validation-blas-tests COMMAND host-validation-blas-tests)
+endif()
+
 add_test(
     NAME host-validation-core-boundary
     COMMAND

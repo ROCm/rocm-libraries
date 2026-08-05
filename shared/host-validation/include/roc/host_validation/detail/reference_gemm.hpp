@@ -94,11 +94,6 @@ struct GemmProblem {
     GemmEpilogue epilogue;
 };
 
-struct GemmRunOptions {
-    GemmBackend backend = GemmBackend::Automatic;
-    bool requireRequestedBackend = false;
-};
-
 struct GemmSupportInfo {
     bool supported = false;
     std::string reason;
@@ -112,6 +107,21 @@ struct GemmRunInfo {
     GemmBackend backendUsed = GemmBackend::Canonical;
     std::optional<std::string> fallbackReason;
     size_t outputElementsComputed = 0;
+};
+
+class GemmBackendImplementation {
+   public:
+    virtual ~GemmBackendImplementation() = default;
+
+    virtual GemmBackend backend() const = 0;
+    virtual GemmSupportInfo querySupport(const GemmProblem&) const = 0;
+    virtual GemmRunInfo run(const GemmProblem&) const = 0;
+};
+
+struct GemmRunOptions {
+    GemmBackend backend = GemmBackend::Automatic;
+    bool requireRequestedBackend = false;
+    const GemmBackendImplementation* backendImplementation = nullptr;
 };
 
 namespace detail {
@@ -566,7 +576,8 @@ GemmRunInfo referenceRuntimeCanonical(const GemmProblem& problem) {
 }
 }  // namespace detail
 
-inline GemmSupportInfo queryGemmSupport(const GemmProblem& problem, GemmBackend backend) {
+inline GemmSupportInfo queryGemmSupport(const GemmProblem& problem, GemmBackend backend,
+                                        const GemmBackendImplementation* implementation = nullptr) {
     try {
         detail::validateRuntimeGemm(problem);
     } catch (const std::exception& error) {
@@ -578,30 +589,49 @@ inline GemmSupportInfo queryGemmSupport(const GemmProblem& problem, GemmBackend 
         case GemmBackend::Canonical:
             return {.supported = true, .reason = {}};
         case GemmBackend::Tiled:
-            return {
-                .supported = false,
-                .reason = "The runtime-typed tiled GEMM backend is not implemented.",
-            };
         case GemmBackend::Blas:
-            return {
-                .supported = false,
-                .reason = "The runtime-typed BLAS GEMM backend is not implemented.",
-            };
+            if (implementation == nullptr)
+                return {
+                    .supported = false,
+                    .reason =
+                        "No implementation was supplied for the requested "
+                        "runtime GEMM backend.",
+                };
+            if (implementation->backend() != backend)
+                return {
+                    .supported = false,
+                    .reason =
+                        "The supplied runtime GEMM implementation does not "
+                        "match the requested backend.",
+                };
+            return implementation->querySupport(problem);
     }
     return {.supported = false, .reason = "Invalid reference GEMM backend."};
 }
 
 inline GemmRunInfo referenceGemm(const GemmProblem& problem, const GemmRunOptions& options = {}) {
     GemmBackend backend = options.backend;
-    if (backend == GemmBackend::Automatic) backend = GemmBackend::Canonical;
-
     std::optional<std::string> fallbackReason;
-    const GemmSupportInfo requestedSupport = queryGemmSupport(problem, backend);
+    if (backend == GemmBackend::Automatic) {
+        if (options.backendImplementation != nullptr) {
+            const GemmBackend implementationBackend = options.backendImplementation->backend();
+            const GemmSupportInfo implementationSupport =
+                queryGemmSupport(problem, implementationBackend, options.backendImplementation);
+            if (implementationSupport) return options.backendImplementation->run(problem);
+            fallbackReason = implementationSupport.reason;
+        }
+        backend = GemmBackend::Canonical;
+    }
+
+    const GemmSupportInfo requestedSupport =
+        queryGemmSupport(problem, backend, options.backendImplementation);
     if (!requestedSupport) {
         if (options.requireRequestedBackend) throw std::invalid_argument(requestedSupport.reason);
         if (backend == GemmBackend::Canonical) throw std::invalid_argument(requestedSupport.reason);
         fallbackReason = requestedSupport.reason;
         backend = GemmBackend::Canonical;
+    } else if (backend != GemmBackend::Canonical) {
+        return options.backendImplementation->run(problem);
     }
 
     const GemmSupportInfo canonicalSupport = queryGemmSupport(problem, GemmBackend::Canonical);
