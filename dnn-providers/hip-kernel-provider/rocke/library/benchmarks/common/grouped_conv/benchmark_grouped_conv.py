@@ -821,6 +821,14 @@ def main() -> int:
             dtype=dtype,
             direction=args.direction,
         )
+        if problem.is_3d:
+            req_base.update(
+                Di=problem.Di,
+                Z=problem.Z,
+                stride_d=problem.sD,
+                pad_d=problem.pD,
+                dilation_d=problem.dD,
+            )
 
         if args.direction == "wgrad":
             rc = _run_wgrad(
@@ -1198,7 +1206,7 @@ def _run_wgrad(
             kernel_name=artifact.kernel_name,
             signature=sig,
         )
-        wg_N = p.Y * p.X * p.C
+        wg_N = (p.Z if p.is_3d else 1) * p.Y * p.X * p.C
         gx = (wg_N + dspec.tile_n - 1) // dspec.tile_n
         gy = (p.K + dspec.tile_m - 1) // dspec.tile_m
         grid = (gx, gy, instance_spec.split_k)

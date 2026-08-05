@@ -232,6 +232,12 @@ class ConvGroupedRequest(OperatorRequest):
     layout: str = "NHWC"
     # "fwd" | "wgrad"
     direction: str = "fwd"
+    # 3D depth fields — all must be set together or all left as None (2D)
+    Di: Optional[int] = None
+    Z: Optional[int] = None
+    stride_d: Optional[int] = None
+    pad_d: Optional[int] = None
+    dilation_d: Optional[int] = None
     # optional vec_size_c override; None = let the candidate decide
     vec_size_c: Optional[int] = None
     op: str = "conv_grouped"
@@ -265,9 +271,16 @@ class ConvGroupedRequest(OperatorRequest):
                 "dilation_w",
             )
         }
+        if self.Di is not None:
+            for name in ("Di", "Z", "stride_d", "pad_d", "dilation_d"):
+                v = getattr(self, name)
+                if v is not None:
+                    d[name] = int(v)
         try:
             p = _problem(self)
             d.update(Ho=int(p.Ho), Wo=int(p.Wo))
+            if p.is_3d:
+                d["Do"] = int(p.Do)
         except Exception:
             pass
         return d
@@ -294,6 +307,11 @@ def _problem(req: ConvGroupedRequest) -> ConvProblem:
         dH=int(req.dilation_h),
         dW=int(req.dilation_w),
         groups=int(req.G),
+        Di=int(req.Di) if req.Di is not None else None,
+        Z=int(req.Z) if req.Z is not None else None,
+        sD=int(req.stride_d) if req.stride_d is not None else None,
+        pD=int(req.pad_d) if req.pad_d is not None else None,
+        dD=int(req.dilation_d) if req.dilation_d is not None else None,
     )
 
 
@@ -318,6 +336,17 @@ def _request_errors(req: OperatorRequest) -> list[str]:
         ArchTarget.from_gfx(req.arch)
     except KeyError as e:
         errors.append(str(e))
+    _3d_fields = {
+        "Di": req.Di,
+        "Z": req.Z,
+        "stride_d": req.stride_d,
+        "pad_d": req.pad_d,
+        "dilation_d": req.dilation_d,
+    }
+    _set_3d = {k for k, v in _3d_fields.items() if v is not None}
+    if _set_3d and _set_3d != set(_3d_fields):
+        missing = sorted(set(_3d_fields) - _set_3d)
+        errors.append(f"3D fields must all be set or all be None; missing: {missing}")
     if errors:
         return errors
     p = _problem(req)
@@ -325,6 +354,11 @@ def _request_errors(req: OperatorRequest) -> list[str]:
         errors.append(
             f"degenerate output spatial dims Ho={p.Ho} Wo={p.Wo} "
             "(filter larger than padded input)"
+        )
+    if p.is_3d and p.Do <= 0:
+        errors.append(
+            f"degenerate output depth Do={p.Do} "
+            "(filter larger than padded input depth)"
         )
     return errors
 
@@ -457,8 +491,8 @@ class ConvGroupedSpec:
         p = problem
         resolved_split_k = select_split_k_wgrad(
             wg_M=p.K,
-            wg_N=p.Y * p.X * p.C,
-            wg_K=p.N * p.Ho * p.Wo,
+            wg_N=(p.Z if p.is_3d else 1) * p.Y * p.X * p.C,
+            wg_K=p.N * p.Ho * p.Wo * (p.Do if p.is_3d else 1),
             tile_m=self.tile_m,
             tile_n=self.tile_n,
             tile_k=self.tile_k,
@@ -505,8 +539,8 @@ def _wgrad_grid(spec: ConvGroupedSpec, req: OperatorRequest) -> Tuple[int, int, 
     assert isinstance(req, ConvGroupedRequest)
     p = _problem(req)
     wg_M = p.K  # output channels
-    wg_N = p.Y * p.X * p.C  # filter spatial × input channel
-    wg_K = p.N * p.Ho * p.Wo
+    wg_N = (p.Z if p.is_3d else 1) * p.Y * p.X * p.C  # filter spatial × input channel
+    wg_K = p.N * p.Ho * p.Wo * (p.Do if p.is_3d else 1)  # output spatial positions
     gx = (wg_N + spec.tile_n - 1) // spec.tile_n
     gy = (wg_M + spec.tile_m - 1) // spec.tile_m
     if spec.split_k == -1:
@@ -1088,6 +1122,13 @@ _CONV_DIM_VOCABULARY = (
     "dilation_w",
     "Ho",
     "Wo",
+    # 3D depth dims (None when 2D)
+    "Di",
+    "Z",
+    "stride_d",
+    "pad_d",
+    "dilation_d",
+    "Do",
 )
 
 CONV_FWD_REGISTRY = CandidateRegistry(_FAMILY_FWD, dim_vocabulary=_CONV_DIM_VOCABULARY)
