@@ -14,7 +14,7 @@ Swept dimensions:
   tile_k         : 16, 32, 64, 128
   warp_m, warp_n : 1, 2, 4, 8
   warp_tile_m == warp_tile_n : 16, 32
-  pipeline       : mem, compv3, compv4
+  pipeline       : mem, compv3, compv4, mem_db, async_dma
   epilogue       : default, cshuffle
 
 warp_tile_k is chosen as the largest valid K for the target MFMA atom
@@ -58,7 +58,10 @@ _TILE_K = (16, 32, 64, 128)
 _WARP_MN = (1, 2, 4, 8)
 _WARP_MN_GFX1250 = (1, 2, 4, 8, 16)
 _WARP_TILE_MN = (16, 32)
-_PIPELINES = ("mem", "compv3", "compv4")
+_PIPELINES = (
+    "mem",
+    "wavelet",
+)  # "mem", "compv3", "compv4", "mem_db", "async_dma")
 _EPILOGUES = ("default", "cshuffle")
 # Split-K degrees swept when --split-k 0 (auto) is passed for wgrad.
 _SPLIT_K_AUTO = (1, 2, 4, 8, 16, 32, 64, 128)
@@ -133,6 +136,7 @@ def _verify_kernel(
     dump_fail: "str | None",
     extra_tensors: "dict | None" = None,
     u8,
+    arch: str,
 ) -> bool:
     """Launch a kernel, compare against reference, optionally dump on failure.
 
@@ -167,9 +171,14 @@ def _verify_kernel(
     out_cpu = torch.empty_like(out_t)
     rt.memcpy_d2h(u8(out_cpu), out_dev, out_t.nbytes)
 
-    out_f32 = out_cpu.float().cuda()
-    abs_diff = out_f32.sub(ref_out).abs()
-    ref_scale = ref_out.abs().max().clamp(min=1.0)
+    if arch == "gfx1250":
+        out_f32 = out_cpu.float()
+        abs_diff = out_f32.sub(ref_out.cpu()).abs()
+        ref_scale = ref_out.cpu().abs().max().clamp(min=1.0)
+    else:
+        out_f32 = out_cpu.float().cuda()
+        abs_diff = out_f32.sub(ref_out).abs()
+        ref_scale = ref_out.abs().max().clamp(min=1.0)
     rel_err = float(abs_diff.max() / ref_scale)
     # Peak-normalised relative error: max|out-ref| / max|ref|.
     # Caveat: a large relative error on a small-magnitude weight can be masked
@@ -833,6 +842,7 @@ def _run_sweep(
                 kernel_name=artifact.kernel_name,
                 dump_fail=args.dump_fail,
                 u8=_u8,
+                arch=arch,
             )
             if stopped:
                 rt.free(A_dev)
@@ -1178,6 +1188,7 @@ def _run_wgrad_sweep(
                 dump_fail=args.dump_fail,
                 extra_tensors={"dY": dY_t, "X": X_t},
                 u8=_u8,
+                arch=arch,
             )
             if stopped:
                 rt.free(dY_dev)

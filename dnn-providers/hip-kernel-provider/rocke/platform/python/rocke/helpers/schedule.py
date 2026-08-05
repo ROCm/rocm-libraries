@@ -450,6 +450,22 @@ class SchedulePolicy:
             # WMMA intrawave schedule: ds_read/wmma interleave in the compute
             # region (no MFMA-cycle model; see :class:`WmmaHotLoopInstList`).
             return cls(name="wmma_v1", emit_hints=True, mode="intrawave")
+        if pipeline == "tdm":
+            # TDM (Two-Dimensional Marching)
+            # Marches the tile computation diagonally through the M×N output
+            # space, keeping A and B tiles live in registers across multiple
+            # output tiles to reduce LDS traffic on compute-bound shapes.
+            # The pipeline body is not yet implemented; this entry gates the
+            # name so is_valid_spec can admit it once target.memory.has_tdm
+            # is True, and the build path can raise a structured error rather
+            # than an unknown-policy ValueError.
+            return cls(name="tdm", emit_hints=False, mode="default")
+        if pipeline == "wavelet":
+            # WAVELET pipeline — load/math wave specialization.
+            # Splits the workgroup into load waves (DRAM→LDS) and math waves
+            # (LDS reads + MFMA). The overlap is architectural on gfx1250 (separate
+            # issue slots), so no sched_group_barrier hints are needed.
+            return cls(name="wavelet", emit_hints=False, mode="default")
         raise ValueError(f"unknown schedule policy {pipeline!r}")
 
     def emit_prologue(self, b: IRBuilder) -> None:

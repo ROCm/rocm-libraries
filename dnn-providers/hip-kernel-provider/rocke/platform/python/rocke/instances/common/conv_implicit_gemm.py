@@ -117,6 +117,20 @@ class ImplicitGemmConvSpec:
       - `pipeline="compv4"`   : double-buffer LDS (ping-pong A_smem/B_smem)
                                 + sched hints + s_setprio to push the K-loop
                                 into compute steady state
+      - `pipeline="mem_db"`   : double-buffer LDS, no scheduler hints;
+                                WMMA-safe alternative to compv4 (gfx1250)
+      - `pipeline="wavelet"`  : load/math wave specialization (CK Tile PR
+                                #8009). Appends ``num_load_waves`` extra waves
+                                to the workgroup; those waves handle all
+                                DRAM→LDS transfers while the standard
+                                warp_m × warp_n waves run MFMA exclusively.
+                                Overlap is architectural on gfx1250 (separate
+                                issue slots). Single-buffer LDS shared by
+                                both roles. WMMA/gfx1250 only.
+      - `pipeline="tdm"`      : TDM (Two-Dimensional Marching) — marches the
+                                tile computation diagonally through M×N,
+                                keeping A/B tiles live across output tiles to
+                                reduce LDS traffic on compute-bound shapes.
 
     Epilogue options:
       - `epilogue="default"`  : per-lane scalar dtype_d stores via the D
@@ -224,10 +238,26 @@ class ImplicitGemmConvSpec:
     # C gets its own LDS bytes (pool = ab + c) and the barrier is elided ->
     # lower small-tile latency, more LDS. Only affects epilogue == "cshuffle".
     cshuffle_no_alias: bool = False
+    # Number of extra load waves appended to the workgroup for pipeline="wavelet".
+    # Load waves handle all DRAM→LDS transfers; math waves (warp_m × warp_n) handle
+    # LDS reads + MFMA only. The launch block size becomes
+    # block_size + num_load_waves * wave_size. Ignored for all other pipelines.
+    num_load_waves: int = 4
 
     @property
     def block_size(self) -> int:
         return self.warp_m * self.warp_n * self.wave_size
+
+    @property
+    def launch_block_size(self) -> int:
+        """Total threads launched per workgroup.
+
+        For ``pipeline="wavelet"`` this is ``block_size + num_load_waves * wave_size``;
+        for all other pipelines it equals ``block_size``.
+        """
+        if self.pipeline == "wavelet":
+            return self.block_size + self.num_load_waves * self.wave_size
+        return self.block_size
 
     @property
     def k_atoms_per_tile_k(self) -> int:
@@ -390,9 +420,10 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
         return False, "tile_n not divisible by warp_n * warp_tile_n"
     if spec.tile_k % spec.warp_tile_k:
         return False, "tile_k not divisible by warp_tile_k"
-    if spec.block_size > target.max_threads_per_block:
+    _launch_block = spec.launch_block_size
+    if _launch_block > target.max_threads_per_block:
         return False, (
-            f"block_size {spec.block_size} > {target.max_threads_per_block} "
+            f"launch_block_size {_launch_block} > {target.max_threads_per_block} "
             f"(hardware cap) on {arch}"
         )
 
@@ -439,7 +470,9 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
     _ab_bytes = (
         _a_shape[0] * _a_shape[1] + _b_shape[0] * _b_shape[1]
     ) * _ab_dtype_bytes
-    _double = spec.pipeline == "compv4" or spec.async_dma or spec.unroll_k
+    _double = (
+        spec.pipeline in ("compv4", "mem_db", "tdm") or spec.async_dma or spec.unroll_k
+    )
     _ab_lds = _ab_bytes * (2 if _double else 1)
     # cshuffle stages tile_m×tile_n elements at dtype_d (fp16/bf16 = 2B, fp32 = 4B).
     _c_dtype_bytes = 4 if spec.data.dtype_d == "fp32" else 2
@@ -458,21 +491,27 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
             f"> {target.lds_capacity_bytes} cap on {arch}"
         )
 
-    # WMMA (RDNA wave32) coverage mirrors the unified GEMM's narrow subset: the
-    # 16x16x16 atom (gfx11/gfx12) or 16x16x32 atom (gfx1250) with the simple
-    # ``mem`` pipeline + ``default`` epilogue and synchronous descriptor-driven
-    # loads. The richer MFMA-shaped paths (compv3/compv4 scheduler interleave,
-    # cshuffle LDS-staged C, async DMA, K-unroll, chiplet swizzle, grouped conv)
-    # are gated off until ported.
+    # The pipeline body is not yet implemented in rocke;
+    if spec.pipeline == "tdm" and not target.memory.has_tdm:
+        return False, (f"pipeline='tdm' requires target.memory.has_tdm=True ")
+
+    if spec.pipeline == "wavelet":
+        if family != "wmma":
+            return False, (
+                f"pipeline='wavelet' is gfx1250/WMMA-only "
+                f"(got {family!r} family on {arch})"
+            )
+        if spec.num_load_waves < 1:
+            return False, "pipeline='wavelet' requires num_load_waves >= 1"
     if family == "wmma":
         if atom not in ((16, 16, 4), (16, 16, 16), (16, 16, 32)):
             return (
                 False,
                 f"WMMA conv supports only 16x16x4, 16x16x16, or 16x16x32 (got {atom}) on {arch}",
             )
-        if spec.pipeline != "mem":
+        if spec.pipeline not in ("mem", "mem_db", "wavelet"):
             return False, (
-                f"WMMA conv supports only the 'mem' pipeline "
+                f"WMMA conv supports only 'mem', 'mem_db', or 'wavelet' pipeline "
                 f"(got {spec.pipeline!r}) on {arch}"
             )
         if spec.epilogue not in ("default", "cshuffle"):
@@ -480,13 +519,11 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
                 f"WMMA conv supports only 'default' or 'cshuffle' epilogue "
                 f"(got {spec.epilogue!r}) on {arch}"
             )
-        for flag, label in (
-            (spec.async_dma, "async_dma"),
-            (spec.unroll_k, "unroll_k"),
-            (spec.chiplet_swizzle, "chiplet_swizzle"),
-        ):
-            if flag:
-                return False, f"WMMA conv does not support {label} on {arch}"
+        if spec.async_dma and not target.memory.has_async_global_lds:
+            return False, (
+                f"async_dma requires global_load_async_to_lds (not available on {arch}); "
+                f"use a GFX12 target (e.g. gfx1250)"
+            )
         if spec.groups != 1:
             return False, f"WMMA conv supports only groups=1 (got {spec.groups})"
 
@@ -934,7 +971,9 @@ def build_implicit_gemm_conv(
     # write into while the MFMA phase reads from the first. Force
     # double-buffering whenever the pipeline opts into async DMA,
     # regardless of the chosen `compv*` flag.
-    double_buffer = spec.pipeline == "compv4" or spec.async_dma or spec.unroll_k
+    double_buffer = (
+        spec.pipeline in ("compv4", "mem_db", "tdm") or spec.async_dma or spec.unroll_k
+    )
     if double_buffer:
         A_smem2 = b.smem_alloc(
             ir_dtype_a, lds_layout.storage_shape(block_m), name_hint="A_smem2"
@@ -1075,6 +1114,43 @@ def build_implicit_gemm_conv(
             load_vec=load_vec_b,
             elem_dtype=ir_dtype_b,
         )
+        # Wavelet pipeline: load waves use a separate loader sized to the
+        # number of load threads (num_load_waves * wave_size), not to
+        # spec.block_size (math threads only).  Using the math-wave
+        # block_size here causes vec_idx = e*math_threads + load_tid to
+        # exceed the tile dimensions, writing LDS at wrong addresses and
+        # producing NaN outputs.
+        if spec.pipeline == "wavelet":
+            _load_threads = spec.num_load_waves * spec.wave_size
+            _tile_vec_load = CoalescedTileLoader.choose_vec(
+                tile_rows=block_m,
+                tile_cols=block_k,
+                block_size=_load_threads,
+                max_vec=load_vec_a,
+            )
+            a_wavelet_loader = CoalescedTileLoader(
+                tile_rows=block_m,
+                tile_cols=block_k,
+                block_size=_load_threads,
+                load_vec=_tile_vec_load,
+                elem_dtype=ir_dtype_a,
+            )
+            _tile_vec_load_b = CoalescedTileLoader.choose_vec(
+                tile_rows=block_n,
+                tile_cols=block_k,
+                block_size=_load_threads,
+                max_vec=load_vec_b,
+            )
+            b_wavelet_loader = CoalescedTileLoader(
+                tile_rows=block_n,
+                tile_cols=block_k,
+                block_size=_load_threads,
+                load_vec=_tile_vec_load_b,
+                elem_dtype=ir_dtype_b,
+            )
+        else:
+            a_wavelet_loader = None
+            b_wavelet_loader = None
 
     schedule = SchedulePolicy.for_pipeline(
         "async_dma" if spec.async_dma else spec.pipeline
@@ -1150,6 +1226,39 @@ def build_implicit_gemm_conv(
         b_sync_loader.load(
             b,
             tid=tid,
+            smem_dst=B_dst,
+            descriptor=b_descriptor,
+            rsrc=b_rsrc,
+        )
+
+    def emit_wavelet_load_phase(
+        k_off: Value, A_dst: Value, B_dst: Value, load_tid: Value
+    ) -> None:
+        """Like emit_load_phase but uses load-wave-sized loaders and a
+        tid normalised to [0, num_load_waves * wave_size).
+
+        In the wavelet pipeline the workgroup has ``spec.block_size`` math
+        threads followed by ``num_load_waves * wave_size`` load threads.
+        The global tid for load waves is in the range
+        [spec.block_size, launch_block_size).  CoalescedTileLoader
+        computes ``vec_idx = e * block_size + tid``; when ``block_size``
+        equals the math-wave count and ``tid`` is a load-wave tid the
+        index blows past the tile dimensions, writing LDS at wrong
+        addresses and producing NaN outputs.  This helper uses the
+        pre-built ``a_wavelet_loader`` / ``b_wavelet_loader`` (sized to
+        the load-thread count) and a normalised ``load_tid``.
+        """
+        k_off_capture[0] = k_off
+        a_wavelet_loader.load(
+            b,
+            tid=load_tid,
+            smem_dst=A_dst,
+            descriptor=a_descriptor,
+            rsrc=a_rsrc,
+        )
+        b_wavelet_loader.load(
+            b,
+            tid=load_tid,
             smem_dst=B_dst,
             descriptor=b_descriptor,
             rsrc=b_rsrc,
@@ -1318,10 +1427,10 @@ def build_implicit_gemm_conv(
         return new_accs
 
     # ---- the K loop ----
-    # Two code paths:
+    # Three code paths:
     #
-    # 1) Sync path (`async_dma=False`): emit a single `scf.for_iter`
-    #    body that runs the load + barrier + MFMA + barrier sequence.
+    # 1) Sync path (`async_dma=False`, `unroll_k=False`, not `tdm`): emit a
+    #    single `scf.for_iter` body (load + barrier + MFMA + barrier).
     #    No software pipelining; each iter waits for its own load.
     #
     # 2) Async path (`async_dma=True`): Python-unroll the K loop and
@@ -1336,6 +1445,125 @@ def build_implicit_gemm_conv(
     #    bake-off shape this is 9 (576 / 64), generating ~9x more IR
     #    but staying well under the 160 KiB LDS budget and the
     #    per-kernel ISA size limits.
+    #
+    # 3) TDM path (`pipeline="tdm"`): Two-Dimensional Marching — tiles the
+    #    computation diagonally through M×N to keep A/B live in registers
+    #    across output tiles, reducing LDS traffic.
+    #    NOT YET IMPLEMENTED — is_valid_spec rejects it until has_tdm is True
+    #    and the outer loop structure is wired up here.
+    if spec.pipeline == "tdm":
+        raise NotImplementedError(
+            "pipeline='tdm' is scaffolded but not yet implemented in rocke. "
+        )
+    if spec.pipeline == "wavelet":
+        # ----------------------------------------------------------------
+        # WAVELET pipeline — load/math wave specialization (CK Tile #8009).
+        #
+        # The workgroup is split into two roles identified by warp_id:
+        #   math waves  [0,          n_math_warps)  — LDS reads + MFMA only
+        #   load waves  [n_math_warps, total_warps)  — global loads + LDS writes only
+        #
+        # The launch block size is larger than spec.block_size (math only).
+        # Both roles share a single LDS buffer (no ping-pong).
+        #
+        # Barrier protocol — must be identical in both branches (deadlock otherwise):
+        #   barrier 0           : load waves fill LDS tile 0 → math waves can start
+        #   per iter (1..K-1):
+        #     barrier A         : math waves done reading LDS → load waves may overwrite
+        #     barrier B         : load waves done writing LDS → math waves may read next
+        #   final barrier A     : after last MFMA, so load waves can exit cleanly
+        #
+        # Total barriers per branch: 1 + 2*(K_iters-1) + 1 = 2*K_iters ✓
+        # ----------------------------------------------------------------
+        n_math_warps = spec.warp_m * spec.warp_n
+        launch_block = spec.launch_block_size
+        b.kernel.attrs["max_workgroup_size"] = launch_block
+
+        c_nmath = b.const_i32(n_math_warps)
+        is_math = b.cmp_lt(warp_id, c_nmath)
+        is_load = b.cmp_ge(warp_id, c_nmath)
+
+        K_iters = (p.K_gemm + block_k - 1) // block_k
+
+        # Normalised thread ID for load waves: subtract the math-thread
+        # offset so it falls in [0, num_load_waves * wave_size).
+        load_tid = b.sub(tid, b.const_i32(spec.block_size))
+
+        # ----------------------------------------------------------------
+        # Barrier protocol (CK Tile wavelet reference, PR #8009):
+        #
+        # AMD s_barrier pairs the Nth barrier each wave reaches regardless
+        # of the instruction address — so *count* (not PC) must match
+        # across load and math waves. Both scf_if branches below execute
+        # exactly the same number of b.sync() calls in the same order:
+        #
+        #   Load branch:  1 + 2*(K_iters-1) + 1 [+ 2 for cshuffle]
+        #   Math branch:  1 + K_iters + (K_iters-1) [+ 2 for cshuffle]
+        #                 = 1 + 2*K_iters - 1 = 2*K_iters  ✓
+        # ----------------------------------------------------------------
+
+        # ---- LOAD WAVE branch ----
+        with b.scf_if(is_load):
+            # Prologue: fill LDS with tile 0.
+            emit_wavelet_load_phase(b.const_i32(0), A_smem, B_smem, load_tid)
+            b.sync()  # barrier 0
+
+            for it in range(1, K_iters):
+                b.sync()  # barrier A: math done reading previous LDS
+                emit_wavelet_load_phase(
+                    b.const_i32(it * block_k), A_smem, B_smem, load_tid
+                )
+                b.sync()  # barrier B: LDS ready for math waves
+
+            b.sync()  # final barrier A: math waves finish last MFMA
+
+            # Mirror cshuffle epilogue barriers so counts stay symmetric.
+            # CShuffleEpilogue.store emits 2 syncs (step-0 alias-reuse +
+            # step-2 LDS RAW) on the WMMA/gfx1250 path.
+            if spec.epilogue == "cshuffle":
+                b.sync()  # mirror step-0
+                b.sync()  # mirror step-2
+
+        # ---- MATH WAVE branch ----
+        with b.scf_if(is_math):
+            current_accs = [v for _, v in accs]
+
+            b.sync()  # barrier 0: wait for load waves to fill LDS tile 0
+
+            for it in range(K_iters):
+                k_off_capture[0] = b.const_i32(it * block_k)
+                current_accs = emit_mfma_phase(A_smem, B_smem, current_accs)
+                b.sync()  # barrier A: signal math done reading LDS
+                if it < K_iters - 1:
+                    b.sync()  # barrier B: wait for load waves to write next LDS
+
+            # ---- epilogue inside math branch ----
+            final_accs_math = _apply_accumulator_epilogue(
+                b, spec.acc_epilogue, current_accs
+            )
+            if epilogue_override is not None:
+                epilogue_override(b, spec, final_accs_math, grid, d_rsrc, extra_context)
+            elif spec.epilogue == "cshuffle":
+                _emit_cshuffle_epilogue(b, spec, final_accs_math, grid, d_rsrc, op=op)
+            elif op.family == "wmma":
+                _emit_direct_epilogue_wmma(
+                    b,
+                    spec,
+                    op,
+                    final_accs_math,
+                    warp_m_idx,
+                    warp_n_idx,
+                    lane,
+                    block_m_off_v,
+                    block_n_off_v,
+                    d_rsrc,
+                    c0,
+                )
+            else:
+                _emit_direct_epilogue(b, spec, final_accs_math, grid, d_rsrc)
+
+        return b.kernel
+
     if spec.unroll_k:
         # Double-buffered Python-unrolled K-loop software pipeline.
         #
@@ -1602,7 +1830,8 @@ def _emit_cshuffle_epilogue(
         )
         _cshuffle_kwargs["max_store_vec"] = vec_c
     if op is not None and op.family == "wmma":
-        _epi = CShuffleEpilogue.from_grid_op(op=op, grid=grid, **_cshuffle_kwargs)
+        _wmma_kwargs = {k: v for k, v in _cshuffle_kwargs.items() if k != "no_alias"}
+        _epi = CShuffleEpilogue.from_grid_op(op=op, grid=grid, **_wmma_kwargs)
     else:
         _epi = CShuffleEpilogue.from_grid(atom=spec.atom, grid=grid, **_cshuffle_kwargs)
     _epi.store(
