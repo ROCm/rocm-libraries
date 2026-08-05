@@ -18,8 +18,7 @@ namespace hipdnn_sdk_test_utils
 {
 
 template <typename InputType>
-static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
-                  std::unordered_map<int64_t, void*>>
+std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<int64_t, void*>>
     buildSdpaFwdGraph(SdpaFwdTensorBundle<InputType>& tensorBundle,
                       hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
                       bool causalMask = false,
@@ -110,8 +109,7 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
 }
 
 template <typename InputType>
-static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
-                  std::unordered_map<int64_t, void*>>
+std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<int64_t, void*>>
     buildSdpaBwdGraph(SdpaBwdTensorBundle<InputType>& tensorBundle,
                       hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
                       float* runtimeScaleHostPtr = nullptr)
