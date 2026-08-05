@@ -31,6 +31,8 @@
 
 #include <vector>
 
+#ifdef HIPSPARSE_WITH_SPGEAM
+
 // hipSPARSE SpGEAM descriptor. Wraps the staged rocSPARSE SpGEAM descriptor and
 // caches the analysis buffer size so that it can be shared by the nnz and compute
 // steps (matching the single-buffer cuSPARSE SpGEAM interface).
@@ -609,3 +611,5 @@ hipsparseStatus_t hipsparseSpGEAM(hipsparseHandle_t          handle,
 
     return HIPSPARSE_STATUS_SUCCESS;
 }
+
+#endif /* HIPSPARSE_WITH_SPGEAM */

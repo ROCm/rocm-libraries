@@ -24,26 +24,33 @@
 #ifndef HIPSPARSE_SPGEAM_H
 #define HIPSPARSE_SPGEAM_H
 
+// The generic SpGEAM API is gated behind the HIPSPARSE_WITH_SPGEAM build-time feature flag.
+#include "hipsparse-config.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 /*! \ingroup generic_module
+*  \brief Create a sparse matrix sparse matrix addition descriptor.
+*
 *  \details
 *  \p hipsparseSpGEAM_createDescr creates a sparse matrix sparse matrix addition descriptor. It should be
 *  destroyed at the end using \ref hipsparseSpGEAM_destroyDescr().
 */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 13030)
+#if(defined(HIPSPARSE_WITH_SPGEAM) && (!defined(CUDART_VERSION) || CUDART_VERSION >= 13030))
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpGEAM_createDescr(hipsparseSpGEAMDescr_t* descr);
 #endif
 
 /*! \ingroup generic_module
+*  \brief Destroy a sparse matrix sparse matrix addition descriptor.
+*
 *  \details
 *  \p hipsparseSpGEAM_destroyDescr destroys a sparse matrix sparse matrix addition descriptor and releases all
 *  resources used by the descriptor.
 */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 13030)
+#if(defined(HIPSPARSE_WITH_SPGEAM) && (!defined(CUDART_VERSION) || CUDART_VERSION >= 13030))
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpGEAM_destroyDescr(hipsparseSpGEAMDescr_t descr);
 #endif
@@ -92,7 +99,7 @@ hipsparseStatus_t hipsparseSpGEAM_destroyDescr(hipsparseSpGEAMDescr_t descr);
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p opA != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE or
 *          \p opB != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE.
 */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 13030)
+#if(defined(HIPSPARSE_WITH_SPGEAM) && (!defined(CUDART_VERSION) || CUDART_VERSION >= 13030))
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpGEAM_bufferSize(hipsparseHandle_t          handle,
                                              hipsparseOperation_t       opA,
@@ -154,7 +161,7 @@ hipsparseStatus_t hipsparseSpGEAM_bufferSize(hipsparseHandle_t          handle,
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p opA != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE or
 *          \p opB != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE.
 */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 13030)
+#if(defined(HIPSPARSE_WITH_SPGEAM) && (!defined(CUDART_VERSION) || CUDART_VERSION >= 13030))
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpGEAM_nnz(hipsparseHandle_t          handle,
                                       hipsparseOperation_t       opA,
@@ -234,7 +241,7 @@ hipsparseStatus_t hipsparseSpGEAM_nnz(hipsparseHandle_t          handle,
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p opA != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE or
 *          \p opB != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE.
 */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 13030)
+#if(defined(HIPSPARSE_WITH_SPGEAM) && (!defined(CUDART_VERSION) || CUDART_VERSION >= 13030))
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpGEAM(hipsparseHandle_t          handle,
                                   hipsparseOperation_t       opA,

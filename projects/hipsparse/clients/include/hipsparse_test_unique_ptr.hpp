@@ -342,7 +342,7 @@ namespace hipsparse_test
     };
 #endif
 
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 13030)
+#if(defined(HIPSPARSE_WITH_SPGEAM) && (!defined(CUDART_VERSION) || CUDART_VERSION >= 13030))
     struct spgeam_struct
     {
         hipsparseSpGEAMDescr_t descr;

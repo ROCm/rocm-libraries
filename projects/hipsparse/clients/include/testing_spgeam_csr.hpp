@@ -42,7 +42,7 @@ using namespace hipsparse_test;
 template <typename T>
 void testing_spgeam_csr_bad_arg(const Arguments& argus)
 {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 13030)
+#if(defined(HIPSPARSE_WITH_SPGEAM) && (!defined(CUDART_VERSION) || CUDART_VERSION >= 13030))
     int64_t              m         = 100;
     int64_t              n         = 100;
     int64_t              nnz_A     = 100;
@@ -288,7 +288,7 @@ void testing_spgeam_csr_bad_arg(const Arguments& argus)
 template <typename T>
 void testing_spgeam_csr(Arguments argus)
 {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 13030)
+#if(defined(HIPSPARSE_WITH_SPGEAM) && (!defined(CUDART_VERSION) || CUDART_VERSION >= 13030))
     int                  m        = argus.M;
     int                  n        = argus.N;
     T                    h_alpha  = argus.get_alpha<T>();

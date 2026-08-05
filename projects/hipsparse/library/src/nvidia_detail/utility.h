@@ -1050,7 +1050,7 @@ namespace hipsparse
     }
 #endif
 
-#if(CUDART_VERSION >= 13030)
+#if(defined(HIPSPARSE_WITH_SPGEAM) && CUDART_VERSION >= 13030)
     inline cusparseSpGEAMAlg_t hipSpGEAMAlgToCudaSpGEAMAlg(hipsparseSpGEAMAlg_t alg)
     {
         switch(alg)

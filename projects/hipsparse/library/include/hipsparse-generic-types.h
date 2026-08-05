@@ -163,7 +163,7 @@ typedef struct hipsparseSpGEMMDescr* hipsparseSpGEMMDescr_t;
  *  hipsparseSpGEAM_nnz(), and hipsparseSpGEAM(). It must be initialized using hipsparseSpGEAM_createDescr(). It
  *  should be destroyed at the end using hipsparseSpGEAM_destroyDescr().
  */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 13030)
+#if(defined(HIPSPARSE_WITH_SPGEAM) && (!defined(CUDART_VERSION) || CUDART_VERSION >= 13030))
 typedef struct hipsparseSpGEAMDescr* hipsparseSpGEAMDescr_t;
 #endif
 
@@ -621,7 +621,7 @@ typedef enum
  *  This is a list of the \ref hipsparseSpGEAMAlg_t types that are used by the hipSPARSE
  *  library to perform sparse matrix sparse matrix addition.
  */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 13030)
+#if(defined(HIPSPARSE_WITH_SPGEAM) && (!defined(CUDART_VERSION) || CUDART_VERSION >= 13030))
 typedef enum
 {
     HIPSPARSE_SPGEAM_ALG1 = 0 /**< Default SpGEAM algorithm. */

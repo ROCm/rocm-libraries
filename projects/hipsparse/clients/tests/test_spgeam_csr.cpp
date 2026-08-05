@@ -24,7 +24,7 @@
 #include "test.hpp"
 #include "testing_spgeam_csr.hpp"
 
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 13030)
+#if(defined(HIPSPARSE_WITH_SPGEAM) && (!defined(CUDART_VERSION) || CUDART_VERSION >= 13030))
 TEST_ROUTINE(spgeam_csr,
              generic,
              arg.M,

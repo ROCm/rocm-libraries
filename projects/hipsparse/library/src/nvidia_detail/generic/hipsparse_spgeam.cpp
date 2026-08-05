@@ -28,7 +28,7 @@
 
 #include "../utility.h"
 
-#if(CUDART_VERSION >= 13030)
+#if(defined(HIPSPARSE_WITH_SPGEAM) && CUDART_VERSION >= 13030)
 namespace
 {
     // Only C = alpha * op(A) + beta * op(B) with non-transpose operations on CSR matrices is

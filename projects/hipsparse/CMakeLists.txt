@@ -69,6 +69,7 @@ endif()
 
 option(HIPSPARSE_BUILD_TESTING "Build test client." OFF)
 option(HIPSPARSE_ENABLE_SPMV_BSR "Build hipSPARSE with BSR format support in hipsparseSpMV." ON)
+option(HIPSPARSE_ENABLE_SPGEAM "Build hipSPARSE with the generic SpGEAM (sparse matrix sparse matrix addition) API." ON)
 option(BUILD_WITH_CSC_TRSV "Build hipSPARSE clients with CSC format support tests for hipsparseSpSV (requires a rocSPARSE built with BUILD_WITH_CSC_TRSV)." ON)
 option(BUILD_WITH_CSC_TRSM "Build hipSPARSE clients with CSC format support tests for hipsparseSpSM (requires a rocSPARSE built with BUILD_WITH_CSC_TRSM)." ON)
 option(HIPSPARSE_ENABLE_COVERAGE "Build with code coverage enabled." OFF)
