@@ -157,6 +157,35 @@ void testRuntimeComplexAndExplicitAxisGemm() {
     require(realD == columnBias, "Runtime GEMM explicit column-axis bias mismatch.");
 }
 
+void testOutputSelection() {
+    using namespace roc::host_validation;
+
+    const std::array<float, 4> a{1, 2, 3, 4};
+    const std::array<float, 4> b{5, 6, 7, 8};
+    const std::array<float, 4> c{};
+    std::array<float, 4> d{-99, -99, -99, -99};
+
+    GemmProblem problem(
+        GemmOperand(TensorView::fromNative<float>(Layout::contiguous(Shape{2, 2}),
+                                                  std::span<const float>(a))),
+        GemmOperand(TensorView::fromNative<float>(Layout::contiguous(Shape{2, 2}),
+                                                  std::span<const float>(b))),
+        TensorView::fromNative<float>(Layout::contiguous(Shape{2, 2}), std::span<const float>(c)),
+        MutableTensorView::fromNative<float>(Layout::contiguous(Shape{2, 2}), std::span<float>(d)),
+        ScalarType::Float32);
+    problem.outputSelection = OutputSelection::explicitIndices({0, 3});
+    const GemmRunInfo run = referenceGemm(problem);
+    require(run.outputElementsComputed == 2,
+            "Selected-output GEMM reported the wrong element count.");
+    require(d[0] == 19 && d[1] == -99 && d[2] == -99 && d[3] == 50,
+            "Selected-output GEMM modified the wrong elements.");
+
+    const auto prime = OutputSelection::primeStride(10, 10, 3).indices(10);
+    require(prime == std::vector<size_t>({0, 3, 6, 9}), "Prime-stride output selection mismatch.");
+    require(OutputSelection::primeStride(10, 10, 0).selectsAll(),
+            "Zero requested elements did not preserve all-output behavior.");
+}
+
 void testActivations() {
     using namespace roc::host_validation;
 
@@ -299,6 +328,7 @@ int main() {
     testRuntimeReferenceGemm();
     testRuntimeMixedAndBlockScaledGemm();
     testRuntimeComplexAndExplicitAxisGemm();
+    testOutputSelection();
     testActivations();
     testStridedAndOffsetViews();
     testGenerationAndComparison();

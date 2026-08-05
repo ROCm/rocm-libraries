@@ -1185,7 +1185,6 @@ namespace TensileLite
                  (inputs.scaleA == nullptr || inputs.scaleB == nullptr)) ||
                 (problem.mxBlockA() > 0 && (inputs.mxsa == nullptr || inputs.mxsb == nullptr)))
                 return false;
-            if (elementsToValidate < problem.d().totalLogicalElements()) return false;
             if (inputs.a == nullptr || inputs.b == nullptr || inputs.c == nullptr ||
                 inputs.d == nullptr || inputs.batchA != nullptr || inputs.batchB != nullptr ||
                 inputs.batchC != nullptr || inputs.batchD != nullptr || inputs.batchOffsetA != 0 ||
@@ -1330,6 +1329,29 @@ namespace TensileLite
             const size_t k = problem.boundSize(0);
             const size_t batches = problem.batchSize(0);
             if (problem.useBias() && problem.useScaleAlphaVec() && m == n) return false;
+            const OutputSelection globalSelection
+                = OutputSelection::primeStride(problem.d().totalLogicalElements(),
+                                               problem.d().totalAllocatedElements(),
+                                               elementsToValidate);
+            std::vector<std::vector<size_t>> selectedByBatch;
+            if(!globalSelection.selectsAll())
+            {
+                selectedByBatch.resize(batches);
+                for(size_t logicalIndex :
+                    globalSelection.indices(problem.d().totalLogicalElements()))
+                {
+                    std::vector<int64_t> coordinate(problem.d().dimensions());
+                    CoordNumbered(logicalIndex,
+                                  coordinate.begin(),
+                                  coordinate.end(),
+                                  problem.d().sizes().begin(),
+                                  problem.d().sizes().end());
+                    const size_t selectedBatch = static_cast<size_t>(coordinate[batchD]);
+                    const size_t row           = static_cast<size_t>(coordinate[indexMD]);
+                    const size_t column        = static_cast<size_t>(coordinate[indexND]);
+                    selectedByBatch.at(selectedBatch).push_back(row * n + column);
+                }
+            }
             bool aConjugate = false;
             bool bConjugate = false;
             for (auto const& op : problem.aOps())
@@ -1477,6 +1499,9 @@ namespace TensileLite
                             problem.f32XdlMathOp() == rocisa::DataType::XFloat32
                         ? MathMode::XFloat32
                         : MathMode::Default;
+                if(!globalSelection.selectsAll())
+                    runtimeProblem.outputSelection
+                        = OutputSelection::explicitIndices(selectedByBatch[batch]);
                 referenceGemm(runtimeProblem);
             }
             return true;
