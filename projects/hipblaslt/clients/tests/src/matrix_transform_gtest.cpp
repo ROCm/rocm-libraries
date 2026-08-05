@@ -32,7 +32,7 @@
 #include <hip/hip_runtime_api.h>
 #include <hipblaslt/hipblaslt.h>
 #include <numeric>
-#include <roc/host_validation/data_generation.hpp>
+#include <roc/host_validation/validation.hpp>
 #include <tuple>
 #include <utility>
 #include <vector>

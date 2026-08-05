@@ -7,7 +7,7 @@
 #include <cmath>
 #include <cstddef>
 #include <limits>
-#include <roc/host_validation/tensor.hpp>
+#include <roc/host_validation/detail/tensor_views.hpp>
 #include <span>
 #include <stdexcept>
 #include <vector>
