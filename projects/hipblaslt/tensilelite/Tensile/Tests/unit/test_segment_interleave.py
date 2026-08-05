@@ -23,8 +23,9 @@ class _FakeDataType:
         return self._nbytes
 
 def _vw8_state(**ovr):
-    # TLUA/TLUB are TOP-LEVEL state keys (not under ProblemType); DataType is an object.
-    s = dict(NumWaves=4, WavefrontSize=32, MacroTile0=256, MacroTile1=256, DepthU=128,
+    # DataType is an object (mirrors the real API). MacroTile0/1 are derived below, not set
+    # here, so a test only overrides the MI primitives it cares about and the tile follows.
+    s = dict(NumWaves=4, WavefrontSize=32, DepthU=128,
              ISA=(12, 5, 0),
              LdsOffsetA=0, LdsBlockSizePerPadA=2048, LdsBlockSizePerPadB=2048,
              LdsPadA=8, LdsPadB=8, VectorWidthA=8, VectorWidthB=8,
@@ -32,7 +33,12 @@ def _vw8_state(**ovr):
              UnrollMajorLDSA=1, UnrollMajorLDSB=1,
              ProblemType=dict(Sparse=0, DataType=_FakeDataType(), MXBlockA=0, MXBlockB=0))
     s["ProblemType"] = {**s["ProblemType"], **ovr.pop("ProblemType", {})}
-    s.update(ovr); return s
+    s.update(ovr)
+    # Derive MacroTile from the MI geometry unless a test overrides it explicitly, so every
+    # state is MI-consistent by construction: MacroTile = MatrixInst * MIWaveTile * MIWaveGroup.
+    s.setdefault("MacroTile0", s["MatrixInstM"] * s["MIWaveTile"][0] * s["MIWaveGroup"][0])
+    s.setdefault("MacroTile1", s["MatrixInstN"] * s["MIWaveTile"][1] * s["MIWaveGroup"][1])
+    return s
 
 def test_vw8_applies_with_handedit_values():
     # Footprint-packed tight: writeStrideBytes = fA+fB (post-pad).
@@ -73,7 +79,7 @@ def test_vwb_fine_unaligned_uses_bcontig():
     # column advance), B cannot be split -> fall back to the bcontig layout [A0][B0][B1][A1]:
     # B stays whole (baseline reads, WaveTileB unrestricted), only A moves to a separate segment. MT*x224
     # VWB1: compCols=112, vIdxCols=32, 112 % 32 != 0. Span-neutral (blockSpan 0), B relocated.
-    r = evaluate(_vw8_state(MacroTile1=224, VectorWidthB=1))
+    r = evaluate(_vw8_state(MIWaveTile=[8, 7], VectorWidthB=1))  # WaveTileB=7 -> MT1=224
     assert r["applicable"] is True and r["reason"] == "bcontig"
     o = r["offsets"]
     # fA=33024, fB=28896 -> ldsBaseB=fA, A stride=fA+2fB, B not interleaved.
@@ -82,24 +88,25 @@ def test_vwb_fine_unaligned_uses_bcontig():
     assert "BCONTIG" in r["segmentMap"]
 
 def test_bcontig_small_mt_aligned_applies():
-    # Small MT where fA+2fB stays in one segment: bcontig pushes A1 to the next segment boundary
-    # (bcontig-aligned, grows LDS). Needs PGR2 + forced (LDSSI=1); B stays whole/baseline.
-    r = evaluate(_vw8_state(MacroTile0=128, MacroTile1=120, VectorWidthB=1,
+    # Small footprint where fA+2fB stays in one segment: bcontig pushes A1 to the next segment
+    # boundary (bcontig-aligned, grows LDS). Needs PGR2 + forced (LDSSI=1); B stays whole/baseline.
+    # DepthU=64 shrinks the footprint; MIWaveTile[1]=7 -> MT1=224, the unreadable odd-B tile.
+    r = evaluate(_vw8_state(MIWaveTile=[8, 7], DepthU=64, VectorWidthB=1,
                             PrefetchGlobalRead=2, LDSSegmentInterleave=1))
     assert r["applicable"] is True and r["reason"] == "bcontig-aligned" and r["aligned"] is True
     o = r["offsets"]
-    # fA=16512; A stride pushed to the segment boundary; B (fB=15472) stays contiguous/baseline.
+    # fA=16512; A stride pushed to the segment boundary; B (fB=14448) stays contiguous/baseline.
     assert o["ldsBaseB"] == 16512 and o["writeStrideBytes"] == SEG and o["bBaseline"] is True
     assert r["blockSpan"] == SEG + 16512               # A1 ends at base+pre+fA
     assert "BCONTIG-ALIGNED" in r["segmentMap"]
 
 def test_bcontig_small_mt_auto_skips():
     # Auto (-1) refuses the LDS-growing bcontig-aligned branch (like split aligned).
-    r = evaluate(_vw8_state(MacroTile0=128, MacroTile1=120, VectorWidthB=1, PrefetchGlobalRead=2))
+    r = evaluate(_vw8_state(MIWaveTile=[8, 7], DepthU=64, VectorWidthB=1, PrefetchGlobalRead=2))
     assert r["applicable"] is False and "auto: skip aligned" in r["reason"]
 
 def test_bcontig_small_mt_needs_pgr2():
-    r = evaluate(_vw8_state(MacroTile0=128, MacroTile1=120, VectorWidthB=1,
+    r = evaluate(_vw8_state(MIWaveTile=[8, 7], DepthU=64, VectorWidthB=1,
                             PrefetchGlobalRead=1, LDSSegmentInterleave=1))
     assert r["applicable"] is False and "PGR" in r["reason"]
 
@@ -109,15 +116,15 @@ def test_vwa_finer_than_half_skips():
     assert r["applicable"] is False and "WaveTileA/2" in r["reason"]
 
 def test_small_mt_skips_without_pgr2():
-    # Small MT is the aligned candidate, but it requires PGR2 double-buffer; with no
+    # Small footprint is the aligned candidate, but it requires PGR2 double-buffer; with no
     # PrefetchGlobalRead set it skips to baseline (buffering gate).
-    r = evaluate(_vw8_state(MacroTile0=128, MacroTile1=128))
+    r = evaluate(_vw8_state(DepthU=64))
     assert r["applicable"] is False and "PGR" in r["reason"]
 
 def test_non_square_small_skips_without_pgr2():
-    # MT0=256, MT1=128: coarse VW ok (16*8=128 >= 256//2), but fA+fB < SEG -> small MT;
-    # no PGR2 -> buffering gate skip.
-    r = evaluate(_vw8_state(MacroTile1=128))
+    # Non-square: MIWaveTile[1]=4 -> MT1=128 (< MT0=256), VWB=4 <= WaveTileB=4. Coarse VW ok
+    # (16*8=128 >= 256//2), fA+fB < SEG -> small MT; no PGR2 -> buffering gate skip.
+    r = evaluate(_vw8_state(MIWaveTile=[8, 4], VectorWidthB=4))
     assert r["applicable"] is False and "PGR" in r["reason"]
 
 def _aligned_tiles_disjoint(r, fA, fB):
@@ -128,8 +135,9 @@ def _aligned_tiles_disjoint(r, fA, fB):
     return all(tiles[i][1] <= tiles[i + 1][0] for i in range(3))
 
 def test_aligned_applies_small_mt():
-    # MT128 bf16 symmetric: fA=fB=16512, sum<SEG -> aligned. Footprint-packed, segment stride.
-    r = evaluate(_vw8_state(MacroTile0=128, MacroTile1=128, PrefetchGlobalRead=2, LDSSegmentInterleave=1))
+    # Shallow DepthU=64 (MT stays 256, MI-consistent): fA=fB=16512, sum<SEG -> aligned.
+    # Footprint-packed, segment stride.
+    r = evaluate(_vw8_state(DepthU=64, PrefetchGlobalRead=2, LDSSegmentInterleave=1))
     assert r["applicable"] is True and r["aligned"] is True
     assert r["offsets"] == {"ldsBaseB": 16512, "writeStrideBytes": SEG,
                             "footprintPacked": True}
@@ -139,8 +147,8 @@ def test_aligned_applies_small_mt():
 
 def test_aligned_fine_vwb_applies():
     # Fine-VWB is supported on the aligned branch too (per-vIdx component jump + enough
-    # LocalReadAddr +64K registers, see KernelWriter numVgprLocalReadAddr). MT128x128 VWB2.
-    r = evaluate(_vw8_state(MacroTile0=128, MacroTile1=128, PrefetchGlobalRead=2,
+    # LocalReadAddr +64K registers, see KernelWriter numVgprLocalReadAddr). DepthU=64 VWB2.
+    r = evaluate(_vw8_state(DepthU=64, PrefetchGlobalRead=2,
                             LDSSegmentInterleave=1, VectorWidthB=2))
     assert r["applicable"] is True and r["aligned"] is True
 
@@ -148,14 +156,14 @@ def test_aligned_unequal_pad_no_overlap():
     # Asymmetric pads (padA=16 != padB=8): footprint packing places each tile at its own post-pad
     # size, so ldsBaseB=base+fA (no compensation) and the segment stride keeps all 4 tiles disjoint.
     # fA=16384+(16384//2048)*(16*2)=16640 ; fB=16384+(16384//2048)*(8*2)=16512
-    r = evaluate(_vw8_state(MacroTile0=128, MacroTile1=128, PrefetchGlobalRead=2,
+    r = evaluate(_vw8_state(DepthU=64, PrefetchGlobalRead=2,
                             LdsPadA=16, LdsPadB=8, LDSSegmentInterleave=1))
     assert r["applicable"] is True and r["aligned"] is True and r["offsets"]["footprintPacked"]
     assert r["offsets"]["ldsBaseB"] == 16640         # base + fA, no compensation
     assert _aligned_tiles_disjoint(r, 16640, 16512)
 
 def test_aligned_skips_pgr_not_2():
-    r = evaluate(_vw8_state(MacroTile0=128, MacroTile1=128, PrefetchGlobalRead=1))
+    r = evaluate(_vw8_state(DepthU=64, PrefetchGlobalRead=1))
     assert r["applicable"] is False and "PGR" in r["reason"]
 
 def test_skips_1ldsbuffer():
@@ -168,7 +176,7 @@ def test_skips_1ldsbuffer():
 def test_subtile_skips():
     # Subtile is a separate codegen body; interleave never applies (tight or aligned).
     assert evaluate(_vw8_state(UseSubtileImpl=1))["applicable"] is False
-    r = evaluate(_vw8_state(MacroTile0=128, MacroTile1=128, PrefetchGlobalRead=2, UseSubtileImpl=1))
+    r = evaluate(_vw8_state(DepthU=64, PrefetchGlobalRead=2, UseSubtileImpl=1))
     assert r["applicable"] is False and "subtile" in r["reason"]
 
 def test_aligned_budget_ok_fits():
@@ -219,14 +227,15 @@ def test_auto_enables_tight():
 
 def test_auto_skips_aligned():
     # -1 (auto) declines the LDS-growing aligned branch even when it is applicable; needs 1.
-    r = evaluate(_vw8_state(MacroTile0=128, MacroTile1=128, PrefetchGlobalRead=2, LDSSegmentInterleave=-1))
+    r = evaluate(_vw8_state(DepthU=64, PrefetchGlobalRead=2, LDSSegmentInterleave=-1))
     assert r["applicable"] is False and "auto" in r["reason"]
-    r1 = evaluate(_vw8_state(MacroTile0=128, MacroTile1=128, PrefetchGlobalRead=2, LDSSegmentInterleave=1))
+    r1 = evaluate(_vw8_state(DepthU=64, PrefetchGlobalRead=2, LDSSegmentInterleave=1))
     assert r1["applicable"] is True and r1["aligned"] is True
 
 def test_miwavegroup_not_2x2_skips():
     # footprint packing assumes 2 waves per MFMA dim; NumWaves=4 with MIWG [4,1]/[1,4] passes
     # Solution.py's prod>1 / pow2 gates but would lose/OOB the component jump. Must skip.
+    # MacroTile follows MIWG (derived in the helper), so each state stays MI-consistent.
     for miwg in ([4, 1], [1, 4]):
         r = evaluate(_vw8_state(MIWaveGroup=miwg))
         assert r["applicable"] is False and "MIWaveGroup" in r["reason"], miwg
@@ -295,6 +304,64 @@ def test_mxf4_tight_relocates_scales():
 def test_fp32_skips():
     r = evaluate(_vw8_state(ProblemType={"DataType": _FakeDataType(bf16=False, half=False, nbytes=4)}))
     assert r["applicable"] is False and ("bf16" in r["reason"] or "fp16" in r["reason"])
+
+def test_not_wave_separated_tdm_skips():
+    # enableTDMA/B off (or NumWaves<=1) means the kernel is not wave-separated TDM -> no interleave.
+    r = evaluate(_vw8_state(enableTDMA=0))
+    assert r["applicable"] is False and "not wave-separated TDM" in r["reason"]
+
+def test_localsplitu_skips():
+    # LocalSplitU>1 changes the LDS reduction layout the offsets assume -> reject.
+    r = evaluate(_vw8_state(LocalSplitU=2))
+    assert r["applicable"] is False and "LocalSplitU" in r["reason"]
+
+def test_numcomp_not_2_skips():
+    # NumWaves//2 != 2 (NumWaves=6 -> 3 components); write/read both assume exactly 2 comps.
+    # MIWaveGroup=[3,2] keeps prod=6=NumWaves (MT0=384 follows via the helper).
+    r = evaluate(_vw8_state(NumWaves=6, MIWaveGroup=[3, 2]))
+    assert r["applicable"] is False and "numComp!=2" in r["reason"]
+
+def test_sparse_skips():
+    # Sparse metadata adds its own LDS region; the interleave layout does not account for it.
+    r = evaluate(_vw8_state(ProblemType={"Sparse": 1}))
+    assert r["applicable"] is False and "sparse" in r["reason"]
+
+def test_zero_pad_footprint_is_unpadded():
+    # LdsPad*=0 (or block=0) -> _pad returns 0, so each footprint is the raw data size with no pad.
+    r = evaluate(_vw8_state(LdsPadA=0))
+    assert r["applicable"] is True
+    # fA = MacroTile0//numComp * DepthU * bpe = 128 * 128 * 2 = 32768, no pad.
+    assert r["offsets"]["ldsBaseB"] == 32768
+
+def test_aligned_budget_nonpositive_block():
+    # offsetBlk = max(naturalOffsetBlk, blockSpan) <= 0 -> nothing to place -> reject.
+    ok, blk = aligned_budget_ok(0, 2, 0, 327680)
+    assert ok is False and blk is None
+
+def test_aligned_port_split():
+    # port-split A (VWA=WaveTileA/2 + TDMSplit) composes with the aligned branch. VWA=4 stays
+    # non-coarse at MT0=256 (16*4=64 < 128); DepthU=64 shrinks fA+fB below one segment -> aligned.
+    r = evaluate(_vw8_state(DepthU=64, VectorWidthA=4, TDMSplit=1,
+                            PrefetchGlobalRead=2, LDSSegmentInterleave=1))
+    assert r["applicable"] is True and r["reason"] == "aligned"
+    assert r["offsets"].get("portSplitA") is True
+
+def test_bcontig_port_split():
+    # port-split A composes with the bcontig fallback (unreadable B, whole-B gap pushes A1 over).
+    r = evaluate(_vw8_state(MIWaveTile=[8, 7], VectorWidthB=1,
+                            VectorWidthA=4, TDMSplit=1))  # WaveTileB=7 -> MT1=224
+    assert r["applicable"] is True and r["reason"] == "bcontig"
+    assert r["offsets"].get("portSplitA") is True
+
+def test_bcontig_aligned_port_split():
+    # port-split A composes with the bcontig-aligned branch (small tile, A1 padded to next segment).
+    # VWA=4 keeps A non-coarse (port-split); MIWaveTile[1]=7 -> MT1=224 (unreadable odd-B);
+    # DepthU=64 shrinks fA+2fB below one segment so A1 must be padded across the boundary.
+    r = evaluate(_vw8_state(MIWaveTile=[8, 7], DepthU=64, VectorWidthB=1,
+                            VectorWidthA=4, TDMSplit=1, PrefetchGlobalRead=2,
+                            LDSSegmentInterleave=1))
+    assert r["applicable"] is True and r["reason"] == "bcontig-aligned"
+    assert r["offsets"].get("portSplitA") is True
 
 def test_mixed_type_per_tensor_bpe():
     # Mixed types: DataType=fp8 passes the gate, but MacDataTypeA=fp4 (0.5B) / MacDataTypeB=fp8 (1B).
