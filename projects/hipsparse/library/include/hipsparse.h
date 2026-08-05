@@ -38,6 +38,7 @@
 #ifndef HIPSPARSE_H
 #define HIPSPARSE_H
 
+#include "hipsparse-config.h"
 #include "hipsparse-export.h"
 #include "hipsparse-version.h"
 

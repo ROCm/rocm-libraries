@@ -24,7 +24,7 @@
 #ifndef HIPSPARSE_GENERIC_TYPES_H
 #define HIPSPARSE_GENERIC_TYPES_H
 
-#include "hipsparse-version.h"
+#include "hipsparse-config.h"
 
 /*! \ingroup types_module
  *  \brief Generic API opaque structure holding information for a sparse vector.
