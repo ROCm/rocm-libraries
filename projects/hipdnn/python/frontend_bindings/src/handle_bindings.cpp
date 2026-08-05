@@ -9,6 +9,7 @@
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/shared_ptr.h>
 #include <nanobind/stl/string.h>
+#include <nanobind/stl/vector.h>
 #include <stdexcept>
 #include <vector>
 
@@ -97,6 +98,25 @@ public:
         }
         return reinterpret_cast<uintptr_t>(stream);
     }
+
+    std::vector<std::string> getLoadedEnginePluginPaths() const
+    {
+        std::vector<std::filesystem::path> paths;
+        const auto error = hipdnn_frontend::getLoadedEnginePluginPaths(get(), paths);
+        if(error.is_bad())
+        {
+            throw std::runtime_error("Failed to get loaded engine plugin paths: "
+                                     + error.get_message());
+        }
+
+        std::vector<std::string> pathStrings;
+        pathStrings.reserve(paths.size());
+        for(const auto& path : paths)
+        {
+            pathStrings.push_back(path.string());
+        }
+        return pathStrings;
+    }
     EngineInfo getEngineInfo(int64_t engineId) const
     {
         checkNotDestroyed();
@@ -182,6 +202,9 @@ void handleBindings(nb::module_& m)
              nb::arg("stream"),
              "Set the HIP stream (as integer pointer)")
         .def("get_stream", &HandleWrapper::getStream, "Get the HIP stream (as integer pointer)")
+        .def("get_loaded_engine_plugin_paths",
+             &HandleWrapper::getLoadedEnginePluginPaths,
+             "Get paths of engine plugins loaded by this handle")
         .def("get_engine_info",
              &HandleWrapper::getEngineInfo,
              nb::arg("engine_id"),
@@ -223,4 +246,9 @@ void handleBindings(nb::module_& m)
         [](const HandleWrapper& h) { return h.getStream(); },
         nb::arg("handle"),
         "Get the HIP stream from a handle");
+    m.def(
+        "get_loaded_engine_plugin_paths",
+        [](const HandleWrapper& h) { return h.getLoadedEnginePluginPaths(); },
+        nb::arg("handle"),
+        "Get paths of engine plugins loaded by a handle");
 }

@@ -43,7 +43,11 @@ class TestHandle:
         graph = hipdnn.Graph().set_preferred_engine_id_ext("MIOPEN_ENGINE")
         engine_id = graph.get_preferred_engine_id_ext()
 
-        info = hipdnn.create_handle().get_engine_info(engine_id)
+        handle = hipdnn.create_handle()
+        try:
+            info = handle.get_engine_info(engine_id)
+        except IndexError:
+            pytest.skip("MIOpen engine plugin is not loaded")
 
         assert isinstance(info, hipdnn.EngineInfo)
         assert info.engine_id == engine_id
@@ -60,6 +64,37 @@ class TestHandle:
 
         with pytest.raises(IndexError, match="Engine ID is not loaded"):
             handle.get_engine_info(9223372036854775807)
+
+    @pytest.mark.parametrize(
+        "get_paths",
+        [
+            lambda h: h.get_loaded_engine_plugin_paths(),
+            hipdnn.get_loaded_engine_plugin_paths,
+        ],
+        ids=["method", "module_fn"],
+    )
+    def test_get_loaded_engine_plugin_paths(self, get_paths):
+        """Loaded engine plugin paths are returned as strings."""
+        handle = hipdnn.create_handle()
+        paths = get_paths(handle)
+
+        assert isinstance(paths, list)
+        assert all(isinstance(path, str) for path in paths)
+
+    @pytest.mark.parametrize(
+        "get_paths",
+        [
+            lambda h: h.get_loaded_engine_plugin_paths(),
+            hipdnn.get_loaded_engine_plugin_paths,
+        ],
+        ids=["method", "module_fn"],
+    )
+    def test_get_loaded_engine_plugin_paths_after_destroy_raises(self, get_paths):
+        """Querying plugin paths through a destroyed handle raises RuntimeError."""
+        handle = hipdnn.create_handle()
+        hipdnn.destroy_handle(handle)
+        with pytest.raises(RuntimeError, match="destroyed"):
+            get_paths(handle)
 
     def test_destroy_handle(self):
         """destroy_handle() invalidates the handle (repr shows destroyed)."""

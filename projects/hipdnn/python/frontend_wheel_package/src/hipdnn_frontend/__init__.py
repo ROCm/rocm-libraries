@@ -125,6 +125,7 @@ __all__ = [
     "destroy_handle",
     "set_stream",
     "get_stream",
+    "get_loaded_engine_plugin_paths",
     # Provisional HIP primitives (not hipDNN API); an unstable surface -- avoid
     # depending on these.
     "HipEvent",
