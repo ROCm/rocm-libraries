@@ -26,8 +26,6 @@ void validateTiled(const GemmProblem& problem) {
         if (k % problem.a.blockScale->blockSize != 0 || k % problem.b.blockScale->blockSize != 0)
             throw std::invalid_argument("Tiled backend requires K divisible by both block sizes.");
     }
-    if (!problem.outputSelection.selectsAll())
-        throw std::invalid_argument("Tiled backend currently requires all outputs.");
 }
 
 template <typename Accumulator>
@@ -44,12 +42,16 @@ GemmRunInfo runTiled(const GemmProblem& problem) {
         runtimeMathFunction<Accumulator>(problem.mathMode);
 
     std::optional<RuntimeVectorReader<Accumulator>> bias;
+    std::optional<RuntimeVectorReader<Accumulator>> preScaleA;
+    std::optional<RuntimeVectorReader<Accumulator>> preScaleB;
     std::optional<RuntimeVectorReader<Accumulator>> scaleAlpha;
     std::optional<RuntimeVectorReader<Accumulator>> scaleA;
     std::optional<RuntimeVectorReader<Accumulator>> scaleB;
     std::optional<RuntimeMatrixReader<Accumulator>> blockScaleA;
     std::optional<RuntimeMatrixReader<Accumulator>> blockScaleB;
     if (problem.epilogue.bias) bias.emplace(problem.epilogue.bias->values);
+    if (problem.a.preQuantizationScale) preScaleA.emplace(*problem.a.preQuantizationScale);
+    if (problem.b.preQuantizationScale) preScaleB.emplace(*problem.b.preQuantizationScale);
     if (problem.epilogue.scaleAlpha) scaleAlpha.emplace(problem.epilogue.scaleAlpha->values);
     if (problem.epilogue.scaleA) scaleA.emplace(*problem.epilogue.scaleA);
     if (problem.epilogue.scaleB) scaleB.emplace(*problem.epilogue.scaleB);
@@ -61,6 +63,12 @@ GemmRunInfo runTiled(const GemmProblem& problem) {
     const size_t m = problem.a.values.shape()[0];
     const size_t k = problem.a.values.shape()[1];
     const size_t n = problem.b.values.shape()[1];
+    std::vector<bool> selectedOutputs;
+    if (!problem.outputSelection.selectsAll()) {
+        selectedOutputs.assign(problem.d.shape().elementCount(), false);
+        for (const size_t index : problem.outputSelection.indices(problem.d.shape().elementCount()))
+            selectedOutputs[index] = true;
+    }
     const Accumulator alpha = runtimeScalar<Accumulator>(problem.epilogue.alpha, "alpha");
     const Accumulator beta = runtimeScalar<Accumulator>(problem.epilogue.beta, "beta");
     const Accumulator activationParameter0 =
@@ -85,6 +93,7 @@ GemmRunInfo runTiled(const GemmProblem& problem) {
                     for (size_t reduction = 0; reduction < reductions; ++reduction) {
                         Accumulator value = conjugateIfNeeded(
                             a(rowBase + row, reductionBase + reduction), problem.a.conjugate);
+                        if (preScaleA) value *= (*preScaleA)[0];
                         aTile[row * reductions + reduction] = operandMath(quantizeA(value));
                     }
                 }
@@ -92,6 +101,7 @@ GemmRunInfo runTiled(const GemmProblem& problem) {
                     for (size_t column = 0; column < columns; ++column) {
                         Accumulator value = conjugateIfNeeded(
                             b(reductionBase + reduction, columnBase + column), problem.b.conjugate);
+                        if (preScaleB) value *= (*preScaleB)[0];
                         bTile[reduction * columns + column] = operandMath(quantizeB(value));
                     }
                 }
@@ -125,6 +135,8 @@ GemmRunInfo runTiled(const GemmProblem& problem) {
                 for (size_t column = 0; column < columns; ++column) {
                     const size_t globalRow = rowBase + row;
                     const size_t globalColumn = columnBase + column;
+                    if (!selectedOutputs.empty() && !selectedOutputs[globalRow * n + globalColumn])
+                        continue;
                     Accumulator effectiveAlpha = alpha;
                     if (scaleA) effectiveAlpha *= (*scaleA)[globalRow];
                     if (scaleB) effectiveAlpha *= (*scaleB)[globalColumn];

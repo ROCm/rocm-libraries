@@ -136,6 +136,29 @@ TEST(ReferenceTiledBackend, DelegatesDenseRuntimeGemm)
     EXPECT_EQ(d, (std::vector<float>{49, 71, 65, 95}));
 }
 
+TEST(ReferenceTiledBackend, PromotesHalfDestinationAccumulationToFloat)
+{
+    const size_t K = 64;
+    auto problem = makePackedProblem(rocisa::DataType::Half,
+                                     rocisa::DataType::Half,
+                                     rocisa::DataType::Half,
+                                     1,
+                                     1,
+                                     K);
+    std::vector<Half> a(K, Half(0.1f));
+    std::vector<Half> b(K, Half(0.1f));
+    std::vector<Half> c(1, Half(0));
+    std::vector<Half> d(1, Half(-99));
+    ContractionInputs inputs(
+        a.data(), b.data(), c.data(), d.data(), Half(1), Half(0));
+
+    ASSERT_TRUE(tryRuntimeTiledGemm(problem, inputs, /*elementsToValidate=*/-1));
+    float expected = 0;
+    for(size_t reduction = 0; reduction < K; ++reduction)
+        expected += static_cast<float>(a[reduction]) * static_cast<float>(b[reduction]);
+    EXPECT_EQ(d[0], Half(expected));
+}
+
 TEST(ReferenceOutputSelection, ComputesPrimeStrideSubset)
 {
     const size_t M = 4;
@@ -500,6 +523,36 @@ TEST(ReferenceRuntimeCanonical, HandlesFloat16Accumulation)
     for(size_t reduction = 0; reduction < K; ++reduction)
         expected = Half(expected + Half(a[reduction] * b[reduction]));
     EXPECT_EQ(d[0], expected);
+}
+
+TEST(ReferenceRuntimeCanonical, AppliesScalarScaleBeforeComputeQuantization)
+{
+    auto problem = makePackedProblem(rocisa::DataType::Half,
+                                     rocisa::DataType::Float,
+                                     rocisa::DataType::Float,
+                                     1,
+                                     1,
+                                     1);
+    problem.setComputeInputTypeA(rocisa::DataType::Float8);
+    problem.setUseScaleAB("Scalar");
+    problem.setScaleA(rocisa::DataType::Float, 1);
+    problem.setScaleB(rocisa::DataType::Float, 1);
+
+    std::vector<Half> a{Half(1.1f)};
+    std::vector<float> b{1};
+    std::vector<float> c{0};
+    std::vector<float> d{-99};
+    float scaleA = 3;
+    float scaleB = 1;
+    ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
+    inputs.scaleA = &scaleA;
+    inputs.scaleB = &scaleB;
+
+    ASSERT_TRUE(tryRuntimeCanonicalGemm(problem, inputs, /*elementsToValidate=*/-1));
+    EXPECT_EQ(d[0], 3.25f);
+    d[0] = -99;
+    ASSERT_TRUE(tryRuntimeTiledGemm(problem, inputs, /*elementsToValidate=*/-1));
+    EXPECT_EQ(d[0], 3.25f);
 }
 
 #if !defined(_WIN32) && defined(TENSILE_USE_FP6)
