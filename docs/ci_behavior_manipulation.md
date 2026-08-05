@@ -34,6 +34,13 @@ The gated build replaces the normal one for that project rather than running alo
 it, so there is no second job and no duplicate artifact — but it also means the
 flag-off configuration is not built while the label is applied.
 
+The target project does not need a job of its own. Projects get merged together when
+they are built as a set — an optional component folds into its parent, and a dependency
+folds into the project that absorbs it — and the option follows its target onto
+whichever job ends up building it. Labelling `miopen` works whether the pull request
+touches `projects/miopen` directly or only `projects/hipdnn`. The option is applied
+last, so it beats a conflicting default that a merge brought in.
+
 ## Workflow dispatch behavior
 
 For `workflow_dispatch`, you are able to trigger CI in [GitHub's therock-ci.yml workflow page](https://github.com/ROCm/rocm-libraries/actions/workflows/therock-ci.yml). To trigger a workflow dispatch, click "Run workflow" and fill in the fields accordingly.

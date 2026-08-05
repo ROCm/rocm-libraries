@@ -141,6 +141,54 @@ class TheRockMatrixTest(unittest.TestCase):
         )
         self.assertIn("-DTHEROCK_FLAG_TEST=ON", self._all_options(project_to_run))
 
+    def test_label_gated_options_injected_when_target_is_optional_components_parent(
+        self,
+    ):
+        # The mirror of the case above: the label names the parent rather than the
+        # component. Only the component's subtree changed, so the parent's job
+        # exists solely because the merge created it -- it was never in the set of
+        # projects derived from the changed subtrees.
+        project_to_run = self._run_gated("miopen", ["projects/hipdnn"])
+        self.assertEqual(len(project_to_run), 1)
+        self.assertIn("-DTHEROCK_FLAG_TEST=ON", self._all_options(project_to_run))
+
+    def test_label_gated_options_injected_for_every_optional_component_parent(self):
+        # Sweep the case above across every optional component. A parent named by
+        # a label must pick up the flag no matter which component pulled its job
+        # into existence.
+        reverse_map = {}
+        for subtree, project in therock_matrix.subtree_to_project_map.items():
+            reverse_map.setdefault(project, subtree)
+        components = sorted(therock_matrix.additional_options.items())
+        self.assertTrue(components)
+        for component, options in components:
+            parent = options["project_to_add"]
+            subtree = reverse_map.get(component)
+            self.assertIsNotNone(subtree, f"no subtree maps to {component}")
+            with self.subTest(component=component, parent=parent):
+                project_to_run = self._run_gated(parent, [subtree])
+                self.assertIn(
+                    "-DTHEROCK_FLAG_TEST=ON", self._all_options(project_to_run)
+                )
+
+    def test_label_gated_option_is_last_even_when_a_merge_appends_after_it(self):
+        # blas is absorbed into miopen, which appends blas's defaults to miopen's
+        # options. An option injected for miopen still has to come out last, or it
+        # loses to whatever the merge brought in.
+        override = "-DTHEROCK_ENABLE_BLAS=OFF"
+        with mock.patch.dict(
+            therock_matrix.LABEL_GATED_CMAKE_OPTIONS,
+            self._gated("miopen", override),
+            clear=True,
+        ):
+            project_to_run = therock_matrix.collect_projects_to_run(
+                ["projects/miopen", "projects/rocblas"], ["ci:test-flag"]
+            )
+        self.assertEqual(len(project_to_run), 1)
+        options = self._all_options(project_to_run)
+        self.assertEqual(options[-1], override)
+        self.assertIn("-DTHEROCK_ENABLE_BLAS=ON", options)
+
     def test_label_gated_option_overriding_default_is_ordered_last(self):
         # cmake takes the last -D for a given name, so an injected option that
         # contradicts a default must survive dedup in last position.
@@ -164,7 +212,7 @@ class TheRockMatrixTest(unittest.TestCase):
         # The defaults are read from the module rather than spelled out, so
         # adding a real option to hip-kernel-provider does not break this test.
         defaults = therock_matrix.project_map["hip-kernel-provider"]["cmake_options"]
-        self.assertEqual(options, [*defaults, override, "-DTHEROCK_ENABLE_ALL=OFF"])
+        self.assertEqual(options, [*defaults, "-DTHEROCK_ENABLE_ALL=OFF", override])
 
     def test_label_gated_options_injected_for_every_known_project(self):
         # Every project reachable from subtree_to_project_map must accept an

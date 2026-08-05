@@ -203,9 +203,17 @@ SUBTREE_EXTRA_MATRIX_PROJECTS = {
 #
 # `project` must name an entry in `project_map` or `additional_options`; anything
 # else is rejected up front by `validate_label_gated_cmake_options` rather than
-# failing obscurely later. Injected options are appended after the project's
-# defaults and option order is preserved end to end, so injecting a value that
-# contradicts a default reliably wins (cmake takes the last -D for a given name).
+# failing obscurely later.
+#
+# A target does not have to survive as its own job. Projects get merged into one
+# another twice -- an optional component into its `project_to_add` parent, and a
+# dependency into the project that absorbs it -- and an injection follows its
+# target through both, landing on whichever job ends up doing that project's
+# build. If the target is not built at all, nothing is injected.
+#
+# Injected options are appended last, after every default and merged-in option,
+# so injecting a value that contradicts a default wins (cmake takes the last -D
+# for a given name).
 LABEL_GATED_CMAKE_OPTIONS = {}
 
 
@@ -253,29 +261,28 @@ def collect_projects_to_run(subtrees, pr_labels=None):
         if extra_matrix:
             projects.add(extra_matrix)
 
-    # Inject label-gated cmake options into their target project's options. This
-    # runs before the merge passes below so the options travel with the project
-    # wherever it ends up: an optional component merges its options into its
-    # `project_to_add` parent, and a dependency merges into the project that
-    # absorbs it. Injecting afterwards would miss both and silently drop the flag.
-    # Options are appended to whichever map owns the target, since optional
-    # components live in `additional_options` and never in `project_map`.
+    # Collect the label-gated cmake options to inject, keyed by target project.
+    # They are not written into the option lists here: the merge passes below
+    # rewrite those lists, so an option injected now can be reordered behind a
+    # merged-in default or dropped outright when a parent's options are replaced.
+    # Instead the target is followed through each merge and the options are
+    # appended at emit time, which keeps them last and keeps them attached to the
+    # job that actually builds the target.
     validate_label_gated_cmake_options()
+    pending_injections = {}
     for label in pr_labels or []:
         gated = LABEL_GATED_CMAKE_OPTIONS.get(label)
         if not gated:
             continue
-        target = gated["project"]
-        # Only inject when the target is actually being built, so the default
-        # build is untouched.
-        if target not in projects:
-            continue
-        owner = (
-            local_additional_options
-            if target in local_additional_options
-            else local_project_map
+        pending_injections.setdefault(gated["project"], []).extend(
+            gated["cmake_options"]
         )
-        owner[target]["cmake_options"].extend(gated["cmake_options"])
+
+    def redirect_injection(absorbed, absorbed_into):
+        """Follow an injection when `absorbed`'s build moves onto another job."""
+        options = pending_injections.pop(absorbed, None)
+        if options:
+            pending_injections.setdefault(absorbed_into, []).extend(options)
 
     for project in list(projects):
         # Check if an optional math component was included.
@@ -301,6 +308,11 @@ def collect_projects_to_run(subtrees, pr_labels=None):
                     project_options_to_add["projects_to_test"]
                 )
 
+            # Either way the component is now built by `project_to_add`'s job, and
+            # the component itself never produces one, so an injection aimed at it
+            # has to move with it.
+            redirect_injection(project, project_to_add)
+
     # Check for potential dependencies
     to_remove_from_project_map = []
     for project in list(projects):
@@ -316,6 +328,7 @@ def collect_projects_to_run(subtrees, pr_labels=None):
                         local_project_map[dependency]["projects_to_test"]
                     )
                     to_remove_from_project_map.append(dependency)
+                    redirect_injection(dependency, project)
 
     # if dependency is included in projects and parent is found, we delete the dependency as the parent will build and test
     for to_remove_item in to_remove_from_project_map:
@@ -339,6 +352,15 @@ def collect_projects_to_run(subtrees, pr_labels=None):
 
             # To save time, only build what is needed
             project_map_data["cmake_options"].extend(["-DTHEROCK_ENABLE_ALL=OFF"])
+
+            # Label-gated options go on last so they override anything above them,
+            # including a default this job absorbed from another project. Targets
+            # that are not built never reach here, which is what keeps an unrelated
+            # PR's build identical to the default one.
+            project_map_data["cmake_options"].extend(
+                pending_injections.get(project, [])
+            )
+
             # To ensure uniqueness of flags and tests. dict.fromkeys dedupes while
             # preserving insertion order; set() does not, and its iteration order
             # varies with PYTHONHASHSEED between runs. Order matters because cmake
