@@ -220,7 +220,7 @@ __forceinline__ __device__ __bf16 fmin(__bf16 x, __bf16 y)
 
 __forceinline__ __device__ __bf16 pow(__bf16 x, __bf16 y)
 {
-    return static_cast<__bf16>(exp(static_cast<float>(x * y)));
+    return static_cast<__bf16>(pow(static_cast<float>(x), static_cast<float>(y)));
 }
 __forceinline__ __device__ __bf16 tan(__bf16 x)
 {
@@ -307,35 +307,35 @@ __forceinline__ __device__ double fma(double a, double b, double c)
 // 4-element vector overloads
 //=============================================================================
 
-#define SINGLE_OPERAND_VEC_MATH(BASE)                                     \
-    template <typename FpVecType>                                         \
-    __forceinline__ __device__ FpVecType BASE(FpVecType x)                \
-    {                                                                     \
-        constexpr auto VecSize = mapped_vector_info<FpVecType>::size;     \
-        if constexpr(VecSize == 4)                                        \
-        {                                                                 \
-            FpVecType out;                                                \
-            out.x = detail::BASE(x.x);                                    \
-            out.y = detail::BASE(x.y);                                    \
-            out.z = detail::BASE(x.z);                                    \
-            out.w = detail::BASE(x.w);                                    \
-            return out;                                                   \
-        }                                                                 \
-        else if constexpr(VecSize == 2)                                   \
-        {                                                                 \
-            FpVecType out;                                                \
-            out.x = detail::BASE(x.x);                                    \
-            out.y = detail::BASE(x.y);                                    \
-            return out;                                                   \
-        }                                                                 \
-        else if constexpr(VecSize == 1)                                   \
-        {                                                                 \
-            return detail::BASE(x);                                       \
-        }                                                                 \
-        else                                                              \
-        {                                                                 \
-            static_assert(false, "Unsupported miopen vector operation."); \
-        }                                                                 \
+#define SINGLE_OPERAND_VEC_MATH(BASE)                                                  \
+    template <typename FpVecType>                                                      \
+    __forceinline__ __device__ FpVecType BASE(FpVecType x)                             \
+    {                                                                                  \
+        constexpr auto VecSize = mapped_vector_info<FpVecType>::size;                  \
+        if constexpr(VecSize == 4)                                                     \
+        {                                                                              \
+            FpVecType out;                                                             \
+            out.x = detail::BASE(x.x);                                                 \
+            out.y = detail::BASE(x.y);                                                 \
+            out.z = detail::BASE(x.z);                                                 \
+            out.w = detail::BASE(x.w);                                                 \
+            return out;                                                                \
+        }                                                                              \
+        else if constexpr(VecSize == 2)                                                \
+        {                                                                              \
+            FpVecType out;                                                             \
+            out.x = detail::BASE(x.x);                                                 \
+            out.y = detail::BASE(x.y);                                                 \
+            return out;                                                                \
+        }                                                                              \
+        else if constexpr(VecSize == 1)                                                \
+        {                                                                              \
+            return detail::BASE(x);                                                    \
+        }                                                                              \
+        else                                                                           \
+        {                                                                              \
+            static_assert(false, "Unsupported hip-kernel-provider vector operation."); \
+        }                                                                              \
     }
 
 SINGLE_OPERAND_VEC_MATH(exp);
@@ -347,35 +347,35 @@ SINGLE_OPERAND_VEC_MATH(fabs);
 
 #undef SINGLE_OPERAND_VEC_MATH
 
-#define DUAL_OPERAND_VEC_MATH(BASE)                                       \
-    template <typename FpVecType>                                         \
-    __forceinline__ __device__ FpVecType BASE(FpVecType x, FpVecType y)   \
-    {                                                                     \
-        constexpr auto VecSize = mapped_vector_info<FpVecType>::size;     \
-        if constexpr(VecSize == 4)                                        \
-        {                                                                 \
-            FpVecType out;                                                \
-            out.x = detail::BASE(x.x, y.x);                               \
-            out.y = detail::BASE(x.y, y.y);                               \
-            out.z = detail::BASE(x.z, y.z);                               \
-            out.w = detail::BASE(x.w, y.w);                               \
-            return out;                                                   \
-        }                                                                 \
-        else if constexpr(VecSize == 2)                                   \
-        {                                                                 \
-            FpVecType out;                                                \
-            out.x = detail::BASE(x.x, y.x);                               \
-            out.y = detail::BASE(x.y, y.y);                               \
-            return out;                                                   \
-        }                                                                 \
-        else if constexpr(VecSize == 1)                                   \
-        {                                                                 \
-            return detail::BASE(x, y);                                    \
-        }                                                                 \
-        else                                                              \
-        {                                                                 \
-            static_assert(false, "Unsupported miopen vector operation."); \
-        }                                                                 \
+#define DUAL_OPERAND_VEC_MATH(BASE)                                                    \
+    template <typename FpVecType>                                                      \
+    __forceinline__ __device__ FpVecType BASE(FpVecType x, FpVecType y)                \
+    {                                                                                  \
+        constexpr auto VecSize = mapped_vector_info<FpVecType>::size;                  \
+        if constexpr(VecSize == 4)                                                     \
+        {                                                                              \
+            FpVecType out;                                                             \
+            out.x = detail::BASE(x.x, y.x);                                            \
+            out.y = detail::BASE(x.y, y.y);                                            \
+            out.z = detail::BASE(x.z, y.z);                                            \
+            out.w = detail::BASE(x.w, y.w);                                            \
+            return out;                                                                \
+        }                                                                              \
+        else if constexpr(VecSize == 2)                                                \
+        {                                                                              \
+            FpVecType out;                                                             \
+            out.x = detail::BASE(x.x, y.x);                                            \
+            out.y = detail::BASE(x.y, y.y);                                            \
+            return out;                                                                \
+        }                                                                              \
+        else if constexpr(VecSize == 1)                                                \
+        {                                                                              \
+            return detail::BASE(x, y);                                                 \
+        }                                                                              \
+        else                                                                           \
+        {                                                                              \
+            static_assert(false, "Unsupported hip-kernel-provider vector operation."); \
+        }                                                                              \
     }
 
 DUAL_OPERAND_VEC_MATH(fmin);
@@ -398,35 +398,35 @@ __forceinline__ __device__ FpVecType max(FpVecType x, FpVecType y)
 
 #undef DUAL_OPERAND_VEC_MATH
 
-#define TRIPLE_OPERAND_VEC_MATH(BASE)                                                \
-    template <typename FpVecType>                                                    \
-    __forceinline__ __device__ FpVecType BASE(FpVecType x, FpVecType y, FpVecType z) \
-    {                                                                                \
-        constexpr auto VecSize = mapped_vector_info<FpVecType>::size;                \
-        if constexpr(VecSize == 4)                                                   \
-        {                                                                            \
-            FpVecType out;                                                           \
-            out.x = detail::BASE(x.x, y.x, z.x);                                     \
-            out.y = detail::BASE(x.y, y.y, z.y);                                     \
-            out.z = detail::BASE(x.z, y.z, z.z);                                     \
-            out.w = detail::BASE(x.w, y.w, z.w);                                     \
-            return out;                                                              \
-        }                                                                            \
-        else if constexpr(VecSize == 2)                                              \
-        {                                                                            \
-            FpVecType out;                                                           \
-            out.x = detail::BASE(x.x, y.x, z.x);                                     \
-            out.y = detail::BASE(x.y, y.y, z.y);                                     \
-            return out;                                                              \
-        }                                                                            \
-        else if constexpr(VecSize == 1)                                              \
-        {                                                                            \
-            return detail::BASE(x, y, z);                                            \
-        }                                                                            \
-        else                                                                         \
-        {                                                                            \
-            static_assert(false, "Unsupported miopen vector operation.");            \
-        }                                                                            \
+#define TRIPLE_OPERAND_VEC_MATH(BASE)                                                  \
+    template <typename FpVecType>                                                      \
+    __forceinline__ __device__ FpVecType BASE(FpVecType x, FpVecType y, FpVecType z)   \
+    {                                                                                  \
+        constexpr auto VecSize = mapped_vector_info<FpVecType>::size;                  \
+        if constexpr(VecSize == 4)                                                     \
+        {                                                                              \
+            FpVecType out;                                                             \
+            out.x = detail::BASE(x.x, y.x, z.x);                                       \
+            out.y = detail::BASE(x.y, y.y, z.y);                                       \
+            out.z = detail::BASE(x.z, y.z, z.z);                                       \
+            out.w = detail::BASE(x.w, y.w, z.w);                                       \
+            return out;                                                                \
+        }                                                                              \
+        else if constexpr(VecSize == 2)                                                \
+        {                                                                              \
+            FpVecType out;                                                             \
+            out.x = detail::BASE(x.x, y.x, z.x);                                       \
+            out.y = detail::BASE(x.y, y.y, z.y);                                       \
+            return out;                                                                \
+        }                                                                              \
+        else if constexpr(VecSize == 1)                                                \
+        {                                                                              \
+            return detail::BASE(x, y, z);                                              \
+        }                                                                              \
+        else                                                                           \
+        {                                                                              \
+            static_assert(false, "Unsupported hip-kernel-provider vector operation."); \
+        }                                                                              \
     }
 
 TRIPLE_OPERAND_VEC_MATH(fma);
