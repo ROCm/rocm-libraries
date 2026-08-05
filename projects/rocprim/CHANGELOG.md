@@ -68,6 +68,10 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 
 * Updated config system to pick better fallback configs for untuned GPUs.
 
+### Upcoming changes
+
+* Deprecated the `ROCPRIM_PRINT_ERROR_ONCE` macro.
+
 ### Changed
 
 * Changed various APIs with undefined behaviors to abort with a trap instead of printing a runtime error with `ROCPRIM_PRINT_ERROR_ONCE` 
@@ -82,13 +86,8 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 
 ### Removed
 
-* Removed deprecated `zip_iterator::operator->`, `invoke_result_binary_op_t`.
 * Removed unused `equality`, `inequality`, `sum`, `max`, `min` from thread_operator.hpp.
 * Removed duplicate `inequality_operator` from binary_op_warpper.hpp
-
-### Upcoming changes
-
-* Deprecated the `ROCPRIM_PRINT_ERROR_ONCE` macro.
 
 ## rocPRIM 4.2.0 for ROCm 7.2
 
