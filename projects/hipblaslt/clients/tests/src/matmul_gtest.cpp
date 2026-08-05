@@ -34,6 +34,69 @@
 
 #include <gtest/gtest-spi.h>
 
+TEST(HostValidationEpilogueBridge, DelegatesToProductIndependentComponent)
+{
+    std::array<float, 4> input{-2, 1, 3, -4};
+    std::array<float, 4> output{};
+    std::array<float, 4> rawOutput{};
+    std::array<float, 4> auxiliary{};
+    std::array<float, 2> bias{1, 2};
+    float                amax   = 5;
+    float                scaleD = 2;
+    float                scaleE = 3;
+
+    roc::host_validation::hipblaslt_adapter::EpilogueArguments arguments;
+    arguments.rows             = 2;
+    arguments.columns          = 2;
+    arguments.leadingDimension = 2;
+    arguments.input            = input.data();
+    arguments.output           = output.data();
+    arguments.rawOutput        = rawOutput.data();
+    arguments.amax             = &amax;
+    arguments.auxiliary        = auxiliary.data();
+    arguments.auxiliaryType    = HIP_R_32F;
+    arguments.outputScale      = &scaleD;
+    arguments.auxiliaryScale   = &scaleE;
+    arguments.bias             = bias.data();
+    arguments.biasType         = HIP_R_32F;
+    arguments.activation       = roc::host_validation::Activation::Relu;
+    arguments.outputType       = HIP_R_32F;
+    arguments.computeType      = HIP_R_32F;
+    roc::host_validation::hipblaslt_adapter::referenceEpilogue(arguments);
+
+    EXPECT_EQ(output, (std::array<float, 4>{0, 6, 8, 0}));
+    EXPECT_EQ(rawOutput, output);
+    EXPECT_EQ(auxiliary, (std::array<float, 4>{-3, 9, 12, -6}));
+    EXPECT_EQ(amax, 5);
+}
+
+TEST(HostValidationEpilogueBridge, RoutesGradientAuxiliaryInput)
+{
+    std::array<float, 4> gradient{10, 20, 30, 40};
+    std::array<float, 4> activationInput{-1, 1, 2, -2};
+    std::array<float, 4> output{};
+    float                one = 1;
+
+    roc::host_validation::hipblaslt_adapter::EpilogueArguments arguments;
+    arguments.rows                  = 2;
+    arguments.columns               = 2;
+    arguments.leadingDimension      = 2;
+    arguments.input                 = gradient.data();
+    arguments.output                = output.data();
+    arguments.auxiliary             = activationInput.data();
+    arguments.auxiliaryType         = HIP_R_32F;
+    arguments.outputScale           = &one;
+    arguments.auxiliaryScale        = &one;
+    arguments.activation            = roc::host_validation::Activation::Relu;
+    arguments.activationApplication = roc::host_validation::ActivationApplication::Gradient;
+    arguments.outputType            = HIP_R_32F;
+    arguments.computeType           = HIP_R_32F;
+    roc::host_validation::hipblaslt_adapter::referenceEpilogue(arguments);
+
+    EXPECT_EQ(output, (std::array<float, 4>{0, 20, 30, 0}));
+    EXPECT_EQ(activationInput, (std::array<float, 4>{-1, 1, 2, -2}));
+}
+
 namespace
 {
 

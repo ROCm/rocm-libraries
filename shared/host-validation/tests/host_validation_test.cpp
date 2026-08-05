@@ -186,6 +186,69 @@ void testOutputSelection() {
             "Zero requested elements did not preserve all-output behavior.");
 }
 
+void testReferenceEpilogue() {
+    using namespace roc::host_validation;
+
+    const std::array<float, 4> input{-2, 1, 3, -4};
+    const std::array<float, 2> bias{1, 2};
+    std::array<uint16_t, 4> output{};
+    std::array<float, 4> rawOutput{};
+    std::array<uint16_t, 4> auxiliary{};
+    std::array<float, 1> amax{};
+
+    EpilogueProblem problem(TensorView::fromNative<float>(Layout::contiguous(Shape{2, 2}),
+                                                          std::span<const float>(input)),
+                            MutableTensorView(ScalarType::Float16, Layout::contiguous(Shape{2, 2}),
+                                              std::as_writable_bytes(std::span<uint16_t>(output))),
+                            ScalarType::Float32);
+    problem.rawOutput = MutableTensorView::fromNative<float>(Layout::contiguous(Shape{2, 2}),
+                                                             std::span<float>(rawOutput));
+    problem.auxiliaryOutput =
+        MutableTensorView(ScalarType::BFloat16, Layout::contiguous(Shape{2, 2}),
+                          std::as_writable_bytes(std::span<uint16_t>(auxiliary)));
+    problem.amax =
+        MutableTensorView::fromNative<float>(Layout::contiguous(Shape{1}), std::span<float>(amax));
+    problem.bias = VectorBinding{
+        TensorView::fromNative<float>(Layout::contiguous(Shape{2}), std::span<const float>(bias)),
+        MatrixAxis::Row,
+    };
+    problem.outputScale = 2.0;
+    problem.auxiliaryScale = 3.0;
+    problem.activation = Activation::Relu;
+    referenceEpilogue(problem);
+
+    const TensorView outputView(ScalarType::Float16, Layout::contiguous(Shape{2, 2}),
+                                std::as_bytes(std::span<const uint16_t>(output)));
+    const TensorView auxiliaryView(ScalarType::BFloat16, Layout::contiguous(Shape{2, 2}),
+                                   std::as_bytes(std::span<const uint16_t>(auxiliary)));
+    require(outputView.loadAs<float>({0, 0}) == 0 && outputView.loadAs<float>({0, 1}) == 4 &&
+                outputView.loadAs<float>({1, 0}) == 10 && outputView.loadAs<float>({1, 1}) == 0,
+            "Reference epilogue output mismatch.");
+    require(rawOutput == std::array<float, 4>{0, 4, 10, 0},
+            "Reference epilogue raw output mismatch.");
+    require(auxiliaryView.loadAs<float>({0, 0}) == -3 && auxiliaryView.loadAs<float>({0, 1}) == 6 &&
+                auxiliaryView.loadAs<float>({1, 0}) == 15 &&
+                auxiliaryView.loadAs<float>({1, 1}) == -6,
+            "Reference epilogue auxiliary output mismatch.");
+    require(amax[0] == 5, "Reference epilogue AMax mismatch.");
+
+    const std::array<float, 4> gradientInput{10, 20, 30, 40};
+    const std::array<float, 4> activationInput{-1, 1, 2, -2};
+    std::array<float, 4> gradientOutput{};
+    EpilogueProblem gradient(TensorView::fromNative<float>(Layout::contiguous(Shape{2, 2}),
+                                                           std::span<const float>(gradientInput)),
+                             MutableTensorView::fromNative<float>(Layout::contiguous(Shape{2, 2}),
+                                                                  std::span<float>(gradientOutput)),
+                             ScalarType::Float32);
+    gradient.auxiliaryInput = TensorView::fromNative<float>(
+        Layout::contiguous(Shape{2, 2}), std::span<const float>(activationInput));
+    gradient.activation = Activation::Relu;
+    gradient.activationApplication = ActivationApplication::Gradient;
+    referenceEpilogue(gradient);
+    require(gradientOutput == std::array<float, 4>{0, 20, 30, 0},
+            "Reference gradient epilogue mismatch.");
+}
+
 void testActivations() {
     using namespace roc::host_validation;
 
@@ -315,9 +378,8 @@ void testGenerationAndComparison() {
     Tensor runtimeObserved = runtimeExpected;
     runtimeObserved.mutableView().storeFrom({1, 2},
                                             runtimeExpected.view().loadAs<float>({1, 2}) + 1.0f);
-    const auto runtimeComparison =
-        compare(runtimeObserved.view(), runtimeExpected.view(),
-                {.absoluteTolerance = 0.0, .maxReportedMismatches = 2});
+    const auto runtimeComparison = compare(runtimeObserved.view(), runtimeExpected.view(),
+                                           {.absoluteTolerance = 0.0, .maxReportedMismatches = 2});
     require(runtimeComparison.compared == 6 && runtimeComparison.mismatches == 1 &&
                 runtimeComparison.reportedMismatches[0].index == 5,
             "Runtime tensor generation/comparison mismatch.");
@@ -329,6 +391,7 @@ int main() {
     testRuntimeMixedAndBlockScaledGemm();
     testRuntimeComplexAndExplicitAxisGemm();
     testOutputSelection();
+    testReferenceEpilogue();
     testActivations();
     testStridedAndOffsetViews();
     testGenerationAndComparison();
