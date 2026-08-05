@@ -349,6 +349,58 @@ class FusedMegaKernelSpecFp8:
     down_k: int = 128  # level 7 (down hero atom); 32 = legacy baseline
     use_dtla: bool = True  # level 8 (direct-to-LDS gate+up); False = global->VGPR
     sched_cadence: str | None = None  # level 9; None defers to ROCKE_FP8_SCHED env
+    # Gate/up emitter selection. True (default, byte-identical) = the fused
+    # across-ni K-loop with DTLA staging. False = the legacy per-(mi, ni)
+    # K-loop (``_emit_fp8_gateup_group_gemm``), which loads weights
+    # global->VGPR exactly like the down GEMM does. The fused emitter carries
+    # a_next/gb_next[ni]/ub_next[ni] live across EVERY ni at once, which is why
+    # its non-DTLA form is intractable for the backend; the per-cell emitter
+    # keeps one cell's operands live and compiles fine on the hero atom (the
+    # down GEMM has always used that shape).
+    use_fused_kloop: bool = True
+    # DTLA prefetch depth: how many gate/up N-cells are staged ahead of the one
+    # being consumed. 2 (default, byte-identical) = the original ping-pong,
+    # which issues cell ni+1 and then immediately blocks on cell ni -- only
+    # ~one iteration of MFMA work covers an HBM round trip, so waves sit in
+    # s_waitcnt. Deeper costs 2*chunks*wave_size*16B of LDS per extra buffer.
+    dtla_depth: int = 2
+    # LDS row padding in BYTES for the Hidden staging buffers (0 = off,
+    # byte-identical). The fp8 Hidden row stride is ``tile_n`` bytes, and at
+    # tile_n=128 that is exactly the 32-bank x 4B span, so every row starts on
+    # bank 0 and the down GEMM's A-read (16 lanes, 16 distinct rows) serializes
+    # 16 ways. Padding shifts each row by ``lds_pad/4`` banks. Must stay a
+    # multiple of 16 to keep ds_read_b128 / 16B stores aligned, which caps the
+    # distinct-bank count at 8 (so 16 rows land 2-way rather than 16-way).
+    lds_pad: int = 0
+    # Windowed (no-LDS) gate/up path: how many ni cells share one sched_barrier.
+    # 1 = a barrier after every cell (tightest register bound, least freedom to
+    # interleave); larger groups give the scheduler a wider region to overlap
+    # loads with MFMAs at the cost of more live fragments.
+    window_group: int = 1
+    # Down GEMM: fuse all n cells of an mi row into one K-loop so the LDS A
+    # fragment is read once instead of per cell, and the W_down loads are
+    # prefetched in a rolling window across cells. False (default) keeps the
+    # byte-identical per-cell emitter.
+    down_fused_cells: bool = False
+    down_depth: int = 2
+    down_group: int = 1
+    # How the windowed paths fence their scheduling regions. "barrier" =
+    # sched_barrier(0), a hard fence: bounds registers tightly but also caps how
+    # many loads can be in flight to one region's worth. "sgb" = express the
+    # VMEM/MFMA interleave with sched_group_barrier instead, which constrains
+    # placement without fencing, so loads from later regions can still hoist.
+    window_sched: str = "barrier"
+    # Width (along inter) of ONE dynamic fp8 scale block for the INTERMEDIATE
+    # hidden tensor. This is entirely internal -- gate/up produces it and the
+    # down GEMM consumes it -- unlike the weight scale groups, which are fixed
+    # at GROUP_K=128 by the checkpoint. The fuse-quant invariant needs a whole
+    # hidden scale block to live inside one CTA's inter tile, so pinning this to
+    # 128 is what forces tile_n_inter >= 128 and caps the grid at 6 inter
+    # slices. Lowering it to 64 legalises tile_n_inter=64 and doubles the CTA
+    # count. Requires down_k <= hidden_group_k so a down atom never straddles
+    # two hidden scale blocks, and down_fused_cells (the per-cell down emitter
+    # still assumes 128).
+    hidden_group_k: int = GROUP_K
 
     def __post_init__(self) -> None:
         if self.block_size == 0:
@@ -549,7 +601,13 @@ def _emit_fp8_gateup_group_gemm(
 
     # Per-lane scale offsets vary along the K-group index ``kg`` only.
     a_row_scale_base = b.mul(m_row, stride_a_scale)
-    n_blk = b.div(n_col, c_group_k)
+    # Derive the scale block from the WAVE-UNIFORM tile base, not from n_col.
+    # atom.n divides GROUP_K, so [n_tile_base, n_tile_base + atom.n) never
+    # straddles a scale block and the two agree exactly -- but only this form
+    # is visibly uniform to the backend, which is what lets the block scale be
+    # fetched with s_load into an SGPR instead of burning a vector memory slot
+    # on a 4-byte broadcast per MFMA.
+    n_blk = b.div(n_tile_base, c_group_k)
 
     zero = atom.zero_acc(b)
     gate_zero = atom.zero_acc(b)
@@ -650,6 +708,9 @@ def _emit_fp8_gateup_fused_kloop(
     tag: str,
     dtla=None,
     cadence: str | None = None,
+    prefetch_depth: int = 2,
+    sched_group: int = 1,
+    sched_mode: str = "barrier",
 ):
     """Gate + up fp8 GEMM fused across ALL ni cells of one mi row.
 
@@ -685,9 +746,13 @@ def _emit_fp8_gateup_fused_kloop(
     m_row = b.add(m_tile_base, lane_decode.m_in_atom)
     a_row_scale_base = b.mul(m_row, stride_a_scale)
 
-    # Per-ni n_col / n_blk for the weight-scale index math.
+    # Per-ni n_col / n_blk for the weight-scale index math. The scale block
+    # comes off the WAVE-UNIFORM tile base (atom.n divides GROUP_K, so an atom
+    # never straddles a block); n_cols stays lane-varying for the weight data
+    # addresses. Only the uniform form lets these 4-byte block scales be
+    # fetched with s_load instead of a vector memory slot per MFMA.
     n_cols = [b.add(nb, lane_decode.n_in_atom) for nb in n_tile_bases]
-    n_blks = [b.div(nc, c_group_k) for nc in n_cols]
+    n_blks = [b.div(nb, c_group_k) for nb in n_tile_bases]
 
     # Outer iter-args: gate[0..nni), up[0..nni).
     zero = atom.zero_acc(b)
@@ -701,8 +766,13 @@ def _emit_fp8_gateup_fused_kloop(
     outer = b.scf_for_iter(
         b.const_i32(0), num_groups, b.const_i32(1), iter_args, iv_name=f"kg_{tag}"
     )
+    # The windowed global->VGPR path drives its own schedule with explicit
+    # sched_barriers, and iglp_opt "owns the loop schedule" -- letting it run
+    # here would undo the window and hoist every cell's loads back to the top.
+    # Scoped to THIS loop so the down GEMM keeps its iglp cadence.
+    _use_window = dtla is None and atoms_per_group == 1
     with outer as (kg, outs):
-        _emit_loop_cadence_hint(b, cadence)
+        _emit_loop_cadence_hint(b, "none" if _use_window else cadence)
         gate_outer = list(outs[:nni])
         up_outer = list(outs[nni:])
 
@@ -852,8 +922,13 @@ def _emit_fp8_gateup_fused_kloop(
                 )
                 return g, u
 
-            # Prime: stage ni=0 into ping slot 0.
-            _stage(0, 0)
+            # Prime the pipeline: stage the first ``depth-1`` cells so that when
+            # the loop blocks on cell ni there are already ``depth-1`` further
+            # cells in flight behind it. depth=2 reproduces the original
+            # single-cell prime exactly.
+            depth = max(2, int(dtla.get("depth", 2)))
+            for _j in range(min(depth - 1, nni)):
+                _stage(_j, _j % depth)
             # DMAs per _stage call: gate + up, each ceil(b_per_lane/16) chunks.
             chunks_per_frag = (atom.b_per_lane + DTLA_CHUNK - 1) // DTLA_CHUNK
             dmas_per_stage = 2 * chunks_per_frag
@@ -885,12 +960,14 @@ def _emit_fp8_gateup_fused_kloop(
                 gb_all = [None] * nni
                 ub_all = [None] * nni
                 for ni in range(nni):
-                    if ni + 1 < nni:
-                        _stage(ni + 1, (ni + 1) % 2)
-                        b.s_waitcnt(vmcnt=dmas_per_stage)
-                    else:
-                        b.s_waitcnt(vmcnt=0)
-                    gb_all[ni], ub_all[ni] = _read(ni % 2)
+                    nxt = ni + depth - 1
+                    if nxt < nni:
+                        _stage(nxt, nxt % depth)
+                    # VMEM retires ~FIFO, so cell ni has landed once only the
+                    # cells behind it are still outstanding.
+                    ahead = min(depth - 1, nni - 1 - ni)
+                    b.s_waitcnt(vmcnt=ahead * dmas_per_stage)
+                    gb_all[ni], ub_all[ni] = _read(ni % depth)
                 accs = []
                 srcs = []
                 for ni in range(nni):
@@ -909,19 +986,18 @@ def _emit_fp8_gateup_fused_kloop(
                     u_acc[ni] = outs[2 * ni + 1]
             else:
                 for ni in range(nni):
-                    pair = ni % 2
-                    # Issue next ni's DMA into the OTHER slot BEFORE consuming
-                    # this ni's MFMAs (in flight under the MFMA). Drain only DOWN
-                    # TO the next stage's outstanding DMA count so the prefetch
-                    # stays in flight (vmcnt(0) here would serialize and kill the
-                    # overlap -- the regression DTLA-alone trap). VMEM completes
-                    # ~FIFO so this ni's stage is done once only the next
-                    # stage's DMAs remain.
-                    if ni + 1 < nni:
-                        _stage(ni + 1, (ni + 1) % 2)
-                        b.s_waitcnt(vmcnt=dmas_per_stage)
-                    else:
-                        b.s_waitcnt(vmcnt=0)
+                    pair = ni % depth
+                    # Issue cell ni+depth-1's DMA BEFORE consuming this cell, so
+                    # ``depth-1`` cells stay in flight across the wait. Drain only
+                    # DOWN TO those outstanding DMAs -- vmcnt(0) here would
+                    # serialize and kill the overlap (the DTLA-alone regression
+                    # trap). VMEM completes ~FIFO, so cell ni has landed once
+                    # only the cells behind it remain.
+                    nxt = ni + depth - 1
+                    if nxt < nni:
+                        _stage(nxt, nxt % depth)
+                    ahead = min(depth - 1, nni - 1 - ni)
+                    b.s_waitcnt(vmcnt=ahead * dmas_per_stage)
                     if a_cur is None:
                         # X-DTLA: A's DMA was issued FIRST (FIFO-earliest) and is
                         # complete after the first partial drain above. Read it
@@ -939,6 +1015,47 @@ def _emit_fp8_gateup_fused_kloop(
                     g_acc[ni] = _emit_mfma(b, atom, a_cur, gb, g_acc[ni])
                     u_acc[ni] = _emit_mfma(b, atom, a_cur, ub, u_acc[ni])
                     _emit_sgb_gateup_dtla(b, n_mfma=2, cadence=cadence)
+        elif atoms_per_group == 1:
+            # ---- windowed global->VGPR->MFMA path (no LDS) ------------------
+            # The hero atom leaves atoms_per_group == 1, so the loop below
+            # degenerates to a single trip and the legacy form ends up issuing
+            # ALL 2*nni weight fragments before the first MFMA -- 128 VGPRs of
+            # weights at nni=8, which is what makes the backend's allocator
+            # blow up. Instead roll a window of ``prefetch_depth`` cells: cell
+            # ni+depth-1's loads are issued before cell ni's MFMAs consume
+            # theirs, so at most ``depth`` gate/up pairs are live at once and
+            # the loads stay in flight under the MFMAs.
+            #
+            # Unlike DTLA there is no manual vmcnt bookkeeping: the fragments
+            # land in VGPRs, so the backend derives an exact per-register wait
+            # and only blocks on the fragment actually being consumed.
+            depth = max(2, int(prefetch_depth))
+            window_group = max(1, int(sched_group))
+            sched_mode = str(sched_mode)
+            a_cur = _a_at(0)
+            win: dict[int, tuple] = {}
+            for _j in range(min(depth, nni)):
+                win[_j] = (_gb_at(_j, 0), _ub_at(_j, 0))
+            for ni in range(nni):
+                nxt = ni + depth
+                if nxt < nni:
+                    win[nxt] = (_gb_at(nxt, 0), _ub_at(nxt, 0))
+                gb, ub = win.pop(ni)
+                g_acc[ni] = _emit_mfma(b, atom, a_cur, gb, g_acc[ni])
+                u_acc[ni] = _emit_mfma(b, atom, a_cur, ub, u_acc[ni])
+                # Pin the [issue ni+depth-1][consume ni] grouping. Without this
+                # the pre-RA scheduler hoists every cell's loads to the top of
+                # the block to maximise ILP, which recreates the all-cells-live
+                # register pressure the window exists to bound. The barrier only
+                # constrains instruction motion, so the issued loads still stay
+                # in flight across it.
+                if (ni + 1) % window_group == 0 or ni + 1 == nni:
+                    if sched_mode == "sgb":
+                        # 2 chunks x (gate, up) VMEM reads and 2 MFMAs per cell.
+                        b.sched_group_barrier(_SGB_VMEM_READ, 4 * window_group, 0)
+                        b.sched_group_barrier(_SGB_MFMA, 2 * window_group, 0)
+                    else:
+                        b.sched_barrier(0)
         else:
             # ---- legacy global->VGPR->MFMA path ----------------------------
             # Prefetch atom 0 operands (A shared + all ni B fragments).
@@ -1301,7 +1418,9 @@ def _emit_fp8_down_group_gemm(
     atoms_per_group = GROUP_K // atom.k  # 4
 
     n_col = b.add(n_tile_base, lane_decode.n_in_atom)
-    h_out_blk = b.div(n_col, c_group_k)
+    # Wave-uniform scale block (see the gate/up emitter): atom.n divides
+    # GROUP_K, so this equals n_col // GROUP_K but stays scalarisable.
+    h_out_blk = b.div(n_tile_base, c_group_k)
     # CORRECTNESS FIX: the down-GEMM A operand row must follow the per-mi atom
     # m-base (m_row_base = down_warp_m_off + mi*atom.m), not a hardcoded 0.
     # HiddenScale is row-uniform-within-block so this term is harmless for the
@@ -1393,6 +1512,140 @@ def _emit_fp8_down_group_gemm(
         b.scf_yield(down_outer_new)
 
     return outer.results[0]
+
+
+def _emit_fp8_down_fused_cells(
+    b: IRBuilder,
+    *,
+    a_view,
+    WDown: Value,
+    WDownScale: Value,
+    atom: MfmaAtom,
+    lane_decode,
+    n_tile_bases,
+    scale_view,
+    inter_slice: int,
+    inter_full: Value,
+    inter_col_base: Value,
+    stride_down_scale: Value,
+    m_row_base: Value,
+    tag: str,
+    cadence: str | None = None,
+    prefetch_depth: int = 2,
+    sched_group: int = 1,
+    sched_mode: str = "barrier",
+    hidden_group_k: int = GROUP_K,
+):
+    """Down fp8 GEMM fused across ALL n cells of one mi row.
+
+    Same dataflow and index conventions as ``_emit_fp8_down_group_gemm``, but
+    every output cell of the mi row shares ONE K-loop. Two wins over the
+    per-cell form:
+
+    * The A (Hidden, LDS) fragment depends only on ``m_row_base`` and k, NOT on
+      the cell, so it is read from LDS ONCE and reused across cells instead of
+      being re-read ``nni`` times -- and that read is the 16-way bank-conflict
+      one.
+    * The W_down fragments are prefetched in a rolling ``prefetch_depth`` window
+      across cells. At ``down_k=128`` the per-cell form has
+      ``atoms_per_group == 1``, so its register double-buffer never engages and
+      each cell loads then immediately consumes -- no load is ever in flight
+      under an MFMA. This is the same degeneracy the gate/up path had.
+
+    Returns one f32 outer accumulator per entry of ``n_tile_bases``.
+    """
+    c_group_k = b.const_i32(GROUP_K)
+    c_atom_k = b.const_i32(atom.k)
+    # The contraction walks HIDDEN scale blocks (the A-side granularity). The
+    # W_down scale stays on the checkpoint's 128-wide grid and is re-derived
+    # from the absolute inter column below, so a 64-wide hidden block simply
+    # reads the same b-scale for its two halves.
+    hgk = int(hidden_group_k)
+    c_hgk = b.const_i32(hgk)
+    atoms_per_group = hgk // atom.k
+    nni = len(n_tile_bases)
+    depth = max(2, int(prefetch_depth))
+    group = max(1, int(sched_group))
+
+    n_cols = [b.add(nb, lane_decode.n_in_atom) for nb in n_tile_bases]
+    # Wave-uniform scale block (see the gate/up emitter). n_cols stays
+    # lane-varying -- it addresses the actual W_down data, not the scale.
+    h_out_blks = [b.div(nb, c_group_k) for nb in n_tile_bases]
+    m_row = b.add(m_row_base, lane_decode.m_in_atom)
+
+    iter_args = [(f"down_outer_{tag}_{ni}", atom.zero_acc(b)) for ni in range(nni)]
+    num_groups = b.const_i32(inter_slice // hgk)
+    outer = b.scf_for_iter(
+        b.const_i32(0), num_groups, b.const_i32(1), iter_args, iv_name=f"dg_{tag}"
+    )
+    with outer as (kg, outs):
+        # As in the gate/up window: iglp_opt owns the loop schedule and would
+        # hoist every cell's loads to the top, undoing the window.
+        _emit_loop_cadence_hint(b, "none")
+        down_outer = list(outs)
+
+        a_scale_v = b.vec_extract(
+            b.smem_load_vN(scale_view.base, m_row, kg, dtype=F32, n=1), 0
+        )
+        local_k_group = b.mul(kg, c_hgk)
+        global_k_group = b.add(inter_col_base, local_k_group)
+        global_blk = b.div(global_k_group, c_group_k)
+        base_scale_off = b.mul(global_blk, stride_down_scale)
+        ab_scales = [
+            b.fmul(
+                a_scale_v,
+                b.global_load_f32(WDownScale, b.add(base_scale_off, h_out_blks[ni])),
+            )
+            for ni in range(nni)
+        ]
+
+        def _load_b_at(ni, kk):
+            return _load_b_fp8(
+                b,
+                B=WDown,
+                atom=atom,
+                lane_decode=lane_decode,
+                n_tile_base=n_tile_bases[ni],
+                k_tile_base=b.add(global_k_group, b.mul(b.const_i32(kk), c_atom_k)),
+                N=inter_full,
+            )
+
+        def _load_a_at(kk):
+            return _load_a_fp8_lds(
+                b,
+                a_view=a_view,
+                atom=atom,
+                lane_decode=lane_decode,
+                m_tile_base=m_row_base,
+                k_tile_base=b.add(local_k_group, b.mul(b.const_i32(kk), c_atom_k)),
+            )
+
+        g_acc = [atom.zero_acc(b)] * nni
+        for kk in range(atoms_per_group):
+            a_frag = _load_a_at(kk)
+            win: dict[int, Value] = {}
+            for _j in range(min(depth, nni)):
+                win[_j] = _load_b_at(_j, kk)
+            for ni in range(nni):
+                nxt = ni + depth
+                if nxt < nni:
+                    win[nxt] = _load_b_at(nxt, kk)
+                g_acc[ni] = _emit_mfma_down(b, atom, a_frag, win.pop(ni), g_acc[ni])
+                if (ni + 1) % group == 0 or ni + 1 == nni:
+                    if sched_mode == "sgb":
+                        # 2 chunks of W_down VMEM and 1 MFMA per cell.
+                        b.sched_group_barrier(_SGB_VMEM_READ, 2 * group, 0)
+                        b.sched_group_barrier(_SGB_MFMA, group, 0)
+                    else:
+                        b.sched_barrier(0)
+
+        new_outer = []
+        for ni in range(nni):
+            sv = b.vector_splat(ab_scales[ni], atom.c_per_lane)
+            new_outer.append(b.vector_fma(g_acc[ni], sv, down_outer[ni]))
+        b.scf_yield(*new_outer)
+
+    return list(outer.results)
 
 
 def _emit_down_atomic_reduce(
@@ -1589,6 +1842,12 @@ def build_moe_fused_mega_gemm_fp8(
     if not ok:
         raise ValueError(f"invalid fp8 fused-mega spec for {arch}: {why}")
     atom = spec.gate_up_atom()
+    # The down GEMM contracts the INTERMEDIATE, whose scale-block width is
+    # hidden_group_k, so its atom must be no wider than that. It shares the
+    # 16x16 C layout (and therefore lane_decode) with the gate/up atom, only
+    # the K extent differs. At the default down_k=128 this IS gate_up_atom, so
+    # existing configs are unchanged.
+    down_atom = spec.down_atom()
     # L6: the unscaled fp8 16x16x128 hero atom reuses the (catalog-registered)
     # ``mfma.scale.f32.16x16x128.f8f6f4`` intrinsic with the in-instruction E8M0
     # scales pinned to the neutral value (verified numerically standalone), so it
@@ -1619,10 +1878,18 @@ def build_moe_fused_mega_gemm_fp8(
     WDown = b.param(
         "WDown", PtrType(FP8E4M3, "global"), noalias=True, readonly=True, align=16
     )
-    AScale = b.param("AScale", PtrType(F32, "global"), readonly=True, align=4)
-    WGateScale = b.param("WGateScale", PtrType(F32, "global"), readonly=True, align=4)
-    WUpScale = b.param("WUpScale", PtrType(F32, "global"), readonly=True, align=4)
-    WDownScale = b.param("WDownScale", PtrType(F32, "global"), readonly=True, align=4)
+    AScale = b.param(
+        "AScale", PtrType(F32, "global"), noalias=True, readonly=True, align=4
+    )
+    WGateScale = b.param(
+        "WGateScale", PtrType(F32, "global"), noalias=True, readonly=True, align=4
+    )
+    WUpScale = b.param(
+        "WUpScale", PtrType(F32, "global"), noalias=True, readonly=True, align=4
+    )
+    WDownScale = b.param(
+        "WDownScale", PtrType(F32, "global"), noalias=True, readonly=True, align=4
+    )
     SortedTokenIds = b.param(
         "SortedTokenIds", PtrType(I32, "global"), noalias=True, readonly=True, align=4
     )
@@ -1632,7 +1899,7 @@ def build_moe_fused_mega_gemm_fp8(
     BlockExpertIds = b.param(
         "BlockExpertIds", PtrType(I32, "global"), noalias=True, readonly=True, align=4
     )
-    Y = b.param("Y", PtrType(F32, "global"), align=16)
+    Y = b.param("Y", PtrType(F32, "global"), noalias=True, align=16)
     M = b.param("M", I32)
     N = b.param("N", I32)  # = I (inter dim)
     K = b.param("K", I32)  # = H (hidden contraction)
@@ -1667,7 +1934,24 @@ def build_moe_fused_mega_gemm_fp8(
 
     tile_m = spec.tile_m
     tile_n = spec.tile_n_inter
-    n_blocks = tile_n // GROUP_K
+    HGK = int(spec.hidden_group_k)
+    if HGK != GROUP_K:
+        if not spec.down_fused_cells:
+            raise ValueError(
+                "hidden_group_k != 128 requires down_fused_cells=True "
+                "(the per-cell down emitter assumes a 128-wide hidden block)"
+            )
+        # Check the ATOM's k, not spec.down_k: down_k only selects between the
+        # 32- and 128-wide atoms, so an unrepresentable value like 64 would
+        # otherwise silently land on the 128 atom and make atoms_per_group 0.
+        _dk = spec.down_atom().k
+        if _dk > HGK or HGK % _dk:
+            raise ValueError(
+                f"down atom k ({_dk}, from down_k={spec.down_k}) must divide "
+                f"hidden_group_k ({HGK}) so a down atom stays inside one hidden "
+                "scale block"
+            )
+    n_blocks = tile_n // HGK
 
     # LEVER (fuse-quant) invariant: each warp's N-extent must lie inside exactly
     # one 128-inter scale block, AND each block must be covered by an integer
@@ -1675,11 +1959,11 @@ def build_moe_fused_mega_gemm_fp8(
     # (block ``blk`` <- warps {warps_per_block*blk .. +warps_per_block-1}) is
     # exact. With warp_m=1 the warp N-extent = warp_n_cols below.
     warp_n_cols = tile_n // spec.warp_n  # mfmas_n * atom.n
-    warps_per_block = GROUP_K // warp_n_cols
+    warps_per_block = HGK // warp_n_cols
     if (
         spec.warp_m != 1
         or warp_n_cols * spec.warp_n != tile_n
-        or GROUP_K % warp_n_cols != 0
+        or HGK % warp_n_cols != 0
         or warps_per_block * n_blocks != spec.warp_n
     ):
         raise ValueError(
@@ -1783,13 +2067,19 @@ def build_moe_fused_mega_gemm_fp8(
     # ---- LDS allocations ----------------------------------------------
     # Persistent fp8 Hidden buffer (half the f16 bytes): silu(gate)*up quantized
     # here, reused as the down-GEMM LDS-resident A operand in STAGE 2.
-    Hidden_smem = b.smem_alloc(FP8E4M3, [tile_m, tile_n], name_hint="Hidden_smem")
+    if spec.lds_pad % 16:
+        raise ValueError(f"lds_pad must be a multiple of 16B (got {spec.lds_pad})")
+    pad_fp8 = spec.lds_pad  # 1 byte/elem
+    pad_f32 = spec.lds_pad // 4  # 4 bytes/elem
+    hid_w = tile_n + pad_fp8
+    f32_w = tile_n + pad_f32
+    Hidden_smem = b.smem_alloc(FP8E4M3, [tile_m, hid_w], name_hint="Hidden_smem")
     # Per-(row, 128-inter-block) dynamic scales for the down dequant (STAGE 2).
     HiddenScale_smem = b.smem_alloc(
         F32, [tile_m, n_blocks], name_hint="HiddenScale_smem"
     )
     # f32 scratch for the exact per-block amax reduction (STAGE 1 only).
-    HiddenF32_smem = b.smem_alloc(F32, [tile_m, tile_n], name_hint="HiddenF32_smem")
+    HiddenF32_smem = b.smem_alloc(F32, [tile_m, f32_w], name_hint="HiddenF32_smem")
     # Tiny per-warp amax partials (one f32 per warp). Each warp's N-extent lands
     # inside ONE 128-inter block, so warps {2*blk, 2*blk+1} cover block ``blk``.
     n_warps = spec.warp_m * spec.warp_n
@@ -1802,8 +2092,10 @@ def build_moe_fused_mega_gemm_fp8(
     # [n_warps*DTLA_SLOTS*DTLA_CHUNKS*wave_size, 16] fp8: 4*4*2*64*16 = 32 KiB
     # at the canonical geometry.
     # 4 B slots (gate/up x 2 ni ping-pong) + 1 X (A) slot under _USE_X_DTLA.
-    DTLA_SLOTS = 5 if _USE_X_DTLA else 4
-    X_SLOT = 4 if _USE_X_DTLA else None
+    # 2 B slots (gate/up) per prefetch buffer + 1 X (A) slot under _USE_X_DTLA.
+    _dtla_depth = max(2, int(spec.dtla_depth))
+    DTLA_SLOTS = 2 * _dtla_depth + (1 if _USE_X_DTLA else 0)
+    X_SLOT = 2 * _dtla_depth if _USE_X_DTLA else None
     DTLA_CHUNKS = (atom.b_per_lane + DTLA_CHUNK - 1) // DTLA_CHUNK
     bstage_rows = n_warps * DTLA_SLOTS * DTLA_CHUNKS * spec.wave_size
     BStage_smem = b.smem_alloc(
@@ -1817,12 +2109,12 @@ def build_moe_fused_mega_gemm_fp8(
 
     f32_view = TensorView(
         base=HiddenF32_smem,
-        desc=TensorDescriptor.packed((tile_m, tile_n), F32),
+        desc=TensorDescriptor.packed((tile_m, f32_w), F32),
         addr_space="lds",
     )
     fp8_view = TensorView(
         base=Hidden_smem,
-        desc=TensorDescriptor.packed((tile_m, tile_n), FP8E4M3),
+        desc=TensorDescriptor.packed((tile_m, hid_w), FP8E4M3),
         addr_space="lds",
     )
     scale_view = TensorView(
@@ -1845,6 +2137,7 @@ def build_moe_fused_mega_gemm_fp8(
     c_floor = b.const_f32(AMAX_FLOOR)
 
     c_group_k = b.const_i32(GROUP_K)
+    c_hgk = b.const_i32(HGK)
     c_threads = b.const_i32(spec.block_size)
     _c_n_blocks = b.const_i32(n_blocks)
     _c_tile_n = b.const_i32(tile_n)
@@ -1885,6 +2178,7 @@ def build_moe_fused_mega_gemm_fp8(
                 "lane": lane,
                 "wave_size": spec.wave_size,
                 "x_slot": X_SLOT,
+                "depth": _dtla_depth,
             }
         else:
             dtla_bundle = None
@@ -1892,6 +2186,34 @@ def build_moe_fused_mega_gemm_fp8(
             m_tile_base = b.add(
                 block_m_off, b.add(warp_m_off, b.const_i32(mi * atom.m))
             )
+            if not spec.use_fused_kloop:
+                # Legacy per-(mi, ni) K-loop: one cell's operands live at a
+                # time, weights global->VGPR (no DTLA), same shape as the down
+                # GEMM's emitter.
+                for ni in range(mfmas_n):
+                    g_dq, u_dq = _emit_fp8_gateup_group_gemm(
+                        b,
+                        A=A,
+                        WGate=WGate,
+                        WUp=WUp,
+                        AScale=AScale,
+                        WGateScale=WGateScale,
+                        WUpScale=WUpScale,
+                        atom=atom,
+                        lane_decode=lane_decode,
+                        m_tile_base=m_tile_base,
+                        n_tile_base=b.add(
+                            gu_n_off, b.add(warp_n_off, b.const_i32(ni * atom.n))
+                        ),
+                        K=K,
+                        stride_a_scale=stride_a_scale,
+                        stride_gate_scale=stride_gate_scale,
+                        stride_up_scale=stride_up_scale,
+                        tag=f"{mi}_{ni}",
+                    )
+                    gate_list.append(g_dq)
+                    up_list.append(u_dq)
+                continue
             n_tile_bases = [
                 b.add(gu_n_off, b.add(warp_n_off, b.const_i32(ni * atom.n)))
                 for ni in range(mfmas_n)
@@ -1915,6 +2237,9 @@ def build_moe_fused_mega_gemm_fp8(
                 tag=f"{mi}",
                 dtla=dtla_bundle,
                 cadence=cadence,
+                prefetch_depth=_dtla_depth,
+                sched_group=spec.window_group,
+                sched_mode=spec.window_sched,
             )
             gate_list.extend(g_dqs)
             up_list.extend(u_dqs)
@@ -2008,7 +2333,7 @@ def build_moe_fused_mega_gemm_fp8(
         with qsweep as qcell:
             row = b.div(qcell, c_tile_n4)
             col4 = b.mul(b.mod(qcell, c_tile_n4), b.const_i32(4))
-            blk = b.div(col4, c_group_k)
+            blk = b.div(col4, c_hgk)
             hv4 = b.smem_load_vN(f32_view.base, row, col4, dtype=F32, n=4)
             sc = b.smem_load_vN(scale_view.base, row, blk, dtype=F32, n=1)
             # Fast reciprocal (~1 ulp): the divide-by-block-scale quant step
@@ -2044,7 +2369,36 @@ def build_moe_fused_mega_gemm_fp8(
             down_warp_m_off = b.mul(warp_m_idx, b.const_i32(mfmas_m_down * atom.m))
             down_warp_n_off = b.mul(warp_n_idx, b.const_i32(mfmas_n_down * atom.n))
             down_list = []
-            for mi in range(mfmas_m_down):
+            for mi in range(mfmas_m_down) if spec.down_fused_cells else ():
+                m_row_base = b.add(down_warp_m_off, b.const_i32(mi * atom.m))
+                n_tile_bases_down = [
+                    b.add(ho, b.add(down_warp_n_off, b.const_i32(ni * atom.n)))
+                    for ni in range(mfmas_n_down)
+                ]
+                down_list.extend(
+                    _emit_fp8_down_fused_cells(
+                        b,
+                        a_view=fp8_view,
+                        WDown=WDown,
+                        WDownScale=WDownScale,
+                        atom=down_atom,
+                        lane_decode=lane_decode,
+                        n_tile_bases=n_tile_bases_down,
+                        scale_view=scale_view,
+                        inter_slice=tile_n,
+                        inter_full=N,
+                        inter_col_base=gu_n_off,
+                        stride_down_scale=stride_down_scale,
+                        m_row_base=m_row_base,
+                        hidden_group_k=HGK,
+                        tag=f"dm{mi}",
+                        cadence=cadence,
+                        prefetch_depth=spec.down_depth,
+                        sched_group=spec.down_group,
+                        sched_mode=spec.window_sched,
+                    )
+                )
+            for mi in range(mfmas_m_down) if not spec.down_fused_cells else ():
                 for ni in range(mfmas_n_down):
                     # Down output column base (along H_out) for this warp-atom.
                     n_tile_base = b.add(

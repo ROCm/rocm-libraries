@@ -19,3 +19,8 @@ CMakeUserPresets.json
 /parametric-chaos-v2.pdf
 /params-=findings.md
 /check_caps.py
+
+# rocKE MoE benchmark artefacts: generated fp8 expert weights (~600 MB per
+# shape, see ROCKE_MOE_BENCH_CACHE) and rocprofv3 counter dumps.
+.cache/
+.rocprofv3/
