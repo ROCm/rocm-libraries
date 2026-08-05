@@ -47,13 +47,13 @@ def _write_reference_output(rt, binding, ptrs, req, dtype):
     """Fill the C buffer with the exact expected result, as a perfect kernel would."""
     import numpy as np
 
-    from rocke.dispatch.gemm.binding import _SEED, _bf16_from_f32
+    from rocke.dispatch.gemm.binding import _SEED, bf16_from_f32
 
     rng = np.random.default_rng(_SEED)
     a = rng.integers(-5, 6, size=(req.M, req.K), dtype=np.int16)
     b = rng.integers(-5, 6, size=(req.N, req.K), dtype=np.int16)
     ref = a.astype(np.float32) @ b.astype(np.float32).T
-    encoded = ref.astype(np.float16) if dtype == "fp16" else _bf16_from_f32(np, ref)
+    encoded = ref.astype(np.float16) if dtype == "fp16" else bf16_from_f32(np, ref)
     rt.mem[ptrs[2]][: encoded.nbytes] = encoded.tobytes()
 
 
@@ -289,21 +289,21 @@ class TestBf16Encoding(unittest.TestCase):
     def test_round_trip_is_exact_for_bf16_representable_values(self):
         import numpy as np
 
-        from rocke.dispatch.gemm.binding import _bf16_from_f32, _f32_from_bf16
+        from rocke.dispatch.gemm.binding import bf16_from_f32, f32_from_bf16
 
         values = np.array([0.0, 1.0, -1.0, 5.0, -256.0, 1024.0], dtype=np.float32)
-        back = _f32_from_bf16(np, _bf16_from_f32(np, values))
+        back = f32_from_bf16(np, bf16_from_f32(np, values))
         np.testing.assert_array_equal(back, values)
 
     def test_rounding_is_nearest_even_not_truncation(self):
         import numpy as np
 
-        from rocke.dispatch.gemm.binding import _bf16_from_f32, _f32_from_bf16
+        from rocke.dispatch.gemm.binding import bf16_from_f32, f32_from_bf16
 
         # A value just above a bf16 tick must round up, not truncate down.
         one_ulp = np.float32(1.0 + 2.0**-8)
         nudged = np.array([one_ulp * (1.0 + 2.0**-12)], dtype=np.float32)
-        back = _f32_from_bf16(np, _bf16_from_f32(np, nudged))
+        back = f32_from_bf16(np, bf16_from_f32(np, nudged))
         self.assertGreaterEqual(float(back[0]), float(one_ulp))
 
 

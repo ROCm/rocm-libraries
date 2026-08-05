@@ -19,24 +19,21 @@ govern what you commit and how you describe it.
   boundary. If a task might implicate export control, stop and escalate.
 - **AMD restricted data.** Handle all AMD data according to its classification. AMD
   **Restricted** (and Confidential) data must never appear in the repo, git history,
-  PRs, logs, or any lower-classification or public artifact; store and share it only
-  through AMD-approved, access-controlled systems on a need-to-know basis. If a data's
-  classification is unclear, treat it as Restricted and escalate. Never reference files or paths
+  PRs. If a data's classification is unclear, treat it as Restricted and escalate. Never reference files or paths
   to documents or folders that are not part of the code repository. Locations of confidential
   files should remain confidential.
 - **No NPI.** Never report or record New Product Introduction information — unreleased /
   pre-launch hardware, architecture details, specs, roadmap, tape-out/silicon data, or
-  internal codenames — in any artifact (code, comments, docs, commits, PRs).
+  internal codenames — in any artifact (code, comments, docs, commits, PRs). Treat the
+  newest unreleased architecture families as NPI; if you are unsure whether a target has
+  been publicly released, escalate to a human rather than naming it in an artifact.
 - **No product / marketing / code names.** Refer to targets by device name (`gfx942`,
   `gfx950`, …) only. No customers or related data shall ever be mentioned (e.g., model architectures, operator shapes, labeling or codenames, IP, confidential data).
-- **No public software-performance data.** No **software-achieved** performance —
-  benchmarks, achieved TFLOP/s, MFU, latencies, or throughputs — in the repo, git
-  history, PRs, or anything that can become public. While in development these numbers
-  are volatile and are **not** guidance, so keep them internal: present them in-session
-  and record them only in a **protected, access-controlled AMD Confluence page**; never
-  paste numbers into the repo, and if asked to, refuse and redirect there. (Published
-  **hardware** spec numbers — e.g. theoretical peak — are governed by AMD marketing, not
-  this rule.)
+- **No public hardware-performance data.** Never publish measured **hardware**
+  performance characteristics in the repo, git history, PRs, or anything that can become
+  public. Two things are outside this rule: published **hardware** spec numbers — e.g.
+  theoretical peak — which are governed by AMD marketing; and **software-achieved**
+  numbers, which may be shared as long as they are reproducible.
 - **No legal or marketing claims or comparisons** about AMD or competitor
   products/software (performance, superiority, availability, roadmap). No marketing
   language. **Protect AMD.**
@@ -46,7 +43,7 @@ govern what you commit and how you describe it.
 **Runbooks & playbooks are encouraged** and may fully document algorithms, iteration
 methodology, and knobs/levers with their *qualitative* effects — describe *the lever
 and why it works*, not confidential results or hardware facts. Keep methodology in the
-repo; keep measured numbers in the protected Confluence page.
+repo; keep measured numbers in the protected Confluence page if they are measured on NPI hardware.
 
 Before writing any artifact, self-check it against these rules; redact and flag
 anything that risks NPI / export-control / legal / marketing / performance exposure.

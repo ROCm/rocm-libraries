@@ -274,13 +274,9 @@ def load_a_row_major_contiguous(
             atom.a_per_lane,
             align=atom.a_per_lane * 2,
         )
-    # fp8 / bf8: no vec load helper -- fall back to scalar loads.
-    out = b.zero_vec(dtype_ir, atom.a_per_lane)
-    for j in range(atom.a_per_lane):
-        addr = b.add(a_addr, b.const_i32(j))
-        s = b.global_load(A, addr, dtype_ir, align=1)
-        out = b.vec_insert(out, s, j)
-    return out
+    # fp8 / bf8: one byte per element, so the lane's whole operand is an
+    # 8-byte load; global_load_vN derives that alignment from the element type.
+    return b.global_load_vN(A, a_addr, dtype_ir, atom.a_per_lane)
 
 
 def load_b_col_strided_scalars(
@@ -319,6 +315,44 @@ def load_b_col_strided_scalars(
         )
         out = b.vec_insert(out, s, j)
     return out
+
+
+def load_b_row_major_contiguous(
+    b: IRBuilder,
+    *,
+    B: Value,
+    atom: MfmaAtom,
+    lane_decode: LaneDecode,
+    n_tile_base: Value,
+    k_tile_base: Value,
+    K: int,
+) -> Value:
+    """Per-lane B load for **row-major (N, K)** layout.
+
+    This is B as a framework stores a weight matrix -- ``[out_features,
+    in_features]``, equivalently column-major ``(K, N)``, which is what the
+    RCR convention and ``torch._scaled_mm`` both mean by a transposed B.
+
+    The K axis is contiguous here, so a lane's ``b_per_lane`` operand is one
+    vector load. The row-major ``(K, N)`` sibling
+    :func:`load_b_col_strided_scalars` has to issue ``b_per_lane`` separate
+    scalar loads for the same operand, which for an fp8 atom is 8 VMEM
+    instructions where this is 1.
+    """
+    dtype_ir = _ir_type_for_dtype(atom.dtype_in)
+    n_row = b.add(n_tile_base, lane_decode.n_in_atom)
+    k_lane_start = b.mul(lane_decode.k_blk, b.const_i32(atom.b_per_lane))
+    k_base = b.add(k_tile_base, k_lane_start)
+    b_addr = b.add(b.mul(n_row, b.const_i32(K)), k_base)
+    if atom.dtype_in in ("f16", "fp16", "bf16"):
+        return b.global_load_vN(
+            B,
+            b_addr,
+            dtype_ir,
+            atom.b_per_lane,
+            align=atom.b_per_lane * 2,
+        )
+    return b.global_load_vN(B, b_addr, dtype_ir, atom.b_per_lane)
 
 
 def load_smem_frag_contiguous_f16(

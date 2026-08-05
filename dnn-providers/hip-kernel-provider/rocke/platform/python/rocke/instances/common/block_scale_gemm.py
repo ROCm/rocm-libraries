@@ -30,7 +30,23 @@ by a single :class:`BlockScaleGemmSpec` whose fields select among:
  per-block scale spans ``(group_m, group_n, group_k)`` elements of
  the original matrix. CK Tile defaults: ``(1, 1, 128)`` for the
  ``grouped`` variants, ``(1, 32, 128)`` / ``(1, 64, 128)`` for the
- wider-channel groups.
+ wider-channel groups. Setting it to ``(M, N, K)`` collapses to one
+ scale per tensor, which is the granularity ``torch._scaled_mm``
+ passes for vLLM's dynamic fp8 linear layers.
+* ``layout`` -- ``"RRR"`` (CK Tile's B as row-major ``(K, N)``) or
+ ``"RCR"`` (B as row-major ``(N, K)``, i.e. a framework weight matrix
+ stored ``[out_features, in_features]``). RCR makes B's K axis
+ contiguous, so a lane loads its operand in one vector load.
+* ``dtype_c`` -- ``"f32"`` / ``"bf16"`` / ``"f16"`` output encoding.
+* ``k_split_waves`` -- how many wave64 warps share one output tile, each
+ covering ``1 / k_split_waves`` of the K extent, with the partials summed
+ through LDS before the epilogue. This is a pure occupancy knob: it does not
+ change the result, only how much of a tile's K reduction is exposed as one
+ wave's serial dependency chain. It exists because a skinny decode GEMM does
+ not have enough output tiles to fill the device -- the router gate of a
+ 30B-class MoE model is 16 tiles against 32 CUs, so at one wave per tile half
+ the CUs idle and the occupied ones have no second wave to run during a
+ memory stall.
 
 v1 ships a **scalar-inner** kernel: one thread per output element,
 per-K-iter accumulation in f32, post-MFMA-style scale application.
@@ -62,6 +78,7 @@ from ...helpers.mfma_gemm_inner import (
     decode_mfma_lanes,
     load_a_row_major_contiguous,
     load_b_col_strided_scalars,
+    load_b_row_major_contiguous,
     mfma_k_loop,
     store_acc_to_global,
     validate_arch_and_block_size,
@@ -69,10 +86,17 @@ from ...helpers.mfma_gemm_inner import (
 )
 from ...helpers.quant import quant_ir_type
 from ...helpers.spec import SignatureBuilder, kernel_name_join
+from ...helpers.tensor_view import make_lds_view
 
 
 QuantMode = Literal["aquant", "bquant", "abquant"]
 MantissaDType = Literal["fp8e4m3", "bf8e5m2", "i4_fp8", "i4_bf8"]
+# "RRR": A (M, K), B (K, N), C (M, N), all row-major -- the CK Tile example's
+# layout. "RCR": B instead row-major (N, K) (equivalently column-major (K, N)),
+# which is how a framework stores a weight matrix and what ``torch._scaled_mm``
+# requires of its second operand.
+GemmLayout = Literal["RRR", "RCR"]
+OutDType = Literal["f32", "bf16", "f16"]
 
 
 @dataclass(frozen=True)
@@ -95,6 +119,9 @@ class BlockScaleGemmSpec:
     group_size_mnk: Tuple[int, int, int] = (1, 1, 128)
     block_tile_m: int = 16
     block_tile_n: int = 16
+    layout: GemmLayout = "RRR"
+    dtype_c: OutDType = "f32"
+    k_split_waves: int = 1
     name: str = "rocke_block_scale_gemm"
     # P77 sibling: per-output-row scale broadcast, same shape as
     # :class:`rocke.instances.common.mx_gemm.MxGemmSpec.per_input_row`.
@@ -128,21 +155,41 @@ class BlockScaleGemmSpec:
 
     @property
     def block_size(self) -> int:
-        # MFMA path: one wave64 warp per CTA -- the MFMA atom is
-        # per-wave and each output tile is one atom invocation chain.
-        return 64
+        # The MFMA atom is per-wave and one output tile is one atom
+        # invocation chain, so a CTA is ``k_split_waves`` wave64 warps: one
+        # tile's worth of work, cut into that many K slices.
+        return 64 * self.k_split_waves
+
+    @property
+    def lds_bytes(self) -> int:
+        """LDS for the cross-wave partial reduction, zero when unsplit.
+
+        Each of the ``k_split_waves`` waves parks its ``c_per_lane`` f32
+        accumulators for all 64 lanes; wave 0 sums them and runs the epilogue.
+        """
+        if self.k_split_waves == 1:
+            return 0
+        return self.k_split_waves * 64 * self.atom.c_per_lane * 4
 
     def kernel_name(self) -> str:
         gm, gn, gk = self.group_size_mnk
-        return kernel_name_join(
+        parts = [
             self.name,
             f"M{self.M}N{self.N}K{self.K}",
             self.quant_mode,
             self.mantissa_dtype,
             f"g{gm}x{gn}x{gk}",
             f"t{self.block_tile_m}x{self.block_tile_n}",
-            flags={"psb": self.preshuffle_b},
-        )
+        ]
+        # Non-default layout / output encoding only. The RRR f32 kernels keep
+        # the names their parity fixtures and compile caches already hold.
+        if self.layout != "RRR":
+            parts.append(self.layout.lower())
+        if self.dtype_c != "f32":
+            parts.append(self.dtype_c)
+        if self.k_split_waves != 1:
+            parts.append(f"w{self.k_split_waves}")
+        return kernel_name_join(*parts, flags={"psb": self.preshuffle_b})
 
 
 def is_valid_spec(spec: BlockScaleGemmSpec, arch: str = "gfx950") -> Tuple[bool, str]:
@@ -175,6 +222,10 @@ def is_valid_spec(spec: BlockScaleGemmSpec, arch: str = "gfx950") -> Tuple[bool,
             "MFMA block_scale_gemm currently ships quant_mode='abquant' only; "
             f"got {spec.quant_mode!r}"
         )
+    if spec.layout not in ("RRR", "RCR"):
+        return False, f"unsupported layout {spec.layout!r}; expected RRR or RCR"
+    if spec.dtype_c not in ("f32", "bf16", "f16"):
+        return False, f"unsupported dtype_c {spec.dtype_c!r}"
     if spec.mantissa_dtype not in ("fp8e4m3", "bf8e5m2", "i4_fp8", "i4_bf8"):
         return False, f"unsupported mantissa_dtype {spec.mantissa_dtype!r}"
     if spec.mantissa_dtype not in ("fp8e4m3", "bf8e5m2"):
@@ -189,11 +240,29 @@ def is_valid_spec(spec: BlockScaleGemmSpec, arch: str = "gfx950") -> Tuple[bool,
         )
     if spec.block_size > 1024:
         return False, (f"block_size {spec.block_size} > 1024 hardware cap")
+    if spec.k_split_waves < 1:
+        return False, f"k_split_waves must be >= 1, got {spec.k_split_waves}"
+    if not target.fits_lds(spec.lds_bytes):
+        return False, (
+            f"k_split_waves={spec.k_split_waves} needs {spec.lds_bytes} B of LDS "
+            f"for the cross-wave reduction, over the {target.lds_capacity_bytes} B "
+            f"{arch} cap"
+        )
     if any(g <= 0 for g in spec.group_size_mnk):
         return False, f"group_size_mnk must be positive, got {spec.group_size_mnk}"
     gk = spec.group_size_mnk[2]
     if spec.K % gk:
         return False, f"K ({spec.K}) must be divisible by group_k ({gk})"
+    # Each wave takes an equal slice of every scale group, and a slice must be a
+    # whole number of MFMA atoms. Splitting within a group rather than across
+    # groups is what keeps the knob usable at per-tensor granularity, where
+    # there is only one group to begin with.
+    if gk % (spec.k_split_waves * spec.atom.k):
+        return False, (
+            f"group_k ({gk}) must be divisible by k_split_waves "
+            f"({spec.k_split_waves}) x atom.k ({spec.atom.k}) so every wave "
+            f"gets a whole number of MFMA atoms"
+        )
     if spec.M % spec.block_tile_m or spec.N % spec.block_tile_n:
         return False, (
             "M / N must be divisible by their tile sizes "
@@ -226,7 +295,7 @@ def build_block_scale_gemm(spec: BlockScaleGemmSpec, arch: str = "gfx950") -> Ke
     (A: ptr<f16 | fp8 | bf8>, # A storage dtype
     B: ptr<fp8 | bf8 | i8>, # mantissa storage (i8 for i4 packed)
     B_scale: ptr<f32, global>, # per-block scale, shape (Ks, Ns)
-    C: ptr<f32, global>, # f32 output
+    C: ptr<f32 | bf16 | f16>, # ``spec.dtype_c`` output
     M: i32, N: i32, K: i32)
 
     Grid: ``(ceil(N / block_tile_n), ceil(M / block_tile_m), 1)``.
@@ -284,12 +353,24 @@ def build_block_scale_gemm(spec: BlockScaleGemmSpec, arch: str = "gfx950") -> Ke
         AScale = b.param("AScale", PtrType(F32, "global"), readonly=True, align=4)
     if spec.quant_mode in ("bquant", "abquant"):
         BScale = b.param("BScale", PtrType(F32, "global"), readonly=True, align=4)
-    C = b.param("C", PtrType(F32, "global"), writeonly=True, align=4)
+    c_ir = F32 if spec.dtype_c == "f32" else io_ir_type(spec.dtype_c)
+    C = b.param(
+        "C",
+        PtrType(c_ir, "global"),
+        writeonly=True,
+        align=4 if spec.dtype_c == "f32" else 2,
+    )
     M = b.param("M", I32)  # noqa: F841 -- ABI; equals spec.M
     N = b.param("N", I32)  # noqa: F841 -- ABI; equals spec.N
     Kp = b.param("K", I32)  # noqa: F841 -- ABI
 
-    lane = b.thread_id_x()
+    W = spec.k_split_waves
+    tid = b.thread_id_x()
+    # With one wave per CTA the thread id *is* the lane, and emitting the
+    # mask/shift anyway would perturb the IR of every kernel that predates
+    # this knob.
+    lane = tid if W == 1 else b.mod(tid, b.const_i32(64))
+    wave = None if W == 1 else b.div(tid, b.const_i32(64))
     bid_n = b.block_id_x()
     bid_m = b.block_id_y()
     atom = spec.atom
@@ -353,8 +434,14 @@ def build_block_scale_gemm(spec: BlockScaleGemmSpec, arch: str = "gfx950") -> Ke
         ab_scale = b.fmul(a_scale_v, b_scale_v)
 
         # Run atoms_per_group MFMA invocations on a fresh acc; their K
-        # range is [kg * gk, (kg+1) * gk).
+        # range is [kg * gk, (kg+1) * gk), or this wave's equal slice of it
+        # when the tile's K reduction is split across waves.
         k_group_base = b.mul(kg, b.const_i32(gk))
+        gk_per_wave = gk // W
+        if W > 1:
+            k_group_base = b.add(
+                k_group_base, b.mul(wave, b.const_i32(gk_per_wave))
+            )
 
         def _load_a_in_group(b, kt_local, base=k_group_base):
             return load_a_row_major_contiguous(
@@ -368,19 +455,30 @@ def build_block_scale_gemm(spec: BlockScaleGemmSpec, arch: str = "gfx950") -> Ke
             )
 
         def _load_b_in_group(b, kt_local, base=k_group_base):
+            k_tile_base = b.add(base, b.mul(kt_local, c_atom_k))
+            if spec.layout == "RCR":
+                return load_b_row_major_contiguous(
+                    b,
+                    B=Bp,
+                    atom=atom,
+                    lane_decode=lane_decode,
+                    n_tile_base=n_tile_base,
+                    k_tile_base=k_tile_base,
+                    K=spec.K,
+                )
             return load_b_col_strided_scalars(
                 b,
                 B=Bp,
                 atom=atom,
                 lane_decode=lane_decode,
                 n_tile_base=n_tile_base,
-                k_tile_base=b.add(base, b.mul(kt_local, c_atom_k)),
+                k_tile_base=k_tile_base,
                 N=spec.N,
             )
 
         group_acc = mfma_k_loop(
             b,
-            K=gk,
+            K=gk_per_wave,
             atom=atom,
             load_a=_load_a_in_group,
             load_b=_load_b_in_group,
@@ -405,23 +503,47 @@ def build_block_scale_gemm(spec: BlockScaleGemmSpec, arch: str = "gfx950") -> Ke
 
     acc_final = outer.results[0]
 
-    # Output store via the shared MFMA epilogue helper: each lane
-    # writes its ``c_per_lane`` cells to global via the atom's
-    # ``lane_to_output`` mapping. f32 out (no cast), no atomic add.
-    # The per-cell stores stay scalar because the 16x16 atom places a
-    # lane's 4 outputs at the same column across 4 consecutive rows
-    # (stride = N), which is not vectorisable without an LDS shuffle.
-    store_acc_to_global(
-        b,
-        C=C,
-        atom=atom,
-        lane_decode=lane_decode,
-        m_tile_base=m_tile_base,
-        n_tile_base=n_tile_base,
-        acc=acc_final,
-        N=spec.N,
-        out_dtype="f32",
-    )
+    def _epilogue(acc: "object") -> None:
+        # Each lane writes its ``c_per_lane`` cells to global via the atom's
+        # ``lane_to_output`` mapping. The per-cell stores stay scalar because
+        # the 16x16 atom places a lane's 4 outputs at the same column across 4
+        # consecutive rows (stride = N), which is not vectorisable without an
+        # LDS shuffle.
+        store_acc_to_global(
+            b,
+            C=C,
+            atom=atom,
+            lane_decode=lane_decode,
+            m_tile_base=m_tile_base,
+            n_tile_base=n_tile_base,
+            acc=acc,
+            N=spec.N,
+            out_dtype=spec.dtype_c,
+        )
+
+    if W == 1:
+        _epilogue(acc_final)
+    else:
+        # Lane L of every wave holds the partials for the *same* output cells,
+        # so the reduction is a straight elementwise sum down the wave axis --
+        # no shuffle, and each lane's whole accumulator moves as one vec4.
+        cpl = atom.c_per_lane
+        lds = make_lds_view(
+            b, dtype=F32, shape=(W * 64, cpl), name_hint="ksplit_partials"
+        ).base
+        c_zero = b.const_i32(0)
+        row = b.add(b.mul(wave, b.const_i32(64)), lane)
+        b.smem_store_vN_f32(lds, [row, c_zero], acc_final, cpl)
+        b.sync()
+        with b.scf_if(b.cmp_eq(wave, c_zero)):
+            total = b.smem_load_vN_f32(lds, lane, c_zero, n=cpl)
+            for w in range(1, W):
+                partial = b.smem_load_vN_f32(
+                    lds, b.add(b.const_i32(w * 64), lane), c_zero, n=cpl
+                )
+                total = b.vector_add(total, partial)
+            _epilogue(total)
+
     b.ret()
     return b.kernel
 
@@ -462,7 +584,7 @@ def block_scale_gemm_signature(spec: BlockScaleGemmSpec):
         sb.ptr("AScale", "f32")
     if spec.quant_mode in ("bquant", "abquant"):
         sb.ptr("BScale", "f32")
-    sb.ptr("C", "f32").scalar("M", "i32").scalar("N", "i32").scalar("K", "i32")
+    sb.ptr("C", spec.dtype_c).scalar("M", "i32").scalar("N", "i32").scalar("K", "i32")
     return sb.build()
 
 

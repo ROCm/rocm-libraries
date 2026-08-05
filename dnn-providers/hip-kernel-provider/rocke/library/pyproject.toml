@@ -32,4 +32,4 @@ package-dir = { "" = "." }
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["kernels*", "builders*", "dispatch*"]
+include = ["kernels*", "builders*", "dispatch*", "serve*"]

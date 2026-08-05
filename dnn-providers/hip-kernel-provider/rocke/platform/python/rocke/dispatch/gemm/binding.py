@@ -33,13 +33,17 @@ _SEED = 0xC0FFEE
 _TOLERANCE = {"fp16": 1e-2, "bf16": 5e-2}
 
 
-def _bf16_from_f32(np, x):
-    """Round-to-nearest-even f32 -> bf16, carried as uint16."""
+def bf16_from_f32(np, x):
+    """Round-to-nearest-even f32 -> bf16, carried as uint16.
+
+    Public because the fp8 family's binding decodes bf16 output too, and a
+    numeric codec is the last thing that should exist in two copies.
+    """
     u = np.ascontiguousarray(x, dtype=np.float32).view(np.uint32)
     return (((u + 0x7FFF + ((u >> 16) & 1)) >> 16) & 0xFFFF).astype(np.uint16)
 
 
-def _f32_from_bf16(np, u):
+def f32_from_bf16(np, u):
     return (u.astype(np.uint32) << 16).view(np.float32)
 
 
@@ -70,12 +74,12 @@ def gemm_rcr_binding(result: Any, verify: bool, *, dtype: str) -> ProblemBinding
             return buf.astype(np.float32)
 
     else:
-        a_host = _bf16_from_f32(np, a_int.astype(np.float32))
-        b_host = _bf16_from_f32(np, b_int.astype(np.float32))
+        a_host = bf16_from_f32(np, a_int.astype(np.float32))
+        b_host = bf16_from_f32(np, b_int.astype(np.float32))
         c_host = np.empty((M, N), dtype=np.uint16)
 
         def decode(buf):
-            return _f32_from_bf16(np, buf)
+            return f32_from_bf16(np, buf)
 
     def make_args(rt: Any) -> Tuple[bytes, Tuple[int, ...]]:
         a_dev = rt.alloc(nbytes(a_host))

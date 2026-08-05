@@ -4,7 +4,8 @@
 """rocKE dispatcher surface.
 
 The dispatcher started with FP16 RCR GEMM only; it now also implements BF16 RCR
-GEMM (the worked template for further dtypes/layouts) and carries documented
+GEMM (the worked template for further dtypes/layouts), FP8 / BF8 RCR
+block-scale GEMM, and carries documented
 scaffolds for the remaining operator families (conv, moe, norm) in
 :mod:`rocke.dispatch.families`. The basic request/result contract
 (``OperatorRequest`` / ``DispatchResult`` / ``CandidateRegistry``) is shared by
@@ -32,13 +33,17 @@ from .families import (
     dispatch_norm,
 )
 from .gemm import (
+    Fp8GemmRequest,
     GemmRequest,
     dispatch_gemm_bf16,
     dispatch_gemm_fp16,
+    dispatch_gemm_fp8,
     gemm_bf16_candidates,
     gemm_bf16_sweep_space,
     gemm_fp16_candidates,
     gemm_fp16_sweep_space,
+    gemm_fp8_candidates,
+    gemm_fp8_sweep_space,
 )
 
 __all__ = [
@@ -46,6 +51,7 @@ __all__ = [
     "DimRelation",
     "DispatchResult",
     "CandidateRegistry",
+    "Fp8GemmRequest",
     "GemmRequest",
     "KernelCandidate",
     "KernelId",
@@ -53,10 +59,13 @@ __all__ = [
     "ShapeRange",
     "dispatch_gemm_fp16",
     "dispatch_gemm_bf16",
+    "dispatch_gemm_fp8",
     "gemm_fp16_candidates",
     "gemm_bf16_candidates",
+    "gemm_fp8_candidates",
     "gemm_fp16_sweep_space",
     "gemm_bf16_sweep_space",
+    "gemm_fp8_sweep_space",
     # operator families
     "ConvRequest",
     "MoeRequest",

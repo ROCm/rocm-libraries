@@ -15,8 +15,7 @@ from rocke.core.arch import ArchTarget, known_arches
 from rocke.dispatch import GemmRequest
 from rocke.dispatch.gemm.bf16_rcr import GEMM_BF16_REGISTRY
 from rocke.dispatch.gemm.fp16_rcr import GEMM_FP16_REGISTRY
-
-_REGISTRIES = (("fp16", GEMM_FP16_REGISTRY), ("bf16", GEMM_BF16_REGISTRY))
+from rocke.dispatch.gemm.fp8_rcr import GEMM_FP8_REGISTRY, Fp8GemmRequest
 
 # Wide enough that every registered tile divides some entry, and skinny enough
 # to reach the decode candidate.
@@ -29,21 +28,37 @@ def _requests(arch: str, dtype: str):
         yield GemmRequest(M=m, N=n, K=k, arch=arch, dtype=dtype)
 
 
+def _fp8_requests(arch: str, dtype: str):
+    """fp8 candidates gate on scale granularity, which plain GemmRequest cannot
+    declare, so this family brings its own request type to the shared checks."""
+    for m, n, k in _SHAPES:
+        yield Fp8GemmRequest(M=m, N=n, K=k, arch=arch, dtype=dtype)
+
+
+# (probe dtype, registry, dtypes the family declares, request generator). The
+# probe dtype builds requests; the declared tuple is what capability must say.
+_REGISTRIES = (
+    ("fp16", GEMM_FP16_REGISTRY, ("fp16",), _requests),
+    ("bf16", GEMM_BF16_REGISTRY, ("bf16",), _requests),
+    ("fp8e4m3", GEMM_FP8_REGISTRY, ("fp8e4m3", "bf8e5m2"), _fp8_requests),
+)
+
+
 class TestDeclaredCoverage(unittest.TestCase):
     def test_every_candidate_declares_a_capability(self):
-        for dtype, registry in _REGISTRIES:
+        for dtype, registry, _dtypes, requests in _REGISTRIES:
             for candidate in registry.candidates():
                 with self.subTest(dtype=dtype, candidate=candidate.name):
                     self.assertIsNotNone(candidate.capability)
 
     def test_no_candidate_admits_an_architecture_it_did_not_declare(self):
         """The cross-architecture misroute, pinned for every arch we know of."""
-        for dtype, registry in _REGISTRIES:
+        for dtype, registry, _dtypes, requests in _REGISTRIES:
             for candidate in registry.candidates():
                 undeclared = set(known_arches()) - set(candidate.capability.arches)
                 for arch in sorted(undeclared):
                     with self.subTest(candidate=candidate.name, arch=arch):
-                        for req in _requests(arch, dtype):
+                        for req in requests(arch, dtype):
                             self.assertFalse(
                                 candidate.admits(req)[0],
                                 f"{candidate.name} wrongly admits {arch}",
@@ -55,7 +70,7 @@ class TestDeclaredCoverage(unittest.TestCase):
         gfx1250 is CDNA-family at wave32, so a family label cannot stand in for
         this; the declared arch list is checked against the arch catalog.
         """
-        for dtype, registry in _REGISTRIES:
+        for dtype, registry, _dtypes, requests in _REGISTRIES:
             for candidate in registry.candidates():
                 with self.subTest(dtype=dtype, candidate=candidate.name):
                     waves = {
@@ -76,27 +91,27 @@ class TestDeclaredCoverage(unittest.TestCase):
         overstate what is dispatchable, which is the failure a manifest exists
         to prevent.
         """
-        for dtype, registry in _REGISTRIES:
+        for dtype, registry, _dtypes, requests in _REGISTRIES:
             for candidate in registry.candidates():
                 for arch in candidate.capability.arches:
                     with self.subTest(candidate=candidate.name, arch=arch):
                         self.assertTrue(
                             any(
                                 candidate.admits(req)[0]
-                                for req in _requests(arch, dtype)
+                                for req in requests(arch, dtype)
                             ),
                             f"{candidate.name} declares {arch} but admits no "
                             "request there",
                         )
 
     def test_declared_dtype_matches_the_family(self):
-        for dtype, registry in _REGISTRIES:
+        for dtype, registry, dtypes, _requests_fn in _REGISTRIES:
             for candidate in registry.candidates():
                 with self.subTest(dtype=dtype, candidate=candidate.name):
-                    self.assertEqual(candidate.capability.dtypes, (dtype,))
+                    self.assertEqual(candidate.capability.dtypes, dtypes)
 
     def test_for_arch_agrees_with_what_each_candidate_declares(self):
-        for _dtype, registry in _REGISTRIES:
+        for _dtype, registry, _dtypes, _requests_fn in _REGISTRIES:
             for arch in known_arches():
                 with self.subTest(family=registry.family, arch=arch):
                     self.assertEqual(

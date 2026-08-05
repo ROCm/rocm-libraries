@@ -50,11 +50,26 @@ class GemmRequest(OperatorRequest):
 GEMM_DIM_VOCABULARY = ("M", "N", "K")
 
 
+# Spellings a framework may hand us, mapped to the canonical name a family
+# registers under. The low-bit entries cover what torch reports for its fp8
+# tensors, so a request can be built straight from an observed operand dtype.
+_DTYPE_ALIASES = {
+    "f16": "fp16",
+    "half": "fp16",
+    "fp8": "fp8e4m3",
+    "e4m3": "fp8e4m3",
+    "fp8_e4m3": "fp8e4m3",
+    "float8_e4m3fn": "fp8e4m3",
+    "bf8": "bf8e5m2",
+    "e5m2": "bf8e5m2",
+    "bf8_e5m2": "bf8e5m2",
+    "float8_e5m2": "bf8e5m2",
+}
+
+
 def normalize_dtype(dtype: str) -> str:
     d = dtype.lower()
-    if d in ("f16", "half"):
-        return "fp16"
-    return d
+    return _DTYPE_ALIASES.get(d, d)
 
 
 def normalize_selector(value: str) -> str:
@@ -78,20 +93,26 @@ def basic_gemm_request_errors(req: OperatorRequest) -> list[str]:
     return errors
 
 
-def rcr_request_errors(req: OperatorRequest, *, dtype: str) -> list[str]:
+def rcr_request_errors(
+    req: OperatorRequest, *, dtype: str | Tuple[str, ...]
+) -> list[str]:
     """Shared RCR-layout request validation parametrized by element dtype.
 
-    Used by every RCR UniversalGemm family module (fp16, bf16, ...) so the
-    layout/transpose checks and the single-dtype gate live in one place. The
-    family passes the canonical dtype it implements (e.g. ``"fp16"``, ``"bf16"``).
+    Used by every RCR GEMM family module (fp16, bf16, fp8, ...) so the
+    layout/transpose checks and the dtype gate live in one place. The family
+    passes the canonical dtype it implements (e.g. ``"fp16"``, ``"bf16"``), or a
+    tuple where one kernel body serves several encodings -- the fp8 family's
+    ``("fp8e4m3", "bf8e5m2")`` differ only in the MFMA atom they select.
     """
     errors = basic_gemm_request_errors(req)
     if errors:
         return errors
     assert isinstance(req, GemmRequest)
-    if normalize_dtype(req.dtype) != dtype:
+    allowed = (dtype,) if isinstance(dtype, str) else tuple(dtype)
+    if normalize_dtype(req.dtype) not in allowed:
+        supported = allowed[0] if len(allowed) == 1 else " / ".join(allowed)
         errors.append(
-            f"unsupported dtype {req.dtype!r}; this family supports {dtype} only"
+            f"unsupported dtype {req.dtype!r}; this family supports {supported} only"
         )
     if req.layout.upper() != "RCR":
         errors.append(f"unsupported layout {req.layout!r}; RCR only")
