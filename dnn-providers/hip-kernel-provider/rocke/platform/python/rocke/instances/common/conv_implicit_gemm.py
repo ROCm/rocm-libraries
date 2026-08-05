@@ -1490,77 +1490,90 @@ def build_implicit_gemm_conv(
         load_tid = b.sub(tid, b.const_i32(spec.block_size))
 
         # ----------------------------------------------------------------
-        # Barrier protocol (CK Tile wavelet reference, PR #8009):
+        # Barrier placement — mirrors CK Tile wavelet (PR #8009) exactly.
         #
-        # AMD s_barrier pairs the Nth barrier each wave reaches regardless
-        # of the instruction address — so *count* (not PC) must match
-        # across load and math waves. Both scf_if branches below execute
-        # exactly the same number of b.sync() calls in the same order:
+        # We use scf_if_else (true if/else, both branches converge at the
+        # same join block) so that s_barrier calls inside each branch
+        # survive LLVM's simplifycfg.  A one-sided scf_if has no else
+        # block — simplifycfg is free to remove barriers it cannot prove
+        # are reachable by all threads, causing NaN.
         #
-        #   Load branch:  1 + 2*(K_iters-1) + 1 [+ 2 for cshuffle]
-        #   Math branch:  1 + K_iters + (K_iters-1) [+ 2 for cshuffle]
-        #                 = 1 + 2*K_iters - 1 = 2*K_iters  ✓
+        # CK Tile structure (reproduced):
+        #
+        #   if (is_math):
+        #     barrier 0
+        #     for i in 0..K-2:   mfma ; barrier_A ; barrier_B
+        #     mfma  (last, no barrier)
+        #   else:  // load waves
+        #     load tile 0 → LDS
+        #     barrier 0
+        #     for i in 0..K-2:   fetch_DRAM ; barrier_A ; store_LDS ; barrier_B
+        #
+        # Barrier counts: math = 1 + (K-1)*2 = 2K-1
+        #                 load = 1 + (K-1)*2 = 2K-1  ✓
         # ----------------------------------------------------------------
 
-        # ---- LOAD WAVE branch ----
-        with b.scf_if(is_load):
-            # Prologue: fill LDS with tile 0.
-            emit_wavelet_load_phase(b.const_i32(0), A_smem, B_smem, load_tid)
-            b.sync()  # barrier 0
+        with b.scf_if_else(is_math) as (math_ctx, load_ctx):
 
-            for it in range(1, K_iters):
-                b.sync()  # barrier A: math done reading previous LDS
-                emit_wavelet_load_phase(
-                    b.const_i32(it * block_k), A_smem, B_smem, load_tid
-                )
-                b.sync()  # barrier B: LDS ready for math waves
+            # ---- MATH WAVE branch ----
+            with math_ctx:
+                current_accs = [v for _, v in accs]
 
-            b.sync()  # final barrier A: math waves finish last MFMA
+                b.sync()  # barrier 0: wait for load waves to fill LDS tile 0
 
-            # Mirror cshuffle epilogue barriers so counts stay symmetric.
-            # CShuffleEpilogue.store emits 2 syncs (step-0 alias-reuse +
-            # step-2 LDS RAW) on the WMMA/gfx1250 path.
-            if spec.epilogue == "cshuffle":
-                b.sync()  # mirror step-0
-                b.sync()  # mirror step-2
+                for it in range(K_iters - 1):
+                    k_off_capture[0] = b.const_i32(it * block_k)
+                    current_accs = emit_mfma_phase(A_smem, B_smem, current_accs)
+                    b.sync()  # barrier A: math done reading LDS
+                    b.sync()  # barrier B: wait for load waves to write next tile
 
-        # ---- MATH WAVE branch ----
-        with b.scf_if(is_math):
-            current_accs = [v for _, v in accs]
-
-            b.sync()  # barrier 0: wait for load waves to fill LDS tile 0
-
-            for it in range(K_iters):
-                k_off_capture[0] = b.const_i32(it * block_k)
+                # Last iteration: MFMA only, no barriers.
+                k_off_capture[0] = b.const_i32((K_iters - 1) * block_k)
                 current_accs = emit_mfma_phase(A_smem, B_smem, current_accs)
-                b.sync()  # barrier A: signal math done reading LDS
-                if it < K_iters - 1:
-                    b.sync()  # barrier B: wait for load waves to write next LDS
 
-            # ---- epilogue inside math branch ----
-            final_accs_math = _apply_accumulator_epilogue(
-                b, spec.acc_epilogue, current_accs
-            )
-            if epilogue_override is not None:
-                epilogue_override(b, spec, final_accs_math, grid, d_rsrc, extra_context)
-            elif spec.epilogue == "cshuffle":
-                _emit_cshuffle_epilogue(b, spec, final_accs_math, grid, d_rsrc, op=op)
-            elif op.family == "wmma":
-                _emit_direct_epilogue_wmma(
-                    b,
-                    spec,
-                    op,
-                    final_accs_math,
-                    warp_m_idx,
-                    warp_n_idx,
-                    lane,
-                    block_m_off_v,
-                    block_n_off_v,
-                    d_rsrc,
-                    c0,
+                final_accs_math = _apply_accumulator_epilogue(
+                    b, spec.acc_epilogue, current_accs
                 )
-            else:
-                _emit_direct_epilogue(b, spec, final_accs_math, grid, d_rsrc)
+                if epilogue_override is not None:
+                    epilogue_override(
+                        b, spec, final_accs_math, grid, d_rsrc, extra_context
+                    )
+                elif spec.epilogue == "cshuffle":
+                    _emit_cshuffle_epilogue(
+                        b, spec, final_accs_math, grid, d_rsrc, op=op
+                    )
+                elif op.family == "wmma":
+                    _emit_direct_epilogue_wmma(
+                        b,
+                        spec,
+                        op,
+                        final_accs_math,
+                        warp_m_idx,
+                        warp_n_idx,
+                        lane,
+                        block_m_off_v,
+                        block_n_off_v,
+                        d_rsrc,
+                        c0,
+                    )
+                else:
+                    _emit_direct_epilogue(b, spec, final_accs_math, grid, d_rsrc)
+
+            # ---- LOAD WAVE branch ----
+            with load_ctx:
+                # Prologue: fill LDS with tile 0.
+                emit_wavelet_load_phase(b.const_i32(0), A_smem, B_smem, load_tid)
+                b.sync()  # barrier 0: LDS tile 0 ready for math waves
+
+                for it in range(K_iters - 1):
+                    # barrier A: wait for math to finish reading current tile.
+                    # Only AFTER this can we safely overwrite LDS with tile it+1.
+                    b.sync()
+                    # Write tile it+1 to LDS.
+                    emit_wavelet_load_phase(
+                        b.const_i32((it + 1) * block_k), A_smem, B_smem, load_tid
+                    )
+                    b.sync()  # barrier B: LDS tile it+1 ready for math waves
 
         return b.kernel
 

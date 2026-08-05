@@ -4641,6 +4641,72 @@ class _Lowerer:
         for i, line in enumerate(cur.lines):
             cur.lines[i] = line.replace("%IF_END", f"%{end_blk.label}")
 
+    def _op_scf_if_else(self, op: Op) -> None:
+        """Lower ``scf.if_else`` to a true LLVM if/else with a shared join block.
+
+        Both branches converge at the same ``if.end`` block, which is the
+        key property that keeps ``s_barrier`` calls alive through
+        ``simplifycfg``: LLVM cannot remove a barrier that is reachable
+        from both sides of a conditional branch (it cannot prove that
+        ``uniform-work-group-size`` guarantees both branches execute in
+        lock-step — only the hardware s_barrier semantic does).
+
+        LLVM IR shape::
+
+            br i1 %cond, label %if.then, label %if.else
+          if.then:
+            [then region]
+            br label %if.end
+          if.else:
+            [else region]
+            br label %if.end
+          if.end:
+            [continuation]
+        """
+        (cond,) = op.operands
+        then_region = op.regions[0]
+        else_region = op.regions[1]
+        cur = self._current()
+
+        # Allocate labels for then, else, and join blocks. We use a
+        # placeholder in the branch instruction and backpatch it (same
+        # trick as _op_scf_if for the %IF_END placeholder).
+        then_blk = self._new_block("if.then")
+        # Emit the conditional branch from the predecessor block.
+        cur.emit(
+            f"  br i1 {self._operand(cond)}, "
+            f"label %{then_blk.label}, label %IF_ELSE"
+        )
+        cur.terminated = True
+
+        # Lower then branch (then_blk is now _current).
+        self.lower_region(then_region)
+        then_last = self._current()
+        # then falls through to join; use another placeholder.
+        if not then_last.terminated:
+            then_last.emit("  br label %IF_END")
+            then_last.terminated = True
+
+        # Create else block (becomes _current).
+        else_blk = self._new_block("if.else")
+
+        # Lower else branch.
+        self.lower_region(else_region)
+        else_last = self._current()
+
+        # Create join block (becomes _current for subsequent ops).
+        end_blk = self._new_block("if.end")
+        if not else_last.terminated:
+            else_last.emit(f"  br label %{end_blk.label}")
+            else_last.terminated = True
+
+        # Backpatch placeholders in the predecessor and then blocks.
+        for blk in (cur, then_last):
+            for i, line in enumerate(blk.lines):
+                line = line.replace("%IF_ELSE", f"%{else_blk.label}")
+                line = line.replace("%IF_END", f"%{end_blk.label}")
+                blk.lines[i] = line
+
     def _op_scf_yield(self, op: Op) -> None:
         if not self._yield_stack:
             raise RuntimeError("scf.yield without enclosing scf.for")

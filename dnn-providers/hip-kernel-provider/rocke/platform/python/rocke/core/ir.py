@@ -3570,6 +3570,31 @@ class IRBuilder:
         self._emit(op)
         return _IfBuilder(self, op, then_r)
 
+    def scf_if_else(self, cond: Value):
+        """Runtime if/else branch (converging control flow).
+
+        Both the ``then`` and ``else`` regions converge at the same join
+        block, which is the key property that prevents LLVM's
+        ``simplifycfg`` from removing ``s_barrier`` / ``s_waitcnt`` calls
+        placed inside either branch.  Use this instead of two consecutive
+        ``scf_if`` calls when barriers must survive optimization.
+
+        Usage::
+
+            with b.scf_if_else(cond) as (then_ctx, else_ctx):
+                with then_ctx:
+                    # code executed when cond is true
+                    b.sync()
+                with else_ctx:
+                    # code executed when cond is false
+                    b.sync()
+        """
+        then_r = Region("then")
+        else_r = Region("else")
+        op = Op(name="scf.if_else", operands=[cond], regions=[then_r, else_r])
+        self._emit(op)
+        return _IfElseBuilder(self, op, then_r, else_r)
+
 
 PURE_OP_NAMES = {
     "arith.constant",
@@ -3720,3 +3745,51 @@ class _IfBuilder:
 
     def __exit__(self, exc_type, exc, tb) -> None:
         self._parent.pop_region()
+
+
+class _ThenCtx:
+    def __init__(self, parent: IRBuilder, region: Region) -> None:
+        self._parent = parent
+        self._region = region
+
+    def __enter__(self) -> "_ThenCtx":
+        self._parent.push_region(self._region)
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self._parent.pop_region()
+
+
+class _ElseCtx:
+    def __init__(self, parent: IRBuilder, region: Region) -> None:
+        self._parent = parent
+        self._region = region
+
+    def __enter__(self) -> "_ElseCtx":
+        self._parent.push_region(self._region)
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self._parent.pop_region()
+
+
+class _IfElseBuilder:
+    """Context manager returned by ``IRBuilder.scf_if_else``."""
+
+    def __init__(
+        self,
+        parent: IRBuilder,
+        op: Op,
+        then_region: Region,
+        else_region: Region,
+    ) -> None:
+        self._parent = parent
+        self.op = op
+        self._then_ctx = _ThenCtx(parent, then_region)
+        self._else_ctx = _ElseCtx(parent, else_region)
+
+    def __enter__(self):
+        return self._then_ctx, self._else_ctx
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        pass  # regions were already popped by their own context managers
