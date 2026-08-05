@@ -24,7 +24,7 @@
 #include "rocsparse_clients_routine_trace.hpp"
 #include "utility.hpp"
 
-#include <rocsparse/rocsparse-version.h>
+#include <rocsparse/rocsparse-config.h>
 
 #include <limits>
 
