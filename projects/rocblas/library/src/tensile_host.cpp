@@ -962,8 +962,9 @@ namespace
                         // Skip experimental libraries
                         if(codeObjectFile.find("Experimental") != std::string::npos)
                             continue;
-                        HIP_CHECK_EXC_MESSAGE(adapter.loadCodeObjectFile(codeObjectFile.c_str()),
-                                              "loading code object: " + codeObjectFile);
+                        THROW_IF_HIP_ERROR_MESSAGE(
+                            adapter.loadCodeObjectFile(codeObjectFile.c_str()),
+                            "loading code object: " + codeObjectFile);
                     } while(FindNextFileA(hfine, &finddata));
                 }
                 else
@@ -983,8 +984,8 @@ namespace
                             continue;
                         if(cofile.find("Experimental") != std::string::npos)
                             continue;
-                        HIP_CHECK_EXC_MESSAGE(adapter.loadCodeObjectFile(cofile),
-                                              "loading code object: " + cofile);
+                        THROW_IF_HIP_ERROR_MESSAGE(adapter.loadCodeObjectFile(cofile),
+                                                   "loading code object: " + cofile);
                     }
                 }
                 else if(g == GLOB_NOMATCH)
