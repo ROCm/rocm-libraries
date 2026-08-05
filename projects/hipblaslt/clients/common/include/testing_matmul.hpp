@@ -29,7 +29,6 @@
 #include "TensorDataManipulation.hpp"
 #include "allclose.hpp"
 #include "benchmark_timing.hpp"
-#include <roc/host_validation/adapters/hipblaslt/HipblasltReferenceGemm.hpp>
 #include "efficiency_monitor.hpp"
 #include "flops.hpp"
 #include "hipBuffer.hpp"
@@ -40,6 +39,8 @@
 #include "hipblaslt_random.hpp"
 #include "hipblaslt_test.hpp"
 #include "hipblaslt_vector.hpp"
+#include <roc/host_validation/adapters/hipblaslt/Epilogue.hpp>
+#include <roc/host_validation/adapters/hipblaslt/HipblasltReferenceGemm.hpp>
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
 #include "mxDataGen.hpp"
 #endif
@@ -618,300 +619,6 @@ void saturate_cast_to_type(void* dst, Tin src, hipDataType typeD, size_t indexD)
     }
 }
 
-template <typename Ti, typename Tc, typename Tact, typename F>
-void epilogue_func(int64_t     m,
-                   int64_t     n,
-                   int64_t     ld,
-                   Ti*         in,
-                   void*       out,
-                   Tc*         out_raw,
-                   Tc*         amaxD,
-                   void*       e,
-                   hipDataType aux_type,
-                   Tc          scaleD,
-                   Tc          scaleE,
-                   bool        enable_bias,
-                   void*       bias,
-                   hipDataType bias_type,
-                   Tact        arg1,
-                   Tact        arg2,
-                   F&          act_func,
-                   bool        gradient,
-                   hipDataType To)
-{
-    for(int i = 0; i < m; i++)
-    {
-        Ti bias_data = enable_bias ? cast_from_type<Ti>(bias, bias_type, i) : 0;
-
-#define CALCULATE_EPILOGUE_ACT                                                                \
-    auto pos     = j * ld + i;                                                                \
-    auto in_Tact = static_cast<Tact>(in[pos]) + bias_data;                                    \
-    if(e && !gradient)                                                                        \
-    {                                                                                         \
-        saturate_cast_to_type(e, in_Tact * scaleE, aux_type, pos);                            \
-    }                                                                                         \
-    Tact in_Tact_act = 0;                                                                     \
-    if(gradient)                                                                              \
-    {                                                                                         \
-        in_Tact_act = act_func(cast_from_type<Tact>(e, aux_type, pos), arg1, arg2) * in_Tact; \
-    }                                                                                         \
-    else                                                                                      \
-        in_Tact_act = act_func(in_Tact, arg1, arg2);
-
-        if(amaxD == nullptr)
-        {
-#pragma omp parallel for
-            for(int j = 0; j < n; j++)
-            {
-                CALCULATE_EPILOGUE_ACT;
-                saturate_cast_to_type(out, in_Tact_act * scaleD, To, pos);
-                *(out_raw + pos) = static_cast<Tc>(in_Tact_act * scaleD);
-            }
-        }
-        else
-        {
-            for(int j = 0; j < n; j++)
-            {
-                CALCULATE_EPILOGUE_ACT;
-                *amaxD = *amaxD > std::abs(static_cast<Tc>(in_Tact_act))
-                             ? *amaxD
-                             : std::abs(static_cast<Tc>(in_Tact_act));
-                saturate_cast_to_type(out, in_Tact_act * scaleD, To, pos);
-                *(out_raw + pos) = static_cast<Tc>(in_Tact_act * scaleD);
-            }
-        }
-    }
-}
-
-template <typename Tact, typename F>
-void epilogue_func(int64_t     m,
-                   int64_t     n,
-                   int64_t     ld,
-                   void*       in,
-                   void*       out,
-                   void*       out_raw,
-                   void*       amaxD,
-                   void*       e,
-                   hipDataType aux_type,
-                   void*       scaleD,
-                   void*       scaleE,
-                   bool        enable_bias,
-                   void*       bias,
-                   hipDataType bias_type,
-                   Tact        arg1,
-                   Tact        arg2,
-                   F&          act_func,
-                   bool        gradient,
-                   hipDataType To,
-                   hipDataType Tc)
-{
-    switch(Tc)
-    {
-    case HIP_R_32F:
-        epilogue_func(m,
-                      n,
-                      ld,
-                      (float*)in,
-                      out,
-                      (float*)out_raw,
-                      (float*)amaxD,
-                      e,
-                      aux_type,
-                      *(float*)scaleD,
-                      *(float*)scaleE,
-                      enable_bias,
-                      bias,
-                      bias_type,
-                      arg1,
-                      arg2,
-                      act_func,
-                      gradient,
-                      To);
-        return;
-    case HIP_R_64F:
-        epilogue_func(m,
-                      n,
-                      ld,
-                      (double*)in,
-                      out,
-                      (double*)out_raw,
-                      (double*)amaxD,
-                      e,
-                      aux_type,
-                      *(double*)scaleD,
-                      *(double*)scaleE,
-                      enable_bias,
-                      bias,
-                      bias_type,
-                      arg1,
-                      arg2,
-                      act_func,
-                      gradient,
-                      To);
-        return;
-    case HIP_R_32I:
-        epilogue_func(m,
-                      n,
-                      ld,
-                      (int32_t*)in,
-                      out,
-                      (int32_t*)out_raw,
-                      (int32_t*)amaxD,
-                      e,
-                      aux_type,
-                      *(int32_t*)scaleD,
-                      *(int32_t*)scaleE,
-                      enable_bias,
-                      bias,
-                      bias_type,
-                      arg1,
-                      arg2,
-                      act_func,
-                      gradient,
-                      To);
-        return;
-    default:
-        hipblaslt_cerr << "Error type in epilogue_func()" << std::endl;
-        return;
-    }
-}
-
-template <typename Ti, typename Tc>
-void epilogue_func(int64_t     m,
-                   int64_t     n,
-                   int64_t     ld,
-                   Ti*         in,
-                   void*       out,
-                   Tc*         out_raw,
-                   Tc*         amaxD,
-                   void*       e,
-                   hipDataType aux_type,
-                   Tc          scaleD,
-                   Tc          scaleE,
-                   bool        enable_bias,
-                   void*       bias,
-                   hipDataType bias_type,
-                   bool        gradient,
-                   hipDataType To)
-{
-#define CALCULATE_EPILOGUE_BASIC                                \
-    auto pos  = j * ld + i;                                     \
-    Tc   temp = static_cast<Ti>(*(in + pos)) + bias_data;       \
-    if(e)                                                       \
-    {                                                           \
-        saturate_cast_to_type(e, temp * scaleE, aux_type, pos); \
-    }
-
-    for(int i = 0; i < m; i++)
-    {
-        Ti bias_data = enable_bias ? cast_from_type<Ti>(bias, bias_type, i) : 0;
-
-        if(amaxD == nullptr)
-        {
-#pragma omp parallel for
-            for(int j = 0; j < n; j++)
-            {
-                CALCULATE_EPILOGUE_BASIC;
-                temp *= scaleD;
-                saturate_cast_to_type(out, temp, To, pos);
-                *(out_raw + pos) = static_cast<Tc>(temp);
-            }
-        }
-        else
-        {
-            for(int j = 0; j < n; j++)
-            {
-                CALCULATE_EPILOGUE_BASIC;
-                *amaxD = *amaxD > std::abs(static_cast<Tc>(temp)) ? *amaxD
-                                                                  : std::abs(static_cast<Tc>(temp));
-                temp *= scaleD;
-                saturate_cast_to_type(out, temp, To, pos);
-                *(out_raw + pos) = static_cast<Tc>(temp);
-            }
-        }
-    }
-}
-
-void epilogue_func(int64_t     m,
-                   int64_t     n,
-                   int64_t     ld,
-                   void*       in,
-                   void*       out,
-                   void*       out_raw,
-                   void*       amaxD,
-                   void*       e,
-                   hipDataType aux_type,
-                   void*       scaleD,
-                   void*       scaleE,
-                   bool        enable_bias,
-                   void*       bias,
-                   hipDataType bias_type,
-                   bool        gradient,
-                   hipDataType To,
-                   hipDataType Tc)
-{
-    switch(Tc)
-    {
-    case HIP_R_32F:
-        epilogue_func(m,
-                      n,
-                      ld,
-                      (float*)in,
-                      out,
-                      (float*)out_raw,
-                      (float*)amaxD,
-                      e,
-                      aux_type,
-                      *(float*)scaleD,
-                      *(float*)scaleE,
-                      enable_bias,
-                      bias,
-                      bias_type,
-                      gradient,
-                      To);
-        return;
-    case HIP_R_64F:
-        epilogue_func(m,
-                      n,
-                      ld,
-                      (double*)in,
-                      out,
-                      (double*)out_raw,
-                      (double*)amaxD,
-                      e,
-                      aux_type,
-                      *(double*)scaleD,
-                      *(double*)scaleE,
-                      enable_bias,
-                      bias,
-                      bias_type,
-                      gradient,
-                      To);
-        return;
-    case HIP_R_32I:
-        epilogue_func(m,
-                      n,
-                      ld,
-                      (int32_t*)in,
-                      out,
-                      (int32_t*)out_raw,
-                      (int32_t*)amaxD,
-                      e,
-                      aux_type,
-                      *(int32_t*)scaleD,
-                      *(int32_t*)scaleE,
-                      enable_bias,
-                      bias,
-                      bias_type,
-                      gradient,
-                      To);
-        return;
-    default:
-        hipblaslt_cerr << "Error type in epilogue_func()" << std::endl;
-        return;
-    }
-}
-
 template <bool SumLd, typename Tc>
 void reduction_func(void*       workspace,
                     hipDataType ti,
@@ -945,62 +652,6 @@ void reduction_func(void*       workspace,
         }
     }
 }
-
-auto _relu = [](auto in, auto /*arg1*/, auto /*arg2*/) -> decltype(in) {
-    return static_cast<decltype(in)>(std::max(static_cast<decltype(in)>(0), in));
-};
-
-auto _drelu = [](auto in, auto /*arg1*/, auto /*arg2*/) -> decltype(in) {
-    return static_cast<decltype(in)>(in > static_cast<decltype(in)>(0) ? 1 : 0);
-};
-
-auto _gelu = [](auto in, auto /*arg1*/, auto /*arg2*/) -> decltype(in) {
-    using Tc = float;
-
-    constexpr auto k0    = static_cast<Tc>(0.7978845608028654);
-    constexpr auto k1    = static_cast<Tc>(0.044715);
-    Tc             in_Tc = static_cast<Tc>(in);
-
-    return static_cast<decltype(in)>(
-        0.5f * (in_Tc * (1.f + std::tanh(k0 * (in_Tc * (1.f + k1 * (in_Tc * in_Tc)))))));
-};
-
-auto _dgelu = [](auto in, auto /*arg1*/, auto /*arg2*/) -> decltype(in) {
-    using Tc = float;
-
-    constexpr auto k0    = static_cast<Tc>(0.0535161);
-    constexpr auto k1    = static_cast<Tc>(0.398942);
-    constexpr auto k2    = static_cast<Tc>(0.0356774);
-    constexpr auto k3    = static_cast<Tc>(0.797885);
-    Tc             in_Tc = static_cast<Tc>(in);
-
-    Tc pow3 = in_Tc * in_Tc * in_Tc;
-    Tc x1   = k0 * pow3 + k1 * in_Tc;
-    Tc xx   = k2 * pow3 + k3 * in_Tc;
-    Tc x2   = 4 / pow(exp(-xx) + exp(xx), 2);
-    Tc tmp  = 0.5 * tanh(xx) + x1 * x2 + 0.5;
-    return static_cast<decltype(in)>(0.5f * tanh(xx) + x1 * x2 + 0.5f);
-};
-
-// swish with beta=1
-auto _silu = [](auto in, auto /*arg1*/, auto /*arg2*/) -> decltype(in) {
-    using Tc = float;
-    Tc in_Tc = static_cast<Tc>(in);
-    return static_cast<decltype(in)>(in_Tc / (1.f + exp(-in_Tc)));
-};
-
-// clamp
-auto _clamp = [](auto in, auto alpha, auto beta) -> decltype(in) {
-    using Tc = float;
-    Tc in_Tc = static_cast<Tc>(in);
-    return static_cast<decltype(in)>(
-        std::max(static_cast<Tc>(alpha), std::min(in_Tc, static_cast<Tc>(beta))));
-};
-
-auto _sigmoid = [](auto in, auto /*arg1*/, auto /*arg2*/) -> decltype(in) {
-    return static_cast<decltype(in)>(static_cast<decltype(in)>(1)
-                                     / (static_cast<decltype(in)>(1) + std::exp(-in)));
-};
 
 void testing_matmul_bad_arg(const Arguments& arg)
 {
@@ -4902,13 +4553,6 @@ void testing_matmul_with_bias(const Arguments& arg,
             cpu_time_used = get_time_us_no_sync();
         }
 
-#define epilogue_param                                                                      \
-    M[gemmIdx], N[gemmIdx], ldd[gemmIdx],                                                   \
-        (hD_gold_epl[gemmIdx].as<char>() + pos * realDataTypeSize(Talpha)),                 \
-        (hD_gold[gemmIdx].as<char>() + pos * realDataTypeSize(To)),                         \
-        (hBias_gold_epl[gemmIdx].as<char>() + pos * realDataTypeSize(Talpha)),              \
-        arg.amaxD ? hAmaxD_gold[gemmIdx].as<char>() + 0 : nullptr, ePos, Taux, scaleDValue, \
-        scaleEValue, applyBias
         gemm_count = std::max(1, arg.grouped_gemm); //Resetting the gemm_count for GroupedGemm
         for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
         {
@@ -4993,93 +4637,63 @@ void testing_matmul_with_bias(const Arguments& arg,
                     void* hBias_buf = ((hBias).size() <= gemmIdx) ? nullptr : hBias[gemmIdx].buf();
                     if(applyBias && arg.bias_stride > 0)
                     {
-                        hBias_buf = ((char*)hBias_buf) + (arg.bias_stride * batchIdx * realDataTypeSize(Tbias));
+                        hBias_buf = ((char*)hBias_buf)
+                                    + (arg.bias_stride * batchIdx * realDataTypeSize(Tbias));
                     }
+
+                    roc::host_validation::hipblaslt_adapter::EpilogueArguments epilogue;
+                    epilogue.rows             = M[gemmIdx];
+                    epilogue.columns          = N[gemmIdx];
+                    epilogue.leadingDimension = ldd[gemmIdx];
+                    epilogue.input
+                        = hD_gold_epl[gemmIdx].as<char>() + pos * realDataTypeSize(Talpha);
+                    epilogue.output = hD_gold[gemmIdx].as<char>() + pos * realDataTypeSize(To);
+                    epilogue.rawOutput
+                        = hBias_gold_epl[gemmIdx].as<char>() + pos * realDataTypeSize(Talpha);
+                    epilogue.amax           = arg.amaxD ? hAmaxD_gold[gemmIdx].as<char>() : nullptr;
+                    epilogue.auxiliary      = ePos;
+                    epilogue.auxiliaryType  = Taux;
+                    epilogue.outputScale    = scaleDValue;
+                    epilogue.auxiliaryScale = scaleEValue;
+                    epilogue.bias           = applyBias ? hBias_buf : nullptr;
+                    epilogue.biasType       = Tbias;
+                    epilogue.activationParameter0 = arg.activation_arg1;
+                    epilogue.activationParameter1 = arg.activation_arg2;
+                    epilogue.outputType           = To;
+                    epilogue.computeType          = Talpha;
+
                     switch(arg.activation_type)
                     {
-                        case hipblaslt_activation_type::gelu:
-                            if(arg.gradient)
-                                epilogue_func(epilogue_param,
-                                            hBias_buf,
-                                            Tbias,
-                                            arg.activation_arg1,
-                                            arg.activation_arg2,
-                                            ::_dgelu,
-                                            true,
-                                            To,
-                                            Talpha);
-                            else
-                            {
-                                epilogue_func(epilogue_param,
-                                            hBias_buf,
-                                            Tbias,
-                                            arg.activation_arg1,
-                                            arg.activation_arg2,
-                                            ::_gelu,
-                                            false,
-                                            To,
-                                            Talpha);
-                            }
-                            break;
-                        case hipblaslt_activation_type::relu:
-                            if(arg.gradient)
-                            {
-                                epilogue_func(epilogue_param,
-                                            hBias_buf,
-                                            Tbias,
-                                            arg.activation_arg1,
-                                            arg.activation_arg2,
-                                            ::_drelu,
-                                            true,
-                                            To,
-                                            Talpha);
-                            }
-                            else
-                            {
-                                epilogue_func(epilogue_param,
-                                            hBias_buf,
-                                            Tbias,
-                                            arg.activation_arg1,
-                                            arg.activation_arg2,
-                                            ::_relu,
-                                            false,
-                                            To,
-                                            Talpha);
-                            }
-                            break;
-                        case hipblaslt_activation_type::swish:
-                            epilogue_func(epilogue_param,
-                                        hBias_buf,
-                                        Tbias,
-                                        arg.activation_arg1,
-                                        arg.activation_arg2,
-                                        ::_silu,
-                                        arg.gradient,
-                                        To,
-                                        Talpha);
-                            break;
-                        case hipblaslt_activation_type::clamp:
-                            epilogue_func(epilogue_param,
-                                        hBias_buf,
-                                        Tbias,
-                                        arg.activation_arg1,
-                                        arg.activation_arg2,
-                                        ::_clamp,
-                                        arg.gradient,
-                                        To,
-                                        Talpha);
-                            break;
-                        default:
-                            epilogue_func(epilogue_param, hBias_buf, Tbias, false, To, Talpha);
-                            break;
+                    case hipblaslt_activation_type::gelu:
+                        epilogue.activation = roc::host_validation::Activation::Gelu;
+                        break;
+                    case hipblaslt_activation_type::relu:
+                        epilogue.activation = roc::host_validation::Activation::Relu;
+                        break;
+                    case hipblaslt_activation_type::swish:
+                        epilogue.activation = roc::host_validation::Activation::Silu;
+                        break;
+                    case hipblaslt_activation_type::clamp:
+                        epilogue.activation = roc::host_validation::Activation::Clamp;
+                        break;
+                    default:
+                        epilogue.activation = roc::host_validation::Activation::None;
+                        break;
                     }
+                    epilogue.activationApplication
+                        = arg.gradient
+                                  && epilogue.activation != roc::host_validation::Activation::None
+                              ? roc::host_validation::ActivationApplication::Gradient
+                              : roc::host_validation::ActivationApplication::Forward;
+                    roc::host_validation::hipblaslt_adapter::referenceEpilogue(epilogue);
 
                     if(arg.gradient && arg.bias_vector && batchIdx == num_batches[gemmIdx] - 1)
                     {
-                        auto *hBias_gold_buf = hBias_gold[gemmIdx].buf();
+                        auto* hBias_gold_buf = hBias_gold[gemmIdx].buf();
                         if(arg.bias_stride > 0 && hBias_gold_buf != nullptr)
                         {
-                            hBias_gold_buf = (char*)hBias_gold_buf + arg.bias_stride * batchIdx * realDataTypeSize(Tbias);
+                            hBias_gold_buf = (char*)hBias_gold_buf
+                                             + arg.bias_stride * batchIdx * realDataTypeSize(Tbias);
                         }
                         if(arg.bias_source == hipblaslt_bias_source::d)
                         {

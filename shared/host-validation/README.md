@@ -12,12 +12,29 @@ comparison used by ROCm library clients and tests.
 - `roc::host-validation`
   - Transitional validation operations layered on the tensor core.
   - Exports `roc/host_validation/validation.hpp`.
-  - Exposes runtime-typed generation, reference GEMM, and comparison.
+  - Exposes runtime-typed generation, reference GEMM, reference epilogues, and
+    comparison.
   - Implementation headers live under `roc/host_validation/detail/`; consumers
     include only `validation.hpp`.
 - `roc::host-validation-blas`
   - Optional compiled CBLAS implementation of `GemmBackend::Blas`.
   - Built with `HOST_VALIDATION_BUILD_BLAS_BACKEND=ON`.
+
+## Component dependency contract
+
+Every file and target owned by `shared/host-validation` is product-independent.
+The component must not include, compile against, or use hipBLASLt, TensileLite,
+rocisa, HIP, GPU architecture types, or product enums. Product-private adapters
+translate their descriptors into component-owned tensor and operation types:
+
+```text
+private product adapter -> roc::host-validation -> roc::host-validation-core
+```
+
+The dependency may never point in the opposite direction. The
+`host-validation-component-boundary` test scans the complete component source
+tree for forbidden product dependencies.
+
 ## Layout
 
 ```text
@@ -150,6 +167,30 @@ F32/F64/complex GEMM and is selected through `GemmRunOptions`.
 The canonical backend computes only selected outputs. Accelerated backends may
 compute all outputs and report the actual count through `GemmRunInfo`.
 
+## Runtime reference epilogue
+
+The component also owns the elementwise host epilogue used after reference
+GEMM:
+
+```cpp
+EpilogueProblem problem(inputView, outputView, ScalarType::Float32);
+problem.bias = VectorBinding{biasView, MatrixAxis::Row};
+problem.activation = Activation::Gelu;
+problem.auxiliaryOutput = auxiliaryView;
+problem.rawOutput = rawOutputView;
+problem.amax = amaxView;
+problem.outputScale = 2.0;
+problem.auxiliaryScale = 3.0;
+
+EpilogueRunInfo run = referenceEpilogue(problem);
+```
+
+The current operation supports runtime input/output/bias/auxiliary types, F32,
+F64, and I32 compute, explicit bias axes, forward and gradient activation,
+auxiliary E input/output, scale-D, scale-E, raw output, and AMax. The
+hipBLASLt pointer and `hipDataType` translation lives in its private client
+adapter and is not compiled by this component.
+
 Consumers should need one of only two includes:
 
 ```cpp
@@ -188,7 +229,9 @@ The `roc_host_validation` package currently provides:
 - `from_numpy` and `to_numpy` copying conversions;
 - deterministic tensor generation and structured comparison; and
 - `reference_gemm` with runtime storage/output/accumulator types, alpha/beta,
-  compute-input quantization, math mode, and activation.
+  compute-input quantization, math mode, and activation; and
+- `reference_epilogue` with bias, forward/gradient activation, E, scale-D/E,
+  raw output, and AMax results.
 
 The NumPy suite independently checks:
 
@@ -199,8 +242,9 @@ The NumPy suite independently checks:
 - affine layout decoding;
 - deterministic generation and structured comparison;
 - F32, F64, and complex GEMM against NumPy;
-- mixed FP8-storage/FP4-compute-input quantization; and
-- selected-output GEMM and prime-stride selection.
+- mixed FP8-storage/FP4-compute-input quantization;
+- selected-output GEMM and prime-stride selection; and
+- forward and ReLU/GELU-gradient epilogues against NumPy.
 
 The first binding deliberately copies between NumPy and `Tensor`. A follow-up
 should expose lifetime-safe non-owning NumPy-backed `TensorView` objects.
