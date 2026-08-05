@@ -24,17 +24,24 @@
  *
  *******************************************************************************/
 
+#include <omp.h>
+
+#include <cmath>
+#include <complex>
+#include <cstddef>
+#include <iostream>
+#include <optional>
+#include <roc/host_validation/adapters/tensilelite/HostValidationBridge.hpp>
 #include <roc/host_validation/adapters/tensilelite/Reference.hpp>
+#include <roc/host_validation/validation.hpp>
+#include <span>
+#include <type_traits>
+#include <utility>
+
 #include "Tensile/TensorDescriptor_fwd.hpp"
 #include "Tensile/Utils.hpp"
 #include "TimingInstrumentation.hpp"
 #include "TypedId.hpp"
-
-#include <cmath>
-#include <cstddef>
-#include <iostream>
-#include <omp.h>
-#include <type_traits>
 
 #define MAX_OMP_THREADS 64
 #if defined(_MSC_VER)
@@ -1157,6 +1164,321 @@ namespace TensileLite
             return multiply<Accumulator, MathOpAccum>(aVal, bVal);
         }
 
+        bool tryRuntimeCanonicalGemm(ContractionProblemGemm const& problem,
+                                     ContractionInputs const& inputs, size_t elementsToValidate) {
+            using namespace roc::host_validation;
+
+            if (problem.boundIndices().size() != 1 || problem.freeIndicesA().size() != 1 ||
+                problem.freeIndicesB().size() != 1 || problem.batchIndices().size() != 1)
+                return false;
+            if (problem.boundIndices()[0].aMirror || problem.boundIndices()[0].bMirror)
+                return false;
+            if (problem.useGradient() || problem.outputAmaxD() || problem.useE() ||
+                problem.useScaleCD() || problem.useGateResidual())
+                return false;
+            if ((problem.mxBlockA() > 0) != (problem.mxBlockB() > 0)) return false;
+            if ((problem.useBias() && inputs.bias == nullptr) ||
+                (problem.useScaleAlphaVec() && inputs.scaleAlphaVec == nullptr) ||
+                ((problem.useScaleAB() == "Scalar" || problem.useScaleAB() == "Vector") &&
+                 (inputs.scaleA == nullptr || inputs.scaleB == nullptr)) ||
+                (problem.mxBlockA() > 0 && (inputs.mxsa == nullptr || inputs.mxsb == nullptr)))
+                return false;
+            if (elementsToValidate < problem.d().totalLogicalElements()) return false;
+            if (inputs.a == nullptr || inputs.b == nullptr || inputs.c == nullptr ||
+                inputs.d == nullptr || inputs.batchA != nullptr || inputs.batchB != nullptr ||
+                inputs.batchC != nullptr || inputs.batchD != nullptr || inputs.batchOffsetA != 0 ||
+                inputs.batchOffsetB != 0 || inputs.batchOffsetC != 0 || inputs.batchOffsetD != 0)
+                return false;
+            if (problem.a().dataType() == rocisa::DataType::Float6 ||
+                problem.a().dataType() == rocisa::DataType::BFloat6 ||
+                problem.b().dataType() == rocisa::DataType::Float6 ||
+                problem.b().dataType() == rocisa::DataType::BFloat6)
+                return false;
+
+            ScalarType typeA;
+            ScalarType typeB;
+            ScalarType typeC;
+            ScalarType typeD;
+            ScalarType accumulatorType;
+            ScalarType computeTypeA;
+            ScalarType computeTypeB;
+            try {
+                typeA = toHostValidationScalarType(problem.a().dataType());
+                typeB = toHostValidationScalarType(problem.b().dataType());
+                typeC = toHostValidationScalarType(problem.c().dataType());
+                typeD = toHostValidationScalarType(problem.d().dataType());
+                accumulatorType = toHostValidationScalarType(problem.computeType());
+                computeTypeA = problem.computeInputTypeA() == rocisa::DataType::None
+                                   ? typeA
+                                   : toHostValidationScalarType(problem.computeInputTypeA());
+                computeTypeB = problem.computeInputTypeB() == rocisa::DataType::None
+                                   ? typeB
+                                   : toHostValidationScalarType(problem.computeInputTypeB());
+            } catch (std::invalid_argument const&) {
+                return false;
+            }
+            if (accumulatorType != ScalarType::Float32 && accumulatorType != ScalarType::Float64 &&
+                accumulatorType != ScalarType::ComplexFloat32 &&
+                accumulatorType != ScalarType::ComplexFloat64)
+                return false;
+            if ((problem.useScaleAB() == "Scalar" || problem.useScaleAB() == "Vector") &&
+                (computeTypeA != typeA || computeTypeB != typeB))
+                return false;
+
+            auto scalarValue = [](rocisa::DataType type,
+                                  ConstantVariant const& value) -> std::complex<double> {
+                switch (type) {
+                    case rocisa::DataType::Float:
+                    case rocisa::DataType::XFloat32:
+                        return {constVariantCast<float>(value), 0.0};
+                    case rocisa::DataType::Double:
+                        return {constVariantCast<double>(value), 0.0};
+                    case rocisa::DataType::ComplexFloat: {
+                        auto converted = constVariantCast<std::complex<float>>(value);
+                        return {converted.real(), converted.imag()};
+                    }
+                    case rocisa::DataType::ComplexDouble:
+                        return constVariantCast<std::complex<double>>(value);
+                    default:
+                        throw std::invalid_argument(
+                            "Runtime canonical bridge scalar type is unsupported.");
+                }
+            };
+            std::complex<double> alpha;
+            std::complex<double> beta;
+            try {
+                alpha = scalarValue(problem.alphaType(), inputs.alpha);
+                beta = scalarValue(problem.betaType(), inputs.beta);
+            } catch (std::invalid_argument const&) {
+                return false;
+            }
+
+            ActivationType concreteActivation = problem.activationType();
+            if (concreteActivation == ActivationType::All ||
+                concreteActivation == ActivationType::Hipblaslt_all)
+                concreteActivation = problem.getParams().activationEnum();
+            roc::host_validation::Activation activation;
+            try {
+                activation = toHostValidationActivation(concreteActivation);
+            } catch (std::invalid_argument const&) {
+                return false;
+            }
+            if ((accumulatorType == ScalarType::ComplexFloat32 ||
+                 accumulatorType == ScalarType::ComplexFloat64) &&
+                activation != roc::host_validation::Activation::None)
+                return false;
+
+            auto storageSpan = [](ScalarType type, void const* pointer, size_t elements) {
+                const size_t bits = scalarTypeInfo(type).storageBits;
+                const size_t bytes = (elements * bits + 7) / 8;
+                return std::span<const std::byte>(static_cast<const std::byte*>(pointer), bytes);
+            };
+            auto scalarFromStorage = [&](ScalarType type,
+                                         void const* pointer) -> std::complex<double> {
+                TensorView view(type, Layout::contiguous(Shape{1}), storageSpan(type, pointer, 1));
+                if (scalarTypeInfo(type).category == ScalarCategory::Complex)
+                    return view.loadAs<std::complex<double>>({0});
+                return {view.loadAs<double>({0}), 0.0};
+            };
+
+            ScalarType alphaType;
+            try {
+                alphaType = toHostValidationScalarType(problem.alphaType());
+            } catch (std::invalid_argument const&) {
+                return false;
+            }
+            if (problem.useScaleAB() == "Scalar")
+                alpha *= scalarFromStorage(alphaType, inputs.scaleA) *
+                         scalarFromStorage(alphaType, inputs.scaleB);
+
+            double activationParameter0 = 0.0;
+            double activationParameter1 = 0.0;
+            try {
+                if (!inputs.activationArgs.empty())
+                    activationParameter0 =
+                        scalarValue(problem.computeType(), inputs.activationArgs[0]).real();
+                if (inputs.activationArgs.size() > 1)
+                    activationParameter1 =
+                        scalarValue(problem.computeType(), inputs.activationArgs[1]).real();
+            } catch (std::invalid_argument const&) {
+                return false;
+            }
+
+            const size_t indexMA = problem.freeIndicesA()[0].i;
+            const size_t indexKA = problem.boundIndices()[0].a;
+            const size_t indexNB = problem.freeIndicesB()[0].i;
+            const size_t indexKB = problem.boundIndices()[0].b;
+            const size_t indexMD = problem.freeIndices()[0].d;
+            const size_t indexND = problem.freeIndices()[1].d;
+            const size_t batchA = problem.batchIndices()[0].a;
+            const size_t batchB = problem.batchIndices()[0].b;
+            const size_t batchC = problem.batchIndices()[0].c;
+            const size_t batchD = problem.batchIndices()[0].d;
+            const size_t mxBlockA = problem.mxBlockA();
+            const size_t mxBlockB = problem.mxBlockB();
+            const size_t strideMxsaM = mxBlockA > 0 ? problem.mxsa().strides()[indexMA] : 0;
+            const size_t strideMxsaBlock = mxBlockA > 0 ? problem.mxsa().strides()[indexKA] : 0;
+            const size_t strideMxsbN = mxBlockB > 0 ? problem.mxsb().strides()[indexNB] : 0;
+            const size_t strideMxsbBlock = mxBlockB > 0 ? problem.mxsb().strides()[indexKB] : 0;
+            const size_t strideBatchMxsa = mxBlockA > 0 ? problem.mxsa().strides()[batchA] : 0;
+            const size_t strideBatchMxsb = mxBlockB > 0 ? problem.mxsb().strides()[batchB] : 0;
+
+            const size_t m = problem.freeSizeA(0);
+            const size_t n = problem.freeSizeB(0);
+            const size_t k = problem.boundSize(0);
+            const size_t batches = problem.batchSize(0);
+            if (problem.useBias() && problem.useScaleAlphaVec() && m == n) return false;
+            bool aConjugate = false;
+            bool bConjugate = false;
+            for (auto const& op : problem.aOps())
+                if (op.type == TensorOp::Type::ComplexConjugate) aConjugate = true;
+            for (auto const& op : problem.bOps())
+                if (op.type == TensorOp::Type::ComplexConjugate) bConjugate = true;
+            const auto aStorage = std::span<const std::byte>(
+                static_cast<const std::byte*>(inputs.a), problem.a().totalAllocatedBytes());
+            const auto bStorage = std::span<const std::byte>(
+                static_cast<const std::byte*>(inputs.b), problem.b().totalAllocatedBytes());
+            const auto cStorage = std::span<const std::byte>(
+                static_cast<const std::byte*>(inputs.c), problem.c().totalAllocatedBytes());
+            const auto dStorage = std::span<std::byte>(static_cast<std::byte*>(inputs.d),
+                                                       problem.d().totalAllocatedBytes());
+            std::optional<ScalarType> biasType;
+            std::span<const std::byte> biasStorage;
+            if (problem.useBias()) {
+                try {
+                    biasType = toHostValidationScalarType(problem.bias().dataType());
+                } catch (std::invalid_argument const&) {
+                    return false;
+                }
+                biasStorage = std::span<const std::byte>(static_cast<const std::byte*>(inputs.bias),
+                                                         problem.bias().totalAllocatedBytes());
+            }
+            const size_t scaleAlphaLength = problem.getParams().factorDim() == 0 ? m : n;
+            std::span<const std::byte> scaleAlphaStorage;
+            if (problem.useScaleAlphaVec())
+                scaleAlphaStorage = storageSpan(alphaType, inputs.scaleAlphaVec, scaleAlphaLength);
+            std::span<const std::byte> scaleAStorage;
+            std::span<const std::byte> scaleBStorage;
+            if (problem.useScaleAB() == "Vector") {
+                scaleAStorage = storageSpan(alphaType, inputs.scaleA, m);
+                scaleBStorage = storageSpan(alphaType, inputs.scaleB, n);
+            }
+
+            for (size_t batch = 0; batch < batches; ++batch) {
+                const ptrdiff_t offsetA =
+                    static_cast<ptrdiff_t>(batch * problem.a().strides()[batchA]);
+                const ptrdiff_t offsetB =
+                    static_cast<ptrdiff_t>(batch * problem.b().strides()[batchB]);
+                const ptrdiff_t offsetC =
+                    static_cast<ptrdiff_t>(batch * problem.c().strides()[batchC]);
+                const ptrdiff_t offsetD =
+                    static_cast<ptrdiff_t>(batch * problem.d().strides()[batchD]);
+                GemmOperand operandA(
+                    TensorView(typeA,
+                               Layout(Shape{m, k},
+                                      {static_cast<ptrdiff_t>(problem.a().strides()[indexMA]),
+                                       static_cast<ptrdiff_t>(problem.a().strides()[indexKA])},
+                                      offsetA),
+                               aStorage));
+                GemmOperand operandB(
+                    TensorView(typeB,
+                               Layout(Shape{k, n},
+                                      {static_cast<ptrdiff_t>(problem.b().strides()[indexKB]),
+                                       static_cast<ptrdiff_t>(problem.b().strides()[indexNB])},
+                                      offsetB),
+                               bStorage));
+                if (computeTypeA != typeA) operandA.computeType = computeTypeA;
+                if (computeTypeB != typeB) operandB.computeType = computeTypeB;
+                operandA.conjugate = aConjugate;
+                operandB.conjugate = bConjugate;
+                std::optional<Tensor> runtimeScaleA;
+                std::optional<Tensor> runtimeScaleB;
+                if (mxBlockA > 0) {
+                    const size_t blockCountA = k / mxBlockA + (k % mxBlockA != 0 ? 1 : 0);
+                    const size_t blockCountB = k / mxBlockB + (k % mxBlockB != 0 ? 1 : 0);
+                    runtimeScaleA.emplace(ScalarType::Float32, Shape{m, blockCountA});
+                    runtimeScaleB.emplace(ScalarType::Float32, Shape{n, blockCountB});
+                    for (size_t row = 0; row < m; ++row) {
+                        for (size_t block = 0; block < blockCountA; ++block) {
+                            const size_t index = batch * strideBatchMxsa + row * strideMxsaM +
+                                                 block * strideMxsaBlock;
+                            runtimeScaleA->mutableView().storeFrom(
+                                {row, block},
+                                mxScaleElementAsFloat(problem.mxTypeA(), inputs.mxsa, index));
+                        }
+                    }
+                    for (size_t column = 0; column < n; ++column) {
+                        for (size_t block = 0; block < blockCountB; ++block) {
+                            const size_t index = batch * strideBatchMxsb + column * strideMxsbN +
+                                                 block * strideMxsbBlock;
+                            runtimeScaleB->mutableView().storeFrom(
+                                {column, block},
+                                mxScaleElementAsFloat(problem.mxTypeB(), inputs.mxsb, index));
+                        }
+                    }
+                    operandA.blockScale = BlockScaleBinding{runtimeScaleA->view(), mxBlockA};
+                    operandB.blockScale = BlockScaleBinding{runtimeScaleB->view(), mxBlockB};
+                }
+
+                GemmProblem runtimeProblem(
+                    std::move(operandA), std::move(operandB),
+                    TensorView(typeC,
+                               Layout(Shape{m, n},
+                                      {static_cast<ptrdiff_t>(problem.c().strides()[indexMD]),
+                                       static_cast<ptrdiff_t>(problem.c().strides()[indexND])},
+                                      offsetC),
+                               cStorage),
+                    MutableTensorView(
+                        typeD,
+                        Layout(Shape{m, n},
+                               {static_cast<ptrdiff_t>(problem.d().strides()[indexMD]),
+                                static_cast<ptrdiff_t>(problem.d().strides()[indexND])},
+                               offsetD),
+                        dStorage),
+                    accumulatorType);
+                runtimeProblem.epilogue.alpha = alpha;
+                runtimeProblem.epilogue.beta = beta;
+                runtimeProblem.epilogue.activation = activation;
+                runtimeProblem.epilogue.activationParameter0 = activationParameter0;
+                runtimeProblem.epilogue.activationParameter1 = activationParameter1;
+                if (problem.useScaleAlphaVec())
+                    runtimeProblem.epilogue.scaleAlpha = VectorBinding{
+                        TensorView(alphaType, Layout::contiguous(Shape{scaleAlphaLength}),
+                                   scaleAlphaStorage),
+                        problem.getParams().factorDim() == 0 ? MatrixAxis::Row
+                                                             : MatrixAxis::Column};
+                if (problem.useScaleAB() == "Vector") {
+                    runtimeProblem.epilogue.scaleA =
+                        TensorView(alphaType, Layout::contiguous(Shape{m}), scaleAStorage);
+                    runtimeProblem.epilogue.scaleB =
+                        TensorView(alphaType, Layout::contiguous(Shape{n}), scaleBStorage);
+                }
+                if (problem.useBias()) {
+                    std::vector<int64_t> biasCoordinate(problem.bias().dimensions(), 0);
+                    if (biasCoordinate.size() > 2) biasCoordinate[2] = static_cast<int64_t>(batch);
+                    const ptrdiff_t biasOffset =
+                        static_cast<ptrdiff_t>(problem.bias().index(biasCoordinate));
+                    const size_t biasLength = problem.bias().sizes()[0];
+                    MatrixAxis biasAxis =
+                        problem.getParams().factorDim() == 0 ? MatrixAxis::Row : MatrixAxis::Column;
+                    if (biasLength == m && biasLength != n)
+                        biasAxis = MatrixAxis::Row;
+                    else if (biasLength == n && biasLength != m)
+                        biasAxis = MatrixAxis::Column;
+                    runtimeProblem.epilogue.bias = VectorBinding{
+                        TensorView(*biasType, Layout(Shape{biasLength}, {1}, biasOffset),
+                                   biasStorage),
+                        biasAxis};
+                }
+                runtimeProblem.mathMode =
+                    accumulatorType == ScalarType::Float32 &&
+                            problem.f32XdlMathOp() == rocisa::DataType::XFloat32
+                        ? MathMode::XFloat32
+                        : MathMode::Default;
+                referenceGemm(runtimeProblem);
+            }
+            return true;
+        }
 
         bool isFastPathEligible(ContractionProblemGemm const& problem)
         {
@@ -3188,6 +3510,8 @@ namespace TensileLite
                     solveCPUFast<float>(problem, inputs);
                 return;
             }
+
+            if (tryRuntimeCanonicalGemm(problem, inputs, elementsToValidate)) return;
 
             {
                 ScopedTimer timer("solve_cpu_slow");
