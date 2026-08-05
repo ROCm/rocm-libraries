@@ -232,8 +232,6 @@ class ConvGroupedRequest(OperatorRequest):
     layout: str = "NHWC"
     # "fwd" | "wgrad"
     direction: str = "fwd"
-    # split_k applies to wgrad only; 1 = disabled, -1 = auto, >1 = fixed
-    split_k: int = 1
     # optional vec_size_c override; None = let the candidate decide
     vec_size_c: Optional[int] = None
     op: str = "conv_grouped"
@@ -346,13 +344,16 @@ def _selector_matches(
 def _vec_size_c(req: ConvGroupedRequest) -> int:
     """Compute vec_size_c the same way the kernel builder does.
 
-    Uses the explicit override from the request when set, otherwise falls back
-    to ``ImplicitGemmConvSpec.default_vector_sizes`` which picks the largest
-    power-of-two factor of K (matching what ``CShuffleEpilogue.from_grid``
-    would auto-select).
+    Forward pass (D=NHWK, last dim K):  uses ImplicitGemmConvSpec, returns _vec(K).
+    Wgrad       (D=KYXC, last dim C):   uses WgradConvSpec,          returns _vec(C).
     """
     if req.vec_size_c is not None:
         return req.vec_size_c
+    if req.direction == "wgrad":
+        _va, _vb, vc = WgradConvSpec.default_vector_sizes(
+            req.C, req.K, req.dtype.lower(), split_k=1
+        )
+        return vc
     _va, _vb, vc = ImplicitGemmConvSpec.default_vector_sizes(
         req.C, req.K, req.dtype.lower()
     )
@@ -416,6 +417,75 @@ class ConvGroupedSpec:
             parts.append(f"spk{self.split_k}")
         return kernel_name_join(self.name, *parts)
 
+    def to_fwd_spec(self, problem: "ConvProblem") -> "ImplicitGemmConvSpec":
+        """Build an ImplicitGemmConvSpec from this dispatcher spec and a ConvProblem."""
+        assert self.direction == "fwd", "to_fwd_spec is only valid for fwd specs"
+        target = ArchTarget.from_gfx(self.arch)
+        return ImplicitGemmConvSpec(
+            problem=problem,
+            name=self.name,
+            data=ConvDataSpec(
+                dtype_a=self.dtype,
+                dtype_b=self.dtype,
+                dtype_d=self.dtype,
+            ),
+            tile_m=self.tile_m,
+            tile_n=self.tile_n,
+            tile_k=self.tile_k,
+            warp_m=self.warp_m,
+            warp_n=self.warp_n,
+            warp_tile_m=self.warp_tile_mn,
+            warp_tile_n=self.warp_tile_mn,
+            warp_tile_k=self.warp_tile_k,
+            wave_size=target.wave_size,
+            pipeline=self.pipeline,
+            epilogue=self.epilogue,
+            groups=problem.groups,
+        )
+
+    def to_wgrad_spec(self, problem: "ConvProblem") -> "WgradConvSpec":
+        """Build a WgradConvSpec with a resolved split_k from this dispatcher spec.
+
+        split_k=-1 (auto) is resolved here via the CK formula so the returned
+        spec always has a concrete split_k >= 1, ready for grid calculation and
+        launch without re-running the formula in the caller.
+        """
+        assert self.direction == "wgrad", "to_wgrad_spec is only valid for wgrad specs"
+        from rocke.helpers.split_k import select_split_k_wgrad
+
+        target = ArchTarget.from_gfx(self.arch)
+        p = problem
+        resolved_split_k = select_split_k_wgrad(
+            wg_M=p.K,
+            wg_N=p.Y * p.X * p.C,
+            wg_K=p.N * p.Ho * p.Wo,
+            tile_m=self.tile_m,
+            tile_n=self.tile_n,
+            tile_k=self.tile_k,
+            arch=self.arch,
+        ).split_k
+        return WgradConvSpec(
+            problem=problem,
+            name=self.name,
+            data=ConvDataSpec(
+                dtype_a=self.dtype,
+                dtype_b=self.dtype,
+                dtype_d=self.dtype,
+            ),
+            tile_m=self.tile_m,
+            tile_n=self.tile_n,
+            tile_k=self.tile_k,
+            warp_m=self.warp_m,
+            warp_n=self.warp_n,
+            warp_tile_m=self.warp_tile_mn,
+            warp_tile_n=self.warp_tile_mn,
+            warp_tile_k=self.warp_tile_k,
+            wave_size=target.wave_size,
+            pipeline=self.pipeline,
+            epilogue=self.epilogue,
+            split_k=resolved_split_k,
+        )
+
 
 # ---------------------------------------------------------------------------
 # Grid helpers
@@ -436,9 +506,24 @@ def _wgrad_grid(spec: ConvGroupedSpec, req: OperatorRequest) -> Tuple[int, int, 
     p = _problem(req)
     wg_M = p.K  # output channels
     wg_N = p.Y * p.X * p.C  # filter spatial × input channel
+    wg_K = p.N * p.Ho * p.Wo
     gx = (wg_N + spec.tile_n - 1) // spec.tile_n
     gy = (wg_M + spec.tile_m - 1) // spec.tile_m
-    return (gx, gy, spec.split_k)
+    if spec.split_k == -1:
+        from rocke.helpers.split_k import select_split_k_wgrad
+
+        split_k = select_split_k_wgrad(
+            wg_M=wg_M,
+            wg_N=wg_N,
+            wg_K=wg_K,
+            tile_m=spec.tile_m,
+            tile_n=spec.tile_n,
+            tile_k=spec.tile_k,
+            arch=spec.arch,
+        ).split_k
+    else:
+        split_k = spec.split_k
+    return (gx, gy, split_k)
 
 
 def _block(spec: ConvGroupedSpec) -> Tuple[int, int, int]:
@@ -808,7 +893,7 @@ def _make_gfx942_wgrad_candidate() -> KernelCandidate:
             wave_size=ArchTarget.from_gfx(req.arch).wave_size,
             pipeline=_PIPELINE,
             epilogue=_epilogue_for(req),
-            split_k=int(req.split_k),
+            split_k=-1,
         )
 
     def support(req: OperatorRequest) -> Tuple[bool, str]:
@@ -820,8 +905,6 @@ def _make_gfx942_wgrad_candidate() -> KernelCandidate:
             return False, f"gfx942 candidate requires arch=gfx942 (got {req.arch!r})"
         if req.direction != "wgrad":
             return False, f"candidate handles 'wgrad', got direction={req.direction!r}"
-        if req.split_k > 1 and _epilogue_for(req) == "cshuffle":
-            return False, "split_k > 1 is incompatible with cshuffle epilogue"
         ok, why = _selector_matches(req, candidate)
         if not ok:
             return False, why
@@ -849,7 +932,7 @@ def _make_gfx942_wgrad_candidate() -> KernelCandidate:
             epilogue=_epilogue_for(req),
             dtype=req.dtype.lower(),
             arch=req.arch,
-            split_k=int(req.split_k),
+            split_k=-1,
             name=name,
         )
 
@@ -919,7 +1002,7 @@ def _make_cdna_wgrad_candidate() -> KernelCandidate:
             wave_size=ArchTarget.from_gfx(req.arch).wave_size,
             pipeline=_PIPELINE,
             epilogue=_epilogue_for(req),
-            split_k=int(req.split_k),
+            split_k=-1,
         )
 
     def support(req: OperatorRequest) -> Tuple[bool, str]:
@@ -931,8 +1014,6 @@ def _make_cdna_wgrad_candidate() -> KernelCandidate:
             return False, f"candidate handles 'wgrad', got direction={req.direction!r}"
         if _is_gfx1250(req):
             return False, "wgrad is not yet supported on gfx1250"
-        if req.split_k > 1 and _epilogue_for(req) == "cshuffle":
-            return False, "split_k > 1 is incompatible with cshuffle epilogue"
         ok, why = _selector_matches(req, candidate)
         if not ok:
             return False, why
@@ -960,7 +1041,7 @@ def _make_cdna_wgrad_candidate() -> KernelCandidate:
             epilogue=_epilogue_for(req),
             dtype=req.dtype.lower(),
             arch=req.arch,
-            split_k=int(req.split_k),
+            split_k=-1,
             name=name,
         )
 

@@ -574,20 +574,6 @@ def main() -> int:
             "— a simple integer pattern easy to verify by eye or compare exactly."
         ),
     )
-    parser.add_argument(
-        "--split-k",
-        type=int,
-        default=-1,
-        dest="split_k",
-        metavar="N",
-        help=(
-            "wgrad split-K degree passed to the dispatcher: "
-            "1 = disabled, "
-            ">1 = fixed degree, "
-            "-1 = auto (CK formula per tile config)"
-        ),
-    )
-
     ck_grp = parser.add_argument_group(
         "ckProfiler comparison",
         "Run ckProfiler on the same conv problem(s) for side-by-side comparison "
@@ -707,13 +693,10 @@ def main() -> int:
         conv_grouped_sweep_space,
     )
     from rocke.instances.common.conv_implicit_gemm import (
-        ConvDataSpec,
         ConvProblem,
-        ImplicitGemmConvSpec,
         build_implicit_gemm_conv,
     )
     from rocke.instances.common.conv_implicit_gemm_wgrad import (
-        WgradConvSpec,
         build_implicit_gemm_conv_wgrad,
     )
     from rocke.runtime import synchronize_and_release, time_launches
@@ -837,7 +820,6 @@ def main() -> int:
             dilation_w=problem.dW,
             dtype=dtype,
             direction=args.direction,
-            split_k=args.split_k if args.direction == "wgrad" else 1,
         )
 
         if args.direction == "wgrad":
@@ -848,8 +830,6 @@ def main() -> int:
                 arch=arch,
                 req_base=req_base,
                 compile_kernel=compile_kernel,
-                ConvDataSpec=ConvDataSpec,
-                WgradConvSpec=WgradConvSpec,
                 build_implicit_gemm_conv_wgrad=build_implicit_gemm_conv_wgrad,
                 conv_grouped_sweep_space=conv_grouped_sweep_space,
                 ConvGroupedRequest=ConvGroupedRequest,
@@ -868,8 +848,6 @@ def main() -> int:
                 arch=arch,
                 req_base=req_base,
                 compile_kernel=compile_kernel,
-                ConvDataSpec=ConvDataSpec,
-                ImplicitGemmConvSpec=ImplicitGemmConvSpec,
                 build_implicit_gemm_conv=build_implicit_gemm_conv,
                 conv_grouped_sweep_space=conv_grouped_sweep_space,
                 ConvGroupedRequest=ConvGroupedRequest,
@@ -892,8 +870,6 @@ def _run_fwd(
     arch: str,
     req_base: dict,
     compile_kernel,
-    ConvDataSpec,
-    ImplicitGemmConvSpec,
     build_implicit_gemm_conv,
     conv_grouped_sweep_space,
     ConvGroupedRequest,
@@ -905,7 +881,6 @@ def _run_fwd(
     u8,
 ) -> int:
     import torch
-    from rocke.core.arch import ArchTarget
     from rocke.helpers.manifest import conv_args_signature
 
     _u8 = u8
@@ -989,23 +964,7 @@ def _run_fwd(
             )
 
     for dspec in specs:
-        instance_spec = ImplicitGemmConvSpec(
-            problem=problem,
-            name=dspec.name,
-            data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
-            tile_m=dspec.tile_m,
-            tile_n=dspec.tile_n,
-            tile_k=dspec.tile_k,
-            warp_m=dspec.warp_m,
-            warp_n=dspec.warp_n,
-            warp_tile_m=dspec.warp_tile_mn,
-            warp_tile_n=dspec.warp_tile_mn,
-            warp_tile_k=dspec.warp_tile_k,
-            wave_size=ArchTarget.from_gfx(arch).wave_size,
-            pipeline=dspec.pipeline,
-            epilogue=dspec.epilogue,
-            groups=p.groups,
-        )
+        instance_spec = dspec.to_fwd_spec(problem)
 
         try:
             kernel = build_implicit_gemm_conv(instance_spec, arch=arch)
@@ -1142,8 +1101,6 @@ def _run_wgrad(
     arch: str,
     req_base: dict,
     compile_kernel,
-    ConvDataSpec,
-    WgradConvSpec,
     build_implicit_gemm_conv_wgrad,
     conv_grouped_sweep_space,
     ConvGroupedRequest,
@@ -1155,7 +1112,6 @@ def _run_wgrad(
     u8,
 ) -> int:
     import torch
-    from rocke.core.arch import ArchTarget
     from rocke.helpers.manifest import conv_args_signature
 
     _u8 = u8
@@ -1202,10 +1158,8 @@ def _run_wgrad(
         )
         return 1
 
-    _spk_label = {-1: "auto(CK)"}.get(args.split_k, str(args.split_k))
     print(
-        f"Running {len(specs)} dispatcher wgrad candidate(s) for {arch} {dtype} {p.short()} "
-        f"(split_k={_spk_label}) ...",
+        f"Running {len(specs)} dispatcher wgrad candidate(s) for {arch} {dtype} {p.short()} ...",
         flush=True,
     )
 
@@ -1230,25 +1184,7 @@ def _run_wgrad(
         )
 
     for dspec in specs:
-        resolved_split_k = dspec.split_k
-
-        instance_spec = WgradConvSpec(
-            problem=problem,
-            name=dspec.name,
-            data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
-            tile_m=dspec.tile_m,
-            tile_n=dspec.tile_n,
-            tile_k=dspec.tile_k,
-            warp_m=dspec.warp_m,
-            warp_n=dspec.warp_n,
-            warp_tile_m=dspec.warp_tile_mn,
-            warp_tile_n=dspec.warp_tile_mn,
-            warp_tile_k=dspec.warp_tile_k,
-            wave_size=ArchTarget.from_gfx(arch).wave_size,
-            pipeline=dspec.pipeline,
-            epilogue=dspec.epilogue,
-            split_k=resolved_split_k,
-        )
+        instance_spec = dspec.to_wgrad_spec(problem)
 
         try:
             kernel = build_implicit_gemm_conv_wgrad(instance_spec, arch=arch)
@@ -1265,7 +1201,7 @@ def _run_wgrad(
         wg_N = p.Y * p.X * p.C
         gx = (wg_N + dspec.tile_n - 1) // dspec.tile_n
         gy = (p.K + dspec.tile_m - 1) // dspec.tile_m
-        grid = (gx, gy, resolved_split_k)
+        grid = (gx, gy, instance_spec.split_k)
         block = (instance_spec.block_size, 1, 1)
         stream = 0
 
@@ -1288,7 +1224,7 @@ def _run_wgrad(
                 block=block,
                 out_dev=dW_dev,
                 out_t=dW_t,
-                zero_init_out=(resolved_split_k > 1),
+                zero_init_out=(instance_spec.split_k > 1),
                 ref_out=ref_out,
                 kernel_name=artifact.kernel_name,
                 dump_fail=args.dump_fail,
@@ -1301,7 +1237,7 @@ def _run_wgrad(
                 rt.free(dW_dev)
                 return 1
 
-        if resolved_split_k > 1:
+        if instance_spec.split_k > 1:
 
             def _launch_spk():
                 rt.memset(dW_dev, 0, dW_t.nbytes)
@@ -1334,7 +1270,7 @@ def _run_wgrad(
                 warp_tile_k=dspec.warp_tile_k,
                 pipeline=dspec.pipeline,
                 epilogue=dspec.epilogue,
-                split_k=resolved_split_k,
+                split_k=instance_spec.split_k,
                 ms=ms,
                 tflops=cur_tflops,
                 gbps=cur_gbps,
@@ -1345,7 +1281,7 @@ def _run_wgrad(
             f"  tile={dspec.tile_m}x{dspec.tile_n}x{dspec.tile_k} "
             f"warp={dspec.warp_m}x{dspec.warp_n} "
             f"atom={dspec.warp_tile_mn}x{dspec.warp_tile_mn}x{dspec.warp_tile_k} "
-            f"{dspec.pipeline}/{dspec.epilogue:9s} spk{resolved_split_k:<3d} "
+            f"{dspec.pipeline}/{dspec.epilogue:9s} spk{instance_spec.split_k:<3d} "
             f"{cur_tflops:6.1f} TFLOPS  {ms:.3f} ms",
             flush=True,
         )
