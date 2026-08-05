@@ -167,7 +167,7 @@ protected:
 
         this->registerValidator(outputs.output, this->getTolerance(graphObj, outputs.output));
 
-        this->synthesis().setGlobalSeed(testCase.seed);
+        this->inputFillRecipes().setGlobalSeed(testCase.seed);
         this->verifyGraph(graphObj);
     }
 
@@ -177,7 +177,7 @@ protected:
     // (MoeGroupedMatmulTensorBundle::setDefaultRouting), after the base
     // implementation has synthesized (and sentinel-filled the output of)
     // everything else.
-    hipdnn_integration_tests::SynthesisResult
+    hipdnn_integration_tests::FillResult
         initializeBundle(const hipdnn_frontend::graph::Graph& graph,
                          hipdnn_test_sdk::utilities::GraphTensorBundle& bundle) override
     {
