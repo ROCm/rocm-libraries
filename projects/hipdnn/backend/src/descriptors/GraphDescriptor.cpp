@@ -409,6 +409,9 @@ void GraphDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeName,
 
 void GraphDescriptor::deserializeGraph(const uint8_t* serializedGraph, size_t graphByteSize)
 {
+    THROW_IF_TRUE(isFinalized(),
+                  HIPDNN_STATUS_NOT_INITIALIZED,
+                  "GraphDescriptor::deserializeGraph() failed: Already finalized.");
     THROW_IF_NULL(serializedGraph,
                   HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
                   "GraphDescriptor::deserializeGraph: serializedGraph is null");

@@ -708,6 +708,27 @@ TEST_F(TestGraphDescriptor, DeserializeInvalidatesSerializedBuffer)
     EXPECT_EQ(std::string(nameBuffer.data()), "graphB");
 }
 
+TEST_F(TestGraphDescriptor, DeserializeFailsAfterFinalizeAndPreservesIdentity)
+{
+    auto builder = createValidGraph();
+    auto serialized = builder.Release();
+
+    GraphDescriptor descriptor;
+    descriptor.deserializeGraph(serialized.data(), serialized.size());
+    setHandle(descriptor);
+    descriptor.finalize();
+    const auto original = unpack(descriptor);
+    ASSERT_NE(original->id, nullptr);
+    const auto originalId = hipdnn_flatbuffers_sdk::utilities::toUuidBytes(*original->id);
+
+    ASSERT_THROW_HIPDNN_STATUS(descriptor.deserializeGraph(serialized.data(), serialized.size()),
+                               HIPDNN_STATUS_NOT_INITIALIZED);
+    EXPECT_TRUE(descriptor.isFinalized());
+    const auto preserved = unpack(descriptor);
+    ASSERT_NE(preserved->id, nullptr);
+    EXPECT_EQ(hipdnn_flatbuffers_sdk::utilities::toUuidBytes(*preserved->id), originalId);
+}
+
 // ============================================================================
 // Binary/JSON serialization error-path tests
 // ============================================================================
