@@ -86,9 +86,6 @@ if(NOT TARGET nlohmann_json::nlohmann_json)
 endif()
 hipdnn_add_dependency_includes(hipdnn_backend_private nlohmann_json::nlohmann_json)
 target_link_libraries(hipdnn_backend_private PRIVATE ${CMAKE_DL_LIBS})
-if(WIN32)
-    target_link_libraries(hipdnn_backend_private PRIVATE bcrypt)
-endif()
 target_compile_definitions(hipdnn_backend_private PRIVATE HIPDNN_BACKEND_COMPILATION)
 
 # Enable spdlog support via shared cmake function

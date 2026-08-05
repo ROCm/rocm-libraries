@@ -1,12 +1,17 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#ifdef _WIN32
+#define _CRT_RAND_S
+#endif
+
 #include "PlatformUtils.hpp"
 
 #ifdef _WIN32
 
 #include "HipdnnException.hpp"
-#include <bcrypt.h>
+#include <cstdlib>
+#include <cstring>
 #include <spdlog/fmt/fmt.h>
 #include <winternl.h>
 
@@ -146,12 +151,15 @@ std::string getSystemInfo()
 std::array<uint8_t, 16> generateUuidV4()
 {
     std::array<uint8_t, 16> bytes{};
-    const auto result = BCryptGenRandom(
-        nullptr, bytes.data(), static_cast<ULONG>(bytes.size()), BCRYPT_USE_SYSTEM_PREFERRED_RNG);
-    if(result < 0)
+    for(size_t offset = 0; offset < bytes.size(); offset += sizeof(unsigned int))
     {
-        throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR,
-                              "Failed to generate graph UUID using BCryptGenRandom.");
+        unsigned int randomValue;
+        if(rand_s(&randomValue) != 0)
+        {
+            throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR,
+                                  "Failed to generate graph UUID using rand_s.");
+        }
+        std::memcpy(bytes.data() + offset, &randomValue, sizeof(randomValue));
     }
 
     bytes[6] = static_cast<uint8_t>((bytes[6] & 0x0fU) | 0x40U);
