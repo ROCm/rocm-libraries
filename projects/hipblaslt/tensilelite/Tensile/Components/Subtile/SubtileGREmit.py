@@ -1198,8 +1198,6 @@ def initTDMDescriptorSubtile(writer, kernel, tP):
     dss = comp.dataSizeShift(dtype)
     lds_inc = (padIntervalBytes + padAmountBytes) >> dss
     iter_count = sizeTile1 // numWaves
-    for i in range(4):
-      mod.add(SMovB32(sgpr(f"{descSgprName(2)}+{i}"), 0, comment=f"zero-init Group2[{i}]"))
     mod.add(comp.setIterationEnabled(descSgprName(1), True))
     with writer.allocTmpSgpr(2) as tmp:
       sIter, sGInc = tmp.idx, tmp.idx + 1
