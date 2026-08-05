@@ -24,17 +24,17 @@
 __device__ void func() {}
 
 struct T {
-  ~T() {
-    // __thread_local_data is expected to be destroyed as it was created
-    // from the main(). Now trigger another access.
-    support::make_test_thread([] __device__(){func();}).join();
-  }
+        ~T() {
+            // __thread_local_data is expected to be destroyed as it was created
+            // from the main(). Now trigger another access.
+            support::make_test_thread([] __device__() { func(); }).join();
+        }
 } t;
 // __device__ T t2;
 
-int main(int, char**) {
-  // Triggers construction of __thread_local_data.
-  support::make_test_thread([] __device__(){func();}).join();
+int main(int, char **) {
+    // Triggers construction of __thread_local_data.
+    support::make_test_thread([] __device__() { func(); }).join();
 
-  return 0;
+    return 0;
 }
