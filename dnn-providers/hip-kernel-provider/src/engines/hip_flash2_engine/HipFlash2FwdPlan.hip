@@ -144,7 +144,8 @@ __device__ void flash2_fwd_body(const __half* __restrict__ ptr_q,
                     load_matrix_sync(kf, &sK[d16 * 16][kg * 16], 64);
                     mma_sync(sf[qg][kg], q_frags[qg][d16], kf, sf[qg][kg]);
                 }
-        // sK done — union transitions to sP usage
+        // sK done — flush caches before reusing union memory as sP
+        __threadfence_block();
 
         // Compute masked scores and tile max
         float tile_m[4][4];
