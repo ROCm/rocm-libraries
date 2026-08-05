@@ -2229,7 +2229,7 @@ hipfftResult hipfftXtExec(hipfftHandle plan, void* input, void* output, int dire
 hipfftResult hipfftXtSetGPUs(hipfftHandle plan, int count, int* gpus)
 try
 {
-    if(count <= 0 || !gpus)
+    if(count <= 0 || count > MAX_HIP_DESCRIPTOR_GPUS || !gpus)
         return HIPFFT_INVALID_VALUE;
     if(!plan || plan->initialized())
         return HIPFFT_INVALID_PLAN;
@@ -2397,9 +2397,9 @@ struct p2p_enabler
     {
     }
 
-    p2p_enabler(const p2p_enabler&)            = delete;
+    p2p_enabler(const p2p_enabler&) = delete;
     p2p_enabler& operator=(const p2p_enabler&) = delete;
-    p2p_enabler& operator=(p2p_enabler&&)      = delete;
+    p2p_enabler& operator=(p2p_enabler&&) = delete;
 
 private:
     bool      enabled_by_us = false;
