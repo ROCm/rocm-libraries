@@ -9774,30 +9774,24 @@ class KernelWriterAssembly(KernelWriter):
             ccWidth = numMIInputA if deinterleaveComplex else numRegistersOut
             deintTmps = []
             if deinterleaveComplex:
-              def _deinterleave(srcBase, tag):
+              def _deinterleave(srcBase, numRegistersIn, tag):
                 planar = self.vgprPool.checkOutAligned(2 * numMIInputA, 2 * numMIInputA, tag)
                 deintTmps.append(planar)
                 reBase = planar
                 imBase = planar + numMIInputA
                 for k in range(numMIInputA):
-                  imod.add(VMovB32(dst=vgpr(reBase + k), src=vgpr(srcBase + "+%u"%(k*numRegistersInA)),   comment="deint %s re[%u]"%(tag, k)))
-                  imod.add(VMovB32(dst=vgpr(imBase + k), src=vgpr(srcBase + "+%u"%(k*numRegistersInA+1)), comment="deint %s im[%u]"%(tag, k)))
+                  imod.add(VMovB32(dst=vgpr(reBase + k), src=vgpr(srcBase + "+%u"%(k*numRegistersIn)),   comment="deint %s re[%u]"%(tag, k)))
+                  imod.add(VMovB32(dst=vgpr(imBase + k), src=vgpr(srcBase + "+%u"%(k*numRegistersIn+1)), comment="deint %s im[%u]"%(tag, k)))
                 return reBase, imBase
-              arBase, aiBase = _deinterleave(aStr_base, "A")
-              brBase, biBase = _deinterleave(bStr_base, "B")
-              ar = vgpr(arBase, numMIInputA)
-              ai = vgpr(aiBase, numMIInputA)
-              br = vgpr(brBase, numMIInputA)
-              bi = vgpr(biBase, numMIInputA)
+              arBase, aiBase = _deinterleave(aStr_base, numRegistersInA, "A")
+              brBase, biBase = _deinterleave(bStr_base, numRegistersInB, "B")
             else:
-              ar_base = aStr_base
-              ai_base = ar_base + "+%u"%numRegistersOut
-              ar = vgpr(ar_base, numRegistersOut)
-              ai = vgpr(ai_base, numRegistersOut)
-              br_base = bStr_base
-              bi_base = br_base + "+%u"%numRegistersOut
-              br = vgpr(br_base, numRegistersOut)
-              bi = vgpr(bi_base, numRegistersOut)
+              arBase, aiBase = aStr_base, aStr_base + "+%u"%numRegistersOut
+              brBase, biBase = bStr_base, bStr_base + "+%u"%numRegistersOut
+            ar = vgpr(arBase, ccWidth)
+            ai = vgpr(aiBase, ccWidth)
+            br = vgpr(brBase, ccWidth)
+            bi = vgpr(biBase, ccWidth)
             minus_ar = ar.getMinus()
             minus_ai = ai.getMinus()
             if miOutInstType == InstType.INST_F32:
@@ -9808,36 +9802,26 @@ class KernelWriterAssembly(KernelWriter):
               printExit("Unsupported v_add type %s"%miOutInstType)
             offsetVgpr = [0,0,0]
             forceGenerate = True # always generate negate since ccVgprs are checked in/out each iteration
-            # Negate a whole planar operand. v_add_f32/f64 is per-element, so when the
-            # operand spans numMIInputA planar f32s (WMMA K>1) negate each element; the
-            # MFMA in-place path is a single element (numRegistersOut wide).
-            def _negateOperand(dstBase, srcPlanarBase, srcMinus, comment):
+            # Negate a whole operand into dst. Planar (WMMA K>1) negates each of the
+            # ccWidth f32 elements; the MFMA in-place path is one numRegistersOut-wide op.
+            def _negateOperand(dst, srcBase, srcMinus, comment):
               if deinterleaveComplex:
                 insts = Module("negate")
                 for e in range(ccWidth):
-                  insts.add(VAddX(dst=vgpr(dstBase + e), src0=vgpr(srcPlanarBase + e).getMinus(), src1=0, comment=comment))
+                  insts.add(VAddX(dst=vgpr(dst + e), src0=vgpr(srcBase + e).getMinus(), src1=0, comment=comment))
                 return insts
-              return VAddX(dst=vgpr(dstBase + offsetVgpr[arrayIndex], numRegistersOut), src0=srcMinus, src1=0, comment=comment)
-            aiPlanarBase = aiBase if deinterleaveComplex else None
-            arPlanarBase = arBase if deinterleaveComplex else None
-            if ccA == ccB:
-              arrayIndex = 0
-              ccVgprs[arrayIndex] = self.vgprPool.checkOutAligned(ccWidth, ccWidth, "negate r1")
-              if forceGenerate or (ai not in zgemmVaddSrcCheck[arrayIndex]):
-                ccInsts[arrayIndex] = _negateOperand(ccVgprs[arrayIndex], aiPlanarBase, minus_ai, "Ai=-Ai")
-                zgemmVaddSrcCheck[arrayIndex].append(ai)
-            if ccA:
-              arrayIndex = 1
-              ccVgprs[arrayIndex] = self.vgprPool.checkOutAligned(ccWidth, ccWidth, "negate i0")
-              if forceGenerate or (ai not in zgemmVaddSrcCheck[arrayIndex]):
-                ccInsts[arrayIndex] = _negateOperand(ccVgprs[arrayIndex], aiPlanarBase, minus_ai, "Ai=-Ai")
-                zgemmVaddSrcCheck[arrayIndex].append(ai)
-            if ccB:
-              arrayIndex = 2
-              ccVgprs[arrayIndex] = self.vgprPool.checkOutAligned(ccWidth, ccWidth, "negate i1")
-              if forceGenerate or (ar not in zgemmVaddSrcCheck[arrayIndex]):
-                ccInsts[arrayIndex] = _negateOperand(ccVgprs[arrayIndex], arPlanarBase, minus_ar, "Ar=-Ar")
-                zgemmVaddSrcCheck[arrayIndex].append(ar)
+              return VAddX(dst=vgpr(dst + offsetVgpr[arrayIndex], numRegistersOut), src0=srcMinus, src1=0, comment=comment)
+            for arrayIndex, cond, srcBase, src, srcMinus, tag in (
+                (0, ccA == ccB, aiBase, ai, minus_ai, "negate r1"),
+                (1, ccA,        aiBase, ai, minus_ai, "negate i0"),
+                (2, ccB,        arBase, ar, minus_ar, "negate i1")):
+              if not cond:
+                continue
+              ccVgprs[arrayIndex] = self.vgprPool.checkOutAligned(ccWidth, ccWidth, tag)
+              if forceGenerate or (src not in zgemmVaddSrcCheck[arrayIndex]):
+                cmt = "Ar=-Ar" if arrayIndex == 2 else "Ai=-Ai"
+                ccInsts[arrayIndex] = _negateOperand(ccVgprs[arrayIndex], srcBase, srcMinus, cmt)
+                zgemmVaddSrcCheck[arrayIndex].append(src)
             (src0, src1) = (br, ar) if kernel["SourceSwap"] else (ar, br)
             for inst in ccInsts:
               if inst is not None:

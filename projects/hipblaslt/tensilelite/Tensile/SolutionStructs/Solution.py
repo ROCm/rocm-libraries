@@ -1994,9 +1994,9 @@ class Solution(collections.abc.Mapping):
       # Complex on WMMA (K>1) de-interleaves operands into temps just before each
       # matrix op; SIA3 flat-schedules the mac items individually, separating the
       # de-interleave moves from their consuming WMMA and recycling the temps early
-      # -> wrong results. Restrict such kernels to SIA<3 (gfx1250 uses SIA0).
+      # -> wrong results. Reject SIA3 only (gfx1250 uses SIA4).
       if state["ProblemType"]["DataType"].isComplex() \
-         and not isaInfoMap[isa].asmCaps["HasMFMA"] \
+         and isaInfoMap[isa].asmCaps["HasWMMA_V3"] \
          and state["MatrixInstK"] > 1 \
          and state["_ScheduleIterAlg"] == 3:
         reject(state, printRejectionReason, "Complex WMMA de-interleave does not support ScheduleIterAlg=3")
@@ -2616,6 +2616,10 @@ class Solution(collections.abc.Mapping):
     if state["TDMInst"]:
       if not isaInfoMap[isa].asmCaps["HasTDM"]:
         reject(state, printRejectionReason, "This arch does not support TDM")
+        return
+      # TDM data_size is a 2-bit field (max element 8B); f64-complex is 16B.
+      if state["ProblemType"]["DataType"].isDoubleComplex():
+        reject(state, printRejectionReason, "TDM does not support f64-complex (16B exceeds data_size field)")
         return
 
     if state["CompactLoopStore"]:
