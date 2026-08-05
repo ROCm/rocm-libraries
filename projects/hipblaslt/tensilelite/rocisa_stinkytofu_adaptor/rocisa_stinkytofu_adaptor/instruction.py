@@ -2187,6 +2187,8 @@ SDcacheWb = _make_no_operand_class("SDcacheWb", "s_dcache_wb")
 GlobalWb = _make_no_operand_class("GlobalWb", "global_wb")
 # logicalIR: GlobalInv
 GlobalInv = _make_no_operand_class("GlobalInv", "global_inv")
+# logicalIR: STtraceData
+STtraceData = _make_no_operand_class("STtraceData", "s_ttracedata")
 # SNop — real class (see class SNop above, after SMovB64).
 # logicalIR: VNop
 class VNop(Instruction):
@@ -2916,6 +2918,8 @@ VFmaF16 = _make_ternary_class("VFmaF16", "v_fma_f16", InstType.INST_F16)
 VFmaF64 = _make_ternary_class("VFmaF64", "v_fma_f64", InstType.INST_F64)
 # logicalIR: VFmaPKF16
 VFmaPKF16 = _make_ternary_class("VFmaPKF16", "v_pk_fma_f16", InstType.INST_F16)
+# logicalIR: VFmaPKF32
+VFmaPKF32 = _make_ternary_class("VFmaPKF32", "v_pk_fma_f32", InstType.INST_F32)
 # VFmaMixF32 — real class (see Vector ALU section above)
 # logicalIR: VMadI32I24
 VMadI32I24 = _make_ternary_class("VMadI32I24", "v_mad_i32_i24", InstType.INST_I32)

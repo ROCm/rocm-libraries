@@ -912,6 +912,7 @@ def supports_tiled_2d(
     use_k_single_buffer: bool = False,
     use_conflict_free_v_store: bool = False,
     use_k_sliced_ring: bool = False,
+    use_d256_fast: bool = False,
 ) -> Tuple[bool, str]:
     # ``block_m_per_warp`` and the ``use_mfma_32x32x8`` /
     # ``use_transposed_qk_32x32`` / ``use_k_single_buffer`` /
@@ -2375,11 +2376,12 @@ def build_unified_attention_2d_tiled(
     # store is one ``smem_store_vN(..., n=8)``.
     fp8_elems_per_chunk = 8
     fp8_total_chunks = (T * HD) // fp8_elems_per_chunk
-    assert fp8_total_chunks % THREADS == 0, (
-        f"fp8 loader: total chunks {fp8_total_chunks} must be divisible by "
-        f"THREADS={THREADS} (T={T}, HD={HD})"
-    )
-    fp8_chunks_per_thread = fp8_total_chunks // THREADS
+    if KV_FP8:
+        assert fp8_total_chunks % THREADS == 0, (
+            f"fp8 loader: total chunks {fp8_total_chunks} must be divisible by "
+            f"THREADS={THREADS} (T={T}, HD={HD})"
+        )
+    fp8_chunks_per_thread = fp8_total_chunks // THREADS if KV_FP8 else 0
 
     def _issue_fp8_dequant_loads(
         kv_tile_idx: Value, buf_idx: Value, lds_token: str
