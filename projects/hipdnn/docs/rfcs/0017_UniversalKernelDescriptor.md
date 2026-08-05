@@ -165,8 +165,7 @@ provider is future work, left to the delivery follow-up RFC.
 ## 2. The Descriptors
 
 Each descriptor maps directly onto a concept hipDNN already has, expressed as data instead of
-hand-written code. This table is the reference definition of each one; the rest of the document
-builds on it rather than restating it.
+hand-written code.
 
 | Descriptor | Purpose | Exists in hipDNN today as |
 |---|---|---|
