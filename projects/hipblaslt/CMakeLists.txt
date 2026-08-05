@@ -73,7 +73,6 @@ option(TENSILELITE_ENABLE_CLIENT "Build tensilelite client" ${HIPBLASLT_ENABLE_D
 option(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS
        "Install TensileLite Python packages and test tools into the test artifact tree."
        OFF)
-option(TENSILELITE_ENABLE_AUTOBUILD "Generate scripts for wrapping tensile python scripts" OFF)
 set(HIPBLASLT_TENSILELITE_PYTHON_MODE "BUILD" CACHE STRING
     "TensileLite Python environment: BUILD (staged local artifacts) or SYSTEM")
 set_property(CACHE HIPBLASLT_TENSILELITE_PYTHON_MODE PROPERTY STRINGS BUILD SYSTEM)
