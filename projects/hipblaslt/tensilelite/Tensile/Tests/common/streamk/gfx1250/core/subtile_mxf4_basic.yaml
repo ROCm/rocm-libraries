@@ -3,7 +3,9 @@
 #
 # Subtile MXFP4 correctness test for gfx1250 (wave32).
 # Covers single/multi-iteration, single/multi-wave, and PGR=1/2.
-# Validates the TDM-based MX scale load path for subtile kernels.
+# Validates the TDM-based MX scale load path for subtile kernels,
+# including edge tiles with non-multiple-of-MT problem sizes and
+# multiple workgroups in both M and N dimensions.
 TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201]
 
@@ -81,3 +83,10 @@ BenchmarkProblems:
           - Exact: [64, 64, 1, 256]
           - Exact: [64, 64, 1, 512]
           - Exact: [128, 128, 1, 512]
+          # Edge tiles: M and/or N not a multiple of MT
+          - Exact: [33, 32, 1, 256]
+          - Exact: [36, 32, 1, 256]
+          - Exact: [100, 32, 1, 256]
+          - Exact: [100, 64, 1, 256]
+          - Exact: [100, 100, 1, 256]
+          - Exact: [100, 128, 1, 256]
