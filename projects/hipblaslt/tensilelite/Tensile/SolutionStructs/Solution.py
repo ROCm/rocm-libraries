@@ -46,7 +46,10 @@ from Tensile.Common.GlobalParameters import defaultSolution, \
 from Tensile.Common.ValidParameters import validParameters, \
                                             _getExpectedTypes, \
                                             _expectedParamTypes, \
-                                            _skipTypeCheck
+                                            _skipTypeCheck, \
+                                            normalizeSwInstructionPrefetch, \
+                                            SW_INSTRUCTION_PREFETCH_ABSOLUTE, \
+                                            SW_INSTRUCTION_PREFETCH_AUTO
 from Tensile.SolutionStructs.Naming import getSolutionNameFull
 from Tensile.SolutionStructs.Problem import ProblemType
 from Tensile.SolutionStructs.segment_interleave import evaluate as segIntEval, aligned_budget_ok as segAlignedBudget
@@ -178,6 +181,10 @@ def _disableUnsupportedRuntimeStaggerU(state):
   # PAP+TDM StaggerU is not implemented (the staggered TDM descriptor isn't carried
   # across the PAP persistent-tile handoff), so force runtime StaggerU off.
   if state["PrefetchAcrossPersistent"] and state["TDMInst"] == 3:
+    _disableRuntimeStaggerU(state)
+  # Workgroup cluster: staggerU breaks cross-WG multicast, so force the runtime
+  # StaggerU path off too (KernelWriter already gates staggerUCode off for clusters).
+  if state.get("ClusterDim", [1, 1]) != [1, 1]:
     _disableRuntimeStaggerU(state)
 
 
@@ -704,6 +711,33 @@ class Solution(collections.abc.Mapping):
     else:
       state["_ScheduleIterAlg"] = state["ScheduleIterAlg"]
       state["_StinkyTofuOptLevel"] = 0
+
+    # SwInstructionPrefetch (single-integer bitmask): explicit Absolute(2) is only supported on
+    # gfx1250 non-Stream-K. Auto(-1) already resolves to Relative on Stream-K / non-gfx1250, so it
+    # is never rejected; legacy bool aliases (True->Relative, False->Off) never request Absolute.
+    # Only an explicit Absolute request on an unsupported target is rejected here (users should
+    # pick Auto(-1) or Relative(1) instead).
+    swpMode = normalizeSwInstructionPrefetch(
+        state.get("SwInstructionPrefetch", SW_INSTRUCTION_PREFETCH_AUTO))
+    if swpMode == SW_INSTRUCTION_PREFETCH_ABSOLUTE:
+      if state.get("StreamK", 0) != 0:
+        reject(state, printRejectionReason,
+               "SwInstructionPrefetch=2 (Absolute) is not supported on Stream-K kernels; "
+               "use Auto(-1) or Relative(1)")
+        return
+      if state["ISA"] != (12, 5, 0):
+        reject(state, printRejectionReason,
+               f"SwInstructionPrefetch=2 (Absolute) is only supported on gfx1250, not {state['ISA']}; "
+               "use Auto(-1) or Off(0)")
+        return
+      if state["ProblemType"]["DataType"].isDouble():
+        # f64: OptNLL epilogue routinely exceeds the 64 KiB I-cache (bucket-c fleet-wide) so the
+        # abs cover/ladder yields no reliable benefit, and sgprAlpha is a 2-dword pair (the
+        # OptNLL-aware Case-B fp32 predicate does not apply). See design doc §16.8/§16.13.
+        reject(state, printRejectionReason,
+               "SwInstructionPrefetch=2 (Absolute) is not supported for f64 (double) kernels; "
+               "use Auto(-1) or Relative(1)")
+        return
 
     if (not state["ProblemType"]["StridedBatched"]) and (not state["ProblemType"]['Batched']):
       reject(state, printRejectionReason, "General Batched GEMM only support Batched Problem")
@@ -1744,8 +1778,6 @@ class Solution(collections.abc.Mapping):
         # limits, stagger state, and LDS bank state before current-tile code
         # resumes. Keep rejecting axes whose borrowed-state contract is not
         # audited below.
-        # Note: HalfPLR+PAP is rejected in the HalfPLR block below (HalfPLR forces
-        # SuppressNoLoadLoop after this guard runs, so it is caught there instead).
         if state["StreamK"] != 3:
           reject(state, printRejectionReason, "PrefetchAcrossPersistent is currently supported only with StreamK=3")
         if not state["BufferLoad"]:
@@ -1762,10 +1794,11 @@ class Solution(collections.abc.Mapping):
           reject(state, printRejectionReason, "PrefetchAcrossPersistent not supported with multiple summation indices")
         if not state["BufferStore"]:
           reject(state, printRejectionReason, "PrefetchAcrossPersistent NLL path requires BufferStore")
-        # HalfPLR sets SuppressNoLoadLoop *after* this guard runs, so it is not
-        # caught here; the HalfPLR block rejects HalfPLR+PAP order-independently.
-        if state.get("SuppressNoLoadLoop", False):
-          reject(state, printRejectionReason, "PrefetchAcrossPersistent NLL path requires NoLoadLoop")
+        # HalfPLR sets SuppressNoLoadLoop after this guard runs. Its supported
+        # out-of-line PAP path is validated in the HalfPLR block below. Add a
+        # condition here for clarity.
+        if state.get("SuppressNoLoadLoop", False) and not state["HalfPLR"]:
+          reject(state, printRejectionReason, "PrefetchAcrossPersistent NLL path requires NoLoadLoop if not using HalfPLR")
         if state["ProblemType"]["Sparse"]:
           reject(state, printRejectionReason, "PrefetchAcrossPersistent NLL path not supported with sparse")
         if state["StoreRemapVectorWidth"]:
@@ -2691,14 +2724,10 @@ class Solution(collections.abc.Mapping):
     if state["HalfPLR"]:
       state["ClusterLocalRead"] = 0
       state["SuppressNoLoadLoop"] = True
-      # Order-independent reject on the raw PAP flag: HalfPLR forces
-      # SuppressNoLoadLoop=True, which disables the PAP no-load-loop handoff
-      # (isPrefetchAcrossPersistentEnabled returns False). The PAP guard runs
-      # before this block, so reject here to avoid PAP silently no-oping while
-      # its raw-flag sites still fire.
       if state.get("PrefetchAcrossPersistent", 0):
-        reject(state, printRejectionReason, "HalfPLR is incompatible with PrefetchAcrossPersistent (HalfPLR forces SuppressNoLoadLoop, which disables the PAP NLL handoff)")
-        return
+        if state["StreamK"] != 3 or state["StreamKForceDPOnly"] != 1:
+          reject(state, printRejectionReason, "HalfPLR + PrefetchAcrossPersistent currently requires StreamK = 3 and StreamKForceDPOnly = 1")
+          return
       # The subtile main loop ignores SuppressNoLoadLoop, which HalfPLR forces;
       # the HalfPLR tail fixup lives only in the legacy calculateLoopNumIter path.
       if state["UseSubtileImpl"]:
@@ -2882,8 +2911,14 @@ class Solution(collections.abc.Mapping):
       if state["ProblemType"]["ComputeDataType"].isDouble() or state["ProblemType"]["ComputeDataType"].isDoubleComplex(): return False
       return True
 
+    # Track VALU source operands on VA_VDST (src-operand WAR hazard). On only for
+    # sparse; non-sparse kernels skip the stamp. Pre-armed for when sparse enables ESM2.
+    def evaluateEnableESM2TrackValuVsrc() -> bool:
+      return bool(state["ProblemType"]["Sparse"])
+
     state["ExpertSchedulingMode"] = evaluateExpertSchedulingMode()
     state["EnableStinkyTofuESM2"] = evaluateStinkyTofuESM2()
+    state["EnableESM2TrackValuVsrc"] = evaluateEnableESM2TrackValuVsrc()
 
     state["ESMRuntimeGate"] = tuple(state["ISA"])[:2] == (12, 0)
     # Some restrictions for float4 and 6bitFloat:
@@ -5518,12 +5553,16 @@ class Solution(collections.abc.Mapping):
       if state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1:
         reject(state, printRejectionReason, "Currently PrefetchGL2 does not support GSU")
         return
-      if state["StreamK"] != 0:
-        reject(state, printRejectionReason, "PrefetchGL2 does not support Stream-K")
+      if state["StreamK"] != 0 and state["StreamK"] != 3:
+        reject(state, printRejectionReason, "PrefetchGL2 only supports DP-first (StreamK==3) Stream-K")
         return
       if state["ProblemType"]["Batched"] and not state["ProblemType"]["StridedBatched"]:
         reject(state, printRejectionReason, "PrefetchGL2 does not support general batch")
         return
+      if state["ProblemType"]["Sparse"]:
+        if state["DirectToVgprSparseMetadata"]:
+          reject(state, printRejectionReason, "PrefetchGL2 with Sparse requires DirectToVgprSparseMetadata=0 (TDM metadata path)")
+          return
       
 
     # # reject conditions with lower performance
