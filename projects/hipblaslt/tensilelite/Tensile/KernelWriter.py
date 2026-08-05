@@ -9318,8 +9318,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # - the MX scale layout is not swizzled: a swizzled (HostPreSwizzle /
       #   InMemorySwizzle) scale block advances by Size{tile}*DepthU/MXBlock*bpe
       #   per unroll step (see GSU.graIncrements), which is only known at runtime,
-      #   so those increments must stay in SGPRs.
-      mxSwizzledScale = kernel.get("MXScaleFormat", "NoSwizzle") in ("InMemorySwizzle", "HostPreSwizzle")
+      #   so those increments must stay in SGPRs. Subtile is exempt: it builds its
+      #   own descriptors and never reads GlobalReadIncs, so holding the SGPR there
+      #   only costs registers that MX kernels, which Solution forces onto subtile
+      #   on gfx950, cannot spare.
+      mxSwizzledScale = kernel.get("MXScaleFormat", "NoSwizzle") in ("InMemorySwizzle", "HostPreSwizzle") \
+                        and not kernel["UseSubtileImpl"]
       if kernel["StreamK"] and (not self.states.staggerUCode):
         if kernel["ProblemType"]["TLUA"] == False:
           if self.states.a.numSgprGlobalReadIncs == 1:
