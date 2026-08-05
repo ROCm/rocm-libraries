@@ -90,6 +90,9 @@ namespace
     }
 
     // Drives the iterator to completion, returning the indices it yielded in order.
+    // preSolution() is deliberately not driven: it dereferences m_reporter, which
+    // these tests do not install. That leaves the preSolution() half of the
+    // m_usePrediction change uncovered here (tracked by ROCM-28904).
     std::vector<int> collectVisitedIndices(AllSolutionsIterator& iter)
     {
         std::vector<int> visited;

@@ -256,8 +256,8 @@ namespace TensileLite
         }
 
         // Once per process: a degraded run otherwise looks like one that never asked.
-        static void warnPredictionUnavailableOnce(std::shared_ptr<ResultReporter> reporter,
-                                                  Hardware const&                 hardware)
+        static void warnPredictionUnavailableOnce(std::shared_ptr<ResultReporter> const& reporter,
+                                                  Hardware const&                        hardware)
         {
             if(!reporter)
                 return;
@@ -389,11 +389,11 @@ namespace TensileLite
         {
             SolutionIterator::preProblem(problem);
             // !(x > 1.0), not (x <= 1.0), to stay an exact negation for NaN too.
-            m_usePrediction
-                = !(m_predictionThreshold > 1.0) && isPredictionAvailable(*m_hardware);
-            if(!m_usePrediction && !(m_predictionThreshold > 1.0))
+            bool const predictionRequested = !(m_predictionThreshold > 1.0);
+            m_usePrediction = predictionRequested && isPredictionAvailable(*m_hardware);
+            if(!m_usePrediction && predictionRequested)
                 warnPredictionUnavailableOnce(m_reporter, *m_hardware);
-            if (!m_usePrediction)
+            if(!m_usePrediction)
             {
                 m_currentSolutionIdx = m_firstSolutionIdx;
             }
@@ -621,9 +621,9 @@ namespace TensileLite
         {
             SolutionIterator::preProblem(problem);
             // !(x > 1.0), not (x <= 1.0), to stay an exact negation for NaN too.
-            m_usePrediction
-                = !(m_predictionThreshold > 1.0) && isPredictionAvailable(*m_hardware);
-            if(!m_usePrediction && !(m_predictionThreshold > 1.0))
+            bool const predictionRequested = !(m_predictionThreshold > 1.0);
+            m_usePrediction = predictionRequested && isPredictionAvailable(*m_hardware);
+            if(!m_usePrediction && predictionRequested)
                 warnPredictionUnavailableOnce(m_reporter, *m_hardware);
 
             if(auto groupedProblem = dynamic_cast<const ContractionProblemGroupedGemm*>(problem))
@@ -633,19 +633,12 @@ namespace TensileLite
             }
             else if(auto gemmProblem = dynamic_cast<const ContractionProblemGemm*>(problem))
             {
-                // Unchanged: picks how m_solutions is populated, not queue-vs-index mode.
-                if(m_predictionThreshold > 1.0)
+                // -1 means "let prediction choose the set"; without prediction
+                // we still need the top-N query or m_solutions is left empty.
+                if(!m_usePrediction || m_numSolutions != -1)
                 {
                     m_solutions
                         = m_library->findTopSolutions(*gemmProblem, *m_hardware, m_numSolutions);
-                }
-                else
-                {
-                    if(m_numSolutions != -1)
-                    {
-                        m_solutions
-                            = m_library->findTopSolutions(*gemmProblem, *m_hardware, m_numSolutions);
-                    }
                 }
             }
             else
