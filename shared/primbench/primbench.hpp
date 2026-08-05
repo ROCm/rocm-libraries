@@ -877,7 +877,7 @@ struct FlagTag
     Flags value{Flags::none}; ///< Underlying flag value.
 
     /// Construct from a specific flag.
-    constexpr FlagTag(Flags v) : value(v) { }
+    constexpr FlagTag(Flags v) : value(v) {}
 
     /// Bitwise OR operator for combining flags.
     friend constexpr FlagTag operator|(FlagTag a, FlagTag b)
@@ -975,7 +975,8 @@ public:
     /// Stores a batch of benchmark results.
     void save(double batch_ms, const std::vector<float>& iterations_ms)
     {
-        struct batch batch{};
+        struct batch batch
+        {};
 
         batch.batch_ms      = batch_ms;
         batch.iterations_ms = iterations_ms;
@@ -1949,8 +1950,9 @@ void block_stream_kernel(volatile int32_t* is_blocked,
     }
 }
 
+// kernel that just reads the wall clock
 static __global__
-void read_clock(long long int* out)
+void read_clock(long long* out)
 {
     *out = wall_clock64();
 }
@@ -2025,38 +2027,32 @@ public:
 #endif
     }
 
-    long long int measure_wall_clk_rate_k_hz()
+    long long measure_wall_clk_rate_k_hz()
     {
-        using lli = long long int;
+        long long* d_tick;
+        PRIMBENCH_CHECK(hipMalloc(&d_tick, sizeof(long long)));
 
-        lli* d_tick;
-        PRIMBENCH_CHECK(hipMalloc(&d_tick, sizeof(lli)));
-
-        lli h_tick_0;
+        long long h_tick_0;
         read_clock<<<dim3(1), dim3(1)>>>(d_tick);
         PRIMBENCH_CHECK(hipDeviceSynchronize());
-        PRIMBENCH_CHECK(hipMemcpy(&h_tick_0, d_tick, sizeof(lli), hipMemcpyDeviceToHost));
+        PRIMBENCH_CHECK(hipMemcpy(&h_tick_0, d_tick, sizeof(long long), hipMemcpyDeviceToHost));
         const auto h_curr_time_0 = std::chrono::steady_clock::now();
 
         std::this_thread::sleep_for(std::chrono::milliseconds(1000));
 
-        lli h_tick_1;
+        long long h_tick_1;
         read_clock<<<dim3(1), dim3(1)>>>(d_tick);
         PRIMBENCH_CHECK(hipDeviceSynchronize());
-        PRIMBENCH_CHECK(hipMemcpy(&h_tick_1, d_tick, sizeof(lli), hipMemcpyDeviceToHost));
+        PRIMBENCH_CHECK(hipMemcpy(&h_tick_1, d_tick, sizeof(long long), hipMemcpyDeviceToHost));
         const auto h_curr_time_1 = std::chrono::steady_clock::now();
 
         PRIMBENCH_CHECK(hipFree(d_tick));
 
         const double elapsed_time_s
             = std::chrono::duration<double>(h_curr_time_1 - h_curr_time_0).count();
-        const lli tot_ticks = h_tick_1 - h_tick_0;
+        const long long tot_ticks = h_tick_1 - h_tick_0;
 
-        const double hz = static_cast<double>(tot_ticks) / elapsed_time_s;
-        // + 0.5 for rounding correctness i.e 9999.7 will get rounded to 9999. 9999.7 + 0.5 will get rounded to 10000
-        const double k_hz = (hz / 1000) + 0.5;
-
-        return static_cast<lli>(k_hz);
+        return std::llround(tot_ticks / (1000 * elapsed_time_s));
     }
 
     /// Destructor that unregisters host memory.
@@ -2344,7 +2340,7 @@ public:
     /// Currently, the actual largest GPU cache size cannot be queried via HIP, so this
     /// conservative size is used instead. Future support via HSA could make this runtime-
     /// queryable.
-    cache_thrasher(size_t cache_size = PRIMBENCH_GPU_CACHE_SIZE) : m_device_storage(cache_size) { }
+    cache_thrasher(size_t cache_size = PRIMBENCH_GPU_CACHE_SIZE) : m_device_storage(cache_size) {}
 
     /// Clears the cache by thrashing memory on device.
     ///
@@ -2495,7 +2491,7 @@ public:
         , m_index_column_width(index_column_width)
         , m_print_index(print_index)
         , m_cache(cache)
-    { }
+    {}
 
     /// Sets the total number of items processed per iteration.
     ///
@@ -3299,7 +3295,7 @@ public:
                 }
             }
             catch(...)
-            { }
+            {}
 
             // Try double.
             try
@@ -3312,7 +3308,7 @@ public:
                 }
             }
             catch(...)
-            { }
+            {}
 
             // Fall back to string.
             return value;
@@ -3432,11 +3428,11 @@ private:
     // Helper to detect vectors.
     template<typename T>
     struct is_vector : std::false_type
-    { };
+    {};
 
     template<typename T, typename A>
     struct is_vector<std::vector<T, A>> : std::true_type
-    { };
+    {};
 }; // class cli
 
 } // namespace detail
@@ -3820,13 +3816,14 @@ private:
     void filter_specializations()
     {
         std::regex pattern(m_settings.filter);
-        specializations.erase(
-            std::remove_if(
-                specializations.begin(),
-                specializations.end(),
-                [&pattern](const auto& spec)
-                { return !std::regex_search(spec.get()->meta().serialize_name(), pattern); }),
-            specializations.end());
+        specializations.erase(std::remove_if(specializations.begin(),
+                                             specializations.end(),
+                                             [&pattern](const auto& spec) {
+                                                 return !std::regex_search(
+                                                     spec.get()->meta().serialize_name(),
+                                                     pattern);
+                                             }),
+                              specializations.end());
     }
 
     /// Ensures that at least one specialization is queued.
