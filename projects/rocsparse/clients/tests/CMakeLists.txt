@@ -225,6 +225,7 @@ set(ROCSPARSE_TEST_SOURCES
   test_spgeam_reuse_csr.cpp
   test_spgeam_csr_2.cpp
   test_spgeam_reuse_csr_2.cpp
+  test_spmat_scale.cpp
   test_gtsv.cpp
   test_gemvi.cpp
   test_sddmm.cpp
@@ -390,6 +391,7 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_spgeam_reuse_csr.cpp
 ../testings/testing_spgeam_csr_2.cpp
 ../testings/testing_spgeam_reuse_csr_2.cpp
+../testings/testing_spmat_scale.cpp
 ../testings/testing_gtsv.cpp
 ../testings/testing_gemvi.cpp
 ../testings/testing_sddmm.cpp

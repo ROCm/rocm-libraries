@@ -68,6 +68,9 @@ add_executable(
     TestGraphLayernormBackward.cpp
     TestMatmulAttributes.cpp
     TestMatmulNode.cpp
+    TestMoeGroupedMatmulAttributes.cpp
+    TestMoeGroupedMatmulNode.cpp
+    TestGraphMoeGroupedMatmul.cpp
     TestNode.cpp
     TestOperationUnpacker.cpp
     TestSdpaAttributes.cpp
