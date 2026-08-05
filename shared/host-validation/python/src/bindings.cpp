@@ -188,6 +188,12 @@ Tensor referenceSumOwned(const Tensor& input, ScalarType outputType, ScalarType 
         ReductionProblem(input.view(), output.mutableView(), accumulatorType, std::move(axes)));
     return output;
 }
+
+Tensor generateOwned(ScalarType type, std::vector<size_t> shape, const GenerationOptions& options) {
+    Tensor output(type, Shape(std::move(shape)));
+    generate(output.mutableView(), options);
+    return output;
+}
 }  // namespace
 
 NB_MODULE(_roc_host_validation, module) {
@@ -251,6 +257,25 @@ NB_MODULE(_roc_host_validation, module) {
         .value("Sine", DataPattern::Sine)
         .value("Cosine", DataPattern::Cosine)
         .value("Constant", DataPattern::Constant);
+
+    nb::enum_<GenerationPattern>(module, "GenerationPattern")
+        .value("Zero", GenerationPattern::Zero)
+        .value("Constant", GenerationPattern::Constant)
+        .value("UniformInteger", GenerationPattern::UniformInteger)
+        .value("UniformReal", GenerationPattern::UniformReal)
+        .value("Normal", GenerationPattern::Normal)
+        .value("Sine", GenerationPattern::Sine)
+        .value("Cosine", GenerationPattern::Cosine)
+        .value("AbsoluteSine", GenerationPattern::AbsoluteSine)
+        .value("AbsoluteCosine", GenerationPattern::AbsoluteCosine)
+        .value("SerialIndex", GenerationPattern::SerialIndex)
+        .value("SerialDimension", GenerationPattern::SerialDimension)
+        .value("Identity", GenerationPattern::Identity)
+        .value("CheckerboardUniformInteger", GenerationPattern::CheckerboardUniformInteger);
+
+    nb::enum_<LogicalIndexOrder>(module, "LogicalIndexOrder")
+        .value("FirstDimensionFastest", LogicalIndexOrder::FirstDimensionFastest)
+        .value("LastDimensionFastest", LogicalIndexOrder::LastDimensionFastest);
 
     nb::enum_<ActivationApplication>(module, "ActivationApplication")
         .value("Forward", ActivationApplication::Forward)
@@ -357,6 +382,21 @@ NB_MODULE(_roc_host_validation, module) {
         .def_ro("reported_mismatches", &ComparisonResult::reportedMismatches)
         .def_prop_ro("passed", &ComparisonResult::passed);
 
+    nb::class_<GenerationPatternSpec>(module, "GenerationPatternSpec")
+        .def(nb::init<>())
+        .def_rw("pattern", &GenerationPatternSpec::pattern)
+        .def_rw("parameter0", &GenerationPatternSpec::parameter0)
+        .def_rw("parameter1", &GenerationPatternSpec::parameter1)
+        .def_rw("stream", &GenerationPatternSpec::stream)
+        .def_rw("dimension", &GenerationPatternSpec::dimension);
+
+    nb::class_<GenerationOptions>(module, "GenerationOptions")
+        .def(nb::init<>())
+        .def_rw("seed", &GenerationOptions::seed)
+        .def_rw("index_order", &GenerationOptions::indexOrder)
+        .def_rw("real", &GenerationOptions::real)
+        .def_rw("imaginary", &GenerationOptions::imaginary);
+
     nb::class_<PythonEpilogueResult>(module, "EpilogueResult")
         .def_prop_ro(
             "output",
@@ -392,6 +432,7 @@ NB_MODULE(_roc_host_validation, module) {
         },
         "tensor"_a, "pattern"_a, "seed"_a, "parameter0"_a = 0.0, "parameter1"_a = 0.0,
         nb::rv_policy::reference);
+    module.def("generate_tensor", &generateOwned, "type"_a, "shape"_a, "options"_a);
     module.def(
         "compare",
         [](const Tensor& observed, const Tensor& expected, const ComparisonOptions& options) {

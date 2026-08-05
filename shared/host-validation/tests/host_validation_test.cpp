@@ -274,6 +274,30 @@ void testReferenceReduction() {
     require(output == std::array<float, 3>{412, 492, 572}, "Reference reduction result mismatch.");
 }
 
+void testIndexedGeneration() {
+    using namespace roc::host_validation;
+
+    Tensor serial(ScalarType::Float32, Shape{2, 3});
+    GenerationOptions serialOptions;
+    serialOptions.real.pattern = GenerationPattern::SerialIndex;
+    const GenerationRunInfo serialRun = generate(serial.mutableView(), serialOptions);
+    require(serialRun.elementsGenerated == 6, "Indexed generation count mismatch.");
+    require(serial.view().loadAs<float>({0, 0}) == 0 && serial.view().loadAs<float>({1, 0}) == 1 &&
+                serial.view().loadAs<float>({0, 1}) == 2 &&
+                serial.view().loadAs<float>({1, 2}) == 5,
+            "First-dimension-fast serial generation mismatch.");
+
+    Tensor complex(ScalarType::ComplexFloat32, Shape{2, 2});
+    GenerationOptions trigonometric;
+    trigonometric.real.pattern = GenerationPattern::Sine;
+    trigonometric.imaginary.pattern = GenerationPattern::Cosine;
+    generate(complex.mutableView(), trigonometric);
+    const std::complex<float> value = complex.view().loadAs<std::complex<float>>({1, 0});
+    require(std::abs(value.real() - std::sin(1.0f)) < 1e-6f &&
+                std::abs(value.imag() - std::cos(1.0f)) < 1e-6f,
+            "Complex trigonometric generation mismatch.");
+}
+
 void testActivations() {
     using namespace roc::host_validation;
 
@@ -418,6 +442,7 @@ int main() {
     testOutputSelection();
     testReferenceEpilogue();
     testReferenceReduction();
+    testIndexedGeneration();
     testActivations();
     testStridedAndOffsetViews();
     testGenerationAndComparison();

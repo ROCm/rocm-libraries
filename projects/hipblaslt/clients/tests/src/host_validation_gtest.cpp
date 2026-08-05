@@ -1,13 +1,63 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include <roc/host_validation/adapters/hipblaslt/HipblasltDataInitialization.hpp>
 #include <roc/host_validation/adapters/hipblaslt/HipblasltReferenceGemm.hpp>
+#include <roc/host_validation/adapters/hipblaslt/hipblaslt_init.hpp>
 
 #include <gtest/gtest.h>
 
 #include <array>
+#include <cmath>
 #include <complex>
+#include <span>
 #include <vector>
+
+TEST(HostValidationDataInitializationBridge, GeneratesComplexTrigonometricValues)
+{
+    std::array<std::complex<float>, 4> values{};
+    roc::host_validation::hipblaslt_adapter::initialize(std::span<std::complex<float>>(values),
+                                                        hipblaslt_initialization::trig_float,
+                                                        roc::host_validation::DataPattern::Sine);
+
+    for(size_t index = 0; index < values.size(); ++index)
+    {
+        EXPECT_FLOAT_EQ(values[index].real(), std::sin(static_cast<float>(index)));
+        EXPECT_FLOAT_EQ(values[index].imag(), std::cos(static_cast<float>(index)));
+    }
+}
+
+TEST(HostValidationDataInitializationBridge, CounterBasedGenerationIsRepeatable)
+{
+    std::array<float, 16> first{};
+    std::array<float, 16> second{};
+    roc::host_validation::hipblaslt_adapter::initialize(std::span<float>(first),
+                                                        hipblaslt_initialization::norm_dist);
+    roc::host_validation::hipblaslt_adapter::initialize(std::span<float>(second),
+                                                        hipblaslt_initialization::norm_dist);
+    EXPECT_EQ(first, second);
+}
+
+TEST(HostValidationDataInitializationBridge, LegacyHostEntryPointsUseTensorLayouts)
+{
+    using Complex = std::complex<float>;
+    std::array<Complex, 8> values;
+    values.fill(Complex(-99, -99));
+
+    hipblaslt_init_sin(values.data(), 2, 2, 3);
+    EXPECT_EQ(values[0], Complex(std::sin(0.0f), std::cos(0.0f)));
+    EXPECT_EQ(values[1], Complex(std::sin(1.0f), std::cos(1.0f)));
+    EXPECT_EQ(values[3], Complex(std::sin(2.0f), std::cos(2.0f)));
+    EXPECT_EQ(values[4], Complex(std::sin(3.0f), std::cos(3.0f)));
+    EXPECT_EQ(values[2], Complex(-99, -99));
+
+    hipblaslt_init_zero(values.data(), 2, 2, 3);
+    EXPECT_EQ(values[0], Complex(0, 0));
+    EXPECT_EQ(values[1], Complex(0, 0));
+    EXPECT_EQ(values[3], Complex(0, 0));
+    EXPECT_EQ(values[4], Complex(0, 0));
+    EXPECT_EQ(values[2], Complex(-99, -99));
+}
 
 TEST(HostValidationCblasBridge, FloatGemm)
 {
