@@ -72,8 +72,15 @@ namespace rocsparse
         {
             // Grid-stride loop over the batch dimension (grid y). Per-batch pointers
             // are computed with load_pointer so the device kernels stay batch-agnostic.
-            // The merge-path coordinates (coord0/coord1) are shared across batches
-            // because every batch has the same sparsity pattern.
+            // The merge-path coordinates are per batch when the batches use distinct
+            // row pointers (offsets_batch_stride_A != 0) and shared (stride 0)
+            // otherwise; coords_per_batch mirrors csrmm_analysis_template_merge.
+            const uint64_t coord_total_work  = static_cast<uint64_t>(m) + nnz;
+            const uint64_t coord_block_count = (coord_total_work - 1) / 256 + 1;
+            const int64_t  coord_batch_stride
+                = (offsets_batch_stride_A != 0)
+                      ? static_cast<int64_t>(((coord_block_count - 1) / 256 + 1) * 256)
+                      : 0;
             for(int64_t batch = hipBlockIdx_y; batch < batch_count; batch += hipGridDim_y)
             {
                 rocsparse::csrmmnt_merge_path_main_device<WF_SIZE, ITEMS_PER_THREAD, LOOPS>(
@@ -89,8 +96,8 @@ namespace rocsparse
                     load_pointer(csr_row_ptr, batch, offsets_batch_stride_A),
                     load_pointer(csr_col_ind, batch, columns_values_batch_stride_A),
                     load_pointer(csr_val, batch, columns_values_batch_stride_A),
-                    coord0,
-                    coord1,
+                    load_pointer(coord0, batch, coord_batch_stride),
+                    load_pointer(coord1, batch, coord_batch_stride),
                     load_pointer(dense_B, batch, batch_stride_B),
                     ldb,
                     beta,
@@ -144,6 +151,12 @@ namespace rocsparse
         if(alpha != 0 || beta != 1)
         {
             // Grid-stride loop over the batch dimension (grid y). See main kernel.
+            const uint64_t coord_total_work  = static_cast<uint64_t>(m) + nnz;
+            const uint64_t coord_block_count = (coord_total_work - 1) / 256 + 1;
+            const int64_t  coord_batch_stride
+                = (offsets_batch_stride_A != 0)
+                      ? static_cast<int64_t>(((coord_block_count - 1) / 256 + 1) * 256)
+                      : 0;
             for(int64_t batch = hipBlockIdx_y; batch < batch_count; batch += hipGridDim_y)
             {
                 rocsparse::
@@ -159,8 +172,8 @@ namespace rocsparse
                         load_pointer(csr_row_ptr, batch, offsets_batch_stride_A),
                         load_pointer(csr_col_ind, batch, columns_values_batch_stride_A),
                         load_pointer(csr_val, batch, columns_values_batch_stride_A),
-                        coord0,
-                        coord1,
+                        load_pointer(coord0, batch, coord_batch_stride),
+                        load_pointer(coord1, batch, coord_batch_stride),
                         load_pointer(dense_B, batch, batch_stride_B),
                         ldb,
                         beta,
@@ -213,6 +226,13 @@ namespace rocsparse
         if(alpha != 0 || beta != 1)
         {
             // Grid-stride loop over the batch dimension (grid y). See main kernel.
+            const uint64_t coord_total_work  = static_cast<uint64_t>(m) + nnz;
+            const uint64_t coord_block_count = (coord_total_work - 1) / 256 + 1;
+            const int64_t  coord_batch_stride
+                = (offsets_batch_stride_A != 0)
+                      ? static_cast<int64_t>(((coord_block_count - 1) / 256 + 1) * 256)
+                      : 0;
+
             for(int64_t batch = hipBlockIdx_y; batch < batch_count; batch += hipGridDim_y)
             {
                 rocsparse::csrmmnn_merge_path_device<BLOCKSIZE, WF_SIZE, ITEMS_PER_THREAD>(
@@ -226,8 +246,8 @@ namespace rocsparse
                     load_pointer(csr_row_ptr, batch, offsets_batch_stride_A),
                     load_pointer(csr_col_ind, batch, columns_values_batch_stride_A),
                     load_pointer(csr_val, batch, columns_values_batch_stride_A),
-                    coord0,
-                    coord1,
+                    load_pointer(coord0, batch, coord_batch_stride),
+                    load_pointer(coord1, batch, coord_batch_stride),
                     load_pointer(dense_B, batch, batch_stride_B),
                     ldb,
                     beta,

@@ -28,16 +28,11 @@
 #include "csrmm/merge_path/kernel_declarations.h"
 #include "csrmm_device_merge.h"
 #include "rocsparse_common.h"
+#include "rocsparse_common.hpp"
 #include "rocsparse_csrmm.hpp"
 
 namespace rocsparse
 {
-    template <typename J>
-    static uint16_t get_batch_grid_size(J batch_count)
-    {
-        return (batch_count > 65535) ? 65535 : batch_count;
-    }
-
     template <typename T, typename I, typename J, typename A>
     rocsparse_status csrmm_buffer_size_template_merge(rocsparse_handle          handle,
                                                       rocsparse_operation       trans_A,
@@ -85,6 +80,8 @@ namespace rocsparse
                                                    J                         n,
                                                    J                         k,
                                                    I                         nnz,
+                                                   int64_t                   batch_count,
+                                                   int64_t                   offsets_batch_stride_A,
                                                    const rocsparse_mat_descr descr,
                                                    const A*                  csr_val,
                                                    const I*                  csr_row_ptr,
@@ -106,19 +103,34 @@ namespace rocsparse
             const uint64_t     total_work      = static_cast<uint64_t>(m) + nnz;
             const uint64_t     block_count     = (total_work - 1) / ITEM_PER_THREAD + 1;
 
+            // Reserve a contiguous coordinate block (rounded up to 256) per coordinate
+            // set. When the batches use distinct row pointers (offsets_batch_stride_A
+            // != 0) each batch needs its own merge coordinates; otherwise every batch
+            // shares identical row pointer data and a single set is sufficient. This
+            // layout must match the compute dispatch and stays within the
+            // batch_count_C over-allocation done in csrmm_buffer_size.
+            const uint32_t coords_per_batch
+                = static_cast<uint32_t>(((block_count - 1) / 256 + 1) * 256);
+            const int64_t num_coord_sets
+                = (offsets_batch_stride_A != 0 && batch_count > 1) ? batch_count : 1;
+
             char*                   ptr    = reinterpret_cast<char*>(temp_buffer);
             coordinate_t<uint32_t>* coord0 = reinterpret_cast<coordinate_t<uint32_t>*>(ptr);
-            ptr += sizeof(coordinate_t<uint32_t>) * ((block_count - 1) / 256 + 1) * 256;
+            ptr += sizeof(coordinate_t<uint32_t>) * static_cast<size_t>(coords_per_batch)
+                   * static_cast<size_t>(num_coord_sets);
             coordinate_t<uint32_t>* coord1 = reinterpret_cast<coordinate_t<uint32_t>*>(ptr);
 
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::csrmmnn_merge_compute_coords<1, ITEM_PER_THREAD>),
-                dim3(block_count),
+                dim3(block_count, get_batch_grid_size<int64_t>(num_coord_sets)),
                 dim3(1),
                 0,
                 handle->stream,
                 m,
                 nnz,
+                num_coord_sets,
+                offsets_batch_stride_A,
+                coords_per_batch,
                 csr_row_ptr,
                 coord0,
                 coord1,
@@ -210,9 +222,19 @@ namespace rocsparse
         const uint64_t     total_work      = static_cast<uint64_t>(m) + nnz;
         const uint64_t     block_count     = (total_work - 1) / ITEM_PER_THREAD + 1;
 
+        // Per-batch coordinate layout must match csrmm_analysis_template_merge: coord0
+        // holds num_coord_sets contiguous blocks of coords_per_batch coordinates,
+        // followed by the coord1 region with the same layout. A single set is shared
+        // by all batches unless the batches use distinct row pointers.
+        const uint32_t coords_per_batch
+            = static_cast<uint32_t>(((block_count - 1) / 256 + 1) * 256);
+        const int64_t num_coord_sets
+            = (offsets_batch_stride_A != 0 && batch_count_C > 1) ? batch_count_C : 1;
+
         char*                   ptr    = reinterpret_cast<char*>(temp_buffer);
         coordinate_t<uint32_t>* coord0 = reinterpret_cast<coordinate_t<uint32_t>*>(ptr);
-        ptr += sizeof(coordinate_t<uint32_t>) * ((block_count - 1) / 256 + 1) * 256;
+        ptr += sizeof(coordinate_t<uint32_t>) * static_cast<size_t>(coords_per_batch)
+               * static_cast<size_t>(num_coord_sets);
         coordinate_t<uint32_t>* coord1 = reinterpret_cast<coordinate_t<uint32_t>*>(ptr);
 
         if(n <= 16)
@@ -348,9 +370,19 @@ namespace rocsparse
         const uint64_t     total_work      = static_cast<uint64_t>(m) + nnz;
         const uint64_t     block_count     = (total_work - 1) / ITEM_PER_THREAD + 1;
 
+        // Per-batch coordinate layout must match csrmm_analysis_template_merge: coord0
+        // holds num_coord_sets contiguous blocks of coords_per_batch coordinates,
+        // followed by the coord1 region with the same layout. A single set is shared
+        // by all batches unless the batches use distinct row pointers.
+        const uint32_t coords_per_batch
+            = static_cast<uint32_t>(((block_count - 1) / 256 + 1) * 256);
+        const int64_t num_coord_sets
+            = (offsets_batch_stride_A != 0 && batch_count_C > 1) ? batch_count_C : 1;
+
         char*                   ptr    = reinterpret_cast<char*>(temp_buffer);
         coordinate_t<uint32_t>* coord0 = reinterpret_cast<coordinate_t<uint32_t>*>(ptr);
-        ptr += sizeof(coordinate_t<uint32_t>) * ((block_count - 1) / 256 + 1) * 256;
+        ptr += sizeof(coordinate_t<uint32_t>) * static_cast<size_t>(coords_per_batch)
+               * static_cast<size_t>(num_coord_sets);
         coordinate_t<uint32_t>* coord1 = reinterpret_cast<coordinate_t<uint32_t>*>(ptr);
 
         J main      = 0;
@@ -547,6 +579,8 @@ INSTANTIATE_BUFFER_SIZE(float, int64_t, int64_t, rocsparse_bfloat16);
         JTYPE                     n,                                    \
         JTYPE                     k,                                    \
         ITYPE                     nnz,                                  \
+        int64_t                   batch_count,                          \
+        int64_t                   offsets_batch_stride_A,               \
         const rocsparse_mat_descr descr,                                \
         const ATYPE*              csr_val,                              \
         const ITYPE*              csr_row_ptr,                          \

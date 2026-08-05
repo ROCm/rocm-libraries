@@ -54,6 +54,8 @@ namespace rocsparse
                                                    J                         n,
                                                    J                         k,
                                                    I                         nnz,
+                                                   int64_t                   batch_count,
+                                                   int64_t                   offsets_batch_stride_A,
                                                    const rocsparse_mat_descr descr,
                                                    const A*                  csr_val,
                                                    const I*                  csr_row_ptr,
@@ -68,6 +70,8 @@ namespace rocsparse
                                                 J                         n,
                                                 J                         k,
                                                 I                         nnz,
+                                                int64_t                   batch_count,
+                                                int64_t                   offsets_batch_stride_A,
                                                 const rocsparse_mat_descr descr,
                                                 const A*                  csr_val,
                                                 const I*                  csr_row_ptr,
@@ -104,6 +108,8 @@ namespace rocsparse
                                                                                n,
                                                                                k,
                                                                                nnz,
+                                                                               batch_count,
+                                                                               offsets_batch_stride_A,
                                                                                descr,
                                                                                csr_val,
                                                                                csr_row_ptr,
@@ -213,6 +219,8 @@ rocsparse_status rocsparse::csrmm_analysis_template(rocsparse_handle          ha
                                                     int64_t                   n,
                                                     int64_t                   k,
                                                     int64_t                   nnz,
+                                                    int64_t                   batch_count,
+                                                    int64_t                   offsets_batch_stride_A,
                                                     const rocsparse_mat_descr descr,
                                                     const void*               csr_val,
                                                     const void*               csr_row_ptr,
@@ -249,6 +257,8 @@ rocsparse_status rocsparse::csrmm_analysis_template(rocsparse_handle          ha
                                                  n,
                                                  k,
                                                  nnz,
+                                                 batch_count,
+                                                 offsets_batch_stride_A,
                                                  descr,
                                                  static_cast<const A*>(csr_val),
                                                  static_cast<const I*>(csr_row_ptr),
@@ -302,6 +312,8 @@ namespace rocsparse
                                                                  n,
                                                                  k,
                                                                  nnz,
+                                                                 static_cast<int64_t>(1),
+                                                                 static_cast<int64_t>(0),
                                                                  descr,
                                                                  csr_val,
                                                                  csr_row_ptr,
@@ -321,6 +333,8 @@ namespace rocsparse
         int64_t                   n,                                       \
         int64_t                   k,                                       \
         int64_t                   nnz,                                     \
+        int64_t                   batch_count,                             \
+        int64_t                   offsets_batch_stride_A,                  \
         const rocsparse_mat_descr descr,                                   \
         const void*               csr_val,                                 \
         const void*               csr_row_ptr,                             \
