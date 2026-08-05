@@ -124,11 +124,11 @@ INSTANTIATE_TEST_SUITE_P(
     IntegrationGpuPointwiseForwardFp32,
     testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
                      testing::ValuesIn(getPointwiseTestCases()),
-                     testing::ValuesIn(test_activation_common::createPointwiseFwdSmokeCases())));
+                     testing::ValuesIn(test_activation_common::createFwdUnaryActivationCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     IntegrationGpuPointwiseForwardFp16,
     testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
                      testing::ValuesIn(getPointwiseTestCases()),
-                     testing::ValuesIn(test_activation_common::createPointwiseFwdSmokeCases())));
+                     testing::ValuesIn(test_activation_common::createFwdUnaryActivationCases())));
