@@ -748,7 +748,7 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
                        });
     }
   }
-
+  OLOG_DEBUG("num_the_same: " << num_the_same);
   OLOG_DEBUG("rank_configs selected MT=(" << results[0].config.mt.m << ","
              << results[0].config.mt.n << "," << results[0].config.mt.k << ")"
              << " latency=" << results[0].latency);

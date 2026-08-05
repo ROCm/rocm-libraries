@@ -92,7 +92,8 @@ inline origami::config_t make_config(size_t mt_m,
                                      int wgm                       = 1,
                                      int occupancy                 = 1,
                                      int non_temporal_a            = 0,
-                                     int non_temporal_b            = 0) {
+                                     int non_temporal_b            = 0,
+                                     int stream_k                  = 5) {
   origami::config_t config;
   config.mt.m                     = mt_m;
   config.mt.n                     = mt_n;
@@ -105,6 +106,10 @@ inline origami::config_t make_config(size_t mt_m,
   config.workgroup_mapping        = wgm;
   config.cache_hints_a            = non_temporal_a;
   config.cache_hints_b            = non_temporal_b;
+  config.stream_k                 = stream_k;
+  if (stream_k == 0) {
+    config.grid_selection = origami::grid_selection_t::data_parallel;
+  }
   return config;
 }
 

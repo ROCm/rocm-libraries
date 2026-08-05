@@ -115,6 +115,9 @@ context_t::context_t(const problem_t& problem, const hardware_t& hardware, const
     OLOG_DEBUG("ElementSizeB (bits): " << int(b_bits));
     OLOG_DEBUG("CacheHintsA: " << int(config.cache_hints_a));
     OLOG_DEBUG("CacheHintsB: " << int(config.cache_hints_b));
+    OLOG_DEBUG("StreamK: " << int(config.stream_k));
+    OLOG_DEBUG("GRVWA: " << int(config.grvw_a));
+    OLOG_DEBUG("GRVWB: " << int(config.grvw_b));
 
     OLOG_DEBUG("Grid: " << int(grid_m) << "x" << int(grid_n));
     OLOG_DEBUG("NumOutputTiles: " << int(num_output_tiles));
@@ -362,15 +365,21 @@ std::tuple<reduction_t, size_t, size_t, size_t, size_t> compute_launch_parameter
     const hardware_t& hardware,
     const config_t& config,
     grid_selection_t grid_selection) {
-  const reduction_t reduction_strategy =
-      streamk::select_reduction(problem, hardware, config, grid_selection);
-  auto config_with_reduction               = config;
-  config_with_reduction.reduction_strategy = reduction_strategy;
-  const size_t num_wgs =
-      streamk::select_grid_size(problem, hardware, config_with_reduction, grid_selection);
-
+  
   const size_t num_mts = streamk::compute_number_of_output_tiles(
-      config.mt.m, config.mt.n, problem.size.m, problem.size.n, problem.batch);
+    config.mt.m, config.mt.n, problem.size.m, problem.size.n, problem.batch);
+  size_t num_wgs = num_mts;
+  reduction_t reduction_strategy = config.reduction_strategy;
+
+  if (config.stream_k > 0) {
+    reduction_strategy =
+        streamk::select_reduction(problem, hardware, config, grid_selection);
+    auto config_with_reduction               = config;
+    config_with_reduction.reduction_strategy = reduction_strategy;
+    num_wgs =
+        streamk::select_grid_size(problem, hardware, config_with_reduction, grid_selection);
+  }
+  
   // There are cases in which StreamK combines multiple output MTs and assigns to 1 WG.
   // That means, we artifically observe one full timesteps, but that is not what actually happens
   // under the hood. From a theoretical point of view, these distributions change all of the
