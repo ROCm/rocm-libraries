@@ -292,6 +292,78 @@ class DAGSchedulerPassTest : public ::testing::Test {
         return inst;
     }
 
+    // `s_sub_u32 s<sgpr>, s<sgpr>, 1` -- writes an SGPR *and* SCC (carry-out). The loop
+    // counter decrement: its SGPR result is read across the back edge while its SCC
+    // result is dead, killed by the compare that follows.
+    StinkyInstruction* createSSubWritingSgprAndScc(BasicBlock* targetBB, int sgpr) {
+        AsmIRBuilder builder(*targetBB, arch);
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::s_sub_u32, arch));
+        inst->addDestReg(StinkyRegister("s", sgpr, 1));
+        inst->addDestReg(StinkyRegister::getSCCRegister());
+        inst->addSrcReg(StinkyRegister("s", sgpr, 1));
+        inst->addSrcReg(StinkyRegister(1));
+        return inst;
+    }
+
+    // `s_cselect_b32 s<dst>, s<src>, 0` -- an SCC reader that is ordinary SALU work, so
+    // unlike a branch the scheduler is free to move it anywhere its deps allow.
+    StinkyInstruction* createSCselectReadingScc(BasicBlock* targetBB, int destSgpr, int srcSgpr) {
+        AsmIRBuilder builder(*targetBB, arch);
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::s_cselect_b32, arch));
+        inst->addDestReg(StinkyRegister("s", destSgpr, 1));
+        inst->addSrcReg(StinkyRegister("s", srcSgpr, 1));
+        inst->addSrcReg(StinkyRegister(0));
+        inst->addSrcReg(StinkyRegister::getSCCRegister());
+        return inst;
+    }
+
+    // The invariant the cluster-barrier SCC rule enforces: no workgroup barrier may sit
+    // between the first and last scheduled member of an SCC def-use chain. Which side of
+    // the barrier the chain ends up on is deliberately not constrained.
+    static bool barrierSplitsChain(const BasicBlock& block,
+                                   const std::vector<StinkyInstruction*>& chain) {
+        int lo = -1, hi = -1, idx = 0;
+        std::vector<int> barrierPositions;
+        for (const IRBase& ir : block) {
+            if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+            const auto* inst = cast<StinkyInstruction>(&ir);
+            if (isBarrier(*inst)) barrierPositions.push_back(idx);
+            for (const StinkyInstruction* member : chain) {
+                if (inst != member) continue;
+                if (lo < 0) lo = idx;
+                hi = idx;
+            }
+            idx++;
+        }
+        for (int pos : barrierPositions)
+            if (pos > lo && pos < hi) return true;
+        return false;
+    }
+
+    // Scheduled index of the first `s_barrier_signal`, or -1.
+    static int firstBarrierSignalPosition(const BasicBlock& block) {
+        int idx = 0;
+        for (const IRBase& ir : block) {
+            if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+            const auto* inst = cast<StinkyInstruction>(&ir);
+            if (isBarrier(*inst) && isBarrierSignal(*inst)) return idx;
+            idx++;
+        }
+        return -1;
+    }
+
+    // Scheduled order as indexed IR lines, for assertion failure messages and dumps.
+    static std::string scheduleOrder(const BasicBlock& block) {
+        std::ostringstream os;
+        int idx = 0;
+        for (const IRBase& ir : block) {
+            if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+            os << "\n  " << idx++ << ": ";
+            cast<StinkyInstruction>(&ir)->dump(os);
+        }
+        return os.str();
+    }
+
     // Scheduled index of \p target, or -1.
     static int positionOf(const BasicBlock& block, const StinkyInstruction* target) {
         int idx = 0;
@@ -1466,6 +1538,211 @@ TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_DisabledLeavesSccDefFree) {
         << "without the rule the compare is an unconstrained SALU and drifts above the barrier";
 }
 
+// A def-use chain (one write, two ordinary SALU readers) ahead of a barrier that guards
+// a tensor_load: the barrier may not be scheduled into it, so neither reader can be left
+// between the signal and the wait nor pushed past the wait.
+TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_GuardingBarrierNeverSplitsChain) {
+    BasicBlock* body = bb;
+    body->addSuccessor(body);
+
+    createWmmaF32_16x16x16_bf16_in(body, /*destStart=*/200, /*src0Start=*/204);
+    for (int i = 0; i < 6; i++)
+        createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i, /*ldsToken=*/i + 10);
+
+    StinkyInstruction* sccDef = createSCmpWritingScc(body, /*srcSgpr=*/90);
+    StinkyInstruction* reader1 = createSCselectReadingScc(body, /*destSgpr=*/91, /*srcSgpr=*/92);
+    StinkyInstruction* reader2 = createSCselectReadingScc(body, /*destSgpr=*/93, /*srcSgpr=*/94);
+
+    createMovableWorkgroupBarrier(body, /*ldsToken=*/1);
+    createMovableTensorLoad(body, /*s0=*/40, /*s1=*/48, /*ldsToken=*/1);
+
+    const int beforeCount = countStinkyInstructions(*body);
+    runPassWithClusterBarrier(/*clusterBarrier=*/true);
+    ASSERT_EQ(countStinkyInstructions(*body), beforeCount);
+
+    EXPECT_FALSE(barrierSplitsChain(*body, {sccDef, reader1, reader2}))
+        << "the handshake anchors on the barrier, so it may not land inside the chain";
+}
+
+// Negative control for the test above: with the rule off the scheduler hoists the barrier
+// signal into the middle of the chain, leaving the def above the signal and both readers
+// below it. That ordering is what InsertClusterBarrierPass would later corrupt, since its
+// handshake clobbers SCC at the barrier.
+TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_DisabledLetsBarrierSplitChain) {
+    BasicBlock* body = bb;
+    body->addSuccessor(body);
+
+    createWmmaF32_16x16x16_bf16_in(body, /*destStart=*/200, /*src0Start=*/204);
+    for (int i = 0; i < 6; i++)
+        createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i, /*ldsToken=*/i + 10);
+
+    StinkyInstruction* sccDef = createSCmpWritingScc(body, /*srcSgpr=*/90);
+    StinkyInstruction* reader1 = createSCselectReadingScc(body, /*destSgpr=*/91, /*srcSgpr=*/92);
+    StinkyInstruction* reader2 = createSCselectReadingScc(body, /*destSgpr=*/93, /*srcSgpr=*/94);
+
+    createMovableWorkgroupBarrier(body, /*ldsToken=*/1);
+    createMovableTensorLoad(body, /*s0=*/40, /*s1=*/48, /*ldsToken=*/1);
+
+    runPassWithClusterBarrier(/*clusterBarrier=*/false);
+
+    const int signalPos = firstBarrierSignalPosition(*body);
+    const int waitPos = lastBarrierWaitPosition(*body);
+    ASSERT_GE(signalPos, 0);
+    ASSERT_GE(waitPos, 0);
+    EXPECT_LT(signalPos, waitPos);
+    EXPECT_LT(positionOf(*body, sccDef), signalPos);
+    EXPECT_GT(positionOf(*body, reader1), signalPos);
+    EXPECT_GT(positionOf(*body, reader2), signalPos);
+    EXPECT_TRUE(barrierSplitsChain(*body, {sccDef, reader1, reader2}))
+        << "nothing keeps the chain together once the rule is disabled";
+}
+
+// The same chain starting behind the guarding barrier. The rule must not pin it there:
+// the chain is still free to be hoisted, as long as it is hoisted whole.
+TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_ChainBehindBarrierStaysWhole) {
+    BasicBlock* body = bb;
+    body->addSuccessor(body);
+
+    createWmmaF32_16x16x16_bf16_in(body, /*destStart=*/200, /*src0Start=*/204);
+    for (int i = 0; i < 6; i++)
+        createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i, /*ldsToken=*/i + 10);
+
+    createMovableWorkgroupBarrier(body, /*ldsToken=*/1);
+    createMovableTensorLoad(body, /*s0=*/40, /*s1=*/48, /*ldsToken=*/1);
+
+    StinkyInstruction* sccDef = createSCmpWritingScc(body, /*srcSgpr=*/90);
+    StinkyInstruction* reader1 = createSCselectReadingScc(body, /*destSgpr=*/91, /*srcSgpr=*/92);
+    StinkyInstruction* reader2 = createSCselectReadingScc(body, /*destSgpr=*/93, /*srcSgpr=*/94);
+
+    runPassWithClusterBarrier(/*clusterBarrier=*/true);
+
+    EXPECT_FALSE(barrierSplitsChain(*body, {sccDef, reader1, reader2}))
+        << "hoisting the chain above the barrier is allowed, but only as a whole";
+}
+
+// A chain that starts entirely behind the guarding barrier, with the tensor_load trailing
+// it. Both cases below build this program order:
+//
+//     s_barrier_signal -1 / s_barrier_wait -1 / s_cmp_eq_u32 / s_cselect_b32 / tensor_load
+//
+// The compare reads an SGPR nothing in the region writes, so it is ready from the first
+// pick and wants to hoist above the barrier; its reader cannot follow until the compare
+// has issued. That is what pulls the chain apart when nothing holds it together.
+TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_DisabledSplitsChainBehindBarrier) {
+    BasicBlock* body = bb;
+    body->addSuccessor(body);
+
+    createWmmaF32_16x16x16_bf16_in(body, /*destStart=*/200, /*src0Start=*/204);
+    for (int i = 0; i < 6; i++)
+        createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i, /*ldsToken=*/i + 10);
+
+    createMovableWorkgroupBarrier(body, /*ldsToken=*/1);
+    StinkyInstruction* sccDef = createSCmpWritingScc(body, /*srcSgpr=*/90);
+    StinkyInstruction* sccReader = createSCselectReadingScc(body, /*destSgpr=*/91, /*srcSgpr=*/92);
+    StinkyInstruction* tensorLoad = createMovableTensorLoad(body, /*s0=*/40, /*s1=*/48,
+                                                            /*ldsToken=*/1);
+
+    runPassWithClusterBarrier(/*clusterBarrier=*/false);
+
+    const std::string order = scheduleOrder(*body);
+    // The compare hoists above the barrier and leaves its reader behind, so the barrier is
+    // scheduled straight through the chain's live range.
+    EXPECT_LT(positionOf(*body, sccDef), firstBarrierSignalPosition(*body)) << order;
+    EXPECT_LT(firstBarrierSignalPosition(*body), positionOf(*body, sccReader)) << order;
+    EXPECT_LT(positionOf(*body, sccReader), lastBarrierWaitPosition(*body)) << order;
+    EXPECT_LT(lastBarrierWaitPosition(*body), positionOf(*body, tensorLoad)) << order;
+    EXPECT_TRUE(barrierSplitsChain(*body, {sccDef, sccReader}))
+        << "nothing keeps the chain together once the rule is disabled:" << order;
+}
+
+// Same IR with the rule on. The chain is still free to hoist above the barrier -- the rule
+// does not pin it behind -- but it may only do so as a whole.
+TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_ChainBehindBarrierHoistsWhole) {
+    BasicBlock* body = bb;
+    body->addSuccessor(body);
+
+    createWmmaF32_16x16x16_bf16_in(body, /*destStart=*/200, /*src0Start=*/204);
+    for (int i = 0; i < 6; i++)
+        createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i, /*ldsToken=*/i + 10);
+
+    createMovableWorkgroupBarrier(body, /*ldsToken=*/1);
+    StinkyInstruction* sccDef = createSCmpWritingScc(body, /*srcSgpr=*/90);
+    StinkyInstruction* sccReader = createSCselectReadingScc(body, /*destSgpr=*/91, /*srcSgpr=*/92);
+    StinkyInstruction* tensorLoad = createMovableTensorLoad(body, /*s0=*/40, /*s1=*/48,
+                                                            /*ldsToken=*/1);
+
+    const int beforeCount = countStinkyInstructions(*body);
+    runPassWithClusterBarrier(/*clusterBarrier=*/true);
+    ASSERT_EQ(countStinkyInstructions(*body), beforeCount);
+
+    const std::string order = scheduleOrder(*body);
+    EXPECT_FALSE(barrierSplitsChain(*body, {sccDef, sccReader}))
+        << "no guarding barrier may land between the SCC def and its reader:" << order;
+    EXPECT_LT(lastBarrierWaitPosition(*body), positionOf(*body, tensorLoad))
+        << "the barrier must still guard the tensor_load:" << order;
+}
+
+// Same chain, same barrier, but nothing to guard: InsertClusterBarrierPass plants no
+// handshake, so the chain must keep its full freedom to straddle the barrier.
+TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_ChainMayStraddleNonGuardingBarrier) {
+    BasicBlock* body = bb;
+    body->addSuccessor(body);
+
+    createWmmaF32_16x16x16_bf16_in(body, /*destStart=*/200, /*src0Start=*/204);
+    for (int i = 0; i < 6; i++)
+        createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i, /*ldsToken=*/i + 10);
+
+    createSCmpWritingScc(body, /*srcSgpr=*/90);
+    StinkyInstruction* reader1 = createSCselectReadingScc(body, /*destSgpr=*/91, /*srcSgpr=*/92);
+    StinkyInstruction* reader2 = createSCselectReadingScc(body, /*destSgpr=*/93, /*srcSgpr=*/94);
+
+    createMovableWorkgroupBarrier(body, /*ldsToken=*/1);
+
+    runPassWithClusterBarrier(/*clusterBarrier=*/true);
+
+    const int signalPos = firstBarrierSignalPosition(*body);
+    ASSERT_GE(signalPos, 0);
+    const int lastReaderPos = std::max(positionOf(*body, reader1), positionOf(*body, reader2));
+    EXPECT_GT(lastReaderPos, signalPos)
+        << "with no tensor_load behind it the barrier anchors nothing, so the chain is free";
+}
+
+// The loop counter decrement writes SCC as a carry-out that the compare right after it
+// immediately kills, so its SCC is dead and the rule must leave it alone. Its *SGPR*
+// result is read across the back edge, which must not be mistaken for a live SCC value
+// -- doing so pins the decrement behind the barrier and blocks a hoist the scheduler
+// would otherwise make.
+TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_DeadSccCarryOutStaysFree) {
+    BasicBlock* body = bb;
+    body->addSuccessor(body);
+
+    createWmmaF32_16x16x16_bf16_in(body, /*destStart=*/200, /*src0Start=*/204);
+    for (int i = 0; i < 6; i++)
+        createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i, /*ldsToken=*/i + 10);
+
+    createMovableWorkgroupBarrier(body, /*ldsToken=*/1);
+    createMovableTensorLoad(body, /*s0=*/40, /*s1=*/48, /*ldsToken=*/1);
+
+    StinkyInstruction* decrement = createSSubWritingSgprAndScc(body, /*sgpr=*/90);
+    createSCmpWritingScc(body, /*srcSgpr=*/90);
+    createSCbranchReadingScc(body);
+    // Past the branch, so in a later region: this is the cross-back-edge SGPR read that
+    // makes the decrement look live-out unless the check is narrowed to SCC readers.
+    {
+        AsmIRBuilder builder(*body, arch);
+        StinkyInstruction* carry = builder.create(getMCIDByUOp(GFX::s_mov_b32, arch));
+        carry->addDestReg(StinkyRegister("s", 95, 1));
+        carry->addSrcReg(StinkyRegister("s", 90, 1));
+    }
+
+    runPassWithClusterBarrier(/*clusterBarrier=*/true);
+
+    const int signalPos = firstBarrierSignalPosition(*body);
+    ASSERT_GE(signalPos, 0);
+    EXPECT_LT(positionOf(*body, decrement), signalPos)
+        << "the decrement's SCC is dead, so nothing stops it from being hoisted";
+}
+
 // No tensor_load means InsertClusterBarrierPass plants nothing here, so the rule must
 // not bind and cost scheduling freedom.
 TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_NoTensorLoadLeavesSccDefFree) {
@@ -1490,6 +1767,36 @@ TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_NoTensorLoadLeavesSccDefFree)
     ASSERT_GE(sccDefPos, 0);
     EXPECT_LT(sccDefPos, barrierPos)
         << "with no tensor_load behind the barrier the rule must not bind";
+}
+
+// An SCC chain that is born and dies inside the region, sitting ahead of the barrier that
+// guards a tensor_load. Without protection the scheduler drops the barrier's signal between
+// the def and its reader, which is where InsertClusterBarrierPass anchors its SCC-clobbering
+// handshake.
+TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_InRegionChainSurvivesGuardingBarrier) {
+    BasicBlock* body = bb;
+    body->addSuccessor(body);
+
+    createWmmaF32_16x16x16_bf16_in(body, /*destStart=*/200, /*src0Start=*/204);
+    for (int i = 0; i < 6; i++)
+        createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i, /*ldsToken=*/i + 10);
+
+    StinkyInstruction* sccDef = createSCmpWritingScc(body, /*srcSgpr=*/90);
+    StinkyInstruction* sccReader = createSCselectReadingScc(body, /*destSgpr=*/91, /*srcSgpr=*/92);
+
+    createMovableWorkgroupBarrier(body, /*ldsToken=*/1);
+    StinkyInstruction* tensorLoad = createMovableTensorLoad(body, /*s0=*/40, /*s1=*/48,
+                                                            /*ldsToken=*/1);
+
+    const int beforeCount = countStinkyInstructions(*body);
+    runPassWithClusterBarrier(/*clusterBarrier=*/true);
+    ASSERT_EQ(countStinkyInstructions(*body), beforeCount);
+
+    EXPECT_FALSE(barrierSplitsChain(*body, {sccDef, sccReader}))
+        << "no guarding barrier may land between the SCC def and its reader:"
+        << scheduleOrder(*body);
+    EXPECT_LT(lastBarrierWaitPosition(*body), positionOf(*body, tensorLoad))
+        << "the barrier must still guard the tensor_load:" << scheduleOrder(*body);
 }
 
 // All instructions are preserved regardless of throttle (count invariant).
