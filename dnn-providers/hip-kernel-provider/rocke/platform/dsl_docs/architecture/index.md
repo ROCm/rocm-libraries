@@ -21,6 +21,9 @@ builders are cataloged separately in [`../instances/index.md`](../instances/inde
   other phases remain proposed.
 - [`ir_serialization_format.md`](ir_serialization_format.md) — serialized IR
   format consumed across that seam.
+- [`portable_ir_schema.md`](portable_ir_schema.md) — the JSON/CBOR artifact
+  schemas the C++ engine replays at runtime, and the byte-identity and device
+  gates on that path.
 
 ## Addressing and layout
 

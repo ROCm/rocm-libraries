@@ -402,7 +402,7 @@ static int ll_list_opt_rocm_roots(char out[][256], int max_roots)
         return 0;
     while((ent = readdir(dir)) != NULL && n < max_roots)
     {
-        int i, j;
+        int i;
         if(strncmp(ent->d_name, "rocm", 4) != 0)
             continue;
         /* Insertion sort, newest first. */
@@ -411,8 +411,11 @@ static int ll_list_opt_rocm_roots(char out[][256], int max_roots)
             if(ll_rocm_name_newer(ent->d_name, out[i]) > 0)
                 break;
         }
-        for(j = n; j > i; --j)
-            snprintf(out[j], 256, "%s", out[j - 1]);
+        /* Shift the tail up one slot. memmove rather than a per-row snprintf:
+         * the rows are distinct, but copying between two elements of the same
+         * array trips -Wrestrict, and a single move is what this means anyway. */
+        if(n > i)
+            memmove(out[i + 1], out[i], (size_t)(n - i) * 256);
         snprintf(out[i], 256, "%s", ent->d_name);
         ++n;
     }
