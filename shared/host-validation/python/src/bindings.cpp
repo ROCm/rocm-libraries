@@ -112,7 +112,8 @@ Tensor referenceGemmOwned(const Tensor& a, const Tensor& b, const Tensor& c, Sca
                           std::optional<ScalarType> computeTypeB, MathMode mathMode,
                           Activation activation, double activationParameter0,
                           double activationParameter1, OutputSelection outputSelection,
-                          GemmBackend backend) {
+                          GemmBackend backend, std::optional<Tensor> blockScaleA,
+                          std::optional<Tensor> blockScaleB, size_t blockSizeA, size_t blockSizeB) {
     if (a.shape().rank() != 2 || b.shape().rank() != 2)
         throw std::invalid_argument("Python reference_gemm requires rank-2 A and B tensors.");
 
@@ -121,6 +122,13 @@ Tensor referenceGemmOwned(const Tensor& a, const Tensor& b, const Tensor& c, Sca
     GemmOperand operandB(b.view());
     operandA.computeType = computeTypeA;
     operandB.computeType = computeTypeB;
+    if (blockScaleA || blockScaleB) {
+        if (!blockScaleA || !blockScaleB || blockSizeA == 0 || blockSizeB == 0)
+            throw std::invalid_argument(
+                "Python reference_gemm block scales require both tensors and nonzero sizes.");
+        operandA.blockScale = BlockScaleBinding{blockScaleA->view(), blockSizeA};
+        operandB.blockScale = BlockScaleBinding{blockScaleB->view(), blockSizeB};
+    }
     GemmProblem problem(std::move(operandA), std::move(operandB), c.view(), d.mutableView(),
                         accumulatorType);
     problem.mathMode = mathMode;
@@ -464,7 +472,9 @@ NB_MODULE(_roc_host_validation, module) {
                "compute_type_b"_a = std::optional<ScalarType>{}, "math_mode"_a = MathMode::Default,
                "activation"_a = Activation::None, "activation_parameter0"_a = 0.0,
                "activation_parameter1"_a = 0.0, "output_selection"_a = OutputSelection::all(),
-               "backend"_a = GemmBackend::Canonical);
+               "backend"_a = GemmBackend::Canonical, "block_scale_a"_a = std::optional<Tensor>{},
+               "block_scale_b"_a = std::optional<Tensor>{}, "block_size_a"_a = 0,
+               "block_size_b"_a = 0);
     module.def("reference_epilogue", &referenceEpilogueOwned, "input"_a, "output_type"_a,
                "compute_type"_a, "bias"_a = std::optional<Tensor>{},
                "bias_axis"_a = MatrixAxis::Row, "activation"_a = Activation::None,

@@ -417,6 +417,31 @@ class TensorAndGemmTests(unittest.TestCase):
             hv.to_numpy(observed, np.float32), np.asarray([[9.0]], np.float32)
         )
 
+    def test_block_scaled_tiled_gemm_matches_numpy(self):
+        a = np.ones((1, 16), dtype=np.float32)
+        b = np.ones((16, 1), dtype=np.float32)
+        c = np.zeros((1, 1), dtype=np.float32)
+        scale_a = np.asarray([[2.0, 4.0]], dtype=np.float32)
+        scale_b = np.asarray([[8.0, 16.0]], dtype=np.float32)
+        observed = hv.reference_gemm(
+            hv.from_numpy(a),
+            hv.from_numpy(b),
+            hv.from_numpy(c),
+            hv.ScalarType.Float32,
+            hv.ScalarType.Float32,
+            backend=hv.GemmBackend.Tiled,
+            block_scale_a=hv.from_numpy(scale_a),
+            block_scale_b=hv.from_numpy(scale_b),
+            block_size_a=8,
+            block_size_b=8,
+        )
+        expected = np.asarray(
+            [[np.sum(a[:, :8] @ b[:8, :] * 2.0 * 8.0)
+              + np.sum(a[:, 8:] @ b[8:, :] * 4.0 * 16.0)]],
+            dtype=np.float32,
+        )
+        np.testing.assert_array_equal(hv.to_numpy(observed), expected)
+
     def test_selected_output_gemm(self):
         a = np.asarray([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)
         b = np.asarray([[5.0, 6.0], [7.0, 8.0]], dtype=np.float32)
