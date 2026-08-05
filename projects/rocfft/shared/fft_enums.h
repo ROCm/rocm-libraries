@@ -29,13 +29,13 @@
 #include <utility>
 
 // type-trait to identify fft-specific enums defined herein
-template <typename T, std::enable_if_t<std::is_enum_v<T>, bool> = true>
+template <typename enumT, std::enable_if_t<std::is_enum_v<enumT>, bool> = true>
 struct is_fft_enum : std::false_type
 {
 };
 
-template <typename T, std::enable_if_t<std::is_enum_v<T>, bool> = true>
-constexpr bool is_fft_enum_v = is_fft_enum<T>::value;
+template <typename enumT, std::enable_if_t<std::is_enum_v<enumT>, bool> = true>
+constexpr bool is_fft_enum_v = is_fft_enum<enumT>::value;
 
 // Constexpr enum-to-string map for fft_enum types.
 // Each specialization provides:
@@ -43,18 +43,19 @@ constexpr bool is_fft_enum_v = is_fft_enum<T>::value;
 //   - entries[]: an array of (value, name) pairs covering all valid enum values
 // These are the single source of truth for validation (validate_or_throw),
 // serialization (fft_enum_to_string), and deserialization (fft_enum_from_string).
-template <typename E, std::enable_if_t<is_fft_enum_v<E>, bool> = true>
+template <typename enumT, std::enable_if_t<is_fft_enum_v<enumT>, bool> = true>
 struct fft_enum_map;
 
-// Generic validate_or_throw: checks a runtime value against fft_enum_map<E>::entries.
-template <typename E, std::enable_if_t<is_fft_enum_v<E>, bool> = true>
-inline void validate_or_throw(E val, const std::string& func_name)
+// Generic validate_or_throw: checks a runtime value against fft_enum_map<enumT>::entries.
+template <typename enumT, std::enable_if_t<is_fft_enum_v<enumT>, bool> = true>
+inline void validate_or_throw(enumT val, const std::string& func_name)
 {
-    for(const auto& [v, name] : fft_enum_map<E>::entries)
+    for(const auto& [v, name] : fft_enum_map<enumT>::entries)
         if(v == val)
             return;
-    throw std::invalid_argument(std::string("invalid ") + std::string(fft_enum_map<E>::type_name)
-                                + " for " + func_name);
+    throw std::invalid_argument(std::string("invalid ")
+                                + std::string(fft_enum_map<enumT>::type_name) + " for "
+                                + func_name);
 }
 
 /**
@@ -66,40 +67,40 @@ inline void validate_or_throw(E val, const std::string& func_name)
  * @param val value of enum to be validated.
  * @param args values of possible additional fft-specific enums to be validated.
  */
-template <typename T, typename... Args, std::enable_if_t<is_fft_enum_v<T>, bool> = true>
-inline void validate_enums_or_throw(const std::string& func_name, T val, Args... args)
+template <typename enumT, typename... Args, std::enable_if_t<is_fft_enum_v<enumT>, bool> = true>
+inline void validate_enums_or_throw(const std::string& func_name, enumT val, Args... args)
 {
     validate_or_throw(val, func_name);
     if constexpr(sizeof...(args) > 0)
         validate_enums_or_throw(func_name, args...);
 }
 
-// Generic runtime enum-to-string: looks up a runtime value in fft_enum_map<E>::entries.
-template <typename E, std::enable_if_t<is_fft_enum_v<E>, bool> = true>
-inline std::string fft_enum_to_string(E v)
+// Generic runtime enum-to-string: looks up a runtime value in fft_enum_map<enumT>::entries.
+template <typename enumT, std::enable_if_t<is_fft_enum_v<enumT>, bool> = true>
+inline std::string fft_enum_to_string(enumT v)
 {
-    for(const auto& [val, name] : fft_enum_map<E>::entries)
+    for(const auto& [val, name] : fft_enum_map<enumT>::entries)
         if(val == v)
             return std::string(name);
-    throw std::invalid_argument("Unexpected value of " + std::string(fft_enum_map<E>::type_name)
+    throw std::invalid_argument("Unexpected value of " + std::string(fft_enum_map<enumT>::type_name)
                                 + " given to fft_enum_to_string()");
 }
 
 // Generic runtime string-to-enum: longest prefix match against fft_enum_map<E>::entries.
 // Optionally writes the number of characters consumed to *consumed.
-template <typename E, std::enable_if_t<is_fft_enum_v<E>, bool> = true>
-inline E fft_enum_from_string(std::string_view input, size_t* consumed = nullptr)
+template <typename enumT, std::enable_if_t<is_fft_enum_v<enumT>, bool> = true>
+inline enumT fft_enum_from_string(std::string_view input, size_t* consumed = nullptr)
 {
-    E      best_val{};
+    enumT  best_val{};
     size_t best_len = 0;
-    for(const auto& [val, entry_name] : fft_enum_map<E>::entries)
+    for(const auto& [val, entry_name] : fft_enum_map<enumT>::entries)
         if(entry_name.size() > best_len && input.substr(0, entry_name.size()) == entry_name)
         {
             best_val = val;
             best_len = entry_name.size();
         }
     if(best_len == 0)
-        throw std::invalid_argument("No matching " + std::string(fft_enum_map<E>::type_name)
+        throw std::invalid_argument("No matching " + std::string(fft_enum_map<enumT>::type_name)
                                     + " at start of: " + std::string(input));
     if(consumed)
         *consumed = best_len;
@@ -108,11 +109,11 @@ inline E fft_enum_from_string(std::string_view input, size_t* consumed = nullptr
 
 // Overload for sequential parsing: reads an enum value starting at input[pos]
 // and advances pos past the consumed characters on success.
-template <typename E, std::enable_if_t<is_fft_enum_v<E>, bool> = true>
-inline E fft_enum_from_string(const char* input, size_t& pos)
+template <typename enumT, std::enable_if_t<is_fft_enum_v<enumT>, bool> = true>
+inline enumT fft_enum_from_string(const char* input, size_t& pos)
 {
     size_t consumed = 0;
-    E      result   = fft_enum_from_string<E>(std::string_view(input + pos), &consumed);
+    enumT  result   = fft_enum_from_string<enumT>(std::string_view(input + pos), &consumed);
     pos += consumed;
     return result;
 }
