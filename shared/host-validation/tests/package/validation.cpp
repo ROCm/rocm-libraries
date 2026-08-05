@@ -3,6 +3,7 @@
 
 #include <array>
 #include <roc/host_validation/validation.hpp>
+#include <span>
 
 int main() {
     using namespace roc::host_validation;
@@ -12,9 +13,14 @@ int main() {
     const std::array<float, 1> c{0};
     std::array<float, 1> d{};
 
-    GemmInvocation<float, float, float, float, float> invocation{
-        ConstMatrixView<float>(a.data(), 1, 1, 1, 1), ConstMatrixView<float>(b.data(), 1, 1, 1, 1),
-        ConstMatrixView<float>(c.data(), 1, 1, 1, 1), MatrixView<float>(d.data(), 1, 1, 1, 1)};
-    referenceGemm(invocation);
+    GemmProblem problem(
+        GemmOperand(TensorView::fromNative<float>(Layout::contiguous(Shape{1, 1}),
+                                                  std::span<const float>(a))),
+        GemmOperand(TensorView::fromNative<float>(Layout::contiguous(Shape{1, 1}),
+                                                  std::span<const float>(b))),
+        TensorView::fromNative<float>(Layout::contiguous(Shape{1, 1}), std::span<const float>(c)),
+        MutableTensorView::fromNative<float>(Layout::contiguous(Shape{1, 1}), std::span<float>(d)),
+        ScalarType::Float32);
+    referenceGemm(problem);
     return d[0] == 6 ? 0 : 1;
 }
