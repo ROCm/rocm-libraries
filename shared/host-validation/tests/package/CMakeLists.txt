@@ -12,6 +12,9 @@ target_link_libraries(host-validation-package-test PRIVATE roc::host-validation-
 add_executable(host-validation-operations-package-test validation.cpp)
 target_link_libraries(host-validation-operations-package-test PRIVATE roc::host-validation)
 
+add_executable(host-validation-tiled-package-test tiled.cpp)
+target_link_libraries(host-validation-tiled-package-test PRIVATE roc::host-validation-tiled)
+
 if(TARGET roc::host-validation-blas)
     add_executable(host-validation-blas-package-test blas.cpp)
     target_link_libraries(

@@ -35,6 +35,7 @@
 #include <optional>
 #include <roc/host_validation/adapters/tensilelite/HostValidationBridge.hpp>
 #include <roc/host_validation/adapters/tensilelite/Reference.hpp>
+#include <roc/host_validation/backends/tiled.hpp>
 #include <roc/host_validation/validation.hpp>
 #include <span>
 #include <type_traits>
@@ -1166,8 +1167,11 @@ namespace TensileLite
             return multiply<Accumulator, MathOpAccum>(aVal, bVal);
         }
 
-        bool tryRuntimeCanonicalGemm(ContractionProblemGemm const& problem,
-                                     ContractionInputs const& inputs, size_t elementsToValidate) {
+        bool tryRuntimeGemm(
+            ContractionProblemGemm const& problem,
+            ContractionInputs const& inputs,
+            size_t elementsToValidate,
+            const roc::host_validation::GemmBackendImplementation* backendImplementation) {
             using namespace roc::host_validation;
 
             if (problem.boundIndices().size() != 1 || problem.freeIndicesA().size() != 1 ||
@@ -1652,7 +1656,19 @@ namespace TensileLite
                 if(!globalSelection.selectsAll())
                     runtimeProblem.outputSelection
                         = OutputSelection::explicitIndices(selectedByBatch[batch]);
-                referenceGemm(runtimeProblem);
+                if (backendImplementation != nullptr) {
+                    const GemmBackend backend = backendImplementation->backend();
+                    const GemmSupportInfo support =
+                        queryGemmSupport(runtimeProblem, backend, backendImplementation);
+                    if (!support) return false;
+                    referenceGemm(runtimeProblem, {
+                                                      .backend = backend,
+                                                      .requireRequestedBackend = true,
+                                                      .backendImplementation = backendImplementation,
+                                                  });
+                } else {
+                    referenceGemm(runtimeProblem);
+                }
 
                 if (useStandaloneEpilogue) {
                     EpilogueProblem epilogue(
@@ -1730,6 +1746,17 @@ namespace TensileLite
                 }
             }
             return true;
+        }
+
+        bool tryRuntimeCanonicalGemm(ContractionProblemGemm const& problem,
+                                     ContractionInputs const& inputs, size_t elementsToValidate) {
+            return tryRuntimeGemm(problem, inputs, elementsToValidate, nullptr);
+        }
+
+        bool tryRuntimeTiledGemm(ContractionProblemGemm const& problem,
+                                 ContractionInputs const& inputs, size_t elementsToValidate) {
+            static const roc::host_validation::TiledGemmBackend tiledBackend;
+            return tryRuntimeGemm(problem, inputs, elementsToValidate, &tiledBackend);
         }
 
         bool isFastPathEligible(ContractionProblemGemm const& problem)
@@ -3753,6 +3780,8 @@ namespace TensileLite
             if(tryFastPath && isDenseEnoughForFastPath && isFastPathEligible(problem))
             {
                 ScopedTimer timer("solve_cpu_fast");
+                if(tryRuntimeTiledGemm(problem, inputs, elementsToValidate)) return;
+
                 bool isDouble = (problem.d().dataType() == rocisa::DataType::Double);
                 if(isDouble)
                     solveCPUFast<double>(problem, inputs);

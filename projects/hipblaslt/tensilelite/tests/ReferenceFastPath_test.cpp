@@ -114,6 +114,28 @@ TEST(ReferenceFastPath, AppliesXFloat32OperandMathOpToBothOperands)
     EXPECT_EQ(d[0], expected);
 }
 
+TEST(ReferenceTiledBackend, DelegatesDenseRuntimeGemm)
+{
+    const size_t M = 2;
+    const size_t N = 2;
+    const size_t K = 2;
+
+    auto problem = makePackedProblem(rocisa::DataType::Float,
+                                     rocisa::DataType::Float,
+                                     rocisa::DataType::Float,
+                                     M,
+                                     N,
+                                     K);
+    std::vector<float> a{1, 2, 3, 4};
+    std::vector<float> b{5, 6, 7, 8};
+    std::vector<float> c(M * N, 1);
+    std::vector<float> d(M * N, -99);
+    ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), 2.0f, 3.0f);
+
+    ASSERT_TRUE(tryRuntimeTiledGemm(problem, inputs, /*elementsToValidate=*/-1));
+    EXPECT_EQ(d, (std::vector<float>{49, 71, 65, 95}));
+}
+
 TEST(ReferenceOutputSelection, ComputesPrimeStrideSubset)
 {
     const size_t M = 4;

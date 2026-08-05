@@ -146,6 +146,7 @@ target_link_libraries(tensilelite-host-validation-adapter
     PUBLIC
         roc::host-validation
     PRIVATE
+        roc::host-validation-tiled
         hip::device
         hip::host
         roc::tensilelite-host
