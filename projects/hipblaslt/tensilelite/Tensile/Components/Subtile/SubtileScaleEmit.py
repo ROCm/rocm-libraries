@@ -16,13 +16,14 @@
 ################################################################################
 
 import math
+from ...Common import INDEX_CHARS
 
 from rocisa.code import Module
 from rocisa.container import DSModifiers, MUBUFModifiers, vgpr, sgpr, mgpr
 from rocisa.instruction import (
     BufferLoadB128,
     DSLoadB32,
-    SAddCU32, SAddU32, SLShiftLeftB32, SMovB32, SMulI32, SNop, SXorB32,
+    SAddCU32, SAddU32, SLShiftLeftB32, SLShiftRightB32, SMovB32, SMovB64, SMulI32, SNop, SOrB32, SSubU32, SXorB32,
     VAddU32, VAndB32, VMulLOU32, VReadfirstlaneB32, VXorB32,
     VLShiftLeftB32, VLShiftRightB32,
 )
@@ -196,9 +197,29 @@ def emitScaleLRLoad(ti, writer, kernel):
 # ---------------------------------------------------------------------------
 
 def emitScaleGRPtrUpdate(ti, writer, kernel):
-  """Advance scale SRD base pointer by one depthU iteration."""
+  """Advance scale base pointer by one depthU iteration."""
   module = Module()
   tc = ti.tc
+
+  useTdmForScale = tuple(kernel["ISA"]) == (12, 5, 0)
+
+  if useTdmForScale:
+    # TDM path (gfx1250): advance Address{tc} and sync descriptor for MXSA.
+    mxBlock = kernel["ProblemType"]["MXBlockA"]
+    du = kernel["DepthU"]
+    scaleInc = du // mxBlock  # scale elements per depthU iteration
+    module.addComment0("Scale TDM addr update: %s += %u" % (tc, scaleInc))
+    module.add(SAddU32(dst=sgpr(f"Address{tc}"), src0=sgpr(f"Address{tc}"),
+               src1=scaleInc, comment=f"Address{tc} += {scaleInc}"))
+    module.add(SAddCU32(dst=sgpr(f"Address{tc}+1"), src0=sgpr(f"Address{tc}+1"),
+               src1=0, comment=f"Address{tc}+1 carry"))
+    if tc == "MXSA":
+      group0 = "tdmMXSAGroup0"
+      module.add(SMovB64(dst=sgpr(f"{group0}+2", 2), src=sgpr(f"Address{tc}", 2),
+                 comment="sync TDM descriptor"))
+      module.add(SOrB32(dst=sgpr(f"{group0}+3"), src0=sgpr(f"{group0}+3"),
+                 src1=hex(2 << 30), comment="restore type field"))
+    return module
 
   inc = int(ti.lrSubtileSize * ti.lrGlobalSubtileGrid[1])
   module.addComment0("Scale SRD update: %s += %u" % (tc, inc))
@@ -215,6 +236,15 @@ def emitScaleGRLDSSwap(ti, writer, kernel):
   """Toggle scale GR DTL write target between double-buffer halves."""
   module = Module()
   tc = ti.tc
+
+  useTdmForScale = tuple(kernel["ISA"]) == (12, 5, 0)
+
+  if useTdmForScale:
+    # TDM path (gfx1250): swap LDS offset in TDM descriptor.
+    module.addComment0("Scale TDM LDS swap: %s" % tc)
+    module.add(writer.tdmSwapLdsOffset(kernel, writer.tPA["MX"] if tc[-1] == "A" else writer.tPB["MX"]))
+    return module
+
   module.addComment0("Emit code to swap %s GR m0 offsets"%tc)
   module.add(SXorB32(dst=sgpr(f"LocalWriteBaseAddr{tc}"),
              src0=sgpr(f"LocalWriteBaseAddr{tc}"), src1=sgpr(f"Swap{tc}"),
@@ -422,6 +452,13 @@ def globalReadDoScaleSubtile(tc, writer, kernel):
   if not kernel["ProblemType"].get("MXBlockA", 0) and not kernel["ProblemType"].get("MXBlockB", 0):
     return module
 
+  # gfx1250 does not support buffer_load with lds modifier; use TDM
+  # tensor_load_to_lds instead. gfx950 continues using SRD buffer loads.
+  useTdmForScale = tuple(kernel["ISA"]) == (12, 5, 0)
+
+  if useTdmForScale:
+    return _globalReadDoScaleSubtileTDM(tc, writer, kernel)
+
   tileInfo = writer.states.mxsa.tileInfo if tc == 'MXSA' else writer.states.mxsb.tileInfo
 
   isGlc = bool(kernel["NonTemporal%s"%tc] & 0x1)
@@ -441,6 +478,52 @@ def globalReadDoScaleSubtile(tc, writer, kernel):
   module.add(BufferLoadB128(dst=None, vaddr=vgpr(tileInfo.sharedVgprGROffset[0]),
                             saddr=sgpr("Srd%s" % tc, 4), soffset=0, mubuf=mubuf,
                             comment="scale%s: DTL b128 load" % tc))
+
+  return module
+
+
+def _globalReadDoScaleSubtileTDM(tc, writer, kernel):
+  """Emit MX scale global read via TDM tensor_load_to_lds (gfx1250).
+
+  Uses the tdmMXS{A,B}Group0/1 descriptors (MXSB aliased onto MXSA).
+  The descriptor must be initialised before the first call and advanced
+  by globalReadScalePtrUpdates between iterations.
+  """
+  from ...Components.TensorDataMover import TensorDataMoverLoad
+
+  module = Module()
+  scaleTc = "MXSA" if tc in ("A", "MXSA") else "MXSB"
+  group0 = "tdm%sGroup0" % scaleTc
+  group1 = "tdm%sGroup1" % scaleTc
+
+  comp = TensorDataMoverLoad.find(writer)
+
+  if scaleTc == "MXSB":
+    ldsBaseMXSB = writer.ldsStartOffsetMXSB
+    ldsBaseMXSA = writer.ldsStartOffsetMXSA
+    ldsDelta = ldsBaseMXSB - ldsBaseMXSA
+    module.addComment0("Scale GR: MXSB (TDM: patch aliased descriptor)")
+    module.add(SMovB64(dst=sgpr(f"{group0}+2", 2), src=sgpr("AddressMXSB", 2),
+               comment="set MXSB global addr"))
+    module.add(SOrB32(dst=sgpr(f"{group0}+3"), src0=sgpr(f"{group0}+3"),
+               src1=hex(2 << 30), comment="restore type field"))
+    if ldsDelta != 0:
+      module.add(SAddU32(dst=sgpr(f"{group0}+1"), src0=sgpr(f"{group0}+1"),
+                 src1=ldsDelta, comment=f"LDS addr += {ldsDelta} (MXSA->MXSB)"))
+
+  module.addComment0("Scale GR: %s (TDM: tensor_load_to_lds)" % scaleTc)
+  comp.setMemToken([writer.states.ldsTensorTokenIdx])
+  module.add(comp.issueLoad(group0, group1, None, None))
+
+  if scaleTc == "MXSB":
+    module.addComment0("Restore MXSA descriptor after MXSB load")
+    module.add(SMovB64(dst=sgpr(f"{group0}+2", 2), src=sgpr("AddressMXSA", 2),
+               comment="restore MXSA global addr"))
+    module.add(SOrB32(dst=sgpr(f"{group0}+3"), src0=sgpr(f"{group0}+3"),
+               src1=hex(2 << 30), comment="restore type field"))
+    if ldsDelta != 0:
+      module.add(SSubU32(dst=sgpr(f"{group0}+1"), src0=sgpr(f"{group0}+1"),
+                 src1=ldsDelta, comment=f"LDS addr -= {ldsDelta} (MXSB->MXSA)"))
 
   return module
 
@@ -506,8 +589,110 @@ def globalReadScalePtrUpdates(tc, writer, kernel):
 # For Swizzled Scales each wave will collectively stream
 # the scale values
 #
+def _initTDMDescriptorMXScaleSubtile(writer, kernel, scaleTc):
+  """Init TDM descriptor for one MX scale tensor (subtile gfx1250 layout).
+
+  Sets up tdmMXS{A,B}Group0/1 to load scale data from global memory
+  directly into the LDS region reserved for MX scales. The LDS offset
+  matches what the subtile scale LR reads via ds_load_b32.
+
+  Args:
+    scaleTc: "MXSA" or "MXSB"
+  """
+  from ...Components.TensorDataMover import TensorDataMoverLoad
+  from math import ceil, log2
+
+  comp = TensorDataMoverLoad.find(writer)
+  mod = Module(f"Init TDM Descriptor Subtile {scaleTc}")
+
+  parentTc = scaleTc[-1]  # 'A' or 'B'
+  if not kernel["ProblemType"].get(f"MXBlock{parentTc}", 0):
+    return mod
+
+  group0 = f"tdm{scaleTc}Group0"
+  group1 = f"tdm{scaleTc}Group1"
+
+  tileInfo = writer.states.mxsa.tileInfo if scaleTc == "MXSA" else writer.states.mxsb.tileInfo
+  tP = writer.tPA["MX"] if parentTc == "A" else writer.tPB["MX"]
+  dtype = kernel["ProblemType"][f"DataType{scaleTc}"]  # E8M0
+  ti = tP["idx"]  # 0 for A, 1 for B
+
+  mxBlock = kernel["ProblemType"][f"MXBlock{parentTc}"]
+  mt = kernel[f"MacroTile{ti}"]
+  du = kernel["DepthU"]
+  numWaves = kernel["NumWaves"]
+  wavelen = kernel["WavefrontSize"]
+
+  # Scale dimensions: each scale covers mxBlock data elements along K.
+  # Total scales per tile = (mt * du) / mxBlock, arranged as mt rows x (du/mxBlock) cols.
+  scaleDu = du // mxBlock     # scale columns per depthU
+  scaleBpe = 1                # E8M0 = 1 byte per scale
+
+  # LDS layout: scales start at ldsStartOffsetMXS{A,B}
+  ldsBase = writer.ldsStartOffsetMXSA if scaleTc == "MXSA" else writer.ldsStartOffsetMXSB
+
+  # Each wave loads its share: mt/numWaves rows * scaleDu cols * scaleBpe bytes
+  bytesPerWave = mt // numWaves * scaleDu * scaleBpe
+
+  mod.add(comp.initOperands(group0, group1, None, None))
+  mod.add(comp.setDataType(dtype, group1))
+  mod.add(comp.setGlobalAddr(group0, f"Address{scaleTc}"))
+
+  # LDS offset = waveId * bytesPerWave + ldsBase
+  with writer.allocTmpSgpr(1) as tmpSgprRes:
+    waveOff = tmpSgprRes.idx
+    mod.add(VReadfirstlaneB32(sgpr(waveOff), vgpr("Serial"), "first tId"))
+    mod.add(SLShiftRightB32(sgpr(waveOff), ceil(log2(wavelen)), sgpr(waveOff),
+            "wId = fTid // wavelen"))
+    mod.add(SMulI32(sgpr(waveOff), sgpr(waveOff), bytesPerWave,
+            f"woffset = wId * {bytesPerWave}"))
+    mod.add(SAddU32(sgpr(waveOff), sgpr(waveOff), ldsBase,
+            f"ldsOffset = woffset + {ldsBase}"))
+    mod.add(comp.setLdsAddr(group0, sgpr(waveOff)))
+
+  # Scale TDM descriptor layout for subtile:
+  # The subtile scale LR reads from LDS linearly (laneId * 4 + base).
+  # The TDM descriptor must write data so that bytes land at the same
+  # LDS offsets the LR expects.
+  #
+  # For TN GEMM with InMemorySwizzle: scale data in global memory is
+  # arranged as [free_dim, K/MXBlock] with stride = Stride{scaleTc}{freeChar}.
+  # The TDM treats dim0 as the contiguous (fast) dimension.
+  # Setting dim0 = K/MXBlock, dim1 = free_dim, tile0 = scaleDu, tile1 = perWaveRows
+  # makes TDM write K-contiguous data into LDS, matching the subtile LR layout.
+  sizeRefK = f"Size{INDEX_CHARS[3]}"
+  sizeRefFree = f"Size{INDEX_CHARS[ti]}"
+
+  sizeShifter = int(ceil(log2(mxBlock)))
+  perWaveRows = mt // numWaves
+
+  mod.add(comp.setIterationEnabled(group1, False))
+  mod.add(comp.setPadding(group1, 0, 0))
+
+  mod.add(comp.setTensorDim0(group1, sizeRefK, writer, sizeShifter))
+  mod.add(comp.setTensorDim1(group1, sizeRefFree, writer))
+
+  mod.add(comp.setTensorTile0(group1, scaleDu, writer, 0))
+  mod.add(comp.setTensorTile1(group1, perWaveRows, writer))
+
+  # Stride: the pre-scaled stride has been multiplied by MXBlock.
+  # Right-shift by log2(MXBlock) to get the actual byte stride.
+  mod.add(comp.setTensorStride0(group1, writer.strideRef(scaleTc, ti), sizeShifter))
+
+  return mod
+
+
+
 def globalReadScaleSwizzledDTLInitCommonSgpr(writer, kernel):
   module = Module()
+
+  useTdmForScale = tuple(kernel["ISA"]) == (12, 5, 0)
+
+  if useTdmForScale:
+    # gfx1250: init TDM descriptors for MX scales using subtile LDS layout.
+    module.addComment0("Init TDM descriptor for MX scales (gfx1250 subtile, MXSA only)")
+    module.add(_initTDMDescriptorMXScaleSubtile(writer, kernel, "MXSA"))
+    return module
 
   wavesize = kernel["WavefrontSize"]
   vgprWaveId = writer.vgprPool.checkOut(1, tag="globalReadScaleSwizzledDTLInitCommonSgpr_vgprWaveId")

@@ -1029,7 +1029,10 @@ class Solution(collections.abc.Mapping):
         elif dtype.is8bitFloat():
           state[f"_ABTilePair{tc}"] = "AB_B8"
         elif dtype.is6bitFloat() or dtype.isFloat4():
-          state[f"_ABTilePair{tc}"] = "AB_B4"
+          if state["WavefrontSize"] == 32:
+            state[f"_ABTilePair{tc}"] = "AB_B4_W32"
+          else:
+            state[f"_ABTilePair{tc}"] = "AB_B4"
         else:
           reject(state, printRejectionReason, f"No subtile geometry for dtype {dtype}")
           return

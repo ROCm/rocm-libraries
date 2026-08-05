@@ -5081,7 +5081,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module.add(globalReadDTLInitCommonSgpr(self, kernel))
 
     if mxsatileInfo != None and mxsbtileInfo != None:
-      if not (kernel["enableTDMA"] and kernel["enableTDMB"]):
+      # Non-TDM or subtile gfx1250 (which uses TDM for scale loads but
+      # still needs explicit descriptor init):
+      _needScaleInit = not (kernel["enableTDMA"] and kernel["enableTDMB"]) \
+                         or (kernel.get("UseSubtileImpl") and tuple(kernel["ISA"]) == (12, 5, 0))
+      if _needScaleInit:
         module.add(globalReadScaleSwizzledDTLInitCommonSgpr(self, kernel))
 
     # TODOBS: globalWriteWorkGroupInit can be emitted here or later on, check..
@@ -9701,15 +9705,17 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if not (kernel["enableTDMA"] and kernel["enableTDMB"]):
         requiredUnalignedSgprVar.append("LocalWriteBaseAddrA")
         requiredUnalignedSgprVar.append("LocalWriteBaseAddrB")
-        if kernel["ProblemType"]["MXBlockA"]:
-          requiredUnalignedSgprVar.append("LocalWriteBaseAddrMXSA")
-        if kernel["ProblemType"]["MXBlockB"]:
-          requiredUnalignedSgprVar.append("LocalWriteBaseAddrMXSB")
         requiredUnalignedSgprVar.append("SwapA")
         requiredUnalignedSgprVar.append("SwapB")
+      # Subtile MX scales: gfx950 uses SRD buffer loads (needs LocalWriteBaseAddr/Swap
+      # SGPRs), gfx1250 uses TDM tensor_load_to_lds (handled by tdmMXSA/BGroup).
+      _subtileScaleUseSrd = tuple(kernel["ISA"]) != (12, 5, 0)
+      if _subtileScaleUseSrd:
         if kernel["ProblemType"]["MXBlockA"]:
+          requiredUnalignedSgprVar.append("LocalWriteBaseAddrMXSA")
           requiredUnalignedSgprVar.append("SwapMXSA")
         if kernel["ProblemType"]["MXBlockB"]:
+          requiredUnalignedSgprVar.append("LocalWriteBaseAddrMXSB")
           requiredUnalignedSgprVar.append("SwapMXSB")
       if kernel["ProblemType"]["Sparse"] and kernel["LocalWriteUseSgprMetadata"]:
         requiredUnalignedSgprVar.append("SwapMetadata")

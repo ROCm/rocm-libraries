@@ -297,6 +297,13 @@ AB_B4 = ABTilePair(
     gr=ABGRGeometry(tag=GRTag_1x2(), **_B4, subtileShape=(1, 2), loadShape=LoadShape(m=1, k=32)),   # 128-bit GR: 32 fp4 along K
     lr=ABLRGeometry(tag=LRTag_1x2(), **_B4, subtileShape=(1, 2), loadShape=LoadShape(m=1, k=32)), # 128-bit LR: 32 fp4 along K
 )
+
+# Wave32 fp4: 8 VGPRs per operand (WMMA V3 gfx1250)
+_B4_W32 = dict(mmaLayout=MMALayout(instM=16, blocks=1, vgprs=8, waveSize=32), instK=128, bpe=0.5, supportedTypes=('fp4',))
+AB_B4_W32 = ABTilePair(
+    gr=ABGRGeometry(tag=GRTag_1x2(), **_B4_W32, subtileShape=(1, 2), loadShape=LoadShape(m=1, k=32)),
+    lr=ABLRGeometry(tag=LRTag_1x2(), **_B4_W32, subtileShape=(1, 2), loadShape=LoadShape(m=1, k=32)),
+)
 AB_B8 = ABTilePair(
     gr=ABGRGeometry(tag=GRTag_1x1(), **_B8, subtileShape=(1, 1), loadShape=LoadShape(m=1, k=16)),  # 128-bit GR: 16 fp8 along K
     lr=ABLRGeometry(tag=LRTag_1x1(), **_B8, subtileShape=(1, 1), loadShape=LoadShape(m=1, k=16)), # 128-bit LR: 16 fp8 along K
@@ -357,6 +364,7 @@ AB_GEOMETRY_MAP = {
   "AB_B16_TLU1": AB_B16_TLU1,
   "AB_B16_TLU1_16x1": AB_B16_TLU1_16x1,
   "AB_B16_W32":  AB_B16_W32,
+  "AB_B4_W32":   AB_B4_W32,
 }
 
 def selectABGeometry(kernel: dict, tc: str) -> ABTilePair:
