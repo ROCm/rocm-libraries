@@ -70,12 +70,12 @@ These tests do not require a GPU. They prove IR builds, LLVM text shape, and hel
 
 `tools/mdlinklint` catches navigation drift caused by moved files, directories,
 or headings. The code-level tests above do not traverse Markdown links, while
-this static check needs no Python, ROCm, or GPU environment. From `platform`,
-run:
+this static check needs only the Python standard library; it does not require
+ROCm or a GPU environment. From `platform`, run:
 
 ```bash
-go run tools/mdlinklint/main.go --root dsl_docs --link-root ..
-go test tools/mdlinklint/main.go tools/mdlinklint/main_test.go
+python tools/mdlinklint/main.py --root dsl_docs --link-root ..
+python tools/mdlinklint/test_main.py
 ```
 
 It emits deterministic `file:line:column: error: ...` diagnostics and exits
