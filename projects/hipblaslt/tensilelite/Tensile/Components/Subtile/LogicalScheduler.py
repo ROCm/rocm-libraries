@@ -3648,20 +3648,25 @@ class LogicalScheduler:
         # B': the FUSED arm is provably no-tail (the front guard / computePostLoopFusedStore
         # ANDs in SizesSum % DepthU == 0), so once its store completes the wave has no tail
         # loop and no other mainloop exit path left to run -- it only needs to reach the
-        # shared SkipToEnd join. When the caller hands us that join label (fusedExitLabel),
+        # shared post-loop join. When the caller hands us that join label (fusedExitLabel),
         # branch the FUSED arm STRAIGHT there in a single 32-bit long branch, merging what
         # used to be two long-branch trampolines: this "skip PLAIN NLL" branch AND the
         # "skip other exit paths" branch emitted by emitMainAndExitLoops. It also bypasses
         # the tail-only PGR2 LW-parity re-align (a no-op for a no-tail wave). doneLabel is
         # kept as the PLAIN arm's fall-through join (it just no longer has an incoming
         # branch from the FUSED arm). Persistence is preserved: the fused arm still lands
-        # at SkipToEnd -> post-loop dedup -> closePersistentLoop back-edge, unchanged.
+        # at the join -> closePersistentLoop back-edge, unchanged.
+        # Phase 3: the caller (emitMainAndExitLoops) chooses fusedExitLabel = SkipToEnd
+        # (endSummation runs, then the dedup guard skips the redundant store) OR, when
+        # _plsinCanBypassEndSummation, SkipPostLoopStore -- branching the fused owner past
+        # endSummation and the dedup guard entirely (all skipped work is comptime or dead
+        # for a fused owner; see _plsinCanBypassEndSummation).
         # Fallback (fusedExitLabel is None): original skip-PLAIN-to-doneLabel branch, so
         # every non-plsin / legacy caller stays byte-identical.
         from rocisa.instruction import SLongBranchPositive
         if fusedExitLabel is not None:
             fusedBranchTarget = fusedExitLabel
-            fusedBranchComment = "PostLoopStoreInNll: FUSED done, skip PLAIN NLL + exit paths -> SkipToEnd (long)"
+            fusedBranchComment = "PostLoopStoreInNll: FUSED done, skip PLAIN NLL + exit paths -> %s (long)" % fusedExitLabel.getLabelName()
         else:
             fusedBranchTarget = doneLabel
             fusedBranchComment = "PostLoopStoreInNll: FUSED done, skip PLAIN NLL (long)"
@@ -4014,6 +4019,20 @@ class LogicalScheduler:
 
         # ── Skip preloop/mainloop/NGLL/NLL when K < DepthU ──
         endLabel = Label("SkipToEnd", "")
+
+        # PostLoopStoreInNll Phase 3: pick the FUSED arm's exit target. A fused
+        # full-tile owner has already stored D and (when the bypass is safe) needs
+        # none of endSummation's runtime work, so branch it STRAIGHT to the post-loop
+        # store's SkipPostLoopStore join -- past endSummation AND the redundant dedup
+        # guard. Matched by label name (getLabelName is name-derived); KernelWriter
+        # emits the sole SkipPostLoopStore label after the post-loop store body. When
+        # the bypass is unsafe (bias-gradient write / SuppressNoLoadLoop wait / GSU
+        # AddressTD-Synchronizer loads) fall back to SkipToEnd so endSummation still
+        # runs and the dedup guard skips only the redundant store. Non-plsin callers
+        # pass None (byte-identical).
+        plsinFusedExitLabel = endLabel
+        if plsin and writer._plsinCanBypassEndSummation(kernel):
+            plsinFusedExitLabel = Label("SkipPostLoopStore", "")
         if not kernel["NoTailLoop"]:
             module.add(SCmpEQU32(src0=sgpr("LoopCounterL"), src1=0,
                                  comment="K < DepthU? skip to tail loop"))
@@ -4126,7 +4145,7 @@ class LogicalScheduler:
         module.addComment0(f"NLL_C{last}")
         module.add(self._emitNllMaybeFused(writer, kernel, f"NLL_C{last}",
                                   inject_pap_after_nll_drain(self._nll_per_unroll[nll_ft]),
-                                  fusedExitLabel=(endLabel if plsin else None)))
+                                  fusedExitLabel=(plsinFusedExitLabel if plsin else None)))
         module.add(self._emit_pgr2_tail_lw_align(kernel))
         if plsin:
             with writer.allocTmpSgpr(3, tag="nllLastExit_longBranch") as tmpSgprInfo:
@@ -4148,7 +4167,7 @@ class LogicalScheduler:
             module.addComment0(f"NLL_C{ui}")
             module.add(self._emitNllMaybeFused(writer, kernel, f"NLL_C{ui}",
                                       inject_pap_after_nll_drain(self._nll_per_unroll[nll_idx]),
-                                      fusedExitLabel=(endLabel if plsin else None)))
+                                      fusedExitLabel=(plsinFusedExitLabel if plsin else None)))
             module.add(self._emit_pgr2_tail_lw_align(kernel))
             if ui < uf - 2:
                 if plsin:
