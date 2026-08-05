@@ -365,7 +365,12 @@ class FmhaFwdApiTrait:
                 return "a.hdim_q % 8 == 0"
             else:
                 assert False
-        elif self.pipeline_tag in ["qr", "qs", "qr_async", "qr_async_trload", "qr_async_trload_v3", "qr_tdm"]:
+        elif self.pipeline_tag == "qr_tdm":
+            if self.dpad == "t":
+                return "a.hdim_q % 8 == 0"
+            else:
+                return f"a.hdim_q % {K0_MAX_SUBMAX_MAP[self.bk0max]} == 0"
+        elif self.pipeline_tag in ["qr", "qs", "qr_async", "qr_async_trload", "qr_async_trload_v3"]:
             bk0submax = K0_MAX_SUBMAX_MAP[self.bk0max]
             if self.dpad == "t":
                 return f"true /*a.hdim_q % {bk0submax} != 0*/"  # TODO: order of get_pipelines() matters! (ugly)
@@ -381,7 +386,12 @@ class FmhaFwdApiTrait:
                 return "a.hdim_v % 8 == 0"
             else:
                 assert False
-        elif self.pipeline_tag in ["qr", "qs", "qr_async", "qr_async_trload", "qr_async_trload_v3", "qr_tdm"]:
+        elif self.pipeline_tag == "qr_tdm":
+            if self.dvpad == "t":
+                return "a.hdim_v % 8 == 0"
+            else:
+                return f"a.hdim_v % {K0_MAX_SUBMAX_MAP[self.bk0max]} == 0"
+        elif self.pipeline_tag in ["qr", "qs", "qr_async", "qr_async_trload", "qr_async_trload_v3"]:
             bk0submax = K0_MAX_SUBMAX_MAP[self.bk0max]
             if self.dvpad == "t":
                 return f"true /*a.hdim_v % {bk0submax} != 0*/"  # TODO: order of get_pipelines() matters! (ugly)
@@ -1394,6 +1404,7 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 ):
                     pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "f", "f", "f", "f", logits, bias, lse, "f", qscale, mask, "f", "f", sink))  # fmt: skip
                     pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "f", "f", "t", "t", logits, bias, lse, "f", qscale, mask, "f", "f", sink))  # fmt: skip
+                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "t", "t", "f", "f", logits, bias, lse, "f", qscale, mask, "f", "f", sink))  # fmt: skip
                     pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "t", "t", "t", "t", logits, bias, lse, "f", qscale, mask, "f", "f", sink))  # fmt: skip
 
             # qr: generic pipeline fallback for trait combos not covered by
