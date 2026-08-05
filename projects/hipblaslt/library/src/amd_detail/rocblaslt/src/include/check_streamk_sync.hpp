@@ -4,6 +4,14 @@
 /*! \file
  * \brief Post-launch dirty-buffer check for the StreamK Synchronizer buffer.
  *        Enabled by HIPBLASLT_CHECK_STREAMK_SYNC env var (read once in handle ctor).
+ *
+ *        Covers rocblaslt_matmul_impl only; the ext and user-argument launch
+ *        paths share the same buffer but are not scanned, so residue they leave
+ *        is reported against the next scanned matmul.
+ *
+ *        Single-threaded, non-capturing debugging only: the scan synchronizes
+ *        the stream and zeroes a handle-wide buffer, which would disrupt a
+ *        concurrent kernel on another stream and is illegal during graph capture.
  */
 
 #pragma once
@@ -49,10 +57,9 @@ inline void hipblaslt_check_streamk_sync_scan(rocblaslt_handle handle,
     // a nonzero word is found.
     const uint64_t* w     = reinterpret_cast<const uint64_t*>(host.data());
     bool            dirty = false;
+    static_assert(count % 2 == 0, "int count must pair evenly into 64-bit words");
     for(size_t i = 0; i < count / 2 && !dirty; ++i)
         dirty = (w[i] != 0);
-    if(!dirty && (count % 2) != 0)
-        dirty = (host[count - 1] != 0);
 
     if(!dirty)
         return;

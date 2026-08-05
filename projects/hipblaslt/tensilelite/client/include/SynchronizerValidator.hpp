@@ -7,7 +7,8 @@
  * StreamK kernels share one Synchronizer allocation across launches and must
  * leave it at zero on exit so the next launch starts clean. Residue is silent
  * -- it corrupts a later launch, not the one that left it -- so this listener
- * reads the buffer back and fails the run on any nonzero byte.
+ * reads the buffer back, re-zeroes it, and fails the run on any nonzero byte.
+ * It also fails when the buffer is declared too narrow to scan in full.
  *
  * Enabled by --check-streamk-sync (GlobalParameters CheckStreamKSync).
  */
@@ -89,9 +90,9 @@ namespace TensileLite
                                       hipStream_t const&  stream) override
             {
             }
-            // The warmup-0 check is the whole check: one launch on a zeroed
-            // buffer is exactly the per-launch self-clean invariant, and the
-            // timed enqueues add cost without adding coverage.
+            // Deliberately unchecked. Back-to-back launches are where work-queue
+            // races surface, but the readback synchronizes the stream, so checking
+            // here would perturb the very cadence the enqueues exercise.
             virtual void validateEnqueues(std::shared_ptr<ProblemInputs> inputs,
                                           TimingEvents const&            startEvents,
                                           TimingEvents const&            stopEvents) override
