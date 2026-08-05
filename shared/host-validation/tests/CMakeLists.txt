@@ -30,3 +30,11 @@ add_test(
         "-DCORE_HEADER=${CMAKE_CURRENT_SOURCE_DIR}/../include/roc/host_validation/tensor.hpp"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/check_core_boundary.cmake"
 )
+
+add_test(
+    NAME host-validation-component-boundary
+    COMMAND
+        "${CMAKE_COMMAND}"
+        -DHOST_VALIDATION_SOURCE_DIR=${PROJECT_SOURCE_DIR}
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/check_component_boundary.cmake"
+)
