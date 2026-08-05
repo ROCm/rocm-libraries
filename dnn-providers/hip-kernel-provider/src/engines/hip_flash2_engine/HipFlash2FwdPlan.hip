@@ -119,8 +119,11 @@ extern "C" __global__
                     load_matrix_sync(kf, &sK[d16 * 16][kg * 16], 64);
                     mma_sync(sf[qg][kg], q_frags[qg][d16], kf, sf[qg][kg]);
                 }
-        // Defect A fix: per-group softmax state (row_m[4], row_d[4])
-        // Each group qg tracks its own running max and normalizer independently.
+        // K1 fix (Samuel Reeder 2026-08-04):
+        // Fragment layout: lane l holds S[row=l%16][col=(l/16)*4+e].
+        // my_qrow=lane%16 = row-within-group; my_cg=lane/16 = column-group.
+        // Row-max for row r: reduce across lanes sharing l%16==r, i.e. offsets 16 and 32.
+        // Every lane contributes to nm[qg] (no my_cg gate).
         float nm[4], ms[4][4][4];
         for(int qg = 0; qg < 4; qg++)
             nm[qg] = row_m[qg];
@@ -134,15 +137,17 @@ extern "C" __global__
                     if(ki0 + kg * 16 + my_cg * 4 + e >= seq_len_kv)
                         s = -1e38f;
                     ms[qg][kg][e] = s;
-                    // Only update group qg's max from lanes that own group qg rows
-                    if(qg == my_cg)
-                        nm[qg] = fmaxf(nm[qg], s);
+                    // All lanes update nm[qg] -- no column-group gate
+                    nm[qg] = fmaxf(nm[qg], s);
                 }
-        // Reduce nm[qg] within the 16-lane group (offsets 1,2,4,8 stay in-group)
+        // Reduce nm[qg] across the 4 column-groups sharing the same row:
+        // offsets 16 and 32 swap between column-groups (not within them)
         for(int qg = 0; qg < 4; qg++)
-            for(int off = 1; off < 16; off <<= 1)
-                nm[qg] = fmaxf(nm[qg], __shfl_xor(nm[qg], off));
-        // Per-group rescale of output accumulators and denominator
+        {
+            nm[qg] = fmaxf(nm[qg], __shfl_xor(nm[qg], 16));
+            nm[qg] = fmaxf(nm[qg], __shfl_xor(nm[qg], 32));
+        }
+        // Per-group rescale
         for(int qg = 0; qg < 4; qg++)
         {
             const float br = flash2_expf(row_m[qg] - nm[qg]);
@@ -161,10 +166,16 @@ extern "C" __global__
                 {
                     float pv = flash2_expf(ms[qg][kg][e] - row_m[qg]);
                     pf[qg][kg].x[e] = (_Float16)pv;
-                    if(qg == my_cg)
-                        row_d[qg] += pv;
+                    // All lanes update row_d[qg] -- no column-group gate
+                    row_d[qg] += pv;
                 }
             }
+        // Reduce row_d[qg] across column-groups (same axis as nm)
+        for(int qg = 0; qg < 4; qg++)
+        {
+            row_d[qg] += __shfl_xor(row_d[qg], 16);
+            row_d[qg] += __shfl_xor(row_d[qg], 32);
+        }
         for(int kg = 0; kg < 4; kg++)
             for(int d16 = 0; d16 < D16; d16++)
             {
@@ -301,8 +312,11 @@ extern "C" __global__
                     load_matrix_sync(kf, &sK[d16 * 16][kg * 16], 64);
                     mma_sync(sf[qg][kg], q_frags[qg][d16], kf, sf[qg][kg]);
                 }
-        // Defect A fix: per-group softmax state (row_m[4], row_d[4])
-        // Each group qg tracks its own running max and normalizer independently.
+        // K1 fix (Samuel Reeder 2026-08-04):
+        // Fragment layout: lane l holds S[row=l%16][col=(l/16)*4+e].
+        // my_qrow=lane%16 = row-within-group; my_cg=lane/16 = column-group.
+        // Row-max for row r: reduce across lanes sharing l%16==r, i.e. offsets 16 and 32.
+        // Every lane contributes to nm[qg] (no my_cg gate).
         float nm[4], ms[4][4][4];
         for(int qg = 0; qg < 4; qg++)
             nm[qg] = row_m[qg];
@@ -316,15 +330,17 @@ extern "C" __global__
                     if(ki0 + kg * 16 + my_cg * 4 + e >= seq_len_kv)
                         s = -1e38f;
                     ms[qg][kg][e] = s;
-                    // Only update group qg's max from lanes that own group qg rows
-                    if(qg == my_cg)
-                        nm[qg] = fmaxf(nm[qg], s);
+                    // All lanes update nm[qg] -- no column-group gate
+                    nm[qg] = fmaxf(nm[qg], s);
                 }
-        // Reduce nm[qg] within the 16-lane group (offsets 1,2,4,8 stay in-group)
+        // Reduce nm[qg] across the 4 column-groups sharing the same row:
+        // offsets 16 and 32 swap between column-groups (not within them)
         for(int qg = 0; qg < 4; qg++)
-            for(int off = 1; off < 16; off <<= 1)
-                nm[qg] = fmaxf(nm[qg], __shfl_xor(nm[qg], off));
-        // Per-group rescale of output accumulators and denominator
+        {
+            nm[qg] = fmaxf(nm[qg], __shfl_xor(nm[qg], 16));
+            nm[qg] = fmaxf(nm[qg], __shfl_xor(nm[qg], 32));
+        }
+        // Per-group rescale
         for(int qg = 0; qg < 4; qg++)
         {
             const float br = flash2_expf(row_m[qg] - nm[qg]);
@@ -343,10 +359,16 @@ extern "C" __global__
                 {
                     float pv = flash2_expf(ms[qg][kg][e] - row_m[qg]);
                     pf[qg][kg].x[e] = (_Float16)pv;
-                    if(qg == my_cg)
-                        row_d[qg] += pv;
+                    // All lanes update row_d[qg] -- no column-group gate
+                    row_d[qg] += pv;
                 }
             }
+        // Reduce row_d[qg] across column-groups (same axis as nm)
+        for(int qg = 0; qg < 4; qg++)
+        {
+            row_d[qg] += __shfl_xor(row_d[qg], 16);
+            row_d[qg] += __shfl_xor(row_d[qg], 32);
+        }
         for(int kg = 0; kg < 4; kg++)
             for(int d16 = 0; d16 < D16; d16++)
             {
