@@ -91,6 +91,26 @@ class TheRockMatrixTest(unittest.TestCase):
             options.extend(job["cmake_options"].split(" "))
         return options
 
+    @staticmethod
+    def _job_options(project_to_run, project_to_test):
+        """Options of the one job that tests `project_to_test`.
+
+        Jobs carry no project name, so they are identified by what they test.
+        Unlike `_all_options`, this keeps jobs apart, which is what lets a test
+        assert which job an option landed on rather than only that it landed on
+        some job.
+        """
+        jobs = [
+            job
+            for job in project_to_run
+            if project_to_test in job["projects_to_test"].split(",")
+        ]
+        if len(jobs) != 1:
+            raise AssertionError(
+                f"expected exactly one job testing {project_to_test}, got {len(jobs)}"
+            )
+        return jobs[0]["cmake_options"].split(" ")
+
     def _run_gated(self, project, subtrees, labels=("ci:test-flag",)):
         with mock.patch.dict(
             therock_matrix.LABEL_GATED_CMAKE_OPTIONS,
@@ -117,6 +137,21 @@ class TheRockMatrixTest(unittest.TestCase):
         project_to_run = self._run_gated("hipdnn", ["projects/hipthreads"])
         self.assertEqual(len(project_to_run), 1)
         self.assertNotIn("-DTHEROCK_FLAG_TEST=ON", self._all_options(project_to_run))
+
+    def test_label_gated_option_lands_only_on_the_targeted_job(self):
+        # The central promise of the mechanism: a label changes the build of the
+        # project it names and nothing else. prim and fft neither merge nor absorb
+        # each other, so they produce two jobs and only prim's may carry the flag.
+        project_to_run = self._run_gated(
+            "prim", ["projects/rocprim", "projects/rocfft"]
+        )
+        self.assertEqual(len(project_to_run), 2)
+        self.assertIn(
+            "-DTHEROCK_FLAG_TEST=ON", self._job_options(project_to_run, "rocprim")
+        )
+        self.assertNotIn(
+            "-DTHEROCK_FLAG_TEST=ON", self._job_options(project_to_run, "rocfft")
+        )
 
     def test_label_gated_options_injected_for_additional_options_project(self):
         # hipdnn is an optional component: it lives in additional_options and is
@@ -244,16 +279,22 @@ class TheRockMatrixTest(unittest.TestCase):
                 {"ci:test-flag": {"cmake_options": ["-DTHEROCK_FLAG_TEST=ON"]}}
             )
 
-    def test_validate_label_gated_cmake_options_rejects_string_options(self):
-        with self.assertRaisesRegex(ValueError, "must be a list"):
-            therock_matrix.validate_label_gated_cmake_options(
-                {
-                    "ci:test-flag": {
-                        "project": "miopen",
-                        "cmake_options": "-DTHEROCK_FLAG_TEST=ON",
-                    }
-                }
-            )
+    def test_validate_label_gated_cmake_options_rejects_non_list_options(self):
+        # A string or dict is iterable, so it is consumed without error and yields
+        # a build made of characters or keys; a scalar fails obscurely mid-run.
+        # All of them have to be rejected here.
+        bad_values = (
+            "-DTHEROCK_FLAG_TEST=ON",
+            {"-DTHEROCK_FLAG_TEST=ON": "on"},
+            7,
+            None,
+        )
+        for value in bad_values:
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, "must be a list"):
+                    therock_matrix.validate_label_gated_cmake_options(
+                        {"ci:test-flag": {"project": "miopen", "cmake_options": value}}
+                    )
 
 
 if __name__ == "__main__":

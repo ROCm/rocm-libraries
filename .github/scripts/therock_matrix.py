@@ -238,10 +238,13 @@ def validate_label_gated_cmake_options(gated_options=None):
                 f"LABEL_GATED_CMAKE_OPTIONS['{label}'] targets unknown project "
                 f"'{gated['project']}'. Valid projects: {sorted(valid_projects)}"
             )
-        if isinstance(gated["cmake_options"], str):
+        if not isinstance(gated["cmake_options"], list):
+            # Anything other than a list either blows up mid-run or, for a string
+            # or dict, is silently consumed as a sequence of characters or keys and
+            # produces a different build than the one that was asked for.
             raise ValueError(
                 f"LABEL_GATED_CMAKE_OPTIONS['{label}']['cmake_options'] must be a "
-                "list of options, not a string"
+                f"list of options, not {type(gated['cmake_options']).__name__}"
             )
 
 
