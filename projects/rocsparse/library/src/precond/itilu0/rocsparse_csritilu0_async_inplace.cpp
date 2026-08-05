@@ -75,7 +75,10 @@ namespace rocsparse
     ROCSPARSE_DEVICE_ILF void device_calculate(const J i,
                                                const J j,
                                                const T* __restrict__ x_,
-                                               T* __restrict__ y_,
+                                               // NOTE: y_ and ilu0_ intentionally alias (y_ == ilu0_ + k)
+                                               // for the in-place iteration, so neither may be marked
+                                               // __restrict__.
+                                               T* y_,
 
                                                const I* __restrict__ lptr_begin_,
                                                const I* __restrict__ lptr_end_,
@@ -86,7 +89,7 @@ namespace rocsparse
                                                const J* __restrict__ uind_,
                                                const I* __restrict__ uperm_,
                                                const rocsparse_index_base base_,
-                                               const T* __restrict__ ilu0_,
+                                               const T* ilu0_,
                                                floating_data_t<T>* __restrict__ nrm_)
     {
         T val = *x_;
@@ -183,7 +186,7 @@ namespace rocsparse
                           const I* __restrict__ uptr_end_,
                           const J* __restrict__ uind_,
                           const I* __restrict__ uperm_,
-                          T* __restrict__ ilu0_,
+                          T* ilu0_,
                           floating_data_t<T>*       nrm_,
                           const floating_data_t<T>* nrm0_)
     {
@@ -346,7 +349,7 @@ namespace rocsparse
                               const I* __restrict__ uptr_end_,
                               const J* __restrict__ uind_,
                               const I* __restrict__ uperm_,
-                              T* __restrict__ ilu0_,
+                              T* ilu0_,
                               floating_data_t<T>*       nrm_,
                               const floating_data_t<T>* nrm0_)
     {
@@ -459,7 +462,7 @@ namespace rocsparse
                                           const I* __restrict__ uptr_end_,
                                           const J* __restrict__ uind_,
                                           const I* __restrict__ uperm_,
-                                          T* __restrict__ ilu0_)
+                                          T* ilu0_)
         {
             hipStream_t stream         = handle_->stream;
             const bool  use_coo_format = (options_ & rocsparse_itilu0_option_coo_format) > 0;
@@ -552,7 +555,7 @@ namespace rocsparse
                                     const J* __restrict__ uind_,
                                     const I* __restrict__ uperm_,
 
-                                    T* __restrict__ ilu0_,
+                                    T* ilu0_,
                                     size_t buffer_size_,
                                     void* __restrict__ buffer_)
         {
