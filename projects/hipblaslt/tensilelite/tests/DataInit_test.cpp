@@ -34,6 +34,8 @@ using TensileLite::DataTypeInfo;
 using TensileLite::TensorDescriptor;
 using TensileLite::Client::isMXProblem;
 using TensileLite::Client::isMXTensor;
+using TensileLite::Client::InitMode;
+using TensileLite::Client::tryHostValidationInitialize;
 
 // Shorthand for the production helper namespace under test (MX builds only).
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
@@ -78,6 +80,56 @@ namespace
         return problem;
     }
 } // namespace
+
+TEST(HostValidationDataInitialization, GeneratesStridedProblemDependentPatterns)
+{
+    TensorDescriptor descriptor("t", rocisa::DataType::Float, {2, 3}, {1, 4});
+    std::vector<float> values(descriptor.totalAllocatedElements(), -99.0f);
+
+    ASSERT_TRUE(tryHostValidationInitialize(
+        rocisa::DataType::Float, InitMode::SerialIdx, values.data(), descriptor));
+    EXPECT_EQ(values[0], 0);
+    EXPECT_EQ(values[1], 1);
+    EXPECT_EQ(values[4], 2);
+    EXPECT_EQ(values[5], 3);
+    EXPECT_EQ(values[8], 4);
+    EXPECT_EQ(values[9], 5);
+    EXPECT_EQ(values[2], -99);
+    EXPECT_EQ(values[3], -99);
+
+    TensorDescriptor identityDescriptor("identity", rocisa::DataType::Float, {3, 4}, {1, 3});
+    std::vector<float> identity(identityDescriptor.totalAllocatedElements(), -1.0f);
+    ASSERT_TRUE(tryHostValidationInitialize(
+        rocisa::DataType::Float, InitMode::Identity, identity.data(), identityDescriptor));
+    for(size_t column = 0; column < 4; ++column)
+        for(size_t row = 0; row < 3; ++row)
+            EXPECT_EQ(identity[row + column * 3], row == column ? 1.0f : 0.0f);
+}
+
+TEST(HostValidationDataInitialization, LeavesUnsupportedLegacyModesToFallback)
+{
+    std::array<float, 4> values{-1, -1, -1, -1};
+    EXPECT_FALSE(tryHostValidationInitialize(
+        rocisa::DataType::Float, InitMode::RandomNarrow, values.data(), values.size()));
+    EXPECT_EQ(values, (std::array<float, 4>{-1, -1, -1, -1}));
+
+    ASSERT_TRUE(tryHostValidationInitialize(
+        rocisa::DataType::Float, InitMode::Two, values.data(), values.size()));
+    EXPECT_EQ(values, (std::array<float, 4>{2, 2, 2, 2}));
+
+    std::array<float, 4> randomFirst{};
+    std::array<float, 4> randomSecond{};
+    ASSERT_TRUE(tryHostValidationInitialize(
+        rocisa::DataType::Float, InitMode::Random, randomFirst.data(), randomFirst.size()));
+    ASSERT_TRUE(tryHostValidationInitialize(
+        rocisa::DataType::Float, InitMode::Random, randomSecond.data(), randomSecond.size()));
+    EXPECT_NE(randomFirst, randomSecond);
+    for(float value : randomFirst)
+    {
+        EXPECT_GE(value, -100);
+        EXPECT_LE(value, 100);
+    }
+}
 
 // =============================================================================
 //   Section 1 - TensileLite::Client::isMXTensor

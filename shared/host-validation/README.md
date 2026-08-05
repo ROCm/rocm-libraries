@@ -121,6 +121,33 @@ Everything else currently exposed through `validation.hpp` is transitional
 and may be renamed or replaced as the operation and runtime scalar-type APIs
 mature.
 
+## Deterministic tensor generation
+
+`GenerationOptions` describes an index-to-value recipe independently of
+storage type, product enums, and traversal parallelism:
+
+```cpp
+GenerationOptions options;
+options.seed = 17;
+options.indexOrder = LogicalIndexOrder::FirstDimensionFastest;
+options.real.pattern = GenerationPattern::Sine;
+options.imaginary.pattern = GenerationPattern::Cosine;
+
+GenerationRunInfo run = generate(outputView, options);
+```
+
+The current patterns cover constants, uniform integer/real values, normal
+values, sine/cosine and absolute variants, serial logical indices, one
+selected dimension, identity tensors, and checkerboard integers. Real and
+imaginary components have independent recipes and random streams. Random
+values are counter-based, so a tensor element depends only on the seed,
+stream, and logical index—not loop order or thread count.
+
+hipBLASLt and TensileLite keep private enum/type adapters. Common host
+initialization modes now translate to this API; unsupported legacy raw-bit,
+sentinel, and packed-format recipes remain bounded fallbacks while they are
+modeled explicitly.
+
 ## Runtime reference GEMM
 
 The canonical reference-GEMM API is tensor-centric and runtime-typed:
@@ -247,6 +274,7 @@ The `roc_host_validation` package currently provides:
 - tensor construction from logical values or exact storage bytes;
 - `from_numpy` and `to_numpy` copying conversions;
 - deterministic tensor generation and structured comparison;
+- `GenerationOptions`, `GenerationPatternSpec`, and `generate_tensor`;
 - `reference_gemm` with runtime storage/output/accumulator types, alpha/beta,
   compute-input quantization, math mode, and activation;
 - `reference_epilogue` with bias, forward/gradient activation, E, scale-D/E,
@@ -261,7 +289,8 @@ The NumPy suite independently checks:
 - finite low-precision round trips;
 - the OCP E8M0 no-zero contract;
 - affine layout decoding;
-- deterministic generation and structured comparison;
+- deterministic generation, logical index ordering, complex component
+  recipes, and structured comparison;
 - F32, F64, and complex GEMM against NumPy;
 - mixed FP8-storage/FP4-compute-input quantization;
 - selected-output GEMM and prime-stride selection;

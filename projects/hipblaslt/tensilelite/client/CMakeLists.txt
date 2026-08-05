@@ -133,6 +133,7 @@ if(HIPBLASLT_CXX_HAS_MF16C)
 endif()
 
 add_library(tensilelite-host-validation-adapter STATIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/host_validation/DataInitialization.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/host_validation/Reference.cpp"
 )
 add_library(tensilelite::host-validation-adapter ALIAS tensilelite-host-validation-adapter)
@@ -151,6 +152,9 @@ target_link_libraries(tensilelite-host-validation-adapter
         rocisa::rocisa-cpp
         OpenMP::OpenMP_CXX
 )
+if(HIPBLASLT_ENABLE_MXDATAGENERATOR)
+    target_link_libraries(tensilelite-host-validation-adapter PRIVATE hipblaslt::mxdatagen)
+endif()
 set_target_properties(tensilelite-host-validation-adapter
     PROPERTIES
         POSITION_INDEPENDENT_CODE ON
