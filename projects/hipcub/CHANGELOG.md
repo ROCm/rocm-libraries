@@ -2,6 +2,7 @@
 
 Full documentation for hipCUB is available at [https://rocm.docs.amd.com/projects/hipCUB/en/latest/](https://rocm.docs.amd.com/projects/hipCUB/en/latest/).
 
+<<<<<<< HEAD
 ## hipCUB-5.0.0 for ROCm 10.0.0
 
 ### Added
@@ -29,6 +30,8 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 * Deprecated `HIPCUB_IS_INT128_ENABLED`, use `_CCCL_HAS_INT128()` instead.
 * Deprecated `hipcub::Equality`, `hipcub::Inequality`, `hipcub::InequalityWrapper`, `hipcub::Sum`, `hipcub::Difference`, `hipcub::Division`, `hipcub::Max` and `hipcub::Min` operators. Use `hip::std::equal_to`, `hip::std::not_equal_to`, `hip::std::plus`, `hip::std::minus`, `hip::std::divides`, `hip::maximum` and `hip:minimum` operators instead.
 
+=======
+>>>>>>> parent of 72b6de5f86e (feat(hipcub): Add CCCL 3.0.x support (copy) (#9931))
 ## hipCUB 4.5.0 for ROCm 7.14
 
 ### Added
