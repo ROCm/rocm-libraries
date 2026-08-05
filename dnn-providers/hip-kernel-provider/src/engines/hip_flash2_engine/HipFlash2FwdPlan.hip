@@ -164,11 +164,25 @@ __device__ void flash2_fwd_body(const __half* __restrict__ ptr_q,
                     tile_m[qg][e]    = fmaxf(tile_m[qg][e], s);
                 }
 
-        // Update running max and rescale
+        // Compute tile global max: max across ALL 16 lanes per (qg,e) query row.
+        // This makes all pv values in sP consistent (same reference max).
+        float tile_gm[4][4];
         for(int qg = 0; qg < 4; qg++)
             for(int e = 0; e < 4; e++)
             {
-                const float new_m = fmaxf(row_m[qg][e], tile_m[qg][e]);
+                float gm = tile_m[qg][e];
+                gm = fmaxf(gm, __shfl_xor(gm, 1));
+                gm = fmaxf(gm, __shfl_xor(gm, 2));
+                gm = fmaxf(gm, __shfl_xor(gm, 4));
+                gm = fmaxf(gm, __shfl_xor(gm, 8));
+                tile_gm[qg][e] = gm;
+            }
+
+        // Update running max with tile global max; rescale previous o_acc and row_d
+        for(int qg = 0; qg < 4; qg++)
+            for(int e = 0; e < 4; e++)
+            {
+                const float new_m = fmaxf(row_m[qg][e], tile_gm[qg][e]);
                 const float br    = flash2_expf(row_m[qg][e] - new_m);
                 row_m[qg][e] = new_m;
                 for(int d16 = 0; d16 < D16; d16++) o_acc[qg][d16][e] *= br;
