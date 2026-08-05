@@ -24,9 +24,15 @@ Scoped to the wave-separated stagger path (``enableTDMA and enableTDMB and
 NumWaves > 1``), since the plain TDM path legitimately reads WaveIdx once and
 then undefines it in the same prologue.
 
+Run for MX-FP8 and MX-FP4 inputs, matching the two GPU tests that regressed. Both
+currently land on the same pool sizes (93/97/101/105 of 106); FP4 is covered because
+it reaches them through a different allocation path -- different global-read widths,
+LDS layout and scale-block bookkeeping -- that could drift away from FP8.
+
 CPU-only: no GPU required.
 """
 
+import itertools
 import os
 import re
 
@@ -39,17 +45,57 @@ pytestmark = pytest.mark.unit
 
 _ARCH = "gfx1250"
 
-_CONFIG = os.path.join(
-    os.path.dirname(__file__),
-    "data",
-    "test_data",
-    "_designed",
-    "gfx1250",
-    "streamk_tdm_prefetchgl2.yaml",
+_DATA_DIR = os.path.join(
+    os.path.dirname(__file__), "data", "test_data", "_designed", "gfx1250"
 )
 
-# PrefetchGL2 x StreamKForceDPOnly, the 2x2 product that spans the SGPR budget.
-_EXPECTED_KERNELS = 4
+# The fork axes both designed configs sweep, in variant-key order. This is the single
+# source of truth: the expected variant set and the emit limit are both derived from
+# it, so the count can never agree while the set silently drifts.
+#
+# Why pinning the set matters: the limit handed to the harness is also a truncation
+# (config_harness slices the permutation list), and constructLazyForkPermutations
+# walks the fork list in reverse, so the first-listed fork parameter varies fastest.
+# Widening any fork list ahead of PrefetchGL2 in the YAML could fill the first N
+# permutations with PrefetchGL2=0 only -- the count assertion would still pass while
+# the tight corner went untested.
+_FORK_AXES = (
+    ("PGL", "PrefetchGL2", (0, 1)),
+    ("SKFDPO", "StreamKForceDPOnly", (0, 1)),
+    ("PGR", "PrefetchGlobalRead", (1, 2)),
+    ("SIA", "ScheduleIterAlg", (0, 4)),
+)
+
+
+def _variant_key(lookup):
+    """Render a variant label from a per-axis value lookup."""
+    return "/".join(f"{label}{lookup(param)}" for label, param, _ in _FORK_AXES)
+
+
+_EXPECTED_VARIANTS = frozenset(
+    "/".join(f"{label}{value}" for (label, _, _), value in zip(_FORK_AXES, combo))
+    for combo in itertools.product(*(values for _, _, values in _FORK_AXES))
+)
+
+# MUST equal the true fork product, or the harness truncates and the missing
+# permutations are never emitted.
+_EXPECTED_KERNELS = len(_EXPECTED_VARIANTS)
+
+# The tightest variant: 105 of 106 SGPRs once WaveIdx is released before the loop,
+# 107 while it is held. If this one is ever missing from the sweep, the budget
+# assertion is running with spare headroom and proves nothing.
+_TIGHT_VARIANT = "PGL1/SKFDPO0/PGR1/SIA0"
+
+assert _TIGHT_VARIANT in _EXPECTED_VARIANTS, (
+    f"_TIGHT_VARIANT {_TIGHT_VARIANT!r} is not in the _FORK_AXES product -- it went "
+    "stale when the axes changed. Fix it to name the tightest surviving variant "
+    "rather than deleting this check."
+)
+
+_CONFIGS = {
+    "mxf8": os.path.join(_DATA_DIR, "streamk_tdm_prefetchgl2.yaml"),
+    "mxf4": os.path.join(_DATA_DIR, "streamk_tdm_prefetchgl2_f4.yaml"),
+}
 
 _UNDEF_RE = re.compile(r"^\s*\.set\s+sgprWaveIdx\s*,\s*UNDEF\s*$", re.MULTILINE)
 _WAVEIDX_READ_RE = re.compile(r"s\[sgprWaveIdx\]")
@@ -95,8 +141,7 @@ def _emit_with_reg_state(config_path, arch, limit):
                 {
                     "base": base,
                     "src": src or "",
-                    "variant": "PGL%s/SKFDPO%s"
-                    % (kernel["PrefetchGL2"], kernel["StreamKForceDPOnly"]),
+                    "variant": _variant_key(lambda param: kernel[param]),
                     "waveSeparated": bool(
                         kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["NumWaves"] > 1
                     ),
@@ -108,22 +153,36 @@ def _emit_with_reg_state(config_path, arch, limit):
     return results
 
 
-@pytest.fixture(scope="module")
-def emitted():
-    results = _emit_with_reg_state(_CONFIG, _ARCH, _EXPECTED_KERNELS)
+@pytest.fixture(scope="module", params=sorted(_CONFIGS))
+def emitted(request):
+    results = _emit_with_reg_state(_CONFIGS[request.param], _ARCH, _EXPECTED_KERNELS)
+    dtype = request.param
+
+    got = {r["variant"] for r in results}
+    missing = _EXPECTED_VARIANTS - got
+    unexpected = got - _EXPECTED_VARIANTS
+    assert not missing and not unexpected, (
+        f"{dtype}: the emitted sweep is not the expected fork product. "
+        f"Missing variants: {sorted(missing)}. Unexpected variants: {sorted(unexpected)}. "
+        f"{_TIGHT_VARIANT} is the tight corner -- if it is in the missing list, every "
+        "assertion below is running on kernels with spare SGPR headroom and proves "
+        "nothing. The emit limit is also a truncation, so widening a fork list in the "
+        "YAML without updating _FORK_AXES silently drops permutations."
+    )
+    assert _TIGHT_VARIANT in got, f"{dtype}: tight corner {_TIGHT_VARIANT} not emitted"
     assert len(results) == _EXPECTED_KERNELS, (
-        f"Expected {_EXPECTED_KERNELS} kernels from the PGL x SKFDPO sweep, "
-        f"got {len(results)}"
+        f"{dtype}: expected {_EXPECTED_KERNELS} kernels from the fork product, "
+        f"got {len(results)} (duplicate variants?)"
     )
     assert all(r["waveSeparated"] for r in results), (
-        "Config no longer selects the wave-separated TDM path: "
+        f"{dtype}: config no longer selects the wave-separated TDM path: "
         f"{[(r['variant'], r['waveSeparated']) for r in results]}"
     )
     return results
 
 
 def test_streamk_tdm_prefetchgl2_stays_within_sgpr_budget(emitted):
-    """No PGL x SKFDPO variant may exceed the gfx1250 SGPR cap."""
+    """No variant in the fork product may exceed the gfx1250 SGPR cap."""
     over = [
         (r["variant"], r["poolSize"], r["maxSgpr"])
         for r in emitted
