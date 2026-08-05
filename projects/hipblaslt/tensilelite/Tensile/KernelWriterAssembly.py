@@ -15034,7 +15034,17 @@ class KernelWriterAssembly(KernelWriter):
     if not isSize1:
       divisor   = kernel["MacroTile0"]
       destBpe   = int(kernel["ProblemType"]["DestDataType"].numBytes()) if self.states.storeAlign8 else 1
-      alignSize = 16 // destBpe  # storeAlign8: dwordx4 store width (16B) / destBpe; else: 16
+      alignSize = 16 // destBpe  # storeAlign8: dwordx4 store width (16B) / destBpe
+      # Fix: When storeAlign8 is active, the exec-mask M guard disables entire
+      # lanes (each lane = one N column).  Each lane group (LG) covers
+      # miM / numLGs M-rows.  If the M remainder is smaller than the LG row
+      # count the exec mask would incorrectly disable valid N columns instead
+      # of invalid M rows.  Ensure alignSize >= rowsPerLG so that any partial-
+      # LG remainder is routed to the scalar Edge path.
+      if self.states.storeAlign8:
+        numLGs = kernel["WavefrontSize"] // 16
+        rowsPerLG = kernel["MatrixInstM"] // numLGs
+        alignSize = max(alignSize, rowsPerLG)
       wgSgpr    = "WorkGroup0"
       nwgSgpr   = "NumWorkGroups0"
       # tmpS0 = SizeI % MT0  (the trailing-row count for the last WG)
