@@ -248,6 +248,7 @@ list(
     -Winit-self # Warn about variables initialized with itself
     -Wunreachable-code # Warn about unreachable code
     $<$<CXX_COMPILER_ID:Clang>:-Wno-error=unused-command-line-argument> # Clang: disable error for unused command line arguments
+    $<$<CXX_COMPILER_ID:Clang>:-Wunused-template> # Clang: catch unused internal-linkage templates (matches llvm-project CI)
     -Wno-error=null-dereference # Downgrade null-dereference to warning (false positives with flatbuffers in backend/data_sdk)
     -Wswitch-default # Warn if a switch statement does not have a default case
 )

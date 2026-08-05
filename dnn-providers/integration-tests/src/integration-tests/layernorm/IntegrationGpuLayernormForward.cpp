@@ -137,7 +137,7 @@ protected:
                                     this->getTolerance(graphObj, outputs.invVariance));
         }
 
-        this->synthesis().setGlobalSeed(layernormTestCase.seed);
+        this->inputFillRecipes().setGlobalSeed(layernormTestCase.seed);
         this->verifyGraph(graphObj);
     }
 };
