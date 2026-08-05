@@ -28,7 +28,7 @@ include: hipsparse_common.yaml
 # The cuSPARSE SpGEAM backend requires host pointer mode scalars (enforced by the test) and
 # does not support the bad-argument probing, so those cases are only run on the rocSPARSE
 # backend (see the rocm test yaml). The alpha/beta zero edge cases below match cuSPARSE on
-# this backend but are marked as known bugs on rocSPARSE (see the rocm test yaml).
+# this backend and are also handled on the rocSPARSE backend (see the rocm test yaml).
 Tests:
 - name: spgeam_csr
   category: quick

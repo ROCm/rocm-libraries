@@ -48,9 +48,10 @@ Tests:
   baseB: [HIPSPARSE_INDEX_BASE_ZERO]
   baseC: [HIPSPARSE_INDEX_BASE_ZERO]
 
-# Edge cases: alpha and/or beta equal to zero. cuSPARSE drops the operand scaled by a zero
-# scalar from C's sparsity pattern (alpha == 0 -> pattern of B, beta == 0 -> pattern of A,
-# both zero -> empty C). On rocSPARSE these are currently marked as known bugs (see above).
+# Edge cases: alpha and/or beta equal to zero. The operand scaled by a zero scalar is dropped
+# from C's sparsity pattern (alpha == 0 -> pattern of B, beta == 0 -> pattern of A,
+# both zero -> empty C). The hipSPARSE wrapper reproduces this cuSPARSE behavior on the
+# rocSPARSE backend using rocsparse_spmat_scale.
 - name: spgeam_csr
   category: quick
   function: spgeam_csr
