@@ -19,7 +19,7 @@ namespace
 // must fail the run loudly rather than silently degrade — unlike
 // BundleMetadata's optional+WARN handling of human-authored, fully-optional
 // metadata.
-constexpr int kSupportedSchemaVersion = 1;
+constexpr int K_SUPPORTED_SCHEMA_VERSION = 1;
 
 const std::set<std::string>& validPlatformTokens()
 {
@@ -44,7 +44,7 @@ int parseVersion(const nlohmann::json& json, std::string_view source)
     }
 
     const int version = json.at("version").get<int>();
-    if(version != kSupportedSchemaVersion)
+    if(version != K_SUPPORTED_SCHEMA_VERSION)
     {
         throw std::runtime_error(
             withSource(source, "unsupported version " + std::to_string(version)));
@@ -77,8 +77,12 @@ ArchPlatformMap parseArchPlatformMap(const nlohmann::json& supportObj, std::stri
             if(!platformJson.is_string()
                || validPlatformTokens().count(platformJson.get<std::string>()) == 0)
             {
-                throw std::runtime_error(
-                    withSource(source, "arch '" + arch + "' has an invalid platform token"));
+                std::string message = "arch '";
+                message += arch;
+                message += "' has invalid platform token ";
+                message += platformJson.dump();
+                message += " (expected one of: linux, windows)";
+                throw std::runtime_error(withSource(source, message));
             }
             platforms.insert(platformJson.get<std::string>());
         }
@@ -227,9 +231,12 @@ SweepSupportClaims parseSweepSupportClaimsJson(const nlohmann::json& json, std::
                     auto caseId = caseIdJson.get<std::string>();
                     if(!seenCaseIds.insert(caseId).second)
                     {
-                        throw std::runtime_error(withSource(
-                            source,
-                            "case '" + caseId + "' claimed twice for engine '" + engine + "'"));
+                        std::string message = "case '";
+                        message += caseId;
+                        message += "' claimed twice for engine '";
+                        message += engine;
+                        message += "'";
+                        throw std::runtime_error(withSource(source, message));
                     }
                     group.cases.push_back(std::move(caseId));
                 }

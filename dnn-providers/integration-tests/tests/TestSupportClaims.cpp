@@ -3,7 +3,6 @@
 
 #include <gtest/gtest.h>
 
-#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <stdexcept>
@@ -39,6 +38,20 @@ nlohmann::json makeSweepGroup(const std::vector<std::string>& cases,
     group["cases"] = nlohmann::json(cases);
     group["support"][arch] = nlohmann::json(platforms);
     return group;
+}
+
+// Unique-per-test scratch directory, derived from the TEST macro's own source
+// line (mirrors TestBundleDiscoveryFixture::SetUp() in TestBundleDiscovery.cpp)
+// rather than an unseeded std::rand(), which can collide across concurrent
+// test processes sharing the same default seed.
+ScopedDirectory makeScopedTestDir(const std::string& prefix)
+{
+    auto path
+        = std::filesystem::temp_directory_path()
+          / (prefix + "_"
+             + std::to_string(::testing::UnitTest::GetInstance()->current_test_info()->line()));
+    std::filesystem::remove_all(path);
+    return ScopedDirectory(path);
 }
 
 } // namespace
@@ -189,8 +202,7 @@ TEST(TestSupportJsonPath, DerivesSupportPathFromBundleJson)
 
 TEST(TestLoadSupportClaims, ReturnsNulloptWhenSidecarDoesNotExist)
 {
-    const ScopedDirectory dir(std::filesystem::temp_directory_path()
-                              / ("test_support_claims_" + std::to_string(std::rand())));
+    const ScopedDirectory dir = makeScopedTestDir("test_support_claims");
     std::ofstream(dir.path() / "Bundle.json") << "{}";
 
     const auto claims = loadSupportClaims(dir.path() / "Bundle.json");
@@ -199,8 +211,7 @@ TEST(TestLoadSupportClaims, ReturnsNulloptWhenSidecarDoesNotExist)
 
 TEST(TestLoadSupportClaims, ThrowsOnUnparseableFile)
 {
-    const ScopedDirectory dir(std::filesystem::temp_directory_path()
-                              / ("test_support_claims_" + std::to_string(std::rand())));
+    const ScopedDirectory dir = makeScopedTestDir("test_support_claims");
     std::ofstream(dir.path() / "Bundle.json") << "{}";
     std::ofstream(dir.path() / "Bundle.support.json") << "{not valid json";
 
@@ -209,8 +220,7 @@ TEST(TestLoadSupportClaims, ThrowsOnUnparseableFile)
 
 TEST(TestLoadSupportClaims, LoadsValidSidecar)
 {
-    const ScopedDirectory dir(std::filesystem::temp_directory_path()
-                              / ("test_support_claims_" + std::to_string(std::rand())));
+    const ScopedDirectory dir = makeScopedTestDir("test_support_claims");
     std::ofstream(dir.path() / "Bundle.json") << "{}";
     std::ofstream(dir.path() / "Bundle.support.json")
         << R"({"version": 1, "claims": {"E": {"gfx942": ["linux"]}}})";
@@ -363,8 +373,7 @@ TEST(TestParseSweepSupportClaimsJson, ThrowsOnInvalidPlatformTokenInGroupSupport
 
 TEST(TestLoadSweepSupportClaims, ReturnsNulloptWhenSupportJsonDoesNotExist)
 {
-    const ScopedDirectory dir(std::filesystem::temp_directory_path()
-                              / ("test_sweep_support_claims_" + std::to_string(std::rand())));
+    const ScopedDirectory dir = makeScopedTestDir("test_sweep_support_claims");
 
     const auto claims = loadSweepSupportClaims(dir.path());
     EXPECT_FALSE(claims.has_value());
@@ -372,8 +381,7 @@ TEST(TestLoadSweepSupportClaims, ReturnsNulloptWhenSupportJsonDoesNotExist)
 
 TEST(TestLoadSweepSupportClaims, LoadsValidSupportJson)
 {
-    const ScopedDirectory dir(std::filesystem::temp_directory_path()
-                              / ("test_sweep_support_claims_" + std::to_string(std::rand())));
+    const ScopedDirectory dir = makeScopedTestDir("test_sweep_support_claims");
     std::ofstream(dir.path() / "support.json")
         << R"({"version": 1, "claims": {"E": [{"cases": ["case_a"], )"
            R"("support": {"gfx942": ["linux"]}}]}})";
@@ -385,8 +393,7 @@ TEST(TestLoadSweepSupportClaims, LoadsValidSupportJson)
 
 TEST(TestLoadSweepSupportClaims, ThrowsOnUnparseableFile)
 {
-    const ScopedDirectory dir(std::filesystem::temp_directory_path()
-                              / ("test_sweep_support_claims_" + std::to_string(std::rand())));
+    const ScopedDirectory dir = makeScopedTestDir("test_sweep_support_claims");
     std::ofstream(dir.path() / "support.json") << "{not valid json";
 
     EXPECT_THROW(loadSweepSupportClaims(dir.path()), std::runtime_error);

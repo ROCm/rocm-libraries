@@ -22,12 +22,6 @@
 namespace hipdnn_integration_tests
 {
 
-/// Metadata read from a {Name}.meta.json companion file alongside a golden
-/// reference bundle ({Name}.json + {Name}.tensor{uid}.bin).
-///
-/// All fields are at the top level of the JSON object (RFC 0011 §4.1).
-/// Every field except `format_version` is optional. A missing field means
-/// "not recorded" — the system must behave correctly without it.
 /// How far up RFC 0015's enforcement ladder a bundle/case is checked.
 enum class EnforcementLevel
 {
@@ -36,6 +30,12 @@ enum class EnforcementLevel
     FULL ///< engine must additionally execute and numeric-verify (default)
 };
 
+/// Metadata read from a {Name}.meta.json companion file alongside a golden
+/// reference bundle ({Name}.json + {Name}.tensor{uid}.bin).
+///
+/// All fields are at the top level of the JSON object (RFC 0011 §4.1).
+/// Every field except `format_version` is optional. A missing field means
+/// "not recorded" — the system must behave correctly without it.
 struct BundleMetadata
 {
     int formatVersion = 1;
