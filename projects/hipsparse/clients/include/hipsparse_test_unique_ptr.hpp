@@ -342,7 +342,11 @@ namespace hipsparse_test
     };
 #endif
 
+    // clang-format 19 (math-ci) rewrites "#if(" to "#if (", which clang-format
+    // 18 (the repo pre-commit hook) reverts; disable so both formatters agree.
+    // clang-format off
 #if(defined(HIPSPARSE_WITH_SPGEAM) && (!defined(CUDART_VERSION) || CUDART_VERSION >= 13030))
+    // clang-format on
     struct spgeam_struct
     {
         hipsparseSpGEAMDescr_t descr;

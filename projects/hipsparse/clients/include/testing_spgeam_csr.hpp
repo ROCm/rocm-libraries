@@ -42,7 +42,11 @@ using namespace hipsparse_test;
 template <typename T>
 void testing_spgeam_csr_bad_arg(const Arguments& argus)
 {
+    // clang-format 19 (math-ci) rewrites "#if(" to "#if (", which clang-format
+    // 18 (the repo pre-commit hook) reverts; disable so both formatters agree.
+    // clang-format off
 #if(defined(HIPSPARSE_WITH_SPGEAM) && (!defined(CUDART_VERSION) || CUDART_VERSION >= 13030))
+    // clang-format on
     int64_t              m         = 100;
     int64_t              n         = 100;
     int64_t              nnz_A     = 100;
@@ -288,7 +292,9 @@ void testing_spgeam_csr_bad_arg(const Arguments& argus)
 template <typename T>
 void testing_spgeam_csr(Arguments argus)
 {
+    // clang-format off
 #if(defined(HIPSPARSE_WITH_SPGEAM) && (!defined(CUDART_VERSION) || CUDART_VERSION >= 13030))
+    // clang-format on
     int                  m        = argus.M;
     int                  n        = argus.N;
     T                    h_alpha  = argus.get_alpha<T>();
@@ -314,7 +320,9 @@ void testing_spgeam_csr(Arguments argus)
 
     // cusparseSpGEAM only supports host pointer mode scalars, so the device pointer mode
     // pass (matrix C2 below) is only exercised on the rocSPARSE backend.
+    // clang-format off
 #if(!defined(CUDART_VERSION))
+    // clang-format on
     std::unique_ptr<spgeam_struct> unique_ptr_descr2(new spgeam_struct);
     hipsparseSpGEAMDescr_t         descr2 = unique_ptr_descr2->descr;
 #endif
@@ -354,7 +362,9 @@ void testing_spgeam_csr(Arguments argus)
     auto dcsr_val_B_managed = hipsparse_unique_ptr{device_malloc(sizeof(T) * nnz_B), device_free};
     auto dcsr_row_ptr_C_1_managed
         = hipsparse_unique_ptr{device_malloc(sizeof(int) * (m + 1)), device_free};
+    // clang-format off
 #if(!defined(CUDART_VERSION))
+    // clang-format on
     auto dcsr_row_ptr_C_2_managed
         = hipsparse_unique_ptr{device_malloc(sizeof(int) * (m + 1)), device_free};
     auto d_alpha_managed = hipsparse_unique_ptr{device_malloc(sizeof(T)), device_free};
@@ -368,7 +378,9 @@ void testing_spgeam_csr(Arguments argus)
     int* dcsr_col_ind_B   = (int*)dcsr_col_ind_B_managed.get();
     T*   dcsr_val_B       = (T*)dcsr_val_B_managed.get();
     int* dcsr_row_ptr_C_1 = (int*)dcsr_row_ptr_C_1_managed.get();
+    // clang-format off
 #if(!defined(CUDART_VERSION))
+    // clang-format on
     int* dcsr_row_ptr_C_2 = (int*)dcsr_row_ptr_C_2_managed.get();
     T*   d_alpha          = (T*)d_alpha_managed.get();
     T*   d_beta           = (T*)d_beta_managed.get();
@@ -386,14 +398,18 @@ void testing_spgeam_csr(Arguments argus)
         dcsr_col_ind_B, hcsr_col_ind_B.data(), sizeof(int) * nnz_B, hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(
         hipMemcpy(dcsr_val_B, hcsr_val_B.data(), sizeof(T) * nnz_B, hipMemcpyHostToDevice));
+    // clang-format off
 #if(!defined(CUDART_VERSION))
+    // clang-format on
     CHECK_HIP_ERROR(hipMemcpy(d_alpha, &h_alpha, sizeof(T), hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(d_beta, &h_beta, sizeof(T), hipMemcpyHostToDevice));
 #endif
 
     // Create matrices
     hipsparseSpMatDescr_t A, B, C1;
+    // clang-format off
 #if(!defined(CUDART_VERSION))
+    // clang-format on
     hipsparseSpMatDescr_t C2;
 #endif
     CHECK_HIPSPARSE_ERROR(hipsparseCreateCsr(&A,
@@ -420,7 +436,9 @@ void testing_spgeam_csr(Arguments argus)
                                              typeT));
     CHECK_HIPSPARSE_ERROR(hipsparseCreateCsr(
         &C1, m, n, 0, dcsr_row_ptr_C_1, nullptr, nullptr, typeI, typeJ, idxBaseC, typeT));
+    // clang-format off
 #if(!defined(CUDART_VERSION))
+    // clang-format on
     CHECK_HIPSPARSE_ERROR(hipsparseCreateCsr(
         &C2, m, n, 0, dcsr_row_ptr_C_2, nullptr, nullptr, typeI, typeJ, idxBaseC, typeT));
 #endif
@@ -437,7 +455,9 @@ void testing_spgeam_csr(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseSpGEAM_nnz(
         handle, transA, transB, &h_alpha, A, &h_beta, B, C1, typeT, alg, descr, externalBuffer1));
 
+    // clang-format off
 #if(!defined(CUDART_VERSION))
+    // clang-format on
     // Buffer size (device pointer mode) - rocSPARSE backend only.
     size_t bufferSize2;
     CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_DEVICE));
@@ -473,7 +493,9 @@ void testing_spgeam_csr(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseSpGEAM(
         handle, transA, transB, &h_alpha, A, &h_beta, B, C1, typeT, alg, descr, externalBuffer1));
 
+    // clang-format off
 #if(!defined(CUDART_VERSION))
+    // clang-format on
     // Device pointer mode compute - rocSPARSE backend only.
     int64_t nnz_C_2;
     CHECK_HIPSPARSE_ERROR(hipsparseSpMatGetSize(C2, &rows_C, &cols_C, &nnz_C_2));
@@ -511,7 +533,9 @@ void testing_spgeam_csr(Arguments argus)
         CHECK_HIP_ERROR(hipMemcpy(
             hcsr_val_C_1.data(), dcsr_val_C_1, sizeof(T) * nnz_C_1, hipMemcpyDeviceToHost));
 
+        // clang-format off
 #if(!defined(CUDART_VERSION))
+        // clang-format on
         std::vector<int> hcsr_row_ptr_C_2(m + 1);
         std::vector<int> hcsr_col_ind_C_2(nnz_C_2);
         std::vector<T>   hcsr_val_C_2(nnz_C_2);
@@ -591,7 +615,9 @@ void testing_spgeam_csr(Arguments argus)
         unit_check_general(1, nnz_C_gold, 1, hcsr_col_ind_C_gold.data(), hcsr_col_ind_C_1.data());
         unit_check_near(1, nnz_C_gold, 1, hcsr_val_C_gold.data(), hcsr_val_C_1.data());
 
+        // clang-format off
 #if(!defined(CUDART_VERSION))
+        // clang-format on
         int nnz_C_2_i = (int)nnz_C_2;
         unit_check_general(1, 1, 1, &nnz_C_gold, &nnz_C_2_i);
         unit_check_general(1, m + 1, 1, hcsr_row_ptr_C_gold.data(), hcsr_row_ptr_C_2.data());
@@ -606,7 +632,9 @@ void testing_spgeam_csr(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(B));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(C1));
 
+    // clang-format off
 #if(!defined(CUDART_VERSION))
+    // clang-format on
     CHECK_HIP_ERROR(hipFree(externalBuffer2));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(C2));
 #endif

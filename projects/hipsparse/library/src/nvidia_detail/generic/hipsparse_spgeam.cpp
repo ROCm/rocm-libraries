@@ -28,7 +28,11 @@
 
 #include "../utility.h"
 
+// clang-format 19 (math-ci) rewrites "#if(" to "#if (", which clang-format
+// 18 (the repo pre-commit hook) reverts; disable so both formatters agree.
+// clang-format off
 #if(defined(HIPSPARSE_WITH_SPGEAM) && CUDART_VERSION >= 13030)
+// clang-format on
 namespace
 {
     // Only C = alpha * op(A) + beta * op(B) with non-transpose operations on CSR matrices is
@@ -70,7 +74,9 @@ namespace
 }
 #endif
 
+// clang-format off
 #if(CUDART_VERSION >= 13030)
+// clang-format on
 hipsparseStatus_t hipsparseSpGEAM_createDescr(hipsparseSpGEAMDescr_t* descr)
 {
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
@@ -78,7 +84,9 @@ hipsparseStatus_t hipsparseSpGEAM_createDescr(hipsparseSpGEAMDescr_t* descr)
 }
 #endif
 
+// clang-format off
 #if(CUDART_VERSION >= 13030)
+// clang-format on
 hipsparseStatus_t hipsparseSpGEAM_destroyDescr(hipsparseSpGEAMDescr_t descr)
 {
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
@@ -86,7 +94,9 @@ hipsparseStatus_t hipsparseSpGEAM_destroyDescr(hipsparseSpGEAMDescr_t descr)
 }
 #endif
 
+// clang-format off
 #if(CUDART_VERSION >= 13030)
+// clang-format on
 hipsparseStatus_t hipsparseSpGEAM_bufferSize(hipsparseHandle_t          handle,
                                              hipsparseOperation_t       opA,
                                              hipsparseOperation_t       opB,
@@ -122,7 +132,9 @@ hipsparseStatus_t hipsparseSpGEAM_bufferSize(hipsparseHandle_t          handle,
 }
 #endif
 
+// clang-format off
 #if(CUDART_VERSION >= 13030)
+// clang-format on
 hipsparseStatus_t hipsparseSpGEAM_nnz(hipsparseHandle_t          handle,
                                       hipsparseOperation_t       opA,
                                       hipsparseOperation_t       opB,
@@ -158,7 +170,9 @@ hipsparseStatus_t hipsparseSpGEAM_nnz(hipsparseHandle_t          handle,
 }
 #endif
 
+// clang-format off
 #if(CUDART_VERSION >= 13030)
+// clang-format on
 hipsparseStatus_t hipsparseSpGEAM(hipsparseHandle_t          handle,
                                   hipsparseOperation_t       opA,
                                   hipsparseOperation_t       opB,
