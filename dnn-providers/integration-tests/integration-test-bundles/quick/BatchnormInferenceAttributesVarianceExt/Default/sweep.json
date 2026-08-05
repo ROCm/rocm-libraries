@@ -10656,6 +10656,135 @@
         "seed": 1,
         "reference_source": "c++ integration suite: Smoke/IntegrationGpuBatchnormFwdInferenceVariance3dFp32.Correctness_3"
       }
+    },
+    {
+      "id": "runtime_epsilon",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              3,
+              224
+            ],
+            "strides": [
+              672,
+              224,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              3,
+              224
+            ],
+            "strides": [
+              672,
+              224,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              3,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              3,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              3,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              3,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "tensor_patches": [
+        {
+          "uid": 3,
+          "set": {
+            "is_runtime_pass_by_value": true
+          },
+          "remove": [
+            "value_type",
+            "value"
+          ]
+        }
+      ],
+      "metadata": {
+        "format_version": 1,
+        "operation": "BatchnormFwdInferenceVarianceExt",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "generated_at": "2026-07-27T00:00:00Z",
+        "seed": 42,
+        "notes": "Runtime PBV scalar: epsilon (uid=3) promoted to is_runtime_pass_by_value=true, detection value 1.0. The harness supplies the detection value via inputs; both the CPU reference and the provider read from the variantPack. A provider that ignores the runtime tensor and uses any other value produces diverging output.",
+        "inputs": {
+          "3": {
+            "kind": "fixed",
+            "value": 1.0
+          }
+        }
+      }
     }
   ]
 }
