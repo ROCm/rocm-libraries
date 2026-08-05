@@ -17,12 +17,7 @@
 // pass and broke the suite. Marking it unsupported is the only option that tolerates a
 // nondeterministic result (the test never runs, so it can neither fail nor unexpectedly pass).
 // See https://amd-hub.atlassian.net/browse/LCOMPILER-2560.
-//
-// NOTE: keep the words XFAIL / UNSUPPORTED out of this prose except in the real directive below —
-// lit treats any comment line containing such a token followed by ':' as a directive. Also note
-// the directive value is `true`, not `*`: unlike XFAIL, the UNSUPPORTED list is parsed as a boolean
-// expression and does not accept the `*` wildcard.
-// UNSUPPORTED: true
+// UNSUPPORTED: target={{.*}}
 
 #include "make_test_thread.h"
 
