@@ -417,6 +417,23 @@ class TensorAndGemmTests(unittest.TestCase):
             hv.to_numpy(observed, np.float32), np.asarray([[9.0]], np.float32)
         )
 
+        pre_scaled = hv.reference_gemm(
+            hv.from_numpy(
+                np.asarray([[1.1]], dtype=np.float32), hv.ScalarType.Float16
+            ),
+            hv.from_numpy(np.asarray([[1.0]], dtype=np.float32)),
+            hv.from_numpy(np.asarray([[0.0]], dtype=np.float32)),
+            hv.ScalarType.Float32,
+            hv.ScalarType.Float32,
+            compute_type_a=hv.ScalarType.Float8E4M3,
+            pre_quantization_scale_a=hv.from_numpy(
+                np.asarray([3.0], dtype=np.float32)
+            ),
+        )
+        np.testing.assert_array_equal(
+            hv.to_numpy(pre_scaled), np.asarray([[3.25]], dtype=np.float32)
+        )
+
     def test_block_scaled_tiled_gemm_matches_numpy(self):
         a = np.ones((1, 16), dtype=np.float32)
         b = np.ones((16, 1), dtype=np.float32)
@@ -456,6 +473,19 @@ class TensorAndGemmTests(unittest.TestCase):
         )
         np.testing.assert_array_equal(
             hv.to_numpy(observed),
+            np.asarray([[19.0, 0.0], [0.0, 50.0]], dtype=np.float32),
+        )
+        tiled = hv.reference_gemm(
+            hv.from_numpy(a),
+            hv.from_numpy(b),
+            hv.from_numpy(c),
+            hv.ScalarType.Float32,
+            hv.ScalarType.Float32,
+            output_selection=hv.OutputSelection.explicit_indices([0, 3]),
+            backend=hv.GemmBackend.Tiled,
+        )
+        np.testing.assert_array_equal(
+            hv.to_numpy(tiled),
             np.asarray([[19.0, 0.0], [0.0, 50.0]], dtype=np.float32),
         )
         self.assertEqual(
