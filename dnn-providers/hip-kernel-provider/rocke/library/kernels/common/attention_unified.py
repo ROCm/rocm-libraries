@@ -1785,7 +1785,7 @@ def _enable_gfx942_sink_prefill_tuned(problem: UnifiedAttentionProblem) -> bool:
 def _enable_gfx950_sink_prefill_wpe3(problem: UnifiedAttentionProblem) -> bool:
     """gfx950 full-causal bf16 attention-sink prefill -> waves_per_eu=3.
 
-    Same-run A/B on MI350X vs the shipped nw4/mw16/T64 config (waves_per_eu is
+    Same-run A/B on gfx950 vs the shipped nw4/mw16/T64 config (waves_per_eu is
     the only difference): 1.07x @ S1024, 1.11x @ S2048, 1.15x @ S4096, reproduced
     across two runs. waves_per_eu is a pure AMDGPU occupancy hint (kernel
     attribute only, no compute change), so output is bit-identical. Full-causal

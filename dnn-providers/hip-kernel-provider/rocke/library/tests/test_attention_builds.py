@@ -1362,7 +1362,7 @@ class TestAttentionHelpers(unittest.TestCase):
         """
         import kernels.common.attention_unified as au
 
-        def _mk(**overrides):
+        def _make_problem(**overrides):
             base = dict(
                 total_q=2048,
                 num_seqs=1,
@@ -1380,7 +1380,7 @@ class TestAttentionHelpers(unittest.TestCase):
             return UnifiedAttentionProblem(**base)
 
         with _patch_resolved_arch("gfx942"):
-            cohort = _mk()
+            cohort = _make_problem()
             self.assertTrue(au._enable_gfx942_sink_prefill_tuned(cohort))
             spec = au._tiled_spec_from_problem(cohort)
             self.assertEqual(spec.num_warps, 2)
@@ -1391,9 +1391,9 @@ class TestAttentionHelpers(unittest.TestCase):
             # Near-miss shapes on the 2D path must NOT hit the tuned cohort and
             # must keep the shipped D64 config (nw4 / mw32 / no register_pv).
             for label, p in (
-                ("swa", _mk(sliding_window=128)),
-                ("no_sinks", _mk(use_sinks=False)),
-                ("bs32", _mk(block_size=32)),
+                ("swa", _make_problem(sliding_window=128)),
+                ("no_sinks", _make_problem(use_sinks=False)),
+                ("bs32", _make_problem(block_size=32)),
             ):
                 with self.subTest(near_miss=label):
                     self.assertFalse(au._enable_gfx942_sink_prefill_tuned(p))
@@ -1404,7 +1404,7 @@ class TestAttentionHelpers(unittest.TestCase):
 
             # Decode (q==1) routes to the 3D path, not the 2D spec builder; the
             # cohort gate must still exclude it.
-            self.assertFalse(au._enable_gfx942_sink_prefill_tuned(_mk(max_seqlen_q=1)))
+            self.assertFalse(au._enable_gfx942_sink_prefill_tuned(_make_problem(max_seqlen_q=1)))
 
     def test_gfx950_sink_prefill_wpe3_cohort(self):
         """gfx950 full-causal bf16 sink prefill selects waves_per_eu=3 (occupancy
@@ -1413,7 +1413,7 @@ class TestAttentionHelpers(unittest.TestCase):
         """
         import kernels.common.attention_unified as au
 
-        def _mk(**overrides):
+        def _make_problem(**overrides):
             base = dict(
                 total_q=2048,
                 num_seqs=1,
@@ -1431,23 +1431,23 @@ class TestAttentionHelpers(unittest.TestCase):
             return UnifiedAttentionProblem(**base)
 
         with _patch_resolved_arch("gfx950"):
-            cohort = _mk()
+            cohort = _make_problem()
             self.assertTrue(au._enable_gfx950_sink_prefill_wpe3(cohort))
             self.assertEqual(au._select_2d_waves_per_eu(cohort), 3)
 
             # Near-miss shapes must NOT hit the wpe=3 cohort.
             for label, p in (
-                ("swa", _mk(sliding_window=128)),
-                ("no_sinks", _mk(use_sinks=False)),
-                ("bs32", _mk(block_size=32)),
+                ("swa", _make_problem(sliding_window=128)),
+                ("no_sinks", _make_problem(use_sinks=False)),
+                ("bs32", _make_problem(block_size=32)),
             ):
                 with self.subTest(near_miss=label):
                     self.assertFalse(au._enable_gfx950_sink_prefill_wpe3(p))
             # Decode (q==1) routes to 3D; gate must still exclude it.
-            self.assertFalse(au._enable_gfx950_sink_prefill_wpe3(_mk(max_seqlen_q=1)))
+            self.assertFalse(au._enable_gfx950_sink_prefill_wpe3(_make_problem(max_seqlen_q=1)))
             # gfx942 must not hit the gfx950 gate.
             with _patch_resolved_arch("gfx942"):
-                self.assertFalse(au._enable_gfx950_sink_prefill_wpe3(_mk()))
+                self.assertFalse(au._enable_gfx950_sink_prefill_wpe3(_make_problem()))
 
     def test_tiled_3d_dispatch_gate_accepts_kwargs_per_arch(self):
         """Regression: the shared dispatch entry

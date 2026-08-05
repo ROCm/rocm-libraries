@@ -334,7 +334,6 @@ def _variant_flags(name: str, *, sliding_window: int, dtype: str, is_fp8: bool) 
         waves_per_eu=2,
         use_i64_kv_addr=False,
         use_register_pv=False,
-        use_global_load_lds_k=False,
     )
     toks = name.split("_")
     head = toks[0]
@@ -395,8 +394,6 @@ def _variant_flags(name: str, *, sliding_window: int, dtype: str, is_fp8: bool) 
             base["use_k_single_buffer"] = True
         elif t == "regpv":
             base["use_register_pv"] = True
-        elif t == "gldlds":
-            base["use_global_load_lds_k"] = True
         else:
             raise ValueError(f"unknown variant modifier {t!r} in {name!r}")
     # mw16 cannot use the 32x32 transpose path
@@ -508,7 +505,6 @@ class CkVariantBench:
             use_k_single_buffer=flags["use_k_single_buffer"],
             use_i64_kv_addr=flags["use_i64_kv_addr"],
             use_register_pv=flags["use_register_pv"],
-            use_global_load_lds_k=flags["use_global_load_lds_k"],
         )
         key = (shape.signature, variant, spec.kernel_name(), self.compile_backend)
         if key not in self._launchers:
