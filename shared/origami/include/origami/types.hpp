@@ -529,7 +529,7 @@ struct config_t {
   std::size_t workspace_size            = 0;
   std::size_t workspace_size_per_elem_c = 0;
 
-  /// Whether this kernel is stream-K
+  /// Stream-K mode selector (0 disables stream-K; 5 dynamic stream-K).
   int stream_k = 5;
 
   /// Reduction strategy.
