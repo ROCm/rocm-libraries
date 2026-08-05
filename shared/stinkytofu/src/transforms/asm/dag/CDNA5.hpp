@@ -497,6 +497,23 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // case: which queue (NonWmmaKind: kOther or kValu) promotedNode_ must be popped from.
     int promotedKind_ = -1;
 
+    // --- Cluster-barrier SCC protection (see applyClusterBarrierSccRule) ---
+    // The SCC def-use chain currently open (0 = none) and how many of its readers have
+    // still to issue. A chain opens when its def issues and closes on its last reader;
+    // in between, no barrier that InsertClusterBarrierPass would anchor a handshake on
+    // may issue, so the SCC clobber cannot land inside the chain. The chain itself stays
+    // free to schedule on either side of such a barrier -- only splitting it is blocked.
+    // Per region: reset in onInitRegion.
+    unsigned openSccChain_ = 0;
+    unsigned sccReadersLeft_ = 0;
+
+    // A barrier that must wait for the open chain to close.
+    bool sccChainBlocks(const DAGNode* node) const {
+        return openSccChain_ != 0 && node->guardingBarrier;
+    }
+
+    void noteSccChainIssue(DAGNode* node);
+
     std::map<int, int> crossBBDsResiduals_;
 
     void advanceTime(int cycles);
@@ -1046,6 +1063,22 @@ bool CDNA5ReadyQueue::findOldestFallbackNonWmma(DAGNode* pickedDS, DAGNode** out
 // through its own NonWmmaFill phase, so it lands before its hazarded consumer needs
 // the gap instead of after. Add further forcing rules here as new PromotePhase cases
 // (or new decisions within an existing phase, as below).
+// Open the chain on its def, close it on its last reader. Between those two picks
+// sccChainBlocks() holds back every guarding barrier.
+void CDNA5ReadyQueue::noteSccChainIssue(DAGNode* node) {
+    if (node->sccChainId == 0) return;
+
+    if (node->sccChainDef) {
+        openSccChain_ = node->sccChainReaders > 0 ? node->sccChainId : 0;
+        sccReadersLeft_ = node->sccChainReaders;
+        return;
+    }
+    // A reader of a chain other than the open one means its def was never issued here
+    // (a value defined in an earlier region); nothing to close.
+    if (node->sccChainId != openSccChain_) return;
+    if (--sccReadersLeft_ == 0) openSccChain_ = 0;
+}
+
 void CDNA5ReadyQueue::decidePromote() {
     promotedPhase_ = PromotePhase::None;
     promotedNode_ = nullptr;
@@ -1053,6 +1086,7 @@ void CDNA5ReadyQueue::decidePromote() {
 
     if (!barrierQueue.empty() && !barrierWmmaThresholds_.empty()) {
         for (DAGNode* node : barrierQueue) {
+            if (sccChainBlocks(node)) continue;
             auto thIt = barrierWmmaThresholds_.find(node->inst);
             if (thIt != barrierWmmaThresholds_.end() &&
                 wmmaIssuedCountThisRegion_ >= thIt->second) {
@@ -1515,6 +1549,7 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
                   << "\n");
     auto rememberPick = [this](DAGNode* node) {
         lastPickedNode_ = node;
+        noteSccChainIssue(node);
         return node;
     };
 
@@ -1639,18 +1674,27 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
     // that exact node (formerly the forced-barrier phase ahead of WMMA). Otherwise this
     // is the drain case: issue the lowest-id barrier once all compute has been picked.
     if (isPromote(PromotePhase::Barrier) && !barrierQueue.empty()) {
-        DAGNode* barrier;
+        DAGNode* barrier = nullptr;
         if (promotedPhase_ == PromotePhase::Barrier) {
             barrier = extractForcedBarrier();  // removes the promoted (threshold-met) node
         } else {
-            barrier = barrierQueue.top();
-            barrierQueue.pop();
+            // Skip barriers held back by an open SCC chain; a later phase issues them
+            // once the chain's last reader has gone out.
+            for (DAGNode* cand : barrierQueue) {
+                if (sccChainBlocks(cand)) continue;
+                barrier = cand;
+                break;
+            }
+            if (barrier) barrierQueue.erase(barrier);
         }
-        updateWMMAStatus(barrier);
-        PASS_DEBUG(std::cerr << "[DAG CDNA5 pickOne] barrier dagId=" << barrier->id
-                             << " promoted=" << (promotedPhase_ == PromotePhase::Barrier) << "\n";
-                   barrier->inst->dump(std::cerr); std::cerr << "\n");
-        return rememberPick(barrier);
+        if (barrier) {
+            updateWMMAStatus(barrier);
+            PASS_DEBUG(std::cerr << "[DAG CDNA5 pickOne] barrier dagId=" << barrier->id
+                                 << " promoted=" << (promotedPhase_ == PromotePhase::Barrier)
+                                 << "\n";
+                       barrier->inst->dump(std::cerr); std::cerr << "\n");
+            return rememberPick(barrier);
+        }
     }
 
     // Phase G — final safety net: force-pick the least-blocked ready node to
@@ -1669,6 +1713,22 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         PASS_DEBUG(std::cerr << "[CDNA5 pickOne] Phase G fallback pick dagId=" << fallback->id
                              << " kind=" << fallbackKind << " wait=" << waitCycles << "\n");
         return rememberPick(popNonWmma(fallback, fallbackKind));
+    }
+
+    // Only guarding barriers are left and an SCC chain is still holding them back.
+    // applyClusterBarrierSccRule only locks chains whose readers can all issue without
+    // the barrier going first, so a locked chain always has a reader to make progress
+    // on and this should be unreachable; release rather than stall if that ever breaks.
+    if (openSccChain_ != 0 && !barrierQueue.empty()) {
+        PASS_DEBUG(std::cerr << "[CDNA5 pickOne] SCC chain " << openSccChain_
+                             << " open but only guarding barriers are ready; releasing the lock"
+                                " to keep the schedule progressing\n");
+        openSccChain_ = 0;
+        sccReadersLeft_ = 0;
+        DAGNode* barrier = barrierQueue.top();
+        barrierQueue.pop();
+        updateWMMAStatus(barrier);
+        return rememberPick(barrier);
     }
 
     assert(false && "CDNA5ReadyQueue::pickOne: all buckets empty");
@@ -1808,6 +1868,10 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     wmmaIssuedCountThisRegion_ = 0;
     dsInsertedSinceLastWmma_ = 0;
     lastPickedNode_ = nullptr;
+    // SCC chain locks are per-region: chain ids index the prior region's DAGNodeList,
+    // and region boundaries are side-effect cuts no reordering crosses anyway.
+    openSccChain_ = 0;
+    sccReadersLeft_ = 0;
     // (B) elapse ordering state is per-region: reset the touch map and clock so a new
     // region starts with all regs "very old" (no spurious deferrals from a prior region).
     regLastTouch_.clear();
