@@ -151,7 +151,8 @@ jobs:
       windows_test_labels: ${{ inputs.windows_test_labels || '' }}
       # Manual override for prebuilt stages
       prebuilt_stages: ${{ inputs.prebuilt_stages || '' }}
-      baseline_run_id: ${{ inputs.baseline_run_id || '' }}
+      # TEST: Hardcode baseline_run_id for testing stage copy
+      baseline_run_id: ${{ inputs.baseline_run_id || '30989762651' }}
       # Enable automatic stage reuse - TheRock will find commit-compatible baselines
       stage_reuse_mode: reuse-stage
       repository: ROCm/TheRock
