@@ -70,7 +70,7 @@ __device__ void flash2_fwd_body(const __half* __restrict__ ptr_q,
 
     // sP overlaps sK after S is computed: sP[row=qg*4+e][col=kg*16+kc]
     // sP reuses sK LDS after S computation. No __restrict__ to avoid aliasing issues.
-    float* sP = reinterpret_cast<float*>(sK);
+    volatile float* sP = reinterpret_cast<volatile float*>(sK);
 
     // Load Q fragments
     fq q_frags[4][D16];
