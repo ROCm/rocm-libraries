@@ -11,3 +11,12 @@ target_link_libraries(host-validation-package-test PRIVATE roc::host-validation-
 
 add_executable(host-validation-operations-package-test validation.cpp)
 target_link_libraries(host-validation-operations-package-test PRIVATE roc::host-validation)
+
+if(TARGET roc::host-validation-blas)
+    add_executable(host-validation-blas-package-test blas.cpp)
+    target_link_libraries(
+        host-validation-blas-package-test
+        PRIVATE
+            roc::host-validation-blas
+    )
+endif()
