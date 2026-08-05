@@ -88,13 +88,28 @@ if(TENSILELITE_ENABLE_HOST)
             $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
     )
 
-    if(NOT TARGET roc::mxDataGenerator)
+    # mxDataGenerator supplies the gfx950 pre-swizzled MX scale padding helper behind
+    # the StrideScaleA1/StrideScaleB1 custom-kernel semantics. Treat it as optional:
+    # HIPBLASLT_ENABLE_MXDATAGENERATOR is OFF on Windows, and shared/mxdatagenerator
+    # is absent from checkouts that vendor only projects/hipblaslt (hipSPARSELt CI),
+    # so probe for it instead of hard-requiring it.
+    set(TENSILELITE_HOST_MXDATAGENERATOR ${HIPBLASLT_ENABLE_MXDATAGENERATOR})
+    if(TENSILELITE_HOST_MXDATAGENERATOR AND NOT TARGET roc::mxDataGenerator)
+        set(_mxdatagen_src "${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/mxdatagenerator")
         if(HIPBLASLT_ENABLE_THEROCK)
-            find_package(mxDataGenerator REQUIRED)
+            find_package(mxDataGenerator QUIET)
+            if(NOT mxDataGenerator_FOUND)
+                set(TENSILELITE_HOST_MXDATAGENERATOR OFF)
+            endif()
+        elseif(EXISTS "${_mxdatagen_src}/CMakeLists.txt")
+            add_subdirectory("${_mxdatagen_src}" "${CMAKE_CURRENT_BINARY_DIR}/mxdatagenerator")
         else()
-            add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/mxdatagenerator"
-                             "${CMAKE_CURRENT_BINARY_DIR}/mxdatagenerator")
+            set(TENSILELITE_HOST_MXDATAGENERATOR OFF)
         endif()
+    endif()
+    if(NOT TENSILELITE_HOST_MXDATAGENERATOR)
+        message(STATUS "tensilelite-host: mxDataGenerator not available; "
+                       "pre-swizzled MX scale strides (StrideScaleA1/B1) are disabled")
     endif()
 
     target_link_libraries(tensilelite-host
@@ -104,9 +119,13 @@ if(TENSILELITE_ENABLE_HOST)
             $<BUILD_INTERFACE:hip::host>
         PRIVATE
             hip::device
-            roc::mxDataGenerator
             ZLIB::ZLIB
     )
+
+    if(TENSILELITE_HOST_MXDATAGENERATOR)
+        target_link_libraries(tensilelite-host PRIVATE roc::mxDataGenerator)
+        target_compile_definitions(tensilelite-host PRIVATE HIPBLASLT_ENABLE_MXDATAGENERATOR)
+    endif()
 
     include(CheckCXXSourceCompiles)
     set(CMAKE_REQUIRED_INCLUDES ${HIP_INCLUDE_DIRS})

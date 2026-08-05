@@ -37,7 +37,9 @@
 
 #include <Tensile/UtilsOrigami.hpp>
 #include <iostream>
+#if HIPBLASLT_ENABLE_MXDATAGENERATOR
 #include <mxDataGenerator/PreSwizzle.hpp>
+#endif
 #include <origami/streamk.hpp>
 
 #include <algorithm>
@@ -59,6 +61,25 @@
 
 namespace TensileLite
 {
+    namespace
+    {
+        // Batch stride for pre-swizzled gfx950 MX scales. The padding rule lives in
+        // mxDataGenerator, which is an optional dependency (see tensilelite/CMakeLists.txt),
+        // so fail loudly rather than silently substituting an unpadded stride that would
+        // make the kernel read the wrong scale block.
+        size_t preSwizzledScaleBatchStride([[maybe_unused]] TensorDescriptor const& t,
+                                          [[maybe_unused]] char const*            semantic)
+        {
+#if HIPBLASLT_ENABLE_MXDATAGENERATOR
+            return DGen::preSwizzleScalesGFX950PaddedSize(t.sizes()[1], t.sizes()[0]);
+#else
+            throw std::runtime_error(concatenate(
+                semantic,
+                " requires mxDataGenerator; rebuild with HIPBLASLT_ENABLE_MXDATAGENERATOR=ON"));
+#endif
+        }
+    }
+
     std::string toString(CustomArgSemantic arg)
     {
         static const std::array<std::string, static_cast<int>(CustomArgSemantic::COUNT)> CustomArgSemanticStrings = {
@@ -2525,9 +2546,8 @@ namespace TensileLite
                 }
                 case CustomArgSemantic::StrideScaleA1:
                 {
-                    auto const& t = problem.mxsa();
                     size_t batchStride
-                        = DGen::preSwizzleScalesGFX950PaddedSize(t.sizes()[1], t.sizes()[0]);
+                        = preSwizzledScaleBatchStride(problem.mxsa(), "StrideScaleA1");
                     rv.args.appendCustomType("StrideScaleA1", batchStride, arg.type);
                     break;
                 }
@@ -2539,9 +2559,8 @@ namespace TensileLite
                 }
                 case CustomArgSemantic::StrideScaleB1:
                 {
-                    auto const& t = problem.mxsb();
                     size_t batchStride
-                        = DGen::preSwizzleScalesGFX950PaddedSize(t.sizes()[1], t.sizes()[0]);
+                        = preSwizzledScaleBatchStride(problem.mxsb(), "StrideScaleB1");
                     rv.args.appendCustomType("StrideScaleB1", batchStride, arg.type);
                     break;
                 }
