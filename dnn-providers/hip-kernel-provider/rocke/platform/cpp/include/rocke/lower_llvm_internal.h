@@ -48,19 +48,33 @@ namespace ckc
 /* ====================================================================== */
 
 /* Verbatim datalayout / triple copied from clang for gfx950 (Python
- * _DATALAYOUT_LLVM20 / _DATALAYOUT_LLVM22 / _TRIPLE). Shared by all CDNA
- * backends today, but the AMDGPU datalayout is FLAVOR-KEYED: only the
- * buffer-fat-pointer address space (p8) drifts between LLVM 20 (ROCm 7.0/7.1)
- * and LLVM 22 (ROCm >= 7.2). ROCKE_LL_DATALAYOUT is a back-compat alias for the
- * LLVM20 form; new code keys on the flavor via rocke_ll_datalayout_for_flavor. */
+ * _DATALAYOUT_LLVM20 / _DATALAYOUT_LLVM22 / _DATALAYOUT_LLVM23 / _TRIPLE).
+ * Shared by all CDNA backends per flavor, but the AMDGPU datalayout is
+ * FLAVOR-KEYED: the buffer-resource address space (p8, the 128-bit buffer
+ * descriptor, not the p7 fat pointer) drifts between LLVM 20 (ROCm 7.0/7.1) and
+ * LLVM 22 (ROCm 7.2), and the ELF symbol-mangling spec (m:e) is present in
+ * LLVM 23 (ROCm 7.13+) but absent in LLVM 20 / 22. ROCKE_LL_DATALAYOUT is a
+ * back-compat alias
+ * for the LLVM20 form; new code keys on the flavor via
+ * rocke_ll_datalayout_for_flavor. */
 extern const char* const ROCKE_LL_DATALAYOUT_LLVM20;
 extern const char* const ROCKE_LL_DATALAYOUT_LLVM22;
+extern const char* const ROCKE_LL_DATALAYOUT_LLVM23; /* LLVM22 p8 layout + m:e */
 extern const char* const ROCKE_LL_DATALAYOUT; /* == ROCKE_LL_DATALAYOUT_LLVM20 */
 extern const char* const ROCKE_LL_TRIPLE;
 
-/* Python _datalayout_for_flavor: LLVM20 => legacy p8 layout, anything else
- * (incl. unexpected values) => the modern LLVM22 layout. */
+/* Python _datalayout_for_flavor: LLVM20 => legacy p8 layout, LLVM23 => its m:e
+ * form, anything else (incl. unexpected values) => the modern LLVM22 layout. */
 const char* rocke_ll_datalayout_for_flavor(rocke_llvm_flavor_t flavor);
+
+/* Python _is_modern_flavor: true for LLVM 21+ IR shapes (llvm22 / llvm23),
+ * which share the same datalayout + intrinsic declares.
+ *
+ * Reads the datalayout-generation column of the flavor ladder in
+ * lower_llvm/core.cpp rather than naming the members here, mirroring Python,
+ * where the answer comes from _DATALAYOUT_KIND_FLAVORS. Spelling the pair out
+ * in an expression is what leaves a new flavor silently classed as legacy. */
+bool rocke_ll_flavor_is_modern(rocke_llvm_flavor_t flavor);
 
 /* CDNA buffer-resource-descriptor DWORD3 (Python ISABackend.buffer_rsrc_word3
  * == 0x00027000). RDNA word3 differs (0x31014000) -- see backend struct. */
@@ -92,6 +106,35 @@ extern const int ROCKE_LL_INTRINSIC_DECLS_COUNT;
 extern const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES[];
 extern const int ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES_COUNT;
 
+/* The LLVM23 overrides (Python _INTRINSIC_DECLS_LLVM23_OVERRIDES): identical to
+ * the LLVM22 set for the declares rocke emits today; split entries here if an
+ * LLVM 23 host proves drift. */
+extern const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES[];
+extern const int ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES_COUNT;
+
+/* Resolve the flavor-specific override table (NULL/0 for non-modern flavors). */
+const rocke_ll_decl_t* rocke_ll_flavor_overrides(rocke_llvm_flavor_t flavor, int* out_count);
+
+/* ---------------------------------------------------------- anyptr overloads */
+
+/* One accepted address space of an llvm_anyptr_ty intrinsic, with the LLVM
+ * pointer text that names it. Mirrors one entry of the Python
+ * _S_PREFETCH_INST_PTR_TYPES / _AV_B128_PTR_TYPES dicts; every entry needs a
+ * matching "<key>.p<space>" row in ROCKE_LL_INTRINSIC_DECLS. */
+typedef struct rocke_ll_anyptr_space
+{
+    int space;
+    const char* ptr_ty;
+} rocke_ll_anyptr_space_t;
+
+extern const rocke_ll_anyptr_space_t ROCKE_LL_S_PREFETCH_INST_PTR_TYPES[];
+extern const int ROCKE_LL_S_PREFETCH_INST_PTR_TYPES_COUNT;
+extern const rocke_ll_anyptr_space_t ROCKE_LL_AV_B128_PTR_TYPES[];
+extern const int ROCKE_LL_AV_B128_PTR_TYPES_COUNT;
+
+/* The resolver that consumes these tables is rocke_ll_anyptr_space, declared
+ * with the other rocke_lower_t helpers below. */
+
 /* ====================================================================== */
 /* ISA backend (the gfx-keyed LLVM details)                               */
 /* ====================================================================== */
@@ -104,14 +147,39 @@ extern const int ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES_COUNT;
  * matching tile.<op_id> CDNA handler.
  *
  * encode_waitcnt: -1 for a counter means "no wait" (architectural max). */
-/* RDNA-family discriminator for the lowering path. CDNA targets reject WMMA;
- * RDNA3/3.5 (gfx11) and RDNA4 (gfx12) emit WMMA. The gfx12 op_ids are distinct
- * (``wmma_gfx12_*``), so the kind only needs to separate CDNA from RDNA-any. */
+/* WMMA-capability discriminator for the lowering path. CDNA/MFMA targets
+ * reject WMMA; RDNA3/3.5 (gfx11), RDNA4 (gfx12) and gfx1250 emit it. Each
+ * family's op_ids are distinct (``wmma_*`` / ``wmma_gfx12_*`` /
+ * ``wmma_gfx1250_*``), so the kind only needs to separate "rejects WMMA" from
+ * "emits WMMA" -- the op_id picks the atom.
+ *
+ * gfx1250 is a CDNA part but is programmed on the GFX12 model, and Python
+ * models it the same way (Gfx1250Backend derives from Gfx12RdnaBackend). It is
+ * ROCKE_LL_ISA_RDNA here for exactly that reason: this enum is about who emits
+ * WMMA, not about the marketing family. */
 typedef enum rocke_ll_isa_kind
 {
     ROCKE_LL_ISA_CDNA = 0, /* gfx908/gfx90a/gfx942/gfx950 (MFMA)         */
-    ROCKE_LL_ISA_RDNA /* gfx11 / gfx12 (WMMA)                       */
+    ROCKE_LL_ISA_RDNA /* gfx11 / gfx12 / gfx1250 (WMMA)             */
 } rocke_ll_isa_kind_t;
+
+/* Forward declaration: the backend struct below carries emit hooks that take
+ * the lowerer, and the lowerer struct (defined further down) carries a pointer
+ * to a backend, so one of the two has to be named before it is complete. */
+typedef struct rocke_lower rocke_lower_t;
+
+/* The (decl_key, intrinsic, return type) triple a ds_read_tr16_b128 lowering
+ * needs. Python ISABackend.ds_tr16_b128_spec returns the same 3-tuple.
+ * `ret_ty` is the intrinsic's LLVM return type: "<8 x i16>" on the
+ * type-agnostic gfx950 opcode (the handler then bitcasts to the op's element
+ * type) or "<8 x half>" / "<8 x bfloat>" on gfx1250, where the opcode is
+ * overloaded on the element type and no reinterpret is needed. */
+typedef struct rocke_ll_tr16_spec
+{
+    const char* decl_key;
+    const char* intrinsic;
+    const char* ret_ty;
+} rocke_ll_tr16_spec_t;
 
 typedef struct rocke_isa_backend
 {
@@ -121,6 +189,27 @@ typedef struct rocke_isa_backend
     int buffer_rsrc_word3;
     int (*encode_waitcnt)(int vmcnt, int expcnt, int lgkmcnt);
     rocke_ll_isa_kind_t kind; /* CDNA (reject WMMA) vs RDNA (emit WMMA)      */
+    /* Python ISABackend.has_async_lds_counter: the gfx1250 dedicated async-DMA
+     * counter (s_wait_asynccnt + global_load_async_to_lds). True only on
+     * gfx1250; elsewhere s_wait_asynccnt lowers to nothing. Declared as a
+     * backend fact rather than tested by gfx-string prefix so the capability
+     * has one definition site per backend, as in Python. */
+    bool has_async_lds_counter;
+    /* Python ISABackend.emits_legacy_s_waitcnt. gfx1250 replaced the
+     * monolithic s_waitcnt with split counters (s_wait_dscnt / s_wait_loadcnt
+     * / ...) and llvm.amdgcn.s.waitcnt is NOT selectable there, so tile.s_waitcnt
+     * must emit nothing rather than an instruction the backend cannot select. */
+    bool emits_legacy_s_waitcnt;
+    /* Python ISABackend.emit_lds_barrier_drain: the memory wait that has to
+     * precede an LDS workgroup barrier. A function pointer because the two
+     * families emit different *text*, not a different immediate --
+     * gfx9/10/11 emit one monolithic s_waitcnt, gfx1250 emits split
+     * s_wait_loadcnt / s_wait_dscnt calls. */
+    void (*emit_lds_barrier_drain)(rocke_lower_t* L, bool drain_vmem);
+    /* Python ISABackend.ds_tr16_b128_spec. Returns false when the element type
+     * is one the opcode cannot carry (the caller then fails with the same
+     * message Python raises). */
+    bool (*ds_tr16_b128_spec)(const char* elem_type, rocke_ll_tr16_spec_t* out);
 } rocke_isa_backend_t;
 
 /* Resolve a gfx string to its backend (Python backend_for). NULL => "gfx950".
@@ -132,6 +221,18 @@ const rocke_isa_backend_t* rocke_ll_backend_for(const char* arch, rocke_status_t
  * lowering path uses gfx9_10. */
 int rocke_ll_encode_waitcnt_gfx9_10(int vmcnt, int expcnt, int lgkmcnt);
 int rocke_ll_encode_waitcnt_gfx11(int vmcnt, int expcnt, int lgkmcnt);
+
+/* The two LDS-barrier drains (Python ISABackend.emit_lds_barrier_drain and the
+ * Gfx1250Backend override). Defined in the control bucket alongside the
+ * barrier handlers that call them through the backend. */
+void rocke_ll_emit_lds_barrier_drain_legacy(rocke_lower_t* L, bool drain_vmem);
+void rocke_ll_emit_lds_barrier_drain_split(rocke_lower_t* L, bool drain_vmem);
+
+/* The two ds_read_tr16_b128 opcode selections (Python
+ * ISABackend.ds_tr16_b128_spec and the Gfx1250Backend override). Defined in
+ * the crosslane bucket alongside the handler. */
+bool rocke_ll_tr16_spec_b128_default(const char* elem_type, rocke_ll_tr16_spec_t* out);
+bool rocke_ll_tr16_spec_b128_gfx1250(const char* elem_type, rocke_ll_tr16_spec_t* out);
 
 /* ====================================================================== */
 /* Block / CFG model (Python _Block)                                      */
@@ -191,7 +292,7 @@ typedef struct rocke_ll_need
 /* The full lowerer state. Allocated on the stack of the entry point; its arena
  * owns every transient string/array. The strbuf `out` (in finalize) is the one
  * heap buffer. */
-typedef struct rocke_lower
+struct rocke_lower
 {
     rocke_arena_t arena; /* owns blocks, lines, fresh names    */
     const rocke_kernel_def_t* kernel;
@@ -207,6 +308,7 @@ typedef struct rocke_lower
      * finalize; the table order is canonical, this set records membership). */
     ROCKE_VEC(rocke_ll_need_t) needs;
     bool needs_fp_atomic_md; /* _needs_fp_atomic_md      */
+    bool needs_av_scope_md; /* agent-scope metadata for av.load/store.b128 */
 
     /* dynamically-registered decls (Python self._decls mutation, e.g. vector
      * smax registers "llvm.smax.vNiW"). Keyed; consulted by _need fallback. */
@@ -234,7 +336,7 @@ typedef struct rocke_lower
     /* sticky error (the lowerer has no builder to carry it). */
     rocke_status_t status;
     char* err; /* arena-owned, ROCKE_ERR_MSG_CAP cap   */
-} rocke_lower_t;
+}; /* rocke_lower_t typedef'd forward, above the backend struct */
 
 /* ====================================================================== */
 /* Error model                                                            */
@@ -307,6 +409,28 @@ const char* rocke_ll_operand_with_type(rocke_lower_t* L, const rocke_value_t* v)
 /* Map an IR Type to its LLVM textual form (Python _llvm_type). Sets NOTIMPL on
  * an unmapped type and returns "" . */
 const char* rocke_ll_llvm_type(rocke_lower_t* L, const rocke_type_t* t);
+
+/* LLVM text for a kernel parameter, honouring the addr_space override (P17)
+ * (Python _param_llvm_type). Used by the function header AND by call sites
+ * passing the param, so the two can never name different types. */
+const char* rocke_ll_param_llvm_type(rocke_lower_t* L, const rocke_param_t* p);
+
+/* LLVM pointer text for an operand as the module sees it: the function
+ * header's type for a kernel param, else the IR type (Python
+ * _Lowerer._ptr_llvm_type). */
+const char* rocke_ll_value_ptr_type(rocke_lower_t* L, const rocke_value_t* v);
+
+/* Address space of an llvm_anyptr_ty operand, validated against `allowed`
+ * (Python _Lowerer._anyptr_space). Also writes the matching pointer text to
+ * *out_ptr_ty when non-NULL. Fails (does not return) for a space the intrinsic
+ * does not accept: the space is part of the overload, so the mangled name, the
+ * declare, and the call site all have to agree with the pointer's real type. */
+int rocke_ll_anyptr_space(rocke_lower_t* L,
+                          const char* op,
+                          const rocke_value_t* ptr,
+                          const rocke_ll_anyptr_space_t* allowed,
+                          int count,
+                          const char** out_ptr_ty);
 
 /* Map an IR type-NAME string (from op.attrs, e.g. iter_args metadata) back to
  * LLVM text (Python _llvm_type_from_name). Handles scalars + "vec<exN>". */

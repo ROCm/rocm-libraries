@@ -259,6 +259,35 @@ if(ROCKE_INSTALL_TESTS)
     install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/tests/golden/rocke_representative_ir_sha256.json"
             DESTINATION ${ROCKE_TEST_INSTALL_DIR}/golden)
 
+    # The harness above builds LIBRARY kernels for its attention, attention_dense
+    # and attention_d256 families (the one platform -> library exception), so the
+    # `kernels` and `builders` packages must be importable by both runners.
+    # Without them every attention case degrades to an expected-failure and
+    # rocke_golden_static reports drift instead of passing.
+    #
+    # Destination matters: TheRock's artifact-hipkernelprovider.toml captures the
+    # test component through a fixed glob list whose only recursive entry for this
+    # subtree is bin/hip_kernel_provider/tests/**. Staging the packages one level
+    # down under tests/ therefore gets them into the CI test artifact with no
+    # change to that manifest; installing them at the test root would match no
+    # glob and they would be silently dropped from the artifact.
+    #
+    # Guarded on the sibling library tree so a platform-only copy of this directory
+    # still configures; keep the guard, it is the copy-able contract.
+    set(_ROCKE_LIBRARY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../library")
+    if(EXISTS "${_ROCKE_LIBRARY_DIR}/kernels")
+      foreach(_rocke_lib_pkg kernels builders)
+        install(DIRECTORY "${_ROCKE_LIBRARY_DIR}/${_rocke_lib_pkg}"
+                DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/library"
+                PATTERN "__pycache__" EXCLUDE
+                REGEX "\\.pyc$" EXCLUDE)
+      endforeach()
+    else()
+      message(WARNING
+              "rocKE: library tree not found at ${_ROCKE_LIBRARY_DIR}; the installed "
+              "golden gate will fail on its attention cases")
+    endif()
+
     # Install the full pytest suite for installed/artifact test execution.
     # Excludes: C/C++ parity emitters (compiled against rocke_core at build time),
     # the differential harness (needs compiler + source), and run_all.py (dev runner).
