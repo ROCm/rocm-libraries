@@ -3195,7 +3195,8 @@ inline flatbuffers::FlatBufferBuilder createValidMoeGroupedMatmulBwdGraph()
     const std::vector<int64_t> routingDims = {2, 1, 1};
     const std::vector<int64_t> routingStrides = {1, 1, 1};
     const std::vector<int64_t> dweightDims = {2, 3, 5};
-    const std::vector<int64_t> dweightStrides = {15, 5, 1};
+    // cuDNN infers column-major strides for dweight: {rows * cols, 1, rows}.
+    const std::vector<int64_t> dweightStrides = {15, 1, 3};
 
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder,
