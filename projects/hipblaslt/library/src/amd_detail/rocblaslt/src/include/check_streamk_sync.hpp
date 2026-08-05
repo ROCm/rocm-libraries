@@ -21,7 +21,6 @@
 #include "handle.h"
 #include "rocblaslt-types.h"
 
-#include <cstdint>
 #include <cstdio>
 #include <hip/hip_runtime.h>
 #include <vector>
@@ -53,17 +52,8 @@ inline void hipblaslt_check_streamk_sync_scan(rocblaslt_handle handle,
         return;
     }
 
-    // Word-at-a-time on the clean path; the per-int tally below only runs once
-    // a nonzero word is found.
-    const uint64_t* w     = reinterpret_cast<const uint64_t*>(host.data());
-    bool            dirty = false;
-    static_assert(count % 2 == 0, "int count must pair evenly into 64-bit words");
-    for(size_t i = 0; i < count / 2 && !dirty; ++i)
-        dirty = (w[i] != 0);
-
-    if(!dirty)
-        return;
-
+    // Ints are both the scan step and the reported unit: the head of the buffer
+    // is one work-queue counter per XCD, so the offset names the counter left set.
     size_t nonzero = 0, first = count;
     for(size_t i = 0; i < count; ++i)
         if(host[i] != 0)
@@ -72,6 +62,9 @@ inline void hipblaslt_check_streamk_sync_scan(rocblaslt_handle handle,
                 first = i;
             ++nonzero;
         }
+
+    if(nonzero == 0)
+        return;
 
     fprintf(stderr,
             "[hipBLASLt CHECK_STREAMK_SYNC] %s: Synchronizer left dirty "
