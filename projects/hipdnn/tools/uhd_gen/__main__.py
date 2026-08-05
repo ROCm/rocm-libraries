@@ -109,6 +109,18 @@ def main(argv: list[str] | None = None) -> int:
         dest="keep_lgbm",
         help="Keep intermediate .lgbm file",
     )
+    parser.add_argument(
+        "--training-arches",
+        nargs="+",
+        dest="training_arches",
+        help="GPU architectures the model was trained on (e.g., gfx942 gfx1100). "
+        "Embedded in the model for RFC 0019 §9.2 out-of-distribution detection.",
+    )
+    parser.add_argument(
+        "--model-version",
+        dest="model_version",
+        help="Semantic version for the model (e.g., 1.0.0). Embedded in model metadata.",
+    )
 
     args = parser.parse_args(argv)
 
@@ -151,7 +163,14 @@ def main(argv: list[str] | None = None) -> int:
 
     features_hash = compute_features_hash(args.features)
     fb_path = output_dir / "model.bin"
-    convert(lgbm_path, features_hash, fb_path, num_training_samples=len(df))
+    convert(
+        lgbm_path,
+        features_hash,
+        fb_path,
+        num_training_samples=len(df),
+        training_arches=args.training_arches,
+        model_version=args.model_version,
+    )
     logger.info("Converted to FlatBuffer: %s", fb_path)
 
     if not args.keep_lgbm:
@@ -182,6 +201,8 @@ def main(argv: list[str] | None = None) -> int:
         "num_trees": model.num_trees(),
         "num_samples": len(df),
         "input_file": str(input_path),
+        "training_arches": args.training_arches or [],
+        "model_version": args.model_version,
     }
     manifest_path = output_dir / "train_manifest.json"
     with open(manifest_path, "w") as f:

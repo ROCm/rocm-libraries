@@ -28,6 +28,8 @@ def convert(
     features_hash: str,
     output_path: str | Path,
     num_training_samples: int | None = None,
+    training_arches: list[str] | None = None,
+    model_version: str | None = None,
 ) -> None:
     """Convert LightGBM model to FlatBuffer GbdtModel.
 
@@ -36,11 +38,21 @@ def convert(
         features_hash: SHA-256 hash of feature specification.
         output_path: Output path for .bin FlatBuffer file.
         num_training_samples: Optional number of training samples for metadata.
+        training_arches: Optional list of GPU architectures the model was trained
+            on (e.g., ["gfx942", "gfx1100"]). Used for RFC 0019 §9.2 out-of-distribution
+            detection at runtime.
+        model_version: Optional semantic version (e.g., "1.0.0").
     """
     model = lgb.Booster(model_file=str(lgbm_path))
     model_json = model.dump_model()
 
-    buffer = build_gbdt_model(model_json, features_hash, num_training_samples)
+    buffer = build_gbdt_model(
+        model_json,
+        features_hash,
+        num_training_samples,
+        training_arches=training_arches,
+        model_version=model_version,
+    )
 
     with open(output_path, "wb") as f:
         f.write(buffer)
@@ -58,6 +70,8 @@ def build_gbdt_model(
     model_json: dict[str, Any],
     features_hash: str,
     num_training_samples: int | None = None,
+    training_arches: list[str] | None = None,
+    model_version: str | None = None,
 ) -> bytes:
     """Build FlatBuffer GbdtModel from LightGBM model JSON.
 
@@ -65,6 +79,8 @@ def build_gbdt_model(
         model_json: Output of lgb.Booster.dump_model().
         features_hash: SHA-256 hash of feature specification.
         num_training_samples: Optional number of training samples.
+        training_arches: GPU architectures the model was trained on.
+        model_version: Semantic version string.
 
     Returns:
         FlatBuffer bytes for GbdtModel.
@@ -93,6 +109,20 @@ def build_gbdt_model(
             model_json["objective"]["config"].get("learning_rate", 1.0)
         )
 
+    # Build training_arches vector if provided
+    training_arches_vec = None
+    if training_arches:
+        arch_offsets = [builder.CreateString(arch) for arch in training_arches]
+        builder.StartVector(4, len(arch_offsets), 4)
+        for offset in reversed(arch_offsets):
+            builder.PrependUOffsetTRelative(offset)
+        training_arches_vec = builder.EndVector()
+
+    # Build model_version string if provided
+    model_version_offset = None
+    if model_version:
+        model_version_offset = builder.CreateString(model_version)
+
     _start_gbdt_model(builder)
     _add_gbdt_model_trees(builder, trees_vec)
     _add_gbdt_model_num_features(builder, model_json["max_feature_idx"] + 1)
@@ -104,6 +134,10 @@ def build_gbdt_model(
     if num_training_samples is not None:
         _add_gbdt_model_num_training_samples(builder, num_training_samples)
     _add_gbdt_model_training_objective(builder, objective_offset)
+    if training_arches_vec is not None:
+        _add_gbdt_model_training_arches(builder, training_arches_vec)
+    if model_version_offset is not None:
+        _add_gbdt_model_model_version(builder, model_version_offset)
     model_offset = _end_gbdt_model(builder)
 
     builder.Finish(model_offset, file_identifier=GBDT_MODEL_FILE_IDENTIFIER)
@@ -250,7 +284,7 @@ def _end_gbdt_tree(builder: flatbuffers.Builder) -> int:
 
 # GbdtModel table helpers
 def _start_gbdt_model(builder: flatbuffers.Builder) -> None:
-    builder.StartObject(9)
+    builder.StartObject(11)  # 11 fields including training_arches and model_version
 
 
 def _add_gbdt_model_trees(builder: flatbuffers.Builder, vec: int) -> None:
@@ -287,6 +321,14 @@ def _add_gbdt_model_num_training_samples(builder: flatbuffers.Builder, n: int) -
 
 def _add_gbdt_model_training_objective(builder: flatbuffers.Builder, s: int) -> None:
     builder.PrependUOffsetTRelativeSlot(8, s, 0)
+
+
+def _add_gbdt_model_training_arches(builder: flatbuffers.Builder, vec: int) -> None:
+    builder.PrependUOffsetTRelativeSlot(9, vec, 0)
+
+
+def _add_gbdt_model_model_version(builder: flatbuffers.Builder, s: int) -> None:
+    builder.PrependUOffsetTRelativeSlot(10, s, 0)
 
 
 def _end_gbdt_model(builder: flatbuffers.Builder) -> int:
