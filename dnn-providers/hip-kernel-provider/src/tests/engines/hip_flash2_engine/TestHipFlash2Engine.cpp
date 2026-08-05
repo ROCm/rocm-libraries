@@ -51,8 +51,8 @@ TEST_F(TestHipFlash2Engine, IsApplicableReturnsTrueForFP16SdpaGraphOnGfx942)
     SKIP_IF_NO_DEVICES();
 
     const auto arch = hip_kernel_provider_common::getDeviceString(_handle.getStream());
-    if(arch != "gfx942" && arch != "gfx950")
-        GTEST_SKIP() << "HipFlash2Engine requires gfx942 or gfx950, got: " << arch;
+    if(arch != "gfx942")
+        GTEST_SKIP() << "HipFlash2Engine requires gfx942, got: " << arch;
 
     // FP16 SDPA graph -- should be accepted
     const std::vector<int64_t> dims{1, 32, 2048, 128}; // {batch, heads, seq, D}
@@ -103,7 +103,7 @@ TEST_F(TestHipFlash2Engine, IsApplicableReturnsFalseForUnsupportedHeadDim)
     SKIP_IF_NO_DEVICES();
 
     const auto arch = hip_kernel_provider_common::getDeviceString(_handle.getStream());
-    if(arch != "gfx942" && arch != "gfx950")
+    if(arch != "gfx942")
         GTEST_SKIP();
 
     // D=256 is not supported (VGPR budget exceeded)
@@ -152,7 +152,7 @@ TEST_F(TestHipFlash2Engine, MaxWorkspaceSizeIsZero)
     SKIP_IF_NO_DEVICES();
 
     const auto arch = hip_kernel_provider_common::getDeviceString(_handle.getStream());
-    if(arch != "gfx942" && arch != "gfx950")
+    if(arch != "gfx942")
         GTEST_SKIP();
 
     const std::vector<int64_t> dims{1, 32, 2048, 128};

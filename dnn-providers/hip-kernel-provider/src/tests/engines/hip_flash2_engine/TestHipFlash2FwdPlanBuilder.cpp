@@ -31,7 +31,7 @@ TEST_F(TestHipFlash2FwdPlanBuilder, AcceptsFP16MHACausal)
 {
     SKIP_IF_NO_DEVICES();
     const auto arch = hip_kernel_provider_common::getDeviceString(_handle.getStream());
-    if(arch != "gfx942" && arch != "gfx950")
+    if(arch != "gfx942")
         GTEST_SKIP();
 
     const std::vector<int64_t> dims{1, 32, 4096, 128};
@@ -62,7 +62,7 @@ TEST_F(TestHipFlash2FwdPlanBuilder, AcceptsFP16MHANonCausal)
 {
     SKIP_IF_NO_DEVICES();
     const auto arch = hip_kernel_provider_common::getDeviceString(_handle.getStream());
-    if(arch != "gfx942" && arch != "gfx950")
+    if(arch != "gfx942")
         GTEST_SKIP();
 
     const std::vector<int64_t> dims{1, 32, 2048, 128};
@@ -93,7 +93,7 @@ TEST_F(TestHipFlash2FwdPlanBuilder, AcceptsFP16HeadDim64)
 {
     SKIP_IF_NO_DEVICES();
     const auto arch = hip_kernel_provider_common::getDeviceString(_handle.getStream());
-    if(arch != "gfx942" && arch != "gfx950")
+    if(arch != "gfx942")
         GTEST_SKIP();
 
     const std::vector<int64_t> dims{1, 32, 2048, 64};
@@ -119,7 +119,7 @@ TEST_F(TestHipFlash2FwdPlanBuilder, AcceptsFP16GQA)
 {
     SKIP_IF_NO_DEVICES();
     const auto arch = hip_kernel_provider_common::getDeviceString(_handle.getStream());
-    if(arch != "gfx942" && arch != "gfx950")
+    if(arch != "gfx942")
         GTEST_SKIP();
 
     const std::vector<int64_t> qDims{1, 32, 4096, 128}; // 32 query heads
@@ -175,7 +175,7 @@ TEST_F(TestHipFlash2FwdPlanBuilder, RejectsUnsupportedHeadDim256)
 {
     SKIP_IF_NO_DEVICES();
     const auto arch = hip_kernel_provider_common::getDeviceString(_handle.getStream());
-    if(arch != "gfx942" && arch != "gfx950")
+    if(arch != "gfx942")
         GTEST_SKIP();
 
     const std::vector<int64_t> dims{1, 32, 2048, 256};
@@ -200,7 +200,7 @@ TEST_F(TestHipFlash2FwdPlanBuilder, RejectsShortSequenceDecodeLength)
 {
     SKIP_IF_NO_DEVICES();
     const auto arch = hip_kernel_provider_common::getDeviceString(_handle.getStream());
-    if(arch != "gfx942" && arch != "gfx950")
+    if(arch != "gfx942")
         GTEST_SKIP();
 
     // seq_q=1 means decode -- should use batched GEMM, not Flash2

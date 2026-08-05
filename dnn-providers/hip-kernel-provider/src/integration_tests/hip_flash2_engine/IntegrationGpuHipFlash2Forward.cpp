@@ -5,6 +5,7 @@
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
@@ -66,17 +67,22 @@ protected:
             .set_compute_data_type(DataType_t::FLOAT)
             .set_intermediate_data_type(DataType_t::FLOAT);
 
+        const std::vector<int64_t> qDims{cfg.batch, cfg.num_heads_q, cfg.seq_q, cfg.head_dim};
+        const std::vector<int64_t> kvDims{cfg.batch, cfg.num_heads_kv, cfg.seq_kv, cfg.head_dim};
         auto Q = graph->tensor(TensorAttributes()
                                    .set_name("Q")
-                                   .set_dim({cfg.batch, cfg.num_heads_q, cfg.seq_q, cfg.head_dim})
+                                   .set_dim(qDims)
+                                   .set_stride(generateStrides(qDims))
                                    .set_data_type(DataType_t::HALF));
         auto K = graph->tensor(TensorAttributes()
                                    .set_name("K")
-                                   .set_dim({cfg.batch, cfg.num_heads_kv, cfg.seq_kv, cfg.head_dim})
+                                   .set_dim(kvDims)
+                                   .set_stride(generateStrides(kvDims))
                                    .set_data_type(DataType_t::HALF));
         auto V = graph->tensor(TensorAttributes()
                                    .set_name("V")
-                                   .set_dim({cfg.batch, cfg.num_heads_kv, cfg.seq_kv, cfg.head_dim})
+                                   .set_dim(kvDims)
+                                   .set_stride(generateStrides(kvDims))
                                    .set_data_type(DataType_t::HALF));
 
         // B1: use SdpaAttributes (not SdpaFwdAttributes which does not exist)

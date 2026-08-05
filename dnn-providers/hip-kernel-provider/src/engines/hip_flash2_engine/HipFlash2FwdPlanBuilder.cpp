@@ -71,9 +71,9 @@ bool HipFlash2FwdPlanBuilder::isApplicable(const Handle& handle,
                                "LSE stats output not supported");
     // K2: reject mask types the kernel does not implement
     {
-        const auto maskType = plan_utils::getMaskType(attrs);
-        HIP_KERNEL_RETURN_FALSE_IF(maskType != plan_utils::MaskType::NO_MASK
-                                       && maskType != plan_utils::MaskType::TOP_LEFT_CAUSAL,
+        const auto maskType = asm_sdpa_engine::plan_utils::getMaskType(attrs);
+        HIP_KERNEL_RETURN_FALSE_IF(maskType != asm_sdpa_engine::plan_utils::MaskType::NO_MASK
+                                       && maskType != asm_sdpa_engine::plan_utils::MaskType::TOP_LEFT_CAUSAL,
                                    "Only NO_MASK and TOP_LEFT_CAUSAL are supported");
     }
     HIP_KERNEL_RETURN_FALSE_IF(attrs.seq_len_q_tensor_uid().has_value()
@@ -119,14 +119,16 @@ bool HipFlash2FwdPlanBuilder::isApplicable(const Handle& handle,
                                    + std::to_string(numHeadsQ) + " kv=" + std::to_string(numHeadsKv)
                                    + ")");
 
+    // Flash2 shape variables (declare before guards that reference them)
+    const int seqLenQ = static_cast<int>(qTensor->dims()->Get(2));
+    const int seqLenKv = static_cast<int>(kTensor->dims()->Get(2));
+
     // K3: reject partial query tiles (divergent __syncthreads under my_valid)
     HIP_KERNEL_RETURN_FALSE_IF(
         seqLenQ % 64 != 0,
         "seq_len_q must be a multiple of 64 -- partial tile causes divergent __syncthreads");
 
     // Flash2 crossover heuristic
-    const int seqLenQ = static_cast<int>(qTensor->dims()->Get(2));
-    const int seqLenKv = static_cast<int>(kTensor->dims()->Get(2));
     HIP_KERNEL_RETURN_FALSE_IF(!useFlash2ForShape(seqLenQ, seqLenKv),
                                "shape below Flash2 crossover threshold (seq_q="
                                    + std::to_string(seqLenQ) + " seq_kv=" + std::to_string(seqLenKv)
