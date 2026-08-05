@@ -27,6 +27,7 @@
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
 #include <iostream>
+#include <roc/host_validation/adapters/hipblaslt/Types.hpp>
 #include <roc/host_validation/validation.hpp>
 
 #include "helper.h"
@@ -64,18 +65,29 @@ int validate(const Runner<TypeA, TypeB, TypeCD, AlphaType, BetaType>& runner)
 
     for(int64_t b = 0; b < runner.batch_count; ++b)
     {
-        roc::host_validation::GemmInvocation<TypeA, TypeB, TypeCD, TypeCD, float> invocation{
-            roc::host_validation::ConstMatrixView<TypeA>(
-                aPtr + batchStrideA * b, runner.m, runner.k, 1, runner.m),
-            roc::host_validation::ConstMatrixView<TypeB>(
-                bPtr + batchStrideB * b, runner.k, runner.n, 1, runner.k),
-            roc::host_validation::ConstMatrixView<TypeCD>(
-                cPtr + batchStrideC * b, runner.m, runner.n, 1, runner.m),
-            roc::host_validation::MatrixView<TypeCD>(
-                reference.data() + batchStrideD * b, runner.m, runner.n, 1, runner.m)};
-        invocation.alpha = static_cast<float>(runner.alpha) * scaleA;
-        invocation.beta  = static_cast<float>(runner.beta);
-        roc::host_validation::referenceGemm(invocation);
+        using namespace roc::host_validation;
+        using namespace roc::host_validation::hipblaslt_adapter;
+
+        GemmProblem problem(GemmOperand(tensorView(aPtr + batchStrideA * b,
+                                                   batchStrideA,
+                                                   Layout(Shape{size_t(runner.m), size_t(runner.k)},
+                                                          {1, static_cast<ptrdiff_t>(runner.m)}))),
+                            GemmOperand(tensorView(bPtr + batchStrideB * b,
+                                                   batchStrideB,
+                                                   Layout(Shape{size_t(runner.k), size_t(runner.n)},
+                                                          {1, static_cast<ptrdiff_t>(runner.k)}))),
+                            tensorView(cPtr + batchStrideC * b,
+                                       batchStrideC,
+                                       Layout(Shape{size_t(runner.m), size_t(runner.n)},
+                                              {1, static_cast<ptrdiff_t>(runner.m)})),
+                            mutableTensorView(reference.data() + batchStrideD * b,
+                                              batchStrideD,
+                                              Layout(Shape{size_t(runner.m), size_t(runner.n)},
+                                                     {1, static_cast<ptrdiff_t>(runner.m)})),
+                            ScalarType::Float32);
+        problem.epilogue.alpha = {static_cast<double>(runner.alpha) * scaleA, 0.0};
+        problem.epilogue.beta  = {static_cast<double>(runner.beta), 0.0};
+        referenceGemm(problem);
     }
 
     std::vector<TypeCD> gpuResult(runner.m * runner.n * runner.batch_count);

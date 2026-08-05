@@ -3,6 +3,7 @@
 
 #include <array>
 #include <cmath>
+#include <complex>
 #include <limits>
 #include <roc/host_validation/validation.hpp>
 #include <stdexcept>
@@ -12,10 +13,9 @@ void require(bool condition, const char* message) {
     if (!condition) throw std::runtime_error(message);
 }
 
-void testReferenceGemm() {
+void testRuntimeReferenceGemm() {
     using namespace roc::host_validation;
 
-    // Column-major A(2x3), B(3x2), C/D(2x2).
     const std::array<float, 6> a{1, 4, 2, 5, 3, 6};
     const std::array<float, 6> b{7, 9, 11, 8, 10, 12};
     const std::array<float, 4> c{1, 1, 1, 1};
@@ -24,42 +24,137 @@ void testReferenceGemm() {
     const std::array<float, 2> scaleA{2, 3};
     const std::array<float, 2> scaleB{5, 7};
 
-    GemmInvocation<float, float, float, float, float> invocation{
-        ConstMatrixView<float>(a.data(), 2, 3, 1, 2), ConstMatrixView<float>(b.data(), 3, 2, 1, 3),
-        ConstMatrixView<float>(c.data(), 2, 2, 1, 2), MatrixView<float>(d.data(), 2, 2, 1, 2)};
-    invocation.alpha = 1;
-    invocation.beta = 1;
-    invocation.bias = ConstVectorView<float>(bias.data(), bias.size());
-    invocation.scaleA = ConstVectorView<float>(scaleA.data(), scaleA.size());
-    invocation.scaleB = ConstVectorView<float>(scaleB.data(), scaleB.size());
-    invocation.activation = Activation::Relu;
+    GemmProblem problem(
+        GemmOperand(
+            TensorView::fromNative<float>(Layout(Shape{2, 3}, {1, 2}), std::span<const float>(a))),
+        GemmOperand(
+            TensorView::fromNative<float>(Layout(Shape{3, 2}, {1, 3}), std::span<const float>(b))),
+        TensorView::fromNative<float>(Layout(Shape{2, 2}, {1, 2}), std::span<const float>(c)),
+        MutableTensorView::fromNative<float>(Layout(Shape{2, 2}, {1, 2}), std::span<float>(d)),
+        ScalarType::Float32);
+    problem.epilogue.beta = 1.0;
+    problem.epilogue.bias = VectorBinding{
+        TensorView::fromNative<float>(Layout::contiguous(Shape{2}), std::span<const float>(bias)),
+        MatrixAxis::Row,
+    };
+    problem.epilogue.scaleA =
+        TensorView::fromNative<float>(Layout::contiguous(Shape{2}), std::span<const float>(scaleA));
+    problem.epilogue.scaleB =
+        TensorView::fromNative<float>(Layout::contiguous(Shape{2}), std::span<const float>(scaleB));
+    problem.epilogue.activation = Activation::Relu;
 
-    referenceGemm(invocation);
+    const GemmRunInfo run = referenceGemm(problem);
+    require(run.backendUsed == GemmBackend::Canonical && run.outputElementsComputed == 4,
+            "Runtime reference GEMM run information mismatch.");
 
-    // Unscaled AB is [[58,64],[139,154]].
-    const std::array<float, 4> expected{58 * 2 * 5 + 1 + 1, 0, 64 * 2 * 7 + 1 + 1, 0};
-    const auto comparison = compare(std::span<const float>(d), std::span<const float>(expected));
-    require(comparison.passed(), "Reference GEMM result mismatch.");
+    const std::array<float, 4> expected{
+        58 * 2 * 5 + 1 + 1,
+        0,
+        64 * 2 * 7 + 1 + 1,
+        0,
+    };
+    require(compare(std::span<const float>(d), std::span<const float>(expected)).passed(),
+            "Runtime reference GEMM result mismatch.");
+
+    const GemmRunInfo fallback = referenceGemm(problem, {.backend = GemmBackend::Tiled});
+    require(fallback.backendUsed == GemmBackend::Canonical && fallback.fallbackReason.has_value(),
+            "Runtime reference GEMM backend fallback mismatch.");
 }
 
-void testBlockScale() {
+void testRuntimeMixedAndBlockScaledGemm() {
     using namespace roc::host_validation;
 
-    const std::array<float, 4> a{1, 1, 1, 1};
-    const std::array<float, 4> b{1, 1, 1, 1};
-    const std::array<float, 1> c{0};
-    std::array<float, 1> d{};
-    const std::array<float, 2> scaleA{2, 3};
-    const std::array<float, 2> scaleB{5, 7};
+    const std::array<float, 2> aValues{1.25f, 2.5f};
+    const std::array<float, 2> bValues{2.0f, 3.0f};
+    const std::array<float, 1> cValues{1.0f};
+    Tensor a =
+        Tensor::fromValues(ScalarType::Float8E4M3, Shape{1, 2}, std::span<const float>(aValues));
+    Tensor b =
+        Tensor::fromValues(ScalarType::Float8E5M2, Shape{2, 1}, std::span<const float>(bValues));
+    Tensor c =
+        Tensor::fromValues(ScalarType::BFloat16, Shape{1, 1}, std::span<const float>(cValues));
+    Tensor d(ScalarType::Float16, Shape{1, 1});
 
-    GemmInvocation<float, float, float, float, float> invocation{
-        ConstMatrixView<float>(a.data(), 1, 4, 1, 1), ConstMatrixView<float>(b.data(), 4, 1, 1, 1),
-        ConstMatrixView<float>(c.data(), 1, 1, 1, 1), MatrixView<float>(d.data(), 1, 1, 1, 1)};
-    invocation.blockScaleA = makeBlockScaleView<float>(scaleA.data(), 2, 2, 1);
-    invocation.blockScaleB = makeBlockScaleView<float>(scaleB.data(), 2, 2, 1);
+    GemmOperand operandA(a.view());
+    operandA.computeType = ScalarType::Float4E2M1;
+    GemmProblem mixed(std::move(operandA), GemmOperand(b.view()), c.view(), d.mutableView(),
+                      ScalarType::Float32);
+    mixed.epilogue.beta = 1.0;
+    referenceGemm(mixed);
+    require(d.view().loadAs<float>({0, 0}) == 9.0f, "Runtime mixed-type GEMM result mismatch.");
 
-    referenceGemm(invocation);
-    require(d[0] == 2 * 2 * 5 + 2 * 3 * 7, "Block-scaled GEMM result mismatch.");
+    const std::array<float, 4> ones{1, 1, 1, 1};
+    const std::array<float, 1> zero{0};
+    const std::array<float, 2> scaleAValues{2, 4};
+    const std::array<float, 2> scaleBValues{8, 16};
+    Tensor blockA =
+        Tensor::fromValues(ScalarType::Float32, Shape{1, 4}, std::span<const float>(ones));
+    Tensor blockB =
+        Tensor::fromValues(ScalarType::Float32, Shape{4, 1}, std::span<const float>(ones));
+    Tensor blockC =
+        Tensor::fromValues(ScalarType::Float32, Shape{1, 1}, std::span<const float>(zero));
+    Tensor blockD(ScalarType::Float32, Shape{1, 1});
+    Tensor scalesA =
+        Tensor::fromValues(ScalarType::E8M0, Shape{1, 2}, std::span<const float>(scaleAValues));
+    Tensor scalesB =
+        Tensor::fromValues(ScalarType::E8M0, Shape{1, 2}, std::span<const float>(scaleBValues));
+
+    GemmOperand blockOperandA(blockA.view());
+    GemmOperand blockOperandB(blockB.view());
+    blockOperandA.blockScale = BlockScaleBinding{scalesA.view(), 2};
+    blockOperandB.blockScale = BlockScaleBinding{scalesB.view(), 2};
+    GemmProblem blockScaled(std::move(blockOperandA), std::move(blockOperandB), blockC.view(),
+                            blockD.mutableView(), ScalarType::Float32);
+    referenceGemm(blockScaled);
+    require(blockD.view().loadAs<float>({0, 0}) == 2 * 2 * 8 + 2 * 4 * 16,
+            "Runtime block-scaled GEMM result mismatch.");
+}
+
+void testRuntimeComplexAndExplicitAxisGemm() {
+    using namespace roc::host_validation;
+
+    const std::array<std::complex<float>, 1> complexA{std::complex<float>(1.0f, 2.0f)};
+    const std::array<std::complex<float>, 1> complexB{std::complex<float>(3.0f, 4.0f)};
+    const std::array<std::complex<float>, 1> complexC{};
+    std::array<std::complex<float>, 1> complexD{};
+
+    GemmOperand complexOperandA(TensorView::fromNative<std::complex<float>>(
+        Layout::contiguous(Shape{1, 1}), std::span<const std::complex<float>>(complexA)));
+    complexOperandA.conjugate = true;
+    GemmProblem complexProblem(
+        std::move(complexOperandA),
+        GemmOperand(TensorView::fromNative<std::complex<float>>(
+            Layout::contiguous(Shape{1, 1}), std::span<const std::complex<float>>(complexB))),
+        TensorView::fromNative<std::complex<float>>(Layout::contiguous(Shape{1, 1}),
+                                                    std::span<const std::complex<float>>(complexC)),
+        MutableTensorView::fromNative<std::complex<float>>(
+            Layout::contiguous(Shape{1, 1}), std::span<std::complex<float>>(complexD)),
+        ScalarType::ComplexFloat32);
+    referenceGemm(complexProblem);
+    require(complexD[0] == std::complex<float>(11.0f, -2.0f),
+            "Runtime complex GEMM result mismatch.");
+
+    const std::array<float, 1> realA{1};
+    const std::array<float, 2> realB{0, 0};
+    const std::array<float, 2> realC{0, 0};
+    const std::array<float, 2> columnBias{2, 3};
+    std::array<float, 2> realD{};
+    GemmProblem axisProblem(GemmOperand(TensorView::fromNative<float>(
+                                Layout::contiguous(Shape{1, 1}), std::span<const float>(realA))),
+                            GemmOperand(TensorView::fromNative<float>(
+                                Layout::contiguous(Shape{1, 2}), std::span<const float>(realB))),
+                            TensorView::fromNative<float>(Layout::contiguous(Shape{1, 2}),
+                                                          std::span<const float>(realC)),
+                            MutableTensorView::fromNative<float>(Layout::contiguous(Shape{1, 2}),
+                                                                 std::span<float>(realD)),
+                            ScalarType::Float32);
+    axisProblem.epilogue.bias = VectorBinding{
+        TensorView::fromNative<float>(Layout::contiguous(Shape{2}),
+                                      std::span<const float>(columnBias)),
+        MatrixAxis::Column,
+    };
+    referenceGemm(axisProblem);
+    require(realD == columnBias, "Runtime GEMM explicit column-axis bias mismatch.");
 }
 
 void testActivations() {
@@ -70,23 +165,28 @@ void testActivations() {
     const std::array<float, 1> c{0};
     std::array<float, 1> d{};
 
-    GemmInvocation<float, float, float, float, float> invocation{
-        ConstMatrixView<float>(a.data(), 1, 1, 1, 1), ConstMatrixView<float>(b.data(), 1, 1, 1, 1),
-        ConstMatrixView<float>(c.data(), 1, 1, 1, 1), MatrixView<float>(d.data(), 1, 1, 1, 1)};
+    GemmProblem problem(
+        GemmOperand(TensorView::fromNative<float>(Layout::contiguous(Shape{1, 1}),
+                                                  std::span<const float>(a))),
+        GemmOperand(TensorView::fromNative<float>(Layout::contiguous(Shape{1, 1}),
+                                                  std::span<const float>(b))),
+        TensorView::fromNative<float>(Layout::contiguous(Shape{1, 1}), std::span<const float>(c)),
+        MutableTensorView::fromNative<float>(Layout::contiguous(Shape{1, 1}), std::span<float>(d)),
+        ScalarType::Float32);
 
-    invocation.activation = Activation::Gelu;
-    referenceGemm(invocation);
+    problem.epilogue.activation = Activation::Gelu;
+    referenceGemm(problem);
     require(std::abs(d[0] - 1.9545977f) < 1e-6f, "GELU result mismatch.");
 
-    invocation.activation = Activation::Silu;
-    invocation.activationParameter0 = 1;
-    referenceGemm(invocation);
+    problem.epilogue.activation = Activation::Silu;
+    problem.epilogue.activationParameter0 = 1;
+    referenceGemm(problem);
     require(std::abs(d[0] - 1.7615942f) < 1e-6f, "SiLU result mismatch.");
 
-    invocation.activation = Activation::Clamp;
-    invocation.activationParameter0 = -1;
-    invocation.activationParameter1 = 1;
-    referenceGemm(invocation);
+    problem.epilogue.activation = Activation::Clamp;
+    problem.epilogue.activationParameter0 = -1;
+    problem.epilogue.activationParameter1 = 1;
+    referenceGemm(problem);
     require(d[0] == 1, "Clamp result mismatch.");
 }
 
@@ -102,13 +202,19 @@ void testStridedAndOffsetViews() {
     std::array<float, 12> d;
     d.fill(-99);
 
-    GemmInvocation<float, float, float, float, float> invocation{
-        ConstMatrixView<float>(a.data(), 2, 3, 4, 1), ConstMatrixView<float>(b.data(), 3, 2, 3, 1),
-        ConstMatrixView<float>(c.data(), 2, 2, 1, 4), MatrixView<float>(d.data() + 1, 2, 2, 1, 5)};
-    invocation.alpha = 2;
-    invocation.beta = 3;
+    const Layout outputLayout(Shape{2, 2}, {1, 5}, 1);
+    GemmProblem problem(
+        GemmOperand(
+            TensorView::fromNative<float>(Layout(Shape{2, 3}, {4, 1}), std::span<const float>(a))),
+        GemmOperand(
+            TensorView::fromNative<float>(Layout(Shape{3, 2}, {3, 1}), std::span<const float>(b))),
+        TensorView::fromNative<float>(Layout(Shape{2, 2}, {1, 4}), std::span<const float>(c)),
+        MutableTensorView::fromNative<float>(outputLayout, std::span<float>(d)),
+        ScalarType::Float32);
+    problem.epilogue.alpha = 2.0;
+    problem.epilogue.beta = 3.0;
 
-    referenceGemm(invocation);
+    referenceGemm(problem);
 
     std::array<float, 12> expected;
     expected.fill(-99);
@@ -116,8 +222,9 @@ void testStridedAndOffsetViews() {
     expected[2] = 2 * 139 + 3;
     expected[6] = 2 * 64 + 3;
     expected[7] = 2 * 154 + 3;
-    const auto comparison = compare(MatrixView<float>(d.data() + 1, 2, 2, 1, 5).asConst(),
-                                    ConstMatrixView<float>(expected.data() + 1, 2, 2, 1, 5));
+    const auto comparison =
+        compare(TensorView::fromNative<float>(outputLayout, std::span<const float>(d)),
+                TensorView::fromNative<float>(outputLayout, std::span<const float>(expected)));
     require(comparison.passed(), "Strided GEMM matrix comparison failed.");
     require(d[0] == -99 && d[3] == -99 && d[11] == -99, "Strided GEMM modified padding.");
 }
@@ -189,8 +296,9 @@ void testGenerationAndComparison() {
 }  // namespace
 
 int main() {
-    testReferenceGemm();
-    testBlockScale();
+    testRuntimeReferenceGemm();
+    testRuntimeMixedAndBlockScaledGemm();
+    testRuntimeComplexAndExplicitAxisGemm();
     testActivations();
     testStridedAndOffsetViews();
     testGenerationAndComparison();

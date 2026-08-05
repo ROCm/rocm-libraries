@@ -12,10 +12,55 @@
 
 namespace TensileLite::Client
 {
-    inline roc::host_validation::Activation toHostValidationActivation(ActivationType activation)
-    {
-        switch(activation)
-        {
+inline roc::host_validation::ScalarType toHostValidationScalarType(rocisa::DataType type) {
+    using roc::host_validation::ScalarType;
+    switch (type) {
+        case rocisa::DataType::Float:
+        case rocisa::DataType::XFloat32:
+            return ScalarType::Float32;
+        case rocisa::DataType::Double:
+            return ScalarType::Float64;
+        case rocisa::DataType::ComplexFloat:
+            return ScalarType::ComplexFloat32;
+        case rocisa::DataType::ComplexDouble:
+            return ScalarType::ComplexFloat64;
+        case rocisa::DataType::Half:
+            return ScalarType::Float16;
+        case rocisa::DataType::BFloat16:
+            return ScalarType::BFloat16;
+        case rocisa::DataType::Int8:
+            return ScalarType::Int8;
+        case rocisa::DataType::Int32:
+            return ScalarType::Int32;
+        case rocisa::DataType::Int64:
+            return ScalarType::Int64;
+        case rocisa::DataType::Float8:
+            return ScalarType::Float8E4M3;
+        case rocisa::DataType::BFloat8:
+            return ScalarType::Float8E5M2;
+        case rocisa::DataType::Float8_fnuz:
+            return ScalarType::Float8E4M3Fnuz;
+        case rocisa::DataType::BFloat8_fnuz:
+            return ScalarType::Float8E5M2Fnuz;
+        case rocisa::DataType::Float6:
+            return ScalarType::Float6E2M3;
+        case rocisa::DataType::BFloat6:
+            return ScalarType::Float6E3M2;
+        case rocisa::DataType::Float4:
+            return ScalarType::Float4E2M1;
+        case rocisa::DataType::E8:
+            throw std::invalid_argument(
+                "TensileLite E8 treats raw zero as numeric zero; convert it "
+                "explicitly before using the OCP E8M0 tensor type.");
+        case rocisa::DataType::E5M3:
+            return ScalarType::E5M3;
+        default:
+            throw std::invalid_argument("rocisa data type has no scalar host-validation mapping.");
+    }
+}
+
+inline roc::host_validation::Activation toHostValidationActivation(ActivationType activation) {
+    switch (activation) {
         case ActivationType::None:
             return roc::host_validation::Activation::None;
         case ActivationType::Relu:
@@ -23,74 +68,6 @@ namespace TensileLite::Client
         default:
             throw std::invalid_argument(
                 "The host-validation POC bridge supports None and Relu activations.");
-        }
-    }
-
-    template <typename Accumulator, typename Narrow>
-    Accumulator quantizeForHostValidation(Accumulator value)
-    {
-        return static_cast<Accumulator>(static_cast<Narrow>(value));
-    }
-
-    template <typename Accumulator>
-    roc::host_validation::QuantizeFunction<Accumulator>
-        hostValidationQuantizerFor(rocisa::DataType type)
-    {
-        switch(type)
-        {
-        case rocisa::DataType::Float:
-            return &quantizeForHostValidation<Accumulator, float>;
-        case rocisa::DataType::Double:
-            return &quantizeForHostValidation<Accumulator, double>;
-        case rocisa::DataType::Half:
-            return &quantizeForHostValidation<Accumulator, Half>;
-        case rocisa::DataType::BFloat16:
-            return &quantizeForHostValidation<Accumulator, BFloat16>;
-#ifdef TENSILE_USE_FP8_BF8
-        case rocisa::DataType::Float8:
-            return &quantizeForHostValidation<Accumulator, Float8>;
-        case rocisa::DataType::BFloat8:
-            return &quantizeForHostValidation<Accumulator, BFloat8>;
-        case rocisa::DataType::Float8_fnuz:
-            return &quantizeForHostValidation<Accumulator, Float8_fnuz>;
-        case rocisa::DataType::BFloat8_fnuz:
-            return &quantizeForHostValidation<Accumulator, BFloat8_fnuz>;
-#endif
-        default:
-            throw std::invalid_argument(
-                "Unsupported compute-input type in host-validation POC bridge.");
-        }
-    }
-
-    template <typename InputA,
-              typename InputB,
-              typename InputC,
-              typename Output,
-              typename Accumulator>
-    roc::host_validation::GemmInvocation<InputA, InputB, InputC, Output, Accumulator>
-        makeHostValidationColumnMajorGemm(const InputA* a,
-                                          const InputB* b,
-                                          const InputC* c,
-                                          Output*       d,
-                                          size_t        m,
-                                          size_t        n,
-                                          size_t        k,
-                                          bool          transA,
-                                          bool          transB)
-    {
-        using roc::host_validation::ConstMatrixView;
-        using roc::host_validation::GemmInvocation;
-        using roc::host_validation::MatrixView;
-
-        const ptrdiff_t strideARow    = transA ? static_cast<ptrdiff_t>(k) : 1;
-        const ptrdiff_t strideAColumn = transA ? 1 : static_cast<ptrdiff_t>(m);
-        const ptrdiff_t strideBRow    = transB ? static_cast<ptrdiff_t>(n) : 1;
-        const ptrdiff_t strideBColumn = transB ? 1 : static_cast<ptrdiff_t>(k);
-
-        return GemmInvocation<InputA, InputB, InputC, Output, Accumulator>{
-            ConstMatrixView<InputA>(a, m, k, strideARow, strideAColumn),
-            ConstMatrixView<InputB>(b, k, n, strideBRow, strideBColumn),
-            ConstMatrixView<InputC>(c, m, n, 1, static_cast<ptrdiff_t>(m)),
-            MatrixView<Output>(d, m, n, 1, static_cast<ptrdiff_t>(m))};
     }
 }
+}  // namespace TensileLite::Client

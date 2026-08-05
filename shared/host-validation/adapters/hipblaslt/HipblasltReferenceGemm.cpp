@@ -23,16 +23,20 @@
  * SOFTWARE.
  *
  *******************************************************************************/
+#include <cblas.h>
+#include <omp.h>
+
+#include <bitset>
+#include <iostream>
 #include <roc/host_validation/adapters/hipblaslt/HipblasltReferenceGemm.hpp>
+#include <roc/host_validation/validation.hpp>
+#include <span>
+#include <stdexcept>
+#include <utility>
+
 #include "datatype_interface.hpp"
 #include "hipblaslt_vector.hpp"
 #include "utility.hpp"
-#include <bitset>
-#include <cblas.h>
-#include <iostream>
-#include <omp.h>
-#include <roc/host_validation/validation.hpp>
-#include <stdexcept>
 
 namespace
 {
@@ -1454,19 +1458,33 @@ void hipblaslt_reference_gemm(hipblasOperation_t       transA,
     }
     else
     {
-        roc::host_validation::GemmInvocation<TcCast, TcCast, TcCast, TcCast, TcCast> invocation{
-            roc::host_validation::ConstMatrixView<TcCast>(
-                aValues, size_t(m), size_t(k), aRowStride, aColumnStride),
-            roc::host_validation::ConstMatrixView<TcCast>(
-                bValues, size_t(k), size_t(n), bRowStride, bColumnStride),
-            roc::host_validation::ConstMatrixView<TcCast>(
-                cValues, size_t(m), size_t(n), 1, ldc),
-            roc::host_validation::MatrixView<TcCast>(cValues, size_t(m), size_t(n), 1, ldc)};
-        invocation.alpha      = alphaCast;
-        invocation.beta       = betaCast;
-        invocation.conjugateA = transA == HIPBLAS_OP_C;
-        invocation.conjugateB = transB == HIPBLAS_OP_C;
-        roc::host_validation::referenceGemm(invocation);
+        using namespace roc::host_validation;
+        GemmOperand operandA(TensorView::fromNative<TcCast>(
+            Layout(Shape{size_t(m), size_t(k)}, {aRowStride, aColumnStride}),
+            std::span<const TcCast>(aValues, sizeA)));
+        GemmOperand operandB(TensorView::fromNative<TcCast>(
+            Layout(Shape{size_t(k), size_t(n)}, {bRowStride, bColumnStride}),
+            std::span<const TcCast>(bValues, sizeB)));
+        operandA.conjugate = transA == HIPBLAS_OP_C;
+        operandB.conjugate = transB == HIPBLAS_OP_C;
+
+        GemmProblem problem(
+            std::move(operandA), std::move(operandB),
+            TensorView::fromNative<TcCast>(Layout(Shape{size_t(m), size_t(n)}, {1, ldc}),
+                                           std::span<const TcCast>(cValues, sizeC)),
+            MutableTensorView::fromNative<TcCast>(Layout(Shape{size_t(m), size_t(n)}, {1, ldc}),
+                                                  std::span<TcCast>(cValues, sizeC)),
+            nativeScalarType<TcCast>);
+        if constexpr (is_std_complex_v<TcCast>) {
+            problem.epilogue.alpha = {static_cast<double>(alphaCast.real()),
+                                      static_cast<double>(alphaCast.imag())};
+            problem.epilogue.beta = {static_cast<double>(betaCast.real()),
+                                     static_cast<double>(betaCast.imag())};
+        } else {
+            problem.epilogue.alpha = {static_cast<double>(alphaCast), 0.0};
+            problem.epilogue.beta = {static_cast<double>(betaCast), 0.0};
+        }
+        referenceGemm(problem);
     }
 
     if(scaleD != static_cast<Tc>(1))

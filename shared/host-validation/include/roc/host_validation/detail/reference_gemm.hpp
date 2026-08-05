@@ -4,14 +4,20 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
+#include <bit>
 #include <cmath>
 #include <complex>
 #include <cstddef>
+#include <cstdint>
 #include <optional>
-#include <roc/host_validation/detail/tensor_views.hpp>
+#include <roc/host_validation/tensor.hpp>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
+#include <utility>
+#include <vector>
 
 namespace roc::host_validation {
 enum class Activation {
@@ -22,27 +28,90 @@ enum class Activation {
     Clamp,
 };
 
-template <typename T>
-using QuantizeFunction = T (*)(T);
+enum class MatrixAxis {
+    Row,
+    Column,
+};
 
-template <typename Accumulator>
-struct BlockScaleView {
-    using LoadFunction = Accumulator (*)(const void*, size_t);
+enum class MathMode {
+    Default,
+    XFloat32,
+};
 
-    const void* data = nullptr;
-    LoadFunction load = nullptr;
-    size_t blockSize = 0;
-    size_t freeStride = 0;
-    size_t blockStride = 0;
+enum class GemmBackend {
+    Automatic,
+    Canonical,
+    Tiled,
+    Blas,
+};
 
-    bool empty() const {
-        return data == nullptr && load == nullptr && blockSize == 0 && freeStride == 0 &&
-               blockStride == 0;
+struct VectorBinding {
+    TensorView values;
+    MatrixAxis axis = MatrixAxis::Row;
+};
+
+struct BlockScaleBinding {
+    TensorView values;
+    size_t blockSize;
+};
+
+struct GemmOperand {
+    explicit GemmOperand(TensorView tensor) : values(std::move(tensor)) {}
+
+    TensorView values;
+    std::optional<ScalarType> computeType;
+    std::optional<BlockScaleBinding> blockScale;
+    bool conjugate = false;
+};
+
+struct GemmEpilogue {
+    std::complex<double> alpha = {1.0, 0.0};
+    std::complex<double> beta = {0.0, 0.0};
+    std::optional<VectorBinding> bias;
+    std::optional<VectorBinding> scaleAlpha;
+    std::optional<TensorView> scaleA;
+    std::optional<TensorView> scaleB;
+    Activation activation = Activation::None;
+    double activationParameter0 = 0.0;
+    double activationParameter1 = 0.0;
+};
+
+struct GemmProblem {
+    GemmProblem(GemmOperand aOperand, GemmOperand bOperand, TensorView cTensor,
+                MutableTensorView dTensor, ScalarType accumulator)
+        : a(std::move(aOperand)),
+          b(std::move(bOperand)),
+          c(std::move(cTensor)),
+          d(std::move(dTensor)),
+          accumulatorType(accumulator) {}
+
+    GemmOperand a;
+    GemmOperand b;
+    TensorView c;
+    MutableTensorView d;
+    ScalarType accumulatorType;
+    MathMode mathMode = MathMode::Default;
+    GemmEpilogue epilogue;
+};
+
+struct GemmRunOptions {
+    GemmBackend backend = GemmBackend::Automatic;
+    bool requireRequestedBackend = false;
+};
+
+struct GemmSupportInfo {
+    bool supported = false;
+    std::string reason;
+
+    explicit operator bool() const {
+        return supported;
     }
+};
 
-    Accumulator value(size_t freeIndex, size_t blockIndex) const {
-        return load(data, freeIndex * freeStride + blockIndex * blockStride);
-    }
+struct GemmRunInfo {
+    GemmBackend backendUsed = GemmBackend::Canonical;
+    std::optional<std::string> fallbackReason;
+    size_t outputElementsComputed = 0;
 };
 
 namespace detail {
@@ -58,11 +127,6 @@ T conjugateIfNeeded(const T& value, bool conjugate) {
         return conjugate ? std::conj(value) : value;
     else
         return value;
-}
-
-template <typename Accumulator, typename Scale>
-Accumulator loadScale(const void* data, size_t index) {
-    return static_cast<Accumulator>(static_cast<const Scale*>(data)[index]);
 }
 
 template <typename Accumulator>
@@ -98,181 +162,477 @@ Accumulator applyActivation(Activation activation, Accumulator value, Accumulato
 
     throw std::invalid_argument("Unsupported reference GEMM activation.");
 }
-}  // namespace detail
 
-template <typename Accumulator, typename Scale>
-BlockScaleView<Accumulator> makeBlockScaleView(const Scale* data, size_t blockSize,
-                                               size_t freeStride, size_t blockStride) {
-    return {data, &detail::loadScale<Accumulator, Scale>, blockSize, freeStride, blockStride};
+inline bool isComplexScalarType(ScalarType type) {
+    return scalarTypeInfo(type).category == ScalarCategory::Complex;
 }
 
-template <typename InputA, typename InputB, typename InputC, typename Output, typename Accumulator>
-struct GemmInvocation {
-    GemmInvocation(ConstMatrixView<InputA> aView, ConstMatrixView<InputB> bView,
-                   ConstMatrixView<InputC> cView, MatrixView<Output> dView)
-        : a(aView), b(bView), c(cView), d(dView) {}
+inline bool isScaleScalarType(ScalarType type) {
+    return scalarTypeInfo(type).category == ScalarCategory::Scale;
+}
 
-    ConstMatrixView<InputA> a;
-    ConstMatrixView<InputB> b;
-    ConstMatrixView<InputC> c;
-    MatrixView<Output> d;
+inline bool isRuntimeGemmAccumulator(ScalarType type) {
+    switch (type) {
+        case ScalarType::Float32:
+        case ScalarType::Float64:
+        case ScalarType::ComplexFloat32:
+        case ScalarType::ComplexFloat64:
+            return true;
+        default:
+            return false;
+    }
+}
 
-    Accumulator alpha = Accumulator(1);
-    Accumulator beta = Accumulator(0);
+template <typename Accumulator>
+using RuntimeLoadFunction = Accumulator (*)(std::span<const std::byte>, ptrdiff_t);
 
-    std::optional<ConstVectorView<Accumulator>> bias;
-    std::optional<ConstVectorView<Accumulator>> scaleAlpha;
-    std::optional<ConstVectorView<Accumulator>> scaleA;
-    std::optional<ConstVectorView<Accumulator>> scaleB;
+template <typename Accumulator>
+using RuntimeStoreFunction = void (*)(std::span<std::byte>, ptrdiff_t, Accumulator);
 
-    int factorDimension = 0;
-    Activation activation = Activation::None;
-    Accumulator activationParameter0 = Accumulator(0);
-    Accumulator activationParameter1 = Accumulator(0);
+template <typename Accumulator, typename Tag>
+Accumulator runtimeLoadScalar(std::span<const std::byte> storage, ptrdiff_t logicalOffset) {
+    return decodeScalarKnown<Tag::type, Accumulator>(storage, logicalOffset);
+}
 
-    QuantizeFunction<Accumulator> quantizeA = nullptr;
-    QuantizeFunction<Accumulator> quantizeB = nullptr;
-    bool conjugateA = false;
-    bool conjugateB = false;
+template <typename Accumulator, typename Tag>
+void runtimeStoreScalar(std::span<std::byte> storage, ptrdiff_t logicalOffset, Accumulator value) {
+    encodeScalarKnown<Tag::type>(storage, logicalOffset, value);
+}
 
-    BlockScaleView<Accumulator> blockScaleA;
-    BlockScaleView<Accumulator> blockScaleB;
+template <typename Accumulator>
+RuntimeLoadFunction<Accumulator> runtimeLoadFunction(ScalarType type) {
+    return visitScalarType(type,
+                           []<typename Tag>() { return &runtimeLoadScalar<Accumulator, Tag>; });
+}
+
+template <typename Accumulator>
+RuntimeStoreFunction<Accumulator> runtimeStoreFunction(ScalarType type) {
+    return visitScalarType(type,
+                           []<typename Tag>() { return &runtimeStoreScalar<Accumulator, Tag>; });
+}
+
+template <typename Accumulator>
+class RuntimeMatrixReader {
+   public:
+    explicit RuntimeMatrixReader(TensorView view)
+        : m_storage(view.storage()),
+          m_offset(view.layout().offset()),
+          m_rowStride(view.layout().strides()[0]),
+          m_columnStride(view.layout().strides()[1]),
+          m_load(runtimeLoadFunction<Accumulator>(view.type())) {}
+
+    Accumulator operator()(size_t row, size_t column) const {
+        return m_load(m_storage, m_offset + static_cast<ptrdiff_t>(row) * m_rowStride +
+                                     static_cast<ptrdiff_t>(column) * m_columnStride);
+    }
+
+   private:
+    std::span<const std::byte> m_storage;
+    ptrdiff_t m_offset;
+    ptrdiff_t m_rowStride;
+    ptrdiff_t m_columnStride;
+    RuntimeLoadFunction<Accumulator> m_load;
 };
 
-template <typename InputA, typename InputB, typename InputC, typename Output, typename Accumulator>
-void validate(const GemmInvocation<InputA, InputB, InputC, Output, Accumulator>& invocation) {
-    const size_t m = invocation.a.rows();
-    const size_t k = invocation.a.columns();
-    const size_t n = invocation.b.columns();
+template <typename Accumulator>
+class RuntimeMatrixWriter {
+   public:
+    explicit RuntimeMatrixWriter(MutableTensorView view)
+        : m_storage(view.storage()),
+          m_offset(view.layout().offset()),
+          m_rowStride(view.layout().strides()[0]),
+          m_columnStride(view.layout().strides()[1]),
+          m_store(runtimeStoreFunction<Accumulator>(view.type())) {}
 
-    if (invocation.b.rows() != k)
-        throw std::invalid_argument("Reference GEMM K dimension mismatch.");
-    if (invocation.c.rows() != m || invocation.c.columns() != n)
-        throw std::invalid_argument("Reference GEMM C shape mismatch.");
-    if (invocation.d.rows() != m || invocation.d.columns() != n)
-        throw std::invalid_argument("Reference GEMM D shape mismatch.");
-    if (invocation.factorDimension != 0 && invocation.factorDimension != 1)
-        throw std::invalid_argument("Reference GEMM factor dimension must be 0 or 1.");
-    if (invocation.bias && invocation.bias->size() != m)
-        throw std::invalid_argument("Reference GEMM bias length must equal M.");
-    if (invocation.scaleA && invocation.scaleA->size() != m)
-        throw std::invalid_argument("Reference GEMM scale-A length must equal M.");
-    if (invocation.scaleB && invocation.scaleB->size() != n)
-        throw std::invalid_argument("Reference GEMM scale-B length must equal N.");
-    if (invocation.scaleAlpha) {
-        const size_t expected = invocation.factorDimension == 0 ? m : n;
-        if (invocation.scaleAlpha->size() != expected)
+    void store(size_t row, size_t column, Accumulator value) const {
+        m_store(m_storage,
+                m_offset + static_cast<ptrdiff_t>(row) * m_rowStride +
+                    static_cast<ptrdiff_t>(column) * m_columnStride,
+                value);
+    }
+
+   private:
+    std::span<std::byte> m_storage;
+    ptrdiff_t m_offset;
+    ptrdiff_t m_rowStride;
+    ptrdiff_t m_columnStride;
+    RuntimeStoreFunction<Accumulator> m_store;
+};
+
+template <typename Accumulator>
+class RuntimeVectorReader {
+   public:
+    explicit RuntimeVectorReader(TensorView view)
+        : m_storage(view.storage()),
+          m_offset(view.layout().offset()),
+          m_stride(view.layout().strides()[0]),
+          m_load(runtimeLoadFunction<Accumulator>(view.type())) {}
+
+    Accumulator operator[](size_t index) const {
+        return m_load(m_storage, m_offset + static_cast<ptrdiff_t>(index) * m_stride);
+    }
+
+   private:
+    std::span<const std::byte> m_storage;
+    ptrdiff_t m_offset;
+    ptrdiff_t m_stride;
+    RuntimeLoadFunction<Accumulator> m_load;
+};
+
+template <typename Accumulator>
+class RuntimeQuantizer {
+   public:
+    RuntimeQuantizer() = default;
+
+    explicit RuntimeQuantizer(std::optional<ScalarType> type) {
+        if (!type) return;
+        m_load = runtimeLoadFunction<Accumulator>(*type);
+        m_store = runtimeStoreFunction<Accumulator>(*type);
+    }
+
+    Accumulator operator()(Accumulator value) const {
+        if (m_load == nullptr) return value;
+        std::array<std::byte, 16> storage{};
+        m_store(storage, 0, value);
+        return m_load(storage, 0);
+    }
+
+   private:
+    RuntimeLoadFunction<Accumulator> m_load = nullptr;
+    RuntimeStoreFunction<Accumulator> m_store = nullptr;
+};
+
+inline float quantizeXFloat32(float value) {
+    uint32_t bits = std::bit_cast<uint32_t>(value);
+    if ((bits & 0x7f800000U) == 0x7f800000U) return value;
+    const uint32_t retainedLeastSignificantBit = (bits >> 13) & 1U;
+    bits += 0x0fffU + retainedLeastSignificantBit;
+    bits &= 0xffffe000U;
+    return std::bit_cast<float>(bits);
+}
+
+template <typename Accumulator>
+using RuntimeMathFunction = Accumulator (*)(Accumulator);
+
+template <typename Accumulator>
+Accumulator identityMath(Accumulator value) {
+    return value;
+}
+
+inline float xfloat32Math(float value) {
+    return quantizeXFloat32(value);
+}
+
+template <typename Accumulator>
+RuntimeMathFunction<Accumulator> runtimeMathFunction(MathMode mode) {
+    if (mode == MathMode::Default) return &identityMath<Accumulator>;
+    if constexpr (std::is_same_v<Accumulator, float>) {
+        if (mode == MathMode::XFloat32) return &xfloat32Math;
+    }
+    throw std::invalid_argument("XFloat32 math mode requires a Float32 accumulator.");
+}
+
+template <typename Accumulator>
+Accumulator runtimeScalar(std::complex<double> value, const char* name) {
+    if constexpr (IsComplex<Accumulator>::value) {
+        return Accumulator(static_cast<typename Accumulator::value_type>(value.real()),
+                           static_cast<typename Accumulator::value_type>(value.imag()));
+    } else {
+        if (value.imag() != 0.0)
             throw std::invalid_argument(
-                "Reference GEMM scale-alpha length does not match factor dimension.");
+                std::string("Reference GEMM real accumulator has complex ") + name + ".");
+        return static_cast<Accumulator>(value.real());
     }
+}
 
-    switch (invocation.activation) {
-        case Activation::None:
-        case Activation::Relu:
-        case Activation::Gelu:
-        case Activation::Silu:
-        case Activation::Clamp:
-            break;
-        default:
-            throw std::invalid_argument("Unsupported reference GEMM activation.");
+inline void requireRank(const Shape& shape, size_t rank, const char* name) {
+    if (shape.rank() != rank)
+        throw std::invalid_argument(std::string("Reference GEMM ") + name + " must have rank " +
+                                    std::to_string(rank) + ".");
+}
+
+inline void validateRuntimeVector(const TensorView& view, size_t expected, const char* name) {
+    requireRank(view.shape(), 1, name);
+    if (view.shape()[0] != expected)
+        throw std::invalid_argument(std::string("Reference GEMM ") + name + " length mismatch.");
+}
+
+inline size_t axisExtent(MatrixAxis axis, size_t rows, size_t columns) {
+    return axis == MatrixAxis::Row ? rows : columns;
+}
+
+inline void validateRuntimeGemm(const GemmProblem& problem) {
+    requireRank(problem.a.values.shape(), 2, "A");
+    requireRank(problem.b.values.shape(), 2, "B");
+    requireRank(problem.c.shape(), 2, "C");
+    requireRank(problem.d.shape(), 2, "D");
+
+    const size_t m = problem.a.values.shape()[0];
+    const size_t k = problem.a.values.shape()[1];
+    const size_t n = problem.b.values.shape()[1];
+    if (problem.b.values.shape()[0] != k)
+        throw std::invalid_argument("Reference GEMM K dimension mismatch.");
+    if (problem.c.shape() != Shape{m, n})
+        throw std::invalid_argument("Reference GEMM C shape mismatch.");
+    if (problem.d.shape() != Shape{m, n})
+        throw std::invalid_argument("Reference GEMM D shape mismatch.");
+    if (!isRuntimeGemmAccumulator(problem.accumulatorType))
+        throw std::invalid_argument(
+            "Runtime reference GEMM currently supports F32, F64, C64, and "
+            "C128 accumulators.");
+
+    const bool complexAccumulator = isComplexScalarType(problem.accumulatorType);
+    auto validateOperandType = [&](ScalarType type, const char* name) {
+        if (type == ScalarType::Count || type == ScalarType::Boolean || isScaleScalarType(type))
+            throw std::invalid_argument(std::string("Reference GEMM ") + name +
+                                        " has an unsupported scalar type.");
+        if (!complexAccumulator && isComplexScalarType(type))
+            throw std::invalid_argument(
+                std::string("Reference GEMM real accumulator cannot consume complex ") + name +
+                ".");
+    };
+    validateOperandType(problem.a.values.type(), "A");
+    validateOperandType(problem.b.values.type(), "B");
+    validateOperandType(problem.c.type(), "C");
+    validateOperandType(problem.d.type(), "D");
+    if (complexAccumulator != isComplexScalarType(problem.d.type()))
+        throw std::invalid_argument("Reference GEMM complex accumulator/output mismatch.");
+
+    auto validateComputeType = [&](const GemmOperand& operand, const char* name) {
+        if (!operand.computeType) return;
+        validateOperandType(*operand.computeType, name);
+        if (isComplexScalarType(operand.values.type()) &&
+            !isComplexScalarType(*operand.computeType))
+            throw std::invalid_argument(std::string("Reference GEMM ") + name +
+                                        " compute-input type has incompatible complexity.");
+    };
+    validateComputeType(problem.a, "A");
+    validateComputeType(problem.b, "B");
+
+    if (problem.mathMode == MathMode::XFloat32 && problem.accumulatorType != ScalarType::Float32)
+        throw std::invalid_argument("XFloat32 math mode requires a Float32 accumulator.");
+    if (complexAccumulator && problem.epilogue.activation != Activation::None)
+        throw std::invalid_argument("Complex reference GEMM does not support activation.");
+    if (!complexAccumulator &&
+        (problem.epilogue.alpha.imag() != 0.0 || problem.epilogue.beta.imag() != 0.0))
+        throw std::invalid_argument("Reference GEMM real accumulator has complex alpha or beta.");
+
+    auto validateEpilogueVector = [&](const TensorView& values, size_t expected, const char* name) {
+        validateRuntimeVector(values, expected, name);
+        if (!complexAccumulator && isComplexScalarType(values.type()))
+            throw std::invalid_argument(
+                std::string("Reference GEMM real accumulator cannot consume complex ") + name +
+                ".");
+    };
+    if (problem.epilogue.bias) {
+        const auto& binding = *problem.epilogue.bias;
+        validateEpilogueVector(binding.values, axisExtent(binding.axis, m, n), "bias");
     }
+    if (problem.epilogue.scaleAlpha) {
+        const auto& binding = *problem.epilogue.scaleAlpha;
+        validateEpilogueVector(binding.values, axisExtent(binding.axis, m, n), "scale-alpha");
+    }
+    if (problem.epilogue.scaleA) validateEpilogueVector(*problem.epilogue.scaleA, m, "scale-A");
+    if (problem.epilogue.scaleB) validateEpilogueVector(*problem.epilogue.scaleB, n, "scale-B");
 
-    const bool hasBlockScaleA = !invocation.blockScaleA.empty();
-    const bool hasBlockScaleB = !invocation.blockScaleB.empty();
+    const bool hasBlockScaleA = problem.a.blockScale.has_value();
+    const bool hasBlockScaleB = problem.b.blockScale.has_value();
     if (hasBlockScaleA != hasBlockScaleB)
         throw std::invalid_argument(
             "Reference GEMM requires block scales for both operands or neither.");
 
-    auto validateBlockScale = [](const char* name, const auto& scale) {
-        if (scale.empty()) return;
-        if (scale.data == nullptr || scale.load == nullptr)
+    auto validateBlockScale = [&](const BlockScaleBinding& binding, size_t freeExtent,
+                                  const char* name) {
+        if (binding.blockSize == 0)
             throw std::invalid_argument(std::string("Reference GEMM ") + name +
-                                        " block scale has no data loader.");
-        if (scale.blockSize == 0 || scale.freeStride == 0 || scale.blockStride == 0)
+                                        " block size must be nonzero.");
+        requireRank(binding.values.shape(), 2, name);
+        const size_t blockCount = k / binding.blockSize + (k % binding.blockSize != 0 ? 1 : 0);
+        if (binding.values.shape()[0] != freeExtent || binding.values.shape()[1] < blockCount)
             throw std::invalid_argument(std::string("Reference GEMM ") + name +
-                                        " block scale has invalid geometry.");
+                                        " block-scale shape mismatch.");
+        if (isComplexScalarType(binding.values.type()))
+            throw std::invalid_argument(std::string("Reference GEMM ") + name +
+                                        " block scales must be real.");
     };
-    validateBlockScale("A", invocation.blockScaleA);
-    validateBlockScale("B", invocation.blockScaleB);
+    if (hasBlockScaleA) {
+        validateBlockScale(*problem.a.blockScale, m, "A");
+        validateBlockScale(*problem.b.blockScale, n, "B");
+        if (complexAccumulator)
+            throw std::invalid_argument("Complex reference GEMM does not support block scaling.");
+    }
 }
 
-template <typename OperandMath = void, typename InputA, typename InputB, typename InputC,
-          typename Output, typename Accumulator>
-void referenceGemm(const GemmInvocation<InputA, InputB, InputC, Output, Accumulator>& invocation) {
-    validate(invocation);
+template <typename Accumulator>
+GemmRunInfo referenceRuntimeCanonical(const GemmProblem& problem) {
+    const RuntimeMatrixReader<Accumulator> a(problem.a.values);
+    const RuntimeMatrixReader<Accumulator> b(problem.b.values);
+    const RuntimeMatrixReader<Accumulator> c(problem.c);
+    const RuntimeMatrixWriter<Accumulator> d(problem.d);
+    const RuntimeQuantizer<Accumulator> quantizeA(problem.a.computeType);
+    const RuntimeQuantizer<Accumulator> quantizeB(problem.b.computeType);
+    const RuntimeMathFunction<Accumulator> operandMath =
+        runtimeMathFunction<Accumulator>(problem.mathMode);
 
-    using MathType = std::conditional_t<std::is_void_v<OperandMath>, Accumulator, OperandMath>;
+    std::optional<RuntimeVectorReader<Accumulator>> bias;
+    std::optional<RuntimeVectorReader<Accumulator>> scaleAlpha;
+    std::optional<RuntimeVectorReader<Accumulator>> scaleA;
+    std::optional<RuntimeVectorReader<Accumulator>> scaleB;
+    std::optional<RuntimeMatrixReader<Accumulator>> blockScaleA;
+    std::optional<RuntimeMatrixReader<Accumulator>> blockScaleB;
+    if (problem.epilogue.bias) bias.emplace(problem.epilogue.bias->values);
+    if (problem.epilogue.scaleAlpha) scaleAlpha.emplace(problem.epilogue.scaleAlpha->values);
+    if (problem.epilogue.scaleA) scaleA.emplace(*problem.epilogue.scaleA);
+    if (problem.epilogue.scaleB) scaleB.emplace(*problem.epilogue.scaleB);
+    if (problem.a.blockScale) {
+        blockScaleA.emplace(problem.a.blockScale->values);
+        blockScaleB.emplace(problem.b.blockScale->values);
+    }
 
-    const size_t m = invocation.a.rows();
-    const size_t n = invocation.b.columns();
-    const size_t k = invocation.a.columns();
-    const bool hasBlockScale = !invocation.blockScaleA.empty();
+    const size_t m = problem.a.values.shape()[0];
+    const size_t k = problem.a.values.shape()[1];
+    const size_t n = problem.b.values.shape()[1];
+    const Accumulator alpha = runtimeScalar<Accumulator>(problem.epilogue.alpha, "alpha");
+    const Accumulator beta = runtimeScalar<Accumulator>(problem.epilogue.beta, "beta");
+    const Accumulator activationParameter0 =
+        static_cast<Accumulator>(problem.epilogue.activationParameter0);
+    const Accumulator activationParameter1 =
+        static_cast<Accumulator>(problem.epilogue.activationParameter1);
 
     for (size_t row = 0; row < m; ++row) {
         for (size_t column = 0; column < n; ++column) {
             Accumulator sum = Accumulator(0);
 
-            if (hasBlockScale) {
-                const size_t step =
-                    std::min(invocation.blockScaleA.blockSize, invocation.blockScaleB.blockSize);
-
-                for (size_t blockBase = 0; blockBase < k; blockBase += step) {
+            if (blockScaleA) {
+                const size_t blockSizeA = problem.a.blockScale->blockSize;
+                const size_t blockSizeB = problem.b.blockScale->blockSize;
+                size_t blockBase = 0;
+                while (blockBase < k) {
+                    const size_t remainingA = blockSizeA - blockBase % blockSizeA;
+                    const size_t remainingB = blockSizeB - blockBase % blockSizeB;
+                    const size_t blockLength = std::min({k - blockBase, remainingA, remainingB});
+                    const size_t blockEnd = blockBase + blockLength;
                     Accumulator blockSum = Accumulator(0);
-                    const size_t blockEnd = std::min(blockBase + step, k);
                     for (size_t reduction = blockBase; reduction < blockEnd; ++reduction) {
-                        Accumulator aValue = static_cast<Accumulator>(detail::conjugateIfNeeded(
-                            invocation.a(row, reduction), invocation.conjugateA));
-                        Accumulator bValue = static_cast<Accumulator>(detail::conjugateIfNeeded(
-                            invocation.b(reduction, column), invocation.conjugateB));
-                        if (invocation.quantizeA) aValue = invocation.quantizeA(aValue);
-                        if (invocation.quantizeB) bValue = invocation.quantizeB(bValue);
-
-                        blockSum += static_cast<Accumulator>(static_cast<MathType>(aValue)) *
-                                    static_cast<Accumulator>(static_cast<MathType>(bValue));
+                        Accumulator aValue =
+                            conjugateIfNeeded(a(row, reduction), problem.a.conjugate);
+                        Accumulator bValue =
+                            conjugateIfNeeded(b(reduction, column), problem.b.conjugate);
+                        aValue = operandMath(quantizeA(aValue));
+                        bValue = operandMath(quantizeB(bValue));
+                        blockSum += aValue * bValue;
                     }
 
-                    const size_t blockA = blockBase / invocation.blockScaleA.blockSize;
-                    const size_t blockB = blockBase / invocation.blockScaleB.blockSize;
-                    const Accumulator scale = invocation.blockScaleA.value(row, blockA) *
-                                              invocation.blockScaleB.value(column, blockB);
+                    const Accumulator scale = (*blockScaleA)(row, blockBase / blockSizeA) *
+                                              (*blockScaleB)(column, blockBase / blockSizeB);
                     sum += blockSum * scale;
+                    blockBase = blockEnd;
                 }
             } else {
                 for (size_t reduction = 0; reduction < k; ++reduction) {
-                    Accumulator aValue = static_cast<Accumulator>(detail::conjugateIfNeeded(
-                        invocation.a(row, reduction), invocation.conjugateA));
-                    Accumulator bValue = static_cast<Accumulator>(detail::conjugateIfNeeded(
-                        invocation.b(reduction, column), invocation.conjugateB));
-                    if (invocation.quantizeA) aValue = invocation.quantizeA(aValue);
-                    if (invocation.quantizeB) bValue = invocation.quantizeB(bValue);
-
-                    sum += static_cast<Accumulator>(static_cast<MathType>(aValue)) *
-                           static_cast<Accumulator>(static_cast<MathType>(bValue));
+                    Accumulator aValue = conjugateIfNeeded(a(row, reduction), problem.a.conjugate);
+                    Accumulator bValue =
+                        conjugateIfNeeded(b(reduction, column), problem.b.conjugate);
+                    aValue = operandMath(quantizeA(aValue));
+                    bValue = operandMath(quantizeB(bValue));
+                    sum += aValue * bValue;
                 }
             }
 
-            Accumulator effectiveAlpha = invocation.alpha;
-            if (invocation.scaleA)
-                effectiveAlpha *= static_cast<Accumulator>((*invocation.scaleA)[row]);
-            if (invocation.scaleB)
-                effectiveAlpha *= static_cast<Accumulator>((*invocation.scaleB)[column]);
-            if (invocation.scaleAlpha) {
-                effectiveAlpha *= static_cast<Accumulator>(
-                    (*invocation.scaleAlpha)[invocation.factorDimension == 0 ? row : column]);
+            Accumulator effectiveAlpha = alpha;
+            if (scaleA) effectiveAlpha *= (*scaleA)[row];
+            if (scaleB) effectiveAlpha *= (*scaleB)[column];
+            if (scaleAlpha) {
+                const MatrixAxis axis = problem.epilogue.scaleAlpha->axis;
+                effectiveAlpha *= (*scaleAlpha)[axis == MatrixAxis::Row ? row : column];
             }
 
-            Accumulator result =
-                effectiveAlpha * sum +
-                invocation.beta * static_cast<Accumulator>(invocation.c(row, column));
-
-            if (invocation.bias) result += static_cast<Accumulator>((*invocation.bias)[row]);
-
-            result = detail::applyActivation(invocation.activation, result,
-                                             invocation.activationParameter0,
-                                             invocation.activationParameter1);
-
-            invocation.d(row, column) = static_cast<Output>(result);
+            Accumulator result = effectiveAlpha * sum + beta * c(row, column);
+            if (bias) {
+                const MatrixAxis axis = problem.epilogue.bias->axis;
+                result += (*bias)[axis == MatrixAxis::Row ? row : column];
+            }
+            result = applyActivation(problem.epilogue.activation, result, activationParameter0,
+                                     activationParameter1);
+            d.store(row, column, result);
         }
     }
+
+    return {
+        .backendUsed = GemmBackend::Canonical,
+        .fallbackReason = std::nullopt,
+        .outputElementsComputed = problem.d.shape().elementCount(),
+    };
+}
+}  // namespace detail
+
+inline GemmSupportInfo queryGemmSupport(const GemmProblem& problem, GemmBackend backend) {
+    try {
+        detail::validateRuntimeGemm(problem);
+    } catch (const std::exception& error) {
+        return {.supported = false, .reason = error.what()};
+    }
+
+    switch (backend) {
+        case GemmBackend::Automatic:
+        case GemmBackend::Canonical:
+            return {.supported = true, .reason = {}};
+        case GemmBackend::Tiled:
+            return {
+                .supported = false,
+                .reason = "The runtime-typed tiled GEMM backend is not implemented.",
+            };
+        case GemmBackend::Blas:
+            return {
+                .supported = false,
+                .reason = "The runtime-typed BLAS GEMM backend is not implemented.",
+            };
+    }
+    return {.supported = false, .reason = "Invalid reference GEMM backend."};
+}
+
+inline GemmRunInfo referenceGemm(const GemmProblem& problem, const GemmRunOptions& options = {}) {
+    GemmBackend backend = options.backend;
+    if (backend == GemmBackend::Automatic) backend = GemmBackend::Canonical;
+
+    std::optional<std::string> fallbackReason;
+    const GemmSupportInfo requestedSupport = queryGemmSupport(problem, backend);
+    if (!requestedSupport) {
+        if (options.requireRequestedBackend) throw std::invalid_argument(requestedSupport.reason);
+        if (backend == GemmBackend::Canonical) throw std::invalid_argument(requestedSupport.reason);
+        fallbackReason = requestedSupport.reason;
+        backend = GemmBackend::Canonical;
+    }
+
+    const GemmSupportInfo canonicalSupport = queryGemmSupport(problem, GemmBackend::Canonical);
+    if (!canonicalSupport) throw std::invalid_argument(canonicalSupport.reason);
+
+    GemmRunInfo result;
+    switch (problem.accumulatorType) {
+        case ScalarType::Float32:
+            result = detail::referenceRuntimeCanonical<float>(problem);
+            break;
+        case ScalarType::Float64:
+            result = detail::referenceRuntimeCanonical<double>(problem);
+            break;
+        case ScalarType::ComplexFloat32:
+            result = detail::referenceRuntimeCanonical<std::complex<float>>(problem);
+            break;
+        case ScalarType::ComplexFloat64:
+            result = detail::referenceRuntimeCanonical<std::complex<double>>(problem);
+            break;
+        default:
+            throw std::invalid_argument("Unsupported runtime reference GEMM accumulator type.");
+    }
+    result.fallbackReason = std::move(fallbackReason);
+    return result;
+}
+
+inline std::vector<GemmRunInfo> referenceGroupedGemm(std::span<const GemmProblem> problems,
+                                                     const GemmRunOptions& options = {}) {
+    std::vector<GemmRunInfo> results;
+    results.reserve(problems.size());
+    for (const GemmProblem& problem : problems) results.push_back(referenceGemm(problem, options));
+    return results;
 }
 }  // namespace roc::host_validation
