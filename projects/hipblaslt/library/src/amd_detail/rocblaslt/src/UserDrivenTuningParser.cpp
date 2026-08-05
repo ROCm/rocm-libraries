@@ -69,6 +69,24 @@ namespace TensileLite
             m_cachePath = path;
     }
 
+    void TuningModeSingleton::reloadForTest()
+    {
+        m_mode = TuningMode::Off;
+        m_cachePath.clear();
+
+        if(const char* env = getenv("HIPBLASLT_TUNING_MODE"))
+        {
+            const std::string value(env);
+            if(value == "cache")
+                m_mode = TuningMode::Cache;
+            else if(value == "tune")
+                m_mode = TuningMode::Tune;
+        }
+
+        if(const char* path = getenv("HIPBLASLT_TUNING_CACHE_PATH"))
+            m_cachePath = path;
+    }
+
     TuningFileSelection selectTuningFile()
     {
         const auto& tuning = TuningModeSingleton::getInstance();

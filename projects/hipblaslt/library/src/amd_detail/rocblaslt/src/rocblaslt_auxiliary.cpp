@@ -2886,3 +2886,45 @@ extern "C" HIPBLASLT_EXPORT void hipblaslt_debug_reload()
 {
     TensileLite::Debug::Instance().reloadDebugBitsForTest();
 }
+
+// Test support for the tuning cache, same rationale as hipblaslt_debug_reload:
+// the mode switch is latched on first use and the loaded-path set is per
+// process, so a test binary exercising several modes and several cache files
+// needs a way to start clean. Not part of any supported interface.
+extern "C" HIPBLASLT_EXPORT void hipblaslt_tuning_reset_for_test()
+{
+    TensileLite::TuningModeSingleton::getInstance().reloadForTest();
+    TensileLite::OverrideMap::getMap().resetForTest();
+
+    auto& counters = TensileLite::TuningCounters::instance();
+    counters.entriesLoaded = 0;
+    counters.hits          = 0;
+    counters.misses        = 0;
+    counters.invalidated   = 0;
+    counters.tuned         = 0;
+    counters.skipped       = 0;
+}
+
+// Lets a test assert on hit / miss / invalidated / tuned directly instead of
+// scraping log output for them.
+extern "C" HIPBLASLT_EXPORT void hipblaslt_tuning_counters_for_test(uint64_t* loaded,
+                                                                    uint64_t* hits,
+                                                                    uint64_t* misses,
+                                                                    uint64_t* invalidated,
+                                                                    uint64_t* tuned,
+                                                                    uint64_t* skipped)
+{
+    const auto& c = TensileLite::TuningCounters::instance();
+    if(loaded)
+        *loaded = c.entriesLoaded.load();
+    if(hits)
+        *hits = c.hits.load();
+    if(misses)
+        *misses = c.misses.load();
+    if(invalidated)
+        *invalidated = c.invalidated.load();
+    if(tuned)
+        *tuned = c.tuned.load();
+    if(skipped)
+        *skipped = c.skipped.load();
+}

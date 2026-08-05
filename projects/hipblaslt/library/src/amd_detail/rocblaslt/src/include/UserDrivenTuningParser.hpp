@@ -105,6 +105,14 @@ namespace TensileLite
         TuningMode         mode() const { return m_mode; }
         const std::string& cachePath() const { return m_cachePath; }
 
+        /**
+         * Re-read the environment after the singleton already exists.
+         *
+         * Only for tests, which run every mode in one process and so cannot
+         * rely on the latch. Mirrors Debug::reloadDebugBitsForTest().
+         */
+        void reloadForTest();
+
         // Tuning does nothing without somewhere to keep the results. There is
         // no default cache location in this milestone, on purpose: a managed
         // default directory brings a lifetime and growth policy with it.
@@ -610,6 +618,19 @@ namespace TensileLite
         {
             std::lock_guard<std::shared_timed_mutex> lock(m_mutex);
             return m_loadedPaths.insert(path).second;
+        }
+
+        /**
+         * Drop everything loaded so far. Tests only: a single test process
+         * exercises several cache files, and the per-path load latch would
+         * otherwise make every file after the first invisible.
+         */
+        void resetForTest()
+        {
+            std::lock_guard<std::shared_timed_mutex> lock(m_mutex);
+            m_override.clear();
+            m_legacy.clear();
+            m_loadedPaths.clear();
         }
 
         bool isLoaded(const std::string& path) const
