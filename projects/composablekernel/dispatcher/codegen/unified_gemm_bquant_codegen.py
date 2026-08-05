@@ -4,121 +4,125 @@
 # SPDX-License-Identifier: MIT
 
 """
-GroupedGemm BQuant Code Generator
+Gemm BQuant Code Generator (non-grouped, block-scale GEMM)
+
+Bridges the plain BQuant (B-only quantized) block-scale GEMM operator from
+example/ck_tile/38_block_scale_gemm to the dispatcher's ctypes path. This is the
+NON-grouped gemm_bquant: a single GEMM problem with grouped-quant weight scales,
+distinct from the multi-problem grouped_gemm_bquant under 17_grouped_gemm.
 
 Generates one .hpp per kernel config for the dispatcher's ctypes path.
 Each header defines a SelectedKernel struct with a static launch() method
-taking QuantGemmHostArgs — compiled per-kernel via force-include:
+taking QuantGemmHostArgs -- compiled per-kernel via force-include:
 
-    hipcc -include <kernel.hpp> -DCK_TILE_SINGLE_KERNEL_INCLUDE grouped_gemm_bquant_ctypes_lib.cpp
+    hipcc -include <kernel.hpp> -DCK_TILE_SINGLE_KERNEL_INCLUDE gemm_bquant_ctypes_lib.cpp
 
-Initial scope: fp8 and bf8 dtype variants, non-preshuffle, compv3 pipeline,
-rcr layout, configurable QuantGroupShape.
+Force-include defines (from generated kernel header):
+    SelectedKernel, KERNEL_NAME
+    ADataType, BDataType, CDataType, QDataType, AccDataType, QuantGroupSize
 
-Naming convention (byte-exact with BQuantKernelConfig.name in grouped_gemm_bquant_utils.py):
-    grouped_gemm_bquant_{dtype_a}_{layout}_{pipeline}_{epilogue}_{scheduler}_
+Scope (100% parity with the Old-TE plain bquant examples):
+    fp8, bf8, fp8i4, bf8i4                        (decode tile, compv3)
+    mx_bf16bf16, mx_bf16bf8, mx_bf16fp4           (MX e8m0 block scale, microscale)
+  x {non-preshuffle, preshuffleb, preshufflebq, preshuffleb+preshufflebq}
+    where each variant supports the preshuffle phases Old-TE ships for it.
+
+Naming convention (byte-exact with BQuantKernelConfig.name in gemm_bquant_utils.py):
+    gemm_bquant_{dtype_a}_{layout}_{pipeline}_{epilogue}_{scheduler}_
     {TileM}x{TileN}x{TileK}_{WarpM}x{WarpN}x{WarpK}_{WtM}x{WtN}x{WtK}_
     qg{gM}x{gN}x{gK}[_preshuffleb][_preshufflebq]
 
 Reference:
-    example/ck_tile/38_block_scale_gemm/gemm_bquant_quantgrouped_fp8.cpp
+    example/ck_tile/38_block_scale_gemm/gemm_bquant_quantgrouped_{fp8,bf8,fp8i4,bf8i4}.cpp
+    example/ck_tile/38_block_scale_gemm/gemm_bquant_quantgrouped_mx_bf16{bf16,bf8,fp4}.cpp
+    example/ck_tile/38_block_scale_gemm/gemm_bquant_quantgrouped_preshuffle*_*.cpp
     example/ck_tile/38_block_scale_gemm/run_gemm_quant_example.inc
-    example/ck_tile/38_block_scale_gemm/gemm_utils.hpp  (GemmConfigQuantDecode)
+    example/ck_tile/38_block_scale_gemm/gemm_utils.hpp  (GemmConfigQuantDecode etc.)
 """
 
 import argparse
 import itertools
 import json
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 from codegen_common import make_bquant_kernel_name, bquant_effective_epilogue
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
 
+# Operator family prefix -- the only structural difference vs the (mis-named)
+# grouped_gemm_bquant bridge, which references these exact same examples.
+NAME_PREFIX = "gemm_bquant"
+
 
 # =============================================================================
 # Dtype variant definitions
-# Each entry: (dtype_key, ADataType, BDataType, CDataType, QDataType)
+# Each entry: (ADataType, BDataType, CDataType, QDataType, AccDataType)
 # Matches example/ck_tile/38_block_scale_gemm/gemm_bquant_quantgrouped_*.cpp
 # =============================================================================
 
 BQUANT_VARIANTS: Dict[str, Dict[str, str]] = {
+    # gemm_bquant_quantgrouped_fp8.cpp:
+    #   GemmQuantTypeConfig<fp8_t, fp8_t, half_t, float>
     "fp8": {
-        "dtype_a": "fp8",
-        "dtype_b": "fp8",
-        "dtype_c": "half",
-        "dtype_q": "float",
         "ck_a": "ck_tile::fp8_t",
         "ck_b": "ck_tile::fp8_t",
         "ck_c": "ck_tile::half_t",
         "ck_q": "float",
         "ck_acc": "float",
     },
+    # gemm_bquant_quantgrouped_bf8.cpp:
+    #   GemmQuantTypeConfig<bf8_t, bf8_t, half_t, float>
     "bf8": {
-        "dtype_a": "bf8",
-        "dtype_b": "bf8",
-        "dtype_c": "half",
-        "dtype_q": "float",
         "ck_a": "ck_tile::bf8_t",
         "ck_b": "ck_tile::bf8_t",
         "ck_c": "ck_tile::half_t",
         "ck_q": "float",
         "ck_acc": "float",
     },
+    # gemm_bquant_quantgrouped_fp8i4.cpp:
+    #   GemmQuantTypeConfig<fp8_t, pk_int4_t, half_t, fp8_t>
     "fp8i4": {
-        "dtype_a": "fp8",
-        "dtype_b": "pk_int4",
-        "dtype_c": "half",
-        "dtype_q": "fp8",
         "ck_a": "ck_tile::fp8_t",
         "ck_b": "ck_tile::pk_int4_t",
         "ck_c": "ck_tile::half_t",
         "ck_q": "ck_tile::fp8_t",
         "ck_acc": "float",
     },
+    # gemm_bquant_quantgrouped_bf8i4.cpp:
+    #   GemmQuantTypeConfig<bf8_t, pk_int4_t, half_t, bf8_t>
     "bf8i4": {
-        "dtype_a": "bf8",
-        "dtype_b": "pk_int4",
-        "dtype_c": "half",
-        "dtype_q": "bf8",
         "ck_a": "ck_tile::bf8_t",
         "ck_b": "ck_tile::pk_int4_t",
         "ck_c": "ck_tile::half_t",
         "ck_q": "ck_tile::bf8_t",
         "ck_acc": "float",
     },
-    # MX microscale variants — Q-type is e8m0 (block scale), pipeline = microscale
+    # MX microscale variants -- Q-type is e8m0 (block scale), pipeline = microscale.
+    # gemm_bquant_quantgrouped_mx_bf16bf16.cpp:
+    #   GemmQuantTypeConfig<bf16_t, bf16_t, bf16_t, e8m0_t>
     "mx_bf16bf16": {
-        "dtype_a": "bf16",
-        "dtype_b": "bf16",
-        "dtype_c": "bf16",
-        "dtype_q": "e8m0",
         "ck_a": "ck_tile::bf16_t",
         "ck_b": "ck_tile::bf16_t",
         "ck_c": "ck_tile::bf16_t",
         "ck_q": "ck_tile::e8m0_t",
         "ck_acc": "float",
     },
+    # gemm_bquant_quantgrouped_mx_bf16bf8.cpp:
+    #   GemmQuantTypeConfig<bf16_t, bf8_t, bf16_t, e8m0_t>
     "mx_bf16bf8": {
-        "dtype_a": "bf16",
-        "dtype_b": "bf8",
-        "dtype_c": "bf16",
-        "dtype_q": "e8m0",
         "ck_a": "ck_tile::bf16_t",
         "ck_b": "ck_tile::bf8_t",
         "ck_c": "ck_tile::bf16_t",
         "ck_q": "ck_tile::e8m0_t",
         "ck_acc": "float",
     },
+    # gemm_bquant_quantgrouped_mx_bf16fp4.cpp:
+    #   GemmQuantTypeConfig<bf16_t, pk_fp4_t, bf16_t, e8m0_t>
     "mx_bf16fp4": {
-        "dtype_a": "bf16",
-        "dtype_b": "pk_fp4",
-        "dtype_c": "bf16",
-        "dtype_q": "e8m0",
         "ck_a": "ck_tile::bf16_t",
         "ck_b": "ck_tile::pk_fp4_t",
         "ck_c": "ck_tile::bf16_t",
@@ -127,16 +131,22 @@ BQUANT_VARIANTS: Dict[str, Dict[str, str]] = {
     },
 }
 
-# Layout strings supported: only rcr for initial implementation
-# (RowMajor A, ColMajor B, RowMajor C) — standard GEMM layout for quant kernels
+# Variants whose QDataType is e8m0 (MX block scale) -- these require gfx950 and
+# use the microscale pipeline. Non-MX variants run on gfx942 + gfx950.
+MX_VARIANTS = {"mx_bf16bf16", "mx_bf16bf8", "mx_bf16fp4"}
+
+# Layout strings supported: only rcr (RowMajor A, ColMajor B, RowMajor C) --
+# the standard GEMM layout the Old-TE bquant examples exercise (a_layout=R,
+# b_layout=C in run_gemm_example_prec_type).
 BQUANT_LAYOUT_TO_CK = {
     "r": "ck_tile::tensor_layout::gemm::RowMajor",
     "c": "ck_tile::tensor_layout::gemm::ColumnMajor",
 }
 
 # Pipeline map for BQuant kernels.
-# "preshuffleb"  -> WPQuantBPipelineAgBgCrV2        (preshuffle_b=true variants)
-# "microscale"   -> MicroscaleGemmPipelineAgBgCrCompV3 (MX e8m0 scale variants)
+#   "compv3"       -> BQuantGemmPipelineAgBgCrCompV3    (non-preshuffle + preshufflebq)
+#   "preshuffleb"  -> WPQuantBPipelineAgBgCrV2          (PreshuffleB=true variants)
+#   "microscale"   -> MicroscaleGemmPipelineAgBgCrCompV3 (MX e8m0 scale variants)
 BQUANT_PIPELINE_MAP = {
     "compv3":      "ck_tile::BQuantGemmPipelineAgBgCrCompV3",
     "preshuffleb": "ck_tile::WPQuantBPipelineAgBgCrV2",
@@ -147,7 +157,7 @@ BQUANT_BASE_PIPELINE_MAP = {
     "compv3":      "ck_tile::BaseGemmPipelineAgBgCrCompV3",
     "preshuffleb": "ck_tile::BaseWeightPreshufflePipelineAGmemBGmemCRegV2",
     # MX BQuant (QDataType=e8m0, PreshuffleB=false) falls into the else branch in
-    # run_gemm_quant_example.inc — same base as preshuffleb.
+    # run_gemm_quant_example.inc -- same base as preshuffleb.
     "microscale":  "ck_tile::BaseWeightPreshufflePipelineAGmemBGmemCRegV2",
 }
 
@@ -186,12 +196,12 @@ class BQuantTileConfig:
 
 @dataclass
 class BQuantKernelSpec:
-    """Complete specification for one BQuant kernel."""
+    """Complete specification for one non-grouped gemm_bquant kernel."""
 
-    variant_key: str          # "fp8" or "bf8"
+    variant_key: str          # "fp8", "bf8", "fp8i4", "bf8i4", "mx_bf16*"
     layout: str               # "rcr"
-    pipeline: str             # "compv3"
-    epilogue: str             # "cshuffle"
+    pipeline: str             # "compv3" | "preshuffleb" | "microscale"
+    epilogue: str             # "cshuffle" (effective epilogue computed from tile)
     scheduler: str            # "intrawave"
     tile: BQuantTileConfig
     quant_group_m: int = 1
@@ -223,6 +233,7 @@ class BQuantKernelSpec:
             quant_group_k=self.quant_group_k,
             preshuffle_b=self.preshuffle_b,
             preshuffle_bquant=self.preshuffle_bquant,
+            name_prefix=NAME_PREFIX,
         )
 
 
@@ -249,8 +260,14 @@ class BQuantKernelHeaderGenerator:
         layout_a_ck = BQUANT_LAYOUT_TO_CK[spec.layout[0]]
         layout_b_ck = BQUANT_LAYOUT_TO_CK[spec.layout[1]]
         layout_c_ck = BQUANT_LAYOUT_TO_CK[spec.layout[2]]
-        # BQ is always RowMajor: scales are stored [ceil(K/gK), ceil(N/gN)]
-        layout_bq_ck = BQUANT_LAYOUT_TO_CK["r"]
+        # BQ layout must match Old-TE's run_gemm_example_prec_type for the rcr
+        # (a=R, b=C) path, which passes bq_layout = Col:
+        #   run_gemm_example_with_layouts(Row, Col, Col, Col, Row)
+        #                                 (A,  AQ,  B,   BQ,  C)
+        # ColMajor is also REQUIRED by the WPQuantB (preshuffleb) pipeline, which
+        # static_asserts "Bq must be col major". The BQ scale tensor is stored
+        # [ceil(K/gK), ceil(N/gN)] with a column-major leading dim.
+        layout_bq_ck = BQUANT_LAYOUT_TO_CK["c"]
         # AQ layout placeholder (unused for BQuant-only, same as A layout)
         layout_aq_ck = layout_a_ck
 
@@ -258,12 +275,51 @@ class BQuantKernelHeaderGenerator:
         base_pipeline_ck = BQUANT_BASE_PIPELINE_MAP[spec.pipeline]
         scheduler_ck = BQUANT_SCHEDULER_TO_CK[spec.scheduler]
 
+        # MX variants gate on gfx950 (native MX support). We emit a #error when
+        # the kernel is compiled without CK_GFX950_SUPPORT so an accidental
+        # gfx942 build fails loudly rather than silently miscompiling.
+        arch_guard = ""
+        if spec.variant_key in MX_VARIANTS:
+            arch_guard = (
+                "\n#ifndef CK_GFX950_SUPPORT\n"
+                f'#error "{spec.name} is an MX (e8m0 block scale) kernel and requires '
+                'gfx950 (CK_GFX950_SUPPORT). Do not build it for other archs."\n'
+                "#endif\n"
+            )
+
         pad_m = str(spec.pad_m).lower()
         pad_n = str(spec.pad_n).lower()
         pad_k = str(spec.pad_k).lower()
         preshuffle_b = str(spec.preshuffle_b).lower()
         preshuffle_bquant = str(spec.preshuffle_bquant).lower()
         double_smem_buffer = str(spec.double_smem_buffer).lower()
+
+        # GemmConfig::TiledMMAPermuteN drives whether the B weight matrix is
+        # pre-shuffled via shuffle_b_permuteN (permute_n) or plain shuffle_b, and
+        # whether the BQ scale tensor is bq_permuteN'd. Only the PreshuffleB configs
+        # override the GemmConfigBase default (false) to (N_Repeat % 2 == 0); every
+        # other config inherits false. Mirrors GemmConfigPreshuffleB_BQuant_Prefill
+        # (gemm_utils.hpp:214-215) and run_gemm_quant_example.inc:773,799-800 (which
+        # select the permuteN path when TiledMMAPermuteN && BQuantGroupSize::kN == 1).
+        n_repeat = (
+            t.tile_n // (t.warp_n * t.warp_tile_n) if (t.warp_n * t.warp_tile_n) else 0
+        )
+        tiled_mma_permute_n = spec.preshuffle_b and (n_repeat % 2 == 0)
+        tiled_mma_permute_n_str = str(tiled_mma_permute_n).lower()
+
+        # BCastPolicy: Old-TE (run_gemm_quant_example.inc:117-120) selects
+        #   b_cast_policy = (ADataType == BDataType) ? BeforeLDSWrite : AfterLDSRead
+        # The GemmBQuantPipelineProblem BCastPolicy_ template arg defaults to
+        # AfterLDSRead, so kernels where A and B share a dtype (fp8/fp8, bf8/bf8,
+        # mx bf16/bf16) MUST override to BeforeLDSWrite -- otherwise the bridge
+        # compiles a different, slower pipeline than Old-TE (mx_bf16bf16 was ~43%
+        # off on gfx950). fp8i4/bf8i4/mx_bf16bf8/mx_bf16fp4 (A != B) keep AfterLDSRead.
+        b_cast_before_lds = ck_a == ck_b
+        b_cast_policy_ck = (
+            "ck_tile::CastPolicy::BeforeLDSWrite"
+            if b_cast_before_lds
+            else "ck_tile::CastPolicy::AfterLDSRead"
+        )
 
         # Determine which epilogue the kernel will use, mirroring run_gemm_quant_example.inc.
         # Delegates to bquant_effective_epilogue (same logic used by make_bquant_kernel_name)
@@ -316,15 +372,15 @@ class BQuantKernelHeaderGenerator:
 
         return f"""\
 // SPDX-License-Identifier: MIT
-// Auto-generated BQuantGrouped GEMM kernel header.
-// DO NOT EDIT — regenerate via unified_grouped_gemm_bquant_codegen.py
+// Auto-generated non-grouped gemm_bquant (block-scale) GEMM kernel header.
+// DO NOT EDIT -- regenerate via unified_gemm_bquant_codegen.py
 #pragma once
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/host/kernel_launch.hpp"
 #include "ck_tile/ops/gemm_quant.hpp"
 #include "ck_tile/ops/epilogue.hpp"
-
+{arch_guard}
 namespace {ns} {{
 
 constexpr const char* KERNEL_NAME = "{spec.name}";
@@ -341,7 +397,7 @@ using CLayout  = {layout_c_ck};
 using AQLayout = {layout_aq_ck};
 using BQLayout = {layout_bq_ck};
 
-// Single QuantGroupSize alias — same type used for both AQ and BQ slots in the
+// Single QuantGroupSize alias -- same type used for both AQ and BQ slots in the
 // pipeline template; AQ is disabled via aq_ptr=nullptr at runtime for BQuant-only.
 using QuantGroupSize = ck_tile::QuantGroupShape<ck_tile::sequence<
     {spec.quant_group_m}, {spec.quant_group_n}, {spec.quant_group_k}>>;
@@ -374,6 +430,10 @@ struct {struct} {{
     static constexpr bool PreshuffleB     = {preshuffle_b};
     static constexpr bool TransposeC      = false;
     static constexpr bool DoubleSmemBuffer = {double_smem_buffer};
+    // TiledMMAPermuteN: selects shuffle_b_permuteN + bq_permuteN vs plain shuffle_b
+    // for the B weight matrix / BQ scale tensor (see gemm_bquant_ctypes_lib.cpp).
+    // Mirrors GemmConfigPreshuffleB_BQuant_Prefill (gemm_utils.hpp:214-215).
+    static constexpr bool TiledMMAPermuteN = {tiled_mma_permute_n_str};
 
     using TileShape = ck_tile::TileGemmShape<
         ck_tile::sequence<TileM, TileN, TileK>,
@@ -381,6 +441,18 @@ struct {struct} {{
         ck_tile::sequence<WarpTileM, WarpTileN, WarpTileK>>;
 
     using TilePartitioner = ck_tile::GemmTile1DPartitioner<TileShape>;
+
+    // Config exposing the member names ck_tile::shuffle_b / shuffle_b_permuteN /
+    // bq_permuteN expect (N_Tile, N_Warp, N_Warp_Tile, K_Warp_Tile). Used by the
+    // ctypes lib to pre-shuffle the B weight matrix and BQ scales for PreshuffleB
+    // kernels, matching Old-TE's host-side shuffle in
+    // run_gemm_quant_example.inc:770-789 and the bq_permuteN at :799-815.
+    struct BShuffleConfig {{
+        static constexpr ck_tile::index_t N_Tile      = TileN;
+        static constexpr ck_tile::index_t N_Warp      = WarpN;
+        static constexpr ck_tile::index_t N_Warp_Tile = WarpTileN;
+        static constexpr ck_tile::index_t K_Warp_Tile = WarpTileK;
+    }};
 
     using GemmTraits = ck_tile::TileGemmQuantTraits<
         kPadM, kPadN, kPadK,
@@ -398,7 +470,7 @@ struct {struct} {{
     static float launch(const ck_tile::QuantGemmHostArgs& args,
                         const ck_tile::stream_config& s)
     {{
-        // hot-loop / tail dispatch — mirrors run_gemm_quant_example.inc
+        // hot-loop / tail dispatch -- mirrors run_gemm_quant_example.inc
         const ck_tile::index_t K_split =
             (args.k_batch == 1)
                 ? ck_tile::integer_least_multiple(args.K, TileK)
@@ -420,7 +492,8 @@ struct {struct} {{
                 ADataType,        // ComputeDataType
                 {scheduler_ck},
                 has_hot_loop_.value,
-                tail_number_.value>;
+                tail_number_.value,
+                {b_cast_policy_ck}>;  // BCastPolicy -- Old-TE: A==B ? BeforeLDSWrite : AfterLDSRead
 
             using GemmPipeline = {pipeline_ck}<PipelineProblem>;
 
@@ -476,8 +549,12 @@ def _default_config() -> dict:
         "epilogue": "cshuffle",
         "scheduler": "intrawave",
         "tile_configs": [
-            # GemmConfigQuantDecode<fp8_t>: M=16, N=64, K=256/sizeof(fp8_t)=256
-            # WarpTileK=128: get_k_warp_tile<fp8_t, M_Warp_Tile=16>() on gfx950 = 128
+            # GemmConfigQuantDecode<fp8_t>: M=16, N=64, K=256
+            # WarpTileK=128: get_k_warp_tile<fp8_t, M_Warp_Tile=16>() on gfx950 = 128.
+            # NOTE: this built-in header-enumeration sweep is gfx950-only. Arch-correct
+            # warp_tile_k (gfx942 fp8/bf8 -> 32) is produced by the bridge via
+            # gemm_bquant_utils._warp_tile_k_for(); a gfx942 sweep must pass a config
+            # with warp_tile_k=32 (128 silently outputs all-zeros on gfx942).
             {"tile_m": 16, "tile_n": 64, "tile_k": 256,
              "warp_m": 1, "warp_n": 4, "warp_k": 1,
              "warp_tile_m": 16, "warp_tile_n": 16, "warp_tile_k": 128},
@@ -517,10 +594,10 @@ def _build_specs(config: dict) -> List[BQuantKernelSpec]:
         config.get("quant_groups", [{"quant_group_m": 1, "quant_group_n": 1, "quant_group_k": 128}]),
     ):
         if variant_key not in BQUANT_VARIANTS:
-            log.warning("Unknown variant_key %s — skipping", variant_key)
+            log.warning("Unknown variant_key %s -- skipping", variant_key)
             continue
         if pipeline not in BQUANT_PIPELINE_MAP:
-            log.warning("Unsupported pipeline %s — skipping", pipeline)
+            log.warning("Unsupported pipeline %s -- skipping", pipeline)
             continue
 
         tile = BQuantTileConfig(
@@ -535,7 +612,7 @@ def _build_specs(config: dict) -> List[BQuantKernelSpec]:
             warp_tile_k=tile_dict["warp_tile_k"],
         )
         if not tile.is_valid():
-            log.debug("Invalid tile config %s — skipping", tile)
+            log.debug("Invalid tile config %s -- skipping", tile)
             continue
 
         specs.append(BQuantKernelSpec(
@@ -571,7 +648,7 @@ def generate_kernels(
     config: Optional[dict] = None,
     parallel: bool = True,
 ) -> List[Path]:
-    """Generate all BQuant kernel headers into output_dir.
+    """Generate all gemm_bquant kernel headers into output_dir.
 
     Returns list of generated .hpp paths.
     """
@@ -580,10 +657,10 @@ def generate_kernels(
     specs = _build_specs(cfg)
 
     if not specs:
-        log.warning("No kernel specs produced from config — check variant_keys and tile_configs")
+        log.warning("No kernel specs produced from config -- check variant_keys and tile_configs")
         return []
 
-    log.info("Generating %d BQuant kernel headers into %s", len(specs), output_dir)
+    log.info("Generating %d gemm_bquant kernel headers into %s", len(specs), output_dir)
 
     gen = BQuantKernelHeaderGenerator()
     generated: List[Path] = []
@@ -622,7 +699,7 @@ def generate_kernels(
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="BQuantGrouped GEMM kernel header generator"
+        description="non-grouped gemm_bquant (block-scale) GEMM kernel header generator"
     )
     parser.add_argument("--output-dir", type=Path, required=True,
                         help="Directory to write generated .hpp files")

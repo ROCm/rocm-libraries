@@ -381,18 +381,28 @@ def bquant_effective_epilogue(
     warp_n: int,
     warp_tile_n: int,
     quant_group_n: int,
+    preshuffle_b: bool = False,
 ) -> str:
     """Return the epilogue tag that the codegen will actually emit for the given tile params.
 
-    Mirrors the TiledMMAPermuteN / use_permute_n_epilogue logic in
-    unified_grouped_gemm_bquant_codegen.py and run_gemm_quant_example.inc:
-      TiledMMAPermuteN = (N_Repeat % 2 == 0), N_Repeat = TileN / (WarpN * WarpTileN)
-      use_permute_n_epilogue = TiledMMAPermuteN and quant_group_n == 1
+    Mirrors the TiledMMAPermuteN / TiledPermuteN epilogue selection in
+    run_gemm_quant_example.inc:208-252:
+      TiledMMAPermuteN = PreshuffleB && (N_Repeat % 2 == 0)   (GemmConfig)
+      TiledPermuteN    = (BQuantGroupSize::kN > 1) ? false : TiledMMAPermuteN
+      GemmEpilogue     = TiledPermuteN ? PermuteNEpilogue : CShuffleEpilogue
+    where N_Repeat = TileN / (WarpN * WarpTileN).
+
+    CRITICAL: TiledMMAPermuteN is false in GemmConfigBase and is ONLY overridden to
+    (N_Repeat % 2 == 0) by the PreshuffleB configs (gemm_utils.hpp:214-215). Every
+    non-PreshuffleB config -- including MX (microscale, PreshuffleB=false) -- inherits
+    false and therefore uses CShuffleEpilogue. Omitting the ``preshuffle_b`` gate made
+    the bridge emit a PermuteNEpilogue for even-N_Repeat MX kernels (e.g. mx_bf16bf8
+    128-tile, N_Repeat=2), a different + ~16-17% slower kernel than Old-TE's CShuffle.
 
     Returns "permute_n" when PermuteNEpilogue is selected, "cshuffle" otherwise.
     """
     n_repeat = tile_n // (warp_n * warp_tile_n)
-    use_permute_n = (n_repeat % 2 == 0) and (quant_group_n == 1)
+    use_permute_n = preshuffle_b and (n_repeat % 2 == 0) and (quant_group_n == 1)
     return "permute_n" if use_permute_n else "cshuffle"
 
 
@@ -410,6 +420,7 @@ def make_bquant_kernel_name(
     quant_group_k: int,
     preshuffle_b: bool = False,
     preshuffle_bquant: bool = False,
+    name_prefix: str = "grouped_gemm_bquant",
 ) -> str:
     """Return the canonical BQuant kernel name used as KERNEL_NAME in generated headers.
 
@@ -420,10 +431,17 @@ def make_bquant_kernel_name(
     (computed via bquant_effective_epilogue from tile params) rather than the
     user-specified epilogue string, so the name always matches the compiled kernel.
     The ``epilogue`` parameter is accepted for call-site compatibility but not used.
+
+    ``name_prefix`` selects the operator family. It defaults to
+    ``"grouped_gemm_bquant"`` for backward compatibility with the quant-grouped
+    (single-problem) BQuant bridge already in tree; the plain non-grouped
+    ``gemm_bquant`` bridge under 38_block_scale_gemm passes ``"gemm_bquant"``.
     """
-    effective_epilogue = bquant_effective_epilogue(tile_n, warp_n, warp_tile_n, quant_group_n)
+    effective_epilogue = bquant_effective_epilogue(
+        tile_n, warp_n, warp_tile_n, quant_group_n, preshuffle_b
+    )
     parts = [
-        "grouped_gemm_bquant",
+        name_prefix,
         variant_key,
         layout,
         pipeline,
