@@ -55,7 +55,7 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32,
   SCmpEQU32, SCmpEQU64, SCmpGeI32, SCmpGeU32, SCmpGtI32, SCmpGtU32, SCmpKEQU32, \
   SCmpKGeU32, SCmpKGtU32, SCmpKLGU32, SCmpLeI32, SCmpLeU32, SCmpLgU32, SCmpLtU32, SCmpLtI32, \
   SEndpgm, SFf1B32, SGetRegB32, SFlbitI32B32, SLShiftLeft2AddU32, SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, \
-  SLShiftRightB64, SLoadB32, SLoadB64, SMFMAInstruction, SMemLoadInstruction, SMaxU32, SMinI32, \
+  SLShiftRightB64, SLoadB32, SLoadB64, SLoadB128, SMFMAInstruction, SMemLoadInstruction, SMaxU32, SMinI32, \
   SMinU32, SMovB32, SMovB64, SMulHIU32, SMulI32, SNop, SOrB32, SOrSaveExecB32, \
   SOrSaveExecB64, SSExtI16toI32, SSetPCB64, SSetRegIMM32B32, SSetPrior, SSubBU32, SSubI32, SSubU32, SSubU64, SSetVgprMsb,\
   SWaitCnt, SWaitAlu, SXorB32, VAShiftRightI32, VAccvgprReadB32, VAccvgprWrite, VAccvgprWriteB32, \
@@ -15654,10 +15654,12 @@ class KernelWriterAssembly(KernelWriter):
     to the (correct) PLAIN NLL store. The default is 0 (=> PLAIN NLL), so any config we
     do not handle stays correct.
 
-    The scalar scale POINTERS are not loaded until the epilogue (after both guard
-    sites), so we read them straight from KernArgAddress using the same ArgType-aware
-    byte offsets the epilogue loader uses (packed: argLoader offset; UserArgs external
-    struct: externalArgLoader offset)."""
+    IMPLEMENTATION: every sub-guard except the full-tile pair is an exact-zero or
+    bitwise-equality test, so they are OR-reduced into a single 'bad' accumulator and
+    resolved by one compare, rather than a cmp+cselect pair each. The scale-pointer
+    s_load is issued first and its s_waitcnt kmcnt(0) sunk below the rest of the guard,
+    so the wait is covered by the accumulator work instead of stalling on its own
+    loads."""
     module = Module("computePostLoopFusedStore")
     if not self._plsinAlphaSkipEligible(kernel):
       return module
@@ -15672,150 +15674,181 @@ class KernelWriterAssembly(KernelWriter):
       module.addComment1("PLSIN: alpha applied in fused store -> eff-alpha==1 NOT gated; fold remaining sub-guards -> PostLoopFusedStore")
     else:
       module.addComment1("PLSIN: precompute effective-alpha==1 (Alpha & null scaleA/B) -> PostLoopFusedStore")
-    # Base: tentatively fuse-eligible; every sub-guard below ANDs in via s_cselect
-    # (keep flag on true, else 0). Any failing sub-guard forces flag=0 -> PLAIN NLL.
-    module.add(SMovB32(dst=sgpr(flag), src=1, comment="tentatively fuse-eligible"))
 
-    if not applyAlphaInFused:
-      # AND-in effective-alpha==1: user Alpha==1 AND (scalar) scaleA/scaleB pointers null.
-      module.add(SCmpEQU32(src0=sgpr("Alpha"), src1=1.0, comment="Alpha == 1.0 ?"))
-      module.add(SCSelectB32(dst=sgpr(flag), src0=sgpr(flag), src1=0, comment="Alpha!=1 -> not one"))
+    depthU        = kernel["DepthU"]
+    depthUPow2    = (depthU & (depthU - 1)) == 0
+    unrollIdx     = self.states.unrollIdx
+    pgr           = kernel["PrefetchGlobalRead"]
+    minIter       = self._plsinMinIter(kernel)
+    isScalarScale = (not applyAlphaInFused) and (kernel["ProblemType"]["UseScaleAB"] == "Scalar")
+    supportUA     = kernel["ProblemType"]["SupportUserArgs"]
+    useStreamK    = (kernel["StreamK"] > 0 and not kernel["StreamKAtomic"]
+                     and not kernel["StreamKForceDPOnly"])
 
-      isScalarScale = (kernel["ProblemType"]["UseScaleAB"] == "Scalar")
-      supportUA = kernel["ProblemType"]["SupportUserArgs"]
-      # Byte offsets of the scaleA/scaleB pointer pair within the current gemm's kernargs.
-      # These mirror loadFusedEpilogueStoreSgprs: packed -> argLoader base offset (scaleA
-      # is the first store-sgpr chunk, packedOff 0); external UserArgs struct ->
-      # externalArgLoader base offset (scaleA chunk extOff 0). Both are compile-time
-      # constants and the loaders are in their post-prologue state here.
-      packedOff = self.argLoader.getOffset() if isScalarScale else None
-      extOff = self.externalArgLoader.getOffset() if (isScalarScale and supportUA) else None
-      ptrBytes = self.states.rpga * self.states.bpr  # scaleA/scaleB are contiguous pointers
+    # Every sub-guard below except the full-tile pair, Alpha and numIter is a "this word
+    # must be zero" test (tail, Beta, the scale pointers, StreamKLocalStart,
+    # StreamKLocalEnd^ItersPerTile), so OR them all into ONE accumulator and spend a
+    # single compare at the end:
+    #     bad == 0  <=>  every folded sub-guard passed
+    # That costs one s_or_b32 per sub-guard instead of a cmp+cselect pair, and collapses
+    # the serial cselect chain on flag (previously as deep as the whole guard) to the
+    # cselects that genuinely need it. Semantics are unchanged: each replaced compare was
+    # already an exact-zero / bitwise-equality test.
+    #
+    # SGPR budget: this is deliberately held to the same temp footprint as the pre-fold
+    # code (one 4-aligned quad + two singles). MT64x448 / MT448x64 overflow MaxSgpr at
+    # +1, so nothing here may hold an extra live temp: 'bad' and 'off' are the only
+    # persistent ones, the pointer quad is released as soon as it is folded in, and the
+    # StreamK scratch is acquired only after that release. 'off' carries the SMEM soffset
+    # until the load is waited for and is reused as divide scratch strictly afterwards.
+    with self.allocTmpSgpr(2, tag="plsinFused_acc") as accTmp:
+      bad = accTmp.idx      # OR-accumulated ineligibility word (0 => all folded guards ok)
+      off = accTmp.idx + 1  # scale-ptr kernarg byte offset (SMEM soffset), then scratch
+
+      def emitAccSeed():
+        """The accumulator terms that need no scratch register, so they can sit between
+        the scale-pointer load issue and its wait and act as cover for it."""
+        m = Module("plsinFusedAccSeed")
+        # no-tail. Loop-invariant, and its only input (SizesSum) is live here, so
+        # computing it BEFORE the main loop lets the scalar work overlap the
+        # prefetch/MFMA shadow instead of sitting on the NLL prologue critical path.
+        # emitFusedStoreGuard drops its transient no-tail/numIter/alpha checks on this
+        # path and reads only the flag.
+        if depthUPow2:
+          m.addComment1("PLSIN guard-hoist: fold no-tail into PostLoopFusedStore (pre-loop shadow)")
+          m.add(SAndB32(dst=sgpr(bad), src0=sgpr("SizesSum+%u" % unrollIdx), src1=depthU - 1,
+                        comment="bad = SizesSum %% DepthU (0 => NLL terminal, no tail)"))
+        else:
+          m.add(SMovB32(dst=sgpr(bad), src=0,
+                        comment="bad = 0 (no-tail fold requires power-of-2 DepthU)"))
+        # beta == 0 (loop-invariant). UseBeta False => nothing to test.
+        if kernel["ProblemType"]["UseBeta"]:
+          m.addComment1("PLSIN guard-hoist: fold beta==0 into %s (pre-loop shadow)" % flag)
+          for i in range(max(1, self.states.bpeCinternal // self.states.bpr)):
+            m.add(SOrB32(dst=sgpr(bad), src0=sgpr("Beta+%u" % i), src1=sgpr(bad),
+                         comment="bad |= Beta[%u] (beta != 0 -> not fused)" % i))
+        # StreamK: this WG started the tile (LocalStart == 0). The matching "finished"
+        # half needs a scratch register, so it lands after the pointer quad is freed.
+        if useStreamK:
+          m.add(SOrB32(dst=sgpr(bad), src0=sgpr("StreamKLocalStart"), src1=sgpr(bad),
+                       comment="bad |= StreamKLocalStart (not start -> split contributor, not fused)"))
+        return m
 
       if isScalarScale:
-        with self.allocTmpSgpr(4, alignment=4, tag="plsinAlphaOne_ptr") as ptrTmp, \
-             self.allocTmpSgpr(2, tag="plsinAlphaOne_off") as offTmp:
-          ptrA = ptrTmp.idx      # scaleA pointer (2 regs, 4-aligned block)
-          ptrB = ptrTmp.idx + 2  # scaleB pointer (2 regs)
-          off = offTmp.idx
-          off2 = offTmp.idx + 1
+        # ---- issue the scale-pointer load FIRST, wait for it LAST -----------------
+        # The scalar scale POINTERS are not loaded until the epilogue (after both guard
+        # sites), so read them straight from KernArgAddress using the same ArgType-aware
+        # byte offsets the epilogue loader uses (packed: argLoader offset; UserArgs
+        # external struct: externalArgLoader offset). These mirror
+        # loadFusedEpilogueStoreSgprs; both are compile-time constants and the loaders
+        # are in their post-prologue state here.
+        #
+        # The wait used to sit immediately after the loads with zero cover, and it waits
+        # on ALL outstanding scalar loads. emitAccSeed() now runs in between.
+        packedOff = self.argLoader.getOffset()
+        extOff    = self.externalArgLoader.getOffset() if supportUA else None
+        ptrBytes  = self.states.rpga * self.states.bpr  # scaleA/scaleB are contiguous pointers
+        with self.allocTmpSgpr(4, alignment=4, tag="plsinFused_scalePtr") as ptrTmp:
+          ptr = ptrTmp.idx
+          module.addComment1("PLSIN guard-hoist: issue scaleA/scaleB pointer load (consumed after the accumulator seed)")
           module.add(SMovB32(dst=sgpr(off), src=packedOff, comment="scaleA ptr kernarg byte offset (packed)"))
           if supportUA:
             module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=2, comment="ArgType == 2 (UserArgs external struct) ?"))
             module.add(SCMovB32(dst=sgpr(off), src=extOff, comment="use external-struct scale offset"))
-          module.add(SAddU32(dst=sgpr(off2), src0=sgpr(off), src1=ptrBytes, comment="scaleB ptr kernarg byte offset"))
-          module.add(SLoadB64(dst=sgpr(ptrA, 2), base=sgpr("KernArgAddress", 2), soffset=sgpr(off), comment="load AddressScaleA pointer"))
-          module.add(SLoadB64(dst=sgpr(ptrB, 2), base=sgpr("KernArgAddress", 2), soffset=sgpr(off2), comment="load AddressScaleB pointer"))
+          # One dwordx4 covers both adjacent pointers when the kernarg offset is 16B
+          # aligned; otherwise two b64 loads, the second reaching scaleB through the SMEM
+          # immediate offset field rather than a separate s_add_u32.
+          if (packedOff % 16) == 0 and (extOff is None or (extOff % 16) == 0):
+            module.add(SLoadB128(dst=sgpr(ptr, 4), base=sgpr("KernArgAddress", 2), soffset=sgpr(off),
+                                 comment="load AddressScaleA+AddressScaleB pointers"))
+          else:
+            module.add(SLoadB64(dst=sgpr(ptr, 2), base=sgpr("KernArgAddress", 2), soffset=sgpr(off),
+                                comment="load AddressScaleA pointer"))
+            module.add(SLoadB64(dst=sgpr(ptr + 2, 2), base=sgpr("KernArgAddress", 2), soffset=sgpr(off),
+                                smem=SMEMModifiers(offset=ptrBytes),
+                                comment="load AddressScaleB pointer"))
+          module.add(emitAccSeed())
+          # A null scalar-scale pointer guarantees that scale is exactly 1.0, so
+          # "AddressScaleA == null && AddressScaleB == null" is simply "all four pointer
+          # dwords are zero" and folds straight into the accumulator. We deliberately do
+          # NOT dereference the pointers here (a mis-derived offset could then fault the
+          # GPU); the only cost of the conservative choice is that a caller passing an
+          # explicit pointer-to-1.0 falls back to the (correct) PLAIN NLL store.
           module.add(SWaitCnt(kmcnt=0, comment="wait for scale pointer loads"))
-          module.add(SCmpEQU64(src0=sgpr(ptrA, 2), src1=0, comment="AddressScaleA == null (=> scaleA==1) ?"))
-          module.add(SCSelectB32(dst=sgpr(flag), src0=sgpr(flag), src1=0, comment="scaleA not null -> not one"))
-          module.add(SCmpEQU64(src0=sgpr(ptrB, 2), src1=0, comment="AddressScaleB == null (=> scaleB==1) ?"))
-          module.add(SCSelectB32(dst=sgpr(flag), src0=sgpr(flag), src1=0, comment="scaleB not null -> not one"))
-
-    # PLSIN guard-hoist: fold the loop-invariant SCALAR fused-store sub-guards into this
-    # same persistent flag so the NLL front guard / post-loop dedup collapse to a single
-    # flag compare+branch instead of a serial no-tail + numIter compare/branch chain on
-    # the NLL prologue critical path. Both conditions are loop-invariant and their only
-    # input (SizesSum) is live here, so computing them BEFORE the main loop lets the
-    # scalar work overlap the prefetch/MFMA shadow. The flag stays "==1 => fuse-eligible":
-    # flag==1 still implies effective alpha==1 (AND semantics), so the compile-time
-    # applyAlpha=False fast path (gated by _plsinAlphaSkipEligible + this runtime flag)
-    # remains correct; any WG with flag==0 branches to the PLAIN NLL before the fused
-    # store. emitFusedStoreGuard drops its transient no-tail/numIter/alpha checks on this
-    # path and reads only this flag.
-    depthU = kernel["DepthU"]
-    if (depthU & (depthU - 1)) == 0:
-      module.addComment1("PLSIN guard-hoist: fold no-tail into PostLoopFusedStore (pre-loop shadow)")
-      with self.allocTmpSgpr(1, tag="plsinFused_tail") as tTmp:
-        module.add(SAndB32(dst=sgpr(tTmp.idx),
-                           src0=sgpr("SizesSum+%u" % self.states.unrollIdx),
-                           src1=depthU - 1,
-                           comment="tail = SizesSum %% DepthU (0 => NLL terminal, no tail)"))
-        module.add(SCmpEQU32(src0=sgpr(tTmp.idx), src1=0, comment="no tail (NLL terminal)?"))
-        module.add(SCSelectB32(dst=sgpr(flag), src0=sgpr(flag), src1=0, comment="has tail -> not fused"))
-      pgr = kernel["PrefetchGlobalRead"]
-      minIter = self._plsinMinIter(kernel)
-      if pgr >= 2 and minIter > 1:
-        module.addComment1("PLSIN guard-hoist: fold numIter>=%u into PostLoopFusedStore (pre-loop shadow)" % minIter)
-        with self.allocTmpSgpr(1, tag="plsinFused_numIter") as nTmp:
-          module.add(SLShiftRightB32(dst=sgpr(nTmp.idx),
-                                     src=sgpr("SizesSum+%u" % self.states.unrollIdx),
-                                     shiftHex=hex(log2(depthU)),
-                                     comment="numIter = SizesSum / DepthU"))
-          module.add(SCmpGeU32(src0=sgpr(nTmp.idx), src1=minIter, comment="numIter >= minIter (real NLL drain)?"))
-          module.add(SCSelectB32(dst=sgpr(flag), src0=sgpr(flag), src1=0, comment="too few K-iters -> not fused"))
-
-    # ------------------------------------------------------------------------
-    # FULL fold: AND the remaining PER-TILE fused-store sub-guards -- beta==0,
-    # full-tile in M and N, and StreamK full-tile owner -- into this same flag so
-    # ALL THREE guard sites (NGLL front, NLL front, post-loop dedup) collapse to a
-    # single flag compare instead of recomputing an edge/owner/beta chain each time.
-    # Every input is per-tile but already live here (setupNewTile ran graWorkGroup +
-    # StreamK preLoop above), and computing it pre-main-loop lets the SALU overlap the
-    # prefetch/MFMA shadow rather than sitting on the NLL prologue critical path. All
-    # tests are fault-free arithmetic on sizes/counters (no dereference). flag stays
-    # "==1 => fully fuse-eligible": flag==1 still implies eff-alpha==1, so the
-    # applyAlpha=False fast path (gated by _plsinAlphaSkipEligible + this flag) is
-    # unaffected; any failing sub-guard forces flag=0 -> PLAIN NLL.
-    # beta == 0 (loop-invariant). UseBeta False => nothing to test (stays eligible).
-    if kernel["ProblemType"]["UseBeta"]:
-      module.addComment1("PLSIN guard-hoist: fold beta==0 into %s (pre-loop shadow)" % flag)
-      if self.states.bpeCinternal <= self.states.bpr:
-        module.add(self.getSCMPKInstruction("EQU32", "Beta", 0, comment="Beta == 0 ?"))
-        module.add(SCSelectB32(dst=sgpr(flag), src0=sgpr(flag), src1=0, comment="beta != 0 -> not fused"))
+          for i in range(4):
+            module.add(SOrB32(dst=sgpr(bad), src0=sgpr(ptr + i), src1=sgpr(bad),
+                              comment="bad |= AddressScale%s[%u] (non-null scale -> not fused)"
+                                      % ("A" if i < 2 else "B", i % 2)))
       else:
-        with self.allocTmpSgpr(1, tag="plsinFused_beta") as bTmp:
-          module.add(SMovB32(dst=sgpr(bTmp.idx), src=sgpr("Beta+0"), comment="tmp = Beta[0]"))
-          for i in range(1, self.states.bpeCinternal // self.states.bpr):
-            module.add(SOrB32(dst=sgpr(bTmp.idx), src0=sgpr("Beta+%u" % i), src1=sgpr(bTmp.idx), comment="tmp |= Beta[%u]" % i))
-          module.add(self.getSCMPKInstruction("EQU32", bTmp.idx, 0, comment="Beta == 0 ?"))
-          module.add(SCSelectB32(dst=sgpr(flag), src0=sgpr(flag), src1=0, comment="beta != 0 -> not fused"))
+        module.add(emitAccSeed())
 
-    # full MacroTile in M and N: for the last WG in each dim, SizeX % MTx must be 0
-    # (non-last WGs are always full -> forced remainder 0). Mirrors
-    # checkIsEdgeSubtile(requireFullTile=True) but folds the rem==0 predicate into the
-    # flag via s_cselect instead of branching.
-    #
-    # This is a STRICT full-tile test: admitting subtile-aligned partial tiles here
-    # would force the fused store to carry per-block bounds checks (align8 exec masks
-    # + OOB branches) on its critical path. Partial tiles instead take the PLAIN NLL,
-    # whose post-loop store is edge-capable; that keeps the fused store branch- and
-    # mask-free (see _plsinFusedNoGuards).
-    for isSize1 in (False, True):
-      dimName  = "N" if isSize1 else "M"
-      divisor  = kernel["MacroTile1"] if isSize1 else kernel["MacroTile0"]
-      wgSgpr   = "WorkGroup1" if isSize1 else "WorkGroup0"
-      nwgSgpr  = "NumWorkGroups1" if isSize1 else "NumWorkGroups0"
-      if isSize1:
-        sizeBoundary = sgpr("PackedSize1") if len(kernel["PackedC1IndicesX"]) > 1 else self.sizeRef(kernel["ProblemType"]["Index1"])
-      else:
-        sizeBoundary = sgpr("PackedSize0") if len(kernel["PackedC0IndicesX"]) > 1 else self.sizeRef(kernel["ProblemType"]["Index0"])
-      module.addComment1("PLSIN guard-hoist: fold full-tile %s (SizeX %% %d == 0 on last WG) into %s" %
-                         (dimName, divisor, flag))
-      with self.allocTmpSgpr(4, tag="plsinFused_fulltile") as eTmp:
-        rem  = eTmp.idx        # SizeX % divisor
-        quo  = eTmp.idx + 1    # SizeX / divisor (reused as nwg-1 after the divide)
-        div2 = eTmp.idx + 2    # 2-reg divide scratch
-        module.add(scalarStaticDivideAndRemainder(quo, rem, sizeBoundary, divisor,
-                                                  ContinuousRegister(div2, 2), 2))
-        module.add(SAddU32(dst=sgpr(quo), src0=hex(-1), src1=sgpr(nwgSgpr), comment="nwg-1"))
-        module.add(SCmpGeU32(src0=sgpr(wgSgpr), src1=sgpr(quo), comment="last WG in %s ?" % dimName))
-        module.add(SCSelectB32(dst=sgpr(rem), src0=sgpr(rem), src1=0, comment="myRem = last WG ? rem : 0"))
-        module.add(SCmpEQU32(src0=sgpr(rem), src1=0, comment="full-tile in %s ?" % dimName))
+      # ---- StreamK: this WG finished the tile (LocalEnd == ItersPerTile) ----------
+      # sIpt doubles as the xor scratch, so this needs no temp of its own -- and it is
+      # acquired only now, after the pointer quad above has been released.
+      if useStreamK:
+        sIpt = self.acquireStreamKConstSgpr(kernel, "ItersPerTile")
+        if self.isStreamKConstantsToVgprEnabled(kernel):
+          module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(self.states.skConstVgprs["ItersPerTile"]),
+                                       comment="ItersPerTile const -> sgpr"))
+        module.add(SXorB32(dst=sgpr(sIpt), src0=sgpr("StreamKLocalEnd"), src1=sgpr(sIpt),
+                           comment="0 iff wg finished this tile"))
+        module.add(SOrB32(dst=sgpr(bad), src0=sgpr(sIpt), src1=sgpr(bad),
+                          comment="bad |= (not finish) -> split contributor, not fused"))
+        self.releaseStreamKConstSgpr(sIpt)
+
+      # ---- materialise the flag from the accumulator ------------------------------
+      # flag stays "==1 => fully fuse-eligible", and (when applyAlphaInFused is False)
+      # flag==1 still implies eff-alpha==1, so the compile-time applyAlpha=False fast
+      # path (gated by _plsinAlphaSkipEligible + this runtime flag) remains correct.
+      module.add(SCmpEQU32(src0=sgpr(bad), src1=0, comment="every folded sub-guard passed ?"))
+      module.add(SCSelectB32(dst=sgpr(flag), src0=1, src1=0, comment="tentatively fuse-eligible"))
+
+      # ---- the remaining sub-guards are not zero-tests, so they keep a cselect ----
+      # Alpha == 1.0 completes the eff-alpha==1 term begun by the null-pointer fold.
+      if not applyAlphaInFused:
+        module.add(SCmpEQU32(src0=sgpr("Alpha"), src1=1.0, comment="Alpha == 1.0 ?"))
+        module.add(SCSelectB32(dst=sgpr(flag), src0=sgpr(flag), src1=0, comment="Alpha != 1 -> not fused"))
+
+      # Degenerate short-K guard: require numIter >= minIter so the NLL pipeline has a
+      # real iteration to drain.
+      if depthUPow2 and pgr >= 2 and minIter > 1:
+        module.addComment1("PLSIN guard-hoist: fold numIter>=%u into %s (pre-loop shadow)" % (minIter, flag))
+        module.add(SLShiftRightB32(dst=sgpr(off), src=sgpr("SizesSum+%u" % unrollIdx),
+                                   shiftHex=hex(log2(depthU)),
+                                   comment="numIter = SizesSum / DepthU"))
+        module.add(SCmpGeU32(src0=sgpr(off), src1=minIter, comment="numIter >= minIter (real NLL drain)?"))
+        module.add(SCSelectB32(dst=sgpr(flag), src0=sgpr(flag), src1=0, comment="too few K-iters -> not fused"))
+
+      # ---- full MacroTile in M and N ---------------------------------------------
+      # Tile wg spans [wg*MT, (wg+1)*MT), so it is full iff (wg+1)*MT <= SizeX, i.e. iff
+      # wg < SizeX / MT (floor). One shift plus one compare per dimension replaces the
+      # remainder / last-WG / cselect chain, and NumWorkGroups is not needed at all. Any
+      # remapping that pushes wg past the full-tile count yields "not full", which fails
+      # safe to the PLAIN NLL.
+      #
+      # This is a STRICT full-tile test: admitting subtile-aligned partial tiles here
+      # would force the fused store to carry per-block bounds checks (align8 exec masks
+      # + OOB branches) on its critical path. Partial tiles instead take the PLAIN NLL,
+      # whose post-loop store is edge-capable; that keeps the fused store branch- and
+      # mask-free (see _plsinFusedNoGuards).
+      for isSize1 in (False, True):
+        dimName  = "N" if isSize1 else "M"
+        divisor  = kernel["MacroTile1"] if isSize1 else kernel["MacroTile0"]
+        wgSgpr   = "WorkGroup1" if isSize1 else "WorkGroup0"
+        if isSize1:
+          sizeBoundary = sgpr("PackedSize1") if len(kernel["PackedC1IndicesX"]) > 1 else self.sizeRef(kernel["ProblemType"]["Index1"])
+        else:
+          sizeBoundary = sgpr("PackedSize0") if len(kernel["PackedC0IndicesX"]) > 1 else self.sizeRef(kernel["ProblemType"]["Index0"])
+        module.addComment1("PLSIN guard-hoist: fold full-tile %s (%s < SizeX / %d) into %s" %
+                           (dimName, wgSgpr, divisor, flag))
+        if (divisor & (divisor - 1)) == 0:
+          module.add(scalarStaticDivideAndRemainder(off, -1, sizeBoundary, divisor, None, 0))
+        else:
+          with self.allocTmpSgpr(4, tag="plsinFused_fulltileDiv") as divTmp:
+            module.add(scalarStaticDivideAndRemainder(off, -1, sizeBoundary, divisor,
+                                                      ContinuousRegister(divTmp.idx, 4), 0))
+        module.add(SCmpLtU32(src0=sgpr(wgSgpr), src1=sgpr(off), comment="full-tile in %s ?" % dimName))
         module.add(SCSelectB32(dst=sgpr(flag), src0=sgpr(flag), src1=0, comment="partial %s tile -> not fused" % dimName))
-
-    # StreamK full-tile owner: started (LocalStart==0) AND finished (LocalEnd==ItersPerTile).
-    if kernel["StreamK"] > 0 and not kernel["StreamKAtomic"] and not kernel["StreamKForceDPOnly"]:
-      module.addComment1("PLSIN guard-hoist: fold StreamK full-tile owner into %s" % flag)
-      module.add(SCmpEQU32(src0=sgpr("StreamKLocalStart"), src1=0, comment="wg started this tile ?"))
-      module.add(SCSelectB32(dst=sgpr(flag), src0=sgpr(flag), src1=0, comment="split contributor (not start) -> not fused"))
-      sIpt = self.acquireStreamKConstSgpr(kernel, "ItersPerTile")
-      if self.isStreamKConstantsToVgprEnabled(kernel):
-        module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(self.states.skConstVgprs["ItersPerTile"]),
-                                     comment="ItersPerTile const -> sgpr"))
-      module.add(SCmpEQU32(src0=sgpr("StreamKLocalEnd"), src1=sgpr(sIpt), comment="wg finished this tile ?"))
-      self.releaseStreamKConstSgpr(sIpt)
-      module.add(SCSelectB32(dst=sgpr(flag), src0=sgpr(flag), src1=0, comment="split contributor (not finish) -> not fused"))
     return module
 
   ##############################################################################
