@@ -172,6 +172,51 @@ inline bool
 }
 
 // Preload problem/solution mappings
+namespace
+{
+    /**
+     * A recorded solution index is a hint; the recorded name is what authorizes
+     * it.
+     *
+     * Resolve the index in the library that is loaded now and require the name
+     * to still match. A rebuild that moved kernels then thins the file one entry
+     * at a time instead of the whole-file build gate rejecting everything, and
+     * an index that now points at an unrelated kernel is rejected rather than
+     * silently used.
+     *
+     * Entries with no recorded name are legacy rows, already gated on the build
+     * stamp when the file was loaded, so there is nothing further to check.
+     */
+    bool tuned_entry_identity_matches(rocblaslt_handle                         handle,
+                                      const TensileLite::TunedEntry&           entry,
+                                      const rocblaslt_matmul_heuristic_result& resolved)
+    {
+        if(!entry.solutionName.has_value())
+            return true;
+
+        // Deliberately the bare name. getSolutionNameFromData decorates with
+        // GSU/WGM suffixes when they differ from the solution defaults, which
+        // would never round-trip against what the writer stored.
+        const std::string currentName = getSolutionNameFromAlgoIndex(handle, resolved.algo);
+        if(currentName == *entry.solutionName)
+            return true;
+
+        auto& counters = TensileLite::TuningCounters::instance();
+        counters.invalidated++;
+
+        if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
+        {
+            std::ostringstream msg;
+            msg << "tuning-cache: entry invalid, index " << entry.solutionIndex
+                << " now resolves to '" << currentName << "', recorded '" << *entry.solutionName
+                << "' [" << counters.summary() << "]";
+            log_info(__func__, msg.str());
+        }
+
+        return false;
+    }
+} // namespace
+
 bool problem_override_from_file(rocblaslt_handle&                 handle,
                                 RocblasltContractionProblem&      problem,
                                 rocblaslt_matmul_desc&            matmul_desc,
@@ -193,16 +238,34 @@ bool problem_override_from_file(rocblaslt_handle&                 handle,
         std::vector<rocblaslt_matmul_heuristic_result> overrideResults;
         std::vector<int>                               solutionIndex(1);
         TensileLite::ProblemOverride prob_key(RocblasltContractionProblem2ProblemOverride(problem));
-        auto                         sol_iter = m_override.find(prob_key);
 
-        for(auto sol_idx = sol_iter.first; !success && sol_idx != sol_iter.second; sol_idx++)
+        // Current-schema rows first, then v0 rows under the historical narrow
+        // key. Old files predate every widened field, so they can only be
+        // matched on what the old format actually recorded.
+        auto       entries = m_override.find(prob_key);
+        const auto legacy  = m_override.findLegacy(prob_key);
+        entries.insert(entries.end(), legacy.begin(), legacy.end());
+
+        for(const auto& entry : entries)
         {
-            solutionIndex[0] = sol_idx->second;
+            if(success)
+                break;
+
+            solutionIndex[0] = entry.solutionIndex;
+
+            // getSolutionsFromIndex appends, and everything below reads [0].
+            // Without clearing, the second and later entries are validated and
+            // launched against the *first* entry's solution. Harmless while a
+            // key only ever had one entry; wrong as soon as it has two.
+            overrideResults.clear();
 
             if(rocblaslt_status_success
                == getSolutionsFromIndex(
-                   handle, solutionIndex, overrideResults, max_workspace_bytes))
+                   handle, solutionIndex, overrideResults, max_workspace_bytes)
+               && !overrideResults.empty())
             {
+                if(!tuned_entry_identity_matches(handle, entry, overrideResults[0]))
+                    continue;
 
                 size_t required_workspace_size = 0;
                 auto&  tensile_data            = matmul_desc->m_data;
@@ -249,10 +312,12 @@ bool problem_override_from_file(rocblaslt_handle&                 handle,
 
         if(!success)
         {
+            TensileLite::TuningCounters::instance().misses++;
             log_info(__func__, "No valid solution index found in override file.");
         }
         else
         {
+            TensileLite::TuningCounters::instance().hits++;
             std::string mapping_result = "Find solution with index: ";
             mapping_result += std::to_string(solutionIndex[0]);
             log_info(__func__, mapping_result);
@@ -260,6 +325,40 @@ bool problem_override_from_file(rocblaslt_handle&                 handle,
     }
 
     return success;
+}
+
+// Declared for the execution-path hook in tensile_host.cpp, which must know
+// whether a key still has a usable entry rather than merely any entry.
+bool tuning_cache_has_valid_entry(rocblaslt_handle                    handle,
+                                  const TensileLite::ProblemOverride& key,
+                                  size_t                              max_workspace_bytes)
+{
+    TensileLite::OverrideMap& m_override = TensileLite::OverrideMap::getMap();
+
+    auto       entries = m_override.find(key);
+    const auto legacy  = m_override.findLegacy(key);
+    entries.insert(entries.end(), legacy.begin(), legacy.end());
+
+    std::vector<rocblaslt_matmul_heuristic_result> resolved;
+    std::vector<int>                               index(1);
+
+    for(const auto& entry : entries)
+    {
+        index[0] = entry.solutionIndex;
+
+        // Cleared per entry for the same reason as the replay loop below:
+        // getSolutionsFromIndex appends and this reads [0].
+        resolved.clear();
+
+        if(rocblaslt_status_success
+               != getSolutionsFromIndex(handle, index, resolved, max_workspace_bytes)
+           || resolved.empty())
+            continue;
+        if(tuned_entry_identity_matches(handle, entry, resolved[0]))
+            return true;
+    }
+
+    return false;
 }
 
 bool problem_override_from_file_cpp(
@@ -272,6 +371,17 @@ bool problem_override_from_file_cpp(
 {
 
     bool success = false;
+
+    // Grouped GEMM carries TensileDataGroupedGemm, but the key accessor casts
+    // to TensileDataGemm unconditionally. Reading a ProblemOverride out of the
+    // wrong type segfaults on its std::string member. Grouped has no key of its
+    // own yet, so it simply does not participate in the cache.
+    if(gemmType != rocblaslt::RocGemmType::ROCBLASLT_GEMM)
+    {
+        log_info(__func__, "tuning-cache: grouped GEMM is not cached; using default selection.");
+        return false;
+    }
+
     TensileLite::getContractionProblemsFromFile(file_path);
     TensileLite::OverrideMap& m_override = TensileLite::OverrideMap::getMap();
 
@@ -284,15 +394,31 @@ bool problem_override_from_file_cpp(
         std::vector<rocblaslt_matmul_heuristic_result> overrideResults;
         std::vector<int>                               solutionIndex(1);
         TensileLite::ProblemOverride prob_key(TensileDataGemm2ProblemOverride(gemmData));
-        auto                         sol_iter = m_override.find(prob_key);
 
-        for(auto sol_idx = sol_iter.first; !success && sol_idx != sol_iter.second; sol_idx++)
+        auto       entries = m_override.find(prob_key);
+        const auto legacy  = m_override.findLegacy(prob_key);
+        entries.insert(entries.end(), legacy.begin(), legacy.end());
+
+        for(const auto& entry : entries)
         {
-            solutionIndex[0] = sol_idx->second;
+            if(success)
+                break;
+
+            solutionIndex[0] = entry.solutionIndex;
+
+            // Same append-and-read-[0] hazard as the C path.
+            overrideResults.clear();
+
             if(rocblaslt_status_success
-               == getSolutionsFromIndex(
-                   handle, solutionIndex, overrideResults, max_workspace_bytes))
+                   == getSolutionsFromIndex(
+                       handle, solutionIndex, overrideResults, max_workspace_bytes)
+               && !overrideResults.empty())
             {
+                // Applied here too. This path never called the git-version gate
+                // at all, so before per-entry validation a stale file was used
+                // across builds with no check whatsoever.
+                if(!tuned_entry_identity_matches(handle, entry, overrideResults[0]))
+                    continue;
 
                 size_t                  required_workspace_size = 0;
                 rocblaslt::RocTuningV2* tuning                  = nullptr;
@@ -2170,15 +2296,24 @@ rocblaslt_status
         auto prob = construct_rocblaslt_problem(
             handle, matmul_desc, matA, matB, matC, matD, &alpha, &beta, pref->max_workspace_bytes);
 
-        OverrideSingleton& override         = OverrideSingleton::getInstance();
-        bool               override_success = false;
-        if(override.env_mode)
+        const auto tuningFile       = TensileLite::selectTuningFile();
+        bool       override_success = false;
+
+        // Initialised before the lookup rather than left to getBestSolutions.
+        // When the lookup hits and the caller asked for exactly one algo, the
+        // decrement below takes requestedAlgoCount to zero, getBestSolutions is
+        // skipped entirely, and the dedup step further down would otherwise read
+        // this uninitialised and then scan heuristicResultsArray[1..] past the
+        // end of a single-element array.
+        *returnAlgoCount = 0;
+
+        if(tuningFile.active)
         {
             override_success = problem_override_from_file(handle,
                                                           prob,
                                                           matmul_desc,
                                                           heuristicResultsArray,
-                                                          override.file_path,
+                                                          tuningFile.path,
                                                           pref->max_workspace_bytes);
             if(override_success)
                 requestedAlgoCount--;
@@ -2441,14 +2576,14 @@ rocblaslt_status
     rocblaslt_status status = rocblaslt_status_success;
     try
     {
-        OverrideSingleton&                             override = OverrideSingleton::getInstance();
+        const auto                                     tuningFile = TensileLite::selectTuningFile();
         bool                                           override_success = false;
         std::vector<rocblaslt_matmul_heuristic_result> override_result;
 
-        if(override.env_mode)
+        if(tuningFile.active)
         {
             override_success = problem_override_from_file_cpp(
-                handle, gemmType, gemmData, override_result, override.file_path, maxWorkspaceBytes);
+                handle, gemmType, gemmData, override_result, tuningFile.path, maxWorkspaceBytes);
 
             log_api(__func__, "OverrideAlgoCount", override_success ? 1 : 0);
         }

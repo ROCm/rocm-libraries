@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -32,8 +32,14 @@
 #include <Tensile/DataTypes.hpp>
 #include <shared_mutex>
 
+#include <atomic>
+#include <cstdint>
 #include <map>
+#include <mutex>
+#include <optional>
+#include <set>
 #include <string>
+#include <tuple>
 #include <vector>
 
 class OverrideSingleton
@@ -69,95 +75,376 @@ private:
 
 namespace TensileLite
 {
-
-    enum class HeaderFields
+    enum class TuningMode : uint32_t
     {
-        transA = 0,
-        transB,
-        batch_count,
-        m,
-        n,
-        k,
-        a_type,
-        b_type,
-        c_type,
-        compute_type,
-        solution_index,
-        count
+        Off   = 0,
+        Cache = 1,
+        Tune  = 2,
     };
 
+    /**
+     * The tuning mode switch, latched on first use.
+     *
+     * Latched rather than read per call so the hot path costs nothing and so a
+     * process cannot change mode halfway through a run. Setting the variable
+     * after the first matmul therefore has no effect, which is the documented
+     * behaviour.
+     */
+    class TuningModeSingleton
+    {
+    public:
+        static TuningModeSingleton& getInstance()
+        {
+            static TuningModeSingleton gInstance;
+            return gInstance;
+        }
+
+        TuningModeSingleton(const TuningModeSingleton&)            = delete;
+        TuningModeSingleton& operator=(const TuningModeSingleton&) = delete;
+
+        TuningMode         mode() const { return m_mode; }
+        const std::string& cachePath() const { return m_cachePath; }
+
+        // Tuning does nothing without somewhere to keep the results. There is
+        // no default cache location in this milestone, on purpose: a managed
+        // default directory brings a lifetime and growth policy with it.
+        bool reads() const { return m_mode != TuningMode::Off && !m_cachePath.empty(); }
+        bool writes() const { return m_mode == TuningMode::Tune && !m_cachePath.empty(); }
+
+    private:
+        TuningModeSingleton();
+
+        TuningMode  m_mode = TuningMode::Off;
+        std::string m_cachePath;
+    };
+
+    /**
+     * Running tallies for the tuning cache.
+     *
+     * Cheap atomics rather than a reporting API. "How many of my entries
+     * survived this upgrade" is the question per-entry validation makes
+     * answerable, and without a count the answer is only visible by grepping
+     * individual log lines.
+     */
+    struct TuningCounters
+    {
+        static TuningCounters& instance()
+        {
+            static TuningCounters gInstance;
+            return gInstance;
+        }
+
+        std::atomic<uint64_t> entriesLoaded{0};
+        std::atomic<uint64_t> hits{0};
+        std::atomic<uint64_t> misses{0};
+        std::atomic<uint64_t> invalidated{0};
+        std::atomic<uint64_t> tuned{0};
+        std::atomic<uint64_t> skipped{0};
+
+        std::string summary() const
+        {
+            return "loaded=" + std::to_string(entriesLoaded.load())
+                   + " hits=" + std::to_string(hits.load())
+                   + " misses=" + std::to_string(misses.load())
+                   + " invalidated=" + std::to_string(invalidated.load())
+                   + " tuned=" + std::to_string(tuned.load())
+                   + " skipped=" + std::to_string(skipped.load());
+        }
+    };
+
+    /**
+     * Which tuning file this process should consult, if any.
+     *
+     * HIPBLASLT_TUNING_CACHE_PATH and HIPBLASLT_TUNING_OVERRIDE_FILE are
+     * mutually exclusive rather than merged. There is a single global map and a
+     * per-path load latch, so letting both load would mean whichever arrived
+     * first silently suppressed the other. In off mode the legacy override
+     * behaves exactly as it always has; in cache or tune mode only the managed
+     * cache is consulted and the legacy override is ignored with a log line.
+     */
+    struct TuningFileSelection
+    {
+        bool        active   = false;
+        bool        writable = false;
+        std::string path;
+    };
+
+    TuningFileSelection selectTuningFile();
+
+    /** The build stamp rows are written with and legacy rows are trusted against. */
+    const std::string& currentBuildStamp();
+
+    /**
+     * Row schema version written into and read from the tuning file.
+     *
+     * v0 is the historical format: ten problem columns plus solution_index, and
+     * no per-row build stamp. Rows without an explicit schema_version column are
+     * v0 and are trusted only when the file build stamp matches, because the
+     * fields they omit (leading dimensions, strides) have no safe default.
+     */
+    enum class TuningSchemaVersion : uint32_t
+    {
+        Legacy  = 0,
+        Current = 1,
+    };
+
+    /**
+     * Where an entry came from. Used for diagnostics and for deciding how much
+     * to trust an entry that carries no solution name.
+     */
+    enum class TuningEntrySource : uint32_t
+    {
+        LegacyOverrideFile = 0,
+        ManagedCacheFile   = 1,
+        OnlineTuning       = 2,
+    };
+
+    /**
+     * The semantic problem key.
+     *
+     * Deliberately built from plain scalars rather than rocblaslt/hip types so
+     * that it can be constructed and compared in a unit test without a solution
+     * library or a device. Conversion from RocblasltContractionProblem lives in
+     * tensile_host.cpp.
+     *
+     * FIELD CLASSIFICATION. Every field of RocblasltContractionProblem must be
+     * accounted for as key, metadata, or deliberately ignored. Everything listed
+     * as a member below is key. The deliberate exclusions, with reasons:
+     *
+     *   A, B, C, D, E, batch_A..batch_D, bias, scaleA..scaleE, scaleAlphaVec,
+     *   amaxD, workspace, Synchronizer
+     *       Device addresses. Only their presence is keyed, never the value.
+     *
+     *   C == D (aliasing)
+     *       construct_rocblaslt_problem passes null for both C and D, so at
+     *       heuristic time this is nullptr == nullptr and setCEqualsD(true) is
+     *       called for every problem, in-place or not. The value is a constant
+     *       at lookup and carries no information.
+     *
+     *   alpha, beta, alpha_owned
+     *       assignAlphaBeta1 fabricates both as one at heuristic time, so the
+     *       key cannot represent them. The tuner does measure with the caller's
+     *       real values, which means a beta=0-tuned entry can serve a beta=2
+     *       caller. Accepted imprecision for now; see the plan.
+     *
+     *   pointer alignment
+     *       No solution predicate consumes it today.
+     *
+     *   stream, workspaceSize
+     *       Execution context, not problem identity. The winner's required
+     *       workspace is stored in the entry instead.
+     *
+     *   row_stride_a..row_stride_e
+     *       Always 1 on every construction path.
+     */
     class ProblemOverride
     {
     public:
-        ProblemOverride();
-        ProblemOverride(bool             transA,
-                        bool             transB,
-                        rocisa::DataType inputTypeA,
-                        rocisa::DataType inputTypeB,
-                        rocisa::DataType computeType,
-                        rocisa::DataType outputType,
-                        size_t           m,
-                        size_t           n,
-                        size_t           k,
-                        size_t           batchSize);
-        ProblemOverride(const ProblemOverride& problem);
+        ProblemOverride() = default;
 
-        inline bool transA() const
+        // Orientation and shape
+        bool   transA     = false;
+        bool   transB     = false;
+        size_t m          = 0;
+        size_t n          = 0;
+        size_t k          = 0;
+        size_t batchSize  = 0;
+
+        // Types. c and d are kept separate: the historical key used only c,
+        // which silently merged mixed-precision problems where c != d.
+        rocisa::DataType inputTypeA  = rocisa::DataType::None;
+        rocisa::DataType inputTypeB  = rocisa::DataType::None;
+        rocisa::DataType outputTypeC = rocisa::DataType::None;
+        rocisa::DataType outputTypeD = rocisa::DataType::None;
+        rocisa::DataType computeType = rocisa::DataType::None;
+        int32_t          computeInputTypeA = 0;
+        int32_t          computeInputTypeB = 0;
+
+        // Layout
+        size_t colStrideA   = 0;
+        size_t colStrideB   = 0;
+        size_t colStrideC   = 0;
+        size_t colStrideD   = 0;
+        size_t batchStrideA = 0;
+        size_t batchStrideB = 0;
+        size_t batchStrideC = 0;
+        size_t batchStrideD = 0;
+        int32_t batchMode   = 0;
+
+        // Epilogue. The enum is kept whole rather than decomposed into an
+        // activation type, because bias source, aux direction and gradient all
+        // derive from it and a partial decomposition merges distinct problems.
+        int32_t epilogue   = 0;
+        bool    gradient   = false;
+        int32_t biasType   = 0;
+        int32_t biasStride = 0;
+        bool    hasBias    = false;
+        int32_t auxType    = 0;
+
+        // Scaling. Formats matter as well as presence: a block-scaled problem
+        // selects different kernels from a scalar-scaled one.
+        int32_t scaleAFormat     = 0;
+        int32_t scaleBFormat     = 0;
+        bool    hasScaleA        = false;
+        bool    hasScaleB        = false;
+        bool    hasScaleC        = false;
+        bool    hasScaleD        = false;
+        bool    hasScaleE        = false;
+        bool    hasScaleAlphaVec = false;
+        bool    hasAmaxD         = false;
+
+        // Kernel-shaping hints that change which solution is applicable
+        bool    swizzleA               = false;
+        bool    swizzleB               = false;
+        int32_t streamkTileScheduling  = 0;
+        int32_t smCountTarget          = 0;
+
+        // Device identity. Entries are scoped to the architecture they were
+        // measured on; replaying a gfx942 winner on gfx950 is meaningless.
+        std::string archName;
+        int32_t     cuCount = 0;
+
+        /**
+         * The single authoritative field list. Ordering and hashing both derive
+         * from this, so a field added above is only actually part of the key
+         * once it appears here.
+         */
+        auto key_tuple() const
         {
-            return m_transA;
+            return std::tie(transA,
+                            transB,
+                            m,
+                            n,
+                            k,
+                            batchSize,
+                            inputTypeA,
+                            inputTypeB,
+                            outputTypeC,
+                            outputTypeD,
+                            computeType,
+                            computeInputTypeA,
+                            computeInputTypeB,
+                            colStrideA,
+                            colStrideB,
+                            colStrideC,
+                            colStrideD,
+                            batchStrideA,
+                            batchStrideB,
+                            batchStrideC,
+                            batchStrideD,
+                            batchMode,
+                            epilogue,
+                            gradient,
+                            biasType,
+                            biasStride,
+                            hasBias,
+                            auxType,
+                            scaleAFormat,
+                            scaleBFormat,
+                            hasScaleA,
+                            hasScaleB,
+                            hasScaleC,
+                            hasScaleD,
+                            hasScaleE,
+                            hasScaleAlphaVec,
+                            hasAmaxD,
+                            swizzleA,
+                            swizzleB,
+                            streamkTileScheduling,
+                            smCountTarget,
+                            archName,
+                            cuCount);
         }
-        inline bool transB() const
+
+        /**
+         * The key reduced to the fields the historical format actually keyed.
+         *
+         * A v0 row cannot populate the widened key: the columns simply are not
+         * in the file, so they parse as defaults and the row then matches
+         * nothing. Reducing both the stored row and the lookup to this same
+         * subset reproduces the pre-existing matching behaviour exactly for old
+         * files, without weakening the widened key for new ones.
+         */
+        ProblemOverride legacyKey() const
         {
-            return m_transB;
-        }
-        inline rocisa::DataType inputTypeA() const
-        {
-            return m_inputTypeA;
-        }
-        inline rocisa::DataType inputTypeB() const
-        {
-            return m_inputTypeB;
-        }
-        inline rocisa::DataType computeType() const
-        {
-            return m_computeType;
-        }
-        inline rocisa::DataType outputType() const
-        {
-            return m_outputType;
-        }
-        inline size_t m() const
-        {
-            return m_m;
-        }
-        inline size_t n() const
-        {
-            return m_n;
-        }
-        inline size_t k() const
-        {
-            return m_k;
-        }
-        inline size_t batchSize() const
-        {
-            return m_batchSize;
+            ProblemOverride k;
+            k.transA      = transA;
+            k.transB      = transB;
+            k.m           = m;
+            k.n           = n;
+            k.k           = k_dim();
+            k.batchSize   = batchSize;
+            k.inputTypeA  = inputTypeA;
+            k.inputTypeB  = inputTypeB;
+            k.outputTypeC = outputTypeC;
+            k.computeType = computeType;
+            return k;
         }
 
     private:
-        bool             m_transA;
-        bool             m_transB;
-        rocisa::DataType m_inputTypeA;
-        rocisa::DataType m_inputTypeB;
-        rocisa::DataType m_computeType;
-        rocisa::DataType m_outputType;
-        size_t           m_m;
-        size_t           m_n;
-        size_t           m_k;
-        size_t           m_batchSize;
+        // `k` is shadowed by the local in legacyKey(); this keeps the accessor
+        // unambiguous without renaming the public field.
+        size_t k_dim() const { return k; }
     };
 
-    std::pair<ProblemOverride, int> problemFromEntries(const std::vector<std::string>& entries);
+    /**
+     * What a tuning file row resolves to.
+     *
+     * The historical map stored a bare solution index, which left nowhere to put
+     * the solution name that per-entry validation needs.
+     */
+    struct TunedEntry
+    {
+        int32_t solutionIndex = -1;
 
+        // Absent for legacy rows. When present, replay resolves the index in the
+        // current library and requires the name to still match before using it.
+        std::optional<std::string> solutionName;
+
+        TuningSchemaVersion schemaVersion = TuningSchemaVersion::Legacy;
+        TuningEntrySource   source        = TuningEntrySource::LegacyOverrideFile;
+
+        // Build that produced this row. Carried per row rather than only in the
+        // file header because appending after an upgrade makes mixed-build files
+        // the normal case.
+        std::string buildStamp;
+
+        // What the winner needed, so replay can reason about a caller whose
+        // budget differs rather than only accept or reject.
+        size_t requiredWorkspaceBytes = 0;
+
+        // Measurement of the winner, and of what default selection would have
+        // chosen at tuning time. Nothing reads the baseline yet; it is recorded
+        // because it cannot be reconstructed later and it is what a future
+        // "re-tune only entries now slower than default" would need.
+        double  winnerTimeUs      = 0.0;
+        int32_t baselineIndex     = -1;
+        double  baselineTimeUs    = 0.0;
+    };
+
+    std::optional<std::pair<ProblemOverride, TunedEntry>>
+        problemFromEntries(const std::map<std::string, std::string>& row);
+
+    /**
+     * Append one tuned winner to the tuning file.
+     *
+     * Takes the problem rather than the key so the type columns can be written
+     * in the spelling the parser reads back, and so a lossy key-to-string
+     * inverse is never needed.
+     *
+     * Serialised behind a file-global mutex rather than any per-key guard: two
+     * different shapes can finish tuning at the same moment and would otherwise
+     * interleave their rows. Concurrent writers in separate processes are not
+     * supported in this milestone; an unlocked append can still tear.
+     */
+    bool appendTunedEntry(const std::string&                 path,
+                          const RocblasltContractionProblem& problem,
+                          const TunedEntry&                  entry);
+
+    /**
+     * Load a tuning file into the map. Safe to call repeatedly; each distinct
+     * path is parsed at most once.
+     */
     void getContractionProblemsFromFile(const std::string& path);
 
     template <>
@@ -170,26 +457,13 @@ namespace TensileLite
 
         static int compare(ProblemOverride const& lhs, ProblemOverride const& rhs)
         {
-            return LexicographicCompare(lhs.transA(),
-                                        rhs.transA(),
-                                        lhs.transB(),
-                                        rhs.transB(),
-                                        lhs.inputTypeA(),
-                                        rhs.inputTypeA(),
-                                        lhs.inputTypeB(),
-                                        rhs.inputTypeB(),
-                                        lhs.computeType(),
-                                        rhs.computeType(),
-                                        lhs.outputType(),
-                                        rhs.outputType(),
-                                        lhs.m(),
-                                        rhs.m(),
-                                        lhs.n(),
-                                        rhs.n(),
-                                        lhs.k(),
-                                        rhs.k(),
-                                        lhs.batchSize(),
-                                        rhs.batchSize());
+            auto l = lhs.key_tuple();
+            auto r = rhs.key_tuple();
+            if(l < r)
+                return -1;
+            if(r < l)
+                return 1;
+            return 0;
         }
     };
 
@@ -209,43 +483,148 @@ namespace TensileLite
         // assignment operator
         OverrideMap& operator=(const OverrideMap&) = delete;
 
-        int size()
+        /**
+         * Entries in both maps.
+         *
+         * Callers use this as a cheap "is anything loaded at all" gate before
+         * looking a key up. Counting only the widened map made that gate fire
+         * for files consisting entirely of v0 rows, so their entries were never
+         * consulted.
+         */
+        size_t size() const
         {
             std::shared_lock<std::shared_timed_mutex> lock(m_mutex);
-            auto                                      size = m_override.size();
-            return size;
+            return m_override.size() + m_legacy.size();
         }
 
-        auto find(const ProblemOverride& prob_key)
+        /**
+         * Copy out every entry matching a key.
+         *
+         * Returns values rather than iterators on purpose. The previous
+         * signature returned an equal_range pair after its shared_lock had gone
+         * out of scope, so every caller walked the multimap unlocked. That was
+         * survivable while the map was written once at load; online tuning
+         * inserts entries throughout the run, which turns it into a live race.
+         */
+        std::vector<TunedEntry> find(const ProblemOverride& prob_key) const
         {
             std::shared_lock<std::shared_timed_mutex> lock(m_mutex);
-            auto                                      iter = m_override.equal_range(prob_key);
-            return iter;
+
+            std::vector<TunedEntry> found;
+            auto                    range = m_override.equal_range(prob_key);
+            for(auto it = range.first; it != range.second; ++it)
+                found.push_back(it->second);
+
+            return found;
         }
 
-        void add(const std::pair<ProblemOverride, int>& problemSolution)
+        /**
+         * Entries from v0 rows, keyed by the historical field subset.
+         *
+         * Kept in a separate map rather than mixed into the widened one so a
+         * legacy row can never accidentally satisfy a lookup that differs in a
+         * field the old format could not express.
+         */
+        std::vector<TunedEntry> findLegacy(const ProblemOverride& prob_key) const
+        {
+            std::shared_lock<std::shared_timed_mutex> lock(m_mutex);
+
+            std::vector<TunedEntry> found;
+            auto                    range = m_legacy.equal_range(prob_key.legacyKey());
+            for(auto it = range.first; it != range.second; ++it)
+                found.push_back(it->second);
+
+            return found;
+        }
+
+        bool addLegacyIfAbsent(const ProblemOverride& key, const TunedEntry& entry)
         {
             std::lock_guard<std::shared_timed_mutex> lock(m_mutex);
-            m_override.insert(problemSolution);
+
+            const ProblemOverride narrow = key.legacyKey();
+            auto                  range  = m_legacy.equal_range(narrow);
+            for(auto it = range.first; it != range.second; ++it)
+                if(it->second.solutionIndex == entry.solutionIndex
+                   && it->second.solutionName == entry.solutionName)
+                    return false;
+
+            m_legacy.emplace(narrow, entry);
+            return true;
         }
 
-        void erase(std::multimap<ProblemOverride, int>::iterator& sol_idx)
+        /**
+         * Drop every entry for a key and install one.
+         *
+         * Needed for re-tuning: a shape whose entries all failed validation must
+         * be replaceable, and addIfAbsent would refuse when the fresh winner
+         * happens to land on the same solution index as the dead row.
+         */
+        void replaceAll(const ProblemOverride& key, const TunedEntry& entry)
         {
             std::lock_guard<std::shared_timed_mutex> lock(m_mutex);
-            m_override.erase(sol_idx);
+            m_override.erase(key);
+            m_override.emplace(key, entry);
         }
 
-        std::mutex& getLock()
+        void add(const ProblemOverride& key, const TunedEntry& entry)
         {
-            return m_guard;
+            std::lock_guard<std::shared_timed_mutex> lock(m_mutex);
+            m_override.emplace(key, entry);
+        }
+
+        /**
+         * Insert unless an identical entry already exists for this key, so
+         * re-reading a file does not stack duplicates. Returns true if the
+         * entry was inserted.
+         *
+         * Identity is the index *and* the recorded name, not the index alone.
+         * The file is append-only, so a re-tuned shape leaves the superseded row
+         * in place ahead of its replacement, and the two commonly share an index
+         * because re-tuning often reaches the same kernel. Deduping on index
+         * alone kept only the stale row, which then failed validation and made
+         * the shape look untuned forever.
+         */
+        bool addIfAbsent(const ProblemOverride& key, const TunedEntry& entry)
+        {
+            std::lock_guard<std::shared_timed_mutex> lock(m_mutex);
+
+            auto range = m_override.equal_range(key);
+            for(auto it = range.first; it != range.second; ++it)
+                if(it->second.solutionIndex == entry.solutionIndex
+                   && it->second.solutionName == entry.solutionName)
+                    return false;
+
+            m_override.emplace(key, entry);
+            return true;
+        }
+
+        /**
+         * Record that a path has been parsed.
+         *
+         * Load used to be gated on size() == 0, which meant a file that yielded
+         * no valid rows was re-read on every heuristic call, and which would
+         * additionally block a second file once online tuning had inserted
+         * anything. Returns true if this call claimed the load.
+         */
+        bool claimLoad(const std::string& path)
+        {
+            std::lock_guard<std::shared_timed_mutex> lock(m_mutex);
+            return m_loadedPaths.insert(path).second;
+        }
+
+        bool isLoaded(const std::string& path) const
+        {
+            std::shared_lock<std::shared_timed_mutex> lock(m_mutex);
+            return m_loadedPaths.count(path) != 0;
         }
 
     private:
-        std::multimap<ProblemOverride, int> m_override;
-        std::mutex                          m_guard;
-        std::shared_timed_mutex             m_mutex;
+        std::multimap<ProblemOverride, TunedEntry> m_override;
+        std::multimap<ProblemOverride, TunedEntry> m_legacy;
+        std::set<std::string>                      m_loadedPaths;
+        mutable std::shared_timed_mutex            m_mutex;
     };
-} // namespace Tensile
+} // namespace TensileLite
 
 namespace std
 {
@@ -254,16 +633,8 @@ namespace std
     {
         inline size_t operator()(TensileLite::ProblemOverride const& po) const
         {
-            return TensileLite::hash_combine(po.transA(),
-                                             po.transB(),
-                                             po.inputTypeA(),
-                                             po.inputTypeB(),
-                                             po.computeType(),
-                                             po.outputType(),
-                                             po.m(),
-                                             po.n(),
-                                             po.k(),
-                                             po.batchSize());
+            return std::apply([](auto const&... field) { return TensileLite::hash_combine(field...); },
+                              po.key_tuple());
         }
     };
 } // namespace std

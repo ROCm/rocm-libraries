@@ -75,8 +75,14 @@ bool override_path_compare_git_version(OverrideSingleton& override, hipblasLtHan
             return true;
     }
 
-    override.env_mode = false;
-
+    // Deliberately does not clear override.env_mode any more.
+    //
+    // This used to disable the override file for the whole process on a header
+    // mismatch, which is the all-or-nothing build gate: one differing byte threw
+    // away every entry. Trust is now decided per entry instead. Rows carrying a
+    // solution name are validated at replay by resolving the recorded index and
+    // comparing the name, and rows without one are rejected against the build
+    // stamp when the file is parsed. A header mismatch is therefore informational.
     return false;
 }
 
@@ -494,9 +500,10 @@ try
         if(override_success)
             log_info(__func__, "HIPBLASLT_TUNING_OVERRIDE_FILE is the correct setting.");
         else
-            log_error(
-                __func__,
-                "The hipBLASLt git version and the override file git version are not the same.");
+            log_info(__func__,
+                     "tuning-cache: override file was produced by a different hipBLASLt build. "
+                     "Named entries are still validated individually; entries without a solution "
+                     "name are skipped.");
     }
 
     auto status = RocBlasLtStatusToHIPStatus(rocblaslt_matmul_algo_get_heuristic(

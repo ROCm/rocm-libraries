@@ -297,6 +297,17 @@ TensileLite::ProblemOverride
 
 TensileLite::ProblemOverride TensileDataGemm2ProblemOverride(std::shared_ptr<void>);
 
+/**
+ * Whether this key still has an entry that resolves to its recorded kernel.
+ *
+ * The execution-path tuning hook needs "is there a usable entry", not "is there
+ * any entry": a shape whose rows all failed validation after a rebuild must be
+ * eligible for re-tuning.
+ */
+bool tuning_cache_has_valid_entry(rocblaslt_handle                    handle,
+                                  const TensileLite::ProblemOverride& key,
+                                  size_t                              max_workspace_bytes);
+
 TensileLite::ContractionProblemGemm* ExtractProblemGemm(std::shared_ptr<void>);
 
 // Push the GemmPreference-supplied StreamK tile scheduling mode onto every
