@@ -115,8 +115,8 @@ __global__ void color_cast_pln_hip_tensor(T* srcPtr, uint3 srcStridesNCH, T* dst
     color_cast_hip_compute(srcPtr, &src_f24.f8[1], &dst_f24.f8[1], &g_f4, &alpha_f4);
     color_cast_hip_compute(srcPtr, &src_f24.f8[2], &dst_f24.f8[2], &b_f4, &alpha_f4);
     if constexpr (std::is_same<T, Rpp8s>::value)
-        rpp_hip_pack_float24_pln3_and_store24_pln3<RoundToNearest>(dstPtr + dstIdx,
-                                                                    dstStridesNCH.y, &dst_f24);
+        rpp_hip_pack_float24_pln3_and_store24_pln3<RoundToNearest>(dstPtr + dstIdx, dstStridesNCH.y,
+                                                                   &dst_f24);
     else
         rpp_hip_pack_float24_pln3_and_store24_pln3(dstPtr + dstIdx, dstStridesNCH.y, &dst_f24);
 }
@@ -151,8 +151,8 @@ __global__ void color_cast_pkd3_pln3_hip_tensor(T* srcPtr, uint2 srcStridesNH, T
     color_cast_hip_compute(srcPtr, &src_f24.f8[1], &dst_f24.f8[1], &g_f4, &alpha_f4);
     color_cast_hip_compute(srcPtr, &src_f24.f8[2], &dst_f24.f8[2], &b_f4, &alpha_f4);
     if constexpr (std::is_same<T, Rpp8s>::value)
-        rpp_hip_pack_float24_pln3_and_store24_pln3<RoundToNearest>(dstPtr + dstIdx,
-                                                                    dstStridesNCH.y, &dst_f24);
+        rpp_hip_pack_float24_pln3_and_store24_pln3<RoundToNearest>(dstPtr + dstIdx, dstStridesNCH.y,
+                                                                   &dst_f24);
     else
         rpp_hip_pack_float24_pln3_and_store24_pln3(dstPtr + dstIdx, dstStridesNCH.y, &dst_f24);
 }
@@ -299,16 +299,15 @@ RppStatus hip_exec_color_cast_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPt
         int globalThreads_y = dstDescPtr->h;
         int globalThreads_z = handle.GetBatchSize();
 
-        hipLaunchKernelGGL(color_cast_pln1_hip_tensor,
-                           dim3(ceil((float)globalThreads_x / LOCAL_THREADS_X),
-                                ceil((float)globalThreads_y / LOCAL_THREADS_Y),
-                                ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
-                           dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0,
-                           handle.GetStream(), srcPtr,
-                           make_uint2(srcDescPtr->strides.nStride, srcDescPtr->strides.hStride),
-                           dstPtr,
-                           make_uint2(dstDescPtr->strides.nStride, dstDescPtr->strides.hStride),
-                           rgbTensor, alphaTensor, roiTensorPtrSrc);
+        hipLaunchKernelGGL(
+            color_cast_pln1_hip_tensor,
+            dim3(ceil((float)globalThreads_x / LOCAL_THREADS_X),
+                 ceil((float)globalThreads_y / LOCAL_THREADS_Y),
+                 ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
+            dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0, handle.GetStream(), srcPtr,
+            make_uint2(srcDescPtr->strides.nStride, srcDescPtr->strides.hStride), dstPtr,
+            make_uint2(dstDescPtr->strides.nStride, dstDescPtr->strides.hStride), rgbTensor,
+            alphaTensor, roiTensorPtrSrc);
         HIP_CHECK_LAUNCH_RETURN();
     }
 

@@ -1055,7 +1055,7 @@ RppStatus color_cast_f16_f16_host_tensor(Rpp16f* srcPtr, RpptDescPtr srcDescPtr,
                     __m128 p[1];
 
                     rpp_simd_load(rpp_load4_f32_to_f32, srcPtrTemp_ps, p);  // simd loads
-                    compute_color_cast_4_host(p, pMul, pAdd[0]);  // color_cast adjustment
+                    compute_color_cast_4_host(p, pMul, pAdd[0]);            // color_cast adjustment
                     // boundary checks for f16
                     rpp_pixel_check_0to1(p, 1);
                     rpp_simd_store(rpp_store4_f32_to_f32, dstPtrTemp_ps, p);  // simd stores
