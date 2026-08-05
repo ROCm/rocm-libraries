@@ -23,12 +23,12 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-#include <cblas.h>
 #include <omp.h>
 
 #include <bitset>
 #include <iostream>
 #include <roc/host_validation/adapters/hipblaslt/HipblasltReferenceGemm.hpp>
+#include <roc/host_validation/backends/blas.hpp>
 #include <roc/host_validation/validation.hpp>
 #include <span>
 #include <stdexcept>
@@ -37,24 +37,6 @@
 #include "datatype_interface.hpp"
 #include "hipblaslt_vector.hpp"
 #include "utility.hpp"
-
-namespace
-{
-    CBLAS_TRANSPOSE toCblasTranspose(hipblasOperation_t transpose)
-    {
-        switch(transpose)
-        {
-        case HIPBLAS_OP_N:
-            return CblasNoTrans;
-        case HIPBLAS_OP_T:
-            return CblasTrans;
-        case HIPBLAS_OP_C:
-            return CblasConjTrans;
-        }
-
-        throw std::invalid_argument("Unsupported hipBLAS operation.");
-    }
-}
 
 template <typename T>
 class customVector
@@ -1385,105 +1367,41 @@ void hipblaslt_reference_gemm(hipblasOperation_t       transA,
     const bool useBlas = m > blasThreshold || n > blasThreshold || k > blasThreshold
                          || lda > blasThreshold || ldb > blasThreshold || ldc > blasThreshold;
 
-    if(useBlas)
-    {
-        if constexpr(std::is_same_v<TcCast, float>)
-        {
-            cblas_sgemm(CblasColMajor,
-                        toCblasTranspose(transA),
-                        toCblasTranspose(transB),
-                        m,
-                        n,
-                        k,
-                        alphaCast,
-                        aValues,
-                        lda,
-                        bValues,
-                        ldb,
-                        betaCast,
-                        cValues,
-                        ldc);
-        }
-        else if constexpr(std::is_same_v<TcCast, double>)
-        {
-            cblas_dgemm(CblasColMajor,
-                        toCblasTranspose(transA),
-                        toCblasTranspose(transB),
-                        m,
-                        n,
-                        k,
-                        alphaCast,
-                        aValues,
-                        lda,
-                        bValues,
-                        ldb,
-                        betaCast,
-                        cValues,
-                        ldc);
-        }
-        else if constexpr(std::is_same_v<TcCast, std::complex<float>>)
-        {
-            cblas_cgemm(CblasColMajor,
-                        toCblasTranspose(transA),
-                        toCblasTranspose(transB),
-                        m,
-                        n,
-                        k,
-                        &alphaCast,
-                        aValues,
-                        lda,
-                        bValues,
-                        ldb,
-                        &betaCast,
-                        cValues,
-                        ldc);
-        }
-        else if constexpr(std::is_same_v<TcCast, std::complex<double>>)
-        {
-            cblas_zgemm(CblasColMajor,
-                        toCblasTranspose(transA),
-                        toCblasTranspose(transB),
-                        m,
-                        n,
-                        k,
-                        &alphaCast,
-                        aValues,
-                        lda,
-                        bValues,
-                        ldb,
-                        &betaCast,
-                        cValues,
-                        ldc);
-        }
-    }
-    else
-    {
-        using namespace roc::host_validation;
-        GemmOperand operandA(TensorView::fromNative<TcCast>(
-            Layout(Shape{size_t(m), size_t(k)}, {aRowStride, aColumnStride}),
-            std::span<const TcCast>(aValues, sizeA)));
-        GemmOperand operandB(TensorView::fromNative<TcCast>(
-            Layout(Shape{size_t(k), size_t(n)}, {bRowStride, bColumnStride}),
-            std::span<const TcCast>(bValues, sizeB)));
-        operandA.conjugate = transA == HIPBLAS_OP_C;
-        operandB.conjugate = transB == HIPBLAS_OP_C;
+    using namespace roc::host_validation;
+    GemmOperand operandA(TensorView::fromNative<TcCast>(
+        Layout(Shape{size_t(m), size_t(k)}, {aRowStride, aColumnStride}),
+        std::span<const TcCast>(aValues, sizeA)));
+    GemmOperand operandB(TensorView::fromNative<TcCast>(
+        Layout(Shape{size_t(k), size_t(n)}, {bRowStride, bColumnStride}),
+        std::span<const TcCast>(bValues, sizeB)));
+    operandA.conjugate = transA == HIPBLAS_OP_C;
+    operandB.conjugate = transB == HIPBLAS_OP_C;
 
-        GemmProblem problem(
-            std::move(operandA), std::move(operandB),
-            TensorView::fromNative<TcCast>(Layout(Shape{size_t(m), size_t(n)}, {1, ldc}),
-                                           std::span<const TcCast>(cValues, sizeC)),
-            MutableTensorView::fromNative<TcCast>(Layout(Shape{size_t(m), size_t(n)}, {1, ldc}),
-                                                  std::span<TcCast>(cValues, sizeC)),
-            nativeScalarType<TcCast>);
-        if constexpr (is_std_complex_v<TcCast>) {
-            problem.epilogue.alpha = {static_cast<double>(alphaCast.real()),
-                                      static_cast<double>(alphaCast.imag())};
-            problem.epilogue.beta = {static_cast<double>(betaCast.real()),
-                                     static_cast<double>(betaCast.imag())};
-        } else {
-            problem.epilogue.alpha = {static_cast<double>(alphaCast), 0.0};
-            problem.epilogue.beta = {static_cast<double>(betaCast), 0.0};
-        }
+    GemmProblem problem(
+        std::move(operandA), std::move(operandB),
+        TensorView::fromNative<TcCast>(Layout(Shape{size_t(m), size_t(n)}, {1, ldc}),
+                                       std::span<const TcCast>(cValues, sizeC)),
+        MutableTensorView::fromNative<TcCast>(Layout(Shape{size_t(m), size_t(n)}, {1, ldc}),
+                                              std::span<TcCast>(cValues, sizeC)),
+        nativeScalarType<TcCast>);
+    if constexpr (is_std_complex_v<TcCast>) {
+        problem.epilogue.alpha = {static_cast<double>(alphaCast.real()),
+                                  static_cast<double>(alphaCast.imag())};
+        problem.epilogue.beta = {static_cast<double>(betaCast.real()),
+                                 static_cast<double>(betaCast.imag())};
+    } else {
+        problem.epilogue.alpha = {static_cast<double>(alphaCast), 0.0};
+        problem.epilogue.beta = {static_cast<double>(betaCast), 0.0};
+    }
+
+    if (useBlas) {
+        static const BlasGemmBackend backend;
+        referenceGemm(problem, {
+                                   .backend = GemmBackend::Blas,
+                                   .requireRequestedBackend = true,
+                                   .backendImplementation = &backend,
+                               });
+    } else {
         referenceGemm(problem);
     }
 
