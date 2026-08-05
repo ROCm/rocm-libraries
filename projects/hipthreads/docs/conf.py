@@ -34,13 +34,12 @@ exclude_patterns = [
 
 extensions = ["rocm_docs", "rocm_docs.doxygen"]
 html_theme = "rocm_docs_theme"
-html_theme_options = {"flavor": "rocm"}
+html_theme_options = {"flavor": "rocm"
+                     "repository_url": "https://github.com/ROCm/rocm-libraries/projects/hipthreads",
+                     "use_repository_button": True,
+                     "use_issues_button": True,}
 
 external_projects_current_project = "hipthreads"
-
-"repository_url": "https://github.com/ROCm/rocm-libraries/projects/hipthreads",
-"use_repository_button": True,
-"use_issues_button": True,
 
 # hipThreads is class-heavy (wthread, mutex, condition_variable, ...). By default
 # Breathe shows only the class summary, not its members. Expand documented public
