@@ -10,6 +10,7 @@
 #include <array>
 #include <cmath>
 #include <complex>
+#include <cstdint>
 #include <span>
 #include <vector>
 
@@ -135,6 +136,262 @@ TEST(HostValidationCblasBridge, MixedHalfInputs)
     EXPECT_FLOAT_EQ(d[3], 154);
 }
 
+TEST(HostValidationCblasBridge, QuantizesCombinedOperandScaleAndAlphaVector)
+{
+    const std::array<float, 1> a{0.3f};
+    const std::array<float, 1> b{1.0f};
+    std::array<float, 1>       d{};
+    const std::array<float, 1> alphaVector{0.6f};
+    const std::array<float, 1> scaleA{0.7f};
+
+    hipblaslt_reference_gemm<float>(HIPBLAS_OP_N,
+                                    HIPBLAS_OP_N,
+                                    1,
+                                    1,
+                                    1,
+                                    1.0f,
+                                    a.data(),
+                                    1,
+                                    b.data(),
+                                    1,
+                                    0.0f,
+                                    d.data(),
+                                    1,
+                                    alphaVector.data(),
+                                    scaleA.data(),
+                                    nullptr,
+                                    1.0f,
+                                    false,
+                                    false,
+                                    HIP_R_32F,
+                                    HIP_R_32F,
+                                    HIP_R_32F,
+                                    HIP_R_32F,
+                                    HIP_R_8F_E4M3,
+                                    HIP_R_32F);
+
+    const float expected =
+        static_cast<float>(hipblaslt_f8(a[0] * scaleA[0] * alphaVector[0]));
+    EXPECT_FLOAT_EQ(d[0], expected);
+}
+
+TEST(HostValidationCblasBridge, AppliesOutputScaleBeforeNarrowConversion)
+{
+    const std::array<float, 1> a{0.3333f};
+    const std::array<float, 1> b{3.0f};
+    std::array<hipblasLtHalf, 1> d{hipblasLtHalf(0.0f)};
+
+    hipblaslt_reference_gemm<float>(HIPBLAS_OP_N,
+                                    HIPBLAS_OP_N,
+                                    1,
+                                    1,
+                                    1,
+                                    1.0f,
+                                    a.data(),
+                                    1,
+                                    b.data(),
+                                    1,
+                                    0.0f,
+                                    d.data(),
+                                    1,
+                                    nullptr,
+                                    nullptr,
+                                    nullptr,
+                                    0.1f,
+                                    false,
+                                    false,
+                                    HIP_R_32F,
+                                    HIP_R_32F,
+                                    HIP_R_16F,
+                                    HIP_R_32F,
+                                    HIP_R_32F,
+                                    HIP_R_32F);
+
+    const hipblasLtHalf expected((a[0] * b[0]) * 0.1f);
+    EXPECT_FLOAT_EQ(static_cast<float>(d[0]), static_cast<float>(expected));
+}
+
+TEST(HostValidationCblasBridge, ConvertsFnuzOutputWithComponentCodec)
+{
+    const std::array<float, 1> a{1.3f};
+    const std::array<float, 1> b{1.0f};
+    std::array<hipblaslt_f8_fnuz, 1> d{hipblaslt_f8_fnuz(0.0f)};
+
+    hipblaslt_reference_gemm<float>(HIPBLAS_OP_N,
+                                    HIPBLAS_OP_N,
+                                    1,
+                                    1,
+                                    1,
+                                    1.0f,
+                                    a.data(),
+                                    1,
+                                    b.data(),
+                                    1,
+                                    0.0f,
+                                    d.data(),
+                                    1,
+                                    nullptr,
+                                    nullptr,
+                                    nullptr,
+                                    1.0f,
+                                    false,
+                                    false,
+                                    HIP_R_32F,
+                                    HIP_R_32F,
+                                    HIP_R_8F_E4M3_FNUZ,
+                                    HIP_R_32F,
+                                    HIP_R_32F,
+                                    HIP_R_32F);
+
+    EXPECT_EQ(d[0], hipblaslt_f8_fnuz(a[0]));
+}
+
+TEST(HostValidationCblasBridge, SaturatesRoundedInt8Output)
+{
+    const std::array<float, 1> a{63.75f};
+    const std::array<float, 1> b{2.0f};
+    std::array<int8_t, 1>      d{};
+
+    hipblaslt_reference_gemm<float>(HIPBLAS_OP_N,
+                                    HIPBLAS_OP_N,
+                                    1,
+                                    1,
+                                    1,
+                                    1.0f,
+                                    a.data(),
+                                    1,
+                                    b.data(),
+                                    1,
+                                    0.0f,
+                                    d.data(),
+                                    1,
+                                    nullptr,
+                                    nullptr,
+                                    nullptr,
+                                    1.0f,
+                                    false,
+                                    false,
+                                    HIP_R_32F,
+                                    HIP_R_32F,
+                                    HIP_R_8I,
+                                    HIP_R_32F,
+                                    HIP_R_32F,
+                                    HIP_R_32F);
+
+    EXPECT_EQ(d[0], 127);
+}
+
+TEST(HostValidationCblasBridge, IntegerComputeUsesWideReferenceAndSaturatingOutput)
+{
+    const std::array<int8_t, 2> a{100, 100};
+    const std::array<int8_t, 2> b{1, 1};
+    std::array<int8_t, 1>       d{};
+
+    hipblaslt_reference_gemm<int32_t>(HIPBLAS_OP_N,
+                                      HIPBLAS_OP_N,
+                                      1,
+                                      1,
+                                      2,
+                                      1,
+                                      a.data(),
+                                      1,
+                                      b.data(),
+                                      2,
+                                      0,
+                                      d.data(),
+                                      1,
+                                      nullptr,
+                                      nullptr,
+                                      nullptr,
+                                      1,
+                                      false,
+                                      false,
+                                      HIP_R_8I,
+                                      HIP_R_8I,
+                                      HIP_R_8I,
+                                      HIP_R_32I,
+                                      HIP_R_32I,
+                                      HIP_R_32I);
+
+    EXPECT_EQ(d[0], 127);
+}
+
+TEST(HostValidationCblasBridge, TransposedPaddedScaleUsesLogicalRows)
+{
+    // Stored A is K x M with one padding element after each column.
+    const std::array<float, 6> a{1.0f, 2.0f, -99.0f, 3.0f, 4.0f, -99.0f};
+    const std::array<float, 2> b{5.0f, 6.0f};
+    const std::array<float, 2> scaleA{2.0f, 3.0f};
+    std::array<float, 2>       d{};
+
+    hipblaslt_reference_gemm<float>(HIPBLAS_OP_T,
+                                    HIPBLAS_OP_N,
+                                    2,
+                                    1,
+                                    2,
+                                    1.0f,
+                                    a.data(),
+                                    3,
+                                    b.data(),
+                                    2,
+                                    0.0f,
+                                    d.data(),
+                                    2,
+                                    nullptr,
+                                    scaleA.data(),
+                                    nullptr,
+                                    1.0f,
+                                    true,
+                                    false,
+                                    HIP_R_32F,
+                                    HIP_R_32F,
+                                    HIP_R_32F,
+                                    HIP_R_32F,
+                                    HIP_R_32F,
+                                    HIP_R_32F);
+
+    EXPECT_FLOAT_EQ(d[0], (1.0f * 5.0f + 2.0f * 6.0f) * 2.0f);
+    EXPECT_FLOAT_EQ(d[1], (3.0f * 5.0f + 4.0f * 6.0f) * 3.0f);
+}
+
+#if defined(HIPBLASLT_USE_FP4)
+TEST(HostValidationCblasBridge, PackedFloat4InputUsesLogicalElementLayout)
+{
+    const std::array<hipblaslt_f4x2, 1> a{hipblaslt_f4x2(1.0f, 2.0f)};
+    const std::array<float, 2>           b{3.0f, 4.0f};
+    std::array<float, 1>                 d{};
+
+    hipblaslt_reference_gemm<float>(
+        HIPBLAS_OP_N,
+        HIPBLAS_OP_N,
+        1,
+        1,
+        2,
+        1.0f,
+        a.data(),
+        1,
+        b.data(),
+        2,
+        0.0f,
+        d.data(),
+        1,
+        nullptr,
+        nullptr,
+        nullptr,
+        1.0f,
+        false,
+        false,
+        static_cast<hipDataType>(HIP_R_4F_E2M1),
+        HIP_R_32F,
+        HIP_R_32F,
+        HIP_R_32F,
+        static_cast<hipDataType>(HIP_R_4F_E2M1),
+        HIP_R_32F);
+
+    EXPECT_FLOAT_EQ(d[0], 11.0f);
+}
+#endif
+
 TEST(HostValidationCblasBridge, ComplexConjugateTranspose)
 {
     using Complex = std::complex<float>;
@@ -211,4 +468,37 @@ TEST(HostValidationCblasBridge, LargeProblemUsesAcceleratedBackend)
 
     for(int64_t row = 0; row < m; ++row)
         EXPECT_FLOAT_EQ(d[row], 6 * a[row] + 4);
+}
+
+TEST(HostValidationCblasBridge, ZeroReductionDoesNotRequireBlasOperands)
+{
+    std::array<float, 1> d{2.0f};
+
+    hipblaslt_reference_gemm<float>(HIPBLAS_OP_N,
+                                    HIPBLAS_OP_N,
+                                    1,
+                                    1,
+                                    0,
+                                    0.0f,
+                                    nullptr,
+                                    601,
+                                    nullptr,
+                                    601,
+                                    3.0f,
+                                    d.data(),
+                                    1,
+                                    nullptr,
+                                    nullptr,
+                                    nullptr,
+                                    1.0f,
+                                    false,
+                                    false,
+                                    HIP_R_32F,
+                                    HIP_R_32F,
+                                    HIP_R_32F,
+                                    HIP_R_32F,
+                                    HIP_R_32F,
+                                    HIP_R_32F);
+
+    EXPECT_FLOAT_EQ(d[0], 6.0f);
 }

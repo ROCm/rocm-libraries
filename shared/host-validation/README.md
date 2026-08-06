@@ -180,13 +180,14 @@ the API.
 - F16, BF16, F32, F64, I32, complex-F32, and complex-F64 accumulation;
 - arbitrary runtime storage types supported by the tensor codecs;
 - distinct compute-input types for A and B;
-- optional scalar operand scaling before compute-input quantization;
+- ordered scalar/vector operand factors before compute-input quantization;
 - default and XFloat32 operand math;
 - alpha/beta;
 - explicit row- or column-axis bias and scale-alpha bindings;
 - row scale-A and column scale-B;
 - tensor-backed block scales with independent A/B block sizes;
 - all, explicit-index, and prime-stride output selection;
+- output scaling plus explicit rounded/saturating Int8 conversion;
 - absolute, clipped/leaky ReLU, ReLU, GELU, GELU scaling and derivative,
   sigmoid, tanh, SiLU, Swish, clamp, and explicit ReLU derivative; and
 - canonical execution, pluggable object-oriented backend implementations,
@@ -198,6 +199,11 @@ have been removed.
 
 The optional `BlasGemmBackend` implements the same interface for dense
 F32/F64/complex GEMM and is selected through `GemmRunOptions`.
+`TransformingBlasGemmBackend` additionally materializes runtime-typed,
+scaled, and compute-input-quantized operands into component-owned scratch,
+invokes the ordinary BLAS backend, and performs component-owned output
+scaling/conversion. This preserves accelerated large mixed-type references
+without placing conversion loops in product adapters.
 The canonical backend computes only selected outputs. Accelerated backends may
 compute all outputs and report the actual count through `GemmRunInfo`.
 
@@ -339,7 +345,8 @@ The `roc_host_validation` package currently provides:
 - deterministic tensor generation and structured comparison;
 - `GenerationOptions`, `GenerationPatternSpec`, and `generate_tensor`;
 - `reference_gemm` with runtime storage/output/accumulator types, alpha/beta,
-  compute-input quantization, math mode, and activation;
+  ordered pre-quantization factors, compute-input quantization, math mode,
+  output scaling/conversion, and activation;
 - `reference_epilogue` with bias, forward/gradient activation, E, scale-D/E,
   gate residual, raw output, and AMax results; and
 - `reference_sum` with runtime input/output/accumulator types and explicit

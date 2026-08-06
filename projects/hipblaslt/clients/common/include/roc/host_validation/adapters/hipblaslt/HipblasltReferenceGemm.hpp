@@ -68,7 +68,6 @@ void hipblaslt_reference_gemm(hipblasOperation_t       transA,
                 hipDataType              tc,
                 hipDataType              tciA,
                 hipDataType              tciB,
-                bool                     alt              = false,
                 bool                     isScaleAMXFormat = false,
                 bool                     isScaleBMXFormat = false);
 
@@ -97,7 +96,6 @@ inline void hipblaslt_reference_gemm(hipblasOperation_t       transA,
                        hipDataType              tc,
                        hipDataType              tciA,
                        hipDataType              tciB,
-                       bool                     alt              = false,
                        bool                     isScaleAMXFormat = false,
                        bool                     isScaleBMXFormat = false)
 {
@@ -135,7 +133,6 @@ inline void hipblaslt_reference_gemm(hipblasOperation_t       transA,
                                             tc,
                                             tiA,
                                             tiB,
-                                            alt,
                                             isScaleAMXFormat,
                                             isScaleBMXFormat);
             return;
@@ -166,8 +163,7 @@ inline void hipblaslt_reference_gemm(hipblasOperation_t       transA,
                                              to,
                                              tc,
                                              tiA,
-                                             tiB,
-                                             alt);
+                                             tiB);
             return;
         }
     }
@@ -200,8 +196,7 @@ inline void hipblaslt_reference_gemm(hipblasOperation_t       transA,
                                       to,
                                       tc,
                                       tciA,
-                                      tciB,
-                                      alt);
+                                      tciB);
             return;
         case HIP_R_32F:
             hipblaslt_reference_gemm<float>(transA,
@@ -229,7 +224,6 @@ inline void hipblaslt_reference_gemm(hipblasOperation_t       transA,
                               tc,
                               tciA,
                               tciB,
-                              alt,
                               isScaleAMXFormat,
                               isScaleBMXFormat);
 
@@ -259,8 +253,7 @@ inline void hipblaslt_reference_gemm(hipblasOperation_t       transA,
                                to,
                                tc,
                                tciA,
-                               tciB,
-                               alt);
+                               tciB);
             return;
         case HIP_R_32I:
             hipblaslt_reference_gemm<int32_t>(transA,
@@ -287,8 +280,7 @@ inline void hipblaslt_reference_gemm(hipblasOperation_t       transA,
                                 to,
                                 tc,
                                 tciA,
-                                tciB,
-                                alt);
+                                tciB);
             return;
         default:
             hipblaslt_cerr << "Error type in hipblaslt_reference_gemm()" << std::endl;

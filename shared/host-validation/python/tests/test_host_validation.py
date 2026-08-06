@@ -426,9 +426,9 @@ class TensorAndGemmTests(unittest.TestCase):
             hv.ScalarType.Float32,
             hv.ScalarType.Float32,
             compute_type_a=hv.ScalarType.Float8E4M3,
-            pre_quantization_scale_a=hv.from_numpy(
-                np.asarray([3.0], dtype=np.float32)
-            ),
+            pre_quantization_scales_a=[
+                hv.from_numpy(np.asarray([3.0], dtype=np.float32))
+            ],
         )
         np.testing.assert_array_equal(
             hv.to_numpy(pre_scaled), np.asarray([[3.25]], dtype=np.float32)
@@ -444,14 +444,57 @@ class TensorAndGemmTests(unittest.TestCase):
             hv.ScalarType.Float32,
             hv.ScalarType.Float32,
             compute_type_a=hv.ScalarType.Float8E4M3,
-            pre_quantization_scale_a=hv.from_numpy(
-                np.asarray([3.0, 4.0], dtype=np.float32)
-            ),
-            pre_quantization_axis_a=hv.MatrixAxis.Row,
+            pre_quantization_scales_a=[
+                hv.from_numpy(np.asarray([3.0, 4.0], dtype=np.float32))
+            ],
+            pre_quantization_axes_a=[hv.MatrixAxis.Row],
         )
         np.testing.assert_array_equal(
             hv.to_numpy(vector_pre_scaled),
             np.asarray([[3.25], [4.5]], dtype=np.float32),
+        )
+
+        combined_pre_scaled = hv.reference_gemm(
+            hv.from_numpy(np.asarray([[0.3]], dtype=np.float32)),
+            hv.from_numpy(np.asarray([[1.0]], dtype=np.float32)),
+            hv.from_numpy(np.asarray([[0.0]], dtype=np.float32)),
+            hv.ScalarType.Float32,
+            hv.ScalarType.Float32,
+            compute_type_a=hv.ScalarType.Float8E4M3,
+            pre_quantization_scales_a=[
+                hv.from_numpy(np.asarray([0.7], dtype=np.float32)),
+                hv.from_numpy(np.asarray([0.6], dtype=np.float32)),
+            ],
+        )
+        np.testing.assert_array_equal(
+            hv.to_numpy(combined_pre_scaled),
+            np.asarray([[0.125]], dtype=np.float32),
+        )
+
+    def test_gemm_output_scale_and_saturating_conversion(self):
+        scaled_half = hv.reference_gemm(
+            hv.from_numpy(np.asarray([[0.3333]], dtype=np.float32)),
+            hv.from_numpy(np.asarray([[3.0]], dtype=np.float32)),
+            hv.from_numpy(np.asarray([[0.0]], dtype=np.float32)),
+            hv.ScalarType.Float16,
+            hv.ScalarType.Float32,
+            output_scale=0.1,
+        )
+        np.testing.assert_array_equal(
+            hv.to_numpy(scaled_half),
+            np.asarray([[np.float16(np.float32(0.3333 * 3.0 * 0.1))]]),
+        )
+
+        saturated_int8 = hv.reference_gemm(
+            hv.from_numpy(np.asarray([[63.75]], dtype=np.float32)),
+            hv.from_numpy(np.asarray([[2.0]], dtype=np.float32)),
+            hv.from_numpy(np.asarray([[0]], dtype=np.int8)),
+            hv.ScalarType.Int8,
+            hv.ScalarType.Float32,
+            output_conversion=hv.GemmOutputConversion.SaturatingInt8,
+        )
+        np.testing.assert_array_equal(
+            hv.to_numpy(saturated_int8), np.asarray([[127]], dtype=np.int8)
         )
 
     def test_block_scaled_tiled_gemm_matches_numpy(self):
