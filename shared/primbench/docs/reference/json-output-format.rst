@@ -2,22 +2,22 @@
    :description: JSON and CSV output formats produced by Primbench, including the json builder, context object, specializations array, and compile-time branch and commit embedding.
    :keywords: Primbench, JSON, CSV, output format, results, ROCm, benchmark, specializations, context, meta
 
-==========================
+****************************
 JSON output format
-==========================
+****************************
 
 Primbench writes benchmark results to a JSON file and, optionally, a CSV file. The JSON file records environment, configuration, and per-specialization measurements. CSV output provides a condensed tabular view.
 
 JSON builder
-************
+============
 
-The ``json`` class is a lightweight JSON builder passed to ``benchmark_interface::meta()`` so that each benchmark specialization can describe itself with algorithm names, type names, and custom fields. These key-value pairs appear in the ``meta`` field of each specialization in the output file. Calls to ``add`` can be chained, and nested ``json`` objects are supported.
+The ``json`` class is a lightweight JSON builder passed to ``benchmark_interface::meta()`` so that each benchmark specialization can describe itself with algorithm names, type names, and custom fields. These key-value pairs appear in the ``meta`` field of each specialization in the output file. Calls to ``add()`` can be chained, and nested ``json`` objects are supported.
 
 .. doxygenclass:: primbench::json
    :members:
 
 Results file structure
-********************
+======================
 
 By default, Primbench writes results to ``results.json``. The output path is controlled by ``--json-out`` and the ``settings.json_out`` field. The JSON file contains three top-level keys: ``context``, ``specializations``, and ``summary``.
 
@@ -41,7 +41,7 @@ The ``general`` sub-object records information about the GPU, backend, monitorin
 - The ``library_build_type`` field is ``"release"`` when compiled with ``NDEBUG`` defined and ``"debug"`` otherwise.
 - The ``gpu`` field is an object with ``name``, ``arch``, and ``pci_bus_id`` fields describing the active GPU.
 - The ``backend`` field is an object with a ``name`` of ``"hip"`` or ``"cuda"``, version strings for the runtime and driver, and a nested ``compiler`` object with ``name`` and ``version``. For HIP backends, a ``hip_version`` field is also present.
-- The ``monitoring`` field is an object with ``name``, ``"amdsmi"`` or ``"nvml"``, and ``version``. This field is omitted when monitoring is disabled through ``-DPRIMBENCH_NO_MONITORING``.
+- The ``monitoring`` field is an object with ``name`` (``"amdsmi"`` on HIP or ``"nvml"`` on CUDA) and ``version``. This field is omitted when monitoring is disabled through ``-DPRIMBENCH_NO_MONITORING``.
 - The ``temperature_type`` field names the GPU temperature sensor in use, for example ``"edge"`` or ``"hotspot"`` on AMD GPUs or ``"gpu"`` on NVIDIA GPUs. Omitted when monitoring is disabled.
 - The ``host_name`` field records the hostname of the machine.
 - The ``date`` field is a local timestamp in RFC 3339 format, ``yyyy-mm-ddTHH:MM:SS±HH:MM``.
@@ -58,7 +58,7 @@ Field descriptions for each setting appear in :doc:`Configure benchmark settings
 ``custom_settings``
 ^^^^^^^^^^^^^^^^^^^
 
-If the benchmark registers additional command-line arguments through ``executor.get<T>()``, a ``custom_settings`` object appears in ``context``. Each key is the argument name, and the value is the argument's parsed value. This object is omitted when no custom arguments are registered.
+When the benchmark registers additional command-line arguments through ``executor.get<T>()``, a ``custom_settings`` object appears in ``context``. Each key is the argument name, and the value is the argument's parsed value. This object is omitted when no custom arguments are registered.
 
 ``flags``
 ^^^^^^^^^
@@ -112,7 +112,7 @@ After the ``specializations`` array, a ``summary`` object provides aggregate sta
 - The ``elapsed_secs`` field is an object with ``host`` and ``gpu`` totals across all specializations.
 
 CSV output
-**********
+==========
 
 CSV output is enabled when ``--csv-out`` is set to a file path. The CSV is a condensed view with one row per specialization. Columns are ``index``, ``name``, ``bytes_per_second``, ``gib_per_second``, ``items_per_second``, ``noise_timeout``, and ``noise_percent``.
 
@@ -127,6 +127,6 @@ CSV output is enabled when ``--csv-out`` is set to a file path. The CSV is a con
 JSON output can be suppressed by setting ``--json-out`` to ``/dev/null`` while CSV output remains enabled.
 
 Embedding branch name and commit hash
-*************************************
+=====================================
 
-Defining the ``BRANCH_NAME`` and ``COMMIT_HASH`` macros at compile time causes Primbench to include them in ``context.general.branch_name`` and ``context.general.commit_hash``. These fields tie benchmark results to a specific source revision. When the repository is in a detached HEAD state, for example in a CI pipeline, ``BRANCH_NAME`` is typically set to ``DETACHED``. When the macros are not defined, the corresponding fields are omitted from the JSON output. Compile-time embedding of branch and commit metadata is documented in :doc:`Configure benchmark settings </how-to/configure-settings>`.
+Defining the ``BRANCH_NAME`` and ``COMMIT_HASH`` macros at compile time causes Primbench to include them in ``context.general.branch_name`` and ``context.general.commit_hash``. These fields tie benchmark results to a specific source revision. In a detached HEAD state, such as a CI pipeline, ``BRANCH_NAME`` is typically set to ``DETACHED``. When the macros aren't defined, the corresponding fields are omitted from the JSON output. Compile-time embedding of branch and commit metadata is documented in :doc:`Configure benchmark settings </how-to/configure-settings>`.

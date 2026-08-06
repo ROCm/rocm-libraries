@@ -3,7 +3,7 @@
 
 PROJECT_NAME           = "Primbench"
 OUTPUT_DIRECTORY       = .
-INPUT                  = ..
+INPUT                  = ../..
 FILE_PATTERNS          = primbench.hpp
 RECURSIVE              = NO
 

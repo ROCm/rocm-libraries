@@ -18,4 +18,4 @@ build:
     - doxygen
   jobs:
     pre_build:
-      - cd shared/primbench/doxygen && doxygen Doxyfile
+      - cd shared/primbench/docs/doxygen && doxygen Doxyfile

@@ -5,8 +5,7 @@ subtrees:
       - file: install/install
   - caption: Conceptual
     entries:
-      - file: conceptual/noise-reduction
-      - file: conceptual/output-format
+      - file: conceptual/primbench-noise-reduction
   - caption: How to
     entries:
       - file: how-to/configure-settings
@@ -20,14 +19,11 @@ subtrees:
     entries:
       - file: reference/primbench-api
         title: Primbench API
+      - file: reference/primbench-output
+        title: Primbench output
       - file: reference/json-output-format
         title: JSON output format
-      - file: reference/api-benchmark-interface
-      - file: reference/api-benchmark-state
-      - file: reference/api-json-and-utilities
       - file: reference/cli-options
-      - file: reference/api-json-output
-      - file: reference/api-macros-and-utilities
   - caption: About
     entries:
       - file: license
