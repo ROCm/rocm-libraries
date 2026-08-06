@@ -24,6 +24,7 @@
 
 #include <cassert>
 #include <cstdint>
+#include <iterator>
 #include <string>
 #include <utility>
 #include <vector>
@@ -41,6 +42,14 @@ enum VgprMsbState : int {
     LABEL_BEGIN = -2,
 };
 
+bool isMsbComputableClass(const StinkyInstruction& inst) {
+    return !(inst.is(InstFlag::IF_SALU) || inst.is(InstFlag::IF_SMemLoad) ||
+             inst.is(InstFlag::IF_SMemStore) || inst.is(InstFlag::IF_SMemAtomic) ||
+             inst.is(InstFlag::IF_Branch) || inst.is(InstFlag::IF_Call) ||
+             inst.is(InstFlag::IF_Barrier) || inst.is(InstFlag::IF_WaitCnt) ||
+             inst.is(InstFlag::IF_HasSideEffect));
+}
+
 // Set offset = -msb*256 on each VGPR operand so the emitter prints byte form
 // (`v[idx + offset]` evaluates to idx ≤ 255).
 void encodeVgprOperands(StinkyInstruction* inst) {
@@ -57,11 +66,11 @@ void encodeVgprOperands(StinkyInstruction* inst) {
     for (auto& dst : const_cast<std::vector<StinkyRegister>&>(inst->getDestRegs())) rewrite(dst);
 }
 
-void emitVgprMsbIfNeeded(int requiredSetVal, bool hasVgpr, int& currentMsb, AsmIRBuilder& irBuilder,
+bool emitVgprMsbIfNeeded(int requiredSetVal, bool hasVgpr, int& currentMsb, AsmIRBuilder& irBuilder,
                          GfxArchID archId, IRBase* insertBefore, VgprMsbMode msbMode) {
     if (!hasVgpr || requiredSetVal == currentMsb) {
         if (currentMsb == VgprMsbState::LABEL_BEGIN) currentMsb = VgprMsbState::NOT_REQUIRED;
-        return;
+        return false;
     }
 
     if (currentMsb == VgprMsbState::LABEL_BEGIN) {
@@ -87,6 +96,12 @@ void emitVgprMsbIfNeeded(int requiredSetVal, bool hasVgpr, int& currentMsb, AsmI
                              ", dst: " + std::to_string(decodeVgprMsbForSlot(requiredSetVal, 3));
     msbInst->addModifier<CommentData>(CommentData{msbComment});
     currentMsb = requiredSetVal;
+    return true;
+}
+
+bool preferInsertAfter(const StinkyInstruction& inst) {
+    return isVectorALU(inst) || (isScalarALU(inst) && !isBarrier(inst)) ||
+           isMatrixInstruction(inst);
 }
 
 class InsertVgprMsbPassImpl : public Pass {
@@ -131,6 +146,14 @@ class InsertVgprMsbPassImpl : public Pass {
             BasicBlock& bb = *bbIt;
             AsmIRBuilder irBuilder(bb, archId);
             int currentMsb = VgprMsbState::NOT_REQUIRED;
+            IRBase* preferredInsertBefore = nullptr;
+            auto findNextInstructionAnchor = [&](BasicBlock::iterator from) -> IRBase* {
+                for (auto scanIt = from; scanIt != bb.end(); ++scanIt) {
+                    if (dyn_cast<StinkyInstruction>(scanIt.getNodePtr()))
+                        return scanIt.getNodePtr();
+                }
+                return nullptr;
+            };
 
             for (auto it = bb.begin(); it != bb.end(); ++it) {
                 auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
@@ -138,6 +161,7 @@ class InsertVgprMsbPassImpl : public Pass {
 
                 if (inst->getUnifiedOpcode() == GFX::LABEL) {
                     currentMsb = VgprMsbState::LABEL_BEGIN;
+                    preferredInsertBefore = nullptr;
                     continue;
                 }
 
@@ -150,13 +174,23 @@ class InsertVgprMsbPassImpl : public Pass {
                 // call because the call ended a basic block.
                 if (isCall(*inst)) {
                     currentMsb = VgprMsbState::NOT_REQUIRED;
+                    // Never carry a deferred insertion anchor across call boundaries:
+                    // call may clobber VGPR MSB state, so post-call rebuilds must stay post-call.
+                    preferredInsertBefore = nullptr;
                     continue;
                 }
 
+                IRBase* insertBefore = preferredInsertBefore ? preferredInsertBefore : inst;
+
                 auto [requiredMsb, hasVgpr] = computeRequiredMsb(inst);
-                emitVgprMsbIfNeeded(requiredMsb, hasVgpr, currentMsb, irBuilder, archId, inst,
-                                    msbMode);
+                bool emittedVgprMsb = emitVgprMsbIfNeeded(requiredMsb, hasVgpr, currentMsb,
+                                                          irBuilder, archId, insertBefore, msbMode);
                 encodeVgprOperands(inst);
+                if (emittedVgprMsb || isMsbComputableClass(*inst)) preferredInsertBefore = nullptr;
+
+                if (preferInsertAfter(*inst)) {
+                    preferredInsertBefore = findNextInstructionAnchor(std::next(it));
+                }
             }
         }
     }
