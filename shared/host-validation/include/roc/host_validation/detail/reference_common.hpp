@@ -24,9 +24,18 @@
 namespace roc::host_validation {
 enum class Activation {
     None,
+    Absolute,
+    ClippedRelu,
     Relu,
     Gelu,
+    GeluDerivative,
+    GeluScaling,
+    LeakyRelu,
+    ReluDerivative,
+    Sigmoid,
+    Tanh,
     Silu,
+    Swish,
     Clamp,
 };
 
@@ -177,6 +186,11 @@ Accumulator applyActivation(Activation activation, Accumulator value, Accumulato
         switch (activation) {
             case Activation::None:
                 return value;
+            case Activation::Absolute:
+                return value >= Accumulator(0) ? value : -value;
+            case Activation::ClippedRelu:
+                return value > parameter0 ? std::min(value, parameter1)
+                                          : std::min(Accumulator(0), parameter1);
             case Activation::Relu:
                 return std::max(Accumulator(0), value);
             case Activation::Gelu: {
@@ -187,7 +201,40 @@ Accumulator applyActivation(Activation activation, Accumulator value, Accumulato
                     0.5f * x *
                     (1.0f + std::tanh(coefficient0 * x * (1.0f + coefficient1 * x * x))));
             }
+            case Activation::GeluDerivative: {
+                constexpr float coefficient0 = 0.0535161f;
+                constexpr float coefficient1 = 0.398942f;
+                constexpr float coefficient2 = 0.0356774f;
+                constexpr float coefficient3 = 0.797885f;
+                const float x = static_cast<float>(value);
+                const float cube = x * x * x;
+                const float first = coefficient0 * cube + coefficient1 * x;
+                const float second = coefficient2 * cube + coefficient3 * x;
+                const float derivative =
+                    0.5f * std::tanh(second) +
+                    first * (4.0f / std::pow(std::exp(-second) + std::exp(second), 2)) + 0.5f;
+                return static_cast<Accumulator>(derivative);
+            }
+            case Activation::GeluScaling:
+                return applyActivation(Activation::Gelu, value, parameter0, parameter1) *
+                       parameter0;
+            case Activation::LeakyRelu:
+                return value > Accumulator(0) ? value : value * parameter0;
+            case Activation::ReluDerivative:
+                return value > Accumulator(0) ? Accumulator(1) : Accumulator(0);
+            case Activation::Sigmoid: {
+                const float x = static_cast<float>(value);
+                return static_cast<Accumulator>(1.0f / (1.0f + std::exp(-x)));
+            }
+            case Activation::Tanh:
+                return static_cast<Accumulator>(
+                    std::tanh(static_cast<float>(value * parameter0)) *
+                    static_cast<float>(parameter1));
             case Activation::Silu: {
+                const float x = static_cast<float>(value);
+                return static_cast<Accumulator>(x / (1.0f + std::exp(-x)));
+            }
+            case Activation::Swish: {
                 const float x = static_cast<float>(value);
                 const float beta = static_cast<float>(parameter0);
                 return static_cast<Accumulator>(x / (1.0f + std::exp(-beta * x)));

@@ -160,46 +160,26 @@ namespace TensileLite
             return AlmostEqual(a.real(), b.real()) && AlmostEqual(a.imag(), b.imag());
         }
 
-        template <typename Inputs,
-                  typename Accumulator = typename Inputs::DType,
-                  typename MathOpAccum = Accumulator>
-        struct ReferenceSolution
-        {
-            static void SolveCPU(ContractionProblemGemm const& contraction,
-                                 ContractionInputs const&      inputs,
-                                 size_t                        elementsToValidate);
-            static void SolveCPU(ContractionProblemGroupedGemm const& contractions,
-                                 ContractionGroupedInputs const&      inputs,
-                                 size_t                               elementsToValidate);
-        };
-
         void SolveCPU(ContractionProblem const* contraction,
                       ProblemInputs const*      inputs,
                       size_t                    elementsToValidate);
 
-        // Specialized solver for ungrouped GEMM problems. There are currently 2 implementations
-        // of reference CPU GEMM. One is substantially faster but only supports a limited set of
-        // data types and problem configurations. The other is a more general but slower implementation.
-        // When `tryFastPath` is true, the function will attempt to use the fast implementation first,
-        // and fall back to the general implementation if the fast path is not applicable. If `tryFastPath`
-        // is false, the function will directly use the general implementation.
+        // Specialized solver for ungrouped GEMM problems. The tiled backend is
+        // attempted for eligible dense work; all supported descriptors then
+        // use the canonical runtime-typed component implementation.
         void SolveGemmCPU(ContractionProblemGemm const& problem,
                           ContractionInputs const&      inputs,
                           size_t                        elementsToValidate,
                           bool                          tryFastPath = true);
 
-        // Transitional product-private bridge used while the broad typed
-        // compatibility backend is being removed. Returns false without
-        // modifying outputs when the descriptor is not yet representable.
+        // Product-private descriptor adapters. Returns false without modifying
+        // outputs when a descriptor is not representable.
         bool tryRuntimeCanonicalGemm(ContractionProblemGemm const& problem,
                                      ContractionInputs const&      inputs,
                                      size_t                        elementsToValidate);
         bool tryRuntimeTiledGemm(ContractionProblemGemm const& problem,
                                  ContractionInputs const&      inputs,
                                  size_t                        elementsToValidate);
-        bool tryRuntimeTensorContraction(ContractionProblemGemm const& problem,
-                                         ContractionInputs const&      inputs,
-                                         size_t                        elementsToValidate);
 
         // Check whether a given contraction problem is eligible for the fast CPU GEMM path.
         // This inspects problem geometry, data types, and feature flags but does not
