@@ -42,7 +42,19 @@ ROCSOLVER_BEGIN_NAMESPACE
 static bool constexpr use_sygs2_hegs2_alt = true;
 static bool constexpr use_recursion = true;
 
-static size_t constexpr byte_alignment = 128;
+template <typename T, typename I>
+static inline I get_len_Asave(I const n)
+{
+    auto ceildiv = [](auto m, auto b) { return ((m - 1) / b + 1); };
+
+    I constexpr byte_alignment = 128;
+    I const nb = xxGST_BLOCKSIZE;
+    I const nT = ceildiv(byte_alignment, sizeof(T));
+    I const nn = std::min(n, nb);
+    I const len = nn * (nn - 1) / 2;
+    I const len_with_alignment = ceildiv(len, nT) * nT;
+    return (len_with_alignment);
+}
 
 template <typename I>
 static inline I split_n(I const n)
@@ -412,13 +424,10 @@ void rocsolver_sygst_hegst_getMemorySize(const rocblas_fill uplo,
         // expand storage for work_x_temp
         //
         // NOTE: assume xxGST_BLOCKSIZE is a power of 2
-        // use nT to maintain alignment
+        // roundup len_Asave to maintain alignment
         // ----------------------------------------
-        I const nb = xxGST_BLOCKSIZE;
-        I const nn = std::min(n, nb);
-        auto const nT = ceildiv(byte_alignment, sizeof(T));
 
-        auto const len_Asave = ceildiv(nn * (nn - 1) / 2, nT) * nT;
+        auto const len_Asave = get_len_Asave<T>(n);
         auto const size_Asave = (sizeof(T) * len_Asave) * batch_count;
         *size_work_x_temp += size_Asave;
     }
@@ -498,10 +507,8 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
 
         rocblas_status istat = rocblas_status_success;
 
-        I const nb = xxGST_BLOCKSIZE;
-        auto const nn = std::min(n, nb);
-        auto const nT = ceildiv(byte_alignment, sizeof(T));
-        rocblas_stride const strideAsave = ceildiv(rocblas_stride(nn) * (nn - 1) / 2, nT) * nT;
+        auto const len_Asave = get_len_Asave<T>(n);
+        rocblas_stride const strideAsave = len_Asave;
 
         // ---------------------------------------------------
         // symmetrize matrix and save strictly triangular part
@@ -667,10 +674,7 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
             // ------------------------------------------
             // note nT to maintain alignment in temp1
             // ------------------------------------------
-            auto const nb = xxGST_BLOCKSIZE;
-            auto const nn = std::min(n, nb);
-            auto const nT = ceildiv(byte_alignment, sizeof(T));
-            size_t const len_Asave = (ceildiv((nn * (nn - 1) / 2), nT) * nT) * batch_count;
+            auto const len_Asave = get_len_Asave<T>(n);
             T* const Asave = static_cast<T*>(work_x_temp);
 
             // ------------------------
