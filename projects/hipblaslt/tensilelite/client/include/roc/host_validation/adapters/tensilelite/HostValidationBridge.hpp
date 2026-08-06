@@ -61,17 +61,37 @@ inline roc::host_validation::ScalarType toHostValidationScalarType(rocisa::DataT
     }
 }
 
-inline roc::host_validation::Activation toHostValidationActivation(ActivationType activation) {
+inline roc::host_validation::Activation
+    toHostValidationActivation(ActivationType activation, bool gradientApplication = false) {
     switch (activation) {
         case ActivationType::None:
             return roc::host_validation::Activation::None;
+        case ActivationType::Abs:
+            return roc::host_validation::Activation::Absolute;
+        case ActivationType::Clippedrelu:
+            return roc::host_validation::Activation::ClippedRelu;
         case ActivationType::Relu:
             return roc::host_validation::Activation::Relu;
         case ActivationType::Gelu:
             return roc::host_validation::Activation::Gelu;
+        case ActivationType::Geluscaling:
+            return roc::host_validation::Activation::GeluScaling;
+        case ActivationType::Leakyrelu:
+            return roc::host_validation::Activation::LeakyRelu;
+        case ActivationType::Sigmoid:
+            return roc::host_validation::Activation::Sigmoid;
+        case ActivationType::Tanh:
+            return roc::host_validation::Activation::Tanh;
+        case ActivationType::DGelu:
+            return gradientApplication ? roc::host_validation::Activation::Gelu
+                                       : roc::host_validation::Activation::GeluDerivative;
+        case ActivationType::DRelu:
+            return gradientApplication ? roc::host_validation::Activation::Relu
+                                       : roc::host_validation::Activation::ReluDerivative;
         case ActivationType::Silu:
-        case ActivationType::Swish:
             return roc::host_validation::Activation::Silu;
+        case ActivationType::Swish:
+            return roc::host_validation::Activation::Swish;
         case ActivationType::Clamp:
             return roc::host_validation::Activation::Clamp;
         default:

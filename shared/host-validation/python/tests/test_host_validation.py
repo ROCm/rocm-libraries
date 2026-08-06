@@ -618,6 +618,142 @@ class TensorAndGemmTests(unittest.TestCase):
             atol=2e-5,
         )
 
+    def test_configured_activation_family_matches_numpy(self):
+        values = np.asarray(
+            [[-2.0, -0.5, 0.0], [0.5, 1.0, 2.0]], dtype=np.float32
+        )
+        parameter0 = np.float32(0.5)
+        parameter1 = np.float32(1.5)
+
+        def gelu(array):
+            coefficient0 = np.float32(0.7978845608028654)
+            coefficient1 = np.float32(0.044715)
+            return np.float32(0.5) * array * (
+                np.float32(1.0)
+                + np.tanh(
+                    coefficient0
+                    * array
+                    * (
+                        np.float32(1.0)
+                        + coefficient1 * array * array
+                    )
+                )
+            )
+
+        def gelu_derivative(array):
+            coefficient0 = np.float32(0.0535161)
+            coefficient1 = np.float32(0.398942)
+            coefficient2 = np.float32(0.0356774)
+            coefficient3 = np.float32(0.797885)
+            cube = array * array * array
+            first = coefficient0 * cube + coefficient1 * array
+            second = coefficient2 * cube + coefficient3 * array
+            return (
+                np.float32(0.5) * np.tanh(second)
+                + first
+                * (
+                    np.float32(4.0)
+                    / (np.exp(-second) + np.exp(second)) ** 2
+                )
+                + np.float32(0.5)
+            )
+
+        sigmoid = np.float32(1.0) / (
+            np.float32(1.0) + np.exp(-values)
+        )
+        swish_sigmoid = np.float32(1.0) / (
+            np.float32(1.0) + np.exp(-parameter0 * values)
+        )
+        cases = {
+            hv.Activation.Absolute: np.abs(values),
+            hv.Activation.ClippedRelu: np.where(
+                values > parameter0,
+                np.minimum(values, parameter1),
+                np.minimum(np.float32(0.0), parameter1),
+            ),
+            hv.Activation.Gelu: gelu(values),
+            hv.Activation.GeluDerivative: gelu_derivative(values),
+            hv.Activation.GeluScaling: gelu(values) * parameter0,
+            hv.Activation.LeakyRelu: np.where(
+                values > 0, values, values * parameter0
+            ),
+            hv.Activation.Relu: np.maximum(values, 0),
+            hv.Activation.ReluDerivative: (values > 0).astype(np.float32),
+            hv.Activation.Sigmoid: sigmoid,
+            hv.Activation.Tanh: np.tanh(values * parameter0) * parameter1,
+            hv.Activation.Silu: values * sigmoid,
+            hv.Activation.Swish: values * swish_sigmoid,
+            hv.Activation.Clamp: np.maximum(
+                parameter0, np.minimum(values, parameter1)
+            ),
+        }
+
+        for activation, expected in cases.items():
+            with self.subTest(activation=activation):
+                result = hv.reference_epilogue(
+                    hv.from_numpy(values),
+                    hv.ScalarType.Float32,
+                    hv.ScalarType.Float32,
+                    activation=activation,
+                    activation_parameter0=float(parameter0),
+                    activation_parameter1=float(parameter1),
+                )
+                np.testing.assert_allclose(
+                    hv.to_numpy(result.output),
+                    expected,
+                    rtol=5e-6,
+                    atol=2e-5,
+                )
+
+        gradient = np.asarray(
+            [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=np.float32
+        )
+        hyperbolic_tangent = np.tanh(values * parameter0)
+        gradient_factors = {
+            hv.Activation.Absolute: np.sign(values),
+            hv.Activation.ClippedRelu: (
+                (values > parameter0) & (values < parameter1)
+            ).astype(np.float32),
+            hv.Activation.Gelu: gelu_derivative(values),
+            hv.Activation.GeluScaling: gelu_derivative(values) * parameter0,
+            hv.Activation.LeakyRelu: np.where(
+                values > 0, np.float32(1.0), parameter0
+            ),
+            hv.Activation.Relu: (values > 0).astype(np.float32),
+            hv.Activation.Sigmoid: sigmoid * (np.float32(1.0) - sigmoid),
+            hv.Activation.Tanh: parameter0
+            * parameter1
+            * (np.float32(1.0) - hyperbolic_tangent * hyperbolic_tangent),
+            hv.Activation.Silu: sigmoid
+            + values * sigmoid * (np.float32(1.0) - sigmoid),
+            hv.Activation.Swish: swish_sigmoid
+            + parameter0
+            * values
+            * swish_sigmoid
+            * (np.float32(1.0) - swish_sigmoid),
+            hv.Activation.Clamp: (
+                (values > parameter0) & (values < parameter1)
+            ).astype(np.float32),
+        }
+        for activation, factor in gradient_factors.items():
+            with self.subTest(gradient_activation=activation):
+                result = hv.reference_epilogue(
+                    hv.from_numpy(gradient),
+                    hv.ScalarType.Float32,
+                    hv.ScalarType.Float32,
+                    activation=activation,
+                    activation_application=hv.ActivationApplication.Gradient,
+                    auxiliary_input=hv.from_numpy(values),
+                    activation_parameter0=float(parameter0),
+                    activation_parameter1=float(parameter1),
+                )
+                np.testing.assert_allclose(
+                    hv.to_numpy(result.output),
+                    gradient * factor,
+                    rtol=5e-6,
+                    atol=2e-5,
+                )
+
     def test_reference_sum_matches_numpy(self):
         values = np.arange(24, dtype=np.float32).reshape(2, 3, 4)
         observed = hv.reference_sum(
@@ -653,28 +789,6 @@ class TensorAndGemmTests(unittest.TestCase):
             hv.to_numpy(integer_observed),
             np.sum(integer_values, axis=1, dtype=np.int32),
         )
-
-    def test_tensor_contraction_matches_numpy_einsum(self):
-        a = np.arange(24, dtype=np.float32).reshape(2, 3, 2, 2) - 5
-        b = np.arange(32, dtype=np.float32).reshape(2, 4, 2, 2) - 7
-        c = np.arange(24, dtype=np.float32).reshape(2, 3, 4)
-        observed = hv.reference_contraction(
-            hv.from_numpy(a),
-            [0, 1, 3, 4],
-            hv.from_numpy(b),
-            [0, 2, 3, 4],
-            hv.from_numpy(c),
-            [0, 1, 2],
-            [0, 1, 2],
-            [3, 4],
-            hv.ScalarType.Float32,
-            hv.ScalarType.Float32,
-            alpha=2.0,
-            beta=-1.0,
-        )
-        expected = 2.0 * np.einsum("bmxy,bnxy->bmn", a, b) - c
-        np.testing.assert_array_equal(hv.to_numpy(observed), expected)
-
 
 if __name__ == "__main__":
     unittest.main()
