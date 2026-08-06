@@ -1,175 +1,223 @@
-# PR #10492 review-fix handoff
+# PR #10492 correctness follow-up handoff
 
-## Purpose
+## Purpose and state
 
-This handoff preserves the bounded follow-up from the review of PR #10492,
-`fix(rocke): harden JIT recipe record and replay`, at head
-`c48abb03beb4a4687102c0601d25489825bf3233`.
+This handoff preserves the bounded correctness follow-up from the review of PR
+#10492, `fix(rocke): harden JIT recipe record and replay`, at head
+`5ba022a4e6b8f5c1c7355b3db2205b04efe22db1` on 2026-08-06.
 
-Implement only the two confirmed recipe-VM validation fixes below, add their
-focused regressions, and correct the stale PR-description wording. Do not widen
-this work into general recipe-schema validation.
+The earlier scalar-validation handoff is complete. Its decisions and regression
+evidence now live in `DECISION_LOG.md`; they are not repeated here. This file
+contains only the two unresolved correctness findings below. It should be
+removed after both fixes are verified and their outcomes are added to the
+decision log.
 
-## Current behavior to fix
+## Scope
 
-### 1. Reject invalid `spec_str_eq` operands and references
+Implement only:
 
-File:
-`cpp/portable_ir/recipe_vm.cpp`, in `rv_int()`.
+1. semantic parity between the Python recipe expander and the C recipe VM for
+   the compile-time expressions and loops changed by this robustness PR;
+2. safe, explicit binding for single-result `emit.out` declarations.
 
-The integer-spec path rejects an unknown spec, but the string predicate path
-does not. Given this expression:
+Do not widen this follow-up into complete recipe-schema validation, a generic
+schema walker, opcode contract validation, provider dispatch integration, or
+rolling redesign.
 
-```json
-{"spec_str_eq": ["typo", "f16"]}
-```
+## Finding 1: restore Python-oracle and C-VM semantic parity
 
-`rv_spec_str()` returns null and `rv_int()` silently evaluates the predicate to
-false. A recipe with no declaration named `typo` therefore returns `ROCKE_OK`
-and can select the wrong `static_if` arm.
+### Confirmed behavior
 
-Required behavior:
+The C VM now rejects:
 
-- require `spec_str_eq` to contain exactly two string values;
-- reject an unknown string-spec name with `rv_fail()`;
-- preserve ordinary true and false comparisons for a declared, supplied string
-  spec;
-- return `ROCKE_ERR_VALUE` and no kernel for malformed or unknown references.
+- division or modulo by zero;
+- `LONG_MIN / -1` and `LONG_MIN % -1`;
+- unknown or malformed `spec_str_eq` operands;
+- non-positive `static_for` and rolled-list steps;
+- loop-increment overflow.
 
-Keep the implementation local to `rv_int()`. Do not introduce a general schema
-walker or change the representation of runtime specs.
+The Python expander in `utils/recipe_expand.py` still:
 
-### 2. Reject wrong kinds for `const_f32` and `scf_for` flags
+- maps division and modulo by zero to `0`;
+- returns false for an unknown string spec;
+- converts a zero step to `1`;
+- can fail to terminate for a negative step;
+- uses Python floor division and modulo for negative operands, while C truncates
+  division toward zero and derives the remainder from that quotient.
 
-File:
-`cpp/portable_ir/recipe_vm.cpp`, in `rv_exec_instr()`.
+Confirmed review repro: Python evaluated `{"div": [1, 0]}` as `0`; the
+standalone C replay path rejected the same expression with `integer division by
+zero`.
 
-Two scalar instruction paths currently read values without checking their DOM
-kind:
+This is a correctness issue because `src/roll.py` uses `expand_recipe()` plus
+`recipes_equiv()` as the device-free proof that a rolled recipe reproduces its
+independently recorded concrete traces. The oracle and deployed replay engine
+must implement one specialization language.
 
-- `const_f32` ignores a failed `rocke_jnum()` call, so a missing or string
-  `fval` becomes `0.0`;
-- `scf_for` reads `unroll` and `elide_trailing_barrier` through `.b` whenever
-  the field exists, even if the node is not `JD_BOOL`.
+### Implementation plan
 
-Required behavior:
+In `python/rocke/portable_ir/utils/recipe_expand.py`:
 
-- require `const_f32.fval` to be numeric before calling
-  `rocke_b_const_f32()`;
-- when present, require `scf_for.unroll` and
-  `scf_for.elide_trailing_barrier` to be booleans;
-- retain the existing defaults when either optional flag is absent;
-- return `ROCKE_ERR_VALUE` and no kernel for wrong-kind values.
+1. Replace the inline division/modulo lambdas with checked helpers.
+2. Implement integer division without a float conversion: divide absolute
+   values, apply the quotient sign for truncation toward zero, and compute
+   modulo as `a - quotient * b`.
+3. Derive `LONG_MIN` and `LONG_MAX` from the native C `long` width and reject
+   the same `LONG_MIN / -1` and `LONG_MIN % -1` cases as the C VM.
+4. Raise `ExpandError` for zero divisors.
+5. Require `spec_str_eq` to contain exactly two strings and require its spec
+   name to exist in `spec_str`.
+6. In `_expand_name_list()`, `_expand_iter_list()`, and `static_for`, reject
+   steps less than or equal to zero. Remove the `or 1` coercion.
+7. Before each loop increment, reject `iv > LONG_MAX - step`, matching the C
+   VM's overflow check.
 
-Use direct checks at the decode sites. Do not refactor unrelated instruction
-decoding.
+In `python/rocke/portable_ir/tests/test_roller.py`:
 
-## Focused regression plan
+1. Add focused unit cases for zero division/modulo, signed division/modulo,
+   signed overflow, malformed and unknown string predicates, non-positive
+   steps, and loop-increment overflow.
+2. Retain positive cases for declared true/false string comparisons and normal
+   increasing loops.
+3. Assert failures are `ExpandError`; no test should rely on a timeout to prove
+   that a loop does not terminate.
 
-Add cases only to:
-`tests/portable_ir/recipe_vm_replay.cpp`.
+Do not change the C VM unless a test proves that its current checked semantics
+are wrong. The main implementation work for this finding belongs in the Python
+oracle.
 
-Extend the existing `check_rejected()` coverage with:
+## Finding 2: reject unsafe single-result bindings
 
-1. `spec_str_eq` referencing an undeclared string spec;
-2. a non-string `spec_str_eq` spec name;
-3. a non-string `spec_str_eq` comparison literal;
-4. `const_f32` with a nonnumeric `fval`;
-5. `const_f32` with a missing `fval`;
-6. `scf_for.unroll` with a non-boolean value;
-7. `scf_for.elide_trailing_barrier` with a non-boolean value.
+### Confirmed behavior
 
-Retain or add small positive checks only where needed to prove that:
+The multi-result `emit.outs` path requires every result to have a nonempty,
+distinct bind. The single-result `emit.out` path still calls
+`rv_bind_name(..., "r")`, so a missing bind silently defaults to `r`.
 
-- a declared string spec still produces both normal true and false predicate
-  results;
-- valid boolean flags and absent optional flags continue to replay.
+Confirmed review repro: a concrete recipe with two side-effecting inline-
+assembly operations and `out: {"type": "i32"}` replayed successfully and
+produced two definitions named `%r`. `llvm-as` rejected the result with
+`multiple definition of local value named 'r'`.
 
-Do not add a new test binary or a generic malformed-recipe framework.
+### Implementation plan
 
-## PR-description correction
+In `cpp/portable_ir/recipe_vm.cpp`:
 
-The PR description currently asks reviewers to review a "single commit," while
-the PR contains multiple commits. Replace that sentence with commit-count-neutral
-wording such as:
+1. Require `emit.out.bind` to be a nonempty string, matching the existing
+   multi-result rule.
+2. Resolve placeholders before checking the final bind.
+3. For concrete recipes using exact SSA names, reject a result bind that would
+   redefine an existing SSA-producing register. Preserve intentional register
+   rebinding for parametric expansion, where exact SSA naming is disabled.
+4. Keep `alias` behavior unchanged; aliases rebind the VM register table without
+   defining a new LLVM SSA value.
 
-> Review the complete diff on top of
-> `users/yraparti/rocke-jit-compilation-prototype`.
+In `tests/portable_ir/recipe_vm_replay.cpp`:
 
-Do not squash, reorder, or otherwise rewrite commits as part of this follow-up.
+1. Reject a missing, empty, or non-string single-result bind.
+2. Reject two concrete single-result operations with the same explicit bind.
+3. Retain a positive single-result replay case and the existing multi-result
+   coverage.
+4. Lower the positive result and verify its expected distinct SSA definition.
+   Keep the hermetic unit independent of an external assembler; use `llvm-as`
+   on the standalone replay output as an additional verification step when the
+   tool is available.
 
 ## Expected implementation footprint
 
-Production and test changes should be limited to:
+Production and focused test changes should normally be limited to:
 
 - `cpp/portable_ir/recipe_vm.cpp`;
+- `python/rocke/portable_ir/utils/recipe_expand.py`;
+- `python/rocke/portable_ir/tests/test_roller.py`;
 - `tests/portable_ir/recipe_vm_replay.cpp`.
 
-This handoff document is the only additional repository artifact. The PR-body
-wording is an external metadata update, not a source change.
+After verification, update `DECISION_LOG.md` with the final decisions and exact
+regressions, then remove this handoff. Changes to another file need a concrete
+reason tied to one of the two findings.
 
 ## Explicit non-goals
-
-Do not include any of the following:
 
 - numeric-cast range validation;
 - add, subtract, or multiply overflow checks;
 - vector-count or shared-memory-dimension validation;
-- changes to single-result default bind behavior;
-- new result-count or opcode-arity validation;
-- changes to recorder coverage or rolling inference;
-- changes to JSON/CBOR parsing or the recipe schema version;
+- generic opcode arity or operand-contract validation;
+- nested list-of-map attribute support;
+- multi-axis rolling inference;
+- new region forms;
+- JSON/CBOR parser changes or a recipe schema-version change;
 - provider `ArtifactStore` or dispatch integration;
-- broad decoder refactoring;
-- unrelated documentation cleanup.
+- GPU execution claims.
 
-The existing decision log already records numeric casts and add/subtract/multiply
-overflow as known boundaries. Leave those boundaries unchanged in this fix.
-
-## Verification
+## Verification plan
 
 From `dnn-providers/hip-kernel-provider/rocke/platform`:
 
-```bash
-cmake -S . -B /tmp/rocke-pr10492-fix -DCMAKE_BUILD_TYPE=Debug \
-  -DROCKE_BUILD_PYENV=OFF
-cmake --build /tmp/rocke-pr10492-fix \
-  --target rocke_portable_ir_recipe_vm_replay \
-           rocke_portable_ir_dom_decoders -j
-ctest --test-dir /tmp/rocke-pr10492-fix \
-  -R 'rocke_portable_ir_(recipe_vm_replay|dom_decoders)' \
-  --output-on-failure
+Set `ROCKE_REVIEW_BUILD` to a writable out-of-tree build directory using the
+platform's normal environment mechanism, then run:
 
+```bash
 PYTHONDONTWRITEBYTECODE=1 \
 PYTHONPATH=python:../library \
 python3 -m unittest discover -s python/rocke/portable_ir/tests -v
+
+PYTHONDONTWRITEBYTECODE=1 \
+PYTHONPATH=python:../library \
+python3 -m rocke.portable_ir.drivers.record_coverage
+
+cmake -S . -B "$ROCKE_REVIEW_BUILD" \
+  -DCMAKE_BUILD_TYPE=Debug \
+  -DROCKE_BUILD_PYENV=OFF \
+  -DROCKE_SANITIZE=ON
+cmake --build "$ROCKE_REVIEW_BUILD" \
+  --target rocke_portable_ir_recipe_vm_replay \
+           rocke_portable_ir_dom_decoders \
+           rocke_portable_ir_replay_cli -j
+ctest --test-dir "$ROCKE_REVIEW_BUILD" \
+  -R 'rocke_portable_ir_(recipe_vm_replay|dom_decoders)' \
+  --output-on-failure
 ```
 
-If LeakSanitizer reports only that it cannot run under a ptraced test runner,
-rerun the two C++ tests with `ASAN_OPTIONS=detect_leaks=0`; keep AddressSanitizer
-and UndefinedBehaviorSanitizer enabled.
+If LeakSanitizer reports only that it cannot run under the ptraced runner, run
+the two test executables directly with `ASAN_OPTIONS=detect_leaks=0`. Keep
+AddressSanitizer and UndefinedBehaviorSanitizer enabled.
 
-Finally run from the repository root:
+Also run the CPU-only recipe parity matrix for `gfx942` and `gfx950` against a
+fresh shared library. This is required because both fixes sit on the path used
+to certify and replay parametric recipes. GPU compilation or launch is not
+required for this follow-up and must not be claimed unless separately executed.
+
+```bash
+PYTHONPATH=python:../library \
+python3 -c 'import sys; from rocke.portable_ir.src import online; online.build_lib(sys.argv[1])' \
+  "$ROCKE_REVIEW_BUILD/librocke.so"
+
+PYTHONDONTWRITEBYTECODE=1 \
+PYTHONPATH=python:../library \
+ROCKE_ONLINE_LIB="$ROCKE_REVIEW_BUILD/librocke.so" \
+python3 -m rocke.portable_ir.drivers.parity_matrix \
+  --arches gfx942,gfx950
+```
+
+Finally, from the repository root:
 
 ```bash
 git diff --check
 git status --short
 ```
 
-GPU execution is not required for these reject-path-only changes. Do not claim
-fresh GPU or full parity-matrix coverage unless it is separately run and
-retained.
-
 ## Acceptance criteria
 
 The follow-up is complete when all of the following are true:
 
-- every malformed case listed above returns `ROCKE_ERR_VALUE`;
-- every rejected call leaves the output kernel null;
-- valid string predicates, numeric `const_f32`, valid boolean flags, and absent
-  optional flags retain their current behavior;
-- the focused C++ tests and existing 30-test Python portable-IR suite pass;
-- the diff contains no production or test changes outside the two expected
-  files;
-- the PR description no longer states that the diff is a single commit;
-- the known boundaries and non-goals above remain untouched.
+- Python and C produce the same values or the same rejection for the focused
+  integer-expression and loop cases;
+- malformed or unknown string predicates are rejected by both paths;
+- non-positive Python expansion loops fail immediately with `ExpandError`;
+- every single-result declaration requires a nonempty bind;
+- repeated concrete single-result SSA definitions are rejected before lowering;
+- valid recorded recipes retain byte-identical replay for `gfx942` and `gfx950`;
+- the full Python portable-IR suite, recorder coverage gate, focused C++ tests,
+  DOM tests, sanitizer run, parity matrix, and diff check pass;
+- the final decisions and regression evidence are added to `DECISION_LOG.md`;
+- this handoff is removed after the decision-log update.

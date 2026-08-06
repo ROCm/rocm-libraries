@@ -30,8 +30,8 @@ division/modulo overflow, and a negative `static_for` step.
 
 ## 2026-08-06: remove replay's hidden result ceiling
 
-Decision: generic `emit` result arrays are dynamically sized; conflicting or
-malformed `out`/`outs` forms are rejected.
+Decision: generic `emit` result arrays are dynamically sized; conflicting
+`out`/`outs` forms and malformed multi-result declarations are rejected.
 
 Reason: replay silently truncated results after sixteen although the recorder
 has no such limit.
@@ -89,6 +89,23 @@ Regression: the C++ replay test covers missing/wrong/duplicate/extra specs, a
 non-array operand list, missing loop init, non-object kernel attributes,
 nonnumeric float attributes, and an unterminated register placeholder.
 
+## 2026-08-06: validate scalar predicates and instruction fields
+
+Decision: `spec_str_eq` requires exactly two strings and a declared runtime
+string spec. `const_f32.fval` must be numeric. When present, `scf_for.unroll`
+and `scf_for.elide_trailing_barrier` must be booleans; their existing defaults
+remain unchanged when absent. Known parameter attributes require their expected
+DOM kinds, and alignment must be a positive power-of-two integer fitting `int`.
+
+Reason: these fields previously read inactive DOM-union members or converted a
+missing value to a default, allowing malformed recipes to select the wrong
+compile-time arm or silently change emitted IR.
+
+Regression: the hermetic C++ replay test covers unknown and malformed string
+predicates, missing and nonnumeric float constants, invalid loop flags, and
+invalid parameter-attribute kinds and alignment values. Positive true/false
+string predicates, valid flags, and absent optional flags still replay.
+
 ## Current verified result
 
 - 30 Python portable-IR unit tests pass.
@@ -103,9 +120,23 @@ nonnumeric float attributes, and an unterminated register placeholder.
 - Regions: only `scf.for` and then-only `scf.if`; no general else/results form.
 - Attributes: wrapped integer lists work; nested list-of-map values do not.
 - Integer expressions do not range-check numeric casts or add/sub/mul overflow.
+- The Python recipe expander does not yet mirror the C VM's new rejection and
+  signed division/modulo semantics. The
+  [active PR handoff](PR_10492_REVIEW_FIX_HANDOFF.md) tracks this correctness
+  fix.
+- Single-result `emit.out` still defaults a missing bind and does not reject a
+  repeated concrete SSA definition. The active PR handoff tracks this fix.
 - Rolling: one structural axis; no joint multi-axis interaction inference.
 - Coverage: two multi-kernel adapters and a chunked 545-configuration replay
   gate remain. A single-process full sweep retained lowering output and grew
   memory substantially.
 - Runtime parity is always-on for `gfx942` and `gfx950`, not every target family.
 - Provider `ArtifactStore`/dispatch integration remains outside this prototype.
+
+## Documentation lifecycle
+
+Completed fixes and durable boundaries live in this decision log. Only active,
+unresolved work belongs in the
+[PR correctness handoff](PR_10492_REVIEW_FIX_HANDOFF.md). When that work is
+verified, move its final decisions and regression evidence here, update the
+verified result, and remove the handoff rather than retaining a historical plan.
