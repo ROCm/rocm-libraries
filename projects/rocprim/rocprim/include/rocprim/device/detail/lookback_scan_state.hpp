@@ -234,7 +234,7 @@ private:
         lookback_scan_prefix_flag flag;
     };
 
-    struct alignas(64) aligned_prefix_type
+    struct alignas(128) aligned_prefix_type
     {
         prefix_underlying_type raw;
     };
