@@ -537,7 +537,6 @@ Tests:
   N: [64]
   K: [512]
   block_dim: [4]
-  percentage: [0.5]
   alpha_alphai: *alpha_range_checkin
   beta_betai: *beta_range_checkin
   transA: [rocsparse_operation_none]
