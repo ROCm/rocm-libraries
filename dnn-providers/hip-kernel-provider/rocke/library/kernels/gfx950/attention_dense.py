@@ -523,13 +523,22 @@ def build_attention_dense(
     # ragged: a bounds-checked buffer load returns 0 for OOB query rows (the
     # partial last block), so padded rows are register-zero (their output is
     # dropped by the guarded store). Aligned: direct global load (unchanged IR).
-    q_rsrc = b.buffer_rsrc(q, b.const_i32(B * Sq * Hq * D * 2)) if RAGGED else None
+    if RAGGED:
+        q_rsrc = b.buffer_rsrc(q, b.const_i32(B * Sq * Hq * D * 2))
+    elif varlen:
+        # Bound the packed-Q read: the last seq's partial query block (a non-
+        # BLOCK_M-aligned length) must not fault past total_tok. OOB rows read 0
+        # (their O is dropped by the guarded store below). cu_q[B] == total_tok.
+        _total_q_tok = b.global_load_i32(cu_q, b.const_i32(B))
+        q_rsrc = b.buffer_rsrc(q, b.mul(_total_q_tok, b.const_i32(Hq * D * 2)))
+    else:
+        q_rsrc = None
     q_tok = b.add(q_tok0, lane_m)
     q_packs = []
     for ks in range(K_STEPS):
         col = b.add(b.const_i32(ks * 16), d_base)
         addr = b.add(b.add(q_base, b.mul(q_tok, b.const_i32(stride_q_tok))), col)
-        if RAGGED:
+        if q_rsrc is not None:
             raw = b.buffer_load_vN(
                 q_rsrc, b.mul(addr, b.const_i32(2)), b.const_i32(0), dtype, 8
             )
@@ -585,6 +594,23 @@ def build_attention_dense(
                 if PAGED:
                     # logical token -> (block, tok-in-block) -> physical page
                     blk = b.div(gkey, b.const_i32(PAGE_BS))
+                    if varlen:
+                        # NaN-safety: the ceil'd partial tile over-fetches pages
+                        # past this seq's last valid page. An uninitialised/garbage
+                        # page yields NaN V, and causal's P=0 * NaN = NaN poisons
+                        # the PV accumulator (the mask zeros the score but PV still
+                        # computes 0*V). Clamp the over-fetched logical block to the
+                        # seq's LAST valid block so it re-reads a real, filled page
+                        # (0*finite=0). Real keys (blk<=last) are unchanged; this
+                        # also removes any reliance on caller-zeroed table slots.
+                        _last_blk = b.sub(
+                            b.div(
+                                b.add(seqlen_kv_b, b.const_i32(PAGE_BS - 1)),
+                                b.const_i32(PAGE_BS),
+                            ),
+                            b.const_i32(1),
+                        )
+                        blk = b.select(b.cmp_lt(blk, _last_blk), blk, _last_blk)
                     tok = b.mod(gkey, b.const_i32(PAGE_BS))
                     bt_idx = b.add(seq_base_pages, blk)
                     # Guard the prefetch-ahead read past this seq's last block:
@@ -812,8 +838,16 @@ def build_attention_dense(
         l_tile = b.fadd(l_local, b.warp_shuffle_xor(l_local, 32))
         return out, p_vals, l_tile
 
+    # varlen: CEIL so the partial last KV tile is visited. varlen requires
+    # causal (see __post_init__), so do_mask's `ktok <= query_tok` drops that
+    # tile's over-range keys (ktok >= seqlen_kv) for free -- no tail mask needed
+    # (same reason do_kbound_mask is causal-exempt). This lets per-seq lengths be
+    # arbitrary multiples of page_block_size, not just block_n. Non-varlen keeps
+    # the compile-time (floor) count -> aligned fast path byte-identical.
     n_ktiles_val = (
-        b.div(seqlen_kv_b, b.const_i32(BN)) if varlen else b.const_i32(n_ktiles)
+        b.div(b.add(seqlen_kv_b, b.const_i32(BN - 1)), b.const_i32(BN))
+        if varlen
+        else b.const_i32(n_ktiles)
     )
     if causal:
         n_upper = b.add(b.mul(qb, b.const_i32(n_per)), b.const_i32(n_per))
@@ -1006,7 +1040,11 @@ def build_attention_dense(
     # buffer store's OOB-drop only protects the last batch's overflow, so use an
     # explicit predicate that is correct for any batch.
     o_store_ctx = (
-        b.scf_if(b.cmp_lt(qtok, b.const_i32(Sq))) if RAGGED else _nullcontext()
+        b.scf_if(b.cmp_lt(qtok, b.const_i32(Sq)))
+        if RAGGED
+        else b.scf_if(b.cmp_lt(qtok, seqlen_q_b))
+        if varlen
+        else _nullcontext()
     )
     with o_store_ctx:
         for dt in range(D_TILES):
@@ -1768,7 +1806,7 @@ def run_attention_dense_torch(
         # Fail loud past 2GiB instead of silently wrapping to corrupt reads.
         # Real i64 support (fold physical_block*stride into a 64-bit buffer base,
         # like unified_2d's offset_i64_split) is a documented follow-up.
-        _kv_bytes = 1 if spec.kv_storage_dtype == "fp8e4m3" else 2
+        _kv_bytes = 1 if spec.dtype == "fp8e4m3" else 2
         _cache_bytes = spec.resolved_num_pages * spec.page_block_size * spec.num_kv_heads * spec.head_size * _kv_bytes
         if _cache_bytes >= (1 << 31):
             raise ValueError(
@@ -1777,18 +1815,21 @@ def run_attention_dense_torch(
                 f"(follow-up: 64-bit buffer base per page)."
             )
         if spec.varlen:
-            # Loud guard: dense varlen uses floor(seqlen_kv/BN), which silently
-            # drops a partial last tile -> each per-seq KV length MUST be a
-            # multiple of block_n. Reject non-aligned inputs, don't mis-compute.
+            # Per-seq KV lengths must be a multiple of page_block_size (paging
+            # maps whole pages). The block_n(64) tile alignment is NOT required:
+            # varlen is causal and build_attention_dense ceils the KV-tile loop
+            # bound, so the causal mask drops the partial last tile's over-range
+            # keys; the block-table over-fetch is bounds-guarded. Non-page-aligned
+            # per-seq lengths remain a follow-up (partial-page handling).
             import torch as _t
             cu = cu_seqlens_kv
             if isinstance(cu, _t.Tensor):
                 lens = cu[1:] - cu[:-1]
-                if bool(((lens % spec.block_n) != 0).any()):
+                if bool(((lens % spec.page_block_size) != 0).any()):
                     raise ValueError(
                         f"paged+varlen requires each per-seq KV length to be a "
-                        f"multiple of block_n={spec.block_n} (dense varlen "
-                        f"floor-drops partial tiles); got {lens.tolist()}"
+                        f"multiple of page_block_size={spec.page_block_size}; "
+                        f"got {lens.tolist()}"
                     )
     launcher(
         vals,
