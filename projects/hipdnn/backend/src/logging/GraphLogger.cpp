@@ -88,7 +88,7 @@ std::filesystem::path GraphLogger::getOutputDirectory()
     return cachedPath;
 }
 
-void GraphLogger::logGraph(const uint8_t* serializedGraph, size_t)
+void GraphLogger::logGraph(const uint8_t* serializedGraph, [[maybe_unused]] size_t size)
 {
     auto* graph
         = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::Graph>(serializedGraph);

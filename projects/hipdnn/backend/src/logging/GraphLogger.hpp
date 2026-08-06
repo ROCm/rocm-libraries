@@ -13,8 +13,8 @@ namespace hipdnn_backend::logging
 class GraphLogger
 {
 public:
-    /// Logs the graph as JSON. Deduplicates by content hash — if the same
-    /// flatbuffer binary has already been logged, this is a no-op.
+    /// Logs the graph as JSON. Deduplicates by graph content while ignoring the graph ID, so
+    /// independently finalized equivalent graphs share one dump.
     /// @param serializedGraph pointer to flatbuffer binary
     /// @param size size of the flatbuffer binary
     static void logGraph(const uint8_t* serializedGraph, size_t size);
