@@ -274,11 +274,9 @@ class AttentionDenseSpec:
             if not self.causal:
                 raise ValueError("varlen requires causal=True")
         if self.paged:
-            if self.batch != 1:
-                raise ValueError("paged (minimal slice) requires batch==1")
-            if self.varlen or self.persistent or self.ragged:
+            if self.persistent or self.ragged:
                 raise ValueError(
-                    "paged is not supported with varlen/persistent/ragged"
+                    "paged is not supported with persistent/ragged"
                 )
             if self.head_size != 128:
                 raise ValueError("paged (minimal slice) requires head_size==128")
@@ -409,6 +407,12 @@ def build_attention_dense(
     PAGE_BS = spec.page_block_size
     PAGE_STRIDE = PAGE_BS * Hkv * D  # elements per physical page
     NUM_PAGES = spec.resolved_num_pages
+    # Block-table geometry. Equal-length batched: bt_stride is compile-time =
+    # blocks per sequence; a CTA's per-seq base into block_tables is
+    # seq_idx (block_id_z) * bt_stride. BT_MAX_IDX bounds the block_tables read
+    # so the prefetch-ahead past a sequence's last block cannot fault.
+    # (per-sequence block-table stride is a runtime param, block_table_stride,
+    #  so varlen batches with a fixed table pitch work; see below.)
     # DMA row packing: one async_buffer_load_lds instr moves 64 lanes x 2 bf16 =
     # 128 elems. D==128 => 1 row/instr (the padded fast path, byte-identical).
     # D<128 => pack 128//D rows/instr into an UNPADDED contiguous LDS tile (the
@@ -451,6 +455,7 @@ def build_attention_dense(
             readonly=True,
             align=4,
         )
+        block_table_stride = b.param("block_table_stride", I32)
     qk_scale = b.fmul(scale, b.const_f32(LOG2E))
 
     _exp2 = b.exp2_fast  # native v_exp_f32 (softmax arg always <= 0)
@@ -499,6 +504,11 @@ def build_attention_dense(
         # kv-head + dim base within a token row (the paged replacement for the
         # contiguous k_base token term).
         kv_head_off = b.mul(hkv, b.const_i32(D))
+        # per-sequence base into the (batched) block table; bt = block_id_z.
+        # per-sequence base + guard bound from the runtime block-table stride
+        # (blocks-per-seq entry pitch); bt = block_id_z = sequence index.
+        seq_base_pages = b.mul(bt, block_table_stride)
+        bt_max_idx_v = b.mul(b.const_i32(B), block_table_stride)
 
     # --- LDS allocation: PAD on K (bank-conflict fix), +PAD_V on V (transposed
     #     PV read bank-conflict pad). Row padding requires 1 row/instr (a padded
@@ -576,7 +586,15 @@ def build_attention_dense(
                     # logical token -> (block, tok-in-block) -> physical page
                     blk = b.div(gkey, b.const_i32(PAGE_BS))
                     tok = b.mod(gkey, b.const_i32(PAGE_BS))
-                    phys = b.global_load_i32(block_tables, blk)
+                    bt_idx = b.add(seq_base_pages, blk)
+                    # Guard the prefetch-ahead read past this seq's last block:
+                    # an OOB block_table load returns a garbage page -> GPU fault.
+                    safe_idx = b.select(
+                        b.cmp_lt(bt_idx, bt_max_idx_v),
+                        bt_idx,
+                        b.const_i32(0),
+                    )
+                    phys = b.global_load_i32(block_tables, safe_idx)
                     voff = b.add(
                         b.add(
                             b.add(
@@ -1662,6 +1680,7 @@ def attention_dense_signature(spec: AttentionDenseSpec):
         sig = sig.ptr("cu_seqlens_q", "i32").ptr("cu_seqlens_kv", "i32")
     if spec.paged:
         sig = sig.ptr("block_tables", "i32")
+        sig = sig.scalar("block_table_stride", "i32")
     return sig.build()
 
 
@@ -1686,6 +1705,7 @@ def run_attention_dense_torch(
     cu_seqlens_q=None,
     cu_seqlens_kv=None,
     block_tables=None,
+    block_table_stride=None,
 ):
     """High-level framework entry: compile (cached) + launch the dense prefill
     kernel on torch tensors. ``q``/``k``/``v``/``out`` are dense contiguous
@@ -1739,7 +1759,37 @@ def run_attention_dense_torch(
     if spec.paged:
         if block_tables is None:
             raise ValueError("paged=True requires block_tables (int32)")
+        if block_table_stride is None:
+            raise ValueError("paged=True requires block_table_stride (int32)")
         vals["block_tables"] = block_tables
+        vals["block_table_stride"] = int(block_table_stride)
+        # 32-bit buffer-offset limit: the paged K/V load puts the full byte
+        # offset (incl. physical_block*page_stride) in a 32-bit buffer voffset.
+        # Fail loud past 2GiB instead of silently wrapping to corrupt reads.
+        # Real i64 support (fold physical_block*stride into a 64-bit buffer base,
+        # like unified_2d's offset_i64_split) is a documented follow-up.
+        _kv_bytes = 1 if spec.kv_storage_dtype == "fp8e4m3" else 2
+        _cache_bytes = spec.resolved_num_pages * spec.page_block_size * spec.num_kv_heads * spec.head_size * _kv_bytes
+        if _cache_bytes >= (1 << 31):
+            raise ValueError(
+                f"paged cache is {_cache_bytes} bytes; exceeds the 2GiB 32-bit "
+                f"buffer-offset limit. i64 addressing is not yet implemented "
+                f"(follow-up: 64-bit buffer base per page)."
+            )
+        if spec.varlen:
+            # Loud guard: dense varlen uses floor(seqlen_kv/BN), which silently
+            # drops a partial last tile -> each per-seq KV length MUST be a
+            # multiple of block_n. Reject non-aligned inputs, don't mis-compute.
+            import torch as _t
+            cu = cu_seqlens_kv
+            if isinstance(cu, _t.Tensor):
+                lens = cu[1:] - cu[:-1]
+                if bool(((lens % spec.block_n) != 0).any()):
+                    raise ValueError(
+                        f"paged+varlen requires each per-seq KV length to be a "
+                        f"multiple of block_n={spec.block_n} (dense varlen "
+                        f"floor-drops partial tiles); got {lens.tolist()}"
+                    )
     launcher(
         vals,
         config=LaunchConfig(
