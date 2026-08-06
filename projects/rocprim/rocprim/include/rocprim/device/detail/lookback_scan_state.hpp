@@ -217,25 +217,33 @@ T lookback_reduce_forward(F scan_op, T prefix, T block_prefix)
 template<class T, bool UseSleep>
 struct lookback_scan_state<T, UseSleep, true>
 {
+public:
+    // Type used for flag/flag of block prefix
+    using value_type = T;
+    
+    static constexpr bool use_sleep = UseSleep;
+
 private:
     // Type which is used in store/load operations of block prefix (flag and value).
     // It is 16-, 32- or 64-bit int and can be loaded/stored using single atomic instruction.
     using prefix_underlying_type = typename match_prefix_underlying_type<T>::type;
 
-    // Helper struct
     struct prefix_type
     {
         T                         value;
         lookback_scan_prefix_flag flag;
     };
 
+    struct alignas(64) aligned_prefix_type
+    {
+        prefix_underlying_type raw;
+    };
+
     static_assert(sizeof(prefix_underlying_type) >= sizeof(prefix_type), "");
 
+    
+    aligned_prefix_type* prefixes;
 public:
-    // Type used for flag/flag of block prefix
-    using value_type = T;
-
-    static constexpr bool use_sleep = UseSleep;
 
     /// \brief Initializes the lookback_scan_state with the given temporary storage and the given grid size.
     ///
@@ -253,7 +261,7 @@ public:
                                     const hipStream_t /*stream*/)
     {
         (void)number_of_blocks;
-        state.prefixes = reinterpret_cast<prefix_underlying_type*>(temp_storage);
+        state.prefixes = reinterpret_cast<aligned_prefix_type*>(temp_storage);
         return hipSuccess;
     }
 
@@ -276,7 +284,7 @@ public:
         unsigned int warp_size;
         hipError_t   error = ::rocprim::host_warp_size(stream, warp_size);
 
-        storage_size = sizeof(prefix_underlying_type) * (warp_size + number_of_blocks);
+        storage_size = sizeof(aligned_prefix_type) * (warp_size + number_of_blocks);
 
         return error;
     }
@@ -299,7 +307,7 @@ public:
     {
         size_t     storage_size = 0;
         hipError_t error        = get_storage_size(number_of_blocks, stream, storage_size);
-        layout = detail::temp_storage::layout{storage_size, alignof(prefix_underlying_type)};
+        layout = detail::temp_storage::layout{storage_size, alignof(aligned_prefix_type)};
         return error;
     }
 
@@ -318,7 +326,7 @@ public:
             prefix.flag = lookback_scan_prefix_flag::empty;
             prefix_underlying_type p;
             memcpy(&p, &prefix, sizeof(prefix_type));
-            prefixes[padding + block_id] = p;
+            prefixes[padding + block_id].raw = p;
         }
         if(block_id < padding)
         {
@@ -326,7 +334,7 @@ public:
             prefix.flag = lookback_scan_prefix_flag::invalid;
             prefix_underlying_type p;
             memcpy(&p, &prefix, sizeof(prefix_type));
-            prefixes[block_id] = p;
+            prefixes[block_id].raw = p;
         }
     }
 
@@ -365,7 +373,7 @@ public:
         const unsigned int SLEEP_MAX     = 32;
         unsigned int       times_through = 1;
 
-        prefix_underlying_type p = ::rocprim::detail::atomic_load(&prefixes[padding + block_id]);
+        prefix_underlying_type p = ::rocprim::detail::atomic_load(&prefixes[padding + block_id].raw);
         memcpy(&prefix, &p, sizeof(prefix_type));
         while(prefix.flag == lookback_scan_prefix_flag::empty)
         {
@@ -377,7 +385,7 @@ public:
                     times_through++;
             }
             prefix_underlying_type p
-                = ::rocprim::detail::atomic_load(&prefixes[padding + block_id]);
+                = ::rocprim::detail::atomic_load(&prefixes[padding + block_id].raw);
             memcpy(&prefix, &p, sizeof(prefix_type));
         }
 
@@ -495,10 +503,8 @@ private:
         prefix_type            prefix = {value, flag};
         prefix_underlying_type p;
         memcpy(&p, &prefix, sizeof(prefix_type));
-        ::rocprim::detail::atomic_store(&prefixes[padding + block_id], p);
+        ::rocprim::detail::atomic_store(&prefixes[padding + block_id].raw, p);
     }
-
-    prefix_underlying_type* prefixes;
 };
 
 // Flag, partial and final prefixes are stored in separate arrays.
