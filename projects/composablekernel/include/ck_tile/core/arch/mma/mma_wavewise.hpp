@@ -244,24 +244,31 @@ struct WaveWiseMmaPipeline : public MmaPipelineBase<WaveWiseMmaPipeline<ADataTyp
 
         if constexpr(AccumPolicy == MmaAccumPolicy::ROW_MAJOR)
         {
-            if constexpr(FragsM == 1 && FragsN == 1 && FragsK > 1)
+            if constexpr(FragsM == 1 && FragsN == 1)
             {
-                // This implementation is simlar to WarpGemmAttributeMfmaIterateK: multiple
-                // get_as/reinterpret_cast and static_for with inputs captured by reference. In most
-                // cases this code generates the same assembly as WarpGemmAttributeMfmaIterateK (but
-                // it's not always optimal).
+                // Replicate the legacy WarpGemmImpl::operator() + WarpGemmAttributeMfmaIterateK
+                // accumulation pattern so the new framework reproduces the legacy WarpGemm's gfx9
+                // assembly on its own. The legacy WarpGemm path is being deprecated, so we cannot
+                // route to it; instead we mimic it here. Load the A/B thread buffers into local
+                // value copies and accumulate every K fragment into a LOCAL C accumulator, then
+                // write it back to the C thread buffer once. Using a local accumulator instead of
+                // read-modify-writing c_buf.at(0) through the buffer reference each iteration
+                // reproduces the legacy ACC-VGPR allocation (this covers both the single-fragment
+                // FragsK == 1 case and the K-composed FragsK > 1 / IterateK case).
                 using AVec1 = ext_vector_t<ADataType, ATensor::get_thread_buffer_size()>;
                 using BVec1 = ext_vector_t<BDataType, BTensor::get_thread_buffer_size()>;
 
                 const auto a_buf1 = a.get_thread_buffer().template get_as<AVec1>();
                 const auto b_buf1 = b.get_thread_buffer().template get_as<BVec1>();
 
+                auto c_vec = c_buf.at(0);
                 static_for<0, FragsK, 1>{}([&](auto bk) {
-                    c_buf.at(0) = MmaOp::template exec<Params...>(
+                    c_vec = MmaOp::template exec<Params...>(
                         a_buf1.template get_as<typename MmaOp::AVecType>().at(bk),
                         b_buf1.template get_as<typename MmaOp::BVecType>().at(bk),
-                        c_buf.at(0));
+                        c_vec);
                 });
+                c_buf.at(0) = c_vec;
             }
             else
             {
