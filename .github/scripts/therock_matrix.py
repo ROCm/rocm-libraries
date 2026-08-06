@@ -18,6 +18,7 @@ subtree_to_project_map = {
     "projects/hipdnn": "hipdnn",
     "projects/hipfft": "fft",
     "projects/hiprand": "rand",
+    "projects/hiptensor": "hiptensor",
     "projects/hipsolver": "solver",
     "projects/hipsparse": "sparse",
     "projects/hipsparselt": "sparselt",
@@ -31,6 +32,7 @@ subtree_to_project_map = {
     "projects/rocthrust": "prim",
     "projects/rocalution": "rocalution",
     "projects/rocwmma": "rocwmma",
+    "projects/hipthreads": "hipthreads",
     "shared/mxdatagenerator": "blas",
     "shared/origami": "blas",
     "shared/rocroller": "rocroller",
@@ -64,6 +66,17 @@ project_map = {
         "cmake_options": ["-DTHEROCK_ENABLE_FFT=ON", "-DTHEROCK_ENABLE_RAND=ON"],
         "projects_to_test": ["hipfft", "rocfft"],
     },
+    "hiptensor": {
+        "cmake_options": [
+            "-DTHEROCK_ENABLE_HIPTENSOR=ON",
+            "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
+            "-DTHEROCK_ENABLE_RAND=ON",
+        ],
+        "additional_flags": {
+            "linux": ["-DTHEROCK_ENABLE_ROCPROFV3=ON"],
+        },
+        "projects_to_test": ["hiptensor"],
+    },
     "hip-kernel-provider": {
         "cmake_options": [
             "-DTHEROCK_ENABLE_HIPKERNELPROVIDER=ON",
@@ -71,6 +84,10 @@ project_map = {
             "-DTHEROCK_FLAG_HIPKERNELPROVIDER_ENABLE_ROCKE=ON",
         ],
         "projects_to_test": ["hipkernelprovider"],
+    },
+    "hipthreads": {
+        "cmake_options": ["-DTHEROCK_ENABLE_HIPTHREADS=ON"],
+        "projects_to_test": ["hipthreads"],
     },
 }
 
@@ -177,10 +194,19 @@ SUBTREE_EXTRA_MATRIX_PROJECTS = {
     "projects/hipblaslt": "sparselt",
 }
 
+ROCJITSU_RACE_CHECK_SUBTREES = {
+    "projects/hipblaslt",
+}
+
 
 def collect_projects_to_run(subtrees):
+    subtrees = list(subtrees)
     platform = os.getenv("PLATFORM")
     projects = set()
+    # Record why the BLAS row was selected before dependency folding loses the
+    # original subtree identity. Workflows consume this marker after the matrix
+    # is assembled to attach instrumentation to the final merged product row.
+    run_rocjitsu_race_check = bool(ROCJITSU_RACE_CHECK_SUBTREES.intersection(subtrees))
     # Work on per-call deep copies so module-level state stays immutable across calls.
     local_project_map = copy.deepcopy(project_map)
     local_additional_options = copy.deepcopy(additional_options)
@@ -262,6 +288,10 @@ def collect_projects_to_run(subtrees):
             )
             project_map_data["projects_to_test"] = list(
                 set(project_map_data["projects_to_test"])
+            )
+            project_map_data["run_rocjitsu_race_check"] = (
+                run_rocjitsu_race_check
+                and "tensilelite" in project_map_data["projects_to_test"]
             )
 
             cmake_flag_options = " ".join(project_map_data["cmake_options"])

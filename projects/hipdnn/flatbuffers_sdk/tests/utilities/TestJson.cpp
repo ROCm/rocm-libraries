@@ -31,30 +31,11 @@ void toJsonAndBackTestSuite(const hipdnn_flatbuffers_sdk::data_objects::Graph* g
     builder.Finish(newGraphBuilder);
     auto newGraph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(builder.GetBufferPointer());
 
-    EXPECT_EQ(graph->compute_data_type(), newGraph->compute_data_type()) << context;
-    EXPECT_EQ(graph->intermediate_data_type(), newGraph->intermediate_data_type()) << context;
-    EXPECT_EQ(graph->io_data_type(), newGraph->io_data_type()) << context;
-    EXPECT_EQ(graph->name()->str(), newGraph->name()->str()) << context;
-
-    ASSERT_EQ(graph->tensors()->size(), newGraph->tensors()->size()) << context;
-    auto t1 = graph->tensors()->begin();
-    auto t2 = newGraph->tensors()->begin();
-    for(; t1 != graph->tensors()->end() && t2 != newGraph->tensors()->end(); t1++, t2++)
-    {
-        const std::unique_ptr<TensorAttributesT> t1ptr(t1->UnPack());
-        const std::unique_ptr<TensorAttributesT> t2ptr(t2->UnPack());
-        EXPECT_EQ(*t1ptr, *t2ptr) << context;
-    }
-
-    ASSERT_EQ(graph->nodes()->size(), newGraph->nodes()->size()) << context;
-    auto n1 = graph->nodes()->begin();
-    auto n2 = newGraph->nodes()->begin();
-    for(; n1 != graph->nodes()->end() && n2 != newGraph->nodes()->end(); n1++, n2++)
-    {
-        const std::unique_ptr<NodeT> n1ptr(n1->UnPack());
-        const std::unique_ptr<NodeT> n2ptr(n2->UnPack());
-        EXPECT_EQ(*n1ptr, *n2ptr) << context;
-    }
+    const std::unique_ptr<GraphT> graphObject(graph->UnPack());
+    const std::unique_ptr<GraphT> newGraphObject(newGraph->UnPack());
+    ASSERT_NE(graphObject, nullptr) << context;
+    ASSERT_NE(newGraphObject, nullptr) << context;
+    EXPECT_EQ(*graphObject, *newGraphObject) << context;
 }
 
 } // namespace
@@ -176,9 +157,18 @@ TEST(TestJson, GraphToJsonAndBack)
             context = "(valid reduction graph)";
             break;
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ResampleFwdAttributes:
-            graphBuilder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph();
+            graphBuilder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph(true);
             graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
             context = "(valid resample fwd graph)";
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ResampleBwdAttributes:
+            graphBuilder = hipdnn_test_sdk::utilities::createValidResampleBwdGraph(true);
+            graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+            context = "(valid resample bwd graph)";
+        case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::MoeGroupedMatmulAttributes:
+            graphBuilder = hipdnn_test_sdk::utilities::createValidMoeGroupedMatmulGraph();
+            graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+            context = "(valid MoE grouped matmul graph)";
             break;
         default:
             FAIL() << "Unhandled NodeAttributes enum value";
@@ -187,6 +177,94 @@ TEST(TestJson, GraphToJsonAndBack)
 
         toJsonAndBackTestSuite(graph, context);
     }
+}
+
+TEST(TestJson, GraphVersionSerializesToJson)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    const EngineApiVersion version(1, 2, 0);
+    const auto graphOffset = CreateGraphDirect(builder,
+                                               "graph",
+                                               DataType::FLOAT,
+                                               DataType::FLOAT,
+                                               DataType::FLOAT,
+                                               nullptr,
+                                               nullptr,
+                                               flatbuffers::nullopt,
+                                               false,
+                                               &version);
+    builder.Finish(graphOffset);
+
+    const auto* graph = GetGraph(builder.GetBufferPointer());
+    const nlohmann::json graphJson = *graph;
+
+    ASSERT_TRUE(graphJson.contains("min_required_engine_api_version"));
+    EXPECT_EQ(graphJson.at("min_required_engine_api_version"),
+              nlohmann::json({{"major", 1}, {"minor", 2}, {"patch", 0}}));
+}
+
+TEST(TestJson, GraphVersionRoundTripsFromJson)
+{
+    const nlohmann::json graphJson
+        = {{"name", "graph"},
+           {"compute_data_type", DataType::FLOAT},
+           {"io_data_type", DataType::FLOAT},
+           {"intermediate_data_type", DataType::FLOAT},
+           {"nodes", nlohmann::json::array()},
+           {"tensors", nlohmann::json::array()},
+           {"min_required_engine_api_version", {{"major", 1}, {"minor", 2}, {"patch", 0}}}};
+
+    flatbuffers::FlatBufferBuilder builder;
+    const auto graphOffset = hipdnn_flatbuffers_sdk::json::to<Graph>(builder, graphJson);
+    builder.Finish(graphOffset);
+
+    const auto* graph = GetGraph(builder.GetBufferPointer());
+    const auto* version = graph->min_required_engine_api_version();
+    ASSERT_NE(version, nullptr);
+    EXPECT_EQ(version->major(), 1);
+    EXPECT_EQ(version->minor(), 2);
+    EXPECT_EQ(version->patch(), 0);
+
+    const nlohmann::json roundTrippedJson = *graph;
+    EXPECT_EQ(roundTrippedJson.at("min_required_engine_api_version"),
+              graphJson.at("min_required_engine_api_version"));
+}
+
+TEST(TestJson, GraphWithoutVersionRoundTripsWithVersionAbsent)
+{
+    const nlohmann::json graphJson = {{"name", "graph"},
+                                      {"compute_data_type", DataType::FLOAT},
+                                      {"io_data_type", DataType::FLOAT},
+                                      {"intermediate_data_type", DataType::FLOAT},
+                                      {"nodes", nlohmann::json::array()},
+                                      {"tensors", nlohmann::json::array()}};
+
+    flatbuffers::FlatBufferBuilder builder;
+    const auto graphOffset = hipdnn_flatbuffers_sdk::json::to<Graph>(builder, graphJson);
+    builder.Finish(graphOffset);
+
+    const auto* graph = GetGraph(builder.GetBufferPointer());
+    EXPECT_EQ(graph->min_required_engine_api_version(), nullptr);
+
+    const nlohmann::json roundTrippedJson = *graph;
+    EXPECT_FALSE(roundTrippedJson.contains("min_required_engine_api_version"));
+}
+TEST(TestJson, MoeGroupedMatmulDefaultsRoundTrip)
+{
+    auto graphBuilder
+        = hipdnn_test_sdk::utilities::createValidMoeGroupedMatmulGraph(MoeGroupedMatmulMode::NONE);
+    const auto* graph = GetGraph(graphBuilder.GetBufferPointer());
+    const nlohmann::json graphJson = *graph;
+    const auto& nodeJson = graphJson.at("nodes").at(0);
+    const auto& inputs = nodeJson.at("inputs");
+
+    EXPECT_EQ(nodeJson.at("type").get<std::string>(), "MoeGroupedMatmulAttributes");
+    EXPECT_EQ(nodeJson.at("mode").get<std::string>(), "none");
+    EXPECT_EQ(nodeJson.at("top_k").get<int32_t>(), 0);
+    EXPECT_FALSE(inputs.contains("token_index_tensor_uid"));
+    EXPECT_FALSE(inputs.contains("token_ks_tensor_uid"));
+
+    toJsonAndBackTestSuite(graph, "(MoE grouped matmul defaults)");
 }
 
 namespace
@@ -381,6 +459,138 @@ TEST(TestJson, TensorAttributesBoolValueRoundTrip)
         ASSERT_NE(newAttr->value_as_BoolValue(), nullptr);
         EXPECT_EQ(newAttr->value_as_BoolValue()->value(), boolVal);
     }
+}
+
+TEST(TestJson, TensorAttributesRaggedOffsetAndAlignmentRoundTrip)
+{
+    const int64_t uid = 5;
+    const int64_t raggedOffsetUid = 42;
+    const int64_t alignment = 128;
+    const std::vector<int64_t> dims = {4, 8, 1, 1};
+    const std::vector<int64_t> strides = {8, 1, 1, 1};
+
+    flatbuffers::FlatBufferBuilder builder;
+    auto attrOffset = CreateTensorAttributesDirect(builder,
+                                                   uid,
+                                                   "ragged_primary",
+                                                   DataType::FLOAT,
+                                                   &strides,
+                                                   &dims,
+                                                   /*virtual*/ false,
+                                                   TensorValue::NONE,
+                                                   /*value*/ 0,
+                                                   false,
+                                                   flatbuffers::Optional<int64_t>(raggedOffsetUid),
+                                                   alignment);
+    builder.Finish(attrOffset);
+
+    auto* attr = flatbuffers::GetRoot<TensorAttributes>(builder.GetBufferPointer());
+
+    // Verify fields before JSON round-trip
+    ASSERT_TRUE(attr->ragged_offset_tensor_uid().has_value());
+    EXPECT_EQ(attr->ragged_offset_tensor_uid().value(), raggedOffsetUid);
+    EXPECT_EQ(attr->alignment(), alignment);
+
+    // JSON round-trip
+    const nlohmann::json attrJson = *attr;
+    EXPECT_EQ(attrJson.at("ragged_offset_tensor_uid").get<int64_t>(), raggedOffsetUid);
+    EXPECT_EQ(attrJson.at("alignment").get<int64_t>(), alignment);
+
+    flatbuffers::FlatBufferBuilder roundTripBuilder;
+    auto newAttrOffset
+        = hipdnn_flatbuffers_sdk::json::to<TensorAttributes>(roundTripBuilder, attrJson);
+    roundTripBuilder.Finish(newAttrOffset);
+
+    auto* newAttr = flatbuffers::GetRoot<TensorAttributes>(roundTripBuilder.GetBufferPointer());
+    ASSERT_TRUE(newAttr->ragged_offset_tensor_uid().has_value());
+    EXPECT_EQ(newAttr->ragged_offset_tensor_uid().value(), raggedOffsetUid);
+    EXPECT_EQ(newAttr->alignment(), alignment);
+}
+
+TEST(TestJson, TensorAttributesDefaultAlignmentAndNoRaggedOffset)
+{
+    const std::vector<int64_t> dims = {1, 1, 1, 1};
+    const std::vector<int64_t> strides = {1, 1, 1, 1};
+
+    flatbuffers::FlatBufferBuilder builder;
+    auto attrOffset = CreateTensorAttributesDirect(
+        builder, 1, "plain", DataType::FLOAT, &strides, &dims, false);
+    builder.Finish(attrOffset);
+
+    auto* attr = flatbuffers::GetRoot<TensorAttributes>(builder.GetBufferPointer());
+    EXPECT_FALSE(attr->ragged_offset_tensor_uid().has_value());
+    EXPECT_EQ(attr->alignment(), 16);
+
+    const nlohmann::json attrJson = *attr;
+    EXPECT_FALSE(attrJson.contains("ragged_offset_tensor_uid"));
+    EXPECT_EQ(attrJson.at("alignment").get<int64_t>(), 16);
+}
+
+TEST(TestJson, TensorAttributesLegacyJsonMissingAlignmentDefaultsTo16)
+{
+    // Simulate legacy JSON that lacks the alignment and ragged_offset_tensor_uid fields
+    const nlohmann::json legacyJson = {{"uid", 1},
+                                       {"name", "legacy"},
+                                       {"data_type", DataType::FLOAT},
+                                       {"dims", std::vector<int64_t>{1, 1, 1, 1}},
+                                       {"strides", std::vector<int64_t>{1, 1, 1, 1}},
+                                       {"virtual", false}};
+
+    flatbuffers::FlatBufferBuilder builder;
+    auto attrOffset = hipdnn_flatbuffers_sdk::json::to<TensorAttributes>(builder, legacyJson);
+    builder.Finish(attrOffset);
+
+    auto* attr = flatbuffers::GetRoot<TensorAttributes>(builder.GetBufferPointer());
+    EXPECT_FALSE(attr->ragged_offset_tensor_uid().has_value());
+    EXPECT_EQ(attr->alignment(), 16);
+}
+
+TEST(TestJson, TensorAttributesRuntimePassByValueRoundTrips)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    const std::vector<int64_t> dims = {1};
+    const std::vector<int64_t> strides = {1};
+    const auto attrOffset = CreateTensorAttributesDirect(builder,
+                                                         /*uid*/ 7,
+                                                         /*name*/ "runtime_scalar",
+                                                         DataType::FLOAT,
+                                                         &strides,
+                                                         &dims,
+                                                         /*virtual*/ false,
+                                                         TensorValue::NONE,
+                                                         0,
+                                                         /*is_runtime_pass_by_value*/ true);
+    builder.Finish(attrOffset);
+
+    const auto* attr = flatbuffers::GetRoot<TensorAttributes>(builder.GetBufferPointer());
+    const nlohmann::json attrJson = *attr;
+    ASSERT_TRUE(attrJson.at("is_runtime_pass_by_value").get<bool>());
+
+    flatbuffers::FlatBufferBuilder roundTripBuilder;
+    const auto newAttrOffset
+        = hipdnn_flatbuffers_sdk::json::to<TensorAttributes>(roundTripBuilder, attrJson);
+    roundTripBuilder.Finish(newAttrOffset);
+
+    const auto* newAttr
+        = flatbuffers::GetRoot<TensorAttributes>(roundTripBuilder.GetBufferPointer());
+    EXPECT_TRUE(newAttr->is_runtime_pass_by_value());
+}
+
+TEST(TestJson, TensorAttributesWithoutRuntimePassByValueDefaultsFalse)
+{
+    const nlohmann::json attrJson = {{"uid", 7},
+                                     {"name", "legacy_tensor"},
+                                     {"data_type", DataType::FLOAT},
+                                     {"strides", {1}},
+                                     {"dims", {1}},
+                                     {"virtual", false}};
+
+    flatbuffers::FlatBufferBuilder builder;
+    const auto attrOffset = hipdnn_flatbuffers_sdk::json::to<TensorAttributes>(builder, attrJson);
+    builder.Finish(attrOffset);
+
+    const auto* attr = flatbuffers::GetRoot<TensorAttributes>(builder.GetBufferPointer());
+    EXPECT_FALSE(attr->is_runtime_pass_by_value());
 }
 
 #endif // HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB
