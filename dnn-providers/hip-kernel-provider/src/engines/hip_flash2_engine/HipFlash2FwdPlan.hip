@@ -5,26 +5,50 @@
 // Build: hipcc --offload-arch=gfx942 -O3 --cuda-device-only -x hip
 //        -I/opt/rocm/include HipFlash2FwdPlan.hip -o kernels/hip_flash2_fwd_gfx942.co
 //
-// FRAGMENT LAYOUT (measured by Samuel Reeder on gfx942, rocWMMA 16x16x16):
-//   accumulator: lane l, elem e -> C[row=(l/16)*4+e][col=l%16]
+// ---------------------------------------------------------------------------
+// v13 -- FULL MFMA for BOTH GEMMs via the S-transpose formulation.
 //
-// For S = Q*K^T (accumulator):
-//   sf[qg][kg].x[e] = S[qg*16+(l/16)*4+e][kg*16+l%16]
-//   => e = query row within group; l%16 = key column per kg
+// MEASURED rocWMMA 16x16x16 f16 register layouts on gfx942 (MI300X), where
+// lane = l (0..63) and e = fragment element index (0..3):
 //
-// OUTPUT: each lane l owns output column my_kcol=l%16.
-//   O[q][my_kcol+d16*16] = sum_{all kc} P[q][kc] * V[kc][my_kcol+d16*16]
-//   where V kc-indexed: sV[d16*16+my_kcol][kc]
+//   matrix_a     : A[row = l%16        ][k   = (l/16)*4 + e]
+//   matrix_b     : B[k   = (l/16)*4 + e][col = l%16        ]
+//   accumulator  : C[row = (l/16)*4 + e][col = l%16        ]
 //
-// REGISTER PRESSURE NOTE:
-//   To avoid spilling for D=128, do NOT store score[4][4][4].
-//   Instead:
-//   Pass 1: compute tile_m from sf directly (one loop over qg,kg,e).
-//   Pass 2: compute tile_gm via shfl_xor, update row_m/o_acc/row_d.
-//   Pass 3: per-kg: mask sf->pv on-the-fly, write sP, sync, accumulate O.
-//   sf[4][4] lives in MFMA accumulator registers (not general VGPRs).
+// KEY OBSERVATION: the accumulator mapping is the TRANSPOSE of the matrix_a
+// mapping, but is IDENTICAL to the matrix_b mapping. Therefore an accumulator
+// holding S = Q*K^T can NEVER be reinterpreted in-register as a matrix_a
+// fragment holding P -- doing so silently yields P^T. Every previous attempt
+// to MFMA the P*V product failed for this reason, forcing a scalar LDS
+// fallback (~4096 scalar MADs/lane).
 //
-// LDS: union{sK[D][64]*2, sP[64][16]*4} + sV[D][64]*2 + so[64][D]*4 = 64KB (D=128)
+// THE FIX: compute the TRANSPOSED score S^T = K*Q^T instead of S = Q*K^T.
+//   S^T accumulator: C[row = key][col = query]
+//        -> lane l, elem e holds key = (l/16)*4+e, query = l%16
+//   This is EXACTLY the matrix_b register mapping for P^T[key][query].
+//   So P^T is produced in-register by an element-wise exp() on the S^T
+//   accumulator -- no shuffles, no LDS round-trip, no transpose.
+//
+// Then accumulate the transposed output:
+//   O^T = V^T * P^T        (equivalently O = P*V)
+//   O^T accumulator: C[row = d][col = query]
+//   matrix_a = V^T : A[row = d  ][k = key]  <- sV[d][key], row_major, ld=64
+//   matrix_b = P^T : B[k = key  ][col = q]  <- in-register from S^T accumulator
+//
+// CONSEQUENCES vs the scalar-LDS version:
+//   * P*V is now 4*D16 MFMA ops per KV tile instead of 4096 scalar MADs/lane.
+//   * The sP LDS staging buffer and its two __syncthreads() per kg are gone.
+//   * The so[64][D] output staging buffer is gone -- each lane writes its own
+//     4 contiguous halves straight to global. LDS drops 64KB -> 32KB (D=128),
+//     which lets two CTAs share a CU again.
+//
+// SOFTMAX AXIS: each lane owns query column l%16 and holds keys along e and
+// across lane groups l/16. The row-wise (per-query) max/sum reduction is
+// therefore over e, over kg, and ACROSS LANE GROUPS -- i.e. __shfl_xor with
+// offsets 16 and 32. (Offsets 1,2,4,8 would reduce across queries: wrong axis.)
+//
+// LDS: sK[D][64] + sV[D][64] = 32KB (D=128), 16KB (D=64).
+// ---------------------------------------------------------------------------
 
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
@@ -53,67 +77,78 @@ __device__ void flash2_fwd_body(const __half* __restrict__ ptr_q,
                                 int o_stride_batch, int o_stride_head, int o_stride_seq)
 {
     using namespace rocwmma;
-    using fq = fragment<matrix_a,    16, 16, 16, __half, row_major>;
-    using fk = fragment<matrix_b,    16, 16, 16, __half, col_major>;
-    using fs = fragment<accumulator, 16, 16, 16, float>;
 
-    const int qi_blk   = blockIdx.x, b = blockIdx.y, hq = blockIdx.z;
-    const int lane      = threadIdx.x;
-    const int hk        = (num_heads_k == num_heads_q) ? hq : hq / (num_heads_q / num_heads_k);
-    const int qi_base   = qi_blk * 64;
-    const int qi_max    = qi_base + 63;
-    const int my_eg     = lane / 16;
-    const int my_e_base = my_eg * 4;
-    const int my_kcol   = lane % 16;
+    // K as matrix_a: A[row=key][k=d] read from sK[d][key] => col_major, ld=64.
+    using fk_a = fragment<matrix_a, 16, 16, 16, __half, col_major>;
+    // Q^T as matrix_b: B[k=d][col=query] read from Q[query][d] => col_major, ld=q_stride_seq.
+    using fq_b = fragment<matrix_b, 16, 16, 16, __half, col_major>;
+    // V^T as matrix_a: A[row=d][k=key] read from sV[d][key] => row_major, ld=64.
+    using fv_a = fragment<matrix_a, 16, 16, 16, __half, row_major>;
+    // P^T as matrix_b: filled in-register from the S^T accumulator (layout tag unused).
+    using fp_b = fragment<matrix_b, 16, 16, 16, __half, col_major>;
+    using facc = fragment<accumulator, 16, 16, 16, float>;
 
-    union KP { __half k[D][64]; float p[64][16]; };
-    __shared__ KP kp;
+    const int qi_blk = blockIdx.x, b = blockIdx.y, hq = blockIdx.z;
+    const int lane   = threadIdx.x;
+    const int hk     = (num_heads_k == num_heads_q) ? hq : hq / (num_heads_q / num_heads_k);
+    const int qi_base = qi_blk * 64;
+    const int qi_max  = qi_base + 63;
+
+    // Register-layout roles for this lane.
+    const int my_qcol   = lane % 16;        // query column owned by this lane
+    const int my_e_base = (lane / 16) * 4;  // base index along the (l/16)*4+e axis
+
+    __shared__ __half sK[D][64];
     __shared__ __half sV[D][64];
-    __shared__ float  so[64][D];
 
-    __half (*sK)[64] = kp.k;
-    float  (*sP)[16] = kp.p;
-
-    // Load Q
-    fq q_frags[4][D16];
+    // ---- Load Q^T fragments once (matrix_b, straight from global) ----------
+    fq_b q_frags[4][D16];
     const __half* Qp = ptr_q + (size_t)b * q_stride_batch + (size_t)hq * q_stride_head
                        + (size_t)qi_base * q_stride_seq;
     for(int qg = 0; qg < 4; qg++)
         for(int d16 = 0; d16 < D16; d16++)
         {
-            if(qi_base + qg * 16 < seq_len_q)
+            if(qi_base + qg * 16 + 15 < seq_len_q)
                 load_matrix_sync(q_frags[qg][d16],
-                                 Qp + (size_t)qg * 16 * q_stride_seq + d16 * 16, q_stride_seq);
+                                 Qp + (size_t)qg * 16 * q_stride_seq + d16 * 16,
+                                 q_stride_seq);
             else
+            {
+                // Partial tile: zero-fill, then fill valid columns element-wise.
                 fill_fragment(q_frags[qg][d16], __half(0));
+                const int qrow = qi_base + qg * 16 + my_qcol;
+                if(qrow < seq_len_q)
+                    for(int e = 0; e < 4; e++)
+                        q_frags[qg][d16].x[e] =
+                            Qp[(size_t)(qg * 16 + my_qcol) * q_stride_seq + d16 * 16
+                               + my_e_base + e];
+            }
         }
 
-    // o_acc[qg][d16][e] = O[qg*16+my_e_base+e][d16*16+my_kcol]
-    float o_acc[4][D16][4];
+    // ---- O^T accumulators: C[row=d][col=query] -----------------------------
+    facc o_acc[4][D16];
     for(int qg = 0; qg < 4; qg++)
-        for(int d16 = 0; d16 < D16; d16++)
-            for(int e = 0; e < 4; e++) o_acc[qg][d16][e] = 0.f;
+        for(int d16 = 0; d16 < D16; d16++) fill_fragment(o_acc[qg][d16], 0.f);
 
-    // Per-lane running max and normalizer
-    float row_m[4][4], row_d[4][4];
-    for(int qg = 0; qg < 4; qg++)
-        for(int e = 0; e < 4; e++) { row_m[qg][e] = -1e38f; row_d[qg][e] = 0.f; }
+    // Per-lane online softmax state: one query column (my_qcol) per qg.
+    float row_m[4], row_d[4];
+    for(int qg = 0; qg < 4; qg++) { row_m[qg] = -1e38f; row_d[qg] = 0.f; }
 
     for(int kb = 0; kb < (seq_len_kv + 63) / 64; kb++)
     {
-        const int ki0        = kb * 64;
+        const int  ki0       = kb * 64;
         if(causal && ki0 > qi_max) break;
         const bool full_tile = (!causal) || (ki0 + 63 <= qi_base);
 
-        // Load K, V
+        // ---- Stage K and V tiles (transposed: [d][key]) --------------------
         const int ki_g = ki0 + lane;
         if(ki_g < seq_len_kv)
         {
-            const __half* kp2 = ptr_k + (size_t)b * k_stride_batch + (size_t)hk * k_stride_head
-                                 + (size_t)ki_g * k_stride_seq;
-            const __half* vp  = ptr_v + (size_t)b * v_stride_batch + (size_t)hk * v_stride_head
-                                 + (size_t)ki_g * v_stride_seq;
-            for(int d = 0; d < D; d++) { sK[d][lane] = kp2[d]; sV[d][lane] = vp[d]; }
+            const __half* kp = ptr_k + (size_t)b * k_stride_batch + (size_t)hk * k_stride_head
+                               + (size_t)ki_g * k_stride_seq;
+            const __half* vp = ptr_v + (size_t)b * v_stride_batch + (size_t)hk * v_stride_head
+                               + (size_t)ki_g * v_stride_seq;
+            for(int d = 0; d < D; d++) { sK[d][lane] = kp[d]; sV[d][lane] = vp[d]; }
         }
         else
         {
@@ -121,140 +156,107 @@ __device__ void flash2_fwd_body(const __half* __restrict__ ptr_q,
         }
         __syncthreads();
 
-        // S = Q * K^T  (accumulator registers - not general VGPRs)
-        fs sf[4][4];
-        for(int qg = 0; qg < 4; qg++)
-            for(int kg = 0; kg < 4; kg++) fill_fragment(sf[qg][kg], 0.f);
-        for(int qg = 0; qg < 4; qg++)
-            for(int kg = 0; kg < 4; kg++)
-                for(int d16 = 0; d16 < D16; d16++)
-                {
-                    fk kf;
-                    load_matrix_sync(kf, &sK[d16 * 16][kg * 16], 64);
-                    mma_sync(sf[qg][kg], q_frags[qg][d16], kf, sf[qg][kg]);
-                }
-        // sK no longer needed -- kp transitions to sP
-
-        // Pass 1: compute per-lane tile max from sf directly (no score[] storage)
-        float tile_m[4][4];
-        for(int qg = 0; qg < 4; qg++)
-            for(int e = 0; e < 4; e++) tile_m[qg][e] = -1e38f;
-        for(int qg = 0; qg < 4; qg++)
-            for(int kg = 0; kg < 4; kg++)
-                for(int e = 0; e < 4; e++)
-                {
-                    float s = sf[qg][kg].x[e] * scale;
-                    if(!full_tile && (ki0 + kg * 16 + my_kcol) > (qi_base + qg * 16 + my_e_base + e))
-                        s = -1e38f;
-                    if(ki0 + kg * 16 + my_kcol >= seq_len_kv) s = -1e38f;
-                    sf[qg][kg].x[e] = s;   // overwrite with masked scaled score (in accum regs)
-                    tile_m[qg][e]   = fmaxf(tile_m[qg][e], s);
-                }
-
-        // Pass 2: tile global max across all 16 lanes sharing each (qg,e) query row
-        float tile_gm[4][4];
-        for(int qg = 0; qg < 4; qg++)
-            for(int e = 0; e < 4; e++)
-            {
-                float gm = tile_m[qg][e];
-                gm = fmaxf(gm, __shfl_xor(gm, 1));
-                gm = fmaxf(gm, __shfl_xor(gm, 2));
-                gm = fmaxf(gm, __shfl_xor(gm, 4));
-                gm = fmaxf(gm, __shfl_xor(gm, 8));
-                tile_gm[qg][e] = gm;
-            }
-
-        // Rescale previous o_acc and row_d with new tile global max
-        for(int qg = 0; qg < 4; qg++)
-            for(int e = 0; e < 4; e++)
-            {
-                const float new_m = fmaxf(row_m[qg][e], tile_gm[qg][e]);
-                const float br    = flash2_expf(row_m[qg][e] - new_m);
-                row_m[qg][e]      = new_m;  // now == tile_gm for all lanes
-                for(int d16 = 0; d16 < D16; d16++) o_acc[qg][d16][e] *= br;
-                row_d[qg][e] *= br;
-            }
-
-        // Pass 3: per-kg: compute pv from sf (score already masked+scaled in accum regs),
-        //   write sP, sync, accumulate O from sP×sV, sync.
+        // ---- GEMM 1: S^T = K * Q^T  (MFMA) --------------------------------
+        // st[kg][qg].x[e] = S^T[key = ki0+kg*16+my_e_base+e][query = qi_base+qg*16+my_qcol]
+        facc st[4][4];
         for(int kg = 0; kg < 4; kg++)
-        {
-            for(int qg = 0; qg < 4; qg++)
-                for(int e = 0; e < 4; e++)
-                {
-                    // row_m[qg][e] == tile_gm[qg][e] for all lanes (broadcast via shfl_xor)
-                    float s  = sf[qg][kg].x[e];  // masked scaled score (or -1e38)
-                    float pv = (s > -1e30f) ? flash2_expf(s - row_m[qg][e]) : 0.f;
-                    row_d[qg][e] += pv;
-                    sP[my_eg * 16 + qg * 4 + e][my_kcol] = pv;
-                }
-            __syncthreads();
+            for(int qg = 0; qg < 4; qg++) fill_fragment(st[kg][qg], 0.f);
+        for(int kg = 0; kg < 4; kg++)
+            for(int d16 = 0; d16 < D16; d16++)
+            {
+                fk_a kf;
+                load_matrix_sync(kf, &sK[d16 * 16][kg * 16], 64);
+                for(int qg = 0; qg < 4; qg++)
+                    mma_sync(st[kg][qg], kf, q_frags[qg][d16], st[kg][qg]);
+            }
 
+        // ---- Scale + mask in place; per-lane tile max over keys ------------
+        float tile_m[4];
+        for(int qg = 0; qg < 4; qg++) tile_m[qg] = -1e38f;
+        for(int kg = 0; kg < 4; kg++)
             for(int qg = 0; qg < 4; qg++)
                 for(int e = 0; e < 4; e++)
                 {
-                    int sp_row = my_eg * 16 + qg * 4 + e;
-                    for(int d16 = 0; d16 < D16; d16++)
-                    {
-                        float acc = 0.f;
-                        for(int kc = 0; kc < 16; kc++)
-                            acc += sP[sp_row][kc]
-                                   * __half2float(sV[d16 * 16 + my_kcol][kg * 16 + kc]);
-                        o_acc[qg][d16][e] += acc;
-                    }
+                    const int key   = ki0 + kg * 16 + my_e_base + e;
+                    const int query = qi_base + qg * 16 + my_qcol;
+                    float     s     = st[kg][qg].x[e] * scale;
+                    if(key >= seq_len_kv)          s = -1e38f;
+                    if(!full_tile && key > query)  s = -1e38f;
+                    st[kg][qg].x[e] = s;
+                    tile_m[qg]      = fmaxf(tile_m[qg], s);
                 }
-            __syncthreads();
+
+        // ---- Reduce the max ACROSS LANE GROUPS (keys), not across queries --
+        for(int qg = 0; qg < 4; qg++)
+        {
+            float gm = tile_m[qg];
+            gm = fmaxf(gm, __shfl_xor(gm, 16));
+            gm = fmaxf(gm, __shfl_xor(gm, 32));
+            tile_m[qg] = gm;
         }
-        // sP writes complete; next iteration may load new sK into kp.k
+
+        // ---- Rescale running state to the new max --------------------------
+        for(int qg = 0; qg < 4; qg++)
+        {
+            const float new_m = fmaxf(row_m[qg], tile_m[qg]);
+            const float br    = (row_m[qg] <= -1e30f) ? 0.f : flash2_expf(row_m[qg] - new_m);
+            row_m[qg] = new_m;
+            row_d[qg] *= br;
+            for(int d16 = 0; d16 < D16; d16++)
+                for(int e = 0; e < 4; e++) o_acc[qg][d16].x[e] *= br;
+        }
+
+        // ---- P^T in-register: exp() on the S^T accumulator -----------------
+        // The accumulator register mapping IS the matrix_b mapping, so this is
+        // a pure element-wise conversion: no shuffle, no LDS, no transpose.
+        fp_b pf[4][4];
+        for(int kg = 0; kg < 4; kg++)
+            for(int qg = 0; qg < 4; qg++)
+                for(int e = 0; e < 4; e++)
+                {
+                    const float s  = st[kg][qg].x[e];
+                    const float pv = (s > -1e30f) ? flash2_expf(s - row_m[qg]) : 0.f;
+                    pf[kg][qg].x[e] = (_Float16)pv;
+                    row_d[qg]      += pv;
+                }
+
+        // ---- GEMM 2: O^T += V^T * P^T  (MFMA) ------------------------------
+        for(int kg = 0; kg < 4; kg++)
+            for(int d16 = 0; d16 < D16; d16++)
+            {
+                fv_a vf;
+                load_matrix_sync(vf, &sV[d16 * 16][kg * 16], 64);
+                for(int qg = 0; qg < 4; qg++)
+                    mma_sync(o_acc[qg][d16], vf, pf[kg][qg], o_acc[qg][d16]);
+            }
+        __syncthreads();
     }
 
-    // Final reduction: row_m already == tile_gm for all lanes (same value)
-    // so shfl_xor max reduction is a no-op (br=1). Sum row_d.
+    // ---- Finalize: sum the normalizer across lane groups -------------------
     for(int qg = 0; qg < 4; qg++)
-        for(int e = 0; e < 4; e++)
-        {
-            float gm = row_m[qg][e];
-            gm = fmaxf(gm, __shfl_xor(gm, 1));
-            gm = fmaxf(gm, __shfl_xor(gm, 2));
-            gm = fmaxf(gm, __shfl_xor(gm, 4));
-            gm = fmaxf(gm, __shfl_xor(gm, 8));
-            const float br = flash2_expf(row_m[qg][e] - gm);
-            for(int d16 = 0; d16 < D16; d16++) o_acc[qg][d16][e] *= br;
-            row_d[qg][e] *= br;
-            row_d[qg][e] += __shfl_xor(row_d[qg][e], 1);
-            row_d[qg][e] += __shfl_xor(row_d[qg][e], 2);
-            row_d[qg][e] += __shfl_xor(row_d[qg][e], 4);
-            row_d[qg][e] += __shfl_xor(row_d[qg][e], 8);
-        }
+    {
+        row_d[qg] += __shfl_xor(row_d[qg], 16);
+        row_d[qg] += __shfl_xor(row_d[qg], 32);
+    }
 
-    // Normalize and write
+    // ---- Normalize and write O straight to global --------------------------
+    // Lane l owns query column my_qcol and head-dim indices my_e_base + e,
+    // so each lane stores 4 contiguous __half per (qg, d16).
     for(int qg = 0; qg < 4; qg++)
-        for(int e = 0; e < 4; e++)
-        {
-            const float inv     = (row_d[qg][e] > 0.f) ? 1.f / row_d[qg][e] : 0.f;
-            const int row_in_so = qg * 16 + my_e_base + e;
-            for(int d16 = 0; d16 < D16; d16++)
-                so[row_in_so][d16 * 16 + my_kcol] = o_acc[qg][d16][e] * inv;
-        }
-    __syncthreads();
-
-    for(int qg = 0; qg < 4; qg++)
-        for(int e = 0; e < 4; e++)
-        {
-            const int oq = qi_base + qg * 16 + my_e_base + e;
-            if(oq < seq_len_q)
-            {
-                __half* op = ptr_o + (size_t)b * o_stride_batch
-                             + (size_t)hq * o_stride_head + (size_t)oq * o_stride_seq;
-                for(int k = 0; k < D16; k++)
-                    op[my_kcol + k * 16] =
-                        __float2half(so[qg * 16 + my_e_base + e][my_kcol + k * 16]);
-            }
-        }
+    {
+        const int oq = qi_base + qg * 16 + my_qcol;
+        if(oq >= seq_len_q) continue;
+        const float inv = (row_d[qg] > 0.f) ? 1.f / row_d[qg] : 0.f;
+        __half* op = ptr_o + (size_t)b * o_stride_batch + (size_t)hq * o_stride_head
+                     + (size_t)oq * o_stride_seq;
+        for(int d16 = 0; d16 < D16; d16++)
+            for(int e = 0; e < 4; e++)
+                op[d16 * 16 + my_e_base + e] = __float2half(o_acc[qg][d16].x[e] * inv);
+    }
 }
 
 extern "C" __global__
-    __launch_bounds__(64, 1) void flash2_v7_hipdnn_d128(
+    __launch_bounds__(64, 2) void flash2_v7_hipdnn_d128(
         const __half* __restrict__ ptr_q, const __half* __restrict__ ptr_k,
         const __half* __restrict__ ptr_v, __half* __restrict__ ptr_o,
         int batch, int num_heads_q, int num_heads_k,
@@ -273,7 +275,7 @@ extern "C" __global__
 }
 
 extern "C" __global__
-    __launch_bounds__(64, 1) void flash2_v7_hipdnn_d64(
+    __launch_bounds__(64, 2) void flash2_v7_hipdnn_d64(
         const __half* __restrict__ ptr_q, const __half* __restrict__ ptr_k,
         const __half* __restrict__ ptr_v, __half* __restrict__ ptr_o,
         int batch, int num_heads_q, int num_heads_k,
