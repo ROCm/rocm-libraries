@@ -167,6 +167,21 @@ hardware/*.def  -->  TableGen  -->  generated .inc files
 
 See [docs/](docs/README.md) for detailed documentation including user guides, developer guides, and design documents.
 
+## Claude Code skills
+
+This directory ships a Claude Code skill under `.claude/skills/`:
+
+- **stinkytofu-guide** — read-only advisor that locates where a feature lives in the
+  StinkyTofu source and recommends where/how to add a new one, grounded in the actual
+  code (not docs). It surfaces the "does this affect scheduling?" question before
+  suggesting a new pass, and enforces design constraints (new architectures via `.def`
+  only, register passes in `stinkytofu-opt`, prefer peephole patterns, skip pseudo-PHIs,
+  and expose any new option through both the Python API and stinkytofu-opt).
+
+Claude Code only discovers skills in `<cwd>/.claude/skills/` and `~/.claude/skills/`, so
+**launch Claude Code from this `shared/stinkytofu/` directory** for `/stinkytofu-guide`
+to be available.
+
 ## License
 
 This project is licensed under the MIT License. See [LICENSE.md](LICENSE.md) for details.
