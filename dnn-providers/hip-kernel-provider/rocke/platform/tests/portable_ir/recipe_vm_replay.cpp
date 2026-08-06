@@ -171,6 +171,22 @@ void check_rejected(const char* recipe,
     check(std::string(err).find(want) != std::string::npos, want);
 }
 
+void check_replayed(const char* recipe,
+                    const char* label,
+                    const rocke_recipe_spec_str_t* strs = nullptr,
+                    int n_strs = 0)
+{
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* kernel = nullptr;
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    const rocke_status_t st = rocke_recipe_run_from_json(
+        recipe, nullptr, 0, strs, n_strs, &b, &kernel, err, sizeof(err));
+    check(st == ROCKE_OK && kernel != nullptr, label);
+    if(st == ROCKE_OK)
+        rocke_ir_builder_free(&b);
+}
+
 void check_lowered_results(const char* recipe, int expected_results, const char* label)
 {
     rocke_ir_builder_t b;
@@ -235,6 +251,22 @@ void check_bad_param_attrs(const char* attrs, const char* want, const char* labe
   ]
 })json";
     check_rejected(recipe.c_str(), want, label);
+}
+
+std::string scf_for_recipe(const char* flags)
+{
+    std::string recipe = R"json({
+  "schema":"rocke.recipe/v1", "kernel_name_fmt":"loop", "spec":[], "program":[
+    {"op":"const_i32","bind":"lo","val":0}, {"op":"const_i32","bind":"hi","val":1},
+    {"op":"const_i32","bind":"step","val":1},
+    {"op":"scf_for","iv":"iv","lo":"lo","hi":"hi","step":"step",
+)json";
+    recipe += flags;
+    recipe += R"json(     "iter":[],"results":[],"body":[]},
+    {"op":"ret"}
+  ]
+})json";
+    return recipe;
 }
 
 void check_long_name(const char* recipe, size_t minimum_length)
@@ -309,6 +341,52 @@ const char* kLongKernelName = R"json({
 const char* kSpecRecipe = R"json({
   "schema":"rocke.recipe/v1", "kernel_name_fmt":"bad",
   "spec":[{"name":"D","kind":"int"}], "program":[{"op":"ret"}]
+})json";
+
+const char* kUnknownStringSpec = R"json({
+  "schema":"rocke.recipe/v1", "kernel_name_fmt":"bad", "spec":[], "program":[
+    {"op":"static_if","pred":{"spec_str_eq":["typo","f16"]},"then":[],"else":[]}
+  ]
+})json";
+
+const char* kNonStringSpecName = R"json({
+  "schema":"rocke.recipe/v1", "kernel_name_fmt":"bad", "spec":[], "program":[
+    {"op":"static_if","pred":{"spec_str_eq":[7,"f16"]},"then":[],"else":[]}
+  ]
+})json";
+
+const char* kNonStringSpecLiteral = R"json({
+  "schema":"rocke.recipe/v1", "kernel_name_fmt":"bad", "spec":[], "program":[
+    {"op":"static_if","pred":{"spec_str_eq":["dtype",7]},"then":[],"else":[]}
+  ]
+})json";
+
+const char* kStringSpecTrue = R"json({
+  "schema":"rocke.recipe/v1", "kernel_name_fmt":"true",
+  "spec":[{"name":"dtype","kind":"str"}], "program":[
+    {"op":"static_if","pred":{"spec_str_eq":["dtype","f16"]},
+     "then":[{"op":"ret"}],"else":[{"op":"unknown"}]}
+  ]
+})json";
+
+const char* kStringSpecFalse = R"json({
+  "schema":"rocke.recipe/v1", "kernel_name_fmt":"false",
+  "spec":[{"name":"dtype","kind":"str"}], "program":[
+    {"op":"static_if","pred":{"spec_str_eq":["dtype","f16"]},
+     "then":[{"op":"unknown"}],"else":[{"op":"ret"}]}
+  ]
+})json";
+
+const char* kNonNumericConstF32 = R"json({
+  "schema":"rocke.recipe/v1", "kernel_name_fmt":"bad", "spec":[], "program":[
+    {"op":"const_f32","bind":"x","fval":"zero"}
+  ]
+})json";
+
+const char* kMissingConstF32 = R"json({
+  "schema":"rocke.recipe/v1", "kernel_name_fmt":"bad", "spec":[], "program":[
+    {"op":"const_f32","bind":"x"}
+  ]
 })json";
 
 const char* kBadOperands = R"json({
@@ -445,6 +523,22 @@ int main()
     check_rejected(kSpecRecipe, "exactly one int", "duplicate runtime spec rejected", duplicate_specs, 2);
     check_rejected(kSpecRecipe, "undeclared runtime int", "extra runtime spec rejected", extra_specs, 2);
 
+    // String predicates require two string operands and a declared runtime spec.
+    // Valid comparisons still select both their true and false arms normally.
+    check_rejected(kUnknownStringSpec,
+                   "unknown spec string 'typo'",
+                   "unknown string spec predicate rejected");
+    check_rejected(kNonStringSpecName,
+                   "spec_str_eq requires exactly two strings",
+                   "non-string spec predicate name rejected");
+    check_rejected(kNonStringSpecLiteral,
+                   "spec_str_eq requires exactly two strings",
+                   "non-string spec predicate literal rejected");
+    const rocke_recipe_spec_str_t dtype_f16[] = {{"dtype", "f16"}};
+    const rocke_recipe_spec_str_t dtype_f32[] = {{"dtype", "f32"}};
+    check_replayed(kStringSpecTrue, "true string spec predicate replays", dtype_f16, 1);
+    check_replayed(kStringSpecFalse, "false string spec predicate replays", dtype_f32, 1);
+
     // Malformed collections, attributes, and format names fail at the schema
     // boundary instead of becoming an empty list/default value/truncated name.
     check_rejected(kBadOperands, "register list must be an array", "bad operand list rejected");
@@ -452,6 +546,27 @@ int main()
     check_rejected(kBadAttr, "float value is not numeric", "bad scalar attr rejected");
     check_rejected(kBadKernelAttrsShape, "attrs must be an object", "bad kernel attrs shape rejected");
     check_rejected(kBadRegisterPlaceholder, "unterminated register", "bad register format rejected");
+    check_rejected(kNonNumericConstF32,
+                   "const_f32 fval must be numeric",
+                   "non-numeric const_f32 rejected");
+    check_rejected(kMissingConstF32,
+                   "const_f32 fval must be numeric",
+                   "missing const_f32 fval rejected");
+
+    // Optional loop flags retain their defaults when absent and accept booleans,
+    // but other JSON kinds are not silently interpreted through the bool union member.
+    const std::string default_loop = scf_for_recipe("");
+    const std::string flagged_loop
+        = scf_for_recipe("     \"unroll\":true,\"elide_trailing_barrier\":false,\n");
+    const std::string bad_unroll = scf_for_recipe("     \"unroll\":1,\n");
+    const std::string bad_elide
+        = scf_for_recipe("     \"elide_trailing_barrier\":\"yes\",\n");
+    check_replayed(default_loop.c_str(), "scf_for defaults replay");
+    check_replayed(flagged_loop.c_str(), "boolean scf_for flags replay");
+    check_rejected(bad_unroll.c_str(), "scf_for unroll must be boolean", "bad unroll rejected");
+    check_rejected(bad_elide.c_str(),
+                   "scf_for elide_trailing_barrier must be boolean",
+                   "bad trailing-barrier flag rejected");
 
     // Parameter attrs use an unwrapped schema, unlike typed op/kernel attrs, but
     // their container and known values still need exact kinds and valid ranges.

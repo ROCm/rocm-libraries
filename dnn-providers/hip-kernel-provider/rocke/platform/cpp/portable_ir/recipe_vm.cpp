@@ -290,11 +290,23 @@ static long rv_int(rvm_t* vm, const jd_val_t* e)
         }
         /* spec_str_eq: ["specname","literal"] -> 1 if the spec string matches. */
         const jd_val_t* sse = rocke_jget(e, "spec_str_eq");
-        if(sse && sse->kind == JD_ARR && sse->arr_len == 2)
+        if(sse)
         {
-            const char* sv = rv_spec_str(vm, rocke_jstr(sse->arr[0]));
+            if(sse->kind != JD_ARR || sse->arr_len != 2 || sse->arr[0]->kind != JD_STR
+               || sse->arr[1]->kind != JD_STR)
+            {
+                rv_fail(vm, "spec_str_eq requires exactly two strings");
+                return 0;
+            }
+            const char* spec_name = rocke_jstr(sse->arr[0]);
+            const char* sv = rv_spec_str(vm, spec_name);
             const char* lit = rocke_jstr(sse->arr[1]);
-            return (sv && lit && strcmp(sv, lit) == 0) ? 1 : 0;
+            if(!sv)
+            {
+                rv_fail(vm, "unknown spec string '%s'", spec_name);
+                return 0;
+            }
+            return strcmp(sv, lit) == 0 ? 1 : 0;
         }
         /* Binary arithmetic + comparisons: {"<op>":[e,e]}. */
         static const char* ops[]
@@ -879,7 +891,11 @@ static void rv_exec_instr(rvm_t* vm, const jd_val_t* instr)
     if(strcmp(op, "const_f32") == 0)
     {
         double d = 0;
-        rocke_jnum(rocke_jget(instr, "fval"), &d);
+        if(!rocke_jnum(rocke_jget(instr, "fval"), &d))
+        {
+            rv_fail(vm, "const_f32 fval must be numeric");
+            return;
+        }
         rocke_value_t* v = rocke_b_const_f32(vm->b, d);
         const char* b = rv_bind_name(vm, instr, "c");
         rv_name(vm, v, b);
@@ -968,6 +984,18 @@ static void rv_exec_instr(rvm_t* vm, const jd_val_t* instr)
             rv_fail(vm, "scf_for needs lo/hi/step/iv");
             return;
         }
+        const jd_val_t* un = rocke_jget(instr, "unroll");
+        const jd_val_t* el = rocke_jget(instr, "elide_trailing_barrier");
+        if(un && un->kind != JD_BOOL)
+        {
+            rv_fail(vm, "scf_for unroll must be boolean");
+            return;
+        }
+        if(el && el->kind != JD_BOOL)
+        {
+            rv_fail(vm, "scf_for elide_trailing_barrier must be boolean");
+            return;
+        }
         rv_names_t inames = {0}, iinits = {0}, results = {0};
         rv_expand_list(vm, rocke_jget(instr, "iter"), &inames, &iinits);
         rv_expand_list(vm, rocke_jget(instr, "results"), &results, NULL);
@@ -991,8 +1019,6 @@ static void rv_exec_instr(rvm_t* vm, const jd_val_t* instr)
             free(results.a);
             return;
         }
-        const jd_val_t* un = rocke_jget(instr, "unroll");
-        const jd_val_t* el = rocke_jget(instr, "elide_trailing_barrier");
         rocke_for_t f = rocke_b_scf_for_iter(
             vm->b, lo, hi, step, ia, n_iter, iv, un ? un->b : false, el ? el->b : true);
         if(!rocke_ir_builder_ok(vm->b))
