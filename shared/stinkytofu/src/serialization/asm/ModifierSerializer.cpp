@@ -116,6 +116,58 @@ std::string vectorToString(const std::vector<int>& vec) {
     return result;
 }
 
+std::string stringVectorToBracketForm(const std::vector<std::string>& vec) {
+    std::string result = "[";
+    for (size_t i = 0; i < vec.size(); ++i) {
+        if (i > 0) result += ',';
+        result += '"';
+        for (char c : vec[i]) {
+            if (c == '\\' || c == '"') result += '\\';
+            result += c;
+        }
+        result += '"';
+    }
+    result += "]";
+    return result;
+}
+
+/// Parse `["a","b"]` with minimal escape support (matches stringVectorToBracketForm).
+std::vector<std::string> parseStringVectorBracket(const std::string& s) {
+    std::vector<std::string> out;
+    size_t pos = 0;
+    while (pos < s.size() && (s[pos] == ' ' || s[pos] == '\t')) ++pos;
+    if (pos >= s.size() || s[pos] != '[') return out;
+    ++pos;
+    for (;;) {
+        while (pos < s.size() && (s[pos] == ' ' || s[pos] == '\t' || s[pos] == ',')) ++pos;
+        if (pos < s.size() && s[pos] == ']') return out;
+        if (pos >= s.size()) return {};
+        if (s[pos] != '"') return {};
+        ++pos;
+        std::string token;
+        while (pos < s.size()) {
+            char c = s[pos++];
+            if (c == '\\') {
+                if (pos >= s.size()) return {};
+                token += s[pos++];
+                continue;
+            }
+            if (c == '"') break;
+            token += c;
+        }
+        out.push_back(std::move(token));
+        while (pos < s.size() && (s[pos] == ' ' || s[pos] == '\t')) ++pos;
+        if (pos < s.size() && s[pos] == ']') return out;
+        if (pos >= s.size() || s[pos] != ',') return {};
+        ++pos;
+    }
+}
+
+std::vector<std::string> getStrVector(const std::unordered_map<std::string, std::string>& m,
+                                      const std::string& key) {
+    return parseStringVectorBracket(getStr(m, key));
+}
+
 }  // anonymous namespace
 
 /*
@@ -398,6 +450,14 @@ bool serializeVisit(const MatrixFmtModifiers& mod, std::ostream& os) {
         sep();
         os << "scaleFmtB = \"" << matrixScaleFmtToStr(mod.scaleFmtB) << "\"";
     }
+    if (mod.scaleSelA != 0) {
+        sep();
+        os << "scaleSelA = " << mod.scaleSelA;
+    }
+    if (mod.scaleSelB != 0) {
+        sep();
+        os << "scaleSelB = " << mod.scaleSelB;
+    }
     os << " }";
     return true;
 }
@@ -415,6 +475,12 @@ bool serializeVisit(const LabelData& mod, std::ostream& os) {
     return true;
 }
 
+// CallTargetData
+bool serializeVisit(const CallTargetData& mod, std::ostream& os) {
+    os << ", mod.call_targets = { callees = " << stringVectorToBracketForm(mod.callees) << " }";
+    return true;
+}
+
 template <typename ModifierType, typename... Rest, unsigned Dummy = 0>
 bool serializeVisit(const Modifier& mod, std::ostream& os) {
     if (auto* modifier = dyn_cast<ModifierType>(&mod)) {
@@ -425,11 +491,11 @@ bool serializeVisit(const Modifier& mod, std::ostream& os) {
 }  // namespace
 
 bool ModifierSerializer::serialize(const Modifier& mod, std::ostream& os) {
-    return serializeVisit<DSModifiers, FLATModifiers, GLOBALModifiers, MUBUFModifiers,
-                          CacheScopeModifiers, SMEMModifiers, SDWAModifiers, DPPModifiers,
-                          VOP3Modifiers, VOP3PModifiers, True16Modifiers, EXEC, VCC, SWaitCntData,
-                          SWaitTensorCntData, SWaitStoreCntData, SDelayAluData, SWaitAluData,
-                          MFMAModifiers, MatrixFmtModifiers, MemTokenData, LabelData>(mod, os);
+    return serializeVisit<
+        DSModifiers, FLATModifiers, GLOBALModifiers, MUBUFModifiers, CacheScopeModifiers,
+        SMEMModifiers, SDWAModifiers, DPPModifiers, VOP3Modifiers, VOP3PModifiers, True16Modifiers,
+        EXEC, VCC, SWaitCntData, SWaitTensorCntData, SWaitStoreCntData, SDelayAluData, SWaitAluData,
+        MFMAModifiers, MatrixFmtModifiers, MemTokenData, LabelData, CallTargetData>(mod, os);
 }
 
 /*
@@ -515,6 +581,8 @@ void deserializeVisit(StinkyInstruction* inst, const std::string& attrKey,
             mod.scaleFmtA = parseMatrixScaleFmt(getStr(fields, "scaleFmtA"));
         if (fields.contains("scaleFmtB"))
             mod.scaleFmtB = parseMatrixScaleFmt(getStr(fields, "scaleFmtB"));
+        mod.scaleSelA = parseMatrixScaleSel(getStr(fields, "scaleSelA", "0"));
+        mod.scaleSelB = parseMatrixScaleSel(getStr(fields, "scaleSelB", "0"));
         inst->addModifier(mod);
     } else if (attrKey == "mod.delayalu") {
         auto toInstType = [](const std::string& s) {
@@ -567,6 +635,8 @@ void deserializeVisit(StinkyInstruction* inst, const std::string& attrKey,
     } else if (attrKey == "mod.label") {
         inst->addModifier(LabelData(getStr(fields, "label", ""),
                                     static_cast<uint16_t>(getInt(fields, "alignment", 1))));
+    } else if (attrKey == "mod.call_targets") {
+        inst->addModifier(CallTargetData(getStrVector(fields, "callees")));
     }
     // mod.sdwa, mod.vop3p, mod.true16: no deserialize support yet
 }
@@ -575,6 +645,8 @@ void deserializeVisit(StinkyInstruction* inst, const std::string& attrKey,
 
 void ModifierSerializer::deserialize(StinkyInstruction* inst, const ParsedModifierDict& modifiers) {
     for (const auto& [attrKey, fields] : modifiers) deserializeVisit(inst, attrKey, fields);
+    // Matrix data format is now known; apply any format-keyed hardware overrides.
+    inst->resolveMatrixFmtOverrides();
 }
 
 }  // namespace stinkytofu

@@ -506,9 +506,8 @@ struct tile_window_with_static_distribution
         using SFC_Ys   = typename Traits::SFC_Ys;
         static constexpr index_t YElementSize =
             typename Base::TileDstr{}.get_ys_to_d_descriptor().get_element_space_size();
-        static_assert(YElementSize % (Traits::PackedSize * Traits::ScalarPerVector) == 0);
-        using vectorized_tbuf =
-            array<vector_t, YElementSize / (Traits::PackedSize * Traits::ScalarPerVector)>;
+        static_assert(YElementSize % Traits::ScalarPerVector == 0);
+        using vectorized_tbuf = array<vector_t, YElementSize / Traits::ScalarPerVector>;
 
         constexpr auto tile_dstr = typename Base::TileDstr{};
 
@@ -534,10 +533,11 @@ struct tile_window_with_static_distribution
                 constexpr index_t d =
                     tile_dstr.get_ys_to_d_descriptor().calculate_offset(idx_ys_start) /
                     Traits::PackedSize;
-                static_assert(d % Traits::ScalarPerVector == 0);
+                static_assert(Traits::ScalarPerVector % Traits::PackedSize == 0);
+                static_assert(d % (Traits::ScalarPerVector / Traits::PackedSize) == 0);
 
                 this->get_bottom_tensor_view().template get_vectorized_elements_raw<vector_t>(
-                    dst_vec_tbuf.template at<d / Traits::ScalarPerVector>(),
+                    dst_vec_tbuf.template at<d / (Traits::ScalarPerVector / Traits::PackedSize)>(),
                     bottom_tensor_thread_coord,
                     0 /**/,
                     bool_constant<oob_conditional_check>{},
@@ -970,7 +970,7 @@ struct tile_window_with_static_distribution
                       "getCachelineSize() called with DataCachePrefetchKind::None; "
                       "prefetching must target L1 or L2");
         if constexpr(PrefetchKind == DataCachePrefetchKind::L1)
-            return 32; // L1 cacheline size in bytes for gfx125
+            return 128; // L1 cacheline size in bytes for gfx125
         else
             return 256; // L2 cacheline size in bytes for gfx125
     }
@@ -1006,10 +1006,10 @@ struct tile_window_with_static_distribution
                       // won't cover more calls
 
         const index_t bytes_per_x_step =
-            x_step * Traits::PackedSize * sizeof(typename Base::DataType);
+            (x_step * sizeof(typename Base::DataType)) / Traits::PackedSize;
 
         constexpr index_t cacheline_part_covered_by_prefetch_for_tdm =
-            raw_box_dim.at(number<0>{}) * sizeof(typename Base::DataType);
+            (raw_box_dim.at(number<0>{}) * sizeof(typename Base::DataType)) / Traits::PackedSize;
 
         const index_t additional_prefetches_covered =
             max(0,
@@ -1071,9 +1071,8 @@ struct tile_window_with_static_distribution
                 max(1,
                     static_cast<index_t>(
                         cacheline_size /
-                        (Traits::PackedSize *
-                         sizeof(typename Base::DataType)))); // prefetch every cacheline bytes in
-                                                             // packed element units
+                        sizeof(typename Base::DataType))); // prefetch every cacheline bytes; x is
+                                                           // already in packed-element units
             constexpr index_t num_lanes = get_warp_size();
 
             // Calculate how many lanes needed to cover one row
@@ -1111,7 +1110,7 @@ struct tile_window_with_static_distribution
                 [&](auto box_dim_idx) {
                     const index_t x =
                         x_lane_offset + box_dim_idx[I0] * lanes_per_row * col_prefetch_stride;
-                    index_t prefetch_offset = base_offset + x * Traits::PackedSize;
+                    index_t prefetch_offset = base_offset + x;
                     bool is_valid           = x < tensor_dims[0];
 
                     if constexpr(box_dim.size() > 1)
@@ -1161,12 +1160,12 @@ struct tile_window_with_static_distribution
             return 0;
 
         const index_t bytes_per_x_step =
-            x_step * Traits::PackedSize * sizeof(typename Base::DataType);
+            (x_step * sizeof(typename Base::DataType)) / Traits::PackedSize;
 
         // bytes covered by the full K extent of the window
         constexpr auto win_lengths = typename Base::WindowLengths{};
         constexpr index_t x_len_bytes =
-            win_lengths.at(number<1>{}) * sizeof(typename Base::DataType);
+            (win_lengths.at(number<1>{}) * sizeof(typename Base::DataType)) / Traits::PackedSize;
         // how many bytes the last cacheline extends past the window's K end
         constexpr index_t cacheline_overhang =
             (cacheline_size - x_len_bytes % cacheline_size) % cacheline_size;
@@ -1229,10 +1228,10 @@ struct tile_window_with_static_distribution
         tensor_dims[0] /= Traits::PackedSize;
 
         // Distribute cache-line prefetches across warp lanes
+        // x is already in packed-element units, so convert cacheline bytes -> packed elements
+        // using sizeof only (do not divide by PackedSize again).
         constexpr index_t col_prefetch_stride =
-            max(1,
-                static_cast<index_t>(cacheline_size /
-                                     (Traits::PackedSize * sizeof(typename Base::DataType))));
+            max(1, static_cast<index_t>(cacheline_size / sizeof(typename Base::DataType)));
         constexpr index_t num_lanes         = get_warp_size();
         constexpr index_t num_unique_x      = max(1, x_len / col_prefetch_stride);
         constexpr index_t lanes_per_row     = num_unique_x < num_lanes ? num_unique_x : num_lanes;
@@ -1821,7 +1820,21 @@ struct tile_window_with_static_distribution
     }
 
     private:
-    // Cached computation for global strides
+    // Cached computation for global strides.
+    //
+    // Per top-level dimension i, the stride is the byte (or PackedSize-scaled
+    // element) offset produced by stepping idx[i] from 0 to 1 with all other
+    // components held at 0. Querying the descriptor with a unit vector lets
+    // calculate_offset traverse the full transform chain (embed/pad/etc.),
+    // so the resulting strides reflect the actual layout that the caller
+    // baked into the tensor view -- including non-packed cases such as
+    // multi-head Q where stride[0] = h_q * hdim_q rather than the packed-
+    // default hdim_q, and padded GEMM operands where stride_a > K.
+    //
+    // The previous implementation derived strides from get_lengths() using
+    // a packed reverse-inclusive-scan, which silently fabricated wrong byte
+    // offsets for any non-packed view. The single-path read here costs N
+    // calculate_offset() calls on first use only, then uses the cache.
     CK_TILE_DEVICE auto get_cached_global_strides() const
     {
         if(!tensor_cache_initialized_)
@@ -1829,10 +1842,14 @@ struct tile_window_with_static_distribution
             using Traits = typename Base::Traits;
             const auto& glb_tensor_descriptor =
                 this->get_bottom_tensor_view().get_tensor_descriptor();
-            cached_global_strides_ = to_array<index_t, Base::NDimBottomTensor>(
-                transform_tuples([](auto x) { return max(x / Traits::PackedSize, index_t{1}); },
-                                 tuple_reverse(container_reverse_inclusive_scan(
-                                     glb_tensor_descriptor.get_lengths(), multiplies<>{}, 1))));
+            cached_global_strides_ = generate_array(
+                [&](auto i) {
+                    auto unit_vec   = make_zero_multi_index<Base::NDimBottomTensor>();
+                    unit_vec(i)     = 1;
+                    const index_t s = glb_tensor_descriptor.calculate_offset(unit_vec);
+                    return max(s / Traits::PackedSize, index_t{1});
+                },
+                number<Base::NDimBottomTensor>{});
             tensor_cache_initialized_ = true;
         }
 
