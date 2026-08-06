@@ -616,6 +616,60 @@ TEST(TestCudnnShimGraphNodes, SdpaFp8Mxfp8RecordsGraphNotSupported)
     expectGraphNotSupported(graph);
 }
 
+// sdpa_fp8_backward mirrors upstream's two overloads, which differ only in
+// tensor-arg count: 18 args -> 7 outputs (FP8), 17 -> 6 (MXFP8). Both the call
+// resolving and the output count are source compatibility, so pin both.
+TEST(TestCudnnShimGraphNodes, SdpaFp8BackwardFp8RecordsGraphNotSupported)
+{
+    fe::graph::Graph graph;
+    auto outputs = graph.sdpa_fp8_backward(nullptr,
+                                           nullptr,
+                                           nullptr,
+                                           nullptr,
+                                           nullptr,
+                                           nullptr,
+                                           nullptr,
+                                           nullptr,
+                                           nullptr,
+                                           nullptr,
+                                           nullptr,
+                                           nullptr,
+                                           nullptr,
+                                           nullptr,
+                                           nullptr,
+                                           nullptr,
+                                           nullptr,
+                                           nullptr,
+                                           fe::graph::SDPA_fp8_backward_attributes{});
+    EXPECT_EQ(outputs.size(), 7U);
+    expectGraphNotSupported(graph);
+}
+
+TEST(TestCudnnShimGraphNodes, SdpaFp8BackwardMxfp8RecordsGraphNotSupported)
+{
+    fe::graph::Graph graph;
+    auto outputs = graph.sdpa_fp8_backward(nullptr,
+                                           nullptr,
+                                           nullptr,
+                                           nullptr,
+                                           nullptr,
+                                           nullptr,
+                                           nullptr,
+                                           nullptr,
+                                           nullptr,
+                                           nullptr,
+                                           nullptr,
+                                           nullptr,
+                                           nullptr,
+                                           nullptr,
+                                           nullptr,
+                                           nullptr,
+                                           nullptr,
+                                           fe::graph::SDPA_fp8_backward_attributes{});
+    EXPECT_EQ(outputs.size(), 6U);
+    expectGraphNotSupported(graph);
+}
+
 // A fail-stub records at add time regardless of the built-up graph: even with a
 // valid tier-1 node already present, the recorded error wins at validate().
 TEST(TestCudnnShimGraphNodes, FailStubPoisonsAnOtherwiseValidGraph)
@@ -643,70 +697,148 @@ TEST(TestCudnnShimGraphNodes, FailStubPoisonsAnOtherwiseValidGraph)
     expectGraphNotSupported(graph);
 }
 
-// --- (c) All 39 attribute classes construct and chain .set_name -------------
+// The single-output fail-stub returns a live placeholder, not null: the
+// idiomatic ->set_output(...).set_uid(...) chain (which used to segfault) is
+// safe, and the recorded GRAPH_NOT_SUPPORTED still wins at validate().
+TEST(TestCudnnShimGraphNodes, ReshapeReturnsChainablePlaceholder)
+{
+    const int64_t n = 4;
+
+    fe::graph::Graph graph;
+    graph.set_io_data_type(fe::DataType_t::HALF).set_compute_data_type(fe::DataType_t::FLOAT);
+
+    auto input = graph.tensor(fe::graph::Tensor_attributes{}
+                                  .set_dim({n, n, n, n})
+                                  .set_stride({n * n * n, n * n, n, 1})
+                                  .set_uid(1));
+
+    auto out = graph.reshape(input, fe::graph::Reshape_attributes{});
+    ASSERT_NE(out, nullptr);
+    out->set_output(true).set_uid(2);
+
+    expectGraphNotSupported(graph);
+}
+
+// Every element of a multi-output fail-stub's returned array is a live
+// placeholder, so per-element chaining is safe before the error surfaces.
+TEST(TestCudnnShimGraphNodes, GenstatsReturnsChainablePlaceholders)
+{
+    const int64_t n = 4;
+
+    fe::graph::Graph graph;
+    graph.set_io_data_type(fe::DataType_t::HALF).set_compute_data_type(fe::DataType_t::FLOAT);
+
+    auto input = graph.tensor(fe::graph::Tensor_attributes{}
+                                  .set_dim({n, n, n, n})
+                                  .set_stride({n * n * n, n * n, n, 1})
+                                  .set_uid(1));
+
+    auto outs = graph.genstats(input, fe::graph::Genstats_attributes{});
+    int64_t uid = 2;
+    for(auto& out : outs)
+    {
+        ASSERT_NE(out, nullptr);
+        out->set_output(true).set_uid(uid++);
+    }
+
+    expectGraphNotSupported(graph);
+}
+
+// A wider multi-output shape: the 9-arg (FP8) sdpa_fp8 returns an array of four
+// live placeholders, each safe to chain before the error surfaces.
+TEST(TestCudnnShimGraphNodes, SdpaFp8ReturnsChainablePlaceholders)
+{
+    fe::graph::Graph graph;
+
+    auto outs = graph.sdpa_fp8(nullptr,
+                               nullptr,
+                               nullptr,
+                               nullptr,
+                               nullptr,
+                               nullptr,
+                               nullptr,
+                               nullptr,
+                               nullptr,
+                               fe::graph::SDPA_fp8_attributes{});
+    int64_t uid = 1;
+    for(auto& out : outs)
+    {
+        ASSERT_NE(out, nullptr);
+        out->set_output(true).set_uid(uid++);
+    }
+
+    expectGraphNotSupported(graph);
+}
+
+// --- (c) All 39 attribute classes construct and expose the universal surface -
 
 // Every cuDNN v9 *_attributes class — whether a 1:1 hipDNN alias, an SDPA alias,
 // or a fail-stub/attribute-only stub — must default-construct and expose the
-// universal fluent .set_name. A missing alias or stub fails to compile here.
+// universal fluent accessors (.set_name/.get_name,
+// .set_compute_data_type/.get_compute_data_type). A missing alias, stub, or
+// accessor fails to compile here.
 template <typename Attributes>
-void expectConstructsAndNames()
+void expectConstructsAndExposesUniversalSurface()
 {
     Attributes attributes;
     attributes.set_name("node");
     EXPECT_EQ(attributes.get_name(), "node");
+
+    attributes.set_compute_data_type(fe::DataType_t::FLOAT);
+    EXPECT_EQ(attributes.get_compute_data_type(), fe::DataType_t::FLOAT);
 }
 
-TEST(TestCudnnShimGraphNodes, AllAttributeClassesConstructAndName)
+TEST(TestCudnnShimGraphNodes, AllAttributeClassesExposeUniversalSurface)
 {
     // Tier-1 aliases (real hipDNN engine).
-    expectConstructsAndNames<fe::graph::Batchnorm_attributes>();
-    expectConstructsAndNames<fe::graph::Batchnorm_backward_attributes>();
-    expectConstructsAndNames<fe::graph::Batchnorm_inference_attributes>();
-    expectConstructsAndNames<fe::graph::Block_scale_dequantize_attributes>();
-    expectConstructsAndNames<fe::graph::Block_scale_quantize_attributes>();
-    expectConstructsAndNames<fe::graph::Conv_dgrad_attributes>();
-    expectConstructsAndNames<fe::graph::Conv_fprop_attributes>();
-    expectConstructsAndNames<fe::graph::Conv_wgrad_attributes>();
-    expectConstructsAndNames<fe::graph::Layernorm_attributes>();
-    expectConstructsAndNames<fe::graph::Layernorm_backward_attributes>();
-    expectConstructsAndNames<fe::graph::Matmul_attributes>();
-    expectConstructsAndNames<fe::graph::Pointwise_attributes>();
-    expectConstructsAndNames<fe::graph::Reduction_attributes>();
-    expectConstructsAndNames<fe::graph::Resample_attributes>();
-    expectConstructsAndNames<fe::graph::Rmsnorm_attributes>();
-    expectConstructsAndNames<fe::graph::Rmsnorm_backward_attributes>();
+    expectConstructsAndExposesUniversalSurface<fe::graph::Batchnorm_attributes>();
+    expectConstructsAndExposesUniversalSurface<fe::graph::Batchnorm_backward_attributes>();
+    expectConstructsAndExposesUniversalSurface<fe::graph::Batchnorm_inference_attributes>();
+    expectConstructsAndExposesUniversalSurface<fe::graph::Block_scale_dequantize_attributes>();
+    expectConstructsAndExposesUniversalSurface<fe::graph::Block_scale_quantize_attributes>();
+    expectConstructsAndExposesUniversalSurface<fe::graph::Conv_dgrad_attributes>();
+    expectConstructsAndExposesUniversalSurface<fe::graph::Conv_fprop_attributes>();
+    expectConstructsAndExposesUniversalSurface<fe::graph::Conv_wgrad_attributes>();
+    expectConstructsAndExposesUniversalSurface<fe::graph::Layernorm_attributes>();
+    expectConstructsAndExposesUniversalSurface<fe::graph::Layernorm_backward_attributes>();
+    expectConstructsAndExposesUniversalSurface<fe::graph::Matmul_attributes>();
+    expectConstructsAndExposesUniversalSurface<fe::graph::Pointwise_attributes>();
+    expectConstructsAndExposesUniversalSurface<fe::graph::Reduction_attributes>();
+    expectConstructsAndExposesUniversalSurface<fe::graph::Resample_attributes>();
+    expectConstructsAndExposesUniversalSurface<fe::graph::Rmsnorm_attributes>();
+    expectConstructsAndExposesUniversalSurface<fe::graph::Rmsnorm_backward_attributes>();
 
 #ifdef HIPDNN_ENABLE_SDPA
     // SDPA aliases (only present in an SDPA-enabled build).
-    expectConstructsAndNames<fe::graph::SDPA_attributes>();
-    expectConstructsAndNames<fe::graph::SDPA_backward_attributes>();
+    expectConstructsAndExposesUniversalSurface<fe::graph::SDPA_attributes>();
+    expectConstructsAndExposesUniversalSurface<fe::graph::SDPA_backward_attributes>();
 #endif
 
     // Tier-2 fail-stub attribute classes.
-    expectConstructsAndNames<fe::graph::BN_finalize_attributes>();
-    expectConstructsAndNames<fe::graph::Genstats_attributes>();
-    expectConstructsAndNames<fe::graph::DBN_weight_attributes>();
-    expectConstructsAndNames<fe::graph::Instancenorm_attributes>();
-    expectConstructsAndNames<fe::graph::Instancenorm_backward_attributes>();
-    expectConstructsAndNames<fe::graph::AdaLayernorm_attributes>();
-    expectConstructsAndNames<fe::graph::AdaLayernorm_backward_attributes>();
-    expectConstructsAndNames<fe::graph::Rng_attributes>();
-    expectConstructsAndNames<fe::graph::Reshape_attributes>();
-    expectConstructsAndNames<fe::graph::Transpose_attributes>();
-    expectConstructsAndNames<fe::graph::RoPE_attributes>();
-    expectConstructsAndNames<fe::graph::RoPE_backward_attributes>();
-    expectConstructsAndNames<fe::graph::SDPA_fp8_attributes>();
-    expectConstructsAndNames<fe::graph::SDPA_fp8_backward_attributes>();
-    expectConstructsAndNames<fe::graph::DiagonalBandMask_attributes>();
-    expectConstructsAndNames<fe::graph::Slice_attributes>();
-    expectConstructsAndNames<fe::graph::Concatenate_attributes>();
-    expectConstructsAndNames<fe::graph::Moe_grouped_matmul_attributes>();
-    expectConstructsAndNames<fe::graph::Moe_grouped_matmul_bwd_attributes>();
+    expectConstructsAndExposesUniversalSurface<fe::graph::BN_finalize_attributes>();
+    expectConstructsAndExposesUniversalSurface<fe::graph::Genstats_attributes>();
+    expectConstructsAndExposesUniversalSurface<fe::graph::DBN_weight_attributes>();
+    expectConstructsAndExposesUniversalSurface<fe::graph::Instancenorm_attributes>();
+    expectConstructsAndExposesUniversalSurface<fe::graph::Instancenorm_backward_attributes>();
+    expectConstructsAndExposesUniversalSurface<fe::graph::AdaLayernorm_attributes>();
+    expectConstructsAndExposesUniversalSurface<fe::graph::AdaLayernorm_backward_attributes>();
+    expectConstructsAndExposesUniversalSurface<fe::graph::Rng_attributes>();
+    expectConstructsAndExposesUniversalSurface<fe::graph::Reshape_attributes>();
+    expectConstructsAndExposesUniversalSurface<fe::graph::Transpose_attributes>();
+    expectConstructsAndExposesUniversalSurface<fe::graph::RoPE_attributes>();
+    expectConstructsAndExposesUniversalSurface<fe::graph::RoPE_backward_attributes>();
+    expectConstructsAndExposesUniversalSurface<fe::graph::SDPA_fp8_attributes>();
+    expectConstructsAndExposesUniversalSurface<fe::graph::SDPA_fp8_backward_attributes>();
+    expectConstructsAndExposesUniversalSurface<fe::graph::DiagonalBandMask_attributes>();
+    expectConstructsAndExposesUniversalSurface<fe::graph::Slice_attributes>();
+    expectConstructsAndExposesUniversalSurface<fe::graph::Concatenate_attributes>();
+    expectConstructsAndExposesUniversalSurface<fe::graph::Moe_grouped_matmul_attributes>();
+    expectConstructsAndExposesUniversalSurface<fe::graph::Moe_grouped_matmul_bwd_attributes>();
 
     // Attribute-only stubs (no Graph method): must still exist and chain.
-    expectConstructsAndNames<fe::graph::Matmul_fp8_attributes>();
-    expectConstructsAndNames<fe::graph::Softmax_attributes>();
-    expectConstructsAndNames<fe::graph::PagedCacheLoad_attributes>();
+    expectConstructsAndExposesUniversalSurface<fe::graph::Matmul_fp8_attributes>();
+    expectConstructsAndExposesUniversalSurface<fe::graph::Softmax_attributes>();
+    expectConstructsAndExposesUniversalSurface<fe::graph::PagedCacheLoad_attributes>();
 }
 
 } // namespace
