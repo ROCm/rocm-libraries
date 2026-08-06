@@ -1697,11 +1697,17 @@ class Solution(collections.abc.Mapping):
       # Overlap feasibility: the weave only weaves store-pairs with pair index >=
       # weaveLA. numStorePairs = MIWT0*MIWT1//2; at or below the threshold no pair
       # is woven, so PLSIN would be pure overhead. This reads the same
-      # TENSILE_WEAVE_LA override and the same "4" production default as the
+      # TENSILE_WEAVE_LA override and the same production default as the
       # scheduler (Components/Subtile/LogicalScheduler.py), so the gate and the
       # weave move together; pinning a separate constant here made the two
       # disagree whenever the override was set.
-      weaveLA = int(plsinDebugEnv("TENSILE_WEAVE_LA", "4"))
+      #
+      # The default 2 admits the numStorePairs==4 tiles (MT64x128 / MT128x64 /
+      # MT32x256 / MT256x32). Do NOT lower it to 0 to admit the numStorePairs==2
+      # tiles: 0 weaves nothing at all, so the already-eligible tiles lose their
+      # overlap (-2.2pp measured). Admitting those needs the weave depth decoupled
+      # from this threshold, not a lower threshold.
+      weaveLA = int(plsinDebugEnv("TENSILE_WEAVE_LA", "2"))
       overlapPossible = bool(miwt) and len(miwt) == 2 and \
                         (miwt[0] * miwt[1] // 2) > weaveLA
       streamKFixupSafe = True
