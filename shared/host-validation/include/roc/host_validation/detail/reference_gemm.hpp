@@ -21,11 +21,6 @@
 #include <vector>
 
 namespace roc::host_validation {
-enum class MathMode {
-    Default,
-    XFloat32,
-};
-
 enum class GemmBackend {
     Automatic,
     Canonical,
@@ -110,14 +105,6 @@ struct GemmRunOptions {
 };
 
 namespace detail {
-template <typename T>
-T conjugateIfNeeded(const T& value, bool conjugate) {
-    if constexpr (IsComplex<T>::value)
-        return conjugate ? std::conj(value) : value;
-    else
-        return value;
-}
-
 inline bool isRuntimeGemmAccumulator(ScalarType type) {
     switch (type) {
         case ScalarType::Float32:
@@ -131,56 +118,6 @@ inline bool isRuntimeGemmAccumulator(ScalarType type) {
         default:
             return false;
     }
-}
-
-template <typename Accumulator>
-class RuntimeQuantizer {
-   public:
-    RuntimeQuantizer() = default;
-
-    explicit RuntimeQuantizer(std::optional<ScalarType> type) {
-        if (!type) return;
-        m_load = runtimeLoadFunction<Accumulator>(*type);
-        m_store = runtimeStoreFunction<Accumulator>(*type);
-    }
-
-    Accumulator operator()(Accumulator value) const {
-        if (m_load == nullptr) return value;
-        std::array<std::byte, 16> storage{};
-        m_store(storage, 0, value);
-        return m_load(storage, 0);
-    }
-
-   private:
-    RuntimeLoadFunction<Accumulator> m_load = nullptr;
-    RuntimeStoreFunction<Accumulator> m_store = nullptr;
-};
-
-inline float quantizeXFloat32(float value) {
-    uint32_t bits = std::bit_cast<uint32_t>(value);
-    bits &= 0xffffe000U;
-    return std::bit_cast<float>(bits);
-}
-
-template <typename Accumulator>
-using RuntimeMathFunction = Accumulator (*)(Accumulator);
-
-template <typename Accumulator>
-Accumulator identityMath(Accumulator value) {
-    return value;
-}
-
-inline float xfloat32Math(float value) {
-    return quantizeXFloat32(value);
-}
-
-template <typename Accumulator>
-RuntimeMathFunction<Accumulator> runtimeMathFunction(MathMode mode) {
-    if (mode == MathMode::Default) return &identityMath<Accumulator>;
-    if constexpr (std::is_same_v<Accumulator, float>) {
-        if (mode == MathMode::XFloat32) return &xfloat32Math;
-    }
-    throw std::invalid_argument("XFloat32 math mode requires a Float32 accumulator.");
 }
 
 inline void validateRuntimeGemm(const GemmProblem& problem) {
