@@ -171,7 +171,7 @@ void check_rejected(const char* recipe,
     check(std::string(err).find(want) != std::string::npos, want);
 }
 
-void check_replayed(const char* recipe, const char* label)
+void check_lowered_results(const char* recipe, int expected_results, const char* label)
 {
     rocke_ir_builder_t b;
     rocke_kernel_def_t* kernel = nullptr;
@@ -180,8 +180,61 @@ void check_replayed(const char* recipe, const char* label)
     const rocke_status_t st = rocke_recipe_run_from_json(
         recipe, nullptr, 0, nullptr, 0, &b, &kernel, err, sizeof(err));
     check(st == ROCKE_OK && kernel != nullptr, label);
-    if(st == ROCKE_OK)
-        rocke_ir_builder_free(&b);
+    if(st != ROCKE_OK || !kernel)
+        return;
+
+    char* ll = nullptr;
+    char lerr[ROCKE_ERR_MSG_CAP];
+    lerr[0] = '\0';
+    const rocke_status_t lower_st = rocke_lower_kernel_to_llvm_ex(
+        kernel, ROCKE_LLVM_FLAVOR_LLVM20, "gfx950", &ll, lerr, sizeof(lerr));
+    check(lower_st == ROCKE_OK && ll != nullptr, "large result list lowers to LLVM");
+    if(lower_st == ROCKE_OK && ll)
+    {
+        const std::string text(ll);
+        check(count(text, "extractvalue") == expected_results,
+              "lowered LLVM contains every result extraction");
+        for(int i = 0; i < expected_results; i++)
+        {
+            char want[64];
+            std::snprintf(want, sizeof(want), "%%r%d = extractvalue", i);
+            check(text.find(want) != std::string::npos,
+                  "lowered LLVM preserves each result bind");
+        }
+        std::free(ll);
+    }
+    rocke_ir_builder_free(&b);
+}
+
+std::string multi_result_recipe(const char* spec, const char* outs)
+{
+    std::string recipe = R"json({
+  "schema":"rocke.recipe/v1", "kernel_name_fmt":"bad", "spec":)json";
+    recipe += spec;
+    recipe += R"json(, "program":[
+    {"op":"emit","opcode":"tile.inline_asm","in":[],"outs":)json";
+    recipe += outs;
+    recipe += R"json(,"attrs":{
+      "template":{"t":"s","v":""}, "constraints":{"t":"s","v":"=v,=v"},
+      "sideeffect":{"t":"b","v":true}, "convergent":{"t":"b","v":false}
+    }}
+  ]
+})json";
+    return recipe;
+}
+
+void check_bad_param_attrs(const char* attrs, const char* want, const char* label)
+{
+    std::string recipe = R"json({
+  "schema":"rocke.recipe/v1", "kernel_name_fmt":"bad", "spec":[], "program":[
+    {"op":"param", "name":"A", "type":{"kind":"ptr","pointee":"f32","space":"global"},
+     "attrs":)json";
+    recipe += attrs;
+    recipe += R"json(},
+    {"op":"ret"}
+  ]
+})json";
+    check_rejected(recipe.c_str(), want, label);
 }
 
 void check_long_name(const char* recipe, size_t minimum_length)
@@ -344,10 +397,43 @@ int main()
                    1);
 
     // The VM now carries an arbitrary result list to rocke_b_op rather than
-    // silently truncating it at sixteen. The generic builder accepts this
-    // synthetic op, proving all 17 result declarations reached it intact.
-    check_replayed(kManyResults, "large result list is not truncated");
+    // silently truncating it at sixteen. Lowering proves that every declaration
+    // survives with its distinct SSA name, rather than only reaching KernelDef.
+    check_lowered_results(kManyResults, 17, "large result list is not truncated");
     check_long_name(kLongKernelName, 300);
+
+    // Every multi-result declaration needs an explicit, distinct bind after
+    // placeholder resolution. Missing/defaulted names would otherwise overwrite
+    // the VM register and can produce duplicate LLVM SSA definitions.
+    const std::string missing_result_bind
+        = multi_result_recipe("[]", R"json([{"type":"i32"},{"bind":"r1","type":"i32"}])json");
+    const std::string empty_result_bind = multi_result_recipe(
+        "[]", R"json([{"bind":"","type":"i32"},{"bind":"r1","type":"i32"}])json");
+    const std::string non_string_result_bind = multi_result_recipe(
+        "[]", R"json([{"bind":7,"type":"i32"},{"bind":"r1","type":"i32"}])json");
+    const std::string duplicate_result_bind = multi_result_recipe(
+        "[]", R"json([{"bind":"r","type":"i32"},{"bind":"r","type":"i32"}])json");
+    const std::string resolved_duplicate_result_bind = multi_result_recipe(
+        R"json([{"name":"D","kind":"int"}])json",
+        R"json([{"bind":"r{D}","type":"i32"},{"bind":"r4","type":"i32"}])json");
+    check_rejected(missing_result_bind.c_str(),
+                   "result bind must be a nonempty string",
+                   "missing multi-result bind rejected");
+    check_rejected(empty_result_bind.c_str(),
+                   "result bind must be a nonempty string",
+                   "empty multi-result bind rejected");
+    check_rejected(non_string_result_bind.c_str(),
+                   "result bind must be a nonempty string",
+                   "non-string multi-result bind rejected");
+    check_rejected(duplicate_result_bind.c_str(),
+                   "duplicate result bind",
+                   "duplicate multi-result bind rejected");
+    const rocke_recipe_spec_int_t result_spec[] = {{"D", 4}};
+    check_rejected(resolved_duplicate_result_bind.c_str(),
+                   "duplicate result bind",
+                   "resolved duplicate multi-result bind rejected",
+                   result_spec,
+                   1);
 
     // Runtime values must match the recipe's declared name and kind exactly.
     const rocke_recipe_spec_str_t wrong_kind[] = {{"D", "4"}};
@@ -366,6 +452,32 @@ int main()
     check_rejected(kBadAttr, "float value is not numeric", "bad scalar attr rejected");
     check_rejected(kBadKernelAttrsShape, "attrs must be an object", "bad kernel attrs shape rejected");
     check_rejected(kBadRegisterPlaceholder, "unterminated register", "bad register format rejected");
+
+    // Parameter attrs use an unwrapped schema, unlike typed op/kernel attrs, but
+    // their container and known values still need exact kinds and valid ranges.
+    check_bad_param_attrs("[]", "param attrs must be an object", "bad param attrs shape rejected");
+    check_bad_param_attrs(
+        R"json({"noalias":[]})json", "param attr 'noalias' must be boolean", "bad noalias rejected");
+    check_bad_param_attrs(R"json({"readonly":1})json",
+                          "param attr 'readonly' must be boolean",
+                          "bad readonly rejected");
+    check_bad_param_attrs(R"json({"writeonly":"yes"})json",
+                          "param attr 'writeonly' must be boolean",
+                          "bad writeonly rejected");
+    check_bad_param_attrs(
+        R"json({"align":"16"})json", "param attr 'align'", "non-numeric param align rejected");
+    check_bad_param_attrs(
+        R"json({"align":16.5})json", "param attr 'align'", "fractional param align rejected");
+    check_bad_param_attrs(
+        R"json({"align":0})json", "param attr 'align'", "zero param align rejected");
+    check_bad_param_attrs(
+        R"json({"align":3})json", "param attr 'align'", "non-power-of-two param align rejected");
+    check_bad_param_attrs(R"json({"align":2147483648})json",
+                          "param attr 'align'",
+                          "out-of-range param align rejected");
+    check_bad_param_attrs(R"json({"addr_space":true})json",
+                          "param attr 'addr_space' must be a string",
+                          "bad param address space rejected");
 
     if(g_fail == 0)
     {

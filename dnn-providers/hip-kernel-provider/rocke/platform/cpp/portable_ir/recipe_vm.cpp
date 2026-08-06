@@ -793,7 +793,12 @@ static void rv_exec_instr(rvm_t* vm, const jd_val_t* instr)
         rocke_param_opts_t opts;
         memset(&opts, 0, sizeof opts);
         const jd_val_t* pa = rocke_jget(instr, "attrs");
-        if(pa && pa->kind == JD_OBJ)
+        if(pa && pa->kind != JD_OBJ)
+        {
+            rv_fail(vm, "param attrs must be an object");
+            return;
+        }
+        if(pa)
         {
             for(int k = 0; k < pa->obj_len; k++)
             {
@@ -802,26 +807,54 @@ static void rv_exec_instr(rvm_t* vm, const jd_val_t* instr)
                 double d;
                 if(strcmp(key, "noalias") == 0)
                 {
+                    if(v->kind != JD_BOOL)
+                    {
+                        rv_fail(vm, "param attr 'noalias' must be boolean");
+                        return;
+                    }
                     opts.noalias = v->b;
                     opts.noalias_set = true;
                 }
                 else if(strcmp(key, "readonly") == 0)
                 {
+                    if(v->kind != JD_BOOL)
+                    {
+                        rv_fail(vm, "param attr 'readonly' must be boolean");
+                        return;
+                    }
                     opts.readonly = v->b;
                     opts.readonly_set = true;
                 }
                 else if(strcmp(key, "writeonly") == 0)
                 {
+                    if(v->kind != JD_BOOL)
+                    {
+                        rv_fail(vm, "param attr 'writeonly' must be boolean");
+                        return;
+                    }
                     opts.writeonly = v->b;
                     opts.writeonly_set = true;
                 }
-                else if(strcmp(key, "align") == 0 && rocke_jnum(v, &d))
+                else if(strcmp(key, "align") == 0)
                 {
+                    if(!rocke_jnum(v, &d) || !(d >= 1.0 && d <= INT_MAX)
+                       || d != (double)(int)d || ((int)d & ((int)d - 1)) != 0)
+                    {
+                        rv_fail(vm,
+                                "param attr 'align' must be a positive power-of-two integer "
+                                "fitting int");
+                        return;
+                    }
                     opts.align = (int)d;
                     opts.align_set = true;
                 }
                 else if(strcmp(key, "addr_space") == 0)
                 {
+                    if(v->kind != JD_STR)
+                    {
+                        rv_fail(vm, "param attr 'addr_space' must be a string");
+                        return;
+                    }
                     opts.addr_space = v->str;
                 }
             }
@@ -1083,7 +1116,20 @@ static void rv_exec_instr(rvm_t* vm, const jd_val_t* instr)
                     break;
                 }
                 rtypes[i] = rv_type(vm, rocke_jget(outs->arr[i], "type"));
-                binds[i] = rv_bind_name(vm, outs->arr[i], "r");
+                const char* raw_bind = rocke_jstr(rocke_jget(outs->arr[i], "bind"));
+                if(!raw_bind || !*raw_bind)
+                {
+                    rv_fail(vm, "emit '%s' result bind must be a nonempty string", opcode_name);
+                    break;
+                }
+                binds[i] = rv_resolve_name(vm, raw_bind);
+                for(int j = 0; j < i && !vm->failed; j++)
+                {
+                    if(strcmp(binds[i], binds[j]) == 0)
+                    {
+                        rv_fail(vm, "emit '%s' duplicate result bind '%s'", opcode_name, binds[i]);
+                    }
+                }
             }
         }
         else if(outs)
