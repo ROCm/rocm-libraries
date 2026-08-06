@@ -26,6 +26,7 @@
  *     precondition for the cross-engine byte-identity gate in
  *     python/rocke/portable_ir/drivers/parity_matrix.py.
  */
+#include <climits>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -211,6 +212,20 @@ const char* kZeroDiv = R"json({
   ]
 })json";
 
+const char* kSignedDivOverflow = R"json({
+  "schema":"rocke.recipe/v1", "kernel_name_fmt":"bad",
+  "spec":[{"name":"D","kind":"int"}], "program":[
+    {"op":"const_i32","bind":"x","val":{"div":[{"spec":"D"},-1]}}
+  ]
+})json";
+
+const char* kSignedModOverflow = R"json({
+  "schema":"rocke.recipe/v1", "kernel_name_fmt":"bad",
+  "spec":[{"name":"D","kind":"int"}], "program":[
+    {"op":"const_i32","bind":"x","val":{"mod":[{"spec":"D"},-1]}}
+  ]
+})json";
+
 const char* kManyResults = R"json({
   "schema":"rocke.recipe/v1", "kernel_name_fmt":"bad", "spec":[], "program":[
     {"op":"emit","opcode":"tile.inline_asm","in":[],"outs":[
@@ -263,6 +278,11 @@ const char* kBadAttr = R"json({
   "attrs":{"bad":{"t":"f","v":"not-a-number"}}, "program":[]
 })json";
 
+const char* kBadKernelAttrsShape = R"json({
+  "schema":"rocke.recipe/v1", "kernel_name_fmt":"bad", "spec":[],
+  "attrs":[], "program":[]
+})json";
+
 const char* kBadRegisterPlaceholder = R"json({
   "schema":"rocke.recipe/v1", "kernel_name_fmt":"bad", "spec":[], "program":[
     {"op":"const_i32","bind":"value{","val":0}
@@ -308,9 +328,20 @@ int main()
     }
 
     // Invalid parametric constructs must be rejected, never silently changed
-    // (division) or allowed to spin forever (a non-progressing static_for).
+    // (division/modulo) or allowed to spin forever (a non-progressing static_for).
     check_rejected(kNegativeStaticFor, "static_for step must be positive", "negative static_for rejected");
     check_rejected(kZeroDiv, "integer division by zero", "zero integer division rejected");
+    const rocke_recipe_spec_int_t min_long[] = {{"D", LONG_MIN}};
+    check_rejected(kSignedDivOverflow,
+                   "integer division overflow",
+                   "signed integer division overflow rejected",
+                   min_long,
+                   1);
+    check_rejected(kSignedModOverflow,
+                   "integer modulo overflow",
+                   "signed integer modulo overflow rejected",
+                   min_long,
+                   1);
 
     // The VM now carries an arbitrary result list to rocke_b_op rather than
     // silently truncating it at sixteen. The generic builder accepts this
@@ -333,6 +364,7 @@ int main()
     check_rejected(kBadOperands, "register list must be an array", "bad operand list rejected");
     check_rejected(kMissingIterInit, "needs name/init", "missing loop init rejected");
     check_rejected(kBadAttr, "float value is not numeric", "bad scalar attr rejected");
+    check_rejected(kBadKernelAttrsShape, "attrs must be an object", "bad kernel attrs shape rejected");
     check_rejected(kBadRegisterPlaceholder, "unterminated register", "bad register format rejected");
 
     if(g_fail == 0)

@@ -18,14 +18,15 @@ baseline is PR #10456 commit `c05f6bbde46bffc90259d30c712f1e48e7357c86` on
 
 ## 2026-08-06: reject unsafe compile-time evaluation
 
-Decision: division/modulo by zero, non-positive `static_for` or rolled-list
-steps, and loop increment overflow are recipe errors.
+Decision: division/modulo by zero, signed overflow at `LONG_MIN / -1` and
+`LONG_MIN % -1`, non-positive `static_for` or rolled-list steps, and loop
+increment overflow are recipe errors.
 
 Reason: these cases previously changed specialization silently or could fail to
 terminate. The roller only emits increasing ranges.
 
-Regression: the hermetic C++ replay test rejects zero division and a negative
-`static_for` step.
+Regression: the hermetic C++ replay test rejects zero division, signed
+division/modulo overflow, and a negative `static_for` step.
 
 ## 2026-08-06: remove replay's hidden result ceiling
 
@@ -77,16 +78,16 @@ when rerun after the fixes.
 
 Decision: runtime specs must match each declared name and kind exactly, with no
 missing, duplicate, wrong-kind, or extra values. Register lists, rolled loop
-initializers, scalar attribute values, and formatted register names are checked
-before use; malformed forms return `ROCKE_ERR_VALUE`.
+initializers, kernel attribute objects, scalar attribute values, and formatted
+register names are checked before use; malformed forms return `ROCKE_ERR_VALUE`.
 
 Reason: these forms previously became empty lists/default scalar values, left
 null names for later lookup, or allowed declarations and supplied values to
 diverge.
 
-Regression: the C++ replay test covers missing/wrong/duplicate/extra specs, a non-array
-operand list, missing loop init, nonnumeric float attribute, and an unterminated
-register placeholder.
+Regression: the C++ replay test covers missing/wrong/duplicate/extra specs, a
+non-array operand list, missing loop init, non-object kernel attributes,
+nonnumeric float attributes, and an unterminated register placeholder.
 
 ## Current verified result
 

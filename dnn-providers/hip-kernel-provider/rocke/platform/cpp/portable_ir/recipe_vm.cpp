@@ -325,11 +325,21 @@ static long rv_int(rvm_t* vm, const jd_val_t* e)
                     rv_fail(vm, "integer division by zero");
                     return 0;
                 }
+                if(a == LONG_MIN && b == -1)
+                {
+                    rv_fail(vm, "integer division overflow");
+                    return 0;
+                }
                 return a / b;
             case 4:
                 if(b == 0)
                 {
                     rv_fail(vm, "integer modulo by zero");
+                    return 0;
+                }
+                if(a == LONG_MIN && b == -1)
+                {
+                    rv_fail(vm, "integer modulo overflow");
                     return 0;
                 }
                 return a % b;
@@ -1435,7 +1445,7 @@ static rocke_status_t rv_run_root(jd_val_t* root,
 
     /* kernel attrs (e.g. max_workgroup_size), typed like portable IR. */
     const jd_val_t* kattrs = rocke_jget(root, "attrs");
-    if(kattrs && kattrs->kind == JD_OBJ)
+    if(kattrs)
     {
         rocke_kernel_def_t* k = rocke_ir_builder_kernel(out_builder);
         rv_attrs(&vm, kattrs, &k->attrs);
