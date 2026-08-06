@@ -521,6 +521,9 @@ endif()
 if(ROCSOLVER_ENABLE_CHOLQR)
   target_compile_definitions(rocsolver PRIVATE ROCSOLVER_ENABLE_CHOLQR)
 endif()
+if(ROCSOLVER_ENABLE_EIGENSOLVERS_64)
+  target_compile_definitions(rocsolver PUBLIC ROCSOLVER_ENABLE_EIGENSOLVERS_64)
+endif()
 
 target_compile_definitions(rocsolver PRIVATE
   ROCM_USE_FLOAT16

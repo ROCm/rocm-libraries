@@ -64,6 +64,8 @@ enum Opcode : uint16_t {
     SMFMA,
     Label,
     IntrinsicCall,
+    SWaitAlu,
+    SchedulingFence,
 
     NUM_OPCODES  // Sentinel value
 };

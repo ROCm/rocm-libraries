@@ -239,6 +239,9 @@ target_compile_definitions(rocsolver-test PRIVATE
 if(ROCSOLVER_ENABLE_CHOLQR)
   target_compile_definitions(rocsolver-test PRIVATE ROCSOLVER_ENABLE_CHOLQR)
 endif()
+if(ROCSOLVER_ENABLE_EIGENSOLVERS_64)
+  target_compile_definitions(rocsolver-test PRIVATE ROCSOLVER_ENABLE_EIGENSOLVERS_64)
+endif()
 
 add_test(
   NAME rocsolver-test

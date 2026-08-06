@@ -164,17 +164,23 @@ void RMSnormBwdPlan::execute([[maybe_unused]] const Handle& handle,
     }
 
     // Get device buffer pointers
-    auto xBuffer = findDeviceBuffer(_params.x()->uid(), deviceBuffers, numDeviceBuffers);
-    auto scaleBuffer = findDeviceBuffer(_params.scale()->uid(), deviceBuffers, numDeviceBuffers);
-    auto dYBuffer = findDeviceBuffer(_params.dy()->uid(), deviceBuffers, numDeviceBuffers);
-    auto invRMSBuffer = findDeviceBuffer(_params.invRMS()->uid(), deviceBuffers, numDeviceBuffers);
-    auto dXBuffer = findDeviceBuffer(_params.dx()->uid(), deviceBuffers, numDeviceBuffers);
-    auto dScaleBufferPtr
-        = findDeviceBuffer(_params.dscale()->uid(), deviceBuffers, numDeviceBuffers);
-    void* dBiasBufferPtr
-        = (_params.dbias() == nullptr)
-              ? nullptr
-              : findDeviceBuffer(_params.dbias()->uid(), deviceBuffers, numDeviceBuffers).ptr;
+    auto xBuffer
+        = hipdnn_plugin_sdk::findDeviceBuffer(_params.x()->uid(), deviceBuffers, numDeviceBuffers);
+    auto scaleBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+        _params.scale()->uid(), deviceBuffers, numDeviceBuffers);
+    auto dYBuffer
+        = hipdnn_plugin_sdk::findDeviceBuffer(_params.dy()->uid(), deviceBuffers, numDeviceBuffers);
+    auto invRMSBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+        _params.invRMS()->uid(), deviceBuffers, numDeviceBuffers);
+    auto dXBuffer
+        = hipdnn_plugin_sdk::findDeviceBuffer(_params.dx()->uid(), deviceBuffers, numDeviceBuffers);
+    auto dScaleBufferPtr = hipdnn_plugin_sdk::findDeviceBuffer(
+        _params.dscale()->uid(), deviceBuffers, numDeviceBuffers);
+    void* dBiasBufferPtr = (_params.dbias() == nullptr)
+                               ? nullptr
+                               : hipdnn_plugin_sdk::findDeviceBuffer(
+                                     _params.dbias()->uid(), deviceBuffers, numDeviceBuffers)
+                                     .ptr;
 
     // Run the BwdData kernel
     _runnableKernels[0]->launch(handle.getStream(),

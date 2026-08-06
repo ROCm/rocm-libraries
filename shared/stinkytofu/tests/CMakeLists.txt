@@ -45,6 +45,7 @@ set(TEST_LINK_LIBS
 set(UNIT_ASM_TEST_FILES
     unit/asm/WaitCntInsertionTest.cpp
     unit/asm/DAGSchedulerPassTest.cpp
+    unit/asm/ExecMaskGroupingTest.cpp
     unit/asm/DeadCodeEliminationPassTest.cpp
     unit/asm/DefUseChainTest.cpp
     unit/asm/InsertPhiTest.cpp
@@ -54,7 +55,10 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/ScopeAdaptorTest.cpp
     unit/asm/PeepholeOptimizationPassTest.cpp
     unit/asm/AccumulateInstructionSizePassTest.cpp
-    unit/asm/SwPrefetchInsertionPassTest.cpp
+    unit/asm/SwInstructionPrefetchRelStaticPassTest.cpp
+    unit/asm/SwInstructionPrefetchRelDynamicPassTest.cpp
+    unit/asm/SwInstructionPrefetchAbsStaticPassTest.cpp
+    unit/asm/SwInstructionPrefetchAbsDynamicPassTest.cpp
     unit/asm/StinkyAsmEmitterTest.cpp
     unit/asm/StinkyModifiersTest.cpp
     unit/asm/LegalizationUtilsTest.cpp
@@ -72,7 +76,9 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/SetpcSwappcCfgTest.cpp
     unit/asm/LongBranchLoweringTest.cpp
     unit/asm/MemTokenConsistencyCheckPassTest.cpp
+    unit/asm/InsertClusterBarrierPassTest.cpp
     unit/asm/VerifyInstrumentationTest.cpp
+    unit/asm/DebugPrintInstrumentation_test.cpp
     unit/asm/AccumulateInstructionSizePassRunTest.cpp
     unit/asm/StinkyRemoveWaitCntPassTest.cpp
     unit/asm/StinkyWmmaVgprReorderPassTest.cpp

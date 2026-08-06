@@ -65,6 +65,7 @@ option(ROCSOLVER_USE_REFERENCE_SECULAR_EQUATIONS_SOLVER "Use LAPACK like impleme
 
 # Feature flags
 option(ROCSOLVER_ENABLE_CHOLQR "Enable CholQR method" ON)
+option(ROCSOLVER_ENABLE_EIGENSOLVERS_64 "Enable the 64-bit eigensolver API (syev/heev/syevd/heevd)" ON)
 
 # Add our CMake helper files to the lookup path
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
@@ -100,7 +101,7 @@ get_os_id(OS_ID)
 message(STATUS "OS detected is ${OS_ID}")
 
 # Versioning via rocm-cmake
-set(VERSION_STRING "3.36.0")
+set(VERSION_STRING "3.37.0")
 rocm_setup_version(VERSION ${VERSION_STRING})
 
 # Workaround until llvm and hip CMake modules fix symlink logic in their config files

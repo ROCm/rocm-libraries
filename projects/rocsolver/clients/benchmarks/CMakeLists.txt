@@ -66,5 +66,8 @@ target_compile_definitions(rocsolver-bench PRIVATE
 if(ROCSOLVER_ENABLE_CHOLQR)
   target_compile_definitions(rocsolver-bench PRIVATE ROCSOLVER_ENABLE_CHOLQR)
 endif()
+if(ROCSOLVER_ENABLE_EIGENSOLVERS_64)
+  target_compile_definitions(rocsolver-bench PRIVATE ROCSOLVER_ENABLE_EIGENSOLVERS_64)
+endif()
 
 rocm_install(TARGETS rocsolver-bench COMPONENT benchmarks)
