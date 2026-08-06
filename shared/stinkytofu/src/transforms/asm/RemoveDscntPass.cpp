@@ -65,7 +65,8 @@ using namespace stinkytofu;
 
 /// A load whose issue cycle is within this many cycles of the current cycle is
 /// considered too recent and is dropped from the in-flight FIFO.
-constexpr int kDsProximityThreshold = 100;
+/// default value is 143, which is the expirimental result from the experiment.
+constexpr int kDsProximityThreshold = 143;
 
 /// An outstanding LDS read: the cycle it was issued at and the destination
 /// register(s) it will eventually write.
@@ -163,7 +164,9 @@ bool canCoExecAtCurrentCycle(int cycles, int activeWmmaStartCycle, int& activeWm
 }
 
 int computeDsIssueTimeTimes3(size_t numDsLoads) {
-    const int n = static_cast<int>(numDsLoads);
+    // conservative constant is 20, which is the expirimental result from the experiment.
+    const int conservativeConstant = 20;
+    const int n = static_cast<int>(numDsLoads) + conservativeConstant;
     if (n <= 16) return 3 * n;
     if (n <= 43) return 48 + (n - 16) * 7;
     return 12 * n - 279;
