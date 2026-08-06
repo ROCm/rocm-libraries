@@ -844,3 +844,35 @@ TEST(TestTypes, ToBackendReductionModeNotSetReturnsNullopt)
 
     EXPECT_EQ(toBackendReductionMode(ReductionMode::NOT_SET), std::nullopt);
 }
+
+TEST(TestTypes, MoeGroupedMatmulModeRoundTrip)
+{
+    using namespace hipdnn_frontend;
+
+    for(const auto mode :
+        {MoeGroupedMatmulMode::NONE, MoeGroupedMatmulMode::GATHER, MoeGroupedMatmulMode::SCATTER})
+    {
+        const auto backendMode = toBackendMoeGroupedMatmulMode(mode);
+        ASSERT_TRUE(backendMode.has_value());
+        const auto [roundTripped, error] = fromHipdnnMoeGroupedMatmulMode(*backendMode);
+        EXPECT_TRUE(error.is_good()) << error.get_message();
+        EXPECT_EQ(roundTripped, mode);
+    }
+}
+
+TEST(TestTypes, ToBackendMoeGroupedMatmulModeNotSetReturnsNullopt)
+{
+    using namespace hipdnn_frontend;
+
+    EXPECT_EQ(toBackendMoeGroupedMatmulMode(MoeGroupedMatmulMode::NOT_SET), std::nullopt);
+}
+
+TEST(TestTypes, MoeGroupedMatmulModeUnknownValueReturnsError)
+{
+    using namespace hipdnn_frontend;
+
+    const auto [mode, error]
+        = fromHipdnnMoeGroupedMatmulMode(static_cast<hipdnnMoeGroupedMatmulMode_t>(9999));
+    EXPECT_EQ(mode, MoeGroupedMatmulMode::NOT_SET);
+    EXPECT_EQ(error.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+}
