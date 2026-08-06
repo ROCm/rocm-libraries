@@ -142,6 +142,7 @@ namespace rocsparse
                                        int64_t                   n,
                                        int64_t                   k,
                                        int64_t                   nnz,
+                                       int64_t                   batch_count_C,
                                        const rocsparse_mat_descr descr,
                                        rocsparse_datatype        compute_datatype,
                                        rocsparse_datatype        csr_val_datatype,
