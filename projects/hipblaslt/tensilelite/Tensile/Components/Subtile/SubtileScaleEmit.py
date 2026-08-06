@@ -524,6 +524,35 @@ def _globalReadDoScaleSubtileTDM(tc, writer, kernel):
     if ldsDelta != 0:
       module.add(SAddU32(dst=sgpr(f"{group0}+1"), src0=sgpr(f"{group0}+1"),
                  src1=ldsDelta, comment=f"LDS addr += {ldsDelta} (MXSA->MXSB)"))
+    # Patch tile1, dim1, and stride for the B dimension when MT0 != MT1.
+    # The aliased descriptor inherits MXSA's values which are based on
+    # MacroTile0 (M dimension).  MXSB needs MacroTile1 (N dimension).
+    parentTcB = "B"
+    tiB = 1  # B is associated with dimension 1
+    mxBlockB = kernel["ProblemType"][f"MXBlock{parentTcB}"]
+    mtB = kernel[f"MacroTile{tiB}"]
+    numWaves = kernel["NumWaves"]
+    perWaveRowsB = mtB // numWaves
+    # Only patch if MXSB tile1 differs from MXSA tile1
+    parentTcA = "A"
+    tiA = 0
+    mtA = kernel[f"MacroTile{tiA}"]
+    perWaveRowsA = mtA // numWaves
+    if perWaveRowsB != perWaveRowsA:
+      module.add(comp.setTensorTile1(group1, perWaveRowsB, writer))
+    # Patch dim1 (free dimension size) for B
+    sizeRefFreeB = f"Size{INDEX_CHARS[tiB]}"
+    sizeRefFreeA = f"Size{INDEX_CHARS[tiA]}"
+    if sizeRefFreeB != sizeRefFreeA:
+      module.add(comp.setTensorDim1(group1, sizeRefFreeB, writer))
+    # Patch stride for B
+    tPB = writer.tPB["MX"] if "MX" in writer.tPB else writer.tPB
+    tluB = tPB["tlu"]
+    sizeShifterB = int(math.ceil(math.log2(mxBlockB)))
+    strideB = writer.strideRef("MXSB", tiB)
+    strideA = writer.strideRef("MXSA", tiA)
+    if str(strideB) != str(strideA):
+      module.add(comp.setTensorStride0(group1, strideB, sizeShifterB))
 
   module.addComment0("Scale GR: %s (TDM: tensor_load_to_lds)" % scaleTc)
   comp.setMemToken([writer.states.ldsTensorTokenIdx])
@@ -538,6 +567,29 @@ def _globalReadDoScaleSubtileTDM(tc, writer, kernel):
     if ldsDelta != 0:
       module.add(SSubU32(dst=sgpr(f"{group0}+1"), src0=sgpr(f"{group0}+1"),
                  src1=ldsDelta, comment=f"LDS addr -= {ldsDelta} (MXSB->MXSA)"))
+    # Restore MXSA descriptor fields that were patched for MXSB
+    parentTcA = "A"
+    tiA = 0
+    mtA = kernel[f"MacroTile{tiA}"]
+    mxBlockA = kernel["ProblemType"][f"MXBlockA"]
+    numWaves = kernel["NumWaves"]
+    perWaveRowsA = mtA // numWaves
+    parentTcB = "B"
+    tiB = 1
+    mtB = kernel[f"MacroTile{tiB}"]
+    mxBlockB = kernel["ProblemType"][f"MXBlockB"]
+    perWaveRowsB = mtB // numWaves
+    if perWaveRowsB != perWaveRowsA:
+      module.add(comp.setTensorTile1(group1, perWaveRowsA, writer))
+    sizeRefFreeA = f"Size{INDEX_CHARS[tiA]}"
+    sizeRefFreeB = f"Size{INDEX_CHARS[tiB]}"
+    if sizeRefFreeB != sizeRefFreeA:
+      module.add(comp.setTensorDim1(group1, sizeRefFreeA, writer))
+    strideA = writer.strideRef("MXSA", tiA)
+    strideB = writer.strideRef("MXSB", tiB)
+    sizeShifterA = int(math.ceil(math.log2(mxBlockA)))
+    if str(strideB) != str(strideA):
+      module.add(comp.setTensorStride0(group1, strideA, sizeShifterA))
 
   return module
 
@@ -645,11 +697,15 @@ def _initTDMDescriptorMXScaleSubtile(writer, kernel, scaleTc):
   # LDS layout: scales start at ldsStartOffsetMXS{A,B}
   ldsBase = writer.ldsStartOffsetMXSA if scaleTc == "MXSA" else writer.ldsStartOffsetMXSB
 
-  # Each wave loads its share: mt/numWaves rows * scaleDu cols * scaleBpe bytes
-  bytesPerWave = mt // numWaves * scaleDu * scaleBpe
+  # Each wave loads its share of the free dimension.  For MXSA the free dim
+  # is M (partitioned by MIWaveGroup[0]); for MXSB it is N (partitioned by
+  # MIWaveGroup[1]).  Using NumWaves (= MIWaveGroup[0]*[1]) would under-load
+  # when the tile is not square.
+  wgAxis = kernel["MIWaveGroup"][ti]  # 0 for A, 1 for B
+  perWaveRows = mt // wgAxis
+  bytesPerWave = perWaveRows * scaleDu * scaleBpe
 
   sizeShifter = int(ceil(log2(mxBlock)))
-  perWaveRows = mt // numWaves
 
   mod.add(comp.initOperands(group0, group1, None, None))
   mod.add(comp.setDataType(dtype, group1))
@@ -669,15 +725,25 @@ def _initTDMDescriptorMXScaleSubtile(writer, kernel, scaleTc):
     mod.add(SMulI32(dst=sgpr(tmp), src0=sgpr(tmp), src1=sgpr(f"WorkGroup{ti}"),
             comment="*= wgId"))
 
-    if numWaves > 1:
+    if wgAxis > 1:
       mod.add(VReadfirstlaneB32(dst=sgpr(waveOff), src=vgpr("Serial"),
               comment="first tId"))
       mod.add(SLShiftRightB32(dst=sgpr(waveOff), src=sgpr(waveOff),
               shiftHex=hex(int(ceil(log2(wavelen)))),
               comment=f"wId = tId / {wavelen}"))
+      # Extract the M/N-direction wave index from the full wave index.
+      # For MXSA (ti=0): waveIdM = waveId % MIWaveGroup[0]
+      # For MXSB (ti=1): waveIdN = waveId / MIWaveGroup[0]
+      if ti == 0:
+        mod.add(SAndB32(dst=sgpr(waveOff), src0=sgpr(waveOff), src1=wgAxis - 1,
+                comment=f"waveIdM = waveId %% {wgAxis}"))
+      else:
+        mod.add(SLShiftRightB32(dst=sgpr(waveOff), src=sgpr(waveOff),
+                shiftHex=hex(int(ceil(log2(kernel["MIWaveGroup"][0])))),
+                comment=f"waveIdN = waveId / {kernel['MIWaveGroup'][0]}"))
       strideWaveSep = writer.strideRef(scaleTc, 3) if tlu else writer.strideRef(scaleTc, ti)
       mod.add(SMulI32(dst=sgpr(waveOff), src0=sgpr(waveOff), src1=perWaveRows,
-              comment=f"waveOff = waveId * {perWaveRows}"))
+              comment=f"waveOff = waveIdx_axis * {perWaveRows}"))
       mod.add(SMulI32(dst=sgpr(waveOff), src0=sgpr(waveOff), src1=strideWaveSep,
               comment="waveOff *= stride"))
       mod.add(SAddU32(dst=sgpr(tmp), src0=sgpr(tmp), src1=sgpr(waveOff),
@@ -695,14 +761,23 @@ def _initTDMDescriptorMXScaleSubtile(writer, kernel, scaleTc):
 
   mod.add(comp.setGlobalAddr(group0, f"Address{scaleTc}"))
 
-  # LDS offset = waveId * bytesPerWave + ldsBase
+  # LDS offset = waveIdx_axis * bytesPerWave + ldsBase
+  # Use the M/N-direction wave index (same as the global offset) so that
+  # waves sharing the same free-dimension partition write to the same LDS slot.
   with writer.allocTmpSgpr(1) as tmpSgprRes:
     waveOff = tmpSgprRes.idx
     mod.add(VReadfirstlaneB32(sgpr(waveOff), vgpr("Serial"), "first tId"))
     mod.add(SLShiftRightB32(sgpr(waveOff), ceil(log2(wavelen)), sgpr(waveOff),
             "wId = fTid // wavelen"))
+    if ti == 0 and wgAxis > 1:
+      mod.add(SAndB32(dst=sgpr(waveOff), src0=sgpr(waveOff), src1=wgAxis - 1,
+              comment=f"waveIdM = waveId %% {wgAxis}"))
+    elif ti == 1 and kernel["MIWaveGroup"][0] > 1:
+      mod.add(SLShiftRightB32(dst=sgpr(waveOff), src=sgpr(waveOff),
+              shiftHex=hex(int(ceil(log2(kernel["MIWaveGroup"][0])))),
+              comment=f"waveIdN = waveId / {kernel['MIWaveGroup'][0]}"))
     mod.add(SMulI32(sgpr(waveOff), sgpr(waveOff), bytesPerWave,
-            f"woffset = wId * {bytesPerWave}"))
+            f"woffset = waveIdx_axis * {bytesPerWave}"))
     mod.add(SAddU32(sgpr(waveOff), sgpr(waveOff), ldsBase,
             f"ldsOffset = woffset + {ldsBase}"))
     mod.add(comp.setLdsAddr(group0, sgpr(waveOff)))
