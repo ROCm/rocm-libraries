@@ -2,19 +2,19 @@
 # name: test_r2_solution_gfx942_golden
   list([
     dict({
-      'basename': 'Cijk_Alik_Bljk_BBS_BH_Bias_A_S_UserArgs_MT64x16x447EqQAKhHgjmbCxtPk4kjwg_DwVa577jAQYMgNtNec=',
+      'basename': 'Cijk_Alik_Bljk_BBS_BH_Bias_A_S_UserArgs_MT64x16x2MLCeKH-GsFV_p4XATG8MNz8Dj1fok2bc84PKj53Lo8=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Alik_Bljk_BBS_BH_Bias_A_S_UserArgs_MT64x16xKmeIoDdY2LsndhIjTAbGI-UmoheOlhHCRltZBDNBRVQ=',
+      'basename': 'Cijk_Alik_Bljk_BBS_BH_Bias_A_S_UserArgs_MT64x16x7Rbs63plMSaLHG8GOkxNKAfI8-jJiTYD0xzaQ8J1CDU=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Alik_Bljk_BBS_BH_Bias_A_S_UserArgs_MT64x16xc_DWRLoALWf4g8aVDtbuxSs520zE4LbzQuxDSv-r7bM=',
+      'basename': 'Cijk_Alik_Bljk_BBS_BH_Bias_A_S_UserArgs_MT64x16xBUfuCnk8_g7R3s3MGZuwljHRgZtOuwsltL4Gemck2Ow=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Alik_Bljk_BBS_BH_Bias_A_S_UserArgs_MT64x16xv21MMjZ0uaPycUD4xS5fWzxW5mFOoq_EWwFIAW6woL4=',
+      'basename': 'Cijk_Alik_Bljk_BBS_BH_Bias_A_S_UserArgs_MT64x16xZVrOmvLYMgPZmiPjgdOvvq1MxjTmNZU8CokLYpgZsLA=',
       'err': 0,
     }),
   ])
