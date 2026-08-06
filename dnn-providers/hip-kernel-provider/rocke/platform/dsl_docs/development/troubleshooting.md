@@ -78,9 +78,13 @@ run_diff --mode ir --canonical --only <family>
   temporaries in source order. See
   [`invariants.md`](./invariants.md#2-the-ir-builder-must-emit-operands-left-to-right).
 
-### `RANGE_DRIFT` on `fmha_appendkv` or `gfx1151_wmma_gemm_iu8_dequant`
-Pre-existing and benign: the C emitter enumerates a slightly wider config range
-than the Python reference; the in-range bytes are identical. Not a failure.
+### `RANGE_DRIFT` on any family
+The two emitters enumerate different config counts: one stopped sampling before
+the other. **This fails the gate.** Identical bytes in the overlapping range do
+not settle the question, because the configs only one side emitted were never
+compared at all. Fix the narrower emitter's config table so both enumerate the
+same range. (`fmha_appendkv` and `gfx1151_wmma_gemm_iu8_dequant` were once
+waived here; both are GREEN now and the waiver is gone with them.)
 
 ### `--check-golden` fails after a change I *meant* to make
 If you intentionally changed what a kernel emits, re-bless the golden **from a
