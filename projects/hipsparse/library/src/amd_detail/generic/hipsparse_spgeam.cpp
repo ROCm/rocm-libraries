@@ -80,6 +80,17 @@ hipsparseStatus_t hipsparseSpGEAM_destroyDescr(hipsparseSpGEAMDescr_t descr)
 
 namespace hipsparse
 {
+    static rocsparse_spgeam_alg hipSpGEAMAlgToHCCSpGEAMAlg(hipsparseSpGEAMAlg_t alg)
+    {
+        switch(alg)
+        {
+        case HIPSPARSE_SPGEAM_ALG1:
+            return rocsparse_spgeam_alg_default;
+        default:
+            throw "Non existent hipsparseSpGEAMAlg_t";
+        }
+    }
+
     static hipsparseStatus_t setSpGEAMInputs(hipsparseHandle_t      handle,
                                              hipsparseSpGEAMDescr_t descr,
                                              hipsparseOperation_t   opA,

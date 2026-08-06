@@ -613,19 +613,6 @@ namespace hipsparse
         }
     }
 
-#ifdef HIPSPARSE_WITH_SPGEAM
-    inline rocsparse_spgeam_alg_ hipSpGEAMAlgToHCCSpGEAMAlg(hipsparseSpGEAMAlg_t alg)
-    {
-        switch(alg)
-        {
-        case HIPSPARSE_SPGEAM_ALG1:
-            return rocsparse_spgeam_alg_default;
-        default:
-            throw "Non existent hipsparseSpGEAMAlg_t";
-        }
-    }
-#endif
-
     inline rocsparse_sddmm_alg_ hipSDDMMAlgToHCCSDDMMAlg(hipsparseSDDMMAlg_t alg)
     {
         switch(alg)
@@ -735,8 +722,8 @@ public:
         bool                 is_implicit_stage_analysis_called{};
         bool                 is_stage_compute_subsequent{};
 
-        Entry()                        = default;
-        Entry(const Entry&)            = delete;
+        Entry()             = default;
+        Entry(const Entry&) = delete;
         Entry& operator=(const Entry&) = delete;
         Entry(Entry&& other) noexcept;
         Entry& operator=(Entry&&) = delete;
