@@ -519,6 +519,27 @@ public:
 
     static constexpr bool use_sleep = UseSleep;
 
+private:
+    struct value_underlying_type
+    {
+        static constexpr int words_no = ceiling_div(sizeof(T), sizeof(unsigned int));
+
+        unsigned int words[words_no];
+    };
+
+    struct alignas(128) aligned_flag_type
+    {
+        flag_cast_type flag;
+    };
+
+    // We need to separate arrays for partial and final prefixes, because
+    // value can be overwritten before flag is changed (flag and value are
+    // not stored in single instruction).
+    void*              prefixes_partial_values;
+    void*              prefixes_complete_values;
+    aligned_flag_type* prefixes_flags;
+
+public:
     /// \brief Initializes the lookback_scan_state with the given temporary storage and the given grid size.
     ///
     /// \param [in,out] state the lookback_scan_state object to be initialized.
@@ -547,7 +568,7 @@ public:
         state.prefixes_complete_values = ptr;
         ptr += ::rocprim::detail::align_size(n * sizeof(value_underlying_type));
 
-        state.prefixes_flags = reinterpret_cast<flag_cast_type*>(ptr);
+        state.prefixes_flags = reinterpret_cast<aligned_flag_type*>(ptr);
 
         return error;
     }
@@ -574,7 +595,7 @@ public:
         // Always use sizeof(value_underlying_type) instead of sizeof(T) because storage is
         // allocated by host so it can hold both types no matter what device is used.
         storage_size = 2 * ::rocprim::detail::align_size(n * sizeof(value_underlying_type));
-        storage_size += n * sizeof(flag_cast_type);
+        storage_size += ::rocprim::detail::align_size(n * sizeof(aligned_flag_type));
         return error;
     }
 
@@ -612,12 +633,12 @@ public:
         const unsigned int padding = ::rocprim::arch::wavefront::size();
         if(block_id < number_of_blocks)
         {
-            prefixes_flags[padding + block_id]
+            prefixes_flags[padding + block_id].flag
                 = static_cast<flag_cast_type>(lookback_scan_prefix_flag::empty);
         }
         if(block_id < padding)
         {
-            prefixes_flags[block_id]
+            prefixes_flags[block_id].flag
                 = static_cast<flag_cast_type>(lookback_scan_prefix_flag::invalid);
         }
     }
@@ -822,7 +843,7 @@ private:
         unsigned int       times_through = 1;
 
         lookback_scan_prefix_flag flag = static_cast<lookback_scan_prefix_flag>(
-            ::rocprim::detail::atomic_load(&prefixes_flags[padding + block_id]));
+            ::rocprim::detail::atomic_load(&prefixes_flags[padding + block_id].flag));
 
         while(::rocprim::detail::warp_any(flag == lookback_scan_prefix_flag::empty))
         {
@@ -835,7 +856,7 @@ private:
             }
 
             flag = static_cast<lookback_scan_prefix_flag>(
-                ::rocprim::detail::atomic_load(&prefixes_flags[padding + block_id]));
+                ::rocprim::detail::atomic_load(&prefixes_flags[padding + block_id].flag));
         }
         return flag;
     }
@@ -865,23 +886,9 @@ private:
         ::rocprim::detail::memory_fence_device();
 #endif
 
-        ::rocprim::detail::atomic_store(&prefixes_flags[padding + block_id],
+        ::rocprim::detail::atomic_store(&prefixes_flags[padding + block_id].flag,
                                         static_cast<flag_cast_type>(flag));
     }
-
-    struct value_underlying_type
-    {
-        static constexpr int words_no = ceiling_div(sizeof(T), sizeof(unsigned int));
-
-        unsigned int words[words_no];
-    };
-
-    // We need to separate arrays for partial and final prefixes, because
-    // value can be overwritten before flag is changed (flag and value are
-    // not stored in single instruction).
-    void*                 prefixes_partial_values;
-    void*                 prefixes_complete_values;
-    flag_cast_type*       prefixes_flags;
 };
 
 template<class T,
