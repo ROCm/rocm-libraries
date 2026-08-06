@@ -173,17 +173,26 @@ Migration is incremental — one cohort at a time.
    The dispatcher still decides only `(path, head_size, block_size)`, and the C++
    parity identity is unchanged (see the top of this doc).
 4. **Test** byte-identity + non-interference (see the
-   `test_gfx942_*_flash_spec_fn.py` tests), then GPU-verify the cohort's arch
-   (kernel name / latency unchanged vs pre-change).
+   `test_per_engine_spec_fns.py` -- table-driven, one entry per cohort), then
+   GPU-verify the cohort's arch (kernel name / built spec unchanged vs pre-change).
 
-Migrated so far:
+Migrated so far (all builder-layer spec_fns in
+`builders/common/attention_spec_builder.py`; `_tiled_spec_from_problem` and
+`_tiled_3d_spec_from_problem` are now clean arch dispatchers):
 - `_spec_gfx942_fp16_flash` — owned by `attention_gfx942_dense_pipe`.
-- `_spec_gfx942_bf16_flash` — ORPHAN (no dispatch candidate yet; currently routed
-  via the generic `unified_2d`). Needs a future `gfx942_bf16` engine.
+- `_spec_gfx942_bf16_flash` — ORPHAN (no dispatch candidate yet; routed via the
+  generic `unified_2d`). Needs a future `gfx942_bf16` engine.
+- `_spec_gfx942_generic` — the gfx942 narrow (non-flash) 2D residual. ORPHAN.
+- `_spec_gfx950_generic` — gfx950 combo / single-batch schedule + the D256
+  gfx950 fast-route override folded in (kept behind the `_kau.` module handle
+  for test-steering). The 2D `_spec_field_names` guards are gone -- the per-arch
+  split replaced them.
+- `_spec_generic_3d` — the shared gfx942/gfx950 3D split-KV fallthrough (one
+  function; the `_gfx942_3d_*` helpers self-gate, so no arch split).
 
-Remaining cohorts to migrate this way: gfx950 combo / single-batch schedule,
-gfx1250. The D256 override is a related but distinct single-sourcing case (see
-`_d256_gfx950_spec_overrides`).
+Remaining: gfx1250 (2D + 3D) -- still inline early-returns in both cascades,
+DEFERRED (no gfx1250 hardware to GPU-verify this pass). The `_kau.` D256
+indirection must be preserved by any code that touches the gfx950 override.
 
 ## Multi-engine benchmarking: `attention_sweep_space`
 
