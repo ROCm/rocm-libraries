@@ -88,9 +88,18 @@ std::filesystem::path GraphLogger::getOutputDirectory()
     return cachedPath;
 }
 
-void GraphLogger::logGraph(const uint8_t* serializedGraph, size_t size)
+void GraphLogger::logGraph(const uint8_t* serializedGraph, size_t)
 {
-    auto hash = hipdnn_data_sdk::utilities::fnv1aHash(serializedGraph, size);
+    auto* graph
+        = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::Graph>(serializedGraph);
+    const nlohmann::json graphJson = *graph;
+    auto graphContent = graphJson;
+
+    // Graph IDs distinguish logical graph lifetimes for runtime caches, but graph dumps are
+    // content-addressed. Exclude the ID from the hash so rebuilding an equivalent graph does not
+    // create another log file; retain it in graphJson for diagnostics.
+    graphContent.erase("id");
+    const auto hash = hipdnn_data_sdk::utilities::fnv1aHash(graphContent.dump());
 
     std::ostringstream oss;
     oss << "graph_" << std::hex << std::setfill('0') << std::setw(16) << hash << ".json";
@@ -108,14 +117,10 @@ void GraphLogger::logGraph(const uint8_t* serializedGraph, size_t size)
         return;
     }
 
-    auto* graph
-        = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::Graph>(serializedGraph);
-    const nlohmann::json j = *graph;
-
     std::ofstream file(fullPath);
     if(file.is_open())
     {
-        file << j.dump(2);
+        file << graphJson.dump(2);
         file.close();
         HIPDNN_BACKEND_LOG_INFO("Graph logged to {}", fullPath.string());
     }

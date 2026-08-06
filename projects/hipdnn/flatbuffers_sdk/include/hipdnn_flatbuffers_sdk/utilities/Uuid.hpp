@@ -53,29 +53,27 @@ inline std::string formatUuid(const UuidBytes& bytes)
     return result;
 }
 
-inline uint8_t parseHexDigit(char value)
-{
-    if(value >= '0' && value <= '9')
-    {
-        return static_cast<uint8_t>(value - '0');
-    }
-    if(value >= 'a' && value <= 'f')
-    {
-        return static_cast<uint8_t>(value - 'a' + 10);
-    }
-    if(value >= 'A' && value <= 'F')
-    {
-        return static_cast<uint8_t>(value - 'A' + 10);
-    }
-    throw std::invalid_argument("UUID contains a non-hexadecimal character");
-}
-
 inline UuidBytes parseUuid(std::string_view text)
 {
     if(text.size() != 36 || text[8] != '-' || text[13] != '-' || text[18] != '-' || text[23] != '-')
     {
         throw std::invalid_argument("UUID must use xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx format");
     }
+    const auto parseHexDigit = [](char value) -> uint8_t {
+        if(value >= '0' && value <= '9')
+        {
+            return static_cast<uint8_t>(value - '0');
+        }
+        if(value >= 'a' && value <= 'f')
+        {
+            return static_cast<uint8_t>(value - 'a' + 10);
+        }
+        if(value >= 'A' && value <= 'F')
+        {
+            return static_cast<uint8_t>(value - 'A' + 10);
+        }
+        throw std::invalid_argument("UUID contains a non-hexadecimal character");
+    };
 
     UuidBytes bytes{};
     size_t input = 0;

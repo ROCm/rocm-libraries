@@ -30,6 +30,7 @@
 #include <hipdnn_flatbuffers_sdk/utilities/json/SdpaAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/SdpaBackwardAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/TensorAttributes.hpp>
+#include <optional>
 
 namespace hipdnn_flatbuffers_sdk::data_objects
 {
@@ -259,14 +260,14 @@ inline auto to<data_objects::Graph>(flatbuffers::FlatBufferBuilder& builder,
         preferredEngineId = entry["preferred_engine_id"].get<int64_t>();
     }
     const bool isOverrideShapeEnabled = entry.value("is_override_shape_enabled", false);
-    std::unique_ptr<data_objects::Uuid> id;
+    std::optional<data_objects::Uuid> id;
     if(entry.contains("id"))
     {
         if(!entry["id"].is_string())
         {
             throw std::runtime_error("Graph id must be a canonical UUID string");
         }
-        id = std::make_unique<data_objects::Uuid>(
+        id.emplace(
             utilities::toFlatbufferUuid(utilities::parseUuid(entry["id"].get<std::string>())));
     }
 
@@ -294,7 +295,7 @@ inline auto to<data_objects::Graph>(flatbuffers::FlatBufferBuilder& builder,
                                            preferredEngineId,
                                            isOverrideShapeEnabled,
                                            minRequiredEngineApiVersion,
-                                           id.get());
+                                           id ? &*id : nullptr);
 }
 
 }

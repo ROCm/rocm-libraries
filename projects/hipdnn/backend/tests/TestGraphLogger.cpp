@@ -131,19 +131,20 @@ TEST_F(TestGraphLogger, GraphLoggedWhenEnabled)
     EXPECT_TRUE(j.contains("nodes"));
     EXPECT_TRUE(j.contains("tensors"));
     EXPECT_TRUE(j.contains("name"));
+    EXPECT_TRUE(j.contains("id"));
 }
 
-TEST_F(TestGraphLogger, IndependentlyFinalizedGraphsAreLoggedSeparately)
+TEST_F(TestGraphLogger, EquivalentGraphsAreNotLoggedTwice)
 {
     hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_GRAPH_DIR", _tempDirStr.c_str());
     hipdnn_backend::logging::loggerShutdown();
 
-    // Equivalent graph contents represent distinct finalized graph identities.
+    // IDs differ, but graph dumps are deduplicated by graph content.
     auto descriptor1 = createAndFinalizeGraph();
     auto descriptor2 = createAndFinalizeGraph();
 
     auto jsonFiles = getJsonFilesInDir(_tempDir);
-    EXPECT_EQ(jsonFiles.size(), 2u);
+    EXPECT_EQ(jsonFiles.size(), 1u);
 }
 
 TEST_F(TestGraphLogger, ReLoggingSameFinalizedGraphIsDeduplicated)

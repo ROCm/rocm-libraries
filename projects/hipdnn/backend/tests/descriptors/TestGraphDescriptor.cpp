@@ -56,46 +56,6 @@ public:
         EXPECT_EQ(graph.tensors.size(), 3);
         EXPECT_EQ(graph.nodes.size(), 1);
     }
-
-    static void verifyGraphsEquivalent(const hipdnn_flatbuffers_sdk::data_objects::GraphT& graph1,
-                                       const hipdnn_flatbuffers_sdk::data_objects::GraphT& graph2)
-    {
-        EXPECT_EQ(graph1.name, graph2.name);
-        EXPECT_EQ(graph1.compute_data_type, graph2.compute_data_type);
-        EXPECT_EQ(graph1.intermediate_data_type, graph2.intermediate_data_type);
-        EXPECT_EQ(graph1.io_data_type, graph2.io_data_type);
-        EXPECT_EQ(graph1.preferred_engine_id, graph2.preferred_engine_id);
-        EXPECT_EQ(graph1.id == nullptr, graph2.id == nullptr);
-        EXPECT_EQ(graph1.min_required_engine_api_version == nullptr,
-                  graph2.min_required_engine_api_version == nullptr);
-        if(graph1.min_required_engine_api_version && graph2.min_required_engine_api_version)
-        {
-            EXPECT_EQ(*graph1.min_required_engine_api_version,
-                      *graph2.min_required_engine_api_version);
-        }
-        if(graph1.id && graph2.id)
-        {
-            EXPECT_EQ(*graph1.id, *graph2.id);
-        }
-
-        ASSERT_EQ(graph1.tensors.size(), graph2.tensors.size());
-        for(size_t i = 0; i < graph1.tensors.size(); ++i)
-        {
-            SCOPED_TRACE("tensor[" + std::to_string(i) + "]");
-            ASSERT_NE(graph1.tensors[i], nullptr);
-            ASSERT_NE(graph2.tensors[i], nullptr);
-            EXPECT_EQ(*graph1.tensors[i], *graph2.tensors[i]);
-        }
-
-        ASSERT_EQ(graph1.nodes.size(), graph2.nodes.size());
-        for(size_t i = 0; i < graph1.nodes.size(); ++i)
-        {
-            SCOPED_TRACE("node[" + std::to_string(i) + "]");
-            ASSERT_NE(graph1.nodes[i], nullptr);
-            ASSERT_NE(graph2.nodes[i], nullptr);
-            EXPECT_EQ(*graph1.nodes[i], *graph2.nodes[i]);
-        }
-    }
 };
 
 TEST_F(TestGraphDescriptor, SerializeDeserializeGraph)
