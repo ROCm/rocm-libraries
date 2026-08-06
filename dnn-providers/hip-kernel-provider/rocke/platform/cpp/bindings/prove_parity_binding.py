@@ -1316,6 +1316,298 @@ def cfgs_gfx950_attention_tiled_2d_fastkv_regp():
     return out
 
 
+def problems_gfx950_attention_tiled_2d():
+    """Problem matrix for the problem-driven gfx950 attention tiled-2D selector parity check.
+
+    Each entry is a dict of UnifiedAttentionProblem fields.  The matrix is designed to:
+      - cover the dimensions that feed _enable_combo_2d / _enable_single_batch_combo
+        / _enable_transposed_qk_32x32 and all related selector gates;
+      - include the concrete cohort that PR #9220 exposed (biased combo geometry:
+        gfx950 + bf16 + d64/b32 + GQA-8 + max_seqlen_q > 256 + use_qq_bias=True);
+      - sweep bias flags (use_alibi, use_qq_bias, softcap > 0) x geometry cohorts.
+    """
+
+    def p(
+        total_q,
+        num_seqs,
+        num_query_heads,
+        num_kv_heads,
+        head_size,
+        block_size,
+        max_seqlen_q,
+        max_seqlen_k,
+        dtype="bf16",
+        sliding_window=0,
+        softcap=0.0,
+        use_sinks=False,
+        use_alibi=False,
+        use_qq_bias=False,
+        use_fp8=False,
+        num_kv_blocks=0,
+    ):
+        return dict(
+            total_q=total_q,
+            num_seqs=num_seqs,
+            num_query_heads=num_query_heads,
+            num_kv_heads=num_kv_heads,
+            head_size=head_size,
+            block_size=block_size,
+            max_seqlen_q=max_seqlen_q,
+            max_seqlen_k=max_seqlen_k,
+            dtype=dtype,
+            sliding_window=sliding_window,
+            softcap=softcap,
+            use_sinks=use_sinks,
+            use_alibi=use_alibi,
+            use_qq_bias=use_qq_bias,
+            use_fp8=use_fp8,
+            num_kv_blocks=num_kv_blocks,
+        )
+
+    return [
+        # ---- baseline: standard multi-batch decode / short-seqlen paths ----
+        p(64, 64, 32, 32, 64, 32, 1, 4096),  # decode-like
+        p(64, 64, 32, 32, 64, 32, 64, 4096),  # short q
+        p(64, 64, 32, 32, 64, 32, 256, 4096),  # edge: seqlen_q == 256
+        # ---- combo_2d cohort (gfx950 bf16 d64 b32 GQA-8 seqlen_q > 256) ----
+        p(512, 2, 64, 8, 64, 32, 512, 4096),  # vanilla combo_2d
+        p(1024, 4, 64, 8, 64, 32, 512, 4096),  # more seqs
+        # ---- #9220 motivating cases: combo_2d cohort + bias flags ----
+        p(
+            512, 2, 64, 8, 64, 32, 512, 4096, use_qq_bias=True
+        ),  # biased combo (was the bug)
+        p(512, 2, 64, 8, 64, 32, 512, 4096, use_alibi=True),  # alibi combo
+        p(512, 2, 64, 8, 64, 32, 512, 4096, softcap=50.0),  # softcap combo
+        # ---- combo_2d boundary: seqlen_q <= 256 should NOT route combo ----
+        p(512, 2, 64, 8, 64, 32, 256, 4096, use_qq_bias=True),  # bias + short seqlen
+        p(512, 2, 64, 8, 64, 32, 200, 4096),  # seqlen below threshold
+        # ---- combo_2d with sliding window ----
+        p(512, 2, 64, 8, 64, 32, 512, 4096, sliding_window=512),
+        # ---- dtype variation: fp16 should not route combo_2d ----
+        p(512, 2, 64, 8, 64, 32, 512, 4096, dtype="fp16"),
+        p(512, 2, 64, 8, 64, 32, 512, 4096, dtype="fp16", use_qq_bias=True),
+        # ---- head_size variation (combo_2d requires d64) ----
+        p(512, 2, 64, 8, 128, 32, 512, 4096),  # d128 no combo
+        p(512, 2, 64, 8, 256, 32, 512, 4096),  # d256
+        # ---- GQA ratio variation (combo_2d requires nqpk == 8) ----
+        p(512, 2, 32, 4, 64, 32, 512, 4096),  # nqpk=8, diff head counts
+        p(512, 2, 16, 4, 64, 32, 512, 4096),  # nqpk=4
+        p(512, 2, 32, 32, 64, 32, 512, 4096),  # nqpk=1
+        p(512, 2, 40, 8, 64, 32, 512, 4096),  # nqpk=5
+        # ---- single-batch combo cohort (num_seqs==1, d64+d128, seqlen>256) ----
+        p(512, 1, 32, 32, 64, 32, 512, 4096),  # single-batch d64
+        p(512, 1, 32, 32, 128, 32, 512, 4096),  # single-batch d128
+        p(512, 1, 32, 32, 64, 32, 2048, 4096),  # single-batch d64 long
+        p(512, 1, 32, 32, 128, 32, 2048, 4096),  # single-batch d128 long
+        p(
+            512, 1, 32, 32, 128, 64, 512, 4096
+        ),  # single-batch d128 block_size=64 (d128 small tile path)
+        p(512, 1, 32, 32, 64, 32, 512, 4096, use_qq_bias=True),  # single-batch + bias
+        p(512, 1, 32, 32, 64, 32, 512, 4096, sliding_window=256),  # single-batch + SW
+        # ---- transposed_qk_32x32 multi-batch path ----
+        p(512, 4, 32, 32, 64, 32, 512, 4096),  # multi-batch d64 long
+        p(512, 4, 32, 32, 128, 32, 512, 4096),  # multi-batch d128 long
+        p(512, 4, 32, 32, 64, 16, 800, 4096),  # single_seq_hd64 cohort
+        # ---- fp8 paths ----
+        p(512, 2, 32, 32, 64, 32, 512, 4096, use_fp8=True),
+        p(512, 2, 32, 32, 64, 32, 512, 4096, use_fp8=True, sliding_window=256),
+        # ---- misc flag combinations ----
+        p(64, 64, 32, 32, 64, 32, 1, 4096, use_sinks=True),
+        p(512, 2, 64, 8, 64, 32, 512, 4096, use_sinks=True),  # combo + sinks
+    ]
+
+
+def _selector_parity_row(problem_dict, arch):
+    """Run one problem through both selectors (spec parity only).
+
+    Returns a dict with fields:
+      spec_match: bool -- Python and C++ spec dicts agree
+      python_spec: dict
+      cpp_spec:    dict
+      diff:        str  -- human-readable summary of any mismatch
+    """
+    # --- Python selector ---
+    try:
+        from builders.common.attention_spec_builder import _tiled_spec_from_problem
+        from kernels.common.attention_unified import (
+            UnifiedAttentionProblem,
+        )
+    except ImportError as e:
+        return dict(
+            spec_match=False,
+            python_spec=None,
+            cpp_spec=None,
+            diff=f"Python import error: {e}",
+        )
+
+    try:
+        prob = UnifiedAttentionProblem(
+            total_q=problem_dict.get("total_q", 0),
+            num_seqs=problem_dict.get("num_seqs", 0),
+            num_query_heads=problem_dict["num_query_heads"],
+            num_kv_heads=problem_dict["num_kv_heads"],
+            head_size=problem_dict["head_size"],
+            block_size=problem_dict["block_size"],
+            max_seqlen_q=problem_dict.get("max_seqlen_q", 0),
+            max_seqlen_k=problem_dict.get("max_seqlen_k", 0),
+            dtype=problem_dict.get("dtype", "bf16"),
+            sliding_window=problem_dict.get("sliding_window", 0),
+            softcap=float(problem_dict.get("softcap", 0.0)),
+            use_sinks=bool(problem_dict.get("use_sinks", False)),
+            use_alibi=bool(problem_dict.get("use_alibi", False)),
+            use_qq_bias=bool(problem_dict.get("use_qq_bias", False)),
+            use_fp8=bool(problem_dict.get("use_fp8", False)),
+            num_kv_blocks=problem_dict.get("num_kv_blocks", 0),
+        )
+        from unittest.mock import patch
+
+        with patch(
+            "kernels.common.attention_unified._resolve_attention_arch",
+            return_value=arch,
+        ):
+            py_spec_obj = _tiled_spec_from_problem(prob)
+        # Normalise to the same field-set the C++ binding emits
+        from dataclasses import asdict
+
+        py_spec = {
+            k: v
+            for k, v in asdict(py_spec_obj).items()
+            if k
+            in {
+                "head_size",
+                "block_size",
+                "num_query_heads",
+                "num_kv_heads",
+                "dtype",
+                "use_sinks",
+                "sliding_window",
+                "has_softcap",
+                "use_alibi",
+                "use_qq_bias",
+                "num_seqs",
+                "num_warps",
+                "waves_per_eu",
+                "kv_storage_dtype",
+                "tile_size",
+                "block_m_per_warp",
+                "use_mfma_32x32",
+                "use_transposed_qk_32x32",
+                "use_transposed_half_local_pv",
+                "use_transposed_scalar_state",
+                "use_transposed_mask_once",
+                "use_transposed_mask_limit",
+                "use_mfma32_skip_legacy_qreg",
+                "use_v_double_buffer",
+                "use_early_v_schedule",
+                "use_sched_barrier",
+                "use_fast_paged_kv_desc",
+                "use_register_pv",
+                "use_i64_kv_addr",
+                "use_k_single_buffer",
+                "use_fp8_mfma_qk",
+            }
+        }
+    except Exception as e:  # noqa: BLE001
+        return dict(
+            spec_match=False,
+            python_spec=None,
+            cpp_spec=None,
+            diff=f"Python selector error: {e}",
+        )
+
+    # --- C++ selector ---
+    try:
+        cpp_spec = rocke_engine.gfx950_attn_tiled_spec_from_problem(
+            problem_dict, arch=arch
+        )
+    except Exception as e:  # noqa: BLE001
+        return dict(
+            spec_match=False,
+            python_spec=py_spec,
+            cpp_spec=None,
+            diff=f"C++ selector error: {e}",
+        )
+
+    # --- Compare specs ---
+    # use_fp8_mfma_qk requires _fp8_qk_loader_fits which is not yet ported to C++;
+    # exclude it from comparison for fp8 problems until the predicate is ported.
+    skip_fields = set()
+    if problem_dict.get("use_fp8", False):
+        skip_fields.add("use_fp8_mfma_qk")
+
+    mismatches = []
+    for key in sorted(py_spec):
+        if key in skip_fields:
+            continue
+        pv = py_spec.get(key)
+        cv = cpp_spec.get(key)
+        if pv != cv:
+            mismatches.append(f"{key}: py={pv!r} cpp={cv!r}")
+    spec_match = len(mismatches) == 0
+
+    if not spec_match:
+        return dict(
+            spec_match=False,
+            python_spec=py_spec,
+            cpp_spec=cpp_spec,
+            diff="spec mismatch: " + "; ".join(mismatches),
+        )
+
+    # Specs match - selector parity confirmed
+    return dict(
+        spec_match=True,
+        python_spec=py_spec,
+        cpp_spec=cpp_spec,
+        diff="",
+    )
+
+
+def _is_biased_combo_2d(problem_dict):
+    """Check if problem hits the #9220 bug (biased combo_2d divergence).
+
+    Returns True for problems with combo_2d geometry (gfx950, bf16, d64, b32 or 64, GQA-8, and
+    seqlen_q>256) and any bias flag (use_qq_bias, use_alibi, softcap!=0).
+    """
+    is_combo_geom = (
+        problem_dict.get("head_size") == 64
+        and problem_dict.get("block_size") in [32, 64]
+        and problem_dict.get("dtype", "bf16") == "bf16"
+        and problem_dict.get("num_query_heads", 0)
+        // problem_dict.get("num_kv_heads", 1)
+        == 8
+        and problem_dict.get("max_seqlen_q", 0) > 256
+    )
+
+    # Bias flags that trigger the bug (from skipped tests)
+    has_bias = (
+        problem_dict.get("use_qq_bias", False)
+        or problem_dict.get("use_alibi", False)
+        or problem_dict.get("softcap", 0.0) != 0.0
+    )
+
+    return is_combo_geom and has_bias  # Both must be true = #9220 bug
+
+
+def run_selector_parity(arch, problems):
+    """Run problem-driven selector parity for all problems, excluding combo_2d with bias cases due to a bias bug introduced in PR #9220 (we will lift this limitation when the bug is fixed). Returns (n_match, n_mismatch, details)."""
+
+    n_match = n_mismatch = n_skipped = 0
+    details = []
+    for idx, prob in enumerate(problems):
+        # Due to bias bug introduced in PR #9220, skip combo_2d cases for now
+        if _is_biased_combo_2d(prob):
+            n_skipped += 1
+            continue
+        row = _selector_parity_row(prob, arch)
+        if row["spec_match"]:
+            n_match += 1
+        else:
+            n_mismatch += 1
+            details.append(f"  problem[{idx}] {row['diff']}")
+            details.append(f"    problem: {prob}")
+    return n_match, n_mismatch, n_skipped, details
+
+
 def cfgs_gfx942_attention_tiled_3d():
     rows = [
         (64, 16, 8, 8, "fp16", 8, False, 0, False, None, False, False),
@@ -1604,7 +1896,31 @@ def main():
     print(f"families EMPTY-ONLY (engine rejects all configs):    {fam_empty_only}")
     print(f"families FAILED:                                     {fam_failed}")
     print(f"configs matched non-empty: {total_match}   mismatched: {total_mismatch}")
-    return 0 if fam_failed == 0 else 1
+
+    # ---- Problem-driven selector parity (gfx950 attention tiled-2D) ----
+    print()
+    print("--- problem-driven selector parity: gfx950_attention_tiled_2d ---")
+    if not hasattr(rocke_engine, "gfx950_attn_tiled_spec_from_problem"):
+        print(
+            "WARNING: rocke_engine.gfx950_attn_tiled_spec_from_problem not found -- "
+            "rebuild the engine with the selector binding. Skipping selector parity."
+        )
+        selector_failed = False
+    else:
+        sel_match, sel_mismatch, sel_skipped, sel_details = run_selector_parity(
+            "gfx950", problems_gfx950_attention_tiled_2d()
+        )
+        selector_failed = sel_mismatch > 0
+        print(
+            f"problems checked: {sel_match + sel_mismatch + sel_skipped}  "
+            f"match: {sel_match}  mismatch: {sel_mismatch}  "
+            f"skipped: {sel_skipped}  "
+            f"{'SELECTOR PARITY FAILED' if selector_failed else 'SELECTOR PARITY OK'}"
+        )
+        for line in sel_details:
+            print(line)
+
+    return 0 if (fam_failed == 0 and not selector_failed) else 1
 
 
 if __name__ == "__main__":

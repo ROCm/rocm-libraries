@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -29,7 +29,7 @@
 template <typename T, typename CompareOp, typename... Args>
 auto call_merge(Args&&... args) -> decltype(thrust::merge(std::forward<Args>(args)...))
 {
-  THRUST_IF_CONSTEXPR (_THRUST_STD::is_void<CompareOp>::value)
+  if constexpr (_THRUST_STD::is_void<CompareOp>::value)
   {
     return thrust::merge(std::forward<Args>(args)...);
   }
@@ -60,7 +60,7 @@ void TestMergeKeyValue(size_t n)
     h_b[i] = T(h_keys_b[i], h_values_b[i]);
   }
 
-  THRUST_IF_CONSTEXPR (_THRUST_STD::is_void<CompareOp>::value)
+  if constexpr (_THRUST_STD::is_void<CompareOp>::value)
   {
     thrust::stable_sort(h_a.begin(), h_a.end());
     thrust::stable_sort(h_b.begin(), h_b.end());

@@ -89,7 +89,7 @@ Complete reference of operations recognized by `core/ir.py` and lowered to AMDGP
 | Op name                       | Builder                       | LLVM emission |
 |-------------------------------|-------------------------------|---------------|
 | `memref.global_load`          | `global_load_f16`             | typed `load addrspace(1)` |
-| `memref.global_load_typed`    | `global_load`, `global_load_f32`, `global_load_i32`, `global_load_i64`, `global_load_bf16`, `global_load_fp8e4m3` | typed `load addrspace(1)` |
+| `memref.global_load_typed`    | `global_load`, `global_load_i8`, `global_load_i16`, `global_load_i32`, `global_load_i64`, `global_load_fp8e4m3`, `global_load_bf8e5m2`, `global_load_bf16`, `global_load_f32` | typed `load addrspace(1)` |
 | `memref.global_load_vN`       | `global_load_vN`, `global_load_vN_f16` | vector `load addrspace(1)` (n in {2,4,8}) |
 | `memref.global_store_typed`   | `global_store`                | typed `store addrspace(1)` |
 | `memref.global_store_vN`      | `global_store_vN`             | vector `store addrspace(1)` |

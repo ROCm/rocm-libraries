@@ -46,7 +46,10 @@ from Tensile.Common.GlobalParameters import defaultSolution, \
 from Tensile.Common.ValidParameters import validParameters, \
                                             _getExpectedTypes, \
                                             _expectedParamTypes, \
-                                            _skipTypeCheck
+                                            _skipTypeCheck, \
+                                            normalizeSwInstructionPrefetch, \
+                                            SW_INSTRUCTION_PREFETCH_ABSOLUTE, \
+                                            SW_INSTRUCTION_PREFETCH_AUTO
 from Tensile.SolutionStructs.Naming import getSolutionNameFull
 from Tensile.SolutionStructs.Problem import ProblemType
 from Tensile.SolutionStructs.segment_interleave import evaluate as segIntEval, aligned_budget_ok as segAlignedBudget
@@ -55,7 +58,7 @@ from Tensile.Components.CustomSchedule import hasCustomSchedule
 
 from ..Component import TensorDataMover
 from ..Components.TensorDataMover import TensorDataMoverLoad
-from .Utilities import reject, roundupRatio, pvar
+from .Utilities import isSubtileIterateMode, reject, roundupRatio, pvar
 from .Validators.MXScaleFormat import validateMXScaleFormatCombination
 
 
@@ -178,6 +181,10 @@ def _disableUnsupportedRuntimeStaggerU(state):
   # PAP+TDM StaggerU is not implemented (the staggered TDM descriptor isn't carried
   # across the PAP persistent-tile handoff), so force runtime StaggerU off.
   if state["PrefetchAcrossPersistent"] and state["TDMInst"] == 3:
+    _disableRuntimeStaggerU(state)
+  # Workgroup cluster: staggerU breaks cross-WG multicast, so force the runtime
+  # StaggerU path off too (KernelWriter already gates staggerUCode off for clusters).
+  if state.get("ClusterDim", [1, 1]) != [1, 1]:
     _disableRuntimeStaggerU(state)
 
 
@@ -443,6 +450,27 @@ class BiasTypeArgs:
     s = "BiasTypesArgs\n"
     return s
 
+class GateTypeArgs:
+
+  ########################################
+  def __init__(self, problemType, config):
+    self.gateTypes = []
+    self.totalProblemSizes = 0
+    if problemType["UseGateResidual"]:
+      for btype in config:
+        datatype = DataType(btype)
+        if datatype not in problemType["GateResidualDataTypeList"]:
+          printWarning("Datatype: %s not support in this kernel (%s)"%(datatype, str(problemType["GateResidualDataTypeList"])))
+        self.gateTypes.append(datatype)
+
+      if not self.gateTypes:
+        printExit("Must provide a gate type in benchmark parameters if UseGateResidual is set to True.")
+
+      self.totalProblemSizes = len(self.gateTypes)
+
+  def __str__(self):
+    s = "GateTypesArgs\n"
+    return s
 ################################################################################
 # Activation
 ################################################################################
@@ -683,6 +711,33 @@ class Solution(collections.abc.Mapping):
     else:
       state["_ScheduleIterAlg"] = state["ScheduleIterAlg"]
       state["_StinkyTofuOptLevel"] = 0
+
+    # SwInstructionPrefetch (single-integer bitmask): explicit Absolute(2) is only supported on
+    # gfx1250 non-Stream-K. Auto(-1) already resolves to Relative on Stream-K / non-gfx1250, so it
+    # is never rejected; legacy bool aliases (True->Relative, False->Off) never request Absolute.
+    # Only an explicit Absolute request on an unsupported target is rejected here (users should
+    # pick Auto(-1) or Relative(1) instead).
+    swpMode = normalizeSwInstructionPrefetch(
+        state.get("SwInstructionPrefetch", SW_INSTRUCTION_PREFETCH_AUTO))
+    if swpMode == SW_INSTRUCTION_PREFETCH_ABSOLUTE:
+      if state.get("StreamK", 0) != 0:
+        reject(state, printRejectionReason,
+               "SwInstructionPrefetch=2 (Absolute) is not supported on Stream-K kernels; "
+               "use Auto(-1) or Relative(1)")
+        return
+      if state["ISA"] != (12, 5, 0):
+        reject(state, printRejectionReason,
+               f"SwInstructionPrefetch=2 (Absolute) is only supported on gfx1250, not {state['ISA']}; "
+               "use Auto(-1) or Off(0)")
+        return
+      if state["ProblemType"]["DataType"].isDouble():
+        # f64: OptNLL epilogue routinely exceeds the 64 KiB I-cache (bucket-c fleet-wide) so the
+        # abs cover/ladder yields no reliable benefit, and sgprAlpha is a 2-dword pair (the
+        # OptNLL-aware Case-B fp32 predicate does not apply). See design doc §16.8/§16.13.
+        reject(state, printRejectionReason,
+               "SwInstructionPrefetch=2 (Absolute) is not supported for f64 (double) kernels; "
+               "use Auto(-1) or Relative(1)")
+        return
 
     if (not state["ProblemType"]["StridedBatched"]) and (not state["ProblemType"]['Batched']):
       reject(state, printRejectionReason, "General Batched GEMM only support Batched Problem")
@@ -1684,7 +1739,10 @@ class Solution(collections.abc.Mapping):
         # StreamKXCCMapping remaps WorkGroup0 with no cluster awareness; disable it.
         state["StreamKXCCMapping"] = 0
       if not state["EnableMatrixInstruction"]:
-        reject(state, printRejectionReason, "Stream-K requires MatrixInstruction")
+        # Source/MAC (non-MI) Stream-K: partial-write + fixup are datapath-agnostic,
+        # so allow it for Assembly source kernels (other SK constraints still apply).
+        if state["KernelLanguage"] != "Assembly":
+          reject(state, printRejectionReason, "Stream-K (non-MatrixInstruction) requires Assembly source kernels")
       # if state["PersistentKernel"]:
       #   reject(state, printRejectionReason, "Cannot enable both Stream-K and PersistentKernel")
       if not state["ProblemType"]["StridedBatched"]:
@@ -1720,8 +1778,6 @@ class Solution(collections.abc.Mapping):
         # limits, stagger state, and LDS bank state before current-tile code
         # resumes. Keep rejecting axes whose borrowed-state contract is not
         # audited below.
-        # Note: HalfPLR+PAP is rejected in the HalfPLR block below (HalfPLR forces
-        # SuppressNoLoadLoop after this guard runs, so it is caught there instead).
         if state["StreamK"] != 3:
           reject(state, printRejectionReason, "PrefetchAcrossPersistent is currently supported only with StreamK=3")
         if not state["BufferLoad"]:
@@ -1738,10 +1794,11 @@ class Solution(collections.abc.Mapping):
           reject(state, printRejectionReason, "PrefetchAcrossPersistent not supported with multiple summation indices")
         if not state["BufferStore"]:
           reject(state, printRejectionReason, "PrefetchAcrossPersistent NLL path requires BufferStore")
-        # HalfPLR sets SuppressNoLoadLoop *after* this guard runs, so it is not
-        # caught here; the HalfPLR block rejects HalfPLR+PAP order-independently.
-        if state.get("SuppressNoLoadLoop", False):
-          reject(state, printRejectionReason, "PrefetchAcrossPersistent NLL path requires NoLoadLoop")
+        # HalfPLR sets SuppressNoLoadLoop after this guard runs. Its supported
+        # out-of-line PAP path is validated in the HalfPLR block below. Add a
+        # condition here for clarity.
+        if state.get("SuppressNoLoadLoop", False) and not state["HalfPLR"]:
+          reject(state, printRejectionReason, "PrefetchAcrossPersistent NLL path requires NoLoadLoop if not using HalfPLR")
         if state["ProblemType"]["Sparse"]:
           reject(state, printRejectionReason, "PrefetchAcrossPersistent NLL path not supported with sparse")
         if state["StoreRemapVectorWidth"]:
@@ -1762,6 +1819,41 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason,
                "DebugPersistentKernelLoopForever requires StreamK=3 (got %d)"
                % state["StreamK"])
+      if state["StreamKWorkStealing"]:
+        # Codegen-time rejections only; there is no hardware context here
+        # (MI300A/MI300X both compile as gfx942). The kernel bakes a power-of-two
+        # per-XCD queue count from origami; the host (ContractionSolution.cpp)
+        # enforces the device's runtime NUM_XCD against that baked count and
+        # otherwise serves a non-work-stealing solution. Work stealing only exists
+        # in the dynamic-queue fetch (auto-mode SK4 and the SK4 sub-path of SK5).
+        if state["StreamK"] not in (4, 5):
+          reject(state, printRejectionReason,
+                 "StreamKWorkStealing requires StreamK in {4,5} (got %d)"
+                 % state["StreamK"])
+        # Stealing is only defined for the non-atomic partials+fixup path.
+        # Atomic SK4/SK5 is already rejected above; keep this explicit guard so
+        # the combination can never slip through.
+        if state["StreamKAtomic"]:
+          reject(state, printRejectionReason,
+                 "StreamKWorkStealing is not supported with StreamKAtomic")
+        # Reject DebugStreamK with work stealing: it can leave a tile-owning
+        # queue with no home workgroup, breaking the W_q>=1 auto-reset precondition.
+        if state["DebugStreamK"]:
+          reject(state, printRejectionReason,
+                 "StreamKWorkStealing requires DebugStreamK=0 (the per-queue "
+                 "auto-reset relies on W_q>=1 whenever tiles_q>=1); got %d"
+                 % state["DebugStreamK"])
+        # The steal path (streamKWorkStealingSteal) emits s_atomic_inc
+        # unconditionally, but the home fetch (_fetchNextWorkItem) only falls
+        # back to a returning vector atomic when scalar atomics are absent. On
+        # arches without scalar atomics (HasSAtomic=false, e.g. gfx1250) the
+        # steal would emit an unsupported s_atomic_inc with no vector fallback,
+        # so reject work stealing there.
+        if not isaInfoMap[isa].asmCaps["HasSAtomic"]:
+          reject(state, printRejectionReason,
+                 "StreamKWorkStealing requires scalar atomics (HasSAtomic); the "
+                 "work-stealing steal path emits s_atomic_inc with no vector "
+                 "fallback (e.g. gfx1250 has HasSAtomic=false)")
       if not state["Valid"]:
         print2("in assignDerivedParameters, state['Valid'] = False")
         return
@@ -1769,6 +1861,7 @@ class Solution(collections.abc.Mapping):
       # If not using StreamK, clear other stream-k settings to avoid duplicate kernels
       state["StreamKForceDPOnly"] = 0
       state["StreamKAtomic"] = 0
+      state["StreamKWorkStealing"] = 0
       state["StreamKXCCMapping"] = 0
       state["StreamKFixupTreeReduction"] = 0
       state["DebugStreamK"] = 0
@@ -2003,6 +2096,7 @@ class Solution(collections.abc.Mapping):
       state["NonTemporalB"] = state["NonTemporal"]
       state["NonTemporalC"] = state["NonTemporal"]
       state["NonTemporalD"] = state["NonTemporal"]
+      state["NonTemporalGate"] = state["NonTemporal"]
       state["NonTemporalMetadata"] = state["NonTemporal"]
 
     if isaInfoMap[isa].asmCaps.get("HasTHModifier", False):
@@ -2630,14 +2724,10 @@ class Solution(collections.abc.Mapping):
     if state["HalfPLR"]:
       state["ClusterLocalRead"] = 0
       state["SuppressNoLoadLoop"] = True
-      # Order-independent reject on the raw PAP flag: HalfPLR forces
-      # SuppressNoLoadLoop=True, which disables the PAP no-load-loop handoff
-      # (isPrefetchAcrossPersistentEnabled returns False). The PAP guard runs
-      # before this block, so reject here to avoid PAP silently no-oping while
-      # its raw-flag sites still fire.
       if state.get("PrefetchAcrossPersistent", 0):
-        reject(state, printRejectionReason, "HalfPLR is incompatible with PrefetchAcrossPersistent (HalfPLR forces SuppressNoLoadLoop, which disables the PAP NLL handoff)")
-        return
+        if state["StreamK"] != 3 or state["StreamKForceDPOnly"] != 1:
+          reject(state, printRejectionReason, "HalfPLR + PrefetchAcrossPersistent currently requires StreamK = 3 and StreamKForceDPOnly = 1")
+          return
       # The subtile main loop ignores SuppressNoLoadLoop, which HalfPLR forces;
       # the HalfPLR tail fixup lives only in the legacy calculateLoopNumIter path.
       if state["UseSubtileImpl"]:
@@ -2792,6 +2882,7 @@ class Solution(collections.abc.Mapping):
         "GroupLoadStore": not state["GroupLoadStore"],
         "StreamK": not state["StreamK"],
         "StreamKAtomic": not state["StreamKAtomic"],
+        "StreamKWorkStealing": not state["StreamKWorkStealing"],
         "StreamKXCCMapping": not state["StreamKXCCMapping"],
         "StreamKFixupTreeReduction": not state["StreamKFixupTreeReduction"],
         "DebugStreamK": not state["DebugStreamK"],
@@ -2820,8 +2911,14 @@ class Solution(collections.abc.Mapping):
       if state["ProblemType"]["ComputeDataType"].isDouble() or state["ProblemType"]["ComputeDataType"].isDoubleComplex(): return False
       return True
 
+    # Track VALU source operands on VA_VDST (src-operand WAR hazard). On only for
+    # sparse; non-sparse kernels skip the stamp. Pre-armed for when sparse enables ESM2.
+    def evaluateEnableESM2TrackValuVsrc() -> bool:
+      return bool(state["ProblemType"]["Sparse"])
+
     state["ExpertSchedulingMode"] = evaluateExpertSchedulingMode()
     state["EnableStinkyTofuESM2"] = evaluateStinkyTofuESM2()
+    state["EnableESM2TrackValuVsrc"] = evaluateEnableESM2TrackValuVsrc()
 
     state["ESMRuntimeGate"] = tuple(state["ISA"])[:2] == (12, 0)
     # Some restrictions for float4 and 6bitFloat:
@@ -3231,7 +3328,8 @@ class Solution(collections.abc.Mapping):
             # A/B in iterate-mode bypass the pad_interval encoding; skip their
             # check. MXSA/MXSB do not support iterate-mode, so their LBSPP
             # must still satisfy the pad_interval constraints.
-            if tc in ("A", "B") and state.get("_TDMIterateMode%s" % tc, False):
+            if tc in ("A", "B") and (state.get("_TDMIterateMode%s" % tc, False)
+                                      or isSubtileIterateMode(state, tc)):
               if val == 0:
                 reject(state, printRejectionReason,
                        f"TDMIterateMode set for {tc} but LdsBlockSizePerPad{tc}=0; "
@@ -4042,17 +4140,8 @@ class Solution(collections.abc.Mapping):
                 validDepthU = False
                 extraComment = ": DepthU(%u) < Min-DU for swizzleB + LSU(%u)"%(depthUB, state["LocalSplitU"])
 
-          # TDM pad_interval (padIntervalBytes = DepthU * bpeGR) max allowed value is
-          # 1024 bytes (256 DWORDs).
-          if state["UseSubtileImpl"]:
-            for tc in ["A", "B"]:
-              if not state["enableTDM%s" % tc]:
-                continue
-              padIntervalBytes = depthU * state["ProblemType"]["DataType%s" % tc].numBytes()
-              if padIntervalBytes > 1024:
-                validDepthU = False
-                extraComment = ": DepthU(%u)*bpeGR%s = %u exceeds TDM pad_interval limit of 1024 bytes" \
-                               % (depthU, tc, padIntervalBytes)
+          # Subtile bypasses the 1024B pad_interval limit via iterate mode;
+          # non-subtile TDM handles it earlier via _TDMIterateMode + VW halving.
         # this depthU is valid, done unless user wants to double (for TN)
         if validDepthU:
           state["DepthU"] = depthU
@@ -4973,15 +5062,14 @@ class Solution(collections.abc.Mapping):
       ldsNumBytesAB = state["LdsOffsetB"] + ldsNumBytesB
     state["NumLdsBlk"] = numLdsBlk
 
-    # Resolve the -1/0/1 knob to the applied 0/1 (LDSSI1 always means "applied"; identical
-    # variants dedup). Defer the one case whose applicability isn't known yet: an unresolved
-    # 1LDSBuffer (-1) whose only blocker is "needs 1LDSBuffer==0" -- re-decided after it resolves.
+    # Defer resolving if the oracle only blocked on an unresolved 1LDSBuffer(-1) (resolved later, then re-evaluated).
     _segRequested = state["LDSSegmentInterleave"]
     _segDeferForBuf = _oneLdsBufAtEval == -1 and _segReason == "needs 1LDSBuffer==0"
     if not _segDeferForBuf:
+      # 1 = applied, 0 = not; split vs bcontig is read from the offsets, not this value.
       state["LDSSegmentInterleave"] = 1 if _segApplicable else 0
       if _segRequested == 1 and not _segApplicable:
-        reject(state, printRejectionReason, "LDSSegmentInterleave=1 requested but not applicable: %s" % _segReason)
+        reject(state, printRejectionReason, "LDSSegmentInterleave=%d requested but not applicable: %s" % (_segRequested, _segReason))
 
     # lds buffer size for reduction
     # if User want to control the LDS usage, we may open this para in the future
@@ -5022,7 +5110,7 @@ class Solution(collections.abc.Mapping):
         if _segRequested == 1:
           _segReason2 = "aligned needs LDS reserved before 1LDSBuffer resolution" \
             if _segRes2["applicable"] else _segRes2["reason"]
-          reject(state, printRejectionReason, "LDSSegmentInterleave=1 requested but not applicable: %s" % _segReason2)
+          reject(state, printRejectionReason, "LDSSegmentInterleave=%d requested but not applicable: %s" % (_segRequested, _segReason2))
 
     if state["1LDSBuffer"]:
       if not state["PrefetchGlobalRead"]:
@@ -5456,12 +5544,16 @@ class Solution(collections.abc.Mapping):
       if state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1:
         reject(state, printRejectionReason, "Currently PrefetchGL2 does not support GSU")
         return
-      if state["StreamK"] != 0:
-        reject(state, printRejectionReason, "PrefetchGL2 does not support Stream-K")
+      if state["StreamK"] != 0 and state["StreamK"] != 3:
+        reject(state, printRejectionReason, "PrefetchGL2 only supports DP-first (StreamK==3) Stream-K")
         return
       if state["ProblemType"]["Batched"] and not state["ProblemType"]["StridedBatched"]:
         reject(state, printRejectionReason, "PrefetchGL2 does not support general batch")
         return
+      if state["ProblemType"]["Sparse"]:
+        if state["DirectToVgprSparseMetadata"]:
+          reject(state, printRejectionReason, "PrefetchGL2 with Sparse requires DirectToVgprSparseMetadata=0 (TDM metadata path)")
+          return
       
 
     # # reject conditions with lower performance

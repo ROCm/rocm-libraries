@@ -267,11 +267,11 @@ def build_mx_gemm(spec: MxGemmSpec, arch: str = "gfx950") -> KernelDef:
         )
         a_scale = decode_mx_scale_e8m0(
             b,
-            b.global_load(AScale, a_scale_off, I8, align=1),
+            b.global_load_i8(AScale, a_scale_off),
         )
         b_scale = decode_mx_scale_e8m0(
             b,
-            b.global_load(BScale, b_scale_off, I8, align=1),
+            b.global_load_i8(BScale, b_scale_off),
         )
         # The MX-spec apply is ``elem * 2^(scale_unbiased - 127)``;
         # mathematically equivalent to ``elem * 2^scale_unbiased / 2^127``
