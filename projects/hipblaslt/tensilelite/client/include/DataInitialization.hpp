@@ -169,6 +169,17 @@ namespace TensileLite
 
         std::ostream& operator<<(std::ostream& stream, PruneSparseMode const& mode);
         std::istream& operator>>(std::istream& stream, PruneSparseMode& mode);
+
+        void initCPUSparseInput(PruneSparseMode         mode,
+                                void*                   dstPruned,
+                                void*                   dstCompressed,
+                                void*                   dstMeta,
+                                TensorDescriptor const& tensor,
+                                TensorDescriptor const& tensorC,
+                                TensorDescriptor const& tensorMeta,
+                                size_t                  dim,
+                                bool                    metadataLayout);
+
         class DataInitialization : public RunListener
         {
         public:

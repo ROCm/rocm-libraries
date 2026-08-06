@@ -288,6 +288,125 @@ void testReferenceReduction() {
     require(output == std::array<float, 3>{412, 492, 572}, "Reference reduction result mismatch.");
 }
 
+void testStructuredSparsity() {
+    using namespace roc::host_validation;
+
+    std::array<float, 20> inputStorage;
+    inputStorage.fill(-99);
+    MutableTensorView input(
+        ScalarType::Float32,
+        Layout(Shape{2, 8}, {10, 1}),
+        std::as_writable_bytes(std::span<float>(inputStorage)));
+    for (size_t row = 0; row < 2; ++row)
+        for (size_t column = 0; column < 8; ++column)
+            input.storeFrom({row, column}, static_cast<float>(1 + row * 8 + column));
+
+    std::array<float, 20> prunedStorage;
+    prunedStorage.fill(-7);
+    MutableTensorView pruned(
+        ScalarType::Float32,
+        Layout(Shape{2, 8}, {10, 1}),
+        std::as_writable_bytes(std::span<float>(prunedStorage)));
+    std::array<float, 8> compressedStorage{};
+    MutableTensorView compressed = MutableTensorView::fromNative<float>(
+        Layout::contiguous(Shape{2, 4}), std::span<float>(compressedStorage));
+    std::array<uint8_t, 8> indexStorage{};
+    MutableTensorView retainedIndices = MutableTensorView::fromNative<uint8_t>(
+        Layout::contiguous(Shape{2, 4}), std::span<uint8_t>(indexStorage));
+
+    StructuredSparsityPattern pattern;
+    pattern.axis = 1;
+    pattern.fixedPositions = {1, 3};
+    const StructuredSparsityRunInfo run = applyStructuredSparsity(
+        StructuredSparsityProblem(
+            input.asConst(), pruned, compressed, retainedIndices, pattern));
+    require(run.groupsProcessed == 4 && run.prunedElementsWritten == 16 &&
+                run.compressedElementsWritten == 8,
+            "Structured sparsity run information mismatch.");
+
+    for (size_t row = 0; row < 2; ++row) {
+        for (size_t group = 0; group < 2; ++group) {
+            const size_t inputBase = group * 4;
+            const size_t compressedBase = group * 2;
+            require(pruned.loadAs<float>({row, inputBase}) == 0 &&
+                        pruned.loadAs<float>({row, inputBase + 1}) ==
+                            input.loadAs<float>({row, inputBase + 1}) &&
+                        pruned.loadAs<float>({row, inputBase + 2}) == 0 &&
+                        pruned.loadAs<float>({row, inputBase + 3}) ==
+                            input.loadAs<float>({row, inputBase + 3}),
+                    "Structured sparsity pruned output mismatch.");
+            require(compressed.loadAs<float>({row, compressedBase}) ==
+                            input.loadAs<float>({row, inputBase + 1}) &&
+                        compressed.loadAs<float>({row, compressedBase + 1}) ==
+                            input.loadAs<float>({row, inputBase + 3}),
+                    "Structured sparsity compressed output mismatch.");
+            require(retainedIndices.loadAs<uint8_t>({row, compressedBase}) == 1 &&
+                        retainedIndices.loadAs<uint8_t>({row, compressedBase + 1}) == 3,
+                    "Structured sparsity retained-index output mismatch.");
+        }
+    }
+
+    std::array<uint8_t, 2> metadataStorage{};
+    MutableTensorView metadata = MutableTensorView::fromNative<uint8_t>(
+        Layout::contiguous(Shape{2, 1}), std::span<uint8_t>(metadataStorage));
+    const TwoOfFourMetadataRunInfo metadataRun = encodeTwoOfFourMetadata(
+        TwoOfFourMetadataProblem(retainedIndices.asConst(), metadata, 1));
+    require(metadataRun.sparsityGroupsEncoded == 4 &&
+                metadataRun.metadataBytesWritten == 2,
+            "Two-of-four metadata run information mismatch.");
+    require(metadataStorage[0] == 0xdd && metadataStorage[1] == 0xdd,
+            "Two-of-four metadata encoding mismatch.");
+
+    std::array<float, 16> fusedPrunedStorage{};
+    std::array<float, 8> fusedCompressedStorage{};
+    std::array<uint8_t, 2> fusedMetadataStorage{};
+    StructuredSparsityProblem fusedProblem(
+        input.asConst(),
+        MutableTensorView::fromNative<float>(
+            Layout::contiguous(Shape{2, 8}),
+            std::span<float>(fusedPrunedStorage)),
+        MutableTensorView::fromNative<float>(
+            Layout::contiguous(Shape{2, 4}),
+            std::span<float>(fusedCompressedStorage)),
+        pattern);
+    fusedProblem.twoOfFourMetadata = MutableTensorView::fromNative<uint8_t>(
+        Layout::contiguous(Shape{2, 1}),
+        std::span<uint8_t>(fusedMetadataStorage));
+    const StructuredSparsityRunInfo firstFusedRun =
+        applyStructuredSparsity(
+            fusedProblem, {.firstSlice = 0, .sliceCount = 1});
+    const StructuredSparsityRunInfo secondFusedRun =
+        applyStructuredSparsity(
+            fusedProblem, {.firstSlice = 1, .sliceCount = 1});
+    require(firstFusedRun.groupsProcessed == 2 &&
+                secondFusedRun.groupsProcessed == 2 &&
+                firstFusedRun.retainedIndicesWritten == 0 &&
+                secondFusedRun.retainedIndicesWritten == 0 &&
+                firstFusedRun.metadataBytesWritten == 1 &&
+                secondFusedRun.metadataBytesWritten == 1 &&
+                fusedMetadataStorage == metadataStorage,
+            "Fused structured sparsity metadata mismatch.");
+
+    Tensor inPlace = Tensor::fromNativeValues<float>(
+        Shape{8},
+        std::array<float, 8>{1, 2, 3, 4, 5, 6, 7, 8});
+    Tensor inPlaceCompressed(ScalarType::Float32, Shape{4});
+    Tensor inPlaceIndices(ScalarType::UInt8, Shape{4});
+    pattern.axis = 0;
+    pattern.fixedPositions = {0, 2};
+    applyStructuredSparsity(StructuredSparsityProblem(
+        inPlace.view(),
+        inPlace.mutableView(),
+        inPlaceCompressed.mutableView(),
+        inPlaceIndices.mutableView(),
+        pattern));
+    require(inPlace.view().loadAs<float>({0}) == 1 &&
+                inPlace.view().loadAs<float>({1}) == 0 &&
+                inPlace.view().loadAs<float>({2}) == 3 &&
+                inPlace.view().loadAs<float>({3}) == 0,
+            "In-place structured sparsity mismatch.");
+}
+
 void testIndexedGeneration() {
     using namespace roc::host_validation;
 
@@ -456,6 +575,7 @@ int main() {
     testOutputSelection();
     testReferenceEpilogue();
     testReferenceReduction();
+    testStructuredSparsity();
     testIndexedGeneration();
     testActivations();
     testStridedAndOffsetViews();
