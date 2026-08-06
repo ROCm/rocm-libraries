@@ -634,12 +634,35 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv(rocke_ir_builder_t* b,
     }
 
     /* ---- K-loop driver selection (1276-1347) ----
-     *   unroll_k            -> unroll
-     *   else not async_dma  -> simple (scf.for_iter)
-     *   else (async_dma)    -> async (SoftwarePipeline.run_ping_pong) */
+     *
+     * The driver is chosen by K-loop *structure*, not by pipeline name.
+     * "mem", "compv3", and "compv4" all use the same scf.for_iter shape
+     * (load->sync->mfma->sync per tile) and therefore share kloop_simple.
+     * Their behavioural differences (scheduling hints, double-buffering) are
+     * encoded in ctx->schedule and ctx->double_buffer, which are consulted
+     * inside emit_mfma_phase and the LDS allocation respectively -- no
+     * K-loop structural change is needed for those pipelines.
+     *
+     * A new driver is only justified when the K-loop itself has a different
+     * shape that cannot be expressed inside kloop_simple:
+     *
+     *   unroll_k     -> kloop_unroll  (Python-unrolled prologue+ping-pong;
+     *                                  2 LDS buffers; no scf.for_iter)
+     *   pipeline="basic"-> kloop_basic (split global_read/lds_write;
+     *                                   single LDS buffer; no scf.for_iter;
+     *                                   VMEM/compute overlap without double-buf)
+     *   else no async -> kloop_simple (scf.for_iter; mem/compv3/compv4 all
+     *                                  share this; pipeline string only
+     *                                  affects schedule hints inside mfma)
+     *   else (async)  -> kloop_async  (SoftwarePipeline.run_ping_pong over
+     *                                  AsyncTileLoader; no scf.for_iter) */
     if(spec->unroll_k)
     {
         rocke_conv_emit_kloop_unroll(&ctx);
+    }
+    else if(spec->pipeline != NULL && strcmp(spec->pipeline, "basic") == 0)
+    {
+        rocke_conv_emit_kloop_basic(&ctx);
     }
     else if(!ctx.async_dma)
     {

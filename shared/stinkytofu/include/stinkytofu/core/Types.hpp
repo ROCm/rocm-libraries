@@ -79,6 +79,7 @@ struct PassFeatureConfig {
         int globalReadDrainLatency = 0;
         int dsReadQueueDepth = 0;
         int dsReadDrainLatency = 0;
+        int dsReadThrottleLatency = 0;
         int dsReadPerWmma = INT_MAX;
     };
 

@@ -58,7 +58,7 @@ _TILE_K = (16, 32, 64, 128)
 _WARP_MN = (1, 2, 4, 8)
 _WARP_MN_GFX1250 = (1, 2, 4, 8, 16)
 _WARP_TILE_MN = (16, 32)
-_PIPELINES = ("mem", "compv3", "compv4")
+_PIPELINES = ("mem", "compv3", "compv4", "basic")
 _EPILOGUES = ("default", "cshuffle")
 # Split-K degrees swept when --split-k 0 (auto) is passed for wgrad.
 _SPLIT_K_AUTO = (1, 2, 4, 8, 16, 32, 64, 128)
