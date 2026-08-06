@@ -474,6 +474,12 @@ def supports_native_unified_attention_tiled(
             use_transposed_qk_32x32=True,
             use_k_single_buffer=single_k,
             use_conflict_free_v_store=use_cfvst,
+            # This branch reaches gfx942's gate too, so it needs the same ring
+            # parameters as the general path below, or the estimate here sizes a
+            # different kernel than _tiled_spec_from_problem builds. Reachable
+            # by definition: _enable_gfx942_bf16_flash implies gfx942.
+            ring_depth=_select_gfx942_flash_ring_depth(problem),
+            k_slice_hd=_select_gfx942_flash_k_slice_hd(problem),
         )
     gfx942_flash = _enable_gfx942_fp16_flash(problem)
     num_warps = (
@@ -501,6 +507,26 @@ def supports_native_unified_attention_tiled(
         use_conflict_free_v_store=gfx942_flash and _gfx942_flash_use_cfvst(problem),
         use_k_sliced_ring=_enable_gfx942_flash_k_sliced_ring(problem),
         use_d256_fast=_d256_gfx942_fast(problem),
+        # The LDS-budget gate sizes the ring's K staging from these, so they have
+        # to be the same values _tiled_spec_from_problem will put on the spec or
+        # the admission check measures a kernel we never build.
+        #
+        # Passed only for gfx942: they are sliced-K ring parameters with no meaning
+        # on the other arch gates, whose supports_tiled_2d does not declare them.
+        # Gating the call site keeps four other arches free of accept-and-ignore
+        # parameters, and avoids the failure mode where this shared caller passes a
+        # kwarg that only one arch accepts -- the failure mode #10126 fixed for
+        # use_d256_fast. Omitting them leaves the gate on its defaults, which
+        # over-count and therefore only ever over-reject -- never admit an
+        # unbuildable combo.
+        **(
+            {
+                "ring_depth": _select_gfx942_flash_ring_depth(problem),
+                "k_slice_hd": _select_gfx942_flash_k_slice_hd(problem),
+            }
+            if arch == "gfx942"
+            else {}
+        ),
     )
 
 
@@ -1313,6 +1339,16 @@ def _tiled_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
             if _enable_gfx942_flash_k_sliced_ring(problem)
             else None
         ),
+        # K slice width, for the same reason as the depth above: it changes
+        # k_groups, the K_lds extents and the barrier count, so two widths are
+        # different kernels and must not share a cached launcher. Also keeps the
+        # HIPDNN_GFX942_K_SLICE_HD override from being masked by a launcher cached
+        # under a previous width in the same process.
+        (
+            _select_gfx942_flash_k_slice_hd(problem)
+            if _enable_gfx942_flash_k_sliced_ring(problem)
+            else None
+        ),
         _enable_gfx942_flash_k_sliced_ldsseq(problem),
         # bf16-wide non-ring geometry knobs: cfvst (HIPDNN_GFX942_BF16_CFVST) and
         # small-tile double-K (HIPDNN_GFX942_D128_SMALLTILE_DK) affect num_warps,
@@ -2020,6 +2056,51 @@ def _select_gfx942_flash_ring_depth(problem: UnifiedAttentionProblem) -> int:
     ):
         return 2
     return 3
+
+
+# Widths the ring schedule can legally take: they must divide both head size in
+# use (64 and 128) and the 8-element QK k-step. 8 is the floor -- below it
+# ``k_steps_per_group`` floors to zero and a slice emits no MFMA.
+_GFX942_K_SLICE_HD_CHOICES = (8, 16, 32, 64)
+
+
+def _select_gfx942_flash_k_slice_hd(problem: UnifiedAttentionProblem) -> int:
+    """K slice width (head-dim elements) for the gfx942 sliced-K ring.
+
+    The width sets ``k_groups = head_size // width`` and the K_lds row stride,
+    which is what the QK read's LDS bank spread follows -- see the ``k_slice_hd``
+    spec field. It is a genuine tuning axis: narrowing cuts the bank-conflict
+    degree but doubles the per-tile barrier and partial-wait count, so the best
+    width is a knee rather than the smallest legal value.
+
+    Returns the shipped 32 for every problem: this makes the width expressible
+    without changing any kernel. Selecting a narrower width is a separate change,
+    and one that has to mirror the width into the C++ engine first -- the C++ twin
+    of this builder hardcodes ``K_SLICE_HD`` (and ``K_SLICE_SLOTS``), so a Python
+    selector that returned anything else would make the two engines disagree for
+    ring specs. The parity corpus enumerates no ring config, so the byte-identity
+    gate would not catch it.
+
+    ``HIPDNN_GFX942_K_SLICE_HD`` overrides the width for measurement. It is a
+    diagnostic knob and carries that same engine-divergence caveat, which is why
+    the default path does not use it. Only meaningful when the ring is active."""
+    env = __import__("os").environ.get("HIPDNN_GFX942_K_SLICE_HD", "").strip()
+    # isdecimal rather than isdigit: isdigit accepts characters such as
+    # superscripts that int() then rejects, turning a typo into a ValueError on
+    # the dispatch path.
+    if env.isdecimal() and int(env) in _GFX942_K_SLICE_HD_CHOICES:
+        width = int(env)
+        # Mirror the validator's shape rules, or the env var can turn a supported
+        # problem into a hard failure: the feasibility gate answers "supported"
+        # before the spec is built, so a rule enforced only in ``__post_init__``
+        # surfaces as a late ValueError on the dispatch path rather than as a
+        # clean decline back to the default width. The width must divide the head
+        # size, and must leave at least two slices. The remaining rule -- a
+        # multiple of the QK k-step -- holds for every member of
+        # ``_GFX942_K_SLICE_HD_CHOICES``, so it cannot fail here.
+        if problem.head_size % width == 0 and problem.head_size // width >= 2:
+            return width
+    return 32
 
 
 def _enable_gfx942_flash_k_sliced_ldsseq(problem: UnifiedAttentionProblem) -> bool:
