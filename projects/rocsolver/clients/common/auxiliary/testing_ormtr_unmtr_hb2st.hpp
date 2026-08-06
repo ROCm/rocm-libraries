@@ -584,7 +584,7 @@ void testing_ormtr_unmtr_hb2st(Arguments& argus)
         CHECK_HIP_ERROR(dnorm.memcheck());
 
     // check quick return
-    if(m == 0 || n == 0)
+    if(m == 0 || n == 0 || nq == 1)
     {
         EXPECT_ROCBLAS_STATUS(rocsolver_ormtr_unmtr_hb2st(handle, side, trans, m, n, kd, dV.data(),
                                                           ldv, dTau.data(), dC.data(), ldc),

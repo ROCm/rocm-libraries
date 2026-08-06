@@ -65,13 +65,13 @@ void rocsolver_ormtr_unmtr_hb2st_getMemorySize(const rocblas_side side,
     *size_work = 0;
     *size_workArr = 0;
 
-    // quick return if no workspace needed
-    if(m == 0 || n == 0 || batch_count == 0)
-        return;
-
     I nz = (side == rocblas_side_left ? n : m); // cols in Z
     I nq = (side == rocblas_side_left ? m : n); // rows & cols in Q
     I nt = ceildiv(nq - 1, kd); // block cols in conceptual triangular V
+
+    // quick return if no workspace needed
+    if(m == 0 || n == 0 || nq == 1 || batch_count == 0)
+        return;
 
     // If batch_count = 1, set max_parallel > 1 and batch update block rows or
     // cols of a single matrix.
@@ -142,7 +142,8 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_argCheck(rocblas_handle handle,
         return rocblas_status_continue;
 
     // skip pointer check if quick return
-    if(m == 0 || n == 0 || batch_count == 0)
+    I nq = (side == rocblas_side_left ? m : n); // rows & cols in Q
+    if(m == 0 || n == 0 || nq == 1 || batch_count == 0)
         return rocblas_status_continue;
 
     // 3. invalid pointers
@@ -189,17 +190,17 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_template(rocblas_handle handle,
     const T one = 1;
     const T negone = -1;
 
-    // quick return
-    if(m == 0 || n == 0 || batch_count == 0)
-        return rocblas_status_success;
-
-    hipStream_t stream;
-    rocblas_get_stream(handle, &stream);
-
     bool left = (side == rocblas_side_left);
     I nz = (left ? n : m); // cols in Z
     I nq = (left ? m : n); // rows & cols in Q
     I nt = ceildiv(nq - 1, kd); // block cols in conceptual triangular V
+
+    // quick return
+    if(m == 0 || n == 0 || nq == 1 || batch_count == 0)
+        return rocblas_status_success;
+
+    hipStream_t stream;
+    rocblas_get_stream(handle, &stream);
 
     I ldt = kd;
     I ldw = 2 * kd;

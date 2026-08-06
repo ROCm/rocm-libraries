@@ -76,10 +76,12 @@ const vector<vector<int>> size_range = {
     {0, 1, 0}, // also bad args
     {1, 0, 0},
     // invalid
-    {-1, 1, 0},
-    {1, -1, 0},
-    {1, 1, -1},
+    {-1, 1, 1}, // m = -1 invalid
+    {1, -1, 1}, // n = -1 invalid
+    {1, 1, 0}, // kd = 0 invalid
     // normal (valid) samples
+    {1, 2, 1}, // on left: quick return (1x1 * 1x2); right: valid (1x2 * 2x2)
+    {2, 1, 1}, // on left: valid (2x2 * 2x1); right: quick return (2x1 * 1x1)
     {10, 30, 4},
     {20, 5, 2},
     {20, 20, 5},
@@ -92,10 +94,12 @@ const vector<vector<int64_t>> size_range_64 = {
     {0, 1, 0}, // also bad args
     {1, 0, 0},
     // invalid
-    {-1, 1, 0},
-    {1, -1, 0},
-    {1, 1, -1},
+    {-1, 1, 1}, // m = -1 invalid
+    {1, -1, 1}, // n = -1 invalid
+    {1, 1, 0}, // kd = 0 invalid
     // normal (valid) samples
+    {1, 2, 1}, // on left: quick return (1x1 * 1x2); right: valid (1x2 * 2x2)
+    {2, 1, 1}, // on left: valid (2x2 * 2x1); right: quick return (2x1 * 1x1)
     {10, 30, 4},
     {20, 5, 2},
     {20, 20, 5},
