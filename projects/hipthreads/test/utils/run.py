@@ -14,8 +14,10 @@ program's error code.
 """
 
 import argparse
+import glob
 import os
 import platform
+import shutil
 import subprocess
 
 
@@ -23,6 +25,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--execdir", type=str, required=True)
     parser.add_argument("--codesign_identity", type=str, required=False, default=None)
+    parser.add_argument("--dll-dir", type=str, required=False, default=None)
     parser.add_argument("--env", type=str, nargs="*", required=False, default=[])
     parser.add_argument(
         "--prepend_env", type=str, nargs="*", required=False, default=[]
@@ -44,6 +47,16 @@ def main():
         for exe in filter(isTestExe, commandLine):
             codesign = ["codesign", "-f", "-s", args.codesign_identity, exe]
             subprocess.check_call(codesign, env={})
+
+    # On Windows, stage the ROCm runtime DLLs next to each test exe. The loader
+    # searches the exe's own directory before System32, so this ensures the test
+    # loads the artifact's HIP runtime and not a driver-installed amdhip64_7.dll
+    # that would otherwise shadow it from System32. See TheRock#7132.
+    if args.dll_dir and platform.system() == "Windows":
+        for exe in filter(isTestExe, commandLine):
+            exe_dir = os.path.dirname(exe)
+            for dll in glob.glob(os.path.join(args.dll_dir, "*.dll")):
+                shutil.copy2(dll, exe_dir)
 
     # Extract environment variables into a dictionary
     env = {k: v for (k, v) in map(lambda s: s.split("=", 1), args.env)}
