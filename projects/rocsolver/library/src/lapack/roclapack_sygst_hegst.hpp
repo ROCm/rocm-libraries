@@ -282,7 +282,7 @@ void rocsolver_sygst_hegst_getMemorySize(const rocblas_fill uplo,
         // ------------------------------------------
         I const nb = xxGST_BLOCKSIZE;
         I nn = std::min(n, nb);
-        nn = (nn % 128) ? (nn + 1) : nn;
+        nn = ((nn % 128) == 0) ? (nn + 1) : nn;
 
         size_t temp1{}, temp2{}, temp3{}, temp4{}, temp5{}, temp6{}, temp7{}, temp8{};
 
@@ -674,13 +674,13 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
             // ------------------------------------------
             // note nT to maintain alignment in temp1
             // ------------------------------------------
-            auto const len_Asave = get_len_Asave<T>(n);
+            size_t const len_Asave = get_len_Asave<T>(n);
             T* const Asave = static_cast<T*>(work_x_temp);
 
             // ------------------------
             // scratch storage for TRSM
             // ------------------------
-            auto const temp1 = Asave + len_Asave;
+            auto const temp1 = Asave + len_Asave * batch_count;
             auto const temp2 = workArr_temp_arr;
             auto const temp3 = store_wcs_invA;
             auto const temp4 = invA_arr;
