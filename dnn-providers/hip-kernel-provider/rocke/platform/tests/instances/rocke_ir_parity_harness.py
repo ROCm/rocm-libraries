@@ -126,6 +126,7 @@ def build_conv(
     pipeline="mem",
     epilogue="default",
     groups=1,
+    vector_size_c=None,
 ):
     def _build():
         from rocke.instances.common.conv_implicit_gemm import (
@@ -150,6 +151,7 @@ def build_conv(
             pipeline=pipeline,
             epilogue=epilogue,
             groups=groups,
+            vector_size_c=vector_size_c,
         )
         return build_implicit_gemm_conv(spec, arch=arch)
 
@@ -943,6 +945,7 @@ def cases():
             tile_k=32,
             pipeline="basic",
             epilogue="default",
+            vector_size_c=1,
         ),
     )
     add(
