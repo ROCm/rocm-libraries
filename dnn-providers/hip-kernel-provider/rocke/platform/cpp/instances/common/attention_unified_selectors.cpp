@@ -245,6 +245,46 @@ static bool enable_softmax_mfma_interleave(const rocke_unified_attn_problem_t* p
     return p->head_size == 128 && !p->use_fp8 && enable_single_batch_combo(p);
 }
 
+/* Python: _enable_i64_kv_addr(problem). Switch to i64 addressing when the paged
+ * KV-cache exceeds 2 GiB (i32 buffer voffset overflows and silently corrupts).
+ * num_kv_blocks==0 means unknown size -> assume small / fast i32 path. */
+static bool enable_i64_kv_addr(const rocke_unified_attn_problem_t* p)
+{
+    if(p->num_kv_blocks <= 0)
+    {
+        return false;
+    }
+    int elem_bytes = p->use_fp8 ? 1 : 2;
+    uint64_t block_stride = (uint64_t)p->block_size * (uint64_t)p->num_kv_heads
+                            * (uint64_t)p->head_size * (uint64_t)elem_bytes;
+    uint64_t cache_bytes = (uint64_t)p->num_kv_blocks * block_stride;
+    return cache_bytes > 0x80000000ULL; /* 2^31 bytes */
+}
+
+/* Python: _d256_gfx950_cohort(problem). */
+static bool d256_gfx950_cohort(const rocke_unified_attn_problem_t* p)
+{
+    return p->head_size == 256 && strcmp(p->dtype, "bf16") == 0 && !p->use_fp8
+           && p->sliding_window == 0 && p->softcap == 0 && !p->use_sinks && !p->use_alibi
+           && !p->use_qq_bias && p->max_seqlen_q > 1;
+}
+
+/* Python: _d256_gfx950_fast(problem). */
+static bool d256_gfx950_fast(const rocke_unified_attn_problem_t* p)
+{
+    return arch_is("gfx950") && d256_gfx950_cohort(p);
+}
+
+/* Python: _d256_gfx942_fast(problem). */
+static bool d256_gfx942_fast(const rocke_unified_attn_problem_t* p)
+{
+    /* Excludes caches > 2 GiB (need i64 path, fall back to default builder). */
+    return arch_is("gfx942") && p->head_size == 256 && strcmp(p->dtype, "bf16") == 0 && !p->use_fp8
+           && p->sliding_window == 0 && p->softcap == 0 && !p->use_sinks && !p->use_alibi
+           && !p->use_qq_bias && p->max_seqlen_q > 1 && (p->block_size == 16 || p->block_size == 32)
+           && !enable_i64_kv_addr(p);
+}
+
 /* Python: _enable_transposed_qk_32x32(problem). */
 static bool enable_transposed_qk_32x32(const rocke_unified_attn_problem_t* p)
 {
@@ -404,6 +444,19 @@ static int select_gfx942_flash_num_warps(const rocke_unified_attn_problem_t* p)
  * D64 force-T=64 branch. */
 static int select_2d_tile_size(const rocke_unified_attn_problem_t* p)
 {
+
+    if(d256_gfx950_fast(p))
+    {
+        return 64;
+    }
+    if(d256_gfx942_fast(p))
+    {
+        return 32;
+    }
+    if(arch_is("gfx1250"))
+    {
+        return p->block_size;
+    }
     /* Sliding-window long-prefill FP8 exception. */
     if(p->use_fp8 && p->sliding_window > 0 && p->max_seqlen_q > 256)
     {
@@ -428,30 +481,24 @@ static int select_2d_tile_size(const rocke_unified_attn_problem_t* p)
     {
         return p->block_size;
     }
-    /* Single-batch d128/d64 prefill full-combo cohort: d128 -> 2*BS,
-       d64 -> 128 (paired with num_warps=4). */
+    /* Single-batch d128/d64 prefill full-combo cohort: d128 -> 2*BS, d64 -> 128. */
     if(enable_single_batch_combo(p))
     {
         if(p->head_size == 64)
         {
+            /* bf16 h64kv8 no-SW fast_paged_kv_desc exception. */
+            if(strcmp(p->dtype, "bf16") == 0 && p->num_query_heads == 64 && p->num_kv_heads == 8
+               && p->sliding_window == 0)
+            {
+                return 64;
+            }
+
             return 128;
         }
-        /* d128 softmax-MFMA-interleave cohort keeps the WIDE T=2*BS tile (the
-           nw=4 interleave win is measured at the wide tile; nw=4 + T=32 is the
-           occupancy-WORSE combo -- 56 KB LDS -> 1 WG/CU). Guard BEFORE the
-           small-tile check so this cohort mirrors Python _select_2d_tile_size
-           (which returns 2*block_size here). Matches the num_warps selector's
-           interleave-before-small-tile ordering. */
-        if(enable_softmax_mfma_interleave(p))
-        {
-            return 2 * p->block_size;
-        }
-        /* d128 occupancy lever: halve the tile to T=block_size (one paged
-           block per iter) -> LDS 48->24 KB -> 2 WG/CU. DEFAULT-ON;
-           HIPDNN_GFX950_D128_SMALL_TILE=0 force-disables. */
+        /* d128 occupancy lever: K-single-buffer (see enable_d128_small_tile). */
         if(enable_d128_small_tile(p))
         {
-            return p->block_size;
+            return 2 * p->block_size;
         }
         return 2 * p->block_size;
     }
