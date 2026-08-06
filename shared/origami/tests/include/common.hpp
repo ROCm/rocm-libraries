@@ -30,6 +30,7 @@
 #include "origami/gemm.hpp"
 #include "origami/hardware.hpp"
 #include "origami/heuristics.hpp"
+#include "origami/math.hpp"
 #include "origami/origami.hpp"
 #include "origami/streamk.hpp"
 
@@ -107,9 +108,7 @@ inline origami::config_t make_config(size_t mt_m,
   config.cache_hints_a            = non_temporal_a;
   config.cache_hints_b            = non_temporal_b;
   config.stream_k                 = stream_k;
-  if (stream_k == 0) {
-    config.grid_selection = origami::grid_selection_t::data_parallel;
-  }
+  if (stream_k == 0) { config.grid_selection = origami::grid_selection_t::data_parallel; }
   return config;
 }
 
@@ -152,10 +151,10 @@ inline origami::hardware_t make_hardware(int gpu_arch) {
     compute_clock_ghz          = 1.2;
     parallel_mi_cu             = 1;
     mem_bw_per_wg_coefficients = std::make_tuple(0, 0.008, 0);
-  } else if(gpu_arch == 1250) {
+  } else if (gpu_arch == 1250) {
     // TODO: using gfx950 placeholders for most fields, update lds_capacity and l2_capacity later
-    auto hw = make_hardware(950);
-    hw.arch = origami::hardware_t::architecture_t::gfx1250;
+    auto hw                       = make_hardware(950);
+    hw.arch                       = origami::hardware_t::architecture_t::gfx1250;
     hw.mem_bw_per_wg_coefficients = std::make_tuple(0, 0.016, 0);
     return hw;
   }

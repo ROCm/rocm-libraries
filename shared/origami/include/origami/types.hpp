@@ -446,9 +446,9 @@ struct tensile_params_t {
   bool swizzle_b = false;
 
   /// Workgroup mapping XCC parameters
-  int workgroup_mapping_xcc = 1;
-  int workgroup_mapping_xcc_group = 0;
-  bool global_split_u_coalesced = false;
+  int workgroup_mapping_xcc           = 1;
+  int workgroup_mapping_xcc_group     = 0;
+  bool global_split_u_coalesced       = false;
   bool global_split_u_wgm_round_robin = false;
 
   constexpr bool operator==(const tensile_params_t& o) const noexcept {
@@ -529,7 +529,7 @@ struct config_t {
   std::size_t workspace_size            = 0;
   std::size_t workspace_size_per_elem_c = 0;
 
-  /// Stream-K mode selector (0 disables stream-K; 5 dynamic stream-K).
+  /// Stream-K mode selector (0 disables stream-K; 1 to 5 enables stream-K).
   int stream_k = 5;
 
   /// Reduction strategy.
