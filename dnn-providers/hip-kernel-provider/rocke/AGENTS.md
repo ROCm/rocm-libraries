@@ -76,12 +76,13 @@ Full rationale + build/test/GPU setup + `helpers/` placement + env-flag table:
 
 ## Definition of Done
 
-A change is not done until it clears [`DEFINITION_OF_DONE.md`](DEFINITION_OF_DONE.md)
-for its change type (new family / new knob / new feature / perf optimization). Build
-and test references: [`BUILDING.md`](BUILDING.md), [`TESTING.md`](TESTING.md).
-Language style: [`style/PYTHON_STYLE.md`](style/PYTHON_STYLE.md),
-[`style/CPP_STYLE.md`](style/CPP_STYLE.md). Contribution flow:
-[`CONTRIBUTING.md`](CONTRIBUTING.md).
+A change is not done until it clears [`KERNEL_AUTHORING.md`](KERNEL_AUTHORING.md)
+for its change type (new family / new knob / new feature / perf optimization) — the
+single doc for the Definition of Done, the process map, and commit/branch
+conventions. Build and test references: [`BUILDING.md`](BUILDING.md),
+[`TESTING.md`](TESTING.md). Language style:
+[`style/PYTHON_STYLE.md`](style/PYTHON_STYLE.md),
+[`style/CPP_STYLE.md`](style/CPP_STYLE.md).
 
 ## Optimization doc routing — READ the matching doc BEFORE optimizing a kernel
 

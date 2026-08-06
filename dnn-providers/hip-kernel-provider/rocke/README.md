@@ -34,8 +34,7 @@ the provider's own `src/`.
 | Understand the rules / invariants (agents + contributors) | [AGENTS.md](AGENTS.md) — the canonical entry point |
 | Build & run | [BUILDING.md](BUILDING.md) |
 | Test | [TESTING.md](TESTING.md) |
-| Know when a change is "done" | [DEFINITION_OF_DONE.md](DEFINITION_OF_DONE.md) |
-| Contribute (flow, branch, commits) | [CONTRIBUTING.md](CONTRIBUTING.md) |
+| Know when a change is "done" (DoD, process, commit/branch conventions) | [KERNEL_AUTHORING.md](KERNEL_AUTHORING.md) |
 | Learn the engine deeply (IR, lowering, primitives, instances) | [platform/dsl_docs/README.md](platform/dsl_docs/README.md) |
 | Author a new kernel | [platform/dsl_docs/architecture/authoring_model.md](platform/dsl_docs/architecture/authoring_model.md) |
 | Optimize a kernel | [platform/dsl_docs/optimization/optimization_runbook.md](platform/dsl_docs/optimization/optimization_runbook.md) |
