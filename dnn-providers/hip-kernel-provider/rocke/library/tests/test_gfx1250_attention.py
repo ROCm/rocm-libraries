@@ -23,22 +23,14 @@ import subprocess
 import sys
 import unittest
 
+from rocke.runtime.hip_module import get_device_arch
+
 # Subprocess `-m` runs (rocke.*, kernels.*, builders.*) resolve through the
 # editable-installed rocke + library packages; no PYTHONPATH wiring needed
 # (see rocke/BUILDING.md).
 
-
-def _device_arch():
-    """(arch_str_or_None) via the rocke HIP runtime (no torch dependency)."""
-    try:
-        from rocke.runtime.hip_module import get_device_arch
-
-        return get_device_arch(0)
-    except Exception:
-        return None
-
-
-_ARCH = _device_arch()
+# Running device's gfx arch via the rocke HIP runtime (no torch dependency).
+_ARCH = get_device_arch(0)
 
 
 class TestGfx1250DenseAttention(unittest.TestCase):

@@ -46,20 +46,23 @@ Definitions:
     - { alpha:  -0.5, beta:  0.5,  alphai:  1.0, betai: -0.5 }
 
 Tests:
-- name: gemvi_bad_arg
-  category: pre_checkin
-  function: gemvi_bad_arg
-  precision: *single_double_precisions_complex_real
-
+# Quick
 - name: gemvi
   category: quick
   function: gemvi
   precision: *single_double_precisions_complex_real
   M: [10, 19]
   N: [33, 28]
+  percentage: [33.0]
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+
+# Pre-checkin
+- name: gemvi_bad_arg
+  category: pre_checkin
+  function: gemvi_bad_arg
+  precision: *single_double_precisions_complex_real
 
 - name: gemvi
   category: pre_checkin
@@ -67,27 +70,8 @@ Tests:
   precision: *single_double_precisions_complex_real
   M: [8, 91]
   N: [8, 76]
+  percentage: [10.0, 33.0, 75.0]
   alpha_beta: *alpha_beta_range_checkin
-  transA: [rocsparse_operation_none]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-
-- name: gemvi
-  category: nightly
-  function: gemvi
-  precision: *single_double_precisions_complex_real
-  M: [728, 291]
-  N: [119, 493]
-  alpha_beta: *alpha_beta_range_nightly
-  transA: [rocsparse_operation_none]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-
-- name: gemvi
-  category: nightly
-  function: gemvi
-  precision: *single_double_precisions
-  M: [629, 341]
-  N: [220, 512]
-  alpha_beta: *alpha_beta_range_nightly
   transA: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
 
@@ -97,7 +81,32 @@ Tests:
   precision: *single_double_precisions_complex_real
   M: [10, 19]
   N: [33, 28]
+  percentage: [0.0, 33.0, 63.0, 100.0]
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   graph_test: true
+
+# Nightly
+- name: gemvi
+  category: nightly
+  function: gemvi
+  precision: *single_double_precisions_complex_real
+  M: [728, 291]
+  N: [119, 493]
+  percentage: [1.0, 5.0, 17.0, 33.0]
+  alpha_beta: *alpha_beta_range_nightly
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+
+- name: gemvi
+  category: nightly
+  function: gemvi
+  precision: *single_double_precisions
+  M: [629, 341, 1024, 2019]
+  N: [220, 512, 758, 1516]
+  percentage: [1.0, 2.0, 25.0, 33.0, 99.0, 100.0]
+  alpha_beta: *alpha_beta_range_nightly
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+

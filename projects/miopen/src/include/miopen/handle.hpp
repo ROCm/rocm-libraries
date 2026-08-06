@@ -239,7 +239,15 @@ struct MIOPEN_EXPORT Handle : miopenHandle
 
     std::string GetDbBasename() const
     {
-        return GetDbBasename(GetTargetProperties(), GetMaxComputeUnits());
+        const auto& target = GetTargetProperties();
+        const auto db_id   = target.DbId();
+        if(db_id == "gfx1100" || db_id == "gfx1102" || db_id == "gfx1201")
+        {
+            std::ostringstream ss;
+            ss << db_id << std::hex << GetMaxHardwareComputeUnits();
+            return ss.str();
+        }
+        return GetDbBasename(target, GetMaxComputeUnits());
     }
 
     std::unique_ptr<HandleImpl> impl;
