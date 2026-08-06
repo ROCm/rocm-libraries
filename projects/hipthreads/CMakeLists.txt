@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-set(VERSION_STRING "0.1.1")
+set(VERSION_STRING "1.0.0")
 
 project(hipthreads VERSION ${VERSION_STRING} LANGUAGES CXX HIP)
 
@@ -52,7 +52,7 @@ add_subdirectory(src)
 if (CMAKE_BUILD_TYPE MATCHES Debug)
   add_subdirectory(test)
 endif()
- 
+
 #-----------------------------------------------------------------------------
 # Installation and Packaging Rules
 #-----------------------------------------------------------------------------
