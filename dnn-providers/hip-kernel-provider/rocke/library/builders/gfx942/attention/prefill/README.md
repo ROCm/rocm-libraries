@@ -22,6 +22,38 @@ gfx950 golden is untouched by construction.
 Still rejected with a structured reason by `supports_attention_dense`: varlen, ragged,
 sliding-window. See the AICK-1664 plan for the deferred-findings backlog.
 
+### Gain over the unified-attention baseline
+
+Relative gain of this kernel over the in-tree unified attention path
+(`attention_tiled_2d`, the `unified_2d` / `dense_pipe` family) at its best per-config
+vehicle. Same HIP-event timer, same inputs, same fp32 reference for both arms, measured
+on the 304-CU gfx942 part; every cell is a **ratio**, so per `AGENTS.md` the absolute
+throughputs stay in the protected results page.
+
+| config | vs unified attention | note |
+|---|---|---|
+| fp16 D128 | **+90 % → +194 %** | grows with sequence length; the primary prefill target |
+| bf16 D128 | **+66 % → +241 %** | grows with sequence length |
+| D64 (both dtypes) | not currently measured — see below | last head-to-head predates the shipped bank-pad |
+
+Three caveats on how to read this, all of which change the reading:
+
+- The fp16-D128 baseline is unified attention's `fast` wide4 + conflict-free-V +
+  sliced-K-ring vehicle, **not** its shipped config — the shipped one overflows the
+  64 KB LDS and fails codegen at llvm22. bf16-D128 uses the shipped `narrow` config.
+  So fp16-D128 is measured against the strongest in-tree alternative, not the easiest.
+- **D64 has no current head-to-head.** The last one ran *before* the D64
+  K-bank-conflict pad was adopted, and measured −17 % (fp16, short sequence) to +29 %
+  (fp16, long) and +23 % (bf16, long). The pad has since shipped for both D64 dtypes
+  and is worth roughly 1.6–2.1× on the D64 path on its own, so those figures
+  understate the shipped kernel by a wide margin and the short-sequence regression is
+  unlikely to have survived. Rather than compose two separately-measured ratios and
+  present the product as data, the row is left open: re-running the comparison at the
+  shipped config is the honest way to close it.
+- D64 remains the VGPR-bound regime described under *Problem category* —
+  `waves_per_eu` reaches 2 WG/CU for bf16-D64 but not fp16-D64 — so a `waves_per_eu`
+  re-tune stays a named follow-up wherever the re-measurement lands.
+
 ## Scope
 
 gfx942 only · forward-inference prefill · dense causal (no paging / bias / SWA / sinks)
@@ -123,5 +155,7 @@ which is the numeric gate for this kernel — the same role the bench plays on g
 no GPU): re-run it after any lever change to confirm 0 spill and to see which resource
 is the occupancy limiter.
 
-Per AGENTS.md, **measured throughput lives only in the protected results page, never in
-the repo.**
+Per AGENTS.md, **absolute measured throughput lives only in the protected results page,
+never in the repo.** The relative gains under *Status* are ratios, which is the form that
+can be stated here; every TFLOP/s, counter and per-lever magnitude behind them is on the
+protected page.
