@@ -32,8 +32,12 @@ import unittest
 from dataclasses import asdict
 
 import kernels.common.attention_unified as au
+import kernels.common.attention_unified as _kau
 from kernels.common.attention_unified import (
     UnifiedAttentionProblem,
+    _enable_combo_2d,
+    _enable_early_v_schedule,
+    _enable_fp8_mfma_qk,
     _enable_gfx942_bf16_flash,
     _enable_gfx942_flash_k_sliced_ldsseq,
     _enable_gfx942_flash_k_sliced_ring,
@@ -41,6 +45,15 @@ from kernels.common.attention_unified import (
     _enable_gfx942_flash_q_direct,
     _enable_gfx942_fp16_flash,
     _enable_i64_kv_addr,
+    _enable_k_single_buffer,
+    _enable_mfma_32x32,
+    _enable_register_pv,
+    _enable_sched_barrier,
+    _enable_softmax_mfma_interleave,
+    _enable_transposed_half_local_pv,
+    _enable_transposed_qk_32x32,
+    _enable_transposed_subflags,
+    _enable_v_double_buffer,
     _gfx942_bf16_wide_geometry,
     _gfx942_bf16_wide_tile_size,
     _gfx942_bf16_wide_use_cfvst,
@@ -50,6 +63,7 @@ from kernels.common.attention_unified import (
     _gfx942_flash_wide_setting,
     _kv_storage_dtype,
     _select_2d_block_m_per_warp,
+    _select_2d_num_warps,
     _select_2d_tile_size,
     _select_2d_waves_per_eu,
     _select_gfx942_flash_num_warps,
@@ -186,6 +200,133 @@ def _reference_gfx942_bf16_flash(problem):
     )
 
 
+# --------------------------------------------------------------------------
+# gfx942 generic (non-flash fallthrough) cohort
+# --------------------------------------------------------------------------
+def _reference_gfx942_generic(problem):
+    """Independent reconstruction of the pre-refactor gfx942 fallthrough.
+
+    The gfx942 residual: the shared fallthrough with the gfx950-only schedule
+    fields omitted (the gfx942 spec class does not declare them). The combo /
+    transposed helpers hard-gate to gfx950, so on gfx942 they are off.
+    """
+    UnifiedAttention2DTiledSpec, _, _ = _tiled_2d_impl("gfx942")
+    combo = _enable_combo_2d(problem)
+    combo_no_sw = combo and problem.sliding_window == 0
+    subflags = _enable_transposed_subflags(problem)
+    scalar_state = combo or subflags
+    skip_legacy_qreg = combo or subflags
+    _bias_active = problem.softcap > 0 or problem.use_alibi or problem.use_qq_bias
+    mask_opts = (combo_no_sw and not _bias_active) or subflags
+    return UnifiedAttention2DTiledSpec(
+        head_size=problem.head_size,
+        block_size=problem.block_size,
+        num_query_heads=problem.num_query_heads,
+        num_kv_heads=problem.num_kv_heads,
+        dtype=problem.dtype,
+        use_sinks=problem.use_sinks,
+        sliding_window=problem.sliding_window,
+        has_softcap=problem.softcap > 0,
+        use_alibi=problem.use_alibi,
+        use_qq_bias=problem.use_qq_bias,
+        num_seqs=problem.num_seqs,
+        num_warps=_select_2d_num_warps(problem),
+        waves_per_eu=_select_2d_waves_per_eu(problem),
+        kv_storage_dtype=_kv_storage_dtype(problem),
+        tile_size=_select_2d_tile_size(problem),
+        block_m_per_warp=_select_2d_block_m_per_warp(problem),
+        use_mfma_32x32=_enable_mfma_32x32(problem),
+        use_transposed_qk_32x32=_enable_transposed_qk_32x32(problem),
+        use_transposed_half_local_pv=_enable_transposed_half_local_pv(problem),
+        use_transposed_scalar_state=scalar_state,
+        use_transposed_mask_once=mask_opts,
+        use_transposed_mask_limit=mask_opts,
+        use_mfma32_skip_legacy_qreg=skip_legacy_qreg,
+        use_early_v_schedule=_enable_early_v_schedule(problem),
+        use_fast_paged_kv_desc=(
+            combo_no_sw
+            and not problem.use_fp8
+            and problem.num_query_heads == 64
+            and problem.num_kv_heads == 8
+            and _select_2d_tile_size(problem) == 64
+        ),
+        use_register_pv=_enable_register_pv(problem),
+        use_fp8_mfma_qk=_enable_fp8_mfma_qk(problem),
+        use_i64_kv_addr=_enable_i64_kv_addr(problem),
+    )
+
+
+# --------------------------------------------------------------------------
+# gfx950 generic (combo / schedule + D256 override) cohort
+# --------------------------------------------------------------------------
+def _reference_gfx950_generic(problem):
+    """Independent reconstruction of the pre-refactor gfx950 fallthrough.
+
+    The full machinery: combo / subflags, the schedule fields set directly (the
+    gfx950 spec class always declares them), and the D256 gfx950 fast-route tail
+    override. Mirrors the guarded fallthrough for gfx950 byte-for-byte.
+    """
+    from dataclasses import replace
+
+    UnifiedAttention2DTiledSpec, _, _ = _tiled_2d_impl("gfx950")
+    combo = _enable_combo_2d(problem)
+    combo_no_sw = combo and problem.sliding_window == 0
+    subflags = _enable_transposed_subflags(problem)
+    scalar_state = combo or subflags
+    skip_legacy_qreg = combo or subflags
+    _bias_active = problem.softcap > 0 or problem.use_alibi or problem.use_qq_bias
+    mask_opts = (combo_no_sw and not _bias_active) or subflags
+    sched = {
+        "use_v_double_buffer": _enable_v_double_buffer(problem),
+        "use_sched_barrier": _enable_sched_barrier(problem),
+    }
+    if _enable_softmax_mfma_interleave(problem):
+        sched["use_softmax_mfma_interleave"] = True
+        sched["softmax_interleave_mode"] = 1
+    if _enable_k_single_buffer(problem):
+        sched["use_k_single_buffer"] = True
+    spec = UnifiedAttention2DTiledSpec(
+        head_size=problem.head_size,
+        block_size=problem.block_size,
+        num_query_heads=problem.num_query_heads,
+        num_kv_heads=problem.num_kv_heads,
+        dtype=problem.dtype,
+        use_sinks=problem.use_sinks,
+        sliding_window=problem.sliding_window,
+        has_softcap=problem.softcap > 0,
+        use_alibi=problem.use_alibi,
+        use_qq_bias=problem.use_qq_bias,
+        num_seqs=problem.num_seqs,
+        num_warps=_select_2d_num_warps(problem),
+        waves_per_eu=_select_2d_waves_per_eu(problem),
+        kv_storage_dtype=_kv_storage_dtype(problem),
+        tile_size=_select_2d_tile_size(problem),
+        block_m_per_warp=_select_2d_block_m_per_warp(problem),
+        use_mfma_32x32=_enable_mfma_32x32(problem),
+        use_transposed_qk_32x32=_enable_transposed_qk_32x32(problem),
+        use_transposed_half_local_pv=_enable_transposed_half_local_pv(problem),
+        use_transposed_scalar_state=scalar_state,
+        use_transposed_mask_once=mask_opts,
+        use_transposed_mask_limit=mask_opts,
+        use_mfma32_skip_legacy_qreg=skip_legacy_qreg,
+        use_early_v_schedule=_enable_early_v_schedule(problem),
+        use_fast_paged_kv_desc=(
+            combo_no_sw
+            and not problem.use_fp8
+            and problem.num_query_heads == 64
+            and problem.num_kv_heads == 8
+            and _select_2d_tile_size(problem) == 64
+        ),
+        use_register_pv=_enable_register_pv(problem),
+        use_fp8_mfma_qk=_enable_fp8_mfma_qk(problem),
+        use_i64_kv_addr=_enable_i64_kv_addr(problem),
+        **sched,
+    )
+    if _kau._d256_gfx950_fast(problem):
+        spec = replace(spec, **_kau._d256_gfx950_spec_overrides())
+    return spec
+
+
 class _Cohort:
     def __init__(
         self,
@@ -195,9 +336,9 @@ class _Cohort:
         gate,
         problems,
         reference,
-        foreign,
-        foreign_field,
-        foreign_value,
+        foreign=None,
+        foreign_field=None,
+        foreign_value=None,
     ):
         self.name = name
         self.arch = arch
@@ -205,6 +346,11 @@ class _Cohort:
         self.gate = gate
         self.problems = problems
         self.reference = reference
+        # ``foreign`` is optional: a same-arch problem the gate REJECTS, proving
+        # non-interference. Some cohorts (e.g. gfx950 generic) have no same-arch
+        # escape -- every problem on that arch routes to them -- so they set
+        # ``foreign=None`` and the non-interference subtest is skipped for them
+        # (cross-arch separation is covered by the other cohorts' foreigns).
         self.foreign = foreign
         self.foreign_field = foreign_field
         self.foreign_value = foreign_value
@@ -264,6 +410,64 @@ _COHORTS = [
         foreign_field="use_mfma_32x32x8",
         foreign_value=False,
     ),
+    _Cohort(
+        name="gfx942_generic",
+        arch="gfx942",
+        spec_fn=lambda p: bld._spec_gfx942_generic(p),
+        # Generic = the fallthrough: reached when neither gfx942 flash gate fires.
+        gate=lambda p: not _enable_gfx942_bf16_flash(p)
+        and not _enable_gfx942_fp16_flash(p),
+        # GQA short-context (small_q_narrow carve-out) falls through on both dtypes.
+        problems=[
+            lambda: _problem(
+                num_query_heads=32, num_kv_heads=8, max_seqlen_q=256, total_q=256
+            ),
+            lambda: _problem(
+                num_query_heads=32,
+                num_kv_heads=8,
+                max_seqlen_q=256,
+                total_q=256,
+                dtype="bf16",
+            ),
+        ],
+        reference=_reference_gfx942_generic,
+        # A flash-eligible shape (MHA long fp16) escapes to the fp16 flash branch,
+        # distinguished by use_mfma_32x32x8 (True on flash, False on generic).
+        foreign=lambda: _problem(
+            num_query_heads=16, num_kv_heads=16, max_seqlen_q=2048, total_q=2048
+        ),
+        foreign_field="use_mfma_32x32x8",
+        foreign_value=True,
+    ),
+    _Cohort(
+        name="gfx950_generic",
+        arch="gfx950",
+        spec_fn=lambda p: bld._spec_gfx950_generic(p),
+        # Every gfx950 2D problem is generic (no gfx950 flash branches; combo /
+        # d256 all live inside this spec_fn), so the gate is unconditionally true.
+        gate=lambda p: True,
+        # Cover the sub-paths: plain narrow, combo (64x8 d128), D256, and SW.
+        problems=[
+            lambda: _problem(
+                num_query_heads=16, num_kv_heads=16, dtype="fp16"
+            ),
+            lambda: _problem(num_query_heads=64, num_kv_heads=8, dtype="bf16"),
+            lambda: _problem(
+                num_query_heads=64,
+                num_kv_heads=8,
+                head_size=256,
+                dtype="bf16",
+                max_seqlen_q=1024,
+                total_q=1024,
+            ),
+            lambda: _problem(
+                num_query_heads=64, num_kv_heads=8, dtype="bf16", sliding_window=128
+            ),
+        ],
+        reference=_reference_gfx950_generic,
+        # No same-arch foreign: all gfx950 problems route here (see _Cohort doc).
+        foreign=None,
+    ),
 ]
 
 
@@ -297,6 +501,8 @@ class TestPerEngineSpecFns(unittest.TestCase):
         # A problem the gate rejects must NOT receive this cohort's spec -- it
         # flows to a different branch (proven via a distinguishing field).
         for c in _COHORTS:
+            if c.foreign is None:
+                continue
             with self.subTest(cohort=c.name), _PinnedArch(c.arch):
                 p = c.foreign()
                 self.assertFalse(c.gate(p))
