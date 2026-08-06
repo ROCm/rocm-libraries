@@ -25,7 +25,7 @@
 #pragma once
 
 #include "rocsparse-auxiliary.h"
-#include "rocsparse-version.h"
+#include "rocsparse-config.h"
 
 #include "rocsparse_adaptive_info.hpp"
 #include "rocsparse_blas.hpp"

@@ -664,34 +664,11 @@ INSTANTIATE_TEST_SUITE_P(Full, TestGpuRMSNormFwdRef5DBfp16, ::testing::ValuesIn(
 // --gtest_filter=*TestGpuRMSNormFwdRefEdgeCaseValidation* flags.
 // ============================================================================
 
-namespace
-{
-
-int64_t getMaxOuterSizeForCurrentDevice()
-{
-    int deviceCount = 0;
-    if(hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount == 0)
-    {
-        // No devices available, return a default value to skip the tests.
-        return 1;
-    }
-
-    int deviceId = 0;
-    EXPECT_EQ(hipGetDevice(&deviceId), hipSuccess);
-
-    hipDeviceProp_t props{};
-    EXPECT_EQ(hipGetDeviceProperties(&props, deviceId), hipSuccess);
-
-    return static_cast<int64_t>(props.maxGridSize[0])
-           / static_cast<int64_t>(GpuFpReferenceRMSNorm::BLOCK_SIZE);
-}
-
-} // namespace
-
 TEST(TestGpuRMSNormFwdRefEdgeCaseValidation, DISABLED_OuterSizeAtMaxBlocksMinusOneSucceeds)
 {
     SKIP_IF_NO_DEVICES();
-    const int64_t outerSize = getMaxOuterSizeForCurrentDevice() - 1;
+    const int64_t outerSize
+        = getMaxGridSizeForCurrentDevice<GpuFpReferenceRMSNorm::BLOCK_SIZE>() - 1;
     Tensor<float> x({outerSize, 1, 1, 1});
     Tensor<float> scale({1, 1, 1, 1});
     Tensor<float> y({outerSize, 1, 1, 1});
@@ -702,7 +679,7 @@ TEST(TestGpuRMSNormFwdRefEdgeCaseValidation, DISABLED_OuterSizeAtMaxBlocksMinusO
 TEST(TestGpuRMSNormFwdRefEdgeCaseValidation, DISABLED_OuterSizeAtMaxBlocksSucceeds)
 {
     SKIP_IF_NO_DEVICES();
-    const int64_t outerSize = getMaxOuterSizeForCurrentDevice();
+    const int64_t outerSize = getMaxGridSizeForCurrentDevice<GpuFpReferenceRMSNorm::BLOCK_SIZE>();
     Tensor<float> x({outerSize, 1, 1, 1});
     Tensor<float> scale({1, 1, 1, 1});
     Tensor<float> y({outerSize, 1, 1, 1});
@@ -713,7 +690,8 @@ TEST(TestGpuRMSNormFwdRefEdgeCaseValidation, DISABLED_OuterSizeAtMaxBlocksSuccee
 TEST(TestGpuRMSNormFwdRefEdgeCaseValidation, DISABLED_OuterSizeAboveMaxBlocksThrows)
 {
     SKIP_IF_NO_DEVICES();
-    const int64_t outerSize = getMaxOuterSizeForCurrentDevice() + 1;
+    const int64_t outerSize
+        = getMaxGridSizeForCurrentDevice<GpuFpReferenceRMSNorm::BLOCK_SIZE>() + 1;
     Tensor<float> x({outerSize, 1, 1, 1});
     Tensor<float> scale({1, 1, 1, 1});
     Tensor<float> y({outerSize, 1, 1, 1});
@@ -776,7 +754,8 @@ INSTANTIATE_TEST_SUITE_P(PowerOfTwo,
 
 INSTANTIATE_TEST_SUITE_P(
     SkinnyInt32Scale, TestGpuRMSNormFwdRefEdgeCaseValidationFp32, ::testing::ValuesIn([]() {
-        return getRMSnormSkinnyInt32ScaleTestCases(getMaxOuterSizeForCurrentDevice());
+        return getRMSnormSkinnyInt32ScaleTestCases(
+            getMaxGridSizeForCurrentDevice<GpuFpReferenceRMSNorm::BLOCK_SIZE>());
     }()));
 
 INSTANTIATE_TEST_SUITE_P(InnerSizeInt32Boundary,

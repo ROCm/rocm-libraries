@@ -4834,7 +4834,11 @@ class KernelWriterAssembly(KernelWriter):
     moduleLoadGeneralBatch.add(SAddCU32(dst=sgpr(stmp+1), src0=sgpr("Address%s+1"%tc), src1=0, comment="Offsetting to the location [Higher half of address]"))
     moduleLoadGeneralBatch.add(SLoadB64(dst=sgpr("Srd%s"%tc, 2), base=sgpr(stmp, 2), soffset=0, comment="Load the Matrix Address in the Pointer Array"))
     # Load and apply batch offset for General Batched GEMM
-    if not kernel["ProblemType"]["GroupedGemm"]:
+    # gfx1250: skip the batch-offset apply. The load references KernArgAddress
+    # after the UserArgs/grouped prologue has relocated it, so the fixed soffset
+    # reads the wrong kernarg word and corrupts the SRD. Fall back to the
+    # pre-offset wait-only path here until the base-relative fix lands.
+    if not kernel["ProblemType"]["GroupedGemm"] and kernel["ISA"][:2] != (12, 5):
       batchOffsetKernArgOffset = self.states.batchOffsetAKernArgOffset if tc == "A" else self.states.batchOffsetBKernArgOffset
       moduleLoadGeneralBatch.add(SLoadB64(dst=sgpr(stmp, 2), base=sgpr("KernArgAddress", 2), soffset=hex(batchOffsetKernArgOffset), comment="Load batchOffset%s from kernel args"%tc))
       moduleLoadGeneralBatch.add(SWaitCnt(kmcnt=0, comment="Wait for Matrix Address and Batch Offset Loads"))
@@ -11497,7 +11501,9 @@ class KernelWriterAssembly(KernelWriter):
               else:
                 with self.allocTmpSgpr(1, tag="tdmSplitDim1Parity") as waveIdTmp:
                   self._emitTdmWaveParitySCC(imod.middle, kernel, waveIdTmp.idx)
-              imod.middle.add(SCSelectB32(sgpr(hr), halfRowsB, halfRowsA, "halfRows = parity ? B : A"))
+              # SALU: one literal per instr; s_mov A first (keeps SCC), then s_cselect against B.
+              imod.middle.add(SMovB32(sgpr(hr), halfRowsA, "halfRows = A"))
+              imod.middle.add(SCSelectB32(sgpr(hr), halfRowsB, sgpr(hr), "halfRows = parity ? B : A"))
             imod.middle.add(SLShiftRightB32(sgpr(h0), hex(16), sgpr(f"{group1}+2"), "H0 = dim1 lo"))
             imod.middle.add(SLShiftLeftB32(sgpr(h1), hex(16), sgpr(f"{group1}+3"), "H0 hi << 16"))
             imod.middle.add(SOrB32(sgpr(h0), sgpr(h0), sgpr(h1), "H0 = full dim1"))
@@ -13680,7 +13686,9 @@ class KernelWriterAssembly(KernelWriter):
               # (not the GSU workspace), so the offset is correctly applied here. When GSU>1 the
               # routing branches to the strided/workspace path and skips this block; the PostGSU
               # conversion kernel applies the offset when it writes the final result to C/D.
-              if not kernel["ProblemType"]["GroupedGemm"]:
+              # gfx1250: skip the batch-offset apply (see computeLoadSrd A/B note);
+              # the KernArgAddress-relative load is unsafe after prologue relocation.
+              if not kernel["ProblemType"]["GroupedGemm"] and kernel["ISA"][:2] != (12, 5):
                 batchOffsetKernArgOffset = self.states.batchOffsetCKernArgOffset if mat == "C" else self.states.batchOffsetDKernArgOffset
                 module.add(SLoadB64(dst=sgpr(tmpS0, 2), base=sgpr("KernArgAddress", 2), soffset=hex(batchOffsetKernArgOffset), comment="Load batchOffset%s from kernel args"%mat))
                 module.add(SWaitCnt(kmcnt=0, comment="Wait for Matrix Address and Batch Offset Loads"))
@@ -13783,7 +13791,9 @@ class KernelWriterAssembly(KernelWriter):
     module.add(SAddCU32(dst=sgpr(tmpsgpr2+1), src0=sgpr("AddressTD+1"), src1=0, comment="Offsetting to the location [Higher half of address]"))
     module.add(SLoadB64(dst=sgpr("SrdTD", 2), base=sgpr(tmpsgpr2, 2), soffset=0, comment="Load the Matrix Address in the Pointer Array"))
     # Load and apply batch offset for General Batched GEMM (dstD) as necessary.
-    if not kernel["ProblemType"]["GroupedGemm"]:
+    # gfx1250: skip the batch-offset apply (see computeLoadSrd A/B note);
+    # the KernArgAddress-relative load is unsafe after prologue relocation.
+    if not kernel["ProblemType"]["GroupedGemm"] and kernel["ISA"][:2] != (12, 5):
       module.add(SLoadB64(dst=sgpr(tmpsgpr3, 2), base=sgpr("KernArgAddress", 2), soffset=hex(self.states.batchOffsetDKernArgOffset), comment="Load batchOffsetD from kernel args"))
       module.add(SWaitCnt(kmcnt=0, comment="Wait for the Matrix Address and batchOffsetD Load"))
       module.add(SAddU32(dst=sgpr("SrdTD+0"), src0=sgpr("SrdTD+0"), src1=sgpr(tmpsgpr3+0), comment="Apply batchOffsetD to SrdTD (low)"))
@@ -19183,6 +19193,16 @@ class KernelWriterAssembly(KernelWriter):
     dim1Divisor = 2
     ldsBlockSizePerPad: int = kernel[f"LdsBlockSizePerPad{tc}"]
     ldsPadSize: int = int(kernel[f"LdsPad{tc}"] * bpe)
+    if kernel.get("LDSSegmentInterleave") == 1 and tc in ("A", "B"):
+      _segOff = kernel["LDSSegInterleaveOffsets"]
+      if tc == "A" and _segOff.get("portSplitA", False):
+        numVec = kernel["MIWaveTile"][ti] // kernel["VectorWidthA"]
+        vIdxFootprint = round(mt * du * bpe // dim1Divisor // numVec)   # per-vIdx, not the component jump
+        vIdxPad = vIdxFootprint // ldsBlockSizePerPad * ldsPadSize if ldsBlockSizePerPad != 0 and ldsPadSize != 0 else 0
+        return vIdxFootprint + vIdxPad
+      # Coarse A / non-bcontig B: component jump.
+      if tc == "A" or not _segOff.get("bBaseline", False):
+        return _segOff["writeStrideBytes"]
     half = round(mt * du * bpe // dim1Divisor)
     extraPadSize = half // ldsBlockSizePerPad * ldsPadSize if ldsBlockSizePerPad != 0 and ldsPadSize != 0 else 0
     return half + extraPadSize
@@ -19472,10 +19492,12 @@ class KernelWriterAssembly(KernelWriter):
       tmpPadSgprIdx: int = tmpSgprRes.idx + 1
       mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), 1, sgpr(waveIdxSgpr), "wId=WaveIdx // 2 (each component covers 2 waves: numComp = numWaves // 2)"))
       dataBytes = mt // numComp * du * int(bpe * 4) // (4 * dim1Divisor)
-      # Interleave rewrites only A/B; MX scales keep their own stride, relocated via ldsBaseMXS*.
-      _segAB = bool(kernel.get("LDSSegmentInterleave") == 1) and tc in ("A", "B")
-      _segFootprint = _segAB and kernel["LDSSegInterleaveOffsets"].get("footprintPacked", False)
-      if _segAB:
+      _segAB = bool(kernel.get("LDSSegmentInterleave") == 1) and (
+          tc == "A" or (tc == "B" and not kernel["LDSSegInterleaveOffsets"].get("bBaseline", False)))
+      _segPortSplitA = _segAB and tc == "A" and kernel["LDSSegInterleaveOffsets"].get("portSplitA", False)
+      _segWaveJump = (_segAB and not kernel["TDMSplit"]) or _segPortSplitA
+      _segFootprint = _segWaveJump and kernel["LDSSegInterleaveOffsets"].get("footprintPacked", False)
+      if _segWaveJump:
           dataBytes = kernel["LDSSegInterleaveOffsets"]["writeStrideBytes"]
       mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), dataBytes, f"woffset = wId * (mt // numComp * du * bpe // dim1Divisor)"))
       # footprintPacked: writeStrideBytes is the post-pad footprint fA+fB; A/B tiles are packed
