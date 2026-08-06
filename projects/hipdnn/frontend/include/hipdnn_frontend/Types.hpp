@@ -33,6 +33,7 @@
 #include <HipdnnConvolutionMode.h>
 #include <HipdnnDataType.h>
 #include <HipdnnDiagonalAlignment.h>
+#include <HipdnnMoeGroupedMatmulMode.h>
 #include <HipdnnNormFwdPhase.h>
 #include <HipdnnPaddingMode.h>
 #include <HipdnnPointwiseMode.h>
@@ -267,6 +268,19 @@ enum class AttentionImplementation
 // NOLINTNEXTLINE(readability-identifier-naming)
 typedef AttentionImplementation
     AttentionImplementation_t; ///< @brief Type alias for AttentionImplementation
+
+/**
+ * @enum MoeGroupedMatmulMode
+ * @brief Selects routing behavior for forward MoE grouped matmul
+ */
+enum class MoeGroupedMatmulMode
+{
+    NOT_SET = 0, ///< Mode not specified.
+    NONE = 1, ///< Tokens are already routed.
+    GATHER = 2, ///< Gather source tokens before grouped matmul.
+    SCATTER = 3 ///< Scatter grouped-matmul output to source token order.
+};
+typedef MoeGroupedMatmulMode MoeGroupedMatmulMode_t; ///< @brief MoE routing mode alias
 
 /**
  * @enum HeuristicMode
@@ -511,6 +525,22 @@ inline hipdnnAttentionImplementation_t
     }
 }
 
+inline std::optional<hipdnnMoeGroupedMatmulMode_t>
+    toBackendMoeGroupedMatmulMode(const MoeGroupedMatmulMode& mode)
+{
+    switch(mode)
+    {
+    case MoeGroupedMatmulMode::NONE:
+        return HIPDNN_MOE_GROUPED_MATMUL_MODE_NONE;
+    case MoeGroupedMatmulMode::GATHER:
+        return HIPDNN_MOE_GROUPED_MATMUL_MODE_GATHER;
+    case MoeGroupedMatmulMode::SCATTER:
+        return HIPDNN_MOE_GROUPED_MATMUL_MODE_SCATTER;
+    default:
+        return std::nullopt;
+    }
+}
+
 /**
  * @brief Convert backend hipdnnDiagonalAlignment_t to frontend DiagonalAlignment
  *
@@ -561,6 +591,25 @@ inline std::pair<AttentionImplementation, Error>
                 {ErrorCode::HIPDNN_BACKEND_ERROR,
                  "Unknown hipdnnAttentionImplementation_t value: "
                      + std::to_string(static_cast<int>(impl))}};
+    }
+}
+
+inline std::pair<MoeGroupedMatmulMode, Error>
+    fromHipdnnMoeGroupedMatmulMode(hipdnnMoeGroupedMatmulMode_t mode)
+{
+    switch(mode)
+    {
+    case HIPDNN_MOE_GROUPED_MATMUL_MODE_NONE:
+        return {MoeGroupedMatmulMode::NONE, {}};
+    case HIPDNN_MOE_GROUPED_MATMUL_MODE_GATHER:
+        return {MoeGroupedMatmulMode::GATHER, {}};
+    case HIPDNN_MOE_GROUPED_MATMUL_MODE_SCATTER:
+        return {MoeGroupedMatmulMode::SCATTER, {}};
+    default:
+        return {MoeGroupedMatmulMode::NOT_SET,
+                {ErrorCode::HIPDNN_BACKEND_ERROR,
+                 "Unknown hipdnnMoeGroupedMatmulMode_t value: "
+                     + std::to_string(static_cast<int>(mode))}};
     }
 }
 
