@@ -55,6 +55,7 @@ from ..Component import TensorDataMover
 from ..Components.TensorDataMover import TensorDataMoverLoad
 from .Utilities import reject, roundupRatio, pvar
 from .Validators.MXScaleFormat import validateMXScaleFormatCombination
+from Tensile.Common.Utilities import plsinDebugEnv
 
 
 def _deriveAndValidateMXScaleLayoutAndTransport(state, asmCaps, archCaps, printRejectionReason):
@@ -1518,6 +1519,18 @@ class Solution(collections.abc.Mapping):
                  state["ProblemType"]["DataTypeB"].isFloat4()
       isgfx950 = isa[:2] == (9, 5)
       destType = state["ProblemType"]["DestDataType"]
+      # TEST-ONLY force: turn PLSIN on for fp4 kernels with an f16 (half) C/D dest
+      # even when only the weave-overlap PROFITABILITY heuristic would auto-disable
+      # it. The structural and register/spill gates below stay enforced, so this can
+      # only ever force NON-SPILL macrotiles on (never past the VGPR/SGPR ceiling).
+      # Unset (default "0") reproduces the shipped library byte-for-byte.
+      # Note this bypasses the gate WITHOUT lowering the scheduler's weave
+      # lookahead, so a forced sub-threshold tile emits the fused store with zero
+      # pairs actually woven -- useful to isolate the guard-folding win from the
+      # overlap win, but lower TENSILE_WEAVE_LA instead to get both.
+      forcePlsinFp4F16 = (isFloat4
+                          and destType.isHalf()
+                          and plsinDebugEnv("TENSILE_PLSIN_FORCE_FP4_F16", "0") != "0")
       # The fused store is _emit16bitSubtilePairedStore: it only exists for a
       # bf16/half dest with HPA on wave64, and not for the StreamK workspace
       # (MultipleBuffer*) accumulation paths.
@@ -1545,31 +1558,43 @@ class Solution(collections.abc.Mapping):
       storeFitsVgpr = not (bool(miwt) and len(miwt) == 2 and
                            min(miwt[0], miwt[1]) >= 4 and max(miwt[0], miwt[1]) >= 14)
       # Overlap feasibility: the weave only weaves store-pairs with pair index >=
-      # weaveLA (default 4). numStorePairs = MIWT0*MIWT1//2; below the threshold no
-      # pair is woven so PLSIN is pure overhead. Keep in sync with LogicalScheduler.
-      WEAVE_LA_DEFAULT = 4
+      # weaveLA. numStorePairs = MIWT0*MIWT1//2; at or below the threshold no pair
+      # is woven, so PLSIN would be pure overhead. This reads the same
+      # TENSILE_WEAVE_LA override and the same "4" production default as the
+      # scheduler (Components/Subtile/LogicalScheduler.py), so the gate and the
+      # weave move together; pinning a separate constant here made the two
+      # disagree whenever the override was set.
+      weaveLA = int(plsinDebugEnv("TENSILE_WEAVE_LA", "4"))
       overlapPossible = bool(miwt) and len(miwt) == 2 and \
-                        (miwt[0] * miwt[1] // 2) > WEAVE_LA_DEFAULT
+                        (miwt[0] * miwt[1] // 2) > weaveLA
       streamKFixupSafe = True
       # MX-block-scaled fp4 extreme skews ([2,16]/[16,2]) overflow the 102-SGPR
       # gfx9 ceiling; auto-disable just those.
       mxBlockScaled = bool(state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"])
       mxBlockScaleSgprFits = not (mxBlockScaled and bool(miwt) and len(miwt) == 2 and
                                   min(miwt[0], miwt[1]) <= 2 and max(miwt[0], miwt[1]) >= 16)
-      if (not isFloat4) or \
-         (not state["UseSubtileImpl"]) or \
-         (not isgfx950) or \
-         (not state["EnableMatrixInstruction"]) or \
-         (state["PrefetchGlobalRead"] < 1) or \
-         (not state["BufferStore"]) or \
-         (not pairedStoreAvailable) or \
-         (not streamKAtomicFree) or \
-         (not barrierFreeStore) or \
-         (not spillFree) or \
-         (not storeFitsVgpr) or \
-         (not overlapPossible) or \
-         (not streamKFixupSafe) or \
-         (not mxBlockScaleSgprFits):
+      # Hard structural: the fused store literally cannot be emitted. ALWAYS enforced.
+      structuralFail = ((not isFloat4)
+                        or (not state["UseSubtileImpl"])
+                        or (not isgfx950)
+                        or (not state["EnableMatrixInstruction"])
+                        or (state["PrefetchGlobalRead"] < 1)
+                        or (not state["BufferStore"])
+                        or (not pairedStoreAvailable)
+                        or (not streamKAtomicFree)
+                        or (not barrierFreeStore))
+      # Register / spill budget: the fused store would overflow the arch-VGPR / 102-SGPR
+      # ceiling for this tile. ALWAYS enforced, so the force only ever turns on non-spill
+      # macrotiles (never pushes a tile past the ceiling / emits out-of-range v>=256).
+      registerFail = ((not spillFree)
+                      or (not storeFitsVgpr)
+                      or (not mxBlockScaleSgprFits))
+      # Pure profitability (weave-overlap threshold): correct and register-safe, just
+      # below the pair-count where the weave overlaps anything. The ONLY group the
+      # TENSILE_PLSIN_FORCE_FP4_F16 force bypasses.
+      profitFail = ((not overlapPossible)
+                    or (not streamKFixupSafe))
+      if structuralFail or registerFail or (profitFail and not forcePlsinFp4F16):
         state["PostLoopStoreInNll"] = False
 
     # PLSIN fuses the D store into the No-Load Loop, so it needs a structural NLL
