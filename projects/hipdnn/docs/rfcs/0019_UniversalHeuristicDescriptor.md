@@ -398,6 +398,7 @@ launch, and selection share one binding:
 | **Problem** | `$q.*`, `$<node>.*` | `$q.seqlen_q`, `$sdpa_fwd.head_size` | Shared across candidates |
 | **Device** | `$device.*` | `$device.cu_count`, `$device.lds_size` | Shared across candidates |
 | **Kernel** | `$kernel.*` | `$kernel.tile_m`, `$kernel.split_k` | Per-candidate (from UKD `metadata`) |
+| **Derived** | `$derived.*` | `$derived.num_tiles_m`, `$derived.arithmetic_intensity` | Computed from the above by the UED's `derived` block ([Section 7.4](#74-derived-values-the-ued-derived-block)) |
 
 Problem features are dims, dtypes, stride order, and op attributes bound by the matcher set.
 
@@ -531,6 +532,80 @@ and advisory for `custom_library` that self-features.
 portable across UHDs, or keep it per-model via the spec? Recommendation: **per-model spec, shared source
 vocabulary**. The spec is per-model (models differ), but every spec draws from one fixed, versioned
 source vocabulary and one extractor, so there is exactly one implementation to trust.
+
+### 7.4 Derived Values: the UED `derived` block
+
+> **DISCUSSION POINT (not settled).** Where derived features are computed and defined is an open team
+> decision. This section proposes putting **all** derived values in one place — a `derived` block on the
+> **UED** — as a concrete option to react to. Alternatives considered and their tradeoffs are noted at
+> the end.
+
+Many of the features a model actually ranks on are not raw fields but **computed** ones: tile/wave
+quantization (`num_tiles_m = ceil_div($q.seqlen_q, $kernel.tile_m0)`), aspect ratios, arithmetic
+intensity, occupancy proxies. These are expressible today as inline `features_signature` entries
+([Section 7.2](#72-the-features_signature)), but two problems push for a dedicated home:
+
+- **They layer.** `total_tiles = num_tiles_m * num_tiles_k`; `overall_tile_efficiency` builds on both.
+  Repeating subexpressions inline is error-prone.
+- **They encode the engine's structure, not a model's choice.** The fact that `seqlen_q` pairs with
+  `tile_m0` is a property of *the engine's tiling*, shared by every UHD of that engine — not something
+  each model should restate. (This is the cross-layer join that has no clean home on either the op
+  schema or the KMD alone.)
+
+**The proposal: a `derived` block on the UED.** Because these definitions are an engine property (one
+tiling structure, one op family), the UED — which already owns the engine's UHD and KMD — declares a
+named, ordered set of derived values, each a JsonLogic expression over `$q.*` / `$device.*` / `$kernel.*`
+(and earlier `$derived.*` entries). They become a new `$derived.*` namespace the `features_signature`
+references by name, exactly like a raw field:
+
+```jsonc
+// on the UED (engine-scoped, shared by every UHD of this engine)
+"derived": {
+  "num_tiles_m":  {"ceil_div": ["$q.seqlen_q", "$kernel.tile_m0"]},
+  "num_tiles_k":  {"ceil_div": ["$k.seqlen_k", "$kernel.tile_n0"]},
+  "total_tiles":  {"*": ["$derived.num_tiles_m", "$derived.num_tiles_k"]},
+  "tile_eff_sq":  {"/": ["$q.seqlen_q", {"*": ["$derived.num_tiles_m", "$kernel.tile_m0"]}]},
+  "tile_volume":  {"*": ["$kernel.tile_m0", "$kernel.tile_n0", "$kernel.tile_k0"]},
+  "arithmetic_intensity": {"/": ["$sdpa_fwd.umd_flops", "$sdpa_fwd.umd_bytes"]}
+}
+```
+
+```jsonc
+// the UHD's features_signature then just names them
+"features_signature": ["$q.seqlen_q", "$kernel.tile_m0",
+                       "$derived.num_tiles_m", "$derived.overall_tile_efficiency",
+                       "$derived.arithmetic_intensity"]
+```
+
+Properties:
+
+- **Authored once per engine, reused by every UHD** — the dim↔tile correspondence lives with the party
+  that knows it (the engine author), stated once.
+- **One evaluator, compile-once.** The block is a dependency-ordered DAG of the same JsonLogic the
+  matcher and dispatch already use; it lowers to a compiled expression at load and evaluates in order
+  ([Section 10.3](#103-efficient-evaluation-expressive-spec-fast-hot-path)). Values referencing only
+  `$kernel.*` are graph-independent and can be cached per kernel; values referencing `$q.*`/`$device.*`
+  are per-graph. The evaluator can classify each automatically — the author need not partition them.
+- **The KMD stays a flat value schema.** It is not extended with expressions; the correspondence and
+  all computed values live in the `derived` block, keeping the KMD's role clean.
+- **Not the custom-operation hatch.** Quantization/intensity are closed-form JsonLogic, so they belong
+  in `derived`, not behind a native predicate. The `custom_library` / native-predicate escape hatch
+  ([Section 8](#8-model-adapters)) stays reserved for genuinely non-closed-form computations.
+
+**Alternatives (for the discussion):**
+
+- *Inline in each `features_signature`* — no new construct, but no reuse and no layering; every UHD
+  restates the engine's tiling. Rejected for repetition.
+- *A `derived` block split across KMD (graph-independent) + UED (graph-dependent)* — cleaner separation
+  of "more kernel metadata" from "plan-time features," and a KMD-derived value would also be visible to
+  the matcher and dispatch (not just selection). But it splits one concept across two descriptors and
+  makes authors decide which half a value goes in. **We propose keeping it all on the UED for now** for
+  simplicity, and revisiting the KMD split if matcher/dispatch reuse of derived kernel values proves
+  valuable.
+- *Per-op-schema annotation of the correspondence* — keeps it op-intrinsic, but the correspondence is
+  engine-specific (tile field *names* are the engine's), so it does not actually belong on the shared op
+  schema. Only the FLOP/byte formulas (`umd_flops`/`umd_bytes`) are truly op-intrinsic and stay there
+  ([Section 14.6](#146-auto-deriving-a-first-pass-features_signature)).
 
 ---
 
@@ -1003,8 +1078,14 @@ The tool auto-derives Layer 1 and proposes a Layer-2 first pass from it, in thre
 | Tier | Feature kind | Derivable from | Author input needed |
 |---|---|---|---|
 | 1 | Raw fields (`$kernel.*` = KMD fields; `$q.*`/attrs = UMD bindings; `$device.*`) | KMD schema + UMD op-schema registry + device vocab | **none** |
-| 2 | Generic transforms (logs, ratios) and **tile/wave quantization** | Tier 1 + a **dim↔tile correspondence** (which problem dim pairs with which `$kernel.*` tile axis) | one correspondence hint (op-schema annotation) |
-| 3 | **Physics** — arithmetic intensity, roofline bound | the op's FLOP and byte formulas | **`umd_flops` / `umd_bytes`** op annotations (below) |
+| 2 | Generic transforms (logs, ratios) and **tile/wave quantization** | Tier 1 + the UED `derived` block that pairs problem dims with `$kernel.*` tile axes | the engine's **`derived` block** ([Section 7.4](#74-derived-values-the-ued-derived-block)), authored once |
+| 3 | **Physics** — arithmetic intensity, roofline bound | the op's FLOP and byte formulas, consumed by a `derived` entry | **`umd_flops` / `umd_bytes`** op annotations (below) |
+
+The tile/wave quantization (Tier 2) is not auto-inferable — the tool cannot guess that `seqlen_q` pairs
+with `tile_m0` — but it is not homeless either: it lives in the engine's **`derived` block on the UED**
+([Section 7.4](#74-derived-values-the-ued-derived-block)), authored once by the engine author. The tool
+can emit a **stub `derived` block** (the raw fields plus placeholders for the correspondences) for the
+author to complete, then reference the results from the proposed `features_signature`.
 
 **Arithmetic intensity, and what authors provide for it.** Intensity is
 `total_FLOPs / total_bytes_moved` (FLOP/byte) — the roofline x-axis that separates compute-bound from
@@ -1125,8 +1206,10 @@ land only when a concrete need appears.
    derived features.)* *(Impacts [Section 7.2](#72-the-features_signature).)*
    **Auto-derivation dependency:** the physics features (arithmetic intensity, roofline bound) need
    per-op **`umd_flops` / `umd_bytes`** `.fbs` annotations to be derivable ([Section 14.6](#146-auto-deriving-a-first-pass-features_signature)).
-   Open: settle the two attributes (declaration + per-op application), the mixed-dtype byte-formula
-   convention, and the dim↔tile correspondence hint that Tier-2 quantization features need.
+   Open: settle the two attributes (declaration + per-op application) and the mixed-dtype byte-formula
+   convention. Tier-2 quantization (the dim↔tile correspondence) is proposed to live in the UED
+   **`derived` block** — itself a **discussion point** ([Section 7.4](#74-derived-values-the-ued-derived-block)):
+   all derived values on the UED for now, vs. splitting graph-independent ones onto the KMD.
 
 ### Structural
 
