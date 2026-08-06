@@ -142,6 +142,231 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableSdpaBwdVariations)
     }
 }
 
+// =============================================================================
+// Runtime pass-by-value scale tensor (RFC 0016)
+// =============================================================================
+
+// Build a backward SDPA graph with a runtime pass-by-value scale tensor
+// (is_runtime_pass_by_value=true, no baked value).
+flatbuffers::FlatBufferBuilder createSdpaBwdGraphWithRuntimePbvScale()
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensorAttributes;
+
+    const std::vector<int64_t> dims = {4, 8, 256, 128};
+    const std::vector<int64_t> strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+
+    int64_t uid = 1;
+    const auto qUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, qUid, "q", DataType::BFLOAT16, &strides, &dims));
+    const auto kUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, kUid, "k", DataType::BFLOAT16, &strides, &dims));
+    const auto vUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, vUid, "v", DataType::BFLOAT16, &strides, &dims));
+    const auto oUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, oUid, "o", DataType::BFLOAT16, &strides, &dims));
+    const auto doUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, doUid, "do", DataType::BFLOAT16, &strides, &dims));
+
+    const std::vector<int64_t> statsDims = {dims[0], dims[1], dims[2], 1};
+    const std::vector<int64_t> statsStrides = {dims[1] * dims[2], dims[2], 1, 1};
+    const auto statsUid = uid++;
+    tensorAttributes.push_back(CreateTensorAttributesDirect(
+        builder, statsUid, "stats", DataType::FLOAT, &statsStrides, &statsDims));
+
+    const auto dqUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, dqUid, "dq", DataType::BFLOAT16, &strides, &dims));
+    const auto dkUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, dkUid, "dk", DataType::BFLOAT16, &strides, &dims));
+    const auto dvUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, dvUid, "dv", DataType::BFLOAT16, &strides, &dims));
+
+    // Runtime pass-by-value scale tensor: is_runtime_pass_by_value=true, no value
+    const std::vector<int64_t> scaleDims = {1};
+    const auto scaleUid = uid++;
+    tensorAttributes.push_back(CreateTensorAttributesDirect(builder,
+                                                            scaleUid,
+                                                            "scale",
+                                                            DataType::FLOAT,
+                                                            &scaleDims,
+                                                            &scaleDims,
+                                                            false, // virtual
+                                                            TensorValue::NONE, // no baked value
+                                                            0, // value offset
+                                                            true)); // is_runtime_pass_by_value
+
+    const auto sdpaAttributes = CreateSdpaBackwardAttributes(builder,
+                                                             qUid,
+                                                             kUid,
+                                                             vUid,
+                                                             oUid,
+                                                             doUid,
+                                                             statsUid,
+                                                             dqUid,
+                                                             dkUid,
+                                                             dvUid,
+                                                             scaleUid); // scale_tensor_uid
+
+    std::vector<flatbuffers::Offset<Node>> nodes;
+    nodes.push_back(CreateNodeDirect(builder,
+                                     "sdpa_bwd",
+                                     DataType::FLOAT,
+                                     NodeAttributes::SdpaBackwardAttributes,
+                                     sdpaAttributes.Union()));
+
+    const auto graphOffset = CreateGraphDirect(builder,
+                                               "test",
+                                               DataType::FLOAT,
+                                               DataType::HALF,
+                                               DataType::BFLOAT16,
+                                               &tensorAttributes,
+                                               &nodes);
+    builder.Finish(graphOffset);
+    return builder;
+}
+
+// Build a backward SDPA graph with a non-pass-by-value scale tensor.
+flatbuffers::FlatBufferBuilder createSdpaBwdGraphWithNonPbvScaleTensor()
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensorAttributes;
+
+    const std::vector<int64_t> dims = {4, 8, 256, 128};
+    const std::vector<int64_t> strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+
+    int64_t uid = 1;
+    const auto qUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, qUid, "q", DataType::BFLOAT16, &strides, &dims));
+    const auto kUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, kUid, "k", DataType::BFLOAT16, &strides, &dims));
+    const auto vUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, vUid, "v", DataType::BFLOAT16, &strides, &dims));
+    const auto oUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, oUid, "o", DataType::BFLOAT16, &strides, &dims));
+    const auto doUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, doUid, "do", DataType::BFLOAT16, &strides, &dims));
+
+    const std::vector<int64_t> statsDims = {dims[0], dims[1], dims[2], 1};
+    const std::vector<int64_t> statsStrides = {dims[1] * dims[2], dims[2], 1, 1};
+    const auto statsUid = uid++;
+    tensorAttributes.push_back(CreateTensorAttributesDirect(
+        builder, statsUid, "stats", DataType::FLOAT, &statsStrides, &statsDims));
+
+    const auto dqUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, dqUid, "dq", DataType::BFLOAT16, &strides, &dims));
+    const auto dkUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, dkUid, "dk", DataType::BFLOAT16, &strides, &dims));
+    const auto dvUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, dvUid, "dv", DataType::BFLOAT16, &strides, &dims));
+
+    // Regular device tensor — NOT pass-by-value
+    const std::vector<int64_t> scaleDims = {1};
+    const auto scaleUid = uid++;
+    tensorAttributes.push_back(CreateTensorAttributesDirect(
+        builder, scaleUid, "scale", DataType::FLOAT, &scaleDims, &scaleDims));
+
+    const auto sdpaAttributes = CreateSdpaBackwardAttributes(builder,
+                                                             qUid,
+                                                             kUid,
+                                                             vUid,
+                                                             oUid,
+                                                             doUid,
+                                                             statsUid,
+                                                             dqUid,
+                                                             dkUid,
+                                                             dvUid,
+                                                             scaleUid); // scale_tensor_uid
+
+    std::vector<flatbuffers::Offset<Node>> nodes;
+    nodes.push_back(CreateNodeDirect(builder,
+                                     "sdpa_bwd",
+                                     DataType::FLOAT,
+                                     NodeAttributes::SdpaBackwardAttributes,
+                                     sdpaAttributes.Union()));
+
+    const auto graphOffset = CreateGraphDirect(builder,
+                                               "test",
+                                               DataType::FLOAT,
+                                               DataType::HALF,
+                                               DataType::BFLOAT16,
+                                               &tensorAttributes,
+                                               &nodes);
+    builder.Finish(graphOffset);
+    return builder;
+}
+
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableAcceptsRuntimePassByValueScale)
+{
+    SKIP_IF_NO_DEVICES();
+
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    auto builder = createSdpaBwdGraphWithRuntimePbvScale();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_handle, graphWrapper));
+}
+
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsNonPassByValueScaleTensor)
+{
+    SKIP_IF_NO_DEVICES();
+
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    auto builder = createSdpaBwdGraphWithNonPbvScaleTensor();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, graphWrapper));
+}
+
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableAcceptsCompileTimeConstantScaleTensor)
+{
+    // Existing withScale=true path uses a compile-time constant scale tensor.
+    // Verify it still passes after the PBV changes.
+    SKIP_IF_NO_DEVICES();
+
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    auto builder = createSdpaBwdGraph({4, 8, 256, 128},
+                                      hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                                      /*withScale=*/true);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_handle, graphWrapper));
+}
+
 TEST_F(TestSdpaBwdPlanBuilder, BackwardWorkspaceSizeSmallUnaligned)
 {
     // B=1, H=3, S=255, D=128 — chosen so D buffer raw size (3060) is NOT a multiple of 64,

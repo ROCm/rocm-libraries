@@ -32,14 +32,16 @@ What's hard, and how we handle it:
 
 from __future__ import annotations
 
+import enum
 import os
 import sys
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, FrozenSet, List, Optional, Set, Tuple
 
 from .ir import (
     KernelDef,
     Op,
+    Param,
     PtrType,
     Region,
     SmemType,
@@ -52,19 +54,25 @@ from .ir import (
 # Datalayout / triple. Copied verbatim from clang's output for the same
 # target on this box: clang -target amdgcn-amd-amdhsa -mcpu=gfx950
 # -emit-llvm -S. The string is LLVM-version-keyed, not gfx-keyed: every
-# wired arch shares one datalayout, but two fields drift between LLVM 20
-# (ROCm 7.0/7.1) and LLVM 21+ (ROCm 7.2 ships LLVM 22):
+# wired arch shares one datalayout, but two fields drift across LLVM 20
+# (ROCm 7.0/7.1), LLVM 22 (ROCm 7.2), and LLVM 23 (ROCm 7.13+):
 #
-#   * the ELF symbol-mangling spec ``m:e`` was added to the LLVM 21+
-#     AMDGPU datalayout (absent under LLVM 20):
+#   * the ELF symbol-mangling spec ``m:e``: absent in LLVM 20 and LLVM 22,
+#     present in LLVM 23 (AMD clang 23.0.0git, ROCm 7.13). (It also appeared
+#     in early LLVM 22 builds but was dropped; ROCm 7.2's LLVM 22 omits it.)
 #         LLVM 20:  e-p:64:64-...
-#         LLVM 22:  e-m:e-p:64:64-...
-#   * the buffer-fat-pointer address space (``p8``) gained an index-width
-#     field:
-#         LLVM 20:  ...-p8:128:128-...
-#         LLVM 22:  ...-p8:128:128:128:48-...
+#         LLVM 22:  e-p:64:64-...
+#         LLVM 23:  e-m:e-p:64:64-...
+#   * the buffer-resource address space (``p8``, the 128-bit buffer
+#     descriptor -- NOT the buffer fat pointer, which is ``p7``) gained an
+#     index-width field in LLVM 22:
+#         LLVM 20:       ...-p8:128:128-...
+#         LLVM 22 / 23:  ...-p8:128:128:128:48-...
 #
-# (Both confirmed against clang 20 and clang 23 amdgcn output.) On the
+# Each constant reflects what the installed hipcc actually produces for that
+# LLVM vintage; the drift guard re-derives them from the toolchain.
+#
+# (Confirmed against clang 20 and current clang 22 amdgcn output.) On the
 # textual-IR (comgr SOURCE) path the parser is lenient: it overrides the
 # module datalayout with the target's canonical one, so a stale-but-well-
 # formed string compiles to byte-identical HSACO and the drift is
@@ -81,6 +89,18 @@ _DATALAYOUT_LLVM20 = (
     "-n32:64-S32-A5-G1-ni:7:8:9"
 )
 _DATALAYOUT_LLVM22 = (
+    "e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
+    "-p7:160:256:256:32-p8:128:128:128:48-p9:192:256:256:32-i64:64-v16:16-v24:32"
+    "-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048"
+    "-n32:64-S32-A5-G1-ni:7:8:9"
+)
+# LLVM 23 (ROCm 7.13+): re-derived on an LLVM 23 host (AMD clang 23.0.0git,
+# ROCm 7.13) and found to drift from LLVM 22 by one field -- LLVM 23 emits the
+# ELF symbol-mangling spec ``m:e`` that LLVM 20 and LLVM 22 omit. Otherwise the
+# p8-indexed layout is identical to LLVM 22 for every wired arch. Regenerate via
+# ``test_datalayout_matches_hipcc_emitted_ir`` if a future LLVM 23 build drifts
+# further.
+_DATALAYOUT_LLVM23 = (
     "e-m:e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
     "-p7:160:256:256:32-p8:128:128:128:48-p9:192:256:256:32-i64:64-v16:16-v24:32"
     "-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048"
@@ -104,23 +124,144 @@ _TRIPLE = "amdgcn-amd-amdhsa"
 # an ``llvm_flavor=`` override for tests.
 LLVM_FLAVOR_LLVM20 = "llvm20"
 LLVM_FLAVOR_LLVM22 = "llvm22"
+LLVM_FLAVOR_LLVM23 = "llvm23"
+
+# Every flavor rocke can emit, oldest first. This is the SSOT every flavor
+# membership test must go through -- validating against a hand-rolled tuple is
+# how ``llvm23`` was silently rejected by the C++ backend path while the Python
+# path accepted it. ``test_no_hand_rolled_flavor_membership_lists`` pins that no
+# such private list reappears, and
+# ``test_cpp_engine_accepts_exactly_the_python_flavor_set`` pins that the C++
+# engine's ladder still matches this tuple.
+LLVM_FLAVORS: Tuple[str, ...] = (
+    LLVM_FLAVOR_LLVM20,
+    LLVM_FLAVOR_LLVM22,
+    LLVM_FLAVOR_LLVM23,
+)
+
+
+class LlvmDatalayoutKind(enum.Enum):
+    """Datalayout generation, i.e. what an IR module's ``p8`` field reveals.
+
+    Two datalayout fields drift between flavors -- the buffer-resource address
+    space ``p8`` shape and the ELF mangling spec ``m:e`` -- but only ``p8``
+    partitions the flavors into the *generation* that gates intrinsic-declare
+    compatibility (``make.buffer.rsrc.p8.p1``, fp8/bf8 MFMA operand widths). So
+    this kind groups flavors by p8 shape, NOT by full datalayout identity:
+    llvm22 and llvm23 share a generation yet differ in ``m:e`` (llvm23 has it),
+    so the datalayout alone still cannot narrow to a single flavor.
+
+    Members are named after the datalayout shape, deliberately not after its
+    recency: a "modern" label stops being true the moment a newer generation
+    lands, whereas ``P8_INDEXED`` keeps describing exactly what it matches.
+    """
+
+    #: LLVM 20 and older: ``p8:128:128`` (no index-width field).
+    P8_PLAIN = "p8_plain"
+    #: LLVM 21+: ``p8:128:128:128:48`` (index width appended).
+    P8_INDEXED = "p8_indexed"
+
+    @property
+    def flavors(self) -> FrozenSet[str]:
+        """Flavors that emit this datalayout generation."""
+        return _DATALAYOUT_KIND_FLAVORS[self]
+
+    def describe(self) -> str:
+        """Human-readable form for diagnostics, e.g. ``p8_indexed (llvm22/llvm23)``."""
+        return f"{self.value} ({'/'.join(sorted(self.flavors))})"
+
+
+# Partition of :data:`LLVM_FLAVORS` by datalayout generation. Every flavor must
+# appear in exactly one entry, and every enum member must have an entry;
+# ``test_datalayout_kinds_partition_every_flavor`` is the exhaustiveness check a
+# language-level ``match`` would give for free.
+_DATALAYOUT_KIND_FLAVORS: Dict[LlvmDatalayoutKind, FrozenSet[str]] = {
+    LlvmDatalayoutKind.P8_PLAIN: frozenset({LLVM_FLAVOR_LLVM20}),
+    LlvmDatalayoutKind.P8_INDEXED: frozenset({LLVM_FLAVOR_LLVM22, LLVM_FLAVOR_LLVM23}),
+}
+
+# Substrings that identify each generation in a module's ``target datalayout``.
+# Kept consistent with the ``_DATALAYOUT_*`` constants by
+# ``test_datalayout_kind_markers_match_datalayouts``.
+_P8_MARKERS: Dict[LlvmDatalayoutKind, str] = {
+    LlvmDatalayoutKind.P8_INDEXED: "p8:128:128:128:48",
+    LlvmDatalayoutKind.P8_PLAIN: "p8:128:128-",
+}
+
+# ROCm release -> flavor bundled with that release's comgr, newest first. Add a
+# row when a ROCm release bumps its bundled LLVM; nothing else needs editing.
+_ROCM_FLAVOR_LADDER: Tuple[Tuple[Tuple[int, int], str], ...] = (
+    # First ROCm release known to bundle LLVM 23.0.0 (confirm on an LLVM 23 host).
+    ((7, 13), LLVM_FLAVOR_LLVM23),
+    ((7, 2), LLVM_FLAVOR_LLVM22),
+)
 
 
 def _flavor_for_rocm(major: int, minor: int) -> str:
-    """ROCm release -> LLVM flavor expected by the bundled comgr."""
-    return LLVM_FLAVOR_LLVM22 if (major, minor) >= (7, 2) else LLVM_FLAVOR_LLVM20
+    """ROCm release -> LLVM flavor expected by that release's bundled comgr.
+
+    The mapping is *clamped at both ends* and never raises. A release newer
+    than the newest ladder row resolves to the newest flavor (a future ROCm
+    bundles LLVM >= 23, and llvm23 is the closest shape we know how to emit);
+    anything below the last row resolves to the oldest, which is what pre-7.2
+    releases actually shipped rather than a fallback.
+
+    Raising on an unrecognised version would be wrong here: both callers are
+    best-effort. :func:`_detect_llvm_flavor` uses this to guess a host's
+    vintage at import time, and ``runtime.comgr._assert_ir_flavor_matches_lib``
+    uses it for a guard that must degrade rather than fail when the host is
+    unfamiliar. Callers wanting strictness pass ``llvm_flavor=`` explicitly,
+    which *is* validated against :data:`LLVM_FLAVORS`.
+    """
+    ver = (major, minor)
+    for min_ver, flavor in _ROCM_FLAVOR_LADDER:
+        if ver >= min_ver:
+            return flavor
+    return LLVM_FLAVORS[0]
+
+
+def _datalayout_kind_for_flavor(flavor: str) -> Optional[LlvmDatalayoutKind]:
+    """Datalayout generation a flavor emits, or ``None`` if unrecognised."""
+    for kind, flavors in _DATALAYOUT_KIND_FLAVORS.items():
+        if flavor in flavors:
+            return kind
+    return None
+
+
+def _datalayout_kind_from_ir(ir_text: str) -> Optional[LlvmDatalayoutKind]:
+    """Datalayout generation of an IR module, read from its ``p8`` field.
+
+    ``None`` when the module has no recognisable ``target datalayout``. This
+    cannot narrow to a single flavor -- see :class:`LlvmDatalayoutKind`.
+    """
+    # P8_INDEXED first: its marker has the plain form as a prefix.
+    for kind in (LlvmDatalayoutKind.P8_INDEXED, LlvmDatalayoutKind.P8_PLAIN):
+        if _P8_MARKERS[kind] in ir_text:
+            return kind
+    return None
+
+
+def _is_modern_flavor(flavor: str) -> bool:
+    """True for flavors emitting the LLVM 21+ ``p8`` shape (llvm22 / llvm23)."""
+    return flavor in _DATALAYOUT_KIND_FLAVORS[LlvmDatalayoutKind.P8_INDEXED]
 
 
 def _datalayout_for_flavor(flavor: str) -> str:
     """Module ``target datalayout`` string for an LLVM flavor.
 
-    Two fields drift between flavors: the ELF mangling spec ``m:e`` (added
-    under LLVM 21+) and the buffer-fat-pointer address space ``p8`` (see
-    :data:`_DATALAYOUT_LLVM20` / :data:`_DATALAYOUT_LLVM22`). LLVM22 is the
-    default for unknown values so a typo'd override degrades to the modern
-    layout rather than the legacy one.
+    Two fields drift between flavors: the buffer-resource address space ``p8``
+    (the 128-bit buffer descriptor, not the ``p7`` fat pointer) gained an
+    index-width field in LLVM 22, and the ELF symbol-mangling spec ``m:e``
+    (absent in LLVM 20 and LLVM 22) is present in LLVM 23
+    (see :data:`_DATALAYOUT_LLVM20` / :data:`_DATALAYOUT_LLVM22` /
+    :data:`_DATALAYOUT_LLVM23`).  LLVM22 is the default for unknown values so a
+    typo'd override degrades to the modern layout rather than the legacy one.
     """
-    return _DATALAYOUT_LLVM20 if flavor == LLVM_FLAVOR_LLVM20 else _DATALAYOUT_LLVM22
+    if flavor == LLVM_FLAVOR_LLVM20:
+        return _DATALAYOUT_LLVM20
+    if flavor == LLVM_FLAVOR_LLVM23:
+        return _DATALAYOUT_LLVM23
+    return _DATALAYOUT_LLVM22
 
 
 def _torch_hip_version() -> Optional[Tuple[int, int]]:
@@ -198,7 +339,7 @@ def _detect_llvm_flavor() -> str:
     misconfigured environment never crashes import.
     """
     env = os.environ.get("ROCKE_LLVM_FLAVOR", "").strip().lower()
-    if env in (LLVM_FLAVOR_LLVM20, LLVM_FLAVOR_LLVM22):
+    if env in LLVM_FLAVORS:
         return env
     comgr_ver = _comgr_lib_rocm_version()
     if comgr_ver is not None:
@@ -224,7 +365,7 @@ _LLVM_FLAVOR_BASIS: Optional[str] = None
 def _resolve_llvm_flavor() -> str:
     global _LLVM_FLAVOR, _LLVM_FLAVOR_BASIS
     env = os.environ.get("ROCKE_LLVM_FLAVOR", "").strip().lower()
-    if env in (LLVM_FLAVOR_LLVM20, LLVM_FLAVOR_LLVM22):
+    if env in LLVM_FLAVORS:
         return env
     try:
         from ..runtime.comgr import resolved_lib_path
@@ -259,7 +400,7 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "s.wait.loadcnt": "declare void @llvm.amdgcn.s.wait.loadcnt(i16)",
     # gfx1250 (gfx1250) async global<->LDS DMA + its dedicated ASYNC counter.
     # The gfx9 buffer/global load-to-LDS intrinsics are NOT selectable here.
-    "s.wait.asynccnt": "declare void @llvm.amdgcn.s.wait.asynccnt(i16)",
+    "s.wait.asynccnt": "declare void @llvm.amdgcn.s.wait.asynccnt(i16 immarg)",
     "global.load.async.to.lds.b32": (
         "declare void @llvm.amdgcn.global.load.async.to.lds.b32("
         "ptr addrspace(1) nocapture, ptr addrspace(3) nocapture, i32 immarg, i32 immarg)"
@@ -273,6 +414,7 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "ptr addrspace(1) nocapture, ptr addrspace(3) nocapture, i32 immarg, i32 immarg)"
     ),
     "exp2.f32": "declare float @llvm.exp2.f32(float)",
+    "amdgcn.exp2.f32": "declare float @llvm.amdgcn.exp2.f32(float)",
     "log2.f32": "declare float @llvm.log2.f32(float)",
     "sqrt.f32": "declare float @llvm.sqrt.f32(float)",
     "rsqrt.f32": "declare float @llvm.amdgcn.rsq.f32(float)",
@@ -509,6 +651,11 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "declare <2 x bfloat> @llvm.amdgcn.global.atomic.fadd.v2bf16.p1("
         "ptr addrspace(1), <2 x bfloat>)"
     ),
+    # Packed fp16 atomic add (gfx940+). Two fp16 lanes per atomic transaction.
+    "global.atomic.fadd.v2f16": (
+        "declare <2 x half> @llvm.amdgcn.global.atomic.fadd.v2f16.p1("
+        "ptr addrspace(1), <2 x half>)"
+    ),
     "mbcnt.lo": ("declare i32 @llvm.amdgcn.mbcnt.lo(i32, i32)"),
     "mbcnt.hi": ("declare i32 @llvm.amdgcn.mbcnt.hi(i32, i32)"),
     "ds.read.tr16.b64": (
@@ -666,16 +813,21 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     # wave64 softmax reduction (combining the lo-32 and hi-32 lane half
     # partial reductions). Returns a struct holding both swapped values
     # so a single call covers BOTH register exchanges.
+    # Not overloaded, so the name needs no suffix, but the two flags are
+    # immarg like every other permlane* flag pair.
     "amdgcn.permlane32.swap": (
-        "declare { i32, i32 } @llvm.amdgcn.permlane32.swap(i32, i32, i1, i1)"
+        "declare { i32, i32 } @llvm.amdgcn.permlane32.swap("
+        "i32, i32, i1 immarg, i1 immarg)"
     ),
     # gfx11 ``v_permlanex16_b32`` — swap each lane with its ``lane ^ 16``
     # partner within a 32-lane group via a permute network (NOT the LDS
     # unit). One VALU op; this is the cheap cross-half vehicle CK's gfx11
     # FMHA pipelines use for the WMMA C->A transpose. Args:
     # (old, src, sel_lo, sel_hi, fi, bound_ctrl).
+    # Overloaded on the data type like permlane16; see that entry.
     "amdgcn.permlanex16": (
-        "declare i32 @llvm.amdgcn.permlanex16(i32, i32, i32, i32, i1, i1)"
+        "declare i32 @llvm.amdgcn.permlanex16.i32("
+        "i32, i32, i32, i32, i1 immarg, i1 immarg)"
     ),
     # gfx950 ``v_mfma_f32_32x32x16_bf16`` — wider MFMA shape (32x32
     # output × 16-K) than the 16x16x32 we use elsewhere. Same FLOPs
@@ -726,6 +878,108 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "<8 x i32>, <8 x i32>, <4 x float>, i32 immarg, i32 immarg, "
         "i32 immarg, i32, i32 immarg, i32)"
     ),
+    # --- LLVM 23 async markers (gfx12+ async global/LDS pipelines) ---
+    "asyncmark": "declare void @llvm.amdgcn.asyncmark()",
+    "wait.asyncmark": "declare void @llvm.amdgcn.wait.asyncmark(i16 immarg)",
+    "raw.ptr.buffer.load.async.lds": (
+        "declare void @llvm.amdgcn.raw.ptr.buffer.load.async.lds("
+        "ptr addrspace(8) nocapture readonly, ptr addrspace(3) nocapture, "
+        "i32, i32, i32, i32 immarg, i32 immarg)"
+    ),
+    "global.load.async.to.lds.b8": (
+        "declare void @llvm.amdgcn.global.load.async.to.lds.b8("
+        "ptr addrspace(1) nocapture, ptr addrspace(3) nocapture, i32 immarg, i32 immarg)"
+    ),
+    # --- DPP / cross-lane relayout ---
+    "mov.dpp8.i32": "declare i32 @llvm.amdgcn.mov.dpp8.i32(i32, i32 immarg)",
+    "mov.dpp8.f32": "declare float @llvm.amdgcn.mov.dpp8.f32(float, i32 immarg)",
+    # --- Wave reductions (gfx10+) ---
+    "wave.reduce.fmax.f32": (
+        "declare float @llvm.amdgcn.wave.reduce.fmax.f32(float, i32 immarg)"
+    ),
+    "wave.reduce.fadd.f32": (
+        "declare float @llvm.amdgcn.wave.reduce.fadd.f32(float, i32 immarg)"
+    ),
+    "wave.reduce.add.i32": (
+        "declare i32 @llvm.amdgcn.wave.reduce.add.i32(i32, i32 immarg)"
+    ),
+    "wave.reduce.max.i32": (
+        "declare i32 @llvm.amdgcn.wave.reduce.max.i32(i32, i32 immarg)"
+    ),
+    "wave.reduce.min.i32": (
+        "declare i32 @llvm.amdgcn.wave.reduce.min.i32(i32, i32 immarg)"
+    ),
+    # --- Lane read/write beyond readfirstlane ---
+    "readlane.i32": "declare i32 @llvm.amdgcn.readlane.i32(i32, i32)",
+    "readlane.f32": "declare float @llvm.amdgcn.readlane.f32(float, i32)",
+    "writelane.i32": "declare i32 @llvm.amdgcn.writelane.i32(i32, i32, i32)",
+    "writelane.f32": "declare float @llvm.amdgcn.writelane.f32(float, i32, float)",
+    # --- Permute / WQM / byte align ---
+    # permlane16/64 and s.wqm are overloaded on their value type, so LLVM
+    # mangles a suffix per overloaded position: one for permlane* (the data
+    # type), two for s.wqm (result and operand are separately overloaded).
+    # The unmangled spellings parse -- LLVM auto-upgrades them -- but they do
+    # not survive a round trip, so emitting them makes the canonical form the
+    # odd one out and any test pinning it fail.
+    "amdgcn.permlane16": (
+        "declare i32 @llvm.amdgcn.permlane16.i32("
+        "i32, i32, i32, i32, i1 immarg, i1 immarg)"
+    ),
+    "amdgcn.permlane64": "declare i32 @llvm.amdgcn.permlane64.i32(i32)",
+    "amdgcn.alignbyte": "declare i32 @llvm.amdgcn.alignbyte(i32, i32, i32)",
+    "amdgcn.s.wqm.i64": "declare i64 @llvm.amdgcn.s.wqm.i64.i64(i64)",
+    "amdgcn.s.wqm.i32": "declare i32 @llvm.amdgcn.s.wqm.i32.i32(i32)",
+    # --- Aligned vector 128b loads (LLVM 23) ---
+    # ``av.load/store.b128`` take an ``llvm_anyptr_ty`` pointer (flat or global
+    # only, per AMDGPUUsage), so the overload is mangled by address space; see
+    # _AV_B128_PTR_TYPES and the s.prefetch.inst note below.
+    "av.load.b128.p0": "declare <4 x i32> @llvm.amdgcn.av.load.b128.p0(ptr, metadata)",
+    "av.load.b128.p1": (
+        "declare <4 x i32> @llvm.amdgcn.av.load.b128.p1(ptr addrspace(1), metadata)"
+    ),
+    "av.store.b128.p0": (
+        "declare void @llvm.amdgcn.av.store.b128.p0(ptr, <4 x i32>, metadata)"
+    ),
+    "av.store.b128.p1": (
+        "declare void @llvm.amdgcn.av.store.b128.p1("
+        "ptr addrspace(1), <4 x i32>, metadata)"
+    ),
+    # --- Scheduler / resource hints (LLVM 23) ---
+    "s.alloc.vgpr": "declare i1 @llvm.amdgcn.s.alloc.vgpr(i32)",
+    "s.wait.event": "declare void @llvm.amdgcn.s.wait.event(i16 immarg)",
+    # ``s.prefetch.inst`` takes an ``llvm_anyptr_ty`` operand, so the overload
+    # is mangled by address space and the declare has to name the SAME address
+    # space the call site passes. One key per space rather than a single
+    # unmangled declare: a kernel prefetching two pointers in different spaces
+    # would otherwise redefine one name with two signatures ("invalid
+    # redefinition of function"). Instruction memory is reached through flat,
+    # global, or constant pointers; see _S_PREFETCH_INST_PTR_TYPES.
+    "s.prefetch.inst.p0": "declare void @llvm.amdgcn.s.prefetch.inst.p0(ptr, i32)",
+    "s.prefetch.inst.p1": (
+        "declare void @llvm.amdgcn.s.prefetch.inst.p1(ptr addrspace(1), i32)"
+    ),
+    "s.prefetch.inst.p4": (
+        "declare void @llvm.amdgcn.s.prefetch.inst.p4(ptr addrspace(4), i32)"
+    ),
+}
+
+# Address spaces each ``llvm_anyptr_ty`` intrinsic accepts, mapped to their LLVM
+# pointer text. Every key MUST have a matching ``<key>.p<N>`` declare above: an
+# unknown need-key emits NO declare at all (``finalize`` skips it), so a missing
+# entry would silently produce a call to an undeclared function.
+#
+# ``s.prefetch.inst`` reaches instruction memory through a flat, global, or
+# constant pointer (LLVM's own test uses ``addrspace(4)``).
+_S_PREFETCH_INST_PTR_TYPES: Dict[int, str] = {
+    0: "ptr",
+    1: "ptr addrspace(1)",
+    4: "ptr addrspace(4)",
+}
+# ``av.load/store.b128`` are documented as flat or global only: a global pointer
+# selects ``global_load/store``, a flat pointer ``flat_load/store``.
+_AV_B128_PTR_TYPES: Dict[int, str] = {
+    0: "ptr",
+    1: "ptr addrspace(1)",
 }
 
 
@@ -754,6 +1008,12 @@ _INTRINSIC_DECLS_LLVM22_OVERRIDES: Dict[str, str] = {
         "ptr addrspace(1) nocapture readnone, i16, i64, i32)"
     ),
 }
+
+# LLVM 23 (ROCm 7.13+): empirically identical to LLVM 22 for the declares rocke
+# emits today. Split entries here if an LLVM 23 host proves drift.
+_INTRINSIC_DECLS_LLVM23_OVERRIDES: Dict[str, str] = dict(
+    _INTRINSIC_DECLS_LLVM22_OVERRIDES
+)
 
 
 def _llvm_type(t: Type) -> str:
@@ -793,6 +1053,23 @@ def _llvm_type(t: Type) -> str:
     if t.name == "f32":
         return "float"
     raise NotImplementedError(f"no LLVM mapping for type {t!r}")
+
+
+def _param_llvm_type(p: Param) -> str:
+    """LLVM text for a kernel parameter, honouring the ``addr_space`` override.
+
+    A ``PtrType`` param may be pinned to a different address space than its IR
+    type says (P17: descriptor tables ask for ``addrspace(4)``). The function
+    header and any call site passing that param must name the same type, so
+    both go through here.
+    """
+    if isinstance(p.type, PtrType):
+        ovr = p.attrs.get("addr_space")
+        if ovr == "constant":
+            return "ptr addrspace(4)"
+        if ovr == "global":
+            return "ptr addrspace(1)"
+    return _llvm_type(p.type)
 
 
 def _escape_llvm_asm_string(s: str) -> str:
@@ -863,7 +1140,7 @@ class _Lowerer:
 
         self._backend = backend_for(arch or "gfx950")
         flavor = llvm_flavor if llvm_flavor is not None else _resolve_llvm_flavor()
-        if flavor not in (LLVM_FLAVOR_LLVM20, LLVM_FLAVOR_LLVM22):
+        if flavor not in LLVM_FLAVORS:
             raise ValueError(f"unknown LLVM flavor {flavor!r}")
         self._flavor: str = flavor
         # Preserve insertion order of ``_INTRINSIC_DECLS`` -- it drives
@@ -871,6 +1148,8 @@ class _Lowerer:
         self._decls: Dict[str, str] = dict(_INTRINSIC_DECLS)
         if flavor == LLVM_FLAVOR_LLVM22:
             self._decls.update(_INTRINSIC_DECLS_LLVM22_OVERRIDES)
+        elif flavor == LLVM_FLAVOR_LLVM23:
+            self._decls.update(_INTRINSIC_DECLS_LLVM23_OVERRIDES)
         self._needs_intrin: Dict[str, bool] = {}
         # Set when an f32 global atomic-add is lowered with the
         # native-hardware-fadd metadata (no.fine.grained / no.remote
@@ -878,8 +1157,19 @@ class _Lowerer:
         # ``global_atomic_add_f32`` instruction instead of a
         # compare-and-swap retry loop.
         self._needs_fp_atomic_md: bool = False
+        # Set when av.load/store.b128 intrinsics are lowered (agent-scope MD).
+        self._needs_av_scope_md: bool = False
         self._smem_globals: List[Tuple[str, SmemType]] = []
         self._smem_storage_name: Dict[str, str] = {}  # IR value name -> @global name
+        # smem pool: one unified addrspace(3) buffer; per-allocation byte offsets.
+        self._smem_offsets: Dict[str, int] = {}
+        self._smem_pool_size: int = 0
+        self._smem_pool_name: Optional[str] = None
+        # Cache of per-allocation base pointers already emitted, keyed by
+        # (block label, global name). Lets a non-zero-offset allocation that is
+        # accessed several times in the same block reuse a single byte-level
+        # GEP instead of re-emitting it per access.
+        self._smem_base_cache: Dict[Tuple[str, str], str] = {}
         self._blocks: List[_Block] = [_Block("entry")]
         self._block_counter = 0
         self._tmp_counter = 0
@@ -923,8 +1213,78 @@ class _Lowerer:
     def _operand_with_type(self, v: Value) -> str:
         return f"{_llvm_type(v.type)} {self._operand(v)}"
 
+    def _anyptr_space(
+        self, op: str, ptr: Value, allowed: Dict[int, str]
+    ) -> Tuple[int, str]:
+        """Resolve an ``llvm_anyptr_ty`` operand to its (address space, type).
+
+        For these intrinsics the address space is part of the overload, so the
+        mangled name, the declare, and the call site all have to agree with the
+        pointer's real type. Naming a bare ``ptr`` for an ``addrspace(N)`` value
+        is not a lax spelling -- LLVM rejects the module outright with
+        "defined with type 'ptr addrspace(N)' but expected 'ptr'".
+        """
+        ty = self._ptr_llvm_type(ptr)
+        for space, text in allowed.items():
+            if text == ty:
+                return space, text
+        raise ValueError(
+            f"{op}: pointer operand is {ty}, but the intrinsic accepts only "
+            f"{', '.join(allowed[s] for s in sorted(allowed))}"
+        )
+
+    def _lds_ptr_operand(self, op: str, v: Value) -> str:
+        """Operand text for an intrinsic's ``ptr addrspace(3)`` LDS argument.
+
+        At the builder level an LDS "pointer" is an i64 address -- that is what
+        ``smem_addr_of`` returns, and no builder op produces an ``addrspace(3)``
+        pointer value -- while these intrinsics declare ``ptr addrspace(3)``.
+        Convert rather than relabel the i64: LLVM rejects the module with
+        "defined with type 'i64' but expected 'ptr addrspace(3)'".
+        """
+        ty = _llvm_type(v.type)
+        if ty == "ptr addrspace(3)":
+            return self._operand(v)
+        if ty != "i64":
+            raise ValueError(
+                f"{op}: LDS argument must be an i64 LDS address (from "
+                f"smem_addr_of) or a ptr addrspace(3), got {ty}"
+            )
+        name = self._fresh("lds_ptr")
+        self._current().emit(
+            f"  {name} = inttoptr i64 {self._operand(v)} to ptr addrspace(3)"
+        )
+        return name
+
+    def _ptr_llvm_type(self, v: Value) -> str:
+        """LLVM pointer text for an operand as the *module* sees it.
+
+        For a kernel parameter that is the type in the function header, which
+        the ``addr_space`` override can move away from the IR type; naming the
+        IR type at a call site instead would emit a type mismatch against the
+        signature.
+        """
+        for p in self.kernel.params:
+            if f"%{p.name}" == v.name:
+                return _param_llvm_type(p)
+        return _llvm_type(v.type)
+
     def _need(self, key: str) -> None:
         self._needs_intrin[key] = True
+
+    def _check_u16(self, op: str, field: str, value: object) -> int:
+        """Reject an immediate that does not fit the declared ``i16``.
+
+        The builder checks too, but serialized IR reaches the lowerer without
+        passing through it, and LLVM truncates silently (``i16 70000`` becomes
+        ``i16 4464``) -- a wrong wait count with no diagnostic.
+        """
+        v = int(value)  # type: ignore[call-overload]
+        if not 0 <= v <= 0xFFFF:
+            raise ValueError(
+                f"{op} {field} must fit an unsigned i16 (0..65535), got {v}"
+            )
+        return v
 
     # ----- constant folding helpers -----
 
@@ -967,6 +1327,298 @@ class _Lowerer:
                 self._smem_storage_name[op.result.name] = gname
             for r in op.regions:
                 self._collect_smem(r)
+
+    def _collect_smem_liveness(
+        self, region: Region
+    ) -> Tuple[Dict[str, Tuple[int, int]], Set[str]]:
+        """Compute live intervals for smem allocations via a DFS preorder walk.
+
+        Returns ``(intervals, used)`` where ``intervals`` maps global-name ->
+        (first_seq, last_seq) (seq is the preorder index of the op that defines
+        / last-uses the allocation) and ``used`` is the set of global-names that
+        appear as an operand of at least one op (i.e. are actually read, written
+        or address-taken -- as opposed to allocated but never referenced).
+        Uses inside a loop body (``scf.for``) are conservatively extended to the
+        *last* sequence index of the enclosing ``scf.for`` subtree so that two
+        allocations that are both live inside the loop always interfere (they
+        may be read on any iteration).
+        """
+        # Map from IR value name (%foo) -> global name (@foo.kernel)
+        val_to_gname: Dict[str, str] = {
+            v: g for v, g in self._smem_storage_name.items()
+        }
+        intervals: Dict[str, Tuple[int, int]] = {}  # gname -> (first, last)
+        used: Set[str] = set()  # gnames referenced by some op operand
+        counter = [0]  # mutable int for nested closures
+
+        def _subtree_size(op) -> int:
+            # Number of ops in this op's DFS-preorder subtree (itself + all
+            # descendants).  Preorder numbers an op *before* its body, so the
+            # subtree rooted at index ``idx`` occupies contiguous sequence
+            # indices ``[idx, idx + _subtree_size(op) - 1]``.
+            n = 1
+            for r in op.regions:
+                for child in r.ops:
+                    n += _subtree_size(child)
+            return n
+
+        def walk(ops: List, loop_end: Optional[int]) -> None:
+            for op in ops:
+                idx = counter[0]
+                counter[0] += 1
+
+                # Definition point of an alloc
+                if op.name == "tile.smem_alloc":
+                    gname = val_to_gname[op.result.name]
+                    if gname not in intervals:
+                        intervals[gname] = (idx, idx)
+
+                # Any operand that is an smem value extends its live range
+                for v in op.operands:
+                    gname = val_to_gname.get(v.name)
+                    if gname is not None:
+                        used.add(gname)
+                        first, last = intervals.get(gname, (idx, idx))
+                        new_last = loop_end if loop_end is not None else idx
+                        intervals[gname] = (min(first, idx), max(last, new_last))
+
+                # Recurse into sub-regions; scf.for gets a conservative loop_end
+                for r in op.regions:
+                    if op.name == "scf.for":
+                        # Conservative loop liveness: a value written on one
+                        # iteration may be read on the next, so every allocation
+                        # touched anywhere in the loop body must be treated as
+                        # live for the whole loop and thus interfere with the
+                        # others.  Preorder numbers the for-op *before* its body,
+                        # so the loop subtree ends at ``idx + size - 1``; extend
+                        # uses to that last index (not the for-op's own, earlier
+                        # index, which would under-extend allocations defined
+                        # inside the loop and let them wrongly share LDS).
+                        #
+                        # For a nested loop, an allocation used only in the inner
+                        # loop can still be re-read on a later *outer* iteration,
+                        # so its live range must reach the enclosing loop's end
+                        # too -- take the max with any enclosing ``loop_end``,
+                        # otherwise the inner alloc could wrongly share LDS with
+                        # an allocation used later in the outer body.
+                        own_last = idx + _subtree_size(op) - 1
+                        loop_last = (
+                            own_last if loop_end is None else max(own_last, loop_end)
+                        )
+                        walk(r.ops, loop_end=loop_last)
+                    else:
+                        walk(r.ops, loop_end=loop_end)
+
+        walk(region.ops, loop_end=None)
+        return intervals, used
+
+    def _compute_smem_layout(self) -> None:
+        """Compute byte offsets for all smem allocations in a single pool.
+
+        Called after ``_collect_smem`` and before ``lower_region``.
+
+        Uses live-interval analysis to let non-interfering allocations share
+        the same LDS region.  Two allocations *interfere* when their live
+        intervals overlap; overlapping allocations must occupy disjoint byte
+        ranges.  Non-interfering allocations may reuse the same range,
+        reducing total LDS consumption.
+
+        The packing algorithm is a greedy linear-scan: allocations are
+        processed in order of their live-interval start.  For each allocation
+        we find the lowest free slot (a previously assigned range whose end
+        is before the current start and whose size is large enough), or open
+        a new slot at the end of the pool.
+
+        Alignment is preserved: 16 bytes for byte-element types, 4 bytes
+        otherwise.  The pool itself is rounded up to 16-byte alignment.
+
+        Falls back to the original sequential packing when liveness analysis
+        yields no intervals (e.g. zero smem allocations).
+        """
+        _elem_bytes = {
+            "i8": 1,
+            "fp8e4m3": 1,
+            "bf8e5m2": 1,
+            "f16": 2,
+            "bf16": 2,
+            "i32": 4,
+            "f32": 4,
+            "i64": 8,
+        }
+
+        pool_name = f"@smem_pool.{self.kernel.name}"
+        self._smem_pool_name = pool_name
+
+        if not self._smem_globals:
+            self._smem_pool_size = 0
+            return
+
+        # ---- compute per-allocation sizes and alignments ----
+        def _seg_size(stype: "SmemType") -> int:
+            eb = _elem_bytes.get(stype.elem.name, 2)
+            seg = eb
+            for d in stype.shape:
+                seg *= d
+            return seg
+
+        def _align(stype: "SmemType") -> int:
+            return 16 if stype.elem.name in ("i8", "fp8e4m3", "bf8e5m2") else 4
+
+        # ---- live intervals from the kernel body ----
+        live, used = self._collect_smem_liveness(self.kernel.body)
+
+        # Never-referenced allocations (allocated but never read, written or
+        # address-taken) must not consume pool space. The pre-pool lowering
+        # emitted every allocation as its own addrspace(3) global, and the
+        # AMDGPU backend dead-strips the ones nothing references, so a kernel
+        # that unconditionally allocates a scratch tile it does not use in a
+        # given spec paid zero LDS for it. Folding those dead tiles into the
+        # single referenced pool would make their bytes count -- e.g. the
+        # transposed/cfvst attention epilogue allocates ``Acc_lds`` (32 KB) but
+        # writes the output straight from registers, leaving it unreferenced;
+        # pooling it pushes the fp16 D128 nw=4 kernel from 50 KB to 82 KB and it
+        # then fails codegen with "local memory exceeds limit (65536)". Exclude
+        # dead allocations here to preserve the backend's dead-strip behaviour;
+        # give them a harmless offset 0 so any unexpected access stays in-bounds.
+        dead = [item for item in self._smem_globals if item[0] not in used]
+        for gname, _stype in dead:
+            self._smem_offsets.setdefault(gname, 0)
+
+        # Sort allocations by live-interval start (definition order is a good
+        # proxy; fall back to declaration order for allocations with no uses).
+        def _sort_key(item: Tuple[str, "SmemType"]) -> int:
+            gname, _ = item
+            return live.get(gname, (0, 0))[0]
+
+        sorted_allocs = sorted(
+            (item for item in self._smem_globals if item[0] in used),
+            key=_sort_key,
+        )
+        if not sorted_allocs:
+            # Every allocation was dead -> empty pool (and no pool global
+            # needed). Clear _smem_globals so finalize() emits no pool global:
+            # otherwise Python would emit a zero-length `[0 x i8]` addrspace(3)
+            # global while the C++ engine (which gates emission on
+            # smem_pool_size > 0) emits nothing -- a byte-identity divergence,
+            # and some LLVM/AMDGPU pipelines reject a zero-length global.
+            self._smem_pool_size = 0
+            self._smem_globals = []
+            return
+
+        # ---- greedy interval packing ----
+        # Each "slot" is (offset, size, last_seq) – the byte range it occupies
+        # and the latest sequence index at which it is still live.
+        slots: List[Tuple[int, int, int]] = []  # (offset, size, last_seq)
+        # Sentinel "never dies" last_seq for exclusive (no-alias) allocations,
+        # so the reuse test ``s_last >= first_seq`` is always true for their
+        # slots and nothing else packs onto them. Larger than any real preorder
+        # index. (Mirrored as ROCKE_LL_EXCL_LAST_SEQ in the C++ engine.)
+        _EXCL_LAST_SEQ = 1 << 30
+
+        for gname, stype in sorted_allocs:
+            seg = _seg_size(stype)
+            aln = _align(stype)
+            first_seq, last_seq = live.get(gname, (0, 0))
+            # Exclusive (cshuffle no-alias) allocations must not reuse another
+            # allocation's slot, and must never be reused by later allocations,
+            # so they occupy their own byte range. Skipping the free-slot search
+            # forces a fresh slot; recording it with a sentinel last_seq below
+            # keeps it permanently "live" so nothing else packs onto it.
+            excl = getattr(stype, "exclusive", False)
+
+            # Try to reuse any slot that is free before this allocation starts.
+            # A "free" slot (s_last < first_seq) provides a candidate base
+            # address: we place the new allocation at aligned(s_off), regardless
+            # of whether it fits within s_size.  The allocation may extend
+            # beyond the slot's original footprint — that is intentional.
+            #
+            # Example: A (12 KB, live 0..3) and B (12 KB, live 1..3) are packed
+            # into slots [0,12K] and [12K,12K].  C (64 KB, live 5..10) is free
+            # to reuse slot A (starting at offset 0) even though 64 KB > 12 KB.
+            # The pool size becomes max(0+64K, 12K+12K) = 64 KB instead of
+            # 12K+12K+64K = 88 KB.
+            #
+            # Among free slots, prefer the one with the smallest aligned start
+            # (lowest address, cache-friendly, minimises pool fragmentation).
+            best: Optional[int] = None  # index into slots[]
+            best_aligned = 0
+            for i, (s_off, s_size, s_last) in enumerate([] if excl else slots):
+                if s_last >= first_seq:
+                    # Still live when we start – interference, skip.
+                    continue
+                aligned_off = (s_off + aln - 1) & ~(aln - 1)
+                # Reusing slot i places this allocation at [aligned_off,
+                # aligned_off + seg). Because it may be larger than slot i's
+                # original footprint, that range can spill upward into a
+                # DIFFERENT slot that is still live while this allocation is
+                # live -- which would alias two simultaneously-live allocations
+                # and corrupt data. Reject any candidate whose placed range
+                # overlaps a still-live slot; slots already dead before
+                # first_seq are safe to overlap.
+                placed_end = aligned_off + seg
+                conflict = False
+                for j, (o2, sz2, last2) in enumerate(slots):
+                    if j == i or last2 < first_seq:
+                        continue
+                    if aligned_off < o2 + sz2 and o2 < placed_end:
+                        conflict = True
+                        break
+                if conflict:
+                    continue
+                if best is None or aligned_off < best_aligned:
+                    best = i
+                    best_aligned = aligned_off
+
+            if best is not None:
+                s_off, s_size, _ = slots[best]
+                aligned_off = best_aligned
+                self._smem_offsets[gname] = aligned_off
+                # Expand the slot to cover the new allocation if it overflows.
+                # The guard above proved the placed range does not overlap any
+                # live slot, so the expansion is safe.
+                new_size = max(s_size, aligned_off - s_off + seg)
+                slots[best] = (s_off, new_size, last_seq)
+            else:
+                # No reusable slot – open a new one at the end of the pool.
+                current_end = max(
+                    (s_off + s_size for s_off, s_size, _ in slots), default=0
+                )
+                aligned_off = (current_end + aln - 1) & ~(aln - 1)
+                self._smem_offsets[gname] = aligned_off
+                # Exclusive allocs stay permanently live (sentinel last_seq) so
+                # no later allocation reuses their bytes.
+                slots.append((aligned_off, seg, _EXCL_LAST_SEQ if excl else last_seq))
+
+        pool_size = max(s_off + s_size for s_off, s_size, _ in slots)
+        self._smem_pool_size = (pool_size + 15) & ~15
+
+    def _emit_smem_base_ptr(self, gname: str, stype: SmemType) -> str:
+        """Return an addrspace(3) pointer to the start of the smem segment.
+
+        When the segment sits at offset 0 in the pool, returns the pool name
+        directly (no extra GEP instruction). Otherwise emits one byte-level
+        GEP and returns the fresh SSA name.
+
+        The byte offset is a compile-time constant, so the base pointer is
+        cached per (block, allocation): repeated accesses to the same segment
+        within one block reuse a single GEP. Keying on the current block keeps
+        every reuse dominance-safe -- instructions within a block execute
+        sequentially, so the cached value always dominates its later uses.
+        """
+        offset = self._smem_offsets[gname]
+        if offset == 0:
+            return self._smem_pool_name
+        key = (self._current().label, gname)
+        cached = self._smem_base_cache.get(key)
+        if cached is not None:
+            return cached
+        base = self._fresh("smem_base")
+        self._current().emit(
+            f"  {base} = getelementptr inbounds i8, ptr addrspace(3) "
+            f"{self._smem_pool_name}, i32 {offset}"
+        )
+        self._smem_base_cache[key] = base
+        return base
 
     # ----- per-op lowerings -----
 
@@ -1646,6 +2298,17 @@ class _Lowerer:
             f"  {op.result.name} = call float @llvm.exp2.f32(float {self._operand(v)})"
         )
 
+    def _op_math_exp2_fast(self, op: Op) -> None:
+        (v,) = op.operands
+        if v.type.name != "f32":
+            raise NotImplementedError("math.exp2_fast currently supports f32")
+        # Native single-instruction exp2 (v_exp_f32), no overflow guard.
+        self._need("amdgcn.exp2.f32")
+        self._current().emit(
+            f"  {op.result.name} = call float "
+            f"@llvm.amdgcn.exp2.f32(float {self._operand(v)})"
+        )
+
     def _op_math_log2(self, op: Op) -> None:
         (v,) = op.operands
         if v.type.name != "f32":
@@ -1841,6 +2504,26 @@ class _Lowerer:
             f"ptr addrspace(1) {gep}, <2 x bfloat> {self._operand(val)})"
         )
 
+    def _op_memref_global_atomic_add_pk_f16(self, op: Op) -> None:
+        """Lower the packed-fp16 atomic add to its AMDGCN intrinsic.
+
+        Mirrors ``_op_memref_global_atomic_add_pk_bf16`` for fp16.
+        GEPs into the fp16 buffer at ``idx`` and calls
+        ``llvm.amdgcn.global.atomic.fadd.v2f16.p1`` (gfx940+).
+        """
+        ptr, idx, val = op.operands
+        self._needs_intrin["global.atomic.fadd.v2f16"] = True
+        gep = self._fresh("gep")
+        self._current().emit(
+            f"  {gep} = getelementptr inbounds half, ptr addrspace(1) "
+            f"{self._operand(ptr)}, i32 {self._operand(idx)}"
+        )
+        self._current().emit(
+            f"  {op.result.name} = call <2 x half> "
+            f"@llvm.amdgcn.global.atomic.fadd.v2f16.p1("
+            f"ptr addrspace(1) {gep}, <2 x half> {self._operand(val)})"
+        )
+
     def _op_memref_global_load_vN(self, op: Op) -> None:
         """Vectorised <vec x 16-bit> load: a single naturally-aligned
         global_load_dwordx{1,2,4} on AMDGPU when the address is aligned."""
@@ -1869,11 +2552,12 @@ class _Lowerer:
         indices = op.operands[1:-1]
         value = op.operands[-1]
         gname, stype = self._smem_global_name(smem)
+        base_ptr = self._emit_smem_base_ptr(gname, stype)
         gep = self._fresh("gep")
         gidx = ["i32 0"] + [f"i32 {self._operand(i)}" for i in indices]
         agg_ty = _smem_storage_type(stype)
         self._current().emit(
-            f"  {gep} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {gname}, "
+            f"  {gep} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {base_ptr}, "
             f"{', '.join(gidx)}"
         )
         # Alignment is the element byte size: 1 for i8, 2 for f16/bf16,
@@ -1907,11 +2591,12 @@ class _Lowerer:
         val = op.operands[-1]
         elem_ty = _llvm_type(val.type)
         gname, stype = self._smem_global_name(smem)
+        base_ptr = self._emit_smem_base_ptr(gname, stype)
         agg_ty = _smem_storage_type(stype)
         gep = self._fresh("gep")
         gidx = ["i32 0"] + [f"i32 {self._operand(i)}" for i in indices]
         self._current().emit(
-            f"  {gep} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {gname}, "
+            f"  {gep} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {base_ptr}, "
             f"{', '.join(gidx)}"
         )
         ordering = op.attrs.get("ordering", "monotonic")
@@ -1933,11 +2618,12 @@ class _Lowerer:
         value = op.operands[-1]
         vec = int(op.attrs["vec"])
         gname, stype = self._smem_global_name(smem)
+        base_ptr = self._emit_smem_base_ptr(gname, stype)
         agg_ty = _smem_storage_type(stype)
         gep = self._fresh("gep")
         gidx = ["i32 0"] + [f"i32 {self._operand(i)}" for i in indices]
         self._current().emit(
-            f"  {gep} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {gname}, "
+            f"  {gep} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {base_ptr}, "
             f"{', '.join(gidx)}"
         )
         elem_ty = _llvm_type(value.type.elem)  # type: ignore[attr-defined]
@@ -1962,10 +2648,11 @@ class _Lowerer:
     def _op_tile_smem_load_v4(self, op: Op) -> None:
         smem, row, col = op.operands
         gname, stype = self._smem_global_name(smem)
+        base_ptr = self._emit_smem_base_ptr(gname, stype)
         agg_ty = _smem_storage_type(stype)
         base = self._fresh("smem.base")
         self._current().emit(
-            f"  {base} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {gname}, "
+            f"  {base} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {base_ptr}, "
             f"i32 0, i32 {self._operand(row)}, i32 {self._operand(col)}"
         )
         # 4 contiguous fp16 loads + insertelement chain. We do separate
@@ -2001,11 +2688,12 @@ class _Lowerer:
         indices = list(op.operands[1:])
         vec = int(op.attrs["vec"])
         gname, stype = self._smem_global_name(smem)
+        base_ptr = self._emit_smem_base_ptr(gname, stype)
         agg_ty = _smem_storage_type(stype)
         base = self._fresh("smem.base")
         idx_strs = ["i32 0"] + [f"i32 {self._operand(i)}" for i in indices]
         self._current().emit(
-            f"  {base} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {gname}, "
+            f"  {base} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {base_ptr}, "
             f"{', '.join(idx_strs)}"
         )
         elem_ty = _llvm_type(op.result.type.elem)  # type: ignore[attr-defined]
@@ -2408,6 +3096,7 @@ class _Lowerer:
         values = op.operands[1]
         n = values.type.count if isinstance(values.type, VectorType) else 1
         gname, stype = self._smem_global_name(smem)
+        base_ptr = self._emit_smem_base_ptr(gname, stype)
         agg_ty = _smem_storage_type(stype)
         elem_ty = (
             _llvm_type(values.type.elem)
@@ -2423,7 +3112,7 @@ class _Lowerer:
             )
             self._current().emit(
                 f"  {gep} = getelementptr inbounds {agg_ty}, "
-                f"ptr addrspace(3) {gname}, i32 0, i32 {i}"
+                f"ptr addrspace(3) {base_ptr}, i32 0, i32 {i}"
             )
             self._current().emit(
                 f"  store {elem_ty} {ev}, ptr addrspace(3) {gep}, align 2"
@@ -2479,7 +3168,7 @@ class _Lowerer:
         """
         a, b, c = op.operands
         self._need(f"mfma.f32.{intrinsic}")
-        ab_ty = "i64" if self._flavor == LLVM_FLAVOR_LLVM22 else "<2 x i32>"
+        ab_ty = "i64" if _is_modern_flavor(self._flavor) else "<2 x i32>"
         a_cast = self._fresh(f"mfma_a_{dtype}")
         b_cast = self._fresh(f"mfma_b_{dtype}")
         self._current().emit(
@@ -2724,16 +3413,179 @@ class _Lowerer:
         xor_mask = int(op.attrs["xor_mask"])
         offset = (xor_mask << 10) | 0x1F
         (data,) = op.operands
-        self._need("ds.swizzle")
+        self._need("amdgcn.ds.swizzle")
         self._current().emit(
             f"  {op.result.name} = call i32 @llvm.amdgcn.ds.swizzle("
             f"i32 {self._operand(data)}, i32 {offset})"
         )
 
+    def _op_tile_ds_swizzle(self, op: Op) -> None:
+        """``ds_swizzle_b32`` with a caller-supplied raw offset immediate."""
+        (data,) = op.operands
+        offset = int(op.attrs["offset"])
+        self._need("amdgcn.ds.swizzle")
+        self._current().emit(
+            f"  {op.result.name} = call i32 @llvm.amdgcn.ds.swizzle("
+            f"i32 {self._operand(data)}, i32 {offset})"
+        )
+
+    def _op_tile_mov_dpp8(self, op: Op) -> None:
+        (data,) = op.operands
+        sel = int(op.attrs["sel"]) & 0xFFFFFF
+        ty_name = data.type.name
+        if ty_name not in ("i32", "f32"):
+            raise NotImplementedError(f"mov_dpp8: unsupported type {ty_name!r}")
+        llvm_ty = _llvm_type(data.type)
+        self._need(f"mov.dpp8.{ty_name}")
+        self._current().emit(
+            f"  {op.result.name} = call {llvm_ty} @llvm.amdgcn.mov.dpp8.{ty_name}("
+            f"{llvm_ty} {self._operand(data)}, i32 {sel})"
+        )
+
+    def _op_tile_wave_reduce(self, op: Op) -> None:
+        (v,) = op.operands
+        reduce_op = str(op.attrs["reduce_op"])
+        strategy = int(op.attrs.get("strategy", 0))
+        ty_name = v.type.name
+        llvm_ty = _llvm_type(v.type)
+        intrin_key = f"wave.reduce.{reduce_op}.{ty_name}"
+        self._need(intrin_key)
+        self._current().emit(
+            f"  {op.result.name} = call {llvm_ty} "
+            f"@llvm.amdgcn.wave.reduce.{reduce_op}.{ty_name}("
+            f"{llvm_ty} {self._operand(v)}, i32 {strategy})"
+        )
+
+    def _op_tile_readlane(self, op: Op) -> None:
+        v, lane = op.operands
+        ty_name = v.type.name
+        if ty_name not in ("i32", "f32"):
+            raise NotImplementedError(f"readlane: unsupported type {ty_name!r}")
+        llvm_ty = _llvm_type(v.type)
+        self._need(f"readlane.{ty_name}")
+        self._current().emit(
+            f"  {op.result.name} = call {llvm_ty} "
+            f"@llvm.amdgcn.readlane.{ty_name}("
+            f"{llvm_ty} {self._operand(v)}, i32 {self._operand(lane)})"
+        )
+
+    def _op_tile_writelane(self, op: Op) -> None:
+        uniform_val, lane, passthrough = op.operands
+        ty_name = uniform_val.type.name
+        if ty_name not in ("i32", "f32"):
+            raise NotImplementedError(f"writelane: unsupported type {ty_name!r}")
+        llvm_ty = _llvm_type(uniform_val.type)
+        self._need(f"writelane.{ty_name}")
+        self._current().emit(
+            f"  {op.result.name} = call {llvm_ty} "
+            f"@llvm.amdgcn.writelane.{ty_name}("
+            f"{llvm_ty} {self._operand(uniform_val)}, "
+            f"i32 {self._operand(lane)}, "
+            f"{llvm_ty} {self._operand(passthrough)})"
+        )
+
+    def _op_tile_permlane16(self, op: Op) -> None:
+        old, src0, src1, src2 = op.operands
+        fi = "true" if op.attrs.get("fi", False) else "false"
+        bound_ctrl = "true" if op.attrs.get("bound_ctrl", False) else "false"
+        self._need("amdgcn.permlane16")
+        self._current().emit(
+            f"  {op.result.name} = call i32 @llvm.amdgcn.permlane16.i32("
+            f"i32 {self._operand(old)}, i32 {self._operand(src0)}, "
+            f"i32 {self._operand(src1)}, i32 {self._operand(src2)}, "
+            f"i1 {fi}, i1 {bound_ctrl})"
+        )
+
+    def _op_tile_permlane64(self, op: Op) -> None:
+        (src,) = op.operands
+        self._need("amdgcn.permlane64")
+        self._current().emit(
+            f"  {op.result.name} = call i32 @llvm.amdgcn.permlane64.i32("
+            f"i32 {self._operand(src)})"
+        )
+
+    def _op_tile_alignbyte(self, op: Op) -> None:
+        a, b, shift = op.operands
+        self._need("amdgcn.alignbyte")
+        self._current().emit(
+            f"  {op.result.name} = call i32 @llvm.amdgcn.alignbyte("
+            f"i32 {self._operand(a)}, i32 {self._operand(b)}, "
+            f"i32 {self._operand(shift)})"
+        )
+
+    def _op_tile_s_wqm(self, op: Op) -> None:
+        (mask,) = op.operands
+        ty_name = mask.type.name
+        if ty_name not in ("i32", "i64"):
+            raise NotImplementedError(f"s_wqm: unsupported type {ty_name!r}")
+        llvm_ty = _llvm_type(mask.type)
+        self._need(f"amdgcn.s.wqm.{ty_name}")
+        # Two suffixes: result and operand are independently overloaded, even
+        # though the ISA only defines the matched-width pair.
+        self._current().emit(
+            f"  {op.result.name} = call {llvm_ty} "
+            f"@llvm.amdgcn.s.wqm.{ty_name}.{ty_name}"
+            f"({llvm_ty} {self._operand(mask)})"
+        )
+
+    def _op_tile_av_load_b128(self, op: Op) -> None:
+        (ptr,) = op.operands
+        space, ptr_ty = self._anyptr_space("av_load_b128", ptr, _AV_B128_PTR_TYPES)
+        self._need(f"av.load.b128.p{space}")
+        self._needs_av_scope_md = True
+        self._current().emit(
+            f"  {op.result.name} = call <4 x i32> "
+            f"@llvm.amdgcn.av.load.b128.p{space}("
+            f"{ptr_ty} {self._operand(ptr)}, metadata !3)"
+        )
+
+    def _op_tile_av_store_b128(self, op: Op) -> None:
+        ptr, data = op.operands
+        space, ptr_ty = self._anyptr_space("av_store_b128", ptr, _AV_B128_PTR_TYPES)
+        self._need(f"av.store.b128.p{space}")
+        self._needs_av_scope_md = True
+        self._current().emit(
+            f"  call void @llvm.amdgcn.av.store.b128.p{space}("
+            f"{ptr_ty} {self._operand(ptr)}, <4 x i32> {self._operand(data)}, "
+            f"metadata !3)"
+        )
+
+    def _op_tile_s_alloc_vgpr(self, op: Op) -> None:
+        n = int(op.attrs["count"])
+        self._need("s.alloc.vgpr")
+        ok = self._fresh("alloc_ok")
+        self._current().emit(f"  {ok} = call i1 @llvm.amdgcn.s.alloc.vgpr(i32 {n})")
+        self._current().emit(f"  {op.result.name} = zext i1 {ok} to i32")
+
+    def _op_tile_asyncmark(self, op: Op) -> None:
+        self._need("asyncmark")
+        self._current().emit("  call void @llvm.amdgcn.asyncmark()")
+
+    def _op_tile_wait_asyncmark(self, op: Op) -> None:
+        n = self._check_u16("wait_asyncmark", "n", op.attrs.get("n", 0))
+        self._need("wait.asyncmark")
+        self._current().emit(f"  call void @llvm.amdgcn.wait.asyncmark(i16 {n})")
+
+    def _op_tile_s_wait_event(self, op: Op) -> None:
+        imm = self._check_u16("s_wait_event", "imm", op.attrs.get("imm", 0))
+        self._need("s.wait.event")
+        self._current().emit(f"  call void @llvm.amdgcn.s.wait.event(i16 {imm})")
+
+    def _op_tile_s_prefetch_inst(self, op: Op) -> None:
+        ptr, length = op.operands
+        space, ptr_ty = self._anyptr_space(
+            "s_prefetch_inst", ptr, _S_PREFETCH_INST_PTR_TYPES
+        )
+        self._need(f"s.prefetch.inst.p{space}")
+        self._current().emit(
+            f"  call void @llvm.amdgcn.s.prefetch.inst.p{space}("
+            f"{ptr_ty} {self._operand(ptr)}, i32 {self._operand(length)})"
+        )
+
     def _op_tile_permlane32_swap(self, op: Op) -> None:
         """``v_permlane32_swap_b32`` — wave64 half-swap in 1 VALU op."""
         lo, hi = op.operands
-        self._need("permlane32.swap")
+        self._need("amdgcn.permlane32.swap")
         tmp = self._fresh("psw.tmp")
         self._current().emit(
             f"  {tmp} = call {{ i32, i32 }} @llvm.amdgcn.permlane32.swap("
@@ -2765,7 +3617,7 @@ class _Lowerer:
         self._need("amdgcn.permlanex16")
         src = self._operand(v)
         self._current().emit(
-            f"  {op.result.name} = call i32 @llvm.amdgcn.permlanex16("
+            f"  {op.result.name} = call i32 @llvm.amdgcn.permlanex16.i32("
             f"i32 {src}, i32 {src}, i32 1985229328, i32 -19088744, "
             f"i1 false, i1 true)"
         )
@@ -2789,11 +3641,12 @@ class _Lowerer:
         smem = op.operands[0]
         indices = list(op.operands[1:])
         gname, stype = self._smem_global_name(smem)
+        base_ptr = self._emit_smem_base_ptr(gname, stype)
         agg_ty = _smem_storage_type(stype)
         base = self._fresh("tr.base")
         idx_strs = ["i32 0"] + [f"i32 {self._operand(i)}" for i in indices]
         self._current().emit(
-            f"  {base} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {gname}, "
+            f"  {base} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {base_ptr}, "
             f"{', '.join(idx_strs)}"
         )
         self._need("ds.read.tr16.b64")
@@ -2818,11 +3671,12 @@ class _Lowerer:
         smem = op.operands[0]
         indices = list(op.operands[1:])
         gname, stype = self._smem_global_name(smem)
+        base_ptr = self._emit_smem_base_ptr(gname, stype)
         agg_ty = _smem_storage_type(stype)
         base = self._fresh("trw.base")
         idx_strs = ["i32 0"] + [f"i32 {self._operand(i)}" for i in indices]
         self._current().emit(
-            f"  {base} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {gname}, "
+            f"  {base} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {base_ptr}, "
             f"{', '.join(idx_strs)}"
         )
         elem_name = op.attrs.get("elem_type", "f16")
@@ -2912,11 +3766,12 @@ class _Lowerer:
         smem = op.operands[0]
         indices = list(op.operands[1:])
         gname, stype = self._smem_global_name(smem)
+        base_ptr = self._emit_smem_base_ptr(gname, stype)
         agg_ty = _smem_storage_type(stype)
         base = self._fresh("tr8.base")
         idx_strs = ["i32 0"] + [f"i32 {self._operand(i)}" for i in indices]
         self._current().emit(
-            f"  {base} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {gname}, "
+            f"  {base} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {base_ptr}, "
             f"{', '.join(idx_strs)}"
         )
         addr = self._fresh("tr8.addr")
@@ -2988,9 +3843,11 @@ class _Lowerer:
     def _op_tile_smem_addr_of(self, op: Op) -> None:
         (smem,) = op.operands
         gname = self._smem_storage_name[smem.name]
+        stype = smem.type
+        base_ptr = self._emit_smem_base_ptr(gname, stype)
         # The global is ptr addrspace(3); cast to i64 for arithmetic.
         self._current().emit(
-            f"  {op.result.name} = ptrtoint ptr addrspace(3) {gname} to i64"
+            f"  {op.result.name} = ptrtoint ptr addrspace(3) {base_ptr} to i64"
         )
 
     def _op_tile_smem_ptr_add(self, op: Op) -> None:
@@ -3044,7 +3901,7 @@ class _Lowerer:
         # (they have no async global<->LDS instructions to track).
         if not getattr(self._backend, "has_async_lds_counter", False):
             return
-        n = int(op.attrs.get("n", 0))
+        n = self._check_u16("s_wait_asynccnt", "n", op.attrs.get("n", 0))
         self._need("s.wait.asynccnt")
         self._current().emit(f"  call void @llvm.amdgcn.s.wait.asynccnt(i16 {n})")
 
@@ -3056,7 +3913,7 @@ class _Lowerer:
         width = int(op.attrs["width_bytes"])
         cpol = int(op.attrs.get("cpol", 0))
         ioff = int(op.attrs.get("offset_bytes", 0))
-        suffix = {4: "b32", 8: "b64", 16: "b128"}[width]
+        suffix = {1: "b8", 4: "b32", 8: "b64", 16: "b128"}[width]
         # Per-lane global source address (element GEP; i32/i64 index width).
         src_elem_ty = _llvm_type(src_ptr.type.pointee)  # type: ignore[attr-defined]
         idx_ty = _llvm_type(src_index.type)
@@ -3067,11 +3924,12 @@ class _Lowerer:
         )
         # Per-lane LDS destination address (typed aggregate GEP).
         gname, stype = self._smem_global_name(lds_smem)
+        base_ptr = self._emit_smem_base_ptr(gname, stype)
         agg_ty = _smem_storage_type(stype)
         gidx = ["i32 0"] + [f"i32 {self._operand(i)}" for i in lds_indices]
         gep_l = self._fresh("async_dst")
         self._current().emit(
-            f"  {gep_l} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {gname}, "
+            f"  {gep_l} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {base_ptr}, "
             f"{', '.join(gidx)}"
         )
         self._need(f"global.load.async.to.lds.{suffix}")
@@ -3208,9 +4066,10 @@ class _Lowerer:
         ``num_records`` arg type are flavor-dependent:
 
         - LLVM 20: ``make.buffer.rsrc.p1`` with ``i32 num_records``.
-        - LLVM 21+: ``make.buffer.rsrc.p8.p1`` with ``i64 num_records``.
+        - LLVM 21+ (llvm22 / llvm23): ``make.buffer.rsrc.p8.p1`` with
+          ``i64 num_records``.
 
-        On the LLVM 22 path we accept either an ``i32`` or an ``i64``
+        On the modern-flavor path we accept either an ``i32`` or an ``i64``
         ``num_bytes`` operand and ``zext`` ``i32`` callers up; ``i64``
         callers reach the full 64-bit range needed for >4 GiB KV
         caches that would otherwise OOB-zero at the tail.
@@ -3221,7 +4080,7 @@ class _Lowerer:
         """
         self._need("make.buffer.rsrc.p1")
         ptr, num_bytes = op.operands
-        if self._flavor == LLVM_FLAVOR_LLVM22:
+        if _is_modern_flavor(self._flavor):
             intrinsic = "llvm.amdgcn.make.buffer.rsrc.p8.p1"
             nb_ty = _llvm_type(num_bytes.type)
             if nb_ty == "i64":
@@ -3596,10 +4455,30 @@ class _Lowerer:
         bytes_per_lane = dwords * 4
         aux = int(op.attrs.get("aux", 0))
         self._need("raw.ptr.buffer.load.lds")
+        lds = self._lds_ptr_operand("async_buffer_load_lds", lds_ptr)
         self._current().emit(
             f"  call void @llvm.amdgcn.raw.ptr.buffer.load.lds("
             f"ptr addrspace(8) {self._operand(rsrc)}, "
-            f"ptr addrspace(3) {self._operand(lds_ptr)}, "
+            f"ptr addrspace(3) {lds}, "
+            f"i32 {bytes_per_lane}, "
+            f"i32 {self._operand(voffset)}, "
+            f"i32 {self._operand(soffset)}, "
+            f"i32 0, "
+            f"i32 {aux})"
+        )
+
+    def _op_tile_buffer_load_lds_async(self, op: Op) -> None:
+        """LLVM 23 async marker variant of ``raw.ptr.buffer.load.lds``."""
+        rsrc, lds_ptr, voffset, soffset = op.operands
+        dwords = int(op.attrs["dwords"])
+        bytes_per_lane = dwords * 4
+        aux = int(op.attrs.get("aux", 0))
+        self._need("raw.ptr.buffer.load.async.lds")
+        lds = self._lds_ptr_operand("buffer_load_lds_async", lds_ptr)
+        self._current().emit(
+            f"  call void @llvm.amdgcn.raw.ptr.buffer.load.async.lds("
+            f"ptr addrspace(8) {self._operand(rsrc)}, "
+            f"ptr addrspace(3) {lds}, "
             f"i32 {bytes_per_lane}, "
             f"i32 {self._operand(voffset)}, "
             f"i32 {self._operand(soffset)}, "
@@ -3644,11 +4523,12 @@ class _Lowerer:
         value = op.operands[-1]
         vec = int(op.attrs["vec"])
         gname, stype = self._smem_global_name(smem)
+        base_ptr = self._emit_smem_base_ptr(gname, stype)
         agg_ty = _smem_storage_type(stype)
         gep = self._fresh("gep")
         gidx = ["i32 0"] + [f"i32 {self._operand(i)}" for i in indices]
         self._current().emit(
-            f"  {gep} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {gname}, "
+            f"  {gep} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {base_ptr}, "
             f"{', '.join(gidx)}"
         )
         align = vec * 4
@@ -3678,11 +4558,12 @@ class _Lowerer:
         indices = list(op.operands[1:])
         vec = int(op.attrs["vec"])
         gname, stype = self._smem_global_name(smem)
+        base_ptr = self._emit_smem_base_ptr(gname, stype)
         agg_ty = _smem_storage_type(stype)
         base = self._fresh("smem.base")
         idx_strs = ["i32 0"] + [f"i32 {self._operand(i)}" for i in indices]
         self._current().emit(
-            f"  {base} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {gname}, "
+            f"  {base} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {base_ptr}, "
             f"{', '.join(idx_strs)}"
         )
         align = vec * 4
@@ -4343,28 +5224,21 @@ class _Lowerer:
         out.append(f'target triple = "{self._backend.triple}"')
         out.append("")
 
-        # smem globals.
-        # ``align 4`` matches the natural alignment of f16/bf16/f32/i32
-        # LDS storage and is what every 16 B ``ds_read_b128`` /
-        # ``ds_write_b128`` issued against them needs (the runtime
-        # offset math handles the per-row 16 B stride). The exception
-        # is fp8/bf8/i8 storage paired with ``ds_read_b64_tr_b8``: that
-        # intrinsic packs 8 bytes per lane and the AMDGPU backend
-        # requires the load address to be 8 B aligned; landing the i8
-        # global on a 4 B boundary silently corrupts the b64
-        # transpose-read output. Bump only the i8/fp8 globals to 16 B
-        # so the b64 transpose-read is always safe; leave fp16/f32
-        # globals at align 4 (raising them would inflate occupancy
-        # pressure on long-prefill 3D kernels).
-        for gname, stype in self._smem_globals:
-            agg = _smem_storage_type(stype)
-            elem_name = stype.elem.name
-            elem_is_byte = elem_name in ("i8", "fp8e4m3", "bf8e5m2")
-            align = 16 if elem_is_byte else 4
-            out.append(
-                f"{gname} = internal unnamed_addr addrspace(3) global {agg} poison, align {align}"
-            )
+        # smem pool: a single unified addrspace(3) global backing all smem
+        # allocations. Segments are placed by liveness-guided interval packing
+        # (see _compute_smem_layout): non-interfering allocations reuse the same
+        # byte range, so the pool holds max(overlapping segments) rather than the
+        # sum. Per-allocation alignment is preserved (4 bytes for f16/bf16/f32/
+        # i32, 16 bytes for i8/fp8).
+        # Each _op_tile_smem_* method emits a byte-level GEP to its segment
+        # base before the typed aggregate GEP, so the typed addressing is
+        # unchanged. align 16 satisfies all segment alignments (the strictest
+        # is the 16-byte requirement for ds_read_b64_tr_b8 on i8/fp8 tiles).
         if self._smem_globals:
+            out.append(
+                f"{self._smem_pool_name} = internal unnamed_addr addrspace(3) "
+                f"global [{self._smem_pool_size} x i8] poison, align 16"
+            )
             out.append("")
 
         # Intrinsic declarations actually used. ``self._decls`` is
@@ -4379,18 +5253,8 @@ class _Lowerer:
         # space via the ``addr_space`` attr (P17): ``"constant"`` →
         # ``ptr addrspace(4)`` for descriptor tables, otherwise the
         # default ``ptr addrspace(1)`` (global).
-        def _param_type_str(p):
-            t = _llvm_type(p.type)
-            if isinstance(p.type, PtrType):
-                ovr = p.attrs.get("addr_space")
-                if ovr == "constant":
-                    t = "ptr addrspace(4)"
-                elif ovr == "global":
-                    t = "ptr addrspace(1)"
-            return t
-
         params = [
-            f"{_param_type_str(p)}{_param_attrs(p.attrs, p.type)} %{p.name}"
+            f"{_param_llvm_type(p)}{_param_attrs(p.attrs, p.type)} %{p.name}"
             for p in self.kernel.params
         ]
         out.append(
@@ -4432,6 +5296,9 @@ class _Lowerer:
         # ``_op_memref_global_atomic_add``).
         if self._needs_fp_atomic_md:
             out.append("!1 = !{}")
+            out.append("")
+        if self._needs_av_scope_md:
+            out.append('!3 = !{!"agent"}')
             out.append("")
         return "\n".join(out)
 
@@ -4609,6 +5476,7 @@ def _lower_kernel_to_llvm_python(
     """
     lowerer = _Lowerer(kernel, llvm_flavor=llvm_flavor, arch=arch)
     lowerer._collect_smem(kernel.body)
+    lowerer._compute_smem_layout()
     lowerer.lower_region(kernel.body)
     return lowerer.finalize()
 
@@ -4622,9 +5490,9 @@ def lower_kernel_to_llvm(
     """Return the AMDGPU LLVM IR text for the given kernel.
 
     ``llvm_flavor`` overrides the autodetected default (one of
-    :data:`LLVM_FLAVOR_LLVM20` / :data:`LLVM_FLAVOR_LLVM22`). Useful
-    for tests that want to pin a specific flavor regardless of the
-    host ROCm install.
+    :data:`LLVM_FLAVOR_LLVM20` / :data:`LLVM_FLAVOR_LLVM22` /
+    :data:`LLVM_FLAVOR_LLVM23`). Useful for tests that want to pin a
+    specific flavor regardless of the host ROCm install.
 
     ``arch`` selects the ISA backend (e.g. ``"gfx942"``, ``"gfx950"``) that
     owns the datalayout, triple, and waitcnt encoding. Defaults to ``gfx950``

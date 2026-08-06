@@ -1,6 +1,10 @@
 # Changelog for Tensile
 
-## Tensile 4.47.0 (Unreleased)
+## Tensile 4.47.0 for ROCm 7.15
+
+### Changed
+
+- For clock frequency monitoring, amd-smi replaces the deprecated rocm-smi dependency for client functionality.
 
 ## Tensile 4.46.0 (Unreleased)
 

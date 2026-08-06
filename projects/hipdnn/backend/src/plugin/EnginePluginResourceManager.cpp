@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
@@ -11,6 +12,7 @@
 #include <mutex>
 #include <numeric>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include "EnginePlugin.hpp"
@@ -336,8 +338,11 @@ std::vector<int64_t>
     // override-execute SDK surface. Older explicit API versions are skipped.
     const bool isOverrideShapeEnabled = readIsOverrideShapeEnabled(*graphDesc);
     const bool isRuntimePBV = graphDesc->isRuntimePassByValueEnabled();
+    const bool isRaggedTensorEnabled = graphDesc->hasRaggedTensors();
+    const bool hasNonDefaultTensorAlignment = graphDesc->hasNonDefaultTensorAlignment();
+
     const auto& requiredVersion = hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion(
-        isOverrideShapeEnabled, isRuntimePBV);
+        isOverrideShapeEnabled, isRuntimePBV, isRaggedTensorEnabled, hasNonDefaultTensorAlignment);
 
     std::vector<int64_t> engineIds;
 
@@ -645,6 +650,44 @@ void EnginePluginResourceManager::executeOpGraph(hipdnnBackendDescriptor_t execu
         deviceBuffers.push_back(buffer);
     }
 
+    // Enforce each tensor's required device-pointer byte alignment. Alignments
+    // are carried on the execution plan (populated from the graph at finalize and
+    // preserved across plan serialization), keyed by tensor uid. Null pointers
+    // (absent optional tensors) and uids without a recorded alignment are skipped.
+    const auto& planTensorUids = executionPlanDesc->getTensorUids();
+    const auto& planTensorAlignments = executionPlanDesc->getTensorAlignments();
+    if(!planTensorAlignments.empty() && planTensorUids.size() == planTensorAlignments.size())
+    {
+        std::unordered_map<int64_t, int64_t> alignmentByUid;
+        alignmentByUid.reserve(planTensorUids.size());
+        for(size_t i = 0; i < planTensorUids.size(); ++i)
+        {
+            alignmentByUid.emplace(planTensorUids[i], planTensorAlignments[i]);
+        }
+
+        for(const auto& buffer : deviceBuffers)
+        {
+            if(buffer.ptr == nullptr)
+            {
+                continue;
+            }
+
+            const auto it = alignmentByUid.find(buffer.uid);
+            if(it == alignmentByUid.end() || it->second <= 0)
+            {
+                continue;
+            }
+
+            const auto alignment = static_cast<uintptr_t>(it->second);
+            const auto address = reinterpret_cast<uintptr_t>(buffer.ptr);
+            THROW_IF_TRUE(address % alignment != 0,
+                          HIPDNN_STATUS_BAD_PARAM,
+                          "Tensor uid " + std::to_string(buffer.uid)
+                              + " device pointer is not aligned to the required "
+                              + std::to_string(it->second) + " bytes");
+        }
+    }
+
     const auto& overrideUniqueIds = variantPackDesc->getOverrideUniqueIds();
     const auto& overrideShapesFlat = variantPackDesc->getOverrideShapes();
     const auto& overrideStridesFlat = variantPackDesc->getOverrideStrides();
@@ -692,7 +735,10 @@ void EnginePluginResourceManager::executeOpGraph(hipdnnBackendDescriptor_t execu
         THROW_IF_FALSE(pluginApiVersion.has_value()
                            && *pluginApiVersion
                                   >= hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion(
-                                      true, /*isRuntimePassByValue=*/false),
+                                      true,
+                                      /*isRuntimePassByValue=*/false,
+                                      /*isRaggedTensorEnabled=*/false,
+                                      /*hasNonDefaultTensorAlignment=*/false),
                        HIPDNN_STATUS_NOT_SUPPORTED,
                        "Selected plugin API version does not support "
                        "hipdnnEnginePluginExecuteOpGraphWithOverrides.");

@@ -294,6 +294,13 @@ class ORIGAMI_EXPORT heuristics_database_t {
   void add_entry(const heuristic_key_t& key, const heuristic_params_t& params);
 
   /**
+   * @brief Add or update a hand-optimized kernel efficiency entry.
+   *
+   * Writes directly to the fast lookup map. Intended for initialization only.
+   */
+  void add_hand_optimized_efficiency(hand_optimized_kernel_key_t key, double main_loop_efficiency);
+
+  /**
    * @brief Return true if the database has a hand-optimized entry for the given (arch, dtype,
    * layout, MT).
    */
