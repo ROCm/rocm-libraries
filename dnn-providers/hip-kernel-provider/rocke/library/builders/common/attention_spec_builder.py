@@ -384,12 +384,46 @@ def _tiled_spec_from_problem(
     return _spec_gfx942_generic(problem)
 
 
+def _spec_generic_3d(problem: UnifiedAttentionProblem):
+    """gfx942/gfx950 generic 3D split-KV geometry -- the shared fallthrough.
+
+    Self-contained per-engine spec builder (GEMM ``spec_fn`` pattern), extracted
+    verbatim from the generic (non-gfx1250) fallthrough of
+    ``_tiled_3d_spec_from_problem``. gfx942 and gfx950 share this single path --
+    the ``_gfx942_3d_*`` helpers self-gate internally, so no arch split is needed
+    (unlike the 2D generic cohort). Geometry stays in the builder layer;
+    dispatcher identity + C++ parity unchanged.
+    """
+    arch = _resolve_attention_arch()
+    UnifiedAttention3DTiledSpec, *_ = _tiled_3d_impl(arch)
+    tile_size_override = _gfx942_3d_tile_size_override(problem)
+    return UnifiedAttention3DTiledSpec(
+        head_size=problem.head_size,
+        block_size=problem.block_size,
+        num_query_heads=problem.num_query_heads,
+        num_kv_heads=problem.num_kv_heads,
+        dtype=problem.dtype,
+        use_sinks=problem.use_sinks,
+        sliding_window=problem.sliding_window,
+        has_softcap=problem.softcap > 0,
+        num_segments=_num_segments(problem),
+        use_alibi=problem.use_alibi,
+        use_qq_bias=problem.use_qq_bias,
+        num_seqs=problem.num_seqs,
+        waves_per_eu=_select_3d_waves_per_eu(problem),
+        kv_storage_dtype=_kv_storage_dtype(problem),
+        tile_size_override=tile_size_override,
+        use_invariant_hoist=_enable_gfx942_3d_invariant_hoist(problem),
+        use_wide_kv_load=_enable_gfx942_3d_wide_kv_load(problem),
+        use_i64_kv_addr=_enable_i64_kv_addr(problem),
+    )
+
+
 def _tiled_3d_spec_from_problem(
     problem: UnifiedAttentionProblem,
 ):
     arch = _kau._resolve_attention_arch()
     UnifiedAttention3DTiledSpec, *_ = _tiled_3d_impl(arch)
-    tile_size_override = _gfx942_3d_tile_size_override(problem)
     if arch == "gfx1250":
         r = _resolve_gfx1250_tiled3d(problem)
         return UnifiedAttention3DTiledSpec(
@@ -418,23 +452,5 @@ def _tiled_3d_spec_from_problem(
             use_fused_reduce=r.use_fused_reduce,
             use_dpp_softmax=r.use_dpp_softmax,
         )
-    return UnifiedAttention3DTiledSpec(
-        head_size=problem.head_size,
-        block_size=problem.block_size,
-        num_query_heads=problem.num_query_heads,
-        num_kv_heads=problem.num_kv_heads,
-        dtype=problem.dtype,
-        use_sinks=problem.use_sinks,
-        sliding_window=problem.sliding_window,
-        has_softcap=problem.softcap > 0,
-        num_segments=_num_segments(problem),
-        use_alibi=problem.use_alibi,
-        use_qq_bias=problem.use_qq_bias,
-        num_seqs=problem.num_seqs,
-        waves_per_eu=_select_3d_waves_per_eu(problem),
-        kv_storage_dtype=_kv_storage_dtype(problem),
-        tile_size_override=tile_size_override,
-        use_invariant_hoist=_enable_gfx942_3d_invariant_hoist(problem),
-        use_wide_kv_load=_enable_gfx942_3d_wide_kv_load(problem),
-        use_i64_kv_addr=_enable_i64_kv_addr(problem),
-    )
+    # gfx942/gfx950 generic 3D split-KV -- one shared builder (see _spec_generic_3d).
+    return _spec_generic_3d(problem)

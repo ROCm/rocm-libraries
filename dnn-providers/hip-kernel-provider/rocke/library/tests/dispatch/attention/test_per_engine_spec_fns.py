@@ -38,6 +38,8 @@ from kernels.common.attention_unified import (
     _enable_combo_2d,
     _enable_early_v_schedule,
     _enable_fp8_mfma_qk,
+    _enable_gfx942_3d_invariant_hoist,
+    _enable_gfx942_3d_wide_kv_load,
     _enable_gfx942_bf16_flash,
     _enable_gfx942_flash_k_sliced_ldsseq,
     _enable_gfx942_flash_k_sliced_ring,
@@ -61,15 +63,19 @@ from kernels.common.attention_unified import (
     _gfx942_flash_use_cfvst,
     _gfx942_flash_use_single_buffer,
     _gfx942_flash_wide_setting,
+    _gfx942_3d_tile_size_override,
     _kv_storage_dtype,
+    _num_segments,
     _select_2d_block_m_per_warp,
     _select_2d_num_warps,
     _select_2d_tile_size,
     _select_2d_waves_per_eu,
+    _select_3d_waves_per_eu,
     _select_gfx942_flash_num_warps,
     _select_gfx942_flash_ring_depth,
     _select_gfx942_flash_k_slice_hd,
     _tiled_2d_impl,
+    _tiled_3d_impl,
 )
 import builders.common.attention_spec_builder as bld
 
@@ -508,6 +514,86 @@ class TestPerEngineSpecFns(unittest.TestCase):
                 self.assertFalse(c.gate(p))
                 spec = bld._tiled_spec_from_problem(p)
                 self.assertEqual(getattr(spec, c.foreign_field), c.foreign_value)
+
+
+def _reference_generic_3d(problem):
+    """Independent reconstruction of the pre-refactor generic 3D fallthrough.
+
+    gfx942 and gfx950 share one 3D path (the ``_gfx942_3d_*`` helpers self-gate),
+    so a single reference covers both arches.
+    """
+    UnifiedAttention3DTiledSpec, *_ = _tiled_3d_impl(au._RESOLVED_ATTENTION_ARCH)
+    return UnifiedAttention3DTiledSpec(
+        head_size=problem.head_size,
+        block_size=problem.block_size,
+        num_query_heads=problem.num_query_heads,
+        num_kv_heads=problem.num_kv_heads,
+        dtype=problem.dtype,
+        use_sinks=problem.use_sinks,
+        sliding_window=problem.sliding_window,
+        has_softcap=problem.softcap > 0,
+        num_segments=_num_segments(problem),
+        use_alibi=problem.use_alibi,
+        use_qq_bias=problem.use_qq_bias,
+        num_seqs=problem.num_seqs,
+        waves_per_eu=_select_3d_waves_per_eu(problem),
+        kv_storage_dtype=_kv_storage_dtype(problem),
+        tile_size_override=_gfx942_3d_tile_size_override(problem),
+        use_invariant_hoist=_enable_gfx942_3d_invariant_hoist(problem),
+        use_wide_kv_load=_enable_gfx942_3d_wide_kv_load(problem),
+        use_i64_kv_addr=_enable_i64_kv_addr(problem),
+    )
+
+
+class TestGeneric3dSpecFn(unittest.TestCase):
+    """Byte-identity + delegation for the extracted generic 3D spec builder.
+
+    Separate from the 2D ``_COHORTS`` table because the 3D cascade uses a
+    different builder (``_tiled_3d_spec_from_problem``) and dataclass.
+    """
+
+    @staticmethod
+    def _decode_problem(**kw) -> UnifiedAttentionProblem:
+        base = dict(
+            total_q=1,
+            num_seqs=1,
+            num_query_heads=16,
+            num_kv_heads=2,
+            head_size=128,
+            block_size=16,
+            max_seqlen_q=1,
+            max_seqlen_k=8192,
+            dtype="bf16",
+        )
+        base.update(kw)
+        return UnifiedAttentionProblem(**base)
+
+    _PROBLEMS = [
+        {},
+        {"head_size": 256},
+        {"num_query_heads": 32, "num_kv_heads": 8, "dtype": "fp16"},
+    ]
+
+    def _run(self, arch):
+        with _PinnedArch(arch):
+            for kw in self._PROBLEMS:
+                p = self._decode_problem(**kw)
+                self.assertEqual(
+                    asdict(bld._spec_generic_3d(p)),
+                    asdict(_reference_generic_3d(p)),
+                    f"{arch} {kw}: spec_fn != reference",
+                )
+                self.assertEqual(
+                    asdict(bld._tiled_3d_spec_from_problem(p)),
+                    asdict(bld._spec_generic_3d(p)),
+                    f"{arch} {kw}: pipeline does not delegate to spec_fn",
+                )
+
+    def test_gfx942(self):
+        self._run("gfx942")
+
+    def test_gfx950(self):
+        self._run("gfx950")
 
 
 if __name__ == "__main__":
