@@ -62,7 +62,6 @@ if(ENABLE_HIP_FLASH2_ENGINE)
     # manual HIP_FLASH2_KERNEL_DIR export (mirrors asm_sdpa_engine pattern)
     file(COPY
         ${CMAKE_CURRENT_SOURCE_DIR}/engines/hip_flash2_engine/kernels/hip_flash2_fwd_gfx942.co
-        ${CMAKE_CURRENT_SOURCE_DIR}/engines/hip_flash2_engine/kernels/hip_flash2_fwd_gfx950.co
         DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/hip_flash2_kernels)
     # Override HIP_FLASH2_KERNEL_DIR at test time to point to build tree
     set(HIP_FLASH2_KERNEL_DIR_BUILD "${CMAKE_CURRENT_BINARY_DIR}/hip_flash2_kernels"

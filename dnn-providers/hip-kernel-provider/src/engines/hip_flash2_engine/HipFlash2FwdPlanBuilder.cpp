@@ -135,9 +135,16 @@ bool HipFlash2FwdPlanBuilder::isApplicable(const Handle& handle,
                                    + std::to_string(seqLenQ) + " seq_kv=" + std::to_string(seqLenKv)
                                    + ")");
 
-    // Stride contiguity (I2): head_dim stride must be 1
+    // Stride contiguity: head_dim stride must be 1 for Q, K, V, O
+    // The kernel assumes contiguous innermost dimension for all four tensors.
     HIP_KERNEL_RETURN_FALSE_IF(qTensor->strides()->Get(3) != 1,
-                               "Q head_dim stride must be 1 (non-contiguous layout not supported)");
+                               "Q head_dim stride must be 1 (non-contiguous not supported)");
+    HIP_KERNEL_RETURN_FALSE_IF(kTensor->strides()->Get(3) != 1,
+                               "K head_dim stride must be 1 (non-contiguous not supported)");
+    HIP_KERNEL_RETURN_FALSE_IF(vTensor->strides()->Get(3) != 1,
+                               "V head_dim stride must be 1 (non-contiguous not supported)");
+    HIP_KERNEL_RETURN_FALSE_IF(oTensor->strides()->Get(3) != 1,
+                               "O head_dim stride must be 1 (non-contiguous not supported)");
 
     return true;
 }
