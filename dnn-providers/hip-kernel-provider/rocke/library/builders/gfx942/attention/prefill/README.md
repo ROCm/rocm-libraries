@@ -25,34 +25,45 @@ sliding-window. See the AICK-1664 plan for the deferred-findings backlog.
 ### Gain over the unified-attention baseline
 
 Relative gain of this kernel over the in-tree unified attention path
-(`attention_tiled_2d`, the `unified_2d` / `dense_pipe` family) at its best per-config
-vehicle. Same HIP-event timer, same inputs, same fp32 reference for both arms, measured
-on the 304-CU gfx942 part; every cell is a **ratio**, so per `AGENTS.md` the absolute
-throughputs stay in the protected results page.
+(`attention_tiled_2d`, the `unified_2d` / `dense_pipe` family). Same HIP-event timer,
+same inputs, same fp32 paged reference for both arms, all cells `PASS` at that
+reference; one run on a 304-CU gfx942 part. Every cell is a **ratio**, so per
+`AGENTS.md` the absolute throughputs stay in the protected results page.
 
-| config | vs unified attention | note |
+Both arms run the config that actually **ships**: dense builds its spec through the
+production dispatch factory (`dispatch/attention/gfx942.py::_dense_spec`, so the
+measured binary carries the shipped `waves_per_eu` / `d64_kpad` / persistent
+decision), and the baseline takes `wide4`, `narrow` or `narrow_d64` as
+`attention_tiled_2d` selects for that shape.
+
+| config | vs unified attention | sequence lengths |
 |---|---|---|
-| fp16 D128 | **+90 % → +194 %** | grows with sequence length; the primary prefill target |
-| bf16 D128 | **+66 % → +241 %** | grows with sequence length |
-| D64 (both dtypes) | not currently measured — see below | last head-to-head predates the shipped bank-pad |
+| bf16 D128 | **+63 % → +244 %** | 2048 → 8192 |
+| fp16 D128 | **+65 % → +146 %** | 2048 → 8192, plus MHA16 at 4096 |
+| fp16 D64 | **+79 % → +144 %** | 2048 → 8192 |
+| bf16 D64 | **+48 % → +112 %** | 2048 → 8192 |
 
-Three caveats on how to read this, all of which change the reading:
+Every config wins at every measured length, and the margin grows with sequence length
+— the persistent grid turns on at the long end, and the causal work per tile rises
+faster than the fixed overhead. Two things worth knowing about how to read the table:
 
-- The fp16-D128 baseline is unified attention's `fast` wide4 + conflict-free-V +
-  sliced-K-ring vehicle, **not** its shipped config — the shipped one overflows the
-  64 KB LDS and fails codegen at llvm22. bf16-D128 uses the shipped `narrow` config.
-  So fp16-D128 is measured against the strongest in-tree alternative, not the easiest.
-- **D64 has no current head-to-head.** The last one ran *before* the D64
-  K-bank-conflict pad was adopted, and measured −17 % (fp16, short sequence) to +29 %
-  (fp16, long) and +23 % (bf16, long). The pad has since shipped for both D64 dtypes
-  and is worth roughly 1.6–2.1× on the D64 path on its own, so those figures
-  understate the shipped kernel by a wide margin and the short-sequence regression is
-  unlikely to have survived. Rather than compose two separately-measured ratios and
-  present the product as data, the row is left open: re-running the comparison at the
-  shipped config is the honest way to close it.
-- D64 remains the VGPR-bound regime described under *Problem category* —
-  `waves_per_eu` reaches 2 WG/CU for bf16-D64 but not fp16-D64 — so a `waves_per_eu`
-  re-tune stays a named follow-up wherever the re-measurement lands.
+- **The D64 rows moved a long way, and the D64 K-bank-conflict pad is why.** An
+  earlier comparison, run before the pad was adopted, measured D64 at −17 % (fp16,
+  short) to +29 %. Re-running with the pad in place is what removed the regression: an
+  explicit ON/OFF A/B in the same harness puts it at **1.88–2.13× (fp16)** and
+  **1.72–1.86× (bf16)** on the D64 path alone, matching the independent cross-part
+  figure recorded when the lever was adopted. A benchmark that hand-builds its spec
+  will silently miss a lever like this; building it from the dispatch factory is what
+  keeps the measured config and the shipped config the same thing.
+- **fp16 D128 is now measured against a stronger baseline than before**, which is why
+  its low end reads lower than an older number would suggest. `attention_tiled_2d`'s
+  shipped `wide4` config used to overflow the 64 KB LDS and fail codegen at llvm22,
+  forcing the comparison onto a fallback vehicle; it builds now, so the baseline got
+  faster while dense did not move. The ratio fell; nothing regressed.
+
+D64 remains the VGPR-bound regime described under *Problem category* — `waves_per_eu`
+reaches 2 WG/CU for bf16-D64 but not fp16-D64 — so a `waves_per_eu` re-tune stays a
+named follow-up, now as upside rather than as a fix for a deficit.
 
 ## Scope
 
