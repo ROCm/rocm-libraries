@@ -1,0 +1,361 @@
+# hipSPARSE Testing Strategy
+
+**Status:** Draft
+**Owner:** @doctorcolinsmith
+**Technical Lead:** @ntrost57
+**Last Updated:** 2026-08-06
+
+This document describes how hipSPARSE is tested today, which signals actually gate a merge, and where
+the gaps are. It follows the ROCm-wide TESTING.md template and is written as a description of the
+current state rather than an aspirational one. A gap that is written down is one that can be argued
+about and closed.
+
+---
+
+## Component Overview
+
+hipSPARSE is a **SPARSE marshalling library**. It sits between an application and a "worker" sparse
+library, marshalling inputs to the backend and results back to the application, and exports a stable
+interface that does not change regardless of the chosen backend. It currently supports two backends:
+
+* **HIP backend** → [rocSPARSE](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocsparse)
+  on AMD GPUs (`library/src/amd_detail/`, package `hipsparse`).
+* **CUDA backend** → NVIDIA cuSPARSE (`library/src/nvidia_detail/`, package `hipsparse-alt`).
+
+**Where it sits in the ROCm stack:** portability layer above rocSPARSE (and cuSPARSE). It is API-
+compatible with cuSPARSE v2, so porting a CUDA application is largely mechanical.
+
+**Key architectural constraint that shapes testing:** hipSPARSE is thin — it owns almost no compute.
+Its job is to translate the hipSPARSE API to the backend correctly, so testing is dominated by
+integration tests that call real backend routines on a GPU and validate the marshalled result. The
+tested surface differs by backend: the HIP backend compiles and runs additional legacy routines that
+the CUDA backend does not, and the CUDA YAML set is versioned per CUDA toolkit (`cuda/12.8/`,
+`cuda/13/`).
+
+---
+
+## Development Workflow
+
+What a developer does between making a change and getting it merged.
+
+**1. Build the library with test/benchmark/sample clients (HIP backend, typical):**
+
+```bash
+cd projects/hipsparse
+# -c → BUILD_CLIENTS_TESTS + samples + benchmarks; -d fetches dependencies (incl. googletest)
+./install.sh -dc
+# equivalently, modern CMake:
+cmake -B build -DHIPSPARSE_BUILD_TESTING=ON -DHIPSPARSE_ENABLE_HIP=ON
+cmake --build build --parallel
+```
+
+Presets are also available: `cmake --preset default:release`, `debug`, `coverage`, `asan`.
+Test binaries land in `build/<release|debug|release-debug>/clients/staging/`.
+
+**2. Provision the test matrices** (functional suites read `.bin` matrices):
+
+```bash
+./install.sh --matrices-dir-install <path>/hipsparse_matrices
+```
+
+**3. Run the tests that match what you touched:**
+
+```bash
+cd build/release/clients/staging
+# PR scope, exclude known bugs:
+HIP_VISIBLE_DEVICES=0 gpu-run ./hipsparse-test --gtest_filter='*checkin*-*known_bug*'
+# a single routine:
+./hipsparse-test --gtest_filter='*csrmv*-*known_bug*'
+```
+
+**4. Add the right kind of test** — see [Choosing the Right Test Type](#choosing-the-right-test-type).
+
+**5. Open the PR** targeting `develop`. The pre-checkin GTest run (`*checkin*`, excluding
+`*known_bug*`) is the merge gate on the HIP backend; the CUDA backend has its own reduced lane.
+
+---
+
+## Testing Strategy and Layers
+
+### Unit Testing Strategy
+
+**Purpose:** validate hardware-independent logic — descriptor/handle construction, enum/type
+marshalling, and argument validation — that can be checked without dispatching a compute kernel.
+
+hipSPARSE does not maintain a separate host-only unit-test binary; hardware-independent checks live
+inside the single `hipsparse-test` GoogleTest binary as:
+
+* **Descriptor / bad-argument tests** — plain `TEST()` cases such as
+  `clients/tests/test_dnmat_descr.cpp` (`dnmat_descr_bad_arg.*`) validate descriptor create/destroy
+  and argument handling without a kernel.
+* **`<routine>_bad_arg` cases** — YAML `function: <routine>_bad_arg` dispatches to
+  `testing_<routine>_bad_arg`, checking status-code marshalling for invalid inputs.
+
+**Framework:** GoogleTest (`find_package(GTest REQUIRED)`); main at
+`clients/tests/hipsparse_gtest_main.cpp`, which defines `GOOGLE_TEST`.
+
+**Location / structure:** per-routine `clients/tests/test_<routine>.cpp` (registration via
+`TEST_ROUTINE` / `TEST_ROUTINE_WITH_CONFIG` in `clients/tests/test.hpp`) +
+`clients/include/testing_<routine>.hpp` (implementation) + backend-specific YAML under
+`clients/tests/rocm/` or `clients/tests/cuda/<ver>/`. At build time
+`clients/common/hipsparse_gentest.py` expands the backend's `hipsparse_test.yaml` into
+`hipsparse_test.data`, consumed at runtime.
+
+**How to run:** `./hipsparse-test --gtest_filter='*bad_arg*'` runs the argument-validation surface.
+
+**What is NOT covered by unit tests:** numerical correctness of marshalled routines (requires the
+backend on a GPU) and anything below the hipSPARSE API in rocSPARSE/cuSPARSE.
+
+**Coverage expectation:** the long-term ROCm-wide goal is >95% line coverage of hardware-independent
+paths, pursued in phases. Because hipSPARSE is a thin marshalling layer, most of its lines are
+exercised only when the backend routine actually runs, so measured coverage is dominated by
+integration tests. Repo Codecov target is 80% (`codecov.yml`, flag `hipSPARSE`).
+
+---
+
+### Integration Testing Strategy
+
+**Purpose:** validate that the hipSPARSE API correctly marshals to the backend and returns correct
+results — for ~110 routines across sparse level 1/2/3, conversions, preconditioners, reordering, and
+the generic API — by running on a GPU and comparing against a host reference.
+
+Integration tests are overwhelmingly `TEST_P` / `INSTANTIATE_TEST_SUITE_P`, parameterized from the
+binary `hipsparse_test.data`. Type dispatch uses `TEST_ROUTINE_WITH_CONFIG`. A few suites use other
+GoogleTest styles: a matrix-file `TestWithParam` in `test_csrilusv.cpp`, and a typed suite
+`test_spmv_csr_pytorch_compat.cpp` (**HIP backend only**).
+
+**Runtime tiers (YAML `category:` field → GTest suite prefix):**
+
+| Tier | Meaning | Typical use |
+|---|---|---|
+| `quick` | small, fast cases | local smoke |
+| `pre_checkin` | PR / checkin scope | PR merge gate (Jenkins filter `*checkin*`) |
+| `nightly` | extended coverage | nightly (`extended.groovy`, filter `*nightly*`) |
+| `stress` | instantiated in code but no `stress` cases in YAML today | — |
+| `known_bug` | auto-promoted by gentest from a YAML `Known bugs:` rule | excluded from all gating runs |
+
+**Backend effect on the tested surface:**
+
+| Aspect | HIP / ROCm | CUDA |
+|---|---|---|
+| YAML root | `clients/tests/rocm/hipsparse_test.yaml` | `cuda/12.8/` (CUDA 12.8) or `cuda/13/` (CUDA 13.x) |
+| Extra HIP-only C++ sources | `test_doti`, `test_dotci`, `test_csr2csc`, `test_csrgemm`, `test_csrgeam`, `test_csrmv`, `test_csrmm`, `test_hybmv`, `test_csr2hyb`, `test_hyb2csr`, `test_spmv_csr_pytorch_compat`, … | not compiled |
+| CUDA version gate | n/a | 12.8 → `cuda/12.8/`; 13.x → `cuda/13/`; otherwise no test data is generated |
+| Jenkins lane | `precheckin.groovy` (`*checkin*`) | `precheckin-cuda.groovy` (`./install.sh -c --cuda`, filter `*checkin*csrmv*`) |
+
+**Test data / matrices:** `cmake/ClientMatrices.cmake` downloads **19 SuiteSparse** matrices (e.g.
+`scircuit`, `nos1`–`nos7`, `amazon0312`, `webbase-1M`) as `.bin` (mirror overridable via
+`HIPSPARSE_TEST_MIRROR`). Runtime resolution: installed data path `../share/hipsparse/test/` or the
+executable directory; matrices via `--matrices-dir` or `HIPSPARSE_CLIENTS_MATRICES_DIR`.
+
+**What requires GPU hardware:** all numerical-correctness cases. **What runs without a compute
+kernel:** descriptor and `*bad_arg*` cases.
+
+**What runs on PRs:** build + `*checkin*` (excluding `*known_bug*`) on the HIP backend; a reduced
+`*checkin*csrmv*` on the CUDA backend. **What runs nightly:** the `*nightly*` tier.
+
+**Test-size / coverage guidance:** since hipSPARSE mostly forwards to the backend, exhaustive
+numerical sweeps add little over the backend's own suite — prefer marshalling-focused cases (type/
+enum coverage, descriptor variants, transpose/index-base combinations) over large size matrices.
+
+---
+
+### Performance and Benchmarking Testing
+
+**Purpose:** detect throughput regressions per routine on a given architecture. Absolute numbers are
+not comparable across GFX targets.
+
+| Item | Detail |
+|---|---|
+| Stack layer | Portability layer above the Core SDK |
+| Metrics measured | Time / GFLOP/s / bandwidth per routine (as forwarded to the backend) |
+| How benchmarks are run | `hipsparse-bench` from `clients/staging/`, e.g. `./hipsparse-bench -f csrmv --bench-x -M 10 20 30 40` |
+| Baseline — stored per architecture | Not stored/aggregated; comparison is manual. Must not be aggregated across GFX |
+| Where results are stored | Benchmark output files; no centralized DB |
+| Regression threshold | Not automated |
+| Gating approach | Manual review |
+| GPU profiling | Not integrated |
+
+**Gating:**
+
+| Gating Level | Status | Notes |
+|---|---|---|
+| PR-level automated gate | No | Known gap |
+| Nightly automated comparison | No | Known gap |
+| Manual review | Yes | On request |
+| Release qualification | Partial | Reviewed before release; not an automated sign-off |
+
+Because hipSPARSE is a thin marshalling layer, performance is effectively that of the backend;
+component-level perf tracking is intentionally light. Backend performance is owned by rocSPARSE /
+cuSPARSE.
+
+---
+
+## Why We Test This Way
+
+hipSPARSE owns almost no compute — it marshals to rocSPARSE or cuSPARSE. The failure modes that
+matter are marshalling mistakes: wrong enum/type translation, mishandled descriptors, incorrect
+status propagation, and API-compatibility drift from cuSPARSE. Those are best caught by running the
+real backend routine on a GPU and comparing against a host reference, which is why the strategy is
+integration-dominant and the hardware-independent surface is validated by descriptor and `*bad_arg*`
+cases inside the same binary.
+
+The backend split is deliberate: the HIP and CUDA backends expose different routine sets, so the YAML
+suites are maintained per backend (and per CUDA toolkit version). This keeps each lane honest about
+what its backend actually supports rather than pretending to a single unified matrix.
+
+---
+
+## Pre-submit / CI Gates
+
+CI runs primarily through internal AMD **Jenkins** pipelines (`.jenkins/`). Root `.github/`
+workflows are not present in this checkout; monorepo TheRock workflows build/test the `sparse`
+component. Dependencies pulled for the build include `rocSPARSE`, `rocPRIM`, `rocBLAS`, `hipBLASLt`,
+and `hipBLAS-common`.
+
+### Validation Gates and Ownership
+
+| Validation Area | Required Before Merge | Owner | Notes |
+|---|---|---|---|
+| Build (HIP and CUDA backends) | Yes | CI / DevOps | `precheckin.groovy`, `precheckin-cuda.groovy`, `static.groovy` |
+| Unit / descriptor / bad-arg tests | Yes | Component team | Part of the `*checkin*` GTest run |
+| Integration tests | Yes | Component team | HIP: `*checkin*`; CUDA: `*checkin*csrmv*`; both exclude `*known_bug*` |
+| Static analysis / formatting | Yes | CI / DevOps | `staticanalysis.groovy`; repo-wide quality gates |
+| Code coverage | No | Component team / CI | `codecov.groovy`, informational (flag `hipSPARSE`, target 80%) |
+| ASAN | Available | CI / DevOps | `asan` preset build; see Sanitizer section |
+| Shared validation infra | N/A | TheRock team | Shared build/validation infrastructure |
+| Release qualification | N/A | Component team + QA + TPM | Readiness and known-gap review |
+
+### PR Test Classification
+
+| Status | Applies to |
+|---|---|
+| Trusted gate | HIP `*checkin*` and CUDA `*checkin*csrmv*` (excluding `*known_bug*`) on the PR runners |
+| Informational | Coverage upload (Codecov); nightly `*nightly*` results |
+| Unstable / flaky | `known_bug`-tagged cases (excluded from gating) |
+
+**Flaky / known-bug policy:** hipSPARSE has no `known_bugs.yaml`. A known bug is declared as a
+`Known bugs:` section inside a routine's YAML (e.g. `rocm/test_csrsv2.yaml`, `test_csric02.yaml`,
+`test_csrilu02.yaml`, `test_spmm_bell.yaml`; and CUDA `test_csric02.yaml`, `test_csrilu02.yaml`), and
+`hipsparse_gentest.py` moves matching cases into the `known_bug` category. Every gating run excludes
+`*known_bug*`. A known-bug tag is not an accepted permanent state; per-case owner/ticket tracking is a
+gap.
+
+---
+
+## Coverage
+
+**Tool:** `lcov` (`-DHIPSPARSE_ENABLE_COVERAGE=ON`, or legacy `-DBUILD_CODE_COVERAGE=ON` /
+`install.sh --codecoverage`; requires a Debug or RelWithDebInfo build).
+
+**How to build and run:**
+
+```bash
+./install.sh -kc --codecoverage        # RelWithDebInfo + clients + coverage
+cd build/release-debug
+make coverage_cleanup coverage GTEST_FILTER='*-*known_bug*'
+# targets: coverage_analysis -> coverage_output (lcov --capture, strip /opt,/usr, genhtml) -> coverage
+```
+
+Output lands in `build/.../lcoverage/` (`main_coverage.info` + HTML). Jenkins `codecov.groovy`
+uploads `lcoverage/main_coverage.info` to Codecov with flag `hipSPARSE`.
+
+> Preset caveat: the `coverage` CMake preset sets `HIPSPARSE_BUILD_COVERAGE`, which the build does not
+> define. Use `HIPSPARSE_ENABLE_COVERAGE` (or the `install.sh` flag) instead.
+
+**Code coverage vs. test coverage** are distinct:
+* *Code coverage* = fraction of lines executed by the suite.
+* *Test coverage* = fraction of intended functionality exercised (backends, routines, types, enums,
+  platforms). A high line-coverage number on the marshalling layer can still leave backend-specific
+  behavior and the CUDA lane under-tested.
+
+**Scope:** measured on Linux; Windows coverage is not tracked separately.
+
+---
+
+## Nightly Validation
+
+Beyond PR validation, nightly (`extended.groovy`) runs the full `*nightly*` tier on the HIP backend.
+The CUDA backend's PR lane is intentionally narrow (`*checkin*csrmv*`); broader CUDA validation is not
+part of the per-PR gate.
+
+---
+
+## Supported Configurations
+
+| Configuration | Validation Level | Frequency | Notes |
+|---|---|---|---|
+| Linux + HIP backend (rocSPARSE) | Full | PR / Nightly / Release | Primary platform, package `hipsparse` |
+| Linux + CUDA 12.8 backend (cuSPARSE) | Partial | PR / Nightly | package `hipsparse-alt`; PR lane is `*checkin*csrmv*` |
+| Linux + CUDA 13.x backend | Partial | Nightly | `cuda/13/` YAML set |
+| gfx908 / gfx90a / gfx942 (and PR runner gfx900/gfx906/gfx908) | Full/Partial | PR / Nightly | via rocSPARSE backend |
+| gfx1151 (Strix Halo) | Partial | Nightly | `f64_r` / `f64_c` cases excluded (`exclude_gpu_gfx1151`) |
+| Windows | Partial | — | Fortran clients off on Windows |
+
+**Explicitly not tested / guaranteed:** enabling HIP and CUDA backends simultaneously is unsupported
+(mutually exclusive); CUDA toolkit versions other than 12.8 / 13.x generate no test data; multi-GPU
+validation; non-listed gfx targets.
+
+---
+
+## ASAN / TSAN / Sanitizer Coverage
+
+**AddressSanitizer:** `-DHIPSPARSE_ENABLE_ASAN=ON` (legacy `-DBUILD_ADDRESS_SANITIZER=ON`,
+`install.sh --address-sanitizer`, or the `asan` preset) builds `hipsparse` and the client libraries
+with `-fsanitize=address -shared-libasan`, linking with `lld`. The `asan` preset also enables testing
+and forces Fortran off — **ASAN and the Fortran clients are mutually exclusive**. Matrix conversion
+(`mtx2csr.exe`) is built with ASAN flags when enabled.
+
+**What is explicitly not covered:** TSAN, UBSAN, and MSAN are not wired into hipSPARSE; device-code
+sanitizing follows the backend's constraints.
+
+---
+
+## Fortran Client Testing
+
+Fortran is **sample-only** — there is no Fortran path in `hipsparse-test`. `HIPSPARSE_ENABLE_FORTRAN`
+(default ON on non-Windows, OFF on Windows) builds the `hipsparse_fortran` object library from
+`library/src/hipsparse.f90` / `hipsparse_enums.f90` and Fortran example binaries under
+`clients/samples/` and `documentation_examples/` (e.g. `example_fortran_csrsv2`,
+`example_fortran_spmv`). Fortran samples require the HIP backend and are disabled under ASAN. This is
+a build/compile check of the Fortran bindings rather than a correctness test suite.
+
+---
+
+## Choosing the Right Test Type
+
+| Scenario | What to add |
+|---|---|
+| New descriptor/enum/type marshalling or status path | A descriptor `TEST()` or `<routine>_bad_arg` case (host-side, no kernel) |
+| New or changed marshalled routine | A YAML case in the appropriate backend directory (`rocm/` and/or `cuda/<ver>/`), validated against the host reference |
+| cuSPARSE API-compatibility change | Ensure the CUDA-backend YAML covers it; keep parity with the HIP set where the routine exists on both |
+| Bug fix | A regression case that fails before the fix; if the defect stays open, add a YAML `Known bugs:` rule |
+| New data type / index base / transpose combination | Extend the routine's YAML / config; the parameterized suite picks it up |
+| Performance-sensitive change | Run `hipsparse-bench` before/after; note the delta in the PR (backend perf is owned upstream) |
+
+---
+
+## Known Gaps Summary
+
+| Gap | Regression risk | Impact | Mitigation today |
+|---|---|---|---|
+| No automated performance regression gate (PR or nightly) | Medium | Medium | Manual `hipsparse-bench` comparison; backend owns perf |
+| CUDA-backend PR lane is narrow (`*checkin*csrmv*`) | Medium | Medium | Broader CUDA coverage only on demand |
+| No tracked quarantine list (owner + ticket + expiry) for `known_bug` cases | Medium | Medium | `*known_bug*` excluded from gating; linkage is ad-hoc |
+| `stress` tier instantiated but empty in YAML | Low | Low | No stress cases today |
+| Coverage preset flag mismatch (`HIPSPARSE_BUILD_COVERAGE` vs `HIPSPARSE_ENABLE_COVERAGE`) | Low | Low | Use the enable flag / `install.sh` |
+| Fortran bindings are compile-checked only, not correctness-tested | Low | Medium | Samples build; no assertion suite |
+| No TSAN/UBSAN/MSAN | Low | Medium | ASAN only; ASAN excludes Fortran |
+| Windows/multi-GPU coverage thin | Medium | Medium | Documented as not guaranteed |
+
+---
+
+## Owners and Review Cadence
+
+**Review this document when:**
+* A new backend, CUDA toolkit version, test tier, or CI lane is added.
+* A cuSPARSE API-compatibility change lands.
+* A regression escapes to an application consumer or is traced to a marshalling error.
+* Before a major release, alongside the known-gap review.
+
+The measure of whether this document is working: the Known Gaps table shrinks over time.
