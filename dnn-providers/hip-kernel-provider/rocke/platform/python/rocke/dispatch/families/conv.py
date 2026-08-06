@@ -298,6 +298,7 @@ def _spec_gfx1250_wmma(req: ConvRequest, name: str) -> ImplicitGemmConvSpec:
         wave_size=ArchTarget.from_gfx(req.arch).wave_size,
         pipeline="mem",
         epilogue="default",
+        vector_size_c=1,
     )
 
 

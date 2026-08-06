@@ -405,6 +405,7 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
             spec.problem.C, spec.problem.K, spec.data.dtype_d
         )[2]
     )
+    _is_wmma_arch = target.wave_size == 32
     if _eff_vec_c > 1 and spec.epilogue == "default":
         return False, (
             f"default epilogue is not supported with vector size c: {_eff_vec_c}"
@@ -415,7 +416,7 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
     # shape thus resolves to an MFMA op_id on gfx942/gfx950 and a WMMA op_id on
     # gfx1151. ``spec.wave_size`` is baked into ``block_size``, so it must match
     # the target's wave size or the lane geometry is wrong on hardware.
-    family = "wmma" if target.wave_size == 32 else "mma"
+    family = "wmma" if _is_wmma_arch else "mma"
     if spec.wave_size != target.wave_size:
         return False, (
             f"spec wave_size {spec.wave_size} != {arch} wave_size {target.wave_size}"
