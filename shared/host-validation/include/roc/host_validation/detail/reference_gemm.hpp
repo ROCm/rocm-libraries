@@ -28,6 +28,11 @@ enum class GemmBackend {
     Blas,
 };
 
+enum class GemmOutputConversion {
+    Default,
+    SaturatingInt8,
+};
+
 struct BlockScaleBinding {
     TensorView values;
     size_t blockSize;
@@ -38,7 +43,7 @@ struct GemmOperand {
 
     TensorView values;
     std::optional<ScalarType> computeType;
-    std::optional<VectorBinding> preQuantizationScale;
+    std::vector<VectorBinding> preQuantizationScales;
     std::optional<BlockScaleBinding> blockScale;
     bool conjugate = false;
 };
@@ -50,6 +55,8 @@ struct GemmEpilogue {
     std::optional<VectorBinding> scaleAlpha;
     std::optional<TensorView> scaleA;
     std::optional<TensorView> scaleB;
+    std::complex<double> outputScale = {1.0, 0.0};
+    GemmOutputConversion outputConversion = GemmOutputConversion::Default;
     Activation activation = Activation::None;
     double activationParameter0 = 0.0;
     double activationParameter1 = 0.0;
@@ -167,30 +174,36 @@ inline void validateRuntimeGemm(const GemmProblem& problem) {
     };
     validateComputeType(problem.a, "A");
     validateComputeType(problem.b, "B");
-    auto validatePreQuantizationScale = [&](const GemmOperand& operand, const char* name) {
-        if (!operand.preQuantizationScale) return;
-        const auto& binding = *operand.preQuantizationScale;
-        requireRank(binding.values.shape(), 1, "Reference GEMM", name);
-        const size_t expected =
-            axisExtent(binding.axis, operand.values.shape()[0], operand.values.shape()[1]);
-        if (binding.values.shape()[0] != 1 && binding.values.shape()[0] != expected)
-            throw std::invalid_argument(std::string("Reference GEMM ") + name +
-                                        " length mismatch.");
-        if (!complexAccumulator && isComplexScalarType(binding.values.type()))
-            throw std::invalid_argument(
-                std::string("Reference GEMM real accumulator cannot consume complex ") + name +
-                ".");
+    auto validatePreQuantizationScales = [&](const GemmOperand& operand, const char* name) {
+        for (const VectorBinding& binding : operand.preQuantizationScales) {
+            requireRank(binding.values.shape(), 1, "Reference GEMM", name);
+            const size_t expected =
+                axisExtent(binding.axis, operand.values.shape()[0], operand.values.shape()[1]);
+            if (binding.values.shape()[0] != 1 && binding.values.shape()[0] != expected)
+                throw std::invalid_argument(std::string("Reference GEMM ") + name +
+                                            " length mismatch.");
+            if (!complexAccumulator && isComplexScalarType(binding.values.type()))
+                throw std::invalid_argument(
+                    std::string("Reference GEMM real accumulator cannot consume complex ") + name +
+                    ".");
+        }
     };
-    validatePreQuantizationScale(problem.a, "A pre-quantization scale");
-    validatePreQuantizationScale(problem.b, "B pre-quantization scale");
+    validatePreQuantizationScales(problem.a, "A pre-quantization scale");
+    validatePreQuantizationScales(problem.b, "B pre-quantization scale");
 
     if (problem.mathMode == MathMode::XFloat32 && problem.accumulatorType != ScalarType::Float32)
         throw std::invalid_argument("XFloat32 math mode requires a Float32 accumulator.");
     if (complexAccumulator && problem.epilogue.activation != Activation::None)
         throw std::invalid_argument("Complex reference GEMM does not support activation.");
     if (!complexAccumulator &&
-        (problem.epilogue.alpha.imag() != 0.0 || problem.epilogue.beta.imag() != 0.0))
-        throw std::invalid_argument("Reference GEMM real accumulator has complex alpha or beta.");
+        (problem.epilogue.alpha.imag() != 0.0 || problem.epilogue.beta.imag() != 0.0 ||
+         problem.epilogue.outputScale.imag() != 0.0))
+        throw std::invalid_argument(
+            "Reference GEMM real accumulator has a complex scalar.");
+    if (problem.epilogue.outputConversion == GemmOutputConversion::SaturatingInt8 &&
+        problem.d.type() != ScalarType::Int8)
+        throw std::invalid_argument(
+            "Reference GEMM saturating output conversion currently requires Int8 output.");
 
     auto validateEpilogueVector = [&](const TensorView& values, size_t expected, const char* name) {
         validateRuntimeVector(values, expected, "Reference GEMM", name);
@@ -240,11 +253,43 @@ inline void validateRuntimeGemm(const GemmProblem& problem) {
 }
 
 template <typename Accumulator>
+class RuntimeGemmOutputWriter {
+   public:
+    RuntimeGemmOutputWriter(MutableTensorView output, GemmOutputConversion conversion)
+        : m_output(std::move(output)), m_defaultWriter(m_output), m_conversion(conversion) {}
+
+    void store(size_t row, size_t column, Accumulator value) const {
+        if (m_conversion == GemmOutputConversion::Default) {
+            m_defaultWriter.store(row, column, value);
+            return;
+        }
+
+        if constexpr (IsComplex<Accumulator>::value) {
+            throw std::invalid_argument(
+                "Saturating GEMM output conversion does not accept complex values.");
+        } else {
+            const long double rounded = std::nearbyint(static_cast<long double>(value));
+            const long double clamped =
+                std::clamp(rounded, static_cast<long double>(-128),
+                           static_cast<long double>(127));
+            m_output.storeFrom(
+                {row, column}, static_cast<int8_t>(clamped));
+        }
+    }
+
+   private:
+    MutableTensorView m_output;
+    RuntimeMatrixWriter<Accumulator> m_defaultWriter;
+    GemmOutputConversion m_conversion;
+};
+
+template <typename Accumulator>
 GemmRunInfo referenceRuntimeCanonical(const GemmProblem& problem) {
     const RuntimeMatrixReader<Accumulator> a(problem.a.values);
     const RuntimeMatrixReader<Accumulator> b(problem.b.values);
     const RuntimeMatrixReader<Accumulator> c(problem.c);
-    const RuntimeMatrixWriter<Accumulator> d(problem.d);
+    const RuntimeGemmOutputWriter<Accumulator> d(
+        problem.d, problem.epilogue.outputConversion);
     const RuntimeQuantizer<Accumulator> quantizeA(problem.a.computeType);
     const RuntimeQuantizer<Accumulator> quantizeB(problem.b.computeType);
     const RuntimeQuantizer<Accumulator> quantizeAccumulator(
@@ -262,16 +307,20 @@ GemmRunInfo referenceRuntimeCanonical(const GemmProblem& problem) {
     };
 
     std::optional<RuntimeVectorReader<Accumulator>> bias;
-    std::optional<RuntimeVectorReader<Accumulator>> preScaleA;
-    std::optional<RuntimeVectorReader<Accumulator>> preScaleB;
+    std::vector<RuntimeVectorReader<Accumulator>> preScalesA;
+    std::vector<RuntimeVectorReader<Accumulator>> preScalesB;
     std::optional<RuntimeVectorReader<Accumulator>> scaleAlpha;
     std::optional<RuntimeVectorReader<Accumulator>> scaleA;
     std::optional<RuntimeVectorReader<Accumulator>> scaleB;
     std::optional<RuntimeMatrixReader<Accumulator>> blockScaleA;
     std::optional<RuntimeMatrixReader<Accumulator>> blockScaleB;
     if (problem.epilogue.bias) bias.emplace(problem.epilogue.bias->values);
-    if (problem.a.preQuantizationScale) preScaleA.emplace(problem.a.preQuantizationScale->values);
-    if (problem.b.preQuantizationScale) preScaleB.emplace(problem.b.preQuantizationScale->values);
+    preScalesA.reserve(problem.a.preQuantizationScales.size());
+    for (const VectorBinding& binding : problem.a.preQuantizationScales)
+        preScalesA.emplace_back(binding.values);
+    preScalesB.reserve(problem.b.preQuantizationScales.size());
+    for (const VectorBinding& binding : problem.b.preQuantizationScales)
+        preScalesB.emplace_back(binding.values);
     if (problem.epilogue.scaleAlpha) scaleAlpha.emplace(problem.epilogue.scaleAlpha->values);
     if (problem.epilogue.scaleA) scaleA.emplace(*problem.epilogue.scaleA);
     if (problem.epilogue.scaleB) scaleB.emplace(*problem.epilogue.scaleB);
@@ -287,6 +336,8 @@ GemmRunInfo referenceRuntimeCanonical(const GemmProblem& problem) {
         quantizeAccumulator(runtimeScalar<Accumulator>(problem.epilogue.alpha, "alpha"));
     const Accumulator beta =
         quantizeAccumulator(runtimeScalar<Accumulator>(problem.epilogue.beta, "beta"));
+    const Accumulator outputScale =
+        runtimeScalar<Accumulator>(problem.epilogue.outputScale, "output scale");
     const Accumulator activationParameter0 =
         quantizeAccumulator(static_cast<Accumulator>(problem.epilogue.activationParameter0));
     const Accumulator activationParameter1 =
@@ -309,21 +360,21 @@ GemmRunInfo referenceRuntimeCanonical(const GemmProblem& problem) {
                     Accumulator aValue = conjugateIfNeeded(a(row, reduction), problem.a.conjugate);
                     Accumulator bValue =
                         conjugateIfNeeded(b(reduction, column), problem.b.conjugate);
-                    if (preScaleA) {
-                        const auto& binding = *problem.a.preQuantizationScale;
+                    for (size_t scaleIndex = 0; scaleIndex < preScalesA.size(); ++scaleIndex) {
+                        const auto& binding = problem.a.preQuantizationScales[scaleIndex];
                         const size_t index =
                             binding.values.shape()[0] == 1
                                 ? 0
                                 : (binding.axis == MatrixAxis::Row ? row : reduction);
-                        aValue *= (*preScaleA)[index];
+                        aValue *= preScalesA[scaleIndex][index];
                     }
-                    if (preScaleB) {
-                        const auto& binding = *problem.b.preQuantizationScale;
+                    for (size_t scaleIndex = 0; scaleIndex < preScalesB.size(); ++scaleIndex) {
+                        const auto& binding = problem.b.preQuantizationScales[scaleIndex];
                         const size_t index =
                             binding.values.shape()[0] == 1
                                 ? 0
                                 : (binding.axis == MatrixAxis::Row ? reduction : column);
-                        bValue *= (*preScaleB)[index];
+                        bValue *= preScalesB[scaleIndex][index];
                     }
                     aValue = operandMath(quantizeA(aValue));
                     bValue = operandMath(quantizeB(bValue));
@@ -340,20 +391,20 @@ GemmRunInfo referenceRuntimeCanonical(const GemmProblem& problem) {
             for (size_t reduction = 0; reduction < k; ++reduction) {
                 Accumulator aValue = conjugateIfNeeded(a(row, reduction), problem.a.conjugate);
                 Accumulator bValue = conjugateIfNeeded(b(reduction, column), problem.b.conjugate);
-                if (preScaleA) {
-                    const auto& binding = *problem.a.preQuantizationScale;
+                for (size_t scaleIndex = 0; scaleIndex < preScalesA.size(); ++scaleIndex) {
+                    const auto& binding = problem.a.preQuantizationScales[scaleIndex];
                     const size_t index = binding.values.shape()[0] == 1
                                              ? 0
                                              : (binding.axis == MatrixAxis::Row ? row : reduction);
-                    aValue *= (*preScaleA)[index];
+                    aValue *= preScalesA[scaleIndex][index];
                 }
-                if (preScaleB) {
-                    const auto& binding = *problem.b.preQuantizationScale;
+                for (size_t scaleIndex = 0; scaleIndex < preScalesB.size(); ++scaleIndex) {
+                    const auto& binding = problem.b.preQuantizationScales[scaleIndex];
                     const size_t index =
                         binding.values.shape()[0] == 1
                             ? 0
                             : (binding.axis == MatrixAxis::Row ? reduction : column);
-                    bValue *= (*preScaleB)[index];
+                    bValue *= preScalesB[scaleIndex][index];
                 }
                 aValue = operandMath(quantizeA(aValue));
                 bValue = operandMath(quantizeB(bValue));
@@ -378,6 +429,7 @@ GemmRunInfo referenceRuntimeCanonical(const GemmProblem& problem) {
         }
         result = quantizeAccumulator(applyActivation(problem.epilogue.activation, result,
                                                      activationParameter0, activationParameter1));
+        result *= outputScale;
         d.store(row, column, result);
     };
 

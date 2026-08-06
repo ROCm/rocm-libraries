@@ -3,6 +3,7 @@
 
 #include <array>
 #include <complex>
+#include <cstdint>
 #include <roc/host_validation/backends/blas.hpp>
 #include <span>
 #include <stdexcept>
@@ -78,6 +79,78 @@ int main() {
                                       .backendImplementation = &backend,
                                   });
     require(complexD[0] == std::complex<float>(11, -2), "BLAS backend complex result mismatch.");
+
+    const std::array<float, 1> transformedA{0.3f};
+    const std::array<float, 1> transformedB{1.0f};
+    const std::array<float, 1> transformedC{0.0f};
+    const std::array<float, 1> transformedScaleA{0.7f};
+    const std::array<float, 1> transformedAlphaVector{0.6f};
+    std::array<float, 1> transformedD{};
+    GemmOperand transformedOperandA(TensorView::fromNative<float>(
+        Layout::contiguous(Shape{1, 1}), std::span<const float>(transformedA)));
+    transformedOperandA.computeType = ScalarType::Float8E4M3;
+    transformedOperandA.preQuantizationScales.push_back(
+        VectorBinding{
+            TensorView::fromNative<float>(
+                Layout::contiguous(Shape{1}),
+                std::span<const float>(transformedScaleA)),
+            MatrixAxis::Row});
+    transformedOperandA.preQuantizationScales.push_back(
+        VectorBinding{
+            TensorView::fromNative<float>(
+                Layout::contiguous(Shape{1}),
+                std::span<const float>(transformedAlphaVector)),
+            MatrixAxis::Row});
+    GemmProblem transformedProblem(
+        std::move(transformedOperandA),
+        GemmOperand(TensorView::fromNative<float>(
+            Layout::contiguous(Shape{1, 1}),
+            std::span<const float>(transformedB))),
+        TensorView::fromNative<float>(
+            Layout::contiguous(Shape{1, 1}),
+            std::span<const float>(transformedC)),
+        MutableTensorView::fromNative<float>(
+            Layout::contiguous(Shape{1, 1}),
+            std::span<float>(transformedD)),
+        ScalarType::Float32);
+    TransformingBlasGemmBackend transformingBackend;
+    referenceGemm(transformedProblem,
+                  {
+                      .backend = GemmBackend::Blas,
+                      .requireRequestedBackend = true,
+                      .backendImplementation = &transformingBackend,
+                  });
+    require(transformedD[0] == 0.125f,
+            "Transforming BLAS pre-quantization result mismatch.");
+
+    const std::array<float, 1> saturatingA{63.75f};
+    const std::array<float, 1> saturatingB{2.0f};
+    const std::array<int8_t, 1> saturatingC{};
+    std::array<int8_t, 1> saturatingD{};
+    GemmProblem saturatingProblem(
+        GemmOperand(TensorView::fromNative<float>(
+            Layout::contiguous(Shape{1, 1}),
+            std::span<const float>(saturatingA))),
+        GemmOperand(TensorView::fromNative<float>(
+            Layout::contiguous(Shape{1, 1}),
+            std::span<const float>(saturatingB))),
+        TensorView::fromNative<int8_t>(
+            Layout::contiguous(Shape{1, 1}),
+            std::span<const int8_t>(saturatingC)),
+        MutableTensorView::fromNative<int8_t>(
+            Layout::contiguous(Shape{1, 1}),
+            std::span<int8_t>(saturatingD)),
+        ScalarType::Float32);
+    saturatingProblem.epilogue.outputConversion =
+        GemmOutputConversion::SaturatingInt8;
+    referenceGemm(saturatingProblem,
+                  {
+                      .backend = GemmBackend::Blas,
+                      .requireRequestedBackend = true,
+                      .backendImplementation = &transformingBackend,
+                  });
+    require(saturatingD[0] == 127,
+            "Transforming BLAS saturating output mismatch.");
 
     return 0;
 }
