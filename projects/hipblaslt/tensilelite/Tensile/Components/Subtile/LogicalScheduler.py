@@ -3561,7 +3561,7 @@ class LogicalScheduler:
         # SolutionStructs/Solution.py (assignPostLoopStoreInNll), which admits a
         # tile only when numStorePairs > weaveLA so at least one pair is left in
         # the loop to hide the woven ones under.
-        weaveLA = int(plsinDebugEnv("TENSILE_WEAVE_LA", "4"))  # test-only override
+        weaveLA = int(plsinDebugEnv("TENSILE_WEAVE_LA", "2"))  # test-only override
         fusedEmitted = copy.deepcopy(emitted_3d)
         # Macro tiles larger than 256x256 peak at 256 arch VGPRs in the loop, so the
         # fused store's temporaries (valuC window, coord0/1, and the element batch)
