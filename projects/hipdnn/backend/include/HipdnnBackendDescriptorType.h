@@ -331,4 +331,12 @@ typedef enum
      */
     HIPDNN_BACKEND_OPERATION_RESAMPLE_BWD_DESCRIPTOR = 36,
 
+    /**
+     * @brief MoE grouped matmul operation descriptor
+     *
+     * Represents forward grouped matrix multiplication over routed mixture-of-experts
+     * tokens, with mode-dependent routing tensors.
+     */
+    HIPDNN_BACKEND_OPERATION_MOE_GROUPED_MATMUL_DESCRIPTOR = 37,
+
 } hipdnnBackendDescriptorType_t;

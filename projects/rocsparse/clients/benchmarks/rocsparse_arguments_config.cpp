@@ -27,6 +27,9 @@
 #include "rocsparse_clients_matrices_dir.hpp"
 #include "rocsparse_enum.hpp"
 #include "rocsparse_importer_format_t.hpp"
+
+#include <algorithm>
+
 rocsparse_arguments_config::rocsparse_arguments_config()
 {
     //
@@ -69,7 +72,7 @@ rocsparse_arguments_config::rocsparse_arguments_config()
         this->beta            = static_cast<double>(0);
         this->betai           = static_cast<double>(0);
         this->threshold       = static_cast<double>(0);
-        this->percentage      = static_cast<double>(0);
+        this->percentage      = static_cast<double>(50);
         this->transA          = static_cast<rocsparse_operation>(0);
         this->transB          = static_cast<rocsparse_operation>(0);
         this->baseA           = static_cast<rocsparse_index_base>(0);
@@ -267,7 +270,7 @@ void rocsparse_arguments_config::set_description(options_description& desc)
      value<double>(&this->threshold)->default_value(1.0), "specifies the scalar threshold")
 
     ("percentage",
-     value<double>(&this->percentage)->default_value(0.0), "specifies the scalar percentage")
+     value<double>(&this->percentage)->default_value(50.0), "specifies the scalar percentage")
 
     ("transposeA",
      value<char>(&this->b_transA)->default_value('N'),
@@ -471,6 +474,9 @@ int rocsparse_arguments_config::parse(int& argc, char**& argv, options_descripti
         std::cout << desc << std::endl;
         return -2;
     }
+
+    // Percentage represents a value in the range [0, 100], so clamp it.
+    this->percentage = std::max(0.0, std::min(this->percentage, 100.0));
 
     if(this->b_dir != rocsparse_direction_row && this->b_dir != rocsparse_direction_column)
     {

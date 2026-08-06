@@ -217,9 +217,53 @@ inline std::optional<nlohmann::json> parseJsonFile(const std::filesystem::path& 
     return std::make_optional<nlohmann::json>(std::move(json));
 }
 
+// Thrown only by validateRuntimePassByValueTensors(), distinct from the generic
+// schema-conversion failures buildGraphBuffer() otherwise collapses to
+// LoadError::INVALID_GRAPH_SCHEMA. Kept as its own type so callers can single
+// this one contradiction out for a hard failure instead of a quiet skip — see
+// BundleRegistration.hpp's classifyBundle().
+class RuntimePassByValueInvariantError : public std::runtime_error
+{
+public:
+    using std::runtime_error::runtime_error;
+};
+
+// Invariant: a tensor with is_runtime_pass_by_value=true must not also carry a baked
+// value_type or value — if it does, both the CPU reference and the provider silently
+// short-circuit to the baked value and the runtime path is never exercised. Checked here
+// rather than in applyTensorPatches so it covers every path that reaches a graph buffer,
+// not just the template-sweep path that patches tensors.
+inline void validateRuntimePassByValueTensors(const nlohmann::json& graphJson)
+{
+    if(!graphJson.contains("tensors") || !graphJson.at("tensors").is_array())
+    {
+        return;
+    }
+
+    for(const auto& tensor : graphJson.at("tensors"))
+    {
+        if(tensor.value("is_runtime_pass_by_value", false)
+           && (tensor.contains("value_type") || tensor.contains("value")))
+        {
+            const auto uid = tensor.value("uid", int64_t{-1});
+            throw RuntimePassByValueInvariantError(
+                "tensor uid " + std::to_string(uid)
+                + " has is_runtime_pass_by_value=true but still carries value_type or value;"
+                  " remove them from the tensor JSON, or from the sweep case's tensor_patches"
+                  " 'remove' list or template");
+        }
+    }
+}
+
+// Validates the PBV invariant outside the try block below so its distinct
+// RuntimePassByValueInvariantError propagates to the caller uncaught, instead
+// of being collapsed into the generic false/INVALID_GRAPH_SCHEMA result used
+// for ordinary schema-conversion failures.
 inline bool buildGraphBuffer(const nlohmann::json& graphJson,
                              flatbuffers::DetachedBuffer& graphBuffer)
 {
+    validateRuntimePassByValueTensors(graphJson);
+
     flatbuffers::FlatBufferBuilder builder;
     try
     {
@@ -558,6 +602,70 @@ inline nlohmann::json expandTemplateGraph(const nlohmann::json& templateJson,
     return expanded;
 }
 
+// Applies structural tensor patches declared in a sweep case's "tensor_patches" array.
+// Each patch targets a tensor by uid and supports "set" (upsert fields) and "remove" (erase
+// fields). Called after expandTemplateGraph so placeholders are already resolved, and before
+// buildGraphBuffer so the flatbuffer has not yet been sealed.
+inline void applyTensorPatches(nlohmann::json& expandedGraph, const nlohmann::json& caseJson)
+{
+    if(!caseJson.contains("tensor_patches") || !caseJson.at("tensor_patches").is_array())
+    {
+        return;
+    }
+
+    if(!expandedGraph.contains("tensors") || !expandedGraph.at("tensors").is_array())
+    {
+        return;
+    }
+
+    for(const auto& patch : caseJson.at("tensor_patches"))
+    {
+        if(!patch.is_object() || !patch.contains("uid") || !patch.at("uid").is_number_integer())
+        {
+            throw std::runtime_error("tensor_patch entry is missing an integer uid");
+        }
+
+        const auto targetUid = patch.at("uid").get<int64_t>();
+        bool found = false;
+
+        for(auto& tensor : expandedGraph.at("tensors"))
+        {
+            if(!tensor.contains("uid") || tensor.at("uid").get<int64_t>() != targetUid)
+            {
+                continue;
+            }
+
+            if(patch.contains("set") && patch.at("set").is_object())
+            {
+                for(const auto& [key, val] : patch.at("set").items())
+                {
+                    tensor[key] = val;
+                }
+            }
+
+            if(patch.contains("remove") && patch.at("remove").is_array())
+            {
+                for(const auto& key : patch.at("remove"))
+                {
+                    if(key.is_string())
+                    {
+                        tensor.erase(key.get<std::string>());
+                    }
+                }
+            }
+
+            found = true;
+            break;
+        }
+
+        if(!found)
+        {
+            throw std::runtime_error("tensor_patch uid " + std::to_string(targetUid)
+                                     + " not found in expanded graph");
+        }
+    }
+}
+
 inline const nlohmann::json* findSweepCase(const nlohmann::json& sweepJson,
                                            const std::string& caseId)
 {
@@ -616,8 +724,12 @@ inline std::optional<std::filesystem::path>
 //   * inputs and outputs present           -> bundle verified against golden data
 //
 // Inputs and outputs are loaded independently. Output uids come from the graph;
-// every other declared tensor is treated as input. The function is total: it
-// never lets an exception escape.
+// every other declared tensor is treated as input. Every failure above is
+// reported through the return value, except one: a
+// RuntimePassByValueInvariantError from buildGraphBuffer() propagates
+// uncaught, since callers (see BundleRegistration.hpp's classifyBundle())
+// deliberately treat that one contradiction as a hard failure rather than a
+// quiet skip.
 inline LoadResult loadIntegrationTestBundle(const std::filesystem::path& jsonPath)
 {
     const auto graphJson = detail::parseJsonFile(jsonPath);
@@ -680,6 +792,9 @@ inline LoadResult loadIntegrationTestBundle(const std::filesystem::path& jsonPat
 // case id, expand `${case...}` placeholders, load inline metadata, and resolve an
 // optional golden directory. Sweep authoring errors are reported as
 // INVALID_SWEEP_CASE; an expanded graph that still fails schema conversion is
+// INVALID_GRAPH_SCHEMA. As with the direct-bundle overload, a
+// RuntimePassByValueInvariantError from buildGraphBuffer() is the one
+// exception that propagates uncaught rather than being folded into
 // INVALID_GRAPH_SCHEMA.
 inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered)
 {
@@ -707,6 +822,7 @@ inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered)
     {
         expandedGraph = detail::expandTemplateGraph(*templateJson, *caseJson, discovered);
         goldenDirectory = detail::resolveSweepGoldenDirectory(discovered.jsonPath, *caseJson);
+        detail::applyTensorPatches(expandedGraph, *caseJson);
     }
     catch(const std::exception&)
     {
