@@ -449,6 +449,10 @@ auto rocsparse_iaxyt_dispatch(const Arguments& arg)
         = (A == rocsparse_datatype_f32_r && X == rocsparse_datatype_f64_r
            && Y == rocsparse_datatype_f64_r && T == rocsparse_datatype_f64_r);
 
+    const bool f32c_f64c_f64c_f64c_case
+        = (A == rocsparse_datatype_f32_c && X == rocsparse_datatype_f64_c
+           && Y == rocsparse_datatype_f64_c && T == rocsparse_datatype_f64_c);
+
 #define DISPATCH_TEST(ITYPE)                                                                     \
     if(f32r_case)                                                                                \
     {                                                                                            \
@@ -518,6 +522,14 @@ auto rocsparse_iaxyt_dispatch(const Arguments& arg)
     else if(f32r_f64r_f64r_f64r_case)                                                            \
     {                                                                                            \
         return TEST<ITYPE, float, double, double, double>{}(arg);                                \
+    }                                                                                            \
+    else if(f32c_f64c_f64c_f64c_case)                                                            \
+    {                                                                                            \
+        return TEST<ITYPE,                                                                       \
+                    rocsparse_float_complex,                                                     \
+                    rocsparse_double_complex,                                                    \
+                    rocsparse_double_complex,                                                    \
+                    rocsparse_double_complex>{}(arg);                                            \
     }
 
     switch(I)
@@ -588,6 +600,10 @@ auto rocsparse_ijaxyt_dispatch(const Arguments& arg)
     const bool f32r_f64r_f64r_f64r_case
         = (A == rocsparse_datatype_f32_r && X == rocsparse_datatype_f64_r
            && Y == rocsparse_datatype_f64_r && T == rocsparse_datatype_f64_r);
+
+    const bool f32c_f64c_f64c_f64c_case
+        = (A == rocsparse_datatype_f32_c && X == rocsparse_datatype_f64_c
+           && Y == rocsparse_datatype_f64_c && T == rocsparse_datatype_f64_c);
 
 #define DISPATCH_TEST(ITYPE, JTYPE)                                                             \
     if(f32r_case)                                                                               \
@@ -666,6 +682,15 @@ auto rocsparse_ijaxyt_dispatch(const Arguments& arg)
     else if(f32r_f64r_f64r_f64r_case)                                                           \
     {                                                                                           \
         return TEST<ITYPE, JTYPE, float, double, double, double>{}(arg);                        \
+    }                                                                                           \
+    else if(f32c_f64c_f64c_f64c_case)                                                           \
+    {                                                                                           \
+        return TEST<ITYPE,                                                                      \
+                    JTYPE,                                                                      \
+                    rocsparse_float_complex,                                                    \
+                    rocsparse_double_complex,                                                   \
+                    rocsparse_double_complex,                                                   \
+                    rocsparse_double_complex>{}(arg);                                           \
     }
 
     switch(I)
