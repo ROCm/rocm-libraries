@@ -50,25 +50,51 @@ Accumulator activationGradientFactor(Activation activation, Accumulator value,
     switch (activation) {
         case Activation::None:
             return Accumulator(1);
+        case Activation::Absolute:
+            if (value > Accumulator(0)) return Accumulator(1);
+            if (value < Accumulator(0)) return Accumulator(-1);
+            return Accumulator(0);
+        case Activation::ClippedRelu:
+            return value > parameter0 && value < parameter1 ? Accumulator(1) : Accumulator(0);
         case Activation::Relu:
             return value > Accumulator(0) ? Accumulator(1) : Accumulator(0);
-        case Activation::Gelu: {
-            constexpr float coefficient0 = 0.0535161f;
-            constexpr float coefficient1 = 0.398942f;
-            constexpr float coefficient2 = 0.0356774f;
-            constexpr float coefficient3 = 0.797885f;
-            const float x = static_cast<float>(value);
-            const float cube = x * x * x;
-            const float first = coefficient0 * cube + coefficient1 * x;
-            const float second = coefficient2 * cube + coefficient3 * x;
-            const float derivative =
-                0.5f * std::tanh(second) +
-                first * (4.0f / std::pow(std::exp(-second) + std::exp(second), 2)) + 0.5f;
-            return static_cast<Accumulator>(derivative);
+        case Activation::Gelu:
+            return applyActivation(
+                Activation::GeluDerivative, value, parameter0, parameter1);
+        case Activation::GeluScaling:
+            return applyActivation(
+                       Activation::GeluDerivative, value, parameter0, parameter1) *
+                   parameter0;
+        case Activation::LeakyRelu:
+            return value > Accumulator(0) ? Accumulator(1) : parameter0;
+        case Activation::Sigmoid: {
+            const Accumulator sigmoid =
+                applyActivation(Activation::Sigmoid, value, parameter0, parameter1);
+            return sigmoid * (Accumulator(1) - sigmoid);
         }
-        case Activation::Silu:
+        case Activation::Tanh: {
+            const Accumulator hyperbolicTangent =
+                static_cast<Accumulator>(std::tanh(static_cast<float>(value * parameter0)));
+            return parameter0 * parameter1 *
+                   (Accumulator(1) - hyperbolicTangent * hyperbolicTangent);
+        }
+        case Activation::Silu: {
+            const Accumulator sigmoid =
+                applyActivation(Activation::Sigmoid, value, parameter0, parameter1);
+            return sigmoid + value * sigmoid * (Accumulator(1) - sigmoid);
+        }
+        case Activation::Swish: {
+            const Accumulator sigmoid = static_cast<Accumulator>(
+                1.0f /
+                (1.0f + std::exp(-static_cast<float>(parameter0 * value))));
+            return sigmoid + parameter0 * value * sigmoid * (Accumulator(1) - sigmoid);
+        }
         case Activation::Clamp:
-            return applyActivation(activation, value, parameter0, parameter1);
+            return value > parameter0 && value < parameter1 ? Accumulator(1) : Accumulator(0);
+        case Activation::GeluDerivative:
+        case Activation::ReluDerivative:
+            throw std::invalid_argument(
+                "Gradient application does not accept an explicit derivative activation.");
     }
     throw std::invalid_argument("Unsupported epilogue activation.");
 }

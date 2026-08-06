@@ -114,7 +114,7 @@ roc::host_validation::Activation toHostValidationActivation(ActivationType activ
     case ActivationType::GELU:
         return roc::host_validation::Activation::Gelu;
     case ActivationType::SWISH:
-        return roc::host_validation::Activation::Silu;
+        return roc::host_validation::Activation::Swish;
     case ActivationType::CLAMP:
         return roc::host_validation::Activation::Clamp;
     }
