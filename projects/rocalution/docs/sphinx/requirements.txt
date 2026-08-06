@@ -37,7 +37,7 @@ click==8.1.7
     #   sphinx-external-toc
 comm==0.2.2
     # via ipykernel
-cryptography==42.0.7
+cryptography==48.0.1
     # via pyjwt
 debugpy==1.8.12
     # via ipykernel
@@ -81,7 +81,7 @@ ipython==8.31.0
     #   myst-nb
 jedi==0.19.2
     # via ipython
-jinja2==3.1.4
+jinja2==3.1.6
     # via
     #   myst-parser
     #   sphinx
@@ -163,7 +163,7 @@ pygments==2.20.0
     #   ipython
     #   pydata-sphinx-theme
     #   sphinx
-pyjwt[crypto]==2.8.0
+pyjwt[crypto]==2.13.0
     # via pygithub
 pynacl==1.6.2
     # via pygithub
@@ -200,7 +200,7 @@ smmap==5.0.1
     # via gitdb
 snowballstemmer==2.2.0
     # via sphinx
-soupsieve==2.5
+soupsieve==2.8.4
     # via beautifulsoup4
 sphinx==7.3.7
     # via
@@ -258,15 +258,17 @@ traitlets==5.14.3
     #   matplotlib-inline
     #   nbclient
     #   nbformat
-typing-extensions==4.11.0
+typing-extensions==4.16.0
     # via
+    #   cryptography
     #   ipython
     #   myst-nb
     #   pydata-sphinx-theme
     #   pygithub
+    #   pyjwt
     #   referencing
     #   sqlalchemy
-urllib3==2.2.1
+urllib3==2.7.0
     # via
     #   pygithub
     #   requests
