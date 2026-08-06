@@ -13,60 +13,60 @@ MPerBlock_ TUNE 32
 
 NPerBlock_ TUNE 32
 
-K0PerBlock_ TUNE 4; 8; 16; 32
+K0PerBlock_ TUNE 32
 CONSTRAINT (MPerBlock_ + NPerBlock_) * K0PerBlock_ * 8 <= 32768 and ((MPerBlock_ + NPerBlock_) * K0PerBlock_ * 8 * 2 + 512) <= 65536
 
 ABK1_ TUNE 8
 
-MRepeat_ TUNE 1; 2; 4; 8; 16
-CONSTRAINT MRepeat_ * 16 <= MPerBlock_
+MRepeat_ TUNE 1
+CONSTRAINT MRepeat_ * 32 <= MPerBlock_
 
-NRepeat_ TUNE 1; 2; 4; 8; 16
-CONSTRAINT NRepeat_ * 16 <= NPerBlock_ and (MPerBlock_ / 16) * (NPerBlock_ / 16) == MRepeat_ * NRepeat_ * (BlockSize_ / 32)
+NRepeat_ TUNE 1
+CONSTRAINT NRepeat_ * 32 <= NPerBlock_ and (MPerBlock_ / 32) * (NPerBlock_ / 32) == MRepeat_ * NRepeat_ * (BlockSize_ / 64)
 
 ################################
 
-AB0_0 TUNE 4; 8; 16; 32
-CONSTRAINT (AB0_0 == K0PerBlock_ * 8 / ABK1_)
+AB0_0 TUNE 4
+#CONSTRAINT (AB0_0 == K0PerBlock_ * 8 / ABK1_)
 
-AB0_1 TUNE 1; 2; 4; 8; 16; 32; 64
-CONSTRAINT (AB0_1 == BlockSize_ / AB0_0 and AB0_1 >= 1)
+AB0_1 TUNE 8
+#CONSTRAINT (AB0_1 == BlockSize_ / AB0_0 and AB0_1 >= 1)
 
-ABlockTransferSrcScalarPerVector_ TUNE 4; 8; 6
+ABlockTransferSrcScalarPerVector_ TUNE 2
 CONSTRAINT AB0_1 * ABlockTransferSrcScalarPerVector_ <= MPerBlock_ and ((MPerBlock_ % 48 == 0 and ABlockTransferSrcScalarPerVector_ % 3 == 0) or (MPerBlock_ % 48 != 0 and ABlockTransferSrcScalarPerVector_ % 3 != 0))
 
-ABlockTransferDstScalarPerVector_K1_ TUNE 8
+ABlockTransferDstScalarPerVector_K1_ TUNE 2
 
 ExtraM_ TUNE 0
 
 ################################
 
-#B0_0 TUNE 4; 8; 16; 32
+#B0_0 TUNE 4
 #CONSTRAINT (B0_0 == K0PerBlock_ * 8 / ABK1_)
 
-#B0_1 TUNE 1; 2; 4; 8; 16
+#B0_1 TUNE 16
 #CONSTRAINT (B0_1 == BlockSize_ / B0_0 and B0_1 >= 1)
 
-BBlockTransferSrcScalarPerVector_ TUNE 4; 8; 6
+BBlockTransferSrcScalarPerVector_ TUNE 2
 CONSTRAINT AB0_1 * BBlockTransferSrcScalarPerVector_ <= NPerBlock_ and ((NPerBlock_ % 48 == 0 and BBlockTransferSrcScalarPerVector_ % 3 == 0) or (NPerBlock_ % 48 != 0 and BBlockTransferSrcScalarPerVector_ % 3 != 0))
 
-BBlockTransferDstScalarPerVector_K1_ TUNE 8
+BBlockTransferDstScalarPerVector_K1_ TUNE 2
 
 ExtraN_ TUNE 0
 
 #################################
 
-C0 TUNE 4; 8; 16
-C1 TUNE 4; 8; 16
+C0 TUNE 8
+C1 TUNE 8
 
-CShuffleBlockTransferScalarPerVector_NPB_ TUNE 8
-CONSTRAINT (C1 == (NPerBlock_ / NRepeat_) / CShuffleBlockTransferScalarPerVector_NPB_) and (C0 == BlockSize_ / C1)
+CShuffleBlockTransferScalarPerVector_NPB_ TUNE 2
+#CONSTRAINT (C1 == (NPerBlock_ / NRepeat_) / CShuffleBlockTransferScalarPerVector_NPB_) and (C0 == BlockSize_ / C1)
 
 BENCH_ARGS:
 0 0 1 2 1 2 64 64 3 3 512 512 1 1 1 1 1 1 1 1
 
 VERIFY_ARGS:
-0 0 1 2 1 2 64 64 3 3 512 512 1 1 1 1 1 1 1 1
+2 1 1 2 1 2 64 64 3 3 512 512 1 1 1 1 1 1 1 1
 
 TEST_INSTANCE_DIR: test_instances/
 

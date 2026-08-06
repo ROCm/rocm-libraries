@@ -15,58 +15,10 @@ using InElementOp  = PassThrough;
 using WeiElementOp = PassThrough;
 using OutElementOp = PassThrough;
 
-// template <ck::index_t NDimSpatial>
-// using DeviceConvBwdWeightInstance =
-//     // clang-format on
-//     ck::tensor_operation::device::DeviceGroupedConvBwdWeight_Xdl_CShuffleV3<
-//         NDimSpatial,
-//         ck::tuple_element_t<NDimSpatial - 1,
-//                             ck::Tuple<ck::tensor_layout::convolution::NWGC,
-//                                       ck::tensor_layout::convolution::NHWGC,
-//                                       ck::tensor_layout::convolution::NDHWGC>>,
-//         ck::tuple_element_t<NDimSpatial - 1,
-//                             ck::Tuple<ck::tensor_layout::convolution::GKXC,
-//                                       ck::tensor_layout::convolution::GKYXC,
-//                                       ck::tensor_layout::convolution::GKZYXC>>,
-//         ck::tuple_element_t<NDimSpatial - 1,
-//                             ck::Tuple<ck::tensor_layout::convolution::NWGK,
-//                                       ck::tensor_layout::convolution::NHWGK,
-//                                       ck::tensor_layout::convolution::NDHWGK>>,
-//         InDataType,           // InDataType
-//         WeiDataType,          // WeiDataType
-//         OutDataType,          // OutDataType
-//         AccDataType,          // AccDataType
-//         InElementOp,          // InElementwiseOperation
-//         WeiElementOp,         // WeiElementwiseOperation
-//         OutElementOp,         // OutElementwiseOperation
-//         ConvBwdWeightDefault, // ConvolutionBackwardWeightSpecialization
-//         256,                  // BlockSize
-//         128,                  // MPerBlock
-//         128,                  // NPerBlock
-//         64,                   // K0PerBlock
-//         16,                   // K1
-//         16,                   // MPerXdl
-//         16,                   // NPerXdl
-//         2,                    // MXdlPerWave
-//         2,                    // NXdlPerWave
-//         S<4, 16, 1>,          // ABlockTransferThreadClusterLengths_K0_M_K1
-//         S<2, 0, 1>,           // ABlockTransferThreadClusterArrangeOrder
-//         S<1, 0, 2>,           // ABlockTransferSrcAccessOrder
-//         1,                    // ABlockTransferSrcVectorDim
-//         1,                    // ABlockTransferSrcScalarPerVector
-//         2,                    // ABlockTransferDstScalarPerVector_K1
-//         true,                 // ABlockLdsAddExtraM
-//         S<4, 16, 1>,          // BBlockTransferThreadClusterLengths_K0_N_K1
-//         S<2, 0, 1>,           // BBlockTransferThreadClusterArrangeOrder
-//         S<1, 0, 2>,           // BBlockTransferSrcAccessOrder
-//         1,                    // BBlockTransferSrcVectorDim
-//         1,                    // BBlockTransferSrcScalarPerVector
-//         2,                    // BBlockTransferDstScalarPerVector_K1
-//         true,                 // BBlockLdsAddExtraN
-//         1,                    // CShuffleMXdlPerWavePerShuffle
-//         1,                    // CShuffleNXdlPerWavePerShuffle
-//         S<1, 64, 1, 2>,       // CBlockTransferClusterLengths_MBlock_MPerBlock_NBlock_NPerBlock
-//         128 / (sizeof(WeiDataType) * CHAR_BIT)>; // CBlockTransferScalarPerVector_NWaveNPerXdl
+[[maybe_unused]]static constexpr auto Intrawave = ck::BlockGemmPipelineScheduler::Intrawave;
+[[maybe_unused]]static constexpr auto Interwave = ck::BlockGemmPipelineScheduler::Interwave;
+[[maybe_unused]]static constexpr auto V1 = ck::BlockGemmPipelineVersion::v1;
+[[maybe_unused]]static constexpr auto V3 = ck::BlockGemmPipelineVersion::v3;
 
 template <ck::index_t NDimSpatial>
 using DeviceConvBwdWeightInstance = ck::tensor_operation::device::DeviceGroupedConvBwdWeight_Xdl_CShuffleV3<
@@ -90,34 +42,36 @@ using DeviceConvBwdWeightInstance = ck::tensor_operation::device::DeviceGroupedC
     InElementOp,          // InElementwiseOperation
     WeiElementOp,         // WeiElementwiseOperation
     OutElementOp,         // OutElementwiseOperation
-    ConvBwdWeightDefault, // ConvolutionBackwardWeightSpecialization
-    64,
-    32,
-    32,
-    32,
-    8,
-    32,
-    32,
-    1,
-    1,
-    S<4, 8, 1>,
-    S<2, 0, 1>,
-    S<1, 0, 2>,
-    1,
-    2,
-    2,
-    false,
-    S<4, 16, 1>,
-    S<2, 0, 1>,
-    S<1, 0, 2>,
-    1,
-    2,
-    2,
-    false,
-    1,
-    1,
-    S<1, 8, 1, 8>,
-    2>;
+    ConvSpec_,                            // ConvolutionBackwardWeightSpecialization
+    BlockSize_,                           // BlockSize
+    MPerBlock_,                           // MPerBlock
+    NPerBlock_,                           // NPerBlock
+    K0PerBlock_,                          // KPerBlock
+    ABK1_,                                // K1
+    32,                                   // MPerWmma
+    32,                                   // NPerWmma
+    MRepeat_,                             // MRepeat
+    NRepeat_,                             // NRepeat
+    S<AB0_0, AB0_1, 1>,                   // ABlockTransferThreadClusterLengths_K0_M_K1
+    S<2, 0, 1>,                           // ABlockTransferThreadClusterArrangeOrder
+    S<1, 0, 2>,                           // ABlockTransferSrcAccessOrder
+    1,                                    // ABlockTransferSrcVectorDim
+    ABlockTransferSrcScalarPerVector_,    // ABlockTransferSrcScalarPerVector
+    ABlockTransferDstScalarPerVector_K1_, // ABlockTransferDstScalarPerVector_K1
+    ExtraM_,                              // ABlockLdsAddExtraM
+    S<AB0_0, AB0_1, 1>,                   // BBlockTransferThreadClusterLengths_K0_N_K1
+    S<2, 0, 1>,                           // BBlockTransferThreadClusterArrangeOrder
+    S<1, 0, 2>,                           // BBlockTransferSrcAccessOrder
+    1,                                    // BBlockTransferSrcVectorDim
+    BBlockTransferSrcScalarPerVector_,    // BBlockTransferSrcScalarPerVector
+    BBlockTransferDstScalarPerVector_K1_, // BBlockTransferDstScalarPerVector_K1
+    ExtraN_,                              // BBlockLdsAddExtraN
+    1,                                    // CShuffleMRepeatPerShuffle
+    1,                                    // CShuffleNRepeatPerShuffle
+    S<1, C0, 1, C1>,                      // CShuffleBlockTransferClusterLengths_MBlock_MPerBlock_NBlock_NPerBlock
+    CShuffleBlockTransferScalarPerVector_NPB_, // CShuffleBlockTransferScalarPerVector_NPerBlock
+    Intrawave,                            // PipeSched
+    V3>;                                  // PipeVer>; 
 
 template <ck::index_t NDimSpatial>
 using HostConvBwdWeightInstance = ck::tensor_operation::host::ReferenceConvBwdWeight<NDimSpatial,
