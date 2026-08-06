@@ -612,9 +612,19 @@ def emitSubtileScaleDsRead(tc, writer, kernel, scaleGroupIdx):
   if tileInfo.mxBlock == 0:
     return module
 
-  # TileInfo LR subtile (2,2) already spans 2 M-adjacent tiles -> stride = lrSubtileSize.
-  # Legacy TileInfo subtile (1,2) spans 1 M-tile -> stride = 2 * subtileSize.
-  if hasattr(tileInfo, 'lrSubtileSize'):
+  # For wave32 gfx1250 with InMemorySwizzle: the LDS layout after TDM load
+  # is {numKTiles, perWaveRows, dimk} where dimk = instK/MXBlock.
+  # Each ds_load_b32 reads dimk bytes per lane.  Group stride = lanes * dimk
+  # advances to the next batch of 32 M-rows within the same K-tile.
+  wavelen = kernel["WavefrontSize"]
+  isWave32Gfx1250 = (wavelen == 32 and tuple(kernel["ISA"]) == (12, 5, 0))
+  if isWave32Gfx1250:
+    parentTc = tc[-1]
+    mxBlock = kernel["ProblemType"][f"MXBlock{parentTc}"]
+    instK = kernel["MatrixInstK"]
+    dimk = instK // mxBlock
+    groupStride = wavelen * dimk  # 32 * 4 = 128 bytes between M-row groups
+  elif hasattr(tileInfo, 'lrSubtileSize'):
     groupStride = int(tileInfo.lrSubtileSize)
   else:
     groupStride = 2 * tileInfo.subtileSize
@@ -635,8 +645,19 @@ def localReadDoScaleSubtile(tc, writer, kernel):
 
   tileInfo = writer.states.mxsa.tileInfo if tc == 'MXSA' else writer.states.mxsb.tileInfo
 
-  # Iterate over scale groups: one ds_read per 2 M-adjacent subtiles
-  numScaleGroups = math.ceil(tileInfo.localSubtileGrid[0] / 2) * tileInfo.localSubtileGrid[1]
+  # For wave32 gfx1250: each ds_load covers wavelen M-rows.
+  # numGroups = perWaveRows / wavelen (M-dimension groups).
+  wavelen = kernel["WavefrontSize"]
+  isWave32Gfx1250 = (wavelen == 32 and tuple(kernel["ISA"]) == (12, 5, 0))
+  if isWave32Gfx1250:
+    parentTc = tc[-1]
+    ti = 0 if parentTc == 'A' else 1
+    mt = kernel[f"MacroTile{ti}"]
+    wgAxis = kernel["MIWaveGroup"][ti]
+    perWaveMRows = mt // wgAxis
+    numScaleGroups = max(1, perWaveMRows // wavelen)
+  else:
+    numScaleGroups = math.ceil(tileInfo.localSubtileGrid[0] / 2) * tileInfo.localSubtileGrid[1]
   for gid in range(numScaleGroups):
     module.add(emitSubtileScaleDsRead(tc, writer, kernel, gid))
 
@@ -693,6 +714,13 @@ def _initTDMDescriptorMXScaleSubtile(writer, kernel, scaleTc):
   # Total scales per tile = (mt * du) / mxBlock, arranged as mt rows x (du/mxBlock) cols.
   scaleDu = du // mxBlock     # scale columns per depthU
   scaleBpe = 1                # E8M0 = 1 byte per scale
+
+  # dimk = instK / mxBlock: number of K-blocks consumed by one WMMA instruction.
+  # In InMemorySwizzle layout, scale data is rearranged as {numKTiles, freeDim, dimk}
+  # where numKTiles = scaleDu / dimk.  Each TDM load reads one K-tile worth of
+  # data: freeDim * dimk contiguous bytes.  This matches the non-subtile path.
+  instK = kernel["MatrixInstK"]
+  dimk = instK // mxBlock     # 4 for FP4 MXBlock=32
 
   # LDS layout: scales start at ldsStartOffsetMXS{A,B}
   ldsBase = writer.ldsStartOffsetMXSA if scaleTc == "MXSA" else writer.ldsStartOffsetMXSB
@@ -792,34 +820,37 @@ def _initTDMDescriptorMXScaleSubtile(writer, kernel, scaleTc):
             comment="swapMask = addr XOR (addr + ldsTotalSize)"))
 
   # Scale TDM descriptor layout for subtile:
-  # The subtile scale LR reads from LDS linearly (laneId * 4 + base).
-  # The TDM descriptor must write data so that bytes land at the same
-  # LDS offsets the LR expects.
+  # Match the non-subtile InMemorySwizzle layout exactly.
+  # Global data is pre-swizzled as {numKTiles, freeDim, dimk}.
+  # The TDM loads one K-tile as a contiguous 1D block: tile0 = freeDim * dimk.
+  # Multiple K-tiles (numKTiles = scaleDu / dimk) are loaded via tile1.
   #
-  # For TN GEMM with InMemorySwizzle: scale data in global memory is
-  # arranged as [free_dim, K/MXBlock] with stride = Stride{scaleTc}{freeChar}.
-  # The TDM treats dim0 as the contiguous (fast) dimension.
-  # Setting dim0 = K/MXBlock, dim1 = free_dim, tile0 = scaleDu, tile1 = perWaveRows
-  # makes TDM write K-contiguous data into LDS, matching the subtile LR layout.
+  # LDS layout after TDM write (per K-tile):
+  #   Byte offset = M_row * dimk + k_block
+  # The subtile LR reads with laneId * 4 (= laneId * dimk), so lane L reads
+  # M=L's dimk K-block bytes.  Multiple K-tiles are at offsets of
+  # perWaveRows * dimk bytes apart.
+  numKTiles = scaleDu // dimk
   sizeRefK = f"Size{INDEX_CHARS[3]}"
 
   mod.add(comp.setIterationEnabled(group1, False))
   mod.add(comp.setPadding(group1, 0, 0))
 
-  mod.add(comp.setTensorDim0(group1, sizeRefK, writer, sizeShifter))
-  mod.add(comp.setTensorDim1(group1, sizeRefFree, writer))
+  # dim0 = freeDim (for OOB clamping along the free/M dimension).
+  # Multiplied by dimk via the isMXS left-shift in setTensorDim0.
+  mod.add(comp.setTensorDim0(group1, sizeRefFree, writer, int(ceil(log2(dimk))), True))
+  # dim1 = K / instK (number of K-tiles for OOB clamping along K).
+  mod.add(comp.setTensorDim1(group1, sizeRefK, writer, int(ceil(log2(mxBlock * dimk))), True))
 
-  mod.add(comp.setTensorTile0(group1, scaleDu, writer, 0))
+  # tile0 = perWaveRows * dimk (one full K-tile's worth of data).
+  mod.add(comp.setTensorTile0(group1, perWaveRows * dimk, writer, 0))
 
-  # Scale tile1: always load the full perWaveRows.  The TDM hardware
-  # zeroes OOB bytes (returning E8M0 scale = 2^-127 for out-of-bounds
-  # rows), so edge WGs get valid (tiny) scale values for OOB lanes
-  # rather than uninitialised LDS garbage.
-  mod.add(comp.setTensorTile1(group1, perWaveRows, writer))
+  # tile1 = numKTiles (number of K-tiles per depthU iteration).
+  # For edge WGs: TDM hardware zeroes OOB bytes.
+  mod.add(comp.setTensorTile1(group1, numKTiles, writer))
 
-  # Stride: the pre-scaled stride has been multiplied by MXBlock.
-  # Right-shift by log2(MXBlock) to get the actual byte stride.
-  mod.add(comp.setTensorStride0(group1, writer.strideRef(scaleTc, ti), sizeShifter))
+  # Stride = freeDimSize * dimk (bytes between K-tiles in the swizzled layout).
+  mod.add(comp.setTensorStride0(group1, sizeRefFree, int(ceil(log2(dimk))), True))
 
   return mod
 
