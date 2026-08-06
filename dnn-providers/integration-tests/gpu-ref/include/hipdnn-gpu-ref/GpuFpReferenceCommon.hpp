@@ -180,7 +180,11 @@ static void gpuFillWithRandomValues(hipdnn_data_sdk::utilities::TensorBase<T>& t
 {
     tensor.memory().markDeviceModified();
 
-    const auto count = tensor.elementCount();
+    // Using elementSpace() to fill the entire allocated buffer
+    // which could be larger than the number of elements in the
+    // tensor's elementCount(), for example, in the case of
+    // strided tensors.
+    const auto count = tensor.elementSpace();
     auto* dstPtr = tensor.memory().deviceData();
 
     const detail::RocRandGenerator gen(ROCRAND_RNG_PSEUDO_DEFAULT);

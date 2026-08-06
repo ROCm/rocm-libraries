@@ -29,7 +29,7 @@ TEST(TestFillTensorWithRandomValues, FloatValuesAreWithinRange)
     gpu_fp_reference_tensor::fillWithRandomValues(tensor, -1.0f, 10.0f, 42);
 
     const auto* data = static_cast<const float*>(tensor.rawHostData());
-    const auto count = tensor.elementCount();
+    const auto count = tensor.elementSpace();
     for(size_t i = 0; i < count; ++i)
     {
         const auto value = data[i];
@@ -49,7 +49,7 @@ TEST(TestFillTensorWithRandomValues, DoubleValuesAreWithinRange)
     gpu_fp_reference_tensor::fillWithRandomValues(tensor, -1.0, 10.0, 42);
 
     const auto* data = static_cast<const double*>(tensor.rawHostData());
-    const auto count = tensor.elementCount();
+    const auto count = tensor.elementSpace();
     for(size_t i = 0; i < count; ++i)
     {
         const auto value = data[i];
@@ -70,7 +70,7 @@ TEST(TestFillTensorWithRandomValues, HalfValuesAreWithinRange)
         tensor, static_cast<HalfType>(-1.0f), static_cast<HalfType>(10.0f), 42);
 
     const auto* data = static_cast<const HalfType*>(tensor.rawHostData());
-    const auto count = tensor.elementCount();
+    const auto count = tensor.elementSpace();
     for(size_t i = 0; i < count; ++i)
     {
         const auto value = static_cast<float>(data[i]);
@@ -91,7 +91,7 @@ TEST(TestFillTensorWithRandomValues, BFloat16ValuesAreWithinRange)
         tensor, static_cast<BFloat16Type>(-1.0f), static_cast<BFloat16Type>(10.0f), 42);
 
     const auto* data = static_cast<const BFloat16Type*>(tensor.rawHostData());
-    const auto count = tensor.elementCount();
+    const auto count = tensor.elementSpace();
     for(size_t i = 0; i < count; ++i)
     {
         const auto value = static_cast<float>(data[i]);
@@ -115,7 +115,7 @@ TEST(TestFillTensorWithRandomValues, FloatMeanAndVariance)
     gpu_fp_reference_tensor::fillWithRandomValues(tensor, 2.0f, 20.0f, 42);
 
     const auto* data = static_cast<const float*>(tensor.rawHostData());
-    const auto count = tensor.elementCount();
+    const auto count = tensor.elementSpace();
 
     double sum = 0.0;
     double sumSq = 0.0;
@@ -143,7 +143,7 @@ TEST(TestFillTensorWithRandomValues, HalfMeanAndVariance)
         tensor, static_cast<HalfType>(2.0f), static_cast<HalfType>(20.0f), 42);
 
     const auto* data = static_cast<const HalfType*>(tensor.rawHostData());
-    const auto count = tensor.elementCount();
+    const auto count = tensor.elementSpace();
 
     double sum = 0.0;
     double sumSq = 0.0;
@@ -171,7 +171,7 @@ TEST(TestFillTensorWithRandomValues, BFloat16MeanAndVariance)
         tensor, static_cast<BFloat16Type>(2.0f), static_cast<BFloat16Type>(20.0f), 42);
 
     const auto* data = static_cast<const BFloat16Type*>(tensor.rawHostData());
-    const auto count = tensor.elementCount();
+    const auto count = tensor.elementSpace();
 
     double sum = 0.0;
     double sumSq = 0.0;
@@ -206,7 +206,7 @@ TEST(TestFillTensorWithRandomValues, SameSeedProducesSameValues)
 
     const auto* data1 = static_cast<const float*>(tensor1.rawHostData());
     const auto* data2 = static_cast<const float*>(tensor2.rawHostData());
-    const auto count = tensor1.elementCount();
+    const auto count = tensor1.elementSpace();
 
     for(size_t i = 0; i < count; ++i)
     {
@@ -227,7 +227,7 @@ TEST(TestFillTensorWithRandomValues, DifferentSeedsProduceDifferentValues)
 
     const auto* data1 = static_cast<const float*>(tensor1.rawHostData());
     const auto* data2 = static_cast<const float*>(tensor2.rawHostData());
-    const auto count = tensor1.elementCount();
+    const auto count = tensor1.elementSpace();
 
     size_t equalCount = 0;
     for(size_t i = 0; i < count; ++i)
@@ -239,6 +239,87 @@ TEST(TestFillTensorWithRandomValues, DifferentSeedsProduceDifferentValues)
     }
 
     EXPECT_LE(equalCount, 1);
+}
+
+// ---------------------------------------------------------------------
+// Strided tensors
+// ---------------------------------------------------------------------
+
+TEST(TestFillTensorWithRandomValues, FloatStridedTensor)
+{
+    SKIP_IF_NO_ROCRAND();
+    SKIP_IF_NO_DEVICES();
+
+    Tensor<float> tensor({10, 10, 100, 100}, {100, 1000, 10000, 1}); // Strided tensor
+    gpu_fp_reference_tensor::fillWithRandomValues(tensor, 2.0f, 50.0f, 42);
+
+    const auto* data = static_cast<const float*>(tensor.rawHostData());
+    const auto count = tensor.elementSpace();
+
+    // Range checks
+    for(size_t i = 0; i < count; ++i)
+    {
+        const auto value = data[i];
+        EXPECT_FALSE(std::isnan(value));
+        EXPECT_FALSE(std::isinf(value));
+        EXPECT_GE(value, 2.0f);
+        EXPECT_LE(value, 50.0f);
+    }
+
+    // Mean and variance checks
+    double sum = 0.0;
+    double sumSq = 0.0;
+    for(size_t i = 0; i < count; ++i)
+    {
+        const auto val = static_cast<double>(data[i]);
+        sum += val;
+        sumSq += val * val;
+    }
+
+    const double mean = sum / static_cast<double>(count);
+    const double variance = (sumSq / static_cast<double>(count)) - (mean * mean);
+
+    EXPECT_NEAR(mean, 26.0, 1.0e-02);
+    EXPECT_NEAR(variance, 192.0, 1.0e-01);
+}
+
+TEST(TestFillTensorWithRandomValues, BFloat16StridedTensor)
+{
+    SKIP_IF_NO_ROCRAND();
+    SKIP_IF_NO_DEVICES();
+
+    Tensor<BFloat16Type> tensor({100, 1, 10, 100}, {1000, 1, 10, 100}); // Strided tensor
+    gpu_fp_reference_tensor::fillWithRandomValues<BFloat16Type>(
+        tensor, static_cast<BFloat16Type>(3.0f), static_cast<BFloat16Type>(10.0f), 42);
+
+    const auto* data = static_cast<const BFloat16Type*>(tensor.rawHostData());
+    const auto count = tensor.elementSpace();
+
+    // Range checks
+    for(size_t i = 0; i < count; ++i)
+    {
+        const auto value = static_cast<float>(data[i]);
+        EXPECT_FALSE(std::isnan(value));
+        EXPECT_FALSE(std::isinf(value));
+        EXPECT_GE(value, 3.0f);
+        EXPECT_LE(value, 10.0f);
+    }
+
+    // Mean and variance checks
+    double sum = 0.0;
+    double sumSq = 0.0;
+    for(size_t i = 0; i < count; ++i)
+    {
+        const auto val = static_cast<double>(data[i]);
+        sum += val;
+        sumSq += val * val;
+    }
+
+    const double mean = sum / static_cast<double>(count);
+    const double variance = (sumSq / static_cast<double>(count)) - (mean * mean);
+
+    EXPECT_NEAR(mean, 6.5, 0.125);
+    EXPECT_NEAR(variance, 4.083333, 0.25);
 }
 
 // ---------------------------------------------------------------------
@@ -254,7 +335,7 @@ TEST(TestFillTensorWithRandomValues, ConstantTensor)
     gpu_fp_reference_tensor::fillWithRandomValues(tensor, 5.0f, 5.0f, 42);
 
     const auto* data = static_cast<const float*>(tensor.rawHostData());
-    const auto count = tensor.elementCount();
+    const auto count = tensor.elementSpace();
 
     for(size_t i = 0; i < count; ++i)
     {
@@ -271,7 +352,7 @@ TEST(TestFillTensorWithRandomValues, SingleElementTensor)
     gpu_fp_reference_tensor::fillWithRandomValues(tensor, -10.0f, 10.0f, 42);
 
     const auto* data = static_cast<const float*>(tensor.rawHostData());
-    EXPECT_EQ(tensor.elementCount(), 1);
+    EXPECT_EQ(tensor.elementSpace(), 1);
     EXPECT_GE(data[0], -10.0f);
     EXPECT_LE(data[0], 10.0f);
 }
@@ -286,7 +367,7 @@ TEST(TestFillTensorWithRandomValues, TensorSizeNotMultipleOfBlockSize)
     gpu_fp_reference_tensor::fillWithRandomValues(tensor, 3.0f, 10.0f, 42);
 
     const auto* data = static_cast<const float*>(tensor.rawHostData());
-    const auto count = tensor.elementCount();
+    const auto count = tensor.elementSpace();
 
     double sum = 0.0;
     double sumSq = 0.0;
