@@ -547,7 +547,6 @@ def _globalReadDoScaleSubtileTDM(tc, writer, kernel):
       module.add(comp.setTensorDim1(group1, sizeRefFreeB, writer))
     # Patch stride for B
     tPB = writer.tPB["MX"] if "MX" in writer.tPB else writer.tPB
-    tluB = tPB["tlu"]
     sizeShifterB = int(math.ceil(math.log2(mxBlockB)))
     strideB = writer.strideRef("MXSB", tiB)
     strideA = writer.strideRef("MXSA", tiA)

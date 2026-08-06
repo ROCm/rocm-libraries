@@ -56,6 +56,8 @@ BenchmarkProblems:
           - [16, 16, 128, 1,  1, 4, 4,  1, 1]  # MT 64x64 WG 1x1 (MIWT 4,4)
           - [16, 16, 128, 1,  1, 4, 4,  2, 2]  # MT 128x128 WG 2x2 (MIWT 4,4)
           - [16, 16, 128, 1,  1, 2, 2,  2, 2]  # MT 64x64 WG 2x2
+          - [16, 16, 128, 1,  1, 4, 2,  2, 2]  # MT 128x64 WG 2x2 (MIWT 4,2)
+          - [16, 16, 128, 1,  1, 2, 4,  2, 2]  # MT 64x128 WG 2x2 (MIWT 2,4)
         - DepthU: [256]
         - WavefrontSize: [32]
         - PrefetchGlobalRead: [1, 2]
