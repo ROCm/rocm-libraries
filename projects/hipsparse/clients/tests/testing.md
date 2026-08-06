@@ -134,6 +134,10 @@ GoogleTest styles: a matrix-file `TestWithParam` in `test_csrilusv.cpp`, and a t
 | `stress` | instantiated in code but no `stress` cases in YAML today | — |
 | `known_bug` | auto-promoted by gentest from a YAML `Known bugs:` rule | excluded from all gating runs |
 
+> Note: the Jenkins `*checkin*` filter matches the `pre_checkin` tier only; the `quick` tier is
+> picked up by TheRock's CTest `standard` category (`quick` + `pre_checkin`), which is the actual PR
+> scope. See [Pre-submit / CI Gates](#pre-submit--ci-gates).
+
 **Backend effect on the tested surface:**
 
 | Aspect | HIP / ROCm | CUDA |
@@ -151,8 +155,10 @@ executable directory; matrices via `--matrices-dir` or `HIPSPARSE_CLIENTS_MATRIC
 **What requires GPU hardware:** all numerical-correctness cases. **What runs without a compute
 kernel:** descriptor and `*bad_arg*` cases.
 
-**What runs on PRs:** build + `*checkin*` (excluding `*known_bug*`) on the HIP backend; a reduced
-`*checkin*csrmv*` on the CUDA backend. **What runs nightly:** the `*nightly*` tier.
+**What runs on PRs:** the CTest `standard` category (`quick` + `pre_checkin`, excluding `*known_bug*`)
+on the HIP backend, via TheRock CI (default `test_type: standard`); a reduced `*checkin*csrmv*` on the
+CUDA backend (legacy Jenkins `precheckin-cuda.groovy`). **What runs nightly:** the `comprehensive`
+category (adds the `nightly` tier).
 
 **Test-size / coverage guidance:** since hipSPARSE mostly forwards to the backend, exhaustive
 numerical sweeps add little over the backend's own suite — prefer marshalling-focused cases (type/
@@ -214,15 +220,17 @@ The presubmit gate is the monorepo **TheRock CI** GitHub Actions workflow
 default, runs the CTest **`standard`** category — `quick` + `pre_checkin`, excluding `*known_bug*`
 (`clients/tests/test_categories.yaml`) — on the HIP backend. Scope widens per PR via labels
 (`test:hipsparse`, `test_type:comprehensive` / `test_type:full`); doc-only changes (`*.md`,
-`docs/*`) skip CI.
+`docs/*`) skip CI. hipSPARSE and rocSPARSE share TheRock's `sparse` component
+(`projects_to_test: [rocsparse, hipsparse]` in `.github/scripts/therock_matrix.py`), so a PR touching
+either one builds and tests both.
 
 Internal AMD **Jenkins** pipelines (`.jenkins/`) are legacy, running on older GPUs (gfx900 / gfx906 /
 gfx908) via cron: `precheckin.groovy` builds the HIP backend (`./install.sh -c`) and runs GTest
-filter `*checkin*`, `precheckin-cuda.groovy` builds `--cuda` (cuSPARSE) and runs the narrow
-`*checkin*csrmv*`, `extended.groovy` runs `*nightly*`, and `codecov.groovy` / `staticanalysis.groovy`
-cover coverage and format/static analysis. Build dependencies pulled include `rocSPARSE`, `rocPRIM`,
-`rocBLAS`, `hipBLASLt`, `hipBLAS-common`. Repo-wide `pre-commit`, `clang-tidy`, `codeql` apply to all
-components.
+filter `*checkin*` (the `pre_checkin` tier), `precheckin-cuda.groovy` builds `--cuda` (cuSPARSE) and
+runs the narrow `*checkin*csrmv*`, `extended.groovy` runs `*nightly*`, and `codecov.groovy` /
+`staticanalysis.groovy` cover coverage and format/static analysis. Build dependencies pulled include
+`rocSPARSE`, `rocPRIM`, `rocBLAS`, `hipBLASLt`, `hipBLAS-common`. Repo-wide `pre-commit`, `clang-tidy`,
+`codeql` apply to all components.
 
 > The CUDA/cuSPARSE backend is validated in its own lane (`precheckin-cuda.groovy`) with a
 > deliberately narrow filter; it is not part of the default TheRock HIP-backend gate.
@@ -305,7 +313,7 @@ broader CUDA validation is not part of the per-PR gate.
 | Linux + HIP backend (rocSPARSE) | Full | PR / Nightly / Release | Primary platform, package `hipsparse` |
 | Linux + CUDA 12.8 backend (cuSPARSE) | Partial | PR / Nightly | package `hipsparse-alt`; PR lane is `*checkin*csrmv*` |
 | Linux + CUDA 13.x backend | Partial | Nightly | `cuda/13/` YAML set |
-| gfx908 / gfx90a / gfx942 (and PR runner gfx900/gfx906/gfx908) | Full/Partial | PR / Nightly | via rocSPARSE backend |
+| gfx908 / gfx90a / gfx942 (and Jenkins runners gfx900/gfx906/gfx908) | Full/Partial | PR / Nightly | via rocSPARSE backend; TheRock selects GPU families per run |
 | gfx1151 (Strix Halo) | Partial | Nightly | `f64_r` / `f64_c` cases excluded (`exclude_gpu_gfx1151`) |
 | Windows | Partial | — | Fortran clients off on Windows |
 

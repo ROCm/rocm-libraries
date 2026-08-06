@@ -154,8 +154,10 @@ directory is set with `--matrices-dir` or `ROCSPARSE_CLIENTS_MATRICES_DIR`.
 **What requires GPU hardware:** all numerical-correctness and conversion cases. **What runs without
 a compute kernel:** `*bad_arg*` and auxiliary API cases.
 
-**Managed-memory (HMM) cases:** `*csrmv_managed*` are run twice on gfx90a/gfx942, with
-`HSA_XNACK=0` and `HSA_XNACK=1`.
+**Managed-memory (HMM) coverage:** on gfx90a/gfx942 the legacy Jenkins lane executes the entire
+pre-checkin filter twice — once with `HSA_XNACK=0` and once with `HSA_XNACK=1` — to cover managed
+memory. `rtest.xml` also defines a dedicated `hmm` set (`--gtest_filter=*csrmv_managed*`, run with
+`HSA_XNACK=1`).
 
 **What runs on PRs:** the CTest `standard` category (`quick` + `pre_checkin`, excluding `*known_bug*`)
 on changed projects, via TheRock CI (default `test_type: standard`).
@@ -224,7 +226,9 @@ The presubmit gate is the monorepo **TheRock CI** GitHub Actions workflow
 changed and, by default, runs the CTest **`standard`** category — i.e. `quick` + `pre_checkin`,
 excluding `*known_bug*` (see `clients/tests/test_categories.yaml`). The scope can be widened per PR
 with labels (`test:rocsparse`, `test_type:comprehensive` / `test_type:full`); doc-only changes
-(`*.md`, `docs/*`) skip CI. Broader tiers run in the TheRock nightly workflows
+(`*.md`, `docs/*`) skip CI. rocSPARSE and hipSPARSE share TheRock's `sparse` component
+(`projects_to_test: [rocsparse, hipsparse]` in `.github/scripts/therock_matrix.py`), so a PR touching
+either one builds and tests both. Broader tiers run in the TheRock nightly workflows
 (`therock-ci-nightly.yml`, `therock-multi-arch-ci-nightly.yml`) and dedicated ASAN workflows
 (`therock-multi-arch-ci-asan*.yml`). Repo-wide quality workflows (`pre-commit`, `clang-tidy`,
 `codeql`) apply to all components.
