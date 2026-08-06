@@ -8,6 +8,37 @@
 namespace gpu_rmsnorm_ref_test
 {
 
+namespace
+{
+
+template <unsigned int BLOCK_SIZE>
+int64_t getMaxGridSizeForCurrentDevice()
+{
+    static_assert(BLOCK_SIZE > 0, "BLOCK_SIZE must be greater than 0");
+
+    int deviceCount = 0;
+    if(hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount == 0)
+    {
+        return 1; // Default value
+    }
+
+    int deviceId = 0;
+    if(hipGetDevice(&deviceId) != hipSuccess)
+    {
+        return 1;
+    }
+
+    hipDeviceProp_t props{};
+    if(hipGetDeviceProperties(&props, deviceId) != hipSuccess)
+    {
+        return 1;
+    }
+
+    return static_cast<int64_t>(props.maxGridSize[0]) / static_cast<int64_t>(BLOCK_SIZE);
+}
+
+} // namespace
+
 using hipdnn_data_sdk::utilities::TensorLayout;
 
 // ============================================================================
