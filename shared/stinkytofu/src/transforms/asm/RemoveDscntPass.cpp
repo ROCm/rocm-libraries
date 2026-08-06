@@ -98,6 +98,9 @@ struct ScanState {
 
     // Number of ds_load instructions seen since the last kept dscnt wait.
     int dsLoadsSinceLastKeptDscnt = 0;
+
+    // Number of DS ops accumulated for pre-activation dscnt tightening.
+    int numDsLoadsBeforeActivation = 0;
 };
 
 /// VALU co-issue profile for an in-flight WMMA/matrix instruction.
@@ -284,6 +287,23 @@ AsmDirective* createTextCommentDirective(const std::string& comment) {
     return directive;
 }
 
+int recomputePrefetchInFlightDsLoads(const BasicBlock& bb) {
+    int inFlight = 0;
+    for (const IRBase& node : bb) {
+        if (node.getType() != IRBase::IRType::StinkyTofu) continue;
+        const auto* inst = cast<StinkyInstruction>(&node);
+        if (isLabel(*inst) || isPseudoInst(inst) || !inst->getHwInstDesc()) continue;
+        if (isBranch(*inst) || isMatrixInstruction(*inst)) break;
+
+        if (isDSRead(*inst) || isDSWrite(*inst)) {
+            ++inFlight;
+        } else if (std::optional<int> keep = getDsWaitCount(*inst)) {
+            inFlight = std::min(inFlight, std::max(0, *keep));
+        }
+    }
+    return inFlight;
+}
+
 class RemoveDscntPass : public StinkyInstPass {
    public:
     explicit RemoveDscntPass(int dsProximityThreshold)
@@ -312,28 +332,50 @@ class RemoveDscntPass : public StinkyInstPass {
             if (!passCtx.shouldProcessBasicBlock(bb)) continue;
 
             scanBlock(bb, state);
-            scanBlockHead(bb, state.cycles, state.inFlightDsLoads);
+            if (std::string_view(bb.getLabel()).starts_with("label_LoopBeginL")) {
+                // No need to remove the blocks after the loop begin label,
+                scanBlockHead(bb, state.cycles, state.numDsLoadsBeforeActivation);
+                return PreservedAnalyses::none();
+            }
+            const int recomputedPrefetchInFlightDsLoads =
+                std::max(0, recomputePrefetchInFlightDsLoads(bb));
+            if (recomputedPrefetchInFlightDsLoads > 0) {
+                state.numDsLoadsBeforeActivation = recomputedPrefetchInFlightDsLoads;
+            }
         }
-        return preserveCFGAnalyses();
+        return PreservedAnalyses::none();
     }
 
    private:
     int dsProximityThreshold_ = kDsProximityThreshold;
 
-    void scanBlockHead(BasicBlock& bb, int cycles, std::deque<DsLoadEntry>& inFlightDsLoads) {
+    void scanBlockHead(BasicBlock& bb, int cycles, int& numDsLoadsBeforeActivation) {
         // Second pass: handle dscnt before waitCheckActive becomes true.
         bool seenFirstDscntBeforeActivation = false;
-        size_t numDsLoadsBeforeActivation = inFlightDsLoads.size();
-        // Log current in-flight ds_loads at the beginning of scanBlockHead
+        // Log carried pre-activation DS-op count at the beginning of scanBlockHead
         PASS_DEBUG({
-            std::cerr << "[RemoveDscnt] scanBlockHead: current inFlightDsLoads size="
+            std::cerr << "[RemoveDscnt] scanBlockHead: numDsLoadsBeforeActivation="
                       << numDsLoadsBeforeActivation << ", cycles=" << cycles << '\n';
         });
-        int numDsFinished = computeNumDsFinished(numDsLoadsBeforeActivation);
+        if (numDsLoadsBeforeActivation == 0) return;
+
+        int numDsFinished =
+            computeNumDsFinished(static_cast<size_t>(std::max(0, numDsLoadsBeforeActivation)));
         PASS_DEBUG(std::cerr << "[RemoveDscnt] pre-activation numDsFinished=" << numDsFinished
                              << " from numDsLoads=" << numDsLoadsBeforeActivation << "\n");
         for (auto it = bb.begin(); it != bb.end();) {
             IRBase& node = *it.getNodePtr();
+            PASS_DEBUG({
+                std::cerr << "[RemoveDscnt] scanBlockHead: node type="
+                          << static_cast<int>(node.getType()) << ", node ptr=" << &node;
+                if (node.getType() == IRBase::IRType::StinkyTofu) {
+                    auto* inst = cast<StinkyInstruction>(&node);
+                    if (inst->getHwInstDesc()) {
+                        std::cerr << ", mnemonic=" << inst->getHwInstDesc()->mnemonic;
+                    }
+                }
+                std::cerr << '\n';
+            });
             if (node.getType() != IRBase::IRType::StinkyTofu) {
                 ++it;
                 continue;
@@ -343,11 +385,12 @@ class RemoveDscntPass : public StinkyInstPass {
                 ++it;
                 continue;
             }
+            if (isBranch(*inst)) break;
 
             bool removeWaitInst = false;
             std::string removalComment;
 
-            if (isDSRead(*inst)) {
+            if (isDSRead(*inst) || isDSWrite(*inst)) {
                 numDsLoadsBeforeActivation++;
             } else if (std::optional<int> keep = getDsWaitCount(*inst)) {
                 const int newVal = (numDsLoadsBeforeActivation - numDsFinished);
@@ -408,6 +451,7 @@ class RemoveDscntPass : public StinkyInstPass {
                 ++it;
                 continue;
             }
+            if (isBranch(*inst)) break;
 
             // --- advance the cycle counter (WMMA co-exec aware) ---
             const bool isCoIssued =
@@ -444,9 +488,14 @@ class RemoveDscntPass : public StinkyInstPass {
                 cycles += inst->issueCycles;
             }
 
-            // --- track in-flight LDS reads / drain on dscnt waits ---
-            if (isDSRead(*inst)) {
-                inFlightDsLoads.push_back(DsLoadEntry{cycles, inst->getDestRegs()});
+            // --- track in-flight LDS ops / drain on dscnt waits ---
+            if (isDSRead(*inst) || isDSWrite(*inst)) {
+                if (isDSRead(*inst)) {
+                    inFlightDsLoads.push_back(DsLoadEntry{cycles, inst->getDestRegs()});
+                } else {
+                    // DS writes contribute to dscnt accounting but have no produced VGPR dest.
+                    inFlightDsLoads.push_back(DsLoadEntry{cycles, {}});
+                }
                 ++dsLoadsSinceLastKeptDscnt;
             } else if (std::optional<int> keep =
                            waitCheckActive ? getDsWaitCount(*inst) : std::nullopt) {

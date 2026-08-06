@@ -156,7 +156,7 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
             WaitCntInsertionOptions waitCntOptions;
             waitCntOptions.enableLoopCarriedTokenDeps = moduleOptions.EnableLoopCarriedTokenDeps;
             innerPM.addPass(createStinkyWaitCntInsertionPass(waitCntOptions));
-            innerPM.addPass(createRemoveDscntPass());
+            if (runScheduler) innerPM.addPass(createRemoveDscntPass());
         }
         pm.addPass(createKernelToRegionsPassAdaptor(module, {"loopWithPrefetch", "noLoadLoopBody"},
                                                     std::move(innerPM)));
