@@ -2016,7 +2016,7 @@ public:
 
 #ifdef __HIP__
         // Query wall clock rate once (constant per device).
-        m_wall_clock_rate = measure_wall_clk_rate_k_hz();
+        m_wall_clock_rate = measure_wall_clk_rate_khz();
 
 #endif
     }
@@ -2024,7 +2024,7 @@ public:
     /// Empirically measures the GPU wall-clock tick rate in kHz
     /// by sampling the on-device clock one second apart, as a fallback
     /// for architectures where hipDeviceAttributeWallClockRate reports 0.
-    long long measure_wall_clk_rate_k_hz()
+    long long measure_wall_clk_rate_khz()
     {
         long long* d_tick;
         PRIMBENCH_CHECK(hipMalloc(&d_tick, sizeof(long long)));
