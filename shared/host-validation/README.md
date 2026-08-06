@@ -13,7 +13,7 @@ comparison used by ROCm library clients and tests.
   - Transitional validation operations layered on the tensor core.
   - Exports `roc/host_validation/validation.hpp`.
   - Exposes runtime-typed generation, reference GEMM, reference epilogues,
-    reductions, and comparison.
+    reductions, structured sparsity, and comparison.
   - Implementation headers live under `roc/host_validation/detail/`; consumers
     include only `validation.hpp`.
 - `roc::host-validation-blas`
@@ -262,6 +262,44 @@ rank-zero outputs, and multiple reduction axes. hipBLASLt's bias-gradient
 adapter represents its matrix as a strided tensor and reduces the K axis; no
 product type enters the component.
 
+## Structured sparsity
+
+`applyStructuredSparsity` applies a logical N:M pattern along one tensor axis
+without naming a GPU instruction or product descriptor:
+
+```cpp
+StructuredSparsityPattern pattern;
+pattern.axis = 1;
+pattern.groupSize = 4;
+pattern.retainedElements = 2;
+pattern.fixedPositions = {0, 2};
+
+StructuredSparsityProblem problem(
+    inputView, prunedView, compressedView, pattern);
+problem.twoOfFourMetadata = metadataView; // optional fused output
+
+StructuredSparsityRunInfo run = applyStructuredSparsity(problem);
+```
+
+The operation supports:
+
+- fixed or counter-based deterministic random retained positions;
+- arbitrary affine input and output layouts;
+- in-place pruning;
+- byte-preserving copies for ordinary and packed scalar formats;
+- optional retained-position indices;
+- optional fused 2:4 metadata encoding; and
+- independent slice ranges for caller-selected parallel scheduling.
+
+A slice is one logical combination of all coordinates except the sparsity
+axis. Product adapters may partition slices with OpenMP or another host
+executor without moving pruning, compression, random selection, or metadata
+arithmetic back into the product. The component itself has no OpenMP, HIP, or
+AMDGPU dependency.
+
+`encodeTwoOfFourMetadata` remains available when retained indices already
+exist and metadata must be produced as a separate operation.
+
 Consumers should need one of only two includes:
 
 ```cpp
@@ -305,7 +343,9 @@ The `roc_host_validation` package currently provides:
 - `reference_epilogue` with bias, forward/gradient activation, E, scale-D/E,
   gate residual, raw output, and AMax results; and
 - `reference_sum` with runtime input/output/accumulator types and explicit
-  tensor axes.
+  tensor axes; and
+- `apply_structured_sparsity` and `encode_two_of_four_metadata`, including the
+  fused metadata result used by product adapters.
 
 The NumPy suite independently checks:
 
@@ -322,7 +362,8 @@ The NumPy suite independently checks:
 - full/selected forward and gradient epilogues for the configured activation
   family against NumPy; and
 - multi-axis tensor reduction against `numpy.sum`; and
-- multi-index tensor contraction against `numpy.einsum`.
+- fixed/random N:M pruning, logical compression, packed-value preservation,
+  and 2:4 metadata encoding against NumPy.
 
 The first binding deliberately copies between NumPy and `Tensor`. A follow-up
 should expose lifetime-safe non-owning NumPy-backed `TensorView` objects.
@@ -334,4 +375,20 @@ cmake -S shared/host-validation -B build/host-validation \
   -DHOST_VALIDATION_BUILD_TESTING=ON
 cmake --build build/host-validation
 ctest --test-dir build/host-validation --output-on-failure
+```
+
+An optional development benchmark compares the fused component path with a
+legacy-shaped two-pass 2:4 implementation using a Tensile-like column-major
+layout:
+
+```bash
+cmake -S shared/host-validation -B build/host-validation-benchmark \
+  -DHOST_VALIDATION_BUILD_TESTING=ON \
+  -DHOST_VALIDATION_BUILD_PYTHON=OFF \
+  -DHOST_VALIDATION_BUILD_BENCHMARKS=ON \
+  -DCMAKE_BUILD_TYPE=Release
+cmake --build build/host-validation-benchmark
+OMP_NUM_THREADS=24 \
+  build/host-validation-benchmark/tests/host-validation-structured-sparsity-benchmark \
+  2048 4096 7
 ```
