@@ -56,7 +56,15 @@ def _load_module(path):
             sys.path.insert(0, d)
     spec = importlib.util.spec_from_file_location(name, path)
     mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    # Match normal import semantics so record_kernel() can discover and patch an
+    # IRBuilder imported by a parity module whose local `_build` constructs the
+    # kernel directly.
+    sys.modules[name] = mod
+    try:
+        spec.loader.exec_module(mod)
+    except Exception:
+        sys.modules.pop(name, None)
+        raise
     return mod
 
 
@@ -94,14 +102,29 @@ def _kernel_thunks(mod):
     ``_spec(idx)`` returning a spec or a ``(spec, arch)`` tuple; or ``_specs()``
     returning a list. Configs are scanned (some idx 0 are intentionally invalid)."""
     # Direct kernel factory (e.g. attention_unified, tiled attention emitters).
-    for fac in ("_kernel", "_make_kernel", "_build_kernel", "_build"):
+    for fac in ("_kernel", "_make_kernel", "_build_kernel"):
         fn = getattr(mod, fac, None)
         if callable(fn):
             for i in range(12):
                 yield (lambda i=i, fn=fn: fn(i))
             return
 
-    build_fn = _find_build_fn(mod)
+    # A few emitters construct their configs inside `_build(idx)` and therefore
+    # have no separate `_spec`. Distinguish these from the common
+    # `_build(spec, arch=None)` adapter shape below.
+    local_build = getattr(mod, "_build", None)
+    has_specs = hasattr(mod, "_spec") or hasattr(mod, "_specs")
+    if callable(local_build) and not has_specs:
+        for i in range(12):
+            yield (lambda i=i, fn=local_build: fn(i))
+        return
+
+    # Most parity emitters expose a local `_build(spec, arch=None)` adapter that
+    # normalizes their production builder's call shape. It is not an index-based
+    # kernel factory: passing the loop index to it caused valid emitters to be
+    # silently reported as unbuildable. Pair it with `_spec(idx)` just like an
+    # imported production build function.
+    build_fn = local_build if callable(local_build) else _find_build_fn(mod)
     if build_fn is None:
         return
     wants_arch = "arch" in inspect.signature(build_fn).parameters
@@ -138,10 +161,12 @@ def _kernel_thunks(mod):
             # Heterogeneous (spec, arch, ...) tuples: try the call forms seen in
             # the parity tree until one binds.
             strs = [x for x in s if isinstance(x, str)]
+            args = [x for x in s if not isinstance(x, str)]
             yield (lambda s=s: build_fn(*s))
-            if wants_arch and strs:
-                yield (lambda s=s, a=strs[-1]: build_fn(s[0], arch=a))
-            yield (lambda s=s: build_fn(s[0]))
+            if wants_arch and strs and args:
+                yield (lambda arg=args[0], a=strs[-1]: build_fn(arg, arch=a))
+            if args:
+                yield (lambda arg=args[0]: build_fn(arg))
             continue
         if wants_arch:
             for a in arch_cands:
