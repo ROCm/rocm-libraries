@@ -63,31 +63,6 @@ INCLUDE = ROCKE / "cpp" / "include"
 TMP = Path(tempfile.gettempdir()) / "rocke_diff"
 TMP.mkdir(parents=True, exist_ok=True)
 
-# L5 golden anchor: committed per-(mode,family,config) reference shas. This is
-# the absolute regression anchor -- any future change that alters an emitted
-# .ll / canonical-ir for a blessed config fails --check-golden.
-GOLDEN_DIR = HERE / "golden"
-GOLDEN_FILE = GOLDEN_DIR / "llvm_gfx_all.json"
-
-
-def golden_key(mode, canonical):
-    """Stable key under which a run's shas are stored in the golden file."""
-    return "ir_canonical" if (mode == "ir" and canonical) else mode
-
-
-def collect_ref_shas(results):
-    """{family: {str(idx): ref_sha}} for every config that produced output."""
-    out = {}
-    for r in results:
-        fam = {}
-        for c in r.get("configs", []):
-            if c.get("ref_sha"):
-                fam[str(c["idx"])] = c["ref_sha"]
-        if fam:
-            out[r["family"]] = fam
-    return out
-
-
 MAX_CFG = 128  # hard cap on config enumeration per family
 TIMEOUT = 120  # seconds per emitter invocation
 
@@ -346,25 +321,11 @@ def run_family(name, archive, mode, canonical=False, src_dir=None):
                 verdict = "CANON_EQUAL" if cc == pc else "STRUCT_DRIFT"
             except Exception as e:  # noqa
                 verdict = "CANON_ERROR"
-        # L5 golden anchor: the reference sha to bless. For ll it is the Python
-        # (== C, when GREEN) byte sha; for ir --canonical it is the canonical
-        # form's sha (stable across incidental SSA-id renumbering). Only recorded
-        # for configs both sides emitted; reject/empty configs carry None.
-        ref_sha = None
-        if po:
-            if canonical and mode == "ir":
-                try:
-                    ref_sha = sh(_canon(po.decode("utf-8", "replace")).encode("utf-8"))
-                except Exception:  # noqa
-                    ref_sha = sh(po)
-            else:
-                ref_sha = sh(po)
         configs.append(
             {
                 "idx": idx,
                 "verdict": verdict,
                 "shas": shas,
-                "ref_sha": ref_sha,
                 "c_rc": cr,
                 "p_rc": pr,
             }
@@ -496,22 +457,6 @@ def main():
         "the target tree lacks, e.g. ir_serialize/verify); ll-mode only",
     )
     ap.add_argument("--json", default=str(TMP / "dashboard.json"))
-    ap.add_argument(
-        "--record-golden",
-        action="store_true",
-        help="bless the current reference shas into the committed "
-        f"golden file ({GOLDEN_FILE}). Run ONLY from a verified-"
-        "good state (gates GREEN). Re-blessing is intentional and "
-        "should accompany a reviewed, expected output change.",
-    )
-    ap.add_argument(
-        "--check-golden",
-        action="store_true",
-        help="re-run and fail on any config whose reference sha "
-        "differs from (or is missing in) the golden file. This is the "
-        "anchor check only -- its exit code answers 'does output match the "
-        "blessed shas', not the parity question the default run gates on.",
-    )
     args = ap.parse_args()
 
     global PY_REF_ROOT, SHIM_DIR
@@ -566,81 +511,6 @@ def main():
         for family, status, reason in failures:
             print(f"  {status:16s} {family}: {reason}")
     print(f"\ndashboard: {args.json}")
-
-    # ---- L5 golden anchor -------------------------------------------------
-    if args.record_golden or args.check_golden:
-        key = golden_key(args.mode, args.canonical)
-        cur = collect_ref_shas(results)
-        GOLDEN_DIR.mkdir(parents=True, exist_ok=True)
-        store = {}
-        if GOLDEN_FILE.exists():
-            store = json.loads(GOLDEN_FILE.read_text())
-
-    if args.record_golden:
-        # The golden records the PYTHON reference sha per config, which is the
-        # source of truth regardless of whether the C engine currently agrees.
-        # A C-vs-Python DRIFT family is reported as a caveat (e.g. the known
-        # pre-existing gfx950_attention_tiled_2d_fastkv_regp ir drift) but does
-        # not invalidate the reference shas being blessed.
-        if failures:
-            print(
-                "\nNOTE: recording golden from a run the gate would fail: "
-                + ", ".join(f"{f.family} ({f.status})" for f in failures)
-                + "\n  The golden anchors the Python reference shas, which "
-                "remain well-defined. But a family that ended early or compared "
-                "nothing blesses FEWER configs than a clean run would, and the "
-                "missing ones return later as NEW (unblessed), not as MISSING."
-            )
-        store[key] = cur
-        nblessed = sum(len(v) for v in cur.values())
-        GOLDEN_FILE.write_text(json.dumps(store, indent=2, sort_keys=True) + "\n")
-        print(
-            f"\nrecorded golden[{key}]: {len(cur)} families, {nblessed} configs "
-            f"-> {GOLDEN_FILE}"
-        )
-        return 0
-
-    if args.check_golden:
-        ref = store.get(key)
-        if not ref:
-            print(
-                f"\nNO GOLDEN for key '{key}'. Bless first: "
-                f"run_diff.py --mode {args.mode}"
-                f"{' --canonical' if args.canonical else ''} --record-golden"
-            )
-            return 1
-        mism, missing, extra = [], [], []
-        for fam, cfgs in ref.items():
-            cur_fam = cur.get(fam, {})
-            for idx, sha in cfgs.items():
-                got = cur_fam.get(idx)
-                if got is None:
-                    missing.append((fam, idx))
-                elif got != sha:
-                    mism.append((fam, idx))
-        for fam, cfgs in cur.items():
-            for idx in cfgs:
-                if idx not in ref.get(fam, {}):
-                    extra.append((fam, idx))
-        print(f"\n=== GOLDEN CHECK (key={key}) ===")
-        print(f"  blessed configs : {sum(len(v) for v in ref.values())}")
-        print(f"  UNBLESSED CHANGE: {len(mism)}")
-        print(f"  MISSING (gone)  : {len(missing)}")
-        print(f"  NEW (unblessed) : {len(extra)}")
-        for fam, idx in (mism + missing)[:30]:
-            print(f"    {fam}[{idx}]")
-        if mism or missing:
-            print(
-                "\nGOLDEN MISMATCH: emitted output changed vs the committed "
-                "anchor. If this change is expected & reviewed, re-bless with "
-                "--record-golden; otherwise you introduced a regression."
-            )
-            return 1
-        if extra:
-            print("\nNew configs not in golden (informational; re-bless to add).")
-        print("GOLDEN OK")
-        return 0
-
     return exit_code
 
 

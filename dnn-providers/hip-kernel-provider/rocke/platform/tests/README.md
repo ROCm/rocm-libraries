@@ -9,7 +9,7 @@ derived relative to each file, so this tree is copy-able verbatim.
 ```
 python tests/run_all.py            # relative-path guard + byte-identity gate + pytest (+ctest if built)
 python tests/run_all.py --only gemm
-python tools/check_byte_identity.py   # build engine fresh + byte-identity gate (llvm20/llvm22)
+python tools/check_byte_identity.py   # build engine fresh + byte-identity gate (one flavor per run; set ROCKE_LLVM_FLAVOR)
 ```
 
 `conftest.py` puts `rocke/platform/python` on `sys.path` (so `import rocke` works);
@@ -38,6 +38,32 @@ for what is actually exercised vs. manual/diagnostic/demo.
 > owned by the byte-identity gate (which builds `rocke_core` and byte-compares the
 > 65 `*_emit.c` outputs to `*_emit.py`), and the binding itself by the
 > consistency proof documented in `cpp/bindings/README.md`.
+
+## Goldens
+
+One committed **IR** golden, `golden/rocke_representative_ir_sha256.json`: a
+lowered-IR sha256 per representative case, held per LLVM flavor (`llvm20`,
+`llvm22`, `llvm23`). It pins more than the digests — the case set itself, and
+each expected failure's exception type and message. Two checkers, and both check
+every flavor sub-document rather than only the one the host autodetects:
+
+| Checked by | Where it runs |
+|---|---|
+| `test_rocke_ci_static.py::test_ir_cases_match_golden_sha256` | the pytest step of `run_all.py`, over the source tree |
+| `rocke_installed_golden_test.py` | CTest target `rocke_golden_static`, over an install prefix, when `ROCKE_INSTALL_PYTHON_TESTS` is ON |
+
+Re-bless (only for a reviewed, intended output change) — paths relative to
+`rocke/platform`:
+
+```
+python tests/instances/rocke_ir_parity_harness.py \
+  --write tests/golden/rocke_representative_ir_sha256.json
+```
+
+Not a sha golden, despite the name: `python/rocke/golden/` ships
+`rocke_gfx950_smoke_perf.json`, a **perf tolerance baseline**
+(`max_slowdown` / `min_fraction`). A within-tolerance slowdown passes it. See
+`TESTING.md` §3.2.
 
 ## Execution categories
 

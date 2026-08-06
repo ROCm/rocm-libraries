@@ -61,6 +61,20 @@ def green(family, n=4):
     return {"family": family, "status": "GREEN", "n": n, "bad": 0, "canon": 0}
 
 
+def range_drift(family):
+    """A family record the gate must refuse: the engines disagree on how many
+    configs exist. Full enough to hand to ``main()``, not just ``gate_verdict``."""
+    return {
+        "family": family,
+        "status": "RANGE_DRIFT",
+        "n": 1,
+        "bad": 0,
+        "canon": 0,
+        "range_drift": {"idx": 1, "c_end": True, "p_end": False},
+        "configs": [],
+    }
+
+
 class TestGateVerdict(unittest.TestCase):
     """The pass/fail rule over a whole dashboard."""
 
@@ -277,7 +291,7 @@ class TestLlModeInvariant(unittest.TestCase):
 class TestMainReturnsTheGateVerdict(unittest.TestCase):
     """The pure rule is only a gate if main() actually returns it."""
 
-    def drive_main(self, family_record, tmp):
+    def drive_main(self, family_record, tmp, extra_argv=()):
         archive = tmp / "librocke_core.a"
         archive.touch()
         argv = [
@@ -286,6 +300,7 @@ class TestMainReturnsTheGateVerdict(unittest.TestCase):
             str(archive),
             "--json",
             str(tmp / "dashboard.json"),
+            *extra_argv,
         ]
         families = [("fake", tmp)] if family_record else []
         with mock.patch.object(run_diff, "find_families", return_value=families):
@@ -298,21 +313,29 @@ class TestMainReturnsTheGateVerdict(unittest.TestCase):
 
     def test_a_range_drift_family_exits_nonzero(self):
         with TemporaryDirectory() as d:
-            self.assertEqual(
-                self.drive_main(
-                    {
-                        "family": "fake",
-                        "status": "RANGE_DRIFT",
-                        "n": 1,
-                        "bad": 0,
-                        "canon": 0,
-                        "range_drift": {"idx": 1, "c_end": True, "p_end": False},
-                        "configs": [],
-                    },
-                    Path(d),
-                ),
-                1,
-            )
+            self.assertEqual(self.drive_main(range_drift("fake"), Path(d)), 1)
+
+    def test_no_diagnostic_flag_can_turn_a_drift_run_green(self):
+        # A diagnostic flag changes *what is compared*, never *whether the run
+        # passes*. A flag that owns an exit path of its own -- returning before
+        # main() reaches the gate verdict -- is a second, weaker gate wearing
+        # the same exit code, and that is how a red run comes to read as green.
+        # Driven over the whole flag surface, with the bare run as the control.
+        surface = [
+            [],
+            ["--mode", "ir"],
+            ["--mode", "ir", "--canonical"],
+            ["--mode", "verify"],
+            # A filter that matches nothing compares no families at all. That
+            # is NO_FAMILIES -- still a failure, not a vacuous pass.
+            ["--only", "no_such_family"],
+        ]
+        for flags in surface:
+            with self.subTest(flags=" ".join(flags) or "<none>"):
+                with TemporaryDirectory() as d:
+                    self.assertEqual(
+                        self.drive_main(range_drift("fake"), Path(d), flags), 1
+                    )
 
     def test_a_green_family_exits_zero(self):
         with TemporaryDirectory() as d:
@@ -325,7 +348,7 @@ class TestMainReturnsTheGateVerdict(unittest.TestCase):
                     "bad": 0,
                     "canon": 0,
                     "range_drift": None,
-                    "configs": [{"idx": 0, "verdict": "IDENTICAL", "ref_sha": "ab"}],
+                    "configs": [{"idx": 0, "verdict": "IDENTICAL"}],
                 },
                 tmp,
             )

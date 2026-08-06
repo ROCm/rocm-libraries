@@ -86,14 +86,19 @@ compared at all. Fix the narrower emitter's config table so both enumerate the
 same range. (`fmha_appendkv` and `gfx1151_wmma_gemm_iu8_dequant` were once
 waived here; both are GREEN now and the waiver is gone with them.)
 
-### `--check-golden` fails after a change I *meant* to make
-If you intentionally changed what a kernel emits, re-bless the golden **from a
-green state** and let your reviewer read the diff:
+### The golden IR check fails after a change I *meant* to make
+`test_ir_cases_match_golden_sha256` prints `IR drift vs golden` when a
+representative case's lowered-IR sha256 moves. If you intentionally changed what
+a kernel emits, re-bless **from a green state** and let your reviewer read the
+diff:
 ```bash
-run_diff --record-golden
+# from rocke/platform
+python tests/instances/rocke_ir_parity_harness.py \
+  --write tests/golden/rocke_representative_ir_sha256.json
 ```
-Never re-bless to silence a red gate you don't understand — that discards the one
-signal that protects the contract.
+One `--write` re-runs every case under all three llvm flavors, so the whole
+golden moves together. Never re-bless to silence a red gate you don't
+understand — that discards the one signal that protects the contract.
 
 ### The gate says "archive not found"
 You didn't build it (or built it elsewhere). Build into the default location, or

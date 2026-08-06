@@ -49,8 +49,8 @@ engine identically.
    tools/check_byte_identity.py        # builds the C engine + run_diff --mode ll
    ```
    Every family must be GREEN (C-emitted `.ll` == Python-emitted `.ll`). See
-   [`engine_contributing.md`](./engine_contributing.md) for modes, the golden
-   snapshot, and the per-flavor note.
+   [`engine_contributing.md`](./engine_contributing.md) for the `run_diff` modes
+   and for the representative IR golden, which is per-flavor.
 3. For a new/changed instance family, validate the binding too:
    ```bash
    python cpp/bindings/prove_parity_binding.py
@@ -62,8 +62,8 @@ engine identically.
    ```
    This is broader than the gate: the gate covers a fixed family list, while
    `both` covers whatever the tests happen to build.
-5. If you *intend* to change emitted output, re-bless the golden snapshot in the
-   same change and have the diff reviewed.
+5. If you *intend* to change emitted output, re-bless the representative IR
+   golden in the same change and have the diff reviewed.
 
 A change is **done** only when the byte-identity gate is green for everything you
 touched.

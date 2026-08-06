@@ -78,7 +78,7 @@ something *different*, and conflating them is how false confidence creeps in.
 | Oracle type | Question it answers | Mechanism in rocKE | Serves |
 |---|---|---|---|
 | **Reference oracle** | Is the math correct? | Run on GPU, compare to an independent reference (numpy / torch) | Kernel correctness (A) |
-| **Regression / characterization** | Did the output change? | sha256 of canonical IR vs. a pinned baseline | Platform output stability (B) |
+| **Regression / characterization** | Did the output change? | sha256 of lowered IR vs. a pinned baseline | Platform output stability (B) |
 | **Differential / pseudo-oracle** | Do the two implementations agree? | **Byte-identity** of emitted IR, Python engine vs C++ engine | Platform equivalence (B) |
 | **Implicit oracle** | Did it crash / NaN / hang? | Signal death, non-finite output, timeout | Both A and B |
 
@@ -162,18 +162,26 @@ differential check across the two tables.*
 
 ### 4.2 Does the platform's output stay stable?
 
-The **regression / characterization** oracle. Golden tests pin the canonical IR of
+The **regression / characterization** oracle. Golden tests pin the lowered IR of
 a representative set so an *unintended* change trips a diff. They are tripwires,
 not correctness checks — a golden update is legitimate when the change is intended
-and reviewed. rocKE keeps goldens at several granularities (representative-IR sha,
-per-config anchors, installed-artifact statics), enumerated in
-[`platform/tests/README.md`](platform/tests/README.md).
+and reviewed. rocKE keeps **one golden IR artifact** — a lowered-IR sha256 per
+representative case, per LLVM flavor, pinning the case set and each expected
+failure's message alongside the digests. Two checkers verify it, over the source
+tree and over an install prefix; both are named in
+[`platform/tests/README.md`](platform/tests/README.md). (The `rocke.golden`
+package is *not* one of these — it holds a perf tolerance baseline, see
+[§3.2](#32-are-the-kernels-fast).)
 
 Note the division of labor: golden catches *any* change to emitted IR — including
 a change that lands in **both** engine implementations identically, which
 byte-identity ([§4.3](#43-do-the-two-implementations-agree-the-migration-gate)) is
 blind to. Golden watches *change*; byte-identity watches *divergence*; neither
 watches *correctness* (that's [§3.1](#31-are-the-kernels-correct)).
+
+**⚠ WIP:** the representative set is far narrower than the parity corpus
+byte-identity spans, so for most families nothing watches *change* at all
+(gap **G9**).
 
 ### 4.3 Do the two implementations agree? (the migration gate)
 
@@ -231,7 +239,7 @@ Four distinct things run here; **do not conflate them**:
 | Tier | What | Gated? |
 |---|---|---|
 | **1. Gate** | relative-path guard → byte-identity gate → pytest (`platform/tests`) → ctest | ✅ blocking |
-| **2. Diagnostics** | IR-canonical diff, fuzz diff, per-config golden check | ❌ opt-in |
+| **2. Diagnostics** | IR-canonical diff, fuzz diff | ❌ opt-in |
 | **3. GPU / numeric** | reference-oracle kernel-correctness lanes | ❌ skipped off-device |
 | **4. Manual demos/tools** | hand-compiled CLIs / demos | ❌ |
 
@@ -255,10 +263,17 @@ orphaned-`platform/python` suites are gaps ([§7](#7-current-state-vs-target-the
 not just untidy: they answer real quality questions but run nowhere.
 
 **Harness lane bridge.** The differential harness numbers its lanes `L1…L6` (L1
-`verify`, L3 `ll` = the byte-identity gate, L5 the golden anchor, L6 numeric). Read
-L3 ↔ [§4.3](#43-do-the-two-implementations-agree-the-migration-gate), L5 ↔
-[§4.2](#42-does-the-platforms-output-stay-stable), L6 ↔
+`verify`, L3 `ll` = the byte-identity gate, L6 numeric). Read L3 ↔
+[§4.3](#43-do-the-two-implementations-agree-the-migration-gate) and L6 ↔
 [§3.1](#31-are-the-kernels-correct).
+
+**L5 is retired**, and the numbering keeps its slot empty rather than closing up,
+because L1/L3/L6 are cited by number from the harness and the
+[RFC](platform/dsl_docs/architecture/dual_backend_unification_rfc.md). L5 was a
+per-config IR anchor over the parity corpus: it hashed **one** engine's output, so
+it was never a *differential* lane and was mis-filed here from the start. Change
+detection is [§4.2](#42-does-the-platforms-output-stay-stable)'s golden; the gap
+L5 was supposed to close, and never did, is **G9**.
 
 ## 6. Invariants & contracts
 
@@ -306,6 +321,7 @@ Read coverage from the emitter configs ([`platform/tests/README.md`](platform/te
 |---|---|---|---|
 | G6 | **Orphaned `library/` behavioral pytest** | Attention *platform behavior* (builds, dispatch wiring, golden IR) runs in no gated tier — only its parity emitters ride the gate | Gate a `library` pytest tier |
 | G7 | **Orphaned `platform/python` pytest** (heuristics, benchmark) | Platform unit tests outside `platform/tests` never run in gate or CI | Collect or relocate them |
+| G9 | **Change detection covers only the representative set** ([§4.2](#42-does-the-platforms-output-stay-stable)) | An edit mirrored correctly into *both* engines is invisible to byte-identity by construction, and unwatched by the golden for every parity family outside the representative set — which is most of them | Extend the golden across the parity corpus. First task is a design one: the corpus keys families by emitter name, the golden by semantic family / arch / case, so the mapping has to be decided before anything is blessed |
 
 ### 7.3 What "green" does and does not mean today
 
@@ -314,7 +330,9 @@ enumerated parity corpus (both trees), IR roundtrips, the platform pytest suite
 passes, and the copyability contract holds. A green gate does **not** prove: that
 the **kernels are correct** on hardware (Question A — needs Tier 3, which itself has
 the holes in G1–G5), that the **kernels are fast** (G8), that attention *platform
-behavior* is correct (G6), or that any arch beyond the enumerated configs works.
+behavior* is correct (G6), that emitted output for a family outside the
+representative set has not silently *changed* (G9), or that any arch beyond the
+enumerated configs works.
 
 ---
 
