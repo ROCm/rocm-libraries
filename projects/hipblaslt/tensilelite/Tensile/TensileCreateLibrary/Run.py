@@ -54,7 +54,7 @@ from Tensile.Common import (
     setVerbosity,
     getVerbosity,
 )
-from Tensile.Common.Architectures import ARCH_COMPILER_TARGET, gfxToIsa, isaToGfx, SUPPORTED_GFX, splitArchsFromPredicates, filterLogicFilesByPredicates, expandAllArchitectures, gfxToCompilerTarget
+from Tensile.Common.Architectures import ARCH_COMPILER_TARGET, baseArchName, gfxToIsa, isaToGfx, SUPPORTED_GFX, splitArchsFromPredicates, filterLogicFilesByPredicates, expandAllArchitectures, gfxToCompilerTarget
 from Tensile.Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
 from Tensile.Common.GlobalParameters import assignGlobalParameters, globalParameters
 from Tensile.Common.TimingInstrumentation import timing_context
@@ -1017,6 +1017,12 @@ def run():
     isaInfoMap = makeIsaInfoMap(targetIsas, cxxCompiler)
     applyArchCapOverrides(isaInfoMap, archs)
     assignGlobalParameters(arguments, isaInfoMap)
+
+    # gfx1250 ships in two steppings (v0/v1) that report the same ISA (12,5,0); the kernel ISA
+    # cannot carry which one, so hand the StinkyTofu backend the identity explicitly here (the same
+    # per-build archs list applyArchCapOverrides uses). KernelWriter forwards it as the
+    # UseV0CostTable module option, which selects the v0 instruction-cost table in StinkyTofu.
+    globalParameters["StinkyTofuUseV0CostTable"] = any(baseArchName(a) == "gfx1250v0" for a in archs)
 
     asmToolchain = makeAssemblyToolchain(
         cxxCompiler,

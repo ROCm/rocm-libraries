@@ -165,6 +165,12 @@ def _find_stale_sources(so_path, source_roots, build_dir):
 
     Extracted from the module-level staleness check so it can be unit-tested
     without requiring a real _rocisa.so or touching actual source files.
+
+    This deliberately excludes only the single build_dir, not a set of build
+    trees or a "_deps" fetch-content dir: the source_roots here are the specific
+    stinkytofu source subdirectories compiled into _rocisa.so (src/, include/,
+    hardware/, tools/tablegen) plus the rocisa bindings root, none of which nest
+    a build tree, so there is nothing extra to exclude.
     """
     import math
     from pathlib import Path
@@ -178,8 +184,12 @@ def _find_stale_sources(so_path, source_roots, build_dir):
     for root in source_roots:
         for pattern in ("*.[ch]pp", "*.h", "*.def", "*.inc"):
             for p in Path(root).rglob(pattern):
-                if p.stat().st_mtime > so_mtime and not p.resolve().is_relative_to(build_dir):
-                    stale.append(str(p))
+                if p.stat().st_mtime <= so_mtime:
+                    continue
+                rp = p.resolve()
+                if rp.is_relative_to(build_dir):
+                    continue
+                stale.append(str(p))
     return stale
 
 

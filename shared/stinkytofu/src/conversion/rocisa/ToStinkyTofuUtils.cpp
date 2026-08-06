@@ -49,6 +49,7 @@
 #include "instruction/cvt.hpp"
 #include "instruction/mem.hpp"
 #include "instruction/mfma.hpp"
+#include "stinkytofu/Config/Config.h"
 #include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/HwRegHelpers.hpp"
@@ -997,8 +998,17 @@ namespace stinkytofu {
 static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
     const rocisa::Module& module, std::array<int, 3> arch, const std::string& moduleName,
     const StinkyAsmModule::ModuleOptions& moduleOptions) {
-    // Get GfxArchID from architecture array
+    // Resolve the GfxArchID. v0 and v1 share the {12,5,0} triple, so a triple lookup alone would
+    // always return the first-registered stepping (v1). When the producer asks for the v0 cost
+    // table via ModuleOptions.UseV0CostTable, select the v0 identity by name; its ArchInfo *is* the
+    // v0 cost table. Guarded because GfxArchID::Gfx1250v0 only exists in a build that includes it;
+    // a v1-only build ignores the flag and keeps the triple lookup.
     GfxArchID archId = getGfxArchID(arch[0], arch[1], arch[2]);
+#ifdef STINKYTOFU_ARCH_GFX1250V0
+    if (moduleOptions.UseV0CostTable && arch[0] == 12 && arch[1] == 5 && arch[2] == 0) {
+        archId = GfxArchID::Gfx1250v0;
+    }
+#endif
 
     // VgprMsbMode is auto-probed by Backend::configurePassManager() when it
     // sees VgprMsbMode::None, so no need to read it from rocisa caps here.

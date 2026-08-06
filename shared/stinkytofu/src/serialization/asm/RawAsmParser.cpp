@@ -1053,9 +1053,10 @@ static std::optional<int> parseDirectiveInt(const std::string& line, const std::
     return v;
 }
 
-/// Determine the isaVersion array from the arch ID.
-static std::array<int, 3> archToIsaVersion(GfxArchID arch) {
-    if (arch == GfxArchID::Gfx1250) return {12, 5, 0};
+/// The isaVersion array to emit. Constant while gfx12.5 is the only family built.
+static std::array<int, 3> archToIsaVersion(GfxArchID /*arch*/) {
+    // Every gfx12.5 stepping reports {12,5,0}. Branching on a specific enumerator
+    // would not compile in a build that selected the other stepping.
     return {12, 5, 0};
 }
 

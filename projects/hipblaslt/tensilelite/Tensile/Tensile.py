@@ -737,6 +737,13 @@ def Tensile(userArgs):
     applyArchCapOverrides(isaInfoMap, archNames)
     assignGlobalParameters(config.get("GlobalParameters", {}), isaInfoMap)
 
+    # gfx1250 ships in two steppings (v0/v1) that report the same ISA (12,5,0); the kernel ISA
+    # cannot carry which one, so hand the StinkyTofu backend the identity explicitly. This mirrors
+    # the flag set on the TensileCreateLibrary path so tuning/benchmark runs (which generate kernels
+    # in-process here) also schedule against the correct instruction-cost table. KernelWriter
+    # forwards it as the UseV0CostTable module option.
+    globalParameters["StinkyTofuUseV0CostTable"] = any(baseArchName(a) == "gfx1250v0" for a in archNames)
+
     overrideParameters = argUpdatedGlobalParameters(args)
 
     debugConfig = makeDebugConfig(config["GlobalParameters"])

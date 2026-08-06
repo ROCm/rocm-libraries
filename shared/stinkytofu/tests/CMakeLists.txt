@@ -266,8 +266,11 @@ target_include_directories(test_gen_instructions PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
 )
 
+# Pass the configured arch list so the test checks the same set the build declares outputs for,
+# instead of a list of its own that would silently stop tracking it.
 add_test(NAME GenInstructionsTest
          COMMAND $<TARGET_FILE:test_gen_instructions> ${CMAKE_CURRENT_SOURCE_DIR}/..
+                 ${STINKYTOFU_ARCHS_TO_BUILD}
          WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
 set_tests_properties(GenInstructionsTest PROPERTIES
@@ -316,10 +319,14 @@ if(STINKYTOFU_BUILD_PYTHON)
                     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
                 )
 
-                # Set PYTHONPATH so pytest can find the module
+                # Set PYTHONPATH so pytest can find the module. The staleness-guard
+                # test briefly puts a probe .def in the scanned tree, which would
+                # make any concurrent `import stinkytofu` raise, so the Python tests
+                # share a lock rather than overlapping.
                 set_tests_properties(python.${TEST_NAME} PROPERTIES
                     ENVIRONMENT "PYTHONPATH=${CMAKE_BINARY_DIR}/lib"
                     LABELS "python;unit_tests"
+                    RESOURCE_LOCK "stinkytofu_source_tree"
                 )
             endforeach()
 

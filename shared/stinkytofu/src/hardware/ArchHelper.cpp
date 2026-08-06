@@ -45,7 +45,14 @@ ArchHelper::ArchHelper() {
 }
 
 const ArchHelper::ArchInfo* ArchHelper::getArchInfo(GfxArchID arch) const {
-    return registeredArchInfos[static_cast<int>(arch)].get();
+    // Bounds-checked: a GfxArchID is an index into the per-build arch list, and a
+    // build registers only the one stepping it selected. Callers that derive an id
+    // arithmetically (e.g. to probe a "some other arch" path) can land past the end,
+    // so return nullptr rather than indexing out of range. This is what makes the
+    // nullptr guards in isGfx125() and the getWaveFrontSize()-family asserts real.
+    const auto idx = static_cast<size_t>(arch);
+    if (idx >= registeredArchInfos.size()) return nullptr;
+    return registeredArchInfos[idx].get();
 }
 
 const ArchHelper::ArchInfo* ArchHelper::getArchInfo(uint32_t major, uint32_t minor,

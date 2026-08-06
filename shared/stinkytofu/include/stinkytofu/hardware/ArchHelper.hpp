@@ -144,4 +144,28 @@ inline std::string getArchName(GfxArchID archID) {
            std::to_string(archInfo->stepping);
 }
 
+// True for the gfx12.5 family from a raw ISA-triple major/minor.
+//
+// Deliberately minor-exact, not major>=12: gfx1200/gfx1201 ({12,0,x}) are a different family
+// that the gfx12.5 callers do not yet handle (see the FIXMEs at the call sites), and widening
+// to major>=12 would silently pull them into gfx12.5's paths. (Contrast HwReg.cpp's private
+// isGfx12Plus, which is intentionally the broader major>=12 test for scheduling-mode fields.)
+//
+// Nothing exercises the minor-exactness: a build registers a single stepping, so every call
+// evaluates at (12,5) and a widened predicate would behave identically until a gfx12.0 arch is
+// registered. Widen it only alongside the call sites' FIXMEs.
+inline constexpr bool isGfx125(uint32_t major, uint32_t minor) {
+    return major == 12 && minor == 5;
+}
+
+// True for the gfx12.5 family, i.e. both the Gfx1250 (v1) and Gfx1250v0 (v0) steppings of the
+// {12,5,x} ISA triple. Prefer this over comparing against GfxArchID::Gfx1250 directly: that
+// enumerator does not exist in a build that selected only the v0 stepping, so naming it breaks
+// the v0-only build. The two steppings are behaviourally identical outside instruction timing,
+// so any code that today special-cases Gfx1250 wants both.
+inline bool isGfx125(GfxArchID archID) {
+    const auto* archInfo = ArchHelper::getInstance().getArchInfo(archID);
+    return archInfo != nullptr && isGfx125(archInfo->major, archInfo->minor);
+}
+
 }  // namespace stinkytofu

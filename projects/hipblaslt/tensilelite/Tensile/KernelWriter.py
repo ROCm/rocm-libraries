@@ -6766,6 +6766,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       # Set StinkyTofu module options
       stinky_module_options = {"OptLevel": stinky_opt_level,
+                               # gfx1250 v0/v1 share ISA (12,5,0); this build-wide flag (set from the
+                               # target stepping name) tells StinkyTofu to use the v0 instruction-cost table.
+                               "UseV0CostTable": bool(globalParameters.get("StinkyTofuUseV0CostTable") or False),
                                "EnableRemarks": bool(globalParameters.get("StinkyTofuEnableRemarks") or False),
                                "DebugLevel": int(globalParameters.get("StinkyTofuDebugLevel") or 0),
                                "PrintBeforePass": str(globalParameters.get("StinkyTofuPrintBeforePass") or ""),
