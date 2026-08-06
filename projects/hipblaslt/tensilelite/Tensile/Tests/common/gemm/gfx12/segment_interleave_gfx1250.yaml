@@ -63,6 +63,11 @@ BenchmarkProblems:
           - [16, 16, 32, 1,  1,  8, 4,  2, 2]   # MT256x128 (aligned, non-square)
           - [16, 16, 32, 1,  1,  4, 4,  2, 2]   # MT128x128 (aligned)
           - [16, 16, 32, 1,  1,  2, 4,  2, 2]   # MT64x128  (aligned)
+          # MIWaveGroup [4,1] (A active / B shared) and [1,4] (B active / A shared):
+          # bcontig-asym read/write core path (no scales). Large-tile + MX-scale relocation
+          # coverage lives in the mxf8 group below.
+          - [16, 16, 32, 1,  1,  4, 8,  4, 1]   # MT256x128 [4,1] -> bcontig-asym (B whole as gap)
+          - [16, 16, 32, 1,  1,  8, 4,  1, 4]   # MT128x256 [1,4] -> bcontig-asym mirror (A whole as gap)
         - DepthU: [128]
         - TDMIterateMode: [-1]
         - TDMInst: [3]
@@ -131,12 +136,18 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [16, 16, 128, 1,  1,  8, 8,  2, 2]   # MT256x256 (tight)
           - [16, 16, 128, 1,  1,  8, 4,  2, 2]   # MT256x128 (aligned)
+          # MIWaveGroup [4,1]/[1,4] with MX scales: exercises asymmetric bcontig-asym AND the
+          # MX-scale relocation (ldsBaseMXSA/MXSB) that the bf16 group cannot reach.
+          - [16, 16, 128, 1,  1,  8, 4,  4, 1]   # MT512x64  [4,1] (A active / B shared)
+          - [16, 16, 128, 1,  1,  4, 8,  4, 1]   # MT256x128 [4,1] smaller tile
+          - [16, 16, 128, 1,  1,  4, 8,  1, 4]   # MT64x512  [1,4] (B active / A shared)
+          - [16, 16, 128, 1,  1,  8, 4,  1, 4]   # MT128x256 [1,4] smaller tile
         - DepthU: [256]
         - TDMIterateMode: [-1]
         - TDMInst: [3]
         - HalfPLR: [3]
         - TDMSplit: [False]
-        - LDSSegmentInterleave: [0,1]
+        - LDSSegmentInterleave: [-1,0,1]
         - PrefetchGL2: [2]
         - TransposeLDS: [-1]
         - LdsPadA: [-1]

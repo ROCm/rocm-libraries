@@ -53,17 +53,22 @@ def _mx_scale_bases(state, mxsaStart):
     szB = int(state.get("LdsNumElementsAlignedMXSB", 0)) if hasB else 0
     return (baseA if hasA else None), (baseB if hasB else None), baseB + szB
 
-def _coarse_a(state):
-    # A must cover a full component (never crosses one) so each A read lands entirely within one
-    # segment. Equivalent to VWA == WaveTileA.
-    numComp = state["NumWaves"] // 2
+def _wactive(state, tc):
+    return state["MIWaveGroup"][0] if tc == "A" else state["MIWaveGroup"][1]
+
+def _coarse(state, tc):
+    # coarse = VW == WaveTile (one read fits one segment). W = waves on this tensor's dim
+    # (MIWaveGroup[dim]); for [2,2] W == 2.
+    W = _wactive(state, tc)
+    mt = state["MacroTile0"] if tc == "A" else state["MacroTile1"]
+    vw = state["VectorWidthA"] if tc == "A" else state["VectorWidthB"]
     mi_threads = min(state["MatrixInstM"], state["MatrixInstN"])
-    return mi_threads * state["VectorWidthA"] >= state["MacroTile0"] // numComp
+    return W > 0 and mi_threads * vw >= mt // W
 
 def _port_split_a(state):
     # Fine A (VWA==WaveTileA/2, not coarse): split along the port axis instead of the component axis.
     # Only VWA==WaveTileA/2 (2 vIdx per port) works, and only with TDMSplit; finer VWA can't.
-    if _coarse_a(state) or not state.get("TDMSplit"):
+    if _coarse(state, "A") or not state.get("TDMSplit"):
         return False
     vwa = state["VectorWidthA"]
     return vwa > 0 and state["MIWaveTile"][0] % vwa == 0 and state["MIWaveTile"][0] // vwa == 2
@@ -100,6 +105,75 @@ def aligned_budget_ok(blockSpan, numLdsBlk, naturalOffsetBlk, maxLDS):
         return (False, None)                      # total = roundup + blockSpan <= roundup*2
     return (True, roundup)
 
+def _evaluate_asymmetric(state):
+    # [4,1]/[1,4]: active tensor = the dim>1 one (A for [4,1], B for [1,4]); the other is shared.
+    # split the active comps across segments; leave the shared one baseline (aBaseline/bBaseline).
+    # numComp stays 2, so the load count is unchanged.
+    activeTC = "A" if state["MIWaveGroup"][0] > 1 else "B"
+    sharedTC = "B" if activeTC == "A" else "A"
+
+    # TODO: no port-split for [4,1]/[1,4] yet.
+    if state.get("TDMSplit"):
+        return _no("TDMSplit not yet supported with MIWaveGroup [4,1]/[1,4]")
+
+    # active must be coarse (VW == WaveTile).
+    if not _coarse(state, activeTC):
+        return _no("%s active: VW must be WaveTile (coarse)" % activeTC)
+
+    fAct     = _footprint(state, activeTC)
+    fActData = _data_bytes(state, activeTC)
+    fSh      = _footprint(state, sharedTC)
+    base     = state["LdsOffsetA"]
+
+    # A active only (baseline puts A at base, B after A+scales -> [1,4] can't shortcut): baseline
+    # already splits A0/A1 when comp0 data fits one segment and comp1 lands in the next.
+    if activeTC == "A" and (base % SEG) + fActData <= SEG and (base + fAct) // SEG != base // SEG:
+        return _no("baseline already separates A0/A1 into different segments "
+                   "(A active; comp0 data within one segment)")
+
+    # put the shared tensor between the two active comps. bcontig if that stride already crosses a
+    # segment; else aligned (pad to the boundary).
+    #   A active: [A0][B][A1] bBaseline    B active: [B0][A][B1] aBaseline
+    strideAct = fAct + 2 * fSh              # comp0 -> comp1 gap
+    baselineKey = "bBaseline" if activeTC == "A" else "aBaseline"
+    sharedBaseKey = "ldsBaseB" if activeTC == "A" else "ldsBaseA"
+
+    def _build_offsets(stride):
+        # active comp0 @ base, shared @ base+fAct; emit sites read ldsBase<tc>.
+        o = {sharedBaseKey: base + fAct, "ldsBase%s" % activeTC: base,
+             "writeStrideBytes": stride, "footprintPacked": True,
+             baselineKey: True, "activeTC": activeTC}
+        bMXSA, bMXSB, _ = _mx_scale_bases(state, base + 2 * fAct + 2 * fSh)
+        if bMXSA is not None: o["ldsBaseMXSA"] = bMXSA
+        if bMXSB is not None: o["ldsBaseMXSB"] = bMXSB
+        return o
+
+    c0 = base // SEG
+    # comp0 can span 2 segments (unaligned base); comp1 must start past its last one.
+    c0end = (base + fActData - 1) // SEG
+    c1 = (base + strideAct) // SEG
+    if c1 > c0end:
+        # shared block already pushed comp1 to a new segment; free.
+        return {"applicable": True, "aligned": False, "offsets": _build_offsets(strideAct),
+                "blockSpan": 0, "reason": "bcontig-asym",
+                "segmentMap": "BCONTIG-ASYM active=%s seg%d={c0,shared} seg%d={c1}" % (activeTC, c0, c1)}
+
+    # smaller: pad comp1 to the next segment. grows LDS -> PGR2 + force only.
+    if state.get("PrefetchGlobalRead") != 2:   return _no("small asym: PGR!=2")
+    if state.get("LDSSegmentInterleave", -1) == -1: return _no("auto: skip aligned (LDS growth)")
+    pre = _ceil_seg(base + strideAct) - base
+    offsets = _build_offsets(pre)
+    blockSpan = base + pre + fAct
+    bMXSA, bMXSB, mxEnd = _mx_scale_bases(state, blockSpan)
+    if bMXSA is not None: offsets["ldsBaseMXSA"] = bMXSA
+    if bMXSB is not None: offsets["ldsBaseMXSB"] = bMXSB
+    blockSpan = max(blockSpan, mxEnd)
+    return {"applicable": True, "aligned": True, "offsets": offsets,
+            "blockSpan": blockSpan, "reason": "bcontig-asym-aligned",
+            "segmentMap": "BCONTIG-ASYM-ALIGNED active=%s seg%d/seg%d"
+                          % (activeTC, base // SEG, (base + pre) // SEG)}
+
+
 def evaluate(state):
     pt = state["ProblemType"]
     # Tri-state knob: -1 = auto (default), 0 = force baseline, 1 = force on where applicable.
@@ -113,11 +187,10 @@ def evaluate(state):
         return _no("LocalSplitU>1")
     if not state.get("UnrollMajorLDSA") or not state.get("UnrollMajorLDSB"):
         return _no("not unrollMajor")
+    # numComp==2 (NumWaves==4) restricts MIWaveGroup to {[2,2],[4,1],[1,4]}, all with even waves
+    # per active dim. [2,2] interleaves both tensors; [4,1]/[1,4] have one active + one shared
+    # tensor and are handled by _evaluate_asymmetric below.
     if state["NumWaves"] // 2 != 2:                             return _no("numComp!=2")
-    # Both write (WaveIdx//2 -> 2 comps) and read (wtid0*stride, num1DWaves=MIWaveGroup dim)
-    # assume exactly 2 waves per MFMA dim. MIWaveGroup!=[2,2] (e.g. [4,1]) loses the component
-    # jump on the dim==1 tensor and reads OOB on the dim==4 one.
-    if list(state.get("MIWaveGroup", [])) != [2, 2]:           return _no("MIWaveGroup!=[2,2]")
     if pt.get("Sparse"):
         return _no("sparse")
     # Subtile uses a separate codegen body; the emit path these offsets target runs only for
@@ -130,9 +203,17 @@ def evaluate(state):
     # fp8/fp4 cover mxf8/mxf4; MX scales are relocated as a trailing block (see _mx_scale_bases).
     if not (_dt.isBFloat16() or _dt.isHalf() or _dt.is8bitFloat() or _dt.isFloat4()):
         return _no("bf16/fp16/fp8/fp4 only")
-    # A must be coarse (VWA==WaveTileA) or port-split (VWA==WaveTileA/2, needs TDMSplit).
+
+    # [4,1]/[1,4]: exactly one MIWaveGroup dim is 1 -> one active + one shared tensor.
+    wgM, wgN = state["MIWaveGroup"][0], state["MIWaveGroup"][1]
+    if (wgM == 1) ^ (wgN == 1):
+        return _evaluate_asymmetric(state)
+    if [wgM, wgN] != [2, 2]:
+        return _no("MIWaveGroup unsupported")
+
+    # [2,2]: A must be coarse (VWA==WaveTileA) or port-split (VWA==WaveTileA/2, needs TDMSplit).
     _portSplit = _port_split_a(state)
-    if not (_coarse_a(state) or _portSplit):                  return _no("A: VWA must be WaveTileA, or WaveTileA/2 with TDMSplit")
+    if not (_coarse(state, "A") or _portSplit):               return _no("A: VWA must be WaveTileA, or WaveTileA/2 with TDMSplit")
 
     fA, fB = _footprint(state, "A"), _footprint(state, "B")
     base = state["LdsOffsetA"]

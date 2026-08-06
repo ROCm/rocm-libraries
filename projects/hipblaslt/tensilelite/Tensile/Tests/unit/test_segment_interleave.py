@@ -232,13 +232,55 @@ def test_auto_skips_aligned():
     r1 = evaluate(_vw8_state(DepthU=64, PrefetchGlobalRead=2, LDSSegmentInterleave=1))
     assert r1["applicable"] is True and r1["aligned"] is True
 
-def test_miwavegroup_not_2x2_skips():
-    # footprint packing assumes 2 waves per MFMA dim; NumWaves=4 with MIWG [4,1]/[1,4] passes
-    # Solution.py's prod>1 / pow2 gates but would lose/OOB the component jump. Must skip.
-    # MacroTile follows MIWG (derived in the helper), so each state stays MI-consistent.
+def test_miwg_4x1_large_tile_baseline_sufficient():
+    # [4,1] large tile: active data fits one segment (fActData <= SEG) AND baseline already lands
+    # A0/A1 in different segments -> no interleave needed (only pad tail spills, negligible).
+    r = evaluate(_vw8_state(MIWaveGroup=[4, 1]))            # MIWaveTile[8,8] -> fActData=SEG
+    assert r["applicable"] is False
+    assert "baseline" in r["reason"], r["reason"]
+
+def test_miwg_1x4_large_tile_interleaves_not_baseline():
+    # [1,4]: B active, but baseline lays out [A][MX][B] so B sits at a non-aligned offset -> its
+    # comps span/overlap a segment even at fB==SEG. No baseline shortcut here; interleave realigns
+    # B to offset 0 (bcontig) -> aBaseline. (Contrast [4,1] where A@0 stays baseline.)
+    r = evaluate(_vw8_state(MIWaveGroup=[1, 4]))
+    assert r["applicable"] is True
+    assert r["offsets"]["aBaseline"] is True
+
+def test_miwg_asym_tdmsplit_not_supported():
+    # TDMSplit + asymmetric MIWaveGroup ([4,1]/[1,4]) is not supported yet -> reject
+    # (even where the fine port-split path would otherwise apply).
     for miwg in ([4, 1], [1, 4]):
-        r = evaluate(_vw8_state(MIWaveGroup=miwg))
-        assert r["applicable"] is False and "MIWaveGroup" in r["reason"], miwg
+        r = evaluate(_vw8_state(MIWaveGroup=miwg, TDMSplit=1, VectorWidthA=4, VectorWidthB=4))
+        assert r["applicable"] is False and "TDMSplit" in r["reason"], miwg
+
+def test_miwg_4x1_nonzero_base_no_false_baseline_shortcut():
+    # fp8/fp4 LDS-transpose kernels use a half-wave shift (LdsOffsetA=4). With fActData==SEG the
+    # active comp0 data straddles into the next segment where comp1 also lands, so the [4,1] baseline
+    # shortcut must NOT fire (it would wrongly report the conflict as already resolved). base=0 is
+    # genuinely clean and still takes the shortcut.
+    f8 = _FakeDataType(bf16=False, f8=True, nbytes=1.0)
+    kw = dict(MIWaveGroup=[4, 1], MIWaveTile=[8, 4], DepthU=256, VectorWidthA=8, VectorWidthB=4,
+              ProblemType={"DataType": f8})   # MT0=512 -> fActData = 256*256*1 = SEG
+    r4 = evaluate(_vw8_state(LdsOffsetA=4, **kw))
+    assert not (r4["applicable"] is False and "baseline already separates" in r4["reason"]), \
+        "base=4, fActData==SEG must not take the (false) baseline shortcut"
+    r0 = evaluate(_vw8_state(LdsOffsetA=0, **kw))
+    assert r0["applicable"] is False and "baseline already separates" in r0["reason"], \
+        "base=0, fActData==SEG is genuinely clean -> baseline shortcut"
+
+def test_miwg_4x1_small_tile_bcontig():
+    # [4,1] small tile: baseline packs A0/A1 in one segment -> interleave separates them with the
+    # whole shared B as the gap ([A0][B_whole][A1]) -> bBaseline.
+    r = evaluate(_vw8_state(MIWaveGroup=[4, 1], MIWaveTile=[4, 8], VectorWidthA=4))
+    assert r["applicable"] is True
+    assert r["offsets"]["bBaseline"] is True
+
+def test_miwg_1x4_small_tile_bcontig_mirror():
+    # Mirror small [1,4] -> aBaseline.
+    r = evaluate(_vw8_state(MIWaveGroup=[1, 4], MIWaveTile=[8, 4], VectorWidthB=4))
+    assert r["applicable"] is True
+    assert r["offsets"]["aBaseline"] is True
 
 def test_tdmsplit_composes():
     # TDMSplit composes: same offsets as the non-split path.
