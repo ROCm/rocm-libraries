@@ -56,6 +56,7 @@
 #include <array>
 #include <cassert>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <fstream>
 #include <functional>
