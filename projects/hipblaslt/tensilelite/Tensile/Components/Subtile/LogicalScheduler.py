@@ -4268,14 +4268,22 @@ class LogicalScheduler:
                              if getattr(em.source, 'label', None) == 'initC_overlap'), None)
             assert init_idx is not None, "preloop must contain the canonical initC op"
             next_id = max(em.moduleId for em in em_list) + 1
-            # After initC, jump to the tail loop when K < DepthU.
+            # After initC, jump to the tail loop when K < DepthU. Under PLSIN the
+            # FUSED NLL bodies sit between here and SkipToEnd and push it past the
+            # +-simm16 short-branch range, so this arm needs the 32-bit form.
+            if plsin:
+                tailJump = writer.longBranchScc1(
+                    endLabel, posNeg=1,
+                    comment="K < DepthU: jump to tail loop (long)")
+            else:
+                tailJump = SCBranchSCC1(labelName=endLabel.getLabelName(),
+                                        comment="K < DepthU: jump to tail loop")
             em_list.insert(init_idx + 1, EmittedModule(
                 moduleId=next_id,
                 instructions=[
                     SCmpEQU32(src0=sgpr("LoopCounterL"), src1=0,
                                 comment="K < DepthU? initC done, run tail only"),
-                    SCBranchSCC1(labelName=endLabel.getLabelName(),
-                                    comment="K < DepthU: jump to tail loop"),
+                    tailJump,
                 ]))
             next_id += 1
             if skipGRForTail:
