@@ -208,21 +208,37 @@ what its backend actually supports rather than pretending to a single unified ma
 
 ## Pre-submit / CI Gates
 
-CI runs primarily through internal AMD **Jenkins** pipelines (`.jenkins/`). Root `.github/`
-workflows are not present in this checkout; monorepo TheRock workflows build/test the `sparse`
-component. Dependencies pulled for the build include `rocSPARSE`, `rocPRIM`, `rocBLAS`, `hipBLASLt`,
-and `hipBLAS-common`.
+The presubmit gate is the monorepo **TheRock CI** GitHub Actions workflow
+(`.github/workflows/therock-ci*.yml`), which runs on every pull request and push to `develop`
+(`.github/scripts/therock_configure_ci.py`). It builds and tests only changed projects and, by
+default, runs the CTest **`standard`** category — `quick` + `pre_checkin`, excluding `*known_bug*`
+(`clients/tests/test_categories.yaml`) — on the HIP backend. Scope widens per PR via labels
+(`test:hipsparse`, `test_type:comprehensive` / `test_type:full`); doc-only changes (`*.md`,
+`docs/*`) skip CI.
+
+Internal AMD **Jenkins** pipelines (`.jenkins/`) are legacy, running on older GPUs (gfx900 / gfx906 /
+gfx908) via cron: `precheckin.groovy` builds the HIP backend (`./install.sh -c`) and runs GTest
+filter `*checkin*`, `precheckin-cuda.groovy` builds `--cuda` (cuSPARSE) and runs the narrow
+`*checkin*csrmv*`, `extended.groovy` runs `*nightly*`, and `codecov.groovy` / `staticanalysis.groovy`
+cover coverage and format/static analysis. Build dependencies pulled include `rocSPARSE`, `rocPRIM`,
+`rocBLAS`, `hipBLASLt`, `hipBLAS-common`. Repo-wide `pre-commit`, `clang-tidy`, `codeql` apply to all
+components.
+
+> The CUDA/cuSPARSE backend is validated in its own lane (`precheckin-cuda.groovy`) with a
+> deliberately narrow filter; it is not part of the default TheRock HIP-backend gate.
 
 ### Validation Gates and Ownership
 
 | Validation Area | Required Before Merge | Owner | Notes |
 |---|---|---|---|
-| Build (HIP and CUDA backends) | Yes | CI / DevOps | `precheckin.groovy`, `precheckin-cuda.groovy`, `static.groovy` |
-| Unit / descriptor / bad-arg tests | Yes | Component team | Part of the `*checkin*` GTest run |
-| Integration tests | Yes | Component team | HIP: `*checkin*`; CUDA: `*checkin*csrmv*`; both exclude `*known_bug*` |
-| Static analysis / formatting | Yes | CI / DevOps | `staticanalysis.groovy`; repo-wide quality gates |
-| Code coverage | No | Component team / CI | `codecov.groovy`, informational (flag `hipSPARSE`, target 80%) |
-| ASAN | Available | CI / DevOps | `asan` preset build; see Sanitizer section |
+| Build (HIP backend) | Yes | CI / DevOps | TheRock CI; Jenkins `precheckin`/`static` (legacy) |
+| Build (CUDA backend) | Separate lane | CI / DevOps | Jenkins `precheckin-cuda.groovy` (legacy); not in the default TheRock gate |
+| Unit / descriptor / bad-arg tests | Yes | Component team | In the CTest `standard` category |
+| Integration tests | Yes | Component team | HIP: `standard` (`quick`+`pre_checkin`); CUDA: narrow `*checkin*csrmv*`; both exclude `*known_bug*` |
+| Formatting | Yes | CI / DevOps | Repo-wide `pre-commit` |
+| Static analysis | No (informational) | CI / DevOps | `clang-tidy`, `codeql`, Jenkins `staticanalysis.groovy` |
+| Code coverage | No | Component team / CI | `codecov.groovy`, informational (Codecov flag `hipSPARSE`, target 80%) |
+| ASAN | Separate lane | CI / DevOps | `asan` preset build + TheRock ASAN workflows; not a confirmed per-PR blocking gate |
 | Shared validation infra | N/A | TheRock team | Shared build/validation infrastructure |
 | Release qualification | N/A | Component team + QA + TPM | Readiness and known-gap review |
 
@@ -230,8 +246,8 @@ and `hipBLAS-common`.
 
 | Status | Applies to |
 |---|---|
-| Trusted gate | HIP `*checkin*` and CUDA `*checkin*csrmv*` (excluding `*known_bug*`) on the PR runners |
-| Informational | Coverage upload (Codecov); nightly `*nightly*` results |
+| Trusted gate | TheRock CI `standard` category on the HIP backend (changed projects), excluding `*known_bug*`; plus the CUDA `*checkin*csrmv*` lane |
+| Informational | Coverage upload (Codecov); nightly `*nightly*` / comprehensive results |
 | Unstable / flaky | `known_bug`-tagged cases (excluded from gating) |
 
 **Flaky / known-bug policy:** hipSPARSE has no `known_bugs.yaml`. A known bug is declared as a
@@ -275,9 +291,10 @@ uploads `lcoverage/main_coverage.info` to Codecov with flag `hipSPARSE`.
 
 ## Nightly Validation
 
-Beyond PR validation, nightly (`extended.groovy`) runs the full `*nightly*` tier on the HIP backend.
-The CUDA backend's PR lane is intentionally narrow (`*checkin*csrmv*`); broader CUDA validation is not
-part of the per-PR gate.
+Beyond the PR `standard` category, nightly runs the `comprehensive` category (adds the `nightly`
+tier) on the HIP backend via the TheRock nightly workflows; the legacy Jenkins `extended.groovy`
+mirrors this with `*nightly*`. The CUDA backend's lane is intentionally narrow (`*checkin*csrmv*`);
+broader CUDA validation is not part of the per-PR gate.
 
 ---
 

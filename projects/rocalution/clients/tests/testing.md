@@ -216,21 +216,40 @@ and comprehensive runs, at the cost of the tier being invisible in the test name
 
 ## Pre-submit / CI Gates
 
-CI runs primarily through internal AMD **Jenkins** pipelines (`.jenkins/`). The rocALUTION Azure
-DevOps pipeline (`.azuredevops/rocm-ci.yml`) is explicitly **disabled** (`trigger: none`, `pr: none`)
-because it depends on rocSPARSE. Monorepo TheRock CI builds/tests the `rocalution` component
-(`-DTHEROCK_ENABLE_ROCALUTION=ON` + sparse + rand) when `projects/rocalution` changes, using the
-shared `quick`/`standard`/`comprehensive`/`full` test types.
+The presubmit gate is the monorepo **TheRock CI** GitHub Actions workflow
+(`.github/workflows/therock-ci*.yml`), which runs on every pull request and push to `develop`
+(`.github/scripts/therock_configure_ci.py`) and tests only changed projects
+(`-DTHEROCK_ENABLE_ROCALUTION=ON` + sparse + rand). By default it runs the CTest **`standard`**
+category, which sets `ROCALUTION_EMULATION_REGRESSION=1` — the regression subset, where GPU-heavy
+infrastructure suites (`local_matrix_*`, `local_vector`, `local_stencil`, `backend`, MPI infra) skip
+themselves and solver suites use reduced parameter sets. The other categories map to the emulation
+vars: `quick` → `ROCALUTION_EMULATION_SMOKE=1`, `comprehensive` → `ROCALUTION_EMULATION_EXTENDED=1`,
+`full` → complete parameter sweep (no emulation var). Scope widens per PR via labels
+(`test:rocalution`, `test_type:comprehensive` / `test_type:full`); doc-only changes (`*.md`,
+`docs/*`) skip CI.
+
+The rocALUTION Azure DevOps pipeline (`.azuredevops/rocm-ci.yml`) is explicitly **disabled**
+(`trigger: none`, `pr: none`) because it depends on rocSPARSE. Internal AMD **Jenkins** pipelines
+(`.jenkins/`) are legacy, running on older GPUs (gfx900 / gfx906 / gfx908) via cron across three build
+variants — default (`./install.sh -c`, HIP+OpenMP), host (`--host`), and MPI
+(`--host --mpi=on --no-openmp`).
+
+> **Important nuance:** the Jenkins `runTestCommand` GTest filter is commented out, so those legacy
+> lanes run the **full** `rocalution-test` suite (no emulation subset). The intended
+> `*checkin*` / `*nightly*` filters match no current test names. The modern TheRock gate, by
+> contrast, selects the subset through the `ROCALUTION_EMULATION_*` env var of the CTest category.
 
 ### Validation Gates and Ownership
 
 | Validation Area | Required Before Merge | Owner | Notes |
 |---|---|---|---|
-| Build (HIP, host, static; MPI variant) | Yes | CI / DevOps | `precheckin.groovy`, `debug.groovy`, `staticlibrary.groovy` |
-| Unit / host-backend tests | Yes | Component team | Part of the Jenkins test run |
-| Integration tests | Yes | Component team | Jenkins currently runs the **full** suite (the intended `*checkin*`/`*nightly*` filters are commented out and match no test names) |
-| Static analysis / formatting | Yes | CI / DevOps | `staticanalysis.groovy` |
-| Code coverage | No | Component team / CI | `codecov.groovy`, informational |
+| Build (HIP, host, static; MPI variant) | Yes | CI / DevOps | TheRock CI; Jenkins `precheckin`/`debug`/`staticlibrary` (legacy) |
+| Unit / host-backend tests | Yes | Component team | In the CTest `standard` category (regression subset) |
+| Integration tests | Yes | Component team | TheRock `standard` = regression subset (`ROCALUTION_EMULATION_REGRESSION=1`); legacy Jenkins runs the full suite (filter commented out) |
+| Formatting | Yes | CI / DevOps | Repo-wide `pre-commit` |
+| Static analysis | No (informational) | CI / DevOps | `clang-tidy`, `codeql`, Jenkins `staticanalysis.groovy` |
+| Code coverage | No | Component team / CI | `codecov.groovy`, informational (Codecov, `rocALUTION`) |
+| ASAN | Separate lane | CI / DevOps | TheRock ASAN workflows + `BUILD_ADDRESS_SANITIZER`; not a confirmed per-PR blocking gate |
 | Shared validation infra | N/A | TheRock team | Shared build/validation infrastructure |
 | Release qualification | N/A | Component team + QA + TPM | Readiness and known-gap review |
 
@@ -242,8 +261,8 @@ MPI `./install.sh -c --host --mpi=on --no-openmp`. Test path:
 
 | Status | Applies to |
 |---|---|
-| Trusted gate | The suite Jenkins runs on the PR GPU runners (effectively the full suite today) |
-| Informational | Coverage upload (Codecov); TheRock component results |
+| Trusted gate | TheRock CI `standard` category (regression subset) on changed projects |
+| Informational | Coverage upload (Codecov); TheRock nightly / comprehensive results; legacy Jenkins full-suite lanes |
 | Unstable / flaky | No `known_bug` mechanism exists in rocALUTION today |
 
 **Flaky / known-bug policy:** rocALUTION has **no `known_bugs.yaml`** and no tests use a `known_bug`

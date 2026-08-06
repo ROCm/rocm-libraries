@@ -157,10 +157,12 @@ a compute kernel:** `*bad_arg*` and auxiliary API cases.
 **Managed-memory (HMM) cases:** `*csrmv_managed*` are run twice on gfx90a/gfx942, with
 `HSA_XNACK=0` and `HSA_XNACK=1`.
 
-**What runs on PRs:** build + `*quick*:*pre_checkin*` (excluding `*known_bug*`).
-**What runs nightly:** the `*nightly*` tier (Jenkins `extended.groovy`, timeout ~600 min).
-**What runs at release / on demand:** `stress` tier and the emulation `smoke`/`regression`/`extended`
-YAML subsets driven through `rtest.py`.
+**What runs on PRs:** the CTest `standard` category (`quick` + `pre_checkin`, excluding `*known_bug*`)
+on changed projects, via TheRock CI (default `test_type: standard`).
+**What runs nightly:** the `comprehensive` category (adds the `nightly` tier) via the TheRock nightly
+workflows; the legacy Jenkins `extended.groovy` mirrors this with `*nightly*` (timeout ~600 min).
+**What runs at release / on demand:** `full` category (adds the `stress` tier), and the emulation
+`smoke`/`regression`/`extended` YAML subsets driven through `rtest.py`.
 
 **Test-size / coverage guidance:** prefer a small set of representative sizes over exhaustive
 numerical variants — the typed/parameterized suites already sweep type and index combinations, so
@@ -216,24 +218,38 @@ type or index combination extends coverage without new hand-written cases.
 
 ## Pre-submit / CI Gates
 
-CI for rocSPARSE runs primarily through internal AMD **Jenkins** pipelines (`.jenkins/`). There is no
-rocSPARSE-dedicated GitHub Actions workflow in this checkout; monorepo-level TheRock workflows build
-and test the `sparse` component.
+The presubmit gate is the monorepo **TheRock CI** GitHub Actions workflow
+(`.github/workflows/therock-ci*.yml`), which runs on every pull request and push to `develop`
+(`.github/scripts/therock_configure_ci.py`). It builds and tests only the projects whose files
+changed and, by default, runs the CTest **`standard`** category — i.e. `quick` + `pre_checkin`,
+excluding `*known_bug*` (see `clients/tests/test_categories.yaml`). The scope can be widened per PR
+with labels (`test:rocsparse`, `test_type:comprehensive` / `test_type:full`); doc-only changes
+(`*.md`, `docs/*`) skip CI. Broader tiers run in the TheRock nightly workflows
+(`therock-ci-nightly.yml`, `therock-multi-arch-ci-nightly.yml`) and dedicated ASAN workflows
+(`therock-multi-arch-ci-asan*.yml`). Repo-wide quality workflows (`pre-commit`, `clang-tidy`,
+`codeql`) apply to all components.
+
+Internal AMD **Jenkins** pipelines (`.jenkins/`) also exist but are legacy: they run on older GPUs
+(gfx900 / gfx906 / gfx908) on cron/nightly triggers and mirror the same GTest filters —
+`precheckin.groovy` runs `*quick*:*pre_checkin*`, `extended.groovy` runs `*nightly*`, `asan.groovy`
+runs `*quick*:*pre_checkin*` under AddressSanitizer, and `codecov.groovy` uploads coverage. All
+Jenkins test commands exclude `*known_bug*`.
 
 ### Validation Gates and Ownership
 
 | Validation Area | Required Before Merge | Owner | Notes |
 |---|---|---|---|
-| Build (Linux; static and shared) | Yes | CI / DevOps | `precheckin.groovy`, `static.groovy`, `debug.groovy` |
-| Unit / bad-arg tests | Yes | Component team | Part of the `*quick*:*pre_checkin*` GTest run |
-| Integration tests | Yes | Component team | `*quick*:*pre_checkin*`, excluding `*known_bug*` |
-| Static analysis / formatting | Yes | CI / DevOps | `staticanalysis.groovy`; repo-wide `pre-commit`, `clang-tidy`, `codeql` |
-| ASAN | Yes | CI / DevOps | `asan.groovy` — `*quick*:*pre_checkin*` under AddressSanitizer |
-| Code coverage | No | Component team / CI | `codecov.groovy`, informational (flag `rocSPARSE`) |
+| Build (Linux; changed projects) | Yes | CI / DevOps | TheRock CI; Jenkins `precheckin`/`static`/`debug` (legacy) |
+| Unit / bad-arg tests | Yes | Component team | In the CTest `standard` category (`quick`+`pre_checkin`) |
+| Integration tests | Yes | Component team | `standard` category, excluding `*known_bug*` |
+| Formatting | Yes | CI / DevOps | Repo-wide `pre-commit` |
+| Static analysis | No (informational) | CI / DevOps | `clang-tidy`, `codeql`, Jenkins `staticanalysis.groovy`; not a confirmed blocking gate |
+| ASAN | Separate lane | CI / DevOps | Dedicated TheRock ASAN workflows (multi-arch / nightly) + Jenkins `asan.groovy`; not a confirmed per-PR blocking gate |
+| Code coverage | No | Component team / CI | `codecov.groovy`, informational (Codecov flag `rocSPARSE`) |
 | Shared validation infra | N/A | TheRock team | Shared build/validation infrastructure |
 | Release qualification | N/A | Component team + QA + TPM | Readiness and known-gap review |
 
-**Build command pattern (pre-checkin):**
+**Build command pattern (Jenkins pre-checkin):**
 
 ```bash
 ./install.sh --matrices-dir-install ${JENKINS_HOME_DIR}/rocsparse_matrices \
@@ -244,8 +260,8 @@ and test the `sparse` component.
 
 | Status | Applies to |
 |---|---|
-| Trusted gate | `*quick*` and `*pre_checkin*` cases (excluding `*known_bug*`) run on the PR GPU runners; ASAN quick run |
-| Informational | Coverage upload (Codecov); nightly `*nightly*` results |
+| Trusted gate | TheRock CI `standard` category (`quick`+`pre_checkin`, excluding `*known_bug*`) on changed projects |
+| Informational | Coverage upload (Codecov); nightly `*nightly*` / comprehensive results; ASAN lane |
 | Unstable / flaky | `known_bug`-tagged cases (excluded from gating) |
 
 **Flaky / known-bug policy:** rocSPARSE has no `known_bugs.yaml`. A case that exposes a tracked
@@ -289,10 +305,14 @@ flag `rocSPARSE`.
 
 ## Nightly Validation
 
-Beyond PR validation, nightly (`extended.groovy`) adds:
+Beyond PR validation (the `standard` category), the TheRock nightly workflows run the
+`comprehensive` category and additional GPU families; the legacy Jenkins `extended.groovy` mirrors
+this. Nightly adds:
 
-* The full `*nightly*` tier — larger shapes and broader type/format coverage (timeout ~600 min).
-* Additional GPU architectures beyond the PR runners.
+* The `nightly` tier — larger shapes and broader type/format coverage (Jenkins `extended.groovy`
+  timeout ~600 min).
+* Additional GPU architectures beyond the PR runners, plus a dedicated ASAN lane
+  (`therock-multi-arch-ci-asan-nightly.yml`).
 * Emulation subsets (`smoke`, `regression`, `extended`) via `rtest.py --emulation`, reading
   `rocsparse_smoke.yaml`, `rocsparse_regression.yaml`, and `rocsparse_extended.yaml`.
 
@@ -309,7 +329,7 @@ Default GPU targets come from `DEFAULT_GPU_TARGETS` in the root `CMakeLists.txt`
 | gfx900 / gfx906 | Partial | PR / Nightly | Older CDNA/GCN |
 | gfx1030 / gfx110x / gfx1200 / gfx1201 | Partial | Nightly | RDNA |
 | gfx1151 (Strix Halo) | Partial | Nightly | `f64_r` / `f64_c` cases excluded (`exclude_gpu_gfx1151`) |
-| ASAN (gfx908/gfx90a/gfx942 `xnack+`) | Partial | PR | AddressSanitizer build, xnack+ only |
+| ASAN (gfx908/gfx90a/gfx942 `xnack+`) | Partial | Dedicated lane / Nightly | AddressSanitizer build, xnack+ only |
 
 **Explicitly not tested / guaranteed:** multi-GPU validation; non-listed gfx targets; Windows
 coverage is thinner than Linux. Configurations are guarded at runtime by the "Insufficient memory"
