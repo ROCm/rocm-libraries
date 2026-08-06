@@ -1,17 +1,18 @@
 name: TheRock CI
 
 on:
-  push:
-    branches:
-      - develop
-      - release/therock-*
-  pull_request:
-    types:
-      - opened
-      - synchronize
-      - reopened
-      - labeled
-      - unlabeled
+  # TESTING: Disable presubmit triggers to test multi-arch-ci only
+  # push:
+  #   branches:
+  #     - develop
+  #     - release/therock-*
+  # pull_request:
+  #   types:
+  #     - opened
+  #     - synchronize
+  #     - reopened
+  #     - labeled
+  #     - unlabeled
   workflow_dispatch:
     inputs:
       projects:
