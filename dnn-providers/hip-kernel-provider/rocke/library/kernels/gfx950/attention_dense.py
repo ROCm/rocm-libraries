@@ -64,7 +64,7 @@ the experiment's ``plan.md`` for their measured results.
 """
 
 from contextlib import nullcontext as _nullcontext
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Optional, Tuple
 
 from rocke.core.ir import IRBuilder, KernelDef, PtrType, BF16, F16, F32, I32, I64
@@ -206,6 +206,12 @@ class AttentionDenseSpec:
     paged: bool = False
     page_block_size: int = 16
     num_pages: int = 0  # 0 -> derive batch*ceil(seqlen_kv/page_block_size)
+    # 64-bit KV addressing for paged caches > 2 GiB. Folds physical_block*page
+    # stride into a 64-bit buffer BASE (per block), keeping only the within-block
+    # offset in the i32 voffset. Auto-enabled by run_attention_dense_torch when
+    # the cache exceeds the 2 GiB i32-voffset cap; the <2 GiB path is
+    # byte-identical. Mirrors unified_2d's offset_i64_split.
+    use_i64_kv_addr: bool = False
 
     def __post_init__(self) -> None:
         if self.dtype not in _DTYPE_IR:
@@ -340,6 +346,8 @@ class AttentionDenseSpec:
             parts.append(f"swa{self.sliding_window}")
         if self.paged:
             parts.append(f"paged{self.page_block_size}")
+        if self.use_i64_kv_addr:
+            parts.append("i64kv")
         if self.varlen:
             parts.append("varlen")
         if self.lazy_rescale:
@@ -404,6 +412,7 @@ def build_attention_dense(
     stride_q_tok = Hq * D
     stride_k_tok = Hkv * D
     PAGED = spec.paged
+    I64_KV_ADDR = spec.use_i64_kv_addr
     PAGE_BS = spec.page_block_size
     PAGE_STRIDE = PAGE_BS * Hkv * D  # elements per physical page
     NUM_PAGES = spec.resolved_num_pages
@@ -566,15 +575,22 @@ def build_attention_dense(
     K_lds_addr = b.smem_addr_of(K_lds)
     V_lds_addr = b.smem_addr_of(V_lds)
     if PAGED:
-        _kv_sz = b.const_i32(NUM_PAGES * PAGE_BS * Hkv * D * 2)
-        k_rsrc = b.buffer_rsrc(k, _kv_sz)
-        v_rsrc = b.buffer_rsrc(v, _kv_sz)
+        if I64_KV_ADDR:
+            # >2 GiB cache: the whole-cache byte size overflows an i32 buffer-rsrc
+            # size field, and it is unused anyway (the i64 path builds a per-block
+            # rsrc in _async_load). Use a 0-size placeholder (never read).
+            k_rsrc = b.buffer_rsrc(k, b.const_i32(0))
+            v_rsrc = b.buffer_rsrc(v, b.const_i32(0))
+        else:
+            _kv_sz = b.const_i32(NUM_PAGES * PAGE_BS * Hkv * D * 2)
+            k_rsrc = b.buffer_rsrc(k, _kv_sz)
+            v_rsrc = b.buffer_rsrc(v, _kv_sz)
     else:
         k_rsrc = b.buffer_rsrc(k, b.const_i32(B * Skv * Hkv * D * 2))
         v_rsrc = b.buffer_rsrc(v, b.const_i32(B * Skv * Hkv * D * 2))
     v_wave_off_i64 = b.zext(b.to_sgpr_u32(b.mul(wave, b.const_i32(WAVE_BYTES))), I64)
 
-    def _async_load(rsrc, lds_base, buf_val, tile_key0, bytes_per_buf, ldrow_bytes):
+    def _async_load(rsrc, base_ptr, lds_base, buf_val, tile_key0, bytes_per_buf, ldrow_bytes):
         """Async DMA one K/V tile into the [BN, LDROW] LDS layout.
 
         ROWS_PER_INSTR==1 (D==128): one instr per padded row -- 64 lanes x 2 bf16
@@ -621,22 +637,39 @@ def build_attention_dense(
                         b.const_i32(0),
                     )
                     phys = b.global_load_i32(block_tables, safe_idx)
-                    voff = b.add(
-                        b.add(
+                    if I64_KV_ADDR:
+                        # >2 GiB cache: fold physical_block*page_stride into a
+                        # 64-bit buffer BASE (bytes); keep only the within-block
+                        # offset in the i32 voffset. PAGE_STRIDE*2 is the byte
+                        # page stride (config-general, NOT a hardcoded shift).
+                        base_i64 = b.mul(b.zext(phys, I64), b.const_i64(PAGE_STRIDE * 2))
+                        load_rsrc = b.buffer_rsrc(
+                            b.global_ptr_add(base_ptr, base_i64),
+                            b.const_i32(PAGE_STRIDE * 2),
+                        )
+                        voff = b.add(
+                            b.add(b.mul(tok, b.const_i32(stride_k_tok)), kv_head_off),
+                            gcol,
+                        )
+                    else:
+                        load_rsrc = rsrc
+                        voff = b.add(
                             b.add(
-                                b.mul(phys, b.const_i32(PAGE_STRIDE)),
-                                b.mul(tok, b.const_i32(stride_k_tok)),
+                                b.add(
+                                    b.mul(phys, b.const_i32(PAGE_STRIDE)),
+                                    b.mul(tok, b.const_i32(stride_k_tok)),
+                                ),
+                                kv_head_off,
                             ),
-                            kv_head_off,
-                        ),
-                        gcol,
-                    )
+                            gcol,
+                        )
                 else:
+                    load_rsrc = rsrc
                     voff = b.add(
                         b.add(k_base, b.mul(gkey, b.const_i32(stride_k_tok))), gcol
                     )
                 b.async_buffer_load_lds_addr(
-                    rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, 1
+                    load_rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, 1
                 )
         else:
             lanes_per_row = D // 2
@@ -659,12 +692,12 @@ def build_attention_dense(
 
     def async_load_k(lds_base, buf_val, tile_key0):
         _async_load(
-            k_rsrc, lds_base, buf_val, tile_key0, K_BYTES_PER_BUF, K_LDROW_BYTES
+            k_rsrc, k, lds_base, buf_val, tile_key0, K_BYTES_PER_BUF, K_LDROW_BYTES
         )
 
     def async_load_v(lds_base, buf_val, tile_key0):
         _async_load(
-            v_rsrc, lds_base, buf_val, tile_key0, V_BYTES_PER_BUF, V_LDROW_BYTES
+            v_rsrc, v, lds_base, buf_val, tile_key0, V_BYTES_PER_BUF, V_LDROW_BYTES
         )
 
     def load_tile(buf_val, tile_idx):
@@ -1772,6 +1805,21 @@ def run_attention_dense_torch(
         )
     if not spec.varlen and (cu_seqlens_q is not None or cu_seqlens_kv is not None):
         raise ValueError("cu_seqlens_* provided but spec.varlen is False")
+    # Auto-enable 64-bit KV addressing when the paged cache is large enough that
+    # the per-row voffset can overflow. The voffset is computed in i32 ELEMENTS
+    # (phys*PAGE_STRIDE + within) then doubled to a u32 byte offset; the binding
+    # limit is the i32-element computation, which overflows once the max element
+    # offset reaches 2^31 (num_pages*page_block_size*num_kv_heads*head_size >=
+    # 2^31, i.e. cache >= 4 GiB for 2-byte KV). Above that, fold the page into a
+    # 64-bit buffer base (mirrors unified_2d's offset_i64_split). The smaller-
+    # cache path is byte-identical (no i64kv kernel-name token).
+    if spec.paged and not spec.use_i64_kv_addr:
+        _max_kv_elems = (
+            spec.resolved_num_pages * spec.page_block_size
+            * spec.num_kv_heads * spec.head_size
+        )
+        if _max_kv_elems >= (1 << 31):
+            spec = replace(spec, use_i64_kv_addr=True)
     from rocke.helpers.compile import compile_kernel
     from rocke.runtime import KernelLauncher, LaunchConfig
 
@@ -1801,19 +1849,6 @@ def run_attention_dense_torch(
             raise ValueError("paged=True requires block_table_stride (int32)")
         vals["block_tables"] = block_tables
         vals["block_table_stride"] = int(block_table_stride)
-        # 32-bit buffer-offset limit: the paged K/V load puts the full byte
-        # offset (incl. physical_block*page_stride) in a 32-bit buffer voffset.
-        # Fail loud past 2GiB instead of silently wrapping to corrupt reads.
-        # Real i64 support (fold physical_block*stride into a 64-bit buffer base,
-        # like unified_2d's offset_i64_split) is a documented follow-up.
-        _kv_bytes = 1 if spec.dtype == "fp8e4m3" else 2
-        _cache_bytes = spec.resolved_num_pages * spec.page_block_size * spec.num_kv_heads * spec.head_size * _kv_bytes
-        if _cache_bytes >= (1 << 31):
-            raise ValueError(
-                f"paged cache is {_cache_bytes} bytes; exceeds the 2GiB 32-bit "
-                f"buffer-offset limit. i64 addressing is not yet implemented "
-                f"(follow-up: 64-bit buffer base per page)."
-            )
         if spec.varlen:
             # Per-seq KV lengths must be a multiple of page_block_size (paging
             # maps whole pages). The block_n(64) tile alignment is NOT required:
