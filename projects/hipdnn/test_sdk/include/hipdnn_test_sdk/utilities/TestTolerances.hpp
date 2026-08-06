@@ -278,6 +278,29 @@ constexpr float getMxTolerance()
 
 } // namespace matmul
 
+namespace moe
+{
+
+// MoE grouped matmul backward is a per-expert GEMM over K; reuse the matmul error model.
+template <typename T>
+constexpr float getToleranceBwd()
+{
+    if constexpr(std::is_same_v<T, float>)
+    {
+        return 1e-5f;
+    }
+    else if constexpr(std::is_same_v<T, half> || std::is_same_v<T, bfloat16>)
+    {
+        return 1e-2f;
+    }
+    else
+    {
+        static_assert(false, "Type not supported");
+    }
+}
+
+} // namespace moe
+
 namespace reduction
 {
 

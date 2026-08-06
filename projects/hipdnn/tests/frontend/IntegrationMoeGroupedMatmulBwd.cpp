@@ -7,12 +7,19 @@
 #include <cstdint>
 #include <memory>
 #include <unordered_map>
+#include <vector>
 
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_frontend.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceMoeGroupedMatmulBwd.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/IntegrationTestFixture.hpp>
+#include <hipdnn_test_sdk/utilities/TensorDiff.hpp>
+#include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+
+#include <iostream>
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
@@ -33,10 +40,15 @@ TEST_F(IntegrationMoeGroupedMatmulBwd, GraphDispatchesToProvider)
     constexpr int64_t K_DIM_N = 32;
     constexpr int64_t K_EXPERTS = 2;
 
+    const std::vector<int64_t> dweightDims = {K_EXPERTS, K_DIM_K, K_DIM_N};
+    // dweight is column-major, matching the strides the node infers for it.
+    const std::vector<int64_t> dweightStrides
+        = hipdnn_test_sdk::utilities::moeGroupedMatmulBwdDweightStrides(dweightDims);
+
     Tensor<float> doutputTensor({K_BATCH, K_TOKENS, K_DIM_N});
     Tensor<float> tokenTensor({K_BATCH, K_TOKENS, K_DIM_K});
     Tensor<int32_t> firstTokenOffsetTensor({K_EXPERTS, 1, 1});
-    Tensor<float> dweightTensor({K_EXPERTS, K_DIM_K, K_DIM_N});
+    Tensor<float> dweightTensor(dweightDims, dweightStrides);
 
     doutputTensor.fillWithValue(1.0F);
     tokenTensor.fillWithValue(1.0F);
@@ -63,11 +75,12 @@ TEST_F(IntegrationMoeGroupedMatmulBwd, GraphDispatchesToProvider)
     attributes.set_name("moe_grouped_matmul_bwd");
     auto dweight = graph->moe_grouped_matmul_bwd(doutput, token, firstTokenOffset, attributes);
     dweight->set_uid(4).set_output(true).set_name("dweight");
-    dweight->set_dim({K_EXPERTS, K_DIM_K, K_DIM_N});
 
     auto result = graph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-    EXPECT_EQ(dweight->get_dim(), (std::vector<int64_t>{K_EXPERTS, K_DIM_K, K_DIM_N}));
+    // dweight dims and strides were never set, so these assert on what the node inferred.
+    EXPECT_EQ(dweight->get_dim(), dweightDims);
+    EXPECT_EQ(dweight->get_stride(), dweightStrides);
 
     result = graph->build_operation_graph(_handle);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -94,6 +107,29 @@ TEST_F(IntegrationMoeGroupedMatmulBwd, GraphDispatchesToProvider)
     };
     result = graph->execute(_handle, variantPack, workspace.get());
     EXPECT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // No provider implements a MoE backward kernel yet (ALMIOPEN-2252 is CPU-reference-only
+    // plumbing), so the default IntegrationTestFixture plugin dispatches the graph without
+    // computing real values into dweightTensor. Once a real provider kernel lands, drop the
+    // logging-only validateAndReport() call below in favor of an EXPECT_TRUE on its result.
+    dweightTensor.memory().markDeviceModified();
+
+    Tensor<float> referenceDweightTensor(dweightDims, dweightStrides);
+    referenceDweightTensor.fillWithValue(0.0F);
+    hipdnn_test_sdk::utilities::CpuFpReferenceMoeGroupedMatmulBwd::
+        backward<float, float, float, float>(
+            doutputTensor, tokenTensor, firstTokenOffsetTensor, referenceDweightTensor);
+
+    const float tolerance = hipdnn_test_sdk::utilities::moe::getToleranceBwd<float>();
+    const hipdnn_test_sdk::utilities::CpuFpReferenceValidation<float> validator(tolerance,
+                                                                                tolerance);
+    hipdnn_test_sdk::utilities::validateAndReport<float>(std::cout,
+                                                         "dweight",
+                                                         validator,
+                                                         referenceDweightTensor,
+                                                         dweightTensor,
+                                                         tolerance,
+                                                         tolerance);
 }
 
 } // namespace

@@ -25,6 +25,7 @@ add_executable(
     utilities/TestCpuFpReferenceLayernorm.cpp
     utilities/TestCpuFpReferenceLayernormBackward.cpp
     utilities/TestCpuFpReferenceMatmul.cpp
+    utilities/TestCpuFpReferenceMoeGroupedMatmulBwd.cpp
     utilities/TestCpuFpReferenceReduction.cpp
     utilities/TestCpuFpReferenceMiopenRmsValidation.cpp
     utilities/TestCpuFpReferenceUtilities.cpp
@@ -75,6 +76,8 @@ add_executable(
     utilities/cpu_graph_executor/TestLayernormFpropSignatureKey.cpp
     utilities/cpu_graph_executor/TestMatmulPlan.cpp
     utilities/cpu_graph_executor/TestMatmulSignatureKey.cpp
+    utilities/cpu_graph_executor/TestMoeGroupedMatmulBwdPlan.cpp
+    utilities/cpu_graph_executor/TestMoeGroupedMatmulBwdSignatureKey.cpp
     utilities/cpu_graph_executor/TestPointwiseOperationsCpuGraphExecutor.cpp
     utilities/cpu_graph_executor/TestGraphTensorBundle.cpp
     utilities/cpu_graph_executor/TestPlanRegistrySignatureKey.cpp
