@@ -3,9 +3,13 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
+#include <cstring>
+#include <limits>
 #include <random>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 #include <hipdnn_data_sdk/types.hpp>
