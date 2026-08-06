@@ -95,7 +95,7 @@ inline void registerBundleTests()
     if(!std::filesystem::exists(dataDir))
     {
         HIPDNN_PLUGIN_LOG_WARN(
-            "--allow-bundles enabled but data directory does not exist: " << dataDir);
+            "Bundle tests are enabled but the data directory does not exist: " << dataDir);
         return;
     }
 
@@ -112,7 +112,7 @@ inline void registerBundleTests()
 
     if(discovered.empty())
     {
-        HIPDNN_PLUGIN_LOG_WARN("--allow-bundles enabled but no bundles found in " << dataDir);
+        HIPDNN_PLUGIN_LOG_WARN("Bundle tests are enabled but no bundles were found in " << dataDir);
         return;
     }
 

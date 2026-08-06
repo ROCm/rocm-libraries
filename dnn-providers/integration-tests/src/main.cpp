@@ -94,10 +94,15 @@ int main(int argc, char** argv) noexcept
             .implicit_value(std::string("support_matrix.md"))
             .help("Generate a markdown support matrix file (default: support_matrix.md).");
         parser.add_argument("--allow-bundles")
+            .default_value(true)
+            .implicit_value(true)
+            .help("Enable bundle test registration (default: true — bundles are the "
+                  "CI driver). Disable with --no-bundles or HIPDNN_TEST_ALLOW_BUNDLES=0.");
+        parser.add_argument("--no-bundles")
             .default_value(false)
             .implicit_value(true)
-            .help("Enable bundle test registration (default: false). "
-                  "Set --allow-bundles or HIPDNN_TEST_ALLOW_BUNDLES=1 env var to enable.");
+            .help("Disable bundle test registration, leaving only the C++ tests built "
+                  "into this binary. Equivalent to HIPDNN_TEST_ALLOW_BUNDLES=0.");
         parser.add_argument("--gd", "--golden-data-dir")
             .help("Path to the integration test bundle data directory. "
                   "Defaults to <exe>/../lib/integration-test-bundles/. "
@@ -172,8 +177,12 @@ int main(int argc, char** argv) noexcept
             }
         }
 
-        // Parse --allow-bundles, --golden-data-dir, --verification-mode
-        auto allowBundles = parser.get<bool>("--allow-bundles");
+        // Parse --allow-bundles / --no-bundles, --golden-data-dir, --verification-mode.
+        // Bundles are on by default; --no-bundles is the explicit opt-out and wins over
+        // a redundant --allow-bundles. HIPDNN_TEST_ALLOW_BUNDLES (handled in TestConfig)
+        // overrides both.
+        auto allowBundles
+            = parser.get<bool>("--allow-bundles") && !parser.get<bool>("--no-bundles");
 
         std::optional<std::filesystem::path> goldenDataDir;
         if(parser.is_used("--golden-data-dir"))

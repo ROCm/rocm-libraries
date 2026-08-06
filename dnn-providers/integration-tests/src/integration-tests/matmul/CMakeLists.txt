@@ -1,11 +1,12 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-target_sources(${INTEGRATION_TESTS_EXE}
-    PRIVATE
-        IntegrationGpuMatmul.cpp
-        IntegrationGpuMatmulActiv.cpp
-        IntegrationGpuMatmulBias.cpp
-        IntegrationGpuMatmulBiasActiv.cpp
-        IntegrationGpuMxMatmul.cpp
+# Bundle equivalents: integration-test-bundles/quick/{Matmul,MatmulPointwise,
+# BlockScaleDequantizeMatmul}/
+add_cpp_graph_test_sources(
+    IntegrationGpuMatmul.cpp
+    IntegrationGpuMatmulActiv.cpp
+    IntegrationGpuMatmulBias.cpp
+    IntegrationGpuMatmulBiasActiv.cpp
+    IntegrationGpuMxMatmul.cpp
 )
