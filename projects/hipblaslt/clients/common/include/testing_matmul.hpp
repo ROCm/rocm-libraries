@@ -4528,7 +4528,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                         epilogue.activation = roc::host_validation::Activation::Relu;
                         break;
                     case hipblaslt_activation_type::swish:
-                        epilogue.activation = roc::host_validation::Activation::Silu;
+                        epilogue.activation = roc::host_validation::Activation::Swish;
                         break;
                     case hipblaslt_activation_type::clamp:
                         epilogue.activation = roc::host_validation::Activation::Clamp;

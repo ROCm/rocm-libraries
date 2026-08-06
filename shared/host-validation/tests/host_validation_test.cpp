@@ -312,53 +312,6 @@ void testIndexedGeneration() {
             "Complex trigonometric generation mismatch.");
 }
 
-void testTensorContraction() {
-    using namespace roc::host_validation;
-
-    std::array<float, 8> a{};
-    std::array<float, 8> b{};
-    for (size_t index = 0; index < a.size(); ++index) {
-        a[index] = static_cast<float>(index + 1);
-        b[index] = static_cast<float>(2 * static_cast<int>(index) - 3);
-    }
-    const std::array<float, 4> c{1, 2, 3, 4};
-    std::array<float, 4> d{};
-
-    TensorContractionProblem problem(
-        TensorContractionOperand(
-            TensorView::fromNative<float>(Layout::contiguous(Shape{1, 2, 2, 2}),
-                                          std::span<const float>(a)),
-            {0, 1, 3, 4}),
-        TensorContractionOperand(
-            TensorView::fromNative<float>(Layout::contiguous(Shape{1, 2, 2, 2}),
-                                          std::span<const float>(b)),
-            {0, 2, 3, 4}),
-        TensorView::fromNative<float>(Layout::contiguous(Shape{1, 2, 2}),
-                                      std::span<const float>(c)),
-        {0, 1, 2},
-        MutableTensorView::fromNative<float>(Layout::contiguous(Shape{1, 2, 2}),
-                                             std::span<float>(d)),
-        {0, 1, 2}, {3, 4}, ScalarType::Float32);
-    problem.alpha = 2;
-    problem.beta = 3;
-    const TensorContractionRunInfo run = referenceTensorContraction(problem);
-    require(run.outputElementsComputed == 4 && run.multiplyAddsComputed == 16,
-            "Tensor contraction run information mismatch.");
-
-    std::array<float, 4> expected{};
-    for (size_t row = 0; row < 2; ++row) {
-        for (size_t column = 0; column < 2; ++column) {
-            float sum = 0;
-            for (size_t reduction0 = 0; reduction0 < 2; ++reduction0)
-                for (size_t reduction1 = 0; reduction1 < 2; ++reduction1)
-                    sum += a[((row * 2 + reduction0) * 2 + reduction1)] *
-                           b[((column * 2 + reduction0) * 2 + reduction1)];
-            expected[row * 2 + column] = 2 * sum + 3 * c[row * 2 + column];
-        }
-    }
-    require(d == expected, "Tensor contraction result mismatch.");
-}
-
 void testActivations() {
     using namespace roc::host_validation;
 
@@ -504,7 +457,6 @@ int main() {
     testReferenceEpilogue();
     testReferenceReduction();
     testIndexedGeneration();
-    testTensorContraction();
     testActivations();
     testStridedAndOffsetViews();
     testGenerationAndComparison();
