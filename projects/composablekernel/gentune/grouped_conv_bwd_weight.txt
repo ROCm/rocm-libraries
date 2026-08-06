@@ -48,18 +48,18 @@ using DeviceConvBwdWeightInstance = ck::tensor_operation::device::DeviceGroupedC
     NPerBlock_,                           // NPerBlock
     K0PerBlock_,                          // KPerBlock
     ABK1_,                                // K1
-    32,                                   // MPerWmma
-    32,                                   // NPerWmma
+    16,                                   // MPerWmma
+    16,                                   // NPerWmma
     MRepeat_,                             // MRepeat
     NRepeat_,                             // NRepeat
-    S<AB0_0, AB0_1, 1>,                   // ABlockTransferThreadClusterLengths_K0_M_K1
+    S<AB0_0, AB0_1, AB0_2>,                   // ABlockTransferThreadClusterLengths_K0_M_K1
     S<2, 0, 1>,                           // ABlockTransferThreadClusterArrangeOrder
     S<1, 0, 2>,                           // ABlockTransferSrcAccessOrder
     1,                                    // ABlockTransferSrcVectorDim
     ABlockTransferSrcScalarPerVector_,    // ABlockTransferSrcScalarPerVector
     ABlockTransferDstScalarPerVector_K1_, // ABlockTransferDstScalarPerVector_K1
     ExtraM_,                              // ABlockLdsAddExtraM
-    S<AB0_0, AB0_1, 1>,                   // BBlockTransferThreadClusterLengths_K0_N_K1
+    S<AB0_0, AB0_1, AB0_2>,               // BBlockTransferThreadClusterLengths_K0_N_K1
     S<2, 0, 1>,                           // BBlockTransferThreadClusterArrangeOrder
     S<1, 0, 2>,                           // BBlockTransferSrcAccessOrder
     1,                                    // BBlockTransferSrcVectorDim

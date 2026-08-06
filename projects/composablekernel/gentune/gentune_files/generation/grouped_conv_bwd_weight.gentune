@@ -1,43 +1,45 @@
 
 OUTPUT_HPP_TEMPLATE_PATH: gentune_files/generation/grouped_conv_bwd_weight_hpp_template.txt
-OUTPUT_HPP_TEMPLATE_CODE_LINE: DeviceGroupedConvBwdWeight_Xdl_CShuffleV3<bla, InDataType, WeiDataType, OutDataType, AccDataType, InElementOp, WeiElementOp, OutElementOp, ConvSpec_, BlockSize_, MPerBlock_, NPerBlock_, K0PerBlock_, ABK1_, 16, 16, MRepeat_, NRepeat_, S<1, AB0_0, AB0_1, 1>, S<0, 3, 1, 2>, S<0, 2, 1, 3>, 1, ABlockTransferSrcScalarPerVector_, ABlockTransferDstScalarPerVector_K1_, ExtraM_, S<1, AB0_0, AB0_1, 1>, S<0, 3, 1, 2>, S<0, 2, 1, 3>, 1, BBlockTransferSrcScalarPerVector_, BBlockTransferDstScalarPerVector_K1_, ExtraN_, 1, 1, S<1, C0, 1, C1>, CShuffleBlockTransferScalarPerVector_NPB_>
+OUTPUT_HPP_TEMPLATE_CODE_LINE: DeviceGroupedConvBwdWeight_Xdl_CShuffleV3<bla, InDataType, WeiDataType, OutDataType, AccDataType, InElementOp, WeiElementOp, OutElementOp, ConvSpec_, BlockSize_, MPerBlock_, NPerBlock_, K0PerBlock_, ABK1_, 16, 16, MRepeat_, NRepeat_, S<AB0_0, AB0_1, AB0_2>, S<2, 0, 1>, S<1, 0, 2>, 1, ABlockTransferSrcScalarPerVector_, ABlockTransferDstScalarPerVector_K1_, ExtraM_, S<AB0_0, AB0_1, AB0_2>, S<2, 0, 1>, S<1, 0, 2>, 1, BBlockTransferSrcScalarPerVector_, BBlockTransferDstScalarPerVector_K1_, ExtraN_, 1, 1, S<1, C0, 1, C1>, CShuffleBlockTransferScalarPerVector_NPB_, Intrawave, V3>
 
 TEST_INSTANCE_TEMPLATE_PATH: grouped_conv_bwd_weight.txt
 
 PARAMS:
 ConvSpec_ TUNE ck::tensor_operation::device::ConvolutionBackwardWeightSpecialization::Default
 
-BlockSize_ TUNE 64
+BlockSize_ TUNE 512
 
-MPerBlock_ TUNE 32
+MPerBlock_ TUNE 64
 
-NPerBlock_ TUNE 32
+NPerBlock_ TUNE 64
 
-K0PerBlock_ TUNE 32
-CONSTRAINT (MPerBlock_ + NPerBlock_) * K0PerBlock_ * 8 <= 32768 and ((MPerBlock_ + NPerBlock_) * K0PerBlock_ * 8 * 2 + 512) <= 65536
+K0PerBlock_ TUNE 512
+#CONSTRAINT (MPerBlock_ + NPerBlock_) * K0PerBlock_ * 8 <= 32768 and ((MPerBlock_ + NPerBlock_) * K0PerBlock_ * 8 * 2 + 512) <= 65536
 
-ABK1_ TUNE 8
+ABK1_ TUNE 16
 
 MRepeat_ TUNE 1
-CONSTRAINT MRepeat_ * 32 <= MPerBlock_
+CONSTRAINT MRepeat_ * 16 <= MPerBlock_
 
 NRepeat_ TUNE 1
-CONSTRAINT NRepeat_ * 32 <= NPerBlock_ and (MPerBlock_ / 32) * (NPerBlock_ / 32) == MRepeat_ * NRepeat_ * (BlockSize_ / 64)
+CONSTRAINT NRepeat_ * 16 <= NPerBlock_ and (MPerBlock_ / 16) * (NPerBlock_ / 16) == MRepeat_ * NRepeat_ * (BlockSize_ / 32)
 
 ################################
 
-AB0_0 TUNE 4
+AB0_0 TUNE 32
 #CONSTRAINT (AB0_0 == K0PerBlock_ * 8 / ABK1_)
 
 AB0_1 TUNE 8
 #CONSTRAINT (AB0_1 == BlockSize_ / AB0_0 and AB0_1 >= 1)
 
-ABlockTransferSrcScalarPerVector_ TUNE 2
+AB0_2 TUNE 2
+
+ABlockTransferSrcScalarPerVector_ TUNE 8
 CONSTRAINT AB0_1 * ABlockTransferSrcScalarPerVector_ <= MPerBlock_ and ((MPerBlock_ % 48 == 0 and ABlockTransferSrcScalarPerVector_ % 3 == 0) or (MPerBlock_ % 48 != 0 and ABlockTransferSrcScalarPerVector_ % 3 != 0))
 
-ABlockTransferDstScalarPerVector_K1_ TUNE 2
+ABlockTransferDstScalarPerVector_K1_ TUNE 8
 
-ExtraM_ TUNE 0
+ExtraM_ TUNE 1
 
 ################################
 
@@ -47,19 +49,19 @@ ExtraM_ TUNE 0
 #B0_1 TUNE 16
 #CONSTRAINT (B0_1 == BlockSize_ / B0_0 and B0_1 >= 1)
 
-BBlockTransferSrcScalarPerVector_ TUNE 2
+BBlockTransferSrcScalarPerVector_ TUNE 8
 CONSTRAINT AB0_1 * BBlockTransferSrcScalarPerVector_ <= NPerBlock_ and ((NPerBlock_ % 48 == 0 and BBlockTransferSrcScalarPerVector_ % 3 == 0) or (NPerBlock_ % 48 != 0 and BBlockTransferSrcScalarPerVector_ % 3 != 0))
 
-BBlockTransferDstScalarPerVector_K1_ TUNE 2
+BBlockTransferDstScalarPerVector_K1_ TUNE 8
 
-ExtraN_ TUNE 0
+ExtraN_ TUNE 1
 
 #################################
 
-C0 TUNE 8
+C0 TUNE 64
 C1 TUNE 8
 
-CShuffleBlockTransferScalarPerVector_NPB_ TUNE 2
+CShuffleBlockTransferScalarPerVector_NPB_ TUNE 8
 #CONSTRAINT (C1 == (NPerBlock_ / NRepeat_) / CShuffleBlockTransferScalarPerVector_NPB_) and (C0 == BlockSize_ / C1)
 
 BENCH_ARGS:
@@ -70,4 +72,4 @@ VERIFY_ARGS:
 
 TEST_INSTANCE_DIR: test_instances/
 
-COMPILE_CMD: /opt/rocm/bin/hipcc  -DCK_CMAKE_GPU_TARGET_IDS=0x1201 -DCK_ENABLE_BF16 -DCK_ENABLE_BF8 -DCK_ENABLE_FP16 -DCK_ENABLE_FP32 -DCK_ENABLE_FP64 -DCK_ENABLE_FP8 -DCK_ENABLE_INT8 -DCK_GFX12_SUPPORT -DCK_TILE_USE_OCP_FP8 -DCK_TILE_USE_WMMA=1 -DCK_TIME_KERNEL=1 -DCK_USE_OCP_FP8 -DCK_USE_WMMA -DCK_USE_WMMA_FP8 -DCK_USE_XDL -DUSE_PROF_API=1 -D__HIP_PLATFORM_AMD__=1 -D__HIP_PLATFORM_HCC__=1 -D__HIP_ROCclr__=1 -I/workspaces/local/dev-container/rocm-libraries/projects/composablekernel/library/include -I/workspaces/local/dev-container/rocm-libraries/projects/composablekernel/include -I/workspaces/local/dev-container/rocm-libraries/projects/composablekernel/build/include -O3 -DNDEBUG -std=gnu++20 --offload-arch=gfx1201   -Wall -Wextra -Wcomment -Wendif-labels -Wformat -Winit-self -Wreturn-type -Wsequence-point -Wswitch -Wtrigraphs -Wundef -Wuninitialized -Wunreachable-code -Wunused -Wno-reserved-identifier -Wno-option-ignored -Wsign-compare -Wno-extra-semi-stmt -Wno-unused-template -Wno-lifetime-safety-intra-tu-suggestions -Wno-lifetime-safety-cross-tu-suggestions -Wno-lifetime-safety-lifetimebound-violation -Wno-unknown-warning-option -Wno-missing-field-initializers -Wno-error=deprecated-declarations -Wall -Wextra -Wcomment -Wendif-labels -Wformat -Winit-self -Wreturn-type -Wsequence-point -Wswitch -Wtrigraphs -Wundef -Wuninitialized -Wunreachable-code -Wunused -Wno-reserved-identifier -Wno-option-ignored -Wsign-compare -Wno-extra-semi-stmt -Wno-unused-template -Wno-lifetime-safety-intra-tu-suggestions -Wno-lifetime-safety-cross-tu-suggestions -Wno-lifetime-safety-lifetimebound-violation -Wno-unknown-warning-option -Weverything -Wno-c++98-compat -Wno-c++98-compat-pedantic -Wno-conversion -Wno-double-promotion -Wno-exit-time-destructors -Wno-extra-semi -Wno-float-conversion -Wno-gnu-anonymous-struct -Wno-gnu-zero-variadic-macro-arguments -Wno-missing-prototypes -Wno-nested-anon-types -Wno-padded -Wno-return-std-move-in-c++11 -Wno-shorten-64-to-32 -Wno-sign-conversion -Wno-unknown-warning-option -Wno-unused-command-line-argument -Wno-weak-vtables -Wno-covered-switch-default -Wno-unsafe-buffer-usage -Wno-unused-lambda-capture -Wno-nvcc-compat -Wno-lifetime-safety-intra-tu-suggestions -Wno-lifetime-safety-cross-tu-suggestions -Wno-lifetime-safety-lifetimebound-violation -Wno-unknown-warning-option -Wno-c++20-compat -Wno-bit-int-extension -Wno-pass-failed -Wno-switch-default -Wno-unique-object-duplication -Wno-unknown-warning-option -fbracket-depth=1024 -Wno-nrvo -fno-offload-uniform-block -mllvm --lsr-drop-solution=1 -mllvm -enable-post-misched=0 -mllvm -amdgpu-early-inline-all=true -mllvm -amdgpu-function-calls=false -Werror -Weverything -Wno-lifetime-safety-intra-tu-suggestions -Wno-lifetime-safety-cross-tu-suggestions -Wno-lifetime-safety-lifetimebound-violation -fcolor-diagnostics -x hip -o OUTPUT_NAME INPUT_FILENAME -L/workspaces/local/dev-container/rocm-libraries/projects/composablekernel/build/lib -lutility
+COMPILE_CMD: /opt/rocm/bin/hipcc  -DCK_CMAKE_GPU_TARGET_IDS=0x1250 -DCK_ENABLE_BF16 -DCK_ENABLE_BF8 -DCK_ENABLE_FP16 -DCK_ENABLE_FP32 -DCK_ENABLE_FP64 -DCK_ENABLE_FP8 -DCK_ENABLE_INT8 -DCK_GFX1250_SUPPORT -DCK_GFX12_SUPPORT -DCK_TILE_USE_OCP_FP8 -DCK_TILE_USE_WMMA=1 -DCK_TIME_KERNEL=1 -DCK_USE_GFX1250 -DCK_USE_NATIVE_MX_SUPPORT -DCK_USE_OCP_FP8 -DCK_USE_WMMA -DCK_USE_WMMA_FP8 -DCK_USE_XDL -DUSE_PROF_API=1 -D__HIP_PLATFORM_AMD__=1 -D__HIP_PLATFORM_HCC__=1 -D__HIP_ROCclr__=1 -I/workspaces/local/dev-container/rocm-libraries/projects/composablekernel/library/include -I/workspaces/local/dev-container/rocm-libraries/projects/composablekernel/include -I/workspaces/local/dev-container/rocm-libraries/projects/composablekernel/build/include -O3 -DNDEBUG -std=gnu++20 --offload-arch=gfx1250   -Wall -Wextra -Wcomment -Wendif-labels -Wformat -Winit-self -Wreturn-type -Wsequence-point -Wswitch -Wtrigraphs -Wundef -Wuninitialized -Wunreachable-code -Wunused -Wno-reserved-identifier -Wno-option-ignored -Wsign-compare -Wno-extra-semi-stmt -Wno-unused-template -Wno-lifetime-safety-intra-tu-suggestions -Wno-lifetime-safety-cross-tu-suggestions -Wno-lifetime-safety-lifetimebound-violation -Wno-unknown-warning-option -Wno-missing-field-initializers -Wno-error=deprecated-declarations -Wall -Wextra -Wcomment -Wendif-labels -Wformat -Winit-self -Wreturn-type -Wsequence-point -Wswitch -Wtrigraphs -Wundef -Wuninitialized -Wunreachable-code -Wunused -Wno-reserved-identifier -Wno-option-ignored -Wsign-compare -Wno-extra-semi-stmt -Wno-unused-template -Wno-lifetime-safety-intra-tu-suggestions -Wno-lifetime-safety-cross-tu-suggestions -Wno-lifetime-safety-lifetimebound-violation -Wno-unknown-warning-option -Weverything -Wno-c++98-compat -Wno-c++98-compat-pedantic -Wno-conversion -Wno-double-promotion -Wno-exit-time-destructors -Wno-extra-semi -Wno-float-conversion -Wno-gnu-anonymous-struct -Wno-gnu-zero-variadic-macro-arguments -Wno-missing-prototypes -Wno-nested-anon-types -Wno-padded -Wno-return-std-move-in-c++11 -Wno-shorten-64-to-32 -Wno-sign-conversion -Wno-unknown-warning-option -Wno-unused-command-line-argument -Wno-weak-vtables -Wno-covered-switch-default -Wno-unsafe-buffer-usage -Wno-unused-lambda-capture -Wno-nvcc-compat -Wno-lifetime-safety-intra-tu-suggestions -Wno-lifetime-safety-cross-tu-suggestions -Wno-lifetime-safety-lifetimebound-violation -Wno-unknown-warning-option -Wno-c++20-compat -Wno-bit-int-extension -Wno-pass-failed -Wno-switch-default -Wno-unique-object-duplication -Wno-unknown-warning-option -fbracket-depth=1024 -Wno-nrvo -fno-offload-uniform-block -mllvm --lsr-drop-solution=1 -mllvm -enable-post-misched=0 -mllvm -amdgpu-early-inline-all=true -mllvm -amdgpu-function-calls=false -Werror -Weverything -Wno-lifetime-safety-intra-tu-suggestions -Wno-lifetime-safety-cross-tu-suggestions -Wno-lifetime-safety-lifetimebound-violation -fcolor-diagnostics -x hip -o OUTPUT_NAME INPUT_FILENAME -L/workspace/rocm-libraries/projects/composablekernel/build/lib -lutility -L/opt/rocm-gfx1250/lib -lamdhip64
