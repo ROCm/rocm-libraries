@@ -953,10 +953,6 @@ namespace TensileLite
             if (problem.boundIndices().size() != 1 || problem.freeIndicesA().size() != 1 ||
                 problem.freeIndicesB().size() != 1 || problem.batchIndices().size() != 1)
                 return false;
-            if ((problem.boundIndices()[0].aMirror || problem.boundIndices()[0].bMirror) &&
-                (problem.mxBlockA() > 0 || problem.mxBlockB() > 0))
-                return false;
-            if (problem.useGradient() && !problem.useE()) return false;
             if (problem.useGradient() && problem.useBias() &&
                 problem.biasSrc() != ContractionProblemGemm::A &&
                 problem.biasSrc() != ContractionProblemGemm::B &&
@@ -967,7 +963,7 @@ namespace TensileLite
                                                problem.useScaleCD() ||
                                                problem.useGateResidual();
             if ((problem.mxBlockA() > 0) != (problem.mxBlockB() > 0)) return false;
-            if ((problem.useBias() && inputs.bias == nullptr) ||
+            if ((problem.useBias() && inputs.bias == nullptr && inputs.batchBias == nullptr) ||
                 (problem.useScaleAlphaVec() && inputs.scaleAlphaVec == nullptr) ||
                 ((problem.useScaleAB() == "Scalar" || problem.useScaleAB() == "Vector") &&
                  (inputs.scaleA == nullptr || inputs.scaleB == nullptr)) ||
@@ -977,13 +973,13 @@ namespace TensileLite
                 (problem.outputAmaxD() && inputs.amaxD == nullptr) ||
                 (problem.useScaleCD() &&
                  (inputs.scaleC == nullptr || inputs.scaleD == nullptr)) ||
-                (problem.useGateResidual() && inputs.gateResidual == nullptr))
+                (problem.useGateResidual() && inputs.gateResidual == nullptr &&
+                 inputs.batchGateResidual == nullptr))
                 return false;
             if ((inputs.a == nullptr && inputs.batchA == nullptr) ||
                 (inputs.b == nullptr && inputs.batchB == nullptr) ||
                 (inputs.c == nullptr && inputs.batchC == nullptr) ||
-                (inputs.d == nullptr && inputs.batchD == nullptr) ||
-                inputs.batchBias != nullptr || inputs.batchGateResidual != nullptr)
+                (inputs.d == nullptr && inputs.batchD == nullptr))
                 return false;
             ScalarType typeA;
             ScalarType typeB;
@@ -1029,10 +1025,6 @@ namespace TensileLite
                 scalarTypeInfo(typeA).storageBits > scalarTypeInfo(computeTypeA).storageBits;
             const bool preQuantizationScaleB =
                 scalarTypeInfo(typeB).storageBits > scalarTypeInfo(computeTypeB).storageBits;
-            if (problem.useScaleAB() == "Vector" &&
-                (preQuantizationScaleA || preQuantizationScaleB))
-                return false;
-
             auto scalarValue = [](rocisa::DataType type,
                                   ConstantVariant const& value) -> std::complex<double> {
                 switch (type) {
@@ -1211,9 +1203,11 @@ namespace TensileLite
                 } catch (std::invalid_argument const&) {
                     return false;
                 }
-                biasStorage = std::span<const std::byte>(static_cast<const std::byte*>(inputs.bias),
-                                                         problem.bias().totalAllocatedBytes());
-                if (problem.useGradient())
+                if (inputs.batchBias == nullptr)
+                    biasStorage =
+                        std::span<const std::byte>(static_cast<const std::byte*>(inputs.bias),
+                                                   problem.bias().totalAllocatedBytes());
+                if (problem.useGradient() && inputs.batchBias == nullptr)
                     biasOutputStorage = std::span<std::byte>(
                         static_cast<std::byte*>(const_cast<void*>(inputs.bias)),
                         problem.bias().totalAllocatedBytes());
@@ -1241,9 +1235,10 @@ namespace TensileLite
                 } catch (std::invalid_argument const&) {
                     return false;
                 }
-                gateStorage = std::span<const std::byte>(
-                    static_cast<const std::byte*>(inputs.gateResidual),
-                    gate.totalAllocatedBytes());
+                if (inputs.batchGateResidual == nullptr)
+                    gateStorage = std::span<const std::byte>(
+                        static_cast<const std::byte*>(inputs.gateResidual),
+                        gate.totalAllocatedBytes());
             }
             std::optional<ScalarType> amaxType;
             std::span<std::byte> amaxStorage;
@@ -1273,7 +1268,11 @@ namespace TensileLite
                 if ((inputs.batchA != nullptr && inputs.batchA[batch] == nullptr) ||
                     (inputs.batchB != nullptr && inputs.batchB[batch] == nullptr) ||
                     (inputs.batchC != nullptr && inputs.batchC[batch] == nullptr) ||
-                    (inputs.batchD != nullptr && inputs.batchD[batch] == nullptr))
+                    (inputs.batchD != nullptr && inputs.batchD[batch] == nullptr) ||
+                    (problem.useBias() && inputs.batchBias != nullptr &&
+                     inputs.batchBias[batch] == nullptr) ||
+                    (problem.useGateResidual() && inputs.batchGateResidual != nullptr &&
+                     inputs.batchGateResidual[batch] == nullptr))
                     return false;
                 ptrdiff_t offsetA = inputs.batchA == nullptr
                     ? static_cast<ptrdiff_t>(batch * problem.a().strides()[batchA])
@@ -1348,15 +1347,25 @@ namespace TensileLite
                 if (computeTypeA != typeA) operandA.computeType = computeTypeA;
                 if (computeTypeB != typeB) operandB.computeType = computeTypeB;
                 if (problem.useScaleAB() == "Scalar" && preQuantizationScaleA)
-                    operandA.preQuantizationScale = TensorView(
-                        alphaType,
-                        Layout::contiguous(Shape{1}),
-                        storageSpan(alphaType, inputs.scaleA, 1));
+                    operandA.preQuantizationScale = VectorBinding{
+                        TensorView(alphaType,
+                                   Layout::contiguous(Shape{1}),
+                                   storageSpan(alphaType, inputs.scaleA, 1)),
+                        MatrixAxis::Row};
                 if (problem.useScaleAB() == "Scalar" && preQuantizationScaleB)
-                    operandB.preQuantizationScale = TensorView(
-                        alphaType,
-                        Layout::contiguous(Shape{1}),
-                        storageSpan(alphaType, inputs.scaleB, 1));
+                    operandB.preQuantizationScale = VectorBinding{
+                        TensorView(alphaType,
+                                   Layout::contiguous(Shape{1}),
+                                   storageSpan(alphaType, inputs.scaleB, 1)),
+                        MatrixAxis::Column};
+                if (problem.useScaleAB() == "Vector" && preQuantizationScaleA)
+                    operandA.preQuantizationScale = VectorBinding{
+                        TensorView(alphaType, Layout::contiguous(Shape{m}), scaleAStorage),
+                        MatrixAxis::Row};
+                if (problem.useScaleAB() == "Vector" && preQuantizationScaleB)
+                    operandB.preQuantizationScale = VectorBinding{
+                        TensorView(alphaType, Layout::contiguous(Shape{n}), scaleBStorage),
+                        MatrixAxis::Column};
                 operandA.conjugate = aConjugate;
                 operandB.conjugate = bConjugate;
                 std::optional<Tensor> runtimeScaleA;
@@ -1368,8 +1377,11 @@ namespace TensileLite
                     runtimeScaleB.emplace(ScalarType::Float32, Shape{n, blockCountB});
                     for (size_t row = 0; row < m; ++row) {
                         for (size_t block = 0; block < blockCountA; ++block) {
+                            const size_t sourceBlock = problem.boundIndices()[0].aMirror
+                                ? blockCountA - 1 - block
+                                : block;
                             const size_t index = batch * strideBatchMxsa + row * strideMxsaM +
-                                                 block * strideMxsaBlock;
+                                                 sourceBlock * strideMxsaBlock;
                             runtimeScaleA->mutableView().storeFrom(
                                 {row, block},
                                 mxScaleElementAsFloat(problem.mxTypeA(), inputs.mxsa, index));
@@ -1377,8 +1389,11 @@ namespace TensileLite
                     }
                     for (size_t column = 0; column < n; ++column) {
                         for (size_t block = 0; block < blockCountB; ++block) {
+                            const size_t sourceBlock = problem.boundIndices()[0].bMirror
+                                ? blockCountB - 1 - block
+                                : block;
                             const size_t index = batch * strideBatchMxsb + column * strideMxsbN +
-                                                 block * strideMxsbBlock;
+                                                 sourceBlock * strideMxsbBlock;
                             runtimeScaleB->mutableView().storeFrom(
                                 {column, block},
                                 mxScaleElementAsFloat(problem.mxTypeB(), inputs.mxsb, index));
@@ -1418,18 +1433,22 @@ namespace TensileLite
                         problem.getParams().factorDim() == 0 ? MatrixAxis::Row
                                                              : MatrixAxis::Column};
                 if (problem.useScaleAB() == "Vector") {
-                    runtimeProblem.epilogue.scaleA =
-                        TensorView(alphaType, Layout::contiguous(Shape{m}), scaleAStorage);
-                    runtimeProblem.epilogue.scaleB =
-                        TensorView(alphaType, Layout::contiguous(Shape{n}), scaleBStorage);
+                    if (!preQuantizationScaleA)
+                        runtimeProblem.epilogue.scaleA =
+                            TensorView(alphaType, Layout::contiguous(Shape{m}), scaleAStorage);
+                    if (!preQuantizationScaleB)
+                        runtimeProblem.epilogue.scaleB =
+                            TensorView(alphaType, Layout::contiguous(Shape{n}), scaleBStorage);
                 }
                 std::optional<VectorBinding> runtimeBias;
                 ptrdiff_t runtimeBiasOffset = 0;
                 size_t runtimeBiasLength = 0;
                 MatrixAxis runtimeBiasAxis = MatrixAxis::Row;
+                std::span<std::byte> currentBiasOutputStorage = biasOutputStorage;
                 if (problem.useBias()) {
                     std::vector<int64_t> biasCoordinate(problem.bias().dimensions(), 0);
-                    if (biasCoordinate.size() > 2) biasCoordinate[2] = static_cast<int64_t>(batch);
+                    if (biasCoordinate.size() > 2 && inputs.batchBias == nullptr)
+                        biasCoordinate[2] = static_cast<int64_t>(batch);
                     runtimeBiasOffset =
                         static_cast<ptrdiff_t>(problem.bias().index(biasCoordinate));
                     runtimeBiasLength = problem.bias().sizes()[0];
@@ -1439,10 +1458,23 @@ namespace TensileLite
                         runtimeBiasAxis = MatrixAxis::Row;
                     else if (runtimeBiasLength == n && runtimeBiasLength != m)
                         runtimeBiasAxis = MatrixAxis::Column;
+                    std::span<const std::byte> currentBiasStorage = biasStorage;
+                    if (inputs.batchBias != nullptr) {
+                        runtimeBiasOffset = 0;
+                        const Layout layout = Layout::contiguous(Shape{runtimeBiasLength});
+                        currentBiasStorage = std::span<const std::byte>(
+                            static_cast<const std::byte*>(inputs.batchBias[batch]),
+                            storageBytesForLayout(*biasType, layout));
+                        if (problem.useGradient())
+                            currentBiasOutputStorage = std::span<std::byte>(
+                                static_cast<std::byte*>(
+                                    const_cast<void*>(inputs.batchBias[batch])),
+                                storageBytesForLayout(*biasType, layout));
+                    }
                     runtimeBias = VectorBinding{
                         TensorView(*biasType,
                                    Layout(Shape{runtimeBiasLength}, {1}, runtimeBiasOffset),
-                                   biasStorage),
+                                   currentBiasStorage),
                         runtimeBiasAxis};
                     if (!useStandaloneEpilogue) runtimeProblem.epilogue.bias = runtimeBias;
                 }
@@ -1477,6 +1509,7 @@ namespace TensileLite
                     epilogue.activationParameter1 = activationParameter1;
                     epilogue.outputScale = outputScale;
                     epilogue.outputSelection = runtimeProblem.outputSelection;
+                    std::optional<Tensor> gradientAuxiliary;
                     std::optional<Tensor> biasWorkspace;
                     if (problem.useGradient() && problem.useBias() &&
                         problem.biasSrc() == ContractionProblemGemm::D) {
@@ -1496,24 +1529,37 @@ namespace TensileLite
                         if (problem.useGradient()) {
                             epilogue.auxiliaryInput = TensorView(
                                 *auxiliaryType, auxiliaryLayout, auxiliaryStorage);
-                            epilogue.activationApplication = ActivationApplication::Gradient;
                         } else {
                             epilogue.auxiliaryOutput = MutableTensorView(
                                 *auxiliaryType, auxiliaryLayout, auxiliaryStorage);
                         }
                     }
+                    if (problem.useGradient()) {
+                        epilogue.activationApplication = ActivationApplication::Gradient;
+                        if (!epilogue.auxiliaryInput) {
+                            gradientAuxiliary.emplace(accumulatorType, Shape{m, n});
+                            epilogue.auxiliaryInput = gradientAuxiliary->view();
+                        }
+                    }
                     if (problem.useGateResidual()) {
                         auto const& gate = problem.tensors()
                             [ContractionProblemGemm::TENSOR::GATE_RESIDUAL];
-                        const ptrdiff_t offsetGate =
-                            static_cast<ptrdiff_t>(batch * gate.strides()[batchD]);
+                        const ptrdiff_t offsetGate = inputs.batchGateResidual == nullptr
+                            ? static_cast<ptrdiff_t>(batch * gate.strides()[batchD])
+                            : 0;
+                        const Layout gateLayout(
+                            Shape{m, n},
+                            {static_cast<ptrdiff_t>(gate.strides()[indexMD]),
+                             static_cast<ptrdiff_t>(gate.strides()[indexND])},
+                            offsetGate);
+                        std::span<const std::byte> currentGateStorage = gateStorage;
+                        if (inputs.batchGateResidual != nullptr)
+                            currentGateStorage = std::span<const std::byte>(
+                                static_cast<const std::byte*>(
+                                    inputs.batchGateResidual[batch]),
+                                storageBytesForLayout(*gateType, gateLayout));
                         epilogue.gateResidual = TensorView(
-                            *gateType,
-                            Layout(Shape{m, n},
-                                   {static_cast<ptrdiff_t>(gate.strides()[indexMD]),
-                                    static_cast<ptrdiff_t>(gate.strides()[indexND])},
-                                   offsetGate),
-                            gateStorage);
+                            *gateType, gateLayout, currentGateStorage);
                     }
                     if (problem.outputAmaxD()) {
                         epilogue.amax = MutableTensorView(
@@ -1526,7 +1572,7 @@ namespace TensileLite
                         MutableTensorView biasOutput(
                             *biasType,
                             Layout(Shape{runtimeBiasLength}, {1}, runtimeBiasOffset),
-                            biasOutputStorage);
+                            currentBiasOutputStorage);
                         if (problem.biasSrc() == ContractionProblemGemm::D) {
                             referenceSum(ReductionProblem(
                                 biasWorkspace->view(),

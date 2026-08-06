@@ -434,6 +434,26 @@ class TensorAndGemmTests(unittest.TestCase):
             hv.to_numpy(pre_scaled), np.asarray([[3.25]], dtype=np.float32)
         )
 
+        vector_pre_scaled = hv.reference_gemm(
+            hv.from_numpy(
+                np.asarray([[1.1], [1.1]], dtype=np.float32),
+                hv.ScalarType.Float16,
+            ),
+            hv.from_numpy(np.asarray([[1.0]], dtype=np.float32)),
+            hv.from_numpy(np.zeros((2, 1), dtype=np.float32)),
+            hv.ScalarType.Float32,
+            hv.ScalarType.Float32,
+            compute_type_a=hv.ScalarType.Float8E4M3,
+            pre_quantization_scale_a=hv.from_numpy(
+                np.asarray([3.0, 4.0], dtype=np.float32)
+            ),
+            pre_quantization_axis_a=hv.MatrixAxis.Row,
+        )
+        np.testing.assert_array_equal(
+            hv.to_numpy(vector_pre_scaled),
+            np.asarray([[3.25], [4.5]], dtype=np.float32),
+        )
+
     def test_block_scaled_tiled_gemm_matches_numpy(self):
         a = np.ones((1, 16), dtype=np.float32)
         b = np.ones((16, 1), dtype=np.float32)
