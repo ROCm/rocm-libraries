@@ -30,6 +30,19 @@ struct PythonEpilogueResult {
     std::optional<Tensor> amax;
 };
 
+struct PythonStructuredSparsityResult {
+    Tensor pruned;
+    Tensor compressed;
+    Tensor retainedIndices;
+    std::optional<Tensor> twoOfFourMetadata;
+    StructuredSparsityRunInfo runInfo;
+};
+
+struct PythonTwoOfFourMetadataResult {
+    Tensor metadata;
+    TwoOfFourMetadataRunInfo runInfo;
+};
+
 std::vector<size_t> dimensions(const Shape& shape) {
     return {shape.dimensions().begin(), shape.dimensions().end()};
 }
@@ -226,6 +239,77 @@ Tensor generateOwned(ScalarType type, std::vector<size_t> shape, const Generatio
     return output;
 }
 
+PythonStructuredSparsityResult applyStructuredSparsityOwned(
+    const Tensor& input,
+    StructuredSparsityPattern pattern,
+    bool emitTwoOfFourMetadata) {
+    if (pattern.axis >= input.shape().rank())
+        throw std::out_of_range("Python structured sparsity axis exceeds tensor rank.");
+    if (pattern.groupSize == 0)
+        throw std::invalid_argument("Python structured sparsity group size must be nonzero.");
+    if (input.shape()[pattern.axis] % pattern.groupSize != 0)
+        throw std::invalid_argument(
+            "Python structured sparsity axis extent must be divisible by group size.");
+
+    std::vector<size_t> compressedDimensions(
+        input.shape().dimensions().begin(), input.shape().dimensions().end());
+    compressedDimensions[pattern.axis] =
+        input.shape()[pattern.axis] / pattern.groupSize * pattern.retainedElements;
+    const Shape compressedShape(std::move(compressedDimensions));
+
+    Tensor pruned(input.type(), input.shape());
+    Tensor compressed(input.type(), compressedShape);
+    Tensor retainedIndices(ScalarType::UInt8, compressedShape);
+    std::optional<Tensor> twoOfFourMetadata;
+    StructuredSparsityProblem problem(input.view(),
+                                      pruned.mutableView(),
+                                      compressed.mutableView(),
+                                      retainedIndices.mutableView(),
+                                      pattern);
+    if (emitTwoOfFourMetadata) {
+        if (pattern.groupSize != 4 || pattern.retainedElements != 2)
+            throw std::invalid_argument(
+                "Python two-of-four metadata output requires a two-of-four pattern.");
+        std::vector<size_t> metadataDimensions(
+            input.shape().dimensions().begin(),
+            input.shape().dimensions().end());
+        const size_t sparsityGroups = input.shape()[pattern.axis] / 4;
+        metadataDimensions[pattern.axis] = (sparsityGroups + 1) / 2;
+        twoOfFourMetadata.emplace(
+            ScalarType::UInt8, Shape(std::move(metadataDimensions)));
+        problem.twoOfFourMetadata = twoOfFourMetadata->mutableView();
+    }
+    const StructuredSparsityRunInfo runInfo =
+        applyStructuredSparsity(problem);
+    return {
+        .pruned = std::move(pruned),
+        .compressed = std::move(compressed),
+        .retainedIndices = std::move(retainedIndices),
+        .twoOfFourMetadata = std::move(twoOfFourMetadata),
+        .runInfo = runInfo,
+    };
+}
+
+PythonTwoOfFourMetadataResult encodeTwoOfFourMetadataOwned(
+    const Tensor& retainedIndices, size_t axis) {
+    if (axis >= retainedIndices.shape().rank())
+        throw std::out_of_range("Python two-of-four metadata axis exceeds tensor rank.");
+    if (retainedIndices.shape()[axis] % 2 != 0)
+        throw std::invalid_argument(
+            "Python two-of-four metadata requires two retained indices per sparsity group.");
+
+    std::vector<size_t> metadataDimensions(
+        retainedIndices.shape().dimensions().begin(),
+        retainedIndices.shape().dimensions().end());
+    const size_t sparsityGroups = retainedIndices.shape()[axis] / 2;
+    metadataDimensions[axis] = (sparsityGroups + 1) / 2;
+    Tensor metadata(ScalarType::UInt8, Shape(std::move(metadataDimensions)));
+    const TwoOfFourMetadataRunInfo runInfo = encodeTwoOfFourMetadata(
+        TwoOfFourMetadataProblem(
+            retainedIndices.view(), metadata.mutableView(), axis));
+    return {.metadata = std::move(metadata), .runInfo = runInfo};
+}
+
 }  // namespace
 
 NB_MODULE(_roc_host_validation, module) {
@@ -321,6 +405,10 @@ NB_MODULE(_roc_host_validation, module) {
     nb::enum_<LogicalIndexOrder>(module, "LogicalIndexOrder")
         .value("FirstDimensionFastest", LogicalIndexOrder::FirstDimensionFastest)
         .value("LastDimensionFastest", LogicalIndexOrder::LastDimensionFastest);
+
+    nb::enum_<StructuredSparsitySelection>(module, "StructuredSparsitySelection")
+        .value("Fixed", StructuredSparsitySelection::Fixed)
+        .value("Random", StructuredSparsitySelection::Random);
 
     nb::enum_<ActivationApplication>(module, "ActivationApplication")
         .value("Forward", ActivationApplication::Forward)
@@ -442,6 +530,80 @@ NB_MODULE(_roc_host_validation, module) {
         .def_rw("real", &GenerationOptions::real)
         .def_rw("imaginary", &GenerationOptions::imaginary);
 
+    nb::class_<StructuredSparsityPattern>(module, "StructuredSparsityPattern")
+        .def(nb::init<>())
+        .def_rw("axis", &StructuredSparsityPattern::axis)
+        .def_rw("group_size", &StructuredSparsityPattern::groupSize)
+        .def_rw("retained_elements", &StructuredSparsityPattern::retainedElements)
+        .def_rw("selection", &StructuredSparsityPattern::selection)
+        .def_rw("fixed_positions", &StructuredSparsityPattern::fixedPositions)
+        .def_rw("seed", &StructuredSparsityPattern::seed)
+        .def_rw("stream", &StructuredSparsityPattern::stream)
+        .def_rw("index_order", &StructuredSparsityPattern::indexOrder);
+
+    nb::class_<StructuredSparsityRunInfo>(module, "StructuredSparsityRunInfo")
+        .def_ro("groups_processed", &StructuredSparsityRunInfo::groupsProcessed)
+        .def_ro("input_elements_visited",
+                &StructuredSparsityRunInfo::inputElementsVisited)
+        .def_ro("pruned_elements_written", &StructuredSparsityRunInfo::prunedElementsWritten)
+        .def_ro("compressed_elements_written",
+                &StructuredSparsityRunInfo::compressedElementsWritten)
+        .def_ro("retained_indices_written",
+                &StructuredSparsityRunInfo::retainedIndicesWritten)
+        .def_ro("metadata_bytes_written",
+                &StructuredSparsityRunInfo::metadataBytesWritten);
+
+    nb::class_<PythonStructuredSparsityResult>(module, "StructuredSparsityResult")
+        .def_prop_ro(
+            "pruned",
+            [](const PythonStructuredSparsityResult& result) -> const Tensor& {
+                return result.pruned;
+            },
+            nb::rv_policy::reference_internal)
+        .def_prop_ro(
+            "compressed",
+            [](const PythonStructuredSparsityResult& result) -> const Tensor& {
+                return result.compressed;
+            },
+            nb::rv_policy::reference_internal)
+        .def_prop_ro(
+            "retained_indices",
+            [](const PythonStructuredSparsityResult& result) -> const Tensor& {
+                return result.retainedIndices;
+            },
+            nb::rv_policy::reference_internal)
+        .def_prop_ro(
+            "two_of_four_metadata",
+            [](const PythonStructuredSparsityResult& result)
+                -> const std::optional<Tensor>& {
+                return result.twoOfFourMetadata;
+            },
+            nb::rv_policy::reference_internal)
+        .def_prop_ro(
+            "run_info",
+            [](const PythonStructuredSparsityResult& result)
+                -> const StructuredSparsityRunInfo& { return result.runInfo; },
+            nb::rv_policy::reference_internal);
+
+    nb::class_<TwoOfFourMetadataRunInfo>(module, "TwoOfFourMetadataRunInfo")
+        .def_ro("sparsity_groups_encoded",
+                &TwoOfFourMetadataRunInfo::sparsityGroupsEncoded)
+        .def_ro("metadata_bytes_written",
+                &TwoOfFourMetadataRunInfo::metadataBytesWritten);
+
+    nb::class_<PythonTwoOfFourMetadataResult>(module, "TwoOfFourMetadataResult")
+        .def_prop_ro(
+            "metadata",
+            [](const PythonTwoOfFourMetadataResult& result) -> const Tensor& {
+                return result.metadata;
+            },
+            nb::rv_policy::reference_internal)
+        .def_prop_ro(
+            "run_info",
+            [](const PythonTwoOfFourMetadataResult& result)
+                -> const TwoOfFourMetadataRunInfo& { return result.runInfo; },
+            nb::rv_policy::reference_internal);
+
     nb::class_<PythonEpilogueResult>(module, "EpilogueResult")
         .def_prop_ro(
             "output",
@@ -478,6 +640,15 @@ NB_MODULE(_roc_host_validation, module) {
         "tensor"_a, "pattern"_a, "seed"_a, "parameter0"_a = 0.0, "parameter1"_a = 0.0,
         nb::rv_policy::reference);
     module.def("generate_tensor", &generateOwned, "type"_a, "shape"_a, "options"_a);
+    module.def("apply_structured_sparsity",
+               &applyStructuredSparsityOwned,
+               "input"_a,
+               "pattern"_a,
+               "emit_two_of_four_metadata"_a = false);
+    module.def("encode_two_of_four_metadata",
+               &encodeTwoOfFourMetadataOwned,
+               "retained_indices"_a,
+               "axis"_a);
     module.def(
         "compare",
         [](const Tensor& observed, const Tensor& expected, const ComparisonOptions& options) {
