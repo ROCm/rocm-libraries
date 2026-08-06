@@ -22,6 +22,9 @@ option(HOST_VALIDATION_BUILD_PYTHON
 option(HOST_VALIDATION_BUILD_BLAS_BACKEND
        "Build the optional host-validation CBLAS GEMM backend."
        OFF)
+option(HOST_VALIDATION_BUILD_BENCHMARKS
+       "Build host-validation development benchmarks."
+       OFF)
 
 add_library(host-validation-core INTERFACE)
 add_library(roc::host-validation-core ALIAS host-validation-core)
@@ -70,6 +73,7 @@ target_sources(host-validation
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/detail/reference_epilogue.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/detail/reference_gemm.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/detail/reference_reduction.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/detail/structured_sparsity.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/detail/tensor_views.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/validation.hpp"
 )

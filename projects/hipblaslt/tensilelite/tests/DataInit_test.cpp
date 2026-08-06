@@ -4,11 +4,14 @@
 #include <gtest/gtest.h>
 #include "DataInitialization.hpp"             // isMXTensor / Problem
 #include <roc/host_validation/adapters/tensilelite/DataInitializationHelpers.hpp>
+#include <roc/host_validation/adapters/tensilelite/HostValidationBridge.hpp>
+#include <roc/host_validation/validation.hpp>
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/DataTypes.hpp>
 #include <Tensile/TensorDescriptor.hpp>
 #include <Tensile/Utils.hpp>
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -34,7 +37,10 @@ using TensileLite::DataTypeInfo;
 using TensileLite::TensorDescriptor;
 using TensileLite::Client::isMXProblem;
 using TensileLite::Client::isMXTensor;
+using TensileLite::Client::initCPUSparseInput;
 using TensileLite::Client::InitMode;
+using TensileLite::Client::PruneSparseMode;
+using TensileLite::Client::toHostValidationScalarType;
 using TensileLite::Client::tryHostValidationInitialize;
 
 // Shorthand for the production helper namespace under test (MX builds only).
@@ -128,6 +134,273 @@ TEST(HostValidationDataInitialization, LeavesUnsupportedLegacyModesToFallback)
     {
         EXPECT_GE(value, -100);
         EXPECT_LE(value, 100);
+    }
+}
+
+TEST(HostValidationStructuredSparsity, TensileAdapterMatchesStandaloneComponent)
+{
+    auto problem = makeProblem(rocisa::DataType::Int8,
+                               rocisa::DataType::Int8,
+                               /*mxBlockA=*/0,
+                               /*mxBlockB=*/0,
+                               /*M=*/2,
+                               /*N=*/2,
+                               /*K=*/8,
+                               /*batch=*/1,
+                               /*transA=*/false,
+                               /*transB=*/false);
+    problem.setSparse(1, 0);
+
+    const TensorDescriptor& denseDescriptor = problem.a();
+    const TensorDescriptor& compressedDescriptor = problem.compressed();
+    const TensorDescriptor& metadataDescriptor = problem.metadata();
+    const size_t sparseAxis = problem.boundIndices()[0].a;
+
+    std::vector<int8_t> original(denseDescriptor.totalAllocatedElements());
+    for(size_t index = 0; index < original.size(); ++index)
+        original[index] = static_cast<int8_t>(index + 1);
+
+    std::vector<int8_t> legacyPruned = original;
+    std::vector<int8_t> legacyCompressed(compressedDescriptor.totalAllocatedElements());
+    std::vector<uint8_t> legacyMetadata(metadataDescriptor.totalAllocatedElements());
+    initCPUSparseInput(PruneSparseMode::PruneXX00,
+                       legacyPruned.data(),
+                       legacyCompressed.data(),
+                       legacyMetadata.data(),
+                       denseDescriptor,
+                       compressedDescriptor,
+                       metadataDescriptor,
+                       sparseAxis,
+                       problem.metadataLayout());
+
+    auto layout = [](const TensorDescriptor& descriptor) {
+        return roc::host_validation::Layout(
+            roc::host_validation::Shape(descriptor.sizes()),
+            std::vector<ptrdiff_t>(
+                descriptor.strides().begin(), descriptor.strides().end()));
+    };
+    using namespace roc::host_validation;
+    const ScalarType scalarType = toHostValidationScalarType(denseDescriptor.dataType());
+    std::vector<int8_t> componentPruned(original.size());
+    std::vector<int8_t> componentCompressed(legacyCompressed.size());
+    std::vector<uint8_t> componentMetadata(legacyMetadata.size());
+    const Shape logicalMetadataShape{denseDescriptor.sizes()[0],
+                                     denseDescriptor.sizes()[1] / 8,
+                                     denseDescriptor.sizes()[2]};
+    const Layout logicalMetadataLayout(
+        logicalMetadataShape,
+        {static_cast<ptrdiff_t>(metadataDescriptor.strides()[1]),
+         static_cast<ptrdiff_t>(metadataDescriptor.strides()[0]),
+         static_cast<ptrdiff_t>(metadataDescriptor.strides()[2])});
+
+    StructuredSparsityPattern pattern;
+    pattern.axis = sparseAxis;
+    pattern.fixedPositions = {0, 1};
+    StructuredSparsityProblem componentProblem(
+        TensorView(scalarType,
+                   layout(denseDescriptor),
+                   std::as_bytes(std::span<const int8_t>(original))),
+        MutableTensorView(
+            scalarType,
+            layout(denseDescriptor),
+            std::as_writable_bytes(std::span<int8_t>(componentPruned))),
+        MutableTensorView(
+            scalarType,
+            layout(compressedDescriptor),
+            std::as_writable_bytes(std::span<int8_t>(componentCompressed))),
+        pattern);
+    componentProblem.twoOfFourMetadata = MutableTensorView(
+        ScalarType::UInt8,
+        logicalMetadataLayout,
+        std::as_writable_bytes(std::span<uint8_t>(componentMetadata)));
+    applyStructuredSparsity(componentProblem);
+
+    EXPECT_EQ(componentPruned, legacyPruned);
+    EXPECT_EQ(componentCompressed, legacyCompressed);
+    EXPECT_EQ(componentMetadata, legacyMetadata);
+}
+
+TEST(HostValidationStructuredSparsity, TensileAdapterCoversModesLayoutsAndSparseSides)
+{
+    const std::array<PruneSparseMode, 7> modes{
+        PruneSparseMode::PruneRandom,
+        PruneSparseMode::PruneXX00,
+        PruneSparseMode::PruneX0X0,
+        PruneSparseMode::Prune0XX0,
+        PruneSparseMode::PruneX00X,
+        PruneSparseMode::Prune0X0X,
+        PruneSparseMode::Prune00XX,
+    };
+    const std::array<std::array<size_t, 2>, 7> retainedPositionSets{{
+        {0, 0},
+        {0, 1},
+        {0, 2},
+        {1, 2},
+        {0, 3},
+        {1, 3},
+        {2, 3},
+    }};
+    struct SparseCase
+    {
+        int  sparseSide;
+        bool transA;
+        bool transB;
+    };
+    const std::array<SparseCase, 4> sparseCases{{
+        {1, false, false},
+        {1, true, false},
+        {2, false, false},
+        {2, false, true},
+    }};
+
+    for(const SparseCase& sparseCase : sparseCases)
+    {
+        for(const int metadataLayout : {0, 1})
+        {
+            for(const PruneSparseMode mode : modes)
+            {
+                SCOPED_TRACE(::testing::Message()
+                             << "sparseSide=" << sparseCase.sparseSide
+                             << " transA=" << sparseCase.transA
+                             << " transB=" << sparseCase.transB
+                             << " metadataLayout=" << metadataLayout
+                             << " mode=" << static_cast<int>(mode));
+                auto problem = makeProblem(rocisa::DataType::Int8,
+                                           rocisa::DataType::Int8,
+                                           0,
+                                           0,
+                                           8,
+                                           8,
+                                           16,
+                                           2,
+                                           sparseCase.transA,
+                                           sparseCase.transB);
+                problem.setSparse(sparseCase.sparseSide, metadataLayout);
+
+                const TensorDescriptor& denseDescriptor
+                    = sparseCase.sparseSide == 1 ? problem.a() : problem.b();
+                const TensorDescriptor& compressedDescriptor = problem.compressed();
+                const TensorDescriptor& metadataDescriptor = problem.metadata();
+                const size_t sparseAxis
+                    = sparseCase.sparseSide == 1
+                          ? problem.boundIndices()[0].a
+                          : problem.boundIndices()[0].b;
+
+                std::vector<int8_t> original(
+                    denseDescriptor.totalAllocatedElements());
+                for(size_t index = 0; index < original.size(); ++index)
+                    original[index]
+                        = static_cast<int8_t>(index % 127 + 1);
+                std::vector<int8_t> pruned = original;
+                std::vector<int8_t> compressed(
+                    compressedDescriptor.totalAllocatedElements(),
+                    static_cast<int8_t>(-101));
+                std::vector<uint8_t> metadata(
+                    metadataDescriptor.totalAllocatedElements(),
+                    0xff);
+
+                initCPUSparseInput(mode,
+                                   pruned.data(),
+                                   compressed.data(),
+                                   metadata.data(),
+                                   denseDescriptor,
+                                   compressedDescriptor,
+                                   metadataDescriptor,
+                                   sparseAxis,
+                                   problem.metadataLayout());
+
+                const size_t groupsPerSlice
+                    = denseDescriptor.sizes()[sparseAxis] / 4;
+                const size_t sliceCount
+                    = denseDescriptor.totalLogicalElements()
+                      / denseDescriptor.sizes()[sparseAxis];
+                std::vector<size_t> denseCoordinates(
+                    denseDescriptor.dimensions(), 0);
+                std::vector<size_t> compressedCoordinates(
+                    compressedDescriptor.dimensions(), 0);
+                std::vector<size_t> metadataCoordinates(
+                    metadataDescriptor.dimensions(), 0);
+                for(size_t slice = 0; slice < sliceCount; ++slice)
+                {
+                    TensileLite::CoordNumberedExclude(
+                        slice,
+                        denseCoordinates.begin(),
+                        denseCoordinates.end(),
+                        denseDescriptor.sizes().begin(),
+                        denseDescriptor.sizes().end(),
+                        sparseAxis);
+                    TensileLite::CoordNumberedExclude(
+                        slice,
+                        metadataCoordinates.begin(),
+                        metadataCoordinates.end(),
+                        metadataDescriptor.sizes().begin(),
+                        metadataDescriptor.sizes().end(),
+                        problem.metadataLayout());
+                    compressedCoordinates = denseCoordinates;
+                    for(size_t group = 0; group < groupsPerSlice; ++group)
+                    {
+                        uint32_t selectedMode = static_cast<uint32_t>(mode);
+                        if(mode == PruneSparseMode::PruneRandom)
+                        {
+                            selectedMode = static_cast<uint32_t>(
+                                roc::host_validation::tensilelite_adapter::
+                                    indexedUniformInteger(
+                                        1,
+                                        slice * groupsPerSlice + group,
+                                        1,
+                                        static_cast<int>(
+                                            PruneSparseMode::MaxPruneMode)
+                                            - 1));
+                        }
+                        const std::array<size_t, 2>& retained
+                            = retainedPositionSets[selectedMode];
+                        const uint8_t expectedMetadata = static_cast<uint8_t>(
+                            retained[0] | (retained[1] << 2));
+
+                        for(size_t position = 0; position < 4; ++position)
+                        {
+                            denseCoordinates[sparseAxis]
+                                = group * 4 + position;
+                            const size_t denseIndex
+                                = denseDescriptor.index(denseCoordinates);
+                            const bool isRetained
+                                = position == retained[0]
+                                  || position == retained[1];
+                            EXPECT_EQ(pruned[denseIndex],
+                                      isRetained ? original[denseIndex] : 0);
+                        }
+                        for(size_t retainedIndex = 0;
+                            retainedIndex < retained.size();
+                            ++retainedIndex)
+                        {
+                            denseCoordinates[sparseAxis]
+                                = group * 4 + retained[retainedIndex];
+                            compressedCoordinates[sparseAxis]
+                                = group * 2 + retainedIndex;
+                            EXPECT_EQ(
+                                compressed[compressedDescriptor.index(
+                                    compressedCoordinates)],
+                                original[denseDescriptor.index(
+                                    denseCoordinates)]);
+                        }
+
+                        metadataCoordinates[problem.metadataLayout()]
+                            = group / 2;
+                        const size_t metadataIndex
+                            = TensileLite::CoordFlattenIndex(
+                                metadataCoordinates.begin(),
+                                metadataCoordinates.end(),
+                                metadataDescriptor.sizes().begin(),
+                                metadataDescriptor.sizes().end());
+                        const uint8_t observedMetadata = static_cast<uint8_t>(
+                            metadata[metadataIndex]
+                            >> ((group % 2) * 4));
+                        EXPECT_EQ(observedMetadata & 0xfU,
+                                  expectedMetadata);
+                    }
+                }
+            }
+        }
     }
 }
 

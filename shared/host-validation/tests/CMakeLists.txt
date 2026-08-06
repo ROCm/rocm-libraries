@@ -42,3 +42,28 @@ add_test(
         -DHOST_VALIDATION_SOURCE_DIR=${PROJECT_SOURCE_DIR}
         -P "${CMAKE_CURRENT_SOURCE_DIR}/check_component_boundary.cmake"
 )
+
+if(HOST_VALIDATION_BUILD_BENCHMARKS)
+    find_package(OpenMP QUIET COMPONENTS CXX)
+    add_executable(
+        host-validation-structured-sparsity-benchmark
+        structured_sparsity_benchmark.cpp
+    )
+    target_link_libraries(
+        host-validation-structured-sparsity-benchmark
+        PRIVATE
+            roc::host-validation
+    )
+    if(OpenMP_CXX_FOUND)
+        target_link_libraries(
+            host-validation-structured-sparsity-benchmark
+            PRIVATE
+                OpenMP::OpenMP_CXX
+        )
+        target_compile_definitions(
+            host-validation-structured-sparsity-benchmark
+            PRIVATE
+                HOST_VALIDATION_BENCHMARK_OPENMP=1
+        )
+    endif()
+endif()

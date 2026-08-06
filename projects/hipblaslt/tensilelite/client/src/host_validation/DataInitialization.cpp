@@ -9,12 +9,15 @@
 #include <roc/host_validation/adapters/tensilelite/HostValidationBridge.hpp>
 #include <roc/host_validation/validation.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <cstddef>
+#include <cstring>
 #include <optional>
 #include <span>
 #include <stdexcept>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -28,6 +31,11 @@ namespace TensileLite::Client
         using roc::host_validation::MutableTensorView;
         using roc::host_validation::ScalarType;
         using roc::host_validation::Shape;
+        using roc::host_validation::StructuredSparsityPattern;
+        using roc::host_validation::StructuredSparsityProblem;
+        using roc::host_validation::StructuredSparsitySelection;
+        using roc::host_validation::StructuredSparsitySliceRange;
+        using roc::host_validation::TensorView;
 
         uint64_t stableStream(std::string_view name)
         {
@@ -176,6 +184,106 @@ namespace TensileLite::Client
             }
         }
 
+        Layout tensorLayout(const TensorDescriptor& descriptor)
+        {
+            std::vector<ptrdiff_t> strides;
+            strides.reserve(descriptor.strides().size());
+            for(const size_t stride : descriptor.strides())
+                strides.push_back(static_cast<ptrdiff_t>(stride));
+            return Layout(Shape(descriptor.sizes()), std::move(strides));
+        }
+
+        Layout logicalSparseMetadataLayout(const TensorDescriptor& dense,
+                                           const TensorDescriptor& metadata,
+                                           size_t                  sparseAxis,
+                                           size_t                  metadataAxis)
+        {
+            if(dense.dimensions() != metadata.dimensions())
+                throw std::invalid_argument(
+                    "TensileLite sparse data and metadata ranks differ.");
+            if(sparseAxis >= dense.dimensions())
+                throw std::out_of_range(
+                    "TensileLite sparse axis exceeds the data tensor rank.");
+            if(metadataAxis >= metadata.dimensions())
+                throw std::out_of_range(
+                    "TensileLite metadata axis exceeds the metadata tensor rank.");
+            if(dense.sizes()[sparseAxis] == 0)
+                throw std::invalid_argument(
+                    "TensileLite sparse axis extent must be nonzero.");
+            if(dense.sizes()[sparseAxis] % 4 != 0)
+                throw std::invalid_argument(
+                    "TensileLite sparse axis extent must be divisible by four.");
+
+            std::vector<size_t> logicalDimensions = dense.sizes();
+            logicalDimensions[sparseAxis]
+                = (dense.sizes()[sparseAxis] / 4 + 1) / 2;
+            std::vector<ptrdiff_t> logicalStrides(dense.dimensions());
+            logicalStrides[sparseAxis]
+                = static_cast<ptrdiff_t>(metadata.strides()[metadataAxis]);
+            if(metadata.sizes()[metadataAxis]
+               != logicalDimensions[sparseAxis])
+                throw std::invalid_argument(
+                    "TensileLite sparse metadata axis extent mismatch.");
+
+            size_t metadataDimension = 0;
+            for(size_t denseDimension = 0;
+                denseDimension < dense.dimensions();
+                ++denseDimension)
+            {
+                if(denseDimension == sparseAxis)
+                    continue;
+                while(metadataDimension == metadataAxis)
+                    ++metadataDimension;
+                if(metadataDimension >= metadata.dimensions()
+                   || metadata.sizes()[metadataDimension]
+                          != logicalDimensions[denseDimension])
+                    throw std::invalid_argument(
+                        "TensileLite sparse metadata non-axis extent mismatch.");
+                logicalStrides[denseDimension] = static_cast<ptrdiff_t>(
+                    metadata.strides()[metadataDimension]);
+                ++metadataDimension;
+            }
+            return Layout(Shape(std::move(logicalDimensions)),
+                          std::move(logicalStrides));
+        }
+
+        StructuredSparsityPattern sparsePattern(PruneSparseMode mode,
+                                                size_t          sparseAxis)
+        {
+            StructuredSparsityPattern pattern;
+            pattern.axis = sparseAxis;
+            switch(mode)
+            {
+            case PruneSparseMode::PruneRandom:
+                pattern.selection = StructuredSparsitySelection::Random;
+                pattern.seed      = 0x54454e53494c454cULL;
+                pattern.stream    = 1;
+                break;
+            case PruneSparseMode::PruneXX00:
+                pattern.fixedPositions = {0, 1};
+                break;
+            case PruneSparseMode::PruneX0X0:
+                pattern.fixedPositions = {0, 2};
+                break;
+            case PruneSparseMode::Prune0XX0:
+                pattern.fixedPositions = {1, 2};
+                break;
+            case PruneSparseMode::PruneX00X:
+                pattern.fixedPositions = {0, 3};
+                break;
+            case PruneSparseMode::Prune0X0X:
+                pattern.fixedPositions = {1, 3};
+                break;
+            case PruneSparseMode::Prune00XX:
+                pattern.fixedPositions = {2, 3};
+                break;
+            default:
+                throw std::invalid_argument(
+                    "Unsupported TensileLite sparse pruning mode.");
+            }
+            return pattern;
+        }
+
         bool generate(rocisa::DataType     dataType,
                       InitMode             mode,
                       Layout               layout,
@@ -248,5 +356,104 @@ namespace TensileLite::Client
                         {static_cast<std::byte*>(array), bytes},
                         true,
                         stableStream(descriptor.getName()));
+    }
+
+    void initCPUSparseInput(PruneSparseMode         mode,
+                            void*                   dstPruned,
+                            void*                   dstCompressed,
+                            void*                   dstMeta,
+                            TensorDescriptor const& tensor,
+                            TensorDescriptor const& tensorC,
+                            TensorDescriptor const& tensorMeta,
+                            size_t                  dim,
+                            bool                    metadataLayout)
+    {
+        const ScalarType scalarType = toHostValidationScalarType(tensor.dataType());
+        if(tensorC.dataType() != tensor.dataType())
+            throw std::invalid_argument(
+                "TensileLite sparse data and compressed tensor types differ.");
+        if(tensorMeta.dataType() != rocisa::DataType::Int8)
+            throw std::invalid_argument(
+                "TensileLite sparse metadata must use byte storage.");
+        if(dstPruned == nullptr && tensor.totalAllocatedBytes() != 0)
+            throw std::invalid_argument(
+                "Null TensileLite sparse input buffer.");
+        if(dstCompressed == nullptr && tensorC.totalAllocatedBytes() != 0)
+            throw std::invalid_argument(
+                "Null TensileLite compressed sparse buffer.");
+        if(dstMeta == nullptr && tensorMeta.totalAllocatedBytes() != 0)
+            throw std::invalid_argument(
+                "Null TensileLite sparse metadata buffer.");
+
+        if(tensorC.totalAllocatedElements() > tensorC.totalLogicalElements())
+            std::memset(dstCompressed, 0, tensorC.totalAllocatedBytes());
+        if(tensorMeta.totalAllocatedElements() > tensorMeta.totalLogicalElements())
+            std::memset(dstMeta, 0, tensorMeta.totalAllocatedBytes());
+
+        std::span<std::byte> prunedStorage(
+            static_cast<std::byte*>(dstPruned),
+            tensor.totalAllocatedBytes());
+        std::span<std::byte> compressedStorage(
+            static_cast<std::byte*>(dstCompressed),
+            tensorC.totalAllocatedBytes());
+        std::span<std::byte> metadataStorage(
+            static_cast<std::byte*>(dstMeta),
+            tensorMeta.totalAllocatedBytes());
+        const Layout denseLayout      = tensorLayout(tensor);
+        const Layout compressedLayout = tensorLayout(tensorC);
+        const Layout metadataTensorLayout = logicalSparseMetadataLayout(
+            tensor,
+            tensorMeta,
+            dim,
+            static_cast<size_t>(metadataLayout));
+        StructuredSparsityProblem problem(
+            TensorView(scalarType, denseLayout, prunedStorage),
+            MutableTensorView(scalarType, denseLayout, prunedStorage),
+            MutableTensorView(
+                scalarType, compressedLayout, compressedStorage),
+            sparsePattern(mode, dim));
+        problem.twoOfFourMetadata = MutableTensorView(
+            ScalarType::UInt8,
+            metadataTensorLayout,
+            metadataStorage);
+
+        const size_t sliceCount =
+            tensor.totalLogicalElements() / tensor.sizes()[dim];
+        if(sliceCount == 0)
+            return;
+        const size_t requestedWorkers = std::max<size_t>(
+            1, static_cast<size_t>(std::thread::hardware_concurrency()));
+        auto hasIndependentSlices = [dim](const Layout& layout) {
+            for(size_t dimension = 0;
+                dimension < layout.shape().rank();
+                ++dimension)
+            {
+                if(dimension != dim && layout.shape()[dimension] > 1
+                   && layout.strides()[dimension] == 0)
+                    return false;
+            }
+            return true;
+        };
+        const bool independentSlices
+            = hasIndependentSlices(denseLayout)
+              && hasIndependentSlices(compressedLayout)
+              && hasIndependentSlices(metadataTensorLayout);
+        const size_t chunkCount
+            = independentSlices ? std::min(sliceCount, requestedWorkers) : 1;
+#pragma omp parallel for schedule(static)
+        for(ptrdiff_t chunk = 0;
+            chunk < static_cast<ptrdiff_t>(chunkCount);
+            ++chunk)
+        {
+            const size_t firstSlice =
+                sliceCount * static_cast<size_t>(chunk) / chunkCount;
+            const size_t endSlice =
+                sliceCount * static_cast<size_t>(chunk + 1) / chunkCount;
+            roc::host_validation::applyStructuredSparsity(
+                problem,
+                StructuredSparsitySliceRange{
+                    .firstSlice = firstSlice,
+                    .sliceCount = endSlice - firstSlice});
+        }
     }
 } // namespace TensileLite::Client
