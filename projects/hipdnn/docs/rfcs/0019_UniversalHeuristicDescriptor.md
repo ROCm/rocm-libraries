@@ -398,7 +398,7 @@ launch, and selection share one binding:
 | **Problem** | `$q.*`, `$<node>.*` | `$q.seqlen_q`, `$sdpa_fwd.head_size` | Shared across candidates |
 | **Device** | `$device.*` | `$device.cu_count`, `$device.lds_size` | Shared across candidates |
 | **Kernel** | `$kernel.*` | `$kernel.tile_m`, `$kernel.split_k` | Per-candidate (from UKD `metadata`) |
-| **Derived** | `$derived.*` | `$derived.num_tiles_m`, `$derived.arithmetic_intensity` | Computed from the above by the UED's `derived` block ([Section 7.4](#74-derived-values-the-uhd-derived-block)) |
+| **Derived** | `$derived.*` | `$derived.num_tiles_m`, `$derived.arithmetic_intensity` | Computed from the above by the UHD's `derived` block ([Section 7.4](#74-derived-values-the-uhd-derived-block)) |
 
 Problem features are dims, dtypes, stride order, and op attributes bound by the matcher set.
 
@@ -535,10 +535,6 @@ source vocabulary and one extractor, so there is exactly one implementation to t
 
 ### 7.4 Derived Values: the UHD `derived` block
 
-> **DISCUSSION POINT (not settled).** Where derived features are computed and defined is an open team
-> decision. This RFC places the `derived` block on the **UHD** (with the model it feeds); the main
-> alternative — the UED (with the engine) — is noted at the end for the team to weigh.
-
 Many of the features a model actually ranks on are not raw fields but **computed** ones: tile/wave
 quantization (`num_tiles_m = ceil_div($q.seqlen_q, $kernel.tile_m0)`), aspect ratios, arithmetic
 intensity, occupancy proxies. These are expressible today as inline `features_signature` entries
@@ -586,23 +582,9 @@ Why the UHD:
   in `derived`, not behind a native predicate. The `custom_library` / native-predicate escape hatch
   ([Section 8](#8-model-adapters)) stays reserved for genuinely non-closed-form computations.
 
-**Cost of this choice — and the alternatives (for the discussion):**
-
-- *On the UED instead (main alternative).* The dim↔tile correspondence is really *engine structure*
-  (one tiling, stable across retrains) shared by both heuristics an engine carries — the cheap estimate
-  (A) and the config UHD (B) — and by every model version. On the UHD, that structural block is
-  **duplicated** across A, B, and each retrain, and re-emitted by the tooling even though it rarely
-  changes. The UED keeps it in one place and out of the regenerated artifact, at the cost of the
-  self-containment above (a dropped-in UHD then depends on the UED declaring the fields it references).
-  **The RFC picks the UHD for drop-in simplicity; the UED is the alternative if duplication across A/B
-  and versions becomes the bigger pain.**
-- *Split across KMD (graph-independent) + UED/UHD (graph-dependent).* A KMD-derived value would also be
-  visible to the matcher and dispatch, not just selection — but it splits one concept across descriptors
-  and makes authors choose which half a value goes in. Deferred.
-- *Per-op-schema annotation of the correspondence.* The correspondence is engine-specific (tile field
-  *names* are the engine's), so it does not belong on the shared op schema. Only the FLOP/byte formulas
-  (`umd_flops`/`umd_bytes`) are truly op-intrinsic and stay there
-  ([Section 14.6](#146-auto-deriving-a-first-pass-features_signature)).
+The dim↔tile correspondence is engine-specific (tile field *names* are the engine's), so it does not
+belong on the shared op schema; only the FLOP/byte formulas (`umd_flops`/`umd_bytes`) are truly
+op-intrinsic and stay there ([Section 14.6](#146-auto-deriving-a-first-pass-features_signature)).
 
 ---
 
@@ -1204,10 +1186,8 @@ land only when a concrete need appears.
    **Auto-derivation dependency:** the physics features (arithmetic intensity, roofline bound) need
    per-op **`umd_flops` / `umd_bytes`** `.fbs` annotations to be derivable ([Section 14.6](#146-auto-deriving-a-first-pass-features_signature)).
    Open: settle the two attributes (declaration + per-op application) and the mixed-dtype byte-formula
-   convention. Tier-2 quantization (the dim↔tile correspondence) lives in the **`derived` block**, whose
-   placement is a **discussion point** ([Section 7.4](#74-derived-values-the-uhd-derived-block)): on the
-   **UHD** (chosen — self-contained, regenerated with the model) vs. the **UED** (shared across the
-   engine's A/B heuristics and versions, but a cross-descriptor dependency for a dropped-in UHD).
+   convention. Tier-2 quantization (the dim↔tile correspondence) lives in the UHD's **`derived` block**
+   ([Section 7.4](#74-derived-values-the-uhd-derived-block)).
 
 ### Structural
 
