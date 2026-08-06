@@ -119,7 +119,7 @@ protected:
         // rather than the generic MatmulNode dispatch in getTolerance().
         this->registerValidator(outputs.c, matmul::getMxTolerance<OutputDataType>());
 
-        this->synthesis().setGlobalSeed(testCase.seed);
+        this->inputFillRecipes().setGlobalSeed(testCase.seed);
         this->verifyGraph(graphObj);
     }
 };

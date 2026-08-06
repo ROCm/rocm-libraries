@@ -330,6 +330,7 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
     int max_store_vec = spec->has_vector_size_c ? spec->vector_size_c : 8;
     rocke_cshuffle_epilogue_t epi = rocke_cshuffle_epilogue_from_grid(atom, grid, max_store_vec);
     epi.out_dtype = spec->dtype_d;
+    epi.no_alias = spec->cshuffle_no_alias;
 
     /* .store(b, accs=accs, addr_fn=d_addr, d_rsrc=d_rsrc,
      *        bounds=(b.const_i32(p.M), b.const_i32(p.N_gemm))) */

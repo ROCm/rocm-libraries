@@ -13,7 +13,7 @@ set -euo pipefail
 # Basic flow:
 #   1. Use the TheRock artifact tree unpacked at ROCM_PATH.
 #   2. Build rocjitsu from the rocm-systems checkout in ROCJITSU_SOURCE_DIR.
-#   3. Select a rocjitsu config for gfx942, gfx950, or gfx1151.
+#   3. Select a rocjitsu config for gfx942 or gfx950.
 #   4. Run hipblaslt-bench and a reduced TensileLite smoke under RJ_RACE=1.
 
 # These defaults match the GitHub Actions workspace layout: ROCM_PATH is the
@@ -34,80 +34,35 @@ HIPBLASLT_BENCH="${HIPBLASLT_BENCH:-${ROCM_PATH}/bin/hipblaslt-bench}"
 TENSILELITE_ROOT="${TENSILELITE_ROOT:-${ROCM_PATH}/share/hipblaslt/tensilelite}"
 TENSILE_DRIVER="${TENSILE_DRIVER:-${TENSILELITE_ROOT}/Tensile/bin/Tensile}"
 TENSILELITE_CLIENT="${TENSILELITE_CLIENT:-${ROCM_PATH}/libexec/hipblaslt/tensilelite/tensilelite-client}"
-TENSILELITE_GPU_TARGET="${TENSILELITE_GPU_TARGET:-}"
 RACE_TIMEOUT_SECONDS="${RACE_TIMEOUT_SECONDS:-180}"
 TENSILELITE_TIMEOUT_SECONDS="${TENSILELITE_TIMEOUT_SECONDS:-420}"
 TIMING_FILE="${RACE_REPORT_DIR}/timing.tsv"
 
-derive_rocjitsu_gpu_target() {
-  if [[ -n "${ROCJITSU_GPU_TARGET}" ]]; then
-    return
-  fi
+# Map TheRock's artifact-group name to the concrete GPU target used by both
+# rocjitsu and TensileLite. The workflow pins one rocm-systems revision, so the
+# corresponding target-specific KMD config paths are part of this script's
+# contract instead of a compatibility search across historical config names.
+select_rocjitsu_target() {
+  local target_selector="${ROCJITSU_GPU_TARGET:-${AMDGPU_FAMILIES}}"
+  local default_config
 
-  case "${AMDGPU_FAMILIES}" in
+  case "${target_selector}" in
     gfx94*)
       ROCJITSU_GPU_TARGET="gfx942"
+      default_config="${ROCJITSU_SOURCE_DIR}/configs/gfx942_cdna3_kmd.json"
       ;;
     gfx950*)
       ROCJITSU_GPU_TARGET="gfx950"
-      ;;
-    gfx1151)
-      ROCJITSU_GPU_TARGET="gfx1151"
+      default_config="${ROCJITSU_SOURCE_DIR}/configs/gfx950_cdna4_kmd.json"
       ;;
     *)
-      echo "Unsupported rocjitsu race-check artifact group: ${AMDGPU_FAMILIES}" >&2
-      echo "Supported groups are gfx94*, gfx950*, and gfx1151." >&2
-      exit 1
-      ;;
-  esac
-}
-
-select_rocjitsu_config() {
-  if [[ -n "${ROCJITSU_CONFIG}" ]]; then
-    return
-  fi
-
-  local candidates=()
-  case "${ROCJITSU_GPU_TARGET}" in
-    gfx942)
-      # Four names cover two rocm-systems config naming choices that are still
-      # in flight: target-specific vs family-generic, and KMD vs non-KMD.
-      # Prefer the target-specific KMD config when it exists.
-      candidates=(
-        "${ROCJITSU_SOURCE_DIR}/configs/gfx942_cdna3_kmd.json"
-        "${ROCJITSU_SOURCE_DIR}/configs/amdgpu_cdna3_kmd.json"
-        "${ROCJITSU_SOURCE_DIR}/configs/gfx942_cdna3.json"
-        "${ROCJITSU_SOURCE_DIR}/configs/amdgpu_cdna3.json"
-      )
-      ;;
-    gfx950)
-      # Same four-name compatibility pattern as gfx942: target-specific before
-      # family-generic, and KMD before non-KMD.
-      candidates=(
-        "${ROCJITSU_SOURCE_DIR}/configs/gfx950_cdna4_kmd.json"
-        "${ROCJITSU_SOURCE_DIR}/configs/amdgpu_cdna4_kmd.json"
-        "${ROCJITSU_SOURCE_DIR}/configs/gfx950_cdna4.json"
-        "${ROCJITSU_SOURCE_DIR}/configs/amdgpu_cdna4.json"
-      )
-      ;;
-    gfx1151)
-      candidates=(
-        "${ROCJITSU_SOURCE_DIR}/configs/gfx1151.json"
-      )
-      ;;
-    *)
-      echo "Unsupported rocjitsu target: ${ROCJITSU_GPU_TARGET}" >&2
+      echo "Unsupported rocjitsu race-check target: ${target_selector}" >&2
+      echo "Supported groups are gfx94* and gfx950*." >&2
       exit 1
       ;;
   esac
 
-  local candidate
-  for candidate in "${candidates[@]}"; do
-    if [[ -f "${candidate}" ]]; then
-      ROCJITSU_CONFIG="${candidate}"
-      return
-    fi
-  done
+  ROCJITSU_CONFIG="${ROCJITSU_CONFIG:-${default_config}}"
 }
 
 # Record the duration and exit status of each stage in a file that is uploaded
@@ -184,17 +139,18 @@ if [[ ! -x "${TENSILELITE_CLIENT}" ]]; then
   exit 1
 fi
 
+# The fetched compiler artifact installs the host OpenMP runtime here.
+LLVM_HOST_RUNTIME_DIR="${ROCM_PATH}/lib/llvm/lib/x86_64-unknown-linux-gnu"
+if [[ ! -f "${LLVM_HOST_RUNTIME_DIR}/libomp.so" ]]; then
+  echo "OpenMP runtime not found: ${LLVM_HOST_RUNTIME_DIR}/libomp.so" >&2
+  exit 1
+fi
 
-derive_rocjitsu_gpu_target
-select_rocjitsu_config
+select_rocjitsu_target
 
 if [[ -z "${ROCJITSU_CONFIG}" || ! -f "${ROCJITSU_CONFIG}" ]]; then
   echo "rocjitsu ${ROCJITSU_GPU_TARGET} config not found under ${ROCJITSU_SOURCE_DIR}/configs" >&2
   exit 1
-fi
-
-if [[ -z "${TENSILELITE_GPU_TARGET}" ]]; then
-  TENSILELITE_GPU_TARGET="${ROCJITSU_GPU_TARGET}"
 fi
 
 mkdir -p "${RACE_REPORT_DIR}"
@@ -205,7 +161,7 @@ mkdir -p "${RACE_REPORT_DIR}"
 # that use it to find the ROCm install root.
 export ROCM_PATH
 export PATH="${ROCM_PATH}/bin:${ROCM_PATH}/lib/llvm/bin:${PATH}"
-export LD_LIBRARY_PATH="${ROCM_PATH}/lib:${ROCM_PATH}/lib/rocm_sysdeps/lib:${ROCM_PATH}/lib/llvm/lib:${LD_LIBRARY_PATH:-}"
+export LD_LIBRARY_PATH="${ROCM_PATH}/lib:${ROCM_PATH}/lib/rocm_sysdeps/lib:${ROCM_PATH}/lib/llvm/lib:${LLVM_HOST_RUNTIME_DIR}:${LD_LIBRARY_PATH:-}"
 export PYTHONPATH="${TENSILELITE_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 
 echo "ROCM_PATH=${ROCM_PATH}"
@@ -218,7 +174,6 @@ echo "HIPBLASLT_BENCH=${HIPBLASLT_BENCH}"
 echo "TENSILELITE_ROOT=${TENSILELITE_ROOT}"
 echo "TENSILE_DRIVER=${TENSILE_DRIVER}"
 echo "TENSILELITE_CLIENT=${TENSILELITE_CLIENT}"
-echo "TENSILELITE_GPU_TARGET=${TENSILELITE_GPU_TARGET}"
 echo "RACE_REPORT_DIR=${RACE_REPORT_DIR}"
 echo "PATH=${PATH}"
 echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH}"
@@ -228,9 +183,8 @@ echo "PYTHONPATH=${PYTHONPATH}"
 # TODO(newling): Track migration to a packaged rocjitsu once TheRock provides a
 # complete runnable artifact. Until then, build rocjitsu from the rocm-systems
 # checkout selected by the workflow so this job controls the tool source.
-# rocjitsu is still consumed from a source checkout in this workflow. Build only
-# the CLI and optional runtime/shim targets needed to launch the test workloads;
-# this keeps the job independent of full rocm-systems packaging.
+# Build only the CLI and its LD_PRELOAD runtime; this keeps the job independent
+# of full rocm-systems packaging.
 #
 # The warning suppressions keep the local rocjitsu build from failing on
 # compiler/header warning mismatches. `nested-anon-types` is a Clang warning for
@@ -258,23 +212,11 @@ cmake_args+=(
 
 run_timed "configure rocjitsu" cmake "${cmake_args[@]}"
 
-# The CLI is required. The shared library and KMD shim target names have existed
-# in some rocm-systems revisions and not others; build them when available, but
-# do not make this bridge job depend on optional target names.
-cmake_target_exists() {
-  local target="$1"
-  cmake --build "${ROCJITSU_BUILD_DIR}" --target help \
-    | grep -Eq "(^|[[:space:]])${target}([:[:space:]]|$)"
-}
-
-build_targets=(rocjitsu_bin)
-if cmake_target_exists rocjitsu_shared; then
-  build_targets+=(rocjitsu_shared)
-fi
-if cmake_target_exists rocjitsu_kmd_shim; then
-  build_targets+=(rocjitsu_kmd_shim)
-fi
-run_timed "build rocjitsu" cmake --build "${ROCJITSU_BUILD_DIR}" --target "${build_targets[@]}"
+# The pinned source revision exposes stable targets for the CLI launcher and its
+# LD_PRELOAD runtime. Both are required to execute the workloads below.
+run_timed "build rocjitsu" \
+  cmake --build "${ROCJITSU_BUILD_DIR}" \
+  --target rocjitsu_bin rocjitsu_shared
 
 ROCJITSU_BIN="${ROCJITSU_BUILD_DIR}/tools/rocjitsu/rocjitsu"
 if [[ ! -x "${ROCJITSU_BIN}" ]]; then
@@ -290,9 +232,9 @@ show_rocjitsu_version() {
 run_hipblaslt_bench_check() {
   mkdir -p "${RACE_REPORT_DIR}/hipblaslt-bench"
   echo "running hipblaslt-bench under rocjitsu race detection"
-  # Use zero initialization because the default HPL initialization currently
-  # triggers a separate device-fill kernel race report that needs independent
-  # investigation. This check is scoped to the hipBLASLt GEMM dispatch path.
+  # Use zero initialization because HPL initialization currently triggers a
+  # separate device-fill kernel LDS race. Keep this check scoped to the
+  # hipBLASLt GEMM dispatch path while that issue is investigated separately.
   timeout "${RACE_TIMEOUT_SECONDS}" \
     env \
       HSA_ENABLE_SDMA=1 \
@@ -332,70 +274,6 @@ run_hipblaslt_bench_check() {
 
 write_tensilelite_check_yaml() {
   local yaml="$1"
-
-  if [[ "${TENSILELITE_GPU_TARGET}" == "gfx1151" ]]; then
-    # gfx1151 f32 does not support the WMMA instruction shape used by the
-    # gfx94x/gfx950 smoke below. Use a small VALU assembly config.
-    #
-    # The workflow builds rocjitsu from rocm-systems develop, which includes
-    # ROCm/rocm-systems#8628. That fix prevents the D16 destination-merge
-    # bookkeeping from false-firing, so this path can execute and validate the
-    # generated client workload instead of stopping after client startup.
-    #
-    # TODO(newling): Move these inline YAMLs into checked-in TensileLite test
-    # data, or reuse existing TensileLite YAMLs once the component path can
-    # consume product-owned workload definitions.
-    cat >"${yaml}" <<'YAML'
-GlobalParameters:
-  NumElementsToValidate: -1
-  DataInitTypeAlpha: 1
-  DataInitTypeBeta: 0
-  Device: 0
-  CpuThreads: 1
-  PrintSolutionRejectionReason: True
-
-BenchmarkProblems:
-  -
-    - OperationType: GEMM
-      DataType: s
-      TransposeA: False
-      TransposeB: True
-      UseBeta: True
-      Batched: True
-    - InitialSolutionParameters:
-      BenchmarkCommonParameters:
-        - KernelLanguage: ["Assembly"]
-      ForkParameters:
-        - ThreadTile:
-          - [1, 1]
-        - WorkGroup:
-          - [8, 8, 1]
-        - DepthU: [8]
-        - VectorWidthA: [1]
-        - VectorWidthB: [1]
-        - GlobalReadVectorWidthA: [1]
-        - GlobalReadVectorWidthB: [1]
-        - LocalReadVectorWidth: [1]
-        - PrefetchGlobalRead: [1]
-        - PrefetchLocalRead: [0]
-        - ScheduleIterAlg: [1]
-        - StaggerU: [32]
-        - StaggerUStride: [256]
-        - WorkGroupMapping: [1]
-        - GlobalSplitU: [1]
-        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - StoreRemapVectorWidth: [0]
-        - StoreVectorWidth: [1]
-        - SourceSwap: [False]
-        - NumElementsPerBatchStore: [0]
-        - ClusterLocalRead: [0]
-      BenchmarkJoinParameters:
-      BenchmarkFinalParameters:
-        - ProblemSizes:
-          - Exact: [32, 32, 1, 32]
-YAML
-    return
-  fi
 
   # One reduced config is embedded here to keep this bridge job self-contained.
   # If the race check grows to multiple configs, move them into a small checked-in
@@ -474,7 +352,7 @@ run_tensilelite_client_check() {
     "${yaml}"
     "${output_dir}"
     --prebuilt-client "${TENSILELITE_CLIENT}"
-    --gpu-targets "${TENSILELITE_GPU_TARGET}"
+    --gpu-targets "${ROCJITSU_GPU_TARGET}"
     --library-format msgpack
   )
   if [[ -x "${ROCM_PATH}/bin/amdclang++" ]]; then
