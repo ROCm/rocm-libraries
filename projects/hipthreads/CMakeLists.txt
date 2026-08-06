@@ -52,7 +52,7 @@ add_subdirectory(src)
 if (CMAKE_BUILD_TYPE MATCHES Debug)
   add_subdirectory(test)
 endif()
- 
+
 #-----------------------------------------------------------------------------
 # Installation and Packaging Rules
 #-----------------------------------------------------------------------------
