@@ -1153,6 +1153,11 @@ TEST_F(DAGSchedulerPassTest, DsReadThrottle_Depth1_SeparatesEveryLoad) {
 // ds_read interleave pattern.
 TEST_F(DAGSchedulerPassTest, DsReadThrottle_QueuePacingIgnoresDrainLatency) {
     auto runCase = [&](int drainLatency) {
+        // Reusing `am` across a new Function: without clearing, cached analysis
+        // results (e.g. loop info) from the previous (now-destroyed) Function can
+        // be reused if the allocator hands the new Function the same address —
+        // undetectable in isolation, but corrupts scheduling amid a full suite run.
+        am.clear();
         func = std::make_unique<Function>("dag_sched_test_ds_throttle_drain_split");
         setFunctionArch(*func, arch);
         bb = func->createBasicBlock("loop_body");
@@ -1180,6 +1185,9 @@ TEST_F(DAGSchedulerPassTest, DsReadThrottle_QueuePacingIgnoresDrainLatency) {
 // under the same queue depth.
 TEST_F(DAGSchedulerPassTest, DsReadThrottle_ThrottleLatencyControlsBurstLength) {
     auto runCase = [&](int throttleLatency) {
+        // See the am.clear() comment in DsReadThrottle_QueuePacingIgnoresDrainLatency
+        // above — same reused-`am`-across-a-new-Function hazard.
+        am.clear();
         func = std::make_unique<Function>("dag_sched_test_ds_throttle_interval");
         setFunctionArch(*func, arch);
         bb = func->createBasicBlock("loop_body");
@@ -1284,6 +1292,38 @@ TEST_F(DAGSchedulerPassTest, WarOverwriteOfDsAddrDeferredByElapse) {
     EXPECT_GT(overwritePos, firstIndependentPos)
         << "WAR overwrite of the ds_load address must be deferred behind independent VALUs "
            "by elapse-time ordering, despite having the smallest DAG id";
+}
+
+// MSB bank affinity: among equal-priority free VALU candidates, the same-bank one wins
+// even with a larger DAG id, so no s_set_vgpr_msb switch is inserted. (Keys off VALU;
+// a pure SALU has no VGPR MSB opinion.)
+TEST_F(DAGSchedulerPassTest, MsbAffinity_SameBankPreferredAmongEqualPriority) {
+    BasicBlock* body = bb;
+    body->addSuccessor(body);
+
+    // Anchor establishes currentMsb_=0; then a bank-1 op (smaller id) and a bank-0 op
+    // (larger id). Plain id-order picks bank-1 next; affinity pulls bank-0 ahead.
+    createVAddInBlock(body, arch, /*dst=*/10, /*src0=*/11, /*src1=*/12);
+    StinkyInstruction* bank1 = createVAddInBlock(body, arch, /*dst=*/260, /*src0=*/261,
+                                                 /*src1=*/262);
+    StinkyInstruction* bank0 = createVAddInBlock(body, arch, /*dst=*/20, /*src0=*/21,
+                                                 /*src1=*/22);
+
+    runPass();
+
+    int bank0Pos = -1, bank1Pos = -1, idx = 0;
+    for (const IRBase& ir : *body) {
+        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+        const auto* inst = cast<StinkyInstruction>(&ir);
+        if (inst == bank0) bank0Pos = idx;
+        if (inst == bank1) bank1Pos = idx;
+        idx++;
+    }
+    ASSERT_GE(bank0Pos, 0);
+    ASSERT_GE(bank1Pos, 0);
+    EXPECT_LT(bank0Pos, bank1Pos)
+        << "same-bank VALU (matching currentMsb_) must be scheduled before the different-bank "
+           "VALU despite its larger DAG id, so no s_set_vgpr_msb switch is inserted between them";
 }
 
 // All instructions are preserved regardless of throttle (count invariant).

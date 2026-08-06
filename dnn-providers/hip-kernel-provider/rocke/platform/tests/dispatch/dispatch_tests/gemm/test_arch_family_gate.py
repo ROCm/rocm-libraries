@@ -1,15 +1,17 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Regression test for the GEMM candidate arch-family gate.
+"""Regression test for the GEMM candidate arch gate.
 
-Before the fix, the RDNA/WMMA candidates were NOT gated to the RDNA arch family.
+Before the fix, the RDNA/WMMA candidates were NOT gated to their architectures.
 On a CDNA arch (e.g. gfx950) ``_make_spec`` rebuilds an RDNA candidate with the
 target's native wave64 and a 16x16x16 MFMA atom that *also* exists on CDNA, so
 ``gemm_config_supported`` accepted it. The prio-10 ``rdna_wmma`` candidate then
 wrongly out-ranked the intended prio-20 ``cdna_mem`` candidate whenever the
 128x128 cshuffle tile did not divide the problem.
 
-These tests fail on the old (ungated) code and pass after the arch-family gate.
+The gate is now the ``arches`` list each candidate declares in its
+``Capability``, rather than a cdna/rdna family label, so these tests query
+``admits`` (capability then predicate) rather than the residual ``_supports``.
 """
 
 from __future__ import annotations
@@ -33,17 +35,17 @@ class TestArchFamilyGate(unittest.TestCase):
         # for shapes whose tiles happen to divide the problem.
         req = GemmRequest(M=64, N=32, K=16, arch="gfx950")
         for spec_id in ("rdna_wmma_default", "rdna_wmma_32x32"):
-            ok, why = _by_spec_id(spec_id).supports(req)
+            ok, why = _by_spec_id(spec_id).admits(req)
             self.assertFalse(ok, f"{spec_id} wrongly supported on gfx950")
-            self.assertIn("family", why)
+            self.assertIn("arch 'gfx950' not in", why)
 
     def test_cdna_candidates_unsupported_on_rdna_arch(self):
         # Symmetric: CDNA candidates must not report support on an RDNA arch.
         req = GemmRequest(M=128, N=128, K=32, arch="gfx1151")
         for spec_id in ("cdna_cshuffle_default", "cdna_mem_64x128"):
-            ok, why = _by_spec_id(spec_id).supports(req)
+            ok, why = _by_spec_id(spec_id).admits(req)
             self.assertFalse(ok, f"{spec_id} wrongly supported on gfx1151")
-            self.assertIn("family", why)
+            self.assertIn("arch 'gfx1151' not in", why)
 
     def test_cdna_selection_prefers_mem_when_cshuffle_tile_does_not_divide(self):
         # M=64 breaks the 128x128 cshuffle tile but the 64x128 mem tile divides;

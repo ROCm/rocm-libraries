@@ -53,10 +53,12 @@ add_unit_test_target(hipdnn_integration_tests_unit_tests ${CMAKE_CURRENT_BINARY_
 
 add_executable(hipdnn_gpu_ref_tests
     gpu-ref/main.cpp
+    gpu-ref/TestGpuFpReferencePointwise.cpp
     gpu-ref/TestGpuFpReferenceConvolution.cpp
-    gpu-ref/TestGpuFpReferenceRMSNorm.cpp
     gpu-ref/TestGpuFpReferenceDgrad.cpp
     gpu-ref/TestGpuFpReferenceWgrad.cpp
+    gpu-ref/TestGpuFpReferenceRMSNormFwd.cpp
+    gpu-ref/TestGpuFpReferenceRMSNormBwd.cpp
     gpu-ref/TestGpuFpReferenceValidation.cpp
     gpu-ref/TestGpuRefHipError.cpp
     gpu-ref/TestGpuRefKernelCompiler.cpp
@@ -79,4 +81,4 @@ target_compile_options(hipdnn_gpu_ref_tests
 
 clang_tidy_check(hipdnn_gpu_ref_tests)
 
-add_tiered_test_target(hipdnn_gpu_ref_tests ${CMAKE_CURRENT_BINARY_DIR})
+add_integration_test_target(hipdnn_gpu_ref_tests ${CMAKE_CURRENT_BINARY_DIR})

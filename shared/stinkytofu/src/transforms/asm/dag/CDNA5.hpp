@@ -48,14 +48,6 @@ using namespace stinkytofu;
 
 enum NonWmmaKind { kGlobalRead = 0, kLocalRead, kOther, kValu };
 
-// CDNA5 (Gfx1250) scheduling defaults. Used when dagFeatures still hold the
-// PassFeatureConfig sentinel values (0 / INT_MAX). Explicit non-sentinel config wins.
-constexpr int kCdna5DsReadQueueDepth = 16;
-constexpr int kCdna5DsReadDrainLatency = 72;
-constexpr int kCdna5DsReadThrottleLatency = 72;
-constexpr int kCdna5DsReadPerWmma = 3;
-constexpr int kCdna5GlobalReadPerWmma = 1;
-
 // -------------------------------------------------------------------------
 // Hardware hazard rules: a fixed cycle gap required between a producer writing a
 // register and a specific class of consumer reading it as a source (not either op's
@@ -88,14 +80,70 @@ static inline bool isVmemAddrHazardConsumer(const StinkyInstruction& inst) {
     return isBufferMemLoad(inst) || isGlobalPrefetch(inst);
 }
 
-static constexpr HazardRule kCdna5HazardRules[] = {
+static constexpr HazardRule kGfx1250HazardRules[] = {
     {"SaluSgprToMemAddr", isScalarALU, isSaluHazardConsumer, RegType::S, 8},
     // VALU vgpr -> VMEM address (global_read/MUBUF/FLAT/GLOBAL). Excludes SMEM/tensor_load:
     // those addresses are sgpr-only, never vgpr.
     {"ValuVgprToVmemAddr", isVectorALU, isVmemAddrHazardConsumer, RegType::V, 32},
 };
-constexpr int kNumCdna5HazardRules =
-    static_cast<int>(sizeof(kCdna5HazardRules) / sizeof(kCdna5HazardRules[0]));
+
+// -------------------------------------------------------------------------
+// Per-arch CDNA5 scheduling config. CDNA5.hpp is the CDNA5 *family* ready queue: both
+// gfx1250 and gfx1250v0 compile against it, so the tunable numbers and the hazard-rule
+// table are selected per arch here rather than baked in as single family-wide constants.
+// A new CDNA5-family arch adds one case to cdna5ConfigForArch(); the ready queue and the
+// scheduler pre-scan both read the selected config. User PassFeatureConfig overrides
+// still win over these per-arch defaults (see the dsRead* accessors).
+//
+// hazardRules is a table pointer + count (not a fixed array) so an arch can override the
+// whole rule set — different cycle counts, or a different number of rules — not just the
+// scalar knobs. The pointed-to table must have static storage duration.
+// -------------------------------------------------------------------------
+struct CDNA5Config {
+    // Used when dagFeatures still hold the PassFeatureConfig sentinel values (0 /
+    // INT_MAX); explicit non-sentinel user config wins over these.
+    int dsReadQueueDepth;
+    int dsReadDrainLatency;
+    int dsReadThrottleLatency;
+    int dsReadPerWmma;
+    int globalReadPerWmma;
+    const HazardRule* hazardRules;
+    int numHazardRules;
+};
+
+constexpr CDNA5Config kGfx1250Config = {
+    /*dsReadQueueDepth=*/16,
+    /*dsReadDrainLatency=*/72,
+    /*dsReadThrottleLatency=*/72,
+    /*dsReadPerWmma=*/3,
+    /*globalReadPerWmma=*/1,
+    /*hazardRules=*/kGfx1250HazardRules,
+    /*numHazardRules=*/
+    static_cast<int>(sizeof(kGfx1250HazardRules) / sizeof(kGfx1250HazardRules[0])),
+};
+
+// gfx1250v0: starts from the gfx1250 values. TODO(tuning): fill in gfx1250v0's real queue
+// depths / drain latency / per-WMMA ratios, and point hazardRules at a gfx1250v0 table if
+// its hazard cycles or rule set diverge. Kept as its own case so those numbers can be
+// changed here without touching gfx1250.
+// TODO: arch encoding {12,5,1} is a placeholder stepping value pending
+// https://github.com/ROCm/rocm-libraries/pull/10273 landing the real gfx1250v0 ArchInfo.
+constexpr CDNA5Config kGfx1250v0Config = kGfx1250Config;
+
+// Select the CDNA5-family config for \p arch. Private to the ready queue / scheduler (not
+// shared infrastructure): each CDNA5 arch's knobs live next to the family model that
+// consumes them. gfx1250 is the default for any unlisted arch (the pipeline only runs the
+// CDNA5 ready queue on CDNA5-family archs).
+inline const CDNA5Config& cdna5ConfigForArch(const std::array<int, 3>& arch) {
+    const int key = arch[0] * 10000 + arch[1] * 100 + arch[2];
+    switch (key) {
+        case 12 * 10000 + 5 * 100 + 1:  // gfx1250v0
+            return kGfx1250v0Config;
+        case 12 * 10000 + 5 * 100 + 0:  // gfx1250
+        default:
+            return kGfx1250Config;
+    }
+}
 
 // -------------------------------------------------------------------------
 // Prefix / loop analysis (free functions; no CDNA5ReadyQueue state)
@@ -298,9 +346,13 @@ class CDNA5ReadyQueue : public ReadyQueue {
     ReadySetByDAGid barrierQueue;
     ReadySetByDAGid otherQueue;  // scalars, waits in region, etc.
 
+    // Per-arch CDNA5 scheduling config (numbers + hazard-rule table), selected by arch in
+    // the constructor. Points at a static constexpr CDNA5Config, so this is a stable ref.
+    const CDNA5Config& config_;
+
     // Throttle tensor issues vs other work.
     int globalReadCounter = 0;
-    int globalReadPerWMMA = kCdna5GlobalReadPerWmma;
+    int globalReadPerWMMA = config_.globalReadPerWmma;
 
     InFlightQueue globalReadInflight_;
     int crossBBGlobalReadCount_ = 0;
@@ -320,19 +372,19 @@ class CDNA5ReadyQueue : public ReadyQueue {
 
     int dsReadQueueDepth() const {
         const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.dsReadQueueDepth;
-        return cfg > 0 ? cfg : kCdna5DsReadQueueDepth;
+        return cfg > 0 ? cfg : config_.dsReadQueueDepth;
     }
     int dsReadDrainLatency() const {
         const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.dsReadDrainLatency;
-        return cfg > 0 ? cfg : kCdna5DsReadDrainLatency;
+        return cfg > 0 ? cfg : config_.dsReadDrainLatency;
     }
     int dsReadThrottleLatency() const {
         const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.dsReadThrottleLatency;
-        return cfg > 0 ? cfg : kCdna5DsReadThrottleLatency;
+        return cfg > 0 ? cfg : config_.dsReadThrottleLatency;
     }
     int dsReadPerWmma() const {
         const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.dsReadPerWmma;
-        return cfg < INT_MAX ? cfg : kCdna5DsReadPerWmma;
+        return cfg < INT_MAX ? cfg : config_.dsReadPerWmma;
     }
     bool dsReadQueueFull() const {
         return dsReadInflight_.full();
@@ -349,6 +401,10 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // activeWmmaLatency_). Used to detect ds_load dest / WMMA src VGPR overlap hazards.
     DAGNode* activeWmmaNode_ = nullptr;
 
+    // VGPR-MSB bank currently in effect (mirrors InsertVgprMsbPass); updated on issue,
+    // reset per region. pickFreeBest prefers a free candidate matching it. -1 = unknown.
+    int currentMsb_ = -1;
+
     // --- Per-WMMA-window DS cap (dagFeatures.dsReadPerWmma) ---
     int maxDsPerWmmaWindow_ = 0;
     int dsInsertedSinceLastWmma_ = 0;
@@ -361,13 +417,15 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // "free". Decays in advanceTime. Crosses BBs via BBScheduleState.dsResiduals.
     std::map<int, int> regDataReadyCounters;
 
-    // Hazard gates, one independent lane per kCdna5HazardRules entry. Per reg key:
+    // Hazard gates, one independent lane per config_.hazardRules entry. Per reg key:
     // remaining cycles until a rule.isConsumer instruction may read it (stamped
     // rule.cycles when a flagged producer issues). Kept SEPARATE per rule (and
     // separate from regDataReadyCounters) because each hazard is consumer-type- and
     // register-file-specific: e.g. a VALU/SALU reading the same sgpr a flagged SALU
     // just wrote is not gated by the SaluSgprToMemAddr lane. Decays in advanceTime.
-    std::array<std::map<int, int>, kNumCdna5HazardRules> hazardGates_;
+    // Sized to config_.numHazardRules at construction (runtime, since the rule count is
+    // per-arch), indexed by the same ruleIdx the scheduler pre-scan assigns.
+    std::vector<std::map<int, int>> hazardGates_;
 
     // Ready, flagged (non-empty hazardFlags), not-yet-issued hazard producers, tracked
     // so decidePromote() doesn't need to scan every queue each pick to find the ones
@@ -471,7 +529,10 @@ class CDNA5ReadyQueue : public ReadyQueue {
     void restoreCrossBBStateFromLoop();
 
    public:
-    explicit CDNA5ReadyQueue(const PassContext& passCtx) : ReadyQueue(passCtx) {}
+    explicit CDNA5ReadyQueue(const PassContext& passCtx)
+        : ReadyQueue(passCtx),
+          config_(cdna5ConfigForArch(passCtx.getGemmTileConfig().arch)),
+          hazardGates_(config_.numHazardRules) {}
 
     DAGNode* pickOne() override;
     void push(DAGNode* node) override;
@@ -572,6 +633,8 @@ DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
     touchOperands(*node->inst);
     updateWMMAStatus(node);
     stampDataReady(*node->inst);
+    // Advance the tracked MSB bank; ops with no opinion (-1) leave it unchanged.
+    if (node->requiredMsb != -1) currentMsb_ = node->requiredMsb;
     // Hazard gates: stamp exactly the (rule, register) pairs the pre-scan found a
     // rule.isConsumer instruction reads from this producer, so that consumer's pick
     // waits the fixed hazard out. Per-rule lane (not regDataReadyCounters) so an
@@ -580,7 +643,7 @@ DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
         // rule.cycles == -1 ("hoist as far as possible"): the strategy is producer-side
         // hoisting (deadline forced to 0 in the pre-scan), not a consumer-side hold, so
         // clamp the gate to 0 rather than stamping a negative wait.
-        hazardGates_[hf.ruleIdx][hf.regKey] = std::max(0, kCdna5HazardRules[hf.ruleIdx].cycles);
+        hazardGates_[hf.ruleIdx][hf.regKey] = std::max(0, config_.hazardRules[hf.ruleIdx].cycles);
     // No longer a live hoist candidate once issued (decidePromote() must not try to
     // force it again).
     if (!node->hazardFlags.empty()) {
@@ -645,8 +708,8 @@ int CDNA5ReadyQueue::getMaxSrcDataWait(DAGNode* node) const {
 // pickFreeBest and findSmallestPickableNonWmma).
 int CDNA5ReadyQueue::getHazardWait(DAGNode* node) const {
     int maxLat = 0;
-    for (int ruleIdx = 0; ruleIdx < kNumCdna5HazardRules; ++ruleIdx) {
-        const HazardRule& rule = kCdna5HazardRules[ruleIdx];
+    for (int ruleIdx = 0; ruleIdx < config_.numHazardRules; ++ruleIdx) {
+        const HazardRule& rule = config_.hazardRules[ruleIdx];
         const auto& gate = hazardGates_[ruleIdx];
         if (gate.empty() || !rule.isConsumer(*node->inst)) continue;
         for (const StinkyRegister& srcReg : node->inst->getSrcRegs()) {
@@ -711,6 +774,7 @@ DAGNode* CDNA5ReadyQueue::pickFreeBest(const ReadySetByDAGid& queue, int* outWai
     DAGNode* best = nullptr;
     int bestElapse = INT_MIN;
     int bestWait = 0;
+    int bestAff = 0;
     for (DAGNode* n : queue) {  // iterates smallest-id first, so ties keep the oldest id
         const int wait = std::max(getMaxSrcDataWait(n), getHazardWait(n));
         // Tolerate a wait only if it fits the WMMA latency shadow and the dest does
@@ -719,18 +783,26 @@ DAGNode* CDNA5ReadyQueue::pickFreeBest(const ReadySetByDAGid& queue, int* outWai
                          destOverlapsActiveWmmaSrc(n)))
             continue;
         const int elapse = nodeElapseKey(n);
-        // Free nodes rank above hidden-stall ones; within a tier, largest elapse wins.
+        // MSB bank affinity: a tiebreak BELOW the free/hazard tier and ABOVE elapse —
+        // prefer a same-bank candidate to avoid an s_set_vgpr_msb switch. Inert when
+        // currentMsb_ == -1 (nothing matches), so unchanged behavior until a real tie.
+        const int aff = (n->requiredMsb != -1 && n->requiredMsb == currentMsb_) ? 1 : 0;
+        // Free nodes rank above hidden-stall ones; within a tier, prefer same-bank
+        // (larger aff), then largest elapse.
         const bool nHazard = wait > 0;
         const bool curHazard = bestWait > 0;
         bool better;
         if (best == nullptr)
             better = true;
         else
-            better = (!nHazard && curHazard) || (nHazard == curHazard && elapse > bestElapse);
+            better = (!nHazard && curHazard) ||
+                     (nHazard == curHazard &&
+                      (aff > bestAff || (aff == bestAff && elapse > bestElapse)));
         if (better) {
             best = n;
             bestElapse = elapse;
             bestWait = wait;
+            bestAff = aff;
         }
     }
     if (best && outWait) *outWait = bestWait;
@@ -788,6 +860,7 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
     // (B) elapse: record the timeline touch for all its operands.
     stampDataReady(*node->inst);
     touchOperands(*node->inst);
+    if (node->requiredMsb != -1) currentMsb_ = node->requiredMsb;
     return node;
 }
 
@@ -930,6 +1003,9 @@ void CDNA5ReadyQueue::decidePromote() {
                 wmmaIssuedCountThisRegion_ >= thIt->second) {
                 promotedPhase_ = PromotePhase::Barrier;
                 promotedNode_ = node;
+                PASS_DEBUG(std::cerr << "[CDNA5 decidePromote] promote barrier=" << node->inst
+                                     << " wmmaIssuedCountThisRegion_=" << wmmaIssuedCountThisRegion_
+                                     << " threshold=" << thIt->second << "\n");
                 return;
             }
         }
@@ -994,7 +1070,10 @@ int CDNA5ReadyQueue::computeWmmaWindowsNeeded(int dsLoadCount) const {
     if (dsLoadCount > dsReadQueueDepth()) {
         const float cyclePerDs = (float)dsReadThrottleLatency() / (float)dsReadQueueDepth();
         const float cyclesNeeded = cyclePerDs * (dsLoadCount - dsReadQueueDepth());
-        wmmaWindowsNeeded += (int)std::ceil(cyclesNeeded / (float)wmmaIssueConfig.latency);
+        const float baseWindows =
+            (float)(dsReadQueueDepth() + maxDsPerWmmaWindow - 1) / (float)maxDsPerWmmaWindow;
+        const float latencyWindows = cyclesNeeded / (float)wmmaIssueConfig.latency;
+        wmmaWindowsNeeded = (int)std::ceil(baseWindows + latencyWindows);
     }
     return wmmaWindowsNeeded;
 }
@@ -1505,7 +1584,7 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
     int fallbackWait = 0;
     if (findOldestFallbackNonWmma(pickedDS, &fallback, &fallbackKind, &fallbackWait)) {
         // Throttle (queue depth) is skipped for progress, but the hazard gate is
-        // unconditional (see kCdna5HazardRules) and still has to be paid here too.
+        // unconditional (see config_.hazardRules) and still has to be paid here too.
         int waitCycles = fallbackWait;
         if (fallbackKind == kGlobalRead && globalReadQueueFull())
             waitCycles = std::max(waitCycles, globalReadInflight_.minResidual());
@@ -1656,6 +1735,8 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     // region starts with all regs "very old" (no spurious deferrals from a prior region).
     regLastTouch_.clear();
     clock_ = 0;
+    // Per-region: MSB state is not carried across a region boundary (side-effect cut).
+    currentMsb_ = -1;
     // Clear per-region node ptr; it dangles into the previous region's freed DAGNodeList.
     activeWmmaNode_ = nullptr;
     // Hazard state is per-region: hazardHoistCandidates_ holds DAGNode* into the prior
