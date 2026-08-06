@@ -623,7 +623,12 @@ DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
         wmmaToValuCoexecOverlap(*activeWmmaNode_->inst, *node->inst)) {
         const int slots = popcount16(activeWmmaNode_->inst->coIssueWindow);
         const int shortfall = slots - nonWmmaFillsSinceActiveWmma_;
-        if (shortfall > 0) pendingFillerVNops_ = shortfall;
+        if (shortfall > 0) {
+            pendingFillerVNops_ = shortfall;
+            // Credit fillers as slot fills so a later dependent VALU in this window is not
+            // re-padded.
+            nonWmmaFillsSinceActiveWmma_ += shortfall;
+        }
     }
     // Only VALU-pipe ops fill a coexec slot.
     if (pickKind == kValu) nonWmmaFillsSinceActiveWmma_++;
