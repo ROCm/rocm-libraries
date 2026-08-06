@@ -8,6 +8,7 @@
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/DataTypes.hpp>
 
+#include <array>
 #include <cmath>
 #include <span>
 #include <vector>
@@ -265,6 +266,27 @@ TEST(ReferenceStandaloneEpilogue, HandlesGradientAuxiliaryInput)
     EXPECT_EQ(e, (std::vector<float>{-1, 2}));
 }
 
+TEST(ReferenceStandaloneEpilogue, UsesZeroAuxiliaryWhenGradientEIsDisabled)
+{
+    auto problem = makePackedProblem(rocisa::DataType::Float,
+                                     rocisa::DataType::Float,
+                                     rocisa::DataType::Float,
+                                     2,
+                                     1,
+                                     1);
+    problem.setUseGradient(true);
+    problem.setActivationType(ActivationType::Relu);
+
+    std::vector<float> a{10, 20};
+    std::vector<float> b{1};
+    std::vector<float> c(2, 0);
+    std::vector<float> d(2, -99);
+    ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
+
+    ASSERT_TRUE(tryRuntimeCanonicalGemm(problem, inputs, /*elementsToValidate=*/-1));
+    EXPECT_EQ(d, (std::vector<float>{0, 0}));
+}
+
 TEST(ReferenceStandaloneEpilogue, HandlesGradientBiasReduction)
 {
     const size_t M = 2;
@@ -439,6 +461,65 @@ TEST(ReferenceRuntimeCanonical, RepresentsMirroredBoundIndexAsNegativeStride)
     EXPECT_EQ(d, (std::vector<float>{21, 32}));
 }
 
+#ifdef TENSILE_USE_FP8_BF8
+TEST(ReferenceRuntimeCanonical, MirrorsBlockScalesWithTheBoundIndex)
+{
+    const size_t K = 32;
+    ContractionProblemGemm::FreeIndices freeIndices{
+        {true, 0, 0, 0},
+        {false, 1, 1, 1},
+    };
+    ContractionProblemGemm::BatchIndices batchIndices{{2, 2, 2, 2}};
+    ContractionProblemGemm::BoundIndices boundIndices{{1, 0, true, false}};
+    TensorOps noOperations;
+    auto problem = ContractionProblemGemm::FromIndexSizes(freeIndices,
+                                                          batchIndices,
+                                                          boundIndices,
+                                                          {1, 1, 1, K},
+                                                          rocisa::DataType::Float8,
+                                                          {1, 1, K},
+                                                          noOperations,
+                                                          rocisa::DataType::Float8,
+                                                          {1, K, K},
+                                                          noOperations,
+                                                          rocisa::DataType::Float,
+                                                          {1, 1, 1},
+                                                          noOperations,
+                                                          rocisa::DataType::Float,
+                                                          {1, 1, 1},
+                                                          noOperations,
+                                                          0.0);
+    problem.setComputeInputTypeA(rocisa::DataType::Float8);
+    problem.setComputeInputTypeB(rocisa::DataType::Float8);
+    problem.setAlphaType(rocisa::DataType::Float);
+    problem.setBetaType(rocisa::DataType::Float);
+    problem.setMXScaleA(rocisa::DataType::E8, 8);
+    problem.setMXScaleB(rocisa::DataType::E8, 8);
+
+    std::vector<Float8> a(K);
+    std::vector<Float8> b(K, Float8(1.0f));
+    for(size_t reduction = 0; reduction < K; ++reduction)
+        a[reduction] = Float8(static_cast<float>(reduction / 8 + 1));
+    std::vector<float> c{0};
+    std::vector<float> d{-99};
+    std::vector<E8> scaleA(problem.mxsa().totalAllocatedElements(), E8(1.0f));
+    std::vector<E8> scaleB(problem.mxsb().totalAllocatedElements(), E8(1.0f));
+    std::vector<int64_t> scaleCoordinate(problem.mxsa().dimensions(), 0);
+    const std::array<float, 4> scales{1, 2, 4, 8};
+    for(size_t block = 0; block < scales.size(); ++block)
+    {
+        scaleCoordinate[1] = static_cast<int64_t>(block);
+        scaleA[problem.mxsa().index(scaleCoordinate)] = E8(scales[block]);
+    }
+
+    ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
+    inputs.mxsa = scaleA.data();
+    inputs.mxsb = scaleB.data();
+    ASSERT_TRUE(tryRuntimeCanonicalGemm(problem, inputs, /*elementsToValidate=*/-1));
+    EXPECT_EQ(d[0], 392);
+}
+#endif
+
 TEST(ReferenceRuntimeCanonical, HandlesPointerArrayBatches)
 {
     const size_t M = 2;
@@ -469,6 +550,11 @@ TEST(ReferenceRuntimeCanonical, HandlesPointerArrayBatches)
     problem.setComputeInputTypeB(rocisa::DataType::Float);
     problem.setAlphaType(rocisa::DataType::Float);
     problem.setBetaType(rocisa::DataType::Float);
+    problem.setUseBias(1);
+    problem.setBias(rocisa::DataType::Float, M, M);
+    problem.setUseGateResidual(true);
+    problem.setGateResidual(
+        rocisa::DataType::Float, problem.d().sizes(), problem.d().strides());
 
     std::vector<float> a0{-99, 1, 2};
     std::vector<float> a1{-99, 4, 5};
@@ -478,24 +564,32 @@ TEST(ReferenceRuntimeCanonical, HandlesPointerArrayBatches)
     std::vector<float> c1{-99, 0, 0};
     std::vector<float> d0{-99, -99, -99};
     std::vector<float> d1{-99, -99, -99};
+    std::vector<float> bias0{1, 2};
+    std::vector<float> bias1{3, 4};
+    std::vector<float> gate0{1, 1};
+    std::vector<float> gate1{2, 2};
     const void* batchA[] = {a0.data(), a1.data()};
     const void* batchB[] = {b0.data(), b1.data()};
     const void* batchC[] = {c0.data(), c1.data()};
     void* batchD[] = {d0.data(), d1.data()};
+    const void* batchBias[] = {bias0.data(), bias1.data()};
+    const void* batchGate[] = {gate0.data(), gate1.data()};
 
     ContractionInputs inputs(nullptr, nullptr, nullptr, nullptr, 1.0f, 0.0f);
     inputs.batchA = batchA;
     inputs.batchB = batchB;
     inputs.batchC = batchC;
     inputs.batchD = batchD;
+    inputs.batchBias = batchBias;
+    inputs.batchGateResidual = batchGate;
     inputs.batchOffsetA = sizeof(float);
     inputs.batchOffsetB = sizeof(float);
     inputs.batchOffsetC = sizeof(float);
     inputs.batchOffsetD = sizeof(float);
 
     ASSERT_TRUE(tryRuntimeCanonicalGemm(problem, inputs, /*elementsToValidate=*/-1));
-    EXPECT_EQ(d0, (std::vector<float>{-99, 3, 6}));
-    EXPECT_EQ(d1, (std::vector<float>{-99, 8, 10}));
+    EXPECT_EQ(d0, (std::vector<float>{-99, 5, 9}));
+    EXPECT_EQ(d1, (std::vector<float>{-99, 24, 30}));
 }
 
 TEST(ReferenceRuntimeCanonical, HandlesFloat16Accumulation)
@@ -553,6 +647,36 @@ TEST(ReferenceRuntimeCanonical, AppliesScalarScaleBeforeComputeQuantization)
     d[0] = -99;
     ASSERT_TRUE(tryRuntimeTiledGemm(problem, inputs, /*elementsToValidate=*/-1));
     EXPECT_EQ(d[0], 3.25f);
+}
+
+TEST(ReferenceRuntimeCanonical, AppliesVectorScaleBeforeComputeQuantization)
+{
+    auto problem = makePackedProblem(rocisa::DataType::Half,
+                                     rocisa::DataType::Float,
+                                     rocisa::DataType::Float,
+                                     2,
+                                     1,
+                                     1);
+    problem.setComputeInputTypeA(rocisa::DataType::Float8);
+    problem.setUseScaleAB("Vector");
+    problem.setScaleA(rocisa::DataType::Float, 2);
+    problem.setScaleB(rocisa::DataType::Float, 1);
+
+    std::vector<Half> a{Half(1.1f), Half(1.1f)};
+    std::vector<float> b{1};
+    std::vector<float> c(2, 0);
+    std::vector<float> d(2, -99);
+    std::vector<float> scaleA{3, 4};
+    std::vector<float> scaleB{1};
+    ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
+    inputs.scaleA = scaleA.data();
+    inputs.scaleB = scaleB.data();
+
+    ASSERT_TRUE(tryRuntimeCanonicalGemm(problem, inputs, /*elementsToValidate=*/-1));
+    EXPECT_EQ(d, (std::vector<float>{3.25f, 4.5f}));
+    d.assign(2, -99);
+    ASSERT_TRUE(tryRuntimeTiledGemm(problem, inputs, /*elementsToValidate=*/-1));
+    EXPECT_EQ(d, (std::vector<float>{3.25f, 4.5f}));
 }
 
 #if !defined(_WIN32) && defined(TENSILE_USE_FP6)

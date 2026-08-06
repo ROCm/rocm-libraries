@@ -50,8 +50,8 @@ GemmRunInfo runTiled(const GemmProblem& problem) {
     std::optional<RuntimeMatrixReader<Accumulator>> blockScaleA;
     std::optional<RuntimeMatrixReader<Accumulator>> blockScaleB;
     if (problem.epilogue.bias) bias.emplace(problem.epilogue.bias->values);
-    if (problem.a.preQuantizationScale) preScaleA.emplace(*problem.a.preQuantizationScale);
-    if (problem.b.preQuantizationScale) preScaleB.emplace(*problem.b.preQuantizationScale);
+    if (problem.a.preQuantizationScale) preScaleA.emplace(problem.a.preQuantizationScale->values);
+    if (problem.b.preQuantizationScale) preScaleB.emplace(problem.b.preQuantizationScale->values);
     if (problem.epilogue.scaleAlpha) scaleAlpha.emplace(problem.epilogue.scaleAlpha->values);
     if (problem.epilogue.scaleA) scaleA.emplace(*problem.epilogue.scaleA);
     if (problem.epilogue.scaleB) scaleB.emplace(*problem.epilogue.scaleB);
@@ -93,7 +93,15 @@ GemmRunInfo runTiled(const GemmProblem& problem) {
                     for (size_t reduction = 0; reduction < reductions; ++reduction) {
                         Accumulator value = conjugateIfNeeded(
                             a(rowBase + row, reductionBase + reduction), problem.a.conjugate);
-                        if (preScaleA) value *= (*preScaleA)[0];
+                        if (preScaleA) {
+                            const auto& binding = *problem.a.preQuantizationScale;
+                            const size_t index =
+                                binding.values.shape()[0] == 1
+                                    ? 0
+                                    : (binding.axis == MatrixAxis::Row ? rowBase + row
+                                                                       : reductionBase + reduction);
+                            value *= (*preScaleA)[index];
+                        }
                         aTile[row * reductions + reduction] = operandMath(quantizeA(value));
                     }
                 }
@@ -101,7 +109,15 @@ GemmRunInfo runTiled(const GemmProblem& problem) {
                     for (size_t column = 0; column < columns; ++column) {
                         Accumulator value = conjugateIfNeeded(
                             b(reductionBase + reduction, columnBase + column), problem.b.conjugate);
-                        if (preScaleB) value *= (*preScaleB)[0];
+                        if (preScaleB) {
+                            const auto& binding = *problem.b.preQuantizationScale;
+                            const size_t index =
+                                binding.values.shape()[0] == 1
+                                    ? 0
+                                    : (binding.axis == MatrixAxis::Row ? reductionBase + reduction
+                                                                       : columnBase + column);
+                            value *= (*preScaleB)[index];
+                        }
                         bTile[reduction * columns + column] = operandMath(quantizeB(value));
                     }
                 }
