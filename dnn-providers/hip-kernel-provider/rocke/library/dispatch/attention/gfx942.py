@@ -137,16 +137,19 @@ def _dense_spec(req: OperatorRequest):
     * ``num_persistent`` defaults to :data:`_GFX942_NUM_PERSISTENT` (304 CUs) rather
       than the shared 256. It drives BOTH the auto persistent decision and the grid
       size, so it is resolved before the mode branch.
-    * ``waves_per_eu`` and ``d64_kpad`` come from the kernel's own per-config policy
-      (``_p0_waves_per_eu`` / ``_p0_d64_kpad``), so the ``kernel_name`` tags and the
-      emitted binary cannot disagree. The kernel's module-level ``_P0_D64_KPAD``
-      default stays False -- this spec is what flips the shipped D64 path on, which
-      keeps a non-dispatch ``build_attention_dense`` byte-identical.
+    * ``waves_per_eu`` comes from the kernel's own per-config policy
+      (``_p0_waves_per_eu``), so the ``kernel_name`` tag and the emitted binary
+      cannot disagree.
+
+    The D64 K row-group pad is deliberately NOT set here: it is the shared
+    ``lds_k_group_pad`` field, whose default (8) is already the value gfx942 wants,
+    and which the gfx942 builder reads directly. Restating it would reintroduce the
+    per-arch duplicate that collapsing the two fields removed.
 
     The spec dataclass itself is REUSED from the gfx950 kernel module (as the gfx942
     kernel body reuses it); it is arch-neutral, only its tuned values differ.
     """
-    from kernels.gfx942.attention_dense import _p0_d64_kpad, _p0_waves_per_eu
+    from kernels.gfx942.attention_dense import _p0_waves_per_eu
     from kernels.gfx950.attention_dense import AttentionDenseSpec, _BLOCK_M
 
     assert isinstance(req, AttentionRequest)
@@ -188,7 +191,6 @@ def _dense_spec(req: OperatorRequest):
         persist_decode=req.dense_persist_decode.strip().lower(),
         ragged=ragged,
         waves_per_eu=_p0_waves_per_eu(head_size, dtype),
-        d64_kpad=_p0_d64_kpad(head_size),
     )
 
 

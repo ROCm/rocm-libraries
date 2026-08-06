@@ -37,7 +37,8 @@ from kernels.gfx942.attention_dense import (
     p0_kernel_name,
     run_attention_dense_torch,
     supports_attention_dense,
-    _p0_d64_kpad,
+    _p0_d64_kpad_active,
+    _p0_k_group_stride,
     _p0_use_exp2_fast,
     _p0_waves_per_eu,
 )
@@ -614,64 +615,76 @@ def test_dispatch_applies_gfx942_waves_per_eu_tuning_and_leaves_gfx950_alone():
     tuned = _dense_spec(_req("bf16", 64, "gfx942"))
     kernel = build_attention_dense(tuned, arch="gfx942")
     assert kernel.attrs.get("waves_per_eu") == 4
-    # D64 also folds in the K bank-conflict pad, so the suffix is _wpe4_d64kpad.
-    assert p0_kernel_name(tuned).endswith("_wpe4_d64kpad")
+    # The K row-group pad needs no gfx942 tag: the SHARED name already carries
+    # kpad{N} for it, so the gfx942 suffix ends at the waves-per-eu bump.
+    assert p0_kernel_name(tuned).endswith("_wpe4")
+    assert "_kpad8_" in p0_kernel_name(tuned)
 
 
 # --------------------------------------------------------------------------- #
 # P3 D64 K-LDS bank-conflict pad (AICK-1664 Hypothesis #3) wiring
 # --------------------------------------------------------------------------- #
-@pytest.mark.parametrize(
-    "head_size, expected",
-    [(64, True), (128, False)],
-)
-def test_d64_kpad_selector_matches_policy(head_size, expected):
-    """The per-config policy: ON for D64 (both dtypes), never for D128 (which already
-    carries a per-row K pad). Mirrors _p0_waves_per_eu -- a pure predicate dispatch
-    folds into spec.d64_kpad."""
-    assert _p0_d64_kpad(head_size) is expected
+@pytest.mark.parametrize("head_size, expected", [(64, True), (128, False)])
+def test_k_group_pad_active_only_on_the_packed_path(head_size, expected):
+    """The pad applies on the PACKED path only (rows_per_instr > 1, i.e. D64 here).
+    D128 packs one row per DMA instruction and already carries a per-row K pad, so
+    re-padding it would double-count. Same gate gfx950 spells `128 // head_size > 1`."""
+    assert _p0_d64_kpad_active(_spec(head_size=head_size)) is expected
 
 
-def test_d64_kpad_off_build_is_byte_identical_and_unnamed():
-    """A directly-built spec (dispatch not involved) leaves d64_kpad at the default
-    False, so the shipped/probe-off codegen stays byte-identical: no _kpad name tag and
-    the emitted symbol matches p0_kernel_name. This is the do-not-regress guard for the
-    'module constant default False' invariant."""
-    for spec in (_spec(head_size=64, dtype="fp16"), _spec(head_size=64, dtype="bf16")):
-        assert spec.d64_kpad is False
-        # endswith, not "in": at D64 the SHARED name carries its own gfx950
-        # kpad{N} token, which a substring test would match by accident.
-        assert not p0_kernel_name(spec).endswith("_d64kpad")
-        kd = build_attention_dense(spec, arch="gfx942")
-        assert kd.name == p0_kernel_name(spec)
+def test_k_group_stride_matches_the_gfx950_formula():
+    """One lever, one formula. gfx950's builder computes
+    ``LDROW = K_GROUP * D + spec.lds_k_group_pad``; gfx942 must agree exactly, or the
+    two arches have silently forked a shared spec field."""
+    for d, rpi in ((64, 2), (128, 1)):
+        spec = _spec(head_size=d)
+        assert _p0_k_group_stride(spec) == rpi * d + spec.lds_k_group_pad
+    # the shipped D64 value, spelled out so a default change is loud
+    assert _p0_k_group_stride(_spec(head_size=64)) == 136  # 2*64 + 8
 
 
-def test_d64_kpad_on_carries_the_kpad_tag_and_builds():
-    """With d64_kpad=True the K_lds layout + do_qk addressing change, so the name must
-    carry a _kpad tag (name-cache disambiguation, same class as _wpe / _b) and the two
-    specs must compile to different symbols. D128 ignores the flag entirely."""
+def test_k_group_pad_zero_reproduces_the_unpadded_layout():
+    """``lds_k_group_pad=0`` IS the A/B probe -- it is what prices the pad's ~2x, and
+    it replaced the old gfx942-private module override. It must disable the padded
+    layout and name itself distinguishably, or an A/B run silently compares a kernel
+    against itself through a name-keyed cache."""
     import dataclasses
 
-    off = _spec(head_size=64, dtype="fp16")
-    on = dataclasses.replace(off, d64_kpad=True)
-    assert p0_kernel_name(on).endswith("_d64kpad")
+    on = _spec(head_size=64, dtype="fp16")
+    off = dataclasses.replace(on, lds_k_group_pad=0)
+    assert _p0_d64_kpad_active(on) is True
+    assert _p0_d64_kpad_active(off) is False
     assert p0_kernel_name(on) != p0_kernel_name(off)
-    kd_on = build_attention_dense(on, arch="gfx942")
-    assert kd_on.name == p0_kernel_name(on)
-    # D128 never re-pads: the flag is inert there (no tag, no layout change).
-    d128 = dataclasses.replace(_spec(head_size=128, dtype="fp16"), d64_kpad=True)
-    assert not p0_kernel_name(d128).endswith("_d64kpad")
-    assert p0_kernel_name(d128) == p0_kernel_name(_spec(head_size=128, dtype="fp16"))
+    assert "_kpad8_" in p0_kernel_name(on)
+    assert "_kpad0_" in p0_kernel_name(off)
+    for spec in (on, off):
+        assert build_attention_dense(spec, arch="gfx942").name == p0_kernel_name(spec)
 
 
-def test_dispatch_applies_gfx942_d64_kpad_and_leaves_gfx950_alone():
-    """The gfx942 dispatch spec factory folds d64_kpad=True for D64 (both dtypes) and
-    leaves D128 + gfx950 untouched, so the dispatched kernel_name and the emitted K_lds
-    layout agree. The shared spec default (owned by the gfx950 file) must stay False."""
+def test_k_group_pad_is_inert_at_d128():
+    """D128 must ignore the field entirely -- no layout change, no name change --
+    since its K pad is per-row via _p0_lds_row_stride."""
+    import dataclasses
+
+    d128 = _spec(head_size=128, dtype="fp16")
+    for pad in (0, 8, 24):
+        alt = dataclasses.replace(d128, lds_k_group_pad=pad)
+        assert _p0_d64_kpad_active(alt) is False
+        assert p0_kernel_name(alt) == p0_kernel_name(d128)
+
+
+def test_dispatch_ships_the_padded_d64_path_without_restating_the_pad():
+    """The gfx942 dispatch spec must SHIP the pad at D64 -- but by inheriting the
+    shared default, not by restating it. Restating would recreate the per-arch
+    duplicate that collapsing ``d64_kpad`` into ``lds_k_group_pad`` removed, and would
+    let the two drift. gfx950's own factory is exercised alongside to pin that this
+    branch changed nothing for it."""
     from dispatch.attention import AttentionRequest
     from dispatch.attention.gfx942 import _dense_spec
     from dispatch.attention.gfx950 import _dense_spec as _dense_spec_gfx950
 
+    # Pin the shared default: every assertion below is relative to it, so a silent
+    # upstream change to the pad amount must fail loudly here rather than downstream.
     assert (
         AttentionDenseSpec(
             batch=1,
@@ -683,8 +696,8 @@ def test_dispatch_applies_gfx942_d64_kpad_and_leaves_gfx950_alone():
             dtype="fp16",
             causal=True,
             block_n=64,
-        ).d64_kpad
-        is False
+        ).lds_k_group_pad
+        == 8
     )
 
     def _req(dtype, d, arch):
@@ -703,19 +716,20 @@ def test_dispatch_applies_gfx942_d64_kpad_and_leaves_gfx950_alone():
             dense_persistent="off",
         )
 
-    # gfx942: D64 both dtypes ON, D128 OFF.
-    assert _dense_spec(_req("fp16", 64, "gfx942")).d64_kpad is True
-    assert _dense_spec(_req("bf16", 64, "gfx942")).d64_kpad is True
-    assert _dense_spec(_req("fp16", 128, "gfx942")).d64_kpad is False
-    assert _dense_spec(_req("bf16", 128, "gfx942")).d64_kpad is False
-    # gfx950: untouched, spec default preserved even for the D64 shape.
-    assert _dense_spec_gfx950(_req("fp16", 64, "gfx950")).d64_kpad is False
+    # D64 ships padded on both dtypes; D128 is inert.
+    for dtype in ("fp16", "bf16"):
+        assert _p0_d64_kpad_active(_dense_spec(_req(dtype, 64, "gfx942"))) is True
+        assert _p0_d64_kpad_active(_dense_spec(_req(dtype, 128, "gfx942"))) is False
+    # gfx950's factory also leaves the field at the shared default -- neither arm
+    # restates it, which is the point of unifying them.
+    assert _dense_spec_gfx950(_req("fp16", 64, "gfx950")).lds_k_group_pad == 8
 
-    # End-to-end: the dispatched D64 spec's _kpad tag reaches the emitted symbol.
+    # End-to-end: the dispatched D64 spec's pad reaches the emitted symbol + layout.
     tuned = _dense_spec(_req("fp16", 64, "gfx942"))
     kernel = build_attention_dense(tuned, arch="gfx942")
     assert kernel.name == p0_kernel_name(tuned)
-    assert kernel.name.endswith("_d64kpad")
+    assert "_kpad8_" in kernel.name
+    assert _p0_k_group_stride(tuned) == 136
 
 
 # --------------------------------------------------------------------------- #

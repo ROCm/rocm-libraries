@@ -12,13 +12,14 @@ Covers the acceptance matrix: D64/D128 x bf16/fp16 x default/persistent x GQA, c
 and full. Every case is in the gfx942 supported set (varlen / ragged / sliding-window
 are rejected on gfx942, so -- unlike the gfx950 sibling -- they are absent here).
 
-Two D64 codegen variants are both pinned so drift on either is caught:
-  * ``default_d64_*``  -- specs built DIRECTLY: d64_kpad defaults False (kpad-OFF).
+Both D64 K-LDS layouts are pinned so drift on either is caught:
+  * ``default_d64_*``  -- specs built DIRECTLY with ``lds_k_group_pad=0``: the UNPADDED
+    layout, i.e. the A/B baseline the pad's ~2x is measured against.
   * ``dispatch_d64_*`` -- specs built through the gfx942 dispatch factory
-    (``_dense_spec``), which folds d64_kpad=True for D64 -> this GUARDS the kpad-ON IR
-    that the shipped D64 path actually emits. Building via the dispatch spec (rather than
-    hard-coding ``d64_kpad=True``) means these cases auto-track any future D64 tuning
-    change, so re-blessing stays a one-command operation across the kernel's evolution.
+    (``_dense_spec``), which inherits the shared default pad -> this GUARDS the padded
+    IR the shipped D64 path actually emits. Building via the dispatch spec (rather than
+    hard-coding the pad) means these cases auto-track any future D64 tuning change, so
+    re-blessing stays a one-command operation across the kernel's evolution.
 
 There is NO cpp/python byte-identity companion test: ``library/kernels/`` has no C++
 engine mirror (AICK-1664 plan §5 Q3), so the dual-engine parity gate does not apply to
@@ -63,15 +64,16 @@ def _cases():
     while still exercising the full pipeline (both grid variants, both decodes).
 
     Two families of builders:
-      * ``mk`` builds an ``AttentionDenseSpec`` DIRECTLY, so ``d64_kpad`` stays at its
-        default (False). These pin the kpad-OFF codegen (the module defaults / probe-off
-        path) and MUST be kept.
+      * ``mk`` builds an ``AttentionDenseSpec`` DIRECTLY. The D64 cases pass
+        ``lds_k_group_pad=0`` explicitly, pinning the UNPADDED K layout -- keep them:
+        that layout is the A/B baseline, and nothing else in the fixture covers it now
+        that the shared field defaults the pad ON.
       * ``mk_dispatch`` routes a request through the gfx942 dispatch factory
         (``_dense_spec``), so the emitted spec carries whatever the SHIPPED path folds in
-        (for D64: ``d64_kpad=True`` + the bf16 ``waves_per_eu`` bump). These GUARD the
-        kpad-ON IR that actually ships. Because they re-derive the spec from the dispatch
-        policy rather than hard-coding the levers, a future D64 tuning change is captured
-        automatically on the next re-bless -- no per-lever edits to this fixture."""
+        (for D64: the inherited K row-group pad + the bf16 ``waves_per_eu`` bump). These
+        GUARD the IR that actually ships. Because they re-derive the spec from the
+        dispatch policy rather than hard-coding the levers, a future D64 tuning change is
+        captured automatically on the next re-bless -- no per-lever edits here."""
     from kernels.gfx942.attention_dense import (
         AttentionDenseSpec,
         build_attention_dense,
@@ -98,9 +100,9 @@ def _cases():
 
     def mk_dispatch(**over):
         """Build via the gfx942 dispatch spec so the case tracks the SHIPPED config
-        (incl. the folded D64 ``d64_kpad``/``waves_per_eu`` levers). Small Sq keeps the
-        auto persistent decision on the default grid, matching the ``mk`` D64 cases so
-        the ONLY delta vs. the kpad-OFF golden is the shipped kpad-ON layout."""
+        (incl. the inherited D64 K row-group pad and the ``waves_per_eu`` bump). Small
+        Sq keeps the auto persistent decision on the default grid, matching the ``mk``
+        D64 cases so the ONLY delta vs. the unpadded golden is the shipped pad."""
         req = AttentionRequest(
             batch=base["batch"],
             nhead_q=base["num_query_heads"],
@@ -120,13 +122,17 @@ def _cases():
         # --- default grid: dtype x head_size x causal/full x GQA/MHA x block_n ---
         "attention_dense_gfx942/default_d128_bf16_causal": mk(),
         "attention_dense_gfx942/default_d128_fp16_causal": mk(dtype="fp16"),
-        "attention_dense_gfx942/default_d64_bf16_causal": mk(head_size=64),
-        "attention_dense_gfx942/default_d64_fp16_causal": mk(
-            head_size=64, dtype="fp16"
+        # UNPADDED D64 (lds_k_group_pad=0): the A/B baseline layout. Explicit, because
+        # the shared field defaults the pad ON -- without it nothing pins this codegen.
+        "attention_dense_gfx942/default_d64_bf16_causal": mk(
+            head_size=64, lds_k_group_pad=0
         ),
-        # --- SHIPPED D64 path: dispatch folds d64_kpad=True (both dtypes) + the bf16
-        #     waves_per_eu bump. These guard the kpad-ON IR that actually ships; the
-        #     kpad-OFF default_d64_* cases above stay to pin the probe-off codegen. ---
+        "attention_dense_gfx942/default_d64_fp16_causal": mk(
+            head_size=64, dtype="fp16", lds_k_group_pad=0
+        ),
+        # --- SHIPPED D64 path: dispatch inherits the shared K row-group pad (both
+        #     dtypes) + the bf16 waves_per_eu bump. These guard the padded IR that
+        #     actually ships; the unpadded default_d64_* cases above pin the other. ---
         "attention_dense_gfx942/dispatch_d64_bf16_causal": mk_dispatch(head_size=64),
         "attention_dense_gfx942/dispatch_d64_fp16_causal": mk_dispatch(
             head_size=64, dtype="fp16"

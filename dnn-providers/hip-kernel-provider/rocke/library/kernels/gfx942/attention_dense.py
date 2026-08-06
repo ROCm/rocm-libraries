@@ -86,7 +86,8 @@ Implementation status (see the AICK-1664 plan for the full ordered work list)
         D64 K bank-pad, wide4 (WG=256), K single-buffer ........... IN PROGRESS
         (waves-per-eu DONE via _p0_waves_per_eu; **D64 K bank-pad DONE and ADOPTED**
         -- cross-part-confirmed large win on both D64 dtypes, wired per-config via
-        ``spec.d64_kpad`` (see :func:`_p0_d64_kpad`), golden re-blessed against the
+        the SHARED ``spec.lds_k_group_pad`` (the same field and formula gfx950
+        uses -- one lever, not a per-arch duplicate), golden re-blessed against the
         shipped path; wide4 / K-single-buf still TODO. D128 -> 2 WG/CU is the open
         item and needs the LDS and register floors cut together -- see "Problem
         category" above. ``BLOCK_M`` is a further occupancy axis: contrary to the
@@ -210,26 +211,25 @@ _P0_LDS_PAD = 8
 _P0_V_PAD = 8
 
 # --- D64 K-LDS bank-conflict fix (AICK-1664 Hypothesis #3) -- ADOPTED, not pending. ---
-# STATUS: the lever is PROVEN (cross-part, both D64 dtypes, all seqlens) and is WIRED
-# ON for D64 through `spec.d64_kpad` (see _p0_d64_kpad / _p0_d64_kpad_active), so the
-# SHIPPED D64 path emits the pad. This module constant stays False purely as the A/B
-# probe override -- it is NOT the shipped switch, and "default False" below means
-# "the probe knob is off", not "the pad is off".
+# There is NO gfx942-private switch for this: the pad amount is the SHARED
+# ``AttentionDenseSpec.lds_k_group_pad`` (default 8), which gfx950 owns and this
+# builder reuses verbatim via _p0_d64_kpad_active / _p0_k_group_stride. Both arches
+# pad between async-DMA row-GROUPS by the same formula for the same reason; gfx942
+# arrived at it from a measured ~2x ON/OFF ablation and gfx950 from a bank/phase
+# model, and both landed on 8. Set the field to 0 to reproduce the unpadded layout
+# for A/B -- that IS the probe, so no module-level override constant is needed.
 # MECHANISM (corrected): the static codegen A/B is IDENTICAL with the pad on and off
 # (VGPR, LDS-instruction stream and s_nop all unchanged), so the once-hypothesised
 # "frees registers -> more ILP, compounding" mechanism is DEBUNKED. The win is purely
 # eliminated bank-conflict REPLAY -- the same ds_read replayed ~8x at 32-way instead
 # of ~4-way -- which is a runtime effect invisible to any static probe.
-# Default False => shipped codegen byte-identical. When True, the D64 K_lds is laid
-# out with a *2-row-group boundary pad* (group stride 2*D + _P0_LDS_PAD elements) so
-# the do_qk K reads drop from a full 32-way bank conflict to 4-way (matching D128),
-# WITHOUT losing async-DMA efficiency (the contiguous 2-rows-per-instruction DMA
-# still writes one whole group per instruction; the pad sits at the group boundary
-# it never touches). This is the "swizzled LDS layout" arm of the hypothesis (a
-# strictly better realization than "ROWS_PER_INSTR=1 + half DMA efficiency"). The
-# read decomposes krow -> (group = krow >> 1, within = krow & 1). Flipped by the
-# replayable probe under builders/gfx942/attention/prefill/. gfx942/D64 only.
-_P0_D64_KPAD = False
+# With a non-zero pad the D64 K_lds takes a *row-group boundary pad* (group stride
+# rows_per_instr*D + pad elements) so the do_qk K reads drop from a full 32-way bank
+# conflict to 4-way (matching D128), WITHOUT losing async-DMA efficiency (the
+# contiguous 2-rows-per-instruction DMA still writes one whole group per instruction;
+# the pad sits at the group boundary it never touches). This is the "swizzled LDS
+# layout" arm of the hypothesis (strictly better than "ROWS_PER_INSTR=1 + half DMA
+# efficiency"). The read decomposes krow -> (group = krow >> 1, within = krow & 1).
 
 # Runbook lever 7 (optimization_runbook.md §8.4): iglp_opt is the canned backend
 # MFMA / ds_read / ds_write interleave (llvm.amdgcn.iglp.opt), distinct from the
@@ -283,26 +283,14 @@ def p0_kernel_name(spec: AttentionDenseSpec) -> str:
     cannot be extended: it is emitted into the IR as the symbol, so changing it would
     break the gfx950 golden / byte-identity.
 
-    The D64 K-LDS bank-conflict pad (:func:`_p0_d64_kpad_active`) adds a further
-    ``_d64kpad`` tag: it changes the emitted K_lds layout + do_qk addressing, so a
-    pad-on and a pad-off spec that agree on every other field compile to different
-    binaries and must not collide in a name-keyed cache (the same collision class as
-    ``batch`` / ``waves_per_eu``).
-
-    .. warning::
-       At D64 the shared ``kernel_name()`` also emits a ``kpad{N}`` token of its own,
-       from the gfx950-owned ``lds_k_group_pad`` field. **That token says nothing
-       about a gfx942 binary** -- this builder never reads that field; the gfx942 pad
-       is driven entirely by ``spec.d64_kpad``. The two are the same lever expressed
-       per-arch (see the field comment in the gfx950 module), and unifying them is a
-       follow-up; until then the tags are deliberately spelled differently so a
-       gfx942 symbol cannot be misread, and so a substring test for one cannot match
-       the other.
+    The K row-group pad needs NO tag here: it also changes the emitted K_lds layout
+    and do_qk addressing, but it lives in the shared ``lds_k_group_pad`` field, and
+    the shared ``kernel_name()`` already emits a ``kpad{N}`` token for it on the
+    packed path. Adding a second gfx942 tag would restate the same fact under a
+    different name -- exactly the duplication that collapsing the two spec fields
+    removed.
     """
-    name = f"{spec.kernel_name()}_gfx942_b{spec.batch}_wpe{spec.waves_per_eu}"
-    if _p0_d64_kpad_active(spec):
-        name += "_d64kpad"
-    return name
+    return f"{spec.kernel_name()}_gfx942_b{spec.batch}_wpe{spec.waves_per_eu}"
 
 
 # In-scope for the gfx942 port (AICK-1664). supports_attention_dense rejects
@@ -416,40 +404,31 @@ def _p0_lds_row_stride(head_size: int) -> int:
     return head_size + _P0_LDS_PAD if _p0_rows_per_instr(head_size) == 1 else head_size
 
 
-def _p0_d64_kpad(head_size: int) -> bool:
-    """Per-config D64 K-LDS bank-conflict-pad policy (P3, AICK-1664 Hypothesis #3).
-
-    Consulted by the gfx942 dispatch spec factory (``_dense_spec``) -- the exact
-    mirror of :func:`_p0_waves_per_eu`: a pure per-config predicate that dispatch
-    folds into ``spec.d64_kpad`` so the kernel-name ``_kpad`` tag and the emitted
-    K_lds layout always agree.
-
-    ON for **D64 (both dtypes)**: the 2-row-group boundary pad drops the do_qk K reads
-    from a full 32-way LDS bank conflict to 4-way (matching the D128 QK path), measured
-    large-positive on both dtypes with bit-identical correctness and 0 spill (the A/B
-    method and its measurements are in the AICK-1664 plan). D128 already carries a
-    per-row K pad (:func:`_p0_lds_row_stride`) so it is never re-padded here.
-    """
-    return head_size == 64
-
-
 def _p0_d64_kpad_active(spec: AttentionDenseSpec) -> bool:
-    """Whether the D64 K-LDS 2-row-group bank-conflict pad is EMITTED for ``spec``.
+    """Whether the D64 K-LDS row-group bank-conflict pad is EMITTED for ``spec``.
 
-    Active when the config opted in via ``spec.d64_kpad`` (set by the gfx942 dispatch
-    factory, see :func:`_p0_d64_kpad`) OR the module-level ``_P0_D64_KPAD`` override is
-    on (the replayable A/B probe), AND the head size is D64. The module constant
-    defaults False so a non-dispatch :func:`build_attention_dense` stays byte-identical;
-    the dispatch spec is what flips the shipped D64 path on. D128 is never affected."""
-    return (spec.d64_kpad or _P0_D64_KPAD) and spec.head_size == 64
+    Reads the SHARED ``spec.lds_k_group_pad``, which gfx950 owns and gfx942 reuses
+    verbatim: both arches pad between async-DMA row-GROUPS by the same formula
+    (``rows_per_instr * head_size + pad``) for the same reason, so this is one lever
+    with one field rather than a per-arch duplicate. gfx942 derived the pad from a
+    measured ~2x ON/OFF ablation, gfx950 from a bank/phase model, and both landed on
+    the same 8-element default.
+
+    Active only on the PACKED path (``rows_per_instr > 1``, i.e. D64 here): D128
+    already carries a per-row K pad via :func:`_p0_lds_row_stride`, so it must never
+    be re-padded. ``lds_k_group_pad=0`` reproduces the unpadded layout for A/B --
+    which is also how the pad's ~2x is priced, no module-level probe constant needed.
+    """
+    return spec.lds_k_group_pad > 0 and _p0_rows_per_instr(spec.head_size) > 1
 
 
-def _p0_k_group_stride(head_size: int) -> int:
-    """K_lds physical group stride in ELEMENTS when the D64 kpad probe is active.
+def _p0_k_group_stride(spec: AttentionDenseSpec) -> int:
+    """K_lds physical group stride in ELEMENTS when the row-group pad is active.
 
     A group is ROWS_PER_INSTR (=2 at D64) contiguous rows written by one async-DMA
-    instruction; the pad sits at the group boundary (never DMA-touched)."""
-    return _p0_rows_per_instr(head_size) * head_size + _P0_LDS_PAD
+    instruction; the pad sits at the group boundary (never DMA-touched). Identical
+    to the gfx950 builder's ``LDROW = K_GROUP * D + spec.lds_k_group_pad``."""
+    return _p0_rows_per_instr(spec.head_size) * spec.head_size + spec.lds_k_group_pad
 
 
 def _p0_lds_bytes(spec: AttentionDenseSpec) -> int:
@@ -468,7 +447,7 @@ def _p0_lds_bytes(spec: AttentionDenseSpec) -> int:
     """
     if _p0_d64_kpad_active(spec):
         rpi = _p0_rows_per_instr(spec.head_size)
-        k_bytes = (spec.block_n // rpi) * _p0_k_group_stride(spec.head_size) * 2
+        k_bytes = (spec.block_n // rpi) * _p0_k_group_stride(spec) * 2
     else:
         k_bytes = spec.block_n * _p0_lds_row_stride(spec.head_size) * 2
     if _p0_use_cfvst(spec.head_size, spec.dtype):
@@ -721,12 +700,12 @@ def _build_attention_dense_p0(spec: AttentionDenseSpec) -> KernelDef:
     # [1, block_n // rows_per_instr, _p0_k_group_stride] 2-row-group layout below.
     USE_CFVST = _p0_use_cfvst(D, spec.dtype)  # P1 conflict-free V: D128 fp16 only
     LDROW = _p0_lds_row_stride(D)
-    # AICK-1664 (Hypothesis #3): D64 K_lds with a 2-row-group boundary pad, gated per
-    # config via spec.d64_kpad (dispatch) or the _P0_D64_KPAD probe override.
+    # AICK-1664 (Hypothesis #3): D64 K_lds with a row-group boundary pad, sized by the
+    # shared spec.lds_k_group_pad (0 disables it -- that is the A/B probe).
     KPAD_D64 = _p0_d64_kpad_active(spec)
     if KPAD_D64:
         K_GROUP = ROWS_PER_INSTR  # rows per async-DMA instruction (=2 at D64)
-        K_GROUP_STRIDE = _p0_k_group_stride(D)  # 2*D + _P0_LDS_PAD elems
+        K_GROUP_STRIDE = _p0_k_group_stride(spec)  # rows_per_instr*D + pad elems
         K_lds = b.smem_alloc(
             dtype, [1, BN // K_GROUP, K_GROUP_STRIDE], name_hint="Klds"
         )

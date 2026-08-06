@@ -156,27 +156,6 @@ class AttentionDenseSpec:
     # waves_per_eu: occupancy hint. 2 is a free win (tighter allocation, still 2
     #   waves/SIMD); 3 is a measured trap (VGPR<=170 forces spills -> -20%).
     waves_per_eu: int = 2
-    # d64_kpad: emit the D64 K-LDS 2-row-group bank-conflict pad (gfx942 P3, AICK-1664
-    #   Hypothesis #3). D64 has no per-row K pad by construction (2 rows/DMA instr need
-    #   a contiguous stride), so its QK K-reads take a full 32-way LDS bank conflict.
-    #   When True the gfx942 K_lds is laid out [1, block_n//2, 2*head_size+8] with the
-    #   pad at the 2-row-group boundary the DMA never touches, dropping the conflict to
-    #   4-way (matches the D128 QK path). D64 only (ignored at D128, which already
-    #   carries a per-row pad) and consumed ONLY by the gfx942 kernel -- the gfx950
-    #   builder never reads this field, so gfx950 codegen is byte-identical. Default
-    #   False keeps every non-gfx942-dispatch build byte-identical; the gfx942 dispatch
-    #   factory (dispatch.attention.gfx942._dense_spec) flips it on for D64. See
-    #   kernels/gfx942/attention_dense.py::_p0_d64_kpad / _p0_d64_kpad_active.
-    #
-    #   This is the gfx942 twin of ``lds_k_group_pad`` below: the same lever -- pad
-    #   between DMA row-groups to break the D64 QK bank pattern -- derived separately
-    #   per arch, and the two landed on the SAME 8-element pad from opposite
-    #   directions: gfx950 from a bank/phase model, gfx942 from a measured ~2x ON/OFF
-    #   ablation. They stay separate fields because the consumers differ (a bool
-    #   switch on a fixed gfx942 layout vs a parameterized gfx950 pitch) and
-    #   collapsing them would re-bless both arches' goldens. Worth unifying once the
-    #   gfx942 layout is parameterized too.
-    d64_kpad: bool = False
     # lds_k_group_pad: bf16 elements of K padding between DMA row-GROUPS, on the
     #   packed head_size<128 path only (ignored at 128, which pads per row via
     #   _LDS_PAD). The async DMA writes 128//head_size rows contiguously, so a
