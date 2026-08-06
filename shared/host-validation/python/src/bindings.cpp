@@ -7,6 +7,7 @@
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
 
+#include <algorithm>
 #include <complex>
 #include <cstring>
 #include <optional>
@@ -223,6 +224,42 @@ Tensor generateOwned(ScalarType type, std::vector<size_t> shape, const Generatio
     Tensor output(type, Shape(std::move(shape)));
     generate(output.mutableView(), options);
     return output;
+}
+
+Tensor referenceContractionOwned(const Tensor& a, std::vector<ContractionDimension> aDimensions,
+                                 const Tensor& b, std::vector<ContractionDimension> bDimensions,
+                                 const Tensor& c, std::vector<ContractionDimension> cDimensions,
+                                 std::vector<ContractionDimension> dDimensions,
+                                 std::vector<ContractionDimension> reductionDimensions,
+                                 ScalarType outputType, ScalarType accumulatorType,
+                                 std::complex<double> alpha, std::complex<double> beta,
+                                 std::optional<ScalarType> computeTypeA,
+                                 std::optional<ScalarType> computeTypeB, MathMode mathMode,
+                                 OutputSelection outputSelection) {
+    std::vector<size_t> outputDimensions;
+    outputDimensions.reserve(dDimensions.size());
+    for (const ContractionDimension dimension : dDimensions) {
+        const auto position = std::find(cDimensions.begin(), cDimensions.end(), dimension);
+        if (position == cDimensions.end())
+            throw std::invalid_argument(
+                "Python reference_contraction D dimension is absent from C.");
+        outputDimensions.push_back(c.shape()[position - cDimensions.begin()]);
+    }
+
+    Tensor d(outputType, Shape(std::move(outputDimensions)));
+    TensorContractionOperand operandA(a.view(), std::move(aDimensions));
+    TensorContractionOperand operandB(b.view(), std::move(bDimensions));
+    operandA.computeType = computeTypeA;
+    operandB.computeType = computeTypeB;
+    TensorContractionProblem problem(
+        std::move(operandA), std::move(operandB), c.view(), std::move(cDimensions), d.mutableView(),
+        std::move(dDimensions), std::move(reductionDimensions), accumulatorType);
+    problem.alpha = alpha;
+    problem.beta = beta;
+    problem.mathMode = mathMode;
+    problem.outputSelection = std::move(outputSelection);
+    referenceTensorContraction(problem);
+    return d;
 }
 }  // namespace
 
@@ -499,4 +536,11 @@ NB_MODULE(_roc_host_validation, module) {
                "output_selection"_a = OutputSelection::all());
     module.def("reference_sum", &referenceSumOwned, "input"_a, "output_type"_a,
                "accumulator_type"_a, "axes"_a);
+    module.def(
+        "reference_contraction", &referenceContractionOwned, "a"_a, "a_dimensions"_a, "b"_a,
+        "b_dimensions"_a, "c"_a, "c_dimensions"_a, "d_dimensions"_a, "reduction_dimensions"_a,
+        "output_type"_a, "accumulator_type"_a, "alpha"_a = std::complex<double>(1.0, 0.0),
+        "beta"_a = std::complex<double>(0.0, 0.0), "compute_type_a"_a = std::optional<ScalarType>{},
+        "compute_type_b"_a = std::optional<ScalarType>{}, "math_mode"_a = MathMode::Default,
+        "output_selection"_a = OutputSelection::all());
 }

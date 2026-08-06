@@ -654,6 +654,27 @@ class TensorAndGemmTests(unittest.TestCase):
             np.sum(integer_values, axis=1, dtype=np.int32),
         )
 
+    def test_tensor_contraction_matches_numpy_einsum(self):
+        a = np.arange(24, dtype=np.float32).reshape(2, 3, 2, 2) - 5
+        b = np.arange(32, dtype=np.float32).reshape(2, 4, 2, 2) - 7
+        c = np.arange(24, dtype=np.float32).reshape(2, 3, 4)
+        observed = hv.reference_contraction(
+            hv.from_numpy(a),
+            [0, 1, 3, 4],
+            hv.from_numpy(b),
+            [0, 2, 3, 4],
+            hv.from_numpy(c),
+            [0, 1, 2],
+            [0, 1, 2],
+            [3, 4],
+            hv.ScalarType.Float32,
+            hv.ScalarType.Float32,
+            alpha=2.0,
+            beta=-1.0,
+        )
+        expected = 2.0 * np.einsum("bmxy,bnxy->bmn", a, b) - c
+        np.testing.assert_array_equal(hv.to_numpy(observed), expected)
+
 
 if __name__ == "__main__":
     unittest.main()
