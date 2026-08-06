@@ -398,13 +398,16 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
 
     # Check global store vector size and disable default epilogue for
     # vec_size_c > 1
-    if (
-        spec.vector_size_c is not None
-        and spec.vector_size_c > 1
-        and spec.epilogue == "default"
-    ):
+    _eff_vec_c = (
+        spec.vector_size_c
+        if spec.vector_size_c is not None
+        else ImplicitGemmConvSpec.default_vector_sizes(
+            spec.problem.C, spec.problem.K, spec.data.dtype_d
+        )[2]
+    )
+    if _eff_vec_c > 1 and spec.epilogue == "default":
         return False, (
-            f"default epilogue is not supported with vector size c: {spec.vector_size_c}"
+            f"default epilogue is not supported with vector size c: {_eff_vec_c}"
         )
 
     # The MMA *family* is selected from the target's wave size: CDNA (wave64)

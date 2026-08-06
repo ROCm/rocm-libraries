@@ -41,9 +41,11 @@ Shape / dtype parameters mirror bake_off_implicit_gemm.py exactly.
 from __future__ import annotations
 
 import argparse
+import csv
 import itertools
 import os
 import random
+import re
 import sys
 from dataclasses import dataclass
 from typing import List
@@ -498,7 +500,7 @@ _CK_DTYPE_STR = {"fp32": "fp32", "fp16": "fp16", "bf16": "bfp16"}
 
 def _run_ckprofiler(
     problem, dtype: str, ckprofiler: str, converter_script: str, forw: int, verify: int
-) -> None:
+) -> "list[dict]":
     """Delegate to convert_miopen_driver_to_profiler.py for the given ConvProblem.
 
     Builds a synthetic args namespace that mirrors what the converter script's
@@ -508,8 +510,12 @@ def _run_ckprofiler(
     ``forw`` follows MIOpenDriver -F convention:
       0 fwd+bwd_data+bwd_weight   1 fwd   2 bwd_data   4 bwd_weight
       3 fwd+bwd_data   5 fwd+bwd_weight   6 bwd_data+bwd_weight
+
+    Returns a list of dicts with keys ``direction``, ``ms``, ``tflops``, ``gbps``
+    parsed from ckProfiler's "Best Perf:" output lines.
     """
     import importlib.util
+    import subprocess
     import types
 
     ck_dtype_str = _CK_DTYPE_STR.get(dtype)
@@ -518,7 +524,7 @@ def _run_ckprofiler(
             f"[ckprofiler] dtype={dtype!r} is not supported by ckProfiler; skipping",
             file=sys.stderr,
         )
-        return
+        return []
 
     # Load the converter script as a module without executing its __main__ block.
     spec = importlib.util.spec_from_file_location("_ck_converter", converter_script)
@@ -528,7 +534,7 @@ def _run_ckprofiler(
     p = problem
 
     # Build a namespace that matches the attributes the converter's argparse produces.
-    args = types.SimpleNamespace(
+    ck_args = types.SimpleNamespace(
         ck_profiler_cmd=ckprofiler,
         data_type=ck_dtype_str,
         in_layout="NHWC" if not p.is_3d else "NDHWC",
@@ -560,8 +566,73 @@ def _run_ckprofiler(
         list_instances=False,
     )
 
-    mod.init_const_args(args)
-    mod.run_ck_profiler(args)
+    # Patch run_ck_profiler_cmd to capture stdout while still printing it.
+    # ckProfiler (grouped_conv) prints:
+    #   Best configuration parameters:
+    #   name: ...
+    #   avg_time: <ms>
+    #   tflops: <tflops>
+    #   GB/s: <gbps>
+    _best_cfg_re = re.compile(
+        r"Best configuration parameters:.*?avg_time:\s*([\d.]+).*?tflops:\s*([\d.]+).*?GB/s:\s*([\d.]+)",
+        re.DOTALL,
+    )
+    # Also accept the compact single-line format used by other CK profilers:
+    #   Best Perf: <ms> ms, <tflops> TFlops, <gbps> GB/s
+    _best_perf_re = re.compile(
+        r"Best Perf:\s*([\d.]+)\s*ms,\s*([\d.]+)\s*TFlops,\s*([\d.]+)\s*GB/s"
+    )
+    captured_rows: list[dict] = []
+    _orig_run_cmd = mod.run_ck_profiler_cmd
+
+    def _patched_run_cmd(cmd):
+        print("ckProfiler command:")
+        print(" ".join(cmd))
+        result = subprocess.run(
+            cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+        output = result.stdout + result.stderr
+        print(result.stdout, end="")
+        print(result.stderr, end="", file=sys.stderr)
+        # Infer direction from the op name embedded in the command.
+        direction = "fwd"
+        for token in cmd:
+            if "bwd_weight" in token:
+                direction = "wgrad"
+                break
+            if "bwd_data" in token:
+                direction = "bwd_data"
+                break
+        for m in _best_cfg_re.finditer(output):
+            captured_rows.append(
+                {
+                    "direction": direction,
+                    "ms": float(m.group(1)),
+                    "tflops": float(m.group(2)),
+                    "gbps": float(m.group(3)),
+                }
+            )
+        for m in _best_perf_re.finditer(output):
+            captured_rows.append(
+                {
+                    "direction": direction,
+                    "ms": float(m.group(1)),
+                    "tflops": float(m.group(2)),
+                    "gbps": float(m.group(3)),
+                }
+            )
+
+    mod.run_ck_profiler_cmd = _patched_run_cmd
+    try:
+        mod.init_const_args(ck_args)
+        # init_const_args overwrites ck_profiler_cmd with a hardcoded relative
+        # path ("../build/bin/ckProfiler"); restore the user-supplied binary.
+        ck_args.ck_profiler_cmd = ckprofiler
+        mod.run_ck_profiler(ck_args)
+    finally:
+        mod.run_ck_profiler_cmd = _orig_run_cmd
+
+    return captured_rows
 
 
 # ---------------------------------------------------------------------------
@@ -662,6 +733,17 @@ def main() -> int:
             ">1 = fixed degree, "
             "-1 = auto (CK formula per tile config)"
         ).replace("%(auto)s", str(list(_SPLIT_K_AUTO))),
+    )
+
+    parser.add_argument(
+        "--csv",
+        default=None,
+        metavar="FILE",
+        help=(
+            "write combined rocke + ckProfiler results to FILE (CSV format). "
+            "Each row is one rocke kernel; ck_tflops, ck_ms, ck_gbps, and "
+            "speedup_rocke_vs_ck columns are populated when --ckprofiler is also set."
+        ),
     )
 
     ck_grp = parser.add_argument_group(
@@ -793,7 +875,7 @@ def main() -> int:
         is_valid_wgrad_spec,
     )
     from rocke.runtime import synchronize_and_release, time_launches
-    from rocke.runtime.hip_module import Runtime
+    from rocke.runtime.hip_module import HipError, Runtime
     from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
     def _u8(t):
@@ -874,59 +956,148 @@ def main() -> int:
         )
         cases = [(problem, args.dtype)]
 
-    all_rc = 0
-    for case_idx, (problem, dtype) in enumerate(cases):
-        if len(cases) > 1:
-            print(f"\n{'#'*72}", flush=True)
-            print(
-                f"# Case {case_idx + 1}/{len(cases)}: {problem.short()} "
-                f"dtype={dtype} direction={args.direction}",
-                flush=True,
-            )
-            print(f"{'#'*72}", flush=True)
+    _csv_fields = [
+        "shape",
+        "dtype",
+        "direction",
+        "tile_m",
+        "tile_n",
+        "tile_k",
+        "warp_m",
+        "warp_n",
+        "warp_tile_mn",
+        "warp_tile_k",
+        "pipeline",
+        "epilogue",
+        "split_k",
+        "rocke_ms",
+        "rocke_tflops",
+        "rocke_gbps",
+        "passed",
+        "kernel_name",
+        "ck_tflops",
+        "ck_ms",
+        "ck_gbps",
+        "speedup_rocke_vs_ck",
+    ]
 
-        if args.ckprofiler is not None:
-            _ck_forw = {"fwd": 1, "wgrad": 4}[args.direction]
-            _run_ckprofiler(
+    all_rc = 0
+    # Maps (shape, dtype, direction) -> best CK tflops/ms/gbps for that case.
+    # Populated before the rocke sweep so the CSV join is available immediately.
+    ck_best: dict[tuple, dict] = {}
+
+    _csv_file = None
+    _csv_writer = None
+    if args.csv is not None:
+        _csv_file = open(args.csv, "w", newline="")
+        _csv_writer = csv.DictWriter(_csv_file, fieldnames=_csv_fields)
+        _csv_writer.writeheader()
+        _csv_file.flush()
+
+    n_csv_rows = 0
+    try:
+        for case_idx, (problem, dtype) in enumerate(cases):
+            if len(cases) > 1:
+                print(f"\n{'#'*72}", flush=True)
+                print(
+                    f"# Case {case_idx + 1}/{len(cases)}: {problem.short()} "
+                    f"dtype={dtype} direction={args.direction}",
+                    flush=True,
+                )
+                print(f"{'#'*72}", flush=True)
+
+            if args.ckprofiler is not None:
+                _ck_forw = {"fwd": 1, "wgrad": 4}[args.direction]
+                ck_rows = _run_ckprofiler(
+                    problem=problem,
+                    dtype=dtype,
+                    ckprofiler=args.ckprofiler,
+                    converter_script=args.ckprofiler_script,
+                    forw=_ck_forw,
+                    verify=int(args.verify),
+                )
+                # Keep the best (highest tflops) CK result for this case.
+                _key = (problem.short(), dtype, args.direction)
+                for row in ck_rows:
+                    if row["direction"] == args.direction:
+                        prev = ck_best.get(_key)
+                        if prev is None or row["tflops"] > prev["tflops"]:
+                            ck_best[_key] = row
+
+            _common = dict(
+                args=args,
                 problem=problem,
                 dtype=dtype,
-                ckprofiler=args.ckprofiler,
-                converter_script=args.ckprofiler_script,
-                forw=_ck_forw,
-                verify=int(args.verify),
+                arch=arch,
+                target=target,
+                compile_kernel=compile_kernel,
+                ConvDataSpec=ConvDataSpec,
+                synchronize_and_release=synchronize_and_release,
+                time_launches=time_launches,
+                Runtime=Runtime,
+                KernelLauncher=KernelLauncher,
+                LaunchConfig=LaunchConfig,
+                u8=_u8,
             )
 
-        _common = dict(
-            args=args,
-            problem=problem,
-            dtype=dtype,
-            arch=arch,
-            target=target,
-            compile_kernel=compile_kernel,
-            ConvDataSpec=ConvDataSpec,
-            synchronize_and_release=synchronize_and_release,
-            time_launches=time_launches,
-            Runtime=Runtime,
-            KernelLauncher=KernelLauncher,
-            LaunchConfig=LaunchConfig,
-            u8=_u8,
-        )
+            if args.direction == "wgrad":
+                rc, rocke_results = _run_wgrad_sweep(
+                    **_common,
+                    WgradConvSpec=WgradConvSpec,
+                    build_implicit_gemm_conv_wgrad=build_implicit_gemm_conv_wgrad,
+                    is_valid_wgrad_spec=is_valid_wgrad_spec,
+                )
+            else:
+                rc, rocke_results = _run_sweep(
+                    **_common,
+                    ImplicitGemmConvSpec=ImplicitGemmConvSpec,
+                    build_implicit_gemm_conv=build_implicit_gemm_conv,
+                    is_valid_spec_for_problem=is_valid_spec_for_problem,
+                )
+            all_rc = all_rc or rc
 
-        if args.direction == "wgrad":
-            rc = _run_wgrad_sweep(
-                **_common,
-                WgradConvSpec=WgradConvSpec,
-                build_implicit_gemm_conv_wgrad=build_implicit_gemm_conv_wgrad,
-                is_valid_wgrad_spec=is_valid_wgrad_spec,
-            )
-        else:
-            rc = _run_sweep(
-                **_common,
-                ImplicitGemmConvSpec=ImplicitGemmConvSpec,
-                build_implicit_gemm_conv=build_implicit_gemm_conv,
-                is_valid_spec_for_problem=is_valid_spec_for_problem,
-            )
-        all_rc = all_rc or rc
+            if _csv_writer is not None and rocke_results:
+                _shape = problem.short()
+                _key = (_shape, dtype, args.direction)
+                _ck = ck_best.get(_key)
+                r = rocke_results[0]  # already sorted by tflops desc; [0] is best
+                speedup = (r.tflops / _ck["tflops"]) if _ck else None
+                _csv_writer.writerow(
+                    {
+                        "shape": _shape,
+                        "dtype": dtype,
+                        "direction": args.direction,
+                        "tile_m": r.tile_m,
+                        "tile_n": r.tile_n,
+                        "tile_k": r.tile_k,
+                        "warp_m": r.warp_m,
+                        "warp_n": r.warp_n,
+                        "warp_tile_mn": r.warp_tile_mn,
+                        "warp_tile_k": r.warp_tile_k,
+                        "pipeline": r.pipeline,
+                        "epilogue": r.epilogue,
+                        "split_k": r.split_k,
+                        "rocke_ms": r.ms,
+                        "rocke_tflops": r.tflops,
+                        "rocke_gbps": r.gbps,
+                        "passed": r.passed,
+                        "kernel_name": r.kernel_name,
+                        "ck_tflops": _ck["tflops"] if _ck else "",
+                        "ck_ms": _ck["ms"] if _ck else "",
+                        "ck_gbps": _ck["gbps"] if _ck else "",
+                        "speedup_rocke_vs_ck": (
+                            f"{speedup:.4f}" if speedup is not None else ""
+                        ),
+                    }
+                )
+                _csv_file.flush()
+                n_csv_rows += 1
+    finally:
+        if _csv_file is not None:
+            _csv_file.close()
+            if n_csv_rows:
+                print(f"\nResults written to {args.csv} ({n_csv_rows} rows).")
+
     return all_rc
 
 
@@ -1009,7 +1180,7 @@ def _run_sweep(
             f"{dtype} convolution is not supported on this target.",
             file=sys.stderr,
         )
-        return 2
+        return 2, []
 
     _tile_mn = _TILE_MN_GFX1250 if arch == "gfx1250" else _TILE_MN
     _warp_mn = _WARP_MN_GFX1250 if arch == "gfx1250" else _WARP_MN
@@ -1130,11 +1301,24 @@ def _run_sweep(
         artifact = compile_kernel(kernel, arch=arch)
         n_built += 1
 
-        launcher = KernelLauncher(
-            hsaco=artifact.hsaco,
-            kernel_name=artifact.kernel_name,
-            signature=sig,
-        )
+        try:
+            launcher = KernelLauncher(
+                hsaco=artifact.hsaco,
+                kernel_name=artifact.kernel_name,
+                signature=sig,
+            )
+        except HipError as e:
+            n_skipped += 1
+            print(
+                f"[skip] kernel load failed for {artifact.kernel_name} "
+                f"tile={tile_m}x{tile_n}x{tile_k} "
+                f"warp={warp_m}x{warp_n} "
+                f"atom={warp_tile_mn}x{warp_tile_mn}x{warp_tile_k} "
+                f"{pipeline}/{epilogue}: {e}",
+                file=sys.stderr,
+                flush=True,
+            )
+            continue
         grid = _grid_for_spec(spec, p)
         block = (spec.block_size, 1, 1)
         stream = 0
@@ -1170,7 +1354,7 @@ def _run_sweep(
                 rt.free(A_dev)
                 rt.free(B_dev)
                 rt.free(D_dev)
-                return 1
+                return 1, []
             rt.memset(D_dev, 0, D_t.nbytes)
 
         ms = time_launches(
@@ -1225,7 +1409,7 @@ def _run_sweep(
 
     if not results:
         print("No valid configurations found.", file=sys.stderr)
-        return 1
+        return 1, []
 
     results.sort(key=lambda r: r.tflops, reverse=True)
     top_n = min(args.top, len(results))
@@ -1261,7 +1445,7 @@ def _run_sweep(
 
     best = results[0]
     print(f"\nBest: {best.tflops:.1f} TFLOPS — {best.kernel_name}")
-    return 0
+    return 0, results
 
 
 def _run_wgrad_sweep(
@@ -1475,11 +1659,24 @@ def _run_wgrad_sweep(
         artifact = compile_kernel(kernel, arch=arch)
         n_built += 1
 
-        launcher = KernelLauncher(
-            hsaco=artifact.hsaco,
-            kernel_name=artifact.kernel_name,
-            signature=sig,
-        )
+        try:
+            launcher = KernelLauncher(
+                hsaco=artifact.hsaco,
+                kernel_name=artifact.kernel_name,
+                signature=sig,
+            )
+        except HipError as e:
+            n_skipped += 1
+            print(
+                f"[skip] kernel load failed for {artifact.kernel_name} "
+                f"tile={tile_m}x{tile_n}x{tile_k} "
+                f"warp={warp_m}x{warp_n} "
+                f"atom={warp_tile_mn}x{warp_tile_mn}x{warp_tile_k} "
+                f"{pipeline}/{epilogue}: {e}",
+                file=sys.stderr,
+                flush=True,
+            )
+            continue
         grid = _grid_for_wgrad_spec(spec, resolved_split_k)
         block = (spec.block_size, 1, 1)
         stream = 0
@@ -1515,7 +1712,7 @@ def _run_wgrad_sweep(
                 rt.free(dY_dev)
                 rt.free(X_dev)
                 rt.free(dW_dev)
-                return 1
+                return 1, []
 
         # For split_k > 1 the timed loop must zero-init dW before every launch
         # so the atomic accumulation starts from zero each iteration.
@@ -1576,7 +1773,7 @@ def _run_wgrad_sweep(
 
     if not results:
         print("No valid wgrad configurations found.", file=sys.stderr)
-        return 1
+        return 1, []
 
     results.sort(key=lambda r: r.tflops, reverse=True)
     top_n = min(args.top, len(results))
@@ -1598,7 +1795,7 @@ def _run_wgrad_sweep(
 
     best = results[0]
     print(f"\nBest: {best.tflops:.1f} TFLOPS — {best.kernel_name}")
-    return 0
+    return 0, results
 
 
 if __name__ == "__main__":
