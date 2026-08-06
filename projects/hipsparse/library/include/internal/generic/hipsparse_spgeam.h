@@ -25,7 +25,9 @@
 #define HIPSPARSE_SPGEAM_H
 
 // The generic SpGEAM API is gated behind the HIPSPARSE_WITH_SPGEAM build-time feature flag.
-#include "hipsparse-config.h"
+// Use the include-root-relative path so it resolves both in the hipSPARSE build and for
+// downstream consumers that only add the include root (e.g. -I <prefix>/include) to their path.
+#include "hipsparse/hipsparse-config.h"
 
 #ifdef __cplusplus
 extern "C" {
