@@ -224,7 +224,8 @@ inline const char* flash2KernelName(int headDim)
 }
 
 // =============================================================================
-// .co path helper -- selects gfx942 or gfx950 based on device string
+// .co path helper -- builds the .co path for this device.
+// Only gfx942 is supported; isApplicable() gates on arch before buildPlan is called.
 // =============================================================================
 // flash2CoPath: resolve the directory containing the precompiled .co files.
 //
