@@ -381,6 +381,7 @@ _CLASSIC_KERNEL_BASE = {
     "EdgeType": "None",
     "GuaranteeNoPartialA": False,
     "GuaranteeNoPartialB": False,
+    "HalfPLR": 0,
     "NoTailLoop": False,
     "PrefetchGlobalRead": 2,
     "PrefetchGL2": 0,
@@ -885,9 +886,7 @@ def test_classic_pap_saves_direct_to_lds_bank_state_after_priming():
     assert writer.states.ldsTensorTokenIdx == writer.states.memTokenLdsBuffer1
 
 
-def test_classic_pap_checkpoints_loop_counters_in_vgprs_around_next_tile_recount(monkeypatch):
-    writer, items = _prefetch_across_persistent(monkeypatch)
-
+def _assert_loop_counters_checkpointed_in_vgprs(writer, items):
     loop_vgpr = next(base for base, _, tag in writer.vgprPool.checked_out if tag == "PAP loop counters")
     orig_loop_vgpr = loop_vgpr + 1
     loop_checkpoint = _instruction_index(items, kwa_module.VMovB32, "v%u" % loop_vgpr, "s[sgprLoopCounterL]")
@@ -905,11 +904,25 @@ def test_classic_pap_checkpoints_loop_counters_in_vgprs_around_next_tile_recount
     assert writer.vgprPool.checked_in == [loop_vgpr]
 
 
+def test_classic_pap_checkpoints_loop_counters_in_vgprs_around_next_tile_recount(monkeypatch):
+    writer, items = _prefetch_across_persistent(monkeypatch)
+
+    _assert_loop_counters_checkpointed_in_vgprs(writer, items)
+
+
+def test_halfplr_pap_checkpoints_loop_counters_even_under_dp_only(monkeypatch):
+    # HalfPLR enters PAP while LoopCounter is one, so the counters cannot be
+    # recomputed and DP-only has to checkpoint them anyway.
+    writer, items = _prefetch_across_persistent(monkeypatch, StreamKForceDPOnly=1, HalfPLR=1)
+
+    _assert_loop_counters_checkpointed_in_vgprs(writer, items)
+
+
 def test_dp_only_pap_skips_loop_counter_checkpoint(monkeypatch):
     # DP-only StreamK keeps LoopCounter/OrigLoopCounter constant (idempotent
     # recompute, PAP never runs on the last tile), so prefetchAcrossPersistent
     # skips the 2-VGPR checkpoint/restore entirely
-    # (KernelWriterAssembly: snapshotLoopCounter = not StreamKForceDPOnly).
+    # (KernelWriterAssembly: snapshotLoopCounter = HalfPLR or not StreamKForceDPOnly).
     writer, items = _prefetch_across_persistent(monkeypatch, StreamKForceDPOnly=1)
 
     assert not any(tag == "PAP loop counters" for _, _, tag in writer.vgprPool.checked_out)

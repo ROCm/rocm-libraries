@@ -180,12 +180,13 @@ std::vector<ReachMap> computeReachOut(const std::vector<BasicBlock*>& rpo,
 
 void removeExistingPhis(Function& func) {
     for (BasicBlock& bb : func) {
-        while (!bb.empty()) {
-            IRBase& ir = *bb.begin();
-            if (ir.getType() != IRBase::IRType::StinkyTofu) break;
-            auto* inst = cast<StinkyInstruction>(&ir);
-            if (inst->getUnifiedOpcode() != GFX::PHI) break;
-            ir.erase();
+        for (auto it = bb.begin(); it != bb.end();) {
+            auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+            if (inst != nullptr && inst->getUnifiedOpcode() == GFX::PHI) {
+                it = bb.eraseIR(it);
+            } else {
+                ++it;
+            }
         }
     }
 }
