@@ -614,8 +614,8 @@ def test_dispatch_applies_gfx942_waves_per_eu_tuning_and_leaves_gfx950_alone():
     tuned = _dense_spec(_req("bf16", 64, "gfx942"))
     kernel = build_attention_dense(tuned, arch="gfx942")
     assert kernel.attrs.get("waves_per_eu") == 4
-    # D64 also folds in the K bank-conflict pad, so the suffix is _wpe4_kpad.
-    assert p0_kernel_name(tuned).endswith("_wpe4_kpad")
+    # D64 also folds in the K bank-conflict pad, so the suffix is _wpe4_d64kpad.
+    assert p0_kernel_name(tuned).endswith("_wpe4_d64kpad")
 
 
 # --------------------------------------------------------------------------- #
@@ -639,7 +639,9 @@ def test_d64_kpad_off_build_is_byte_identical_and_unnamed():
     'module constant default False' invariant."""
     for spec in (_spec(head_size=64, dtype="fp16"), _spec(head_size=64, dtype="bf16")):
         assert spec.d64_kpad is False
-        assert "_kpad" not in p0_kernel_name(spec)
+        # endswith, not "in": at D64 the SHARED name carries its own gfx950
+        # kpad{N} token, which a substring test would match by accident.
+        assert not p0_kernel_name(spec).endswith("_d64kpad")
         kd = build_attention_dense(spec, arch="gfx942")
         assert kd.name == p0_kernel_name(spec)
 
@@ -652,13 +654,13 @@ def test_d64_kpad_on_carries_the_kpad_tag_and_builds():
 
     off = _spec(head_size=64, dtype="fp16")
     on = dataclasses.replace(off, d64_kpad=True)
-    assert "_kpad" in p0_kernel_name(on)
+    assert p0_kernel_name(on).endswith("_d64kpad")
     assert p0_kernel_name(on) != p0_kernel_name(off)
     kd_on = build_attention_dense(on, arch="gfx942")
     assert kd_on.name == p0_kernel_name(on)
     # D128 never re-pads: the flag is inert there (no tag, no layout change).
     d128 = dataclasses.replace(_spec(head_size=128, dtype="fp16"), d64_kpad=True)
-    assert "_kpad" not in p0_kernel_name(d128)
+    assert not p0_kernel_name(d128).endswith("_d64kpad")
     assert p0_kernel_name(d128) == p0_kernel_name(_spec(head_size=128, dtype="fp16"))
 
 
@@ -713,7 +715,7 @@ def test_dispatch_applies_gfx942_d64_kpad_and_leaves_gfx950_alone():
     tuned = _dense_spec(_req("fp16", 64, "gfx942"))
     kernel = build_attention_dense(tuned, arch="gfx942")
     assert kernel.name == p0_kernel_name(tuned)
-    assert "_kpad" in kernel.name
+    assert kernel.name.endswith("_d64kpad")
 
 
 # --------------------------------------------------------------------------- #

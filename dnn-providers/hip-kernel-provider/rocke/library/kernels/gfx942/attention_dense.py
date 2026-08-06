@@ -284,14 +284,24 @@ def p0_kernel_name(spec: AttentionDenseSpec) -> str:
     break the gfx950 golden / byte-identity.
 
     The D64 K-LDS bank-conflict pad (:func:`_p0_d64_kpad_active`) adds a further
-    ``_kpad`` tag: it changes the emitted K_lds layout + do_qk addressing, so a
-    kpad-on and a kpad-off spec that agree on every other field compile to different
+    ``_d64kpad`` tag: it changes the emitted K_lds layout + do_qk addressing, so a
+    pad-on and a pad-off spec that agree on every other field compile to different
     binaries and must not collide in a name-keyed cache (the same collision class as
     ``batch`` / ``waves_per_eu``).
+
+    .. warning::
+       At D64 the shared ``kernel_name()`` also emits a ``kpad{N}`` token of its own,
+       from the gfx950-owned ``lds_k_group_pad`` field. **That token says nothing
+       about a gfx942 binary** -- this builder never reads that field; the gfx942 pad
+       is driven entirely by ``spec.d64_kpad``. The two are the same lever expressed
+       per-arch (see the field comment in the gfx950 module), and unifying them is a
+       follow-up; until then the tags are deliberately spelled differently so a
+       gfx942 symbol cannot be misread, and so a substring test for one cannot match
+       the other.
     """
     name = f"{spec.kernel_name()}_gfx942_b{spec.batch}_wpe{spec.waves_per_eu}"
     if _p0_d64_kpad_active(spec):
-        name += "_kpad"
+        name += "_d64kpad"
     return name
 
 
