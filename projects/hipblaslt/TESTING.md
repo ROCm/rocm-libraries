@@ -264,8 +264,11 @@ distinguishes a characterization test that would catch a regression from one tha
 code, so widening it is what makes the scaffolding trustworthy while the unit tests are still being
 written.
 
-Today it is a report-only pilot on a five-file slice, run through `tox -e mutation-unit` and
-configured in `pyproject.toml`. It is not a gate and does not run in CI. Accepted equivalent mutants
+Today it is a report-only pilot on an eight-file slice, run through `tox -e mutation-unit` and
+configured in `pyproject.toml`. It started at five files in
+[PR #7989](https://github.com/ROCm/rocm-libraries/pull/7989) and grew by three in
+[PR #9337](https://github.com/ROCm/rocm-libraries/pull/9337).
+It is not a gate and does not run in CI. Accepted equivalent mutants
 and every `# pragma: no mutate` are justified in `DECISIONS.md`. A series of PRs widening the
 mutation-hardened surface starts at
 [PR #10133](https://github.com/ROCm/rocm-libraries/pull/10133); those are still in draft.
@@ -831,7 +834,7 @@ it is further along than it is.
 | --- | --- | --- | --- |
 | TensileLite Python, unit and characterization combined | `coverage.py` via `tox -e coverage-unit` | GitHub Actions, on any change under `tensilelite/**`; Math CI measures it again for codecov | Floor plus per-file ratchet, 1 pp tolerance. Enforced in a lane that is not a required check |
 | TensileLite Python, unit-only share | Same lane, reported in the split summary card | GitHub Actions | **No.** Informational only, and it is the number that tracks real progress |
-| TensileLite Python, mutation score | `tox -e mutation-unit` | Nowhere; run by hand | No. Report-only pilot on five files |
+| TensileLite Python, mutation score | `tox -e mutation-unit` | Nowhere; run by hand | No. Report-only pilot on eight files |
 | TensileLite C++ host library | `tox -e coverage-cpp` | Math CI | Reported to codecov, not enforced |
 | hipBLASLt C++ library | Optional `HIPBLASLT_ENABLE_COVERAGE=ON` build | Not run in CI | No |
 
@@ -1299,7 +1302,7 @@ this table should drive.
 | Gap | Regression risk | Impact | Mitigation today | Tracking |
 | --- | --- | --- | --- | --- |
 | Enforced coverage counts characterization scaffolding as unit testing, overstating how much is verified | High | Medium | The split summary card reports the characterization-only share, but it gates nothing |  |
-| Mutation testing, the only evidence a golden would catch a regression, covers five files and runs nowhere in CI | Medium | Medium | Manual `tox -e mutation-unit`; widening PRs are in draft. Treated as report-only | AIHPBLAS-3868 |
+| Mutation testing, the only evidence a golden would catch a regression, covers eight files and runs nowhere in CI | Medium | Medium | Manual `tox -e mutation-unit`; widening PRs are in draft. Treated as report-only | AIHPBLAS-3868 |
 
 ### CI visibility and gating
 
