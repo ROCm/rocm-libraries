@@ -5,8 +5,10 @@
 
 This is the host-only (no GPU) golden test for the provider CI lane. It rebuilds
 the representative IR cases from the installed ``rocke`` package, hashes the
-Python-lowered LLVM IR for this host's llvm flavor, and compares the digests to
-the committed golden. Any drift means emitted IR changed.
+Python-lowered LLVM IR for every llvm flavor the golden holds -- the flavor is
+an argument to lowering, so the host's own ROCm vintage does not limit what can
+be checked -- and compares the digests to the committed golden. Any drift means
+emitted IR changed.
 
 It is intended to run directly from an installed staging prefix, co-located with
 the ``rocke`` package, the ``rocke_ir_parity_harness`` module, and the golden
@@ -45,6 +47,24 @@ def _add_installed_python_paths() -> None:
                 found.append(path)
     if script.parent not in found:
         found.append(script.parent)
+    # An install co-locates the parity harness with this script (covered by
+    # script.parent above); a checkout keeps it under tests/instances/.
+    harness_dir = script.parent / "instances"
+    if (harness_dir / "rocke_ir_parity_harness.py").is_file():
+        if harness_dir not in found:
+            found.append(harness_dir)
+    # The harness' attention families build library kernels, so `kernels` and
+    # `builders` must resolve too. They are staged under tests/library/ in an
+    # install (the destination TheRock's test-artifact globs capture) and live in
+    # the sibling library tree in a checkout.
+    lib_roots = [script.parent / "tests" / "library"]
+    if len(script.parents) > 2:
+        lib_roots.append(script.parents[2] / "library")
+    for lib_root in lib_roots:
+        if (lib_root / "kernels").is_dir():
+            if lib_root not in found:
+                found.append(lib_root)
+            break
     for path in reversed(found):
         sys.path.insert(0, str(path))
 
@@ -72,15 +92,15 @@ def _find_golden() -> Path:
 def main() -> int:
     _add_installed_python_paths()
 
-    from rocke_ir_parity_harness import check_golden, current_flavor
+    from rocke_ir_parity_harness import GOLDEN_FLAVORS, check_golden
 
     golden = _find_golden()
-    flavor = current_flavor()
-    drift = check_golden(golden, flavor)
+    flavors = ", ".join(GOLDEN_FLAVORS)
+    drift = check_golden(golden)
     if drift:
-        print(f"rocKE installed golden gate: FAIL ({flavor})\n  " + "\n  ".join(drift))
+        print(f"rocKE installed golden gate: FAIL ({flavors})\n  " + "\n  ".join(drift))
         return 1
-    print(f"rocKE installed golden gate: PASS ({flavor}, golden={golden.name})")
+    print(f"rocKE installed golden gate: PASS ({flavors}, golden={golden.name})")
     return 0
 
 

@@ -354,6 +354,29 @@ void rocke_conv_emit_load_phase(rocke_conv_build_ctx_t* ctx,
                                 rocke_value_t* A_dst,
                                 rocke_value_t* B_dst);
 
+/* Split-load helpers for CK pipeline_basic (sync path only).
+ *
+ * emit_global_read: issue only buffer_load_vN for A and B into VGPR staging.
+ *   Sets ctx->k_off_capture = k_off so descriptors address the correct tile.
+ *   Fills *a_staged and *b_staged (caller-allocated); these are consumed later
+ *   by emit_lds_write. Mirrors Python emit_global_read() -> (k_off, a_staged, b_staged).
+ *
+ * emit_lds_write: commit the staged VGPRs to LDS via smem_store_vN.
+ *   Restores ctx->k_off_capture = k_off (from the staged tuple) so any
+ *   descriptor that re-reads k_off_capture sees the correct value.
+ *   Mirrors Python emit_lds_write(staged_tuple, A_dst, B_dst). */
+void rocke_conv_emit_global_read(rocke_conv_build_ctx_t* ctx,
+                                 rocke_value_t* k_off,
+                                 rocke_ctl_staged_t* a_staged,
+                                 rocke_ctl_staged_t* b_staged);
+
+void rocke_conv_emit_lds_write(rocke_conv_build_ctx_t* ctx,
+                               rocke_value_t* k_off,
+                               const rocke_ctl_staged_t* a_staged,
+                               const rocke_ctl_staged_t* b_staged,
+                               rocke_value_t* A_dst,
+                               rocke_value_t* B_dst);
+
 /* emit_wmma_phase(ctx, A_src, B_src, iter_vars[n], out_accs[n]): one K-tile of
  * WMMA atoms, fully MMA-contract driven (gfx1151). Reads iter_vars (length
  * ctx->num_accs), writes the new accs into out_accs. */
@@ -378,12 +401,18 @@ void rocke_conv_emit_mfma_phase(rocke_conv_build_ctx_t* ctx,
 /* ----- K-loop drivers (ctx-driven; write ctx->final_accs) ----- *
  * Exactly one is called per build, chosen as Python does:
  *   unroll_k                -> rocke_conv_emit_kloop_unroll
+ *   pipeline=="basic"       -> rocke_conv_emit_kloop_basic
  *   else not async_dma      -> rocke_conv_emit_kloop_simple
  *   else (async_dma)        -> rocke_conv_emit_kloop_async */
 
 /* spec.unroll_k branch (lines 1276-1310): double-buffered Python-unrolled
  * software pipeline (ping-pong A_smem/A_smem2). */
 void rocke_conv_emit_kloop_unroll(rocke_conv_build_ctx_t* ctx);
+
+/* pipeline=="basic" branch: CK pipeline_basic single-buffer, global-read/compute
+ * overlap. Global read for tile k+1 is issued before the sync+mfma for tile k
+ * so VMEM latency is hidden behind compute. Single LDS buffer, no double-buf. */
+void rocke_conv_emit_kloop_basic(rocke_conv_build_ctx_t* ctx);
 
 /* not-async branch (lines 1311-1319): single scf.for_iter load+sync+mfma+sync. */
 void rocke_conv_emit_kloop_simple(rocke_conv_build_ctx_t* ctx);
