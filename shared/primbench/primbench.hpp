@@ -1950,7 +1950,7 @@ void block_stream_kernel(volatile int32_t* is_blocked,
     }
 }
 
-// kernel that just reads the wall clock
+/// Kernel that reads the wall clock.
 static __global__
 void read_clock(long long* out)
 {
