@@ -51,7 +51,7 @@ from .Components.CustomSchedule import customMainLoopSchedule
 from .Components.StreamK import streamKVariantClass
 from .Components.Subtile.Kernel import *
 from .SolutionStructs import Solution, isPackedIndex
-from .SolutionStructs.Utilities import getMiInputType
+from .SolutionStructs.Utilities import getMiInputType, isSubtileIterateMode
 from .AsmMemoryInstruction import MemoryInstruction
 from .Activation import ActivationModule
 from .Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
@@ -237,6 +237,8 @@ class StateValues:
   numMfmaPerIter: int                    = 0
   SubTileIdx: int                       = 0
   subtileLdsSwizzle: bool                = False
+  subtileIterateModeA: bool              = False
+  subtileIterateModeB: bool              = False
   numReadsIterCoalescedA: int            = 0
   numReadsIterCoalescedB: int            = 0
   numReadsIterCoalescedMXSA: int         = 0
@@ -6928,6 +6930,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # LDS swizzling for subtile bank-conflict avoidance (gfx950 only;
     # gfx1250 TDM uses a different LDS layout without swizzling).
     self.states.subtileLdsSwizzle = kernel.get("UseSubtileImpl", False) and isgfx950
+    # Subtile iterate mode: DepthU * bpeGR > 1024B pad_interval limit.
+    for tc in ("A", "B"):
+      setattr(self.states, "subtileIterateMode%s" % tc, isSubtileIterateMode(kernel, tc))
     self.vgprs  = StateVgprs()
     self.sgprs  = collections.OrderedDict()
     self.codes  = CodeModules()
