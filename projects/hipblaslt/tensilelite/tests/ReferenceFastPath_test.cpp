@@ -679,6 +679,72 @@ TEST(ReferenceRuntimeCanonical, AppliesVectorScaleBeforeComputeQuantization)
     EXPECT_EQ(d, (std::vector<float>{3.25f, 4.5f}));
 }
 
+TEST(ReferenceTensorContraction, HandlesMultipleBoundIndices)
+{
+    const size_t M = 2;
+    const size_t N = 2;
+    const size_t batch = 1;
+    const size_t K0 = 2;
+    const size_t K1 = 2;
+
+    ContractionProblemGemm::FreeIndices freeIndices{
+        {true, 0, 0, 0},
+        {false, 1, 1, 1},
+    };
+    ContractionProblemGemm::BatchIndices batchIndices{{3, 3, 2, 2}};
+    ContractionProblemGemm::BoundIndices boundIndices{{1, 0, false, false},
+                                                      {2, 2, false, false}};
+    TensorOps noOperations;
+    auto problem = ContractionProblemGemm::FromIndexSizes(
+        freeIndices,
+        batchIndices,
+        boundIndices,
+        {M, N, batch, K0, K1},
+        rocisa::DataType::Float,
+        {1, M, M * K0, M * K0 * K1},
+        noOperations,
+        rocisa::DataType::Float,
+        {1, K0, K0 * N, K0 * N * K1},
+        noOperations,
+        rocisa::DataType::Float,
+        {1, M, M * N},
+        noOperations,
+        rocisa::DataType::Float,
+        {1, M, M * N},
+        noOperations,
+        0.0);
+    problem.setComputeInputTypeA(rocisa::DataType::Float);
+    problem.setComputeInputTypeB(rocisa::DataType::Float);
+    problem.setAlphaType(rocisa::DataType::Float);
+    problem.setBetaType(rocisa::DataType::Float);
+
+    std::vector<float> a(M * K0 * K1);
+    std::vector<float> b(K0 * N * K1);
+    for(size_t index = 0; index < a.size(); ++index)
+        a[index] = static_cast<float>(index + 1);
+    for(size_t index = 0; index < b.size(); ++index)
+        b[index] = static_cast<float>(2 * static_cast<int>(index) - 3);
+    std::vector<float> c(M * N, 1);
+    std::vector<float> d(M * N, -99);
+    ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), 2.0f, 3.0f);
+
+    ASSERT_TRUE(tryRuntimeTensorContraction(problem, inputs, /*elementsToValidate=*/-1));
+    std::vector<float> expected(M * N, 0);
+    for(size_t row = 0; row < M; ++row)
+    {
+        for(size_t column = 0; column < N; ++column)
+        {
+            float sum = 0;
+            for(size_t reduction1 = 0; reduction1 < K1; ++reduction1)
+                for(size_t reduction0 = 0; reduction0 < K0; ++reduction0)
+                    sum += a[row + reduction0 * M + reduction1 * M * K0]
+                           * b[reduction0 + column * K0 + reduction1 * K0 * N];
+            expected[row + column * M] = 2 * sum + 3;
+        }
+    }
+    EXPECT_EQ(d, expected);
+}
+
 #if !defined(_WIN32) && defined(TENSILE_USE_FP6)
 TEST(ReferencePackedStorage, Float6MatchesComponentCodec)
 {
