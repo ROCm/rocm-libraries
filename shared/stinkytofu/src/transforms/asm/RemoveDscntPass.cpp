@@ -324,7 +324,7 @@ class RemoveDscntPass : public StinkyInstPass {
         // Log current in-flight ds_loads at the beginning of scanBlockHead
         PASS_DEBUG({
             std::cerr << "[RemoveDscnt] scanBlockHead: current inFlightDsLoads size="
-                      << numDsLoadsBeforeActivation << ", cycles=" << cycles << std::endl;
+                      << numDsLoadsBeforeActivation << ", cycles=" << cycles << '\n';
         });
         int numDsFinished = computeNumDsFinished(numDsLoadsBeforeActivation);
         PASS_DEBUG(std::cerr << "[RemoveDscnt] pre-activation numDsFinished=" << numDsFinished
