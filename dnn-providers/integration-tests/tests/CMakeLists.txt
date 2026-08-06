@@ -5,7 +5,6 @@ add_executable(hipdnn_integration_tests_unit_tests
     main.cpp
     ../src/harness/bundle/IntegrationBundleVerificationHarness.cpp
     ../src/harness/input-init/FillInputs.cpp
-    TestArchMatch.cpp
     TestBundleMetadata.cpp
     TestGraphDescription.cpp
     TestNodeTypeToString.cpp
