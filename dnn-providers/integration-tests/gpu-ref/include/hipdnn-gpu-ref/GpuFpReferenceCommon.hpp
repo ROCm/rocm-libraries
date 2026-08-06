@@ -169,7 +169,6 @@ static void
                                           nullptr,
                                           config),
                     "hipModuleLaunchKernel failed");
-    throwOnHipError(hipDeviceSynchronize(), "hipDeviceSynchronize failed");
 }
 
 template <class T>
@@ -200,6 +199,8 @@ static void gpuFillWithRandomValues(hipdnn_data_sdk::utilities::TensorBase<T>& t
                                     "rocrand_generate_uniform");
 
         launchScaleUniform<T>(scratch.data, dstPtr, count, minValue, maxValue);
+
+        throwOnHipError(hipDeviceSynchronize(), "hipDeviceSynchronize failed");
     }
     else if constexpr(std::is_same_v<T, double>)
     {
@@ -211,6 +212,8 @@ static void gpuFillWithRandomValues(hipdnn_data_sdk::utilities::TensorBase<T>& t
         {
             launchScaleUniform<T>(dstPtr, dstPtr, count, minValue, maxValue);
         }
+
+        throwOnHipError(hipDeviceSynchronize(), "hipDeviceSynchronize failed");
     }
     else if constexpr(std::is_same_v<T, hipdnn_data_sdk::types::half>)
     {
@@ -223,6 +226,8 @@ static void gpuFillWithRandomValues(hipdnn_data_sdk::utilities::TensorBase<T>& t
         {
             launchScaleUniform<T>(dstPtr, dstPtr, count, minValue, maxValue);
         }
+
+        throwOnHipError(hipDeviceSynchronize(), "hipDeviceSynchronize failed");
     }
     else // float or other unsupported types
     {
@@ -236,6 +241,8 @@ static void gpuFillWithRandomValues(hipdnn_data_sdk::utilities::TensorBase<T>& t
         {
             launchScaleUniform<T>(dstPtr, dstPtr, count, minValue, maxValue);
         }
+
+        throwOnHipError(hipDeviceSynchronize(), "hipDeviceSynchronize failed");
     }
 }
 #endif // USE_ROCRAND
