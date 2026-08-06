@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
@@ -31,9 +32,12 @@ struct PointwiseGraphSpec
     DataType ioDataType = DataType::FLOAT;
     DataType computeDataType = DataType::FLOAT;
     std::vector<int64_t> inputDims{1, 3, 4, 4};
-    std::vector<int64_t> inputStrides{48, 16, 4, 1};
     std::vector<int64_t> outputDims{1, 3, 4, 4};
-    std::vector<int64_t> outputStrides{48, 16, 4, 1};
+    // std::nullopt emits a null strides vector, which is what the applicability check's
+    // "tensor dims or strides are null" guard looks for. A plain empty vector would not do:
+    // CreateTensorAttributesDirect only omits the field when handed a null pointer.
+    std::optional<std::vector<int64_t>> inputStrides{{48, 16, 4, 1}};
+    std::optional<std::vector<int64_t>> outputStrides{{48, 16, 4, 1}};
     bool virtualInput = false;
     bool virtualOutput = false;
     bool overrideShapeEnabled = false;
@@ -50,19 +54,19 @@ flatbuffers::FlatBufferBuilder createPointwiseGraph(const PointwiseGraphSpec& sp
 
     std::vector<::flatbuffers::Offset<data_objects::TensorAttributes>> tensorAttributes;
 
-    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(builder,
-                                                                          1,
-                                                                          "input",
-                                                                          spec.ioDataType,
-                                                                          &spec.inputStrides,
-                                                                          &spec.inputDims,
-                                                                          spec.virtualInput));
+    const std::vector<int64_t>* inputStrides
+        = spec.inputStrides ? &spec.inputStrides.value() : nullptr;
+    const std::vector<int64_t>* outputStrides
+        = spec.outputStrides ? &spec.outputStrides.value() : nullptr;
+
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
+        builder, 1, "input", spec.ioDataType, inputStrides, &spec.inputDims, spec.virtualInput));
 
     tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(builder,
                                                                           2,
                                                                           "output",
                                                                           spec.ioDataType,
-                                                                          &spec.outputStrides,
+                                                                          outputStrides,
                                                                           &spec.outputDims,
                                                                           spec.virtualOutput));
 
@@ -351,6 +355,34 @@ TEST_F(TestMiopenUnaryActivationPlanBuilder, IsApplicableReturnsFalseForBackward
         EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph))
             << "mode: " << hipdnn_flatbuffers_sdk::data_objects::EnumNamePointwiseMode(mode);
     }
+}
+
+TEST_F(TestMiopenUnaryActivationPlanBuilder, IsApplicableReturnsFalseForNullStrides)
+{
+    // The plan reads strides straight out of the flatbuffer when building the MIOpen tensor
+    // descriptor, so a tensor with no strides at all must be declined rather than dereferenced.
+    for(const bool nullInput : {true, false})
+    {
+        PointwiseGraphSpec spec;
+        (nullInput ? spec.inputStrides : spec.outputStrides) = std::nullopt;
+        auto builder = createPointwiseGraph(spec);
+        const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+        EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph))
+            << (nullInput ? "null input strides" : "null output strides");
+    }
+}
+
+TEST_F(TestMiopenUnaryActivationPlanBuilder, IsApplicableReturnsFalseForDimsStridesSizeMismatch)
+{
+    // Dims and strides are indexed in lockstep when the descriptor is built; a rank-4 dims array
+    // paired with a rank-3 strides array would read past the end of the shorter one.
+    PointwiseGraphSpec spec;
+    spec.inputStrides = {16, 4, 1};
+    auto builder = createPointwiseGraph(spec);
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }
 
 // ============================================================================
