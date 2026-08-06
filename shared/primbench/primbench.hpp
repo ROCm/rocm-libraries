@@ -2047,6 +2047,9 @@ public:
 
         const double elapsed_time_s
             = std::chrono::duration<double>(h_curr_time_1 - h_curr_time_0).count();
+
+        std::assert(elapsed_time_s > 0);
+
         const long long tot_ticks = h_tick_1 - h_tick_0;
 
         return std::llround(tot_ticks / (1000 * elapsed_time_s));
