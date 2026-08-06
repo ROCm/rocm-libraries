@@ -13,6 +13,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -180,6 +181,23 @@ public:
         HIPDNN_CUDNN_SHIM_RETURN_OK_IF_NO_NATIVE_GRAPH();
 
         CHECK_CUDNN_FRONTEND_ERROR(applyPendingFiltersForCreatedPlans());
+
+        // Native build_plans(HEURISTICS_CHOICE) only ever inspects the active
+        // plan, so a filter that bars the top-ranked engine fails the build
+        // outright. cuDNN instead narrows the candidate set, so retarget onto the
+        // top-ranked survivor first.
+        if(policy == BuildPlanPolicy_t::HEURISTICS_CHOICE)
+        {
+            int64_t survivingIndex = -1;
+            CHECK_CUDNN_FRONTEND_ERROR(findPlanIndexIfActiveBarred(survivingIndex));
+            if(survivingIndex >= 0)
+            {
+                CHECK_CUDNN_FRONTEND_ERROR(_graph.build_plan_at_index(survivingIndex));
+                _stage = Stage::PlansBuilt;
+                return {};
+            }
+        }
+
         auto err = _graph.build_plans(policy);
         if(err.is_good())
         {
@@ -1393,6 +1411,7 @@ private:
     std::vector<int64_t> _engineIndexToNativeEngineId;
     std::vector<BehaviorNote_t> _selectedBehaviorNotes;
     std::vector<BehaviorNote_t> _deselectedBehaviorNotes;
+    std::unordered_set<int64_t> _shimBarredEngineIds;
 
     Mode _mode = Mode::Empty;
     Stage _stage = Stage::Described;
@@ -1458,6 +1477,11 @@ private:
 
     error_t applyPendingPlanFilters(const std::vector<HeurMode_t>& modes = {HeurMode_t::FALLBACK})
     {
+        // create_execution_plans() clears the native graph's filter state, so the
+        // shim's record of what it barred is rebuilt on every pass rather than
+        // accumulated.
+        _shimBarredEngineIds.clear();
+
         if(_maxWorkspaceAllowed.has_value())
         {
             _graph.deselect_workspace_greater_than(*_maxWorkspaceAllowed);
@@ -1465,6 +1489,10 @@ private:
         if(!_barredEngineNames.empty())
         {
             _graph.deselect_engines(_barredEngineNames);
+            for(const auto& name : _barredEngineNames)
+            {
+                _shimBarredEngineIds.insert(hipdnn_data_sdk::utilities::engineNameToId(name));
+            }
         }
         if(!_barredEngineIndices.empty())
         {
@@ -1472,6 +1500,7 @@ private:
             CHECK_CUDNN_FRONTEND_ERROR(
                 mapEngineIndices(_barredEngineIndices, nativeEngineIds, modes));
             _graph.deselect_engines(nativeEngineIds);
+            _shimBarredEngineIds.insert(nativeEngineIds.begin(), nativeEngineIds.end());
         }
 
         return applyBehaviorNoteFilters(modes);
@@ -1512,8 +1541,53 @@ private:
         if(!enginesToBar.empty())
         {
             _graph.deselect_engines(enginesToBar);
+            _shimBarredEngineIds.insert(enginesToBar.begin(), enginesToBar.end());
         }
         return {};
+    }
+
+    // Report the top-ranked plan that survives this shim's own engine filters, or
+    // -1 when the active plan already survives and native can build it directly.
+    // Plan order is not guaranteed to match ranked-engine order, so each plan's
+    // engine is resolved through its own name.
+    error_t findPlanIndexIfActiveBarred(int64_t& survivingIndex)
+    {
+        survivingIndex = -1;
+        if(_shimBarredEngineIds.empty())
+        {
+            return {};
+        }
+
+        int64_t activeEngineId = -1;
+        if(_graph.get_execution_plan_engine_id(activeEngineId).is_bad()
+           || _shimBarredEngineIds.count(activeEngineId) == 0)
+        {
+            return {};
+        }
+
+        const int64_t planCount = _graph.get_execution_plan_count();
+        for(int64_t index = 0; index < planCount; ++index)
+        {
+            std::string planName;
+            if(_graph.get_plan_name_at_index(index, planName).is_bad())
+            {
+                continue;
+            }
+            // An engine whose name does not resolve cannot be matched against the
+            // barred set. Treat it as a survivor: only ids this shim explicitly
+            // barred are known to be excluded, and native re-checks its own filter
+            // before building.
+            if(!hipdnn_data_sdk::utilities::isEngineNameRegistered(planName)
+               || _shimBarredEngineIds.count(hipdnn_data_sdk::utilities::engineNameToId(planName))
+                      == 0)
+            {
+                survivingIndex = index;
+                return {};
+            }
+        }
+
+        return {error_code_t::GRAPH_NOT_SUPPORTED,
+                "Engine filters removed every applicable hipDNN execution plan"};
     }
 
     bool behaviorNotesMatch(const std::vector<BehaviorNote_t>& engineNotes) const

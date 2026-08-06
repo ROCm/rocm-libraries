@@ -8,7 +8,9 @@
 #include "fake_backend/MockBackendFixture.hpp"
 
 #include <hipdnn_compatibility/cudnn/cudnn_frontend.h>
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <gtest/gtest.h>
@@ -45,6 +47,8 @@ class TestCudnnShimNoteTriageBackend : public hipdnn_shim_test::ShimMockBackendF
 protected:
     std::vector<hipdnnBackendDescriptor_t> _executionPlanDescs;
     std::unordered_map<hipdnnBackendDescriptor_t, int64_t> _engineIdsByDesc;
+    std::unordered_map<int64_t, std::vector<hipdnnBackendBehaviorNote_t>> _behaviorNotesByEngineId;
+    std::array<int64_t, 2> _rankedEngineIds{10, 20};
     std::array<char, 16> _engineDescs{};
     size_t _nextEngineDesc = 0;
     size_t _nextEngineIdLookup = 0;
@@ -63,6 +67,21 @@ protected:
                     return HIPDNN_STATUS_SUCCESS;
                 });
 
+        // A behavior-note query builds a throwaway engine descriptor, so the id
+        // the caller stamps on it is the only way back to the engine it stands for.
+        ON_CALL(*_mockBackend, backendSetAttribute(_, _, _, _, _))
+            .WillByDefault([this](hipdnnBackendDescriptor_t descriptor,
+                                  hipdnnBackendAttributeName_t attribute,
+                                  hipdnnBackendAttributeType_t,
+                                  int64_t,
+                                  const void* arrayOfElements) {
+                if(attribute == HIPDNN_ATTR_ENGINE_GLOBAL_INDEX && arrayOfElements != nullptr)
+                {
+                    _engineIdsByDesc[descriptor] = *static_cast<const int64_t*>(arrayOfElements);
+                }
+                return HIPDNN_STATUS_SUCCESS;
+            });
+
         ON_CALL(*_mockBackend, backendGetAttribute(_, _, _, _, _, _))
             .WillByDefault([this](hipdnnBackendDescriptor_t descriptor,
                                   hipdnnBackendAttributeName_t attribute,
@@ -80,7 +99,8 @@ protected:
                 }
                 if(attribute == HIPDNN_ATTR_ENGINECFG_ENGINE)
                 {
-                    const int64_t engineId = (_nextEngineIdLookup++ % 2 == 0) ? 10 : 20;
+                    const int64_t engineId
+                        = _rankedEngineIds[_nextEngineIdLookup++ % _rankedEngineIds.size()];
                     auto engineDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(
                         &_engineDescs[_nextEngineDesc++ % _engineDescs.size()]);
                     _engineIdsByDesc[engineDesc] = engineId;
@@ -90,6 +110,23 @@ protected:
                 if(attribute == HIPDNN_ATTR_ENGINE_GLOBAL_INDEX)
                 {
                     *static_cast<int64_t*>(arrayOfElements) = _engineIdsByDesc.at(descriptor);
+                    return HIPDNN_STATUS_SUCCESS;
+                }
+                if(attribute == HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE)
+                {
+                    const auto* notes = behaviorNotesForDesc(descriptor);
+                    const int64_t noteCount
+                        = notes == nullptr ? 0 : static_cast<int64_t>(notes->size());
+                    if(notes != nullptr && arrayOfElements != nullptr)
+                    {
+                        std::copy_n(notes->begin(),
+                                    std::min(requestedElementCount, noteCount),
+                                    static_cast<hipdnnBackendBehaviorNote_t*>(arrayOfElements));
+                    }
+                    if(elementCount != nullptr)
+                    {
+                        *elementCount = noteCount;
+                    }
                     return HIPDNN_STATUS_SUCCESS;
                 }
                 if(attribute == HIPDNN_ATTR_EXECUTION_PLAN_WORKSPACE_SIZE)
@@ -103,6 +140,28 @@ protected:
                 }
                 return HIPDNN_STATUS_SUCCESS;
             });
+    }
+
+    // The shim maps a candidate plan back to its engine through the engine-name
+    // registry, so tests that exercise plan narrowing need ids that round-trip
+    // through it; the default synthetic ids only resolve to a hex fallback.
+    void installRegisteredEnginePlanMocks()
+    {
+        _rankedEngineIds = {hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID,
+                            hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_ID};
+        installTwoEnginePlanMocks();
+    }
+
+    const std::vector<hipdnnBackendBehaviorNote_t>*
+        behaviorNotesForDesc(hipdnnBackendDescriptor_t descriptor) const
+    {
+        const auto engineEntry = _engineIdsByDesc.find(descriptor);
+        if(engineEntry == _engineIdsByDesc.end())
+        {
+            return nullptr;
+        }
+        const auto notesEntry = _behaviorNotesByEngineId.find(engineEntry->second);
+        return notesEntry == _behaviorNotesByEngineId.end() ? nullptr : &notesEntry->second;
     }
 };
 
@@ -416,6 +475,109 @@ TEST_F(TestCudnnShimNoteTriageBackend, DeselectEngineIndicesAfterPlanCreationBar
     EXPECT_TRUE(err.is_bad());
     EXPECT_EQ(err.get_code(), fe::error_code_t::INVALID_VALUE);
     EXPECT_NE(err.get_message().find("barred"), std::string::npos);
+}
+
+// Regression: create_execution_plans() pins the active plan before the shim's
+// filters run, and native build_plans(HEURISTICS_CHOICE) inspects only that
+// plan — so barring the top-ranked engine used to turn a satisfiable build into
+// an INVALID_VALUE failure. cuDNN narrows the candidate set instead.
+TEST_F(TestCudnnShimNoteTriageBackend, DeselectBehaviorNoteOnTopEngineNarrowsToSurvivingPlan)
+{
+    installRegisteredEnginePlanMocks();
+    _behaviorNotesByEngineId[hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID]
+        = {HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION};
+
+    fe::graph::Graph graph;
+    addPointwiseGraph(graph);
+    ASSERT_TRUE(graph.validate().is_good());
+    ASSERT_TRUE(graph.build_operation_graph(_handle).is_good());
+    ASSERT_TRUE(graph.create_execution_plans({fe::HeurMode_t::A}).is_good());
+    ASSERT_EQ(_executionPlanDescs.size(), 2u);
+
+    EXPECT_EQ(&graph.deselect_behavior_notes({BehNote::RUNTIME_COMPILATION}), &graph);
+
+    auto err = graph.build_plans(fe::BuildPlanPolicy_t::HEURISTICS_CHOICE);
+
+    EXPECT_TRUE(err.is_good()) << err.get_message();
+
+    std::string planName;
+    EXPECT_TRUE(graph.get_plan_name(planName).is_good());
+    EXPECT_EQ(planName, hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_NAME);
+    EXPECT_EQ(graph.get_workspace_size_plan_at_index(0), -1);
+    EXPECT_EQ(graph.get_workspace_size_plan_at_index(1), 0);
+}
+
+TEST_F(TestCudnnShimNoteTriageBackend, DeselectBehaviorNoteOnEveryEngineFailsBuild)
+{
+    installRegisteredEnginePlanMocks();
+    _behaviorNotesByEngineId[hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID]
+        = {HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION};
+    _behaviorNotesByEngineId[hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_ID]
+        = {HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION};
+
+    fe::graph::Graph graph;
+    addPointwiseGraph(graph);
+    ASSERT_TRUE(graph.validate().is_good());
+    ASSERT_TRUE(graph.build_operation_graph(_handle).is_good());
+    ASSERT_TRUE(graph.create_execution_plans({fe::HeurMode_t::A}).is_good());
+    ASSERT_EQ(_executionPlanDescs.size(), 2u);
+
+    EXPECT_EQ(&graph.deselect_behavior_notes({BehNote::RUNTIME_COMPILATION}), &graph);
+
+    auto err = graph.build_plans(fe::BuildPlanPolicy_t::HEURISTICS_CHOICE);
+
+    EXPECT_TRUE(err.is_bad());
+    EXPECT_EQ(err.get_code(), fe::error_code_t::GRAPH_NOT_SUPPORTED);
+    EXPECT_EQ(graph.get_workspace_size_plan_at_index(0), -1);
+    EXPECT_EQ(graph.get_workspace_size_plan_at_index(1), -1);
+}
+
+TEST_F(TestCudnnShimNoteTriageBackend, DeselectTopEngineIndexNarrowsToSurvivingPlan)
+{
+    installRegisteredEnginePlanMocks();
+
+    fe::graph::Graph graph;
+    addPointwiseGraph(graph);
+    ASSERT_TRUE(graph.validate().is_good());
+    ASSERT_TRUE(graph.build_operation_graph(_handle).is_good());
+    ASSERT_TRUE(graph.create_execution_plans({fe::HeurMode_t::A}).is_good());
+    ASSERT_EQ(_executionPlanDescs.size(), 2u);
+
+    EXPECT_EQ(&graph.deselect_engines(std::vector<int64_t>{0}), &graph);
+
+    auto err = graph.build_plans(fe::BuildPlanPolicy_t::HEURISTICS_CHOICE);
+
+    EXPECT_TRUE(err.is_good()) << err.get_message();
+
+    std::string planName;
+    EXPECT_TRUE(graph.get_plan_name(planName).is_good());
+    EXPECT_EQ(planName, hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_NAME);
+    EXPECT_EQ(graph.get_workspace_size_plan_at_index(0), -1);
+    EXPECT_EQ(graph.get_workspace_size_plan_at_index(1), 0);
+}
+
+// Control for the two narrowing cases above: with nothing barred the shim must
+// leave the heuristics choice alone and build the top-ranked plan.
+TEST_F(TestCudnnShimNoteTriageBackend, UnfilteredHeuristicsChoiceBuildsTopRankedPlan)
+{
+    installRegisteredEnginePlanMocks();
+
+    fe::graph::Graph graph;
+    addPointwiseGraph(graph);
+    ASSERT_TRUE(graph.validate().is_good());
+    ASSERT_TRUE(graph.build_operation_graph(_handle).is_good());
+    ASSERT_TRUE(graph.create_execution_plans({fe::HeurMode_t::A}).is_good());
+    ASSERT_EQ(_executionPlanDescs.size(), 2u);
+
+    auto err = graph.build_plans(fe::BuildPlanPolicy_t::HEURISTICS_CHOICE);
+
+    EXPECT_TRUE(err.is_good()) << err.get_message();
+
+    std::string planName;
+    EXPECT_TRUE(graph.get_plan_name(planName).is_good());
+    EXPECT_EQ(planName, hipdnn_data_sdk::utilities::MIOPEN_ENGINE_NAME);
+    EXPECT_EQ(graph.get_workspace_size_plan_at_index(0), 0);
+    EXPECT_EQ(graph.get_workspace_size_plan_at_index(1), -1);
 }
 
 } // namespace

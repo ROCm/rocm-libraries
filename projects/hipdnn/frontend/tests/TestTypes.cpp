@@ -42,8 +42,18 @@ TEST(TestTypes, BehaviorNoteFromBackend)
     EXPECT_EQ(fromHipdnnBehaviorNote(HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION),
               BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION);
 
+    // Frontend and backend BehaviorNote numbering are independent. An unknown
+    // backend value must not be reinterpreted numerically: every value in this
+    // range would otherwise alias onto a valid, unrelated frontend enumerator.
     constexpr hipdnnBackendBehaviorNote_t UNKNOWN_NOTE = HIPDNN_BEHAVIOR_NOTE_TYPE_COUNT + 1;
-    EXPECT_EQ(fromHipdnnBehaviorNote(UNKNOWN_NOTE), static_cast<BehaviorNote>(UNKNOWN_NOTE));
+    EXPECT_EQ(fromHipdnnBehaviorNote(UNKNOWN_NOTE), std::nullopt);
+
+    for(int raw = HIPDNN_BEHAVIOR_NOTE_TYPE_COUNT; raw <= 9; ++raw)
+    {
+        EXPECT_EQ(fromHipdnnBehaviorNote(static_cast<hipdnnBackendBehaviorNote_t>(raw)),
+                  std::nullopt)
+            << "Backend note " << raw << " must not alias onto a frontend enumerator";
+    }
 }
 
 TEST(TestTypes, IsKnownBehaviorNote)
@@ -878,11 +888,16 @@ TEST(TestTypes, FromHipdnnDiagonalAlignmentRoundTrip)
 
     for(auto alignment : {DiagonalAlignment::TOP_LEFT, DiagonalAlignment::BOTTOM_RIGHT})
     {
-        auto backend = toBackendDiagonalAlignment(alignment);
-        auto [roundTripped, err] = fromHipdnnDiagonalAlignment(backend);
+        auto backendOpt = toBackendDiagonalAlignment(alignment);
+        ASSERT_TRUE(backendOpt.has_value())
+            << "toBackendDiagonalAlignment failed for " << static_cast<int>(alignment);
+        auto [roundTripped, err] = fromHipdnnDiagonalAlignment(*backendOpt);
         EXPECT_TRUE(err.is_good());
         EXPECT_EQ(roundTripped, alignment);
     }
+
+    // An unmapped value is rejected rather than silently coerced to TOP_LEFT.
+    EXPECT_EQ(toBackendDiagonalAlignment(static_cast<DiagonalAlignment>(9999)), std::nullopt);
 }
 
 TEST(TestTypes, FromHipdnnAttentionImplementationValidValues)
@@ -925,11 +940,17 @@ TEST(TestTypes, FromHipdnnAttentionImplementationRoundTrip)
                      AttentionImplementation::COMPOSITE,
                      AttentionImplementation::UNIFIED})
     {
-        auto backend = toBackendAttentionImplementation(impl);
-        auto [roundTripped, err] = fromHipdnnAttentionImplementation(backend);
+        auto backendOpt = toBackendAttentionImplementation(impl);
+        ASSERT_TRUE(backendOpt.has_value())
+            << "toBackendAttentionImplementation failed for " << static_cast<int>(impl);
+        auto [roundTripped, err] = fromHipdnnAttentionImplementation(*backendOpt);
         EXPECT_TRUE(err.is_good());
         EXPECT_EQ(roundTripped, impl);
     }
+
+    // An unmapped value is rejected rather than silently coerced to AUTO.
+    EXPECT_EQ(toBackendAttentionImplementation(static_cast<AttentionImplementation>(9999)),
+              std::nullopt);
 }
 
 TEST(TestTypes, FromHipdnnPointwiseModeRoundTrip)

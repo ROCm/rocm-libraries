@@ -76,6 +76,10 @@ For behavior notes hipDNN *does* expose, both filters apply after native plan
 creation. If known behavior-note filters remove every applicable hipDNN engine,
 plan creation returns `GRAPH_NOT_SUPPORTED`.
 
+When a filter bars only some engines, the shim narrows the candidate set the way
+cuDNN does: `build_plans(HEURISTICS_CHOICE)` retargets onto the top-ranked
+surviving plan rather than failing because the top-ranked one was barred.
+
 ## Engine IDs
 
 cuDNN frontend presents integer engine IDs as dense graph-local indices bounded
@@ -102,6 +106,12 @@ cuDNN frontend exposes knobs as a fixed `KnobType_t` enum plus integer
 `minValue`, `maxValue`, and `stride` metadata. hipDNN native knobs use provider-
 defined string IDs, variant-valued settings, descriptions, and richer constraints.
 The shim uses explicit conversion rather than aliasing these incompatible models.
+
+hipDNN knob IDs are namespaced (for example `global.workspace_size_limit`) while
+cuDNN's `KnobType_t` is flat. The shim matches on the final dot-separated segment,
+so both `tile_size` and `provider.tile_size` project onto the same cuDNN knob.
+Matching is case-insensitive, and `workspace_size_limit` is the one bare name that
+differs from its cuDNN counterpart (`workspace`).
 
 When returning knobs from `get_knobs_for_engine`, native hipDNN knobs are projected
 to cuDNN-shaped knobs only when all of the following are true:

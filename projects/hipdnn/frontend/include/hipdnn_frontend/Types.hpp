@@ -523,13 +523,12 @@ inline std::pair<ConvolutionMode, Error> fromHipdnnConvMode(hipdnnConvolutionMod
 /**
  * @brief Convert frontend DiagonalAlignment to backend hipdnnDiagonalAlignment_t
  *
- * Maps frontend diagonal alignment enum directly to the backend C API enum type
- * for use with HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT attributes.
- *
  * @param type The frontend DiagonalAlignment value
- * @return The corresponding hipdnnDiagonalAlignment_t value
+ * @return The corresponding hipdnnDiagonalAlignment_t value, or std::nullopt if
+ *         the value has no backend mapping.
  */
-inline hipdnnDiagonalAlignment_t toBackendDiagonalAlignment(const DiagonalAlignment& type)
+inline std::optional<hipdnnDiagonalAlignment_t>
+    toBackendDiagonalAlignment(const DiagonalAlignment& type)
 {
     switch(type)
     {
@@ -538,20 +537,19 @@ inline hipdnnDiagonalAlignment_t toBackendDiagonalAlignment(const DiagonalAlignm
     case DiagonalAlignment::BOTTOM_RIGHT:
         return HIPDNN_DIAGONAL_ALIGNMENT_BOTTOM_RIGHT_EXT;
     default:
-        return HIPDNN_DIAGONAL_ALIGNMENT_TOP_LEFT_EXT;
+        return std::nullopt;
     }
 }
 
 /**
- * @brief Convert frontend AttentionImplementation to backend hipdnnAttentionImplementation_t
- *
- * Maps frontend attention implementation enum directly to the backend C API enum type
- * for use with HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT attributes.
+ * @brief Convert frontend AttentionImplementation to backend
+ *        hipdnnAttentionImplementation_t
  *
  * @param type The frontend AttentionImplementation value
- * @return The corresponding hipdnnAttentionImplementation_t value
+ * @return The corresponding hipdnnAttentionImplementation_t value, or
+ *         std::nullopt if the value has no backend mapping.
  */
-inline hipdnnAttentionImplementation_t
+inline std::optional<hipdnnAttentionImplementation_t>
     toBackendAttentionImplementation(const AttentionImplementation& type)
 {
     switch(type)
@@ -563,7 +561,7 @@ inline hipdnnAttentionImplementation_t
     case AttentionImplementation::UNIFIED:
         return HIPDNN_ATTENTION_IMPLEMENTATION_UNIFIED_EXT;
     default:
-        return HIPDNN_ATTENTION_IMPLEMENTATION_AUTO_EXT;
+        return std::nullopt;
     }
 }
 
@@ -1041,8 +1039,12 @@ inline hipdnnBackendHeurMode_t toBackendType(const HeuristicMode& type)
 }
 
 /// @brief Convert backend behavior note to frontend behavior note.
-/// @return A frontend behavior note. Unknown values are preserved numerically.
-inline BehaviorNote fromHipdnnBehaviorNote(hipdnnBackendBehaviorNote_t note)
+/// @return The frontend behavior note, or std::nullopt if the backend value is
+///         not known to this frontend. Frontend and backend numbering are
+///         independent, so an unrecognized value is never reinterpreted
+///         numerically: a newer backend's note would otherwise alias onto an
+///         unrelated frontend enumerator.
+inline std::optional<BehaviorNote> fromHipdnnBehaviorNote(hipdnnBackendBehaviorNote_t note)
 {
     switch(note)
     {
@@ -1057,7 +1059,7 @@ inline BehaviorNote fromHipdnnBehaviorNote(hipdnnBackendBehaviorNote_t note)
     case HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION:
         return BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION;
     default:
-        return static_cast<BehaviorNote>(note);
+        return std::nullopt;
     }
 }
 

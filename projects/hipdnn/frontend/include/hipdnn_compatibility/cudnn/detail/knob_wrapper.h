@@ -29,16 +29,26 @@
 namespace hipdnn_frontend::compatibility::cudnn_frontend::detail
 {
 
+// hipDNN knob ids are namespaced (e.g. "global.workspace_size_limit") while
+// cuDNN's KnobType_t is flat, so match on the final dot-separated segment: both
+// "tile_size" and "provider.tile_size" project onto the same cuDNN knob.
 inline std::string normalizedKnobId(std::string knobId)
 {
-    if(knobId == "global.workspace_size_limit")
+    const auto lastDot = knobId.rfind('.');
+    if(lastDot != std::string::npos)
     {
-        return "workspace";
+        knobId.erase(0, lastDot + 1);
     }
 
     for(auto& ch : knobId)
     {
         ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    }
+
+    // The one knob whose bare hipDNN name differs from its cuDNN counterpart.
+    if(knobId == "workspace_size_limit")
+    {
+        return "workspace";
     }
     return knobId;
 }
