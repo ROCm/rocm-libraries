@@ -5,6 +5,20 @@ Documentation for rocFFT is available at
 
 ## (Unreleased) rocFFT 1.0.40
 
+### Added
+
+* Implemented `rocfft_plan_description_set_load_callback` and `rocfft_plan_description_set_store_callback` APIs, to 
+  allow for user-defined device functions to be called when loading input or storing output of a transform.  These 
+  callback functions are specified during plan creation and allow rocFFT to Just-In-Time (JIT) compile the code into 
+  rocFFT's own kernels.
+
+### Changed
+
+  The `rocfft_execution_info_set_load_callback` and `rocfft_execution_info_set_store_callback` APIs are now 
+  deprecated and will be removed in a future release.  They allow for specifying callbacks as device function 
+  pointers at plan execution time, but rocFFT cannot optimize the combined code.  Instead, users should specify JIT 
+  callbacks on plan descriptions.
+
 ## rocFFT 1.0.39 for ROCm 10.0
 
 ### Optimized
