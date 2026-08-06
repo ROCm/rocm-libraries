@@ -1524,8 +1524,8 @@ struct FmhaFwdKernel
             has_padded_seqlen_k = (kargs.seqlen_k_ptr != nullptr);
 
 #if CK_TILE_FMHA_FORCE_HEAD_MAJOR
-            // compiler-workaround gate (ROCm 7.1 + gfx12).
-            // Keep head-major enabled for all unaffected kernels.
+        // compiler-workaround gate (ROCm 7.1 + gfx12).
+        // Keep head-major enabled for all unaffected kernels.
 #if defined(__gfx12__) && (HIP_VERSION_MAJOR == 7) && (HIP_VERSION_MINOR == 1)
         constexpr bool kSkipHeadMajor = kIsGroupMode && kHasMask && !kHasDropout &&
                                         (BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS) &&
