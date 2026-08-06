@@ -43,7 +43,7 @@ struct GemmOperand {
 
     TensorView values;
     std::optional<ScalarType> computeType;
-    std::optional<TensorView> preQuantizationScale;
+    std::optional<VectorBinding> preQuantizationScale;
     std::optional<BlockScaleBinding> blockScale;
     bool conjugate = false;
 };
@@ -232,8 +232,14 @@ inline void validateRuntimeGemm(const GemmProblem& problem) {
     validateComputeType(problem.b, "B");
     auto validatePreQuantizationScale = [&](const GemmOperand& operand, const char* name) {
         if (!operand.preQuantizationScale) return;
-        validateRuntimeVector(*operand.preQuantizationScale, 1, "Reference GEMM", name);
-        if (!complexAccumulator && isComplexScalarType(operand.preQuantizationScale->type()))
+        const auto& binding = *operand.preQuantizationScale;
+        requireRank(binding.values.shape(), 1, "Reference GEMM", name);
+        const size_t expected =
+            axisExtent(binding.axis, operand.values.shape()[0], operand.values.shape()[1]);
+        if (binding.values.shape()[0] != 1 && binding.values.shape()[0] != expected)
+            throw std::invalid_argument(std::string("Reference GEMM ") + name +
+                                        " length mismatch.");
+        if (!complexAccumulator && isComplexScalarType(binding.values.type()))
             throw std::invalid_argument(
                 std::string("Reference GEMM real accumulator cannot consume complex ") + name +
                 ".");
@@ -327,8 +333,8 @@ GemmRunInfo referenceRuntimeCanonical(const GemmProblem& problem) {
     std::optional<RuntimeMatrixReader<Accumulator>> blockScaleA;
     std::optional<RuntimeMatrixReader<Accumulator>> blockScaleB;
     if (problem.epilogue.bias) bias.emplace(problem.epilogue.bias->values);
-    if (problem.a.preQuantizationScale) preScaleA.emplace(*problem.a.preQuantizationScale);
-    if (problem.b.preQuantizationScale) preScaleB.emplace(*problem.b.preQuantizationScale);
+    if (problem.a.preQuantizationScale) preScaleA.emplace(problem.a.preQuantizationScale->values);
+    if (problem.b.preQuantizationScale) preScaleB.emplace(problem.b.preQuantizationScale->values);
     if (problem.epilogue.scaleAlpha) scaleAlpha.emplace(problem.epilogue.scaleAlpha->values);
     if (problem.epilogue.scaleA) scaleA.emplace(*problem.epilogue.scaleA);
     if (problem.epilogue.scaleB) scaleB.emplace(*problem.epilogue.scaleB);
@@ -366,8 +372,22 @@ GemmRunInfo referenceRuntimeCanonical(const GemmProblem& problem) {
                     Accumulator aValue = conjugateIfNeeded(a(row, reduction), problem.a.conjugate);
                     Accumulator bValue =
                         conjugateIfNeeded(b(reduction, column), problem.b.conjugate);
-                    if (preScaleA) aValue *= (*preScaleA)[0];
-                    if (preScaleB) bValue *= (*preScaleB)[0];
+                    if (preScaleA) {
+                        const auto& binding = *problem.a.preQuantizationScale;
+                        const size_t index =
+                            binding.values.shape()[0] == 1
+                                ? 0
+                                : (binding.axis == MatrixAxis::Row ? row : reduction);
+                        aValue *= (*preScaleA)[index];
+                    }
+                    if (preScaleB) {
+                        const auto& binding = *problem.b.preQuantizationScale;
+                        const size_t index =
+                            binding.values.shape()[0] == 1
+                                ? 0
+                                : (binding.axis == MatrixAxis::Row ? reduction : column);
+                        bValue *= (*preScaleB)[index];
+                    }
                     aValue = operandMath(quantizeA(aValue));
                     bValue = operandMath(quantizeB(bValue));
                     blockSum = addAccumulator(blockSum, multiplyAccumulator(aValue, bValue));
@@ -383,8 +403,21 @@ GemmRunInfo referenceRuntimeCanonical(const GemmProblem& problem) {
             for (size_t reduction = 0; reduction < k; ++reduction) {
                 Accumulator aValue = conjugateIfNeeded(a(row, reduction), problem.a.conjugate);
                 Accumulator bValue = conjugateIfNeeded(b(reduction, column), problem.b.conjugate);
-                if (preScaleA) aValue *= (*preScaleA)[0];
-                if (preScaleB) bValue *= (*preScaleB)[0];
+                if (preScaleA) {
+                    const auto& binding = *problem.a.preQuantizationScale;
+                    const size_t index = binding.values.shape()[0] == 1
+                                             ? 0
+                                             : (binding.axis == MatrixAxis::Row ? row : reduction);
+                    aValue *= (*preScaleA)[index];
+                }
+                if (preScaleB) {
+                    const auto& binding = *problem.b.preQuantizationScale;
+                    const size_t index =
+                        binding.values.shape()[0] == 1
+                            ? 0
+                            : (binding.axis == MatrixAxis::Row ? reduction : column);
+                    bValue *= (*preScaleB)[index];
+                }
                 aValue = operandMath(quantizeA(aValue));
                 bValue = operandMath(quantizeB(bValue));
                 sum = addAccumulator(sum, multiplyAccumulator(aValue, bValue));
