@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <hip/hip_runtime.h>
 #include <memory>
 #include <numeric>
 #include <stdexcept>
@@ -542,7 +543,7 @@ TEST(TestRaggedTensor, FillWithValuesDeviceGenerator)
     tensor.fillWithValues(DeviceGpuGenerator(), false);
 
     auto hostData = static_cast<float*>(tensor.rawHostData());
-    for(size_t i = 0; i < tensor.elementCount(); i++)
+    for(size_t i = 0; i < tensor.elementSpace(); i++)
     {
         EXPECT_EQ(hostData[i], static_cast<float>(i));
     }
