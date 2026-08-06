@@ -983,6 +983,76 @@ explicit `sweep_values` / grid hint, not an inferred range. **OPEN**: standardiz
 and any runtime-knob grid live (a tool-side config vs. a descriptor field), so a heuristic can be
 regenerated reproducibly without out-of-band inputs.
 
+### 14.6 Auto-deriving a first-pass `features_signature`
+
+Most of a `features_signature` can be **derived from what a package already carries**, so the tool can
+propose a first pass rather than requiring an author to hand-write the feature list. The key is that
+"map the graph to features" spans **two layers**, and only the first is shared/derivable:
+
+- **Layer 1 — op-intrinsic vocabulary (per op, shared).** The fields that *exist and are bindable*:
+  tensor/dim bindings (`$q.seqlen_q`), node attributes (`$sdpa_fwd.head_size`), device properties
+  (`$device.*`). These are facts about the op, identical for every engine that implements it, and the
+  UMD op-schema registry already emits them by reflection from the `.fbs` annotations
+  ([Section 7](#7-feature-extraction), [PR #10341](https://github.com/ROCm/rocm-libraries/pull/10341)).
+- **Layer 2 — the `features_signature` (per package/UHD, not shared).** *Which* of those fields a given
+  model consumes, plus derived transforms. This is per-UHD: two packages of the same op may rank on
+  different subsets.
+
+The tool auto-derives Layer 1 and proposes a Layer-2 first pass from it, in three tiers:
+
+| Tier | Feature kind | Derivable from | Author input needed |
+|---|---|---|---|
+| 1 | Raw fields (`$kernel.*` = KMD fields; `$q.*`/attrs = UMD bindings; `$device.*`) | KMD schema + UMD op-schema registry + device vocab | **none** |
+| 2 | Generic transforms (logs, ratios) and **tile/wave quantization** | Tier 1 + a **dim↔tile correspondence** (which problem dim pairs with which `$kernel.*` tile axis) | one correspondence hint (op-schema annotation) |
+| 3 | **Physics** — arithmetic intensity, roofline bound | the op's FLOP and byte formulas | **`umd_flops` / `umd_bytes`** op annotations (below) |
+
+**Arithmetic intensity, and what authors provide for it.** Intensity is
+`total_FLOPs / total_bytes_moved` (FLOP/byte) — the roofline x-axis that separates compute-bound from
+memory-bound problems, which is exactly the split that decides which kernel wins. Both terms are
+closed-form over the bound dims and dtype sizes, but the *formulas* are op-specific and cannot be
+inferred from the KMD field list. So they are authored **once per op, at Layer 1**, as two table-level
+attributes on the op's `.fbs` schema — the same annotation channel and codegen as `umd_opcode`:
+
+```fbs
+// data_types.fbs — declare once, alongside the existing umd_* attributes
+attribute "umd_flops";   // JsonLogic expr over bound dims -> FLOP count
+attribute "umd_bytes";   // JsonLogic expr over bound dims + per-tensor dtype size -> bytes moved
+
+// sdpa_attributes.fbs — applied table-level, next to umd_opcode
+table SdpaAttributes (
+    umd_opcode: "sdpa_fwd",
+    umd_flops:  "{\"*\":[4,\"$q.batch\",\"$q.num_heads\",\"$q.seqlen_q\",\"$k.seqlen_k\",\"$q.head_size\"]}",
+    umd_bytes:  "..."   // sum of per-tensor (element_count * dtype_bytes) for Q, K, V, O
+) { /* ... */ }
+```
+
+Because these are **op-intrinsic** (SDPA does `4·B·H·Sq·Sk·D` FLOPs regardless of engine or package),
+they live at Layer 1 and are shared by every package of that op — one annotation per op-family, authored
+once. The codegen then promotes intensity into the bindable vocabulary as a derived field (e.g.
+`$sdpa_fwd.arithmetic_intensity`), which a `features_signature` references *identically* to a raw dim
+like `$q.seqlen_q`. The Tier-3 "physics" distinction thus disappears at the point of use.
+
+Caveats:
+
+- **Only the two `.fbs` attributes are a new author ask.** The FLOP/byte formulas are the sole required
+  input; everything else (Tier 1, and Tier 2 given the correspondence hint) is derived. `dtype`→byte
+  size is already a known schema mapping, not a new ask.
+- **Mixed-dtype ops** (e.g. fp8 in / fp16 accumulate, or differing I/O dtypes) make `umd_bytes` a sum
+  over *per-tensor* dtype sizes, not one global `dtype_bytes`. The single expression still handles it,
+  but it must reference each tensor's own dtype — a single-dtype shortcut is wrong for quantized kernels.
+- **A native-predicate fallback** covers ops whose FLOP/byte count is not a clean closed form (ragged,
+  data-dependent masking): a registered function resolved by name instead of an inline formula, via the
+  custom-operation escape hatch ([Section 8](#8-model-adapters)).
+- **Auto-derivation yields a *superset*.** Deriving every raw field and generic transform produces a
+  bloated, noisy vector that can hurt a small-data model; the sweep's feature-importance (or a curated
+  per-op template) prunes it. Auto-derivation proposes; data or a template trims.
+
+**A data-free structural first pass.** Tiers 1–2 alone (no benchmarking) already support a real
+model-free heuristic better than `static_order`: prefer the kernel whose tile best divides the problem
+(minimize quantization waste), tie-break on an occupancy proxy. That is a legitimate `table`/rule UHD
+computable from KMD + matcher bindings + device facts, and it is the zero-benchmark starting point before
+the autotune-trained `tree_data` model replaces it.
+
 ---
 
 ## 15. Phased Delivery
@@ -1053,6 +1123,10 @@ land only when a concrete need appears.
    Enumerate the final set against real per-op sweeps before freezing.
    *(The expression-op question is resolved — the UMD RFC's JsonLogic operator set already covers the
    derived features.)* *(Impacts [Section 7.2](#72-the-features_signature).)*
+   **Auto-derivation dependency:** the physics features (arithmetic intensity, roofline bound) need
+   per-op **`umd_flops` / `umd_bytes`** `.fbs` annotations to be derivable ([Section 14.6](#146-auto-deriving-a-first-pass-features_signature)).
+   Open: settle the two attributes (declaration + per-op application), the mixed-dtype byte-formula
+   convention, and the dim↔tile correspondence hint that Tier-2 quantization features need.
 
 ### Structural
 
