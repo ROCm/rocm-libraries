@@ -20,6 +20,17 @@ registration), see the test documentation landing in
 [PR #10205](https://github.com/ROCm/rocm-libraries/pull/10205). This document is the strategy layer
 and does not duplicate it.
 
+One deliberate habit, since it is unusual for a document of this kind. Where a check exists because of
+a specific failure, that failure is written up under a subsection headed
+**How this one was learned**. This is not decoration. A control whose motivating failure is recorded
+nowhere reads as pure overhead, so it gets skipped, left unwired, or deleted by the next person who
+finds it inconvenient;
+[Build-Time Validation of Library Logic](#build-time-validation-of-library-logic) is a case where
+exactly that happened to a validator already sitting in this repository, at a cost of about three
+months. Each write-up sits in a highlighted box, states its finding in one bold sentence, and folds
+the narrative behind a collapsed **The full account** toggle, so the finding is unavoidable and the
+story stays optional.
+
 ## The short version
 
 **Where the confidence comes from.** Overwhelmingly from large GTest suites running real GEMMs on
@@ -56,6 +67,8 @@ additions to the template; everything else follows it.
 **Orientation**
 
 - [The short version](#the-short-version)
+- Incident write-ups, headed *How this one was learned*:
+  - [One number and three months](#how-this-one-was-learned-one-number-and-three-months)
 
 **What we test, and how**
 
@@ -380,22 +393,86 @@ broader hardware coverage than PR or nightly CI provides. See
 
 ### Build-Time Validation of Library Logic
 
-This one is easy to miss, because it does not look like a test and does not report like one. It is
-nonetheless a real gate, and it covers a class of defect nothing else in the component touches.
+**What it does.** `TensileLogic --check-all` validates the library logic YAML before any of it is
+compiled. It checks chip IDs, matrix instructions, work-group shapes, the XCC work-group mapping, and
+custom kernel declarations across every logic file. It reads YAML only, so it needs no GPU and no
+compiled kernels, and it is fast. A failure stops the build. It is the only mechanism in the component
+that validates tuning data rather than code, it does not look or report like a test, and it exists
+because of one specific incident.
 
-hipBLASLt's kernel selection is driven by library logic YAML: generated, tuned data describing which
-solution serves which problem shape on which architecture. That data can be wrong in ways no code
-review catches, and a bad entry surfaces at runtime as a kernel-selection failure on one shape on one
-architecture, which is an expensive way to find out.
+#### How this one was learned: one number and three months
 
-`TensileLogic --check-all` validates it before any of it is used. It checks chip IDs, matrix
-instructions, work-group shapes, the XCC work-group mapping, and custom kernel declarations across
-every logic file. It reads YAML only, so it needs no GPU and no compiled kernels, and it is fast.
+> [!IMPORTANT]
+>
+> **One retuned number in a YAML file silently disqualified every kernel candidate on a 38-CU
+> partition, the fallback path hid that as a 3x slowdown rather than a failure, and it cost the better
+> part of three months; the validator that would have caught it in seconds was already sitting in this
+> repository, wired to nothing.**
+>
+> <details>
+> <summary>The full account: how it was found, why nobody caught it, and what the fix actually took</summary>
+>
+> In February 2026, someone investigating a slow inference workload on an MI300X found that ROCm 7.2
+> took three times as long as ROCm 7.0 to do the same work. Nothing crashed. No answer was wrong. It
+> was just slow. They minimized it to three back-to-back matmul calls, and the numbers were stark: 2.6
+> seconds became 8.5, and the count of `hipGetDeviceProperties` calls went from 2,594 to 66,189.
+> Twenty-five times the driver traffic for three matrix multiplications. Swapping the caller's BLAS
+> backend made it vanish, which is what turned it into a hipBLASLt ticket, ROCM-2963.
+>
+> The cause was one number in a YAML file. The GPU was in CPX mode, which partitions it into eight
+> units of 38 compute units each. Kernel selection has a predicate, `WorkgroupMappingXCCCheck`, that
+> requires the CU count to divide evenly by a solution's `WorkGroupMappingXCC`. Somewhere between 7.0
+> and 7.2, that value was retuned from 1 to 4 in the 38-CU library. 38 is not divisible by 4. Every
+> solution failed the predicate, the heuristic returned zero candidates, and the library fell back to
+> `getAllSolutions`, an exhaustive scan of roughly 2,680 candidates, on every single call.
+>
+> Notice that the fallback worked. It did exactly what it was designed to do, and that is precisely why
+> nobody caught this: the safety net converted a total kernel-selection failure into a performance
+> problem, and performance has no gate in this component (see
+> [Performance and Benchmarking Testing](#performance-and-benchmarking-testing)). So it shipped.
+>
+> Then there is the scale. The fix, [PR #5009](https://github.com/ROCm/rocm-libraries/pull/5009),
+> changed 15,841 lines across 21 YAML files, and every one of those lines was the same edit:
+> `WorkGroupMappingXCC: 4` back to `1`. Nearly sixteen thousand solutions, every one syntactically
+> valid, every one reviewed and merged, every one silently unusable on the hardware that library exists
+> to serve. Nothing in the component could have caught it, because nothing in the component was looking
+> at the data at all.
+>
+> The fix then had a rough month. It merged, was cherry-picked into the 7.2 release branch, was
+> reverted, was proposed for revert again, and was reverted a second time when the 7.2.1 release team
+> decided not to take it. That part never shows up in a root-cause summary. One retuned parameter
+> produced the better part of three months of tickets, cherry-picks, reverts and meetings between the
+> first symptom and a guardrail that would have caught it in seconds.
+>
+> Here is the part that should change how you read the rest of this document: most of what the fix
+> needed already existed. `TensileLogic` had been in the tree for over a year, with validators for
+> work-group shapes and matrix instructions already written. Somebody had been bitten by bad logic data
+> before and had built a tool to catch it. But nothing ran that tool. It was wired into neither the
+> build nor CI, and it had drifted out of step with the data it was meant to check.
+>
+> So [PR #5039](https://github.com/ROCm/rocm-libraries/pull/5039) was less about writing a checker than
+> about making the existing one bite: clean it up, add a `WorkGroupMappingXCC`-versus-CU validator for
+> the rule that had actually been violated, and wire the whole thing into the build ahead of codegen so
+> invalid logic cannot reach a `.dat` file. It also added a validation API in TensileLite encoding the
+> rules a solution must satisfy to be selectable, with unit tests that inject a CU count of 38 directly
+> and assert that `WorkGroupMappingXCC: 4` fails and `1` passes. That is the original three-month bug,
+> reproduced in milliseconds on a CPU, with no CPX-mode hardware anywhere in the loop.
+>
+> The uncomfortable implication is that ROCM-2963 was probably not the first time this class of defect
+> cost somebody weeks. It is the first time it was well enough documented to point at. A validator
+> nobody runs is indistinguishable from no validator at all, and this document names three more of
+> them: `tox -e lint`, configured and invoked by no CI job; a CodeQL workflow that never sees C++ and
+> never runs on a pull request; and TSAN build options that exist while no lane uses them. Each one is
+> a tool somebody wrote because they had been burned, sitting where it cannot burn anything back.
+>
+> </details>
 
-**Why it runs in the build.** Relative to the build, the logic YAML is compiler input rather than
-build output: `TensileCreateLibrary` consumes it and emits kernels from it. Validating it is
-front-end analysis rather than testing, and running codegen over input already known to be invalid
-produces output nobody should trust. So the check is wired in as a CMake custom command in
+#### Why it runs in the build
+
+Relative to the build, the logic YAML is compiler input rather than build output:
+`TensileCreateLibrary` consumes it and emits kernels from it. Validating it is front-end analysis
+rather than testing, and running codegen over input already known to be invalid produces output nobody
+should trust. So the check is wired in as a CMake custom command in
 [`cmake/HipBLASLtCodegen.cmake`](cmake/HipBLASLtCodegen.cmake) that runs ahead of
 `TensileCreateLibrary` and writes a stamp file. A failure stops the build.
 
@@ -407,21 +484,36 @@ logic file rather than only the architectures being built, which is deliberate: 
 so there is value in a developer working on one architecture noticing that another one's data is
 broken.
 
-**What the placement costs is visibility and strictness.** There is no check name in the pull
-request, no test report, and no way for CI to run it in isolation. It also cannot be tightened in
-place, because `--strict-known-bugs` would fail local developer builds over a stale entry someone
-else owns, which is not a reasonable thing to do to a person trying to build. Both costs point at the
-same answer, and that answer is a second lane rather than a different home for this one.
+What the placement costs is visibility and strictness. There is no check name in the pull request, no
+test report, and no way for CI to run it in isolation. It also cannot be tightened in place, because
+`--strict-known-bugs` would fail local developer builds over a stale entry someone else owns, which is
+not a reasonable thing to do to a person trying to build. Both costs point at the same answer, and
+that answer is a second lane rather than a different home for this one.
+
+#### What it found once it existed
+
+The first thing a new gate does is argue with itself, and this one was no exception. Pointed at the
+full library it reported `Total 552358 solutions / Keep 552345 / Reject 13`. Thirteen gfx950 solutions
+failing matrix instruction validation, quarantined rather than fixed and still open under ROCM-7144.
+Shortly after, it failed a TheRock CI build on a gfx942 fp8 configuration, and that one turned out to
+be the validator's fault rather than the data's: its MFMA tables were missing the fnuz key variants
+(ROCM-24036, fixed in the same PR that added the gate).
+
+Since then it has been quiet, which is the outcome you want and the hardest one to take credit for. A
+retuning that breaks a CU-variant library the way ROCM-2963 did now fails a build in seconds instead
+of reaching a customer's model three months earlier in the story. There is no way to know how many
+times that has already happened, because a build that fails on line one of a bad YAML file does not
+generate a ticket, a meeting, or a revert. That absence is the whole return on the investment.
 
 Its known-bug list,
 [`tensilelite/Tensile/TensileLogic/known_bugs.yaml`](tensilelite/Tensile/TensileLogic/known_bugs.yaml),
 is the best-structured quarantine in the component (see
 [Known Bugs and Expected Failures](#known-bugs-and-expected-failures)). Entries are keyed on the
-logic file path plus the solution's `SolutionNameMin`, a content-derived name chosen so that keys
-survive library re-tuning instead of shifting with a positional index, and each entry carries a
-`ticket:` field. The checker re-validates every entry and reports the ones that no longer reproduce,
-so a fixed bug is detected rather than skipped forever. All 14 current entries document the same
-gfx950 validation drift under ROCM-7144.
+logic file path plus the solution's `SolutionNameMin`, a content-derived name adopted in
+[PR #9355](https://github.com/ROCm/rocm-libraries/pull/9355) so that keys survive library re-tuning
+instead of drifting with a positional index, and each entry carries a `ticket:` field. The checker
+re-validates every entry and reports the ones that no longer reproduce, so a fixed bug is detected
+rather than skipped forever. All 14 current entries document the same gfx950 validation drift.
 
 `--strict-known-bugs` turns that detection into a failure, but it defaults off and nothing passes it
 today, so a stale entry only warns. Enforcing it is tracked in AIHPBLAS-4196, which proposes the
@@ -431,9 +523,6 @@ tightening the in-build command. That ticket also names a remaining hole, which 
 entry whose `solution_name` resolves to nothing currently matches nothing and is silently ignored, so
 strict mode is not yet a complete dead-entry detector. Extending the gate to cover derived-parameter
 assignment is tracked in AIHPBLAS-3575.
-
-The check arrived in [PR #5039](https://github.com/ROCm/rocm-libraries/pull/5039) and was re-keyed
-onto solution names in [PR #9355](https://github.com/ROCm/rocm-libraries/pull/9355).
 
 ### Performance and Benchmarking Testing
 
