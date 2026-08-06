@@ -1,5 +1,5 @@
 # guessing the size of the parameter space can be rather difficult. To
-def add_param_dim(replace_strs, instances, param, max_expansion_size=10000):
+def add_param_dim(replace_strs, instances, param, max_expansion_size=1000000000):
     new_instances = []
     replace_strs.append(param["Names"])
     for instance in instances:
@@ -35,7 +35,7 @@ def add_param_dim(replace_strs, instances, param, max_expansion_size=10000):
 PARAM_SPACE_TO_LARGE_TO_COMPUTE = -1
 
 
-def get_param_space_size(params, prev_rv=[], prev_rs=[[]], max_expansion_size=10000):
+def get_param_space_size(params, prev_rv=[], prev_rs=[[]], max_expansion_size=1000000000):
     replace_strs = prev_rv
     instances = prev_rs
     for param in params:

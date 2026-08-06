@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include "common.hpp"
+#include "../example/20_grouped_conv_bwd_weight/common.hpp"
 
 #include "ck/tensor_operation/gpu/device/impl/device_grouped_conv_bwd_weight_xdl_cshuffle_v3.hpp"
 
@@ -128,7 +128,7 @@ using HostConvBwdWeightInstance = ck::tensor_operation::host::ReferenceConvBwdWe
                                                                                      WeiElementOp,
                                                                                      OutElementOp>;
 
-#include "run_grouped_conv_bwd_weight_example.inc"
+#include "../example/20_grouped_conv_bwd_weight/run_grouped_conv_bwd_weight_example.inc"
 
 int main(int argc, char* argv[])
 {

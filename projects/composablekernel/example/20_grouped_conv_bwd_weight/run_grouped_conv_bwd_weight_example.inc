@@ -5,8 +5,8 @@ template <ck::index_t NDimSpatial>
 bool run_grouped_conv_bwd_weight(const ExecutionConfig& config,
                                  const ck::utils::conv::ConvParam& conv_param)
 {
-    // Dl ops don't support split_k > 1
-    constexpr ck::index_t split_k = 1;
+    // Just use auto-deduced split_k for now.
+    constexpr ck::index_t split_k = -1; //TODO: FIX!!
 
     const auto in_g_n_c_wis_desc =
         ck::utils::conv::make_input_host_tensor_descriptor_g_n_c_wis_packed<
@@ -25,9 +25,9 @@ bool run_grouped_conv_bwd_weight(const ExecutionConfig& config,
     Tensor<WeiDataType> wei_device_result(wei_g_k_c_xs_desc);
     Tensor<OutDataType> out(out_g_n_k_wos_desc);
 
-    std::cout << "in: " << in.mDesc << std::endl;
-    std::cout << "wei: " << wei_host_result.mDesc << std::endl;
-    std::cout << "out: " << out.mDesc << std::endl;
+    // std::cout << "in: " << in.mDesc << std::endl;
+    // std::cout << "wei: " << wei_host_result.mDesc << std::endl;
+    // std::cout << "out: " << out.mDesc << std::endl;
 
     switch(config.init_method)
     {
@@ -76,35 +76,55 @@ bool run_grouped_conv_bwd_weight(const ExecutionConfig& config,
     range_copy(conv_param.input_right_pads_, begin(input_right_pads));
 
     // do GEMM
-    auto conv     = DeviceConvBwdWeightInstance<NDimSpatial>{};
-    auto invoker  = conv.MakeInvoker();
-    auto argument = conv.MakeArgument(static_cast<InDataType*>(in_device_buf.GetDeviceBuffer()),
-                                      static_cast<WeiDataType*>(wei_device_buf.GetDeviceBuffer()),
-                                      static_cast<OutDataType*>(out_device_buf.GetDeviceBuffer()),
-                                      input_lengths,
-                                      input_strides,
-                                      filter_lengths,
-                                      weights_strides,
-                                      output_lengths,
-                                      output_strides,
-                                      conv_filter_strides,
-                                      conv_filter_dilations,
-                                      input_left_pads,
-                                      input_right_pads,
-                                      InElementOp{},
-                                      WeiElementOp{},
-                                      OutElementOp{},
-                                      split_k);
+    auto conv           = DeviceConvBwdWeightInstance<NDimSpatial>{};
+    std::string op_name = conv.GetTypeString();
+    auto invoker        = conv.MakeInvoker();
+    auto argument_ptr =
+        conv.MakeArgumentPointer(static_cast<InDataType*>(in_device_buf.GetDeviceBuffer()),
+                                 static_cast<WeiDataType*>(wei_device_buf.GetDeviceBuffer()),
+                                 static_cast<OutDataType*>(out_device_buf.GetDeviceBuffer()),
+                                 input_lengths,
+                                 input_strides,
+                                 filter_lengths,
+                                 weights_strides,
+                                 output_lengths,
+                                 output_strides,
+                                 conv_filter_strides,
+                                 conv_filter_dilations,
+                                 input_left_pads,
+                                 input_right_pads,
+                                 InElementOp{},
+                                 WeiElementOp{},
+                                 OutElementOp{},
+                                 split_k);
 
-    if(!conv.IsSupportedArgument(argument))
+    ck::index_t split_k_value = split_k;
+    bool pass = 0;
+
+    if (split_k == -1)
     {
-        std::cerr << "wrong! device_conv with the specified compilation parameters does "
-                     "not support this Conv problem"
-                  << std::endl;
-        return true;
+        auto* split_k_arg =
+            dynamic_cast<ck::tensor_operation::device::ArgumentSplitK*>(argument_ptr.get());
+        if(split_k_arg)
+        {
+            split_k_value = split_k_arg->k_batch_;
+        }
     }
 
-    invoker.Run(argument, StreamConfig{nullptr, false});
+    // Dot not give a pass for unsupported instances!
+    if(!conv.IsSupportedArgument(argument_ptr.get()))
+    {
+        std::cout << op_name << " does not support this problem" << std::endl;
+        return 0;
+    }
+
+    float avg_time        = invoker.Run(argument_ptr.get(), StreamConfig{nullptr, config.time_kernel});
+    std::size_t flop      = conv_param.GetFlops();
+    std::size_t num_btype = conv_param.GetByte<InDataType, WeiDataType, OutDataType>();
+
+    float tflops = static_cast<float>(flop) / 1.E9 / avg_time;
+
+    float gb_per_sec = num_btype / 1.E6 / avg_time;
 
     std::cout << "do_verification = " << config.do_verification << std::endl;
 
@@ -141,15 +161,13 @@ bool run_grouped_conv_bwd_weight(const ExecutionConfig& config,
         double atol = ck::utils::get_absolute_threshold<InDataType, WeiDataType, AccDataType>(
             max_accumulated_value / num_accums_split_k, num_accums / num_accums_split_k);
 
-        bool pass = ck::utils::check_err(wei_device_result.mData,
+        pass = ck::utils::check_err(wei_device_result.mData,
                                          wei_host_result.mData,
                                          "Error: Incorrect results!",
                                          rtol,
                                          atol);
 
         std::cout << "CPU verification: " << (pass ? "PASS" : "FAIL") << std::endl;
-
-        return pass;
     }
     else if(config.do_verification == 2)
     {
@@ -194,29 +212,25 @@ bool run_grouped_conv_bwd_weight(const ExecutionConfig& config,
         std::cout << "Comparing GPU kernel output vs GPU reference..." << std::endl;
 
         // Compare: Optimized kernel result vs GPU reference result
-        bool pass = ck::utils::check_err(wei_device_result.mData,
+        pass = ck::utils::check_err(wei_device_result.mData,
                                          wei_host_result.mData,
                                          "Error: Incorrect results!",
                                          get_rtol<WeiDataType, float>(),
                                          get_atol<WeiDataType, float>());
 
         std::cout << "GPU verification result is:" << (pass ? "correct" : "fail") << std::endl;
-
-        return pass;
     }
 
-    float avg_time = invoker.Run(argument, StreamConfig{nullptr, config.time_kernel});
+    std::cout << std::fixed << std::setprecision(3);
+    std::cout << "Perf: " << std::setw(10) << avg_time << " ms, " << tflops << " TFlops, "
+              << gb_per_sec << " GB/s, " << op_name << ", SplitK " << split_k_value << std::endl;
 
-    std::size_t flop      = conv_param.GetFlops();
-    std::size_t num_btype = conv_param.GetByte<InDataType, WeiDataType, OutDataType>();
-
-    float tflops = static_cast<float>(flop) / 1.E9 / avg_time;
-
-    float gb_per_sec = num_btype / 1.E6 / avg_time;
-
-    std::cerr << "Perf: " << avg_time << " ms, " << tflops << " TFlops, " << gb_per_sec << " GB/s"
-              << std::endl
-              << "DeviceOp: " << conv.GetTypeString() << std::endl;
-
-    return true;
+    if(config.do_verification)
+    {
+        return pass;
+    }
+    else
+    {
+        return true;
+    }
 }

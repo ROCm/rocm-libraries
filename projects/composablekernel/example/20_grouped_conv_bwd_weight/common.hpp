@@ -39,6 +39,9 @@ using PassThrough = ck::tensor_operation::element_wise::PassThrough;
 static constexpr auto ConvBwdWeightDefault =
     ck::tensor_operation::device::ConvolutionBackwardWeightSpecialization::Default;
 
+static constexpr auto Filter1x1Stride1Pad0 =
+    ck::tensor_operation::device::ConvolutionBackwardWeightSpecialization::Filter1x1Stride1Pad0;
+
 template <typename DataType, typename GemmType = DataType>
 inline __host__ __device__ constexpr double get_rtol()
 {
@@ -90,31 +93,31 @@ struct CommonLayoutSetting
 };
 
 namespace ctl = ck::tensor_layout::convolution;
-template <ck::index_t NDimSpatial>
+template <ck::index_t Buh>
 struct CommonLayoutSettingSelector
-    : CommonLayoutSetting<ck::tuple_element_t<NDimSpatial - 1,
-                                              ck::Tuple<ck::tensor_layout::convolution::GNWC,
-                                                        ck::tensor_layout::convolution::GNHWC,
-                                                        ck::tensor_layout::convolution::GNDHWC>>,
-                          ck::tuple_element_t<NDimSpatial - 1,
+    : CommonLayoutSetting<ck::tuple_element_t<Buh - 1,
+                                              ck::Tuple<ck::tensor_layout::convolution::NWGC,
+                                                        ck::tensor_layout::convolution::NHWGC,
+                                                        ck::tensor_layout::convolution::NDHWGC>>,
+                          ck::tuple_element_t<Buh - 1,
                                               ck::Tuple<ck::tensor_layout::convolution::GKXC,
                                                         ck::tensor_layout::convolution::GKYXC,
                                                         ck::tensor_layout::convolution::GKZYXC>>,
-                          ck::tuple_element_t<NDimSpatial - 1,
-                                              ck::Tuple<ck::tensor_layout::convolution::GNWK,
-                                                        ck::tensor_layout::convolution::GNHWK,
-                                                        ck::tensor_layout::convolution::GNDHWK>>>
+                          ck::tuple_element_t<Buh - 1,
+                                              ck::Tuple<ck::tensor_layout::convolution::NWGK,
+                                                        ck::tensor_layout::convolution::NHWGK,
+                                                        ck::tensor_layout::convolution::NDHWGK>>>
 {
 };
 
-template <ck::index_t NDimSpatial>
-using InputLayout = typename CommonLayoutSettingSelector<NDimSpatial>::InputLayout;
+template <ck::index_t Buh>
+using InputLayout = typename CommonLayoutSettingSelector<Buh>::InputLayout;
 
-template <ck::index_t NDimSpatial>
-using WeightLayout = typename CommonLayoutSettingSelector<NDimSpatial>::WeightLayout;
+template <ck::index_t Buh>
+using WeightLayout = typename CommonLayoutSettingSelector<Buh>::WeightLayout;
 
-template <ck::index_t NDimSpatial>
-using OutputLayout = typename CommonLayoutSettingSelector<NDimSpatial>::OutputLayout;
+template <ck::index_t Buh>
+using OutputLayout = typename CommonLayoutSettingSelector<Buh>::OutputLayout;
 
 struct ExecutionConfig final
 {
