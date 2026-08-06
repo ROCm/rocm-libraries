@@ -1399,6 +1399,9 @@ def problems_gfx950_attention_tiled_2d():
         p(512, 1, 32, 32, 128, 32, 512, 4096),  # single-batch d128
         p(512, 1, 32, 32, 64, 32, 2048, 4096),  # single-batch d64 long
         p(512, 1, 32, 32, 128, 32, 2048, 4096),  # single-batch d128 long
+        p(
+            512, 1, 32, 32, 128, 64, 512, 4096
+        ),  # single-batch d128 block_size=64 (d128 small tile path)
         p(512, 1, 32, 32, 64, 32, 512, 4096, use_qq_bias=True),  # single-batch + bias
         p(512, 1, 32, 32, 64, 32, 512, 4096, sliding_window=256),  # single-batch + SW
         # ---- transposed_qk_32x32 multi-batch path ----
