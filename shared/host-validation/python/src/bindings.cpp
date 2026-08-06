@@ -106,16 +106,15 @@ Tensor tensorFromStorage(ScalarType type, std::vector<size_t> dimensions, nb::by
     return Tensor::fromStorage(type, std::move(layout), std::move(storage));
 }
 
-Tensor referenceGemmOwned(const Tensor& a, const Tensor& b, const Tensor& c, ScalarType outputType,
-                          ScalarType accumulatorType, std::complex<double> alpha,
-                          std::complex<double> beta, std::optional<ScalarType> computeTypeA,
-                          std::optional<ScalarType> computeTypeB, MathMode mathMode,
-                          Activation activation, double activationParameter0,
-                          double activationParameter1, OutputSelection outputSelection,
-                          GemmBackend backend, std::optional<Tensor> blockScaleA,
-                          std::optional<Tensor> blockScaleB, size_t blockSizeA, size_t blockSizeB,
-                          std::optional<Tensor> preQuantizationScaleA,
-                          std::optional<Tensor> preQuantizationScaleB) {
+Tensor referenceGemmOwned(
+    const Tensor& a, const Tensor& b, const Tensor& c, ScalarType outputType,
+    ScalarType accumulatorType, std::complex<double> alpha, std::complex<double> beta,
+    std::optional<ScalarType> computeTypeA, std::optional<ScalarType> computeTypeB,
+    MathMode mathMode, Activation activation, double activationParameter0,
+    double activationParameter1, OutputSelection outputSelection, GemmBackend backend,
+    std::optional<Tensor> blockScaleA, std::optional<Tensor> blockScaleB, size_t blockSizeA,
+    size_t blockSizeB, std::optional<Tensor> preQuantizationScaleA, MatrixAxis preQuantizationAxisA,
+    std::optional<Tensor> preQuantizationScaleB, MatrixAxis preQuantizationAxisB) {
     if (a.shape().rank() != 2 || b.shape().rank() != 2)
         throw std::invalid_argument("Python reference_gemm requires rank-2 A and B tensors.");
 
@@ -124,8 +123,12 @@ Tensor referenceGemmOwned(const Tensor& a, const Tensor& b, const Tensor& c, Sca
     GemmOperand operandB(b.view());
     operandA.computeType = computeTypeA;
     operandB.computeType = computeTypeB;
-    if (preQuantizationScaleA) operandA.preQuantizationScale = preQuantizationScaleA->view();
-    if (preQuantizationScaleB) operandB.preQuantizationScale = preQuantizationScaleB->view();
+    if (preQuantizationScaleA)
+        operandA.preQuantizationScale =
+            VectorBinding{preQuantizationScaleA->view(), preQuantizationAxisA};
+    if (preQuantizationScaleB)
+        operandB.preQuantizationScale =
+            VectorBinding{preQuantizationScaleB->view(), preQuantizationAxisB};
     if (blockScaleA || blockScaleB) {
         if (!blockScaleA || !blockScaleB || blockSizeA == 0 || blockSizeB == 0)
             throw std::invalid_argument(
@@ -479,7 +482,9 @@ NB_MODULE(_roc_host_validation, module) {
                "backend"_a = GemmBackend::Canonical, "block_scale_a"_a = std::optional<Tensor>{},
                "block_scale_b"_a = std::optional<Tensor>{}, "block_size_a"_a = 0,
                "block_size_b"_a = 0, "pre_quantization_scale_a"_a = std::optional<Tensor>{},
-               "pre_quantization_scale_b"_a = std::optional<Tensor>{});
+               "pre_quantization_axis_a"_a = MatrixAxis::Row,
+               "pre_quantization_scale_b"_a = std::optional<Tensor>{},
+               "pre_quantization_axis_b"_a = MatrixAxis::Column);
     module.def("reference_epilogue", &referenceEpilogueOwned, "input"_a, "output_type"_a,
                "compute_type"_a, "bias"_a = std::optional<Tensor>{},
                "bias_axis"_a = MatrixAxis::Row, "activation"_a = Activation::None,
