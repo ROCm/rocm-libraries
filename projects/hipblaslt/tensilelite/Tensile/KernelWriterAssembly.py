@@ -756,10 +756,10 @@ class KernelWriterAssembly(KernelWriter):
       if not kernel["enableTDMB"]:
         module.add(self.defineSgpr("SrdB", 4, 4))
         self.addSgprVarToPool("SrdB")
-      if kernel["ProblemType"]["MXBlockA"] and (not kernel["enableTDMA"] or (kernel.get("UseSubtileImpl") and kernel["ISA"] != (12, 5, 0))):
+      if kernel["ProblemType"]["MXBlockA"] and (not kernel["enableTDMA"] or (kernel.get("UseSubtileImpl") and not self.states.asmCaps["HasTDM"])):
         module.add(self.defineSgpr("SrdMXSA", 4, 4))
         self.addSgprVarToPool("SrdMXSA")
-      if kernel["ProblemType"]["MXBlockB"] and (not kernel["enableTDMB"] or (kernel.get("UseSubtileImpl") and kernel["ISA"] != (12, 5, 0))):
+      if kernel["ProblemType"]["MXBlockB"] and (not kernel["enableTDMB"] or (kernel.get("UseSubtileImpl") and not self.states.asmCaps["HasTDM"])):
         module.add(self.defineSgpr("SrdMXSB", 4, 4))
         self.addSgprVarToPool("SrdMXSB")
       if not kernel["enableTDMMetadata"] and kernel["ProblemType"]["Sparse"]:
@@ -775,10 +775,10 @@ class KernelWriterAssembly(KernelWriter):
       if not kernel["enableTDMMetadata"] and kernel["ProblemType"]["Sparse"]:
         module.add(self.defineSgpr("ShadowLimitMetadata", 2, 2))
     if self.states.use64bShadowLimitMX:
-      if kernel["ProblemType"]["MXBlockA"] and (not kernel["enableTDMA"] or (kernel.get("UseSubtileImpl") and kernel["ISA"] != (12, 5, 0))):
+      if kernel["ProblemType"]["MXBlockA"] and (not kernel["enableTDMA"] or (kernel.get("UseSubtileImpl") and not self.states.asmCaps["HasTDM"])):
         module.add(self.defineSgpr("ShadowLimitMXSA", 2, 2))
         self.addSgprVarToPool("ShadowLimitMXSA")
-      if kernel["ProblemType"]["MXBlockB"] and (not kernel["enableTDMB"] or (kernel.get("UseSubtileImpl") and kernel["ISA"] != (12, 5, 0))):
+      if kernel["ProblemType"]["MXBlockB"] and (not kernel["enableTDMB"] or (kernel.get("UseSubtileImpl") and not self.states.asmCaps["HasTDM"])):
         module.add(self.defineSgpr("ShadowLimitMXSB", 2, 2))
         self.addSgprVarToPool("ShadowLimitMXSB")
 
@@ -960,7 +960,7 @@ class KernelWriterAssembly(KernelWriter):
       # gfx950 subtile MX scales use SRD buffer loads (no TDM SGPRs needed).
       # gfx1250 subtile MX scales need TDM tensor_load_to_lds (buffer_load lds
       # is not supported), so allocate TDM descriptor SGPRs.
-      _subtileSkipMxTdm = kernel.get("UseSubtileImpl") and kernel["ISA"] != (12, 5, 0)
+      _subtileSkipMxTdm = kernel.get("UseSubtileImpl") and not self.states.asmCaps["HasTDM"]
       if kernel["ProblemType"]["MXBlockA"] and not _subtileSkipMxTdm:
         module.add(self.defineSgpr("tdmMXSAGroup0", 4, 4))
         module.add(self.defineSgpr("tdmMXSAGroup1", 8, 4))

@@ -5090,8 +5090,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # Non-TDM or subtile gfx1250 (which uses TDM for scale loads but
       # still needs explicit descriptor init):
       _needScaleInit = not (kernel["enableTDMA"] and kernel["enableTDMB"]) \
-                         or (kernel.get("UseSubtileImpl") and tuple(kernel["ISA"]) == (12, 5, 0))
-      _subtileScaleDeferred = kernel.get("UseSubtileImpl") and tuple(kernel["ISA"]) == (12, 5, 0)
+                         or (kernel.get("UseSubtileImpl") and self.states.asmCaps["HasTDM"])
+      _subtileScaleDeferred = kernel.get("UseSubtileImpl") and self.states.asmCaps["HasTDM"]
       if _needScaleInit and not _subtileScaleDeferred:
         module.add(globalReadScaleSwizzledDTLInitCommonSgpr(self, kernel))
 
@@ -5163,7 +5163,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # Subtile gfx1250 MX scale TDM init: deferred to here so that
       # AddressMXSA/B have been rebased and we can apply per-WG offsets.
       if mxsatileInfo is not None and kernel.get("UseSubtileImpl") \
-          and tuple(kernel["ISA"]) == (12, 5, 0):
+          and self.states.asmCaps["HasTDM"]:
         module.add(globalReadScaleSwizzledDTLInitCommonSgpr(self, kernel))
     if not hasTDM:
       module.add(graTileAssignment(self, kernel))

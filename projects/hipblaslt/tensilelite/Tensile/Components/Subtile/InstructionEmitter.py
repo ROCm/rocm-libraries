@@ -236,7 +236,7 @@ class InstructionEmitter:
             vgprTilesScale = self.vgprTilesSA if tensor == 'SA' else self.vgprTilesSB
             kernel = self.kernel
             wavelen = kernel["WavefrontSize"]
-            isWave32Gfx1250 = (wavelen == 32 and tuple(kernel["ISA"]) == (12, 5, 0))
+            isWave32Gfx1250 = (wavelen == 32 and self.writer.states.asmCaps["HasTDM"])
             for tileId in range(placement.tiles.tileId_start, placement.tiles.tileId_end, lrGran.mn):
                 scaleGroupIdx = tileId // lrGran.mn
                 groupKey = scaleGroupIdx * lrGran.mn

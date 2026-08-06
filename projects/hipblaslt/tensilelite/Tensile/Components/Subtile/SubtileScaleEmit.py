@@ -23,7 +23,7 @@ from rocisa.container import DSModifiers, MUBUFModifiers, vgpr, sgpr, mgpr
 from rocisa.instruction import (
     BufferLoadB128,
     DSLoadB32,
-    SAddCU32, SAddU32, SAndB32, SLShiftLeftB32, SLShiftRightB32, SMaxI32, SMinU32, SMovB32, SMovB64, SMulI32, SNop, SOrB32, SSubI32, SSubU32, SXorB32,
+    SAddCU32, SAddU32, SAndB32, SLShiftLeftB32, SLShiftRightB32, SMovB32, SMovB64, SMulI32, SNop, SOrB32, SSubU32, SXorB32,
     VAddU32, VAndB32, VMulLOU32, VReadfirstlaneB32, VXorB32,
     VLShiftLeftB32, VLShiftRightB32,
 )
@@ -201,7 +201,7 @@ def emitScaleGRPtrUpdate(ti, writer, kernel):
   module = Module()
   tc = ti.tc
 
-  useTdmForScale = tuple(kernel["ISA"]) == (12, 5, 0)
+  useTdmForScale = writer.states.asmCaps["HasTDM"]
 
   if useTdmForScale:
     # TDM path (gfx1250): advance Address{tc} and sync descriptor for MXSA.
@@ -238,7 +238,7 @@ def emitScaleGRLDSSwap(ti, writer, kernel):
   module = Module()
   tc = ti.tc
 
-  useTdmForScale = tuple(kernel["ISA"]) == (12, 5, 0)
+  useTdmForScale = writer.states.asmCaps["HasTDM"]
 
   if useTdmForScale:
     # TDM path (gfx1250): only swap for MXSA.  MXSB is aliased onto the
@@ -468,7 +468,7 @@ def globalReadDoScaleSubtile(tc, writer, kernel):
 
   # gfx1250 does not support buffer_load with lds modifier; use TDM
   # tensor_load_to_lds instead. gfx950 continues using SRD buffer loads.
-  useTdmForScale = tuple(kernel["ISA"]) == (12, 5, 0)
+  useTdmForScale = writer.states.asmCaps["HasTDM"]
 
   if useTdmForScale:
     return _globalReadDoScaleSubtileTDM(tc, writer, kernel)
@@ -616,7 +616,7 @@ def emitSubtileScaleDsRead(tc, writer, kernel, scaleGroupIdx):
   # Each ds_load_b32 reads dimk bytes per lane.  Group stride = lanes * dimk
   # advances to the next batch of 32 M-rows within the same K-tile.
   wavelen = kernel["WavefrontSize"]
-  isWave32Gfx1250 = (wavelen == 32 and tuple(kernel["ISA"]) == (12, 5, 0))
+  isWave32Gfx1250 = (wavelen == 32 and writer.states.asmCaps["HasTDM"])
   if isWave32Gfx1250:
     parentTc = tc[-1]
     mxBlock = kernel["ProblemType"][f"MXBlock{parentTc}"]
@@ -647,7 +647,7 @@ def localReadDoScaleSubtile(tc, writer, kernel):
   # For wave32 gfx1250: each ds_load covers wavelen M-rows.
   # numGroups = perWaveRows / wavelen (M-dimension groups).
   wavelen = kernel["WavefrontSize"]
-  isWave32Gfx1250 = (wavelen == 32 and tuple(kernel["ISA"]) == (12, 5, 0))
+  isWave32Gfx1250 = (wavelen == 32 and writer.states.asmCaps["HasTDM"])
   if isWave32Gfx1250:
     parentTc = tc[-1]
     ti = 0 if parentTc == 'A' else 1
@@ -858,7 +858,7 @@ def _initTDMDescriptorMXScaleSubtile(writer, kernel, scaleTc):
 def globalReadScaleSwizzledDTLInitCommonSgpr(writer, kernel):
   module = Module()
 
-  useTdmForScale = tuple(kernel["ISA"]) == (12, 5, 0)
+  useTdmForScale = writer.states.asmCaps["HasTDM"]
 
   if useTdmForScale:
     # gfx1250: init TDM descriptors for MX scales using subtile LDS layout.
