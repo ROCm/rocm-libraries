@@ -14,7 +14,7 @@ with open("../CMakeLists.txt", encoding="utf-8") as f:
 left_nav_title = f"hipThreads {version_number} Documentation"
 
 # for PDF output on Read the Docs
-project = "hipThreads Documentation"
+project = "hipThreads"
 author = "Advanced Micro Devices, Inc."
 copyright = "Copyright (c) 2025-2026 Advanced Micro Devices, Inc. All rights reserved."
 version = version_number
@@ -34,7 +34,12 @@ exclude_patterns = [
 
 extensions = ["rocm_docs", "rocm_docs.doxygen"]
 html_theme = "rocm_docs_theme"
-html_theme_options = {"flavor": "rocm"}
+html_theme_options = {
+    "flavor": "rocm",
+    "repository_url": "https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipthreads",
+    "use_repository_button": True,
+    "use_issues_button": True,
+}
 
 external_projects_current_project = "hipthreads"
 
