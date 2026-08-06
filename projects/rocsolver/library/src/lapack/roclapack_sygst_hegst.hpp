@@ -218,8 +218,6 @@ void rocsolver_sygst_hegst_getMemorySize(const rocblas_fill uplo,
         return;
     }
 
-    auto ceildiv = [](auto m, auto b) { return ((m + b - 1) / b); };
-
     if(n < xxGST_BLOCKSIZE)
     {
         // requirements for calling a single SYGS2/HEGS2
@@ -609,7 +607,7 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
 
                                          A, shiftA, lda, strideA,
 
-                                         batch_count, (T**)temp4);
+                                         batch_count, (T**)temp2);
             }
 
             if(istat == rocblas_status_success)
@@ -632,7 +630,7 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
 
                                          A, shiftA, lda, strideA,
 
-                                         batch_count, (T**)temp4);
+                                         batch_count, (T**)temp2);
             }
         }
 
