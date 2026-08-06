@@ -10163,18 +10163,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
         self.states.numStoreSgprNameSizes.append(1)
       storeSgprLoad += self.states.numActivationTypeArgSize + self.states.numactivationArgTotalSize
 
-    if self.states.useGateResidual:
-      self.states.numSgprAddressGate = self.states.rpga # 64-bit
-      self.states.numStoreSgprNames.append("AddressGate")
-      self.states.numStoreSgprNameSizes.append(self.states.numSgprAddressGate)
-      self.states.GateType   = 1
-      self.states.GateStride = self.states.gate.numSgprStrides
-      self.states.numStoreSgprNames.append("GateType")
-      self.states.numStoreSgprNameSizes.append(self.states.GateType)
-      self.states.numStoreSgprNames.append("GateStride")
-      self.states.numStoreSgprNameSizes.append(self.states.GateStride)
-      storeSgprLoad += self.states.numSgprAddressGate + self.states.GateType + self.states.GateStride
-
     self.states.numStoreSgprToLoad = storeSgprLoad
     if self.db["InitLds"] : print ("\n***WARNING: InitLds enabled, may impact performance\n")
     if self.db["InitSgpr"] : print ("\n***WARNING: InitSgpr enabled, may impact performance\n")

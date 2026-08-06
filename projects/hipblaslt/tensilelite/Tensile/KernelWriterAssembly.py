@@ -611,6 +611,12 @@ class KernelWriterAssembly(KernelWriter):
 
   def defineMultiSgprIndex(self, names: List[str], numSgprs: List[int], align=1):
     assert(len(names) == len(numSgprs))
+    # checkOutMulti only aligns the start of the whole block, so a repeated name
+    # remaps self.sgprs[name] to its later index, which is aligned only by luck.
+    # A 64-bit arg landing on an odd SGPR then fails assembly with "invalid
+    # register alignment" far from the duplicate that caused it.
+    assert len(set(names)) == len(names), \
+        "duplicate sgpr arg names: %s" % sorted({n for n in names if names.count(n) > 1})
 
     sgprIdxVec = self.sgprPool.checkOutMulti(numSgprs, align, tags=names)
     #self.sgprIdx = roundUpToNearestMultiple(self.sgprIdx,align)
