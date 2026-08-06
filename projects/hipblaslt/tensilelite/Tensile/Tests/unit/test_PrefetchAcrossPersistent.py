@@ -12,6 +12,7 @@ from types import SimpleNamespace
 
 import pytest
 from rocisa.code import Module
+from rocisa.container import sgpr
 from rocisa.enum import RegisterType
 from rocisa.register import RegisterPool
 
@@ -198,6 +199,9 @@ class _SetupNewTilePapTdmWriter:
 
     def tdmApplyStreamKOffsetWaveSeparated(self, kernel, tpa, tpb):
         return self._module("tdmApplyStreamKOffsetWaveSeparated_%s_%s" % (tpa["tensorChar"], tpb["tensorChar"]))
+
+    def hoistWaveParityWrapUSel(self, kernel, tpa, tpb):
+        return self._module("hoistWaveParityWrapUSel_%s_%s" % (tpa["tensorChar"], tpb["tensorChar"]))
 
     def releaseGlobalReadIncsSgprsAfterTdmWaveSep(self, kernel):
         return self._module("releaseGlobalReadIncsSgprsAfterTdmWaveSep")
@@ -781,6 +785,139 @@ def test_setup_new_tile_keeps_waveidx_for_wave_separated_tdm_staggeru(monkeypatc
         assert "calculateStagger_A" in module_names
         assert "calculateStagger_B" in module_names
         assert "undefineSgpr_WaveIdx" not in module_names
+
+
+class _HoistWrapUSelWriter:
+    def __init__(self, stagger_u_code=True):
+        self.states = SimpleNamespace(
+            staggerUCode=stagger_u_code,
+            waveIdxReleasedAfterStagger=False,
+        )
+
+    @contextmanager
+    def allocTmpSgpr(self, size, alignment=1, tag=""):
+        yield SimpleNamespace(idx=90, size=size)
+
+    def isTdmWaveSeparated(self, kernel):
+        return kwa_module.KernelWriterAssembly.isTdmWaveSeparated(self, kernel)
+
+    def isTdmWaveIdxLive(self, kernel):
+        return kwa_module.KernelWriterAssembly.isTdmWaveIdxLive(self, kernel)
+
+    def _emitTdmWaveParitySCC(self, *args, **kwargs):
+        return kwa_module.KernelWriterAssembly._emitTdmWaveParitySCC(self, *args, **kwargs)
+
+
+_HOIST_WRAPU_KERNEL = {
+    "ClusterBarrier": False,
+    "NumWaves": 2,
+    "UseSubtileImpl": False,
+    "WavefrontSize": 32,
+    "enableTDMA": True,
+    "enableTDMB": True,
+}
+
+
+def _hoist_wrapu_sel_items(tc_a, tc_b, *, stagger_u_code=True, **kernel_overrides):
+    kernel = dict(_HOIST_WRAPU_KERNEL)
+    kernel.update(kernel_overrides)
+    module = kwa_module.KernelWriterAssembly.hoistWaveParityWrapUSel(
+        _HoistWrapUSelWriter(stagger_u_code=stagger_u_code),
+        kernel,
+        {"tensorChar": tc_a},
+        {"tensorChar": tc_b},
+    )
+    return _module_items(module)
+
+
+def _operand_text(items):
+    return " ".join(
+        "%s %s" % (getattr(item, "dst", ""), " ".join(str(src) for src in getattr(item, "srcs", [])))
+        for item in items
+    )
+
+
+def test_hoist_wave_parity_wrapu_sel_selects_the_ab_pair():
+    selects = [
+        item
+        for item in _hoist_wrapu_sel_items("A", "B")
+        if isinstance(item, kwa_module.SCSelectB32)
+    ]
+
+    assert len(selects) == 2
+    for select, half in zip(selects, ("0", "1")):
+        assert "WrapUSelAB+%s" % half in str(select.dst)
+        srcs = [str(src) for src in select.srcs]
+        assert "WrapUB+%s" % half in srcs[0]
+        assert "WrapUA+%s" % half in srcs[1]
+
+
+class _TdmIncrementWaveSepWriter:
+    def __init__(self):
+        self.states = SimpleNamespace(
+            staggerUCode=True, unrollIdx=0, waveIdxReleasedAfterStagger=False
+        )
+        self._next_tmp_sgpr = 80
+        self.sgprs = {"WrapUSelAB": 60}
+
+    def isTdmWaveSeparated(self, kernel):
+        return kwa_module.KernelWriterAssembly.isTdmWaveSeparated(self, kernel)
+
+    def isTdmWaveIdxLive(self, kernel):
+        return kwa_module.KernelWriterAssembly.isTdmWaveIdxLive(self, kernel)
+
+    def _emitTdmWaveParitySCC(self, *args, **kwargs):
+        return kwa_module.KernelWriterAssembly._emitTdmWaveParitySCC(self, *args, **kwargs)
+
+    @contextmanager
+    def allocTmpSgpr(self, size, alignment=1, tag=""):
+        base = self._next_tmp_sgpr
+        self._next_tmp_sgpr += size + alignment
+        yield SimpleNamespace(idx=base, size=size)
+
+    def loopCounter(self, kernel, loop_idx):
+        return sgpr("LoopCounterL")
+
+
+def _tdm_increment_ab_items(tc_a, tc_b):
+    kernel = dict(_HOIST_WRAPU_KERNEL)
+    kernel.update({"ProblemType": {"Sparse": 0}, "TDMSplit": False})
+    module = kwa_module.KernelWriterAssembly.tdmIncrementABWaveSperated(
+        _TdmIncrementWaveSepWriter(),
+        kernel,
+        {"tensorChar": tc_a},
+        {"tensorChar": tc_b},
+        loopIdx=0,
+    )
+    return _module_items(module)
+
+
+def test_tdm_increment_ab_pair_reads_the_hoisted_wrapu_sel(monkeypatch):
+    monkeypatch.setattr(kwa_module.TensorDataMoverLoad, "find", lambda writer: _StubTdmComp())
+    operands = _operand_text(_tdm_increment_ab_items("A", "B"))
+
+    assert "sgprWrapUSelAB" in operands
+    # The A/B select is hoisted, so the loop must not re-read the raw wrap registers.
+    assert "sgprWrapUA" not in operands
+    assert "sgprWrapUB" not in operands
+
+
+@pytest.mark.parametrize(
+    "kernel_overrides, stagger_u_code",
+    [
+        pytest.param({}, False, id="no_stagger_ucode"),
+        pytest.param({"NumWaves": 1}, True, id="single_wave"),
+        pytest.param({"enableTDMB": False}, True, id="not_wave_separated"),
+    ],
+)
+def test_hoist_wave_parity_wrapu_sel_emits_nothing_off_wave_separated_tdm(
+    kernel_overrides, stagger_u_code
+):
+    items = _hoist_wrapu_sel_items(
+        "A", "B", stagger_u_code=stagger_u_code, **kernel_overrides
+    )
+
+    assert items == []
 
 
 def test_pap_tdm_descriptor_refresh_threads_temporary_waveidx(monkeypatch):

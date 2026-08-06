@@ -676,6 +676,9 @@ class KernelWriterAssembly(KernelWriter):
 
     self.removeSgprVarFromPool("WrapUA")
     self.removeSgprVarFromPool("WrapUB")
+    if self.states.staggerUCode and kernel["enableTDMA"] and kernel["enableTDMB"] \
+        and kernel["NumWaves"] > 1:
+      self.removeSgprVarFromPool("WrapUSelAB")
     if kernel["ProblemType"]["MXBlockA"]:
       self.removeSgprVarFromPool("WrapUMXSA")
     if kernel["ProblemType"]["MXBlockB"]:
@@ -797,6 +800,14 @@ class KernelWriterAssembly(KernelWriter):
         module.add(self.defineSgpr("WrapUMXSB", 2, wrapAlignment))  # Bytes to add to SrdA to reset address from N-1 iter to AddressMXSB
       if kernel["ProblemType"]["Sparse"]:
         module.add(self.defineSgpr("WrapUMetadata", 2, wrapAlignment))  # Bytes to add to SrdMetadata to reset address from N-1 iter to AddressMetadata
+      # Wave-separated TDM picks WrapUB (odd waves) vs WrapUA (even waves) by wave parity.
+      # That parity and the resulting selection are loop-invariant (Serial is constant), so
+      # precompute the selected WrapU once into this persistent pair (see
+      # hoistWaveParityWrapUSel) and read it in the loop instead of recomputing parity +
+      # selecting every iteration.
+      if kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["NumWaves"] > 1:
+        module.add(self.defineSgpr("WrapUSelAB", 2, wrapAlignment))  # Parity-selected WrapU for the aliased A/B SRD
+        self.addSgprVarToPool("WrapUSelAB")
 
       self.addSgprVarToPool("WrapUA")
       self.addSgprVarToPool("WrapUB")
@@ -20096,6 +20107,27 @@ class KernelWriterAssembly(KernelWriter):
 
     return mod
 
+  def hoistWaveParityWrapUSel(self, kernel, tPA, tPB) -> Module:
+    # Preloop: compute the loop-invariant parity-selected WrapU once into WrapUSelAB.
+    # Mirrors the (now removed) per-iteration select in tdmIncrementABWaveSperated.
+    #   WrapUSel = wave_parity ? WrapU{tcB} : WrapU{tcA}
+    # Only emitted for the wave-separated TDM path that consumes WrapUSelAB in the loop.
+    mod = Module("HoistWaveParityWrapUSel")
+    if not (self.states.staggerUCode and kernel["enableTDMA"] and kernel["enableTDMB"] \
+            and kernel["NumWaves"] > 1):
+      return mod
+    tcA: str = tPA['tensorChar']
+    tcB: str = tPB['tensorChar']
+    selSgprName = f"WrapUSel{tcA}{tcB}"
+
+    assert self.isTdmWaveIdxLive(kernel), "wave parity needs a live sgprWaveIdx"
+    self._emitTdmWaveParitySCC(mod, kernel, comment="check wave parity")
+    mod.add(SCSelectB32(dst=sgpr(f"{selSgprName}+0"), src0=sgpr(f"WrapU{tcB}+0"), src1=sgpr(f"WrapU{tcA}+0"), \
+            comment=f"hoist: {selSgprName} = parity ? WrapU{tcB} : WrapU{tcA} (lo)"))
+    mod.add(SCSelectB32(dst=sgpr(f"{selSgprName}+1"), src0=sgpr(f"WrapU{tcB}+1"), src1=sgpr(f"WrapU{tcA}+1"), \
+            comment=f"hoist: {selSgprName} = parity ? WrapU{tcB} : WrapU{tcA} (hi)"))
+    return mod
+
   def tdmIncrementABWaveSperated(self, kernel, tPA, tPB, loopIdx=None, prefetchIndex=0) -> Module:
     comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
     #TODO: TDM replace by universal tdm group sgpr
@@ -20104,23 +20136,34 @@ class KernelWriterAssembly(KernelWriter):
     mod = Module("TDMGlobalIncrementsWaveSeparated")
     tdmGroup0 = f"tdm{tcA}Group0"
     incSgprName = f"tdm{tcA}{tcB}Incs"
+    selSgprName = f"WrapUSel{tcA}{tcB}"
+    # Only the tensor pair hoistWaveParityWrapUSel ran for has a persistent selected pair;
+    # any other pair still selects in the loop.
+    hoistedSel = selSgprName in self.sgprs
 
     if loopIdx is not None and loopIdx == self.states.unrollIdx and self.states.staggerUCode:
-      with self.allocTmpSgpr(4, tag="tdmIncrementABWaveSperated_tmpSgprInfo") as tmpSgprInfo:
+      with self.allocTmpSgpr(2 if hoistedSel else 4, tag="tdmIncrementABWaveSperated_tmpSgprInfo") as tmpSgprInfo:
         incTmpLo = tmpSgprInfo.idx
         incTmpHi = tmpSgprInfo.idx + 1
-        wrapTmpLo = tmpSgprInfo.idx + 2
-        wrapTmpHi = tmpSgprInfo.idx + 3
 
-        if self.isTdmWaveIdxLive(kernel):
-          self._emitTdmWaveParitySCC(mod, kernel, comment="check wave parity")
+        if hoistedSel:
+          # Wave parity and the parity-selected WrapU are loop-invariant (Serial is constant),
+          # so they are computed ONCE in the preloop (see hoistWaveParityWrapUSel). Here we
+          # only do the genuinely per-iteration wrapIter test and final select+add.
+          wrapLo, wrapHi = sgpr(f"{selSgprName}+0"), sgpr(f"{selSgprName}+1")
         else:
-          with self.allocTmpSgpr(1, tag="tdmIncrementABWaveSperated_tmpSgprInfo2") as waveIdTmp:
-            self._emitTdmWaveParitySCC(mod, kernel, waveIdTmp.idx, "check wave parity")
-        mod.add(SCSelectB32(dst=sgpr(wrapTmpLo), src0=sgpr(f"WrapU{tcB}+0"), src1=sgpr(f"WrapU{tcA}+0"), \
-                comment="select WrapU based on wave parity (lo)"))
-        mod.add(SCSelectB32(dst=sgpr(wrapTmpHi), src0=sgpr(f"WrapU{tcB}+1"), src1=sgpr(f"WrapU{tcA}+1"), \
-                comment="select WrapU based on wave parity (hi)"))
+          wrapTmpLo = tmpSgprInfo.idx + 2
+          wrapTmpHi = tmpSgprInfo.idx + 3
+          if self.isTdmWaveIdxLive(kernel):
+            self._emitTdmWaveParitySCC(mod, kernel, comment="check wave parity")
+          else:
+            with self.allocTmpSgpr(1, tag="tdmIncrementABWaveSperated_tmpSgprInfo2") as waveIdTmp:
+              self._emitTdmWaveParitySCC(mod, kernel, waveIdTmp.idx, "check wave parity")
+          mod.add(SCSelectB32(dst=sgpr(wrapTmpLo), src0=sgpr(f"WrapU{tcB}+0"), src1=sgpr(f"WrapU{tcA}+0"), \
+                  comment="select WrapU based on wave parity (lo)"))
+          mod.add(SCSelectB32(dst=sgpr(wrapTmpHi), src0=sgpr(f"WrapU{tcB}+1"), src1=sgpr(f"WrapU{tcA}+1"), \
+                  comment="select WrapU based on wave parity (hi)"))
+          wrapLo, wrapHi = sgpr(wrapTmpLo), sgpr(wrapTmpHi)
 
         if prefetchIndex:
           mod.add(SAddU32(dst=sgpr(incTmpLo), src0=self.loopCounter(kernel, self.states.unrollIdx), \
@@ -20129,9 +20172,9 @@ class KernelWriterAssembly(KernelWriter):
         else:
           mod.add(SCmpEQU32(src0=self.loopCounter(kernel, self.states.unrollIdx), \
                     src1=sgpr("StaggerUIter"), comment="Is this the wrapIter?"))
-        mod.add(SCSelectB32(dst=sgpr(incTmpLo), src0=sgpr(wrapTmpLo), src1=sgpr(incSgprName), \
+        mod.add(SCSelectB32(dst=sgpr(incTmpLo), src0=wrapLo, src1=sgpr(incSgprName), \
                 comment="select WrapU or normal inc (lo)"))
-        mod.add(SCSelectB32(dst=sgpr(incTmpHi), src0=sgpr(wrapTmpHi), src1=0, \
+        mod.add(SCSelectB32(dst=sgpr(incTmpHi), src0=wrapHi, src1=0, \
                 comment="select WrapU or normal inc (hi)"))
 
         mod.add(SAddU64(dst=sgpr(f"{tdmGroup0}+2", 2), src0=sgpr(f"{tdmGroup0}+2", 2), \
