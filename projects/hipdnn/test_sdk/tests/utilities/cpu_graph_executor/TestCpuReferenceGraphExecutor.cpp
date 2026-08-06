@@ -283,10 +283,10 @@ public:
         runMoeGroupedMatmulBwdTest(hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,
                                    hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType)
     {
-        constexpr int64_t experts = 2;
-        constexpr int64_t hiddenK = 3;
-        constexpr int64_t outputN = 4;
-        constexpr int64_t tokenRows = 8;
+        constexpr int64_t EXPERTS = 2;
+        constexpr int64_t HIDDEN_K = 3;
+        constexpr int64_t OUTPUT_N = 4;
+        constexpr int64_t TOKEN_ROWS = 8;
 
         const unsigned int seed = getGlobalTestSeed();
 
@@ -294,9 +294,9 @@ public:
         // one's buffers, leaving the second with pristine inputs for the direct
         // reference call.
         MoeGroupedMatmulBwdTensorBundle<InputType, DweightType> execBundle(
-            experts, hiddenK, outputN, tokenRows, seed);
+            EXPERTS, HIDDEN_K, OUTPUT_N, TOKEN_ROWS, seed);
         MoeGroupedMatmulBwdTensorBundle<InputType, DweightType> directBundle(
-            experts, hiddenK, outputN, tokenRows, seed);
+            EXPERTS, HIDDEN_K, OUTPUT_N, TOKEN_ROWS, seed);
 
         auto graphTuple = buildMoeGroupedMatmulBwdGraph(execBundle, inputDataType, computeDataType);
 

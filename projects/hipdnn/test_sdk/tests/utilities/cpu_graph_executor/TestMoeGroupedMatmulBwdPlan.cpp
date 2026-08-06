@@ -33,8 +33,8 @@ std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<in
     const std::vector<int64_t> aDims = {1, 1, 4, 2};
     const std::vector<int64_t> bDims = {1, 1, 2, 3};
     const std::vector<int64_t> cDims = {1, 1, 4, 3};
-    static MatmulTensorBundle<float> matmulTensorBundle(aDims, bDims, cDims, false, false, 1);
-    return buildMatmulGraph(matmulTensorBundle, DataType::FLOAT, DataType::FLOAT);
+    static MatmulTensorBundle<float> s_matmulTensorBundle(aDims, bDims, cDims, false, false, 1);
+    return buildMatmulGraph(s_matmulTensorBundle, DataType::FLOAT, DataType::FLOAT);
 }
 
 } // namespace
@@ -58,16 +58,16 @@ protected:
 
 TEST_F(TestMoeGroupedMatmulBwdPlan, ExecutePlan)
 {
-    constexpr int64_t experts = 2;
-    constexpr int64_t hiddenK = 3;
-    constexpr int64_t outputN = 4;
-    constexpr int64_t tokenRows = 8;
+    constexpr int64_t EXPERTS = 2;
+    constexpr int64_t HIDDEN_K = 3;
+    constexpr int64_t OUTPUT_N = 4;
+    constexpr int64_t TOKEN_ROWS = 8;
 
     const unsigned int seed = getGlobalTestSeed();
     MoeGroupedMatmulBwdTensorBundle<float> planTensorBundle(
-        experts, hiddenK, outputN, tokenRows, seed);
+        EXPERTS, HIDDEN_K, OUTPUT_N, TOKEN_ROWS, seed);
     MoeGroupedMatmulBwdTensorBundle<float> directTensorBundle(
-        experts, hiddenK, outputN, tokenRows, seed);
+        EXPERTS, HIDDEN_K, OUTPUT_N, TOKEN_ROWS, seed);
 
     MoeGroupedMatmulBwdParams params;
     initTensorValues(params.doutputTensor, DataType::FLOAT, planTensorBundle.doutputTensor, 1);
