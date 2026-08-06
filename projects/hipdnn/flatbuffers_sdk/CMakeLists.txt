@@ -141,6 +141,7 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
             schemas/reduction_attributes.fbs
             schemas/resample_common.fbs
             schemas/resample_fwd_attributes.fbs
+            schemas/resample_bwd_attributes.fbs
             schemas/tensor_attributes.fbs
             schemas/uhd.fbs
             schemas/gbdt_model.fbs

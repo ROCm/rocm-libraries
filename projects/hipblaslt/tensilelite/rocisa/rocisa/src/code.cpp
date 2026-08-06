@@ -369,6 +369,7 @@ void init_code(nb::module_ m)
              nb::arg("totalVgprs") = 0,
              nb::arg("totalSgprs") = 0)
         .def("setGprs", &rocisa::SignatureCodeMeta::setGprs)
+        .def_ro("offset", &rocisa::SignatureCodeMeta::offset)
         .def("addArg",
              &rocisa::SignatureCodeMeta::addArg,
              nb::arg("name"),
@@ -408,6 +409,8 @@ void init_code(nb::module_ m)
              nb::arg("totalSgprs")      = 0,
              nb::arg("numSgprPreload")  = 0)
         .def("setGprs", &rocisa::SignatureBase::setGprs)
+        .def_prop_ro("offset",
+                     [](const rocisa::SignatureBase& self) { return self.codeMeta.offset; })
         .def("addArg",
              &rocisa::SignatureBase::addArg,
              nb::arg("name"),

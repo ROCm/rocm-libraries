@@ -58,6 +58,7 @@ from .ir import (
     VectorType,
 )
 from .backend import (
+    BackendCoverageGap,
     BackendError,
     BackendMismatch,
     lower_universal_gemm,
@@ -103,6 +104,7 @@ __all__ = [
     "Type",
     "Value",
     "VectorType",
+    "BackendCoverageGap",
     "BackendError",
     "BackendMismatch",
     "lower_universal_gemm",
