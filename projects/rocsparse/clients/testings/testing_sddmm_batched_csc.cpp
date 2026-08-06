@@ -240,7 +240,7 @@ void testing_sddmm_batched_csc(const Arguments& arg)
                                arg.rand_gen_min,
                                arg.rand_gen_max);
 
-    host_vector<I> hcsc_col_ptr(batch_count * (N + 1));
+    host_vector<I> hcsc_col_ptr(batch_count_C * (N + 1));
     for(J i = 0; i < batch_count_C; ++i)
     {
         for(size_t j = 0; j < static_cast<size_t>(N + 1); ++j)
@@ -479,5 +479,12 @@ INSTANTIATE_MIXED(int64_t, int64_t, _Float16, _Float16, float, float);
 INSTANTIATE_MIXED(int32_t, int32_t, _Float16, _Float16, _Float16, float);
 INSTANTIATE_MIXED(int64_t, int32_t, _Float16, _Float16, _Float16, float);
 INSTANTIATE_MIXED(int64_t, int64_t, _Float16, _Float16, _Float16, float);
+
+INSTANTIATE_MIXED(int32_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, float, float);
+INSTANTIATE_MIXED(int64_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, float, float);
+INSTANTIATE_MIXED(int64_t, int64_t, rocsparse_bfloat16, rocsparse_bfloat16, float, float);
+INSTANTIATE_MIXED(int32_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16, float);
+INSTANTIATE_MIXED(int64_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16, float);
+INSTANTIATE_MIXED(int64_t, int64_t, rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16, float);
 
 void testing_sddmm_batched_csc_extra(const Arguments& arg) {}
