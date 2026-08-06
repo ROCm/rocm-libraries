@@ -4480,7 +4480,6 @@ void testing_matmul_with_bias(const Arguments& arg,
                         Tc,
                         isScaleAMXFormat ? HIP_R_32F : TciA,
                         isScaleBMXFormat ? HIP_R_32F : TciB,
-                        false,
                         isBlockScaling(arg.scaleA),
                         isBlockScaling(arg.scaleB));
 
@@ -4641,7 +4640,6 @@ void testing_matmul_with_bias(const Arguments& arg,
                                Tc,
                                isScaleAMXFormat ? HIP_R_32F : TciA,
                                isScaleBMXFormat ? HIP_R_32F : TciB,
-                               false,
                                isBlockScaling(arg.scaleA),
                                isBlockScaling(arg.scaleB));
                 }
@@ -4684,7 +4682,6 @@ void testing_matmul_with_bias(const Arguments& arg,
                         Tc,
                         isScaleAMXFormat ? HIP_R_32F : TciA,
                         isScaleBMXFormat ? HIP_R_32F : TciB,
-                        false,
                         isBlockScaling(arg.scaleA),
                         isBlockScaling(arg.scaleB));
                 }

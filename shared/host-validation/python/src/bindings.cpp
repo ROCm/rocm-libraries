@@ -127,8 +127,11 @@ Tensor referenceGemmOwned(
     MathMode mathMode, Activation activation, double activationParameter0,
     double activationParameter1, OutputSelection outputSelection, GemmBackend backend,
     std::optional<Tensor> blockScaleA, std::optional<Tensor> blockScaleB, size_t blockSizeA,
-    size_t blockSizeB, std::optional<Tensor> preQuantizationScaleA, MatrixAxis preQuantizationAxisA,
-    std::optional<Tensor> preQuantizationScaleB, MatrixAxis preQuantizationAxisB) {
+    size_t blockSizeB, std::vector<Tensor> preQuantizationScalesA,
+    std::vector<MatrixAxis> preQuantizationAxesA,
+    std::vector<Tensor> preQuantizationScalesB,
+    std::vector<MatrixAxis> preQuantizationAxesB,
+    std::complex<double> outputScale, GemmOutputConversion outputConversion) {
     if (a.shape().rank() != 2 || b.shape().rank() != 2)
         throw std::invalid_argument("Python reference_gemm requires rank-2 A and B tensors.");
 
@@ -137,12 +140,30 @@ Tensor referenceGemmOwned(
     GemmOperand operandB(b.view());
     operandA.computeType = computeTypeA;
     operandB.computeType = computeTypeB;
-    if (preQuantizationScaleA)
-        operandA.preQuantizationScale =
-            VectorBinding{preQuantizationScaleA->view(), preQuantizationAxisA};
-    if (preQuantizationScaleB)
-        operandB.preQuantizationScale =
-            VectorBinding{preQuantizationScaleB->view(), preQuantizationAxisB};
+    auto addPreQuantizationScales = [](GemmOperand& operand,
+                                       const std::vector<Tensor>& scales,
+                                       const std::vector<MatrixAxis>& axes,
+                                       MatrixAxis defaultAxis,
+                                       const char* name) {
+        if (!axes.empty() && axes.size() != scales.size())
+            throw std::invalid_argument(
+                std::string("Python reference_gemm ") + name +
+                " scale/axis counts differ.");
+        for (size_t index = 0; index < scales.size(); ++index)
+            operand.preQuantizationScales.push_back(
+                VectorBinding{scales[index].view(),
+                              axes.empty() ? defaultAxis : axes[index]});
+    };
+    addPreQuantizationScales(operandA,
+                             preQuantizationScalesA,
+                             preQuantizationAxesA,
+                             MatrixAxis::Row,
+                             "A pre-quantization");
+    addPreQuantizationScales(operandB,
+                             preQuantizationScalesB,
+                             preQuantizationAxesB,
+                             MatrixAxis::Column,
+                             "B pre-quantization");
     if (blockScaleA || blockScaleB) {
         if (!blockScaleA || !blockScaleB || blockSizeA == 0 || blockSizeB == 0)
             throw std::invalid_argument(
@@ -155,6 +176,8 @@ Tensor referenceGemmOwned(
     problem.mathMode = mathMode;
     problem.epilogue.alpha = alpha;
     problem.epilogue.beta = beta;
+    problem.epilogue.outputScale = outputScale;
+    problem.epilogue.outputConversion = outputConversion;
     problem.epilogue.activation = activation;
     problem.epilogue.activationParameter0 = activationParameter0;
     problem.epilogue.activationParameter1 = activationParameter1;
@@ -356,6 +379,10 @@ NB_MODULE(_roc_host_validation, module) {
     nb::enum_<GemmBackend>(module, "GemmBackend")
         .value("Canonical", GemmBackend::Canonical)
         .value("Tiled", GemmBackend::Tiled);
+
+    nb::enum_<GemmOutputConversion>(module, "GemmOutputConversion")
+        .value("Default", GemmOutputConversion::Default)
+        .value("SaturatingInt8", GemmOutputConversion::SaturatingInt8);
 
     nb::enum_<MatrixAxis>(module, "MatrixAxis")
         .value("Row", MatrixAxis::Row)
@@ -663,10 +690,13 @@ NB_MODULE(_roc_host_validation, module) {
                "activation_parameter1"_a = 0.0, "output_selection"_a = OutputSelection::all(),
                "backend"_a = GemmBackend::Canonical, "block_scale_a"_a = std::optional<Tensor>{},
                "block_scale_b"_a = std::optional<Tensor>{}, "block_size_a"_a = 0,
-               "block_size_b"_a = 0, "pre_quantization_scale_a"_a = std::optional<Tensor>{},
-               "pre_quantization_axis_a"_a = MatrixAxis::Row,
-               "pre_quantization_scale_b"_a = std::optional<Tensor>{},
-               "pre_quantization_axis_b"_a = MatrixAxis::Column);
+               "block_size_b"_a = 0,
+               "pre_quantization_scales_a"_a = std::vector<Tensor>{},
+               "pre_quantization_axes_a"_a = std::vector<MatrixAxis>{},
+               "pre_quantization_scales_b"_a = std::vector<Tensor>{},
+               "pre_quantization_axes_b"_a = std::vector<MatrixAxis>{},
+               "output_scale"_a = std::complex<double>(1.0, 0.0),
+               "output_conversion"_a = GemmOutputConversion::Default);
     module.def("reference_epilogue", &referenceEpilogueOwned, "input"_a, "output_type"_a,
                "compute_type"_a, "bias"_a = std::optional<Tensor>{},
                "bias_axis"_a = MatrixAxis::Row, "activation"_a = Activation::None,
