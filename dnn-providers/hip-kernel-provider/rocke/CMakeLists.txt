@@ -6,7 +6,11 @@
 # The library/ tree is build-time-only Python (kernels/builders/dispatch); it is
 # editable-installed and wheeled by the rocke-pyenv / rocke-wheels blocks below,
 # not added as a CMake subdirectory.
-add_subdirectory(platform)
+#
+# NOTE: add_subdirectory(platform) is deferred to after the ROCKE_BUILD_PYENV /
+# ROCKE_WHEEL_DIR / ROCKE_WHEEL_VERSION declarations below so that
+# platform/CMakeLists.txt sees those variables when it registers the wheel
+# install() rules.
 
 # ---------------------------------------------------------------------------
 # rocke-pyenv: build-time editable Python environment.
@@ -96,3 +100,5 @@ if(ROCKE_BUILD_PYENV)
         DEPENDS "${_rocke_platform_wheel}" "${_rocke_library_wheel}"
         COMMENT "rocke-wheels: building platform + library Python wheels")
 endif()
+
+add_subdirectory(platform)
