@@ -319,7 +319,7 @@ static __global__ void cal_gnorm_sq_kernel(const I m,
                     norm_j += shift_left(norm_j, 32);
                 if(tx == 0)
                 {
-                    gnorm_j = std::max(gnorm_j, norm_j);
+                    gnorm_j = rocblas_max_nan(gnorm_j, norm_j);
                 }
             }
 
@@ -586,13 +586,13 @@ static rocblas_status rocsolver_cholqr_getMemorySize(const rocsolver_cholqr_shif
     I mn = std::min(m, n);
     if(mn == n)
     {
-        // case m >= n
+        // case min(m, n) == n
         uplo = rocblas_fill_upper;
         side = rocblas_side_right;
     }
     else
     {
-        // case m < n
+        // case min(m, n) == m
         uplo = rocblas_fill_lower;
         side = rocblas_side_left;
     }

@@ -367,13 +367,13 @@ void cholqr_getError(const rocblas_handle handle,
         // reconstruction error is ||A - QR|| / ||A|| or ||A - LQ|| / ||A||
         if(mn == n)
         {
-            // case m >= n
+            // case min(m, n) == n
             cpu_gemm(rocblas_operation_none, rocblas_operation_none, m, n, mn, T(1), hARes[b], lda,
                      hWRes[b], ldw, T(0), Ac.data(), lda);
         }
         else
         {
-            // case m < n
+            // case min(m, n) == m
             cpu_gemm(rocblas_operation_none, rocblas_operation_none, m, n, mn, T(1), hWRes[b], ldw,
                      hARes[b], lda, T(0), Ac.data(), lda);
         }
@@ -437,12 +437,12 @@ void cholqr_getPerfData(const rocblas_handle handle,
         {
             if(mn == n)
             {
-                // case m >= n
+                // case min(m, n) == n
                 cpu_geqrf(m, n, hA[b], lda, hTau.data(), hWrk.data(), mn);
             }
             else
             {
-                // case m < n
+                // case min(m, n) == m
                 cpu_gelqf(m, n, hA[b], lda, hTau.data(), hWrk.data(), mn);
             }
         }
