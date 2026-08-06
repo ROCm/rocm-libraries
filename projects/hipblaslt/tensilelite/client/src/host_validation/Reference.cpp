@@ -504,25 +504,25 @@ namespace TensileLite
                 if (computeTypeA != typeA) operandA.computeType = computeTypeA;
                 if (computeTypeB != typeB) operandB.computeType = computeTypeB;
                 if (problem.useScaleAB() == "Scalar" && preQuantizationScaleA)
-                    operandA.preQuantizationScale = VectorBinding{
+                    operandA.preQuantizationScales.push_back(VectorBinding{
                         TensorView(alphaType,
                                    Layout::contiguous(Shape{1}),
                                    storageSpan(alphaType, inputs.scaleA, 1)),
-                        MatrixAxis::Row};
+                        MatrixAxis::Row});
                 if (problem.useScaleAB() == "Scalar" && preQuantizationScaleB)
-                    operandB.preQuantizationScale = VectorBinding{
+                    operandB.preQuantizationScales.push_back(VectorBinding{
                         TensorView(alphaType,
                                    Layout::contiguous(Shape{1}),
                                    storageSpan(alphaType, inputs.scaleB, 1)),
-                        MatrixAxis::Column};
+                        MatrixAxis::Column});
                 if (problem.useScaleAB() == "Vector" && preQuantizationScaleA)
-                    operandA.preQuantizationScale = VectorBinding{
+                    operandA.preQuantizationScales.push_back(VectorBinding{
                         TensorView(alphaType, Layout::contiguous(Shape{m}), scaleAStorage),
-                        MatrixAxis::Row};
+                        MatrixAxis::Row});
                 if (problem.useScaleAB() == "Vector" && preQuantizationScaleB)
-                    operandB.preQuantizationScale = VectorBinding{
+                    operandB.preQuantizationScales.push_back(VectorBinding{
                         TensorView(alphaType, Layout::contiguous(Shape{n}), scaleBStorage),
-                        MatrixAxis::Column};
+                        MatrixAxis::Column});
                 operandA.conjugate = aConjugate;
                 operandB.conjugate = bConjugate;
                 std::optional<Tensor> runtimeScaleA;
@@ -817,8 +817,8 @@ namespace TensileLite
             if(mxBlockA > 0 || mxBlockB > 0)
             {
                 // One-sided MX (only A or only B scaled) is not supported. The
-                // slow path's columnMajorGemm reference also rejects this case,
-                // so the two paths agree on what "MX" means.
+                // canonical component reference also rejects this case, so the
+                // two paths agree on what "MX" means.
                 if((mxBlockA > 0) != (mxBlockB > 0))
                     return rejectFast("one_sided_mx_not_supported");
 

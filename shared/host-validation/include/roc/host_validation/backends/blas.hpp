@@ -12,4 +12,11 @@ class BlasGemmBackend final : public GemmBackendImplementation {
     GemmSupportInfo querySupport(const GemmProblem& problem) const override;
     GemmRunInfo run(const GemmProblem& problem) const override;
 };
+
+class TransformingBlasGemmBackend final : public GemmBackendImplementation {
+   public:
+    GemmBackend backend() const override;
+    GemmSupportInfo querySupport(const GemmProblem& problem) const override;
+    GemmRunInfo run(const GemmProblem& problem) const override;
+};
 }  // namespace roc::host_validation

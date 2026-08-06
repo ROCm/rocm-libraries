@@ -35,23 +35,28 @@ GemmRunInfo runTiled(const GemmProblem& problem) {
     const RuntimeMatrixReader<Accumulator> a(problem.a.values);
     const RuntimeMatrixReader<Accumulator> b(problem.b.values);
     const RuntimeMatrixReader<Accumulator> c(problem.c);
-    const RuntimeMatrixWriter<Accumulator> d(problem.d);
+    const RuntimeGemmOutputWriter<Accumulator> d(
+        problem.d, problem.epilogue.outputConversion);
     const RuntimeQuantizer<Accumulator> quantizeA(problem.a.computeType);
     const RuntimeQuantizer<Accumulator> quantizeB(problem.b.computeType);
     const RuntimeMathFunction<Accumulator> operandMath =
         runtimeMathFunction<Accumulator>(problem.mathMode);
 
     std::optional<RuntimeVectorReader<Accumulator>> bias;
-    std::optional<RuntimeVectorReader<Accumulator>> preScaleA;
-    std::optional<RuntimeVectorReader<Accumulator>> preScaleB;
+    std::vector<RuntimeVectorReader<Accumulator>> preScalesA;
+    std::vector<RuntimeVectorReader<Accumulator>> preScalesB;
     std::optional<RuntimeVectorReader<Accumulator>> scaleAlpha;
     std::optional<RuntimeVectorReader<Accumulator>> scaleA;
     std::optional<RuntimeVectorReader<Accumulator>> scaleB;
     std::optional<RuntimeMatrixReader<Accumulator>> blockScaleA;
     std::optional<RuntimeMatrixReader<Accumulator>> blockScaleB;
     if (problem.epilogue.bias) bias.emplace(problem.epilogue.bias->values);
-    if (problem.a.preQuantizationScale) preScaleA.emplace(problem.a.preQuantizationScale->values);
-    if (problem.b.preQuantizationScale) preScaleB.emplace(problem.b.preQuantizationScale->values);
+    preScalesA.reserve(problem.a.preQuantizationScales.size());
+    for (const VectorBinding& binding : problem.a.preQuantizationScales)
+        preScalesA.emplace_back(binding.values);
+    preScalesB.reserve(problem.b.preQuantizationScales.size());
+    for (const VectorBinding& binding : problem.b.preQuantizationScales)
+        preScalesB.emplace_back(binding.values);
     if (problem.epilogue.scaleAlpha) scaleAlpha.emplace(problem.epilogue.scaleAlpha->values);
     if (problem.epilogue.scaleA) scaleA.emplace(*problem.epilogue.scaleA);
     if (problem.epilogue.scaleB) scaleB.emplace(*problem.epilogue.scaleB);
@@ -71,6 +76,8 @@ GemmRunInfo runTiled(const GemmProblem& problem) {
     }
     const Accumulator alpha = runtimeScalar<Accumulator>(problem.epilogue.alpha, "alpha");
     const Accumulator beta = runtimeScalar<Accumulator>(problem.epilogue.beta, "beta");
+    const Accumulator outputScale =
+        runtimeScalar<Accumulator>(problem.epilogue.outputScale, "output scale");
     const Accumulator activationParameter0 =
         static_cast<Accumulator>(problem.epilogue.activationParameter0);
     const Accumulator activationParameter1 =
@@ -93,14 +100,16 @@ GemmRunInfo runTiled(const GemmProblem& problem) {
                     for (size_t reduction = 0; reduction < reductions; ++reduction) {
                         Accumulator value = conjugateIfNeeded(
                             a(rowBase + row, reductionBase + reduction), problem.a.conjugate);
-                        if (preScaleA) {
-                            const auto& binding = *problem.a.preQuantizationScale;
+                        for (size_t scaleIndex = 0; scaleIndex < preScalesA.size();
+                             ++scaleIndex) {
+                            const auto& binding =
+                                problem.a.preQuantizationScales[scaleIndex];
                             const size_t index =
                                 binding.values.shape()[0] == 1
                                     ? 0
                                     : (binding.axis == MatrixAxis::Row ? rowBase + row
                                                                        : reductionBase + reduction);
-                            value *= (*preScaleA)[index];
+                            value *= preScalesA[scaleIndex][index];
                         }
                         aTile[row * reductions + reduction] = operandMath(quantizeA(value));
                     }
@@ -109,14 +118,16 @@ GemmRunInfo runTiled(const GemmProblem& problem) {
                     for (size_t column = 0; column < columns; ++column) {
                         Accumulator value = conjugateIfNeeded(
                             b(reductionBase + reduction, columnBase + column), problem.b.conjugate);
-                        if (preScaleB) {
-                            const auto& binding = *problem.b.preQuantizationScale;
+                        for (size_t scaleIndex = 0; scaleIndex < preScalesB.size();
+                             ++scaleIndex) {
+                            const auto& binding =
+                                problem.b.preQuantizationScales[scaleIndex];
                             const size_t index =
                                 binding.values.shape()[0] == 1
                                     ? 0
                                     : (binding.axis == MatrixAxis::Row ? reductionBase + reduction
                                                                        : columnBase + column);
-                            value *= (*preScaleB)[index];
+                            value *= preScalesB[scaleIndex][index];
                         }
                         bTile[reduction * columns + column] = operandMath(quantizeB(value));
                     }
@@ -170,6 +181,7 @@ GemmRunInfo runTiled(const GemmProblem& problem) {
                     }
                     result = applyActivation(problem.epilogue.activation, result,
                                              activationParameter0, activationParameter1);
+                    result *= outputScale;
                     d.store(globalRow, globalColumn, result);
                 }
             }

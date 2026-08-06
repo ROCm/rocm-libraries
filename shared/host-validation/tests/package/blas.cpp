@@ -5,5 +5,9 @@
 
 int main() {
     roc::host_validation::BlasGemmBackend backend;
-    return backend.backend() == roc::host_validation::GemmBackend::Blas ? 0 : 1;
+    roc::host_validation::TransformingBlasGemmBackend transforming;
+    return backend.backend() == roc::host_validation::GemmBackend::Blas &&
+                   transforming.backend() == roc::host_validation::GemmBackend::Blas
+               ? 0
+               : 1;
 }
