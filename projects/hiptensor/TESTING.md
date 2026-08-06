@@ -182,7 +182,6 @@ Tiers are applied to the installed tree only (`<prefix>/bin/hiptensor/CTestTestf
 
 - No per-architecture performance baseline stored in a queryable format (SQLite, dashboard, etc.).
 - No automated regression threshold enforced in CI.
-- FP8 type combinations not yet represented in bench configs.
 - Trinary contraction and unary-ops variants have no bench configs.
 
 ---
@@ -263,7 +262,6 @@ hipTensor's test coverage surface is wide: 6 tensor ranks × multiple data types
 **Known gaps:**
 - Code coverage is not measured in CI today.
 - No per-Linux / per-Windows coverage split.
-- FP8 type coverage exists in the source but is not represented in all validation config tiers.
 
 ---
 
@@ -295,7 +293,6 @@ Beyond PR validation, nightly runs add:
 
 - Multi-GPU (single-device API only).
 - ROCm versions older than 7.0.
-- FP8 data types on RDNA targets (FP8 kernels require CDNA3+).
 - hipTensor compiled with non-AMD toolchains.
 
 ---
@@ -351,7 +348,6 @@ There is no client-side known-bug list (analogous to `known_bugs.yaml` in other 
 | Kernel selection (ActorCritic/DefaultPatient) has no unit test — requires a live device | Medium | Medium | Covered by integration tests; slow feedback |
 | Code coverage not measured in CI | Medium | Medium | None |
 | `interface_test` commented out and not built | Low | Medium | None |
-| FP8 types absent from some validation config tiers | Low | Medium | FP8 correctness is covered in `full` tier only |
 | Trinary/unary-ops variants have no bench configs | Low | Low | Not performance-gated |
 | `clang-format` and static analysis not enforced in CI | Low | Low | Manual enforcement in code review |
 | No sanitizer (ASAN/TSAN) gate in CI | Low | High if hit | None; ASAN can be built manually |
