@@ -166,6 +166,8 @@ namespace TensileLite
                 m_output.setHeaderForKey(ResultKey::LDA, "LDA");
                 m_output.setHeaderForKey(ResultKey::LDB, "LDB");
                 m_output.setHeaderForKey(ResultKey::TotalFlops, "TotalFlops");
+                m_output.setHeaderForKey(ResultKey::GbpsBW, "GbpsBW");
+
                 if(m_extraCol)
                 {
                     m_output.setHeaderForKey(ResultKey::TilesPerCu, "TilesPerCu");
@@ -197,6 +199,7 @@ namespace TensileLite
                 m_output.setHeaderForKey(ResultKey::LDA, "LDA");
                 m_output.setHeaderForKey(ResultKey::LDB, "LDB");
                 m_output.setHeaderForKey(ResultKey::TotalFlops, "TotalFlops");
+                m_output.setHeaderForKey(ResultKey::GbpsBW, "GbpsBW");
 
                 if(m_extraCol)
                 {

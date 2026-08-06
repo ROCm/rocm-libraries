@@ -37,6 +37,88 @@
 #include <cstddef>
 #include <thread>
 
+namespace {
+    // We compute the bytes read for a GEMM of shape BxMxNxK as follows:
+    // B * (M * K + K * N) * elem_size + B * (M * K / aMXScaleFactor + K * N / bMXScaleFactor) * elem_size.
+    // The second term is valid only for MX dtypes and equates to zero for all others.
+    using namespace TensileLite;
+    double computeByteRWForGEMM(const ContractionProblemGemm& gemm)
+    {
+        double totalBytes = 0.0;
+
+        size_t M = gemm.freeSizeA(0);
+        size_t N = gemm.freeSizeB(0);
+        size_t K = gemm.boundSize(0);
+
+        // Compute total batch size.
+        size_t numBatches = 1;
+        for(size_t i = 0; i < gemm.batchIndices().size(); ++i)
+            numBatches *= gemm.batchSize(i);
+
+        auto aDtypeInfo = DataTypeInfo::Get(gemm.a().dataType());
+        auto bDtypeInfo = DataTypeInfo::Get(gemm.b().dataType());
+        auto dDtypeInfo = DataTypeInfo::Get(gemm.d().dataType());
+
+        auto bytesA = multiplyElementSize(M * K * numBatches, aDtypeInfo.elementSize);
+        auto bytesB = multiplyElementSize(K * N * numBatches, bDtypeInfo.elementSize);
+        auto bytesD = multiplyElementSize(M * N * numBatches, dDtypeInfo.elementSize);
+
+        // Add bytesC if beta is enabled.
+        if(gemm.beta() != 0.0)
+        {
+            auto cDtypeInfo = DataTypeInfo::Get(gemm.c().dataType());
+            // Accumulate read bytes from C into totalBytes.
+            totalBytes += multiplyElementSize(M * N * numBatches, cDtypeInfo.elementSize);
+        }
+
+        // Add E tensor bytes if enabled.
+        if(gemm.useE())
+        {
+          auto eDtypeInfo = DataTypeInfo::Get(gemm.e().dataType());
+          totalBytes += multiplyElementSize(M * N * numBatches, eDtypeInfo.elementSize);
+        }
+
+        // Add bias vector bytes if enabled.
+        if(gemm.useBias() != 0)
+            totalBytes += gemm.bias().totalAllocatedBytes();
+
+        // Add scale tensor bytes if enabled.
+        if(!gemm.useScaleAB().empty())
+        {
+            totalBytes += gemm.tensors()[ContractionProblemGemm::TENSOR::SCALEA].totalAllocatedBytes();
+            totalBytes += gemm.tensors()[ContractionProblemGemm::TENSOR::SCALEB].totalAllocatedBytes();
+        }
+
+        if(gemm.useScaleCD())
+        {
+            totalBytes += gemm.tensors()[ContractionProblemGemm::TENSOR::SCALEC].totalAllocatedBytes();
+            totalBytes += gemm.tensors()[ContractionProblemGemm::TENSOR::SCALED].totalAllocatedBytes();
+        }
+
+        if(gemm.useScaleAlphaVec() != 0)
+            totalBytes += gemm.scaleAlphaVec().totalAllocatedBytes();
+
+
+        // Add MX scale tensor bytes if dtype is MX.
+        if(gemm.mxTypeA() != rocisa::DataType::None && gemm.mxBlockA() > 0)
+        {
+            auto mxAInfo = DataTypeInfo::Get(gemm.mxTypeA());
+            bytesA += multiplyElementSize(M * (K / gemm.mxBlockA()) * numBatches,
+                                          mxAInfo.elementSize);
+        }
+        if(gemm.mxTypeB() != rocisa::DataType::None && gemm.mxBlockB() > 0)
+        {
+            auto mxBInfo = DataTypeInfo::Get(gemm.mxTypeB());
+            bytesB += multiplyElementSize((K / gemm.mxBlockB()) * N * numBatches,
+                                          mxBInfo.elementSize);
+        }
+
+        totalBytes += bytesA + bytesB + bytesD;
+        return totalBytes;
+    }
+}
+
+
 namespace TensileLite
 {
     namespace Client
@@ -164,6 +246,7 @@ namespace TensileLite
             double timePerEnqueue_us;
             double gflops;
             double gflopsPerCu;
+            double bandwidthGbps = 0.0;
 
             {
                 ScopedTimer timer("post_solution_perf_calc");
@@ -195,6 +278,28 @@ namespace TensileLite
                 int    tiles       = pp.granularities.tilesPerCu * perf.CUs;
                 int    usedCus     = std::min(tiles, perf.CUs);
                 gflopsPerCu = gflops / usedCus;
+
+                if(!sol_is_skipped)
+                {
+                    double totalBytes = 0.0;
+                    if(auto problem = dynamic_cast<ContractionProblemGemm*>(m_problem))
+                    {
+                        totalBytes = computeByteRWForGEMM(*problem);
+                    }
+                    else if(auto problem = dynamic_cast<ContractionProblemGroupedGemm*>(m_problem))
+                    {
+                        for (const auto &gemm : problem->gemms)
+                            totalBytes += computeByteRWForGEMM(gemm);
+                    }
+                    else
+                    {
+                        throw std::runtime_error(
+                            "[BenchmarkTimer] Failed to cast problem to any ContractionProblem.");
+                    }
+
+                    // Calculate total TB/s bandwidth from timePerEnqueue_us and update the report.
+                    bandwidthGbps = (totalBytes / timePerEnqueue_us) / (double)1e3;
+                }
             }
 
             {
@@ -202,6 +307,7 @@ namespace TensileLite
                 m_reporter->report(ResultKey::TimeUS, timePerEnqueue_us);
                 m_reporter->report(ResultKey::SpeedGFlopsPerCu, gflopsPerCu);
                 m_reporter->report(ResultKey::SpeedGFlops, gflops);
+                m_reporter->report(ResultKey::GbpsBW, bandwidthGbps);
             }
 
             m_timeInSolution        = double_millis::zero();
