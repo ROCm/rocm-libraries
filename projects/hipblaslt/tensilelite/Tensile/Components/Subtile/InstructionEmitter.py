@@ -234,12 +234,25 @@ class InstructionEmitter:
             ti = self.tileInfoMap[tensor]
             lrGran = self.config.lrSA if tensor == 'SA' else self.config.lrSB
             vgprTilesScale = self.vgprTilesSA if tensor == 'SA' else self.vgprTilesSB
+            kernel = self.kernel
+            wavelen = kernel["WavefrontSize"]
+            isWave32Gfx1250 = (wavelen == 32 and tuple(kernel["ISA"]) == (12, 5, 0))
             for tileId in range(placement.tiles.tileId_start, placement.tiles.tileId_end, lrGran.mn):
                 scaleGroupIdx = tileId // lrGran.mn
                 groupKey = scaleGroupIdx * lrGran.mn
                 kGroupIdx = placement.tiles.subIterK_start // ti.lrSubtileShape[1]
-                numKGroups = ti.lrLocalSubtileGrid[1]
-                dsOffset = int(ti.lrSubtileSize) * (scaleGroupIdx * numKGroups + kGroupIdx)
+                if isWave32Gfx1250:
+                    # InMemorySwizzle LDS layout: {numKTiles, perWaveRows, dimk}.
+                    # M-group stride = wavelen * dimk (32 * 4 = 128 bytes).
+                    # K-tile stride = perWaveRows * dimk.
+                    parentTc = tc[-1]  # 'A' or 'B'
+                    mxBlock = kernel["ProblemType"][f"MXBlock{parentTc}"]
+                    instK = kernel["MatrixInstK"]
+                    dimk = instK // mxBlock
+                    dsOffset = scaleGroupIdx * wavelen * dimk
+                else:
+                    numKGroups = ti.lrLocalSubtileGrid[1]
+                    dsOffset = int(ti.lrSubtileSize) * (scaleGroupIdx * numKGroups + kGroupIdx)
                 vdst = next(iter(vgprTilesScale[tile_map[groupKey]]))
                 module.add(DSLoadB32(
                     dst=vgpr(vdst),
