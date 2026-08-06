@@ -13,6 +13,10 @@ After installation, verify that all the ROCm Performance Primitives (RPP) files 
 * Samples: ``/opt/rocm/share/rpp``
 * Documentation: ``/opt/rocm/share/doc/rpp``
 
+.. note::
+
+    Packages built by TheRock install into a version-scoped prefix such as ``/opt/rocm/core-<major>.<minor>`` to support side-by-side installations. The ``/opt/rocm`` paths listed above remain valid because they are maintained as ``update-alternatives`` symlinks into the active prefix.
+
 You can verify your installation using the CTest module. You will need to install the `test suite prerequisites <https://github.com/ROCm/rocm-libraries/blob/develop/projects/rpp/utilities/test_suite/README.md>`_ before building and running the tests.
 
 .. code-block:: shell

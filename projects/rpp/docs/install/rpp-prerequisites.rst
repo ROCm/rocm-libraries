@@ -31,8 +31,8 @@ With the following compiler support:
 * OpenMP
 * Threads
 
-On the HIP backend, RPP requires ROCm installed with the `AMDGPU installer <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/install/install-methods/amdgpu-installer-index.html>`_ and the ``rocm`` usecase running on `accelerators based on the CDNA architecture <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html>`_.
+The HIP backend requires a working ROCm installation running on `ROCm-supported AMD GPUs and accelerators <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html>`_. A ``gfx908`` or later GPU is required.
 
-On CPU-only backends, also referred to as HOST backends, RPP requires CPUs that support PCIe™ atomics.
+The CPU-only backend, also referred to as the HOST backend, has no GPU requirement.
 
 The `test suite prerequisites <https://github.com/ROCm/rocm-libraries/blob/develop/projects/rpp/utilities/test_suite/README.md>`_ are required to build the RPP test suite.

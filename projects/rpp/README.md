@@ -13,7 +13,7 @@ vision library for AMD processors that have `HIP`, or `CPU` backends.
 <p align="center"><img width="35%" src="docs/data/rpp_structure_4.png" /></p>
 
 > [!NOTE]
-> Starting with ROCm 7.15, RPP is built and delivered as part of
+> Starting with ROCm 10.1, RPP is built and delivered as part of
 > [TheRock](https://github.com/ROCm/TheRock), the unified ROCm build system.
 > Earlier standalone RPP releases were delivered with ROCm 7.2.x and prior.
 >
@@ -267,13 +267,9 @@ Spectrogram functionality output represented as an image:
 > * [ROCm-supported hardware required for HIP backend](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html)
 > * `gfx908` or higher GPU required
 
-RPP is built and installed as part of
-[TheRock](https://github.com/ROCm/TheRock), which is the recommended path for
-source builds and nightly/CI artifacts.
-
 ### Dependencies
 * AMD Clang++ compiler (C++17 or higher) - installed with ROCm
-* CMake Version `3.10` or later - installed with ROCm
+* CMake Version `3.10` or later
 * OpenMP - installed with ROCm llvm
 * Half - installed with ROCm
 * On Ubuntu 22.04 - Additional package required: libstdc++-12-dev
@@ -291,42 +287,64 @@ The installation process uses the following steps:
 * [ROCm-supported hardware](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html) install verification
 
 * RPP is included with the ROCm Core SDK on Linux. A standard ROCm
-installation using the `amdrocm-core-sdk` meta package installs the RPP
-runtime and development package by default. Follow the official
+installation using the `amdrocm-core-sdk` or `amdrocm-core` meta package
+installs the RPP runtime and development package by default. Follow the official
 [Install AMD ROCm](https://rocm.docs.amd.com/en/latest/install/rocm.html) guide
 and use the selector to choose your GPU, operating system, and install method.
 > [!IMPORTANT]
-> Use **either** [package install](#package-install) **or** [source install](#source-install) as described below.
+> Use **either** [package install](#package-install) **or** [source build and install](#source-build-and-install) as described below.
 
 ### Package install
 
 Install RPP runtime, development, and test packages.
-* Runtime package - `rpp` only provides the rpp library `librpp.so`
-* Development package - `rpp-dev`/`rpp-devel` provides the library, header files, and samples
-* Test package - `rpp-test` provides CTest to verify installation
+* Runtime package - `amdrocm-rpp` only provides the rpp library `librpp.so`
+* Development package - `amdrocm-rpp-dev` (Debian) / `amdrocm-rpp-devel` (RPM) provides the library, header files, and the CMake package config
+* Test package - `amdrocm-rpp-test` provides CTest to verify installation
 
 > [!NOTE]
-> Package install will auto install all dependencies.
+> Package install will auto install all dependencies. `amdrocm-rpp` and the
+> development package are already pulled in by the `amdrocm-core` and
+> `amdrocm-core-sdk` meta packages, so only `amdrocm-rpp-test` has to be
+> installed explicitly on a standard ROCm installation.
+
+> [!IMPORTANT]
+> The RPP packages built by TheRock are currently built with audio
+> augmentations disabled (`RPP_AUDIO_SUPPORT=OFF`). Build from source to enable
+> audio augmentation support.
 
 #### Ubuntu
 
 ```shell
-sudo apt install rpp rpp-dev rpp-test
+sudo apt install amdrocm-rpp amdrocm-rpp-dev amdrocm-rpp-test
 ```
 
 #### RHEL
 
 ```shell
-sudo yum install rpp rpp-devel rpp-test
+sudo dnf install amdrocm-rpp amdrocm-rpp-devel amdrocm-rpp-test
 ```
 
 #### SLES
 
 ```shell
-sudo zypper install rpp rpp-devel rpp-test
+sudo zypper install amdrocm-rpp amdrocm-rpp-devel amdrocm-rpp-test
 ```
 
 ### Source build and install
+
+RPP is built and released as part of
+[TheRock](https://github.com/ROCm/TheRock). Building through TheRock produces
+the same artifacts as the released packages and is the recommended path when
+you need a build that matches a ROCm release. Follow the
+[TheRock build instructions](https://github.com/ROCm/TheRock/blob/main/README.md)
+to fetch the sources and configure the build, then build the RPP subproject:
+
+```shell
+cmake -B build -GNinja . -DTHEROCK_AMDGPU_FAMILIES=<your-gpu-family>
+ninja -C build rpp+dist
+```
+
+RPP can also be built standalone against an existing ROCm installation.
 
 * Clone the ROCm libraries git repository and change into the RPP project directory
 
@@ -358,7 +376,13 @@ The installer will copy
 * Samples, and test folder into `${ROCM_PATH}/share/rpp`
 * Documents folder into `${ROCM_PATH}/share/doc/rpp`
 
-### Verify with rpp-test package
+> [!NOTE]
+> Packages built by TheRock install into a version-scoped prefix such as
+> `/opt/rocm/core-<major>.<minor>` to support side-by-side installations. The
+> `/opt/rocm` paths above remain valid because they are maintained as
+> `update-alternatives` symlinks into the active prefix.
+
+### Verify with the amdrocm-rpp-test package
 
 Test package will install CTest module to test rpp. Follow below steps to test package install
 
@@ -429,15 +453,3 @@ python3 -m sphinx -T -E -b html -d _build/doctrees -D language=en . _build/html
 ## Release notes
 
 All notable changes for each release are added to our [changelog](CHANGELOG.md).
-
-## Tested configurations
-
-* Linux distribution
-  * Ubuntu - `22.04+`
-  * RedHat - `8` / `9`
-  * SLES - `15 SP7`
-* ROCm: rocm-core - `7.0.0`+
-* CMake - Version `3.10`+
-* AMD Clang++ - Version `18.0.0`+
-* Half - IEEE 754-based half-precision floating-point library - Version `1.12.0` / package V`1.12.0`
-* OpenCV - [4.6.0](https://github.com/opencv/opencv/releases/tag/4.6.0)
