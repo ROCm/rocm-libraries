@@ -52,6 +52,9 @@ __all__ = [
     "build_wmma_attention_fwd",
     "wmma_attention_fwd_grid",
     "is_valid_spec",
+    "BLOCK_M",
+    "WMMA_K",
+    "DTYPES",
 ]
 
 _WMMA_OP_ID = "wmma_gfx1250_f32_16x16x32_f16"
@@ -59,6 +62,15 @@ _BLOCK_M = 16  # Q rows per wave per CTA (WMMA M)
 _WMMA_N = 16  # k positions per WMMA N-sub-tile
 _WMMA_K = 32  # contraction per WMMA step (head-dim for QK, k-positions for PV)
 _BLOCK_K = 32  # K positions per K-loop iteration (== two N-sub-tiles == PV K)
+
+# Public aliases for the two tile constants that constrain the *problem* rather
+# than the codegen: head_size must be a multiple of the WMMA K, and seqlen_q a
+# multiple of the M tile (the grid helper refuses a remainder). A dispatcher has
+# to state both as a Capability, and restating them from memory is how a shape
+# gate silently stops matching the kernel it is meant to describe.
+BLOCK_M = _BLOCK_M
+WMMA_K = _WMMA_K
+DTYPES: Tuple[str, ...] = ("fp16",)
 
 
 @dataclass(frozen=True)

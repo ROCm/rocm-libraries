@@ -405,8 +405,9 @@ class UnifiedAttention2DTiledSpec:
     # slot). DEFAULT OFF -> gfx950 and every existing kernel are byte-identical.
     use_k_single_buffer: bool = False
     # Experimental CK-style sliced K staging for transposed-x8 D128 cfvst.
-    # Stages 32-head-dim K slices in a 3-slot ring instead of double-buffering
-    # full [T, HD] K tiles. This is the LDS prerequisite for NumPrefetchK/V=3
+    # Stages ``k_slice_hd``-wide K slices in a ``ring_depth``-slot ring instead of
+    # double-buffering full [T, HD] K tiles. This is the LDS prerequisite for
+    # NumPrefetchK/V=3
     # on MI300X; v1 syncs per slice before adding overlap.
     use_k_sliced_ring: bool = False
     # Ring pipeline depth: how many K slices are staged/in-flight at once.
@@ -420,6 +421,25 @@ class UnifiedAttention2DTiledSpec:
     #     register/occupancy pressure), and is the measured best for fp16 D128
     #     prefill on gfx942 (~0.72-1.05x AOTriton flash, correct at magnitude).
     ring_depth: int = 3
+    # Head-dim width of one K slice, so k_groups = head_size // k_slice_hd.
+    # K_lds is ``[slots, T, k_slice_hd]``, and the QK read has 32 lanes take 32
+    # consecutive K rows at a fixed column, so lane i lands on LDS bank
+    # ``(k_slice_hd * 2 // 4 * i) % 32`` -- the row stride in dwords sets the
+    # bank spread. gfx942 has 32 banks of 4 B, so distinct banks touched is
+    # ``32 // gcd(stride_dwords, 32)`` and the conflict degree is 32 lanes over
+    # that many banks: width 32 (16-dword stride) reaches 2 banks -> 16-way,
+    # width 16 (8-dword stride) reaches 4 banks -> 8-way. Narrowing therefore
+    # halves the conflict degree, at the cost of doubling k_groups and so the
+    # per-tile barrier/partial-wait count -- the two effects trade off and the
+    # width is a tuning axis rather than a monotone win.
+    #   32 (default): the shipped ring geometry.
+    # Slot reuse is independent of this field: with the plain modulo map,
+    # ``K_SLICE_SLOTS == ring_depth`` and the prefetch distance is
+    # ``ring_depth - 1``, so the DMA target ``(kg + ring_depth - 1) % ring_depth``
+    # is identically ``(kg - 1) % ring_depth`` -- always the slot slice(kg-1) was
+    # read from, for every depth and every k_groups. The drain-on-reuse fence in
+    # the ring schedule therefore covers any legal width without new analysis.
+    k_slice_hd: int = 32
     # Use CK Tile's explicit LDS buffer sequence for the sliced-K pipeline
     # instead of the conservative round-robin slot map. This is opt-in because
     # the sequence can reuse the previously consumed slot and therefore needs
@@ -691,17 +711,44 @@ class UnifiedAttention2DTiledSpec:
             if (
                 self.dtype not in ("fp16", "bf16")
                 or self.head_size not in (64, 128)
-                or self.head_size % 32 != 0
                 or self.tile_size_eff not in (64, 128)
             ):
                 raise ValueError(
-                    "use_k_sliced_ring requires fp16/bf16, head_size in {64,128} "
-                    "(HD %% 32 == 0 for the 32-wide K slices), T in {64,128}"
+                    "use_k_sliced_ring requires fp16/bf16, head_size in {64,128}, "
+                    "T in {64,128}"
                 )
             if self.ring_depth not in (2, 3):
                 raise ValueError(
                     f"ring_depth must be 2 or 3 when use_k_sliced_ring is set "
                     f"(got {self.ring_depth})"
+                )
+            # The head dim must split into whole slices, or the last slice would
+            # read past the K_lds row.
+            if self.k_slice_hd <= 0 or self.head_size % self.k_slice_hd != 0:
+                raise ValueError(
+                    f"k_slice_hd must divide head_size={self.head_size} "
+                    f"(got {self.k_slice_hd})"
+                )
+            # The ring runs on the 32x32x8 path, so the QK atom consumes 8 head-dim
+            # elements per step and the schedule takes
+            # ``k_steps_per_group = k_slice_hd // QK_K_STEP``. Below one full step
+            # that floors to zero and the slice emits no MFMA at all, which is why
+            # 8 is the floor rather than merely the narrowest useful width.
+            _qk_k_step = 8
+            if self.k_slice_hd % _qk_k_step != 0:
+                raise ValueError(
+                    f"k_slice_hd must be a multiple of the QK k-step "
+                    f"{_qk_k_step} (got {self.k_slice_hd})"
+                )
+            # A single group is a ring with nothing to pipeline: the prologue's
+            # second issue and the in-loop prefetch are both skipped, yet
+            # ring_depth slots are still allocated and only slot 0 is ever
+            # touched. Reject it rather than reserve dead LDS.
+            if self.head_size // self.k_slice_hd < 2:
+                raise ValueError(
+                    f"k_slice_hd={self.k_slice_hd} gives k_groups="
+                    f"{self.head_size // self.k_slice_hd} at head_size="
+                    f"{self.head_size}; the ring needs at least 2 slices"
                 )
         if self.use_k_sliced_ldsseq and not self.use_k_sliced_ring:
             raise ValueError("use_k_sliced_ldsseq requires use_k_sliced_ring")
@@ -978,6 +1025,14 @@ class UnifiedAttention2DTiledSpec:
                 if self.use_k_sliced_ring and self.ring_depth != 3
                 else ""
             ),
+            # A narrower slice changes k_groups, the K_lds extents and the barrier
+            # count, so it is a distinct kernel. Tagged only away from the default
+            # so every already-shipped ring kernel keeps its current name.
+            (
+                f"ks{self.k_slice_hd}"
+                if self.use_k_sliced_ring and self.k_slice_hd != 32
+                else ""
+            ),
             "ldsseq" if self.use_k_sliced_ldsseq else "",
             "iglp1" if self.use_iglp_opt else "",
             "cmps" if self.use_causal_mask_phase_split else "",
@@ -1005,6 +1060,8 @@ def supports_tiled_2d(
     use_k_single_buffer: bool = False,
     use_conflict_free_v_store: bool = False,
     use_k_sliced_ring: bool = False,
+    ring_depth: int = 3,
+    k_slice_hd: int = 32,
     use_d256_fast: bool = False,
 ) -> Tuple[bool, str]:
     # The gfx942 variant runs the narrow 16x16x16 default path. The arch gate
@@ -1157,12 +1214,20 @@ def supports_tiled_2d(
         if use_mfma_32x32x8 and use_transposed_qk_32x32:
             if use_k_sliced_ring:
                 # Overlapped sliced-K ring (CK Tile geometry): K is staged as a
-                # 3-slot ring of 32-head-dim slices (not double-buffered at full
-                # HD), Q is fed direct-from-global (no Q_lds), and V uses the
-                # conflict-free CK packed layout. This is what lets T=128 fit the
-                # 64 KB cap where the naive 2*T*HD K buffer would not.
-                _K_SLICE_HD = 32
-                _K_SLICE_SLOTS = 3
+                # ``ring_depth``-slot ring of ``k_slice_hd``-wide slices (not
+                # double-buffered at full HD), Q is fed direct-from-global (no
+                # Q_lds), and V uses the conflict-free CK packed layout. This is
+                # what lets T=128 fit the 64 KB cap where the naive 2*T*HD K
+                # buffer would not.
+                #
+                # Both terms must track the spec, or this gate sizes a different
+                # kernel than the builder emits. It was pinned at 3 slots of 32
+                # while ring_depth already varied, which over-counted depth-2 by
+                # one slot; over-counting only ever over-rejects, so it was
+                # conservative rather than wrong, but it is no longer accurate
+                # once the width is tunable too.
+                _K_SLICE_HD = k_slice_hd
+                _K_SLICE_SLOTS = ring_depth
                 _k_bytes = _K_SLICE_SLOTS * _t_eff * _K_SLICE_HD * _BPE
                 # CK conflict-free transposed-V slot map (mirrors V_T_CK_SLOTS in
                 # build_unified_attention_2d_tiled): kgroups*ngroups*group_stride.
@@ -1629,7 +1694,11 @@ def build_unified_attention_2d_tiled(
     V_LDS_DTYPE = FP8E4M3 if FP8_MFMA_PV else dtype
     P_LDS_DTYPE = FP8E4M3 if FP8_MFMA_PV else dtype
     Q_BYTES = BLOCK_M * HD * 2
-    K_SLICE_HD = 32
+    # Head-dim width of one K slice (spec.k_slice_hd), so k_groups = HD // this.
+    # It sets the K_lds row stride and therefore the QK read's LDS bank spread;
+    # see the spec field docstring. Validated against head_size and the QK k-step
+    # in __post_init__ when the ring is active; unused when it is not.
+    K_SLICE_HD = spec.k_slice_hd
     # Ring pipeline depth (spec.ring_depth): depth-3 keeps the live set
     # {kg, kg+1, kg+2} in 3 slots; depth-2 keeps {kg, kg+1} in 2 slots (fewer
     # LDS slots, lower occupancy pressure -- fp16 D128's best). See the spec
@@ -2667,12 +2736,37 @@ def build_unified_attention_2d_tiled(
                     coherency=kv_cache_aux,
                 )
 
+    # This count is not just a loop bound: it is the value the ring's partial
+    # ``s_waitcnt(vmcnt=...)`` uses to leave exactly one slice's VMEM stream in
+    # flight. Partial waits are FIFO-count fences, so a floored division would
+    # silently fence the wrong number of calls. Checked for the same reason the
+    # full-tile ``kv_calls_per_tile`` above is, but raised rather than asserted:
+    # these are validation of a tunable geometry, and ``__post_init__`` cannot
+    # reach them because the count depends on ``num_warps`` through
+    # ``KV_HALVES_PER_CALL``. An ``assert`` here is stripped under ``python -O``,
+    # which would emit the mis-fenced kernel the message warns about.
+    if K_SLICED_ACTIVE:
+        if (T * K_SLICE_HD) % KV_HALVES_PER_CALL != 0:
+            raise ValueError(
+                f"T={T} * k_slice_hd={K_SLICE_HD} must be a multiple of "
+                f"KV_HALVES_PER_CALL={KV_HALVES_PER_CALL} so the ring's partial "
+                f"vmcnt fence counts whole slice prefetches"
+            )
+        # The count is also the operand of s_waitcnt(vmcnt=...), whose encoded
+        # field is 6 bits on this target. Widening the slice raises the count, so
+        # cap it explicitly rather than silently truncating the fence.
+        if (T * K_SLICE_HD) // KV_HALVES_PER_CALL > 63:
+            raise ValueError(
+                f"ring partial-vmcnt count {(T * K_SLICE_HD) // KV_HALVES_PER_CALL} "
+                f"exceeds the 6-bit vmcnt field (T={T}, k_slice_hd={K_SLICE_HD}, "
+                f"KV_HALVES_PER_CALL={KV_HALVES_PER_CALL})"
+            )
     K_SLICE_CALLS_PER_TILE = (T * K_SLICE_HD) // KV_HALVES_PER_CALL
 
     def _issue_k_slice_load_runtime(
         kv_tile_idx: Value, slice_idx: int, slot_idx: int
     ) -> None:
-        """Issue one 32-dim K slice into the sliced K ring."""
+        """Issue one ``K_SLICE_HD``-wide K slice into the sliced K ring."""
         slot_off_i64 = b.const_i64(slot_idx * K_BUF_BYTES)
         K_slot_base = b.smem_ptr_add(K_lds_addr, slot_off_i64)
         K_wave_base = b.smem_ptr_add(K_slot_base, wave_lds_offset_i64)
