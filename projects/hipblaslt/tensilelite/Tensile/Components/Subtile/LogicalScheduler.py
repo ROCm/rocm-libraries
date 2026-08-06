@@ -3688,6 +3688,10 @@ class LogicalScheduler:
         # LA = how many store-pairs ahead a pair's terminal MFMAs are issued (the
         # MFMA->accvgpr_read latency window). The first LA pairs keep their MFMAs in
         # the loop (natural large distance); pairs >= LA are woven.
+        # Must stay in step with the eligibility gate's default in
+        # SolutionStructs/Solution.py (assignPostLoopStoreInNll), which admits a
+        # tile only when numStorePairs > weaveLA so at least one pair is left in
+        # the loop to hide the woven ones under.
         weaveLA = int(plsinDebugEnv("TENSILE_WEAVE_LA", "4"))  # test-only override
         fusedEmitted = copy.deepcopy(emitted_3d)
         # Macro tiles larger than 256x256 peak at 256 arch VGPRs in the loop, so the
