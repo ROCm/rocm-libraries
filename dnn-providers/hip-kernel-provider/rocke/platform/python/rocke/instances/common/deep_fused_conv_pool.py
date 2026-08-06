@@ -232,6 +232,7 @@ def make_deep_fused_conv_pool_spec(
     async_dma: bool = False,
     cache_input_footprint: bool = False,
     direct_conv0_from_input_cache: bool = False,
+    epilogue: Optional[str] = None,
 ) -> DeepFusedConvPoolSpec:
     """Build a deep-fusion spec, auto-deriving the constrained ``tile_m``.
 

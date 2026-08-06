@@ -154,6 +154,22 @@
           "sha256": "5b8932a7f5e08ab5d983a4adbfd1b8272902ddbd0c9d32db142283e58a983a14",
           "status": "ok"
         },
+        "deep/gfx1201/h16w16_k32": {
+          "arch": "gfx1201",
+          "bytes": 72486,
+          "family": "deep_fused_conv",
+          "kernel_name": "rocke_gfx1201_deep_fused_conv_pool_N1H16W16C16_K32Y3X3_t64x32x16_w2x1_a16x16x16_mem_cshuffle_epi_relu",
+          "sha256": "e946cb0ef37e7e0dd0d6da7be65e6d0b7de7d6ed7547720cf5e1f3325ad1c7ee",
+          "status": "ok"
+        },
+        "deep/gfx1201/h24w24_k32": {
+          "arch": "gfx1201",
+          "bytes": 72487,
+          "family": "deep_fused_conv",
+          "kernel_name": "rocke_gfx1201_deep_fused_conv_pool_N1H24W24C16_K32Y3X3_t64x32x16_w2x1_a16x16x16_mem_cshuffle_epi_relu",
+          "sha256": "f22b28ad1749ae88cdd8a3ebae49c11f9320de18ed608ccd748d2dcfaefbba37",
+          "status": "ok"
+        },
         "deep/gfx950/h16w16_k32": {
           "arch": "gfx950",
           "bytes": 32107,
@@ -347,35 +363,26 @@
           "status": "ok"
         }
       },
-      "expected_failures": {
-        "deep/gfx1201/h16w16_k32": {
-          "message": "make_deep_fused_conv_pool_spec() got an unexpected keyword argument 'epilogue'",
-          "type": "TypeError"
-        },
-        "deep/gfx1201/h24w24_k32": {
-          "message": "make_deep_fused_conv_pool_spec() got an unexpected keyword argument 'epilogue'",
-          "type": "TypeError"
-        }
-      },
+      "expected_failures": {},
       "summary": {
         "arches": {
           "gfx11-generic": 1,
           "gfx1151": 8,
-          "gfx1201": 5,
+          "gfx1201": 7,
           "gfx1250": 2,
           "gfx90a": 4,
           "gfx942": 5,
           "gfx950": 18
         },
-        "expected_failures": 2,
+        "expected_failures": 0,
         "families": {
           "conv": 7,
           "conv_wgrad": 7,
-          "deep_fused_conv": 7,
+          "deep_fused_conv": 9,
           "gemm": 13,
           "moe": 9
         },
-        "ok_cases": 43
+        "ok_cases": 45
       }
     },
     "llvm22": {
@@ -530,6 +537,22 @@
           "family": "deep_fused_conv",
           "kernel_name": "rocke_gfx1151_deep_fused_conv_pool_N1H16W16C16_K32Y3X3_K132_pool2x2_s2x2_t64x32_pt4x4_w4x2_wmma16x16x16_directa_nativeiu8_i8i4_realquant",
           "sha256": "3ab1d6b025e5409d3eee4ca3dd1120e630bd9a127d0ba5cc79625ee96ed981ce",
+          "status": "ok"
+        },
+        "deep/gfx1201/h16w16_k32": {
+          "arch": "gfx1201",
+          "bytes": 72673,
+          "family": "deep_fused_conv",
+          "kernel_name": "rocke_gfx1201_deep_fused_conv_pool_N1H16W16C16_K32Y3X3_t64x32x16_w2x1_a16x16x16_mem_cshuffle_epi_relu",
+          "sha256": "4a56c2f01e3c2103d2cf5881045e702e2385d4cb378432a375c567f367cc18a0",
+          "status": "ok"
+        },
+        "deep/gfx1201/h24w24_k32": {
+          "arch": "gfx1201",
+          "bytes": 72674,
+          "family": "deep_fused_conv",
+          "kernel_name": "rocke_gfx1201_deep_fused_conv_pool_N1H24W24C16_K32Y3X3_t64x32x16_w2x1_a16x16x16_mem_cshuffle_epi_relu",
+          "sha256": "fb99727d08201800869e97a34375bd043b23d0daf147651c6529ab1f6f83ec35",
           "status": "ok"
         },
         "deep/gfx950/h16w16_k32": {
@@ -725,35 +748,26 @@
           "status": "ok"
         }
       },
-      "expected_failures": {
-        "deep/gfx1201/h16w16_k32": {
-          "message": "make_deep_fused_conv_pool_spec() got an unexpected keyword argument 'epilogue'",
-          "type": "TypeError"
-        },
-        "deep/gfx1201/h24w24_k32": {
-          "message": "make_deep_fused_conv_pool_spec() got an unexpected keyword argument 'epilogue'",
-          "type": "TypeError"
-        }
-      },
+      "expected_failures": {},
       "summary": {
         "arches": {
           "gfx11-generic": 1,
           "gfx1151": 8,
-          "gfx1201": 5,
+          "gfx1201": 7,
           "gfx1250": 2,
           "gfx90a": 4,
           "gfx942": 5,
           "gfx950": 18
         },
-        "expected_failures": 2,
+        "expected_failures": 0,
         "families": {
           "conv": 7,
           "conv_wgrad": 7,
-          "deep_fused_conv": 7,
+          "deep_fused_conv": 9,
           "gemm": 13,
           "moe": 9
         },
-        "ok_cases": 43
+        "ok_cases": 45
       }
     }
   },

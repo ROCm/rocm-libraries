@@ -197,6 +197,7 @@ def _spec_cdna_mem(req: ConvRequest, name: str) -> ImplicitGemmConvSpec:
         wave_size=ArchTarget.from_gfx(req.arch).wave_size,
         pipeline="mem",
         epilogue="default",
+        vector_size_c=1,
     )
 
 
@@ -215,6 +216,7 @@ def _spec_rdna_wmma(req: ConvRequest, name: str) -> ImplicitGemmConvSpec:
         wave_size=ArchTarget.from_gfx(req.arch).wave_size,
         pipeline="mem",
         epilogue="default",
+        vector_size_c=1,
     )
 
 

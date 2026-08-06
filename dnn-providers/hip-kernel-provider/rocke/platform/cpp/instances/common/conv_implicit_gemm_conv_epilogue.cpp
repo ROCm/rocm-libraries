@@ -380,7 +380,10 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
     int max_store_vec = spec->has_vector_size_c ? spec->vector_size_c : 8;
     rocke_cshuffle_epilogue_t epi = rocke_cshuffle_epilogue_from_grid(atom, grid, max_store_vec);
     epi.out_dtype = spec->dtype_d;
-    epi.no_alias = spec->cshuffle_no_alias;
+    /* Python _emit_cshuffle_epilogue no longer passes no_alias to from_grid
+     * (removed from _cshuffle_kwargs in the pointwise commit), so the epilogue
+     * always uses no_alias=False (the dataclass default). Match that here. */
+    epi.no_alias = false;
 
     if(rocke_conv_problem_is_pointwise(p))
     {

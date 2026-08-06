@@ -123,6 +123,40 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
             b, ROCKE_ERR_VALUE, "invalid conv_igemm spec for %s: %s", ctx->arch, reason);
         return false;
     }
+    /* Forward-conv-only: reject default epilogue when vec_c > 1 (auto-derived from K).
+     * Python build_implicit_gemm_conv calls is_valid_spec which now checks:
+     *   _eff_vec_c = vector_size_c if set else default_vector_sizes(C,K,dtype_d)[2]
+     *   if _eff_vec_c > 1 and epilogue == "default": raise ValueError(...)
+     * This gate is NOT part of rocke_implicit_gemm_conv_is_valid_spec because
+     * wgrad calls that function with a dummy forward spec and uses a separate
+     * explicit-only vec_c check (its own is_valid_spec mirrors the old Python). */
+    if(spec->epilogue && strcmp(spec->epilogue, "default") == 0)
+    {
+        int _eff_vec_c;
+        if(spec->has_vector_size_c)
+        {
+            _eff_vec_c = spec->vector_size_c;
+        }
+        else
+        {
+            int _K = spec->problem.K;
+            bool _is_fp32_d = (spec->dtype_d && strcmp(spec->dtype_d, "fp32") == 0);
+            if(_is_fp32_d)
+                _eff_vec_c = (_K % 4 == 0) ? 4 : (_K % 2 == 0) ? 2 : 1;
+            else
+                _eff_vec_c = (_K % 8 == 0) ? 8 : (_K % 4 == 0) ? 4 : (_K % 2 == 0) ? 2 : 1;
+        }
+        if(_eff_vec_c > 1)
+        {
+            rocke_i_set_err(b,
+                            ROCKE_ERR_VALUE,
+                            "invalid conv_igemm spec for %s: default epilogue is not "
+                            "supported with vector size c: %d",
+                            ctx->arch,
+                            _eff_vec_c);
+            return false;
+        }
+    }
 
     /* ---- b.kernel.attrs["waves_per_eu"] = spec.waves_per_eu ---- (792-795)
      * The builder `b` is already constructed with spec.kernel_name() by the
