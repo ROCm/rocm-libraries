@@ -1651,15 +1651,25 @@ class LocalReadMFMA(LocalRead):
                                 # boundary. Split it into within-component (vCols) + component jump
                                 # (segCompByteOff, added post-pad below).
                                 segCompByteOff = 0
-                                vCols = (vIdx * numOffsets + oIdx) * MIWaveGroupShape[tile01]
-                                if (kernel.get("LDSSegmentInterleave") == 1
-                                        and kernel["LDSSegInterleaveOffsets"].get("footprintPacked")
-                                        and tc in ("A", "B")):
-                                    numComp  = kernel["NumWaves"] // 2
-                                    compCols = kernel["MacroTile%u" % tile01] // numComp
-                                    if compCols > 0 and MIWaveGroupShape[tile01] > 0:
-                                        segCompByteOff = (vCols // compCols) * kernel["LDSSegInterleaveOffsets"]["writeStrideBytes"]
-                                        vCols = vCols % compCols
+                                _portSplitA = (kernel.get("LDSSegmentInterleave") == 1 and tc == "A"
+                                               and kernel["LDSSegInterleaveOffsets"].get("portSplitA", False))
+                                if _portSplitA:
+                                    # Fine A: drop the wave-group factor from the per-vIdx column stride so
+                                    # the two vIdx stay within this port's segment; the A0->A1 segment jump
+                                    # is on the wave stride, not here.
+                                    _shape = MIWaveGroupShape[tile01] // kernel["MIWaveGroup"][tile01]
+                                    vCols = (vIdx * numOffsets + oIdx) * _shape
+                                else:
+                                    vCols = (vIdx * numOffsets + oIdx) * MIWaveGroupShape[tile01]
+                                    if (kernel.get("LDSSegmentInterleave") == 1
+                                            and kernel["LDSSegInterleaveOffsets"].get("footprintPacked")
+                                            and (tc == "A" or (tc == "B"
+                                                 and not kernel["LDSSegInterleaveOffsets"].get("bBaseline", False)))):
+                                        numComp  = kernel["NumWaves"] // 2
+                                        compCols = kernel["MacroTile%u" % tile01] // numComp
+                                        if compCols > 0 and MIWaveGroupShape[tile01] > 0:
+                                            segCompByteOff = (vCols // compCols) * kernel["LDSSegInterleaveOffsets"]["writeStrideBytes"]
+                                            vCols = vCols % compCols
                                 if perpStride > 1 and kernel["ProblemType"]["TLU%s"%tc] == 0:
                                     permBlock = kernel["MatrixInstK"] if kernel["ProblemType"]["TLU%s"%tc] == 1 else kernel["VectorWidth%s"%tc] * kernel["MatrixInstM"]
                                     perpStrideInv = permBlock // perpStride
