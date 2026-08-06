@@ -25,10 +25,13 @@ import unittest
 import kernels.common.attention_unified as au
 from dispatch.attention import (
     AttentionRequest,
-    _dense_spec,
     attention_candidates,
     dispatch_attention,
 )
+
+# gfx942's own spec factory. NOT the package-level ``dense_spec_for_request``,
+# which is gfx950's and would hand back an untuned spec for a gfx942 request.
+from dispatch.attention.gfx942 import _dense_spec
 from kernels.gfx942.attention_dense import build_attention_dense
 
 _NAME = "attention_gfx942_dense"
@@ -88,7 +91,7 @@ class TestGfx942DenseRegistration(unittest.TestCase):
 class TestGfx942DenseOptIn(unittest.TestCase):
     def test_auto_algorithm_never_selects_it(self):
         with _Gfx942Arch():
-            ok, why = _candidate().supports(_req(algorithm="auto", spec_id="auto"))
+            ok, why = _candidate().admits(_req(algorithm="auto", spec_id="auto"))
             self.assertFalse(ok, "attention_dense must never be auto-selected")
             self.assertIn("opt-in", why)
             routed = dispatch_attention(_req(algorithm="auto", spec_id="auto"))
@@ -96,7 +99,7 @@ class TestGfx942DenseOptIn(unittest.TestCase):
 
     def test_spec_id_is_an_equivalent_opt_in(self):
         with _Gfx942Arch():
-            ok, why = _candidate().supports(_req(algorithm="auto", spec_id=_SPEC_ID))
+            ok, why = _candidate().admits(_req(algorithm="auto", spec_id=_SPEC_ID))
             self.assertTrue(ok, why)
 
     def test_routes_on_explicit_algorithm(self):
@@ -108,27 +111,47 @@ class TestGfx942DenseOptIn(unittest.TestCase):
 
 
 class TestGfx942DenseSupportGates(unittest.TestCase):
+    """Arch, dtype and feature rejections are the declared ``Capability``'s job;
+    only what capability cannot express as data stays in the predicate. Each test
+    below asserts which of the two turned the request down, so a gate silently
+    migrating between them is a failure rather than a rename."""
+
     def test_rejects_non_gfx942_arch(self):
-        ok, why = _candidate().supports(_req(arch="gfx950"))
+        ok, why = _candidate().admits(_req(arch="gfx950"))
         self.assertFalse(ok)
+        self.assertIn("capability", why)
         self.assertIn("gfx942", why)
 
     def test_rejects_unsupported_dtype(self):
         with _Gfx942Arch():
-            self.assertFalse(_candidate().supports(_req(dtype="fp8"))[0])
+            ok, why = _candidate().admits(_req(dtype="fp8"))
+            self.assertFalse(ok)
+            self.assertIn("capability", why)
+            self.assertIn("fp8", why)
 
     def test_rejects_sliding_window(self):
         with _Gfx942Arch():
-            ok, why = _candidate().supports(_req(sliding_window=64))
+            ok, why = _candidate().admits(_req(sliding_window=64))
             self.assertFalse(ok)
-            self.assertIn("sliding-window", why)
+            self.assertIn("capability", why)
+            self.assertIn("sliding_window", why)
+
+    def test_rejects_sinks(self):
+        with _Gfx942Arch():
+            ok, why = _candidate().admits(_req(use_sinks=True))
+            self.assertFalse(ok)
+            self.assertIn("capability", why)
+            self.assertIn("sinks", why)
 
     def test_rejects_ragged_sequence_length(self):
         """_dense_spec sets ragged=True for any non-256-multiple self-attention
-        length -- most real serving shapes. P0 must decline, not select-then-fail."""
+        length -- most real serving shapes. The kernel must decline, not
+        select-then-fail. Capability cannot see this one: it is a property of the
+        BUILT spec, so it stays in the predicate."""
         with _Gfx942Arch():
-            ok, why = _candidate().supports(_req(seqlen_q=1000, seqlen_k=1000))
+            ok, why = _candidate().admits(_req(seqlen_q=1000, seqlen_k=1000))
             self.assertFalse(ok)
+            self.assertNotIn("capability", why)
             self.assertIn("ragged", why)
 
 
@@ -139,7 +162,7 @@ class TestGfx942DensePersistent(unittest.TestCase):
         regime -- and the request is accepted."""
         with _Gfx942Arch():
             req = _req(seqlen_q=8192, seqlen_k=8192, dense_persistent="auto")
-            ok, why = _candidate().supports(req)
+            ok, why = _candidate().admits(req)
             self.assertTrue(ok, why)
             self.assertTrue(_dense_spec(req).persistent)
 
@@ -149,7 +172,7 @@ class TestGfx942DensePersistent(unittest.TestCase):
         default-grid kernel."""
         with _Gfx942Arch():
             req = _req(dense_persistent="on")
-            ok, why = _candidate().supports(req)
+            ok, why = _candidate().admits(req)
             self.assertTrue(ok, why)
             self.assertTrue(_dense_spec(req).persistent)
 
@@ -171,7 +194,7 @@ class TestGfx942DenseSpecIdentity(unittest.TestCase):
         post-P4) is exactly what the builder emits."""
         with _Gfx942Arch():
             req = _req()
-            self.assertTrue(_candidate().supports(req)[0])
+            self.assertTrue(_candidate().admits(req)[0])
             spec = _dense_spec(req)
             kd = build_attention_dense(spec, arch="gfx942")
             self.assertEqual(kd.name, dispatch_attention(req).spec.kernel_name_override)

@@ -76,7 +76,8 @@ def _cases():
         AttentionDenseSpec,
         build_attention_dense,
     )
-    from dispatch.attention import AttentionRequest, _dense_spec
+    from dispatch.attention import AttentionRequest
+    from dispatch.attention.gfx942 import _dense_spec
 
     base = dict(
         batch=1,

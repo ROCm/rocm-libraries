@@ -162,7 +162,7 @@ class AttentionDenseSpec:
     #   carries a per-row pad) and consumed ONLY by the gfx942 kernel -- the gfx950
     #   builder never reads this field, so gfx950 codegen is byte-identical. Default
     #   False keeps every non-gfx942-dispatch build byte-identical; the gfx942 dispatch
-    #   factory (dispatch.attention._dense_spec) flips it on for D64. See
+    #   factory (dispatch.attention.gfx942._dense_spec) flips it on for D64. See
     #   kernels/gfx942/attention_dense.py::_p0_d64_kpad / _p0_d64_kpad_active.
     d64_kpad: bool = False
     # persistent: emit the grid-stride PERSISTENT variant instead of one CTA per

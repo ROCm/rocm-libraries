@@ -38,7 +38,6 @@ from kernels.gfx942.attention_dense import (
     run_attention_dense_torch,
     supports_attention_dense,
     _p0_d64_kpad,
-    _p0_use_cfvst,
     _p0_use_exp2_fast,
     _p0_waves_per_eu,
 )
@@ -555,13 +554,17 @@ def test_build_bakes_the_tuned_waves_per_eu_attribute():
 def test_dispatch_applies_gfx942_waves_per_eu_tuning_and_leaves_gfx950_alone():
     """The gfx942 dispatch spec factory applies the tune; gfx950 stays at the default.
 
-    The tune lives in the shared ``_dense_spec`` gated on ``req.arch == 'gfx942'`` so
-    the kernel_name ``wpe`` tag and the emitted attribute agree on the dispatched path
-    (``dense_spec_for_request`` -> ``run_attention_dense_torch``). gfx950 reuses the
-    same factory and MUST keep the spec default (waves_per_eu=2) -- this is the
-    do-not-touch-gfx950 guard as an executable assertion.
+    The tune lives in gfx942's OWN ``_dense_spec`` (``dispatch/attention/gfx942.py``),
+    so the kernel_name ``wpe`` tag and the emitted attribute agree on the dispatched
+    path (``dense_spec_for_request`` -> ``run_attention_dense_torch``). gfx950 has a
+    separate factory in its own arch module which MUST keep the spec default
+    (waves_per_eu=2) -- this is the do-not-touch-gfx950 guard as an executable
+    assertion. Both are exercised here precisely because they are now two functions:
+    the guard is that they stayed different in the intended direction only.
     """
-    from dispatch.attention import _dense_spec, AttentionRequest
+    from dispatch.attention import AttentionRequest
+    from dispatch.attention.gfx942 import _dense_spec
+    from dispatch.attention.gfx950 import _dense_spec as _dense_spec_gfx950
 
     # The gfx942 tune is an OVERRIDE relative to the shared spec's default; if that
     # default (owned by the gfx950 file) ever shifts, the "== 2" baseline below would
@@ -603,7 +606,7 @@ def test_dispatch_applies_gfx942_waves_per_eu_tuning_and_leaves_gfx950_alone():
     assert _dense_spec(_req("bf16", 128, "gfx942")).waves_per_eu == 2
     assert _dense_spec(_req("fp16", 128, "gfx942")).waves_per_eu == 2
     # gfx950: untouched, spec default preserved even for the bf16-D64 shape.
-    assert _dense_spec(_req("bf16", 64, "gfx950")).waves_per_eu == 2
+    assert _dense_spec_gfx950(_req("bf16", 64, "gfx950")).waves_per_eu == 2
 
     # End-to-end: the dispatched (tuned) spec's wpe actually reaches the emitted
     # attribute -- not just the spec field. Guards against a builder that ignores
@@ -663,7 +666,9 @@ def test_dispatch_applies_gfx942_d64_kpad_and_leaves_gfx950_alone():
     """The gfx942 dispatch spec factory folds d64_kpad=True for D64 (both dtypes) and
     leaves D128 + gfx950 untouched, so the dispatched kernel_name and the emitted K_lds
     layout agree. The shared spec default (owned by the gfx950 file) must stay False."""
-    from dispatch.attention import _dense_spec, AttentionRequest
+    from dispatch.attention import AttentionRequest
+    from dispatch.attention.gfx942 import _dense_spec
+    from dispatch.attention.gfx950 import _dense_spec as _dense_spec_gfx950
 
     assert (
         AttentionDenseSpec(
@@ -702,7 +707,7 @@ def test_dispatch_applies_gfx942_d64_kpad_and_leaves_gfx950_alone():
     assert _dense_spec(_req("fp16", 128, "gfx942")).d64_kpad is False
     assert _dense_spec(_req("bf16", 128, "gfx942")).d64_kpad is False
     # gfx950: untouched, spec default preserved even for the D64 shape.
-    assert _dense_spec(_req("fp16", 64, "gfx950")).d64_kpad is False
+    assert _dense_spec_gfx950(_req("fp16", 64, "gfx950")).d64_kpad is False
 
     # End-to-end: the dispatched D64 spec's _kpad tag reaches the emitted symbol.
     tuned = _dense_spec(_req("fp16", 64, "gfx942"))
@@ -773,7 +778,9 @@ def test_dispatch_persistent_auto_turns_on_for_large_sq_only():
     (nqb*Hq*B) fills the gfx942 persistent grid (num_persistent defaulted to 304), and
     stays off for small Sq. Explicit on/off are honored; gfx950 keeps its 256 default
     and is otherwise untouched."""
-    from dispatch.attention import _dense_spec, AttentionRequest
+    from dispatch.attention import AttentionRequest
+    from dispatch.attention.gfx942 import _dense_spec
+    from dispatch.attention.gfx950 import _dense_spec as _dense_spec_gfx950
 
     def _req(sq, arch, persist="auto"):
         return AttentionRequest(
@@ -791,7 +798,7 @@ def test_dispatch_persistent_auto_turns_on_for_large_sq_only():
             dense_persistent=persist,
         )
 
-    # gfx942 num_persistent defaulted to the MI300X CU count.
+    # gfx942 num_persistent defaulted to the 304-CU part's CU count.
     assert _dense_spec(_req(8192, "gfx942")).num_persistent == 304
     # auto: on for large Sq (nqb*Hq = 32*16 = 512 >= 304), off for small.
     assert _dense_spec(_req(8192, "gfx942")).persistent is True
@@ -800,7 +807,7 @@ def test_dispatch_persistent_auto_turns_on_for_large_sq_only():
     assert _dense_spec(_req(8192, "gfx942", "off")).persistent is False
     assert _dense_spec(_req(256, "gfx942", "on")).persistent is True
     # gfx950 untouched: keeps the 256 default (not the gfx942 304 override).
-    assert _dense_spec(_req(8192, "gfx950")).num_persistent == 256
+    assert _dense_spec_gfx950(_req(8192, "gfx950")).num_persistent == 256
 
 
 # --------------------------------------------------------------------------- #

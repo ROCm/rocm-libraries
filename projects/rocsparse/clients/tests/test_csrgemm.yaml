@@ -198,7 +198,6 @@ Tests:
   M: [128]
   N: [128]
   K: [256]
-  percentage: [0.4]
   alpha_alphai: *alpha_range_checkin
   beta: [-99.0]
   transA: [rocsparse_operation_none]
