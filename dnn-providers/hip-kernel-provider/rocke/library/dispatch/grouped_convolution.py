@@ -25,7 +25,7 @@ Three arch families are supported, each with its own hard-coded tile config:
 
 * **gfx942** — wave64, MFMA 16×16×16 atom (largest fp16/bf16 atom available):
       tile 64×64×64, warp 2×2, atom 16×16×16, pipeline ``mem``
-* **CDNA** (gfx950 only) — wave64, MFMA 32×32×16 atom:
+* **gfx950** — wave64, MFMA 32×32×16 atom:
       tile 64×64×64, warp 2×2, atom 32×32×16, pipeline ``mem``
 * **gfx1250** (wave32, WMMA) — WMMA 16×16×32 atom:
       tile 32×32×32, warp 2×2, atom 16×16×32, pipeline ``mem``
@@ -175,14 +175,14 @@ CONV_GROUPED_ABI_VERSION = "hipkg-conv-grouped/v1"
 # Hard-coded tile parameters (to be replaced by sweep-derived tuning tables)
 # ---------------------------------------------------------------------------
 
-# CDNA (gfx950 only) — wave64, MFMA 32x32x16 (gfx942 lacks this fp16 atom)
-_CDNA_TILE_M = 64
-_CDNA_TILE_N = 64
-_CDNA_TILE_K = 64
-_CDNA_WARP_M = 2
-_CDNA_WARP_N = 2
-_CDNA_WARP_TILE_MN = 32
-_CDNA_WARP_TILE_K = 16
+# gfx950 — wave64, MFMA 32x32x16 (gfx942 lacks this fp16 atom)
+_GFX950_TILE_M = 64
+_GFX950_TILE_N = 64
+_GFX950_TILE_K = 64
+_GFX950_WARP_M = 2
+_GFX950_WARP_N = 2
+_GFX950_WARP_TILE_MN = 32
+_GFX950_WARP_TILE_K = 16
 
 # gfx942 — wave64, MFMA 16x16x16 (largest fp16/bf16 atom available)
 _GFX942_TILE_M = 64
@@ -407,6 +407,14 @@ def _data_spec(req: ConvGroupedRequest) -> ConvDataSpec:
     )
 
 
+def _is_gfx942(req: ConvGroupedRequest) -> bool:
+    return req.arch == "gfx942"
+
+
+def _is_gfx950(req: ConvGroupedRequest) -> bool:
+    return req.arch == "gfx950"
+
+
 def _is_gfx1250(req: ConvGroupedRequest) -> bool:
     return req.arch == "gfx1250"
 
@@ -562,18 +570,18 @@ def _wgrad_grid(spec: ConvGroupedSpec, req: OperatorRequest) -> Tuple[int, int, 
 
 def _block(spec: ConvGroupedSpec) -> Tuple[int, int, int]:
     # wave_size is baked into block_size via warp_m * warp_n * wave_size.
-    # For CDNA wave64: 2*2*64=256; for gfx1250 wave32: 2*2*32=128.
+    # For gfx942/gfx950 wave64: 2*2*64=256; for gfx1250 wave32: 2*2*32=128.
     target = ArchTarget.from_gfx(spec.arch)
     block_size = spec.warp_m * spec.warp_n * target.wave_size
     return (block_size, 1, 1)
 
 
 # ---------------------------------------------------------------------------
-# CDNA forward candidate (gfx942, gfx950)
+# gfx950 forward candidate (wave64, MFMA 32×32×16)
 # ---------------------------------------------------------------------------
 
 
-def _make_cdna_fwd_candidate() -> KernelCandidate:
+def _make_gfx950_fwd_candidate() -> KernelCandidate:
     """Forward conv for gfx950: 64×64×64, 2×2, 32×32×16 MFMA (gfx942 lacks this atom)."""
     name = "implicit_gemm_conv"
     spec_id = "igemm_conv_fwd_64x64"
@@ -581,13 +589,13 @@ def _make_cdna_fwd_candidate() -> KernelCandidate:
 
     def _tile(req: ConvGroupedRequest):
         return (
-            _CDNA_TILE_M,
-            _CDNA_TILE_N,
-            _CDNA_TILE_K,
-            _CDNA_WARP_M,
-            _CDNA_WARP_N,
-            _CDNA_WARP_TILE_MN,
-            _CDNA_WARP_TILE_K,
+            _GFX950_TILE_M,
+            _GFX950_TILE_N,
+            _GFX950_TILE_K,
+            _GFX950_WARP_M,
+            _GFX950_WARP_N,
+            _GFX950_WARP_TILE_MN,
+            _GFX950_WARP_TILE_K,
         )
 
     def _build_instance_spec(req: ConvGroupedRequest) -> ImplicitGemmConvSpec:
@@ -615,10 +623,10 @@ def _make_cdna_fwd_candidate() -> KernelCandidate:
         if errors:
             return False, "; ".join(errors)
         assert isinstance(req, ConvGroupedRequest)
+        if not _is_gfx950(req):
+            return False, f"gfx950 candidate requires arch=gfx950 (got {req.arch!r})"
         if req.direction != "fwd":
             return False, f"candidate handles 'fwd', got direction={req.direction!r}"
-        if _is_gfx1250(req):
-            return False, "gfx1250 is handled by implicit_gemm_conv_gfx1250"
         ok, why = _selector_matches(req, candidate)
         if not ok:
             return False, why
@@ -828,7 +836,7 @@ def _make_gfx942_fwd_candidate() -> KernelCandidate:
         if errors:
             return False, "; ".join(errors)
         assert isinstance(req, ConvGroupedRequest)
-        if req.arch != "gfx942":
+        if not _is_gfx942(req):
             return False, f"gfx942 candidate requires arch=gfx942 (got {req.arch!r})"
         if req.direction != "fwd":
             return False, f"candidate handles 'fwd', got direction={req.direction!r}"
@@ -935,7 +943,7 @@ def _make_gfx942_wgrad_candidate() -> KernelCandidate:
         if errors:
             return False, "; ".join(errors)
         assert isinstance(req, ConvGroupedRequest)
-        if req.arch != "gfx942":
+        if not _is_gfx942(req):
             return False, f"gfx942 candidate requires arch=gfx942 (got {req.arch!r})"
         if req.direction != "wgrad":
             return False, f"candidate handles 'wgrad', got direction={req.direction!r}"
@@ -993,16 +1001,16 @@ def _make_gfx942_wgrad_candidate() -> KernelCandidate:
 
 
 # ---------------------------------------------------------------------------
-# CDNA wgrad candidate (gfx950)
+# gfx950 wgrad candidate (wave64, MFMA 32×32×16)
 # ---------------------------------------------------------------------------
 
 
-def _make_cdna_wgrad_candidate() -> KernelCandidate:
+def _make_gfx950_wgrad_candidate() -> KernelCandidate:
     """Backward-weight conv for gfx950: 64×64×64, 2×2, 32×32×16 MFMA.
 
     Epilogue derived from vec_size_c (cshuffle when >1, default otherwise).
     Split-K forwarded from request (1=disabled, -1=auto CK formula, >1=fixed).
-    gfx1250 wgrad is not yet supported; use CDNA only.
+    gfx1250 wgrad is not yet supported.
     """
     name = "implicit_gemm_conv_wgrad"
     spec_id = "igemm_conv_wgrad_64x64"
@@ -1010,13 +1018,13 @@ def _make_cdna_wgrad_candidate() -> KernelCandidate:
 
     def _tile(req: ConvGroupedRequest):
         return (
-            _CDNA_TILE_M,
-            _CDNA_TILE_N,
-            _CDNA_TILE_K,
-            _CDNA_WARP_M,
-            _CDNA_WARP_N,
-            _CDNA_WARP_TILE_MN,
-            _CDNA_WARP_TILE_K,
+            _GFX950_TILE_M,
+            _GFX950_TILE_N,
+            _GFX950_TILE_K,
+            _GFX950_WARP_M,
+            _GFX950_WARP_N,
+            _GFX950_WARP_TILE_MN,
+            _GFX950_WARP_TILE_K,
         )
 
     def _build_instance_spec(req: ConvGroupedRequest) -> WgradConvSpec:
@@ -1044,10 +1052,10 @@ def _make_cdna_wgrad_candidate() -> KernelCandidate:
         if errors:
             return False, "; ".join(errors)
         assert isinstance(req, ConvGroupedRequest)
+        if not _is_gfx950(req):
+            return False, f"gfx950 candidate requires arch=gfx950 (got {req.arch!r})"
         if req.direction != "wgrad":
             return False, f"candidate handles 'wgrad', got direction={req.direction!r}"
-        if _is_gfx1250(req):
-            return False, "wgrad is not yet supported on gfx1250"
         ok, why = _selector_matches(req, candidate)
         if not ok:
             return False, why
@@ -1133,14 +1141,14 @@ _CONV_DIM_VOCABULARY = (
 
 CONV_FWD_REGISTRY = CandidateRegistry(_FAMILY_FWD, dim_vocabulary=_CONV_DIM_VOCABULARY)
 CONV_FWD_REGISTRY.register(_make_gfx942_fwd_candidate())
-CONV_FWD_REGISTRY.register(_make_cdna_fwd_candidate())
+CONV_FWD_REGISTRY.register(_make_gfx950_fwd_candidate())
 CONV_FWD_REGISTRY.register(_make_gfx1250_fwd_candidate())
 
 CONV_WGRAD_REGISTRY = CandidateRegistry(
     _FAMILY_WGRAD, dim_vocabulary=_CONV_DIM_VOCABULARY
 )
 CONV_WGRAD_REGISTRY.register(_make_gfx942_wgrad_candidate())
-CONV_WGRAD_REGISTRY.register(_make_cdna_wgrad_candidate())
+CONV_WGRAD_REGISTRY.register(_make_gfx950_wgrad_candidate())
 
 
 def _registry_for(req: ConvGroupedRequest) -> CandidateRegistry:
