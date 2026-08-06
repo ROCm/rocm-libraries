@@ -90,11 +90,22 @@ which of those are yours; these steps are the first pass that gets you to that a
 2. Confirm the current state before investigating. `gh pr checks <PR_NUMBER> --repo ROCm/rocm-libraries`
    shows whether the check is still failing, passed on a retry, or never started. If it is green
    now, say so and ask for the earlier run rather than guessing which failure was meant.
-3. Check the known bugs first. Look through the
+3. Search for an existing issue before digging into logs. Many reports turn out to be an
+   already-tracked failure, and linking that issue is faster and more useful than a fresh
+   investigation. Search on the error text or the failing job name rather than on a label, and
+   search [ROCm/TheRock](https://github.com/ROCm/TheRock/issues) as well as this repository: the
+   TheRock-driven lanes and the build and packaging code live there, so a failure that surfaces on a
+   rocm-libraries PR is often already filed against TheRock.
+
+   ```bash
+   gh search issues "<error text>" --repo ROCm/rocm-libraries --repo ROCm/TheRock --state open
+   ```
+
+   Searching by label alone will miss things. TheRock issues are often tracked on a triage board
+   with no labels at all, and the infrastructure ones use `infra`, `infra-timeout`, `infra-machine`,
+   `test-infra`, or `test-flaky` rather than `gardener`. The
    [gardener known bugs](https://github.com/ROCm/rocm-libraries/issues?q=is%3Aissue%20state%3Aopen%20label%3Agardener)
-   and the owning CI system's known issues before digging into logs. Many reports turn out to be an
-   already-tracked infra failure, and linking that issue is faster and more useful than a fresh
-   investigation.
+   list is still worth a look for this repository.
 4. Re-run before escalating. Infra flakes such as host timeouts, GPU sanity check hangs, and runner
    resource errors frequently pass on a re-run, which is cheaper than a hand-off. A failure that
    survives a re-run, or that reproduces on unrelated PRs, is worth an issue.
