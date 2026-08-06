@@ -261,6 +261,32 @@ rank-zero outputs, and multiple reduction axes. hipBLASLt's bias-gradient
 adapter represents its matrix as a strided tensor and reduces the K axis; no
 product type enters the component.
 
+## Runtime tensor contraction
+
+`TensorContractionProblem` uses product-independent dimension labels rather
+than transpose or architecture enums:
+
+```cpp
+TensorContractionProblem problem(
+    TensorContractionOperand(aView, {0, 1, 3, 4}),
+    TensorContractionOperand(bView, {0, 2, 3, 4}),
+    cView,
+    {0, 1, 2},
+    dView,
+    {0, 1, 2},
+    {3, 4},
+    ScalarType::Float32);
+
+TensorContractionRunInfo run = referenceTensorContraction(problem);
+```
+
+The canonical operation supports multiple free, batch, and reduction
+dimensions, arbitrary affine layouts, conjugation, compute-input
+quantization, F16/BF16/F32/F64/I32/complex accumulation, alpha/beta,
+XFloat32, and partial output selection. GEMM remains the smaller optimized API;
+the contraction operation is the migration target for Tensile descriptors
+that cannot be normalized to one M, N, and K dimension.
+
 Consumers should need one of only two includes:
 
 ```cpp
@@ -304,7 +330,9 @@ The `roc_host_validation` package currently provides:
 - `reference_epilogue` with bias, forward/gradient activation, E, scale-D/E,
   gate residual, raw output, and AMax results; and
 - `reference_sum` with runtime input/output/accumulator types and explicit
-  tensor axes.
+  tensor axes; and
+- `reference_contraction` with dimension labels matching the C++ tensor
+  contraction object model.
 
 The NumPy suite independently checks:
 
@@ -319,7 +347,8 @@ The NumPy suite independently checks:
 - mixed FP8-storage/FP4-compute-input quantization;
 - selected-output GEMM and prime-stride selection;
 - full/selected forward and ReLU/GELU-gradient epilogues against NumPy; and
-- multi-axis tensor reduction against `numpy.sum`.
+- multi-axis tensor reduction against `numpy.sum`; and
+- multi-index tensor contraction against `numpy.einsum`.
 
 The first binding deliberately copies between NumPy and `Tensor`. A follow-up
 should expose lifetime-safe non-owning NumPy-backed `TensorView` objects.

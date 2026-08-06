@@ -943,6 +943,225 @@ namespace TensileLite
             return multiply<Accumulator, MathOpAccum>(aVal, bVal);
         }
 
+        bool tryRuntimeTensorContraction(ContractionProblemGemm const& problem,
+                                         ContractionInputs const& inputs,
+                                         size_t elementsToValidate) {
+            using namespace roc::host_validation;
+
+            if (problem.boundIndices().size() == 1 &&
+                problem.freeIndicesA().size() == 1 &&
+                problem.freeIndicesB().size() == 1 &&
+                problem.batchIndices().size() == 1)
+                return false;
+            if (problem.useGradient() || problem.outputAmaxD() || problem.useE() ||
+                problem.useBias() || problem.useScaleCD() ||
+                problem.useScaleAlphaVec() || !problem.useScaleAB().empty() ||
+                problem.useGateResidual() || problem.mxBlockA() > 0 ||
+                problem.mxBlockB() > 0)
+                return false;
+            if (inputs.a == nullptr || inputs.b == nullptr || inputs.c == nullptr ||
+                inputs.d == nullptr || inputs.batchA != nullptr || inputs.batchB != nullptr ||
+                inputs.batchC != nullptr || inputs.batchD != nullptr)
+                return false;
+
+            ScalarType typeA;
+            ScalarType typeB;
+            ScalarType typeC;
+            ScalarType typeD;
+            ScalarType accumulatorType;
+            ScalarType computeTypeA;
+            ScalarType computeTypeB;
+            try {
+                typeA = toHostValidationScalarType(problem.a().dataType());
+                typeB = toHostValidationScalarType(problem.b().dataType());
+                typeC = toHostValidationScalarType(problem.c().dataType());
+                typeD = toHostValidationScalarType(problem.d().dataType());
+                accumulatorType = toHostValidationScalarType(problem.computeType());
+                computeTypeA = problem.computeInputTypeA() == rocisa::DataType::None
+                    ? typeA
+                    : toHostValidationScalarType(problem.computeInputTypeA());
+                computeTypeB = problem.computeInputTypeB() == rocisa::DataType::None
+                    ? typeB
+                    : toHostValidationScalarType(problem.computeInputTypeB());
+            } catch (std::invalid_argument const&) {
+                return false;
+            }
+
+            auto scalarValue = [](rocisa::DataType type,
+                                  ConstantVariant const& value) -> std::complex<double> {
+                switch (type) {
+                    case rocisa::DataType::Float:
+                    case rocisa::DataType::XFloat32:
+                        return {constVariantCast<float>(value), 0.0};
+                    case rocisa::DataType::Double:
+                        return {constVariantCast<double>(value), 0.0};
+                    case rocisa::DataType::Half:
+                        return {static_cast<double>(constVariantCast<Half>(value)), 0.0};
+                    case rocisa::DataType::BFloat16:
+                        return {static_cast<double>(constVariantCast<BFloat16>(value)), 0.0};
+                    case rocisa::DataType::Int32:
+                        return {static_cast<double>(constVariantCast<int32_t>(value)), 0.0};
+                    case rocisa::DataType::ComplexFloat: {
+                        const auto converted = constVariantCast<std::complex<float>>(value);
+                        return {converted.real(), converted.imag()};
+                    }
+                    case rocisa::DataType::ComplexDouble:
+                        return constVariantCast<std::complex<double>>(value);
+                    default:
+                        throw std::invalid_argument(
+                            "Runtime contraction scalar type is unsupported.");
+                }
+            };
+            std::complex<double> alpha;
+            std::complex<double> beta;
+            try {
+                alpha = scalarValue(problem.alphaType(), inputs.alpha);
+                beta = scalarValue(problem.betaType(), inputs.beta);
+            } catch (std::invalid_argument const&) {
+                return false;
+            }
+
+            const size_t outputRank = problem.d().dimensions();
+            const ContractionDimension reductionBase =
+                static_cast<ContractionDimension>(outputRank);
+            std::vector<ContractionDimension> aDimensions(problem.a().dimensions(),
+                                                          UINT32_MAX);
+            std::vector<ContractionDimension> bDimensions(problem.b().dimensions(),
+                                                          UINT32_MAX);
+            std::vector<ContractionDimension> cDimensions(problem.c().dimensions(),
+                                                          UINT32_MAX);
+            std::vector<ContractionDimension> dDimensions(outputRank);
+            for (size_t dimension = 0; dimension < outputRank; ++dimension)
+                dDimensions[dimension] = static_cast<ContractionDimension>(dimension);
+
+            for (const auto& index : problem.freeIndices()) {
+                if (index.isA)
+                    aDimensions[index.i] = static_cast<ContractionDimension>(index.d);
+                else
+                    bDimensions[index.i] = static_cast<ContractionDimension>(index.d);
+                cDimensions[index.c] = static_cast<ContractionDimension>(index.d);
+            }
+            for (const auto& index : problem.batchIndices()) {
+                const auto dimension = static_cast<ContractionDimension>(index.d);
+                aDimensions[index.a] = dimension;
+                bDimensions[index.b] = dimension;
+                cDimensions[index.c] = dimension;
+            }
+            std::vector<ContractionDimension> reductionDimensions;
+            reductionDimensions.reserve(problem.boundIndices().size());
+            for (size_t index = 0; index < problem.boundIndices().size(); ++index) {
+                const auto dimension =
+                    static_cast<ContractionDimension>(reductionBase + index);
+                aDimensions[problem.boundIndices()[index].a] = dimension;
+                bDimensions[problem.boundIndices()[index].b] = dimension;
+                reductionDimensions.push_back(dimension);
+            }
+            auto allAssigned = [](const auto& dimensions) {
+                return std::find(dimensions.begin(), dimensions.end(), UINT32_MAX) ==
+                       dimensions.end();
+            };
+            if (!allAssigned(aDimensions) || !allAssigned(bDimensions) ||
+                !allAssigned(cDimensions))
+                return false;
+
+            auto layout = [&](TensorDescriptor const& descriptor, bool operandA) {
+                std::vector<ptrdiff_t> strides;
+                strides.reserve(descriptor.strides().size());
+                for (const size_t stride : descriptor.strides())
+                    strides.push_back(static_cast<ptrdiff_t>(stride));
+                ptrdiff_t offset = 0;
+                for (size_t index = 0; index < problem.boundIndices().size(); ++index) {
+                    const auto& bound = problem.boundIndices()[index];
+                    const size_t axis = operandA ? bound.a : bound.b;
+                    const bool mirror = operandA ? bound.aMirror : bound.bMirror;
+                    if (mirror && descriptor.sizes()[axis] != 0) {
+                        offset += static_cast<ptrdiff_t>(descriptor.sizes()[axis] - 1) *
+                                  strides[axis];
+                        strides[axis] = -strides[axis];
+                    }
+                }
+                return Layout(Shape(descriptor.sizes()), std::move(strides), offset);
+            };
+            const Layout layoutA = layout(problem.a(), true);
+            const Layout layoutB = layout(problem.b(), false);
+            const Layout layoutC(Shape(problem.c().sizes()),
+                                 std::vector<ptrdiff_t>(problem.c().strides().begin(),
+                                                        problem.c().strides().end()));
+            const Layout layoutD(Shape(problem.d().sizes()),
+                                 std::vector<ptrdiff_t>(problem.d().strides().begin(),
+                                                        problem.d().strides().end()));
+            TensorContractionOperand operandA(
+                TensorView(typeA,
+                           layoutA,
+                           {static_cast<const std::byte*>(inputs.a) + inputs.batchOffsetA,
+                            problem.a().totalAllocatedBytes()}),
+                std::move(aDimensions));
+            TensorContractionOperand operandB(
+                TensorView(typeB,
+                           layoutB,
+                           {static_cast<const std::byte*>(inputs.b) + inputs.batchOffsetB,
+                            problem.b().totalAllocatedBytes()}),
+                std::move(bDimensions));
+            if (computeTypeA != typeA) operandA.computeType = computeTypeA;
+            if (computeTypeB != typeB) operandB.computeType = computeTypeB;
+            for (const auto& operation : problem.aOps())
+                if (operation.type == TensorOp::Type::ComplexConjugate)
+                    operandA.conjugate = true;
+            for (const auto& operation : problem.bOps())
+                if (operation.type == TensorOp::Type::ComplexConjugate)
+                    operandB.conjugate = true;
+
+            TensorContractionProblem runtimeProblem(
+                std::move(operandA),
+                std::move(operandB),
+                TensorView(typeC,
+                           layoutC,
+                           {static_cast<const std::byte*>(inputs.c) + inputs.batchOffsetC,
+                            problem.c().totalAllocatedBytes()}),
+                std::move(cDimensions),
+                MutableTensorView(
+                    typeD,
+                    layoutD,
+                    {static_cast<std::byte*>(inputs.d) + inputs.batchOffsetD,
+                     problem.d().totalAllocatedBytes()}),
+                std::move(dDimensions),
+                std::move(reductionDimensions),
+                accumulatorType);
+            runtimeProblem.alpha = alpha;
+            runtimeProblem.beta = beta;
+            runtimeProblem.mathMode =
+                accumulatorType == ScalarType::Float32 &&
+                        problem.f32XdlMathOp() == rocisa::DataType::XFloat32
+                    ? MathMode::XFloat32
+                    : MathMode::Default;
+            const OutputSelection selection =
+                OutputSelection::primeStride(problem.d().totalLogicalElements(),
+                                             problem.d().totalAllocatedElements(),
+                                             elementsToValidate);
+            if (!selection.selectsAll()) {
+                std::vector<size_t> selected;
+                for (const size_t logicalIndex :
+                     selection.indices(problem.d().totalLogicalElements())) {
+                    std::vector<int64_t> coordinate(problem.d().dimensions());
+                    CoordNumbered(logicalIndex,
+                                  coordinate.begin(),
+                                  coordinate.end(),
+                                  problem.d().sizes().begin(),
+                                  problem.d().sizes().end());
+                    size_t runtimeIndex = 0;
+                    for (size_t dimension = 0; dimension < coordinate.size(); ++dimension)
+                        runtimeIndex =
+                            runtimeIndex * problem.d().sizes()[dimension] +
+                            static_cast<size_t>(coordinate[dimension]);
+                    selected.push_back(runtimeIndex);
+                }
+                runtimeProblem.outputSelection =
+                    OutputSelection::explicitIndices(std::move(selected));
+            }
+            referenceTensorContraction(runtimeProblem);
+            return true;
+        }
+
         bool tryRuntimeGemm(
             ContractionProblemGemm const& problem,
             ContractionInputs const& inputs,
@@ -3086,6 +3305,7 @@ namespace TensileLite
             }
 
             if (tryRuntimeCanonicalGemm(problem, inputs, elementsToValidate)) return;
+            if (tryRuntimeTensorContraction(problem, inputs, elementsToValidate)) return;
 
             {
                 ScopedTimer timer("solve_cpu_slow");
