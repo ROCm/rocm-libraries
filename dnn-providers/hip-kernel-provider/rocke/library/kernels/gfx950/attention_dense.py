@@ -195,6 +195,18 @@ class AttentionDenseSpec:
     #   at 1.46e-3, ~+2% TFLOPS); set False only to disable for A/B.
     lazy_rescale: bool = True
 
+    # --- paged KV (opt-in) ---
+    # When True, k_ptr/v_ptr are a PAGED cache [num_pages, page_block_size,
+    # num_kv_heads, head_size] and an int32 ``block_tables`` param maps each
+    # logical KV block -> physical page. Q/O stay dense-contiguous. Minimal
+    # slice: batch==1, head_size==128 (one row/instr), no varlen/persistent/
+    # ragged. block_n stays 64 so the dense tiling/MFMA/LDS are UNCHANGED; only
+    # the per-token async-DMA row load gains a block_table lookup. Tests whether
+    # the dense compute survives paging vs the production paged kernel.
+    paged: bool = False
+    page_block_size: int = 16
+    num_pages: int = 0  # 0 -> derive batch*ceil(seqlen_kv/page_block_size)
+
     def __post_init__(self) -> None:
         if self.dtype not in _DTYPE_IR:
             raise ValueError(
@@ -261,6 +273,22 @@ class AttentionDenseSpec:
                 raise ValueError("varlen is not supported with persistent=True")
             if not self.causal:
                 raise ValueError("varlen requires causal=True")
+        if self.paged:
+            if self.batch != 1:
+                raise ValueError("paged (minimal slice) requires batch==1")
+            if self.varlen or self.persistent or self.ragged:
+                raise ValueError(
+                    "paged is not supported with varlen/persistent/ragged"
+                )
+            if self.head_size != 128:
+                raise ValueError("paged (minimal slice) requires head_size==128")
+            bs = self.page_block_size
+            if bs <= 0 or (bs & (bs - 1)) != 0:
+                raise ValueError("page_block_size must be a positive power of two")
+            if self.block_n % bs != 0:
+                raise ValueError("block_n must be a multiple of page_block_size")
+            if self.seqlen_kv % bs != 0:
+                raise ValueError("seqlen_kv must be a multiple of page_block_size")
 
     @property
     def num_waves(self) -> int:
@@ -289,6 +317,13 @@ class AttentionDenseSpec:
             return "hkv_major"
         return "qb_major"
 
+    @property
+    def resolved_num_pages(self) -> int:
+        if self.num_pages > 0:
+            return self.num_pages
+        bs = self.page_block_size
+        return self.batch * ((self.seqlen_kv + bs - 1) // bs)
+
     def kernel_name(self) -> str:
         parts = [
             "rocke_attention_dense",
@@ -305,6 +340,8 @@ class AttentionDenseSpec:
             parts.append("ragged")
         if self.sliding_window > 0:
             parts.append(f"swa{self.sliding_window}")
+        if self.paged:
+            parts.append(f"paged{self.page_block_size}")
         if self.varlen:
             parts.append("varlen")
         if self.lazy_rescale:
@@ -368,6 +405,10 @@ def build_attention_dense(
     gqa = Hq // Hkv
     stride_q_tok = Hq * D
     stride_k_tok = Hkv * D
+    PAGED = spec.paged
+    PAGE_BS = spec.page_block_size
+    PAGE_STRIDE = PAGE_BS * Hkv * D  # elements per physical page
+    NUM_PAGES = spec.resolved_num_pages
     # DMA row packing: one async_buffer_load_lds instr moves 64 lanes x 2 bf16 =
     # 128 elems. D==128 => 1 row/instr (the padded fast path, byte-identical).
     # D<128 => pack 128//D rows/instr into an UNPADDED contiguous LDS tile (the
@@ -397,6 +438,14 @@ def build_attention_dense(
         )
         cu_kv = b.param(
             "cu_seqlens_kv",
+            PtrType(I32, "global"),
+            noalias=True,
+            readonly=True,
+            align=4,
+        )
+    if PAGED:
+        block_tables = b.param(
+            "block_tables",
             PtrType(I32, "global"),
             noalias=True,
             readonly=True,
@@ -446,6 +495,10 @@ def build_attention_dense(
             b.mul(b.mul(bt, b.const_i32(Skv)), b.const_i32(stride_k_tok)),
             b.mul(hkv, b.const_i32(D)),
         )
+    if PAGED:
+        # kv-head + dim base within a token row (the paged replacement for the
+        # contiguous k_base token term).
+        kv_head_off = b.mul(hkv, b.const_i32(D))
 
     # --- LDS allocation: PAD on K (bank-conflict fix), +PAD_V on V (transposed
     #     PV read bank-conflict pad). Row padding requires 1 row/instr (a padded
@@ -493,8 +546,13 @@ def build_attention_dense(
     zero_soff = b.const_i32(0)
     K_lds_addr = b.smem_addr_of(K_lds)
     V_lds_addr = b.smem_addr_of(V_lds)
-    k_rsrc = b.buffer_rsrc(k, b.const_i32(B * Skv * Hkv * D * 2))
-    v_rsrc = b.buffer_rsrc(v, b.const_i32(B * Skv * Hkv * D * 2))
+    if PAGED:
+        _kv_sz = b.const_i32(NUM_PAGES * PAGE_BS * Hkv * D * 2)
+        k_rsrc = b.buffer_rsrc(k, _kv_sz)
+        v_rsrc = b.buffer_rsrc(v, _kv_sz)
+    else:
+        k_rsrc = b.buffer_rsrc(k, b.const_i32(B * Skv * Hkv * D * 2))
+        v_rsrc = b.buffer_rsrc(v, b.const_i32(B * Skv * Hkv * D * 2))
     v_wave_off_i64 = b.zext(b.to_sgpr_u32(b.mul(wave, b.const_i32(WAVE_BYTES))), I64)
 
     def _async_load(rsrc, lds_base, buf_val, tile_key0, bytes_per_buf, ldrow_bytes):
@@ -514,9 +572,25 @@ def build_attention_dense(
                 row_base = b.smem_ptr_add(lds_base, row_lds_off)
                 gkey = b.add(tile_key0, row)
                 gcol = b.mul(lane, b.const_i32(2))
-                voff = b.add(
-                    b.add(k_base, b.mul(gkey, b.const_i32(stride_k_tok))), gcol
-                )
+                if PAGED:
+                    # logical token -> (block, tok-in-block) -> physical page
+                    blk = b.div(gkey, b.const_i32(PAGE_BS))
+                    tok = b.mod(gkey, b.const_i32(PAGE_BS))
+                    phys = b.global_load_i32(block_tables, blk)
+                    voff = b.add(
+                        b.add(
+                            b.add(
+                                b.mul(phys, b.const_i32(PAGE_STRIDE)),
+                                b.mul(tok, b.const_i32(stride_k_tok)),
+                            ),
+                            kv_head_off,
+                        ),
+                        gcol,
+                    )
+                else:
+                    voff = b.add(
+                        b.add(k_base, b.mul(gkey, b.const_i32(stride_k_tok))), gcol
+                    )
                 b.async_buffer_load_lds_addr(
                     rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, 1
                 )
@@ -1586,6 +1660,8 @@ def attention_dense_signature(spec: AttentionDenseSpec):
     )
     if spec.varlen:
         sig = sig.ptr("cu_seqlens_q", "i32").ptr("cu_seqlens_kv", "i32")
+    if spec.paged:
+        sig = sig.ptr("block_tables", "i32")
     return sig.build()
 
 
@@ -1609,6 +1685,7 @@ def run_attention_dense_torch(
     arch: str = "gfx950",
     cu_seqlens_q=None,
     cu_seqlens_kv=None,
+    block_tables=None,
 ):
     """High-level framework entry: compile (cached) + launch the dense prefill
     kernel on torch tensors. ``q``/``k``/``v``/``out`` are dense contiguous
@@ -1659,6 +1736,10 @@ def run_attention_dense_torch(
     if spec.varlen:
         vals["cu_seqlens_q"] = cu_seqlens_q
         vals["cu_seqlens_kv"] = cu_seqlens_kv
+    if spec.paged:
+        if block_tables is None:
+            raise ValueError("paged=True requires block_tables (int32)")
+        vals["block_tables"] = block_tables
     launcher(
         vals,
         config=LaunchConfig(
