@@ -1,6 +1,8 @@
 import instance_writer
 import subprocess
 import re
+import time
+import sys
 
 ERROR_BENCHMARK_FAILURE = -100
 ERROR_COMPILE_FAILURE = -3
@@ -15,10 +17,29 @@ def benchmark_example(
 ):
     performances = []
     for benchIdx in range(len(bench_args)):
+        print("Doing bench index %d args %s at %.1f" % (benchIdx, bench_args[benchIdx], time.time() % 1000))
         fail_mode = SUCCESS
-        res = subprocess.getstatusoutput(
-            "./" + instance_name + ".o " + bench_args[benchIdx]
+
+        cmd = "./" + instance_name + ".o " + bench_args[benchIdx]
+
+        process = subprocess.Popen(
+            cmd,
+            shell=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
         )
+
+        output_lines = []
+        for line in process.stdout:
+            print(line, end='')  # live output
+            output_lines.append(line)
+
+        process.wait()
+        res = (process.returncode, "".join(output_lines))
+
+        print("Finished bench index %d at %.1f" % (benchIdx, time.time() % 1000))
+
         # check for errors
         if "Error" in res[1]:
             fail_mode = ERROR_BENCHMARK_FAILURE
@@ -56,7 +77,8 @@ def benchmark_example(
                     if print_nosupport:
                         print(line)
                 else:
-                    performances.append(float(re.findall("\\d+\\.\\d+", line)[0]))
+                    performances.append(float(re.findall(r"(\d+(?:\.\d+)?)\s*ms", line)[0]))
+    print("Bench got performances: ", performances)
     return performances
 
 

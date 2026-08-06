@@ -11,6 +11,7 @@ def create_file(gen_file_configs, out_filename):
 
 
 def generate_instance_file_text(gen_file_configs):
+    print("AT LEAST TRYING TO MAKE INSTANCE FILE")
     template_txt = gen_file_configs[0]["hpp_out_template"].split("#ADD_INSTANCES_HERE")
     if len(template_txt) != 2:
         raise Exception(

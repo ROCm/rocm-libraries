@@ -225,9 +225,15 @@ def benchmarker_thread(
 ):
     global n_improvments_mc, n_improvments_rv, n_improvments_cache, n_perf_extracted
     global n_build_failures, n_bench_failures, n_success
+    n_verify_failures = 0
+    verify_time = 0
+    n_valid_benchmarked = 0
+
     is_first = True
     instance_file_name = ""
     while True:
+        print("Hello bench alive")
+
         # delete last file
         if not is_first:
             try:
@@ -243,13 +249,17 @@ def benchmarker_thread(
         bench_config = bench_configs[uid]
         gen_file_config = gen_file_configs[uid]
 
+        print("N valid benchmarked %d build fails %d ver fails %d time verifying %f" % (n_valid_benchmarked, n_build_failures, n_verify_failures, verify_time))
+
         if build_result == 0:
+            print("Going to do benches for params ", params)
             bench_results = benchmarker.benchmark_example(
                 instance_file_name,
                 bench_config["bench_args"],
                 (int(gen_file_config["verbose_level"]) >= 1),
                 (int(gen_file_config["verbose_level"]) >= 1),
             )
+            n_valid_benchmarked += 1
         else:
             n_build_failures += 1
             continue
@@ -264,12 +274,15 @@ def benchmarker_thread(
                     or bconf["best_score_so_far"][i] == 0
                 ):
                     # now, run again in verify mode to be sure it actually is a valid configuration
+                    ver_t1 = time.time()
                     bench_results_verify = benchmarker.benchmark_example(
                         instance_file_name,
                         [bench_config["verify_args"][i]],
                         (int(gen_file_config["verbose_level"]) >= 1),
                     )
+                    verify_time += time.time() - ver_t1
                     if bench_results_verify[0] < 0:
+                        n_verify_failures += 1
                         n_bench_failures += 1
                         continue
 
@@ -314,6 +327,12 @@ def benchmarker_thread(
                                 "best_params"
                             ][i][dict_write_param_idx]
                             dict_write_param_idx += 1
+
+                    print("\n===== CURRENT BEST RESULTS =====")
+                    for qqi, qqscore in enumerate(bconf["best_score_so_far"]):
+                        if qqscore and qqscore > 0:
+                            print(f"{bench_config["bench_args"][qqi]} | score={qqscore:.3f} | params={bconf["best_params"][qqi]}")
+                    print("================================\n")
 
 
 def print_stats(best_configs):
