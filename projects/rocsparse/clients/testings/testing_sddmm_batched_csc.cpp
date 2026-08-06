@@ -223,7 +223,7 @@ void testing_sddmm_batched_csc(const Arguments& arg)
 
     int64_t batch_stride_A             = (batch_count_A > 1) ? nnz_A_per_batch : 0;
     int64_t batch_stride_B             = (batch_count_B > 1) ? nnz_B_per_batch : 0;
-    int64_t offsets_batch_stride_C     = 0; //(batch_count_C > 1) ? (N + 1) : 0;
+    int64_t offsets_batch_stride_C     = (batch_count_C > 1) ? N + 1 : 0;
     int64_t rows_values_batch_stride_C = (batch_count_C > 1) ? nnz_C_per_batch : 0;
 
     // Allocate/initialize dense A and B matrices (per batch unique).
@@ -240,14 +240,13 @@ void testing_sddmm_batched_csc(const Arguments& arg)
                                arg.rand_gen_min,
                                arg.rand_gen_max);
 
-    // Output sparse matrix C. The column offsets are shared across batches (we
-    // use offsets_batch_stride = 0 so a single col_ptr array is consumed). The
-    // row indices and values are strided, so we replicate the row indices across
-    // batches and initialize independent values per batch.
-    host_vector<I> hcsc_col_ptr(N + 1);
-    for(size_t i = 0; i < static_cast<size_t>(N + 1); ++i)
+    host_vector<I> hcsc_col_ptr(batch_count * (N + 1));
+    for(J i = 0; i < batch_count_C; ++i)
     {
-        hcsc_col_ptr[i] = hcsc_col_ptr_temp[i];
+        for(size_t j = 0; j < static_cast<size_t>(N + 1); ++j)
+        {
+            hcsc_col_ptr[(N + 1) * i + j] = hcsc_col_ptr_temp[j];
+        }
     }
 
     host_vector<J> hcsc_row_ind(batch_count_C * nnz_C_per_batch);
