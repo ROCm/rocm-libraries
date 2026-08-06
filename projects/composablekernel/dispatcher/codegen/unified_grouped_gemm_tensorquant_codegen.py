@@ -396,7 +396,7 @@ def _default_config() -> dict:
         "pipeline": "compv3",
         "epilogue": "cshuffle",
         "scheduler": "intrawave",
-        "pad_m": False,
+        "pad_m": True,
         "pad_n": False,
         "pad_k": True,
         "persistent": False,

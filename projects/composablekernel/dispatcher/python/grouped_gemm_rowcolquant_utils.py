@@ -645,6 +645,7 @@ def default_fp8_config(gfx_arch: str = _DEFAULT_GFX_ARCH) -> RowColQuantKernelCo
         tile_m=128, tile_n=128, tile_k=64,
         warp_m=2, warp_n=2, warp_k=1,
         warp_tile_m=32, warp_tile_n=32, warp_tile_k=16,
+        pad_m=True,
         gfx_arch=gfx_arch,
     )
 
@@ -660,5 +661,6 @@ def default_bf8_config(gfx_arch: str = _DEFAULT_GFX_ARCH) -> RowColQuantKernelCo
         tile_m=128, tile_n=128, tile_k=64,
         warp_m=2, warp_n=2, warp_k=1,
         warp_tile_m=32, warp_tile_n=32, warp_tile_k=16,
+        pad_m=True,
         gfx_arch=gfx_arch,
     )
