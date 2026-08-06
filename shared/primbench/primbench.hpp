@@ -2024,7 +2024,7 @@ public:
 
     /// Empirically measures the GPU wall-clock tick rate in kHz
     /// by sampling the on-device clock one second apart, as a fallback
-    /// for architectures where hipDeviceAttributeWallClockRate reports 0
+    /// for architectures where hipDeviceAttributeWallClockRate reports 0.
     long long measure_wall_clk_rate_k_hz()
     {
         long long* d_tick;
