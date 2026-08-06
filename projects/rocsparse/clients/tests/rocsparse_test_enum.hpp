@@ -23,6 +23,7 @@
 * ************************************************************************ */
 #pragma once
 #include "rocsparse_arguments.hpp"
+#include <rocsparse/rocsparse-config.h>
 template <std::size_t N, typename T>
 static constexpr std::size_t countof2(T (&)[N])
 {
@@ -155,6 +156,7 @@ static constexpr std::size_t countof2(T (&)[N])
   TRANSFORM_ROCSPARSE_TEST_ENUM(spgeam_reuse_csr)				\
   TRANSFORM_ROCSPARSE_TEST_ENUM(spgeam_csr_2)				    \
   TRANSFORM_ROCSPARSE_TEST_ENUM(spgeam_reuse_csr_2)				\
+  TRANSFORM_ROCSPARSE_TEST_ENUM(spmat_scale)				        \
   TRANSFORM_ROCSPARSE_TEST_ENUM(spmat_descr)				    \
   TRANSFORM_ROCSPARSE_TEST_ENUM(spmm_bell)				        \
   TRANSFORM_ROCSPARSE_TEST_ENUM(spmm_bsr)				        \
