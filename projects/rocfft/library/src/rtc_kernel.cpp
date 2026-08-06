@@ -1,4 +1,4 @@
-// Copyright (C) 2021 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2021 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -241,8 +241,17 @@ std::shared_future<std::unique_ptr<RTCKernel>> RTCKernel::runtime_compile(
         }
 
         // Create the RTCKernel that we'll return
-        kernel_promise.set_value(generator.construct_rtckernel(
-            kernel_name, module_future, generator.gridDim, generator.blockDim));
+        try
+        {
+            kernel_promise.set_value(generator.construct_rtckernel(
+                kernel_name, module_future, generator.gridDim, generator.blockDim));
+        }
+        catch(const std::exception& e)
+        {
+            if(LOG_RTC_ENABLED())
+                (*LogSingleton::GetInstance().GetRTCOS()) << e.what() << std::endl;
+            kernel_promise.set_exception(std::current_exception());
+        }
     };
 
     std::thread compile_thread(make_kernel,

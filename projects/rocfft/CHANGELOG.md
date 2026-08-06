@@ -9,6 +9,11 @@ Documentation for rocFFT is available at
 
 * Added amdgcnspirv architecture to client programs, so that they are functional even on gfx architectures that they have not been explicitly compiled in.
 
+### Resolved issues
+
+* Fixed a potential issue where rocFFT could terminate the calling process if a HIP module failed to load during plan
+  creation.
+
 ## rocFFT 1.0.39 for ROCm 10.0
 
 ### Optimized
