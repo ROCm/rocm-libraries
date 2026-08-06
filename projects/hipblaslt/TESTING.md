@@ -392,13 +392,26 @@ architecture, which is an expensive way to find out.
 instructions, work-group shapes, the XCC work-group mapping, and custom kernel declarations across
 every logic file. It reads YAML only, so it needs no GPU and no compiled kernels, and it is fast.
 
-**Where it runs is the odd part.** It is wired into the build, as a CMake custom command in
+**Why it runs in the build.** Relative to the build, the logic YAML is compiler input rather than
+build output: `TensileCreateLibrary` consumes it and emits kernels from it. Validating it is
+front-end analysis rather than testing, and running codegen over input already known to be invalid
+produces output nobody should trust. So the check is wired in as a CMake custom command in
 [`cmake/HipBLASLtCodegen.cmake`](cmake/HipBLASLtCodegen.cmake) that runs ahead of
-`TensileCreateLibrary` and writes a stamp file. So it executes on every build that generates kernels,
-including every developer's local build, and a failure stops the build. That gives it excellent
-reach and costs three things: it has no check name in the pull request, it produces no test report,
-and it cannot be run in isolation by CI. It also cannot be tightened in place, because any stricter
-setting would fail local developer builds as readily as CI ones.
+`TensileCreateLibrary` and writes a stamp file. A failure stops the build.
+
+That placement buys the best reach of any gate in the component. It runs on every build that
+generates kernels, including every developer's local one, so a bad entry surfaces in the edit-build
+loop instead of a CI round trip later. It cannot be skipped by a path filter and it cannot be dropped
+by a gating rule, neither of which is true of the gating `preliminary` job. It also validates every
+logic file rather than only the architectures being built, which is deliberate: the data is shared,
+so there is value in a developer working on one architecture noticing that another one's data is
+broken.
+
+**What the placement costs is visibility and strictness.** There is no check name in the pull
+request, no test report, and no way for CI to run it in isolation. It also cannot be tightened in
+place, because `--strict-known-bugs` would fail local developer builds over a stale entry someone
+else owns, which is not a reasonable thing to do to a person trying to build. Both costs point at the
+same answer, and that answer is a second lane rather than a different home for this one.
 
 Its known-bug list,
 [`tensilelite/Tensile/TensileLogic/known_bugs.yaml`](tensilelite/Tensile/TensileLogic/known_bugs.yaml),
