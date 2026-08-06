@@ -23,13 +23,23 @@ and does not duplicate it.
 One deliberate habit, since it is unusual for a document of this kind. Where a check exists because of
 a specific failure, that failure is written up under a subsection headed
 **How this one was learned**. This is not decoration. A control whose motivating failure is recorded
-nowhere reads as pure overhead, so it gets skipped, left unwired, or deleted by the next person who
-finds it inconvenient;
+nowhere is indistinguishable from overhead, and overhead gets skipped, left unwired, or removed by
+whoever touches it next.
 [Build-Time Validation of Library Logic](#build-time-validation-of-library-logic) is a case where
 exactly that happened to a validator already sitting in this repository, at a cost of about three
-months. Each write-up sits in a highlighted box, states its finding in one bold sentence, and folds
-the narrative behind a collapsed **The full account** toggle, so the finding is unavoidable and the
-story stays optional.
+months.
+
+Whoever touches it next is increasingly a coding agent rather than a person, which is the second
+reason for writing these up. The narrative sections are the most human part of this document and also
+the most useful part of it to a machine: they carry intent, they attach a cost to that intent, and
+they leave a trail back to the pull requests and tickets where the reasoning actually happened. An
+agent that can see why a guardrail exists will keep it, and will pick up the evidence already
+gathered rather than re-deriving a conclusion from scratch or deleting something it reads as dead
+weight.
+
+Each write-up sits in a highlighted box, states its finding in one bold sentence, and folds the
+narrative behind a collapsed **The full account** toggle, so the finding is unavoidable and the story
+stays optional.
 
 ## The short version
 
@@ -68,6 +78,7 @@ additions to the template; everything else follows it.
 
 - [The short version](#the-short-version)
 - Incident write-ups, headed *How this one was learned*:
+  - [Why the net came before the tests](#how-this-one-was-learned-why-the-net-came-before-the-tests)
   - [One number and three months](#how-this-one-was-learned-one-number-and-three-months)
 
 **What we test, and how**
@@ -230,9 +241,78 @@ goldens pin behavior that is known to be wrong. A unit test asserts what the cod
 line reached only by a characterization test is protected against accidental change but unverified,
 and it still owes a real test.
 
-The scaffolding is deliberate and temporary. It exists so the consolidation refactor can proceed
-safely, and the intent is for unit tests to replace it as the code becomes unit-testable. How that
-migration gets measured, and why no enforced number can see it, is covered under
+#### How this one was learned: why the net came before the tests
+
+> [!IMPORTANT]
+>
+> **The generator that emits every GEMM kernel takes a bug fix every four days on median, and those
+> fixes keep landing on the same few concepts; that is what code with no testable seam does to the
+> people maintaining it, and the goldens exist to create the seam, as scaffolding with a demolition
+> date rather than a destination.**
+>
+> <details>
+> <summary>The full account: the churn, the deadlock, and the plan that makes the net unnecessary</summary>
+>
+> [`KernelWriterAssembly.py`](tensilelite/Tensile/KernelWriterAssembly.py) is where a GEMM kernel
+> actually becomes assembly, which makes it one of the highest-consequence files in the repository. It
+> is 20,259 lines. Since the monorepo reorganization in April 2025 it has taken 303 commits from 78
+> authors, adding 13,810 lines and removing 7,277. That window undercounts the file, which is years
+> older than this repository. Roughly one commit in four is a fix, 74 of them, and the median gap
+> between one fix and the next is four days.
+>
+> The fixes are not scattered. They cluster on a few ideas that keep coming back. Register lifetime is
+> the worst by a distance, with 16 separate fixes to SGPR and VGPR allocation, release, alignment and
+> overlap. Four of those land in a single nine-week run: not releasing certain SGPRs in one TDM kernel
+> variant, then releasing them correctly in another, then releasing them before a StaggerU boundary,
+> then a fourth on instantiation failures in a third variant. After that come tail-loop handling,
+> StreamK and StaggerU work distribution, and sparse metadata at seven fixes each, then LDS layout,
+> addressing and descriptors, and prefetch scheduling at six each. There are seven reverts. One had to
+> be done by hand, deleting 472 lines, because the change had drifted too far to revert mechanically.
+> Another was reverted the same day it landed and reapplied five days later.
+>
+> It is worth being careful about what that history means, because the obvious reading is the wrong
+> one. Read the fix list and what you actually see is people repeatedly getting hard things right in a
+> file where the language offers them no help: registers allocated by hand with no type to check the
+> arithmetic, assembly built up as text, and correctness observable only on hardware.
+> `KernelWriterAssembly.py` holds a single class with 287 methods and 290 distinct instance
+> attributes. `KernelWriter.py` has one method 3,284 lines long. `mfmaIter` contains a single
+> 34-branch `if`/`elif` chain. Landing a correct change in that requires holding more state in your
+> head than anyone should be asked to hold, and that 78 people have moved it forward with no more
+> breakage than this is the impressive part. The churn is a property of the code's shape. Change the
+> shape and the churn goes with it.
+>
+> That is the case for refactoring, and it runs straight into a deadlock. The campaign's own
+> assessment (AIHPBLAS-3865) states it plainly: the codegen path is simultaneously the least tested,
+> at about 22.5 percent line and branch coverage under unit, and the most complex, with a file-average
+> cyclomatic complexity of 16 to 27 and a worst function at 815 by that assessment's tooling. You
+> cannot safely unit-test or refactor code in that shape without first recording what it does. The two
+> halves hold each other in place: there is no seam to write a unit test against, and no safe way to
+> create the seam without tests.
+>
+> The characterization suite is how that deadlock breaks. Photograph the behavior first, including the
+> bugs, which are flagged in `DECISIONS.md` rather than quietly corrected. Reshape the code behind the
+> photograph, so that any unintended change shows up as a reviewable diff. Then replace the
+> photographs with real unit tests as each piece finally becomes testable. Every step of that order is
+> forced by the situation rather than chosen.
+>
+> (One thing the history shows in passing: most of those 74 fixes carry no tracker reference, so the
+> defect record for this file has largely lived in commit subject lines. That is actively being
+> improved by the PR description and traceability hygiene now applied at review time and by the PR
+> bot. It is a repository-wide practice rather than a testing question, so this document does not
+> pursue it.)
+>
+> Two things have to stay true for any of this to be worth the trouble. The net has to stay honest,
+> which is why blanket regeneration of the goldens is forbidden rather than merely discouraged. And
+> something has to show that the net would actually notice a change, which today is mutation testing
+> and nothing else. The plan then runs in phases: land the net, lock it with the coverage floor and
+> snapshot governance, widen mutation beyond the pilot, make the codegen goldens portable across
+> architectures, and finally refactor, each function graduating to real unit tests and losing its pins
+> as it goes. Until that last phase lands, every coverage percentage in this document describes how
+> much code is protected from change, not how much is known to be right.
+>
+> </details>
+
+How that migration gets measured, and why no enforced number can see it, is covered under
 [Coverage](#coverage).
 
 The discipline that goes with goldens is documented in the suite's
@@ -1093,9 +1173,11 @@ anywhere else in the component, which is why the deepest test infrastructure in 
 predates any expectation of testability, so writing real unit tests against it means refactoring it,
 and refactoring it without a net is how silent regressions happen. Pinning current behavior first,
 then refactoring behind the pins, then replacing the pins with unit tests, is the order the situation
-forces. The cost of that order is a coverage number that looks better than the underlying quality
-warrants, which is why this document keeps separating the two rather than quoting the union and
-moving on.
+forces rather than one anybody chose. The churn and complexity that make it necessary, and the phased
+plan for making it unnecessary, are in
+[why the net came before the tests](#how-this-one-was-learned-why-the-net-came-before-the-tests). The
+cost of that order is a coverage number that looks better than the underlying quality warrants, which
+is why this document keeps separating the two rather than quoting the union and moving on.
 
 **Correctness of a GEMM is not decidable without hardware.** A kernel can be structurally valid,
 compile cleanly, and produce wrong numbers on one architecture at one tile size. No amount of
