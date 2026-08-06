@@ -2015,8 +2015,6 @@ public:
 
 #ifdef __HIP__
         // Query wall clock rate once (constant per device).
-        int device_id;
-        PRIMBENCH_CHECK(hipGetDevice(&device_id));
         m_wall_clock_rate = measure_wall_clk_rate_k_hz();
 
 #endif
