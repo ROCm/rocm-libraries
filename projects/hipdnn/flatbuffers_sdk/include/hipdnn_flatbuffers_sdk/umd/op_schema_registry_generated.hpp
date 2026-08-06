@@ -314,6 +314,31 @@ inline const AttrBinding attributes[] = {
 };
 } // namespace op19
 
+// ResampleBwdAttributes
+namespace op20 {
+inline const AttrBinding attributes[] = {
+    {"dx_tensor_uid", false, AttrType::INT, +[](const void* a) -> ScalarValue { ScalarValue s; s.type = AttrType::INT; s.present = true; s.i = static_cast<std::int64_t>(static_cast<const ::hipdnn_flatbuffers_sdk::data_objects::ResampleBwdAttributes*>(a)->dx_tensor_uid()); return s; }},
+    {"dy_tensor_uid", false, AttrType::INT, +[](const void* a) -> ScalarValue { ScalarValue s; s.type = AttrType::INT; s.present = true; s.i = static_cast<std::int64_t>(static_cast<const ::hipdnn_flatbuffers_sdk::data_objects::ResampleBwdAttributes*>(a)->dy_tensor_uid()); return s; }},
+    {"index_tensor_uid", true, AttrType::INT, +[](const void* a) -> ScalarValue { ScalarValue s; s.type = AttrType::INT; auto v = static_cast<const ::hipdnn_flatbuffers_sdk::data_objects::ResampleBwdAttributes*>(a)->index_tensor_uid(); s.present = v.has_value(); if(v) s.i = static_cast<std::int64_t>(*v); return s; }},
+    {"padding_mode", false, AttrType::DTYPE, +[](const void* a) -> ScalarValue { ScalarValue s; s.type = AttrType::DTYPE; s.present = true; s.dtype = ::hipdnn_flatbuffers_sdk::data_objects::EnumNamePaddingMode(static_cast<const ::hipdnn_flatbuffers_sdk::data_objects::ResampleBwdAttributes*>(a)->padding_mode()); return s; }},
+    {"resample_mode", false, AttrType::DTYPE, +[](const void* a) -> ScalarValue { ScalarValue s; s.type = AttrType::DTYPE; s.present = true; s.dtype = ::hipdnn_flatbuffers_sdk::data_objects::EnumNameResampleMode(static_cast<const ::hipdnn_flatbuffers_sdk::data_objects::ResampleBwdAttributes*>(a)->resample_mode()); return s; }},
+};
+} // namespace op20
+
+// MoeGroupedMatmulAttributes
+namespace op21 {
+inline const AttrBinding attributes[] = {
+    {"first_token_offset_tensor_uid", false, AttrType::INT, +[](const void* a) -> ScalarValue { ScalarValue s; s.type = AttrType::INT; s.present = true; s.i = static_cast<std::int64_t>(static_cast<const ::hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulAttributes*>(a)->first_token_offset_tensor_uid()); return s; }},
+    {"mode", false, AttrType::DTYPE, +[](const void* a) -> ScalarValue { ScalarValue s; s.type = AttrType::DTYPE; s.present = true; s.dtype = ::hipdnn_flatbuffers_sdk::data_objects::EnumNameMoeGroupedMatmulMode(static_cast<const ::hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulAttributes*>(a)->mode()); return s; }},
+    {"output_tensor_uid", false, AttrType::INT, +[](const void* a) -> ScalarValue { ScalarValue s; s.type = AttrType::INT; s.present = true; s.i = static_cast<std::int64_t>(static_cast<const ::hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulAttributes*>(a)->output_tensor_uid()); return s; }},
+    {"token_index_tensor_uid", true, AttrType::INT, +[](const void* a) -> ScalarValue { ScalarValue s; s.type = AttrType::INT; auto v = static_cast<const ::hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulAttributes*>(a)->token_index_tensor_uid(); s.present = v.has_value(); if(v) s.i = static_cast<std::int64_t>(*v); return s; }},
+    {"token_ks_tensor_uid", true, AttrType::INT, +[](const void* a) -> ScalarValue { ScalarValue s; s.type = AttrType::INT; auto v = static_cast<const ::hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulAttributes*>(a)->token_ks_tensor_uid(); s.present = v.has_value(); if(v) s.i = static_cast<std::int64_t>(*v); return s; }},
+    {"token_tensor_uid", false, AttrType::INT, +[](const void* a) -> ScalarValue { ScalarValue s; s.type = AttrType::INT; s.present = true; s.i = static_cast<std::int64_t>(static_cast<const ::hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulAttributes*>(a)->token_tensor_uid()); return s; }},
+    {"top_k", false, AttrType::INT, +[](const void* a) -> ScalarValue { ScalarValue s; s.type = AttrType::INT; s.present = true; s.i = static_cast<std::int64_t>(static_cast<const ::hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulAttributes*>(a)->top_k()); return s; }},
+    {"weight_tensor_uid", false, AttrType::INT, +[](const void* a) -> ScalarValue { ScalarValue s; s.type = AttrType::INT; s.present = true; s.i = static_cast<std::int64_t>(static_cast<const ::hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulAttributes*>(a)->weight_tensor_uid()); return s; }},
+};
+} // namespace op21
+
 inline const OpSchemaEntry entries[] = {
     {"BatchnormInferenceAttributes", "BatchnormInferenceAttributes", ::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes, nullptr, 0u, nullptr, 0u, op0::attributes, 6u},
     {"PointwiseAttributes", "PointwiseAttributes", ::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::PointwiseAttributes, nullptr, 0u, nullptr, 0u, op1::attributes, 12u},
@@ -335,6 +360,8 @@ inline const OpSchemaEntry entries[] = {
     {"ReductionAttributes", "ReductionAttributes", ::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ReductionAttributes, nullptr, 0u, nullptr, 0u, op17::attributes, 4u},
     {"ResampleFwdAttributes", "ResampleFwdAttributes", ::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ResampleFwdAttributes, nullptr, 0u, nullptr, 0u, op18::attributes, 6u},
     {"LayernormBackwardAttributes", "LayernormBackwardAttributes", ::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::LayernormBackwardAttributes, nullptr, 0u, nullptr, 0u, op19::attributes, 10u},
+    {"ResampleBwdAttributes", "ResampleBwdAttributes", ::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ResampleBwdAttributes, nullptr, 0u, nullptr, 0u, op20::attributes, 5u},
+    {"MoeGroupedMatmulAttributes", "MoeGroupedMatmulAttributes", ::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::MoeGroupedMatmulAttributes, nullptr, 0u, nullptr, 0u, op21::attributes, 8u},
 };
 
 } // namespace generated
