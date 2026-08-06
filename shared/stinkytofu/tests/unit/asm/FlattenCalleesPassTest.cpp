@@ -7,7 +7,7 @@
 // (entry + callable functions + markers) in C++.
 //
 // TEMPORARY: FlattenCalleesPass is a stopgap (see its header). Once a proper
-// module-pass infrastructure lands and SwPrefetchInsertionPass handles multiple
+// module-pass infrastructure lands and SwInstructionPrefetchRelStaticPass handles multiple
 // functions directly, the pass — and this test — should be removed/replaced.
 
 #include <gtest/gtest.h>
