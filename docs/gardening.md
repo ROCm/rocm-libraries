@@ -46,6 +46,21 @@ as a group and likely admins should be approving the majority of those.
 
 As an example to include an admin: *we have a critical feature but develop is broken and it is unrelated to our changes*
 
+### Pushing through a known infra failure
+
+The most common bypass request is a PR blocked by a CI failure that has nothing to do with the
+change. Before pushing one of those through, confirm all of the following:
+
+- The failure matches a known infra issue that is already filed, and you can link it.
+- The failing check is unrelated to what the PR actually changes.
+- The failure is not specific to this PR: it reproduces on other PRs, or it survives a re-run.
+- No new, different failure is hiding behind the known one.
+
+Leave the reasoning on the PR when you push it through: the check that failed, the issue it maps to,
+and why the change is not the cause. That note is what saves the next gardener from re-deriving the
+same conclusion. Then keep an eye on the post-submit run for that merge, since pushing it through
+makes the outcome yours.
+
 ## Scope of Gardeners and Developers
 
 In scope:
@@ -63,6 +78,31 @@ Not in scope:
 
 Developer responsibilities:
 - If developers find CI system failures in their PR (pre-submit) checks they should notify the gardener on rotation and the appropriate CI team.
+
+### First pass triage
+
+Most requests reach a gardener as "my PR is blocked, can someone take a look?". The lists above say
+which of those are yours; these steps are the first pass that gets you to that answer quickly.
+
+1. Ask for a precise pointer. A PR link on its own is rarely enough. Ask for the failing run URL,
+   the failing job URL, and roughly when the problem was seen. A run that looked stuck when it was
+   reported has often finished by the time you look at it.
+2. Confirm the current state before investigating. `gh pr checks <PR_NUMBER> --repo ROCm/rocm-libraries`
+   shows whether the check is still failing, passed on a retry, or never started. If it is green
+   now, say so and ask for the earlier run rather than guessing which failure was meant.
+3. Check the known bugs first. Look through the
+   [gardener known bugs](https://github.com/ROCm/rocm-libraries/issues?q=is%3Aissue%20state%3Aopen%20label%3Agardener)
+   and the owning CI system's known issues before digging into logs. Many reports turn out to be an
+   already-tracked infra failure, and linking that issue is faster and more useful than a fresh
+   investigation.
+4. Re-run before escalating. Infra flakes such as host timeouts, GPU sanity check hangs, and runner
+   resource errors frequently pass on a re-run, which is cheaper than a hand-off. A failure that
+   survives a re-run, or that reproduces on unrelated PRs, is worth an issue.
+5. Answer in the thread. Say what you found, link the run, job, or issue you based it on, and name
+   who owns the next step. A reply with no links leaves the next gardener to redo the same work.
+
+If none of the above resolves it, route it with the in-scope rules: CI system failures go to the
+owning [CI team](#ci-teams), code failures go to the [CODEOWNERS](../.github/CODEOWNERS).
 
 ### Beyond the Responsibilities
 
