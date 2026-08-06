@@ -5953,7 +5953,18 @@ std::string getSolutionNameFromData(rocblaslt_handle             handle,
     }
     if(solutionIndex == -1)
         return "";
-    auto        solution       = library->getSolutionByIndex(*hardware, solutionIndex);
+
+#ifdef HIPBLASLT_USE_ROCROLLER
+    if(solutionIndex < 0)
+    {
+        return rocRollerShortKernelNameFromEncodedSolutionIndex(solutionIndex);
+    }
+#endif
+
+    auto solution = library->getSolutionByIndex(*hardware, solutionIndex);
+    if(!solution)
+        return "";
+
     std::string modifiedString = "";
     if(gsu != solution->sizeMapping.globalSplitU && gsu != 0)
     {

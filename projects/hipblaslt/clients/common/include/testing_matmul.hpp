@@ -6150,7 +6150,10 @@ void testing_matmul_with_bias(const Arguments& arg,
 
             if(arg.print_solution_found)
             {
-                if(arg.print_kernel_info)
+                // Resolve the name whenever a tuning run is capturing results,
+                // not only for --print_kernel_info: the winner's name is taken
+                // from best_s_name below, which is fed from here.
+                if(arg.print_kernel_info || tuningEnv)
                 {
                     if(arg.use_ext && batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
                     {
@@ -6229,7 +6232,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                 cuNum    = std::to_string(deviceProps.multiProcessorCount);
             }
 
-            if(arg.print_kernel_info)
+            // Same reason as the per-candidate loop above.
+            if(arg.print_kernel_info || tuningEnv)
             {
                 solutionName = best_s_name;
                 kernelName   = best_k_name;

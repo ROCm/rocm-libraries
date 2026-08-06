@@ -93,3 +93,69 @@ To find and use the best GEMM kernel for a problem, follow these steps:
       transA,transB,grouped_gemm,batch_count,m,n,k,alpha,lda,stride_a,beta,ldb,stride_b,ldc,stride_c,ldd,stride_d,a_type,b_type,c_type,d_type,compute_type,scaleA,scaleB,scaleC,scaleD,amaxD,activation_type,bias_vector,bias_type,rotating_buffer,hipblaslt-Gflops,hipblaslt-GB/s,us,soulution_index
       [0]:
       N,N,0,1,1024,512,1024,1,1024,1048576,1,1024,524288,1024,524288,1024,524288,f16_r,f16_r,f16_r,f16_r,f32_r,0,0,0,0,0,none,0,f32_r,512,37575.2,205.047,28.5758,56537
+
+How tuned entries are validated
+===============================
+
+A tuning file records a ``solution_name`` next to each ``solution_index``. When the file is
+replayed, the index is treated as a lookup hint: hipBLASLt resolves it in the current library and
+uses it only if it still names the same kernel. If it does not, that entry is rejected and the
+problem falls back to normal heuristic selection.
+
+Validation is per entry, so upgrading hipBLASLt thins a tuning file rather than discarding it, and
+only the shapes that failed need re-tuning. Entries written by an older hipBLASLt that predates the
+``solution_name`` column carry no name, so they cannot be checked this way; those are used only when
+the file was produced by the running build.
+
+Runtime tuning
+==============
+
+Instead of tuning offline with ``hipblaslt-bench``, hipBLASLt can benchmark candidate kernels itself
+the first time it sees a GEMM shape and remember the winner. This is off by default and is enabled
+with two environment variables:
+
+.. code-block:: bash
+
+   export HIPBLASLT_TUNING_MODE=<off|cache|tune>
+   export HIPBLASLT_TUNING_CACHE_PATH=<file_name>
+
+``tune`` benchmarks supported candidates for each shape it has not seen before, at that shape's first
+matmul, and appends the winner to the cache file. ``cache`` only replays what the file already
+contains, validating each entry as described above. ``off`` is the default and changes nothing.
+
+The cache file uses the same format as an offline tuning file, so a file produced by one can be read
+by the other. ``HIPBLASLT_TUNING_CACHE_PATH`` and ``HIPBLASLT_TUNING_OVERRIDE_FILE`` are mutually
+exclusive; set only one.
+
+A typical run writes the cache once and reuses it afterwards:
+
+.. code-block:: bash
+
+   export HIPBLASLT_TUNING_CACHE_PATH=tuning.txt
+   HIPBLASLT_TUNING_MODE=tune ./your_application    # benchmark and record
+   HIPBLASLT_TUNING_MODE=cache ./your_application   # replay only
+
+A benchmarked kernel replaces the default choice only when it wins by a margin, which defaults to
+five percent. Below roughly 1000x1000x1000 the whole candidate field tends to land within about one
+percent of each other at the launch-overhead floor, where the fastest measurement is mostly noise.
+The margin and the benchmarking effort can be adjusted:
+
+.. code-block:: bash
+
+   export HIPBLASLT_TUNING_MIN_GAIN_PERCENT=<value>     (Default value is: 5)
+   export HIPBLASLT_TUNING_MAX_CANDIDATES=<value>       (Default value is: 128)
+   export HIPBLASLT_TUNING_WARMUP_ITERS=<value>         (Default value is: 3)
+   export HIPBLASLT_TUNING_MEASURE_ITERS=<value>        (Default value is: 9)
+   export HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE=<value>  (Default value is: 2000)
+
+Benchmarking never writes to your buffers. Candidates run against memory the library allocates for
+the purpose, and only the winner runs on the real output.
+
+Limitations
+-----------
+
+* Tuning happens on the C API execution path. Callers of the C++ extension API can replay a cache but do not tune.
+* Grouped GEMM, pointer-array batch, RocRoller and HIP graph capture are excluded from tuning.
+* One process should write a given cache file at a time.
+* ``alpha``, ``beta`` and whether ``C`` and ``D`` alias are not part of the lookup key, so an entry tuned at one value of ``beta`` can serve a caller using another.
+* Passing ``algo=nullptr`` to ``hipblasLtMatmul`` does not replay cached winners.
