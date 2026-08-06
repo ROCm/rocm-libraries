@@ -213,7 +213,7 @@ protected:
                                      + buildResult.get_message());
         }
 
-        this->synthesis().setGlobalSeed(getGlobalTestSeed());
+        this->inputFillRecipes().setGlobalSeed(getGlobalTestSeed());
         this->verifyGraph(graphObj);
     }
 };

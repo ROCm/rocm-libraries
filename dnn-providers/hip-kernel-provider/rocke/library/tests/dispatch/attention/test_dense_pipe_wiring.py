@@ -108,7 +108,7 @@ class TestDensePipeSupportGates(unittest.TestCase):
                 for c in attention_candidates()
                 if c.name == "attention_gfx942_dense_pipe"
             )
-            ok, why = candidate.supports(_gfx942_fp16(arch="gfx950"))
+            ok, why = candidate.admits(_gfx942_fp16(arch="gfx950"))
             self.assertFalse(ok)
             self.assertIn("gfx942", why)
 
@@ -119,7 +119,7 @@ class TestDensePipeSupportGates(unittest.TestCase):
                 for c in attention_candidates()
                 if c.name == "attention_gfx942_dense_pipe"
             )
-            ok, why = candidate.supports(_gfx942_fp16(dtype="bf16"))
+            ok, why = candidate.admits(_gfx942_fp16(dtype="bf16"))
             self.assertFalse(ok)
             self.assertIn("fp16", why)
 
@@ -134,7 +134,7 @@ class TestDensePipeSupportGates(unittest.TestCase):
             req = _gfx942_fp16(
                 batch=1, nhead_q=16, nhead_k=16, seqlen_q=1, seqlen_k=8192
             )
-            ok, why = candidate.supports(req)
+            ok, why = candidate.admits(req)
             self.assertFalse(ok)
             self.assertIn("3D", why)
 
@@ -145,7 +145,7 @@ class TestDensePipeSupportGates(unittest.TestCase):
                 for c in attention_candidates()
                 if c.name == "attention_gfx942_dense_pipe"
             )
-            ok, why = candidate.supports(
+            ok, why = candidate.admits(
                 _gfx942_fp16(seqlen_q=512, seqlen_k=4096, sliding_window=256)
             )
             self.assertFalse(ok)
@@ -191,7 +191,7 @@ class TestDensePipeRouting(unittest.TestCase):
             req = _gfx942_fp16(
                 batch=2, nhead_q=32, nhead_k=8, seqlen_q=512, seqlen_k=512
             )
-            ok, _ = candidate.supports(req)
+            ok, _ = candidate.admits(req)
         self.assertFalse(ok)
 
     def test_spec_records_correct_dims(self):
@@ -291,13 +291,36 @@ class TestBf16FlashGate(unittest.TestCase):
             )
             self.assertTrue(au._enable_gfx942_flash_k_sliced_ring(p))
 
-    def test_bf16_ring_enabled_for_d128(self):
-        # D128 bf16 now shares the sliced-K ring path: the earlier generator-bug
-        # exclusion was fixed on develop (ring uses the fp16-flash nw4+cfvst
-        # geometry; verified numerically correct, byte-identity gate green).
+    def test_bf16_ring_disabled_for_d128(self):
+        # D128 bf16 stays OFF the ring, and the reason is performance rather
+        # than correctness. The depth-3 slot-reuse bug that originally excluded
+        # D128 was fixed two ways (the drain-on-reuse fence, now unconditional,
+        # and the depth-2 ring), so a correct bf16 D128 ring exists -- it is
+        # just slower than the non-ring T=64 flash path at the production
+        # block_size=64. fp16 D128 takes the depth-2 ring; bf16 does not.
         with _Gfx942Arch():
             p = self._bf16_problem(seqlen_q=2048, seqlen_k=2048)
+            self.assertFalse(au._enable_gfx942_flash_k_sliced_ring(p))
+
+    def test_fp16_ring_enabled_for_d128_at_depth_2(self):
+        # The other half of the same routing decision, pinned so the two
+        # dtypes cannot silently converge: fp16 D128 does take the ring, and
+        # specifically the depth-2 schedule (k%2 avoids slot reuse in the
+        # k_groups=4 live set).
+        with _Gfx942Arch():
+            p = au.UnifiedAttentionProblem(
+                total_q=2 * 2048,
+                num_seqs=2,
+                num_query_heads=16,
+                num_kv_heads=16,
+                head_size=128,
+                block_size=16,
+                max_seqlen_q=2048,
+                max_seqlen_k=2048,
+                dtype="fp16",
+            )
             self.assertTrue(au._enable_gfx942_flash_k_sliced_ring(p))
+            self.assertEqual(au._select_gfx942_flash_ring_depth(p), 2)
 
     def test_bf16_mask_limit_enabled_for_prefill(self):
         with _Gfx942Arch():

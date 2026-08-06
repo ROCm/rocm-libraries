@@ -486,6 +486,7 @@ set(rocsparse_source
   src/extra/rocsparse_bsrgemm.cpp
   src/extra/rocsparse_spgemm.cpp
   src/extra/rocsparse_spgeam.cpp
+  src/extra/rocsparse_spmat_scale.cpp
   #
   # Preconditioner
   #

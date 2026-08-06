@@ -48,19 +48,23 @@ namespace ckc
 /* ====================================================================== */
 
 /* Verbatim datalayout / triple copied from clang for gfx950 (Python
- * _DATALAYOUT_LLVM20 / _DATALAYOUT_LLVM22 / _TRIPLE). Shared by all CDNA
- * backends today, but the AMDGPU datalayout is FLAVOR-KEYED: only the
- * buffer-fat-pointer address space (p8) drifts between LLVM 20 (ROCm 7.0/7.1)
- * and LLVM 22 (ROCm >= 7.2). ROCKE_LL_DATALAYOUT is a back-compat alias for the
- * LLVM20 form; new code keys on the flavor via rocke_ll_datalayout_for_flavor. */
+ * _DATALAYOUT_LLVM20 / _DATALAYOUT_LLVM22 / _DATALAYOUT_LLVM23 / _TRIPLE).
+ * Shared by all CDNA backends per flavor, but the AMDGPU datalayout is
+ * FLAVOR-KEYED: the buffer-resource address space (p8, the 128-bit buffer
+ * descriptor, not the p7 fat pointer) drifts between LLVM 20 (ROCm 7.0/7.1) and
+ * LLVM 22 (ROCm 7.2), and the ELF symbol-mangling spec (m:e) is present in
+ * LLVM 23 (ROCm 7.13+) but absent in LLVM 20 / 22. ROCKE_LL_DATALAYOUT is a
+ * back-compat alias
+ * for the LLVM20 form; new code keys on the flavor via
+ * rocke_ll_datalayout_for_flavor. */
 extern const char* const ROCKE_LL_DATALAYOUT_LLVM20;
 extern const char* const ROCKE_LL_DATALAYOUT_LLVM22;
-extern const char* const ROCKE_LL_DATALAYOUT_LLVM23; /* == LLVM22 form today */
+extern const char* const ROCKE_LL_DATALAYOUT_LLVM23; /* LLVM22 p8 layout + m:e */
 extern const char* const ROCKE_LL_DATALAYOUT; /* == ROCKE_LL_DATALAYOUT_LLVM20 */
 extern const char* const ROCKE_LL_TRIPLE;
 
-/* Python _datalayout_for_flavor: LLVM20 => legacy p8 layout, anything else
- * (incl. unexpected values) => the modern LLVM22/LLVM23 layout. */
+/* Python _datalayout_for_flavor: LLVM20 => legacy p8 layout, LLVM23 => its m:e
+ * form, anything else (incl. unexpected values) => the modern LLVM22 layout. */
 const char* rocke_ll_datalayout_for_flavor(rocke_llvm_flavor_t flavor);
 
 /* Python _is_modern_flavor: true for LLVM 21+ IR shapes (llvm22 / llvm23),

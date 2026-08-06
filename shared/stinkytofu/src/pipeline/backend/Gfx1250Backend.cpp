@@ -128,6 +128,8 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
             passFeatureConfig.dagFeatures.distributeGlobalRead = true;
             passFeatureConfig.dagFeatures.dsReadQueueDepth = moduleOptions.DsReadQueueDepth;
             passFeatureConfig.dagFeatures.dsReadDrainLatency = moduleOptions.DsReadDrainLatency;
+            passFeatureConfig.dagFeatures.dsReadThrottleLatency =
+                moduleOptions.DsReadThrottleLatency;
             passFeatureConfig.dagFeatures.globalReadQueueDepth = moduleOptions.GlobalReadQueueDepth;
             passFeatureConfig.dagFeatures.globalReadDrainLatency =
                 moduleOptions.GlobalReadDrainLatency;
