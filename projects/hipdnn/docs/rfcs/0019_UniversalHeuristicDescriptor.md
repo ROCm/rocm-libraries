@@ -586,6 +586,81 @@ The dim↔tile correspondence is engine-specific (tile field *names* are the eng
 belong on the shared op schema; only the FLOP/byte formulas (`umd_flops`/`umd_bytes`) are truly
 op-intrinsic and stay there ([Section 14.6](#146-auto-deriving-a-first-pass-features_signature)).
 
+### 7.5 Example: mapping the current rocKE SDPA features
+
+> **Illustrative.** This maps the **existing** rocKE FMHA-forward feature engine
+> (`FmhaFeatureEngine`, 69 features) onto this RFC's namespaces, to show the model in practice and to
+> validate that a real, in-use feature set decomposes cleanly. It documents how rocKE sources each
+> feature *today*; it does not prescribe the final set.
+
+rocKE's featurizer takes two dicts — a **`problem`** (the graph/problem) and a **`kernel`** (the
+compiled variant's config) — and emits a fixed 69-`double` row. Those two dicts map directly onto the
+RFC's two per-plan sources: `problem` → `$q.* / $<node>.*`, `kernel` → `$kernel.*` (the KMD fields).
+Everything else is either `$device.*` (hardware) or a `$derived.*` computation. The full decomposition:
+
+**Problem — `$q.*` / `$<node>.*` (from the `problem` dict) — 8 raw + 7 log + 4 derived-shape**
+
+| rocKE feature | RFC mapping |
+|---|---|
+| `batch, seqlen_q, seqlen_k, nhead_q, nhead_k, hdim_q, hdim_v` | `$q.batch`, `$q.seqlen_q`, `$k.seqlen_k`, `$q.nhead_q`, `$k.nhead_k`, `$q.hdim_q`, `$v.hdim_v` |
+| `dtype_enc` | `$q.dtype` (encoded) |
+| `log2_batch … log2_hdim_v` (7) | `$derived.*` = `{"log2": ["$q.<dim>"]}` |
+| `gqa_ratio` = nhead_q/nhead_k | `$derived.gqa_ratio` = `{"/": ["$q.nhead_q", "$k.nhead_k"]}` |
+| `aspect_sq_sk` = seqlen_q/seqlen_k | `$derived.aspect_sq_sk` |
+| `log2_ops` | `$derived.log2_ops` (from the FLOP count below) |
+| `decode_flag` = (seqlen_q ≤ 1) | `$derived.decode_flag` = `{"<=": ["$q.seqlen_q", 1]}` |
+
+**Kernel — `$kernel.*` (from the `kernel` dict = KMD fields) — 20**
+
+| rocKE feature | RFC mapping |
+|---|---|
+| `pipeline_code` | `$kernel.pipeline` (encoded) |
+| `tile_m0, tile_n0, tile_k0, tile_n1, tile_k1, tile_k0max` | `$kernel.tile_m0 …` — the tiling of attention's two GEMMs |
+| `pad_s, pad_sk, pad_d, pad_dv` | `$kernel.pad_*` |
+| `num_warps` | `$kernel.num_warps` |
+| `mask, bias, lse, dropout, logits, sink, skip, qscale, paged` | `$kernel.*` — **kernel capability flags** (whether the compiled variant supports that feature); note these are sourced from the `kernel` dict, i.e. they are build config, not problem attributes |
+
+**Derived — `$derived.*` (computed) — the quantization / fit / occupancy families**
+
+| rocKE feature | RFC `$derived.*` expression (schematic) |
+|---|---|
+| `arithmetic_intensity` | `ops / mem`, where `ops = 2·batch·nhead_q·seqlen_q·seqlen_k·(hdim_q+hdim_v)` and `mem` sums Q/K/V/O bytes — the `{"/": ["$sdpa_fwd.umd_flops", "$sdpa_fwd.umd_bytes"]}` of [Section 14.6](#146-auto-deriving-a-first-pass-features_signature) |
+| `num_tiles_m` = ⌈seqlen_q/tile_m0⌉ | `{"ceil_div": ["$q.seqlen_q", "$kernel.tile_m0"]}` |
+| `num_tiles_k` = ⌈seqlen_k/tile_n0⌉ | `{"ceil_div": ["$k.seqlen_k", "$kernel.tile_n0"]}` |
+| `total_tiles` = batch·nhead_q·num_tiles_m·num_tiles_k | product of the above with `$q.*` |
+| `tile_eff_sq, tile_eff_sk, overall_tile_efficiency` | remainder-based tile-efficiency ratios |
+| `cu_utilization` = total_tiles/num_cus | `{"/": ["$derived.total_tiles", "$device.num_cus"]}` — spans `$derived` × `$device` |
+| `tile_volume, tile_area` | products of `$kernel.tile_*` (graph-independent — cacheable per kernel) |
+| `lds_usage_estimate` | `(tile_m0·tile_k0 + tile_n0·tile_k0)·dtype_bytes` |
+| `lds_usage_ratio` | `{"/": ["$derived.lds_usage_estimate", "$device.lds_capacity"]}` |
+| `ratio_d_to_tk0, ratio_dv_to_tn1` | `$kernel` ratios (hdim vs. tile) |
+| `sq_le_tm0, sk_le_tn0, d_eq_dv, gqa_flag` | boolean fit/shape flags |
+| `total_q_elems, total_kv_elems` | element-count products |
+
+**Device — `$device.*` — 8**
+
+`hw_num_cus, hw_simds_per_cu, hw_total_simds, hw_shader_engines, hw_max_clock_mhz, hw_wavefront_size,
+hw_lds_capacity, hw_num_xcd` → `$device.num_cus`, `$device.simds_per_cu`, … (from the device-facts path
+of [Section 7.1](#71-feature-sources)).
+
+*(`feature_count` is a bookkeeping constant, not a real feature.)*
+
+**What this validates:**
+
+- The 69 features partition exactly into the four namespaces — **no feature falls outside**
+  `$q.* / $kernel.* / $device.* / $derived.*`. The RFC vocabulary is sufficient for a real model.
+- The split is roughly **~20 problem, ~20 kernel, ~20 derived, ~8 device** — the `$derived.*` block
+  carries ~30% of the vector, confirming the [Section 7.4](#74-derived-values-the-uhd-derived-block)
+  block earns its place.
+- One subtlety worth carrying forward: rocKE's `mask/bias/lse/…` are **kernel capability flags** sourced
+  from the kernel config, so they are `$kernel.*` (KMD fields), *not* problem attributes — even though
+  the *problem* also has a mask. The KMD field records "does this compiled variant support masking,"
+  which is what the model ranks on; problem-side mask presence is a matcher concern.
+- `arithmetic_intensity` here is the **problem/ideal** intensity (identical across all candidates for a
+  graph) — a shared-prefix context feature, not a per-candidate discriminator; the algorithm-level
+  differences are carried by the `$kernel.*` tile fields and the quantization derivations, exactly as
+  [Section 14.6](#146-auto-deriving-a-first-pass-features_signature) describes.
+
 ---
 
 ## 8. Model Adapters
