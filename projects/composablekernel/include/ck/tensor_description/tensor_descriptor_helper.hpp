@@ -24,7 +24,10 @@ __host__ __device__ constexpr auto calculate_element_space_size_impl(const Lengt
                                                                      Number<I> i,
                                                                      AccOld acc_old)
 {
-    auto acc_new = acc_old + (lengths[i] - Number<1>{}) * strides[i];
+    // ROCM-29071: widen operands to long_index_t before the multiply so the
+    // product cannot overflow index_t (int32) for large tensors (K*C > INT32_MAX).
+    auto acc_new = acc_old + static_cast<long_index_t>(lengths[i] - Number<1>{}) *
+                                 static_cast<long_index_t>(strides[i]);
 
     if constexpr(i.value < Lengths::Size() - 1)
     {
@@ -64,7 +67,10 @@ __host__ __device__ constexpr auto make_naive_tensor_descriptor(const Tuple<Leng
     // rocm-4.1 compiler would crash for recursive labmda
     // recursive function for reduction
     auto f = [&](auto fs, auto i, auto acc_old) {
-        auto acc_new = acc_old + (lengths[i] - Number<1>{}) * strides[i];
+        // ROCM-29071: widen operands to long_index_t before the multiply so the
+        // product cannot overflow index_t (int32) for large tensors.
+        auto acc_new = acc_old + static_cast<long_index_t>(lengths[i] - Number<1>{}) *
+                                     static_cast<long_index_t>(strides[i]);
 
         if constexpr(i.value < N - 1)
         {
