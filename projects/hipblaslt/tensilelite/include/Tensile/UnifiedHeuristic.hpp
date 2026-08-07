@@ -13,6 +13,7 @@
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/Debug.hpp>
 #include <Tensile/SolutionLibrary.hpp>
+#include <Tensile/Task.hpp>
 #include <Tensile/UtilsOrigami.hpp>
 #include <Tensile/hip/HipHardware.hpp>
 
@@ -57,8 +58,10 @@ namespace TensileLite
             problem, hardware, SolutionLibrarySearchType::GEMM_TYPE_ONLY);
 
         // 2. GEMM_TYPE_ONLY does not apply the per-solution predicates, so filter
-        //    here to keep only solutions valid for this problem/hardware, matching
-        //    the validity check the native findTopSolutions applies per library.
+        //    here to keep only solutions valid for this problem/hardware. This
+        //    mirrors the native findTopSolutions path, whose tuned rows validate
+        //    hardware + problem + task predicates (via findBestSolution); the same
+        //    task predicate is also enforced downstream at algo-support time.
         auto matchesProblem = [&](std::shared_ptr<ContractionSolution> const& sol) {
             if(!sol)
                 return false;
@@ -66,6 +69,12 @@ namespace TensileLite
                 return false;
             if(sol->problemPredicate && !(*sol->problemPredicate)(problem))
                 return false;
+            if(sol->taskPredicate)
+            {
+                Task task(hardware, problem, *sol);
+                if(!(*sol->taskPredicate)(task))
+                    return false;
+            }
             return true;
         };
 
@@ -132,6 +141,17 @@ namespace TensileLite
                     pushUnique(sol);
                 return rv;
             }
+        }
+
+        // 6. Backfill any predicate-valid candidates the analytical model did not
+        //    rank. origami::rank_configs may silently drop configs it cannot score
+        //    (e.g. LDS- or heuristic-rejected), so append the remaining valid
+        //    solutions in union order rather than returning fewer than requested.
+        for(auto const& sol : rest)
+        {
+            if(rv.size() >= want)
+                break;
+            pushUnique(sol);
         }
 
         return rv;

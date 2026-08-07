@@ -7,6 +7,8 @@
 #include <vector>
 
 #include <Tensile/ContractionLibrary.hpp>
+#include <Tensile/Predicates.hpp>
+#include <Tensile/Task.hpp>
 #include <Tensile/UnifiedHeuristic.hpp>
 #include <Tensile/hip/HipHardware.hpp>
 #include <origami/origami.hpp>
@@ -219,6 +221,29 @@ TEST(UnifiedHeuristicTest, PinsExactTunedMatchesFirst)
     std::vector<int> actualRest(idx.begin() + 1, idx.end());
     EXPECT_EQ(actualRest, expectedRest)
         << "remainder must follow the origami analytical ranking";
+}
+
+// Solutions that fail the task predicate are excluded, matching the native
+// findTopSolutions path (which validates the task predicate for tuned rows and
+// is enforced again downstream at algo-support time).
+TEST(UnifiedHeuristicTest, ExcludesSolutionsFailingTaskPredicate)
+{
+    auto analyticalHw = std::make_shared<origami::hardware_t>(makeGfx950AnalyticalHardware());
+    auto device       = makeHipDeviceWithAnalytical(analyticalHw);
+    auto problem      = makeGemmProblem(4096, 4096, 1024);
+
+    auto ok                 = makeTiledSolution("ok", 1, 128, 128, 64);
+    auto rejected           = makeTiledSolution("rejected", 2, 256, 256, 64);
+    rejected->taskPredicate = std::make_shared<Predicates::False<Task>>();
+
+    StubUnionLibrary lib;
+    lib.all = {ok, rejected};
+
+    auto result = findTopSolutionsUnified(lib, problem, device, 5);
+    auto idx    = indicesOf(result);
+
+    EXPECT_EQ(idx, (std::vector<int>{1}))
+        << "a solution failing the task predicate must be excluded from the union";
 }
 
 // The union is de-duplicated and truncated to the requested count.
