@@ -328,8 +328,6 @@ int runGemm(size_t             m,
     // E2M1-representable value set so the MX-scale logic is exercised.
     roc::host_validation::RandomGenerator generator(42);
 
-    auto randomGen = [&]() { return generator.binary<float>(); };
-
 #ifndef _WIN32
     if constexpr(isFP4)
     {
@@ -352,9 +350,6 @@ int runGemm(size_t             m,
                                        3.0f,
                                        4.0f,
                                        6.0f};
-        auto            randomFp4
-            = [&]() { return generator.choose<float>(std::span<const float>(fp4Values)); };
-
         // Pack 2 logical FP4 values per byte (Float4x2). When the logical
         // element count is odd, the second slot of the last byte has no
         // element behind it — it's padding. We must still initialize that
@@ -363,14 +358,20 @@ int runGemm(size_t             m,
         // byte (the guard is on the *write* back, not the read), and reading
         // uninitialized memory would be UB.
         auto initFp4Operand = [&](auto& vec, size_t numLogical) {
-            const size_t storage    = vec.size();
-            const bool   hasOddTail = (numLogical % 2 != 0);
-            for(size_t i = 0; i < storage; ++i)
+            const size_t storagePerBatch = (numLogical + 1) / 2;
+            for(size_t batch = 0; batch < batchCount; ++batch)
             {
-                const bool isPaddingSlot = hasOddTail && (i == storage - 1);
-                float      slot0         = randomFp4();
-                float      slot1         = isPaddingSlot ? 0.0f : randomFp4();
-                vec[i]                   = Float4x2(slot0, slot1);
+                std::vector<float> logicalValues(numLogical);
+                generator.fillChoose<float>(
+                    logicalValues, std::span<const float>(fp4Values));
+                auto packed = roc::host_validation::Tensor::fromValues(
+                    roc::host_validation::ScalarType::Float4E2M1,
+                    roc::host_validation::Shape{numLogical},
+                    std::span<const float>(logicalValues));
+                std::memcpy(reinterpret_cast<std::byte*>(vec.data())
+                                + batch * storagePerBatch,
+                            packed.storage().data(),
+                            storagePerBatch);
             }
         };
         initFp4Operand(a, numA);
@@ -391,18 +392,16 @@ int runGemm(size_t             m,
             }
             else
 #endif
-                if(quantizes)
+            if(quantizes)
             {
                 // Values representable in storage but not on the compute-input grid -
                 // for storage=Half/compute=F8N, values like 0.7 that Half holds
                 // exactly but F8N rounds to 0.625 or 0.75.
-                std::generate(
-                    vec.begin(), vec.end(), [&]() { return generator.uniformReal<T>(-1.0, 1.0); });
+                generator.fillUniformReal<T>(vec, -1.0, 1.0);
             }
             else
             {
-                std::generate(
-                    vec.begin(), vec.end(), [&]() { return static_cast<T>(randomGen()); });
+                generator.fillBinary<T>(vec);
             }
         };
 
@@ -411,7 +410,7 @@ int runGemm(size_t             m,
         initOperand(a, quantizesA);
         initOperand(b, quantizesB);
     }
-    std::generate(c.begin(), c.end(), [&]() { return static_cast<AccumulateT>(randomGen()); });
+    generator.fillBinary<AccumulateT>(c);
 
     // Optional feature buffers — typed as AccumulateT so the slow path's
     // GetValue(alphaType, ...) reads the correct byte width.
@@ -421,9 +420,7 @@ int runGemm(size_t             m,
     if(useBias)
     {
         biasVec.resize(m * batchCount);
-        std::generate(biasVec.begin(), biasVec.end(), [&]() {
-            return static_cast<AccumulateT>(randomGen());
-        });
+        generator.fillBinary<AccumulateT>(biasVec);
         contraction.setUseBias(1);
         contraction.setBias(accumDtypeEnum, m, m);
     }
@@ -432,28 +429,20 @@ int runGemm(size_t             m,
     {
         size_t scaleAlphaVecLen = (factorDim == 0) ? m : n;
         scaleAlphaVecBuf.resize(scaleAlphaVecLen);
-        std::generate(scaleAlphaVecBuf.begin(), scaleAlphaVecBuf.end(), [&]() {
-            return static_cast<AccumulateT>(randomGen());
-        });
+        generator.fillBinary<AccumulateT>(scaleAlphaVecBuf);
         contraction.setUseScaleAlphaVec(1);
         contraction.setScaleAlphaVec(accumDtypeEnum, scaleAlphaVecLen, factorDim);
     }
-
-    // Random scale generator: magnitude in (1, 100], integer values to avoid rounding issues, sign random.
-    // Excludes 0 and ±1 so missing/incorrect scaling is never masked.
-    auto scaleGen = [&]() -> AccumulateT {
-        const AccumulateT sign      = generator.binary<AccumulateT>();
-        const AccumulateT magnitude = generator.uniformInteger<AccumulateT>(2, 100);
-        return sign * magnitude;
-    };
 
     std::vector<AccumulateT> scaleABuf;
     std::vector<AccumulateT> scaleBBuf;
 
     if(useScaleAB == "Scalar")
     {
-        scaleABuf = {scaleGen()};
-        scaleBBuf = {scaleGen()};
+        scaleABuf.resize(1);
+        scaleBBuf.resize(1);
+        generator.fillSignedUniformInteger<AccumulateT>(scaleABuf, 2, 100);
+        generator.fillSignedUniformInteger<AccumulateT>(scaleBBuf, 2, 100);
         // setUseScaleAB must be called before setScaleA/setScaleB,
         // because setScaleA/B silently skips tensor registration when
         // m_useScaleAB is still empty.
@@ -466,8 +455,8 @@ int runGemm(size_t             m,
     {
         scaleABuf.resize(m);
         scaleBBuf.resize(n);
-        std::generate(scaleABuf.begin(), scaleABuf.end(), scaleGen);
-        std::generate(scaleBBuf.begin(), scaleBBuf.end(), scaleGen);
+        generator.fillSignedUniformInteger<AccumulateT>(scaleABuf, 2, 100);
+        generator.fillSignedUniformInteger<AccumulateT>(scaleBBuf, 2, 100);
         contraction.setUseScaleAB("Vector");
         contraction.setScaleA(accumDtypeEnum, m);
         contraction.setScaleB(accumDtypeEnum, n);
@@ -510,11 +499,25 @@ int runGemm(size_t             m,
             mxsa.resize(nmxsa);
             mxsb.resize(nmxsb);
 
-            // Distinct exponents in [0..7] so wrong indexing breaks validation
-            for(size_t i = 0; i < nmxsa; i++)
-                mxsa[i] = E8(std::ldexp(1.0f, generator.uniformInteger<int>(0, 7)));
-            for(size_t i = 0; i < nmxsb; i++)
-                mxsb[i] = E8(std::ldexp(1.0f, generator.uniformInteger<int>(0, 7)));
+            // Distinct exponents in [0..7] so wrong indexing breaks validation.
+            auto fillScale = [](std::vector<E8>& values, uint64_t stream) {
+                roc::host_validation::Tensor generated(
+                    roc::host_validation::ScalarType::E8M0,
+                    roc::host_validation::Shape{values.size()});
+                roc::host_validation::GenerationOptions options;
+                options.seed            = 42;
+                options.real.pattern
+                    = roc::host_validation::GenerationPattern::RandomEncodedExponent;
+                options.real.parameter0 = 0;
+                options.real.parameter1 = 7;
+                options.real.stream     = stream;
+                roc::host_validation::generate(generated.mutableView(), options);
+                std::memcpy(values.data(),
+                            generated.storage().data(),
+                            generated.storage().size());
+            };
+            fillScale(mxsa, 0);
+            fillScale(mxsb, 1);
         }
     }
 #endif
