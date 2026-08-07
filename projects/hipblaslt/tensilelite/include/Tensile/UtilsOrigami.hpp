@@ -25,10 +25,15 @@
  *******************************************************************************/
 
 #pragma once
+#include <algorithm>
+#include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <origami/origami.hpp>
 #include <rocisa/include/enum.hpp>
 #include <origami/simulator/tensilelite/formocast_simulator.hpp>
+
+#include <Tensile/Debug.hpp>
 
 #include <tensilelitehost/export.h>
 
@@ -87,6 +92,106 @@ namespace TensileLite
         default:
             throw std::runtime_error("Unsupported data type: " + std::to_string(static_cast<int>(type)));
         }
+    }
+
+    // Build an Origami analytical config from a solution's size mapping. The
+    // resulting config carries `index` so callers can map an origami ranking
+    // result back to the originating solution. Kept templated (rather than
+    // taking ContractionSolution directly) so UtilsOrigami.hpp stays free of
+    // heavy Tensile headers and avoids include cycles.
+    template <typename Solution>
+    inline origami::config_t makeOrigamiConfig(const Solution& solution, int index)
+    {
+        origami::dim3_t origami_mi;
+        if(solution.sizeMapping.matrixInstruction[0] == 0
+           && solution.sizeMapping.matrixInstruction[1] == 0
+           && solution.sizeMapping.matrixInstruction[2] == 0)
+        {
+            // Override dot2 instruction with vector lane widths
+            origami_mi = {1, 1, 64};
+        }
+        else
+        {
+            origami_mi = {static_cast<size_t>(solution.sizeMapping.matrixInstruction[0]),
+                          static_cast<size_t>(solution.sizeMapping.matrixInstruction[1]),
+                          static_cast<size_t>(solution.sizeMapping.matrixInstruction[2])};
+        }
+
+        if(Debug::Instance().printPropertyEvaluation() && solution.sizeMapping.CUOccupancy <= 0)
+        {
+            std::cerr << "TensileLite::DEBUG: sizeMapping.CUOccupancy="
+                      << solution.sizeMapping.CUOccupancy << " (<=0) for solution '"
+                      << solution.kernelName << "'; clamping to 1 in origami config.\n";
+        }
+
+        origami::config_t origami_config = {
+            .mt = {solution.sizeMapping.macroTile.x,
+                   solution.sizeMapping.macroTile.y,
+                   solution.sizeMapping.depthU},
+            .mi                       = origami_mi,
+            .hand_optimized_main_loop = (solution.sizeMapping.customMainLoopScheduling > 0) ? true
+                                                                                            : false,
+            .subtile                  = solution.sizeMapping.useSubtileImpl,
+            .occupancy = std::max(solution.sizeMapping.CUOccupancy, static_cast<int>(1)),
+            .workgroup_mapping         = solution.sizeMapping.workGroupMapping,
+            .cache_hints_a             = solution.sizeMapping.nonTemporalA,
+            .cache_hints_b             = solution.sizeMapping.nonTemporalB,
+            .workspace_size            = std::numeric_limits<size_t>::max(),
+            .workspace_size_per_elem_c = std::numeric_limits<size_t>::max(),
+            .index                     = static_cast<size_t>(index),
+        };
+
+        return origami_config;
+    }
+
+    // Build an Origami analytical problem descriptor from a Tensile problem.
+    template <typename Problem>
+    inline origami::problem_t makeOrigamiProblem(const Problem& problem)
+    {
+        size_t m     = 1;
+        size_t n     = 1;
+        size_t k     = 1;
+        size_t batch = 1;
+        for(size_t i = 0; i < problem.freeIndicesA().size(); i++)
+            m *= problem.freeSizeA(i);
+        for(size_t i = 0; i < problem.freeIndicesB().size(); i++)
+            n *= problem.freeSizeB(i);
+        for(size_t i = 0; i < problem.boundIndices().size(); ++i)
+            k *= problem.boundSize(i);
+        for(size_t i = 0; i < problem.batchIndices().size(); ++i)
+            batch *= problem.batchSize(i);
+
+        auto miDataType = datatypeToAnalyticalDatatype(problem.computeInputTypeA());
+        if(problem.f32XdlMathOp() == rocisa::DataType::XFloat32) // Check F32 compute type
+            miDataType = origami::data_type_t::XFloat32;
+
+        origami::problem_t origami_problem = {
+            .size  = {m, n, k},
+            .batch = batch,
+            // CU budget hint; 0 = use all CUs.
+            .num_cus     = static_cast<size_t>(problem.getParams().smCountTarget()),
+            .a_transpose = problem.transA() ? origami::transpose_t::T : origami::transpose_t::N,
+            .b_transpose = problem.transB() ? origami::transpose_t::T : origami::transpose_t::N,
+            .a_dtype     = datatypeToAnalyticalDatatype(problem.a().dataType()),
+            .b_dtype     = datatypeToAnalyticalDatatype(problem.b().dataType()),
+            .c_dtype     = datatypeToAnalyticalDatatype(problem.c().dataType()),
+            .d_dtype     = datatypeToAnalyticalDatatype(problem.d().dataType()),
+            .mi_dtype    = miDataType,
+            .a_mx_block_size = 0, // MX Data types come from rocroller
+            .b_mx_block_size = 0, // MX Data types come from rocroller
+        };
+
+        return origami_problem;
+    }
+
+    // Assemble the analytical hardware descriptor used for ranking. This mirrors
+    // the prediction library, which ranks against the full analytical hardware.
+    // (A StreamK CU cap is layered on separately by the skMaxCUs feature and is
+    // intentionally not applied here so this path stays decoupled from it.)
+    template <typename GPU>
+    inline origami::hardware_t makeRankingHardware(const GPU& gpu)
+    {
+        return *(gpu.analyticalHardware);
     }
 } // namespace TensileLite
 

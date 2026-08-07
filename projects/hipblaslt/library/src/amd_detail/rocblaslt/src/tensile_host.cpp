@@ -49,6 +49,7 @@
 #include <Tensile/MasterSolutionLibrary.hpp>
 #include <Tensile/PlaceholderLibrary.hpp>
 #include <Tensile/Tensile.hpp>
+#include <Tensile/UnifiedHeuristic.hpp>
 #include <Tensile/TensorDescriptor.hpp>
 #include <Tensile/Utils.hpp>
 #include <Tensile/hip/HipHardware.hpp>
@@ -4327,6 +4328,19 @@ inline auto getSolutions(
     bool                                          enableEpilogue,
     const int&                                    requestedAlgoCount)
 {
+    // Opt-in: draw the requested algorithms from an analytically-ranked union
+    // of all candidate libraries (exact-tuned matches pinned on top) instead of
+    // concatenating each library's independently sorted results. Only engages
+    // when the Origami analytical model is available for this device.
+    if(TensileLite::Debug::Instance().useUnifiedHeuristic())
+    {
+        auto const* pAMDGPU
+            = dynamic_cast<TensileLite::hip::HipAMDGPU const*>(hardware.get());
+        if(pAMDGPU && pAMDGPU->analyticalHardware)
+            return TensileLite::findTopSolutionsUnified(
+                *library, tensile_prob, *hardware, requestedAlgoCount);
+    }
+
     auto solutions = library->findTopSolutions(tensile_prob, *hardware, requestedAlgoCount);
     return solutions;
 }

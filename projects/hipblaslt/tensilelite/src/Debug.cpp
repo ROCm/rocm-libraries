@@ -160,6 +160,11 @@ namespace TensileLite
         return m_predictionLib;
     }
 
+    bool Debug::useUnifiedHeuristic() const
+    {
+        return m_unifiedHeuristic;
+    }
+
     int Debug::getGridbasedTopSols() const
     {
         return m_gridbasedTopSols;
@@ -228,6 +233,10 @@ namespace TensileLite
         const char* prediction_only = std::getenv("TENSILE_PREDICTION_LIB");
         if(prediction_only)
             m_predictionLib = strtol(prediction_only, nullptr, 0) != 0;
+
+        const char* unified_heuristic = std::getenv("TENSILE_UNIFIED_HEURISTIC");
+        if(unified_heuristic)
+            m_unifiedHeuristic = strtol(unified_heuristic, nullptr, 0) != 0;
 
         const char* solution_index = std::getenv("TENSILE_SOLUTION_INDEX");
         if(solution_index)

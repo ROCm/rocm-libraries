@@ -1,0 +1,145 @@
+/*******************************************************************************
+ *
+ * MIT License
+ *
+ * Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ *
+ *******************************************************************************/
+
+#pragma once
+
+#include <exception>
+#include <iostream>
+#include <memory>
+#include <set>
+#include <vector>
+
+#include <Tensile/ContractionProblem.hpp>
+#include <Tensile/ContractionSolution.hpp>
+#include <Tensile/Debug.hpp>
+#include <Tensile/SolutionLibrary.hpp>
+#include <Tensile/UtilsOrigami.hpp>
+#include <Tensile/hip/HipHardware.hpp>
+
+namespace TensileLite
+{
+    /**
+     * Draw `numSolutions` solutions from an analytically-ranked union of every
+     * candidate library, rather than concatenating each library's independently
+     * sorted results (the default findTopSolutions behavior).
+     *
+     * Selection order:
+     *   1. Exact-tuned (EqualityMatching) matches are pinned on top.
+     *   2. The remaining slots are filled from the predicate-valid union of all
+     *      other libraries, ranked by the Origami analytical model (predicted
+     *      runtime, best first).
+     *
+     * The union is de-duplicated by solution index. Falls back to the library's
+     * native findTopSolutions when the analytical model is unavailable (no
+     * analytical hardware) or when an unsupported problem is encountered.
+     */
+    inline SolutionVector<ContractionSolution>
+        findTopSolutionsUnified(SolutionLibrary<ContractionProblemGemm> const& library,
+                                ContractionProblemGemm const&                  problem,
+                                Hardware const&                                hardware,
+                                int                                            numSolutions)
+    {
+        auto const* pAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
+        if(!(pAMDGPU && pAMDGPU->analyticalHardware))
+            return library.findTopSolutions(problem, hardware, numSolutions);
+
+        const size_t want = numSolutions > 0 ? static_cast<size_t>(numSolutions) : 0;
+
+        SolutionVector<ContractionSolution> rv;
+        if(want == 0)
+            return rv;
+
+        // 1. Predicate-filtered, de-duplicated union across all libraries. The
+        //    prediction row contributes nothing to a DEFAULT findAllSolutions;
+        //    the same solution objects are still enumerated by the matching /
+        //    free-size / equality rows, so the candidate pool is complete.
+        SolutionSet<ContractionSolution> all
+            = library.findAllSolutions(problem, hardware, SolutionLibrarySearchType::DEFAULT);
+
+        // 2. Partition exact-tuned matches from the analytically-ranked rest.
+        std::vector<std::shared_ptr<ContractionSolution>> exacts;
+        std::vector<std::shared_ptr<ContractionSolution>> rest;
+        for(auto const& sol : all)
+        {
+            if(!sol)
+                continue;
+            if(sol->tag == ContractionSolution::MatchingTag::Equal)
+                exacts.push_back(sol);
+            else
+                rest.push_back(sol);
+        }
+
+        std::set<int> used;
+        auto          pushUnique = [&](std::shared_ptr<ContractionSolution> const& sol) {
+            if(rv.size() >= want || !sol)
+                return;
+            if(used.insert(sol->index).second)
+                rv.push_back(sol);
+        };
+
+        // 3. Pin exact-tuned matches first.
+        for(auto const& sol : exacts)
+            pushUnique(sol);
+
+        // 4. Analytically rank and append the remainder.
+        if(rv.size() < want && !rest.empty())
+        {
+            try
+            {
+                origami::hardware_t ranking_hardware = makeRankingHardware(*pAMDGPU);
+                origami::problem_t  origami_problem  = makeOrigamiProblem(problem);
+
+                std::vector<origami::config_t> configs;
+                configs.reserve(rest.size());
+                for(size_t i = 0; i < rest.size(); ++i)
+                    configs.emplace_back(makeOrigamiConfig(*rest[i], static_cast<int>(i)));
+
+                auto ranked = origami::rank_configs(origami_problem, ranking_hardware, configs);
+
+                for(auto const& r : ranked)
+                {
+                    if(r.config.index >= rest.size())
+                        continue;
+                    pushUnique(rest[r.config.index]);
+                    if(rv.size() >= want)
+                        break;
+                }
+            }
+            catch(std::exception const& e)
+            {
+                // Unsupported dtype or analytical failure: return a correct
+                // result via the library's native ordering.
+                if(Debug::Instance().printPropertyEvaluation())
+                    std::cerr << "TensileLite::findTopSolutionsUnified: analytical ranking "
+                                 "failed ("
+                              << e.what() << "); falling back to findTopSolutions.\n";
+                return library.findTopSolutions(problem, hardware, numSolutions);
+            }
+        }
+
+        return rv;
+    }
+} // namespace TensileLite

@@ -94,6 +94,7 @@ target_sources(tensilelite-host
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/TensorDescriptor_fwd.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/TensorOps.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/TensorOps_fwd.hpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/UnifiedHeuristic.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Utils.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/UtilsOrigami.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/geom.hpp"
