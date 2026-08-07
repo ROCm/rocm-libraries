@@ -47,12 +47,11 @@ jobs:
         run: pip install tox
 
       # Runs the characterization suite and the pure unit suite under coverage
-      # (once each), unions them, and enforces two gates on the combined result
-      # (AIHPBLAS-3877 / AIHPBLAS-3878): the whole-project floor (fail_under in
-      # pyproject.toml, enforced by `coverage report` on the combined data) and
-      # the per-file ratchet (coverage_ratchet.py, wired into the tox env's
-      # commands_post). As a byproduct it emits per-suite reports (char.json /
-      # unit.json) that feed the split-summary card below - no duplicate runs.
+      # (once each) and unions them, producing the combined coverage.json /
+      # coverage.xml the next two steps consume. As a byproduct it emits
+      # per-suite reports (char.json / unit.json) that feed the split-summary
+      # card below - no duplicate runs. This step measures only; the floors are
+      # enforced by the coverage-gate step that follows.
       # No GPU or client build is needed - coverage-unit skips the client build;
       # the compiler env below is only so rocisa builds during the tox run.
       #
@@ -62,7 +61,7 @@ jobs:
       # process-wide rocisa singleton with a bogus compiler, which caches
       # all-false gfx942 capabilities and cascades into ~200 Solution/codegen
       # failures across the xdist workers (AIHPBLAS-3877).
-      - name: Run coverage-unit (floor + ratchet)
+      - name: Run coverage-unit (measure)
         shell: bash
         working-directory: projects/hipblaslt/tensilelite
         env:
@@ -74,6 +73,22 @@ jobs:
         run: |
           export PATH="${ROCM_PATH}/bin:${ROCM_PATH}/lib/llvm/bin:${PATH}"
           tox -e coverage-unit
+
+      # This job owns the two coverage gates (AIHPBLAS-3877 / AIHPBLAS-3878), so
+      # it names them explicitly here rather than having them fire inside
+      # coverage-unit. The Math CI Jenkins job tensilelite-unit-codecov runs the
+      # same coverage-unit env to produce its Codecov upload and must not be
+      # failed by a gate it does not own; keeping enforcement in its own env is
+      # what decouples the two. It also means removing this gate requires
+      # deleting a visible step, rather than dropping a variable and going
+      # quietly green.
+      #
+      # Judges the artifacts the step above wrote, so it needs no ROCm, no
+      # rocisa build and no test run: it takes seconds.
+      - name: Enforce coverage floors (whole-project + per-file ratchet)
+        shell: bash
+        working-directory: projects/hipblaslt/tensilelite
+        run: tox -e coverage-gate
 
       # Informational (non-gating): attribute coverage to the two suites that
       # make up the unit lane - characterization tests (the characterization/
