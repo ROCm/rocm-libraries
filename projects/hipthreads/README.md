@@ -1,5 +1,8 @@
 # hipThreads : C++-style concurrency library for AMD GPUs
 
+> [!NOTE]
+> The published hipThreads documentation is available [here](https://rocm.docs.amd.com/projects/hipThreads/en/latest/) in an organized, easy-to-read format, with search and a table of contents. The documentation source files reside in the `docs` folder of this repository. As with all ROCm projects, the documentation is open source.
+
 ## Introduction
 
 hipThreads is a C++-style concurrency library for AMD GPUs that brings familiar threading abstractions to GPU programming by implementing C++ threading and synchronization primitives for GPU code.
