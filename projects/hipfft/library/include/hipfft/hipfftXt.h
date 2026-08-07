@@ -254,6 +254,9 @@ HIPFFT_EXPORT hipfftResult hipfftXtExec(hipfftHandle plan,
  *  creation and initialization (::hipfftPlan1d, ::hipfftPlan2d,
  *  ::hipfftPlan3d, and ::hipfftPlanMany) cannot use multiple GPUs.
  *
+ * @note The rocFFT backend currently requires all device IDs in
+ *  the `gpus` array to be distinct.
+ *
  * @param[in, out] plan The FFT plan.
  * @param[in] count Number of GPUs (length of the `gpus` array).
  * @param[in] gpus Array of device IDs.

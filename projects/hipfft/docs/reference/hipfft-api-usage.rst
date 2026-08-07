@@ -212,7 +212,11 @@ To implement this functionality, use the API as follows:
 
 #. Allocate memory for the data on the devices with
    :cpp:func:`hipfftXtMalloc`, which returns the allocated memory as
-   a :cpp:struct:`hipLibXtDesc` descriptor.
+   a :cpp:struct:`hipLibXtDesc` descriptor. Use a subformat compatible
+   with the desired placement of results (see :cpp:enum:`hipfftXtSubFormat`);
+   note that restrictions apply, e.g., multi-device unbatched
+   multi-dimensional transforms require subformats compatible with in-place
+   execution.
 
 #. Copy data from the host to the descriptor with :cpp:func:`hipfftXtMemcpy`.
 
@@ -226,7 +230,10 @@ To implement this functionality, use the API as follows:
    * :cpp:func:`hipfftXtExecDescriptorD2Z`
    * :cpp:func:`hipfftXtExecDescriptorZ2D`
 
-   Pass the descriptor as input and output.
+   For in-place execution, pass the same descriptor as both input and output.
+   For out-of-place batched execution, pass separate input and output
+   descriptors. The descriptors' subformats must be compatible with the desired
+   placement of results (see :cpp:enum:`hipfftXtSubFormat`).
 
 #. Copy the output from the descriptor back to the host with :cpp:func:`hipfftXtMemcpy`.
 
@@ -257,7 +264,10 @@ To implement this functionality, use the API as follows:
 
    For real-to-complex or complex-to-real plans, all subformats compatible
    with in-place operations result in padding of real domain data along the
-   fastest dimension.
+   fastest dimension. :cpp:func:`hipfftXtMemcpy` assumes (resp. produces)
+   similar padding in the source (resp. destination) host-side buffer when
+   copying from (resp. to) such a descriptor, with a multi-device plan for
+   real forward (resp. inverse) transform.
 
 .. note::
 
