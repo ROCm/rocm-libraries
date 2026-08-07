@@ -23,7 +23,7 @@ beautifulsoup4==4.12.3
     # via pydata-sphinx-theme
 breathe==4.35.0
     # via rocm-docs-core
-certifi==2024.2.2
+certifi==2024.7.4
     # via requests
 cffi==2.0.0
     # via
@@ -83,7 +83,7 @@ ipython==8.31.0
     #   myst-nb
 jedi==0.19.2
     # via ipython
-jinja2==3.1.4
+jinja2==3.1.6
     # via
     #   myst-parser
     #   sphinx
@@ -165,9 +165,9 @@ pygments==2.20.0
     #   ipython
     #   pydata-sphinx-theme
     #   sphinx
-pyjwt[crypto]==2.8.0
+pyjwt[crypto]==2.13.0
     # via pygithub
-pynacl==1.5.0
+pynacl==1.6.2
     # via pygithub
 python-dateutil==2.9.0.post0
     # via jupyter-client
@@ -274,6 +274,7 @@ typing-extensions==4.15.0
     #   myst-nb
     #   pydata-sphinx-theme
     #   pygithub
+    #   pyjwt
     #   referencing
     #   sqlalchemy
 urllib3==2.2.1
