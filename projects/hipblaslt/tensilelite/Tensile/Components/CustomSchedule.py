@@ -1332,7 +1332,7 @@ def _get_schedule_256x256x128_8bit(kernel, useLDSTr, TLDS):
                     SBarrier(comment=""),
                     SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0/LRB0 to complete"),
                     SBarrier(comment=""),
-                    SWaitCnt(dscnt=-1, vlcnt=15, vscnt=-1, comment="Wait for GRA to complete"),
+                    SWaitCnt(dscnt=-1, vlcnt=14, vscnt=-1, comment="Wait for GRA to complete [EXPERIMENT: vlcnt 15->14, tighten DTL wait by one before barrier]"),
                     SBarrier(comment=""),
                     SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for PLR to complete")]
         nglshift = nllshift = 16
