@@ -346,7 +346,7 @@ class TestRecordCoverage(unittest.TestCase):
         if not paths:
             self.skipTest("no parity emitters found")
 
-        failures, npass = [], 0
+        failures, skipped, npass = [], [], 0
         for path in paths:
             label = os.path.basename(path)[: -len("_emit.py")]
             try:
@@ -356,12 +356,21 @@ class TestRecordCoverage(unittest.TestCase):
                 status, detail = "FAIL", f"harness error: {e}"
             if status == "FAIL":
                 failures.append(f"{label}: {detail}")
+            elif status == "SKIP":
+                skipped.append(label)
             elif status == "PASS":
                 npass += 1
 
         self.assertEqual(failures, [], "recorder gaps:\n" + "\n".join(failures))
-        # Guard against the harness silently degrading to ~0 recorded kernels.
-        self.assertGreaterEqual(npass, 40, f"only {npass} kernels recorded")
+        # These two emitters orchestrate multiple kernels and do not currently
+        # expose one reusable KernelDef factory. Every ordinary spec + `_build`
+        # emitter must remain buildable so coverage cannot regress to SKIP.
+        self.assertEqual(
+            skipped,
+            ["gfx950_attention_tiled_3d", "fused_moe_e2e"],
+            f"unexpected recorder skips: {skipped}",
+        )
+        self.assertGreaterEqual(npass, 66, f"only {npass} kernels recorded")
 
 
 if __name__ == "__main__":

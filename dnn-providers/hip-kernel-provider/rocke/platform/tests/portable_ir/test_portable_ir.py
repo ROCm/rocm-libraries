@@ -26,6 +26,7 @@
 # missing, and the skip reason names the command that produces it.
 
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -114,6 +115,28 @@ def test_record_coverage():
     recorder gap rather than as a mysterious parity failure later.
     """
     r = _run([sys.executable, "-m", "rocke.portable_ir.drivers.record_coverage"])
+    assert r.returncode == 0, r.stdout[-4000:] + r.stderr[-4000:]
+
+
+def test_online_shared_library_build(tmp_path):
+    """The documented online build must link and expose its replay entry point.
+
+    This catches duplicate symbols hidden by ordinary static-archive linking but
+    pulled in by the online path's intentional ``--whole-archive`` link.
+    """
+    if not shutil.which("cmake") or not shutil.which("c++"):
+        pytest.skip("online shared-library build needs cmake and a C++ compiler")
+    out = tmp_path / "librocke.so"
+    script = """
+import ctypes
+import sys
+from rocke.portable_ir.src import online
+
+path = online.build_lib(sys.argv[1])
+lib = ctypes.CDLL(path)
+getattr(lib, "rocke_online_recipe_cbor_to_llvm")
+"""
+    r = _run([sys.executable, "-c", script, str(out)])
     assert r.returncode == 0, r.stdout[-4000:] + r.stderr[-4000:]
 
 

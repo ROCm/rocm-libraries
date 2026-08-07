@@ -26,6 +26,7 @@
  *     precondition for the cross-engine byte-identity gate in
  *     python/rocke/portable_ir/drivers/parity_matrix.py.
  */
+#include <climits>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -56,7 +57,12 @@ const char* kToyRecipe = R"json({
   "schema": "rocke.recipe/v1",
   "kernel_name_fmt": "rocke_recipe_toy_d{D}_{dtype}",
   "spec": [{"name": "D", "kind": "int"}, {"name": "dtype", "kind": "str"}],
-  "attrs": {"max_workgroup_size": {"t": "i", "v": 64}},
+  "attrs": {
+    "max_workgroup_size": {"t": "i", "v": 64},
+    "agpr_alloc": {"t": "l", "v": [
+      {"_": {"t": "i", "v": 0}}, {"_": {"t": "i", "v": 0}}
+    ]}
+  },
   "program": [
     {"op": "param", "name": "A", "bind": "A",
      "type": {"kind": "ptr", "pointee": "f32", "space": "global"},
@@ -146,6 +152,334 @@ int count(const std::string& hay, const char* needle)
     return n;
 }
 
+void check_rejected(const char* recipe,
+                    const char* want,
+                    const char* label,
+                    const rocke_recipe_spec_int_t* ints = nullptr,
+                    int n_ints = 0,
+                    const rocke_recipe_spec_str_t* strs = nullptr,
+                    int n_strs = 0)
+{
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* kernel = nullptr;
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    const rocke_status_t st = rocke_recipe_run_from_json(
+        recipe, ints, n_ints, strs, n_strs, &b, &kernel, err, sizeof(err));
+    check(st == ROCKE_ERR_VALUE, label);
+    check(kernel == nullptr, "rejected recipe has no kernel");
+    check(std::string(err).find(want) != std::string::npos, want);
+}
+
+void check_replayed(const char* recipe,
+                    const char* label,
+                    const rocke_recipe_spec_str_t* strs = nullptr,
+                    int n_strs = 0)
+{
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* kernel = nullptr;
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    const rocke_status_t st = rocke_recipe_run_from_json(
+        recipe, nullptr, 0, strs, n_strs, &b, &kernel, err, sizeof(err));
+    check(st == ROCKE_OK && kernel != nullptr, label);
+    if(st == ROCKE_OK)
+        rocke_ir_builder_free(&b);
+}
+
+void check_lowered_results(const char* recipe, int expected_results, const char* label)
+{
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* kernel = nullptr;
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    const rocke_status_t st
+        = rocke_recipe_run_from_json(recipe, nullptr, 0, nullptr, 0, &b, &kernel, err, sizeof(err));
+    check(st == ROCKE_OK && kernel != nullptr, label);
+    if(st != ROCKE_OK || !kernel)
+        return;
+
+    char* ll = nullptr;
+    char lerr[ROCKE_ERR_MSG_CAP];
+    lerr[0] = '\0';
+    const rocke_status_t lower_st = rocke_lower_kernel_to_llvm_ex(
+        kernel, ROCKE_LLVM_FLAVOR_LLVM20, "gfx950", &ll, lerr, sizeof(lerr));
+    check(lower_st == ROCKE_OK && ll != nullptr, "large result list lowers to LLVM");
+    if(lower_st == ROCKE_OK && ll)
+    {
+        const std::string text(ll);
+        check(count(text, "extractvalue") == expected_results,
+              "lowered LLVM contains every result extraction");
+        for(int i = 0; i < expected_results; i++)
+        {
+            char want[64];
+            std::snprintf(want, sizeof(want), "%%r%d = extractvalue", i);
+            check(text.find(want) != std::string::npos, "lowered LLVM preserves each result bind");
+        }
+        std::free(ll);
+    }
+    rocke_ir_builder_free(&b);
+}
+
+std::string multi_result_recipe(const char* spec, const char* outs)
+{
+    std::string recipe = R"json({
+  "schema":"rocke.recipe/v1", "kernel_name_fmt":"bad", "spec":)json";
+    recipe += spec;
+    recipe += R"json(, "program":[
+    {"op":"emit","opcode":"tile.inline_asm","in":[],"outs":)json";
+    recipe += outs;
+    recipe += R"json(,"attrs":{
+      "template":{"t":"s","v":""}, "constraints":{"t":"s","v":"=v,=v"},
+      "sideeffect":{"t":"b","v":true}, "convergent":{"t":"b","v":false}
+    }}
+  ]
+})json";
+    return recipe;
+}
+
+std::string single_result_recipe(const char* first_out,
+                                 const char* second_out = nullptr,
+                                 const char* between = nullptr)
+{
+    std::string recipe = R"json({
+  "schema":"rocke.recipe/v1", "kernel_name_fmt":"single", "spec":[], "program":[
+    {"op":"emit","opcode":"tile.inline_asm","in":[],"out":)json";
+    recipe += first_out;
+    recipe += R"json(,"attrs":{
+      "template":{"t":"s","v":""}, "constraints":{"t":"s","v":"=v"},
+      "sideeffect":{"t":"b","v":true}, "convergent":{"t":"b","v":false}
+    }})json";
+    if(between)
+    {
+        recipe += ',';
+        recipe += between;
+    }
+    if(second_out)
+    {
+        recipe += R"json(,
+    {"op":"emit","opcode":"tile.inline_asm","in":[],"out":)json";
+        recipe += second_out;
+        recipe += R"json(,"attrs":{
+      "template":{"t":"s","v":""}, "constraints":{"t":"s","v":"=v"},
+      "sideeffect":{"t":"b","v":true}, "convergent":{"t":"b","v":false}
+    }})json";
+    }
+    recipe += R"json(,{"op":"ret"}]})json";
+    return recipe;
+}
+
+void check_lowered_single_results(const char* recipe, const char* first, const char* second)
+{
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* kernel = nullptr;
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    const rocke_status_t st
+        = rocke_recipe_run_from_json(recipe, nullptr, 0, nullptr, 0, &b, &kernel, err, sizeof(err));
+    check(st == ROCKE_OK && kernel != nullptr, "valid single-result binds replay");
+    if(st != ROCKE_OK || !kernel)
+        return;
+
+    char* ll = nullptr;
+    char lerr[ROCKE_ERR_MSG_CAP];
+    lerr[0] = '\0';
+    const rocke_status_t lower_st = rocke_lower_kernel_to_llvm_ex(
+        kernel, ROCKE_LLVM_FLAVOR_LLVM20, "gfx950", &ll, lerr, sizeof(lerr));
+    check(lower_st == ROCKE_OK && ll != nullptr, "valid single-result binds lower to LLVM");
+    if(lower_st == ROCKE_OK && ll)
+    {
+        const std::string text(ll);
+        const std::string first_def = std::string("%") + first + " =";
+        const std::string second_def = std::string("%") + second + " =";
+        check(count(text, first_def.c_str()) == 1, "first single-result SSA bind is distinct");
+        check(count(text, second_def.c_str()) == 1, "second single-result SSA bind is distinct");
+        std::free(ll);
+    }
+    rocke_ir_builder_free(&b);
+}
+
+void check_bad_param_attrs(const char* attrs, const char* want, const char* label)
+{
+    std::string recipe = R"json({
+  "schema":"rocke.recipe/v1", "kernel_name_fmt":"bad", "spec":[], "program":[
+    {"op":"param", "name":"A", "type":{"kind":"ptr","pointee":"f32","space":"global"},
+     "attrs":)json";
+    recipe += attrs;
+    recipe += R"json(},
+    {"op":"ret"}
+  ]
+})json";
+    check_rejected(recipe.c_str(), want, label);
+}
+
+std::string scf_for_recipe(const char* flags)
+{
+    std::string recipe = R"json({
+  "schema":"rocke.recipe/v1", "kernel_name_fmt":"loop", "spec":[], "program":[
+    {"op":"const_i32","bind":"lo","val":0}, {"op":"const_i32","bind":"hi","val":1},
+    {"op":"const_i32","bind":"step","val":1},
+    {"op":"scf_for","iv":"iv","lo":"lo","hi":"hi","step":"step",
+)json";
+    recipe += flags;
+    recipe += R"json(     "iter":[],"results":[],"body":[]},
+    {"op":"ret"}
+  ]
+})json";
+    return recipe;
+}
+
+void check_long_name(const char* recipe, size_t minimum_length)
+{
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* kernel = nullptr;
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    const rocke_status_t st
+        = rocke_recipe_run_from_json(recipe, nullptr, 0, nullptr, 0, &b, &kernel, err, sizeof(err));
+    check(st == ROCKE_OK && kernel != nullptr, "long kernel name replays");
+    if(st == ROCKE_OK)
+    {
+        check(std::strlen(kernel->name) >= minimum_length, "long kernel name is not truncated");
+        rocke_ir_builder_free(&b);
+    }
+}
+
+const char* kNegativeStaticFor = R"json({
+  "schema":"rocke.recipe/v1", "kernel_name_fmt":"bad", "spec":[], "program":[
+    {"op":"static_for","var":"i","lo":0,"hi":1,"step":-1,"body":[]}
+  ]
+})json";
+
+const char* kZeroDiv = R"json({
+  "schema":"rocke.recipe/v1", "kernel_name_fmt":"bad", "spec":[], "program":[
+    {"op":"const_i32","bind":"x","val":{"div":[1,0]}}
+  ]
+})json";
+
+const char* kSignedDivOverflow = R"json({
+  "schema":"rocke.recipe/v1", "kernel_name_fmt":"bad",
+  "spec":[{"name":"D","kind":"int"}], "program":[
+    {"op":"const_i32","bind":"x","val":{"div":[{"spec":"D"},-1]}}
+  ]
+})json";
+
+const char* kSignedModOverflow = R"json({
+  "schema":"rocke.recipe/v1", "kernel_name_fmt":"bad",
+  "spec":[{"name":"D","kind":"int"}], "program":[
+    {"op":"const_i32","bind":"x","val":{"mod":[{"spec":"D"},-1]}}
+  ]
+})json";
+
+const char* kManyResults = R"json({
+  "schema":"rocke.recipe/v1", "kernel_name_fmt":"bad", "spec":[], "program":[
+    {"op":"emit","opcode":"tile.inline_asm","in":[],"outs":[
+      {"bind":"r0","type":"i32"},{"bind":"r1","type":"i32"},
+      {"bind":"r2","type":"i32"},{"bind":"r3","type":"i32"},
+      {"bind":"r4","type":"i32"},{"bind":"r5","type":"i32"},
+      {"bind":"r6","type":"i32"},{"bind":"r7","type":"i32"},
+      {"bind":"r8","type":"i32"},{"bind":"r9","type":"i32"},
+      {"bind":"r10","type":"i32"},{"bind":"r11","type":"i32"},
+      {"bind":"r12","type":"i32"},{"bind":"r13","type":"i32"},
+      {"bind":"r14","type":"i32"},{"bind":"r15","type":"i32"},
+      {"bind":"r16","type":"i32"}
+    ],"attrs":{
+      "template":{"t":"s","v":""},
+      "constraints":{"t":"s","v":"=v,=v,=v,=v,=v,=v,=v,=v,=v,=v,=v,=v,=v,=v,=v,=v,=v"},
+      "sideeffect":{"t":"b","v":true},
+      "convergent":{"t":"b","v":false}
+    }}
+  ]
+})json";
+
+const char* kLongKernelName = R"json({
+  "schema":"rocke.recipe/v1",
+  "kernel_name_fmt":"rocke_long_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "spec":[], "program":[{"op":"ret"}]
+})json";
+
+const char* kSpecRecipe = R"json({
+  "schema":"rocke.recipe/v1", "kernel_name_fmt":"bad",
+  "spec":[{"name":"D","kind":"int"}], "program":[{"op":"ret"}]
+})json";
+
+const char* kUnknownStringSpec = R"json({
+  "schema":"rocke.recipe/v1", "kernel_name_fmt":"bad", "spec":[], "program":[
+    {"op":"static_if","pred":{"spec_str_eq":["typo","f16"]},"then":[],"else":[]}
+  ]
+})json";
+
+const char* kNonStringSpecName = R"json({
+  "schema":"rocke.recipe/v1", "kernel_name_fmt":"bad", "spec":[], "program":[
+    {"op":"static_if","pred":{"spec_str_eq":[7,"f16"]},"then":[],"else":[]}
+  ]
+})json";
+
+const char* kNonStringSpecLiteral = R"json({
+  "schema":"rocke.recipe/v1", "kernel_name_fmt":"bad", "spec":[], "program":[
+    {"op":"static_if","pred":{"spec_str_eq":["dtype",7]},"then":[],"else":[]}
+  ]
+})json";
+
+const char* kStringSpecTrue = R"json({
+  "schema":"rocke.recipe/v1", "kernel_name_fmt":"true",
+  "spec":[{"name":"dtype","kind":"str"}], "program":[
+    {"op":"static_if","pred":{"spec_str_eq":["dtype","f16"]},
+     "then":[{"op":"ret"}],"else":[{"op":"unknown"}]}
+  ]
+})json";
+
+const char* kStringSpecFalse = R"json({
+  "schema":"rocke.recipe/v1", "kernel_name_fmt":"false",
+  "spec":[{"name":"dtype","kind":"str"}], "program":[
+    {"op":"static_if","pred":{"spec_str_eq":["dtype","f16"]},
+     "then":[{"op":"unknown"}],"else":[{"op":"ret"}]}
+  ]
+})json";
+
+const char* kNonNumericConstF32 = R"json({
+  "schema":"rocke.recipe/v1", "kernel_name_fmt":"bad", "spec":[], "program":[
+    {"op":"const_f32","bind":"x","fval":"zero"}
+  ]
+})json";
+
+const char* kMissingConstF32 = R"json({
+  "schema":"rocke.recipe/v1", "kernel_name_fmt":"bad", "spec":[], "program":[
+    {"op":"const_f32","bind":"x"}
+  ]
+})json";
+
+const char* kBadOperands = R"json({
+  "schema":"rocke.recipe/v1", "kernel_name_fmt":"bad", "spec":[], "program":[
+    {"op":"emit","opcode":"tile.inline_asm","in":{}}
+  ]
+})json";
+
+const char* kMissingIterInit = R"json({
+  "schema":"rocke.recipe/v1", "kernel_name_fmt":"bad", "spec":[], "program":[
+    {"op":"const_i32","bind":"lo","val":0}, {"op":"const_i32","bind":"hi","val":1},
+    {"op":"const_i32","bind":"step","val":1},
+    {"op":"scf_for","iv":"iv","lo":"lo","hi":"hi","step":"step",
+     "iter":[{"name":"carry"}],"results":["result"],"body":[]}
+  ]
+})json";
+
+const char* kBadAttr = R"json({
+  "schema":"rocke.recipe/v1", "kernel_name_fmt":"bad", "spec":[],
+  "attrs":{"bad":{"t":"f","v":"not-a-number"}}, "program":[]
+})json";
+
+const char* kBadKernelAttrsShape = R"json({
+  "schema":"rocke.recipe/v1", "kernel_name_fmt":"bad", "spec":[],
+  "attrs":[], "program":[]
+})json";
+
+const char* kBadRegisterPlaceholder = R"json({
+  "schema":"rocke.recipe/v1", "kernel_name_fmt":"bad", "spec":[], "program":[
+    {"op":"const_i32","bind":"value{","val":0}
+  ]
+})json";
+
 } // namespace
 
 int main()
@@ -164,6 +498,8 @@ int main()
     check(name8 == "rocke_recipe_toy_d8_f32", "kernel name at D=8");
     check(ll4.find("rocke_recipe_toy_d4_f32") != std::string::npos,
           "kernel name appears in the lowered IR");
+    check(ll4.find("\"amdgpu-agpr-alloc\"=\"0,0\"") != std::string::npos,
+          "integer-list kernel attribute survives replay");
 
     // The spec drives structure: the static_for body is emitted D times, so the
     // multiply-accumulate count tracks D exactly. This is the whole point of a
@@ -181,6 +517,191 @@ int main()
     {
         check(ll4 == ll4_again, "replay at the same spec is byte-identical");
     }
+
+    // Invalid parametric constructs must be rejected, never silently changed
+    // (division/modulo) or allowed to spin forever (a non-progressing static_for).
+    check_rejected(
+        kNegativeStaticFor, "static_for step must be positive", "negative static_for rejected");
+    check_rejected(kZeroDiv, "integer division by zero", "zero integer division rejected");
+    const rocke_recipe_spec_int_t min_long[] = {{"D", LONG_MIN}};
+    check_rejected(kSignedDivOverflow,
+                   "integer division overflow",
+                   "signed integer division overflow rejected",
+                   min_long,
+                   1);
+    check_rejected(kSignedModOverflow,
+                   "integer modulo overflow",
+                   "signed integer modulo overflow rejected",
+                   min_long,
+                   1);
+
+    // The VM now carries an arbitrary result list to rocke_b_op rather than
+    // silently truncating it at sixteen. Lowering proves that every declaration
+    // survives with its distinct SSA name, rather than only reaching KernelDef.
+    check_lowered_results(kManyResults, 17, "large result list is not truncated");
+    check_long_name(kLongKernelName, 300);
+
+    // Every multi-result declaration needs an explicit, distinct bind after
+    // placeholder resolution. Missing/defaulted names would otherwise overwrite
+    // the VM register and can produce duplicate LLVM SSA definitions.
+    const std::string missing_result_bind
+        = multi_result_recipe("[]", R"json([{"type":"i32"},{"bind":"r1","type":"i32"}])json");
+    const std::string empty_result_bind = multi_result_recipe(
+        "[]", R"json([{"bind":"","type":"i32"},{"bind":"r1","type":"i32"}])json");
+    const std::string non_string_result_bind = multi_result_recipe(
+        "[]", R"json([{"bind":7,"type":"i32"},{"bind":"r1","type":"i32"}])json");
+    const std::string duplicate_result_bind = multi_result_recipe(
+        "[]", R"json([{"bind":"r","type":"i32"},{"bind":"r","type":"i32"}])json");
+    const std::string resolved_duplicate_result_bind = multi_result_recipe(
+        R"json([{"name":"D","kind":"int"}])json",
+        R"json([{"bind":"r{D}","type":"i32"},{"bind":"r4","type":"i32"}])json");
+    check_rejected(missing_result_bind.c_str(),
+                   "result bind must be a nonempty string",
+                   "missing multi-result bind rejected");
+    check_rejected(empty_result_bind.c_str(),
+                   "result bind must be a nonempty string",
+                   "empty multi-result bind rejected");
+    check_rejected(non_string_result_bind.c_str(),
+                   "result bind must be a nonempty string",
+                   "non-string multi-result bind rejected");
+    check_rejected(duplicate_result_bind.c_str(),
+                   "duplicate result bind",
+                   "duplicate multi-result bind rejected");
+    const rocke_recipe_spec_int_t result_spec[] = {{"D", 4}};
+    check_rejected(resolved_duplicate_result_bind.c_str(),
+                   "duplicate result bind",
+                   "resolved duplicate multi-result bind rejected",
+                   result_spec,
+                   1);
+
+    // A single result follows the same explicit-bind contract. Concrete
+    // recipes use exact LLVM SSA names, so redefining a prior bind must fail
+    // before lowering; parametric recipes retain fresh-name rebinding.
+    const std::string missing_single_bind = single_result_recipe(R"json({"type":"i32"})json");
+    const std::string empty_single_bind
+        = single_result_recipe(R"json({"bind":"","type":"i32"})json");
+    const std::string non_string_single_bind
+        = single_result_recipe(R"json({"bind":7,"type":"i32"})json");
+    const std::string duplicate_single_bind = single_result_recipe(
+        R"json({"bind":"r","type":"i32"})json", R"json({"bind":"r","type":"i32"})json");
+    const std::string distinct_single_binds = single_result_recipe(
+        R"json({"bind":"r0","type":"i32"})json", R"json({"bind":"r1","type":"i32"})json");
+    const std::string rebound_alias
+        = single_result_recipe(R"json({"bind":"x","type":"i32"})json",
+                               R"json({"bind":"y","type":"i32"})json",
+                               R"json({"op":"alias","bind":"y","from":"x"})json");
+    const std::string masked_duplicate_single_bind
+        = single_result_recipe(R"json({"bind":"r","type":"i32"})json",
+                               R"json({"bind":"r","type":"i32"})json",
+                               R"json({"op":"emit","opcode":"tile.inline_asm","in":[],
+                 "out":{"bind":"x","type":"i32"},"attrs":{
+                 "template":{"t":"s","v":""},"constraints":{"t":"s","v":"=v"},
+                 "sideeffect":{"t":"b","v":true},"convergent":{"t":"b","v":false}}},
+                {"op":"alias","bind":"r","from":"x"})json");
+    check_rejected(missing_single_bind.c_str(),
+                   "result bind must be a nonempty string",
+                   "missing single-result bind rejected");
+    check_rejected(empty_single_bind.c_str(),
+                   "result bind must be a nonempty string",
+                   "empty single-result bind rejected");
+    check_rejected(non_string_single_bind.c_str(),
+                   "result bind must be a nonempty string",
+                   "non-string single-result bind rejected");
+    check_rejected(duplicate_single_bind.c_str(),
+                   "redefines an existing SSA value",
+                   "duplicate concrete single-result bind rejected");
+    check_rejected(masked_duplicate_single_bind.c_str(),
+                   "redefines an existing SSA value",
+                   "alias cannot mask an earlier concrete SSA definition");
+    check_lowered_single_results(distinct_single_binds.c_str(), "r0", "r1");
+    check_lowered_single_results(rebound_alias.c_str(), "x", "y");
+
+    // Runtime values must match the recipe's declared name and kind exactly.
+    const rocke_recipe_spec_str_t wrong_kind[] = {{"D", "4"}};
+    const rocke_recipe_spec_int_t duplicate_specs[] = {{"D", 4}, {"D", 8}};
+    const rocke_recipe_spec_int_t extra_specs[] = {{"D", 4}, {"E", 8}};
+    check_rejected(kSpecRecipe, "exactly one int", "missing runtime spec rejected");
+    check_rejected(kSpecRecipe,
+                   "exactly one int",
+                   "wrong runtime spec kind rejected",
+                   nullptr,
+                   0,
+                   wrong_kind,
+                   1);
+    check_rejected(
+        kSpecRecipe, "exactly one int", "duplicate runtime spec rejected", duplicate_specs, 2);
+    check_rejected(
+        kSpecRecipe, "undeclared runtime int", "extra runtime spec rejected", extra_specs, 2);
+
+    // String predicates require two string operands and a declared runtime spec.
+    // Valid comparisons still select both their true and false arms normally.
+    check_rejected(
+        kUnknownStringSpec, "unknown spec string 'typo'", "unknown string spec predicate rejected");
+    check_rejected(kNonStringSpecName,
+                   "spec_str_eq requires exactly two strings",
+                   "non-string spec predicate name rejected");
+    check_rejected(kNonStringSpecLiteral,
+                   "spec_str_eq requires exactly two strings",
+                   "non-string spec predicate literal rejected");
+    const rocke_recipe_spec_str_t dtype_f16[] = {{"dtype", "f16"}};
+    const rocke_recipe_spec_str_t dtype_f32[] = {{"dtype", "f32"}};
+    check_replayed(kStringSpecTrue, "true string spec predicate replays", dtype_f16, 1);
+    check_replayed(kStringSpecFalse, "false string spec predicate replays", dtype_f32, 1);
+
+    // Malformed collections, attributes, and format names fail at the schema
+    // boundary instead of becoming an empty list/default value/truncated name.
+    check_rejected(kBadOperands, "register list must be an array", "bad operand list rejected");
+    check_rejected(kMissingIterInit, "needs name/init", "missing loop init rejected");
+    check_rejected(kBadAttr, "float value is not numeric", "bad scalar attr rejected");
+    check_rejected(
+        kBadKernelAttrsShape, "attrs must be an object", "bad kernel attrs shape rejected");
+    check_rejected(
+        kBadRegisterPlaceholder, "unterminated register", "bad register format rejected");
+    check_rejected(
+        kNonNumericConstF32, "const_f32 fval must be numeric", "non-numeric const_f32 rejected");
+    check_rejected(
+        kMissingConstF32, "const_f32 fval must be numeric", "missing const_f32 fval rejected");
+
+    // Optional loop flags retain their defaults when absent and accept booleans,
+    // but other JSON kinds are not silently interpreted through the bool union member.
+    const std::string default_loop = scf_for_recipe("");
+    const std::string flagged_loop
+        = scf_for_recipe("     \"unroll\":true,\"elide_trailing_barrier\":false,\n");
+    const std::string bad_unroll = scf_for_recipe("     \"unroll\":1,\n");
+    const std::string bad_elide = scf_for_recipe("     \"elide_trailing_barrier\":\"yes\",\n");
+    check_replayed(default_loop.c_str(), "scf_for defaults replay");
+    check_replayed(flagged_loop.c_str(), "boolean scf_for flags replay");
+    check_rejected(bad_unroll.c_str(), "scf_for unroll must be boolean", "bad unroll rejected");
+    check_rejected(bad_elide.c_str(),
+                   "scf_for elide_trailing_barrier must be boolean",
+                   "bad trailing-barrier flag rejected");
+
+    // Parameter attrs use an unwrapped schema, unlike typed op/kernel attrs, but
+    // their container and known values still need exact kinds and valid ranges.
+    check_bad_param_attrs("[]", "param attrs must be an object", "bad param attrs shape rejected");
+    check_bad_param_attrs(R"json({"noalias":[]})json",
+                          "param attr 'noalias' must be boolean",
+                          "bad noalias rejected");
+    check_bad_param_attrs(R"json({"readonly":1})json",
+                          "param attr 'readonly' must be boolean",
+                          "bad readonly rejected");
+    check_bad_param_attrs(R"json({"writeonly":"yes"})json",
+                          "param attr 'writeonly' must be boolean",
+                          "bad writeonly rejected");
+    check_bad_param_attrs(
+        R"json({"align":"16"})json", "param attr 'align'", "non-numeric param align rejected");
+    check_bad_param_attrs(
+        R"json({"align":16.5})json", "param attr 'align'", "fractional param align rejected");
+    check_bad_param_attrs(
+        R"json({"align":0})json", "param attr 'align'", "zero param align rejected");
+    check_bad_param_attrs(
+        R"json({"align":3})json", "param attr 'align'", "non-power-of-two param align rejected");
+    check_bad_param_attrs(R"json({"align":2147483648})json",
+                          "param attr 'align'",
+                          "out-of-range param align rejected");
+    check_bad_param_attrs(R"json({"addr_space":true})json",
+                          "param attr 'addr_space' must be a string",
+                          "bad param address space rejected");
 
     if(g_fail == 0)
     {

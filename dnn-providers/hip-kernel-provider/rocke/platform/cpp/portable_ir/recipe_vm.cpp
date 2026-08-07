@@ -44,6 +44,7 @@
  */
 #include "rocke/recipe_vm.h"
 
+#include <limits.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -83,6 +84,9 @@ typedef struct
     char** owned; /* interned resolved register names (format-name substitution) */
     int n_owned, cap_owned;
 
+    const char** ssa_defs; /* concrete exact-name SSA definitions; aliases excluded */
+    int n_ssa_defs, cap_ssa_defs;
+
     /* Concrete recipes (recorder-produced, no rolling: every bind is a unique
      * Python SSA name) opt into exact SSA naming: each created value is named
      * "%<bind>" verbatim, so the lowerer (which emits value names verbatim)
@@ -95,6 +99,37 @@ typedef struct
     bool failed;
 } rvm_t;
 
+static void rv_fail(rvm_t* vm, const char* fmt, ...);
+
+static bool rv_ssa_defined(const rvm_t* vm, const char* bind)
+{
+    if(!vm->exact_names || !bind)
+        return false;
+    for(int i = 0; i < vm->n_ssa_defs; i++)
+        if(strcmp(vm->ssa_defs[i], bind) == 0)
+            return true;
+    return false;
+}
+
+static void rv_ssa_define(rvm_t* vm, const char* bind)
+{
+    if(!vm->exact_names || !bind || rv_ssa_defined(vm, bind))
+        return;
+    if(vm->n_ssa_defs == vm->cap_ssa_defs)
+    {
+        int nc = vm->cap_ssa_defs ? vm->cap_ssa_defs * 2 : 16;
+        const char** nd = (const char**)realloc(vm->ssa_defs, (size_t)nc * sizeof(const char*));
+        if(!nd)
+        {
+            rv_fail(vm, "oom SSA definitions");
+            return;
+        }
+        vm->ssa_defs = nd;
+        vm->cap_ssa_defs = nc;
+    }
+    vm->ssa_defs[vm->n_ssa_defs++] = bind;
+}
+
 /* Under exact_names, give `v` the SSA name "%<bind>" (arena-owned), mirroring the
  * portable-IR importer so the lowerer emits it verbatim. No-op otherwise. */
 static void rv_name(rvm_t* vm, rocke_value_t* v, const char* bind)
@@ -103,7 +138,10 @@ static void rv_name(rvm_t* vm, rocke_value_t* v, const char* bind)
         return;
     char* nm = rocke_arena_printf(&vm->b->arena, "%%%s", bind);
     if(nm)
+    {
         v->name = nm;
+        rv_ssa_define(vm, bind);
+    }
 }
 
 /* Resolve an opcode name, applying portable-IR aliases. The Python builder names
@@ -162,6 +200,8 @@ static void rv_fail(rvm_t* vm, const char* fmt, ...)
 
 static bool rv_spec_int(rvm_t* vm, const char* name, long* out)
 {
+    if(!name || !out)
+        return false;
     for(int i = 0; i < vm->n_ints; i++)
         if(strcmp(vm->ints[i].name, name) == 0)
         {
@@ -173,6 +213,8 @@ static bool rv_spec_int(rvm_t* vm, const char* name, long* out)
 
 static const char* rv_spec_str(rvm_t* vm, const char* name)
 {
+    if(!name)
+        return NULL;
     for(int i = 0; i < vm->n_strs; i++)
         if(strcmp(vm->strs[i].name, name) == 0)
             return vm->strs[i].value;
@@ -181,6 +223,11 @@ static const char* rv_spec_str(rvm_t* vm, const char* name)
 
 static void rv_reg_set(rvm_t* vm, const char* name, rocke_value_t* val)
 {
+    if(!name || !*name || !val)
+    {
+        rv_fail(vm, "invalid register binding");
+        return;
+    }
     for(int i = 0; i < vm->n_regs; i++)
         if(strcmp(vm->regs[i].name, name) == 0)
         {
@@ -206,6 +253,8 @@ static void rv_reg_set(rvm_t* vm, const char* name, rocke_value_t* val)
 
 static rocke_value_t* rv_reg_get(rvm_t* vm, const char* name)
 {
+    if(!name)
+        return NULL;
     for(int i = vm->n_regs - 1; i >= 0; i--)
         if(strcmp(vm->regs[i].name, name) == 0)
             return vm->regs[i].val;
@@ -214,6 +263,8 @@ static rocke_value_t* rv_reg_get(rvm_t* vm, const char* name)
 
 static bool rv_ivar_get(rvm_t* vm, const char* name, long* out)
 {
+    if(!name || !out)
+        return false;
     for(int i = vm->n_ivars - 1; i >= 0; i--)
         if(strcmp(vm->ivars[i].name, name) == 0)
         {
@@ -225,6 +276,11 @@ static bool rv_ivar_get(rvm_t* vm, const char* name, long* out)
 
 static void rv_ivar_push(rvm_t* vm, const char* name, long value)
 {
+    if(!name || !*name)
+    {
+        rv_fail(vm, "invalid loop variable");
+        return;
+    }
     if(vm->n_ivars == vm->cap_ivars)
     {
         int nc = vm->cap_ivars ? vm->cap_ivars * 2 : 16;
@@ -271,11 +327,23 @@ static long rv_int(rvm_t* vm, const jd_val_t* e)
         }
         /* spec_str_eq: ["specname","literal"] -> 1 if the spec string matches. */
         const jd_val_t* sse = rocke_jget(e, "spec_str_eq");
-        if(sse && sse->kind == JD_ARR && sse->arr_len == 2)
+        if(sse)
         {
-            const char* sv = rv_spec_str(vm, rocke_jstr(sse->arr[0]));
+            if(sse->kind != JD_ARR || sse->arr_len != 2 || sse->arr[0]->kind != JD_STR
+               || sse->arr[1]->kind != JD_STR)
+            {
+                rv_fail(vm, "spec_str_eq requires exactly two strings");
+                return 0;
+            }
+            const char* spec_name = rocke_jstr(sse->arr[0]);
+            const char* sv = rv_spec_str(vm, spec_name);
             const char* lit = rocke_jstr(sse->arr[1]);
-            return (sv && lit && strcmp(sv, lit) == 0) ? 1 : 0;
+            if(!sv)
+            {
+                rv_fail(vm, "unknown spec string '%s'", spec_name);
+                return 0;
+            }
+            return strcmp(sv, lit) == 0 ? 1 : 0;
         }
         /* Binary arithmetic + comparisons: {"<op>":[e,e]}. */
         static const char* ops[]
@@ -301,9 +369,29 @@ static long rv_int(rvm_t* vm, const jd_val_t* e)
             case 2:
                 return a * b;
             case 3:
-                return b ? a / b : 0;
+                if(b == 0)
+                {
+                    rv_fail(vm, "integer division by zero");
+                    return 0;
+                }
+                if(a == LONG_MIN && b == -1)
+                {
+                    rv_fail(vm, "integer division overflow");
+                    return 0;
+                }
+                return a / b;
             case 4:
-                return b ? a % b : 0;
+                if(b == 0)
+                {
+                    rv_fail(vm, "integer modulo by zero");
+                    return 0;
+                }
+                if(a == LONG_MIN && b == -1)
+                {
+                    rv_fail(vm, "integer modulo overflow");
+                    return 0;
+                }
+                return a % b;
             case 5:
                 return a == b;
             case 6:
@@ -354,34 +442,94 @@ static const char* rv_intern(rvm_t* vm, const char* s)
     return dup;
 }
 
+static bool rv_append(rvm_t* vm,
+                      char** out,
+                      size_t* len,
+                      size_t* cap,
+                      const char* src,
+                      size_t src_len,
+                      const char* what)
+{
+    if(src_len > SIZE_MAX - *len - 1)
+    {
+        rv_fail(vm, "%s too long", what);
+        return false;
+    }
+    const size_t need = *len + src_len + 1;
+    if(need > *cap)
+    {
+        size_t nc = *cap;
+        while(nc < need)
+        {
+            if(nc > SIZE_MAX / 2)
+            {
+                rv_fail(vm, "%s too long", what);
+                return false;
+            }
+            nc *= 2;
+        }
+        char* grown = (char*)realloc(*out, nc);
+        if(!grown)
+        {
+            rv_fail(vm, "oom %s", what);
+            return false;
+        }
+        *out = grown;
+        *cap = nc;
+    }
+    memcpy(*out + *len, src, src_len);
+    *len += src_len;
+    (*out)[*len] = '\0';
+    return true;
+}
+
 /* Resolve a register name that may contain {var} loop-index / spec tokens
  * (e.g. "acc_m{lane}_n0" -> "acc_m2_n0"). Names without '{' pass through with no
  * allocation. */
 static const char* rv_resolve_name(rvm_t* vm, const char* raw)
 {
-    if(!raw || !strchr(raw, '{'))
+    if(!raw || !*raw)
+    {
+        rv_fail(vm, "missing register name");
+        return raw;
+    }
+    if(!strchr(raw, '{') && !strchr(raw, '}'))
         return raw;
     char buf[256];
     size_t n = 0;
-    for(const char* p = raw; *p && n + 1 < sizeof buf;)
+    buf[0] = '\0';
+    for(const char* p = raw; *p;)
     {
         if(*p == '{')
         {
             const char* close = strchr(p, '}');
             if(!close)
             {
-                buf[n++] = *p++;
-                continue;
+                rv_fail(vm, "unterminated register name placeholder");
+                return raw;
+            }
+            size_t kl = (size_t)(close - p - 1);
+            if(kl == 0 || kl >= 64)
+            {
+                rv_fail(vm, "invalid register name placeholder");
+                return raw;
             }
             char key[64];
-            size_t kl = (size_t)(close - p - 1);
-            if(kl >= sizeof key)
-                kl = sizeof key - 1;
             memcpy(key, p + 1, kl);
             key[kl] = '\0';
             long v;
             if(rv_ivar_get(vm, key, &v) || rv_spec_int(vm, key, &v))
-                n += (size_t)snprintf(buf + n, sizeof buf - n, "%ld", v);
+            {
+                char tmp[32];
+                int written = snprintf(tmp, sizeof tmp, "%ld", v);
+                if(written < 0 || (size_t)written >= sizeof buf - n)
+                {
+                    rv_fail(vm, "resolved register name too long");
+                    return raw;
+                }
+                memcpy(buf + n, tmp, (size_t)written);
+                n += (size_t)written;
+            }
             else
             {
                 rv_fail(vm, "unresolved name var '%s'", key);
@@ -389,13 +537,24 @@ static const char* rv_resolve_name(rvm_t* vm, const char* raw)
             }
             p = close + 1;
         }
+        else if(*p == '}')
+        {
+            rv_fail(vm, "unmatched register name placeholder close");
+            return raw;
+        }
         else
         {
+            if(n + 1 >= sizeof buf)
+            {
+                rv_fail(vm, "resolved register name too long");
+                return raw;
+            }
             buf[n++] = *p++;
         }
     }
     buf[n] = '\0';
-    return rv_intern(vm, buf);
+    const char* resolved = rv_intern(vm, buf);
+    return resolved;
 }
 
 /* A growable list of (interned) register names. */
@@ -429,7 +588,10 @@ static void rv_names_push(rvm_t* vm, rv_names_t* s, const char* v)
 static void rv_expand_list(rvm_t* vm, const jd_val_t* arr, rv_names_t* names, rv_names_t* inits)
 {
     if(!arr || arr->kind != JD_ARR)
+    {
+        rv_fail(vm, "register list must be an array");
         return;
+    }
     for(int i = 0; i < arr->arr_len && !vm->failed; i++)
     {
         const jd_val_t* e = arr->arr[i];
@@ -438,19 +600,34 @@ static void rv_expand_list(rvm_t* vm, const jd_val_t* arr, rv_names_t* names, rv
             rv_names_push(vm, names, rv_resolve_name(vm, e->str));
             continue;
         }
+        if(e->kind != JD_OBJ)
+        {
+            rv_fail(vm, "register-list entry must be a string or object");
+            return;
+        }
         const jd_val_t* fr = rocke_jget(e, "for");
         const char* nm = rocke_jstr(rocke_jget(e, "name"));
         const char* init = inits ? rocke_jstr(rocke_jget(e, "init")) : NULL;
         if(fr)
         {
+            if(fr->kind != JD_OBJ)
+            {
+                rv_fail(vm, "rolled-list for must be an object");
+                return;
+            }
             const char* var = rocke_jstr(rocke_jget(fr, "var"));
             long lo = rv_int(vm, rocke_jget(fr, "lo"));
             long hi = rv_int(vm, rocke_jget(fr, "hi"));
             const jd_val_t* sn = rocke_jget(fr, "step");
             long step = sn ? rv_int(vm, sn) : 1;
-            if(!var || step == 0)
+            if(!var || !*var || !nm || !*nm || (inits && (!init || !*init)))
             {
-                rv_fail(vm, "bad rolled-list for");
+                rv_fail(vm, "rolled-list entry needs var/name%s", inits ? "/init" : "");
+                return;
+            }
+            if(step <= 0)
+            {
+                rv_fail(vm, "rolled-list step must be positive");
                 return;
             }
             for(long iv = lo; iv < hi && !vm->failed; iv += step)
@@ -461,10 +638,20 @@ static void rv_expand_list(rvm_t* vm, const jd_val_t* arr, rv_names_t* names, rv
                 if(inits)
                     rv_names_push(vm, inits, rv_resolve_name(vm, init));
                 vm->n_ivars = mark;
+                if(iv > LONG_MAX - step)
+                {
+                    rv_fail(vm, "rolled-list loop overflow");
+                    return;
+                }
             }
         }
         else
         {
+            if(!nm || !*nm || (inits && (!init || !*init)))
+            {
+                rv_fail(vm, "register-list entry needs name%s", inits ? "/init" : "");
+                return;
+            }
             rv_names_push(vm, names, rv_resolve_name(vm, nm));
             if(inits)
                 rv_names_push(vm, inits, rv_resolve_name(vm, init));
@@ -539,8 +726,13 @@ static const rocke_type_t* rv_type(rvm_t* vm, const jd_val_t* t)
 static void rv_attrs(rvm_t* vm, const jd_val_t* attrs, rocke_attr_map_t* m)
 {
     rocke_attr_map_init(m);
-    if(!attrs || attrs->kind != JD_OBJ)
+    if(!attrs)
         return;
+    if(attrs->kind != JD_OBJ)
+    {
+        rv_fail(vm, "attrs must be an object");
+        return;
+    }
     for(int i = 0; i < attrs->obj_len && !vm->failed; i++)
     {
         const char* key = attrs->obj[i].key;
@@ -557,13 +749,56 @@ static void rv_attrs(rvm_t* vm, const jd_val_t* attrs, rocke_attr_map_t* m)
         else if(strcmp(t, "f") == 0)
         {
             double d = 0;
-            rocke_jnum(v, &d);
+            if(!rocke_jnum(v, &d))
+            {
+                rv_fail(vm, "attr '%s' float value is not numeric", key);
+                return;
+            }
             rocke_attr_set_float(vm->b, m, key, d);
         }
         else if(strcmp(t, "b") == 0)
+        {
+            if(v->kind != JD_BOOL)
+            {
+                rv_fail(vm, "attr '%s' bool value is not boolean", key);
+                return;
+            }
             rocke_attr_set_bool(vm->b, m, key, v->b);
+        }
         else if(strcmp(t, "s") == 0)
-            rocke_attr_set_str(vm->b, m, key, v->str ? v->str : "");
+        {
+            if(v->kind != JD_STR)
+            {
+                rv_fail(vm, "attr '%s' string value is not a string", key);
+                return;
+            }
+            rocke_attr_set_str(vm->b, m, key, v->str);
+        }
+        else if(strcmp(t, "l") == 0 && v->kind == JD_ARR)
+        {
+            int n = v->arr_len;
+            int64_t* vals = n ? (int64_t*)malloc((size_t)n * sizeof *vals) : NULL;
+            if(n && !vals)
+            {
+                rv_fail(vm, "oom attr int list");
+                return;
+            }
+            for(int j = 0; j < n && !vm->failed; j++)
+            {
+                const jd_val_t* wrapped = rocke_jget(v->arr[j], "_");
+                const char* item_t = rocke_jstr(rocke_jget(wrapped, "t"));
+                const jd_val_t* item_v = rocke_jget(wrapped, "v");
+                if(!wrapped || !item_t || strcmp(item_t, "i") != 0 || !item_v)
+                {
+                    rv_fail(vm, "attr '%s' unsupported non-integer list", key);
+                    break;
+                }
+                vals[j] = (int64_t)rv_int(vm, item_v);
+            }
+            if(!vm->failed)
+                rocke_attr_set_int_list(vm->b, m, key, vals, n);
+            free(vals);
+        }
         else
             rv_fail(vm, "attr '%s' bad kind '%s'", key, t);
     }
@@ -583,6 +818,11 @@ static void rv_exec_instr(rvm_t* vm, const jd_val_t* instr)
 {
     if(vm->failed)
         return;
+    if(!instr || instr->kind != JD_OBJ)
+    {
+        rv_fail(vm, "instruction must be an object");
+        return;
+    }
     const char* op = rocke_jstr(rocke_jget(instr, "op"));
     if(!op)
     {
@@ -602,7 +842,12 @@ static void rv_exec_instr(rvm_t* vm, const jd_val_t* instr)
         rocke_param_opts_t opts;
         memset(&opts, 0, sizeof opts);
         const jd_val_t* pa = rocke_jget(instr, "attrs");
-        if(pa && pa->kind == JD_OBJ)
+        if(pa && pa->kind != JD_OBJ)
+        {
+            rv_fail(vm, "param attrs must be an object");
+            return;
+        }
+        if(pa)
         {
             for(int k = 0; k < pa->obj_len; k++)
             {
@@ -611,26 +856,54 @@ static void rv_exec_instr(rvm_t* vm, const jd_val_t* instr)
                 double d;
                 if(strcmp(key, "noalias") == 0)
                 {
+                    if(v->kind != JD_BOOL)
+                    {
+                        rv_fail(vm, "param attr 'noalias' must be boolean");
+                        return;
+                    }
                     opts.noalias = v->b;
                     opts.noalias_set = true;
                 }
                 else if(strcmp(key, "readonly") == 0)
                 {
+                    if(v->kind != JD_BOOL)
+                    {
+                        rv_fail(vm, "param attr 'readonly' must be boolean");
+                        return;
+                    }
                     opts.readonly = v->b;
                     opts.readonly_set = true;
                 }
                 else if(strcmp(key, "writeonly") == 0)
                 {
+                    if(v->kind != JD_BOOL)
+                    {
+                        rv_fail(vm, "param attr 'writeonly' must be boolean");
+                        return;
+                    }
                     opts.writeonly = v->b;
                     opts.writeonly_set = true;
                 }
-                else if(strcmp(key, "align") == 0 && rocke_jnum(v, &d))
+                else if(strcmp(key, "align") == 0)
                 {
+                    if(!rocke_jnum(v, &d) || !(d >= 1.0 && d <= INT_MAX) || d != (double)(int)d
+                       || ((int)d & ((int)d - 1)) != 0)
+                    {
+                        rv_fail(vm,
+                                "param attr 'align' must be a positive power-of-two integer "
+                                "fitting int");
+                        return;
+                    }
                     opts.align = (int)d;
                     opts.align_set = true;
                 }
                 else if(strcmp(key, "addr_space") == 0)
                 {
+                    if(v->kind != JD_STR)
+                    {
+                        rv_fail(vm, "param attr 'addr_space' must be a string");
+                        return;
+                    }
                     opts.addr_space = v->str;
                 }
             }
@@ -641,7 +914,9 @@ static void rv_exec_instr(rvm_t* vm, const jd_val_t* instr)
             rv_fail(vm, "param '%s' failed", name);
             return;
         }
-        rv_reg_set(vm, rv_bind_name(vm, instr, name), pv);
+        const char* bind = rv_bind_name(vm, instr, name);
+        rv_ssa_define(vm, bind);
+        rv_reg_set(vm, bind, pv);
         return;
     }
     if(strcmp(op, "const_i32") == 0)
@@ -655,7 +930,11 @@ static void rv_exec_instr(rvm_t* vm, const jd_val_t* instr)
     if(strcmp(op, "const_f32") == 0)
     {
         double d = 0;
-        rocke_jnum(rocke_jget(instr, "fval"), &d);
+        if(!rocke_jnum(rocke_jget(instr, "fval"), &d))
+        {
+            rv_fail(vm, "const_f32 fval must be numeric");
+            return;
+        }
         rocke_value_t* v = rocke_b_const_f32(vm->b, d);
         const char* b = rv_bind_name(vm, instr, "c");
         rv_name(vm, v, b);
@@ -697,9 +976,9 @@ static void rv_exec_instr(rvm_t* vm, const jd_val_t* instr)
         const jd_val_t* stepn = rocke_jget(instr, "step");
         long step = stepn ? rv_int(vm, stepn) : 1;
         const jd_val_t* body = rocke_jget(instr, "body");
-        if(!var || !body || body->kind != JD_ARR || step == 0)
+        if(!var || !body || body->kind != JD_ARR || step <= 0)
         {
-            rv_fail(vm, "bad static_for");
+            rv_fail(vm, "static_for step must be positive");
             return;
         }
         for(long iv = lo; iv < hi && !vm->failed; iv += step)
@@ -708,6 +987,11 @@ static void rv_exec_instr(rvm_t* vm, const jd_val_t* instr)
             rv_ivar_push(vm, var, iv);
             rv_exec_list(vm, body);
             vm->n_ivars = mark; /* pop loop var */
+            if(iv > LONG_MAX - step)
+            {
+                rv_fail(vm, "static_for loop overflow");
+                return;
+            }
         }
         return;
     }
@@ -739,10 +1023,24 @@ static void rv_exec_instr(rvm_t* vm, const jd_val_t* instr)
             rv_fail(vm, "scf_for needs lo/hi/step/iv");
             return;
         }
+        const jd_val_t* un = rocke_jget(instr, "unroll");
+        const jd_val_t* el = rocke_jget(instr, "elide_trailing_barrier");
+        if(un && un->kind != JD_BOOL)
+        {
+            rv_fail(vm, "scf_for unroll must be boolean");
+            return;
+        }
+        if(el && el->kind != JD_BOOL)
+        {
+            rv_fail(vm, "scf_for elide_trailing_barrier must be boolean");
+            return;
+        }
         rv_names_t inames = {0}, iinits = {0}, results = {0};
         rv_expand_list(vm, rocke_jget(instr, "iter"), &inames, &iinits);
         rv_expand_list(vm, rocke_jget(instr, "results"), &results, NULL);
         int n_iter = inames.n;
+        if(!vm->failed && (iinits.n != n_iter || results.n != n_iter))
+            rv_fail(vm, "scf_for iter/init/result counts differ");
         rocke_iter_arg_t* ia
             = n_iter ? (rocke_iter_arg_t*)malloc((size_t)n_iter * sizeof *ia) : NULL;
         for(int i = 0; i < n_iter && !vm->failed; i++)
@@ -760,8 +1058,6 @@ static void rv_exec_instr(rvm_t* vm, const jd_val_t* instr)
             free(results.a);
             return;
         }
-        const jd_val_t* un = rocke_jget(instr, "unroll");
-        const jd_val_t* el = rocke_jget(instr, "elide_trailing_barrier");
         rocke_for_t f = rocke_b_scf_for_iter(
             vm->b, lo, hi, step, ia, n_iter, iv, un ? un->b : false, el ? el->b : true);
         if(!rocke_ir_builder_ok(vm->b))
@@ -797,7 +1093,8 @@ static void rv_exec_instr(rvm_t* vm, const jd_val_t* instr)
     }
     if(strcmp(op, "scf_if") == 0)
     {
-        rocke_value_t* cond = rv_reg_get(vm, rocke_jstr(rocke_jget(instr, "cond")));
+        rocke_value_t* cond
+            = rv_reg_get(vm, rv_resolve_name(vm, rocke_jstr(rocke_jget(instr, "cond"))));
         if(!cond)
         {
             rv_fail(vm, "scf_if needs cond");
@@ -838,23 +1135,86 @@ static void rv_exec_instr(rvm_t* vm, const jd_val_t* instr)
         /* Results: a single "out" {bind,type} or multiple "outs":[{bind,type}]. */
         const jd_val_t* out = rocke_jget(instr, "out");
         const jd_val_t* outs = rocke_jget(instr, "outs");
-        const rocke_type_t* rtypes[16];
-        const char* binds[16];
+        const rocke_type_t** rtypes = NULL;
+        const char** binds = NULL;
         int n_res = 0;
-        if(!vm->failed && out && out->kind == JD_OBJ)
+        if(out && outs)
         {
-            rtypes[0] = rv_type(vm, rocke_jget(out, "type"));
-            binds[0] = rv_bind_name(vm, out, "r");
-            n_res = 1;
+            rv_fail(vm, "emit '%s' cannot have both out and outs", opcode_name);
+        }
+        else if(!vm->failed && out && out->kind == JD_OBJ)
+        {
+            rtypes = (const rocke_type_t**)malloc(sizeof *rtypes);
+            binds = (const char**)malloc(sizeof *binds);
+            if(!rtypes || !binds)
+            {
+                rv_fail(vm, "oom emit results");
+            }
+            else
+            {
+                rtypes[0] = rv_type(vm, rocke_jget(out, "type"));
+                const char* raw_bind = rocke_jstr(rocke_jget(out, "bind"));
+                if(!raw_bind || !*raw_bind)
+                {
+                    rv_fail(vm, "emit '%s' result bind must be a nonempty string", opcode_name);
+                }
+                else
+                {
+                    binds[0] = rv_resolve_name(vm, raw_bind);
+                    if(!vm->failed && rv_ssa_defined(vm, binds[0]))
+                    {
+                        rv_fail(vm,
+                                "emit '%s' result bind '%s' redefines an existing SSA value",
+                                opcode_name,
+                                binds[0]);
+                    }
+                }
+                n_res = 1;
+            }
+        }
+        else if(!vm->failed && out)
+        {
+            rv_fail(vm, "emit '%s' out must be an object", opcode_name);
         }
         else if(!vm->failed && outs && outs->kind == JD_ARR)
         {
-            n_res = outs->arr_len > 16 ? 16 : outs->arr_len;
+            n_res = outs->arr_len;
+            if(n_res > 0)
+            {
+                rtypes = (const rocke_type_t**)malloc((size_t)n_res * sizeof *rtypes);
+                binds = (const char**)malloc((size_t)n_res * sizeof *binds);
+                if(!rtypes || !binds)
+                {
+                    rv_fail(vm, "oom emit results");
+                }
+            }
             for(int i = 0; i < n_res && !vm->failed; i++)
             {
+                if(outs->arr[i]->kind != JD_OBJ)
+                {
+                    rv_fail(vm, "emit '%s' result %d is not an object", opcode_name, i);
+                    break;
+                }
                 rtypes[i] = rv_type(vm, rocke_jget(outs->arr[i], "type"));
-                binds[i] = rv_bind_name(vm, outs->arr[i], "r");
+                const char* raw_bind = rocke_jstr(rocke_jget(outs->arr[i], "bind"));
+                if(!raw_bind || !*raw_bind)
+                {
+                    rv_fail(vm, "emit '%s' result bind must be a nonempty string", opcode_name);
+                    break;
+                }
+                binds[i] = rv_resolve_name(vm, raw_bind);
+                for(int j = 0; j < i && !vm->failed; j++)
+                {
+                    if(strcmp(binds[i], binds[j]) == 0)
+                    {
+                        rv_fail(vm, "emit '%s' duplicate result bind '%s'", opcode_name, binds[i]);
+                    }
+                }
             }
+        }
+        else if(outs)
+        {
+            rv_fail(vm, "emit '%s' outs must be an array", opcode_name);
         }
         rocke_attr_map_t m;
         if(!vm->failed)
@@ -863,6 +1223,8 @@ static void rv_exec_instr(rvm_t* vm, const jd_val_t* instr)
         {
             free(ops);
             free(innames.a);
+            free(rtypes);
+            free(binds);
             return;
         }
         /* The smem type node deliberately omits the `exclusive` bit; it rides
@@ -879,6 +1241,8 @@ static void rv_exec_instr(rvm_t* vm, const jd_val_t* instr)
                 rv_fail(vm, "smem_alloc: exclusive type rebuild failed");
                 free(ops);
                 free(innames.a);
+                free(rtypes);
+                free(binds);
                 return;
             }
         }
@@ -892,6 +1256,21 @@ static void rv_exec_instr(rvm_t* vm, const jd_val_t* instr)
                     rocke_ir_builder_ok(vm->b) ? "null" : rocke_ir_builder_error(vm->b));
             free(ops);
             free(innames.a);
+            free(rtypes);
+            free(binds);
+            return;
+        }
+        if(built->num_results != n_res)
+        {
+            rv_fail(vm,
+                    "emit '%s' produced %d results, expected %d",
+                    opcode_name,
+                    built->num_results,
+                    n_res);
+            free(ops);
+            free(innames.a);
+            free(rtypes);
+            free(binds);
             return;
         }
         /* tile.smem_alloc's result value name becomes the LDS global symbol,
@@ -909,6 +1288,8 @@ static void rv_exec_instr(rvm_t* vm, const jd_val_t* instr)
         }
         free(ops);
         free(innames.a);
+        free(rtypes);
+        free(binds);
         return;
     }
     rv_fail(vm, "unknown instr op '%s'", op);
@@ -927,24 +1308,41 @@ static void rv_exec_list(rvm_t* vm, const jd_val_t* program)
 
 /* ----------------------------------------------------- kernel name format */
 
-/* Expand "{NAME}" tokens in `fmt` using the int/str specs into out. */
-static void rv_format_name(rvm_t* vm, const char* fmt, char* out, size_t cap)
+/* Expand "{NAME}" tokens in `fmt` using the int/str specs. The returned string
+ * is caller-owned. Kernel names are deliberately unbounded here: production
+ * spec composition can legitimately exceed a small stack buffer. */
+static char* rv_format_name(rvm_t* vm, const char* fmt)
 {
+    size_t cap = strlen(fmt) + 32;
+    if(cap < 64)
+        cap = 64;
+    char* out = (char*)malloc(cap);
+    if(!out)
+    {
+        rv_fail(vm, "oom kernel name");
+        return NULL;
+    }
     size_t n = 0;
-    for(const char* p = fmt; *p && n + 1 < cap;)
+    out[0] = '\0';
+    for(const char* p = fmt; *p;)
     {
         if(*p == '{')
         {
             const char* close = strchr(p, '}');
             if(!close)
             {
-                out[n++] = *p++;
-                continue;
+                rv_fail(vm, "unterminated kernel name placeholder");
+                free(out);
+                return NULL;
             }
             char key[64];
             size_t klen = (size_t)(close - p - 1);
             if(klen >= sizeof key)
-                klen = sizeof key - 1;
+            {
+                rv_fail(vm, "kernel name placeholder too long");
+                free(out);
+                return NULL;
+            }
             memcpy(key, p + 1, klen);
             key[klen] = '\0';
             long iv;
@@ -960,17 +1358,138 @@ static void rv_format_name(rvm_t* vm, const char* fmt, char* out, size_t cap)
             {
                 val = sv;
             }
-            if(val)
-                for(const char* q = val; *q && n + 1 < cap;)
-                    out[n++] = *q++;
+            if(!val)
+            {
+                rv_fail(vm, "unresolved kernel name placeholder '%s'", key);
+                free(out);
+                return NULL;
+            }
+            if(!rv_append(vm, &out, &n, &cap, val, strlen(val), "kernel name"))
+            {
+                free(out);
+                return NULL;
+            }
             p = close + 1;
         }
         else
         {
-            out[n++] = *p++;
+            if(*p == '}')
+            {
+                rv_fail(vm, "unmatched kernel name placeholder close");
+                free(out);
+                return NULL;
+            }
+            if(!rv_append(vm, &out, &n, &cap, p, 1, "kernel name"))
+            {
+                free(out);
+                return NULL;
+            }
+            p++;
         }
     }
-    out[n] = '\0';
+    return out;
+}
+
+static bool rv_validate_specs(rvm_t* vm, const jd_val_t* spec)
+{
+    if(vm->n_ints < 0 || vm->n_strs < 0 || (vm->n_ints && !vm->ints) || (vm->n_strs && !vm->strs))
+    {
+        rv_fail(vm, "invalid runtime spec arrays");
+        return false;
+    }
+    if(spec && spec->kind != JD_ARR)
+    {
+        rv_fail(vm, "recipe spec must be an array");
+        return false;
+    }
+
+    const int n_decl = spec ? spec->arr_len : 0;
+    for(int i = 0; i < n_decl; i++)
+    {
+        const jd_val_t* decl = spec->arr[i];
+        const char* name = rocke_jstr(rocke_jget(decl, "name"));
+        const char* kind = rocke_jstr(rocke_jget(decl, "kind"));
+        if(!decl || decl->kind != JD_OBJ || !name || !*name || !kind
+           || (strcmp(kind, "int") != 0 && strcmp(kind, "str") != 0))
+        {
+            rv_fail(vm, "malformed recipe spec declaration %d", i);
+            return false;
+        }
+        for(int j = 0; j < i; j++)
+        {
+            const char* prior = rocke_jstr(rocke_jget(spec->arr[j], "name"));
+            if(prior && strcmp(prior, name) == 0)
+            {
+                rv_fail(vm, "duplicate recipe spec '%s'", name);
+                return false;
+            }
+        }
+
+        int int_matches = 0;
+        int str_matches = 0;
+        for(int j = 0; j < vm->n_ints; j++)
+            if(vm->ints[j].name && strcmp(vm->ints[j].name, name) == 0)
+                int_matches++;
+        for(int j = 0; j < vm->n_strs; j++)
+            if(vm->strs[j].name && strcmp(vm->strs[j].name, name) == 0)
+                str_matches++;
+        if(strcmp(kind, "int") == 0 && (int_matches != 1 || str_matches != 0))
+        {
+            rv_fail(vm, "runtime spec '%s' must have exactly one int value", name);
+            return false;
+        }
+        if(strcmp(kind, "str") == 0 && (str_matches != 1 || int_matches != 0))
+        {
+            rv_fail(vm, "runtime spec '%s' must have exactly one string value", name);
+            return false;
+        }
+    }
+
+    for(int i = 0; i < vm->n_ints; i++)
+    {
+        const char* name = vm->ints[i].name;
+        if(!name || !*name)
+        {
+            rv_fail(vm, "runtime int spec has no name");
+            return false;
+        }
+        bool declared = false;
+        for(int j = 0; j < n_decl; j++)
+        {
+            const char* decl_name = rocke_jstr(rocke_jget(spec->arr[j], "name"));
+            const char* kind = rocke_jstr(rocke_jget(spec->arr[j], "kind"));
+            if(decl_name && strcmp(decl_name, name) == 0 && kind && strcmp(kind, "int") == 0)
+                declared = true;
+        }
+        if(!declared)
+        {
+            rv_fail(vm, "undeclared runtime int spec '%s'", name);
+            return false;
+        }
+    }
+    for(int i = 0; i < vm->n_strs; i++)
+    {
+        const char* name = vm->strs[i].name;
+        if(!name || !*name || !vm->strs[i].value)
+        {
+            rv_fail(vm, "runtime string spec has invalid name/value");
+            return false;
+        }
+        bool declared = false;
+        for(int j = 0; j < n_decl; j++)
+        {
+            const char* decl_name = rocke_jstr(rocke_jget(spec->arr[j], "name"));
+            const char* kind = rocke_jstr(rocke_jget(spec->arr[j], "kind"));
+            if(decl_name && strcmp(decl_name, name) == 0 && kind && strcmp(kind, "str") == 0)
+                declared = true;
+        }
+        if(!declared)
+        {
+            rv_fail(vm, "undeclared runtime string spec '%s'", name);
+            return false;
+        }
+    }
+    return true;
 }
 
 /* Execute a recipe whose DOM root has already been parsed (from JSON or CBOR).
@@ -986,6 +1505,14 @@ static rocke_status_t rv_run_root(jd_val_t* root,
                                   char* err,
                                   size_t err_cap)
 {
+    if(out_kernel)
+        *out_kernel = NULL;
+    if(!root || root->kind != JD_OBJ || !out_builder || !out_kernel)
+    {
+        if(err && err_cap)
+            snprintf(err, err_cap, "invalid recipe root or output pointers");
+        return ROCKE_ERR_VALUE;
+    }
     const char* schema = rocke_jstr(rocke_jget(root, "schema"));
     if(!schema || strcmp(schema, "rocke.recipe/v1") != 0)
     {
@@ -1001,15 +1528,21 @@ static rocke_status_t rv_run_root(jd_val_t* root,
     vm.strs = strs;
     vm.n_strs = n_strs;
 
+    const jd_val_t* spec = rocke_jget(root, "spec");
+    if(!rv_validate_specs(&vm, spec))
+    {
+        if(err && err_cap)
+            snprintf(err, err_cap, "%s", vm.err);
+        return ROCKE_ERR_VALUE;
+    }
+
     /* Exact SSA naming for CONCRETE recipes only, detected by an empty "spec":
      * with no spec there is no static_for/rolled-list expansion, so every bind is
      * a unique (Python) SSA name and can be applied verbatim -> byte-identical
      * .ll. Parametric recipes (non-empty spec) unroll and reuse binds across
      * iterations, so they must keep fresh names to avoid SSA collisions. */
-    const jd_val_t* spec = rocke_jget(root, "spec");
     vm.exact_names = !spec || spec->kind != JD_ARR || spec->arr_len == 0;
 
-    char kname[256];
     const char* fmt = rocke_jstr(rocke_jget(root, "kernel_name_fmt"));
     if(!fmt)
     {
@@ -1017,9 +1550,16 @@ static rocke_status_t rv_run_root(jd_val_t* root,
             snprintf(err, err_cap, "missing kernel_name_fmt");
         return ROCKE_ERR_VALUE;
     }
-    rv_format_name(&vm, fmt, kname, sizeof kname);
+    char* kname = rv_format_name(&vm, fmt);
+    if(!kname)
+    {
+        if(err && err_cap)
+            snprintf(err, err_cap, "%s", vm.err);
+        return ROCKE_ERR_VALUE;
+    }
 
     rocke_status_t st = rocke_ir_builder_init(out_builder, kname);
+    free(kname);
     if(st != ROCKE_OK)
     {
         if(err && err_cap)
@@ -1030,18 +1570,16 @@ static rocke_status_t rv_run_root(jd_val_t* root,
 
     /* kernel attrs (e.g. max_workgroup_size), typed like portable IR. */
     const jd_val_t* kattrs = rocke_jget(root, "attrs");
-    if(kattrs && kattrs->kind == JD_OBJ)
+    if(kattrs)
     {
         rocke_kernel_def_t* k = rocke_ir_builder_kernel(out_builder);
-        for(int i = 0; i < kattrs->obj_len; i++)
+        rv_attrs(&vm, kattrs, &k->attrs);
+        if(vm.failed)
         {
-            const char* key = kattrs->obj[i].key;
-            const jd_val_t* tv = kattrs->obj[i].val;
-            const char* t = rocke_jstr(rocke_jget(tv, "t"));
-            const jd_val_t* v = rocke_jget(tv, "v");
-            double d;
-            if(t && v && strcmp(t, "i") == 0 && rocke_jnum(v, &d))
-                rocke_attr_set_int(out_builder, &k->attrs, key, (int64_t)d);
+            if(err && err_cap)
+                snprintf(err, err_cap, "%s", vm.err);
+            rocke_ir_builder_free(out_builder);
+            return ROCKE_ERR_VALUE;
         }
     }
 
@@ -1049,6 +1587,7 @@ static rocke_status_t rv_run_root(jd_val_t* root,
 
     free(vm.regs);
     free(vm.ivars);
+    free(vm.ssa_defs);
     for(int i = 0; i < vm.n_owned; i++)
         free(vm.owned[i]);
     free(vm.owned);
