@@ -267,8 +267,8 @@ bwd_result fmha_bwd_run(mode_enum mode,
     ck_tile::HostTensor<LSEDataType> lse_host(
         std::array<ck_tile::index_t, 3>{shape_batch, nhead, shape_seqlen_q});
     ck_tile::HostTensor<LSEDataType> sink_host(
-        sink_grad ? std::array<ck_tile::index_t, 2>{batch, nhead}
-                  : std::array<ck_tile::index_t, 2>{1, 1} /* dummy when sink is disabled */);
+        sink_grad ? std::array<ck_tile::index_t, 1>{nhead}
+                  : std::array<ck_tile::index_t, 1>{1} /* dummy when sink is disabled */);
     if(sink_grad)
     {
         // Keep the range small and centered near zero. With a large sink (e.g. [30, 60])
@@ -821,7 +821,7 @@ bwd_result fmha_bwd_run(mode_enum mode,
                 s_host_ref, p_hp_host_ref, ck_tile::identity{}, lse_host_ref);
 
             // Incorporate sink token into the softmax distribution (reference computation).
-            // The sink acts as an extra key whose score is sink_host(wb, i_h) (in log-space),
+            // The sink acts as an extra key whose score is sink_host(i_h) (in log-space),
             // which is a per-head random value in [30, 60].
             //   lse_new = log(exp(lse_old) + exp(sink))
             //   P_new   = P_old * exp(lse_old - lse_new)   (rescaled token attention)
@@ -833,7 +833,7 @@ bwd_result fmha_bwd_run(mode_enum mode,
             {
                 for(int i_h = 0; i_h < nhead; ++i_h)
                 {
-                    AccDataType sink_val = sink_host(wb, i_h);
+                    AccDataType sink_val = sink_host(i_h);
                     for(int i_q = 0; i_q < real_seqlen_q; ++i_q)
                     {
                         // Use numerically stable log-sum-exp: lse_new = log(exp(lse_old)+exp(sink))
