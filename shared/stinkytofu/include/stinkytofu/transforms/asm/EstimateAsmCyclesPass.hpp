@@ -53,11 +53,13 @@ STINKYTOFU_EXPORT unsigned int calculateEstimateAsmCycles(Function& func, PassCo
 
 /// Run the asm-cycle estimator and return a per-instruction map of estimated
 /// cumulative cycle positions (the cycle index at which each instruction is
-/// modeled to issue). Only instructions inside the modeled `label_LoopBeginL`
-/// unrolled-loop region are populated, and only for Gfx1250 (the estimator
-/// self-disables otherwise, yielding an empty map). Unlike the pass form, this
-/// helper does NOT annotate instructions with `<This is N-cycle>` comments, so
-/// it is safe to call from other passes as a pure query.
+/// modeled to issue). Coverage runs from the last `tensor_load_to_lds` ahead of
+/// `label_LoopBeginL` -- so the preheader tail feeding the first iteration is
+/// included -- through the end of the unrolled-loop region, and only for Gfx1250
+/// (the estimator self-disables otherwise, yielding an empty map). Unlike the
+/// pass form, this helper does NOT annotate instructions with
+/// `<This is N-cycle>` comments and does not publish a total-cycles metadata
+/// value, so it is safe to call from other passes as a pure query.
 STINKYTOFU_EXPORT std::unordered_map<const StinkyInstruction*, uint32_t>
 computeEstimatedCyclesPerInstruction(Function& func, PassContext& passCtx);
 }  // namespace stinkytofu

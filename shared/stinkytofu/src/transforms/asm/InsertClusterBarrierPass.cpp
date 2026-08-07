@@ -43,6 +43,8 @@ constexpr int kClusterBarrierId = -3;
 constexpr int kWorkgroupBarrierId = -1;
 constexpr const char* kSkipLabelPrefix = "label_skipCBPreSignal_";
 constexpr const char* kSkipLabelPrefixLCL = "label_skipCBPreSignal_LCL_";
+constexpr const char* kDrainBypassLabelPrefix = "label_";
+constexpr const char* kDrainBypassLabelSuffix = "_skipCBWait";
 constexpr const char* kWaveIdxSymbol = "sgprWaveIdx";
 constexpr const char* kLoopCounterLSymbol = "sgprLoopCounterL";
 constexpr size_t kHashLen = 16;
@@ -59,6 +61,12 @@ constexpr int kRule3SignalLeadCycles = 500;
 /// worth. The anchor then drops below the range instead, which lands it closer than
 /// kRule3SignalLeadCycles rather than further away.
 constexpr int kRule3SignalMaxLeadCycles = 900;
+
+/// Segment edges one handshake may climb across when its own segment is too short to
+/// hold kRule3SignalLeadCycles. One hop reaches the previous segment of a pipelined loop
+/// body, which leaves exactly one signal in flight and so costs one compensating pair
+/// around the loop; more hops would need per-edge accounting for no extra overlap.
+constexpr int kMaxSegmentHops = 1;
 
 std::string makeRandomHash() {
     static thread_local std::mt19937_64 engine{std::random_device{}()};
@@ -361,18 +369,109 @@ IRBase* anchorAfterWorkgroupBarrierFollowing(StinkyInstruction* afterWait, IRBas
     return defaultAnchor;
 }
 
-IRBase* findRule3SignalAnchorByCycleLead(
+/// Start of the segment holding \p pos, i.e. just past the closest boundary above it.
+BasicBlock::iterator segmentBeginBefore(BasicBlock::iterator pos, BasicBlock::iterator bbBegin) {
+    auto it = pos;
+    while (it != bbBegin) {
+        --it;
+        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (inst != nullptr && isSegmentBoundary(*inst)) return std::next(it);
+    }
+    return bbBegin;
+}
+
+/// First segment boundary at or below \p pos, which closes the segment holding it.
+/// Used as the forward limit for SCC queries about an anchor that climbed into an
+/// earlier segment, where the wait anchor sits above rather than below.
+const IRBase* segmentEndAfter(BasicBlock::iterator pos, BasicBlock::iterator bbEnd) {
+    for (auto it = pos; it != bbEnd; ++it) {
+        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (inst != nullptr && isSegmentBoundary(*inst)) return it.getNodePtr();
+    }
+    return nullptr;
+}
+
+/// The branch that closes a loop on \p labelInst: a branch back up to it from below.
+/// A backward walk leaving a loop head has to follow this edge rather than the textual
+/// one, because the textual predecessor is the preheader and runs only on the first trip.
+StinkyInstruction* findLatchBranchFor(StinkyInstruction* labelInst) {
+    BasicBlock* parent = labelInst->getParent();
+    const auto* labelData = labelInst->getModifier<LabelData>();
+    if (parent == nullptr || labelData == nullptr) return nullptr;
+    for (auto it = std::next(BasicBlock::iterator(labelInst)); it != parent->end(); ++it) {
+        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (inst == nullptr || !isBranch(*inst)) continue;
+        if (getBranchTarget(*inst) == labelData->label) return inst;
+    }
+    return nullptr;
+}
+
+/// Innermost loop head enclosing \p inst: a label whose latch branch sits below \p inst.
+/// Hoisting is confined to such a region, because the compensating pair this pass emits
+/// only balances a signal that a loop carries from one trip into the next.
+StinkyInstruction* findEnclosingLoopHead(StinkyInstruction* inst) {
+    BasicBlock* parent = inst->getParent();
+    if (parent == nullptr) return nullptr;
+    auto it = BasicBlock::iterator(inst);
+    while (it != parent->begin()) {
+        --it;
+        auto* cand = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (cand == nullptr || !isLabel(*cand)) continue;
+        StinkyInstruction* latch = findLatchBranchFor(cand);
+        if (latch == nullptr) continue;
+        for (auto fwd = BasicBlock::iterator(inst); fwd != parent->end(); ++fwd) {
+            if (fwd.getNodePtr() == latch) return cand;
+        }
+    }
+    return nullptr;
+}
+
+/// Label the loop's escape branches jump to, i.e. where control lands when the body is
+/// abandoned. Read before this pass inserts anything, so the only branches between the head
+/// and the latch are the loop's own exits.
+std::string findLoopExitLabelName(StinkyInstruction* loopHead) {
+    BasicBlock* parent = loopHead->getParent();
+    StinkyInstruction* latch = findLatchBranchFor(loopHead);
+    const auto* headData = loopHead->getModifier<LabelData>();
+    if (parent == nullptr || latch == nullptr || headData == nullptr) return {};
+    for (auto it = BasicBlock::iterator(loopHead); it != parent->end(); ++it) {
+        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (inst == nullptr) continue;
+        if (isBranch(*inst) && inst != latch) {
+            const std::string target = getBranchTarget(*inst);
+            if (!target.empty() && target != headData->label) return target;
+        }
+        if (inst == latch) break;
+    }
+    return {};
+}
+
+struct Rule3SignalAnchor {
+    IRBase* anchor = nullptr;
+    /// Segment edges crossed to reach `anchor`. Non-zero means the signal no longer
+    /// shares a segment with its wait, so the loop around it needs a compensating pair.
+    int hops = 0;
+};
+
+Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
     StinkyInstruction* referenceAnchor, BasicBlock::iterator segBegin, IRBase* defaultAnchor,
     const std::unordered_map<const StinkyInstruction*, uint32_t>& cycleMap, int leadCycles,
-    int maxLeadCycles, const std::unordered_set<StinkyInstruction*>& priorWaitAnchors) {
-    if (leadCycles <= 0) return defaultAnchor;
+    int maxLeadCycles, const std::unordered_set<StinkyInstruction*>& priorWaitAnchors,
+    int maxHops) {
+    if (leadCycles <= 0) return {defaultAnchor, 0};
     auto refIt = cycleMap.find(referenceAnchor);
-    if (refIt == cycleMap.end()) return defaultAnchor;
+    if (refIt == cycleMap.end()) return {defaultAnchor, 0};
+    BasicBlock* parent = referenceAnchor->getParent();
+    if (parent == nullptr) return {defaultAnchor, 0};
+    const auto bbBegin = parent->begin();
 
-    // target may be <= 0 when the wait anchor is fewer than leadCycles from
-    // function entry; cycle matching then fails and the barrier/segment
-    // fallbacks below decide the anchor.
-    const int64_t target = static_cast<int64_t>(refIt->second) - leadCycles;
+    // The lead is accumulated from per-instruction costs rather than compared against an
+    // absolute cycle position, because a hop across a back edge lands in a segment that is
+    // textually below the wait and so carries larger absolute cycles.
+    int64_t accum = 0;
+    int64_t prevCycle = static_cast<int64_t>(refIt->second);
+    int hops = 0;
+    auto curSegBegin = segBegin;
 
     // The handshake opens with `s_cmp_eq_u32 sgprWaveIdx, 0` and is planted in front of
     // whatever this scan returns, so the anchor may only land where SCC holds nothing
@@ -380,11 +479,19 @@ IRBase* findRule3SignalAnchorByCycleLead(
     // instruction being looked at, and once the cycle lead is met the scan keeps climbing
     // until that point is clear -- which, for a lead that falls inside a def..reader
     // range, means coming to rest in front of the def. The boundary returns below still
-    // win: a cluster wait, a segment edge or a prior handshake's barrier cannot be
-    // crossed just to find a better spot.
+    // win: a cluster wait or a prior handshake's barrier cannot be crossed just to find a
+    // better spot, and neither can a segment edge once the hop budget is spent.
     bool sccLive = isSccLiveBefore(referenceAnchor);
     bool targetMet = false;
     StinkyInstruction* leadPoint = nullptr;
+
+    // SCC queries about the anchor scan forward to the end of its own segment. While the
+    // scan is still in the wait's segment that end is the wait itself; past a hop the wait
+    // is above the anchor, so the segment's closing boundary takes over as the limit.
+    auto sccLimit = [&](StinkyInstruction* anchorInst) -> const IRBase* {
+        if (hops == 0) return referenceAnchor;
+        return segmentEndAfter(BasicBlock::iterator(anchorInst), parent->end());
+    };
 
     // A climb that ends up further than maxLeadCycles from the wait has cleared a range too
     // long to be worth it. Fall the other way instead: down from the lead point to the first
@@ -397,33 +504,47 @@ IRBase* findRule3SignalAnchorByCycleLead(
     auto clearScc = [&](IRBase* anchor) -> IRBase* {
         auto* anchorInst = dyn_cast<StinkyInstruction>(anchor);
         if (anchorInst == nullptr || !isSccLiveBefore(anchorInst)) return anchor;
-        StinkyInstruction* below = findSccDeadPointBelow(anchorInst, referenceAnchor);
+        StinkyInstruction* below = findSccDeadPointBelow(anchorInst, sccLimit(anchorInst));
         return (below != nullptr) ? static_cast<IRBase*>(below) : defaultAnchor;
     };
 
     auto settle = [&](IRBase* climbed) -> IRBase* {
         if (leadPoint == nullptr || climbed == leadPoint) return climbed;
-        int64_t climbedCycle = 0;
-        if (auto* climbedInst = dyn_cast<StinkyInstruction>(climbed)) {
-            auto climbedIt = cycleMap.find(climbedInst);
-            if (climbedIt != cycleMap.end()) climbedCycle = static_cast<int64_t>(climbedIt->second);
-        }
-        if (static_cast<int64_t>(refIt->second) - climbedCycle <= maxLeadCycles) return climbed;
-        StinkyInstruction* below = findSccDeadPointBelow(leadPoint, referenceAnchor);
+        if (accum <= maxLeadCycles) return climbed;
+        StinkyInstruction* below = findSccDeadPointBelow(leadPoint, sccLimit(leadPoint));
         return (below != nullptr) ? static_cast<IRBase*>(below) : defaultAnchor;
     };
 
     auto it = BasicBlock::iterator(referenceAnchor);
-    while (it != segBegin) {
+    while (it != bbBegin) {
         --it;
         auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
         if (inst == nullptr) continue;
         if (isClusterBarrierWait(*inst)) {
-            return clearScc(anchorAfterWorkgroupBarrierFollowing(inst, defaultAnchor));
+            return {clearScc(anchorAfterWorkgroupBarrierFollowing(inst, defaultAnchor)), hops};
         }
-        if (isSegmentBoundary(*inst)) return clearScc(segBegin.getNodePtr());
+        if (isSegmentBoundary(*inst)) {
+            // Calls and unconditional branches are not crossed: the first has no modelled
+            // predecessor and the second's is another jump, so neither yields an edge whose
+            // compensation this pass can account for.
+            if (hops >= maxHops || isCall(*inst) || isUnconditionalBranch(*inst)) {
+                return {clearScc(curSegBegin.getNodePtr()), hops};
+            }
+            if (isLabel(*inst)) {
+                // Leaving a loop head textually would land in the preheader, which runs
+                // once; follow the latch so the signal lands on the path that repeats.
+                StinkyInstruction* latch = findLatchBranchFor(inst);
+                if (latch == nullptr) return {clearScc(curSegBegin.getNodePtr()), hops};
+                it = BasicBlock::iterator(latch);
+                auto latchCycle = cycleMap.find(latch);
+                if (latchCycle != cycleMap.end()) prevCycle = static_cast<int64_t>(latchCycle->second);
+            }
+            ++hops;
+            curSegBegin = segmentBeginBefore(it, bbBegin);
+            continue;
+        }
         if (isWorkgroupBarrierSignal(*inst) && priorWaitAnchors.count(inst) != 0) {
-            return clearScc(anchorAfterWorkgroupBarrierPair(inst, defaultAnchor));
+            return {clearScc(anchorAfterWorkgroupBarrierPair(inst, defaultAnchor)), hops};
         }
 
         // live-before(inst) = reads(inst) | (live-after(inst) & !writes(inst))
@@ -432,14 +553,19 @@ IRBase* findRule3SignalAnchorByCycleLead(
         if (isWorkgroupBarrierSignal(*inst) || isWorkgroupBarrierWait(*inst)) continue;
 
         auto cycleIt = cycleMap.find(inst);
-        if (cycleIt != cycleMap.end() && static_cast<int64_t>(cycleIt->second) <= target) {
-            if (!targetMet) leadPoint = inst;
-            targetMet = true;
+        if (cycleIt != cycleMap.end()) {
+            const int64_t cyc = static_cast<int64_t>(cycleIt->second);
+            if (cyc <= prevCycle) accum += prevCycle - cyc;
+            prevCycle = cyc;
+            if (accum >= leadCycles) {
+                if (!targetMet) leadPoint = inst;
+                targetMet = true;
+            }
         }
-        if (targetMet && !sccLive) return settle(inst);
+        if (targetMet && !sccLive) return {settle(inst), hops};
     }
-    // Running out of segment can leave the anchor inside a range that starts above it.
-    return clearScc(settle(segBegin.getNodePtr()));
+    // Running out of block can leave the anchor inside a range that starts above it.
+    return {clearScc(settle(curSegBegin.getNodePtr())), hops};
 }
 
 StinkyInstruction* findFirstTensorLoadInFunc(Function& func) {
@@ -467,6 +593,173 @@ bool isImmediatelyPrecededByClusterBarrierWait(StinkyInstruction* anchor) {
     return false;
 }
 
+struct PreLoopSignalAnchor {
+    IRBase* anchor = nullptr;
+    /// True when the climb found no workgroup barrier to sit behind. Only wave 0 issues the
+    /// signal, so one has to be planted to hold the rest of the group until it does.
+    bool needsWorkgroupBarrier = true;
+};
+
+/// Where the compensating signal goes in the preheader. The loop's own handshakes reach
+/// their lead by climbing from the wait into the segment above; the trip that has no segment
+/// above it inside the loop reaches its lead the same way, by climbing out of the loop head
+/// into the run-up that precedes it, adding up per-instruction costs as it goes.
+///
+/// Three things end the climb:
+///   * a workgroup barrier -- the group is already gathered there, so sit behind its wait
+///     and leave the barrier itself alone;
+///   * a label, or a cluster wait -- above a label are paths that reach the loop without
+///     passing through here, and above a cluster wait the signal would land on the wrong
+///     side of the token it belongs to;
+///   * the lead being met, which is the point of the exercise.
+///
+/// Only the first of those leaves a barrier in front of the signal, so the other two ask the
+/// caller for one. No trip-count gate goes with it: unlike the Rule 1 signal this one is
+/// paired with a wait below the loop, and both are reached on exactly the same paths.
+PreLoopSignalAnchor findPreLoopSignalAnchor(
+    StinkyInstruction* loopHead,
+    const std::unordered_map<const StinkyInstruction*, uint32_t>& cycleMap, int leadCycles) {
+    BasicBlock* parent = (loopHead != nullptr) ? loopHead->getParent() : nullptr;
+    if (parent == nullptr) return {};
+
+    // A stop condition plants the signal just below whatever it stopped on, so keep the
+    // point one step behind the instruction under inspection.
+    IRBase* below = loopHead;
+
+    // The signal opens with `s_cmp_eq_u32 sgprWaveIdx, 0`, so it may not land in front of a
+    // compare whose result a branch below still wants. A stop is a lower bound, so the only
+    // way out of a live range is down.
+    auto place = [&](IRBase* anchor, bool needsWg) -> PreLoopSignalAnchor {
+        auto* anchorInst = dyn_cast<StinkyInstruction>(anchor);
+        if (anchorInst == nullptr || !isSccLiveBefore(anchorInst)) return {anchor, needsWg};
+        StinkyInstruction* dead = findSccDeadPointBelow(anchorInst, loopHead);
+        if (dead == nullptr) return {};
+        return {dead, needsWg};
+    };
+
+    const auto headCycle = cycleMap.find(loopHead);
+    int64_t prevCycle = (headCycle != cycleMap.end()) ? static_cast<int64_t>(headCycle->second) : 0;
+    int64_t accum = 0;
+
+    auto it = BasicBlock::iterator(loopHead);
+    while (it != parent->begin()) {
+        --it;
+        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (inst == nullptr || isPseudoInst(inst)) continue;
+
+        if (isWorkgroupBarrierWait(*inst) || isWorkgroupBarrierSignal(*inst)) {
+            return place(below, /*needsWg=*/false);
+        }
+        if (isLabel(*inst) || isClusterBarrierWait(*inst)) return place(below, true);
+
+        const auto cycleIt = cycleMap.find(inst);
+        if (cycleIt != cycleMap.end()) {
+            const int64_t cyc = static_cast<int64_t>(cycleIt->second);
+            if (cyc <= prevCycle) accum += prevCycle - cyc;
+            prevCycle = cyc;
+            if (accum >= leadCycles) return place(inst, true);
+        }
+        below = inst;
+    }
+    return place(below, true);
+}
+
+/// Point \p branch at \p newLabel. The target is spelled twice -- as the modifier the
+/// printer reads and as the literal operand -- so both have to move.
+void retargetBranch(StinkyInstruction& branch, const std::string& newLabel) {
+    if (auto* labelData = branch.getModifier<LabelData>()) labelData->label = newLabel;
+    const auto& srcs = branch.getSrcRegs();
+    for (std::size_t i = 0; i < srcs.size(); ++i) {
+        if (srcs[i].dataType != StinkyRegister::Type::LiteralString) continue;
+        branch.setSrcReg(i, StinkyRegister(newLabel));
+        break;
+    }
+}
+
+/// Balance the signal a hoisted loop now carries from one trip into the next.
+///
+/// One half of that pair is already in place: a handshake that climbed out of its segment
+/// leaves a signal near the loop's tail feeding the next trip's wait. Missing are a signal
+/// ahead of the first trip -- \p pre, found by climbing the preheader -- and a wait that
+/// swallows the last one, which goes just below the loop's exit label where every path out
+/// of the body lands.
+///
+/// Paths that reach that label without having run the preheader signal are sent past the
+/// wait instead. The zero-trip guard is one of them, so without this they would block on a
+/// token nobody posted.
+bool emitLoopCarriedCompensation(const std::string& exitLabelName, const PreLoopSignalAnchor& pre,
+                                 BasicBlock& preLoopBlock, Function& func, GfxArchID archId) {
+    if (exitLabelName.empty() || pre.anchor == nullptr) return false;
+
+    // The exit label may be an instruction inside a block or the header of the block that
+    // opens at it, depending on where the CFG was last cut; both spell the same point.
+    BasicBlock* exitBlock = nullptr;
+    IRBase* waitAnchor = nullptr;
+    for (BasicBlock& block : func) {
+        for (auto it = block.begin(); it != block.end(); ++it) {
+            auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+            if (inst == nullptr || !isLabel(*inst)) continue;
+            const auto* labelData = inst->getModifier<LabelData>();
+            if (labelData == nullptr || labelData->label != exitLabelName) continue;
+            if (StinkyInstruction* after = firstRealInstAfter(inst)) {
+                exitBlock = &block;
+                waitAnchor = after;
+            }
+            break;
+        }
+        if (waitAnchor != nullptr) break;
+    }
+    if (waitAnchor == nullptr) {
+        for (BasicBlock& block : func) {
+            if (block.getLabel() != exitLabelName) continue;
+            for (auto it = block.begin(); it != block.end(); ++it) {
+                auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+                if (inst == nullptr || isPseudoInst(inst)) continue;
+                exitBlock = &block;
+                waitAnchor = inst;
+                break;
+            }
+            break;
+        }
+    }
+    if (waitAnchor == nullptr) return false;
+
+    std::vector<StinkyInstruction*> bypassBranches;
+    {
+        bool passedSignal = false;
+        for (BasicBlock& block : func) {
+            for (auto it = block.begin(); it != block.end(); ++it) {
+                if (it.getNodePtr() == pre.anchor) passedSignal = true;
+                if (passedSignal) continue;
+                auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+                if (inst == nullptr || !isBranch(*inst)) continue;
+                if (getBranchTarget(*inst) == exitLabelName) bypassBranches.push_back(inst);
+            }
+        }
+    }
+
+    AsmIRBuilder exitBuilder(*exitBlock, archId);
+    insertClusterBarrierWaitBefore(waitAnchor, "drain loop-carried cluster signal", exitBuilder,
+                                   archId);
+    if (!bypassBranches.empty()) {
+        // Named after the exit it sits just below, so the two read as a pair.
+        const std::string bypassLabel =
+            kDrainBypassLabelPrefix + exitLabelName + kDrainBypassLabelSuffix;
+        static const HwInstDesc labelMCID{
+            GFX::LABEL, GFX::LABEL, 0, 0, 0, "LABEL", makeFlagSet({InstFlag::IF_HasSideEffect})};
+        StinkyInstruction* bypassLbl = exitBuilder.create(&labelMCID, waitAnchor);
+        bypassLbl->addModifier<LabelData>(LabelData{bypassLabel, /*alignment=*/1});
+        for (StinkyInstruction* branch : bypassBranches) retargetBranch(*branch, bypassLabel);
+    }
+
+    AsmIRBuilder entryBuilder(preLoopBlock, archId);
+    if (pre.needsWorkgroupBarrier) {
+        insertWorkgroupBarrierSyncBefore(pre.anchor, entryBuilder, archId);
+    }
+    insertClusterBarrierSignalOnlyBefore(pre.anchor, entryBuilder, archId);
+    return true;
+}
+
 class InsertClusterBarrierPassImpl : public Pass {
    public:
     static char ID;
@@ -491,64 +784,108 @@ class InsertClusterBarrierPassImpl : public Pass {
                                          : std::unordered_map<const StinkyInstruction*, uint32_t>{};
 
         for (BasicBlock& bb : func) {
-            std::vector<std::tuple<StinkyInstruction*, IRBase*, IRBase*>> pending;
+            // Collect every trigger in the block before any search runs. A scan that climbs
+            // across a back edge walks into handshakes that come later in program order, and
+            // it may only stop at their barriers if it already knows they are there.
+            std::vector<std::pair<StinkyInstruction*, BasicBlock::iterator>> triggers;
             std::unordered_set<StinkyInstruction*> seenTriggers;
             // Anchors (instruction right after each cooperative tensor_load
             // group) for the producer-side drain; see
             // insertProducerTensorDrainBefore.
             std::vector<IRBase*> producerDrainAnchors;
-
-            auto segBegin = bb.begin();
-            for (auto it = bb.begin(); it != bb.end(); ++it) {
-                auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
-                if (inst == nullptr) continue;
-                if (isSegmentBoundary(*inst)) {
-                    segBegin = std::next(it);
-                    continue;
-                }
-                if (!isTensorLoad(*inst)) continue;
-
-                StinkyInstruction* trigger =
-                    findPrecedingWorkgroupBarrierSignalInSegment(segBegin, inst);
-                if (trigger == nullptr) continue;
-                if (!seenTriggers.insert(trigger).second) continue;
-
-                IRBase* waitAnchor = trigger;
-                StinkyInstruction* waitAnchorInst = trigger;
-                if (isImmediatelyPrecededByClusterBarrierWait(waitAnchorInst)) continue;
-
-                std::unordered_set<StinkyInstruction*> priorWaitAnchors;
-                for (const auto& [priorTrigger, _sig, _wait] : pending) {
-                    (void)_sig;
-                    (void)_wait;
-                    priorWaitAnchors.insert(priorTrigger);
-                }
-
-                IRBase* signalAnchor = findRule3SignalAnchorByCycleLead(
-                    waitAnchorInst, segBegin, /*defaultAnchor=*/waitAnchor, cycleMap,
-                    kRule3SignalLeadCycles, kRule3SignalMaxLeadCycles, priorWaitAnchors);
-                pending.emplace_back(trigger, signalAnchor, waitAnchor);
-
-                // Record the instruction right after this cooperative
-                // tensor_load group so a producer-side tensor drain can be
-                // planted there (retire the load before the back edge / next
-                // publishing barrier). Advance past any immediately-following
-                // tensor_load(s) so the drain covers the whole group (e.g. the
-                // A/B operand load plus its MX-scale load) rather than landing
-                // between them.
-                if (streamKMulticast_ && pgrValue_ >= 2) {
-                    auto postIt = std::next(it);
-                    while (postIt != bb.end()) {
-                        auto* pinst = dyn_cast<StinkyInstruction>(postIt.getNodePtr());
-                        if (pinst != nullptr && isTensorLoad(*pinst)) {
-                            ++postIt;
-                            continue;
-                        }
-                        break;
+            {
+                auto segBegin = bb.begin();
+                for (auto it = bb.begin(); it != bb.end(); ++it) {
+                    auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+                    if (inst == nullptr) continue;
+                    if (isSegmentBoundary(*inst)) {
+                        segBegin = std::next(it);
+                        continue;
                     }
-                    producerDrainAnchors.push_back((postIt != bb.end()) ? postIt.getNodePtr()
-                                                                        : nullptr);
+                    if (!isTensorLoad(*inst)) continue;
+
+                    StinkyInstruction* trigger =
+                        findPrecedingWorkgroupBarrierSignalInSegment(segBegin, inst);
+                    if (trigger == nullptr) continue;
+                    if (!seenTriggers.insert(trigger).second) continue;
+                    if (isImmediatelyPrecededByClusterBarrierWait(trigger)) continue;
+                    triggers.emplace_back(trigger, segBegin);
+
+                    // Record the instruction right after this cooperative
+                    // tensor_load group so a producer-side tensor drain can be
+                    // planted there (retire the load before the back edge / next
+                    // publishing barrier). Advance past any immediately-following
+                    // tensor_load(s) so the drain covers the whole group (e.g. the
+                    // A/B operand load plus its MX-scale load) rather than landing
+                    // between them.
+                    if (streamKMulticast_ && pgrValue_ >= 2) {
+                        auto postIt = std::next(it);
+                        while (postIt != bb.end()) {
+                            auto* pinst = dyn_cast<StinkyInstruction>(postIt.getNodePtr());
+                            if (pinst != nullptr && isTensorLoad(*pinst)) {
+                                ++postIt;
+                                continue;
+                            }
+                            break;
+                        }
+                        producerDrainAnchors.push_back((postIt != bb.end()) ? postIt.getNodePtr()
+                                                                            : nullptr);
+                    }
                 }
+            }
+
+            std::unordered_set<StinkyInstruction*> priorWaitAnchors;
+            for (const auto& [trigger, _seg] : triggers) {
+                (void)_seg;
+                priorWaitAnchors.insert(trigger);
+            }
+
+            // A hoisted signal is balanced by one compensating pair wrapped around the whole
+            // loop, which only adds up if every handshake in that loop hoists: each segment
+            // then emits one signal and one wait, so exactly one signal is in flight no
+            // matter which exit is taken. Loops that come out mixed are searched again with
+            // hoisting off rather than compensated edge by edge.
+            std::unordered_map<StinkyInstruction*, std::pair<int, int>> loopHopTally;
+            for (const auto& [trigger, tSegBegin] : triggers) {
+                StinkyInstruction* head = findEnclosingLoopHead(trigger);
+                if (head == nullptr) continue;
+                Rule3SignalAnchor probe = findRule3SignalAnchorByCycleLead(
+                    trigger, tSegBegin, /*defaultAnchor=*/trigger, cycleMap,
+                    kRule3SignalLeadCycles, kRule3SignalMaxLeadCycles, priorWaitAnchors,
+                    kMaxSegmentHops);
+                auto& tally = loopHopTally[head];
+                ++tally.first;
+                if (probe.hops > 0) ++tally.second;
+            }
+
+            struct LoopCompensation {
+                std::string exitLabel;
+                PreLoopSignalAnchor preLoopSignal;
+            };
+            std::vector<std::tuple<StinkyInstruction*, IRBase*, IRBase*>> pending;
+            std::vector<LoopCompensation> hoistedLoops;
+            std::unordered_set<StinkyInstruction*> hoistedHeads;
+            for (const auto& [trigger, tSegBegin] : triggers) {
+                StinkyInstruction* head = findEnclosingLoopHead(trigger);
+                int maxHops = 0;
+                if (head != nullptr) {
+                    const auto& tally = loopHopTally[head];
+                    if (tally.second == tally.first) maxHops = kMaxSegmentHops;
+                }
+                Rule3SignalAnchor found = findRule3SignalAnchorByCycleLead(
+                    trigger, tSegBegin, /*defaultAnchor=*/trigger, cycleMap,
+                    kRule3SignalLeadCycles, kRule3SignalMaxLeadCycles, priorWaitAnchors,
+                    maxHops);
+                // Read the exit label and climb the preheader now: once the handshakes go
+                // in, the body is full of this pass's own skip branches and barriers, and
+                // neither the loop's real exit nor an unspoken-for stretch of preheader is
+                // easy to tell apart from them.
+                if (found.hops > 0 && hoistedHeads.insert(head).second) {
+                    hoistedLoops.push_back(
+                        {findLoopExitLabelName(head),
+                         findPreLoopSignalAnchor(head, cycleMap, kRule3SignalLeadCycles)});
+                }
+                pending.emplace_back(trigger, found.anchor, trigger);
             }
 
             std::vector<IRBase*> gsu1Anchors;
@@ -607,6 +944,9 @@ class InsertClusterBarrierPassImpl : public Pass {
             for (const auto& [trigger, signalAnchor, waitAnchor] : pending) {
                 insertRule3HandshakeBefore(signalAnchor, waitAnchor, irBuilder, archId);
                 (void)trigger;
+            }
+            for (const LoopCompensation& comp : hoistedLoops) {
+                emitLoopCarriedCompensation(comp.exitLabel, comp.preLoopSignal, bb, func, archId);
             }
             // Producer-side drain right after each cooperative tensor_load
             // group (retire the async cooperative load before the back-edge so
