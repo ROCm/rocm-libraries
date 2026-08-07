@@ -46,7 +46,7 @@ BenchmarkProblems:
         - UseSgprForGRO: [0]
         - ForceDisableShadowInit: [True]
         - MatrixInstruction:
-          - [16, 16, 32, 1, 1, 4, 1, 4, 1]
+          - [16, 16, 32, 1, 1, 1, 4, 1, 4]
         - DepthU: [128]
         - HalfPLR: [0]
         - TDMInst: [3]
@@ -90,7 +90,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [65536, 16, 1, 16384]
+          - Exact: [16, 65536, 1, 16384]
         - ActivationArgs:
           - [Enum: none]
 

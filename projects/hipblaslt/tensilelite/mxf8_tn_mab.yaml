@@ -19,6 +19,7 @@ GlobalParameters:
   Architecture: gfx1250
   CpuThreads: 1
   KeepBuildTmp: True
+  #NumBenchmarks: 10
   #RotatingBufferSize: 1024
   ForceGenerateKernel: 1
 
@@ -50,7 +51,7 @@ BenchmarkProblems:
         - UseSgprForGRO: [0]
         - ForceDisableShadowInit: [True]
         - MatrixInstruction:
-          - [16, 16, 128, 1, 1, 4, 1, 4, 1]
+          - [16, 16, 128, 1, 1, 1, 4, 1, 4]
         - DepthU: [256]
         - HalfPLR: [0]
         - TDMInst: [3]
@@ -93,7 +94,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [65536, 16, 1, 32768]
+          - Exact: [16, 65536, 1, 32768]
         - ActivationArgs:
           - [Enum: none]
 
