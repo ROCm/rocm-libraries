@@ -39,10 +39,7 @@ BenchmarkProblems:
       MXBlockA: 32
       MXBlockB: 32
 
-    - # sk_mxf4_force_dp_only_cluster_multicast.yaml plus
-      # PrefetchAcrossPersistent: [1]. Everything else, including the ClusterDim
-      # set and every problem size, is identical to that file, so a diff between
-      # the two isolates the effect of PAP.
+    -
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
@@ -70,7 +67,6 @@ BenchmarkProblems:
         - LDSTrInst: [False]
         - PrefetchGlobalRead: [1, 2]
         - PrefetchLocalRead: [1]
-        - PrefetchAcrossPersistent: [1]
         - ScheduleIterAlg: [0, 4]
         - SourceSwap: [False]
         - StoreRemapVectorWidth: [0]
@@ -94,11 +90,6 @@ BenchmarkProblems:
         - TDMInst: [3]
         - MXLoadInst: ["TDM"]
         - MXScaleFormat: ["InMemorySwizzle"]
-        # 2-D shapes are the reason this file exists alongside the 1-D set: with
-        # Ck > 1 the PAP mask refresh keeps both MulticastMaskA and MulticastMaskB
-        # live (papDropsSelfOnlyMaskA only drops the self-only maskA on 1-D), so
-        # PAP + 2-D is the tightest SGPR case in the PR and needs numerical, not
-        # just codegen, coverage.
         - ClusterDim: [[2, 1], [4, 1], [8, 1], [2, 2], [2, 4], [4, 2]]
       BenchmarkForkParameters:
       JoinParameters:

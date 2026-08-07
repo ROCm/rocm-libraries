@@ -67,6 +67,7 @@ BenchmarkProblems:
         - LDSTrInst: [False]
         - PrefetchGlobalRead: [1, 2]
         - PrefetchLocalRead: [1]
+        - PrefetchAcrossPersistent: [1]
         - ScheduleIterAlg: [0, 4]
         - SourceSwap: [False]
         - StoreRemapVectorWidth: [0]
@@ -90,6 +91,11 @@ BenchmarkProblems:
         - TDMInst: [3]
         - MXLoadInst: ["TDM"]
         - MXScaleFormat: ["InMemorySwizzle"]
+        # 2-D shapes are the reason this file exists alongside the 1-D set: with
+        # Ck > 1 the PAP mask refresh keeps both MulticastMaskA and MulticastMaskB
+        # live (papDropsSelfOnlyMaskA only drops the self-only maskA on 1-D), so
+        # PAP + 2-D is the tightest SGPR case in the PR and needs numerical, not
+        # just codegen, coverage.
         - ClusterDim: [[2, 1], [4, 1], [8, 1], [2, 2], [2, 4], [4, 2]]
       BenchmarkForkParameters:
       JoinParameters:
@@ -106,13 +112,8 @@ BenchmarkProblems:
           - Exact: [1280, 1280, 1, 256]
           - Exact: [320, 320, 1, 512]
           - Exact: [96, 96, 3, 256]
-          # Carried over from sk_mxf4_force_dp_only_cluster.yaml, this file's
-          # ancestor, so the successor is a superset of the coverage it replaces.
           - Exact: [256, 256, 1, 1056]
           - Exact: [512, 512, 1, 1056]
-          # Carried up from sk_mxf4_force_dp_only_pap_cluster_multicast.yaml so
-          # this file and that one share one size set, leaving PAP as their only
-          # difference.
           - Exact: [1280, 1280, 1, 1024]
           - Exact: [320, 320, 3, 1056]
         - ActivationArgs:
