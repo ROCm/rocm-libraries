@@ -496,6 +496,39 @@ def globalReadDoScaleSubtile(tc, writer, kernel):
   return module
 
 
+def _patchMxsbDescriptorFields(module, comp, group1, kernel, writer, targetTi):
+  """Patch tile1, dim1, stride in the aliased MXSA descriptor for dimension targetTi.
+
+  Called with targetTi=1 to switch from MXSA to MXSB layout, and
+  targetTi=0 to restore MXSA layout after the MXSB load. Only emits
+  instructions when the A and B dimensions actually differ.
+  """
+  otherTi = 1 - targetTi
+  targetTc = "A" if targetTi == 0 else "B"
+  otherTc  = "A" if otherTi == 0 else "B"
+
+  mtTarget = kernel[f"MacroTile{targetTi}"]
+  mtOther  = kernel[f"MacroTile{otherTi}"]
+  numWaves = kernel["NumWaves"]
+  perWaveRowsTarget = mtTarget // numWaves
+  perWaveRowsOther  = mtOther  // numWaves
+  if perWaveRowsTarget != perWaveRowsOther:
+    module.add(comp.setTensorTile1(group1, perWaveRowsTarget, writer))
+
+  sizeRefTarget = f"Size{INDEX_CHARS[targetTi]}"
+  sizeRefOther  = f"Size{INDEX_CHARS[otherTi]}"
+  if sizeRefTarget != sizeRefOther:
+    module.add(comp.setTensorDim1(group1, sizeRefTarget, writer))
+
+  mxBlock = kernel["ProblemType"][f"MXBlock{targetTc}"]
+  sizeShifter = int(math.ceil(math.log2(mxBlock)))
+  strideTarget = writer.strideRef(f"MXS{targetTc}", targetTi)
+  strideOther  = writer.strideRef(f"MXS{otherTc}",  otherTi)
+  if str(strideTarget) != str(strideOther):
+    module.add(comp.setTensorStride0(group1, strideTarget, sizeShifter))
+
+
+
 def _globalReadDoScaleSubtileTDM(tc, writer, kernel):
   """Emit MX scale global read via TDM tensor_load_to_lds (gfx1250).
 
@@ -525,33 +558,7 @@ def _globalReadDoScaleSubtileTDM(tc, writer, kernel):
       module.add(SAddU32(dst=sgpr(f"{group0}+1"), src0=sgpr(f"{group0}+1"),
                  src1=ldsDelta, comment=f"LDS addr += {ldsDelta} (MXSA->MXSB)"))
     # Patch tile1, dim1, and stride for the B dimension when MT0 != MT1.
-    # The aliased descriptor inherits MXSA's values which are based on
-    # MacroTile0 (M dimension).  MXSB needs MacroTile1 (N dimension).
-    parentTcB = "B"
-    tiB = 1  # B is associated with dimension 1
-    mxBlockB = kernel["ProblemType"][f"MXBlock{parentTcB}"]
-    mtB = kernel[f"MacroTile{tiB}"]
-    numWaves = kernel["NumWaves"]
-    perWaveRowsB = mtB // numWaves
-    # Only patch if MXSB tile1 differs from MXSA tile1
-    parentTcA = "A"
-    tiA = 0
-    mtA = kernel[f"MacroTile{tiA}"]
-    perWaveRowsA = mtA // numWaves
-    if perWaveRowsB != perWaveRowsA:
-      module.add(comp.setTensorTile1(group1, perWaveRowsB, writer))
-    # Patch dim1 (free dimension size) for B
-    sizeRefFreeB = f"Size{INDEX_CHARS[tiB]}"
-    sizeRefFreeA = f"Size{INDEX_CHARS[tiA]}"
-    if sizeRefFreeB != sizeRefFreeA:
-      module.add(comp.setTensorDim1(group1, sizeRefFreeB, writer))
-    # Patch stride for B
-    tPB = writer.tPB["MX"] if "MX" in writer.tPB else writer.tPB
-    sizeShifterB = int(math.ceil(math.log2(mxBlockB)))
-    strideB = writer.strideRef("MXSB", tiB)
-    strideA = writer.strideRef("MXSA", tiA)
-    if str(strideB) != str(strideA):
-      module.add(comp.setTensorStride0(group1, strideB, sizeShifterB))
+    _patchMxsbDescriptorFields(module, comp, group1, kernel, writer, targetTi=1)
 
   module.addComment0("Scale GR: %s (TDM: tensor_load_to_lds)" % scaleTc)
   comp.setMemToken([writer.states.ldsTensorTokenIdx])
@@ -566,29 +573,8 @@ def _globalReadDoScaleSubtileTDM(tc, writer, kernel):
     if ldsDelta != 0:
       module.add(SSubU32(dst=sgpr(f"{group0}+1"), src0=sgpr(f"{group0}+1"),
                  src1=ldsDelta, comment=f"LDS addr -= {ldsDelta} (MXSB->MXSA)"))
-    # Restore MXSA descriptor fields that were patched for MXSB
-    parentTcA = "A"
-    tiA = 0
-    mtA = kernel[f"MacroTile{tiA}"]
-    mxBlockA = kernel["ProblemType"][f"MXBlockA"]
-    numWaves = kernel["NumWaves"]
-    perWaveRowsA = mtA // numWaves
-    parentTcB = "B"
-    tiB = 1
-    mtB = kernel[f"MacroTile{tiB}"]
-    mxBlockB = kernel["ProblemType"][f"MXBlockB"]
-    perWaveRowsB = mtB // numWaves
-    if perWaveRowsB != perWaveRowsA:
-      module.add(comp.setTensorTile1(group1, perWaveRowsA, writer))
-    sizeRefFreeA = f"Size{INDEX_CHARS[tiA]}"
-    sizeRefFreeB = f"Size{INDEX_CHARS[tiB]}"
-    if sizeRefFreeB != sizeRefFreeA:
-      module.add(comp.setTensorDim1(group1, sizeRefFreeA, writer))
-    strideA = writer.strideRef("MXSA", tiA)
-    strideB = writer.strideRef("MXSB", tiB)
-    sizeShifterA = int(math.ceil(math.log2(mxBlockA)))
-    if str(strideB) != str(strideA):
-      module.add(comp.setTensorStride0(group1, strideA, sizeShifterA))
+    # Restore MXSA descriptor fields
+    _patchMxsbDescriptorFields(module, comp, group1, kernel, writer, targetTi=0)
 
   return module
 
