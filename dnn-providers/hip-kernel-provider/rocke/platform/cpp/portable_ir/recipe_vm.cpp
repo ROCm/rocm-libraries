@@ -59,6 +59,7 @@ typedef struct
 {
     const char* name;
     rocke_value_t* val;
+    int next; /* next reg in this hash bucket, or -1 */
 } rv_reg_t;
 
 typedef struct
@@ -75,8 +76,10 @@ typedef struct
     const rocke_recipe_spec_str_t* strs;
     int n_strs;
 
-    rv_reg_t* regs; /* IR-value registers */
+    rv_reg_t* regs; /* IR-value registers, name-unique; indexed by reg_buckets */
     int n_regs, cap_regs;
+    int* reg_buckets; /* open hash over reg names -> head index, chained via .next */
+    int reg_nbuckets;
     rv_int_t* ivars; /* VM integers (loop vars), a scope stack */
     int n_ivars, cap_ivars;
 
@@ -179,14 +182,71 @@ static const char* rv_spec_str(rvm_t* vm, const char* name)
     return NULL;
 }
 
+/* The register table is name-unique (rv_reg_set updates in place), so a hash
+ * index over it is a straight swap for the former linear scan. It has to be an
+ * index rather than a scan: a recorded production kernel binds thousands of
+ * names and looks each operand up again, which is quadratic scanned -- 66ms of
+ * strcmp on a recorded flash-attention prefill, against 2ms to lower it. */
+static unsigned rv_reg_hash(const char* s)
+{
+    /* FNV-1a, matching the portable-IR importer's vmap. */
+    unsigned h = 2166136261u;
+    for(; *s; s++)
+    {
+        h ^= (unsigned char)*s;
+        h *= 16777619u;
+    }
+    return h;
+}
+
+static bool rv_reg_rehash(rvm_t* vm, int want)
+{
+    int n = vm->reg_nbuckets ? vm->reg_nbuckets : 1024;
+    while(n < want)
+        n *= 2;
+    int* nb = (int*)malloc((size_t)n * sizeof(int));
+    if(!nb)
+    {
+        rv_fail(vm, "oom reg buckets");
+        return false;
+    }
+    for(int i = 0; i < n; i++)
+        nb[i] = -1;
+    for(int i = 0; i < vm->n_regs; i++)
+    {
+        unsigned h = rv_reg_hash(vm->regs[i].name) & (unsigned)(n - 1);
+        vm->regs[i].next = nb[h];
+        nb[h] = i;
+    }
+    free(vm->reg_buckets);
+    vm->reg_buckets = nb;
+    vm->reg_nbuckets = n;
+    return true;
+}
+
+static int rv_reg_find(rvm_t* vm, const char* name)
+{
+    if(vm->reg_nbuckets == 0)
+        return -1;
+    unsigned h = rv_reg_hash(name) & (unsigned)(vm->reg_nbuckets - 1);
+    for(int i = vm->reg_buckets[h]; i != -1; i = vm->regs[i].next)
+        if(strcmp(vm->regs[i].name, name) == 0)
+            return i;
+    return -1;
+}
+
 static void rv_reg_set(rvm_t* vm, const char* name, rocke_value_t* val)
 {
-    for(int i = 0; i < vm->n_regs; i++)
-        if(strcmp(vm->regs[i].name, name) == 0)
-        {
-            vm->regs[i].val = val;
-            return;
-        }
+    int i = rv_reg_find(vm, name);
+    if(i != -1)
+    {
+        vm->regs[i].val = val;
+        return;
+    }
+    if(vm->reg_nbuckets == 0 && !rv_reg_rehash(vm, 1024))
+        return;
+    if(vm->n_regs + 1 > (vm->reg_nbuckets * 3) / 4 && !rv_reg_rehash(vm, vm->reg_nbuckets * 2))
+        return;
     if(vm->n_regs == vm->cap_regs)
     {
         int nc = vm->cap_regs ? vm->cap_regs * 2 : 16;
@@ -199,17 +259,18 @@ static void rv_reg_set(rvm_t* vm, const char* name, rocke_value_t* val)
         vm->regs = nr;
         vm->cap_regs = nc;
     }
-    vm->regs[vm->n_regs].name = name;
-    vm->regs[vm->n_regs].val = val;
-    vm->n_regs++;
+    int s = vm->n_regs++;
+    vm->regs[s].name = name;
+    vm->regs[s].val = val;
+    unsigned h = rv_reg_hash(name) & (unsigned)(vm->reg_nbuckets - 1);
+    vm->regs[s].next = vm->reg_buckets[h];
+    vm->reg_buckets[h] = s;
 }
 
 static rocke_value_t* rv_reg_get(rvm_t* vm, const char* name)
 {
-    for(int i = vm->n_regs - 1; i >= 0; i--)
-        if(strcmp(vm->regs[i].name, name) == 0)
-            return vm->regs[i].val;
-    return NULL;
+    int i = rv_reg_find(vm, name);
+    return i != -1 ? vm->regs[i].val : NULL;
 }
 
 static bool rv_ivar_get(rvm_t* vm, const char* name, long* out)
@@ -1048,6 +1109,7 @@ static rocke_status_t rv_run_root(jd_val_t* root,
     rv_exec_list(&vm, rocke_jget(root, "program"));
 
     free(vm.regs);
+    free(vm.reg_buckets);
     free(vm.ivars);
     for(int i = 0; i < vm.n_owned; i++)
         free(vm.owned[i]);
