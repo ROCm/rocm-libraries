@@ -1037,15 +1037,22 @@ class Solution(collections.abc.Mapping):
           reject(state, printRejectionReason, f"No subtile geometry for dtype {dtype}")
           return
 
-      bytesLoaded = state["NumThreads"] * 16
-      if state["ProblemType"]["MXBlockA"]:
-        numBytesMXSA = (state["DepthU"] // state["ProblemType"]["MXBlockA"]) * state["MacroTile0"]
-        if bytesLoaded < numBytesMXSA:
-          reject(state, printRejectionReason, "Unable to load MXSA scales using one load per wave")
-      if state["ProblemType"]["MXBlockB"]:
-        numBytesMXSB = (state["DepthU"] // state["ProblemType"]["MXBlockB"]) * state["MacroTile1"]
-        if bytesLoaded < numBytesMXSB:
-          reject(state, printRejectionReason, "Unable to load MXSB scales using one load per wave")
+      # Per-thread scale load constraint: each thread issues one 128-bit
+      # buffer_load, so the total bytes loadable in a single pass is
+      # NumThreads * 16.  This only applies to the gfx950 SRD path;
+      # gfx1250 uses TDM tensor_load_to_lds (hardware DMA) which has
+      # no per-thread constraint.
+      _scaleUsesPerThreadLoad = not isaInfoMap[isa].asmCaps.get("HasTDM", False)
+      if _scaleUsesPerThreadLoad:
+        bytesLoaded = state["NumThreads"] * 16
+        if state["ProblemType"]["MXBlockA"]:
+          numBytesMXSA = (state["DepthU"] // state["ProblemType"]["MXBlockA"]) * state["MacroTile0"]
+          if bytesLoaded < numBytesMXSA:
+            reject(state, printRejectionReason, "Unable to load MXSA scales using one load per wave")
+        if state["ProblemType"]["MXBlockB"]:
+          numBytesMXSB = (state["DepthU"] // state["ProblemType"]["MXBlockB"]) * state["MacroTile1"]
+          if bytesLoaded < numBytesMXSB:
+            reject(state, printRejectionReason, "Unable to load MXSB scales using one load per wave")
 
       for tc in ("MXSA", "MXSB"):
         if state["ProblemType"]["MXBlock" + tc[-1]]:
@@ -3167,11 +3174,11 @@ class Solution(collections.abc.Mapping):
         state["_staggerStrideShift"] = (int)(math.ceil(math.log(state["StaggerUStride"] / (state["DepthU"] * bpeAB), 2)))
 
       def calcLdsPad(isaInfoMap: Dict[str, IsaInfo]) -> Tuple[int, int, int, int, int]:
-        # SubtileImpl: LDS padding is disabled.
-        # gfx950 subtile uses software swizzle+rotation for bank conflict avoidance instead.
-        # gfx1250 subtile (TDM) currently has no bank conflict mitigation -- TDM hardware
-        # padding could be enabled here in the future by computing non-zero LdsPad values.
-        if state["UseSubtileImpl"]:
+        # gfx950 subtile uses software swizzle+rotation for bank conflict
+        # avoidance instead of LDS padding.  gfx1250 subtile (TDM) has
+        # hardware padding via pad_interval/pad_amount descriptor fields,
+        # so fall through to the normal auto-resolve path.
+        if state["UseSubtileImpl"] and not isaInfoMap[tuple(state["ISA"])].asmCaps.get("HasTDM", False):
           return 0, 0, 0, 0, 0
         numBytesA = state["ProblemType"]["MacDataTypeA"].numBytes()
         numBytesB = state["ProblemType"]["MacDataTypeB"].numBytes()
