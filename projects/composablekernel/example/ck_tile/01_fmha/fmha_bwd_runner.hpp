@@ -271,7 +271,13 @@ bwd_result fmha_bwd_run(mode_enum mode,
                   : std::array<ck_tile::index_t, 2>{1, 1} /* dummy when sink is disabled */);
     if(sink_grad)
     {
-        std::uniform_real_distribution<float> sink_dist(30.0f, 60.0f);
+        // Keep the range small and centered near zero. With a large sink (e.g. [30, 60])
+        // lse_new = log(exp(lse_old) + exp(sink)) saturates to sink, so P_sink -> 1 and
+        // d_sink collapses to -sum_q D[q] almost regardless of the sink value. The check
+        // then cannot see which sink element was read, which hid a [batch, nhead] vs
+        // [nhead] indexing mismatch in 12 of 15 SinkGradGroupMode cases. The saturation
+        // also drives the token weights to 0, weakening the dK/dV checks.
+        std::uniform_real_distribution<float> sink_dist(-1.0f, 1.0f);
         sink_host.ForEach([&](auto& self, auto i) {
             self(i) = static_cast<LSEDataType>(sink_dist(random_engine));
         });
