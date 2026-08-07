@@ -2239,6 +2239,10 @@ try
     if(std::any_of(
            gpus, gpus + count, [=](int gpu_id) { return gpu_id < 0 || gpu_id >= dev_count; }))
         return HIPFFT_INVALID_VALUE;
+    // TODO: verify that duplicated device IDs are robustly handled and remove the following check if so
+    std::set<int> unique_gpus(gpus, gpus + count);
+    if(static_cast<int>(unique_gpus.size()) != count)
+        return HIPFFT_INVALID_VALUE;
     plan->device_contexts.clear();
     for(int i = 0; i < count; ++i)
         plan->device_contexts.emplace_back(gpus[i]);
