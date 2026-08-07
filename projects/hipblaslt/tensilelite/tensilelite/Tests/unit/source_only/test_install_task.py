@@ -6,6 +6,8 @@ import subprocess
 
 import pytest
 
+import tasks
+
 
 pytestmark = pytest.mark.unit
 
@@ -24,3 +26,8 @@ def test_invoke_install_is_a_discoverable_developer_workflow():
     assert "--build-dir" in result.stdout
     assert "--gpu-targets" in result.stdout
     assert "--rocm-path" in result.stdout
+
+
+def test_install_binds_the_actual_cmake_client_output(tmp_path):
+    expected = tmp_path / "build/tensilelite/client/tensilelite-client"
+    assert tasks._built_client_path(tmp_path / "build") == expected

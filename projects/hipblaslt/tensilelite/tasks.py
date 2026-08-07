@@ -472,16 +472,9 @@ def install(
         enable_tsan=enable_tsan,
     )
 
-    staged_client = (
-        pathlib.Path(build_dir).resolve()
-        / "tensilelite-rocm"
-        / "libexec"
-        / "hipblaslt"
-        / "tensilelite"
-        / "tensilelite-client"
-    )
-    if not staged_client.is_file() or not os.access(staged_client, os.X_OK):
-        raise Exit(f"Staged tensilelite-client is missing or not executable: {staged_client}", code=1)
+    built_client = _built_client_path(build_dir)
+    if not built_client.is_file() or not os.access(built_client, os.X_OK):
+        raise Exit(f"Built tensilelite-client is missing or not executable: {built_client}", code=1)
 
     env = dict(os.environ, ROCM_PATH=str(rocm))
     c.run(
@@ -506,12 +499,12 @@ def install(
                 "-m",
                 "tensilelite_configure_client",
                 "--client",
-                str(staged_client),
+                str(built_client),
             ]
         ),
         env=env,
     )
-    print(f"TensileLite editable install uses: {staged_client}")
+    print(f"TensileLite editable install uses: {built_client}")
 @task
 def precommit_install(c):
     """Install the hipblaslt/TensileLite git pre-commit hook (run once after `uv sync`).
@@ -612,3 +605,7 @@ def build_coverage(
 
     c.run(shlex.join(cmake_cmd))
     c.run(shlex.join(["cmake", "--build", build_dir, "--parallel"]))
+
+def _built_client_path(build_dir):
+    executable = "tensilelite-client.exe" if sys.platform == "win32" else "tensilelite-client"
+    return pathlib.Path(build_dir).resolve() / "tensilelite" / "client" / executable
