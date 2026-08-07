@@ -19,6 +19,7 @@ operation:
     unpacker_function: "unpackMoeGroupedMatmulBwdOperation"
     node_class: "MoeGroupedMatmulBwdNode"
     attributes_class: "MoeGroupedMatmulBwdAttributes"
+    generate_node: false
 
     inputs:
       - name: "doutput"
@@ -61,7 +62,7 @@ operation:
   # `--mode frontend` for this op.
   infer_properties:
     strategy: "stub"
-    dimension_formula: "dweight = [experts, token.dim[2], doutput.dim[2]] (caller-supplied; validated, not inferred)"
+    dimension_formula: "dweight = [first_token_offset.dim[0], token.dim[2], doutput.dim[2]] (inferred when unset, validated when caller-supplied)"
 
   validation:
     required_input_tensors:
@@ -73,13 +74,10 @@ operation:
       - "doutput"
       - "token"
       - "first_token_offset"
-      - "dweight"
     custom_checks:
-      - "Validate dweight has rank 3 [experts, K, N] - reject rather than infer, the expert count is not derivable from any input"
-      - "Validate dweight dim[1] (K) matches token dim[2]"
-      - "Validate dweight dim[2] (N) matches doutput dim[2]"
       - "Validate doutput dim[1] (token count) matches token dim[1]"
-      - "Validate first_token_offset has rank 3 with shape [experts, 1, 1] and dim[0] equal to dweight dim[0] (expert count)"
+      - "Validate first_token_offset has rank 3 with shape [experts, 1, 1] and a positive expert count"
+      - "Infer dweight as [first_token_offset.dim[0], token.dim[2], doutput.dim[2]] when its dims are unset, otherwise validate the caller-supplied dims match (infer_properties_node, mirroring the forward op)"
 
   tensor_fields:
     - name: "doutput"
@@ -118,5 +116,6 @@ operation:
       doutput: { dims: [1, 8, 32], strides: [256, 32, 1] }
       token: { dims: [1, 8, 16], strides: [128, 16, 1] }
       first_token_offset: { dims: [2, 1, 1], strides: [1, 1, 1], data_type: INT32 }
-      dweight: { dims: [2, 16, 32], strides: [512, 32, 1] }
+      # Column-major [K*N, 1, K], matching the layout inferred for dweight.
+      dweight: { dims: [2, 16, 32], strides: [512, 1, 16] }
     field_values: {}

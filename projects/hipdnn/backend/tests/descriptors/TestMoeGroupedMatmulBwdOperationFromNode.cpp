@@ -74,22 +74,6 @@ protected:
             = TensorDescriptor::fromFlatBuffer(dweightAttrs);
     }
 
-    // Overwrites the tensor map entry for `uid` with a tensor of the given shape, so
-    // finalize()'s K/N/token-count/expert-count consistency checks can be exercised
-    // with mismatched shapes via fromNode().
-    void replaceTensor(int64_t uid,
-                       const std::vector<int64_t>& dims,
-                       const std::vector<int64_t>& strides,
-                       DataType dataType)
-    {
-        TensorAttributesT attrs;
-        attrs.uid = uid;
-        attrs.data_type = dataType;
-        attrs.dims = dims;
-        attrs.strides = strides;
-        _tensorMap[uid] = TensorDescriptor::fromFlatBuffer(attrs);
-    }
-
     static hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulBwdAttributesT
         createStandardMoeGroupedMatmulBwdAttrs()
     {
@@ -218,187 +202,46 @@ TEST_F(TestMoeGroupedMatmulBwdOperationFromNode, SetsTensorReferencesWithFullVal
     EXPECT_EQ(desc->getDweightDesc()->getData().uid, K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_UID);
     EXPECT_EQ(desc->getDweightDesc()->getData().data_type, DataType::FLOAT);
     EXPECT_EQ(desc->getDweightDesc()->getData().dims, (std::vector<int64_t>{2, 16, 32}));
-    EXPECT_EQ(desc->getDweightDesc()->getData().strides, (std::vector<int64_t>{512, 32, 1}));
+    // dweight is column-major [K*N, 1, K]; the other tensors are row-major.
+    EXPECT_EQ(desc->getDweightDesc()->getData().strides, (std::vector<int64_t>{512, 1, 16}));
 }
 
-TEST_F(TestMoeGroupedMatmulBwdOperationFromNode, FailsWithMissingDoutputTensor)
+namespace
 {
-    _tensorMap.erase(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DOUTPUT_UID);
+
+// Identifies the tensor to drop from the tensor map before calling fromNode().
+struct MissingTensorCase
+{
+    int64_t uid;
+    const char* name;
+};
+
+} // namespace
+
+class TestMoeGroupedMatmulBwdOperationFromNodeMissingTensor
+    : public TestMoeGroupedMatmulBwdOperationFromNode,
+      public ::testing::WithParamInterface<MissingTensorCase>
+{
+};
+
+TEST_P(TestMoeGroupedMatmulBwdOperationFromNodeMissingTensor, FromNodeFails)
+{
+    _tensorMap.erase(GetParam().uid);
     auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(MoeGroupedMatmulBwdOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
 }
 
-TEST_F(TestMoeGroupedMatmulBwdOperationFromNode, FailsWithMissingTokenTensor)
-{
-    _tensorMap.erase(K_MOE_GROUPED_MATMUL_BWD_TENSOR_TOKEN_UID);
-    auto node = createStandardNode();
-
-    ASSERT_THROW_HIPDNN_STATUS(MoeGroupedMatmulBwdOperationDescriptor::fromNode(node, _tensorMap),
-                               HIPDNN_STATUS_INTERNAL_ERROR);
-}
-
-TEST_F(TestMoeGroupedMatmulBwdOperationFromNode, FailsWithMissingFirstTokenOffsetTensor)
-{
-    _tensorMap.erase(K_MOE_GROUPED_MATMUL_BWD_TENSOR_FIRST_TOKEN_OFFSET_UID);
-    auto node = createStandardNode();
-
-    ASSERT_THROW_HIPDNN_STATUS(MoeGroupedMatmulBwdOperationDescriptor::fromNode(node, _tensorMap),
-                               HIPDNN_STATUS_INTERNAL_ERROR);
-}
-
-TEST_F(TestMoeGroupedMatmulBwdOperationFromNode, FailsWithMissingDweightTensor)
-{
-    _tensorMap.erase(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_UID);
-    auto node = createStandardNode();
-
-    ASSERT_THROW_HIPDNN_STATUS(MoeGroupedMatmulBwdOperationDescriptor::fromNode(node, _tensorMap),
-                               HIPDNN_STATUS_INTERNAL_ERROR);
-}
-
-// =============================================================================
-// finalize() consistency-check negative tests (K, N, token-count, expert-count)
-// =============================================================================
-
-TEST_F(TestMoeGroupedMatmulBwdOperationFromNode, FailsWithDweightRankMismatch)
-{
-    // DWEIGHT_DESC must have rank 3 [experts, K, N]; supply a rank-2 tensor instead.
-    replaceTensor(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_UID, {2, 16}, {16, 1}, DataType::FLOAT);
-    auto node = createStandardNode();
-
-    ASSERT_THROW_HIPDNN_STATUS(MoeGroupedMatmulBwdOperationDescriptor::fromNode(node, _tensorMap),
-                               HIPDNN_STATUS_BAD_PARAM);
-}
-
-TEST_F(TestMoeGroupedMatmulBwdOperationFromNode, FailsWithTokenRankMismatch)
-{
-    // TOKEN_DESC must have rank 3; supply a rank-2 tensor instead.
-    replaceTensor(K_MOE_GROUPED_MATMUL_BWD_TENSOR_TOKEN_UID, {1, 8}, {8, 1}, DataType::FLOAT);
-    auto node = createStandardNode();
-
-    ASSERT_THROW_HIPDNN_STATUS(MoeGroupedMatmulBwdOperationDescriptor::fromNode(node, _tensorMap),
-                               HIPDNN_STATUS_BAD_PARAM);
-}
-
-TEST_F(TestMoeGroupedMatmulBwdOperationFromNode, FailsWithDoutputRankMismatch)
-{
-    // DOUTPUT_DESC must have rank 3; supply a rank-2 tensor instead.
-    replaceTensor(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DOUTPUT_UID, {1, 32}, {32, 1}, DataType::FLOAT);
-    auto node = createStandardNode();
-
-    ASSERT_THROW_HIPDNN_STATUS(MoeGroupedMatmulBwdOperationDescriptor::fromNode(node, _tensorMap),
-                               HIPDNN_STATUS_BAD_PARAM);
-}
-
-TEST_F(TestMoeGroupedMatmulBwdOperationFromNode, FailsWithKDimMismatch)
-{
-    // DWEIGHT_DESC dim[1] (K) must match TOKEN_DESC dim[2] (K=16); mutate dweight's K.
-    replaceTensor(
-        K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_UID, {2, 8, 32}, {256, 32, 1}, DataType::FLOAT);
-    auto node = createStandardNode();
-
-    ASSERT_THROW_HIPDNN_STATUS(MoeGroupedMatmulBwdOperationDescriptor::fromNode(node, _tensorMap),
-                               HIPDNN_STATUS_BAD_PARAM);
-}
-
-TEST_F(TestMoeGroupedMatmulBwdOperationFromNode, FailsWithNDimMismatch)
-{
-    // DWEIGHT_DESC dim[2] (N) must match DOUTPUT_DESC dim[2] (N=32); mutate dweight's N.
-    replaceTensor(
-        K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_UID, {2, 16, 64}, {1024, 64, 1}, DataType::FLOAT);
-    auto node = createStandardNode();
-
-    ASSERT_THROW_HIPDNN_STATUS(MoeGroupedMatmulBwdOperationDescriptor::fromNode(node, _tensorMap),
-                               HIPDNN_STATUS_BAD_PARAM);
-}
-
-TEST_F(TestMoeGroupedMatmulBwdOperationFromNode, FailsWithTokenCountMismatch)
-{
-    // DOUTPUT_DESC dim[1] (token count) must match TOKEN_DESC dim[1] (token count=8); mutate doutput.
-    replaceTensor(
-        K_MOE_GROUPED_MATMUL_BWD_TENSOR_DOUTPUT_UID, {1, 4, 32}, {128, 32, 1}, DataType::FLOAT);
-    auto node = createStandardNode();
-
-    ASSERT_THROW_HIPDNN_STATUS(MoeGroupedMatmulBwdOperationDescriptor::fromNode(node, _tensorMap),
-                               HIPDNN_STATUS_BAD_PARAM);
-}
-
-TEST_F(TestMoeGroupedMatmulBwdOperationFromNode, FailsWithFirstTokenOffsetRankMismatch)
-{
-    // FIRST_TOKEN_OFFSET_DESC must have rank 3 [experts, 1, 1]; supply a rank-1 tensor instead.
-    replaceTensor(
-        K_MOE_GROUPED_MATMUL_BWD_TENSOR_FIRST_TOKEN_OFFSET_UID, {2}, {1}, DataType::INT32);
-    auto node = createStandardNode();
-
-    ASSERT_THROW_HIPDNN_STATUS(MoeGroupedMatmulBwdOperationDescriptor::fromNode(node, _tensorMap),
-                               HIPDNN_STATUS_BAD_PARAM);
-}
-
-TEST_F(TestMoeGroupedMatmulBwdOperationFromNode, FailsWithFirstTokenOffsetShapeMismatch)
-{
-    // FIRST_TOKEN_OFFSET_DESC dims [1] and [2] must both equal 1; mutate dim[1].
-    replaceTensor(K_MOE_GROUPED_MATMUL_BWD_TENSOR_FIRST_TOKEN_OFFSET_UID,
-                  {2, 2, 1},
-                  {2, 1, 1},
-                  DataType::INT32);
-    auto node = createStandardNode();
-
-    ASSERT_THROW_HIPDNN_STATUS(MoeGroupedMatmulBwdOperationDescriptor::fromNode(node, _tensorMap),
-                               HIPDNN_STATUS_BAD_PARAM);
-}
-
-TEST_F(TestMoeGroupedMatmulBwdOperationFromNode, FailsWithExpertCountMismatch)
-{
-    // FIRST_TOKEN_OFFSET_DESC dim[0] (expert count) must match DWEIGHT_DESC dim[0] (experts=2).
-    replaceTensor(K_MOE_GROUPED_MATMUL_BWD_TENSOR_FIRST_TOKEN_OFFSET_UID,
-                  {3, 1, 1},
-                  {1, 1, 1},
-                  DataType::INT32);
-    auto node = createStandardNode();
-
-    ASSERT_THROW_HIPDNN_STATUS(MoeGroupedMatmulBwdOperationDescriptor::fromNode(node, _tensorMap),
-                               HIPDNN_STATUS_BAD_PARAM);
-}
-
-TEST_F(TestMoeGroupedMatmulBwdOperationFromNode, FailsWithDoutputNonSingletonLeadingDimension)
-{
-    // DOUTPUT_DESC dim[0] is a singleton placeholder axis; supply dim[0]=2 instead.
-    replaceTensor(
-        K_MOE_GROUPED_MATMUL_BWD_TENSOR_DOUTPUT_UID, {2, 8, 32}, {256, 32, 1}, DataType::FLOAT);
-    auto node = createStandardNode();
-
-    ASSERT_THROW_HIPDNN_STATUS(MoeGroupedMatmulBwdOperationDescriptor::fromNode(node, _tensorMap),
-                               HIPDNN_STATUS_BAD_PARAM);
-}
-
-TEST_F(TestMoeGroupedMatmulBwdOperationFromNode, FailsWithTokenNonSingletonLeadingDimension)
-{
-    // TOKEN_DESC dim[0] is a singleton placeholder axis; supply dim[0]=2 instead.
-    replaceTensor(
-        K_MOE_GROUPED_MATMUL_BWD_TENSOR_TOKEN_UID, {2, 8, 16}, {128, 16, 1}, DataType::FLOAT);
-    auto node = createStandardNode();
-
-    ASSERT_THROW_HIPDNN_STATUS(MoeGroupedMatmulBwdOperationDescriptor::fromNode(node, _tensorMap),
-                               HIPDNN_STATUS_BAD_PARAM);
-}
-
-TEST_F(TestMoeGroupedMatmulBwdOperationFromNode, FailsWithDweightZeroExpertCount)
-{
-    // DWEIGHT_DESC dim[0] (expert count) must describe at least one expert. Zero out
-    // FIRST_TOKEN_OFFSET_DESC's expert count too, so the expert-count-match check can't
-    // also fire on 0 vs 2 and mask a deleted zero-expert check.
-    replaceTensor(
-        K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_UID, {0, 16, 32}, {512, 32, 1}, DataType::FLOAT);
-    replaceTensor(K_MOE_GROUPED_MATMUL_BWD_TENSOR_FIRST_TOKEN_OFFSET_UID,
-                  {0, 1, 1},
-                  {1, 1, 1},
-                  DataType::INT32);
-    auto node = createStandardNode();
-
-    ASSERT_THROW_HIPDNN_STATUS(MoeGroupedMatmulBwdOperationDescriptor::fromNode(node, _tensorMap),
-                               HIPDNN_STATUS_BAD_PARAM);
-}
+INSTANTIATE_TEST_SUITE_P(
+    RequiredTensors,
+    TestMoeGroupedMatmulBwdOperationFromNodeMissingTensor,
+    ::testing::Values(MissingTensorCase{K_MOE_GROUPED_MATMUL_BWD_TENSOR_DOUTPUT_UID, "Doutput"},
+                      MissingTensorCase{K_MOE_GROUPED_MATMUL_BWD_TENSOR_TOKEN_UID, "Token"},
+                      MissingTensorCase{K_MOE_GROUPED_MATMUL_BWD_TENSOR_FIRST_TOKEN_OFFSET_UID,
+                                        "FirstTokenOffset"},
+                      MissingTensorCase{K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_UID, "Dweight"}),
+    [](const ::testing::TestParamInfo<MissingTensorCase>& info) { return info.param.name; });
 
 TEST_F(TestMoeGroupedMatmulBwdOperationFromNode, GetTensorDescriptorsReturnsAllTensors)
 {
@@ -505,11 +348,12 @@ TEST_F(TestMoeGroupedMatmulBwdOperationFromNode, GetAttributeWorksAfterFromNode)
                        static_cast<void*>(dweightScoped.getPtr()));
     ASSERT_EQ(dweightCount, 1);
     ASSERT_NE(dweightScoped.get(), nullptr);
+    // dweight is column-major [K*N, 1, K]; the other tensors are row-major.
     verifyTensorDescriptor(dweightScoped.get(),
                            K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_UID,
                            HIPDNN_DATA_FLOAT,
                            {2, 16, 32},
-                           {512, 32, 1});
+                           {512, 1, 16});
 
     // Verify operation type
     hipdnnOperationType_ext_t opType = HIPDNN_OPERATION_TYPE_NOT_SET_EXT;

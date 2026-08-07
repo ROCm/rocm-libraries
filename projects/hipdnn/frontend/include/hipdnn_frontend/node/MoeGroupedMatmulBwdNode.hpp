@@ -77,16 +77,13 @@ public:
             ErrorCode::ATTRIBUTE_NOT_SET,
             "MoeGroupedMatmulBwdNode missing first_token_offset dimensions for pre-validation");
 
-        HIPDNN_RETURN_IF_TRUE(
-            attributes.get_dweight()->get_dim().empty(),
-            ErrorCode::ATTRIBUTE_NOT_SET,
-            "MoeGroupedMatmulBwdNode missing dweight dimensions for pre-validation");
+        // dweight dimensions are intentionally not checked here; they are inferred (or, when
+        // caller-supplied, validated against the inferred shape) in infer_properties_node().
 
         // Custom validation checks
         const auto doutputTensor = attributes.get_doutput();
         const auto tokenTensor = attributes.get_token();
         const auto firstTokenOffsetTensor = attributes.get_first_token_offset();
-        const auto dweightTensor = attributes.get_dweight();
 
         constexpr size_t K_TENSOR_RANK = 3;
 
@@ -119,37 +116,14 @@ public:
                             ErrorCode::INVALID_VALUE,
                             "MoE token tensor must have a singleton leading dimension");
 
-        // Validate dweight has rank 3 [experts, K, N] - reject rather than infer, the expert
-        // count is not derivable from any input.
-        HIPDNN_RETURN_IF_NE(dweightTensor->get_dim().size(),
-                            K_TENSOR_RANK,
-                            ErrorCode::INVALID_VALUE,
-                            "MoE dweight tensor must have shape [experts, K, N]");
-
-        HIPDNN_RETURN_IF_TRUE(dweightTensor->get_dim()[0] <= 0,
-                              ErrorCode::INVALID_VALUE,
-                              "MoE dweight tensor must describe at least one expert");
-
-        // Validate dweight dim[1] (K) matches token dim[2]
-        HIPDNN_RETURN_IF_NE(dweightTensor->get_dim()[1],
-                            tokenTensor->get_dim()[2],
-                            ErrorCode::INVALID_VALUE,
-                            "MoE dweight K dimension must match the token K dimension");
-
-        // Validate dweight dim[2] (N) matches doutput dim[2]
-        HIPDNN_RETURN_IF_NE(dweightTensor->get_dim()[2],
-                            doutputTensor->get_dim()[2],
-                            ErrorCode::INVALID_VALUE,
-                            "MoE dweight N dimension must match the doutput N dimension");
-
         // Validate doutput dim[1] (token count) matches token dim[1]
         HIPDNN_RETURN_IF_NE(doutputTensor->get_dim()[1],
                             tokenTensor->get_dim()[1],
                             ErrorCode::INVALID_VALUE,
                             "MoE doutput token-count dimension must match the token tensor");
 
-        // Validate first_token_offset has rank 3 with shape [experts, 1, 1] and dim[0] equal
-        // to dweight dim[0] (expert count)
+        // Validate first_token_offset has rank 3 with shape [experts, 1, 1]. Its dim[0] is the
+        // expert count that infer_properties_node() uses as dweight's leading dimension.
         HIPDNN_RETURN_IF_NE(firstTokenOffsetTensor->get_dim().size(),
                             K_TENSOR_RANK,
                             ErrorCode::INVALID_VALUE,
@@ -162,11 +136,9 @@ public:
                             1,
                             ErrorCode::INVALID_VALUE,
                             "MoE first-token-offset tensor must have trailing dimensions [1, 1]");
-        HIPDNN_RETURN_IF_NE(
-            firstTokenOffsetTensor->get_dim()[0],
-            dweightTensor->get_dim()[0],
-            ErrorCode::INVALID_VALUE,
-            "MoE first-token-offset expert count must match the dweight expert count");
+        HIPDNN_RETURN_IF_TRUE(firstTokenOffsetTensor->get_dim()[0] <= 0,
+                              ErrorCode::INVALID_VALUE,
+                              "MoE first-token-offset tensor must describe at least one expert");
         HIPDNN_RETURN_IF_TRUE(firstTokenOffsetTensor->get_data_type() != DataType::INT32,
                               ErrorCode::INVALID_VALUE,
                               "MoE first-token-offset tensor must have INT32 data type");
@@ -196,27 +168,35 @@ public:
 
         HIPDNN_CHECK_ERROR(attributes.fill_from_context(graph_attributes));
 
-        // dweight = [experts, token.dim[2], doutput.dim[2]], but the expert count cannot be
-        // derived from any input tensor, so dweight dimensions are caller-supplied and
-        // validated (see pre_validate_node) rather than inferred here.
+        // dweight = [experts, K, N], where the expert count comes from first_token_offset dim[0],
+        // K from token dim[2], and N from doutput dim[2].
+        const std::vector<int64_t> expectedDweightDims
+            = {attributes.get_first_token_offset()->get_dim()[0],
+               attributes.get_token()->get_dim()[2],
+               attributes.get_doutput()->get_dim()[2]};
+
         auto dweightTensor = attributes.get_dweight();
+        if(dweightTensor->get_dim().empty())
+        {
+            dweightTensor->set_dim(expectedDweightDims);
+        }
+        else
+        {
+            HIPDNN_RETURN_IF_NE(
+                dweightTensor->get_dim(),
+                expectedDweightDims,
+                ErrorCode::INVALID_VALUE,
+                "MoeGroupedMatmulBwd dweight tensor dimensions do not match the inferred "
+                "dimensions");
+        }
 
-        HIPDNN_RETURN_IF_TRUE(dweightTensor->get_dim().empty(),
-                              ErrorCode::ATTRIBUTE_NOT_SET,
-                              "MoeGroupedMatmulBwdNode: dweight dimensions must be set by the "
-                              "caller (expert count cannot be inferred)");
-
-        constexpr size_t K_TENSOR_RANK = 3;
-        HIPDNN_RETURN_IF_NE(dweightTensor->get_dim().size(),
-                            K_TENSOR_RANK,
-                            ErrorCode::INVALID_VALUE,
-                            "MoeGroupedMatmulBwdNode: dweight must have rank 3 [experts, K, N]");
-
-        // Infer output strides if not set
+        // Infer output strides if not set. dweight uses packed column-major strides: for
+        // [experts, K, N] that is [K*N, 1, K], i.e. K packed tightest, then N, then experts.
         if(dweightTensor->get_stride().empty())
         {
-            dweightTensor->set_stride(
-                hipdnn_data_sdk::utilities::generateStrides(dweightTensor->get_dim()));
+            const std::vector<int64_t> columnMajorStrideOrder = {2, 0, 1};
+            dweightTensor->set_stride(hipdnn_data_sdk::utilities::generateStrides(
+                dweightTensor->get_dim(), columnMajorStrideOrder));
         }
 
         return {};

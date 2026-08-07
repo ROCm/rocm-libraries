@@ -37,41 +37,75 @@ public:
         return _wrapper->asDescriptor<MoeGroupedMatmulBwdOperationDescriptor>();
     }
 
-    void setTensors() const
+    void setTensors(std::optional<hipdnnBackendAttributeName_t> excluded = std::nullopt) const
     {
         auto desc = getDescriptor();
-        desc->setAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_DOUTPUT_DESC,
-                           HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                           1,
-                           &_doutputDesc);
-        desc->setAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_TOKEN_DESC,
-                           HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                           1,
-                           &_tokenDesc);
-        desc->setAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_FIRST_TOKEN_OFFSET_DESC,
-                           HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                           1,
-                           &_firstTokenOffsetDesc);
-        desc->setAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_DWEIGHT_DESC,
-                           HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                           1,
-                           &_dweightDesc);
+        if(!excluded || *excluded != HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_DOUTPUT_DESC)
+        {
+            desc->setAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_DOUTPUT_DESC,
+                               HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                               1,
+                               &_doutputDesc);
+        }
+        if(!excluded || *excluded != HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_TOKEN_DESC)
+        {
+            desc->setAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_TOKEN_DESC,
+                               HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                               1,
+                               &_tokenDesc);
+        }
+        if(!excluded
+           || *excluded != HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_FIRST_TOKEN_OFFSET_DESC)
+        {
+            desc->setAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_FIRST_TOKEN_OFFSET_DESC,
+                               HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                               1,
+                               &_firstTokenOffsetDesc);
+        }
+        if(!excluded || *excluded != HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_DWEIGHT_DESC)
+        {
+            desc->setAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_DWEIGHT_DESC,
+                               HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                               1,
+                               &_dweightDesc);
+        }
     }
 
-    void setMoeGroupedMatmulBwdParams() const
+    // Sets exactly one tensor attribute, leaving the other three unset.
+    void setTensor(hipdnnBackendAttributeName_t attribute) const
     {
         auto desc = getDescriptor();
+        if(attribute == HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_DOUTPUT_DESC)
+        {
+            desc->setAttribute(attribute, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_doutputDesc);
+        }
+        else if(attribute == HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_TOKEN_DESC)
+        {
+            desc->setAttribute(attribute, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_tokenDesc);
+        }
+        else if(attribute == HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_FIRST_TOKEN_OFFSET_DESC)
+        {
+            desc->setAttribute(
+                attribute, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_firstTokenOffsetDesc);
+        }
+        else if(attribute == HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_DWEIGHT_DESC)
+        {
+            desc->setAttribute(attribute, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_dweightDesc);
+        }
     }
 
-    void setRequiredAttributes() const
+    void setRequiredAttributes(std::optional<hipdnnBackendAttributeName_t> excluded
+                               = std::nullopt) const
     {
-        setTensors();
-        setMoeGroupedMatmulBwdParams();
-        auto computeType = HIPDNN_DATA_FLOAT;
-        getDescriptor()->setAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_MATH_PREC,
-                                      HIPDNN_TYPE_DATA_TYPE,
-                                      1,
-                                      &computeType);
+        setTensors(excluded);
+        if(!excluded || *excluded != HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_MATH_PREC)
+        {
+            auto computeType = HIPDNN_DATA_FLOAT;
+            getDescriptor()->setAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_MATH_PREC,
+                                          HIPDNN_TYPE_DATA_TYPE,
+                                          1,
+                                          &computeType);
+        }
     }
 
     void makeFinalized() const
@@ -141,147 +175,111 @@ TEST_F(TestMoeGroupedMatmulBwdOperationDescriptor, FinalizeWithRequiredAttribute
     ASSERT_TRUE(getDescriptor()->isFinalized());
 }
 
-TEST_F(TestMoeGroupedMatmulBwdOperationDescriptor, FinalizeFailsWithoutDoutputTensor)
+// Every other required attribute is set, so each case proves the omitted attribute alone is
+// what finalize() rejects.
+class TestMoeGroupedMatmulBwdOperationDescriptorFinalizeFailsWithout
+    : public TestMoeGroupedMatmulBwdOperationDescriptor,
+      public ::testing::WithParamInterface<hipdnnBackendAttributeName_t>
 {
-    auto desc = getDescriptor();
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_TOKEN_DESC,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       &_tokenDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_FIRST_TOKEN_OFFSET_DESC,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       &_firstTokenOffsetDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_DWEIGHT_DESC,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       &_dweightDesc);
-    setMoeGroupedMatmulBwdParams();
+};
 
-    ASSERT_THROW_HIPDNN_STATUS(desc->finalize(), HIPDNN_STATUS_BAD_PARAM);
-}
-
-TEST_F(TestMoeGroupedMatmulBwdOperationDescriptor, FinalizeFailsWithoutTokenTensor)
+TEST_P(TestMoeGroupedMatmulBwdOperationDescriptorFinalizeFailsWithout, RequiredAttribute)
 {
-    auto desc = getDescriptor();
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_DOUTPUT_DESC,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       &_doutputDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_FIRST_TOKEN_OFFSET_DESC,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       &_firstTokenOffsetDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_DWEIGHT_DESC,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       &_dweightDesc);
-    setMoeGroupedMatmulBwdParams();
-
-    ASSERT_THROW_HIPDNN_STATUS(desc->finalize(), HIPDNN_STATUS_BAD_PARAM);
-}
-
-TEST_F(TestMoeGroupedMatmulBwdOperationDescriptor, FinalizeFailsWithoutFirstTokenOffsetTensor)
-{
-    auto desc = getDescriptor();
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_DOUTPUT_DESC,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       &_doutputDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_TOKEN_DESC,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       &_tokenDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_DWEIGHT_DESC,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       &_dweightDesc);
-    setMoeGroupedMatmulBwdParams();
-
-    ASSERT_THROW_HIPDNN_STATUS(desc->finalize(), HIPDNN_STATUS_BAD_PARAM);
-}
-
-TEST_F(TestMoeGroupedMatmulBwdOperationDescriptor, FinalizeFailsWithoutDweightTensor)
-{
-    auto desc = getDescriptor();
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_DOUTPUT_DESC,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       &_doutputDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_TOKEN_DESC,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       &_tokenDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_FIRST_TOKEN_OFFSET_DESC,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       &_firstTokenOffsetDesc);
-    setMoeGroupedMatmulBwdParams();
-
-    ASSERT_THROW_HIPDNN_STATUS(desc->finalize(), HIPDNN_STATUS_BAD_PARAM);
-}
-
-TEST_F(TestMoeGroupedMatmulBwdOperationDescriptor, FinalizeFailsWithoutComputeType)
-{
-    setTensors();
-    setMoeGroupedMatmulBwdParams();
+    setRequiredAttributes(GetParam());
     ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    RequiredAttributes,
+    TestMoeGroupedMatmulBwdOperationDescriptorFinalizeFailsWithout,
+    ::testing::Values(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_DOUTPUT_DESC,
+                      HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_TOKEN_DESC,
+                      HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_FIRST_TOKEN_OFFSET_DESC,
+                      HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_DWEIGHT_DESC,
+                      HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_MATH_PREC));
+
+TEST_F(TestMoeGroupedMatmulBwdOperationDescriptor, FinalizeFailsWithNonInt32FirstTokenOffset)
+{
+    auto desc = getDescriptor();
+    auto wrongTypeFirstTokenOffsetDesc
+        = createFinalizedTensor(K_MOE_GROUPED_MATMUL_BWD_TENSOR_FIRST_TOKEN_OFFSET_UID,
+                                toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_FIRST_TOKEN_OFFSET_DIMS),
+                                toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_FIRST_TOKEN_OFFSET_STRIDES),
+                                HIPDNN_DATA_FLOAT);
+
+    // Set everything except first_token_offset, then supply the wrong-typed one in its place.
+    setRequiredAttributes(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_FIRST_TOKEN_OFFSET_DESC);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_FIRST_TOKEN_OFFSET_DESC,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &wrongTypeFirstTokenOffsetDesc);
+
+    ASSERT_THROW_HIPDNN_STATUS(desc->finalize(), HIPDNN_STATUS_BAD_PARAM);
 }
 
 // =============================================================================
 // SetAttribute Tests - Tensor Descriptors
 // =============================================================================
 
-TEST_F(TestMoeGroupedMatmulBwdOperationDescriptor, SetTensorDescriptorDoutput)
+namespace
 {
+
+// Each case sets exactly one tensor attribute and checks it lands in the matching data field
+// and accessor, so a cross-wired attribute would surface as a UID mismatch.
+struct SetTensorCase
+{
+    hipdnnBackendAttributeName_t attribute;
+    const char* name;
+    int64_t expectedUid;
+    int64_t MoeGroupedMatmulBwdAttributesT::*uidField;
+    std::shared_ptr<TensorDescriptor> (MoeGroupedMatmulBwdOperationDescriptor::*getter)() const;
+};
+
+} // namespace
+
+class TestMoeGroupedMatmulBwdOperationDescriptorSetTensor
+    : public TestMoeGroupedMatmulBwdOperationDescriptor,
+      public ::testing::WithParamInterface<SetTensorCase>
+{
+};
+
+TEST_P(TestMoeGroupedMatmulBwdOperationDescriptorSetTensor, StoresTensorDescriptor)
+{
+    const auto& tc = GetParam();
     auto desc = getDescriptor();
-    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_DOUTPUT_DESC,
-                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                       1,
-                                       &_doutputDesc));
+
+    ASSERT_NO_THROW(setTensor(tc.attribute));
 
     // Verify UID extracted via getData()
-    ASSERT_EQ(desc->getData().doutput_tensor_uid, K_MOE_GROUPED_MATMUL_BWD_TENSOR_DOUTPUT_UID);
-    ASSERT_NE(desc->getDoutputDesc(), nullptr);
+    ASSERT_EQ((desc->getData()).*(tc.uidField), tc.expectedUid);
+    ASSERT_NE((desc.get()->*(tc.getter))(), nullptr);
 }
 
-TEST_F(TestMoeGroupedMatmulBwdOperationDescriptor, SetTensorDescriptorToken)
-{
-    auto desc = getDescriptor();
-    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_TOKEN_DESC,
-                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                       1,
-                                       &_tokenDesc));
-
-    ASSERT_EQ(desc->getData().token_tensor_uid, K_MOE_GROUPED_MATMUL_BWD_TENSOR_TOKEN_UID);
-    ASSERT_NE(desc->getTokenDesc(), nullptr);
-}
-
-TEST_F(TestMoeGroupedMatmulBwdOperationDescriptor, SetTensorDescriptorFirstTokenOffset)
-{
-    auto desc = getDescriptor();
-    ASSERT_NO_THROW(
-        desc->setAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_FIRST_TOKEN_OFFSET_DESC,
-                           HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                           1,
-                           &_firstTokenOffsetDesc));
-
-    ASSERT_EQ(desc->getData().first_token_offset_tensor_uid,
-              K_MOE_GROUPED_MATMUL_BWD_TENSOR_FIRST_TOKEN_OFFSET_UID);
-    ASSERT_NE(desc->getFirstTokenOffsetDesc(), nullptr);
-}
-
-TEST_F(TestMoeGroupedMatmulBwdOperationDescriptor, SetTensorDescriptorDweight)
-{
-    auto desc = getDescriptor();
-    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_DWEIGHT_DESC,
-                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                       1,
-                                       &_dweightDesc));
-
-    ASSERT_EQ(desc->getData().dweight_tensor_uid, K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_UID);
-    ASSERT_NE(desc->getDweightDesc(), nullptr);
-}
+INSTANTIATE_TEST_SUITE_P(
+    AllTensors,
+    TestMoeGroupedMatmulBwdOperationDescriptorSetTensor,
+    ::testing::Values(SetTensorCase{HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_DOUTPUT_DESC,
+                                    "Doutput",
+                                    K_MOE_GROUPED_MATMUL_BWD_TENSOR_DOUTPUT_UID,
+                                    &MoeGroupedMatmulBwdAttributesT::doutput_tensor_uid,
+                                    &MoeGroupedMatmulBwdOperationDescriptor::getDoutputDesc},
+                      SetTensorCase{HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_TOKEN_DESC,
+                                    "Token",
+                                    K_MOE_GROUPED_MATMUL_BWD_TENSOR_TOKEN_UID,
+                                    &MoeGroupedMatmulBwdAttributesT::token_tensor_uid,
+                                    &MoeGroupedMatmulBwdOperationDescriptor::getTokenDesc},
+                      SetTensorCase{
+                          HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_FIRST_TOKEN_OFFSET_DESC,
+                          "FirstTokenOffset",
+                          K_MOE_GROUPED_MATMUL_BWD_TENSOR_FIRST_TOKEN_OFFSET_UID,
+                          &MoeGroupedMatmulBwdAttributesT::first_token_offset_tensor_uid,
+                          &MoeGroupedMatmulBwdOperationDescriptor::getFirstTokenOffsetDesc},
+                      SetTensorCase{HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_DWEIGHT_DESC,
+                                    "Dweight",
+                                    K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_UID,
+                                    &MoeGroupedMatmulBwdAttributesT::dweight_tensor_uid,
+                                    &MoeGroupedMatmulBwdOperationDescriptor::getDweightDesc}),
+    [](const ::testing::TestParamInfo<SetTensorCase>& info) { return info.param.name; });
 
 TEST_F(TestMoeGroupedMatmulBwdOperationDescriptor, SetTensorFailsNotFinalized)
 {
@@ -481,77 +479,49 @@ TEST_F(TestMoeGroupedMatmulBwdOperationDescriptor, GetAttributeUnsupported)
 // GetAttribute Query Mode Tests
 // =============================================================================
 
-TEST_F(TestMoeGroupedMatmulBwdOperationDescriptor, GetAttributeTensorDoutputQueryReturnsOne)
+namespace
+{
+
+struct QueryAttributeParam
+{
+    hipdnnBackendAttributeName_t attributeName;
+    hipdnnBackendAttributeType_t attributeType;
+};
+
+} // namespace
+
+class TestMoeGroupedMatmulBwdOperationDescriptorQuery
+    : public TestMoeGroupedMatmulBwdOperationDescriptor,
+      public ::testing::WithParamInterface<QueryAttributeParam>
+{
+};
+
+TEST_P(TestMoeGroupedMatmulBwdOperationDescriptorQuery, ReturnsOne)
 {
     makeFinalized();
     auto desc = getDescriptor();
-
-    int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_DOUTPUT_DESC,
-                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                       0,
-                                       &elementCount,
-                                       nullptr));
-    ASSERT_EQ(elementCount, 1);
-}
-
-TEST_F(TestMoeGroupedMatmulBwdOperationDescriptor, GetAttributeTensorTokenQueryReturnsOne)
-{
-    makeFinalized();
-    auto desc = getDescriptor();
-
-    int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_TOKEN_DESC,
-                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                       0,
-                                       &elementCount,
-                                       nullptr));
-    ASSERT_EQ(elementCount, 1);
-}
-
-TEST_F(TestMoeGroupedMatmulBwdOperationDescriptor,
-       GetAttributeTensorFirstTokenOffsetQueryReturnsOne)
-{
-    makeFinalized();
-    auto desc = getDescriptor();
+    const auto param = GetParam();
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(
-        desc->getAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_FIRST_TOKEN_OFFSET_DESC,
-                           HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                           0,
-                           &elementCount,
-                           nullptr));
+        desc->getAttribute(param.attributeName, param.attributeType, 0, &elementCount, nullptr));
     ASSERT_EQ(elementCount, 1);
 }
 
-TEST_F(TestMoeGroupedMatmulBwdOperationDescriptor, GetAttributeTensorDweightQueryReturnsOne)
-{
-    makeFinalized();
-    auto desc = getDescriptor();
-
-    int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_DWEIGHT_DESC,
-                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                       0,
-                                       &elementCount,
-                                       nullptr));
-    ASSERT_EQ(elementCount, 1);
-}
-
-TEST_F(TestMoeGroupedMatmulBwdOperationDescriptor, GetAttributeComputeTypeQueryReturnsOne)
-{
-    makeFinalized();
-    auto desc = getDescriptor();
-
-    int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_MATH_PREC,
-                                       HIPDNN_TYPE_DATA_TYPE,
-                                       0,
-                                       &elementCount,
-                                       nullptr));
-    ASSERT_EQ(elementCount, 1);
-}
+INSTANTIATE_TEST_SUITE_P(
+    QueryableAttributes,
+    TestMoeGroupedMatmulBwdOperationDescriptorQuery,
+    ::testing::Values(QueryAttributeParam{HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_DOUTPUT_DESC,
+                                          HIPDNN_TYPE_BACKEND_DESCRIPTOR},
+                      QueryAttributeParam{HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_TOKEN_DESC,
+                                          HIPDNN_TYPE_BACKEND_DESCRIPTOR},
+                      QueryAttributeParam{
+                          HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_FIRST_TOKEN_OFFSET_DESC,
+                          HIPDNN_TYPE_BACKEND_DESCRIPTOR},
+                      QueryAttributeParam{HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_DWEIGHT_DESC,
+                                          HIPDNN_TYPE_BACKEND_DESCRIPTOR},
+                      QueryAttributeParam{HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_MATH_PREC,
+                                          HIPDNN_TYPE_DATA_TYPE}));
 
 TEST_F(TestMoeGroupedMatmulBwdOperationDescriptor, GetAttributeTensorQueryFailsNullElementCount)
 {

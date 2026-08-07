@@ -107,6 +107,9 @@ public:
 {% endif %}
 
 
+{# Only emitted when the operation has data fields to set; ops whose descriptor carries just
+   tensors and a compute type would otherwise get an empty hook and dead call sites. #}
+{% if op.data_fields %}
     void {{ op.effective_test_params_method_name }}() const
     {
         auto desc = getDescriptor();
@@ -129,11 +132,14 @@ public:
 {% endif %}
 {% endfor %}
     }
+{% endif %}
 
     void setRequiredAttributes() const
     {
         setTensors();
+{% if op.data_fields %}
         {{ op.effective_test_params_method_name }}();
+{% endif %}
 {% if op.has_compute_data_type %}
         auto computeType = HIPDNN_DATA_FLOAT;
         getDescriptor()->setAttribute(
@@ -260,7 +266,9 @@ TEST_F(Test{{ op.class_name }}, FinalizeFailsWithout{{ tf.pascal_name }}Tensor)
         {{ op.operation_attr_prefix }}_{{ tf2.attr_suffix }}, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &{{ tf2.member_name }});
 {% endif %}
 {% endfor %}
+{% if op.data_fields %}
     {{ op.effective_test_params_method_name }}();
+{% endif %}
 
     ASSERT_THROW_HIPDNN_STATUS(desc->finalize(), HIPDNN_STATUS_BAD_PARAM);
 }
@@ -373,7 +381,9 @@ TEST_F(Test{{ op.class_name }}, FinalizeFailsWithout{{ df.name | replace('_', ' 
 TEST_F(Test{{ op.class_name }}, FinalizeFailsWithoutComputeType)
 {
     setTensors();
+{% if op.data_fields %}
     {{ op.effective_test_params_method_name }}();
+{% endif %}
 {% for ef in op.enum_fields %}
     auto {{ ef.camel_name }} = static_cast<int64_t>({{ ef.enum_short_type }}::{{ ef.test_enum_value }});
     getDescriptor()->setAttribute(
@@ -392,7 +402,9 @@ TEST_F(Test{{ op.class_name }}, FinalizeFailsWithoutComputeType)
 TEST_F(Test{{ op.class_name }}, FinalizeFailsWithout{{ ef.enum_short_type }})
 {
     setTensors();
+{% if op.data_fields %}
     {{ op.effective_test_params_method_name }}();
+{% endif %}
     auto computeType = HIPDNN_DATA_FLOAT;
     getDescriptor()->setAttribute(
         {{ op.compute_data_type_attr }}, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
@@ -404,7 +416,9 @@ TEST_F(Test{{ op.class_name }}, FinalizeFailsWithout{{ ef.enum_short_type }})
 TEST_F(Test{{ op.class_name }}, FinalizeFailsWithout{{ cf.enum_short_type }})
 {
     setTensors();
+{% if op.data_fields %}
     {{ op.effective_test_params_method_name }}();
+{% endif %}
     auto computeType = HIPDNN_DATA_FLOAT;
     getDescriptor()->setAttribute(
         {{ op.compute_data_type_attr }}, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);

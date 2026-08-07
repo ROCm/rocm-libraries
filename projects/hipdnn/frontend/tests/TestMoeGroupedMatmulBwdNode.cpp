@@ -7,8 +7,6 @@
 #include <hipdnn_frontend/attributes/MoeGroupedMatmulBwdAttributes.hpp>
 #include <hipdnn_frontend/node/MoeGroupedMatmulBwdNode.hpp>
 
-#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
-
 #include "fake_backend/MockHipdnnBackend.hpp"
 
 #include <array>
@@ -53,7 +51,8 @@ MoeGroupedMatmulBwdAttributes createValidAttributes()
     auto dweightTensor = std::make_shared<TensorAttributes>();
     dweightTensor->set_uid(1913);
     dweightTensor->set_dim({2, 16, 32});
-    dweightTensor->set_stride({512, 32, 1});
+    // Column-major [K*N, 1, K], matching the layout infer_properties_node() generates.
+    dweightTensor->set_stride({512, 1, 16});
     dweightTensor->set_data_type(DataType::FLOAT);
     attrs.set_dweight(dweightTensor);
 
@@ -137,7 +136,7 @@ TEST(TestMoeGroupedMatmulBwdNode, PreValidateNodeMissingDoutputTensor)
     attrs.set_first_token_offset(firstTokenOffsetTensor);
     auto dweightTensor = std::make_shared<TensorAttributes>();
     dweightTensor->set_dim({2, 16, 32});
-    dweightTensor->set_stride({512, 32, 1});
+    dweightTensor->set_stride({512, 1, 16});
     dweightTensor->set_data_type(DataType::FLOAT);
     attrs.set_dweight(dweightTensor);
 
@@ -166,7 +165,7 @@ TEST(TestMoeGroupedMatmulBwdNode, PreValidateNodeMissingTokenTensor)
     attrs.set_first_token_offset(firstTokenOffsetTensor);
     auto dweightTensor = std::make_shared<TensorAttributes>();
     dweightTensor->set_dim({2, 16, 32});
-    dweightTensor->set_stride({512, 32, 1});
+    dweightTensor->set_stride({512, 1, 16});
     dweightTensor->set_data_type(DataType::FLOAT);
     attrs.set_dweight(dweightTensor);
 
@@ -195,7 +194,7 @@ TEST(TestMoeGroupedMatmulBwdNode, PreValidateNodeMissingFirstTokenOffsetTensor)
     attrs.set_token(tokenTensor);
     auto dweightTensor = std::make_shared<TensorAttributes>();
     dweightTensor->set_dim({2, 16, 32});
-    dweightTensor->set_stride({512, 32, 1});
+    dweightTensor->set_stride({512, 1, 16});
     dweightTensor->set_data_type(DataType::FLOAT);
     attrs.set_dweight(dweightTensor);
 
@@ -236,9 +235,54 @@ TEST(TestMoeGroupedMatmulBwdNode, PreValidateNodeMissingDweightTensor)
     EXPECT_EQ(error.code, error_code_t::ATTRIBUTE_NOT_SET);
 }
 
-TEST(TestMoeGroupedMatmulBwdNode, PreValidateNodeAllValuesSet)
+// --- PreValidateNode: empty tensor dimensions ---
+
+TEST(TestMoeGroupedMatmulBwdNode, PreValidateNodeRejectsEmptyDoutputDims)
 {
     auto attrs = createValidAttributes();
+    attrs.get_doutput()->set_dim({});
+    attrs.get_doutput()->set_stride({});
+
+    const GraphAttributes graphAttributes;
+    const MoeGroupedMatmulBwdNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::ATTRIBUTE_NOT_SET);
+}
+
+TEST(TestMoeGroupedMatmulBwdNode, PreValidateNodeRejectsEmptyTokenDims)
+{
+    auto attrs = createValidAttributes();
+    attrs.get_token()->set_dim({});
+    attrs.get_token()->set_stride({});
+
+    const GraphAttributes graphAttributes;
+    const MoeGroupedMatmulBwdNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::ATTRIBUTE_NOT_SET);
+}
+
+TEST(TestMoeGroupedMatmulBwdNode, PreValidateNodeRejectsEmptyFirstTokenOffsetDims)
+{
+    auto attrs = createValidAttributes();
+    attrs.get_first_token_offset()->set_dim({});
+    attrs.get_first_token_offset()->set_stride({});
+
+    const GraphAttributes graphAttributes;
+    const MoeGroupedMatmulBwdNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::ATTRIBUTE_NOT_SET);
+}
+
+TEST(TestMoeGroupedMatmulBwdNode, PreValidateNodeAllowsEmptyDweightDims)
+{
+    auto attrs = createValidAttributes();
+    // Unlike the inputs above, dweight may arrive with empty dims: its shape is inferred in
+    // infer_properties_node(), so pre_validate_node() must not reject it here.
+    attrs.get_dweight()->set_dim({});
+    attrs.get_dweight()->set_stride({});
 
     const GraphAttributes graphAttributes;
     const MoeGroupedMatmulBwdNode node(std::move(attrs), graphAttributes);
@@ -247,33 +291,8 @@ TEST(TestMoeGroupedMatmulBwdNode, PreValidateNodeAllValuesSet)
     EXPECT_EQ(error.code, error_code_t::OK) << error.err_msg;
 }
 
-// --- PreValidateNode: dweight/token/doutput consistency checks ---
-
-TEST(TestMoeGroupedMatmulBwdNode, PreValidateNodeRejectsDweightKDimensionMismatch)
-{
-    auto attrs = createValidAttributes();
-    // dweight K dimension (dim[1]) no longer matches token K dimension (dim[2] == 16)
-    attrs.get_dweight()->set_dim({2, 8, 32});
-
-    const GraphAttributes graphAttributes;
-    const MoeGroupedMatmulBwdNode node(std::move(attrs), graphAttributes);
-
-    auto error = node.pre_validate_node();
-    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
-}
-
-TEST(TestMoeGroupedMatmulBwdNode, PreValidateNodeRejectsDweightNDimensionMismatch)
-{
-    auto attrs = createValidAttributes();
-    // dweight N dimension (dim[2]) no longer matches doutput N dimension (dim[2] == 32)
-    attrs.get_dweight()->set_dim({2, 16, 64});
-
-    const GraphAttributes graphAttributes;
-    const MoeGroupedMatmulBwdNode node(std::move(attrs), graphAttributes);
-
-    auto error = node.pre_validate_node();
-    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
-}
+// --- PreValidateNode: token/doutput/first_token_offset consistency checks ---
+// dweight shape consistency is checked in infer_properties_node(), not here.
 
 TEST(TestMoeGroupedMatmulBwdNode, PreValidateNodeRejectsTokenCountMismatch)
 {
@@ -281,20 +300,6 @@ TEST(TestMoeGroupedMatmulBwdNode, PreValidateNodeRejectsTokenCountMismatch)
     // doutput token-count dimension (dim[1] == 8) no longer matches token's dim[1]
     attrs.get_token()->set_dim({1, 4, 16});
     attrs.get_token()->set_stride({64, 16, 1});
-
-    const GraphAttributes graphAttributes;
-    const MoeGroupedMatmulBwdNode node(std::move(attrs), graphAttributes);
-
-    auto error = node.pre_validate_node();
-    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
-}
-
-TEST(TestMoeGroupedMatmulBwdNode, PreValidateNodeRejectsExpertCountMismatch)
-{
-    auto attrs = createValidAttributes();
-    // first_token_offset expert-count dimension (dim[0]) no longer matches dweight's dim[0] (== 2)
-    attrs.get_first_token_offset()->set_dim({3, 1, 1});
-    attrs.get_first_token_offset()->set_stride({1, 1, 1});
 
     const GraphAttributes graphAttributes;
     const MoeGroupedMatmulBwdNode node(std::move(attrs), graphAttributes);
@@ -345,14 +350,11 @@ TEST(TestMoeGroupedMatmulBwdNode, PreValidateNodeRejectsTokenNonSingletonLeading
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
 }
 
-TEST(TestMoeGroupedMatmulBwdNode, PreValidateNodeRejectsDweightZeroExpertCount)
+TEST(TestMoeGroupedMatmulBwdNode, PreValidateNodeRejectsZeroExpertCount)
 {
     auto attrs = createValidAttributes();
-    // dweight dim[0] (expert count) must describe at least one expert. Zero out
-    // first_token_offset's expert count too, so the later expert-count-match check can't
-    // also fire on 0 vs 2 and mask a deleted zero-expert check.
-    attrs.get_dweight()->set_dim({0, 16, 32});
-    attrs.get_dweight()->set_stride({512, 32, 1});
+    // first_token_offset dim[0] is the expert count and must describe at least one expert;
+    // it becomes dweight's leading dimension in infer_properties_node().
     attrs.get_first_token_offset()->set_dim({0, 1, 1});
     attrs.get_first_token_offset()->set_stride({1, 1, 1});
 
@@ -393,6 +395,35 @@ TEST(TestMoeGroupedMatmulBwdNode, PreValidateNodeRejectsTokenRankMismatch)
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
 }
 
+TEST(TestMoeGroupedMatmulBwdNode, PreValidateNodeRejectsFirstTokenOffsetRankMismatch)
+{
+    auto attrs = createValidAttributes();
+    // first_token_offset rank 4 passes the minimum-rank (>= 3) check but must still be
+    // rejected by the exact-rank-3 check.
+    attrs.get_first_token_offset()->set_dim({2, 1, 1, 1});
+    attrs.get_first_token_offset()->set_stride({1, 1, 1, 1});
+
+    const GraphAttributes graphAttributes;
+    const MoeGroupedMatmulBwdNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestMoeGroupedMatmulBwdNode, PreValidateNodeRejectsFirstTokenOffsetTrailingShapeMismatch)
+{
+    auto attrs = createValidAttributes();
+    // first_token_offset must have trailing dimensions [1, 1]; mutate dim[1].
+    attrs.get_first_token_offset()->set_dim({2, 2, 1});
+    attrs.get_first_token_offset()->set_stride({2, 1, 1});
+
+    const GraphAttributes graphAttributes;
+    const MoeGroupedMatmulBwdNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
+
 // --- InferPropertiesNode ---
 
 TEST(TestMoeGroupedMatmulBwdNode, InferPropertiesNode)
@@ -417,23 +448,81 @@ TEST(TestMoeGroupedMatmulBwdNode, InferPropertiesNodeGeneratesDweightStrides)
     auto error = node.infer_properties_node();
     ASSERT_EQ(error.code, error_code_t::OK) << error.err_msg;
 
-    const auto dweightDim = node.attributes.get_dweight()->get_dim();
-    EXPECT_EQ(node.attributes.get_dweight()->get_stride(),
-              hipdnn_data_sdk::utilities::generateStrides(dweightDim));
+    // Column-major [K*N, 1, K] for dims [2, 16, 32]
+    const std::vector<int64_t> expectedStrides{512, 1, 16};
+    EXPECT_EQ(node.attributes.get_dweight()->get_stride(), expectedStrides);
 }
 
-TEST(TestMoeGroupedMatmulBwdNode, InferPropertiesNodeRejectsUnsetDweightDims)
+TEST(TestMoeGroupedMatmulBwdNode, InferPropertiesNodeInfersDweightDimsWhenUnset)
 {
     auto attrs = createValidAttributes();
-    // dweight dimensions are caller-supplied and never inferred (expert count is not
-    // derivable from any input tensor).
+    // dweight = [first_token_offset.dim[0], token.dim[2], doutput.dim[2]] == [2, 16, 32]
     attrs.get_dweight()->set_dim({});
+    attrs.get_dweight()->set_stride({});
 
     const GraphAttributes graphAttributes;
     MoeGroupedMatmulBwdNode node(std::move(attrs), graphAttributes);
 
     auto error = node.infer_properties_node();
-    EXPECT_EQ(error.code, error_code_t::ATTRIBUTE_NOT_SET);
+    ASSERT_EQ(error.code, error_code_t::OK) << error.err_msg;
+
+    const std::vector<int64_t> expectedDims{2, 16, 32};
+    const std::vector<int64_t> expectedStrides{512, 1, 16};
+    EXPECT_EQ(node.attributes.get_dweight()->get_dim(), expectedDims);
+    EXPECT_EQ(node.attributes.get_dweight()->get_stride(), expectedStrides);
+}
+
+TEST(TestMoeGroupedMatmulBwdNode, InferPropertiesNodeRejectsDweightKDimensionMismatch)
+{
+    auto attrs = createValidAttributes();
+    // dweight K dimension (dim[1]) no longer matches token K dimension (dim[2] == 16)
+    attrs.get_dweight()->set_dim({2, 8, 32});
+
+    const GraphAttributes graphAttributes;
+    MoeGroupedMatmulBwdNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.infer_properties_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestMoeGroupedMatmulBwdNode, InferPropertiesNodeRejectsDweightNDimensionMismatch)
+{
+    auto attrs = createValidAttributes();
+    // dweight N dimension (dim[2]) no longer matches doutput N dimension (dim[2] == 32)
+    attrs.get_dweight()->set_dim({2, 16, 64});
+
+    const GraphAttributes graphAttributes;
+    MoeGroupedMatmulBwdNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.infer_properties_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestMoeGroupedMatmulBwdNode, InferPropertiesNodeRejectsExpertCountMismatch)
+{
+    auto attrs = createValidAttributes();
+    // dweight expert count (dim[0]) no longer matches first_token_offset's dim[0] (== 2)
+    attrs.get_dweight()->set_dim({3, 16, 32});
+
+    const GraphAttributes graphAttributes;
+    MoeGroupedMatmulBwdNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.infer_properties_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestMoeGroupedMatmulBwdNode, InferPropertiesNodeRejectsDweightRankMismatch)
+{
+    auto attrs = createValidAttributes();
+    // A caller-supplied dweight of the wrong rank cannot match the inferred rank-3 shape.
+    attrs.get_dweight()->set_dim({2, 16});
+    attrs.get_dweight()->set_stride({16, 1});
+
+    const GraphAttributes graphAttributes;
+    MoeGroupedMatmulBwdNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.infer_properties_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
 }
 
 // --- GatherHipdnnTensors ---

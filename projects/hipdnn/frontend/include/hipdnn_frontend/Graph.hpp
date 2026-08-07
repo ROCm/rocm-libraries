@@ -5488,9 +5488,9 @@ public:
      * @brief Performs backward mixture-of-experts grouped matrix multiplication.
      *
      * Computes `dweight` from `dOutput`, `token`, and `firstTokenOffset`. NONE-mode
-     * routing only — there is no mode/top_k/token-index/token-ks support. `dweight`
-     * is caller-supplied and validated (shape `[experts, K, N]`); the expert count
-     * cannot be derived from any input tensor, so it is not inferred.
+     * routing only — there is no mode/top_k/token-index/token-ks support. `dweight` is
+     * shaped `[firstTokenOffset.dim[0], token.dim[2], dOutput.dim[2]]`; leaving its
+     * dimensions unset infers that shape, and supplying them validates against it.
      *
      * @param dOutput Output gradient, shaped `[1, tokens, N]`.
      * @param token Token activations, shaped `[1, tokens, K]`.
@@ -5510,15 +5510,17 @@ public:
         {
             attributes.set_name("MoeGroupedMatmulBwd_" + std::to_string(_sub_nodes.size()));
         }
-        if(dOutput->get_name().empty())
+        // Null tensors are tolerated here so the error surfaces from pre_validate_node() as a
+        // missing-input error rather than a crash while auto-naming.
+        if(dOutput && dOutput->get_name().empty())
         {
             dOutput->set_name(attributes.get_name() + "::DOUTPUT");
         }
-        if(token->get_name().empty())
+        if(token && token->get_name().empty())
         {
             token->set_name(attributes.get_name() + "::TOKEN");
         }
-        if(firstTokenOffset->get_name().empty())
+        if(firstTokenOffset && firstTokenOffset->get_name().empty())
         {
             firstTokenOffset->set_name(attributes.get_name() + "::FIRST_TOKEN_OFFSET");
         }

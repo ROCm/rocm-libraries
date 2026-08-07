@@ -28,6 +28,7 @@ constexpr std::array<int64_t, 3> K_MOE_GROUPED_MATMUL_BWD_TENSOR_FIRST_TOKEN_OFF
 
 constexpr int64_t K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_UID = 1913;
 constexpr std::array<int64_t, 3> K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_DIMS = {2, 16, 32};
-constexpr std::array<int64_t, 3> K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_STRIDES = {512, 32, 1};
+// Column-major [K*N, 1, K], matching the layout MoeGroupedMatmulBwdNode infers for dweight.
+constexpr std::array<int64_t, 3> K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_STRIDES = {512, 1, 16};
 
 } // namespace hipdnn_tests::constants

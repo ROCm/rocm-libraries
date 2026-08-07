@@ -48,7 +48,8 @@ protected:
         return attrs;
     }
 
-    static std::shared_ptr<TestableGraphLifting> buildGraph(MoeGroupedMatmulBwdAttributes attrs)
+    static std::shared_ptr<TestableGraphLifting> buildGraph(MoeGroupedMatmulBwdAttributes attrs,
+                                                            bool setDweightStride = true)
     {
         auto graph = std::make_shared<TestableGraphLifting>();
         graph->set_name("MoeGroupedMatmulBwdLiftingTestGraph")
@@ -82,8 +83,11 @@ protected:
         dweight->set_uid(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_UID)
             .set_output(true)
             .set_name("dweight");
-        dweight->set_dim(toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_DIMS))
-            .set_stride(toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_STRIDES));
+        dweight->set_dim(toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_DIMS));
+        if(setDweightStride)
+        {
+            dweight->set_stride(toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_STRIDES));
+        }
 
         return graph;
     }
@@ -168,6 +172,10 @@ TEST_F(IntegrationMoeGroupedMatmulBwdDescriptorLifting, BasicMoeGroupedMatmulBwd
 
     // Verify operation name
     EXPECT_EQ(opNode->attributes.get_name(), "test_op");
+
+    // The operation-level compute type was left unset, so fill_from_context() takes the
+    // graph-level FLOAT; verify that survives the round-trip.
+    EXPECT_EQ(opNode->attributes.get_compute_data_type(), DataType::FLOAT);
 }
 
 // Verifies an operation-level compute type survives descriptor lifting.
@@ -183,6 +191,34 @@ TEST_F(IntegrationMoeGroupedMatmulBwdDescriptorLifting, OperationComputeDataType
     auto* opNode = dynamic_cast<MoeGroupedMatmulBwdNode*>(subNodes[0].get());
     ASSERT_NE(opNode, nullptr);
     EXPECT_EQ(opNode->attributes.get_compute_data_type(), DataType::HALF);
+}
+
+// Exercises JSON serialization and deserialization. NONE mode is the only supported
+// scenario for this op, so unlike the forward op's JsonRoundTripsAllModeScenarios there
+// are no mode variants to loop over.
+TEST_F(IntegrationMoeGroupedMatmulBwdDescriptorLifting, JsonRoundTripsBasicScenario)
+{
+    auto originalGraph = buildGraph(createAttributes());
+
+    auto result = originalGraph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    std::string jsonData;
+    result = originalGraph->serialize(jsonData);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    ASSERT_FALSE(jsonData.empty());
+
+    auto liftedGraph = std::make_shared<TestableGraphLifting>();
+    result = liftedGraph->deserialize(_handle, jsonData);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    const auto tensorMap = liftedGraph->getTensorsByUid();
+    ASSERT_EQ(tensorMap.size(), 4u);
+    auto& subNodes = liftedGraph->getSubNodes();
+    ASSERT_EQ(subNodes.size(), 1u);
+    auto* opNode = dynamic_cast<MoeGroupedMatmulBwdNode*>(subNodes[0].get());
+    ASSERT_NE(opNode, nullptr);
+    EXPECT_EQ(opNode->attributes.get_name(), "test_op");
 }
 
 // After lifting, verifies tensor objects in the node attributes are the same
@@ -373,6 +409,31 @@ TEST_F(IntegrationMoeGroupedMatmulBwdDescriptorLifting, AutoAssignedUidsPreserve
     EXPECT_EQ(opNode->attributes.get_dweight()->get_stride(),
               toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_STRIDES));
     EXPECT_EQ(opNode->attributes.get_dweight()->get_name(), "dweight");
+}
+
+// Builds a MoeGroupedMatmulBwd graph with dweight strides left unset so the full
+// lowering pipeline exercises infer_properties_node()'s stride-inference branch, then
+// verifies the row-major strides survive the lifting round-trip.
+TEST_F(IntegrationMoeGroupedMatmulBwdDescriptorLifting, InferredDweightStridesSurviveRoundTrip)
+{
+    auto originalGraph = buildGraph(createAttributes(), false);
+
+    auto liftedGraph = liftGraph(*originalGraph, _handle);
+    ASSERT_NE(liftedGraph, nullptr);
+
+    auto tensorMap = liftedGraph->getTensorsByUid();
+    ASSERT_NE(tensorMap.count(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_UID), 0u);
+    EXPECT_EQ(tensorMap[K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_UID]->get_dim(),
+              toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_DIMS));
+    EXPECT_EQ(tensorMap[K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_UID]->get_stride(),
+              toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_STRIDES));
+
+    auto& subNodes = liftedGraph->getSubNodes();
+    ASSERT_EQ(subNodes.size(), 1u);
+    auto* opNode = dynamic_cast<MoeGroupedMatmulBwdNode*>(subNodes[0].get());
+    ASSERT_NE(opNode, nullptr);
+    EXPECT_EQ(opNode->attributes.get_dweight()->get_stride(),
+              toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_STRIDES));
 }
 
 } // namespace
