@@ -6807,6 +6807,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                # abs prefetch is off (also -1 for Stream-K / non-gfx1250).
                                "SwInstructionPrefetchAbsBaseSgpr": int(
                                    self.states.swPrefetchAbsBaseSgpr),
+                               # Arch capability read by Gfx1250HazardPass: XNACK replay
+                               # can reorder in-flight memory ops, so the pass inserts
+                               # s_wait_xcnt drains to order them.
+                               "RequiresXCntForVolatileVMEM": bool(
+                                   self.states.archCaps["RequiresXCntForVolatileVMEM"]),
                               }
 
       # Region-clone jobs for StinkyTofu RegionClonePass.
