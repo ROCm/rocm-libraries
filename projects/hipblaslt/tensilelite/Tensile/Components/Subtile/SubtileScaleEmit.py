@@ -494,12 +494,13 @@ def globalReadDoScaleSubtile(tc, writer, kernel):
   return module
 
 
-def _patchMxsbDescriptorFields(module, comp, group1, kernel, writer, targetTi):
-  """Patch tile1, dim1, stride in the aliased MXSA descriptor for dimension targetTi.
+def _setMxsAliasedDescriptorDim(module, comp, group1, kernel, writer, targetTi):
+  """Set tile1, dim1, and stride in the aliased MXS descriptor for dimension targetTi.
 
-  Called with targetTi=1 to switch from MXSA to MXSB layout, and
-  targetTi=0 to restore MXSA layout after the MXSB load. Only emits
-  instructions when the A and B dimensions actually differ.
+  MXSB's Group1 is aliased onto MXSA's.  Called with targetTi=1 to
+  switch to MXSB layout before loading, and targetTi=0 to restore
+  MXSA layout afterwards.  Only emits instructions when the A and B
+  dimensions actually differ.
   """
   otherTi = 1 - targetTi
   targetTc = "A" if targetTi == 0 else "B"
@@ -553,7 +554,7 @@ def _globalReadDoScaleSubtileTDM(tc, writer, kernel):
       module.add(SAddU32(dst=sgpr(f"{group0}+1"), src0=sgpr(f"{group0}+1"),
                  src1=ldsDelta, comment=f"LDS addr += {ldsDelta} (MXSA->MXSB)"))
     # Patch tile1, dim1, and stride for the B dimension when MT0 != MT1.
-    _patchMxsbDescriptorFields(module, comp, group1, kernel, writer, targetTi=1)
+    _setMxsAliasedDescriptorDim(module, comp, group1, kernel, writer, targetTi=1)
 
   module.addComment0("Scale GR: %s (TDM: tensor_load_to_lds)" % scaleTc)
   comp.setMemToken([writer.states.ldsTensorTokenIdx])
@@ -566,7 +567,7 @@ def _globalReadDoScaleSubtileTDM(tc, writer, kernel):
       module.add(SSubU32(dst=sgpr(f"{group0}+1"), src0=sgpr(f"{group0}+1"),
                  src1=ldsDelta, comment=f"LDS addr -= {ldsDelta} (MXSB->MXSA)"))
     # Restore MXSA descriptor fields
-    _patchMxsbDescriptorFields(module, comp, group1, kernel, writer, targetTi=0)
+    _setMxsAliasedDescriptorDim(module, comp, group1, kernel, writer, targetTi=0)
 
   return module
 
