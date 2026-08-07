@@ -14,10 +14,8 @@ program's error code.
 """
 
 import argparse
-import glob
 import os
 import platform
-import shutil
 import subprocess
 
 
@@ -48,15 +46,19 @@ def main():
             codesign = ["codesign", "-f", "-s", args.codesign_identity, exe]
             subprocess.check_call(codesign, env={})
 
-    # On Windows, stage the ROCm runtime DLLs next to each test exe. The loader
-    # searches the exe's own directory before System32, so this ensures the test
-    # loads the artifact's HIP runtime and not a driver-installed amdhip64_7.dll
-    # that would otherwise shadow it from System32. See TheRock#7132.
+    # On Windows, put the ROCm runtime dir ahead of System32 in the DLL search
+    # order so the test loads the artifact's HIP runtime and not a driver-installed
+    # amdhip64_7.dll that would otherwise shadow it (System32 is searched before
+    # PATH). SetDllDirectoryW applies to this process and the child we spawn below,
+    # without copying DLLs into the artifact. See TheRock#7132.
     if args.dll_dir and platform.system() == "Windows":
-        for exe in filter(isTestExe, commandLine):
-            exe_dir = os.path.dirname(exe)
-            for dll in glob.glob(os.path.join(args.dll_dir, "*.dll")):
-                shutil.copy2(dll, exe_dir)
+        import ctypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.SetDllDirectoryW.argtypes = [ctypes.c_wchar_p]
+        kernel32.SetDllDirectoryW.restype = ctypes.c_bool
+        if not kernel32.SetDllDirectoryW(args.dll_dir):
+            raise ctypes.WinError(ctypes.get_last_error())
 
     # Extract environment variables into a dictionary
     env = {k: v for (k, v) in map(lambda s: s.split("=", 1), args.env)}
