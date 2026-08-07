@@ -191,5 +191,57 @@ def gen_conv_ops_library() -> List[CKGroupedConvFwdOp]:
     return _substitute_templated_args(op_instances)
 
 
+# Only the bias-less WMMA header is enumerated. The other WMMA headers are
+# epilogue-fusion families needing a non-empty Ds tuple, which PyTorch's conv
+# lowering never supplies; `..._wave_transfer_instance.hpp` is Ds-free but writes
+# into the diverging tail (see parse_instances) and so cannot share this parser.
+_WMMA_INSTANCE_HEADER = "device_grouped_conv_fwd_wmma_cshufflev3_instance.hpp"
+
+
+@lru_cache(None)
+def gen_conv_ops_library_wmma() -> List[CKGroupedConvFwdOp]:
+    """
+    Parse the gfx1250 WMMA Grouped Convolution Forward instances.
+
+    These are a separate product from the XDL instances above: purpose-built
+    16x16 warp-tile kernels rather than XDL shapes that happen to lower to WMMA.
+    f16/bf16 only -- CK ships no f32 WMMA conv instance at this time.
+    """
+    ck_library_dir = _ck_conv_instances_path()
+    if not ck_library_dir:
+        return []
+
+    grep_result = subprocess.run(
+        [
+            "grep",
+            "-in",
+            "DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3",
+            os.path.join(ck_library_dir, _WMMA_INSTANCE_HEADER),
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    op_instances = parse_instances(
+        grep_result.stdout.strip().split("\n"),
+        class_name="DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3",
+    )
+    # Guard the dtype rather than trusting the filename: a header rename or an
+    # added dtype would otherwise let extra dtypes through unnoticed.
+    op_instances = [
+        op
+        for op in op_instances
+        if op.a_element_dtype in ("F16", "BF16")
+        and op.b_element_dtype in ("F16", "BF16")
+    ]
+
+    log.debug("ck wmma conv instances from library: %d", len(op_instances))
+
+    return [
+        replace(instance, is_wmma=True)
+        for instance in _substitute_templated_args(op_instances)
+    ]
+
+
 if __name__ == "__main__":
     print(gen_conv_ops_library())
