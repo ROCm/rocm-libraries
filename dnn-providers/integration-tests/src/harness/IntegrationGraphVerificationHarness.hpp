@@ -17,6 +17,7 @@
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
+
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceMiopenRmsValidation.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
@@ -35,8 +36,8 @@
 #include "harness/SupportMatrixCollector.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/TomlGuards.hpp"
-#include "harness/input-init/SynthesisConfig.hpp"
-#include "harness/input-init/SynthesizeInputs.hpp"
+#include "harness/input-init/FillInputs.hpp"
+#include "harness/input-init/InputFillRecipes.hpp"
 #include "harness/tolerance/ToleranceResolver.hpp"
 
 namespace hipdnn_integration_tests
@@ -120,7 +121,7 @@ protected:
     int _deviceId = 0;
     std::string _testCaseNote;
     std::string _testCaseLayout;
-    SynthesisConfig _synthesisConfig;
+    InputFillRecipes _inputFillRecipes;
     std::unordered_map<int64_t, std::string> _tensorIdToNameMap;
     std::unordered_map<int64_t, std::unique_ptr<hipdnn_test_sdk::utilities::IReferenceValidation>>
         _tensorIdToValidatorMap;
@@ -318,32 +319,41 @@ protected:
         });
     }
 
-    SynthesisConfig& synthesis()
+    InputFillRecipes& inputFillRecipes()
     {
-        return _synthesisConfig;
+        return _inputFillRecipes;
     }
 
-    virtual SynthesisResult initializeBundle(const hipdnn_frontend::graph::Graph& graph,
-                                             hipdnn_test_sdk::utilities::GraphTensorBundle& bundle)
+    virtual FillResult initializeBundle(const hipdnn_frontend::graph::Graph& graph,
+                                        hipdnn_test_sdk::utilities::GraphTensorBundle& bundle)
     {
         bundle.sentinelFillOutputTensors();
 
         auto [serialized, serErr] = graph.to_binary();
         if(serErr.code != hipdnn_frontend::ErrorCode::OK || serialized.empty())
         {
-            return SynthesisResult::unsupported("Graph serialization failed");
+            return FillResult::unsupported("Graph serialization failed");
         }
 
         const auto* fb = hipdnn_flatbuffers_sdk::data_objects::GetGraph(serialized.data());
         if(fb == nullptr || fb->nodes() == nullptr)
         {
-            return SynthesisResult::unsupported("Graph flatbuffer is invalid");
+            return FillResult::unsupported("Graph flatbuffer is invalid");
         }
 
-        return synthesizeGraphInputs(*fb, bundle);
+        return fillGraphInputs(*fb, bundle);
     }
 
-private:
+    // Ranks engines for `graph` and either pins TestConfig's --test-engine as the
+    // preferred engine (leaving the graph ready for create_execution_plans()/
+    // build_plans(), or for Graph::build()) or GTEST_SKIP()s/FAILs the current
+    // test when no suitable engine is available. GTEST_SKIP()/FAIL() only unwind
+    // this function, not the caller's - callers MUST check
+    // ::testing::Test::IsSkipped() (and, if they don't already ASSERT/FAIL
+    // through to a return, HasFatalFailure()) and return immediately afterward.
+    // Protected (rather than private) so callers that build/serialize a plan
+    // manually instead of going through verifyGraph() (e.g. conv serialize
+    // round-trip) can check engine support themselves first.
     void ensureEngineSupport(hipdnn_frontend::graph::Graph& graph)
     {
         checkEngineSupportOrSkip(graph);
@@ -399,8 +409,8 @@ private:
         }
     }
 
-    SynthesisResult synthesizeGraphInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& fb,
-                                          hipdnn_test_sdk::utilities::GraphTensorBundle& bundle)
+    FillResult fillGraphInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& fb,
+                               hipdnn_test_sdk::utilities::GraphTensorBundle& bundle)
     {
         std::vector<int64_t> leafInputUids;
         for(const auto& [uid, tensor] : bundle.tensors)
@@ -411,24 +421,24 @@ private:
             }
         }
 
-        auto synthResult = synthesizeInputs(fb, bundle.tensors, leafInputUids, _synthesisConfig);
-        if(!synthResult.filled)
+        auto fillResult = fillInputs(fb, bundle.tensors, leafInputUids, _inputFillRecipes);
+        if(!fillResult.filled)
         {
-            return synthResult;
+            return fillResult;
         }
 
-        auto missing = _synthesisConfig.unfilled(leafInputUids);
+        auto missing = _inputFillRecipes.unfilled(leafInputUids);
         if(!missing.empty())
         {
-            std::string msg = "cannot synthesize:";
+            std::string msg = "unfilled inputs:";
             for(const int64_t uid : missing)
             {
                 msg += " uid=" + std::to_string(uid);
             }
-            return SynthesisResult::unsupported(msg);
+            return FillResult::unsupported(msg);
         }
 
-        return SynthesisResult::ok();
+        return FillResult::ok();
     }
 
 public:
@@ -492,11 +502,11 @@ public:
         meta["operation"] = suiteName;
         meta["generator"] = "capture-bundles";
         meta["generator_version"] = "1.0.0";
-        meta["seed"] = _synthesisConfig.globalSeed();
+        meta["seed"] = _inputFillRecipes.globalSeed();
 
-        if(!_synthesisConfig.fills().empty())
+        if(!_inputFillRecipes.fills().empty())
         {
-            meta["inputs"] = _synthesisConfig.toJson();
+            meta["inputs"] = _inputFillRecipes.toJson();
         }
 
         meta["notes"] = "Captured from C++ graph test " + suiteName + "." + caseName;
@@ -569,10 +579,17 @@ public:
             return false;
         }
 
-        refBundle.tensors.insert(
-            {tensorId, hipdnn_test_sdk::utilities::createTensorFromAttribute(*tensorAttr)});
-        gpuBundle.tensors.insert(
-            {tensorId, hipdnn_test_sdk::utilities::createTensorFromAttribute(*tensorAttr)});
+        // The reference bundle keeps one element per byte for element-wise access;
+        // the GPU bundle uses the packed device layout for sub-byte types (e.g. FP4
+        // as two 4-bit values per byte) so the buffer can be consumed directly by
+        // the kernel. Both are filled from the same seed, so they hold identical
+        // logical values.
+        refBundle.addTensor(*tensorAttr,
+                            hipdnn_test_sdk::utilities::createTensorFromAttribute(
+                                *tensorAttr, /*packSubByteElements=*/false));
+        gpuBundle.addTensor(*tensorAttr,
+                            hipdnn_test_sdk::utilities::createTensorFromAttribute(
+                                *tensorAttr, /*packSubByteElements=*/true));
         _tensorIdToNameMap.insert({tensorId, tensorAttr->get_name()});
 
         return true;

@@ -266,4 +266,7 @@ public:
         return logicallyEqualsImpl(other);
     }
 };
+
+typedef LayernormBackwardAttributes
+    Layernorm_backward_attributes; // NOLINT(readability-identifier-naming)
 } // namespace hipdnn_frontend::graph

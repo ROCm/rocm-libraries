@@ -23,6 +23,7 @@
 * ************************************************************************ */
 #pragma once
 #include "rocsparse_arguments.hpp"
+#include <rocsparse/rocsparse-config.h>
 
 // clang-format off
 #ifdef ROCSPARSE_WITH_ILDLT0
@@ -81,6 +82,7 @@ ROCSPARSE_DO_ROUTINE(csrmm_batched)					\
 ROCSPARSE_DO_ROUTINE(cscmm)					\
 ROCSPARSE_DO_ROUTINE(cscmm_batched)					\
 ROCSPARSE_DO_ROUTINE(csrsm)					\
+ROCSPARSE_DO_ROUTINE(cscsm)					\
 ROCSPARSE_DO_ROUTINE(csrsort)					\
 ROCSPARSE_DO_ROUTINE(csrsv)					\
 ROCSPARSE_DO_ROUTINE(cscsv)					\

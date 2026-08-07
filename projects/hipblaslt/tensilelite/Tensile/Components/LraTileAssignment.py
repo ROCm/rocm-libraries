@@ -29,7 +29,7 @@ from rocisa.functions import vectorStaticRemainder, \
     vectorStaticDivideAndRemainder, vectorStaticDivide, vectorStaticMultiply, \
     vectorStaticMultiplyAdd
 
-from ..Component import LraTileAssignment, LraTileProperties
+from ..Component import LraTileAssignment, LraTileProperties, LocalRead
 from ..Common import roundUp, log2, ceilDivide
 from ..Common.DataType import DataType
 from dataclasses import dataclass
@@ -254,6 +254,16 @@ class LraTileAssignmentTransposedMFMAFP32(LraTileAssignmentTransposedMFMA):
               "DirectToVgprB": False,
               "ProblemType": {
                   "DataType": DataType("s")
+              }}
+
+class LraTileAssignmentTransposedMFMAFP32C(LraTileAssignmentTransposedMFMA):
+    # complex has no LDS-transpose path (numBytes=8); __call__ delegates to
+    # LraTileAssignmentMFMA, matching the non-LDSTr arch (e.g. gfx950) complex path.
+    kernel = {"EnableMatrixInstruction": True,
+              "DirectToVgprA": False,
+              "DirectToVgprB": False,
+              "ProblemType": {
+                  "DataType": DataType("c")
               }}
 
 class LraTileAssignmentTransposedMFMAFP16(LraTileAssignmentTransposedMFMA):
@@ -744,6 +754,23 @@ class LraTileAssignmentMFMA(LraTileAssignment):
         # get constant parameter
         tc               = tP["tensorChar"]
         tile01           = tP["tile01Idx"]
+        # tileSpan is the ds_load-halving gate: it MUST match LocalRead.getMxsTileSpanInfo
+        # exactly so the load layout produced here agrees with the packed VGPR layout /
+        # matrix_*_scale:N select the WMMA emits. Rather than re-deriving the gate (which
+        # risks drift, and previously mixed tc[3]-aliased MIWaveTile/VectorWidth with
+        # tile01-indexed MatrixInst), call getMxsTileSpanInfo as the single source of truth.
+        # It internally requires: MXS tensor, HasWMMA_V3 + InMemorySwizzle, ratio >= 2 and
+        # even, and the tile-axis matrix-instr size at the wave midpoint. Wave-count neutral.
+        #
+        # tileSpanWaveSplit adds MIWaveGroup>1 and picks between the two load layouts (both put
+        # block 2g in the lower half-wave and partner block 2g+1 in the upper half-wave):
+        #   - MIWaveGroup==1 (tileSpan and not tileSpanWaveSplit): non-split. nIdx = wtid, so a
+        #     single wave's lanes 0..MI-1 / MI..2MI-1 directly cover the two blocks; no hi offset.
+        #   - MIWaveGroup>1 (tileSpanWaveSplit): wave-split. nIdx = wtid % MI, and the num1DWaves>1
+        #     hiOffset path below explicitly places the partner block into the upper half-wave.
+        tileSpan = LocalRead.find(writer).getMxsTileSpanInfo(kernel, tc, tile01, writer.states.asmCaps) is not None
+        tileSpanWaveSplit = tileSpan and (kernel["MIWaveGroup"][tile01] > 1)
+
         waveWidth        = writer.states.kernel["WavefrontSize"]
 
         noUnrollOffset = writer.states.asmCaps["HasWMMA_V1"] or ("MXS" in tc)
@@ -849,6 +876,19 @@ class LraTileAssignmentMFMA(LraTileAssignment):
         else:
            strideWave = matrixInstT * num1DBlocks * strideTile * vectorWidth
 
+        # When one wave's read spans a whole LDS component, the component jump lives in the wave
+        # stride. A narrower VW straddles components; then LocalRead applies the jump instead, so
+        # keep the baseline wave stride. A/B only: MX scales keep their own stride (relocated, not split).
+        segILWaveSpansComp = False
+        # bcontig: B keeps its baseline wave stride (not interleaved) -> only A gets the override.
+        if kernel.get("LDSSegmentInterleave") == 1 and (
+                tc == "A" or (tc == "B" and not kernel["LDSSegInterleaveOffsets"].get("bBaseline", False))):
+            _compCols  = kernel["MacroTile%u" % tile01] // (kernel["NumWaves"] // 2)
+            segILWaveSpansComp = min(kernel["MatrixInstM"], kernel["MatrixInstN"]) * vectorWidth >= _compCols
+            # portSplitA (fine A): the A0->A1 segment jump is carried on the wave stride, so force it on.
+            if tc == "A" and kernel["LDSSegInterleaveOffsets"].get("portSplitA", False):
+                segILWaveSpansComp = True
+
         lsu              = kernel["LocalSplitU"]
 
         if isDTVAB:
@@ -880,6 +920,8 @@ class LraTileAssignmentMFMA(LraTileAssignment):
                rotVgpr = writer.vgprPool.checkOut(1, tag="perpPerm_rotVgpr") # remainder
 
             # tile offset
+            if tileSpan:
+              kReg = tReg
             module.add(vectorStaticRemainder(dummy, kReg, dividendReg, waveWidth, tmpVgprRes, tmpSgprInfo, \
                 "0. thread id in wave: wtid = tid %% wavelength(%u)" % waveWidth))
             if enableLDSTr:
@@ -893,8 +935,17 @@ class LraTileAssignmentMFMA(LraTileAssignment):
                                          "1. K1 offset: lrK1Offset = k1Idx * mStride(%u)" % (strideK1)))
 
             else:
-               module.add(vectorStaticRemainder(dummy, tReg, kReg, matrixInstTO, tmpVgprRes, tmpSgprInfo, \
+              if not tileSpan or tileSpanWaveSplit:
+                # Base layout and TileSpan wave-split both wrap nIdx at MI. In the wave-split case
+                # the lower/upper half-wave share nIdx and the upper half-wave grabs the partner
+                # block via the hi offset added after the wave offset below.
+                module.add(vectorStaticRemainder(dummy, tReg, kReg, matrixInstTO, tmpVgprRes, tmpSgprInfo, \
                                              "1. N offset: nIdx = wtid %% MI_N(%u)" % matrixInstTO))
+              else:
+                # TileSpan non-split (MIWaveGroup==1): one thread per M/N, nIdx = wtid (no wrap),
+                # so lanes 0..MI-1 vs MI..2MI-1 already carry block 2g / partner 2g+1 in the
+                # lower/upper half-wave of a single ds_load; no hi offset needed.
+                module.addComment0("N offset: nIdx = wtid")
 
             applyVWCalcEarly = perpStride > 1 and kernel["ProblemType"]["TLU%s"%tc] == 0 and kernel["ProblemType"]["DataType"].numBytes() != 2
             if applyVWCalcEarly:
@@ -978,8 +1029,29 @@ class LraTileAssignmentMFMA(LraTileAssignment):
                     "7. wave offset in N dimen: wtid = tid / dividedForWaveId(%u)" % dividedForWaveId))
                 module.add(vectorStaticRemainder(dummy, dummy, dummy, num1DWaves, tmpVgprRes, tmpSgprInfo, \
                     "7. wave offset in M dimen: wtid0 = wtid / num1DWaves(%u)" % num1DWaves))
-                module.add(vectorStaticMultiplyAdd(vgpr(tReg), vgpr(dummy), strideWave, vgpr(tReg), tmpSgprInfo, \
+                if kernel.get("LDSSegmentInterleave") == 1 and kernel["LDSSegInterleaveOffsets"].get("footprintPacked") and segILWaveSpansComp:
+                    # wave spans a whole component: stash its component jump; added post-pad in lraFinalOffset.
+                    segOff = writer.vgprPool.checkOut(1, tag="segWaveByteOff")
+                    module.add(vectorStaticMultiply(vgpr(segOff), vgpr(dummy), kernel["LDSSegInterleaveOffsets"]["writeStrideBytes"], tmpSgprInfo, \
+                                             "seg interleave: component byte offset = wtid0 * (fA+fB)"))
+                    tP["gpr"]["segWaveByteOff"] = segOff
+                else:
+                    module.add(vectorStaticMultiplyAdd(vgpr(tReg), vgpr(dummy), strideWave, vgpr(tReg), tmpSgprInfo, \
                                              "7. wave offset in M dimen: wOffset = wtid0 * W0Stride(%u); 7. final local read offset: flrOffset = lrOffset + WOffset" % strideWave))
+                if tileSpanWaveSplit:
+                    # TileSpan wave-split: the upper half-wave reads the partner scale block
+                    # @+hiOffset. Bake it into the per-lane address so a single ds_load holds
+                    # both blocks (lower/upper half-wave), which the WMMA then selects between
+                    # via matrix_{a,b}_scale. hiOffset = full tile-half span in bytes.
+                    hiOffset = matrixInstT * num1DBlocks * num1DWaves * vectorWidth * strideTile
+                    # axis-neutral: tile01==0 -> M axis (MXSA), tile01==1 -> N axis (MXSB)
+                    tileDim = "M" if tile01 == 0 else "N"
+                    module.add(vectorStaticDivide(dummy, dividendReg, matrixInstTO, tmpVgprRes, \
+                        "8. (TileSpan wave-split) hiSel = tid / MI_dim(%u)" % matrixInstTO))
+                    module.add(VAndB32(dst=vgpr(dummy), src0=1, src1=vgpr(dummy), \
+                        comment="8. (TileSpan wave-split) hi = (tid / MI_dim) & 1  (lower/upper half-wave)"))
+                    module.add(vectorStaticMultiplyAdd(vgpr(tReg), vgpr(dummy), hiOffset, vgpr(tReg), tmpSgprInfo, \
+                        "8. (TileSpan wave-split) wave offset in %s dimen: wOffset += hi * hiOffset(%u); upper half-wave grabs partner block" % (tileDim, hiOffset)))
             if perpBlockSize > 0:
                writer.vgprPool.checkIn(rotVgpr)
 
