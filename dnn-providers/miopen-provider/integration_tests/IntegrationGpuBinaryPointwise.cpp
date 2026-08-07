@@ -5,7 +5,7 @@
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
-#include "IntegrationGraphVerificationHarness.hpp"
+#include "harness/IntegrationGraphVerificationHarness.hpp"
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
@@ -19,15 +19,15 @@ namespace
 struct PointwiseTestCase
 {
     std::vector<int64_t> dims;
-    unsigned int seed = 0;
+    unsigned int seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
 };
 
 std::vector<PointwiseTestCase> getPointwiseTestCases()
 {
     return {
-        {{2, 4, 8, 8}, 0},
-        {{1, 16, 4, 4}, 1},
-        {{4, 8, 16, 16}, 2},
+        {{2, 4, 8, 8}},
+        {{1, 16, 4, 4}},
+        {{4, 8, 16, 16}},
     };
 }
 
@@ -47,7 +47,10 @@ constexpr const char* getModeName()
         return "Mul";
     }
 
-    return "Unknown";
+    static_assert(Mode == hipdnn_frontend::PointwiseMode::ADD
+                    || Mode == hipdnn_frontend::PointwiseMode::SUB
+                    || Mode == hipdnn_frontend::PointwiseMode::MUL,
+                    "getModeName: unsupported PointwiseMode");
 }
 
 template <typename DataType, hipdnn_frontend::PointwiseMode Mode>
@@ -85,7 +88,7 @@ protected:
         auto yTensorAttr = graphObj.pointwise(x0TensorAttr, x1TensorAttr, pwAttrs);
         yTensorAttr->set_output(true);
 
-        this->registerValidator(yTensorAttr, tolerance);
+        this->registerValidator(yTensorAttr, this->getTolerance(graphObj, yTensorAttr));
         this->verifyGraph(graphObj, testCase.seed);
     }
 };

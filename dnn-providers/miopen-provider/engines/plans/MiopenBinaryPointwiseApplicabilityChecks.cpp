@@ -24,13 +24,12 @@ using hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
 void checkModeSupported(const PointwiseAttributes& attrs)
 {
     const auto mode = attrs.operation();
-    if(mode != PointwiseMode::ADD && mode != PointwiseMode::SUB && mode != PointwiseMode::MUL
-       && mode != PointwiseMode::MIN_OP && mode != PointwiseMode::MAX_OP)
+    if(mode != PointwiseMode::ADD && mode != PointwiseMode::SUB && mode != PointwiseMode::MUL)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Binary pointwise plan builder: unsupported pointwise mode. "
-            "Supported mode: ADD, SUB, MUL, MIN, MAX");
+            "Supported mode: ADD, SUB, MUL");
     }
 }
 

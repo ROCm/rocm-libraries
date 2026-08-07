@@ -70,12 +70,6 @@ void MiopenBinaryPointwisePlan::execute(const HipdnnMiopenHandle& handle,
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::MUL:
         miopenOp = miopenTensorOpMul;
         break;
-    case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::MIN_OP:
-        miopenOp = miopenTensorOpMin;
-        break;
-    case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::MAX_OP:
-        miopenOp = miopenTensorOpMax;
-        break;
     default:
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
