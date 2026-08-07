@@ -683,6 +683,8 @@ class KernelWriterAssembly(KernelWriter):
     if self.states.staggerUCode and kernel["enableTDMA"] and kernel["enableTDMB"] \
         and kernel["NumWaves"] > 1:
       self.removeSgprVarFromPool("WrapUSelAB")
+      if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
+        self.removeSgprVarFromPool("WrapUSelMXSAMXSB")
 
     return module
 
@@ -805,12 +807,15 @@ class KernelWriterAssembly(KernelWriter):
       # precompute the selected WrapU once into this persistent pair (see
       # hoistWaveParityWrapUSel) and read it in the loop instead of recomputing parity +
       # selecting every iteration.
-      # A/B only, hence the name: the MXSA/MXSB scale pair keeps its in-loop recompute
-      # because it has its own WrapU registers, and a second persistent pair does not fit
-      # the SGPR budget on tight MX StreamK+PAP shapes.
+      # One pair per tensor pair, named WrapUSel{tcA}{tcB} to mirror tdm{tcA}{tcB}Incs:
+      # WrapUSelAB carries the A/B choice, WrapUSelMXSAMXSB the MXSA/MXSB choice. A single
+      # shared register would hand the MX increment the A/B wrap value.
       if kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["NumWaves"] > 1:
         module.add(self.defineSgpr("WrapUSelAB", 2, wrapAlignment))  # Parity-selected WrapU for the aliased A/B SRD
         self.addSgprVarToPool("WrapUSelAB")
+        if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
+          module.add(self.defineSgpr("WrapUSelMXSAMXSB", 2, wrapAlignment))  # Parity-selected WrapU for the aliased MXSA/MXSB SRD
+          self.addSgprVarToPool("WrapUSelMXSAMXSB")
 
       self.addSgprVarToPool("WrapUA")
       self.addSgprVarToPool("WrapUB")
@@ -20078,18 +20083,16 @@ class KernelWriterAssembly(KernelWriter):
     return mod
 
   def hoistWaveParityWrapUSel(self, kernel, tPA, tPB) -> Module:
-    # Preloop: compute the loop-invariant parity-selected WrapU once into WrapUSelAB.
+    # Preloop: compute the loop-invariant parity-selected WrapU once into WrapUSel{tcA}{tcB}.
     # Mirrors the (now removed) per-iteration select in tdmIncrementABWaveSperated.
-    # Only emitted for the wave-separated TDM path that consumes WrapUSelAB in the loop.
-    # A/B only: the MXSA/MXSB scale pair still selects in-loop, so it is never hoisted here.
+    # Only emitted for the wave-separated TDM path that consumes WrapUSel in the loop.
+    # Called once per tensor pair, so the A/B and MXSA/MXSB selections stay independent.
     mod = Module("HoistWaveParityWrapUSel")
     if not (self.states.staggerUCode and kernel["enableTDMA"] and kernel["enableTDMB"] \
             and kernel["NumWaves"] > 1):
       return mod
     tcA: str = tPA['tensorChar']
     tcB: str = tPB['tensorChar']
-    assert not (("MXS" in tcA) or ("MXS" in tcB)), \
-        "hoist is A/B only; the MXSA/MXSB pair selects in-loop (see tdmIncrementABWaveSperated)"
     selSgprName = f"WrapUSel{tcA}{tcB}"
 
     assert self.isTdmWaveIdxLive(kernel), "wave parity needs a live sgprWaveIdx"
@@ -20108,33 +20111,18 @@ class KernelWriterAssembly(KernelWriter):
     mod = Module("TDMGlobalIncrementsWaveSeparated")
     tdmGroup0 = f"tdm{tcA}Group0"
     incSgprName = f"tdm{tcA}{tcB}Incs"
-    isMXPair = ("MXS" in tcA) or ("MXS" in tcB)
+    selSgprName = f"WrapUSel{tcA}{tcB}"
 
     if loopIdx is not None and loopIdx == self.states.unrollIdx and self.states.staggerUCode:
-      with self.allocTmpSgpr(4 if isMXPair else 2, tag="tdmIncrementABWaveSperated_tmpSgprInfo") as tmpSgprInfo:
+      with self.allocTmpSgpr(2, tag="tdmIncrementABWaveSperated_tmpSgprInfo") as tmpSgprInfo:
         incTmpLo = tmpSgprInfo.idx
         incTmpHi = tmpSgprInfo.idx + 1
 
-        if isMXPair:
-          # The MXSA/MXSB pair recomputes parity and its own select here rather than reading
-          # the hoisted WrapUSelAB: it has its own WrapU registers, and a second persistent
-          # pair does not fit the SGPR budget on tight MX StreamK+PAP shapes.
-          wrapTmpLo = tmpSgprInfo.idx + 2
-          wrapTmpHi = tmpSgprInfo.idx + 3
-          assert self.isTdmWaveIdxLive(kernel), "wave parity needs a live sgprWaveIdx"
-          self._emitTdmWaveParitySCC(mod, kernel, comment="check wave parity")
-          mod.add(SCSelectB32(dst=sgpr(wrapTmpLo), src0=sgpr(f"WrapU{tcB}+0"), src1=sgpr(f"WrapU{tcA}+0"), \
-                  comment="select WrapU based on wave parity (lo)"))
-          mod.add(SCSelectB32(dst=sgpr(wrapTmpHi), src0=sgpr(f"WrapU{tcB}+1"), src1=sgpr(f"WrapU{tcA}+1"), \
-                  comment="select WrapU based on wave parity (hi)"))
-          wrapLo, wrapHi = sgpr(wrapTmpLo), sgpr(wrapTmpHi)
-        else:
-          # Wave parity and the parity-selected WrapU are loop-invariant (Serial is constant),
-          # so they are computed ONCE in the preloop (see hoistWaveParityWrapUSel) into
-          # WrapUSelAB. Here we only do the genuinely per-iteration wrapIter test and
-          # final select+add.
-          wrapLo, wrapHi = sgpr("WrapUSelAB+0"), sgpr("WrapUSelAB+1")
-
+        # Wave parity and the parity-selected WrapU are loop-invariant (Serial is constant),
+        # so they are computed ONCE in the preloop (see hoistWaveParityWrapUSel) into
+        # WrapUSel{tcA}{tcB}. Here we only do the genuinely per-iteration wrapIter test and
+        # final select+add. selSgprName is derived from this call's own tcA/tcB, so the
+        # MXSA/MXSB invocation reads WrapUSelMXSAMXSB and never the A/B pair's value.
         if prefetchIndex:
           mod.add(SAddU32(dst=sgpr(incTmpLo), src0=self.loopCounter(kernel, self.states.unrollIdx), \
                   src1=prefetchIndex, comment="remove pf(%u)"%prefetchIndex))
@@ -20142,9 +20130,9 @@ class KernelWriterAssembly(KernelWriter):
         else:
           mod.add(SCmpEQU32(src0=self.loopCounter(kernel, self.states.unrollIdx), \
                     src1=sgpr("StaggerUIter"), comment="Is this the wrapIter?"))
-        mod.add(SCSelectB32(dst=sgpr(incTmpLo), src0=wrapLo, src1=sgpr(incSgprName), \
+        mod.add(SCSelectB32(dst=sgpr(incTmpLo), src0=sgpr(f"{selSgprName}+0"), src1=sgpr(incSgprName), \
                 comment="select WrapU or normal inc (lo)"))
-        mod.add(SCSelectB32(dst=sgpr(incTmpHi), src0=wrapHi, src1=0, \
+        mod.add(SCSelectB32(dst=sgpr(incTmpHi), src0=sgpr(f"{selSgprName}+1"), src1=0, \
                 comment="select WrapU or normal inc (hi)"))
 
         mod.add(SAddU64(dst=sgpr(f"{tdmGroup0}+2", 2), src0=sgpr(f"{tdmGroup0}+2", 2), \

@@ -830,42 +830,41 @@ def _operand_text(items):
     )
 
 
-def test_hoist_wave_parity_wrapu_sel_selects_the_ab_pair():
+@pytest.mark.parametrize(
+    "tc_a, tc_b",
+    [
+        pytest.param("A", "B", id="ab_pair"),
+        pytest.param("MXSA", "MXSB", id="mx_scale_pair"),
+    ],
+)
+def test_hoist_wave_parity_wrapu_sel_selects_within_its_own_tensor_pair(tc_a, tc_b):
     selects = [
         item
-        for item in _hoist_wrapu_sel_items("A", "B")
+        for item in _hoist_wrapu_sel_items(tc_a, tc_b)
         if isinstance(item, kwa_module.SCSelectB32)
     ]
 
     assert len(selects) == 2
     for select, half in zip(selects, ("0", "1")):
-        assert "WrapUSelAB+%s" % half in str(select.dst)
+        assert "WrapUSel%s%s+%s" % (tc_a, tc_b, half) in str(select.dst)
         srcs = [str(src) for src in select.srcs]
-        assert "WrapUB+%s" % half in srcs[0]
-        assert "WrapUA+%s" % half in srcs[1]
+        assert "WrapU%s+%s" % (tc_b, half) in srcs[0]
+        assert "WrapU%s+%s" % (tc_a, half) in srcs[1]
 
 
-def test_hoist_wave_parity_wrapu_sel_rejects_the_mx_scale_pair():
-    # The hoist is A/B only; routing the scale pair through it is #9991's defect.
-    with pytest.raises(AssertionError):
-        _hoist_wrapu_sel_items("MXSA", "MXSB")
+def test_hoist_wave_parity_wrapu_sel_mx_pair_never_reads_ab_wrapu():
+    operands = _operand_text(_hoist_wrapu_sel_items("MXSA", "MXSB"))
+
+    assert "sgprWrapUMXSA" in operands
+    assert "sgprWrapUMXSB" in operands
+    assert "sgprWrapUA" not in operands
+    assert "sgprWrapUB" not in operands
 
 
 class _TdmIncrementWaveSepWriter:
     def __init__(self):
-        self.states = SimpleNamespace(
-            staggerUCode=True, unrollIdx=0, waveIdxReleasedAfterStagger=False
-        )
+        self.states = SimpleNamespace(staggerUCode=True, unrollIdx=0)
         self._next_tmp_sgpr = 80
-
-    def isTdmWaveSeparated(self, kernel):
-        return kwa_module.KernelWriterAssembly.isTdmWaveSeparated(self, kernel)
-
-    def isTdmWaveIdxLive(self, kernel):
-        return kwa_module.KernelWriterAssembly.isTdmWaveIdxLive(self, kernel)
-
-    def _emitTdmWaveParitySCC(self, *args, **kwargs):
-        return kwa_module.KernelWriterAssembly._emitTdmWaveParitySCC(self, *args, **kwargs)
 
     @contextmanager
     def allocTmpSgpr(self, size, alignment=1, tag=""):
@@ -890,36 +889,21 @@ def _tdm_increment_ab_items(tc_a, tc_b):
     return _module_items(module)
 
 
-def test_tdm_increment_ab_pair_reads_the_hoisted_wrapu_sel(monkeypatch):
+@pytest.mark.parametrize(
+    "tc_a, tc_b, other_pair",
+    [
+        pytest.param("A", "B", "MXSAMXSB", id="ab_pair"),
+        pytest.param("MXSA", "MXSB", "AB", id="mx_scale_pair"),
+    ],
+)
+def test_tdm_increment_wave_separated_reads_its_own_hoisted_wrapu_sel(
+    monkeypatch, tc_a, tc_b, other_pair
+):
     monkeypatch.setattr(kwa_module.TensorDataMoverLoad, "find", lambda writer: _StubTdmComp())
-    operands = _operand_text(_tdm_increment_ab_items("A", "B"))
+    operands = _operand_text(_tdm_increment_ab_items(tc_a, tc_b))
 
-    assert "sgprWrapUSelAB" in operands
-    # The A/B select is hoisted, so the loop must not re-read the raw wrap registers.
-    assert "sgprWrapUA" not in operands
-    assert "sgprWrapUB" not in operands
-
-
-def test_tdm_increment_mx_pair_never_reads_the_hoisted_wrapu_sel(monkeypatch):
-    """#9991's defect: the MX increment must not consume the A/B pair's hoisted value."""
-    monkeypatch.setattr(kwa_module.TensorDataMoverLoad, "find", lambda writer: _StubTdmComp())
-    operands = _operand_text(_tdm_increment_ab_items("MXSA", "MXSB"))
-
-    assert "sgprWrapUSel" not in operands
-    assert "sgprWrapUMXSB" in operands
-    assert "sgprWrapUMXSA" in operands
-
-
-def test_tdm_increment_mx_pair_selects_wrapu_in_loop(monkeypatch):
-    monkeypatch.setattr(kwa_module.TensorDataMoverLoad, "find", lambda writer: _StubTdmComp())
-    items = _tdm_increment_ab_items("MXSA", "MXSB")
-    selects = [item for item in items if isinstance(item, kwa_module.SCSelectB32)]
-
-    # Two parity selects for MXSB-vs-MXSA plus the two wrapIter selects.
-    assert len(selects) == 4
-    parity_srcs = [str(src) for src in selects[0].srcs]
-    assert "sgprWrapUMXSB+0" in parity_srcs[0]
-    assert "sgprWrapUMXSA+0" in parity_srcs[1]
+    assert "sgprWrapUSel%s%s" % (tc_a, tc_b) in operands
+    assert "sgprWrapUSel%s" % other_pair not in operands
 
 
 @pytest.mark.parametrize(

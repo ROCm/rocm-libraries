@@ -3086,12 +3086,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
         module.add(self.calculateStagger(kernel, tensorParametersB))
         # Hoist the loop-invariant wave-parity WrapU selection out of the K-loop:
         # parity (from Serial) and the resulting WrapUB-vs-WrapUA choice never change
-        # across iterations, so compute the selected WrapU once here into WrapUSelAB and
+        # across iterations, so compute the selected WrapU once here into WrapUSel and
         # read it in the loop instead of recomputing parity + selecting every iteration.
-        # A/B only. The MXSA/MXSB scale pair is deliberately left on its in-loop select
-        # (see tdmIncrementABWaveSperated): it has its own WrapU registers, and a second
-        # persistent pair does not fit the SGPR budget on tight MX StreamK+PAP shapes.
+        # One hoist per tensor pair: tdmIncrementABWaveSperated runs once for A/B and again
+        # for the MXSA/MXSB scale pair, and each pair has its own WrapU values, so each
+        # needs its own WrapUSel{tcA}{tcB}.
         module.add(self.hoistWaveParityWrapUSel(kernel, tensorParametersA, tensorParametersB))
+        if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
+          module.add(self.hoistWaveParityWrapUSel(kernel, tensorParametersA["MX"], tensorParametersB["MX"]))
       # LRO and LWA as assigned
       # init lds read pointers before each unrolled loop
       module.addComment0("local read addresses: init pointers a")
