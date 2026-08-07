@@ -662,6 +662,7 @@ namespace TensileLite
                                    int32_t                             autoWGM,
                                    size_t                              autoWGMXCC,
                                    size_t                              autoWGMXCCCHUNK,
+                                   size_t                              autoWGMXCCSPLITK,
                                    size_t                              autoStaggerUMapping,
                                    size_t                              autoStaggerU,
                                    size_t                              autoStaggerUStrideShift,

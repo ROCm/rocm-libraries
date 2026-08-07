@@ -2028,6 +2028,7 @@ namespace TensileLite
                                          int32_t                             autoWGM,
                                          size_t                              autoWGMXCC,
                                          size_t                              autoWGMXCCCHUNK,
+                                         size_t                              autoWGMXCCSPLITK,
                                          size_t                              autoStaggerUMapping,
                                          size_t                              autoStaggerU,
                                          size_t                              autoStaggerUStrideShift,
@@ -2044,7 +2045,7 @@ namespace TensileLite
 
         uint32_t internalArg0;
         uint32_t internalArg1;
-        calculateInternalArgs<T_Debug>(internalArg0, internalArg1, hardware, param, autoWGM, autoWGMXCC, autoWGMXCCCHUNK, autoStaggerUMapping, autoStaggerU, autoStaggerUStrideShift, autoGsuVal, ntab);
+        calculateInternalArgs<T_Debug>(internalArg0, internalArg1, hardware, param, autoWGM, autoWGMXCC, autoWGMXCCCHUNK, autoWGMXCCSPLITK, autoStaggerUMapping, autoStaggerU, autoStaggerUStrideShift, autoGsuVal, ntab);
 
         args.template append<uint32_t>("internalArgs", internalArg0);
 
@@ -2453,12 +2454,13 @@ namespace TensileLite
 
         rv.sharedMemBytes = 0;
 
-        auto [autoWGM, autoWGMXCC, autoWGMXCCCHUNK] = calculateAutoWGM(problem, &hardware, sk.grid);
+        auto [autoWGM, autoWGMXCC, autoWGMXCCCHUNK, autoWGMXCCSPLITK]
+            = calculateAutoWGM(problem, &hardware, sk.grid);
         auto [autoStaggerUMapping, autoStaggerU, autoStaggerUStrideShift] = calculateAutoStaggerU(problem, &hardware, sk.grid, autoWGM);
         AdaptiveGemmNTAB ntab = calculateAdaptiveGemmNTAB(problem, &hardware);
         uint32_t internalArg0 = 0;
         uint32_t internalArg1 = 0;
-        calculateInternalArgs<T_Debug>(internalArg0, internalArg1, &hardware, problem.getParams(), autoWGM, autoWGMXCC, autoWGMXCCCHUNK, autoStaggerUMapping, autoStaggerU, autoStaggerUStrideShift, autoGsuVal, ntab);
+        calculateInternalArgs<T_Debug>(internalArg0, internalArg1, &hardware, problem.getParams(), autoWGM, autoWGMXCC, autoWGMXCCCHUNK, autoWGMXCCSPLITK, autoStaggerUMapping, autoStaggerU, autoStaggerUStrideShift, autoGsuVal, ntab);
 
         uint32_t debugPattern = 0xDB000001;
         bool appendedInternalArgs = false;
@@ -2812,13 +2814,14 @@ namespace TensileLite
                     break;
                 case CustomArgSemantic::InternalArgs:
                 {
-                    auto [autoWGM, autoWGMXCC, autoWGMXCCCHUNK]
+                    auto [autoWGM, autoWGMXCC, autoWGMXCCCHUNK, autoWGMXCCSPLITK]
                         = calculateAutoWGM(problem, &hardware, sk.grid);
                     auto [autoStaggerUMapping, autoStaggerU, autoStaggerUStrideShift]
                         = calculateAutoStaggerU(problem, &hardware, sk.grid, autoWGM);
                     kernelArgs<T_Debug, true>(1, 0, rv.args, getNumWorkGroups(rv),
                                              &hardware, problem.getParams(),
                                              autoWGM, autoWGMXCC, autoWGMXCCCHUNK,
+                                             autoWGMXCCSPLITK,
                                              autoStaggerUMapping, autoStaggerU,
                                              autoStaggerUStrideShift, autoGsuVal, ntab);
                     appendedInternalArgs = true;
