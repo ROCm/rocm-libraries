@@ -62,7 +62,7 @@ option(HIPBLASLT_ENABLE_MATRIX_TRANSFORM "Build hipBLASLt MatrixTransform device
 option(HIPBLASLT_ENABLE_CLIENT "Build hipBLASLt client apps." ON)
 option(HIPBLASLT_ENABLE_HOST "Build hipBLASLt host library." ON)
 option(HIPBLASLT_ENABLE_FETCH "Fetch dependencies using fetch content" OFF)
-option(HIPBLASLT_BUNDLE_PYTHON_DEPS "Build the in-tree rocisa Python extension." OFF)
+option(ROCISA_BUILD_PYTHON "Build the in-tree rocisa Python extension without device libraries." OFF)
 option(HIPBLASLT_ENABLE_COVERAGE "Build coverage support." OFF)
 option(HIPBLASLT_ENABLE_THEROCK "Build hipBLASLt for TheRock." OFF)
 option(HIPBLASLT_VALIDATE_INSTALL "Run post-install per-base layout / .dat integrity checks on the install tree." OFF)
@@ -73,13 +73,15 @@ option(TENSILELITE_ENABLE_CLIENT "Build tensilelite client" ${HIPBLASLT_ENABLE_D
 option(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS
        "Install TensileLite Python packages and test tools into the test artifact tree."
        OFF)
-set(HIPBLASLT_TENSILELITE_PYTHON_MODE "BUILD" CACHE STRING
-    "TensileLite Python environment: BUILD (staged local artifacts) or SYSTEM")
-set_property(CACHE HIPBLASLT_TENSILELITE_PYTHON_MODE PROPERTY STRINGS BUILD SYSTEM)
-if(NOT HIPBLASLT_TENSILELITE_PYTHON_MODE STREQUAL "BUILD"
-        AND NOT HIPBLASLT_TENSILELITE_PYTHON_MODE STREQUAL "SYSTEM")
+if(HIPBLASLT_ENABLE_DEVICE AND NOT TENSILELITE_ENABLE_HOST)
     message(FATAL_ERROR
-        "HIPBLASLT_TENSILELITE_PYTHON_MODE must be BUILD or SYSTEM")
+        "HIPBLASLT_ENABLE_DEVICE=ON requires TENSILELITE_ENABLE_HOST=ON; "
+        "remove -DTENSILELITE_ENABLE_HOST=OFF or disable device generation")
+endif()
+if(HIPBLASLT_ENABLE_DEVICE AND NOT TENSILELITE_ENABLE_CLIENT)
+    message(FATAL_ERROR
+        "HIPBLASLT_ENABLE_DEVICE=ON requires TENSILELITE_ENABLE_CLIENT=ON; "
+        "remove -DTENSILELITE_ENABLE_CLIENT=OFF or disable device generation")
 endif()
 
 if(HIPBLASLT_ENABLE_CLIENT)
@@ -232,13 +234,17 @@ if(HIPBLASLT_ENABLE_DEVICE AND NOT WIN32)
     endif()
 endif()
 
-if(HIPBLASLT_ENABLE_DEVICE OR TENSILELITE_ENABLE_CLIENT
-        OR HIPBLASLT_BUNDLE_PYTHON_DEPS)
-    hipblaslt_find_python(3.10 "Development.Module")
-else()
-    hipblaslt_find_python(3.8 "")
+if(HIPBLASLT_ENABLE_DEVICE OR ROCISA_BUILD_PYTHON)
+    if(ROCISA_USE_STABLE_ABI)
+        hipblaslt_find_python(3.12 "Development.Module;Development.SABIModule")
+    else()
+        hipblaslt_find_python(3.10 "Development.Module")
+    endif()
+elseif(TENSILELITE_ENABLE_CLIENT OR HIPBLASLT_ENABLE_CLIENT
+        OR HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS)
+    hipblaslt_find_python(3.10 "")
 endif()
-set(HIPBLASLT_PYTHON_COMMAND "${Python3_EXECUTABLE}")
+set(HIPBLASLT_PYTHON_COMMAND "")
 set(HIPBLASLT_PYTHON_DEPS "")
 
 if(HIPBLASLT_ENABLE_DEVICE OR TENSILELITE_ENABLE_CLIENT
@@ -382,8 +388,7 @@ if(_hipblaslt_mxdatagen_enabled)
 endif()
 
 add_subdirectory(tensilelite)
-hipblaslt_configure_tensilelite_python(
-    "${HIPBLASLT_TENSILELITE_PYTHON_MODE}" "${san_opts}")
+hipblaslt_configure_tensilelite_python("${san_opts}")
 
 if(HIPBLASLT_ENABLE_HOST)
     if(HIPBLASLT_BUILD_SHARED_LIBS)
@@ -460,10 +465,6 @@ if(HIPBLASLT_ENABLE_HOST)
         VISIBILITY_INLINES_HIDDEN ON
     )
     add_subdirectory(library)
-endif()
-
-if(HIPBLASLT_ENABLE_DEVICE)
-    add_subdirectory(device-library)
 endif()
 
 if(HIPBLASLT_ENABLE_CLIENT)
@@ -780,10 +781,18 @@ if(HIPBLASLT_ENABLE_DEVICE OR TENSILELITE_ENABLE_CLIENT
         DEPENDS "${_tensilelite_compatibility_stamp}")
     add_custom_target(tensilelite-build-release-wheels
         DEPENDS tensilelite-canonical-release-wheel tensilelite-compatibility-release-wheel)
+    if(TARGET tensilelite-python-build-environment)
+        add_dependencies(tensilelite-python-build-environment
+            tensilelite-canonical-release-wheel)
+    endif()
     if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS)
         add_custom_target(tensilelite-release-wheels-all ALL
             DEPENDS tensilelite-build-release-wheels)
     endif()
+endif()
+
+if(HIPBLASLT_ENABLE_DEVICE)
+    add_subdirectory(device-library)
 endif()
 
 # Install ROCm-versioned wheels and source-only tests for artifact-based testing.
