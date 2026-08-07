@@ -1013,6 +1013,27 @@ target_link_libraries(MIOpen PRIVATE nlohmann_json::nlohmann_json)
 target_link_libraries(MIOpen INTERFACE $<BUILD_INTERFACE:nlohmann_json::nlohmann_json>)
 
 if(NOT WIN32 AND NOT APPLE)
+    # PoC: restore symbol versioning dropped by develop. Consumers linked
+    # against ROCm 7.0.2's libMIOpen resolve versioned symbols
+    # (miopen*@@MIOPEN_HIP_1); without this they fail to link even though the
+    # SONAME matches. Kept alongside CXX_VISIBILITY_PRESET hidden: visibility
+    # controls WHAT is exported, the version script controls how it is TAGGED.
+    file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/lib.def "
+MIOPEN_${MIOPEN_BACKEND}_1
+{
+global:
+    miopen*;
+    extern \"C++\" {
+        miopen::*;
+    };
+local:
+    *boost*;
+    extern \"C++\" {
+        std::*;
+    };
+};
+")
+    target_link_libraries(MIOpen PRIVATE "-Wl,--version-script=${CMAKE_CURRENT_BINARY_DIR}/lib.def")
     target_link_libraries(MIOpen PRIVATE "-Wl,--exclude-libs,ALL")
     set_target_properties(MIOpen PROPERTIES CXX_VISIBILITY_PRESET hidden)
     set_target_properties(MIOpen PROPERTIES VISIBILITY_INLINES_HIDDEN 1)
