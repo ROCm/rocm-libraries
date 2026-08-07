@@ -40,10 +40,29 @@ void checkReluParamsSupported(const PointwiseAttributes& attrs)
 
     if(lowerClip && upperClip)
     {
+        // Clamp. MIOpen's CLAMP floors at lower_clip and has no slope parameter, and this
+        // branch wins over the leaky one below, so a non-zero slope would be silently dropped
+        // and the op would compute a flat floor instead of a ramp. A zero slope is a no-op
+        // that CLAMP already represents exactly, so it stays allowed.
+        if(lowerClipSlope && *lowerClipSlope != 0.f)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "Relu plan builder: clamp with a non-zero relu_lower_clip_slope is not "
+                "supported");
+        }
         return; // Clamp
     }
     if(upperClip)
     {
+        // Clipped ReLU is likewise flat below the knee, so the same reasoning applies.
+        if(lowerClipSlope && *lowerClipSlope != 0.f)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "Relu plan builder: clipped relu with a non-zero relu_lower_clip_slope is not "
+                "supported");
+        }
         return; // Clipped ReLU
     }
     if(lowerClipSlope)

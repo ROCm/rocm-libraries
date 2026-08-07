@@ -492,3 +492,59 @@ TEST_F(TestMiopenUnaryActivationPlanBuilder, IsApplicableReturnsTrueForReluWithZ
 
     EXPECT_TRUE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }
+
+TEST_F(TestMiopenUnaryActivationPlanBuilder, IsApplicableReturnsFalseForReluWithUpperClipAndSlope)
+{
+    // The reference computes a leaky ramp below the knee and clips above it. MIOpen's
+    // CLIPPEDRELU is flat below the knee and has no slope parameter, and the mapping reaches it
+    // before its leaky branch, so accepting this would silently drop the slope.
+    PointwiseGraphSpec spec;
+    spec.reluUpperClip = 6.0f;
+    spec.reluLowerClipSlope = 0.01f;
+    auto builder = createPointwiseGraph(spec);
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
+}
+
+TEST_F(TestMiopenUnaryActivationPlanBuilder,
+       IsApplicableReturnsFalseForReluWithLowerAndUpperClipAndSlope)
+{
+    // Same reasoning for CLAMP, which floors at lower_clip instead of following the slope.
+    PointwiseGraphSpec spec;
+    spec.reluLowerClip = -1.0f;
+    spec.reluUpperClip = 1.0f;
+    spec.reluLowerClipSlope = 0.01f;
+    auto builder = createPointwiseGraph(spec);
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
+}
+
+TEST_F(TestMiopenUnaryActivationPlanBuilder,
+       IsApplicableReturnsTrueForReluWithUpperClipAndZeroSlope)
+{
+    // A zero slope is a no-op ramp: CLIPPEDRELU already computes zero below the knee, so the
+    // combination is representable exactly and must not be declined.
+    PointwiseGraphSpec spec;
+    spec.reluUpperClip = 6.0f;
+    spec.reluLowerClipSlope = 0.0f;
+    auto builder = createPointwiseGraph(spec);
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(*_dummyHandle, graph));
+}
+
+TEST_F(TestMiopenUnaryActivationPlanBuilder,
+       IsApplicableReturnsTrueForReluWithLowerAndUpperClipAndZeroSlope)
+{
+    // Likewise CLAMP floors at lower_clip, which is what a zero slope asks for.
+    PointwiseGraphSpec spec;
+    spec.reluLowerClip = -1.0f;
+    spec.reluUpperClip = 1.0f;
+    spec.reluLowerClipSlope = 0.0f;
+    auto builder = createPointwiseGraph(spec);
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(*_dummyHandle, graph));
+}
