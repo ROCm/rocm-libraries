@@ -41,6 +41,7 @@
 #include "InFlightQueue.hpp"
 #include "ReadyQueue.hpp"
 #include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 
 namespace {
@@ -521,10 +522,19 @@ class CDNA5ReadyQueue : public ReadyQueue {
     void push(DAGNode* node) override;
     bool empty() const override;
 
-    int takePendingFillerVNops() override {
-        const int n = pendingFillerVNops_;
+    // Build the coexec filler v_nops counted during the last pickOne() as detached insts.
+    std::vector<StinkyInstruction*> takePendingFillerInsts() override {
+        std::vector<StinkyInstruction*> fillers;
+        if (pendingFillerVNops_ > 0) {
+            const auto& arch = getPassContext().getGemmTileConfig().arch;
+            const GfxArchID archId = getGfxArchID(arch[0], arch[1], arch[2]);
+            const HwInstDesc* vnopDesc = getMCIDByUOp(GFX::v_nop, archId);
+            fillers.reserve(pendingFillerVNops_);
+            for (int i = 0; i < pendingFillerVNops_; ++i)
+                fillers.push_back(IRBase::createIR<StinkyInstruction>(vnopDesc));
+        }
         pendingFillerVNops_ = 0;
-        return n;
+        return fillers;
     }
 
     void onInit(IRList::iterator regionStart, IRList::iterator regionEnd) override;

@@ -71,8 +71,7 @@ static void dumpDAGGraph(const std::vector<std::unordered_set<unsigned>>& dagGra
 static void scheduleRegionWithMovableSideEffects(
     IRList::iterator regionStart, IRList::iterator regionEnd, IRList::iterator blockBegin,
     std::vector<IRBase*>& scheduled, ReadyQueue& readyQueue,
-    const std::unordered_map<StinkyInstruction*, unsigned>& wmmaIndex, GfxArchID archId,
-    int& fillerVNopCount) {
+    const std::unordered_map<StinkyInstruction*, unsigned>& wmmaIndex, int& fillerCount) {
     if (regionStart == regionEnd) {
         return;  // Empty region, nothing to schedule.
     }
@@ -428,15 +427,13 @@ static void scheduleRegionWithMovableSideEffects(
         DAGNode* currentNode = readyQueue.pickOne();
         ++orderInRegion;
 
-        // Filler v_nops before this pick; detached so the reorder loop places them in order.
-        if (int nVnop = readyQueue.takePendingFillerVNops(); nVnop > 0) {
-            PASS_DEBUG(std::cerr << "[DAG drain] emitting " << nVnop
-                                 << " filler v_nop before dagId=" << currentNode->id << "\n");
-            const HwInstDesc* vnopDesc = getMCIDByUOp(GFX::v_nop, archId);
-            for (int i = 0; i < nVnop; ++i) {
-                scheduled.push_back(IRBase::createIR<StinkyInstruction>(vnopDesc));
-                ++fillerVNopCount;
-            }
+        // Filler instructions the queue emits before this pick; detached so the reorder
+        // loop places them in order. The queue owns any arch/opcode knowledge.
+        for (StinkyInstruction* filler : readyQueue.takePendingFillerInsts()) {
+            PASS_DEBUG(std::cerr << "[DAG drain] emitting filler inst before dagId="
+                                 << currentNode->id << "\n");
+            scheduled.push_back(filler);
+            ++fillerCount;
         }
 
         if (isBarrier(*currentNode->inst)) {
@@ -469,18 +466,17 @@ static void scheduleRegionWithMovableSideEffects(
 // In the end, the instructions will be reordered in the block
 // to reflect the scheduling order.
 static void scheduleInDAG(BasicBlock& bb, ReadyQueue& readyQueue,
-                          const std::unordered_map<StinkyInstruction*, unsigned>& wmmaIndex,
-                          GfxArchID archId) {
+                          const std::unordered_map<StinkyInstruction*, unsigned>& wmmaIndex) {
     PASS_DEBUG(std::cerr << "*** Scheduling Instructions in DAG: ***\n");
 
     if (bb.empty()) return;
 
     std::vector<IRBase*> scheduled;
     scheduled.reserve(bb.size());
-    // Filler v_nops the ready queue synthesized during this block (detached; attached by
-    // the reorder loop). Grows both `scheduled` and the final block, so the size check adds
-    // it to bb.size().
-    int fillerVNopCount = 0;
+    // Filler instructions the ready queue emits during this block (detached; attached by
+    // the reorder loop). Grows both `scheduled` and the final block, so the size check
+    // adds it to bb.size().
+    int fillerCount = 0;
 
     BasicBlock::iterator beginIt = bb.begin();
     BasicBlock::iterator endIt = bb.end();
@@ -497,7 +493,7 @@ static void scheduleInDAG(BasicBlock& bb, ReadyQueue& readyQueue,
             // Non-instruction IR (e.g. AsmDirective): treat as non-movable
             // side-effect boundary so its position is strictly preserved.
             scheduleRegionWithMovableSideEffects(regionStart, it, beginIt, scheduled, readyQueue,
-                                                 wmmaIndex, archId, fillerVNopCount);
+                                                 wmmaIndex, fillerCount);
             scheduled.push_back(irNode);
             regionStart = std::next(it);
             continue;
@@ -506,7 +502,7 @@ static void scheduleInDAG(BasicBlock& bb, ReadyQueue& readyQueue,
         StinkyInstruction& inst = *instPtr;
         if (hasSideEffect(inst)) {
             scheduleRegionWithMovableSideEffects(regionStart, it, beginIt, scheduled, readyQueue,
-                                                 wmmaIndex, archId, fillerVNopCount);
+                                                 wmmaIndex, fillerCount);
 
             scheduled.push_back(&inst);
 
@@ -519,15 +515,15 @@ static void scheduleInDAG(BasicBlock& bb, ReadyQueue& readyQueue,
     }
     // Flush the last region if it has not been flushed yet.
     scheduleRegionWithMovableSideEffects(regionStart, endIt, beginIt, scheduled, readyQueue,
-                                         wmmaIndex, archId, fillerVNopCount);
+                                         wmmaIndex, fillerCount);
 
-    assert(scheduled.size() == bb.size() + static_cast<size_t>(fillerVNopCount) &&
-           "Scheduled instructions size must match original plus synthesized filler v_nops");
+    assert(scheduled.size() == bb.size() + static_cast<size_t>(fillerCount) &&
+           "Scheduled instructions size must match original plus filler insts");
 
     // Now we have a scheduled list of instructions.
     // Reorder the block to reflect the scheduling (move each to end in order). Original
-    // instructions already live in bb (remove+append repositions them); synthesized filler
-    // v_nops are detached (no parent) and are only appended.
+    // instructions already live in bb (remove+append repositions them); filler
+    // instructions are detached (no parent) and are only appended.
     for (IRBase* ir : scheduled) {
         if (ir->getParent()) bb.removeIR(ir);
         bb.appendIR(ir);
@@ -616,7 +612,7 @@ class StinkyDAGSchedulerPass : public StinkyInstPass {
         auto scheduleBlock = [&](BasicBlock* bb, ReadyQueue& rq) {
             AsmIRBuilder builder(*bb, archId);
             collapseExecMaskedRegions(*bb, builder, wavefrontSize);
-            scheduleInDAG(*bb, rq, wmmaIndex, archId);
+            scheduleInDAG(*bb, rq, wmmaIndex);
             expandExecMaskedGroups(*bb);
         };
 
