@@ -38,7 +38,7 @@ if(HIP_COMPILER STREQUAL "nvcc")
     # NVCC requires some additional setup
     include(SetupNVCC)
 elseif(HIP_COMPILER STREQUAL "clang")
-    if(NOT (CMAKE_CXX_COMPILER MATCHES ".*hipcc$" OR CMAKE_CXX_COMPILER MATCHES ".*clang\\+\\+"))
+    if(NOT (CMAKE_CXX_COMPILER MATCHES ".*hipcc$" OR CMAKE_CXX_COMPILER MATCHES ".*clang\\+\\+" OR CMAKE_CXX_COMPILER MATCHES ".*clang-cl"))
         message(FATAL_ERROR "On ROCm platform 'hipcc' or HIP-aware Clang must be used as C++ compiler.")
     endif()
 else()
