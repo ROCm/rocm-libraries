@@ -1537,13 +1537,18 @@ def _enable_single_batch_combo(problem: UnifiedAttentionProblem) -> bool:
         return False
     if problem.softcap > 0 or problem.use_sinks:
         return False
-    # fp16 D128 sliding-window routes to the transposed-32x32 fp32 online-softmax
-    # path (the narrow 16x16 path loses accuracy on long-KV fp16). bf16 D128 SW
-    # and all other SW shapes stay on their existing paths. The no-SW VALU
-    # sub-flags auto-disable for SW via _enable_transposed_subflags, leaving the
-    # bare transposed path + the emitter's per-element window mask.
+    # fp16 D128 sliding-window (block_size==16 only) routes to the transposed-
+    # 32x32 fp32 online-softmax path (the narrow 16x16 path loses accuracy on
+    # long-KV fp16). Scoped to block_size==16: at bs in {32,64} the combo also
+    # pulls in the default-on _enable_d128_small_tile / _enable_softmax_mfma_
+    # interleave levers (neither excludes SW), which yield block_m=128 >
+    # tile_size=64 with use_k_single_buffer -> uncaught ValueError at launch.
+    # bf16 D128 SW and all other SW shapes stay on their existing paths; the
+    # no-SW VALU sub-flags auto-disable for SW via _enable_transposed_subflags.
     if problem.sliding_window > 0 and not (
-        problem.head_size == 128 and problem.dtype == "fp16"
+        problem.head_size == 128
+        and problem.dtype == "fp16"
+        and problem.block_size == 16
     ):
         return False
     if problem.head_size not in (64, 128):
