@@ -102,6 +102,15 @@ namespace TensileLite
                     }
                 }
             }
+            else if(key == ResultKey::GbpsBW)
+            {
+                if(!m_invalidSolution)
+                {
+                    double bandwidth = std::stod(valueStr);
+                    if(!std::isnan(bandwidth) && bandwidth > m_fastestBandwidthGbps)
+                        m_fastestBandwidthGbps = bandwidth;
+                }
+            }
             else if((key == ResultKey::SpeedGFlops
                      && m_performanceMetric == PerformanceMetric::DeviceEfficiency)
                     || (key == ResultKey::SpeedGFlopsPerCu
@@ -257,6 +266,14 @@ namespace TensileLite
                     // skip, we update these together with FastestGFlops
                     continue;
                 }
+                else if(key.compare(ResultKey::GbpsBW) == 0)
+                {
+                    double oldBandwidth
+                        = (oldRowIter.second.empty()) ? 0.0 : std::stod(oldRowIter.second);
+                    double newBandwidth = (newRow[key].empty()) ? 0.0 : std::stod(newRow[key]);
+                    if(newBandwidth > oldBandwidth)
+                        oldRow[key] = newRow[key];
+                }
                 else
                 {
                     // these are gflops for each solution
@@ -284,6 +301,7 @@ namespace TensileLite
                 m_output.setValueForKey(ResultKey::SolutionWinnerIdx, m_winnerSolutionIdx);
                 m_output.setValueForKey(ResultKey::SolutionWinner, m_winnerSolution);
             }
+            m_output.setValueForKey(ResultKey::GbpsBW, m_fastestBandwidthGbps);
             // reset
             m_winnerSolution          = "";
             m_currSolutionIdx         = -1;
@@ -292,6 +310,7 @@ namespace TensileLite
             m_fasterTimeUS            = -1.0;
             m_fastestTilesPerCu       = -1.0;
             m_fastestTotalGranularity = -1.0;
+            m_fastestBandwidthGbps    = -1.0;
 
             if(!m_mergeSameProblems)
             {

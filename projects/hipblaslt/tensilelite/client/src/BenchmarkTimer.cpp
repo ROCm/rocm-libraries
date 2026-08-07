@@ -102,15 +102,11 @@ namespace {
         // Add MX scale tensor bytes if dtype is MX.
         if(gemm.mxTypeA() != rocisa::DataType::None && gemm.mxBlockA() > 0)
         {
-            auto mxAInfo = DataTypeInfo::Get(gemm.mxTypeA());
-            bytesA += multiplyElementSize(M * (K / gemm.mxBlockA()) * numBatches,
-                                          mxAInfo.elementSize);
+            bytesA += gemm.mxsa().totalAllocatedBytes();
         }
         if(gemm.mxTypeB() != rocisa::DataType::None && gemm.mxBlockB() > 0)
         {
-            auto mxBInfo = DataTypeInfo::Get(gemm.mxTypeB());
-            bytesB += multiplyElementSize((K / gemm.mxBlockB()) * N * numBatches,
-                                          mxBInfo.elementSize);
+            bytesB += gemm.mxsb().totalAllocatedBytes();
         }
 
         totalBytes += bytesA + bytesB + bytesD;
