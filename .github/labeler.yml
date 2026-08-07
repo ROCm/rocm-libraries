@@ -23,7 +23,7 @@
 "project: hip-kernel-provider":
 - changed-files:
   - any-glob-to-any-file: 'dnn-providers/hip-kernel-provider/**/*'
-  
+
 # These labels help distinguish which subteams are responsible for reviews for changes made in rocKE
 
 "rocke-lib: attention":
