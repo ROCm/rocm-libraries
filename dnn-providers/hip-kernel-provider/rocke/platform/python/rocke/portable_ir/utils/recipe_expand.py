@@ -23,18 +23,45 @@
 from __future__ import annotations
 
 import copy
+import ctypes
 from typing import Any, Dict, List, Optional
 
 
 # --------------------------------------------------------------------------
 # intexpr evaluation (mirrors rv_int in recipe_vm.c)
 # --------------------------------------------------------------------------
+_LONG_BITS = ctypes.sizeof(ctypes.c_long) * 8
+_LONG_MIN = -(1 << (_LONG_BITS - 1))
+_LONG_MAX = (1 << (_LONG_BITS - 1)) - 1
+
+
+class ExpandError(RuntimeError):
+    pass
+
+
+def _trunc_div(a: int, b: int) -> int:
+    if b == 0:
+        raise ExpandError("integer division by zero")
+    if a == _LONG_MIN and b == -1:
+        raise ExpandError("integer division overflow")
+    quotient = abs(a) // abs(b)
+    return -quotient if (a < 0) != (b < 0) else quotient
+
+
+def _trunc_mod(a: int, b: int) -> int:
+    if b == 0:
+        raise ExpandError("integer modulo by zero")
+    if a == _LONG_MIN and b == -1:
+        raise ExpandError("integer modulo overflow")
+    return a - _trunc_div(a, b) * b
+
+
 _BIN = {
     "add": lambda a, b: a + b,
     "sub": lambda a, b: a - b,
     "mul": lambda a, b: a * b,
-    "div": lambda a, b: (a // b if b else 0),
-    "mod": lambda a, b: (a % b if b else 0),
+    "div": _trunc_div,
+    "mod": _trunc_mod,
     "eq": lambda a, b: int(a == b),
     "ne": lambda a, b: int(a != b),
     "lt": lambda a, b: int(a < b),
@@ -42,10 +69,6 @@ _BIN = {
     "gt": lambda a, b: int(a > b),
     "ge": lambda a, b: int(a >= b),
 }
-
-
-class ExpandError(RuntimeError):
-    pass
 
 
 def eval_intexpr(
@@ -69,8 +92,17 @@ def eval_intexpr(
                 raise ExpandError(f"unknown loop var '{name}'")
             return ivars[name]
         if "spec_str_eq" in node:
-            n, lit = node["spec_str_eq"]
-            return int(spec_str.get(n) == lit)
+            operands = node["spec_str_eq"]
+            if (
+                not isinstance(operands, list)
+                or len(operands) != 2
+                or not all(isinstance(value, str) for value in operands)
+            ):
+                raise ExpandError("spec_str_eq requires exactly two strings")
+            name, literal = operands
+            if name not in spec_str:
+                raise ExpandError(f"unknown spec string '{name}'")
+            return int(spec_str[name] == literal)
         for k, fn in _BIN.items():
             if k in node:
                 a, b = node[k]
@@ -121,10 +153,14 @@ class _Expander:
                 saved = self.ivars.get(var)
                 v = self._eval(fr["lo"])
                 hi = self._eval(fr["hi"])
-                step = self._eval(fr.get("step", 1)) or 1
+                step = self._eval(fr.get("step", 1))
+                if step <= 0:
+                    raise ExpandError("rolled-list step must be positive")
                 while v < hi:
                     self.ivars[var] = v
                     out.append(self._subst(it["name"]))
+                    if v > _LONG_MAX - step:
+                        raise ExpandError("rolled-list loop overflow")
                     v += step
                 if saved is None:
                     self.ivars.pop(var, None)
@@ -145,10 +181,14 @@ class _Expander:
                 saved = self.ivars.get(var)
                 v = self._eval(fr["lo"])
                 hi = self._eval(fr["hi"])
-                step = self._eval(fr.get("step", 1)) or 1
+                step = self._eval(fr.get("step", 1))
+                if step <= 0:
+                    raise ExpandError("rolled-list step must be positive")
                 while v < hi:
                     self.ivars[var] = v
                     out.append({"name": self._subst(it["name"]), "init": it["init"]})
+                    if v > _LONG_MAX - step:
+                        raise ExpandError("rolled-list loop overflow")
                     v += step
                 if saved is None:
                     self.ivars.pop(var, None)
@@ -259,12 +299,16 @@ class _Expander:
         if op == "static_for":
             var = instr["var"]
             lo, hi = self._eval(instr["lo"]), self._eval(instr["hi"])
-            step = self._eval(instr.get("step", 1)) or 1
+            step = self._eval(instr.get("step", 1))
+            if step <= 0:
+                raise ExpandError("static_for step must be positive")
             saved = self.ivars.get(var, None)
             iv = lo
             while iv < hi:
                 self.ivars[var] = iv
                 self.run(instr["body"])
+                if iv > _LONG_MAX - step:
+                    raise ExpandError("static_for loop overflow")
                 iv += step
             if saved is None:
                 self.ivars.pop(var, None)

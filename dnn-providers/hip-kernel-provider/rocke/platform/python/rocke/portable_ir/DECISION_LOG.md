@@ -28,6 +28,23 @@ terminate. The roller only emits increasing ranges.
 Regression: the hermetic C++ replay test rejects zero division, signed
 division/modulo overflow, and a negative `static_for` step.
 
+## 2026-08-06: keep the Python rolling oracle semantically equal to the C VM
+
+Decision: the Python recipe expander uses native C `long` bounds, truncates
+signed division toward zero, derives the remainder from that quotient, and
+rejects the same zero divisors and `LONG_MIN / -1` cases as the C VM. String
+predicates require two strings and a declared spec. Static and rolled-list loops
+require a positive step and reject increment overflow.
+
+Reason: `roll()` relies on Python expansion as its device-free correctness
+oracle. Mapping invalid expressions to a value, using Python floor division, or
+allowing a non-progressing loop made that oracle disagree with deployed replay.
+
+Regression: focused Python tests cover zero and signed division/modulo,
+overflow, malformed and unknown string predicates, zero and negative steps,
+loop-increment overflow, valid string comparisons, and an ordinary increasing
+loop. All failures are immediate `ExpandError` results.
+
 ## 2026-08-06: remove replay's hidden result ceiling
 
 Decision: generic `emit` result arrays are dynamically sized; conflicting
@@ -37,6 +54,22 @@ Reason: replay silently truncated results after sixteen although the recorder
 has no such limit.
 
 Regression: a synthetic 17-result inline-assembly operation replays intact.
+
+## 2026-08-06: require safe single-result bindings
+
+Decision: every `emit.out` requires a nonempty string bind after placeholder
+resolution. Concrete exact-name replay rejects a bind that would redefine an
+existing LLVM SSA value. Parametric replay keeps fresh-name rebinding, and an
+`alias` remains a register-table rebind rather than an SSA definition.
+
+Reason: the missing-bind fallback silently named results `r`; two concrete
+side-effecting operations could therefore lower to duplicate `%r` definitions.
+
+Regression: the hermetic C++ replay test rejects missing, empty, non-string, and
+repeated concrete single-result binds, including when an alias overwrites the
+register-table entry after the first definition. Distinct binds and an alias
+followed by a same-named result both lower with distinct SSA definitions, and
+the standalone positive replay output is accepted by `llvm-as`.
 
 ## 2026-08-06: make online construction linkable
 
@@ -108,8 +141,10 @@ string predicates, valid flags, and absent optional flags still replay.
 
 ## Current verified result
 
-- 30 Python portable-IR unit tests pass.
-- Both portable-IR C++ tests pass.
+- 35 Python portable-IR unit tests pass.
+- Both portable-IR C++ tests pass with AddressSanitizer and
+  UndefinedBehaviorSanitizer enabled; LeakSanitizer alone is disabled under the
+  ptraced runner.
 - Fresh online shared-library build/load passes.
 - Recorder coverage: 66 pass, 2 explicit skips, 0 failures.
 - On both `gfx942` and `gfx950`, engine and recipe replay are byte-identical for
@@ -120,12 +155,6 @@ string predicates, valid flags, and absent optional flags still replay.
 - Regions: only `scf.for` and then-only `scf.if`; no general else/results form.
 - Attributes: wrapped integer lists work; nested list-of-map values do not.
 - Integer expressions do not range-check numeric casts or add/sub/mul overflow.
-- The Python recipe expander does not yet mirror the C VM's new rejection and
-  signed division/modulo semantics. The
-  [active PR handoff](PR_10492_REVIEW_FIX_HANDOFF.md) tracks this correctness
-  fix.
-- Single-result `emit.out` still defaults a missing bind and does not reject a
-  repeated concrete SSA definition. The active PR handoff tracks this fix.
 - Rolling: one structural axis; no joint multi-axis interaction inference.
 - Coverage: two multi-kernel adapters and a chunked 545-configuration replay
   gate remain. A single-process full sweep retained lowering output and grew
@@ -136,7 +165,6 @@ string predicates, valid flags, and absent optional flags still replay.
 ## Documentation lifecycle
 
 Completed fixes and durable boundaries live in this decision log. Only active,
-unresolved work belongs in the
-[PR correctness handoff](PR_10492_REVIEW_FIX_HANDOFF.md). When that work is
-verified, move its final decisions and regression evidence here, update the
-verified result, and remove the handoff rather than retaining a historical plan.
+unresolved work belongs in a temporary handoff. When handoff work is verified,
+move its final decisions and regression evidence here, update the verified
+result, and remove the handoff rather than retaining a historical plan.

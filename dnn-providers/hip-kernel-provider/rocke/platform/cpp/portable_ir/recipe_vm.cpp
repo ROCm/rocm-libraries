@@ -84,6 +84,9 @@ typedef struct
     char** owned; /* interned resolved register names (format-name substitution) */
     int n_owned, cap_owned;
 
+    const char** ssa_defs; /* concrete exact-name SSA definitions; aliases excluded */
+    int n_ssa_defs, cap_ssa_defs;
+
     /* Concrete recipes (recorder-produced, no rolling: every bind is a unique
      * Python SSA name) opt into exact SSA naming: each created value is named
      * "%<bind>" verbatim, so the lowerer (which emits value names verbatim)
@@ -96,6 +99,37 @@ typedef struct
     bool failed;
 } rvm_t;
 
+static void rv_fail(rvm_t* vm, const char* fmt, ...);
+
+static bool rv_ssa_defined(const rvm_t* vm, const char* bind)
+{
+    if(!vm->exact_names || !bind)
+        return false;
+    for(int i = 0; i < vm->n_ssa_defs; i++)
+        if(strcmp(vm->ssa_defs[i], bind) == 0)
+            return true;
+    return false;
+}
+
+static void rv_ssa_define(rvm_t* vm, const char* bind)
+{
+    if(!vm->exact_names || !bind || rv_ssa_defined(vm, bind))
+        return;
+    if(vm->n_ssa_defs == vm->cap_ssa_defs)
+    {
+        int nc = vm->cap_ssa_defs ? vm->cap_ssa_defs * 2 : 16;
+        const char** nd = (const char**)realloc(vm->ssa_defs, (size_t)nc * sizeof(const char*));
+        if(!nd)
+        {
+            rv_fail(vm, "oom SSA definitions");
+            return;
+        }
+        vm->ssa_defs = nd;
+        vm->cap_ssa_defs = nc;
+    }
+    vm->ssa_defs[vm->n_ssa_defs++] = bind;
+}
+
 /* Under exact_names, give `v` the SSA name "%<bind>" (arena-owned), mirroring the
  * portable-IR importer so the lowerer emits it verbatim. No-op otherwise. */
 static void rv_name(rvm_t* vm, rocke_value_t* v, const char* bind)
@@ -104,7 +138,10 @@ static void rv_name(rvm_t* vm, rocke_value_t* v, const char* bind)
         return;
     char* nm = rocke_arena_printf(&vm->b->arena, "%%%s", bind);
     if(nm)
+    {
         v->name = nm;
+        rv_ssa_define(vm, bind);
+    }
 }
 
 /* Resolve an opcode name, applying portable-IR aliases. The Python builder names
@@ -849,8 +886,8 @@ static void rv_exec_instr(rvm_t* vm, const jd_val_t* instr)
                 }
                 else if(strcmp(key, "align") == 0)
                 {
-                    if(!rocke_jnum(v, &d) || !(d >= 1.0 && d <= INT_MAX)
-                       || d != (double)(int)d || ((int)d & ((int)d - 1)) != 0)
+                    if(!rocke_jnum(v, &d) || !(d >= 1.0 && d <= INT_MAX) || d != (double)(int)d
+                       || ((int)d & ((int)d - 1)) != 0)
                     {
                         rv_fail(vm,
                                 "param attr 'align' must be a positive power-of-two integer "
@@ -877,7 +914,9 @@ static void rv_exec_instr(rvm_t* vm, const jd_val_t* instr)
             rv_fail(vm, "param '%s' failed", name);
             return;
         }
-        rv_reg_set(vm, rv_bind_name(vm, instr, name), pv);
+        const char* bind = rv_bind_name(vm, instr, name);
+        rv_ssa_define(vm, bind);
+        rv_reg_set(vm, bind, pv);
         return;
     }
     if(strcmp(op, "const_i32") == 0)
@@ -1114,7 +1153,22 @@ static void rv_exec_instr(rvm_t* vm, const jd_val_t* instr)
             else
             {
                 rtypes[0] = rv_type(vm, rocke_jget(out, "type"));
-                binds[0] = rv_bind_name(vm, out, "r");
+                const char* raw_bind = rocke_jstr(rocke_jget(out, "bind"));
+                if(!raw_bind || !*raw_bind)
+                {
+                    rv_fail(vm, "emit '%s' result bind must be a nonempty string", opcode_name);
+                }
+                else
+                {
+                    binds[0] = rv_resolve_name(vm, raw_bind);
+                    if(!vm->failed && rv_ssa_defined(vm, binds[0]))
+                    {
+                        rv_fail(vm,
+                                "emit '%s' result bind '%s' redefines an existing SSA value",
+                                opcode_name,
+                                binds[0]);
+                    }
+                }
                 n_res = 1;
             }
         }
@@ -1338,8 +1392,7 @@ static char* rv_format_name(rvm_t* vm, const char* fmt)
 
 static bool rv_validate_specs(rvm_t* vm, const jd_val_t* spec)
 {
-    if(vm->n_ints < 0 || vm->n_strs < 0 || (vm->n_ints && !vm->ints)
-       || (vm->n_strs && !vm->strs))
+    if(vm->n_ints < 0 || vm->n_strs < 0 || (vm->n_ints && !vm->ints) || (vm->n_strs && !vm->strs))
     {
         rv_fail(vm, "invalid runtime spec arrays");
         return false;
@@ -1534,6 +1587,7 @@ static rocke_status_t rv_run_root(jd_val_t* root,
 
     free(vm.regs);
     free(vm.ivars);
+    free(vm.ssa_defs);
     for(int i = 0; i < vm.n_owned; i++)
         free(vm.owned[i]);
     free(vm.owned);

@@ -8,13 +8,16 @@
 #
 #   python3 -m unittest rocke.portable_ir.tests.test_roller
 
+import ctypes
 import unittest
 
 from rocke.core.ir import F32, IRBuilder, PtrType
 from rocke.portable_ir.examples import export_mha, qk_block
 from rocke.portable_ir.src.kerneldef_to_recipe import kerneldef_to_recipe
 from rocke.portable_ir.utils.recipe_expand import (
+    ExpandError,
     equiv_reason,
+    eval_intexpr,
     expand_recipe,
     recipes_equiv,
 )
@@ -111,11 +114,189 @@ def build_quad(N):
 
 
 class TestExpanderOracle(unittest.TestCase):
+    @staticmethod
+    def _expand_program(program):
+        return expand_recipe({"program": program}, {})["program"]
+
     def test_equiv_has_teeth(self):
         c64 = kerneldef_to_recipe(export_mha.build("fp16", 64, 2048, 1, 32, 1))
         c128 = kerneldef_to_recipe(export_mha.build("fp16", 128, 2048, 1, 32, 1))
         self.assertTrue(recipes_equiv(c64, c64))
         self.assertFalse(recipes_equiv(c64, c128))  # different unroll counts
+
+    def test_checked_division_and_modulo_match_c(self):
+        cases = (
+            ("div", -7, 3, -2),
+            ("mod", -7, 3, -1),
+            ("div", 7, -3, -2),
+            ("mod", 7, -3, 1),
+            ("div", -7, -3, 2),
+            ("mod", -7, -3, -1),
+        )
+        for op, lhs, rhs, expected in cases:
+            with self.subTest(op=op, lhs=lhs, rhs=rhs):
+                self.assertEqual(eval_intexpr({op: [lhs, rhs]}, {}, {}, {}), expected)
+
+        long_min = -(1 << (ctypes.sizeof(ctypes.c_long) * 8 - 1))
+        rejected = (
+            ({"div": [1, 0]}, "integer division by zero"),
+            ({"mod": [1, 0]}, "integer modulo by zero"),
+            ({"div": [long_min, -1]}, "integer division overflow"),
+            ({"mod": [long_min, -1]}, "integer modulo overflow"),
+        )
+        for expr, message in rejected:
+            with self.subTest(expr=expr):
+                with self.assertRaisesRegex(ExpandError, message):
+                    eval_intexpr(expr, {}, {}, {})
+
+    def test_string_predicates_are_strict(self):
+        self.assertEqual(
+            eval_intexpr({"spec_str_eq": ["dtype", "f16"]}, {}, {}, {"dtype": "f16"}),
+            1,
+        )
+        self.assertEqual(
+            eval_intexpr({"spec_str_eq": ["dtype", "f16"]}, {}, {}, {"dtype": "f32"}),
+            0,
+        )
+        malformed = (
+            {"spec_str_eq": "dtype"},
+            {"spec_str_eq": ["dtype"]},
+            {"spec_str_eq": [7, "f16"]},
+            {"spec_str_eq": ["dtype", 7]},
+        )
+        for expr in malformed:
+            with self.subTest(expr=expr):
+                with self.assertRaisesRegex(
+                    ExpandError, "spec_str_eq requires exactly two strings"
+                ):
+                    eval_intexpr(expr, {}, {}, {"dtype": "f16"})
+        with self.assertRaisesRegex(ExpandError, "unknown spec string 'typo'"):
+            eval_intexpr({"spec_str_eq": ["typo", "f16"]}, {}, {}, {})
+
+    def test_nonpositive_loop_steps_are_rejected(self):
+        def rolled_names(step):
+            return [
+                {
+                    "op": "emit",
+                    "opcode": "scf.yield",
+                    "in": [
+                        {
+                            "for": {"var": "i", "lo": 0, "hi": 1, "step": step},
+                            "name": "value{i}",
+                        }
+                    ],
+                }
+            ]
+
+        def rolled_iters(step):
+            return [
+                {"op": "const_i32", "bind": "lo", "val": 0},
+                {"op": "const_i32", "bind": "hi", "val": 1},
+                {"op": "const_i32", "bind": "step", "val": 1},
+                {
+                    "op": "scf_for",
+                    "iv": "iv",
+                    "lo": "lo",
+                    "hi": "hi",
+                    "step": "step",
+                    "iter": [
+                        {
+                            "for": {"var": "i", "lo": 0, "hi": 1, "step": step},
+                            "name": "carry{i}",
+                            "init": "lo",
+                        }
+                    ],
+                    "results": [],
+                    "body": [],
+                },
+            ]
+
+        def static_loop(step):
+            return [
+                {
+                    "op": "static_for",
+                    "var": "i",
+                    "lo": 0,
+                    "hi": 1,
+                    "step": step,
+                    "body": [],
+                }
+            ]
+
+        for label, make_program, message in (
+            ("static_for", static_loop, "static_for step must be positive"),
+            ("rolled names", rolled_names, "rolled-list step must be positive"),
+            ("rolled iters", rolled_iters, "rolled-list step must be positive"),
+        ):
+            for step in (0, -1):
+                with self.subTest(path=label, step=step):
+                    with self.assertRaisesRegex(ExpandError, message):
+                        self._expand_program(make_program(step))
+
+    def test_loop_increment_overflow_is_rejected(self):
+        long_max = (1 << (ctypes.sizeof(ctypes.c_long) * 8 - 1)) - 1
+        loop = {
+            "var": "i",
+            "lo": long_max - 1,
+            "hi": long_max,
+            "step": 2,
+        }
+        programs = (
+            (
+                "static_for",
+                [{"op": "static_for", **loop, "body": []}],
+                "static_for loop overflow",
+            ),
+            (
+                "rolled names",
+                [
+                    {
+                        "op": "emit",
+                        "opcode": "scf.yield",
+                        "in": [{"for": loop, "name": "value{i}"}],
+                    }
+                ],
+                "rolled-list loop overflow",
+            ),
+            (
+                "rolled iters",
+                [
+                    {"op": "const_i32", "bind": "lo", "val": 0},
+                    {"op": "const_i32", "bind": "hi", "val": 1},
+                    {"op": "const_i32", "bind": "step", "val": 1},
+                    {
+                        "op": "scf_for",
+                        "iv": "iv",
+                        "lo": "lo",
+                        "hi": "hi",
+                        "step": "step",
+                        "iter": [{"for": loop, "name": "carry{i}", "init": "lo"}],
+                        "results": [],
+                        "body": [],
+                    },
+                ],
+                "rolled-list loop overflow",
+            ),
+        )
+        for label, program, message in programs:
+            with self.subTest(path=label):
+                with self.assertRaisesRegex(ExpandError, message):
+                    self._expand_program(program)
+
+    def test_positive_static_loop_still_expands(self):
+        program = self._expand_program(
+            [
+                {
+                    "op": "static_for",
+                    "var": "i",
+                    "lo": 0,
+                    "hi": 3,
+                    "step": 1,
+                    "body": [{"op": "const_i32", "bind": "x", "val": {"var": "i"}}],
+                }
+            ]
+        )
+        self.assertEqual([instr["attrs"]["value"]["v"] for instr in program], [0, 1, 2])
 
 
 class TestRollAttention(unittest.TestCase):
