@@ -131,9 +131,10 @@ const rocke_type_t*
     return t;
 }
 
-/* SmemType(elem, shape) -> "smem<{elem}, [{d0}x{d1}...]>" */
-const rocke_type_t*
-    rocke_smem_type(rocke_ir_builder_t* b, const rocke_type_t* elem, const int* shape, int rank)
+/* SmemType(elem, shape) -> "smem<{elem}, [{d0}x{d1}...]>"
+ * `exclusive` is kept OUT of the name (default 0 stays byte-identical). */
+const rocke_type_t* rocke_smem_type(
+    rocke_ir_builder_t* b, const rocke_type_t* elem, const int* shape, int rank, int exclusive)
 {
     rocke_type_t* t;
     int* shape_copy = NULL;
@@ -146,6 +147,9 @@ const rocke_type_t*
     if(!elem)
         return (const rocke_type_t*)rocke_i_set_err(
             b, ROCKE_ERR_VALUE, "smem_type: NULL element type");
+    if(exclusive != 0 && exclusive != 1)
+        return (const rocke_type_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "smem_type: exclusive must be 0 or 1, got %d", exclusive);
     if(rank < 0)
         rank = 0;
 
@@ -166,6 +170,7 @@ const rocke_type_t*
     t->elem = elem;
     t->shape = shape_copy;
     t->rank = rank;
+    t->smem_exclusive = exclusive; /* guarded to 0/1 above */
 
     /* Build the "[d0xd1x...]" body, then the full canonical name. The Python
      * form is f"smem<{elem.name}, [{'x'.join(...)}]>". */
@@ -492,6 +497,7 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
     "memref.global_atomic_add",
     "memref.global_atomic_add_f32",
     "memref.global_atomic_add_pk_bf16",
+    "memref.global_atomic_add_pk_f16",
     "memref.cooperative_global_store",
 
     /* vector.* */
@@ -537,6 +543,8 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
     "tile.global_load_lds",
     "tile.async_buffer_load_lds",
     "tile.async_buffer_load_lds_addr",
+    "tile.buffer_load_lds_async",
+    "tile.global_load_async_to_lds",
     "tile.buffer_rsrc",
     "tile.buffer_load_f16",
     "tile.buffer_load_vN_f16",
@@ -567,6 +575,18 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
     "tile.ds_bpermute",
     "tile.ds_bpermute_b64",
     "tile.ds_swizzle_xor",
+    "tile.ds_swizzle",
+    "tile.mov_dpp8",
+    "tile.wave_reduce",
+    "tile.readlane",
+    "tile.writelane",
+    "tile.permlane16",
+    "tile.permlane64",
+    "tile.alignbyte",
+    "tile.s_wqm",
+    "tile.av_load_b128",
+    "tile.av_store_b128",
+    "tile.s_alloc_vgpr",
     "tile.mov_dpp",
     "tile.permlane32_swap",
     "tile.perm_b32",
@@ -582,6 +602,11 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
     "tile.sync_lds_only",
     "tile.s_barrier_bare",
     "tile.s_waitcnt",
+    "tile.s_wait_asynccnt",
+    "tile.asyncmark",
+    "tile.wait_asyncmark",
+    "tile.s_wait_event",
+    "tile.s_prefetch_inst",
     "tile.s_setprio",
     "tile.iglp_opt",
     "tile.sched_barrier",
@@ -698,6 +723,7 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
     /* global_atomic_add            */ false,
     /* global_atomic_add_f32        */ false,
     /* global_atomic_add_pk_bf16    */ false,
+    /* global_atomic_add_pk_f16     */ false,
     /* cooperative_global_store     */ false,
 
     /* vector.* */
@@ -743,6 +769,8 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
     /* global_load_lds            */ false,
     /* async_buffer_load_lds      */ false,
     /* async_buffer_load_lds_addr */ false,
+    /* buffer_load_lds_async      */ false,
+    /* global_load_async_to_lds   */ false,
     /* buffer_rsrc                */ false,
     /* buffer_load_f16            */ false,
     /* buffer_load_vN_f16         */ false,
@@ -773,6 +801,18 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
     /* ds_bpermute       */ true,
     /* ds_bpermute_b64   */ false,
     /* ds_swizzle_xor    */ true,
+    /* ds_swizzle        */ true,
+    /* mov_dpp8          */ true,
+    /* wave_reduce       */ true,
+    /* readlane          */ true,
+    /* writelane         */ true,
+    /* permlane16        */ true,
+    /* permlane64        */ true,
+    /* alignbyte         */ true,
+    /* s_wqm             */ true,
+    /* av_load_b128      */ true,
+    /* av_store_b128     */ false,
+    /* s_alloc_vgpr      */ false,
     /* mov_dpp           */ false,
     /* permlane32_swap   */ true,
     /* perm_b32          */ true,
@@ -788,6 +828,11 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
     /* sync_lds_only        */ false,
     /* s_barrier_bare       */ false,
     /* s_waitcnt            */ false,
+    /* s_wait_asynccnt      */ false,
+    /* asyncmark            */ false,
+    /* wait_asyncmark       */ false,
+    /* s_wait_event         */ false,
+    /* s_prefetch_inst      */ false,
     /* s_setprio            */ false,
     /* iglp_opt             */ false,
     /* sched_barrier        */ false,

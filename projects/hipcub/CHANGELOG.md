@@ -2,32 +2,20 @@
 
 Full documentation for hipCUB is available at [https://rocm.docs.amd.com/projects/hipCUB/en/latest/](https://rocm.docs.amd.com/projects/hipCUB/en/latest/).
 
-## hipCUB-5.0.0 for ROCm 10.0
-
+## hipCUB 4.6.0 for ROCm 10.0
+ 
 ### Added
+ 
+* Return value checks for assorted locations in the codebase that were previously missing.
+ 
+### Fixed
+ 
+* DeviceSegmentedRadixSort test failure when using hipMallocManaged with size 0.
+* Fixed uninitialized automatic variable bug in BlockReduce.
 
-* Added `::hip::std` support.
+### Upcoming changes
 
-### Changed
-
-* Changed `CCCL_MINIMUM_VERSION` to `3.0.0` to align with CUB.
-* Add support for large num_items `DeviceMerge` and `DeviceSegmentedSort`.
-* Replace `#pragma unroll` by `_CCCL_PRAGMA_UNROLL_FULL()` and `_CCCL_PRAGMA_NOUNROLL()` by `_CCCL_PRAGMA_NOUNROLL()`.
-* Add `_CCCL_SORT_MAYBE_UNROLL()` in block merge sort and thread sort.
-* Update `WarpExchange` template parameters for CUB compatibility.
-
-### Removed
-
-* Removed `hipcub::BaseTraits::CATEGORY`, `hipcub::BaseTraits::nullptr_TYPE` and `hipcub::BaseTraits::PRIMITIVE`.
-* Removed  `ConstantInputIterator`, `CountingInputIterator`, `DiscardOutputIterator` and `TransformInputIterator` which were deprecated in hipCUB-4.1.0.
-* Removed `DeviceSpmv`, which was removed from CUB after CCCL's 2.8.0 release. Use `hipSPARSE` or `rocSPARSE` libraries instead.
-* Removed `GridBarrier`.
-* Removed `HIPCUB_MIN`, `HIPCUB_MAX`, `HIPCUB_QUOTIENT_FLOOR`, `HIPCUB_QUOTIENT_CEILING`, `HIPCUB_ROUND_UP_NEAREST` and `HIPCUB_ROUND_DOWN_NEAREST` which were deprecated in hipCUB-4.1.0.
-* Removed `LEGACY_PTX_ARCH`.
-* Removed `hipcub:max` and `hipcub:min`, which were deprecated. Use `hip::std::max` and `hip::std::min` instead.
-* Deprecated `hipcub::Swap`, use `rocprim::swap` instead.
-* Deprecated `HIPCUB_IS_INT128_ENABLED`, use `_CCCL_HAS_INT128()` instead.
-* Deprecated `hipcub::Equality`, `hipcub::Inequality`, `hipcub::InequalityWrapper`, `hipcub::Sum`, `hipcub::Difference`, `hipcub::Division`, `hipcub::Max` and `hipcub::Min` operators. Use `hip::std::equal_to`, `hip::std::not_equal_to`, `hip::std::plus`, `hip::std::minus`, `hip::std::divides`, `hip::maximum` and `hip:minimum` operators instead.
+* CCCL 2.8.x compatibility is deprecated. hipCUB and rocThrust will be brought forward to CCCL 3.0.x compatibility in an upcoming version.
 
 ## hipCUB 4.5.0 for ROCm 7.14
 

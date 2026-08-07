@@ -16,7 +16,7 @@ namespace hipdnn_integration_tests::bundle
 // sections so a genuine reference bug is never lost among expected coverage gaps.
 //
 //   Unverifiable — expected coverage gap (no golden data, no reference can run
-//                  the op, inputs could not be synthesized, ...). The engine was
+//                  the op, inputs could not be filled, ...). The engine was
 //                  not accused; we simply had no oracle. Quiet but listed.
 //   RefError     — a reference executor that CAN run the op threw at runtime
 //                  (case C) and the harness fell through to keep verifying the
