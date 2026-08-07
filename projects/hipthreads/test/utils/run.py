@@ -65,7 +65,7 @@ def main():
 
     # Set environment variables where we prepend the given value to the
     # existing environment variable.
-    for (k, v) in map(lambda s: s.split("=", 1), args.prepend_env):
+    for k, v in map(lambda s: s.split("=", 1), args.prepend_env):
         if k in os.environ:
             v = v + os.pathsep + os.environ[k]
         env[k] = v
