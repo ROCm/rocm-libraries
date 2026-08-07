@@ -167,6 +167,44 @@ initialization modes now translate to this API; unsupported legacy raw-bit,
 sentinel, and packed-format recipes remain bounded fallbacks while they are
 modeled explicitly.
 
+## Structured tensor comparison
+
+`comparison.hpp` owns the complete host-side numerical decision after a
+product has copied an observed tensor into host memory:
+
+```cpp
+ComparisonOptions options
+    = defaultComparisonOptions(ScalarType::Float32);
+options.selection.indexOrder
+    = ComparisonIndexOrder::FirstDimensionFastest;
+options.computeUlp = true;
+options.ulpType = ScalarType::Float32;
+
+ComparisonResult report = compare(observedView, expectedView, options);
+```
+
+One plan can select logical elements and collect:
+
+- exact, absolute, relative, and symmetric-relative pointwise decisions;
+- complex component evidence;
+- explicit NaN, infinity, and signed-zero policy;
+- maximum absolute/relative differences and mismatch samples;
+- observed, expected, difference, and relative Frobenius evidence;
+- maximum, sum, and average ULP evidence;
+- candidate-grid allclose tolerance search; and
+- unwritten-sentinel checks before, inside, and after logical tensor storage.
+
+The same API accepts runtime `TensorView` objects or typed caller-owned
+storage. Typed adapters are useful for product scalar wrappers and preserve a
+vectorizable hot path without placing numerical comparison code in the
+product. hipBLASLt and TensileLite now retain only descriptor/type
+translation, host readback, option selection, and formatting/reporting.
+
+This ownership deliberately excludes hipBLASLt's runtime device
+`check_numerics_matrix` facility. That HIP kernel scans device memory for
+NaN/Inf while the library is running; it is not expected-versus-reference
+validation and remains a separate product/GPU concern.
+
 ## Runtime reference GEMM
 
 The canonical reference-GEMM API is tensor-centric and runtime-typed:
@@ -347,10 +385,11 @@ AMDGPU dependency.
 `encodeTwoOfFourMetadata` remains available when retained indices already
 exist and metadata must be produced as a separate operation.
 
-Consumers should need one of only two includes:
+Consumers should need one of only these focused includes:
 
 ```cpp
 #include <roc/host_validation/tensor.hpp>      // stable tensor core
+#include <roc/host_validation/comparison.hpp>  // host comparison plan/report
 #include <roc/host_validation/validation.hpp>  // transitional validation operations
 ```
 
@@ -360,6 +399,11 @@ Installed consumers can use:
 find_package(ROCHostValidation CONFIG REQUIRED)
 target_link_libraries(app PRIVATE roc::host-validation-core)
 ```
+
+When the optional static BLAS backend is installed, its imported target carries
+`BLAS::BLAS` as a link-only dependency and the package config calls
+`find_dependency(BLAS)`. Consumers therefore do not manually repeat the
+OpenBLAS/CBLAS link line.
 
 ## Python and NumPy oracle
 
@@ -384,6 +428,9 @@ The `roc_host_validation` package currently provides:
 - tensor construction from logical values or exact storage bytes;
 - `from_numpy` and `to_numpy` copying conversions;
 - deterministic tensor generation and structured comparison;
+- `ComparisonOptions`/`ComparisonResult`, logical selection, complex and
+  non-finite policy, Frobenius/ULP evidence, allclose search, and sentinel
+  diagnostics;
 - `GenerationOptions`, `GenerationPatternSpec`, and `generate_tensor`;
 - `reference_gemm` with runtime storage/output/accumulator types, alpha/beta,
   ordered pre-quantization factors, compute-input quantization, math mode,
@@ -404,6 +451,8 @@ The NumPy suite independently checks:
 - affine layout decoding;
 - deterministic generation, logical index ordering, complex component
   recipes, and structured comparison;
+- pointwise, selected, complex, non-finite, Frobenius, ULP, allclose-search,
+  and unwritten-sentinel comparison behavior against NumPy;
 - F16 stepwise, F32, F64, I32, complex, and tiled GEMM against NumPy;
 - mixed FP8-storage/FP4-compute-input quantization;
 - selected-output GEMM and prime-stride selection;
