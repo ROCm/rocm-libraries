@@ -194,6 +194,10 @@ SUBTREE_EXTRA_MATRIX_PROJECTS = {
     "projects/hipblaslt": "sparselt",
 }
 
+ROCJITSU_RACE_CHECK_SUBTREES = {
+    "projects/hipblaslt",
+}
+
 # PR labels that inject an extra cmake option into a specific project's build.
 # The option is only added when the gating label is present on the PR AND that
 # project is actually being built, so the default build is unchanged. This lets a
@@ -259,10 +263,14 @@ def validate_label_gated_cmake_options(gated_options=None):
                 f"list of options, not {type(gated['cmake_options']).__name__}"
             )
 
-
 def collect_projects_to_run(subtrees, pr_labels=None):
+    subtrees = list(subtrees)
     platform = os.getenv("PLATFORM")
     projects = set()
+    # Record why the BLAS row was selected before dependency folding loses the
+    # original subtree identity. Workflows consume this marker after the matrix
+    # is assembled to attach instrumentation to the final merged product row.
+    run_rocjitsu_race_check = bool(ROCJITSU_RACE_CHECK_SUBTREES.intersection(subtrees))
     # Work on per-call deep copies so module-level state stays immutable across calls.
     local_project_map = copy.deepcopy(project_map)
     local_additional_options = copy.deepcopy(additional_options)
@@ -386,6 +394,10 @@ def collect_projects_to_run(subtrees, pr_labels=None):
             )
             project_map_data["projects_to_test"] = list(
                 dict.fromkeys(project_map_data["projects_to_test"])
+            )
+            project_map_data["run_rocjitsu_race_check"] = (
+                run_rocjitsu_race_check
+                and "tensilelite" in project_map_data["projects_to_test"]
             )
 
             cmake_flag_options = " ".join(project_map_data["cmake_options"])
