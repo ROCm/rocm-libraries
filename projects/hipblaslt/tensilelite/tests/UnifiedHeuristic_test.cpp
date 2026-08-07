@@ -246,6 +246,29 @@ TEST(UnifiedHeuristicTest, ExcludesSolutionsFailingTaskPredicate)
         << "a solution failing the task predicate must be excluded from the union";
 }
 
+// When StreamK dynamic scheduling is active, the ExactLogicLibrary gate skips
+// equality/range rows and restricts selection to prediction/analytical rows.
+// The unified path must defer to native findTopSolutions so it does not surface
+// the excluded kernels via its GEMM_TYPE_ONLY union.
+TEST(UnifiedHeuristicTest, DefersToNativeWhenPredictionGateActive)
+{
+    auto analyticalHw = std::make_shared<origami::hardware_t>(makeGfx950AnalyticalHardware());
+    auto device       = makeHipDeviceWithAnalytical(analyticalHw);
+    auto problem      = makeGemmProblem(4096, 4096, 1024);
+    problem.setParams().setStreamKTileSchedulingMode(1);
+
+    StubUnionLibrary lib;
+    lib.topSentinel = {makeSolution("native-sentinel", 99)};
+    lib.all         = {makeTiledSolution("union-a", 1, 128, 128, 64)};
+
+    auto result = findTopSolutionsUnified(lib, problem, device, 4);
+
+    EXPECT_EQ(indicesOf(result), (std::vector<int>{99}))
+        << "StreamK-dynamic gate must defer to the native findTopSolutions";
+    EXPECT_EQ(lib.lastSearchType, SolutionLibrarySearchType::COUNT)
+        << "gate path must not gather the GEMM_TYPE_ONLY union";
+}
+
 // The union is de-duplicated and truncated to the requested count.
 TEST(UnifiedHeuristicTest, DedupsAndTruncatesToRequestedCount)
 {

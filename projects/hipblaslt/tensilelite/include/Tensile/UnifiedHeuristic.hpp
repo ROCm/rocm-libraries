@@ -44,6 +44,21 @@ namespace TensileLite
         if(!(pAMDGPU && pAMDGPU->analyticalHardware))
             return library.findTopSolutions(problem, hardware, numSolutions);
 
+        // Honor the ExactLogicLibrary selection gate: when the prediction library
+        // is forced (TENSILE_USE_PREDICTION) or StreamK dynamic scheduling is
+        // active, the native findTopSolutions restricts selection to prediction/
+        // analytical rows and skips EqualityMatching/RangeMatching. The
+        // GEMM_TYPE_ONLY union cannot reconstruct that row-level exclusion (Range
+        // solutions are untagged outside debug), so defer to the native path.
+        {
+            const auto forceDynamic     = Debug::Instance().streamK5ForceMode();
+            const bool effectiveDynamic = (forceDynamic == 1)
+                                          || (forceDynamic != 0
+                                              && problem.getParams().streamKTileSchedulingMode() != 0);
+            if(Debug::Instance().usePredictionLibrary() || effectiveDynamic)
+                return library.findTopSolutions(problem, hardware, numSolutions);
+        }
+
         const size_t want = numSolutions > 0 ? static_cast<size_t>(numSolutions) : 0;
 
         SolutionVector<ContractionSolution> rv;
