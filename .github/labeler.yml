@@ -32,6 +32,7 @@
   - any-glob-to-any-file: 'dnn-providers/hip-kernel-provider/rocke/library/builders/**/attention/**/*'
 
 # RocKE platform and library work are owned and tracked by separate teams.
+# This label serves to distiguish work being done in RocKE platofm, for the revieing team and external tools
 "rocke: platform":
 - changed-files:
   - any-glob-to-any-file: 'dnn-providers/hip-kernel-provider/rocke/platform/**/*'
