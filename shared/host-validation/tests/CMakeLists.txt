@@ -76,4 +76,14 @@ if(HOST_VALIDATION_BUILD_BENCHMARKS)
                 HOST_VALIDATION_BENCHMARK_OPENMP=1
         )
     endif()
+
+    add_executable(
+        host-validation-comparison-benchmark
+        comparison_benchmark.cpp
+    )
+    target_link_libraries(
+        host-validation-comparison-benchmark
+        PRIVATE
+            roc::host-validation
+    )
 endif()

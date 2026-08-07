@@ -10,13 +10,19 @@
 #include <Tensile/Activation.hpp>
 #include <Tensile/DataTypes.hpp>
 
+#include <complex>
+#include <cstddef>
+#include <cstdint>
+#include <span>
 #include <stdexcept>
 
 namespace TensileLite::Client
 {
-inline roc::host_validation::ScalarType toHostValidationScalarType(rocisa::DataType type) {
-    using roc::host_validation::ScalarType;
-    switch (type) {
+    inline roc::host_validation::ScalarType toHostValidationScalarType(rocisa::DataType type)
+    {
+        using roc::host_validation::ScalarType;
+        switch(type)
+        {
         case rocisa::DataType::Float:
         case rocisa::DataType::XFloat32:
             return ScalarType::Float32;
@@ -58,12 +64,14 @@ inline roc::host_validation::ScalarType toHostValidationScalarType(rocisa::DataT
             return ScalarType::E5M3;
         default:
             throw std::invalid_argument("rocisa data type has no scalar host-validation mapping.");
+        }
     }
-}
 
-inline roc::host_validation::Activation
-    toHostValidationActivation(ActivationType activation, bool gradientApplication = false) {
-    switch (activation) {
+    inline roc::host_validation::Activation
+        toHostValidationActivation(ActivationType activation, bool gradientApplication = false)
+    {
+        switch(activation)
+        {
         case ActivationType::None:
             return roc::host_validation::Activation::None;
         case ActivationType::Abs:
@@ -96,6 +104,73 @@ inline roc::host_validation::Activation
             return roc::host_validation::Activation::Clamp;
         default:
             throw std::invalid_argument("Activation has no runtime host-validation mapping.");
+        }
     }
-}
-}  // namespace TensileLite::Client
+
+    template <typename T>
+    roc::host_validation::ComparisonResult
+        compareHostBuffersTyped(const void*                                    observed,
+                                const void*                                    expected,
+                                size_t                                         storageElements,
+                                const roc::host_validation::Layout&            layout,
+                                const roc::host_validation::ComparisonOptions& options)
+    {
+        return roc::host_validation::compare(
+            std::span<const T>(static_cast<const T*>(observed), storageElements),
+            layout,
+            std::span<const T>(static_cast<const T*>(expected), storageElements),
+            layout,
+            options);
+    }
+
+    inline roc::host_validation::ComparisonResult
+        compareHostBuffers(rocisa::DataType                               type,
+                           const void*                                    observed,
+                           const void*                                    expected,
+                           size_t                                         storageElements,
+                           const roc::host_validation::Layout&            layout,
+                           const roc::host_validation::ComparisonOptions& options)
+    {
+        switch(type)
+        {
+        case rocisa::DataType::Float:
+            return compareHostBuffersTyped<float>(
+                observed, expected, storageElements, layout, options);
+        case rocisa::DataType::Double:
+            return compareHostBuffersTyped<double>(
+                observed, expected, storageElements, layout, options);
+        case rocisa::DataType::ComplexFloat:
+            return compareHostBuffersTyped<std::complex<float>>(
+                observed, expected, storageElements, layout, options);
+        case rocisa::DataType::ComplexDouble:
+            return compareHostBuffersTyped<std::complex<double>>(
+                observed, expected, storageElements, layout, options);
+        case rocisa::DataType::Half:
+            return compareHostBuffersTyped<Half>(
+                observed, expected, storageElements, layout, options);
+        case rocisa::DataType::BFloat16:
+            return compareHostBuffersTyped<BFloat16>(
+                observed, expected, storageElements, layout, options);
+        case rocisa::DataType::Float8:
+            return compareHostBuffersTyped<Float8>(
+                observed, expected, storageElements, layout, options);
+        case rocisa::DataType::BFloat8:
+            return compareHostBuffersTyped<BFloat8>(
+                observed, expected, storageElements, layout, options);
+        case rocisa::DataType::Float8_fnuz:
+            return compareHostBuffersTyped<Float8_fnuz>(
+                observed, expected, storageElements, layout, options);
+        case rocisa::DataType::BFloat8_fnuz:
+            return compareHostBuffersTyped<BFloat8_fnuz>(
+                observed, expected, storageElements, layout, options);
+        case rocisa::DataType::Int8:
+            return compareHostBuffersTyped<int8_t>(
+                observed, expected, storageElements, layout, options);
+        case rocisa::DataType::Int32:
+            return compareHostBuffersTyped<int32_t>(
+                observed, expected, storageElements, layout, options);
+        default:
+            throw std::invalid_argument("TensileLite output type has no typed comparison adapter.");
+        }
+    }
+} // namespace TensileLite::Client

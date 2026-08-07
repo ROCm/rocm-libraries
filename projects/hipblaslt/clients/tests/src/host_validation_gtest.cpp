@@ -3,7 +3,11 @@
 
 #include <roc/host_validation/adapters/hipblaslt/HipblasltDataInitialization.hpp>
 #include <roc/host_validation/adapters/hipblaslt/HipblasltReferenceGemm.hpp>
+#include <roc/host_validation/adapters/hipblaslt/allclose.hpp>
 #include <roc/host_validation/adapters/hipblaslt/hipblaslt_init.hpp>
+#include <roc/host_validation/adapters/hipblaslt/near.hpp>
+#include <roc/host_validation/adapters/hipblaslt/norm.hpp>
+#include <roc/host_validation/adapters/hipblaslt/unit.hpp>
 
 #include <gtest/gtest.h>
 
@@ -13,6 +17,7 @@
 #include <cmath>
 #include <complex>
 #include <cstdint>
+#include <limits>
 #include <span>
 #include <vector>
 
@@ -28,6 +33,79 @@ TEST(HostValidationDataInitializationBridge, GeneratesComplexTrigonometricValues
         EXPECT_FLOAT_EQ(values[index].real(), std::sin(static_cast<float>(index)));
         EXPECT_FLOAT_EQ(values[index].imag(), std::cos(static_cast<float>(index)));
     }
+}
+
+TEST(HostValidationComparisonBridge, FindsAllcloseToleranceAcrossBatches)
+{
+    const std::array<float, 4> expected{1.0f, 2.0f, 3.0f, 4.0f};
+    const std::array<float, 4> observed{1.0f, 2.00009f, 3.0f, 4.0f};
+    double atol = 1.0;
+    double rtol = 1.0;
+
+    EXPECT_TRUE(allclose_check_general('F',
+                                       2,
+                                       1,
+                                       2,
+                                       2,
+                                       const_cast<float*>(expected.data()),
+                                       const_cast<float*>(observed.data()),
+                                       2,
+                                       atol,
+                                       rtol,
+                                       HIP_R_32F));
+    EXPECT_EQ(atol, 1e-6);
+    EXPECT_EQ(rtol, 1e-4);
+}
+
+TEST(HostValidationComparisonBridge, ComputesRelativeFrobeniusEvidence)
+{
+    std::array<double, 2> expected{3.0, 4.0};
+    std::array<double, 2> observed{0.0, 4.0};
+    const double error = norm_check_general('F',
+                                            2,
+                                            1,
+                                            2,
+                                            2,
+                                            expected.data(),
+                                            observed.data(),
+                                            1,
+                                            HIP_R_64F);
+    EXPECT_DOUBLE_EQ(error, 0.6);
+}
+
+TEST(HostValidationComparisonBridge, UnitNearAndSpecialValuePolicies)
+{
+    const float oneUlp = std::nextafter(1.0f, 2.0f);
+    std::array<float, 2> expected{1.0f,
+                                  std::numeric_limits<float>::infinity()};
+    std::array<float, 2> observed{oneUlp,
+                                  std::numeric_limits<float>::infinity()};
+
+    unit_check_general(2,
+                       1,
+                       2,
+                       2,
+                       expected.data(),
+                       observed.data(),
+                       1,
+                       HIP_R_32F);
+    near_check_general(2,
+                       1,
+                       2,
+                       2,
+                       expected.data(),
+                       observed.data(),
+                       1,
+                       1e-6,
+                       HIP_R_32F);
+    check_special_value_consistency(2,
+                                    1,
+                                    2,
+                                    2,
+                                    expected.data(),
+                                    observed.data(),
+                                    1,
+                                    HIP_R_32F);
 }
 
 TEST(HostValidationDataInitializationBridge, CounterBasedGenerationIsRepeatable)
