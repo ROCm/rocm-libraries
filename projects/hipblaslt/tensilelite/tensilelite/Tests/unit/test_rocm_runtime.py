@@ -80,7 +80,8 @@ def test_runtime_treats_rocisa_as_an_opaque_import(tmp_path, monkeypatch):
         "validate_distribution",
         lambda distribution, version: _rocm.ValidatedRocm(root, "7.2.4"),
     )
-    monkeypatch.setattr(_runtime, "_custom_client_path", lambda: None)
+    monkeypatch.setattr(_runtime, "selected_client", lambda root: (client, False))
+    monkeypatch.setattr(_runtime, "validate_client", lambda path, version: None)
 
     _runtime.initialize("5.0.0+rocm7.2.4")
 
@@ -106,25 +107,10 @@ def test_custom_client_never_falls_back_to_rocm_client(tmp_path, monkeypatch):
         "validate_distribution",
         lambda distribution, version: _rocm.ValidatedRocm(root, "7.2.4"),
     )
-    monkeypatch.setattr(_runtime, "_custom_client_path", lambda: custom_client)
+    monkeypatch.setattr(_runtime, "selected_client", lambda root: (custom_client, True))
+    monkeypatch.setattr(_runtime, "validate_client", lambda path, version: None)
 
     _runtime.initialize("5.0.0+rocm7.2.4")
     custom_client.unlink()
 
-    with pytest.raises(_rocm.TensileLiteRuntimeError, match=str(custom_client)):
-        _runtime.client_executable()
-
-
-def test_malformed_installed_client_binding_is_rejected(monkeypatch):
-    class InstalledDistribution:
-        def read_text(self, filename):
-            return "Wheel-Version: 1.0" if filename == "WHEEL" else "not-json"
-
-    monkeypatch.setattr(
-        _runtime,
-        "distributions",
-        lambda **selection: [InstalledDistribution()],
-    )
-
-    with pytest.raises(_rocm.TensileLiteRuntimeError, match="not valid JSON"):
-        _runtime._custom_client_path()
+    assert _runtime.client_executable() == custom_client

@@ -497,8 +497,6 @@ def install(
                 "--no-deps",
                 "--editable",
                 str(_TASKS_DIR),
-                "--config-settings",
-                f"tensilelite.client-path={staged_client}",
             ]
         ),
         env=env,
@@ -507,14 +505,9 @@ def install(
         shlex.join(
             [
                 str(python),
-                "-c",
-                (
-                    "import pathlib, sys; import rocisa, tensilelite; "
-                    "from tensilelite import _runtime; "
-                    "actual = _runtime.client_executable(); "
-                    "expected = pathlib.Path(sys.argv[1]); "
-                    "assert actual == expected, f'{actual} != {expected}'"
-                ),
+                "-m",
+                "tensilelite_configure_client",
+                "--client",
                 str(staged_client),
             ]
         ),

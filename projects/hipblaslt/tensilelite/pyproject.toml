@@ -76,6 +76,7 @@ license = "MIT"
 
 [project.scripts]
 tensilelite = "tensilelite.cli:main"
+tensilelite-configure-client = "tensilelite_configure_client:main"
 
 [project.optional-dependencies]
 profile = ["yappi"]
@@ -97,9 +98,10 @@ dev = [
 
 [build-system]
 requires = ["setuptools>=68"]
-build-backend = "build_backend"
-backend-path = ["."]
+build-backend = "setuptools.build_meta"
 
+[tool.setuptools]
+py-modules = ["_tensilelite_client_binding", "tensilelite_configure_client"]
 [tool.setuptools.packages.find]
 include = ["tensilelite*"]
 exclude = ["tensilelite.Tests*", "tensilelite.Utilities.archive*"]
