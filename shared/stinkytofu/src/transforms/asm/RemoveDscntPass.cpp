@@ -63,8 +63,8 @@
 namespace {
 using namespace stinkytofu;
 
-/// A load whose issue cycle is within this many cycles of the current cycle is
-/// considered too recent and is dropped from the in-flight FIFO.
+/// A load whose issue cycle is farther than this many cycles from the current
+/// cycle is considered old enough and is dropped from the in-flight FIFO.
 /// default value is 143, which is the expirimental result from the experiment.
 constexpr int kDsProximityThreshold = 143;
 
@@ -510,17 +510,17 @@ class RemoveDscntPass : public StinkyInstPass {
                     inFlightDsLoads.pop_front();
                 }
 
-                // After draining to the wait count, drop any load whose distance
-                // from the current cycle is still under the proximity threshold.
+                // After draining to the wait count, drop loads that are already
+                // far enough from the current cycle (distance > threshold).
                 // `cycles` is monotonically non-decreasing during the scan, so the
                 // in-flight FIFO is ordered oldest->newest front->back and these
-                // recent loads form a contiguous suffix.
-                PASS_DEBUG(std::cerr << "[RemoveDscnt]   drop recent load @cycle="
-                                     << inFlightDsLoads.front().cycle
-                                     << " dist=" << (cycles - inFlightDsLoads.front().cycle)
-                                     << " < " << dsProximityThreshold_ << "\n");
+                // old-enough loads form a contiguous prefix.
                 while (!inFlightDsLoads.empty() &&
                        (cycles - inFlightDsLoads.front().cycle) > dsProximityThreshold_) {
+                    PASS_DEBUG(std::cerr << "[RemoveDscnt]   drop old load @cycle="
+                                         << inFlightDsLoads.front().cycle
+                                         << " dist=" << (cycles - inFlightDsLoads.front().cycle)
+                                         << " > " << dsProximityThreshold_ << "\n");
                     inFlightDsLoads.pop_front();
                 }
 
