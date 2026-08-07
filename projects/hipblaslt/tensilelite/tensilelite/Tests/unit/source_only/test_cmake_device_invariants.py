@@ -10,7 +10,7 @@ import pytest
 
 
 pytestmark = pytest.mark.unit
-_HIPBLASLT_ROOT = Path(__file__).resolve().parents[4]
+_HIPBLASLT_ROOT = Path(__file__).resolve().parents[5]
 
 
 @pytest.mark.parametrize(

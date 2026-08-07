@@ -820,29 +820,47 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
         PATTERN "*.o" EXCLUDE
         PATTERN "CMakeFiles" EXCLUDE
         PATTERN "CMakeCache.txt" EXCLUDE
+        PATTERN "source_only" EXCLUDE
     )
 
-    # Scripts used by unit tests
     install(
-        FILES
-            "${_tensilelite_src}/scripts/analyze_timing.py"
-            "${_tensilelite_src}/scripts/precommit_affected_tests.py"
-        DESTINATION "${_tensilelite_install_dest}/scripts"
+        DIRECTORY "${_tensilelite_src}/compat/tests/"
+        DESTINATION "${_tensilelite_install_dest}/compat/tests"
         COMPONENT tests
+        PATTERN "__pycache__" EXCLUDE
+        PATTERN "*.pyc" EXCLUDE
     )
-    # Imported directly by the true16 activation regression test, so retain
-    # this source-only helper alongside the installed test package.
+
+    if(NOT TARGET _rocisa)
+        message(FATAL_ERROR
+            "HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS requires the in-tree _rocisa target")
+    endif()
     install(
-        FILES "${_tensilelite_src}/AMaxGenerator.py"
-        DESTINATION "${_tensilelite_install_dest}"
+        DIRECTORY "${_tensilelite_src}/rocisa/rocisa/"
+        DESTINATION "${_tensilelite_install_dest}/rocisa/rocisa"
         COMPONENT tests
+        FILES_MATCHING PATTERN "*.py"
+        PATTERN "__pycache__" EXCLUDE
     )
-    if(TARGET tensilelite-client)
-        install(TARGETS tensilelite-client
-            RUNTIME DESTINATION "${CMAKE_INSTALL_LIBEXECDIR}/hipblaslt/tensilelite"
+    install(TARGETS _rocisa
+        LIBRARY DESTINATION "${_tensilelite_install_dest}/rocisa/rocisa" COMPONENT tests
+        RUNTIME DESTINATION "${_tensilelite_install_dest}/rocisa/rocisa" COMPONENT tests
+    )
+    if(TARGET stinkytofu::stinkytofu AND NOT WIN32)
+        install(FILES
+            "$<TARGET_FILE:stinkytofu::stinkytofu>"
+            "$<TARGET_SONAME_FILE:stinkytofu::stinkytofu>"
+            DESTINATION "${_tensilelite_install_dest}/rocisa/rocisa"
             COMPONENT tests
         )
     endif()
+    install(
+        DIRECTORY "${_tensilelite_src}/rocisa/test/"
+        DESTINATION "${_tensilelite_install_dest}/rocisa_tests"
+        COMPONENT tests
+        PATTERN "__pycache__" EXCLUDE
+        PATTERN "*.pyc" EXCLUDE
+    )
 
     # pytest config (marker registration, xfail_strict)
     install(

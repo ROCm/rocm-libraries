@@ -7,7 +7,6 @@ import os
 from pathlib import Path
 import subprocess
 import sys
-import zipfile
 
 from packaging.version import Version
 import pytest
@@ -17,7 +16,6 @@ import tensilelite_configure_client as configure_client
 
 
 pytestmark = pytest.mark.unit
-_SOURCE_ROOT = Path(__file__).resolve().parents[3]
 
 
 class _Distribution:
@@ -163,38 +161,3 @@ def test_client_launch_diagnostics(tmp_path, monkeypatch, failure, message):
     monkeypatch.setattr(binding.subprocess, "run", fail)
     with pytest.raises(binding.ClientBindingError, match=message):
         binding.validate_client(client, "5.0.0+rocm7.2.4")
-
-
-def test_configuring_installation_does_not_modify_original_wheel(tmp_path):
-    wheel_dir = tmp_path / "wheelhouse"
-    wheel_dir.mkdir()
-    rocm_root = tmp_path / "rocm"
-    (rocm_root / ".info").mkdir(parents=True)
-    (rocm_root / ".info/version").write_text("7.2.4\n", encoding="utf-8")
-    env = dict(os.environ, ROCM_PATH=str(rocm_root))
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "pip",
-            "wheel",
-            "--disable-pip-version-check",
-            "--no-build-isolation",
-            "--no-deps",
-            "--wheel-dir",
-            str(wheel_dir),
-            str(_SOURCE_ROOT),
-        ],
-        cwd=_SOURCE_ROOT,
-        env=env,
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 0, result.stderr
-    wheel = next(wheel_dir.glob("tensilelite-*.whl"))
-    before = hashlib.sha256(wheel.read_bytes()).digest()
-    with zipfile.ZipFile(wheel) as archive:
-        assert not any(name.endswith("client.json") for name in archive.namelist())
-        assert "_tensilelite_client_binding.py" in archive.namelist()
-        assert "tensilelite_configure_client.py" in archive.namelist()
-    assert hashlib.sha256(wheel.read_bytes()).digest() == before

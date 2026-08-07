@@ -25,6 +25,6 @@ class CleanBuildPy(build_py):
 
 setup(
     version=_version,
-    install_requires=[f"tensilelite=={_version}", "pandas"],
+    install_requires=[f"tensilelite=={_version}"],
     cmdclass={"build_py": CleanBuildPy},
 )

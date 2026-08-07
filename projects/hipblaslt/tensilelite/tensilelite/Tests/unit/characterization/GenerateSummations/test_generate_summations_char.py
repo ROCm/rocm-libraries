@@ -22,12 +22,12 @@ import pytest
 pytestmark = pytest.mark.unit
 
 
-# Attempt to import the module; if pandas is missing, we'll skip main tests
+# Import the real production module; it has no optional dataframe dependency.
 try:
     M = importlib.import_module("tensilelite.GenerateSummations")
     _PANDAS_AVAILABLE = True
 except ImportError as e:
-    if "pandas" in str(e) or "numpy" in str(e):
+    if "numpy" in str(e):
         M = None
         _PANDAS_AVAILABLE = False
     else:
@@ -88,7 +88,6 @@ def test_create_library_for_benchmark_error_handling():
         with patch.object(M, "createLibrary", side_effect=OSError("File not found")):
             with pytest.raises(SystemExit):
                 M.createLibraryForBenchmark(logic_path, lib_path, current_path)
-
 
 
 

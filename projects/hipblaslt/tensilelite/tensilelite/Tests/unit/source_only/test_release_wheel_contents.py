@@ -10,7 +10,7 @@ import pytest
 
 
 pytestmark = pytest.mark.unit
-_SOURCE_ROOT = Path(__file__).resolve().parents[3]
+_SOURCE_ROOT = Path(__file__).resolve().parents[4]
 _VALIDATOR = _SOURCE_ROOT / "scripts/check_release_wheel_contents.py"
 
 
