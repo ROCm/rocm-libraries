@@ -976,10 +976,12 @@ fwd_result fmha_fwd_run(mode_enum mode,
     iota_shuffle(cache_batch_idx_host.begin(), cache_batch_idx_host.end(), 0, random_engine);
     if(init_sink_value != 0)
     {
-        // sink is initialized to a fixed integer value for easy debugging and use 30 to 60 range
-        // for close to rowmax values.
-        ck_tile::FillUniformDistributionIntegerValue<SMPLComputeDataType>{30.f, 60.f, next_seed()}(
-            sink_host);
+        // Keep the sink small and centered near zero. A sink far above rowmax makes
+        // lse_new = log(exp(lse_old) + exp(sink)) saturate to sink, so P_sink -> 1 while every
+        // regular token weight is scaled by exp(lse_old - lse_new) -> 0. The output then collapses
+        // toward zero and stops depending on which K/V, bias or randval tiles were read, which
+        // hides tile-window offset bugs in the sink path.
+        ck_tile::FillUniformDistribution<SMPLComputeDataType>{-1.f, 1.f, next_seed()}(sink_host);
     }
     ck_tile::DeviceMem q_buf(q_host.get_element_space_size_in_bytes());
     ck_tile::DeviceMem k_buf(k_host.get_element_space_size_in_bytes());
