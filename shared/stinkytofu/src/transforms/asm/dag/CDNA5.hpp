@@ -828,9 +828,9 @@ DAGNode* CDNA5ReadyQueue::pickFreeBest(const ReadySetByDAGid& queue, int* outWai
 // Returns the node and its latency. Ties broken by DAG id (program order).
 std::pair<DAGNode*, int> CDNA5ReadyQueue::findMostReadyWMMA() {
     DAGNode* best = nullptr;
-    std::tuple<int, unsigned> bestKey{INT_MAX, 0};
+    std::tuple<int, int> bestKey{INT_MAX, 0};
     for (DAGNode* n : wmmaQueue) {
-        considerBest(n, std::make_tuple(getMaxSrcDataWait(n), n->id), best, bestKey);
+        considerBest(n, std::make_tuple(getMaxSrcDataWait(n), (int)n->id), best, bestKey);
     }
     return {best, std::get<0>(bestKey)};
 }
@@ -892,7 +892,7 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     DAGNode* best = nullptr;
     int kind = -1;
     int bestWait = 0;
-    std::tuple<bool, unsigned> bestKey{};
+    std::tuple<bool, int> bestKey{};
 
     // Ordering, highest key first: (1) free work beats a hidden-stall candidate;
     // (2) smallest id. Producer-side hazard hoisting is handled separately by
@@ -900,7 +900,7 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     // everything else unless/until decidePromote() forces it.
     auto consider = [&](DAGNode* cand, int candKind, int candWait) {
         if (!cand) return;
-        if (considerBest(cand, std::make_tuple(candWait > 0, cand->id), best, bestKey)) {
+        if (considerBest(cand, std::make_tuple(candWait > 0, (int)cand->id), best, bestKey)) {
             kind = candKind;
             bestWait = candWait;
         }
@@ -961,12 +961,12 @@ bool CDNA5ReadyQueue::findOldestFallbackNonWmma(DAGNode* pickedDS, DAGNode** out
     if (outWait) *outWait = 0;
     DAGNode* best = nullptr;
     int kind = -1;
-    std::tuple<int, unsigned> bestKey{};
+    std::tuple<int, int> bestKey{};
 
     auto consider = [&](DAGNode* cand, int candKind) {
         if (cand == nullptr) return;
         const int wait = std::max(getMaxSrcDataWait(cand), getHazardWait(cand));
-        if (considerBest(cand, std::make_tuple(wait, cand->id), best, bestKey)) kind = candKind;
+        if (considerBest(cand, std::make_tuple(wait, (int)cand->id), best, bestKey)) kind = candKind;
     };
 
     if (!globalReadQueue.empty()) consider(globalReadQueue.top(), kGlobalRead);
