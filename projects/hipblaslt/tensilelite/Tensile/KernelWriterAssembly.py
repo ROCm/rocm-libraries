@@ -2106,6 +2106,19 @@ class KernelWriterAssembly(KernelWriter):
       self.states.overflowedResources = 1
     elif self.sgprPool.size() > self.states.regCaps["MaxSgpr"]:
       self.states.overflowedResources = 2
+      # An overflow is not a build failure: the kernel is emitted as an .if 0 /
+      # s_endpgm shell and simply disappears from the library, so the only
+      # symptom is a silent performance cliff at run time. PLSIN clears the cap
+      # by only 2 registers and does it by freeing a contiguous kernarg run,
+      # which any change to the kernarg layout or to the store epilogue's peak
+      # can undo -- so for these kernels make it loud rather than silent.
+      if self.states.postLoopStoreInNll:
+        printExit("PostLoopStoreInNll kernel %s needs %u SGPRs against a cap of %u. "
+                  "It would be emitted as an empty shell and silently dropped from "
+                  "the library. Re-check the StreamK constant park set "
+                  "(streamKConstVgprNames) against the current SGPR peak."
+                  % (self.states.kernelName, self.sgprPool.size(),
+                     self.states.regCaps["MaxSgpr"]))
 
     # TODO: Add target occupancy or kept the occupancy settings from globalWriteBatch
     kernel["CUOccupancy"] = self.getOccupancy(kernel["NumThreads"], self.vgprPool.size(), self.sgprPool.size(), \
