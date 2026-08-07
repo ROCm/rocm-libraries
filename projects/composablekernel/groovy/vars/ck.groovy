@@ -652,11 +652,15 @@ def buildDocker(install_prefix){
 
 def get_docker_options(){
     def dockerOpts
+    // Deliberately no --network=host: the container-local listeners we start (stunnel on
+    // 127.0.0.1:6379 and the sccache server on 4226) would land in the host netns and
+    // collide when several jobs share a node. Bridge networking gives each job its own
+    // loopback, and everything we talk to (redis/sccache, registries, github) is outbound.
     if ( params.BUILD_INSTANCES_ONLY ){
-        dockerOpts = "--network=host --group-add video --group-add render --cap-add=SYS_PTRACE --security-opt seccomp=unconfined"
+        dockerOpts = "--group-add video --group-add render --cap-add=SYS_PTRACE --security-opt seccomp=unconfined"
     }
     else{ //only add kfd and dri paths if you actually going to run somthing on GPUs
-        dockerOpts = "--network=host --device=/dev/kfd --device=/dev/dri --group-add video --group-add render --cap-add=SYS_PTRACE --security-opt seccomp=unconfined"
+        dockerOpts = "--device=/dev/kfd --device=/dev/dri --group-add video --group-add render --cap-add=SYS_PTRACE --security-opt seccomp=unconfined"
     }
     if (params.COMPILER_VERSION == "develop" || params.COMPILER_VERSION == "amd-staging" || params.COMPILER_VERSION == "therock" || params.COMPILER_COMMIT != ""){
     // the  --env COMPRESSED_BUNDLE_FORMAT_VERSION=2 env variable is required when building code with offload-compress flag with
