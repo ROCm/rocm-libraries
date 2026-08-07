@@ -24,6 +24,11 @@ comparison used by ROCm library clients and tests.
   - Supports dense F32/F64 accumulation, runtime input/output types,
     compute-input quantization, XFloat32, vector/scalar epilogue operands,
     bias, and activation.
+- `roc::host-validation-mx`
+  - Optional compiled block-scaled tensor data-generation implementation.
+  - Built with `HOST_VALIDATION_BUILD_MX_BACKEND=ON`.
+  - Uses the product-independent `mxDataGenerator` backend and exports only
+    component-owned scalar, tensor, block-axis, and recipe types.
 
 ## Component dependency contract
 
@@ -227,6 +232,32 @@ F16 and BF16 accumulator modes execute with a float host register but quantize
 the product and accumulated sum after each arithmetic step. They therefore
 model low-precision accumulation rather than silently substituting F32
 accumulation.
+
+## Block-scaled tensor generation
+
+The optional MX target generates packed data, natural-layout scales, explicit
+per-element scale indices, and the decoded F32 reference tensor:
+
+```cpp
+MxGenerationProblem problem;
+problem.dataType = ScalarType::Float4E2M1;
+problem.scaleType = ScalarType::E8M0;
+problem.shape = Shape{64, 128};
+problem.leadingDimension = 64;
+problem.blockAxis = 0;
+problem.blockSize = 32;
+problem.data.mode = MxGenerationMode::Bounded;
+
+MxGenerationResult result = generateMx(problem);
+```
+
+The operation is GEMM- and architecture-agnostic. A product adapter identifies
+which tensor axis is block-scaled and may subsequently transform the natural
+scale bytes for an architecture-specific upload layout. GFX950/GFX1250
+selection and swizzling are intentionally outside this target. The
+`scaleIndices` tensor makes the storage contract explicit, including legacy
+flat-buffer tail behavior, and lets NumPy independently verify
+`reference == data * scales[scaleIndices]`.
 
 ## Runtime reference epilogue
 

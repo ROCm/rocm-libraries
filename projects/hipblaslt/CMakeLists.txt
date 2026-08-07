@@ -280,16 +280,36 @@ if(NOT ROCM_LIBS_SUPERBUILD)
     endif()
 endif()
 
+set(_hipblaslt_mxdatagen_enabled FALSE)
+if(HIPBLASLT_ENABLE_MXDATAGENERATOR
+        AND (HIPBLASLT_ENABLE_CLIENT
+             OR TENSILELITE_ENABLE_CLIENT
+             OR TENSILELITE_BUILD_TESTING))
+    set(_hipblaslt_mxdatagen_enabled TRUE)
+endif()
+
 if(NOT TARGET roc::host-validation)
     block(SCOPE_FOR VARIABLES)
         set(HOST_VALIDATION_BUILD_TESTING OFF)
         set(HOST_VALIDATION_BUILD_BLAS_BACKEND ${HIPBLASLT_ENABLE_CLIENT})
+        set(HOST_VALIDATION_BUILD_MX_BACKEND
+            ${_hipblaslt_mxdatagen_enabled}
+        )
         add_subdirectory(
             "${CMAKE_CURRENT_SOURCE_DIR}/../../shared/host-validation"
             "${CMAKE_CURRENT_BINARY_DIR}/host-validation"
             EXCLUDE_FROM_ALL
         )
     endblock()
+endif()
+if(_hipblaslt_mxdatagen_enabled AND NOT TARGET roc::host-validation-mx)
+    if(COMMAND roc_host_validation_enable_mx_backend)
+        roc_host_validation_enable_mx_backend()
+    else()
+        message(FATAL_ERROR
+            "hipBLASLt MX clients require the optional roc::host-validation-mx target."
+        )
+    endif()
 endif()
 if(HIPBLASLT_ENABLE_CLIENT AND NOT TARGET roc::host-validation-blas)
     if(COMMAND roc_host_validation_enable_blas_backend)
@@ -356,13 +376,6 @@ endif()
 # tensilelite/tests reach for it on the same condition, so we drive the
 # subdir from here to keep the dependency wiring close to the gate that
 # decides whether to build it at all.
-set(_hipblaslt_mxdatagen_enabled FALSE)
-if(HIPBLASLT_ENABLE_MXDATAGENERATOR
-        AND (HIPBLASLT_ENABLE_CLIENT
-             OR TENSILELITE_ENABLE_CLIENT
-             OR TENSILELITE_BUILD_TESTING))
-    set(_hipblaslt_mxdatagen_enabled TRUE)
-endif()
 if(_hipblaslt_mxdatagen_enabled)
     add_subdirectory(clients/common)
 endif()
