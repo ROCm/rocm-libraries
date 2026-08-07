@@ -27,13 +27,53 @@
 #include "gpubuf.h"
 #include "hostbuf.h"
 #include "ptrdiff.h"
-#include "rocfft_against_fftw.h"
+#include "reference_fft_data.h"
 #include "rocfft_hip.h"
 #include "test_callbacks.h"
 #include <chrono>
 #include <mpi.h>
 #include <optional>
 #include <stdexcept>
+#include <type_traits>
+
+reference_fft_data_t reference_fft_data_t::cached_data = reference_fft_data_t::make_default();
+int                  verbose;
+bool                 fftw_compare = true;
+
+template <typename T>
+struct is_size_one_array : std::false_type
+{
+};
+
+template <typename T>
+struct is_size_one_array<std::array<T, 1>> : std::true_type
+{
+};
+
+template <typename T>
+struct param_creator_t
+{
+    // Only for size-1 array (using linked-in symbols) or vector (dynamically loaded symbols)
+    // of parameter types derived from fft_params
+    static_assert(is_size_one_array<T>::value
+                  || std::is_same<T, std::vector<typename T::value_type>>::value);
+    static_assert(std::is_base_of<fft_params, typename T::value_type>::value);
+    T operator()(const std::vector<std::string>& lib_strings) const
+    {
+        if constexpr(is_size_one_array<T>::value)
+        {
+            return T();
+        }
+        else
+        {
+            // note: type T must have a constructor using an std::string (path of library to load)
+            T ret;
+            for(auto& lib : lib_strings)
+                ret.emplace_back(lib);
+            return ret;
+        }
+    }
+};
 
 static MPI_Datatype get_mpi_type(size_t elem_size)
 {
@@ -481,23 +521,22 @@ double single_epsilon  = default_single_epsilon();
 double double_epsilon  = default_double_epsilon();
 
 // execute the specific number of trials on a vec of libraries
-template <typename AllParams>
-void exec_testcases(std::function<AllParams(const std::vector<std::string>&)> make_params,
-                    MPI_Comm                                                  mpi_comm,
-                    int                                                       mpi_rank,
-                    bool                                                      run_bench,
-                    bool                                                      run_fftw,
-                    int                                                       test_sequence,
-                    const std::string&                                        token,
-                    const std::vector<std::string>&                           lib_strings,
-                    std::vector<std::vector<double>>&                         gpu_time,
-                    std::map<int, gpubuf>&                                    local_inputs,
-                    std::vector<void*>&                                       local_input_ptrs,
-                    std::map<int, gpubuf>&                                    local_outputs,
-                    std::vector<void*>&                                       local_output_ptrs,
-                    size_t                                                    ntrial)
+template <typename params_t>
+void exec_testcases(MPI_Comm                          mpi_comm,
+                    int                               mpi_rank,
+                    bool                              run_bench,
+                    int                               test_sequence,
+                    const std::string&                token,
+                    const std::vector<std::string>&   lib_strings,
+                    std::vector<std::vector<double>>& gpu_time,
+                    std::map<int, gpubuf>&            local_inputs,
+                    std::vector<void*>&               local_input_ptrs,
+                    std::map<int, gpubuf>&            local_outputs,
+                    std::vector<void*>&               local_output_ptrs,
+                    size_t                            ntrial)
 {
-    auto all_params = make_params(lib_strings);
+    const param_creator_t<params_t> make_params;
+    auto                            all_params = make_params(lib_strings);
 
     for(auto& p : all_params)
     {
@@ -559,9 +598,9 @@ void exec_testcases(std::function<AllParams(const std::vector<std::string>&)> ma
 
     // use first params to know things like precision, type that
     // won't change between libraries
-    const auto& params        = all_params.front();
-    const auto  in_elem_size  = var_size<size_t>(params.precision, params.itype);
-    const auto  out_elem_size = var_size<size_t>(params.precision, params.otype);
+    auto&      params        = all_params.front();
+    const auto in_elem_size  = var_size<size_t>(params.precision, params.itype);
+    const auto out_elem_size = var_size<size_t>(params.precision, params.otype);
 
     // allocate and initialize input buffers
     alloc_local_bricks(mpi_rank,
@@ -577,21 +616,27 @@ void exec_testcases(std::function<AllParams(const std::vector<std::string>&)> ma
         mpi_rank, params, params.ifields.back().bricks, in_elem_size, local_input_ptrs);
 
     // gather input for FFTW before we transform, in case we're doing an in-place FFT
-    std::vector<hostbuf> cpu_data(1);
-    if(run_fftw)
+    std::optional<reference_fft_data_t> reference_fft;
+    if(fftw_compare)
     {
-        if(mpi_rank == 0)
-            cpu_data.front().alloc(std::max(params.isize.front() * in_elem_size,
-                                            params.osize.front() * out_elem_size));
+        hostbuf    ref_input;
+        const auto ref_params = params.make_params_for_reference_cpu();
+        ref_input.alloc(ref_params.isize.front() * in_elem_size);
 
         gather_field(mpi_comm,
                      params.ifields.front().bricks,
-                     params.istride,
-                     params.idist,
+                     ref_params.istride,
+                     ref_params.idist,
                      params.precision,
                      params.itype,
                      local_inputs,
-                     cpu_data.front());
+                     ref_input);
+
+        if(mpi_rank == 0)
+        {
+            reference_fft.emplace(ref_params, &ref_input);
+            reference_fft->launch_async_compute();
+        }
     }
 
     // if this is not an in-place transform, then allocate output buffers
@@ -612,14 +657,28 @@ void exec_testcases(std::function<AllParams(const std::vector<std::string>&)> ma
     std::chrono::time_point<std::chrono::steady_clock> start, stop;
 
     // call rocfft_plan_create
+
     for(auto& p : all_params)
+    {
+        // initialize JIT callbacks prior to plan create
+        if(p.run_callbacks == fft_callback_type_jit)
+        {
+            p.load_jit_cb_state
+                = get_rank_jit_state(p, "load_callback", false, jit_callback_op::LOAD);
+            p.store_jit_cb_state
+                = get_rank_jit_state(p, "store_callback", false, jit_callback_op::STORE);
+        }
+
         p.create_plan();
+    }
 
     for(size_t i = 0; i < testcases.size(); ++i)
     {
         size_t testcase = testcases[i];
 
-        std::vector<gpubuf_t<callback_test_data>> all_cb_data;
+        // funcptr cbdata allocations are per-execute and are
+        // recreated for every exec
+        std::vector<gpubuf_t<callback_test_data>> all_funcptr_cb_data;
         std::vector<void*>                        load_cb_func;
         std::vector<void*>                        load_cb_data;
         std::vector<void*>                        store_cb_func;
@@ -628,9 +687,9 @@ void exec_testcases(std::function<AllParams(const std::vector<std::string>&)> ma
         if(all_params[testcase].run_callbacks == fft_callback_type_funcptr)
         {
             get_rank_load_callbacks_funcptr(
-                all_params[testcase], load_cb_func, load_cb_data, false, all_cb_data);
+                all_params[testcase], load_cb_func, load_cb_data, false, all_funcptr_cb_data);
             get_rank_store_callbacks_funcptr(
-                all_params[testcase], store_cb_func, store_cb_data, false, all_cb_data);
+                all_params[testcase], store_cb_func, store_cb_data, false, all_funcptr_cb_data);
 
             auto fft_status = all_params[testcase].set_funcptr_callbacks(
                 &load_cb_func, &load_cb_data, &store_cb_func, &store_cb_data);
@@ -671,47 +730,16 @@ void exec_testcases(std::function<AllParams(const std::vector<std::string>&)> ma
     }
 
     // FFTW Validation
-    if(run_fftw)
+    if(fftw_compare)
     {
         std::vector<hostbuf> gpu_output(1);
         VectorNorms          cpu_output_norm;
 
         if(mpi_rank == 0)
         {
-            fft_params params_inplace = params;
-            params_inplace.placement  = fft_placement_inplace;
-
-            apply_load_callback(params_inplace, cpu_data);
-            params.apply_host_load_ops(cpu_data);
-
-            switch(params_inplace.precision)
-            {
-            case fft_precision_half:
-                execute_reference_fft<rocfft_fp16>(params_inplace, cpu_data);
-                break;
-            case fft_precision_single:
-                execute_reference_fft<float>(params_inplace, cpu_data);
-                break;
-            case fft_precision_double:
-                execute_reference_fft<double>(params_inplace, cpu_data);
-                break;
-            }
-
-            params.apply_host_store_ops(cpu_data);
-            apply_store_callback(params_inplace, cpu_data);
-
-            cpu_output_norm = norm(cpu_data,
-                                   params_inplace.ilength(),
-                                   params_inplace.nbatch,
-                                   params_inplace.precision,
-                                   params_inplace.itype,
-                                   params_inplace.istride,
-                                   params_inplace.idist,
-                                   params_inplace.ioffset);
-        }
-
-        if(mpi_rank == 0)
+            cpu_output_norm = reference_fft->get_norm<fft_io::fft_io_out>(params.nbatch).get();
             gpu_output.front().alloc(params.osize.front() * out_elem_size);
+        }
 
         gather_field(mpi_comm,
                      params.ofields.front().bricks,
@@ -730,20 +758,20 @@ void exec_testcases(std::function<AllParams(const std::vector<std::string>&)> ma
 
             std::vector<std::pair<size_t, size_t>> linf_failures;
 
-            auto diff = distance(cpu_data,
+            auto diff = distance(reference_fft->get_buffers<fft_io::fft_io_out>(),
                                  gpu_output,
                                  params.olength(),
                                  params.nbatch,
                                  params.precision,
                                  params.otype,
-                                 params.ostride,
-                                 params.odist,
-                                 params.otype,
+                                 reference_fft->get_params().ostride,
+                                 reference_fft->get_params().odist,
+                                 reference_fft->get_params().otype,
                                  params.ostride,
                                  params.odist,
                                  &linf_failures,
                                  linf_cutoff,
-                                 params.ooffset,
+                                 reference_fft->get_params().ooffset,
                                  params.ooffset);
 
             if(diff.l_inf > linf_cutoff)
@@ -782,16 +810,14 @@ std::vector<unsigned int> compute_final_grid(const std::vector<unsigned int>& mp
 
 bool skip_runtime_fails = false;
 
-// AllParams is a callable that returns a container of fft_params
-// structs to test.  It accepts a vector of library strings, which
+// params_t is a type of container of parameter structs derviced from
+// fft_params to test.  It accepts a vector of library strings, which
 // "dyna" workers will turn into params that load the specified
 // libraries.  Non-"dyna" workers return fft_params for the library
 // that's linked in.
-template <typename AllParams, bool dyna_load_libs>
-int mpi_worker_main(const char*                                               description,
-                    int                                                       argc,
-                    char*                                                     argv[],
-                    std::function<AllParams(const std::vector<std::string>&)> make_params)
+
+template <typename params_t>
+int mpi_worker_main(const std::string& description, int argc, char* argv[])
 {
     MPI_Init(&argc, &argv);
 
@@ -804,7 +830,7 @@ int mpi_worker_main(const char*                                               de
     MPI_Comm_rank(mpi_comm, &mpi_rank);
     MPI_Comm_size(mpi_comm, &mp_size);
 
-    CLI::App    app{description};
+    CLI::App    app{(!is_size_one_array<params_t>::value ? "dynamic " : "") + description};
     size_t      ntrial = 1;
     std::string token;
 
@@ -817,14 +843,13 @@ int mpi_worker_main(const char*                                               de
     // Bool to specify whether the libs are loaded in forward or forward+reverse order.
     int reverse{};
 
-    bool run_fftw  = false;
     bool run_bench = false;
     auto bench_flag
         = app.add_flag("--benchmark", run_bench, "Benchmark a specified number of MPI transforms");
     app.add_option("-N, --ntrial", ntrial, "Number of trials to benchmark")
         ->default_val(1)
         ->check(CLI::PositiveNumber);
-    app.add_flag("--accuracy", run_fftw, "Check accuracy of an MPI transform")
+    app.add_flag("--accuracy", fftw_compare, "Check accuracy of an MPI transform")
         ->excludes(bench_flag);
 
     CLI::Option* opt_token
@@ -834,7 +859,7 @@ int mpi_worker_main(const char*                                               de
            "--sequence", test_sequence, "Test sequence:\n0) random\n1) alternating\n2) sequential")
         ->check(CLI::Range(0, 2))
         ->default_val(0);
-    if(dyna_load_libs)
+    if constexpr(!is_size_one_array<params_t>::value)
     {
         app.add_option("--lib", lib_strings, "Set test target library full path (appendable)")
             ->required();
@@ -852,9 +877,6 @@ int mpi_worker_main(const char*                                               de
     fft_params params;
 
     params.mp_lib = fft_params::fft_mp_lib_mpi;
-
-    // Control output verbosity:
-    int verbose{};
 
     // input/output FFT grids
     std::vector<unsigned int> imgrid;
@@ -1124,20 +1146,18 @@ int mpi_worker_main(const char*                                               de
 
     // if reversing, cut runs in half for first pass
     size_t ntrial_pass1 = reverse ? (ntrial + 1) / 2 : ntrial;
-    exec_testcases(make_params,
-                   mpi_comm,
-                   mpi_rank,
-                   run_bench,
-                   run_fftw,
-                   test_sequence,
-                   token,
-                   lib_strings,
-                   gpu_time,
-                   local_inputs,
-                   local_input_ptrs,
-                   local_outputs,
-                   local_output_ptrs,
-                   ntrial_pass1);
+    exec_testcases<params_t>(mpi_comm,
+                             mpi_rank,
+                             run_bench,
+                             test_sequence,
+                             token,
+                             lib_strings,
+                             gpu_time,
+                             local_inputs,
+                             local_input_ptrs,
+                             local_outputs,
+                             local_output_ptrs,
+                             ntrial_pass1);
     if(reverse)
     {
         size_t ntrial_pass2 = ntrial / 2;
@@ -1145,20 +1165,18 @@ int mpi_worker_main(const char*                                               de
         // do libraries in reverse order
         std::reverse(lib_strings.begin(), lib_strings.end());
         std::reverse(gpu_time.begin(), gpu_time.end());
-        exec_testcases(make_params,
-                       mpi_comm,
-                       mpi_rank,
-                       run_bench,
-                       run_fftw,
-                       test_sequence,
-                       token,
-                       lib_strings,
-                       gpu_time,
-                       local_inputs,
-                       local_input_ptrs,
-                       local_outputs,
-                       local_output_ptrs,
-                       ntrial_pass2);
+        exec_testcases<params_t>(mpi_comm,
+                                 mpi_rank,
+                                 run_bench,
+                                 test_sequence,
+                                 token,
+                                 lib_strings,
+                                 gpu_time,
+                                 local_inputs,
+                                 local_input_ptrs,
+                                 local_outputs,
+                                 local_output_ptrs,
+                                 ntrial_pass2);
         // put back to normal order
         std::reverse(lib_strings.begin(), lib_strings.end());
         std::reverse(gpu_time.begin(), gpu_time.end());

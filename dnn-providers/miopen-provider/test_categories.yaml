@@ -7,25 +7,29 @@
 # miopen-provider has two GTest binaries (miopen_plugin_tests and
 # miopen_plugin_integration_tests) that share this YAML. CI can invoke the
 # generated CTest file without a label filter, so each enabled category becomes
-# a separate binary execution.
-# See https://github.com/ROCm/rocm-libraries/issues/8852 for the duplicate
-# category executions this layout avoids.
-# TODO: Revert the standard/comprehensive disablement after TheRock's proper
-# test runner lands and is migrated back to rocm-libraries:
-# https://github.com/ROCm/TheRock/pull/5775
-#
-# Tier behaviour:
+# a separate binary execution. Because the tiers are cumulative (see below),
+# invoking multiple tiers in one run re-executes the lower-tier tests; select a
+# single tier label to run exactly that tier's coverage.
+# See https://github.com/ROCm/rocm-libraries/issues/8852 for background on the
+# category execution model.
+# Tier behaviour (cumulative — each tier is a superset of the ones below it):
 #   - quick: run non-Full tests only.
-#   - standard/comprehensive: disabled by leaving test_patterns empty; the
-#     shared parser skips categories with no patterns, avoiding duplicate
-#     executions.
-#   - full: run only Full* parameterised expansions, excluding Smoke* and
-#     disabled tests.
+#   - standard: quick coverage (quick tests). No distinct Standard* prefix
+#     exists, so standard runs the same non-Full tests as quick.
+#   - comprehensive: standard + quick coverage. No distinct Comprehensive*
+#     prefix exists, so comprehensive runs the same non-Full tests as standard.
+#   - full: all tests (non-Full + Full* parameterised expansions), excluding
+#     only disabled tests.
 #
 # Unit tests in tests/ use INSTANTIATE_TEST_SUITE_P prefixes "AllCases" and
 # bare TEST/TEST_F; integration tests in integration_tests/ use "Smoke" and
-# "Full" prefixes. There are no Standard*/Comprehensive* prefixes, so those
-# tiers would otherwise duplicate quick/full coverage.
+# "Full" prefixes. There are no Standard*/Comprehensive* prefixes, so the
+# standard and comprehensive tiers reuse the quick (non-Full) pattern set and
+# full is the union of every tier.
+#
+# These categories apply to miopen_plugin_tests and miopen_plugin_integration_tests.
+# External hipdnn_integration_tests suites use test_categories_integration.yaml
+# because they have different GTest naming conventions.
 test_categories:
   quick:
     description: "Fast sanity checks (target: < 5 min) - excludes Full* parameterised expansions"
@@ -40,31 +44,49 @@ test_categories:
       - "smoke"
 
   standard:
-    description: "Pre-checkin validation disabled for miopen-provider (no distinct Standard* tier exists)"
-    test_patterns: []
+    description: "Pre-checkin validation (cumulative: runs quick coverage) - excludes Full* parameterised expansions"
+    test_patterns:
+      - "*"
+    exclude:
+      - "*DISABLED*"
+      - "Full*"
     labels:
       - "standard"
       - "pr"
       - "precheckin"
 
   comprehensive:
-    description: "Nightly comprehensive validation disabled for miopen-provider (no distinct Comprehensive* tier exists)"
-    test_patterns: []
+    description: "Nightly comprehensive validation (cumulative: runs standard + quick coverage) - excludes Full* parameterised expansions"
+    test_patterns:
+      - "*"
+    exclude:
+      - "*DISABLED*"
+      - "Full*"
     labels:
       - "comprehensive"
       - "nightly"
       - "extended"
 
   full:
-    description: "Complete Full* parameterised suite - excludes Smoke* and disabled tests"
+    description: "Complete suite (cumulative: runs all tests, non-Full + Full*) - excludes only disabled tests"
     test_patterns:
-      - "Full*"
+      - "*"
     exclude:
       - "*DISABLED*"
-      - "Smoke*"
     labels:
       - "full"
       - "all"
+
+  ffm_quick:
+    description: "Fast-feedback mechanism (FFM) quick tier - currently mirrors the quick tier"
+    test_patterns:
+      - "*"
+    exclude:
+      - "*DISABLED*"
+      - "Full*"
+    labels:
+      - "ffm_quick"
+      - "ffm_full"
 
 # GPU-arch-specific exclusions. Mirrors the TEST_TO_IGNORE map in the legacy
 # TheRock/build_tools/github_actions/test_executable_scripts/test_miopenprovider.py:

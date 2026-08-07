@@ -1,5 +1,5 @@
 # #############################################################################
-# Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -89,7 +89,7 @@ endif()
 # Using standardized versioning from rocm-cmake
 set ( ROCFFT_VERSION_MAJOR "1" )
 set ( ROCFFT_VERSION_MINOR "0" )
-set ( ROCFFT_VERSION_PATCH "38" )
+set ( ROCFFT_VERSION_PATCH "40" )
 set ( VERSION_STRING "${ROCFFT_VERSION_MAJOR}.${ROCFFT_VERSION_MINOR}.${ROCFFT_VERSION_PATCH}" )
 rocm_setup_version( VERSION ${VERSION_STRING} )
 
@@ -190,29 +190,11 @@ rocm_check_target_ids(GPU_TARGETS TARGETS "${GPU_TARGETS}")
 find_package( hip REQUIRED CONFIG PATHS /opt/rocm/lib/cmake/hip/ )
 find_package( hiprtc REQUIRED CONFIG PATHS /opt/rocm/lib/cmake/hiprtc/ )
 
-# The nvidia backend can be used to compile for CUDA devices.
-# Specify the CUDA prefix in the CUDA_PREFIX variable.
-# CUDA_ARCH (e.g. sm_75) is also required.
-if( USE_CUDA )
-  if( NOT DEFINED CUDA_PREFIX )
-    message( FATAL_ERROR "CUDA_PREFIX variable is required (e.g. /usr/local/cuda-11.4)" )
-  endif()
-  if( NOT DEFINED CUDA_ARCH )
-    message( FATAL_ERROR "CUDA_ARCH variable is required. (e.g. sm_75)" )
-  endif()
-  add_compile_options(-I${HIP_ROOT_DIR}/include -I${CUDA_PREFIX}/include -D__HIP_PLATFORM_NVIDIA__)
-  add_link_options(-L${CUDA_PREFIX}/lib64 -pthread)
-endif( )
-
 # hipcc automatically provides HIP include dirs and HIP platform,
 # but plain clang needs to be told
 if( NOT CMAKE_CXX_COMPILER MATCHES ".*/hipcc$" )
   include_directories( ${HIP_INCLUDE_DIRS} )
-  if( USE_CUDA )
-    add_compile_definitions( __HIP_PLATFORM_NVIDIA__ )
-  else()
-    add_compile_definitions( __HIP_PLATFORM_AMD__ )
-  endif()
+  add_compile_definitions( __HIP_PLATFORM_AMD__ )
 endif()
 
 # Enable MPI support in rocFFT:
@@ -222,6 +204,9 @@ if( ROCFFT_MPI_ENABLE )
   find_package( MPI REQUIRED )
   include_directories(SYSTEM ${MPI_INCLUDE_PATH})
 endif()
+
+# Optional RCCL backend for single-node multi-GPU communication.
+option(ROCFFT_RCCL_ENABLE "Enable RCCL for optimized single-node multi-GPU communication" OFF)
 
 # Internal (library-side) unit tests.  enable_testing() must be called
 # here, an ancestor of library/src, for ctest to discover them.
@@ -233,6 +218,11 @@ set( ROCFFT_INTERNAL_TESTS_FILTER "" CACHE STRING
 if( ROCFFT_RUN_INTERNAL_TESTS AND NOT ROCFFT_BUILD_INTERNAL_TESTS )
   message( FATAL_ERROR
     "ROCFFT_RUN_INTERNAL_TESTS=ON requires ROCFFT_BUILD_INTERNAL_TESTS=ON." )
+endif()
+# Coverage needs the internal tests built too.
+if( BUILD_CODE_COVERAGE )
+  set( ROCFFT_BUILD_INTERNAL_TESTS ON CACHE BOOL
+    "Build internal (library-side) unit tests" FORCE )
 endif()
 if( ROCFFT_BUILD_INTERNAL_TESTS )
   enable_testing()

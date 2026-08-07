@@ -225,7 +225,10 @@ bool serializeVisit(const MUBUFModifiers& mod, std::ostream& os) {
         os << ", scope = \"" << toString(mod.scope) << "\"";
     }
     if (hasTemporalHint(mod.th)) {
-        os << ", th = \"" << toString(mod.th) << "\"";
+        os << ", th = \"" << toString(mod.th, mod.isStore) << "\"";
+    }
+    if (mod.nv != NonVolatile::NV_NONE) {
+        os << ", nv = \"" << toString(mod.nv) << "\"";
     }
     os << " }";
     return true;
@@ -447,6 +450,14 @@ bool serializeVisit(const MatrixFmtModifiers& mod, std::ostream& os) {
         sep();
         os << "scaleFmtB = \"" << matrixScaleFmtToStr(mod.scaleFmtB) << "\"";
     }
+    if (mod.scaleSelA != 0) {
+        sep();
+        os << "scaleSelA = " << mod.scaleSelA;
+    }
+    if (mod.scaleSelB != 0) {
+        sep();
+        os << "scaleSelB = " << mod.scaleSelB;
+    }
     os << " }";
     return true;
 }
@@ -512,11 +523,13 @@ void deserializeVisit(StinkyInstruction* inst, const std::string& attrKey,
     } else if (attrKey == "mod.mubuf") {
         MUBUFScope scope = parseMUBUFScope(getStr(fields, "scope", ""));
         TemporalHint th = parseTemporalHint(getStr(fields, "th", ""));
+        NonVolatile nv = parseNonVolatile(getStr(fields, "nv", ""));
+        bool isStore = getStr(fields, "th", "").rfind("TH_STORE_", 0) == 0;
         inst->addModifier(
             MUBUFModifiers(getBool(fields, "offen", false), getInt(fields, "offset12", 0),
                            getBool(fields, "glc", false), getBool(fields, "slc", false),
-                           getBool(fields, "nt", false), getBool(fields, "lds", false), false,
-                           false, false, false, scope, th));
+                           getBool(fields, "nt", false), getBool(fields, "lds", false), isStore,
+                           false, false, false, scope, th, nv));
     } else if (attrKey == "mod.cache_scope") {
         inst->addModifier(CacheScopeModifiers(parseMUBUFScope(getStr(fields, "scope", ""))));
     } else if (attrKey == "mod.smem") {
@@ -568,6 +581,8 @@ void deserializeVisit(StinkyInstruction* inst, const std::string& attrKey,
             mod.scaleFmtA = parseMatrixScaleFmt(getStr(fields, "scaleFmtA"));
         if (fields.contains("scaleFmtB"))
             mod.scaleFmtB = parseMatrixScaleFmt(getStr(fields, "scaleFmtB"));
+        mod.scaleSelA = parseMatrixScaleSel(getStr(fields, "scaleSelA", "0"));
+        mod.scaleSelB = parseMatrixScaleSel(getStr(fields, "scaleSelB", "0"));
         inst->addModifier(mod);
     } else if (attrKey == "mod.delayalu") {
         auto toInstType = [](const std::string& s) {
@@ -630,6 +645,8 @@ void deserializeVisit(StinkyInstruction* inst, const std::string& attrKey,
 
 void ModifierSerializer::deserialize(StinkyInstruction* inst, const ParsedModifierDict& modifiers) {
     for (const auto& [attrKey, fields] : modifiers) deserializeVisit(inst, attrKey, fields);
+    // Matrix data format is now known; apply any format-keyed hardware overrides.
+    inst->resolveMatrixFmtOverrides();
 }
 
 }  // namespace stinkytofu

@@ -10,7 +10,9 @@
 #include "HipdnnException.hpp"
 #include "NodeFactory.hpp"
 
+#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/Graph.hpp>
+#include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
 #include <logging/GraphLogger.hpp>
 #include <nlohmann/json.hpp>
 #include <unordered_map>
@@ -88,6 +90,23 @@ std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT>
         // Build node from operation
         graph->nodes.push_back(op->buildNode());
     }
+
+    // Stamp the minimum engine plugin API version this graph requires, from the
+    // single shared graph -> version mapping (see PluginVersionConstants.hpp).
+    // A newer writer can therefore emit graphs an older reader must reject --
+    // deserializeGraph() enforces the ceiling below.
+    const bool anyRuntimePassByValue
+        = hipdnn_flatbuffers_sdk::utilities::anyTensorIsRuntimePassByValue(
+            graph->tensors, [](const auto& tensor) { return tensor.get(); });
+
+    const auto& requiredVersion
+        = hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion(_isOverrideShapeEnabled,
+                                                                  anyRuntimePassByValue,
+                                                                  hasRaggedTensors(),
+                                                                  hasNonDefaultTensorAlignment());
+    graph->min_required_engine_api_version
+        = std::make_unique<hipdnn_flatbuffers_sdk::data_objects::EngineApiVersion>(
+            hipdnn_plugin_sdk::toEngineApiVersion(requiredVersion));
 
     return graph;
 }
@@ -378,12 +397,24 @@ void GraphDescriptor::deserializeGraph(const uint8_t* serializedGraph, size_t gr
     std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT> graph;
     flatbuffer_utilities::convertSerializedGraphToGraph(serializedGraph, graphByteSize, graph);
 
+    const auto requiredVersion
+        = hipdnn_plugin_sdk::fromEngineApiVersion(graph->min_required_engine_api_version.get());
+    THROW_IF_TRUE(
+        requiredVersion
+            > hipdnn_data_sdk::utilities::Version{hipdnn_plugin_sdk::K_MAX_SUPPORTED_API_VERSION},
+        HIPDNN_STATUS_NOT_SUPPORTED,
+        "Serialized graph requires a newer engine plugin API version than this build supports.");
+
     // Extract graph-level attributes
     _computeDataType = graph->compute_data_type;
     _intermediateDataType = graph->intermediate_data_type;
     _ioDataType = graph->io_data_type;
     _preferredEngineId = graph->preferred_engine_id;
     _isOverrideShapeEnabled = graph->is_override_shape_enabled;
+    // Scanned directly: the stamped required-version collapses to a single floor
+    // and cannot distinguish pass-by-value from a higher feature floor like ragged.
+    _isRuntimePassByValueEnabled = hipdnn_flatbuffers_sdk::utilities::anyTensorIsRuntimePassByValue(
+        graph->tensors, [](const auto& tensor) { return tensor.get(); });
     _name = graph->name;
 
     // Populate _operations from the deserialized graph nodes
@@ -408,6 +439,10 @@ void GraphDescriptor::buildSerializedGraph()
     THROW_IF_NULL(graph,
                   HIPDNN_STATUS_INTERNAL_ERROR,
                   "GraphDescriptor::buildSerializedGraph: graph is null");
+    // Scanned directly: the stamped required-version collapses to a single floor
+    // and cannot distinguish pass-by-value from a higher feature floor like ragged.
+    _isRuntimePassByValueEnabled = hipdnn_flatbuffers_sdk::utilities::anyTensorIsRuntimePassByValue(
+        graph->tensors, [](const auto& tensor) { return tensor.get(); });
 
     flatbuffers::FlatBufferBuilder builder;
     builder.Finish(hipdnn_flatbuffers_sdk::data_objects::Graph::Pack(builder, graph.get()));
@@ -497,6 +532,45 @@ hipdnnHandle_t GraphDescriptor::getHandle() const
 bool GraphDescriptor::isOverrideShapeEnabled() const
 {
     return _isOverrideShapeEnabled;
+}
+
+bool GraphDescriptor::hasRaggedTensors() const
+{
+    for(const auto& desc : _operations)
+    {
+        const auto* op = desc->asGraphOperation();
+        for(const auto& tensorDesc : op->getTensorDescriptors())
+        {
+            if(tensorDesc->getData().ragged_offset_tensor_uid.has_value())
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+bool GraphDescriptor::hasNonDefaultTensorAlignment() const
+{
+    // Source of truth: tensor_attributes.fbs -> `alignment: long = 16`.
+    static constexpr int64_t K_DEFAULT_TENSOR_ALIGNMENT = 16;
+    for(const auto& desc : _operations)
+    {
+        const auto* op = desc->asGraphOperation();
+        for(const auto& tensorDesc : op->getTensorDescriptors())
+        {
+            if(tensorDesc->getData().alignment != K_DEFAULT_TENSOR_ALIGNMENT)
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+bool GraphDescriptor::isRuntimePassByValueEnabled() const
+{
+    return _isRuntimePassByValueEnabled;
 }
 
 std::string GraphDescriptor::toString() const

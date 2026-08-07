@@ -132,7 +132,7 @@ TEST_F(DumpStinkyModulePassTest, EmitAsmDerivesPathFromStirPath) {
     fs::remove(derivedAsm);
 }
 
-TEST_F(DumpStinkyModulePassTest, WritesEntryAndCallees) {
+TEST_F(DumpStinkyModulePassTest, WritesEntryAndCallableFunctions) {
     StinkyAsmModule::ModuleOptions options;
     StinkyAsmModule module("dump_module_test", {12, 5, 0}, options);
 
@@ -142,10 +142,10 @@ TEST_F(DumpStinkyModulePassTest, WritesEntryAndCallees) {
     AsmIRBuilder entryBuilder(*entry.getEntryBlock(), GfxArchID::Gfx1250);
     entryBuilder.create(getMCIDByUOp(GFX::s_nop, GfxArchID::Gfx1250));
 
-    Function& callee = module.createFunction("callee_func");
-    setFunctionArch(callee, GfxArchID::Gfx1250);
-    AsmIRBuilder calleeBuilder(*callee.getEntryBlock(), GfxArchID::Gfx1250);
-    calleeBuilder.create(getMCIDByUOp(GFX::s_nop, GfxArchID::Gfx1250));
+    Function& callable = module.createFunction("callable_func");
+    setFunctionArch(callable, GfxArchID::Gfx1250);
+    AsmIRBuilder callableBuilder(*callable.getEntryBlock(), GfxArchID::Gfx1250);
+    callableBuilder.create(getMCIDByUOp(GFX::s_nop, GfxArchID::Gfx1250));
 
     DumpStinkyModulePassConfig cfg;
     cfg.stirPath = stirPath;
@@ -162,7 +162,7 @@ TEST_F(DumpStinkyModulePassTest, WritesEntryAndCallees) {
     std::string stirContent((std::istreambuf_iterator<char>(stirFile)), {});
     EXPECT_EQ(stirContent.find("st.module @dump_module_test {\n"), 0u);
     EXPECT_NE(stirContent.find("  st.func @entry_func()"), std::string::npos);
-    EXPECT_NE(stirContent.find("  st.func @callee_func()"), std::string::npos);
+    EXPECT_NE(stirContent.find("  st.func @callable_func()"), std::string::npos);
     EXPECT_NE(stirContent.rfind("}\n"), std::string::npos);
 
     ASSERT_TRUE(fs::exists(asmPath));

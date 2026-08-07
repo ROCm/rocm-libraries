@@ -47,7 +47,8 @@ namespace rocsparse
                                               rocsparse_mat_info        info,
                                               rocsparse_solve_policy    policy,
                                               rocsparse_csrsm_info      csrsm_info,
-                                              void*                     temp_buffer);
+                                              void*                     temp_buffer,
+                                              bool                      force_conj);
 
     using csrsm_solve_tuple
         = std::tuple<rocsparse_indextype, rocsparse_indextype, rocsparse_datatype>;
@@ -161,7 +162,8 @@ rocsparse_status rocsparse::csrsm_solve(rocsparse_handle          handle,
                                         rocsparse_mat_info        info,
                                         rocsparse_solve_policy    policy,
                                         rocsparse_csrsm_info      csrsm_info,
-                                        void*                     temp_buffer)
+                                        void*                     temp_buffer,
+                                        bool                      force_conj)
 {
     rocsparse::csrsm_solve_t f;
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_solve_find(
@@ -183,6 +185,7 @@ rocsparse_status rocsparse::csrsm_solve(rocsparse_handle          handle,
                                 info,
                                 policy,
                                 csrsm_info,
-                                temp_buffer));
+                                temp_buffer,
+                                force_conj));
     return rocsparse_status_success;
 }
