@@ -207,5 +207,4 @@ jobs:
     uses: ./.github/workflows/therock-rocjitsu-race-check-linux.yml
     with:
       therock_ref: ${{ inputs.therock_ref }}
-      build_runs_on: ${{ inputs.build_runs_on }}
       amdgpu_families: ${{ inputs.amdgpu_families }}

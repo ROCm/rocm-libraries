@@ -1,8 +1,9 @@
 # This reusable workflow is a narrow post-build instrumentation job for
 # hipBLASLt. It fetches BLAS artifacts from the just-finished TheRock build and
 # runs two small workloads under rocjitsu's race detector. The workloads run
-# entirely under CPU-side emulation, so the workflow uses the CPU build runner
-# instead of consuming GPU test capacity.
+# entirely under CPU-side emulation, so the workflow uses a standard
+# GitHub-hosted Linux runner instead of consuming TheRock build or GPU test
+# capacity.
 
 name: TheRock rocjitsu race check Linux
 
@@ -10,9 +11,6 @@ on:
   workflow_call:
     inputs:
       therock_ref:
-        type: string
-        required: true
-      build_runs_on:
         type: string
         required: true
       amdgpu_families:
@@ -30,7 +28,10 @@ jobs:
     # this behavior.
     # TODO(AIHPBLAS-3605): Remove after the check is reliably green.
     continue-on-error: true
-    runs-on: ${{ inputs.build_runs_on }}
+    # The CI artifact buckets allow public reads, and TheRock's artifact
+    # downloader falls back to unsigned S3 requests when credentials are not
+    # available. This CPU-only job therefore does not require a TheRock runner.
+    runs-on: ubuntu-24.04
     timeout-minutes: 90
     container:
       # Use a plain Ubuntu image without ROCm preinstalled. The ROCm runtime,
