@@ -73,6 +73,7 @@ enum class GenerationPattern {
     RandomEncodedExponent,
     RawConstant,
     UniformRawInteger,
+    RandomRawBits,
     RawSerialDimension,
 };
 
@@ -81,13 +82,25 @@ enum class LogicalIndexOrder {
     LastDimensionFastest,
 };
 
+enum class GenerationTransform {
+    None,
+    Absolute,
+    Sine,
+    Cosine,
+};
+
 struct GenerationPatternSpec {
     GenerationPattern pattern = GenerationPattern::Zero;
     double parameter0 = 0.0;
     double parameter1 = 1.0;
+    double valueScale = 1.0;
+    double valueOffset = 0.0;
     uint64_t stream = 0;
     size_t dimension = 0;
     ScalarType sourceType = ScalarType::Count;
+    GenerationTransform transform = GenerationTransform::None;
+    std::vector<size_t> alternatingDimensions;
+    size_t negativeParity = 0;
 };
 
 struct GenerationOptions {
@@ -144,6 +157,7 @@ inline double indexedUniformUnit(uint64_t seed, uint64_t stream, uint64_t index)
 inline bool isRawGenerationPattern(GenerationPattern pattern) {
     return pattern == GenerationPattern::RawConstant ||
            pattern == GenerationPattern::UniformRawInteger ||
+           pattern == GenerationPattern::RandomRawBits ||
            pattern == GenerationPattern::RawSerialDimension;
 }
 
@@ -157,6 +171,8 @@ inline uint64_t rawGenerationValue(const GenerationPatternSpec& spec, uint64_t s
             return static_cast<uint64_t>(static_cast<int64_t>(indexedUniformInteger(
                 seed, spec.stream, logicalIndex, static_cast<int>(spec.parameter0),
                 static_cast<int>(spec.parameter1))));
+        case GenerationPattern::RandomRawBits:
+            return counterRandom(seed, spec.stream, logicalIndex);
         case GenerationPattern::RawSerialDimension:
             if (spec.dimension >= shape.rank())
                 throw std::out_of_range("Generation dimension exceeds tensor rank.");
@@ -401,9 +417,9 @@ inline double randomEncodedExponentValue(const GenerationPatternSpec& spec,
     }
 }
 
-inline double generationValue(const GenerationPatternSpec& spec, uint64_t seed,
-                              std::span<const size_t> indices, const Shape& shape,
-                              size_t logicalIndex, ScalarType destinationType) {
+inline double baseGenerationValue(const GenerationPatternSpec& spec, uint64_t seed,
+                                  std::span<const size_t> indices, const Shape& shape,
+                                  size_t logicalIndex, ScalarType destinationType) {
     switch (spec.pattern) {
         case GenerationPattern::Zero:
             return 0.0;
@@ -484,11 +500,45 @@ inline double generationValue(const GenerationPatternSpec& spec, uint64_t seed,
                 spec, seed, logicalIndex, destinationType);
         case GenerationPattern::RawConstant:
         case GenerationPattern::UniformRawInteger:
+        case GenerationPattern::RandomRawBits:
         case GenerationPattern::RawSerialDimension:
             throw std::invalid_argument(
                 "Raw generation requires encoded storage output.");
     }
     throw std::invalid_argument("Unsupported GenerationPattern.");
+}
+
+inline double generationValue(const GenerationPatternSpec& spec, uint64_t seed,
+                              std::span<const size_t> indices, const Shape& shape,
+                              size_t logicalIndex, ScalarType destinationType) {
+    double value =
+        baseGenerationValue(spec, seed, indices, shape, logicalIndex, destinationType);
+    switch (spec.transform) {
+        case GenerationTransform::None:
+            break;
+        case GenerationTransform::Absolute:
+            value = std::abs(value);
+            break;
+        case GenerationTransform::Sine:
+            value = std::sin(value);
+            break;
+        case GenerationTransform::Cosine:
+            value = std::cos(value);
+            break;
+    }
+    value = value * spec.valueScale + spec.valueOffset;
+
+    if (!spec.alternatingDimensions.empty()) {
+        size_t parity = 0;
+        for (const size_t dimension : spec.alternatingDimensions) {
+            if (dimension >= shape.rank())
+                throw std::out_of_range(
+                    "Alternating-sign generation dimension exceeds tensor rank.");
+            parity ^= indices[dimension];
+        }
+        if ((parity & 1U) == (spec.negativeParity & 1U)) value = -value;
+    }
+    return value;
 }
 }  // namespace detail
 

@@ -27,11 +27,10 @@
 #include "hipblaslt_datatype2string.hpp"
 #include "hipblaslt_init.hpp"
 #include "hipblaslt_ostream.hpp"
-#include "hipblaslt_random.hpp"
 #include "hipblaslt_test.hpp"
+#include <cmath>
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt.h>
-#include <array>
 #include <limits>
 #include <type_traits>
 #include <vector>
@@ -74,6 +73,60 @@ bool ulp_positive_init()
     return ulp_positive_init_state();
 }
 
+namespace hipblaslt_norm_dist
+{
+    struct XorwowState
+    {
+        unsigned int x[5];
+        unsigned int counter;
+    };
+
+    __host__ __device__ inline void
+        init_xorwow(XorwowState* state, unsigned int seed)
+    {
+        unsigned int value = seed;
+        for(int index = 0; index < 5; ++index)
+        {
+            value = value * 69069 + (index + 1);
+            state->x[index] = value;
+        }
+        state->counter = seed ^ 362437;
+    }
+
+    __host__ __device__ inline unsigned int
+        xorwow_rand(XorwowState* state)
+    {
+        unsigned int temporary = state->x[4];
+        const unsigned int first = state->x[0];
+        state->x[4] = state->x[3];
+        state->x[3] = state->x[2];
+        state->x[2] = state->x[1];
+        state->x[1] = first;
+        temporary ^= temporary >> 2;
+        temporary ^= temporary << 1;
+        state->x[0] = temporary ^ first ^ (first << 4);
+        state->counter += 362437;
+        return state->x[0] + state->counter;
+    }
+
+    __host__ __device__ inline float xorwow_uniform(XorwowState* state)
+    {
+        return xorwow_rand(state) / 4294967296.0f;
+    }
+
+    __host__ __device__ inline float
+        box_muller_normal(XorwowState* state)
+    {
+        float first = xorwow_uniform(state);
+        const float second = xorwow_uniform(state);
+        if(first < 1e-10f)
+            first = 1e-10f;
+        const float radius = sqrtf(-2.0f * logf(first));
+        const float angle = 2.0f * 3.1415926535f * second;
+        return radius * cosf(angle);
+    }
+} // namespace hipblaslt_norm_dist
+
 template <typename T, typename F>
 __global__ void fill_kernel(T* A, size_t size, size_t offset, F f)
 {
@@ -100,19 +153,6 @@ void fill_batch(T* A, size_t M, size_t N, size_t lda, size_t stride, size_t batc
         size_64    = size_64 / type::packed_size;
     }
     constexpr size_t c_i32_max = size_t(std::numeric_limits<int32_t>::max());
-    if(host_side_fill_kernel())
-    {
-        for(size_t offset = 0; offset < size_64; offset += c_i32_max)
-        {
-            size_t size = std::min(size_64 - offset, c_i32_max);
-            std::vector<T> h(size);
-            for(size_t k = 0; k < size; k++)
-                h[k] = f(offset + k);
-            CHECK_HIP_ERROR(hipMemcpy(
-                A + offset, h.data(), size * sizeof(T), hipMemcpyHostToDevice));
-        }
-        return;
-    }
     for(size_t offset = 0; offset < size_64; offset += c_i32_max)
     {
         size_t size       = std::min(size_64 - offset, c_i32_max);
@@ -712,18 +752,21 @@ void hipblaslt_init_device(ABC_dims                 abc,
         }
         else
         {
-            std::array<T, 100> rand_nans;
-            for(auto& r : rand_nans)
-            {
-                if constexpr(is_std_complex<T>::value)
-                  r = make_std_complex(static_cast<T_real>(hipblaslt_nan_rng()),
-                                     static_cast<T_real>(hipblaslt_nan_rng()));
-                else
-                  r = T(hipblaslt_nan_rng());
-            }
-            fill_batch(A, M, N, lda, stride, batch_count, [rand_nans] __host__ __device__ (size_t idx) -> T {
-                return rand_nans[pseudo_random_device(idx) % rand_nans.size()];
-            });
+            fill_batch(
+                A,
+                M,
+                N,
+                lda,
+                stride,
+                batch_count,
+                [make_std_complex] __host__ __device__(size_t) -> T {
+                    const T_real nan = static_cast<T_real>(
+                        std::numeric_limits<float>::quiet_NaN());
+                    if constexpr(is_std_complex<T>::value)
+                        return make_std_complex(nan, nan);
+                    else
+                        return T(nan);
+                });
         }
     }
     else
@@ -1098,12 +1141,15 @@ void hipblaslt_init_device(ABC_dims                 abc,
             if constexpr(std::is_floating_point_v<T> || std::is_same_v<T, hipblasLtHalf>
                          || std::is_same_v<T, hip_bfloat16>)
             {
-                std::array<T, 100> rand_nans;
-                for(auto& r : rand_nans)
-                    r = T(hipblaslt_nan_rng());
-                fill_batch(A, M, N, lda, stride, batch_count, [rand_nans](size_t idx) -> T {
-                    return rand_nans[pseudo_random_device(idx) % rand_nans.size()];
-                });
+                fill_batch(A,
+                           M,
+                           N,
+                           lda,
+                           stride,
+                           batch_count,
+                           [] __host__ __device__(size_t) -> T {
+                               return T(std::numeric_limits<float>::quiet_NaN());
+                           });
             }
             else
             {
@@ -1131,6 +1177,40 @@ void hipblaslt_init_device(ABC_dims                 abc,
                            size_t                   batch_count,
                            int                      norm_dist_one_special_type)
 {
+    if(host_side_fill_kernel())
+    {
+        using roc::host_validation::hipblaslt_adapter::MatrixRole;
+        using roc::host_validation::hipblaslt_adapter::MatrixStorageInitialization;
+        MatrixStorageInitialization initialization;
+        initialization.role
+            = abc == ABC_dims::A
+                  ? MatrixRole::A
+                  : abc == ABC_dims::B ? MatrixRole::B : MatrixRole::C;
+        initialization.initialization   = init;
+        initialization.forceNaN         = is_nan;
+        initialization.type             = type;
+        initialization.rows             = M;
+        initialization.columns          = N;
+        initialization.leadingDimension = lda;
+        initialization.batchStride      = stride;
+        initialization.batchCount       = batch_count;
+        initialization.specialValueType = norm_dist_one_special_type;
+        initialization.positiveOnly
+            = ulp_positive_init()
+              && (init == hipblaslt_initialization::hpl
+                  || init == hipblaslt_initialization::trig_float);
+
+        std::vector<std::byte> storage
+            = roc::host_validation::hipblaslt_adapter::generateMatrixStorage(
+                initialization);
+        if(!storage.empty())
+            CHECK_HIP_ERROR(hipMemcpy(A,
+                                      storage.data(),
+                                      storage.size(),
+                                      hipMemcpyHostToDevice));
+        return;
+    }
+
     switch(type)
     {
     case HIP_R_32F:

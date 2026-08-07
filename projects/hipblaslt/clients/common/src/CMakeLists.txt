@@ -7,13 +7,13 @@ target_sources(hipblaslt-clients-common
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_bench_options.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/utility.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/efficiency_monitor.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/host_validation/DataInitialization.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/host_validation/Epilogue.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/host_validation/HipblasltReferenceGemm.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/host_validation/Reduction.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/argument_model.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_parse_data.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_arguments.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/host_validation/hipblaslt_random.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_init_device.cpp"
 )
 

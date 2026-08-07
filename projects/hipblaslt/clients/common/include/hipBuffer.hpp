@@ -30,6 +30,9 @@
 #include "datatype_interface.hpp"
 #include "hipblaslt_ostream.hpp"
 
+#include <complex>
+#include <type_traits>
+
 class HipDeviceBuffer : public d_vector_type
 {
 public:
@@ -292,7 +295,14 @@ inline void copy_buf(HipHostBuffer& src, HipHostBuffer& dst, hipDataType type)
 template <typename T1, typename Tc>
 inline void transform_buf(HipHostBuffer& src, HipHostBuffer& dst)
 {
-    constexpr bool requires_real_extraction = !is_std_complex_v<Tc> && is_std_complex_v<T1>;
+    constexpr bool outputIsComplex
+        = std::is_same_v<Tc, std::complex<float>>
+          || std::is_same_v<Tc, std::complex<double>>;
+    constexpr bool inputIsComplex
+        = std::is_same_v<T1, std::complex<float>>
+          || std::is_same_v<T1, std::complex<double>>;
+    constexpr bool requires_real_extraction
+        = !outputIsComplex && inputIsComplex;
     if constexpr(std::is_same<Tc, float>::value
                  || !(std::is_same<T1, hipblaslt_bf8_fnuz>::value
                       || std::is_same<T1, hipblaslt_f8_fnuz>::value))
