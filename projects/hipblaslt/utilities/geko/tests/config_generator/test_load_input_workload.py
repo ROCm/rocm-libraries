@@ -209,3 +209,32 @@ def test_load_prepared_non_log_mode_populates_gemm_problem(tmp_path: Path) -> No
     cfg = load_prepared_config_from_yaml(cfg_path)
     assert "GemmProblems" in cfg
     assert len(cfg["GemmProblems"]) == 1
+
+
+@pytest.mark.parametrize("dt", ["C", "Z"])
+def test_heuristic_rejected_for_complex_dtype(dt: str) -> None:
+    cfg = {
+        "ARCH": "gfx942",
+        "TRANSA": "N",
+        "TRANSB": "N",
+        "DataType": dt,
+        "DestDataType": dt,
+        "ComputeDataType": "S" if dt == "C" else "Z",
+        "search_space": "heuristic",
+    }
+    validate_input_config(cfg)
+    with pytest.raises(NotImplementedError, match="Heuristic search space"):
+        apply_input_config_defaults(cfg)
+
+
+def test_heuristic_rejected_for_complex_gemm_problems() -> None:
+    from geko.schemas import GemmConfig, GemmType
+
+    gt = GemmType.from_tensile("N", "N", "C", "C", "C")
+    cfg = {
+        "ARCH": "gfx942",
+        "search_space": "heuristic",
+        "GemmProblems": [GemmConfig(gt, [[64, 64, 1, 64]])],
+    }
+    with pytest.raises(NotImplementedError, match="Heuristic search space"):
+        apply_input_config_defaults(cfg)

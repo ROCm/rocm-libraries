@@ -88,7 +88,8 @@ def build_parser() -> argparse.ArgumentParser:
         metavar=("M", "N", "batch", "K", "DataType", "DestDataType", "ComputeDataType", "transA", "transB"),
         help=(
             "Single GEMM: M N batch_count K, Tensile DataType / DestDataType / ComputeDataType "
-            "(e.g. B B S), transA and transB each N or T (e.g. --inline 1024 1024 1 1024 B B S N T)"
+            "(e.g. B B S), transA and transB each N, T, or C (conjugate-transpose, complex only) "
+            "(e.g. --inline 1024 1024 1 1024 B B S N T)"
         ),
     )
     parser.add_argument(
@@ -255,8 +256,8 @@ def parse_cli_args(argv: Sequence[str] | None) -> CliArgs:
             parser.error("--inline: M, N, batch, and K must be integers")
         trans_a = str(ta).strip().upper()
         trans_b = str(tb).strip().upper()
-        if trans_a not in ("N", "T") or trans_b not in ("N", "T"):
-            parser.error("--inline: transA and transB must each be N or T")
+        if trans_a not in ("N", "T", "C") or trans_b not in ("N", "T", "C"):
+            parser.error("--inline: transA and transB must each be N, T, or C")
         dt, dd, cd = str(data_t).strip(), str(dest_t).strip(), str(comp_t).strip()
         inline = (m_i, n_i, b_i, k_i, dt, dd, cd, trans_a, trans_b)
 

@@ -32,6 +32,10 @@ class GFX950Params(BaseOptimizationParams):
         dt = self._gt.data_type
         if dt in ("H", "B"):
             du = [32, 64, 128, 256]
+        elif dt in ("D", "Z"):
+            du = [8, 16, 32, 64]
+        elif dt == "C":
+            du = [16, 32, 64, 128]
         elif dt == "F8":
             du = [64, 128, 256, 512]
         else:
@@ -272,6 +276,11 @@ class GFX950GAParams(BaseOptimizationParams):
 
     @param
     def depth_u(self, ctx: SizeContext) -> ForkParameter:
+        dt = self._gt.data_type
+        if dt in ("D", "Z"):
+            return self._make_param("DepthU", [8, 16, 32, 64, 128])
+        if dt == "C":
+            return self._make_param("DepthU", [16, 32, 64, 128, 256])
         return self._make_param("DepthU", [32, 64, 128, 256, 512, 1024])
 
     @param

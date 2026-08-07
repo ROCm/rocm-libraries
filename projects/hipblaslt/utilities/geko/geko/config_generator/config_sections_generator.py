@@ -47,8 +47,8 @@ class ConfigSectionGenerator:
     def _use_epilogues(self) -> bool:
         """Whether to emit epilogue fields for this GEMM type."""
         gt = self._gt
-        is_dgemm = gt.data_type == "D" and gt.dest_data_type == "D"
-        return self.config["EPILOGUES"] and not is_dgemm
+        no_epilogue = (gt.data_type == "D" and gt.dest_data_type == "D") or gt.data_type in ("C", "Z")
+        return self.config["EPILOGUES"] and not no_epilogue
 
     def __init__(self, config: Dict[str, Any]) -> None:
         self.config = config
@@ -68,8 +68,8 @@ class ConfigSectionGenerator:
         if self._is_tf32(self._gt.data_type):
             val_HighPrecisionAccumulate = False
 
-        val_transA = "True" if self._gt.transA == "T" else "False"
-        val_transB = "True" if self._gt.transB == "T" else "False"
+        val_transA = "True" if self._gt.transA in ("T", "C") else "False"
+        val_transB = "True" if self._gt.transB in ("T", "C") else "False"
 
         pt = {}
         pt['OperationType'] = 'GEMM'
@@ -86,8 +86,9 @@ class ConfigSectionGenerator:
             pt['MXBlockB'] = 32
         pt['TransposeA'] = val_transA
         pt['TransposeB'] = val_transB
-        pt['#ComplexConjugateA'] = val_transA  # TODO: fix this
-        pt['#ComplexConjugateB'] = val_transB  # TODO: fix this
+        if self._gt.data_type in ("C", "Z"):
+            pt['ComplexConjugateA'] = "True" if self._gt.transA == "C" else "False"
+            pt['ComplexConjugateB'] = "True" if self._gt.transB == "C" else "False"
         pt['UseBeta'] = "True"
 
         epi_tag = "" if self._use_epilogues() else "#"
@@ -152,6 +153,8 @@ class ConfigSectionGenerator:
     def _resolve_bias_type(self) -> Optional[str]:
         """Compute BiasTypeArgs string if epilogues are enabled, else None."""
         if not self._use_epilogues():
+            return None
+        if self._gt.data_type in ("C", "Z"):
             return None
         bias_type = self._convert_type(self._gt.data_type)
         if "8" in bias_type:

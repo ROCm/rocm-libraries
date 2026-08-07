@@ -305,6 +305,10 @@ class Library:
             Assumes no epilogues were previously added. Updates all solution
             names with appropriate suffixes and sets library flags.
         """
+        _NO_EPILOGUE_DTYPES = (1, 2, 3)  # f64_r, f32_c, f64_c
+        if self.problem.get("DataType") in _NO_EPILOGUE_DTYPES:
+            return
+
         # This assumes no epilogues were added before, otherwise this may create inconsistencies
 
         self.problem["Activation"] = True
@@ -393,8 +397,10 @@ class Library:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        transA = "T" if self.problem["TransposeA"] else "N"
-        transB = "T" if self.problem["TransposeB"] else "N"
+        ccA = self.problem.get("ComplexConjugateA", False)
+        ccB = self.problem.get("ComplexConjugateB", False)
+        transA = "C" if (self.problem["TransposeA"] and ccA) else ("T" if self.problem["TransposeA"] else "N")
+        transB = "C" if (self.problem["TransposeB"] and ccB) else ("T" if self.problem["TransposeB"] else "N")
 
         if initialization != "rand_int" and INDEX_TYPE_MAP[self.problem["DataType"]] == "i8_r":
             initialization = "rand_int"
@@ -414,6 +420,10 @@ class Library:
 
         if "ComputeDataType" in self.problem:
             compute_type = INDEX_TYPE_MAP[self.problem["ComputeDataType"]]
+
+            _COMPLEX_TO_REAL_COMPUTE = {"f32_c": "f32_r", "f64_c": "f64_r"}
+            compute_type = _COMPLEX_TO_REAL_COMPUTE.get(compute_type, compute_type)
+
             common["scale_type"] = compute_type
 
             if "F32XdlMathOp" in self.problem and self.problem["F32XdlMathOp"] == 10:  # TF32

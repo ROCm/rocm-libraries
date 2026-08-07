@@ -292,6 +292,22 @@ def apply_input_config_defaults(config: Dict[str, Any]) -> None:
             )
     ss = _resolve_search_space(config)
 
+    if ss == "heuristic":
+        _complex = ("C", "Z")
+        dt = str(config.get("DataType", ""))
+        if dt in _complex:
+            raise NotImplementedError(
+                f"Heuristic search space is not yet supported for complex data type "
+                f"'{dt}'. Use search_space='generic' instead."
+            )
+        for gp in config.get("GemmProblems", []):
+            gdt = gp.gemm_type.data_type
+            if gdt in _complex:
+                raise NotImplementedError(
+                    f"Heuristic search space is not yet supported for complex data type "
+                    f"'{gdt}'. Use search_space='generic' instead."
+                )
+
     if ss == "generic":
         config["MAX_NUM_KERNELS_PER_CONFIG"] = sys.maxsize
     else:
