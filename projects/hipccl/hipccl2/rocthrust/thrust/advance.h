@@ -22,18 +22,6 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
-
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <iterator>
-#endif
-
 THRUST_NAMESPACE_BEGIN
 
 /*! \addtogroup iterators
@@ -105,7 +93,7 @@ template <typename InputIterator, typename Distance>
 THRUST_HOST_DEVICE
 InputIterator next(
   InputIterator i
-, typename _THRUST_STD::iterator_traits<InputIterator>::difference_type n = 1
+, typename iterator_traits<InputIterator>::difference_type n = 1
 );
 #endif
 
@@ -139,7 +127,7 @@ template <typename BidirectionalIterator, typename Distance>
 THRUST_HOST_DEVICE
 BidirectionalIterator prev(
   BidirectionalIterator i
-, typename _THRUST_STD::iterator_traits<BidirectionalIterator>::difference_type n = 1
+, typename iterator_traits<BidirectionalIterator>::difference_type n = 1
 );
 #endif
 

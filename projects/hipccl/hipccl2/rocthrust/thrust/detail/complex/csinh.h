@@ -50,7 +50,6 @@
 #include <thrust/detail/config.h>
 
 #include <thrust/complex.h>
-#include <thrust/detail/complex/cexp.h>
 #include <thrust/detail/complex/math_private.h>
 
 THRUST_NAMESPACE_BEGIN

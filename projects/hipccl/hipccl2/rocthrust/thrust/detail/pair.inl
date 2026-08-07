@@ -16,8 +16,6 @@
 
 #pragma once
 
-// TODO(libhipcxx): remove this file once libhipcxx gets ready
-
 #include <thrust/detail/config.h>
 
 #include <thrust/pair.h>

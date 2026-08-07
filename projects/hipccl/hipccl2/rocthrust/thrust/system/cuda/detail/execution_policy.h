@@ -44,6 +44,10 @@
 #include <thrust/iterator/detail/any_system_tag.h>
 #include <thrust/version.h>
 
+#if !_CCCL_COMPILER(NVRTC)
+#  include <thrust/detail/dependencies_aware_execution_policy.h>
+#endif // !_CCCL_COMPILER(NVRTC)
+
 THRUST_NAMESPACE_BEGIN
 
 namespace cuda_cub
@@ -60,10 +64,15 @@ struct execution_policy<tag> : thrust::execution_policy<tag>
   using tag_type = tag;
 };
 
+_CCCL_SUPPRESS_DEPRECATED_PUSH
 struct tag
     : execution_policy<tag>
-    , detail::allocator_aware_execution_policy<cuda_cub::execution_policy>
+    , thrust::detail::allocator_aware_execution_policy<cuda_cub::execution_policy>
+#if !_CCCL_COMPILER(NVRTC)
+    , thrust::detail::dependencies_aware_execution_policy<cuda_cub::execution_policy>
+#endif // !_CCCL_COMPILER(NVRTC)
 {};
+_CCCL_SUPPRESS_DEPRECATED_POP
 
 template <class Derived>
 struct execution_policy : thrust::execution_policy<Derived>
