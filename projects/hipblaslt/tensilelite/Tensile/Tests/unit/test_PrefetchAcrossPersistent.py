@@ -322,18 +322,11 @@ class _ClassicPapWrapperWriter:
     def isPrefetchAcrossPersistentEnabled(self, kernel):
         return True
 
-    @contextmanager
-    def allocPapTileIdentitySgprs(self, kernel):
-        yield {
-            "WorkGroup0": 100,
-            "WorkGroup1": 101,
-            "WorkGroup2": 102,
-            "StreamKLocalStart": 103,
-            "StreamKLocalEnd": 104,
-        }
+    def papTileIdentityNames(self, kernel):
+        return kwa_module.KernelWriterAssembly.papTileIdentityNames(self, kernel)
 
-    def papCheckpointCurrentTileIdentity(self, kernel, prev_tile):
-        return _module_with_comment("papCheckpointCurrentTileIdentity", "unit: checkpoint tile")
+    def papCheckpointCurrentTileIdentityVgprs(self, kernel, prev_tile):
+        return kw_module.KernelWriter.papCheckpointCurrentTileIdentityVgprs(self, kernel, prev_tile)
 
     def loopCounterName(self, kernel, loop_idx):
         return "LoopCounterL"
@@ -344,8 +337,8 @@ class _ClassicPapWrapperWriter:
     def setupPrefetchAcrossPersistentLoads(self, kernel, tpa, tpb, isOptNLL=True):
         return _module_with_comment("setupPrefetchAcrossPersistentLoads", "unit: setup PAP loads")
 
-    def papRestoreCurrentTileIdentity(self, kernel, prev_tile):
-        return _module_with_comment("papRestoreCurrentTileIdentity", "unit: restore tile")
+    def papRestoreCurrentTileIdentityVgprs(self, kernel, prev_tile):
+        return kw_module.KernelWriter.papRestoreCurrentTileIdentityVgprs(self, kernel, prev_tile)
 
 
 class _StubStreamK:
@@ -1065,7 +1058,42 @@ def _assert_loop_counters_checkpointed_in_vgprs(writer, items):
     assert calculate_loop_num_iter < setup_pap_loads
     assert setup_pap_loads < loop_restore
     assert loop_restore < orig_loop_restore
-    assert writer.vgprPool.checked_in == [loop_vgpr]
+    # Both PAP VGPR borrows are returned: the loop counters and the tile identity.
+    assert sorted(writer.vgprPool.checked_in) == sorted([loop_vgpr, _tile_identity_vgpr(writer)])
+
+
+def _tile_identity_vgpr(writer):
+    return next(base for base, _, tag in writer.vgprPool.checked_out
+                if tag == "PAP tile identity")
+
+
+def _assert_tile_identity_checkpointed_in_vgprs(writer, items):
+    tile_vgpr = _tile_identity_vgpr(writer)
+    names = ["WorkGroup0", "WorkGroup1", "WorkGroup2",
+             "StreamKLocalStart", "StreamKLocalEnd"]
+    vgprs = ["v%u" % (tile_vgpr + i) for i in range(len(names))]
+    sgprs = ["s[sgpr%s]" % name for name in names]
+
+    checkpoint = _module_index(items, "papCheckpointCurrentTileIdentityVgprs")
+    setup_next_tile = _module_index(items, "prefetchAcrossPersistentSetupNextTile")
+    restore = _module_index(items, "papRestoreCurrentTileIdentityVgprs")
+    # The checkpoint has to bracket the call that overwrites these registers.
+    assert checkpoint < setup_next_tile < restore
+
+    # ... and every value has to come back out of the VGPR it went into.
+    saved = _module_items(items[checkpoint])
+    restored = _module_items(items[restore])
+    assert [str(item.dst) for item in saved] == vgprs
+    assert [str(item.srcs[0]) for item in saved] == sgprs
+    assert [str(item.dst) for item in restored] == sgprs
+    assert [str(item.srcs[0]) for item in restored] == vgprs
+    assert tile_vgpr in writer.vgprPool.checked_in
+
+
+def test_classic_pap_checkpoints_tile_identity_in_vgprs(monkeypatch):
+    writer, items = _prefetch_across_persistent(monkeypatch)
+
+    _assert_tile_identity_checkpointed_in_vgprs(writer, items)
 
 
 def test_classic_pap_checkpoints_loop_counters_in_vgprs_around_next_tile_recount(monkeypatch):

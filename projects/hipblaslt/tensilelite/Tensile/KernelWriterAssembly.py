@@ -18341,6 +18341,13 @@ class KernelWriterAssembly(KernelWriter):
   # The StreamK PAP handoff maps WorkGroup*/StreamKLocal* to the next
   # persistent tile to compute next-tile addresses, but current NLL/tail code
   # resumes immediately after the prefetch. Keep tile identity borrowed.
+  #
+  # The checkpoint lives in VGPRs, as it already does on the subtile path
+  # (prefetchAcrossPersistentSubtile) and as the loop counters do below. It has
+  # to stay live across prefetchAcrossPersistentSetupNextTile, which is the code
+  # that overwrites WorkGroup*/StreamKLocal*, so it necessarily overlaps that
+  # function's own temporaries; in SGPRs that overlap sat at the top of the SGPR
+  # high-water mark on MX StreamK+PAP shapes.
   ##############################################################################
   def papTileIdentityNames(self, kernel):
     names = [
@@ -18357,27 +18364,6 @@ class KernelWriterAssembly(KernelWriter):
     if len(kernel["SpaceFillingAlgo"]):
       names.append("StreamKTileID")
     return names
-
-  @contextmanager
-  def allocPapTileIdentitySgprs(self, kernel):
-    names = self.papTileIdentityNames(kernel)
-    with self.allocTmpSgpr(len(names), alignment=1, tag="PAP tile identity") as papTileIdentitySgpr:
-      yield {name: papTileIdentitySgpr.idx + i for i, name in enumerate(names)}
-
-  def papCheckpointCurrentTileIdentity(self, kernel, prevTile):
-    module = Module("papCheckpointCurrentTileIdentity")
-    for name in self.papTileIdentityNames(kernel):
-      module.add(SMovB32(dst=sgpr(prevTile[name]), src=sgpr(name), comment="checkpoint %s for PAP restore" % name))
-    return module
-
-  def papRestoreCurrentTileIdentity(self, kernel, prevTile):
-    module = Module("papRestoreCurrentTileIdentity")
-    # PAP temporarily maps WorkGroup*/StreamKLocal* to the next persistent tile
-    # so it can issue the first PGR early. Restore the current tile for the
-    # remaining NLL/tail code; StreamKIter already points at the next chunk.
-    for name in self.papTileIdentityNames(kernel):
-      module.add(SMovB32(dst=sgpr(name), src=sgpr(prevTile[name]), comment="restore current %s after PAP" % name))
-    return module
 
   ##############################################################################
   # Prefetch across persistent: prefetch next tile's data during the NLL.
@@ -18408,33 +18394,36 @@ class KernelWriterAssembly(KernelWriter):
       module.add(SBarrier(comment="PAP: sync before next-tile prefetch"))
 
     skComponent = Component.StreamK.find(self)
-    with self.allocPapTileIdentitySgprs(kernel) as prevTile:
-      module.add(self.papCheckpointCurrentTileIdentity(kernel, prevTile))
-      module.add(skComponent.prefetchAcrossPersistentSetupNextTile(self, kernel, tensorParametersA, tensorParametersB, skipLroReset=True))
-      if kernel["enableTDMA"] and kernel["enableTDMB"]:
-        module.add(self.papTdmUpdateDescriptor(kernel, tensorParametersA, tensorParametersB))
-        if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
-          module.add(self.papTdmUpdateDescriptor(kernel, tensorParametersA["MX"], tensorParametersB["MX"]))
-      loopCounterName = self.loopCounterName(kernel, self.states.unrollIdx)
-      # DP-only: LoopCounter is constant ItersPerTile and OrigLoopCounter is a
-      # per-problem constant, so calculateLoopNumIter recomputes the same values
-      # (idempotent) and PAP never runs on the last tile. Skip the 2-VGPR
-      # checkpoint/restore. (DP-only PAP saving.)  HalfPLR is the exception: it
-      # enters PAP while LoopCounter is one, so the counters must be preserved.
-      snapshotLoopCounter = kernel["HalfPLR"] or not kernel["StreamKForceDPOnly"]
-      if snapshotLoopCounter:
-        prevLoopVgpr = self.vgprPool.checkOutAligned(2, 1, "PAP loop counters")
-        module.add(VMovB32(dst=vgpr(prevLoopVgpr), src=sgpr(loopCounterName), comment="checkpoint LoopCounter for PAP restore"))
-        module.add(VMovB32(dst=vgpr(prevLoopVgpr + 1), src=sgpr("OrigLoopCounter"), comment="checkpoint OrigLoopCounter for PAP restore"))
-      module.add(self.calculateLoopNumIter(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx))
-      module.add(self.setupPrefetchAcrossPersistentLoads(kernel, tensorParametersA, tensorParametersB, isOptNLL=True))
-      if snapshotLoopCounter:
-        module.add(VReadfirstlaneB32(dst=sgpr(loopCounterName), src=vgpr(prevLoopVgpr), comment="restore LoopCounter after PAP"))
-        module.add(VReadfirstlaneB32(dst=sgpr("OrigLoopCounter"), src=vgpr(prevLoopVgpr + 1), comment="restore OrigLoopCounter after PAP"))
-        self.vgprPool.checkIn(prevLoopVgpr)
-      if kernel["enableTDMA"] and kernel["enableTDMB"]:
-        module.add(self.papTdmSaveLdsBank(kernel))
-      module.add(self.papRestoreCurrentTileIdentity(kernel, prevTile))
+    tileIdentityNames = self.papTileIdentityNames(kernel)
+    prevTileBase = self.vgprPool.checkOutAligned(len(tileIdentityNames), 1, "PAP tile identity")
+    prevTile = {name: prevTileBase + i for i, name in enumerate(tileIdentityNames)}
+    module.add(self.papCheckpointCurrentTileIdentityVgprs(kernel, prevTile))
+    module.add(skComponent.prefetchAcrossPersistentSetupNextTile(self, kernel, tensorParametersA, tensorParametersB, skipLroReset=True))
+    if kernel["enableTDMA"] and kernel["enableTDMB"]:
+      module.add(self.papTdmUpdateDescriptor(kernel, tensorParametersA, tensorParametersB))
+      if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
+        module.add(self.papTdmUpdateDescriptor(kernel, tensorParametersA["MX"], tensorParametersB["MX"]))
+    loopCounterName = self.loopCounterName(kernel, self.states.unrollIdx)
+    # DP-only: LoopCounter is constant ItersPerTile and OrigLoopCounter is a
+    # per-problem constant, so calculateLoopNumIter recomputes the same values
+    # (idempotent) and PAP never runs on the last tile. Skip the 2-VGPR
+    # checkpoint/restore. (DP-only PAP saving.)  HalfPLR is the exception: it
+    # enters PAP while LoopCounter is one, so the counters must be preserved.
+    snapshotLoopCounter = kernel["HalfPLR"] or not kernel["StreamKForceDPOnly"]
+    if snapshotLoopCounter:
+      prevLoopVgpr = self.vgprPool.checkOutAligned(2, 1, "PAP loop counters")
+      module.add(VMovB32(dst=vgpr(prevLoopVgpr), src=sgpr(loopCounterName), comment="checkpoint LoopCounter for PAP restore"))
+      module.add(VMovB32(dst=vgpr(prevLoopVgpr + 1), src=sgpr("OrigLoopCounter"), comment="checkpoint OrigLoopCounter for PAP restore"))
+    module.add(self.calculateLoopNumIter(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx))
+    module.add(self.setupPrefetchAcrossPersistentLoads(kernel, tensorParametersA, tensorParametersB, isOptNLL=True))
+    if snapshotLoopCounter:
+      module.add(VReadfirstlaneB32(dst=sgpr(loopCounterName), src=vgpr(prevLoopVgpr), comment="restore LoopCounter after PAP"))
+      module.add(VReadfirstlaneB32(dst=sgpr("OrigLoopCounter"), src=vgpr(prevLoopVgpr + 1), comment="restore OrigLoopCounter after PAP"))
+      self.vgprPool.checkIn(prevLoopVgpr)
+    if kernel["enableTDMA"] and kernel["enableTDMB"]:
+      module.add(self.papTdmSaveLdsBank(kernel))
+    module.add(self.papRestoreCurrentTileIdentityVgprs(kernel, prevTile))
+    self.vgprPool.checkIn(prevTileBase)
     if (kernel["enableTDMA"] and kernel["enableTDMB"] and not kernel["NoTailLoop"]
         and not kernel["HalfPLR"]):
       module.add(self.papTdmUpdateDescriptor(kernel, tensorParametersA, tensorParametersB, preservePapBank=False))

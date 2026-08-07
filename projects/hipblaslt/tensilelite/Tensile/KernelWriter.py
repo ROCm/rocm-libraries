@@ -3427,18 +3427,18 @@ class KernelWriter(metaclass=abc.ABCMeta):
   ##############################################################################
   # Setup next-tile PAP loads for Subtile scheduler kernels.
   ##############################################################################
-  def papCheckpointCurrentTileIdentityVgprs(self, kernel, prevTile):
+  def papCheckpointCurrentTileIdentityVgprs(self, kernel, prevTile, label="PAP"):
     module = Module("papCheckpointCurrentTileIdentityVgprs")
     for name in self.papTileIdentityNames(kernel):
       module.add(VMovB32(dst=vgpr(prevTile[name]), src=sgpr(name),
-                         comment="checkpoint %s for Subtile PAP restore" % name))
+                         comment="checkpoint %s for %s restore" % (name, label)))
     return module
 
-  def papRestoreCurrentTileIdentityVgprs(self, kernel, prevTile):
+  def papRestoreCurrentTileIdentityVgprs(self, kernel, prevTile, label="PAP"):
     module = Module("papRestoreCurrentTileIdentityVgprs")
     for name in self.papTileIdentityNames(kernel):
       module.add(VReadfirstlaneB32(dst=sgpr(name), src=vgpr(prevTile[name]),
-                                   comment="restore current %s after Subtile PAP" % name))
+                                   comment="restore current %s after %s" % (name, label)))
     return module
 
   def prefetchAcrossPersistentSubtile(self, kernel, tensorParametersA, tensorParametersB, preloopGrModule=None, skipBarrier=False):
@@ -3464,10 +3464,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
     tileIdentityNames = self.papTileIdentityNames(kernel)
     prevTileBase = self.vgprPool.checkOutAligned(len(tileIdentityNames), 1, "Subtile PAP tile identity")
     prevTile = {name: prevTileBase + i for i, name in enumerate(tileIdentityNames)}
-    module.add(self.papCheckpointCurrentTileIdentityVgprs(kernel, prevTile))
+    module.add(self.papCheckpointCurrentTileIdentityVgprs(kernel, prevTile, label="Subtile PAP"))
     module.add(skComponent.prefetchAcrossPersistentSetupNextTile(self, kernel, tensorParametersA, tensorParametersB, skipLroReset=True))
     module.add(self.setupPrefetchAcrossPersistentSubtileLoads(kernel, tensorParametersA, tensorParametersB, preloopGrModule))
-    module.add(self.papRestoreCurrentTileIdentityVgprs(kernel, prevTile))
+    module.add(self.papRestoreCurrentTileIdentityVgprs(kernel, prevTile, label="Subtile PAP"))
     self.vgprPool.checkIn(prevTileBase)
 
     module.add(skipLabel)
