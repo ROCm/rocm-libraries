@@ -413,8 +413,8 @@ bool rocke_attention_tiled_2d_spec_validate(rocke_ir_builder_t* b,
         {
             rocke_attn2d_set_err(b,
                                  ROCKE_ERR_VALUE,
-                                 "use_k_sliced_ring requires fp16/bf16, head_size in {64,128} "
-                                 "(HD %% 32 == 0 for the 32-wide K slices), T in {64,128}");
+                                 "use_k_sliced_ring requires fp16/bf16, head_size in {64,128}, "
+                                 "T in {64,128}");
             return false;
         }
         if(!(s->ring_depth == 2 || s->ring_depth == 3))
