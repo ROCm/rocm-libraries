@@ -1,10 +1,53 @@
-# rocBLAS Testing Strategy
+# rocBLAS Testing 
 
+## Component Overview
 
-**Owner:** rocBLAS Team   
-**Last Updated:** 2026-08-06  
+rocBLAS is AMD's ROCm implementation of the BLAS API (Levels 1–3 and extensions). It sits in the
+math-libraries layer above HIP and the ROCr runtime, and is consumed directly and through hipBLAS,
+rocSOLVER, and other libraries and frameworks.
 
-This document has two layers:
+Two architectural facts shape testing:
+
+**GEMM performance paths are largely generated.** When `BUILD_WITH_TENSILE=ON`, Level-3 GEMM kernels
+and solution libraries come from a separate library hipBLASLt (TensileLite) or the embedded Tensile (under `shared/tensile/` in the monorepo).
+Correctness and performance of those paths depend on both the C++ dispatch layer in this repository and generated
+kernel logic maintained separately from hand-written BLAS routines.
+
+**Most validation requires a GPU.** Numerical correctness means agreement with a host reference BLAS
+on real hardware across precisions, transposes, batching, and pointer modes. The client suite is
+integration-heavy by design; only a small fraction of behavior is exercised without dispatching device
+work.
+
+Major dependencies: HIP, ROCr, host reference BLAS (OpenBLAS or AOCL-BLAS with ILP64 for clients), 
+Depends on hipBLASLt and Tensile GEMM backends, unless custom build uses `BUILD_WITH_HIPBLASLT_ONLY=ON` it consumes shared monorepo infrastructure `shared/tensile` as child build step.  Other dependencies: `shared/ctest`, TheRock, Math CI.
+
+## Development Workflow
+
+What a developer typically does between a change and merge:
+
+**1. Build** with clients enabled (`BUILD_CLIENTS_TESTS=ON`). Staged binaries land under
+`build/release/clients/staging/`.
+
+**2. Run tests matched to the change.**
+
+| You changed | Run this | Needs a GPU |
+| --- | --- | --- |
+| Any BLAS routine or client harness | `rocblas-test --gtest_filter=*quick*-*known_bug*` or `--yaml rocblas_smoke.yaml` | Yes |
+| CTest category (monorepo + `shared/ctest`) | `ctest -L quick` from build tree or `bin/rocblas/` after install | Yes |
+| Broad pre-submit scope | `rocblas_rtest.py -t psdb` or `ctest -L standard` | Yes |
+| Tensile / logic YAML (GEMM) | Rebuild with Tensile; run affected `*gemm*` / `*_tensile` gtest filters | Yes |
+| Performance-sensitive GEMM | `rocblas-bench` on representative sizes; compare to baseline manually | Yes |
+| Format / hooks only | `pre-commit run --all-files` | No |
+
+**3. Add the right validation** — see [Coverage Expectations by Change Type](#coverage-expectations-by-change-type) and [Choosing the Right Test Type](#choosing-the-right-test-type).
+
+**4. Open a PR** targeting `develop`, following [`.github/CONTRIBUTING.rst`](.github/CONTRIBUTING.rst).
+
+**5. Watch CI** — build plus client tests on GPU runners; see [Pre-submit / CI Gates](#pre-submit--ci-gates).
+
+---
+
+This remainder of this document has two layers:
 
 1. **Testing mechanics** — how `rocblas-test`, YAML, CTest, and `rocblas_rtest.py` are wired (below).
 2. **Testing strategy** — what we validate, how CI gates merge, known gaps, and what contributors should run ([strategy sections](#component-overview)).
@@ -265,50 +308,7 @@ Full walkthrough: [`clients/gtest/README.md`](clients/gtest/README.md). Contribu
 
 ---
 
-## Component Overview
 
-rocBLAS is AMD's ROCm implementation of the BLAS API (Levels 1–3 and extensions). It sits in the
-math-libraries layer above HIP and the ROCr runtime, and is consumed directly and through hipBLAS,
-rocSOLVER, and other libraries and frameworks.
-
-Two architectural facts shape testing:
-
-**GEMM performance paths are largely generated.** When `BUILD_WITH_TENSILE=ON`, Level-3 GEMM kernels
-and solution libraries come from a separate library hipBLASLt (TensileLite) or the embedded Tensile (under `shared/tensile/` in the monorepo).
-Correctness and performance of those paths depend on both the C++ dispatch layer in this repository and generated
-kernel logic maintained separately from hand-written BLAS routines.
-
-**Most validation requires a GPU.** Numerical correctness means agreement with a host reference BLAS
-on real hardware across precisions, transposes, batching, and pointer modes. The client suite is
-integration-heavy by design; only a small fraction of behavior is exercised without dispatching device
-work.
-
-Major dependencies: HIP, ROCr, host reference BLAS (OpenBLAS or AOCL-BLAS with ILP64 for clients), 
-Depends on hipBLASLt and Tensile GEMM backends, unless custom build uses `BUILD_WITH_HIPBLASLT_ONLY=ON` it consumes shared monorepo infrastructure `shared/tensile` as child build step.  Other dependencies: `shared/ctest`, TheRock, Math CI.
-
-## Development Workflow
-
-What a developer typically does between a change and merge:
-
-**1. Build** with clients enabled (`BUILD_CLIENTS_TESTS=ON`). Staged binaries land under
-`build/release/clients/staging/`.
-
-**2. Run tests matched to the change.**
-
-| You changed | Run this | Needs a GPU |
-| --- | --- | --- |
-| Any BLAS routine or client harness | `rocblas-test --gtest_filter=*quick*-*known_bug*` or `--yaml rocblas_smoke.yaml` | Yes |
-| CTest category (monorepo + `shared/ctest`) | `ctest -L quick` from build tree or `bin/rocblas/` after install | Yes |
-| Broad pre-submit scope | `rocblas_rtest.py -t psdb` or `ctest -L standard` | Yes |
-| Tensile / logic YAML (GEMM) | Rebuild with Tensile; run affected `*gemm*` / `*_tensile` gtest filters | Yes |
-| Performance-sensitive GEMM | `rocblas-bench` on representative sizes; compare to baseline manually | Yes |
-| Format / hooks only | `pre-commit run --all-files` | No |
-
-**3. Add the right validation** — see [Coverage Expectations by Change Type](#coverage-expectations-by-change-type) and [Choosing the Right Test Type](#choosing-the-right-test-type).
-
-**4. Open a PR** targeting `develop`, following [`.github/CONTRIBUTING.rst`](.github/CONTRIBUTING.rst).
-
-**5. Watch CI** — build plus client tests on GPU runners; see [Pre-submit / CI Gates](#pre-submit--ci-gates).
 
 ## Testing Strategy and Layers
 
