@@ -42,7 +42,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-ROCKE = Path(__file__).resolve().parents[1]          # tools -> rocke
+ROCKE = Path(__file__).resolve().parents[1]  # tools -> rocke
 PLATFORM = ROCKE / "platform"
 LIBRARY = ROCKE / "library"
 PLATFORM_PYROOT = PLATFORM / "python"
@@ -55,7 +55,9 @@ STAGES = ("guard", "gate", "parity", "pytest", "numeric")
 def _env() -> dict:
     env = dict(os.environ)
     roots = [str(LIBRARY), str(PLATFORM_PYROOT), str(EMIT_COMMON_DIR)]
-    env["PYTHONPATH"] = os.pathsep.join(roots + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else []))
+    env["PYTHONPATH"] = os.pathsep.join(
+        roots + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else [])
+    )
     env.setdefault("ROCKE", str(PLATFORM))
     return env
 
@@ -64,6 +66,7 @@ def _has_gpu() -> bool:
     try:
         sys.path.insert(0, str(PLATFORM_PYROOT))
         from rocke.runtime.hip_module import get_device_arch
+
         return bool(get_device_arch(0))
     except Exception:
         return False
@@ -99,14 +102,31 @@ def _parse_steps(raw: str) -> list[str]:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="rocke check runner (auto-discovering, stage-selectable)")
-    ap.add_argument("--steps", default="",
-                    help=f"comma-separated subset of stages to run (default: all). Stages: {', '.join(STAGES)}")
-    ap.add_argument("--op", default="",
-                    help="scope to an OPERATOR/family substring across pytest, numeric, and the gate")
-    ap.add_argument("--flavor", choices=FLAVORS, default="", help="pin one LLVM flavor (default: both)")
-    ap.add_argument("--build-root", default=str(Path(tempfile.gettempdir()) / "rocke_checks"))
-    ap.add_argument("--list", action="store_true", help="list what would run, then exit")
+    ap = argparse.ArgumentParser(
+        description="rocke check runner (auto-discovering, stage-selectable)"
+    )
+    ap.add_argument(
+        "--steps",
+        default="",
+        help=f"comma-separated subset of stages to run (default: all). Stages: {', '.join(STAGES)}",
+    )
+    ap.add_argument(
+        "--op",
+        default="",
+        help="scope to an OPERATOR/family substring across pytest, numeric, and the gate",
+    )
+    ap.add_argument(
+        "--flavor",
+        choices=FLAVORS,
+        default="",
+        help="pin one LLVM flavor (default: both)",
+    )
+    ap.add_argument(
+        "--build-root", default=str(Path(tempfile.gettempdir()) / "rocke_checks")
+    )
+    ap.add_argument(
+        "--list", action="store_true", help="list what would run, then exit"
+    )
     args = ap.parse_args()
 
     steps = _parse_steps(args.steps)
@@ -118,18 +138,29 @@ def main() -> int:
     pytest_dirs = _discover_pytest_dirs()
 
     if args.list:
-        print(f"rocke checks that WOULD run (steps: {', '.join(steps)}"
-              + (f"; op: {op}" if op else "") + "):")
+        print(
+            f"rocke checks that WOULD run (steps: {', '.join(steps)}"
+            + (f"; op: {op}" if op else "")
+            + "):"
+        )
         print(f"  guard        : {'yes' if 'guard' in steps else 'skip'}")
         print(f"  gate flavors : {', '.join(flavors) if 'gate' in steps else 'skip'}")
         if "parity" in steps:
-            print("  platform parity: " + ("skip (--op has no filter here)" if op else "yes"))
+            print(
+                "  platform parity: "
+                + ("skip (--op has no filter here)" if op else "yes")
+            )
         else:
             print("  platform parity: skip")
-        pt = ', '.join(str(d.relative_to(ROCKE)) for d in pytest_dirs) or 'NONE FOUND'
-        print(f"  pytest dirs  : {pt + (f' (-k {op})' if op else '') if 'pytest' in steps else 'skip'}")
+        pt = ", ".join(str(d.relative_to(ROCKE)) for d in pytest_dirs) or "NONE FOUND"
+        print(
+            f"  pytest dirs  : {pt + (f' (-k {op})' if op else '') if 'pytest' in steps else 'skip'}"
+        )
         if "numeric" in steps:
-            print(f"  numeric lane : {'yes (device visible)' if gpu else 'NO device'}" + (f" (--only {op})" if op else ""))
+            print(
+                f"  numeric lane : {'yes (device visible)' if gpu else 'NO device'}"
+                + (f" (--only {op})" if op else "")
+            )
         else:
             print("  numeric lane : skip")
         return 0
@@ -138,15 +169,28 @@ def main() -> int:
 
     # guard -- relative-path guard (fast, no build)
     if "guard" in steps:
-        status |= _run("relative-path guard", [sys.executable, str(PLATFORM / "tests" / "run_all.py"),
-                                               "--no-gate", "--no-pytest"], env, cwd=PLATFORM)
+        status |= _run(
+            "relative-path guard",
+            [
+                sys.executable,
+                str(PLATFORM / "tests" / "run_all.py"),
+                "--no-gate",
+                "--no-pytest",
+            ],
+            env,
+            cwd=PLATFORM,
+        )
 
     # gate -- byte-identity gate at each flavor (builds the C++ engine)
     if "gate" in steps:
         for fl in flavors:
             genv = dict(env, ROCKE_LLVM_FLAVOR=fl)
-            cmd = [sys.executable, str(PLATFORM / "tools" / "check_byte_identity.py"),
-                   "--build-root", args.build_root]
+            cmd = [
+                sys.executable,
+                str(PLATFORM / "tools" / "check_byte_identity.py"),
+                "--build-root",
+                args.build_root,
+            ]
             if op:
                 cmd += ["--only", op]
             status |= _run(f"byte-identity gate [{fl}]", cmd, genv, cwd=PLATFORM)
@@ -155,11 +199,21 @@ def main() -> int:
     # microkernels; has no operator filter, so it is skipped when scoping to --op).
     if "parity" in steps:
         if op:
-            print(f"\n== parity: SKIPPED (--op {op}; platform instance parity has no operator filter) ==")
+            print(
+                f"\n== parity: SKIPPED (--op {op}; platform instance parity has no operator filter) =="
+            )
         else:
-            status |= _run("platform instance parity",
-                           [sys.executable, str(EMIT_COMMON_DIR / "run_parity.py"),
-                            "--build-root", args.build_root], env, cwd=PLATFORM)
+            status |= _run(
+                "platform instance parity",
+                [
+                    sys.executable,
+                    str(EMIT_COMMON_DIR / "run_parity.py"),
+                    "--build-root",
+                    args.build_root,
+                ],
+                env,
+                cwd=PLATFORM,
+            )
 
     # pytest -- auto-discovered dirs; GPU-only tests inside self-skip without a device
     if "pytest" in steps:
@@ -187,7 +241,9 @@ def main() -> int:
         else:
             print("\n== numeric: SKIPPED (no HIP device visible) ==")
 
-    print(f"\n{'=' * 48}\nrocke checks: {'ALL PASSED' if status == 0 else 'FAILURES PRESENT'}\n{'=' * 48}")
+    print(
+        f"\n{'=' * 48}\nrocke checks: {'ALL PASSED' if status == 0 else 'FAILURES PRESENT'}\n{'=' * 48}"
+    )
     return 1 if status else 0
 
 
