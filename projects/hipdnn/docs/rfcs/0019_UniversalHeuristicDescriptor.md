@@ -31,10 +31,11 @@
 12. [Engine Selection Integration](#12-engine-selection-integration)
 13. [Observability](#13-observability)
 14. [Model Generation Pipeline](#14-model-generation-pipeline)
-15. [Phased Delivery](#15-phased-delivery)
-16. [Risks](#16-risks)
-17. [Open Questions](#17-open-questions)
-18. [Glossary](#18-glossary)
+15. [Package-Creation-Time Selection: Knobs and AOT Kernels](#15-package-creation-time-selection-knobs-and-aot-kernels)
+16. [Phased Delivery](#16-phased-delivery)
+17. [Risks](#17-risks)
+18. [Open Questions](#18-open-questions)
+19. [Glossary](#19-glossary)
 
 ---
 
@@ -1104,7 +1105,10 @@ KMD fields the engine lets a user set, via `add_engine_variants` knob settings).
 *filters* the catalog ([Section 4.2](#42-kmd-fields-and-knobs-as-a-view-onto-them)), so sweeping knobs
 explores user-visible restrictions, not new kernels. The **variant space itself is fixed** — it is the pack's
 existing child UKDs, so the tool does not enumerate or build variants; it enrolls the shipped ones and
-times them ([Section 14.2](#142-benchmarking-via-hipdnn-autotune)).
+times them ([Section 14.2](#142-benchmarking-via-hipdnn-autotune)). That holds *within this pipeline*;
+deciding which variants exist in the first place — and pruning them once a heuristic exists — is the
+upstream, package-creation-time stage of
+[Section 15](#15-package-creation-time-selection-knobs-and-aot-kernels).
 
 One subtlety for anything that *drives* a sweep from a descriptor: a validity *constraint*
 (`min:1, max:8`) expresses which values are **legal**, not which to **sample**, so a swept axis needs an
@@ -1190,7 +1194,118 @@ the autotune-trained `tree_data` model replaces it.
 
 ---
 
-## 15. Phased Delivery
+## 15. Package-Creation-Time Selection: Knobs and AOT Kernels
+
+Everything above concerns *runtime* selection (which kernel wins for a graph) and *model* generation
+(training a UHD for a fixed pack). This section covers the stage upstream of both: deciding **which knobs
+a package exposes** and **which kernels it compiles AOT** — that is, generating the UED and the UKD set
+itself, at **package creation time**.
+
+It is a distinct heuristics area, and it closes a loop with
+[Section 14](#14-model-generation-pipeline): a generated heuristic is one of the inputs used to prune
+knobs, and the pruned knob set then changes which kernels are worth compiling.
+
+> **First pass.** This captures the intended shape of the work. The algorithms — prioritization
+> objective, search-space refinement, pruning thresholds — are deliberately left open below.
+
+### 15.1 AOT selection depends on whether the engine can JIT
+
+The goal of AOT differs sharply between two regimes.
+
+**Engine can JIT in hipDNN — AOT is a cost optimization.** AOT exists to cut compile cost for the
+kernels that actually get used. Coverage is *not* the objective, because the JIT path already covers the
+space; AOT only needs the most-used, most-performant subset. All knobs are available, and compiling a
+subset trades package size and build time against runtime compile latency.
+**Goal: select the best kernels for a representative set of data.**
+
+**Engine cannot JIT in hipDNN — AOT is the entire functional surface.** Here the compiled kernels are
+everything the engine can do, so the set needs *both* good coverage and good performance. This is the
+case when JIT has not been built (rocKE today), is never planned, or the kernel generator is not
+JIT-able (CK). In this regime hipDNN **cannot inform** AOT selection — it can only **filter** an
+already-generated set to reduce package size and runtime load. That filtering can feed back into knob
+generation, but it **cannot reduce the up-front cost of variant explosion**, which happens in the
+engine's own generator before hipDNN sees anything.
+**Goal: filter the worst kernels to reduce size, without losing coverage.**
+
+| | Engine can JIT | Engine cannot JIT |
+|---|---|---|
+| Role of AOT | compile-cost optimization | the entire functional surface |
+| Coverage requirement | low — JIT is the fallback | high — nothing else fills the gap |
+| Objective | **select the best** for the data | **filter the worst** to reduce size |
+| hipDNN's leverage | can inform *what to build* | can only filter *what was already built* |
+
+### 15.2 Pipeline: AOT selection
+
+1. **Generate an unoptimized KDP** that exposes all possible knobs (for JIT or AOT), through tooling
+   plus user generation.
+2. **Benchmark that KDP through hipDNN** using the exposed knobs, over an *algorithmically refined*
+   search space rather than the full cross-product — and, where relevant, over **targeted datasets for
+   specific clients**.
+3. **Post-hoc algorithmic evaluation** to prioritize the candidate list: frequency of kernel use, the
+   time cost of a poor selection, and similar signals.
+4. **Modify the KDP** to include the AOT kernels selected (or newly created) by that evaluation, on
+   coverage / frequency / performance.
+
+Step 2 uses the same autotune substrate as [Section 14.2](#142-benchmarking-via-hipdnn-autotune); what
+differs is *what varies* (the variant space itself, not just the shape corpus) and *what the output
+drives* (the pack's kernel set, not a model).
+
+### 15.3 Knob selection: static vs. empirical
+
+**Static analysis.** Largely package/project dependent, driven by the kernel author — increasingly with
+LLM assistance — and limited tooling. This is likely **not** an area the heuristics team owns directly.
+It answers two questions from the code: which knobs indicate that a **separate engine** is warranted
+rather than one super-engine, and which knobs are **dead or low-impact** for performance.
+
+**Empirical.** Requires a generation-and-execution loop. That loop can live **inside hipDNN** when the
+engine supports both JIT and AOT; otherwise it must live **in the engine's own codebase**, wherever the
+generation/execution loop can actually run.
+
+### 15.4 Pipeline: knob reduction (hipDNN JIT case)
+
+1. **Generate an unoptimized KDP** exposing all possible knobs for JIT.
+2. **Benchmark through hipDNN** over an algorithmically refined search space.
+3. **Generate heuristics** from the results ([Section 14](#14-model-generation-pipeline)).
+4. **Backwards-evaluate the heuristics** to find the weakest knobs — the axes the trained model barely
+   uses.
+5. **Regenerate the UED** with the reduced knob set.
+6. **Regenerate the AOT kernels** from the reduced knobs, or run the AOT-selection pipeline
+   ([Section 15.2](#152-pipeline-aot-selection)).
+
+Step 4 is the same signal as the feature-importance pruning noted in
+[Section 14.6](#146-auto-deriving-a-first-pass-features_signature) — there it trims a bloated
+`features_signature`; here it trims the **knob space itself**. A knob the model never splits on is a knob
+whose variants are not earning their package size.
+
+Steps 5–6 are why this closes a loop: a smaller knob set shrinks the `$kernel.*` space
+([Section 4.2](#42-kmd-fields-and-knobs-as-a-view-onto-them)), which shrinks both the variant explosion
+and the feature vector, which changes what the next model needs.
+
+### 15.5 Relationship to the model-generation pipeline
+
+[Section 14.5](#145-sweep-space-grid-vs-constraint) states that the variant space is *fixed* for model
+generation — the tool enrolls the pack's existing UKDs and times them. That holds **within** that
+pipeline. This section is the stage where the variant space is actually **decided**, and where a
+generated heuristic feeds back to change it. The two run in sequence and iterate:
+
+```
+pack (all knobs) → benchmark → heuristic → prune knobs → regenerate pack → benchmark → heuristic → …
+```
+
+**OPEN items for this area:**
+
+- The **prioritization objective** for AOT selection (step 3): how to weigh frequency of use against the
+  time cost of a poor selection, and how client-specific targeted datasets factor in.
+- How the **search-space refinement** algorithm works, and whether it is shared with the shape-corpus
+  sweep of [Section 14.5](#145-sweep-space-grid-vs-constraint).
+- The **pruning threshold** for a "weak" knob, and whether pruning is automatic or a proposal for author
+  review.
+- For the **non-JIT** case, whether anything can feed back into the *engine's own generator* to reduce
+  variant explosion at the source, rather than only filtering after the fact.
+
+---
+
+## 16. Phased Delivery
 
 Each phase is independently shippable and validated against the SDPA path and the reference tooling,
 using the parity and overhead checks of [RFC 0017 §12.1](0017_UniversalKernelDescriptor.md#121-testing-and-performance).
@@ -1204,13 +1319,15 @@ using the parity and overhead checks of [RFC 0017 §12.1](0017_UniversalKernelDe
 | 5 | `table` / CSV | Cheap bucketed heuristics for ops that don't warrant a model. |
 | 6 | `custom_library` | Compiled scorer `.so` for models the in-tree walker doesn't cover. Dependency + trust audit gated. |
 | 7 | Engine-selection integration | Score-only mode, plugin-query surface, engine-selection policy. Co-owned with [RFC 0007](0007_EngineSelectionHeuristicsFramework.md). |
+| 8 | AOT selection ([Section 15.2](#152-pipeline-aot-selection)) | Benchmark an all-knobs KDP, prioritize by frequency / cost-of-poor-selection, emit the AOT kernel set. Needed first for **non-JIT** engines (rocKE today, CK), where it is filtering rather than selection. Depends on phase 4. |
+| 9 | Knob reduction loop ([Section 15.4](#154-pipeline-knob-reduction-hipdnn-jit-case)) | Backwards-evaluate a generated heuristic for weak knobs, regenerate the UED with a reduced knob set, then regenerate AOT kernels. Requires an engine that can **JIT in hipDNN**; depends on phases 4 and 8. |
 
 `lgbm_to_c` (build-time, in-tree perf optimization only) and `lightgbm_native` are dependency-gated and
 land only when a concrete need appears.
 
 ---
 
-## 16. Risks
+## 17. Risks
 
 | Risk | Description | Mitigation |
 |------|-------------|------------|
@@ -1225,7 +1342,7 @@ land only when a concrete need appears.
 
 ---
 
-## 17. Open Questions
+## 18. Open Questions
 
 ### Schema and Training
 
@@ -1309,7 +1426,7 @@ land only when a concrete need appears.
 
 ---
 
-## 18. Glossary
+## 19. Glossary
 
 - **UHD (Universal Heuristic Descriptor):** One kernel-selection model, owned by the UED (one per
   engine), that ranks the applicable child UKDs of every pack joining its engine and picks one.
