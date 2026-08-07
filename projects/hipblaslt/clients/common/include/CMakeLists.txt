@@ -19,7 +19,6 @@ target_sources(hipblaslt-clients-common
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_init.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_math.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_parse_data.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_random.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_test.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/host_vector.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipBuffer.hpp"

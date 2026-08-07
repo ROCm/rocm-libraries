@@ -151,6 +151,12 @@ have independent recipes and random streams. Random values are counter-based,
 so a tensor element depends only on the seed, stream, and logical index—not
 loop order or thread count.
 
+Each numerical component recipe can also apply one unary transform
+(`absolute`, `sine`, or `cosine`), an affine value scale/offset, and sign
+alternation over explicitly selected tensor dimensions. These modifiers let
+product adapters describe small-value, checkerboard, positive-only, and probe
+inputs without owning element loops.
+
 hipBLASLt and TensileLite keep private enum/type adapters. Common host
 initialization modes now translate to this API; unsupported legacy raw-bit,
 sentinel, and packed-format recipes remain bounded fallbacks while they are

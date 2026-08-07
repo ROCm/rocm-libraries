@@ -16,7 +16,6 @@
 #include <numeric>
 #include <vector>
 
-#include "../include/hipblaslt_random.hpp"
 #include "../include/unit.hpp"
 #include "hipblaslt_arguments.hpp"
 
@@ -156,7 +155,8 @@ TEST_P(ExtOpSoftmaxTest, softmaxSuccess)
     uint32_t           n = 16;
     std::vector<float> input(m * n, 0.f);
     std::vector<float> output(m * n, 0.f);
-    hipblaslt_uniform_int_1_10_run_float(input.data(), input.size());
+    roc::host_validation::hipblaslt_adapter::initialize(
+        input.data(), input.size(), hipblaslt_initialization::rand_int);
     float* gpuInput{};
     float* gpuOutput{};
 

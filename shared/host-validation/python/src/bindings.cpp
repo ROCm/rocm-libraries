@@ -441,11 +441,18 @@ NB_MODULE(_roc_host_validation, module) {
         .value("RandomEncodedExponent", GenerationPattern::RandomEncodedExponent)
         .value("RawConstant", GenerationPattern::RawConstant)
         .value("UniformRawInteger", GenerationPattern::UniformRawInteger)
+        .value("RandomRawBits", GenerationPattern::RandomRawBits)
         .value("RawSerialDimension", GenerationPattern::RawSerialDimension);
 
     nb::enum_<LogicalIndexOrder>(module, "LogicalIndexOrder")
         .value("FirstDimensionFastest", LogicalIndexOrder::FirstDimensionFastest)
         .value("LastDimensionFastest", LogicalIndexOrder::LastDimensionFastest);
+
+    nb::enum_<GenerationTransform>(module, "GenerationTransform")
+        .value("Identity", GenerationTransform::None)
+        .value("Absolute", GenerationTransform::Absolute)
+        .value("Sine", GenerationTransform::Sine)
+        .value("Cosine", GenerationTransform::Cosine);
 
     nb::enum_<StructuredSparsitySelection>(module, "StructuredSparsitySelection")
         .value("Fixed", StructuredSparsitySelection::Fixed)
@@ -561,9 +568,14 @@ NB_MODULE(_roc_host_validation, module) {
         .def_rw("pattern", &GenerationPatternSpec::pattern)
         .def_rw("parameter0", &GenerationPatternSpec::parameter0)
         .def_rw("parameter1", &GenerationPatternSpec::parameter1)
+        .def_rw("value_scale", &GenerationPatternSpec::valueScale)
+        .def_rw("value_offset", &GenerationPatternSpec::valueOffset)
         .def_rw("stream", &GenerationPatternSpec::stream)
         .def_rw("dimension", &GenerationPatternSpec::dimension)
-        .def_rw("source_type", &GenerationPatternSpec::sourceType);
+        .def_rw("source_type", &GenerationPatternSpec::sourceType)
+        .def_rw("transform", &GenerationPatternSpec::transform)
+        .def_rw("alternating_dimensions", &GenerationPatternSpec::alternatingDimensions)
+        .def_rw("negative_parity", &GenerationPatternSpec::negativeParity);
 
     nb::class_<GenerationOptions>(module, "GenerationOptions")
         .def(nb::init<>())
