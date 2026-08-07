@@ -20,5 +20,7 @@ CMakeUserPresets.json
 /params-=findings.md
 /check_caps.py
 
+# uaitool
 .depend/
 .idea/
+.vscode/
