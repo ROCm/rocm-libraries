@@ -12,6 +12,9 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
     - CHOLQR_64 (with batched and strided\_batched versions)
 * Hessenberg reduction auxiliary routine
     * LAHR2
+* Hessenberg decomposition
+    * GEHD2
+    * GEHRD
 
 ### Changed
 ### Removed
@@ -94,8 +97,6 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 * Computation of different matrix condition numbers
     * GECON
     * GECON_64
-* Hessenberg decomposition
-    * GEHD2
 
 ### Resolved issues
 

@@ -114,8 +114,7 @@ void rocsolver_gehrd_getMemorySize(const I n,
 
     // workspace from lahr2 (panel reduction)
     size_t w_lh, n_lh, wv_lh, b_lh;
-    rocsolver_lahr2_getMemorySize<BATCHED, T>(n, ilo, nb, batch_count, size_scalars, &w_lh, &n_lh,
-                                              &wv_lh, &b_lh);
+    rocsolver_lahr2_getMemorySize<BATCHED, T>(n, ilo, nb, batch_count, &w_lh, &n_lh, &wv_lh, &b_lh);
 
     // workspace from larfb (left application to trailing submatrix)
     // first block: m = ihi-i-1, n_cols = n-i-ib (i = ilo-1, ib = nb)
@@ -215,8 +214,7 @@ rocblas_status rocsolver_gehrd_template(rocblas_handle handle,
         // Reduce columns i:i+ib-1 to Hessenberg form and generate matrix Y = A * V * T
         rocsolver_lahr2_template<T>(handle, ihi, i + 1, ib, A, shiftA + idx2D(0, i, lda), lda,
                                     strideA, ipiv + i, strideP, F, ldf, strideF, Y, 0, ldy, strideY,
-                                    batch_count, scalars, work_workArr, norms_tmptr, work_vec,
-                                    (T*)diag_beta);
+                                    batch_count, work_workArr, norms_tmptr, work_vec, (T*)diag_beta);
 
         // Apply H from right to A(0:ihi-1, i+ib:ihi-1):  A -= Y * V^H (V = A(i+ib:ihi, i:i+ib-1))
         // Temporarily set A(i+ib, i+ib-1) = 1 (unit lower triangular V convention).
