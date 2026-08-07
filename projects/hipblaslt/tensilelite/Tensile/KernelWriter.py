@@ -5183,7 +5183,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module.add(tdmApplyStreamKOffsetSubtile(self, kernel, tensorParametersA))
       module.add(tdmApplyStreamKOffsetSubtile(self, kernel, tensorParametersB))
 
-    dtileInfo.allocVgprTileRegisters_legacy(self, kernel)
+    # Defer D-tile allocation: when MX scales are present on gfx1250, the
+    # scheduler must allocate scale tiles first (they must stay below v255
+    # since WMMA scale operands are not covered by s_set_vgpr_msb).
+    # mainLoop() will allocate D tiles after scheduler.allocVgprTiles().
+    _deferDtileAlloc = kernel.get("UseSubtileImpl") and \
+                       kernel.get("MIArchVgpr", False) and \
+                       (kernel["ProblemType"].get("MXBlockA", 0) or kernel["ProblemType"].get("MXBlockB", 0))
+    if not _deferDtileAlloc:
+      dtileInfo.allocVgprTileRegisters_legacy(self, kernel)
 
     if dtileInfo.vgprTiles:
       self._subtileDtileBaseVgpr = dtileInfo.vgprTiles[0].regList.indices[0]

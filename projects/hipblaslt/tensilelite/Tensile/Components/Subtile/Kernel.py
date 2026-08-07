@@ -549,6 +549,7 @@ class TileInfo:
 
     # --- Mutable register state (filled by allocOffsetRegisters) ---
     self.localSubtilesRegister: List = []
+    self.vgprTiles: List = []  # filled by allocVgprTileRegisters_legacy
 
     # --- Consistency checks ---
     if isinstance(geometry, ABTilePair):
@@ -1399,7 +1400,17 @@ def mainLoop(writer, kernel):
           break
   scheduler.allocVgprTiles(writer, tiA, tiB,
                            scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
+
   dtileInfo = writer.states.d.tileInfo
+
+  # Allocate D-tile VGPRs AFTER the scheduler's scale/data tiles so that
+  # scale tiles (which must stay below v255 on gfx1250 — the WMMA scale
+  # operand is not covered by s_set_vgpr_msb) get low VGPR indices and
+  # the large D-tile block lands above them.
+  if not dtileInfo.vgprTiles:
+    dtileInfo.allocVgprTileRegisters_legacy(writer, kernel)
+  if dtileInfo.vgprTiles:
+    writer._subtileDtileBaseVgpr = dtileInfo.vgprTiles[0].regList.indices[0]
 
   # For plain FP8 (miK=128, no MX scale): allocate a unit scale VGPR and initialize
   # it once here, before the loop. emitMfmaInstruction will reference it via kernel dict.

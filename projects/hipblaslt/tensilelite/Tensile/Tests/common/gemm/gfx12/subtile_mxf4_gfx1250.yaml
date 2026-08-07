@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: MIT
 #
 # Subtile MXFP4 correctness test for gfx1250 (wave32).
-# Covers single/multi-iteration (DepthU 128/256/512)
-# and single/multi-wave tiles, with PGR=1/2.
+# Covers single/multi-iteration (DepthU 128/256/512),
+# single/multi-wave tiles up to 256x256, and PGR=1/2.
 # Validates the TDM-based MX scale load path for subtile kernels,
 # including edge tiles with non-multiple-of-MT problem sizes and
 # multiple workgroups in both M and N dimensions.
@@ -59,6 +59,8 @@ BenchmarkProblems:
           - [16, 16, 128, 1,  1, 2, 2,  2, 2]  # MT 64x64 WG 2x2
           - [16, 16, 128, 1,  1, 4, 2,  2, 2]  # MT 128x64 WG 2x2 (MIWT 4,2)
           - [16, 16, 128, 1,  1, 2, 4,  2, 2]  # MT 64x128 WG 2x2 (MIWT 2,4)
+          - [16, 16, 128, 1,  1, 8, 8,  2, 2]  # MT 256x256 WG 2x2 (MIWT 8,8)
+          - [16, 16, 128, 1,  1, 8, 4,  2, 2]  # MT 256x128 WG 2x2 (MIWT 8,4)
         - DepthU: [128, 256, 512]
         - WavefrontSize: [32]
         - PrefetchGlobalRead: [1, 2]
@@ -91,10 +93,13 @@ BenchmarkProblems:
           - Exact: [64, 64, 1, 512]
           - Exact: [128, 128, 1, 512]
           - Exact: [128, 128, 1, 128]
-          # Edge tiles: M and/or N not a multiple of MT
+          - Exact: [256, 256, 1, 256]
+          - Exact: [256, 128, 1, 256]
+          # Edge tiles
           - Exact: [33, 32, 1, 256]
           - Exact: [36, 32, 1, 256]
           - Exact: [100, 32, 1, 256]
           - Exact: [100, 64, 1, 256]
           - Exact: [100, 100, 1, 256]
-          - Exact: [100, 128, 1, 256]
+          # 256x256 edge: M or N < MT but still valid
+          - Exact: [200, 200, 1, 256]
