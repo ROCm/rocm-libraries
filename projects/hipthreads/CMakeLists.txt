@@ -46,8 +46,7 @@ option(HIPTHREADS_COPY_TO_BUILD
 
 if(HIPTHREADS_COPY_TO_BUILD)
   file(COPY "${CMAKE_CURRENT_SOURCE_DIR}" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}"
-    PATTERN "matrices.tgz" EXCLUDE
-    PATTERN "shallow_water1.mtx" EXCLUDE
+    REGEX ".*(matrices\\.tgz|shallow_water1\\.mtx)$" EXCLUDE
   )
 endif()
 
