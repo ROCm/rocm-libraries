@@ -25,7 +25,7 @@
  *******************************************************************************/
 
 #include "ReferenceValidator.hpp"
-#include <roc/host_validation/adapters/tensilelite/ResultComparison.hpp>
+#include <roc/host_validation/adapters/tensilelite/HostValidationBridge.hpp>
 #include "ResultReporter.hpp"
 #include "TimingInstrumentation.hpp"
 
@@ -234,154 +234,277 @@ namespace TensileLite
                                               size_t                  validationStride,
                                               double                  threshold)
         {
-            bool rv = false;
-            switch(tensor.dataType())
+            using namespace roc::host_validation;
+
+            const ScalarType scalarType
+                = toHostValidationScalarType(tensor.dataType());
+            const size_t storageBits = scalarTypeInfo(scalarType).storageBits;
+            if(storageBits % 8 != 0)
             {
-            case rocisa::DataType::Float:
+                throw std::runtime_error(
+                    "Sub-byte output validation requires a packed readback adapter.");
+            }
+
+            const size_t elementBytes = storageBits / 8;
+            size_t       elementsToCopy
+                = tensor.totalAllocatedElements();
+            size_t elementsBeforeData = 0;
+            size_t elementsAfterData  = 0;
+
+            const BoundsCheckMode boundsCheck
+                = m_dataInit->getCurBoundsCheck();
+            if(boundsCheck == BoundsCheckMode::NaN)
+                elementsToCopy = maxElements;
+
+            const bool hasNullPointer
+                = resPtr == nullptr || refPtr == nullptr;
+            const bool hasZeroElements
+                = elementsToCopy == 0 || maxElements == 0;
+            if(shouldSkipNullTensor(
+                   tensor.getName(), hasNullPointer, hasZeroElements))
+                return true;
+            if(hasNullPointer || hasZeroElements)
             {
-                rv = checkResultsTyped(tensor,
-                                       (float const*)refPtr,
-                                       (float const*)resPtr,
-                                       maxElements,
-                                       isgpu,
-                                       validationStride,
-                                       threshold);
+                std::stringstream ss;
+                ss << "Unexpected null pointer or no data for tensor "
+                   << tensor.getName() << " (result=" << resPtr
+                   << ", reference=" << refPtr
+                   << ", elementsToCopy=" << elementsToCopy
+                   << ", maxElements=" << maxElements << ")";
+                throw std::runtime_error(ss.str());
             }
-            break;
-            case rocisa::DataType::Double:
+
+            if(elementsToCopy
+               > std::numeric_limits<size_t>::max() / elementBytes)
+                throw std::overflow_error(
+                    "Validation readback byte count overflow.");
+            const size_t bytesToCopy = elementsToCopy * elementBytes;
+            allocateResultBuffer(bytesToCopy);
+
+            void const* copySource = resPtr;
+            if(boundsCheck == BoundsCheckMode::NaN)
             {
-                rv = checkResultsTyped(tensor,
-                                       (double const*)refPtr,
-                                       (double const*)resPtr,
-                                       maxElements,
-                                       isgpu,
-                                       validationStride,
-                                       threshold);
+                if(maxElements < tensor.totalAllocatedElements())
+                    throw std::runtime_error(
+                        "Validation guard allocation is smaller than the tensor.");
+                const ptrdiff_t paddingElements
+                    = maxElements - tensor.totalAllocatedElements();
+                size_t paddingBytes
+                    = multiplyElementSize(
+                        paddingElements, tensor.elementBytes());
+                const size_t alignmentBytes
+                    = 2
+                      * static_cast<size_t>(std::ceil(
+                          std::max(1.0f, tensor.elementBytes())));
+                paddingBytes
+                    = paddingBytes / alignmentBytes * alignmentBytes;
+                const size_t bytesBeforeData = paddingBytes / 2;
+                if(bytesBeforeData % elementBytes != 0)
+                    throw std::runtime_error(
+                        "Validation guard offset is not element-aligned.");
+
+                copySource
+                    = static_cast<uint8_t const*>(resPtr)
+                      - bytesBeforeData;
+                elementsBeforeData
+                    = bytesBeforeData / elementBytes;
             }
-            break;
-            case rocisa::DataType::ComplexFloat:
+
+            if(elementsToCopy
+               < elementsBeforeData + tensor.totalAllocatedElements())
+                throw std::runtime_error(
+                    "Validation guard allocation is smaller than the tensor.");
+            elementsAfterData
+                = elementsToCopy - elementsBeforeData
+                  - tensor.totalAllocatedElements();
+
             {
-                rv = checkResultsTyped(tensor,
-                                       (std::complex<float> const*)refPtr,
-                                       (std::complex<float> const*)resPtr,
-                                       maxElements,
-                                       isgpu,
-                                       validationStride,
-                                       threshold);
+                ScopedTimer timer("validate_gpu_readback");
+                const auto copyKind
+                    = isgpu ? hipMemcpyDeviceToHost : hipMemcpyHostToHost;
+                HIP_CHECK_EXC(hipMemcpy(
+                    m_cpuResultBuffer.get(),
+                    copySource,
+                    bytesToCopy,
+                    copyKind));
             }
-            break;
-            case rocisa::DataType::ComplexDouble:
+
+            std::vector<size_t> dimensions(
+                tensor.sizes().begin(), tensor.sizes().end());
+            std::vector<ptrdiff_t> strides;
+            strides.reserve(tensor.strides().size());
+            for(const auto stride : tensor.strides())
+                strides.push_back(static_cast<ptrdiff_t>(stride));
+            const Layout layout(
+                Shape(std::move(dimensions)), std::move(strides));
+
+            if(tensor.totalAllocatedElements()
+               > std::numeric_limits<size_t>::max() / elementBytes)
+                throw std::overflow_error(
+                    "Validation tensor byte count overflow.");
+            const size_t allocatedBytes
+                = tensor.totalAllocatedElements() * elementBytes;
+            const auto referenceStorage = std::span<const std::byte>(
+                static_cast<const std::byte*>(refPtr), allocatedBytes);
+            const auto resultStorage = std::span<const std::byte>(
+                reinterpret_cast<const std::byte*>(
+                    m_cpuResultBuffer.get())
+                    + elementsBeforeData * elementBytes,
+                allocatedBytes);
+            const TensorView resultView(
+                scalarType, layout, resultStorage);
+
+            const std::optional<double> toleranceOverride
+                = scalarType == ScalarType::Float32 && threshold > 0.0
+                      ? std::optional<double>(threshold)
+                      : std::nullopt;
+            ComparisonOptions options
+                = defaultComparisonOptions(
+                    scalarType, toleranceOverride);
+            options.selection.indexOrder
+                = ComparisonIndexOrder::FirstDimensionFastest;
+            options.selection.stride = validationStride;
+            options.computePointwiseStatistics = false;
+            options.computeFrobenius = false;
+            options.reportMatchingElements = m_printValids;
+            options.maxReportedMismatches
+                = m_printMax > 0 ? static_cast<size_t>(m_printMax) : 0;
+
+            ComparisonResult comparison;
             {
-                rv = checkResultsTyped(tensor,
-                                       (std::complex<double> const*)refPtr,
-                                       (std::complex<double> const*)resPtr,
-                                       maxElements,
-                                       isgpu,
-                                       validationStride,
-                                       threshold);
+                ScopedTimer timer("validate_element_comparison");
+                comparison = compareHostBuffers(
+                    tensor.dataType(),
+                    resultStorage.data(),
+                    referenceStorage.data(),
+                    tensor.totalAllocatedElements(),
+                    layout,
+                    options);
             }
-            break;
-            case rocisa::DataType::Half:
+
+            const bool isComplex
+                = scalarTypeInfo(scalarType).category
+                  == ScalarCategory::Complex;
+            const auto& samples
+                = m_printValids ? comparison.reportedComparisons
+                                : comparison.reportedMismatches;
+            if(!samples.empty() && m_printMax > 0)
             {
-                rv = checkResultsTyped(tensor,
-                                       (Half const*)refPtr,
-                                       (Half const*)resPtr,
-                                       maxElements,
-                                       isgpu,
-                                       validationStride,
-                                       threshold);
+                ScopedTimer timer("validate_mismatch_printing");
+                std::cout << "Index:  Device | Reference" << std::endl;
+                size_t printed = 0;
+                for(const auto& sample : samples)
+                {
+                    std::cout << "[" << printed++ << "] elem="
+                              << sample.index << " idx="
+                              << sample.observedOffset << ": ";
+                    if(isComplex)
+                    {
+                        std::cout << "(" << sample.observed << ","
+                                  << sample.observedImaginary << ")"
+                                  << (sample.matched ? "==" : "!=")
+                                  << "(" << sample.expected << ","
+                                  << sample.expectedImaginary << ")";
+                    }
+                    else
+                    {
+                        std::cout << sample.observed
+                                  << (sample.matched ? "==" : "!=")
+                                  << sample.expected;
+                    }
+                    std::cout << std::endl;
+                }
             }
-            break;
-            case rocisa::DataType::Float8:
+            if(comparison.mismatches != 0 && m_printMax > 0)
             {
-                rv = checkResultsTyped(tensor,
-                                       (Float8 const*)refPtr,
-                                       (Float8 const*)resPtr,
-                                       maxElements,
-                                       isgpu,
-                                       validationStride,
-                                       threshold);
+                std::cout << "Found " << comparison.mismatches
+                          << " incorrect values in "
+                          << comparison.compared
+                          << " total values compared." << std::endl;
             }
-            break;
-            case rocisa::DataType::BFloat8:
+
+            SentinelResult sentinel;
+            const auto completeStorage = std::span<const std::byte>(
+                reinterpret_cast<const std::byte*>(
+                    m_cpuResultBuffer.get()),
+                bytesToCopy);
+            if(elementsBeforeData != 0)
             {
-                rv = checkResultsTyped(tensor,
-                                       (BFloat8 const*)refPtr,
-                                       (BFloat8 const*)resPtr,
-                                       maxElements,
-                                       isgpu,
-                                       validationStride,
-                                       threshold);
+                sentinel.append(
+                    checkUnwrittenSentinel(
+                        scalarType,
+                        completeStorage,
+                        0,
+                        elementsBeforeData,
+                        SentinelRegion::Before,
+                        options.maxReportedMismatches),
+                    options.maxReportedMismatches);
             }
-            break;
-            case rocisa::DataType::Float8_fnuz:
+            if(boundsCheck == BoundsCheckMode::NaN
+               && validationStride == 1)
             {
-                rv = checkResultsTyped(tensor,
-                                       (Float8_fnuz const*)refPtr,
-                                       (Float8_fnuz const*)resPtr,
-                                       maxElements,
-                                       isgpu,
-                                       validationStride,
-                                       threshold);
+                sentinel.append(
+                    checkUnusedTensorStorage(
+                        resultView,
+                        tensor.totalAllocatedElements(),
+                        SentinelRegion::Inside,
+                        options.maxReportedMismatches),
+                    options.maxReportedMismatches);
             }
-            break;
-            case rocisa::DataType::BFloat8_fnuz:
+            if(elementsAfterData != 0)
             {
-                rv = checkResultsTyped(tensor,
-                                       (BFloat8_fnuz const*)refPtr,
-                                       (BFloat8_fnuz const*)resPtr,
-                                       maxElements,
-                                       isgpu,
-                                       validationStride,
-                                       threshold);
+                sentinel.append(
+                    checkUnwrittenSentinel(
+                        scalarType,
+                        completeStorage,
+                        elementsBeforeData
+                            + tensor.totalAllocatedElements(),
+                        elementsAfterData,
+                        SentinelRegion::After,
+                        options.maxReportedMismatches),
+                    options.maxReportedMismatches);
             }
-            break;
-            case rocisa::DataType::Int8x4:
+
+            if(sentinel.checked != 0 && m_printMax > 0)
             {
-                throw std::runtime_error("Unsupported validator data type Int8x4 for output.");
+                std::cout << "Performed bounds check on "
+                          << sentinel.checked << " elements." << std::endl;
             }
-            break;
-            case rocisa::DataType::Int32:
+            for(const auto& mismatch : sentinel.reportedMismatches)
             {
-                rv = checkResultsTyped(tensor,
-                                       (int32_t const*)refPtr,
-                                       (int32_t const*)resPtr,
-                                       maxElements,
-                                       isgpu,
-                                       validationStride,
-                                       threshold);
+                const char* location = "near";
+                switch(mismatch.region)
+                {
+                case SentinelRegion::Before:
+                    location = "before";
+                    break;
+                case SentinelRegion::Inside:
+                    location = "inside";
+                    break;
+                case SentinelRegion::After:
+                    location = "after";
+                    break;
+                case SentinelRegion::Unspecified:
+                    break;
+                }
+                std::cout << "Value written " << location
+                          << " output buffer at index "
+                          << mismatch.index << ": found "
+                          << mismatch.observed.real
+                          << " instead of the unwritten sentinel"
+                          << std::endl;
             }
-            break;
-            case rocisa::DataType::BFloat16:
+
+            const bool failed
+                = !comparison.passed() || !sentinel.passed();
+            if(failed)
             {
-                rv = checkResultsTyped(tensor,
-                                       (BFloat16 const*)refPtr,
-                                       (BFloat16 const*)resPtr,
-                                       maxElements,
-                                       isgpu,
-                                       validationStride,
-                                       threshold);
+                m_errorInSolution = true;
+                m_error           = true;
+                std::cout << "Check failed in output tensor: "
+                          << tensor << std::endl;
             }
-            break;
-            case rocisa::DataType::Int8:
-            {
-                rv = checkResultsTyped(tensor,
-                                       (int8_t const*)refPtr,
-                                       (int8_t const*)resPtr,
-                                       maxElements,
-                                       isgpu,
-                                       validationStride,
-                                       threshold);
-            }
-            break;
-            default:
-                throw std::runtime_error("Unsupported validator data type");
-            }
-            if(rv)
-            {
-                std::cout << "Check failed in output tensor: " << tensor << std::endl;
-            }
-            return rv;
+            return failed;
         }
 
         bool ReferenceValidator::shouldSkipNullTensor(const std::string& tensorName,
@@ -759,231 +882,6 @@ namespace TensileLite
                                       problem.amaxd(),
                                       result.amaxD);
             }
-        }
-
-        template <typename ValidType, typename Comparator>
-        void forEachElement(TensorDescriptor const& tensor,
-                            ValidType const*        reference,
-                            ValidType const*        resultData,
-                            size_t                  validationStride,
-                            Comparator&             compare)
-        {
-            if(validationStride == 1)
-            {
-                std::vector<size_t> coord(tensor.dimensions());
-                size_t outerCount
-                    = CoordCount(tensor.sizes().begin() + 1, tensor.sizes().end());
-
-                size_t       elemNumberBase = 0;
-                const size_t innerDimSize   = tensor.sizes()[0];
-                const size_t initialStride  = tensor.strides()[0];
-
-                for(size_t i = 0; i < outerCount; i++)
-                {
-                    CoordNumbered(i,
-                                  coord.begin() + 1,
-                                  coord.end(),
-                                  tensor.sizes().begin() + 1,
-                                  tensor.sizes().end());
-                    size_t baseElemIndex = tensor.index(coord);
-
-                    for(size_t j = 0; j < innerDimSize; j++)
-                    {
-                        size_t elemIndex  = baseElemIndex + (j * initialStride);
-                        size_t elemNumber = elemNumberBase + j;
-
-                        compare(reference[elemIndex], resultData[elemIndex],
-                                elemIndex, elemNumber);
-                    }
-                    elemNumberBase += innerDimSize;
-                }
-            }
-            else
-            {
-                std::vector<size_t> coord(tensor.dimensions());
-                for(size_t elemNumber = 0;
-                    elemNumber < tensor.totalLogicalElements();
-                    elemNumber += validationStride)
-                {
-                    CoordNumbered(elemNumber,
-                                  coord.begin(),
-                                  coord.end(),
-                                  tensor.sizes().begin(),
-                                  tensor.sizes().end());
-                    size_t elemIndex = tensor.index(coord);
-
-                    compare(reference[elemIndex], resultData[elemIndex],
-                            elemIndex, elemNumber);
-                }
-            }
-        }
-
-        template <typename ValidType>
-        bool ReferenceValidator::checkResultsTyped(TensorDescriptor const& tensor,
-                                                   ValidType const*        reference,
-                                                   ValidType const*        result,
-                                                   size_t                  maxElement,
-                                                   bool                    isgpu,
-                                                   size_t                  validationStride,
-                                                   double                  threshold)
-        {
-            size_t elementsToCopy       = tensor.totalAllocatedElements();
-            size_t elementsOffsetToCopy = 0;
-            size_t elementsBeforeData   = 0;
-            size_t elementsAfterData    = 0;
-
-            BoundsCheckMode boundsCheck = m_dataInit->getCurBoundsCheck();
-            // For NaN bounds checking, copy the full padded buffer from GPU for all tensors
-            if(boundsCheck == BoundsCheckMode::NaN)
-                elementsToCopy = maxElement;
-            size_t bytesToCopy = elementsToCopy * sizeof(ValidType);
-
-            // Check if we should skip this tensor due to null pointers or no data
-            bool hasNullPointer = (result == nullptr || reference == nullptr);
-            bool hasZeroElements = (bytesToCopy == 0 || maxElement == 0);
-
-            if(shouldSkipNullTensor(tensor.getName(), hasNullPointer, hasZeroElements))
-            {
-                return true;
-            }
-
-            // If we reach here with null pointers or no data, it's an error
-            if(hasNullPointer || hasZeroElements)
-            {
-                std::stringstream ss;
-                ss << "Unexpected null pointer or no data for tensor " << tensor.getName()
-                   << " (result=" << result << ", reference=" << reference
-                   << ", bytesToCopy=" << bytesToCopy << ", maxElement=" << maxElement << ")";
-                throw std::runtime_error(ss.str());
-            }
-
-            allocateResultBuffer(bytesToCopy);
-
-            auto copykind = isgpu ? hipMemcpyDeviceToHost : hipMemcpyHostToHost;
-
-            // For NaN bounds checking, the result pointer points to valid data (middle of buffer)
-            // We need to adjust it back to buffer start to copy the NaN padding
-            void const* copySource = result;
-            if(boundsCheck == BoundsCheckMode::NaN)
-            {
-                // Match the EXACT allocation logic in copyBadInputBuffers:
-                // dPadding = totalElements - totalAllocatedElements()  (in elements)
-                // dPadding = multiplyElementSize(dPadding, elementBytes())  (convert to bytes)
-                // dPadding = round to multiple of (2 * ceil(max(1, elementBytes)))  (ensure alignment)
-                // dstOffset = dst + dPadding / 2  (divide bytes by 2)
-                ptrdiff_t paddingElements = maxElement - tensor.totalAllocatedElements();
-                size_t paddingBytes = multiplyElementSize(paddingElements, tensor.elementBytes());
-
-                // Ensure paddingBytes/2 is properly aligned for the element type
-                // Match the exact rounding logic from copyBadInputBuffers
-                float elementBytes = tensor.elementBytes();
-                size_t alignmentBytes = 2 * static_cast<size_t>(std::ceil(std::max(1.0f, elementBytes)));
-                paddingBytes = (paddingBytes / alignmentBytes) * alignmentBytes;
-
-                size_t bytesBeforeData = paddingBytes / 2;
-
-                copySource = (uint8_t const*)result - bytesBeforeData;
-
-                // Calculate elementsBeforeData for bounds checking display
-                // Note: for sub-byte types this may not be exact due to rounding
-                elementsBeforeData = bytesBeforeData / std::max(static_cast<size_t>(1),
-                                                                 static_cast<size_t>(tensor.elementBytes()));
-                elementsAfterData
-                    = elementsToCopy - (tensor.totalAllocatedElements() + elementsBeforeData);
-            }
-
-            {
-                ScopedTimer timer("validate_gpu_readback");
-                HIP_CHECK_EXC(hipMemcpy(m_cpuResultBuffer.get(), copySource, bytesToCopy, copykind));
-            }
-            // If there was extra data allocated before the tensor to do bounds
-            // checking, resultBuffer is the whole allocation, while resultData
-            // points directly to the result.
-            ValidType const* resultBuffer
-                = reinterpret_cast<ValidType const*>(m_cpuResultBuffer.get());
-            ValidType const* resultData      = resultBuffer + elementsBeforeData;
-            ValidType const* resultAfterData = resultData + tensor.totalAllocatedElements();
-
-            FastPointwiseComparison<ValidType> compareValid(m_printMax > 0, threshold);
-            InvalidComparison<ValidType>   compareInvalid(m_printMax, m_printMax > 0);
-
-            size_t boundsCheckElements = 0;
-
-            {
-                ScopedTimer timer("validate_element_comparison");
-
-                for(ptrdiff_t i = 0; i < elementsBeforeData; i++)
-                {
-                    boundsCheckElements++;
-                    compareInvalid.before(resultBuffer[i], i, elementsBeforeData);
-                }
-
-                forEachElement(tensor, reference, resultData, validationStride, compareValid);
-
-                if(boundsCheck == BoundsCheckMode::NaN && validationStride == 1)
-                {
-                    std::vector<size_t> coord(tensor.dimensions());
-                    size_t outerCount
-                        = CoordCount(tensor.sizes().begin() + 1, tensor.sizes().end());
-                    size_t       prevBaseIndex = 0;
-                    const size_t innerDimSize  = tensor.sizes()[0];
-
-                    for(size_t i = 0; i < outerCount; i++)
-                    {
-                        CoordNumbered(i,
-                                      coord.begin() + 1,
-                                      coord.end(),
-                                      tensor.sizes().begin() + 1,
-                                      tensor.sizes().end());
-                        size_t baseElemIndex = tensor.index(coord);
-
-                        if(baseElemIndex != 0
-                           && baseElemIndex != prevBaseIndex + innerDimSize)
-                        {
-                            for(auto innerIndex = prevBaseIndex + innerDimSize;
-                                innerIndex < baseElemIndex;
-                                innerIndex++)
-                            {
-                                compareInvalid.inside(
-                                    resultData[innerIndex], innerIndex, baseElemIndex);
-                            }
-                        }
-                        prevBaseIndex = baseElemIndex;
-                    }
-                }
-
-                for(ptrdiff_t i = 0; i < elementsAfterData; i++)
-                {
-                    compareInvalid.after(resultAfterData[i], i, elementsAfterData);
-                }
-            }
-
-            if(boundsCheckElements > 0)
-                std::cout << "Performed bounds check on " << boundsCheckElements << " elements ("
-                          << elementsBeforeData << " before data)" << std::endl;
-
-            if((compareValid.errorCount() > 0 || m_printValids) && m_printMax > 0)
-            {
-                ScopedTimer timer("validate_mismatch_printing");
-
-                PointwiseComparison<ValidType> comparePrint(
-                    m_printValids, m_printMax, false, threshold);
-
-                forEachElement(tensor, reference, resultData, validationStride, comparePrint);
-            }
-
-            compareValid.report();
-            compareInvalid.report();
-
-            if(compareValid.error() || compareInvalid.error())
-            {
-                m_errorInSolution = true;
-                m_error           = true;
-
-                return true;
-            }
-
-            return false;
         }
 
         void ReferenceValidator::postSolution()
