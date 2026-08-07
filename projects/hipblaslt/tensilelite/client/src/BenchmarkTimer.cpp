@@ -38,9 +38,9 @@
 #include <thread>
 
 namespace {
-    // We compute the bytes read for a GEMM of shape BxMxNxK as follows:
-    // B * (M * K + K * N) * elem_size + B * (M * K / aMXScaleFactor + K * N / bMXScaleFactor) * elem_size.
-    // The second term is valid only for MX dtypes and equates to zero for all others.
+    // Computes total bytes read/written for a GEMM problem instance (A/B reads + D writes),
+    // plus additional traffic from optional tensors (C when beta!=0, E, bias, scaling tensors, MX scales).
+    // Used for approximate bandwidth reporting in the client logger.
     using namespace TensileLite;
     double computeByteRWForGEMM(const ContractionProblemGemm& gemm)
     {
