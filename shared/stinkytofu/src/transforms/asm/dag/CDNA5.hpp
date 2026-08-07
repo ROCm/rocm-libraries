@@ -36,6 +36,7 @@
 #include <cmath>
 #include <cstdint>
 #include <map>
+#include <tuple>
 #include <vector>
 
 #include "InFlightQueue.hpp"
@@ -758,6 +759,20 @@ int CDNA5ReadyQueue::nodeElapseKey(DAGNode* node) const {
     return minElapse;
 }
 
+// Updates (best, bestKey) to (cand, key) if key sorts before bestKey (lexicographic
+// std::tuple compare) or best is not yet set. Shared by the "min by (metric, id)"
+// candidate pickers below; each caller supplies its own key shape.
+template <typename Key>
+static bool considerBest(DAGNode* cand, Key key, DAGNode*& best, Key& bestKey) {
+    if (!cand) return false;
+    if (best == nullptr || key < bestKey) {
+        best = cand;
+        bestKey = key;
+        return true;
+    }
+    return false;
+}
+
 // Best issuable node in \p queue: RAW/hazard-free nodes are preferred; when none is
 // free and \p allowHiddenStall is set, a node whose remaining wait (RAW data-ready or
 // hazard-gate, whichever is larger) still fits under the active WMMA's latency shadow
@@ -813,15 +828,11 @@ DAGNode* CDNA5ReadyQueue::pickFreeBest(const ReadySetByDAGid& queue, int* outWai
 // Returns the node and its latency. Ties broken by DAG id (program order).
 std::pair<DAGNode*, int> CDNA5ReadyQueue::findMostReadyWMMA() {
     DAGNode* best = nullptr;
-    int bestLatency = INT_MAX;
+    std::tuple<int, unsigned> bestKey{INT_MAX, 0};
     for (DAGNode* n : wmmaQueue) {
-        int lat = getMaxSrcDataWait(n);
-        if (lat < bestLatency || (lat == bestLatency && (!best || n->id < best->id))) {
-            best = n;
-            bestLatency = lat;
-        }
+        considerBest(n, std::make_tuple(getMaxSrcDataWait(n), n->id), best, bestKey);
     }
-    return {best, bestLatency};
+    return {best, std::get<0>(bestKey)};
 }
 
 // Pick a WMMA: start a new co-issue timeline from its coIssueWindow,
@@ -881,6 +892,7 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     DAGNode* best = nullptr;
     int kind = -1;
     int bestWait = 0;
+    std::tuple<bool, unsigned> bestKey{};
 
     // Ordering, highest key first: (1) free work beats a hidden-stall candidate;
     // (2) smallest id. Producer-side hazard hoisting is handled separately by
@@ -888,17 +900,7 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     // everything else unless/until decidePromote() forces it.
     auto consider = [&](DAGNode* cand, int candKind, int candWait) {
         if (!cand) return;
-        const bool candHazard = candWait > 0;
-        const bool curHazard = bestWait > 0;
-        bool take;
-        if (best == nullptr)
-            take = true;
-        else if (candHazard != curHazard)
-            take = !candHazard;
-        else
-            take = cand->id < best->id;
-        if (take) {
-            best = cand;
+        if (considerBest(cand, std::make_tuple(candWait > 0, cand->id), best, bestKey)) {
             kind = candKind;
             bestWait = candWait;
         }
@@ -959,16 +961,12 @@ bool CDNA5ReadyQueue::findOldestFallbackNonWmma(DAGNode* pickedDS, DAGNode** out
     if (outWait) *outWait = 0;
     DAGNode* best = nullptr;
     int kind = -1;
-    int bestWait = 0;
+    std::tuple<int, unsigned> bestKey{};
 
     auto consider = [&](DAGNode* cand, int candKind) {
         if (cand == nullptr) return;
         const int wait = std::max(getMaxSrcDataWait(cand), getHazardWait(cand));
-        if (best == nullptr || wait < bestWait || (wait == bestWait && cand->id < best->id)) {
-            best = cand;
-            kind = candKind;
-            bestWait = wait;
-        }
+        if (considerBest(cand, std::make_tuple(wait, cand->id), best, bestKey)) kind = candKind;
     };
 
     if (!globalReadQueue.empty()) consider(globalReadQueue.top(), kGlobalRead);
@@ -979,7 +977,7 @@ bool CDNA5ReadyQueue::findOldestFallbackNonWmma(DAGNode* pickedDS, DAGNode** out
     if (best == nullptr) return false;
     *outNode = best;
     *kindOut = kind;
-    if (outWait) *outWait = bestWait;
+    if (outWait) *outWait = std::get<0>(bestKey);
     return true;
 }
 
