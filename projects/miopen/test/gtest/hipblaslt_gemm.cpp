@@ -55,6 +55,8 @@ using namespace miopen;
 
 namespace hipblaslt_gemm {
 
+constexpr unsigned fp8_seed_count = 16;
+
 struct TestCase
 {
     bool isColMajor;
@@ -352,8 +354,13 @@ TEST_P(GPU_HipBLASLtGEMMTest_FP8, RunHipBLASLtGEMM)
                             Gpu::gfx90A,
                             Gpu::gfx110X,
                             Gpu::gfx115X>;
-    RunGemmDescriptors<float8_fnuz, d_mask, e_mask>(GetParam(),
-                                                    miopenDataType_t::miopenFloat8_fnuz);
+    for(unsigned seed = 0; seed < fp8_seed_count; ++seed)
+    {
+        SCOPED_TRACE(testing::Message() << "PRNG seed offset: " << seed);
+        prng::reset_seed(seed);
+        RunGemmDescriptors<float8_fnuz, d_mask, e_mask>(GetParam(),
+                                                        miopenDataType_t::miopenFloat8_fnuz);
+    }
 };
 INSTANTIATE_TEST_SUITE_P(Full, GPU_HipBLASLtGEMMTest_FP8, testing::ValuesIn(GetTestCases()));
 
@@ -384,8 +391,13 @@ TEST_P(GPU_HipBLASLtGEMMTest_BFP8, RunHipBLASLtGEMM)
                             Gpu::gfx90A,
                             Gpu::gfx110X,
                             Gpu::gfx115X>;
-    RunGemmDescriptors<bfloat8_fnuz, d_mask, e_mask>(GetParam(),
-                                                     miopenDataType_t::miopenBFloat8_fnuz);
+    for(unsigned seed = 0; seed < fp8_seed_count; ++seed)
+    {
+        SCOPED_TRACE(testing::Message() << "PRNG seed offset: " << seed);
+        prng::reset_seed(seed);
+        RunGemmDescriptors<bfloat8_fnuz, d_mask, e_mask>(GetParam(),
+                                                         miopenDataType_t::miopenBFloat8_fnuz);
+    }
 #else
     GTEST_SKIP();
 #endif
