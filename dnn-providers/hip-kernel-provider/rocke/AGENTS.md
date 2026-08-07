@@ -48,12 +48,29 @@ rocke/
 ```
 
 One-way dependency: **`library → platform` only**; platform never imports
-`kernels`/`builders`/`dispatch` and stays standalone-installable. `library/` is
-editable-installed into the dev env to build/verify attention kernels — it is
-**never** packaged into the `rocke` wheel and ships no C-api plugin of its own (the
-provider plugin is emitted by the provider's `src/`). Non-package assets resolve
-through `rocke.assets` (`platform_root()`, `dsl_docs_dir()`), never per-file
-`parents[N]` math.
+`kernels`/`builders`/`dispatch` and stays standalone-installable.
+
+**No cycles inside `library/` either.** The packages are layered lowest → highest
+and may only import *downward*:
+
+```
+kernels  ->  builders  ->  dispatch  ->  benchmarks
+```
+
+Skipping a layer downward is fine (`dispatch` imports `kernels` directly);
+importing at or above your own layer is not. Deferring an upward import into a
+function body does not make it legal — it hides the cycle instead of breaking it.
+`tests/` sits above all four and may import any of them.
+[`library/tests/test_library_layering.py`](library/tests/test_library_layering.py)
+enforces this by AST walk, so function-level imports are caught too. It carries a
+short `KNOWN_VIOLATIONS` allowlist for one pre-existing back-edge — burn entries
+down, never add to it.
+
+`library/` is editable-installed into the dev env to build/verify attention
+kernels — it is **never** packaged into the `rocke` wheel and ships no C-api
+plugin of its own (the provider plugin is emitted by the provider's `src/`).
+Non-package assets resolve through `rocke.assets` (`platform_root()`,
+`dsl_docs_dir()`), never per-file `parents[N]` math.
 
 ## Hard rules (digest)
 
