@@ -17,10 +17,6 @@
 
 import math
 from ...Common import INDEX_CHARS
-# TDM descriptor dword3 type field: bits [31:30] = 2 (resource type).
-# SMovB64 into group0+2:3 zeroes the type field; SOrB32 restores it.
-_TDM_DESC_TYPE_FIELD = hex(2 << 30)
-
 from rocisa.code import Module
 from rocisa.container import DSModifiers, MUBUFModifiers, vgpr, sgpr, mgpr
 from rocisa.instruction import (
@@ -218,11 +214,10 @@ def emitScaleGRPtrUpdate(ti, writer, kernel):
     module.add(SAddCU32(dst=sgpr(f"Address{tc}+1"), src0=sgpr(f"Address{tc}+1"),
                src1=0, comment=f"Address{tc}+1 carry"))
     if tc == "MXSA":
+      from ...Components.TensorDataMover import TensorDataMoverLoad
+      comp = TensorDataMoverLoad.find(writer)
       group0 = "tdmMXSAGroup0"
-      module.add(SMovB64(dst=sgpr(f"{group0}+2", 2), src=sgpr(f"Address{tc}", 2),
-                 comment="sync TDM descriptor"))
-      module.add(SOrB32(dst=sgpr(f"{group0}+3"), src0=sgpr(f"{group0}+3"),
-                 src1=_TDM_DESC_TYPE_FIELD, comment="restore type field"))
+      module.add(comp.setGlobalAddr(group0, f"Address{tc}"))
     return module
 
   inc = int(ti.lrSubtileSize * ti.lrGlobalSubtileGrid[1])
@@ -553,10 +548,7 @@ def _globalReadDoScaleSubtileTDM(tc, writer, kernel):
     ldsBaseMXSA = writer.ldsStartOffsetMXSA
     ldsDelta = ldsBaseMXSB - ldsBaseMXSA
     module.addComment0("Scale GR: MXSB (TDM: patch aliased descriptor)")
-    module.add(SMovB64(dst=sgpr(f"{group0}+2", 2), src=sgpr("AddressMXSB", 2),
-               comment="set MXSB global addr"))
-    module.add(SOrB32(dst=sgpr(f"{group0}+3"), src0=sgpr(f"{group0}+3"),
-               src1=_TDM_DESC_TYPE_FIELD, comment="restore type field"))
+    module.add(comp.setGlobalAddr(group0, "AddressMXSB"))
     if ldsDelta != 0:
       module.add(SAddU32(dst=sgpr(f"{group0}+1"), src0=sgpr(f"{group0}+1"),
                  src1=ldsDelta, comment=f"LDS addr += {ldsDelta} (MXSA->MXSB)"))
@@ -569,10 +561,7 @@ def _globalReadDoScaleSubtileTDM(tc, writer, kernel):
 
   if scaleTc == "MXSB":
     module.addComment0("Restore MXSA descriptor after MXSB load")
-    module.add(SMovB64(dst=sgpr(f"{group0}+2", 2), src=sgpr("AddressMXSA", 2),
-               comment="restore MXSA global addr"))
-    module.add(SOrB32(dst=sgpr(f"{group0}+3"), src0=sgpr(f"{group0}+3"),
-               src1=_TDM_DESC_TYPE_FIELD, comment="restore type field"))
+    module.add(comp.setGlobalAddr(group0, "AddressMXSA"))
     if ldsDelta != 0:
       module.add(SSubU32(dst=sgpr(f"{group0}+1"), src0=sgpr(f"{group0}+1"),
                  src1=ldsDelta, comment=f"LDS addr -= {ldsDelta} (MXSB->MXSA)"))

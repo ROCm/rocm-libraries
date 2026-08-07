@@ -45,7 +45,6 @@ from rocisa.code import Label
 from ...Common import INDEX_CHARS, clusterEnabled
 from ...SolutionStructs.Utilities import isSubtileIterateMode as _isSubtileIterateMode
 from ...Common.DataType import DataType
-from .SubtileScaleEmit import _TDM_DESC_TYPE_FIELD
 
 
 ################################################################################
@@ -534,12 +533,12 @@ def _emitGRPtrUpdate_TLU0(tag, tile, ti, writer, kernel):
     module.add(SAddU64(dst=sgpr("Address%s" % tc, 2), src0=sgpr("Address%s" % tc, 2), src1=inc))
     # When B's Group0 is aliased onto A, don't sync B's addr to the
     # descriptor (it holds A's addr). B's addr is patched at load time.
-    _bAliased = (tc == 'B' and kernel["NumWaves"] > 1
-                 and kernel.get("UseSubtileImpl"))
+    _bAliased = (tc == 'B' and kernel["NumWaves"] > 1)
     if not _bAliased:
+      from ...Components.TensorDataMover import TensorDataMoverLoad
+      comp = TensorDataMoverLoad.find(writer)
       group0 = "tdm%sGroup0" % tc
-      module.add(SMovB64(dst=sgpr("%s+2" % group0, 2), src=sgpr("Address%s" % tc, 2), comment="sync descriptor global addr"))
-      module.add(SOrB32(dst=sgpr("%s+3" % group0), src0=sgpr("%s+3" % group0), src1=_TDM_DESC_TYPE_FIELD, comment="restore type field"))
+      module.add(comp.setGlobalAddr(group0, "Address%s" % tc))
     return module
 
   module = Module(f"GR Ptr Update ({tc})")
@@ -895,14 +894,13 @@ def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1):
       # When B's Group0 is aliased onto A (NumWaves > 1), patch the shared
       # Group0 with B's global addr and LDS addr before the load, then
       # restore A's state. Group1 is separate and already has B's fields.
-      _bAliased = (tc == 'B' and kernel["NumWaves"] > 1
-                   and kernel.get("UseSubtileImpl"))
+      _bAliased = (tc == 'B' and kernel["NumWaves"] > 1)
       if _bAliased:
         module.addComment0("TDM B: patch aliased Group0 (A->B)")
         module.add(SMovB64(dst=sgpr("%s+2" % group0, 2), src=sgpr("AddressB", 2),
                    comment="set B global addr"))
         module.add(SOrB32(dst=sgpr("%s+3" % group0), src0=sgpr("%s+3" % group0),
-                   src1=_TDM_DESC_TYPE_FIELD, comment="restore type field"))
+                   src1=hex(2 << 30), comment="restore type field"))
         module.add(SMovB32(dst=sgpr("%s+1" % group0), src=sgpr("tdmLdsAddrB"),
                    comment="set B LDS addr"))
       module.add(TensorLoadToLds(sgpr(group0, 4), sgpr(group1, 8), group2, group3,
@@ -912,7 +910,7 @@ def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1):
         module.add(SMovB64(dst=sgpr("%s+2" % group0, 2), src=sgpr("AddressA", 2),
                    comment="restore A global addr"))
         module.add(SOrB32(dst=sgpr("%s+3" % group0), src0=sgpr("%s+3" % group0),
-                   src1=_TDM_DESC_TYPE_FIELD, comment="restore type field"))
+                   src1=hex(2 << 30), comment="restore type field"))
         module.add(SMovB32(dst=sgpr("%s+1" % group0), src=sgpr("tdmLdsAddrA"),
                    comment="restore A LDS addr"))
     return module
@@ -1018,8 +1016,7 @@ def globalReadLDSBufferSwap(tc, writer, kernel):
       module.add(SXorB32(dst=sgpr(ldsAddrSgpr), src0=sgpr(ldsAddrSgpr), src1=sgpr(swapSgpr), comment=""))
       # When B's Group0 is aliased onto A, only update the tracking SGPR.
       # The descriptor is patched with B's LDS addr at load time.
-      _bAliased = (tc == 'B' and kernel["NumWaves"] > 1
-                   and kernel.get("UseSubtileImpl"))
+      _bAliased = (tc == 'B' and kernel["NumWaves"] > 1)
       if not _bAliased:
         group0 = "tdm%sGroup0" % tc
         module.add(SMovB32(dst=sgpr("%s+1" % group0), src=sgpr(ldsAddrSgpr), comment="sync descriptor LDS addr"))
@@ -1280,10 +1277,9 @@ def tdmApplyStreamKOffsetSubtile(writer, kernel, tP):
                     comment="Address += SK K-start offset (lo)"))
     mod.add(SAddCU32(dst=sgpr(f"Address{tc}+1"), src0=sgpr(f"Address{tc}+1"), src1=sgpr(o + 1),
                      comment="Address += SK K-start offset (hi, carry)"))
-  mod.add(SMovB64(dst=sgpr(f"{group0}+2", 2), src=sgpr(f"Address{tc}", 2),
-                  comment="sync descriptor global addr"))
-  mod.add(SOrB32(dst=sgpr(f"{group0}+3"), src0=sgpr(f"{group0}+3"), src1=_TDM_DESC_TYPE_FIELD,
-                 comment="restore descriptor type field"))
+  from ...Components.TensorDataMover import TensorDataMoverLoad
+  _comp = TensorDataMoverLoad.find(writer)
+  mod.add(_comp.setGlobalAddr(group0, f"Address{tc}"))
   return mod
 
 ##################################################
