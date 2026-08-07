@@ -20,7 +20,7 @@
 #     headers (the source pulls in `<hipblaslt/hipblaslt-export.h>` and
 #     `<hipblaslt/hipblaslt-types.h>`).
 
-if(NOT ROCM_LIBS_SUPERBUILD)
+if(NOT TARGET roc::mxDataGenerator AND NOT ROCM_LIBS_SUPERBUILD)
     if(HIPBLASLT_ENABLE_THEROCK)
         find_package(mxDataGenerator REQUIRED)
     else()
@@ -49,6 +49,7 @@ target_link_libraries(hipblaslt-mxdatagen
     PUBLIC
         hipblaslt::headers
         roc::host-validation
+        roc::host-validation-mx
         roc::mxDataGenerator
     PRIVATE
         # `-x hip` (via hip::device's INTERFACE_COMPILE_OPTIONS) makes the

@@ -22,6 +22,9 @@ option(HOST_VALIDATION_BUILD_PYTHON
 option(HOST_VALIDATION_BUILD_BLAS_BACKEND
        "Build the optional host-validation CBLAS GEMM backend."
        OFF)
+option(HOST_VALIDATION_BUILD_MX_BACKEND
+       "Build the optional host-validation MX data-generation backend."
+       ${HOST_VALIDATION_STANDALONE})
 option(HOST_VALIDATION_BUILD_BENCHMARKS
        "Build host-validation development benchmarks."
        OFF)
@@ -140,6 +143,63 @@ if(HOST_VALIDATION_BUILD_BLAS_BACKEND)
     roc_host_validation_enable_blas_backend()
 endif()
 
+function(roc_host_validation_enable_mx_backend)
+    if(TARGET host-validation-mx)
+        return()
+    endif()
+
+    if(NOT TARGET roc::mxDataGenerator)
+        set(_host_validation_mx_source_dir
+            "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../mxdatagenerator"
+        )
+        if(EXISTS "${_host_validation_mx_source_dir}/CMakeLists.txt")
+            add_subdirectory(
+                "${_host_validation_mx_source_dir}"
+                "${CMAKE_CURRENT_BINARY_DIR}/mxdatagenerator"
+            )
+        else()
+            find_package(mxDataGenerator REQUIRED CONFIG)
+        endif()
+    endif()
+
+    set(_host_validation_source_dir "${CMAKE_CURRENT_FUNCTION_LIST_DIR}")
+    add_library(host-validation-mx STATIC
+        "${_host_validation_source_dir}/src/mx.cpp"
+    )
+    add_library(roc::host-validation-mx ALIAS host-validation-mx)
+    target_compile_features(host-validation-mx PUBLIC cxx_std_20)
+    target_link_libraries(host-validation-mx
+        PUBLIC
+            roc::host-validation
+        PRIVATE
+            roc::mxDataGenerator
+    )
+    target_sources(host-validation-mx
+        PUBLIC
+            FILE_SET HEADERS
+            BASE_DIRS "${_host_validation_source_dir}/include"
+            FILES
+                "${_host_validation_source_dir}/include/roc/host_validation/mx.hpp"
+    )
+    set_target_properties(host-validation-mx
+        PROPERTIES
+            POSITION_INDEPENDENT_CODE ON
+    )
+    install(TARGETS host-validation-mx
+        EXPORT host-validation-targets
+        ARCHIVE
+            DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+            COMPONENT runtime
+        FILE_SET HEADERS
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+            COMPONENT devel
+    )
+endfunction()
+
+if(HOST_VALIDATION_BUILD_MX_BACKEND)
+    roc_host_validation_enable_mx_backend()
+endif()
+
 if(HOST_VALIDATION_BUILD_TESTING)
     enable_testing()
 endif()
@@ -162,6 +222,15 @@ install(TARGETS host-validation-core host-validation host-validation-tiled
 set(HOST_VALIDATION_INSTALL_CMAKEDIR
     "${CMAKE_INSTALL_LIBDIR}/cmake/ROCHostValidation"
 )
+
+set(HOST_VALIDATION_PACKAGE_HAS_BLAS OFF)
+if(TARGET host-validation-blas)
+    set(HOST_VALIDATION_PACKAGE_HAS_BLAS ON)
+endif()
+set(HOST_VALIDATION_PACKAGE_HAS_MX OFF)
+if(TARGET host-validation-mx)
+    set(HOST_VALIDATION_PACKAGE_HAS_MX ON)
+endif()
 
 configure_package_config_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/cmake/ROCHostValidationConfig.cmake.in"
