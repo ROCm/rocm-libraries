@@ -3,13 +3,11 @@
 
 #pragma once
 
-#include <iomanip>
 #include <ostream>
 #include <sstream>
 #include <string>
 
 #include <hipdnn_data_sdk/types.hpp>
-#include <hipdnn_data_sdk/utilities/ITensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_test_sdk/utilities/TensorDiff.hpp>
 #include <hipdnn_test_sdk/utilities/VectorLoggingUtils.hpp>

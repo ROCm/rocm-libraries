@@ -606,12 +606,17 @@ public:
 
     std::string getOutputTensorName(int64_t tensorId)
     {
-        auto it = _tensorValidationMap.find(tensorId);
-        if(it != _tensorValidationMap.end())
+        auto valIt = _tensorValidationMap.find(tensorId);
+        if(valIt != _tensorValidationMap.end())
         {
-            return it->second.name;
+            return valIt->second.name;
         }
-        return _tensorIdToNameMap.at(tensorId);
+        auto nameIt = _tensorIdToNameMap.find(tensorId);
+        if(nameIt != _tensorIdToNameMap.end())
+        {
+            return nameIt->second;
+        }
+        return "uid=" + std::to_string(tensorId);
     }
 
     bool tryAddTensorToBundles(

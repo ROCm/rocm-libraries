@@ -17,10 +17,10 @@ using DT = hipdnn_flatbuffers_sdk::data_objects::DataType;
 
 TEST(TestFormatComparisonHeader, ContainsAllFields)
 {
-    ComparisonContext ctx{
+    const ComparisonContext ctx{
         "Bundle: /path/to/bundle", "output_tensor (UID 42, output)", "FLOAT", 1e-5f, 1e-4f};
 
-    Tensor<float> tensor({2, 3, 4});
+    const Tensor<float> tensor({2, 3, 4});
     const std::string header = formatComparisonHeader(ctx, tensor);
 
     EXPECT_NE(header.find("Comparison FAILED"), std::string::npos);
@@ -33,13 +33,13 @@ TEST(TestFormatComparisonHeader, ContainsAllFields)
 
 TEST(TestFormatComparisonHeader, IncludesShape)
 {
-    ComparisonContext ctx{"Test: MyTest.Case", "x", "HALF", 0.0f, 0.0f};
+    const ComparisonContext ctx{"Test: MyTest.Case", "x", "HALF", 0.0f, 0.0f};
 
-    Tensor<float> tensor({8, 16});
+    const Tensor<float> tensor({8, 16});
     const std::string header = formatComparisonHeader(ctx, tensor);
 
-    EXPECT_NE(header.find("8"), std::string::npos);
-    EXPECT_NE(header.find("16"), std::string::npos);
+    EXPECT_NE(header.find("Shape:"), std::string::npos);
+    EXPECT_NE(header.find("8, 16"), std::string::npos);
 }
 
 // =================================================================================================
