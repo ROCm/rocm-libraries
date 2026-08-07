@@ -64,7 +64,7 @@ hipdnn_frontend::Knob
 
 const std::vector<fe::KnobType_t>& mappedKnobTypes()
 {
-    static const std::vector<fe::KnobType_t> types
+    static const std::vector<fe::KnobType_t> s_types
         = {fe::KnobType_t::SWIZZLE,     fe::KnobType_t::TILE_SIZE,
            fe::KnobType_t::EDGE,        fe::KnobType_t::MULTIPLY,
            fe::KnobType_t::SPLIT_K_BUF, fe::KnobType_t::TILEK,
@@ -79,7 +79,7 @@ const std::vector<fe::KnobType_t>& mappedKnobTypes()
            fe::KnobType_t::CTA_COUNT,   fe::KnobType_t::STREAM_K,
            fe::KnobType_t::SPLIT_P_SLC, fe::KnobType_t::TILE_M,
            fe::KnobType_t::TILE_N,      fe::KnobType_t::WARP_SPEC_CFG};
-    return types;
+    return s_types;
 }
 
 const hipdnn_frontend::KnobSetting*
