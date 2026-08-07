@@ -54,7 +54,7 @@ This remainder of this document has two layers:
 
 For step-by-step instructions to add client tests, see [`clients/gtest/README.md`](clients/gtest/README.md). For client CLI and environment variables, see the [Programmer's Guide](docs/how-to/Programmers_Guide.rst) (benchmarking and testing section).
 
----
+
 
 ## Testing mechanics
 
