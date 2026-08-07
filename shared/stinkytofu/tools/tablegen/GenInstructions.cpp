@@ -1903,6 +1903,11 @@ static bool emitArchHeader(const ArchDef& arch, const std::string& outputPath) {
         std::cerr << "Error: Cannot write " << outputPath << "\n";
         return false;
     }
+    // Lowercase identity name stored on ArchInfo (e.g. "gfx1250v0"). Must match the tensile
+    // baseArchName the caller passes to getGfxArchID(name); the .def identifier is capitalized.
+    std::string lowerName = arch.name;
+    std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     out << "/* ************************************************************************\n"
         << " * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.\n"
         << " *\n"
@@ -1932,10 +1937,10 @@ static bool emitArchHeader(const ArchDef& arch, const std::string& outputPath) {
         << "struct " << arch.name << "ArchInfo : public ArchHelper::ArchInfo\n"
         << "{\n"
         << "    " << arch.name << "ArchInfo()\n"
-        << "        : ArchInfo(" << arch.major << ", " << arch.minor << ", " << arch.stepping
-        << ", " << arch.wavefront << " /* waveFrontSize */" << ", " << arch.totalVgprPerSimd
-        << " /* totalVgprPerSimd */" << ", " << arch.vgprAllocGranule
-        << " /* vgprAllocGranule */)\n"
+        << "        : ArchInfo(\"" << lowerName << "\" /* name */" << ", " << arch.major << ", "
+        << arch.minor << ", " << arch.stepping << ", " << arch.wavefront << " /* waveFrontSize */"
+        << ", " << arch.totalVgprPerSimd << " /* totalVgprPerSimd */" << ", "
+        << arch.vgprAllocGranule << " /* vgprAllocGranule */)\n"
         << "    {\n"
         << "    }\n\n"
         << "    IsaOpcode getIsaOpcode(UnifiedOpcode unifiedOpcode) const override\n"

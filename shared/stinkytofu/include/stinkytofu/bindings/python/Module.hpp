@@ -98,7 +98,7 @@
     X(GlobalReadQueueDepth, int)                  \
     X(GlobalReadDrainLatency, int)                \
     X(DsReadOrder, int)                           \
-    X(UseV0CostTable, bool)
+    X(ArchName, std::string)
 
 namespace stinkytofu {
 /**

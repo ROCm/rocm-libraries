@@ -29,6 +29,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "stinkytofu/Export.hpp"
@@ -43,9 +44,11 @@ namespace stinkytofu {
 class STINKYTOFU_EXPORT ArchHelper {
    public:
     struct ArchInfo {
-        ArchInfo(uint32_t major, uint32_t minor, uint32_t stepping, uint32_t waveFrontSize,
-                 uint32_t totalVgprPerSimd = 0, uint32_t vgprAllocGranule = 0)
-            : major(major),
+        ArchInfo(std::string name, uint32_t major, uint32_t minor, uint32_t stepping,
+                 uint32_t waveFrontSize, uint32_t totalVgprPerSimd = 0,
+                 uint32_t vgprAllocGranule = 0)
+            : name(std::move(name)),
+              major(major),
               minor(minor),
               stepping(stepping),
               waveFrontSize(waveFrontSize),
@@ -64,6 +67,11 @@ class STINKYTOFU_EXPORT ArchHelper {
         // On such targets a D16 VMEM op zero-fills the non-data 16-bit half, and
         // True16 VALU performs the write at full-DWORD granularity.
         virtual bool hasD16Writes32BitVgpr() const = 0;
+
+        // Concrete stepping identity (lowercase, e.g. "gfx1250" vs "gfx1250v0"). Distinguishes
+        // steppings that share an ISA triple, which the triple alone cannot. Set by the generated
+        // ArchInfo subclass; used by getGfxArchID(name) to resolve an identity the triple can't.
+        const std::string name;
 
         const uint32_t major;
         const uint32_t minor;
@@ -85,7 +93,18 @@ class STINKYTOFU_EXPORT ArchHelper {
 
     const ArchInfo* getArchInfo(uint32_t major, uint32_t minor, uint32_t stepping) const;
 
+    // Resolve by concrete identity name (ArchInfo::name), disambiguating steppings that share an
+    // ISA triple (e.g. gfx1250 v1 vs gfx1250v0). Unlike getGfxArchID(const std::string&), an
+    // unknown name returns nullptr instead of asserting, so callers can probe a name and fall
+    // back to legacy triple parsing without aborting in debug builds.
+    const ArchInfo* getArchInfo(const std::string& name) const;
+
     const GfxArchID getGfxArchID(uint32_t major, uint32_t minor, uint32_t stepping) const;
+
+    // Resolve by concrete identity name (ArchInfo::name), disambiguating steppings that share an
+    // ISA triple. On an unknown name it asserts (debug) and falls back to the first-registered
+    // arch (release), matching the triple overload; exceptions are disabled in this build.
+    GfxArchID getGfxArchID(const std::string& name) const;
 
    private:
     // Private constructor: Populate the fixed list here
@@ -98,6 +117,10 @@ class STINKYTOFU_EXPORT ArchHelper {
 
 inline GfxArchID getGfxArchID(uint32_t major, uint32_t minor, uint32_t stepping) {
     return ArchHelper::getInstance().getGfxArchID(major, minor, stepping);
+}
+
+inline GfxArchID getGfxArchID(const std::string& name) {
+    return ArchHelper::getInstance().getGfxArchID(name);
 }
 
 inline uint32_t getWaveFrontSize(GfxArchID archID) {

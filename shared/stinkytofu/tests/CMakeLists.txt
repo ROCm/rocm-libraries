@@ -353,6 +353,16 @@ file(GLOB FILECHECK_TESTS
     "${CMAKE_CURRENT_SOURCE_DIR}/filecheck/*.stir"
     "${CMAKE_CURRENT_SOURCE_DIR}/filecheck/*.s"
 )
+# v0-specific FileCheck tests invoke `--arch gfx1250v0`, so they are only valid
+# when the Gfx1250v0 stepping is built. Register them only then, keeping a
+# Gfx1250-only test build green.
+if("Gfx1250v0" IN_LIST STINKYTOFU_ARCHS_TO_BUILD)
+    file(GLOB FILECHECK_V0_TESTS
+        "${CMAKE_CURRENT_SOURCE_DIR}/filecheck/v0/*.stir"
+        "${CMAKE_CURRENT_SOURCE_DIR}/filecheck/v0/*.s"
+    )
+    list(APPEND FILECHECK_TESTS ${FILECHECK_V0_TESTS})
+endif()
 foreach(test_file ${FILECHECK_TESTS})
     get_filename_component(test_name ${test_file} NAME_WE)
     add_test(

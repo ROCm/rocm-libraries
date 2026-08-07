@@ -22,7 +22,9 @@
  * ************************************************************************ */
 #include "stinkytofu/hardware/ArchHelper.hpp"
 
+#include <cassert>
 #include <cstdint>
+#include <string>
 #include <unordered_map>
 
 #include "stinkytofu/Config/Config.h"
@@ -66,6 +68,15 @@ const ArchHelper::ArchInfo* ArchHelper::getArchInfo(uint32_t major, uint32_t min
     return nullptr;
 }
 
+const ArchHelper::ArchInfo* ArchHelper::getArchInfo(const std::string& name) const {
+    for (const auto& archInfo : registeredArchInfos) {
+        if (archInfo && archInfo->name == name) {
+            return archInfo.get();
+        }
+    }
+    return nullptr;
+}
+
 const GfxArchID ArchHelper::getGfxArchID(uint32_t major, uint32_t minor, uint32_t stepping) const {
     for (size_t i = 0; i < registeredArchInfos.size(); ++i) {
         const auto& archInfo = registeredArchInfos[i];
@@ -76,6 +87,20 @@ const GfxArchID ArchHelper::getGfxArchID(uint32_t major, uint32_t minor, uint32_
         }
     }
     assert(false && "Unsupported GfxArchID");
+    return static_cast<GfxArchID>(0);
+}
+
+GfxArchID ArchHelper::getGfxArchID(const std::string& name) const {
+    for (size_t i = 0; i < registeredArchInfos.size(); ++i) {
+        const auto& archInfo = registeredArchInfos[i];
+        if (archInfo && archInfo->name == name) {
+            return static_cast<GfxArchID>(
+                i);  // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange)
+        }
+    }
+    // Exceptions are disabled in this build, so mirror the triple overload: assert in debug and
+    // fall back to the first-registered arch in release rather than surfacing an error.
+    assert(false && "Unknown stinkytofu arch name");
     return static_cast<GfxArchID>(0);
 }
 

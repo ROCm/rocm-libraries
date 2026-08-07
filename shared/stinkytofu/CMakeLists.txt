@@ -85,7 +85,7 @@ list(REMOVE_DUPLICATES STINKYTOFU_ARCHS_TO_BUILD)
 
 # Gfx1250 (v1) and Gfx1250v0 (v0) are two steppings of one ISA triple, {12,5,0}, but distinct
 # GfxArchID identities. They intentionally coexist in one library: downstream selects the per-arch
-# cost table by identity (threaded from the conversion entry, e.g. ModuleOptions.UseV0CostTable),
+# cost table by identity (threaded from the conversion entry as ModuleOptions.ArchName),
 # not by resolving the shared triple. The pipeline stays keyed on the triple and is shared. So the
 # pair is allowed here; the identity, not a first-match triple lookup, keeps their costs apart.
 

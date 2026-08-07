@@ -1018,11 +1018,8 @@ def run():
     applyArchCapOverrides(isaInfoMap, archs)
     assignGlobalParameters(arguments, isaInfoMap)
 
-    # gfx1250 ships in two steppings (v0/v1) that report the same ISA (12,5,0); the kernel ISA
-    # cannot carry which one, so hand the StinkyTofu backend the identity explicitly here (the same
-    # per-build archs list applyArchCapOverrides uses). KernelWriter forwards it as the
-    # UseV0CostTable module option, which selects the v0 instruction-cost table in StinkyTofu.
-    globalParameters["StinkyTofuUseV0CostTable"] = any(baseArchName(a) == "gfx1250v0" for a in archs)
+    # gfx1250 v0/v1 share ISA (12,5,0); pass the concrete stepping name so StinkyTofu picks the right cost table.
+    globalParameters["StinkyTofuArchName"] = "gfx1250v0" if any(baseArchName(a) == "gfx1250v0" for a in archs) else ""
 
     asmToolchain = makeAssemblyToolchain(
         cxxCompiler,
