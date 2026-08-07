@@ -2047,7 +2047,8 @@ public:
         const double elapsed_time_s
             = std::chrono::duration<double>(h_curr_time_1 - h_curr_time_0).count();
 
-        if (elapsed_time_s <= 0) {
+        if(elapsed_time_s <= 0)
+        {
             std::cerr << "Error: Elapsed time must be greater than 0.\n";
             exit(EXIT_FAILURE);
         }
