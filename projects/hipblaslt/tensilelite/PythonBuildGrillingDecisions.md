@@ -67,7 +67,7 @@ The release/test-artifact flow is separate:
 ```text
 build canonical and compatibility release wheels
 build/package tensilelite-client
-package raw rocisa + _rocisa and source-only tests
+package raw rocisa + _rocisa and copied installed-wheel tests
 upload artifacts
                               │
                               ▼
@@ -273,10 +273,16 @@ resolution during the CMake build.
 
 ### Q017 — Should dependencies be copied into `TheRock/requirements.txt`?
 
-**Decision: Accepted — no.**
+**Decision: Accepted — add no new root duplication and do not modify the
+existing compatibility entries in this change.**
 
-TensileLite owns its requirements file; do not duplicate its dependency list in
-TheRock.
+TensileLite owns its requirements file for staged/native and rocm-libraries
+wrapper provisioning. Leave TheRock root `requirements.txt` completely
+untouched: its existing `joblib`/`msgpack` entries remain a compatibility bridge
+for the documented non-staged local build, which does not consume artifact
+`python_requires`. Removing those entries requires a separate local-provisioning
+migration. Likewise, leave `requirements-test.txt` unchanged until its fresh
+test-venv consumer installs an artifact-owned equivalent.
 
 ### Q018 — Where should workflows install TensileLite requirements?
 
@@ -285,12 +291,23 @@ TheRock.
 Use both integration mechanisms:
 
 1. Native TheRock staged builds: add the TensileLite requirements file to the
-   `blas` artifact's `python_requires` in `BUILD_TOPOLOGY.toml`.
+   `blas` artifact's `python_requires` in `BUILD_TOPOLOGY.toml`. Extend
+   `configure_stage.py` with one explicit rocm-libraries source-root input,
+   defaulting to TheRock's `rocm-libraries` submodule. Resolve the project-owned
+   requirements path from that root and emit the matching
+   `-DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=<root>` CMake argument from the same
+   selection. Do not hard-code the default submodule path independently of the
+   CMake source selection or require callers to specify the root twice.
 2. rocm-libraries wrapper workflows: explicitly run:
 
    ```bash
    pip install -r projects/hipblaslt/tensilelite/requirements.txt
    ```
+
+Validate the native mechanism with the default submodule, the conventional
+external `rocm-libraries` checkout, and an arbitrary absolute local checkout.
+Fail before pip or CMake when the selected requirements file is missing, with
+the resolved path in the diagnostic.
 
 ### Q019 — Which workflows must provision the requirements?
 
@@ -523,6 +540,17 @@ Tests must verify:
 Expensive underlying commands may be mocked, but argument forwarding must be
 asserted exactly.
 
+Remove the compatibility wheel's `pandas` dependency rather than provisioning
+it in artifact CI. `GenerateSummations.py` is the only production pandas user
+and uses it only to read `benchmark.csv`, strip headers, select `SizeL`/`Cij` and
+kernel columns, and compute a maximum. Replace that with standard-library
+`csv.DictReader` plus the already-required NumPy arrays/`nanmax`/`polyfit`, while
+preserving first-seen `SizeL` order, numeric conversion, quoting, whitespace,
+and NaN behavior. Remove the test-only pandas module mock and add a focused CSV
+fixture proving the parsed vectors, maximum, and fitted model. Compatibility CI
+can then import the real delegated module while still mocking expensive
+underlying execution for forwarding assertions.
+
 ### Q040 — Where does wheel validation occur today?
 
 **Confirmed fact:**
@@ -540,8 +568,9 @@ required canonical resources.
 
 **Decision: Accepted — yes. All wheel archives remain unbound.**
 
-Client bindings belong to an installed Python environment and are created only
-by the post-install `tensilelite-configure-client` command. Canonical,
+Client bindings belong to one user's exact resolved TensileLite installation
+directory and are created only by the post-install
+`tensilelite-configure-client` command. Canonical,
 compatibility, local, non-editable, and editable wheel archives contain no
 machine-local client metadata.
 
@@ -640,7 +669,7 @@ Use separate SDK-root and client-binding seams:
 ```text
 TheRock build phase:
   SDK/version root = THEROCK_TOOLCHAIN_ROOT (hip-clr/dist)
-  client = exact CMake-built executable through installation-local binding
+  client = exact CMake-built executable through keyed per-user binding
 
 TheRock test phase:
   SDK/version root = reconstructed ROCM_PATH
@@ -670,7 +699,7 @@ or validate the intended client reliably. Q052 defines the complete precedence.
 
 Final contract:
 
-1. If installation-local binding metadata exists, use only its exact client and
+1. If keyed per-user binding metadata exists, use only its exact client and
    never fall back.
 2. Otherwise resolve only the standard client under the selected `ROCM_PATH`.
 3. Do not search PATH.
@@ -726,7 +755,7 @@ python -m tensilelite_configure_client \
 ```
 
 The command is importable outside normal `tensilelite` initialization, validates
-the client, stores the installation-local binding, and leaves the original
+the client, stores the keyed per-user binding, and leaves the original
 wheel unchanged.
 
 The binding overrides only the client executable. Commands still require a
@@ -788,13 +817,13 @@ Use one client-binding module for:
 - native client identity/version query;
 - Python/client compatibility checks;
 - binding metadata schema and parsing;
-- RECORD entry construction/update;
+- installation-key and per-user binding-path construction;
 - runtime binding validation.
 
 Use two thin adapters:
 
-1. `tensilelite-configure-client`: writes the binding into an already
-   installed distribution and updates its RECORD.
+1. `tensilelite-configure-client`: atomically writes the binding into the
+   current user's slot for the exact resolved installation directory.
 2. Runtime resolver: reads the binding or resolves the standard client without
    performing installed-state mutation.
 
@@ -808,18 +837,29 @@ by that initialization.
 
 The final contract is:
 
-- keep the binding metadata as a bare JSON absolute-path string in installed
-  `.dist-info`;
+- keep the binding metadata as a bare JSON absolute-path string at
+  `~/.tensilelite/bindings/<installation-id>/client.json`;
+- derive `<installation-id>` only from the exact resolved installed package
+  directory; configuring a reinstall or upgrade at the same directory
+  intentionally atomically replaces the existing file and is not a collision;
 - share path validation, version-command policy, version comparison, metadata
-  parsing, and RECORD-row construction in a pre-runtime module;
-- use thin adapters for installed-distribution mutation and runtime resolution;
+  parsing, and installation-key construction in a pre-runtime module;
+- use thin adapters for per-user configuration and runtime resolution;
 - make runtime use configured binding exclusively when present, with no fallback
   to `ROCM_PATH`, PATH, YAML, globals, or command-line overrides;
 - retain standard `ROCM_PATH/libexec/...` lookup only when no binding exists;
 - validate both configured and standard clients with plain `--version`;
 - keep configuration importable before normal package initialization;
-- mutate binding metadata and RECORD under an inter-process lock using atomic
-  replacement for each file and explicit recovery ordering; and
+- use one atomic replacement for configure and one file deletion for reset;
+- treat concurrent configure/reset of the same installation as unsupported,
+  without locks, tombstones, or a recovery state machine;
+- intentionally leave per-user configuration outside pip uninstall ownership;
+- rename the existing helper-kernel cache root from
+  `~/.tensile/helper_cache` to the single shared per-user
+  `~/.tensilelite/helper_cache`; never place it below an installation-keyed
+  binding directory, because its existing content-derived keys safely share
+  compatible entries across wheels, venvs, and worktrees; do not automatically
+  migrate the disposable old cache; and
 - keep every wheel archive free of machine-local client bindings.
 
 ### Q061 — How do local source installs configure a custom client?
@@ -846,10 +886,9 @@ Provide:
 tensilelite-configure-client --reset
 ```
 
-Under the installation lock, reset removes the binding metadata and rewrites
-RECORD using atomic replacement for each file and deterministic recovery
-ordering. Subsequent processes return to standard
-`ROCM_PATH/libexec/...` lookup.
+Reset deletes the current installation's one keyed per-user `client.json`.
+Subsequent processes return to standard `ROCM_PATH/libexec/...` lookup. It does
+not mutate the installed distribution or another installation's binding.
 
 ### Q063 — Can TheRock install and configure an unmodified release wheel for build-time use?
 
@@ -870,9 +909,11 @@ run tensilelite-configure-client with exact CMake client target
 run logic/create-library/ext-op generation
 ```
 
-`tensilelite-configure-client` changes only the installed distribution metadata
-in that Python environment and updates its installed RECORD. It does not modify
-the original `.whl` archive.
+`tensilelite-configure-client` writes only the build user's keyed file below
+`~/.tensilelite/bindings`; it does not modify the installed distribution or the
+original `.whl` archive. The exact resolved site-packages directory gives a
+regular wheel its installation key even though the final ROCm root is not yet
+assembled.
 
 Packaging therefore uses the original validated wheel file, which contains no
 machine-local client binding. The separate test job installs that unchanged
@@ -1037,22 +1078,36 @@ client must report additional independent fields.
 
 ### Q074 — Where is an installation-local binding stored?
 
-**Decision: Accepted.**
+**Decision: Superseded by Q114 — use keyed per-user configuration, not installed
+distribution metadata.**
 
-`tensilelite-configure-client` writes binding metadata into the installed
-TensileLite `.dist-info` directory and rewrites `RECORD` under an inter-process
-lock. Each file uses atomic replacement with deterministic recovery ordering.
+The common per-user root is:
+
+```text
+~/.tensilelite/
+├── helper_cache/                         # shared across all installations
+└── bindings/<installation-id>/client.json
+```
+
+`<installation-id>` is derived only from the exact resolved imported
+`tensilelite` package directory. A regular wheel therefore keys from its
+site-packages directory, while editable installs in different worktrees key
+from their different resolved source package directories. Different users have
+different home roots. Reinstalls or upgrades into the same resolved directory
+intentionally reuse the same key, and successful configuration atomically
+replaces any existing `client.json` rather than reporting a collision.
 
 Consequences:
 
-- the binding belongs to one Python installation;
+- the binding belongs to one user and resolved installation directory;
 - the original wheel remains unchanged and transferable;
-- runtime resolves it through `importlib.metadata`;
-- `--reset` removes both the metadata file and RECORD row;
-- uninstall can account for the configured file.
-
-Configuration and runtime resolution identify the distribution that owns the
-imported TensileLite package and reject ambiguous visible installations.
+- runtime computes the same key from its own resolved package directory;
+- `--reset` removes only the keyed `client.json`;
+- pip uninstall intentionally does not own or remove per-user configuration;
+- there is no `.dist-info`, `RECORD`, distribution-ownership, lock, tombstone,
+  or multi-file recovery mechanism; and
+- `helper_cache/` stays global to the user rather than being partitioned by
+  installation, because its content-derived keys already govern safe reuse.
 
 ### Q075 — When is a custom client's version validated?
 
@@ -1236,9 +1291,13 @@ endif()
 ```
 
 Use `_build_rocm_root` only as scoped `ROCM_PATH` for TensileLite release-wheel
-construction, installation, and Python code-generation commands. Validate that
-it contains readable `.info/version` and the required toolchain layout. Never
-copy hipBLASLt outputs into it.
+construction, client configuration/validation, and Python code-generation
+commands; plain installation of an already-built wheel does not require it.
+`release_metadata.py` is the sole authority that actually reads and validates
+`<root>/.info/version`; do not duplicate it with a CMake existence/readability
+preflight. Likewise, do not maintain a second platform-specific toolchain-layout
+checklist: imported CMake targets and real generator commands validate the tools
+they consume. Never copy hipBLASLt outputs into the selected root.
 
 ### Q086 — May a TheRock build fall back when `THEROCK_TOOLCHAIN_ROOT` is missing?
 
@@ -1253,9 +1312,10 @@ hermeticity guarantee.
 
 **Decision: Accepted — use the existing bare JSON absolute-path string.**
 
-The settled format remains the existing JSON absolute-path string in installed
-`.dist-info`. Client version is queried from the executable during configuration
-and package import, so it is not duplicated in binding metadata.
+The settled value remains the existing bare JSON absolute-path string, now in
+the keyed per-user `client.json`. Client version and installation identity are
+derived during configuration and package import, so neither is duplicated in
+the JSON payload.
 
 ### Q088 — Is `tensilelite-client` required on TheRock Windows builds?
 
@@ -1313,6 +1373,12 @@ Use the same active-interpreter pip pattern for TensileLite canonical and later
 compatibility phases. Do not introduce a component-specific uv invocation when a
 working wheel-install precedent already exists.
 
+Both phases use the exact command shape
+`sys.executable -m pip install --force-reinstall --no-deps <exact-wheel>`.
+In particular, the compatibility phase must not resolve its exact canonical pin
+or contact an index or replace the canonical distribution
+that passed phase 1. Runner unit tests assert the complete argument lists.
+
 Q103 assigns phase orchestration to the thin TensileLite runner and leaves
 categories, markers, timeouts, workers, and JUnit execution with the generic
 TheRock pytest runner.
@@ -1350,6 +1416,42 @@ dependencies include package code/resources, build backend and metadata,
 validator, requirements/build metadata, and `.info/version`. The configured
 Python environment additionally depends on the exact client and raw rocisa
 targets.
+
+Each wheel target builds only its own wheel in an independently cleaned private
+staging directory and validates that staged wheel in its independent validator
+mode. Neither target cleans or builds directly in the shared final release-wheel
+directory. After validation, it copies that one exact wheel to its declared
+release path and only then touches its target-specific completion stamp. The
+wheel is a declared byproduct and the stamp is the custom-command output, so an
+interrupted copy does not mark publication complete and the next build reruns
+it. This follows TheRock's existing copy-then-stamp model; atomic replacement is
+not required. Neither target clears or modifies the other target's output.
+
+CMake composes the release version during configuration so the generated build
+and install graph contains the exact canonical and compatibility wheel paths.
+Register `VERSION`, `release_metadata.py`, and the selected SDK's
+`.info/version` as configure dependencies. If any changes in an existing build
+tree, `cmake --build` first regenerates the CMake graph with the new filenames;
+do not introduce a build-time wheel-path manifest.
+
+Install the two configured, validated wheel files explicitly with
+`install(FILES ...)`; do not install the release-wheel directory. This prevents
+stale or unrelated build-tree wheels from entering the test artifact. It does
+not add cleanup of an existing install prefix or change TheRock's subsequent
+stage-to-artifact copy behavior.
+
+The canonical wheel remains a dependency of every device-generation build.
+When the existing `HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS` option is
+enabled, make `tensilelite-build-release-wheels` part of `ALL` so the normal
+build produces both wheels before TheRock runs `cmake --install`. When the
+option is disabled, do not build the compatibility wheel solely for tests.
+Preserve the standard build-before-install lifecycle; installation does not
+invoke a nested build.
+
+Both independent wheel-build commands use the selected Python and retain
+`python -m pip wheel --no-build-isolation --no-deps`. Splitting the targets must
+not create isolated build environments or let the compatibility build resolve,
+download, or rebuild its declared canonical and pandas dependencies.
 
 ### Q093 — What do current defaults build?
 
@@ -1410,11 +1512,30 @@ hipBLASLt CMake owns one centralized dependency rule:
 ```text
 HIPBLASLT_ENABLE_DEVICE=ON
   → _rocisa
+  → tensilelite-host
   → tensilelite-client
   → canonical release wheel
   → installed/configured build Python package
   → logic/create-library/ext-op generation
 ```
+
+Every device-generation build owns and builds the in-tree `_rocisa`. An
+already-importable external rocisa is not an alternative for this graph.
+`HIPBLASLT_BUNDLE_PYTHON_DEPS` therefore no longer gates `_rocisa` creation for
+an integrated device build; remove that escape hatch with the obsolete Python
+mode wiring. Standalone rocisa builds retain their independent entry point.
+
+The required `tensilelite-client` retains its existing link to
+`roc::tensilelite-host`, so device generation also owns and builds
+`tensilelite-host` as the client's transitive prerequisite. Refactoring the
+client to remove that host dependency is outside this packaging change.
+
+The centralized rule rejects, rather than silently overrides, explicit cache
+values that contradict this graph. Configuring
+`HIPBLASLT_ENABLE_DEVICE=ON` with either `TENSILELITE_ENABLE_HOST=OFF` or
+`TENSILELITE_ENABLE_CLIENT=OFF` fails immediately with an actionable message.
+Maintained presets, Invoke wiring, TheRock, and superbuild callers must stop
+supplying those contradictory values.
 
 Raw CMake, Invoke, presets, TheRock, superbuilds, sanitizer builds, and platform
 CI only select options and consume this graph. They must not replicate package
@@ -1479,6 +1600,35 @@ helpers, inherited bases, and harnesses as local test modules. Rewrite the
 eleven `tensilelite.Tests.*` statements as test-local imports because tests are
 not part of the production wheel.
 
+Do not treat those eleven rewrites as the complete installed-suite migration.
+Audit every test selected for the copied artifact tree for project-root paths,
+adjacent production-source reads, build/version metadata, checkout-only scripts,
+and source-relative resource loading. Record each dependency before deciding
+whether the test should use an installed API/resource or remain source-only;
+discovery alone does not require rewriting every test or expanding the artifact.
+
+Classify by the subject under test. A test of installed production behavior must
+use the installed package API or `importlib.resources`. A test of source/build
+machinery such as `VERSION`, wheel construction, `release_metadata.py`,
+`tasks.py`, or the `invoke install` workflow remains in source CI and is excluded
+from the installed suite. Do not copy production source or build scripts merely
+to preserve a path-based test, and do not classify a test as source-only merely
+because conversion is inconvenient.
+
+Move every genuine source/build test under the explicit
+`tensilelite/Tests/unit/source_only/` directory. Source CI continues collecting
+that directory recursively. Artifact installation excludes the whole directory
+with one rule, rather than relying on per-file lists, markers, `-k`, or runtime
+skips that occur after collection. Moving a test into `source_only/` is the
+reviewable declaration of its scope; artifact-layout tests assert that the
+directory is absent from the installed test tree.
+
+Do not add a separate `pytest --collect-only` preflight. Each normal category
+already collects its configured paths from the exact installed tree with the
+checkout absent, and collection errors fail that phase. Preserve the
+category-specific paths and options rather than duplicating collection in a
+synthetic all-category invocation.
+
 Run the reconstructed artifact suite with the checkout absent. Fix installed
 package/resource assumptions that fail in that environment, and keep genuine
 source-layout or package-construction tests in source CI.
@@ -1533,15 +1683,29 @@ delegates pytest execution to TheRock's generic runner.**
 
 The TensileLite runner owns component-specific package orchestration:
 
+- construct the final reconstructed test environment first, including
+  `ROCM_PATH`, platform loader paths, `PATH`, and the scoped raw-rocisa
+  `PYTHONPATH`;
+- query the production client's no-GPU `--version` with that environment;
 - discover exactly one canonical wheel with the expected version;
 - fail on zero or ambiguous matches;
 - install it into the active test venv with
   `--force-reinstall --no-deps`;
-- configure the reconstructed `ROCM_PATH` and raw-rocisa `PYTHONPATH`;
 - invoke the generic runner for the canonical test phase;
 - install the compatibility wheel only after the canonical phase passes;
 - invoke the generic runner for `compat/tests` with `--run-compat`; and
 - return failure when either executed phase fails.
+
+Reuse the same constructed environment for the client-version subprocess,
+wheel installation, and both pytest phases. The operating-system loader must
+resolve the native client's dependencies before its `--version` branch reaches
+`main`, so version discovery cannot precede loader-environment construction.
+
+As a Q078 caller, the thin runner enforces a five-second timeout, zero status,
+exactly one canonical stdout line, empty stderr, PEP 440 parsing, and equality
+with the selected wheel version. Unit tests pass the exact final environment and
+cover success plus distinct launch/loader, timeout, signal, nonzero, stderr,
+missing/malformed/extra-output, and version-mismatch diagnostics.
 
 The generic TheRock pytest runner continues to own:
 
@@ -1551,10 +1715,10 @@ The generic TheRock pytest runner continues to own:
 - pytest invocation; and
 - JUnit generation.
 
-Canonical and compatibility phases write separate JUnit results. If the
-canonical phase fails, preserve its JUnit output, do not install the
-compatibility wheel, and return failure immediately. A compatibility failure
-preserves its own JUnit output and returns failure.
+If the canonical phase fails, do not install the compatibility wheel and return
+failure immediately. A compatibility failure returns failure. Do not require
+new JUnit files, directories, preservation, upload, or reporting; the generic
+runner's existing optional JUnit behavior remains unchanged.
 
 The compatibility phase and its inputs are removed when the compatibility
 package is retired.
@@ -1589,6 +1753,13 @@ Remove component-version literals from canonical and compatibility setup code.
 The native client embeds the generated build-time value and never derives its
 identity from the runtime `ROCM_PATH`.
 
+Generate the native header during the same CMake configuration that composes
+the exact wheel filenames. `VERSION`, `release_metadata.py`, and the selected
+`.info/version` are configure dependencies; automatic regeneration rewrites the
+header, and the header is a normal input that recompiles and relinks
+`tensilelite-client` when its value changes. Do not add a second build-time
+version authority or path manifest.
+
 `GENERATOR_VERSION` remains a generator/logic compatibility concept. Any
 decision to couple its lifecycle to the component release version must be
 explicit rather than an accidental consequence of package-version plumbing.
@@ -1602,9 +1773,10 @@ install the wheel first and then use `tensilelite-configure-client` when they
 need a custom executable. The build backend no longer adds binding metadata or
 rewrites wheel `RECORD` files.
 
-This makes the binding an installation-local concern, uses one persistence
-path for all installation modes, and preserves wheel archive contents and any
-wheel signatures. It also removes the signed-wheel rewriting decision.
+This makes the binding an external per-user, per-installation concern, uses one
+persistence scheme for normal and editable installations, and preserves both
+wheel archive contents and installed distribution metadata. It also removes the
+signed-wheel rewriting decision.
 
 ### Q106 — Does a multi-config build require configuration-specific Python package state?
 
@@ -1615,25 +1787,30 @@ contract are configuration-independent. Debug and Release clients implement the
 same versioned interface; CMake build type is not part of the Python
 compatibility identity.
 
-Sequential multi-config builds are supported. Before a Python generator command
-runs, the config-aware CMake wiring refreshes the installation-local binding to
-the selected config's exact client when necessary and supplies the active
-config's raw rocisa path. This does not require separate wheel or Python package
-roots for Debug and Release.
+This change does not expand device-generation or raw-rocisa support beyond the
+generators and layouts supported on `develop`. In particular, creating complete
+per-configuration raw rocisa packages for Visual Studio-style multi-config
+generation is out of scope unless a concrete supported path requires it.
 
-Concurrent configurations that mutate the same selected Python remain outside
-the single-owner contract in Q097. Validate a sequential Debug-to-Release build
-to prove binding refresh and generator behavior.
+Before every supported Python generator command runs, the CMake wiring invokes
+a state-aware, idempotent binding check against that command's exact client. The
+check reads the current keyed per-user binding and refreshes it when it does
+not select that exact client. A permanent per-configuration completion stamp is
+not evidence of the current shared binding, because another command may have
+changed it. This binding-state rule does not add a new multi-config support
+commitment. Concurrent commands that mutate the same selected Python remain
+outside the single-owner contract in Q097.
 
 ### Q107 — How do standard and custom client install directories resolve?
 
 **Decision: Accepted — standard ROCm lookup uses the fixed production layout;
-custom layouts use an explicit installation-local binding.**
+custom layouts use an explicit keyed per-user binding.**
 
 Production ROCm/TheRock artifacts place the client at:
 
 ```text
-libexec/hipblaslt/tensilelite/tensilelite-client
+non-Windows: libexec/hipblaslt/tensilelite/tensilelite-client
+Windows:     libexec/hipblaslt/tensilelite/tensilelite-client.exe
 ```
 
 The canonical wheel's standard resolver checks only that location below
@@ -1641,7 +1818,8 @@ The canonical wheel's standard resolver checks only that location below
 `CMAKE_INSTALL_LIBEXECDIR` for custom/local installations; those installations
 select their exact client with `tensilelite-configure-client`.
 
-The runtime does not search alternate libexec directory names, and wheel
+The directory is fixed and only the platform-native executable suffix differs.
+The runtime does not search alternate libexec directory names or `PATH`, and wheel
 metadata does not encode a build-specific install layout. This preserves the
 standard production contract and wheel transferability without adding code for
 a nonstandard production layout that is not currently required.
@@ -1688,6 +1866,13 @@ run Python tooling/client-only build           -> Interpreter only
 true host-only build                           -> no TensileLite Python requirement
 ```
 
+Preserve rocisa's existing stable-ABI specialization. When `_rocisa` is built
+with `ROCISA_USE_STABLE_ABI=ON`, require Python 3.12 or newer plus
+`Interpreter`, `Development.Module`, and `Development.SABIModule`. Without
+stable ABI, `_rocisa` keeps the Python 3.10 floor and requires `Interpreter` plus
+`Development.Module`. This conditional belongs to the extension target and does
+not make client-only or host-only paths require Python development components.
+
 This preserves the intended native-generation direction without making the
 current standalone executable require headers it does not consume.
 
@@ -1722,20 +1907,35 @@ affected CI for integration coverage.**
 
 Required focused tests cover:
 
+- a no-clean incremental version-input change proving the rebuilt canonical
+  wheel and `tensilelite-client --version` advance to the same value;
+- distinct installation keys for regular wheels in different environments and
+  editable installs in different worktrees, intentional overwrite on reinstall
+  to the same resolved directory, and per-user binding-root isolation;
+- parameterized raw-CMake configure failures for device generation with either
+  the required host or required client explicitly disabled, including the exact
+  actionable diagnostic;
+- successful `hipblaslt-clients` preset configuration after removing its
+  contradictory client override;
 - `VERSION` plus `.info/version` composition and equality across canonical
   metadata, compatibility metadata/pin, and the generated client version;
-- post-install configure/reset, installed RECORD updates, mismatched-client
-  rejection, and proof that the original wheel archive remains unchanged;
+- post-install configure/reset, atomic single-file replacement,
+  mismatched-client rejection, proof that installed distribution metadata and
+  the original wheel archive remain unchanged, and the shared
+  `~/.tensilelite/helper_cache` rename;
 - configured-versus-standard runtime resolution, no fallback, client
   `--version` success/failure/malformed handling, and process-local freezing;
 - canonical/compatibility wheel version, pin, entry-point, resource, and unbound
-  content validation;
+  content validation, including canonical `Requires-Dist: rocisa`, normalized
+  distribution names, exact `py3-none-any` filename/WHEEL tag agreement,
+  `_tensilelite_client_binding.py`, `tensilelite_configure_client.py`, and the
+  `tensilelite-configure-client` target;
 - thin-runner phase ordering and failure propagation; and
 - GPU-less native `--version` stdout, stderr, and exit-status behavior.
 
 Existing Linux/Windows TheRock, artifact-test, sanitizer, and superbuild lanes
 provide integrated coverage. This work does not add a separate comprehensive
-CMake matrix or coverage workflow.
+CMake matrix, duplicate per-caller invariant tests, or coverage workflow.
 
 ### Q113 — How should the `hipblaslt-clients` preset satisfy the device-build invariant?
 
@@ -1747,6 +1947,47 @@ enable `tensilelite-client` and the complete Python/native generation graph.
 Removing the override keeps the invariant in one place rather than duplicating
 an explicit `ON` value in the preset. Add a focused configure test proving the
 preset no longer selects a contradictory option combination.
+
+### Q114 — Where does mutable client configuration live?
+
+**Decision: Accepted — use one keyed per-user registry and never mutate the
+installed distribution.**
+
+The common user root is renamed and organized as:
+
+```text
+~/.tensilelite/
+├── helper_cache/
+└── bindings/<installation-id>/client.json
+```
+
+`helper_cache/` is one shared per-user cache for all wheels, venvs, and
+worktrees. Its existing content-derived cache keys decide reuse, so it must not
+be nested below an installation ID. Rename the current default
+`~/.tensile/helper_cache` to `~/.tensilelite/helper_cache`, retain the existing
+explicit cache-directory override, and do not automatically migrate the old
+disposable cache.
+
+Derive `<installation-id>` only from the exact resolved directory of the
+imported `tensilelite` package. Different venv wheel installations and editable
+worktrees resolve to different keys; different users have different home roots.
+A reinstall or upgrade into the same resolved directory intentionally reuses
+the same key. After full client validation, configuration atomically replaces
+any existing `client.json` at that key; an existing file is never a collision.
+Locate the package directory with `importlib.util.find_spec` without executing
+`tensilelite.__init__`, because configuration may be establishing the client
+required by initialization. The JSON payload remains one bare absolute
+client-path string.
+
+Runtime uses a present keyed binding exclusively and otherwise uses only the
+fixed client below `ROCM_PATH`. `--reset` deletes the current key's one file.
+Concurrent configure/reset for the same key is unsupported. The binding is
+external per-user configuration which intentionally survives pip uninstall;
+there is no `.dist-info` or `RECORD` mutation, distribution-ownership algorithm,
+inter-process lock, tombstone, or multi-file recovery state machine. TheRock
+can configure a regular installed wheel from its exact CMake client before the
+final ROCm tree exists because the installation key comes from site-packages,
+not from the source checkout or final ROCm layout.
 
 ## Confirmed TheRock build/test facts
 
@@ -1801,13 +2042,14 @@ let pytest's default `prepend` mode expose the separately copied tests.
   wheel metadata and the generated native-client header.
 - `tensilelite-client` is production-owned on Linux and Windows and is wired as
   the intended long-term native generation seam.
-- Every wheel archive remains unbound; custom client metadata is written only
-  into an installed distribution by `tensilelite-configure-client`.
-- Python package state is configuration-independent. Sequential multi-config
-  builds refresh the selected config's client binding before generation;
-  concurrent configs sharing one Python are unsupported.
+- Every wheel archive and installed distribution remains unbound and unchanged;
+  `tensilelite-configure-client` writes only the exact installation's keyed file
+  below the current user's `~/.tensilelite/bindings` root.
+- Python package state is configuration-independent. Every supported generator
+  command checks the current client binding against its exact target client;
+  this does not expand `develop`'s multi-config or raw-rocisa support.
 - Standard ROCm artifacts use `libexec/hipblaslt/tensilelite`; custom
-  `CMAKE_INSTALL_LIBEXECDIR` layouts use an explicit post-install client binding.
+  `CMAKE_INSTALL_LIBEXECDIR` layouts use an explicit keyed per-user binding.
 - Standalone Windows device builds require an explicit ROCm SDK root; only
   standalone non-Windows builds may fall back to `/opt/rocm`.
 - Python `Development.Module` is required only by native Python-extension
@@ -1830,11 +2072,10 @@ let pytest's default `prepend` mode expose the separately copied tests.
 
 ## Next questions
 
-Q097–Q106 resolve the renewed design choices and consistency findings from the
-staff review. No current-scope design decisions remain open.
-
-Confirm shared understanding of the complete accepted design before
-implementation.
+Q097–Q114 record the renewed design choices and the review resolutions accepted
+so far, including the final keyed per-user binding and shared-cache layout.
+Remaining implementation-plan review findings are being resolved in order
+before implementation begins.
 
 Deferred follow-ups remain source-SHA/channel version naming, exact same-version
 source-build identity, and proper rocisa distribution packaging.
