@@ -411,6 +411,21 @@ def build_client(
     if build:
         c.run(shlex.join(["cmake", "--build", build_dir, "--parallel"]))
 
+@task(help={"build_dir": "CMake build directory containing tensilelite-client."})
+def configure_client(c, build_dir="build_tmp"):
+    """Bind this Python installation to a previously built client."""
+    client = _built_client_path(build_dir)
+    c.run(
+        shlex.join(
+            [
+                sys.executable,
+                "-m",
+                "tensilelite_configure_client",
+                "--ensure-client",
+                str(client),
+            ]
+        )
+    )
 @task(
     help={
         "clean": "Remove the client build directory before building.",
