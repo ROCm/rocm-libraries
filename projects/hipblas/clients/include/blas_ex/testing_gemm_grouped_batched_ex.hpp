@@ -528,13 +528,39 @@ void testing_gemm_grouped_batched_ex(const Arguments& arg)
     hipblasGemmAlgo_t    algo        = HIPBLAS_GEMM_DEFAULT;
     hipblasGemmFlags_t   flags       = hipblasGemmFlags_t(arg.flags);
 
+    const int unit_check = arg.unit_check;
+    const int norm_check = arg.norm_check;
+    const int timing     = arg.timing;
+
+    double hipblas_error_host{0}, hipblas_error_device{0};
+
     host_batch_matrix<Ti> hA(cfg.max_a_row, cfg.max_a_col, cfg.max_lda, problem_count);
     host_batch_matrix<Ti> hB(cfg.max_b_row, cfg.max_b_col, cfg.max_ldb, problem_count);
     host_batch_matrix<To> hC(cfg.max_m, cfg.max_n, cfg.max_ldc, problem_count);
+    host_batch_matrix<To> hC_init(cfg.max_m, cfg.max_n, cfg.max_ldc, problem_count);
+    host_batch_matrix<To> hD_gold(cfg.max_m, cfg.max_n, cfg.max_ldd, problem_count);
+    host_batch_matrix<To> hD_host(cfg.max_m, cfg.max_n, cfg.max_ldd, problem_count);
+    host_batch_matrix<To> hD_device(cfg.max_m, cfg.max_n, cfg.max_ldd, problem_count);
 
     device_batch_matrix<Ti> dA(cfg.max_a_row, cfg.max_a_col, cfg.max_lda, problem_count);
     device_batch_matrix<Ti> dB(cfg.max_b_row, cfg.max_b_col, cfg.max_ldb, problem_count);
     device_batch_matrix<To> dC(cfg.max_m, cfg.max_n, cfg.max_ldc, problem_count);
+
+    device_vector<Tc> d_alpha(group_count);
+    device_vector<Tc> d_beta(group_count);
+
+    CHECK_HIP_ERROR(hA.memcheck());
+    CHECK_HIP_ERROR(hB.memcheck());
+    CHECK_HIP_ERROR(hC.memcheck());
+    CHECK_HIP_ERROR(hC_init.memcheck());
+    CHECK_HIP_ERROR(hD_gold.memcheck());
+    CHECK_HIP_ERROR(hD_host.memcheck());
+    CHECK_HIP_ERROR(hD_device.memcheck());
+    CHECK_DEVICE_ALLOCATION(dA.memcheck());
+    CHECK_DEVICE_ALLOCATION(dB.memcheck());
+    CHECK_DEVICE_ALLOCATION(dC.memcheck());
+    CHECK_DEVICE_ALLOCATION(d_alpha.memcheck());
+    CHECK_DEVICE_ALLOCATION(d_beta.memcheck());
 
     const void* const* dA_ptr = reinterpret_cast<const void* const*>(dA.ptr_on_device());
     const void* const* dB_ptr = reinterpret_cast<const void* const*>(dB.ptr_on_device());
@@ -545,14 +571,39 @@ void testing_gemm_grouped_batched_ex(const Arguments& arg)
     hipblas_init_matrix(
         hB, arg, hipblas_client_alpha_sets_nan, hipblas_general_matrix, false, true);
     hipblas_init_matrix(hC, arg, hipblas_client_beta_sets_nan, hipblas_general_matrix);
+    hC_init.copy_from(hC);
 
     CHECK_HIP_ERROR(dA.transfer_from(hA));
     CHECK_HIP_ERROR(dB.transfer_from(hB));
     CHECK_HIP_ERROR(dC.transfer_from(hC));
 
-    CHECK_HIPBLAS_ERROR(hipblasSetPointerMode(handle, HIPBLAS_POINTER_MODE_HOST));
+    if(unit_check || norm_check)
+    {
+        copy_matrix_with_different_leading_dimensions(hC, hD_gold);
 
-    const auto run_grouped_gemm_ex = [&] {
+        int idx = 0;
+        for(int g = 0; g < group_count; ++g)
+        {
+            for(int p = 0; p < int(cfg.group_size[g]); ++p, ++idx)
+            {
+                ref_gemm<Ti, To, Tc>(cfg.transa_array[g],
+                                     cfg.transb_array[g],
+                                     int(cfg.m_array[g]),
+                                     int(cfg.n_array[g]),
+                                     int(cfg.k_array[g]),
+                                     cfg.alpha_array[g],
+                                     hA[idx],
+                                     int(cfg.lda_array[g]),
+                                     hB[idx],
+                                     int(cfg.ldb_array[g]),
+                                     cfg.beta_array[g],
+                                     hD_gold[idx],
+                                     int(cfg.ldd_array[g]));
+            }
+        }
+    }
+
+    const auto run_grouped_gemm_ex = [&](const void* alpha_ptr, const void* beta_ptr) {
         if(arg.api & c_API_64)
         {
             if(arg.with_flags)
@@ -563,14 +614,14 @@ void testing_gemm_grouped_batched_ex(const Arguments& arg)
                                                      cfg_64.m_array.data(),
                                                      cfg_64.n_array.data(),
                                                      cfg_64.k_array.data(),
-                                                     cfg.alpha_array.data(),
+                                                     alpha_ptr,
                                                      dA_ptr,
                                                      aType,
                                                      cfg_64.lda_array.data(),
                                                      dB_ptr,
                                                      bType,
                                                      cfg_64.ldb_array.data(),
-                                                     cfg.beta_array.data(),
+                                                     beta_ptr,
                                                      dC_ptr,
                                                      cType,
                                                      cfg_64.ldc_array.data(),
@@ -591,14 +642,14 @@ void testing_gemm_grouped_batched_ex(const Arguments& arg)
                                           cfg_64.m_array.data(),
                                           cfg_64.n_array.data(),
                                           cfg_64.k_array.data(),
-                                          cfg.alpha_array.data(),
+                                          alpha_ptr,
                                           dA_ptr,
                                           aType,
                                           cfg_64.lda_array.data(),
                                           dB_ptr,
                                           bType,
                                           cfg_64.ldb_array.data(),
-                                          cfg.beta_array.data(),
+                                          beta_ptr,
                                           dC_ptr,
                                           cType,
                                           cfg_64.ldc_array.data(),
@@ -621,14 +672,14 @@ void testing_gemm_grouped_batched_ex(const Arguments& arg)
                                                   cfg.m_array.data(),
                                                   cfg.n_array.data(),
                                                   cfg.k_array.data(),
-                                                  cfg.alpha_array.data(),
+                                                  alpha_ptr,
                                                   dA_ptr,
                                                   aType,
                                                   cfg.lda_array.data(),
                                                   dB_ptr,
                                                   bType,
                                                   cfg.ldb_array.data(),
-                                                  cfg.beta_array.data(),
+                                                  beta_ptr,
                                                   dC_ptr,
                                                   cType,
                                                   cfg.ldc_array.data(),
@@ -649,14 +700,14 @@ void testing_gemm_grouped_batched_ex(const Arguments& arg)
                                        cfg.m_array.data(),
                                        cfg.n_array.data(),
                                        cfg.k_array.data(),
-                                       cfg.alpha_array.data(),
+                                       alpha_ptr,
                                        dA_ptr,
                                        aType,
                                        cfg.lda_array.data(),
                                        dB_ptr,
                                        bType,
                                        cfg.ldb_array.data(),
-                                       cfg.beta_array.data(),
+                                       beta_ptr,
                                        dC_ptr,
                                        cType,
                                        cfg.ldc_array.data(),
@@ -671,12 +722,85 @@ void testing_gemm_grouped_batched_ex(const Arguments& arg)
         }
     };
 
-    run_grouped_gemm_ex();
+    const auto compare_to_gold = [&](host_batch_matrix<To>& hD) {
+        if(unit_check)
+        {
+            int idx = 0;
+            for(int g = 0; g < group_count; ++g)
+            {
+                for(int p = 0; p < int(cfg.group_size[g]); ++p, ++idx)
+                {
+                    if((getArchMajor() == 11)
+                       && ((std::is_same<Tc, float>{} && std::is_same<Ti, hipblasBfloat16>{})
+                           || (std::is_same<Tc, float>{} && std::is_same<Ti, hipblasHalf>{})
+                           || (std::is_same<Tc, hipblasHalf>{} && std::is_same<Ti, hipblasHalf>{})))
+                    {
+                        const double tol
+                            = int(cfg.k_array[g]) * sum_error_tolerance_for_gfx11<Tc, Ti, To>;
+                        near_check_general<To>(int(cfg.m_array[g]),
+                                               int(cfg.n_array[g]),
+                                               int(cfg.ldd_array[g]),
+                                               hD_gold[idx],
+                                               hD[idx],
+                                               tol);
+                    }
+                    else
+                    {
+                        unit_check_general<To>(int(cfg.m_array[g]),
+                                               int(cfg.n_array[g]),
+                                               int(cfg.ldd_array[g]),
+                                               hD_gold[idx],
+                                               hD[idx]);
+                    }
+                }
+            }
+        }
 
-    if(arg.timing)
+        double error = 0;
+        if(norm_check)
+        {
+            int idx = 0;
+            for(int g = 0; g < group_count; ++g)
+            {
+                for(int p = 0; p < int(cfg.group_size[g]); ++p, ++idx)
+                {
+                    error = std::max(error,
+                                     std::abs(norm_check_general<To>('F',
+                                                                     int(cfg.m_array[g]),
+                                                                     int(cfg.n_array[g]),
+                                                                     int(cfg.ldd_array[g]),
+                                                                     hD_gold[idx],
+                                                                     hD[idx])));
+                }
+            }
+        }
+        return error;
+    };
+
+    if(unit_check || norm_check)
+    {
+        CHECK_HIPBLAS_ERROR(hipblasSetPointerMode(handle, HIPBLAS_POINTER_MODE_HOST));
+        run_grouped_gemm_ex(cfg.alpha_array.data(), cfg.beta_array.data());
+        CHECK_HIP_ERROR(hD_host.transfer_from(dC));
+
+        CHECK_HIPBLAS_ERROR(hipblasSetPointerMode(handle, HIPBLAS_POINTER_MODE_DEVICE));
+        CHECK_HIP_ERROR(dC.transfer_from(hC_init));
+        CHECK_HIP_ERROR(hipMemcpy(
+            d_alpha, cfg.alpha_array.data(), group_count * sizeof(Tc), hipMemcpyHostToDevice));
+        CHECK_HIP_ERROR(hipMemcpy(
+            d_beta, cfg.beta_array.data(), group_count * sizeof(Tc), hipMemcpyHostToDevice));
+        run_grouped_gemm_ex(d_alpha, d_beta);
+        CHECK_HIP_ERROR(hD_device.transfer_from(dC));
+
+        hipblas_error_host   = compare_to_gold(hD_host);
+        hipblas_error_device = compare_to_gold(hD_device);
+    }
+
+    if(timing)
     {
         hipStream_t stream;
         CHECK_HIPBLAS_ERROR(hipblasGetStream(handle, &stream));
+        CHECK_HIPBLAS_ERROR(hipblasSetPointerMode(handle, HIPBLAS_POINTER_MODE_HOST));
 
         double    gpu_time_used = 0.0;
         const int runs          = arg.cold_iters + arg.iters;
@@ -685,7 +809,7 @@ void testing_gemm_grouped_batched_ex(const Arguments& arg)
         {
             if(iter == arg.cold_iters)
                 gpu_time_used = get_time_us_sync(stream);
-            run_grouped_gemm_ex();
+            run_grouped_gemm_ex(cfg.alpha_array.data(), cfg.beta_array.data());
         }
 
         gpu_time_used = get_time_us_sync(stream) - gpu_time_used;
@@ -696,11 +820,7 @@ void testing_gemm_grouped_batched_ex(const Arguments& arg)
                            * gemm_gflop_count<Tc>(
                                int(cfg.m_array[g]), int(cfg.n_array[g]), int(cfg.k_array[g]));
 
-        hipblasGemmGroupedBatchedExModel{}.log_args<Tc>(std::cout,
-                                                        arg,
-                                                        gpu_time_used,
-                                                        gflop_count,
-                                                        ArgumentLogging::NA_value,
-                                                        ArgumentLogging::NA_value);
+        hipblasGemmGroupedBatchedExModel{}.log_args<Tc>(
+            std::cout, arg, gpu_time_used, gflop_count, hipblas_error_host, hipblas_error_device);
     }
 }
