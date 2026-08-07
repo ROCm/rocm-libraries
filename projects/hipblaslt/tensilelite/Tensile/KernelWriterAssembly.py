@@ -7701,7 +7701,7 @@ class KernelWriterAssembly(KernelWriter):
             # skip TailLoopINNLL if StreamK WG not processing final iteration
             # Check if tile finished
             sIpt = self.acquireStreamKConstSgpr(kernel, "ItersPerTile")
-            if self.isStreamKConstantsToVgprEnabled(kernel):
+            if self.isStreamKConstantsToVgprEnabled(kernel, "ItersPerTile"):
               module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(self.states.skConstVgprs["ItersPerTile"])))
             module.add(SCmpLtU32(src0=sgpr("StreamKLocalEnd"), src1=sgpr(sIpt), comment="Check if WG processes final iteration of tile"))
             self.releaseStreamKConstSgpr(sIpt)
@@ -13975,7 +13975,7 @@ class KernelWriterAssembly(KernelWriter):
         module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Check for synchronizer"))
         module.add(SCBranchSCC0(labelName=bpeDoneLabel.getLabelName(), comment="If synchronizer, use regular output BPE"))
         sSkt = self.acquireStreamKConstSgpr(kernel, "skTiles")
-        if self.isStreamKConstantsToVgprEnabled(kernel):
+        if self.isStreamKConstantsToVgprEnabled(kernel, "skTiles"):
           module.add(VReadfirstlaneB32(dst=sgpr(sSkt), src=vgpr(self.states.skConstVgprs["skTiles"])))
         module.add(SCmpEQU32(src0=sgpr(sSkt), src1=1, comment="split == 1 ?"))
         self.releaseStreamKConstSgpr(sSkt)
@@ -16277,7 +16277,7 @@ class KernelWriterAssembly(KernelWriter):
       # setting it to 1 is the same signal as or-ing in a nonzero difference.
       if useStreamK:
         sIpt = self.acquireStreamKConstSgpr(kernel, "ItersPerTile")
-        if self.isStreamKConstantsToVgprEnabled(kernel):
+        if self.isStreamKConstantsToVgprEnabled(kernel, "ItersPerTile"):
           module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(self.states.skConstVgprs["ItersPerTile"]),
                                        comment="ItersPerTile const -> sgpr"))
         module.add(SCmpLgU32(src0=sgpr("StreamKLocalEnd"), src1=sgpr(sIpt),
@@ -16471,7 +16471,7 @@ class KernelWriterAssembly(KernelWriter):
         module.add(SCBranchSCC0(labelName=targetLabel.getLabelName(),
                                 comment="not tile start -> not fused (split contributor)"))
       sIpt = self.acquireStreamKConstSgpr(kernel, "ItersPerTile")
-      if self.isStreamKConstantsToVgprEnabled(kernel):
+      if self.isStreamKConstantsToVgprEnabled(kernel, "ItersPerTile"):
         module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(self.states.skConstVgprs["ItersPerTile"]),
                                      comment="ItersPerTile const -> sgpr"))
       module.add(SCmpEQU32(src0=sgpr("StreamKLocalEnd"), src1=sgpr(sIpt),
@@ -16936,7 +16936,7 @@ class KernelWriterAssembly(KernelWriter):
         module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Check for synchronizer"))
         module.add(SCBranchSCC0(labelName=gsuLabel.getLabelName(), comment="Branch to stream-k store code"))
         sSkt = self.acquireStreamKConstSgpr(kernel, "skTiles")
-        if self.isStreamKConstantsToVgprEnabled(kernel):
+        if self.isStreamKConstantsToVgprEnabled(kernel, "skTiles"):
           module.add(VReadfirstlaneB32(dst=sgpr(sSkt), src=vgpr(self.states.skConstVgprs["skTiles"])))
         module.add(SCmpEQU32(src0=sgpr(sSkt), src1=1, comment="split == 1 ?"))
         self.releaseStreamKConstSgpr(sSkt)
@@ -21314,7 +21314,7 @@ class KernelWriterAssembly(KernelWriter):
       # (kept in a VGPR on gfx1250).
       if kernel["StreamKForceDPOnly"]:
         sIpt = self.acquireStreamKConstSgpr(kernel, "ItersPerTile")
-        if self.isStreamKConstantsToVgprEnabled(kernel):
+        if self.isStreamKConstantsToVgprEnabled(kernel, "ItersPerTile"):
           mod.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(self.states.skConstVgprs["ItersPerTile"])))
         mod.add(SSubU32(dst=sgpr(tmpSgpr), src0=sgpr(sIpt), src1=1,
                         comment="tail iteration index within current StreamK tile (DP-only: ItersPerTile - 1)"))

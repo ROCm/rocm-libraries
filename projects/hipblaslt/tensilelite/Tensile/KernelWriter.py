@@ -5493,7 +5493,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
   ##############################################################################
   # StreamK Constants In VGPRs
   ##############################################################################
-  def isStreamKConstantsToVgprEnabled(self, kernel):
+  def isStreamKConstantsToVgprEnabled(self, kernel, name=None):
+    # With `name`, additionally asks whether that particular constant is parked.
+    # The parked set is not all-or-nothing: see streamKConstVgprNames.
+    if name is not None:
+      return name in self.streamKConstVgprNames(kernel)
     # Variants that mark keepsConstantsInSgpr=True (the dynamic
     # per-XCD path references SK kernarg constants directly) cannot
     # cache them in VGPRs on gfx1250.
@@ -5513,13 +5517,59 @@ class KernelWriter(metaclass=abc.ABCMeta):
       return True
     return False
 
+  def streamKConstVgprNames(self, kernel):
+    """StreamK constants parked in VGPRs, in VGPR-slot order.
+
+    gfx1250 parks the whole set -- that is what the mechanism was built for.
+
+    gfx950 + PostLoopStoreInNll needs far less. Its store epilogue peaks at 104
+    against a MaxSgpr of 102 on the large tiles, so only 2 registers are missing
+    -- but what matters is not the count, it is that the freed slots form a
+    CONTIGUOUS run. The allocations that set the peak (SrdA/B/MXSA/MXSB, then the
+    store batch temp) need 4- and 2-aligned blocks, so scattered single-register
+    holes let nothing compact. Measured: any two or three of these constants
+    still leaves 8-10 kernels over the cap, while the contiguous four below take
+    all 468 to zero overflow.
+
+    That drops ItersPerTile (48 readback sites), StreamKIdx (23) and skTiles (15)
+    from the parked set -- 86 of the 114 sites, and most of the ~38 instructions
+    per dispatch the full stash costs.
+    """
+    if not self.isStreamKConstantsToVgprEnabled(kernel):
+      return []
+    if kernel["ISA"] == IsaVersion(9,5,0) and kernel.get("PostLoopStoreInNll"):
+      # Kernarg order, which is what makes the default a contiguous run:
+      allNames = ["ItersPerTile", "MagicNumberItersPerTile", "MagicShiftItersPerTile",
+                  "SKItersPerWG", "skGrid", "skTiles", "StreamKIdx"]
+      sel = os.environ.get("TENSILE_PLSIN_SK_PARK",
+                           "MagicNumberItersPerTile,MagicShiftItersPerTile,SKItersPerWG,skGrid")
+      want = [n for n in allNames if n in sel.split(",")]
+      if kernel["StreamK"] != 3:
+        want = [n for n in want if n not in ("skGrid", "skTiles")]
+      return want
+    names = ["ItersPerTile", "MagicNumberItersPerTile", "MagicShiftItersPerTile", "SKItersPerWG"]
+    if kernel["StreamK"] == 3:
+      names += ["skGrid", "skTiles"]
+    # StreamKIdx is a var rather than a kernel arg; it gets a slot but no save.
+    names.append("StreamKIdx")
+    return names
+
   def acquireStreamKConstSgpr(self, kernel, name):
-    if self.isStreamKConstantsToVgprEnabled(kernel):
+    if self.isStreamKConstantsToVgprEnabled(kernel, name):
       idx = self.sgprPool.checkOut(1, name, preventOverflow=False)
       if idx + 1 > self.states.regCaps["MaxSgpr"]:
         self.states.overflowedResources = 2
       return idx
     return name
+
+  def readbackStreamKConst(self, kernel, dst, name):
+    """Read a parked StreamK constant back into `dst`, or nothing if it is not
+    parked -- in which case `dst` is already the constant's own SGPR name, as
+    returned by acquireStreamKConstSgpr."""
+    module = Module("readback %s" % name)
+    if self.isStreamKConstantsToVgprEnabled(kernel, name):
+      module.add(VReadfirstlaneB32(dst=sgpr(dst), src=vgpr(self.states.skConstVgprs[name])))
+    return module
 
   def releaseStreamKConstSgpr(self, nameOrIdx):
     if isinstance(nameOrIdx, int):
@@ -5582,14 +5632,16 @@ class KernelWriter(metaclass=abc.ABCMeta):
     module = Module("Move StreamK constants to VGPRs")
     self.states.skConstVgprs = {}
 
-    consts = ["ItersPerTile", "MagicNumberItersPerTile", "MagicShiftItersPerTile", "SKItersPerWG"]
-    if kernel["StreamK"] == 3:
-      consts += ["skGrid", "skTiles"]
+    names = self.streamKConstVgprNames(kernel)
+    # StreamKIdx is a var, not a kernel arg -- its value is only set later in
+    # preLoop, so it takes a slot but is neither saved nor undefined here.
+    consts = [n for n in names if n != "StreamKIdx"]
 
     baseVgpr = self.states.startVgprSKConsts
-    for i, name in enumerate(consts):
-      v = baseVgpr + i
-      self.states.skConstVgprs[name] = v
+    for i, name in enumerate(names):
+      self.states.skConstVgprs[name] = baseVgpr + i
+    for name in consts:
+      v = self.states.skConstVgprs[name]
       module.add(VMovB32(dst=vgpr(v), src=sgpr(name), comment="Save %s to VGPR v%u" % (name, v)))
 
     # Fully free the SGPR slots so defineVariableSgprs can reuse them.
@@ -5599,10 +5651,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # defineSgpr intentionally blocks from reuse (see defineSgpr lines 514-518).
     for name in consts:
       module.add(self.undefineSgpr(name))
-
-    # StreamKIdx is a var (not kernel arg) — value set later in preLoop
-    v = baseVgpr + len(consts)
-    self.states.skConstVgprs["StreamKIdx"] = v
 
     return module
 
@@ -9304,9 +9352,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         vgprIdx += numVgprsEmuB # for vgpr 32XEmulation B
 
       if kernel["StreamK"] and self.isStreamKConstantsToVgprEnabled(kernel):
-        numSKConsts = 5  # ItersPerTile, MagicNumberItersPerTile, MagicShiftItersPerTile, SKItersPerWG, StreamKIdx
-        if kernel["StreamK"] == 3:
-          numSKConsts += 2  # skGrid, skTiles
+        numSKConsts = len(self.streamKConstVgprNames(kernel))
         self.states.startVgprSKConsts = vgprIdx
         self.states.numVgprSKConsts = numSKConsts
         vgprIdx += numSKConsts
@@ -9366,9 +9412,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       #vgprIdx += self.states.c.numVgprValu
       if kernel["StreamK"] and self.isStreamKConstantsToVgprEnabled(kernel):
-        numSKConsts = 5  # ItersPerTile, MagicNumberItersPerTile, MagicShiftItersPerTile, SKItersPerWG, StreamKIdx
-        if kernel["StreamK"] == 3:
-          numSKConsts += 2  # skGrid, skTiles
+        numSKConsts = len(self.streamKConstVgprNames(kernel))
         self.states.startVgprSKConsts = vgprIdx
         self.states.numVgprSKConsts = numSKConsts
         vgprIdx += numSKConsts
@@ -9862,7 +9906,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if kernel["StreamKAtomic"] == 0:
         requiredAligned4SgprVar.append("SrdWS")
     elif kernel["StreamK"]:
-      if not self.isStreamKConstantsToVgprEnabled(kernel):
+      if not self.isStreamKConstantsToVgprEnabled(kernel, "StreamKIdx"):
         requiredUnalignedSgprVar.append("StreamKIdx")
       requiredUnalignedSgprVar += [
         "StreamKIter",

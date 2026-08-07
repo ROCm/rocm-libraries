@@ -125,7 +125,7 @@ class _SKWriter:
     def releaseStreamKConstSgpr(self, nameOrIdx):
         pass
 
-    def isStreamKConstantsToVgprEnabled(self, kernel):
+    def isStreamKConstantsToVgprEnabled(self, kernel, name=None):
         return False
 
     def strideRef(self, tc, idx):
