@@ -96,8 +96,6 @@ if( "${BACKEND}" STREQUAL "HIP")
     endif()
     message("-- ${Green}HIP kernels added${ColourReset}")
 
-    # Set compiler flags
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${HIP_HIPCC_FLAGS}")
     add_fma_property()
 
     # Add HIP specific includes

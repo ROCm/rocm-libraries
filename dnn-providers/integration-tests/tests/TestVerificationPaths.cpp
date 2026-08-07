@@ -14,7 +14,7 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 
 #include "harness/bundle/BundleDiscovery.hpp"
-#include "harness/gpu_graph_executor/GpuReferenceGraphExecutor.hpp"
+#include "harness/gpu-graph-executor/GpuReferenceGraphExecutor.hpp"
 
 // NOLINTBEGIN(readability-identifier-naming)
 
@@ -25,7 +25,7 @@ namespace
 
 std::filesystem::path goldenDataRoot()
 {
-    return std::filesystem::path(__FILE__).parent_path() / ".." / "integration_test_bundles";
+    return std::filesystem::path(__FILE__).parent_path() / ".." / "integration-test-bundles";
 }
 
 std::filesystem::path batchNormSmallBundle()

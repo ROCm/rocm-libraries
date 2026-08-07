@@ -8,14 +8,15 @@
 #include <set>
 #include <sstream>
 
+#include "harness/BundleMetadata.hpp"
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_frontend/Graph.hpp>
-#include <hipdnn_test_sdk/utilities/BundleMetadata.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
 #include <hipdnn_test_sdk/utilities/TensorDiff.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
+#include <hipdnn_test_sdk/utilities/VariantPackUtils.hpp>
 #include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
 
 #include "harness/CpuReferenceGraphExecutorAdapter.hpp"
@@ -25,8 +26,8 @@
 #include "harness/TestConfig.hpp"
 #include "harness/TomlGuards.hpp"
 #include "harness/bundle/UnverifiableBundleReport.hpp"
-#include "harness/gpu_graph_executor/GpuReferenceGraphExecutor.hpp"
-#include "harness/input_init/SynthesizeInputs.hpp"
+#include "harness/gpu-graph-executor/GpuReferenceGraphExecutor.hpp"
+#include "harness/input-init/FillInputs.hpp"
 #include "harness/tolerance/ToleranceResolver.hpp"
 
 namespace hipdnn_integration_tests::bundle
@@ -300,10 +301,10 @@ bool IntegrationBundleVerificationHarness::ensureInputsAvailable()
     {
         return true;
     }
-    return synthesizeInputs();
+    return fillBundleInputs();
 }
 
-bool IntegrationBundleVerificationHarness::synthesizeInputs()
+bool IntegrationBundleVerificationHarness::fillBundleInputs()
 {
     const auto wrapper = _bundle->graphWrapper();
     const auto& tensorAttrMap = wrapper.getTensorMap();
@@ -322,19 +323,19 @@ bool IntegrationBundleVerificationHarness::synthesizeInputs()
         leafInputUids.push_back(uid);
     }
 
-    auto synthResult = hipdnn_integration_tests::synthesizeInputs(
-        wrapper.getGraph(), inputs, leafInputUids, _synthesisConfig);
-    if(!synthResult.filled)
+    auto fillResult = hipdnn_integration_tests::fillInputs(
+        wrapper.getGraph(), inputs, leafInputUids, _inputFillRecipes);
+    if(!fillResult.filled)
     {
-        skipUnverifiable(synthResult.reason);
+        skipUnverifiable(fillResult.reason);
         return false;
     }
 
-    auto missing = _synthesisConfig.unfilled(leafInputUids);
+    auto missing = _inputFillRecipes.unfilled(leafInputUids);
     if(!missing.empty())
     {
         std::ostringstream os;
-        os << "cannot synthesize:";
+        os << "cannot fill:";
         for(const int64_t uid : missing)
         {
             os << " uid=" << uid;
@@ -357,6 +358,44 @@ bool IntegrationBundleVerificationHarness::synthesizeInputs()
 // make an unwritten output indistinguishable from a legitimately-computed zero,
 // so engine and reference could silently agree on garbage (both untouched zeros)
 // and the comparison would vacuously pass.
+namespace detail
+{
+std::unordered_map<int64_t, void*> buildVariantPack(
+    TensorMap& inputs,
+    OutputTensors& outputs,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorAttributes,
+    const std::vector<int64_t>& outputTensorUids,
+    bool useDevice)
+{
+    std::unordered_map<int64_t, void*> variantPack;
+    const std::set<int64_t> outputUids(outputTensorUids.begin(), outputTensorUids.end());
+
+    for(auto& [uid, tensor] : inputs)
+    {
+        if(outputUids.count(uid) != 0)
+        {
+            continue;
+        }
+
+        const auto attrIt = tensorAttributes.find(uid);
+        const bool isRuntimePassByValue
+            = attrIt != tensorAttributes.end() && attrIt->second->is_runtime_pass_by_value();
+        variantPack[uid] = hipdnn_test_sdk::utilities::selectVariantPackPointer(
+            *tensor, useDevice, isRuntimePassByValue);
+    }
+
+    for(auto& [uid, tensor] : outputs)
+    {
+        variantPack[uid] = hipdnn_test_sdk::utilities::selectVariantPackPointer(
+            *tensor, useDevice, /*isRuntimePassByValue=*/false);
+    }
+
+    return variantPack;
+}
+}
+
 OutputTensors IntegrationBundleVerificationHarness::allocateSentinelOutputs() const
 {
     const auto wrapper = _bundle->graphWrapper();
@@ -375,23 +414,9 @@ std::unordered_map<int64_t, void*>
     IntegrationBundleVerificationHarness::buildVariantPack(OutputTensors& outputs,
                                                            bool useDevice) const
 {
-    std::unordered_map<int64_t, void*> variantPack;
-    const std::set<int64_t> outputUids(_bundle->outputTensorUids.begin(),
-                                       _bundle->outputTensorUids.end());
-
-    for(auto& [uid, tensor] : *_bundle->tensors)
-    {
-        if(outputUids.count(uid) != 0)
-        {
-            continue;
-        }
-        variantPack[uid] = useDevice ? tensor->rawDeviceData() : tensor->rawHostData();
-    }
-    for(auto& [uid, tensor] : outputs)
-    {
-        variantPack[uid] = useDevice ? tensor->rawDeviceData() : tensor->rawHostData();
-    }
-    return variantPack;
+    const auto wrapper = _bundle->graphWrapper();
+    return detail::buildVariantPack(
+        *_bundle->tensors, outputs, wrapper.getTensorMap(), _bundle->outputTensorUids, useDevice);
 }
 
 std::optional<OutputTensors>
@@ -634,14 +659,13 @@ std::string IntegrationBundleVerificationHarness::dataTypeName(
 
 void IntegrationBundleVerificationHarness::applyMetadataGuards() const
 {
-    if(auto reason = hipdnn_test_sdk::utilities::checkVramRequirement(
-           _bundle->metadata, TestConfig::get().getCurrentDeviceVramMb()))
+    if(auto reason
+       = checkVramRequirement(_bundle->metadata, TestConfig::get().getCurrentDeviceVramMb()))
     {
         GTEST_SKIP() << *reason;
     }
 
-    if(auto reason = hipdnn_test_sdk::utilities::checkArchCompatibility(
-           _bundle->metadata, TestConfig::get().getCurrentArch()))
+    if(auto reason = checkArchCompatibility(_bundle->metadata, TestConfig::get().getCurrentArch()))
     {
         GTEST_SKIP() << *reason;
     }

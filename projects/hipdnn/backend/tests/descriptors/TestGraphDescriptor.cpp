@@ -38,34 +38,6 @@ public:
         EXPECT_EQ(graph.tensors.size(), 3);
         EXPECT_EQ(graph.nodes.size(), 1);
     }
-
-    static void verifyGraphsEquivalent(const hipdnn_flatbuffers_sdk::data_objects::GraphT& graph1,
-                                       const hipdnn_flatbuffers_sdk::data_objects::GraphT& graph2)
-    {
-        EXPECT_EQ(graph1.name, graph2.name);
-        EXPECT_EQ(graph1.compute_data_type, graph2.compute_data_type);
-        EXPECT_EQ(graph1.intermediate_data_type, graph2.intermediate_data_type);
-        EXPECT_EQ(graph1.io_data_type, graph2.io_data_type);
-        EXPECT_EQ(graph1.preferred_engine_id, graph2.preferred_engine_id);
-
-        ASSERT_EQ(graph1.tensors.size(), graph2.tensors.size());
-        for(size_t i = 0; i < graph1.tensors.size(); ++i)
-        {
-            SCOPED_TRACE("tensor[" + std::to_string(i) + "]");
-            ASSERT_NE(graph1.tensors[i], nullptr);
-            ASSERT_NE(graph2.tensors[i], nullptr);
-            EXPECT_EQ(*graph1.tensors[i], *graph2.tensors[i]);
-        }
-
-        ASSERT_EQ(graph1.nodes.size(), graph2.nodes.size());
-        for(size_t i = 0; i < graph1.nodes.size(); ++i)
-        {
-            SCOPED_TRACE("node[" + std::to_string(i) + "]");
-            ASSERT_NE(graph1.nodes[i], nullptr);
-            ASSERT_NE(graph2.nodes[i], nullptr);
-            EXPECT_EQ(*graph1.nodes[i], *graph2.nodes[i]);
-        }
-    }
 };
 
 TEST_F(TestGraphDescriptor, SerializeDeserializeGraph)
@@ -320,7 +292,48 @@ TEST_F(TestGraphDescriptor, JsonRoundTripViaDescriptorApi)
     auto graph2 = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(
         static_cast<const uint8_t*>(binary2.ptr));
 
-    verifyGraphsEquivalent(*graph1, *graph2);
+    EXPECT_EQ(*graph1, *graph2);
+}
+
+TEST_F(TestGraphDescriptor, JsonRoundTripPreservesMinimumApiVersionAndRuntimePassByValue)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    auto builder = createValidGraph();
+    const auto* graph = GetGraph(builder.GetBufferPointer());
+    auto graphT = std::unique_ptr<GraphT>(graph->UnPack());
+    ASSERT_NE(graphT, nullptr);
+    ASSERT_FALSE(graphT->tensors.empty());
+
+    graphT->tensors.front()->is_runtime_pass_by_value = true;
+    graphT->min_required_engine_api_version = std::make_unique<EngineApiVersion>(1, 2, 0);
+
+    flatbuffers::FlatBufferBuilder versionedBuilder;
+    versionedBuilder.Finish(Graph::Pack(versionedBuilder, graphT.get()));
+
+    GraphDescriptor original;
+    original.deserializeGraph(versionedBuilder.GetBufferPointer(), versionedBuilder.GetSize());
+    original.buildSerializedGraph();
+
+    const auto jsonStr = original.getSerializedJsonGraph();
+    const auto parsed = nlohmann::json::parse(jsonStr);
+    EXPECT_EQ(parsed.at("min_required_engine_api_version"),
+              nlohmann::json({{"major", 1}, {"minor", 2}, {"patch", 0}}));
+
+    GraphDescriptor roundTripped;
+    ASSERT_NO_THROW(
+        GraphDescriptor::createFromJsonGraph(roundTripped, jsonStr.c_str(), jsonStr.size()));
+    roundTripped.buildSerializedGraph();
+
+    const auto binary = roundTripped.getSerializedGraph();
+    const auto restored = UnPackGraph(static_cast<const uint8_t*>(binary.ptr));
+    ASSERT_NE(restored, nullptr);
+    ASSERT_NE(restored->min_required_engine_api_version, nullptr);
+    EXPECT_EQ(restored->min_required_engine_api_version->major(), 1);
+    EXPECT_EQ(restored->min_required_engine_api_version->minor(), 2);
+    EXPECT_EQ(restored->min_required_engine_api_version->patch(), 0);
+    ASSERT_FALSE(restored->tensors.empty());
+    EXPECT_TRUE(restored->tensors.front()->is_runtime_pass_by_value);
 }
 
 TEST_F(TestGraphDescriptor, JsonSerializationEmitsOverrideShapeTrue)
@@ -572,7 +585,7 @@ TEST_F(TestGraphDescriptor, JsonRoundTripViaApi)
     auto graph2 = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(
         static_cast<const uint8_t*>(binary2.ptr));
 
-    verifyGraphsEquivalent(*graph1, *graph2);
+    EXPECT_EQ(*graph1, *graph2);
 }
 
 TEST_F(TestGraphDescriptor, DeserializeInvalidatesSerializedBuffer)
@@ -840,7 +853,7 @@ TEST_F(TestGraphDescriptor, BinaryRoundTripViaApi)
     auto graph2 = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(
         static_cast<const uint8_t*>(binary2.ptr));
 
-    verifyGraphsEquivalent(*graph1, *graph2);
+    EXPECT_EQ(*graph1, *graph2);
 }
 
 // ============================================================================
@@ -939,4 +952,77 @@ TEST_F(TestGraphDescriptor, LegacyGraphWithoutOverrideShapeFieldRoundTripsToFals
                                 &count,
                                 &value));
     EXPECT_FALSE(value);
+}
+
+// ============================================================================
+// GraphDescriptor::hasRaggedTensors() (RFC 0014)
+// ============================================================================
+
+TEST_F(TestGraphDescriptor, HasRaggedTensorsFalseForNonRaggedGraph)
+{
+    auto builder = createValidGraph();
+    auto serializedGraph = builder.Release();
+
+    GraphDescriptor descriptor;
+    descriptor.deserializeGraph(serializedGraph.data(), serializedGraph.size());
+
+    EXPECT_FALSE(descriptor.hasRaggedTensors());
+}
+
+TEST_F(TestGraphDescriptor, HasRaggedTensorsFalseForEmptyDescriptor)
+{
+    // No operations => no tensors => not ragged.
+    const GraphDescriptor descriptor;
+    EXPECT_FALSE(descriptor.hasRaggedTensors());
+}
+
+TEST_F(TestGraphDescriptor, HasRaggedTensorsTrueWhenTensorCarriesRaggedOffset)
+{
+    auto builder = test_utilities::createValidGraphWithRaggedTensor();
+    auto serializedGraph = builder.Release();
+
+    GraphDescriptor descriptor;
+    descriptor.deserializeGraph(serializedGraph.data(), serializedGraph.size());
+
+    EXPECT_TRUE(descriptor.hasRaggedTensors());
+}
+
+TEST_F(TestGraphDescriptor, HasRaggedTensorsSurvivesSerializationRoundTrip)
+{
+    auto builder = test_utilities::createValidGraphWithRaggedTensor();
+    auto serializedGraph = builder.Release();
+
+    GraphDescriptor original;
+    original.deserializeGraph(serializedGraph.data(), serializedGraph.size());
+
+    auto handle = reinterpret_cast<hipdnnHandle_t>(0x12345678);
+    ASSERT_NO_THROW(original.setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
+                                          HIPDNN_TYPE_HANDLE,
+                                          1,
+                                          static_cast<const void*>(&handle)));
+    ASSERT_NO_THROW(original.finalize());
+
+    auto serialized = original.getSerializedGraph();
+
+    GraphDescriptor revived;
+    revived.deserializeGraph(static_cast<const uint8_t*>(serialized.ptr), serialized.size);
+
+    EXPECT_TRUE(revived.hasRaggedTensors());
+}
+
+TEST_F(TestGraphDescriptor, HasRaggedTensorsSurvivesJsonRoundTrip)
+{
+    auto builder = test_utilities::createValidGraphWithRaggedTensor();
+    auto serializedGraph = builder.Release();
+
+    GraphDescriptor original;
+    original.deserializeGraph(serializedGraph.data(), serializedGraph.size());
+    original.buildSerializedGraph();
+    const auto jsonStr = original.getSerializedJsonGraph();
+
+    GraphDescriptor fromJson;
+    ASSERT_NO_THROW(
+        GraphDescriptor::createFromJsonGraph(fromJson, jsonStr.c_str(), jsonStr.size()));
+
+    EXPECT_TRUE(fromJson.hasRaggedTensors());
 }

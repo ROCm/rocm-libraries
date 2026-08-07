@@ -5763,9 +5763,11 @@ void TreeNode::Print(rocfft_ostream& os, const int indent) const
     os << indentStr << PrintOperatingBufferCode(obIn) << " -> " << PrintOperatingBufferCode(obOut)
        << "\n";
 
-    for(const auto& c : comments)
+    for(auto c = comments.begin(); c != comments.end(); c++)
     {
-        os << "\n" << indentStr << "comment: " << c;
+        if(c == comments.begin())
+            os << "\n";
+        os << indentStr << "comment: " << *c << "\n";
     }
 
     if(childNodes.size())

@@ -77,6 +77,8 @@ set(HIPSPARSE_TEST_SOURCES
     test_const_dnvec_descr.cpp
     test_const_spmat_descr.cpp
     test_const_spvec_descr.cpp
+    test_dense_to_sparse_bell.cpp
+    test_dense_to_sparse_bell_no_set_pointers.cpp
     test_dense_to_sparse_coo.cpp
     test_dense_to_sparse_csc.cpp
     test_dense_to_sparse_csr.cpp
@@ -115,6 +117,7 @@ set(HIPSPARSE_TEST_SOURCES
     test_spsm_csr.cpp
     test_spsv_coo.cpp
     test_spsv_csr.cpp
+    test_spsv_csr_reuse_descr.cpp
     test_spvec_descr.cpp
     test_spvv.cpp
 )
@@ -192,6 +195,8 @@ set(HIPSPARSE_TEST_YAMLS
     rocm/test_prune_dense2csr_by_percentage.yaml
     # Generic
     rocm/test_axpby.yaml
+    rocm/test_dense_to_sparse_bell.yaml
+    rocm/test_dense_to_sparse_bell_no_set_pointers.yaml
     rocm/test_dense_to_sparse_coo.yaml
     rocm/test_dense_to_sparse_csc.yaml
     rocm/test_dense_to_sparse_csr.yaml
@@ -228,9 +233,20 @@ set(HIPSPARSE_TEST_YAMLS
     rocm/test_spsm_ex_csr.yaml
     rocm/test_spsv_coo.yaml
     rocm/test_spsv_csr.yaml
+    rocm/test_spsv_csr_reuse_descr.yaml
     rocm/test_spvv.yaml)
 
 if(HIPSPARSE_ENABLE_SPMV_BSR)
     list(APPEND HIPSPARSE_TEST_SOURCES test_spmv_bsr.cpp)
     list(APPEND HIPSPARSE_TEST_YAMLS rocm/test_spmv_bsr.yaml)
+endif()
+
+if(BUILD_WITH_CSC_TRSV)
+    list(APPEND HIPSPARSE_TEST_SOURCES test_spsv_csc.cpp)
+    list(APPEND HIPSPARSE_TEST_YAMLS rocm/test_spsv_csc.yaml)
+endif()
+
+if(BUILD_WITH_CSC_TRSM)
+    list(APPEND HIPSPARSE_TEST_SOURCES test_spsm_csc.cpp)
+    list(APPEND HIPSPARSE_TEST_YAMLS rocm/test_spsm_csc.yaml)
 endif()

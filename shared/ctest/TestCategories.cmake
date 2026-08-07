@@ -11,14 +11,15 @@ find_package(Python3 COMPONENTS Interpreter)
 function(_parse_test_category_optional_args)
     cmake_parse_arguments(
         ARG
-        ""
+        "USE_RTEST_DRIVER"
         "INSTALL_TEST_FILE;RESOURCE_GROUP;TEST_NAME_PREFIX;INSTALL_EXECUTABLE"
-        "COMMAND_ARGS;INSTALL_COMMAND_ARGS;ADDITIONAL_LABELS;ENVIRONMENT"
+        "COMMAND_ARGS;INSTALL_COMMAND_ARGS;ADDITIONAL_LABELS;ENVIRONMENT;ENVIRONMENT_MODIFICATION;FIXTURES_REQUIRED"
         ${ARGN}
     )
 
     set(_install_test_file "${ARG_INSTALL_TEST_FILE}")
     set(_resource_group "${ARG_RESOURCE_GROUP}")
+    set(_use_rtest_driver "${ARG_USE_RTEST_DRIVER}")
     if(ARG_UNPARSED_ARGUMENTS)
         list(LENGTH ARG_UNPARSED_ARGUMENTS _arg_count)
         if(NOT _install_test_file AND _arg_count GREATER 0)
@@ -27,16 +28,25 @@ function(_parse_test_category_optional_args)
         if(NOT _resource_group AND _arg_count GREATER 1)
             list(GET ARG_UNPARSED_ARGUMENTS 1 _resource_group)
         endif()
+        if(NOT _use_rtest_driver)
+            list(FIND ARG_UNPARSED_ARGUMENTS "--use-rtest-driver" _rtest_idx)
+            if(NOT _rtest_idx EQUAL -1)
+                set(_use_rtest_driver TRUE)
+            endif()
+        endif()
     endif()
 
     set(_TEST_CATEGORY_INSTALL_FILE "${_install_test_file}" PARENT_SCOPE)
     set(_TEST_CATEGORY_RESOURCE_GROUP "${_resource_group}" PARENT_SCOPE)
+    set(_TEST_CATEGORY_USE_RTEST_DRIVER "${_use_rtest_driver}" PARENT_SCOPE)
     set(_TEST_CATEGORY_NAME_PREFIX "${ARG_TEST_NAME_PREFIX}" PARENT_SCOPE)
     set(_TEST_CATEGORY_INSTALL_EXECUTABLE "${ARG_INSTALL_EXECUTABLE}" PARENT_SCOPE)
     set(_TEST_CATEGORY_COMMAND_ARGS "${ARG_COMMAND_ARGS}" PARENT_SCOPE)
     set(_TEST_CATEGORY_INSTALL_COMMAND_ARGS "${ARG_INSTALL_COMMAND_ARGS}" PARENT_SCOPE)
     set(_TEST_CATEGORY_ADDITIONAL_LABELS "${ARG_ADDITIONAL_LABELS}" PARENT_SCOPE)
     set(_TEST_CATEGORY_ENVIRONMENT "${ARG_ENVIRONMENT}" PARENT_SCOPE)
+    set(_TEST_CATEGORY_ENVIRONMENT_MODIFICATION "${ARG_ENVIRONMENT_MODIFICATION}" PARENT_SCOPE)
+    set(_TEST_CATEGORY_FIXTURES_REQUIRED "${ARG_FIXTURES_REQUIRED}" PARENT_SCOPE)
 endfunction()
 
 # Appends parser args for generated GTest category suites.
@@ -67,6 +77,15 @@ function(_build_test_category_parser_args out_var)
     foreach(extra_env_kv IN LISTS _TEST_CATEGORY_ENVIRONMENT)
         list(APPEND extra_args "--environment" "${extra_env_kv}")
     endforeach()
+    foreach(extra_env_mod IN LISTS _TEST_CATEGORY_ENVIRONMENT_MODIFICATION)
+        list(APPEND extra_args "--environment-modification" "${extra_env_mod}")
+    endforeach()
+    foreach(fixture IN LISTS _TEST_CATEGORY_FIXTURES_REQUIRED)
+        list(APPEND extra_args "--fixtures-required" "${fixture}")
+    endforeach()
+    if(_TEST_CATEGORY_USE_RTEST_DRIVER)
+        list(APPEND extra_args "--use-rtest-driver")
+    endif()
     set(${out_var} "${extra_args}" PARENT_SCOPE)
 endfunction()
 
@@ -123,6 +142,8 @@ endfunction()
 #       generated suite, merged with execution_settings.environment from the
 #       YAML (this list wins on key conflicts). Use to forward CMake-side
 #       TEST_ENVIRONMENT (ASAN symbolizer path, coverage LLVM_PROFILE_FILE).
+#   USE_RTEST_DRIVER - Run the project's <stem>_rtest.py driver with
+#       -t ctest_<category> instead of invoking the gtest binary directly.
 # ~~~
 function(apply_test_category_labels target_name yaml_file working_dir)
     _parse_test_category_optional_args(${ARGN})
