@@ -23,3 +23,12 @@ if(TARGET roc::host-validation-blas)
             roc::host-validation-blas
     )
 endif()
+
+if(TARGET roc::host-validation-mx)
+    add_executable(host-validation-mx-package-test mx.cpp)
+    target_link_libraries(
+        host-validation-mx-package-test
+        PRIVATE
+            roc::host-validation-mx
+    )
+endif()

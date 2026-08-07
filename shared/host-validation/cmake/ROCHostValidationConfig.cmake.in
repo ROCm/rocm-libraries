@@ -1,10 +1,13 @@
 @PACKAGE_INIT@
 
 include(CMakeFindDependencyMacro)
-include("${CMAKE_CURRENT_LIST_DIR}/ROCHostValidationTargets.cmake")
-
-if(TARGET roc::host-validation-blas)
+if(@HOST_VALIDATION_PACKAGE_HAS_BLAS@)
     find_dependency(BLAS)
 endif()
+if(@HOST_VALIDATION_PACKAGE_HAS_MX@)
+    find_dependency(mxDataGenerator CONFIG)
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/ROCHostValidationTargets.cmake")
 
 check_required_components(ROCHostValidation)

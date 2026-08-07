@@ -443,6 +443,42 @@ class TensorAndGemmTests(unittest.TestCase):
         )
         np.testing.assert_array_equal(opposite, -expected_matrix)
 
+    def test_mx_generation_matches_decoded_numpy_values(self):
+        for dimensions, block_axis in (((64, 3), 0), ((3, 64), 1)):
+            with self.subTest(dimensions=dimensions, block_axis=block_axis):
+                problem = hv.MxGenerationProblem()
+                problem.data_type = hv.ScalarType.Float4E2M1
+                problem.scale_type = hv.ScalarType.E8M0
+                problem.shape = hv.Shape(list(dimensions))
+                problem.leading_dimension = dimensions[0]
+                problem.block_axis = block_axis
+                problem.block_size = 32
+                recipe = hv.MxGenerationRecipe()
+                recipe.mode = hv.MxGenerationMode.Bounded
+                recipe.parameter0 = -1
+                recipe.parameter1 = 1
+                problem.data = recipe
+
+                first = hv.generate_mx(problem)
+                second = hv.generate_mx(problem)
+                self.assertEqual(first.data.storage, second.data.storage)
+                self.assertEqual(first.scales.storage, second.scales.storage)
+
+                data = hv.to_numpy(first.data)
+                scales = hv.to_numpy(first.scales)
+                scale_indices = hv.to_numpy(
+                    first.scale_indices, np.uint32
+                )
+                reference = hv.to_numpy(first.reference)
+                expected = np.empty(dimensions, dtype=np.float32)
+                for row in range(dimensions[0]):
+                    for column in range(dimensions[1]):
+                        scale_index = scale_indices[row, column]
+                        expected[row, column] = (
+                            data[row, column] * scales[scale_index]
+                        )
+                np.testing.assert_array_equal(reference, expected)
+
     def test_float32_gemm_matches_numpy(self):
         a = np.arange(15, dtype=np.float32).reshape(3, 5) - 4
         b = np.arange(20, dtype=np.float32).reshape(5, 4) - 7
