@@ -126,9 +126,10 @@ def configure(
     gemm_configs: Union[GemmConfig, Sequence[GemmConfig]],
     output_dir: str | Path,
     arch: str = "gfx950",
-    backend: str = "ductile"
+    backend: str = "ductile",
+    search_space: str | None = None,
 ) -> dict:
-    """Generate Tensile optimization configuration for one or more GEMM types.
+    """Generate tuning YAML configs for one or more GEMM types.
 
     Builds a config dict from gemm_configs (each a GemmConfig with its
     GemmType and size list), applies ARCH-specific defaults via
@@ -143,9 +144,10 @@ def configure(
         output_dir (str | Path): Output directory for generated config files.
         arch (str, optional): Target GPU architecture (gfx-style string written
             into config["ARCH"]). Defaults to "gfx950".
-        backend (str, optional): tensilelite backend; "ductile" (GA) or
-            "tensile" (sets config["GA"] accordingly). Defaults to
-            "ductile".
+        backend (str, optional): "ductile" or "tensile". 
+            Defaults to "ductile".
+        search_space (str, optional): "heuristic", "generic", or None 
+            (auto-inferred from backend).
 
     Returns:
         dict: The fully populated config dict (after defaults and the
@@ -171,7 +173,8 @@ def configure(
 
     config: dict = {
         "ARCH": arch,
-        "GA": backend.lower() == "ductile",
+        "backend": backend.lower(),
+        "search_space": search_space,
     }
     config["GemmProblems"] = gcs
 

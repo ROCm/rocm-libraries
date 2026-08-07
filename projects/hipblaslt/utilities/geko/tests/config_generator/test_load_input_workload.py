@@ -68,7 +68,7 @@ def test_apply_defaults_log_mode_roundtrip() -> None:
     cfg = {"ARCH": "gfx950", "GEMM_LOG_PATH": str(wf), "SIZE_OPTION": 2}
     validate_input_config(cfg)
     apply_input_config_defaults(cfg)
-    assert "GA" in cfg
+    assert "search_space" in cfg
     assert cfg.get("GemmProblems") is None
 
 
@@ -86,7 +86,7 @@ def test_validate_rejects_unknown_arch() -> None:
         )
 
 
-def test_apply_defaults_macro_tile_opt_requires_ga() -> None:
+def test_apply_defaults_macro_tile_opt_requires_ductile_backend() -> None:
     cfg = {
         "ARCH": "gfx950",
         "TRANSA": "N",
@@ -95,7 +95,7 @@ def test_apply_defaults_macro_tile_opt_requires_ga() -> None:
         "DestDataType": "B",
         "ComputeDataType": "S",
         "MACROTILE_OPT": True,
-        "GA": False,
+        "backend": "tensile",
     }
     validate_input_config(cfg)
     with pytest.raises(NotImplementedError, match="MACROTILE_OPT only valid"):
@@ -110,7 +110,7 @@ def test_apply_defaults_sets_non_ga_kernel_cap_and_mt_du_none() -> None:
         "DataType": "B",
         "DestDataType": "B",
         "ComputeDataType": "S",
-        "GA": False,
+        "backend": "tensile",
         "MACROTILE_OPT": False,
     }
     validate_input_config(cfg)
@@ -127,13 +127,13 @@ def test_apply_defaults_env_overrides_and_invalid_tokens(monkeypatch: pytest.Mon
         "DataType": "B",
         "DestDataType": "B",
         "ComputeDataType": "S",
-        "GA": False,
+        "backend": "tensile",
     }
     validate_input_config(cfg)
 
     monkeypatch.setenv("StreamK", "false")
     monkeypatch.setenv("MI_FILTER", "7")
-    monkeypatch.setenv("GA_VALIDATION_PROFILE", "bad-int")
+    monkeypatch.setenv("DUCTILE_VALIDATION_PROFILE", "bad-int")
     apply_input_config_defaults(cfg)
 
     assert cfg["StreamK"] is False

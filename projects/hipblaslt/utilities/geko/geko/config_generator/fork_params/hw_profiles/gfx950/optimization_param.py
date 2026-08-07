@@ -255,10 +255,10 @@ class GFX950Params(BaseOptimizationParams):
 
 
 class GFX950GAParams(BaseOptimizationParams):
-    """GFX950 GA (genetic algorithm) profile.
+    """GFX950 generic search-space profile.
 
     Broad exploratory ranges for all parameters.
-    Inherits directly from BaseOptimizationParams — GA defines its own
+    Inherits directly from BaseOptimizationParams — generic defines its own
     complete parameter set, independent of heuristic.
 
     Inactive groups (tailloop_stagger_group, extra_latency_dtv_group)
@@ -267,7 +267,7 @@ class GFX950GAParams(BaseOptimizationParams):
     """
 
     # =================================================================
-    # Overrides of inherited @param methods — broad GA ranges
+    # Overrides of inherited @param methods — broad generic ranges
     # =================================================================
 
     @param
@@ -369,7 +369,7 @@ class GFX950GAParams(BaseOptimizationParams):
         return None
 
     # =================================================================
-    # GA-only params (not in heuristic)
+    # Generic-only params (not in heuristic)
     # =================================================================
 
     @param
@@ -427,7 +427,7 @@ class GFX950GAParams(BaseOptimizationParams):
         return None
 
     # =================================================================
-    # GA group overrides + GA-only groups
+    # Generic group overrides + generic-only groups
     # =================================================================
 
     @group

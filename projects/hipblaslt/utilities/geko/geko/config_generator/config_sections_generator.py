@@ -167,7 +167,8 @@ class ConfigSectionGenerator:
 
         ds = dataSize[self._gt.data_type]
         mn_area = M_dim * N_dim * B_dim
-        threshold = LIST_OF_MT_MAX_SIZE[self._gt.data_type] * self.config['CUs'] * 10
+        mt_max = get_list_of_mt_max_size(self.config.get("search_space"))
+        threshold = mt_max[self._gt.data_type] * self.config['CUs'] * 10
 
         if ds == 1 and mn_area < threshold:
             val = math.ceil(val * 3.5)
@@ -189,15 +190,11 @@ class ConfigSectionGenerator:
         self,
         global_params: Dict[str, Any],
         sizes: Sequence[Sequence[int]],
-        is_ga: bool,
+        backend: str,
     ) -> None:
-        """Set ``EnqueuesPerSync``, ``NumWarmups``, and GA-only ``SleepPercent`` on *global_params*.
-
-        Non-GA mode uses enqueue heuristics only. GA scales warmups/enqueues with
-        :meth:`_calc_iters` and raises ``SleepPercent``.
-        """
+        """Set EnqueuesPerSync, NumWarmups, and (Ductile-only) SleepPercent."""
         enqueues = self._compute_enqueues(sizes)
-        if not is_ga:
+        if backend != "ductile":
             global_params['EnqueuesPerSync'] = enqueues
             global_params['NumWarmups'] = enqueues
         else:
@@ -215,9 +212,7 @@ class ConfigSectionGenerator:
         cms_priority: bool,
         soo: bool,
     ) -> Dict[str, Any]:
-        """Build the ductile section for GA tuning.
-
-        Computes GA sampling costs from MI groups and problem sizes.
+        """Build the ductile YAML section. Computes sampling costs from MI groups and problem sizes.
 
         Cost priority (lower is better):
         1) Lower ceil(TilesPerCU) bucket
@@ -228,11 +223,11 @@ class ConfigSectionGenerator:
         Group cost is averaged across sizes.
         """
 
-        val_profile = self.config.get("GA_VALIDATION_PROFILE", 1)
-        if val_profile not in GA_VALIDATION_PROFILE_MAP:
-            raise ValueError(f"Invalid GA_VALIDATION_PROFILE {val_profile}; must be one of {GA_VALIDATION_PROFILE_MAP.keys()}")
+        val_profile = self.config.get("DUCTILE_VALIDATION_PROFILE", 1)
+        if val_profile not in DUCTILE_VALIDATION_PROFILE_MAP:
+            raise ValueError(f"Invalid DUCTILE_VALIDATION_PROFILE {val_profile}; must be one of {DUCTILE_VALIDATION_PROFILE_MAP.keys()}")
 
-        n_elements_to_validate = GA_VALIDATION_PROFILE_MAP[val_profile]
+        n_elements_to_validate = DUCTILE_VALIDATION_PROFILE_MAP[val_profile]
         mi_groups = fork_params["Groups"].values[0]
 
         has_priority = lambda grp: "UseCustomMainLoopSchedule" in grp and int(grp["UseCustomMainLoopSchedule"].values[0]) and cms_priority
@@ -297,7 +292,7 @@ class ConfigSectionGenerator:
     def build_config(
         self,
         entry: ConfigEntry,
-        is_ga: bool = False,
+        backend: str = "tensile",
         cms_priority: bool = False,
         config_name: Optional[str] = None,
         soo: bool = False,
@@ -306,19 +301,20 @@ class ConfigSectionGenerator:
 
         Args:
             entry: ConfigEntry holding sizes, fork_params, nkernels, and mis_per_size.
-            is_ga: Whether GA (genetic algorithm) tuning is enabled.
-            config_name: Config name for log files (required when is_ga=True).
-            cms_priority: Whether to prioritize CMS tiles (GA only).
-            soo: Whether single-objective optimization is enabled (GA only).
+            backend: Tuning backend ("ductile" or "tensile").
+            config_name: Config name for log files (required for Ductile).
+            cms_priority: Whether to prioritize CMS tiles (Ductile only).
+            soo: Whether single-objective optimization is enabled (Ductile only).
 
         Returns:
             Complete config dict ready for YAML serialization.
         """
         sizes = entry.sizes
         fork_params = entry.fork_params
+        is_ductile = backend == "ductile"
 
         global_params = dict(self._global_params_base)
-        self._apply_enqueue_and_warmup_params(global_params, sizes, is_ga)
+        self._apply_enqueue_and_warmup_params(global_params, sizes, backend)
 
         problem_sizes = [{"Exact": f'[ {M}, {N}, {batch}, {K} ]'}
                          for M, N, batch, K in sizes]
@@ -340,10 +336,10 @@ class ConfigSectionGenerator:
             'BenchmarkProblems': [[self._problem_type, benchmark_common]],
             'LibraryLogic': self._library_logic,
             '#LibraryClient': '',
-            'Backend': {"Name": "Ductile"} if is_ga else {"Name": "Tensile"}
+            'Backend': {"Name": "Ductile"} if is_ductile else {"Name": "Tensile"}
         }
 
-        if is_ga:
+        if is_ductile:
             tuning_config['Backend']["Config"] = self._build_ductile(
                 fork_params, 
                 sizes, 

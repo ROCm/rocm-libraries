@@ -231,7 +231,7 @@ def _emit_entity_files(
     entity_name = gemm_type + cat_name
     built = csg.build_config(
         entry,
-        is_ga=config["GA"],
+        backend=config.get("backend", "ductile"),
         config_name=entity_name,
         cms_priority=config["CMS_PRIORITY"],
         soo=config["MACROTILE_OPT"],

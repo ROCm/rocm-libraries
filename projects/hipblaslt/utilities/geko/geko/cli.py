@@ -59,11 +59,11 @@ def _rows_from_gemm_config_yaml(path: Path, arch: str | None) -> List[dict]:
 def build_parser() -> argparse.ArgumentParser:
     """Construct the argparse parser (mutually exclusive --tune/--search/--bench and workload sources)."""
     parser = argparse.ArgumentParser(
-        description="GEKO: tune (GA), search, or benchmark a hipBLASLt GEMM workload log.",
+        description="GEKO: tune, search, or benchmark a hipBLASLt GEMM workload log.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     mode = parser.add_mutually_exclusive_group(required=True)
-    mode.add_argument("--tune", action="store_true", help="GA workflow: configure then optimize")
+    mode.add_argument("--tune", action="store_true", help="Tuning workflow: configure then optimize")
     mode.add_argument("--search", action="store_true", help="Dense-search tuning workflow")
     mode.add_argument("--bench", action="store_true", help="Benchmark GEMMs from the workload log only")
     workload_src = parser.add_mutually_exclusive_group(required=True)
@@ -146,7 +146,15 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         default="ductile",
         choices=["ductile", "tensile"],
-        help="Tuning backend for configure step (only used with --tune)",
+        help="Tuning backend: Ductile or Tensile (only used with --tune)",
+    )
+    parser.add_argument(
+        "--search-space",
+        type=str,
+        default=None,
+        choices=["heuristic", "generic"],
+        dest="search_space",
+        help="Search space strategy. Defaults to 'generic' for ductile, 'heuristic' for tensile (only used with --tune)",
     )
     parser.add_argument(
         "--workdir",
@@ -210,6 +218,7 @@ class CliArgs:
     n_slots: int
     keep_thr: float
     backend: str
+    search_space: str | None
     workdir: str | None
     up_thr: float
     duration: float
@@ -275,6 +284,7 @@ def parse_cli_args(argv: Sequence[str] | None) -> CliArgs:
         n_slots=ns.n_slots,
         keep_thr=keep_thr,
         backend=ns.backend,
+        search_space=ns.search_space,
         workdir=ns.workdir,
         up_thr=ns.up_thr,
         duration=ns.duration,
@@ -363,6 +373,7 @@ def dispatch(args: CliArgs, anchor: str | None = None) -> int:
             keep_thr=args.keep_thr,
             arch=args.arch,
             backend=args.backend,
+            search_space=args.search_space,
             workdir=run_root_str,
             verbose=args.verbose,
             bench_freq=args.bench_freq,

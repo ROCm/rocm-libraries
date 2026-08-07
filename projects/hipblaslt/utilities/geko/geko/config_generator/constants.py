@@ -51,23 +51,41 @@ validMFMA["I8"] = validMFMA["H"] + validMFMA["F8"]
 
 MAX_GSU_WORKSPACE_SIZE = 128 * 1024 * 1024
 
-# TODO: check if we can use larger MT0xMT1 for all datatypes
-LARGE_MT0xMT1=256*464
-REGULAR_MT0xMT1=256*256
-LIST_OF_MT_MAX_SIZE = {
-    'H': LARGE_MT0xMT1,
-    'B': LARGE_MT0xMT1,
-    'S': REGULAR_MT0xMT1, # Is larger MT valid for for F32?
-    'D': REGULAR_MT0xMT1,
-    'C': 32768,
-    'Z': 16384,
-    'I8': LARGE_MT0xMT1,
-    'X': LARGE_MT0xMT1, # X3 (3 BF16 implementation)
-    'X1': LARGE_MT0xMT1, # X1 (1 BF16 implementation)
-    'F8': LARGE_MT0xMT1,
-    'F8N': LARGE_MT0xMT1,
-    'F8B8': LARGE_MT0xMT1,
-    'B8F8': LARGE_MT0xMT1}
+_LARGE_MT0xMT1_DEFAULT = 256 * 464
+_REGULAR_MT0xMT1_DEFAULT = 256 * 256
+
+
+def _build_mt_max_size(large: int, regular: int):
+    return {
+        'H': large,
+        'B': large,
+        'S': regular,
+        'D': regular,
+        'C': 32768,
+        'Z': 16384,
+        'I8': large,
+        'X': large,
+        'X1': large,
+        'F8': large,
+        'F8N': large,
+        'F8B8': large,
+        'B8F8': large,
+    }
+
+
+LIST_OF_MT_MAX_SIZE_DEFAULT = _build_mt_max_size(_LARGE_MT0xMT1_DEFAULT, _REGULAR_MT0xMT1_DEFAULT)
+
+
+def get_list_of_mt_max_size(search_space=None):
+    """Return MT-area cap dict for search_space.
+
+    Stage 1 supports heuristic/generic only, both using default caps.
+    """
+    return LIST_OF_MT_MAX_SIZE_DEFAULT
+
+
+# Backward-compatible alias.
+LIST_OF_MT_MAX_SIZE = LIST_OF_MT_MAX_SIZE_DEFAULT
 
 ONLY_INCLUDE_MIs_GFX950 = {
     'H':
@@ -261,7 +279,7 @@ MAX_MT0 = 512
 MIN_MT1 = 4
 MAX_MT1 = 512
 
-MAX_MT_AREA = 464 * 256
+MAX_MT_AREA = 464 * 256 # Used by setupMTTuning.py. TODO - This should not be here.
 
 # <<< Controls for number of MIs in the config file
 # these params are only for MI_FILTER = 2
@@ -278,15 +296,16 @@ ROUND3 = 5
 # The  larger the number is, the more MI it keeps
 LSUTHRESHOLD = 65536
 
-# Cap on kernels per config file for non-GA (exhaustive) tuning.
-# In GA mode this is ignored (set to sys.maxsize). User can override via config YAML.
+# Kernel cap for heuristic search space (generic uses sys.maxsize).
 MAX_NUM_KERNELS_PER_CONFIG = 180_000_000
 
 
-# GA VALIDATION PROFILE NUM ELEMENTS TO VALIDATE
-# This is used to cap the number of elements used for GA kernel validation 
-# after the last generation.
-GA_VALIDATION_PROFILE_MAP = {
+VALID_BACKENDS = ("ductile", "tensile")
+VALID_SEARCH_SPACES = ("heuristic", "generic")
+
+
+# Ductile validation profile: caps elements validated after the last generation.
+DUCTILE_VALIDATION_PROFILE_MAP = {
     0: 0, 
     1: 128, 
     2: -1,  # -1 means no cap (use all elements)
@@ -301,7 +320,7 @@ REQUIRED_CONFIG_FIELDS = ["TRANSA", "TRANSB", "DataType", "DestDataType", "Compu
 # To add or change per-ARCH optional defaults, edit ``CONFIG_DEFAULTS_BY_ARCH`` below.
 _CONFIG_OPTIONAL_COMMON = {
     "StreamK": True,
-    "GA": True,
+    "search_space": None,
     "MACROTILE_OPT": False,
     "MT_DU": None,
     "USE_HEURISTICS": False,
@@ -310,14 +329,14 @@ _CONFIG_OPTIONAL_COMMON = {
     "MI_FILTER": 2,
     "EPILOGUES": True,
     "CLUSTER": 0,
-    "GA_VALIDATION_PROFILE": 1,
+    "DUCTILE_VALIDATION_PROFILE": 1,
 }
 
 # Config fields that can be overridden by environment variables (if set). Used in _apply_env_config_overrides.
 ENV_UPDATABLE_KEYS = {
     "StreamK",
     "MI_FILTER",
-    "GA_VALIDATION_PROFILE",
+    "DUCTILE_VALIDATION_PROFILE",
 }
 
 _CMS_DEFAULTS_GFX950 = {"CMS": True, "CMS_PRIORITY": False}

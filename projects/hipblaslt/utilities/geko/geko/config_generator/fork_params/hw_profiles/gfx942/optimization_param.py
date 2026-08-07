@@ -341,10 +341,10 @@ class GFX942Params(BaseOptimizationParams):
 
 
 class GFX942GAParams(BaseOptimizationParams):
-    """GFX942 GA (genetic algorithm) profile.
+    """GFX942 generic search-space profile.
 
     Broad exploratory ranges for all parameters.
-    Inherits directly from BaseOptimizationParams — GA defines its own
+    Inherits directly from BaseOptimizationParams — generic defines its own
     complete parameter set, independent of heuristic.
     """
 

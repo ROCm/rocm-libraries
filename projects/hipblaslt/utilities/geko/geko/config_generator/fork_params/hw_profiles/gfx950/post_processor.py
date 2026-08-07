@@ -3,7 +3,7 @@
 
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from geko.config_generator.constants import LIST_OF_MT_MAX_SIZE
+from geko.config_generator.constants import get_list_of_mt_max_size
 from geko.config_generator.mi_designer import MFMA, MIDesign
 from geko.config_generator.fork_params.post_processor import BasePostProcessor, mark_post_process
 from geko.config_generator.shared_utils import (
@@ -31,7 +31,7 @@ class GFX950PostProcessor(BasePostProcessor):
     ) -> Tuple[Dict[str, ForkParameter], GroupDimension]:
         """Add MIArchVgpr=False to MI entries with large macro tiles."""
         dt = self._gt.data_type
-        threshold = LIST_OF_MT_MAX_SIZE[dt] // 3
+        threshold = get_list_of_mt_max_size(self.config.get("search_space"))[dt] // 3
         for entry in mi_groups:
             mfma_params = MIDesign.calculate_mfma_parameters(MFMA.from_list(entry["MatrixInstruction"].values))
             if mfma_params.MT0 * mfma_params.MT1 >= threshold:
@@ -102,7 +102,7 @@ class GFX950PostProcessor(BasePostProcessor):
     ) -> Tuple[Dict[str, ForkParameter], GroupDimension]:
         """Load CMS kernels and prepend to MI groups.
         When CMS is disabled, set UseCustomMainLoopSchedule=0
-        NOTE - Legacy code doesn't support CMS for non-GA workflows"""
+        NOTE - Legacy code doesn't support CMS for non-Ductile workflows"""
         if not self.config.get("CMS", False):
             fork_params["UseCustomMainLoopSchedule"] = self._make_param(
                 "UseCustomMainLoopSchedule", [0])
@@ -120,7 +120,7 @@ class GFX950PostProcessor(BasePostProcessor):
 
 
 class GFX950GAPostProcessor(BasePostProcessor):
-    """GFX950 GA post-processor.
+    """GFX950 generic search-space post-processor.
 
     Augments MI groups with MIArchVgpr and merges CMS groups.
     """
@@ -134,7 +134,7 @@ class GFX950GAPostProcessor(BasePostProcessor):
     ) -> Tuple[Dict[str, ForkParameter], GroupDimension]:
         """Add MIArchVgpr=False to MI entries with large macro tiles."""
         dt = self._gt.data_type
-        threshold = LIST_OF_MT_MAX_SIZE[dt] // 3
+        threshold = get_list_of_mt_max_size(self.config.get("search_space"))[dt] // 3
         for entry in mi_groups:
             mfma_params = MIDesign.calculate_mfma_parameters(MFMA.from_list(entry["MatrixInstruction"].values))
             if mfma_params.MT0 * mfma_params.MT1 >= threshold:
