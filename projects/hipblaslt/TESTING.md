@@ -1,8 +1,7 @@
 # hipBLASLt Testing Strategy
 
-- **Status:** Draft
-- **Owner:** Tony Davis (@tony-davis)
-- **Technical Lead:** TBD before this document leaves draft
+- **Owner:** T.J. Alumbaugh (@talumbau)
+- **Technical Lead:** Tony Davis (@tony-davis)
 - **Last Updated:** 2026-08-07
 
 > **In a hurry?** Start with [The short version](#the-short-version). From there, jump to
@@ -1547,7 +1546,8 @@ this table should drive.
 
 ## Owners and Review Cadence
 
-**Document owner:** Tony Davis (@tony-davis), responsible for keeping this document accurate.
+**Document owner:** T.J. Alumbaugh (@talumbau). **Technical lead:** Tony Davis (@tony-davis),
+responsible for keeping this document accurate.
 
 **Test ownership** is currently distributed rather than assigned. The client GTest suite, the
 TensileLite Python suites, the characterization goldens, and the CI lanes each have people who work
