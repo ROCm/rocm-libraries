@@ -263,6 +263,7 @@ def validate_label_gated_cmake_options(gated_options=None):
                 f"list of options, not {type(gated['cmake_options']).__name__}"
             )
 
+
 def collect_projects_to_run(subtrees, pr_labels=None):
     subtrees = list(subtrees)
     platform = os.getenv("PLATFORM")
