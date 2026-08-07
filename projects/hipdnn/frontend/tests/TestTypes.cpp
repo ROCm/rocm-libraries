@@ -87,6 +87,7 @@ TEST(TestTypes, GetDataTypeEnumFromType)
     EXPECT_EQ(getDataTypeEnumFromType<uint8_t>(), DataType::UINT8);
     EXPECT_EQ(getDataTypeEnumFromType<int32_t>(), DataType::INT32);
     EXPECT_EQ(getDataTypeEnumFromType<int8_t>(), DataType::INT8);
+    EXPECT_EQ(getDataTypeEnumFromType<fp4_e2m1>(), DataType::FP4_E2M1);
     EXPECT_EQ(getDataTypeEnumFromType<fp8_e4m3>(), DataType::FP8_E4M3);
     EXPECT_EQ(getDataTypeEnumFromType<fp8_e5m2>(), DataType::FP8_E5M2);
     EXPECT_EQ(getDataTypeEnumFromType<int64_t>(), DataType::INT64);
@@ -843,4 +844,36 @@ TEST(TestTypes, ToBackendReductionModeNotSetReturnsNullopt)
     using namespace hipdnn_frontend;
 
     EXPECT_EQ(toBackendReductionMode(ReductionMode::NOT_SET), std::nullopt);
+}
+
+TEST(TestTypes, MoeGroupedMatmulModeRoundTrip)
+{
+    using namespace hipdnn_frontend;
+
+    for(const auto mode :
+        {MoeGroupedMatmulMode::NONE, MoeGroupedMatmulMode::GATHER, MoeGroupedMatmulMode::SCATTER})
+    {
+        const auto backendMode = toBackendMoeGroupedMatmulMode(mode);
+        ASSERT_TRUE(backendMode.has_value());
+        const auto [roundTripped, error] = fromHipdnnMoeGroupedMatmulMode(*backendMode);
+        EXPECT_TRUE(error.is_good()) << error.get_message();
+        EXPECT_EQ(roundTripped, mode);
+    }
+}
+
+TEST(TestTypes, ToBackendMoeGroupedMatmulModeNotSetReturnsNullopt)
+{
+    using namespace hipdnn_frontend;
+
+    EXPECT_EQ(toBackendMoeGroupedMatmulMode(MoeGroupedMatmulMode::NOT_SET), std::nullopt);
+}
+
+TEST(TestTypes, MoeGroupedMatmulModeUnknownValueReturnsError)
+{
+    using namespace hipdnn_frontend;
+
+    const auto [mode, error]
+        = fromHipdnnMoeGroupedMatmulMode(static_cast<hipdnnMoeGroupedMatmulMode_t>(9999));
+    EXPECT_EQ(mode, MoeGroupedMatmulMode::NOT_SET);
+    EXPECT_EQ(error.code, ErrorCode::HIPDNN_BACKEND_ERROR);
 }
