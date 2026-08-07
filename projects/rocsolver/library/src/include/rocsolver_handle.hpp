@@ -30,6 +30,9 @@
 #include "common_host_helpers.hpp"
 #include "rocsolver/rocsolver.h"
 
+#include <map>
+#include <utility>
+
 ROCSOLVER_BEGIN_NAMESPACE
 
 struct rocsolver_handle_data_
@@ -40,6 +43,10 @@ struct rocsolver_handle_data_
     rocsolver_alg_mode sterf_mode = rocsolver_alg_mode_gpu;
     rocsolver_alg_mode steqr_mode = rocsolver_alg_mode_gpu;
     rocsolver_alg_mode hetrd_mode = rocsolver_alg_mode_1stage;
+
+    using opt_key = std::pair<rocsolver_function, rocsolver_option>;
+    std::map<opt_key, int64_t> opts_i64;
+    std::map<opt_key, double>  opts_fp64;
 };
 
 typedef struct rocsolver_handle_data_* rocsolver_handle_data;

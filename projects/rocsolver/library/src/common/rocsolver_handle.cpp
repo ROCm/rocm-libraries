@@ -33,6 +33,7 @@
 
 ROCSOLVER_BEGIN_NAMESPACE
 
+//------------------------------------------------------------------------------
 rocblas_status rocsolver_set_alg_mode_impl(rocblas_handle handle,
                                            const rocsolver_function func,
                                            const rocsolver_alg_mode mode)
@@ -110,6 +111,7 @@ catch(...)
     return exception2rocblas_status();
 }
 
+//------------------------------------------------------------------------------
 rocblas_status rocsolver_get_alg_mode_impl(rocblas_handle handle,
                                            const rocsolver_function func,
                                            rocsolver_alg_mode* mode)
@@ -159,6 +161,143 @@ catch(...)
     return exception2rocblas_status();
 }
 
+//------------------------------------------------------------------------------
+static int64_t default_opt_i64(rocsolver_function /*func*/, rocsolver_option opt)
+{
+    switch(opt)
+    {
+    case rocsolver_option_nb: return 64;
+    default: return 0;
+    }
+}
+
+static double default_opt_fp64(rocsolver_function /*func*/, rocsolver_option /*opt*/)
+{
+    return 0.0;
+}
+
+//------------------------------------------------------------------------------
+rocblas_status rocsolver_set_opt_impl(rocblas_handle handle,
+                                      const rocsolver_function func,
+                                      const rocsolver_option opt,
+                                      const int64_t value)
+try
+{
+    if(!handle)
+        return rocblas_status_invalid_handle;
+
+    switch(opt)
+    {
+    case rocsolver_option_nb:
+    case rocsolver_option_kd:
+    case rocsolver_option_switch_size:
+    case rocsolver_option_2stage_switch_size:
+    case rocsolver_option_dc_leaf_size: break;
+    default: return rocblas_status_invalid_value;
+    }
+
+    std::shared_ptr<void> handle_ptr;
+    ROCBLAS_CHECK(rocblas_internal_get_data_ptr(handle, handle_ptr));
+    rocsolver_handle_data handle_data = (rocsolver_handle_data)handle_ptr.get();
+
+    if(handle_data == nullptr)
+    {
+        handle_ptr  = std::make_shared<rocsolver_handle_data_>();
+        handle_data = (rocsolver_handle_data)handle_ptr.get();
+        handle_data->checksum = sizeof(rocsolver_handle_data_);
+        ROCBLAS_CHECK(rocblas_internal_set_data_ptr(handle, handle_ptr));
+    }
+    else if(handle_data->checksum != sizeof(rocsolver_handle_data_))
+        return rocblas_status_internal_error;
+
+    handle_data->opts_i64[{func, opt}] = value;
+    return rocblas_status_success;
+}
+catch(...)
+{
+    return exception2rocblas_status();
+}
+
+//------------------------------------------------------------------------------
+rocblas_status rocsolver_get_opt_impl(rocblas_handle handle,
+                                      const rocsolver_function func,
+                                      const rocsolver_option opt,
+                                      int64_t* value)
+try
+{
+    if(!handle)
+        return rocblas_status_invalid_handle;
+
+    switch(opt)
+    {
+    case rocsolver_option_nb:
+    case rocsolver_option_kd:
+    case rocsolver_option_switch_size:
+    case rocsolver_option_2stage_switch_size:
+    case rocsolver_option_dc_leaf_size: break;
+    default: return rocblas_status_invalid_value;
+    }
+
+    std::shared_ptr<void> handle_ptr;
+    ROCBLAS_CHECK(rocblas_internal_get_data_ptr(handle, handle_ptr));
+    rocsolver_handle_data handle_data = (rocsolver_handle_data)handle_ptr.get();
+
+    if(handle_data && handle_data->checksum != sizeof(rocsolver_handle_data_))
+        return rocblas_status_internal_error;
+
+    if(handle_data)
+    {
+        auto it = handle_data->opts_i64.find({func, opt});
+        if(it != handle_data->opts_i64.end())
+        {
+            *value = it->second;
+            return rocblas_status_success;
+        }
+    }
+    *value = default_opt_i64(func, opt);
+    return rocblas_status_success;
+}
+catch(...)
+{
+    return exception2rocblas_status();
+}
+
+//------------------------------------------------------------------------------
+rocblas_status rocsolver_set_opt_fp64_impl(rocblas_handle handle,
+                                           const rocsolver_function /*func*/,
+                                           const rocsolver_option /*opt*/,
+                                           const double /*value*/)
+try
+{
+    if(!handle)
+        return rocblas_status_invalid_handle;
+
+    // No fp64 options defined yet.
+    return rocblas_status_invalid_value;
+}
+catch(...)
+{
+    return exception2rocblas_status();
+}
+
+//------------------------------------------------------------------------------
+rocblas_status rocsolver_get_opt_fp64_impl(rocblas_handle handle,
+                                           const rocsolver_function /*func*/,
+                                           const rocsolver_option /*opt*/,
+                                           double* /*value*/)
+try
+{
+    if(!handle)
+        return rocblas_status_invalid_handle;
+
+    // No fp64 options defined yet.
+    return rocblas_status_invalid_value;
+}
+catch(...)
+{
+    return exception2rocblas_status();
+}
+
 ROCSOLVER_END_NAMESPACE
 
 extern "C" {
@@ -175,6 +314,38 @@ rocblas_status rocsolver_get_alg_mode(rocblas_handle handle,
                                       rocsolver_alg_mode* mode)
 {
     return rocsolver::rocsolver_get_alg_mode_impl(handle, func, mode);
+}
+
+rocblas_status rocsolver_set_opt(rocblas_handle handle,
+                                 const rocsolver_function func,
+                                 const rocsolver_option opt,
+                                 const int64_t value)
+{
+    return rocsolver::rocsolver_set_opt_impl(handle, func, opt, value);
+}
+
+rocblas_status rocsolver_get_opt(rocblas_handle handle,
+                                 const rocsolver_function func,
+                                 const rocsolver_option opt,
+                                 int64_t* value)
+{
+    return rocsolver::rocsolver_get_opt_impl(handle, func, opt, value);
+}
+
+rocblas_status rocsolver_set_opt_fp64(rocblas_handle handle,
+                                      const rocsolver_function func,
+                                      const rocsolver_option opt,
+                                      const double value)
+{
+    return rocsolver::rocsolver_set_opt_fp64_impl(handle, func, opt, value);
+}
+
+rocblas_status rocsolver_get_opt_fp64(rocblas_handle handle,
+                                      const rocsolver_function func,
+                                      const rocsolver_option opt,
+                                      double* value)
+{
+    return rocsolver::rocsolver_get_opt_fp64_impl(handle, func, opt, value);
 }
 
 } // extern C
