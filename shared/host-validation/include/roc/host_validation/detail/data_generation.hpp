@@ -667,6 +667,25 @@ class RandomGenerator {
         for (auto& value : values) value = uniformReal<T>(lower, upper);
     }
 
+    template <typename T>
+    void fillChoose(std::span<T> values, std::span<const T> candidates) {
+        for (auto& value : values) value = choose<T>(candidates);
+    }
+
+    template <typename T>
+    void fillSignedUniformInteger(std::span<T> values, int lowerMagnitude,
+                                  int upperMagnitude) {
+        if (lowerMagnitude < 0 || lowerMagnitude > upperMagnitude)
+            throw std::invalid_argument(
+                "Signed uniform-integer magnitudes are invalid.");
+        for (auto& value : values) {
+            const int sign = m_binaryDistribution(m_generator) ? 1 : -1;
+            const int magnitude =
+                uniformInteger<int>(lowerMagnitude, upperMagnitude);
+            value = static_cast<T>(sign * magnitude);
+        }
+    }
+
    private:
     std::mt19937 m_generator;
     std::uniform_int_distribution<> m_binaryDistribution{0, 1};
