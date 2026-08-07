@@ -53,6 +53,15 @@
     #endif
 #endif // ROCPRIM_DETAIL_LOOKBACK_SCAN_STATE_WITHOUT_SLOW_FENCES
 
+#ifndef ROCPRIM_DETAIL_LOOKBACK_SCAN_STATE_ATOMIC_ALIGNMENT
+    #if defined(__HIP_DEVICE_COMPILE__) \
+        && (defined(__gfx942__) || defined(__gfx950__) || defined(__gfx9_4_generic__))
+        #define ROCPRIM_DETAIL_LOOKBACK_SCAN_STATE_ATOMIC_ALIGNMENT 128
+    #else
+        #define ROCPRIM_DETAIL_LOOKBACK_SCAN_STATE_ATOMIC_ALIGNMENT 4
+    #endif
+#endif // ROCPRIM_DETAIL_LOOKBACK_SCAN_STATE_ATOMIC_ALIGNMENT
+
 extern "C" {
 void __builtin_amdgcn_s_sleep(int);
 }
@@ -234,14 +243,18 @@ private:
         lookback_scan_prefix_flag flag;
     };
 
-    struct alignas(128) aligned_prefix_type
+    static constexpr size_t alignment
+        = max(sizeof(prefix_underlying_type),
+              size_t{ROCPRIM_DETAIL_LOOKBACK_SCAN_STATE_ATOMIC_ALIGNMENT});
+    /// This type aligns the raw prefix data. This can be used to align
+    /// a single atomic per cache line to reduce false sharing.
+    struct alignas(alignment) aligned_prefix_type
     {
         prefix_underlying_type raw;
     };
 
     static_assert(sizeof(prefix_underlying_type) >= sizeof(prefix_type), "");
 
-    
     aligned_prefix_type* prefixes;
 public:
 
@@ -527,7 +540,11 @@ private:
         unsigned int words[words_no];
     };
 
-    struct alignas(128) aligned_flag_type
+    static constexpr size_t alignment
+        = max(sizeof(flag_cast_type), size_t{ROCPRIM_DETAIL_LOOKBACK_SCAN_STATE_ATOMIC_ALIGNMENT});
+    /// This type aligns the raw flag data. This can be used to align
+    /// a single atomic per cache line to reduce false sharing.
+    struct alignas(alignment) aligned_flag_type
     {
         flag_cast_type flag;
     };
