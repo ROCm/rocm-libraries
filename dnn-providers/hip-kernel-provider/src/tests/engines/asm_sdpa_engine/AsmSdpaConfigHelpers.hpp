@@ -55,6 +55,33 @@ struct GraphTestCase
 };
 
 /**
+ * @brief A test case with explicit tensor dimensions for shape-sweep tests.
+ *
+ * Unlike GraphTestCase (which holds a pre-built graph), this struct holds
+ * raw dimensions so the test fixture can build the graph itself — enabling
+ * shape sweeps, GQA, and asymmetric sequence-length testing.
+ */
+struct SdpaFwdTestCase
+{
+    SdpaFwdTestCase(std::vector<int64_t> qDimsIn,
+                    std::vector<int64_t> vDimsIn,
+                    std::string archIn,
+                    int64_t leftBoundIn = -1,
+                    int64_t rightBoundIn = -1,
+                    bool topLeftAlignmentIn = true);
+
+    std::vector<int64_t> qDims; // [B, H_q, S_q, D_qk]
+    std::vector<int64_t> kDims; // derived: [B, H_kv, S_kv, D_qk]
+    std::vector<int64_t> vDims; // [B, H_kv, S_kv, D_v]
+    std::string arch;
+    int64_t leftBound;
+    int64_t rightBound;
+    bool topLeftAlignment;
+
+    static std::string getName(const testing::TestParamInfo<SdpaFwdTestCase>& info);
+};
+
+/**
  * @brief Generates a descriptive string for a kernel config.
  *
  * @param config The kernel configuration
