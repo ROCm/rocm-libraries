@@ -78,6 +78,9 @@ template <typename T>
 constexpr ScalarType scalarType() {
     if constexpr (std::is_same_v<T, uint8_t>)
         return ScalarType::UInt8;
+    else if constexpr (std::is_same_v<T, char>)
+        return std::is_signed_v<char> ? ScalarType::Int8
+                                      : ScalarType::UInt8;
     else if constexpr (std::is_same_v<T, hipblasLtInt8>)
         return ScalarType::Int8;
     else if constexpr (std::is_same_v<T, int32_t>)
@@ -102,6 +105,8 @@ constexpr ScalarType scalarType() {
         return ScalarType::Float8E4M3Fnuz;
     else if constexpr (std::is_same_v<T, hipblaslt_bf8_fnuz>)
         return ScalarType::Float8E5M2Fnuz;
+    else if constexpr (std::is_same_v<T, hipblaslt_e8>)
+        return ScalarType::E8M0;
     else
         static_assert(!sizeof(T), "C++ type has no host-validation scalar mapping.");
 }
@@ -121,5 +126,14 @@ MutableTensorView mutableTensorView(T* data, size_t elements, Layout layout) {
                   "External C++ type does not store one scalar per object.");
     return MutableTensorView(type, std::move(layout),
                              std::as_writable_bytes(std::span<T>(data, elements)));
+}
+
+inline MutableTensorView mutableTensorView(void* data,
+                                          size_t storageBytes,
+                                          hipDataType type,
+                                          Layout layout) {
+    return MutableTensorView(
+        scalarType(type), std::move(layout),
+        std::span<std::byte>(static_cast<std::byte*>(data), storageBytes));
 }
 }  // namespace roc::host_validation::hipblaslt_adapter

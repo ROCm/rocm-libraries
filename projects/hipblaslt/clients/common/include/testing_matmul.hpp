@@ -36,7 +36,6 @@
 #include "hipblaslt_datatype2string.hpp"
 #include "hipblaslt_init.hpp"
 #include "hipblaslt_math.hpp"
-#include "hipblaslt_random.hpp"
 #include "hipblaslt_test.hpp"
 #include "hipblaslt_vector.hpp"
 #include <roc/host_validation/adapters/hipblaslt/Epilogue.hpp>
@@ -2344,8 +2343,6 @@ void testing_matmul_with_bias(const Arguments& arg,
             if(arg.scaleD)
                 hScaleD.emplace_back(Talpha, 1);
         }
-
-        hipblaslt_seedrand();
 
         // For ULP validation, force hpl / trig_float A/B/C inputs to be
         // positive-only so the reference dot products do not cancel toward zero

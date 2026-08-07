@@ -389,6 +389,60 @@ class TensorAndGemmTests(unittest.TestCase):
         )[:65]
         self.assertTrue(np.all(fp4_nibbles <= 14))
 
+        options.real.pattern = hv.GenerationPattern.RandomRawBits
+        options.seed = 41
+        raw_bits = hv.generate_tensor(hv.ScalarType.UInt32, [32], options)
+        raw_bits_repeat = hv.generate_tensor(
+            hv.ScalarType.UInt32, [32], options
+        )
+        self.assertEqual(raw_bits.storage, raw_bits_repeat.storage)
+        self.assertNotEqual(raw_bits.storage, bytes(len(raw_bits.storage)))
+
+    def test_generation_recipe_modifiers(self):
+        options = hv.GenerationOptions()
+        options.real.pattern = hv.GenerationPattern.UniformInteger
+        options.real.parameter0 = 1
+        options.real.parameter1 = 10
+        options.real.value_scale = 0.1
+        options.real.value_offset = 2.0
+        options.seed = 37
+        scaled = hv.to_numpy(
+            hv.generate_tensor(hv.ScalarType.Float32, [64], options)
+        )
+        scaled_tenths = np.rint((scaled - 2.0) * 10).astype(np.int32)
+        self.assertTrue(np.all((1 <= scaled_tenths) & (scaled_tenths <= 10)))
+        np.testing.assert_allclose(
+            scaled, 2.0 + scaled_tenths.astype(np.float32) / 10.0
+        )
+
+        options.real.pattern = hv.GenerationPattern.UniformReal
+        options.real.parameter0 = -0.5
+        options.real.parameter1 = 0.5
+        options.real.value_scale = 1.0
+        options.real.value_offset = 0.0
+        options.real.transform = hv.GenerationTransform.Absolute
+        positive = hv.to_numpy(
+            hv.generate_tensor(hv.ScalarType.Float32, [64], options)
+        )
+        self.assertTrue(np.all((0 <= positive) & (positive <= 0.5)))
+
+        options.real.pattern = hv.GenerationPattern.Constant
+        options.real.parameter0 = 2.0
+        options.real.transform = hv.GenerationTransform.Identity
+        options.real.alternating_dimensions = [0, 1]
+        alternating = hv.to_numpy(
+            hv.generate_tensor(hv.ScalarType.Float32, [2, 3, 2], options)
+        )
+        expected_matrix = np.asarray([[-2, 2, -2], [2, -2, 2]], dtype=np.float32)
+        np.testing.assert_array_equal(alternating[:, :, 0], expected_matrix)
+        np.testing.assert_array_equal(alternating[:, :, 1], expected_matrix)
+
+        options.real.negative_parity = 1
+        opposite = hv.to_numpy(
+            hv.generate_tensor(hv.ScalarType.Float32, [2, 3], options)
+        )
+        np.testing.assert_array_equal(opposite, -expected_matrix)
+
     def test_float32_gemm_matches_numpy(self):
         a = np.arange(15, dtype=np.float32).reshape(3, 5) - 4
         b = np.arange(20, dtype=np.float32).reshape(5, 4) - 7

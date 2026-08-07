@@ -7,6 +7,8 @@
 
 #include <gtest/gtest.h>
 
+#include <hip/hip_runtime.h>
+
 #include <array>
 #include <cmath>
 #include <complex>
@@ -58,6 +60,186 @@ TEST(HostValidationDataInitializationBridge, LegacyHostEntryPointsUseTensorLayou
     EXPECT_EQ(values[3], Complex(0, 0));
     EXPECT_EQ(values[4], Complex(0, 0));
     EXPECT_EQ(values[2], Complex(-99, -99));
+}
+
+TEST(HostValidationDataInitializationBridge, LegacyRandomHelpersUseComponentRecipes)
+{
+    std::array<float, 8> values;
+    values.fill(-99);
+
+    hipblaslt_init(values.data(), 2, 2, 3);
+    for(const size_t index : {size_t{0}, size_t{1}, size_t{3}, size_t{4}})
+    {
+        EXPECT_EQ(values[index], std::trunc(values[index]));
+        EXPECT_GE(values[index], 1);
+        EXPECT_LE(values[index], 10);
+    }
+    EXPECT_EQ(values[2], -99);
+
+    values.fill(-99);
+    hipblaslt_init_small(values.data(), 2, 2, 3);
+    for(const size_t index : {size_t{0}, size_t{1}, size_t{3}, size_t{4}})
+    {
+        EXPECT_GE(values[index], 0.1f);
+        EXPECT_LE(values[index], 1.0f);
+        EXPECT_FLOAT_EQ(values[index] * 10,
+                        std::round(values[index] * 10));
+    }
+    EXPECT_EQ(values[2], -99);
+
+    values.fill(-99);
+    hipblaslt_init_alternating_sign(values.data(), 2, 2, 3);
+    EXPECT_LT(values[0], 0);
+    EXPECT_GT(values[1], 0);
+    EXPECT_GT(values[3], 0);
+    EXPECT_LT(values[4], 0);
+    EXPECT_EQ(values[2], -99);
+
+    values.fill(-99);
+    hipblaslt_init_hpl(values.data(), 2, 2, 3);
+    for(const size_t index : {size_t{0}, size_t{1}, size_t{3}, size_t{4}})
+    {
+        EXPECT_GE(values[index], -0.5f);
+        EXPECT_LE(values[index], 0.5f);
+    }
+    EXPECT_EQ(values[2], -99);
+
+    hipblaslt_init_nan(values.data(), values.size());
+    for(const float value : values)
+        EXPECT_TRUE(std::isnan(value));
+}
+
+TEST(HostValidationDataInitializationBridge, GeneratesProblemLevelMatrixRecipes)
+{
+    using namespace roc::host_validation;
+    using namespace roc::host_validation::hipblaslt_adapter;
+
+    MatrixStorageInitialization exact;
+    exact.role             = MatrixRole::B;
+    exact.initialization   = hipblaslt_initialization::integer_exact;
+    exact.type             = HIP_R_32F;
+    exact.rows             = 2;
+    exact.columns          = 3;
+    exact.leadingDimension = 4;
+    exact.batchStride      = 12;
+    exact.batchCount       = 2;
+    std::vector<std::byte> exactStorage = generateMatrixStorage(exact);
+    TensorView exactView(
+        ScalarType::Float32,
+        Layout(Shape{2, 3, 2}, {1, 4, 12}),
+        exactStorage);
+    for(size_t batch = 0; batch < 2; ++batch)
+        for(size_t column = 0; column < 3; ++column)
+            for(size_t row = 0; row < 2; ++row)
+            {
+                const float value
+                    = exactView.loadAs<float>({row, column, batch});
+                EXPECT_EQ(value, std::trunc(value));
+                EXPECT_LE(std::abs(value), 2);
+                if(value != 0)
+                    EXPECT_EQ(value > 0, ((row ^ column) & 1U) != 0);
+            }
+    TensorView exactAllocation(
+        ScalarType::Float32,
+        Layout(Shape{4, 3, 2}, {1, 4, 12}),
+        exactStorage);
+    for(size_t batch = 0; batch < 2; ++batch)
+        for(size_t column = 0; column < 3; ++column)
+            for(size_t row = 2; row < 4; ++row)
+                EXPECT_EQ(
+                    exactAllocation.loadAs<float>({row, column, batch}), 0);
+
+    MatrixStorageInitialization probe;
+    probe.role             = MatrixRole::B;
+    probe.initialization   = hipblaslt_initialization::fp16_accumulator_probe;
+    probe.type             = HIP_R_16F;
+    probe.rows             = 4;
+    probe.columns          = 2;
+    probe.leadingDimension = 4;
+    std::vector<std::byte> probeStorage = generateMatrixStorage(probe);
+    TensorView probeView(
+        ScalarType::Float16,
+        Layout(Shape{4, 2, 1}, {1, 4, 0}),
+        probeStorage);
+    for(size_t column = 0; column < 2; ++column)
+        for(size_t row = 0; row < 4; ++row)
+            EXPECT_EQ(probeView.loadAs<float>({row, column, 0}),
+                      row % 2 == 0 ? 2 : -2);
+
+    MatrixStorageInitialization oneSpecial;
+    oneSpecial.role             = MatrixRole::A;
+    oneSpecial.initialization
+        = hipblaslt_initialization::norm_dist_one_special;
+    oneSpecial.specialValueType = 0;
+    oneSpecial.type             = HIP_R_32F;
+    oneSpecial.rows             = 4;
+    oneSpecial.columns          = 3;
+    oneSpecial.leadingDimension = 4;
+    oneSpecial.batchStride      = 12;
+    oneSpecial.batchCount       = 2;
+    std::vector<std::byte> specialStorage
+        = generateMatrixStorage(oneSpecial);
+    TensorView specialView(
+        ScalarType::Float32,
+        Layout(Shape{4, 3, 2}, {1, 4, 12}),
+        specialStorage);
+    size_t infinityCount = 0;
+    for(size_t batch = 0; batch < 2; ++batch)
+        for(size_t column = 0; column < 3; ++column)
+            for(size_t row = 0; row < 4; ++row)
+                infinityCount += std::isinf(
+                    specialView.loadAs<float>({row, column, batch}));
+    EXPECT_EQ(infinityCount, 1);
+}
+
+TEST(HostValidationDataInitializationBridge, HostSideDeviceFillCopiesComponentStorage)
+{
+    using namespace roc::host_validation::hipblaslt_adapter;
+
+    MatrixStorageInitialization initialization;
+    initialization.role             = MatrixRole::B;
+    initialization.initialization   = hipblaslt_initialization::integer_exact;
+    initialization.type             = HIP_R_32F;
+    initialization.rows             = 2;
+    initialization.columns          = 3;
+    initialization.leadingDimension = 4;
+    initialization.batchStride      = 12;
+    initialization.batchCount       = 2;
+    const std::vector<std::byte> expected
+        = generateMatrixStorage(initialization);
+
+    void* device = nullptr;
+    ASSERT_EQ(hipMalloc(&device, expected.size()), hipSuccess);
+    struct HostFillStateGuard
+    {
+        HostFillStateGuard()
+        {
+            set_host_side_fill_kernel_state(true);
+        }
+        ~HostFillStateGuard()
+        {
+            set_host_side_fill_kernel_state(false);
+        }
+    } guard;
+
+    hipblaslt_init_device(ABC_dims::B,
+                          initialization.initialization,
+                          false,
+                          device,
+                          initialization.rows,
+                          initialization.columns,
+                          initialization.leadingDimension,
+                          initialization.type,
+                          initialization.batchStride,
+                          initialization.batchCount);
+    std::vector<std::byte> observed(expected.size());
+    EXPECT_EQ(hipMemcpy(observed.data(),
+                        device,
+                        observed.size(),
+                        hipMemcpyDeviceToHost),
+              hipSuccess);
+    EXPECT_EQ(observed, expected);
+    EXPECT_EQ(hipFree(device), hipSuccess);
 }
 
 TEST(HostValidationCblasBridge, FloatGemm)
