@@ -49,6 +49,7 @@ Tests:
              HIPSPARSE_SPMV_CSR_ALG1,
              HIPSPARSE_SPMV_CSR_ALG2,
              HIPSPARSE_SPMV_CSR_ALG3]
+  call_preprocess: [true, false]
 
 # Test transpose operations with default algorithm (tests fix for rocsparse fallback)
 - name: spmv_csr_transpose
@@ -65,6 +66,7 @@ Tests:
   transA: [HIPSPARSE_OPERATION_TRANSPOSE, HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
   spmv_alg: [HIPSPARSE_SPMV_ALG_DEFAULT, HIPSPARSE_SPMV_CSR_ALG3]
+  call_preprocess: [true]
 
 - name: spmv_csr_mixed
   category: quick
@@ -83,6 +85,7 @@ Tests:
              HIPSPARSE_SPMV_CSR_ALG1,
              HIPSPARSE_SPMV_CSR_ALG2,
              HIPSPARSE_SPMV_CSR_ALG3]
+  call_preprocess: [true]
 
 - name: spmv_csr
   category: pre_checkin
@@ -108,6 +111,7 @@ Tests:
              nos5,
              nos6,
              nos7]
+  call_preprocess: [true]
              
 - name: spmv_csr
   category: pre_checkin
@@ -137,3 +141,4 @@ Tests:
              ASIC_320k,
              mac_econ_fwd500,
              mc2depi]
+  call_preprocess: [true]
