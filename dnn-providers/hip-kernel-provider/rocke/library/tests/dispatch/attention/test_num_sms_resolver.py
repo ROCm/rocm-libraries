@@ -15,6 +15,7 @@ assert the resolution order plus the downstream routing/segment effects.
 from __future__ import annotations
 
 import dispatch.attention as A
+import dispatch.attention.common as AC
 from dispatch.attention import AttentionRequest, _resolve_num_cus
 from kernels.common.attention_unified import UnifiedAttentionProblem
 import kernels.common.attention_unified as au
@@ -57,9 +58,9 @@ def test_gfx942_device_query():
     p = _Patch()
     try:
         p.attr(hipm, "get_device_arch", lambda *a, **k: "gfx942")
-        p.attr(A, "_device_num_cus", lambda: 304)
+        p.attr(AC, "_device_num_cus", lambda: 304)
         assert _resolve_num_cus(_req(num_sms=0)) == 304
-        p.attr(A, "_device_num_cus", lambda: 228)  # smaller-CU gfx942 variant
+        p.attr(AC, "_device_num_cus", lambda: 228)  # smaller-CU gfx942 variant
         assert _resolve_num_cus(_req(num_sms=0)) == 228
     finally:
         p.restore()
@@ -71,7 +72,7 @@ def test_gfx942_fallback_off_box():
     try:
         p.attr(hipm, "get_device_arch", lambda *a, **k: None)  # no gfx942 device
         p.attr(
-            A, "_device_num_cus", lambda: 256
+            AC, "_device_num_cus", lambda: 256
         )  # e.g. a gfx950 box; must NOT be consulted
         assert (
             _resolve_num_cus(_req(num_sms=0)) == 120
@@ -85,7 +86,7 @@ def test_other_archs_keep_legacy_120():
     p = _Patch()
     try:
         p.attr(hipm, "get_device_arch", lambda *a, **k: "gfx950")
-        p.attr(A, "_device_num_cus", lambda: 256)
+        p.attr(AC, "_device_num_cus", lambda: 256)
         assert _resolve_num_cus(_req(num_sms=0, arch="gfx950")) == 120
         assert _resolve_num_cus(_req(num_sms=0, arch="gfx90a")) == 120
         assert _resolve_num_cus(_req(num_sms=0, arch="gfxZZZ")) == 120
@@ -98,7 +99,7 @@ def test_explicit_caller_wins_any_arch():
     p = _Patch()
     try:
         p.attr(hipm, "get_device_arch", lambda *a, **k: "gfx942")
-        p.attr(A, "_device_num_cus", lambda: 999)  # must NOT be consulted
+        p.attr(AC, "_device_num_cus", lambda: 999)  # must NOT be consulted
         assert _resolve_num_cus(_req(num_sms=200)) == 200
         assert _resolve_num_cus(_req(num_sms=200, arch="gfx950")) == 200
     finally:
