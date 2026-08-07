@@ -120,13 +120,17 @@ namespace TensileLite
             }
             catch(std::exception const& e)
             {
-                // Unsupported dtype or analytical failure: return a correct
-                // result via the library's native ordering.
+                // Unsupported dtype or analytical failure: keep the pinned
+                // exact-tuned matches and fill the remainder from the library's
+                // native ordering (de-duplicated), preserving the guarantee that
+                // exacts stay at the top.
                 if(Debug::Instance().printPropertyEvaluation())
                     std::cerr << "TensileLite::findTopSolutionsUnified: analytical ranking "
                                  "failed ("
                               << e.what() << "); falling back to findTopSolutions.\n";
-                return library.findTopSolutions(problem, hardware, numSolutions);
+                for(auto const& sol : library.findTopSolutions(problem, hardware, numSolutions))
+                    pushUnique(sol);
+                return rv;
             }
         }
 
