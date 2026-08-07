@@ -967,9 +967,11 @@ class KernelWriterAssembly(KernelWriter):
 
     if kernel["enableTDMB"]:
       # Alias B descriptor onto A for multi-wave to reduce SGPR pressure.
-      # Subtile uses separate descriptors -- deferred allocation provides
-      # enough SGPR headroom, and separate descriptors avoid the reinit
-      # overhead before each tensor_load_to_lds.
+      # Non-subtile aliases both Group0 and Group1 (wave-separated: same
+      # descriptor is shared, per-wave parity selects A vs B fields).
+      # Subtile aliases only Group0 (global addr + LDS addr, patched inline
+      # before each B load) but keeps Group1 separate because B has its own
+      # Dim1/Stride0 values that differ from A's.
       if kernel["NumWaves"] > 1 and not kernel.get("UseSubtileImpl"):
         module.add(RegSet("s", "sgprtdmBGroup0", "sgprtdmAGroup0"))
         module.add(RegSet("s", "sgprtdmBGroup1", "sgprtdmAGroup1"))
@@ -977,6 +979,16 @@ class KernelWriterAssembly(KernelWriter):
           module.add(RegSet("s", "sgprtdmBGroup2", "sgprtdmAGroup2"))
           module.add(RegSet("s", "sgprtdmBGroup3", "sgprtdmAGroup2"))
         if kernel["ProblemType"]["MXBlockB"]:
+          module.add(RegSet("s", "sgprtdmMXSBGroup0", "sgprtdmMXSAGroup0"))
+          module.add(RegSet("s", "sgprtdmMXSBGroup1", "sgprtdmMXSAGroup1"))
+      elif kernel["NumWaves"] > 1 and kernel.get("UseSubtileImpl"):
+        # Subtile: alias Group0 onto A (saves 4 SGPRs), keep Group1 separate
+        module.add(RegSet("s", "sgprtdmBGroup0", "sgprtdmAGroup0"))
+        module.add(self.defineSgpr("tdmBGroup1", 8, 4))
+        if kernel.get("_TDMIterateModeA", False) or kernel.get("_TDMIterateModeB", False):
+          module.add(RegSet("s", "sgprtdmBGroup2", "sgprtdmAGroup2"))
+          module.add(RegSet("s", "sgprtdmBGroup3", "sgprtdmAGroup2"))
+        if kernel["ProblemType"]["MXBlockB"] and not _subtileSkipMxTdm:
           module.add(RegSet("s", "sgprtdmMXSBGroup0", "sgprtdmMXSAGroup0"))
           module.add(RegSet("s", "sgprtdmMXSBGroup1", "sgprtdmMXSAGroup1"))
       else:

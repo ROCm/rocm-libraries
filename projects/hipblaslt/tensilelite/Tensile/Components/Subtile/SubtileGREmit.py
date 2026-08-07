@@ -46,6 +46,9 @@ from ...Common import INDEX_CHARS, clusterEnabled
 from ...SolutionStructs.Utilities import isSubtileIterateMode as _isSubtileIterateMode
 from ...Common.DataType import DataType
 
+# TDM descriptor type field (bits [31:30] = 0b10 for typed load).
+_TDM_DESC_TYPE_FIELD = hex(2 << 30)
+
 
 ################################################################################
 # 1. Dispatch bases
@@ -531,9 +534,14 @@ def _emitGRPtrUpdate_TLU0(tag, tile, ti, writer, kernel):
     inc = int(ti.depthUBytes)
     module.addComment0("TDM addr update: %s += %u" % (tc, inc))
     module.add(SAddU64(dst=sgpr("Address%s" % tc, 2), src0=sgpr("Address%s" % tc, 2), src1=inc))
-    group0 = "tdm%sGroup0" % tc
-    module.add(SMovB64(dst=sgpr("%s+2" % group0, 2), src=sgpr("Address%s" % tc, 2), comment="sync descriptor global addr"))
-    module.add(SOrB32(dst=sgpr("%s+3" % group0), src0=sgpr("%s+3" % group0), src1=hex(2 << 30), comment="restore type field"))
+    # When B's Group0 is aliased onto A, don't sync B's addr to the
+    # descriptor (it holds A's addr). B's addr is patched at load time.
+    _bAliased = (tc == 'B' and kernel["NumWaves"] > 1
+                 and kernel.get("UseSubtileImpl"))
+    if not _bAliased:
+      group0 = "tdm%sGroup0" % tc
+      module.add(SMovB64(dst=sgpr("%s+2" % group0, 2), src=sgpr("Address%s" % tc, 2), comment="sync descriptor global addr"))
+      module.add(SOrB32(dst=sgpr("%s+3" % group0), src0=sgpr("%s+3" % group0), src1=hex(2 << 30), comment="restore type field"))
     return module
 
   module = Module(f"GR Ptr Update ({tc})")
@@ -886,8 +894,29 @@ def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1):
       isSubtileIter = _isSubtileIterateMode(kernel, tc)
       group2 = sgpr("tdm%sGroup2" % tc, 4) if isSubtileIter else None
       group3 = sgpr("tdm%sGroup3" % tc, 4) if isSubtileIter else None
+      # When B's Group0 is aliased onto A (NumWaves > 1), patch the shared
+      # Group0 with B's global addr and LDS addr before the load, then
+      # restore A's state. Group1 is separate and already has B's fields.
+      _bAliased = (tc == 'B' and kernel["NumWaves"] > 1
+                   and kernel.get("UseSubtileImpl"))
+      if _bAliased:
+        module.addComment0("TDM B: patch aliased Group0 (A->B)")
+        module.add(SMovB64(dst=sgpr("%s+2" % group0, 2), src=sgpr("AddressB", 2),
+                   comment="set B global addr"))
+        module.add(SOrB32(dst=sgpr("%s+3" % group0), src0=sgpr("%s+3" % group0),
+                   src1=_TDM_DESC_TYPE_FIELD, comment="restore type field"))
+        module.add(SMovB32(dst=sgpr("%s+1" % group0), src=sgpr("tdmLdsAddrB"),
+                   comment="set B LDS addr"))
       module.add(TensorLoadToLds(sgpr(group0, 4), sgpr(group1, 8), group2, group3,
                                  comment="TDM: global->LDS for %s" % tc))
+      if _bAliased:
+        module.addComment0("TDM B: restore A Group0")
+        module.add(SMovB64(dst=sgpr("%s+2" % group0, 2), src=sgpr("AddressA", 2),
+                   comment="restore A global addr"))
+        module.add(SOrB32(dst=sgpr("%s+3" % group0), src0=sgpr("%s+3" % group0),
+                   src1=_TDM_DESC_TYPE_FIELD, comment="restore type field"))
+        module.add(SMovB32(dst=sgpr("%s+1" % group0), src=sgpr("tdmLdsAddrA"),
+                   comment="restore A LDS addr"))
     return module
 
   linearId = tileInfo.getLocalSubtileLinearId(sId0, sId1)
@@ -989,8 +1018,13 @@ def globalReadLDSBufferSwap(tc, writer, kernel):
       module = Module()
       module.addComment0("TDM: swap %s LDS buffer (XOR with per-tensor swap mask)" % tc)
       module.add(SXorB32(dst=sgpr(ldsAddrSgpr), src0=sgpr(ldsAddrSgpr), src1=sgpr(swapSgpr), comment=""))
-      group0 = "tdm%sGroup0" % tc
-      module.add(SMovB32(dst=sgpr("%s+1" % group0), src=sgpr(ldsAddrSgpr), comment="sync descriptor LDS addr"))
+      # When B's Group0 is aliased onto A, only update the tracking SGPR.
+      # The descriptor is patched with B's LDS addr at load time.
+      _bAliased = (tc == 'B' and kernel["NumWaves"] > 1
+                   and kernel.get("UseSubtileImpl"))
+      if not _bAliased:
+        group0 = "tdm%sGroup0" % tc
+        module.add(SMovB32(dst=sgpr("%s+1" % group0), src=sgpr(ldsAddrSgpr), comment="sync descriptor LDS addr"))
       return module
     return ti_.emitGRLDSBufferSwap(writer, kernel)
   else:
@@ -1110,9 +1144,18 @@ def initTDMDescriptorSubtile(writer, kernel, tP):
   padAmountBytes = int(getattr(tileInfoForTc, "ldsRowPadBytes", 0))
   padIntervalBytes = int(du * bpe) if padAmountBytes else 0
 
-  mod.add(comp.initOperands(descSgprName(0), descSgprName(1), None, None))
+  # When B's Group0 is aliased onto A, skip Group0 init (it would clobber
+  # A's live descriptor). Only init B's separate Group1.
+  _bAliased = (tc == 'B' and kernel["NumWaves"] > 1)
+  if not _bAliased:
+    mod.add(comp.initOperands(descSgprName(0), descSgprName(1), None, None))
+    mod.add(comp.setGlobalAddr(descSgprName(0), f"Address{tc}"))
+  else:
+    # Zero-init B's separate Group1 only (Group0 is aliased to A)
+    for i in range(8):
+      mod.add(SMovB32(dst=sgpr(f"{descSgprName(1)}+{i}"), src=0,
+              comment=f"zero-init B Group1[{i}]"))
   mod.add(comp.setDataType(dtype, descSgprName(1)))
-  mod.add(comp.setGlobalAddr(descSgprName(0), f"Address{tc}"))
   # OR the per-tensor broadcast mask into the descriptor for TDM multicast.
   # Subtile loads both A and B on every wave, so it uses split masks
   # (MulticastMask{tc}), not the non-subtile single parity mask.
@@ -1137,7 +1180,8 @@ def initTDMDescriptorSubtile(writer, kernel, tP):
               "woffset = wId * (mt // numWaves * du * bpe)"))
     mod.add(SAddU32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), ldsConstOffset,
             f"ldsOffset = woffset + {ldsConstOffset} (subtile LDS offset for {tc})"))
-    mod.add(comp.setLdsAddr(descSgprName(0), sgpr(waveOffsetSgprIdx)))
+    if not _bAliased:
+      mod.add(comp.setLdsAddr(descSgprName(0), sgpr(waveOffsetSgprIdx)))
     # Save LDS offset to tracking SGPR for runtime double-buffer swap
     ldsTrackSgpr = f"tdmLdsAddr{tc}"
     mod.add(SMovB32(dst=sgpr(ldsTrackSgpr), src=sgpr(waveOffsetSgprIdx), comment=f"init {ldsTrackSgpr} for buffer tracking"))
