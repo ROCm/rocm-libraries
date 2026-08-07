@@ -193,6 +193,9 @@ def retrieve_projects(args):
     # Variables to track if labels override defaults
     label_projects = []
     label_test_type = None
+    # Populated only inside the push/pull_request branch below, so label-driven
+    # behavior cannot be triggered by a nightly or workflow_dispatch run even if
+    # PR_LABELS is set in that environment. Read again after the branch.
     pr_labels = []
 
     # Check if CI should be skipped based on modified paths

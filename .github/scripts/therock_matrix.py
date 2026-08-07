@@ -266,6 +266,9 @@ def validate_label_gated_cmake_options(gated_options=None):
 
 def collect_projects_to_run(subtrees, pr_labels=None):
     subtrees = list(subtrees)
+    # Defaults to None rather than [] so the default is not a shared mutable.
+    # Normalize once here so the rest of the function can just iterate it.
+    pr_labels = pr_labels or []
     platform = os.getenv("PLATFORM")
     projects = set()
     # Record why the BLAS row was selected before dependency folding loses the
@@ -294,10 +297,10 @@ def collect_projects_to_run(subtrees, pr_labels=None):
     # job that actually builds the target.
     validate_label_gated_cmake_options()
     pending_injections = {}
-    for label in pr_labels or []:
-        gated = LABEL_GATED_CMAKE_OPTIONS.get(label)
-        if not gated:
+    for label in pr_labels:
+        if label not in LABEL_GATED_CMAKE_OPTIONS:
             continue
+        gated = LABEL_GATED_CMAKE_OPTIONS[label]
         pending_injections.setdefault(gated["project"], []).extend(
             gated["cmake_options"]
         )

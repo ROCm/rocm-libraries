@@ -15,6 +15,9 @@ For [CI changes](https://github.com/ROCm/rocm-libraries/blob/f4ddefcbc17bf368892
 Here are additional labels that manipulate the CI behavior. The labels we provide are:
 
 - `skip-therockci`: The CI will skip all builds and tests
+- Label-gated cmake options: see [the section below](#label-gated-cmake-options) for the
+  current list. There are none today — the map ships empty, and each new one is added by
+  a code change.
 
 ### Label-gated cmake options
 
@@ -29,6 +32,25 @@ These labels are declared in
 label, naming the target project and the options to inject. The map is empty by default;
 adding an entry requires a code change plus a matching label in the repository's label
 set, since these labels are applied by hand and are not assigned by `labeler.yml`.
+
+For example, this entry would make the label `ci:miopen-my-feature` build MIOpen with
+`-DMIOPEN_ENABLE_MY_FEATURE=ON`:
+
+```python
+LABEL_GATED_CMAKE_OPTIONS = {
+    "ci:miopen-my-feature": {
+        "project": "miopen",
+        "cmake_options": ["-DMIOPEN_ENABLE_MY_FEATURE=ON"],
+    },
+}
+```
+
+`project` must name an entry in `project_map` or `additional_options` (for example
+`miopen`, `blas`, or `fft`) and `cmake_options` must be a list, even for a single
+option. Both are checked when the matrix is generated, so a typo fails the run with a
+clear message instead of quietly producing a build without the option. Whenever an entry
+is added, add its label to the bullet list above so the set of labels stays discoverable
+without reading the code.
 
 The gated build replaces the normal one for that project rather than running alongside
 it, so there is no second job and no duplicate artifact — but it also means the
