@@ -93,7 +93,8 @@ TEST(TestAppendComparisonDiffByDataType, UnsupportedTypeShowsMessage)
     std::ostringstream oss;
     appendComparisonDiffByDataType(oss, DT::INT8, "w", ref, actual, 0.0f, 0.0f);
 
-    EXPECT_NE(oss.str().find("no element-wise diff available"), std::string::npos);
+    EXPECT_NE(oss.str().find("no element-wise diff available for data type: INT8"),
+              std::string::npos);
 }
 
 TEST(TestAppendComparisonDiffByDataType, MatchingTensorsShowZeroMismatches)

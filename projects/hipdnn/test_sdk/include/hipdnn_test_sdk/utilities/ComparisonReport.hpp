@@ -75,7 +75,8 @@ inline void appendComparisonDiffByDataType(std::ostream& os,
         appendComparisonDiff<double>(os, tensorLabel, expected, actual, atol, rtol);
         return;
     default:
-        os << "  (no element-wise diff available for this data type)\n";
+        os << "  (no element-wise diff available for data type: "
+           << hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(dataType) << ")\n";
     }
 }
 
