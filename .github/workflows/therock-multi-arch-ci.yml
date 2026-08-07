@@ -158,6 +158,8 @@ jobs:
       # TESTING: Use granular-artifact-reuse branch
       ref: users/geomin12/granular-artifact-reuse
       external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'
+      # Pass changed projects for granular artifact-level reuse
+      changed_projects: ${{ needs.configure.outputs.changed_projects }}
 
   linux_build_and_test:
     name: Linux::${{ fromJSON(needs.setup.outputs.linux_build_config || '{}').build_variant_label || 'skip' }}
