@@ -329,13 +329,25 @@ def main() -> int:
         log(bar)
         return 1
 
-    runtime_root = tl_root / "build_tmp" / "tensilelite-rocm"
-    if not (runtime_root / ".info" / "version").is_file():
-        log("[tensilelite-tests] ERROR: staged ROCm runtime is missing.")
+    executable = "tensilelite-client.exe" if os.name == "nt" else "tensilelite-client"
+    client = tl_root / "build_tmp" / "tensilelite" / "client" / executable
+    if not client.is_file():
+        log("[tensilelite-tests] ERROR: built TensileLite client is missing.")
         log("    Run: invoke build-client --gpu-targets <gfx target>")
         return 1
     test_env = os.environ.copy()
-    test_env["ROCM_PATH"] = str(runtime_root)
+    test_env.setdefault("ROCM_PATH", "/opt/rocm")
+    configured = subprocess.run(
+        [
+            "uv", "run", "--no-sync", "python", "-m",
+            "tensilelite_configure_client", "--ensure-client", str(client),
+        ],
+        cwd=tl_root,
+        env=test_env,
+    )
+    if configured.returncode:
+        log("[tensilelite-tests] ERROR: failed to configure the built TensileLite client.")
+        return configured.returncode
 
     # --no-sync: use the provisioned .venv without rewriting uv.lock mid-commit.
     # -n 8: fixed; -n auto = os.cpu_count() over-subscribes large CI/dev hosts.
