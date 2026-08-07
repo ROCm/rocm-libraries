@@ -1479,6 +1479,16 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
 
     static bool IsSupportedArgument(const Argument& arg)
     {
+        // Memory access error
+        // TODO: need fix
+        if constexpr(LargeTensors)
+        {
+            if(is_gfx125_supported())
+            {
+                return false;
+            }
+        }
+
         if constexpr(!LargeTensors)
         {
             if(arg.stride_overflow)
