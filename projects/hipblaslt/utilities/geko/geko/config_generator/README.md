@@ -85,8 +85,8 @@ If the YAML omits them, these are filled from `HARDWARE_MAP[ARCH]` in [`load_inp
 |-----|------|
 | `StreamK` | `True` = StreamK, `False` = DataParallel |
 | `backend` | `"ductile"` or `"tensile"` (default: `"ductile"`; CLI `--backend` overrides). |
-| `search_space` | `"heuristic"` or `"generic"` (default: auto from `backend` - `generic` for ductile, `heuristic` for tensile). |
-| `MACROTILE_OPT` | Origami macro-tile tuning (**Ductile only**) |
+| `search_space` | `"heuristic"`, `"generic"`, or `"subtile"` (default: auto from `backend` — `generic` for ductile, `heuristic` for tensile). For full fork ranges with `backend: tensile`, set `search_space: generic`. |
+| `MACROTILE_OPT` | Origami macro-tile tuning. Works with the Ductile backend, or with `backend: tensile` when `SIZE_OPTION: 0` (explicit `Sizes:` list); the tensile path emits `Backend: Tensile` and Tensile enumerates the pinned fork space exhaustively. |
 | `MT_DU` | Fixed `[MT0, MT1, DU]` when `MACROTILE_OPT` |
 | `USE_HEURISTICS` | Refined heuristic param lists per size |
 | `ONE_SIZE_PER_CONFIG` | One size per output config file |
@@ -116,8 +116,8 @@ MI_FILTER=0 python3 scripts/config_generator.py --hipblaslt /path/to/hipBLASLt -
 ### Other behavior
 
 - **`MAX_NUM_KERNELS_PER_CONFIG`:** With heuristic search space, caps merged kernels per file (default in `constants.py`; overridable in YAML). With generic search space it is set to effectively unlimited (`sys.maxsize`).
-- **`load_prepared_config`** / **`_prepare_config`** ([`load_input_config.py`](load_input_config.py)): `MACROTILE_OPT` requires Ductile backend; if `MACROTILE_OPT` is false, `MT_DU` is cleared to `None`.
-- **`get_sizes`** ([`sizes.py`](sizes.py)): `SIZE_OPTION=1` (grid) with `MACROTILE_OPT` raises `NotImplementedError`.
+- **`load_prepared_config`** / **`_prepare_config`** ([`load_input_config.py`](load_input_config.py)): if `MACROTILE_OPT` is false, `MT_DU` is cleared to `None`. `MACROTILE_OPT` with a non-Ductile backend is supported for `SIZE_OPTION: 0` only (explicit `Sizes:` list); attempting it with `SIZE_OPTION: 1` raises `NotImplementedError`. The post-processor's `_apply_mt_du` runs regardless of backend.
+- **`get_sizes`** ([`sizes.py`](sizes.py)): `SIZE_OPTION=1` (grid) with `MACROTILE_OPT` and the Ductile backend raises `NotImplementedError`.
 - **`BUILD_DIR`:** Optional; passed to `geko.utils.build_tensilelite_client` from [`scripts/config_generator.py`](../../scripts/config_generator.py) when generating shell scripts.
 
 ---

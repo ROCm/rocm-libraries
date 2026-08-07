@@ -284,8 +284,12 @@ def apply_input_config_defaults(config: Dict[str, Any]) -> None:
 
     backend = config.get("backend", "ductile").lower()
     if config["MACROTILE_OPT"] and backend != "ductile":
-        raise NotImplementedError("MACROTILE_OPT only valid with Ductile backend.")
-
+        if config.get("SIZE_OPTION", 0) != 0:
+            raise NotImplementedError(
+                "MACROTILE_OPT without the Ductile backend is only supported "
+                "for SIZE_OPTION=0 (explicit Sizes list); got "
+                f"SIZE_OPTION={config.get('SIZE_OPTION')}."
+            )
     ss = _resolve_search_space(config)
 
     if ss == "generic":

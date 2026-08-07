@@ -22,7 +22,7 @@ Contents:
 
 import json
 
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, fields
 from pathlib import Path
 from typing import ClassVar, List, Tuple
 
@@ -209,7 +209,12 @@ class GemmType:
         if dt == "X" and dd == "S" and cd == "S":
             return "xf32_r", "f32_r", "f32_r", "xf32_r"
 
-        if len(dt) == 1:
+        if dt in m:
+            try:
+                a_type = b_type = m[dt]
+            except KeyError as e:
+                raise ValueError(f"Unknown Tensile DataType letter {dt!r}") from e
+        elif len(dt) == 1:
             try:
                 a_type = b_type = m[dt]
             except KeyError as e:
@@ -396,7 +401,8 @@ class RunState:
         """Load RunState from a JSON file."""
         with Path(path).open("r") as f:
             data = json.load(f)
-        return cls(**data)
+        known = {f.name for f in fields(cls)}
+        return cls(**{k: v for k, v in data.items() if k in known})
 
     def verify(self, current_input: str | Path) -> None:
         """Validate that the current input matches the one used to create this run.

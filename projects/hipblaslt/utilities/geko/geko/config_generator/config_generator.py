@@ -164,8 +164,9 @@ def _run_per_gemm_type(
     parallel_for(emit_one, indexed_entries)
     # Serial pass: shared run-all script and Config_*.log must append in index order.
     for idx, entry in indexed_entries:
+        base_name = GEMM_type + f"_{idx}"
         output_writer.append_aggregate_metadata(
-            GEMM_type + f"_{idx}",
+            base_name,
             entry,
             progress=f"{idx}/{progress_denom}",
         )

@@ -80,6 +80,10 @@ class ConfigSectionGenerator:
         pt['DestDataType'] = self._convert_type(self._gt.dest_data_type)
         pt['ComputeDataType'] = self._convert_type(self._gt.compute_data_type)
         pt['HighPrecisionAccumulate'] = val_HighPrecisionAccumulate
+        # fp4 inputs use MX block scaling (block size 32 on A and B).
+        if self._gt.data_type == "F4":
+            pt['MXBlockA'] = 32
+            pt['MXBlockB'] = 32
         pt['TransposeA'] = val_transA
         pt['TransposeB'] = val_transB
         pt['#ComplexConjugateA'] = val_transA  # TODO: fix this
@@ -114,7 +118,8 @@ class ConfigSectionGenerator:
         so emitted YAML keeps stable key ordering before per-size overrides.
         """
         is_i8 = self._gt.data_type == 'I8'
-        return {
+        is_fp4 = self._gt.data_type == 'F4'
+        params = {
             'MinimumRequiredVersion': '5.0.0',
             'SleepPercent': 0,
             'EnqueuesPerSync': 0,
@@ -138,6 +143,11 @@ class ConfigSectionGenerator:
             'RotatingBufferSize': 1024,
             'UseEffLike': False,
         }
+        if is_fp4:
+            params['DataInitTypeMXSA'] = 3
+            params['DataInitTypeMXSB'] = 3
+            params['MXScaleFormat'] = 1
+        return params
 
     def _resolve_bias_type(self) -> Optional[str]:
         """Compute BiasTypeArgs string if epilogues are enabled, else None."""
@@ -150,6 +160,9 @@ class ConfigSectionGenerator:
             bias_type = "S"
         if self._gt.data_type == "X1":
             bias_type = "S"
+        if self._gt.data_type == "F4":
+            # fp4 cannot be used as bias type.
+            bias_type = self._convert_type(self._gt.dest_data_type)
         return f"[{bias_type}]"
 
     # ------------------------------------------------------------------
@@ -232,9 +245,16 @@ class ConfigSectionGenerator:
 
         has_priority = lambda grp: "UseCustomMainLoopSchedule" in grp and int(grp["UseCustomMainLoopSchedule"].values[0]) and cms_priority
 
+        # pop_size must be <= SearchSpace.n_perms in Ductile GA.
+        n_perms = self._compute_n_perms(fork_params)
+        pop_size = self._safe_pop_size(n_perms)
+
         non_cms_mask = np.array([not has_priority(grp) for grp in mi_groups], dtype=bool)
         if non_cms_mask.sum() <= 1 or len(sizes) == 0:
-            return dict(soo=soo, n_elements_to_validate=n_elements_to_validate)
+            d = dict(soo=soo, n_elements_to_validate=n_elements_to_validate)
+            if pop_size:
+                d["pop_size"] = pop_size
+            return d
         
         gsu_values = [float(grp["MatrixInstruction"].metadata.get("GSU", 1)) for grp in mi_groups if not has_priority(grp)]
         gsu_min = min(gsu_values) if gsu_values else 1.0
@@ -279,11 +299,39 @@ class ConfigSectionGenerator:
         cost[non_cms_mask] = cost_matrix[:, non_cms_mask].mean(axis=0)
         cost[~non_cms_mask] = cost[non_cms_mask].min()
         
-        return dict(
+        d = dict(
             soo=soo,
             n_elements_to_validate=n_elements_to_validate,
             weights=[{"group_0": f"{cost.tolist()}"}],
         )
+        if pop_size:
+            d["pop_size"] = pop_size
+        return d
+
+    @staticmethod
+    def _compute_n_perms(fork_params: Dict[str, Any]) -> int:
+        """Approximate Ductile search-space permutations from active fork params."""
+        n_perms = 1
+        for name, fp in fork_params.items():
+            if not getattr(fp, "active", True):
+                continue
+            if name == "Groups":
+                for group_dim in fp.values:
+                    if len(group_dim) > 1:
+                        n_perms *= len(group_dim)
+                continue
+            if len(fp.values) > 1:
+                n_perms *= len(fp.values)
+        return n_perms
+
+    @staticmethod
+    def _safe_pop_size(n_perms: int, default: int = 512) -> int:
+        """Return a valid pop_size satisfying 2 < pop_size <= n_perms, else 0."""
+        if n_perms >= default:
+            return default
+        if n_perms < 3:
+            return 0
+        return min(n_perms, max(3, n_perms - 1))
 
     # ------------------------------------------------------------------
     # Public API
@@ -316,8 +364,13 @@ class ConfigSectionGenerator:
         global_params = dict(self._global_params_base)
         self._apply_enqueue_and_warmup_params(global_params, sizes, backend)
 
-        problem_sizes = [{"Exact": f'[ {M}, {N}, {batch}, {K} ]'}
-                         for M, N, batch, K in sizes]
+        # K is rounded up to a multiple of 32 only for MXFP4 (F4).
+        problem_sizes = []
+        is_mxfp4 = self._gt.data_type == "F4"
+        for M, N, batch, K in sizes:
+            if is_mxfp4:
+                K = ((K + 31) // 32) * 32
+            problem_sizes.append({"Exact": f'[ {M}, {N}, {batch}, {K} ]'})
 
         benchmark_final = [{"ProblemSizes": problem_sizes}]
         if self._bias_type_args:

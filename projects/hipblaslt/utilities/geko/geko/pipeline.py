@@ -352,6 +352,7 @@ def run_configure(
     logger.info(f"Backend: '{backend}'")
     logger.info(f"Working directory: '{workdir}'")
     logger.info(f"Keep threshold: {keep_thr}")
+    logger.info(f"Search space: {search_space}")
 
     _, uniq_df = bench.log.summarize(
         hipblaslt_path,

@@ -22,6 +22,7 @@ DTYPE = {
     "f8_fnuz_r": "F8N",
     "bf8_r": "B8",
     "xf32_r": "X",
+    "f4_r": "F4",
     # C,Z,I8
 }
 
@@ -29,7 +30,7 @@ DTYPE = {
 DTYPE_BYTES = {
     "f64_r": 8, "f32_r": 4, "f16_r": 2, "bf16_r": 2,
     "f8_r": 1, "bf8_r": 1, "i8_r": 1, "i32_r": 4,
-    "xf32_r": 4,
+    "xf32_r": 4, "f4_r": 1,
 }
 
 GEMM_FIELDS = (

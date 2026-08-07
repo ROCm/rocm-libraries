@@ -86,7 +86,7 @@ def test_validate_rejects_unknown_arch() -> None:
         )
 
 
-def test_apply_defaults_macro_tile_opt_requires_ductile_backend() -> None:
+def test_apply_defaults_macro_tile_opt_tensile_size_option_zero_allowed() -> None:
     cfg = {
         "ARCH": "gfx950",
         "TRANSA": "N",
@@ -98,7 +98,23 @@ def test_apply_defaults_macro_tile_opt_requires_ductile_backend() -> None:
         "backend": "tensile",
     }
     validate_input_config(cfg)
-    with pytest.raises(NotImplementedError, match="MACROTILE_OPT only valid"):
+    apply_input_config_defaults(cfg)
+
+
+def test_apply_defaults_macro_tile_opt_tensile_nonzero_size_option_rejected() -> None:
+    cfg = {
+        "ARCH": "gfx950",
+        "TRANSA": "N",
+        "TRANSB": "N",
+        "DataType": "B",
+        "DestDataType": "B",
+        "ComputeDataType": "S",
+        "MACROTILE_OPT": True,
+        "backend": "tensile",
+        "SIZE_OPTION": 1,
+    }
+    validate_input_config(cfg)
+    with pytest.raises(NotImplementedError, match="only supported for SIZE_OPTION=0"):
         apply_input_config_defaults(cfg)
 
 
