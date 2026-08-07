@@ -132,23 +132,62 @@ jobs:
           proj="$(echo '${{ inputs.project_name }}' | tr '[:upper:]' '[:lower:]')"
           BC=TheRock/build-coverage
           nm="$(find "$BC" -type f -name llvm-nm -path '*/llvm/bin/*' 2>/dev/null | head -1)"
-          echo "===== coverage self-check (${proj}) ====="
+          echo "===== COVERAGE BUILD VERIFICATION (${proj}) ====="
+
           echo "-- [1] lib${proj}.so* symbol counts (symlinks resolved) --"
           find "$BC" -name "lib${proj}.so*" 2>/dev/null | sort -u | while read -r so; do
             real="$(readlink -f "$so" 2>/dev/null || echo "$so")"
-            printf '    %6s __llvm_profile  %s\n' "$("${nm}" "$real" 2>/dev/null | grep -c __llvm_profile)" "$so"
+            count="$("${nm}" "$real" 2>/dev/null | grep -c __llvm_profile || echo 0)"
+            printf '    %6s __llvm_profile  %s\n' "$count" "$so"
+            if [ "$count" -eq 0 ]; then
+              echo "       WARNING: No coverage symbols in $so"
+              file "$real"
+              ls -lh "$real"
+            fi
           done
+
           echo "-- [2] compile_commands*.json entries with -fprofile-instr-generate --"
           find "$BC" -name "compile_commands*.json" 2>/dev/null | while read -r cc; do
             n="$(grep -c "fprofile-instr-generate" "$cc" 2>/dev/null)"
             printf '    %6s  %s\n' "${n:-0}" "$cc"
           done
-          echo "-- [3] ${proj} configure log: coverage/ENABLE/fprofile lines --"
+
+          echo "-- [3] ${proj} configure log: coverage/ENABLE/fprofile/offload-new-driver --"
           find "$BC" -iname "*${proj}*configure*.log" 2>/dev/null | while read -r lg; do
             echo "    log: $lg"
-            grep -iE "coverage|ENABLE_COVERAGE|fprofile" "$lg" 2>/dev/null | head -8 | sed 's/^/       /'
+            grep -iE "coverage|ENABLE_COVERAGE|fprofile|offload-new-driver" "$lg" 2>/dev/null | head -15 | sed 's/^/       /'
           done
-          echo "===== end self-check ====="
+
+          echo "-- [4] Artifact verification for dist/rocm/lib --"
+          DIST_LIB="$BC/dist/rocm/lib/lib${proj}.so"
+          if [ -f "$DIST_LIB" ]; then
+            echo "    Found dist lib: $DIST_LIB"
+            ls -lh "$DIST_LIB"
+            real_dist="$(readlink -f "$DIST_LIB")"
+            echo "    Real path: $real_dist"
+            count_dist="$("${nm}" "$real_dist" 2>/dev/null | grep -c __llvm_profile || echo 0)"
+            echo "    __llvm_profile symbols: $count_dist"
+            if [ "$count_dist" -eq 0 ]; then
+              echo "    ERROR: dist library has NO coverage instrumentation!"
+            fi
+          else
+            echo "    ERROR: $DIST_LIB not found!"
+          fi
+
+          echo "-- [5] CMake cache verification --"
+          if [ -f "$BC/CMakeCache.txt" ]; then
+            echo "    HIPRAND_ENABLE_COVERAGE:"
+            grep "HIPRAND_ENABLE_COVERAGE" "$BC/CMakeCache.txt" || echo "    NOT SET"
+            echo "    COMPILER_RT_BUILD_PROFILE_ROCM:"
+            grep "COMPILER_RT_BUILD_PROFILE_ROCM" "$BC/CMakeCache.txt" || echo "    NOT SET"
+            echo "    PROFILE_DIR:"
+            grep "PROFILE_DIR" "$BC/CMakeCache.txt" || echo "    NOT SET"
+          fi
+
+          echo "-- [6] Compiler RT profile runtime check --"
+          find "$BC/dist/rocm" -name "*profile*" -o -name "*PGO*" | head -20
+
+          echo "===== END BUILD VERIFICATION ====="
 
       - name: Report
         if: ${{ !cancelled() }}
