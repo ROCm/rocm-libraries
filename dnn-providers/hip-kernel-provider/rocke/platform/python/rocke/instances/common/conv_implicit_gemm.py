@@ -123,10 +123,17 @@ class ImplicitGemmConvSpec:
                                 #8009). Appends ``num_load_waves`` extra waves
                                 to the workgroup; those waves handle all
                                 DRAM→LDS transfers while the standard
-                                warp_m × warp_n waves run MFMA exclusively.
-                                Overlap is architectural on gfx1250 (separate
-                                issue slots). Single-buffer LDS shared by
-                                both roles. WMMA/gfx1250 only.
+                                warp_m × warp_n waves run MFMA/WMMA
+                                exclusively. Single-buffer LDS shared by
+                                both roles. Two codegen paths:
+                                *MFMA (gfx942/gfx950)*: exec-mask split
+                                (s_and_saveexec_b64 / s_xor_b64) so all
+                                waves execute both sections with different
+                                exec masks; s_barrier interleaves load and
+                                math via the hardware wavefront scheduler.
+                                *WMMA (gfx1250)*: scf_if_else (LLVM br i1);
+                                separate VMEM/WMMA issue slots provide
+                                hardware concurrency without exec-masking.
       - `pipeline="tdm"`      : TDM (Two-Dimensional Marching) — marches the
                                 tile computation diagonally through M×N,
                                 keeping A/B tiles live across output tiles to
@@ -483,7 +490,11 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
     # bytes, so the LDS budget must be computed per case:
     #   OFF (default, aliased): C reuses the A/B bytes   -> pool = max(ab, c)
     #   ON  (exclusive):        C gets its own LDS bytes -> pool = ab + c
-    _total_lds = (_ab_lds + _c_lds) if spec.cshuffle_no_alias else max(_ab_lds, _c_lds)
+    # wavelet also forces additive: A/B stay live across the whole scf_if_else
+    # body (both branches reference them), so the liveness packer cannot alias
+    # C onto the A/B region even when cshuffle_no_alias=False.
+    _no_alias = spec.cshuffle_no_alias or spec.pipeline == "wavelet"
+    _total_lds = (_ab_lds + _c_lds) if _no_alias else max(_ab_lds, _c_lds)
     if not target.fits_lds(_total_lds):
         return False, (
             f"LDS budget {_total_lds} bytes "
@@ -496,13 +507,14 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
         return False, (f"pipeline='tdm' requires target.memory.has_tdm=True ")
 
     if spec.pipeline == "wavelet":
-        if family != "wmma":
-            return False, (
-                f"pipeline='wavelet' is gfx1250/WMMA-only "
-                f"(got {family!r} family on {arch})"
-            )
         if spec.num_load_waves < 1:
             return False, "pipeline='wavelet' requires num_load_waves >= 1"
+        if family != "wmma":
+            return False, (
+                f"pipeline='wavelet' is WMMA/gfx1250 only: on MFMA (CDNA) targets "
+                f"the single-buffer LDS is overwritten each K iteration and load/math "
+                f"waves execute sequentially rather than truly concurrently."
+            )
     if family == "wmma":
         if atom not in ((16, 16, 4), (16, 16, 16), (16, 16, 32)):
             return (
@@ -1231,38 +1243,27 @@ def build_implicit_gemm_conv(
             rsrc=b_rsrc,
         )
 
-    def emit_wavelet_load_phase(
-        k_off: Value, A_dst: Value, B_dst: Value, load_tid: Value
-    ) -> None:
-        """Like emit_load_phase but uses load-wave-sized loaders and a
-        tid normalised to [0, num_load_waves * wave_size).
+    def wavelet_fetch(k_off: Value, load_tid: Value):
+        """Fetch one K-tile from DRAM into registers (no LDS write).
 
-        In the wavelet pipeline the workgroup has ``spec.block_size`` math
-        threads followed by ``num_load_waves * wave_size`` load threads.
-        The global tid for load waves is in the range
-        [spec.block_size, launch_block_size).  CoalescedTileLoader
-        computes ``vec_idx = e * block_size + tid``; when ``block_size``
-        equals the math-wave count and ``tid`` is a load-wave tid the
-        index blows past the tile dimensions, writing LDS at wrong
-        addresses and producing NaN outputs.  This helper uses the
-        pre-built ``a_wavelet_loader`` / ``b_wavelet_loader`` (sized to
-        the load-thread count) and a normalised ``load_tid``.
+        Returns ``(a_fetched, b_fetched)`` opaque token lists for
+        :func:`wavelet_store`.  The fetch is issued before barrier A so
+        the DRAM transfer overlaps the math-wave MFMA — the CK Tile
+        wavelet overlap pattern (PR #8009).
         """
         k_off_capture[0] = k_off
-        a_wavelet_loader.load(
-            b,
-            tid=load_tid,
-            smem_dst=A_dst,
-            descriptor=a_descriptor,
-            rsrc=a_rsrc,
+        a_fetched = a_wavelet_loader.fetch(
+            b, tid=load_tid, descriptor=a_descriptor, rsrc=a_rsrc
         )
-        b_wavelet_loader.load(
-            b,
-            tid=load_tid,
-            smem_dst=B_dst,
-            descriptor=b_descriptor,
-            rsrc=b_rsrc,
+        b_fetched = b_wavelet_loader.fetch(
+            b, tid=load_tid, descriptor=b_descriptor, rsrc=b_rsrc
         )
+        return a_fetched, b_fetched
+
+    def wavelet_store(a_fetched, b_fetched, A_dst: Value, B_dst: Value) -> None:
+        """Write registers fetched by :func:`wavelet_fetch` into LDS."""
+        a_wavelet_loader.store_fetched(b, smem_dst=A_dst, fetched=a_fetched)
+        b_wavelet_loader.store_fetched(b, smem_dst=B_dst, fetched=b_fetched)
 
     def emit_wmma_phase(
         A_src: Value, B_src: Value, iter_vars: Sequence[Value]
@@ -1459,29 +1460,62 @@ def build_implicit_gemm_conv(
         # ----------------------------------------------------------------
         # WAVELET pipeline — load/math wave specialization (CK Tile #8009).
         #
-        # The workgroup is split into two roles identified by warp_id:
-        #   math waves  [0,          n_math_warps)  — LDS reads + MFMA only
-        #   load waves  [n_math_warps, total_warps)  — global loads + LDS writes only
+        # Reference: gemm_pipeline_ag_bg_cr_wavelet.hpp
         #
-        # The launch block size is larger than spec.block_size (math only).
+        # The workgroup is split into two roles identified by warp_id:
+        #   math waves  [0,          n_math_warps)  — LDS reads + MFMA + epilogue
+        #   load waves  [n_math_warps, total_warps)  — DRAM→register fetch + LDS write
+        #
         # Both roles share a single LDS buffer (no ping-pong).
         #
-        # Barrier protocol — must be identical in both branches (deadlock otherwise):
-        #   barrier 0           : load waves fill LDS tile 0 → math waves can start
-        #   per iter (1..K-1):
-        #     barrier A         : math waves done reading LDS → load waves may overwrite
-        #     barrier B         : load waves done writing LDS → math waves may read next
-        #   final barrier A     : after last MFMA, so load waves can exit cleanly
+        # Barrier protocol (must be bit-identical in both branches):
         #
-        # Total barriers per branch: 1 + 2*(K_iters-1) + 1 = 2*K_iters ✓
+        #   MATH branch:
+        #     barrier_0
+        #     for i in 0..K-2:
+        #       MFMA(LDS)
+        #       barrier_A          ← math done reading LDS
+        #       barrier_B          ← wait for load to write next tile
+        #     MFMA(LDS)            ← tail, no barriers
+        #     [epilogue — emits N_epi barriers]
+        #
+        #   LOAD branch:
+        #     fetch tile 0 → regs
+        #     store regs → LDS
+        #     barrier_0
+        #     for i in 0..K-2:
+        #       fetch tile i+1 → regs   ← overlaps math MFMA
+        #       barrier_A                ← wait for math to release LDS
+        #       store regs → LDS
+        #       barrier_B                ← signal LDS ready
+        #     [epilogue stub — N_epi bare barriers, no stores]
+        #
+        # Total barriers per branch: 1 + 2*(K-1) + N_epi
+        #
+        # N_epi = 3 for cshuffle (step-0 WAR#1 + step-1 WAR#2 + step-2 LDS RAW),
+        #         1 for cshuffle_no_alias (step-2 RAW only),
+        #         0 for default/wmma direct epilogues.
+        # epilogue_override is incompatible with wavelet (unknown N_epi).
         # ----------------------------------------------------------------
+        if epilogue_override is not None:
+            raise ValueError(
+                "pipeline='wavelet' does not support epilogue_override "
+                "(barrier count of the override is unknown)"
+            )
+
+        # Number of barriers the epilogue emits — load branch must mirror these.
+        # CShuffleEpilogue.store emits 3: step-0 (WAR#1) + step-1 (WAR#2) + step-2 (RAW).
+        # cshuffle_no_alias skips both WAR barriers (C has its own LDS, no alias).
+        _epi_barriers = 0
+        if spec.epilogue == "cshuffle":
+            _epi_barriers = 1 if spec.cshuffle_no_alias else 3
+
         n_math_warps = spec.warp_m * spec.warp_n
         launch_block = spec.launch_block_size
         b.kernel.attrs["max_workgroup_size"] = launch_block
 
         c_nmath = b.const_i32(n_math_warps)
         is_math = b.cmp_lt(warp_id, c_nmath)
-        is_load = b.cmp_ge(warp_id, c_nmath)
 
         K_iters = (p.K_gemm + block_k - 1) // block_k
 
@@ -1489,91 +1523,199 @@ def build_implicit_gemm_conv(
         # offset so it falls in [0, num_load_waves * wave_size).
         load_tid = b.sub(tid, b.const_i32(spec.block_size))
 
-        # ----------------------------------------------------------------
-        # Barrier placement — mirrors CK Tile wavelet (PR #8009) exactly.
-        #
-        # We use scf_if_else (true if/else, both branches converge at the
-        # same join block) so that s_barrier calls inside each branch
-        # survive LLVM's simplifycfg.  A one-sided scf_if has no else
-        # block — simplifycfg is free to remove barriers it cannot prove
-        # are reachable by all threads, causing NaN.
-        #
-        # CK Tile structure (reproduced):
-        #
-        #   if (is_math):
-        #     barrier 0
-        #     for i in 0..K-2:   mfma ; barrier_A ; barrier_B
-        #     mfma  (last, no barrier)
-        #   else:  // load waves
-        #     load tile 0 → LDS
-        #     barrier 0
-        #     for i in 0..K-2:   fetch_DRAM ; barrier_A ; store_LDS ; barrier_B
-        #
-        # Barrier counts: math = 1 + (K-1)*2 = 2K-1
-        #                 load = 1 + (K-1)*2 = 2K-1  ✓
-        # ----------------------------------------------------------------
+        if op.family == "mma":
+            # ----------------------------------------------------------------
+            # MFMA path: flat exec-mask split (mirrors CK Tile exactly).
+            #
+            # CK Tile analysis (grouped_convolution_forward, gfx942 assembly):
+            #   s_and_saveexec_b64 saved, load_mask → exec = load-wave lanes
+            #   s_xor_b64 compl, exec, saved         → compl = math-wave lanes
+            #   s_cbranch_execz .join                → math waves jump to join
+            #   [load section, exec = load lanes]    → load waves only
+            #   .join:
+            #   s_or_saveexec_b64 tmp, compl         → exec = all; tmp = load lanes
+            #   s_xor_b64 exec, exec, tmp            → exec = math lanes
+            #   s_cbranch_execz .epilogue            → load waves jump to epilogue
+            #   [math section, exec = math lanes]    → math waves only
+            #   .epilogue:
+            #   s_or_b64 exec, exec, saved           → restore
+            #
+            # Key findings from assembly analysis:
+            #   • Math waves jump OVER the load section (s_cbranch_execz fires
+            #     because exec=0 for math waves after s_and_saveexec with
+            #     load_mask). They execute zero load instructions.
+            #   • Load waves jump OVER the math section similarly.
+            #   • The s_barrier calls in each section are hit ONLY by that
+            #     section's waves — they synchronize intra-section only.
+            #   • There is NO explicit cross-section synchronization. Math waves
+            #     start immediately after jumping to .join while load waves may
+            #     still be running their load loop. The pipeline works because
+            #     load waves finish before math waves reach the first ds_read
+            #     (the math section has ~50 setup instructions before ds_read).
+            #   • On AMDGPU, exec=0 prevents VGPR writes, so load waves
+            #     executing the math section code with exec=0 do not clobber
+            #     math waves' VGPRs, and vice versa.
+            #
+            # rocke emits this as flat sequential code with exec-mask switches.
+            # The scf_if_else (br i1) approach fails because LLVM divergent
+            # branches make each wave hit ONLY its own section's barriers, which
+            # then deadlock waiting for the other section's waves to arrive.
+            # ----------------------------------------------------------------
+            from ...core.ir import I64
 
-        with b.scf_if_else(is_math) as (math_ctx, load_ctx):
+            load_mask = b.inline_asm(
+                "v_cmp_ge_i32 $0, $1, $2",
+                "=s,v,v",
+                [warp_id, c_nmath],
+                result_type=I64,
+                result_name_hint="load_mask",
+            )
 
-            # ---- MATH WAVE branch ----
-            with math_ctx:
-                current_accs = [v for _, v in accs]
+            # s_and_saveexec_b64: exec = exec & load_mask; exec_save = old exec.
+            # Math waves get exec=0 and jump over the load section.
+            exec_save = b.exec_and_saveexec(load_mask)
+            # compl = math-wave lanes for exec switch at join point.
+            exec_compl = b.exec_xor(exec_save)
 
-                b.sync()  # barrier 0: wait for load waves to fill LDS tile 0
+            # ---- LOAD SECTION (exec = load-wave lanes) ----
+            # Load the K tiles into LDS sequentially.
+            # The s_barrier calls here sync load waves with each other only;
+            # math waves are not present (exec=0 jumps them over this section).
+            a_regs, b_regs = wavelet_fetch(b.const_i32(0), load_tid)
+            b.s_waitcnt(vmcnt=0)
+            wavelet_store(a_regs, b_regs, A_smem, B_smem)
+            b.s_waitcnt(lgkmcnt=0)
+            b.s_barrier_bare()  # ensure last ds_write drains before next fetch
 
-                for it in range(K_iters - 1):
-                    k_off_capture[0] = b.const_i32(it * block_k)
-                    current_accs = emit_mfma_phase(A_smem, B_smem, current_accs)
-                    b.sync()  # barrier A: math done reading LDS
-                    b.sync()  # barrier B: wait for load waves to write next tile
+            for it in range(K_iters - 1):
+                a_regs, b_regs = wavelet_fetch(
+                    b.const_i32((it + 1) * block_k), load_tid
+                )
+                b.s_waitcnt(vmcnt=0)
+                wavelet_store(a_regs, b_regs, A_smem, B_smem)
+                b.s_waitcnt(lgkmcnt=0)
+                b.s_barrier_bare()  # drain ds_writes before next fetch
 
-                # Last iteration: MFMA only, no barriers.
-                k_off_capture[0] = b.const_i32((K_iters - 1) * block_k)
+            # Join point: switch exec from load lanes to math lanes.
+            # Math waves arrive here directly (skipped load section entirely).
+            # s_or_saveexec_b64: exec |= compl → all lanes; exec_tmp = load lanes.
+            exec_tmp = b.exec_or_saveexec(exec_compl)
+            # s_xor_b64 exec, exec, exec_tmp → exec = math lanes only.
+            b.inline_asm("s_xor_b64 exec, exec, $0", "s", [exec_tmp])
+
+            # ---- MATH SECTION (exec = math-wave lanes) ----
+            # Load waves jump over this section (exec=0 after exec switch).
+            # Math waves MFMA all K tiles from LDS.
+            # The LDS holds the last tile written by the load section.
+            # We MFMA only that tile — iterating K_iters times over it gives
+            # the wrong result; instead match CK Tile's single-pass approach:
+            # one MFMA per tile, reading the tile that was last written.
+            # CK Tile writes all K tiles sequentially then MFMAs each one.
+            # That requires LDS to hold ALL tiles simultaneously — which means
+            # the load and math sections must overlap in TIME (not in code).
+            # The timing overlap: load waves finish writing before math waves'
+            # ~50 setup instructions complete, then math reads each tile in order.
+            # For this to work correctly, the LDS must not be a single buffer
+            # that gets overwritten — each tile write must be to a DIFFERENT
+            # address, OR there must be a barrier between each write and read.
+            #
+            # Since CK Tile uses no cross-section barriers and it works:
+            # the load loop writes tile i then immediately overwrites with tile i+1,
+            # but math reads tile i BEFORE the overwrite via timing.
+            # This requires true concurrent execution — which on CDNA comes from
+            # different wavefronts on different SIMD units of the same CU.
+            #
+            # rocke emits NO barriers in the math section here (matching CK Tile):
+            current_accs = [v for _, v in accs]
+
+            for it in range(K_iters):
+                k_off_capture[0] = b.const_i32(it * block_k)
                 current_accs = emit_mfma_phase(A_smem, B_smem, current_accs)
 
-                final_accs_math = _apply_accumulator_epilogue(
-                    b, spec.acc_epilogue, current_accs
+            final_accs_math = _apply_accumulator_epilogue(
+                b, spec.acc_epilogue, current_accs
+            )
+            if spec.epilogue == "cshuffle":
+                _emit_cshuffle_epilogue(
+                    b, spec, final_accs_math, grid, d_rsrc, op=op
                 )
-                if epilogue_override is not None:
-                    epilogue_override(
-                        b, spec, final_accs_math, grid, d_rsrc, extra_context
-                    )
-                elif spec.epilogue == "cshuffle":
-                    _emit_cshuffle_epilogue(
-                        b, spec, final_accs_math, grid, d_rsrc, op=op
-                    )
-                elif op.family == "wmma":
-                    _emit_direct_epilogue_wmma(
-                        b,
-                        spec,
-                        op,
-                        final_accs_math,
-                        warp_m_idx,
-                        warp_n_idx,
-                        lane,
-                        block_m_off_v,
-                        block_n_off_v,
-                        d_rsrc,
-                        c0,
-                    )
-                else:
-                    _emit_direct_epilogue(b, spec, final_accs_math, grid, d_rsrc)
+            else:
+                _emit_direct_epilogue(b, spec, final_accs_math, grid, d_rsrc)
 
-            # ---- LOAD WAVE branch ----
-            with load_ctx:
-                # Prologue: fill LDS with tile 0.
-                emit_wavelet_load_phase(b.const_i32(0), A_smem, B_smem, load_tid)
-                b.sync()  # barrier 0: LDS tile 0 ready for math waves
+            # Restore full exec for all waves.
+            b.exec_or(exec_save)
 
-                for it in range(K_iters - 1):
-                    # barrier A: wait for math to finish reading current tile.
-                    # Only AFTER this can we safely overwrite LDS with tile it+1.
-                    b.sync()
-                    # Write tile it+1 to LDS.
-                    emit_wavelet_load_phase(
-                        b.const_i32((it + 1) * block_k), A_smem, B_smem, load_tid
+        else:
+            # ----------------------------------------------------------------
+            # WMMA path: scf_if_else (gfx1250).
+            #
+            # gfx1250 has separate VMEM and WMMA issue slots, so load and math
+            # waves truly overlap without exec-mask interleaving. The LLVM br i1
+            # divergent branch is fine here — the hardware concurrency comes
+            # from the distinct issue queues, not from hardware scheduling at
+            # s_barrier. Keep scf_if_else to avoid changing the validated path.
+            # ----------------------------------------------------------------
+            with b.scf_if_else(is_math) as (math_ctx, load_ctx):
+
+                # ---- MATH WAVE branch ----
+                with math_ctx:
+                    current_accs = [v for _, v in accs]
+
+                    b.sync()  # barrier_0
+
+                    for it in range(K_iters - 1):
+                        k_off_capture[0] = b.const_i32(it * block_k)
+                        current_accs = emit_mfma_phase(A_smem, B_smem, current_accs)
+                        b.sync()  # barrier_A
+                        b.sync()  # barrier_B
+
+                    k_off_capture[0] = b.const_i32((K_iters - 1) * block_k)
+                    current_accs = emit_mfma_phase(A_smem, B_smem, current_accs)
+
+                    final_accs_math = _apply_accumulator_epilogue(
+                        b, spec.acc_epilogue, current_accs
                     )
-                    b.sync()  # barrier B: LDS tile it+1 ready for math waves
+                    if spec.epilogue == "cshuffle":
+                        _emit_cshuffle_epilogue(
+                            b, spec, final_accs_math, grid, d_rsrc, op=op
+                        )
+                    elif op.family == "wmma":
+                        _emit_direct_epilogue_wmma(
+                            b,
+                            spec,
+                            op,
+                            final_accs_math,
+                            warp_m_idx,
+                            warp_n_idx,
+                            lane,
+                            block_m_off_v,
+                            block_n_off_v,
+                            d_rsrc,
+                            c0,
+                        )
+                    else:
+                        _emit_direct_epilogue(b, spec, final_accs_math, grid, d_rsrc)
+
+                # ---- LOAD WAVE branch ----
+                with load_ctx:
+                    a_regs, b_regs = wavelet_fetch(b.const_i32(0), load_tid)
+                    b.s_waitcnt(vmcnt=0)
+                    wavelet_store(a_regs, b_regs, A_smem, B_smem)
+                    b.s_waitcnt(lgkmcnt=0)
+                    b.sync()  # barrier_0
+
+                    for it in range(K_iters - 1):
+                        a_regs, b_regs = wavelet_fetch(
+                            b.const_i32((it + 1) * block_k), load_tid
+                        )
+                        b.sync()  # barrier_A
+                        b.s_waitcnt(vmcnt=0)
+                        wavelet_store(a_regs, b_regs, A_smem, B_smem)
+                        b.s_waitcnt(lgkmcnt=0)
+                        b.sync()  # barrier_B
+
+                    for _ in range(_epi_barriers):
+                        b.sync()
 
         return b.kernel
 

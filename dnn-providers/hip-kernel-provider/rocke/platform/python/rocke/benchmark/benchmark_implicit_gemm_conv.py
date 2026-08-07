@@ -59,7 +59,7 @@ _WARP_MN = (1, 2, 4, 8)
 _WARP_MN_GFX1250 = (1, 2, 4, 8, 16)
 _WARP_TILE_MN = (16, 32)
 _PIPELINES = (
-    "mem",
+    # "mem",
     "wavelet",
 )  # "mem", "compv3", "compv4", "mem_db", "async_dma")
 _EPILOGUES = ("default", "cshuffle")

@@ -2738,6 +2738,50 @@ class IRBuilder:
         """
         self._op("tile.s_barrier_bare")
 
+    # ---- exec-mask manipulation (wavelet pipeline, MFMA targets) ----
+
+    def exec_and_saveexec(self, load_mask: Value) -> Value:
+        """``s_and_saveexec_b64 dst, load_mask``: exec = exec & load_mask; returns old exec.
+
+        Used to restrict exec to load-wave lanes at the start of the wavelet
+        exec-mask split. The returned i64 SGPR pair holds the old exec (all
+        active lanes before the split) — pass it to :meth:`exec_or` at the end
+        to restore the full workgroup exec.
+        """
+        return self._op(
+            "tile.exec_and_saveexec", [load_mask], [I64], result_name_hint="exec_save"
+        ).result
+
+    def exec_xor(self, saved_exec: Value) -> Value:
+        """``s_xor_b64 dst, exec, saved_exec``: returns the complement lanes.
+
+        After :meth:`exec_and_saveexec` restricts exec to load waves,
+        ``s_xor_b64 dst, exec, saved`` produces the math-wave mask
+        (old_exec ^ load_exec = math_exec).
+        """
+        return self._op(
+            "tile.exec_xor", [saved_exec], [I64], result_name_hint="exec_compl"
+        ).result
+
+    def exec_or_saveexec(self, compl: Value) -> Value:
+        """``s_or_saveexec_b64 dst, compl``: exec |= compl; returns old exec.
+
+        Widens exec back to all lanes and then switches to math-wave lanes:
+        after this call, exec = old | compl = all lanes, and ``dst`` holds
+        the previous (load-only) exec so a subsequent ``s_xor_b64 exec``
+        can flip to math-only lanes.
+        """
+        return self._op(
+            "tile.exec_or_saveexec", [compl], [I64], result_name_hint="exec_tmp"
+        ).result
+
+    def exec_or(self, saved_exec: Value) -> None:
+        """``s_or_b64 exec, exec, saved_exec``: restore exec to all lanes (void).
+
+        Call at the end of the wavelet exec-mask split to undo the restriction.
+        """
+        self._op("tile.exec_or", [saved_exec])
+
     def sync_half_block(self, half_selector: Value) -> None:
         """Half-block barrier: only the waves where ``half_selector``
         is non-zero participate in the workgroup barrier.

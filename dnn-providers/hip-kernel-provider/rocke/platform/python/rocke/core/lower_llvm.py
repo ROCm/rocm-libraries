@@ -3435,6 +3435,40 @@ class _Lowerer:
         self._need("s.barrier")
         self._current().emit(" call void @llvm.amdgcn.s.barrier()")
 
+    # ---- exec-mask manipulation (wavelet pipeline, MFMA targets) ----
+
+    def _op_tile_exec_and_saveexec(self, op: Op) -> None:
+        # s_and_saveexec_b64 dst, src: exec = exec & src; dst = old exec.
+        (mask,) = op.operands
+        self._current().emit(
+            f"  {op.result.name} = call i64 asm sideeffect"
+            f' "s_and_saveexec_b64 $0, $1", "=s,s"({self._operand_with_type(mask)})'
+        )
+
+    def _op_tile_exec_xor(self, op: Op) -> None:
+        # s_xor_b64 dst, exec, src: dst = exec XOR src (complement mask).
+        (saved,) = op.operands
+        self._current().emit(
+            f"  {op.result.name} = call i64 asm sideeffect"
+            f' "s_xor_b64 $0, exec, $1", "=s,s"({self._operand_with_type(saved)})'
+        )
+
+    def _op_tile_exec_or_saveexec(self, op: Op) -> None:
+        # s_or_saveexec_b64 dst, src: exec |= src; dst = old exec.
+        (compl,) = op.operands
+        self._current().emit(
+            f"  {op.result.name} = call i64 asm sideeffect"
+            f' "s_or_saveexec_b64 $0, $1", "=s,s"({self._operand_with_type(compl)})'
+        )
+
+    def _op_tile_exec_or(self, op: Op) -> None:
+        # s_or_b64 exec, exec, src: restore exec (void, side-effect only).
+        (saved,) = op.operands
+        self._current().emit(
+            f"  call void asm sideeffect"
+            f' "s_or_b64 exec, exec, $0", "s"({self._operand_with_type(saved)})'
+        )
+
     def _op_tile_sync_half_block(self, op: Op) -> None:
         # Half-block barrier: branch on the i32 selector; only the
         # ``then`` branch hits the s_barrier. This emits the AMDGPU pattern

@@ -520,19 +520,22 @@ class CShuffleEpilogue:
         dist = _cshuffle_acc_distribution(_c_per_lane)
         traits = LoadStoreTraits(distribution=dist, vector_dim_y=1, scalar_per_vector=1)
 
-        # ---- step 0: reuse barrier. ----
+        # ---- step 0: reuse barriers (×2). ----
         # The common-LDS packer aliases this C staging tile onto the A/B
-        # staging bytes (non-interfering in program order). Double-buffered /
-        # prefetched (compv4 / async_dma) mainloops end with the tail-tile MFMA
-        # reading A/B from LDS *after* their last drain barrier and emit no
-        # trailing barrier, so without a barrier here a fast wave's first C
-        # ``ds_write`` would clobber A/B bytes a slow wave is still reading for
-        # its tail MFMA -- a cross-wave WAR on the aliased pool region.
+        # staging bytes (non-interfering in program order). Two barriers are
+        # needed to match CK Tile's GemmPipelineAgBgCrWavelet protocol:
+        #   barrier 0: all MFMAs done; load waves may acknowledge and exit.
+        #   barrier 1: load waves have exited; safe to overwrite the A/B
+        #              LDS region with C scatter writes.
+        # Using only one barrier races: a fast wave's first C ds_write can
+        # clobber A/B bytes a slow wave is still reading for its tail MFMA.
         #
-        # With ``no_alias`` the C tile has its own exclusive LDS bytes that never
-        # overlap A/B, so this WAR cannot occur and the barrier is elided. The
-        # step-2 C-write->C-read barrier below is a genuine RAW and always stays.
+        # With ``no_alias`` the C tile has its own exclusive LDS bytes that
+        # never overlap A/B, so neither WAR can occur and both barriers are
+        # elided. The step-2 C-write->C-read barrier below is a genuine RAW
+        # and always stays.
         if not self.no_alias:
+            b.sync()
             b.sync()
 
         for mi in range(mfmas_m):
