@@ -24,8 +24,6 @@
 
 #include "rocblas.h"
 
-extern "C" void rocblas_shutdown();
-
 /*****************************************************************************
  * This is the only file in rocBLAS which should #include Hipblaslt headers    *
  * or reference Hipblaslt identifiers. hipblaslt_host.hpp defines the interface. *
@@ -730,11 +728,12 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
         }
         CHECK_SOLUTION_FOUND(returnedAlgoCount);
         CHECK_RETURNED_WORKSPACE_SIZE(workspaceSize, max_workspace_size);
-        if(workspaceSize > 0)
+        auto gsu_malloc = prob.handle->gsu_malloc_by_size(workspaceSize);
+        if(!gsu_malloc)
         {
-            THROW_IF_HIP_ERROR(
-                hipMallocAsync(&workspace, workspaceSize, prob.handle->get_stream()));
+            throw rocblas_status_memory_error;
         }
+        workspace = prob.handle->gsu_workspace;
         hipblaslt_alpha_beta_type<Tc> alpha, beta;
         if(prob.alpha != nullptr)
         {
@@ -873,8 +872,6 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
         HANDLE_HIP_ERROR(hipFreeAsync(devicePtrArray_B, prob.handle->get_stream()), status);
     if(devicePtrArray_A)
         HANDLE_HIP_ERROR(hipFreeAsync(devicePtrArray_A, prob.handle->get_stream()), status);
-    if(workspaceSize > 0)
-        HANDLE_HIP_ERROR(hipFreeAsync(workspace, prob.handle->get_stream()), status);
     if(pref)
         HANDLE_HIPBLASLT_ERROR(hipblasLtMatmulPreferenceDestroy(pref), status);
     if(matmulDesc)
@@ -1034,9 +1031,18 @@ rocblas_status getAllSolutionsHipBlasLT(const RocblasContractionProblem<Ti, To, 
         {
             std::vector<hipblasLtMatmulHeuristicResult_t> heuristicResults;
             std::vector<hipblasOperation_t> ops = {HIPBLAS_OP_N, HIPBLAS_OP_T, HIPBLAS_OP_C};
-            hipblaslt_ext::GemmType         gemmType
-                = prob.strided_batch ? hipblaslt_ext::GemmType::HIPBLASLT_GEMM
-                                     : hipblaslt_ext::GemmType::HIPBLASLT_GROUPED_GEMM;
+            hipblaslt_ext::GemmType         gemmType;
+#if defined(HIPBLASLT_VERSION_MAJOR) && defined(HIPBLASLT_VERSION_MINOR) \
+    && defined(HIPBLASLT_VERSION_PATCH)                                  \
+    && (HIPBLASLT_VERSION_MAJOR > 1                                      \
+        || (HIPBLASLT_VERSION_MAJOR == 1                                 \
+            && (HIPBLASLT_VERSION_MINOR > 4                              \
+                || (HIPBLASLT_VERSION_MINOR == 4 && HIPBLASLT_VERSION_PATCH >= 1))))
+            gemmType = hipblaslt_ext::GemmType::HIPBLASLT_GEMM;
+#else
+            gemmType = prob.strided_batch ? hipblaslt_ext::GemmType::HIPBLASLT_GEMM
+                                          : hipblaslt_ext::GemmType::HIPBLASLT_GROUPED_GEMM;
+#endif
             for(auto op1 : ops)
             {
                 for(auto op2 : ops)
@@ -1094,9 +1100,18 @@ rocblas_status getAllSolutionsHipBlasLT(const RocblasContractionProblem<Ti, To, 
         }
         else if(option == CAN_SOLVE)
         {
-            hipblaslt_ext::GemmType gemmType
-                = prob.strided_batch ? hipblaslt_ext::GemmType::HIPBLASLT_GEMM
-                                     : hipblaslt_ext::GemmType::HIPBLASLT_GROUPED_GEMM;
+            hipblaslt_ext::GemmType gemmType;
+#if defined(HIPBLASLT_VERSION_MAJOR) && defined(HIPBLASLT_VERSION_MINOR) \
+    && defined(HIPBLASLT_VERSION_PATCH)                                  \
+    && (HIPBLASLT_VERSION_MAJOR > 1                                      \
+        || (HIPBLASLT_VERSION_MAJOR == 1                                 \
+            && (HIPBLASLT_VERSION_MINOR > 4                              \
+                || (HIPBLASLT_VERSION_MINOR == 4 && HIPBLASLT_VERSION_PATCH >= 1))))
+            gemmType = hipblaslt_ext::GemmType::HIPBLASLT_GEMM;
+#else
+            gemmType = prob.strided_batch ? hipblaslt_ext::GemmType::HIPBLASLT_GEMM
+                                          : hipblaslt_ext::GemmType::HIPBLASLT_GROUPED_GEMM;
+#endif
             std::vector<hipblasLtMatmulHeuristicResult_t> heuristicResults;
             auto                                          fetch = hipblaslt_ext::getAllAlgos(handle,
                                                     gemmType,

@@ -10088,7 +10088,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgetrs_strided_batched_64(rocblas_hand
     \brief The SYTRS functions solve a system of ``n`` linear equations on ``n`` variables in its factorized form.
 
     \details
-    It solves the linear system \f$ A X = B \f$, where the n-by-n matrix A is symmetric and maybe indefinite, 
+    It solves the linear system \f$ A X = B \f$, where the n-by-n matrix A is symmetric and maybe indefinite,
     using one of the following factorizations that depends on the value of ``uplo``:
 
     \f[
@@ -10230,7 +10230,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zsytrs_64(rocblas_handle handle,
         \end{array}
     \f]
 
-    Matrix \f$A_l\f$ is defined by its triangular factors as returned by 
+    Matrix \f$A_l\f$ is defined by its triangular factors as returned by
     \ref rocsolver_ssytrf_batched "SYTRF_BATCHED".
     Note matrix \f$ D_l \f$ contains 1-by-1 or 2-by-2 blocks on the main diagonal.
 
@@ -10385,7 +10385,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zsytrs_batched_64(rocblas_handle handl
         \end{array}
     \f]
 
-    Matrix \f$A_l\f$ is defined by its triangular factors as returned by 
+    Matrix \f$A_l\f$ is defined by its triangular factors as returned by
     \ref rocsolver_ssytrf_strided_batched "SYTRF_STRIDED_BATCHED".
     Note matrix \f$ D_l \f$ contains 1-by-1 or 2-by-2 blocks on the main diagonal.
 
@@ -18439,6 +18439,11 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zhegst_strided_batched(rocblas_handle 
     \brief The SYEV functions compute the eigenvalues and optionally the eigenvectors of a real symmetric
     matrix ``A``.
 
+    \note
+    The ``_64`` interface accepts ``int64_t`` arguments, but the matrix dimensions ``n`` and
+    ``lda`` must still fit within a 32-bit integer (less than 2^31). The internal tridiagonal
+    reduction and back-transformation steps remain 32-bit, which bounds the supported size.
+
     \details
     The eigenvalues are returned in ascending order. The eigenvectors are computed depending
     on the value of ``evect``. The computed eigenvectors are orthonormal.
@@ -18500,10 +18505,35 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dsyev(rocblas_handle handle,
                                                 double* D,
                                                 double* E,
                                                 rocblas_int* info);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_ssyev_64(rocblas_handle handle,
+                                                   const rocblas_evect evect,
+                                                   const rocblas_fill uplo,
+                                                   const int64_t n,
+                                                   float* A,
+                                                   const int64_t lda,
+                                                   float* D,
+                                                   float* E,
+                                                   int64_t* info);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_dsyev_64(rocblas_handle handle,
+                                                   const rocblas_evect evect,
+                                                   const rocblas_fill uplo,
+                                                   const int64_t n,
+                                                   double* A,
+                                                   const int64_t lda,
+                                                   double* D,
+                                                   double* E,
+                                                   int64_t* info);
 //! @}
 
 /*! @{
     \brief The HEEV functions compute the eigenvalues and optionally the eigenvectors of a Hermitian matrix A.
+
+    \note
+    The ``_64`` interface accepts ``int64_t`` arguments, but the matrix dimensions ``n`` and
+    ``lda`` must still fit within a 32-bit integer (less than 2^31). The internal tridiagonal
+    reduction and back-transformation steps remain 32-bit, which bounds the supported size.
 
     \details
     The eigenvalues are returned in ascending order. The eigenvectors are computed depending
@@ -18566,11 +18596,36 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zheev(rocblas_handle handle,
                                                 double* D,
                                                 double* E,
                                                 rocblas_int* info);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_cheev_64(rocblas_handle handle,
+                                                   const rocblas_evect evect,
+                                                   const rocblas_fill uplo,
+                                                   const int64_t n,
+                                                   rocblas_float_complex* A,
+                                                   const int64_t lda,
+                                                   float* D,
+                                                   float* E,
+                                                   int64_t* info);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_zheev_64(rocblas_handle handle,
+                                                   const rocblas_evect evect,
+                                                   const rocblas_fill uplo,
+                                                   const int64_t n,
+                                                   rocblas_double_complex* A,
+                                                   const int64_t lda,
+                                                   double* D,
+                                                   double* E,
+                                                   int64_t* info);
 //! @}
 
 /*! @{
     \brief The SYEV_BATCHED functions compute the eigenvalues and optionally the eigenvectors of a batch of
     real symmetric matrices A_l.
+
+    \note
+    The ``_64`` interface accepts ``int64_t`` arguments, but the matrix dimensions ``n`` and
+    ``lda`` must still fit within a 32-bit integer (less than 2^31). The internal tridiagonal
+    reduction and back-transformation steps remain 32-bit, which bounds the supported size.
 
     \details
     The eigenvalues are returned in ascending order. The eigenvectors are computed depending
@@ -18650,11 +18705,42 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dsyev_batched(rocblas_handle handle,
                                                         const rocblas_stride strideE,
                                                         rocblas_int* info,
                                                         const rocblas_int batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_ssyev_batched_64(rocblas_handle handle,
+                                                           const rocblas_evect evect,
+                                                           const rocblas_fill uplo,
+                                                           const int64_t n,
+                                                           float* const A[],
+                                                           const int64_t lda,
+                                                           float* D,
+                                                           const rocblas_stride strideD,
+                                                           float* E,
+                                                           const rocblas_stride strideE,
+                                                           int64_t* info,
+                                                           const int64_t batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_dsyev_batched_64(rocblas_handle handle,
+                                                           const rocblas_evect evect,
+                                                           const rocblas_fill uplo,
+                                                           const int64_t n,
+                                                           double* const A[],
+                                                           const int64_t lda,
+                                                           double* D,
+                                                           const rocblas_stride strideD,
+                                                           double* E,
+                                                           const rocblas_stride strideE,
+                                                           int64_t* info,
+                                                           const int64_t batch_count);
 //! @}
 
 /*! @{
     \brief The HEEV_BATCHED functions compute the eigenvalues and optionally the eigenvectors of a batch of
     Hermitian matrices A_l.
+
+    \note
+    The ``_64`` interface accepts ``int64_t`` arguments, but the matrix dimensions ``n`` and
+    ``lda`` must still fit within a 32-bit integer (less than 2^31). The internal tridiagonal
+    reduction and back-transformation steps remain 32-bit, which bounds the supported size.
 
     \details
     The eigenvalues are returned in ascending order. The eigenvectors are computed depending
@@ -18734,11 +18820,42 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zheev_batched(rocblas_handle handle,
                                                         const rocblas_stride strideE,
                                                         rocblas_int* info,
                                                         const rocblas_int batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_cheev_batched_64(rocblas_handle handle,
+                                                           const rocblas_evect evect,
+                                                           const rocblas_fill uplo,
+                                                           const int64_t n,
+                                                           rocblas_float_complex* const A[],
+                                                           const int64_t lda,
+                                                           float* D,
+                                                           const rocblas_stride strideD,
+                                                           float* E,
+                                                           const rocblas_stride strideE,
+                                                           int64_t* info,
+                                                           const int64_t batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_zheev_batched_64(rocblas_handle handle,
+                                                           const rocblas_evect evect,
+                                                           const rocblas_fill uplo,
+                                                           const int64_t n,
+                                                           rocblas_double_complex* const A[],
+                                                           const int64_t lda,
+                                                           double* D,
+                                                           const rocblas_stride strideD,
+                                                           double* E,
+                                                           const rocblas_stride strideE,
+                                                           int64_t* info,
+                                                           const int64_t batch_count);
 //! @}
 
 /*! @{
     \brief The SYEV_STRIDED_BATCHED functions compute the eigenvalues and optionally the eigenvectors of a batch of
     real symmetric matrices A_l.
+
+    \note
+    The ``_64`` interface accepts ``int64_t`` arguments, but the matrix dimensions ``n`` and
+    ``lda`` must still fit within a 32-bit integer (less than 2^31). The internal tridiagonal
+    reduction and back-transformation steps remain 32-bit, which bounds the supported size.
 
     \details
     The eigenvalues are returned in ascending order. The eigenvectors are computed depending
@@ -18824,11 +18941,45 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dsyev_strided_batched(rocblas_handle h
                                                                 const rocblas_stride strideE,
                                                                 rocblas_int* info,
                                                                 const rocblas_int batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_ssyev_strided_batched_64(rocblas_handle handle,
+                                                                   const rocblas_evect evect,
+                                                                   const rocblas_fill uplo,
+                                                                   const int64_t n,
+                                                                   float* A,
+                                                                   const int64_t lda,
+                                                                   const rocblas_stride strideA,
+                                                                   float* D,
+                                                                   const rocblas_stride strideD,
+                                                                   float* E,
+                                                                   const rocblas_stride strideE,
+                                                                   int64_t* info,
+                                                                   const int64_t batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_dsyev_strided_batched_64(rocblas_handle handle,
+                                                                   const rocblas_evect evect,
+                                                                   const rocblas_fill uplo,
+                                                                   const int64_t n,
+                                                                   double* A,
+                                                                   const int64_t lda,
+                                                                   const rocblas_stride strideA,
+                                                                   double* D,
+                                                                   const rocblas_stride strideD,
+                                                                   double* E,
+                                                                   const rocblas_stride strideE,
+                                                                   int64_t* info,
+                                                                   const int64_t batch_count);
+
 //! @}
 
 /*! @{
     \brief The HEEV_STRIDED_BATCHED functions compute the eigenvalues and optionally the eigenvectors of a batch of
     Hermitian matrices A_l.
+
+    \note
+    The ``_64`` interface accepts ``int64_t`` arguments, but the matrix dimensions ``n`` and
+    ``lda`` must still fit within a 32-bit integer (less than 2^31). The internal tridiagonal
+    reduction and back-transformation steps remain 32-bit, which bounds the supported size.
 
     \details
     The eigenvalues are returned in ascending order. The eigenvectors are computed depending
@@ -18914,11 +19065,44 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zheev_strided_batched(rocblas_handle h
                                                                 const rocblas_stride strideE,
                                                                 rocblas_int* info,
                                                                 const rocblas_int batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_cheev_strided_batched_64(rocblas_handle handle,
+                                                                   const rocblas_evect evect,
+                                                                   const rocblas_fill uplo,
+                                                                   const int64_t n,
+                                                                   rocblas_float_complex* A,
+                                                                   const int64_t lda,
+                                                                   const rocblas_stride strideA,
+                                                                   float* D,
+                                                                   const rocblas_stride strideD,
+                                                                   float* E,
+                                                                   const rocblas_stride strideE,
+                                                                   int64_t* info,
+                                                                   const int64_t batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_zheev_strided_batched_64(rocblas_handle handle,
+                                                                   const rocblas_evect evect,
+                                                                   const rocblas_fill uplo,
+                                                                   const int64_t n,
+                                                                   rocblas_double_complex* A,
+                                                                   const int64_t lda,
+                                                                   const rocblas_stride strideA,
+                                                                   double* D,
+                                                                   const rocblas_stride strideD,
+                                                                   double* E,
+                                                                   const rocblas_stride strideE,
+                                                                   int64_t* info,
+                                                                   const int64_t batch_count);
 //! @}
 
 /*! @{
     \brief The SYEVD functions compute the eigenvalues and optionally the eigenvectors of a real symmetric
     matrix ``A``.
+
+    \note
+    The ``_64`` interface accepts ``int64_t`` arguments, but the matrix dimensions ``n`` and
+    ``lda`` must still fit within a 32-bit integer (less than 2^31). The internal tridiagonal
+    reduction and back-transformation steps remain 32-bit, which bounds the supported size.
 
     \details
     The eigenvalues are returned in ascending order. The eigenvectors are computed using a
@@ -18985,10 +19169,35 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dsyevd(rocblas_handle handle,
                                                  double* D,
                                                  double* E,
                                                  rocblas_int* info);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_ssyevd_64(rocblas_handle handle,
+                                                    const rocblas_evect evect,
+                                                    const rocblas_fill uplo,
+                                                    const int64_t n,
+                                                    float* A,
+                                                    const int64_t lda,
+                                                    float* D,
+                                                    float* E,
+                                                    int64_t* info);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_dsyevd_64(rocblas_handle handle,
+                                                    const rocblas_evect evect,
+                                                    const rocblas_fill uplo,
+                                                    const int64_t n,
+                                                    double* A,
+                                                    const int64_t lda,
+                                                    double* D,
+                                                    double* E,
+                                                    int64_t* info);
 //! @}
 
 /*! @{
     \brief The HEEVD functions compute the eigenvalues and optionally the eigenvectors of a Hermitian matrix ``A``.
+
+    \note
+    The ``_64`` interface accepts ``int64_t`` arguments, but the matrix dimensions ``n`` and
+    ``lda`` must still fit within a 32-bit integer (less than 2^31). The internal tridiagonal
+    reduction and back-transformation steps remain 32-bit, which bounds the supported size.
 
     \details
     The eigenvalues are returned in ascending order. The eigenvectors are computed using a
@@ -19055,11 +19264,36 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zheevd(rocblas_handle handle,
                                                  double* D,
                                                  double* E,
                                                  rocblas_int* info);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_cheevd_64(rocblas_handle handle,
+                                                    const rocblas_evect evect,
+                                                    const rocblas_fill uplo,
+                                                    const int64_t n,
+                                                    rocblas_float_complex* A,
+                                                    const int64_t lda,
+                                                    float* D,
+                                                    float* E,
+                                                    int64_t* info);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_zheevd_64(rocblas_handle handle,
+                                                    const rocblas_evect evect,
+                                                    const rocblas_fill uplo,
+                                                    const int64_t n,
+                                                    rocblas_double_complex* A,
+                                                    const int64_t lda,
+                                                    double* D,
+                                                    double* E,
+                                                    int64_t* info);
 //! @}
 
 /*! @{
     \brief The SYEVD_BATCHED functions compute the eigenvalues and optionally the eigenvectors of a batch of
     real symmetric matrices A_l.
+
+    \note
+    The ``_64`` interface accepts ``int64_t`` arguments, but the matrix dimensions ``n`` and
+    ``lda`` must still fit within a 32-bit integer (less than 2^31). The internal tridiagonal
+    reduction and back-transformation steps remain 32-bit, which bounds the supported size.
 
     \details
     The eigenvalues are returned in ascending order. The eigenvectors are computed using a
@@ -19143,11 +19377,42 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dsyevd_batched(rocblas_handle handle,
                                                          const rocblas_stride strideE,
                                                          rocblas_int* info,
                                                          const rocblas_int batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_ssyevd_batched_64(rocblas_handle handle,
+                                                            const rocblas_evect evect,
+                                                            const rocblas_fill uplo,
+                                                            const int64_t n,
+                                                            float* const A[],
+                                                            const int64_t lda,
+                                                            float* D,
+                                                            const rocblas_stride strideD,
+                                                            float* E,
+                                                            const rocblas_stride strideE,
+                                                            int64_t* info,
+                                                            const int64_t batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_dsyevd_batched_64(rocblas_handle handle,
+                                                            const rocblas_evect evect,
+                                                            const rocblas_fill uplo,
+                                                            const int64_t n,
+                                                            double* const A[],
+                                                            const int64_t lda,
+                                                            double* D,
+                                                            const rocblas_stride strideD,
+                                                            double* E,
+                                                            const rocblas_stride strideE,
+                                                            int64_t* info,
+                                                            const int64_t batch_count);
 //! @}
 
 /*! @{
     \brief The HEEVD_BATCHED functions compute the eigenvalues and optionally the eigenvectors of a batch of
     Hermitian matrices A_l.
+
+    \note
+    The ``_64`` interface accepts ``int64_t`` arguments, but the matrix dimensions ``n`` and
+    ``lda`` must still fit within a 32-bit integer (less than 2^31). The internal tridiagonal
+    reduction and back-transformation steps remain 32-bit, which bounds the supported size.
 
     \details
     The eigenvalues are returned in ascending order. The eigenvectors are computed using a
@@ -19231,11 +19496,42 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zheevd_batched(rocblas_handle handle,
                                                          const rocblas_stride strideE,
                                                          rocblas_int* info,
                                                          const rocblas_int batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_cheevd_batched_64(rocblas_handle handle,
+                                                            const rocblas_evect evect,
+                                                            const rocblas_fill uplo,
+                                                            const int64_t n,
+                                                            rocblas_float_complex* const A[],
+                                                            const int64_t lda,
+                                                            float* D,
+                                                            const rocblas_stride strideD,
+                                                            float* E,
+                                                            const rocblas_stride strideE,
+                                                            int64_t* info,
+                                                            const int64_t batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_zheevd_batched_64(rocblas_handle handle,
+                                                            const rocblas_evect evect,
+                                                            const rocblas_fill uplo,
+                                                            const int64_t n,
+                                                            rocblas_double_complex* const A[],
+                                                            const int64_t lda,
+                                                            double* D,
+                                                            const rocblas_stride strideD,
+                                                            double* E,
+                                                            const rocblas_stride strideE,
+                                                            int64_t* info,
+                                                            const int64_t batch_count);
 //! @}
 
 /*! @{
     \brief The SYEVD_STRIDED_BATCHED functions compute the eigenvalues and optionally the eigenvectors of a batch of
     real symmetric matrices A_l.
+
+    \note
+    The ``_64`` interface accepts ``int64_t`` arguments, but the matrix dimensions ``n`` and
+    ``lda`` must still fit within a 32-bit integer (less than 2^31). The internal tridiagonal
+    reduction and back-transformation steps remain 32-bit, which bounds the supported size.
 
     \details
     The eigenvalues are returned in ascending order. The eigenvectors are computed using a
@@ -19325,11 +19621,44 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dsyevd_strided_batched(rocblas_handle 
                                                                  const rocblas_stride strideE,
                                                                  rocblas_int* info,
                                                                  const rocblas_int batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_ssyevd_strided_batched_64(rocblas_handle handle,
+                                                                    const rocblas_evect evect,
+                                                                    const rocblas_fill uplo,
+                                                                    const int64_t n,
+                                                                    float* A,
+                                                                    const int64_t lda,
+                                                                    const rocblas_stride strideA,
+                                                                    float* D,
+                                                                    const rocblas_stride strideD,
+                                                                    float* E,
+                                                                    const rocblas_stride strideE,
+                                                                    int64_t* info,
+                                                                    const int64_t batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_dsyevd_strided_batched_64(rocblas_handle handle,
+                                                                    const rocblas_evect evect,
+                                                                    const rocblas_fill uplo,
+                                                                    const int64_t n,
+                                                                    double* A,
+                                                                    const int64_t lda,
+                                                                    const rocblas_stride strideA,
+                                                                    double* D,
+                                                                    const rocblas_stride strideD,
+                                                                    double* E,
+                                                                    const rocblas_stride strideE,
+                                                                    int64_t* info,
+                                                                    const int64_t batch_count);
 //! @}
 
 /*! @{
     \brief The HEEVD_STRIDED_BATCHED functions compute the eigenvalues and optionally the eigenvectors of a batch of
     Hermitian matrices A_l.
+
+    \note
+    The ``_64`` interface accepts ``int64_t`` arguments, but the matrix dimensions ``n`` and
+    ``lda`` must still fit within a 32-bit integer (less than 2^31). The internal tridiagonal
+    reduction and back-transformation steps remain 32-bit, which bounds the supported size.
 
     \details
     The eigenvalues are returned in ascending order. The eigenvectors are computed using a
@@ -19419,6 +19748,34 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zheevd_strided_batched(rocblas_handle 
                                                                  const rocblas_stride strideE,
                                                                  rocblas_int* info,
                                                                  const rocblas_int batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_cheevd_strided_batched_64(rocblas_handle handle,
+                                                                    const rocblas_evect evect,
+                                                                    const rocblas_fill uplo,
+                                                                    const int64_t n,
+                                                                    rocblas_float_complex* A,
+                                                                    const int64_t lda,
+                                                                    const rocblas_stride strideA,
+                                                                    float* D,
+                                                                    const rocblas_stride strideD,
+                                                                    float* E,
+                                                                    const rocblas_stride strideE,
+                                                                    int64_t* info,
+                                                                    const int64_t batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_zheevd_strided_batched_64(rocblas_handle handle,
+                                                                    const rocblas_evect evect,
+                                                                    const rocblas_fill uplo,
+                                                                    const int64_t n,
+                                                                    rocblas_double_complex* A,
+                                                                    const int64_t lda,
+                                                                    const rocblas_stride strideA,
+                                                                    double* D,
+                                                                    const rocblas_stride strideD,
+                                                                    double* E,
+                                                                    const rocblas_stride strideE,
+                                                                    int64_t* info,
+                                                                    const int64_t batch_count);
 //! @}
 
 /*! @{

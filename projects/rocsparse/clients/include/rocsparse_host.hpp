@@ -662,6 +662,25 @@ void host_csrsm(J                    M,
                 J*                   struct_pivot,
                 J*                   numeric_pivot);
 
+template <typename I, typename J, typename T>
+void host_cscsm(J                    M,
+                J                    nrhs,
+                I                    nnz,
+                rocsparse_operation  transA,
+                rocsparse_operation  transB,
+                T                    alpha,
+                const I*             csc_col_ptr,
+                const J*             csc_row_ind,
+                const T*             csc_val,
+                T*                   B,
+                int64_t              ldb,
+                rocsparse_order      order_B,
+                rocsparse_diag_type  diag_type,
+                rocsparse_fill_mode  fill_mode,
+                rocsparse_index_base base,
+                J*                   struct_pivot,
+                J*                   numeric_pivot);
+
 template <typename I, typename T>
 void host_coosm(I                    M,
                 I                    nrhs,
