@@ -15,6 +15,9 @@ from ck4inductor.universal_gemm.gen_instances import (
 from ck4inductor.grouped_conv_fwd.gen_instances import (
     gen_conv_ops_library as gen_conv_ops_library,
 )
+from ck4inductor.grouped_conv_fwd.gen_instances import (
+    gen_conv_ops_library_wmma as gen_conv_ops_library_wmma,
+)
 from ck4inductor.batched_universal_gemm.gen_instances import (
     gen_ops_library as gen_batched_gemm_ops_library,
 )
@@ -47,6 +50,59 @@ class TestGenInstances(unittest.TestCase):
 
         log.debug("%d gemm instances from library" % len(instances))
         self.assertTrue(instances)
+
+    def test_gen_conv_wmma_instances(self):
+        # gfx1250 WMMA grouped-conv enumerator. Purpose-built 16x16-warp kernels,
+        # f16/bf16 only -- CK ships no f32 WMMA conv instance.
+        instances = gen_conv_ops_library_wmma()
+
+        log.debug("%d wmma conv instances from library" % len(instances))
+        self.assertTrue(instances)
+        # Parse completeness. parse_instances skips any line it cannot turn into
+        # an op, so a CK template-param reorder would silently drop most of them
+        # while every per-op assertion below still passed on the survivors.
+        #
+        # Each parsed line expands by 8: the WMMA instances hardcode their
+        # scheduler (unlike the XDL ones, which leave a BlkGemmPipeSched
+        # placeholder and expand by 16), so only the 4 conv specs x 2 layouts
+        # multiply out.
+        self.assertEqual(
+            len(instances) % 8,
+            0,
+            "WMMA conv instance count is not a multiple of the substitution "
+            "factor; parse_instances failed to parse some lines.",
+        )
+        self.assertGreaterEqual(
+            len(instances) // 8,
+            70,
+            "Far fewer WMMA conv instances parsed than the 76 CK ships; "
+            "parse_instances is skipping lines without reporting it "
+            "(did the CK template parameters change?).",
+        )
+        for op in instances:
+            self.assertTrue(op.is_wmma)
+            self.assertEqual((op.m_per_xdl, op.n_per_xdl), (16, 16))
+            self.assertIn(op.a_element_dtype, ("F16", "BF16"))
+            self.assertIn(op.b_element_dtype, ("F16", "BF16"))
+            # PyTorch's conv lowering passes no D tensor; an instance carrying one
+            # would render a template argument the kernel wrapper never supplies.
+            self.assertEqual(op.ds_layout, ())
+            self.assertEqual(op.ds_element_dtype, ())
+            # `is_wmma` is Python-side metadata. If it reaches dict_items it is
+            # emitted as a C++ template argument and every instance fails to build.
+            self.assertNotIn("is_wmma", dict(op.dict_items()))
+
+    def test_conv_xdl_instances_are_not_wmma(self):
+        # The two enumerators must never share an op: a WMMA-tagged op reaching the
+        # XDL pool would be rendered through the wrong device op, and the aliases
+        # would collide.
+        xdl = gen_conv_ops_library()
+        self.assertTrue(xdl)
+        self.assertFalse(any(op.is_wmma for op in xdl))
+        self.assertTrue(all("_xdl_" in op.name() for op in xdl))
+        self.assertTrue(
+            all("_wmma_" in op.name() for op in gen_conv_ops_library_wmma())
+        )
 
     def test_gen_batched_gemm_instances(self):
         instances = gen_batched_gemm_ops_library()
