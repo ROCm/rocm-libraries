@@ -942,6 +942,11 @@ class KernelWriterAssembly(KernelWriter):
   def defineTdmSgprs(self, kernel):
     """Allocate TDM descriptor SGPRs. Extracted so subtile can defer this."""
     module = Module("DefineTdmSgprs")
+    # Default: subtile on non-TDM arches skips MX scale TDM SGPRs.
+    # Overwritten inside enableTDMA block; defined here defensively in
+    # case enableTDMB is true without enableTDMA in a future config.
+    _subtileSkipMxTdm = kernel.get("UseSubtileImpl") and not self.states.asmCaps["HasTDM"]
+
     if kernel["enableTDMA"]:
       module.add(self.defineSgpr("tdmAGroup0", 4, 4))
       module.add(self.defineSgpr("tdmAGroup1", 8, 4))
@@ -960,7 +965,6 @@ class KernelWriterAssembly(KernelWriter):
       # gfx950 subtile MX scales use SRD buffer loads (no TDM SGPRs needed).
       # gfx1250 subtile MX scales need TDM tensor_load_to_lds (buffer_load lds
       # is not supported), so allocate TDM descriptor SGPRs.
-      _subtileSkipMxTdm = kernel.get("UseSubtileImpl") and not self.states.asmCaps["HasTDM"]
       if kernel["ProblemType"]["MXBlockA"] and not _subtileSkipMxTdm:
         module.add(self.defineSgpr("tdmMXSAGroup0", 4, 4))
         module.add(self.defineSgpr("tdmMXSAGroup1", 8, 4))

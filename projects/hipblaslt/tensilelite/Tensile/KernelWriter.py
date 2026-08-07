@@ -9735,7 +9735,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         requiredUnalignedSgprVar.append("SwapB")
       # Subtile MX scales: gfx950 uses SRD buffer loads (needs LocalWriteBaseAddr/Swap
       # SGPRs), gfx1250 uses TDM tensor_load_to_lds (handled by tdmMXSA/BGroup).
-      _subtileScaleUseSrd = tuple(kernel["ISA"]) != (12, 5, 0)
+      _subtileScaleUseSrd = not self.states.asmCaps["HasTDM"]
       if _subtileScaleUseSrd:
         if kernel["ProblemType"]["MXBlockA"]:
           requiredUnalignedSgprVar.append("LocalWriteBaseAddrMXSA")

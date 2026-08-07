@@ -45,9 +45,7 @@ from rocisa.code import Label
 from ...Common import INDEX_CHARS, clusterEnabled
 from ...SolutionStructs.Utilities import isSubtileIterateMode as _isSubtileIterateMode
 from ...Common.DataType import DataType
-
-# TDM descriptor type field (bits [31:30] = 0b10 for typed load).
-_TDM_DESC_TYPE_FIELD = hex(2 << 30)
+from .SubtileScaleEmit import _TDM_DESC_TYPE_FIELD
 
 
 ################################################################################
@@ -541,7 +539,7 @@ def _emitGRPtrUpdate_TLU0(tag, tile, ti, writer, kernel):
     if not _bAliased:
       group0 = "tdm%sGroup0" % tc
       module.add(SMovB64(dst=sgpr("%s+2" % group0, 2), src=sgpr("Address%s" % tc, 2), comment="sync descriptor global addr"))
-      module.add(SOrB32(dst=sgpr("%s+3" % group0), src0=sgpr("%s+3" % group0), src1=hex(2 << 30), comment="restore type field"))
+      module.add(SOrB32(dst=sgpr("%s+3" % group0), src0=sgpr("%s+3" % group0), src1=_TDM_DESC_TYPE_FIELD, comment="restore type field"))
     return module
 
   module = Module(f"GR Ptr Update ({tc})")
@@ -1284,7 +1282,7 @@ def tdmApplyStreamKOffsetSubtile(writer, kernel, tP):
                      comment="Address += SK K-start offset (hi, carry)"))
   mod.add(SMovB64(dst=sgpr(f"{group0}+2", 2), src=sgpr(f"Address{tc}", 2),
                   comment="sync descriptor global addr"))
-  mod.add(SOrB32(dst=sgpr(f"{group0}+3"), src0=sgpr(f"{group0}+3"), src1=hex(2 << 30),
+  mod.add(SOrB32(dst=sgpr(f"{group0}+3"), src0=sgpr(f"{group0}+3"), src1=_TDM_DESC_TYPE_FIELD,
                  comment="restore descriptor type field"))
   return mod
 

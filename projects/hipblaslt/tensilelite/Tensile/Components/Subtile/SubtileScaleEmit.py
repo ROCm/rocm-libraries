@@ -672,6 +672,8 @@ def _emitWaveAxisIndex(mod, writer, kernel, ti, wgAxis, dstSgprIdx):
   caller should handle the single-wave case).
   """
 
+  assert wgAxis > 0 and (wgAxis & (wgAxis - 1)) == 0, \
+      f"MIWaveGroup[{ti}] = {wgAxis} must be a power of 2 (bitmask/shift decomposition)"
   wavelen = kernel["WavefrontSize"]
   mod.add(VReadfirstlaneB32(dst=sgpr(dstSgprIdx), src=vgpr("Serial"),
           comment="first tId"))
@@ -759,9 +761,12 @@ def _initTDMDescriptorMXScaleSubtile(writer, kernel, scaleTc):
   # iteration, so apply the WG+wave offset here.
   tlu = tP["tlu"]
   sizeRefFree = f"Size{INDEX_CHARS[ti]}"
-  with writer.allocTmpSgpr(3, tag="_initTDMScale_off") as offRes:
+  # Allocate 4 tmp SGPRs: [0]=accumulator, [1]=spare, [2]=waveGlobalOff, [3]=waveAxisIdx.
+  # waveAxisIdx is computed once and reused for both the global and LDS offset.
+  with writer.allocTmpSgpr(4, tag="_initTDMScale_off") as offRes:
     tmp = offRes.idx
-    waveOff = offRes.idx + 2
+    waveGlobalOff = offRes.idx + 2
+    waveAxisIdx = offRes.idx + 3
     # WG offset: stride_free * MT * wgId
     scaleStride = writer.strideRef(scaleTc, ti)
     mod.add(SMulI32(dst=sgpr(tmp), src0=scaleStride, src1=mt,
@@ -770,14 +775,16 @@ def _initTDMDescriptorMXScaleSubtile(writer, kernel, scaleTc):
             comment="*= wgId"))
 
     if wgAxis > 1:
-      _emitWaveAxisIndex(mod, writer, kernel, ti, wgAxis, waveOff)
+      _emitWaveAxisIndex(mod, writer, kernel, ti, wgAxis, waveAxisIdx)
       strideWaveSep = writer.strideRef(scaleTc, 3) if tlu else writer.strideRef(scaleTc, ti)
-      mod.add(SMulI32(dst=sgpr(waveOff), src0=sgpr(waveOff), src1=perWaveRows,
-              comment=f"waveOff = waveIdx_axis * {perWaveRows}"))
-      mod.add(SMulI32(dst=sgpr(waveOff), src0=sgpr(waveOff), src1=strideWaveSep,
-              comment="waveOff *= stride"))
-      mod.add(SAddU32(dst=sgpr(tmp), src0=sgpr(tmp), src1=sgpr(waveOff),
+      mod.add(SMulI32(dst=sgpr(waveGlobalOff), src0=sgpr(waveAxisIdx), src1=perWaveRows,
+              comment=f"waveGlobalOff = waveIdx_axis * {perWaveRows}"))
+      mod.add(SMulI32(dst=sgpr(waveGlobalOff), src0=sgpr(waveGlobalOff), src1=strideWaveSep,
+              comment="waveGlobalOff *= stride"))
+      mod.add(SAddU32(dst=sgpr(tmp), src0=sgpr(tmp), src1=sgpr(waveGlobalOff),
               comment="+= waveOff"))
+    else:
+      mod.add(SMovB32(dst=sgpr(waveAxisIdx), src=0, comment="single wave: waveAxisIdx=0"))
 
     # Undo MXBlock pre-scale to get byte offset
     mod.add(SLShiftRightB32(dst=sgpr(tmp), src=sgpr(tmp),
@@ -789,30 +796,23 @@ def _initTDMDescriptorMXScaleSubtile(writer, kernel, scaleTc):
     mod.add(SAddCU32(dst=sgpr(f"Address{scaleTc}+1"),
             src0=sgpr(f"Address{scaleTc}+1"), src1=0, comment="carry"))
 
-  mod.add(comp.setGlobalAddr(group0, f"Address{scaleTc}"))
+    mod.add(comp.setGlobalAddr(group0, f"Address{scaleTc}"))
 
-  # LDS offset = waveIdx_axis * bytesPerWave + ldsBase
-  # Use the M/N-direction wave index (same as the global offset) so that
-  # waves sharing the same free-dimension partition write to the same LDS slot.
-  with writer.allocTmpSgpr(1) as tmpSgprRes:
-    waveOff = tmpSgprRes.idx
-    if wgAxis > 1:
-      _emitWaveAxisIndex(mod, writer, kernel, ti, wgAxis, waveOff)
-    else:
-      mod.add(SMovB32(dst=sgpr(waveOff), src=0, comment="single wave: waveAxisIdx=0"))
-    mod.add(SMulI32(sgpr(waveOff), sgpr(waveOff), bytesPerWave,
+    # LDS offset = waveIdx_axis * bytesPerWave + ldsBase
+    # Reuse waveAxisIdx computed above (avoids a second VReadfirstlaneB32).
+    mod.add(SMulI32(sgpr(waveAxisIdx), sgpr(waveAxisIdx), bytesPerWave,
             f"woffset = waveIdx_axis * {bytesPerWave}"))
-    mod.add(SAddU32(sgpr(waveOff), sgpr(waveOff), ldsBase,
+    mod.add(SAddU32(sgpr(waveAxisIdx), sgpr(waveAxisIdx), ldsBase,
             f"ldsOffset = woffset + {ldsBase}"))
-    mod.add(comp.setLdsAddr(group0, sgpr(waveOff)))
+    mod.add(comp.setLdsAddr(group0, sgpr(waveAxisIdx)))
 
     # Pre-compute the LDS double-buffer swap mask for MXSA.
     ldsTotalSize = writer.ldsTotalSize
-    mod.add(SAddU32(dst=sgpr("tdmLdsSwapMaskMXSA"), src0=sgpr(waveOff),
+    mod.add(SAddU32(dst=sgpr("tdmLdsSwapMaskMXSA"), src0=sgpr(waveAxisIdx),
             src1=ldsTotalSize,
             comment=f"addr + ldsTotalSize({ldsTotalSize})"))
     mod.add(SXorB32(dst=sgpr("tdmLdsSwapMaskMXSA"),
-            src0=sgpr(waveOff), src1=sgpr("tdmLdsSwapMaskMXSA"),
+            src0=sgpr(waveAxisIdx), src1=sgpr("tdmLdsSwapMaskMXSA"),
             comment="swapMask = addr XOR (addr + ldsTotalSize)"))
 
   # Scale TDM descriptor layout for subtile:
