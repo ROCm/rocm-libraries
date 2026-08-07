@@ -79,6 +79,7 @@ namespace
     public:
         SolutionSet<ContractionSolution>    all;
         SolutionVector<ContractionSolution> topSentinel;
+        mutable SolutionLibrarySearchType   lastSearchType = SolutionLibrarySearchType::COUNT;
 
         std::shared_ptr<ContractionSolution>
             getSolutionByIndex(ContractionProblemGemm const&, Hardware const&, int) const override
@@ -96,9 +97,10 @@ namespace
         SolutionSet<ContractionSolution>
             findAllSolutions(ContractionProblemGemm const&,
                              Hardware const&,
-                             SolutionLibrarySearchType
+                             SolutionLibrarySearchType searchType
                              = SolutionLibrarySearchType::DEFAULT) const override
         {
+            lastSearchType = searchType;
             return all;
         }
 
@@ -203,6 +205,11 @@ TEST(UnifiedHeuristicTest, PinsExactTunedMatchesFirst)
 
     auto result = findTopSolutionsUnified(lib, problem, device, 3);
     auto idx    = indicesOf(result);
+
+    // The union must be gathered with GEMM_TYPE_ONLY; DEFAULT drops the entire
+    // prediction (analytical) library from the candidate pool.
+    EXPECT_EQ(lib.lastSearchType, SolutionLibrarySearchType::GEMM_TYPE_ONLY)
+        << "unified path must enumerate candidates with GEMM_TYPE_ONLY";
 
     ASSERT_EQ(idx.size(), 3u);
     EXPECT_EQ(idx.front(), 7) << "exact-tuned match must be pinned on top";

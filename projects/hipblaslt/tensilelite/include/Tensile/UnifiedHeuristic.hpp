@@ -49,19 +49,32 @@ namespace TensileLite
         if(want == 0)
             return rv;
 
-        // 1. Predicate-filtered, de-duplicated union across all libraries. The
-        //    prediction row contributes nothing to a DEFAULT findAllSolutions;
-        //    the same solution objects are still enumerated by the matching /
-        //    free-size / equality rows, so the candidate pool is complete.
-        SolutionSet<ContractionSolution> all
-            = library.findAllSolutions(problem, hardware, SolutionLibrarySearchType::DEFAULT);
+        // 1. De-duplicated union across all libraries. GEMM_TYPE_ONLY is required
+        //    so the prediction (analytical) row contributes its kernels; a DEFAULT
+        //    search returns an empty set from the prediction / free-size rows and
+        //    would drop the entire analytical library from the candidate pool.
+        SolutionSet<ContractionSolution> all = library.findAllSolutions(
+            problem, hardware, SolutionLibrarySearchType::GEMM_TYPE_ONLY);
 
-        // 2. Partition exact-tuned matches from the analytically-ranked rest.
+        // 2. GEMM_TYPE_ONLY does not apply the per-solution predicates, so filter
+        //    here to keep only solutions valid for this problem/hardware, matching
+        //    the validity check the native findTopSolutions applies per library.
+        auto matchesProblem = [&](std::shared_ptr<ContractionSolution> const& sol) {
+            if(!sol)
+                return false;
+            if(sol->hardwarePredicate && !(*sol->hardwarePredicate)(hardware))
+                return false;
+            if(sol->problemPredicate && !(*sol->problemPredicate)(problem))
+                return false;
+            return true;
+        };
+
+        // 3. Partition exact-tuned matches from the analytically-ranked rest.
         std::vector<std::shared_ptr<ContractionSolution>> exacts;
         std::vector<std::shared_ptr<ContractionSolution>> rest;
         for(auto const& sol : all)
         {
-            if(!sol)
+            if(!matchesProblem(sol))
                 continue;
             if(sol->tag == ContractionSolution::MatchingTag::Equal)
                 exacts.push_back(sol);
@@ -77,11 +90,11 @@ namespace TensileLite
                 rv.push_back(sol);
         };
 
-        // 3. Pin exact-tuned matches first.
+        // 4. Pin exact-tuned matches first.
         for(auto const& sol : exacts)
             pushUnique(sol);
 
-        // 4. Analytically rank and append the remainder.
+        // 5. Analytically rank and append the remainder.
         if(rv.size() < want && !rest.empty())
         {
             try
