@@ -66,11 +66,22 @@ namespace TensileLite::Client
             case rocisa::DataType::BFloat16:
             case rocisa::DataType::Int8:
             case rocisa::DataType::Int32:
+            case rocisa::DataType::Int64:
+            case rocisa::DataType::XFloat32:
             case rocisa::DataType::Float8:
             case rocisa::DataType::BFloat8:
             case rocisa::DataType::Float8_fnuz:
             case rocisa::DataType::BFloat8_fnuz:
+            case rocisa::DataType::Float6:
+            case rocisa::DataType::BFloat6:
+            case rocisa::DataType::Float4:
+            case rocisa::DataType::E5M3:
                 return toHostValidationScalarType(type);
+            case rocisa::DataType::E8:
+                // Generation operates on the shared raw OCP E8M0 encoding.
+                // Tensile's later numerical interpretation of raw zero remains
+                // a product compatibility concern.
+                return ScalarType::E8M0;
             default:
                 return std::nullopt;
             }
@@ -78,13 +89,16 @@ namespace TensileLite::Client
 
         std::optional<GenerationOptions> generationOptions(rocisa::DataType dataType,
                                                            InitMode          mode,
-                                                           bool              problemDependent)
+                                                           bool              problemDependent,
+                                                           std::optional<double> freeValue = std::nullopt)
         {
             GenerationOptions options;
             options.seed = 0x54454e53494c454cULL;
             switch(mode)
             {
             case InitMode::Zero:
+                if(dataType == rocisa::DataType::E8)
+                    options.real.pattern = GenerationPattern::RawConstant;
                 return options;
             case InitMode::One:
                 options.real.pattern    = GenerationPattern::Constant;
@@ -98,9 +112,105 @@ namespace TensileLite::Client
                 options.real.pattern    = GenerationPattern::Constant;
                 options.real.parameter0 = -1;
                 return options;
+            case InitMode::Max:
+                if(dataType == rocisa::DataType::BFloat16)
+                {
+                    // Tensile's BF16 conversion rounds Float32 max to +Inf.
+                    options.real.pattern = GenerationPattern::TypeInfinity;
+                }
+                else if(dataType == rocisa::DataType::BFloat6)
+                {
+                    // Preserve the existing Tensile compatibility value even
+                    // though the E3M2 format itself has a larger finite range.
+                    options.real.pattern    = GenerationPattern::Constant;
+                    options.real.parameter0 = 7.5;
+                }
+                else
+                {
+                    options.real.pattern = GenerationPattern::TypeMaximum;
+                }
+                options.imaginary = options.real;
+                return options;
+            case InitMode::DenormMin:
+                if(dataType == rocisa::DataType::BFloat6)
+                {
+                    options.real.pattern    = GenerationPattern::Constant;
+                    options.real.parameter0 = 0.125;
+                }
+                else
+                {
+                    options.real.pattern = GenerationPattern::TypeDenormalMinimum;
+                }
+                options.imaginary    = options.real;
+                return options;
+            case InitMode::DenormMax:
+                if(dataType == rocisa::DataType::BFloat6)
+                {
+                    options.real.pattern    = GenerationPattern::Constant;
+                    options.real.parameter0 = 0.875;
+                }
+                else
+                {
+                    options.real.pattern = GenerationPattern::TypeDenormalMaximum;
+                }
+                options.imaginary    = options.real;
+                return options;
+            case InitMode::NaN:
+                options.real.pattern = GenerationPattern::TypeNaN;
+                options.imaginary    = options.real;
+                return options;
+            case InitMode::Inf:
+                if(dataType == rocisa::DataType::Float8
+                   || dataType == rocisa::DataType::Float8_fnuz
+                   || dataType == rocisa::DataType::BFloat8_fnuz)
+                    options.real.pattern = GenerationPattern::TypeNaN;
+                else
+                    options.real.pattern = GenerationPattern::TypeInfinity;
+                options.imaginary = options.real;
+                return options;
+            case InitMode::BadInput:
+                if(dataType == rocisa::DataType::Int8
+                   || dataType == rocisa::DataType::Int32)
+                    options.real.pattern = GenerationPattern::TypeMaximum;
+                else
+                    options.real.pattern = GenerationPattern::TypeNaN;
+                options.imaginary = options.real;
+                return options;
+            case InitMode::BadOutput:
+                if(dataType == rocisa::DataType::Int8
+                   || dataType == rocisa::DataType::Int32)
+                    options.real.pattern = GenerationPattern::TypeLowest;
+                else if(dataType == rocisa::DataType::Float8
+                        || dataType == rocisa::DataType::Float8_fnuz
+                        || dataType == rocisa::DataType::BFloat8_fnuz
+                        || dataType == rocisa::DataType::E8
+                        || dataType == rocisa::DataType::E5M3)
+                    options.real.pattern = GenerationPattern::TypeNaN;
+                else
+                    options.real.pattern = GenerationPattern::TypeInfinity;
+                options.imaginary = options.real;
+                return options;
             case InitMode::Random:
                 options.real.pattern = GenerationPattern::UniformInteger;
-                if(dataType == rocisa::DataType::Float)
+                if(dataType == rocisa::DataType::E8)
+                {
+                    options.real.pattern    = GenerationPattern::RandomEncodedExponent;
+                    options.real.parameter0 = -3;
+                    options.real.parameter1 = 3;
+                }
+                else if(dataType == rocisa::DataType::E5M3)
+                {
+                    options.real.pattern    = GenerationPattern::AbsoluteUniformInteger;
+                    options.real.parameter0 = -3;
+                    options.real.parameter1 = 3;
+                }
+                else if(dataType == rocisa::DataType::Float4)
+                {
+                    options.real.pattern    = GenerationPattern::UniformRawInteger;
+                    options.real.parameter0 = 0;
+                    options.real.parameter1 = 14;
+                }
+                else if(dataType == rocisa::DataType::Float)
                 {
                     options.real.parameter0 = -100;
                     options.real.parameter1 = 100;
@@ -118,9 +228,49 @@ namespace TensileLite::Client
                 options.imaginary        = options.real;
                 options.imaginary.stream = 1;
                 return options;
-            case InitMode::RandomNegPosLimited:
+            case InitMode::RandomNarrow:
+                if(dataType == rocisa::DataType::E8
+                   || dataType == rocisa::DataType::E5M3
+                   || dataType == rocisa::DataType::Float4)
+                    return generationOptions(
+                        dataType, InitMode::Random, problemDependent, freeValue);
                 if(dataType == rocisa::DataType::Int8
-                   || dataType == rocisa::DataType::Int32)
+                   || dataType == rocisa::DataType::Int32
+                   || dataType == rocisa::DataType::Int64)
+                {
+                    options.real.pattern    = GenerationPattern::UniformInteger;
+                    options.real.parameter0 = -3;
+                    options.real.parameter1 = 3;
+                }
+                else
+                {
+                    options.real.pattern = GenerationPattern::RandomEncodedExponent;
+                    options.real.parameter0 =
+                        dataType == rocisa::DataType::Double ? -189 : -100;
+                    options.real.parameter1 = 0;
+                    if(dataType == rocisa::DataType::Float6
+                       || dataType == rocisa::DataType::BFloat6)
+                        options.real.sourceType = ScalarType::Float32;
+                }
+                options.imaginary        = options.real;
+                options.imaginary.stream = 1;
+                return options;
+            case InitMode::RandomNegPosLimited:
+                if(dataType == rocisa::DataType::E8)
+                {
+                    options.real.pattern    = GenerationPattern::UniformRawInteger;
+                    options.real.parameter0 = -128;
+                    options.real.parameter1 = 128;
+                }
+                else if(dataType == rocisa::DataType::E5M3)
+                {
+                    options.real.pattern    = GenerationPattern::AbsoluteUniformInteger;
+                    options.real.parameter0 = -128;
+                    options.real.parameter1 = 128;
+                }
+                else if(dataType == rocisa::DataType::Int8
+                        || dataType == rocisa::DataType::Int32
+                        || dataType == rocisa::DataType::Int64)
                 {
                     options.real.pattern    = GenerationPattern::UniformInteger;
                     options.real.parameter0 = -128;
@@ -135,6 +285,32 @@ namespace TensileLite::Client
                 options.imaginary        = options.real;
                 options.imaginary.stream = 1;
                 return options;
+            case InitMode::UniformLowPrecision:
+                options.real.pattern = GenerationPattern::UniformReal;
+                if(dataType == rocisa::DataType::Float4)
+                {
+                    options.real.parameter0 = -6.0;
+                    options.real.parameter1 = 6.0;
+                }
+                else if(dataType == rocisa::DataType::Float6
+                        || dataType == rocisa::DataType::BFloat6)
+                {
+                    options.real.parameter0 = -7.5;
+                    options.real.parameter1 = 7.5;
+                }
+                else
+                {
+                    return std::nullopt;
+                }
+                options.imaginary        = options.real;
+                options.imaginary.stream = 1;
+                return options;
+            case InitMode::Free:
+                if(!freeValue)
+                    return std::nullopt;
+                options.real.pattern    = GenerationPattern::Constant;
+                options.real.parameter0 = *freeValue;
+                return options;
             case InitMode::SerialIdx:
                 options.real.pattern = GenerationPattern::SerialIndex;
                 options.imaginary    = options.real;
@@ -142,14 +318,18 @@ namespace TensileLite::Client
             case InitMode::SerialDim0:
                 if(!problemDependent)
                     return std::nullopt;
-                options.real.pattern   = GenerationPattern::SerialDimension;
+                options.real.pattern   = dataType == rocisa::DataType::Half
+                                             ? GenerationPattern::RawSerialDimension
+                                             : GenerationPattern::SerialDimension;
                 options.real.dimension = 0;
                 options.imaginary      = options.real;
                 return options;
             case InitMode::SerialDim1:
                 if(!problemDependent)
                     return std::nullopt;
-                options.real.pattern   = GenerationPattern::SerialDimension;
+                options.real.pattern   = dataType == rocisa::DataType::Half
+                                             ? GenerationPattern::RawSerialDimension
+                                             : GenerationPattern::SerialDimension;
                 options.real.dimension = 1;
                 options.imaginary      = options.real;
                 return options;
@@ -289,19 +469,13 @@ namespace TensileLite::Client
                       Layout               layout,
                       std::span<std::byte> storage,
                       bool                 problemDependent,
-                      uint64_t             stream)
+                      uint64_t             stream,
+                      std::optional<double> freeValue = std::nullopt)
         {
             const std::optional<ScalarType>        type = generationScalarType(dataType);
             const std::optional<GenerationOptions> options
-                = generationOptions(dataType, mode, problemDependent);
+                = generationOptions(dataType, mode, problemDependent, freeValue);
             if(!type || !options)
-                return false;
-
-            // Tensile historically treats SerialDim on Half as a raw-bit
-            // pattern rather than a numerical coordinate. Preserve that
-            // compatibility path until raw-storage recipes are modeled.
-            if(dataType == rocisa::DataType::Half
-               && (mode == InitMode::SerialDim0 || mode == InitMode::SerialDim1))
                 return false;
 
             GenerationOptions adjusted = *options;
@@ -333,6 +507,28 @@ namespace TensileLite::Client
                         nextUnnamedStream());
     }
 
+    bool tryHostValidationInitialize(rocisa::DataType dataType,
+                                     InitMode         mode,
+                                     void*            array,
+                                     size_t           elements,
+                                     double           freeValue)
+    {
+        const std::optional<ScalarType> type = generationScalarType(dataType);
+        if(!type)
+            return false;
+        const size_t bytes
+            = (elements * roc::host_validation::scalarTypeInfo(*type).storageBits + 7) / 8;
+        if(array == nullptr && bytes != 0)
+            throw std::invalid_argument("Null TensileLite host initialization buffer.");
+        return generate(dataType,
+                        mode,
+                        Layout::contiguous(Shape{elements}),
+                        {static_cast<std::byte*>(array), bytes},
+                        false,
+                        nextUnnamedStream(),
+                        freeValue);
+    }
+
     bool tryHostValidationInitialize(rocisa::DataType        dataType,
                                      InitMode                mode,
                                      void*                   array,
@@ -356,6 +552,38 @@ namespace TensileLite::Client
                         {static_cast<std::byte*>(array), bytes},
                         true,
                         stableStream(descriptor.getName()));
+    }
+
+    double hostValidationDoubleValue(InitMode mode, double freeValue)
+    {
+        double value = 0;
+        if(!tryHostValidationInitialize(
+               rocisa::DataType::Double, mode, &value, 1, freeValue))
+            throw std::invalid_argument(
+                "TensileLite constant initialization mode is unsupported.");
+        return value;
+    }
+
+    double hostValidationUniformDouble(double lower, double upper)
+    {
+        if(lower > upper)
+            throw std::invalid_argument(
+                "TensileLite uniform lower bound exceeds upper bound.");
+
+        GenerationOptions options;
+        options.seed            = 0x54454e53494c454cULL;
+        options.real.pattern    = GenerationPattern::UniformReal;
+        options.real.parameter0 = lower;
+        options.real.parameter1 = upper;
+        options.real.stream     = 2 * nextUnnamedStream();
+
+        double value = 0;
+        roc::host_validation::generate(
+            MutableTensorView(ScalarType::Float64,
+                              Layout::contiguous(Shape{1}),
+                              {reinterpret_cast<std::byte*>(&value), sizeof(value)}),
+            options);
+        return value;
     }
 
     void initCPUSparseInput(PruneSparseMode         mode,

@@ -5,6 +5,7 @@
 #include "DataInitialization.hpp"             // isMXTensor / Problem
 #include <roc/host_validation/adapters/tensilelite/DataInitializationHelpers.hpp>
 #include <roc/host_validation/adapters/tensilelite/HostValidationBridge.hpp>
+#include <roc/host_validation/adapters/tensilelite/TensileDataGeneration.hpp>
 #include <roc/host_validation/validation.hpp>
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/DataTypes.hpp>
@@ -12,6 +13,7 @@
 #include <Tensile/Utils.hpp>
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -38,6 +40,7 @@ using TensileLite::TensorDescriptor;
 using TensileLite::Client::isMXProblem;
 using TensileLite::Client::isMXTensor;
 using TensileLite::Client::initCPUSparseInput;
+using TensileLite::Client::DataInitialization;
 using TensileLite::Client::InitMode;
 using TensileLite::Client::PruneSparseMode;
 using TensileLite::Client::toHostValidationScalarType;
@@ -110,14 +113,37 @@ TEST(HostValidationDataInitialization, GeneratesStridedProblemDependentPatterns)
     for(size_t column = 0; column < 4; ++column)
         for(size_t row = 0; row < 3; ++row)
             EXPECT_EQ(identity[row + column * 3], row == column ? 1.0f : 0.0f);
+
+    TensorDescriptor halfDescriptor(
+        "half-raw-dimension",
+        rocisa::DataType::Half,
+        {2, 3},
+        {1, 4});
+    std::vector<uint16_t> halfBits(
+        halfDescriptor.totalAllocatedElements(), 0xffffU);
+    ASSERT_TRUE(tryHostValidationInitialize(
+        rocisa::DataType::Half,
+        InitMode::SerialDim1,
+        halfBits.data(),
+        halfDescriptor));
+    for(size_t column = 0; column < 3; ++column)
+        for(size_t row = 0; row < 2; ++row)
+            EXPECT_EQ(halfBits[row + column * 4], column);
+    EXPECT_EQ(halfBits[2], 0xffffU);
+    EXPECT_EQ(halfBits[3], 0xffffU);
 }
 
-TEST(HostValidationDataInitialization, LeavesUnsupportedLegacyModesToFallback)
+TEST(HostValidationDataInitialization, HandlesIndexedAndEncodedRandomModes)
 {
     std::array<float, 4> values{-1, -1, -1, -1};
-    EXPECT_FALSE(tryHostValidationInitialize(
+    ASSERT_TRUE(tryHostValidationInitialize(
         rocisa::DataType::Float, InitMode::RandomNarrow, values.data(), values.size()));
-    EXPECT_EQ(values, (std::array<float, 4>{-1, -1, -1, -1}));
+    for(float value : values)
+    {
+        const uint32_t exponent = (std::bit_cast<uint32_t>(value) >> 23) & 0xffU;
+        EXPECT_GE(exponent, 27U);
+        EXPECT_LE(exponent, 127U);
+    }
 
     ASSERT_TRUE(tryHostValidationInitialize(
         rocisa::DataType::Float, InitMode::Two, values.data(), values.size()));
@@ -135,6 +161,126 @@ TEST(HostValidationDataInitialization, LeavesUnsupportedLegacyModesToFallback)
         EXPECT_GE(value, -100);
         EXPECT_LE(value, 100);
     }
+
+    std::array<uint8_t, 64> legacyE8{};
+    ASSERT_TRUE(tryHostValidationInitialize(
+        rocisa::DataType::E8,
+        InitMode::RandomNegPosLimited,
+        legacyE8.data(),
+        legacyE8.size()));
+
+    std::array<TensileLite::E5M3, 64> unsignedScale{};
+    ASSERT_TRUE(tryHostValidationInitialize(
+        rocisa::DataType::E5M3,
+        InitMode::Random,
+        unsignedScale.data(),
+        unsignedScale.size()));
+    for(const TensileLite::E5M3 value : unsignedScale)
+    {
+        EXPECT_FALSE(value.is_nan());
+        EXPECT_GE(static_cast<float>(value), 0);
+        EXPECT_LE(static_cast<float>(value), 3);
+    }
+
+#ifndef _WIN32
+#ifdef TENSILE_USE_FP4
+    constexpr size_t logicalFP4Elements = 65;
+    std::array<uint8_t, (logicalFP4Elements + 1) / 2> packedFP4{};
+    ASSERT_TRUE(tryHostValidationInitialize(
+        rocisa::DataType::Float4,
+        InitMode::RandomNarrow,
+        packedFP4.data(),
+        logicalFP4Elements));
+    for(size_t index = 0; index < logicalFP4Elements; ++index)
+    {
+        const uint8_t byte = packedFP4[index / 2];
+        const uint8_t raw = index % 2 == 0 ? byte & 0xfU : byte >> 4;
+        EXPECT_LE(raw, 14);
+    }
+#endif
+#endif
+}
+
+namespace
+{
+    template <typename T>
+    void expectComponentInitializationBytes(rocisa::DataType dataType,
+                                            InitMode         mode,
+                                            const T&         expected)
+    {
+        constexpr size_t logicalElements = TensileLite::TypeInfo<T>::Packing;
+        std::array<std::byte, sizeof(T)> observed{};
+        ASSERT_TRUE(tryHostValidationInitialize(
+            dataType, mode, observed.data(), logicalElements));
+        EXPECT_EQ(std::memcmp(observed.data(), &expected, sizeof(T)), 0)
+            << "dataType=" << dataType << " mode=" << mode;
+    }
+}
+
+TEST(HostValidationDataInitialization, TypeDerivedSpecialValuesMatchLegacyEncoding)
+{
+    expectComponentInitializationBytes<int8_t>(
+        rocisa::DataType::Int8,
+        InitMode::Max,
+        std::numeric_limits<int8_t>::max());
+    expectComponentInitializationBytes<int32_t>(
+        rocisa::DataType::Int32,
+        InitMode::Max,
+        std::numeric_limits<int32_t>::max());
+    expectComponentInitializationBytes<int8_t>(
+        rocisa::DataType::Int8,
+        InitMode::BadInput,
+        std::numeric_limits<int8_t>::max());
+    expectComponentInitializationBytes<int8_t>(
+        rocisa::DataType::Int8,
+        InitMode::BadOutput,
+        std::numeric_limits<int8_t>::min());
+    expectComponentInitializationBytes<int32_t>(
+        rocisa::DataType::Int32,
+        InitMode::BadInput,
+        std::numeric_limits<int32_t>::max());
+    expectComponentInitializationBytes<int32_t>(
+        rocisa::DataType::Int32,
+        InitMode::BadOutput,
+        std::numeric_limits<int32_t>::min());
+
+    expectComponentInitializationBytes<TensileLite::BFloat16>(
+        rocisa::DataType::BFloat16,
+        InitMode::Max,
+        TensileLite::BFloat16(std::numeric_limits<float>::max()));
+#ifndef _WIN32
+#ifdef TENSILE_USE_BF6
+    expectComponentInitializationBytes<TensileLite::BFloat6x32>(
+        rocisa::DataType::BFloat6,
+        InitMode::Max,
+        TensileLite::BFloat6x32(7.5f));
+    expectComponentInitializationBytes<TensileLite::BFloat6x32>(
+        rocisa::DataType::BFloat6,
+        InitMode::DenormMin,
+        TensileLite::BFloat6x32(0.125f));
+    expectComponentInitializationBytes<TensileLite::BFloat6x32>(
+        rocisa::DataType::BFloat6,
+        InitMode::DenormMax,
+        TensileLite::BFloat6x32(0.875f));
+#endif
+#endif
+
+    expectComponentInitializationBytes<TensileLite::E8>(
+        rocisa::DataType::E8, InitMode::Zero, TensileLite::E8(uint8_t{0}));
+    expectComponentInitializationBytes<TensileLite::E8>(
+        rocisa::DataType::E8, InitMode::One, TensileLite::E8(1.0f));
+    expectComponentInitializationBytes<TensileLite::E8>(
+        rocisa::DataType::E8, InitMode::Two, TensileLite::E8(2.0f));
+    expectComponentInitializationBytes<TensileLite::E8>(
+        rocisa::DataType::E8,
+        InitMode::Max,
+        TensileLite::E8(static_cast<uint8_t>(0xfe)));
+    for(const InitMode mode :
+        {InitMode::NaN, InitMode::BadInput, InitMode::BadOutput})
+        expectComponentInitializationBytes<TensileLite::E8>(
+            rocisa::DataType::E8,
+            mode,
+            TensileLite::E8(static_cast<uint8_t>(0xff)));
 }
 
 TEST(HostValidationStructuredSparsity, TensileAdapterMatchesStandaloneComponent)

@@ -143,10 +143,13 @@ GenerationRunInfo run = generate(outputView, options);
 
 The current patterns cover constants, uniform integer/real values, normal
 values, sine/cosine and absolute variants, serial logical indices, one
-selected dimension, identity tensors, and checkerboard integers. Real and
-imaginary components have independent recipes and random streams. Random
-values are counter-based, so a tensor element depends only on the seed,
-stream, and logical index—not loop order or thread count.
+selected dimension, identity tensors, checkerboard integers, type-derived
+extrema/non-finite values, encoded-exponent sampling, and explicit raw-storage
+recipes. Raw recipes are used only when compatibility depends on exact scalar
+encodings rather than numerical conversion. Real and imaginary components
+have independent recipes and random streams. Random values are counter-based,
+so a tensor element depends only on the seed, stream, and logical index—not
+loop order or thread count.
 
 hipBLASLt and TensileLite keep private enum/type adapters. Common host
 initialization modes now translate to this API; unsupported legacy raw-bit,
@@ -263,7 +266,8 @@ ReductionRunInfo run = referenceSum(problem);
 ```
 
 The current implementation supports F32, F64, I32, complex-F32, and complex-F64
-accumulation, runtime input/output storage types, arbitrary affine layouts,
+accumulation, runtime input/output storage types, validated signed-strided layouts
+used by current consumers,
 rank-zero outputs, and multiple reduction axes. hipBLASLt's bias-gradient
 adapter represents its matrix as a strided tensor and reduces the K axis; no
 product type enters the component.
@@ -290,7 +294,7 @@ StructuredSparsityRunInfo run = applyStructuredSparsity(problem);
 The operation supports:
 
 - fixed or counter-based deterministic random retained positions;
-- arbitrary affine input and output layouts;
+- validated signed-strided input and output layouts used by current consumers;
 - in-place pruning;
 - byte-preserving copies for ordinary and packed scalar formats;
 - optional retained-position indices;

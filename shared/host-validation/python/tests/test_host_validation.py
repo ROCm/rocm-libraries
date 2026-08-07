@@ -268,6 +268,127 @@ class TensorAndGemmTests(unittest.TestCase):
         self.assertFalse(np.array_equal(random_first, random_other_stream))
         self.assertTrue(np.all((-3 <= random_first) & (random_first <= 3)))
 
+    def test_type_derived_generation(self):
+        options = hv.GenerationOptions()
+        options.real.pattern = hv.GenerationPattern.TypeMaximum
+        maximum_cases = (
+            (hv.ScalarType.Float16, np.finfo(np.float16).max),
+            (
+                hv.ScalarType.BFloat16,
+                np.asarray([0x7F7F0000], dtype=np.uint32).view(np.float32)[0],
+            ),
+            (hv.ScalarType.Float4E2M1, 6.0),
+            (hv.ScalarType.Float6E2M3, 7.5),
+            (hv.ScalarType.Float6E3M2, 28.0),
+            (hv.ScalarType.Float8E4M3, 448.0),
+            (hv.ScalarType.Int8, 127),
+            (hv.ScalarType.Int32, np.iinfo(np.int32).max),
+        )
+        for scalar_type, expected in maximum_cases:
+            with self.subTest(scalar_type=scalar_type):
+                observed = hv.to_numpy(
+                    hv.generate_tensor(scalar_type, [3], options),
+                    np.float64
+                    if scalar_type == hv.ScalarType.Float64
+                    else np.float32,
+                )
+                np.testing.assert_array_equal(
+                    observed, np.full(3, expected, dtype=observed.dtype)
+                )
+
+        options.real.pattern = hv.GenerationPattern.TypeDenormalMinimum
+        fp4_denormal = hv.to_numpy(
+            hv.generate_tensor(hv.ScalarType.Float4E2M1, [2], options)
+        )
+        np.testing.assert_array_equal(
+            fp4_denormal, np.asarray([0.5, 0.5], dtype=np.float32)
+        )
+
+        options.real.pattern = hv.GenerationPattern.TypeNaN
+        nan_values = hv.to_numpy(
+            hv.generate_tensor(hv.ScalarType.Float8E4M3Fnuz, [2], options)
+        )
+        self.assertTrue(np.isnan(nan_values).all())
+
+        options.real.pattern = hv.GenerationPattern.TypeInfinity
+        infinity = hv.to_numpy(
+            hv.generate_tensor(hv.ScalarType.Float8E5M2, [2], options)
+        )
+        self.assertTrue(np.isposinf(infinity).all())
+
+        options.real.pattern = hv.GenerationPattern.UniformTypeRange
+        options.seed = 23
+        low_precision = hv.to_numpy(
+            hv.generate_tensor(hv.ScalarType.Float4E2M1, [64], options)
+        )
+        self.assertTrue(np.all((-6.0 <= low_precision) & (low_precision <= 6.0)))
+        float64_range = hv.to_numpy(
+            hv.generate_tensor(hv.ScalarType.Float64, [64], options)
+        )
+        self.assertTrue(np.isfinite(float64_range).all())
+        self.assertTrue(
+            np.all(
+                (-np.finfo(np.float64).max <= float64_range)
+                & (float64_range <= np.finfo(np.float64).max)
+            )
+        )
+
+        options.real.pattern = hv.GenerationPattern.AbsoluteUniformInteger
+        options.real.parameter0 = -3
+        options.real.parameter1 = 3
+        unsigned_scale_values = hv.to_numpy(
+            hv.generate_tensor(hv.ScalarType.E5M3, [64], options)
+        )
+        self.assertTrue(np.all((0 <= unsigned_scale_values) & (unsigned_scale_values <= 3)))
+
+        options.real.pattern = hv.GenerationPattern.RandomEncodedExponent
+        options.real.parameter0 = -3
+        options.real.parameter1 = -1
+        options.real.source_type = hv.ScalarType.Float32
+        options.seed = 29
+        narrow = hv.to_numpy(
+            hv.generate_tensor(hv.ScalarType.Float32, [64], options)
+        )
+        narrow_repeat = hv.to_numpy(
+            hv.generate_tensor(hv.ScalarType.Float32, [64], options)
+        )
+        np.testing.assert_array_equal(narrow, narrow_repeat)
+        exponent_bits = (narrow.view(np.uint32) >> 23) & np.uint32(0xFF)
+        self.assertTrue(
+            set(int(value) for value in exponent_bits).issubset(
+                {124, 125, 126}
+            )
+        )
+
+        options.real.pattern = hv.GenerationPattern.RawSerialDimension
+        options.real.dimension = 1
+        raw_serial = hv.generate_tensor(
+            hv.ScalarType.Float16, [2, 3], options
+        )
+        np.testing.assert_array_equal(
+            np.frombuffer(raw_serial.storage, dtype=np.uint16).reshape(2, 3),
+            np.asarray([[0, 1, 2], [0, 1, 2]], dtype=np.uint16),
+        )
+
+        options.real.pattern = hv.GenerationPattern.RawConstant
+        options.real.parameter0 = 0
+        raw_zero = hv.generate_tensor(hv.ScalarType.E8M0, [4], options)
+        np.testing.assert_array_equal(
+            np.frombuffer(raw_zero.storage, dtype=np.uint8),
+            np.zeros(4, dtype=np.uint8),
+        )
+
+        options.real.pattern = hv.GenerationPattern.UniformRawInteger
+        options.real.parameter0 = 0
+        options.real.parameter1 = 14
+        options.seed = 31
+        raw_fp4 = hv.generate_tensor(hv.ScalarType.Float4E2M1, [65], options)
+        fp4_nibbles = np.frombuffer(raw_fp4.storage, dtype=np.uint8)
+        fp4_nibbles = np.concatenate(
+            (fp4_nibbles & np.uint8(0xF), fp4_nibbles >> np.uint8(4))
+        )[:65]
+        self.assertTrue(np.all(fp4_nibbles <= 14))
+
     def test_float32_gemm_matches_numpy(self):
         a = np.arange(15, dtype=np.float32).reshape(3, 5) - 4
         b = np.arange(20, dtype=np.float32).reshape(5, 4) - 7
