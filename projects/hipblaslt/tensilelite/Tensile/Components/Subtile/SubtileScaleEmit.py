@@ -655,33 +655,7 @@ def globalReadScalePtrUpdates(tc, writer, kernel):
 # the scale values
 #
 
-def _emitWaveAxisIndex(mod, writer, kernel, ti, wgAxis, dstSgprIdx):
-  """Emit instructions to compute the M/N-direction wave index into sgpr(dstSgprIdx).
-
-  For single-wave configs (wgAxis == 1), emits nothing (wave index is 0,
-  caller should handle the single-wave case).
-  """
-
-  assert wgAxis > 0 and (wgAxis & (wgAxis - 1)) == 0, \
-      f"MIWaveGroup[{ti}] = {wgAxis} must be a power of 2 (bitmask/shift decomposition)"
-  wavelen = kernel["WavefrontSize"]
-  mod.add(VReadfirstlaneB32(dst=sgpr(dstSgprIdx), src=vgpr("Serial"),
-          comment="first tId"))
-  mod.add(SLShiftRightB32(dst=sgpr(dstSgprIdx), src=sgpr(dstSgprIdx),
-          shiftHex=hex(int(math.ceil(math.log2(wavelen)))),
-          comment=f"waveId = tId / {wavelen}"))
-  # Extract axis-specific wave index from the flat wave index.
-  # MXSA (ti=0): waveIdM = waveId % MIWaveGroup[0]
-  # MXSB (ti=1): waveIdN = waveId / MIWaveGroup[0]
-  if ti == 0:
-    mod.add(SAndB32(dst=sgpr(dstSgprIdx), src0=sgpr(dstSgprIdx),
-            src1=wgAxis - 1,
-            comment=f"waveIdAxis = waveId %% {wgAxis}"))
-  else:
-    wg0 = kernel["MIWaveGroup"][0]
-    mod.add(SLShiftRightB32(dst=sgpr(dstSgprIdx), src=sgpr(dstSgprIdx),
-            shiftHex=hex(int(math.ceil(math.log2(wg0)))),
-            comment=f"waveIdAxis = waveId / {wg0}"))
+# emitWaveAxisIndex imported lazily at call site to avoid circular import
 
 
 def _initTDMDescriptorMXScaleSubtile(writer, kernel, scaleTc):
@@ -765,7 +739,8 @@ def _initTDMDescriptorMXScaleSubtile(writer, kernel, scaleTc):
             comment="*= wgId"))
 
     if wgAxis > 1:
-      _emitWaveAxisIndex(mod, writer, kernel, ti, wgAxis, waveAxisIdx)
+      from .Kernel import emitWaveAxisIndex
+      emitWaveAxisIndex(mod, kernel, ti, waveAxisIdx)
       strideWaveSep = writer.strideRef(scaleTc, 3) if tlu else writer.strideRef(scaleTc, ti)
       mod.add(SMulI32(dst=sgpr(waveGlobalOff), src0=sgpr(waveAxisIdx), src1=perWaveRows,
               comment=f"waveGlobalOff = waveIdx_axis * {perWaveRows}"))

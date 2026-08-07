@@ -15173,20 +15173,11 @@ class KernelWriterAssembly(KernelWriter):
 
     edgeModule.addComment1("UseSubtileImpl NonEdge guards: numValidD1Steps (MatrixInstM=%d) and numValid16NBlocks" % kernel["MatrixInstM"])
 
-    # Read waveId once; extract M (lower bits) and N (upper bits) before AND destroys waveId.
-    waveSize = kernel["WavefrontSize"]
-    log2WaveSize = int(log(waveSize, 2))
-    edgeModule.add(VReadfirstlaneB32(dst=sgpr(tmpM), src=vgpr("Serial"),
-                                     comment="lane 0 serial of this wave"))
-    edgeModule.add(SLShiftRightB32(dst=sgpr(tmpM), src=sgpr(tmpM),
-                                   shiftHex=log2WaveSize, comment="waveId = serial >> %d" % log2WaveSize))
+    # Decompose Serial into per-axis wave indices (shared helper).
+    from Tensile.Components.Subtile.Kernel import emitWaveAxisIndex
+    emitWaveAxisIndex(edgeModule, kernel, 0, tmpM)
     if numWavesN > 1:
-      edgeModule.add(SLShiftRightB32(dst=sgpr(tmpN), src=sgpr(tmpM),
-                                     shiftHex=log2numWavesM,
-                                     comment="waveIdN = waveId >> log2(numWavesM=%d)" % numWavesM))
-    # MIWaveGroup[0] is always a power of 2, so AND is correct for modulo.
-    edgeModule.add(SAndB32(dst=sgpr(tmpM), src0=sgpr(tmpM), src1=numWavesM - 1,
-                           comment="waveIdM = waveId & (numWavesM-1=%d)" % (numWavesM - 1)))
+      emitWaveAxisIndex(edgeModule, kernel, 1, tmpN)
 
     # --- M guard ---
     # Each d1 step in the C-load batch corresponds to MatrixInstM rows.

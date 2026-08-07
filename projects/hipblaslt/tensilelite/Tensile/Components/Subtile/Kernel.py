@@ -51,7 +51,7 @@ from rocisa.instruction import (
   MFMAInstruction, MXMFMAInstruction, SMFMAInstruction,
   SAddCU32, SAddU32, SBarrier, SBranch,
   SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ,
-  SCmpEQU32, SCmpLeU32, SCSelectB32, SLShiftLeftB32, SLongBranchPositive,
+  SAndB32, SCmpEQU32, SCmpLeU32, SCSelectB32, SLShiftLeftB32, SLShiftRightB32, SLongBranchPositive,
   SMovB32, SMovB64, SMulI32, SNop,
   SSetPrior, SSetRegIMM32B32, SSubBU32, SSubU32, SWaitAlu, SWaitCnt, SXorB32,
   VAccvgprWrite, VAddCCOU32, VAddCOU32, VAddU32, VAndB32,
@@ -378,6 +378,38 @@ def selectDGeometry(kernel: dict) -> CDTileGeometry:
   if kernel["WavefrontSize"] == 32:
     return CD_F32_W32
   return CD_F32
+
+
+################################################################################
+# Wave-axis index decomposition
+################################################################################
+
+def emitWaveAxisIndex(mod, kernel, ti, dstSgprIdx):
+  """Compute the M-axis (ti=0) or N-axis (ti=1) wave index into sgpr(dstSgprIdx).
+
+  Decomposes the flat waveId (derived from Serial / WavefrontSize) into
+  per-axis indices using MIWaveGroup:
+    waveIdM = waveId %  MIWaveGroup[0]   (ti=0)
+    waveIdN = waveId // MIWaveGroup[0]   (ti=1)
+  """
+  wavelen = kernel["WavefrontSize"]
+  wgAxis = kernel["MIWaveGroup"][ti]
+  assert wgAxis > 0 and (wgAxis & (wgAxis - 1)) == 0, \
+      f"MIWaveGroup[{ti}] = {wgAxis} must be a power of 2"
+  mod.add(VReadfirstlaneB32(dst=sgpr(dstSgprIdx), src=vgpr("Serial"),
+          comment="lane 0 serial"))
+  mod.add(SLShiftRightB32(dst=sgpr(dstSgprIdx), src=sgpr(dstSgprIdx),
+          shiftHex=hex(int(math.ceil(math.log2(wavelen)))),
+          comment=f"waveId = serial / {wavelen}"))
+  if ti == 0:
+    mod.add(SAndB32(dst=sgpr(dstSgprIdx), src0=sgpr(dstSgprIdx),
+            src1=wgAxis - 1,
+            comment=f"waveIdM = waveId %% {wgAxis}"))
+  else:
+    wg0 = kernel["MIWaveGroup"][0]
+    mod.add(SLShiftRightB32(dst=sgpr(dstSgprIdx), src=sgpr(dstSgprIdx),
+            shiftHex=hex(int(math.ceil(math.log2(wg0)))),
+            comment=f"waveIdN = waveId / {wg0}"))
 
 
 ################################################################################
