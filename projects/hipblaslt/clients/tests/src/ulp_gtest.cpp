@@ -305,17 +305,16 @@ namespace
         EXPECT_EQ(r.count, 4u);
     }
 
-    TEST(UlpCheckGeneral, unsupported_type_leaves_counters_untouched)
+    TEST(UlpCheckGeneral, complex_float_dispatch)
     {
-        // HIP_C_32F is not handled by the switch; it hits the default branch,
-        // logs an error, and must not touch the running counters.
-        std::vector<float> cpu = {1.0f, 2.0f};
-        std::vector<float> gpu = {9.0f, 9.0f};
-        CheckResult        r   = run_check(cpu, gpu, 1, 2, HIP_C_32F);
+        std::vector<std::complex<float>> cpu
+            = {{1.0f, 2.0f}, {3.0f, 4.0f}};
+        std::vector<std::complex<float>> gpu = cpu;
+        CheckResult r = run_check(cpu, gpu, 1, 2, HIP_C_32F);
 
         EXPECT_DOUBLE_EQ(r.max_ulp, 0.0);
         EXPECT_DOUBLE_EQ(r.sum_ulp, 0.0);
-        EXPECT_EQ(r.count, 0u);
+        EXPECT_EQ(r.count, 4u);
     }
 
 } // namespace

@@ -30,6 +30,7 @@
 
 // TensileLite reference API owned by the shared host-validation component.
 
+#include <roc/host_validation/comparison.hpp>
 
 #include <Tensile/ContractionProblem.hpp>
 
@@ -41,16 +42,28 @@ namespace TensileLite
     {
         // AlmostEqual tolerance constants per type.
         // Formula: |a - b| < tolerance * (|a| + |b| + 1)
-        constexpr float  AlmostEqualTolerance_Half     = 0.01f;
-        constexpr float  AlmostEqualTolerance_BFloat16 = 0.1f;
+        constexpr float AlmostEqualTolerance_Half = static_cast<float>(
+            roc::host_validation::defaultSymmetricRelativeTolerance(
+                roc::host_validation::ScalarType::Float16));
+        constexpr float AlmostEqualTolerance_BFloat16 = static_cast<float>(
+            roc::host_validation::defaultSymmetricRelativeTolerance(
+                roc::host_validation::ScalarType::BFloat16));
         // tolerance * epsilon = 2 * 0.0625; 2*eps needed for SR
-        constexpr float  AlmostEqualTolerance_Float8   = 0.125f;
+        constexpr float AlmostEqualTolerance_Float8 = static_cast<float>(
+            roc::host_validation::defaultSymmetricRelativeTolerance(
+                roc::host_validation::ScalarType::Float8E4M3));
         // tolerance * epsilon = 2 * 0.125; 2*eps needed for SR
-        constexpr float  AlmostEqualTolerance_BFloat8  = 0.25f;
+        constexpr float AlmostEqualTolerance_BFloat8 = static_cast<float>(
+            roc::host_validation::defaultSymmetricRelativeTolerance(
+                roc::host_validation::ScalarType::Float8E5M2));
         // 7 digits precision - 2
-        constexpr float  AlmostEqualTolerance_Float    = 0.0001f;
+        constexpr float AlmostEqualTolerance_Float = static_cast<float>(
+            roc::host_validation::defaultSymmetricRelativeTolerance(
+                roc::host_validation::ScalarType::Float32));
         // 15 digits precision - 2
-        constexpr double AlmostEqualTolerance_Double   = 1e-12;
+        constexpr double AlmostEqualTolerance_Double
+            = roc::host_validation::defaultSymmetricRelativeTolerance(
+                roc::host_validation::ScalarType::Float64);
 
         // threshold is largest allowed delta. -1 uses default for each type
         template <typename T>
@@ -59,105 +72,119 @@ namespace TensileLite
         template <>
         inline bool AlmostEqual(Half a, Half b, double threshold)
         {
-            float fa      = static_cast<float>(a);
-            float fb      = static_cast<float>(b);
-            float absDiff = std::fabs(fa - fb);
-            return fa == fb
-                   || absDiff < AlmostEqualTolerance_Half * (std::fabs(fa) + std::fabs(fb) + 1.0f);
+            return roc::host_validation::valuesClose(
+                static_cast<float>(a),
+                static_cast<float>(b),
+                roc::host_validation::defaultComparisonOptions(
+                    roc::host_validation::ScalarType::Float16));
         }
 
         template <>
         inline bool AlmostEqual(Float8 a, Float8 b, double threshold)
         {
-            float fa      = static_cast<float>(a);
-            float fb      = static_cast<float>(b);
-            float absDiff = std::fabs(fa - fb);
-            return fa == fb
-                   || absDiff < AlmostEqualTolerance_Float8 * (std::fabs(fa) + std::fabs(fb) + 1.0f);
+            return roc::host_validation::valuesClose(
+                static_cast<float>(a),
+                static_cast<float>(b),
+                roc::host_validation::defaultComparisonOptions(
+                    roc::host_validation::ScalarType::Float8E4M3));
         }
 
         template <>
         inline bool AlmostEqual(BFloat8 a, BFloat8 b, double threshold)
         {
-            float fa      = static_cast<float>(a);
-            float fb      = static_cast<float>(b);
-            float absDiff = std::fabs(fa - fb);
-
-            return fa == fb
-                   || absDiff < AlmostEqualTolerance_BFloat8 * (std::fabs(fa) + std::fabs(fb) + 1.0f);
+            return roc::host_validation::valuesClose(
+                static_cast<float>(a),
+                static_cast<float>(b),
+                roc::host_validation::defaultComparisonOptions(
+                    roc::host_validation::ScalarType::Float8E5M2));
         }
 
         template <>
         inline bool AlmostEqual(Float8_fnuz a, Float8_fnuz b, double threshold)
         {
-            float fa      = static_cast<float>(a);
-            float fb      = static_cast<float>(b);
-            float absDiff = std::fabs(fa - fb);
-            return fa == fb
-                   || absDiff < AlmostEqualTolerance_Float8 * (std::fabs(fa) + std::fabs(fb) + 1.0f);
+            return roc::host_validation::valuesClose(
+                static_cast<float>(a),
+                static_cast<float>(b),
+                roc::host_validation::defaultComparisonOptions(
+                    roc::host_validation::ScalarType::Float8E4M3Fnuz));
         }
 
         template <>
         inline bool AlmostEqual(BFloat8_fnuz a, BFloat8_fnuz b, double threshold)
         {
-            float fa      = static_cast<float>(a);
-            float fb      = static_cast<float>(b);
-            float absDiff = std::fabs(fa - fb);
-            return fa == fb
-                   || absDiff < AlmostEqualTolerance_BFloat8 * (std::fabs(fa) + std::fabs(fb) + 1.0f);
+            return roc::host_validation::valuesClose(
+                static_cast<float>(a),
+                static_cast<float>(b),
+                roc::host_validation::defaultComparisonOptions(
+                    roc::host_validation::ScalarType::Float8E5M2Fnuz));
         }
 
         template <>
         inline bool AlmostEqual(BFloat16 a, BFloat16 b, double threshold)
         {
-            float fa      = static_cast<float>(a);
-            float fb      = static_cast<float>(b);
-            float absDiff = std::fabs(fa - fb);
-            return fa == fb
-                   || absDiff < AlmostEqualTolerance_BFloat16 * (std::fabs(fa) + std::fabs(fb) + 1.0f);
+            return roc::host_validation::valuesClose(
+                static_cast<float>(a),
+                static_cast<float>(b),
+                roc::host_validation::defaultComparisonOptions(
+                    roc::host_validation::ScalarType::BFloat16));
         }
 
         template <>
         inline bool AlmostEqual(float a, float b, double threshold)
         {
-            float tol     = (threshold > 0.0) ? static_cast<float>(threshold) : AlmostEqualTolerance_Float;
-            float absDiff = std::fabs(a - b);
-            return a == b
-                   || absDiff < tol * (std::fabs(a) + std::fabs(b) + 1);
+            const std::optional<double> override =
+                threshold > 0.0 ? std::optional<double>(threshold)
+                                : std::nullopt;
+            return roc::host_validation::valuesClose(
+                a,
+                b,
+                roc::host_validation::defaultComparisonOptions(
+                    roc::host_validation::ScalarType::Float32,
+                    override));
         }
 
         template <>
         inline bool AlmostEqual(double a, double b, double threshold)
         {
-            double absDiff = std::fabs(a - b);
-            return a == b
-                   || absDiff < AlmostEqualTolerance_Double * (std::fabs(a) + std::fabs(b) + 1);
+            return roc::host_validation::valuesClose(
+                a,
+                b,
+                roc::host_validation::defaultComparisonOptions(
+                    roc::host_validation::ScalarType::Float64));
         }
         template <>
         inline bool AlmostEqual(int8_t a, int8_t b, double threshold)
         {
-            return a == b;
+            return roc::host_validation::valuesClose(a, b);
         }
         template <>
         inline bool AlmostEqual(int a, int b, double threshold)
         {
-            return a == b;
+            return roc::host_validation::valuesClose(a, b);
         }
         template <>
         inline bool AlmostEqual(unsigned int a, unsigned int b, double threshold)
         {
-            return a == b;
+            return roc::host_validation::valuesClose(a, b);
         }
         template <>
         inline bool AlmostEqual(std::complex<float> a, std::complex<float> b, double threshold)
         {
-            return AlmostEqual(a.real(), b.real()) && AlmostEqual(a.imag(), b.imag());
+            return roc::host_validation::valuesClose(
+                a,
+                b,
+                roc::host_validation::defaultComparisonOptions(
+                    roc::host_validation::ScalarType::ComplexFloat32));
         }
 
         template <>
         inline bool AlmostEqual(std::complex<double> a, std::complex<double> b, double threshold)
         {
-            return AlmostEqual(a.real(), b.real()) && AlmostEqual(a.imag(), b.imag());
+            return roc::host_validation::valuesClose(
+                a,
+                b,
+                roc::host_validation::defaultComparisonOptions(
+                    roc::host_validation::ScalarType::ComplexFloat64));
         }
 
         void SolveCPU(ContractionProblem const* contraction,
