@@ -655,7 +655,12 @@ struct BlockFmhaPipelineQRKSVSAsync
             }
             if constexpr(kHasSink)
             {
-                if(i_total_loops == 0)
+                // Only jump out of the sink prefix when a sink phase actually ran.
+                // bias_dram_window already starts at kv_load_start, which equals
+                // seqlen_k_start when sink_seq_end == 0, so an unconditional move here
+                // double-offsets the bias tile for a learnable-softmax sink combined
+                // with a local (sliding-window) mask. Matches the batch_prefill pipeline.
+                if(i_total_loops == num_sink_loop - 1)
                     move_tile_window(bias_dram_window, {0, seqlen_k_start - sink_seq_end});
             }
             move_tile_window(bias_dram_window, {0, kN0});
@@ -927,7 +932,9 @@ struct BlockFmhaPipelineQRKSVSAsync
                         return seqlen_k_start + i_total_loops * kN0;
 
                     const bool in_sink_phase = (num_sink_loop > i_total_loops);
-                    if(i_total_loops == num_sink_loop)
+                    // Same guard as the bias window above: with no sink phase the window
+                    // already starts at seqlen_k_start, so skip the transition move.
+                    if(num_sink_loop > 0 && i_total_loops == num_sink_loop)
                         move_tile_window(randval_dram_window, {0, seqlen_k_start - sink_seq_end});
 
                     return in_sink_phase ? (kv_load_start + i_total_loops * kN0)
