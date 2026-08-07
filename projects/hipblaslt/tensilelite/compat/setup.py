@@ -9,9 +9,8 @@ from setuptools import setup
 from setuptools.command.build_py import build_py
 
 
-_metadata = runpy.run_path(str(Path(__file__).with_name("release_metadata.py")))
-_rocm = _metadata["rocm_version"]()
-_version = f"5.0.0+rocm{_rocm}"
+_metadata = runpy.run_path(str(Path(__file__).resolve().parents[1] / "release_metadata.py"))
+_version = _metadata["distribution_version"]()
 
 
 class CleanBuildPy(build_py):

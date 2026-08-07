@@ -88,6 +88,10 @@ endif()
 
 add_executable(tensilelite-client "${CMAKE_CURRENT_SOURCE_DIR}/main.cpp")
 target_link_libraries(tensilelite-client PRIVATE tensilelite-client-common)
+target_include_directories(tensilelite-client PRIVATE
+    "${CMAKE_CURRENT_BINARY_DIR}/../../tensilelite-client-generated")
+target_sources(tensilelite-client PRIVATE
+    "${CMAKE_CURRENT_BINARY_DIR}/../../tensilelite-client-generated/TensileLiteClientVersion.hpp")
 
 if(TENSILELITE_BUILD_TESTING OR BUILD_TESTING)
     add_executable(cpu-gemm-driver "${CMAKE_CURRENT_SOURCE_DIR}/cpu_gemm_driver.cpp")
