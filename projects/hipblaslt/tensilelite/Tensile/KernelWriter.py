@@ -5353,11 +5353,18 @@ class KernelWriter(metaclass=abc.ABCMeta):
         doPostLoopStoreLabel = Label("DoPostLoopStore", "")
         # Guard branches target the adjacent doPostLoopStoreLabel -> short is fine.
         module.add(self.emitFusedStoreGuard(kernel, doPostLoopStoreLabel))
-        # The skip jump now spans the post-loop store-init + entire store body, which
-        # exceeds the +-simm16 short-branch range -> emit a 32-bit long branch.
-        with self.allocTmpSgpr(3, tag="postLoopStoreDedup_longBranch") as tmpSgprInfo:
-          module.add(SLongBranchPositive(postLoopStoreDedupLabel, tmpSgprInfo,
-                     comment="FUSED NLL already stored D -> skip redundant post-loop store-init + store (long)"))
+        # The skip jump spans the post-loop store-init + store body. That span is
+        # tile-dependent and, measured, sits well inside the short-branch window
+        # (85 KB / 15350 instructions of a 128 KB / 16384 budget on MT256x64, the
+        # largest tile carrying the fused store), so it must not be hard-coded to
+        # the 32-bit form: doing so took a 3-SGPR temp at the pool's high-water
+        # mark, pushing 31 kernels past MaxSgpr. Leave a placeholder and let
+        # updateBranchPlaceHolder choose from the measured distance once the body
+        # has been emitted -- if it does pick the long form, the temp is allocated
+        # there instead, after the store temps have been checked back in.
+        dedupBranch = Module("postLoopStoreDedup_placeholder")
+        dedupBranch.addComment1("FUSED NLL already stored D -> skip redundant post-loop store-init + store")
+        module.add(dedupBranch)
         module.add(doPostLoopStoreLabel)
 
       # Post-loop store-init (SrdC/SrdD address math). Emitted AFTER the dedup guard so
@@ -5385,6 +5392,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module.add(storeModule)
       if postLoopStoreDedupLabel is not None:
         module.add(postLoopStoreDedupLabel)
+        # module now ends at the branch target, so the placeholder-to-end
+        # instruction count that updateBranchPlaceHolder measures is the real span.
+        self.updateBranchPlaceHolder(module, ["postLoopStoreDedup_placeholder"],
+                                     [postLoopStoreDedupLabel.label], ["SBranch"])
 
       if not (kernel["UseSubtileImpl"] and kernel["MIArchVgpr"] and self._subtileDtileBaseVgpr is not None):
         self.vgprPool.checkIn(self.states.c.startVgprValu)
