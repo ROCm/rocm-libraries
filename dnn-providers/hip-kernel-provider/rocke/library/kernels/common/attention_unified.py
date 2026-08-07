@@ -920,6 +920,17 @@ def _select_2d_tile_size(problem: UnifiedAttentionProblem) -> int:
     # combo and a much heavier prelude.
     if _enable_combo_2d(problem) and problem.sliding_window > 0:
         return problem.block_size
+    # fp16 D128 single-batch sliding-window: force T=64. The combo (admitted
+    # below via _enable_single_batch_combo) would otherwise take the generic
+    # 2*block_size = T=32 tile, which _select_2d_block_m_per_warp flags as a
+    # numerically-wrong hipcc T=32 SW combo; T=64 is the correctness-clean tile.
+    if (
+        _enable_single_batch_combo(problem)
+        and problem.sliding_window > 0
+        and problem.head_size == 128
+        and problem.dtype == "fp16"
+    ):
+        return 64
     # Single-batch (num_seqs == 1) d128/d64 prefill full-combo cohort.
     # Autotuner-proven KV tile per shape (gfx950, no-SW):
     #   * d128 -> T = 2 * block_size (32). The d128 winners all kept the
@@ -1507,7 +1518,10 @@ def _enable_single_batch_combo(problem: UnifiedAttentionProblem) -> bool:
         them per-score, so biased single-batch prefill takes the combo path
         instead of the fallback. Only softcap/sinks are excluded (above)
         because the mask-limit shortcut can't fold them.
-      * no sliding window (the mask-once / mask-limit opts require no-SW).
+      * sliding window: fp16 D128 only -- routed here for correctness (the narrow
+        16x16 path is numerically wrong on long-KV fp16); other SW shapes are
+        excluded, and the no-SW VALU sub-flags auto-disable via
+        _enable_transposed_subflags.
       * head_size in {64, 128}.
       * max_seqlen_q > 256 (long prefill; decode-class shapes route to the 3D
         split-KV path via ``select_path``, and the autotuner's win starts at
@@ -1523,7 +1537,14 @@ def _enable_single_batch_combo(problem: UnifiedAttentionProblem) -> bool:
         return False
     if problem.softcap > 0 or problem.use_sinks:
         return False
-    if problem.sliding_window > 0:
+    # fp16 D128 sliding-window routes to the transposed-32x32 fp32 online-softmax
+    # path (the narrow 16x16 path loses accuracy on long-KV fp16). bf16 D128 SW
+    # and all other SW shapes stay on their existing paths. The no-SW VALU
+    # sub-flags auto-disable for SW via _enable_transposed_subflags, leaving the
+    # bare transposed path + the emitter's per-element window mask.
+    if problem.sliding_window > 0 and not (
+        problem.head_size == 128 and problem.dtype == "fp16"
+    ):
         return False
     if problem.head_size not in (64, 128):
         return False
