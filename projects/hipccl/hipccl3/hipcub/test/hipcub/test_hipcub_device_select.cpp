@@ -24,6 +24,8 @@
 
 // hipcub API
 #include <hipcub/device/device_select.hpp>
+#include <hipcub/iterator/counting_input_iterator.hpp>
+#include <hipcub/iterator/discard_output_iterator.hpp>
 
 #include "single_index_iterator.hpp"
 #include "test_utils_bfloat16.hpp"
@@ -73,7 +75,7 @@ TYPED_TEST(HipcubDeviceSelectTests, Flagged)
     using U = typename TestFixture::output_type;
     using F = typename TestFixture::flag_type;
 
-    constexpr bool inplace = std::is_same_v<T, U>;
+    constexpr bool inplace = std::is_same<T, U>::value;
 
     hipStream_t stream = 0; // default
     if(TestFixture::use_graphs)
@@ -109,7 +111,7 @@ TYPED_TEST(HipcubDeviceSelectTests, Flagged)
             unsigned int* d_selected_count_output;
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, input.size() * sizeof(T)));
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_flags, flags.size() * sizeof(F)));
-            if constexpr(!inplace)
+            if HIPCUB_IF_CONSTEXPR(!inplace)
             {
                 HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, input.size() * sizeof(U)));
             }
@@ -133,7 +135,7 @@ TYPED_TEST(HipcubDeviceSelectTests, Flagged)
 
             auto call = [&](void* d_temp_storage, size_t& temp_storage_size_bytes)
             {
-                if constexpr(inplace)
+                if HIPCUB_IF_CONSTEXPR(inplace)
                 {
                     HIP_CHECK(hipcub::DeviceSelect::Flagged(d_temp_storage,
                                                             temp_storage_size_bytes,
@@ -190,7 +192,7 @@ TYPED_TEST(HipcubDeviceSelectTests, Flagged)
 
             // Check if output values are as expected
             std::vector<U> output(input.size());
-            if constexpr(inplace)
+            if HIPCUB_IF_CONSTEXPR(inplace)
             {
                 HIP_CHECK(hipMemcpy(output.data(),
                                     d_input,
@@ -242,8 +244,8 @@ TEST(HipcubDeviceSelectTests, FlagNormalization)
     for(size_t size : test_utils::get_sizes(seed_value))
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
-        test_utils::counting_iterator<T> d_input(0);
-        test_utils::counting_iterator<F> d_flags(1);
+        rocprim::counting_iterator<T>    d_input(0);
+        rocprim::counting_iterator<F>    d_flags(1);
         U*                               d_output;
         unsigned int*                    d_selected_count_output;
 
@@ -335,7 +337,7 @@ TYPED_TEST(HipcubDeviceSelectTests, SelectOp)
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
 
-    constexpr bool inplace = std::is_same_v<T, U>;
+    constexpr bool inplace = std::is_same<T, U>::value;
 
     hipStream_t stream = 0; // default
     if(TestFixture::use_graphs)
@@ -367,7 +369,7 @@ TYPED_TEST(HipcubDeviceSelectTests, SelectOp)
             U*            d_output;
             unsigned int* d_selected_count_output;
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, input.size() * sizeof(T)));
-            if constexpr(!inplace)
+            if HIPCUB_IF_CONSTEXPR(!inplace)
             {
                 HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, input.size() * sizeof(U)));
             }
@@ -389,7 +391,7 @@ TYPED_TEST(HipcubDeviceSelectTests, SelectOp)
 
             auto call = [&](void* d_temp_storage, size_t& temp_storage_size_bytes)
             {
-                if constexpr(inplace)
+                if HIPCUB_IF_CONSTEXPR(inplace)
                 {
                     HIP_CHECK(hipcub::DeviceSelect::If(d_temp_storage,
                                                        temp_storage_size_bytes,
@@ -446,7 +448,7 @@ TYPED_TEST(HipcubDeviceSelectTests, SelectOp)
 
             // Check if output values are as expected
             std::vector<U> output(input.size());
-            if constexpr(inplace)
+            if HIPCUB_IF_CONSTEXPR(inplace)
             {
                 HIP_CHECK(hipMemcpy(output.data(),
                                     d_input,
@@ -490,7 +492,7 @@ TYPED_TEST(HipcubDeviceSelectTests, FlaggedIf)
     using U = typename TestFixture::output_type;
     using F = typename TestFixture::flag_type;
 
-    constexpr bool inplace = std::is_same_v<T, U>;
+    constexpr bool inplace = std::is_same<T, U>::value;
 
     hipStream_t stream = 0; // default
     if(TestFixture::use_graphs)
@@ -528,7 +530,7 @@ TYPED_TEST(HipcubDeviceSelectTests, FlaggedIf)
             unsigned int* d_selected_count_output;
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, input.size() * sizeof(T)));
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_flags, flags.size() * sizeof(F)));
-            if constexpr(!inplace)
+            if HIPCUB_IF_CONSTEXPR(!inplace)
             {
                 HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, input.size() * sizeof(U)));
             }
@@ -552,7 +554,7 @@ TYPED_TEST(HipcubDeviceSelectTests, FlaggedIf)
 
             auto call = [&](void* d_temp_storage, size_t& temp_storage_size_bytes)
             {
-                if constexpr(inplace)
+                if HIPCUB_IF_CONSTEXPR(inplace)
                 {
                     HIP_CHECK(hipcub::DeviceSelect::FlaggedIf(d_temp_storage,
                                                               temp_storage_size_bytes,
@@ -611,7 +613,7 @@ TYPED_TEST(HipcubDeviceSelectTests, FlaggedIf)
 
             // Check if output values are as expected
             std::vector<U> output(input.size());
-            if constexpr(inplace)
+            if HIPCUB_IF_CONSTEXPR(inplace)
             {
                 HIP_CHECK(hipMemcpy(output.data(),
                                     d_input,
@@ -689,7 +691,7 @@ TYPED_TEST(HipcubDeviceSelectTests, Unique)
                     test_utils::host_inclusive_scan(input01.begin(),
                                                     input01.end(),
                                                     input.begin(),
-                                                    test_utils::plus{});
+                                                    hipcub::Sum());
                 }
 
                 // Allocate and copy to device
@@ -805,11 +807,9 @@ TEST(HipcubDeviceSelectTests, UniqueDiscardOutputIterator)
     for(size_t size : test_utils::get_sizes(seed_value))
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
-        test_utils::counting_iterator<unsigned int> d_input(0);
-
-        auto d_output = test_utils::make_discard_iterator();
-
-        size_t* d_selected_count_output;
+        rocprim::counting_iterator<unsigned int>    d_input(0);
+        rocprim::discard_iterator                   d_output;
+        size_t*                                     d_selected_count_output;
 
         HIP_CHECK(test_common_utils::hipMallocHelper((&d_selected_count_output), sizeof(size_t)));
 
@@ -902,7 +902,7 @@ TEST_P(HipcubDeviceSelectLargeIndicesTests, LargeIndicesSelectOp)
 #endif
 
         // Generate data
-        test_utils::counting_iterator<T> d_input(0);
+        rocprim::counting_iterator<T>    d_input(0);
         U*                               d_output;
         selected_count_type*             d_selected_count_output;
         selected_count_type              expected_output_size = selected_size;
@@ -974,7 +974,7 @@ TEST_P(HipcubDeviceSelectLargeIndicesTests, LargeIndicesSelectOp)
 
 template<typename KeyType,
          typename ValueType,
-         typename EqualityOp        = test_utils::equal,
+         typename EqualityOp        = hipcub::Equality,
          typename OutputKeyType     = KeyType,
          typename OutputValueType   = ValueType,
          typename SelectedCountType = unsigned int,
@@ -1019,11 +1019,11 @@ struct TestUniqueEqualityOp
 using HipcubDeviceUniqueByKeyTestsParams = ::testing::Types<
     DeviceUniqueByKeyParams<int, int>,
     DeviceUniqueByKeyParams<size_t, int, TestUniqueEqualityOp, double, long long, size_t>,
-    DeviceUniqueByKeyParams<double, float, test_utils::equal, double, double, size_t>,
+    DeviceUniqueByKeyParams<double, float, hipcub::Equality, double, double, size_t>,
     DeviceUniqueByKeyParams<uint8_t, long long>,
     DeviceUniqueByKeyParams<test_utils::custom_test_type<double>,
                             test_utils::custom_test_type<int>>,
-    DeviceUniqueByKeyParams<int, int, test_utils::equal, int, int, unsigned int, true>>;
+    DeviceUniqueByKeyParams<int, int, hipcub::Equality, int, int, unsigned int, true>>;
 
 TYPED_TEST_SUITE(HipcubDeviceUniqueByKeyTests, HipcubDeviceUniqueByKeyTestsParams);
 
@@ -1069,7 +1069,7 @@ TYPED_TEST(HipcubDeviceUniqueByKeyTests, UniqueByKey)
                     test_utils::host_inclusive_scan(input01.begin(),
                                                     input01.end(),
                                                     input_keys.begin(),
-                                                    test_utils::plus{});
+                                                    hipcub::Sum());
                 }
 
                 const auto input_values
@@ -1244,8 +1244,8 @@ TEST(HipcubDeviceUniqueByKeyTests, LargeIndicesUniqueByKey)
                 = (size + TestUniqueEqualityOp::segment - 1) / TestUniqueEqualityOp::segment;
             const size_t output_index = selected_count - 1;
             const size_t input_index  = output_index * TestUniqueEqualityOp::segment;
-            test_utils::counting_iterator<key_type>   d_keys_input(0);
-            test_utils::counting_iterator<value_type> d_values_input(123);
+            rocprim::counting_iterator<key_type>   d_keys_input(0);
+            rocprim::counting_iterator<value_type> d_values_input(123);
             key_type*   d_keys_output;
             value_type* d_values_output;
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys_output, sizeof(*d_keys_output)));

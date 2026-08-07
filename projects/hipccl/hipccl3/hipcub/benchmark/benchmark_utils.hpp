@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -36,15 +36,12 @@
 #endif
 
 #include <hipcub/tuple.hpp>
-#include <hipcub/util_type.hpp>
 
 #ifndef HIPCUB_CUB_API
     #define HIPCUB_WARP_THREADS_MACRO warpSize
 #else
-    #define HIPCUB_WARP_THREADS_MACRO warp_threads
+    #define HIPCUB_WARP_THREADS_MACRO CUB_PTX_WARP_THREADS
 #endif
-
-#include _HIPCUB_STD_INCLUDE(limits)
 
 namespace benchmark_utils
 {
@@ -62,11 +59,11 @@ inline auto
     std::uniform_int_distribution<distribution_type> distribution(min, max);
     std::vector<T>                                   data(size);
     std::generate(data.begin(),
-                  data.begin() + _HIPCUB_STD::min(size, max_random_size),
+                  data.begin() + std::min(size, max_random_size),
                   [&]() { return distribution(gen); });
     for(size_t i = max_random_size; i < size; i += max_random_size)
     {
-        std::copy_n(data.begin(), _HIPCUB_STD::min(size - i, max_random_size), data.begin() + i);
+        std::copy_n(data.begin(), std::min(size - i, max_random_size), data.begin() + i);
     }
     return data;
 }
@@ -81,11 +78,11 @@ inline auto
     std::uniform_real_distribution<T> distribution(min, max);
     std::vector<T>                    data(size);
     std::generate(data.begin(),
-                  data.begin() + _HIPCUB_STD::min(size, max_random_size),
+                  data.begin() + std::min(size, max_random_size),
                   [&]() { return distribution(gen); });
     for(size_t i = max_random_size; i < size; i += max_random_size)
     {
-        std::copy_n(data.begin(), _HIPCUB_STD::min(size - i, max_random_size), data.begin() + i);
+        std::copy_n(data.begin(), std::min(size - i, max_random_size), data.begin() + i);
     }
     return data;
 }
@@ -99,11 +96,11 @@ inline std::vector<T>
     std::bernoulli_distribution distribution(p);
     std::vector<T>              data(size);
     std::generate(data.begin(),
-                  data.begin() + _HIPCUB_STD::min(size, max_random_size),
+                  data.begin() + std::min(size, max_random_size),
                   [&]() { return distribution(gen); });
     for(size_t i = max_random_size; i < size; i += max_random_size)
     {
-        std::copy_n(data.begin(), _HIPCUB_STD::min(size - i, max_random_size), data.begin() + i);
+        std::copy_n(data.begin(), std::min(size - i, max_random_size), data.begin() + i);
     }
     return data;
 }
@@ -117,12 +114,12 @@ inline T get_random_value(T min, T max)
 // Can't use std::prefix_sum for inclusive/exclusive scan, because
 // it does not handle short[] -> int(int a, int b) { a + b; } -> int[]
 // they way we expect. That's because sum in std::prefix_sum's implementation
-// is of type ::hipcub::detail::it_value_t<InputIt> (short)
+// is of type typename std::iterator_traits<InputIt>::value_type (short)
 template<class InputIt, class OutputIt, class BinaryOperation>
 OutputIt host_inclusive_scan(InputIt first, InputIt last, OutputIt d_first, BinaryOperation op)
 {
-    using input_type  = ::hipcub::detail::it_value_t<InputIt>;
-    using output_type = ::hipcub::detail::it_value_t<OutputIt>;
+    using input_type  = typename std::iterator_traits<InputIt>::value_type;
+    using output_type = typename std::iterator_traits<OutputIt>::value_type;
     using result_type =
         typename std::conditional<std::is_void<output_type>::value, input_type, output_type>::type;
 
@@ -144,8 +141,8 @@ template<class InputIt, class T, class OutputIt, class BinaryOperation>
 OutputIt host_exclusive_scan(
     InputIt first, InputIt last, T initial_value, OutputIt d_first, BinaryOperation op)
 {
-    using input_type  = ::hipcub::detail::it_value_t<InputIt>;
-    using output_type = ::hipcub::detail::it_value_t<OutputIt>;
+    using input_type  = typename std::iterator_traits<InputIt>::value_type;
+    using output_type = typename std::iterator_traits<OutputIt>::value_type;
     using result_type =
         typename std::conditional<std::is_void<output_type>::value, input_type, output_type>::type;
 
@@ -178,8 +175,8 @@ OutputIt host_exclusive_scan_by_key(InputIt         first,
                                     BinaryOperation op,
                                     KeyCompare      key_compare_op)
 {
-    using input_type  = ::hipcub::detail::it_value_t<InputIt>;
-    using output_type = ::hipcub::detail::it_value_t<OutputIt>;
+    using input_type  = typename std::iterator_traits<InputIt>::value_type;
+    using output_type = typename std::iterator_traits<OutputIt>::value_type;
     using result_type =
         typename std::conditional<std::is_void<output_type>::value, input_type, output_type>::type;
 
@@ -306,11 +303,11 @@ struct generate_limits<T, std::enable_if_t<std::is_integral<T>::value>>
 {
     static inline T min()
     {
-        return _HIPCUB_STD::numeric_limits<T>::min();
+        return std::numeric_limits<T>::min();
     }
     static inline T max()
     {
-        return _HIPCUB_STD::numeric_limits<T>::max();
+        return std::numeric_limits<T>::max();
     }
 };
 
@@ -360,7 +357,8 @@ inline auto get_random_data(size_t size, T min, T max, size_t max_random_size = 
 
 template<class T>
 inline auto get_random_data(size_t size, T min, T max, size_t max_random_size = 1024 * 1024) ->
-    typename std::enable_if<!is_custom_type<T>::value && !std::is_same_v<decltype(max.x), void>,
+    typename std::enable_if<!is_custom_type<T>::value
+                                && !std::is_same<decltype(max.x), void>::value,
                             std::vector<T>>::type
 {
 
@@ -385,15 +383,14 @@ std::vector<T>
     using key_distribution_type = std::conditional_t<std::is_integral<T>::value,
                                                      std::uniform_int_distribution<T>,
                                                      std::uniform_real_distribution<T>>;
-    key_distribution_type key_distribution(_HIPCUB_STD::numeric_limits<T>::max());
+    key_distribution_type key_distribution(std::numeric_limits<T>::max());
     std::vector<T>        keys(size);
 
     size_t keys_start_index = 0;
     while(keys_start_index < size)
     {
         const size_t new_segment_length = segment_length_distribution(prng);
-        const size_t new_segment_end
-            = _HIPCUB_STD::min(size, keys_start_index + new_segment_length);
+        const size_t new_segment_end    = std::min(size, keys_start_index + new_segment_length);
         const T      key                = key_distribution(prng);
         std::fill(std::next(keys.begin(), keys_start_index),
                   std::next(keys.begin(), new_segment_end),
@@ -420,30 +417,26 @@ inline constexpr bool is_power_of_two(const T x)
     return (x > 0) && ((x & (x - 1)) == 0);
 }
 
+template<typename Iterator>
+using it_value_t = typename std::iterator_traits<Iterator>::value_type;
+
 using engine_type = std::default_random_engine;
 
 // generate_random_data_n() generates only part of sequence and replicates it,
 // because benchmarks usually do not need "true" random sequence.
 template<class OutputIter, class U, class V, class Generator>
-inline auto generate_random_data_n(OutputIter it,
-                                   size_t     size,
-                                   U          min,
-                                   V          max,
-                                   Generator& gen,
-                                   size_t     max_random_size = 1024 * 1024) ->
-    typename std::enable_if_t<std::is_integral<::hipcub::detail::it_value_t<OutputIter>>::value,
-                              OutputIter>
+inline auto generate_random_data_n(
+    OutputIter it, size_t size, U min, V max, Generator& gen, size_t max_random_size = 1024 * 1024)
+    -> typename std::enable_if_t<std::is_integral<it_value_t<OutputIter>>::value, OutputIter>
 {
-    using T = ::hipcub::detail::it_value_t<OutputIter>;
+    using T = it_value_t<OutputIter>;
 
     using dis_type = typename std::conditional<(sizeof(T) == 1), short, T>::type;
     std::uniform_int_distribution<dis_type> distribution((T)min, (T)max);
-    std::generate_n(it,
-                    _HIPCUB_STD::min(size, max_random_size),
-                    [&]() { return distribution(gen); });
+    std::generate_n(it, std::min(size, max_random_size), [&]() { return distribution(gen); });
     for(size_t i = max_random_size; i < size; i += max_random_size)
     {
-        std::copy_n(it, _HIPCUB_STD::min(size - i, max_random_size), it + i);
+        std::copy_n(it, std::min(size - i, max_random_size), it + i);
     }
     return it + size;
 }
@@ -455,23 +448,20 @@ inline auto generate_random_data_n(OutputIterator it,
                                    V              max,
                                    Generator&     gen,
                                    size_t         max_random_size = 1024 * 1024)
-    -> std::enable_if_t<std::is_floating_point<::hipcub::detail::it_value_t<OutputIterator>>::value,
-                        OutputIterator>
+    -> std::enable_if_t<std::is_floating_point<it_value_t<OutputIterator>>::value, OutputIterator>
 {
-    using T = ::hipcub::detail::it_value_t<OutputIterator>;
+    using T = typename std::iterator_traits<OutputIterator>::value_type;
 
     std::uniform_real_distribution<T> distribution((T)min, (T)max);
-    std::generate_n(it,
-                    _HIPCUB_STD::min(size, max_random_size),
-                    [&]() { return distribution(gen); });
+    std::generate_n(it, std::min(size, max_random_size), [&]() { return distribution(gen); });
     for(size_t i = max_random_size; i < size; i += max_random_size)
     {
-        std::copy_n(it, _HIPCUB_STD::min(size - i, max_random_size), it + i);
+        std::copy_n(it, std::min(size - i, max_random_size), it + i);
     }
     return it + size;
 }
 
-template<size_t Size, size_t Alignment>
+template<std::size_t Size, std::size_t Alignment>
 struct alignas(Alignment) custom_aligned_type
 {
     unsigned char data[Size];
@@ -484,26 +474,6 @@ inline constexpr auto ceiling_div(const T a, const U b)
 {
     return a / b + (a % b > 0 ? 1 : 0);
 }
-
-struct minimum
-{
-    template<class T, class U>
-    HIPCUB_HOST_DEVICE
-    auto operator()(const T& a, const U& b) const
-    {
-        return a < b ? a : b;
-    }
-};
-
-struct plus
-{
-    template<class A, class B>
-    HIPCUB_HOST_DEVICE
-    constexpr auto operator()(const A& a, const B& b) const -> decltype(a + b)
-    {
-        return a + b;
-    }
-};
 
 } // namespace benchmark_utils
 
@@ -518,17 +488,17 @@ class numeric_limits<benchmark_utils::custom_type<int>>
 public:
     static constexpr inline T min()
     {
-        return _HIPCUB_STD::numeric_limits<typename T::first_type>::min();
+        return std::numeric_limits<typename T::first_type>::min();
     }
 
     static constexpr inline T max()
     {
-        return _HIPCUB_STD::numeric_limits<typename T::first_type>::max();
+        return std::numeric_limits<typename T::first_type>::max();
     }
 
     static constexpr inline T lowest()
     {
-        return _HIPCUB_STD::numeric_limits<typename T::first_type>::lowest();
+        return std::numeric_limits<typename T::first_type>::lowest();
     }
 };
 
@@ -540,17 +510,17 @@ class numeric_limits<benchmark_utils::custom_type<float>>
 public:
     static constexpr inline T min()
     {
-        return _HIPCUB_STD::numeric_limits<typename T::first_type>::min();
+        return std::numeric_limits<typename T::first_type>::min();
     }
 
     static constexpr inline T max()
     {
-        return _HIPCUB_STD::numeric_limits<typename T::first_type>::max();
+        return std::numeric_limits<typename T::first_type>::max();
     }
 
     static constexpr inline T lowest()
     {
-        return _HIPCUB_STD::numeric_limits<typename T::first_type>::lowest();
+        return std::numeric_limits<typename T::first_type>::lowest();
     }
 };
 } // namespace std

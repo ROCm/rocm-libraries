@@ -22,14 +22,6 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
-
 // get the execution policies definitions first
 #include <thrust/system/cpp/detail/execution_policy.h>
 
@@ -133,7 +125,7 @@ struct tag : thrust::system::cpp::execution_policy<tag> { unspecified };
  *
  *  struct printf_functor
  *  {
- *    __host__ __device__
+ *    THRUST_HOST_DEVICE
  *    void operator()(int x)
  *    {
  *      printf("%d\n", x);

@@ -23,25 +23,22 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
+/*! \cond
+ *  skip overloaded implementation
+ */
 
-#ifndef THRUST_DOXYGEN_INVOKED
 // #include the device system's vector header
-#  define __THRUST_DEVICE_SYSTEM_MEMORY_HEADER <__THRUST_DEVICE_SYSTEM_ROOT/memory.h>
-#  include __THRUST_DEVICE_SYSTEM_MEMORY_HEADER
-#  undef __THRUST_DEVICE_SYSTEM_MEMORY_HEADER
-#endif
+#define __THRUST_DEVICE_SYSTEM_MEMORY_HEADER <__THRUST_DEVICE_SYSTEM_ROOT/memory.h>
+#include __THRUST_DEVICE_SYSTEM_MEMORY_HEADER
+#undef __THRUST_DEVICE_SYSTEM_MEMORY_HEADER
+
+/*! \endcond
+ */
 
 THRUST_NAMESPACE_BEGIN
 
 /** \addtogroup memory_resources Memory Resources
- *  \ingroup memory_management_classes
+ *  \ingroup memory_management
  *  \{
  */
 
@@ -51,13 +48,6 @@ THRUST_NAMESPACE_BEGIN
  *  \see https://en.cppreference.com/w/cpp/named_req/Allocator
  */
 using thrust::system::__THRUST_DEVICE_SYSTEM_NAMESPACE::universal_allocator;
-
-/*! \brief An allocator which creates new elements in memory accessible by both hosts and devices. Uses pinned memory
- *         when the system supports it.
- *
- *  \see https://en.cppreference.com/w/cpp/named_req/Allocator
- */
-using thrust::system::__THRUST_DEVICE_SYSTEM_NAMESPACE::universal_host_pinned_allocator;
 
 /*! \p universal_ptr stores a pointer to an object allocated in memory accessible
  *  to both hosts and devices.

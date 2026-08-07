@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -29,10 +29,7 @@
 #include "common_benchmark_header.hpp"
 
 // HIP API
-#include <hipcub/device/device_reduce.hpp>
 #include <hipcub/device/device_scan.hpp>
-
-#include _HIPCUB_STD_INCLUDE(functional)
 
 #ifndef DEFAULT_N
 const size_t DEFAULT_N = 1024 * 1024 * 32;
@@ -100,7 +97,7 @@ auto run_device_scan_by_key(void*             temporary_storage,
                                                   scan_op,
                                                   initial_value,
                                                   static_cast<int>(input_size),
-                                                  _HIPCUB_STD::equal_to<>(),
+                                                  hipcub::Equality(),
                                                   stream);
 }
 
@@ -123,7 +120,7 @@ auto run_device_scan_by_key(void*   temporary_storage,
                                                   output,
                                                   scan_op,
                                                   static_cast<int>(input_size),
-                                                  _HIPCUB_STD::equal_to<>(),
+                                                  hipcub::Equality(),
                                                   stream);
 }
 
@@ -352,8 +349,8 @@ int main(int argc, char* argv[])
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks = {
-        CREATE_BENCHMARKS(benchmark_utils::plus),
-        CREATE_BENCHMARKS(benchmark_utils::minimum),
+        CREATE_BENCHMARKS(hipcub::Sum),
+        CREATE_BENCHMARKS(hipcub::Min),
     };
 
     // Use manual timing

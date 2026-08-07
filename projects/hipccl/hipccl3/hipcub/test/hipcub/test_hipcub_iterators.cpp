@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -27,7 +27,10 @@
 #include <hipcub/iterator/arg_index_input_iterator.hpp>
 #include <hipcub/iterator/cache_modified_input_iterator.hpp>
 #include <hipcub/iterator/cache_modified_output_iterator.hpp>
+#include <hipcub/iterator/constant_input_iterator.hpp>
+#include <hipcub/iterator/counting_input_iterator.hpp>
 #include <hipcub/iterator/tex_obj_input_iterator.hpp>
+#include <hipcub/iterator/transform_input_iterator.hpp>
 
 #include <hipcub/util_allocator.hpp>
 
@@ -230,7 +233,7 @@ TYPED_TEST(HipcubIteratorTests, TestConstant)
     HIP_CHECK(hipSetDevice(device_id));
 
     using T = typename TestFixture::input_type;
-    using IteratorType            = test_utils::constant_iterator<T>;
+    using IteratorType            = rocprim::constant_iterator<T>;
     constexpr uint32_t array_size = 8;
 
     std::vector<T> h_reference(array_size);
@@ -257,7 +260,7 @@ TYPED_TEST(HipcubIteratorTests, TestCounting)
     HIP_CHECK(hipSetDevice(device_id));
 
     using T = typename TestFixture::input_type;
-    using IteratorType            = test_utils::counting_iterator<T>;
+    using IteratorType            = rocprim::counting_iterator<T>;
     constexpr uint32_t array_size = 8;
 
     std::vector<T> h_reference(array_size);
@@ -289,7 +292,7 @@ TYPED_TEST(HipcubIteratorTests, TestTransform)
 
     using T = typename TestFixture::input_type;
     using CastT = typename TestFixture::input_type;
-    using IteratorType        = test_utils::transform_iterator<CastT*, TransformOp<T>>;
+    using IteratorType        = rocprim::transform_iterator<CastT*, TransformOp<T>, T>;
     constexpr int TEST_VALUES = 11000;
 
     std::vector<T> h_data(TEST_VALUES);
@@ -543,12 +546,11 @@ TYPED_TEST(HipcubIteratorTests, TestTexTransform)
         HIP_CHECK(d_tex_itr.BindTexture(d_data, sizeof(T) * TEST_VALUES));
 
         // Create transform iterator
-        test_utils::transform_iterator<TextureIteratorType, TransformOp<T>> xform_itr(d_tex_itr,
+        rocprim::transform_iterator<TextureIteratorType, TransformOp<T>, T> xform_itr(d_tex_itr,
                                                                                       op);
 
-        iterator_test_function<test_utils::transform_iterator<TextureIteratorType, TransformOp<T>>>(
-            xform_itr,
-            h_reference);
+        iterator_test_function<rocprim::transform_iterator<TextureIteratorType, TransformOp<T>, T>,
+                               T>(xform_itr, h_reference);
         HIP_CHECK(g_allocator.DeviceFree(d_data));
     }
 }
