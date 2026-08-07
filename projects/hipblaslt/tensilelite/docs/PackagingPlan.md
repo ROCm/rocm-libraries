@@ -3,6 +3,11 @@
 
 # TensileLite ROCm-Coupled Packaging Implementation Plan
 
+> **Superseded for Python build integration:** use
+> `PythonBuildGrillingDecisions.md` and `PythonBuildImplementationPlan.md` for
+> the canonical wheel, client-binding, device-generation, and artifact-test
+> design. The phases below are historical where they conflict with those files.
+
 Status: Implemented for TensileLite; rocisa packaging explicitly deferred
 Plan date: 2026-07-29  
 Decision record: `PackagingDecisions.md`

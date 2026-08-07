@@ -3,6 +3,11 @@
 
 # TensileLite Packaging Decisions
 
+> **Superseded for Python build integration:** `PythonBuildGrillingDecisions.md`
+> is the current decision record for wheel identity, client binding, CMake
+> generation, rocisa staging, and installed-artifact testing. Historical
+> decisions below remain useful only where they do not conflict with that file.
+
 Status: Accepted for implementation  
 Decision date: 2026-07-29  
 Source proposal: `Public.md`

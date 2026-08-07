@@ -38,7 +38,9 @@ python -c 'import tensilelite, rocisa; print(tensilelite.__version__)'
 
 Import fails deliberately when the wheel and ROCm release differ, when rocisa
 cannot be imported, or when the ROCm-owned client is missing. Released wheels
-have no runtime client-path override.
+are unbound and resolve only
+`$ROCM_PATH/libexec/hipblaslt/tensilelite/tensilelite-client` (with `.exe` on
+Windows); `PATH` is never searched.
 
 Optional runtime capabilities remain available as extras:
 
@@ -66,41 +68,36 @@ cd rocm-libraries/projects/hipblaslt/tensilelite
 invoke install --gpu-targets gfx942
 ```
 
-The editable installation records the staged client's absolute path. Python
-source edits are immediately visible; rerun `invoke build-client` after client
-source or CMake changes to rebuild and refresh that same staged path.
+The editable installation records the built client's absolute path in the
+current user's keyed `~/.tensilelite/bindings/` registry. Python source edits
+are immediately visible; rerun `invoke build-client` after client source or
+CMake changes.
 
 Each step remains available independently. A manual source install may bind any
 existing client executable:
 
 ```bash
-python -m pip install -r requirements-dev.txt
+python -m pip install -r requirements-dev-common.txt
 invoke build-client --gpu-targets gfx942
 
-python -m pip install --no-build-isolation --no-deps -e . \
-  --config-settings="tensilelite.client-path=$PWD/build_tmp/tensilelite-rocm/libexec/hipblaslt/tensilelite/tensilelite-client"
+python -m pip install --no-build-isolation --no-deps -e .
+python -m tensilelite_configure_client \
+  --client "$PWD/build_tmp/tensilelite/client/tensilelite-client"
+
+# Remove only this installation's development binding.
+python -m tensilelite_configure_client --reset
 ```
 
-The config-setting value must be an absolute executable path. It is frozen into
-that installation; runtime CLI, YAML, and environment overrides are not
-supported. A stable symlink may be supplied and retargeted without reinstalling
-the Python package.
-
-The integrated CMake `BUILD` mode still creates a private environment using the
-standard staged ROCm layout:
-
-```bash
-invoke build-client --gpu-targets gfx942
-export ROCM_PATH="$PWD/build_tmp/tensilelite-rocm"
-"$PWD/build_tmp/tensilelite-venv/bin/python" -m tensilelite --help
-```
-
-On Windows, use `build_tmp/tensilelite-venv/Scripts/python.exe`. A custom build
-directory has the same `tensilelite-rocm` and `tensilelite-venv` children.
+The client value must be an absolute executable whose exact `--version`
+matches the installed distribution. A configured binding is exclusive: a
+broken configured path never falls back to the production client. Configuration
+does not alter the wheel, and the client selection is frozen for each importing
+process. Use a fresh process after changing or resetting a binding.
 
 ## Tests
 
-Tox provisions the same staged runtime before importing either Python package:
+Tox builds the client, configures the active editable installation, and uses the
+selected real ROCm SDK before importing either Python package:
 
 ```bash
 tox -e unit -- tensilelite/Tests/unit
@@ -127,23 +124,23 @@ uv run invoke precommit-install
 
 ## CMake integration
 
-`HIPBLASLT_TENSILELITE_PYTHON_MODE` selects the package environment:
+Device generation builds the canonical controlled-artifact wheel, installs it
+into the single CMake-selected Python with `--force-reinstall --no-deps`, and
+uses only the in-tree raw rocisa package through a command-scoped `PYTHONPATH`.
+Every generator command refreshes the keyed binding to its exact built client.
+Do not run two configurations concurrently against one Python environment.
 
-- `BUILD` stages `tensilelite-client`, installs TensileLite editably, and
-  inherits an already installed rocisa without implicit network access.
-- `SYSTEM` validates the installed TensileLite wheel/client and importable
-  rocisa at configure time.
-
-Device-generation builds require Python 3.10. Host-only hipBLASLt builds that
-do not build the client or Python artifacts retain their existing Python
-requirements.
+Device-generation builds require Python 3.10 and Python development headers;
+stable-ABI rocisa builds require Python 3.12. A true host-only build does not
+require TensileLite Python. Standalone Windows builds must set `ROCM_PATH` to
+the SDK used for the build.
 
 Relevant options:
 
 - `TENSILELITE_ENABLE_HOST`
 - `TENSILELITE_ENABLE_CLIENT`
 - `TENSILELITE_BUILD_TESTING`
-- `HIPBLASLT_TENSILELITE_PYTHON_MODE`
+- `ROCISA_BUILD_PYTHON` (rocisa-only root configuration)
 - `GPU_TARGETS`
 
 ## Design records
@@ -151,3 +148,4 @@ Relevant options:
 - `docs/Public.md`: original proposal.
 - `docs/PackagingDecisions.md`: accepted choices and rationale.
 - `docs/PackagingPlan.md`: implementation and acceptance plan.
+- `PythonBuildGrillingDecisions.md`: current canonical Python-build decisions.

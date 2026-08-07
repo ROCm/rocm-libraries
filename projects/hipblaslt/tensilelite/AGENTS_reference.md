@@ -21,13 +21,14 @@ python -m tensilelite run tensilelite/Tests/common/exception/<test>.yaml tensile
 ## Custom CMake Build
 
 ```bash
-# A suitable rocisa must already be importable in the selected Python.
+# Client-only builds use the selected SDK and do not create a private venv.
 cmake --preset tensilelite -S .. -B my-custom-build
 cmake --build my-custom-build --parallel
 
 # Run test with custom client path
-ROCM_PATH=my-custom-build/tensilelite-rocm \
-    my-custom-build/tensilelite-venv/bin/python -m tensilelite run \
+python -m tensilelite_configure_client \
+    --client "$PWD/my-custom-build/tensilelite/client/tensilelite-client"
+ROCM_PATH=/opt/rocm python -m tensilelite run \
     tensilelite/Tests/common/<test>.yaml tensile-out
 
 # Build with custom args (e.g., Debug + specific GPU)
@@ -69,7 +70,7 @@ make co TENSILE_OUT=tensile-out ARCH="gfx1100" WAVE=32  # gfx11 explicit
 | `TENSILELITE_ENABLE_HOST` | ON | Build C++ runtime library |
 | `TENSILELITE_ENABLE_CLIENT` | ON | Build benchmark client |
 | `TENSILELITE_BUILD_TESTING` | OFF | Build C++ host library tests |
-| `HIPBLASLT_TENSILELITE_PYTHON_MODE` | BUILD | Use a private editable TensileLite environment or an installed `SYSTEM` package |
+| `ROCISA_BUILD_PYTHON` | OFF | Build only the in-tree rocisa extension without device libraries |
 | `GPU_TARGETS` | (detected) | Semicolon-separated list of gfx targets |
 
 ## Supported Targets
