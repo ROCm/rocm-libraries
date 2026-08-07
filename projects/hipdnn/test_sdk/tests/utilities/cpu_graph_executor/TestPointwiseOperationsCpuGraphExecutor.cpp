@@ -532,19 +532,20 @@ TEST(PointwiseOperationsCpuGraphExecutor, PreluBackwardComposedGraph)
     configureOutput(dalphaTensor, hipdnn_frontend::DataType::FLOAT, alphaDims);
     dalphaTensor->set_output(true);
 
-    constexpr float xValues[2][4] = {
-        {-2.0f, 0.0f, 1.0f, 2.0f},
-        {-3.0f, -1.0f, 0.0f, 4.0f},
+    constexpr std::array<std::array<float, 4>, 2> X_VALUES = {
+        std::array{-2.0f, 0.0f, 1.0f, 2.0f},
+        std::array{-3.0f, -1.0f, 0.0f, 4.0f},
     };
     for(int64_t channel = 0; channel < 2; ++channel)
     {
+        const auto channelIndex = static_cast<size_t>(channel);
         alpha.setHostValue(channel == 0 ? 0.1f : 0.25f, 0, channel, 0, 0);
         for(int64_t height = 0; height < 2; ++height)
         {
             for(int64_t width = 0; width < 2; ++width)
             {
-                const float dyValue = static_cast<float>(1 + channel * 4 + height * 2 + width);
-                const float xValue = xValues[channel][height * 2 + width];
+                const auto dyValue = static_cast<float>(1 + channel * 4 + height * 2 + width);
+                const auto xValue = X_VALUES[channelIndex][static_cast<size_t>(height * 2 + width)];
                 dy.setHostValue(dyValue, 0, channel, height, width);
                 x.setHostValue(xValue, 0, channel, height, width);
             }
@@ -572,9 +573,10 @@ TEST(PointwiseOperationsCpuGraphExecutor, PreluBackwardComposedGraph)
     CpuReferenceGraphExecutor{}.execute(
         serializedGraph.data(), serializedGraph.size(), variantPack);
 
-    float expectedDalpha[2] = {0.0f, 0.0f};
+    std::array<float, 2> expectedDalpha = {0.0f, 0.0f};
     for(int64_t channel = 0; channel < 2; ++channel)
     {
+        const auto channelIndex = static_cast<size_t>(channel);
         const float alphaValue = alpha.getHostValue(0, channel, 0, 0);
         for(int64_t height = 0; height < 2; ++height)
         {
@@ -587,10 +589,10 @@ TEST(PointwiseOperationsCpuGraphExecutor, PreluBackwardComposedGraph)
                                 positive ? dyValue : dyValue * alphaValue);
                 if(!positive)
                 {
-                    expectedDalpha[channel] += dyValue * xValue;
+                    expectedDalpha[channelIndex] += dyValue * xValue;
                 }
             }
         }
-        EXPECT_FLOAT_EQ(dalpha.getHostValue(0, channel, 0, 0), expectedDalpha[channel]);
+        EXPECT_FLOAT_EQ(dalpha.getHostValue(0, channel, 0, 0), expectedDalpha[channelIndex]);
     }
 }
