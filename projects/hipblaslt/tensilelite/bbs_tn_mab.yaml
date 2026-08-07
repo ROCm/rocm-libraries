@@ -54,7 +54,7 @@ BenchmarkProblems:
         - ClusterDim: [[1,1]]
         - TDMIterateMode: [0]
         - TDMSplit: [False]
-        - StaggerU: [0,8,16]
+        - StaggerU: [0]
         - StreamK: [0]
         #- StreamKForceDPOnly: [1]
         #- PrefetchAcrossPersistent: [1]
