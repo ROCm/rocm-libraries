@@ -28,16 +28,90 @@
 
 // Product-private TensileLite adapter.
 
-// TensileLite comparison adapter owned by the shared host-validation component.
-
-
 #include "Reference.hpp"
+
+#include <cmath>
+#include <complex>
 #include <iostream>
+#include <limits>
+#include <type_traits>
 
 namespace TensileLite
 {
     namespace Client
     {
+        template <typename T>
+        inline bool isBadOutputSentinel(T value)
+        {
+            if constexpr(std::is_integral_v<T>)
+                return value == std::numeric_limits<T>::min();
+            else
+                return std::isinf(static_cast<float>(value));
+        }
+
+        template <>
+        inline bool isBadOutputSentinel<double>(double value)
+        {
+            return std::isinf(value);
+        }
+
+        template <>
+        inline bool isBadOutputSentinel<std::complex<float>>(std::complex<float> value)
+        {
+            return std::isinf(value.real()) && std::isinf(value.imag());
+        }
+
+        template <>
+        inline bool isBadOutputSentinel<std::complex<double>>(std::complex<double> value)
+        {
+            return std::isinf(value.real()) && std::isinf(value.imag());
+        }
+
+        template <>
+        inline bool isBadOutputSentinel<Int8x4>(Int8x4 value)
+        {
+            constexpr int8_t sentinel = std::numeric_limits<int8_t>::min();
+            return value == Int8x4{sentinel, sentinel, sentinel, sentinel};
+        }
+
+#ifndef _WIN32
+#ifdef TENSILE_USE_FP6
+        template <>
+        inline bool isBadOutputSentinel<Float6x32>(Float6x32)
+        {
+            return false;
+        }
+#endif // TENSILE_USE_FP6
+
+#ifdef TENSILE_USE_BF6
+        template <>
+        inline bool isBadOutputSentinel<BFloat6x32>(BFloat6x32)
+        {
+            return false;
+        }
+#endif // TENSILE_USE_BF6
+
+#ifdef TENSILE_USE_FP4
+        template <>
+        inline bool isBadOutputSentinel<Float4x2>(Float4x2)
+        {
+            return false;
+        }
+#endif // TENSILE_USE_FP4
+#endif // !_WIN32
+
+        template <>
+        inline bool isBadOutputSentinel<E8>(E8 value)
+        {
+            return value.data == 0xff;
+        }
+
+        template <>
+        inline bool isBadOutputSentinel<E5M3>(E5M3 value)
+        {
+            return value.data == 0xff;
+        }
+
         template <typename T>
         struct NullComparison
         {
@@ -322,7 +396,7 @@ namespace TensileLite
             {
                 m_checkedBefore++;
 
-                if(!DataInitialization::isBadOutput(value))
+                if(!isBadOutputSentinel(value))
                 {
                     m_errorsBefore++;
 
@@ -335,8 +409,7 @@ namespace TensileLite
                         }
 
                         std::cout << "Index " << elemIndex << " / " << elemCount << ": found "
-                                  << value << " instead of "
-                                  << DataInitialization::getValue<T, InitMode::BadOutput>()
+                                  << value << " instead of the bad-output sentinel"
                                   << std::endl;
 
                         if(m_printedBefore >= m_printMax)
@@ -349,7 +422,7 @@ namespace TensileLite
             {
                 m_checkedInside++;
 
-                if(!DataInitialization::isBadOutput(value))
+                if(!isBadOutputSentinel(value))
                 {
                     m_errorsInside++;
 
@@ -363,8 +436,7 @@ namespace TensileLite
                         }
 
                         std::cout << "Index " << elemIndex << " / " << elemCount << ": found "
-                                  << value << " instead of "
-                                  << DataInitialization::getValue<T, InitMode::BadOutput>()
+                                  << value << " instead of the bad-output sentinel"
                                   << std::endl;
 
                         if(m_printedInside >= m_printMax)
@@ -377,7 +449,7 @@ namespace TensileLite
             {
                 m_checkedAfter++;
 
-                if(!DataInitialization::isBadOutput(value))
+                if(!isBadOutputSentinel(value))
                 {
                     m_errorsAfter++;
 
@@ -390,8 +462,7 @@ namespace TensileLite
                         }
 
                         std::cout << "Index " << elemIndex << " / " << elemCount << ": found "
-                                  << value << " instead of "
-                                  << DataInitialization::getValue<T, InitMode::BadOutput>()
+                                  << value << " instead of the bad-output sentinel"
                                   << std::endl;
 
                         if(m_printedAfter >= m_printMax)
