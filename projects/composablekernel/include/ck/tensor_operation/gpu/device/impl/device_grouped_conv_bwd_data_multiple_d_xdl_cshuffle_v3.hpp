@@ -937,27 +937,27 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
                 arg.Print();
             }
 
-            // if(get_warp_size() == 64)
-            // {
-            //     if constexpr(MXdlPerWave64 > 0)
-            //     {
-            //         if(arg.k_batch_ > 1)
-            //         {
-            //             if constexpr(IsSplitKSupported)
-            //             {
-            //                 ave_time +=
-            //                     RunMultiDGemm<GridwiseGemm64, InMemoryDataOperationEnum::AtomicAdd>(
-            //                         arg, stream_config);
-            //             }
-            //         }
-            //         else
-            //         {
-            //             ave_time += RunMultiDGemm<GridwiseGemm64, InMemoryDataOperationEnum::Set>(
-            //                 arg, stream_config);
-            //         }
-            //     }
-            // }
-            // else
+            if(get_warp_size() == 64)
+            {
+                if constexpr(MXdlPerWave64 > 0)
+                {
+                    if(arg.k_batch_ > 1)
+                    {
+                        if constexpr(IsSplitKSupported)
+                        {
+                            ave_time +=
+                                RunMultiDGemm<GridwiseGemm64, InMemoryDataOperationEnum::AtomicAdd>(
+                                    arg, stream_config);
+                        }
+                    }
+                    else
+                    {
+                        ave_time += RunMultiDGemm<GridwiseGemm64, InMemoryDataOperationEnum::Set>(
+                            arg, stream_config);
+                    }
+                }
+            }
+            else
             {
                 if constexpr(MXdlPerWave32 > 0)
                 {
