@@ -28,6 +28,18 @@ target_link_libraries(
         roc::host-validation
         roc::host-validation-tiled
 )
+if(TARGET host-validation-mx)
+    target_link_libraries(
+        host-validation-python
+        PRIVATE
+            roc::host-validation-mx
+    )
+    target_compile_definitions(
+        host-validation-python
+        PRIVATE
+            HOST_VALIDATION_PYTHON_HAS_MX=1
+    )
+endif()
 set_target_properties(
     host-validation-python
     PROPERTIES

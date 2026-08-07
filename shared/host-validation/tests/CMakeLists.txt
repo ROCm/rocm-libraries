@@ -27,6 +27,16 @@ if(TARGET host-validation-blas)
     add_test(NAME host-validation-blas-tests COMMAND host-validation-blas-tests)
 endif()
 
+if(TARGET host-validation-mx)
+    add_executable(host-validation-mx-tests mx_test.cpp)
+    target_link_libraries(
+        host-validation-mx-tests
+        PRIVATE
+            roc::host-validation-mx
+    )
+    add_test(NAME host-validation-mx-tests COMMAND host-validation-mx-tests)
+endif()
+
 add_test(
     NAME host-validation-core-boundary
     COMMAND

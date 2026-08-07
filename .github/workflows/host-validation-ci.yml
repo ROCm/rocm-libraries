@@ -4,12 +4,14 @@ on:
   pull_request:
     paths:
       - "shared/host-validation/**"
+      - "shared/mxdatagenerator/**"
       - ".github/workflows/host-validation-ci.yml"
   push:
     branches:
       - develop
     paths:
       - "shared/host-validation/**"
+      - "shared/mxdatagenerator/**"
       - ".github/workflows/host-validation-ci.yml"
   workflow_dispatch:
 
@@ -45,6 +47,7 @@ jobs:
             -DHOST_VALIDATION_BUILD_TESTING=ON \
             -DHOST_VALIDATION_BUILD_PYTHON=ON \
             -DHOST_VALIDATION_BUILD_BLAS_BACKEND=ON \
+            -DHOST_VALIDATION_BUILD_MX_BACKEND=ON \
             -DCMAKE_BUILD_TYPE=Release
 
       - name: Build and test
@@ -66,6 +69,7 @@ jobs:
           "${RUNNER_TEMP}/host-validation-package-test/host-validation-package-test"
           "${RUNNER_TEMP}/host-validation-package-test/host-validation-operations-package-test"
           "${RUNNER_TEMP}/host-validation-package-test/host-validation-blas-package-test"
+          "${RUNNER_TEMP}/host-validation-package-test/host-validation-mx-package-test"
           PYTHONPATH="$(find "${RUNNER_TEMP}/host-validation-install" \
             -type d -path '*/site-packages' -print -quit)" \
             python -c "import roc_host_validation"
@@ -88,6 +92,7 @@ jobs:
             -DHOST_VALIDATION_BUILD_TESTING=ON \
             -DHOST_VALIDATION_BUILD_PYTHON=OFF \
             -DHOST_VALIDATION_BUILD_BLAS_BACKEND=ON \
+            -DHOST_VALIDATION_BUILD_MX_BACKEND=ON \
             -DCMAKE_BUILD_TYPE=Debug \
             -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" \
             -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
