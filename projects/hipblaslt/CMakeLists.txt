@@ -147,8 +147,6 @@ endif()
 
 if(HIPBLASLT_ENABLE_AMD_SMI)
     find_package(amd_smi REQUIRED)
-else()
-    find_package(amd_smi)
 endif()
 
 if(HIPBLASLT_ENABLE_CLIENT)
