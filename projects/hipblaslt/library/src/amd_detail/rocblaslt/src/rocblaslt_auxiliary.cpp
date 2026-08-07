@@ -2194,7 +2194,8 @@ rocblaslt_status
                                       override_success ? &heuristicResultsArray[1]
                                                        : heuristicResultsArray,
                                       returnAlgoCount,
-                                      pref->max_workspace_bytes);
+                                      pref->max_workspace_bytes,
+                                      /*allowUnifiedHeuristic=*/true);
         }
 
         if(override_success)
@@ -2460,7 +2461,8 @@ rocblaslt_status
                                    gemmData,
                                    maxWorkspaceBytes,
                                    override_success ? requestedAlgoCount - 1 : requestedAlgoCount,
-                                   results);
+                                   results,
+                                   /*allowUnifiedHeuristic=*/true);
 
         if(override_success)
         {

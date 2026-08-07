@@ -4326,13 +4326,19 @@ inline auto getSolutions(
     const std::shared_ptr<TensileLite::Hardware>& hardware,
     TensileLite::ContractionProblemGemm&          tensile_prob,
     bool                                          enableEpilogue,
-    const int&                                    requestedAlgoCount)
+    const int&                                    requestedAlgoCount,
+    bool                                          allowUnifiedHeuristic)
 {
     // Opt-in: draw the requested algorithms from an analytically-ranked union
     // of all candidate libraries (exact-tuned matches pinned on top) instead of
-    // concatenating each library's independently sorted results. Only engages
-    // when the Origami analytical model is available for this device.
-    if(TensileLite::Debug::Instance().useUnifiedHeuristic())
+    // concatenating each library's independently sorted results. This only
+    // engages on the get-algo-heuristic path (allowUnifiedHeuristic), when the
+    // Origami analytical model is available for this device, and when the
+    // prediction-library / StreamK-dynamic selection gate is not active (that
+    // gate restricts selection to prediction/analytical rows, which the unified
+    // union cannot reconstruct). All other callers keep the native ordering.
+    if(allowUnifiedHeuristic && TensileLite::Debug::Instance().useUnifiedHeuristic()
+       && !TensileLite::predictionLibrarySelectionActive(tensile_prob))
     {
         auto const* pAMDGPU
             = dynamic_cast<TensileLite::hip::HipAMDGPU const*>(hardware.get());
@@ -4369,8 +4375,10 @@ std::vector<std::shared_ptr<TensileLite::ContractionSolution>>
 
     bool enableEpilogue = prob.epilogue == ROCBLASLT_EPILOGUE_DEFAULT ? false : true;
 
-    auto solutions
-        = getSolutions(prob, library, hardware, data->problem, enableEpilogue, requestedAlgoCount);
+    // is-tuned / raw-solution query path: keep the native ordering (not the
+    // get-algo-heuristic path), so the unified heuristic never engages here.
+    auto solutions = getSolutions(
+        prob, library, hardware, data->problem, enableEpilogue, requestedAlgoCount, false);
 
     // when there is no solution for xfloat32, fallback comput_type to fp32
     if(solutions.size() == 0 && prob.compute_type == rocblaslt_compute_f32_fast_xf32)
@@ -4378,7 +4386,7 @@ std::vector<std::shared_ptr<TensileLite::ContractionSolution>>
         log_api(__func__, "no solutions found, try to fallback");
         data->problem.setF32XdlMathOp(rocisa::DataType::Float);
         solutions = getSolutions(
-            prob, library, hardware, data->problem, enableEpilogue, requestedAlgoCount);
+            prob, library, hardware, data->problem, enableEpilogue, requestedAlgoCount, false);
     }
 
     return solutions;
@@ -4390,7 +4398,8 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
                                   int                                requestedAlgoCount,
                                   rocblaslt_matmul_heuristic_result  heuristicResultsArray[],
                                   int*                               returnAlgoCount,
-                                  size_t                             maxWorkSpaceBytes)
+                                  size_t                             maxWorkSpaceBytes,
+                                  bool                               allowUnifiedHeuristic)
 {
 #ifdef HIPBLASLT_USE_ROCROLLER
     if(useRocRoller(handle, prob))
@@ -4419,8 +4428,8 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
 
     bool enableEpilogue = prob.epilogue == ROCBLASLT_EPILOGUE_DEFAULT ? false : true;
 
-    auto solutions
-        = getSolutions(prob, library, hardware, data->problem, enableEpilogue, requestedAlgoCount);
+    auto solutions = getSolutions(
+        prob, library, hardware, data->problem, enableEpilogue, requestedAlgoCount, allowUnifiedHeuristic);
 
     // when there is no solution for xfloat32, fallback comput_type to fp32
     if(solutions.size() == 0 && prob.compute_type == rocblaslt_compute_f32_fast_xf32)
@@ -4428,7 +4437,7 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
         log_api(__func__, "no xf32 solutions found, try to fallback fp32");
         data->problem.setF32XdlMathOp(rocisa::DataType::Float);
         solutions = getSolutions(
-            prob, library, hardware, data->problem, enableEpilogue, requestedAlgoCount);
+            prob, library, hardware, data->problem, enableEpilogue, requestedAlgoCount, allowUnifiedHeuristic);
     }
 
     auto algoCount = min(static_cast<size_t>(requestedAlgoCount), solutions.size());
@@ -5034,7 +5043,8 @@ rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
                                   std::shared_ptr<void>  gemmData,
                                   const int              workspaceBytes,
                                   const int              requestedAlgoCount,
-                                  std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults)
+                                  std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults,
+                                  bool allowUnifiedHeuristic)
 {
     log_api(__func__, "Entering function");
 
@@ -5060,7 +5070,8 @@ rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
                                       hardware,
                                       data->problem,
                                       data->enableEpilogue,
-                                      requestedAlgoCount);
+                                      requestedAlgoCount,
+                                      allowUnifiedHeuristic);
 
         // when there is no solution for xfloat32, fallback comput_type to fp32
         if(solutions.size() == 0 && data->problem.f32XdlMathOp() == rocisa::DataType::XFloat32)
@@ -5071,7 +5082,8 @@ rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
                                      hardware,
                                      data->problem,
                                      data->enableEpilogue,
-                                     requestedAlgoCount);
+                                     requestedAlgoCount,
+                                     allowUnifiedHeuristic);
         }
 
         auto algoCount       = min(static_cast<size_t>(requestedAlgoCount), solutions.size());

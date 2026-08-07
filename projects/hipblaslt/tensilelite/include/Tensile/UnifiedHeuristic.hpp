@@ -20,6 +20,23 @@
 namespace TensileLite
 {
     /**
+     * Returns true when the ExactLogicLibrary selection gate restricts selection
+     * to prediction/analytical rows: the prediction library is forced
+     * (TENSILE_USE_PREDICTION) or StreamK dynamic scheduling is active. In that
+     * mode EqualityMatching/RangeMatching rows are skipped, so the unified union
+     * (which includes them) must not be used. This mirrors the effectiveDynamic /
+     * predictionLib computation in ExactLogicLibrary::findTopSolutions.
+     */
+    inline bool predictionLibrarySelectionActive(ContractionProblemGemm const& problem)
+    {
+        const auto forceDynamic     = Debug::Instance().streamK5ForceMode();
+        const bool effectiveDynamic = (forceDynamic == 1)
+                                      || (forceDynamic != 0
+                                          && problem.getParams().streamKTileSchedulingMode() != 0);
+        return Debug::Instance().usePredictionLibrary() || effectiveDynamic;
+    }
+
+    /**
      * Draw `numSolutions` solutions from an analytically-ranked union of every
      * candidate library, rather than concatenating each library's independently
      * sorted results (the default findTopSolutions behavior).
@@ -40,24 +57,11 @@ namespace TensileLite
                                 Hardware const&                                hardware,
                                 int                                            numSolutions)
     {
+        // Defensive: the caller (getSolutions) only invokes this when the analytical
+        // model is available, but guard anyway so the function is safe standalone.
         auto const* pAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
         if(!(pAMDGPU && pAMDGPU->analyticalHardware))
             return library.findTopSolutions(problem, hardware, numSolutions);
-
-        // Honor the ExactLogicLibrary selection gate: when the prediction library
-        // is forced (TENSILE_USE_PREDICTION) or StreamK dynamic scheduling is
-        // active, the native findTopSolutions restricts selection to prediction/
-        // analytical rows and skips EqualityMatching/RangeMatching. The
-        // GEMM_TYPE_ONLY union cannot reconstruct that row-level exclusion (Range
-        // solutions are untagged outside debug), so defer to the native path.
-        {
-            const auto forceDynamic     = Debug::Instance().streamK5ForceMode();
-            const bool effectiveDynamic = (forceDynamic == 1)
-                                          || (forceDynamic != 0
-                                              && problem.getParams().streamKTileSchedulingMode() != 0);
-            if(Debug::Instance().usePredictionLibrary() || effectiveDynamic)
-                return library.findTopSolutions(problem, hardware, numSolutions);
-        }
 
         const size_t want = numSolutions > 0 ? static_cast<size_t>(numSolutions) : 0;
 

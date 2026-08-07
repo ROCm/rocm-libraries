@@ -205,14 +205,16 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
                                   int                                requestedAlgoCount,
                                   rocblaslt_matmul_heuristic_result  heuristicResultsArray[],
                                   int*                               returnAlgoCount,
-                                  size_t                             maxWorkSpaceBytes);
+                                  size_t                             maxWorkSpaceBytes,
+                                  bool allowUnifiedHeuristic = false);
 
 rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
                                   rocblaslt::RocGemmType gemmType,
                                   std::shared_ptr<void>  gemmData,
                                   const int              workspaceBytes,
                                   const int              requestedAlgoCount,
-                                  std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults);
+                                  std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults,
+                                  bool allowUnifiedHeuristic = false);
 
 /******************************************************
  * Map a hipblaslt data type to a corresponding Tensile type *

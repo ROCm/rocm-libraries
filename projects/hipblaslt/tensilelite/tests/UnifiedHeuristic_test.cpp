@@ -246,27 +246,21 @@ TEST(UnifiedHeuristicTest, ExcludesSolutionsFailingTaskPredicate)
         << "a solution failing the task predicate must be excluded from the union";
 }
 
-// When StreamK dynamic scheduling is active, the ExactLogicLibrary gate skips
-// equality/range rows and restricts selection to prediction/analytical rows.
-// The unified path must defer to native findTopSolutions so it does not surface
-// the excluded kernels via its GEMM_TYPE_ONLY union.
-TEST(UnifiedHeuristicTest, DefersToNativeWhenPredictionGateActive)
+// The prediction-library / StreamK-dynamic selection gate is evaluated by the
+// caller (getSolutions in tensile_host.cpp) via predictionLibrarySelectionActive.
+// When it is active, the ExactLogicLibrary skips equality/range rows and
+// restricts selection to prediction/analytical rows, so the caller keeps the
+// native ordering rather than building the GEMM_TYPE_ONLY union. Verify the
+// predicate mirrors that gate for StreamK dynamic scheduling.
+TEST(UnifiedHeuristicTest, PredictionGateDetectsStreamKDynamic)
 {
-    auto analyticalHw = std::make_shared<origami::hardware_t>(makeGfx950AnalyticalHardware());
-    auto device       = makeHipDeviceWithAnalytical(analyticalHw);
-    auto problem      = makeGemmProblem(4096, 4096, 1024);
+    auto problem = makeGemmProblem(4096, 4096, 1024);
+    EXPECT_FALSE(predictionLibrarySelectionActive(problem))
+        << "a default problem must not trip the prediction-library gate";
+
     problem.setParams().setStreamKTileSchedulingMode(1);
-
-    StubUnionLibrary lib;
-    lib.topSentinel = {makeSolution("native-sentinel", 99)};
-    lib.all         = {makeTiledSolution("union-a", 1, 128, 128, 64)};
-
-    auto result = findTopSolutionsUnified(lib, problem, device, 4);
-
-    EXPECT_EQ(indicesOf(result), (std::vector<int>{99}))
-        << "StreamK-dynamic gate must defer to the native findTopSolutions";
-    EXPECT_EQ(lib.lastSearchType, SolutionLibrarySearchType::COUNT)
-        << "gate path must not gather the GEMM_TYPE_ONLY union";
+    EXPECT_TRUE(predictionLibrarySelectionActive(problem))
+        << "StreamK dynamic scheduling must trip the prediction-library gate";
 }
 
 // The union is de-duplicated and truncated to the requested count.
