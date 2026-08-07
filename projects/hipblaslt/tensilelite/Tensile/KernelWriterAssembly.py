@@ -16256,17 +16256,21 @@ class KernelWriterAssembly(KernelWriter):
         module.add(emitAccSeed())
 
       # ---- StreamK: this WG finished the tile (LocalEnd == ItersPerTile) ----------
-      # sIpt doubles as the xor scratch, so this needs no temp of its own -- and it is
-      # acquired only now, after the pointer quad above has been released.
+      # sIpt must stay read-only. acquireStreamKConstSgpr only hands back a scratch
+      # register when the constant is parked in a VGPR; otherwise it hands back the
+      # kernarg itself, and writing to it corrupts every later loop bound and fixup
+      # comparison. Fold the compare straight into `bad` through SCC instead of
+      # materialising the xor -- `bad` is only ever tested against zero below, so
+      # setting it to 1 is the same signal as or-ing in a nonzero difference.
       if useStreamK:
         sIpt = self.acquireStreamKConstSgpr(kernel, "ItersPerTile")
         if self.isStreamKConstantsToVgprEnabled(kernel):
           module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(self.states.skConstVgprs["ItersPerTile"]),
                                        comment="ItersPerTile const -> sgpr"))
-        module.add(SXorB32(dst=sgpr(sIpt), src0=sgpr("StreamKLocalEnd"), src1=sgpr(sIpt),
-                           comment="0 iff wg finished this tile"))
-        module.add(SOrB32(dst=sgpr(bad), src0=sgpr(sIpt), src1=sgpr(bad),
-                          comment="bad |= (not finish) -> split contributor, not fused"))
+        module.add(SCmpLgU32(src0=sgpr("StreamKLocalEnd"), src1=sgpr(sIpt),
+                             comment="wg did not finish this tile ?"))
+        module.add(SCSelectB32(dst=sgpr(bad), src0=1, src1=sgpr(bad),
+                               comment="bad |= (not finish) -> split contributor, not fused"))
         self.releaseStreamKConstSgpr(sIpt)
 
       # ---- materialise the flag from the accumulator ------------------------------
