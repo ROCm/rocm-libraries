@@ -35,7 +35,7 @@ There are two mechanisms for testing that a graph runs correctly on an engine.
 | What it is | Graph stored as JSON + a case matrix of shapes/dtypes/layouts | A `buildGraph()` function + `INSTANTIATE_TEST_SUITE_P` |
 | Add a case | Edit JSON / run a tool — no compile | Write C++, recompile |
 | Best at | "does this graph run and match a reference on this engine" | anything that is *not* just "run a graph and verify output" |
-| Discovery | Auto-discovered from `integration_test_bundles/` | Registered in CMake per file |
+| Discovery | Auto-discovered from `integration-test-bundles/` | Registered in CMake per file |
 | Runs against every engine | Yes | Yes |
 
 > **Bundles and sweeps are now the default way to test that a hipDNN graph runs
@@ -76,7 +76,7 @@ one case or many; golden data is optional in both.
 One graph, optionally one set of golden tensors:
 
 ```
-integration_test_bundles/{Tier}/{Operation}/{Layout}/{DataType}/{Name}/
+integration-test-bundles/{Tier}/{Operation}/{Layout}/{DataType}/{Name}/
     {Name}.json              # one concrete graph (committed to git)
     {Name}.tensors.dvc       # optional — omit for a graph-only bundle
     {Name}.tensor0.bin       # optional — DVC-tracked, in S3
@@ -92,7 +92,7 @@ no `.dvc`/`.bin` fetched) is a graph-only case, verified against the GPU/CPU
 reference executor instead of golden comparison.
 
 ```
-integration_test_bundles/{Tier}/{Operation}/{TopologyName}/
+integration-test-bundles/{Tier}/{Operation}/{TopologyName}/
     graph.template.json      # topology skeleton with ${case.dims}, ${case.data_type}, ...
     sweep.json               # list of cases: values + optional golden path + metadata
     golden/{CaseId}/tensors.dvc   # optional per case
@@ -103,7 +103,7 @@ integration_test_bundles/{Tier}/{Operation}/{TopologyName}/
 `graph.template.json` holds the parts that never vary (node types, tensor
 wiring/UIDs, `virtual` flags); `sweep.json` holds the parts that do (dims,
 strides, dtypes, node attributes, seeds, input ranges). See
-[`integration_test_bundles/README.md`](integration_test_bundles/README.md) for
+[`integration-test-bundles/README.md`](integration-test-bundles/README.md) for
 the on-disk layout, DVC remote layout, and pull/push workflow, and
 [`migration-scripts/README.md`](migration-scripts/README.md) for the exact
 field mapping between the two.
@@ -149,7 +149,7 @@ case id:
 ```bash
 python3 migration-scripts/import_graph.py \
     --graph new_conv.json \
-    --bundle-dir integration_test_bundles/
+    --bundle-dir integration-test-bundles/
 ```
 
 What happens:
@@ -188,7 +188,7 @@ sweep-authoring tool that skips the C++ detour is a known future need, not
 yet built.
 
 Golden tensor data is tracked with DVC (stored in S3, not git). See
-[`integration_test_bundles/README.md`](integration_test_bundles/README.md) for
+[`integration-test-bundles/README.md`](integration-test-bundles/README.md) for
 adding/updating/removing the `.bin` data and the `dvc push`/`dvc pull`
 workflow, and [`migration-scripts/README.md`](migration-scripts/README.md) for
 the full tooling reference (`import_graph.py`, `find_case.py`, `place_bundles.py`,
@@ -239,9 +239,8 @@ tests (via GTest prefixes) and to bundles (via the `{Tier}` path segment).
 | Comprehensive | `Comprehensive` | `comprehensive/` | Nightly | 3600s (60 min) |
 | Full | `Full` | `full/` | Weekly | 7200s (120 min) |
 
-Timeouts can be overridden per binary via `SMOKE_TIMEOUT`, `STANDARD_TIMEOUT`,
-`COMPREHENSIVE_TIMEOUT`, and `FULL_TIMEOUT` arguments to
-`add_tiered_test_target()`.
+Timeouts are configured per tier via `category_timeouts` in
+[`test_categories.yaml`](test_categories.yaml).
 
 ### Smoke is a catch-all
 
@@ -487,7 +486,7 @@ tests/
 Register the test binary in `tests/CMakeLists.txt`:
 
 ```cmake
-add_tiered_test_target(hipdnn_my_new_op_tests ${CMAKE_CURRENT_BINARY_DIR})
+add_integration_test_target(hipdnn_my_new_op_tests ${CMAKE_CURRENT_BINARY_DIR})
 ```
 
 ### Step 2 — Shape catalog
@@ -560,7 +559,7 @@ for the full workflow and tooling reference.
 
 ## See Also
 
-- [`integration_test_bundles/README.md`](integration_test_bundles/README.md) —
+- [`integration-test-bundles/README.md`](integration-test-bundles/README.md) —
   on-disk bundle layout, DVC remotes, and add/update/remove/pull/push workflow.
 - [`migration-scripts/README.md`](migration-scripts/README.md) — capture →
   place → verify pipeline, `import_graph.py`, `find_case.py`, and the C++ → bundle

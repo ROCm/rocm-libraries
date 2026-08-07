@@ -116,8 +116,6 @@ TEST(TestResampleFwdAttributes, GenerateIndex)
 
     resampleFwdAttributes.set_generate_index(true);
     ASSERT_TRUE(resampleFwdAttributes.get_generate_index().has_value());
-
-    resampleFwdAttributes.set_generate_index(true);
     EXPECT_TRUE(resampleFwdAttributes.get_generate_index().value());
 
     resampleFwdAttributes.set_generate_index(false);

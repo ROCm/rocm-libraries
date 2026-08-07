@@ -35,6 +35,7 @@
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
 #include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
+#include "stinkytofu/transforms/asm/Gfx1250HazardPass.hpp"
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
 #include "stinkytofu/transforms/asm/InsertCoexecHazardPass.hpp"
 #include "stinkytofu/transforms/asm/InsertDelayAluPass.hpp"
@@ -103,6 +104,12 @@ const std::vector<PassInfo> availablePasses = {
          options.enableLoopCarriedTokenDeps = hasPassArg(args, "enableLoopCarriedTokenDeps");
          return createStinkyWaitCntInsertionPass(options);
      }},
+    // Gfx1250HazardPass accepts:
+    //   profile — print the xcnt drain summary (per rule and drain site) to stderr
+    {"Gfx1250HazardPass",
+     [](const std::vector<std::string>& args) {
+         return createGfx1250HazardPass({}, hasPassArg(args, "profile"));
+     }},
     // BuildUseDefChainPass accepts:
     //   includePseudo    — also build chains for pseudo registers (memtokens)
     //   noClearExisting  — keep any existing PHIs/chains
@@ -137,20 +144,7 @@ const std::vector<PassInfo> availablePasses = {
     {"InsertInitialUnclausedVmemPass",
      [](const auto&) { return createInsertInitialUnclausedVmemPass(); }},
     {"LongBranchLoweringPass", [](const auto&) { return createLongBranchLoweringPass(); }},
-    // InsertClusterBarrierPass accepts:
-    //   --InsertClusterBarrierPass=PrefetchGlobalRead=<n>,PrefetchLocalRead=<n>
-    {"InsertClusterBarrierPass",
-     [](const std::vector<std::string>& args) {
-         auto getArgInt = [&args](const char* k, int d) {
-             std::string prefix = std::string(k) + "=";
-             for (const auto& a : args)
-                 if (a.starts_with(prefix)) return std::atoi(a.substr(prefix.size()).c_str());
-             return d;
-         };
-         return createInsertClusterBarrierPass(/*isKernelScope=*/true,
-                                               getArgInt("PrefetchGlobalRead", 1),
-                                               getArgInt("PrefetchLocalRead", 1));
-     }},
+    {"InsertClusterBarrierPass", [](const auto&) { return createInsertClusterBarrierPass(); }},
     {"RemoveWaitAluPass", [](const auto&) { return createRemoveWaitAluPass(); }},
     {"InsertWaitAluPass",
      [](const std::vector<std::string>& args) {
