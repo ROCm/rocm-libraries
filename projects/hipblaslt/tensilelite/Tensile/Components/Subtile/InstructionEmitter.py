@@ -236,23 +236,22 @@ class InstructionEmitter:
             vgprTilesScale = self.vgprTilesSA if tensor == 'SA' else self.vgprTilesSB
             kernel = self.kernel
             wavelen = kernel["WavefrontSize"]
-            isWave32Gfx1250 = (wavelen == 32 and self.writer.states.asmCaps["HasTDM"])
+            parentTc = tc[-1]  # 'A' or 'B'
+            mxBlock = kernel["ProblemType"][f"MXBlock{parentTc}"]
+            dimk = kernel["MatrixInstK"] // mxBlock
+            # InMemorySwizzle LDS layout: scale data is packed as
+            # {numKTiles, perWaveRows, dimk}.  Each M-group occupies
+            # wavelen * dimk contiguous bytes -- exactly one ds_load_b32.
+            groupStride = wavelen * dimk
+            numKGroups = ti.lrLocalSubtileGrid[1]
             for tileId in range(placement.tiles.tileId_start, placement.tiles.tileId_end, lrGran.mn):
                 scaleGroupIdx = tileId // lrGran.mn
                 groupKey = scaleGroupIdx * lrGran.mn
                 kGroupIdx = placement.tiles.subIterK_start // ti.lrSubtileShape[1]
-                if isWave32Gfx1250:
-                    # InMemorySwizzle LDS layout: {numKTiles, perWaveRows, dimk}.
-                    # M-group stride = wavelen * dimk (32 * 4 = 128 bytes).
-                    # K-tile stride = perWaveRows * dimk.
-                    parentTc = tc[-1]  # 'A' or 'B'
-                    mxBlock = kernel["ProblemType"][f"MXBlock{parentTc}"]
-                    instK = kernel["MatrixInstK"]
-                    dimk = instK // mxBlock
-                    dsOffset = scaleGroupIdx * wavelen * dimk
+                if numKGroups > 1:
+                    dsOffset = groupStride * (scaleGroupIdx * numKGroups + kGroupIdx)
                 else:
-                    numKGroups = ti.lrLocalSubtileGrid[1]
-                    dsOffset = int(ti.lrSubtileSize) * (scaleGroupIdx * numKGroups + kGroupIdx)
+                    dsOffset = groupStride * scaleGroupIdx
                 vdst = next(iter(vgprTilesScale[tile_map[groupKey]]))
                 module.add(DSLoadB32(
                     dst=vgpr(vdst),
