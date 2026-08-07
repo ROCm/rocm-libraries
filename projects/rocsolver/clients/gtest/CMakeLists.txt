@@ -115,6 +115,7 @@ set(rocauxiliary_test_source
   auxiliary/stebz_gtest.cpp
   auxiliary/stein_gtest.cpp
   auxiliary/latrd_gtest.cpp
+  # hessenberg matrices
   auxiliary/lahr2_gtest.cpp
   # symmetric matrices
   auxiliary/lasyf_gtest.cpp

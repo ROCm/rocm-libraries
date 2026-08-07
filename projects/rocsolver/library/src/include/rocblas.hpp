@@ -1722,7 +1722,7 @@ rocblas_status rocblasCall_trmm(rocblas_handle handle,
     return rocblas_status_success;
 }
 
-// trmm out-of-place
+// trmm out-of-place - non batched / strided batched
 template <typename T>
 rocblas_status rocblasCall_trmm(rocblas_handle handle,
                                 rocblas_side side,
@@ -1759,6 +1759,7 @@ rocblas_status rocblasCall_trmm(rocblas_handle handle,
     return rocblas_status_success;
 }
 
+// trmm out-of-place - batched
 template <typename T>
 rocblas_status rocblasCall_trmm(rocblas_handle handle,
                                 rocblas_side side,
@@ -1795,7 +1796,7 @@ rocblas_status rocblasCall_trmm(rocblas_handle handle,
     return rocblas_status_success;
 }
 
-// trmm out-of-place: batched A and B, strided flat C
+// trmm out-of-place - batched A and B, strided flat C
 template <typename T>
 rocblas_status rocblasCall_trmm(rocblas_handle handle,
                                 rocblas_side side,
@@ -1827,9 +1828,9 @@ rocblas_status rocblasCall_trmm(rocblas_handle handle,
 
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
-    rocblas_int blocks = (batch_count - 1) / 256 + 1;
+    rocblas_int blocks = (batch_count - 1) / BS1 + 1;
 
-    ROCSOLVER_LAUNCH_KERNEL(get_array, dim3(blocks), dim3(256), 0, stream, workArr, C, strideC,
+    ROCSOLVER_LAUNCH_KERNEL(get_array, dim3(blocks), dim3(BS1), 0, stream, workArr, C, strideC,
                             batch_count);
 
     THROW_IF_ROCBLAS_ERROR(rocblas_internal_trmm_batched_template(

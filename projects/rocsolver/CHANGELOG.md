@@ -6,6 +6,10 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ## (Unreleased) rocSOLVER
 
 ### Added
+
+* Hessenberg reduction auxiliary routine
+    * LAHR2
+
 ### Changed
 ### Removed
 ### Optimized
@@ -40,8 +44,6 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 ### Added
 
-* Hessenberg reduction auxiliary routine
-    * LAHR2
 * Support added for the gfx1250 architecture.
 
 ### Optimized

@@ -46,7 +46,7 @@ void lahr2_checkBadArgs(const rocblas_handle handle,
                         T* dTau,
                         T* dT,
                         const rocblas_int ldt,
-                        U dY,
+                        T* dY,
                         const rocblas_int ldy)
 {
     // handle
@@ -63,12 +63,11 @@ void lahr2_checkBadArgs(const rocblas_handle handle,
                           rocblas_status_invalid_pointer);
     EXPECT_ROCBLAS_STATUS(rocsolver_lahr2(handle, n, k, nb, dA, lda, dTau, (T*)nullptr, ldt, dY, ldy),
                           rocblas_status_invalid_pointer);
-    EXPECT_ROCBLAS_STATUS(rocsolver_lahr2(handle, n, k, nb, dA, lda, dTau, dT, ldt, (U) nullptr, ldy),
+    EXPECT_ROCBLAS_STATUS(rocsolver_lahr2(handle, n, k, nb, dA, lda, dTau, dT, ldt, (T*)nullptr, ldy),
                           rocblas_status_invalid_pointer);
 
     // quick return with invalid pointers
-    EXPECT_ROCBLAS_STATUS(rocsolver_lahr2(handle, 0, k, nb, (U) nullptr, lda, (T*)nullptr,
-                                          (T*)nullptr, ldt, (U) nullptr, ldy),
+    EXPECT_ROCBLAS_STATUS(rocsolver_lahr2(handle, 0, k, nb, (U) nullptr, lda, dTau, dT, ldt, dY, ldy),
                           rocblas_status_success);
 }
 
@@ -118,26 +117,6 @@ void lahr2_initData(const rocblas_handle handle,
     if(CPU)
     {
         rocblas_init<T>(hA, true);
-
-        // scale A to avoid singularities
-        for(rocblas_int j = 0; j < n; j++)
-        {
-            for(rocblas_int i = 0; i < n; i++)
-            {
-                if(i == j)
-                    hA[0][i + j * lda] += 400;
-                else
-                    hA[0][i + j * lda] -= 4;
-            }
-        }
-
-        // zero out T and Y
-        for(rocblas_int i = 0; i < nb; i++)
-            for(rocblas_int j = 0; j < nb; j++)
-                hT[0][i + j * ldt] = T(0);
-        for(rocblas_int i = 0; i < n; i++)
-            for(rocblas_int j = 0; j < nb; j++)
-                hY[0][i + j * ldy] = T(0);
     }
 
     if(GPU)

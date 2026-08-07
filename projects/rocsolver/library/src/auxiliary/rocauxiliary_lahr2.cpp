@@ -67,8 +67,6 @@ try
     rocblas_int batch_count = 1;
 
     // memory workspace sizes:
-    // size for constants in rocblas calls
-    size_t size_scalars;
     // size of arrays of pointers (for batched cases) and re-usable workspace
     size_t size_work_workArr;
     // extra requirements for calling LARFG
@@ -77,33 +75,29 @@ try
     size_t size_work_vec;
     // one scalar beta per batch instance
     size_t size_beta;
-    rocsolver_lahr2_getMemorySize<false, T>(n, k, nb, batch_count, &size_scalars, &size_work_workArr,
-                                            &size_norms, &size_work_vec, &size_beta);
+    rocsolver_lahr2_getMemorySize<false, T>(n, k, nb, batch_count, &size_work_workArr, &size_norms,
+                                            &size_work_vec, &size_beta);
 
     if(rocblas_is_device_memory_size_query(handle))
-        return rocblas_set_optimal_device_memory_size(handle, size_scalars, size_work_workArr,
-                                                      size_norms, size_work_vec, size_beta);
+        return rocblas_set_optimal_device_memory_size(handle, size_work_workArr, size_norms,
+                                                      size_work_vec, size_beta);
 
     // memory workspace allocation
-    void *scalars, *work_workArr, *norms, *work_vec, *beta;
-    rocblas_device_malloc mem(handle, size_scalars, size_work_workArr, size_norms, size_work_vec,
-                              size_beta);
+    void *work_workArr, *norms, *work_vec, *beta;
+    rocblas_device_malloc mem(handle, size_work_workArr, size_norms, size_work_vec, size_beta);
 
     if(!mem)
         return rocblas_status_memory_error;
 
-    scalars = mem[0];
-    work_workArr = mem[1];
-    norms = mem[2];
-    work_vec = mem[3];
-    beta = mem[4];
-    if(size_scalars > 0)
-        init_scalars(handle, (T*)scalars);
+    work_workArr = mem[0];
+    norms = mem[1];
+    work_vec = mem[2];
+    beta = mem[3];
 
     // execution
     return rocsolver_lahr2_template<T>(handle, n, k, nb, A, shiftA, lda, strideA, tau, strideT, F,
                                        ldf, strideF, Y, shiftY, ldy, strideY, batch_count,
-                                       (T*)scalars, work_workArr, (T*)norms, (T*)work_vec, (T*)beta);
+                                       work_workArr, (T*)norms, (T*)work_vec, (T*)beta);
 }
 catch(...)
 {
@@ -120,6 +114,89 @@ ROCSOLVER_END_NAMESPACE
 
 extern "C" {
 
+/*! @{
+    \brief LAHR2 reduces the first ``nb`` columns of a general n-by-(n-k+1) matrix A
+    so that elements below the k-th subdiagonal are zero. This is an auxiliary routine
+    used in the blocked reduction to upper Hessenberg form (GEHRD).
+
+    \details
+    The reduced form is given by:
+
+    \f[
+        B = Q'  A  Q
+    \f]
+
+    where the elements of B below the k-th subdiagonal are zero and Q is an orthogonal
+    matrix represented as the product of Householder matrices
+
+    \f[
+        \begin{array}{cl}
+        Q = H(nb-1)H(nb-2)\cdots H(1)
+        \end{array}
+    \f]
+
+    The reduction is performed by ``nb`` Householder reflectors. Each Householder
+    matrix \f$H(i)\f$ is given by
+
+    \f[
+        H(i) = I - \text{tau}[i] \cdot v_i^{} v_i'
+    \f]
+
+    where \f$\text{tau}[i]\f$ is the corresponding Householder scalar and the first \f$k+i\f$
+    elements of the Householder vector \f$v_i\f$ are zero, and \f$v_i[k+i] = 1\f$.
+
+    LAHR2 returns the triangular factor ``T`` that is upper triangular where
+
+    \f[
+        H = I - VTV'
+    \f]
+
+    and matrix ``Y`` that is given by
+
+    \f[
+        Y = A V T
+    \f]
+
+    where the \f$i\f$th column of matrix ``V`` contains the Householder vector associated with \f$H(i)\f$.
+    Together, \f$(V, T, Y)\f$ allow the unreduced trailing part of A to be updated via rank-nb operations
+    instead of nb individual rank-1 updates.
+
+    @param[in]
+    handle      rocblas_handle.
+    @param[in]
+    n           rocblas_int. n >= 0.
+                The order of the matrix A.
+    @param[in]
+    k           rocblas_int. 1 <= k < n.
+                The offset (1-based column index) at which the reduction begins.
+    @param[in]
+    nb          rocblas_int. 1 <= nb < n - k + 1.
+                The number of columns to reduce.
+    @param[inout]
+    A           pointer to type. Array on the GPU of dimension lda*n.
+                On entry, the n-by-(n-k+1) matrix to be reduced.
+                On exit, the first nb Householder vectors are stored in the
+                lower triangle of the submatrix A(k:n-1, k:k+nb-1),
+                and the rest of A is updated accordingly.
+    @param[in]
+    lda         rocblas_int. lda >= max(1, n).
+                The leading dimension of A.
+    @param[out]
+    tau         pointer to type. Array of nb scalars on the GPU.
+                The vector of all the Householder scalars.
+    @param[out]
+    T           pointer to type. Array on the GPU of dimension ldt*nb.
+                The upper triangular factor.
+    @param[in]
+    ldt         rocblas_int. ldt >= nb.
+                The leading dimension of T.
+    @param[out]
+    Y           pointer to type. Array on the GPU of dimension ldy*nb.
+                The n-by-nb matrix \f$Y = A V T\f$.
+    @param[in]
+    ldy         rocblas_int. ldy >= n.
+                The leading dimension of Y.
+    ********************************************************************/
 ROCSOLVER_EXPORT rocblas_status rocsolver_slahr2(rocblas_handle handle,
                                                  const rocblas_int n,
                                                  const rocblas_int k,
@@ -181,5 +258,6 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zlahr2(rocblas_handle handle,
     return rocsolver::rocsolver_lahr2_impl<rocblas_double_complex>(handle, n, k, nb, A, lda, tau, T,
                                                                    ldt, Y, ldy);
 }
+//! @}
 
 } // extern C
