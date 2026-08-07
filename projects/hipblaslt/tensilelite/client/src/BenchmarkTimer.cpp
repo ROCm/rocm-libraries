@@ -297,7 +297,7 @@ namespace TensileLite
                             "[BenchmarkTimer] Failed to cast problem to any ContractionProblem.");
                     }
 
-                    // Calculate total TB/s bandwidth from timePerEnqueue_us and update the report.
+                    // Calculate total GB/s bandwidth from timePerEnqueue_us and update the report.
                     bandwidthGbps = (totalBytes / timePerEnqueue_us) / (double)1e3;
                 }
             }
