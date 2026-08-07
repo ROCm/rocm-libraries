@@ -60,7 +60,7 @@ os.environ.setdefault("ROCKE_CPP_QUIET_FALLBACK", "1")
 
 _TILE_MN = (16, 32, 64, 128, 256)
 _TILE_MN_GFX1250 = (16, 32, 64, 128, 256, 512)
-_TILE_K = (16, 32, 64, 128)
+_TILE_K = (16, 32, 64)
 _WARP_MN = (1, 2, 4, 8)
 _WARP_MN_GFX1250 = (1, 2, 4, 8, 16)
 _WARP_TILE_MN = (16, 32)
@@ -674,6 +674,18 @@ def main() -> int:
         "--iters", type=int, default=10, help="timed iterations (default: 10)"
     )
     parser.add_argument(
+        "--jobs",
+        type=int,
+        default=1,
+        metavar="N",
+        help=(
+            "number of parallel compile workers (default: 1, serial). "
+            "Uses multiprocessing (ProcessPoolExecutor) so each worker runs "
+            "libamd_comgr in its own process, bypassing the GIL. "
+            "Set to 0 to use os.cpu_count() workers."
+        ),
+    )
+    parser.add_argument(
         "--sample",
         type=float,
         default=None,
@@ -1031,6 +1043,7 @@ def main() -> int:
                 arch=arch,
                 target=target,
                 compile_kernel=compile_kernel,
+                jobs=args.jobs,
                 ConvDataSpec=ConvDataSpec,
                 synchronize_and_release=synchronize_and_release,
                 time_launches=time_launches,
@@ -1101,6 +1114,67 @@ def main() -> int:
     return all_rc
 
 
+def _compile_one(args_tuple):
+    """Top-level picklable worker for ProcessPoolExecutor.
+
+    Receives (kernel, arch) and returns (kernel_name, artifact).  Must be
+    defined at module level so pickle can locate it by name.
+    """
+    kernel, arch = args_tuple
+    from rocke import compile_kernel as _compile_kernel
+
+    artifact = _compile_kernel(kernel, arch=arch)
+    return kernel.name, artifact
+
+
+def _compile_kernels_parallel(kernels, compile_kernel, arch: str, jobs: int) -> dict:
+    """Compile *kernels* (a list of KernelDef) in parallel.
+
+    Deduplicates by kernel name before submitting.  Returns a
+    ``{name: KernelArtifact}`` dict covering every unique name in *kernels*.
+
+    When *jobs* == 1 the compilation is serial (no subprocess overhead).
+    When *jobs* == 0 the worker count defaults to ``os.cpu_count()``.
+    """
+    import os
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+
+    unique: dict = {}
+    for k in kernels:
+        if k.name not in unique:
+            unique[k.name] = k
+
+    if not unique:
+        return {}
+
+    artifact_map: dict = {}
+
+    if jobs == 1:
+        for name, k in unique.items():
+            artifact_map[name] = compile_kernel(k, arch=arch)
+        return artifact_map
+
+    max_workers = os.cpu_count() if jobs == 0 else jobs
+    work = [(k, arch) for k in unique.values()]
+
+    print(
+        f"Compiling {len(unique)} unique kernels with {max_workers} workers ...",
+        flush=True,
+    )
+
+    with ProcessPoolExecutor(max_workers=max_workers) as pool:
+        futures = {pool.submit(_compile_one, item): item[0].name for item in work}
+        done = 0
+        for fut in as_completed(futures):
+            name, artifact = fut.result()
+            artifact_map[name] = artifact
+            done += 1
+            if done % max(1, len(unique) // 10) == 0 or done == len(unique):
+                print(f"  compiled {done}/{len(unique)}", flush=True)
+
+    return artifact_map
+
+
 def _run_sweep(
     *,
     args,
@@ -1109,6 +1183,7 @@ def _run_sweep(
     arch: str,
     target,
     compile_kernel,
+    jobs: int = 1,
     ConvDataSpec,
     ImplicitGemmConvSpec,
     build_implicit_gemm_conv,
@@ -1211,50 +1286,16 @@ def _run_sweep(
         flush=True,
     )
 
-    rt = Runtime()
-    results: List[Result] = []
-    n_built = 0
+    # ---------------------------------------------------------------------------
+    # Phase 1 – filter: validate every combo and build KernelDef IR (CPU only).
+    # ---------------------------------------------------------------------------
     n_skipped = 0
+    # pending: list of (combo_tuple, spec, kernel) for every combo that passes
+    # validation.  Ordering is preserved so the GPU run phase matches combos.
+    pending = []
 
-    # Upload inputs once; reuse across all kernels.
-    A_dev = rt.alloc(A_t.nbytes)
-    B_dev = rt.alloc(B_t.nbytes)
-    D_dev = rt.alloc(D_t.nbytes)
-    rt.memcpy_h2d(A_dev, _u8(A_t), A_t.nbytes)
-    rt.memcpy_h2d(B_dev, _u8(B_t), B_t.nbytes)
-    rt.memset(D_dev, 0, D_t.nbytes)
-
-    ref_out: torch.Tensor | None = None
-    if args.verify:
-        from rocke.benchmark.conv_reference import (
-            conv_reference,
-            conv_reference_gfx1250,
-        )
-
-        if arch == "gfx1250" and not p.is_3d:
-            ref_out = conv_reference_gfx1250(A_t, B_t, p, out_dtype=_torch_dtype).cuda()
-            print(
-                f"Reference computed via gfx1250 hand-written conv "
-                f"({tuple(ref_out.shape)}, {ref_out.dtype}).",
-                flush=True,
-            )
-        else:
-            ref_out = conv_reference(A_t, B_t, p, out_dtype=_torch_dtype)
-            print(
-                f"Reference computed via torch ({tuple(ref_out.shape)}, {ref_out.dtype}).",
-                flush=True,
-            )
-
-    for (
-        tile_m,
-        tile_n,
-        tile_k,
-        warp_m,
-        warp_n,
-        warp_tile_mn,
-        pipeline,
-        epilogue,
-    ) in combos:
+    for combo in combos:
+        tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile_mn, pipeline, epilogue = combo
         atom = target.mma.select_largest_k(
             family=_mma_family,
             a_dtype=dtype,
@@ -1298,8 +1339,58 @@ def _run_sweep(
             n_skipped += 1
             continue
 
-        artifact = compile_kernel(kernel, arch=arch)
-        n_built += 1
+        pending.append((combo, spec, kernel))
+
+    # ---------------------------------------------------------------------------
+    # Phase 2 – compile: fan out compile_kernel across processes (or serial).
+    # ---------------------------------------------------------------------------
+    artifact_map = _compile_kernels_parallel(
+        [k for _, _, k in pending], compile_kernel, arch, jobs
+    )
+    n_built = len(artifact_map)
+
+    # ---------------------------------------------------------------------------
+    # Phase 3 – GPU run: load modules and time each kernel serially.
+    # ---------------------------------------------------------------------------
+    from rocke.runtime.hip_module import HipError
+
+    rt = Runtime()
+    results: List[Result] = []
+
+    # Upload inputs once; reuse across all kernels.
+    A_dev = rt.alloc(A_t.nbytes)
+    B_dev = rt.alloc(B_t.nbytes)
+    D_dev = rt.alloc(D_t.nbytes)
+    rt.memcpy_h2d(A_dev, _u8(A_t), A_t.nbytes)
+    rt.memcpy_h2d(B_dev, _u8(B_t), B_t.nbytes)
+    rt.memset(D_dev, 0, D_t.nbytes)
+
+    ref_out: torch.Tensor | None = None
+    if args.verify:
+        from rocke.benchmark.conv_reference import (
+            conv_reference,
+            conv_reference_gfx1250,
+        )
+
+        if arch == "gfx1250" and not p.is_3d:
+            ref_out = conv_reference_gfx1250(A_t, B_t, p, out_dtype=_torch_dtype).cuda()
+            print(
+                f"Reference computed via gfx1250 hand-written conv "
+                f"({tuple(ref_out.shape)}, {ref_out.dtype}).",
+                flush=True,
+            )
+        else:
+            ref_out = conv_reference(A_t, B_t, p, out_dtype=_torch_dtype)
+            print(
+                f"Reference computed via torch ({tuple(ref_out.shape)}, {ref_out.dtype}).",
+                flush=True,
+            )
+
+    n_run = 0
+    for combo, spec, kernel in pending:
+        tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile_mn, pipeline, epilogue = combo
+        warp_tile_k = spec.warp_tile_k
+        artifact = artifact_map[kernel.name]
 
         try:
             launcher = KernelLauncher(
@@ -1319,6 +1410,7 @@ def _run_sweep(
                 flush=True,
             )
             continue
+
         grid = _grid_for_spec(spec, p)
         block = (spec.block_size, 1, 1)
         stream = 0
@@ -1367,6 +1459,7 @@ def _run_sweep(
 
         cur_tflops = (flop / ms) * 1e-9
         cur_gbps = (bytes_xfer / ms) * 1e-6
+        n_run += 1
 
         results.append(
             Result(
@@ -1389,7 +1482,7 @@ def _run_sweep(
         )
 
         print(
-            f"[{n_built:4d}] tile={tile_m}x{tile_n}x{tile_k} "
+            f"[{n_run:4d}] tile={tile_m}x{tile_n}x{tile_k} "
             f"warp={warp_m}x{warp_n} "
             f"atom={warp_tile_mn}x{warp_tile_mn}x{warp_tile_k} "
             f"{pipeline}/{epilogue:9s} "
@@ -1403,7 +1496,7 @@ def _run_sweep(
     rt.free(D_dev)
 
     print(
-        f"\nSweep done: {n_built} built, {n_skipped} skipped.",
+        f"\nSweep done: {n_built} compiled, {n_skipped} skipped.",
         flush=True,
     )
 
@@ -1456,6 +1549,7 @@ def _run_wgrad_sweep(
     arch: str,
     target,
     compile_kernel,
+    jobs: int = 1,
     ConvDataSpec,
     WgradConvSpec,
     build_implicit_gemm_conv_wgrad,
@@ -1559,41 +1653,26 @@ def _run_wgrad_sweep(
         flush=True,
     )
 
-    rt = Runtime()
-    results: List[Result] = []
-    n_built = 0
+    # ---------------------------------------------------------------------------
+    # Phase 1 – filter: validate every combo and build KernelDef IR (CPU only).
+    # ---------------------------------------------------------------------------
     n_skipped = 0
+    # pending: list of (combo_tuple, spec, resolved_split_k, kernel)
+    pending = []
 
-    dY_dev = rt.alloc(dY_t.nbytes)
-    X_dev = rt.alloc(X_t.nbytes)
-    dW_dev = rt.alloc(dW_t.nbytes)
-    rt.memcpy_h2d(dY_dev, _u8(dY_t), dY_t.nbytes)
-    rt.memcpy_h2d(X_dev, _u8(X_t), X_t.nbytes)
-    rt.memset(dW_dev, 0, dW_t.nbytes)
+    for combo in combos:
+        (
+            tile_m,
+            tile_n,
+            tile_k,
+            warp_m,
+            warp_n,
+            warp_tile_mn,
+            pipeline,
+            epilogue,
+            split_k,
+        ) = combo
 
-    ref_out: torch.Tensor | None = None
-    if args.verify or args.dump_fail:
-        from rocke.benchmark.conv_reference import wgrad_reference
-
-        ref_out = wgrad_reference(_X_f32, _dY_f32, p)
-        print(
-            f"Wgrad reference computed ({tuple(ref_out.shape)}, {ref_out.dtype}).",
-            flush=True,
-        )
-
-    for (
-        tile_m,
-        tile_n,
-        tile_k,
-        warp_m,
-        warp_n,
-        warp_tile_mn,
-        pipeline,
-        epilogue,
-        split_k,
-    ) in combos:
-        # split_k > 1 requires dtype_d in fp32/bf16/fp16 (atomic accumulation).
-        # For split_k == 1 any dtype is fine; skip invalid split_k > 1 + cshuffle.
         if split_k > 1 and epilogue == "cshuffle":
             n_skipped += 1
             continue
@@ -1611,8 +1690,6 @@ def _run_wgrad_sweep(
             continue
 
         warp_tile_k = atom.k
-        # Resolve split_k=-1 once here so the concrete value is used for the
-        # spec, the grid z-axis, the timing loop, and the result record.
         if split_k == -1:
             from rocke.helpers.split_k import select_split_k_wgrad
 
@@ -1645,7 +1722,7 @@ def _run_wgrad_sweep(
             split_k=resolved_split_k,
         )
 
-        ok, reason = is_valid_wgrad_spec(spec, arch)
+        ok, _ = is_valid_wgrad_spec(spec, arch)
         if not ok:
             n_skipped += 1
             continue
@@ -1656,8 +1733,48 @@ def _run_wgrad_sweep(
             n_skipped += 1
             continue
 
-        artifact = compile_kernel(kernel, arch=arch)
-        n_built += 1
+        pending.append((combo, spec, resolved_split_k, kernel))
+
+    # ---------------------------------------------------------------------------
+    # Phase 2 – compile: fan out compile_kernel across processes (or serial).
+    # ---------------------------------------------------------------------------
+    artifact_map = _compile_kernels_parallel(
+        [k for _, _, _, k in pending], compile_kernel, arch, jobs
+    )
+    n_built = len(artifact_map)
+
+    # ---------------------------------------------------------------------------
+    # Phase 3 – GPU run: load modules and time each kernel serially.
+    # ---------------------------------------------------------------------------
+    from rocke.runtime.hip_module import HipError
+
+    rt = Runtime()
+    results: List[Result] = []
+
+    dY_dev = rt.alloc(dY_t.nbytes)
+    X_dev = rt.alloc(X_t.nbytes)
+    dW_dev = rt.alloc(dW_t.nbytes)
+    rt.memcpy_h2d(dY_dev, _u8(dY_t), dY_t.nbytes)
+    rt.memcpy_h2d(X_dev, _u8(X_t), X_t.nbytes)
+    rt.memset(dW_dev, 0, dW_t.nbytes)
+
+    ref_out: torch.Tensor | None = None
+    if args.verify or args.dump_fail:
+        from rocke.benchmark.conv_reference import wgrad_reference
+
+        ref_out = wgrad_reference(_X_f32, _dY_f32, p)
+        print(
+            f"Wgrad reference computed ({tuple(ref_out.shape)}, {ref_out.dtype}).",
+            flush=True,
+        )
+
+    n_run = 0
+    for combo, spec, resolved_split_k, kernel in pending:
+        tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile_mn, pipeline, epilogue, _ = (
+            combo
+        )
+        warp_tile_k = spec.warp_tile_k
+        artifact = artifact_map[kernel.name]
 
         try:
             launcher = KernelLauncher(
@@ -1677,6 +1794,7 @@ def _run_wgrad_sweep(
                 flush=True,
             )
             continue
+
         grid = _grid_for_wgrad_spec(spec, resolved_split_k)
         block = (spec.block_size, 1, 1)
         stream = 0
@@ -1700,7 +1818,6 @@ def _run_wgrad_sweep(
                 block=block,
                 out_dev=dW_dev,
                 out_t=dW_t,
-                # Split-K atomic accumulation requires a zero-init buffer.
                 zero_init_out=(resolved_split_k > 1),
                 ref_out=ref_out,
                 kernel_name=artifact.kernel_name,
@@ -1714,8 +1831,6 @@ def _run_wgrad_sweep(
                 rt.free(dW_dev)
                 return 1, []
 
-        # For split_k > 1 the timed loop must zero-init dW before every launch
-        # so the atomic accumulation starts from zero each iteration.
         if resolved_split_k > 1:
 
             def _launch_spk():
@@ -1736,6 +1851,7 @@ def _run_wgrad_sweep(
 
         cur_tflops = (flop / ms) * 1e-9
         cur_gbps = (bytes_xfer / ms) * 1e-6
+        n_run += 1
 
         results.append(
             Result(
@@ -1757,7 +1873,7 @@ def _run_wgrad_sweep(
         )
 
         print(
-            f"[{n_built:4d}] tile={tile_m}x{tile_n}x{tile_k} "
+            f"[{n_run:4d}] tile={tile_m}x{tile_n}x{tile_k} "
             f"warp={warp_m}x{warp_n} "
             f"atom={warp_tile_mn}x{warp_tile_mn}x{warp_tile_k} "
             f"{pipeline}/{epilogue:9s} spk{resolved_split_k:<3d} "
@@ -1769,7 +1885,7 @@ def _run_wgrad_sweep(
     rt.free(X_dev)
     rt.free(dW_dev)
 
-    print(f"\nWgrad sweep done: {n_built} built, {n_skipped} skipped.", flush=True)
+    print(f"\nWgrad sweep done: {n_built} compiled, {n_skipped} skipped.", flush=True)
 
     if not results:
         print("No valid wgrad configurations found.", file=sys.stderr)
