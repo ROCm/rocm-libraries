@@ -57,6 +57,17 @@ inline const PointwiseModeBitset& getImplementedBinaryModesBitset()
     return s_implementedBinaryModes;
 }
 
+// Get operations that have implemented functors for ternary operations
+inline const PointwiseModeBitset& getImplementedTernaryModesBitset()
+{
+    static const PointwiseModeBitset s_implementedTernaryModes = []() {
+        PointwiseModeBitset bitset;
+        bitset.set(toBitPosition(data_objects::PointwiseMode::BINARY_SELECT));
+        return bitset;
+    }();
+    return s_implementedTernaryModes;
+}
+
 // Get all unary operations (for frontend compatibility)
 inline const PointwiseModeBitset& getUnaryModesBitset()
 {
@@ -168,7 +179,7 @@ inline bool isImplementedBinaryPointwiseMode(data_objects::PointwiseMode mode)
 inline bool isImplementedTernaryPointwiseMode(data_objects::PointwiseMode mode)
 {
     auto position = toBitPosition(mode);
-    return position < POINTWISE_MODE_COUNT && getTernaryModesBitset().test(position);
+    return position < POINTWISE_MODE_COUNT && getImplementedTernaryModesBitset().test(position);
 }
 
 } // namespace hipdnn_flatbuffers_sdk::utilities

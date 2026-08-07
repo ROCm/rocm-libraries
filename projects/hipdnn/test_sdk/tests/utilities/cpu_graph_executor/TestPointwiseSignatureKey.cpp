@@ -85,6 +85,23 @@ TEST(TestPointwiseSignatureKey, HashFunction)
 
     EXPECT_TRUE(hash5 != hash6);
 }
+TEST(TestPointwiseSignatureKey, HashSeparatesBooleanFields)
+{
+    const PointwiseSignatureKey input1Boolean{PointwiseMode::BINARY_SELECT,
+                                              DataType::FLOAT,
+                                              DataType::FLOAT,
+                                              DataType::FLOAT,
+                                              DataType::BOOLEAN,
+                                              DataType::UNSET};
+    const PointwiseSignatureKey input2Boolean{PointwiseMode::BINARY_SELECT,
+                                              DataType::FLOAT,
+                                              DataType::FLOAT,
+                                              DataType::FLOAT,
+                                              DataType::UNSET,
+                                              DataType::BOOLEAN};
+
+    EXPECT_NE(input1Boolean.hashSelf(), input2Boolean.hashSelf());
+}
 
 TEST(TestPointwiseSignatureKey, Copy)
 {

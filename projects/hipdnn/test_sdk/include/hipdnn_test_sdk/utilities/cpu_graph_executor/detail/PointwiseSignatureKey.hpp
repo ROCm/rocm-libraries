@@ -118,15 +118,20 @@ struct PointwiseSignatureKey
         return k.hashSelf();
     }
 
-    constexpr std::size_t hashSelf() const
+    std::size_t hashSelf() const noexcept
     {
-        return static_cast<std::size_t>(static_cast<int>(nodeType))
-               ^ (static_cast<std::size_t>(static_cast<int>(operation)) << 4)
-               ^ (static_cast<std::size_t>(static_cast<int>(inputDataType)) << 8)
-               ^ (static_cast<std::size_t>(static_cast<int>(computeDataType)) << 12)
-               ^ (static_cast<std::size_t>(static_cast<int>(outputDataType)) << 16)
-               ^ (static_cast<std::size_t>(static_cast<int>(input1DataType)) << 20)
-               ^ (static_cast<std::size_t>(static_cast<int>(input2DataType)) << 24);
+        std::size_t seed = 0;
+        const auto combine = [&seed](auto value) {
+            seed ^= std::hash<decltype(value)>{}(value) + 0x9e3779b9U + (seed << 6) + (seed >> 2);
+        };
+        combine(nodeType);
+        combine(operation);
+        combine(inputDataType);
+        combine(input1DataType);
+        combine(input2DataType);
+        combine(computeDataType);
+        combine(outputDataType);
+        return seed;
     }
 
     bool operator==(const PointwiseSignatureKey& other) const noexcept
@@ -364,6 +369,7 @@ private:
             ModeEnum, InputDataTypeEnum, ComputeDataTypeEnum, OutputDataTypeEnum)]
             = std::make_unique<PointwisePlanBuilder<InputDataTypeEnum,
                                                     InputDataTypeEnum,
+                                                    InputDataTypeEnum,
                                                     ComputeDataTypeEnum,
                                                     OutputDataTypeEnum>>();
     }
@@ -383,6 +389,7 @@ private:
                                   OutputDataTypeEnum,
                                   Input1DataTypeEnum)]
             = std::make_unique<PointwisePlanBuilder<Input0DataTypeEnum,
+                                                    Input1DataTypeEnum,
                                                     Input1DataTypeEnum,
                                                     ComputeDataTypeEnum,
                                                     OutputDataTypeEnum>>();
@@ -406,9 +413,9 @@ private:
                                   Input2DataTypeEnum)]
             = std::make_unique<PointwisePlanBuilder<Input0DataTypeEnum,
                                                     Input1DataTypeEnum,
+                                                    Input2DataTypeEnum,
                                                     ComputeDataTypeEnum,
-                                                    OutputDataTypeEnum,
-                                                    Input2DataTypeEnum>>();
+                                                    OutputDataTypeEnum>>();
     }
 
     template <hipdnn_flatbuffers_sdk::data_objects::DataType Input0DataTypeEnum,
@@ -425,6 +432,7 @@ private:
                                   Input1DataTypeEnum)]
             = std::make_unique<
                 PointwisePlanBuilder<Input0DataTypeEnum,
+                                     Input1DataTypeEnum,
                                      Input1DataTypeEnum,
                                      ComputeDataTypeEnum,
                                      hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN>>();

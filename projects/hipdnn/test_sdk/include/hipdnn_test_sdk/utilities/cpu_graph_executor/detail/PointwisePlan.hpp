@@ -68,10 +68,7 @@ struct PointwiseParams
     std::optional<float> softplusBeta;
 };
 
-template <typename Input0Type,
-          typename Input1Type,
-          typename OutputType,
-          typename Input2Type = Input1Type>
+template <typename Input0Type, typename Input1Type, typename Input2Type, typename OutputType>
 class PointwisePlan : public IGraphNodePlanExecutor
 {
 public:
@@ -213,9 +210,9 @@ private:
 
 template <hipdnn_flatbuffers_sdk::data_objects::DataType Input0DataTypeEnum,
           hipdnn_flatbuffers_sdk::data_objects::DataType Input1DataTypeEnum,
+          hipdnn_flatbuffers_sdk::data_objects::DataType Input2DataTypeEnum,
           hipdnn_flatbuffers_sdk::data_objects::DataType ComputeDataTypeEnum,
-          hipdnn_flatbuffers_sdk::data_objects::DataType OutputDataTypeEnum,
-          hipdnn_flatbuffers_sdk::data_objects::DataType Input2DataTypeEnum = Input1DataTypeEnum>
+          hipdnn_flatbuffers_sdk::data_objects::DataType OutputDataTypeEnum>
 class PointwisePlanBuilder : public IGraphNodePlanBuilder
 {
 public:
@@ -318,13 +315,23 @@ public:
                                      ? tensorMap.at(*nodeAttributes->in_2_tensor_uid())
                                      : nullptr);
 
+        if(hipdnn_flatbuffers_sdk::utilities::isTernaryPointwiseMode(nodeAttributes->operation())
+           && (nodeAttributes->relu_lower_clip().has_value()
+               || nodeAttributes->relu_upper_clip().has_value()
+               || nodeAttributes->relu_lower_clip_slope().has_value()
+               || nodeAttributes->swish_beta().has_value()))
+        {
+            throw std::runtime_error("Parameterized ternary pointwise operations are not supported "
+                                     "in PointwisePlanBuilder for the Cpu Graph Executor");
+        }
+
         if(nodeAttributes->elu_alpha().has_value() || nodeAttributes->softplus_beta().has_value())
         {
             throw std::runtime_error("ELU and Softplus parameters are not supported "
                                      "in PointwisePlanBuilder for the Cpu Graph Executor yet");
         }
 
-        return std::make_unique<PointwisePlan<Input0Type, Input1Type, OutputType, Input2Type>>(
+        return std::make_unique<PointwisePlan<Input0Type, Input1Type, Input2Type, OutputType>>(
             PointwiseParams(nodeAttributes->operation(),
                             *in0Tensor,
                             in1Tensor,

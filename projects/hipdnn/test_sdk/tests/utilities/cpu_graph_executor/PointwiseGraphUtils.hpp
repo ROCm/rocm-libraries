@@ -246,7 +246,7 @@ inline std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
 }
 
 inline std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
-                  PointwiseTernaryTensorBundle,
+                  hipdnn_test_sdk::utilities::GraphTensorBundle,
                   std::unordered_map<int64_t, void*>>
     buildPointwiseTernaryGraph(const std::vector<int64_t>& input0Dims,
                                const std::vector<int64_t>& input1Dims,
@@ -259,7 +259,8 @@ inline std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
                                hipdnn_flatbuffers_sdk::data_objects::DataType outputDataType,
                                hipdnn_frontend::PointwiseMode operation,
                                const hipdnn_data_sdk::utilities::TensorLayout& layout
-                               = hipdnn_data_sdk::utilities::TensorLayout::NCHW)
+                               = hipdnn_data_sdk::utilities::TensorLayout::NCHW,
+                               std::optional<float> reluLowerClip = std::nullopt)
 {
     auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name("PointwiseTernaryTest");
@@ -289,6 +290,10 @@ inline std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     hipdnn_frontend::graph::PointwiseAttributes pointwiseAttrs;
     pointwiseAttrs.set_name("PointwiseTernary");
     pointwiseAttrs.set_mode(operation);
+    if(reluLowerClip.has_value())
+    {
+        pointwiseAttrs.set_relu_lower_clip(reluLowerClip.value());
+    }
     auto outputTensorAttr
         = graph->pointwise(input0TensorAttr, input1TensorAttr, input2TensorAttr, pointwiseAttrs);
 
@@ -316,10 +321,8 @@ inline std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     }
     auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
-    auto nodeWrap
-        = hipdnn_flatbuffers_sdk::flatbuffer_utilities::NodeWrapper(&graphWrap.getNode(0));
 
-    PointwiseTernaryTensorBundle tensorBundle(nodeWrap, graphWrap.getTensorMap());
+    hipdnn_test_sdk::utilities::GraphTensorBundle tensorBundle(graphWrap.getTensorMap());
     auto variantPack = tensorBundle.toHostVariantPack();
 
     return std::make_tuple(graph, std::move(tensorBundle), variantPack);

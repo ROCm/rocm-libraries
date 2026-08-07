@@ -50,16 +50,4 @@ struct PointwiseBinaryTensorBundle : public hipdnn_test_sdk::utilities::GraphTen
     }
 };
 
-struct PointwiseTernaryTensorBundle : public hipdnn_test_sdk::utilities::GraphTensorBundle
-{
-    PointwiseTernaryTensorBundle(
-        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::INodeWrapper&,
-        const std::unordered_map<int64_t,
-                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
-            tensorMap)
-        : hipdnn_test_sdk::utilities::GraphTensorBundle(tensorMap)
-    {
-    }
-};
-
 }

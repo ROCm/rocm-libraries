@@ -520,15 +520,10 @@ TEST(PointwiseOperationsCpuGraphExecutor, PreluBackwardComposedGraph)
     auto dyTimesX = graph->pointwise(dyTensor, xTensor, multiplyXAttrs);
     configureOutput(dyTimesX, hipdnn_frontend::DataType::FLOAT, tensorDims);
 
-    hipdnn_frontend::graph::PointwiseAttributes zeroTermsAttrs;
-    zeroTermsAttrs.set_name("zero_terms").set_mode(hipdnn_frontend::PointwiseMode::MUL);
-    auto zeroTerms = graph->pointwise(dyTensor, zeroTensor, zeroTermsAttrs);
-    configureOutput(zeroTerms, hipdnn_frontend::DataType::FLOAT, tensorDims);
-
     hipdnn_frontend::graph::PointwiseAttributes dalphaSelectAttrs;
     dalphaSelectAttrs.set_name("dalpha_select")
         .set_mode(hipdnn_frontend::PointwiseMode::BINARY_SELECT);
-    auto dalphaTerms = graph->pointwise(zeroTerms, dyTimesX, positiveMask, dalphaSelectAttrs);
+    auto dalphaTerms = graph->pointwise(zeroTensor, dyTimesX, positiveMask, dalphaSelectAttrs);
     configureOutput(dalphaTerms, hipdnn_frontend::DataType::FLOAT, tensorDims);
 
     hipdnn_frontend::graph::ReductionAttributes reduceAttrs;
