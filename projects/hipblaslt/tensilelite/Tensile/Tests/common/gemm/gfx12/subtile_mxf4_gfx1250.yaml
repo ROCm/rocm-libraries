@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: MIT
 #
 # Subtile MXFP4 correctness test for gfx1250 (wave32).
-# Covers single/multi-iteration, single/multi-wave, and PGR=1/2.
+# Covers single/multi-iteration (DepthU 128/256/512)
+# and single/multi-wave tiles, with PGR=1/2.
 # Validates the TDM-based MX scale load path for subtile kernels,
 # including edge tiles with non-multiple-of-MT problem sizes and
 # multiple workgroups in both M and N dimensions.
@@ -58,7 +59,7 @@ BenchmarkProblems:
           - [16, 16, 128, 1,  1, 2, 2,  2, 2]  # MT 64x64 WG 2x2
           - [16, 16, 128, 1,  1, 4, 2,  2, 2]  # MT 128x64 WG 2x2 (MIWT 4,2)
           - [16, 16, 128, 1,  1, 2, 4,  2, 2]  # MT 64x128 WG 2x2 (MIWT 2,4)
-        - DepthU: [256]
+        - DepthU: [128, 256, 512]
         - WavefrontSize: [32]
         - PrefetchGlobalRead: [1, 2]
         - PrefetchLocalRead: [1]
@@ -85,10 +86,11 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [32, 32, 1, 256]
-          - Exact: [32, 32, 1, 512]
+          - Exact: [32, 32, 1, 128]
           - Exact: [64, 64, 1, 256]
           - Exact: [64, 64, 1, 512]
           - Exact: [128, 128, 1, 512]
+          - Exact: [128, 128, 1, 128]
           # Edge tiles: M and/or N not a multiple of MT
           - Exact: [33, 32, 1, 256]
           - Exact: [36, 32, 1, 256]
