@@ -21,6 +21,7 @@ import os
 import subprocess
 import re
 import shutil
+import sys
 import time
 import yaml
 import pandas as pd
@@ -300,11 +301,8 @@ def run(
             self.build_dir.mkdir(parents=True, exist_ok=True)
             (self.build_dir / ".running").write_text(f"device={self.device}\nslot={self.slot_id}\n")
 
-            runtime_root = client_build_dir / "tensilelite-rocm"
-            python = client_build_dir / "tensilelite-venv" / (
-                "Scripts/python.exe" if os.name == "nt" else "bin/python"
-            )
-            env = {"ROCM_PATH": str(runtime_root)}
+            python = sys.executable
+            env = os.environ.copy()
             with open(self.build_dir / f"{self.config_name}-tensilelite.log", "w") as f:
                 proc = subprocess.Popen(
                     [

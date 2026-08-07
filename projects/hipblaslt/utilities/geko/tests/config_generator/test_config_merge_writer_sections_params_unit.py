@@ -116,11 +116,11 @@ def test_output_writer_scripts_and_orchestrator(tmp_path: Path) -> None:
     hip = tmp_path / "hip"
     hip.mkdir()
     script = tmp_path / "e1.sh"
-    runtime_root = tmp_path / "build" / "tensilelite-rocm"
-    ow.write_run_script(script, "e1", hip, client_path=runtime_root)
+    client = tmp_path / "build/tensilelite/client/tensilelite-client"
+    ow.write_run_script(script, "e1", hip, client_path=client)
     assert script.is_file()
     script_text = script.read_text(encoding="utf-8")
-    assert f"ROCM_PATH={runtime_root}" in script_text
+    assert f"--ensure-client {client}" in script_text
     assert "-m tensilelite run" in script_text
     assert "PYTHONPATH" not in script_text
     assert "--prebuilt-client" not in script_text

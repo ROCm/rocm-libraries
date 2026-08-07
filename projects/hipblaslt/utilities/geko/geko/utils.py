@@ -105,8 +105,8 @@ def build_tensilelite_client(hipblaslt_path: str | Path, build_dir: str | Path =
         build_dir = default_build_dir
 
     build_dir = Path(build_dir).resolve()
-    runtime_root = build_dir / "tensilelite-rocm"
-    client_path = runtime_root / "libexec/hipblaslt/tensilelite/tensilelite-client"
+    executable = "tensilelite-client.exe" if sys.platform == "win32" else "tensilelite-client"
+    client_path = build_dir / "tensilelite" / "client" / executable
     hash_file_path = build_dir / "hash.txt"
 
     build = True
@@ -136,9 +136,30 @@ def build_tensilelite_client(hipblaslt_path: str | Path, build_dir: str | Path =
         with open(hash_file_path, "w") as f:
             f.write(current_hash)
     else:
-        logger.debug(f"Skipping TensileLite runtime build, using cached stage at '{runtime_root}'")
+        logger.debug(f"Skipping TensileLite client build, using cached binary at '{client_path}'")
 
-    return runtime_root
+    run_silent_command(
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--no-build-isolation",
+            "--no-deps",
+            "--editable",
+            tensilelite_path,
+        ]
+    )
+    run_silent_command(
+        [
+            sys.executable,
+            "-m",
+            "tensilelite_configure_client",
+            "--ensure-client",
+            client_path,
+        ]
+    )
+    return client_path
 
 
 def parse_devices(devices: str | list[int]) -> List[int]:

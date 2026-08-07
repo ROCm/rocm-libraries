@@ -69,8 +69,7 @@ def test_build_tensilelite_client_build_and_cached_paths(monkeypatch: pytest.Mon
     tensile.mkdir(parents=True)
 
     build_dir = tmp_path / "build"
-    runtime_root = build_dir / "tensilelite-rocm"
-    client = runtime_root / "libexec/hipblaslt/tensilelite/tensilelite-client"
+    client = build_dir / "tensilelite/client/tensilelite-client"
     hash_file = build_dir / "hash.txt"
     client.parent.mkdir(parents=True, exist_ok=True)
 
@@ -86,10 +85,10 @@ def test_build_tensilelite_client_build_and_cached_paths(monkeypatch: pytest.Mon
     monkeypatch.setattr(utils, "run_silent_command", _fake_run)
 
     out1 = utils.build_tensilelite_client(hip, build_dir=build_dir)
-    assert out1 == runtime_root
-    assert built["n"] == 1
+    assert out1 == client
+    assert built["n"] == 3
     assert hash_file.is_file()
 
     out2 = utils.build_tensilelite_client(hip, build_dir=build_dir)
-    assert out2 == runtime_root
-    assert built["n"] == 1
+    assert out2 == client
+    assert built["n"] == 5

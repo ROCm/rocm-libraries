@@ -21,6 +21,7 @@ import logging
 import os
 from pathlib import Path
 import shlex
+import sys
 from typing import Any, Dict, List, Optional
 
 from geko.config_generator.shared_utils import ConfigEntry, ForkParameter
@@ -285,18 +286,18 @@ def write_run_script(
         filepath: Path for the ``.sh`` file (created with mode ``0o755``).
         entity_name: Base name matching ``{entity_name}.yaml`` in the working directory.
         hipblaslt_path: Root of the hipBLASLt checkout (for ``tensilelite`` paths).
-        client_path: Optional staged ROCm root returned by the TensileLite build.
+        client_path: Optional client executable returned by the TensileLite build.
     """
     command = "tensilelite run"
     environment = ""
     if client_path:
-        runtime_root = Path(client_path).resolve()
-        build_dir = runtime_root.parent
-        python = build_dir / "tensilelite-venv" / (
-            "Scripts/python.exe" if os.name == "nt" else "bin/python"
+        client = Path(client_path).resolve()
+        python = shlex.quote(sys.executable)
+        environment = (
+            f"{python} -m tensilelite_configure_client --ensure-client "
+            f"{shlex.quote(str(client))} && "
         )
-        environment = f"ROCM_PATH={shlex.quote(str(runtime_root))} "
-        command = f"{shlex.quote(str(python))} -m tensilelite run"
+        command = f"{python} -m tensilelite run"
 
     run_command = (
         f'{environment}{command} $YAML $WORK_DIR 2>&1 | tee $OUT'
