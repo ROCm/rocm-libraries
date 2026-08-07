@@ -1081,10 +1081,10 @@ class KernelComponentFactoryGfx950(
     def get_hdim_tile_size_dict(cls, dtype: str) -> Optional[dict]:
         result = KernelComponentFactoryGfx9.get_hdim_tile_size_dict(dtype)
         if dtype in cls._DT_FP16_BF16:
-            # # add tile for qr_async_trload_v3 (bf16/fp16 V3 not ready)
-            # if (128, 128) in result.keys():
-            #     result[(128, 128)].append(
-            #         FmhaFwdTileSize(256, 32, 128, 128, 32, 128,  8, 1, 1,  8, 1, 1,  32, 32, 16,  32, 32, 16,  -1))  # fmt: skip
+            # add tile for qr_async_trload_v3
+            if (128, 128) in result.keys():
+                result[(128, 128)].append(
+                    FmhaFwdTileSize(256, 32, 128, 128, 32, 128,  8, 1, 1,  8, 1, 1,  32, 32, 16,  32, 32, 16,  -1))  # fmt: skip
             if (256, 256) in result.keys():
                 result[(256, 256)] = [FmhaFwdTileSize(128,  64,  32, 256,  32, 256,  4, 1, 1,  4, 1, 1,  32, 32, 16,  32, 32, 16,  -1)]  # fmt: skip
         elif dtype in cls._DT_MXFP8:
@@ -1134,11 +1134,12 @@ class KernelComponentFactoryGfx950(
                     pipelines.append(FmhaFwdPipeline("qr_async_trload", "row", "f", "f", "t", "t", logits, bias, lse, dropout, qscale, mask, skip, "t", sink))  # fmt: skip
                     pipelines.append(FmhaFwdPipeline("qr_async_trload", "row", "t", "t", "f", "f", logits, bias, lse, dropout, qscale, mask, skip, "t", sink))  # fmt: skip  # group mode spad
 
-            # # qr_async_trload_v3 bf16/fp16 not ready
-            # if (hdim, hdim_v) == (128, 128):
-            #     for logits, mask in itertools.product(["t", "f"], ["no", "causal"]):
-            #         pipelines.append(FmhaFwdPipeline("qr_async_trload_v3", "row", "t", "t", "f", "f",
-            #             F_logits=logits, F_bias="no", F_lse="f", F_dropout="f", F_qscale=qscale, F_mask=mask, F_skip="f", F_trload="t", F_sink="f"))  # fmt: skip
+            # qr_async_trload_v3 only supports hdim=hdim_v=128 for now
+            if (hdim, hdim_v) == (128, 128):
+                # qr_async_trload_v3 only supports (generic) causal mask
+                for logits, mask in itertools.product(["t", "f"], ["no", "causal"]):
+                    pipelines.append(FmhaFwdPipeline("qr_async_trload_v3", "row", "t", "t", "f", "f",
+                        F_logits=logits, F_bias="no", F_lse="f", F_dropout="f", F_qscale=qscale, F_mask=mask, F_skip="f", F_trload="t", F_sink="f"))  # fmt: skip
         elif dtype in cls._DT_FP8BF16:
             # qr_async_trload_v3 only supports (generic) causal mask
             for logits, qscale, mask, lse in itertools.product(

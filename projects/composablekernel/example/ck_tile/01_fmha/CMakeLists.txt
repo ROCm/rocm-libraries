@@ -33,6 +33,13 @@ if(NOT "fwd" IN_LIST FMHA_FWD_ENABLE_APIS)
   list(PREPEND FMHA_FWD_ENABLE_APIS "fwd")
 endif()
 
+# fnmatch-style filter (see generate.py --filter), applied identically to every enabled FWD API,
+# to restrict which kernel instances get generated/compiled. e.g. set to "*qr_async_trload_v3*"
+# to build/test only FmhaFwdV3Kernel (qr_async_trload_v3 pipeline) instances, skipping every
+# other fwd pipeline/API instance - handy for fast local iteration on a single kernel.
+set(FMHA_FWD_KERNEL_FILTER "" CACHE STRING
+  "fnmatch-style filter (see generate.py --filter) applied to every enabled FWD API's kernel instances. Empty means no filtering.")
+
 file(GLOB_RECURSE CODE_GEN_SCRIPTS CONFIGURE_DEPENDS
   ${CMAKE_CURRENT_LIST_DIR}/generate.py
   ${CMAKE_CURRENT_LIST_DIR}/codegen/*.py
@@ -58,11 +65,27 @@ set(FMHA_BWD_CODE_GEN_COMMON_ARGS
   # --filter fmha_bwd_dot...@fmha_bwd_convert...@fmha_bwd...
 )
 
-# Reduce building time by disabling instances that are not currently used in the gtests
-# TODO: Consider to use a special receipt for testing only, or even two receipts: a small subset of
-# instances for quick CI runs and a larger subset for scheduled runs (the tests skip tests when
-# there is no corresponding instance for parameters).
-if(BUILD_TESTING)
+if(FMHA_FWD_KERNEL_FILTER)
+  # apply the same user-supplied filter to every enabled API (generate.py expects one
+  # comma-separated filter entry per API in FMHA_FWD_ENABLE_APIS, in order). The
+  # "fwd_splitkv" API alone expects a "combine_filter@kernel_filter" composite (see
+  # fmha_fwd_splitkv.py write_blobs/list_blobs), so apply the filter to both halves.
+  set(FMHA_FWD_KERNEL_FILTER_LIST)
+  foreach(api ${FMHA_FWD_ENABLE_APIS})
+    if(api STREQUAL "fwd_splitkv")
+      list(APPEND FMHA_FWD_KERNEL_FILTER_LIST "${FMHA_FWD_KERNEL_FILTER}@${FMHA_FWD_KERNEL_FILTER}")
+    else()
+      list(APPEND FMHA_FWD_KERNEL_FILTER_LIST "${FMHA_FWD_KERNEL_FILTER}")
+    endif()
+  endforeach()
+  list(JOIN FMHA_FWD_KERNEL_FILTER_LIST , FMHA_FWD_KERNEL_FILTER_ARG)
+  list(APPEND FMHA_FWD_CODE_GEN_COMMON_ARGS --filter ${FMHA_FWD_KERNEL_FILTER_ARG})
+  message(STATUS "CK Tile FMHA FWD: restricting kernel generation with filter '${FMHA_FWD_KERNEL_FILTER}' (APIs: ${FMHA_FWD_ENABLE_APIS})")
+elseif(BUILD_TESTING)
+  # Reduce building time by disabling instances that are not currently used in the gtests
+  # TODO: Consider to use a special receipt for testing only, or even two receipts: a small subset of
+  # instances for quick CI runs and a larger subset for scheduled runs (the tests skip tests when
+  # there is no corresponding instance for parameters).
   # Filters are in the order of FMHA_FWD_KNOWN_APIS: fwd,fwd_splitkv_combine@fwd_splitkv,fwd_appendkv,pagedkv_prefill
   list(APPEND FMHA_FWD_CODE_GEN_COMMON_ARGS --filter *_nlogits*_nskip*,*@*_nlogits*_nbias*,*,*_nlogits*_nskip*_pagedkv*)
 endif()
