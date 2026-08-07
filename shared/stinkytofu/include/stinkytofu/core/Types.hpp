@@ -81,6 +81,7 @@ struct PassFeatureConfig {
         int dsReadDrainLatency = 0;
         int dsReadThrottleLatency = 0;
         int dsReadPerWmma = INT_MAX;
+        float tensorLoadLoopSpaceRatio = 0.0f;
     };
 
     LoopConfig loopConfig;

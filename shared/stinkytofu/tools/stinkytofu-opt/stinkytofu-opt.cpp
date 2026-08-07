@@ -179,6 +179,7 @@ std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
                 arg.starts_with("--ds-read-drain-latency=") ||
                 arg.starts_with("--ds-read-throttle-latency=") ||
                 arg.starts_with("--ds-read-per-wmma=") ||
+                arg.starts_with("--tensor-load-loop-space-ratio=") ||
                 arg.starts_with("--global-read-queue-depth=") ||
                 arg.starts_with("--global-read-drain-latency=") ||
                 arg.starts_with("--vgpr-msb-mode=") || arg == "--from-label" ||
@@ -509,6 +510,8 @@ int main(int argc, char** argv) {
             passFeatureConfig.dagFeatures.dsReadThrottleLatency = std::stoi(a.substr(27));
         } else if (a.starts_with("--ds-read-per-wmma=")) {
             passFeatureConfig.dagFeatures.dsReadPerWmma = std::stoi(a.substr(19));
+        } else if (a.starts_with("--tensor-load-loop-space-ratio=")) {
+            passFeatureConfig.dagFeatures.tensorLoadLoopSpaceRatio = std::stof(a.substr(31));
         } else if (a.starts_with("--global-read-queue-depth=")) {
             passFeatureConfig.dagFeatures.globalReadQueueDepth = std::stoi(a.substr(26));
         } else if (a.starts_with("--global-read-drain-latency=")) {

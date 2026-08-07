@@ -157,6 +157,8 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                 passFeatureConfig.dagFeatures.dsReadDrainLatency = moduleOptions.DsReadDrainLatency;
                 passFeatureConfig.dagFeatures.dsReadThrottleLatency =
                     moduleOptions.DsReadThrottleLatency;
+                passFeatureConfig.dagFeatures.tensorLoadLoopSpaceRatio =
+                    moduleOptions.TensorLoadLoopSpaceRatio;
                 passFeatureConfig.dagFeatures.globalReadQueueDepth =
                     moduleOptions.GlobalReadQueueDepth;
                 passFeatureConfig.dagFeatures.globalReadDrainLatency =
