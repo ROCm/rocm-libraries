@@ -1017,7 +1017,7 @@ namespace TensileLite
                     double value = 0.0;
                     if(activationAdditionalArgs.empty())
                     {
-                        value = getValueWithUpperLowerBoundFP<double>(2.0, -2.0);
+                        value = hostValidationUniformDouble(-2.0, 2.0);
                     }
                     else
                     {
@@ -2027,69 +2027,83 @@ namespace TensileLite
                 if(prop.dataType != problem.constants()[i].dataType)
                 {
                     prop.dataType = problem.constants()[i].dataType;
+                    auto assignGeneratedValue = [&]<typename T>() {
+                        T value{};
+                        if(!tryHostValidationInitialize(prop.dataType,
+                                                        prop.init,
+                                                        &value,
+                                                        TypeInfo<T>::Packing,
+                                                        prop.freeValue))
+                            throw std::invalid_argument(
+                                "TensileLite constant mode/type is not represented "
+                                "by host-validation.");
+                        prop.value = value;
+                    };
                     switch(prop.dataType)
                     {
                     case rocisa::DataType::Float:
-                        prop.value = getValue<float>(prop.init, prop.freeValue);
+                        assignGeneratedValue.template operator()<float>();
                         break;
                     case rocisa::DataType::Double:
-                        prop.value = getValue<double>(prop.init, prop.freeValue);
+                        assignGeneratedValue.template operator()<double>();
                         break;
                     case rocisa::DataType::Half:
-                        prop.value = getValue<Half>(prop.init, prop.freeValue);
+                        assignGeneratedValue.template operator()<Half>();
                         break;
                     case rocisa::DataType::Int32:
-                        prop.value = getValue<int32_t>(prop.init, prop.freeValue);
+                        assignGeneratedValue.template operator()<int32_t>();
                         break;
                     case rocisa::DataType::BFloat16:
-                        prop.value = getValue<BFloat16>(prop.init, prop.freeValue);
+                        assignGeneratedValue.template operator()<BFloat16>();
                         break;
                     case rocisa::DataType::Int8:
-                        prop.value = getValue<int8_t>(prop.init, prop.freeValue);
+                        assignGeneratedValue.template operator()<int8_t>();
                         break;
                     case rocisa::DataType::ComplexFloat:
-                        prop.value = getValue<std::complex<float>>(prop.init, prop.freeValue);
+                        assignGeneratedValue.template operator()<std::complex<float>>();
                         break;
                     case rocisa::DataType::ComplexDouble:
-                        prop.value = getValue<std::complex<double>>(prop.init, prop.freeValue);
+                        assignGeneratedValue.template operator()<std::complex<double>>();
                         break;
                     case rocisa::DataType::Int8x4:
-                        prop.value = getValue<Int8x4>(prop.init, prop.freeValue);
-                        break;
+                        throw std::invalid_argument(
+                            "Int8x4 constant initialization is unsupported.");
                     case rocisa::DataType::Float8:
-                        prop.value = getValue<Float8>(prop.init, prop.freeValue);
+                        assignGeneratedValue.template operator()<Float8>();
                         break;
                     case rocisa::DataType::BFloat8:
-                        prop.value = getValue<BFloat8>(prop.init, prop.freeValue);
+                        assignGeneratedValue.template operator()<BFloat8>();
                         break;
                     case rocisa::DataType::Float8_fnuz:
-                        prop.value = getValue<Float8_fnuz>(prop.init, prop.freeValue);
+                        assignGeneratedValue.template operator()<Float8_fnuz>();
                         break;
                     case rocisa::DataType::BFloat8_fnuz:
-                        prop.value = getValue<BFloat8_fnuz>(prop.init, prop.freeValue);
+                        assignGeneratedValue.template operator()<BFloat8_fnuz>();
                         break;
 #ifndef _WIN32
 #ifdef TENSILE_USE_FP6
                     case rocisa::DataType::Float6:
-                        prop.value = getValue<Float6x32>(prop.init, prop.freeValue);
+                        assignGeneratedValue.template operator()<Float6x32>();
                         break;
 #endif // #ifdef TENSILE_USE_FP6
 #ifdef TENSILE_USE_BF6
                     case rocisa::DataType::BFloat6:
-                        prop.value = getValue<BFloat6x32>(prop.init, prop.freeValue);
+                        assignGeneratedValue.template operator()<BFloat6x32>();
                         break;
 #endif // #ifdef TENSILE_USE_BF6
 #ifdef TENSILE_USE_FP4
                     case rocisa::DataType::Float4:
-                        prop.value = getValue<Float4x2>(prop.init, prop.freeValue);
+                        assignGeneratedValue.template operator()<Float4x2>();
                         break;
 #endif // #ifdef TENSILE_USE_FP4
 #endif // !_WIN32
                     case rocisa::DataType::E8:
-                        prop.value = getValue<E8>(prop.init, prop.freeValue);
+                        assignGeneratedValue.template operator()<E8>();
+                        break;
+                    case rocisa::DataType::Int64:
+                        assignGeneratedValue.template operator()<int64_t>();
                         break;
                     case rocisa::DataType::E5M3:
-                    case rocisa::DataType::Int64:
                     case rocisa::DataType::XFloat32:
                     case rocisa::DataType::Count:
                     case rocisa::DataType::Float8BFloat8:

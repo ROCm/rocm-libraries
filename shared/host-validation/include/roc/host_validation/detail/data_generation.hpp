@@ -3,10 +3,12 @@
 
 #pragma once
 
+#include <bit>
 #include <cmath>
 #include <complex>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <random>
 #include <roc/host_validation/detail/tensor_views.hpp>
 #include <span>
@@ -48,6 +50,7 @@ enum class GenerationPattern {
     Zero,
     Constant,
     UniformInteger,
+    AbsoluteUniformInteger,
     UniformReal,
     Normal,
     Sine,
@@ -58,6 +61,19 @@ enum class GenerationPattern {
     SerialDimension,
     Identity,
     CheckerboardUniformInteger,
+    TypeMaximum,
+    TypeLowest,
+    TypeDenormalMinimum,
+    TypeDenormalMaximum,
+    TypeNaN,
+    TypeInfinity,
+    TypeNegativeInfinity,
+    TypeNegativeZero,
+    UniformTypeRange,
+    RandomEncodedExponent,
+    RawConstant,
+    UniformRawInteger,
+    RawSerialDimension,
 };
 
 enum class LogicalIndexOrder {
@@ -71,6 +87,7 @@ struct GenerationPatternSpec {
     double parameter1 = 1.0;
     uint64_t stream = 0;
     size_t dimension = 0;
+    ScalarType sourceType = ScalarType::Count;
 };
 
 struct GenerationOptions {
@@ -124,9 +141,269 @@ inline double indexedUniformUnit(uint64_t seed, uint64_t stream, uint64_t index)
     return (static_cast<double>(mantissa) + 0.5) * inverseTwoTo53;
 }
 
+inline bool isRawGenerationPattern(GenerationPattern pattern) {
+    return pattern == GenerationPattern::RawConstant ||
+           pattern == GenerationPattern::UniformRawInteger ||
+           pattern == GenerationPattern::RawSerialDimension;
+}
+
+inline uint64_t rawGenerationValue(const GenerationPatternSpec& spec, uint64_t seed,
+                                   std::span<const size_t> indices, const Shape& shape,
+                                   size_t logicalIndex) {
+    switch (spec.pattern) {
+        case GenerationPattern::RawConstant:
+            return static_cast<uint64_t>(static_cast<int64_t>(spec.parameter0));
+        case GenerationPattern::UniformRawInteger:
+            return static_cast<uint64_t>(static_cast<int64_t>(indexedUniformInteger(
+                seed, spec.stream, logicalIndex, static_cast<int>(spec.parameter0),
+                static_cast<int>(spec.parameter1))));
+        case GenerationPattern::RawSerialDimension:
+            if (spec.dimension >= shape.rank())
+                throw std::out_of_range("Generation dimension exceeds tensor rank.");
+            return static_cast<uint64_t>(indices[spec.dimension]);
+        default:
+            throw std::invalid_argument(
+                "Requested generation pattern does not produce raw storage.");
+    }
+}
+
+inline ScalarType generationComponentType(ScalarType type) {
+    if (type == ScalarType::ComplexFloat32) return ScalarType::Float32;
+    if (type == ScalarType::ComplexFloat64) return ScalarType::Float64;
+    return type;
+}
+
+inline double typeMaximum(ScalarType requestedType) {
+    const ScalarType type = generationComponentType(requestedType);
+    switch (type) {
+        case ScalarType::Boolean:
+            return 1.0;
+        case ScalarType::UInt8:
+            return std::numeric_limits<uint8_t>::max();
+        case ScalarType::Int8:
+            return std::numeric_limits<int8_t>::max();
+        case ScalarType::UInt16:
+            return std::numeric_limits<uint16_t>::max();
+        case ScalarType::Int16:
+            return std::numeric_limits<int16_t>::max();
+        case ScalarType::UInt32:
+            return std::numeric_limits<uint32_t>::max();
+        case ScalarType::Int32:
+            return std::numeric_limits<int32_t>::max();
+        case ScalarType::Float16:
+            return decodeFloat16(0x7bffU);
+        case ScalarType::BFloat16:
+            return decodeBFloat16(0x7f7fU);
+        case ScalarType::Float32:
+            return std::numeric_limits<float>::max();
+        case ScalarType::Float64:
+            return std::numeric_limits<double>::max();
+        case ScalarType::Float4E2M1:
+        case ScalarType::Float6E2M3:
+        case ScalarType::Float6E3M2:
+        case ScalarType::Float8E4M3:
+        case ScalarType::Float8E5M2:
+        case ScalarType::Float8E4M3Fnuz:
+        case ScalarType::Float8E5M2Fnuz:
+        case ScalarType::E5M3: {
+            const BinaryFloatFormat format = binaryFloatFormat(type);
+            return decodeBinaryFloat(type, format.maximumPositiveFiniteRaw);
+        }
+        case ScalarType::Int4:
+            return 7.0;
+        case ScalarType::Int12:
+            return 2047.0;
+        case ScalarType::E8M0:
+            return decodeE8M0(0xfeU);
+        case ScalarType::UInt64:
+        case ScalarType::Int64:
+            throw std::invalid_argument(
+                "Type-derived generation does not represent 64-bit integer extrema through double.");
+        case ScalarType::ComplexFloat32:
+        case ScalarType::ComplexFloat64:
+        case ScalarType::Count:
+            break;
+    }
+    throw std::invalid_argument("Unsupported scalar type for maximum generation.");
+}
+
+inline double typeLowest(ScalarType requestedType) {
+    const ScalarType type = generationComponentType(requestedType);
+    switch (type) {
+        case ScalarType::Boolean:
+        case ScalarType::UInt8:
+        case ScalarType::UInt16:
+        case ScalarType::UInt32:
+        case ScalarType::UInt64:
+        case ScalarType::E8M0:
+        case ScalarType::E5M3:
+            return 0.0;
+        case ScalarType::Int8:
+            return std::numeric_limits<int8_t>::min();
+        case ScalarType::Int16:
+            return std::numeric_limits<int16_t>::min();
+        case ScalarType::Int32:
+            return std::numeric_limits<int32_t>::min();
+        case ScalarType::Int4:
+            return -8.0;
+        case ScalarType::Int12:
+            return -2048.0;
+        case ScalarType::Float16:
+        case ScalarType::BFloat16:
+        case ScalarType::Float32:
+        case ScalarType::Float64:
+        case ScalarType::Float4E2M1:
+        case ScalarType::Float6E2M3:
+        case ScalarType::Float6E3M2:
+        case ScalarType::Float8E4M3:
+        case ScalarType::Float8E5M2:
+        case ScalarType::Float8E4M3Fnuz:
+        case ScalarType::Float8E5M2Fnuz:
+            return -typeMaximum(type);
+        case ScalarType::Int64:
+            throw std::invalid_argument(
+                "Type-derived generation does not represent Int64 minimum through double.");
+        case ScalarType::ComplexFloat32:
+        case ScalarType::ComplexFloat64:
+        case ScalarType::Count:
+            break;
+    }
+    throw std::invalid_argument("Unsupported scalar type for lowest-value generation.");
+}
+
+inline double typeDenormalMinimum(ScalarType requestedType) {
+    const ScalarType type = generationComponentType(requestedType);
+    switch (type) {
+        case ScalarType::Float16:
+            return decodeFloat16(0x0001U);
+        case ScalarType::BFloat16:
+            return decodeBFloat16(0x0001U);
+        case ScalarType::Float32:
+            return std::numeric_limits<float>::denorm_min();
+        case ScalarType::Float64:
+            return std::numeric_limits<double>::denorm_min();
+        case ScalarType::Float4E2M1:
+        case ScalarType::Float6E2M3:
+        case ScalarType::Float6E3M2:
+        case ScalarType::Float8E4M3:
+        case ScalarType::Float8E5M2:
+        case ScalarType::Float8E4M3Fnuz:
+        case ScalarType::Float8E5M2Fnuz:
+        case ScalarType::E5M3:
+            return decodeBinaryFloat(type, 1U);
+        default:
+            throw std::invalid_argument(
+                "Requested scalar type has no denormal minimum.");
+    }
+}
+
+inline double typeDenormalMaximum(ScalarType requestedType) {
+    const ScalarType type = generationComponentType(requestedType);
+    switch (type) {
+        case ScalarType::Float16:
+            return decodeFloat16(0x03ffU);
+        case ScalarType::BFloat16:
+            return decodeBFloat16(0x007fU);
+        case ScalarType::Float32:
+            return std::bit_cast<float>(0x007fffffU);
+        case ScalarType::Float64:
+            return std::bit_cast<double>(0x000fffffffffffffULL);
+        case ScalarType::Float4E2M1:
+        case ScalarType::Float6E2M3:
+        case ScalarType::Float6E3M2:
+        case ScalarType::Float8E4M3:
+        case ScalarType::Float8E5M2:
+        case ScalarType::Float8E4M3Fnuz:
+        case ScalarType::Float8E5M2Fnuz:
+        case ScalarType::E5M3: {
+            const BinaryFloatFormat format = binaryFloatFormat(type);
+            return decodeBinaryFloat(type, (1U << format.mantissaBits) - 1U);
+        }
+        default:
+            throw std::invalid_argument(
+                "Requested scalar type has no denormal maximum.");
+    }
+}
+
+inline double typeNaN(ScalarType type) {
+    type = generationComponentType(type);
+    if (!scalarTypeInfo(type).supportsNaN)
+        throw std::invalid_argument("Requested scalar type has no NaN encoding.");
+    return std::numeric_limits<double>::quiet_NaN();
+}
+
+inline double typeInfinity(ScalarType type, bool negative) {
+    type = generationComponentType(type);
+    if (!scalarTypeInfo(type).supportsInfinity)
+        throw std::invalid_argument("Requested scalar type has no infinity encoding.");
+    return negative ? -std::numeric_limits<double>::infinity()
+                    : std::numeric_limits<double>::infinity();
+}
+
+inline double randomEncodedExponentValue(const GenerationPatternSpec& spec,
+                                         uint64_t seed,
+                                         size_t logicalIndex,
+                                         ScalarType destinationType) {
+    ScalarType type = spec.sourceType == ScalarType::Count
+                          ? generationComponentType(destinationType)
+                          : generationComponentType(spec.sourceType);
+    const ScalarTypeInfo& info = scalarTypeInfo(type);
+    if (info.exponentBits == 0)
+        throw std::invalid_argument(
+            "Random encoded-exponent generation requires a floating-point encoding.");
+    const int lowerExponent = static_cast<int>(spec.parameter0);
+    const int upperExponent = static_cast<int>(spec.parameter1);
+    if (lowerExponent > upperExponent)
+        throw std::invalid_argument(
+            "Random encoded-exponent lower bound exceeds upper bound.");
+
+    const uint64_t randomBits = counterRandom(seed, spec.stream, logicalIndex);
+    const int exponent = static_cast<int>(
+                             randomBits %
+                             static_cast<uint64_t>(
+                                 upperExponent - lowerExponent + 1)) +
+                         lowerExponent;
+    const uint64_t exponentMask =
+        ((uint64_t{1} << info.exponentBits) - 1U) << info.mantissaBits;
+    const uint64_t encoded =
+        (randomBits & ~exponentMask) |
+        ((static_cast<uint64_t>(exponent + info.exponentBias)
+          << info.mantissaBits) &
+         exponentMask);
+    const uint64_t storageMask =
+        info.storageBits == 64 ? std::numeric_limits<uint64_t>::max()
+                               : ((uint64_t{1} << info.storageBits) - 1U);
+    const uint64_t raw = encoded & storageMask;
+
+    switch (type) {
+        case ScalarType::Float64:
+            return std::bit_cast<double>(raw);
+        case ScalarType::Float32:
+            return std::bit_cast<float>(static_cast<uint32_t>(raw));
+        case ScalarType::Float16:
+            return decodeFloat16(static_cast<uint16_t>(raw));
+        case ScalarType::BFloat16:
+            return decodeBFloat16(static_cast<uint16_t>(raw));
+        case ScalarType::Float4E2M1:
+        case ScalarType::Float6E2M3:
+        case ScalarType::Float6E3M2:
+        case ScalarType::Float8E4M3:
+        case ScalarType::Float8E5M2:
+        case ScalarType::Float8E4M3Fnuz:
+        case ScalarType::Float8E5M2Fnuz:
+        case ScalarType::E5M3:
+            return decodeBinaryFloat(type, static_cast<uint32_t>(raw));
+        case ScalarType::E8M0:
+            return decodeE8M0(static_cast<uint8_t>(raw));
+        default:
+            throw std::invalid_argument(
+                "Random encoded-exponent source type is unsupported.");
+    }
+}
+
 inline double generationValue(const GenerationPatternSpec& spec, uint64_t seed,
                               std::span<const size_t> indices, const Shape& shape,
-                              size_t logicalIndex) {
+                              size_t logicalIndex, ScalarType destinationType) {
     switch (spec.pattern) {
         case GenerationPattern::Zero:
             return 0.0;
@@ -136,7 +413,14 @@ inline double generationValue(const GenerationPatternSpec& spec, uint64_t seed,
             return static_cast<double>(indexedUniformInteger(seed, spec.stream, logicalIndex,
                                                              static_cast<int>(spec.parameter0),
                                                              static_cast<int>(spec.parameter1)));
+        case GenerationPattern::AbsoluteUniformInteger:
+            return std::abs(static_cast<double>(indexedUniformInteger(
+                seed, spec.stream, logicalIndex, static_cast<int>(spec.parameter0),
+                static_cast<int>(spec.parameter1))));
         case GenerationPattern::UniformReal: {
+            if (spec.parameter0 > spec.parameter1)
+                throw std::invalid_argument(
+                    "Uniform-real lower bound exceeds upper bound.");
             const double unit = indexedUniformUnit(seed, spec.stream, logicalIndex);
             return spec.parameter0 + unit * (spec.parameter1 - spec.parameter0);
         }
@@ -174,6 +458,35 @@ inline double generationValue(const GenerationPatternSpec& spec, uint64_t seed,
             for (const size_t index : indices) parity ^= index;
             return (parity & 1) == 0 ? -value : value;
         }
+        case GenerationPattern::TypeMaximum:
+            return typeMaximum(destinationType);
+        case GenerationPattern::TypeLowest:
+            return typeLowest(destinationType);
+        case GenerationPattern::TypeDenormalMinimum:
+            return typeDenormalMinimum(destinationType);
+        case GenerationPattern::TypeDenormalMaximum:
+            return typeDenormalMaximum(destinationType);
+        case GenerationPattern::TypeNaN:
+            return typeNaN(destinationType);
+        case GenerationPattern::TypeInfinity:
+            return typeInfinity(destinationType, false);
+        case GenerationPattern::TypeNegativeInfinity:
+            return typeInfinity(destinationType, true);
+        case GenerationPattern::TypeNegativeZero:
+            return -0.0;
+        case GenerationPattern::UniformTypeRange: {
+            const double maximum = typeMaximum(destinationType);
+            const double unit = indexedUniformUnit(seed, spec.stream, logicalIndex);
+            return maximum * (2.0 * unit - 1.0);
+        }
+        case GenerationPattern::RandomEncodedExponent:
+            return randomEncodedExponentValue(
+                spec, seed, logicalIndex, destinationType);
+        case GenerationPattern::RawConstant:
+        case GenerationPattern::UniformRawInteger:
+        case GenerationPattern::RawSerialDimension:
+            throw std::invalid_argument(
+                "Raw generation requires encoded storage output.");
     }
     throw std::invalid_argument("Unsupported GenerationPattern.");
 }
@@ -203,14 +516,50 @@ void generate(MutableTensorView destination, Generator&& generator) {
 inline GenerationRunInfo generate(MutableTensorView destination, const GenerationOptions& options) {
     const bool complexOutput =
         scalarTypeInfo(destination.type()).category == ScalarCategory::Complex;
+    if (detail::isRawGenerationPattern(options.real.pattern)) {
+        if (complexOutput)
+            throw std::invalid_argument(
+                "Raw generation does not support complex output.");
+        const uint16_t bits = scalarTypeInfo(destination.type()).storageBits;
+        if (bits > 64)
+            throw std::invalid_argument(
+                "Raw generation supports scalar encodings up to 64 bits.");
+
+        detail::forEachIndex(destination.shape(),
+                             [&](std::span<const size_t> indices, size_t) {
+            const ptrdiff_t elementOffset =
+                destination.layout().elementOffset(indices);
+            const size_t logicalIndex = detail::logicalLinearIndex(
+                indices, destination.shape(), options.indexOrder);
+            const uint64_t raw = detail::rawGenerationValue(
+                options.real, options.seed, indices, destination.shape(), logicalIndex);
+            const uint64_t offsetBits =
+                detail::bitOffset(destination.type(), elementOffset);
+            if (bits <= 32) {
+                detail::writePackedBits(destination.storage(),
+                                        offsetBits,
+                                        bits,
+                                        static_cast<uint32_t>(raw));
+            } else {
+                detail::writeNative<uint64_t>(
+                    destination.storage(),
+                    static_cast<size_t>(offsetBits / 8),
+                    raw);
+            }
+        });
+        return {.elementsGenerated = destination.shape().elementCount()};
+    }
+
     detail::forEachIndex(destination.shape(), [&](std::span<const size_t> indices, size_t) {
         const size_t logicalIndex =
             detail::logicalLinearIndex(indices, destination.shape(), options.indexOrder);
         const double real = detail::generationValue(options.real, options.seed, indices,
-                                                    destination.shape(), logicalIndex);
+                                                    destination.shape(), logicalIndex,
+                                                    destination.type());
         if (complexOutput) {
             const double imaginary = detail::generationValue(
-                options.imaginary, options.seed, indices, destination.shape(), logicalIndex);
+                options.imaginary, options.seed, indices, destination.shape(), logicalIndex,
+                destination.type());
             destination.storeFrom(indices, std::complex<double>(real, imaginary));
         } else {
             destination.storeFrom(indices, real);

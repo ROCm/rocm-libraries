@@ -418,6 +418,7 @@ NB_MODULE(_roc_host_validation, module) {
         .value("Zero", GenerationPattern::Zero)
         .value("Constant", GenerationPattern::Constant)
         .value("UniformInteger", GenerationPattern::UniformInteger)
+        .value("AbsoluteUniformInteger", GenerationPattern::AbsoluteUniformInteger)
         .value("UniformReal", GenerationPattern::UniformReal)
         .value("Normal", GenerationPattern::Normal)
         .value("Sine", GenerationPattern::Sine)
@@ -427,7 +428,20 @@ NB_MODULE(_roc_host_validation, module) {
         .value("SerialIndex", GenerationPattern::SerialIndex)
         .value("SerialDimension", GenerationPattern::SerialDimension)
         .value("Identity", GenerationPattern::Identity)
-        .value("CheckerboardUniformInteger", GenerationPattern::CheckerboardUniformInteger);
+        .value("CheckerboardUniformInteger", GenerationPattern::CheckerboardUniformInteger)
+        .value("TypeMaximum", GenerationPattern::TypeMaximum)
+        .value("TypeLowest", GenerationPattern::TypeLowest)
+        .value("TypeDenormalMinimum", GenerationPattern::TypeDenormalMinimum)
+        .value("TypeDenormalMaximum", GenerationPattern::TypeDenormalMaximum)
+        .value("TypeNaN", GenerationPattern::TypeNaN)
+        .value("TypeInfinity", GenerationPattern::TypeInfinity)
+        .value("TypeNegativeInfinity", GenerationPattern::TypeNegativeInfinity)
+        .value("TypeNegativeZero", GenerationPattern::TypeNegativeZero)
+        .value("UniformTypeRange", GenerationPattern::UniformTypeRange)
+        .value("RandomEncodedExponent", GenerationPattern::RandomEncodedExponent)
+        .value("RawConstant", GenerationPattern::RawConstant)
+        .value("UniformRawInteger", GenerationPattern::UniformRawInteger)
+        .value("RawSerialDimension", GenerationPattern::RawSerialDimension);
 
     nb::enum_<LogicalIndexOrder>(module, "LogicalIndexOrder")
         .value("FirstDimensionFastest", LogicalIndexOrder::FirstDimensionFastest)
@@ -548,7 +562,8 @@ NB_MODULE(_roc_host_validation, module) {
         .def_rw("parameter0", &GenerationPatternSpec::parameter0)
         .def_rw("parameter1", &GenerationPatternSpec::parameter1)
         .def_rw("stream", &GenerationPatternSpec::stream)
-        .def_rw("dimension", &GenerationPatternSpec::dimension);
+        .def_rw("dimension", &GenerationPatternSpec::dimension)
+        .def_rw("source_type", &GenerationPatternSpec::sourceType);
 
     nb::class_<GenerationOptions>(module, "GenerationOptions")
         .def(nb::init<>())
