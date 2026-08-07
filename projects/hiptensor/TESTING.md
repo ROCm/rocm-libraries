@@ -1,9 +1,9 @@
 # hipTensor Testing Strategy
 
-**Status:** Draft
-**Owner:** Estevan Vedovelli (@evedovelli)
-**Technical Lead:** TBD
-**Last Updated:** 2026-08-06
+- **Status:** Draft
+- **Owner:** Estevan Vedovelli (@evedovelli)
+- **Technical Lead:** TBD
+- **Last Updated:** 2026-08-06
 
 This document describes how hipTensor is tested today, which signals actually gate a merge, and
 where the gaps are. It follows the ROCm-wide TESTING.md template.
@@ -183,14 +183,6 @@ Tiers are applied to the installed tree only (`<prefix>/bin/hiptensor/CTestTestf
 - No per-architecture performance baseline stored in a queryable format (SQLite, dashboard, etc.).
 - No automated regression threshold enforced in CI.
 - Trinary contraction and unary-ops variants have no bench configs.
-
----
-
-## Why We Test This Way
-
-hipTensor instantiates all GPU kernels from Composable Kernel (CK) templates and does not own kernel source. This has two practical consequences: nearly all meaningful behavior is only observable on real hardware, and hardware-independent logic (logging, YAML parsing, option handling, utility math) is the only practical unit-test surface. Confidence comes overwhelmingly from integration tests.
-
-Kernel selection (ActorCritic/DefaultPatient) and workspace sizing also require a live device — both call `hipGetDeviceProperties` through CK — so they cannot be unit-tested in isolation. The test tier system (`quick` → `full`) is a sampling strategy over a large combinatorial space (6 ranks × multiple types × multiple algorithms × layouts); exhaustive coverage is not achievable.
 
 ---
 
