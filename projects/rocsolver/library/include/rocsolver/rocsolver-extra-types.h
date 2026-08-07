@@ -219,6 +219,7 @@ typedef enum rocsolver_option_
     rocsolver_option_2stage_switch_size = 505, /**< Dimension to switch from 1-stage to 2-stage. */
     rocsolver_option_dc_leaf_size = 506, /**< Minimum size for divide-and-conquer recursion. */
     rocsolver_option_svd_qr_ratio = 507, /**< Ratio of max(m,n) / min(m,n) above which to do initial QR or LQ in SVD. */
+    rocsolver_option_svd_values_qr_ratio = 508, /**< Ratio of max(m,n) / min(m,n) above which to do initial QR or LQ when computing singular values only. */
 } rocsolver_option;
 
 #endif /* ROCSOLVER_EXTRA_TYPES_H */
