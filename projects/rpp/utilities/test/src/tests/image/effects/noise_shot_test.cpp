@@ -8,21 +8,21 @@
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/tensor_setup.hpp"
-#include "reference/shot_noise_ref.hpp"
+#include "reference/noise_shot_ref.hpp"
 
 using namespace rpptest;
 
 namespace {
 
-// shot_noise's public API doc only pins down the shotNoiseFactor = 0 corner (see
-// shot_noise_ref.hpp): the exact Poisson photon-count scaling for factor > 0 is not derivable
+// noise_shot's public API doc only pins down the shotNoiseFactor = 0 corner (see
+// noise_shot_ref.hpp): the exact Poisson photon-count scaling for factor > 0 is not derivable
 // from the header comment alone, so it is deliberately left as an open question rather than
 // guessed. The general case is covered here only by cheap runtime invariants -- a coarse
 // valid-storable-range check and a seed-determinism check -- not a golden comparison.
 constexpr Rpp32f kNontrivialFactor = 0.5f;
 
 template <typename T>
-void run_shot_noise_identity(const TestConfig& cfg) {
+void run_noise_shot_identity(const TestConfig& cfg) {
     const TensorShape shape{cfg.size.n, static_cast<Rpp32u>(channels_of(cfg.layout)), cfg.size.h,
                             cfg.size.w};
     RpptDesc desc = make_descriptor(shape, cfg.dtype, cfg.layout);  // RPP takes a non-const ptr
@@ -40,7 +40,7 @@ void run_shot_noise_identity(const TestConfig& cfg) {
     std::vector<T> input(count), golden(count), actual(count);
     fill_input<T>(input.data(), count, cfg.dtype);
     golden = input;
-    shot_noise_identity_reference<T>(input.data(), golden.data(), desc, roi.data(), XYWH);
+    noise_shot_identity_reference<T>(input.data(), golden.data(), desc, roi.data(), XYWH);
 
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
     src.write(input.data(), bytes);
@@ -61,7 +61,7 @@ void run_shot_noise_identity(const TestConfig& cfg) {
 // is a legally storable value for its dtype -- catches gross corruption (NaN, overflow, wrong
 // range), not distribution correctness (that formula is the open question noted above).
 template <typename T>
-void run_shot_noise_valid_range(const TestConfig& cfg) {
+void run_noise_shot_valid_range(const TestConfig& cfg) {
     const TensorShape shape{cfg.size.n, static_cast<Rpp32u>(channels_of(cfg.layout)), cfg.size.h,
                             cfg.size.w};
     RpptDesc desc = make_descriptor(shape, cfg.dtype, cfg.layout);
@@ -99,16 +99,16 @@ void run_shot_noise_valid_range(const TestConfig& cfg) {
                         const double q = quantize_stored(v, cfg.dtype);
                         if (!std::isfinite(v) || std::fabs(v - q) > 1e-6) ok = false;
                     });
-    EXPECT_TRUE(ok) << "shot_noise produced a value outside the storable range for dtype "
+    EXPECT_TRUE(ok) << "noise_shot produced a value outside the storable range for dtype "
                     << dtype_name(cfg.dtype);
 }
 
 // A real per-call seed should make the op reproducible for a fixed seed and different across
 // seeds -- contrast with the rain/fog RNGs seeded from std::random_device, which cannot satisfy
-// either half of this (see the rain-nondeterministic-seed / fog-nondeterministic-and-baked-mask
-// tickets). shot_noise takes an explicit Rpp32u seed, so it is expected to behave like this.
+// either half of this. noise_shot takes an explicit Rpp32u seed, so it is expected to behave like
+// this.
 template <typename T>
-void run_shot_noise_seed_invariant(const TestConfig& cfg) {
+void run_noise_shot_seed_invariant(const TestConfig& cfg) {
     const TensorShape shape{cfg.size.n, static_cast<Rpp32u>(channels_of(cfg.layout)), cfg.size.h,
                             cfg.size.w};
     RpptDesc desc = make_descriptor(shape, cfg.dtype, cfg.layout);
@@ -150,92 +150,72 @@ void run_shot_noise_seed_invariant(const TestConfig& cfg) {
         << "different seeds produced bit-identical output";
 }
 
+// The HOST Poisson sampler's rejection-loop threshold overflows to +inf for the lambda an ordinary
+// 8-bit pixel produces at kNontrivialFactor, so the loop does not reliably terminate -- observed
+// run times from several seconds to over a minute for a single tiny image, growing without bound as
+// pixel values increase. The RNG-active intents skip HOST rather than being left red/hanging, so
+// the suite stays safe to run; HIP uses a different (unaffected) algorithm.
+constexpr char kHostPoissonSkip[] =
+    "shot_noise HOST Poisson sampler's rejection threshold overflows to +inf for ordinary pixel "
+    "values at this factor, making the loop's runtime unbounded in practice";
+
 }  // namespace
 
 // Full names:
-// Image_Effects/ShotNoiseTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>
-// Image_Effects_ValidRange/ShotNoiseValidRangeTest.ValidRangeInvariant/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>
-// Image_Effects_Seed/ShotNoiseSeedTest.SeedInvariant/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>
+// Image_Effects/NoiseShotTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>
+// Image_Effects/NoiseShotTest.ValidRangeInvariant/<same>
+// Image_Effects/NoiseShotTest.SeedInvariant/<same>
 //
-// Each of the three checks uses its OWN fixture class (rather than sharing one across all three
-// TEST_P bodies) so each INSTANTIATE_TEST_SUITE_P only ever instantiates its own test: a shared
-// fixture would cross-instantiate every body against every param set -- in particular it would run
-// SeedInvariant (which is hardcoded to Rpp8u) against Correctness's full dtype grid, including F16,
-// a dtype/buffer-size mismatch that corrupts the heap. Self-inflicted test bug, not a kernel defect.
-class ShotNoiseTest : public ::testing::TestWithParam<TestConfig> {};
+// One fixture, one instantiation. GTest cross-instantiates every TEST_P body of a fixture against
+// the whole param set, so the grid below is the union of what the three intents cover and each body
+// skips the points outside its own slice. The narrower slices are deliberate: SeedInvariant runs
+// three full kernel invocations per case, and ValidRangeInvariant's storable-range notion is
+// checked on one integer and one float dtype rather than all four.
+class NoiseShotTest : public ::testing::TestWithParam<TestConfig> {};
 
-TEST_P(ShotNoiseTest, Correctness) {
+TEST_P(NoiseShotTest, Correctness) {
     const TestConfig& cfg = GetParam();
     switch (cfg.dtype) {
         case DType::U8:
-            run_shot_noise_identity<Rpp8u>(cfg);
+            run_noise_shot_identity<Rpp8u>(cfg);
             break;
         case DType::F16:
-            run_shot_noise_identity<Rpp16f>(cfg);
+            run_noise_shot_identity<Rpp16f>(cfg);
             break;
         case DType::F32:
-            run_shot_noise_identity<Rpp32f>(cfg);
+            run_noise_shot_identity<Rpp32f>(cfg);
             break;
         case DType::I8:
-            run_shot_noise_identity<Rpp8s>(cfg);
+            run_noise_shot_identity<Rpp8s>(cfg);
             break;
         default:
-            FAIL() << "unsupported dtype for shot_noise";
+            FAIL() << "unsupported dtype for noise_shot";
     }
 }
 
-INSTANTIATE_TEST_SUITE_P(Image_Effects, ShotNoiseTest,
+TEST_P(NoiseShotTest, ValidRangeInvariant) {
+    const TestConfig& cfg = GetParam();
+    if (cfg.layout == Layout::PLN3 || (cfg.dtype != DType::U8 && cfg.dtype != DType::F32))
+        GTEST_SKIP() << "ValidRangeInvariant covers U8/F32 on PKD3/PLN1";
+    if (cfg.backend == RPP_HOST_BACKEND) GTEST_SKIP() << kHostPoissonSkip;
+    if (cfg.dtype == DType::U8)
+        run_noise_shot_valid_range<Rpp8u>(cfg);
+    else
+        run_noise_shot_valid_range<Rpp32f>(cfg);
+}
+
+TEST_P(NoiseShotTest, SeedInvariant) {
+    const TestConfig& cfg = GetParam();
+    if (cfg.dtype != DType::U8 || cfg.layout != Layout::PKD3 || cfg.roi != Roi::Full)
+        GTEST_SKIP() << "SeedInvariant covers the U8 PKD3 FullRoi point";
+    if (cfg.backend == RPP_HOST_BACKEND) GTEST_SKIP() << kHostPoissonSkip;
+    run_noise_shot_seed_invariant<Rpp8u>(cfg);
+}
+
+INSTANTIATE_TEST_SUITE_P(Image_Effects, NoiseShotTest,
                          ::testing::ValuesIn(make_configs({DType::U8, DType::F16, DType::F32,
                                                            DType::I8},
                                                           {Layout::PKD3, Layout::PLN3,
                                                            Layout::PLN1},
                                                           {Roi::Full, Roi::Partial})),
-                         config_param_name);
-
-class ShotNoiseValidRangeTest : public ::testing::TestWithParam<TestConfig> {};
-
-TEST_P(ShotNoiseValidRangeTest, ValidRangeInvariant) {
-    const TestConfig& cfg = GetParam();
-    // The HOST Poisson sampler's rejection-loop threshold overflows to +inf for lambda values an
-    // ordinary 8-bit pixel produces at this factor, so the loop does not reliably terminate --
-    // observed run times from several seconds to over a minute for a single tiny image, growing
-    // without bound as pixel values increase. Skipped rather than left red/hanging so the suite
-    // stays safe to run; HIP uses a different (unaffected) algorithm and is not skipped.
-    if (cfg.backend == RPP_HOST_BACKEND)
-        GTEST_SKIP() << "shot_noise HOST Poisson sampler's rejection threshold overflows to +inf "
-                        "for ordinary pixel values at this factor, making the loop's runtime "
-                        "unbounded in practice";
-    switch (cfg.dtype) {
-        case DType::U8:
-            run_shot_noise_valid_range<Rpp8u>(cfg);
-            break;
-        case DType::F32:
-            run_shot_noise_valid_range<Rpp32f>(cfg);
-            break;
-        default:
-            FAIL() << "unsupported dtype for shot_noise ValidRangeInvariant slice";
-    }
-}
-
-INSTANTIATE_TEST_SUITE_P(Image_Effects_ValidRange, ShotNoiseValidRangeTest,
-                         ::testing::ValuesIn(make_configs({DType::U8, DType::F32},
-                                                          {Layout::PKD3, Layout::PLN1},
-                                                          {Roi::Full, Roi::Partial})),
-                         config_param_name);
-
-class ShotNoiseSeedTest : public ::testing::TestWithParam<TestConfig> {};
-
-TEST_P(ShotNoiseSeedTest, SeedInvariant) {
-    const TestConfig& cfg = GetParam();
-    // Same HOST Poisson-sampler hang risk as ValidRangeInvariant above -- skip HOST, keep HIP.
-    if (cfg.backend == RPP_HOST_BACKEND)
-        GTEST_SKIP() << "shot_noise HOST Poisson sampler's rejection threshold overflows to +inf "
-                        "for ordinary pixel values at this factor, making the loop's runtime "
-                        "unbounded in practice";
-    run_shot_noise_seed_invariant<Rpp8u>(cfg);
-}
-
-INSTANTIATE_TEST_SUITE_P(Image_Effects_Seed, ShotNoiseSeedTest,
-                         ::testing::ValuesIn(make_configs({DType::U8}, {Layout::PKD3},
-                                                          {Roi::Full})),
                          config_param_name);

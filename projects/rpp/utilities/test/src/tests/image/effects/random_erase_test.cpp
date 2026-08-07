@@ -84,7 +84,7 @@ void run_random_erase(const TestConfig& cfg) {
 //
 // There is no seed parameter anywhere in this API: box placement and noiseBuffer contents are both
 // supplied by the caller, so the golden is fully bit-exact and deterministic (unlike jitter /
-// shot_noise, which sample their own RNG state internally).
+// noise_shot, which sample their own RNG state internally).
 class RandomEraseTest : public ::testing::TestWithParam<TestConfig> {};
 
 TEST_P(RandomEraseTest, Correctness) {
