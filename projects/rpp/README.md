@@ -3,10 +3,6 @@
 
 <p align="center"><img width="70%" src="docs/data/AMD_RPP_logo.png" /></p>
 
-
-> [!NOTE]
-> The published documentation is available at [ROCm Performance Primitives (RPP)](https://rocm.docs.amd.com/projects/rpp/en/latest/index.html) in an organized, easy-to-read format, with search and a table of contents. The documentation source files reside in the `docs` folder of this repository. As with all ROCm projects, the documentation is open source. For more information on contributing to the documentation, see [Contribute to ROCm documentation](https://rocm.docs.amd.com/en/latest/contribute/contributing.html).
-
 AMD ROCm Performance Primitives (RPP) library is a comprehensive, high-performance computer
 vision library for AMD processors that have `HIP`, or `CPU` backends.
 
@@ -254,9 +250,9 @@ Spectrogram functionality output represented as an image:
 
 ### Operating Systems
 * Linux
-  * Ubuntu - `22.04+`
-  * RedHat - `8` / `9`
-  * SLES - `15 SP7`
+
+>[!NOTE]
+> * ROCm supported distributions
 
 
 ### Hardware
@@ -265,20 +261,12 @@ Spectrogram functionality output represented as an image:
 
 > [!IMPORTANT]
 > * [ROCm-supported hardware required for HIP backend](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html)
-> * `gfx908` or higher GPU required
 
 ### Dependencies
-* AMD Clang++ compiler (C++17 or higher) - installed with ROCm
 * CMake Version `3.10` or later
+* AMD Clang++ compiler (C++17 or higher) - installed with ROCm
 * OpenMP - installed with ROCm llvm
 * Half - installed with ROCm
-* On Ubuntu 22.04 - Additional package required: libstdc++-12-dev
->  ```shell
->  sudo apt install libstdc++-12-dev
->  ```
-
->[!NOTE]
-> * All package installs are shown with the `apt` package manager. Use the appropriate package manager for your operating system.
 
 ## Installation instructions
 
@@ -392,15 +380,7 @@ cmake ${ROCM_PATH}/share/rpp/test/
 ctest -VV
 ```
 > [!NOTE]
-> * **Ubuntu**: Install Nifti-Imaging to run all tests
-> ```
-> git clone https://github.com/NIFTI-Imaging/nifti_clib.git
-> cd nifti_clib
-> git reset --hard 84e323cc3cbb749b6a3eeef861894e444cf7d788
-> mkdir build && cd build && cmake ..
-> sudo make -j$nproc install
-> ```
-> * **SLES/RHEL**: Install [prerequisites](utilities/test_suite#prerequisites) to run all tests
+> Install test [prerequisites](utilities/test_suite#prerequisites) to run all tests
 
 ## Test Functionalities
 
