@@ -566,6 +566,129 @@ void testGenerationAndComparison() {
                 runtimeComparison.reportedMismatches[0].index == 5,
             "Runtime tensor generation/comparison mismatch.");
 }
+
+void testComparisonProgram() {
+    using namespace roc::host_validation;
+
+    const std::array<float, 8> expectedStorage{
+        1.0f, 2.0f, -99.0f, 3.0f, 4.0f, -99.0f, 5.0f, 6.0f};
+    auto observedStorage = expectedStorage;
+    observedStorage[4] += 0.5f;
+    observedStorage[6] += 1.0f;
+    const Layout layout(Shape{2, 3}, {1, 3});
+
+    ComparisonOptions selected;
+    selected.selection.indexOrder =
+        ComparisonIndexOrder::FirstDimensionFastest;
+    selected.selection.stride = 2;
+    const auto selectedResult =
+        compare(std::span<const float>(observedStorage),
+                layout,
+                std::span<const float>(expectedStorage),
+                layout,
+                selected);
+    require(selectedResult.compared == 3 && selectedResult.mismatches == 1,
+            "Selected comparison visited the wrong logical elements.");
+    require(selectedResult.reportedMismatches[0].index == 4 &&
+                selectedResult.reportedMismatches[0].coordinates ==
+                    std::vector<size_t>({0, 2}) &&
+                selectedResult.reportedMismatches[0].observedOffset == 6,
+            "Selected comparison reported the wrong logical location.");
+
+    const std::array<double, 3> expected{3.0, 4.0, 0.0};
+    const std::array<double, 3> observed{0.0, 4.0, 3.0};
+    ComparisonOptions metrics;
+    metrics.pointwise = false;
+    metrics.relativeFrobeniusTolerance = 0.9;
+    metrics.computeUlp = true;
+    metrics.ulpType = ScalarType::Float64;
+    const auto metricResult =
+        compare(std::span<const double>(observed),
+                std::span<const double>(expected),
+                metrics);
+    require(std::abs(metricResult.frobeniusExpected - 5.0) < 1e-12 &&
+                std::abs(metricResult.frobeniusObserved - 5.0) < 1e-12 &&
+                std::abs(metricResult.frobeniusDifference -
+                         std::sqrt(18.0)) <
+                    1e-12 &&
+                std::abs(metricResult.relativeFrobeniusError -
+                         std::sqrt(18.0) / 5.0) <
+                    1e-12 &&
+                metricResult.frobeniusPassed,
+            "Comparison Frobenius evidence is incorrect.");
+
+    const double oneUlp = std::ldexp(1.0, -52);
+    const std::array<double, 1> ulpObserved{1.0 + oneUlp};
+    const std::array<double, 1> ulpExpected{1.0};
+    ComparisonOptions ulp;
+    ulp.computeUlp = true;
+    ulp.ulpType = ScalarType::Float64;
+    ulp.maximumUlpTolerance = 1.0;
+    const auto ulpResult =
+        compare(std::span<const double>(ulpObserved),
+                std::span<const double>(ulpExpected),
+                ulp);
+    require(ulpResult.maximumUlp == 1.0 && ulpResult.averageUlp == 1.0 &&
+                ulpResult.ulpPassed,
+            "Comparison ULP evidence is incorrect.");
+    require(encodedUlpDistance(
+                0.0,
+                static_cast<double>(std::numeric_limits<float>::denorm_min()),
+                ScalarType::Float32) == 1.0,
+            "Encoded ULP distance mishandled the F32 zero/subnormal boundary.");
+    require(encodedUlpDistance(1.0, 1.5, ScalarType::Float4E2M1) == 1.0,
+            "Encoded ULP distance mishandled a packed scalar sign width.");
+
+    const std::array<std::complex<double>, 2> complexExpected{
+        std::complex<double>(
+            std::numeric_limits<double>::infinity(), 2.0),
+        std::complex<double>(
+            std::numeric_limits<double>::quiet_NaN(), 4.0)};
+    const auto complexObserved = complexExpected;
+    ComparisonOptions nonFinite;
+    nonFinite.equalNaNs = true;
+    const auto nonFiniteResult =
+        compare(std::span<const std::complex<double>>(complexObserved),
+                std::span<const std::complex<double>>(complexExpected),
+                nonFinite);
+    require(nonFiniteResult.passed() &&
+                nonFiniteResult.matchedInfinities == 1 &&
+                nonFiniteResult.matchedNaNs == 1,
+            "Complex non-finite comparison policy is incorrect.");
+
+    const std::array<double, 4> absoluteCandidates{
+        1e-6, 1e-5, 1e-4, 1e-3};
+    const std::array<double, 1> relativeCandidates{0.0};
+    const std::array<double, 1> closeObserved{1.00009};
+    const std::array<double, 1> closeExpected{1.0};
+    const auto tolerance = findAllCloseTolerance(
+        std::span<const double>(closeObserved),
+        Layout::contiguous(Shape{1}),
+        std::span<const double>(closeExpected),
+        Layout::contiguous(Shape{1}),
+        std::span<const double>(absoluteCandidates),
+        std::span<const double>(relativeCandidates));
+    require(tolerance && tolerance->absolute == 1e-4 &&
+                tolerance->relative == 0.0,
+            "Allclose tolerance search selected the wrong candidate.");
+
+    std::array<float, 5> guarded{
+        std::numeric_limits<float>::infinity(),
+        std::numeric_limits<float>::infinity(),
+        std::numeric_limits<float>::infinity(),
+        std::numeric_limits<float>::infinity(),
+        std::numeric_limits<float>::infinity()};
+    TensorView guardedView = TensorView::fromNative<float>(
+        Layout(Shape{2, 2}, {1, 3}), std::span<const float>(guarded));
+    require(checkUnusedTensorStorage(guardedView, guarded.size()).passed(),
+            "Unwritten tensor padding sentinel was rejected.");
+    guarded[2] = 0.0f;
+    const auto sentinel =
+        checkUnusedTensorStorage(guardedView, guarded.size());
+    require(!sentinel.passed() && sentinel.mismatches == 1 &&
+                sentinel.reportedMismatches[0].index == 2,
+            "Written tensor padding was not detected.");
+}
 }  // namespace
 
 int main() {
@@ -580,5 +703,6 @@ int main() {
     testActivations();
     testStridedAndOffsetViews();
     testGenerationAndComparison();
+    testComparisonProgram();
     return 0;
 }
