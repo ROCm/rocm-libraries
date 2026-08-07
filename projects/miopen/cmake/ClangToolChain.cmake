@@ -207,18 +207,22 @@ endif()
 # consistent behaviour when ROCM_PATH is set by an included package but the usr provided only
 # ROCM_CMAKE_PATH.
 if(DEFINED ROCM_PATH AND NOT DEFINED ROCM_CMAKE_PATH)
-    file(TO_NATIVE_PATH "${ROCM_PATH}${DEFAULT_ROCM_LLVM_BIN_SUFFIX}" ROCM_LLVM_BIN_DIR)
 
-    if(EXISTS ${ROCM_LLVM_BIN_DIR})
-        set(CMAKE_C_COMPILER ${ROCM_LLVM_BIN_DIR}/clang${DEFAULT_ROCM_COMPILER_EXTENSION})
-        set(CMAKE_CXX_COMPILER ${ROCM_LLVM_BIN_DIR}/clang++${DEFAULT_ROCM_COMPILER_EXTENSION})
-        message(STATUS "Using ROCm Clang compilers from ${ROCM_LLVM_BIN_DIR}")
+    if(EXISTS ${ROCM_PATH}/bin/clang${DEFAULT_ROCM_COMPILER_EXTENSION})
+        file(TO_NATIVE_PATH "${ROCM_PATH}/bin" ROCM_LLVM_BIN_DIR)
     else()
-        message(
-            FATAL_ERROR
-                "The directory ${ROCM_LLVM_BIN_DIR} does not exist. Cannot set ROCm Clang compilers."
-        )
+        file(TO_NATIVE_PATH "${ROCM_PATH}${DEFAULT_ROCM_LLVM_BIN_SUFFIX}" ROCM_LLVM_BIN_DIR)
+        if(NOT EXISTS ${ROCM_LLVM_BIN_DIR})
+            message(
+                FATAL_ERROR
+                    "The directory ${ROCM_LLVM_BIN_DIR} does not exist. Cannot set ROCm Clang compilers."
+            )
+        endif()
     endif()
+
+    set(CMAKE_C_COMPILER ${ROCM_LLVM_BIN_DIR}/clang${DEFAULT_ROCM_COMPILER_EXTENSION})
+    set(CMAKE_CXX_COMPILER ${ROCM_LLVM_BIN_DIR}/clang++${DEFAULT_ROCM_COMPILER_EXTENSION})
+    message(STATUS "Using ROCm Clang compilers from ${ROCM_LLVM_BIN_DIR}")
 
     # In case the toolchain is not in the system path, add the ROCm folder to the CMAKE_PREFIX_PATH
     # so that find_package(hip) works.
