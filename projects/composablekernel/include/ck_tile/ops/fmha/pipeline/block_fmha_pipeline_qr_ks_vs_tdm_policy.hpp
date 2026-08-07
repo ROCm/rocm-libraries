@@ -400,22 +400,19 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
                                            typename Problem::BlockFmhaShape::Gemm1BlockWarps,
                                            typename Problem::BlockFmhaShape::Gemm1WarpTile>>;
 
-        using WarpGemm =
-            WarpGemmDispatcher<typename Problem::PDataType,
-                               typename Problem::VDataType,
-                               typename Problem::OaccDataType,
-                               Problem::BlockFmhaShape::Gemm1WarpTile::at(number<0>{}),
-                               Problem::BlockFmhaShape::Gemm1WarpTile::at(number<1>{}),
-                               Problem::BlockFmhaShape::Gemm1WarpTile::at(number<2>{}),
-                               true,
-                               false,
-                               false,
-                               ((Problem::BlockFmhaShape::Gemm1WarpTile::at(number<1>{}) == 16 &&
-                                 Problem::BlockFmhaShape::Gemm1WarpTile::at(number<2>{}) == 32) ||
-                                (Problem::BlockFmhaShape::Gemm1WarpTile::at(number<1>{}) == 32 &&
-                                 Problem::BlockFmhaShape::Gemm1WarpTile::at(number<2>{}) == 16))
-                                   ? WGAttrNumAccessEnum::Double
-                                   : WGAttrNumAccessEnum::Single>;
+        using WarpGemm = WarpGemmDispatcher<typename Problem::PDataType,
+                                            typename Problem::VDataType,
+                                            typename Problem::OaccDataType,
+                                            Problem::BlockFmhaShape::Gemm1WarpTile::at(number<0>{}),
+                                            Problem::BlockFmhaShape::Gemm1WarpTile::at(number<1>{}),
+                                            Problem::BlockFmhaShape::Gemm1WarpTile::at(number<2>{}),
+                                            true,
+                                            false,
+                                            false,
+                                            // Default keeps kBK1PerLane as the terminal K
+                                            // sub-dim, which is all an 8-bit ds_read_tr
+                                            // (load_tile_transpose on V) can deliver per lane.
+                                            WGAttrNumAccessEnum::Default>;
 
         using BlockGemmPolicy =
             BlockGemmARegBRegCRegV2CustomPolicy<typename Problem::PDataType,

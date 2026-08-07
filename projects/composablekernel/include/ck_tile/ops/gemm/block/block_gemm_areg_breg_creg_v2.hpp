@@ -201,12 +201,26 @@ struct BlockGemmARegBRegCRegV2
         }
     }
 
-    // C += A * B
-    template <typename CBlockTensor, typename ABlockTensor, typename BBlockTensor>
+    struct no_scale
+    {
+    };
+
+    // C += A * B, or C += (A * a_scale) * (B * b_scale) when the scales are
+    // supplied. They are queried per iteration as a_scale(mIter, kIter) /
+    // b_scale(nIter, kIter) and applied by the hardware scaled MMA.
+    template <typename CBlockTensor,
+              typename ABlockTensor,
+              typename BBlockTensor,
+              typename AScaleFn = no_scale,
+              typename BScaleFn = no_scale>
     CK_TILE_DEVICE void operator()(CBlockTensor& c_block_tensor,
                                    const ABlockTensor& a_block_tensor,
-                                   const BBlockTensor& b_block_tensor) const
+                                   const BBlockTensor& b_block_tensor,
+                                   const AScaleFn& a_scale = {},
+                                   const BScaleFn& b_scale = {}) const
     {
+        constexpr bool kScaled = !std::is_same_v<remove_cvref_t<AScaleFn>, no_scale>;
+
         static_assert(std::is_same_v<ADataType, remove_cv_t<typename ABlockTensor::DataType>> &&
                           std::is_same_v<BDataType, remove_cv_t<typename BBlockTensor::DataType>> &&
                           std::is_same_v<CDataType, remove_cv_t<typename CBlockTensor::DataType>>,
@@ -273,7 +287,18 @@ struct BlockGemmARegBRegCRegV2
                         merge_sequences(sequence<1, 1>{}, c_warp_y_lengths));
 
                     // warp GEMM
-                    WarpGemm{}(c_warp_tensor, a_warp_tensor, b_warp_tensor);
+                    if constexpr(kScaled)
+                    {
+                        WarpGemm{}(c_warp_tensor,
+                                   a_warp_tensor,
+                                   b_warp_tensor,
+                                   a_scale(mIter, kIter),
+                                   b_scale(nIter, kIter));
+                    }
+                    else
+                    {
+                        WarpGemm{}(c_warp_tensor, a_warp_tensor, b_warp_tensor);
+                    }
 
                     // write C warp tensor into C block tensor
                     c_block_tensor.set_y_sliced_thread_data(
@@ -312,7 +337,18 @@ struct BlockGemmARegBRegCRegV2
                     merge_sequences(sequence<1, 1>{}, c_warp_y_lengths));
 
                 // warp GEMM
-                WarpGemm{}(c_warp_tensor, a_warp_tensor, b_warp_tensor);
+                if constexpr(kScaled)
+                {
+                    WarpGemm{}(c_warp_tensor,
+                               a_warp_tensor,
+                               b_warp_tensor,
+                               a_scale(mIter, kIter),
+                               b_scale(nIter, kIter));
+                }
+                else
+                {
+                    WarpGemm{}(c_warp_tensor, a_warp_tensor, b_warp_tensor);
+                }
 
                 // write C warp tensor into C block tensor
                 c_block_tensor.set_y_sliced_thread_data(
