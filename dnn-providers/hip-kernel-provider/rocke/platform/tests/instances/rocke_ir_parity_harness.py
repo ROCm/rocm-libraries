@@ -919,6 +919,45 @@ def cases():
             tile_k=16,
         ),
     )
+    # pipeline=basic: single-buffer global-read/compute overlap on gfx950.
+    add(
+        "conv",
+        "conv/gfx950/n1h8c16k32r3/basic_default",
+        "gfx950",
+        build_conv(
+            "irhash_conv_950_basic_a",
+            "gfx950",
+            conv1,
+            wave_size=64,
+            wtm=32,
+            wtn=32,
+            wtk=16,
+            tile_m=64,
+            tile_n=64,
+            tile_k=32,
+            pipeline="basic",
+            epilogue="default",
+        ),
+    )
+    add(
+        "conv",
+        "conv/gfx950/n1h8c16k32r3/basic_cshuffle",
+        "gfx950",
+        build_conv(
+            "irhash_conv_950_basic_b",
+            "gfx950",
+            conv1,
+            wave_size=64,
+            wtm=32,
+            wtn=32,
+            wtk=16,
+            tile_m=64,
+            tile_n=64,
+            tile_k=32,
+            pipeline="basic",
+            epilogue="cshuffle",
+        ),
+    )
 
     # Conv wgrad: implicit-GEMM backward-weight direction (NHWK x NHWC -> KYXC).
     # wgrad1: small 3x3 conv (N8 H8 W8 C16 K32 Y3 X3, stride/pad=defaults).
