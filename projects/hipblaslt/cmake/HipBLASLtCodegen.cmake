@@ -81,7 +81,7 @@ function(hipblaslt_create_device_library)
     # Keep the resource as an explicit dependency so quarantine edits invalidate
     # the validation stamp; TensileLogic itself resolves the resource at runtime.
     set(_known_bugs_resource
-        "${CMAKE_CURRENT_SOURCE_DIR}/tensilelite/tensilelite/tensilelite_logic/known_bugs.yaml")
+        "${hipblaslt_SOURCE_DIR}/tensilelite/tensilelite/tensilelite_logic/known_bugs.yaml")
     set(_logic_opts --use-bundled-known-bugs --check-all)
     if(_cdl_LOGIC_FILTER)
         list(APPEND _logic_opts "--logic-filter=**/${_cdl_LOGIC_FILTER}.yaml")
