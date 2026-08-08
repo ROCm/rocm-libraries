@@ -69,7 +69,7 @@ namespace ConnectWorkgroupsTest
         auto graph     = graph0;
         auto remapping = connectWorkgroups(graph);
 
-        for(uint wg = 0; wg < vX; ++wg)
+        for(unsigned int wg = 0; wg < vX; ++wg)
         {
             auto exprs = graph.coordinates.forward(
                 {literal(wg)}, {remapping[{0, GD::Downstream}]}, {tileNumAD});
@@ -79,7 +79,7 @@ namespace ConnectWorkgroupsTest
             CHECK(tileNumA == expectedA);
         }
 
-        for(uint wg = 0; wg < vY; ++wg)
+        for(unsigned int wg = 0; wg < vY; ++wg)
         {
             auto exprs = graph.coordinates.forward(
                 {literal(wg)}, {remapping[{1, GD::Downstream}]}, {tileNumBD});

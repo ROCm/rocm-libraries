@@ -164,9 +164,9 @@ namespace MatrixMultiplyTest
     {
         auto [typeAB, MFMAK, transOp, loadPathB] = std::get<1>(GetParam());
 
-        uint const waveM = (MFMAK == 32) ? 16 : 32;
-        uint const waveN = (MFMAK == 32) ? 16 : 32;
-        uint const waveK = MFMAK;
+        unsigned int const waveM = (MFMAK == 32) ? 16 : 32;
+        unsigned int const waveN = (MFMAK == 32) ? 16 : 32;
+        unsigned int const waveK = MFMAK;
 
         auto const transA = transOp.first;
         auto const transB = transOp.second;
@@ -206,7 +206,7 @@ namespace MatrixMultiplyTest
 
         std::string generatedCode = m_context->instructions()->toString();
 
-        uint const elementBits = DataTypeInfo::Get(typeAB).elementBits;
+        unsigned int const elementBits = DataTypeInfo::Get(typeAB).elementBits;
 
         auto const& arch = m_context->targetArchitecture();
 
@@ -214,11 +214,11 @@ namespace MatrixMultiplyTest
             fmt::format("v_mfma_f32_{}x{}x{}_{}", waveM, waveN, waveK, typeStr)};
         std::string const trLoadMnemonic{transposeLoadMnemonic(arch, elementBits)};
 
-        uint const numMFMAs            = 4;
-        uint const elementsPerWavetile = waveM * waveK / 64;
-        uint const elementsPerTrLoad   = bitsPerTransposeLoad(arch, elementBits) / elementBits;
-        uint const trLoadsPerMFMA      = elementsPerWavetile / elementsPerTrLoad;
-        uint       expectedTrLoads     = 0;
+        unsigned int const numMFMAs            = 4;
+        unsigned int const elementsPerWavetile = waveM * waveK / 64;
+        unsigned int const elementsPerTrLoad   = bitsPerTransposeLoad(arch, elementBits) / elementBits;
+        unsigned int const trLoadsPerMFMA      = elementsPerWavetile / elementsPerTrLoad;
+        unsigned int       expectedTrLoads     = 0;
         if(transA == "N")
             expectedTrLoads += numMFMAs * trLoadsPerMFMA;
         if(transB == "T")
@@ -364,9 +364,9 @@ namespace MatrixMultiplyTest
 
         auto [typeAB, MFMAK, transOp, loadPathB] = std::get<1>(GetParam());
 
-        uint const waveM = (MFMAK == 128) ? 16 : 32;
-        uint const waveN = (MFMAK == 128) ? 16 : 32;
-        uint const waveK = MFMAK;
+        unsigned int const waveM = (MFMAK == 128) ? 16 : 32;
+        unsigned int const waveN = (MFMAK == 128) ? 16 : 32;
+        unsigned int const waveK = MFMAK;
 
         std::string const mfmaMnemonic{
             fmt::format("v_mfma_f32_{}x{}x{}_f8f6f4", waveM, waveN, waveK)};
@@ -375,7 +375,7 @@ namespace MatrixMultiplyTest
 
         auto const& arch = m_context->targetArchitecture();
 
-        uint const        elementBits = DataTypeInfo::Get(typeAB).elementBits;
+        unsigned int const        elementBits = DataTypeInfo::Get(typeAB).elementBits;
         std::string const trLoadMnemonic{transposeLoadMnemonic(arch, elementBits)};
 
         std::string modifiers{"cbsz:0b000 blgp:0b000"};
@@ -412,11 +412,11 @@ namespace MatrixMultiplyTest
                             toString(typeAB)));
         }
 
-        uint const numMFMAs            = 2;
-        uint const elementsPerWavetile = waveM * waveK / 64;
-        uint const elementsPerTrLoad   = bitsPerTransposeLoad(arch, elementBits) / elementBits;
-        uint const trLoadsPerMFMA      = elementsPerWavetile / elementsPerTrLoad;
-        uint       expectedTrLoads     = 0;
+        unsigned int const numMFMAs            = 2;
+        unsigned int const elementsPerWavetile = waveM * waveK / 64;
+        unsigned int const elementsPerTrLoad   = bitsPerTransposeLoad(arch, elementBits) / elementBits;
+        unsigned int const trLoadsPerMFMA      = elementsPerWavetile / elementsPerTrLoad;
+        unsigned int       expectedTrLoads     = 0;
         if(transA == "N")
             expectedTrLoads += numMFMAs * trLoadsPerMFMA;
         if(transB == "T")
@@ -436,9 +436,9 @@ namespace MatrixMultiplyTest
 
         auto [typeAB, MFMAK, transOp, loadPathB] = std::get<1>(GetParam());
 
-        uint const waveM = (MFMAK == 128) ? 16 : 32;
-        uint const waveN = (MFMAK == 128) ? 16 : 32;
-        uint const waveK = MFMAK;
+        unsigned int const waveM = (MFMAK == 128) ? 16 : 32;
+        unsigned int const waveN = (MFMAK == 128) ? 16 : 32;
+        unsigned int const waveK = MFMAK;
 
         std::string const mfmaMnemonic{
             fmt::format("v_mfma_scale_f32_{}x{}x{}_f8f6f4", waveM, waveN, waveK)};
@@ -447,7 +447,7 @@ namespace MatrixMultiplyTest
 
         auto const& arch = m_context->targetArchitecture();
 
-        uint        elementBits = DataTypeInfo::Get(typeAB).elementBits;
+        unsigned int        elementBits = DataTypeInfo::Get(typeAB).elementBits;
         std::string trLoadMnemonic{transposeLoadMnemonic(arch, elementBits)};
 
         // TODO: enable non-TN 16x16x128 tests
@@ -493,11 +493,11 @@ namespace MatrixMultiplyTest
                             toString(typeAB)));
         }
 
-        uint const numMFMAs            = 2;
-        uint const elementsPerWavetile = waveM * waveK / 64;
-        uint const elementsPerTrLoad   = bitsPerTransposeLoad(arch, elementBits) / elementBits;
-        uint const trLoadsPerMFMA      = elementsPerWavetile / elementsPerTrLoad;
-        uint       expectedTrLoads     = 0;
+        unsigned int const numMFMAs            = 2;
+        unsigned int const elementsPerWavetile = waveM * waveK / 64;
+        unsigned int const elementsPerTrLoad   = bitsPerTransposeLoad(arch, elementBits) / elementBits;
+        unsigned int const trLoadsPerMFMA      = elementsPerWavetile / elementsPerTrLoad;
+        unsigned int       expectedTrLoads     = 0;
         if(transA == "N")
             expectedTrLoads += numMFMAs * trLoadsPerMFMA;
         if(transB == "T")
@@ -561,9 +561,9 @@ namespace MatrixMultiplyTest
 
         auto [typeAB, MFMAK, transOp, loadPathAB] = std::get<1>(GetParam());
 
-        uint const waveM = (MFMAK == 128) ? 16 : 32;
-        uint const waveN = (MFMAK == 128) ? 16 : 32;
-        uint const waveK = MFMAK;
+        unsigned int const waveM = (MFMAK == 128) ? 16 : 32;
+        unsigned int const waveN = (MFMAK == 128) ? 16 : 32;
+        unsigned int const waveK = MFMAK;
 
         std::string const mfmaMnemonic{
             fmt::format("v_mfma_f32_{}x{}x{}_f8f6f4", waveM, waveN, waveK)};
@@ -573,7 +573,7 @@ namespace MatrixMultiplyTest
 
         auto const& arch = m_context->targetArchitecture();
 
-        uint const        elementBits = DataTypeInfo::Get(typeAB).elementBits;
+        unsigned int const        elementBits = DataTypeInfo::Get(typeAB).elementBits;
         std::string const trLoadMnemonic{transposeLoadMnemonic(arch, elementBits)};
 
         std::string modifiers{"cbsz:0b000 blgp:0b000"};
@@ -605,11 +605,11 @@ namespace MatrixMultiplyTest
                             toString(typeAB)));
         }
 
-        uint const numMFMAs            = 2;
-        uint const elementsPerWavetile = waveM * waveK / 64;
-        uint const elementsPerTrLoad   = bitsPerTransposeLoad(arch, elementBits) / elementBits;
-        uint const trLoadsPerMFMA      = elementsPerWavetile / elementsPerTrLoad;
-        uint       expectedTrLoads     = 0;
+        unsigned int const numMFMAs            = 2;
+        unsigned int const elementsPerWavetile = waveM * waveK / 64;
+        unsigned int const elementsPerTrLoad   = bitsPerTransposeLoad(arch, elementBits) / elementBits;
+        unsigned int const trLoadsPerMFMA      = elementsPerWavetile / elementsPerTrLoad;
+        unsigned int       expectedTrLoads     = 0;
         if(!transA)
             expectedTrLoads += numMFMAs * trLoadsPerMFMA;
         if(transB)
@@ -801,7 +801,7 @@ namespace MatrixMultiplyTest
                         double      err,
                         bool        transA,
                         bool        transB,
-                        const uint  scaleBlockSize)
+                        const unsigned int  scaleBlockSize)
     {
         auto dataTypeA = TypeInfo<TA>::Var.dataType;
         auto dataTypeB = TypeInfo<TB>::Var.dataType;
@@ -843,7 +843,7 @@ namespace MatrixMultiplyTest
                           double              err,
                           bool                transA,
                           bool                transB,
-                          const uint          scaleBlockSize = 32)
+                          const unsigned int          scaleBlockSize = 32)
     {
         if(typeB == rocRoller::DataType::FP8)
             exeScaledCPUMM<TA, FP8>(
@@ -875,7 +875,7 @@ namespace MatrixMultiplyTest
                           double              err,
                           bool                transA,
                           bool                transB,
-                          const uint          scaleBlockSize = 32)
+                          const unsigned int          scaleBlockSize = 32)
     {
         if(typeA == rocRoller::DataType::FP8)
             scaledCPUMMMixed<FP8>(

@@ -25,7 +25,7 @@ namespace rocRoller
     {
         DataType dataType   = DataType::None; //< Desired result type of the expression
         bool     unitStride = false; //< Expression corresponds to a unitary (=1) element-stride.
-        uint     elementBlockSize = 0; //< If non-zero, elements are loaded in blocks.
+        unsigned int     elementBlockSize = 0; //< If non-zero, elements are loaded in blocks.
         Expression::ExpressionPtr
             elementBlockStride; //< If non-null, stride between element blocks.
         Expression::ExpressionPtr

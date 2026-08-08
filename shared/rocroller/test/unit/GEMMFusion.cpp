@@ -72,20 +72,20 @@ namespace GEMMDriverTest
             AssertFatal(gemm.workgroupSizeX % gemm.wavefrontSize == 0,
                         "Workgroup Size X must be multiply of wave front size");
 
-            uint wavetilePerWavefrontM
+            unsigned int wavetilePerWavefrontM
                 = gemm.wavefrontSize * gemm.macM / gemm.waveM / gemm.workgroupSizeX;
-            uint wavetilePerWavefrontN = gemm.macN / gemm.waveN / gemm.workgroupSizeY;
+            unsigned int wavetilePerWavefrontN = gemm.macN / gemm.waveN / gemm.workgroupSizeY;
 
             AssertFatal(gemm.macM % (gemm.waveM * wavetilePerWavefrontM) == 0,
                         "WaveTile size mismatch (M)");
             AssertFatal(gemm.macN % (gemm.waveN * wavetilePerWavefrontN) == 0,
                         "WaveTile size mismatch (N)");
 
-            uint workgroupSizeX = gemm.workgroupSizeX * gemm.workgroupSizeY;
-            uint workgroupSizeY = 1;
+            unsigned int workgroupSizeX = gemm.workgroupSizeX * gemm.workgroupSizeY;
+            unsigned int workgroupSizeY = 1;
 
-            uint numWorkgroupX;
-            uint numWorkgroupY;
+            unsigned int numWorkgroupX;
+            unsigned int numWorkgroupY;
 
             if(gemm.loopOverTiles > 0)
             {
@@ -242,7 +242,7 @@ namespace GEMMDriverTest
             {
                 params->loopOverOutputTilesDimensions = {0, 1};
                 params->loopOverOutputTilesCoordSizes
-                    = {static_cast<uint>(M / gemm.macM), static_cast<uint>(N / gemm.macN)};
+                    = {static_cast<unsigned int>(M / gemm.macM), static_cast<unsigned int>(N / gemm.macN)};
                 params->loopOverOutputTilesIteratedTiles = 2;
             }
 
@@ -294,8 +294,8 @@ namespace GEMMDriverTest
                 "GEMM workitem counts {} {} {}", toString(NX), toString(NY), toString(NZ));
 
             params->setManualWavefrontCount(
-                {static_cast<uint>(gemm.macM / gemm.waveM / wavetilePerWavefrontM),
-                 static_cast<uint>(gemm.macN / gemm.waveN / wavetilePerWavefrontN)});
+                {static_cast<unsigned int>(gemm.macM / gemm.waveM / wavetilePerWavefrontM),
+                 static_cast<unsigned int>(gemm.macN / gemm.waveN / wavetilePerWavefrontN)});
 
             CommandKernel commandKernel(command, testKernelName());
             commandKernel.setContext(m_context);

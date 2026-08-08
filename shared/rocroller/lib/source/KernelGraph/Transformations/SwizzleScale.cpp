@@ -123,26 +123,26 @@ namespace rocRoller
             auto iWaveY   = graph.coordinates.addElement(waveTile.tileIndex(1));
 
             auto       wavefrontSize = context->kernel()->wavefront_size();
-            uint const lanesPerSIMD  = 16;
-            uint const nSIMDsPerWave = wavefrontSize / lanesPerSIMD;
-            uint const nSIMDIndex    = macTile.subTileSizes.at(0) / lanesPerSIMD;
-            uint const nSIMDBlock    = nSIMDsPerWave / nSIMDIndex;
+            unsigned int const lanesPerSIMD  = 16;
+            unsigned int const nSIMDsPerWave = wavefrontSize / lanesPerSIMD;
+            unsigned int const nSIMDIndex    = macTile.subTileSizes.at(0) / lanesPerSIMD;
+            unsigned int const nSIMDBlock    = nSIMDsPerWave / nSIMDIndex;
             auto       SIMDBlock
                 = graph.coordinates.addElement(Adhoc("SIMDBlock", literal(nSIMDBlock), nullptr));
             auto SIMDIndex
                 = graph.coordinates.addElement(Adhoc("SIMDIndex", literal(nSIMDIndex), nullptr));
             auto laneInSIMD = graph.coordinates.addElement(Lane(literal(lanesPerSIMD), nullptr));
 
-            uint const numElements       = waveTile.elements();
-            uint const activeLanesInWave = static_cast<uint>(wavefrontSize);
-            uint const numVgpr           = numElements / activeLanesInWave;
-            uint const nVgprIndex
-                = std::min(nSIMDIndex, static_cast<uint>(macTile.miTileSizes.at(2)));
+            unsigned int const numElements       = waveTile.elements();
+            unsigned int const activeLanesInWave = static_cast<unsigned int>(wavefrontSize);
+            unsigned int const numVgpr           = numElements / activeLanesInWave;
+            unsigned int const nVgprIndex
+                = std::min(nSIMDIndex, static_cast<unsigned int>(macTile.miTileSizes.at(2)));
             // Minimal swizzle tile size 64x4 or 32x8 = 256
-            uint const numElementsPerMinimalSwizzleTile = 256;
-            uint const nVgprBlock = numElementsPerMinimalSwizzleTile / macTile.subTileSizes.at(0)
+            unsigned int const numElementsPerMinimalSwizzleTile = 256;
+            unsigned int const nVgprBlock = numElementsPerMinimalSwizzleTile / macTile.subTileSizes.at(0)
                                     / nSIMDBlock / nVgprIndex;
-            uint const nBlocks = numVgpr / nVgprBlock / nVgprIndex;
+            unsigned int const nBlocks = numVgpr / nVgprBlock / nVgprIndex;
             auto       vgprBlock
                 = graph.coordinates.addElement(VGPRBlockNumber(literal(nVgprBlock), literal(1u)));
             auto vgprIndex
@@ -153,8 +153,8 @@ namespace rocRoller
 
             graph.coordinates.addElement(Tile(), {vgpr}, {block, vgprBlock, vgprIndex});
 
-            uint const nSIMDIndexBlock = nVgprIndex;
-            uint const nSIMDIndexIndex = nSIMDIndex / nSIMDIndexBlock;
+            unsigned int const nSIMDIndexBlock = nVgprIndex;
+            unsigned int const nSIMDIndexIndex = nSIMDIndex / nSIMDIndexBlock;
             auto       SIMDIndexBlock  = graph.coordinates.addElement(
                 Adhoc("SIMDIndexBlock", literal(nSIMDIndexBlock), nullptr));
             auto SIMDIndexIndex = graph.coordinates.addElement(
@@ -344,13 +344,13 @@ namespace rocRoller
             connections.push_back(DC<WaveTileNumber>(nWave0, 0));
             connections.push_back(DC<WaveTileNumber>(nWave1, 1));
 
-            uint const nLanesInSIMD      = 16;
-            uint const numElements       = waveTile.elements();
-            uint const activeLanesInWave = static_cast<uint>(wavefrontSize);
-            uint const numVgpr           = numElements / activeLanesInWave;
+            unsigned int const nLanesInSIMD      = 16;
+            unsigned int const numElements       = waveTile.elements();
+            unsigned int const activeLanesInWave = static_cast<unsigned int>(wavefrontSize);
+            unsigned int const numVgpr           = numElements / activeLanesInWave;
 
-            uint const nLanesInSIMDIndex = macTile.subTileSizes.at(2) / numVgpr; // k dimension
-            uint const nLanesInSIMDBlock = nLanesInSIMD / nLanesInSIMDIndex;
+            unsigned int const nLanesInSIMDIndex = macTile.subTileSizes.at(2) / numVgpr; // k dimension
+            unsigned int const nLanesInSIMDBlock = nLanesInSIMD / nLanesInSIMDIndex;
             auto       laneInSIMD
                 = graph.coordinates.addElement(Lane(literal(nLanesInSIMD), literal(1u)));
             auto laneInSIMDIndex
@@ -358,22 +358,22 @@ namespace rocRoller
             auto laneInSIMDBlock
                 = graph.coordinates.addElement(Lane(literal(nLanesInSIMDBlock), literal(1u)));
 
-            uint const nSIMDsPerWave = wavefrontSize / nLanesInSIMD;
-            uint const nSIMDIndex    = macTile.subTileSizes.at(0) / nLanesInSIMD;
+            unsigned int const nSIMDsPerWave = wavefrontSize / nLanesInSIMD;
+            unsigned int const nSIMDIndex    = macTile.subTileSizes.at(0) / nLanesInSIMD;
             auto       SIMDIndex
                 = graph.coordinates.addElement(Adhoc("SIMDIndex", literal(nSIMDIndex), nullptr));
 
-            uint const nSIMDBlock = nSIMDsPerWave / nSIMDIndex;
+            unsigned int const nSIMDBlock = nSIMDsPerWave / nSIMDIndex;
             auto       SIMDBlock
                 = graph.coordinates.addElement(Adhoc("SIMDBlock", literal(nSIMDBlock), nullptr));
 
-            uint const nVgprIndex
-                = std::min(nSIMDIndex, static_cast<uint>(macTile.miTileSizes.at(2)));
+            unsigned int const nVgprIndex
+                = std::min(nSIMDIndex, static_cast<unsigned int>(macTile.miTileSizes.at(2)));
             // Minimal swizzle tile size 64x4 or 32x8 = 256
-            uint const numElementsPerMinimalSwizzleTile = 256;
-            uint const nVgprBlock = numElementsPerMinimalSwizzleTile / macTile.subTileSizes.at(0)
+            unsigned int const numElementsPerMinimalSwizzleTile = 256;
+            unsigned int const nVgprBlock = numElementsPerMinimalSwizzleTile / macTile.subTileSizes.at(0)
                                     / nSIMDBlock / nVgprIndex;
-            uint const nBlocks = numVgpr / nVgprBlock / nVgprIndex;
+            unsigned int const nBlocks = numVgpr / nVgprBlock / nVgprIndex;
             auto       vgprBlock
                 = graph.coordinates.addElement(VGPRBlockNumber(literal(nVgprBlock), literal(1u)));
             auto vgprIndex
@@ -545,7 +545,7 @@ namespace rocRoller
                         ShowValue(waveSwizzleM),
                         ShowValue(waveSwizzleN));
             // Minimal swizzle tile size 64x4 or 32x8 = 256
-            uint const numElementsPerMinimalSwizzleTile = 256;
+            unsigned int const numElementsPerMinimalSwizzleTile = 256;
             auto const waveSwizzleK = numElementsPerMinimalSwizzleTile / waveSwizzleM;
 
             return std::make_pair(waveSwizzleM / waveM, waveSwizzleK / waveK);

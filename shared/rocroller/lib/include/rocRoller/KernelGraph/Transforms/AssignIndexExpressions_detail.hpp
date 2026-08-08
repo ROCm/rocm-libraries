@@ -42,7 +42,7 @@ namespace rocRoller::KernelGraph
          */
         inline Expression::ExpressionPtr ToBytes(Expression::ExpressionPtr expr, DataType valueType)
         {
-            uint numBits = DataTypeInfo::Get(valueType).elementBits;
+            unsigned int numBits = DataTypeInfo::Get(valueType).elementBits;
             Log::debug("  toBytes: {}: numBits {}", toString(valueType), numBits);
 
             // If numBits is not a multiple of 8, the caller must ensure
@@ -85,7 +85,7 @@ namespace rocRoller::KernelGraph
          * @param isTransposed Whether load/store is transposed
          * @return Pair of (elementBlockNumber, elementBlockIndex)
          */
-        std::pair<uint, uint>
+        std::pair<unsigned int, unsigned int>
             GetElementBlockValues(KernelGraph const& graph, int target, bool isTransposed);
 
         /**

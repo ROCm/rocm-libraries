@@ -44,7 +44,7 @@ namespace rocRoller
             std::vector<Expression::ExpressionPtr> operator()(Flatten const& e)
             {
                 auto result = indexes[0];
-                for(uint d = 1; d < srcs.size(); ++d)
+                for(unsigned int d = 1; d < srcs.size(); ++d)
                     result = result * getSize(srcs[d]) + indexes[d];
                 setComment(result, "Flatten");
                 return {result};
@@ -54,7 +54,7 @@ namespace rocRoller
             {
                 AssertFatal(dsts.size() == 1, ShowValue(dsts.size()));
                 auto result = indexes[0] * getStride(srcs[0]);
-                for(uint d = 1; d < srcs.size(); ++d)
+                for(unsigned int d = 1; d < srcs.size(); ++d)
                     result = result + indexes[d] * getStride(srcs[d]);
                 setComment(result, "Join");
                 return {result};
@@ -67,7 +67,7 @@ namespace rocRoller
                 AssertFatal(dsts.size() == 1, ShowValue(dsts.size()));
                 auto branchTrue  = indexes[0] * e.strides.first[0];
                 auto branchFalse = indexes[0] * e.strides.second[0];
-                for(uint d = 1; d < srcs.size(); ++d)
+                for(unsigned int d = 1; d < srcs.size(); ++d)
                 {
                     branchTrue  = branchTrue + indexes[d] * e.strides.first[d];
                     branchFalse = branchFalse + indexes[d] * e.strides.second[d];
@@ -191,7 +191,7 @@ namespace rocRoller
             {
                 AssertFatal(srcs.size() == 1, ShowValue(srcs.size()));
                 auto result = indexes[0] * getStride(dsts[0]);
-                for(uint d = 1; d < dsts.size(); ++d)
+                for(unsigned int d = 1; d < dsts.size(); ++d)
                     result = result + indexes[d] * getStride(dsts[d]);
 
                 setComment(result, "Split");
@@ -237,7 +237,7 @@ namespace rocRoller
                 AssertFatal(srcs.size() == 1, ShowValue(srcs.size()));
                 auto branchTrue  = indexes[0] * e.strides.first[0];
                 auto branchFalse = indexes[0] * e.strides.second[0];
-                for(uint d = 1; d < dsts.size(); ++d)
+                for(unsigned int d = 1; d < dsts.size(); ++d)
                 {
                     branchTrue  = branchTrue + indexes[d] * e.strides.first[d];
                     branchFalse = branchFalse + indexes[d] * e.strides.second[d];
@@ -282,7 +282,7 @@ namespace rocRoller
             std::vector<Expression::ExpressionPtr> operator()(Tile const& e)
             {
                 auto result = indexes[0];
-                for(uint d = 1; d < dsts.size(); ++d)
+                for(unsigned int d = 1; d < dsts.size(); ++d)
                     result = result * getSize(dsts[d]) + indexes[d];
                 setComment(result, "Tile");
                 return {result};
@@ -365,7 +365,7 @@ namespace rocRoller
 
                 auto index = indexes[0] * strides[0];
                 auto delta = getDelta(srcTags[0]) * strides[0];
-                for(uint d = 1; d < srcs.size(); ++d)
+                for(unsigned int d = 1; d < srcs.size(); ++d)
                 {
                     index = index + indexes[d] * strides[d];
                     delta = delta + getDelta(srcTags[d]) * strides[d];
@@ -384,7 +384,7 @@ namespace rocRoller
 
                 auto index = indexes[0] * getStride(srcs[0]);
                 auto delta = getDelta(srcTags[0]) * getStride(srcs[0]);
-                for(uint d = 1; d < srcs.size(); ++d)
+                for(unsigned int d = 1; d < srcs.size(); ++d)
                 {
                     index = index + indexes[d] * getStride(srcs[d]);
                     delta = delta + getDelta(srcTags[d]) * getStride(srcs[d]);
@@ -401,7 +401,7 @@ namespace rocRoller
                 AssertFatal(dsts.size() == 1, ShowValue(dsts.size()));
                 auto branchTrue  = indexes[0] * e.strides.first[0];
                 auto branchFalse = indexes[0] * e.strides.second[0];
-                for(uint d = 1; d < srcs.size(); ++d)
+                for(unsigned int d = 1; d < srcs.size(); ++d)
                 {
                     branchTrue  = branchTrue + indexes[d] * e.strides.first[d];
                     branchFalse = branchFalse + indexes[d] * e.strides.second[d];
@@ -527,7 +527,7 @@ namespace rocRoller
 
                 auto index = indexes[0] * getStride(dsts[0]);
                 auto delta = getDelta(dstTags[0]) * getStride(dsts[0]);
-                for(uint d = 1; d < dsts.size(); ++d)
+                for(unsigned int d = 1; d < dsts.size(); ++d)
                 {
                     index = index + indexes[d] * getStride(dsts[d]);
                     delta = delta + getDelta(dstTags[d]) * getStride(dsts[d]);
@@ -566,7 +566,7 @@ namespace rocRoller
                 AssertFatal(srcs.size() == 1, ShowValue(srcs.size()));
                 auto branchTrue  = indexes[0] * e.strides.first[0];
                 auto branchFalse = indexes[0] * e.strides.second[0];
-                for(uint d = 1; d < dsts.size(); ++d)
+                for(unsigned int d = 1; d < dsts.size(); ++d)
                 {
                     branchTrue  = branchTrue + indexes[d] * e.strides.first[d];
                     branchFalse = branchFalse + indexes[d] * e.strides.second[d];
@@ -629,7 +629,7 @@ namespace rocRoller
 
                 auto index = indexes[0];
                 auto delta = getDelta(dstTags[0]);
-                for(uint d = 1; d < dsts.size(); ++d)
+                for(unsigned int d = 1; d < dsts.size(); ++d)
                 {
                     index = index * getSize(dsts[d]) + indexes[d];
                     delta = delta * getSize(dsts[d]) + getDelta(dstTags[d]);

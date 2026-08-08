@@ -74,7 +74,7 @@ namespace MatrixMultiplyTest
                                                              rocRoller::DataType,
                                                              rocRoller::DataType,
                                                              int,
-                                                             uint,
+                                                             unsigned int,
                                                              std::pair<std::string, std::string>>>
     {
     };
@@ -91,7 +91,7 @@ namespace MatrixMultiplyTest
                                                              rocRoller::DataType,
                                                              rocRoller::DataType,
                                                              rocRoller::DataType,
-                                                             uint,
+                                                             unsigned int,
                                                              std::pair<std::string, std::string>>>
     {
     };

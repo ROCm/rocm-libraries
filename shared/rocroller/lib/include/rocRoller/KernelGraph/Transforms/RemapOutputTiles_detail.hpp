@@ -105,7 +105,7 @@ namespace rocRoller
             RemappedDimensions workgroupMapping(TileSizeInfo const&                  info,
                                                 rocRoller::KernelGraph::KernelGraph& graph,
                                                 rocRoller::Graph::Direction          direction,
-                                                uint                                 dimension,
+                                                unsigned int                                 dimension,
                                                 Expression::ExpressionPtr            size);
 
         }

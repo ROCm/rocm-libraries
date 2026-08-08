@@ -160,12 +160,12 @@ namespace rocRollerTest::Graphs
         }
 
         // Workgroup size
-        uint wavefrontSize  = 64;
-        uint workgroupSizeX = 2 * wavefrontSize;
-        uint workgroupSizeY = 4;
+        unsigned int wavefrontSize  = 64;
+        unsigned int workgroupSizeX = 2 * wavefrontSize;
+        unsigned int workgroupSizeY = 4;
 
-        uint jammedM = wavefrontSize * m_macM / m_waveM / workgroupSizeX;
-        uint jammedN = m_macN / m_waveN / workgroupSizeY;
+        unsigned int jammedM = wavefrontSize * m_macM / m_waveM / workgroupSizeX;
+        unsigned int jammedN = m_macN / m_waveN / workgroupSizeY;
 
         params->setWaveTilesPerWavefront(jammedM, jammedN);
 
@@ -451,9 +451,9 @@ namespace rocRollerTest::Graphs
         AssertFatal(m_problem.workgroupSizeX % m_problem.wavefrontSize == 0,
                     "Workgroup Size X must be multiply of wave front size");
 
-        uint wavetilePerWavefrontM
+        unsigned int wavetilePerWavefrontM
             = m_problem.wavefrontSize * m_problem.macM / m_problem.waveM / m_problem.workgroupSizeX;
-        uint wavetilePerWavefrontN = m_problem.macN / m_problem.waveN / m_problem.workgroupSizeY;
+        unsigned int wavetilePerWavefrontN = m_problem.macN / m_problem.waveN / m_problem.workgroupSizeY;
 
         AssertFatal(m_problem.macM % (m_problem.waveM * wavetilePerWavefrontM) == 0,
                     "WaveTile size mismatch (M)");

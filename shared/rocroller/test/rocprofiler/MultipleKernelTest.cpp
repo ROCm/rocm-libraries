@@ -76,8 +76,8 @@ namespace RocprofilerTest
     public:
         AddTestKernel(ContextPtr context,
                       uint32_t   literal,
-                      uint       workgroupSize = 256,
-                      uint       workitemCount = 256 * 256)
+                      unsigned int       workgroupSize = 256,
+                      unsigned int       workitemCount = 256 * 256)
             : RocprofilerTestKernel(
                 context, KernelInvocation{{workitemCount, 1, 1}, {workgroupSize, 1, 1}, 0})
             , m_literal(literal)
@@ -135,8 +135,8 @@ namespace RocprofilerTest
     public:
         MovTestKernel(ContextPtr context,
                       uint32_t   literal,
-                      uint       workgroupSize = 256,
-                      uint       workitemCount = 256 * 256)
+                      unsigned int       workgroupSize = 256,
+                      unsigned int       workitemCount = 256 * 256)
             : RocprofilerTestKernel(
                 context, KernelInvocation{{workitemCount, 1, 1}, {workgroupSize, 1, 1}, 0})
             , m_literal(literal)

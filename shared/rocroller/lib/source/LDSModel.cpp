@@ -289,7 +289,7 @@ namespace rocRoller::Scheduling::LDSModel
         return ss.str();
     }
 
-    uint getThreadsPerClock(const MemoryOpLDS& memoryOp, uint dwords, GPUArchitectureGFX gfx)
+    unsigned int getThreadsPerClock(const MemoryOpLDS& memoryOp, unsigned int dwords, GPUArchitectureGFX gfx)
     {
         // Assumes aligned accesses (e.g. b128 is 16-byte aligned)
         // In future, when linked to codegen, update interface to check alignment of allocation
@@ -324,7 +324,7 @@ namespace rocRoller::Scheduling::LDSModel
         Throw<FatalError>("Unsupported dword count: ", dwords);
     }
 
-    uint getNumLDSBanks(GPUArchitectureGFX gfx, const MemoryOpLDS& memoryOp, uint dwords)
+    unsigned int getNumLDSBanks(GPUArchitectureGFX gfx, const MemoryOpLDS& memoryOp, unsigned int dwords)
     {
         // Non ds_read_b128 and ds_read_b64 on gfx950 act as-if there are still only 32 banks for conflict resolution
         if(gfx == GPUArchitectureGFX::GFX950 && memoryOp.direction == LdsDirection::Read
@@ -336,7 +336,7 @@ namespace rocRoller::Scheduling::LDSModel
     }
 
     std::vector<std::vector<size_t>> divideIntoThreadGroups(const std::vector<size_t>& addresses,
-                                                            uint threadsPerClock)
+                                                            unsigned int threadsPerClock)
     {
         AssertFatal(addresses.size() % threadsPerClock == 0,
                     fmt::format("Number of addresses {} is not a multiple of threads per clock {}",
@@ -355,25 +355,25 @@ namespace rocRoller::Scheduling::LDSModel
         return threadGroups;
     }
 
-    std::map<uint, uint> createBankToAddressCounts(const std::vector<size_t>& baseAddresses,
-                                                   uint                       dwords,
+    std::map<unsigned int, unsigned int> createBankToAddressCounts(const std::vector<size_t>& baseAddresses,
+                                                   unsigned int                       dwords,
                                                    GPUArchitectureGFX         gfx,
                                                    const MemoryOpLDS&         memoryOp)
     {
-        std::map<uint, uint> bankToAddressCounts;
-        uint                 numBanks = getNumLDSBanks(gfx, memoryOp, dwords);
+        std::map<unsigned int, unsigned int> bankToAddressCounts;
+        unsigned int                 numBanks = getNumLDSBanks(gfx, memoryOp, dwords);
 
         for(size_t i = 0; i < baseAddresses.size(); ++i)
         {
             AssertFatal(
                 baseAddresses[i] % 4 == 0, "Base address is not dword aligned ", baseAddresses[i]);
-            uint baseAddr = baseAddresses[i] / 4; // in dwords
+            unsigned int baseAddr = baseAddresses[i] / 4; // in dwords
 
             // Note: using dword as the unit here
-            for(uint offset = 0; offset < dwords; offset += 1)
+            for(unsigned int offset = 0; offset < dwords; offset += 1)
             {
-                uint currentAddr = baseAddr + offset;
-                uint bankIndex   = currentAddr % numBanks;
+                unsigned int currentAddr = baseAddr + offset;
+                unsigned int bankIndex   = currentAddr % numBanks;
                 bankToAddressCounts[bankIndex]++;
             }
         }
@@ -381,7 +381,7 @@ namespace rocRoller::Scheduling::LDSModel
         return bankToAddressCounts;
     }
 
-    uint calculateBankConflictCycles(const std::map<uint, uint>& bankToAddressCounts)
+    unsigned int calculateBankConflictCycles(const std::map<unsigned int, unsigned int>& bankToAddressCounts)
     {
         if(bankToAddressCounts.empty())
         {
@@ -390,7 +390,7 @@ namespace rocRoller::Scheduling::LDSModel
 
         // The number of clock cycles is determined by the bank accessed by the most addresses,
         // since only one address per bank can be serviced per cycle
-        uint maxAddressesPerBank = 0;
+        unsigned int maxAddressesPerBank = 0;
         for(const auto& [bankIndex, count] : bankToAddressCounts)
         {
             maxAddressesPerBank = std::max(maxAddressesPerBank, count);
@@ -399,10 +399,10 @@ namespace rocRoller::Scheduling::LDSModel
         return maxAddressesPerBank;
     }
 
-    std::vector<std::map<uint, uint>>
+    std::vector<std::map<unsigned int, unsigned int>>
         computeThreadGroupBankMappings(const RuntimeLDSInstruction& instr, GPUArchitectureGFX gfx)
     {
-        std::vector<std::map<uint, uint>> threadGroupBankMappings;
+        std::vector<std::map<unsigned int, unsigned int>> threadGroupBankMappings;
 
         const auto threadGroupAddresses = divideIntoThreadGroups(
             instr.baseAddresses, getThreadsPerClock(instr.memoryOp, instr.dwords, gfx));
@@ -416,10 +416,10 @@ namespace rocRoller::Scheduling::LDSModel
         return threadGroupBankMappings;
     }
 
-    uint calculateTotalCyclesFromBankMappings(
-        const std::vector<std::map<uint, uint>>& threadGroupBankMappings)
+    unsigned int calculateTotalCyclesFromBankMappings(
+        const std::vector<std::map<unsigned int, unsigned int>>& threadGroupBankMappings)
     {
-        uint cycles = 0;
+        unsigned int cycles = 0;
         for(const auto& bankMapping : threadGroupBankMappings)
         {
             cycles += calculateBankConflictCycles(bankMapping);
@@ -427,7 +427,7 @@ namespace rocRoller::Scheduling::LDSModel
         return cycles;
     }
 
-    uint getInstructionDataCycles(const RuntimeLDSInstruction& instr, GPUArchitectureGFX gfx)
+    unsigned int getInstructionDataCycles(const RuntimeLDSInstruction& instr, GPUArchitectureGFX gfx)
     {
         const auto threadGroupBankMappings = computeThreadGroupBankMappings(instr, gfx);
 
@@ -439,15 +439,15 @@ namespace rocRoller::Scheduling::LDSModel
             }
         }
 
-        uint cycles = calculateTotalCyclesFromBankMappings(threadGroupBankMappings);
+        unsigned int cycles = calculateTotalCyclesFromBankMappings(threadGroupBankMappings);
 
         return cycles;
     }
 
-    uint getInstructionIssueCycles(const MemoryOpLDS& memoryOp, uint dwords)
+    unsigned int getInstructionIssueCycles(const MemoryOpLDS& memoryOp, unsigned int dwords)
     {
         // 4 cycles for addresses, additional cycles for write
-        uint cycles = 4;
+        unsigned int cycles = 4;
         if(memoryOp.direction == LdsDirection::Write)
         {
             cycles += 4 * dwords;
@@ -455,10 +455,10 @@ namespace rocRoller::Scheduling::LDSModel
         return cycles;
     }
 
-    uint getInstructionCycles(const RuntimeLDSInstruction& instr, GPUArchitectureGFX gfx)
+    unsigned int getInstructionCycles(const RuntimeLDSInstruction& instr, GPUArchitectureGFX gfx)
     {
-        uint issueCycles = getInstructionIssueCycles(instr.memoryOp, instr.dwords);
-        uint dataCycles  = getInstructionDataCycles(instr, gfx);
+        unsigned int issueCycles = getInstructionIssueCycles(instr.memoryOp, instr.dwords);
+        unsigned int dataCycles  = getInstructionDataCycles(instr, gfx);
         return std::max(issueCycles, dataCycles);
     }
 
@@ -540,10 +540,10 @@ namespace rocRoller::Scheduling::LDSModel
                     "Odd {} number of thread groups not supported",
                     threadGroupBankMappings.size());
 
-        std::vector<std::set<uint>> threadGroupBankSets;
+        std::vector<std::set<unsigned int>> threadGroupBankSets;
         for(const auto& bankMapping : threadGroupBankMappings)
         {
-            std::set<uint> bankSet;
+            std::set<unsigned int> bankSet;
             for(const auto& [bankIndex, count] : bankMapping)
             {
                 bankSet.insert(bankIndex);
@@ -574,7 +574,7 @@ namespace rocRoller::Scheduling::LDSModel
         return ss.str();
     }
 
-    std::pair<std::string, uint> stringifyInstructionAnalysis(const RuntimeLDSInstruction& instr,
+    std::pair<std::string, unsigned int> stringifyInstructionAnalysis(const RuntimeLDSInstruction& instr,
                                                               GPUArchitectureGFX           gfx)
     {
         std::stringstream ss;
@@ -591,27 +591,27 @@ namespace rocRoller::Scheduling::LDSModel
         ss << fmt::format("  Instruction: {}\n", instructionName);
 
         // Follows getClockCount (checked against it later for consistency)
-        uint cycles = 0;
+        unsigned int cycles = 0;
         {
             const auto threadsPerClock = getThreadsPerClock(instr.memoryOp, instr.dwords, gfx);
-            uint       i               = 0;
+            unsigned int       i               = 0;
             for(const auto& groupAddresses :
                 divideIntoThreadGroups(instr.baseAddresses, threadsPerClock))
             {
                 const auto bankToAddressCounts
                     = createBankToAddressCounts(groupAddresses, instr.dwords, gfx, instr.memoryOp);
-                uint groupCycles = calculateBankConflictCycles(bankToAddressCounts);
+                unsigned int groupCycles = calculateBankConflictCycles(bankToAddressCounts);
                 ss << fmt::format("    Group {}: threads {}-{}\n",
                                   i,
                                   i * threadsPerClock,
                                   (i + 1) * threadsPerClock - 1);
 
-                uint maxCount = 0;
+                unsigned int maxCount = 0;
                 for(const auto& [bankIndex, count] : bankToAddressCounts)
                 {
                     maxCount = std::max(maxCount, count);
                 }
-                std::vector<uint> maxBanks;
+                std::vector<unsigned int> maxBanks;
                 for(const auto& [bankIndex, count] : bankToAddressCounts)
                 {
                     if(count == maxCount)
@@ -656,7 +656,7 @@ namespace rocRoller::Scheduling::LDSModel
         {
             ss << fmt::format("Operation Tag: {}, LDS Tag: {}\n", operationTag, opAccesses.ldsTag);
 
-            uint operationTotalClocks = 0;
+            unsigned int operationTotalClocks = 0;
 
             for(const auto& instr : opAccesses.instructions)
             {

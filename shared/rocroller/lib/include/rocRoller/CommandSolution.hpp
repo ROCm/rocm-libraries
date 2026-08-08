@@ -59,8 +59,8 @@ namespace rocRoller
         void setManualWorkgroupSize(std::array<unsigned int, 3> const&);
         std::optional<std::array<unsigned int, 3>> getManualWorkgroupSize() const;
 
-        void setManualWavefrontCount(std::pair<uint, uint> wavefrontCounts);
-        std::optional<std::pair<uint, uint>> getManualWavefrontCounts() const;
+        void setManualWavefrontCount(std::pair<unsigned int, unsigned int> wavefrontCounts);
+        std::optional<std::pair<unsigned int, unsigned int>> getManualWavefrontCounts() const;
 
         void setManualWorkgroupClusterSize(std::array<unsigned int, 3> const&);
         std::optional<std::array<unsigned int, 3>> getManualWorkgroupClusterSize() const;
@@ -117,8 +117,8 @@ namespace rocRoller
 
         std::vector<int>  loopOverOutputTilesDimensions    = {};
         std::string       loopOverOutputTilesTopLoop       = XLOOP;
-        std::vector<uint> loopOverOutputTilesCoordSizes    = {};
-        uint              loopOverOutputTilesIteratedTiles = 0;
+        std::vector<unsigned int> loopOverOutputTilesCoordSizes    = {};
+        unsigned int              loopOverOutputTilesIteratedTiles = 0;
 
         std::optional<int> workgroupMappingDim = {};
         std::optional<int> workgroupRemapXCC   = {};
@@ -142,7 +142,7 @@ namespace rocRoller
     private:
         std::map<Operations::OperationTag, KernelGraph::CoordinateGraph::Dimension> m_dimInfo;
         std::optional<std::array<unsigned int, 3>>                                  m_workgroupSize;
-        std::optional<std::pair<uint, uint>>       m_wavefrontCounts;
+        std::optional<std::pair<unsigned int, unsigned int>>       m_wavefrontCounts;
         std::optional<std::array<unsigned int, 3>> m_workgroupClusterSize;
 
         int m_kernelDimension = 0;

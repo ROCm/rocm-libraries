@@ -238,7 +238,7 @@ namespace rocRoller
         template <>
         ExpressionPtr powerOfTwoDivision(ExpressionPtr lhs, unsigned int rhs)
         {
-            uint shiftAmount = std::countr_zero(rhs);
+            unsigned int shiftAmount = std::countr_zero(rhs);
             auto new_rhs     = literal(shiftAmount);
             return arithmeticShiftR(lhs, new_rhs);
         }

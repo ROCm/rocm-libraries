@@ -759,12 +759,12 @@ namespace rocRoller::KernelGraph
             return std::nullopt;
         }
 
-        std::pair<uint, uint>
+        std::pair<unsigned int, unsigned int>
             GetElementBlockValues(KernelGraph const& graph, int target, const bool isTransposed)
         {
             namespace CT            = rocRoller::KernelGraph::CoordinateGraph;
-            uint elementBlockNumber = 0;
-            uint elementBlockIndex  = 0;
+            unsigned int elementBlockNumber = 0;
+            unsigned int elementBlockIndex  = 0;
 
             using OpsAndTilesType
                 = std::tuple<std::pair<int, Operation>, std::pair<int, MacroTile>, DataType>;
@@ -983,7 +983,7 @@ namespace rocRoller::KernelGraph
 
                 if(needsPadding)
                 {
-                    uint elementsPerTrLoad = bitsPerTransposeLoad(arch, numBits) / numBits;
+                    unsigned int elementsPerTrLoad = bitsPerTransposeLoad(arch, numBits) / numBits;
                     auto extraLdsBytes     = extraLDSBytesPerElementBlock(arch, numBits);
                     paddingBytes           = indexExpr / L(elementsPerTrLoad) * L(extraLdsBytes);
                 }
@@ -1059,7 +1059,7 @@ namespace rocRoller::KernelGraph
             auto const& arch     = context->targetArchitecture();
 
             // Initialize stride attributes for sub-dword types
-            uint                      elementBlockSize               = 0;
+            unsigned int                      elementBlockSize               = 0;
             Expression::ExpressionPtr elementBlockStride             = L(0u);
             Expression::ExpressionPtr trLoadPairStride               = L(0u);
             Expression::ExpressionPtr elementBlockStridePaddingBytes = L(0u);
@@ -1078,8 +1078,8 @@ namespace rocRoller::KernelGraph
                 if(isTransposed)
                 {
                     // See addLoadWaveTileCTF8F6F4 in LowerTile.cpp
-                    uint const wfs = arch.GetCapability(GPUCapability::DefaultWavefrontSize);
-                    uint const numVBlocks
+                    unsigned int const wfs = arch.GetCapability(GPUCapability::DefaultWavefrontSize);
+                    unsigned int const numVBlocks
                         = (wfs == 64) ? (numBits == 8 ? 2 : 1) : (numBits == 8 ? 4 : 2);
                     elementBlockSize = (elementBlockNumber / numVBlocks) * elementBlockSize;
                 }
@@ -1107,7 +1107,7 @@ namespace rocRoller::KernelGraph
                 // Add padding bytes for LDS operations
                 if(needsPadding && isLDS)
                 {
-                    uint elementsPerTrLoad = bitsPerTransposeLoad(arch, numBits) / numBits;
+                    unsigned int elementsPerTrLoad = bitsPerTransposeLoad(arch, numBits) / numBits;
                     auto extraLdsBytes     = extraLDSBytesPerElementBlock(arch, numBits);
                     elementBlockStridePaddingBytes
                         = elementBlockStride / L(elementsPerTrLoad) * L(extraLdsBytes);

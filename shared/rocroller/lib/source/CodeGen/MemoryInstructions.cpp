@@ -56,7 +56,7 @@ namespace rocRoller
         return stream << toString(k);
     }
 
-    uint bitsPerTransposeLoad(GPUArchitecture const& arch, uint elementBits)
+    unsigned int bitsPerTransposeLoad(GPUArchitecture const& arch, unsigned int elementBits)
     {
         switch(elementBits)
         {
@@ -121,7 +121,7 @@ namespace rocRoller
         return 0;
     }
 
-    uint extraLDSBytesPerElementBlock(GPUArchitecture const& arch, uint elementBits)
+    unsigned int extraLDSBytesPerElementBlock(GPUArchitecture const& arch, unsigned int elementBits)
     {
         if(arch.HasCapability(GPUCapability::DSReadTransposeB6PaddingBytes) && elementBits == 6)
         {
@@ -130,7 +130,7 @@ namespace rocRoller
         return 0;
     }
 
-    std::string transposeLoadMnemonic(GPUArchitecture const& arch, uint elementBits)
+    std::string transposeLoadMnemonic(GPUArchitecture const& arch, unsigned int elementBits)
     {
         switch(elementBits)
         {
@@ -208,7 +208,7 @@ namespace rocRoller
                                                                   Register::ValuePtr addr,
                                                                   int                offset,
                                                                   int                numBytes,
-                                                                  uint               elementBits,
+                                                                  unsigned int               elementBits,
                                                                   std::string const  comment)
     {
         AssertFatal(dest != nullptr);
@@ -223,8 +223,8 @@ namespace rocRoller
         AssertFatal(numBytes > 0 && (numBytes < m_wordSize || numBytes % m_wordSize == 0),
                     "Invalid number of bytes");
         // 6-bit transposes are special as they require 128b alignment even though they only load 96 bits.
-        const uint extraLDSBytes  = extraLDSBytesPerElementBlock(arch, elementBits);
-        const uint bytesPerTrLoad = bitsPerTransposeLoad(arch, elementBits) / 8 + extraLDSBytes;
+        const unsigned int extraLDSBytes  = extraLDSBytesPerElementBlock(arch, elementBits);
+        const unsigned int bytesPerTrLoad = bitsPerTransposeLoad(arch, elementBits) / 8 + extraLDSBytes;
         const std::string dsReadTrMnemonic{transposeLoadMnemonic(arch, elementBits)};
 
         AssertFatal(

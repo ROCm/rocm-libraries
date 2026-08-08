@@ -172,7 +172,7 @@ namespace rocRoller
 
                 // Create new coordinates
                 auto              ldsTag      = k.coordinates.addElement(LDS());
-                std::vector<uint> jammedTiles = {1, 1};
+                std::vector<unsigned int> jammedTiles = {1, 1};
                 bool              splitStore  = false;
 
                 if(!isLoad)

@@ -315,8 +315,8 @@ namespace rocRollerTest::Graphs
         // TODO Fix MemoryType promotion (LDS)
         params->setDimensionInfo(m_tagD, macTileVGPR);
 
-        uint workgroupSizeX = m_macM / m_thrM;
-        uint workgroupSizeY = m_macN / m_thrN;
+        unsigned int workgroupSizeX = m_macM / m_thrM;
+        unsigned int workgroupSizeY = m_macN / m_thrN;
 
         AssertFatal(m_macM > 0 && m_macN > 0 && m_thrM > 0 && m_thrN > 0
                         && (size_t)m_macM * m_macN
@@ -459,8 +459,8 @@ namespace rocRollerTest::Graphs
         auto macTile = MacroTile({m_macM, m_macN}, MemoryType::VGPR, {m_thrM, m_thrN});
         params->setDimensionInfo(m_tag, macTile);
 
-        uint workgroupSizeX = m_macM / m_thrM;
-        uint workgroupSizeY = m_macN / m_thrN;
+        unsigned int workgroupSizeX = m_macM / m_thrM;
+        unsigned int workgroupSizeY = m_macN / m_thrN;
 
         AssertFatal(m_macM > 0 && m_macN > 0 && m_thrM > 0 && m_thrN > 0
                         && (size_t)m_macM * m_macN

@@ -142,7 +142,7 @@ namespace rocRoller
                             }
                             else if(lhsValueType.getElementSize() == 8)
                             {
-                                auto mask = (~(0ul));
+                                auto mask = (~(0ull));
                                 if(isLeft)
                                     mask <<= bits;
                                 else

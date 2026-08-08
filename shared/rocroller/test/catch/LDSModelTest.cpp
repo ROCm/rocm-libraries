@@ -65,7 +65,7 @@ namespace LDSModelTest
         {
             // Test multiple addresses accessing the same bank
             std::vector<size_t> addresses = {0, 128, 256}; // x / 4 mod 32 = 0 for all addresses
-            uint                dwords    = 1;
+            unsigned int                dwords    = 1;
             auto                ldsRead   = MemoryOpLDS{LdsDirection::Read};
 
             auto bankCounts
@@ -89,7 +89,7 @@ namespace LDSModelTest
         SECTION("Wrap around")
         {
             std::vector<size_t> addresses = {124}; // 124 / 4 mod 32 = 31
-            uint                dwords    = 4; // Accesses banks 31, 0, 1, 2
+            unsigned int                dwords    = 4; // Accesses banks 31, 0, 1, 2
             auto                ldsRead   = MemoryOpLDS{LdsDirection::Read};
 
             auto bankCounts
@@ -105,7 +105,7 @@ namespace LDSModelTest
 
     TEST_CASE("LDS model calculate bank conflict cycles", "[lds-bank-model]")
     {
-        std::map<uint, uint> bankToAddressCounts = {};
+        std::map<unsigned int, unsigned int> bankToAddressCounts = {};
         CHECK(calculateBankConflictCycles(bankToAddressCounts) == 0);
 
         bankToAddressCounts = {{0, 1}};
@@ -124,7 +124,7 @@ namespace LDSModelTest
     TEST_CASE("LDS model divide into thread groups", "[lds-bank-model]")
     {
         std::vector<size_t> addresses       = {0, 4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 44};
-        uint                threadsPerClock = 4;
+        unsigned int                threadsPerClock = 4;
 
         auto groups = divideIntoThreadGroups(addresses, threadsPerClock);
 
@@ -179,7 +179,7 @@ namespace LDSModelTest
 
     TEST_CASE("LDS model calculate total cycles from bank mappings", "[lds-bank-model]")
     {
-        std::vector<std::map<uint, uint>> mappings = {
+        std::vector<std::map<unsigned int, unsigned int>> mappings = {
             {{0, 5}, {1, 2}, {2, 1}}, // Group 1: max 5 accesses
             {{3, 1}, {4, 1}, {5, 1}}, // Group 2: max 1 access (no conflicts)
             {{0, 3}, {1, 3}, {2, 3}} // Group 3: max 3 accesses
@@ -221,7 +221,7 @@ namespace LDSModelTest
             auto ldsRead = MemoryOpLDS{LdsDirection::Read};
 
             // For reads, always 4 cycles (address transfer only)
-            for(uint dwords = 1; dwords <= 4; ++dwords)
+            for(unsigned int dwords = 1; dwords <= 4; ++dwords)
             {
                 CHECK(getInstructionIssueCycles(ldsRead, dwords) == 4);
             }

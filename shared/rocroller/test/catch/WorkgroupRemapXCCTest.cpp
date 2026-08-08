@@ -32,7 +32,7 @@ namespace WorkgroupRemapXCCTest
         using GD = rocRoller::Graph::Direction;
 
     public:
-        RemapWorkgroupXCCKernel(rocRoller::ContextPtr context, uint numXCC, uint size)
+        RemapWorkgroupXCCKernel(rocRoller::ContextPtr context, unsigned int numXCC, unsigned int size)
             : AssemblyTestKernel(context)
             , m_numXCC(numXCC)
             , m_size(size)
@@ -66,10 +66,10 @@ namespace WorkgroupRemapXCCTest
             return exprs[0];
         }
 
-        uint reference(uint wg)
+        unsigned int reference(unsigned int wg)
         {
             auto fstride = ((m_size + m_numXCC - 1) / m_numXCC);
-            uint r       = (wg % m_numXCC) * fstride + (wg / m_numXCC);
+            unsigned int r       = (wg % m_numXCC) * fstride + (wg / m_numXCC);
             if(wg % m_numXCC > m_size % m_numXCC)
                 r -= (wg % m_numXCC) - m_size % m_numXCC;
             return r;
@@ -163,7 +163,7 @@ namespace WorkgroupRemapXCCTest
         rocRoller::KernelGraph::KernelGraphPtr m_graph;
         int m_workgroupU, m_workgroupD, m_newWorkgroupU, m_newWorkgroupD;
 
-        uint m_size, m_numXCC;
+        unsigned int m_size, m_numXCC;
     };
 
     TEST_CASE("Remap Workgroup XCC", "[kernel-graph]")
@@ -171,19 +171,19 @@ namespace WorkgroupRemapXCCTest
         using namespace rocRoller::Expression;
         using GD = rocRoller::Graph::Direction;
 
-        uint numXCC = 8u;
-        uint size   = 55u * numXCC + 3u;
+        unsigned int numXCC = 8u;
+        unsigned int size   = 55u * numXCC + 3u;
 
         RemapWorkgroupXCCKernel kernel(nullptr, numXCC, size);
 
         auto direction = GENERATE(GD::Upstream, GD::Downstream);
 
         std::map<int, int> coverage;
-        for(uint wg = 0; wg < size; ++wg)
+        for(unsigned int wg = 0; wg < size; ++wg)
         {
-            uint expectedWG = kernel.reference(wg);
+            unsigned int expectedWG = kernel.reference(wg);
 
-            uint remappedWG;
+            unsigned int remappedWG;
             if(direction == GD::Downstream)
             {
                 auto [graph, workgroup, newWorkgroup] = kernel.getGraphAndWorkgroups(direction);

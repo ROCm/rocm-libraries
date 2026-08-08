@@ -42,7 +42,7 @@ namespace rocRoller
         auto context     = m_context.lock();
         auto invalidAddr = std::make_shared<Register::Value>(
             context, Register::Type::Vector, DataType::Int64, 1);
-        co_yield context->copier()->copy(invalidAddr, Register::Value::Literal(0L));
+        co_yield context->copier()->copy(invalidAddr, Register::Value::Literal(0LL));
 
         auto dummyData = std::make_shared<Register::Value>(
             context, Register::Type::Vector, DataType::Int32, 1);

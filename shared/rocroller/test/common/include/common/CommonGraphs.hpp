@@ -278,7 +278,7 @@ namespace rocRollerTest
                               m_problem.scaleTypeB,
                               -1.f,
                               1.f,
-                              static_cast<uint>(scaleBlockSize));
+                              static_cast<unsigned int>(scaleBlockSize));
                 }
                 else
                 {

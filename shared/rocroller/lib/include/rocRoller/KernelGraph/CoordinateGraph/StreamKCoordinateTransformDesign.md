@@ -144,9 +144,9 @@ The control graph would implement code roughly equivalent to:
     auto totalTiles = numTilesM * numTilesN * numTilesK;
     auto tilesPerWG = (totalTiles + numWGs - 1) / numWGs;
 
-    for(uint wg = 0; wg < numWGs; wg++)
+    for(unsigned int wg = 0; wg < numWGs; wg++)
     {
-        uint forTileIdx, forKIdx;
+        unsigned int forTileIdx, forKIdx;
 
         forKIdx = 0;
         for(forTileIdx = 0;
@@ -154,8 +154,8 @@ The control graph would implement code roughly equivalent to:
             && ((tilesPerWG * wg + forTileIdx) < totalTiles);
             forTileIdx += forKIdx)
         {
-            uint tile;
-            uint m, n, k;
+            unsigned int tile;
+            unsigned int m, n, k;
 
             tile = tilesPerWG * wg + forTileIdx;
 

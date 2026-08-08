@@ -20,7 +20,7 @@ namespace rocRoller
         {
             int remapWorkgroupXCC(rocRoller::KernelGraph::KernelGraph& graph,
                                   int                                  workgroupTag,
-                                  uint                                 numXCC)
+                                  unsigned int                                 numXCC)
             {
                 auto const direction = danglingDirection(graph, workgroupTag);
                 if(not direction.has_value())

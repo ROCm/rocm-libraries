@@ -3244,10 +3244,10 @@ namespace KernelGraphTest
     {
         auto kgraph = rocRoller::KernelGraph::KernelGraph();
 
-        uint numTileM = 57;
-        uint numTileN = 57;
-        uint numTileK = 57;
-        uint numWGs   = 128;
+        unsigned int numTileM = 57;
+        unsigned int numTileN = 57;
+        unsigned int numTileK = 57;
+        unsigned int numWGs   = 128;
 
         auto kernel = kgraph.control.addElement(Kernel());
         auto [forKCoord, forKOp]

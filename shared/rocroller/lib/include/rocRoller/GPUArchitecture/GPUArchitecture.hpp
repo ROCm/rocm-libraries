@@ -57,6 +57,26 @@ namespace rocRoller
 
         bool isSupportedConstantValue(TDM value) const;
 
+        bool isSupportedConstantValue(__half value) const;
+
+        bool isSupportedConstantValue(BFloat16 value) const;
+
+        bool isSupportedConstantValue(FP8 value) const;
+
+        bool isSupportedConstantValue(BF8 value) const;
+
+        bool isSupportedConstantValue(FP6 value) const;
+
+        bool isSupportedConstantValue(BF6 value) const;
+
+        bool isSupportedConstantValue(FP4 value) const;
+
+        bool isSupportedConstantValue(E8M0 value) const;
+
+        bool isSupportedConstantValue(E5M3 value) const;
+
+        bool isSupportedConstantValue(E4M3 value) const;
+
         template <typename T>
         requires(std::is_pointer_v<T>) bool isSupportedConstantValue(T value) const;
 

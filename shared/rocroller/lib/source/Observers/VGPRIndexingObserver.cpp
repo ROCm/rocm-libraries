@@ -52,9 +52,9 @@ namespace rocRoller
             bool    foundVgprOperand = false;
 
             auto checkOperandsForMode = [&](auto const& operands,
-                                            uint        maxOperands,
-                                            uint        shift,
-                                            uint        iterShift) {
+                                            unsigned int        maxOperands,
+                                            unsigned int        shift,
+                                            unsigned int        iterShift) {
                 for(auto const& operand : operands)
                 {
                     if(operand and operand->regType() == Register::Type::Vector)

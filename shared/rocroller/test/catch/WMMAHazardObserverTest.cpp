@@ -25,7 +25,7 @@ namespace WMMAObserverTests
             : TestContext(TestContext::ForTarget({gfx})){};
         WMMAObserverTest(GPUArchitectureTarget target, KernelOptions kernelOptions)
             : TestContext(TestContext::ForTarget(target, kernelOptions)){};
-        void peekAndSchedule(Instruction& inst, uint expectedNops = 0)
+        void peekAndSchedule(Instruction& inst, unsigned int expectedNops = 0)
         {
             auto peeked = m_context->observer()->peek(inst);
             CHECK(peeked.nops == expectedNops);

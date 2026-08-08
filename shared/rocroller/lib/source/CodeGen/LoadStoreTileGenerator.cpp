@@ -404,7 +404,7 @@ namespace rocRoller
 
             if(!info.isTransposedTile && info.colStrideAttributes.unitStride)
             {
-                uint numVGPRBlocks = 1;
+                unsigned int numVGPRBlocks = 1;
                 if(info.colStrideAttributes.elementBlockSize > 0
                    && (info.n * info.packedAmount) > info.colStrideAttributes.elementBlockSize)
                 {
@@ -442,7 +442,7 @@ namespace rocRoller
 
                 for(uint64_t i = 0; i < info.m; ++i)
                 {
-                    for(uint r = 0; r < numVGPRBlocks; ++r)
+                    for(unsigned int r = 0; r < numVGPRBlocks; ++r)
                     {
                         auto start = (i * numVGPRBlocks + r) * elementsPerMove;
                         auto stop  = (i * numVGPRBlocks + r + 1) * elementsPerMove;
@@ -620,7 +620,7 @@ namespace rocRoller
                         ShowValue(info.offset->description()));
             auto offsetValue = getUnsignedInt(info.offset->getLiteralValue());
 
-            uint numVGPRBlocks = 1;
+            unsigned int numVGPRBlocks = 1;
             if(info.colStrideAttributes.elementBlockSize > 0
                && (info.n * unsegmentedDataType.packing)
                       > info.colStrideAttributes.elementBlockSize)
@@ -653,7 +653,7 @@ namespace rocRoller
 
             for(uint64_t i = 0; i < info.m; ++i)
             {
-                for(uint r = 0; r < numVGPRBlocks; ++r)
+                for(unsigned int r = 0; r < numVGPRBlocks; ++r)
                 {
                     auto start = (i * numVGPRBlocks + r) * elementsPerMove;
                     auto stop  = (i * numVGPRBlocks + r + 1) * elementsPerMove;
@@ -781,7 +781,7 @@ namespace rocRoller
             co_yield Instruction::Comment(
                 concatenate(ShowValue(varTypeInfo.elementBits), ShowValue(varTypeInfo.packing)));
 
-            info.elementBits = (uint)varTypeInfo.elementBits;
+            info.elementBits = (unsigned int)varTypeInfo.elementBits;
 
             if(info.m > 1)
                 co_yield generateStride(info.rowStrideReg, info.rowStrideAttributes, info.tag, 0);
@@ -1133,9 +1133,9 @@ namespace rocRoller
                     = Register::Value::Literal(ldsAllocation->getLDSAllocation()->offset());
             }
 
-            uint numVGPRBlockSets = GetVGPRBlockSetDimSize(*m_graph, tag).value_or(1);
+            unsigned int numVGPRBlockSets = GetVGPRBlockSetDimSize(*m_graph, tag).value_or(1);
 
-            uint numElements       = waveTile.sizes[0] * waveTile.sizes[1] / numVGPRBlockSets;
+            unsigned int numElements       = waveTile.sizes[0] * waveTile.sizes[1] / numVGPRBlockSets;
             auto [_, lane]         = m_graph->getDimension<Lane>(tag);
             auto activeLanesInWave = getUnsignedInt(evaluate(lane.size));
 
@@ -1145,7 +1145,7 @@ namespace rocRoller
                         ShowValue(activeLanesInWave),
                         ShowValue(packing),
                         ShowValue(activeLanesInWave * packing));
-            uint numVgpr = numElements / (activeLanesInWave * packing);
+            unsigned int numVgpr = numElements / (activeLanesInWave * packing);
             AssertFatal(numVgpr > 0, "Invalid load dimensions.");
 
             result.tag                  = tag;
@@ -1173,7 +1173,7 @@ namespace rocRoller
             co_yield Instruction::Comment(
                 concatenate("GEN: loadMacroTileWAVE OP", tag, " WaveTile ", waveTileTag));
 
-            uint numElements       = waveTile.sizes[0] * waveTile.sizes[1];
+            unsigned int numElements       = waveTile.sizes[0] * waveTile.sizes[1];
             auto [_, lane]         = m_graph->getDimension<Lane>(tag);
             auto activeLanesInWave = getUnsignedInt(evaluate(lane.size));
 
@@ -1184,7 +1184,7 @@ namespace rocRoller
                         ShowValue(packing),
                         ShowValue(activeLanesInWave * packing),
                         ShowValue(load.varType));
-            uint numVgpr = numElements / (activeLanesInWave * packing);
+            unsigned int numVgpr = numElements / (activeLanesInWave * packing);
             AssertFatal(numVgpr > 0, "Invalid load dimensions.");
 
             auto memoryKind = MemoryInstructions::MemoryKind::Buffer;
@@ -1216,7 +1216,7 @@ namespace rocRoller
             co_yield Instruction::Comment(
                 concatenate("GEN: loadMacroTileWAVECIACCUM OP ", tag, " WaveTile ", waveTileTag));
 
-            uint numElements       = waveTile.sizes[0] * waveTile.sizes[1];
+            unsigned int numElements       = waveTile.sizes[0] * waveTile.sizes[1];
             auto [_, lane]         = m_graph->getDimension<Lane>(tag);
             auto activeLanesInWave = getUnsignedInt(evaluate(lane.size));
 
@@ -1226,7 +1226,7 @@ namespace rocRoller
                         ShowValue(activeLanesInWave),
                         ShowValue(packing),
                         ShowValue(activeLanesInWave * packing));
-            uint numVgpr = numElements / activeLanesInWave;
+            unsigned int numVgpr = numElements / activeLanesInWave;
             AssertFatal(numVgpr > 0, "Invalid load dimensions.");
 
             auto [vgprBlockNumberTag, vgprBlockNumber]
@@ -1576,7 +1576,7 @@ namespace rocRoller
             auto [ldsTag, _lds]          = m_graph->getDimension<LDS>(tag);
             auto [macTileTag, _macTile]  = m_graph->getDimension<MacroTile>(tag);
             auto [waveTileTag, waveTile] = m_graph->getDimension<WaveTile>(tag);
-            uint waveTileNumElements     = waveTile.sizes[0] * waveTile.sizes[1];
+            unsigned int waveTileNumElements     = waveTile.sizes[0] * waveTile.sizes[1];
             auto varType                 = store.varType;
 
             rocRoller::Log::getLogger()->debug(
@@ -1657,7 +1657,7 @@ namespace rocRoller
                                                     ShowValue(activeLanesInWave * packing)));
             }
 
-            uint numVgpr = waveTileNumElements / activeLanesInWave;
+            unsigned int numVgpr = waveTileNumElements / activeLanesInWave;
 
             auto [vgprBlockNumberTag, vgprBlockNumber]
                 = m_graph->getDimension<VGPRBlockNumber>(tag, 0);
@@ -1700,7 +1700,7 @@ namespace rocRoller
                                                       " WaveTile ",
                                                       waveTileTag));
 
-            uint numElements       = waveTile.sizes[0] * waveTile.sizes[1];
+            unsigned int numElements       = waveTile.sizes[0] * waveTile.sizes[1];
             auto [_, lane]         = m_graph->getDimension<Lane>(tag);
             auto activeLanesInWave = getUnsignedInt(evaluate(lane.size));
 
@@ -1710,7 +1710,7 @@ namespace rocRoller
                         ShowValue(activeLanesInWave),
                         ShowValue(packing),
                         ShowValue(activeLanesInWave * packing));
-            uint numValues = numElements / activeLanesInWave;
+            unsigned int numValues = numElements / activeLanesInWave;
             AssertFatal(numValues > 0, "Invalid store dimensions.");
 
             auto [vgprBlockNumberTag, vgprBlockNumber]

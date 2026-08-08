@@ -16,7 +16,7 @@ namespace rocRoller
    *
    * @param elementBits number of bits of variable type to load.
    */
-    uint bitsPerTransposeLoad(GPUArchitecture const& arch, uint elementBits);
+    unsigned int bitsPerTransposeLoad(GPUArchitecture const& arch, unsigned int elementBits);
 
     /**
    * @brief Returns extra number of bytes required to fulfill 128b alignment requirement of 6-bit transpose loads.
@@ -25,7 +25,7 @@ namespace rocRoller
    *
    * @param elementBits number of bits of variable type to load.
    */
-    uint extraLDSBytesPerElementBlock(GPUArchitecture const& arch, uint elementBits);
+    unsigned int extraLDSBytesPerElementBlock(GPUArchitecture const& arch, unsigned int elementBits);
 
-    std::string transposeLoadMnemonic(GPUArchitecture const& arch, uint elementBits);
+    std::string transposeLoadMnemonic(GPUArchitecture const& arch, unsigned int elementBits);
 } // rocRoller

@@ -39,14 +39,14 @@ namespace rocRoller
                 return 256;
             }
 
-            inline constexpr uint RegisterIndexNormalizationMask()
+            inline constexpr unsigned int RegisterIndexNormalizationMask()
             {
                 return RegisterBankSize() - 1;
             }
 
-            inline uint8_t GetBankBits(uint idx)
+            inline uint8_t GetBankBits(unsigned int idx)
             {
-                AssertFatal(0 <= idx and idx < 1024, ShowValue(idx));
+                AssertFatal(idx < 1024, ShowValue(idx));
                 return static_cast<uint8_t>((idx >> 8u) & 0b11);
             }
         }

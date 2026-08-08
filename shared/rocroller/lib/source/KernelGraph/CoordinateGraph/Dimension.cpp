@@ -147,7 +147,7 @@ namespace rocRoller
 
         Unroll::Unroll() = default;
 
-        Unroll::Unroll(uint const usize)
+        Unroll::Unroll(unsigned int const usize)
             : BaseDimension(Expression::literal(usize), Expression::literal(1))
         {
         }
@@ -202,7 +202,7 @@ namespace rocRoller
             AssertFatal(layoutType != LayoutType::None, "Invalid layout type.");
         }
 
-        MacroTile::MacroTile(MacroTile& macTile, std::vector<uint> const& padBytesOfDim)
+        MacroTile::MacroTile(MacroTile& macTile, std::vector<unsigned int> const& padBytesOfDim)
             : MacroTile(macTile)
         {
             AssertFatal(this->layoutType == LayoutType::MATRIX_A
@@ -232,7 +232,7 @@ namespace rocRoller
             return MacroTileNumber(sdim, size, Expression::literal(1u));
         }
 
-        MacroTileIndex MacroTile::tileIndex(int sdim, uint jamming) const
+        MacroTileIndex MacroTile::tileIndex(int sdim, unsigned int jamming) const
         {
             AssertFatal(!sizes.empty(), "MacroTile doesn't have sizes set.");
             int stride = 1;
@@ -242,7 +242,7 @@ namespace rocRoller
                 stride = stride * sizes[d];
             }
             return MacroTileIndex(sdim,
-                                  Expression::literal(static_cast<uint>(sizes.at(sdim)) * jamming),
+                                  Expression::literal(static_cast<unsigned int>(sizes.at(sdim)) * jamming),
                                   Expression::literal(stride));
         }
 
@@ -252,7 +252,7 @@ namespace rocRoller
             return product(sizes);
         }
 
-        uint MacroTile::paddingBytes() const
+        unsigned int MacroTile::paddingBytes() const
         {
             if(padBytesOfDim.empty())
                 return 0;
@@ -346,7 +346,7 @@ namespace rocRoller
         WaveTileNumber WaveTile::tileNumber(int sdim) const
         {
             return WaveTileNumber(sdim,
-                                  Expression::literal(static_cast<uint>(wsizes.at(sdim))),
+                                  Expression::literal(static_cast<unsigned int>(wsizes.at(sdim))),
                                   Expression::literal(1u));
         }
 
@@ -360,7 +360,7 @@ namespace rocRoller
                 stride = stride * sizes[d];
             }
             return WaveTileIndex(sdim,
-                                 Expression::literal(static_cast<uint>(sizes.at(sdim))),
+                                 Expression::literal(static_cast<unsigned int>(sizes.at(sdim))),
                                  Expression::literal(stride));
         }
 
@@ -369,7 +369,7 @@ namespace rocRoller
             return product(sizes);
         }
 
-        uint WaveTile::paddingBytes() const
+        unsigned int WaveTile::paddingBytes() const
         {
             if(padBytesOfDim.empty())
                 return 0;

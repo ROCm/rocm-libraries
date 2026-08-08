@@ -150,8 +150,8 @@ namespace rocRollerTest
         int N = 256;
 
         auto rng = RandomGenerator(316473u);
-        auto a   = rng.vector<uint>(
-            N, std::numeric_limits<uint>::min(), std::numeric_limits<uint>::max());
+        auto a   = rng.vector<unsigned int>(
+            N, std::numeric_limits<unsigned int>::min(), std::numeric_limits<unsigned int>::max());
 
         std::vector<float> result(a.size() * numF8PerElement);
 
