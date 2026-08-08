@@ -2119,8 +2119,9 @@ struct BlockFmhaBwdPipelineDefaultPolicy
             Problem::BlockFmhaShape::Gemm0WarpTile::at(number<0>{});
         static constexpr index_t WarpGemmN =
             Problem::BlockFmhaShape::Gemm0WarpTile::at(number<1>{});
-        static constexpr index_t WarpGemmK = WarpGemmM == 16 ? 16 : 8;
-        static constexpr index_t Gemm4MWarp =
+        static constexpr index_t WarpGemmK =
+            Problem::BlockFmhaShape::Gemm0WarpTile::at(number<2>{});
+	static constexpr index_t Gemm4MWarp =
             Problem::BlockFmhaShape::Gemm4BlockWarps::at(number<0>{});
         static constexpr index_t Gemm4NWarp =
             Problem::BlockFmhaShape::Gemm4BlockWarps::at(number<1>{});
