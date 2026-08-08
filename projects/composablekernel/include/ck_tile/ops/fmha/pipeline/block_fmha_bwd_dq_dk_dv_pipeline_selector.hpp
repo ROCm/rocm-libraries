@@ -6,6 +6,7 @@
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/fmha/pipeline/block_fmha_bwd_dq_dk_dv_pipeline_kr_ktr_vr.hpp"
 #include "ck_tile/ops/fmha/pipeline/block_fmha_bwd_dq_dk_dv_pipeline_kr_ktr_vr_iglp.hpp"
+#include "ck_tile/ops/fmha/pipeline/block_fmha_bwd_dq_dk_dv_pipeline_ldsacc_kr_ktr_vr.hpp"
 #include "ck_tile/ops/fmha/pipeline/block_fmha_bwd_dq_dk_dv_pipeline_trload_kr_ktr_vr.hpp"
 #include "ck_tile/ops/fmha/pipeline/block_fmha_bwd_dq_dk_dv_pipeline_trload_qr_qtr_dor.hpp"
 
@@ -25,9 +26,16 @@ class BlockFmhaBwdDQDKDVPipelineSelector
                            std::conditional_t<is_decode,
                                               BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR<TS...>,
                                               BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR<TS...>>,
-                           std::conditional_t<has_dpad1,
-                                              BlockFmhaBwdDQDKDVPipelineKRKTRVR<TS...>,
-                                              BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP<TS...>>>;
+                           std::conditional_t<
+                               has_dpad1,
+                               BlockFmhaBwdDQDKDVPipelineKRKTRVR<TS...>,
+                               // LdsAcc is the IGLP pipeline with the dK/dV
+                               // accumulators moved to LDS, so it slots in
+                               // wherever IGLP would have been chosen.
+                               std::conditional_t<
+                                   Problem::kUseLdsAcc,
+                                   BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR<TS...>,
+                                   BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP<TS...>>>>;
     using type = std::conditional_t<std::is_same_v<Policy, void>, //
                                     type_<Problem>,
                                     type_<Problem, Policy>>;
