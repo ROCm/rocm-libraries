@@ -1071,4 +1071,62 @@ TEST_F(TestTreeDataAdapter, RealisticRankingOrdersCorrectly)
     EXPECT_EQ(scored[2].second, "small_tile_low_cu");
 }
 
+// ========== Buffer ownership ==========
+
+TEST_F(TestTreeDataAdapter, OwnershipTransferPreservesModel)
+{
+    auto buffer = GbdtModelBuilder()
+                      .setNumFeatures(1)
+                      .setFeaturesHash(TEST_HASH)
+                      .addTree(makeLeafTree(2.5))
+                      .build();
+
+    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
+    ASSERT_NE(adapter, nullptr);
+
+    // The adapter copies the buffer, so clearing the caller's copy must not affect it.
+    // If the model pointer were derived from a moved-from vector this would read
+    // freed memory.
+    buffer.assign(buffer.size(), 0);
+    buffer.clear();
+    buffer.shrink_to_fit();
+
+    EXPECT_DOUBLE_EQ(adapter->score({0.0}), 2.5);
+}
+
+TEST_F(TestTreeDataAdapter, LoadFromBufferHandlesLargeBufferCorrectly)
+{
+    // A larger model makes the owning vector heap-allocate well past any small-buffer
+    // optimisation, so a dangling pointer would reliably fault rather than happen to work.
+    GbdtModelBuilder builder;
+    builder.setNumFeatures(4).setFeaturesHash(TEST_HASH);
+    for(int i = 0; i < 200; ++i)
+    {
+        builder.addTree(makeBinarySplitTree(0, static_cast<double>(i), 0.01, 0.02));
+    }
+    auto buffer = builder.build();
+
+    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
+    ASSERT_NE(adapter, nullptr);
+
+    buffer.clear();
+    buffer.shrink_to_fit();
+
+    EXPECT_TRUE(std::isfinite(adapter->score({0.0, 0.0, 0.0, 0.0})));
+}
+
+TEST_F(TestTreeDataAdapter, HashMismatchIsRejected)
+{
+    auto buffer = GbdtModelBuilder()
+                      .setNumFeatures(2)
+                      .setFeaturesHash("sha256:model_hash_abc")
+                      .addTree(makeLeafTree(1.0))
+                      .build();
+
+    auto adapter =
+        TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), "sha256:expected_hash_xyz");
+
+    EXPECT_EQ(adapter, nullptr);
+}
+
 } // namespace

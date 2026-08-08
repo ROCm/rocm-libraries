@@ -7,6 +7,7 @@
 #include <cmath>
 #include <fstream>
 
+#include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/gbdt_model_generated.h>
 
 namespace hipdnn_backend::heuristics::uhd
@@ -74,6 +75,11 @@ std::unique_ptr<TreeDataAdapter>
         model->features_hash() != nullptr ? model->features_hash()->str() : "";
     if(!expectedFeaturesHash.empty() && modelHash != expectedFeaturesHash)
     {
+        // Say which hashes disagreed. Returning a bare nullptr makes a
+        // descriptor/model pairing mistake indistinguishable from a missing or
+        // corrupt file once it surfaces as "adapter creation failed".
+        HIPDNN_SDK_LOG_WARN("TreeDataAdapter: features hash mismatch - model='"
+                           << modelHash << "' expected='" << expectedFeaturesHash << "'");
         return nullptr;
     }
 
@@ -101,10 +107,12 @@ std::unique_ptr<TreeDataAdapter>
     // Copy buffer to owned storage
     std::vector<uint8_t> ownedBuffer(buffer, buffer + size);
 
-    // Create the adapter with the owned buffer data pointer before moving
-    const uint8_t* bufferData = ownedBuffer.data();
+    // Resolve the model pointer before the move. As sibling arguments, the order of
+    // fb::GetGbdtModel(...) and std::move(ownedBuffer) is unspecified — if the move
+    // runs first, the pointer is derived from a moved-from vector.
+    const fb::GbdtModel* modelPtr = fb::GetGbdtModel(ownedBuffer.data());
     return std::unique_ptr<TreeDataAdapter>(new TreeDataAdapter(std::move(ownedBuffer),
-                                                                 fb::GetGbdtModel(bufferData),
+                                                                 modelPtr,
                                                                  modelHash,
                                                                  numFeatures,
                                                                  baseScore,
