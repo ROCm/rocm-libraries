@@ -33,6 +33,7 @@ import math
 MAX_SAFE_NUMERIC_LITERAL = 1e15
 
 __all__ = [
+    "FEATURE_NAMESPACES",
     "MAX_SAFE_NUMERIC_LITERAL",
     "build_features_signature",
     "canonicalize_signature",
@@ -41,13 +42,36 @@ __all__ = [
 ]
 
 
+#: Namespaces the runtime binds, per RFC 0019 7.1. A reference outside these resolves
+#: to nothing at selection time (FeatureExtractionContext binds exactly device/kernel/q
+#: in backend/src/heuristics/uhd/FeatureExtractor.cpp).
+FEATURE_NAMESPACES = ("device", "kernel", "q")
+
+
 def build_features_signature(feature_cols: list[str]) -> list[str]:
     """Build the RFC 0019 features_signature from training feature columns.
 
     Entries are bare field references (``$q.batch``) per RFC 0019 7.2 -- the canonical
     spelling the runtime's feature extractor expects.
 
+    Column names must be namespace-qualified (``q.batch``, ``kernel.tile_m``,
+    ``device.cu_count``). An unqualified name such as ``batch`` produces ``$batch``,
+    which the runtime cannot resolve: it binds only the three namespaces above, so
+    every selection throws "Undefined variable" and degrades to static order. Nothing
+    downstream catches it -- registration only inspects ``$kernel.``-prefixed
+    references -- so the descriptor would load, validate, and silently never score.
     """
+    unqualified = [
+        col for col in feature_cols if not col.startswith(tuple(f"{ns}." for ns in FEATURE_NAMESPACES))
+    ]
+    if unqualified:
+        raise ValueError(
+            "features must be namespace-qualified with one of "
+            f"{', '.join(FEATURE_NAMESPACES)}; got {unqualified}. "
+            "Rename the CSV columns (e.g. 'batch' -> 'q.batch', 'tile_m' -> "
+            "'kernel.tile_m', 'cu_count' -> 'device.cu_count'). An unqualified name "
+            "produces a descriptor that loads but never scores."
+        )
     return [f"${col}" for col in feature_cols]
 
 

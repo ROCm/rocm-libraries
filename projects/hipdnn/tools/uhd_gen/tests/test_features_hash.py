@@ -30,6 +30,32 @@ def test_signature_uses_bare_field_references():
     ]
 
 
+@pytest.mark.parametrize("namespace", ["q", "kernel", "device"])
+def test_accepts_every_runtime_namespace(namespace):
+    assert build_features_signature([f"{namespace}.field"]) == [f"${namespace}.field"]
+
+
+@pytest.mark.parametrize("column", ["batch", "tile_m", "cu_count", "M", "unknown.field"])
+def test_rejects_unqualified_feature_columns(column):
+    """An unqualified column yields a reference the runtime cannot bind.
+
+    The failure is silent end to end -- the descriptor loads, passes registration
+    (which only inspects $kernel.* refs), and then degrades on every selection -- so it
+    has to be caught here at emit time.
+    """
+    with pytest.raises(ValueError, match="namespace-qualified"):
+        build_features_signature([column])
+
+
+def test_rejection_names_only_the_offending_columns():
+    with pytest.raises(ValueError) as excinfo:
+        build_features_signature(["q.batch", "tile_m", "cu_count"])
+
+    # The blamed set is the list after "got"; q.batch also appears in the remediation
+    # hint, so match the list itself rather than searching the whole message.
+    assert "got ['tile_m', 'cu_count']" in str(excinfo.value)
+
+
 def test_hash_matches_runtime_canonical_form():
     """Pinned against FeatureExtractor::computeHash.
 

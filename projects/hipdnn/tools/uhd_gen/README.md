@@ -22,19 +22,38 @@ pip install -e .
 # Input CSV must have feature columns and a target column (default: tflops)
 python -m uhd_gen \
     --input benchmark_results.csv \
-    --features M N K tile_m tile_n tile_k cu_count \
+    --features q.M q.N q.K kernel.tile_m kernel.tile_n kernel.tile_k device.cu_count \
     --target tflops \
-    --group-by M N K \
+    --group-by q.M q.N q.K \
     --output-dir ./uhd_output \
     --name "GEMM UHD"
 ```
+
+### Feature columns must be namespace-qualified
+
+Every `--features` column has to start with `q.`, `kernel.`, or `device.` — the three
+namespaces the runtime binds (RFC 0019 §7.1):
+
+| Namespace | Source | Example |
+|-----------|--------|---------|
+| `q.` | Problem / query shape | `q.M`, `q.seqlen_q` |
+| `kernel.` | Per-candidate UKD metadata | `kernel.tile_m`, `kernel.split_k` |
+| `device.` | Device properties | `device.cu_count` |
+
+The tool rejects unqualified names, and has to: a bare `cu_count` becomes `$cu_count`
+in the signature, which the runtime cannot resolve. Every selection then throws
+`Undefined variable` and quietly degrades to static ordering. Nothing downstream
+catches it — descriptor registration only inspects `$kernel.`-prefixed references — so
+an unqualified descriptor loads, validates, and never once uses the model.
+
+Rename the columns in your CSV to match.
 
 ### Arguments
 
 | Argument | Required | Description |
 |----------|----------|-------------|
 | `--input` | Yes | Path to benchmark CSV/JSON |
-| `--features` | Yes | Feature column names (space-separated) |
+| `--features` | Yes | Namespace-qualified feature column names (space-separated) |
 | `--target` | No | Target column name (default: `tflops`) |
 | `--group-by` | No | Columns for GroupKFold CV |
 | `--output-dir` | Yes | Output directory |
@@ -88,7 +107,7 @@ output_dir/
   "id": "...",
   "name": "GEMM UHD",
   "adapter": "tree_data",
-  "features_signature": ["$M", "$N", "$K", ...],
+  "features_signature": ["$q.M", "$q.N", "$q.K", "$kernel.tile_m", ...],
   "features_hash": "sha256:...",
   "objective": "max",
   "score": {"units": "tflops", "calibrated": true, "transform": "log1p"},
