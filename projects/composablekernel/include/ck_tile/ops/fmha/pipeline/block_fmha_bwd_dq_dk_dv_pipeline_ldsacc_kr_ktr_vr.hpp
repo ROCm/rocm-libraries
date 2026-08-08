@@ -281,6 +281,8 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
         // disabled by the policy; workgroup_mask stays 0 (no cluster multicast).
         TDMConfig tdm_config_v;
         TDMConfig tdm_config_k;
+        TDMConfig tdm_config_q;
+        TDMConfig tdm_config_do;
         {
             constexpr auto LdsPaddingConfigV = Policy::template GetLdsPaddingConfigV<Problem>();
             tdm_config_v.pad_enable              = LdsPaddingConfigV[number<0>{}];
@@ -291,6 +293,16 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
             tdm_config_k.pad_enable              = LdsPaddingConfigK[number<0>{}];
             tdm_config_k.pad_config.pad_amount   = LdsPaddingConfigK[number<1>{}];
             tdm_config_k.pad_config.pad_interval = LdsPaddingConfigK[number<2>{}];
+
+            constexpr auto LdsPaddingConfigQ = Policy::template GetLdsPaddingConfigQ<Problem>();
+            tdm_config_q.pad_enable              = LdsPaddingConfigQ[number<0>{}];
+            tdm_config_q.pad_config.pad_amount   = LdsPaddingConfigQ[number<1>{}];
+            tdm_config_q.pad_config.pad_interval = LdsPaddingConfigQ[number<2>{}];
+
+            constexpr auto LdsPaddingConfigDO = Policy::template GetLdsPaddingConfigOGrad<Problem>();
+            tdm_config_do.pad_enable              = LdsPaddingConfigDO[number<0>{}];
+            tdm_config_do.pad_config.pad_amount   = LdsPaddingConfigDO[number<1>{}];
+            tdm_config_do.pad_config.pad_interval = LdsPaddingConfigDO[number<2>{}];
         }
 
         //------------------------------------------------------------------
@@ -341,26 +353,14 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
 
         auto pt_reg_tensor = make_static_distributed_tensor<GemmDataType>(
             Policy::template MakePTRegSliceBlockDescriptor<Problem>());
-        // QT: Reg -> Reg-> LDS
-        auto shuffled_q_block_tile = make_static_distributed_tensor<QDataType>(
-            Policy::template MakeShuffledQRegWriteBlockDescriptor<Problem>());
-
-        QDataType* qt_lds_ptr =
-            static_cast<QDataType*>(static_cast<void*>(static_cast<char*>(smem_ptr)));
-
-        auto shuffled_q_lds_write = make_tensor_view<address_space_enum::lds>(
-            qt_lds_ptr, Policy::template MakeShuffledQLdsWriteBlockDescriptor<Problem>());
-
-        auto shuffled_q_lds_write_window = make_tile_window(
-            shuffled_q_lds_write, make_tuple(number<kM0>{}, number<kQKHeaddim>{}), {0, 0});
-
-        auto qt_lds_read = make_tensor_view<address_space_enum::lds>(
-            qt_lds_ptr, Policy::template MakeQTLdsReadBlockDescriptor<Problem>());
-
+        // Q^T: read transposed out of the single Q box. The shuffle and the
+        // second LDS copy it fed are gone -- ds_load_tr16_b128 does the
+        // transpose in hardware. Q's shuffle ran once per Q-loop iteration, so
+        // this removes hot-loop work, unlike K's which was once per block.
         auto qt_lds_read_window =
-            make_tile_window(qt_lds_read,
-                             make_tuple(number<kQKHeaddim>{}, number<kM0>{}),
-                             {0, 0},
+            make_tile_window(q_lds_window.get_bottom_tensor_view(),
+                             make_tuple(number<kM0>{}, number<kQKHeaddim>{}),
+                             q_lds_window.get_window_origin(),
                              Policy::template MakeQTRegSliceBlockDescriptor<Problem>());
 
         // dO: HBM ->Reg ->LDS
@@ -384,27 +384,16 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
                              make_tuple(number<kM0>{}, number<kK2>{}),
                              do_lds_window.get_window_origin(),
                              Policy::template MakeOGradRegSliceBlockDescriptor<Problem>());
-        // dOT: Reg ->Reg ->LDS
-        auto shuffled_do_block_tile = make_static_distributed_tensor<OGradDataType>(
-            Policy::template MakeShuffledOGradRegWriteBlockDescriptor<Problem>());
-
-        OGradDataType* dot_lds_ptr = static_cast<OGradDataType*>(static_cast<void*>(
-            static_cast<char*>(smem_ptr) + Policy::template GetSmemSizeQT<Problem>() +
-            Policy::template GetSmemSizeOGrad<Problem>()));
-
-        auto shuffled_do_lds_write = make_tensor_view<address_space_enum::lds>(
-            dot_lds_ptr, Policy::template MakeShuffledOGradLdsWriteBlockDescriptor<Problem>());
-
-        auto shuffled_do_lds_write_window = make_tile_window(
-            shuffled_do_lds_write, make_tuple(number<kM0>{}, number<kVHeaddim>{}), {0, 0});
-
-        auto dot_read_lds = make_tensor_view<address_space_enum::lds>(
-            dot_lds_ptr, Policy::template MakeOGradTLdsReadBlockDescriptor<Problem>());
-
+        // dO^T: read transposed straight out of the single dO box.
+        //
+        // There used to be a second LDS copy here, produced by shuffling
+        // do_block_tile in registers, so gemm_1 could read dO^T with a plain
+        // load_tile. ds_load_tr16_b128 does that in hardware. Unlike K, dO is
+        // reloaded every Q iteration, so this shuffle was in the hot loop.
         auto dot_lds_read_window =
-            make_tile_window(dot_read_lds,
-                             make_tuple(number<kVHeaddim>{}, number<kM0>{}),
-                             {0, 0},
+            make_tile_window(do_lds_window.get_bottom_tensor_view(),
+                             make_tuple(number<kM0>{}, number<kVHeaddim>{}),
+                             do_lds_window.get_window_origin(),
                              Policy::template MakeOGradTRegSliceBlockDescriptor<Problem>());
 
         // dS: Reg -> Reg -> LDS
@@ -547,13 +536,12 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
         /*
          * Prefetch Q, LSE, dO, D
          */
-        auto q_block_tile = load_tile(q_dram_window);
-        move_tile_window(q_dram_window, {kM0, 0});
+        // Q and dO go global -> LDS by TDM, so nothing is prefetched into
+        // registers here. Their DRAM windows are advanced only after the
+        // transfer has been issued, because TDM reads at issue time whereas the
+        // old load_tile read before the advance.
         auto lse_block_tile = load_tile(lse_dram_window);
         move_tile_window(lse_dram_window, {kM0});
-
-        auto do_block_tile = load_tile(do_dram_window);
-        move_tile_window(do_dram_window, {kM0, 0});
 
         auto d_block_tile = load_tile(d_dram_window);
         move_tile_window(d_dram_window, {kM0});
@@ -562,17 +550,18 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
          * Store prefetched data into LDS
          */
         block_sync_lds();
-        store_tile(q_lds_window, q_block_tile);
-        shuffle_tile(shuffled_q_block_tile, q_block_tile);
-        store_tile(shuffled_q_lds_write_window, shuffled_q_block_tile);
+        load_tile_tdm(tdm_config_q, q_lds_window, q_dram_window);
+        move_tile_window(q_dram_window, {kM0, 0});
 
         store_tile(lse_lds_write_window, lse_block_tile);
 
-        store_tile(do_lds_window, do_block_tile);
-        shuffle_tile(shuffled_do_block_tile, do_block_tile);
-        store_tile(shuffled_do_lds_write_window, shuffled_do_block_tile);
+        load_tile_tdm(tdm_config_do, do_lds_window, do_dram_window);
+        move_tile_window(do_dram_window, {kM0, 0});
 
         store_tile(d_lds_write_window, d_block_tile);
+        // Q and dO now arrive by TDM, which commits on TENSORcnt; block_sync_lds
+        // only covers the LSE/D stores that still go through dscnt.
+        s_wait_tensorcnt_barrier<0>();
         block_sync_lds();
 
         /*
@@ -604,21 +593,15 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
             // STAGE 1, Q@K Gemm0
             auto s_acc = SPBlockTileType{};
 
-            q_block_tile = load_tile(q_dram_window);
-            move_tile_window(q_dram_window, {kM0, 0});
-
             lse_block_tile = load_tile(lse_dram_window);
             move_tile_window(lse_dram_window, {kM0});
-
-            do_block_tile = load_tile(do_dram_window);
-            move_tile_window(do_dram_window, {kM0, 0});
 
             d_block_tile = load_tile(d_dram_window);
             move_tile_window(d_dram_window, {kM0});
 
             s_acc = gemm_0(q_reg_tensor, k_reg_tensor);
 
-            auto dot_reg_tensor = load_tile(dot_lds_read_window);
+            auto dot_reg_tensor = load_tile_transpose(dot_lds_read_window);
 
             HotLoopScheduler::template GemmStagedScheduler<0>();
             __builtin_amdgcn_sched_barrier(0);
@@ -738,7 +721,7 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
                 store_tile(dv_acc_lds_window, dv_acc);
             }
 
-            auto qt_reg_tensor = load_tile(qt_lds_read_window);
+            auto qt_reg_tensor = load_tile_transpose(qt_lds_read_window);
 
             HotLoopScheduler::template GemmStagedScheduler<1>();
             __builtin_amdgcn_sched_barrier(0);
@@ -749,17 +732,17 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
 
             block_sync_lds();
 
-            store_tile(q_lds_window, q_block_tile);
-            shuffle_tile(shuffled_q_block_tile, q_block_tile);
-            store_tile(shuffled_q_lds_write_window, shuffled_q_block_tile);
+            load_tile_tdm(tdm_config_q, q_lds_window, q_dram_window);
+            move_tile_window(q_dram_window, {kM0, 0});
 
             store_tile(lse_lds_write_window, lse_block_tile);
 
-            store_tile(do_lds_window, do_block_tile);
-            shuffle_tile(shuffled_do_block_tile, do_block_tile);
-            store_tile(shuffled_do_lds_write_window, shuffled_do_block_tile);
+            load_tile_tdm(tdm_config_do, do_lds_window, do_dram_window);
+            move_tile_window(do_dram_window, {kM0, 0});
 
             store_tile(d_lds_write_window, d_block_tile);
+            // same as the prologue: Q/dO are on TENSORcnt now
+            s_wait_tensorcnt_barrier<0>();
 
             HotLoopScheduler::template GemmStagedScheduler<2>();
             __builtin_amdgcn_sched_barrier(0);
@@ -997,7 +980,7 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
 
         Policy::template PTFromGemm0CToGemm1A<Problem, decltype(pt_reg_tensor), decltype(p_gemm)>(
             pt_reg_tensor, p_gemm);
-        auto dot_reg_tensor = load_tile(dot_lds_read_window);
+        auto dot_reg_tensor = load_tile_transpose(dot_lds_read_window);
         {
             auto dv_acc = load_tile(dv_acc_lds_window);
             gemm_1(dv_acc, pt_reg_tensor, dot_reg_tensor);
@@ -1010,7 +993,7 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
         // STAGE 4, OGrad@V Gemm2
         auto dp_acc = SPGradBlockTileType{};
 
-        auto qt_reg_tensor = load_tile(qt_lds_read_window);
+        auto qt_reg_tensor = load_tile_transpose(qt_lds_read_window);
 
         dp_acc = gemm_2(do_reg_tensor, v_reg_tensor);
 

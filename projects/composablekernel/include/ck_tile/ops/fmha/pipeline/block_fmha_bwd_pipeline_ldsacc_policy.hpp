@@ -148,6 +148,156 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
         return make_tuple(number<false>{}, number<0>{}, number<0>{});
     }
 
+    // ---- dO: one plain box, dO^T read back by ds_load_tr --------------------
+    //
+    // Exactly the K story one operand over: dO was materialised twice, the
+    // second copy produced by shuffle_tile purely so gemm_1 could read dO^T with
+    // a plain load_tile. ds_load_tr16_b128 does it in hardware, so the shuffle,
+    // its staging tile and the second copy all go.
+    //
+    // Unlike K, dO is re-loaded every Q iteration, so the shuffle this removes
+    // was in the hot loop.
+    //
+    // Verified on gfx1250 against the shuffle path as reference: both produce
+    // dO^T with zero mismatches over the whole tile.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeOGradLdsBlockDescriptor()
+    {
+        using OGradDataType          = typename Problem::OGradDataType;
+        constexpr index_t kMPerBlock = Problem::BlockFmhaShape::kM0;
+        constexpr index_t kKPerBlock = Problem::BlockFmhaShape::kVHeaddim;
+        constexpr index_t kKPack     = 16 / sizeof(OGradDataType);
+
+        return make_naive_tensor_descriptor(
+            make_tuple(number<kMPerBlock>{}, number<kKPerBlock>{}),
+            make_tuple(number<kKPerBlock>{}, number<1>{}),
+            number<kKPack>{},
+            number<1>{});
+    }
+
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSizeOGrad()
+    {
+        return sizeof(typename Problem::OGradDataType) *
+               MakeOGradLdsBlockDescriptor<Problem>().get_element_space_size();
+    }
+
+    // the shuffled staging area is gone
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSizeOGradT()
+    {
+        return 0;
+    }
+
+    // Same encoding the base policy builds for gemm_1's B operand, wrapped so
+    // that load_tile_transpose fills it.
+    template <typename Problem>
+    CK_TILE_DEVICE static constexpr auto MakeOGradTRegSliceBlockDescriptor()
+    {
+        using BlockGemm = remove_cvref_t<decltype(GetPTOGradTBlockGemm<Problem>())>;
+        using WarpGemm  = typename BlockGemm::WarpGemm;
+
+        constexpr index_t MWarp = Problem::BlockFmhaShape::Gemm1BlockWarps::at(number<0>{});
+        constexpr index_t NWarp = Problem::BlockFmhaShape::Gemm1BlockWarps::at(number<1>{});
+
+        constexpr index_t kNPerBlock = Problem::BlockFmhaShape::kVHeaddim;
+        // constexpr index_t kNPerBlock = 32;
+        constexpr index_t kKPerBlock = Problem::BlockFmhaShape::kK1;
+
+        constexpr index_t NIterPerWarp = kNPerBlock / (NWarp * WarpGemm::kN);
+        constexpr index_t KIterPerWarp = kKPerBlock / WarpGemm::kK;
+
+        constexpr auto dot_block_outer_dstr_encoding =
+            tile_distribution_encoding<sequence<MWarp>,
+                                       tuple<sequence<NIterPerWarp, NWarp>, sequence<KIterPerWarp>>,
+                                       tuple<sequence<0, 1>>,
+                                       tuple<sequence<0, 1>>,
+                                       sequence<1, 2>,
+                                       sequence<0, 0>>{};
+
+        constexpr auto dot_block_dstr_encode = detail::make_embed_tile_distribution_encoding(
+            dot_block_outer_dstr_encoding, typename WarpGemm::BWarpDstrEncoding{});
+        // CK_PRINT<typename WarpGemm::BWarpDstrEncoding>();
+        // CK_PRINT<decltype(dot_block_dstr_encode)>();
+
+        return make_static_tile_distribution(
+            typename InputTileDistributionTraits<
+                decltype(dot_block_dstr_encode),
+                typename Problem::OGradDataType>::TransposedDstrEncode{});
+    }
+
+    // ---- Q: one plain box, Q^T read back by ds_load_tr ----------------------
+    //
+    // Same treatment as K and dO. Q was materialised twice -- once as-is for
+    // gemm_0 and once through shuffle_tile into a second LDS copy so gemm_3
+    // could read Q^T with a plain load_tile. ds_load_tr16_b128 removes the need
+    // for both, and Q's shuffle sits in the Q loop, so it ran once per iteration
+    // rather than once per block the way K's did.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeQLdsBlockDescriptor()
+    {
+        using QDataType              = typename Problem::QDataType;
+        constexpr index_t kMPerBlock = Problem::BlockFmhaShape::kM0;
+        constexpr index_t kKPerBlock = Problem::BlockFmhaShape::kQKHeaddim;
+        constexpr index_t kKPack     = 16 / sizeof(QDataType);
+
+        return make_naive_tensor_descriptor(
+            make_tuple(number<kMPerBlock>{}, number<kKPerBlock>{}),
+            make_tuple(number<kKPerBlock>{}, number<1>{}),
+            number<kKPack>{},
+            number<1>{});
+    }
+
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSizeQ()
+    {
+        return sizeof(typename Problem::QDataType) *
+               MakeQLdsBlockDescriptor<Problem>().get_element_space_size();
+    }
+
+    // The shuffled Q copy is gone.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSizeQT()
+    {
+        return 0;
+    }
+
+    // gemm_3's B operand, wrapped so load_tile_transpose fills it -- the base
+    // policy returns the same encoding unwrapped, for a plain read off the
+    // pre-shuffled copy.
+    template <typename Problem>
+    CK_TILE_DEVICE static constexpr auto MakeQTRegSliceBlockDescriptor()
+    {
+        using BlockGemm       = remove_cvref_t<decltype(GetSGradTQTBlockGemm<Problem>())>;
+        constexpr auto config = BlockGemm::Policy::template GetWarpGemmMWarpNWarp<Problem>();
+        using WarpGemm        = remove_cvref_t<decltype(config.template at<0>())>;
+
+        constexpr index_t MWarp = Problem::BlockFmhaShape::Gemm3BlockWarps::at(number<0>{});
+        constexpr index_t NWarp = Problem::BlockFmhaShape::Gemm3BlockWarps::at(number<1>{});
+
+        constexpr index_t kNPerBlock = Problem::BlockFmhaShape::kQKHeaddim;
+        constexpr index_t kKPerBlock = Problem::BlockFmhaShape::kK3;
+
+        constexpr index_t NIterPerWarp = kNPerBlock / (NWarp * WarpGemm::kN);
+        constexpr index_t KIterPerWarp = kKPerBlock / WarpGemm::kK;
+
+        constexpr auto qt_block_outer_dstr_encoding =
+            tile_distribution_encoding<sequence<MWarp>,
+                                       tuple<sequence<NIterPerWarp, NWarp>, sequence<KIterPerWarp>>,
+                                       tuple<sequence<0, 1>>,
+                                       tuple<sequence<0, 1>>,
+                                       sequence<1, 2>,
+                                       sequence<0, 0>>{};
+
+        constexpr auto qt_block_dstr_encode = detail::make_embed_tile_distribution_encoding(
+            qt_block_outer_dstr_encoding, typename WarpGemm::BWarpDstrEncoding{});
+
+        return make_static_tile_distribution(
+            typename InputTileDistributionTraits<
+                decltype(qt_block_dstr_encode),
+                typename Problem::QDataType>::TransposedDstrEncode{});
+    }
+
     // ---- V staged into LDS by TDM -------------------------------------------
     //
     // V used to go global -> registers (load_tile) -> LDS (store_tile). TDM
@@ -309,6 +459,59 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
     {
         return GetSmemSizeStaged<Problem>() + GetSmemSizeKGradAcc<Problem>() +
                GetSmemSizeVGradAcc<Problem>();
+    }
+
+    // Q and dO DRAM distributions for TDM: trivial tile-major, same reasoning as
+    // K and V. The inherited ones scatter each row across lanes so load_tile can
+    // assemble a register tile; TDM builds no register tile.
+    template <typename Problem>
+    CK_TILE_DEVICE static constexpr auto MakeQDramTileDistribution()
+    {
+        constexpr index_t kRows    = Problem::BlockFmhaShape::kM0;
+        constexpr index_t kCols    = Problem::BlockFmhaShape::kQKHeaddim;
+        constexpr index_t warpNum  = Problem::BlockFmhaShape::NumWarps;
+        static_assert(kRows % warpNum == 0, "kM0 must divide by the warp count");
+
+        return make_static_tile_distribution(
+            tile_distribution_encoding<sequence<>,
+                                       tuple<sequence<warpNum, kRows / warpNum>,
+                                             sequence<kCols>>,
+                                       tuple<sequence<1>>,
+                                       tuple<sequence<0>>,
+                                       sequence<1, 2>,
+                                       sequence<1, 0>>{},
+            bool_constant<true>{});
+    }
+
+    template <typename Problem>
+    CK_TILE_DEVICE static constexpr auto MakeOGradDramTileDistribution()
+    {
+        constexpr index_t kRows    = Problem::BlockFmhaShape::kM0;
+        constexpr index_t kCols    = Problem::BlockFmhaShape::kVHeaddim;
+        constexpr index_t warpNum  = Problem::BlockFmhaShape::NumWarps;
+        static_assert(kRows % warpNum == 0, "kM0 must divide by the warp count");
+
+        return make_static_tile_distribution(
+            tile_distribution_encoding<sequence<>,
+                                       tuple<sequence<warpNum, kRows / warpNum>,
+                                             sequence<kCols>>,
+                                       tuple<sequence<1>>,
+                                       tuple<sequence<0>>,
+                                       sequence<1, 2>,
+                                       sequence<1, 0>>{},
+            bool_constant<true>{});
+    }
+
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr auto GetLdsPaddingConfigQ()
+    {
+        return make_tuple(number<false>{}, number<0>{}, number<0>{});
+    }
+
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr auto GetLdsPaddingConfigOGrad()
+    {
+        return make_tuple(number<false>{}, number<0>{}, number<0>{});
     }
 
     template <typename Problem>
