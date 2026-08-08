@@ -830,13 +830,14 @@ TEST_F(TestPointwisePlan, CompareGreaterProducesBooleanMask)
     auto* output
         = static_cast<Tensor<bool>*>(&tensorBundle.getTensor(attributes.out_0_tensor_uid()));
 
-    constexpr float input0Values[] = {-2.0f, 0.0f, 3.0f, 4.0f};
-    constexpr float input1Values[] = {-3.0f, 0.0f, 5.0f, 1.0f};
-    constexpr bool expected[] = {true, false, false, true};
+    constexpr std::array INPUT0_VALUES = {-2.0f, 0.0f, 3.0f, 4.0f};
+    constexpr std::array INPUT1_VALUES = {-3.0f, 0.0f, 5.0f, 1.0f};
+    constexpr std::array EXPECTED = {true, false, false, true};
     for(int64_t width = 0; width < 4; ++width)
     {
-        input0->setHostValue(input0Values[width], 0, 0, 0, width);
-        input1->setHostValue(input1Values[width], 0, 0, 0, width);
+        const auto widthIndex = static_cast<size_t>(width);
+        input0->setHostValue(INPUT0_VALUES[widthIndex], 0, 0, 0, width);
+        input1->setHostValue(INPUT1_VALUES[widthIndex], 0, 0, 0, width);
     }
     input0->markHostModified();
     input1->markHostModified();
@@ -846,7 +847,8 @@ TEST_F(TestPointwisePlan, CompareGreaterProducesBooleanMask)
 
     for(int64_t width = 0; width < 4; ++width)
     {
-        EXPECT_EQ(output->getHostValue(0, 0, 0, width), expected[width]);
+        const auto widthIndex = static_cast<size_t>(width);
+        EXPECT_EQ(output->getHostValue(0, 0, 0, width), EXPECTED[widthIndex]);
     }
 }
 

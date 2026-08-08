@@ -453,7 +453,7 @@ TYPED_TEST(ReluPointwiseOperationsCpuGraphExecutor, ReluBackwardUpperBoundOnlyAb
     PointwiseReluTestHelper::runReluBwdTest<TypeParam>(params);
 }
 
-TEST(PointwiseOperationsCpuGraphExecutor, PreluBackwardComposedGraph)
+TEST(PointwiseOperationsCpuGraphExecutor, PreluForwardBackwardComposedGraph)
 {
     const std::vector<int64_t> tensorDims = {1, 2, 2, 2};
     const std::vector<int64_t> alphaDims = {1, 2, 1, 1};
@@ -463,6 +463,7 @@ TEST(PointwiseOperationsCpuGraphExecutor, PreluBackwardComposedGraph)
     Tensor<float> x(tensorDims);
     Tensor<float> alpha(alphaDims);
     Tensor<float> zero(scalarDims);
+    Tensor<float> y(tensorDims);
     Tensor<float> dx(tensorDims);
     Tensor<float> dalpha(alphaDims);
 
@@ -503,6 +504,17 @@ TEST(PointwiseOperationsCpuGraphExecutor, PreluBackwardComposedGraph)
     compareAttrs.set_name("positive_mask").set_mode(hipdnn_frontend::PointwiseMode::CMP_GT);
     auto positiveMask = graph->pointwise(xTensor, zeroTensor, compareAttrs);
     configureOutput(positiveMask, hipdnn_frontend::DataType::BOOLEAN, tensorDims);
+
+    hipdnn_frontend::graph::PointwiseAttributes multiplyXAlphaAttrs;
+    multiplyXAlphaAttrs.set_name("x_times_alpha").set_mode(hipdnn_frontend::PointwiseMode::MUL);
+    auto xTimesAlpha = graph->pointwise(xTensor, alphaTensor, multiplyXAlphaAttrs);
+    configureOutput(xTimesAlpha, hipdnn_frontend::DataType::FLOAT, tensorDims);
+
+    hipdnn_frontend::graph::PointwiseAttributes ySelectAttrs;
+    ySelectAttrs.set_name("y_select").set_mode(hipdnn_frontend::PointwiseMode::BINARY_SELECT);
+    auto yTensor = graph->pointwise(xTensor, xTimesAlpha, positiveMask, ySelectAttrs);
+    configureOutput(yTensor, hipdnn_frontend::DataType::FLOAT, tensorDims);
+    yTensor->set_output(true);
 
     hipdnn_frontend::graph::PointwiseAttributes multiplyAlphaAttrs;
     multiplyAlphaAttrs.set_name("dy_times_alpha").set_mode(hipdnn_frontend::PointwiseMode::MUL);
@@ -567,6 +579,7 @@ TEST(PointwiseOperationsCpuGraphExecutor, PreluBackwardComposedGraph)
         {xTensor->get_uid(), x.memory().hostData()},
         {alphaTensor->get_uid(), alpha.memory().hostData()},
         {zeroTensor->get_uid(), zero.memory().hostData()},
+        {yTensor->get_uid(), y.memory().hostData()},
         {dxTensor->get_uid(), dx.memory().hostData()},
         {dalphaTensor->get_uid(), dalpha.memory().hostData()},
     };
@@ -585,6 +598,8 @@ TEST(PointwiseOperationsCpuGraphExecutor, PreluBackwardComposedGraph)
                 const float dyValue = dy.getHostValue(0, channel, height, width);
                 const float xValue = x.getHostValue(0, channel, height, width);
                 const bool positive = xValue > 0.0f;
+                EXPECT_FLOAT_EQ(y.getHostValue(0, channel, height, width),
+                                positive ? xValue : xValue * alphaValue);
                 EXPECT_FLOAT_EQ(dx.getHostValue(0, channel, height, width),
                                 positive ? dyValue : dyValue * alphaValue);
                 if(!positive)
