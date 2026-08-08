@@ -11,9 +11,7 @@ Documentation for rocSPARSE is available at
 * Added batched support to the SpMM algorithm `rocsparse_spmm_alg_csr_nnz_split`.
 
 ### Resolved issues
-* Fixed the atomic COO algorithm in `rocsparse_spmm`, which failed with `hipErrorInvalidConfiguration` for batch counts greater than 65,535 because the kernel launch grid exceeded the maximum supported batch dimension.
-* Fixed `rocsparse_spmm` with the segmented atomic COO algorithm, which failed with `hipErrorInvalidConfiguration` for batch counts exceeding 65535 because the batch dimension of the kernel launch grid exceeded the maximum grid dimension.
-* Fixed `rocsparse_spmm` with the row-split CSR algorithm, which failed with `hipErrorInvalidConfiguration` for batch counts exceeding 65535 because the batch dimension of the kernel launch grid exceeded the maximum grid dimension.
+* Fixed `rocsparse_spmm` with the segmented COO, atomic COO, segmented-atomic COO, and row-split CSR algorithms, which failed with `hipErrorInvalidConfiguration` for batch counts exceeding 65535 because the batch dimension of the kernel launch grid exceeded the maximum supported grid dimension.
 * Fixed an issue with `rocsparse_spmm` when using the nnz-split algorithm with the CSR or CSC format. The operation produced incorrect results because the segmented-block-reduction helper had shared-memory pointer parameters marked `__restrict__`, while threads in the block must read values written by other threads. The `__restrict__` attribute has now been removed.
 
 ## rocSPARSE 5.0.0 for ROCm 10.0

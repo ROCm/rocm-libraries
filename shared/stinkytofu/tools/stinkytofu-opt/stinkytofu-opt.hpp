@@ -36,6 +36,7 @@
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
 #include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
+#include "stinkytofu/transforms/asm/Gfx1250HazardPass.hpp"
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
 #include "stinkytofu/transforms/asm/InsertCoexecHazardPass.hpp"
 #include "stinkytofu/transforms/asm/InsertDelayAluPass.hpp"
@@ -104,6 +105,12 @@ const std::vector<PassInfo> availablePasses = {
          WaitCntInsertionOptions options;
          options.enableLoopCarriedTokenDeps = hasPassArg(args, "enableLoopCarriedTokenDeps");
          return createStinkyWaitCntInsertionPass(options);
+     }},
+    // Gfx1250HazardPass accepts:
+    //   profile — print the xcnt drain summary (per rule and drain site) to stderr
+    {"Gfx1250HazardPass",
+     [](const std::vector<std::string>& args) {
+         return createGfx1250HazardPass({}, hasPassArg(args, "profile"));
      }},
     // BuildUseDefChainPass accepts:
     //   includePseudo    — also build chains for pseudo registers (memtokens)
