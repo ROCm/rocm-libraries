@@ -96,8 +96,8 @@ int main(int argc, char** argv) noexcept
         parser.add_argument("--allow-bundles")
             .default_value(true)
             .implicit_value(true)
-            .help("Enable bundle test registration (default: true — bundles are the "
-                  "CI driver). Disable with --no-bundles or HIPDNN_TEST_ALLOW_BUNDLES=0.");
+            .help("Retained no-op alias (bundles are always enabled by default). "
+                  "Disable with --no-bundles or HIPDNN_TEST_ALLOW_BUNDLES=0.");
         parser.add_argument("--no-bundles")
             .default_value(false)
             .implicit_value(true)
@@ -177,12 +177,9 @@ int main(int argc, char** argv) noexcept
             }
         }
 
-        // Parse --allow-bundles / --no-bundles, --golden-data-dir, --verification-mode.
-        // Bundles are on by default; --no-bundles is the explicit opt-out and wins over
-        // a redundant --allow-bundles. HIPDNN_TEST_ALLOW_BUNDLES (handled in TestConfig)
-        // overrides both.
-        auto allowBundles
-            = parser.get<bool>("--allow-bundles") && !parser.get<bool>("--no-bundles");
+        // Bundles are on by default; --no-bundles is the explicit opt-out.
+        // HIPDNN_TEST_ALLOW_BUNDLES (handled in TestConfig) overrides.
+        auto allowBundles = !parser.get<bool>("--no-bundles");
 
         std::optional<std::filesystem::path> goldenDataDir;
         if(parser.is_used("--golden-data-dir"))
@@ -328,6 +325,15 @@ int main(int argc, char** argv) noexcept
         }
 
         hipdnn_integration_tests::bundle::registerBundleTests();
+
+        if(::testing::UnitTest::GetInstance()->test_to_run_count() == 0
+           && hipdnn_integration_tests::TestConfig::get().allowBundles())
+        {
+            std::cerr << "Error: zero tests registered (bundles are enabled but none were "
+                         "discovered — check the bundle data directory).\n";
+            static_cast<void>(hipStreamDestroy(stream));
+            return 1;
+        }
 
         const int result = RUN_ALL_TESTS();
 

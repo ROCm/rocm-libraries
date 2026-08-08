@@ -81,6 +81,9 @@ macro(_build_external_integration_command out_var)
         --test-article $<TARGET_FILE:${ARG_PLUGIN_TARGET}>
         --test-engine ${ARG_ENGINE_NAME}
     )
+    if(HIPDNN_INTEGRATION_TEST_BUNDLE_DIR)
+        list(APPEND ${out_var} "--gd" "${HIPDNN_INTEGRATION_TEST_BUNDLE_DIR}")
+    endif()
     if(ARG_TEST_CONFIG)
         list(APPEND ${out_var} "--test-config" "${ARG_TEST_CONFIG}")
     endif()
@@ -119,8 +122,13 @@ macro(_stage_external_integration_install_test)
         file(RELATIVE_PATH _install_bin "${_install_cwd_abs}" "${_bin_abs}")
         file(RELATIVE_PATH _install_plugin "${_install_cwd_abs}" "${_plugin_abs}")
 
+        set(_bundle_dir_abs
+            "${_synthetic_root}/${CMAKE_INSTALL_LIBDIR}/integration-test-bundles"
+        )
+        file(RELATIVE_PATH _install_bundle_dir "${_install_cwd_abs}" "${_bundle_dir_abs}")
+
         if(NOT _GENERATE_EXTERNAL_CATEGORY_SUITES)
-            set(_install_cmd "add_test(\"${ARG_TARGET_NAME}\" \"${_install_bin}\" \"--test-article\" \"${_install_plugin}\" \"--test-engine\" \"${ARG_ENGINE_NAME}\"")
+            set(_install_cmd "add_test(\"${ARG_TARGET_NAME}\" \"${_install_bin}\" \"--test-article\" \"${_install_plugin}\" \"--test-engine\" \"${ARG_ENGINE_NAME}\" \"--gd\" \"${_install_bundle_dir}\"")
             if(ARG_TEST_CONFIG)
                 string(APPEND _install_cmd " \"--test-config\" \"${_install_config}\"")
             endif()
@@ -155,6 +163,9 @@ macro(_add_external_integration_category_suites)
             "--test-article" "$<TARGET_FILE:${ARG_PLUGIN_TARGET}>"
             "--test-engine" "${ARG_ENGINE_NAME}"
         )
+        if(HIPDNN_INTEGRATION_TEST_BUNDLE_DIR)
+            list(APPEND _category_command_args "--gd" "${HIPDNN_INTEGRATION_TEST_BUNDLE_DIR}")
+        endif()
         if(ARG_TEST_CONFIG)
             list(APPEND _category_command_args "--test-config" "${ARG_TEST_CONFIG}")
         endif()
@@ -179,6 +190,7 @@ macro(_add_external_integration_category_suites)
             set(_category_install_command_args
                 "--test-article" "${_install_plugin}"
                 "--test-engine" "${ARG_ENGINE_NAME}"
+                "--gd" "${_install_bundle_dir}"
             )
             if(ARG_TEST_CONFIG)
                 list(APPEND _category_install_command_args "--test-config" "${_install_config}")

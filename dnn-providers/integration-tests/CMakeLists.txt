@@ -117,6 +117,10 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 # under integration-test-bundles/, re-run cmake to pick up the changes.
 file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/integration-test-bundles/"
      DESTINATION "${CMAKE_BINARY_DIR}/lib/integration-test-bundles")
+
+set(HIPDNN_INTEGRATION_TEST_BUNDLE_DIR "${CMAKE_BINARY_DIR}/lib/integration-test-bundles"
+    CACHE INTERNAL "Path to integration test bundle data (build tree)")
+
 if(Python3_FOUND)
     add_test(
         NAME hipdnn_bundle_verifier_python_tests

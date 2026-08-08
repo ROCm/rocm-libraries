@@ -3,8 +3,5 @@
 
 add_cpp_graph_test_sources(
     IntegrationGpuSdpaBackward.cpp
-)
-
-add_cpp_graph_test_sources(
     IntegrationGpuSdpaFwdInference.cpp
 )
