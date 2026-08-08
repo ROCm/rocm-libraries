@@ -32,6 +32,25 @@ void VariableContext::bindNamespace(const std::string& ns,
     }
 }
 
+void VariableContext::clearNamespace(const std::string& ns)
+{
+    std::string prefix = "$";
+    prefix += ns;
+    prefix += ".";
+
+    for(auto it = _bindings.begin(); it != _bindings.end();)
+    {
+        if(it->first.rfind(prefix, 0) == 0)
+        {
+            it = _bindings.erase(it);
+        }
+        else
+        {
+            ++it;
+        }
+    }
+}
+
 std::optional<double> VariableContext::resolveDouble(const std::string& name) const
 {
     auto it = _bindings.find(name);

@@ -219,4 +219,30 @@ void EngineRegistry::clear()
     _engines.clear();
 }
 
+std::shared_ptr<FeatureExtractor> EngineRegistry::getOrCreateExtractor(int64_t engineId) const
+{
+    const std::lock_guard<std::mutex> lock(_mutex);
+    const auto it = _engines.find(engineId);
+    if(it == _engines.end())
+    {
+        return nullptr;
+    }
+
+    auto& entry = it->second;
+
+    // Return cached extractor if available
+    if(entry.cachedExtractor != nullptr)
+    {
+        return entry.cachedExtractor;
+    }
+
+    // Create extractor from features signature if non-empty
+    if(!entry.uhdConfig.featuresSignature.empty())
+    {
+        entry.cachedExtractor = std::make_shared<FeatureExtractor>(entry.uhdConfig.featuresSignature);
+    }
+
+    return entry.cachedExtractor;
+}
+
 } // namespace hipdnn_backend::heuristics::uhd

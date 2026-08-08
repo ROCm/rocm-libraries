@@ -150,10 +150,9 @@ public:
                                      const FeatureExtractionContext::ValueMap& queryVars);
 
 private:
-    /// Build feature vector for a candidate.
-    static std::vector<double> buildFeatureVector(const FeatureExtractor& extractor,
-                                                  const FeatureExtractionContext& ctx,
-                                                  const KernelCandidate& candidate);
+    /// Build the $kernel.* bindings for a candidate from its KMD metadata, plus the
+    /// implicit `priority` and `id` fields every candidate carries.
+    static FeatureExtractionContext::ValueMap buildKernelVars(const KernelCandidate& candidate);
 
     /// Apply static ordering fallback.
     static SelectionResult applyStaticOrdering(const std::vector<KernelCandidate>& candidates,

@@ -41,6 +41,14 @@ public:
     void bindNamespace(const std::string& ns,
                        const std::unordered_map<std::string, ValueType>& values);
 
+    /// Erase every binding in a namespace (e.g., "kernel" drops all $kernel.* entries).
+    ///
+    /// Rebinding a namespace does not remove keys the previous binding set but the
+    /// new one omits. Callers that reuse a context across candidates must clear the
+    /// namespace first, or a candidate missing a field silently inherits the previous
+    /// candidate's value.
+    void clearNamespace(const std::string& ns);
+
     /// Resolve a variable to a double. Returns nullopt if not found.
     std::optional<double> resolveDouble(const std::string& name) const;
 

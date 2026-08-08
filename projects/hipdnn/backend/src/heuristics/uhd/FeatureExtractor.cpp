@@ -134,6 +134,11 @@ void FeatureExtractionContext::bindKernelVars(const ValueMap& metadata)
     _ctx.bindNamespace("kernel", metadata);
 }
 
+void FeatureExtractionContext::clearKernelVars()
+{
+    _ctx.clearNamespace("kernel");
+}
+
 void FeatureExtractionContext::bindQueryVars(const ValueMap& queryProps)
 {
     _ctx.bindNamespace("q", queryProps);
@@ -254,6 +259,8 @@ FeatureExtractor::FeatureExtractor(const std::vector<std::string>& signature)
 {
     _parsedExprs.reserve(signature.size());
 
+    const std::string kernelPrefix = "$kernel.";
+
     for(const auto& exprStr : signature)
     {
         auto parsed = parseSignatureEntry(exprStr);
@@ -262,6 +269,28 @@ FeatureExtractor::FeatureExtractor(const std::vector<std::string>& signature)
         // Extract variable references from this expression
         auto vars = JsonLogicEvaluator::extractVariables(_parsedExprs.back());
         _varRefs.insert(vars.begin(), vars.end());
+
+        // Partition by whether this entry varies per candidate (RFC 0019 §6 step 2).
+        //
+        // The bare "$kernel" case matters: extractVariables reports the *syntactic*
+        // reference, but the shape/rank operators resolve a *synthesized* name --
+        // {"shape": ["$kernel", 0]} reads $kernel.shape_0. Testing only for the
+        // "$kernel." prefix would file that entry as shared, so it would be evaluated
+        // in the shared pass before any kernel metadata is bound.
+        const bool kernelDependent =
+            std::any_of(vars.begin(), vars.end(), [&kernelPrefix](const std::string& v) {
+                return v == "$kernel" || v.rfind(kernelPrefix, 0) == 0;
+            });
+
+        const size_t index = _parsedExprs.size() - 1;
+        if(kernelDependent)
+        {
+            _kernelIndices.push_back(index);
+        }
+        else
+        {
+            _sharedIndices.push_back(index);
+        }
     }
 
     _signatureHash = computeHash(signature);
@@ -278,6 +307,34 @@ std::vector<double> FeatureExtractor::extract(const FeatureExtractionContext& ct
     }
 
     return features;
+}
+
+std::vector<double> FeatureExtractor::extractSharedRow(const FeatureExtractionContext& ctx) const
+{
+    std::vector<double> row(_parsedExprs.size(), 0.0);
+
+    for(const size_t i : _sharedIndices)
+    {
+        row[i] = _evaluator.evaluateDouble(_parsedExprs[i], ctx.getContext());
+    }
+
+    return row;
+}
+
+void FeatureExtractor::extractKernelInto(const FeatureExtractionContext& ctx,
+                                         std::vector<double>& row) const
+{
+    if(row.size() != _parsedExprs.size())
+    {
+        throw JsonLogicError("extractKernelInto: row width " + std::to_string(row.size()) +
+                             " does not match signature width " +
+                             std::to_string(_parsedExprs.size()));
+    }
+
+    for(const size_t i : _kernelIndices)
+    {
+        row[i] = _evaluator.evaluateDouble(_parsedExprs[i], ctx.getContext());
+    }
 }
 
 bool FeatureExtractor::validateContext(const FeatureExtractionContext& ctx) const

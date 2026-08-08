@@ -523,4 +523,96 @@ TEST_F(TestFeatureExtractor, ConstructorRejectsUnsafeLiteralToo)
 
 
 
+// ========== Shared vs. per-candidate partitioning (RFC §6 step 2) ==========
+
+TEST_F(TestFeatureExtractor, PartitionsSignatureByKernelDependence)
+{
+    const std::vector<std::string> signature = {
+        "$device.cu_count",                             // shared
+        "$q.batch",                                     // shared
+        "$kernel.tile_m",                               // per-candidate
+        R"({"*": ["$q.batch", "$kernel.tile_m"]})",     // per-candidate (mixed)
+        R"({"*": ["$q.batch", "$device.cu_count"]})",   // shared (derived, no kernel ref)
+    };
+    const FeatureExtractor extractor(signature);
+
+    EXPECT_EQ(extractor.featureCount(), 5u);
+    EXPECT_EQ(extractor.kernelDependentCount(), 2u);
+}
+TEST_F(TestFeatureExtractor, SharedPlusKernelExtractionMatchesFullExtraction)
+{
+    const std::vector<std::string> signature = {
+        "$device.cu_count",
+        "$kernel.tile_m",
+        "$q.batch",
+        R"({"*": ["$q.batch", "$kernel.tile_m"]})",
+    };
+    const FeatureExtractor extractor(signature);
+
+    FeatureExtractionContext ctx;
+    ctx.bindDeviceVars({{"cu_count", 120.0}});
+    ctx.bindQueryVars({{"batch", 32.0}});
+    ctx.bindKernelVars({{"tile_m", 256.0}});
+
+    auto split = extractor.extractSharedRow(ctx);
+    extractor.extractKernelInto(ctx, split);
+
+    EXPECT_EQ(split, extractor.extract(ctx));
+}
+TEST_F(TestFeatureExtractor, SharedRowIsReusableAcrossCandidates)
+{
+    const std::vector<std::string> signature = {"$q.batch", "$kernel.tile_m"};
+    const FeatureExtractor extractor(signature);
+
+    FeatureExtractionContext ctx;
+    ctx.bindQueryVars({{"batch", 32.0}});
+
+    // Shared slots are evaluated once; only kernel slots change per candidate.
+    const auto sharedRow = extractor.extractSharedRow(ctx);
+
+    ctx.bindKernelVars({{"tile_m", 64.0}});
+    auto rowA = sharedRow;
+    extractor.extractKernelInto(ctx, rowA);
+
+    ctx.clearKernelVars();
+    ctx.bindKernelVars({{"tile_m", 128.0}});
+    auto rowB = sharedRow;
+    extractor.extractKernelInto(ctx, rowB);
+
+    EXPECT_DOUBLE_EQ(rowA[0], 32.0);
+    EXPECT_DOUBLE_EQ(rowB[0], 32.0);
+    EXPECT_DOUBLE_EQ(rowA[1], 64.0);
+    EXPECT_DOUBLE_EQ(rowB[1], 128.0);
+}
+TEST_F(TestFeatureExtractor, ExtractKernelIntoRejectsWrongWidthRow)
+{
+    const std::vector<std::string> signature = {"$q.batch", "$kernel.tile_m"};
+    const FeatureExtractor extractor(signature);
+
+    FeatureExtractionContext ctx;
+    ctx.bindQueryVars({{"batch", 32.0}});
+    ctx.bindKernelVars({{"tile_m", 64.0}});
+
+    std::vector<double> tooNarrow(1, 0.0);
+    EXPECT_THROW(extractor.extractKernelInto(ctx, tooNarrow), JsonLogicError);
+}
+TEST_F(TestFeatureExtractor, ClearKernelVarsDropsOnlyKernelBindings)
+{
+    // Reusing a context across candidates is only safe if a candidate that omits a
+    // field cannot inherit the previous candidate's value.
+    const std::vector<std::string> signature = {"$q.batch", "$kernel.tile_m"};
+    const FeatureExtractor extractor(signature);
+
+    FeatureExtractionContext ctx;
+    ctx.bindQueryVars({{"batch", 32.0}});
+    ctx.bindKernelVars({{"tile_m", 64.0}});
+    EXPECT_NO_THROW(extractor.extract(ctx));
+
+    ctx.clearKernelVars();
+
+    // $q.* survives, $kernel.* is gone — so the omission surfaces instead of going stale.
+    EXPECT_THROW(extractor.extract(ctx), JsonLogicError);
+    const FeatureExtractor queryOnly(std::vector<std::string>{"$q.batch"});
+    EXPECT_NO_THROW(queryOnly.extract(ctx));
+}
 } // namespace

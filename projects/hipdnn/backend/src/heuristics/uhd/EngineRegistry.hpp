@@ -17,6 +17,8 @@
 namespace hipdnn_backend::heuristics::uhd
 {
 
+class FeatureExtractor;
+
 /// @brief Kernel candidate metadata (mock for UKD).
 ///
 /// Represents a single kernel variant with its KMD field values.
@@ -66,6 +68,9 @@ struct EngineEntry
 
     // Loaded adapter (cached after first use)
     mutable std::shared_ptr<IUhdAdapter> cachedAdapter;
+
+    // Cached feature extractor (built on first use from featuresSignature)
+    mutable std::shared_ptr<FeatureExtractor> cachedExtractor;
 };
 
 /// @brief Mock engine registry for UHD selection testing.
@@ -104,6 +109,11 @@ public:
     /// @param engineId Engine to get adapter for.
     /// @returns Adapter or nullptr if engine not found or adapter creation fails.
     std::shared_ptr<IUhdAdapter> getOrCreateAdapter(int64_t engineId) const;
+
+    /// Get or create the feature extractor for an engine.
+    /// @param engineId Engine to get extractor for.
+    /// @returns Extractor or nullptr if engine not found or signature is empty.
+    std::shared_ptr<FeatureExtractor> getOrCreateExtractor(int64_t engineId) const;
 
     /// Check if an engine is registered.
     bool hasEngine(int64_t engineId) const;

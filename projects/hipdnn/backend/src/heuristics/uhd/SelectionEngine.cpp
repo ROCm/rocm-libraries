@@ -64,8 +64,13 @@ SelectionResult SelectionEngine::select(int64_t engineId,
         }
     }
 
-    // Build feature extractor from signature
-    const FeatureExtractor extractor(cfg.featuresSignature);
+    // Reuse the engine's cached extractor. Parsing the signature per selection
+    // re-walks and re-hashes every entry for a result that cannot change.
+    auto extractor = EngineRegistry::instance().getOrCreateExtractor(engineId);
+    if(extractor == nullptr)
+    {
+        return applyStaticOrdering(engine.candidates, "failed to create feature extractor");
+    }
 
     // Validate features hash if adapter provides one
     const std::string& adapterHash = adapter->getFeaturesHash();
@@ -81,15 +86,45 @@ SelectionResult SelectionEngine::select(int64_t engineId,
         return fallbackResult;
     }
 
-    // Build base context with device and query vars
-    FeatureExtractionContext baseCtx;
-    baseCtx.bindDeviceVars(deviceVars);
-    baseCtx.bindQueryVars(queryVars);
+    // Build the context once and reuse it. Device and query bindings are shared by
+    // every candidate; only the $kernel.* namespace is rebound per candidate.
+    FeatureExtractionContext ctx;
+    ctx.bindDeviceVars(deviceVars);
+    ctx.bindQueryVars(queryVars);
+
+    // RFC 0019 §6 step 2: extract shared features once, not once per candidate.
+    // sharedRow holds the $device.*/$q.* slots — including derived expressions over
+    // them, which are the expensive ones; each candidate overwrites only the
+    // $kernel.*-dependent slots.
+    std::vector<double> sharedRow;
+    try
+    {
+        sharedRow = extractor->extractSharedRow(ctx);
+    }
+    catch(const std::exception& e)
+    {
+        return applyStaticOrdering(engine.candidates,
+                                   std::string("shared feature extraction failed: ") + e.what());
+    }
+
+    // The feature vector width is fixed by the signature, so the adapter's arity
+    // contract (RFC 0019 §7.3c) is checked once rather than per candidate. That also
+    // means a mismatch reports itself instead of masquerading as "all candidates
+    // failed scoring".
+    if(!adapter->validateFeatureCount(sharedRow.size()))
+    {
+        return applyStaticOrdering(engine.candidates,
+                                   "feature count mismatch: signature has " +
+                                       std::to_string(sharedRow.size()) +
+                                       " features, model expects " +
+                                       std::to_string(adapter->expectedFeatureCount()));
+    }
 
     // Score each candidate
     std::vector<ScoredCandidate> scored;
     scored.reserve(engine.candidates.size());
 
+    std::vector<double> features;
     for(const auto& candidate : engine.candidates)
     {
         ScoredCandidate sc;
@@ -98,20 +133,17 @@ SelectionResult SelectionEngine::select(int64_t engineId,
 
         try
         {
-            // Build feature vector with this candidate's kernel metadata
-            auto features = buildFeatureVector(extractor, baseCtx, candidate);
+            // Rebind only this candidate's metadata, then refresh the kernel slots.
+            // clearKernelVars() matters: without it a candidate whose metadata omits a
+            // field would silently inherit the previous candidate's value.
+            ctx.clearKernelVars();
+            ctx.bindKernelVars(buildKernelVars(candidate));
 
-            // Validate feature count
-            if(!adapter->validateFeatureCount(features.size()))
-            {
-                sc.scoreValid = false;
-                sc.score = 0.0;
-            }
-            else
-            {
-                sc.score = adapter->score(features);
-                sc.scoreValid = true;
-            }
+            features = sharedRow;
+            extractor->extractKernelInto(ctx, features);
+
+            sc.score = adapter->score(features);
+            sc.scoreValid = true;
         }
         catch(const std::exception&)
         {
@@ -175,32 +207,22 @@ SelectionResult SelectionEngine::scoreOnly(int64_t engineId,
     return select(engineId, deviceVars, queryVars);
 }
 
-std::vector<double> SelectionEngine::buildFeatureVector(const FeatureExtractor& extractor,
-                                                        const FeatureExtractionContext& baseCtx,
-                                                        const KernelCandidate& candidate)
+FeatureExtractionContext::ValueMap SelectionEngine::buildKernelVars(const KernelCandidate& candidate)
 {
-    // Create a copy of the base context and add kernel metadata
-    FeatureExtractionContext ctx;
-
-    // Re-bind device and query vars (copying from base)
-    // Note: This is a workaround since VariableContext doesn't expose iteration.
-    // In production, we'd want a more efficient approach.
-    ctx = baseCtx;
-
-    // Bind kernel metadata
     FeatureExtractionContext::ValueMap kernelVars;
+    kernelVars.reserve(candidate.metadata.size() + 2);
+
     for(const auto& [key, value] : candidate.metadata)
     {
         kernelVars[key] = value;
     }
-    // Also add priority and id as implicit kernel fields
+
+    // priority and id are implicit kernel fields every candidate carries, so
+    // static_order signatures can reference them without KMD declarations.
     kernelVars["priority"] = static_cast<double>(candidate.priority);
     kernelVars["id"] = static_cast<double>(candidate.kernelId);
 
-    ctx.bindKernelVars(kernelVars);
-
-    // Extract features
-    return extractor.extract(ctx);
+    return kernelVars;
 }
 
 SelectionResult

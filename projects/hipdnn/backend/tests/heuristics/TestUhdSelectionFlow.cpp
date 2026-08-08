@@ -987,4 +987,110 @@ TEST_F(TestUhdSelectionFlow, RegisterRejectsHashDeclaredOverEmptySignature)
 
 
 
+// ========== Cached extractor and per-candidate binding hygiene ==========
+
+TEST_F(TestUhdSelectionFlow, CachedExtractorProducesConsistentResults)
+{
+    // Register an engine with a features signature
+    auto k1 = makeCandidate(1, 10, {{"tile_m", 64.0}, {"tile_n", 64.0}});
+    auto k2 = makeCandidate(2, 5, {{"tile_m", 128.0}, {"tile_n", 128.0}});
+    auto k3 = makeCandidate(3, 1, {{"tile_m", 256.0}, {"tile_n", 256.0}});
+
+    EngineEntry entry;
+    entry.engineId = 200;
+    entry.engineName = "CacheTestEngine";
+    entry.uhdConfig.uhdId = "cache-test";
+    entry.uhdConfig.adapterType = "static_order";
+    entry.uhdConfig.featuresSignature = {"\"$kernel.tile_m\"", "\"$kernel.tile_n\""};
+    entry.uhdConfig.staticOrderFields = {"tile_m"};
+    entry.candidates = {k1, k2, k3};
+
+    EngineRegistry::instance().registerEngine(entry);
+
+    // Run selection 100 times and verify consistent results
+    FeatureExtractionContext::ValueMap deviceVars;
+    deviceVars["architecture_name"] = std::string("gfx942");
+
+    FeatureExtractionContext::ValueMap queryVars;
+    queryVars["m"] = 1024.0;
+
+    std::optional<int64_t> firstBestKernel;
+
+    for(int i = 0; i < 100; ++i)
+    {
+        auto result = SelectionEngine::select(200, deviceVars, queryVars);
+        ASSERT_TRUE(result.applied) << "Selection failed on iteration " << i;
+        ASSERT_TRUE(result.bestKernelId.has_value()) << "No best kernel on iteration " << i;
+
+        if(!firstBestKernel.has_value())
+        {
+            firstBestKernel = result.bestKernelId;
+        }
+        else
+        {
+            EXPECT_EQ(result.bestKernelId.value(), firstBestKernel.value())
+                << "Inconsistent result on iteration " << i;
+        }
+    }
+}
+TEST_F(TestUhdSelectionFlow, GetOrCreateExtractorReturnsNullForUnknownEngine)
+{
+    auto extractor = EngineRegistry::instance().getOrCreateExtractor(999999);
+    EXPECT_EQ(extractor, nullptr);
+}
+TEST_F(TestUhdSelectionFlow, GetOrCreateExtractorReturnsSameInstance)
+{
+    // Register an engine
+    auto k1 = makeCandidate(1, 10, {{"tile_m", 64.0}});
+
+    EngineEntry entry;
+    entry.engineId = 300;
+    entry.engineName = "ExtractorCacheEngine";
+    entry.uhdConfig.uhdId = "extractor-cache";
+    entry.uhdConfig.adapterType = "static_order";
+    entry.uhdConfig.featuresSignature = {"\"$kernel.tile_m\""};
+    entry.uhdConfig.staticOrderFields = {"priority"};
+    entry.candidates = {k1};
+
+    EngineRegistry::instance().registerEngine(entry);
+
+    // Get extractor twice and verify same instance
+    auto extractor1 = EngineRegistry::instance().getOrCreateExtractor(300);
+    auto extractor2 = EngineRegistry::instance().getOrCreateExtractor(300);
+
+    ASSERT_NE(extractor1, nullptr);
+    ASSERT_NE(extractor2, nullptr);
+    EXPECT_EQ(extractor1.get(), extractor2.get()) << "Extractor should be cached and return same instance";
+}
+TEST_F(TestUhdSelectionFlow, CandidateMissingMetadataDoesNotInheritPreviousValue)
+{
+    // The context is reused across candidates for speed (RFC §6 step 2). A candidate
+    // that omits a referenced field must fail to score rather than silently pick up
+    // the previous candidate's value.
+    auto withField = makeCandidate(1, 10, {{"tile_m", 64.0}});
+    auto withoutField = makeCandidate(2, 5); // no tile_m
+
+    EngineEntry entry;
+    entry.engineId = 100;
+    entry.uhdConfig.uhdId = "staleness";
+    entry.uhdConfig.adapterType = "static_order";
+    entry.uhdConfig.featuresSignature = {"$kernel.tile_m"};
+    entry.uhdConfig.staticOrderFields = {"tile_m"};
+    entry.candidates = {withField, withoutField};
+
+    EngineRegistry::instance().registerEngine(entry);
+
+    auto result = SelectionEngine::select(100, defaultDeviceVars(), defaultQueryVars());
+
+    ASSERT_EQ(result.scoredCandidates.size(), 2u);
+
+    // Exactly the candidate carrying tile_m scores; the other is marked invalid.
+    const auto scoredWithout =
+        std::find_if(result.scoredCandidates.begin(),
+                     result.scoredCandidates.end(),
+                     [](const auto& sc) { return sc.kernelId == 2; });
+    ASSERT_NE(scoredWithout, result.scoredCandidates.end());
+    EXPECT_FALSE(scoredWithout->scoreValid)
+        << "candidate without tile_m must not inherit the previous candidate's value";
+}
 } // namespace

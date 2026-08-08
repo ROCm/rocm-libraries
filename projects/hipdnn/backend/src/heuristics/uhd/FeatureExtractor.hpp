@@ -34,6 +34,12 @@ public:
     /// Bind kernel metadata ($kernel.*).
     void bindKernelVars(const ValueMap& metadata);
 
+    /// Drop all $kernel.* bindings, leaving $device.* and $q.* intact.
+    ///
+    /// Call this between candidates when reusing a context, so a candidate whose
+    /// metadata omits a field does not inherit the previous candidate's value.
+    void clearKernelVars();
+
     /// Bind problem/query properties ($q.*).
     void bindQueryVars(const ValueMap& queryProps);
 
@@ -72,8 +78,28 @@ public:
     /// @throws JsonLogicError if any expression fails to evaluate.
     std::vector<double> extract(const FeatureExtractionContext& ctx) const;
 
+    /// Evaluate only the entries that do not reference $kernel.* (RFC 0019 §6 step 2).
+    ///
+    /// Problem ($q.*) and device ($device.*) features are shared across every
+    /// candidate, so they are evaluated once per selection rather than once per
+    /// candidate. Kernel-dependent slots are left at zero for extractKernelInto().
+    ///
+    /// @returns A full-width row with shared slots populated.
+    /// @throws JsonLogicError if any shared expression fails to evaluate.
+    std::vector<double> extractSharedRow(const FeatureExtractionContext& ctx) const;
+
+    /// Fill the $kernel.*-dependent slots of a row from extractSharedRow().
+    ///
+    /// @param ctx Context with this candidate's kernel metadata bound.
+    /// @param row Row to update in place; must be featureCount() wide.
+    /// @throws JsonLogicError if any kernel-dependent expression fails to evaluate.
+    void extractKernelInto(const FeatureExtractionContext& ctx, std::vector<double>& row) const;
+
     /// Get the number of features in the signature.
     size_t featureCount() const { return _parsedExprs.size(); }
+
+    /// Number of signature entries that reference $kernel.* (re-evaluated per candidate).
+    size_t kernelDependentCount() const { return _kernelIndices.size(); }
 
     /// Get all variable references in the signature.
     const std::unordered_set<std::string>& getVariableRefs() const { return _varRefs; }
@@ -117,6 +143,10 @@ public:
 private:
     std::vector<nlohmann::json> _parsedExprs;
     std::unordered_set<std::string> _varRefs;
+    /// Signature positions with no $kernel.* reference — evaluated once per selection.
+    std::vector<size_t> _sharedIndices;
+    /// Signature positions referencing $kernel.* — evaluated once per candidate.
+    std::vector<size_t> _kernelIndices;
     std::string _signatureHash;
     JsonLogicEvaluator _evaluator;
 };
