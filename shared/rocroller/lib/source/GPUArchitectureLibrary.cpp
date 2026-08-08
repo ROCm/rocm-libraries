@@ -95,11 +95,11 @@ namespace rocRoller
         {
             if(envPath.extension() == ".yaml" || envPath.extension() == ".yml")
             {
-                return GPUArchitecture::readYaml(envPath);
+                return GPUArchitecture::readYaml(envPath.string());
             }
             else if(envPath.extension() == ".msgpack")
             {
-                return GPUArchitecture::readMsgpack(envPath);
+                return GPUArchitecture::readMsgpack(envPath.string());
             }
             // ignore otherwise
         }

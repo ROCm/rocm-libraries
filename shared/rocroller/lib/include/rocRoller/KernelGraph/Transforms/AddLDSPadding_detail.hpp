@@ -28,9 +28,9 @@ namespace rocRoller
                 std::array<int, 2> downstreamTags; //< Coordinates downstream of downstreamEdge.
                 DataType           dataType; //< DataType of the data in LDS.
                 LayoutType         layoutType; //< LayoutType of the data in LDS.
-                uint
+                unsigned int
                     loadInstructionByteWidth; //< Byte-width of the instructions used to load data destined for LDS.
-                uint loadLaneWidth; //< Number of lanes that should be considered contiguous.
+                unsigned int loadLaneWidth; //< Number of lanes that should be considered contiguous.
             };
         }
     }

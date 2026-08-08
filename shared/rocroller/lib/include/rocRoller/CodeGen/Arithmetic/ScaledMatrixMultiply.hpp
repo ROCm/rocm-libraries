@@ -40,7 +40,7 @@ namespace rocRoller
                                                Register::ValuePtr  scaleA,
                                                Register::ValuePtr  scaleB,
                                                MatrixMultiplySizes mi,
-                                               std::optional<uint> maybeScaleBlockSize)
+                                               std::optional<unsigned int> maybeScaleBlockSize)
                 = 0;
         };
 
@@ -88,7 +88,7 @@ namespace rocRoller
                                                Register::ValuePtr  scaleA,
                                                Register::ValuePtr  scaleB,
                                                MatrixMultiplySizes mi,
-                                               std::optional<uint> maybeScaleBlockSize) override;
+                                               std::optional<unsigned int> maybeScaleBlockSize) override;
 
         protected:
             ContextPtr m_context;

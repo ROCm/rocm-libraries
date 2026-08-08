@@ -37,11 +37,11 @@ struct GEMMProblem
     int waveB = 1;
 
     // Workgroup size
-    uint wavefrontSize  = 64;
-    uint workgroupSizeX = 2 * wavefrontSize;
-    uint workgroupSizeY = 2;
+    unsigned int wavefrontSize  = 64;
+    unsigned int workgroupSizeX = 2 * wavefrontSize;
+    unsigned int workgroupSizeY = 2;
 
-    uint numWGs = 0;
+    unsigned int numWGs = 0;
 
     std::string transA = "N";
     std::string transB = "T";
@@ -88,9 +88,9 @@ struct GEMMProblem
     int  workgroupMappingValue = -1;
     bool workgroupRemapXCC     = false;
 
-    uint workgroupClusterSizeX = 0;
-    uint workgroupClusterSizeY = 0;
-    uint workgroupClusterSizeZ = 0;
+    unsigned int workgroupClusterSizeX = 0;
+    unsigned int workgroupClusterSizeY = 0;
+    unsigned int workgroupClusterSizeZ = 0;
 
     rocRoller::Operations::ScaleMode scaleAMode = rocRoller::Operations::ScaleMode::None;
     rocRoller::Operations::ScaleMode scaleBMode = rocRoller::Operations::ScaleMode::None;

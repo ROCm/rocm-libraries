@@ -34,7 +34,7 @@ namespace rocRoller
                                         int                                        element,
                                         LayoutType                                 layout,
                                         InstructionGenerators::MatrixMultiplySizes mi,
-                                        uint                                       bitsPerElement,
+                                        unsigned int                                       bitsPerElement,
                                         int                                        wavefrontSize);
     }
 }

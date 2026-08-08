@@ -88,7 +88,7 @@ namespace rocRoller
                                             int                              element,
                                             LayoutType                       layout,
                                             MatrixMultiplySizes              mi,
-                                            uint                             bitsPerElement,
+                                            unsigned int                             bitsPerElement,
                                             int                              wavefrontSize);
 
         template <>
@@ -103,7 +103,7 @@ namespace rocRoller
             int                              element,
             LayoutType                       layout,
             MatrixMultiplySizes              mi,
-            uint                             bitsPerElement,
+            unsigned int                             bitsPerElement,
             int                              wavefrontSize)
         {
             const auto M              = (layout == LayoutType::MATRIX_B) ? mi.n : mi.m;
@@ -177,7 +177,7 @@ namespace rocRoller
             int                              element,
             LayoutType                       layout,
             MatrixMultiplySizes              mi,
-            uint                             bitsPerElement,
+            unsigned int                             bitsPerElement,
             int                              wavefrontSize)
         {
             const auto M              = (layout == LayoutType::MATRIX_B) ? mi.n : mi.m;
@@ -357,7 +357,7 @@ namespace rocRoller
                                         int                              element,
                                         LayoutType                       layout,
                                         MatrixMultiplySizes              mi,
-                                        uint                             bitsPerElement,
+                                        unsigned int                             bitsPerElement,
                                         int                              wavefrontSize)
         {
             TIMER(t, "KernelGraph::AddTransposeLoadCT");

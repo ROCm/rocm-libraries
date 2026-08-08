@@ -116,19 +116,56 @@ namespace rocRoller
         return false;
     }
 
-    inline bool GPUArchitecture::isSupportedConstantValue(Raw32 value) const
-    {
+    inline bool GPUArchitecture::isSupportedConstantValue(Raw32 value) const {
         return isSupportedConstantValue(static_cast<int>(value));
     }
 
-    inline bool GPUArchitecture::isSupportedConstantValue(Buffer value) const
-    {
+    inline bool GPUArchitecture::isSupportedConstantValue(Buffer value) const {
         return false;
     }
 
-    inline bool GPUArchitecture::isSupportedConstantValue(TDM value) const
-    {
+    inline bool GPUArchitecture::isSupportedConstantValue(TDM value) const {
         return false;
+    }
+
+    inline bool GPUArchitecture::isSupportedConstantValue(__half value) const {
+        return true;
+    }
+
+    inline bool GPUArchitecture::isSupportedConstantValue(BFloat16 value) const {
+        return true;
+    }
+
+    inline bool GPUArchitecture::isSupportedConstantValue(FP8 value) const {
+        return true;
+    }
+
+    inline bool GPUArchitecture::isSupportedConstantValue(BF8 value) const {
+        return true;
+    }
+
+    inline bool GPUArchitecture::isSupportedConstantValue(FP6 value) const {
+        return true;
+    }
+
+    inline bool GPUArchitecture::isSupportedConstantValue(BF6 value) const {
+        return true;
+    }
+
+    inline bool GPUArchitecture::isSupportedConstantValue(FP4 value) const {
+        return true;
+    }
+
+    inline bool GPUArchitecture::isSupportedConstantValue(E8M0 value) const {
+        return true;
+    }
+
+    inline bool GPUArchitecture::isSupportedConstantValue(E5M3 value) const {
+        return true;
+    }
+
+    inline bool GPUArchitecture::isSupportedConstantValue(E4M3 value) const {
+        return true;
     }
 
     template <std::integral T>

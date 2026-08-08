@@ -118,11 +118,11 @@ namespace rocRollerTest
         AssertFatal(M % mac_m == 0, "MacroTile size mismatch (M)");
         AssertFatal(N % mac_n == 0, "MacroTile size mismatch (N)");
 
-        uint workgroup_size_x = 256;
-        uint workgroup_size_y = 1;
+        unsigned int workgroup_size_x = 256;
+        unsigned int workgroup_size_y = 1;
 
-        uint num_workgroup_x = M / mac_m;
-        uint num_workgroup_y = N / mac_n;
+        unsigned int num_workgroup_x = M / mac_m;
+        unsigned int num_workgroup_y = N / mac_n;
 
         auto NX = std::make_shared<Expression::Expression>(num_workgroup_x * workgroup_size_x);
         auto NY = std::make_shared<Expression::Expression>(num_workgroup_y * workgroup_size_y);
@@ -248,11 +248,11 @@ namespace rocRollerTest
         auto       arch = m_context->targetArchitecture();
         const auto wfs  = arch.GetCapability(GPUCapability::DefaultWavefrontSize);
 
-        uint workgroup_size_x = wavefrontCountX * wavefrontCountY * wfs;
-        uint workgroup_size_y = 1;
+        unsigned int workgroup_size_x = wavefrontCountX * wavefrontCountY * wfs;
+        unsigned int workgroup_size_y = 1;
 
-        uint num_workgroup_x = M / mac_m;
-        uint num_workgroup_y = N / mac_n;
+        unsigned int num_workgroup_x = M / mac_m;
+        unsigned int num_workgroup_y = N / mac_n;
 
         auto NX = std::make_shared<Expression::Expression>(num_workgroup_x * workgroup_size_x);
         auto NY = std::make_shared<Expression::Expression>(num_workgroup_y * workgroup_size_y);

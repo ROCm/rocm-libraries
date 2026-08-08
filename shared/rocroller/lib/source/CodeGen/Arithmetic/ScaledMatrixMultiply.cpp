@@ -23,7 +23,7 @@ namespace rocRoller
                                                Register::ValuePtr  scaleA,
                                                Register::ValuePtr  scaleB,
                                                MatrixMultiplySizes miSizes,
-                                               std::optional<uint> maybeScaleBlockSize)
+                                               std::optional<unsigned int> maybeScaleBlockSize)
         {
             AssertFatal(matA != nullptr);
             AssertFatal(matB != nullptr);

@@ -215,7 +215,7 @@ namespace rocRoller
                      int          partialMacTileTag,
                      int          destMacTileTag,
                      DataType     dataType,
-                     uint         numVGPRs)
+                     unsigned int         numVGPRs)
         {
             auto lhsExpr = std::make_shared<Expression::Expression>(
                 Expression::DataFlowTag{destMacTileTag, Register::Type::Vector, dataType});
@@ -278,8 +278,8 @@ namespace rocRoller
             auto numWorkgroupsX = argInfo.numWGs;
             auto numWorkgroupsY = literal(1u);
 
-            auto sizeX = simplify(numWorkgroupsX * literal(static_cast<uint>(macTile.sizes[0])));
-            auto sizeY = simplify(numWorkgroupsY * literal(static_cast<uint>(macTile.sizes[1])));
+            auto sizeX = simplify(numWorkgroupsX * literal(static_cast<unsigned int>(macTile.sizes[0])));
+            auto sizeY = simplify(numWorkgroupsY * literal(static_cast<unsigned int>(macTile.sizes[1])));
 
             auto strideX = sizeY;
             auto strideY = literal(1u);
@@ -646,7 +646,7 @@ namespace rocRoller
             auto barrierBeforeResetTag = graph.control.addElement(Barrier());
 
             auto accumulatorTile = graph.coordinates.get<MacroTile>(accumulatorTileTag);
-            uint numRegisters    = accumulatorTile->elements()
+            unsigned int numRegisters    = accumulatorTile->elements()
                                 / (product(context->kernel()->workgroupSize()) * loopInfo.xLoopSize
                                    * loopInfo.yLoopSize);
 

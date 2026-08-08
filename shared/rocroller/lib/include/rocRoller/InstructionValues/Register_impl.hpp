@@ -25,7 +25,7 @@ namespace rocRoller
 
     namespace Register
     {
-        uint constexpr bitsPerRegister = 32;
+        unsigned int constexpr bitsPerRegister = 32;
 
         inline std::string RegisterId::toString() const
         {
@@ -322,7 +322,7 @@ namespace rocRoller
 
             auto const info = DataTypeInfo::Get(variableType);
 
-            uint numRegisters = count;
+            unsigned int numRegisters = count;
             if(info.elementBits > bitsPerRegister)
                 numRegisters = CeilDivide(count * info.elementBits, bitsPerRegister);
             m_allocationCoord = std::vector<int>(numRegisters);
@@ -437,7 +437,7 @@ namespace rocRoller
                                            VariableType variableType,
                                            int          count,
                                            unsigned int alignment,
-                                           uint         paddingBytes)
+                                           unsigned int paddingBytes)
         {
             auto v                  = std::make_shared<Value>();
             v->m_regType            = Type::LocalData;
@@ -1022,8 +1022,8 @@ namespace rocRoller
             AssertFatal(bitOffset < registerCount() * bitsPerRegister,
                         "bitOffset is greater than number of bits in this value.");
 
-            uint registerOfBitOffset = bitOffset / bitsPerRegister;
-            uint registerOfLastBit   = (bitOffset + bitWidth - 1) / bitsPerRegister;
+            unsigned int registerOfBitOffset = bitOffset / bitsPerRegister;
+            unsigned int registerOfLastBit   = (bitOffset + bitWidth - 1) / bitsPerRegister;
 
             AssertFatal(registerOfBitOffset == registerOfLastBit,
                         "cannot get bitfield across registers.");
@@ -1059,11 +1059,11 @@ namespace rocRoller
             auto first = *std::ranges::begin(indices);
             auto last  = *std::ranges::prev(std::ranges::end(indices));
 
-            uint startBitOffset = first * (info.elementBits / info.packing);
-            uint endBitOffset   = (last + 1) * (info.elementBits / info.packing);
-            uint bitWidth       = endBitOffset - startBitOffset;
+            unsigned int startBitOffset = first * (info.elementBits / info.packing);
+            unsigned int endBitOffset   = (last + 1) * (info.elementBits / info.packing);
+            unsigned int bitWidth       = endBitOffset - startBitOffset;
 
-            return bitfield(startBitOffset, bitWidth);
+            return bitfield(static_cast<int>(startBitOffset), static_cast<int>(bitWidth));
         }
 
         template <typename T>
@@ -1309,7 +1309,7 @@ namespace rocRoller
                 // TODO: Should be capability check:
                 // e.g. m_context.targetArchitecture().target().GetCapability(GPUCapability::MaxVGPRs)
                 AssertFatal(0 <= idx and idx < 1024, ShowValue(idx));
-                return static_cast<uint>(idx)
+                return static_cast<unsigned int>(idx)
                        & Scheduling::VGPRIndexingObserverDetail::RegisterIndexNormalizationMask();
             };
             std::vector<int> normalizedRegisterIndices;

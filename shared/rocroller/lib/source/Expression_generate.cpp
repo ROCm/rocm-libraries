@@ -986,13 +986,13 @@ namespace rocRoller
                 auto getScaleBlockSize = [&](auto&& aScale, auto&& bScale) {
                     auto idx                   = 1;
                     auto computeScaleBlockSize = rocRoller::overloaded{
-                        [&](WaveTilePtr const& tile) -> std::optional<uint> {
+                        [&](WaveTilePtr const& tile) -> std::optional<unsigned int> {
                             return mi.k / tile->sizes[idx];
                         },
-                        [&](Register::ValuePtr const& reg) -> std::optional<uint> {
+                        [&](Register::ValuePtr const& reg) -> std::optional<unsigned int> {
                             return std::nullopt;
                         },
-                        [&](auto const& other) -> std::optional<uint> {
+                        [&](auto const& other) -> std::optional<unsigned int> {
                             Throw<FatalError>("Invalid scale expression type: ",
                                               typeName<decltype(other)>());
                         }};
