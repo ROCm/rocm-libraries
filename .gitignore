@@ -19,3 +19,9 @@ CMakeUserPresets.json
 /parametric-chaos-v2.pdf
 /params-=findings.md
 /check_caps.py
+
+# uaitool
+.depend/
+.idea/
+.vscode/
+CMakeUserPresets.json
