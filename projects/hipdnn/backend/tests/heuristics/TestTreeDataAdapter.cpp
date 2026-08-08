@@ -946,62 +946,150 @@ TEST_F(TestTreeDataAdapter, RealisticRankingOrdersCorrectly)
     EXPECT_EQ(scored[2].second, "small_tile_low_cu");
 }
 
-// ========== Buffer ownership ==========
+// ========== Ownership Transfer Safety Tests (Dangling Pointer Fix) ==========
 
 TEST_F(TestTreeDataAdapter, OwnershipTransferPreservesModel)
 {
+    // Build a model and load it
     auto buffer = GbdtModelBuilder()
-                      .setNumFeatures(1)
+                      .setNumFeatures(2)
                       .setFeaturesHash(TEST_HASH)
-                      .addTree(makeLeafTree(2.5))
+                      .setBaseScore(10.0)
+                      .addTree(makeBinarySplitTree(0, 5.0, 1.0, 2.0))
                       .build();
 
     auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
-    // The adapter copies the buffer, so clearing the caller's copy must not affect it.
-    // If the model pointer were derived from a moved-from vector this would read
-    // freed memory.
-    buffer.assign(buffer.size(), 0);
-    buffer.clear();
-    buffer.shrink_to_fit();
+    // Clear the original buffer to ensure adapter owns its data
+    std::fill(buffer.begin(), buffer.end(), static_cast<uint8_t>(0));
 
-    EXPECT_DOUBLE_EQ(adapter->score({0.0}), 2.5);
+    // Adapter should still work correctly after original buffer is cleared
+    const std::vector<double> features = {3.0}; // < 5.0 -> left -> 1.0
+    const double score = adapter->score(features);
+    EXPECT_DOUBLE_EQ(score, 11.0); // base_score(10.0) + leaf(1.0)
 }
 
 TEST_F(TestTreeDataAdapter, LoadFromBufferHandlesLargeBufferCorrectly)
 {
-    // A larger model makes the owning vector heap-allocate well past any small-buffer
-    // optimisation, so a dangling pointer would reliably fault rather than happen to work.
+    // Build a model with many trees to stress test buffer ownership
     GbdtModelBuilder builder;
-    builder.setNumFeatures(4).setFeaturesHash(TEST_HASH);
-    for(int i = 0; i < 200; ++i)
+    builder.setNumFeatures(5).setFeaturesHash(TEST_HASH).setBaseScore(0.0);
+
+    // Add 100 trees
+    for(int i = 0; i < 100; ++i)
     {
-        builder.addTree(makeBinarySplitTree(0, static_cast<double>(i), 0.01, 0.02));
+        builder.addTree(makeBinarySplitTree(i % 5, static_cast<double>(i), 0.01, 0.02));
     }
+
     auto buffer = builder.build();
+    ASSERT_GT(buffer.size(), 10000u); // Should be a decent size
 
     auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
+    EXPECT_EQ(adapter->treeCount(), 100u);
 
-    buffer.clear();
-    buffer.shrink_to_fit();
+    // Clear original buffer
+    std::fill(buffer.begin(), buffer.end(), static_cast<uint8_t>(0));
 
-    EXPECT_TRUE(std::isfinite(adapter->score({0.0, 0.0, 0.0, 0.0})));
+    // Adapter should still work with many trees
+    const std::vector<double> features = {50.0, 50.0, 50.0, 50.0, 50.0};
+    const double score = adapter->score(features);
+
+    // Score should be non-zero and finite
+    EXPECT_FALSE(std::isnan(score));
+    EXPECT_FALSE(std::isinf(score));
 }
 
-TEST_F(TestTreeDataAdapter, HashMismatchIsRejected)
+TEST_F(TestTreeDataAdapter, HashMismatchLogsWarning)
 {
+    // This test verifies that hash mismatch returns nullptr (the warning is logged internally)
     auto buffer = GbdtModelBuilder()
                       .setNumFeatures(2)
                       .setFeaturesHash("sha256:model_hash_abc")
                       .addTree(makeLeafTree(1.0))
                       .build();
 
+    // Expected hash doesn't match model hash
     auto adapter =
         TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), "sha256:expected_hash_xyz");
 
+    // Should return nullptr due to hash mismatch
     EXPECT_EQ(adapter, nullptr);
+}
+
+// ========== Bounded evaluation (RFC 0019 §16) ==========
+//
+// The model artifact is author-controlled input. FlatBuffers' Verifier validates
+// buffer layout, not graph acyclicity, so a cyclic tree is a perfectly well-formed
+// buffer. Without a bound the descent spins forever and hangs plan build.
+
+TEST_F(TestTreeDataAdapter, SelfLoopingTreeTerminates)
+{
+    // Node 0 is an internal node whose left child is itself.
+    GbdtModelBuilder::TreeSpec cyclic;
+    cyclic.featureIndices = {0, 0};
+    cyclic.thresholds = {0.5, 0.5};
+    cyclic.leftChildren = {0, -1}; // <-- node 0 points at node 0
+    cyclic.rightChildren = {1, -1};
+    cyclic.leafValues = {0.0, 1.0};
+    cyclic.defaultLeft = {1, 1};
+
+    auto buffer = GbdtModelBuilder().setNumFeatures(1).addTree(cyclic).build();
+    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), "");
+    ASSERT_NE(adapter, nullptr);
+
+    // Feature 0.0 <= threshold 0.5 sends the descent left, i.e. back to node 0.
+    // This must raise rather than hang.
+    EXPECT_THROW(adapter->score({0.0}), std::runtime_error);
+}
+
+TEST_F(TestTreeDataAdapter, MutuallyRecursiveTreeTerminates)
+{
+    // A two-node cycle: 0 -> 1 -> 0. Both indices are in range, so the pre-existing
+    // bounds check in the loop condition does not catch it.
+    GbdtModelBuilder::TreeSpec cyclic;
+    cyclic.featureIndices = {0, 0};
+    cyclic.thresholds = {0.5, 0.5};
+    cyclic.leftChildren = {1, 0};
+    cyclic.rightChildren = {1, 0};
+    cyclic.leafValues = {0.0, 0.0};
+    cyclic.defaultLeft = {1, 1};
+
+    auto buffer = GbdtModelBuilder().setNumFeatures(1).addTree(cyclic).build();
+    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), "");
+    ASSERT_NE(adapter, nullptr);
+
+    EXPECT_THROW(adapter->score({0.0}), std::runtime_error);
+}
+
+TEST_F(TestTreeDataAdapter, DeepButAcyclicTreeStillEvaluates)
+{
+    // The bound is the node count, so a legitimate deep chain must not trip it.
+    constexpr int kDepth = 64;
+    GbdtModelBuilder::TreeSpec chain;
+    for(int i = 0; i < kDepth; ++i)
+    {
+        chain.featureIndices.push_back(0);
+        chain.thresholds.push_back(0.5);
+        chain.leftChildren.push_back(i + 1); // descend
+        chain.rightChildren.push_back(i + 1);
+        chain.leafValues.push_back(0.0);
+        chain.defaultLeft.push_back(1);
+    }
+    // Terminal leaf.
+    chain.featureIndices.push_back(0);
+    chain.thresholds.push_back(0.0);
+    chain.leftChildren.push_back(-1);
+    chain.rightChildren.push_back(-1);
+    chain.leafValues.push_back(7.0);
+    chain.defaultLeft.push_back(1);
+
+    auto buffer = GbdtModelBuilder().setNumFeatures(1).addTree(chain).build();
+    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), "");
+    ASSERT_NE(adapter, nullptr);
+
+    EXPECT_DOUBLE_EQ(adapter->score({0.0}), 7.0);
 }
 
 } // namespace

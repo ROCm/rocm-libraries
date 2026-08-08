@@ -148,12 +148,24 @@ JsonLogicEvaluator::Value JsonLogicEvaluator::evaluate(const nlohmann::json& exp
         std::string s = expr.get<std::string>();
         if(!s.empty() && s[0] == '$')
         {
-            auto val = ctx.resolveDouble(s);
-            if(!val.has_value())
+            auto raw = ctx.resolve(s);
+            if(!raw.has_value())
             {
                 throw JsonLogicError("Undefined variable: " + s);
             }
-            return val.value();
+
+            // RFC 0019 §7.2 requires failing closed on a type error, not just on an
+            // unknown symbol. resolveDouble() reports a string-typed binding as
+            // quiet_NaN, which is indistinguishable from a legitimate missing value
+            // and would be scored as if it were data — a GBDT routes NaN down
+            // default_left and returns an ordinary leaf, so the garbage never surfaces.
+            if(std::holds_alternative<std::string>(*raw))
+            {
+                throw JsonLogicError("Type error: variable " + s +
+                                     " holds a string and cannot be used as a number");
+            }
+
+            return ctx.resolveDouble(s).value();
         }
         return s;
     }
@@ -584,7 +596,11 @@ JsonLogicEvaluator::Value JsonLogicEvaluator::evaluateOp(const std::string& op,
         }
         // Shape access requires tensor metadata binding (not yet implemented)
         // For now, attempt to resolve as $tensor.shape[dim]
-        const Value tensorRef = evaluate(args[0], ctx);
+        //
+        // Do NOT evaluate args[0] here. It names a tensor, not a scalar, so resolving
+        // it as a variable throws "Undefined variable" for every reference that is not
+        // separately bound as a number — which made the synthesis below unreachable and
+        // the operator unusable for its stated purpose.
         const auto dim = static_cast<int>(toDouble(evaluate(args[1], ctx)));
 
         // Try to resolve $tensor.shape_N pattern

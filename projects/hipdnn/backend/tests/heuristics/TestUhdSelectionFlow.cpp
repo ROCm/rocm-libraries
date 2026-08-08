@@ -18,16 +18,10 @@
 
 #include "GbdtModelTestBuilder.hpp"
 
-#include "GbdtModelTestBuilder.hpp"
-
 #include <gtest/gtest.h>
 
 #include <algorithm>
-#include <algorithm>
 #include <cmath>
-#include <filesystem>
-#include <string>
-#include <system_error>
 #include <filesystem>
 #include <string>
 #include <system_error>
@@ -500,9 +494,102 @@ TEST_F(TestUhdSelectionFlow, GetEngineForUnregisteredReturnsNull)
     EXPECT_EQ(engine, nullptr);
 }
 
+TEST_F(TestUhdSelectionFlow, SnapshotSurvivesReregistration)
+{
+    // RFC 0019 §9.2 supports dropping a replacement descriptor set in place. A holder
+    // of the previous snapshot must keep reading a consistent entry rather than having
+    // it assigned over mid-use.
+    EngineRegistry::instance().registerEngine(
+        createStaticOrderEngine(100, {makeCandidate(1, 10), makeCandidate(2, 20)}));
 
+    auto snapshot = EngineRegistry::instance().getEngine(100);
+    ASSERT_NE(snapshot, nullptr);
+    ASSERT_EQ(snapshot->candidates.size(), 2u);
 
+    // Replace the engine with a differently-shaped one.
+    EngineRegistry::instance().registerEngine(createStaticOrderEngine(100, {makeCandidate(9, 1)}));
 
+    // The old snapshot is unchanged and still readable.
+    ASSERT_EQ(snapshot->candidates.size(), 2u);
+    EXPECT_EQ(snapshot->candidates[0].kernelId, 1);
+
+    // A fresh lookup sees the replacement.
+    auto current = EngineRegistry::instance().getEngine(100);
+    ASSERT_NE(current, nullptr);
+    ASSERT_EQ(current->candidates.size(), 1u);
+    EXPECT_EQ(current->candidates[0].kernelId, 9);
+}
+
+TEST_F(TestUhdSelectionFlow, SnapshotResolvesItsOwnAdapterAndExtractor)
+{
+    // A snapshot is only useful if everything derived from it comes from it too.
+    // Resolving the adapter by ID instead would pair a *new* model with this
+    // snapshot's config and candidates after a re-registration — and the mismatch is
+    // silent, since objective and score.transform are read from the old config while
+    // the score comes from the new model.
+    auto k1 = makeCandidate(1, 10, {{"tile_m", 64.0}});
+
+    EngineEntry before;
+    before.engineId = 100;
+    before.uhdConfig.uhdId = "before";
+    before.uhdConfig.adapterType = "static_order";
+    before.uhdConfig.featuresSignature = {"$kernel.priority", "$kernel.id"}; // width 2
+    before.uhdConfig.staticOrderFields = {"priority"};
+    before.candidates = {k1};
+    EngineRegistry::instance().registerEngine(before);
+
+    auto snapshot = EngineRegistry::instance().getEngine(100);
+    ASSERT_NE(snapshot, nullptr);
+
+    // Replace with a descriptor of a different shape.
+    EngineEntry after;
+    after.engineId = 100;
+    after.uhdConfig.uhdId = "after";
+    after.uhdConfig.adapterType = "static_order";
+    after.uhdConfig.featuresSignature = {"$kernel.priority"}; // width 1
+    after.uhdConfig.staticOrderFields = {"priority"};
+    after.candidates = {k1};
+    EngineRegistry::instance().registerEngine(after);
+
+    auto fromSnapshot = EngineRegistry::instance().getOrCreateAdapter(snapshot);
+    auto fromId = EngineRegistry::instance().getOrCreateAdapter(100);
+    ASSERT_NE(fromSnapshot, nullptr);
+    ASSERT_NE(fromId, nullptr);
+
+    // The snapshot's adapter matches the snapshot's signature, not the live one's.
+    EXPECT_EQ(fromSnapshot->expectedFeatureCount(), 2u);
+    EXPECT_EQ(fromId->expectedFeatureCount(), 1u);
+
+    auto extractorFromSnapshot = EngineRegistry::instance().getOrCreateExtractor(snapshot);
+    auto extractorFromId = EngineRegistry::instance().getOrCreateExtractor(100);
+    ASSERT_NE(extractorFromSnapshot, nullptr);
+    ASSERT_NE(extractorFromId, nullptr);
+    EXPECT_EQ(extractorFromSnapshot->featureCount(), 2u);
+    EXPECT_EQ(extractorFromId->featureCount(), 1u);
+}
+
+TEST_F(TestUhdSelectionFlow, NullSnapshotYieldsNullAdapterAndExtractor)
+{
+    const std::shared_ptr<const hipdnn_backend::heuristics::uhd::EngineEntry> none;
+
+    EXPECT_EQ(EngineRegistry::instance().getOrCreateAdapter(none), nullptr);
+    EXPECT_EQ(EngineRegistry::instance().getOrCreateExtractor(none), nullptr);
+}
+
+TEST_F(TestUhdSelectionFlow, SnapshotSurvivesRegistryClear)
+{
+    EngineRegistry::instance().registerEngine(createStaticOrderEngine(100, {makeCandidate(1, 10)}));
+
+    auto snapshot = EngineRegistry::instance().getEngine(100);
+    ASSERT_NE(snapshot, nullptr);
+
+    EngineRegistry::instance().clear();
+
+    // Reading through the snapshot after a clear must stay well-defined.
+    ASSERT_EQ(snapshot->candidates.size(), 1u);
+    EXPECT_EQ(snapshot->engineId, 100);
+    EXPECT_EQ(EngineRegistry::instance().getEngine(100), nullptr);
+}
 
 // ========== Calibrated Score Transform Tests ==========
 
@@ -535,13 +622,146 @@ TEST_F(TestUhdSelectionFlow, CalibratedScoreAppliesTransform)
     EXPECT_NEAR(*result.bestScore, expectedTransformed, 1e-10);
 }
 
+TEST_F(TestUhdSelectionFlow, UncalibratedScoreStillAppliesInverseTransform)
+{
+    // RFC 0019 §5/§12.3: `transform` and `calibrated` are orthogonal. `transform` says
+    // the model was trained on a transformed target and must be inverted to report the
+    // declared `units`; `calibrated` says the recovered value is comparable across
+    // engines. An uncalibrated model with a transform must still be inverted, or the
+    // reported score is a log-space number labelled as tflops.
+    auto k1 = makeCandidate(1, 5);
 
+    EngineEntry entry;
+    entry.engineId = 100;
+    entry.uhdConfig.adapterType = "static_order";
+    entry.uhdConfig.featuresSignature = {"\"$kernel.priority\"", "\"$kernel.id\""};
+    entry.uhdConfig.staticOrderFields = {"priority", "id"};
+    entry.uhdConfig.objective = "max";
+    entry.uhdConfig.scoreCalibrated = false; // Not comparable across engines...
+    entry.uhdConfig.scoreTransform = "log1p"; // ...but still trained on a transform
+    entry.candidates = {k1};
 
+    EngineRegistry::instance().registerEngine(entry);
 
+    auto result = SelectionEngine::select(100, defaultDeviceVars(), defaultQueryVars());
 
+    EXPECT_TRUE(result.applied);
+    EXPECT_TRUE(result.bestScore.has_value());
+    // StaticOrderAdapter computes: sum(-weight_i * field_i)
+    // With 2 fields: weight0=1e10, weight1=1
+    // Raw score = -1e10 * 5 (priority) + -1 * 1 (id) = -5e10 - 1
+    const double rawScore = -5e10 - 1;
+    EXPECT_NEAR(*result.bestScore, std::expm1(rawScore), 1e-10);
+}
 
+TEST_F(TestUhdSelectionFlow, RegisterRejectsUnsupportedScoreTransform)
+{
+    // applyInverse cannot signal "unknown" at the point of use — it returns the score
+    // unchanged. So a transform this runtime cannot invert has to be caught at load,
+    // or the model's transformed output gets reported as if it were in the declared
+    // score.units and silently corrupts cross-engine comparison (RFC §12.3).
+    auto k1 = makeCandidate(1, 5);
+    auto entry = createStaticOrderEngine(100, {k1});
+    entry.uhdConfig.scoreTransform = "boxcox";
 
+    EXPECT_THROW(EngineRegistry::instance().registerEngine(entry), std::invalid_argument);
+}
 
+TEST_F(TestUhdSelectionFlow, RegisterRejectsMisspelledScoreTransform)
+{
+    // The failure mode that motivates fail-closed: a near-miss that would otherwise
+    // pass through as a no-op.
+    auto k1 = makeCandidate(1, 5);
+    auto entry = createStaticOrderEngine(100, {k1});
+    entry.uhdConfig.scoreTransform = "log1P";
+
+    EXPECT_THROW(EngineRegistry::instance().registerEngine(entry), std::invalid_argument);
+}
+
+TEST_F(TestUhdSelectionFlow, RegisterAcceptsEverySupportedScoreTransform)
+{
+    int64_t engineId = 100;
+    for(const auto* transform :
+        hipdnn_backend::heuristics::uhd::score_transform::kSupportedTransforms)
+    {
+        auto k1 = makeCandidate(1, 5);
+        auto entry = createStaticOrderEngine(engineId, {k1});
+        entry.uhdConfig.scoreTransform = transform;
+
+        EXPECT_NO_THROW(EngineRegistry::instance().registerEngine(entry))
+            << "transform '" << transform << "' is listed as supported but was rejected";
+        ++engineId;
+    }
+}
+
+TEST_F(TestUhdSelectionFlow, SupportedTransformsCoverTheSchemaVocabulary)
+{
+    // flatbuffers_sdk/schemas/uhd.fbs documents the transform field as
+    // (e.g., "identity", "log1p", "exp"). A name the schema advertises but the runtime
+    // rejects is a descriptor that passes schema review and then fails to load.
+    namespace xform = hipdnn_backend::heuristics::uhd::score_transform;
+
+    for(const auto* documented : {"identity", "log1p", "exp"})
+    {
+        EXPECT_TRUE(xform::isSupported(documented))
+            << "uhd.fbs documents transform '" << documented
+            << "' but the runtime cannot invert it";
+    }
+}
+
+TEST_F(TestUhdSelectionFlow, ExpTransformInvertsToLog)
+{
+    namespace xform = hipdnn_backend::heuristics::uhd::score_transform;
+
+    // Round-trip: a target pushed through the forward transform comes back out.
+    const double target = 4.5;
+    EXPECT_NEAR(xform::applyInverse(xform::applyForward(target, "exp"), "exp"), target, 1e-9);
+}
+
+TEST_F(TestUhdSelectionFlow, IdentityTransformLeavesScoreUnchanged)
+{
+    auto k1 = makeCandidate(1, 5);
+
+    EngineEntry entry;
+    entry.engineId = 100;
+    entry.uhdConfig.adapterType = "static_order";
+    entry.uhdConfig.featuresSignature = {"\"$kernel.priority\"", "\"$kernel.id\""};
+    entry.uhdConfig.staticOrderFields = {"priority", "id"};
+    entry.uhdConfig.objective = "max";
+    entry.uhdConfig.scoreCalibrated = true;
+    entry.uhdConfig.scoreTransform = "identity";
+    entry.candidates = {k1};
+
+    EngineRegistry::instance().registerEngine(entry);
+
+    auto result = SelectionEngine::select(100, defaultDeviceVars(), defaultQueryVars());
+
+    ASSERT_TRUE(result.bestScore.has_value());
+    EXPECT_NEAR(*result.bestScore, -5e10 - 1, 1e-5);
+}
+
+TEST_F(TestUhdSelectionFlow, NoTransformLeavesScoreUnchanged)
+{
+    auto k1 = makeCandidate(1, 5);
+
+    EngineEntry entry;
+    entry.engineId = 100;
+    entry.uhdConfig.adapterType = "static_order";
+    entry.uhdConfig.featuresSignature = {"\"$kernel.priority\"", "\"$kernel.id\""};
+    entry.uhdConfig.staticOrderFields = {"priority", "id"};
+    entry.uhdConfig.objective = "max";
+    entry.uhdConfig.scoreCalibrated = true;
+    entry.uhdConfig.scoreTransform = ""; // No transform declared
+    entry.candidates = {k1};
+
+    EngineRegistry::instance().registerEngine(entry);
+
+    auto result = SelectionEngine::select(100, defaultDeviceVars(), defaultQueryVars());
+
+    EXPECT_TRUE(result.applied);
+    ASSERT_TRUE(result.bestScore.has_value());
+    EXPECT_NEAR(*result.bestScore, -5e10 - 1, 1e-5);
+}
 
 // ========== Mixed Valid/Invalid Candidates ==========
 
@@ -863,8 +1083,81 @@ TEST_F(TestUhdSelectionFlow, RegisterEngineSkipsValidationWithNoCandidates)
 
 // ========== Cached Extractor Tests ==========
 
+TEST_F(TestUhdSelectionFlow, CachedExtractorProducesConsistentResults)
+{
+    // Register an engine with a features signature
+    auto k1 = makeCandidate(1, 10, {{"tile_m", 64.0}, {"tile_n", 64.0}});
+    auto k2 = makeCandidate(2, 5, {{"tile_m", 128.0}, {"tile_n", 128.0}});
+    auto k3 = makeCandidate(3, 1, {{"tile_m", 256.0}, {"tile_n", 256.0}});
 
+    EngineEntry entry;
+    entry.engineId = 200;
+    entry.engineName = "CacheTestEngine";
+    entry.uhdConfig.uhdId = "cache-test";
+    entry.uhdConfig.adapterType = "static_order";
+    entry.uhdConfig.featuresSignature = {"\"$kernel.tile_m\"", "\"$kernel.tile_n\""};
+    entry.uhdConfig.staticOrderFields = {"tile_m"};
+    entry.candidates = {k1, k2, k3};
 
+    EngineRegistry::instance().registerEngine(entry);
+
+    // Run selection 100 times and verify consistent results
+    FeatureExtractionContext::ValueMap deviceVars;
+    deviceVars["architecture_name"] = std::string("gfx942");
+
+    FeatureExtractionContext::ValueMap queryVars;
+    queryVars["m"] = 1024.0;
+
+    std::optional<int64_t> firstBestKernel;
+
+    for(int i = 0; i < 100; ++i)
+    {
+        auto result = SelectionEngine::select(200, deviceVars, queryVars);
+        ASSERT_TRUE(result.applied) << "Selection failed on iteration " << i;
+        ASSERT_TRUE(result.bestKernelId.has_value()) << "No best kernel on iteration " << i;
+
+        if(!firstBestKernel.has_value())
+        {
+            firstBestKernel = result.bestKernelId;
+        }
+        else
+        {
+            EXPECT_EQ(result.bestKernelId.value(), firstBestKernel.value())
+                << "Inconsistent result on iteration " << i;
+        }
+    }
+}
+
+TEST_F(TestUhdSelectionFlow, GetOrCreateExtractorReturnsNullForUnknownEngine)
+{
+    auto extractor = EngineRegistry::instance().getOrCreateExtractor(999999);
+    EXPECT_EQ(extractor, nullptr);
+}
+
+TEST_F(TestUhdSelectionFlow, GetOrCreateExtractorReturnsSameInstance)
+{
+    // Register an engine
+    auto k1 = makeCandidate(1, 10, {{"tile_m", 64.0}});
+
+    EngineEntry entry;
+    entry.engineId = 300;
+    entry.engineName = "ExtractorCacheEngine";
+    entry.uhdConfig.uhdId = "extractor-cache";
+    entry.uhdConfig.adapterType = "static_order";
+    entry.uhdConfig.featuresSignature = {"\"$kernel.tile_m\""};
+    entry.uhdConfig.staticOrderFields = {"priority"};
+    entry.candidates = {k1};
+
+    EngineRegistry::instance().registerEngine(entry);
+
+    // Get extractor twice and verify same instance
+    auto extractor1 = EngineRegistry::instance().getOrCreateExtractor(300);
+    auto extractor2 = EngineRegistry::instance().getOrCreateExtractor(300);
+
+    ASSERT_NE(extractor1, nullptr);
+    ASSERT_NE(extractor2, nullptr);
+    EXPECT_EQ(extractor1.get(), extractor2.get()) << "Extractor should be cached and return same instance";
+}
 
 // ========== features_hash contract at registration (RFC §7.3) ==========
 
@@ -941,299 +1234,6 @@ TEST_F(TestUhdSelectionFlow, RegisterAcceptsBareReferenceSignature)
 
 // ========== Fail-open and trace preservation (RFC §6 step 6, §13) ==========
 
-
-
-
-
-
-
-TEST_F(TestUhdSelectionFlow, MalformedSignatureEntryThrowsInvalidArgument)
-{
-    // registerEngine documents std::invalid_argument; a malformed entry makes the
-    // extractor throw JsonLogicError, which a caller catching invalid_argument would
-    // miss.
-    auto k1 = makeCandidate(1, 5, {{"tile_m", 64.0}});
-
-    EngineEntry entry;
-    entry.engineId = 100;
-    entry.uhdConfig.uhdId = "malformed";
-    entry.uhdConfig.adapterType = "static_order";
-    entry.uhdConfig.featuresSignature = {"{not valid json"};
-    entry.uhdConfig.staticOrderFields = {"priority"};
-    entry.candidates = {k1};
-
-    EXPECT_THROW(EngineRegistry::instance().registerEngine(entry), std::invalid_argument);
-}
-
-TEST_F(TestUhdSelectionFlow, RegisterRejectsHashDeclaredOverEmptySignature)
-{
-    // A hash over no features is self-inconsistent; skipping the check when the
-    // signature is empty would let it through unvalidated.
-    EngineEntry entry;
-    entry.engineId = 100;
-    entry.uhdConfig.uhdId = "hash-no-signature";
-    entry.uhdConfig.adapterType = "static_order";
-    entry.uhdConfig.featuresSignature = {};
-    entry.uhdConfig.featuresHash = "sha256:0000000000000000";
-
-    EXPECT_THROW(EngineRegistry::instance().registerEngine(entry), std::invalid_argument);
-}
-
-
-// ========== Per-candidate binding hygiene ==========
-
-// ========== Per-candidate binding hygiene ==========
-
-// ========== Untrained architecture degrades (RFC §9.3) ==========
-
-
-
-
-
-
-
-
-// ========== Cached extractor and per-candidate binding hygiene ==========
-
-TEST_F(TestUhdSelectionFlow, CachedExtractorProducesConsistentResults)
-{
-    // Register an engine with a features signature
-    auto k1 = makeCandidate(1, 10, {{"tile_m", 64.0}, {"tile_n", 64.0}});
-    auto k2 = makeCandidate(2, 5, {{"tile_m", 128.0}, {"tile_n", 128.0}});
-    auto k3 = makeCandidate(3, 1, {{"tile_m", 256.0}, {"tile_n", 256.0}});
-
-    EngineEntry entry;
-    entry.engineId = 200;
-    entry.engineName = "CacheTestEngine";
-    entry.uhdConfig.uhdId = "cache-test";
-    entry.uhdConfig.adapterType = "static_order";
-    entry.uhdConfig.featuresSignature = {"\"$kernel.tile_m\"", "\"$kernel.tile_n\""};
-    entry.uhdConfig.staticOrderFields = {"tile_m"};
-    entry.candidates = {k1, k2, k3};
-
-    EngineRegistry::instance().registerEngine(entry);
-
-    // Run selection 100 times and verify consistent results
-    FeatureExtractionContext::ValueMap deviceVars;
-    deviceVars["architecture_name"] = std::string("gfx942");
-
-    FeatureExtractionContext::ValueMap queryVars;
-    queryVars["m"] = 1024.0;
-
-    std::optional<int64_t> firstBestKernel;
-
-    for(int i = 0; i < 100; ++i)
-    {
-        auto result = SelectionEngine::select(200, deviceVars, queryVars);
-        ASSERT_TRUE(result.applied) << "Selection failed on iteration " << i;
-        ASSERT_TRUE(result.bestKernelId.has_value()) << "No best kernel on iteration " << i;
-
-        if(!firstBestKernel.has_value())
-        {
-            firstBestKernel = result.bestKernelId;
-        }
-        else
-        {
-            EXPECT_EQ(result.bestKernelId.value(), firstBestKernel.value())
-                << "Inconsistent result on iteration " << i;
-        }
-    }
-}
-TEST_F(TestUhdSelectionFlow, GetOrCreateExtractorReturnsNullForUnknownEngine)
-{
-    auto extractor = EngineRegistry::instance().getOrCreateExtractor(999999);
-    EXPECT_EQ(extractor, nullptr);
-}
-TEST_F(TestUhdSelectionFlow, GetOrCreateExtractorReturnsSameInstance)
-{
-    // Register an engine
-    auto k1 = makeCandidate(1, 10, {{"tile_m", 64.0}});
-
-    EngineEntry entry;
-    entry.engineId = 300;
-    entry.engineName = "ExtractorCacheEngine";
-    entry.uhdConfig.uhdId = "extractor-cache";
-    entry.uhdConfig.adapterType = "static_order";
-    entry.uhdConfig.featuresSignature = {"\"$kernel.tile_m\""};
-    entry.uhdConfig.staticOrderFields = {"priority"};
-    entry.candidates = {k1};
-
-    EngineRegistry::instance().registerEngine(entry);
-
-    // Get extractor twice and verify same instance
-    auto extractor1 = EngineRegistry::instance().getOrCreateExtractor(300);
-    auto extractor2 = EngineRegistry::instance().getOrCreateExtractor(300);
-
-    ASSERT_NE(extractor1, nullptr);
-    ASSERT_NE(extractor2, nullptr);
-    EXPECT_EQ(extractor1.get(), extractor2.get()) << "Extractor should be cached and return same instance";
-}
-TEST_F(TestUhdSelectionFlow, CandidateMissingMetadataDoesNotInheritPreviousValue)
-{
-    // The context is reused across candidates for speed (RFC §6 step 2). A candidate
-    // that omits a referenced field must fail to score rather than silently pick up
-    // the previous candidate's value.
-    auto withField = makeCandidate(1, 10, {{"tile_m", 64.0}});
-    auto withoutField = makeCandidate(2, 5); // no tile_m
-
-    EngineEntry entry;
-    entry.engineId = 100;
-    entry.uhdConfig.uhdId = "staleness";
-    entry.uhdConfig.adapterType = "static_order";
-    entry.uhdConfig.featuresSignature = {"$kernel.tile_m"};
-    entry.uhdConfig.staticOrderFields = {"tile_m"};
-    entry.candidates = {withField, withoutField};
-
-    EngineRegistry::instance().registerEngine(entry);
-
-    auto result = SelectionEngine::select(100, defaultDeviceVars(), defaultQueryVars());
-
-    ASSERT_EQ(result.scoredCandidates.size(), 2u);
-
-    // Exactly the candidate carrying tile_m scores; the other is marked invalid.
-    const auto scoredWithout =
-        std::find_if(result.scoredCandidates.begin(),
-                     result.scoredCandidates.end(),
-                     [](const auto& sc) { return sc.kernelId == 2; });
-    ASSERT_NE(scoredWithout, result.scoredCandidates.end());
-    EXPECT_FALSE(scoredWithout->scoreValid)
-        << "candidate without tile_m must not inherit the previous candidate's value";
-}
-// ========== Fail open, degrade, and score transforms ==========
-
-TEST_F(TestUhdSelectionFlow, RegisterRejectsUnsupportedScoreTransform)
-{
-    // applyInverse cannot signal "unknown" at the point of use — it returns the score
-    // unchanged. So a transform this runtime cannot invert has to be caught at load,
-    // or the model's transformed output gets reported as if it were in the declared
-    // score.units and silently corrupts cross-engine comparison (RFC §12.3).
-    auto k1 = makeCandidate(1, 5);
-    auto entry = createStaticOrderEngine(100, {k1});
-    entry.uhdConfig.scoreTransform = "boxcox";
-
-    EXPECT_THROW(EngineRegistry::instance().registerEngine(entry), std::invalid_argument);
-}
-TEST_F(TestUhdSelectionFlow, RegisterRejectsMisspelledScoreTransform)
-{
-    // The failure mode that motivates fail-closed: a near-miss that would otherwise
-    // pass through as a no-op.
-    auto k1 = makeCandidate(1, 5);
-    auto entry = createStaticOrderEngine(100, {k1});
-    entry.uhdConfig.scoreTransform = "log1P";
-
-    EXPECT_THROW(EngineRegistry::instance().registerEngine(entry), std::invalid_argument);
-}
-TEST_F(TestUhdSelectionFlow, RegisterAcceptsEverySupportedScoreTransform)
-{
-    int64_t engineId = 100;
-    for(const auto* transform :
-        hipdnn_backend::heuristics::uhd::score_transform::kSupportedTransforms)
-    {
-        auto k1 = makeCandidate(1, 5);
-        auto entry = createStaticOrderEngine(engineId, {k1});
-        entry.uhdConfig.scoreTransform = transform;
-
-        EXPECT_NO_THROW(EngineRegistry::instance().registerEngine(entry))
-            << "transform '" << transform << "' is listed as supported but was rejected";
-        ++engineId;
-    }
-}
-TEST_F(TestUhdSelectionFlow, SupportedTransformsCoverTheSchemaVocabulary)
-{
-    // flatbuffers_sdk/schemas/uhd.fbs documents the transform field as
-    // (e.g., "identity", "log1p", "exp"). A name the schema advertises but the runtime
-    // rejects is a descriptor that passes schema review and then fails to load.
-    namespace xform = hipdnn_backend::heuristics::uhd::score_transform;
-
-    for(const auto* documented : {"identity", "log1p", "exp"})
-    {
-        EXPECT_TRUE(xform::isSupported(documented))
-            << "uhd.fbs documents transform '" << documented
-            << "' but the runtime cannot invert it";
-    }
-}
-TEST_F(TestUhdSelectionFlow, ExpTransformInvertsToLog)
-{
-    namespace xform = hipdnn_backend::heuristics::uhd::score_transform;
-
-    // Round-trip: a target pushed through the forward transform comes back out.
-    const double target = 4.5;
-    EXPECT_NEAR(xform::applyInverse(xform::applyForward(target, "exp"), "exp"), target, 1e-9);
-}
-TEST_F(TestUhdSelectionFlow, IdentityTransformLeavesScoreUnchanged)
-{
-    auto k1 = makeCandidate(1, 5);
-
-    EngineEntry entry;
-    entry.engineId = 100;
-    entry.uhdConfig.adapterType = "static_order";
-    entry.uhdConfig.featuresSignature = {"\"$kernel.priority\"", "\"$kernel.id\""};
-    entry.uhdConfig.staticOrderFields = {"priority", "id"};
-    entry.uhdConfig.objective = "max";
-    entry.uhdConfig.scoreCalibrated = true;
-    entry.uhdConfig.scoreTransform = "identity";
-    entry.candidates = {k1};
-
-    EngineRegistry::instance().registerEngine(entry);
-
-    auto result = SelectionEngine::select(100, defaultDeviceVars(), defaultQueryVars());
-
-    ASSERT_TRUE(result.bestScore.has_value());
-    EXPECT_NEAR(*result.bestScore, -5e10 - 1, 1e-5);
-}
-TEST_F(TestUhdSelectionFlow, NoTransformLeavesScoreUnchanged)
-{
-    auto k1 = makeCandidate(1, 5);
-
-    EngineEntry entry;
-    entry.engineId = 100;
-    entry.uhdConfig.adapterType = "static_order";
-    entry.uhdConfig.featuresSignature = {"\"$kernel.priority\"", "\"$kernel.id\""};
-    entry.uhdConfig.staticOrderFields = {"priority", "id"};
-    entry.uhdConfig.objective = "max";
-    entry.uhdConfig.scoreCalibrated = true;
-    entry.uhdConfig.scoreTransform = ""; // No transform declared
-    entry.candidates = {k1};
-
-    EngineRegistry::instance().registerEngine(entry);
-
-    auto result = SelectionEngine::select(100, defaultDeviceVars(), defaultQueryVars());
-
-    EXPECT_TRUE(result.applied);
-    ASSERT_TRUE(result.bestScore.has_value());
-    EXPECT_NEAR(*result.bestScore, -5e10 - 1, 1e-5);
-}
-TEST_F(TestUhdSelectionFlow, UncalibratedScoreStillAppliesInverseTransform)
-{
-    // RFC 0019 §5/§12.3: `transform` and `calibrated` are orthogonal. `transform` says
-    // the model was trained on a transformed target and must be inverted to report the
-    // declared `units`; `calibrated` says the recovered value is comparable across
-    // engines. An uncalibrated model with a transform must still be inverted, or the
-    // reported score is a log-space number labelled as tflops.
-    auto k1 = makeCandidate(1, 5);
-
-    EngineEntry entry;
-    entry.engineId = 100;
-    entry.uhdConfig.adapterType = "static_order";
-    entry.uhdConfig.featuresSignature = {"\"$kernel.priority\"", "\"$kernel.id\""};
-    entry.uhdConfig.staticOrderFields = {"priority", "id"};
-    entry.uhdConfig.objective = "max";
-    entry.uhdConfig.scoreCalibrated = false; // Not comparable across engines...
-    entry.uhdConfig.scoreTransform = "log1p"; // ...but still trained on a transform
-    entry.candidates = {k1};
-
-    EngineRegistry::instance().registerEngine(entry);
-
-    auto result = SelectionEngine::select(100, defaultDeviceVars(), defaultQueryVars());
-
-    EXPECT_TRUE(result.applied);
-    EXPECT_TRUE(result.bestScore.has_value());
-    // StaticOrderAdapter computes: sum(-weight_i * field_i)
-    // With 2 fields: weight0=1e10, weight1=1
-    // Raw score = -1e10 * 5 (priority) + -1 * 1 (id) = -5e10 - 1
-    const double rawScore = -5e10 - 1;
-    EXPECT_NEAR(*result.bestScore, std::expm1(rawScore), 1e-10);
-}
 TEST_F(TestUhdSelectionFlow, UnknownAdapterStillProducesOrdering)
 {
     // RFC §6 step 6: a model that cannot be built degrades to priority+id; the engine
@@ -1258,6 +1258,7 @@ TEST_F(TestUhdSelectionFlow, UnknownAdapterStillProducesOrdering)
     ASSERT_EQ(result.sortedKernelIds.size(), 2u);
     EXPECT_EQ(result.sortedKernelIds[0], 2); // priority 5 beats priority 10
 }
+
 TEST_F(TestUhdSelectionFlow, FallbackPreservesModelProvenanceInTrace)
 {
     // Provenance set before the failure must survive into the returned trace —
@@ -1282,6 +1283,7 @@ TEST_F(TestUhdSelectionFlow, FallbackPreservesModelProvenanceInTrace)
     EXPECT_FALSE(result.trace.usedModel);
     EXPECT_FALSE(result.trace.fallbackReason.empty());
 }
+
 TEST_F(TestUhdSelectionFlow, HasOrderingIsFalseWhenEngineMissing)
 {
     auto result = SelectionEngine::select(999, defaultDeviceVars(), defaultQueryVars());
@@ -1289,24 +1291,7 @@ TEST_F(TestUhdSelectionFlow, HasOrderingIsFalseWhenEngineMissing)
     EXPECT_FALSE(result.applied);
     EXPECT_FALSE(result.hasOrdering());
 }
-TEST_F(TestUhdSelectionFlow, EngineWithNoCandidatesIsNotRuledOut)
-{
-    // Nothing to rank is not the same as selection failing — the engine keeps its
-    // place rather than being dropped.
-    EngineEntry entry;
-    entry.engineId = 100;
-    entry.uhdConfig.uhdId = "no-candidates";
-    entry.uhdConfig.adapterType = "static_order";
-    entry.candidates = {};
 
-    EngineRegistry::instance().registerEngine(entry);
-
-    auto result = SelectionEngine::select(100, defaultDeviceVars(), defaultQueryVars());
-
-    EXPECT_TRUE(result.applied);
-    EXPECT_TRUE(result.sortedKernelIds.empty());
-    EXPECT_TRUE(result.hasOrdering());
-}
 TEST_F(TestUhdSelectionFlow, NonFiniteScoresAreTreatedAsInvalid)
 {
     // A string-valued device property resolves to NaN rather than throwing
@@ -1348,6 +1333,7 @@ TEST_F(TestUhdSelectionFlow, NonFiniteScoresAreTreatedAsInvalid)
     EXPECT_EQ(result.sortedKernelIds[0], 2);
     EXPECT_FALSE(result.bestScore.has_value());
 }
+
 TEST_F(TestUhdSelectionFlow, NonFiniteFeatureIgnoredByAdapterIsHarmless)
 {
     // The guard is on the score, not on the feature vector. A NaN sitting in a slot the
@@ -1377,6 +1363,89 @@ TEST_F(TestUhdSelectionFlow, NonFiniteFeatureIgnoredByAdapterIsHarmless)
     ASSERT_EQ(result.sortedKernelIds.size(), 2u);
     EXPECT_EQ(result.sortedKernelIds[0], 2); // priority 5 wins
 }
+
+TEST_F(TestUhdSelectionFlow, StringDevicePropertyInSignatureDegradesRatherThanScoring)
+{
+    // architecture_name is bound as a string. Before the §7.2 type check it resolved to
+    // NaN and was scored as if it were data; now it fails closed and the engine
+    // degrades — still ranked, but honestly.
+    auto k1 = makeCandidate(1, 10);
+    auto k2 = makeCandidate(2, 5);
+
+    EngineEntry entry;
+    entry.engineId = 100;
+    entry.uhdConfig.uhdId = "string-feature";
+    entry.uhdConfig.adapterType = "static_order";
+    entry.uhdConfig.featuresSignature = {"$device.architecture_name"};
+    entry.uhdConfig.staticOrderFields = {"$device.architecture_name"};
+    entry.candidates = {k1, k2};
+
+    EngineRegistry::instance().registerEngine(entry);
+
+    auto deviceVars = defaultDeviceVars();
+    deviceVars[hipdnn_backend::heuristics::uhd::kArchitectureNameKey] = std::string("gfx942");
+
+    auto result = SelectionEngine::select(100, deviceVars, defaultQueryVars());
+
+    EXPECT_FALSE(result.applied);
+    EXPECT_TRUE(result.hasOrdering());
+    ASSERT_EQ(result.sortedKernelIds.size(), 2u);
+    EXPECT_EQ(result.sortedKernelIds[0], 2);
+}
+
+TEST_F(TestUhdSelectionFlow, MalformedSignatureEntryThrowsInvalidArgument)
+{
+    // registerEngine documents std::invalid_argument; a malformed entry makes the
+    // extractor throw JsonLogicError, which a caller catching invalid_argument would
+    // miss.
+    auto k1 = makeCandidate(1, 5, {{"tile_m", 64.0}});
+
+    EngineEntry entry;
+    entry.engineId = 100;
+    entry.uhdConfig.uhdId = "malformed";
+    entry.uhdConfig.adapterType = "static_order";
+    entry.uhdConfig.featuresSignature = {"{not valid json"};
+    entry.uhdConfig.staticOrderFields = {"priority"};
+    entry.candidates = {k1};
+
+    EXPECT_THROW(EngineRegistry::instance().registerEngine(entry), std::invalid_argument);
+}
+
+TEST_F(TestUhdSelectionFlow, RegisterRejectsHashDeclaredOverEmptySignature)
+{
+    // A hash over no features is self-inconsistent; skipping the check when the
+    // signature is empty would let it through unvalidated.
+    EngineEntry entry;
+    entry.engineId = 100;
+    entry.uhdConfig.uhdId = "hash-no-signature";
+    entry.uhdConfig.adapterType = "static_order";
+    entry.uhdConfig.featuresSignature = {};
+    entry.uhdConfig.featuresHash = "sha256:0000000000000000";
+
+    EXPECT_THROW(EngineRegistry::instance().registerEngine(entry), std::invalid_argument);
+}
+
+TEST_F(TestUhdSelectionFlow, EngineWithNoCandidatesIsNotRuledOut)
+{
+    // Nothing to rank is not the same as selection failing — the engine keeps its
+    // place rather than being dropped.
+    EngineEntry entry;
+    entry.engineId = 100;
+    entry.uhdConfig.uhdId = "no-candidates";
+    entry.uhdConfig.adapterType = "static_order";
+    entry.candidates = {};
+
+    EngineRegistry::instance().registerEngine(entry);
+
+    auto result = SelectionEngine::select(100, defaultDeviceVars(), defaultQueryVars());
+
+    EXPECT_TRUE(result.applied);
+    EXPECT_TRUE(result.sortedKernelIds.empty());
+    EXPECT_TRUE(result.hasOrdering());
+}
+
+// ========== Per-candidate binding hygiene ==========
+
 // ========== Untrained architecture degrades (RFC §9.3) ==========
 
 /// Fixture that writes a real tree_data artifact so arch metadata can be exercised
@@ -1510,99 +1579,36 @@ TEST_F(TestUhdSelectionFlowTreeData, MissingArchKeySkipsTheCheck)
     EXPECT_TRUE(result.trace.deviceArch.empty());
 }
 
-// ========== Registry snapshots ==========
-
-TEST_F(TestUhdSelectionFlow, SnapshotSurvivesReregistration)
+TEST_F(TestUhdSelectionFlow, CandidateMissingMetadataDoesNotInheritPreviousValue)
 {
-    // RFC 0019 §9.2 supports dropping a replacement descriptor set in place. A holder
-    // of the previous snapshot must keep reading a consistent entry rather than having
-    // it assigned over mid-use.
-    EngineRegistry::instance().registerEngine(
-        createStaticOrderEngine(100, {makeCandidate(1, 10), makeCandidate(2, 20)}));
+    // The context is reused across candidates for speed (RFC §6 step 2). A candidate
+    // that omits a referenced field must fail to score rather than silently pick up
+    // the previous candidate's value.
+    auto withField = makeCandidate(1, 10, {{"tile_m", 64.0}});
+    auto withoutField = makeCandidate(2, 5); // no tile_m
 
-    auto snapshot = EngineRegistry::instance().getEngine(100);
-    ASSERT_NE(snapshot, nullptr);
-    ASSERT_EQ(snapshot->candidates.size(), 2u);
+    EngineEntry entry;
+    entry.engineId = 100;
+    entry.uhdConfig.uhdId = "staleness";
+    entry.uhdConfig.adapterType = "static_order";
+    entry.uhdConfig.featuresSignature = {"$kernel.tile_m"};
+    entry.uhdConfig.staticOrderFields = {"tile_m"};
+    entry.candidates = {withField, withoutField};
 
-    // Replace the engine with a differently-shaped one.
-    EngineRegistry::instance().registerEngine(createStaticOrderEngine(100, {makeCandidate(9, 1)}));
+    EngineRegistry::instance().registerEngine(entry);
 
-    // The old snapshot is unchanged and still readable.
-    ASSERT_EQ(snapshot->candidates.size(), 2u);
-    EXPECT_EQ(snapshot->candidates[0].kernelId, 1);
+    auto result = SelectionEngine::select(100, defaultDeviceVars(), defaultQueryVars());
 
-    // A fresh lookup sees the replacement.
-    auto current = EngineRegistry::instance().getEngine(100);
-    ASSERT_NE(current, nullptr);
-    ASSERT_EQ(current->candidates.size(), 1u);
-    EXPECT_EQ(current->candidates[0].kernelId, 9);
+    ASSERT_EQ(result.scoredCandidates.size(), 2u);
+
+    // Exactly the candidate carrying tile_m scores; the other is marked invalid.
+    const auto scoredWithout =
+        std::find_if(result.scoredCandidates.begin(),
+                     result.scoredCandidates.end(),
+                     [](const auto& sc) { return sc.kernelId == 2; });
+    ASSERT_NE(scoredWithout, result.scoredCandidates.end());
+    EXPECT_FALSE(scoredWithout->scoreValid)
+        << "candidate without tile_m must not inherit the previous candidate's value";
 }
-TEST_F(TestUhdSelectionFlow, SnapshotResolvesItsOwnAdapterAndExtractor)
-{
-    // A snapshot is only useful if everything derived from it comes from it too.
-    // Resolving the adapter by ID instead would pair a *new* model with this
-    // snapshot's config and candidates after a re-registration — and the mismatch is
-    // silent, since objective and score.transform are read from the old config while
-    // the score comes from the new model.
-    auto k1 = makeCandidate(1, 10, {{"tile_m", 64.0}});
 
-    EngineEntry before;
-    before.engineId = 100;
-    before.uhdConfig.uhdId = "before";
-    before.uhdConfig.adapterType = "static_order";
-    before.uhdConfig.featuresSignature = {"$kernel.priority", "$kernel.id"}; // width 2
-    before.uhdConfig.staticOrderFields = {"priority"};
-    before.candidates = {k1};
-    EngineRegistry::instance().registerEngine(before);
-
-    auto snapshot = EngineRegistry::instance().getEngine(100);
-    ASSERT_NE(snapshot, nullptr);
-
-    // Replace with a descriptor of a different shape.
-    EngineEntry after;
-    after.engineId = 100;
-    after.uhdConfig.uhdId = "after";
-    after.uhdConfig.adapterType = "static_order";
-    after.uhdConfig.featuresSignature = {"$kernel.priority"}; // width 1
-    after.uhdConfig.staticOrderFields = {"priority"};
-    after.candidates = {k1};
-    EngineRegistry::instance().registerEngine(after);
-
-    auto fromSnapshot = EngineRegistry::instance().getOrCreateAdapter(snapshot);
-    auto fromId = EngineRegistry::instance().getOrCreateAdapter(100);
-    ASSERT_NE(fromSnapshot, nullptr);
-    ASSERT_NE(fromId, nullptr);
-
-    // The snapshot's adapter matches the snapshot's signature, not the live one's.
-    EXPECT_EQ(fromSnapshot->expectedFeatureCount(), 2u);
-    EXPECT_EQ(fromId->expectedFeatureCount(), 1u);
-
-    auto extractorFromSnapshot = EngineRegistry::instance().getOrCreateExtractor(snapshot);
-    auto extractorFromId = EngineRegistry::instance().getOrCreateExtractor(100);
-    ASSERT_NE(extractorFromSnapshot, nullptr);
-    ASSERT_NE(extractorFromId, nullptr);
-    EXPECT_EQ(extractorFromSnapshot->featureCount(), 2u);
-    EXPECT_EQ(extractorFromId->featureCount(), 1u);
-}
-TEST_F(TestUhdSelectionFlow, NullSnapshotYieldsNullAdapterAndExtractor)
-{
-    const std::shared_ptr<const hipdnn_backend::heuristics::uhd::EngineEntry> none;
-
-    EXPECT_EQ(EngineRegistry::instance().getOrCreateAdapter(none), nullptr);
-    EXPECT_EQ(EngineRegistry::instance().getOrCreateExtractor(none), nullptr);
-}
-TEST_F(TestUhdSelectionFlow, SnapshotSurvivesRegistryClear)
-{
-    EngineRegistry::instance().registerEngine(createStaticOrderEngine(100, {makeCandidate(1, 10)}));
-
-    auto snapshot = EngineRegistry::instance().getEngine(100);
-    ASSERT_NE(snapshot, nullptr);
-
-    EngineRegistry::instance().clear();
-
-    // Reading through the snapshot after a clear must stay well-defined.
-    ASSERT_EQ(snapshot->candidates.size(), 1u);
-    EXPECT_EQ(snapshot->engineId, 100);
-    EXPECT_EQ(EngineRegistry::instance().getEngine(100), nullptr);
-}
 } // namespace

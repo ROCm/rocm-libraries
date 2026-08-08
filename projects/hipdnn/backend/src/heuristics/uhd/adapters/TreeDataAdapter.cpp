@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <cmath>
 #include <fstream>
+#include <stdexcept>
+#include <string>
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/gbdt_model_generated.h>
@@ -75,9 +77,6 @@ std::unique_ptr<TreeDataAdapter>
         model->features_hash() != nullptr ? model->features_hash()->str() : "";
     if(!expectedFeaturesHash.empty() && modelHash != expectedFeaturesHash)
     {
-        // Say which hashes disagreed. Returning a bare nullptr makes a
-        // descriptor/model pairing mistake indistinguishable from a missing or
-        // corrupt file once it surfaces as "adapter creation failed".
         HIPDNN_SDK_LOG_WARN("TreeDataAdapter: features hash mismatch - model='"
                            << modelHash << "' expected='" << expectedFeaturesHash << "'");
         return nullptr;
@@ -107,9 +106,9 @@ std::unique_ptr<TreeDataAdapter>
     // Copy buffer to owned storage
     std::vector<uint8_t> ownedBuffer(buffer, buffer + size);
 
-    // Resolve the model pointer before the move. As sibling arguments, the order of
-    // fb::GetGbdtModel(...) and std::move(ownedBuffer) is unspecified — if the move
-    // runs first, the pointer is derived from a moved-from vector.
+    // Evaluate GetGbdtModel BEFORE moving ownedBuffer to avoid unspecified
+    // argument evaluation order issues (the model pointer must be obtained
+    // while the buffer is still valid)
     const fb::GbdtModel* modelPtr = fb::GetGbdtModel(ownedBuffer.data());
     return std::unique_ptr<TreeDataAdapter>(new TreeDataAdapter(std::move(ownedBuffer),
                                                                  modelPtr,
@@ -182,9 +181,25 @@ double TreeDataAdapter::evaluateTree(const fb::GbdtTree* tree,
 
     const bool hasDefaultLeft = tree->default_left() != nullptr && !tree->default_left()->empty();
 
+    // Bound the descent (RFC 0019 §16: the model artifact is author-controlled input,
+    // so the evaluator must be bounded). FlatBuffers' Verifier checks buffer layout,
+    // not graph acyclicity — a tree whose child index points at an ancestor, or at
+    // itself, is a well-formed buffer that would spin here forever and hang plan build.
+    // A well-formed descent visits each node at most once, so exceeding the node count
+    // means the tree is cyclic.
+    const size_t maxSteps = leftChildren.size();
+    size_t steps = 0;
+
     size_t node = 0;
     while(node < leftChildren.size())
     {
+        if(++steps > maxSteps)
+        {
+            throw std::runtime_error(
+                "TreeDataAdapter: tree descent exceeded " + std::to_string(maxSteps) +
+                " steps, so the model artifact contains a cycle in its child indices");
+        }
+
         const auto nodeIdx = static_cast<flatbuffers::uoffset_t>(node);
         const int leftChild = leftChildren[nodeIdx];
         const int rightChild = rightChildren[nodeIdx];

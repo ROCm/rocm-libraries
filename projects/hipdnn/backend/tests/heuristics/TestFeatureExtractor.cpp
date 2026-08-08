@@ -393,8 +393,52 @@ TEST_F(TestFeatureExtractor, MixesBareReferencesWithDerivedExpressions)
     EXPECT_DOUBLE_EQ(features[1], 256.0);
 }
 
+TEST_F(TestFeatureExtractor, StringValuedBindingIsATypeError)
+{
+    // RFC 0019 §7.2 requires failing closed on a type error, not only on an unknown
+    // symbol. Yielding NaN here would be silently wrong: a GBDT treats NaN as a
+    // missing value, routes it down default_left, and returns an ordinary leaf — so
+    // the garbage would be scored as data and never surface.
+    const std::vector<std::string> signature = {"$device.architecture_name"};
+    const FeatureExtractor extractor(signature);
 
+    FeatureExtractionContext ctx;
+    ctx.bindDeviceVars({{"architecture_name", std::string("gfx942")}});
 
+    EXPECT_THROW(extractor.extract(ctx), JsonLogicError);
+}
+
+TEST_F(TestFeatureExtractor, NumericBindingsOfEveryTypeStillResolve)
+{
+    // The type check must reject only strings — double, int64 and bool all convert.
+    const std::vector<std::string> signature = {
+        "$device.as_double", "$device.as_int", "$device.as_bool"};
+    const FeatureExtractor extractor(signature);
+
+    FeatureExtractionContext ctx;
+    ctx.bindDeviceVars({
+        {"as_double", 1.5},
+        {"as_int", int64_t{7}},
+        {"as_bool", true},
+    });
+
+    const auto features = extractor.extract(ctx);
+    ASSERT_EQ(features.size(), 3u);
+    EXPECT_DOUBLE_EQ(features[0], 1.5);
+    EXPECT_DOUBLE_EQ(features[1], 7.0);
+    EXPECT_DOUBLE_EQ(features[2], 1.0);
+}
+
+TEST_F(TestFeatureExtractor, UnknownSymbolStillReportsAsUndefined)
+{
+    // The type error must not swallow the pre-existing unknown-symbol diagnostic.
+    const FeatureExtractor extractor(std::vector<std::string>{"$device.not_bound"});
+
+    FeatureExtractionContext ctx;
+    ctx.bindDeviceVars({{"cu_count", 120.0}});
+
+    EXPECT_THROW(extractor.extract(ctx), JsonLogicError);
+}
 
 TEST_F(TestFeatureExtractor, MalformedNonReferenceEntryThrows)
 {
@@ -516,13 +560,6 @@ TEST_F(TestFeatureExtractor, ConstructorRejectsUnsafeLiteralToo)
     EXPECT_THROW(FeatureExtractor{std::vector<std::string>{"1e15"}}, JsonLogicError);
 }
 
-
-
-
-
-
-
-
 // ========== Shared vs. per-candidate partitioning (RFC §6 step 2) ==========
 
 TEST_F(TestFeatureExtractor, PartitionsSignatureByKernelDependence)
@@ -539,6 +576,38 @@ TEST_F(TestFeatureExtractor, PartitionsSignatureByKernelDependence)
     EXPECT_EQ(extractor.featureCount(), 5u);
     EXPECT_EQ(extractor.kernelDependentCount(), 2u);
 }
+
+TEST_F(TestFeatureExtractor, BareKernelReferenceUnderShapeIsKernelDependent)
+{
+    // extractVariables reports the syntactic reference ($kernel), but the shape
+    // operator resolves a synthesized name ($kernel.shape_0). Matching only on the
+    // "$kernel." prefix would file this as shared, and it would then be evaluated in
+    // the shared pass before any kernel metadata is bound.
+    const std::vector<std::string> signature = {R"({"shape": ["$kernel", 0]})"};
+    const FeatureExtractor extractor(signature);
+
+    EXPECT_EQ(extractor.kernelDependentCount(), 1u);
+
+    FeatureExtractionContext ctx;
+    ctx.bindDeviceVars({{"cu_count", 120.0}});
+
+    // Shared pass must not touch it — no kernel vars are bound yet.
+    auto row = extractor.extractSharedRow(ctx);
+    ASSERT_EQ(row.size(), 1u);
+
+    ctx.bindKernelVars({{"shape_0", 128.0}});
+    extractor.extractKernelInto(ctx, row);
+    EXPECT_DOUBLE_EQ(row[0], 128.0);
+}
+
+TEST_F(TestFeatureExtractor, NamespacedTensorReferenceUnderShapeIsKernelDependent)
+{
+    const std::vector<std::string> signature = {R"({"shape": ["$kernel.tensor", 0]})"};
+    const FeatureExtractor extractor(signature);
+
+    EXPECT_EQ(extractor.kernelDependentCount(), 1u);
+}
+
 TEST_F(TestFeatureExtractor, SharedPlusKernelExtractionMatchesFullExtraction)
 {
     const std::vector<std::string> signature = {
@@ -559,6 +628,7 @@ TEST_F(TestFeatureExtractor, SharedPlusKernelExtractionMatchesFullExtraction)
 
     EXPECT_EQ(split, extractor.extract(ctx));
 }
+
 TEST_F(TestFeatureExtractor, SharedRowIsReusableAcrossCandidates)
 {
     const std::vector<std::string> signature = {"$q.batch", "$kernel.tile_m"};
@@ -584,6 +654,7 @@ TEST_F(TestFeatureExtractor, SharedRowIsReusableAcrossCandidates)
     EXPECT_DOUBLE_EQ(rowA[1], 64.0);
     EXPECT_DOUBLE_EQ(rowB[1], 128.0);
 }
+
 TEST_F(TestFeatureExtractor, ExtractKernelIntoRejectsWrongWidthRow)
 {
     const std::vector<std::string> signature = {"$q.batch", "$kernel.tile_m"};
@@ -596,6 +667,7 @@ TEST_F(TestFeatureExtractor, ExtractKernelIntoRejectsWrongWidthRow)
     std::vector<double> tooNarrow(1, 0.0);
     EXPECT_THROW(extractor.extractKernelInto(ctx, tooNarrow), JsonLogicError);
 }
+
 TEST_F(TestFeatureExtractor, ClearKernelVarsDropsOnlyKernelBindings)
 {
     // Reusing a context across candidates is only safe if a candidate that omits a
@@ -615,4 +687,5 @@ TEST_F(TestFeatureExtractor, ClearKernelVarsDropsOnlyKernelBindings)
     const FeatureExtractor queryOnly(std::vector<std::string>{"$q.batch"});
     EXPECT_NO_THROW(queryOnly.extract(ctx));
 }
+
 } // namespace
