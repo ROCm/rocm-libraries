@@ -327,10 +327,11 @@ int main(int argc, char** argv) noexcept
         hipdnn_integration_tests::bundle::registerBundleTests();
 
         if(::testing::UnitTest::GetInstance()->test_to_run_count() == 0
-           && hipdnn_integration_tests::TestConfig::get().allowBundles())
+           && hipdnn_integration_tests::TestConfig::get().allowBundles()
+           && std::filesystem::exists(hipdnn_integration_tests::bundle::resolveDataDir()))
         {
-            std::cerr << "Error: zero tests registered (bundles are enabled but none were "
-                         "discovered — check the bundle data directory).\n";
+            std::cerr << "Error: zero tests registered (bundles are enabled and the data "
+                         "directory exists but no tests were discovered).\n";
             static_cast<void>(hipStreamDestroy(stream));
             return 1;
         }
