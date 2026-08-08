@@ -331,19 +331,6 @@ bool IntegrationBundleVerificationHarness::fillBundleInputs()
         return false;
     }
 
-    auto missing = _inputFillRecipes.unfilled(leafInputUids);
-    if(!missing.empty())
-    {
-        std::ostringstream os;
-        os << "cannot fill:";
-        for(const int64_t uid : missing)
-        {
-            os << " uid=" << uid;
-        }
-        skipUnverifiable(os.str());
-        return false;
-    }
-
     _bundle->tensors = std::move(inputs);
     return true;
 }
