@@ -45,12 +45,12 @@ namespace rocRoller
             template <typename Op>
             std::vector<size_t> getLDSAddresses(KernelGraph& graph, int tag, Op const& op);
             void                setup();
-            void                setWorkgroup(uint dim, uint value);
-            void                setWorkitem(uint dim, uint value);
+            void                setWorkgroup(unsigned int dim, unsigned int value);
+            void                setWorkitem(unsigned int dim, unsigned int value);
 
             ContextPtr                               m_context;
             KernelArguments                          arguments;
-            std::array<uint, 3>                      workgroupOffset, workitemOffset;
+            std::array<unsigned int, 3>                      workgroupOffset, workitemOffset;
             std::array<Expression::ExpressionPtr, 3> kernelWorkgroupIndexes, kernelWorkitemIndexes;
             std::vector<uint8_t>                     rawArguments;
             RuntimeArguments                         runtimeArguments;

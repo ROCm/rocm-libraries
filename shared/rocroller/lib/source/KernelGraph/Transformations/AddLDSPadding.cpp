@@ -91,7 +91,7 @@ namespace rocRoller
         /**
          * @brief Return the number of elements that the fastest thread-tile indexes.
          */
-        uint GetFastThreadTileIndexElementWidth(KernelGraph const& graph, int tileTag)
+        unsigned int GetFastThreadTileIndexElementWidth(KernelGraph const& graph, int tileTag)
         {
             namespace CT = rocRoller::KernelGraph::CoordinateGraph;
 
@@ -177,7 +177,7 @@ namespace rocRoller
          * For Direct2LDS loads, this is the workgroup size; for other
          * loads, this is the wavefront size.
          */
-        std::pair<uint, uint> GetLoadAndLaneWidth(KernelGraph const& graph,
+        std::pair<unsigned int, unsigned int> GetLoadAndLaneWidth(KernelGraph const& graph,
                                                   int                ldsTag,
                                                   LayoutType         layoutType,
                                                   DataType           dataType,
@@ -197,8 +197,8 @@ namespace rocRoller
 
             auto loadElementWidth = GetFastThreadTileIndexElementWidth(graph, tileTag);
 
-            uint loadWidth = loadElementWidth * DataTypeInfo::Get(dataType).elementBits / 8u;
-            uint laneWidth = isDirect2LDS ? workgroupSize : wavefrontSize;
+            unsigned int loadWidth = loadElementWidth * DataTypeInfo::Get(dataType).elementBits / 8u;
+            unsigned int laneWidth = isDirect2LDS ? workgroupSize : wavefrontSize;
 
             return {loadWidth, laneWidth};
         }
@@ -210,9 +210,9 @@ namespace rocRoller
                               Graph::Direction    direction,
                               int&                edge,
                               std::array<int, 2>& tags,
-                              uint                contiguousBytes,
-                              uint                paddingBytes,
-                              uint                elementBits)
+                              unsigned int                contiguousBytes,
+                              unsigned int                paddingBytes,
+                              unsigned int                elementBits)
         {
             auto getCoordinateSize
                 = [&](int tag) { return getSize(graph.coordinates.getNode(tag)); };
@@ -287,7 +287,7 @@ namespace rocRoller
             void commit(KernelGraph&);
 
         private:
-            std::pair<uint, uint> getLDSPaddingElements(KernelGraph const&,
+            std::pair<unsigned int, unsigned int> getLDSPaddingElements(KernelGraph const&,
                                                         LDSPaddingInfo const&) const;
 
             ContextPtr           m_context;
@@ -303,7 +303,7 @@ namespace rocRoller
          * If the padding is set to -1, this will compute a default
          * padding value.
          */
-        std::pair<uint, uint>
+        std::pair<unsigned int, unsigned int>
             AddLDSPaddingVisitor::getLDSPaddingElements(KernelGraph const&    graph,
                                                         LDSPaddingInfo const& info) const
         {

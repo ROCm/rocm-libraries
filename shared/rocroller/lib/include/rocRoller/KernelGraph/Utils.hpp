@@ -423,7 +423,7 @@ namespace rocRoller
         void updateThreadTileForLongDwords(int& t_m,
                                            int& t_n,
                                            int  maxWidth,
-                                           uint macTileFastMovingDimSize,
+                                           unsigned int macTileFastMovingDimSize,
                                            int  numDwordsPerElement,
                                            bool avoidDWordX2);
 
@@ -890,7 +890,7 @@ namespace rocRoller
          *
          * @return The VGPRBlockSet size, or std::nullopt if no VGPRBlockSet dimension exists.
          */
-        std::optional<uint> GetVGPRBlockSetDimSize(KernelGraph const& graph, int tag);
+        std::optional<unsigned int> GetVGPRBlockSetDimSize(KernelGraph const& graph, int tag);
     }
 }
 

@@ -116,29 +116,26 @@ namespace rocRoller
 
     // Get path
     // Strips all "../" and "./"
-    constexpr const char* GetBaseFileName(const char* file)
-    {
-        if(strnlen(file, 3) >= 3 && file[0] == '.' && file[1] == '.' && file[2] == '/')
-        {
-            return GetBaseFileName(file + 3);
+    constexpr std::string_view GetBaseFileName(std::string_view file) {
+        if (file.starts_with("../")) {
+            return GetBaseFileName(file.substr(3));
         }
-        else if(strnlen(file, 3) >= 2 && file[0] == '.' && file[1] == '/')
-        {
-            return GetBaseFileName(file + 2);
+        if (file.starts_with("./")) {
+            return GetBaseFileName(file.substr(2));
         }
         return file;
     }
 
 #define ShowValue(var) concatenate("\t", #var, " = ", var, "\n")
 
-#define AssertError(T_Exception, condition, message...)                                \
+#define AssertError(T_Exception, condition, ...)                                       \
     do                                                                                 \
     {                                                                                  \
         bool condition_val = static_cast<bool>(condition);                             \
         if(!(condition_val))                                                           \
         {                                                                              \
             Throw<T_Exception>(                                                        \
-                std::source_location::current(), #T_Exception, #condition, ##message); \
+                std::source_location::current(), #T_Exception, #condition); \
         }                                                                              \
     } while(0)
 

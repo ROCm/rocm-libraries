@@ -20,7 +20,7 @@ namespace rocRollerTest
             return {GPUArchitectureGFX::GFX90A};
         }
 
-        void peekAndSchedule(Instruction& inst, uint expectedNops = 0)
+        void peekAndSchedule(Instruction& inst, unsigned int expectedNops = 0)
         {
             auto peeked = m_context->observer()->peek(inst);
             EXPECT_EQ(peeked.nops, expectedNops) << inst.toString(LogLevel::Debug);
@@ -36,7 +36,7 @@ namespace rocRollerTest
             return {GPUArchitectureGFX::GFX908};
         }
 
-        void peekAndSchedule(Instruction inst, uint expectedNops = 0)
+        void peekAndSchedule(Instruction inst, unsigned int expectedNops = 0)
         {
             auto peeked = m_context->peek(inst);
             EXPECT_EQ(peeked.nops, expectedNops) << inst.toString(LogLevel::Debug);
@@ -52,7 +52,7 @@ namespace rocRollerTest
             return {GPUArchitectureGFX::GFX942};
         }
 
-        void peekAndSchedule(Instruction& inst, uint expectedNops = 0)
+        void peekAndSchedule(Instruction& inst, unsigned int expectedNops = 0)
         {
             auto peeked = m_context->observer()->peek(inst);
             EXPECT_EQ(peeked.nops, expectedNops) << inst.toString(LogLevel::Debug);
@@ -68,7 +68,7 @@ namespace rocRollerTest
             return GPUArchitectureTarget{GPUArchitectureGFX::GFX950};
         }
 
-        void peekAndSchedule(Instruction& inst, uint expectedNops = 0)
+        void peekAndSchedule(Instruction& inst, unsigned int expectedNops = 0)
         {
             auto peeked = m_context->observer()->peek(inst);
             EXPECT_EQ(peeked.nops, expectedNops) << inst.toString(LogLevel::Debug);

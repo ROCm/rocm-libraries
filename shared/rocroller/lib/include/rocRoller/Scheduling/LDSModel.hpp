@@ -33,7 +33,7 @@ namespace rocRoller::Scheduling::LDSModel
     {
         struct Banks
         {
-            uint   bankIndex;
+            unsigned int   bankIndex;
             size_t workitemsAccessed;
             bool   imbalanced;
         };
@@ -85,8 +85,8 @@ namespace rocRoller::Scheduling::LDSModel
         int          operationTag;
         int          ldsTag;
         LdsDirection direction;
-        uint         workitem;
-        uint         bankIndex;
+        unsigned int         workitem;
+        unsigned int         bankIndex;
     };
 
     /**
@@ -97,7 +97,7 @@ namespace rocRoller::Scheduling::LDSModel
      * @param instr The LDS instruction
      * @param gfx The GPU architecture
      */
-    uint getInstructionDataCycles(const RuntimeLDSInstruction& instr, GPUArchitectureGFX gfx);
+    unsigned int getInstructionDataCycles(const RuntimeLDSInstruction& instr, GPUArchitectureGFX gfx);
 
     /**
      * @brief Get the number of cycles to issue an instruction (stalls excluded)
@@ -108,7 +108,7 @@ namespace rocRoller::Scheduling::LDSModel
      * @param dwords Number of dwords being accessed (1 for b32, 2 for b64, 3 for b96, 4 for b128)
      * @return Number of cycles to issue the instruction
      */
-    uint getInstructionIssueCycles(const MemoryOpLDS& memoryOp, uint dwords);
+    unsigned int getInstructionIssueCycles(const MemoryOpLDS& memoryOp, unsigned int dwords);
 
     /**
      * @brief Get the equilibrium cycles when continuously issuing the same instruction
@@ -117,7 +117,7 @@ namespace rocRoller::Scheduling::LDSModel
      * @param gfx The GPU architecture
      * @return Total number of cycles for the instruction
      */
-    uint getInstructionCycles(const RuntimeLDSInstruction& instr, GPUArchitectureGFX gfx);
+    unsigned int getInstructionCycles(const RuntimeLDSInstruction& instr, GPUArchitectureGFX gfx);
 
     /**
      * @brief Get the number of LDS banks for a given GPU architecture and memory operation
@@ -127,7 +127,7 @@ namespace rocRoller::Scheduling::LDSModel
      * @param dwords Number of dwords (1 for b32, 2 for b64, 3 for b96, 4 for b128)
      * @return Number of LDS banks (64 for ds_read_b64/b128 on GFX950, otherwise 32)
      */
-    uint getNumLDSBanks(GPUArchitectureGFX gfx, const MemoryOpLDS& memoryOp, uint dwords);
+    unsigned int getNumLDSBanks(GPUArchitectureGFX gfx, const MemoryOpLDS& memoryOp, unsigned int dwords);
 
     /**
      * @brief Returns the number of threads that can operate per clock for a given memory operation
@@ -136,7 +136,7 @@ namespace rocRoller::Scheduling::LDSModel
      * @param dwords Number of dwords (1 for b32, 2 for b64, 3 for b96, 4 for b128)
      * @param gfx The GPU architecture
      */
-    uint getThreadsPerClock(const MemoryOpLDS& memoryOp, uint dwords, GPUArchitectureGFX gfx);
+    unsigned int getThreadsPerClock(const MemoryOpLDS& memoryOp, unsigned int dwords, GPUArchitectureGFX gfx);
 
     /**
      * @brief Divide addresses into thread groups based on threadsPerClock limit
@@ -146,7 +146,7 @@ namespace rocRoller::Scheduling::LDSModel
      * @return Vector of thread groups, each containing addresses for that group
      */
     std::vector<std::vector<size_t>> divideIntoThreadGroups(const std::vector<size_t>& addresses,
-                                                            uint threadsPerClock);
+                                                            unsigned int threadsPerClock);
 
     /**
      * @brief Determines how many addresses accesses each bank
@@ -160,8 +160,8 @@ namespace rocRoller::Scheduling::LDSModel
      * @param memoryOp The memory operation (read or write)
      * @return A map, where the key is the bank index and the value is the count of addresses accessing that bank
      */
-    std::map<uint, uint> createBankToAddressCounts(const std::vector<size_t>& baseAddresses,
-                                                   uint                       dwords,
+    std::map<unsigned int, unsigned int> createBankToAddressCounts(const std::vector<size_t>& baseAddresses,
+                                                   unsigned int                       dwords,
                                                    GPUArchitectureGFX         gfx,
                                                    const MemoryOpLDS&         memoryOp);
 
@@ -174,7 +174,7 @@ namespace rocRoller::Scheduling::LDSModel
      * @param bankToAddressCounts Map from bank index to count of addresses accessing that bank
      * @return Number of clock cycles
      */
-    uint calculateBankConflictCycles(const std::map<uint, uint>& bankToAddressCounts);
+    unsigned int calculateBankConflictCycles(const std::map<unsigned int, unsigned int>& bankToAddressCounts);
 
     /**
      * @brief Compute bank-to-address-count mappings for each thread group
@@ -186,7 +186,7 @@ namespace rocRoller::Scheduling::LDSModel
      * @param gfx The GPU architecture
      * @return Vector of bank-to-address count mappings, one per thread group
      */
-    std::vector<std::map<uint, uint>>
+    std::vector<std::map<unsigned int, unsigned int>>
         computeThreadGroupBankMappings(const RuntimeLDSInstruction& instr, GPUArchitectureGFX gfx);
 
     /**
@@ -198,8 +198,8 @@ namespace rocRoller::Scheduling::LDSModel
      * @param threadGroupBankMappings Vector of bank to address count mappings
      * @return Total number of clock cycles
      */
-    uint calculateTotalCyclesFromBankMappings(
-        const std::vector<std::map<uint, uint>>& threadGroupBankMappings);
+    unsigned int calculateTotalCyclesFromBankMappings(
+        const std::vector<std::map<unsigned int, unsigned int>>& threadGroupBankMappings);
 
     /**
      * @brief Check if an instruction's wave accesses non-overlapping banks across cycles

@@ -1052,7 +1052,7 @@ namespace rocRoller
         void updateThreadTileForLongDwords(int& t_m,
                                            int& t_n,
                                            int  maxWidth,
-                                           uint macTileFastMovingDimSize,
+                                           unsigned int macTileFastMovingDimSize,
                                            int  numDwordsPerElement,
                                            bool avoidDWordX2)
         {
@@ -1317,8 +1317,8 @@ namespace rocRoller
 
         Expression::ExpressionPtr tileCeilDivide(Expression::ExpressionPtr sdSize, int tileSize)
         {
-            auto tileSizeExpr = std::has_single_bit(static_cast<uint>(tileSize))
-                                    ? Expression::literal(static_cast<uint>(tileSize))
+            auto tileSizeExpr = std::has_single_bit(static_cast<unsigned int>(tileSize))
+                                    ? Expression::literal(static_cast<unsigned int>(tileSize))
                                     : Expression::literal(static_cast<int64_t>(tileSize));
 
             auto one = Expression::literal(1u);
@@ -1447,8 +1447,8 @@ namespace rocRoller
 
             int rv = 0;
 
-            auto flattenedSizes = [&](std::vector<int> const& tags) -> std::vector<uint> {
-                std::vector<uint> sizes;
+            auto flattenedSizes = [&](std::vector<int> const& tags) -> std::vector<unsigned int> {
+                std::vector<unsigned int> sizes;
                 sizes.reserve(tags.size());
                 for(auto tag : tags)
                 {
@@ -1458,8 +1458,8 @@ namespace rocRoller
                 return sizes;
             };
 
-            auto joinedSizes = [&](std::vector<int> const& tags) -> std::vector<uint> {
-                std::vector<uint> sizes;
+            auto joinedSizes = [&](std::vector<int> const& tags) -> std::vector<unsigned int> {
+                std::vector<unsigned int> sizes;
                 sizes.reserve(tags.size());
                 for(auto tag : tags)
                 {
@@ -1729,7 +1729,7 @@ namespace rocRoller
             return threadTileIndex.dim != elementNumber.dim;
         }
 
-        std::optional<uint> GetVGPRBlockSetDimSize(KernelGraph const& graph, int tag)
+        std::optional<unsigned int> GetVGPRBlockSetDimSize(KernelGraph const& graph, int tag)
         {
             auto coord = graph.mapper.get(tag, Connections::TypeAndSubDimension{"VGPRBlockSet", 0});
             if(coord == -1)

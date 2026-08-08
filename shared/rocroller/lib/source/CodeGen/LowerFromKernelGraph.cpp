@@ -101,7 +101,7 @@ namespace rocRoller
                 // TODO Audit bytes/bits
                 auto const& info = DataTypeInfo::Get(dtype);
                 auto        numBytes
-                    = Expression::literal(static_cast<uint>(CeilDivide(info.elementBits, 8u)));
+                    = Expression::literal(static_cast<unsigned int>(CeilDivide(info.elementBits, 8u)));
 
                 // TODO: Consider moving numBytes into input of this function.
                 if(offsetInBytes)

@@ -388,7 +388,7 @@ namespace rocRoller
     };
 
     template <typename T>
-    concept CArithmeticType = std::integral<T> || std::floating_point<T>;
+    concept CArithmeticType = std::integral<T> || std::floating_point<T> || std::is_same_v<T, Half>;
 
     template <typename Result, typename T>
     concept CCanStaticCastTo = requires(T val) //

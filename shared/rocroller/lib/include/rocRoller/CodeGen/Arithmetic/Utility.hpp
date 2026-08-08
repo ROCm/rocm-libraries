@@ -44,6 +44,6 @@ namespace rocRoller
          * b1 = bit 1 of rhsByte
          *
          */
-        std::tuple<std::string, std::string> getOpselModifiers2xByte(uint lhsByte, uint rhsByte);
+        std::tuple<std::string, std::string> getOpselModifiers2xByte(unsigned int lhsByte, unsigned int rhsByte);
     }
 }

@@ -244,7 +244,7 @@ namespace rocRoller
                 varType = *maybePacked;
             auto packFactor = DataTypeInfo::Get(varType).packing;
 
-            uint wfs = context->kernel()->wavefront_size();
+            unsigned int wfs = context->kernel()->wavefront_size();
 
             return CopyInfo{varType.dataType, elements / wfs / packFactor};
         }

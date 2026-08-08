@@ -54,7 +54,7 @@ namespace rocRoller
 
         AssertFatal(file.good(), "Could not read ", filename);
 
-        std::array<char, 4096> buffer;
+        std::array<char, 4096> buffer{};
 
         std::vector<char> rv;
 

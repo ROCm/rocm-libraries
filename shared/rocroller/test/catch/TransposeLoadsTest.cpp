@@ -28,9 +28,9 @@ namespace TransposeLoadsTest
         TransposeLoadKernel(ContextPtr context,
                             DataType   elementType,
                             bool       unalignedVGPRs,
-                            uint       dwordX,
-                            uint       MN,
-                            uint       K)
+                            unsigned int       dwordX,
+                            unsigned int       MN,
+                            unsigned int       K)
             : AssemblyTestKernel(context)
             , m_elementType(elementType)
             , m_dwordX(dwordX)
@@ -49,17 +49,17 @@ namespace TransposeLoadsTest
             auto const& arch = m_context->targetArchitecture();
 
             // DS_READ_B96_TR_B6 requires 128b-aligned addresses
-            const uint     extraLdsBytes   = (m_elementBits == 6) ? (128 - 96) / 8 : 0;
+            const unsigned int     extraLdsBytes   = (m_elementBits == 6) ? (128 - 96) / 8 : 0;
             const DataType elementDataType = m_elementType;
             const DataType packDataType
                 = DataTypeInfo::Get(m_elementType).packedVariableType()->dataType;
-            const uint workitemCountX       = 64u;
-            const uint numWorkitemsPerWave  = workitemCountX;
-            const uint packBytes            = DataTypeInfo::Get(packDataType).elementBits / 8;
-            const uint bytesPerTrLoad       = bitsPerTransposeLoad(arch, m_elementBits) / 8;
-            const uint bytesPerWorkitem     = bytesPerTrLoad * /*numberOfLDSTrLoads*/ 2;
-            const uint bytesPerWord         = 4;
-            const uint registerCountPerLoad = bytesPerTrLoad / packBytes;
+            const unsigned int workitemCountX       = 64u;
+            const unsigned int numWorkitemsPerWave  = workitemCountX;
+            const unsigned int packBytes            = DataTypeInfo::Get(packDataType).elementBits / 8;
+            const unsigned int bytesPerTrLoad       = bitsPerTransposeLoad(arch, m_elementBits) / 8;
+            const unsigned int bytesPerWorkitem     = bytesPerTrLoad * /*numberOfLDSTrLoads*/ 2;
+            const unsigned int bytesPerWord         = 4;
+            const unsigned int registerCountPerLoad = bytesPerTrLoad / packBytes;
             const uint threadTrLoadOffset   = m_MN * (bytesPerTrLoad + extraLdsBytes);
 
             auto k = m_context->kernel();

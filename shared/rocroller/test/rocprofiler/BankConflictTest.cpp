@@ -203,11 +203,11 @@ TEST_CASE("LDS bank model with bank conflicts", "[rocprofiler][gpu][lds-model]")
                     ldsinstr.dwords             = instrDwords;
                     ldsinstr.baseAddresses      = baseAddresses;
 
-                    uint predictedCycles = getInstructionCycles(ldsinstr, gfx);
+                    unsigned int predictedCycles = getInstructionCycles(ldsinstr, gfx);
 
-                    uint issueCycles
+                    unsigned int issueCycles
                         = getInstructionIssueCycles(ldsinstr.memoryOp, ldsinstr.dwords);
-                    uint dataCycles = getInstructionDataCycles(ldsinstr, gfx);
+                    unsigned int dataCycles = getInstructionDataCycles(ldsinstr, gfx);
 
                     std::stringstream info;
 

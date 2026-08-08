@@ -92,7 +92,7 @@ namespace rocRoller
             };
         }
 
-        std::tuple<std::string, std::string> getOpselModifiers2xByte(uint lhsByte, uint rhsByte)
+        std::tuple<std::string, std::string> getOpselModifiers2xByte(unsigned int lhsByte, unsigned int rhsByte)
         {
             AssertFatal(lhsByte < 4, ShowValue(lhsByte));
             AssertFatal(rhsByte < 4, ShowValue(rhsByte));

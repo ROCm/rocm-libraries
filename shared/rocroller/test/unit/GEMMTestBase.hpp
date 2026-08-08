@@ -183,9 +183,9 @@ namespace GEMMTests
             AssertFatal(gemm.workgroupSizeX % gemm.wavefrontSize == 0,
                         "Workgroup Size X must be multiply of wave front size");
 
-            uint wavetilePerWavefrontM
+            unsigned int wavetilePerWavefrontM
                 = gemm.wavefrontSize * gemm.macM / gemm.waveM / gemm.workgroupSizeX;
-            uint wavetilePerWavefrontN = gemm.macN / gemm.waveN / gemm.workgroupSizeY;
+            unsigned int wavetilePerWavefrontN = gemm.macN / gemm.waveN / gemm.workgroupSizeY;
 
             AssertFatal(wavetilePerWavefrontM > 0, "WaveTile size mismatch (M).");
             AssertFatal(wavetilePerWavefrontN > 0, "WaveTile size mismatch (N).");
@@ -197,11 +197,11 @@ namespace GEMMTests
 
             Log::debug("GEMMTest jamming: {}x{}", wavetilePerWavefrontM, wavetilePerWavefrontN);
 
-            uint workgroupSizeX = gemm.workgroupSizeX * gemm.workgroupSizeY;
-            uint workgroupSizeY = 1;
+            unsigned int workgroupSizeX = gemm.workgroupSizeX * gemm.workgroupSizeY;
+            unsigned int workgroupSizeY = 1;
 
-            uint numWorkgroupX;
-            uint numWorkgroupY;
+            unsigned int numWorkgroupX;
+            unsigned int numWorkgroupY;
 
             if(gemm.loopOverTiles > 0)
             {
@@ -268,7 +268,7 @@ namespace GEMMTests
                           gemm.scaleTypeB,
                           -1.f,
                           1.f,
-                          static_cast<uint>(scaleBlockSize));
+                          static_cast<unsigned int>(scaleBlockSize));
             }
             else
             {
@@ -705,8 +705,8 @@ namespace GEMMTests
             }
             // TODO: Calculate these values internally based on workgroup sizes.
             params->setManualWavefrontCount(
-                {static_cast<uint>(gemm.macM / gemm.waveM / wavetilePerWavefrontM),
-                 static_cast<uint>(gemm.macN / gemm.waveN / wavetilePerWavefrontN)});
+                {static_cast<unsigned int>(gemm.macM / gemm.waveM / wavetilePerWavefrontM),
+                 static_cast<unsigned int>(gemm.macN / gemm.waveN / wavetilePerWavefrontN)});
             params->setWaveTilesPerWavefront(wavetilePerWavefrontM, wavetilePerWavefrontN);
             params->setSplitStoreTileIntoWaveBlocks(gemm.splitStoreTileIntoWaveBlocks);
 
@@ -744,7 +744,7 @@ namespace GEMMTests
             {
                 params->loopOverOutputTilesDimensions = {0, 1};
                 params->loopOverOutputTilesCoordSizes
-                    = {static_cast<uint>(M / gemm.macM), static_cast<uint>(N / gemm.macN)};
+                    = {static_cast<unsigned int>(M / gemm.macM), static_cast<unsigned int>(N / gemm.macN)};
                 params->loopOverOutputTilesIteratedTiles = 2;
             }
 

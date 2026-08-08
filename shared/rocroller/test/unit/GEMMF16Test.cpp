@@ -9,13 +9,13 @@ namespace GEMMTests
 {
     using namespace rocRoller;
 
-    GEMMProblem SetupGEMMF16(uint waveM, uint waveN, uint waveK)
+    GEMMProblem SetupGEMMF16(unsigned int waveM, unsigned int waveN, unsigned int waveK)
     {
         GEMMProblem gemm;
 
         // 1x4 jamming
-        uint wavesPerWGX = 4;
-        uint wavesPerWGY = 4;
+        unsigned int wavesPerWGX = 4;
+        unsigned int wavesPerWGY = 4;
 
         gemm.waveM = waveM;
         gemm.waveN = waveN;
@@ -44,11 +44,11 @@ namespace GEMMTests
 
     void CheckGEMMF16(rocRoller::ContextPtr m_context,
                       std::string           mfma,
-                      uint                  numMFMAs,
-                      uint                  numBufferAndGlobalLoads,
-                      uint                  numDSWrites,
-                      uint                  numDSReads,
-                      uint                  numTrLoads)
+                      unsigned int                  numMFMAs,
+                      unsigned int                  numBufferAndGlobalLoads,
+                      unsigned int                  numDSWrites,
+                      unsigned int                  numDSReads,
+                      unsigned int                  numTrLoads)
     {
         std::string generatedCode = m_context->instructions()->toString();
 
@@ -176,9 +176,9 @@ namespace GEMMTests
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         auto [typeAB, MFMAK, transOp, loadPathA, loadPathB] = std::get<1>(GetParam());
 
-        uint const waveM = (MFMAK == 32) ? 16 : 32;
-        uint const waveN = (MFMAK == 32) ? 16 : 32;
-        uint const waveK = MFMAK;
+        unsigned int const waveM = (MFMAK == 32) ? 16 : 32;
+        unsigned int const waveN = (MFMAK == 32) ? 16 : 32;
+        unsigned int const waveK = MFMAK;
 
         auto problem = SetupGEMMF16(waveM, waveN, waveK);
 
@@ -219,43 +219,43 @@ namespace GEMMTests
                                           toString(typeAB)));
         }
 
-        uint const wfs           = problem.wavefrontSize;
-        uint const wgX           = problem.workgroupSizeX;
-        uint const wgY           = problem.workgroupSizeY;
-        uint const numDWavetiles = problem.macM * problem.macN / (waveM * waveN);
-        uint const numWaves      = wgX * wgY / wfs;
+        unsigned int const wfs           = problem.wavefrontSize;
+        unsigned int const wgX           = problem.workgroupSizeX;
+        unsigned int const wgY           = problem.workgroupSizeY;
+        unsigned int const numDWavetiles = problem.macM * problem.macN / (waveM * waveN);
+        unsigned int const numWaves      = wgX * wgY / wfs;
 
-        uint const numDWavetilesPerWave = numDWavetiles / numWaves;
-        uint const numMFMAsPerWave      = problem.macK / waveK;
-        uint const numMFMAs             = numDWavetilesPerWave * numMFMAsPerWave;
+        unsigned int const numDWavetilesPerWave = numDWavetiles / numWaves;
+        unsigned int const numMFMAsPerWave      = problem.macK / waveK;
+        unsigned int const numMFMAs             = numDWavetilesPerWave * numMFMAsPerWave;
 
         auto const& arch                = m_context->targetArchitecture();
-        uint const  elementsPerWavetile = waveM * waveK / wfs;
-        uint const  elementBits         = DataTypeInfo::Get(typeAB).elementBits;
-        uint const  elementsPerTrLoad   = bitsPerTransposeLoad(arch, elementBits) / elementBits;
+        unsigned int const  elementsPerWavetile = waveM * waveK / wfs;
+        unsigned int const  elementBits         = DataTypeInfo::Get(typeAB).elementBits;
+        unsigned int const  elementsPerTrLoad   = bitsPerTransposeLoad(arch, elementBits) / elementBits;
 
-        uint const bitsPerWavetileLoad = elementsPerWavetile * elementBits;
+        unsigned int const bitsPerWavetileLoad = elementsPerWavetile * elementBits;
 
-        uint const trLoadsPerWave = elementsPerWavetile / elementsPerTrLoad;
-        uint const dsLoadsPerWave = elementsPerWavetile / (bitsPerWavetileLoad / elementBits);
+        unsigned int const trLoadsPerWave = elementsPerWavetile / elementsPerTrLoad;
+        unsigned int const dsLoadsPerWave = elementsPerWavetile / (bitsPerWavetileLoad / elementBits);
 
-        // uint const bitsLoadedForAB
+        // unsigned int const bitsLoadedForAB
         //     = numDWavetilesPerWave * /*A & B*/ 2 * waveM * waveN * elementBits;
-        uint const bitsLoadedForAB
+        unsigned int const bitsLoadedForAB
             = (/*A*/ waveM * problem.macK + /*B*/ problem.macK * waveN) * elementBits;
 
-        uint const elementBitsC   = DataTypeInfo::Get(DataType::Float).elementBits;
-        uint const bitsLoadedForC = numDWavetilesPerWave * waveM * waveN * elementBitsC;
+        unsigned int const elementBitsC   = DataTypeInfo::Get(DataType::Float).elementBits;
+        unsigned int const bitsLoadedForC = numDWavetilesPerWave * waveM * waveN * elementBitsC;
 
-        // uint const numBufferLoads = (bitsLoadedForAB + bitsLoadedForC) / bitsPerWavetileLoad / wfs;
-        // uint const numDSWrites    = bitsLoadedForAB / bitsPerWavetileLoad / wfs;
+        // unsigned int const numBufferLoads = (bitsLoadedForAB + bitsLoadedForC) / bitsPerWavetileLoad / wfs;
+        // unsigned int const numDSWrites    = bitsLoadedForAB / bitsPerWavetileLoad / wfs;
 
-        uint const numBufferLoadsForC  = bitsLoadedForC / bitsPerWavetileLoad / wfs;
-        uint const numDSWrites         = bitsLoadedForAB / bitsPerWavetileLoad / wfs;
-        uint const numBufferLoadsForAB = numDSWrites;
+        unsigned int const numBufferLoadsForC  = bitsLoadedForC / bitsPerWavetileLoad / wfs;
+        unsigned int const numDSWrites         = bitsLoadedForAB / bitsPerWavetileLoad / wfs;
+        unsigned int const numBufferLoadsForAB = numDSWrites;
 
-        uint numTrLoads = 0;
-        uint numDSReads = 0;
+        unsigned int numTrLoads = 0;
+        unsigned int numDSReads = 0;
         { // 1x4 jamming = 4 tiles. Each tile of A gets multiplied by 4 tiles of B.
             if(problem.transA == "T")
                 numDSReads += /*number of A tiles*/ 1 * numMFMAsPerWave * dsLoadsPerWave;

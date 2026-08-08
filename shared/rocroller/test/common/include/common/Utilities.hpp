@@ -414,7 +414,7 @@ namespace rocRoller
                      float                       beta,
                      bool                        transA,
                      bool                        transB,
-                     const uint                  scaleBlockSize = 32,
+                     const unsigned int                  scaleBlockSize = 32,
                      const DataType              scaleTypeA     = DataType::E8M0,
                      const DataType              scaleTypeB     = DataType::E8M0);
 
@@ -432,7 +432,7 @@ namespace rocRoller
                      float                       beta,
                      bool                        transA,
                      bool                        transB,
-                     const uint                  scaleBlockSize = 32,
+                     const unsigned int                  scaleBlockSize = 32,
                      const DataType              scaleTypeA     = DataType::E8M0,
                      const DataType              scaleTypeB     = DataType::E8M0)
     {
