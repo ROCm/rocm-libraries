@@ -1277,9 +1277,14 @@ def tdmApplyStreamKOffsetSubtile(writer, kernel, tP):
                     comment="Address += SK K-start offset (lo)"))
     mod.add(SAddCU32(dst=sgpr(f"Address{tc}+1"), src0=sgpr(f"Address{tc}+1"), src1=sgpr(o + 1),
                      comment="Address += SK K-start offset (hi, carry)"))
-  from ...Components.TensorDataMover import TensorDataMoverLoad
-  _comp = TensorDataMoverLoad.find(writer)
-  mod.add(_comp.setGlobalAddr(group0, f"Address{tc}"))
+  # When B's Group0 is aliased onto A, skip the descriptor sync for B —
+  # the inline patch before each B tensor_load_to_lds will pick up the
+  # updated AddressB.  Syncing here would clobber A's live descriptor.
+  _bAliased = (tc == 'B' and kernel["NumWaves"] > 1)
+  if not _bAliased:
+    from ...Components.TensorDataMover import TensorDataMoverLoad
+    _comp = TensorDataMoverLoad.find(writer)
+    mod.add(_comp.setGlobalAddr(group0, f"Address{tc}"))
   return mod
 
 ##################################################
