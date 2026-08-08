@@ -18,16 +18,19 @@ SelectionResult SelectionEngine::select(int64_t engineId,
 {
     SelectionResult result;
 
-    // Look up engine in registry
-    const auto engineOpt = EngineRegistry::instance().getEngine(engineId);
-    if(!engineOpt.has_value())
+    // Look up engine in registry. Hold the snapshot by shared_ptr for the whole
+    // selection: a concurrent re-registration (RFC 0019 §9.2 descriptor replacement)
+    // swaps the registry's slot, and this keeps the entry we started with alive and
+    // internally consistent rather than reading one that is being replaced.
+    const auto enginePtr = EngineRegistry::instance().getEngine(engineId);
+    if(enginePtr == nullptr)
     {
         result.fallbackReason = "engine not found in registry";
         result.trace.fallbackReason = result.fallbackReason;
         return result;
     }
 
-    const EngineEntry& engine = engineOpt->get();
+    const EngineEntry& engine = *enginePtr;
     const UhdConfig& cfg = engine.uhdConfig;
 
     // Populate trace with UHD config (RFC 0019 §13)
@@ -57,7 +60,12 @@ SelectionResult SelectionEngine::select(int64_t engineId,
     };
 
     // Get or create adapter
-    auto adapter = EngineRegistry::instance().getOrCreateAdapter(engineId);
+    // Resolve from the snapshot, not by ID. Going back through the map would let a
+    // re-registration landing mid-selection pair a new model with this snapshot's
+    // config and candidates — and the mismatch is silent, since `objective` and
+    // `score.transform` are read from the old config while the score comes from the
+    // new model.
+    auto adapter = EngineRegistry::instance().getOrCreateAdapter(enginePtr);
     if(adapter == nullptr)
     {
         HIPDNN_SDK_LOG_WARN("UHD: engine " << engineId << " uhd='" << cfg.uhdId
@@ -94,7 +102,7 @@ SelectionResult SelectionEngine::select(int64_t engineId,
     }
 
     // Get cached feature extractor (or create on first use)
-    auto extractor = EngineRegistry::instance().getOrCreateExtractor(engineId);
+    auto extractor = EngineRegistry::instance().getOrCreateExtractor(enginePtr);
     if(extractor == nullptr)
     {
         HIPDNN_SDK_LOG_WARN("UHD: engine " << engineId << " uhd='" << cfg.uhdId

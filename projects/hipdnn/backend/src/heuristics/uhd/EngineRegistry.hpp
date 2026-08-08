@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "FeatureExtractor.hpp"
 #include "adapters/IUhdAdapter.hpp"
 
 #include <cstdint>
@@ -16,8 +17,6 @@
 
 namespace hipdnn_backend::heuristics::uhd
 {
-
-class FeatureExtractor;
 
 /// @brief Kernel candidate metadata (mock for UKD).
 ///
@@ -102,15 +101,45 @@ public:
     void registerEngine(EngineEntry entry);
 
     /// Look up an engine by ID.
-    /// @returns Engine entry or nullopt if not found.
-    std::optional<std::reference_wrapper<const EngineEntry>> getEngine(int64_t engineId) const;
+    ///
+    /// Returns a shared snapshot rather than a reference into the map. RFC 0019 §9.2
+    /// makes descriptor replacement a supported operation ("drop a new engine
+    /// descriptor set alongside the existing one... rollback restores the previous"),
+    /// so a re-registration can land while a selection is in flight. A reference into
+    /// the map would be assigned over or destroyed under the reader; holding a
+    /// shared_ptr keeps the snapshot the selection started with alive until it
+    /// finishes, and the next lookup picks up the new one.
+    ///
+    /// A snapshot is only self-consistent if everything derived from it is also
+    /// resolved from it — use the snapshot overloads of getOrCreateAdapter and
+    /// getOrCreateExtractor, not the by-ID ones, for the duration of a selection.
+    ///
+    /// @returns Engine entry snapshot, or nullptr if not found.
+    std::shared_ptr<const EngineEntry> getEngine(int64_t engineId) const;
 
-    /// Get or create the adapter for an engine.
+    /// Get or create the adapter for a specific engine snapshot.
+    ///
+    /// Prefer this over the by-ID overload inside a selection. Resolving by ID reaches
+    /// back into the live map, so a re-registration landing mid-selection would pair a
+    /// new model with the old snapshot's config and candidates — silently, since the
+    /// two disagree on things like `objective` and `score.transform`.
+    ///
+    /// @param entry Snapshot from getEngine().
+    /// @returns Adapter or nullptr if entry is null or adapter creation fails.
+    std::shared_ptr<IUhdAdapter> getOrCreateAdapter(const std::shared_ptr<const EngineEntry>& entry) const;
+
+    /// Get or create the feature extractor for a specific engine snapshot.
+    /// @param entry Snapshot from getEngine().
+    /// @returns Extractor or nullptr if entry is null or its signature is empty.
+    std::shared_ptr<FeatureExtractor>
+        getOrCreateExtractor(const std::shared_ptr<const EngineEntry>& entry) const;
+
+    /// Get or create the adapter for an engine, resolved by ID against the live map.
     /// @param engineId Engine to get adapter for.
     /// @returns Adapter or nullptr if engine not found or adapter creation fails.
     std::shared_ptr<IUhdAdapter> getOrCreateAdapter(int64_t engineId) const;
 
-    /// Get or create the feature extractor for an engine.
+    /// Get or create the feature extractor for an engine, resolved by ID.
     /// @param engineId Engine to get extractor for.
     /// @returns Extractor or nullptr if engine not found or signature is empty.
     std::shared_ptr<FeatureExtractor> getOrCreateExtractor(int64_t engineId) const;
@@ -125,7 +154,7 @@ public:
     void clear();
 
     /// Get the number of registered engines.
-    size_t size() const { return _engines.size(); }
+    size_t size() const;
 
     EngineRegistry(const EngineRegistry&) = delete;
     EngineRegistry& operator=(const EngineRegistry&) = delete;
@@ -142,7 +171,9 @@ private:
     /// @throws std::invalid_argument on an unsupported transform name.
     static void validateScoreTransform(const EngineEntry& entry);
 
-    std::unordered_map<int64_t, EngineEntry> _engines;
+    /// Entries are held by shared_ptr so a reader can outlive a re-registration that
+    /// replaces the entry (see getEngine).
+    std::unordered_map<int64_t, std::shared_ptr<EngineEntry>> _engines;
     mutable std::mutex _mutex;
 };
 

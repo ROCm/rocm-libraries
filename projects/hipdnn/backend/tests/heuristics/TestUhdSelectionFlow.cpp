@@ -268,8 +268,8 @@ TEST_F(TestUhdSelectionFlow, RegistryStoresAndRetrievesEngines)
     EXPECT_FALSE(EngineRegistry::instance().hasEngine(999));
 
     auto retrieved = EngineRegistry::instance().getEngine(100);
-    ASSERT_TRUE(retrieved.has_value());
-    EXPECT_EQ(retrieved->get().engineId, 100);
+    ASSERT_NE(retrieved, nullptr);
+    EXPECT_EQ(retrieved->engineId, 100);
 }
 
 TEST_F(TestUhdSelectionFlow, RegistryClearRemovesAllEngines)
@@ -494,10 +494,10 @@ TEST_F(TestUhdSelectionFlow, GetAdapterForUnregisteredEngineReturnsNull)
     EXPECT_EQ(adapter, nullptr);
 }
 
-TEST_F(TestUhdSelectionFlow, GetEngineForUnregisteredReturnsNullopt)
+TEST_F(TestUhdSelectionFlow, GetEngineForUnregisteredReturnsNull)
 {
     auto engine = EngineRegistry::instance().getEngine(999);
-    EXPECT_FALSE(engine.has_value());
+    EXPECT_EQ(engine, nullptr);
 }
 
 
@@ -1510,4 +1510,99 @@ TEST_F(TestUhdSelectionFlowTreeData, MissingArchKeySkipsTheCheck)
     EXPECT_TRUE(result.trace.deviceArch.empty());
 }
 
+// ========== Registry snapshots ==========
+
+TEST_F(TestUhdSelectionFlow, SnapshotSurvivesReregistration)
+{
+    // RFC 0019 §9.2 supports dropping a replacement descriptor set in place. A holder
+    // of the previous snapshot must keep reading a consistent entry rather than having
+    // it assigned over mid-use.
+    EngineRegistry::instance().registerEngine(
+        createStaticOrderEngine(100, {makeCandidate(1, 10), makeCandidate(2, 20)}));
+
+    auto snapshot = EngineRegistry::instance().getEngine(100);
+    ASSERT_NE(snapshot, nullptr);
+    ASSERT_EQ(snapshot->candidates.size(), 2u);
+
+    // Replace the engine with a differently-shaped one.
+    EngineRegistry::instance().registerEngine(createStaticOrderEngine(100, {makeCandidate(9, 1)}));
+
+    // The old snapshot is unchanged and still readable.
+    ASSERT_EQ(snapshot->candidates.size(), 2u);
+    EXPECT_EQ(snapshot->candidates[0].kernelId, 1);
+
+    // A fresh lookup sees the replacement.
+    auto current = EngineRegistry::instance().getEngine(100);
+    ASSERT_NE(current, nullptr);
+    ASSERT_EQ(current->candidates.size(), 1u);
+    EXPECT_EQ(current->candidates[0].kernelId, 9);
+}
+TEST_F(TestUhdSelectionFlow, SnapshotResolvesItsOwnAdapterAndExtractor)
+{
+    // A snapshot is only useful if everything derived from it comes from it too.
+    // Resolving the adapter by ID instead would pair a *new* model with this
+    // snapshot's config and candidates after a re-registration — and the mismatch is
+    // silent, since objective and score.transform are read from the old config while
+    // the score comes from the new model.
+    auto k1 = makeCandidate(1, 10, {{"tile_m", 64.0}});
+
+    EngineEntry before;
+    before.engineId = 100;
+    before.uhdConfig.uhdId = "before";
+    before.uhdConfig.adapterType = "static_order";
+    before.uhdConfig.featuresSignature = {"$kernel.priority", "$kernel.id"}; // width 2
+    before.uhdConfig.staticOrderFields = {"priority"};
+    before.candidates = {k1};
+    EngineRegistry::instance().registerEngine(before);
+
+    auto snapshot = EngineRegistry::instance().getEngine(100);
+    ASSERT_NE(snapshot, nullptr);
+
+    // Replace with a descriptor of a different shape.
+    EngineEntry after;
+    after.engineId = 100;
+    after.uhdConfig.uhdId = "after";
+    after.uhdConfig.adapterType = "static_order";
+    after.uhdConfig.featuresSignature = {"$kernel.priority"}; // width 1
+    after.uhdConfig.staticOrderFields = {"priority"};
+    after.candidates = {k1};
+    EngineRegistry::instance().registerEngine(after);
+
+    auto fromSnapshot = EngineRegistry::instance().getOrCreateAdapter(snapshot);
+    auto fromId = EngineRegistry::instance().getOrCreateAdapter(100);
+    ASSERT_NE(fromSnapshot, nullptr);
+    ASSERT_NE(fromId, nullptr);
+
+    // The snapshot's adapter matches the snapshot's signature, not the live one's.
+    EXPECT_EQ(fromSnapshot->expectedFeatureCount(), 2u);
+    EXPECT_EQ(fromId->expectedFeatureCount(), 1u);
+
+    auto extractorFromSnapshot = EngineRegistry::instance().getOrCreateExtractor(snapshot);
+    auto extractorFromId = EngineRegistry::instance().getOrCreateExtractor(100);
+    ASSERT_NE(extractorFromSnapshot, nullptr);
+    ASSERT_NE(extractorFromId, nullptr);
+    EXPECT_EQ(extractorFromSnapshot->featureCount(), 2u);
+    EXPECT_EQ(extractorFromId->featureCount(), 1u);
+}
+TEST_F(TestUhdSelectionFlow, NullSnapshotYieldsNullAdapterAndExtractor)
+{
+    const std::shared_ptr<const hipdnn_backend::heuristics::uhd::EngineEntry> none;
+
+    EXPECT_EQ(EngineRegistry::instance().getOrCreateAdapter(none), nullptr);
+    EXPECT_EQ(EngineRegistry::instance().getOrCreateExtractor(none), nullptr);
+}
+TEST_F(TestUhdSelectionFlow, SnapshotSurvivesRegistryClear)
+{
+    EngineRegistry::instance().registerEngine(createStaticOrderEngine(100, {makeCandidate(1, 10)}));
+
+    auto snapshot = EngineRegistry::instance().getEngine(100);
+    ASSERT_NE(snapshot, nullptr);
+
+    EngineRegistry::instance().clear();
+
+    // Reading through the snapshot after a clear must stay well-defined.
+    ASSERT_EQ(snapshot->candidates.size(), 1u);
+    EXPECT_EQ(snapshot->engineId, 100);
+    EXPECT_EQ(EngineRegistry::instance().getEngine(100), nullptr);
+}
 } // namespace

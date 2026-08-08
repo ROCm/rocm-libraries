@@ -13,7 +13,6 @@
 #include <algorithm>
 #include <sstream>
 #include <stdexcept>
-#include <unordered_set>
 
 namespace hipdnn_backend::heuristics::uhd
 {
@@ -75,8 +74,7 @@ void EngineRegistry::registerEngine(EngineEntry entry)
                 oss << missingFields[i];
             }
             oss << ". Engine ID: " << entry.engineId
-                << ". Ensure all $kernel.* fields in features_signature are present in "
-                   "candidate metadata.";
+                << ". Ensure all $kernel.* fields in features_signature are present in candidate metadata.";
             throw std::invalid_argument(oss.str());
         }
     }
@@ -84,21 +82,47 @@ void EngineRegistry::registerEngine(EngineEntry entry)
     validateFeaturesHash(entry);
     validateScoreTransform(entry);
 
+    const int64_t engineId = entry.engineId;
+
     const std::lock_guard<std::mutex> lock(_mutex);
-    _engines[entry.engineId] = std::move(entry);
+    // Replace the slot rather than assigning through it: a selection already holding
+    // the previous snapshot keeps reading a consistent entry until it finishes.
+    _engines[engineId] = std::make_shared<EngineEntry>(std::move(entry));
+}
+
+void EngineRegistry::validateScoreTransform(const EngineEntry& entry)
+{
+    const UhdConfig& cfg = entry.uhdConfig;
+
+    // A transform this runtime cannot invert means the score cannot be reported in the
+    // units the descriptor declares. Rejecting at load is the only honest option:
+    // score_transform::applyInverse has no way to signal "unknown" at the point of
+    // use, so an unrecognized name passes the model's transformed output straight
+    // through as if it were already in the declared units. RFC 0019 §12.3 feeds
+    // exactly that number into cross-engine comparison, where a wrong scale silently
+    // corrupts engine selection.
+    if(!score_transform::isSupported(cfg.scoreTransform))
+    {
+        std::ostringstream oss;
+        oss << "UHD declares an unsupported score.transform '" << cfg.scoreTransform
+            << "'. Engine ID: " << entry.engineId << ", uhd='" << cfg.uhdId
+            << "'. Supported: " << score_transform::supportedTransformList() << ".";
+        throw std::invalid_argument(oss.str());
+    }
 }
 
 void EngineRegistry::validateFeaturesHash(const EngineEntry& entry)
 {
     const UhdConfig& cfg = entry.uhdConfig;
 
-    // A declared hash must describe the signature it ships with (RFC 0019 §7.3).
-    // Without this the only hash check is model-vs-config, so both could agree while
-    // neither matches the signature actually being evaluated — which defeats the
-    // point of fingerprinting the feature contract.
+    // A declared hash must describe the signature it ships with (RFC 0019 §7.3). The
+    // load-time check in SelectionEngine only compares the model's embedded hash to
+    // this one; without this check both could agree while neither matches the
+    // signature actually being evaluated, which defeats the point of fingerprinting
+    // the feature contract.
     //
-    // Checked even for an empty signature: a hash over no features is
-    // self-inconsistent, and skipping it there would let that through.
+    // Checked even for an empty signature: a descriptor declaring a hash over no
+    // features is self-inconsistent, and skipping it here would let that through.
     if(!cfg.featuresHash.empty())
     {
         std::string actual;
@@ -108,6 +132,9 @@ void EngineRegistry::validateFeaturesHash(const EngineEntry& entry)
         }
         catch(const JsonLogicError& e)
         {
+            // Surface a malformed signature entry as invalid_argument, matching what
+            // registerEngine documents, rather than leaking JsonLogicError to a caller
+            // that only catches invalid_argument.
             std::ostringstream oss;
             oss << "UHD features_signature contains an entry that is neither a bare $ref "
                 << "nor valid JsonLogic. Engine ID: " << entry.engineId << ", uhd='"
@@ -134,7 +161,8 @@ void EngineRegistry::validateFeaturesHash(const EngineEntry& entry)
     }
 
     // Feature-bearing adapters are required to carry a hash (RFC 0019 §7.3). Absent
-    // one there is nothing to check the model artifact against.
+    // one there is nothing to check the model artifact against, so the mismatch guard
+    // in SelectionEngine silently passes.
     if(cfg.adapterType == "tree_data" || cfg.adapterType == "onnx" || cfg.adapterType == "table")
     {
         HIPDNN_SDK_LOG_WARN("UHD: engine "
@@ -145,39 +173,7 @@ void EngineRegistry::validateFeaturesHash(const EngineEntry& entry)
     }
 }
 
-void EngineRegistry::validateScoreTransform(const EngineEntry& entry)
-{
-    const UhdConfig& cfg = entry.uhdConfig;
-
-    // A transform this runtime cannot invert means the score cannot be reported in the
-    // units the descriptor declares. Rejecting at load is the only honest option:
-    // applyInverse has no way to signal "unknown" at the point of use, so an
-    // unrecognized name passes the model's transformed output straight through as if
-    // it were already in the declared units — and RFC 0019 §12.3 feeds exactly that
-    // number into cross-engine comparison.
-    if(!score_transform::isSupported(cfg.scoreTransform))
-    {
-        std::ostringstream oss;
-        oss << "UHD declares an unsupported score.transform '" << cfg.scoreTransform
-            << "'. Engine ID: " << entry.engineId << ", uhd='" << cfg.uhdId
-            << "'. Supported: " << score_transform::supportedTransformList() << ".";
-        throw std::invalid_argument(oss.str());
-    }
-}
-
-std::optional<std::reference_wrapper<const EngineEntry>>
-    EngineRegistry::getEngine(int64_t engineId) const
-{
-    const std::lock_guard<std::mutex> lock(_mutex);
-    const auto it = _engines.find(engineId);
-    if(it == _engines.end())
-    {
-        return std::nullopt;
-    }
-    return std::cref(it->second);
-}
-
-std::shared_ptr<IUhdAdapter> EngineRegistry::getOrCreateAdapter(int64_t engineId) const
+std::shared_ptr<const EngineEntry> EngineRegistry::getEngine(int64_t engineId) const
 {
     const std::lock_guard<std::mutex> lock(_mutex);
     const auto it = _engines.find(engineId);
@@ -185,23 +181,36 @@ std::shared_ptr<IUhdAdapter> EngineRegistry::getOrCreateAdapter(int64_t engineId
     {
         return nullptr;
     }
+    return it->second;
+}
 
-    auto& entry = it->second;
+std::shared_ptr<IUhdAdapter>
+    EngineRegistry::getOrCreateAdapter(const std::shared_ptr<const EngineEntry>& entry) const
+{
+    if(entry == nullptr)
+    {
+        return nullptr;
+    }
+
+    // The cache members are `mutable`, so they can be filled through a const entry.
+    // The registry mutex still guards them: every read and write of cachedAdapter
+    // goes through this function or its by-ID overload.
+    const std::lock_guard<std::mutex> lock(_mutex);
 
     // Return cached adapter if available
-    if(entry.cachedAdapter != nullptr)
+    if(entry->cachedAdapter != nullptr)
     {
-        return entry.cachedAdapter;
+        return entry->cachedAdapter;
     }
 
     // Create adapter based on type
-    const auto& cfg = entry.uhdConfig;
+    const auto& cfg = entry->uhdConfig;
 
     if(cfg.adapterType == "static_order")
     {
         // StaticOrderAdapter needs the features signature to map field names to indices
         auto adapter = StaticOrderAdapter::create(cfg.staticOrderFields, cfg.featuresSignature);
-        entry.cachedAdapter = std::move(adapter);
+        entry->cachedAdapter = std::move(adapter);
     }
     else if(cfg.adapterType == "tree_data")
     {
@@ -209,18 +218,30 @@ std::shared_ptr<IUhdAdapter> EngineRegistry::getOrCreateAdapter(int64_t engineId
         if(!cfg.modelArtifactPath.empty())
         {
             auto adapter = TreeDataAdapter::load(cfg.modelArtifactPath, cfg.featuresHash);
-            entry.cachedAdapter = std::move(adapter);
+            entry->cachedAdapter = std::move(adapter);
         }
     }
     // TODO: Add table, onnx, custom_library adapters when implemented
 
-    return entry.cachedAdapter;
+    return entry->cachedAdapter;
+}
+
+std::shared_ptr<IUhdAdapter> EngineRegistry::getOrCreateAdapter(int64_t engineId) const
+{
+    return getOrCreateAdapter(getEngine(engineId));
 }
 
 bool EngineRegistry::hasEngine(int64_t engineId) const
 {
     const std::lock_guard<std::mutex> lock(_mutex);
     return _engines.find(engineId) != _engines.end();
+}
+
+size_t EngineRegistry::size() const
+{
+    // Was reading _engines unlocked, which races registerEngine's insert and clear().
+    const std::lock_guard<std::mutex> lock(_mutex);
+    return _engines.size();
 }
 
 std::vector<int64_t> EngineRegistry::getAllEngineIds() const
@@ -241,30 +262,35 @@ void EngineRegistry::clear()
     _engines.clear();
 }
 
-std::shared_ptr<FeatureExtractor> EngineRegistry::getOrCreateExtractor(int64_t engineId) const
+std::shared_ptr<FeatureExtractor>
+    EngineRegistry::getOrCreateExtractor(const std::shared_ptr<const EngineEntry>& entry) const
 {
-    const std::lock_guard<std::mutex> lock(_mutex);
-    const auto it = _engines.find(engineId);
-    if(it == _engines.end())
+    if(entry == nullptr)
     {
         return nullptr;
     }
 
-    auto& entry = it->second;
+    const std::lock_guard<std::mutex> lock(_mutex);
 
     // Return cached extractor if available
-    if(entry.cachedExtractor != nullptr)
+    if(entry->cachedExtractor != nullptr)
     {
-        return entry.cachedExtractor;
+        return entry->cachedExtractor;
     }
 
     // Create extractor from features signature if non-empty
-    if(!entry.uhdConfig.featuresSignature.empty())
+    if(!entry->uhdConfig.featuresSignature.empty())
     {
-        entry.cachedExtractor = std::make_shared<FeatureExtractor>(entry.uhdConfig.featuresSignature);
+        entry->cachedExtractor =
+            std::make_shared<FeatureExtractor>(entry->uhdConfig.featuresSignature);
     }
 
-    return entry.cachedExtractor;
+    return entry->cachedExtractor;
+}
+
+std::shared_ptr<FeatureExtractor> EngineRegistry::getOrCreateExtractor(int64_t engineId) const
+{
+    return getOrCreateExtractor(getEngine(engineId));
 }
 
 } // namespace hipdnn_backend::heuristics::uhd
