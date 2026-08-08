@@ -150,6 +150,9 @@ void setBlockScaleDequantizeInitDefaults(const hipdnn_flatbuffers_sdk::data_obje
     {
         return;
     }
+    // [0.5, 2.0]: UE8M0 scales have zero mantissa bits, so any value stored
+    // discretizes to a power of two ({0.5, 1.0, 2.0}), keeping dequantized
+    // products within FP16 range.
     recipes.setDefault(a->scale_tensor_uid(), FillRecipe::free(0.5f, 2.0f));
 }
 

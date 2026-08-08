@@ -228,7 +228,7 @@ float scalarValue(const InputTensorMap& inputs, int64_t uid)
     return *static_cast<const float*>(inputs.at(uid)->rawHostData());
 }
 
-// ── SDPA forward (no structured optionals) ──────────────────────────────────
+// ── SDPA forward (minimal inputs) ───────────────────────────────────────────
 
 GraphResult buildSdpaFwdGraph()
 {
@@ -257,7 +257,7 @@ GraphResult buildSdpaFwdGraph()
 
 // ── SDPA forward with optional seq_len_q ────────────────────────────────────
 
-GraphResult buildSdpaFwdWithStructuredGraph()
+GraphResult buildSdpaFwdWithSeqLenQGraph()
 {
     GraphResult r;
     auto& b = r.builder;
@@ -449,7 +449,7 @@ TEST(TestFillInputs, RuntimePbvScalarsUseFixedAndDeterministicRandomFills)
     EXPECT_FLOAT_EQ(scalarValue(secondInputs, 10), firstMomentum);
 }
 
-TEST(TestFillInputs, SdpaFwdNoStructuredOptionals)
+TEST(TestFillInputs, SdpaFwdMinimalInputs)
 {
     const auto gr = buildSdpaFwdGraph();
     const auto result = runFill(gr, {4});
@@ -459,7 +459,7 @@ TEST(TestFillInputs, SdpaFwdNoStructuredOptionals)
 
 TEST(TestFillInputs, SdpaFwdWithSeqLenQFills)
 {
-    const auto gr = buildSdpaFwdWithStructuredGraph();
+    const auto gr = buildSdpaFwdWithSeqLenQGraph();
     const auto result = runFill(gr, {4});
 
     EXPECT_TRUE(result.filled) << result.reason;
