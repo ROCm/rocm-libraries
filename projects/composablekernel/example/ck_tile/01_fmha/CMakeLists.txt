@@ -49,14 +49,34 @@ set(FMHA_FWD_CODE_GEN_COMMON_ARGS
   --api ${FMHA_FWD_APIS}
   --optdim 32,64,80,128,256
 )
+# Dev knob: shrink the generated BWD instance set so an iteration is minutes
+# instead of the best part of an hour. The full set is ~670 translation units
+# and almost all of them are irrelevant when you are debugging one tile.
+#
+# Value is three fnmatch patterns joined by '@', one per BWD kernel:
+#   dot_do_o @ convert_dq @ dq_dk_dv
+# Empty (the default) generates everything, i.e. no behaviour change.
+#
+#   # bf16, batch mode, hdim 128 only -- ~20 TUs
+#   cmake -D FMHA_BWD_INSTANCE_FILTER=*_d128_bf16_batch*@*_d128_bf16_batch*@*_d128_bf16_batch* .
+#
+# A filtered build only dispatches the shapes it generated; other -d/-prec
+# values will report no kernel rather than run a wrong one.
+set(FMHA_BWD_INSTANCE_FILTER "" CACHE STRING
+  "fnmatch filter for generated FMHA BWD kernels: dot_do_o@convert_dq@dq_dk_dv. Empty = all.")
+
 set(FMHA_BWD_CODE_GEN_COMMON_ARGS
   ${CMAKE_CURRENT_LIST_DIR}/generate.py
   --targets ${FMHA_TARGETS_ARG}
   --api bwd
   --receipt 3
   --optdim 32,64,96,128,256
-  # --filter fmha_bwd_dot...@fmha_bwd_convert...@fmha_bwd...
 )
+if(NOT FMHA_BWD_INSTANCE_FILTER STREQUAL "")
+  # must go into COMMON_ARGS so --list_blobs and --output_dir stay in agreement
+  list(APPEND FMHA_BWD_CODE_GEN_COMMON_ARGS --filter ${FMHA_BWD_INSTANCE_FILTER})
+  message(STATUS "CK Tile FMHA BWD instance filter: ${FMHA_BWD_INSTANCE_FILTER}")
+endif()
 
 # Reduce building time by disabling instances that are not currently used in the gtests
 # TODO: Consider to use a special receipt for testing only, or even two receipts: a small subset of
