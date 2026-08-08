@@ -1,0 +1,77 @@
+<svg viewBox="0 0 920 420" width="920" height="420" xmlns="http://www.w3.org/2000/svg" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="13">
+  <rect x="0" y="0" width="100%" height="100%" fill="#ffffff"/>
+  <defs>
+    <marker id="arrowCM" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#444"/>
+    </marker>
+  </defs>
+
+  <!-- Stage titles -->
+  <text x="135" y="40" text-anchor="middle" font-weight="600">Live graph</text>
+  <text x="485" y="40" text-anchor="middle" font-weight="600">UMD matcher: pattern + criteria expression</text>
+  <text x="800" y="40" text-anchor="middle" font-weight="600">Bound variables</text>
+
+  <!-- STAGE 1: Live graph container -->
+  <rect x="20" y="55" width="230" height="290" rx="8" fill="#e8f0fe" stroke="#4a72c4" stroke-width="1.5"/>
+
+  <!-- input tensor nodes -->
+  <rect x="45" y="80" width="50" height="30" rx="8" fill="#ffffff" stroke="#4a72c4" stroke-width="1.5"/>
+  <text x="70" y="100" text-anchor="middle">Q</text>
+
+  <rect x="110" y="80" width="50" height="30" rx="8" fill="#ffffff" stroke="#4a72c4" stroke-width="1.5"/>
+  <text x="135" y="100" text-anchor="middle">K</text>
+
+  <rect x="175" y="80" width="50" height="30" rx="8" fill="#ffffff" stroke="#4a72c4" stroke-width="1.5"/>
+  <text x="200" y="100" text-anchor="middle">V</text>
+
+  <!-- op box -->
+  <rect x="80" y="185" width="110" height="40" rx="8" fill="#ffffff" stroke="#4a72c4" stroke-width="1.5"/>
+  <text x="135" y="210" text-anchor="middle" font-family="Consolas, monospace" font-size="11">sdpa_fwd</text>
+
+  <!-- output tensor node -->
+  <rect x="110" y="295" width="50" height="30" rx="8" fill="#ffffff" stroke="#4a72c4" stroke-width="1.5"/>
+  <text x="135" y="315" text-anchor="middle">O</text>
+
+  <!-- edges Q,K,V -> sdpa_fwd -->
+  <line x1="70" y1="110" x2="112" y2="184" stroke="#444" stroke-width="1.5" marker-end="url(#arrowCM)"/>
+  <line x1="135" y1="110" x2="135" y2="184" stroke="#444" stroke-width="1.5" marker-end="url(#arrowCM)"/>
+  <line x1="200" y1="110" x2="158" y2="184" stroke="#444" stroke-width="1.5" marker-end="url(#arrowCM)"/>
+  <!-- edge sdpa_fwd -> O -->
+  <line x1="135" y1="225" x2="135" y2="294" stroke="#444" stroke-width="1.5" marker-end="url(#arrowCM)"/>
+
+  <!-- Arrow Stage1 -> Stage2 (match) -->
+  <line x1="255" y1="200" x2="325" y2="200" stroke="#444" stroke-width="1.5" marker-end="url(#arrowCM)"/>
+  <text x="290" y="192" text-anchor="middle" font-weight="600">match</text>
+
+  <!-- STAGE 2: criteria box (amber) -->
+  <rect x="330" y="55" width="310" height="290" rx="8" fill="#fef7e0" stroke="#c99a2e" stroke-width="1.5"/>
+  <text x="345" y="82"  font-family="Consolas, monospace" font-size="11">nodes:  op sdpa_fwd</text>
+  <text x="345" y="100" font-family="Consolas, monospace" font-size="11">  operands { Q:$q, K:$k, V:$v }</text>
+  <text x="345" y="118" font-family="Consolas, monospace" font-size="11">  results  { O:$o }</text>
+  <text x="345" y="142" font-family="Consolas, monospace" font-size="11" fill="#8a6d1f">criteria (expression tree):</text>
+  <text x="345" y="162" font-family="Consolas, monospace" font-size="11">{"and": [</text>
+  <text x="345" y="180" font-family="Consolas, monospace" font-size="11">  {"in": ["$q.dtype", ["BFLOAT16"]]},</text>
+  <text x="345" y="198" font-family="Consolas, monospace" font-size="11">  {"shape": ["$q", [b, h, sq, d]]},</text>
+  <text x="345" y="216" font-family="Consolas, monospace" font-size="11">  {"shape": ["$k", [b, h, sk, d]]},</text>
+  <text x="345" y="234" font-family="Consolas, monospace" font-size="11">  {"shape": ["$v", [b, h, sk, d]]},</text>
+  <text x="345" y="252" font-family="Consolas, monospace" font-size="11">  {"==": ["$sdpa_fwd.head_size", 128]}</text>
+  <text x="345" y="270" font-family="Consolas, monospace" font-size="11">]}</text>
+  <text x="345" y="290" font-family="Consolas, monospace" font-size="10" fill="#555">fields: Tensor·Graph·Attrs·$kernel·$device</text>
+  <text x="345" y="308" font-size="10" fill="#8a6d1f">one matcher of the KDP's set, run once, memoized</text>
+
+  <!-- Arrow Stage2 -> Stage3 (bind) -->
+  <line x1="645" y1="200" x2="695" y2="200" stroke="#444" stroke-width="1.5" marker-end="url(#arrowCM)"/>
+  <text x="670" y="192" text-anchor="middle" font-weight="600">bind</text>
+
+  <!-- STAGE 3: bound variables box (green) -->
+  <rect x="700" y="55" width="200" height="290" rx="8" fill="#e6f4ea" stroke="#3f9159" stroke-width="1.5"/>
+  <text x="715" y="90" font-family="Consolas, monospace" font-size="11">$q → Q  (bf16)</text>
+  <text x="715" y="115" font-family="Consolas, monospace" font-size="11">$k → K</text>
+  <text x="715" y="140" font-family="Consolas, monospace" font-size="11">$v → V</text>
+  <text x="715" y="165" font-family="Consolas, monospace" font-size="11">$o → O</text>
+  <text x="715" y="200" font-family="Consolas, monospace" font-size="11">b, h, sq, d</text>
+  <text x="715" y="220" font-family="Consolas, monospace" font-size="11">  (bound dims)</text>
+
+  <!-- Caption -->
+  <text x="460" y="395" text-anchor="middle" font-style="italic" fill="#444">The same matcher that accepts a graph also binds the handles that launch and workspace formulas reference.</text>
+</svg>
