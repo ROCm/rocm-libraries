@@ -4,6 +4,7 @@
 #include "EngineRegistry.hpp"
 
 #include "FeatureExtractor.hpp"
+#include "ScoreTransform.hpp"
 #include "adapters/StaticOrderAdapter.hpp"
 #include "adapters/TreeDataAdapter.hpp"
 
@@ -81,6 +82,7 @@ void EngineRegistry::registerEngine(EngineEntry entry)
     }
 
     validateFeaturesHash(entry);
+    validateScoreTransform(entry);
 
     const std::lock_guard<std::mutex> lock(_mutex);
     _engines[entry.engineId] = std::move(entry);
@@ -140,6 +142,26 @@ void EngineRegistry::validateFeaturesHash(const EngineEntry& entry)
                             << cfg.adapterType
                             << "' declares a features_signature but no features_hash; the "
                                "feature contract with the model artifact cannot be enforced");
+    }
+}
+
+void EngineRegistry::validateScoreTransform(const EngineEntry& entry)
+{
+    const UhdConfig& cfg = entry.uhdConfig;
+
+    // A transform this runtime cannot invert means the score cannot be reported in the
+    // units the descriptor declares. Rejecting at load is the only honest option:
+    // applyInverse has no way to signal "unknown" at the point of use, so an
+    // unrecognized name passes the model's transformed output straight through as if
+    // it were already in the declared units — and RFC 0019 §12.3 feeds exactly that
+    // number into cross-engine comparison.
+    if(!score_transform::isSupported(cfg.scoreTransform))
+    {
+        std::ostringstream oss;
+        oss << "UHD declares an unsupported score.transform '" << cfg.scoreTransform
+            << "'. Engine ID: " << entry.engineId << ", uhd='" << cfg.uhdId
+            << "'. Supported: " << score_transform::supportedTransformList() << ".";
+        throw std::invalid_argument(oss.str());
     }
 }
 

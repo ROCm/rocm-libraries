@@ -18,10 +18,16 @@
 
 #include "GbdtModelTestBuilder.hpp"
 
+#include "GbdtModelTestBuilder.hpp"
+
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <algorithm>
 #include <cmath>
+#include <filesystem>
+#include <string>
+#include <system_error>
 #include <filesystem>
 #include <string>
 #include <system_error>
@@ -1093,4 +1099,415 @@ TEST_F(TestUhdSelectionFlow, CandidateMissingMetadataDoesNotInheritPreviousValue
     EXPECT_FALSE(scoredWithout->scoreValid)
         << "candidate without tile_m must not inherit the previous candidate's value";
 }
+// ========== Fail open, degrade, and score transforms ==========
+
+TEST_F(TestUhdSelectionFlow, RegisterRejectsUnsupportedScoreTransform)
+{
+    // applyInverse cannot signal "unknown" at the point of use — it returns the score
+    // unchanged. So a transform this runtime cannot invert has to be caught at load,
+    // or the model's transformed output gets reported as if it were in the declared
+    // score.units and silently corrupts cross-engine comparison (RFC §12.3).
+    auto k1 = makeCandidate(1, 5);
+    auto entry = createStaticOrderEngine(100, {k1});
+    entry.uhdConfig.scoreTransform = "boxcox";
+
+    EXPECT_THROW(EngineRegistry::instance().registerEngine(entry), std::invalid_argument);
+}
+TEST_F(TestUhdSelectionFlow, RegisterRejectsMisspelledScoreTransform)
+{
+    // The failure mode that motivates fail-closed: a near-miss that would otherwise
+    // pass through as a no-op.
+    auto k1 = makeCandidate(1, 5);
+    auto entry = createStaticOrderEngine(100, {k1});
+    entry.uhdConfig.scoreTransform = "log1P";
+
+    EXPECT_THROW(EngineRegistry::instance().registerEngine(entry), std::invalid_argument);
+}
+TEST_F(TestUhdSelectionFlow, RegisterAcceptsEverySupportedScoreTransform)
+{
+    int64_t engineId = 100;
+    for(const auto* transform :
+        hipdnn_backend::heuristics::uhd::score_transform::kSupportedTransforms)
+    {
+        auto k1 = makeCandidate(1, 5);
+        auto entry = createStaticOrderEngine(engineId, {k1});
+        entry.uhdConfig.scoreTransform = transform;
+
+        EXPECT_NO_THROW(EngineRegistry::instance().registerEngine(entry))
+            << "transform '" << transform << "' is listed as supported but was rejected";
+        ++engineId;
+    }
+}
+TEST_F(TestUhdSelectionFlow, SupportedTransformsCoverTheSchemaVocabulary)
+{
+    // flatbuffers_sdk/schemas/uhd.fbs documents the transform field as
+    // (e.g., "identity", "log1p", "exp"). A name the schema advertises but the runtime
+    // rejects is a descriptor that passes schema review and then fails to load.
+    namespace xform = hipdnn_backend::heuristics::uhd::score_transform;
+
+    for(const auto* documented : {"identity", "log1p", "exp"})
+    {
+        EXPECT_TRUE(xform::isSupported(documented))
+            << "uhd.fbs documents transform '" << documented
+            << "' but the runtime cannot invert it";
+    }
+}
+TEST_F(TestUhdSelectionFlow, ExpTransformInvertsToLog)
+{
+    namespace xform = hipdnn_backend::heuristics::uhd::score_transform;
+
+    // Round-trip: a target pushed through the forward transform comes back out.
+    const double target = 4.5;
+    EXPECT_NEAR(xform::applyInverse(xform::applyForward(target, "exp"), "exp"), target, 1e-9);
+}
+TEST_F(TestUhdSelectionFlow, IdentityTransformLeavesScoreUnchanged)
+{
+    auto k1 = makeCandidate(1, 5);
+
+    EngineEntry entry;
+    entry.engineId = 100;
+    entry.uhdConfig.adapterType = "static_order";
+    entry.uhdConfig.featuresSignature = {"\"$kernel.priority\"", "\"$kernel.id\""};
+    entry.uhdConfig.staticOrderFields = {"priority", "id"};
+    entry.uhdConfig.objective = "max";
+    entry.uhdConfig.scoreCalibrated = true;
+    entry.uhdConfig.scoreTransform = "identity";
+    entry.candidates = {k1};
+
+    EngineRegistry::instance().registerEngine(entry);
+
+    auto result = SelectionEngine::select(100, defaultDeviceVars(), defaultQueryVars());
+
+    ASSERT_TRUE(result.bestScore.has_value());
+    EXPECT_NEAR(*result.bestScore, -5e10 - 1, 1e-5);
+}
+TEST_F(TestUhdSelectionFlow, NoTransformLeavesScoreUnchanged)
+{
+    auto k1 = makeCandidate(1, 5);
+
+    EngineEntry entry;
+    entry.engineId = 100;
+    entry.uhdConfig.adapterType = "static_order";
+    entry.uhdConfig.featuresSignature = {"\"$kernel.priority\"", "\"$kernel.id\""};
+    entry.uhdConfig.staticOrderFields = {"priority", "id"};
+    entry.uhdConfig.objective = "max";
+    entry.uhdConfig.scoreCalibrated = true;
+    entry.uhdConfig.scoreTransform = ""; // No transform declared
+    entry.candidates = {k1};
+
+    EngineRegistry::instance().registerEngine(entry);
+
+    auto result = SelectionEngine::select(100, defaultDeviceVars(), defaultQueryVars());
+
+    EXPECT_TRUE(result.applied);
+    ASSERT_TRUE(result.bestScore.has_value());
+    EXPECT_NEAR(*result.bestScore, -5e10 - 1, 1e-5);
+}
+TEST_F(TestUhdSelectionFlow, UncalibratedScoreStillAppliesInverseTransform)
+{
+    // RFC 0019 §5/§12.3: `transform` and `calibrated` are orthogonal. `transform` says
+    // the model was trained on a transformed target and must be inverted to report the
+    // declared `units`; `calibrated` says the recovered value is comparable across
+    // engines. An uncalibrated model with a transform must still be inverted, or the
+    // reported score is a log-space number labelled as tflops.
+    auto k1 = makeCandidate(1, 5);
+
+    EngineEntry entry;
+    entry.engineId = 100;
+    entry.uhdConfig.adapterType = "static_order";
+    entry.uhdConfig.featuresSignature = {"\"$kernel.priority\"", "\"$kernel.id\""};
+    entry.uhdConfig.staticOrderFields = {"priority", "id"};
+    entry.uhdConfig.objective = "max";
+    entry.uhdConfig.scoreCalibrated = false; // Not comparable across engines...
+    entry.uhdConfig.scoreTransform = "log1p"; // ...but still trained on a transform
+    entry.candidates = {k1};
+
+    EngineRegistry::instance().registerEngine(entry);
+
+    auto result = SelectionEngine::select(100, defaultDeviceVars(), defaultQueryVars());
+
+    EXPECT_TRUE(result.applied);
+    EXPECT_TRUE(result.bestScore.has_value());
+    // StaticOrderAdapter computes: sum(-weight_i * field_i)
+    // With 2 fields: weight0=1e10, weight1=1
+    // Raw score = -1e10 * 5 (priority) + -1 * 1 (id) = -5e10 - 1
+    const double rawScore = -5e10 - 1;
+    EXPECT_NEAR(*result.bestScore, std::expm1(rawScore), 1e-10);
+}
+TEST_F(TestUhdSelectionFlow, UnknownAdapterStillProducesOrdering)
+{
+    // RFC §6 step 6: a model that cannot be built degrades to priority+id; the engine
+    // must stay rankable rather than drop out.
+    auto k1 = makeCandidate(1, 10);
+    auto k2 = makeCandidate(2, 5);
+
+    EngineEntry entry;
+    entry.engineId = 100;
+    entry.uhdConfig.uhdId = "unknown-adapter-uhd";
+    entry.uhdConfig.adapterType = "no_such_adapter";
+    entry.uhdConfig.featuresSignature = {"$kernel.priority"};
+    entry.uhdConfig.staticOrderFields = {"priority"};
+    entry.candidates = {k1, k2};
+
+    EngineRegistry::instance().registerEngine(entry);
+
+    auto result = SelectionEngine::select(100, defaultDeviceVars(), defaultQueryVars());
+
+    EXPECT_FALSE(result.applied) << "the model did not run";
+    EXPECT_TRUE(result.hasOrdering()) << "but a usable ordering must still come back";
+    ASSERT_EQ(result.sortedKernelIds.size(), 2u);
+    EXPECT_EQ(result.sortedKernelIds[0], 2); // priority 5 beats priority 10
+}
+TEST_F(TestUhdSelectionFlow, FallbackPreservesModelProvenanceInTrace)
+{
+    // Provenance set before the failure must survive into the returned trace —
+    // otherwise the failures worth diagnosing are the ones that report an empty uhdId.
+    auto k1 = makeCandidate(1, 10);
+
+    EngineEntry entry;
+    entry.engineId = 100;
+    entry.uhdConfig.uhdId = "provenance-uhd";
+    entry.uhdConfig.adapterType = "no_such_adapter";
+    entry.uhdConfig.featuresSignature = {"$kernel.priority"};
+    entry.uhdConfig.staticOrderFields = {"priority"};
+    entry.candidates = {k1};
+
+    EngineRegistry::instance().registerEngine(entry);
+
+    auto result = SelectionEngine::select(100, defaultDeviceVars(), defaultQueryVars());
+
+    EXPECT_FALSE(result.applied);
+    EXPECT_EQ(result.trace.uhdId, "provenance-uhd");
+    EXPECT_EQ(result.trace.adapterType, "no_such_adapter");
+    EXPECT_FALSE(result.trace.usedModel);
+    EXPECT_FALSE(result.trace.fallbackReason.empty());
+}
+TEST_F(TestUhdSelectionFlow, HasOrderingIsFalseWhenEngineMissing)
+{
+    auto result = SelectionEngine::select(999, defaultDeviceVars(), defaultQueryVars());
+
+    EXPECT_FALSE(result.applied);
+    EXPECT_FALSE(result.hasOrdering());
+}
+TEST_F(TestUhdSelectionFlow, EngineWithNoCandidatesIsNotRuledOut)
+{
+    // Nothing to rank is not the same as selection failing — the engine keeps its
+    // place rather than being dropped.
+    EngineEntry entry;
+    entry.engineId = 100;
+    entry.uhdConfig.uhdId = "no-candidates";
+    entry.uhdConfig.adapterType = "static_order";
+    entry.candidates = {};
+
+    EngineRegistry::instance().registerEngine(entry);
+
+    auto result = SelectionEngine::select(100, defaultDeviceVars(), defaultQueryVars());
+
+    EXPECT_TRUE(result.applied);
+    EXPECT_TRUE(result.sortedKernelIds.empty());
+    EXPECT_TRUE(result.hasOrdering());
+}
+TEST_F(TestUhdSelectionFlow, NonFiniteScoresAreTreatedAsInvalid)
+{
+    // A string-valued device property resolves to NaN rather than throwing
+    // (VariableContext::resolveDouble), so a signature referencing one produces a NaN
+    // score with no exception. NaN must not enter the ranking: it compares false
+    // against everything, so the comparator would call it equivalent to two values
+    // that are not equivalent to each other, breaking strict weak ordering and making
+    // std::sort undefined.
+    auto k1 = makeCandidate(1, 10);
+    auto k2 = makeCandidate(2, 5);
+
+    EngineEntry entry;
+    entry.engineId = 100;
+    entry.uhdConfig.uhdId = "nan-score";
+    entry.uhdConfig.adapterType = "static_order";
+    // architecture_name is bound as a string, so this resolves to NaN — and here it is
+    // the ranking field, so the NaN reaches the score.
+    entry.uhdConfig.featuresSignature = {"$device.architecture_name"};
+    entry.uhdConfig.staticOrderFields = {"$device.architecture_name"};
+    entry.candidates = {k1, k2};
+
+    EngineRegistry::instance().registerEngine(entry);
+
+    auto deviceVars = defaultDeviceVars();
+    deviceVars[hipdnn_backend::heuristics::uhd::kArchitectureNameKey] = std::string("gfx942");
+
+    auto result = SelectionEngine::select(100, deviceVars, defaultQueryVars());
+
+    for(const auto& sc : result.scoredCandidates)
+    {
+        EXPECT_FALSE(sc.scoreValid) << "a NaN score must not be reported as valid";
+    }
+
+    // All candidates invalid means the model produced nothing usable — degrade, but
+    // stay in play with a deterministic priority+id ordering.
+    EXPECT_FALSE(result.applied);
+    EXPECT_TRUE(result.hasOrdering());
+    ASSERT_EQ(result.sortedKernelIds.size(), 2u);
+    EXPECT_EQ(result.sortedKernelIds[0], 2);
+    EXPECT_FALSE(result.bestScore.has_value());
+}
+TEST_F(TestUhdSelectionFlow, NonFiniteFeatureIgnoredByAdapterIsHarmless)
+{
+    // The guard is on the score, not on the feature vector. A NaN sitting in a slot the
+    // adapter never reads cannot corrupt the ranking, so it must not disqualify the
+    // candidate.
+    //
+    // The NaN here comes from a genuine numeric operation (pow of a negative base with
+    // a fractional exponent), not from a type error — a string-typed binding now fails
+    // closed per RFC §7.2 and never reaches the feature vector at all.
+    auto k1 = makeCandidate(1, 10, {{"neg", -1.0}});
+    auto k2 = makeCandidate(2, 5, {{"neg", -1.0}});
+
+    EngineEntry entry;
+    entry.engineId = 100;
+    entry.uhdConfig.uhdId = "nan-unused-feature";
+    entry.uhdConfig.adapterType = "static_order";
+    entry.uhdConfig.featuresSignature = {R"({"pow": ["$kernel.neg", 0.5]})",
+                                          "$kernel.priority"};
+    entry.uhdConfig.staticOrderFields = {"priority"}; // index 1 only; index 0 is NaN
+    entry.candidates = {k1, k2};
+
+    EngineRegistry::instance().registerEngine(entry);
+
+    auto result = SelectionEngine::select(100, defaultDeviceVars(), defaultQueryVars());
+
+    EXPECT_TRUE(result.applied);
+    ASSERT_EQ(result.sortedKernelIds.size(), 2u);
+    EXPECT_EQ(result.sortedKernelIds[0], 2); // priority 5 wins
+}
+// ========== Untrained architecture degrades (RFC §9.3) ==========
+
+/// Fixture that writes a real tree_data artifact so arch metadata can be exercised
+/// end to end through the selection flow.
+class TestUhdSelectionFlowTreeData : public TestUhdSelectionFlow
+{
+protected:
+    void SetUp() override
+    {
+        TestUhdSelectionFlow::SetUp();
+        // Name the artifact after the running test so parallel suites don't collide.
+        const auto* info = ::testing::UnitTest::GetInstance()->current_test_info();
+        _modelPath =
+            (std::filesystem::temp_directory_path() /
+             ("uhd_arch_test_" + std::string(info != nullptr ? info->name() : "unknown") + ".bin"))
+                .string();
+    }
+
+    void TearDown() override
+    {
+        std::error_code ec;
+        std::filesystem::remove(_modelPath, ec);
+        TestUhdSelectionFlow::TearDown();
+    }
+
+    /// Register a tree_data engine whose model was trained only on `trainedArches`.
+    void registerTreeDataEngine(int64_t engineId, const std::vector<std::string>& trainedArches)
+    {
+        namespace uhd_test = hipdnn_backend::heuristics::uhd::testing;
+
+        const std::vector<std::string> signature = {"$kernel.priority"};
+        const auto hash =
+            hipdnn_backend::heuristics::uhd::FeatureExtractor::computeHash(signature);
+
+        uhd_test::GbdtModelTestBuilder builder;
+        builder.setNumFeatures(static_cast<int32_t>(signature.size()))
+            .setFeaturesHash(hash)
+            .setTrainingArches(trainedArches)
+            .setModelVersion("v1.2.3")
+            .addTree(uhd_test::makeLeafTreeSpec(1.0));
+        ASSERT_TRUE(builder.buildToFile(_modelPath));
+
+        EngineEntry entry;
+        entry.engineId = engineId;
+        entry.uhdConfig.uhdId = "tree-uhd";
+        entry.uhdConfig.adapterType = "tree_data";
+        entry.uhdConfig.featuresSignature = signature;
+        entry.uhdConfig.featuresHash = hash;
+        entry.uhdConfig.staticOrderFields = {"priority"};
+        entry.uhdConfig.objective = "max";
+        entry.uhdConfig.modelArtifactPath = _modelPath;
+        entry.candidates = {makeCandidate(1, 10), makeCandidate(2, 5)};
+
+        ASSERT_NO_THROW(EngineRegistry::instance().registerEngine(entry));
+    }
+
+    static FeatureExtractionContext::ValueMap deviceVarsForArch(const std::string& arch)
+    {
+        auto vars = defaultDeviceVars();
+        vars[hipdnn_backend::heuristics::uhd::kArchitectureNameKey] = arch;
+        return vars;
+    }
+
+    std::string _modelPath;
+};
+
+TEST_F(TestUhdSelectionFlowTreeData, TrainedArchUsesModel)
+{
+    registerTreeDataEngine(100, {"gfx942", "gfx950"});
+
+    auto result = SelectionEngine::select(100, deviceVarsForArch("gfx942"), defaultQueryVars());
+
+    EXPECT_TRUE(result.applied);
+    EXPECT_TRUE(result.trace.usedModel);
+    EXPECT_TRUE(result.trace.archWasTrained);
+    EXPECT_EQ(result.trace.deviceArch, "gfx942");
+}
+
+TEST_F(TestUhdSelectionFlowTreeData, UntrainedArchDegradesToStaticOrder)
+{
+    // RFC §9.3: a model trained only on gfx942 has no basis for ranking gfx1100, so it
+    // must degrade rather than extrapolate.
+    registerTreeDataEngine(100, {"gfx942"});
+
+    auto result = SelectionEngine::select(100, deviceVarsForArch("gfx1100"), defaultQueryVars());
+
+    EXPECT_FALSE(result.applied) << "the model must not score an untrained arch";
+    EXPECT_FALSE(result.trace.usedModel);
+    EXPECT_FALSE(result.trace.archWasTrained);
+    EXPECT_EQ(result.trace.deviceArch, "gfx1100");
+    EXPECT_NE(result.fallbackReason.find("gfx1100"), std::string::npos);
+
+    // Fail open: still ranked, by priority then id.
+    EXPECT_TRUE(result.hasOrdering());
+    ASSERT_EQ(result.sortedKernelIds.size(), 2u);
+    EXPECT_EQ(result.sortedKernelIds[0], 2);
+}
+
+TEST_F(TestUhdSelectionFlowTreeData, UntrainedArchFallbackKeepsProvenance)
+{
+    registerTreeDataEngine(100, {"gfx942"});
+
+    auto result = SelectionEngine::select(100, deviceVarsForArch("gfx1100"), defaultQueryVars());
+
+    EXPECT_EQ(result.trace.uhdId, "tree-uhd");
+    EXPECT_EQ(result.trace.adapterType, "tree_data");
+    EXPECT_EQ(result.trace.modelVersion, "v1.2.3");
+    ASSERT_EQ(result.trace.trainingArches.size(), 1u);
+    EXPECT_EQ(result.trace.trainingArches[0], "gfx942");
+}
+
+TEST_F(TestUhdSelectionFlowTreeData, EmptyTrainingArchesMeansNoRestriction)
+{
+    registerTreeDataEngine(100, {});
+
+    auto result = SelectionEngine::select(100, deviceVarsForArch("gfx1100"), defaultQueryVars());
+
+    EXPECT_TRUE(result.applied);
+    EXPECT_TRUE(result.trace.archWasTrained);
+}
+
+TEST_F(TestUhdSelectionFlowTreeData, MissingArchKeySkipsTheCheck)
+{
+    // Device properties without an architecture_name cannot be checked; selection
+    // proceeds rather than degrading on missing information.
+    registerTreeDataEngine(100, {"gfx942"});
+
+    auto result = SelectionEngine::select(100, defaultDeviceVars(), defaultQueryVars());
+
+    EXPECT_TRUE(result.applied);
+    EXPECT_TRUE(result.trace.deviceArch.empty());
+}
+
 } // namespace

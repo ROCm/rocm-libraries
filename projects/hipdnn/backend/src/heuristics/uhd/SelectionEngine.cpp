@@ -3,7 +3,10 @@
 
 #include "SelectionEngine.hpp"
 
+#include <hipdnn_data_sdk/logging/Logger.hpp>
+
 #include <algorithm>
+#include <cmath>
 #include <limits>
 
 namespace hipdnn_backend::heuristics::uhd
@@ -41,35 +44,63 @@ SelectionResult SelectionEngine::select(int64_t engineId,
         return result;
     }
 
+    // Every fallback below routes through here so the provenance gathered so far
+    // (uhdId, adapterType, hashes, arch) survives into the returned trace. Returning
+    // applyStaticOrdering() directly would hand back a default-constructed trace and
+    // report an empty uhdId for exactly the failures worth diagnosing.
+    const auto degrade = [&result, &engine](const std::string& reason) {
+        auto fallback = applyStaticOrdering(engine.candidates, reason);
+        fallback.trace = result.trace;
+        fallback.trace.usedModel = false;
+        fallback.trace.fallbackReason = reason;
+        return fallback;
+    };
+
     // Get or create adapter
     auto adapter = EngineRegistry::instance().getOrCreateAdapter(engineId);
     if(adapter == nullptr)
     {
-        return applyStaticOrdering(engine.candidates, "adapter creation failed");
+        HIPDNN_SDK_LOG_WARN("UHD: engine " << engineId << " uhd='" << cfg.uhdId
+                                           << "' adapter '" << cfg.adapterType
+                                           << "' could not be created; using static order");
+        return degrade("adapter creation failed");
     }
 
-    // Populate trace with adapter info (RFC 0019 §9.2, §13)
+    // Populate trace with adapter info (RFC 0019 §9.3, §13)
     result.trace.featuresHashModel = adapter->getFeaturesHash();
     result.trace.modelVersion = adapter->getModelVersion();
     result.trace.trainingArches = adapter->getTrainingArches();
 
-    // Check if device arch was seen during training (RFC 0019 §9.2)
-    auto archIt = deviceVars.find("architecture_name");
+    // Check if device arch was seen during training (RFC 0019 §9.3).
+    // A model trained only on gfx942 has no basis for ranking gfx950, so an
+    // out-of-distribution device degrades rather than extrapolating.
+    auto archIt = deviceVars.find(kArchitectureNameKey);
     if(archIt != deviceVars.end())
     {
         if(const auto* archStr = std::get_if<std::string>(&archIt->second))
         {
             result.trace.deviceArch = *archStr;
             result.trace.archWasTrained = adapter->isTrainedForArch(*archStr);
+
+            if(!result.trace.archWasTrained)
+            {
+                HIPDNN_SDK_LOG_WARN("UHD: engine "
+                                    << engineId << " uhd='" << cfg.uhdId << "' model version='"
+                                    << adapter->getModelVersion() << "' was not trained for arch '"
+                                    << *archStr << "'; using static order");
+                return degrade("device arch '" + *archStr + "' not in training set");
+            }
         }
     }
 
-    // Reuse the engine's cached extractor. Parsing the signature per selection
-    // re-walks and re-hashes every entry for a result that cannot change.
+    // Get cached feature extractor (or create on first use)
     auto extractor = EngineRegistry::instance().getOrCreateExtractor(engineId);
     if(extractor == nullptr)
     {
-        return applyStaticOrdering(engine.candidates, "failed to create feature extractor");
+        HIPDNN_SDK_LOG_WARN("UHD: engine " << engineId << " uhd='" << cfg.uhdId
+                                           << "' feature extractor could not be built; "
+                                              "using static order");
+        return degrade("failed to create feature extractor");
     }
 
     // Validate features hash if adapter provides one
@@ -77,13 +108,8 @@ SelectionResult SelectionEngine::select(int64_t engineId,
     if(!adapterHash.empty() && !cfg.featuresHash.empty() && adapterHash != cfg.featuresHash)
     {
         result.trace.featuresHashMatch = false;
-        auto fallbackResult =
-            applyStaticOrdering(engine.candidates,
-                                "features hash mismatch: adapter=" + adapterHash +
-                                    " config=" + cfg.featuresHash);
-        fallbackResult.trace = result.trace;
-        fallbackResult.trace.fallbackReason = fallbackResult.fallbackReason;
-        return fallbackResult;
+        return degrade("features hash mismatch: adapter=" + adapterHash +
+                       " config=" + cfg.featuresHash);
     }
 
     // Build the context once and reuse it. Device and query bindings are shared by
@@ -93,8 +119,7 @@ SelectionResult SelectionEngine::select(int64_t engineId,
     ctx.bindQueryVars(queryVars);
 
     // RFC 0019 §6 step 2: extract shared features once, not once per candidate.
-    // sharedRow holds the $device.*/$q.* slots — including derived expressions over
-    // them, which are the expensive ones; each candidate overwrites only the
+    // sharedRow holds the $device.*/$q.* slots; each candidate overwrites only the
     // $kernel.*-dependent slots.
     std::vector<double> sharedRow;
     try
@@ -103,21 +128,21 @@ SelectionResult SelectionEngine::select(int64_t engineId,
     }
     catch(const std::exception& e)
     {
-        return applyStaticOrdering(engine.candidates,
-                                   std::string("shared feature extraction failed: ") + e.what());
+        HIPDNN_SDK_LOG_WARN("UHD: engine " << engineId << " uhd='" << cfg.uhdId
+                                           << "' shared feature extraction failed: " << e.what()
+                                           << "; using static order");
+        return degrade(std::string("shared feature extraction failed: ") + e.what());
     }
 
     // The feature vector width is fixed by the signature, so the adapter's arity
-    // contract (RFC 0019 §7.3c) is checked once rather than per candidate. That also
-    // means a mismatch reports itself instead of masquerading as "all candidates
-    // failed scoring".
+    // contract (RFC 0019 §7.3c) can be checked once rather than per candidate. Doing
+    // it here also means a mismatch reports itself instead of masquerading as
+    // "all candidates failed scoring".
     if(!adapter->validateFeatureCount(sharedRow.size()))
     {
-        return applyStaticOrdering(engine.candidates,
-                                   "feature count mismatch: signature has " +
-                                       std::to_string(sharedRow.size()) +
-                                       " features, model expects " +
-                                       std::to_string(adapter->expectedFeatureCount()));
+        return degrade("feature count mismatch: signature has " +
+                       std::to_string(sharedRow.size()) + " features, model expects " +
+                       std::to_string(adapter->expectedFeatureCount()));
     }
 
     // Score each candidate
@@ -142,8 +167,26 @@ SelectionResult SelectionEngine::select(int64_t engineId,
             features = sharedRow;
             extractor->extractKernelInto(ctx, features);
 
-            sc.score = adapter->score(features);
-            sc.scoreValid = true;
+            const double score = adapter->score(features);
+
+            // A non-finite score is not a ranking. Treating it as one is worse than
+            // dropping the candidate: NaN compares false against everything, so the
+            // sort comparator would find NaN "equivalent" to two values that are not
+            // equivalent to each other, breaking strict weak ordering and making
+            // std::sort undefined. NaN reaches here without an exception because
+            // VariableContext::resolveDouble yields quiet_NaN for a string-valued
+            // binding (e.g. a signature referencing $device.architecture_name), and
+            // because ops like pow() propagate it silently.
+            if(!std::isfinite(score))
+            {
+                sc.scoreValid = false;
+                sc.score = 0.0;
+            }
+            else
+            {
+                sc.score = score;
+                sc.scoreValid = true;
+            }
         }
         catch(const std::exception&)
         {
@@ -161,10 +204,7 @@ SelectionResult SelectionEngine::select(int64_t engineId,
 
     if(!anyValid)
     {
-        auto fallbackResult = applyStaticOrdering(engine.candidates, "all candidates failed scoring");
-        fallbackResult.trace = result.trace;
-        fallbackResult.trace.fallbackReason = fallbackResult.fallbackReason;
-        return fallbackResult;
+        return degrade("all candidates failed scoring");
     }
 
     // Sort by objective (max or min) with tie-breaking
@@ -173,6 +213,10 @@ SelectionResult SelectionEngine::select(int64_t engineId,
     // Build result
     result.applied = true;
     result.scoredCandidates = scored;
+    // TODO(RFC-0019): sortedKernelIds duplicates the kernelId column of
+    // scoredCandidates. Keep both while the consumer API is in flux (§12.1 score-only
+    // mode wants only the best; §6 wants the full ranking); collapse to one once
+    // RFC 0007 fixes the shape it needs.
     result.sortedKernelIds.reserve(scored.size());
     for(const auto& s : scored)
     {
@@ -185,8 +229,13 @@ SelectionResult SelectionEngine::select(int64_t engineId,
         result.bestKernelId = scored[0].kernelId;
         result.bestScore = scored[0].score;
 
-        // Apply inverse transform if configured (for cross-engine comparison)
-        if(cfg.scoreCalibrated && !cfg.scoreTransform.empty())
+        // Recover the original scale (RFC 0019 §5, §12.3). `transform` and `calibrated`
+        // are orthogonal: `transform` says the model was trained on a transformed
+        // target and must be inverted to report the declared `units`, while
+        // `calibrated` says the recovered value is comparable across engines. Gating
+        // the inverse on `calibrated` would report a log-space number as if it were
+        // tflops whenever a model is transformed but uncalibrated.
+        if(!cfg.scoreTransform.empty())
         {
             result.bestScore = score_transform::applyInverse(*result.bestScore, cfg.scoreTransform);
         }
@@ -202,8 +251,11 @@ SelectionResult SelectionEngine::scoreOnly(int64_t engineId,
                                            const FeatureExtractionContext::ValueMap& deviceVars,
                                            const FeatureExtractionContext::ValueMap& queryVars)
 {
-    // For now, score-only uses the same path as full selection.
-    // A future optimization could skip sorting and just find the best.
+    // TODO(RFC-0019 §12.1): score-only mode is meant to be the *cheap* engine estimate
+    // (model A) — a single f(graph) prediction that never enumerates candidates. This
+    // delegates to full selection, so it still scores every candidate and sorts them.
+    // Correct results, wrong cost profile. Replacing this needs the distinct model A
+    // artifact, which lands with Phase 7 alongside RFC 0007.
     return select(engineId, deviceVars, queryVars);
 }
 

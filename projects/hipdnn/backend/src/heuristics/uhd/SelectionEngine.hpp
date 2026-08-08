@@ -5,6 +5,7 @@
 
 #include "EngineRegistry.hpp"
 #include "FeatureExtractor.hpp"
+#include "ScoreTransform.hpp"
 #include "adapters/IUhdAdapter.hpp"
 
 #include <cmath>
@@ -15,6 +16,10 @@
 
 namespace hipdnn_backend::heuristics::uhd
 {
+
+/// Device-property key holding the GPU architecture name (e.g. "gfx942").
+/// Used for the RFC 0019 §9.3 training-coverage check.
+inline constexpr const char* kArchitectureNameKey = "architecture_name";
 
 /// @brief Result of scoring a single kernel candidate.
 struct ScoredCandidate
@@ -40,7 +45,7 @@ struct SelectionTrace
     bool usedModel = false;           // true if model scored, false if fallback
     std::string fallbackReason;       // if usedModel==false, why
 
-    // Arch validation (RFC 0019 §9.2)
+    // Arch validation (RFC 0019 §9.3)
     bool archWasTrained = true;       // false if device arch not in training set
     std::string deviceArch;           // the device arch being checked
 
@@ -53,7 +58,11 @@ struct SelectionTrace
 /// @brief Result of the UHD selection process.
 struct SelectionResult
 {
-    bool applied = false;                          // true if UHD successfully ranked
+    /// True when selection ran to completion without degrading. Note this includes the
+    /// engine that registered no candidates: nothing to rank is a trivially complete
+    /// selection, not a failure. Use `trace.usedModel` to ask the narrower question of
+    /// whether the model actually scored anything.
+    bool applied = false;
     std::vector<int64_t> sortedKernelIds;          // kernels sorted by score (best first)
     std::vector<ScoredCandidate> scoredCandidates; // full scoring details
 
@@ -66,57 +75,22 @@ struct SelectionResult
 
     // Observability trace (RFC 0019 §13)
     SelectionTrace trace;
+
+    /// True when selection completed without ruling the engine out — either the model
+    /// ran, or the static_order fallback produced a ranking.
+    ///
+    /// RFC 0019 §6 step 6 requires failing *open*: a model that is absent, mismatched,
+    /// or throwing degrades to priority+id ordering, and the engine stays in play.
+    /// Callers must gate on this rather than on `applied`, which is narrower and only
+    /// reports whether the model itself ran.
+    ///
+    /// The `applied` disjunct covers the engine that registered no candidates: there
+    /// is nothing to rank, but selection did not fail, so the engine is not dropped.
+    bool hasOrdering() const { return applied || !sortedKernelIds.empty(); }
 };
 
-/// @brief Score transform utilities (RFC §5, §12.3).
-///
-/// Models may be trained on transformed targets (e.g., log1p(tflops)).
-/// These utilities recover the original scale for cross-engine comparison.
-namespace score_transform
-{
-
-/// Apply inverse transform to recover original scale.
-/// @param rawScore Score from the model.
-/// @param transform Transform name from UhdConfig::scoreTransform.
-/// @returns Transformed score in original units.
-inline double applyInverse(double rawScore, const std::string& transform)
-{
-    if(transform == "log1p")
-    {
-        // Inverse of log1p is expm1
-        return std::expm1(rawScore);
-    }
-    if(transform == "log")
-    {
-        return std::exp(rawScore);
-    }
-    if(transform == "sqrt")
-    {
-        return rawScore * rawScore;
-    }
-    // "identity" or unknown: no transform
-    return rawScore;
-}
-
-/// Apply forward transform (for training/debugging).
-inline double applyForward(double value, const std::string& transform)
-{
-    if(transform == "log1p")
-    {
-        return std::log1p(value);
-    }
-    if(transform == "log")
-    {
-        return std::log(value);
-    }
-    if(transform == "sqrt")
-    {
-        return std::sqrt(value);
-    }
-    return value;
-}
-
-} // namespace score_transform
+// score_transform now lives in ScoreTransform.hpp so EngineRegistry can validate a
+// descriptor's declared transform at load without depending on the selection engine.
 
 /// @brief UHD selection engine.
 ///

@@ -408,34 +408,70 @@ hipdnnPluginStatus_t policyFinalize(hipdnnHeuristicPolicyDescriptor_t desc, int3
 
             auto result = SelectionEngine::select(engineId, deviceVars, queryVars);
 
-            if(result.applied)
+            // RFC 0019 §6 step 6 requires failing *open*. Gate on hasOrdering(), not on
+            // `applied`: when the model is absent, mismatched, or throwing, selection
+            // still returns a valid priority+id ordering and the engine must stay in
+            // play. `applied` only reports whether selection completed, and gating on
+            // it here would drop the engine entirely on any model failure.
+            if(result.hasOrdering())
             {
                 anyApplied = true;
-                // For now, add the engine ID if selection succeeded.
                 // The sorted kernel IDs are stored in the result but we
                 // don't have a place to return them in this API yet.
                 // TODO(RFC-0017): Extend API to return per-engine kernel ranking.
                 d->sortedEngineIds.push_back(engineId);
 
-                UHD_LOG(HIPDNN_SEV_INFO,
-                        "policyFinalize: engine %lld selection applied, %zu kernels ranked",
-                        static_cast<long long>(engineId),
-                        result.sortedKernelIds.size());
-
-                if(result.bestScore.has_value())
+                // Report on trace.usedModel, not `applied`. An engine with no
+                // candidates completes with applied=true but never builds an adapter,
+                // so reporting it as a model application would log an empty
+                // model_version alongside a zero-kernel ranking.
+                if(result.trace.usedModel)
                 {
                     UHD_LOG(HIPDNN_SEV_INFO,
-                            "policyFinalize: engine %lld best kernel=%lld score=%f",
+                            "policyFinalize: engine %lld selection applied, %zu kernels ranked "
+                            "(uhd=%s model_version=%s adapter=%s)",
                             static_cast<long long>(engineId),
-                            static_cast<long long>(*result.bestKernelId),
-                            *result.bestScore);
+                            result.sortedKernelIds.size(),
+                            result.trace.uhdId.c_str(),
+                            result.trace.modelVersion.c_str(),
+                            result.trace.adapterType.c_str());
+
+                    if(result.bestScore.has_value())
+                    {
+                        UHD_LOG(HIPDNN_SEV_INFO,
+                                "policyFinalize: engine %lld best kernel=%lld score=%f",
+                                static_cast<long long>(engineId),
+                                static_cast<long long>(*result.bestKernelId),
+                                *result.bestScore);
+                    }
+                }
+                else if(result.applied)
+                {
+                    UHD_LOG(HIPDNN_SEV_INFO,
+                            "policyFinalize: engine %lld had nothing to rank (uhd=%s): %s",
+                            static_cast<long long>(engineId),
+                            result.trace.uhdId.c_str(),
+                            result.fallbackReason.c_str());
+                }
+                else
+                {
+                    UHD_LOG(HIPDNN_SEV_WARN,
+                            "policyFinalize: engine %lld degraded to static order, %zu kernels "
+                            "ranked (uhd=%s adapter=%s arch=%s): %s",
+                            static_cast<long long>(engineId),
+                            result.sortedKernelIds.size(),
+                            result.trace.uhdId.c_str(),
+                            result.trace.adapterType.c_str(),
+                            result.trace.deviceArch.c_str(),
+                            result.fallbackReason.c_str());
                 }
             }
             else
             {
                 UHD_LOG(HIPDNN_SEV_WARN,
-                        "policyFinalize: engine %lld selection failed: %s",
+                        "policyFinalize: engine %lld produced no ranking (uhd=%s): %s",
                         static_cast<long long>(engineId),
+                        result.trace.uhdId.c_str(),
                         result.fallbackReason.c_str());
             }
         }

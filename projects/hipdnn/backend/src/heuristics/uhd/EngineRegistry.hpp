@@ -138,6 +138,10 @@ private:
     /// @throws std::invalid_argument on mismatch.
     static void validateFeaturesHash(const EngineEntry& entry);
 
+    /// Check that a declared score.transform is one this runtime can invert.
+    /// @throws std::invalid_argument on an unsupported transform name.
+    static void validateScoreTransform(const EngineEntry& entry);
+
     std::unordered_map<int64_t, EngineEntry> _engines;
     mutable std::mutex _mutex;
 };
