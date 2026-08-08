@@ -100,7 +100,8 @@ namespace rocRoller
         if(value->regType() != Register::Type::Literal)
             return false;
 
-        return std::visit([this](auto val) -> bool { return this->isSupportedConstantValue(val); },
-                          value->getLiteralValue());
+        return std::visit<bool>([this](auto&& arg) -> bool {
+            return this->isSupportedConstantValue(arg);
+        }, value->getLiteralValue());
     }
 }

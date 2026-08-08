@@ -66,6 +66,11 @@ target_compile_definitions(GPUArchitectureGenerator
        __HIP_PLATFORM_AMD__
 )
 
+if(WIN32)
+    add_custom_command(TARGET GPUArchitectureGenerator POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${_amdhip64_location} ${_amd_comgr_location} $<TARGET_FILE_DIR:GPUArchitectureGenerator>)
+endif()
+
 if(ROCROLLER_ENABLE_TIMERS)
     target_compile_definitions(GPUArchitectureGenerator PRIVATE ROCROLLER_ENABLE_TIMERS)
 endif()

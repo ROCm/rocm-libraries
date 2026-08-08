@@ -33,7 +33,7 @@ namespace HazardObserverTest
 {
     using Catch::Matchers::ContainsSubstring;
 
-    void peekAndSchedule(TestContext& context, Instruction& inst, uint expectedNops = 0)
+    void peekAndSchedule(TestContext& context, Instruction& inst, unsigned int expectedNops = 0)
     {
         auto peeked = context->observer()->peek(inst);
         CHECK(peeked.nops == expectedNops);

@@ -186,7 +186,7 @@ namespace rocRoller
                    std::vector<uint8_t>& hostScaleB,
                    float                 min            = -1.f,
                    float                 max            = 1.f,
-                   const uint            scaleBlockSize = 32,
+                   const unsigned int            scaleBlockSize = 32,
                    DataInitMode          initModeA      = DataInitMode(Bounded{}),
                    DataInitMode          initModeB      = DataInitMode(Bounded{}),
                    DataInitMode          initModeC      = DataInitMode(Bounded{}))
@@ -268,7 +268,7 @@ namespace rocRoller
                    const DataType&       scaleBType,
                    float                 min            = -1.f,
                    float                 max            = 1.f,
-                   const uint            scaleBlockSize = 32,
+                   const unsigned int            scaleBlockSize = 32,
                    DataInitMode          initModeA      = DataInitMode(Bounded{}),
                    DataInitMode          initModeB      = DataInitMode(Bounded{}),
                    DataInitMode          initModeC      = DataInitMode(Bounded{})
@@ -357,7 +357,7 @@ namespace rocRoller
                    const DataType&       scaleBType,
                    float                 min            = -1.f,
                    float                 max            = 1.f,
-                   const uint            scaleBlockSize = 32,
+                   const unsigned int            scaleBlockSize = 32,
                    DataInitMode          initModeA      = DataInitMode(Bounded{}),
                    DataInitMode          initModeB      = DataInitMode(Bounded{}),
                    DataInitMode          initModeC      = DataInitMode(Bounded{}))

@@ -147,7 +147,7 @@ namespace rocRoller
             RemappedDimensions workgroupMapping(TileSizeInfo const&                  info,
                                                 rocRoller::KernelGraph::KernelGraph& graph,
                                                 GD                                   direction,
-                                                uint                                 dimension,
+                                                unsigned int                                 dimension,
                                                 Expression::ExpressionPtr            size)
             {
                 AssertFatal(dimension == 0 || dimension == 1);

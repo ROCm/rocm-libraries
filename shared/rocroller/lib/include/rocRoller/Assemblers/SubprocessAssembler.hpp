@@ -9,6 +9,8 @@
 #include <functional>
 #include <vector>
 
+#include "spdlog/details/synchronous_factory.h"
+
 namespace rocRoller
 {
     class SubprocessAssembler : public Assembler

@@ -15,9 +15,14 @@ namespace rocRoller
          */
         inline int clz(uint32_t x)
         {
-            // the result of __builtin_clz is undefined if x is 0
-            AssertFatal(x != 0, "The input value must be non-zero");
+            if (x == 0) return 32;
+#ifdef _MSC_VER
+            unsigned long idx;
+            _BitScanReverse(&idx, x);
+            return static_cast<int>(31 - idx);
+#else
             return __builtin_clz(x);
+#endif
         }
 
         /**

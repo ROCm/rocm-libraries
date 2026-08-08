@@ -64,8 +64,8 @@ namespace rocRoller
         public:
             LoopOverTileNumbers() = delete;
             LoopOverTileNumbers(std::vector<int> const&  dims,
-                                std::vector<uint> const& tileNumberCoordSizes,
-                                uint                     numIteratedTiles,
+                                std::vector<unsigned int> const& tileNumberCoordSizes,
+                                unsigned int                     numIteratedTiles,
                                 std::string const&       topLoop,
                                 ContextPtr               context);
 

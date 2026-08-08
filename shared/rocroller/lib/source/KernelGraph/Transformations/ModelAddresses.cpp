@@ -42,14 +42,14 @@ namespace rocRoller::KernelGraph
             auto wg_carg       = CommandArgument(
                 nullptr, DataType::UInt32, workgroupOffset[i], DataDirection::ReadOnly, wg_name);
             auto wg = std::make_shared<CommandArgument>(wg_carg);
-            arguments.appendUnbound<uint>(wg_name);
+            arguments.appendUnbound<unsigned int>(wg_name);
 
             workitemOffset[i] = arguments.size();
             auto wi_name      = concatenate("WI", i);
             auto wi_carg      = CommandArgument(
                 nullptr, DataType::UInt32, workitemOffset[i], DataDirection::ReadOnly, wi_name);
             auto wi = std::make_shared<CommandArgument>(wi_carg);
-            arguments.appendUnbound<uint>(wi_name);
+            arguments.appendUnbound<unsigned int>(wi_name);
 
             kernelWorkgroupIndexes[i] = std::make_shared<Expression::Expression>(wg);
             kernelWorkitemIndexes[i]  = std::make_shared<Expression::Expression>(wi);
@@ -59,12 +59,12 @@ namespace rocRoller::KernelGraph
         runtimeArguments = RuntimeArguments(rawArguments.data(), rawArguments.size());
     }
 
-    void ModelAddresses::setWorkgroup(uint dim, uint value)
+    void ModelAddresses::setWorkgroup(unsigned int dim, unsigned int value)
     {
         std::memcpy(rawArguments.data() + workgroupOffset[dim], &value, sizeof(value));
     }
 
-    void ModelAddresses::setWorkitem(uint dim, uint value)
+    void ModelAddresses::setWorkitem(unsigned int dim, unsigned int value)
     {
         std::memcpy(rawArguments.data() + workitemOffset[dim], &value, sizeof(value));
     }
@@ -106,7 +106,7 @@ namespace rocRoller::KernelGraph
             auto maybeVGPRBlockSets = GetVGPRBlockSetDimSize(graph, tag);
             if(maybeVGPRBlockSets.has_value())
             {
-                const uint numVGPRBlockSets = maybeVGPRBlockSets.value();
+                const unsigned int numVGPRBlockSets = maybeVGPRBlockSets.value();
                 auto [vgprBlockSetTag, _]   = graph.getDimension<VGPRBlockSet>(tag);
                 coords.setCoordinate(vgprBlockSetTag, Expression::literal(numVGPRBlockSets));
             }
@@ -141,7 +141,7 @@ namespace rocRoller::KernelGraph
         setWorkgroup(0, 0);
 
         std::vector<size_t> addresses;
-        for(uint wi = 0; wi < product(m_context->kernel()->workgroupSize()); ++wi)
+        for(unsigned int wi = 0; wi < product(m_context->kernel()->workgroupSize()); ++wi)
         {
             setWorkitem(0, wi);
 

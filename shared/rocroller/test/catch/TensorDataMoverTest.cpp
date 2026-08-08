@@ -236,7 +236,7 @@ namespace TensorDataMoverTest
 
         void generate() override
         {
-            const uint workitemCountX = 32u;
+            const unsigned int workitemCountX = 32u;
 
             auto k = m_context->kernel();
 

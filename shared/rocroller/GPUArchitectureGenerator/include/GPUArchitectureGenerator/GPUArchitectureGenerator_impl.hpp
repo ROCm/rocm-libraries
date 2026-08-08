@@ -16,6 +16,7 @@
 #include <unordered_map>
 
 #include "GPUArchitectureGenerator_defs.hpp"
+#include "rocRoller/Windows.hpp"
 
 namespace GPUArchitectureGenerator
 {
@@ -131,7 +132,7 @@ namespace GPUArchitectureGenerator
 
         auto tmpFolderTemplate
             = std::filesystem::temp_directory_path() / "rocroller_GPUArchitectureGenerator-XXXXXX";
-        char* tmpFolder = mkdtemp(const_cast<char*>(tmpFolderTemplate.c_str()));
+        char* tmpFolder = mkdtemp(tmpFolderTemplate.string());
 
         std::string asmFileName   = std::string(tmpFolder) + "/tmp.asm";
         std::string ouputFileName = std::string(tmpFolder) + "/tmp.o";
@@ -200,7 +201,7 @@ namespace GPUArchitectureGenerator
                 amdisa::IsaSpec spec;
 
                 std::string err_msg;
-                if(!amdisa::IsaXmlReader::ReadSpec(file.path(), spec, err_msg))
+                if(!amdisa::IsaXmlReader::ReadSpec(file.path().string(), spec, err_msg))
                 {
                     std::cerr << "Error reading ISA XML: " << file.path() << std::endl
                               << err_msg << std::endl;
@@ -465,9 +466,9 @@ namespace GPUArchitectureGenerator
                     splitArch[gpuArchitecture.first] = gpuArchitecture.second;
 
                     std::string newFilename
-                        = argPath.parent_path()
+                        = (argPath.parent_path()
                           / (argPath.stem().string() + "_" + gpuArchitecture.first.toString()
-                             + argPath.extension().string());
+                             + argPath.extension().string())).string();
                     std::ranges::replace(newFilename, ':', '_');
                     std::ranges::replace(newFilename, '+', 't');
 

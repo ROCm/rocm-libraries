@@ -19,16 +19,16 @@ namespace GEMMTests
     void CheckGEMMF8F6F4(rocRoller::ContextPtr m_context,
                          std::string           mfma,
                          std::string           modifiers,
-                         uint                  numMFMAs,
-                         uint                  numBufferLoadsForC,
-                         uint                  numBufferLoadsForAB,
-                         uint                  numDSWrites,
-                         uint                  numDSReads,
-                         uint                  numTrLoads,
+                         unsigned int                  numMFMAs,
+                         unsigned int                  numBufferLoadsForC,
+                         unsigned int                  numBufferLoadsForAB,
+                         unsigned int                  numDSWrites,
+                         unsigned int                  numDSReads,
+                         unsigned int                  numTrLoads,
                          bool const            isF6Type            = false,
-                         uint                  numScaleBufferLoads = 0,
-                         uint                  numScaleDSWrites    = 0,
-                         uint                  numScaleDSLoads     = 0)
+                         unsigned int                  numScaleBufferLoads = 0,
+                         unsigned int                  numScaleDSWrites    = 0,
+                         unsigned int                  numScaleDSLoads     = 0)
     {
         std::string generatedCode = m_context->instructions()->toString();
 
@@ -217,7 +217,7 @@ namespace GEMMTests
                 GPUCapability::DefaultScaleBlockSize);
         }
 
-        uint const elementBits = DataTypeInfo::Get(typeAB).elementBits;
+        unsigned int const elementBits = DataTypeInfo::Get(typeAB).elementBits;
 
         switch(typeAB)
         {
@@ -318,7 +318,7 @@ namespace GEMMTests
         problem.loadPathA = loadPathA;
         problem.loadPathB = loadPathB;
 
-        uint const elementBits = DataTypeInfo::Get(typeAB).elementBits;
+        unsigned int const elementBits = DataTypeInfo::Get(typeAB).elementBits;
 
         std::string modifiers{"cbsz:0b000 blgp:0b000"};
 
@@ -349,37 +349,37 @@ namespace GEMMTests
                             toString(typeAB)));
         }
 
-        uint const wfs           = problem.wavefrontSize;
-        uint const wgX           = problem.workgroupSizeX;
-        uint const wgY           = problem.workgroupSizeY;
-        uint const numDWavetiles = problem.macM * problem.macN / (waveM * waveN);
-        uint const numWaves      = wgX * wgY / wfs;
+        unsigned int const wfs           = problem.wavefrontSize;
+        unsigned int const wgX           = problem.workgroupSizeX;
+        unsigned int const wgY           = problem.workgroupSizeY;
+        unsigned int const numDWavetiles = problem.macM * problem.macN / (waveM * waveN);
+        unsigned int const numWaves      = wgX * wgY / wfs;
 
-        uint const numDWavetilesPerWave = numDWavetiles / numWaves;
-        uint const numMFMAsPerWave      = problem.macK / waveK;
-        uint const numMFMAs             = numDWavetilesPerWave * numMFMAsPerWave;
+        unsigned int const numDWavetilesPerWave = numDWavetiles / numWaves;
+        unsigned int const numMFMAsPerWave      = problem.macK / waveK;
+        unsigned int const numMFMAs             = numDWavetilesPerWave * numMFMAsPerWave;
 
         auto const& arch                = m_context->targetArchitecture();
-        uint const  elementsPerWavetile = waveM * waveK / wfs;
-        uint const  elementsPerTrLoad   = bitsPerTransposeLoad(arch, elementBits) / elementBits;
+        unsigned int const  elementsPerWavetile = waveM * waveK / wfs;
+        unsigned int const  elementsPerTrLoad   = bitsPerTransposeLoad(arch, elementBits) / elementBits;
 
-        uint const bitsPerABMemOp = (elementBits == 6 ? 96 : 128);
-        uint const trLoadsPerWave
+        unsigned int const bitsPerABMemOp = (elementBits == 6 ? 96 : 128);
+        unsigned int const trLoadsPerWave
             = elementsPerWavetile * elementBits / bitsPerTransposeLoad(arch, elementBits);
-        uint const dsLoadsPerWave = elementsPerWavetile * elementBits / bitsPerABMemOp;
+        unsigned int const dsLoadsPerWave = elementsPerWavetile * elementBits / bitsPerABMemOp;
 
-        uint const bitsLoadedForAB
+        unsigned int const bitsLoadedForAB
             = (/*A*/ waveM * problem.macK + /*B*/ problem.macK * waveN) * elementBits;
 
-        uint const elementBitsC   = DataTypeInfo::Get(DataType::Float).elementBits;
-        uint const bitsLoadedForC = numDWavetilesPerWave * waveM * waveN * elementBitsC;
+        unsigned int const elementBitsC   = DataTypeInfo::Get(DataType::Float).elementBits;
+        unsigned int const bitsLoadedForC = numDWavetilesPerWave * waveM * waveN * elementBitsC;
 
-        uint const numBufferLoadsForC  = bitsLoadedForC / 128 / wfs;
-        uint const numDSWrites         = bitsLoadedForAB / bitsPerABMemOp / wfs;
-        uint const numBufferLoadsForAB = numDSWrites;
+        unsigned int const numBufferLoadsForC  = bitsLoadedForC / 128 / wfs;
+        unsigned int const numDSWrites         = bitsLoadedForAB / bitsPerABMemOp / wfs;
+        unsigned int const numBufferLoadsForAB = numDSWrites;
 
-        uint numTrLoads = 0;
-        uint numDSReads = 0;
+        unsigned int numTrLoads = 0;
+        unsigned int numDSReads = 0;
         { // 2x2 jamming = 4 tiles. Each tile of A gets multiplied by 4 tiles of B.
             if(problem.transA == "T")
                 numDSReads += /*number of A tiles*/ 1 * numMFMAsPerWave * dsLoadsPerWave;
@@ -423,7 +423,7 @@ namespace GEMMTests
 
         std::tie(problem.transA, problem.transB) = transOp;
 
-        uint const elementBits = DataTypeInfo::Get(typeAB).elementBits;
+        unsigned int const elementBits = DataTypeInfo::Get(typeAB).elementBits;
 
         problem.scaleAMode = Operations::ScaleMode::Separate;
         problem.scaleBMode = Operations::ScaleMode::Separate;
@@ -468,37 +468,37 @@ namespace GEMMTests
                             toString(typeAB)));
         }
 
-        uint const wfs           = problem.wavefrontSize;
-        uint const wgX           = problem.workgroupSizeX;
-        uint const wgY           = problem.workgroupSizeY;
-        uint const numDWavetiles = problem.macM * problem.macN / (waveM * waveN);
-        uint const numWaves      = wgX * wgY / wfs;
+        unsigned int const wfs           = problem.wavefrontSize;
+        unsigned int const wgX           = problem.workgroupSizeX;
+        unsigned int const wgY           = problem.workgroupSizeY;
+        unsigned int const numDWavetiles = problem.macM * problem.macN / (waveM * waveN);
+        unsigned int const numWaves      = wgX * wgY / wfs;
 
-        uint const numDWavetilesPerWave = numDWavetiles / numWaves;
-        uint const numMFMAsPerWave      = problem.macK / waveK;
-        uint const numMFMAs             = numDWavetilesPerWave * numMFMAsPerWave;
+        unsigned int const numDWavetilesPerWave = numDWavetiles / numWaves;
+        unsigned int const numMFMAsPerWave      = problem.macK / waveK;
+        unsigned int const numMFMAs             = numDWavetilesPerWave * numMFMAsPerWave;
 
         auto const& arch                = m_context->targetArchitecture();
-        uint const  elementsPerWavetile = waveM * waveK / wfs;
-        uint const  elementsPerTrLoad   = bitsPerTransposeLoad(arch, elementBits) / elementBits;
+        unsigned int const  elementsPerWavetile = waveM * waveK / wfs;
+        unsigned int const  elementsPerTrLoad   = bitsPerTransposeLoad(arch, elementBits) / elementBits;
 
-        uint const bitsPerABMemOp = (elementBits == 6 ? 96 : 128);
-        uint const trLoadsPerWave
+        unsigned int const bitsPerABMemOp = (elementBits == 6 ? 96 : 128);
+        unsigned int const trLoadsPerWave
             = elementsPerWavetile * elementBits / bitsPerTransposeLoad(arch, elementBits);
-        uint const dsLoadsPerWave = elementsPerWavetile * elementBits / bitsPerABMemOp;
+        unsigned int const dsLoadsPerWave = elementsPerWavetile * elementBits / bitsPerABMemOp;
 
-        uint const bitsLoadedForAB
+        unsigned int const bitsLoadedForAB
             = (/*A*/ waveM * problem.macK + /*B*/ problem.macK * waveN) * elementBits;
 
-        uint const elementBitsC   = DataTypeInfo::Get(DataType::Float).elementBits;
-        uint const bitsLoadedForC = numDWavetilesPerWave * waveM * waveN * elementBitsC;
+        unsigned int const elementBitsC   = DataTypeInfo::Get(DataType::Float).elementBits;
+        unsigned int const bitsLoadedForC = numDWavetilesPerWave * waveM * waveN * elementBitsC;
 
-        uint const numBufferLoadsForC  = bitsLoadedForC / 128 / wfs;
-        uint const numDSWrites         = bitsLoadedForAB / bitsPerABMemOp / wfs;
-        uint const numBufferLoadsForAB = numDSWrites;
+        unsigned int const numBufferLoadsForC  = bitsLoadedForC / 128 / wfs;
+        unsigned int const numDSWrites         = bitsLoadedForAB / bitsPerABMemOp / wfs;
+        unsigned int const numBufferLoadsForAB = numDSWrites;
 
-        uint numTrLoads = 0;
-        uint numDSReads = 0;
+        unsigned int numTrLoads = 0;
+        unsigned int numDSReads = 0;
         { // 2x2 jamming = 4 tiles. Each tile of A gets multiplied by 4 tiles of B.
             if(problem.transA == "T")
                 numDSReads += /*number of A tiles*/ 1 * numMFMAsPerWave * dsLoadsPerWave;
@@ -511,9 +511,9 @@ namespace GEMMTests
                 numTrLoads += /*number of B tiles*/ 4 * numMFMAsPerWave * trLoadsPerWave;
         }
 
-        uint const numScaleBufferLoads = (32 / 8);
-        uint const numScaleDSWrites    = (32 / 8);
-        uint const numScaleDSLoads     = (/*A*/ 1 + /*B*/ 4) * numMFMAsPerWave;
+        unsigned int const numScaleBufferLoads = (32 / 8);
+        unsigned int const numScaleDSWrites    = (32 / 8);
+        unsigned int const numScaleDSLoads     = (/*A*/ 1 + /*B*/ 4) * numMFMAsPerWave;
 
         bool const isF6 = typeAB == DataType::FP6 || typeAB == DataType::BF6;
 
@@ -549,7 +549,7 @@ namespace GEMMTests
 
         std::tie(gemm.transA, gemm.transB) = transOp;
 
-        uint const elementBits = DataTypeInfo::Get(typeAB).elementBits;
+        unsigned int const elementBits = DataTypeInfo::Get(typeAB).elementBits;
 
         gemm.scaleAMode = Operations::ScaleMode::Separate;
         gemm.scaleBMode = Operations::ScaleMode::Separate;
@@ -604,16 +604,16 @@ namespace GEMMTests
         auto const mfma{fmt::format("v_mfma_scale_f32_{}x{}x{}_f8f6f4", waveM, waveN, waveK)};
         CheckMFMAF8F6F4(m_context, mfma, modifiers);
 
-        uint const totalWorkitems = gemm.workgroupSizeX * gemm.workgroupSizeY;
+        unsigned int const totalWorkitems = gemm.workgroupSizeX * gemm.workgroupSizeY;
         // Example A:256x128 => scaleA:256x4 => 1024 values/256 workitems => 4 values per workitem
-        uint const numABScaleLoadStorePerWorkitem = (gemm.macM * (gemm.macK / 32)) / totalWorkitems;
+        unsigned int const numABScaleLoadStorePerWorkitem = (gemm.macM * (gemm.macK / 32)) / totalWorkitems;
         AssertFatal(
             numABScaleLoadStorePerWorkitem % 4 == 0,
             "long dword instructions require multiple of 4 scale(8-bit) values per workitem");
 
         std::string bufferLoad{"buffer_load_dword "};
         std::string dsWrite{"ds_write_b32"};
-        uint const  factor = numABScaleLoadStorePerWorkitem / 4;
+        unsigned int const  factor = numABScaleLoadStorePerWorkitem / 4;
         AssertFatal(factor > 0 && factor <= 2,
                     "For the given macrotile, dword factor can't be greater than 2");
         if(factor == 2)

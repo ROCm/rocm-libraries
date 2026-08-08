@@ -373,21 +373,21 @@ namespace rocRoller
             int                              element,
             LayoutType                       layout,
             MatrixMultiplySizes              mi,
-            uint                             bitsPerElement,
+            unsigned int                             bitsPerElement,
             int                              wavefrontSize)
 
         {
-            uint const M            = layout == LayoutType::MATRIX_B ? mi.n : mi.m;
-            uint const N            = mi.k;
-            uint const lanesPerSIMD = 16;
-            uint const simdsPerWave = wavefrontSize / lanesPerSIMD;
+            unsigned int const M            = layout == LayoutType::MATRIX_B ? mi.n : mi.m;
+            unsigned int const N            = mi.k;
+            unsigned int const lanesPerSIMD = 16;
+            unsigned int const simdsPerWave = wavefrontSize / lanesPerSIMD;
 
-            uint const simdsPerSGroup = M / lanesPerSIMD;
+            unsigned int const simdsPerSGroup = M / lanesPerSIMD;
             // We should find a name for this 2x factor between wave32 & wave64.
-            uint const numVBlocks = wavefrontSize == 64 ? (bitsPerElement == 8 ? 2 : 1)
+            unsigned int const numVBlocks = wavefrontSize == 64 ? (bitsPerElement == 8 ? 2 : 1)
                                                         : (bitsPerElement == 8 ? 4 : 2);
 
-            uint const elementsPerVGPRBlock = ((M * N) / wavefrontSize) / numVBlocks;
+            unsigned int const elementsPerVGPRBlock = ((M * N) / wavefrontSize) / numVBlocks;
 
             auto SIMD = graph.coordinates.addElement(Adhoc("SIMD", literal(simdsPerWave), nullptr));
             auto laneInSIMD = graph.coordinates.addElement(Lane(literal(lanesPerSIMD), nullptr));
@@ -423,16 +423,16 @@ namespace rocRoller
                                            int                              lane,
                                            int                              element,
                                            MatrixMultiplySizes              mi,
-                                           uint                             bitsPerElement,
+                                           unsigned int                             bitsPerElement,
                                            int                              wavefrontSize)
 
         {
-            uint const lanesPerSIMD         = 16;
-            uint const simdsPerWave         = wavefrontSize / lanesPerSIMD;
-            uint const numVBlocks           = 4;
-            uint const numVBlockSets        = 2;
-            uint const numVBlocksInSet      = numVBlocks / numVBlockSets;
-            uint const elementsPerVGPRBlock = ((mi.m * mi.k) / wavefrontSize) / numVBlocks;
+            unsigned int const lanesPerSIMD         = 16;
+            unsigned int const simdsPerWave         = wavefrontSize / lanesPerSIMD;
+            unsigned int const numVBlocks           = 4;
+            unsigned int const numVBlockSets        = 2;
+            unsigned int const numVBlocksInSet      = numVBlocks / numVBlockSets;
+            unsigned int const elementsPerVGPRBlock = ((mi.m * mi.k) / wavefrontSize) / numVBlocks;
 
             auto SIMD = graph.coordinates.addElement(Adhoc("SIMD", literal(simdsPerWave), nullptr));
             auto laneInSIMD = graph.coordinates.addElement(Lane(literal(lanesPerSIMD), nullptr));
@@ -493,25 +493,25 @@ namespace rocRoller
             connections.push_back(DC<WaveTileNumber>(nWaveX, 0));
             connections.push_back(DC<WaveTileNumber>(nWaveY, 1));
 
-            uint const nLaneInSIMD   = 16;
-            uint const nSIMDsPerWave = wavefrontSize / nLaneInSIMD;
-            uint const nSIMDIndex    = macTile.subTileSizes.at(0) / nLaneInSIMD;
+            unsigned int const nLaneInSIMD   = 16;
+            unsigned int const nSIMDsPerWave = wavefrontSize / nLaneInSIMD;
+            unsigned int const nSIMDIndex    = macTile.subTileSizes.at(0) / nLaneInSIMD;
             auto       SIMDIndex
                 = graph.coordinates.addElement(Adhoc("SIMDIndex", literal(nSIMDIndex), nullptr));
             auto laneInSIMD = graph.coordinates.addElement(Lane(literal(nLaneInSIMD), nullptr));
 
             graph.coordinates.addElement(Tile(), {iWaveX}, {SIMDIndex, laneInSIMD});
 
-            uint const nSIMDBlock = nSIMDsPerWave / nSIMDIndex;
+            unsigned int const nSIMDBlock = nSIMDsPerWave / nSIMDIndex;
             auto       SIMDBlock
                 = graph.coordinates.addElement(Adhoc("SIMDBlock", literal(nSIMDBlock), nullptr));
 
-            uint const numElements       = waveTile.elements();
-            uint       activeLanesInWave = static_cast<uint>(wavefrontSize);
-            uint const numVgpr           = numElements / activeLanesInWave;
-            uint const nVgprIndex
-                = std::min(nSIMDIndex, static_cast<uint>(macTile.miTileSizes.at(2)));
-            uint const nVgprBlock
+            unsigned int const numElements       = waveTile.elements();
+            unsigned int       activeLanesInWave = static_cast<unsigned int>(wavefrontSize);
+            unsigned int const numVgpr           = numElements / activeLanesInWave;
+            unsigned int const nVgprIndex
+                = std::min(nSIMDIndex, static_cast<unsigned int>(macTile.miTileSizes.at(2)));
+            unsigned int const nVgprBlock
                 = numElements / macTile.subTileSizes.at(0) / nSIMDBlock / nVgprIndex;
             auto vgprBlock
                 = graph.coordinates.addElement(VGPRBlockNumber(literal(nVgprBlock), literal(1u)));
@@ -582,25 +582,25 @@ namespace rocRoller
             connections.push_back(DC<WaveTileNumber>(nWaveX, 0));
             connections.push_back(DC<WaveTileNumber>(nWaveY, 1));
 
-            uint const nLaneInSIMD   = 16;
-            uint const nSIMDsPerWave = wavefrontSize / nLaneInSIMD;
-            uint const nSIMDIndex    = macTile.subTileSizes.at(0) / nLaneInSIMD;
+            unsigned int const nLaneInSIMD   = 16;
+            unsigned int const nSIMDsPerWave = wavefrontSize / nLaneInSIMD;
+            unsigned int const nSIMDIndex    = macTile.subTileSizes.at(0) / nLaneInSIMD;
             auto       SIMDIndex
                 = graph.coordinates.addElement(Adhoc("SIMDIndex", literal(nSIMDIndex), nullptr));
             auto laneInSIMD = graph.coordinates.addElement(Lane(literal(nLaneInSIMD), nullptr));
 
             graph.coordinates.addElement(Flatten(), {SIMDIndex, laneInSIMD}, {iWaveX});
 
-            uint const nSIMDBlock = nSIMDsPerWave / nSIMDIndex;
+            unsigned int const nSIMDBlock = nSIMDsPerWave / nSIMDIndex;
             auto       SIMDBlock
                 = graph.coordinates.addElement(Adhoc("SIMDBlock", literal(nSIMDBlock), nullptr));
 
-            uint const numElements       = waveTile.elements();
-            uint       activeLanesInWave = static_cast<uint>(wavefrontSize);
-            uint const numVgpr           = numElements / activeLanesInWave;
-            uint const nVgprIndex
+            unsigned int const numElements       = waveTile.elements();
+            unsigned int       activeLanesInWave = static_cast<unsigned int>(wavefrontSize);
+            unsigned int const numVgpr           = numElements / activeLanesInWave;
+            unsigned int const nVgprIndex
                 = macTile.subTileSizes.at(2) / (activeLanesInWave / macTile.subTileSizes.at(0));
-            uint const nVgprBlock = numVgpr / nVgprIndex;
+            unsigned int const nVgprBlock = numVgpr / nVgprIndex;
             auto       vgprBlock
                 = graph.coordinates.addElement(VGPRBlockNumber(literal(nVgprBlock), literal(1u)));
             auto vgprIndex
@@ -692,24 +692,24 @@ namespace rocRoller
                                          .n = macTile.miTileSizes[1],
                                          .k = macTile.miTileSizes[2]};
 
-            uint        numElements       = waveTile.elements();
-            uint        activeLanesInWave = static_cast<uint>(wavefrontSize);
+            unsigned int        numElements       = waveTile.elements();
+            unsigned int        activeLanesInWave = static_cast<unsigned int>(wavefrontSize);
             const auto& arch              = context->targetArchitecture();
             if(arch.HasCapability(GPUCapability::PartiallyActiveWaveSize) && isScaleType(dataType))
             {
-                const uint numRequiredLanes = waveTile.elements() / mi.k;
+                const unsigned int numRequiredLanes = waveTile.elements() / mi.k;
                 if(numRequiredLanes < wavefrontSize)
                 {
                     activeLanesInWave = arch.GetCapability(GPUCapability::PartiallyActiveWaveSize);
                 }
             }
 
-            uint numGPR = numElements / activeLanesInWave;
+            unsigned int numGPR = numElements / activeLanesInWave;
 
-            uint MN  = waveTile.layout == LayoutType::MATRIX_B ? macTile.subTileSizes[1]
+            unsigned int MN  = waveTile.layout == LayoutType::MATRIX_B ? macTile.subTileSizes[1]
                                                                : macTile.subTileSizes[0];
-            uint K   = macTile.subTileSizes[2];
-            uint K_L = K / (activeLanesInWave / MN);
+            unsigned int K   = macTile.subTileSizes[2];
+            unsigned int K_L = K / (activeLanesInWave / MN);
 
             auto lane = graph.coordinates.addElement(Lane(literal(activeLanesInWave), nullptr));
             auto vgpr = graph.coordinates.addElement(VGPR(literal(numGPR), nullptr));
@@ -906,7 +906,7 @@ namespace rocRoller
             {
                 auto numGPRsPerLaneInWave
                     = activeLanesInWave == 64 ? 4 : 8; // A wave can have 256 GPR in total
-                uint simdsPerWave = activeLanesInWave / 16u; // Each SIMD consists of 16 lanes
+                unsigned int simdsPerWave = activeLanesInWave / 16u; // Each SIMD consists of 16 lanes
                 auto simdsPerWaveLiteral = literal(simdsPerWave);
                 auto unitStride          = literal(1u);
 
@@ -1243,13 +1243,13 @@ namespace rocRoller
                 auto numYElements = thrTile.sizes.at(1);
                 auto waveNumber   = graph.coordinates.addElement(
                     Adhoc("waveNumber",
-                          literal(static_cast<uint>(numYWorkitems / numYWorkitemsPerWave)),
+                          literal(static_cast<unsigned int>(numYWorkitems / numYWorkitemsPerWave)),
                           nullptr));
                 auto workitemYPerWave = graph.coordinates.addElement(Adhoc(
-                    "workitemYPerWave", literal(static_cast<uint>(numYWorkitemsPerWave)), nullptr));
+                    "workitemYPerWave", literal(static_cast<unsigned int>(numYWorkitemsPerWave)), nullptr));
                 auto waveBlock        = graph.coordinates.addElement(
                     Adhoc("waveBlock",
-                          literal(static_cast<uint>(numYWorkitemsPerWave * numYElements)),
+                          literal(static_cast<unsigned int>(numYWorkitemsPerWave * numYElements)),
                           nullptr));
 
                 graph.coordinates.addElement(Tile(), {iMacY}, {waveNumber, waveBlock});
@@ -1311,13 +1311,13 @@ namespace rocRoller
                 auto numYElements = thrTile.sizes.at(1);
                 auto waveNumber   = graph.coordinates.addElement(
                     Adhoc("waveNumber",
-                          literal(static_cast<uint>(numYWorkitems / numYWorkitemsPerWave)),
+                          literal(static_cast<unsigned int>(numYWorkitems / numYWorkitemsPerWave)),
                           nullptr));
                 auto workitemYPerWave = graph.coordinates.addElement(Adhoc(
-                    "workitemYPerWave", literal(static_cast<uint>(numYWorkitemsPerWave)), nullptr));
+                    "workitemYPerWave", literal(static_cast<unsigned int>(numYWorkitemsPerWave)), nullptr));
                 auto waveBlock        = graph.coordinates.addElement(
                     Adhoc("waveBlock",
-                          literal(static_cast<uint>(numYWorkitemsPerWave * numYElements)),
+                          literal(static_cast<unsigned int>(numYWorkitemsPerWave * numYElements)),
                           nullptr));
 
                 graph.coordinates.addElement(Tile(), {nThrY}, {waveNumber, workitemYPerWave});
@@ -1408,12 +1408,12 @@ namespace rocRoller
             auto waveTile    = WaveTile(macTile);
             auto waveTileTag = graph.coordinates.addElement(waveTile);
 
-            uint numElements       = waveTile.sizes[0] * waveTile.sizes[1];
-            uint activeLanesInWave = static_cast<uint>(wavefrontSize);
-            uint numGPR            = numElements / activeLanesInWave;
+            unsigned int numElements       = waveTile.sizes[0] * waveTile.sizes[1];
+            unsigned int activeLanesInWave = static_cast<unsigned int>(wavefrontSize);
+            unsigned int numGPR            = numElements / activeLanesInWave;
 
             auto numGPRsPerLaneInWave = activeLanesInWave == 64 ? 4 : 8;
-            uint simdsPerWave         = activeLanesInWave / 16u;
+            unsigned int simdsPerWave         = activeLanesInWave / 16u;
             auto simdsPerWaveLiteral  = literal(simdsPerWave);
 
             auto nRowBlocks = literal(waveTile.sizes[0] / simdsPerWave);
@@ -1703,7 +1703,7 @@ namespace rocRoller
 
             // Load multiple smaller-precision (< 32-bit) elements into contiguous VGPRs
             bool packed     = false;
-            uint packFactor = bitsPerRegister / DataTypeInfo::Get(varType).elementBits;
+            unsigned int packFactor = bitsPerRegister / DataTypeInfo::Get(varType).elementBits;
 
             if(auto packedVariableType = DataTypeInfo::Get(varType).packedVariableType())
             {
@@ -2094,10 +2094,10 @@ namespace rocRoller
                     auto iWaveY      = graph.coordinates.addElement(waveTile.tileIndex(1));
 
                     auto       wavefrontSize = m_context->kernel()->wavefront_size();
-                    uint const lanesPerSIMD  = 16;
-                    uint const nSIMDsPerWave = wavefrontSize / lanesPerSIMD;
-                    uint const nSIMDIndex    = macTile.subTileSizes.at(0) / lanesPerSIMD;
-                    uint const nSIMDBlock    = nSIMDsPerWave / nSIMDIndex;
+                    unsigned int const lanesPerSIMD  = 16;
+                    unsigned int const nSIMDsPerWave = wavefrontSize / lanesPerSIMD;
+                    unsigned int const nSIMDIndex    = macTile.subTileSizes.at(0) / lanesPerSIMD;
+                    unsigned int const nSIMDBlock    = nSIMDsPerWave / nSIMDIndex;
                     auto       SIMDBlock     = graph.coordinates.addElement(
                         Adhoc("SIMDBlock", literal(nSIMDBlock), nullptr));
                     auto SIMDIndex = graph.coordinates.addElement(
@@ -2105,12 +2105,12 @@ namespace rocRoller
                     auto laneInSIMD
                         = graph.coordinates.addElement(Lane(literal(lanesPerSIMD), nullptr));
 
-                    uint const numElements       = waveTile.elements();
-                    uint const activeLanesInWave = static_cast<uint>(wavefrontSize);
-                    uint const numVgpr           = numElements / activeLanesInWave;
-                    uint const nVgprIndex
-                        = std::min(nSIMDIndex, static_cast<uint>(macTile.miTileSizes.at(2)));
-                    uint const nVgprBlock
+                    unsigned int const numElements       = waveTile.elements();
+                    unsigned int const activeLanesInWave = static_cast<unsigned int>(wavefrontSize);
+                    unsigned int const numVgpr           = numElements / activeLanesInWave;
+                    unsigned int const nVgprIndex
+                        = std::min(nSIMDIndex, static_cast<unsigned int>(macTile.miTileSizes.at(2)));
+                    unsigned int const nVgprBlock
                         = numElements / macTile.subTileSizes.at(0) / nSIMDBlock / nVgprIndex;
                     auto vgprBlock = graph.coordinates.addElement(
                         VGPRBlockNumber(literal(nVgprBlock), literal(1u)));
@@ -2120,8 +2120,8 @@ namespace rocRoller
 
                     graph.coordinates.addElement(Flatten(), {vgprBlock, vgprIndex}, {vgpr});
 
-                    uint const nSIMDIndexBlock = nVgprIndex;
-                    uint const nSIMDIndexIndex = nSIMDIndex / nSIMDIndexBlock;
+                    unsigned int const nSIMDIndexBlock = nVgprIndex;
+                    unsigned int const nSIMDIndexIndex = nSIMDIndex / nSIMDIndexBlock;
                     auto       SIMDIndexBlock  = graph.coordinates.addElement(
                         Adhoc("SIMDIndexBlock", literal(nSIMDIndexBlock), nullptr));
                     auto SIMDIndexIndex = graph.coordinates.addElement(
@@ -2324,7 +2324,7 @@ namespace rocRoller
                    || tile.memoryType == MemoryType::WAVE_FROM_GLOBAL)
                 {
                     auto              varType     = getVariableType(graph, loadTag);
-                    std::vector<uint> jammedTiles = wavetilesPerWavefront;
+                    std::vector<unsigned int> jammedTiles = wavetilesPerWavefront;
                     addLoadWaveTileCT(graph,
                                       connections,
                                       tileTag,
@@ -2345,7 +2345,7 @@ namespace rocRoller
                 }
                 else
                 {
-                    std::vector<uint> jammedTiles = {1, 1};
+                    std::vector<unsigned int> jammedTiles = {1, 1};
                     addLoadThreadTileCT(graph,
                                         connections,
                                         tileTag,
@@ -2573,7 +2573,7 @@ namespace rocRoller
                     // When LDS swizzle is active, use isGlobalToLDS=true so the
                     // store coordinate decomposition matches the load side,
                     // producing the same LDS layout as D2LDS.
-                    std::vector<uint> jammedTiles = {1, 1};
+                    std::vector<unsigned int> jammedTiles = {1, 1};
                     addStoreThreadTileCT(graph,
                                          connections,
                                          tileTag,
@@ -2587,7 +2587,7 @@ namespace rocRoller
                 else if(tile.memoryType == MemoryType::WAVE_Direct2LDS)
                 {
                     // We are storing entire workgroup tiles
-                    std::vector<uint> jammedTiles = {1, 1};
+                    std::vector<unsigned int> jammedTiles = {1, 1};
 
                     addStoreThreadTileCT(graph,
                                          connections,
@@ -2602,7 +2602,7 @@ namespace rocRoller
                 else if(tile.memoryType == MemoryType::WAVE_TDMToLDS)
                 {
                     // We are storing entire workgroup tiles
-                    std::vector<uint> jammedTiles = {1, 1};
+                    std::vector<unsigned int> jammedTiles = {1, 1};
                     addStoreThreadTileCT(graph,
                                          connections,
                                          tileTag,
@@ -2618,7 +2618,7 @@ namespace rocRoller
                     // We are storing single wavefront tiles.  This
                     // currently assumes that epilogue blocks are
                     // serialized.
-                    std::vector<uint> jammedTiles = {1, 1};
+                    std::vector<unsigned int> jammedTiles = {1, 1};
                     addStoreWaveTileCT(graph,
                                        connections,
                                        tileTag,

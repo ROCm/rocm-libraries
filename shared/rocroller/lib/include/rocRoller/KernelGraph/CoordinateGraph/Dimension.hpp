@@ -286,7 +286,7 @@ namespace rocRoller
             static constexpr bool HasValue = false;
 
             Unroll();
-            explicit Unroll(uint const usize);
+            explicit Unroll(unsigned int const usize);
             explicit Unroll(Expression::ExpressionPtr usize);
 
             std::string name() const override;
@@ -353,7 +353,7 @@ namespace rocRoller
              * For example, a MxN Macrotile padded with [[x y]] requires
              * M * N * elementBytes + N * x + M * y bytes of storage.
              */
-            std::vector<uint> padBytesOfDim;
+            std::vector<unsigned int> padBytesOfDim;
 
             /**
              * Construct MacroTile dimension with deferred rank etc.
@@ -394,7 +394,7 @@ namespace rocRoller
              *
              * Layout type must be either MATRIX_A or MATRIX_B.
              */
-            MacroTile(MacroTile& macTile, std::vector<uint> const& padBytesOfDim);
+            MacroTile(MacroTile& macTile, std::vector<unsigned int> const& padBytesOfDim);
 
             std::string toString() const override;
 
@@ -408,7 +408,7 @@ namespace rocRoller
             /**
              * Return MacroTileIndex corresponding to sub-dimension `sdim` of this tile.
              */
-            MacroTileIndex tileIndex(int sdim, uint jamming = 1) const;
+            MacroTileIndex tileIndex(int sdim, unsigned int jamming = 1) const;
 
             /**
              * Return total number of elements.
@@ -418,7 +418,7 @@ namespace rocRoller
             /**
              * Return total number of padding bytes.
              */
-            uint paddingBytes() const;
+            unsigned int paddingBytes() const;
         };
 
         /**
@@ -512,7 +512,7 @@ namespace rocRoller
              * For example, a MxN Macrotile padded with [[x y]] requires
              * M * N * elementBytes + N * x + M * y bytes of storage.
              */
-            std::vector<uint> padBytesOfDim;
+            std::vector<unsigned int> padBytesOfDim;
 
             WaveTile() = default;
 
@@ -541,7 +541,7 @@ namespace rocRoller
             /**
              * Return total number of padding bytes.
              */
-            uint paddingBytes() const;
+            unsigned int paddingBytes() const;
         };
 
         /**
