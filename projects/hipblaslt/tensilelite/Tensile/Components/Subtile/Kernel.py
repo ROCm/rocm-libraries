@@ -508,8 +508,10 @@ class TileInfo:
       # Derived byte-counts for emit logic
       self.depthUBytes   = int(self.depthU * geometry.bpe)
       self.subIterKBytes = self.depthUBytes // self.localSubtileGrid[1]
-      # TDM path. We apply 16 Bytes padding to each row.
-      # TDM only exists on gfx1250, which is never swizzled (gfx950-only).
+      # TDM data padding (gfx1250 only): 16 bytes per row, applied via the
+      # TDM descriptor's pad_interval/pad_amount fields at descriptor init
+      # (SubtileGREmit).  This is independent of calcLdsPad in Solution.py,
+      # which handles scale pads (LdsPadMXSA/B) and non-subtile data pads.
       isTDM = kernel.get("enableTDM%s" % tc, False)
       self.ldsRowPadBytes = 16 if isTDM else 0
 

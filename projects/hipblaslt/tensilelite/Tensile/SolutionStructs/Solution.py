@@ -3175,9 +3175,11 @@ class Solution(collections.abc.Mapping):
 
       def calcLdsPad(isaInfoMap: Dict[str, IsaInfo]) -> Tuple[int, int, int, int, int]:
         # gfx950 subtile uses software swizzle+rotation for bank conflict
-        # avoidance instead of LDS padding.  gfx1250 subtile (TDM) has
-        # hardware padding via pad_interval/pad_amount descriptor fields,
-        # so fall through to the normal auto-resolve path.
+        # avoidance; data and scale LDS padding are both disabled.
+        # gfx1250 subtile data padding is handled separately by the TDM
+        # descriptor (TileInfo.ldsRowPadBytes -> pad_interval/pad_amount),
+        # but scale pads (LdsPadMXSA/B) still need the auto-resolve path
+        # below, so we fall through.
         if state["UseSubtileImpl"] and not isaInfoMap[tuple(state["ISA"])].asmCaps.get("HasTDM", False):
           return 0, 0, 0, 0, 0
         numBytesA = state["ProblemType"]["MacDataTypeA"].numBytes()
