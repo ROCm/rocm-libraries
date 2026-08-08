@@ -1,10 +1,20 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
+import functools
+import os
+import subprocess
+from typing import TYPE_CHECKING
+
 from .util import check_headers, include_roots
 
 
 __all__ = ["check_headers", "include_roots", "__version__"]
+
+if TYPE_CHECKING:
+    # Bound at runtime by __getattr__ below; declared here so type checkers can
+    # see the name that __all__ exports.
+    __version__: str
 
 
 # Needs to be manually updated at each release; it cannot be derived here. Release
@@ -18,13 +28,11 @@ _HASH_WIDTH = 7
 def _build_hash():
     """Short commit hash of this source tree, or "" if it cannot be determined.
 
-    Resolved against the directory holding this file rather than the working
-    directory, so an installed copy cannot report the hash of whatever repository
-    the caller happens to be standing in.
+    Queried against the directory holding this file rather than the working
+    directory, so the answer does not depend on where the caller happens to be
+    standing. Note git still walks upwards from there, so an installed copy
+    nested inside an unrelated repository reports that repository's commit.
     """
-    import os
-    import subprocess
-
     try:
         return subprocess.run(
             [
@@ -45,6 +53,7 @@ def _build_hash():
         return ""
 
 
+@functools.lru_cache(None)
 def _build_version():
     build_hash = _build_hash()
     # "+unknown" keeps the label honest when the hash is unavailable, rather than
@@ -52,6 +61,10 @@ def _build_version():
     return f"{BASE_VERSION}+g{build_hash}" if build_hash else f"{BASE_VERSION}+unknown"
 
 
-# A string, not a callable: setuptools accepts either, but consumers reading
-# ck4inductor.__version__ at runtime need the value.
-__version__ = _build_version()
+def __getattr__(name):
+    # Resolve __version__ on first access rather than at import: it forks git, and
+    # importing this package must not pay for a value most callers never read.
+    # setuptools' `attr:` directive (pyproject.toml) triggers this at build time.
+    if name == "__version__":
+        return _build_version()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
