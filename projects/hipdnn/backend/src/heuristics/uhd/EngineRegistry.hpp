@@ -87,7 +87,13 @@ public:
     static EngineRegistry& instance();
 
     /// Register an engine with its UHD configuration.
+    ///
+    /// Enforces the RFC 0019 §7.3 load-time contract, fail-closed: every $kernel.*
+    /// reference in features_signature must be a known KMD field, and a declared
+    /// features_hash must describe that signature.
+    ///
     /// @param entry Complete engine entry including UHD config and candidates.
+    /// @throws std::invalid_argument if either contract check fails.
     void registerEngine(EngineEntry entry);
 
     /// Look up an engine by ID.
@@ -116,6 +122,11 @@ public:
 
 private:
     EngineRegistry() = default;
+
+    /// Check a declared features_hash against its features_signature, and warn when a
+    /// feature-bearing adapter ships without one.
+    /// @throws std::invalid_argument on mismatch.
+    static void validateFeaturesHash(const EngineEntry& entry);
 
     std::unordered_map<int64_t, EngineEntry> _engines;
     mutable std::mutex _mutex;

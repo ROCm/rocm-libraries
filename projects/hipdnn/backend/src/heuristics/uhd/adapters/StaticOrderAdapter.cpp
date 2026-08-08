@@ -3,6 +3,8 @@
 
 #include "StaticOrderAdapter.hpp"
 
+#include "../FeatureExtractor.hpp"
+
 #include <algorithm>
 #include <cmath>
 
@@ -20,24 +22,38 @@ std::unique_ptr<StaticOrderAdapter>
     StaticOrderAdapter::create(const std::vector<std::string>& orderFields,
                                const std::vector<std::string>& signature)
 {
+    // Resolve each signature entry to its reference name once, so the bare
+    // (`$kernel.priority`) and pre-quoted (`"\"$kernel.priority\""`) spellings both
+    // match. Non-reference entries (derived expressions) resolve to empty and are
+    // never matched by an order field.
+    std::vector<std::string> refNames;
+    refNames.reserve(signature.size());
+    for(const auto& entry : signature)
+    {
+        nlohmann::json parsed;
+        try
+        {
+            parsed = FeatureExtractor::parseSignatureEntry(entry);
+        }
+        catch(const JsonLogicError&)
+        {
+            refNames.emplace_back();
+            continue;
+        }
+        refNames.push_back(parsed.is_string() ? parsed.get<std::string>() : std::string{});
+    }
+
     std::vector<size_t> indices;
     indices.reserve(orderFields.size());
 
     for(const auto& field : orderFields)
     {
-        // Look for exact match or $kernel.<field> pattern
-        // Signature entries may be quoted JSON strings like "\"$kernel.priority\""
+        // Order fields may be given bare (`priority`) or namespaced (`$kernel.priority`).
         bool found = false;
-        for(size_t i = 0; i < signature.size(); ++i)
+        for(size_t i = 0; i < refNames.size(); ++i)
         {
-            std::string sigField = signature[i];
-            // Strip surrounding quotes if present
-            if(sigField.size() >= 2 && sigField.front() == '"' && sigField.back() == '"')
-            {
-                sigField = sigField.substr(1, sigField.size() - 2);
-            }
-
-            if(sigField == field || sigField == "$kernel." + field)
+            if(!refNames[i].empty() &&
+               (refNames[i] == field || refNames[i] == "$kernel." + field))
             {
                 indices.push_back(i);
                 found = true;

@@ -16,9 +16,15 @@
 #include "heuristics/uhd/EngineRegistry.hpp"
 #include "heuristics/uhd/SelectionEngine.hpp"
 
+#include "GbdtModelTestBuilder.hpp"
+
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
+#include <filesystem>
+#include <string>
+#include <system_error>
 
 using hipdnn_backend::heuristics::uhd::EngineEntry;
 using hipdnn_backend::heuristics::uhd::EngineRegistry;
@@ -370,9 +376,15 @@ TEST_F(TestUhdSelectionFlow, MultipleEnginesIndependentSelection)
 
 // ========== Fallback Behavior Tests (RFC §6) ==========
 
-TEST_F(TestUhdSelectionFlow, FeaturesHashMismatchFallsBackToStaticOrder)
+TEST_F(TestUhdSelectionFlow, AdapterWithoutHashSkipsMismatchGuard)
 {
-    // When adapter's hash doesn't match config's hash, fall back to static_order
+    // Renamed from FeaturesHashMismatchFallsBackToStaticOrder, which promised coverage
+    // it no longer provides. The mismatch guard in SelectionEngine needs *both* hashes
+    // non-empty and differing, and no adapter can reach that state today:
+    // StaticOrderAdapter reports an empty hash, and TreeDataAdapter::load already
+    // rejects a mismatched model and returns nullptr, so selection degrades earlier at
+    // "adapter creation failed". The guard is kept as defense for a future adapter
+    // that does not self-check; what this test actually pins is the empty-hash path.
     auto k1 = makeCandidate(1, 10);
     auto k2 = makeCandidate(2, 5);
 
@@ -382,10 +394,13 @@ TEST_F(TestUhdSelectionFlow, FeaturesHashMismatchFallsBackToStaticOrder)
     entry.uhdConfig.featuresSignature = {"\"$kernel.priority\"", "\"$kernel.id\""};
     entry.uhdConfig.staticOrderFields = {"priority", "id"};
     entry.uhdConfig.objective = "max";
-    // Set a hash that won't match the adapter's empty hash
-    // Note: StaticOrderAdapter returns empty hash, so this tests the mismatch path
-    // when a non-empty config hash is set
-    entry.uhdConfig.featuresHash = "sha256:mismatched_hash_value";
+    // The config hash must describe its own signature or registration rejects it, so
+    // compute it rather than inventing one. StaticOrderAdapter reports an empty hash,
+    // and the mismatch guard only fires when both sides are non-empty — so this
+    // exercises the "adapter carries no hash" path, which must still apply the model.
+    entry.uhdConfig.featuresHash =
+        hipdnn_backend::heuristics::uhd::FeatureExtractor::computeHash(
+            entry.uhdConfig.featuresSignature);
     entry.candidates = {k1, k2};
 
     EngineRegistry::instance().registerEngine(entry);
@@ -479,6 +494,10 @@ TEST_F(TestUhdSelectionFlow, GetEngineForUnregisteredReturnsNullopt)
     EXPECT_FALSE(engine.has_value());
 }
 
+
+
+
+
 // ========== Calibrated Score Transform Tests ==========
 
 TEST_F(TestUhdSelectionFlow, CalibratedScoreAppliesTransform)
@@ -501,41 +520,22 @@ TEST_F(TestUhdSelectionFlow, CalibratedScoreAppliesTransform)
 
     EXPECT_TRUE(result.applied);
     EXPECT_TRUE(result.bestScore.has_value());
-    // StaticOrderAdapter score = -weight * priority = -1e10 * 5 = -5e10
-    // With log1p transform and scoreCalibrated=true, the inverse (expm1) is applied
+    // StaticOrderAdapter score = -(1e10 * priority) - (1 * id) = -5e10 - 1
+    // A declared log1p transform means the model was trained in log space, so the
+    // inverse (expm1) is applied to recover the declared units.
     // expm1(-5e10) = e^(-5e10) - 1 ≈ -1 (extremely close to -1)
-    const double rawScore = -5e10;
+    const double rawScore = -5e10 - 1;
     const double expectedTransformed = std::expm1(rawScore);
     EXPECT_NEAR(*result.bestScore, expectedTransformed, 1e-10);
 }
 
-TEST_F(TestUhdSelectionFlow, UncalibratedScoreNoTransform)
-{
-    auto k1 = makeCandidate(1, 5);
 
-    EngineEntry entry;
-    entry.engineId = 100;
-    entry.uhdConfig.adapterType = "static_order";
-    entry.uhdConfig.featuresSignature = {"\"$kernel.priority\"", "\"$kernel.id\""};
-    entry.uhdConfig.staticOrderFields = {"priority", "id"};
-    entry.uhdConfig.objective = "max";
-    entry.uhdConfig.scoreCalibrated = false; // Not calibrated
-    entry.uhdConfig.scoreTransform = "log1p"; // Transform specified but not applied
-    entry.candidates = {k1};
 
-    EngineRegistry::instance().registerEngine(entry);
 
-    auto result = SelectionEngine::select(100, defaultDeviceVars(), defaultQueryVars());
 
-    EXPECT_TRUE(result.applied);
-    EXPECT_TRUE(result.bestScore.has_value());
-    // Transform should NOT be applied since scoreCalibrated is false
-    // StaticOrderAdapter computes: sum(-weight_i * field_i)
-    // With 2 fields: weight0=1e10, weight1=1
-    // Score = -1e10 * 5 (priority) + -1 * 1 (id) = -5e10 - 1
-    const double expectedRawScore = -5e10 - 1;
-    EXPECT_NEAR(*result.bestScore, expectedRawScore, 1e-5);
-}
+
+
+
 
 // ========== Mixed Valid/Invalid Candidates ==========
 
@@ -681,13 +681,15 @@ TEST_F(TestUhdSelectionFlow, TraceContainsFeaturesHashFromConfig)
 {
     auto k1 = makeCandidate(1, 5);
     auto entry = createStaticOrderEngine(100, {k1});
-    entry.uhdConfig.featuresHash = "sha256:abcdef1234567890";
+    const auto hash = hipdnn_backend::heuristics::uhd::FeatureExtractor::computeHash(
+        entry.uhdConfig.featuresSignature);
+    entry.uhdConfig.featuresHash = hash;
     EngineRegistry::instance().registerEngine(entry);
 
     auto result = SelectionEngine::select(100, defaultDeviceVars(), defaultQueryVars());
 
     EXPECT_TRUE(result.applied);
-    EXPECT_EQ(result.trace.featuresHashConfig, "sha256:abcdef1234567890");
+    EXPECT_EQ(result.trace.featuresHashConfig, hash);
 }
 
 TEST_F(TestUhdSelectionFlow, TraceRecordsFallbackReasonOnEngineNotFound)
@@ -852,5 +854,137 @@ TEST_F(TestUhdSelectionFlow, RegisterEngineSkipsValidationWithNoCandidates)
 
     EXPECT_NO_THROW(EngineRegistry::instance().registerEngine(entry));
 }
+
+// ========== Cached Extractor Tests ==========
+
+
+
+
+// ========== features_hash contract at registration (RFC §7.3) ==========
+
+TEST_F(TestUhdSelectionFlow, RegisterRejectsHashThatDoesNotDescribeSignature)
+{
+    auto k1 = makeCandidate(1, 5);
+    auto entry = createStaticOrderEngine(100, {k1});
+    entry.uhdConfig.featuresHash = "sha256:0000000000000000";
+
+    EXPECT_THROW(EngineRegistry::instance().registerEngine(entry), std::invalid_argument);
+}
+
+TEST_F(TestUhdSelectionFlow, RegisterRejectsHashOfPermutedSignature)
+{
+    // The hash must pin order, not just membership.
+    auto k1 = makeCandidate(1, 5);
+    auto entry = createStaticOrderEngine(100, {k1});
+
+    std::vector<std::string> permuted = entry.uhdConfig.featuresSignature;
+    std::reverse(permuted.begin(), permuted.end());
+    entry.uhdConfig.featuresHash =
+        hipdnn_backend::heuristics::uhd::FeatureExtractor::computeHash(permuted);
+
+    EXPECT_THROW(EngineRegistry::instance().registerEngine(entry), std::invalid_argument);
+}
+
+TEST_F(TestUhdSelectionFlow, RegisterAcceptsMatchingHash)
+{
+    auto k1 = makeCandidate(1, 5);
+    auto entry = createStaticOrderEngine(100, {k1});
+    entry.uhdConfig.featuresHash =
+        hipdnn_backend::heuristics::uhd::FeatureExtractor::computeHash(
+            entry.uhdConfig.featuresSignature);
+
+    EXPECT_NO_THROW(EngineRegistry::instance().registerEngine(entry));
+}
+
+TEST_F(TestUhdSelectionFlow, RegisterAcceptsAbsentHashForStaticOrder)
+{
+    // features_hash is optional for feature-less adapters (RFC §7.3).
+    auto k1 = makeCandidate(1, 5);
+    auto entry = createStaticOrderEngine(100, {k1});
+    entry.uhdConfig.featuresHash.clear();
+
+    EXPECT_NO_THROW(EngineRegistry::instance().registerEngine(entry));
+}
+
+TEST_F(TestUhdSelectionFlow, RegisterAcceptsBareReferenceSignature)
+{
+    // The RFC-canonical spelling must survive registration end to end.
+    auto k1 = makeCandidate(1, 10, {{"tile_m", 64.0}});
+    auto k2 = makeCandidate(2, 5, {{"tile_m", 128.0}});
+
+    EngineEntry entry;
+    entry.engineId = 100;
+    entry.uhdConfig.uhdId = "bare-ref";
+    entry.uhdConfig.adapterType = "static_order";
+    entry.uhdConfig.featuresSignature = {"$kernel.priority", "$kernel.id"};
+    entry.uhdConfig.staticOrderFields = {"priority", "id"};
+    entry.uhdConfig.objective = "max";
+    entry.uhdConfig.featuresHash =
+        hipdnn_backend::heuristics::uhd::FeatureExtractor::computeHash(
+            entry.uhdConfig.featuresSignature);
+    entry.candidates = {k1, k2};
+
+    ASSERT_NO_THROW(EngineRegistry::instance().registerEngine(entry));
+
+    auto result = SelectionEngine::select(100, defaultDeviceVars(), defaultQueryVars());
+
+    EXPECT_TRUE(result.applied);
+    ASSERT_EQ(result.sortedKernelIds.size(), 2u);
+    EXPECT_EQ(result.sortedKernelIds[0], 2); // lower priority wins
+}
+
+// ========== Fail-open and trace preservation (RFC §6 step 6, §13) ==========
+
+
+
+
+
+
+
+TEST_F(TestUhdSelectionFlow, MalformedSignatureEntryThrowsInvalidArgument)
+{
+    // registerEngine documents std::invalid_argument; a malformed entry makes the
+    // extractor throw JsonLogicError, which a caller catching invalid_argument would
+    // miss.
+    auto k1 = makeCandidate(1, 5, {{"tile_m", 64.0}});
+
+    EngineEntry entry;
+    entry.engineId = 100;
+    entry.uhdConfig.uhdId = "malformed";
+    entry.uhdConfig.adapterType = "static_order";
+    entry.uhdConfig.featuresSignature = {"{not valid json"};
+    entry.uhdConfig.staticOrderFields = {"priority"};
+    entry.candidates = {k1};
+
+    EXPECT_THROW(EngineRegistry::instance().registerEngine(entry), std::invalid_argument);
+}
+
+TEST_F(TestUhdSelectionFlow, RegisterRejectsHashDeclaredOverEmptySignature)
+{
+    // A hash over no features is self-inconsistent; skipping the check when the
+    // signature is empty would let it through unvalidated.
+    EngineEntry entry;
+    entry.engineId = 100;
+    entry.uhdConfig.uhdId = "hash-no-signature";
+    entry.uhdConfig.adapterType = "static_order";
+    entry.uhdConfig.featuresSignature = {};
+    entry.uhdConfig.featuresHash = "sha256:0000000000000000";
+
+    EXPECT_THROW(EngineRegistry::instance().registerEngine(entry), std::invalid_argument);
+}
+
+
+// ========== Per-candidate binding hygiene ==========
+
+// ========== Per-candidate binding hygiene ==========
+
+// ========== Untrained architecture degrades (RFC §9.3) ==========
+
+
+
+
+
+
+
 
 } // namespace

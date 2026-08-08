@@ -93,8 +93,11 @@ nlohmann::json JsonLogicEvaluator::parse(const std::string& jsonStr)
     {
         return nlohmann::json::parse(jsonStr);
     }
-    catch(const nlohmann::json::parse_error& e)
+    catch(const nlohmann::json::exception& e)
     {
+        // Catch the whole nlohmann hierarchy, not just parse_error. Numeric overflow
+        // ("1e400") raises out_of_range.406, which would otherwise escape as a raw
+        // nlohmann type past every contract that promises JsonLogicError.
         throw JsonLogicError("Failed to parse JsonLogic expression: " + std::string(e.what()));
     }
 }

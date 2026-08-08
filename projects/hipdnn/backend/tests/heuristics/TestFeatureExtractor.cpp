@@ -15,6 +15,7 @@
 
 using hipdnn_backend::heuristics::uhd::FeatureExtractionContext;
 using hipdnn_backend::heuristics::uhd::FeatureExtractor;
+using hipdnn_backend::heuristics::uhd::JsonLogicError;
 
 namespace
 {
@@ -283,5 +284,243 @@ TEST_F(TestFeatureExtractor, SingleBindAddsVariable)
     ASSERT_EQ(features.size(), 1u);
     EXPECT_DOUBLE_EQ(features[0], 42.0);
 }
+
+// ========== Consistency and Edge Case Tests ==========
+
+TEST_F(TestFeatureExtractor, ExtractorProducesSameResultsOnMultipleCalls)
+{
+    const std::vector<std::string> signature = {
+        "\"$device.cu_count\"",
+        "\"$kernel.tile_m\"",
+        "\"$q.batch\"",
+    };
+    const FeatureExtractor extractor(signature);
+
+    FeatureExtractionContext ctx;
+    ctx.bindDeviceVars({{"cu_count", 120.0}});
+    ctx.bindKernelVars({{"tile_m", 256.0}});
+    ctx.bindQueryVars({{"batch", 32.0}});
+
+    // Extract multiple times and verify same results
+    const auto features1 = extractor.extract(ctx);
+    const auto features2 = extractor.extract(ctx);
+    const auto features3 = extractor.extract(ctx);
+
+    ASSERT_EQ(features1.size(), 3u);
+    ASSERT_EQ(features2.size(), 3u);
+    ASSERT_EQ(features3.size(), 3u);
+
+    for(size_t i = 0; i < features1.size(); ++i)
+    {
+        EXPECT_DOUBLE_EQ(features1[i], features2[i]) << "Mismatch at index " << i;
+        EXPECT_DOUBLE_EQ(features2[i], features3[i]) << "Mismatch at index " << i;
+    }
+}
+
+TEST_F(TestFeatureExtractor, EmptySignatureProducesEmptyVector)
+{
+    const std::vector<std::string> emptySignature;
+    const FeatureExtractor extractor(emptySignature);
+
+    FeatureExtractionContext ctx;
+    ctx.bindDeviceVars({{"cu_count", 120.0}});
+
+    const auto features = extractor.extract(ctx);
+    EXPECT_TRUE(features.empty());
+}
+
+TEST_F(TestFeatureExtractor, EmptySignatureHasEmptyHash)
+{
+    const std::vector<std::string> emptySignature;
+    const FeatureExtractor extractor(emptySignature);
+
+    // Empty signature should produce a consistent (possibly empty) hash
+    const auto& hash = extractor.getSignatureHash();
+    // Hash of empty content is still a valid SHA-256 hash
+    EXPECT_FALSE(hash.empty());
+}
+
+// ========== Signature wire format (RFC §7.2) ==========
+
+TEST_F(TestFeatureExtractor, AcceptsBareFieldReference)
+{
+    // RFC §7.2 canonical spelling, and what tools/uhd_gen emits. A bare reference is
+    // not valid JSON, so it must be lifted rather than parsed.
+    const std::vector<std::string> signature = {"$device.cu_count", "$kernel.tile_m"};
+    const FeatureExtractor extractor(signature);
+
+    FeatureExtractionContext ctx;
+    ctx.bindDeviceVars({{"cu_count", 120.0}});
+    ctx.bindKernelVars({{"tile_m", 256.0}});
+
+    const auto features = extractor.extract(ctx);
+    ASSERT_EQ(features.size(), 2u);
+    EXPECT_DOUBLE_EQ(features[0], 120.0);
+    EXPECT_DOUBLE_EQ(features[1], 256.0);
+}
+
+TEST_F(TestFeatureExtractor, BareAndQuotedReferencesAreEquivalent)
+{
+    const std::vector<std::string> bare = {"$device.cu_count", "$kernel.tile_m"};
+    const std::vector<std::string> quoted = {"\"$device.cu_count\"", "\"$kernel.tile_m\""};
+
+    const FeatureExtractor bareExtractor(bare);
+    const FeatureExtractor quotedExtractor(quoted);
+
+    EXPECT_EQ(bareExtractor.getSignatureHash(), quotedExtractor.getSignatureHash());
+
+    FeatureExtractionContext ctx;
+    ctx.bindDeviceVars({{"cu_count", 120.0}});
+    ctx.bindKernelVars({{"tile_m", 256.0}});
+
+    EXPECT_EQ(bareExtractor.extract(ctx), quotedExtractor.extract(ctx));
+}
+
+TEST_F(TestFeatureExtractor, MixesBareReferencesWithDerivedExpressions)
+{
+    const std::vector<std::string> signature = {
+        "$q.batch",
+        R"({"*": ["$q.batch", "$q.num_heads"]})",
+    };
+    const FeatureExtractor extractor(signature);
+
+    FeatureExtractionContext ctx;
+    ctx.bindQueryVars({{"batch", 32.0}, {"num_heads", 8.0}});
+
+    const auto features = extractor.extract(ctx);
+    ASSERT_EQ(features.size(), 2u);
+    EXPECT_DOUBLE_EQ(features[0], 32.0);
+    EXPECT_DOUBLE_EQ(features[1], 256.0);
+}
+
+
+
+
+TEST_F(TestFeatureExtractor, MalformedNonReferenceEntryThrows)
+{
+    const std::vector<std::string> signature = {"{not valid json"};
+    EXPECT_THROW(FeatureExtractor{signature}, JsonLogicError);
+}
+
+// ========== Hash is order-sensitive (RFC §7.2) ==========
+
+TEST_F(TestFeatureExtractor, PermutedSignatureProducesDifferentHash)
+{
+    // RFC §7.2 requires the signature to match training exactly. Hashing a sorted copy
+    // would make a permuted signature — a real feature-contract break — invisible.
+    const std::vector<std::string> signature = {"$q.batch", "$kernel.tile_m", "$device.cu_count"};
+    const std::vector<std::string> permuted = {"$device.cu_count", "$kernel.tile_m", "$q.batch"};
+
+    EXPECT_NE(FeatureExtractor::computeHash(signature), FeatureExtractor::computeHash(permuted));
+}
+
+// Pinned against tools/uhd_gen/features.py compute_features_hash. Canonicalization is
+// structural, not textual: each entry is parsed, then the array is dumped compact. The
+// mirror of every case below lives in
+// tools/uhd_gen/tests/test_features_hash.py::test_canonical_form_matches_runtime, and
+// both must be updated together — editing one alone silently breaks loading for every
+// descriptor the generator emits.
+
+TEST_F(TestFeatureExtractor, HashMatchesGeneratorForBareReferences)
+{
+    const std::vector<std::string> signature = {
+        "$q.batch", "$kernel.tile_m", "$device.cu_count"};
+    EXPECT_EQ(FeatureExtractor::computeHash(signature), "sha256:fe9d0487031089e0");
+}
+
+TEST_F(TestFeatureExtractor, HashMatchesGeneratorForPrequotedReference)
+{
+    EXPECT_EQ(FeatureExtractor::computeHash({"\"$q.batch\""}), "sha256:611513da8e8614b2");
+}
+
+TEST_F(TestFeatureExtractor, HashMatchesGeneratorForDerivedExpression)
+{
+    // The case that exposed the original divergence: hashing raw entry strings makes
+    // this an opaque escaped string on the Python side and a parsed node here.
+    const std::vector<std::string> signature = {
+        "$q.batch",
+        R"({"*": ["$q.batch", "$q.num_heads"]})",
+    };
+    EXPECT_EQ(FeatureExtractor::computeHash(signature), "sha256:d5ae6976facefe74");
+}
+
+TEST_F(TestFeatureExtractor, HashMatchesGeneratorForNestedExpression)
+{
+    const std::vector<std::string> signature = {
+        R"({"log2": [{"*": ["$q.batch", "$q.num_heads"]}]})"};
+    EXPECT_EQ(FeatureExtractor::computeHash(signature), "sha256:8f014cf81bab5f8c");
+}
+
+TEST_F(TestFeatureExtractor, HashMatchesGeneratorForEmptySignature)
+{
+    EXPECT_EQ(FeatureExtractor::computeHash({}), "sha256:4f53cda18c2baa0c");
+}
+
+// ========== Numeric literals the two languages render differently ==========
+//
+// Strings, keys, escaping and unicode canonicalize identically. Numbers are the one
+// axis where nlohmann and Python disagree, so literals near or past the divergence
+// are rejected rather than hashed into a digest the other side cannot reproduce.
+// Mirrored by tools/uhd_gen/tests/test_features_hash.py.
+
+TEST_F(TestFeatureExtractor, RejectsFloatAtScientificNotationThreshold)
+{
+    // nlohmann renders this "1e+15", Python "1000000000000000.0".
+    EXPECT_THROW(FeatureExtractor::computeHash({R"({">": ["$q.batch", 1e15]})"}),
+                 JsonLogicError);
+}
+
+TEST_F(TestFeatureExtractor, RejectsIntegerBeyondInt64)
+{
+    // nlohmann degrades this to double, which both diverges from Python's arbitrary
+    // precision *and* collides with neighbouring values.
+    EXPECT_THROW(FeatureExtractor::computeHash({"18446744073709551616"}), JsonLogicError);
+    EXPECT_THROW(FeatureExtractor::computeHash({"-9223372036854775809"}), JsonLogicError);
+}
+
+TEST_F(TestFeatureExtractor, RejectsNonFiniteLiteral)
+{
+    // Python's json accepts these as extensions; nlohmann does not.
+    EXPECT_THROW(FeatureExtractor::computeHash({"NaN"}), JsonLogicError);
+    EXPECT_THROW(FeatureExtractor::computeHash({"Infinity"}), JsonLogicError);
+    EXPECT_THROW(FeatureExtractor::computeHash({"1e400"}), JsonLogicError);
+}
+
+TEST_F(TestFeatureExtractor, AcceptsLiteralJustBelowThreshold)
+{
+    // Boundary check, and a cross-language pin: the generator produces the same digest
+    // for this input.
+    EXPECT_EQ(FeatureExtractor::computeHash({"999999999999999.0"}), "sha256:1449061ef40ea91e");
+}
+
+TEST_F(TestFeatureExtractor, AcceptsRealisticFeatureLiterals)
+{
+    // Tile sizes, dimensions and thresholds are orders of magnitude clear of the bound.
+    EXPECT_NO_THROW(FeatureExtractor::computeHash({R"({">": ["$q.seqlen_q", 4096]})"}));
+    EXPECT_NO_THROW(FeatureExtractor::computeHash({R"({"*": ["$kernel.tile_m", 0.5]})"}));
+    EXPECT_NO_THROW(FeatureExtractor::computeHash({"$q.batch", "1e14", "-1e14"}));
+}
+
+TEST_F(TestFeatureExtractor, RejectionAppliesToNestedLiterals)
+{
+    // The walk has to reach literals buried in operator trees, not just top level.
+    EXPECT_THROW(
+        FeatureExtractor::computeHash({R"({"log2": [{"+": ["$q.batch", 1e16]}]})"}),
+        JsonLogicError);
+}
+
+TEST_F(TestFeatureExtractor, ConstructorRejectsUnsafeLiteralToo)
+{
+    // computeHash runs from the ctor, so an unsafe literal cannot slip in by building
+    // an extractor directly instead of hashing.
+    EXPECT_THROW(FeatureExtractor{std::vector<std::string>{"1e15"}}, JsonLogicError);
+}
+
+
+
+
+
+
+
 
 } // namespace

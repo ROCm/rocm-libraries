@@ -18,7 +18,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import logging
 import sys
@@ -27,6 +26,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from .features import build_features_signature, compute_features_hash
 from .lgbm_to_flatbuffer import convert
 from .train_uhd import train_model
 
@@ -35,17 +35,6 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
-
-
-def compute_features_hash(feature_cols: list[str]) -> str:
-    """Compute SHA-256 hash of canonical feature column list.
-
-    The hash is used to validate that inference uses the same features
-    as training (feature contract enforcement).
-    """
-    canonical = json.dumps(sorted(feature_cols), separators=(",", ":"))
-    digest = hashlib.sha256(canonical.encode()).hexdigest()[:16]
-    return f"sha256:{digest}"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -161,7 +150,8 @@ def main(argv: list[str] | None = None) -> int:
     model.save_model(str(lgbm_path))
     logger.info("Saved LightGBM model to %s", lgbm_path)
 
-    features_hash = compute_features_hash(args.features)
+    features_signature = build_features_signature(args.features)
+    features_hash = compute_features_hash(features_signature)
     fb_path = output_dir / "model.bin"
     convert(
         lgbm_path,
@@ -182,7 +172,7 @@ def main(argv: list[str] | None = None) -> int:
         "id": str(uuid.uuid4()),
         "name": args.name,
         "adapter": "tree_data",
-        "features_signature": [f"${col}" for col in args.features],
+        "features_signature": features_signature,
         "features_hash": features_hash,
         "objective": "max",
         "score": {"units": "tflops", "calibrated": True, "transform": "log1p"},

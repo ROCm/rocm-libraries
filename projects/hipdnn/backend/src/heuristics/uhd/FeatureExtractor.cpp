@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <iomanip>
 #include <sstream>
@@ -178,13 +179,84 @@ std::vector<std::string>
 // FeatureExtractor
 // ============================================================================
 
+namespace
+{
+
+/// Largest numeric literal magnitude the cross-language canonical form is safe for.
+///
+/// Above this the two JSON writers stop agreeing, in three independent ways:
+///   - nlohmann switches a double to scientific notation at 1e15, Python's repr at
+///     1e16, so the whole decade renders differently ("1e+15" vs "1000000000000000.0");
+///   - an integer outside int64/uint64 degrades to double in nlohmann while Python
+///     keeps arbitrary precision -- and the lossy conversion makes distinct values
+///     collide, so C++ would accept a hash computed over a *different* signature;
+///   - non-finite values are a Python json extension that nlohmann rejects outright.
+///
+/// Feature literals are tile sizes, dimensions and thresholds, so this bound is many
+/// orders of magnitude clear of anything real. Rejecting is the honest option: a
+/// signature we cannot canonicalize identically on both sides has no usable hash.
+constexpr double kMaxSafeNumericLiteral = 1e15;
+
+void validateNumericLiterals(const nlohmann::json& node)
+{
+    if(node.is_number())
+    {
+        const double value = node.get<double>();
+        if(!std::isfinite(value))
+        {
+            throw JsonLogicError("features_signature contains a non-finite numeric literal");
+        }
+        if(std::abs(value) >= kMaxSafeNumericLiteral)
+        {
+            throw JsonLogicError(
+                "features_signature contains the numeric literal " + node.dump() +
+                ", whose magnitude is at or above 1e15. The generator and the runtime "
+                "render such values differently, so the features_hash would not match. "
+                "Rescale the feature instead.");
+        }
+        return;
+    }
+
+    if(node.is_array())
+    {
+        for(const auto& element : node)
+        {
+            validateNumericLiterals(element);
+        }
+        return;
+    }
+
+    if(node.is_object())
+    {
+        for(const auto& item : node.items())
+        {
+            validateNumericLiterals(item.value());
+        }
+    }
+}
+
+} // namespace
+
+nlohmann::json FeatureExtractor::parseSignatureEntry(const std::string& entry)
+{
+    // A bare reference such as `$q.seqlen_q` is the RFC 0019 §7.2 canonical spelling
+    // and what tools/uhd_gen emits, but it is not valid JSON. Lift it to a JSON string
+    // so it reaches the evaluator's variable branch.
+    if(!entry.empty() && entry.front() == '$')
+    {
+        return nlohmann::json(entry);
+    }
+
+    return JsonLogicEvaluator::parse(entry);
+}
+
 FeatureExtractor::FeatureExtractor(const std::vector<std::string>& signature)
 {
     _parsedExprs.reserve(signature.size());
 
     for(const auto& exprStr : signature)
     {
-        auto parsed = JsonLogicEvaluator::parse(exprStr);
+        auto parsed = parseSignatureEntry(exprStr);
         _parsedExprs.push_back(std::move(parsed));
 
         // Extract variable references from this expression
@@ -221,26 +293,35 @@ std::vector<std::string>
 
 std::string FeatureExtractor::computeHash(const std::vector<std::string>& signature)
 {
-    // Build canonical JSON representation matching Python's format:
-    // json.dumps(sorted(feature_cols), separators=(",", ":"))
-    std::vector<std::string> sorted = signature;
-    std::sort(sorted.begin(), sorted.end());
-
-    std::ostringstream oss;
-    oss << "[";
-    for(size_t i = 0; i < sorted.size(); ++i)
+    // Canonical form is the parsed signature dumped as compact JSON, matching Python's
+    // json.dumps(signature, separators=(",", ":")) in tools/uhd_gen. Parsing first means
+    // the bare and pre-quoted spellings of a reference collapse to the same node, and
+    // nlohmann handles escaping. Order is preserved deliberately: RFC 0019 §7.2 requires
+    // the signature to match training exactly, so a permuted signature must hash
+    // differently.
+    nlohmann::json canonical = nlohmann::json::array();
+    for(const auto& entry : signature)
     {
-        if(i > 0)
-        {
-            oss << ",";
-        }
-        // JSON string escaping (minimal - assumes no special chars in feature names)
-        oss << "\"" << sorted[i] << "\"";
+        canonical.push_back(parseSignatureEntry(entry));
     }
-    oss << "]";
 
-    const std::string canonical = oss.str();
-    const std::string fullHash = sha256(canonical);
+    // Reject literals the two languages would render differently before hashing them.
+    validateNumericLiterals(canonical);
+
+    std::string serialized;
+    try
+    {
+        serialized = canonical.dump();
+    }
+    catch(const nlohmann::json::exception& e)
+    {
+        // dump() rejects invalid UTF-8 (type_error.316). That path never went through
+        // parse() -- a bare "$ref" is lifted straight to a JSON string -- so it has to
+        // be converted here or it escapes as a raw nlohmann type.
+        throw JsonLogicError("features_signature cannot be serialized: " + std::string(e.what()));
+    }
+
+    const std::string fullHash = sha256(serialized);
 
     // Return first 16 chars with sha256: prefix to match Python format
     return "sha256:" + fullHash.substr(0, 16);

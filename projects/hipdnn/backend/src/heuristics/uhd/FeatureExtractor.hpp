@@ -84,8 +84,23 @@ public:
     /// Get missing variables that are referenced but not bound in context.
     std::vector<std::string> getMissingVariables(const FeatureExtractionContext& ctx) const;
 
+    /// Parse one features_signature entry.
+    ///
+    /// RFC 0019 §7.2 allows two forms: a bare field reference (`$q.seqlen_q`) or a
+    /// derived JsonLogic expression (`{"log2": ["$q.seqlen_q"]}`). A bare reference is
+    /// not valid JSON on its own, so it is lifted to a JSON string rather than parsed.
+    /// Pre-quoted entries (`"\"$q.seqlen_q\""`) still parse to the same node.
+    ///
+    /// @throws JsonLogicError if a non-reference entry is not valid JSON.
+    static nlohmann::json parseSignatureEntry(const std::string& entry);
+
     /// Compute SHA-256 hash of the features signature.
     /// This hash is embedded in trained models for contract validation.
+    ///
+    /// Entries are canonicalized through parseSignatureEntry() before hashing, so the
+    /// bare and pre-quoted spellings of a reference agree. Order is significant —
+    /// RFC 0019 §7.2 requires the signature to match training exactly, so a permuted
+    /// signature must not produce a matching hash.
     static std::string computeHash(const std::vector<std::string>& signature);
 
     /// Get the hash of this extractor's signature.

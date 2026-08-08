@@ -7,9 +7,12 @@
 #include "adapters/StaticOrderAdapter.hpp"
 #include "adapters/TreeDataAdapter.hpp"
 
+#include <hipdnn_data_sdk/logging/Logger.hpp>
+
 #include <algorithm>
 #include <sstream>
 #include <stdexcept>
+#include <unordered_set>
 
 namespace hipdnn_backend::heuristics::uhd
 {
@@ -39,9 +42,23 @@ void EngineRegistry::registerEngine(EngineEntry entry)
         kmdFields.insert("priority");
         kmdFields.insert("id");
 
-        // Build extractor to parse signature and extract $kernel.* refs
-        const FeatureExtractor extractor(entry.uhdConfig.featuresSignature);
-        const auto missingFields = extractor.getMissingKmdFields(kmdFields);
+        // Build extractor to parse signature and extract $kernel.* refs.
+        // A malformed entry throws JsonLogicError; re-raise as invalid_argument so the
+        // exception type matches what registerEngine documents.
+        std::vector<std::string> missingFields;
+        try
+        {
+            const FeatureExtractor extractor(entry.uhdConfig.featuresSignature);
+            missingFields = extractor.getMissingKmdFields(kmdFields);
+        }
+        catch(const JsonLogicError& e)
+        {
+            std::ostringstream oss;
+            oss << "UHD features_signature contains an entry that is neither a bare $ref "
+                << "nor valid JsonLogic. Engine ID: " << entry.engineId << ", uhd='"
+                << entry.uhdConfig.uhdId << "': " << e.what();
+            throw std::invalid_argument(oss.str());
+        }
 
         if(!missingFields.empty())
         {
@@ -56,13 +73,74 @@ void EngineRegistry::registerEngine(EngineEntry entry)
                 }
                 oss << missingFields[i];
             }
-            oss << ". Engine ID: " << entry.engineId;
+            oss << ". Engine ID: " << entry.engineId
+                << ". Ensure all $kernel.* fields in features_signature are present in "
+                   "candidate metadata.";
             throw std::invalid_argument(oss.str());
         }
     }
 
+    validateFeaturesHash(entry);
+
     const std::lock_guard<std::mutex> lock(_mutex);
     _engines[entry.engineId] = std::move(entry);
+}
+
+void EngineRegistry::validateFeaturesHash(const EngineEntry& entry)
+{
+    const UhdConfig& cfg = entry.uhdConfig;
+
+    // A declared hash must describe the signature it ships with (RFC 0019 §7.3).
+    // Without this the only hash check is model-vs-config, so both could agree while
+    // neither matches the signature actually being evaluated — which defeats the
+    // point of fingerprinting the feature contract.
+    //
+    // Checked even for an empty signature: a hash over no features is
+    // self-inconsistent, and skipping it there would let that through.
+    if(!cfg.featuresHash.empty())
+    {
+        std::string actual;
+        try
+        {
+            actual = FeatureExtractor::computeHash(cfg.featuresSignature);
+        }
+        catch(const JsonLogicError& e)
+        {
+            std::ostringstream oss;
+            oss << "UHD features_signature contains an entry that is neither a bare $ref "
+                << "nor valid JsonLogic. Engine ID: " << entry.engineId << ", uhd='"
+                << cfg.uhdId << "': " << e.what();
+            throw std::invalid_argument(oss.str());
+        }
+
+        if(actual != cfg.featuresHash)
+        {
+            std::ostringstream oss;
+            oss << "UHD features_hash does not describe its own features_signature. "
+                << "Engine ID: " << entry.engineId << ", uhd='" << cfg.uhdId
+                << "', declared=" << cfg.featuresHash << ", computed=" << actual
+                << ". The signature and hash must be emitted together — regenerate the "
+                   "descriptor rather than editing either by hand.";
+            throw std::invalid_argument(oss.str());
+        }
+        return;
+    }
+
+    if(cfg.featuresSignature.empty())
+    {
+        return;
+    }
+
+    // Feature-bearing adapters are required to carry a hash (RFC 0019 §7.3). Absent
+    // one there is nothing to check the model artifact against.
+    if(cfg.adapterType == "tree_data" || cfg.adapterType == "onnx" || cfg.adapterType == "table")
+    {
+        HIPDNN_SDK_LOG_WARN("UHD: engine "
+                            << entry.engineId << " uhd='" << cfg.uhdId << "' adapter '"
+                            << cfg.adapterType
+                            << "' declares a features_signature but no features_hash; the "
+                               "feature contract with the model artifact cannot be enforced");
+    }
 }
 
 std::optional<std::reference_wrapper<const EngineEntry>>
