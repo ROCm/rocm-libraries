@@ -28,7 +28,11 @@ template <typename QDataType_,
           typename FmhaMask_,
           typename FmhaDropout_,
           bool kUseTrLoad_,
-          typename Traits_>
+          typename Traits_,
+          // Keep the dK/dV accumulators in LDS instead of registers. Defaulted
+          // so every existing instantiation is unaffected; only the targets
+          // that need the VGPRs back opt in.
+          bool kUseLdsAcc_ = false>
 struct BlockFmhaBwdPipelineProblem
 {
     using QDataType             = remove_cvref_t<QDataType_>;
@@ -55,6 +59,7 @@ struct BlockFmhaBwdPipelineProblem
     static constexpr bool kIsGroupMode     = kIsGroupMode_;
     static constexpr bool kIsDeterministic = kIsDeterministic_;
     static constexpr bool kUseTrLoad       = kUseTrLoad_;
+    static constexpr bool kUseLdsAcc       = kUseLdsAcc_;
 
     // attributes from traits
     static constexpr index_t kPadHeadDimQ = Traits::kPadHeadDimQ;
