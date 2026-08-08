@@ -815,6 +815,40 @@ void testing_syevd_heevd(Arguments& argus)
         EXPECT_EQ(check_mode, hetrd_mode);
     }
 
+    rocblas_int nb = argus.get<rocblas_int>("nb", 0);
+    if(nb != 0)
+    {
+        EXPECT_ROCBLAS_STATUS(
+            rocsolver_set_opt(handle, rocsolver_function_syev_heev, rocsolver_option_nb,
+                                int64_t(nb)),
+            rocblas_status_success);
+
+        int64_t check_nb;
+        EXPECT_ROCBLAS_STATUS(
+            rocsolver_get_opt(handle, rocsolver_function_syev_heev, rocsolver_option_nb,
+                                &check_nb),
+            rocblas_status_success);
+
+        EXPECT_EQ(check_nb, int64_t(nb));
+    }
+
+    rocblas_int kd = argus.get<rocblas_int>("kd", 0);
+    if(kd != 0)
+    {
+        EXPECT_ROCBLAS_STATUS(
+            rocsolver_set_opt(handle, rocsolver_function_syev_heev, rocsolver_option_kd,
+                                int64_t(kd)),
+            rocblas_status_success);
+
+        int64_t check_kd;
+        EXPECT_ROCBLAS_STATUS(
+            rocsolver_get_opt(handle, rocsolver_function_syev_heev, rocsolver_option_kd,
+                                &check_kd),
+            rocblas_status_success);
+
+        EXPECT_EQ(check_kd, int64_t(kd));
+    }
+
     // check non-supported values
     if(uplo == rocblas_fill_full || evect == rocblas_evect_tridiagonal)
     {
@@ -940,7 +974,6 @@ void testing_syevd_heevd(Arguments& argus)
                                                    argus.profile, argus.profile_kernels, argus.perf);
         }
     }
-
     else
     {
         // memory allocations
