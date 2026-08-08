@@ -32,7 +32,7 @@ namespace rocRoller
             auto [macTileTag, macTile]   = m_graph->getDimension<MacroTile>(tag);
             auto oMacTileTag             = m_graph->mapper.get(tag, NaryArgument::DEST);
 
-            uint waveMN, waveK, miMN, miK;
+            unsigned int waveMN, waveK, miMN, miK;
             switch(macTile.layoutType)
             {
             case LayoutType::MATRIX_A:
@@ -51,7 +51,7 @@ namespace rocRoller
                 Throw<FatalError>("Layout type not supported yet for Exchange.");
             }
 
-            const uint waveTileSize = waveTile.sizes[0] * waveTile.sizes[1];
+            const unsigned int waveTileSize = waveTile.sizes[0] * waveTile.sizes[1];
 
             Expression::ExpressionPtr waveTileExpr, expectedExpr;
 
@@ -105,9 +105,9 @@ namespace rocRoller
                 }
             }
 
-            const uint wfs = m_context->kernel()->wavefront_size();
+            const unsigned int wfs = m_context->kernel()->wavefront_size();
             // Exchange tile fixed size: 256 = 64 x 4 or 32 x 8
-            const uint numVgpr = 256 / wfs;
+            const unsigned int numVgpr = 256 / wfs;
 
             auto vgpr = m_context->registerTagManager()->getRegister(macTileTag);
 

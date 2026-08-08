@@ -3,6 +3,9 @@
 
 #pragma once
 
+#include <array>
+#include <optional>
+
 #include "KernelOptions.hpp"
 #include <rocRoller/Parameters/Solution/LDSBankSwizzleMode.hpp>
 #include <rocRoller/Parameters/Solution/ScaleSkipPermlaneMode.hpp>

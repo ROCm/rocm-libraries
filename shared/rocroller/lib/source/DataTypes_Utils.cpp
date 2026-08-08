@@ -462,7 +462,7 @@ namespace rocRoller
         return type == DataType::E4M3 or type == DataType::E4M3x4;
     }
 
-    uint packingFactorForDataType(DataType type)
+    unsigned int packingFactorForDataType(DataType type)
     {
         auto packing = DataTypeInfo::Get(type).packing;
         if(packing == 1)

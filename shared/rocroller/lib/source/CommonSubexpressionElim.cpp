@@ -693,8 +693,8 @@ namespace rocRoller
                    || expr.width % Register::bitsPerRegister != 0)
                     return std::nullopt;
 
-                uint registerOffset = expr.offset / Register::bitsPerRegister;
-                uint registerCount  = expr.width / Register::bitsPerRegister;
+                unsigned int registerOffset = expr.offset / Register::bitsPerRegister;
+                unsigned int registerCount  = expr.width / Register::bitsPerRegister;
 
                 // Only simplify if the register count matches the expected output data type
                 if(DataTypeInfo::Get(expr.outputDataType).registerCount != registerCount)

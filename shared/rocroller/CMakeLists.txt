@@ -43,6 +43,11 @@ if(ROCROLLER_ENABLE_TEST_DISCOVERY)
     enable_testing()
 endif()
 
+if(WIN32)
+    add_compile_definitions("$<$<COMPILE_LANGUAGE:C,CXX>:_CRT_SECURE_NO_WARNINGS;NOMINMAX>")
+    #add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:-Wno-microsoft-cast>)
+endif()
+
 if(ROCROLLER_ENABLE_CPPCHECK)
     find_program(CMAKE_CXX_CPPCHECK NAMES cppcheck)
     if(CMAKE_CXX_CPPCHECK)
@@ -128,6 +133,11 @@ endif()
 
 find_package(hip REQUIRED)
 find_package(amd_comgr REQUIRED)
+
+if(WIN32)
+    get_property(_amdhip64_location TARGET hip::amdhip64 PROPERTY IMPORTED_LOCATION_RELEASE)
+    get_property(_amd_comgr_location TARGET amd_comgr PROPERTY IMPORTED_LOCATION_RELEASE)
+endif()
 
 include(CheckCXXSourceCompiles)
 set(CMAKE_REQUIRED_LIBRARIES hip::host)

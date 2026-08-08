@@ -408,10 +408,10 @@ namespace rocRoller
 
                     auto const arch = GPUArchitectureLibrary::getInstance()->GetArch(
                         solutionParams.architecture);
-                    uint wavefrontSize = arch.GetCapability(GPUCapability::DefaultWavefrontSize);
-                    uint wavetilePerWavefrontM = wavefrontSize * solutionParams.macM / wave_m
+                    unsigned int wavefrontSize = arch.GetCapability(GPUCapability::DefaultWavefrontSize);
+                    unsigned int wavetilePerWavefrontM = wavefrontSize * solutionParams.macM / wave_m
                                                  / solutionParams.workgroupSizeX;
-                    uint wavetilePerWavefrontN
+                    unsigned int wavetilePerWavefrontN
                         = solutionParams.macN / wave_n / solutionParams.workgroupSizeY;
 
                     AssertFatal(wavetilePerWavefrontM > 0, "WaveTile size mismatch.");
@@ -612,9 +612,9 @@ namespace rocRoller
                     params->transposeMemoryAccess.set(
                         LayoutType::MATRIX_B, solutionParams.types.transB == TransposeType::T);
 
-                    uint workgroup_size_x
+                    unsigned int workgroup_size_x
                         = solutionParams.workgroupSizeX * solutionParams.workgroupSizeY;
-                    uint workgroup_size_y = 1;
+                    unsigned int workgroup_size_y = 1;
 
                     params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
 
@@ -691,8 +691,8 @@ namespace rocRoller
                     }
 
                     params->setManualWavefrontCount(
-                        {static_cast<uint>(solutionParams.macM / wave_m / wavetilePerWavefrontM),
-                         static_cast<uint>(solutionParams.macN / wave_n / wavetilePerWavefrontN)});
+                        {static_cast<unsigned int>(solutionParams.macM / wave_m / wavetilePerWavefrontM),
+                         static_cast<unsigned int>(solutionParams.macN / wave_n / wavetilePerWavefrontN)});
 
                     return params;
                 }

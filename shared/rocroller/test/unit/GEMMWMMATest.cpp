@@ -482,8 +482,8 @@ namespace GEMMTests
         gemm.workgroupSizeX = 2 * gemm.wavefrontSize;
 
         auto clusterSize    = std::get<1>(GetParam());
-        auto numWorkgroupsX = gemm.n / static_cast<uint>(gemm.macN);
-        auto numWorkgroupsY = gemm.m / static_cast<uint>(gemm.macM);
+        auto numWorkgroupsX = gemm.n / static_cast<unsigned int>(gemm.macN);
+        auto numWorkgroupsY = gemm.m / static_cast<unsigned int>(gemm.macM);
 
         AssertFatal(WorkgroupClustersDetail::IsValidWorkgroupClusterSize(
                         clusterSize, {numWorkgroupsX, numWorkgroupsY, 1}),

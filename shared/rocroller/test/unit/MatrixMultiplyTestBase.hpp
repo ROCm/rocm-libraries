@@ -63,7 +63,7 @@ namespace MatrixMultiplyTest
     {
         DataType scaleTypeA     = DataType::None;
         DataType scaleTypeB     = DataType::None;
-        uint     scaleBlockSize = 1;
+        unsigned int     scaleBlockSize = 1;
     };
 
     template <typename... Ts>
@@ -200,8 +200,8 @@ namespace MatrixMultiplyTest
             AssertFatal(mac_n == wave_n, "Single output MacroTile.");
 
             auto const& arch             = m_context->targetArchitecture();
-            uint        workgroup_size_x = arch.GetCapability(GPUCapability::DefaultWavefrontSize);
-            uint        workgroup_size_y = 1;
+            unsigned int        workgroup_size_x = arch.GetCapability(GPUCapability::DefaultWavefrontSize);
+            unsigned int        workgroup_size_y = 1;
 
             auto bpe = CeilDivide(DataTypeInfo::Get(dataTypeA).elementBits, 8u);
             AssertFatal(mac_m * mac_k * bpe > wave_m * wave_k, "Not enough elements.");
@@ -615,14 +615,14 @@ namespace MatrixMultiplyTest
             auto       arch = m_context->targetArchitecture();
             const auto wfs  = arch.GetCapability(GPUCapability::DefaultWavefrontSize);
 
-            uint workgroup_size_x = wavefrontCountX * wavefrontCountY * wfs;
-            uint workgroup_size_y = 1;
+            unsigned int workgroup_size_x = wavefrontCountX * wavefrontCountY * wfs;
+            unsigned int workgroup_size_y = 1;
 
             auto bpe = CeilDivide(DataTypeInfo::Get(dataTypeA).elementBits, 8u);
             AssertFatal(mac_m * mac_k * bpe > wave_m * wave_k, "Not enough elements.");
 
-            uint num_workgroup_x = M / mac_m;
-            uint num_workgroup_y = N / mac_n;
+            unsigned int num_workgroup_x = M / mac_m;
+            unsigned int num_workgroup_y = N / mac_n;
 
             auto NX = std::make_shared<Expression::Expression>(num_workgroup_x * workgroup_size_x);
             auto NY = std::make_shared<Expression::Expression>(num_workgroup_y * workgroup_size_y);
@@ -743,11 +743,11 @@ namespace MatrixMultiplyTest
             auto       arch = m_context->targetArchitecture();
             const auto wfs  = arch.GetCapability(GPUCapability::DefaultWavefrontSize);
 
-            uint workgroup_size_x = wavefrontCountX * wavefrontCountY * wfs;
-            uint workgroup_size_y = 1;
+            unsigned int workgroup_size_x = wavefrontCountX * wavefrontCountY * wfs;
+            unsigned int workgroup_size_y = 1;
 
-            uint num_workgroup_x = M / mac_m;
-            uint num_workgroup_y = N / mac_n;
+            unsigned int num_workgroup_x = M / mac_m;
+            unsigned int num_workgroup_y = N / mac_n;
 
             auto NX = std::make_shared<Expression::Expression>(num_workgroup_x * workgroup_size_x);
             auto NY = std::make_shared<Expression::Expression>(num_workgroup_y * workgroup_size_y);

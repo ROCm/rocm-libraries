@@ -379,7 +379,7 @@ namespace rocRoller
             auto userA = graph.coordinates.getNode<User>(userTag);
             auto tileA = graph.coordinates.getNode<MacroTile>(tileTag);
             auto matK  = graph.coordinates.getNode<SubDimension>(sdims[1]).size;
-            auto macK  = literal(static_cast<uint>(tileA.sizes[1])); // M x K
+            auto macK  = literal(static_cast<unsigned int>(tileA.sizes[1])); // M x K
 
             auto toUInt32 = [](ExpressionPtr expr) -> ExpressionPtr {
                 return std::make_shared<Expression::Expression>(
@@ -496,9 +496,9 @@ namespace rocRoller
             const auto  regType          = arch.HasCapability(GPUCapability::HasAccCD)
                                                ? Register::Type::Accumulator
                                                : Register::Type::Vector;
-            uint        num_elements     = waveA.sizes[0] * waveB.sizes[1];
-            uint        wfs              = context->kernel()->wavefront_size();
-            uint        numElemPerThread = num_elements / wfs;
+            unsigned int        num_elements     = waveA.sizes[0] * waveB.sizes[1];
+            unsigned int        wfs              = context->kernel()->wavefront_size();
+            unsigned int        numElemPerThread = num_elements / wfs;
 
             std::optional<VariableType> assignVarType = info.accType;
             if(info.accType == DataType::Half || info.accType == DataType::BFloat16)
@@ -545,7 +545,7 @@ namespace rocRoller
             // WaveTileNumber[0]. This is because we are unrolling the "small k" loop.
             auto tileA = graph.coordinates.getNode<MacroTile>(a);
 
-            uint const numWaveTiles = tileA.sizes[1] / waveA.sizes[1];
+            unsigned int const numWaveTiles = tileA.sizes[1] / waveA.sizes[1];
             auto       smallKUnroll = graph.coordinates.addElement(Unroll(numWaveTiles));
             graph.mapper.connect<Unroll>(info.loadA.load(), smallKUnroll, 1);
             graph.mapper.connect<Unroll>(info.loadB.load(), smallKUnroll, 0);
@@ -593,7 +593,7 @@ namespace rocRoller
             if(scaleModeB == Operations::ScaleMode::Separate)
                 addGlobalLoadOperation(*info.loadBScale);
 
-            for(uint k = 0; k < numWaveTiles; k++)
+            for(unsigned int k = 0; k < numWaveTiles; k++)
             {
                 auto createUnrollLoad
                     = [&, forK = forK](LoadStoreInfo loadInfo) -> std::tuple<int, int> {

@@ -144,9 +144,9 @@ namespace rocRollerTest
         auto size_z   = std::make_shared<Expression::Expression>(16u);
         auto stride_z = std::make_shared<Expression::Expression>(8u);
 
-        uint x_index_value = 5;
-        uint y_index_value = 3;
-        uint z_index_value = 7;
+        unsigned int x_index_value = 5;
+        unsigned int y_index_value = 3;
+        unsigned int z_index_value = 7;
 
         auto x_index = std::make_shared<Expression::Expression>(x_index_value);
         auto y_index = std::make_shared<Expression::Expression>(y_index_value);
@@ -641,8 +641,8 @@ namespace rocRollerTest
     {
         auto ct = CoordinateGraph();
 
-        uint m = 16;
-        uint n = 16;
+        unsigned int m = 16;
+        unsigned int n = 16;
 
         auto unit = Expression::literal(1u);
         auto M    = Expression::literal(100u * m);
@@ -1058,8 +1058,8 @@ namespace rocRollerTest
         EXPECT_EQ(WaveAi.dim, 0);
         EXPECT_EQ(WaveAj.dim, 1);
 
-        EXPECT_EQ(std::get<uint>(Expression::evaluate(WaveAi.size)), 32u);
-        EXPECT_EQ(std::get<uint>(Expression::evaluate(WaveAj.size)), 2u);
+        EXPECT_EQ(std::get<unsigned int>(Expression::evaluate(WaveAi.size)), 32u);
+        EXPECT_EQ(std::get<unsigned int>(Expression::evaluate(WaveAj.size)), 2u);
 
         EXPECT_EQ(std::get<int>(Expression::evaluate(WaveAi.stride)), 2);
         EXPECT_EQ(std::get<int>(Expression::evaluate(WaveAj.stride)), 1);

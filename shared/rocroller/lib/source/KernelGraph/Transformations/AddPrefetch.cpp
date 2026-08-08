@@ -683,7 +683,7 @@ namespace rocRoller
                 = ((direct2LDSCounter > 0) && (storeLDScounter == direct2LDSCounter));
 
             graph.control.addElement(Body(), {scope}, {preChain[0]});
-            for(uint i = 1; i < preChain.size(); ++i)
+            for(unsigned int i = 1; i < preChain.size(); ++i)
             {
                 graph.control.addElement(Sequence(), {preChain[i - 1]}, {preChain[i]});
             }
@@ -762,7 +762,7 @@ namespace rocRoller
                               pre,
                               prefetchChain.front());
                 graph.control.addElement(Sequence(), {pre}, {prefetchChain.front()});
-                for(uint i = 1; i < prefetchChain.size(); ++i)
+                for(unsigned int i = 1; i < prefetchChain.size(); ++i)
                 {
                     logger->debug("  prefetch: lds prefetch: ordering {} to {} (chain)",
                                   prefetchChain[i - 1],
@@ -788,7 +788,7 @@ namespace rocRoller
             //
 
             // Update SetCoordinates for LoadTile operations
-            for(uint u = 0; u < numUnroll; ++u)
+            for(unsigned int u = 0; u < numUnroll; ++u)
             {
                 auto prefetchGlobalU   = (u + numInFlight) % numUnroll;
                 auto prefetchCoordExpr = literal(u + numInFlight);
@@ -816,7 +816,7 @@ namespace rocRoller
             }
 
             // Update SetCoordinates for direct loads operations
-            for(uint u = 0; u < numUnroll; ++u)
+            for(unsigned int u = 0; u < numUnroll; ++u)
             {
                 auto prefetchGlobalU = (u + numInFlight) % numUnroll;
                 for(auto load : m_directLoads[forLoop][prefetchGlobalU])
@@ -846,13 +846,13 @@ namespace rocRoller
 
             // Build Unroll segment boundaries
             std::vector<int> segmentBoundaries = {forLoop};
-            for(uint u = 0; u < numUnroll; ++u)
+            for(unsigned int u = 0; u < numUnroll; ++u)
                 segmentBoundaries.push_back(graph.control.addElement(NOP()));
 
             auto separateMemOps = !m_params->prefetchMixMemOps;
 
             // Unrolled loop over prefetch segments
-            for(uint u = 0; u < numUnroll; ++u)
+            for(unsigned int u = 0; u < numUnroll; ++u)
             {
                 logger->debug("  prefetch: in-loop: segment {}", u);
 

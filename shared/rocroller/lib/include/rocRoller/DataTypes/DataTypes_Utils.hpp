@@ -114,7 +114,7 @@ namespace rocRoller
     bool isE5M3(DataType type);
     bool isE4M3(DataType type);
 
-    uint packingFactorForDataType(DataType type);
+    unsigned int packingFactorForDataType(DataType type);
 
     uint8_t floatToScale(DataType scaleType, float value);
     float   scaleToFloat(DataType scaleType, uint8_t scale);

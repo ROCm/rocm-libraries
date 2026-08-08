@@ -37,6 +37,7 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/ScheduledInstructions_fwd.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/TensorDescriptor.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/TensorDescriptor_impl.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Windows.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/WorkgroupClusters_detail.hpp"
 
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Assemblers/Assembler.hpp"

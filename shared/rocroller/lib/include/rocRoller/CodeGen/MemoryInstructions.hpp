@@ -256,7 +256,7 @@ namespace rocRoller
                                                   Register::ValuePtr addr,
                                                   int                offset,
                                                   int                numBytes,
-                                                  uint               elementBits,
+                                                  unsigned int               elementBits,
                                                   std::string const  comment = "");
 
         /**

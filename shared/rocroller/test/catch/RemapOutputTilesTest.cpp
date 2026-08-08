@@ -280,7 +280,7 @@ namespace RemapOutputTilesTest
             auto numTilesM = GENERATE(22, 55);
             auto numTilesN = GENERATE(7, 8, 11);
 
-            uint totalSize = numTilesM * numTilesN;
+            unsigned int totalSize = numTilesM * numTilesN;
 
             auto WGM = GENERATE(range(1, 50));
             {
@@ -316,7 +316,7 @@ namespace RemapOutputTilesTest
 
                 // Build coverage
                 std::map<std::pair<int, int>, int> coverage;
-                for(uint i = 0; i < totalSize; ++i)
+                for(unsigned int i = 0; i < totalSize; ++i)
                 {
                     auto mapped = std::pair<int, int>{wgx[i], wgy[i]};
                     coverage[mapped]++;

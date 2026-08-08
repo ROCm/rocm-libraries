@@ -183,7 +183,7 @@ namespace rocRoller::Client::GEMMClient
                       problemParams.types.scaleTypeB,
                       -1.f,
                       1.f,
-                      static_cast<uint>(scaleBlockSize),
+                      static_cast<unsigned int>(scaleBlockSize),
                       problemParams.initModeA,
                       problemParams.initModeB,
                       problemParams.initModeC);

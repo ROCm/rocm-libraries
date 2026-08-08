@@ -45,20 +45,22 @@ namespace rocRoller
             auto* thisDerived = static_cast<DerivedObserver*>(this);
             if(thisDerived->trigger(inst))
             {
-                for(auto iter = (DerivedObserver::writeTrigger() ? inst.getDsts().begin()
-                                                                 : inst.getSrcs().begin());
-                    iter
-                    != (DerivedObserver::writeTrigger() ? inst.getDsts().end()
-                                                        : inst.getSrcs().end());
-                    iter++)
-                {
-                    auto reg = *iter;
-                    if(reg)
-                    {
-                        for(auto const& regId : reg->getRegisterIds())
-                        {
-                            (*m_hazardMap)[regId].push_back(WaitStateHazardCounter(
-                                thisDerived->getMaxNops(inst), DerivedObserver::writeTrigger()));
+                if constexpr (DerivedObserver::writeTrigger()) {
+                    for (auto iter = inst.getDsts().begin(); iter != inst.getDsts().end(); ++iter) {
+                        if (*iter) {
+                            for (auto const& regId : (*iter)->getRegisterIds()) {
+                                (*m_hazardMap)[regId].emplace_back(
+                                    thisDerived->getMaxNops(inst), DerivedObserver::writeTrigger());
+                            }
+                        }
+                    }
+                } else {
+                    for (auto iter = inst.getSrcs().begin(); iter != inst.getSrcs().end(); ++iter) {
+                        if (*iter) {
+                            for (auto const& regId : (*iter)->getRegisterIds()) {
+                                (*m_hazardMap)[regId].emplace_back(
+                                    thisDerived->getMaxNops(inst), DerivedObserver::writeTrigger());
+                            }
                         }
                     }
                 }

@@ -31,10 +31,10 @@ namespace rocRoller
         {
             struct
             {
-                uint mantissa : 23;
-                uint exponent : 8;
-                bool sign : 1;
-            } parts;
+                unsigned int mantissa : 23;
+                unsigned int exponent : 8;
+                unsigned int sign     : 1;
+            } parts{};
 
             static_assert(sizeof(parts) == 4);
 

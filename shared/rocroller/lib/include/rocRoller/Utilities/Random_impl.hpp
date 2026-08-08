@@ -8,7 +8,7 @@
 namespace rocRoller
 {
     template <typename T, typename R>
-    std::vector<typename PackedTypeOf<T>::type> RandomGenerator::vector(uint nx, R min, R max)
+    std::vector<typename PackedTypeOf<T>::type> RandomGenerator::vector(unsigned int nx, R min, R max)
     {
         using U = typename PackedTypeOf<T>::type;
 

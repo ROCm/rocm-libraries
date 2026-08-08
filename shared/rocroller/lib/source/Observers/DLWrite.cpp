@@ -13,17 +13,22 @@ namespace rocRoller
             if(trigger(inst))
             {
                 m_prevOpCode = inst.getOpCode();
-                for(auto iter = (writeTrigger() ? inst.getDsts().begin() : inst.getSrcs().begin());
-                    iter != (writeTrigger() ? inst.getDsts().end() : inst.getSrcs().end());
-                    iter++)
-                {
-                    auto reg = *iter;
-                    if(reg)
-                    {
-                        for(auto const& regId : reg->getRegisterIds())
-                        {
-                            (*m_hazardMap)[regId].push_back(
-                                WaitStateHazardCounter(getMaxNops(inst), writeTrigger()));
+                if constexpr (writeTrigger()) {
+                    for (auto iter = inst.getDsts().begin(); iter != inst.getDsts().end(); ++iter) {
+                        if (*iter) {
+                            for (auto const& regId : (*iter)->getRegisterIds()) {
+                                (*m_hazardMap)[regId].emplace_back(
+                                    getMaxNops(inst), writeTrigger());
+                            }
+                        }
+                    }
+                } else {
+                    for (auto iter = inst.getSrcs().begin(); iter != inst.getSrcs().end(); ++iter) {
+                        if (*iter) {
+                            for (auto const& regId : (*iter)->getRegisterIds()) {
+                                (*m_hazardMap)[regId].emplace_back(
+                                    getMaxNops(inst), writeTrigger());
+                            }
                         }
                     }
                 }

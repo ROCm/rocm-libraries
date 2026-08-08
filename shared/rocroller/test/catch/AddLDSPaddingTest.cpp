@@ -42,8 +42,8 @@ namespace AddLDSPaddingTest
         {
             rocRoller::KernelGraph::KernelGraph graph;
 
-            uint sizeX = 5u;
-            uint sizeY = 7u;
+            unsigned int sizeX = 5u;
+            unsigned int sizeY = 7u;
 
             auto indexX = graph.coordinates.addElement(MacroTileIndex(0, literal(sizeX), nullptr));
             auto indexY = graph.coordinates.addElement(MacroTileIndex(1, literal(sizeY), nullptr));
@@ -60,10 +60,10 @@ namespace AddLDSPaddingTest
         {
             rocRoller::KernelGraph::KernelGraph graph;
 
-            uint sizeX   = 5u;
-            uint sizeY   = 7u;
-            uint strideX = GENERATE(7u, 10u);
-            uint strideY = 1u;
+            unsigned int sizeX   = 5u;
+            unsigned int sizeY   = 7u;
+            unsigned int strideX = GENERATE(7u, 10u);
+            unsigned int strideY = 1u;
 
             auto indexX
                 = graph.coordinates.addElement(MacroTileIndex(0, literal(sizeX), literal(strideX)));
@@ -82,10 +82,10 @@ namespace AddLDSPaddingTest
         {
             rocRoller::KernelGraph::KernelGraph graph;
 
-            uint sizeX   = 5u;
-            uint sizeY   = 7u;
-            uint strideX = 1u;
-            uint strideY = GENERATE(5u, 11u);
+            unsigned int sizeX   = 5u;
+            unsigned int sizeY   = 7u;
+            unsigned int strideX = 1u;
+            unsigned int strideY = GENERATE(5u, 11u);
 
             auto indexX
                 = graph.coordinates.addElement(MacroTileIndex(0, literal(sizeX), literal(strideX)));

@@ -130,12 +130,12 @@ namespace rocRoller
         return m_workgroupClusterSize;
     }
 
-    void CommandParameters::setManualWavefrontCount(std::pair<uint, uint> wavefrontCounts)
+    void CommandParameters::setManualWavefrontCount(std::pair<unsigned int, unsigned int> wavefrontCounts)
     {
         m_wavefrontCounts = wavefrontCounts;
     }
 
-    std::optional<std::pair<uint, uint>> CommandParameters::getManualWavefrontCounts() const
+    std::optional<std::pair<unsigned int, unsigned int>> CommandParameters::getManualWavefrontCounts() const
     {
         return m_wavefrontCounts;
     }

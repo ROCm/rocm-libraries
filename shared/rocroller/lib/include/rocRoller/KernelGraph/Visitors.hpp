@@ -246,7 +246,7 @@ namespace rocRoller
 
             Expression::ExpressionPtr wavefrontSize() const
             {
-                uint wfs = static_cast<uint>(m_context->kernel()->wavefront_size());
+                unsigned int wfs = static_cast<unsigned int>(m_context->kernel()->wavefront_size());
                 return Expression::literal(wfs);
             }
 

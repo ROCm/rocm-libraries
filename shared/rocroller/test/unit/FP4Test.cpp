@@ -166,9 +166,9 @@ namespace rocRollerTest
                         "Number of FP4 values must be multiple times of 16");
 
             auto rng = RandomGenerator(316473u);
-            auto a   = rng.vector<uint>(num_fp4 / numFP4PerElement,
-                                      std::numeric_limits<uint>::min(),
-                                      std::numeric_limits<uint>::max());
+            auto a   = rng.vector<unsigned int>(num_fp4 / numFP4PerElement,
+                                      std::numeric_limits<unsigned int>::min(),
+                                      std::numeric_limits<unsigned int>::max());
 
             std::vector<uint32_t> result(a.size());
 
@@ -221,8 +221,8 @@ namespace rocRollerTest
             auto NZ = std::make_shared<Expression::Expression>(1u); // number of work items z
 
             auto rng = RandomGenerator(316473u);
-            auto a   = rng.vector<uint>(
-                numFP4x8, std::numeric_limits<uint>::min(), std::numeric_limits<uint>::max());
+            auto a   = rng.vector<unsigned int>(
+                numFP4x8, std::numeric_limits<unsigned int>::min(), std::numeric_limits<unsigned int>::max());
 
             std::vector<uint32_t> b(a.size());
             std::vector<uint32_t> r(a.size());

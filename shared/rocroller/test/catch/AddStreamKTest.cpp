@@ -35,15 +35,15 @@ using namespace rocRoller::KernelGraph;
 using namespace rocRoller::KernelGraph::CoordinateGraph;
 using namespace rocRoller::KernelGraph::ControlGraph;
 
-void computeReference(std::function<void(uint, uint, uint, uint)> f,
-                      uint                                        numTileM,
-                      uint                                        numTileN,
-                      uint                                        numTileK,
-                      uint                                        numWGs,
-                      uint                                        numTilesSK,
-                      uint                                        numTilesDP)
+void computeReference(std::function<void(unsigned int, unsigned int, unsigned int, unsigned int)> f,
+                      unsigned int                                        numTileM,
+                      unsigned int                                        numTileN,
+                      unsigned int                                        numTileK,
+                      unsigned int                                        numWGs,
+                      unsigned int                                        numTilesSK,
+                      unsigned int                                        numTilesDP)
 {
-    std::map<std::tuple<uint, uint, uint>, uint> coverage;
+    std::map<std::tuple<unsigned int, unsigned int, uint>, uint> coverage;
 
     auto numSKTilesPerWG = (numTilesSK + numWGs - 1) / numWGs;
     auto numDPTilesPerWG = numTilesDP / numWGs;

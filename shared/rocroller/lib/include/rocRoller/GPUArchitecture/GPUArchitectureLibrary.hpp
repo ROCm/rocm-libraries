@@ -21,6 +21,10 @@
 #include <rocRoller/GPUArchitecture/GPUInstructionInfo.hpp>
 #include <rocRoller/Utilities/LazySingleton.hpp>
 
+#ifdef _MSC_VER
+#undef LoadLibrary
+#endif
+
 namespace rocRoller
 {
     class GPUArchitectureLibrary : public LazySingleton<GPUArchitectureLibrary>

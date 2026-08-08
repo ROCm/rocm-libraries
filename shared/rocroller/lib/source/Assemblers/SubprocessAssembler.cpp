@@ -1,11 +1,11 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include <cstdio>
 #include <filesystem>
 #include <fstream>
 
 #include <rocRoller/Assemblers/SubprocessAssembler.hpp>
+#include <rocRoller/Windows.hpp>
 
 #include <rocRoller/GPUArchitecture/GPUArchitectureLibrary.hpp>
 #include <rocRoller/Utilities/Component.hpp>
@@ -67,7 +67,7 @@ namespace rocRoller
     std::string SubprocessAssembler::makeTempFolder()
     {
         auto  tmpFolderTemplate = std::filesystem::temp_directory_path() / "rocroller-XXXXXX";
-        char* tmpFolder         = mkdtemp(const_cast<char*>(tmpFolderTemplate.c_str()));
+        char* tmpFolder         = mkdtemp(tmpFolderTemplate.string());
         if(!tmpFolder)
             throw std::runtime_error("Unable to create temporary directory");
 
@@ -113,7 +113,7 @@ namespace rocRoller
             auto const arch          = GPUArchitectureLibrary::getInstance()->GetArch(target);
             auto const wavefrontSize = arch.GetCapability(GPUCapability::DefaultWavefrontSize);
 
-            std::vector<std::string> args = {assemblerPath,
+            std::vector<std::string> args{assemblerPath,
                                              "-x",
                                              "assembler",
                                              "-target",
@@ -123,8 +123,8 @@ namespace rocRoller
                                              (wavefrontSize == 64) ? "-mwavefrontsize64" : "",
                                              "-c",
                                              "-o",
-                                             objectFile,
-                                             assemblyFile};
+                                             objectFile.string(),
+                                             assemblyFile.string()};
 
             auto command = joinArgs(args);
 
@@ -133,14 +133,14 @@ namespace rocRoller
 
         {
             std::vector<std::string> args
-                = {assemblerPath, "-target", "amdgcn-amd-amdhsa", "-o", codeObjectFile, objectFile};
+                = {assemblerPath, "-target", "amdgcn-amd-amdhsa", "-o", codeObjectFile.string(), objectFile.string()};
 
             auto command = joinArgs(args);
 
             executeChecked(command, deleteDir);
         }
 
-        auto fileContents = readFile(codeObjectFile);
+        auto fileContents = readFile(codeObjectFile.string());
 
         deleteDir();
 

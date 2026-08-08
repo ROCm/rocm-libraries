@@ -21,7 +21,7 @@ namespace rocRoller
              */
             int remapWorkgroupXCC(rocRoller::KernelGraph::KernelGraph& graph,
                                   int                                  workgroupTag,
-                                  uint                                 numXCC);
+                                  unsigned int                                 numXCC);
         }
     }
 }

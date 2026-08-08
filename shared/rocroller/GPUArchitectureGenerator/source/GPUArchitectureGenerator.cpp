@@ -9,6 +9,7 @@
 #include <string.h>
 #include <string>
 
+#include "Windows.h"
 #include "GPUArchitectureGenerator/GPUArchitectureGenerator.hpp"
 
 const std::string HELP_MESSAGE

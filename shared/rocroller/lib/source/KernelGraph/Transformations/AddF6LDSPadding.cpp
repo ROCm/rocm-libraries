@@ -20,16 +20,16 @@ namespace rocRoller
         }
 
         CoordinateGraph::MacroTile paddedMacroTile(CoordinateGraph::MacroTile& macroTile,
-                                                   uint                        paddingBytes)
+                                                   unsigned int                        paddingBytes)
         {
-            uint const elementBits = 6;
-            uint const packing     = 16;
+            unsigned int const elementBits = 6;
+            unsigned int const packing     = 16;
 
             auto fastMovingDim = isMatrixA(macroTile) ? 0 : 1;
             auto padElements   = macroTile.sizes[fastMovingDim] / packing;
 
-            std::vector<uint> padBytesA = {padElements * paddingBytes, 0};
-            std::vector<uint> padBytesB = {0, padElements * paddingBytes};
+            std::vector<unsigned int> padBytesA = {padElements * paddingBytes, 0};
+            std::vector<unsigned int> padBytesB = {0, padElements * paddingBytes};
 
             return CoordinateGraph::MacroTile(macroTile,
                                               isMatrixA(macroTile) ? padBytesA : padBytesB);

@@ -32,16 +32,16 @@ namespace rocRoller
      * @{
      */
 
-    template <typename T>
-    constexpr T CeilDivide(T num, T den)
+    template <typename T, typename K>
+    constexpr T CeilDivide(T num, K den)
     {
-        return (num + (den - 1)) / den;
+        return (num + (static_cast<T>(den) - 1)) / static_cast<T>(den);
     }
 
-    template <typename T>
-    constexpr T RoundUpToMultiple(T val, T den)
+    template <typename T, typename K>
+    constexpr T RoundUpToMultiple(T val, K den)
     {
-        return CeilDivide(val, den) * den;
+        return CeilDivide(val, den) * static_cast<T>(den);
     }
 
     template <typename T, typename = typename std::enable_if<std::is_integral<T>::value>>
@@ -270,15 +270,15 @@ namespace rocRoller
         }
     };
 
-    template <std::integral T>
-    Generator<T> iota(T begin, T end, T inc)
+    template <std::integral T, std::integral K>
+    Generator<T> iota(T begin, K end, T inc)
     {
-        for(; begin < end; begin += inc)
+        for(; begin < static_cast<T>(end); begin += inc)
             co_yield begin;
     }
 
-    template <std::integral T>
-    Generator<T> iota(T begin, T end)
+    template <std::integral T, std::integral K>
+    Generator<T> iota(T begin, K end)
     {
         co_yield iota<T>(begin, end, 1);
     }
@@ -290,7 +290,7 @@ namespace rocRoller
             co_yield begin;
     }
 
-    inline constexpr auto Generated(auto gen)
+    constexpr auto Generated(auto gen)
     {
         return std::vector(gen.begin(), gen.end());
     }
@@ -299,7 +299,7 @@ namespace rocRoller
      * Returns true if begin...end represents a contiguous, increasing range of integer values.
      */
     template <typename Iter, typename End>
-    inline bool IsContiguousRange(Iter begin, End end)
+    bool IsContiguousRange(Iter begin, End end)
     {
         if(begin == end)
             return true;

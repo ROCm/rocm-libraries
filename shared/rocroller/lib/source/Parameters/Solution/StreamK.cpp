@@ -3,6 +3,7 @@
 
 #include <rocRoller/Parameters/Solution/StreamK.hpp>
 
+#include <ostream>
 #include <string>
 
 namespace rocRoller
