@@ -703,7 +703,8 @@ NB_MODULE(_roc_host_validation, module) {
                          return nb::bytes(reinterpret_cast<const char*>(storage.data()),
                                           storage.size());
                      })
-        .def_prop_ro("values", [](const TensorView& tensor) { return tensorValues(tensor); });
+        .def_prop_ro("values", [](const TensorView& tensor) { return tensorValues(tensor); })
+        .def("to", &TensorView::to, "type"_a);
 
     nb::class_<Tensor>(module, "Tensor")
         .def(nb::init<ScalarType, Shape>())
@@ -745,7 +746,8 @@ NB_MODULE(_roc_host_validation, module) {
                                           storage.size());
                      })
         .def_prop_ro("values", [](const Tensor& tensor) { return tensorValues(tensor); })
-        .def("view", &Tensor::view, nb::keep_alive<0, 1>());
+        .def("view", &Tensor::view, nb::keep_alive<0, 1>())
+        .def("to", &Tensor::to, "type"_a);
 
     nb::enum_<ComparisonIndexOrder>(module, "ComparisonIndexOrder")
         .value("FirstDimensionFastest", ComparisonIndexOrder::FirstDimensionFastest)

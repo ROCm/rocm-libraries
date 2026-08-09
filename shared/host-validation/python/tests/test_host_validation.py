@@ -256,6 +256,35 @@ class TensorAndGemmTests(unittest.TestCase):
         np.testing.assert_array_equal(hv.to_numpy(view), values)
         self.assertTrue(hv.compare(view, hv.from_numpy(values).view()).passed)
 
+    def test_tensor_conversion_preserves_layout(self):
+        values = np.arange(24, dtype=np.float32).reshape(4, 6)[::-1, ::-2]
+        view = hv.TensorView.from_numpy(values)
+
+        copied = view.to(hv.ScalarType.Float32)
+        self.assertEqual(copied.strides, view.strides)
+        self.assertEqual(copied.offset, view.offset)
+        np.testing.assert_array_equal(hv.to_numpy(copied), values)
+
+        converted = view.to(hv.ScalarType.Float16)
+        self.assertEqual(converted.strides, view.strides)
+        self.assertEqual(converted.offset, view.offset)
+        np.testing.assert_array_equal(hv.to_numpy(converted), values.astype(np.float16))
+
+        bfloat_source = hv.from_numpy(np.asarray([1.1, -2.25], dtype=np.float32))
+        np.testing.assert_array_equal(
+            hv.to_numpy(bfloat_source.to(hv.ScalarType.BFloat16)),
+            quantize_bfloat16(np.asarray([1.1, -2.25], dtype=np.float32)),
+        )
+
+        packed = hv.from_numpy(
+            np.asarray([-6.0, -0.5, 1.5, 6.0], dtype=np.float32),
+            hv.ScalarType.Float4E2M1,
+        )
+        np.testing.assert_array_equal(
+            hv.to_numpy(packed.to(hv.ScalarType.Float32)),
+            np.asarray([-6.0, -0.5, 1.5, 6.0], dtype=np.float32),
+        )
+
     def test_numpy_tensor_view_observes_mutation(self):
         values = np.arange(6, dtype=np.float32).reshape(2, 3)
         view = hv.TensorView.from_numpy(values)
