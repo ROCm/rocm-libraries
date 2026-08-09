@@ -266,8 +266,7 @@ TensorView tensorViewFromNumpy(nb::object array, std::optional<ScalarType> reque
     ptrdiff_t lowerOffset = 0;
     ptrdiff_t upperOffset = 0;
     for (size_t dimension = 0; dimension < tensorStrides.size(); ++dimension) {
-        const ptrdiff_t delta =
-            checkedElementDelta(tensorStrides[dimension], shape[dimension] - 1);
+        const ptrdiff_t delta = checkedElementDelta(tensorStrides[dimension], shape[dimension] - 1);
         if (delta < 0)
             lowerOffset = checkedElementOffsetAdd(lowerOffset, delta);
         else
@@ -277,10 +276,8 @@ TensorView tensorViewFromNumpy(nb::object array, std::optional<ScalarType> reque
     if (lowerOffset == std::numeric_limits<ptrdiff_t>::min())
         throw std::overflow_error("NumPy TensorView base offset overflow.");
     const ptrdiff_t normalizedOffset = -lowerOffset;
-    const ptrdiff_t normalizedUpper =
-        checkedElementOffsetAdd(upperOffset, normalizedOffset);
-    if (!std::in_range<size_t>(normalizedOffset) ||
-        !std::in_range<size_t>(normalizedUpper))
+    const ptrdiff_t normalizedUpper = checkedElementOffsetAdd(upperOffset, normalizedOffset);
+    if (!std::in_range<size_t>(normalizedOffset) || !std::in_range<size_t>(normalizedUpper))
         throw std::overflow_error("NumPy TensorView addressed range exceeds size_t.");
 
     const size_t prefixBytes =
@@ -288,8 +285,7 @@ TensorView tensorViewFromNumpy(nb::object array, std::optional<ScalarType> reque
     const size_t normalizedUpperSize = static_cast<size_t>(normalizedUpper);
     if (normalizedUpperSize == std::numeric_limits<size_t>::max())
         throw std::overflow_error("NumPy TensorView addressed range overflow.");
-    const size_t storageBytes =
-        checkedStorageBytes(normalizedUpperSize + 1, storageType.itemSize);
+    const size_t storageBytes = checkedStorageBytes(normalizedUpperSize + 1, storageType.itemSize);
 
     const uintptr_t logicalAddress = reinterpret_cast<uintptr_t>(view.buf);
     if (prefixBytes > logicalAddress)
@@ -298,10 +294,9 @@ TensorView tensorViewFromNumpy(nb::object array, std::optional<ScalarType> reque
     if (storageBytes > std::numeric_limits<uintptr_t>::max() - storageAddress)
         throw std::overflow_error("NumPy TensorView storage address overflow.");
 
-    return TensorView(
-        type, Layout(std::move(shape), std::move(tensorStrides), normalizedOffset),
-        std::span<const std::byte>(reinterpret_cast<const std::byte*>(storageAddress),
-                                   storageBytes));
+    return TensorView(type, Layout(std::move(shape), std::move(tensorStrides), normalizedOffset),
+                      std::span<const std::byte>(reinterpret_cast<const std::byte*>(storageAddress),
+                                                 storageBytes));
 }
 
 Tensor tensorFromStorage(ScalarType type, std::vector<size_t> dimensions, nb::bytes rawStorage,
@@ -326,11 +321,9 @@ Tensor referenceGemmOwned(
     double activationParameter1, OutputSelection outputSelection, GemmBackend backend,
     std::optional<Tensor> blockScaleA, std::optional<Tensor> blockScaleB, size_t blockSizeA,
     size_t blockSizeB, std::vector<Tensor> preQuantizationScalesA,
-    std::vector<MatrixAxis> preQuantizationAxesA,
-    std::vector<Tensor> preQuantizationScalesB,
-    std::vector<MatrixAxis> preQuantizationAxesB,
-    std::complex<double> outputScale, GemmOutputConversion outputConversion,
-    AccumulationRounding accumulationRounding) {
+    std::vector<MatrixAxis> preQuantizationAxesA, std::vector<Tensor> preQuantizationScalesB,
+    std::vector<MatrixAxis> preQuantizationAxesB, std::complex<double> outputScale,
+    GemmOutputConversion outputConversion, AccumulationRounding accumulationRounding) {
     if (a.shape().rank() != 2 || b.shape().rank() != 2)
         throw std::invalid_argument("Python reference_gemm requires rank-2 A and B tensors.");
 
@@ -339,30 +332,20 @@ Tensor referenceGemmOwned(
     GemmOperand operandB(b.view());
     operandA.computeType = computeTypeA;
     operandB.computeType = computeTypeB;
-    auto addPreQuantizationScales = [](GemmOperand& operand,
-                                       const std::vector<Tensor>& scales,
-                                       const std::vector<MatrixAxis>& axes,
-                                       MatrixAxis defaultAxis,
+    auto addPreQuantizationScales = [](GemmOperand& operand, const std::vector<Tensor>& scales,
+                                       const std::vector<MatrixAxis>& axes, MatrixAxis defaultAxis,
                                        const char* name) {
         if (!axes.empty() && axes.size() != scales.size())
-            throw std::invalid_argument(
-                std::string("Python reference_gemm ") + name +
-                " scale/axis counts differ.");
+            throw std::invalid_argument(std::string("Python reference_gemm ") + name +
+                                        " scale/axis counts differ.");
         for (size_t index = 0; index < scales.size(); ++index)
             operand.preQuantizationScales.push_back(
-                VectorBinding{scales[index].view(),
-                              axes.empty() ? defaultAxis : axes[index]});
+                VectorBinding{scales[index].view(), axes.empty() ? defaultAxis : axes[index]});
     };
-    addPreQuantizationScales(operandA,
-                             preQuantizationScalesA,
-                             preQuantizationAxesA,
-                             MatrixAxis::Row,
-                             "A pre-quantization");
-    addPreQuantizationScales(operandB,
-                             preQuantizationScalesB,
-                             preQuantizationAxesB,
-                             MatrixAxis::Column,
-                             "B pre-quantization");
+    addPreQuantizationScales(operandA, preQuantizationScalesA, preQuantizationAxesA,
+                             MatrixAxis::Row, "A pre-quantization");
+    addPreQuantizationScales(operandB, preQuantizationScalesB, preQuantizationAxesB,
+                             MatrixAxis::Column, "B pre-quantization");
     if (blockScaleA || blockScaleB) {
         if (!blockScaleA || !blockScaleB || blockSizeA == 0 || blockSizeB == 0)
             throw std::invalid_argument(
@@ -469,10 +452,9 @@ Tensor referenceMaximumAbsoluteOwned(const Tensor& input, ScalarType outputType,
     return output;
 }
 
-PythonStructuredSparsityResult applyStructuredSparsityOwned(
-    const Tensor& input,
-    StructuredSparsityPattern pattern,
-    bool emitTwoOfFourMetadata) {
+PythonStructuredSparsityResult applyStructuredSparsityOwned(const Tensor& input,
+                                                            StructuredSparsityPattern pattern,
+                                                            bool emitTwoOfFourMetadata) {
     if (pattern.axis >= input.shape().rank())
         throw std::out_of_range("Python structured sparsity axis exceeds tensor rank.");
     if (pattern.groupSize == 0)
@@ -481,8 +463,8 @@ PythonStructuredSparsityResult applyStructuredSparsityOwned(
         throw std::invalid_argument(
             "Python structured sparsity axis extent must be divisible by group size.");
 
-    std::vector<size_t> compressedDimensions(
-        input.shape().dimensions().begin(), input.shape().dimensions().end());
+    std::vector<size_t> compressedDimensions(input.shape().dimensions().begin(),
+                                             input.shape().dimensions().end());
     compressedDimensions[pattern.axis] =
         input.shape()[pattern.axis] / pattern.groupSize * pattern.retainedElements;
     const Shape compressedShape(std::move(compressedDimensions));
@@ -491,26 +473,20 @@ PythonStructuredSparsityResult applyStructuredSparsityOwned(
     Tensor compressed(input.type(), compressedShape);
     Tensor retainedIndices(ScalarType::UInt8, compressedShape);
     std::optional<Tensor> twoOfFourMetadata;
-    StructuredSparsityProblem problem(input.view(),
-                                      pruned.mutableView(),
-                                      compressed.mutableView(),
-                                      retainedIndices.mutableView(),
-                                      pattern);
+    StructuredSparsityProblem problem(input.view(), pruned.mutableView(), compressed.mutableView(),
+                                      retainedIndices.mutableView(), pattern);
     if (emitTwoOfFourMetadata) {
         if (pattern.groupSize != 4 || pattern.retainedElements != 2)
             throw std::invalid_argument(
                 "Python two-of-four metadata output requires a two-of-four pattern.");
-        std::vector<size_t> metadataDimensions(
-            input.shape().dimensions().begin(),
-            input.shape().dimensions().end());
+        std::vector<size_t> metadataDimensions(input.shape().dimensions().begin(),
+                                               input.shape().dimensions().end());
         const size_t sparsityGroups = input.shape()[pattern.axis] / 4;
         metadataDimensions[pattern.axis] = (sparsityGroups + 1) / 2;
-        twoOfFourMetadata.emplace(
-            ScalarType::UInt8, Shape(std::move(metadataDimensions)));
+        twoOfFourMetadata.emplace(ScalarType::UInt8, Shape(std::move(metadataDimensions)));
         problem.twoOfFourMetadata = twoOfFourMetadata->mutableView();
     }
-    const StructuredSparsityRunInfo runInfo =
-        applyStructuredSparsity(problem);
+    const StructuredSparsityRunInfo runInfo = applyStructuredSparsity(problem);
     return {
         .pruned = std::move(pruned),
         .compressed = std::move(compressed),
@@ -520,23 +496,21 @@ PythonStructuredSparsityResult applyStructuredSparsityOwned(
     };
 }
 
-PythonTwoOfFourMetadataResult encodeTwoOfFourMetadataOwned(
-    const Tensor& retainedIndices, size_t axis) {
+PythonTwoOfFourMetadataResult encodeTwoOfFourMetadataOwned(const Tensor& retainedIndices,
+                                                           size_t axis) {
     if (axis >= retainedIndices.shape().rank())
         throw std::out_of_range("Python two-of-four metadata axis exceeds tensor rank.");
     if (retainedIndices.shape()[axis] % 2 != 0)
         throw std::invalid_argument(
             "Python two-of-four metadata requires two retained indices per sparsity group.");
 
-    std::vector<size_t> metadataDimensions(
-        retainedIndices.shape().dimensions().begin(),
-        retainedIndices.shape().dimensions().end());
+    std::vector<size_t> metadataDimensions(retainedIndices.shape().dimensions().begin(),
+                                           retainedIndices.shape().dimensions().end());
     const size_t sparsityGroups = retainedIndices.shape()[axis] / 2;
     metadataDimensions[axis] = (sparsityGroups + 1) / 2;
     Tensor metadata(ScalarType::UInt8, Shape(std::move(metadataDimensions)));
     const TwoOfFourMetadataRunInfo runInfo = encodeTwoOfFourMetadata(
-        TwoOfFourMetadataProblem(
-            retainedIndices.view(), metadata.mutableView(), axis));
+        TwoOfFourMetadataProblem(retainedIndices.view(), metadata.mutableView(), axis));
     return {.metadata = std::move(metadata), .runInfo = runInfo};
 }
 
@@ -777,10 +751,8 @@ NB_MODULE(_roc_host_validation, module) {
         .def("view", &Tensor::view, nb::keep_alive<0, 1>());
 
     nb::enum_<ComparisonIndexOrder>(module, "ComparisonIndexOrder")
-        .value("FirstDimensionFastest",
-               ComparisonIndexOrder::FirstDimensionFastest)
-        .value("LastDimensionFastest",
-               ComparisonIndexOrder::LastDimensionFastest);
+        .value("FirstDimensionFastest", ComparisonIndexOrder::FirstDimensionFastest)
+        .value("LastDimensionFastest", ComparisonIndexOrder::LastDimensionFastest);
 
     nb::enum_<UlpComparisonMode>(module, "UlpComparisonMode")
         .value("RelativeSpacing", UlpComparisonMode::RelativeSpacing)
@@ -802,19 +774,14 @@ NB_MODULE(_roc_host_validation, module) {
         .def_rw("strict_tolerance", &ComparisonOptions::strictTolerance)
         .def_rw("equal_nans", &ComparisonOptions::equalNaNs)
         .def_rw("equal_signed_zero", &ComparisonOptions::equalSignedZero)
-        .def_rw("compute_pointwise_statistics",
-                &ComparisonOptions::computePointwiseStatistics)
-        .def_rw("compute_frobenius",
-                &ComparisonOptions::computeFrobenius)
+        .def_rw("compute_pointwise_statistics", &ComparisonOptions::computePointwiseStatistics)
+        .def_rw("compute_frobenius", &ComparisonOptions::computeFrobenius)
         .def_rw("compute_ulp", &ComparisonOptions::computeUlp)
         .def_rw("ulp_type", &ComparisonOptions::ulpType)
         .def_rw("ulp_mode", &ComparisonOptions::ulpMode)
-        .def_rw("relative_frobenius_tolerance",
-                &ComparisonOptions::relativeFrobeniusTolerance)
-        .def_rw("maximum_ulp_tolerance",
-                &ComparisonOptions::maximumUlpTolerance)
-        .def_rw("report_matching_elements",
-                &ComparisonOptions::reportMatchingElements)
+        .def_rw("relative_frobenius_tolerance", &ComparisonOptions::relativeFrobeniusTolerance)
+        .def_rw("maximum_ulp_tolerance", &ComparisonOptions::maximumUlpTolerance)
+        .def_rw("report_matching_elements", &ComparisonOptions::reportMatchingElements)
         .def_rw("max_reported_mismatches", &ComparisonOptions::maxReportedMismatches)
         .def_rw("selection", &ComparisonOptions::selection);
 
@@ -841,25 +808,18 @@ NB_MODULE(_roc_host_validation, module) {
         .def_ro("mismatches", &ComparisonResult::mismatches)
         .def_ro("matched_nans", &ComparisonResult::matchedNaNs)
         .def_ro("matched_infinities", &ComparisonResult::matchedInfinities)
-        .def_ro("non_finite_mismatches",
-                &ComparisonResult::nonFiniteMismatches)
-        .def_ro("signed_zero_mismatches",
-                &ComparisonResult::signedZeroMismatches)
+        .def_ro("non_finite_mismatches", &ComparisonResult::nonFiniteMismatches)
+        .def_ro("signed_zero_mismatches", &ComparisonResult::signedZeroMismatches)
         .def_ro("max_absolute_difference", &ComparisonResult::maxAbsoluteDifference)
-        .def_ro("max_relative_difference",
-                &ComparisonResult::maxRelativeDifference)
+        .def_ro("max_relative_difference", &ComparisonResult::maxRelativeDifference)
         .def_ro("max_symmetric_relative_difference",
                 &ComparisonResult::maxSymmetricRelativeDifference)
-        .def_ro("maximum_observed_magnitude",
-                &ComparisonResult::maximumObservedMagnitude)
-        .def_ro("maximum_expected_magnitude",
-                &ComparisonResult::maximumExpectedMagnitude)
-        .def_ro("frobenius_difference",
-                &ComparisonResult::frobeniusDifference)
+        .def_ro("maximum_observed_magnitude", &ComparisonResult::maximumObservedMagnitude)
+        .def_ro("maximum_expected_magnitude", &ComparisonResult::maximumExpectedMagnitude)
+        .def_ro("frobenius_difference", &ComparisonResult::frobeniusDifference)
         .def_ro("frobenius_observed", &ComparisonResult::frobeniusObserved)
         .def_ro("frobenius_expected", &ComparisonResult::frobeniusExpected)
-        .def_ro("relative_frobenius_error",
-                &ComparisonResult::relativeFrobeniusError)
+        .def_ro("relative_frobenius_error", &ComparisonResult::relativeFrobeniusError)
         .def_ro("maximum_ulp", &ComparisonResult::maximumUlp)
         .def_ro("sum_ulp", &ComparisonResult::sumUlp)
         .def_ro("average_ulp", &ComparisonResult::averageUlp)
@@ -868,8 +828,7 @@ NB_MODULE(_roc_host_validation, module) {
         .def_ro("frobenius_passed", &ComparisonResult::frobeniusPassed)
         .def_ro("ulp_passed", &ComparisonResult::ulpPassed)
         .def_ro("reported_mismatches", &ComparisonResult::reportedMismatches)
-        .def_ro("reported_comparisons",
-                &ComparisonResult::reportedComparisons)
+        .def_ro("reported_comparisons", &ComparisonResult::reportedComparisons)
         .def_prop_ro("passed", &ComparisonResult::passed);
 
     nb::class_<ComparisonTolerance>(module, "ComparisonTolerance")
@@ -890,8 +849,7 @@ NB_MODULE(_roc_host_validation, module) {
     nb::class_<SentinelResult>(module, "SentinelResult")
         .def_ro("checked", &SentinelResult::checked)
         .def_ro("mismatches", &SentinelResult::mismatches)
-        .def_ro("reported_mismatches",
-                &SentinelResult::reportedMismatches)
+        .def_ro("reported_mismatches", &SentinelResult::reportedMismatches)
         .def_prop_ro("passed", &SentinelResult::passed);
 
     module.attr("ComparisonPlan") = module.attr("ComparisonOptions");
@@ -982,15 +940,12 @@ NB_MODULE(_roc_host_validation, module) {
 
     nb::class_<StructuredSparsityRunInfo>(module, "StructuredSparsityRunInfo")
         .def_ro("groups_processed", &StructuredSparsityRunInfo::groupsProcessed)
-        .def_ro("input_elements_visited",
-                &StructuredSparsityRunInfo::inputElementsVisited)
+        .def_ro("input_elements_visited", &StructuredSparsityRunInfo::inputElementsVisited)
         .def_ro("pruned_elements_written", &StructuredSparsityRunInfo::prunedElementsWritten)
         .def_ro("compressed_elements_written",
                 &StructuredSparsityRunInfo::compressedElementsWritten)
-        .def_ro("retained_indices_written",
-                &StructuredSparsityRunInfo::retainedIndicesWritten)
-        .def_ro("metadata_bytes_written",
-                &StructuredSparsityRunInfo::metadataBytesWritten);
+        .def_ro("retained_indices_written", &StructuredSparsityRunInfo::retainedIndicesWritten)
+        .def_ro("metadata_bytes_written", &StructuredSparsityRunInfo::metadataBytesWritten);
 
     nb::class_<PythonStructuredSparsityResult>(module, "StructuredSparsityResult")
         .def_prop_ro(
@@ -1013,22 +968,20 @@ NB_MODULE(_roc_host_validation, module) {
             nb::rv_policy::reference_internal)
         .def_prop_ro(
             "two_of_four_metadata",
-            [](const PythonStructuredSparsityResult& result)
-                -> const std::optional<Tensor>& {
+            [](const PythonStructuredSparsityResult& result) -> const std::optional<Tensor>& {
                 return result.twoOfFourMetadata;
             },
             nb::rv_policy::reference_internal)
         .def_prop_ro(
             "run_info",
-            [](const PythonStructuredSparsityResult& result)
-                -> const StructuredSparsityRunInfo& { return result.runInfo; },
+            [](const PythonStructuredSparsityResult& result) -> const StructuredSparsityRunInfo& {
+                return result.runInfo;
+            },
             nb::rv_policy::reference_internal);
 
     nb::class_<TwoOfFourMetadataRunInfo>(module, "TwoOfFourMetadataRunInfo")
-        .def_ro("sparsity_groups_encoded",
-                &TwoOfFourMetadataRunInfo::sparsityGroupsEncoded)
-        .def_ro("metadata_bytes_written",
-                &TwoOfFourMetadataRunInfo::metadataBytesWritten);
+        .def_ro("sparsity_groups_encoded", &TwoOfFourMetadataRunInfo::sparsityGroupsEncoded)
+        .def_ro("metadata_bytes_written", &TwoOfFourMetadataRunInfo::metadataBytesWritten);
 
     nb::class_<PythonTwoOfFourMetadataResult>(module, "TwoOfFourMetadataResult")
         .def_prop_ro(
@@ -1039,8 +992,9 @@ NB_MODULE(_roc_host_validation, module) {
             nb::rv_policy::reference_internal)
         .def_prop_ro(
             "run_info",
-            [](const PythonTwoOfFourMetadataResult& result)
-                -> const TwoOfFourMetadataRunInfo& { return result.runInfo; },
+            [](const PythonTwoOfFourMetadataResult& result) -> const TwoOfFourMetadataRunInfo& {
+                return result.runInfo;
+            },
             nb::rv_policy::reference_internal);
 
     nb::class_<PythonEpilogueResult>(module, "EpilogueResult")
@@ -1079,14 +1033,9 @@ NB_MODULE(_roc_host_validation, module) {
         "tensor"_a, "pattern"_a, "seed"_a, "parameter0"_a = 0.0, "parameter1"_a = 0.0,
         nb::rv_policy::reference);
     module.def("generate_tensor", &generateOwned, "type"_a, "shape"_a, "options"_a);
-    module.def("apply_structured_sparsity",
-               &applyStructuredSparsityOwned,
-               "input"_a,
-               "pattern"_a,
+    module.def("apply_structured_sparsity", &applyStructuredSparsityOwned, "input"_a, "pattern"_a,
                "emit_two_of_four_metadata"_a = false);
-    module.def("encode_two_of_four_metadata",
-               &encodeTwoOfFourMetadataOwned,
-               "retained_indices"_a,
+    module.def("encode_two_of_four_metadata", &encodeTwoOfFourMetadataOwned, "retained_indices"_a,
                "axis"_a);
     module.def(
         "compare",
@@ -1100,115 +1049,60 @@ NB_MODULE(_roc_host_validation, module) {
             return compare(observed, expected, options);
         },
         "observed"_a, "expected"_a, "options"_a = ComparisonOptions{});
-    module.def("default_comparison_options",
-               &defaultComparisonOptions,
-               "type"_a,
-               "symmetric_relative_tolerance"_a =
-                   std::optional<double>{});
-    module.def("near_comparison_options",
-               &nearComparisonOptions,
-               "absolute_tolerance"_a);
-    module.def("allclose_comparison_options",
-               &allCloseComparisonOptions,
-               "absolute_tolerance"_a,
-               "relative_tolerance"_a,
-               "equal_nans"_a = false);
+    module.def("default_comparison_options", &defaultComparisonOptions, "type"_a,
+               "symmetric_relative_tolerance"_a = std::optional<double>{});
+    module.def("near_comparison_options", &nearComparisonOptions, "absolute_tolerance"_a);
+    module.def("allclose_comparison_options", &allCloseComparisonOptions, "absolute_tolerance"_a,
+               "relative_tolerance"_a, "equal_nans"_a = false);
     module.def("ulp_mantissa_bits", &ulpMantissaBits, "type"_a);
-    module.def("ulp_distance",
-               &ulpDistance,
-               "exact"_a,
-               "approximation"_a,
-               "mantissa_bits"_a);
-    module.def("encoded_ulp_distance",
-               &encodedUlpDistance,
-               "exact"_a,
-               "approximation"_a,
-               "type"_a);
+    module.def("ulp_distance", &ulpDistance, "exact"_a, "approximation"_a, "mantissa_bits"_a);
+    module.def("encoded_ulp_distance", &encodedUlpDistance, "exact"_a, "approximation"_a, "type"_a);
     module.def(
         "find_allclose_tolerance",
-        [](const Tensor& observed,
-           const Tensor& expected,
+        [](const Tensor& observed, const Tensor& expected,
            const std::vector<double>& absoluteCandidates,
-           const std::vector<double>& relativeCandidates,
-           const ComparisonOptions& options) {
-            return findAllCloseTolerance(
-                observed.view(),
-                expected.view(),
-                std::span<const double>(absoluteCandidates),
-                std::span<const double>(relativeCandidates),
-                options);
+           const std::vector<double>& relativeCandidates, const ComparisonOptions& options) {
+            return findAllCloseTolerance(observed.view(), expected.view(),
+                                         std::span<const double>(absoluteCandidates),
+                                         std::span<const double>(relativeCandidates), options);
         },
-        "observed"_a,
-        "expected"_a,
-        "absolute_candidates"_a,
-        "relative_candidates"_a,
+        "observed"_a, "expected"_a, "absolute_candidates"_a, "relative_candidates"_a,
         "options"_a = ComparisonOptions{});
     module.def(
         "find_allclose_tolerance",
-        [](TensorView observed,
-           TensorView expected,
-           const std::vector<double>& absoluteCandidates,
-           const std::vector<double>& relativeCandidates,
-           const ComparisonOptions& options) {
-            return findAllCloseTolerance(
-                observed,
-                expected,
-                std::span<const double>(absoluteCandidates),
-                std::span<const double>(relativeCandidates),
-                options);
+        [](TensorView observed, TensorView expected, const std::vector<double>& absoluteCandidates,
+           const std::vector<double>& relativeCandidates, const ComparisonOptions& options) {
+            return findAllCloseTolerance(observed, expected,
+                                         std::span<const double>(absoluteCandidates),
+                                         std::span<const double>(relativeCandidates), options);
         },
-        "observed"_a,
-        "expected"_a,
-        "absolute_candidates"_a,
-        "relative_candidates"_a,
+        "observed"_a, "expected"_a, "absolute_candidates"_a, "relative_candidates"_a,
         "options"_a = ComparisonOptions{});
     module.def(
         "check_unwritten_sentinel",
-        [](const Tensor& tensor,
-           SentinelRegion region,
-           size_t maxReportedMismatches) {
-            return checkUnwrittenSentinel(
-                tensor.type(),
-                tensor.storage(),
-                0,
-                tensor.shape().elementCount(),
-                region,
-                maxReportedMismatches);
+        [](const Tensor& tensor, SentinelRegion region, size_t maxReportedMismatches) {
+            return checkUnwrittenSentinel(tensor.type(), tensor.storage(), 0,
+                                          tensor.shape().elementCount(), region,
+                                          maxReportedMismatches);
         },
-        "tensor"_a,
-        "region"_a = SentinelRegion::Unspecified,
+        "tensor"_a, "region"_a = SentinelRegion::Unspecified, "max_reported_mismatches"_a = 10);
+    module.def(
+        "check_unused_tensor_storage",
+        [](const Tensor& tensor, size_t allocatedElements, SentinelRegion region,
+           size_t maxReportedMismatches) {
+            return checkUnusedTensorStorage(tensor.view(), allocatedElements, region,
+                                            maxReportedMismatches);
+        },
+        "tensor"_a, "allocated_elements"_a, "region"_a = SentinelRegion::Inside,
         "max_reported_mismatches"_a = 10);
     module.def(
         "check_unused_tensor_storage",
-        [](const Tensor& tensor,
-           size_t allocatedElements,
-           SentinelRegion region,
+        [](TensorView tensor, size_t allocatedElements, SentinelRegion region,
            size_t maxReportedMismatches) {
-            return checkUnusedTensorStorage(
-                tensor.view(),
-                allocatedElements,
-                region,
-                maxReportedMismatches);
+            return checkUnusedTensorStorage(tensor, allocatedElements, region,
+                                            maxReportedMismatches);
         },
-        "tensor"_a,
-        "allocated_elements"_a,
-        "region"_a = SentinelRegion::Inside,
-        "max_reported_mismatches"_a = 10);
-    module.def(
-        "check_unused_tensor_storage",
-        [](TensorView tensor,
-           size_t allocatedElements,
-           SentinelRegion region,
-           size_t maxReportedMismatches) {
-            return checkUnusedTensorStorage(
-                tensor,
-                allocatedElements,
-                region,
-                maxReportedMismatches);
-        },
-        "tensor"_a,
-        "allocated_elements"_a,
-        "region"_a = SentinelRegion::Inside,
+        "tensor"_a, "allocated_elements"_a, "region"_a = SentinelRegion::Inside,
         "max_reported_mismatches"_a = 10);
     module.def("reference_gemm", &referenceGemmOwned, "a"_a, "b"_a, "c"_a, "output_type"_a,
                "accumulator_type"_a, "alpha"_a = 1.0, "beta"_a = 0.0,
@@ -1218,8 +1112,7 @@ NB_MODULE(_roc_host_validation, module) {
                "activation_parameter1"_a = 0.0, "output_selection"_a = OutputSelection::all(),
                "backend"_a = GemmBackend::Canonical, "block_scale_a"_a = std::optional<Tensor>{},
                "block_scale_b"_a = std::optional<Tensor>{}, "block_size_a"_a = 0,
-               "block_size_b"_a = 0,
-               "pre_quantization_scales_a"_a = std::vector<Tensor>{},
+               "block_size_b"_a = 0, "pre_quantization_scales_a"_a = std::vector<Tensor>{},
                "pre_quantization_axes_a"_a = std::vector<MatrixAxis>{},
                "pre_quantization_scales_b"_a = std::vector<Tensor>{},
                "pre_quantization_axes_b"_a = std::vector<MatrixAxis>{},
