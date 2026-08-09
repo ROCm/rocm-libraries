@@ -153,6 +153,7 @@ options.real.pattern = GenerationPattern::Sine;
 options.imaginary.pattern = GenerationPattern::Cosine;
 
 GenerationRunInfo run = generate(outputView, options);
+GenerationRunInfo patch = generateAt(outputView, logicalIndex, options);
 ```
 
 The current patterns cover constants, selection from an explicit candidate
@@ -167,6 +168,10 @@ encodings rather than numerical conversion. Real and imaginary components
 have independent recipes and random streams. Random values are counter-based,
 so a tensor element depends only on the seed, stream, and logical index—not
 loop order or thread count.
+
+`generateAt` applies the same recipe to one logical element. Its coordinate is
+decoded with `GenerationOptions::indexOrder`, so callers do not reproduce
+layout-independent linear-index arithmetic.
 
 Each numerical component recipe can also apply one unary transform
 (`absolute`, `sine`, or `cosine`), an affine value scale/offset, and sign
@@ -472,7 +477,8 @@ The `roc_host_validation` package currently provides:
 - `ComparisonOptions`/`ComparisonResult`, logical selection, complex and
   non-finite policy, Frobenius/ULP evidence, allclose search, and sentinel
   diagnostics;
-- `GenerationOptions`, `GenerationPatternSpec`, and `generate_tensor`;
+- `GenerationOptions`, `GenerationPatternSpec`, `generate_tensor`, and
+  `generate_at`;
 - `reference_axpby` with optional X/Y tensors, explicit alpha/beta,
   accumulator type, and output type;
 - `reference_gemm` with runtime storage/output/accumulator types, alpha/beta,

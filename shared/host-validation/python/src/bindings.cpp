@@ -1070,6 +1070,13 @@ NB_MODULE(_roc_host_validation, module) {
 
     module.def("scalar_type_info", [](ScalarType type) { return scalarTypeInfo(type); });
     module.def("generate_tensor", &generateOwned, "type"_a, "shape"_a, "options"_a);
+    module.def(
+        "generate_at",
+        [](Tensor& tensor, size_t logicalIndex, const GenerationOptions& options) -> Tensor& {
+            generateAt(tensor.mutableView(), logicalIndex, options);
+            return tensor;
+        },
+        "tensor"_a, "logical_index"_a, "options"_a, nb::rv_policy::reference);
     module.def("apply_structured_sparsity", &applyStructuredSparsityOwned, "input"_a, "pattern"_a,
                "emit_two_of_four_metadata"_a = false);
     module.def("encode_two_of_four_metadata", &encodeTwoOfFourMetadataOwned, "retained_indices"_a,

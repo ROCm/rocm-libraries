@@ -442,6 +442,21 @@ void testIndexedGeneration() {
         require(candidates.view().loadAs<float>({index}) == expected,
                 "Candidate-set generation mismatch.");
     }
+
+    Tensor point(ScalarType::Float32, Shape{2, 3, 2});
+    GenerationOptions pointOptions;
+    pointOptions.real.pattern = GenerationPattern::Constant;
+    pointOptions.real.parameter0 = 9.0;
+    const GenerationRunInfo pointRun = generateAt(point.mutableView(), 3, pointOptions);
+    require(pointRun.elementsGenerated == 1 && point.view().loadAs<float>({1, 1, 0}) == 9.0f &&
+                point.view().loadAs<float>({0, 1, 1}) == 0.0f,
+            "First-dimension-fast point generation mismatch.");
+
+    pointOptions.indexOrder = LogicalIndexOrder::LastDimensionFastest;
+    pointOptions.real.parameter0 = 7.0;
+    generateAt(point.mutableView(), 3, pointOptions);
+    require(point.view().loadAs<float>({0, 1, 1}) == 7.0f,
+            "Last-dimension-fast point generation mismatch.");
 }
 
 void testReferenceAxpby() {
