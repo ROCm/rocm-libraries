@@ -3,8 +3,6 @@
 
 #include <rocRoller/Expression.hpp>
 
-#include <bit>
-
 template <typename T>
 constexpr auto cast_to_unsigned(T val)
 {
