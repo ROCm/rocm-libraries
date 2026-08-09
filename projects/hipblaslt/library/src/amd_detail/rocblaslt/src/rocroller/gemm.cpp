@@ -415,9 +415,9 @@ std::shared_ptr<RocRollerGemmKernel> RocRollerGemmKernel::generate(std::shared_p
                     >= gemm->machineInstruction.n * gemm->machineInstruction.k,
                 "Not enough elements (B).");
 
-    uint wavetilePerWavefrontM = gemm->wavefrontSize * gemm->workgroupTile.m
+    unsigned int wavetilePerWavefrontM = gemm->wavefrontSize * gemm->workgroupTile.m
                                  / gemm->machineInstruction.m / gemm->workgroupSizeX;
-    uint wavetilePerWavefrontN
+    unsigned int wavetilePerWavefrontN
         = gemm->workgroupTile.n / gemm->machineInstruction.n / gemm->workgroupSizeY;
 
     AssertFatal(wavetilePerWavefrontM > 0, "WaveTile size mismatch.");
@@ -543,8 +543,8 @@ std::shared_ptr<RocRollerGemmKernel> RocRollerGemmKernel::generate(std::shared_p
     params->transposeMemoryAccess.set(LayoutType::MATRIX_A, gemm->kernelType.transA);
     params->transposeMemoryAccess.set(LayoutType::MATRIX_B, gemm->kernelType.transB);
 
-    uint workgroupSizeX = gemm->workgroupSizeX * gemm->workgroupSizeY;
-    uint workgroupSizeY = 1;
+    unsigned int workgroupSizeX = gemm->workgroupSizeX * gemm->workgroupSizeY;
+    unsigned int workgroupSizeY = 1;
 
     // Workgroup Mapping
     if(gemm->workgroupMappingDim != -1)
@@ -572,10 +572,10 @@ std::shared_ptr<RocRollerGemmKernel> RocRollerGemmKernel::generate(std::shared_p
 
     params->setManualWorkgroupSize({workgroupSizeX, workgroupSizeY, 1});
     params->setManualWavefrontCount(
-        {static_cast<uint>(gemm->workgroupTile.m / gemm->machineInstruction.m
-                           / wavetilePerWavefrontM),
-         static_cast<uint>(gemm->workgroupTile.n / gemm->machineInstruction.n
-                           / wavetilePerWavefrontN)});
+        {gemm->workgroupTile.m / gemm->machineInstruction.m
+                           / wavetilePerWavefrontM,
+         gemm->workgroupTile.n / gemm->machineInstruction.n
+                           / wavetilePerWavefrontN});
 
     AssertFatal(gemm->kernelType.scaleTypeA.preSwizzleTile.size()
                     == gemm->kernelType.scaleTypeB.preSwizzleTile.size(),

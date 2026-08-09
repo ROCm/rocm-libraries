@@ -7,6 +7,10 @@ option(CMAKE_EXPORT_COMPILE_COMMANDS "Generate compile commands json file." ON)
 
 project(hipblaslt LANGUAGES CXX C ASM)
 
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
 if("${CMAKE_SOURCE_DIR}" STREQUAL "${PROJECT_SOURCE_DIR}")
     set(HIPBLASLT_IS_SUBPROJECT FALSE)
 else()
@@ -19,6 +23,13 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 # Only set default when not already defined (e.g. by superproject / rocm-libraries).
 if(NOT DEFINED ROCM_LIBRARIES_ROOT)
   cmake_path(SET ROCM_LIBRARIES_ROOT NORMALIZE "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+endif()
+
+if(WIN32)
+    add_compile_definitions("$<$<COMPILE_LANGUAGE:C,CXX>:_CRT_SECURE_NO_WARNINGS;NOMINMAX>")
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_C_COMPILER_ID STREQUAL "Clang" )
+        add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:-Wno-format;-Wno-c++17-extensions;-fms-extensions;-fms-compatibility>")
+    endif()
 endif()
 
 include(hipblaslt_shim)
@@ -147,8 +158,6 @@ endif()
 
 if(HIPBLASLT_ENABLE_AMD_SMI)
     find_package(amd_smi REQUIRED)
-else()
-    find_package(amd_smi)
 endif()
 
 if(HIPBLASLT_ENABLE_CLIENT)
@@ -235,7 +244,9 @@ if(HIPBLASLT_ENABLE_ROCROLLER)
                 set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
                 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/rocroller" "${CMAKE_CURRENT_BINARY_DIR}/rocroller")
             endblock()
-            target_link_options(rocroller PRIVATE "LINKER:--exclude-libs,ALL")
+            if(NOT WIN32)
+                target_link_options(rocroller PRIVATE "LINKER:--exclude-libs,ALL")
+            endif()
         endif()
     endif()
 endif()
@@ -374,7 +385,6 @@ if(HIPBLASLT_ENABLE_HOST)
         hipblaslt_target_configure_sanitizers(hipblaslt PRIVATE)
     endif()
 
-    target_compile_features(hipblaslt PUBLIC cxx_std_17)
     target_compile_definitions(hipblaslt
         PUBLIC
             $<BUILD_INTERFACE:ROCM_USE_FLOAT16>
