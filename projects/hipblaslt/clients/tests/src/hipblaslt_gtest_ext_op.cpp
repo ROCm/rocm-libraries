@@ -16,7 +16,6 @@
 #include <numeric>
 #include <vector>
 
-#include "../include/unit.hpp"
 #include "hipblaslt_arguments.hpp"
 
 namespace

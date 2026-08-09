@@ -354,13 +354,8 @@ namespace TensileLite
             const TensorView resultView(
                 scalarType, layout, resultStorage);
 
-            const std::optional<double> toleranceOverride
-                = scalarType == ScalarType::Float32 && threshold > 0.0
-                      ? std::optional<double>(threshold)
-                      : std::nullopt;
             ComparisonOptions options
-                = defaultComparisonOptions(
-                    scalarType, toleranceOverride);
+                = validationComparisonOptions(tensor.dataType(), threshold);
             options.selection.indexOrder
                 = ComparisonIndexOrder::FirstDimensionFastest;
             options.selection.stride = validationStride;

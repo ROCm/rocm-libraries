@@ -5,6 +5,10 @@ add_executable(host-validation-tests host_validation_test.cpp)
 target_link_libraries(host-validation-tests PRIVATE roc::host-validation)
 add_test(NAME host-validation-tests COMMAND host-validation-tests)
 
+add_executable(host-validation-comparison-policy-tests comparison_policy_test.cpp)
+target_link_libraries(host-validation-comparison-policy-tests PRIVATE roc::host-validation)
+add_test(NAME host-validation-comparison-policy-tests COMMAND host-validation-comparison-policy-tests)
+
 add_executable(host-validation-tiled-tests tiled_backend_test.cpp)
 target_link_libraries(host-validation-tiled-tests PRIVATE roc::host-validation-tiled)
 add_test(NAME host-validation-tiled-tests COMMAND host-validation-tiled-tests)

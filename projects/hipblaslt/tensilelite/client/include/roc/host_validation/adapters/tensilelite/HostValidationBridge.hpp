@@ -13,6 +13,7 @@
 #include <complex>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <stdexcept>
 
@@ -105,6 +106,19 @@ namespace TensileLite::Client
         default:
             throw std::invalid_argument("Activation has no runtime host-validation mapping.");
         }
+    }
+
+    inline roc::host_validation::ComparisonOptions
+        validationComparisonOptions(rocisa::DataType type, double threshold)
+    {
+        using namespace roc::host_validation;
+
+        const ScalarType            scalarType = toHostValidationScalarType(type);
+        const std::optional<double> toleranceOverride
+            = scalarType == ScalarType::Float32 && threshold > 0.0
+                  ? std::optional<double>(threshold)
+                  : std::nullopt;
+        return defaultComparisonOptions(scalarType, toleranceOverride);
     }
 
     template <typename T>
