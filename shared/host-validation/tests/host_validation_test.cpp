@@ -457,6 +457,18 @@ void testIndexedGeneration() {
     generateAt(point.mutableView(), 3, pointOptions);
     require(point.view().loadAs<float>({0, 1, 1}) == 7.0f,
             "Last-dimension-fast point generation mismatch.");
+
+    Tensor affine(ScalarType::Float32, Shape{2, 3, 2});
+    GenerationOptions affineOptions;
+    affineOptions.real.pattern = GenerationPattern::AffineIndexRemainder;
+    affineOptions.real.dimensionCoefficients = {1, -1, 2};
+    affineOptions.real.affineOffset = -2;
+    affineOptions.real.remainderDivisor = 5;
+    affineOptions.real.valueOffset = 1.0;
+    generate(affine.mutableView(), affineOptions);
+    require(affine.view().loadAs<float>({0, 0, 0}) == -1.0f &&
+                affine.view().loadAs<float>({1, 2, 1}) == 0.0f,
+            "Affine-index remainder generation mismatch.");
 }
 
 void testReferenceAxpby() {
