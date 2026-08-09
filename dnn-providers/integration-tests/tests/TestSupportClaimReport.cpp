@@ -130,7 +130,7 @@ TEST_F(TestSupportClaimReport, ResetClearsAll)
     SupportClaimReport::get().record(makeResult(SupportVerdict::SATISFIED));
     SupportClaimReport::get().record(makeResult(SupportVerdict::CLAIM_BROKEN));
     SupportClaimReport::get().recordGraphFound();
-    SupportClaimReport::get().recordGraphWithClaimsFound();
+    SupportClaimReport::get().recordGraphWithClaims();
 
     SupportClaimReport::get().reset();
 
@@ -138,14 +138,14 @@ TEST_F(TestSupportClaimReport, ResetClearsAll)
     EXPECT_EQ(SupportClaimReport::get().count(SupportVerdict::CLAIM_BROKEN), 0u);
     EXPECT_EQ(SupportClaimReport::get().getTotalRecorded(), 0u);
     EXPECT_EQ(SupportClaimReport::get().getGraphsFound(), 0u);
-    EXPECT_EQ(SupportClaimReport::get().getGraphsWithClaimsFound(), 0u);
-    EXPECT_EQ(SupportClaimReport::get().getGraphsWithClaimsQueried(), 0u);
+    EXPECT_EQ(SupportClaimReport::get().getGraphsWithClaims(), 0u);
+    EXPECT_EQ(SupportClaimReport::get().getGraphsWithClaimsVerified(), 0u);
     EXPECT_FALSE(SupportClaimReport::get().hasFailures());
 }
 
 // ---------------------------------------------------------------------------
 // The nesting invariant: queried ⊆ withClaimsFound ⊆ found. The queried count
-// is an explicit counter (recordGraphQueried), not derived from _records.size(),
+// is an explicit counter (recordGraphWithClaimsVerified), not derived from _records.size(),
 // because multi-engine enforcement produces N records per graph.
 // ---------------------------------------------------------------------------
 
@@ -155,16 +155,16 @@ TEST_F(TestSupportClaimReport, QueriedCountTracksExplicitCalls)
     {
         SupportClaimReport::get().recordGraphFound();
     }
-    SupportClaimReport::get().recordGraphWithClaimsFound();
-    SupportClaimReport::get().recordGraphWithClaimsFound();
+    SupportClaimReport::get().recordGraphWithClaims();
+    SupportClaimReport::get().recordGraphWithClaims();
 
-    SupportClaimReport::get().recordGraphQueried();
+    SupportClaimReport::get().recordGraphWithClaimsVerified();
     SupportClaimReport::get().record(makeResult(SupportVerdict::SATISFIED));
     SupportClaimReport::get().record(makeResult(SupportVerdict::NOT_ENFORCED));
 
     EXPECT_EQ(SupportClaimReport::get().getGraphsFound(), 5u);
-    EXPECT_EQ(SupportClaimReport::get().getGraphsWithClaimsFound(), 2u);
-    EXPECT_EQ(SupportClaimReport::get().getGraphsWithClaimsQueried(), 1u);
+    EXPECT_EQ(SupportClaimReport::get().getGraphsWithClaims(), 2u);
+    EXPECT_EQ(SupportClaimReport::get().getGraphsWithClaimsVerified(), 1u);
     EXPECT_EQ(SupportClaimReport::get().getTotalRecorded(), 2u);
 }
 
@@ -176,7 +176,7 @@ TEST_F(TestSupportClaimReport, PrintLevel1ShowsCounters)
 {
     SupportClaimReport::get().recordGraphFound();
     SupportClaimReport::get().recordGraphFound();
-    SupportClaimReport::get().recordGraphWithClaimsFound();
+    SupportClaimReport::get().recordGraphWithClaims();
     SupportClaimReport::get().record(makeResult(SupportVerdict::SATISFIED));
 
     std::ostringstream oss;
@@ -250,7 +250,7 @@ TEST_F(TestSupportClaimReport, PrintIsSilentWhenGraphsFoundButNoSidecars)
 TEST_F(TestSupportClaimReport, PrintShowsNotEnforcedOnceASidecarExists)
 {
     SupportClaimReport::get().recordGraphFound();
-    SupportClaimReport::get().recordGraphWithClaimsFound();
+    SupportClaimReport::get().recordGraphWithClaims();
     SupportClaimReport::get().record(makeResult(SupportVerdict::NOT_ENFORCED));
 
     std::ostringstream oss;
@@ -268,7 +268,7 @@ TEST_F(TestSupportClaimReport, PrintShowsNotEnforcedOnceASidecarExists)
 TEST_F(TestSupportClaimReport, PrintShowsDiscoveryCountsWhenNothingWasQueried)
 {
     SupportClaimReport::get().recordGraphFound();
-    SupportClaimReport::get().recordGraphWithClaimsFound();
+    SupportClaimReport::get().recordGraphWithClaims();
 
     std::ostringstream oss;
     SupportClaimReport::get().print(oss);
@@ -285,22 +285,22 @@ TEST_F(TestSupportClaimReport, PrintShowsDiscoveryCountsWhenNothingWasQueried)
 TEST_F(TestSupportClaimReport, EmptyQueryGuardNotTrippedWhenNothingDiscovered)
 {
     // (0, 0) → false: no graph carried a claim, so there was nothing to enforce.
-    EXPECT_FALSE(SupportClaimReport::get().claimsFoundButNoneQueried());
+    EXPECT_FALSE(SupportClaimReport::get().claimsFoundButNoneVerified());
 }
 
 TEST_F(TestSupportClaimReport, EmptyQueryGuardTrippedWhenDiscoveredButNoQueries)
 {
     // (N, 0) → true: claim-bearing graphs exist but not one was ever queried.
-    SupportClaimReport::get().recordGraphWithClaimsFound();
-    EXPECT_TRUE(SupportClaimReport::get().claimsFoundButNoneQueried());
+    SupportClaimReport::get().recordGraphWithClaims();
+    EXPECT_TRUE(SupportClaimReport::get().claimsFoundButNoneVerified());
 }
 
 TEST_F(TestSupportClaimReport, EmptyQueryGuardNotTrippedWhenQueriesObserved)
 {
-    SupportClaimReport::get().recordGraphWithClaimsFound();
-    SupportClaimReport::get().recordGraphQueried();
+    SupportClaimReport::get().recordGraphWithClaims();
+    SupportClaimReport::get().recordGraphWithClaimsVerified();
     SupportClaimReport::get().record(makeResult(SupportVerdict::SATISFIED));
-    EXPECT_FALSE(SupportClaimReport::get().claimsFoundButNoneQueried());
+    EXPECT_FALSE(SupportClaimReport::get().claimsFoundButNoneVerified());
 }
 
 // An errored query is still an observed query. Counting only the ones that
@@ -308,18 +308,18 @@ TEST_F(TestSupportClaimReport, EmptyQueryGuardNotTrippedWhenQueriesObserved)
 // hand it a green exit code — the precise silence this guard exists to break.
 TEST_F(TestSupportClaimReport, EmptyQueryGuardNotTrippedWhenEveryQueryErrored)
 {
-    SupportClaimReport::get().recordGraphWithClaimsFound();
-    SupportClaimReport::get().recordGraphQueried();
+    SupportClaimReport::get().recordGraphWithClaims();
+    SupportClaimReport::get().recordGraphWithClaimsVerified();
     SupportClaimReport::get().record(makeResult(SupportVerdict::QUERY_ERRORED));
-    EXPECT_FALSE(SupportClaimReport::get().claimsFoundButNoneQueried());
+    EXPECT_FALSE(SupportClaimReport::get().claimsFoundButNoneVerified());
 }
 
 TEST_F(TestSupportClaimReport, EmptyQueryGuardNotTrippedWithOnlyQueries)
 {
     // (0, N) → false: queries ran but no graph carried a claim.
-    SupportClaimReport::get().recordGraphQueried();
+    SupportClaimReport::get().recordGraphWithClaimsVerified();
     SupportClaimReport::get().record(makeResult(SupportVerdict::SATISFIED));
-    EXPECT_FALSE(SupportClaimReport::get().claimsFoundButNoneQueried());
+    EXPECT_FALSE(SupportClaimReport::get().claimsFoundButNoneVerified());
 }
 
 // NOLINTEND(readability-identifier-naming)

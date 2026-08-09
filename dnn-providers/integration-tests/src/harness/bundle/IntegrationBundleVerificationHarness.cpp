@@ -65,7 +65,7 @@ void IntegrationBundleVerificationHarness::executeGraphThroughEngine(
                                                    status.get_message());
     if(!allVerdicts.empty())
     {
-        SupportClaimReport::get().recordGraphQueried();
+        SupportClaimReport::get().recordGraphWithClaimsVerified();
     }
     for(const auto& v : allVerdicts)
     {
@@ -178,7 +178,7 @@ void IntegrationBundleVerificationHarness::enforceAtLevel(EnforcementLevel level
                                                    status.get_message());
     if(!allVerdicts.empty())
     {
-        SupportClaimReport::get().recordGraphQueried();
+        SupportClaimReport::get().recordGraphWithClaimsVerified();
     }
 
     const std::string rung

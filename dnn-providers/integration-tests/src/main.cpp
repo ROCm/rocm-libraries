@@ -366,12 +366,11 @@ int main(int argc, char** argv) noexcept
 
         if(hipdnn_integration_tests::TestConfig::get().enforceSupportClaims()
            && hipdnn_integration_tests::bundle::SupportClaimReport::get()
-                  .claimsFoundButNoneQueried())
+                  .claimsFoundButNoneVerified())
         {
             std::cerr
                 << "\nFATAL: --enforce-support-claims is active and "
-                << hipdnn_integration_tests::bundle::SupportClaimReport::get()
-                       .getGraphsWithClaimsFound()
+                << hipdnn_integration_tests::bundle::SupportClaimReport::get().getGraphsWithClaims()
                 << " graph(s) carrying support\n"
                    "       claims were discovered, but not one of them was ever queried. "
                    "Enforcement\n"

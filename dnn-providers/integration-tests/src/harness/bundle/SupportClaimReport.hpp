@@ -49,7 +49,7 @@ public:
 
     // Record one verdict. Callers must not pass NO_SIDECAR — a graph with no
     // support.json has nothing to report, and admitting those records would both
-    // bury the real verdicts and break getGraphsWithClaimsQueried() below.
+    // bury the real verdicts and break getGraphsWithClaimsVerified() below.
     void record(const SupportResult& result)
     {
         const std::lock_guard<std::mutex> lock(_mutex);
@@ -71,22 +71,22 @@ public:
     }
 
     // ...of which these have a .support.json beside them.
-    void recordGraphWithClaimsFound()
+    void recordGraphWithClaims()
     {
-        _graphsWithClaimsFound.fetch_add(1, std::memory_order_relaxed);
+        _graphsWithClaims.fetch_add(1, std::memory_order_relaxed);
     }
 
     // ...of which these we actually got to query. Counted once per graph at
     // the call site, not once per engine — multi-engine enforcement produces
     // N records per graph, so deriving from _records.size() would overcount.
-    void recordGraphQueried()
+    void recordGraphWithClaimsVerified()
     {
-        _graphsQueried.fetch_add(1, std::memory_order_relaxed);
+        _graphsWithClaimsVerified.fetch_add(1, std::memory_order_relaxed);
     }
 
-    size_t getGraphsWithClaimsQueried() const
+    size_t getGraphsWithClaimsVerified() const
     {
-        return _graphsQueried.load(std::memory_order_relaxed);
+        return _graphsWithClaimsVerified.load(std::memory_order_relaxed);
     }
 
     // RFC 0015 §7.2. True when the run found graphs carrying support claims but
@@ -94,9 +94,9 @@ public:
     // plugin failed to load, no --test-engine, every graph filtered out.
     // Enforcement then "passes" having verified nothing, so main() turns this
     // into a hard failure.
-    bool claimsFoundButNoneQueried() const
+    bool claimsFoundButNoneVerified() const
     {
-        return getGraphsWithClaimsFound() > 0 && getGraphsWithClaimsQueried() == 0;
+        return getGraphsWithClaims() > 0 && getGraphsWithClaimsVerified() == 0;
     }
 
     size_t count(SupportVerdict verdict) const
@@ -151,7 +151,7 @@ public:
         // it is every run in the tree today. Once a sidecar exists we print even
         // if there is nothing to say about it, because "enforcing nothing" is a
         // result the user needs to see rather than silence that reads as success.
-        if(records.empty() && getGraphsWithClaimsFound() == 0)
+        if(records.empty() && getGraphsWithClaims() == 0)
         {
             return;
         }
@@ -161,7 +161,7 @@ public:
         // 0 queried is a broken run, while 0 and 0 is simply a run with nothing
         // to enforce.
         os << "\n==== SUPPORT CLAIM SUMMARY ====\n"
-           << "  graphs: " << getGraphsFound() << " found, " << getGraphsWithClaimsFound()
+           << "  graphs: " << getGraphsFound() << " found, " << getGraphsWithClaims()
            << " with claims, " << records.size() << " queried\n"
            << "  satisfied: " << sat << "  broken: " << broke << "  errored: " << err
            << "  unclaimed: " << unc << "  not-enforced: " << notEnf << "\n";
@@ -209,8 +209,8 @@ public:
     void reset()
     {
         _graphsFound.store(0, std::memory_order_relaxed);
-        _graphsWithClaimsFound.store(0, std::memory_order_relaxed);
-        _graphsQueried.store(0, std::memory_order_relaxed);
+        _graphsWithClaims.store(0, std::memory_order_relaxed);
+        _graphsWithClaimsVerified.store(0, std::memory_order_relaxed);
         const std::lock_guard<std::mutex> lock(_mutex);
         _records.clear();
     }
@@ -219,9 +219,9 @@ public:
     {
         return _graphsFound.load(std::memory_order_relaxed);
     }
-    size_t getGraphsWithClaimsFound() const
+    size_t getGraphsWithClaims() const
     {
-        return _graphsWithClaimsFound.load(std::memory_order_relaxed);
+        return _graphsWithClaims.load(std::memory_order_relaxed);
     }
 
 private:
@@ -230,11 +230,18 @@ private:
     mutable std::mutex _mutex;
     std::vector<SupportResult> _records; // every verdict; filter by SupportVerdict when reading
 
-    // found ⊇ withClaimsFound ⊇ queried
+    // found ⊇ withClaims ⊇ withClaimsVerified
+    //
+    // Example: 100 bundles on disk, 3 have a .support.json, 2 of those 3
+    // actually got their claims verified against loaded engines (1 failed to
+    // load). The remaining 97 have no sidecar — nothing to enforce.
+    //   _graphsFound = 100
+    //   _graphsWithClaims = 3
+    //   _graphsWithClaimsVerified = 2
 
-    std::atomic<size_t> _graphsFound{0}; // every graph on disk
-    std::atomic<size_t> _graphsWithClaimsFound{0}; // ...of which these have a sidecar
-    std::atomic<size_t> _graphsQueried{0}; // ...of which these we actually queried
+    std::atomic<size_t> _graphsFound{0};
+    std::atomic<size_t> _graphsWithClaims{0};
+    std::atomic<size_t> _graphsWithClaimsVerified{0};
 };
 
 } // namespace hipdnn_integration_tests::bundle
