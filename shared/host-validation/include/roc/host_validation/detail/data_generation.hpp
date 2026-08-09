@@ -48,6 +48,7 @@ enum class DataPattern {
 enum class GenerationPattern {
     Zero,
     Constant,
+    CandidateSet,
     UniformInteger,
     AbsoluteUniformInteger,
     UniformReal,
@@ -98,6 +99,7 @@ struct GenerationPatternSpec {
     size_t dimension = 0;
     ScalarType sourceType = ScalarType::Count;
     GenerationTransform transform = GenerationTransform::None;
+    std::vector<double> candidates;
     std::vector<size_t> alternatingDimensions;
     size_t negativeParity = 0;
 };
@@ -413,6 +415,11 @@ inline double baseGenerationValue(const GenerationPatternSpec& spec, uint64_t se
             return 0.0;
         case GenerationPattern::Constant:
             return spec.parameter0;
+        case GenerationPattern::CandidateSet:
+            if (spec.candidates.empty())
+                throw std::invalid_argument("Candidate-set generation requires values.");
+            return spec.candidates[counterRandom(seed, spec.stream, logicalIndex) %
+                                   spec.candidates.size()];
         case GenerationPattern::UniformInteger:
             return static_cast<double>(indexedUniformInteger(seed, spec.stream, logicalIndex,
                                                              static_cast<int>(spec.parameter0),
@@ -594,12 +601,11 @@ inline GenerationRunInfo generate(MutableTensorView destination, const Generatio
 }
 
 /**
- * Small host-data generator used by the proof-of-concept cut.
+ * Mutable compatibility generator for legacy callers.
  *
- * The class centralizes the random stream and the common distributions so
- * callers do not each own another set of initialization helpers. A
- * counter-based, cross-language generator should replace this engine before
- * the API is declared stable.
+ * This uses the same counter primitive as GenerationOptions, but advances a
+ * private counter and therefore remains call-order-dependent. New code should
+ * use indexed GenerationOptions with explicit semantic streams.
  */
 class RandomGenerator {
    public:

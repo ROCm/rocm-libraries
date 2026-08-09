@@ -426,6 +426,22 @@ void testIndexedGeneration() {
     require(std::abs(value.real() - std::sin(1.0f)) < 1e-6f &&
                 std::abs(value.imag() - std::cos(1.0f)) < 1e-6f,
             "Complex trigonometric generation mismatch.");
+
+    Tensor candidates(ScalarType::Float32, Shape{8});
+    GenerationOptions candidateOptions;
+    candidateOptions.seed = 37;
+    candidateOptions.real.pattern = GenerationPattern::CandidateSet;
+    candidateOptions.real.stream = 5;
+    candidateOptions.real.candidates = {-6.0, -1.5, 0.0, 4.0};
+    generate(candidates.mutableView(), candidateOptions);
+    for (size_t index = 0; index < candidates.size(); ++index) {
+        const double expected =
+            candidateOptions.real.candidates[counterRandom(candidateOptions.seed,
+                                                           candidateOptions.real.stream, index) %
+                                             candidateOptions.real.candidates.size()];
+        require(candidates.view().loadAs<float>({index}) == expected,
+                "Candidate-set generation mismatch.");
+    }
 }
 
 void testActivations() {
