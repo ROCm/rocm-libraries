@@ -1,0 +1,38 @@
+{
+  "schema": "hyperloom.rocke.serve_request/v1",
+  "op": "moe",
+  "arch": "gfx950",
+  "budget_s": 1800,
+  "num_gpus": 1,
+  "requests": [
+    {
+      "moe_request": {
+        "tokens": 32,
+        "experts": 128,
+        "topk": 8,
+        "hidden": 2048,
+        "intermediate": 768,
+        "group_k": 128,
+        "activation": "silu",
+        "dtype": "fp8e4m3"
+      },
+      "problem": {
+        "tokens": 32,
+        "experts": 128,
+        "topk": 8,
+        "hidden": 2048,
+        "intermediate": 768,
+        "group_k": 128,
+        "activation": "silu",
+        "dtype": "fp8e4m3"
+      },
+      "call_count": 48,
+      "active_experts": 111,
+      "shape_provenance": "traced:qwen3-30b-a3b-decode"
+    }
+  ],
+  "kernel": {
+    "name": "fused_moe_kernel",
+    "operation": "moe"
+  }
+}

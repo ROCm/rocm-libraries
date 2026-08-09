@@ -72,9 +72,10 @@ convention for "validate rejected this spec on this arch") which is a SKIP.
 | `universal_gemm_hip_512` | gemm | `common.universal_gemm_verify_hip` | `--arch gfx950 --m 512 --n 512 --k 512` | HIP path -> `run_manifest --verify`; PerfJSON timings scrubbed, `max_abs_diff`/`bad_count` kept |
 | `fmha_fwd_hip_mha` | attention | `common.fmha_fwd_verify_hip` | `--arch gfx950 --seqlen-q 64 --seqlen-k 64 --head-size 64 --heads 4 --batch 2` | unified tiled FMHA fwd, seeded numpy dense-attn reference |
 | `distribution_reduce_demo` | reduce | `common.distribution_reduce_demo` | `--M 128 --N 4096 --block-size 256 --vec 8` | torch row-reduce, exact-match verdict |
+| `moe_gather_rescale_verify` | moe | `gfx950.moe_gather_rescale.verify_gather_rescale` | `--seed 0` | MoE activation prologue (gather + rescale + fp8 round); torch-free, compares `A` byte for byte because the bug it guards against is a rounding difference a tolerance cannot see |
 | `numeric_differential_lane` | differential | `tests/instances/differential/numeric.py` | `--arch gfx950` | the full L6 numeric lane (GEMM/elementwise/norm/reduce/attention) as one repeatable example; per-config GREEN/XFAIL table digested |
 
-All five are pinned to `gfx950` (the box's MI355X). On a different arch they
+All six are pinned to `gfx950` (the box's MI355X). On a different arch they
 SKIP rather than fail.
 
 ## Registering another example

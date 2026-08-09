@@ -43,6 +43,14 @@ silu, down GEMM, reduce) that writes `Hidden` to HBM and reads it back. **The
 mega-kernel does the whole per-token FFN in one launch and never spills `Hidden`
 to HBM.**
 
+That fusion is the right trade only while tokens are scarce. A **split** variant
+built from the same instance splits the launch in two — gate/up plus requantize,
+then the down GEMM over the materialized intermediate — deliberately paying the
+HBM round-trip in exchange for a workgroup-shared weight tile and a wider
+`tile_m`. The dispatcher gives the fused form `T <= 8` and the split form
+everything above; the README's kernel-family section has the measured bands and
+the crossover.
+
 ## 2. Block-scale fp8 (the quantization lemma)
 
 Weights and activations are fp8 e4m3 with one f32 scale per 128-element block.
@@ -66,6 +74,14 @@ for the down dequant. The block (row-uniform) granularity is mandatory: the
 down-GEMM dequant fold applies a single per-lane scalar to output slots that span
 several different rows, so only a row-uniform block scale stays correct under that
 fold.
+
+The same row-uniformity requirement applies to the **activation** scale `s_X`,
+and it is the reason the `moe_gather_rescale_a` prologue exists: a serving stack
+that quantizes before routing produces one scale per `(token, 128-group)`, which
+this kernel cannot consume. That kernel gathers into expert-block order and
+re-rounds each row onto the block's shared scale. It is opt-in and appears in no
+default plan — see the README's kernel-family section for its coverage and cost,
+and `../moe_gather_rescale/ALGORITHM.md` for its specification.
 
 ## 3. The fusion idea (the heart)
 
@@ -112,16 +128,19 @@ Let `e = BlockExpertIds[by]`, the expert this block serves. The contraction `H`
 is walked in `GROUP_K=128` chunks.
 
 ### 5.1 — Load the X fragment
-The `[tile_m, H]` activation is a small, repeatedly-reused operand, so by default
-it is a cheap global→VGPR load: per K-group each lane loads its `a_per_lane` fp8
-bytes once and reuses that fragment across **both** the gate and the up MFMAs (and
+The `[tile_m, H]` activation is a small, repeatedly-reused operand, so it is a
+cheap global→VGPR load: per K-group each lane loads its `a_per_lane` fp8 bytes
+once and reuses that fragment across **both** the gate and the up MFMAs (and
 across every intermediate-column cell `ni` of the row). The dominant traffic — the
 gate/up **weight** tiles (§4) — is what goes through the direct-to-LDS path
 (`use_dtla`, default on): staged HBM→LDS with `global_load_lds`, ping-pong
-double-buffered over `ni`, then read back with `ds_read` to feed the MFMA. (An
-*X*-via-LDS variant
-exists behind the `ROCKE_FP8_X_DTLA` flag but is default-off — it measured slower
-because the extra LDS round-trip adds a drain the scheduler cannot hide.)
+double-buffered over `ni`, then read back with `ds_read` to feed the MFMA.
+
+**FINDING (dead end, removed).** Routing *X* through LDS as well was tried and
+measured slower: the extra LDS round-trip adds a drain the scheduler cannot hide,
+and X is the one operand small enough that a VGPR-resident fragment already pays
+for itself. The path is gone from the kernel; it is recorded here so it is not
+re-derived.
 
 ### 5.2 — Gate and up GEMMs (shared A)
 For each 128-block `c` along `H`:
@@ -160,8 +179,8 @@ each fp8 `Hidden` value at the logical `(m, inter)` cell, and the down GEMM read
 its A operand from that *same* `(m, inter)` cell of the LDS buffer — the quant
 write address equals the down-MFMA A-read address. The reshape from the gate/up
 MFMA C-output layout into the down-GEMM A-input layout is therefore *implicit* in
-the addressing (BUILD_SPEC_FP8 §3.5), accomplished by the write/read addressing
-itself rather than by a separate swizzled write/read pair.
+the addressing, accomplished by the write/read addressing itself rather than by
+a separate swizzled write/read pair.
 
 ### 5.6 — Down GEMM (contract the I-slice this block owns)
 For each 128-block `c` along this threadgroup's `tile_n` slice of `I`:
@@ -252,3 +271,12 @@ The algorithm above is fixed; the README's levers (tiling, prefetch depth,
 scheduling cadence, active grid, persistent loop) change *only* how these steps
 are scheduled onto the hardware, never what is computed. Correctness is pinned by
 the hardened parity gate (§8.2); performance is the per-threadgroup schedule.
+
+Every one of those levers is a field on `FusedMegaKernelSpecFp8`, chosen by the
+MoE dispatcher and frozen into the kernel name — `tile_m`, `tile_n_inter`,
+`warp_n`, `gate_up_k` / `down_k`, `use_dtla`, `dtla_depth`, `sched_cadence`,
+`coop_alias`, and the rest. There are no environment
+variables in this path: a knob that is not on the spec cannot be selected, cached
+against, or reproduced, and two processes with different environments would build
+different kernels under the same name. When you want to try a setting, add or set
+a spec field.

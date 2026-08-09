@@ -84,7 +84,7 @@ def _report(
 ) -> str:
     served = [p for p in plans if p.get("servable")]
     lines = [
-        "# rocKE attention kernel generation",
+        f"# rocKE {request.op} kernel generation",
         "",
         f"- arch: `{request.arch}`",
         f"- shapes received: {len(plans)}",
@@ -130,7 +130,14 @@ def _report(
             )
             speedup = m.get("speedup")
             speed = f"{speedup:.4f}x vs Triton baseline" if speedup else "no baseline"
-            lines.append(f"- `{m.get('signature')}`: correctness {verdict}; {speed}")
+            line = f"- `{m.get('signature')}`: correctness {verdict}; {speed}"
+            # For a bandwidth-bound kernel the ratio to the incumbent is only
+            # half the story: how close it runs to achievable read bandwidth
+            # says whether there is anything left to win.
+            roofline = m.get("roofline_fraction")
+            if roofline:
+                line += f"; {roofline * 100:.1f}% of achievable read bandwidth"
+            lines.append(line)
         lines.append("")
     for reason in reasons:
         lines.append(f"> {reason}")
@@ -189,32 +196,70 @@ def _candidates_for_arch(registry: Any, arch: str) -> tuple[list[str] | None, st
     )
 
 
+def _registries() -> dict[str, Any]:
+    """The dispatch registry behind each served op.
+
+    Imported here rather than at module scope so ``probe`` stays the cheap,
+    device-free call it advertises being.
+    """
+    from dispatch.attention import ATTENTION_REGISTRY
+    from rocke.dispatch.families.moe import MOE_REGISTRY
+
+    return {"attention": ATTENTION_REGISTRY, "moe": MOE_REGISTRY}
+
+
 def cmd_probe(args: argparse.Namespace) -> int:
     """Report what rocKE can serve here, without needing a request or a device."""
-    from dispatch.attention import ATTENTION_REGISTRY
-
     from .runner import torch_gpu_available
 
     gpu_ok, gpu_reason = torch_gpu_available()
     arch = str(args.arch or "").strip().lower()
+    registries = _registries()
+    want = str(args.op or "").strip().lower()
+    if want and want not in registries:
+        _write(
+            Path(args.output) if args.output else None,
+            make_result(status="error", reasons=[f"unknown op {want!r}"]),
+        )
+        return EXIT_ERROR
+    selected = {want: registries[want]} if want else registries
+
+    ops: dict[str, Any] = {}
+    for op, registry in selected.items():
+        entry: dict[str, Any] = {
+            "family": registry.family,
+            "coverage": _coverage(registry),
+        }
+        if arch:
+            names, reason = _candidates_for_arch(registry, arch)
+            entry["candidates_for_arch"] = names
+            entry["candidates_for_arch_reason"] = reason
+        ops[op] = entry
+
     payload: dict[str, Any] = {
         "schema": "hyperloom.rocke.serve_probe/v1",
-        "family": "attention_unified",
         "measured_lanes_available": gpu_ok,
         "measured_lanes_reason": gpu_reason,
-        "coverage": _coverage(ATTENTION_REGISTRY),
+        "ops": ops,
     }
     if arch:
-        names, reason = _candidates_for_arch(ATTENTION_REGISTRY, arch)
         payload["arch"] = arch
-        payload["candidates_for_arch"] = names
-        payload["candidates_for_arch_reason"] = reason
+    # Retained at the top level so a caller written against the
+    # attention-only probe keeps reading the field it already reads.
+    if "attention" in ops:
+        payload["family"] = ops["attention"]["family"]
+        payload["coverage"] = ops["attention"]["coverage"]
+        if arch:
+            payload["candidates_for_arch"] = ops["attention"]["candidates_for_arch"]
+            payload["candidates_for_arch_reason"] = ops["attention"][
+                "candidates_for_arch_reason"
+            ]
     _write(Path(args.output) if args.output else None, payload)
     return EXIT_OK
 
 
 def cmd_plan(args: argparse.Namespace) -> int:
-    from .planner import plan_all
+    from .planner import PLANNERS
 
     try:
         request = _load_request(Path(args.request))
@@ -225,7 +270,7 @@ def cmd_plan(args: argparse.Namespace) -> int:
         )
         return EXIT_ERROR
 
-    plans = plan_all(request.entries, arch=request.arch)
+    plans = PLANNERS[request.op](request.entries, arch=request.arch)
     served = [p for p in plans if p.get("servable")]
     result = make_result(
         status="ok" if served else "declined",
@@ -238,7 +283,7 @@ def cmd_plan(args: argparse.Namespace) -> int:
 
 
 def cmd_run(args: argparse.Namespace) -> int:
-    from .planner import plan_all
+    from .planner import PLANNERS
 
     out_path = Path(args.output)
     try:
@@ -247,7 +292,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         _write(out_path, make_result(status="error", reasons=[str(exc)]))
         return EXIT_ERROR
 
-    plans = plan_all(request.entries, arch=request.arch)
+    plans = PLANNERS[request.op](request.entries, arch=request.arch)
     served = [p for p in plans if p.get("servable")]
     artifact_dir = request.output_dir or str(out_path.parent)
     if not served:
@@ -266,21 +311,35 @@ def cmd_run(args: argparse.Namespace) -> int:
     if args.plan_only:
         reasons.append("measured lanes disabled by --plan-only")
     else:
-        from .runner import measure_plan, torch_gpu_available
+        from .runner import measure_moe_plan, measure_plan, torch_gpu_available
 
+        # The MoE lane runs its two halves as subprocesses (see runner.py), so
+        # it does not need torch in *this* interpreter -- only in the one it
+        # spawns. Gating it on the local torch would refuse a lane that works.
         gpu_ok, gpu_reason = torch_gpu_available()
-        if not gpu_ok:
+        if request.op == "attention" and not gpu_ok:
             reasons.append(f"measured lanes skipped: {gpu_reason}")
         else:
             for plan in served[: args.max_shapes]:
-                measurement = measure_plan(
-                    plan,
-                    iterations=args.iterations,
-                    warmup=args.warmup,
-                    seed=args.seed,
-                    do_verify=not args.no_verify,
-                    do_baseline=not args.no_baseline,
-                )
+                if request.op == "moe":
+                    measurement = measure_moe_plan(
+                        plan,
+                        iterations=args.iterations,
+                        warmup=args.warmup,
+                        do_verify=not args.no_verify,
+                        do_baseline=not args.no_baseline,
+                        timeout_s=request.budget_s,
+                        work_dir=artifact_dir,
+                    )
+                else:
+                    measurement = measure_plan(
+                        plan,
+                        iterations=args.iterations,
+                        warmup=args.warmup,
+                        seed=args.seed,
+                        do_verify=not args.no_verify,
+                        do_baseline=not args.no_baseline,
+                    )
                 measurement["call_count"] = plan.get("call_count") or 0
                 measurements.append(measurement)
 
@@ -315,6 +374,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     probe = sub.add_parser("probe", help="report servable coverage; needs no request")
     probe.add_argument("--arch", default="", help="restrict coverage to one gfx target")
+    probe.add_argument("--op", default="", help="restrict coverage to one operator")
     probe.add_argument("--output", default="", help="write JSON here instead of stdout")
     probe.set_defaults(func=cmd_probe)
 

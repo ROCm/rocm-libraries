@@ -11,15 +11,13 @@ kernel (via a spec/build/grid **flag-config** on the production
 (T1 / T8 / skewed-E0), times a launch-only perf measurement (T1 + T8, warm
 best-of-N), and prints one table row of the kernel's OWN numeric perf.
 
-This is the clean, skinny-decode-style entry point: ``reproduce_levels.py`` is
-the single, fully standalone driver that turns the campaign audit trail into a
-reproducible ledger. It depends on NOTHING under ``/tmp`` and ships NO external
-hand-tuned-asm comparison -- only the kernel's numeric T1/T8 ms. All the parity
-machinery and the launch-only timing closure are inlined below, so the script
-needs neither ``parity_fp8.py`` nor ``perf_fp8.py`` present.
+Everything it needs is in this file and the ``levels/`` snapshots next to it:
+no scratch directory, no comparison against an external reference kernel, only
+the kernel's own numeric T1/T8 ms. That is what makes the ledger something
+another person can regenerate from a clean checkout.
 
-The 12 documented levels (cumulative best, T1 ms, from the README
-step table):
+The 12 documented levels (cumulative best, T1 ms; the same ledger as the
+README's step table, and the two must be kept in step):
 
     L0  vec-load (baseline)                 1.83 -> 0.872  snapshot
     L1  tile_m 32->16 (kill padded-M)       0.871-> 0.472  flag (tile_m) on snap
@@ -27,14 +25,16 @@ step table):
     L3  down software-pipeline              0.337-> 0.333  snapshot
     L4  m_tile_base correctness fix         0.333-> 0.331  snapshot (ALWAYS-ON)
     L5  gate+up SW-pipeline + wave IL       0.331-> 0.291  snapshot
-    L6  epilogue drain hoist               0.291-> 0.280  sub-diff of L5
-    L7  K=128 hero atom                      0.280-> 0.182  flag (gate_up_k/down_k)
+    L6  epilogue drain hoist                0.291-> 0.280  sub-diff of L5
+    L7  K=128 hero atom                     0.280-> 0.182  snapshot
     L8  direct-to-LDS gate+up               0.182-> 0.161  flag (use_dtla)
-    L9  iglp_opt(1) cadence                  0.161-> 0.157  flag (sched_cadence)
-    L10 active de-padded grid                0.152-> 0.131  flag (harness grid)
-    L11 persistent kernel + XCD (NEUTRAL)    0.131         flag (persistent) OFF-default
+    L9  iglp_opt(1) cadence                 0.161-> 0.157  flag (sched_cadence)
+    L10 active de-padded grid               0.157-> 0.131  flag (harness grid)
+    L11 persistent kernel                   0.131-> 0.124  flag (persistent)
 
-Run from ``dnn-providers/hip-kernel-provider/rocke/platform/python`` with ``PYTHONPATH=$(pwd)``::
+Needs a GPU and an interpreter with torch (unlike ``bench_moe_mega_fp8.py``,
+which must NOT have torch -- these two are deliberately different lanes).
+Run from ``dnn-providers/hip-kernel-provider/rocke/platform/python``::
 
     PYTHONPATH=$(pwd) python \
         -m rocke.examples.gfx950.fused_mega_moe.reproduce_levels
@@ -54,48 +54,40 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-HERE = Path(__file__).resolve().parent
-LEVELS_DIR = HERE / "levels"
+import torch
 
-import torch  # noqa: E402
-
-from rocke.examples.gfx950.moe.fused_moe_e2e_perf import (  # noqa: E402
+from rocke.examples.gfx950.fused_mega_moe.levels._build_by_path import (
+    load_level_module,
+)
+from rocke.examples.gfx950.moe.fused_moe_e2e_perf import (
     Scenario,
     make_inputs,
     time_callable_ms,
     _compare,
 )
-from rocke.helpers.compile import compile_kernel  # noqa: E402
-from rocke.runtime.launcher import (  # noqa: E402
-    KernelLauncher,
-    LaunchConfig,
-)
-from rocke.examples.gfx950.fused_mega_moe.levels._build_by_path import (  # noqa: E402
-    load_level_module,
-)
+from rocke.helpers.compile import compile_kernel
 
 # Production kernel (the FINAL best; all levers default-on).
-from rocke.instances.common import moe_fused_mega_fp8 as PROD  # noqa: E402
+from rocke.instances.common import moe_fused_mega_fp8 as PROD
+from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
+HERE = Path(__file__).resolve().parent
+LEVELS_DIR = HERE / "levels"
 
-# ---------------------------------------------------------------------------
-# Self-contained constants + helpers (inlined; asm-free).
-#   Timing knobs + parity tolerance + fp8 quant/reference machinery, copied
-#   verbatim from the legacy parity_fp8 / perf_fp8 harnesses so this driver is
-#   fully standalone (no import from those modules, no /tmp dependency).
-# ---------------------------------------------------------------------------
-
-# --- timing knobs (was perf_fp8) ---
+# --- timing knobs ---
 WARMUP = 25
 ATTEMPTS = 50
 OUTER_RUNS = 5
 
-# --- fp8 quant constants + parity tolerance (was parity_fp8) ---
+# --- fp8 quant constants + parity tolerance ---
 GROUP_K = 128
 FP8_MAX = 448.0
 AMAX_FLOOR = 1e-6
 TOL = 1.5e-2
-TILE_M = 32  # FusedMegaKernelSpecFp8.tile_m default for the hardened spec
+#: tile_m for the hardened skewed-expert case. It must exceed the 16 rows one
+#: MFMA m-tile covers, or the ``m_tile_base`` bug the case exists to catch stays
+#: invisible (see the L4 row).
+HARD_TILE_M = 32
 
 
 def _warm_gpu() -> None:
@@ -124,8 +116,8 @@ def _quant_fp8(x_f32: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
     return q.to(torch.float8_e4m3fn)
 
 
-def _blockwise_scale(w: torch.Tensor, out_axis: int, k_axis: int) -> torch.Tensor:
-    """Per-128-block amax/448 scale for a 2D weight, blocking BOTH axes by 128.
+def _blockwise_scale(w: torch.Tensor) -> torch.Tensor:
+    """Per-128-block amax/448 scale for a 2D ``(out, k)`` weight, both axes blocked.
 
     Returns a ``[ceil(out/128), ceil(k/128)]`` f32 scale tensor.
     """
@@ -163,7 +155,7 @@ def _apply_skew_routing(inputs, s: Scenario, e0: int) -> None:
     inputs.topk_weights_pre = weights
 
 
-def build_static_padded_inputs(inputs, s: Scenario, tile_m: int = TILE_M):
+def build_static_padded_inputs(inputs, s: Scenario, tile_m: int = 16):
     """Reconstruct the production static-offset (de-padded/compacted) layout.
 
     Returns the tensors the mega-kernel consumes plus the compacted-layout
@@ -171,7 +163,6 @@ def build_static_padded_inputs(inputs, s: Scenario, tile_m: int = TILE_M):
     ACTIVE expert contributes only ceil(count[e]/tile_m) blocks packed to the
     FRONT; ``num_m_blocks = sum_e ceil(count[e]/tile_m)``.
     """
-    TILE_M = tile_m
     device = inputs.X.device
     E = s.experts
     H = s.hidden
@@ -180,12 +171,9 @@ def build_static_padded_inputs(inputs, s: Scenario, tile_m: int = TILE_M):
     top_weights = inputs.topk_weights_pre  # (T, K) f32
 
     counts = [int((top_ids == e).sum()) for e in range(E)]
-    blocks_per_expert = [(c + TILE_M - 1) // TILE_M for c in counts]
-    num_m_blocks = sum(blocks_per_expert)
-    if num_m_blocks == 0:
-        num_m_blocks = 1
-
-    total_padded = num_m_blocks * TILE_M
+    blocks_per_expert = [(c + tile_m - 1) // tile_m for c in counts]
+    num_m_blocks = max(sum(blocks_per_expert), 1)
+    total_padded = num_m_blocks * tile_m
 
     grouped_input_padded = torch.zeros(
         total_padded, H, dtype=inputs.X.dtype, device=device
@@ -196,7 +184,9 @@ def build_static_padded_inputs(inputs, s: Scenario, tile_m: int = TILE_M):
     sorted_weights_padded = torch.zeros(
         total_padded, dtype=torch.float32, device=device
     )
-    block_expert_cpu = torch.full((num_m_blocks,), -1, dtype=torch.int32, device=device)
+    block_expert_ids = torch.full(
+        (num_m_blocks,), -1, dtype=torch.int32, device=device
+    )
 
     expert_base = [-1] * E
 
@@ -208,9 +198,9 @@ def build_static_padded_inputs(inputs, s: Scenario, tile_m: int = TILE_M):
         mask = top_ids == e  # (T, K)
         token_idx, slot_idx = mask.nonzero(as_tuple=True)
         ce = int(token_idx.numel())
-        poff = blk * TILE_M
+        poff = blk * tile_m
         expert_base[e] = poff
-        block_expert_cpu[blk : blk + be] = e
+        block_expert_ids[blk : blk + be] = e
         grouped_input_padded[poff : poff + ce] = inputs.X[token_idx]
         sorted_token_ids_padded[poff : poff + ce] = token_idx.to(torch.int32)
         sorted_weights_padded[poff : poff + ce] = top_weights[token_idx, slot_idx].to(
@@ -218,20 +208,18 @@ def build_static_padded_inputs(inputs, s: Scenario, tile_m: int = TILE_M):
         )
         blk += be
 
-    block_expert_ids = block_expert_cpu
-
     return {
         "grouped_input_padded": grouped_input_padded,
         "sorted_token_ids_padded": sorted_token_ids_padded,
         "sorted_weights_padded": sorted_weights_padded,
         "block_expert_ids": block_expert_ids,
-        "slot_size": TILE_M,
+        "slot_size": tile_m,
         "total_padded": total_padded,
         "num_m_blocks": num_m_blocks,
         "blocks_per_expert": blocks_per_expert,
         "expert_base": expert_base,
         "counts": counts,
-        "tile_m": TILE_M,
+        "tile_m": tile_m,
     }
 
 
@@ -255,8 +243,8 @@ def make_fp8_inputs(s: Scenario, *, seed: int = 11939):
     gate_scale = torch.empty(E, nHb, nIb, dtype=torch.float32, device=device)
     up_scale = torch.empty(E, nHb, nIb, dtype=torch.float32, device=device)
     for e in range(E):
-        sg = _blockwise_scale(Wg_f32[e], out_axis=0, k_axis=1)  # [nIb, nHb]
-        su = _blockwise_scale(Wu_f32[e], out_axis=0, k_axis=1)
+        sg = _blockwise_scale(Wg_f32[e])  # [nIb, nHb]
+        su = _blockwise_scale(Wu_f32[e])
         gate_scale[e] = sg.T.contiguous()
         up_scale[e] = su.T.contiguous()
         sg_full = sg.repeat_interleave(GROUP_K, 0).repeat_interleave(GROUP_K, 1)
@@ -267,7 +255,7 @@ def make_fp8_inputs(s: Scenario, *, seed: int = 11939):
     Wd_q = torch.empty(E, H, ni, dtype=torch.float8_e4m3fn, device=device)  # (E, H, I)
     down_scale = torch.empty(E, nIb, nHb, dtype=torch.float32, device=device)
     for e in range(E):
-        sd = _blockwise_scale(Wd_f32[e], out_axis=0, k_axis=1)  # [nHb, nIb]
+        sd = _blockwise_scale(Wd_f32[e])  # [nHb, nIb]
         down_scale[e] = sd.T.contiguous()
         sd_full = sd.repeat_interleave(GROUP_K, 0).repeat_interleave(GROUP_K, 1)
         Wd_q[e] = _quant_fp8(Wd_f32[e], sd_full)
@@ -299,7 +287,7 @@ def _build_padded_activation(fp8in, padded, s: Scenario):
     H = s.hidden
     E = s.experts
     total_padded = padded["total_padded"]
-    TILE_M = padded["tile_m"]
+    tile_m = padded["tile_m"]
     expert_base = padded["expert_base"]
     blocks_per_expert = padded["blocks_per_expert"]
 
@@ -325,7 +313,7 @@ def _build_padded_activation(fp8in, padded, s: Scenario):
         blk_scale_full = blk_scale.repeat_interleave(GROUP_K)  # (H,)
         Xq = _quant_fp8(X_sub, blk_scale_full.unsqueeze(0))  # (ce, H)
         A_q[base : base + ce] = Xq
-        AScale[base : base + be * TILE_M] = blk_scale.unsqueeze(0)
+        AScale[base : base + be * tile_m] = blk_scale.unsqueeze(0)
     return A_q, AScale
 
 
@@ -455,7 +443,7 @@ class LevelDef:
     gate_up_k: int = 128
     down_k: int = 128
     use_dtla: bool = True
-    sched_cadence: Optional[str] = None  # None == iglp1 default
+    sched_cadence: str = "iglp1"
     grid_mode: str = "active"  # "static" | "active" | "persistent"
     persistent: bool = False
     hardened_required: bool = True  # L0-L3 predate the L4 m_tile_base fix:
@@ -610,7 +598,7 @@ LEVELS = [
         "level_10_active_grid",
         "active de-padded grid",
         "flag",
-        0.152,
+        0.157,
         0.131,
         sched_cadence="iglp1",
         grid_mode="active",
@@ -619,14 +607,15 @@ LEVELS = [
     LevelDef(
         11,
         "level_11_persistent",
-        "persistent kernel + XCD (NEUTRAL)",
+        "persistent kernel",
         "flag",
         0.131,
-        0.131,
+        0.124,
         sched_cadence="iglp1",
         grid_mode="persistent",
         persistent=True,
-        note="documented OFF-by-default; correct but neutral at this grid",
+        note="fixed resident grid looping over (bx, by) work-items; the XCD "
+        "remap that was tried alongside it measured neutral and is off",
     ),
 ]
 
@@ -814,7 +803,7 @@ def _mega_values(fp8in, s, padded, A_q, AScale, Y_f32, persist_scalars):
     return v
 
 
-def _prepare(mod, lvl, s, spec, launcher):
+def _prepare(mod, lvl, s, spec):
     """Build padded inputs ONCE; return packing closure inputs.
 
     The torch reference consumes the DE-PADDED ``padded`` + ``A_q``/``AScale``
@@ -849,8 +838,8 @@ def _prepare(mod, lvl, s, spec, launcher):
 
 def _run_parity(mod, lvl, s, spec, launcher) -> tuple[float, float, str]:
     """Hardened parity for one scenario: returns (max_abs, rel, status)."""
-    fp8in, padded, padded_ref, A_q, AScale, Y_f32, cfg, grid, persist = _prepare(
-        mod, lvl, s, spec, launcher
+    fp8in, padded, padded_ref, A_q, AScale, Y_f32, cfg, _, persist = _prepare(
+        mod, lvl, s, spec
     )
     _isolate_lane()
     Y_f32.zero_()
@@ -860,7 +849,7 @@ def _run_parity(mod, lvl, s, spec, launcher) -> tuple[float, float, str]:
     Y_ref = torch_fused_moe_fp8_reference(
         fp8in, padded_ref, A_q, AScale, s, tile_m=spec.tile_m
     )
-    mx, mn, rl = _compare(Y_kernel, Y_ref)
+    mx, _, rl = _compare(Y_kernel, Y_ref)
     _isolate_lane()
     status = "PASS" if rl < TOL else "FAIL"
     return mx, rl, status
@@ -868,8 +857,8 @@ def _run_parity(mod, lvl, s, spec, launcher) -> tuple[float, float, str]:
 
 def _time_level(mod, lvl, s, spec, launcher) -> tuple[float, float, tuple]:
     """Launch-only best/median ms (warm best-of-N) for one scenario."""
-    fp8in, padded, padded_ref, A_q, AScale, Y_f32, cfg, grid, persist = _prepare(
-        mod, lvl, s, spec, launcher
+    fp8in, padded, _, A_q, AScale, Y_f32, cfg, grid, persist = _prepare(
+        mod, lvl, s, spec
     )
     vals = _mega_values(fp8in, s, padded, A_q, AScale, Y_f32, persist)
 
@@ -902,8 +891,6 @@ class LevelResult:
     t8_ms: Optional[float]
     parity: str
     hardened: str  # skewE0 status: PASS / FAIL / EXPECTED-FAIL
-    before: float
-    after: float
     grid: str
     hsaco_bytes: Optional[int]
     note: str
@@ -917,33 +904,31 @@ def run_level(lvl: LevelDef, *, do_perf: bool) -> LevelResult:
     except Exception as exc:  # noqa: BLE001
         print(f"  BUILD FAILED: {exc!r}")
         return LevelResult(
-            lvl.idx,
-            lvl.name,
-            lvl.lever,
-            lvl.mechanism,
-            None,
-            None,
-            "BUILD_FAIL",
-            "-",
-            lvl.before,
-            lvl.after,
-            lvl.grid_mode,
-            None,
-            lvl.note,
+            idx=lvl.idx,
+            name=lvl.name,
+            lever=lvl.lever,
+            mechanism=lvl.mechanism,
+            t1_ms=None,
+            t8_ms=None,
+            parity="BUILD_FAIL",
+            hardened="-",
+            grid=lvl.grid_mode,
+            hsaco_bytes=None,
+            note=lvl.note,
         )
     print(f"  built {spec.kernel_name()}  hsaco={nbytes}B  grid={lvl.grid_mode}")
 
     # --- HARDENED parity: T1, T8, skewed-E0 (never loosened) ---
     s1, s8, sh = _scn_t1(), _scn_t8(), _scn_hard()
-    # The skewed-E0 hardened case must run on a tile_m=32 spec (mfmas_m_down=2).
+    # The skewed-E0 hardened case needs mfmas_m_down > 1, hence HARD_TILE_M.
     if lvl.mechanism in ("snapshot", "sub-diff(L5)"):
         spec_hard = mod.FusedMegaKernelSpecFp8(
-            name=f"{spec.kernel_name()}_m32", tile_m=32
+            name=f"{spec.kernel_name()}_m{HARD_TILE_M}", tile_m=HARD_TILE_M
         )
     else:
         spec_hard = PROD.FusedMegaKernelSpecFp8(
-            name=f"{spec.kernel_name()}_m32",
-            tile_m=32,
+            name=f"{spec.kernel_name()}_m{HARD_TILE_M}",
+            tile_m=HARD_TILE_M,
             gate_up_k=lvl.gate_up_k,
             down_k=lvl.down_k,
             use_dtla=lvl.use_dtla,
@@ -976,7 +961,7 @@ def run_level(lvl: LevelDef, *, do_perf: bool) -> LevelResult:
     grid_str = lvl.grid_mode
     if do_perf and parity == "PASS":
         b1, m1, g1 = _time_level(mod, lvl, s1, spec, launcher)
-        b8, m8, g8 = _time_level(mod, lvl, s8, spec, launcher)
+        b8, m8, _ = _time_level(mod, lvl, s8, spec, launcher)
         t1, t8 = b1, b8
         grid_str = f"{lvl.grid_mode}{g1}"
         print(f"  perf T1 best={b1:.6f} med={m1:.6f}  T8 best={b8:.6f} med={m8:.6f}")
@@ -989,19 +974,17 @@ def run_level(lvl: LevelDef, *, do_perf: bool) -> LevelResult:
         hardened = "EXPECTED-FAIL" if sth == "FAIL" else "PASS"
 
     return LevelResult(
-        lvl.idx,
-        lvl.name,
-        lvl.lever,
-        lvl.mechanism,
-        t1,
-        t8,
-        parity,
-        hardened,
-        lvl.before,
-        lvl.after,
-        grid_str,
-        nbytes,
-        lvl.note,
+        idx=lvl.idx,
+        name=lvl.name,
+        lever=lvl.lever,
+        mechanism=lvl.mechanism,
+        t1_ms=t1,
+        t8_ms=t8,
+        parity=parity,
+        hardened=hardened,
+        grid=grid_str,
+        hsaco_bytes=nbytes,
+        note=lvl.note,
     )
 
 

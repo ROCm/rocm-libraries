@@ -1,0 +1,46 @@
+{
+  "schema": "hyperloom.rocke.serve_request/v1",
+  "op": "attention",
+  "arch": "gfx950",
+  "requests": [
+    {
+      "attention_request": {
+        "op": "attention",
+        "batch": 8,
+        "nhead_q": 64,
+        "nhead_k": 8,
+        "seqlen_q": 1,
+        "seqlen_k": 8192,
+        "hdim_q": 128,
+        "hdim_v": 128,
+        "arch": "gfx950",
+        "mask_type": 1,
+        "kv_block_size": 16,
+        "num_sms": 256,
+        "dtype": "bf16"
+      },
+      "problem": {
+        "total_q": 8,
+        "num_seqs": 8,
+        "num_query_heads": 64,
+        "num_kv_heads": 8,
+        "head_size": 128,
+        "block_size": 16,
+        "max_seqlen_q": 1,
+        "max_seqlen_k": 8192,
+        "dtype": "bf16",
+        "num_kv_blocks": 8192
+      }
+    }
+  ],
+  "profile": {},
+  "advisory": false,
+  "output_dir": "/tmp/rocke-serve-example",
+  "budget_s": 900,
+  "num_gpus": 1,
+  "kernel": {
+    "kernel_id": "example-001",
+    "name": "unified_attention_with_output",
+    "operation": "attention"
+  }
+}

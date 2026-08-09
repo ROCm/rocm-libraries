@@ -16,11 +16,16 @@ caller's.
 python -m serve probe --arch gfx950
 
 # Dispatch only. Reproducible for an arch that is not attached.
-python -m serve plan request.json [result.json]
+python -m serve plan example_request.json [result.json]
 
 # Plan, then verify and measure whatever the machine allows.
-python -m serve run request.json result.json
+python -m serve run example_request.json result.json
 ```
+
+`example_request.json` is a runnable 8-sequence bf16 decode shape that this tree
+serves on the 3D split-KV path. Its `num_sms` is the full gfx950 socket; on a
+partitioned device set it to the partition's CU count, because `select_path`
+derives `num_sms * 4` and will otherwise plan for a machine that is not there.
 
 Both source roots must be importable, as for every other entry point in this
 tree (see `rocke/BUILDING.md`):

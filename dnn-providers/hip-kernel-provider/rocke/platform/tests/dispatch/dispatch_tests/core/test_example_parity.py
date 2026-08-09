@@ -31,6 +31,7 @@ from rocke.dispatch.families.norm import NORM_REGISTRY, NormRequest, dispatch_no
 from rocke.dispatch.gemm.bf16_rcr import GEMM_BF16_REGISTRY
 from rocke.dispatch.gemm.common import GemmRequest
 from rocke.dispatch.gemm.fp16_rcr import GEMM_FP16_REGISTRY, dispatch_gemm_fp16
+from rocke.instances.common.moe_fused_mega_fp8_tuned import BAND_RANGE, TUNED_SHAPE
 
 # ---------------------------------------------------------------------------
 # Problem shapes lifted from the examples, so "does it build?" is asked about
@@ -45,6 +46,19 @@ CONV_SHAPE = dict(N=8, C=64, K=64, Hi=56, Wi=56, Y=3, X=3, pad_h=1, pad_w=1)
 MOE_SHAPE = dict(
     num_tokens=128, hidden=2048, intermediate=768, num_experts=256, top_k=8
 )
+# examples/gfx950/fused_mega_moe/bench_moe_mega_fp8.py. The token-banded fp8
+# candidates claim only the tuned geometry, and each band claims only part of
+# the token range, so one shape and one token count cannot reach them the way
+# MOE_SHAPE reaches the two generic candidates. Both are read off the tuning
+# record rather than restated: a band boundary that moves should move the
+# request that probes it, not leave this test probing the wrong band.
+MOE_TUNED_SHAPE = dict(
+    hidden=TUNED_SHAPE.hidden,
+    intermediate=TUNED_SHAPE.intermediate,
+    num_experts=TUNED_SHAPE.num_experts,
+    top_k=TUNED_SHAPE.top_k,
+)
+MOE_TUNED_BAND_TOKENS = {band: hi for band, (_, hi) in BAND_RANGE.items()}
 # examples/common/ck_tile_parity.py
 NORM_SHAPE = dict(rows=4096, cols=4096)
 
@@ -65,6 +79,16 @@ def _conv_reqs(arch, spec_id, _dtype):
 
 
 def _moe_reqs(arch, spec_id, dtype):
+    for algorithm, tokens in MOE_TUNED_BAND_TOKENS.items():
+        if spec_id in (algorithm, f"moe_{algorithm}_stage2"):
+            yield MoeRequest(
+                arch=arch,
+                dtype=dtype,
+                spec_id=spec_id,
+                num_tokens=tokens,
+                **MOE_TUNED_SHAPE,
+            )
+            return
     yield MoeRequest(arch=arch, dtype=dtype, spec_id=spec_id, **MOE_SHAPE)
 
 

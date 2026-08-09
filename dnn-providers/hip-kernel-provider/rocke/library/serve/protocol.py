@@ -4,27 +4,45 @@
 """Wire format for the ``rocke-serve`` JSON subprocess contract.
 
 The caller is an external kernel-optimization orchestrator that has already
-resolved a *complete* attention problem -- one it observed in a serving process,
-not one it inferred from tensor geometry alone. It hands that over as JSON,
-rocKE plans/builds/measures, and the answer comes back as JSON.
+resolved a *complete* problem -- one it observed in a serving process, not one
+it inferred from tensor geometry alone. It hands that over as JSON, rocKE
+plans/builds/measures, and the answer comes back as JSON.
 
 This module is the whole of the format and deliberately imports neither
 ``kernels`` nor ``dispatch``: parsing and validating a request must not need a
 GPU, a comgr, or even the rest of the library, so schema handling stays testable
 on its own.
 
+Two operators share one envelope
+--------------------------------
+``op`` selects the family: ``"attention"`` (unified paged FMHA) or ``"moe"``
+(the single-launch fused mixture-of-experts FFN). They share the envelope,
+the result shape, and the run/plan/probe verbs; they differ only in the entry
+type inside ``requests``, because the shape of an attention problem and the
+shape of an MoE layer have nothing in common. Adding a third operator means
+adding an entry type and a branch in :meth:`ServeRequest.from_dict`, not a
+second protocol.
+
 Why the caller sends two views of the same shape
 ------------------------------------------------
-Each entry in ``requests`` carries both an ``attention_request`` and a
-``problem``, and they disagree on purpose. ``attention_request`` is the
-*dispatch* view, whose ``total_q`` is implicitly ``batch * seqlen_q`` (see
-``dispatch.attention.common._problem``). ``problem`` is the *runtime* view and
-carries the ``total_q`` actually observed. For a ragged batch -- the normal case
-in continuous batching, where sequences in one launch have different query
-lengths -- the observed total is strictly less than the padded product. Planning
-on the padded upper bound is correct because that is what the kernel must be
-able to cover; measuring on it would overstate the work. Keeping both means each
-stage reads the view it is entitled to instead of one lossy compromise.
+Both operators split the shape into a *dispatch* view and a *runtime* view, for
+the same underlying reason: the kernel must be planned for the worst case it
+could be handed, but measured on what actually happened.
+
+For attention each entry carries an ``attention_request`` whose ``total_q`` is
+implicitly ``batch * seqlen_q`` (see ``dispatch.attention.common._problem``),
+plus a ``problem`` carrying the ``total_q`` actually observed. For a ragged
+batch -- the normal case in continuous batching -- the observed total is
+strictly less than the padded product.
+
+For MoE the same split falls on the routing. The launch grid must cover every
+expert being active, since dispatch cannot know the routing histogram; but the
+weight traffic that dominates the latency is set by how many experts the
+observed routing actually touched (111 of 128 on the traced Qwen3 decode). So
+``moe_request`` is the padded dispatch view and ``problem`` carries
+``active_experts`` alongside it. Planning on the bound is correct because that
+is what the kernel must be able to cover; measuring on it would overstate the
+work.
 """
 
 from __future__ import annotations
@@ -34,6 +52,9 @@ from typing import Any
 
 REQUEST_SCHEMA = "hyperloom.rocke.serve_request/v1"
 RESULT_SCHEMA = "hyperloom.rocke.serve_result/v1"
+
+#: Operators this endpoint serves. The envelope is shared; the entry type is not.
+SERVE_OPS = ("attention", "moe")
 
 #: Fields of ``kernels.common.attention_unified.UnifiedAttentionProblem`` that
 #: the caller is allowed to set. ``num_sms`` and the codegen knobs
@@ -131,12 +152,94 @@ class ShapeEntry:
         )
 
 
+#: Fields of ``rocke.dispatch.families.moe.MoeRequest`` the caller may set,
+#: in serve's own wire spelling -- ``planner._MOE_WIRE_ALIASES`` maps the three
+#: that differ onto the dispatcher's names. ``num_sms`` is
+#: absent for the same reason it is absent from ``PROBLEM_FIELDS``: it is
+#: rocKE's to read from the target, not the caller's to pin.
+MOE_PROBLEM_FIELDS = (
+    "tokens",
+    "experts",
+    "topk",
+    "hidden",
+    "intermediate",
+    "group_k",
+    "activation",
+    "dtype",
+)
+
+_REQUIRED_MOE_FIELDS = (
+    "tokens",
+    "experts",
+    "topk",
+    "hidden",
+    "intermediate",
+    "dtype",
+)
+
+
+@dataclass(frozen=True)
+class MoeShapeEntry:
+    """One dispatchable fused-MoE layer shape.
+
+    ``active_experts`` is observational: it is how many experts the traced
+    routing actually selected, which sets the weight bytes the layer streams
+    and therefore its latency. It never feeds dispatch -- the grid is planned
+    for every expert being live -- but the measured lane needs it to build
+    routing with the right occupancy, and zero means "unknown, synthesize it".
+    """
+
+    moe_request: dict[str, Any]
+    problem: dict[str, Any]
+    call_count: int = 0
+    active_experts: int = 0
+    shape_provenance: str = ""
+    estimated_fields: tuple[str, ...] = ()
+
+    @property
+    def signature(self) -> str:
+        p = self.problem
+        return (
+            f"e{p.get('experts')}k{p.get('topk')}"
+            f"_h{p.get('hidden')}_i{p.get('intermediate')}"
+            f"_t{p.get('tokens')}"
+            f"_g{p.get('group_k')}"
+            f"_{p.get('activation')}"
+            f"_{p.get('dtype')}"
+        )
+
+    @classmethod
+    def from_dict(cls, raw: Any, *, index: int) -> "MoeShapeEntry":
+        where = f"requests[{index}]"
+        if not isinstance(raw, dict):
+            raise ProtocolError(f"{where} must be an object, got {type(raw).__name__}")
+        request = raw.get("moe_request")
+        problem = raw.get("problem")
+        for name, value in (("moe_request", request), ("problem", problem)):
+            if not isinstance(value, dict) or not value:
+                raise ProtocolError(f"{where}.{name} must be a non-empty object")
+        missing = [f for f in _REQUIRED_MOE_FIELDS if problem.get(f) in (None, "")]
+        if missing:
+            raise ProtocolError(f"{where}.problem is missing {missing}")
+        return cls(
+            moe_request=dict(request),
+            problem={k: problem[k] for k in MOE_PROBLEM_FIELDS if k in problem},
+            call_count=int(raw.get("call_count") or 0),
+            active_experts=int(raw.get("active_experts") or 0),
+            shape_provenance=str(raw.get("shape_provenance") or ""),
+            estimated_fields=tuple(raw.get("estimated_fields") or ()),
+        )
+
+
+_ENTRY_TYPES = {"attention": ShapeEntry, "moe": MoeShapeEntry}
+
+
 @dataclass(frozen=True)
 class ServeRequest:
     """A parsed, structurally valid ``rocke-serve`` request."""
 
     arch: str
-    entries: tuple[ShapeEntry, ...]
+    entries: tuple[Any, ...]
     op: str = "attention"
     llvm_flavor: str = ""
     profile: dict[str, Any] = field(default_factory=dict)
@@ -156,9 +259,9 @@ class ServeRequest:
                 f"unsupported schema {schema!r}; expected {REQUEST_SCHEMA!r}"
             )
         op = str(raw.get("op") or "attention")
-        if op != "attention":
+        if op not in _ENTRY_TYPES:
             raise ProtocolError(
-                f"unsupported op {op!r}; rocke-serve serves attention only"
+                f"unsupported op {op!r}; rocke-serve serves {list(SERVE_OPS)}"
             )
         arch = str(raw.get("arch") or "").strip().lower()
         if not arch.startswith("gfx"):
@@ -166,8 +269,9 @@ class ServeRequest:
         raw_entries = raw.get("requests")
         if not isinstance(raw_entries, list) or not raw_entries:
             raise ProtocolError("requests must be a non-empty list")
+        entry_type = _ENTRY_TYPES[op]
         entries = tuple(
-            ShapeEntry.from_dict(entry, index=i) for i, entry in enumerate(raw_entries)
+            entry_type.from_dict(entry, index=i) for i, entry in enumerate(raw_entries)
         )
         return cls(
             arch=arch,

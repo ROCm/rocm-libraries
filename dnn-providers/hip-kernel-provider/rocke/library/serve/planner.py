@@ -24,12 +24,25 @@ from dataclasses import asdict, fields
 from typing import Any
 
 from dispatch.attention import AttentionRequest, dispatch_attention
+from rocke.dispatch.families.moe import MoeRequest, dispatch_moe
 from kernels.common.attention_unified import UnifiedAttentionProblem
 
-from .protocol import ShapeEntry
+from .protocol import MoeShapeEntry, ShapeEntry
 
 _REQUEST_FIELDS = frozenset(f.name for f in fields(AttentionRequest))
 _PROBLEM_FIELDS = frozenset(f.name for f in fields(UnifiedAttentionProblem))
+_MOE_REQUEST_FIELDS = frozenset(f.name for f in fields(MoeRequest))
+
+#: serve's wire spelling -> the dispatcher's field name. The wire contract names
+#: the token count ``tokens``; the dispatcher names it ``num_tokens``. Both are
+#: fixed by different audiences -- one by callers who already emit this JSON,
+#: the other by the dim vocabulary every family shares -- so the difference is
+#: translated at the boundary rather than renamed on either side.
+_MOE_WIRE_ALIASES = {
+    "tokens": "num_tokens",
+    "experts": "num_experts",
+    "topk": "top_k",
+}
 
 
 def build_attention_request(entry: ShapeEntry, *, arch: str) -> AttentionRequest:
@@ -107,3 +120,99 @@ def plan_entry(entry: ShapeEntry, *, arch: str) -> dict[str, Any]:
 
 def plan_all(entries: tuple[ShapeEntry, ...], *, arch: str) -> list[dict[str, Any]]:
     return [plan_entry(entry, arch=arch) for entry in entries]
+
+
+# --------------------------------------------------------------------------
+# Fused MoE
+# --------------------------------------------------------------------------
+
+
+def build_moe_request(entry: MoeShapeEntry, *, arch: str) -> MoeRequest:
+    """Build the dispatch-view MoE request, with ``arch`` authoritative.
+
+    Same rule as attention: the envelope's arch is what the caller resolved for
+    the destination machine, so it wins over any per-entry copy.
+    """
+    payload = {
+        _MOE_WIRE_ALIASES.get(k, k): v
+        for k, v in entry.moe_request.items()
+        if _MOE_WIRE_ALIASES.get(k, k) in _MOE_REQUEST_FIELDS
+    }
+    payload["arch"] = arch
+    return MoeRequest(**payload)
+
+
+def _weight_layout(spec) -> str:
+    """How the plan's consumer must have laid the expert weights out.
+
+    The dispatcher's spec states this as two per-GEMM booleans rather than one
+    string, because the two GEMMs could in principle disagree. The plan reports
+    the layout the caller has to *supply*, which is a single answer, so a split
+    is reported as such instead of being rounded to whichever GEMM is read
+    first -- a plan that quietly claimed "row_major" for a swizzled gate/up
+    would be a wrong-weights run with no error.
+    """
+    def layout(swizzled: bool) -> str:
+        return "swizzled" if swizzled else "row_major"
+
+    gu = bool(getattr(spec, "swizzle_gu", False))
+    down = bool(getattr(spec, "swizzle_down", False))
+    if gu != down:
+        return f"gate_up={layout(gu)},down={layout(down)}"
+    return layout(gu)
+
+
+def plan_moe_entry(entry: MoeShapeEntry, *, arch: str) -> dict[str, Any]:
+    """Plan one MoE layer. Never raises for an unservable shape.
+
+    Declining is the expected answer for most shapes here -- the mega-kernel
+    claims only the cohort it was tuned on -- so a rejection carries the
+    registry's own reasons rather than an exception.
+    """
+    base: dict[str, Any] = {
+        "signature": entry.signature,
+        "call_count": entry.call_count,
+        "active_experts": entry.active_experts,
+        "shape_provenance": entry.shape_provenance,
+    }
+    try:
+        request = build_moe_request(entry, arch=arch)
+    except (TypeError, ValueError) as exc:
+        return {**base, "servable": False, "reason": f"malformed moe_request: {exc}"}
+
+    try:
+        decision = dispatch_moe(request)
+    except ValueError as exc:
+        return {**base, "servable": False, "reason": str(exc)}
+
+    spec = decision.spec
+    return {
+        **base,
+        "servable": True,
+        "candidate": decision.candidate.name,
+        "algorithm": decision.candidate.algorithm,
+        "spec_id": decision.candidate.spec_id,
+        "weight_layout": _weight_layout(spec),
+        "kernel_name": spec.kernel_name(),
+        "arch": request.arch,
+        "grid": list(decision.grid),
+        "block": list(decision.block),
+        "kernel_id": {
+            **decision.kernel_id.as_dict(),
+            "cache_key": decision.kernel_id.cache_key,
+        },
+        "explanation": list(decision.explanation),
+        "problem": dict(entry.problem),
+        "spec": asdict(spec),
+    }
+
+
+def plan_moe_all(
+    entries: tuple[MoeShapeEntry, ...], *, arch: str
+) -> list[dict[str, Any]]:
+    return [plan_moe_entry(entry, arch=arch) for entry in entries]
+
+
+#: ``op`` -> the planner that serves it. Keeps ``__main__`` from growing a
+#: branch per operator.
+PLANNERS = {"attention": plan_all, "moe": plan_moe_all}

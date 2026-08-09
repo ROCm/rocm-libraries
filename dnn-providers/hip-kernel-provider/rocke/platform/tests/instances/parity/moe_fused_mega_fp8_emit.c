@@ -33,23 +33,28 @@ static int make_spec(int idx, rocke_fused_mega_kernel_spec_fp8_t* spec, bool* pe
 
     switch(idx)
     {
-    case 0: /* baseline: gate_up_k=32, down_k=32, use_dtla=False, no cadence */
+    case 0: /* baseline: gate_up_k=32, down_k=32, use_dtla=False, iglp1 */
         spec->name = "moe_fused_mega_fp8_baseline";
         spec->tile_m = 16;
         spec->tile_n_inter = 256;
         spec->gate_up_k = 32;
         spec->down_k = 32;
         spec->use_dtla = false;
-        spec->has_sched_cadence = false; /* Python None */
+        /* Was has_sched_cadence=false, encoding a Python None that deferred to
+           the "iglp1" lever default. The Python field no longer admits None,
+           so both sides now pin the cadence the case always emitted. */
+        spec->has_sched_cadence = true;
+        spec->sched_cadence = "iglp1";
         break;
-    case 1: /* l7 hero: gate_up_k=128, down_k=128, use_dtla=False, no cadence */
+    case 1: /* l7 hero: gate_up_k=128, down_k=128, use_dtla=False, iglp1 */
         spec->name = "moe_fused_mega_fp8_l7_hero";
         spec->tile_m = 16;
         spec->tile_n_inter = 256;
         spec->gate_up_k = 128;
         spec->down_k = 128;
         spec->use_dtla = false;
-        spec->has_sched_cadence = false; /* Python None */
+        spec->has_sched_cadence = true;
+        spec->sched_cadence = "iglp1";
         break;
     case 2: /* l8 dtla: use_dtla=True, sched_cadence="none" */
         spec->name = "moe_fused_mega_fp8_l8_dtla";

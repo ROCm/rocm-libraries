@@ -1,18 +1,22 @@
-"""vLLM Triton fused-MoE baseline on the Qwen3-30B-A3B decode shape.
+"""vLLM Triton fused-MoE baseline on the same shapes as the rocKE harness.
 
-This is the incumbent from the trace (`fused_moe_kernel`), measured on the SAME
-32-CU partition the rocKE mega-kernel harness runs on, so the two numbers are
-finally comparable. The trace's 35 us/call was recorded on a full 256-CU
-MI355X at ~8 TB/s and cannot be compared against a 1/8 partition directly.
+The point of this file is that a comparison is only meaningful when both sides
+run on the same device, in the same session, over the same routing. It therefore
+takes ``--routing-from`` (the numpy harness's cache directory) so both kernels
+activate exactly the same experts, and it reports its own measured HBM read
+bandwidth so the result can be read as a fraction of what the box was doing at
+that moment rather than as an absolute.
 
-One `fused_experts` call performs both expert GEMMs (gate/up then down), which
-is the same work as one rocKE mega-kernel launch; in the trace that shows up as
-two `fused_moe_kernel` launches per MoE layer.
+One ``fused_experts`` call performs both expert GEMMs (gate/up then down), which
+is the same work as one rocKE mega-kernel launch.
 
 Deliberately kept in its own process and its own file: it imports torch, which
-must never share a process with a rocKE Comgr compile.
+must never share a process with a rocKE Comgr compile (the harness's own
+docstring explains why). The ``rocke not in sys.modules`` assert below enforces
+that from this side.
 
-    python -u moe_triton_baseline.py --shape qwen3
+    python3 -u rocke/examples/gfx950/fused_mega_moe/bench_triton_baseline.py \\
+        --shape qwen3 --routing-from $ROCKE_MOE_BENCH_CACHE/qwen3_e128_seed11939
 """
 
 from __future__ import annotations
@@ -21,6 +25,7 @@ import argparse
 import sys
 import time
 from dataclasses import dataclass
+from functools import partial
 
 import torch
 
@@ -71,11 +76,11 @@ def measure_bandwidth(nbytes: int = 1 << 30) -> "tuple[float, float]":
     """
     src = torch.empty(nbytes, dtype=torch.uint8, device="cuda")
     dst = torch.empty_like(src)
-    ms_copy = time_ms(lambda: dst.copy_(src), warmup=5, iters=20)
+    ms_copy = time_ms(partial(dst.copy_, src), warmup=5, iters=20)
     copy_gbs = 2 * nbytes / (ms_copy * 1e-3) / 1e9
 
     view = src.view(torch.float32)
-    ms_read = time_ms(lambda: torch.sum(view), warmup=5, iters=20)
+    ms_read = time_ms(partial(torch.sum, view), warmup=5, iters=20)
     read_gbs = nbytes / (ms_read * 1e-3) / 1e9
     del src, dst, view
     torch.cuda.empty_cache()
@@ -139,6 +144,12 @@ def main() -> int:
         help="numpy-harness cache dir to share routing with (e.g. "
         ".cache/qwen3_e128_seed11939)",
     )
+    ap.add_argument(
+        "--json",
+        dest="json_out",
+        default="",
+        help="write the measurement here as JSON (used by rocke-serve)",
+    )
     args = ap.parse_args()
 
     assert "rocke" not in sys.modules, "baseline must not share a process with rocKE"
@@ -186,7 +197,6 @@ def main() -> int:
         )
 
     try:
-        out = None
         call()
         torch.cuda.synchronize()
     except Exception as exc:  # noqa: BLE001
@@ -205,6 +215,31 @@ def main() -> int:
         f"  achieved: {weight_bytes / (ms * 1e-3) / 1e9:.0f} GB/s "
         f"({weight_bytes / (ms * 1e-3) / 1e9 / bw * 100:.0f}% of measured peak)"
     )
+    if args.json_out:
+        import json
+        from pathlib import Path
+
+        Path(args.json_out).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.json_out).write_text(
+            json.dumps(
+                {
+                    "framework": "vllm_triton_fused_experts",
+                    "shape": s.name,
+                    "latency_us": us,
+                    "latency_ms": ms,
+                    "active_experts": active,
+                    "weight_bytes": weight_bytes,
+                    "achieved_gbs": weight_bytes / (ms * 1e-3) / 1e9,
+                    "read_peak_gbs": bw,
+                    "copy_peak_gbs": copy_gbs,
+                    "iters": args.iters,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
     return 0
 
 
