@@ -148,11 +148,14 @@ options.imaginary.pattern = GenerationPattern::Cosine;
 GenerationRunInfo run = generate(outputView, options);
 ```
 
-The current patterns cover constants, uniform integer/real values, normal
-values, sine/cosine and absolute variants, serial logical indices, one
-selected dimension, identity tensors, checkerboard integers, type-derived
-extrema/non-finite values, encoded-exponent sampling, and explicit raw-storage
-recipes. Raw recipes are used only when compatibility depends on exact scalar
+The current patterns cover constants, selection from an explicit candidate
+set, uniform integer/real values, normal values, sine/cosine and absolute
+variants, serial logical indices, one selected dimension, identity tensors,
+checkerboard integers, type-derived extrema/non-finite values,
+encoded-exponent sampling, and explicit raw-storage recipes. Candidate-set
+selection is the generic equivalent of `numpy.random.choice` for fixed
+numerical values and is useful for exactly representable low-precision grids.
+Raw recipes are used only when compatibility depends on exact scalar
 encodings rather than numerical conversion. Real and imaginary components
 have independent recipes and random streams. Random values are counter-based,
 so a tensor element depends only on the seed, stream, and logical index—not
@@ -165,9 +168,9 @@ product adapters describe small-value, checkerboard, positive-only, and probe
 inputs without owning element loops.
 
 hipBLASLt and TensileLite keep private enum/type adapters. Common host
-initialization modes now translate to this API; unsupported legacy raw-bit,
-sentinel, and packed-format recipes remain bounded fallbacks while they are
-modeled explicitly.
+initialization modes now translate to this API. The mutable
+`RandomGenerator`/`DataPattern` interface remains only as a compatibility
+surface while its remaining callers move to explicit seed/stream recipes.
 
 ## Structured tensor comparison
 

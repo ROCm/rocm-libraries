@@ -27,12 +27,15 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
+#include <cstring>
 #include <iostream>
 #include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 #include <roc/host_validation/adapters/tensilelite/HostValidationBridge.hpp>
@@ -136,6 +139,40 @@ namespace
         static constexpr rocisa::DataType value = rocisa::DataType::Float4;
     };
 #endif
+
+    enum class InitializationStream : uint64_t
+    {
+        OperandA   = 0,
+        OperandB   = 1,
+        MatrixC    = 2,
+        Bias       = 3,
+        ScaleAlpha = 4,
+        ScaleA     = 5,
+        ScaleB     = 6,
+    };
+
+    template <typename T>
+    void generateValues(std::vector<T>&                             destination,
+                        roc::host_validation::GenerationPatternSpec pattern,
+                        InitializationStream                        stream)
+    {
+        using namespace roc::host_validation;
+        static_assert(std::is_trivially_copyable_v<T>);
+
+        pattern.stream = static_cast<uint64_t>(stream);
+        GenerationOptions options;
+        options.seed = 42;
+        options.real = std::move(pattern);
+
+        Tensor generated(toHostValidationScalarType(TypeTraits<T>::value),
+                         Shape{destination.size()});
+        generate(generated.mutableView(), options);
+        const std::span<std::byte> destinationBytes
+            = std::as_writable_bytes(std::span<T>(destination));
+        if(generated.storage().size() != destinationBytes.size())
+            throw std::runtime_error("Generated tensor storage does not match CPU driver type.");
+        std::memcpy(destinationBytes.data(), generated.storage().data(), destinationBytes.size());
+    }
 }
 
 /*
@@ -326,7 +363,6 @@ int runGemm(size_t             m,
     //
     // For FP4 with mxBlockA/B>0 (mxfp4), inputs are drawn from the discrete
     // E2M1-representable value set so the MX-scale logic is exercised.
-    roc::host_validation::RandomGenerator generator(42);
 
 #ifndef _WIN32
     if constexpr(isFP4)
@@ -335,21 +371,11 @@ int runGemm(size_t             m,
         // Drawing from the entire grid (not just the powers of two near zero)
         // exercises the MX-scale path with values whose products span more of
         // the FP4 range, while still being exactly representable.
-        constexpr float fp4Values[] = {-6.0f,
-                                       -4.0f,
-                                       -3.0f,
-                                       -2.0f,
-                                       -1.5f,
-                                       -1.0f,
-                                       -0.5f,
-                                       0.0f,
-                                       0.5f,
-                                       1.0f,
-                                       1.5f,
-                                       2.0f,
-                                       3.0f,
-                                       4.0f,
-                                       6.0f};
+        roc::host_validation::GenerationPatternSpec fp4Pattern;
+        fp4Pattern.pattern = roc::host_validation::GenerationPattern::CandidateSet;
+        fp4Pattern.candidates
+            = {-6.0, -4.0, -3.0, -2.0, -1.5, -1.0, -0.5, 0.0,
+               0.5,  1.0,  1.5,  2.0,  3.0,  4.0,  6.0};
         // Pack 2 logical FP4 values per byte (Float4x2). When the logical
         // element count is odd, the second slot of the last byte has no
         // element behind it — it's padding. We must still initialize that
@@ -357,30 +383,32 @@ int runGemm(size_t             m,
         // ShadowBuffer FP4 decoder unconditionally reads both slots of every
         // byte (the guard is on the *write* back, not the read), and reading
         // uninitialized memory would be UB.
-        auto initFp4Operand = [&](auto& vec, size_t numLogical) {
-            const size_t storagePerBatch = (numLogical + 1) / 2;
+        auto initFp4Operand = [&](auto&                vec,
+                                  size_t               numLogical,
+                                  InitializationStream initializationStream) {
+            const size_t       storagePerBatch = (numLogical + 1) / 2;
+            std::vector<float> logicalValues(numLogical * batchCount);
+            generateValues(logicalValues, fp4Pattern, initializationStream);
             for(size_t batch = 0; batch < batchCount; ++batch)
             {
-                std::vector<float> logicalValues(numLogical);
-                generator.fillChoose<float>(
-                    logicalValues, std::span<const float>(fp4Values));
                 auto packed = roc::host_validation::Tensor::fromValues(
                     roc::host_validation::ScalarType::Float4E2M1,
                     roc::host_validation::Shape{numLogical},
-                    std::span<const float>(logicalValues));
-                std::memcpy(reinterpret_cast<std::byte*>(vec.data())
-                                + batch * storagePerBatch,
+                    std::span<const float>(logicalValues).subspan(batch * numLogical, numLogical));
+                std::memcpy(reinterpret_cast<std::byte*>(vec.data()) + batch * storagePerBatch,
                             packed.storage().data(),
                             storagePerBatch);
             }
         };
-        initFp4Operand(a, numA);
-        initFp4Operand(b, numB);
+        initFp4Operand(a, numA, InitializationStream::OperandA);
+        initFp4Operand(b, numB, InitializationStream::OperandB);
     }
     else
 #endif
     {
-        auto initOperand = [&](auto& vec, bool quantizes) {
+        auto initOperand = [&](auto&                vec,
+                               bool                 quantizes,
+                               InitializationStream initializationStream) {
             using T = typename std::decay_t<decltype(vec)>::value_type;
 #ifndef _WIN32
             if constexpr(std::is_same_v<T, Float4x2>)
@@ -397,20 +425,30 @@ int runGemm(size_t             m,
                 // Values representable in storage but not on the compute-input grid -
                 // for storage=Half/compute=F8N, values like 0.7 that Half holds
                 // exactly but F8N rounds to 0.625 or 0.75.
-                generator.fillUniformReal<T>(vec, -1.0, 1.0);
+                roc::host_validation::GenerationPatternSpec pattern;
+                pattern.pattern    = roc::host_validation::GenerationPattern::UniformReal;
+                pattern.parameter0 = -1.0;
+                pattern.parameter1 = 1.0;
+                generateValues(vec, std::move(pattern), initializationStream);
             }
             else
             {
-                generator.fillBinary<T>(vec);
+                roc::host_validation::GenerationPatternSpec pattern;
+                pattern.pattern    = roc::host_validation::GenerationPattern::CandidateSet;
+                pattern.candidates = {-1.0, 1.0};
+                generateValues(vec, std::move(pattern), initializationStream);
             }
         };
 
         bool quantizesA = (sizeof(InputAT) > 1) && (computeInputA != dtypeEnumA);
         bool quantizesB = (sizeof(InputBT) > 1) && (computeInputB != dtypeEnumB);
-        initOperand(a, quantizesA);
-        initOperand(b, quantizesB);
+        initOperand(a, quantizesA, InitializationStream::OperandA);
+        initOperand(b, quantizesB, InitializationStream::OperandB);
     }
-    generator.fillBinary<AccumulateT>(c);
+    roc::host_validation::GenerationPatternSpec binaryPattern;
+    binaryPattern.pattern    = roc::host_validation::GenerationPattern::CandidateSet;
+    binaryPattern.candidates = {-1.0, 1.0};
+    generateValues(c, binaryPattern, InitializationStream::MatrixC);
 
     // Optional feature buffers — typed as AccumulateT so the slow path's
     // GetValue(alphaType, ...) reads the correct byte width.
@@ -420,7 +458,7 @@ int runGemm(size_t             m,
     if(useBias)
     {
         biasVec.resize(m * batchCount);
-        generator.fillBinary<AccumulateT>(biasVec);
+        generateValues(biasVec, binaryPattern, InitializationStream::Bias);
         contraction.setUseBias(1);
         contraction.setBias(accumDtypeEnum, m, m);
     }
@@ -429,20 +467,27 @@ int runGemm(size_t             m,
     {
         size_t scaleAlphaVecLen = (factorDim == 0) ? m : n;
         scaleAlphaVecBuf.resize(scaleAlphaVecLen);
-        generator.fillBinary<AccumulateT>(scaleAlphaVecBuf);
+        generateValues(scaleAlphaVecBuf, binaryPattern, InitializationStream::ScaleAlpha);
         contraction.setUseScaleAlphaVec(1);
         contraction.setScaleAlphaVec(accumDtypeEnum, scaleAlphaVecLen, factorDim);
     }
 
-    std::vector<AccumulateT> scaleABuf;
-    std::vector<AccumulateT> scaleBBuf;
+    std::vector<AccumulateT>                    scaleABuf;
+    std::vector<AccumulateT>                    scaleBBuf;
+    roc::host_validation::GenerationPatternSpec scalePattern;
+    scalePattern.pattern = roc::host_validation::GenerationPattern::CandidateSet;
+    for(int magnitude = 2; magnitude <= 100; ++magnitude)
+    {
+        scalePattern.candidates.push_back(-magnitude);
+        scalePattern.candidates.push_back(magnitude);
+    }
 
     if(useScaleAB == "Scalar")
     {
         scaleABuf.resize(1);
         scaleBBuf.resize(1);
-        generator.fillSignedUniformInteger<AccumulateT>(scaleABuf, 2, 100);
-        generator.fillSignedUniformInteger<AccumulateT>(scaleBBuf, 2, 100);
+        generateValues(scaleABuf, scalePattern, InitializationStream::ScaleA);
+        generateValues(scaleBBuf, scalePattern, InitializationStream::ScaleB);
         // setUseScaleAB must be called before setScaleA/setScaleB,
         // because setScaleA/B silently skips tensor registration when
         // m_useScaleAB is still empty.
@@ -455,8 +500,8 @@ int runGemm(size_t             m,
     {
         scaleABuf.resize(m);
         scaleBBuf.resize(n);
-        generator.fillSignedUniformInteger<AccumulateT>(scaleABuf, 2, 100);
-        generator.fillSignedUniformInteger<AccumulateT>(scaleBBuf, 2, 100);
+        generateValues(scaleABuf, scalePattern, InitializationStream::ScaleA);
+        generateValues(scaleBBuf, scalePattern, InitializationStream::ScaleB);
         contraction.setUseScaleAB("Vector");
         contraction.setScaleA(accumDtypeEnum, m);
         contraction.setScaleB(accumDtypeEnum, n);

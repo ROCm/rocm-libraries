@@ -13,6 +13,19 @@ import numpy as np
 import roc_host_validation as hv
 
 
+def counter_random(seed, stream, index):
+    mask = (1 << 64) - 1
+    value = (
+        seed
+        ^ ((stream + 0x9E3779B97F4A7C15) & mask)
+        ^ ((index * 0xBF58476D1CE4E5B9) & mask)
+    )
+    value = (value + 0x9E3779B97F4A7C15) & mask
+    value = ((value ^ (value >> 30)) * 0xBF58476D1CE4E5B9) & mask
+    value = ((value ^ (value >> 27)) * 0x94D049BB133111EB) & mask
+    return (value ^ (value >> 31)) & mask
+
+
 def pack_bits(values, bits):
     result = bytearray((len(values) * bits + 7) // 8)
     for index, value in enumerate(values):
@@ -697,6 +710,26 @@ class TensorAndGemmTests(unittest.TestCase):
         )
         self.assertFalse(np.array_equal(random_first, random_other_stream))
         self.assertTrue(np.all((-3 <= random_first) & (random_first <= 3)))
+
+        candidates = np.asarray([-6.0, -1.5, 0.0, 4.0], dtype=np.float32)
+        options.seed = 37
+        options.real.stream = 5
+        options.real.pattern = hv.GenerationPattern.CandidateSet
+        options.real.candidates = candidates.tolist()
+        selected = hv.to_numpy(
+            hv.generate_tensor(hv.ScalarType.Float32, [2, 4], options)
+        )
+        expected = np.asarray(
+            [
+                candidates[counter_random(options.seed, options.real.stream, index) % 4]
+                for index in range(8)
+            ],
+            dtype=np.float32,
+        ).reshape((2, 4), order="F")
+        np.testing.assert_array_equal(selected, expected)
+        options.real.candidates = []
+        with self.assertRaises(ValueError):
+            hv.generate_tensor(hv.ScalarType.Float32, [1], options)
 
     def test_type_derived_generation(self):
         options = hv.GenerationOptions()
