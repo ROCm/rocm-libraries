@@ -97,6 +97,7 @@ set_target_properties(host-validation-tiled
         POSITION_INDEPENDENT_CODE ON
 )
 
+# Add the optional BLAS-backed GEMM implementation to the current build.
 function(roc_host_validation_enable_blas_backend)
     if(TARGET host-validation-blas)
         return()
@@ -130,6 +131,7 @@ function(roc_host_validation_enable_blas_backend)
         PROPERTIES
             POSITION_INDEPENDENT_CODE ON
     )
+    # cmake-lint: disable=E1122
     install(TARGETS host-validation-blas
         EXPORT host-validation-targets
         ARCHIVE
@@ -145,6 +147,7 @@ if(HOST_VALIDATION_BUILD_BLAS_BACKEND)
     roc_host_validation_enable_blas_backend()
 endif()
 
+# Add the optional MX generation implementation to the current build.
 function(roc_host_validation_enable_mx_backend)
     if(TARGET host-validation-mx)
         return()
@@ -187,6 +190,7 @@ function(roc_host_validation_enable_mx_backend)
         PROPERTIES
             POSITION_INDEPENDENT_CODE ON
     )
+    # cmake-lint: disable=E1122
     install(TARGETS host-validation-mx
         EXPORT host-validation-targets
         ARCHIVE
