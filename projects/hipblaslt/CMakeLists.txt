@@ -306,7 +306,14 @@ if(NOT TARGET roc::host-validation)
             )
         endblock()
     else()
-        find_package(ROCHostValidation CONFIG REQUIRED)
+        find_package(ROCHostValidation CONFIG QUIET)
+        if(NOT TARGET roc::host-validation)
+            message(FATAL_ERROR
+                "hipBLASLt requires the standalone ROCHostValidation component. "
+                "Include shared/host-validation in a monorepo sparse checkout or "
+                "install the ROCHostValidation package and add it to CMAKE_PREFIX_PATH."
+            )
+        endif()
     endif()
 endif()
 if(_hipblaslt_mxdatagen_enabled AND NOT TARGET roc::host-validation-mx)
