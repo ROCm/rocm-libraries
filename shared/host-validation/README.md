@@ -159,8 +159,9 @@ GenerationRunInfo patch = generateAt(outputView, logicalIndex, options);
 The current patterns cover constants, selection from an explicit candidate
 set, uniform integer/real values, normal values, sine/cosine and absolute
 variants, serial logical indices, one selected dimension, identity tensors,
-checkerboard integers, type-derived extrema/non-finite values,
-encoded-exponent sampling, and explicit raw-storage recipes. Candidate-set
+affine coordinate/remainder patterns, checkerboard integers, type-derived
+extrema/non-finite values, encoded-exponent sampling, and explicit raw-storage
+recipes. Candidate-set
 selection is the generic equivalent of `numpy.random.choice` for fixed
 numerical values and is useful for exactly representable low-precision grids.
 Raw recipes are used only when compatibility depends on exact scalar

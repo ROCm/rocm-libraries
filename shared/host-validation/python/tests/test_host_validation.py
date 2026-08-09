@@ -26,6 +26,10 @@ def counter_random(seed, stream, index):
     return (value ^ (value >> 31)) & mask
 
 
+def cxx_remainder(value, divisor):
+    return value % divisor if value >= 0 else -((-value) % divisor)
+
+
 def pack_bits(values, bits):
     result = bytearray((len(values) * bits + 7) // 8)
     for index, value in enumerate(values):
@@ -809,6 +813,22 @@ class TensorAndGemmTests(unittest.TestCase):
         np.testing.assert_array_equal(hv.to_numpy(point), expected_point)
         with self.assertRaises(IndexError):
             hv.generate_at(point, point.size, options)
+
+        options.index_order = hv.LogicalIndexOrder.FirstDimensionFastest
+        options.real.pattern = hv.GenerationPattern.AffineIndexRemainder
+        options.real.dimension_coefficients = [1, -1, 2]
+        options.real.affine_offset = -2
+        options.real.remainder_divisor = 5
+        options.real.value_scale = 1.0
+        options.real.value_offset = 1.0
+        affine = hv.to_numpy(
+            hv.generate_tensor(hv.ScalarType.Float32, [2, 3, 2], options)
+        )
+        expected_affine = np.empty((2, 3, 2), dtype=np.float32)
+        for index in np.ndindex(expected_affine.shape):
+            numerator = -2 + index[0] - index[1] + 2 * index[2]
+            expected_affine[index] = cxx_remainder(numerator, 5) + 1
+        np.testing.assert_array_equal(affine, expected_affine)
 
     def test_type_derived_generation(self):
         options = hv.GenerationOptions()
