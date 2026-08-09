@@ -329,7 +329,8 @@ Tensor referenceGemmOwned(
     std::vector<MatrixAxis> preQuantizationAxesA,
     std::vector<Tensor> preQuantizationScalesB,
     std::vector<MatrixAxis> preQuantizationAxesB,
-    std::complex<double> outputScale, GemmOutputConversion outputConversion) {
+    std::complex<double> outputScale, GemmOutputConversion outputConversion,
+    AccumulationRounding accumulationRounding) {
     if (a.shape().rank() != 2 || b.shape().rank() != 2)
         throw std::invalid_argument("Python reference_gemm requires rank-2 A and B tensors.");
 
@@ -371,6 +372,7 @@ Tensor referenceGemmOwned(
     }
     GemmProblem problem(std::move(operandA), std::move(operandB), c.view(), d.mutableView(),
                         accumulatorType);
+    problem.accumulationRounding = accumulationRounding;
     problem.mathMode = mathMode;
     problem.epilogue.alpha = alpha;
     problem.epilogue.beta = beta;
@@ -573,6 +575,11 @@ NB_MODULE(_roc_host_validation, module) {
     nb::enum_<MathMode>(module, "MathMode")
         .value("Default", MathMode::Default)
         .value("XFloat32", MathMode::XFloat32);
+
+    nb::enum_<AccumulationRounding>(module, "AccumulationRounding")
+        .value("TypeDefault", AccumulationRounding::TypeDefault)
+        .value("FullPrecision", AccumulationRounding::FullPrecision)
+        .value("AfterProductAndSum", AccumulationRounding::AfterProductAndSum);
 
     nb::enum_<GemmBackend>(module, "GemmBackend")
         .value("Canonical", GemmBackend::Canonical)
@@ -1206,7 +1213,8 @@ NB_MODULE(_roc_host_validation, module) {
                "pre_quantization_scales_b"_a = std::vector<Tensor>{},
                "pre_quantization_axes_b"_a = std::vector<MatrixAxis>{},
                "output_scale"_a = std::complex<double>(1.0, 0.0),
-               "output_conversion"_a = GemmOutputConversion::Default);
+               "output_conversion"_a = GemmOutputConversion::Default,
+               "accumulation_rounding"_a = AccumulationRounding::TypeDefault);
     module.def("reference_epilogue", &referenceEpilogueOwned, "input"_a, "output_type"_a,
                "compute_type"_a, "bias"_a = std::optional<Tensor>{},
                "bias_axis"_a = MatrixAxis::Row, "activation"_a = Activation::None,
