@@ -431,6 +431,20 @@ inline std::pair<ptrdiff_t, ptrdiff_t> elementBounds(const Layout& layout) {
     return {lower, upper};
 }
 
+template <typename Function>
+void forEachIndex(const Shape& shape, Function&& function) {
+    const size_t count = shape.elementCount();
+    std::vector<size_t> indices(shape.rank(), 0);
+    for (size_t linearIndex = 0; linearIndex < count; ++linearIndex) {
+        function(std::span<const size_t>(indices), linearIndex);
+        for (size_t dimension = shape.rank(); dimension > 0; --dimension) {
+            const size_t index = dimension - 1;
+            if (++indices[index] < shape[index]) break;
+            indices[index] = 0;
+        }
+    }
+}
+
 inline size_t storageBytesForLayout(ScalarType type, const Layout& layout) {
     const auto [lower, upper] = elementBounds(layout);
     if (upper < lower) return 0;
@@ -902,6 +916,8 @@ inline size_t storageBytesForLayout(ScalarType type, const Layout& layout) {
     return detail::storageBytesForLayout(type, layout);
 }
 
+class Tensor;
+
 class TensorView {
    public:
     TensorView(ScalarType type, Layout layout, std::span<const std::byte> storage)
@@ -940,6 +956,8 @@ class TensorView {
     Target loadAs(std::initializer_list<size_t> indices) const {
         return loadAs<Target>(std::span<const size_t>(indices.begin(), indices.size()));
     }
+
+    Tensor to(ScalarType type) const;
 
    private:
     ScalarType m_type;
@@ -1074,9 +1092,59 @@ class Tensor {
         return MutableTensorView(m_type, m_layout, m_storage);
     }
 
+    Tensor to(ScalarType type) const;
+
    private:
     ScalarType m_type;
     Layout m_layout;
     std::vector<std::byte> m_storage;
 };
+
+inline Tensor TensorView::to(ScalarType type) const {
+    const size_t requiredStorage = storageBytesForLayout(m_type, m_layout);
+    if (type == m_type)
+        return Tensor::fromStorage(
+            type, m_layout,
+            std::vector<std::byte>(m_storage.begin(), m_storage.begin() + requiredStorage));
+
+    Tensor result(type, m_layout);
+    const MutableTensorView destination = result.mutableView();
+    visitScalarType(m_type, [&]<typename SourceTag>() {
+        visitScalarType(type, [&]<typename DestinationTag>() {
+            detail::forEachIndex(m_layout.shape(), [&](std::span<const size_t> indices, size_t) {
+                const ptrdiff_t sourceOffset = m_layout.elementOffset(indices);
+                const ptrdiff_t destinationOffset = destination.layout().elementOffset(indices);
+                constexpr ScalarCategory sourceCategory = scalarTypeInfo(SourceTag::type).category;
+                if constexpr (sourceCategory == ScalarCategory::Boolean ||
+                              sourceCategory == ScalarCategory::UnsignedInteger) {
+                    const uint64_t value = detail::decodeScalarKnown<SourceTag::type, uint64_t>(
+                        m_storage, sourceOffset);
+                    detail::encodeScalarKnown<DestinationTag::type>(destination.storage(),
+                                                                    destinationOffset, value);
+                } else if constexpr (sourceCategory == ScalarCategory::SignedInteger) {
+                    const int64_t value = detail::decodeScalarKnown<SourceTag::type, int64_t>(
+                        m_storage, sourceOffset);
+                    detail::encodeScalarKnown<DestinationTag::type>(destination.storage(),
+                                                                    destinationOffset, value);
+                } else if constexpr (sourceCategory == ScalarCategory::Complex) {
+                    const std::complex<double> value =
+                        detail::decodeScalarKnown<SourceTag::type, std::complex<double>>(
+                            m_storage, sourceOffset);
+                    detail::encodeScalarKnown<DestinationTag::type>(destination.storage(),
+                                                                    destinationOffset, value);
+                } else {
+                    const double value =
+                        detail::decodeScalarKnown<SourceTag::type, double>(m_storage, sourceOffset);
+                    detail::encodeScalarKnown<DestinationTag::type>(destination.storage(),
+                                                                    destinationOffset, value);
+                }
+            });
+        });
+    });
+    return result;
+}
+
+inline Tensor Tensor::to(ScalarType type) const {
+    return view().to(type);
+}
 }  // namespace roc::host_validation
