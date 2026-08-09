@@ -16,8 +16,10 @@ MoE per-expert path with fp8 e4m3 operands and per-128-block f32 scales:
       -> GEMM2 (down) -- fp8 Hidden . fp8 W_down -> f32 acc, dequant by
          (hidden_dyn_scale * down_scale) -> weighted atomic reduce into Y.
 
-See ``examples/gfx950/fused_mega_moe/docs/BUILD_SPEC_FP8.md`` for the authoritative
-build spec. The dequant ordering follows BUILD_SPEC_FP8 Section 1.2 (the
+See ``examples/gfx950/fused_mega_moe/ALGORITHM.md`` for the algorithm this
+implements. (The ``BUILD_SPEC_FP8 Section N`` markers below are the section
+numbers of the original build spec, kept as provenance for the snapshots; the
+spec itself is not in the tree.) The dequant ordering follows Section 1.2 (the
 ``block_scale_gemm.py`` group-accumulator pattern): within a 128-wide
 contraction block the scales are constant, so
 ``sum_k (a.sa)(b.sb) = sa.sb . sum_k (a.b)`` -- the scale is applied per
@@ -54,7 +56,6 @@ toolkit (which dispatches the fp8 atom directly) rather than the
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from typing import Tuple
 
@@ -69,7 +70,6 @@ from ...core.ir import (
     PtrType,
     Value,
 )
-from ...helpers.asm import mfma_f8f6f4_agpr
 from ...helpers.atoms import MfmaAtom
 from ...helpers.mfma_gemm_inner import (
     decode_mfma_lanes,
@@ -88,81 +88,13 @@ __all__ = [
 ]
 
 
-# AGPR operand staging: route the gate/up/down K=128 fp8 MFMAs through the
-# inline-asm helper (``v_mfma_f32_16x16x128_f8f6f4`` with AGPR srcA/srcB +
-# VGPR acc, the hand-tuned asm staging layout) instead of the scaled intrinsic. The
-# helper is numerically identical (cbsz/blgp=0 => fp8e4m3, scales pinned to
-# the neutral E8M0 0 => factor 1.0) and verified bit-exact vs the intrinsic
-# (asm_mfma_parity / asm_mfma_fp8frag). Forcing the fp8 A/B fragments to live
-# in the AGPR file across the K-loop is the lever (hand-tuned asm keeps ~192 AGPR of
-# operand state; the intrinsic path leaves srcA/srcB placement to the register
-# allocator). Flip to True to force the AGPR-source inline-asm MFMA.
-#
-# DEFAULT False (intrinsic path): the forced-AGPR-source inline-asm route was
-# DEBUGGED TO BIT-EXACT CORRECTNESS (hardened parity passes at every hazard_nop
-# down to 0) but measured ~25% SLOWER same-session (T1 0.197-0.201 ms asm vs
-# 0.159 ms intrinsic, clean A/B/A). Root cause: the ``sideeffect`` inline-asm
-# MFMA is OPAQUE to the LLVM machine scheduler + GCNHazardRecognizer, so the
-# scheduler can no longer interleave independent VMEM loads / other MFMAs into
-# the MFMA latency window -- the exact overlap the AGPR-resident-operand lever
-# is meant to enable -- and the sideeffect barrier blocks reordering. The
-# intrinsic path ALREADY stages operands into AGPR via the register allocator
-# (verified ``v_accvgpr_write_b32`` in ISA) WITHOUT forfeiting the scheduler.
-# hand-tuned asm's 192-AGPR staging works because hand-tuned asm hand-schedules the ENTIRE asm
-# instruction stream (AGPR lifetime AND interleave together); comgr inline-asm
-# gives register-class control but forfeits the scheduler, which dominates here.
-# Kept behind a flag (correct, available) rather than reverted.
-_USE_ASM_AGPR_MFMA = False
-
-# Trailing ``s_nop`` count on each inline-asm MFMA (see helpers/asm.py). The
-# default-8 the helper bakes in is conservative: it is sized for a back-to-back
-# dependent accumulation chain on the SAME source AGPRs with no interleaved
-# work. The mega-kernel's K-loop emits multiple INDEPENDENT MFMAs back-to-back
-# (gate vs up; multiple ni accumulators), so the hardware MFMA pipeline is
-# already partially filled and a smaller nop suffices -- recovering the
-# throughput the blanket nop would otherwise serialise. This is SWEPT against
-# HARDENED parity (NOT a free perf knob: too-small a value silently corrupts
-# the accumulator, so every value is re-validated numerically). Overridable
-# via the ROCKE_FP8_MFMA_NOP env var for the sweep.
-_ASM_MFMA_HAZARD_NOP = int(os.environ.get("ROCKE_FP8_MFMA_NOP", "8"))
-
-# D5 scheduling-cadence sweep knob (additive). Values:
-#   "iglp1" -> (KEPT, default) emit ``b.iglp_opt(1)``
-#              (MFMASmallGemmSingleWaveOpt) once at the top of the gate/up + down
-#              K-loop bodies. The post-RA scheduler then imposes the canned
-#              MFMA/DS interleave for each loop region. Won the D5 sweep:
-#              same-session best-of-5 T1 ~0.1586 vs "none" ~0.1597 (strictly
-#              faster across 3 alternating thermal-controlled pairs, parity PASS,
-#              golden digest unchanged). Mutually exclusive with sched_*barrier
-#              (so no sched_group_barrier is emitted when this is set).
-#   "none"  -> no scheduler hint (pre-D5 baseline; byte-identical IR).
-#   "sgb"   -> explicit sched_group_barrier cadence in the active DTLA gate/up +
-#              down loops. D5-swept: REGRESSED (~0.166 T1) -> not kept.
-_SCHED_CADENCE = os.environ.get("ROCKE_FP8_SCHED", "iglp1").strip().lower()
-
-# D8 XCD-remap sweep knob (additive, file-only, grid shape UNCHANGED at (gx, gy)).
-# The HW round-robins linear workgroups across the 8 XCDs (each its own L2
-# slice). The default linear (m_block major in y, inter slice in x) order spreads
-# the 8 m_blocks (= 8 distinct experts' weight footprints) round-robin across the
-# 8 XCDs interleaved with the 28 inter slices, so every XCD touches every expert
-# (no L2 locality on the huge per-expert WGate/WUp/WDown). This knob remaps the
-# (inter, m_block) tile a physical workgroup owns so that workgroups landing on
-# the same XCD share the same m_block (= same expert weights) => per-expert weight
-# columns stay resident in that XCD's L2 across the 28 inter slices.
-#   0 -> OFF (default; byte-identical IR / digest, the kept-best path)
-#   N>0 -> remap with N = XCD count (8 on MI355X). The linear workgroup id
-#          ``bx*gy + by`` is re-tiled into (xcd, slot) so each XCD owns a
-#          contiguous run of inter slices for ONE m_block at a time.
-_XCD_REMAP = int(os.environ.get("ROCKE_FP8_XCD", "8"))
-
-
-def _emit_loop_cadence_hint(b: IRBuilder) -> None:
-    """Emit the D5 per-loop scheduler hint at the TOP of a K-loop body.
+def _emit_loop_cadence_hint(b: IRBuilder, cadence: str) -> None:
+    """Emit the per-loop scheduler hint at the TOP of a K-loop body.
 
     Only ``iglp1`` emits here (it owns the whole-loop schedule and must precede
     the loop body). ``sgb`` emits its cadence inline next to each MFMA instead.
     """
-    if _SCHED_CADENCE == "iglp1":
+    if cadence == "iglp1":
         b.iglp_opt(1)
 
 
@@ -174,45 +106,32 @@ _SGB_DS_READ = 0x100
 _SGB_DS_WRITE = 0x200
 
 
-def _emit_sgb_gateup_dtla(b: IRBuilder, n_mfma: int = 2) -> None:
+def _emit_sgb_gateup_dtla(b: IRBuilder, cadence: str, n_mfma: int = 2) -> None:
     """compv4-style cadence for the DTLA gate/up loop body (per ni).
 
     The DTLA path stages B via ``global_load...lds`` (a VMEM read whose dest is
     LDS) then ``ds_read`` then ``n_mfma`` MFMAs. Impose: 1 VMEM_READ (the staged
     DMA), DS_READ feeding the MFMA, then the MFMAs -- so the in-flight DMA + LDS
-    read overlap the MFMA shadow. No-op unless ``_SCHED_CADENCE == 'sgb'``.
+    read overlap the MFMA shadow. No-op unless ``cadence == 'sgb'``.
     """
-    if _SCHED_CADENCE != "sgb":
+    if cadence != "sgb":
         return
     b.sched_group_barrier(_SGB_VMEM_READ, 1, 0)
     b.sched_group_barrier(_SGB_DS_READ, n_mfma, 0)
     b.sched_group_barrier(_SGB_MFMA, int(n_mfma), 0)
 
 
-def _emit_sgb_down_group(b: IRBuilder, n_mfma: int = 1) -> None:
+def _emit_sgb_down_group(b: IRBuilder, cadence: str, n_mfma: int = 1) -> None:
     """compv4-style VMEM<->MFMA cadence for the down loop per-group body.
 
     The down loop issues a global VMEM W_down load then ``n_mfma`` MFMAs per
     128-group. Impose: 1 VMEM_READ (next group's W_down) under the MFMA(s).
-    No-op unless ``_SCHED_CADENCE == 'sgb'``.
+    No-op unless ``cadence == 'sgb'``.
     """
-    if _SCHED_CADENCE != "sgb":
+    if cadence != "sgb":
         return
     b.sched_group_barrier(_SGB_VMEM_READ, 1, 0)
     b.sched_group_barrier(_SGB_MFMA, int(n_mfma), 0)
-
-
-def _emit_mfma(b: IRBuilder, atom: MfmaAtom, a: Value, bb: Value, acc: Value) -> Value:
-    """Issue one K=128 fp8 MFMA, optionally via the AGPR-source inline-asm helper.
-
-    When :data:`_USE_ASM_AGPR_MFMA` is set AND the atom is the K=128 fp8 hero
-    atom, route through :func:`mfma_f8f6f4_agpr` (AGPR srcA/srcB). The helper
-    bitcasts the ``<32 x fp8e4m3>`` fragment to ``<8 x i32>`` itself. Otherwise
-    fall back to the bit-identical scaled-intrinsic atom (``atom.emit``).
-    """
-    if _USE_ASM_AGPR_MFMA and atom.k == 128 and atom.dtype_in == "fp8e4m3":
-        return mfma_f8f6f4_agpr(b, a, bb, acc, hazard_nop=_ASM_MFMA_HAZARD_NOP)
-    return atom.emit(b, a, bb, acc)
 
 
 # Group block along the contraction axis (= 4 fp8_16x16x32 atoms).
@@ -258,6 +177,14 @@ class FusedMegaKernelSpecFp8:
     wave_size: int = 64
     block_size: int = 0
     dtype: str = "fp8e4m3"
+    #: Per-loop scheduler hint. This level's lever, so ``iglp1`` is the point of
+    #: the snapshot; ``none`` reproduces the pre-level-9 IR and ``sgb`` the
+    #: rejected ``sched_group_barrier`` cadence.
+    sched_cadence: str = "iglp1"
+    #: XCD count for the L2-locality remap of the inter-slice id, or 0 to leave
+    #: the linear order alone. The remap is a permutation either way, so this
+    #: only moves which workgroup computes which slice.
+    xcd_remap: int = 8
 
     def __post_init__(self) -> None:
         if self.block_size == 0:
@@ -482,8 +409,8 @@ def _emit_fp8_gateup_group_gemm(
                 k_tile_base=k_tile_base,
                 N=K,
             )
-            g_new = _emit_mfma(b, atom, a_frag, gb_frag, g_acc)
-            u_new = _emit_mfma(b, atom, a_frag, ub_frag, u_acc)
+            g_new = atom.emit(b, a_frag, gb_frag, g_acc)
+            u_new = atom.emit(b, a_frag, ub_frag, u_acc)
             b.scf_yield(g_new, u_new)
         group_gate = ginner.results[0]
         group_up = ginner.results[1]
@@ -516,6 +443,7 @@ def _emit_fp8_gateup_fused_kloop(
     stride_gate_scale: Value,
     stride_up_scale: Value,
     tag: str,
+    cadence: str,
     dtla=None,
 ):
     """Gate + up fp8 GEMM fused across ALL ni cells of one mi row.
@@ -569,7 +497,7 @@ def _emit_fp8_gateup_fused_kloop(
         b.const_i32(0), num_groups, b.const_i32(1), iter_args, iv_name=f"kg_{tag}"
     )
     with outer as (kg, outs):
-        _emit_loop_cadence_hint(b)
+        _emit_loop_cadence_hint(b, cadence)
         gate_outer = list(outs[:nni])
         up_outer = list(outs[nni:])
 
@@ -718,9 +646,9 @@ def _emit_fp8_gateup_fused_kloop(
                 else:
                     b.s_waitcnt(vmcnt=0)
                 gb, ub = _read(pair)
-                g_acc[ni] = _emit_mfma(b, atom, a_cur, gb, g_acc[ni])
-                u_acc[ni] = _emit_mfma(b, atom, a_cur, ub, u_acc[ni])
-                _emit_sgb_gateup_dtla(b, n_mfma=2)
+                g_acc[ni] = atom.emit(b, a_cur, gb, g_acc[ni])
+                u_acc[ni] = atom.emit(b, a_cur, ub, u_acc[ni])
+                _emit_sgb_gateup_dtla(b, cadence, n_mfma=2)
         else:
             # ---- legacy global->VGPR->MFMA path ----------------------------
             # Prefetch atom 0 operands (A shared + all ni B fragments).
@@ -740,8 +668,8 @@ def _emit_fp8_gateup_fused_kloop(
                     if not last:
                         gb_next_ni = _gb_at(ni, kk + 1)
                         ub_next_ni = _ub_at(ni, kk + 1)
-                    g_acc[ni] = _emit_mfma(b, atom, a_cur, gb_cur[ni], g_acc[ni])
-                    u_acc[ni] = _emit_mfma(b, atom, a_cur, ub_cur[ni], u_acc[ni])
+                    g_acc[ni] = atom.emit(b, a_cur, gb_cur[ni], g_acc[ni])
+                    u_acc[ni] = atom.emit(b, a_cur, ub_cur[ni], u_acc[ni])
                     if not last:
                         gb_cur[ni] = gb_next_ni
                         ub_cur[ni] = ub_next_ni
@@ -982,6 +910,7 @@ def _emit_fp8_down_group_gemm(
     stride_down_scale: Value,
     m_row_base: Value,
     tag: str,
+    cadence: str,
 ) -> Value:
     """Down fp8 GEMM for one warp-atom output cell -> per-lane f32 vector.
 
@@ -1036,7 +965,7 @@ def _emit_fp8_down_group_gemm(
         iv_name=f"dg_{tag}",
     )
     with outer as (kg, (down_outer,)):
-        _emit_loop_cadence_hint(b)
+        _emit_loop_cadence_hint(b, cadence)
         # A-side dynamic scale: HiddenScale_smem[m_row, local-inter-block kg].
         a_scale_v = b.vec_extract(
             b.smem_load_vN(scale_view.base, m_row, kg, dtype=F32, n=1), 0
@@ -1090,13 +1019,13 @@ def _emit_fp8_down_group_gemm(
             # Issue the NEXT atom's W_down load (in flight during the MFMA).
             if kk + 1 < atoms_per_group:
                 b_next = _load_b_at(kk + 1)
-            d_new = _emit_mfma(b, atom, a_frag, b_cur, group_acc)
+            d_new = atom.emit(b, a_frag, b_cur, group_acc)
             group_acc = d_new
             if kk + 1 < atoms_per_group:
                 b_cur = b_next
 
         # D5 sgb: place the next-group W_down VMEM under this group's MFMA(s).
-        _emit_sgb_down_group(b, n_mfma=atoms_per_group)
+        _emit_sgb_down_group(b, cadence, n_mfma=atoms_per_group)
 
         scale_vec = b.vector_splat(ab_scale, atom.c_per_lane)
         down_outer_new = b.vector_fma(group_acc, scale_vec, down_outer)
@@ -1331,6 +1260,7 @@ def build_moe_fused_mega_gemm_fp8(
     slot_size = b.param("slot_size", I32)  # noqa: F841 -- ABI
     tokens = b.param("tokens", I32)  # noqa: F841 -- used in STAGE 2 epilogue
 
+    cadence = spec.sched_cadence.strip().lower()
     tile_m = spec.tile_m
     tile_n = spec.tile_n_inter
     n_blocks = tile_n // GROUP_K
@@ -1369,14 +1299,14 @@ def build_moe_fused_mega_gemm_fp8(
 
     m_block_idx = b.block_id_y()
     inter_block_x = None  # set below only when XCD remap is active (OFF = no-op)
-    if _XCD_REMAP > 0:
+    if spec.xcd_remap > 0:
         inter_block_x = b.block_id_x()
-        # D8 XCD remap (grid shape unchanged): re-tile the inter-slice id so that
+        # XCD remap (grid shape unchanged): re-tile the inter-slice id so that
         # workgroups landing on the same XCD (HW round-robins consecutive linear
-        # ids across the _XCD_REMAP XCDs) walk a CONTIGUOUS run of inter slices
-        # for this m_block, maximising per-XCD L2 residency of the gate/up/down
-        # weight columns. gx = ceil(N / tile_n_inter) (tile_n_inter compile-time).
-        c_xcd = b.const_i32(_XCD_REMAP)
+        # ids across the XCDs) walk a CONTIGUOUS run of inter slices for this
+        # m_block, maximising per-XCD L2 residency of the gate/up/down weight
+        # columns. gx = ceil(N / tile_n_inter) (tile_n_inter compile-time).
+        c_xcd = b.const_i32(spec.xcd_remap)
         c_tn = b.const_i32(spec.tile_n_inter)
         gx = b.div(b.add(N, b.const_i32(spec.tile_n_inter - 1)), c_tn)
         # n_full = (gx // XCD) * XCD: the largest multiple of XCD <= gx. Only the
@@ -1549,6 +1479,7 @@ def build_moe_fused_mega_gemm_fp8(
                 stride_gate_scale=stride_gate_scale,
                 stride_up_scale=stride_up_scale,
                 tag=f"{mi}",
+                cadence=cadence,
                 dtla=dtla_bundle,
             )
             gate_list.extend(g_dqs)
@@ -1691,6 +1622,7 @@ def build_moe_fused_mega_gemm_fp8(
                         stride_down_scale=stride_down_scale,
                         m_row_base=m_row_base,
                         tag=f"d{mi}_{ni}",
+                        cadence=cadence,
                     )
                     down_list.append(d_dq)
             # Barrier before the next H_out tile reuses Hidden_smem reads

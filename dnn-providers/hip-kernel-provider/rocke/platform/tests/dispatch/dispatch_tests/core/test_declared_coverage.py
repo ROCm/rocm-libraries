@@ -18,6 +18,23 @@ from rocke.dispatch.families.moe import MOE_REGISTRY, MoeRequest
 from rocke.dispatch.families.norm import NORM_REGISTRY, NormRequest
 
 
+#: The tuned MoE geometry. The token-banded fp8 candidates claim this shape
+#: exactly and decline everything else, so the generic shapes below never reach
+#: them and reachability has to be asked at the shape they exist for. Written
+#: out rather than imported for the same reason as the bands below.
+_MOE_TUNED = dict(hidden=2048, intermediate=768, num_experts=128, top_k=8)
+
+#: One token count inside each band. Written out rather than imported from the
+#: tuning record so that moving a boundary has to be restated here, where the
+#: fact that a band moved is the thing under test.
+_MOE_TUNED_BANDS = {
+    "fused_tm16": 4,
+    "split_coop_tm16": 128,
+    "split_coop_tm32": 512,
+    "split_coop_tm64": 4096,
+}
+
+
 def _moe_requests(arch: str):
     for dtype in ("fp16", "bf16", "fp8"):
         for tokens in (1, 128, 4096):
@@ -32,6 +49,35 @@ def _moe_requests(arch: str):
                         arch=arch,
                         dtype=dtype,
                     )
+    for algorithm, tokens in _MOE_TUNED_BANDS.items():
+        yield MoeRequest(
+            num_tokens=tokens, arch=arch, dtype="fp8", **_MOE_TUNED
+        )
+        if algorithm == "fused_tm16":
+            continue  # one launch, so no stage 2 to reach
+        # Stage 2 declines ``auto`` on purpose -- it is half an algorithm, and
+        # answering "the MoE layer" with a down GEMM would be wrong -- so it is
+        # only reachable by naming it.
+        yield MoeRequest(
+            num_tokens=tokens,
+            arch=arch,
+            dtype="fp8",
+            spec_id=f"moe_{algorithm}_stage2",
+            **_MOE_TUNED,
+        )
+    # The activation gather/rescale prologue declines ``auto`` for the same
+    # reason stage 2 does, and more sharply: it answers with a quantized A
+    # matrix, not a layer output, so admitting it to ``auto`` would be a wrong
+    # answer rather than a slow one. Named explicitly, as the only way to reach
+    # it. One token count is enough -- reachability is what is under test here,
+    # and the band-to-tile_m tracking is asserted in the moe suite.
+    yield MoeRequest(
+        num_tokens=32,
+        arch=arch,
+        dtype="fp8",
+        spec_id="moe_gather_rescale_a",
+        **_MOE_TUNED,
+    )
 
 
 def _norm_requests(arch: str):
