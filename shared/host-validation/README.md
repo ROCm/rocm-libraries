@@ -11,11 +11,13 @@ comparison used by ROCm library clients and tests.
   - Builds with an ordinary host compiler and the C++ standard library.
 - `roc::host-validation`
   - Transitional validation operations layered on the tensor core.
-  - Exports `roc/host_validation/validation.hpp`.
+  - Exports `comparison.hpp`, `epilogue.hpp`, `generation.hpp`, `gemm.hpp`,
+    `reduction.hpp`, `structured_sparsity.hpp`, and the convenience umbrella
+    `validation.hpp`.
   - Exposes runtime-typed generation, reference GEMM, reference epilogues,
     reductions, structured sparsity, and comparison.
   - Implementation headers live under `roc/host_validation/detail/`; consumers
-    include only `validation.hpp`.
+    include the operation header they need or `validation.hpp`.
 - `roc::host-validation-blas`
   - Optional compiled CBLAS implementation of `GemmBackend::Blas`.
   - Built with `HOST_VALIDATION_BUILD_BLAS_BACKEND=ON`.
