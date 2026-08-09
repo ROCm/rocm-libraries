@@ -207,20 +207,17 @@ void hipblaslt_reference_gemm(hipblasOperation_t       transA,
         rows != 0 && columns != 0 && reduction != 0 &&
         (m > blasThreshold || n > blasThreshold || k > blasThreshold ||
          lda > blasThreshold || ldb > blasThreshold || ldc > blasThreshold);
+    GemmInvocation invocation(std::move(problem));
     if(useBlas)
     {
         static const TransformingBlasGemmBackend backend;
-        referenceGemm(problem,
-                      {
-                          .backend = GemmBackend::Blas,
-                          .requireRequestedBackend = true,
-                          .backendImplementation = &backend,
-                      });
+        invocation.execution = {
+            .backend = GemmBackend::Blas,
+            .requireRequestedBackend = true,
+            .backendImplementation = &backend,
+        };
     }
-    else
-    {
-        referenceGemm(problem);
-    }
+    referenceGemm(invocation);
 
     (void)Tc_enum;
 }
