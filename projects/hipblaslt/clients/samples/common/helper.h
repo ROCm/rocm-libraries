@@ -24,10 +24,12 @@
  *
  *******************************************************************************/
 #pragma once
+#include <cstdint>
 #include <functional>
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt.h>
-#include <roc/host_validation/validation.hpp>
+#include <roc/host_validation/adapters/hipblaslt/Types.hpp>
+#include <roc/host_validation/generation.hpp>
 
 #ifndef CHECK_HIP_ERROR
 #define CHECK_HIP_ERROR(error)                    \
@@ -52,6 +54,55 @@
         exit(EXIT_FAILURE);                                                               \
     }
 #endif
+
+namespace hipblaslt_sample_detail
+{
+    constexpr std::uint64_t initializationSeed = 69069;
+
+    enum class GemmInitializationStream : std::uint64_t
+    {
+        A          = 0,
+        B          = 1,
+        C          = 2,
+        Bias       = 3,
+        ScaleAlpha = 4,
+    };
+
+    enum class LayerNormInitializationStream : std::uint64_t
+    {
+        Input = 0,
+        Gamma = 1,
+        Beta  = 2,
+    };
+
+    enum class AMaxInitializationStream : std::uint64_t
+    {
+        Input = 0,
+    };
+
+    constexpr std::uint64_t groupedInitializationStream(std::uint64_t            group,
+                                                        GemmInitializationStream role)
+    {
+        return (group << 32) | static_cast<std::uint64_t>(role);
+    }
+
+    template <typename Type>
+    void generateUniformInteger(Type* values, size_t elements, std::uint64_t stream)
+    {
+        roc::host_validation::GenerationOptions options;
+        options.seed            = initializationSeed;
+        options.real.pattern    = roc::host_validation::GenerationPattern::UniformInteger;
+        options.real.parameter0 = -3;
+        options.real.parameter1 = 3;
+        options.real.stream     = stream;
+        roc::host_validation::generate(
+            roc::host_validation::hipblaslt_adapter::mutableTensorView(
+                values,
+                elements,
+                roc::host_validation::Layout::contiguous(roc::host_validation::Shape{elements})),
+            options);
+    }
+} // namespace hipblaslt_sample_detail
 
 template <typename InTypeA,
           typename InTypeB,
@@ -135,19 +186,15 @@ struct Runner
 
         if(max_workspace_size > 0)
             CHECK_HIP_ERROR(hipMalloc(&d_workspace, max_workspace_size));
-        roc::host_validation::RandomGenerator generator(69069);
-        roc::host_validation::fill(
-            std::span(static_cast<OutType*>(c), size_t(m * n * batch_count)),
-            roc::host_validation::DataPattern::UniformInteger,
-            generator,
-            -3,
-            3);
-        roc::host_validation::fill(
-            std::span(static_cast<float*>(alphaVec), size_t(m * batch_count)),
-            roc::host_validation::DataPattern::UniformInteger,
-            generator,
-            -3,
-            3);
+        hipblaslt_sample_detail::generateUniformInteger(
+            static_cast<OutType*>(c),
+            size_t(m * n * batch_count),
+            static_cast<std::uint64_t>(hipblaslt_sample_detail::GemmInitializationStream::C));
+        hipblaslt_sample_detail::generateUniformInteger(
+            static_cast<float*>(alphaVec),
+            size_t(m * batch_count),
+            static_cast<std::uint64_t>(
+                hipblaslt_sample_detail::GemmInitializationStream::ScaleAlpha));
     }
 
     ~Runner()
@@ -196,13 +243,11 @@ struct Runner
 
             CHECK_HIP_ERROR(hipMalloc(&d_biasVec, biasElems * sizeof(BiasType)));
             CHECK_HIP_ERROR(hipHostMalloc(&biasVec, biasElems * sizeof(BiasType)));
-            roc::host_validation::RandomGenerator generator(69069);
-            roc::host_validation::fill(
-                std::span(static_cast<BiasType*>(biasVec), size_t(biasElems)),
-                roc::host_validation::DataPattern::UniformInteger,
-                generator,
-                -3,
-                3);
+            hipblaslt_sample_detail::generateUniformInteger(
+                static_cast<BiasType*>(biasVec),
+                size_t(biasElems),
+                static_cast<std::uint64_t>(
+                    hipblaslt_sample_detail::GemmInitializationStream::Bias));
         }
     }
 
@@ -301,7 +346,6 @@ struct RunnerVec
         c.resize(m.size(), nullptr);
         d.resize(m.size(), nullptr);
         alphaVec.resize(m.size(), nullptr);
-        roc::host_validation::RandomGenerator generator(69069);
         for(int j = 0; j < m.size(); j++)
         {
             CHECK_HIP_ERROR(hipMalloc(&d_a[j], m[j] * k[j] * batch_count[j] * sizeof(InTypeA)));
@@ -316,30 +360,30 @@ struct RunnerVec
             CHECK_HIP_ERROR(hipHostMalloc(&d[j], m[j] * n[j] * batch_count[j] * sizeof(OutType)));
             CHECK_HIP_ERROR(hipHostMalloc(&alphaVec[j], m[j] * batch_count[j] * sizeof(float)));
 
-            roc::host_validation::fill(
-                std::span(static_cast<InTypeA*>(a[j]), size_t(m[j] * k[j] * batch_count[j])),
-                roc::host_validation::DataPattern::UniformInteger,
-                generator,
-                -3,
-                3);
-            roc::host_validation::fill(
-                std::span(static_cast<InTypeB*>(b[j]), size_t(n[j] * k[j] * batch_count[j])),
-                roc::host_validation::DataPattern::UniformInteger,
-                generator,
-                -3,
-                3);
-            roc::host_validation::fill(
-                std::span(static_cast<OutType*>(c[j]), size_t(m[j] * n[j] * batch_count[j])),
-                roc::host_validation::DataPattern::UniformInteger,
-                generator,
-                -3,
-                3);
-            roc::host_validation::fill(
-                std::span(static_cast<float*>(alphaVec[j]), size_t(m[j] * batch_count[j])),
-                roc::host_validation::DataPattern::UniformInteger,
-                generator,
-                -3,
-                3);
+            hipblaslt_sample_detail::generateUniformInteger(
+                static_cast<InTypeA*>(a[j]),
+                size_t(m[j] * k[j] * batch_count[j]),
+                hipblaslt_sample_detail::groupedInitializationStream(
+                    static_cast<std::uint64_t>(j),
+                    hipblaslt_sample_detail::GemmInitializationStream::A));
+            hipblaslt_sample_detail::generateUniformInteger(
+                static_cast<InTypeB*>(b[j]),
+                size_t(n[j] * k[j] * batch_count[j]),
+                hipblaslt_sample_detail::groupedInitializationStream(
+                    static_cast<std::uint64_t>(j),
+                    hipblaslt_sample_detail::GemmInitializationStream::B));
+            hipblaslt_sample_detail::generateUniformInteger(
+                static_cast<OutType*>(c[j]),
+                size_t(m[j] * n[j] * batch_count[j]),
+                hipblaslt_sample_detail::groupedInitializationStream(
+                    static_cast<std::uint64_t>(j),
+                    hipblaslt_sample_detail::GemmInitializationStream::C));
+            hipblaslt_sample_detail::generateUniformInteger(
+                static_cast<float*>(alphaVec[j]),
+                size_t(m[j] * batch_count[j]),
+                hipblaslt_sample_detail::groupedInitializationStream(
+                    static_cast<std::uint64_t>(j),
+                    hipblaslt_sample_detail::GemmInitializationStream::ScaleAlpha));
         }
         if(max_workspace_size > 0)
             CHECK_HIP_ERROR(hipMalloc(&d_workspace, max_workspace_size));
@@ -455,22 +499,21 @@ struct LayerNormRunner
         CHECK_HIP_ERROR(hipHostMalloc(&gamma, n * sizeof(Type)));
         CHECK_HIP_ERROR(hipHostMalloc(&beta, n * sizeof(Type)));
 
-        roc::host_validation::RandomGenerator generator(69069);
-        roc::host_validation::fill(std::span(static_cast<Type*>(in), size_t(m * n)),
-                                   roc::host_validation::DataPattern::UniformInteger,
-                                   generator,
-                                   -3,
-                                   3);
-        roc::host_validation::fill(std::span(static_cast<Type*>(gamma), size_t(n)),
-                                   roc::host_validation::DataPattern::UniformInteger,
-                                   generator,
-                                   -3,
-                                   3);
-        roc::host_validation::fill(std::span(static_cast<Type*>(beta), size_t(n)),
-                                   roc::host_validation::DataPattern::UniformInteger,
-                                   generator,
-                                   -3,
-                                   3);
+        hipblaslt_sample_detail::generateUniformInteger(
+            static_cast<Type*>(in),
+            size_t(m * n),
+            static_cast<std::uint64_t>(
+                hipblaslt_sample_detail::LayerNormInitializationStream::Input));
+        hipblaslt_sample_detail::generateUniformInteger(
+            static_cast<Type*>(gamma),
+            size_t(n),
+            static_cast<std::uint64_t>(
+                hipblaslt_sample_detail::LayerNormInitializationStream::Gamma));
+        hipblaslt_sample_detail::generateUniformInteger(
+            static_cast<Type*>(beta),
+            size_t(n),
+            static_cast<std::uint64_t>(
+                hipblaslt_sample_detail::LayerNormInitializationStream::Beta));
     }
 
     ~LayerNormRunner()
@@ -549,12 +592,10 @@ struct OptAMaxRunner
         CHECK_HIP_ERROR(hipHostMalloc(&out, sizeof(Type)));
         CHECK_HIP_ERROR(hipHostMalloc(&in, m * n * sizeof(Type)));
 
-        roc::host_validation::RandomGenerator generator(69069);
-        roc::host_validation::fill(std::span(static_cast<Type*>(in), size_t(m * n)),
-                                   roc::host_validation::DataPattern::UniformInteger,
-                                   generator,
-                                   -3,
-                                   3);
+        hipblaslt_sample_detail::generateUniformInteger(
+            static_cast<Type*>(in),
+            size_t(m * n),
+            static_cast<std::uint64_t>(hipblaslt_sample_detail::AMaxInitializationStream::Input));
     }
 
     ~OptAMaxRunner()
