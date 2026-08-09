@@ -462,6 +462,13 @@ Tensor generateOwned(ScalarType type, std::vector<size_t> shape, const Generatio
     return output;
 }
 
+Tensor referenceMaximumAbsoluteOwned(const Tensor& input, ScalarType outputType,
+                                     ScalarType accumulatorType) {
+    Tensor output(outputType, Shape{});
+    referenceMaximumAbsolute(input.view(), output.mutableView(), accumulatorType);
+    return output;
+}
+
 PythonStructuredSparsityResult applyStructuredSparsityOwned(
     const Tensor& input,
     StructuredSparsityPattern pattern,
@@ -666,6 +673,10 @@ NB_MODULE(_roc_host_validation, module) {
     nb::enum_<ActivationApplication>(module, "ActivationApplication")
         .value("Forward", ActivationApplication::Forward)
         .value("Gradient", ActivationApplication::Gradient);
+
+    nb::enum_<ReductionOperation>(module, "ReductionOperation")
+        .value("Sum", ReductionOperation::Sum)
+        .value("MaximumAbsolute", ReductionOperation::MaximumAbsolute);
 
     nb::enum_<OutputSelectionKind>(module, "OutputSelectionKind")
         .value("All", OutputSelectionKind::All)
@@ -1229,4 +1240,6 @@ NB_MODULE(_roc_host_validation, module) {
                "output_selection"_a = OutputSelection::all());
     module.def("reference_sum", &referenceSumOwned, "input"_a, "output_type"_a,
                "accumulator_type"_a, "axes"_a);
+    module.def("reference_maximum_absolute", &referenceMaximumAbsoluteOwned, "input"_a,
+               "output_type"_a, "accumulator_type"_a);
 }
