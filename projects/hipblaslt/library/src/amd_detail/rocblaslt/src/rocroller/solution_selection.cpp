@@ -274,8 +274,8 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
             || kernelType.typeA == rocRoller::DataType::BF6
             || kernelType.typeB == rocRoller::DataType::FP6
             || kernelType.typeB == rocRoller::DataType::BF6)
-            && (!std::has_single_bit(static_cast<uint>(wgt.m))
-                || !std::has_single_bit(static_cast<uint>(wgt.n))))
+            && (!std::has_single_bit(static_cast<unsigned int>(wgt.m))
+                || !std::has_single_bit(static_cast<unsigned int>(wgt.n))))
             continue;
 
         // check if this size is valid for pre-swizzled data

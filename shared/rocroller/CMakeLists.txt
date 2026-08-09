@@ -45,7 +45,9 @@ endif()
 
 if(WIN32)
     add_compile_definitions("$<$<COMPILE_LANGUAGE:C,CXX>:_CRT_SECURE_NO_WARNINGS;NOMINMAX>")
-    #add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:-Wno-microsoft-cast>)
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_C_COMPILER_ID STREQUAL "Clang")
+        add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:-fms-extensions;-fms-compatibility>")
+    endif()
 endif()
 
 if(ROCROLLER_ENABLE_CPPCHECK)
@@ -277,8 +279,8 @@ configure_file(
 )
 target_sources(rocroller PRIVATE "${PROJECT_BINARY_DIR}/rocRoller/src/Version.cpp")
 
-add_subdirectory(lib/source)
 add_subdirectory(lib/include)
+add_subdirectory(lib/source)
 add_subdirectory(GPUArchitectureGenerator)
 
 if(ROCROLLER_EMBED_ARCH_DEF)
