@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 #include <algorithm>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <gmock/gmock.h>
@@ -32,7 +33,8 @@
 #include <hip/hip_runtime_api.h>
 #include <hipblaslt/hipblaslt.h>
 #include <numeric>
-#include <roc/host_validation/validation.hpp>
+#include <roc/host_validation/adapters/hipblaslt/Types.hpp>
+#include <roc/host_validation/generation.hpp>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -88,8 +90,8 @@ namespace
             this->a = reinterpret_cast<DType*>(aBase + (allocSize - bufSize));
             this->b = reinterpret_cast<DType*>(bBase + (allocSize - bufSize));
             this->c = reinterpret_cast<DType*>(cBase + (allocSize - bufSize));
-            init(this->a, m * n * b);
-            init(this->b, m * n * b);
+            init(this->a, m * n * b, InitializationStream::MatrixA);
+            init(this->b, m * n * b, InitializationStream::MatrixB);
         }
 
         ~TypedMatrixTransformIO() override
@@ -120,15 +122,30 @@ namespace
         }
 
     private:
-        void init(DType* buf, size_t len)
+        enum class InitializationStream : std::uint64_t
         {
-            std::vector<DType> ref(len);
-            roc::host_validation::RandomGenerator generator(69069);
-            roc::host_validation::fill(std::span(ref),
-                                       roc::host_validation::DataPattern::UniformInteger,
-                                       generator,
-                                       -3,
-                                       3);
+            MatrixA = 0,
+            MatrixB = 1,
+        };
+
+        static constexpr std::uint64_t initializationSeed = 69069;
+
+        void init(DType* buf, size_t len, InitializationStream stream)
+        {
+            std::vector<DType>                      ref(len);
+            roc::host_validation::GenerationOptions options;
+            options.seed            = initializationSeed;
+            options.real.pattern    = roc::host_validation::GenerationPattern::UniformInteger;
+            options.real.parameter0 = -3;
+            options.real.parameter1 = 3;
+            options.real.stream     = static_cast<std::uint64_t>(stream);
+            roc::host_validation::generate(
+                roc::host_validation::hipblaslt_adapter::mutableTensorView(
+                    ref.data(),
+                    ref.size(),
+                    roc::host_validation::Layout::contiguous(
+                        roc::host_validation::Shape{ref.size()})),
+                options);
 
             auto err = hipMemcpy(buf, ref.data(), len * sizeof(DType), hipMemcpyHostToDevice);
             ASSERT_EQ(err, hipSuccess);
