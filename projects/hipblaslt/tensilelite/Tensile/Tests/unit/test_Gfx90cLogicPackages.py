@@ -58,13 +58,6 @@ LAYOUTS = {
 }
 
 VARIANTS = {
-    "HB": {
-        "data_type": 4,
-        "dest_type": 4,
-        "compute_type": 4,
-        "hpa": False,
-        "initial_strides_ab": False,
-    },
     "HHS_BH": {
         "data_type": 4,
         "dest_type": 4,
@@ -127,11 +120,13 @@ def _problem_value(problem, key):
 
 
 def _expected_package_names():
-    return {
+    packages = {
         _package_name(layout, variant)
         for layout in LAYOUTS
         for variant in VARIANTS
     }
+    packages.add("vega10_Cijk_Alik_Bljk_H_B_UserArgs.yaml")
+    return packages
 
 
 def test_complete_layout_variant_matrix_exists():
@@ -219,16 +214,17 @@ def test_lite_mac_vector_widths_are_current_and_codegen_compatible():
 
 
 def test_prompt_gemm_mappings_use_tuned_solutions():
-    hhh = _load_lite(LITE_ROOT / "vega10_Cijk_Alik_Bljk_HB.yaml")
+    hhh = _load_lite(LITE_ROOT / "vega10_Cijk_Alik_Bljk_H_B_UserArgs.yaml")
     qk = _load_classic(CLASSIC_ROOT / "vega10_Cijk_Alik_Bljk_SB_GB.yaml")
 
     hhh_solutions = {solution["SolutionIndex"]: solution for solution in hhh[5]}
-    assert (hhh_solutions[37]["MacroTile0"], hhh_solutions[37]["MacroTile1"]) == (64, 128)
-    assert (hhh_solutions[38]["MacroTile0"], hhh_solutions[38]["MacroTile1"]) == (128, 64)
+    assert (hhh_solutions[0]["MacroTile0"], hhh_solutions[0]["MacroTile1"]) == (64, 128)
+    assert (hhh_solutions[1]["MacroTile0"], hhh_solutions[1]["MacroTile1"]) == (128, 64)
+    assert all(solution["ProblemType"]["SupportUserArgs"] for solution in hhh_solutions.values())
 
     hhh_mappings = {tuple(entry[0]): entry[1][0] for entry in hhh[7]}
-    assert hhh_mappings[(8960, 16384, 1, 1536)] == 37
-    assert hhh_mappings[(128, 16384, 12, 16384)] == 38
+    assert hhh_mappings[(8960, 16384, 1, 1536, 8960, 8960, 1536, 1536)] == 0
+    assert hhh_mappings[(128, 16384, 12, 16384, 128, 128, 128, 16384)] == 1
 
     assert [(solution["MacroTile0"], solution["MacroTile1"], solution["DepthU"]) for solution in qk[5]] == [
         (256, 64, 12),
@@ -242,7 +238,6 @@ def test_prompt_gemm_mappings_use_tuned_solutions():
 @pytest.mark.parametrize(
     "name,counts",
     {
-        "vega10_Cijk_Ailk_Bljk_HB.yaml": ((85, 853), (87, 860)),
         "vega10_Cijk_Ailk_Bljk_HHS_BH.yaml": ((109, 1540), (73, 844)),
         "vega10_Cijk_Ailk_Bljk_SBIIc.yaml": ((5, 12), (5, 12)),
         "vega10_Cijk_Ailk_Bljk_SBIc.yaml": ((5, 12), (5, 12)),
