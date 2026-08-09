@@ -17,19 +17,11 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
+#include <thrust/system/detail/generic/tabulate.h>
+#include <thrust/iterator/iterator_traits.h>
+#include <thrust/transform.h>
 #include <thrust/distance.h>
 #include <thrust/iterator/counting_iterator.h>
-#include <thrust/iterator/iterator_traits.h>
-#include <thrust/system/detail/generic/tabulate.h>
-#include <thrust/transform.h>
 
 THRUST_NAMESPACE_BEGIN
 namespace system
@@ -39,11 +31,17 @@ namespace detail
 namespace generic
 {
 
-template <typename DerivedPolicy, typename ForwardIterator, typename UnaryOperation>
-THRUST_HOST_DEVICE void tabulate(
-  thrust::execution_policy<DerivedPolicy>& exec, ForwardIterator first, ForwardIterator last, UnaryOperation unary_op)
+
+template<typename DerivedPolicy,
+         typename ForwardIterator,
+         typename UnaryOperation>
+THRUST_HOST_DEVICE
+  void tabulate(thrust::execution_policy<DerivedPolicy> &exec,
+                ForwardIterator first,
+                ForwardIterator last,
+                UnaryOperation unary_op)
 {
-  using difference_type = thrust::detail::it_difference_t<ForwardIterator>;
+  using difference_type = typename iterator_difference<ForwardIterator>::type;
 
   // by default, counting_iterator uses a 64b difference_type on 32b platforms to avoid overflowing its counter.
   // this causes problems when a zip_iterator is created in transform's implementation -- ForwardIterator is
@@ -53,6 +51,7 @@ THRUST_HOST_DEVICE void tabulate(
 
   thrust::transform(exec, iter, iter + thrust::distance(first, last), first, unary_op);
 } // end tabulate()
+
 
 } // end namespace generic
 } // end namespace detail
