@@ -32,6 +32,8 @@
 #include <roc/host_validation/backends/blas.hpp>
 #include <roc/host_validation/validation.hpp>
 
+#include "hipblaslt_ostream.hpp"
+
 #include <complex>
 #include <cstddef>
 #include <span>
@@ -227,6 +229,113 @@ void hipblaslt_reference_gemm(hipblasOperation_t       transA,
     referenceGemm(invocation);
 
     (void)Tc_enum;
+}
+
+void hipblaslt_reference_gemm(hipblasOperation_t   transA,
+                              hipblasOperation_t   transB,
+                              int64_t              m,
+                              int64_t              n,
+                              int64_t              k,
+                              computeTypeInterface alpha,
+                              const void*          A,
+                              int64_t              lda,
+                              const void*          B,
+                              int64_t              ldb,
+                              computeTypeInterface beta,
+                              const void*          C,
+                              int64_t              ldc,
+                              void*                D,
+                              int64_t              ldd,
+                              const void*          AlphaVec,
+                              const void*          scaleA,
+                              const void*          scaleB,
+                              const void*          scaleD,
+                              bool                 isScaleAVec,
+                              bool                 isScaleBVec,
+                              hipDataType          tiA,
+                              hipDataType          tiB,
+                              hipDataType          tiC,
+                              hipDataType          to,
+                              hipDataType          tc,
+                              hipDataType          tciA,
+                              hipDataType          tciB,
+                              bool                 isScaleAMXFormat,
+                              bool                 isScaleBMXFormat)
+{
+    auto invoke = [&]<typename T>(T alphaValue,
+                                  T betaValue,
+                                  T scaleDValue,
+                                  hipDataType computeInputA,
+                                  hipDataType computeInputB) {
+        hipblaslt_reference_gemm<T>(transA,
+                                    transB,
+                                    m,
+                                    n,
+                                    k,
+                                    alphaValue,
+                                    A,
+                                    lda,
+                                    B,
+                                    ldb,
+                                    betaValue,
+                                    C,
+                                    ldc,
+                                    D,
+                                    ldd,
+                                    AlphaVec,
+                                    scaleA,
+                                    scaleB,
+                                    scaleDValue,
+                                    isScaleAVec,
+                                    isScaleBVec,
+                                    tiA,
+                                    tiB,
+                                    tiC,
+                                    to,
+                                    tc,
+                                    computeInputA,
+                                    computeInputB,
+                                    isScaleAMXFormat,
+                                    isScaleBMXFormat);
+    };
+
+    if(tiA == HIP_C_32F)
+    {
+        invoke(alpha.cf,
+               beta.cf,
+               *static_cast<const std::complex<float>*>(scaleD),
+               tiA,
+               tiB);
+        return;
+    }
+    if(tiA == HIP_C_64F)
+    {
+        invoke(alpha.cd,
+               beta.cd,
+               *static_cast<const std::complex<double>*>(scaleD),
+               tiA,
+               tiB);
+        return;
+    }
+
+    switch(tc)
+    {
+    case HIP_R_16F:
+        invoke(alpha.f16, beta.f16, *static_cast<const hipblasLtHalf*>(scaleD), tciA, tciB);
+        return;
+    case HIP_R_32F:
+        invoke(alpha.f32, beta.f32, *static_cast<const float*>(scaleD), tciA, tciB);
+        return;
+    case HIP_R_64F:
+        invoke(alpha.f64, beta.f64, *static_cast<const double*>(scaleD), tciA, tciB);
+        return;
+    case HIP_R_32I:
+        invoke(alpha.i32, beta.i32, *static_cast<const int32_t*>(scaleD), tciA, tciB);
+        return;
+    default:
+        hipblaslt_cerr << "Error type in hipblaslt_reference_gemm()" << std::endl;
+        return;
+    }
 }
 
 #define CREATEFUNCTION(Tc)                                                                  \
