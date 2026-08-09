@@ -105,20 +105,6 @@ struct GenerationRunInfo {
 };
 
 namespace detail {
-template <typename Function>
-void forEachIndex(const Shape& shape, Function&& function) {
-    const size_t count = shape.elementCount();
-    std::vector<size_t> indices(shape.rank(), 0);
-    for (size_t linearIndex = 0; linearIndex < count; ++linearIndex) {
-        function(std::span<const size_t>(indices), linearIndex);
-        for (size_t dimension = shape.rank(); dimension > 0; --dimension) {
-            const size_t index = dimension - 1;
-            if (++indices[index] < shape[index]) break;
-            indices[index] = 0;
-        }
-    }
-}
-
 inline size_t logicalLinearIndex(std::span<const size_t> indices, const Shape& shape,
                                  LogicalIndexOrder order) {
     size_t result = 0;
@@ -589,10 +575,4 @@ inline GenerationRunInfo generate(MutableTensorView destination, const Generatio
     return {.elementsGenerated = destination.shape().elementCount()};
 }
 
-template <typename Destination, typename Source>
-std::vector<Destination> convertValues(std::span<const Source> source) {
-    std::vector<Destination> result(source.size());
-    for (size_t i = 0; i < source.size(); ++i) result[i] = static_cast<Destination>(source[i]);
-    return result;
-}
 }  // namespace roc::host_validation

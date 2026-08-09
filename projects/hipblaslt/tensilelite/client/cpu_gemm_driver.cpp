@@ -173,6 +173,65 @@ namespace
             throw std::runtime_error("Generated tensor storage does not match CPU driver type.");
         std::memcpy(destinationBytes.data(), generated.storage().data(), destinationBytes.size());
     }
+
+    template <typename Destination, typename Source>
+    std::vector<Destination> convertValues(std::span<const Source> source)
+    {
+        using namespace roc::host_validation;
+        static_assert(std::is_trivially_copyable_v<Source>);
+        static_assert(std::is_trivially_copyable_v<Destination>);
+
+        const TensorView sourceView(toHostValidationScalarType(TypeTraits<Source>::value),
+                                    Layout::contiguous(Shape{source.size()}),
+                                    std::as_bytes(source));
+        const Tensor     converted
+            = sourceView.to(toHostValidationScalarType(TypeTraits<Destination>::value));
+
+        std::vector<Destination>   result(source.size());
+        const std::span<std::byte> resultBytes
+            = std::as_writable_bytes(std::span<Destination>(result));
+        if(converted.storage().size() != resultBytes.size())
+            throw std::runtime_error("Converted tensor storage does not match CPU driver type.");
+        std::memcpy(resultBytes.data(), converted.storage().data(), resultBytes.size());
+        return result;
+    }
+
+#ifndef _WIN32
+    template <typename Destination>
+    std::vector<Destination> convertPackedFloat4Values(std::span<const Float4x2> source,
+                                                       size_t logicalElementsPerBatch,
+                                                       size_t batchCount)
+    {
+        using namespace roc::host_validation;
+        static_assert(sizeof(Float4x2) == 1);
+        static_assert(std::is_trivially_copyable_v<Destination>);
+
+        const size_t storageBytesPerBatch = (logicalElementsPerBatch + 1) / 2;
+        if(source.size_bytes() != storageBytesPerBatch * batchCount)
+            throw std::runtime_error("Packed FP4 storage does not match CPU driver batches.");
+
+        std::vector<Destination>         result(logicalElementsPerBatch * batchCount);
+        const std::span<const std::byte> sourceBytes = std::as_bytes(source);
+        for(size_t batch = 0; batch < batchCount; ++batch)
+        {
+            const TensorView sourceView(
+                ScalarType::Float4E2M1,
+                Layout::contiguous(Shape{logicalElementsPerBatch}),
+                sourceBytes.subspan(batch * storageBytesPerBatch, storageBytesPerBatch));
+            const Tensor converted
+                = sourceView.to(toHostValidationScalarType(TypeTraits<Destination>::value));
+            const std::span<std::byte> destinationBytes
+                = std::as_writable_bytes(std::span<Destination>(result).subspan(
+                    batch * logicalElementsPerBatch, logicalElementsPerBatch));
+            if(converted.storage().size() != destinationBytes.size())
+                throw std::runtime_error(
+                    "Converted FP4 tensor storage does not match CPU driver type.");
+            std::memcpy(
+                destinationBytes.data(), converted.storage().data(), destinationBytes.size());
+        }
+        return result;
+    }
+#endif
 }
 
 /*
@@ -619,22 +678,18 @@ int runGemm(size_t             m,
         std::cout << "Validating..." << std::endl;
 
         // Convert inputs to AccumulateT for the golden reference comparison.
-        // For batched problems, A/B are batchCount slices of size numA/numB
-        // (column-major packed; batch stride = numA / numB).
-        size_t totalA = numA * batchCount;
-        size_t totalB = numB * batchCount;
+        // Batched FP4 storage is converted one slice at a time so odd logical
+        // sizes retain their per-batch byte padding.
 
         std::vector<AccumulateT> aRef, bRef;
 
 #ifndef _WIN32
         if constexpr(isFP4)
         {
-            aRef.resize(totalA);
-            for(size_t i = 0; i < totalA; i++)
-                aRef[i] = static_cast<AccumulateT>(a[i / 2].getElement(i % 2));
-            bRef.resize(totalB);
-            for(size_t i = 0; i < totalB; i++)
-                bRef[i] = static_cast<AccumulateT>(b[i / 2].getElement(i % 2));
+            aRef = convertPackedFloat4Values<AccumulateT>(
+                std::span<const Float4x2>(a), numA, batchCount);
+            bRef = convertPackedFloat4Values<AccumulateT>(
+                std::span<const Float4x2>(b), numB, batchCount);
         }
         else if constexpr(std::is_same_v<InputAT, Float4x2> || std::is_same_v<InputBT, Float4x2>)
         {
@@ -643,12 +698,11 @@ int runGemm(size_t             m,
         else
 #endif
         {
-            aRef = roc::host_validation::convertValues<AccumulateT>(std::span<const InputAT>(a));
-            bRef = roc::host_validation::convertValues<AccumulateT>(std::span<const InputBT>(b));
+            aRef = convertValues<AccumulateT>(std::span<const InputAT>(a));
+            bRef = convertValues<AccumulateT>(std::span<const InputBT>(b));
         }
 
-        std::vector<AccumulateT> cRef
-            = roc::host_validation::convertValues<AccumulateT>(std::span<const AccumulateT>(c));
+        std::vector<AccumulateT> cRef = convertValues<AccumulateT>(std::span<const AccumulateT>(c));
         std::vector<AccumulateT> dRef(d.size());
 
 #ifndef _WIN32

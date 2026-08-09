@@ -107,6 +107,7 @@ Tensor::layout();
 Tensor::storage();
 Tensor::view();
 Tensor::mutableView();
+Tensor::to(ScalarType);
 
 TensorView::fromNative(Layout, nativeValues);
 TensorView::type();
@@ -114,6 +115,7 @@ TensorView::shape();
 TensorView::layout();
 TensorView::storage();
 TensorView::loadAs<T>(indices);
+TensorView::to(ScalarType);
 
 MutableTensorView::fromNative(Layout, nativeValues);
 MutableTensorView::loadAs<T>(indices);
@@ -124,6 +126,11 @@ MutableTensorView::storeFrom(indices, value);
 copy. Views never own storage. Layout strides and offsets are measured in
 logical scalar elements, including for sub-byte formats; the tensor layer
 performs the element-to-bit addressing internally.
+
+`to(ScalarType)` performs explicit runtime storage conversion while preserving
+shape, strides, and offset. Same-type conversion copies the layout's required
+raw storage without decoding; cross-type conversion decodes and re-encodes
+logical values through the core scalar codecs.
 
 `visitScalarType` dispatches a runtime scalar type once to a unique semantic
 tag. Operations should dispatch at their boundary and run typed inner loops;
