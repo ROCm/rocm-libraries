@@ -340,26 +340,24 @@ class TensorAndGemmTests(unittest.TestCase):
         )
 
     def test_generation_and_comparison(self):
-        first = hv.Tensor(hv.ScalarType.Float32, hv.Shape([2, 3]))
-        second = hv.Tensor(hv.ScalarType.Float32, hv.Shape([2, 3]))
-        hv.fill(
-            first,
-            hv.DataPattern.UniformInteger,
-            seed=17,
-            parameter0=-3,
-            parameter1=3,
-        )
-        hv.fill(
-            second,
-            hv.DataPattern.UniformInteger,
-            seed=17,
-            parameter0=-3,
-            parameter1=3,
-        )
+        generation = hv.GenerationOptions()
+        generation.seed = 17
+        generation.real.pattern = hv.GenerationPattern.UniformInteger
+        generation.real.parameter0 = -3
+        generation.real.parameter1 = 3
+        first = hv.generate_tensor(hv.ScalarType.Float32, [2, 3], generation)
+        second = hv.generate_tensor(hv.ScalarType.Float32, [2, 3], generation)
         self.assertTrue(hv.compare(first, second).passed)
+        expected = np.asarray(
+            [
+                -3 + counter_random(generation.seed, generation.real.stream, index) % 7
+                for index in range(6)
+            ],
+            dtype=np.float32,
+        ).reshape((2, 3), order="F")
         np.testing.assert_array_equal(
             hv.to_numpy(first),
-            np.asarray([[-2.0, -1.0, -2.0], [-3.0, 0.0, 0.0]], dtype=np.float32),
+            expected,
         )
 
         changed_values = hv.to_numpy(second).copy()
