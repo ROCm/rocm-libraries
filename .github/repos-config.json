@@ -37,15 +37,6 @@
       "monorepo_source_of_truth": true
     },
     {
-      "name": "host-validation",
-      "url": "ROCm/rocm-libraries",
-      "branch": "develop",
-      "category": "shared",
-      "auto_subtree_pull": false,
-      "auto_subtree_push": false,
-      "monorepo_source_of_truth": true
-    },
-    {
       "name": "composablekernel",
       "url": "ROCm/composable_kernel",
       "branch": "develop",
