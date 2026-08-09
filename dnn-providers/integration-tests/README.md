@@ -239,8 +239,9 @@ tests (via GTest prefixes) and to bundles (via the `{Tier}` path segment).
 | Comprehensive | `Comprehensive` | `comprehensive/` | Nightly | 3600s (60 min) |
 | Full | `Full` | `full/` | Weekly | 7200s (120 min) |
 
-Timeouts are configured per tier via `category_timeouts` in
-[`test_categories.yaml`](test_categories.yaml).
+Timeouts can be overridden per binary via `SMOKE_TIMEOUT`, `STANDARD_TIMEOUT`,
+`COMPREHENSIVE_TIMEOUT`, and `FULL_TIMEOUT` arguments to
+`add_tiered_test_target()`.
 
 ### Smoke is a catch-all
 
@@ -486,7 +487,7 @@ tests/
 Register the test binary in `tests/CMakeLists.txt`:
 
 ```cmake
-add_integration_test_target(hipdnn_my_new_op_tests ${CMAKE_CURRENT_BINARY_DIR})
+add_tiered_test_target(hipdnn_my_new_op_tests ${CMAKE_CURRENT_BINARY_DIR})
 ```
 
 ### Step 2 — Shape catalog
