@@ -124,6 +124,27 @@ inline size_t logicalLinearIndex(std::span<const size_t> indices, const Shape& s
     return result;
 }
 
+inline std::vector<size_t> logicalCoordinates(size_t linearIndex, const Shape& shape,
+                                              LogicalIndexOrder order) {
+    if (linearIndex >= shape.elementCount())
+        throw std::out_of_range("Generation logical index exceeds tensor shape.");
+
+    std::vector<size_t> indices(shape.rank(), 0);
+    if (order == LogicalIndexOrder::FirstDimensionFastest) {
+        for (size_t dimension = 0; dimension < shape.rank(); ++dimension) {
+            indices[dimension] = linearIndex % shape[dimension];
+            linearIndex /= shape[dimension];
+        }
+    } else {
+        for (size_t dimension = shape.rank(); dimension > 0; --dimension) {
+            const size_t index = dimension - 1;
+            indices[index] = linearIndex % shape[index];
+            linearIndex /= shape[index];
+        }
+    }
+    return indices;
+}
+
 inline double indexedUniformUnit(uint64_t seed, uint64_t stream, uint64_t index) {
     constexpr double inverseTwoTo53 = 1.0 / 9007199254740992.0;
     const uint64_t mantissa = counterRandom(seed, stream, index) >> 11;
@@ -506,6 +527,41 @@ inline double generationValue(const GenerationPatternSpec& spec, uint64_t seed,
     }
     return value;
 }
+
+inline void generateElement(MutableTensorView destination, const GenerationOptions& options,
+                            std::span<const size_t> indices, size_t logicalIndex) {
+    const bool complexOutput =
+        scalarTypeInfo(destination.type()).category == ScalarCategory::Complex;
+    if (isRawGenerationPattern(options.real.pattern)) {
+        if (complexOutput)
+            throw std::invalid_argument("Raw generation does not support complex output.");
+        const uint16_t bits = scalarTypeInfo(destination.type()).storageBits;
+        if (bits > 64)
+            throw std::invalid_argument("Raw generation supports scalar encodings up to 64 bits.");
+
+        const ptrdiff_t elementOffset = destination.layout().elementOffset(indices);
+        const uint64_t raw = rawGenerationValue(options.real, options.seed, indices,
+                                                destination.shape(), logicalIndex);
+        const uint64_t offsetBits = bitOffset(destination.type(), elementOffset);
+        if (bits <= 32) {
+            writePackedBits(destination.storage(), offsetBits, bits, static_cast<uint32_t>(raw));
+        } else {
+            writeNative<uint64_t>(destination.storage(), static_cast<size_t>(offsetBits / 8), raw);
+        }
+        return;
+    }
+
+    const double real = generationValue(options.real, options.seed, indices, destination.shape(),
+                                        logicalIndex, destination.type());
+    if (complexOutput) {
+        const double imaginary =
+            generationValue(options.imaginary, options.seed, indices, destination.shape(),
+                            logicalIndex, destination.type());
+        destination.storeFrom(indices, std::complex<double>(real, imaginary));
+    } else {
+        destination.storeFrom(indices, real);
+    }
+}
 }  // namespace detail
 
 template <typename T, typename Generator>
@@ -530,49 +586,20 @@ void generate(MutableTensorView destination, Generator&& generator) {
 }
 
 inline GenerationRunInfo generate(MutableTensorView destination, const GenerationOptions& options) {
-    const bool complexOutput =
-        scalarTypeInfo(destination.type()).category == ScalarCategory::Complex;
-    if (detail::isRawGenerationPattern(options.real.pattern)) {
-        if (complexOutput)
-            throw std::invalid_argument("Raw generation does not support complex output.");
-        const uint16_t bits = scalarTypeInfo(destination.type()).storageBits;
-        if (bits > 64)
-            throw std::invalid_argument("Raw generation supports scalar encodings up to 64 bits.");
-
-        detail::forEachIndex(destination.shape(), [&](std::span<const size_t> indices, size_t) {
-            const ptrdiff_t elementOffset = destination.layout().elementOffset(indices);
-            const size_t logicalIndex =
-                detail::logicalLinearIndex(indices, destination.shape(), options.indexOrder);
-            const uint64_t raw = detail::rawGenerationValue(options.real, options.seed, indices,
-                                                            destination.shape(), logicalIndex);
-            const uint64_t offsetBits = detail::bitOffset(destination.type(), elementOffset);
-            if (bits <= 32) {
-                detail::writePackedBits(destination.storage(), offsetBits, bits,
-                                        static_cast<uint32_t>(raw));
-            } else {
-                detail::writeNative<uint64_t>(destination.storage(),
-                                              static_cast<size_t>(offsetBits / 8), raw);
-            }
-        });
-        return {.elementsGenerated = destination.shape().elementCount()};
-    }
-
     detail::forEachIndex(destination.shape(), [&](std::span<const size_t> indices, size_t) {
         const size_t logicalIndex =
             detail::logicalLinearIndex(indices, destination.shape(), options.indexOrder);
-        const double real =
-            detail::generationValue(options.real, options.seed, indices, destination.shape(),
-                                    logicalIndex, destination.type());
-        if (complexOutput) {
-            const double imaginary =
-                detail::generationValue(options.imaginary, options.seed, indices,
-                                        destination.shape(), logicalIndex, destination.type());
-            destination.storeFrom(indices, std::complex<double>(real, imaginary));
-        } else {
-            destination.storeFrom(indices, real);
-        }
+        detail::generateElement(destination, options, indices, logicalIndex);
     });
     return {.elementsGenerated = destination.shape().elementCount()};
+}
+
+inline GenerationRunInfo generateAt(MutableTensorView destination, size_t logicalIndex,
+                                    const GenerationOptions& options) {
+    const std::vector<size_t> indices =
+        detail::logicalCoordinates(logicalIndex, destination.shape(), options.indexOrder);
+    detail::generateElement(destination, options, indices, logicalIndex);
+    return {.elementsGenerated = 1};
 }
 
 }  // namespace roc::host_validation

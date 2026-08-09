@@ -794,6 +794,22 @@ class TensorAndGemmTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             hv.generate_tensor(hv.ScalarType.Float32, [1], options)
 
+        point = hv.Tensor(hv.ScalarType.Float32, hv.Shape([2, 3, 2]))
+        options.real.pattern = hv.GenerationPattern.Constant
+        options.real.parameter0 = 9.0
+        hv.generate_at(point, 3, options)
+        expected_point = np.zeros((2, 3, 2), dtype=np.float32)
+        expected_point[1, 1, 0] = 9.0
+        np.testing.assert_array_equal(hv.to_numpy(point), expected_point)
+
+        options.index_order = hv.LogicalIndexOrder.LastDimensionFastest
+        options.real.parameter0 = 7.0
+        hv.generate_at(point, 3, options)
+        expected_point[0, 1, 1] = 7.0
+        np.testing.assert_array_equal(hv.to_numpy(point), expected_point)
+        with self.assertRaises(IndexError):
+            hv.generate_at(point, point.size, options)
+
     def test_type_derived_generation(self):
         options = hv.GenerationOptions()
         options.real.pattern = hv.GenerationPattern.TypeMaximum

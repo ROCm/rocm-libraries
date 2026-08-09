@@ -49,6 +49,10 @@ int main() {
         const float value = generated.view().loadAs<float>({index});
         if (value != -2.0f && value != 3.0f) return 1;
     }
+    generation.real.pattern = GenerationPattern::Constant;
+    generation.real.parameter0 = 11.0;
+    generateAt(generated.mutableView(), 2, generation);
+    if (generated.view().loadAs<float>({2}) != 11.0f) return 1;
 
     Tensor axpbyOutput(ScalarType::Float32, Shape{1});
     AxpbyProblem axpby(
