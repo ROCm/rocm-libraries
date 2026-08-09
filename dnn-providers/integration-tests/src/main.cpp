@@ -327,13 +327,25 @@ int main(int argc, char** argv) noexcept
         hipdnn_integration_tests::bundle::registerBundleTests();
 
         if(::testing::UnitTest::GetInstance()->test_to_run_count() == 0
-           && hipdnn_integration_tests::TestConfig::get().allowBundles()
-           && std::filesystem::exists(hipdnn_integration_tests::bundle::resolveDataDir()))
+           && hipdnn_integration_tests::TestConfig::get().allowBundles())
         {
-            std::cerr << "Error: zero tests registered (bundles are enabled and the data "
-                         "directory exists but no tests were discovered).\n";
-            static_cast<void>(hipStreamDestroy(stream));
-            return 1;
+            const auto dataDir = hipdnn_integration_tests::bundle::resolveDataDir();
+            if(hipdnn_integration_tests::TestConfig::get().hasEngineName())
+            {
+                std::cerr << "Error: zero tests registered. --test-engine was specified but "
+                             "no bundle tests were discovered. Verify the bundle data "
+                             "directory exists: "
+                          << dataDir << "\n";
+                static_cast<void>(hipStreamDestroy(stream));
+                return 1;
+            }
+            if(std::filesystem::exists(dataDir))
+            {
+                std::cerr << "Error: zero tests registered (bundles are enabled and the data "
+                             "directory exists but no tests were discovered).\n";
+                static_cast<void>(hipStreamDestroy(stream));
+                return 1;
+            }
         }
 
         const int result = RUN_ALL_TESTS();
