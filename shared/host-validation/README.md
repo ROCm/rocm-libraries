@@ -215,6 +215,7 @@ GemmOperand b(TensorView);
 GemmProblem problem(a, b, cView, dView, ScalarType::Float32);
 
 problem.a.computeType = ScalarType::Float8E4M3;  // optional MAC-input quantization
+problem.accumulationRounding = AccumulationRounding::FullPrecision;
 problem.mathMode = MathMode::XFloat32;           // optional operand math
 problem.epilogue.alpha = {1.0, 0.0};
 problem.epilogue.beta = {0.0, 0.0};
@@ -237,6 +238,8 @@ backend selection cannot inspect a different numerical problem.
 - F16, BF16, F32, F64, I32, complex-F32, and complex-F64 accumulation;
 - arbitrary runtime storage types supported by the tensor codecs;
 - distinct compute-input types for A and B;
+- explicit type-default, full-precision, or per-product/per-sum accumulator
+  rounding;
 - ordered scalar/vector operand factors before compute-input quantization;
 - default and XFloat32 operand math;
 - alpha/beta;
