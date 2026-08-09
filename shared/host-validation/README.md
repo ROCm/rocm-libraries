@@ -168,9 +168,9 @@ product adapters describe small-value, checkerboard, positive-only, and probe
 inputs without owning element loops.
 
 hipBLASLt and TensileLite keep private enum/type adapters. Common host
-initialization modes now translate to this API. The mutable
-`RandomGenerator`/`DataPattern` interface remains only as a compatibility
-surface while its remaining callers move to explicit seed/stream recipes.
+initialization modes now translate to this API. Indexed `GenerationOptions`
+is the single public generation path; the former mutable, call-order-dependent
+generator has been removed.
 
 ## Structured tensor comparison
 
