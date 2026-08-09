@@ -45,21 +45,16 @@ namespace roc::host_validation::hipblaslt_adapter
             std::span<const std::byte>(static_cast<const std::byte*>(data), storageBytes));
     }
 
-    inline size_t comparisonStorageElements(const Layout& layout)
-    {
-        const auto [lower, upper] = detail::elementBounds(layout);
-        if(lower < 0)
-            throw std::invalid_argument("hipBLASLt comparison layout has a negative offset.");
-        return upper < lower ? 0 : static_cast<size_t>(upper) + 1;
-    }
-
     template <typename T>
     ComparisonResult compareTypedBuffers(const void*       expected,
                                          const void*       observed,
                                          const Layout&     layout,
                                          ComparisonOptions options)
     {
-        const size_t storageElements = comparisonStorageElements(layout);
+        constexpr ScalarType scalar = scalarType<T>();
+        static_assert(scalarTypeInfo(scalar).storageBits == sizeof(T) * 8,
+                      "Typed hipBLASLt comparison requires native scalar storage.");
+        const size_t storageElements = storageBytesForLayout(scalar, layout) / sizeof(T);
         options.selection.indexOrder = ComparisonIndexOrder::FirstDimensionFastest;
         return compare(std::span<const T>(static_cast<const T*>(observed), storageElements),
                        layout,
