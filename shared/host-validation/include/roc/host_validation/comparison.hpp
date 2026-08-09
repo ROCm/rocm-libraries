@@ -187,19 +187,22 @@ inline ComparisonResult compare(TensorView observed, TensorView expected,
                                 const ComparisonOptions& options = {});
 
 template <typename Observed, typename Expected>
-std::optional<ComparisonTolerance> findAllCloseTolerance(
-    std::span<const Observed> observedStorage, const Layout& observedLayout,
-    std::span<const Expected> expectedStorage, const Layout& expectedLayout,
-    std::span<const double> absoluteCandidates, std::span<const double> relativeCandidates,
-    ComparisonOptions options = {});
+std::optional<ComparisonTolerance> findAllCloseTolerance(std::span<const Observed> observedStorage,
+                                                         const Layout& observedLayout,
+                                                         std::span<const Expected> expectedStorage,
+                                                         const Layout& expectedLayout,
+                                                         std::span<const double> absoluteCandidates,
+                                                         std::span<const double> relativeCandidates,
+                                                         ComparisonOptions options = {});
 
 inline std::optional<ComparisonTolerance> findAllCloseTolerance(
     TensorView observed, TensorView expected, std::span<const double> absoluteCandidates,
     std::span<const double> relativeCandidates, ComparisonOptions options = {});
 
-inline SentinelResult checkUnwrittenSentinel(
-    ScalarType type, std::span<const std::byte> storage, size_t firstElement, size_t elementCount,
-    SentinelRegion region = SentinelRegion::Unspecified, size_t maxReportedMismatches = 10);
+inline SentinelResult checkUnwrittenSentinel(ScalarType type, std::span<const std::byte> storage,
+                                             size_t firstElement, size_t elementCount,
+                                             SentinelRegion region = SentinelRegion::Unspecified,
+                                             size_t maxReportedMismatches = 10);
 
 inline SentinelResult checkUnusedTensorStorage(TensorView logicalTensor, size_t allocatedElements,
                                                SentinelRegion region = SentinelRegion::Inside,

@@ -245,16 +245,15 @@ int main() {
             "FP8 underflow zero-sign mismatch.");
     require(encodeRaw(ScalarType::Float8E4M3, std::bit_cast<float>(uint32_t{0xffc00000})) == 0xff,
             "FP8 OCP NaN sign mismatch.");
-    require(encodeRaw(ScalarType::Float4E2M1,
-                      std::numeric_limits<float>::quiet_NaN()) == 0x07 &&
-                encodeRaw(ScalarType::Float4E2M1,
-                          std::bit_cast<float>(uint32_t{0xffc00000})) == 0x0f,
-            "Finite-only minifloat NaN saturation mismatch.");
+    require(
+        encodeRaw(ScalarType::Float4E2M1, std::numeric_limits<float>::quiet_NaN()) == 0x07 &&
+            encodeRaw(ScalarType::Float4E2M1, std::bit_cast<float>(uint32_t{0xffc00000})) == 0x0f,
+        "Finite-only minifloat NaN saturation mismatch.");
     require(encodeRaw(ScalarType::E5M3, 1.0f) == 0x78 && encodeRaw(ScalarType::E5M3, 2.0f) == 0x80,
             "E5M3 scale encoding mismatch.");
-    require(encodeRaw(ScalarType::E5M3, -0.0f) == 0x00 &&
-                encodeRaw(ScalarType::E8M0, -0.0f) == 0x00,
-            "Unsigned scale negative-zero encoding mismatch.");
+    require(
+        encodeRaw(ScalarType::E5M3, -0.0f) == 0x00 && encodeRaw(ScalarType::E8M0, -0.0f) == 0x00,
+        "Unsigned scale negative-zero encoding mismatch.");
 
     bool negativeScaleThrew = false;
     try {
