@@ -39,7 +39,6 @@ subtree_to_project_map = {
     "projects/rocwmma": "rocwmma",
     "projects/hipthreads": "hipthreads",
     "projects/rpp": "rpp",
-    "shared/host-validation": "blas",
     "shared/mxdatagenerator": "blas",
     "shared/origami": "blas",
     "shared/rocroller": "rocroller",
