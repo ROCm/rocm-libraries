@@ -596,16 +596,6 @@ NB_MODULE(_roc_host_validation, module) {
         .value("Swish", Activation::Swish)
         .value("Clamp", Activation::Clamp);
 
-    nb::enum_<DataPattern>(module, "DataPattern")
-        .value("Zero", DataPattern::Zero)
-        .value("RandomInteger", DataPattern::RandomInteger)
-        .value("UniformInteger", DataPattern::UniformInteger)
-        .value("AlternatingRandomInteger", DataPattern::AlternatingRandomInteger)
-        .value("UniformReal", DataPattern::UniformReal)
-        .value("Sine", DataPattern::Sine)
-        .value("Cosine", DataPattern::Cosine)
-        .value("Constant", DataPattern::Constant);
-
     nb::enum_<GenerationPattern>(module, "GenerationPattern")
         .value("Zero", GenerationPattern::Zero)
         .value("Constant", GenerationPattern::Constant)
@@ -1044,16 +1034,6 @@ NB_MODULE(_roc_host_validation, module) {
             nb::rv_policy::reference_internal);
 
     module.def("scalar_type_info", [](ScalarType type) { return scalarTypeInfo(type); });
-    module.def(
-        "fill",
-        [](Tensor& tensor, DataPattern pattern, uint32_t seed, double parameter0,
-           double parameter1) -> Tensor& {
-            RandomGenerator generator(seed);
-            fill(tensor.mutableView(), pattern, generator, parameter0, parameter1);
-            return tensor;
-        },
-        "tensor"_a, "pattern"_a, "seed"_a, "parameter0"_a = 0.0, "parameter1"_a = 0.0,
-        nb::rv_policy::reference);
     module.def("generate_tensor", &generateOwned, "type"_a, "shape"_a, "options"_a);
     module.def("apply_structured_sparsity", &applyStructuredSparsityOwned, "input"_a, "pattern"_a,
                "emit_two_of_four_metadata"_a = false);
