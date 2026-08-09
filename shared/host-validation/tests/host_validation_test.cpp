@@ -444,6 +444,66 @@ void testIndexedGeneration() {
     }
 }
 
+void testReferenceAxpby() {
+    using namespace roc::host_validation;
+
+    const Shape shape{2, 2, 2};
+    Tensor x(ScalarType::Float16, Layout(shape, {1, 3, 6}));
+    Tensor y(ScalarType::BFloat16, Layout(shape, {3, 1, 6}));
+    Tensor output(ScalarType::Float32, Layout(shape, {1, 4, 8}));
+    for (size_t batch = 0; batch < 2; ++batch) {
+        for (size_t row = 0; row < 2; ++row) {
+            for (size_t column = 0; column < 2; ++column) {
+                const std::array<size_t, 3> indices{row, column, batch};
+                x.mutableView().storeFrom(indices,
+                                          static_cast<float>(1 + row + 2 * column + batch));
+                y.mutableView().storeFrom(indices,
+                                          static_cast<float>(2 - 2 * row + column + batch));
+            }
+        }
+    }
+
+    AxpbyProblem problem(x.view(), y.view(), output.mutableView(), ScalarType::Float32);
+    problem.alpha = 2.0;
+    problem.beta = -0.5;
+    const AxpbyRunInfo run = referenceAxpby(problem);
+    require(run.elementsComputed == shape.elementCount(),
+            "Reference AXPBY element count mismatch.");
+
+    for (size_t batch = 0; batch < 2; ++batch) {
+        for (size_t row = 0; row < 2; ++row) {
+            for (size_t column = 0; column < 2; ++column) {
+                const std::array<size_t, 3> indices{row, column, batch};
+                const float expected =
+                    2.0f * x.view().loadAs<float>(indices) - 0.5f * y.view().loadAs<float>(indices);
+                require(output.view().loadAs<float>(indices) == expected,
+                        "Reference AXPBY value mismatch.");
+            }
+        }
+    }
+
+    Tensor yOnlyOutput(ScalarType::Float32, shape);
+    AxpbyProblem yOnly(std::nullopt, y.view(), yOnlyOutput.mutableView(), ScalarType::Float32);
+    yOnly.beta = 3.0;
+    referenceAxpby(yOnly);
+    require(yOnlyOutput.view().loadAs<float>({1, 0, 1}) == 3.0f * y.view().loadAs<float>({1, 0, 1}),
+            "Reference AXPBY optional-input mismatch.");
+
+    const std::array<std::complex<float>, 1> complexXValues{std::complex<float>(1, 2)};
+    const std::array<std::complex<float>, 1> complexYValues{std::complex<float>(3, -1)};
+    Tensor complexX = Tensor::fromNativeValues<std::complex<float>>(Shape{1}, complexXValues);
+    Tensor complexY = Tensor::fromNativeValues<std::complex<float>>(Shape{1}, complexYValues);
+    Tensor complexOutput(ScalarType::ComplexFloat32, Shape{1});
+    AxpbyProblem complexProblem(complexX.view(), complexY.view(), complexOutput.mutableView(),
+                                ScalarType::ComplexFloat32);
+    complexProblem.alpha = std::complex<double>(0.5, 1.0);
+    complexProblem.beta = -2.0;
+    referenceAxpby(complexProblem);
+    require(
+        complexOutput.view().loadAs<std::complex<float>>({0}) == std::complex<float>(-7.5f, 4.0f),
+        "Complex reference AXPBY mismatch.");
+}
+
 void testActivations() {
     using namespace roc::host_validation;
 
@@ -690,6 +750,7 @@ int main() {
     testReferenceReduction();
     testStructuredSparsity();
     testIndexedGeneration();
+    testReferenceAxpby();
     testActivations();
     testStridedAndOffsetViews();
     testGenerationAndComparison();

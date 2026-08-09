@@ -70,6 +70,7 @@ target_sources(host-validation
         FILE_SET HEADERS
         BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/include"
         FILES
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/axpby.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/comparison.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/epilogue.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/generation.hpp"
@@ -79,6 +80,7 @@ target_sources(host-validation
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/detail/comparison.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/detail/comparison_impl.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/detail/data_generation.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/detail/reference_axpby.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/detail/reference_common.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/detail/reference_epilogue.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/detail/reference_gemm.hpp"
