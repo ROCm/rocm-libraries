@@ -33,6 +33,12 @@ enum class GemmOutputConversion {
     SaturatingInt8,
 };
 
+enum class AccumulationRounding {
+    TypeDefault,
+    FullPrecision,
+    AfterProductAndSum,
+};
+
 struct BlockScaleBinding {
     TensorView values;
     size_t blockSize;
@@ -76,6 +82,7 @@ struct GemmProblem {
     TensorView c;
     MutableTensorView d;
     ScalarType accumulatorType;
+    AccumulationRounding accumulationRounding = AccumulationRounding::TypeDefault;
     MathMode mathMode = MathMode::Default;
     GemmEpilogue epilogue;
     OutputSelection outputSelection = OutputSelection::all();
@@ -146,6 +153,12 @@ inline void validateRuntimeGemm(const GemmProblem& problem) {
         throw std::invalid_argument(
             "Runtime reference GEMM currently supports F16, BF16, F32, F64, I32, C64, and "
             "C128 accumulators.");
+    if (problem.accumulationRounding == AccumulationRounding::AfterProductAndSum &&
+        problem.accumulatorType != ScalarType::Float16 &&
+        problem.accumulatorType != ScalarType::BFloat16)
+        throw std::invalid_argument(
+            "Product-and-sum accumulator rounding currently requires an F16 or BF16 "
+            "accumulator type.");
 
     const bool complexAccumulator = isComplexScalarType(problem.accumulatorType);
     auto validateOperandType = [&](ScalarType type, const char* name) {
@@ -292,11 +305,15 @@ GemmRunInfo referenceRuntimeCanonical(const GemmProblem& problem) {
         problem.d, problem.epilogue.outputConversion);
     const RuntimeQuantizer<Accumulator> quantizeA(problem.a.computeType);
     const RuntimeQuantizer<Accumulator> quantizeB(problem.b.computeType);
-    const RuntimeQuantizer<Accumulator> quantizeAccumulator(
+    const bool typeRoundsAfterEachStep =
         problem.accumulatorType == ScalarType::Float16 ||
-                problem.accumulatorType == ScalarType::BFloat16
-            ? std::optional<ScalarType>(problem.accumulatorType)
-            : std::nullopt);
+        problem.accumulatorType == ScalarType::BFloat16;
+    const bool roundAfterEachStep =
+        problem.accumulationRounding == AccumulationRounding::AfterProductAndSum ||
+        (problem.accumulationRounding == AccumulationRounding::TypeDefault &&
+         typeRoundsAfterEachStep);
+    const RuntimeQuantizer<Accumulator> quantizeAccumulator(
+        roundAfterEachStep ? std::optional<ScalarType>(problem.accumulatorType) : std::nullopt);
     const RuntimeMathFunction<Accumulator> operandMath =
         runtimeMathFunction<Accumulator>(problem.mathMode);
     auto multiplyAccumulator = [&](Accumulator left, Accumulator right) {
