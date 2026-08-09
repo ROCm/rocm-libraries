@@ -25,5 +25,15 @@ int main() {
     GemmInvocation invocation(std::move(problem));
     if (!queryGemmSupport(invocation)) return 1;
     referenceGemm(invocation);
-    return d[0] == 6 ? 0 : 1;
+    if (d[0] != 6) return 1;
+
+    const std::array<float, 3> reductionInput{-1, 4, -3};
+    std::array<float, 1> maximumAbsolute{};
+    referenceMaximumAbsolute(
+        TensorView::fromNative<float>(Layout::contiguous(Shape{3}),
+                                      std::span<const float>(reductionInput)),
+        MutableTensorView::fromNative<float>(Layout::contiguous(Shape{}),
+                                             std::span<float>(maximumAbsolute)),
+        ScalarType::Float32);
+    return maximumAbsolute[0] == 4 ? 0 : 1;
 }

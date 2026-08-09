@@ -30,9 +30,13 @@
 #include <hipblaslt/hipblaslt.h>
 #include <hipblaslt_datatype2string.hpp>
 #include <roc/host_validation/adapters/hipblaslt/HipblasltDataInitialization.hpp>
+#include <roc/host_validation/adapters/hipblaslt/Types.hpp>
+#include <roc/host_validation/comparison.hpp>
+#include <roc/host_validation/validation.hpp>
 #include <iostream>
 #include <numeric>
 #include <random>
+#include <span>
 #include <type_traits>
 #include <vector>
 
@@ -47,30 +51,6 @@ void printUsage(char* programName)
               << "\t-n, --n\t\t\t\tSize of dim 1, default is 64\n"
               << "\t--initialization \t\tInitialize matrix data. Options: rand_int, trig_float, "
                  "hpl(floating), special, zero. (default is hpl)\n";
-}
-
-template <typename T>
-T abs(T a)
-{
-    return (a > 0) ? a : -a;
-}
-
-template <typename T>
-T max(T a, T b)
-{
-    return (a > b) ? a : b;
-}
-
-template <typename Ti, typename To>
-void cpuAMax(To* out, Ti* in, std::uint32_t length)
-{
-    // calculate amax
-    Ti m = 0;
-    for(int j = 0; j < length; j++)
-    {
-        m = max(m, abs(in[j]));
-    }
-    out[0] = To(m);
 }
 
 int parseArgs(int                       argc,
@@ -151,14 +131,9 @@ void dumpBuffer(const char* title, Dtype* data, int N)
 template <typename T>
 void compare(const char* title, const std::vector<T>& cpuOutput, const std::vector<T>& refOutput)
 {
-    T maxErr = 0.0;
-    for(int i = 0; i < cpuOutput.size(); i++)
-    {
-        T err  = abs(refOutput[i] - cpuOutput[i]);
-        maxErr = max(maxErr, err);
-    }
-
-    std::cout << "max error : " << float(maxErr) << std::endl;
+    const auto report = roc::host_validation::compare(std::span<const T>(cpuOutput),
+                                                      std::span<const T>(refOutput));
+    std::cout << title << " max error : " << report.maxAbsoluteDifference << std::endl;
 }
 
 template <typename DType>
@@ -170,7 +145,7 @@ void initData(DType* data, std::size_t numElements, hipblaslt_initialization ini
 template <typename Ti, typename To>
 int AmaxTest(hipDataType type, hipDataType dtype, int m, int n, hipblaslt_initialization& init)
 {
-    int         numElements = m * n;
+    std::size_t numElements = static_cast<std::size_t>(m) * static_cast<std::size_t>(n);
     std::size_t tiNumBytes  = sizeof(Ti);
     std::size_t toNumBytes  = sizeof(To);
 
@@ -195,7 +170,13 @@ int AmaxTest(hipDataType type, hipDataType dtype, int m, int n, hipblaslt_initia
 
     hipErr = hipMemcpyDtoH(cpuOutput.data(), gpuOutput, toNumBytes);
 
-    cpuAMax(refOutput.data(), cpuInput.data(), m * n);
+    using namespace roc::host_validation;
+    referenceMaximumAbsolute(
+        hipblaslt_adapter::tensorView(
+            cpuInput.data(), cpuInput.size(), Layout::contiguous(Shape{numElements})),
+        hipblaslt_adapter::mutableTensorView(
+            refOutput.data(), refOutput.size(), Layout::contiguous(Shape{})),
+        ScalarType::Float32);
 
     // dumpBuffer("Input", cpuInput.data(), m * n);
     // dumpBuffer("GPU", cpuOutput.data(), 1);
