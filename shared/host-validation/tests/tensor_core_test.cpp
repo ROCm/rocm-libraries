@@ -1,6 +1,7 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <complex>
@@ -76,6 +77,20 @@ int main() {
                               std::as_bytes(std::span<const int32_t>(reversedStorage)));
     require(reversed.loadAs<int32_t>({0}) == 3 && reversed.loadAs<int32_t>({2}) == 1,
             "Negative-stride tensor layout mismatch.");
+    const Tensor reversedFloat = reversed.to(ScalarType::Float32);
+    require(reversedFloat.layout() == reversed.layout() &&
+                reversedFloat.view().loadAs<float>({0}) == 3.0f &&
+                reversedFloat.view().loadAs<float>({2}) == 1.0f,
+            "TensorView conversion did not preserve the logical layout.");
+
+    const std::array<float, 2> conversionSource{1.1f, -2.25f};
+    const Tensor convertedBFloat16 =
+        Tensor::fromNativeValues<float>(Shape{2}, conversionSource).to(ScalarType::BFloat16);
+    const Tensor convertedBack = convertedBFloat16.to(ScalarType::Float32);
+    requireNear(convertedBack.view().loadAs<float>({0}), 1.1015625f, 0.0f,
+                "Tensor conversion did not apply BFloat16 rounding.");
+    requireNear(convertedBack.view().loadAs<float>({1}), -2.25f, 0.0f,
+                "Tensor conversion changed an exactly representable value.");
 
     Tensor int4(ScalarType::Int4, Shape{5});
     auto int4View = int4.mutableView();
@@ -101,6 +116,16 @@ int main() {
     fp4.mutableView().storeFrom({1}, -0.5f);
     fp4.mutableView().storeFrom({2}, 1.5f);
     fp4.mutableView().storeFrom({3}, 6.0f);
+    const Tensor fp4Copy = fp4.to(ScalarType::Float4E2M1);
+    require(
+        fp4Copy.storage().size() == fp4.storage().size() &&
+            std::equal(fp4Copy.storage().begin(), fp4Copy.storage().end(), fp4.storage().begin()),
+        "Same-type tensor conversion changed raw storage.");
+    const Tensor fp4Float = fp4.to(ScalarType::Float32);
+    requireNear(fp4Float.view().loadAs<float>({0}), -6.0f, 0.0f,
+                "Packed tensor conversion minimum mismatch.");
+    requireNear(fp4Float.view().loadAs<float>({2}), 1.5f, 0.0f,
+                "Packed tensor conversion normal mismatch.");
     requireNear(fp4.view().loadAs<float>({0}), -6.0f, 0.0f, "FP4 minimum mismatch.");
     requireNear(fp4.view().loadAs<float>({1}), -0.5f, 0.0f, "FP4 subnormal mismatch.");
     requireNear(fp4.view().loadAs<float>({2}), 1.5f, 0.0f, "FP4 normal mismatch.");
