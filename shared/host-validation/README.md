@@ -355,6 +355,11 @@ rank-zero outputs, and multiple reduction axes. hipBLASLt's bias-gradient
 adapter represents its matrix as a strided tensor and reduces the K axis; no
 product type enters the component.
 
+`referenceMaximumAbsolute` reduces every logical input dimension into a
+rank-zero output. It supports F16, BF16, F32, and F64 accumulator policies,
+ignores NaN inputs consistently with the existing GEMM-epilogue AMax program,
+and converts the final value through the requested output tensor codec.
+
 ## Structured sparsity
 
 `applyStructuredSparsity` applies a logical N:M pattern along one tensor axis
@@ -446,7 +451,8 @@ The `roc_host_validation` package currently provides:
 - `reference_epilogue` with bias, forward/gradient activation, E, scale-D/E,
   gate residual, raw output, and AMax results; and
 - `reference_sum` with runtime input/output/accumulator types and explicit
-  tensor axes; and
+  tensor axes;
+- `reference_maximum_absolute` with runtime input/output/accumulator types; and
 - `apply_structured_sparsity` and `encode_two_of_four_metadata`, including the
   fused metadata result used by product adapters.
 
@@ -468,7 +474,8 @@ The NumPy suite independently checks:
 - selected-output GEMM and prime-stride selection;
 - full/selected forward and gradient epilogues for the configured activation
   family against NumPy; and
-- multi-axis tensor reduction against `numpy.sum`; and
+- multi-axis tensor reduction against `numpy.sum` and max-absolute reduction
+  against an explicit NumPy NaN policy; and
 - fixed/random N:M pruning, logical compression, packed-value preservation,
   and 2:4 metadata encoding against NumPy.
 
