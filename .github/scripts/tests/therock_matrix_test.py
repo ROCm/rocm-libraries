@@ -34,6 +34,17 @@ class TheRockMatrixTest(unittest.TestCase):
         self.assertEqual(len(project_to_run), 1)
         self.assertFalse(project_to_run[0]["run_rocjitsu_race_check"])
 
+    def test_host_validation_changes_run_blas_consumers(self):
+        project_to_run = therock_matrix.collect_projects_to_run(
+            ["shared/host-validation"]
+        )
+        self.assertEqual(len(project_to_run), 1)
+        blas_entry = project_to_run[0]
+        projects_to_test = blas_entry["projects_to_test"].split(",")
+        self.assertIn("hipblaslt", projects_to_test)
+        self.assertIn("tensilelite", projects_to_test)
+        self.assertFalse(blas_entry["run_rocjitsu_race_check"])
+
     def test_rocjitsu_race_check_does_not_run_for_provider_rows(self):
         # These rows exercise the names that motivated the explicit selection
         # marker. In particular, `hipblasltprovider` must not match merely

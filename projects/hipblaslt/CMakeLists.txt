@@ -289,18 +289,25 @@ if(HIPBLASLT_ENABLE_MXDATAGENERATOR
 endif()
 
 if(NOT TARGET roc::host-validation)
-    block(SCOPE_FOR VARIABLES)
-        set(HOST_VALIDATION_BUILD_TESTING OFF)
-        set(HOST_VALIDATION_BUILD_BLAS_BACKEND ${HIPBLASLT_ENABLE_CLIENT})
-        set(HOST_VALIDATION_BUILD_MX_BACKEND
-            ${_hipblaslt_mxdatagen_enabled}
-        )
-        add_subdirectory(
-            "${CMAKE_CURRENT_SOURCE_DIR}/../../shared/host-validation"
-            "${CMAKE_CURRENT_BINARY_DIR}/host-validation"
-            EXCLUDE_FROM_ALL
-        )
-    endblock()
+    set(_hipblaslt_host_validation_source
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../shared/host-validation"
+    )
+    if(EXISTS "${_hipblaslt_host_validation_source}/CMakeLists.txt")
+        block(SCOPE_FOR VARIABLES)
+            set(HOST_VALIDATION_BUILD_TESTING OFF)
+            set(HOST_VALIDATION_BUILD_BLAS_BACKEND ${HIPBLASLT_ENABLE_CLIENT})
+            set(HOST_VALIDATION_BUILD_MX_BACKEND
+                ${_hipblaslt_mxdatagen_enabled}
+            )
+            add_subdirectory(
+                "${_hipblaslt_host_validation_source}"
+                "${CMAKE_CURRENT_BINARY_DIR}/host-validation"
+                EXCLUDE_FROM_ALL
+            )
+        endblock()
+    else()
+        find_package(ROCHostValidation CONFIG REQUIRED)
+    endif()
 endif()
 if(_hipblaslt_mxdatagen_enabled AND NOT TARGET roc::host-validation-mx)
     if(COMMAND roc_host_validation_enable_mx_backend)
