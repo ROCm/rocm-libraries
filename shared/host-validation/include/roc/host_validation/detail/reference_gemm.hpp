@@ -211,8 +211,7 @@ inline void validateRuntimeGemm(const GemmProblem& problem) {
     if (!complexAccumulator &&
         (problem.epilogue.alpha.imag() != 0.0 || problem.epilogue.beta.imag() != 0.0 ||
          problem.epilogue.outputScale.imag() != 0.0))
-        throw std::invalid_argument(
-            "Reference GEMM real accumulator has a complex scalar.");
+        throw std::invalid_argument("Reference GEMM real accumulator has a complex scalar.");
     if (problem.epilogue.outputConversion == GemmOutputConversion::SaturatingInt8 &&
         problem.d.type() != ScalarType::Int8)
         throw std::invalid_argument(
@@ -283,10 +282,8 @@ class RuntimeGemmOutputWriter {
         } else {
             const long double rounded = std::nearbyint(static_cast<long double>(value));
             const long double clamped =
-                std::clamp(rounded, static_cast<long double>(-128),
-                           static_cast<long double>(127));
-            m_output.storeFrom(
-                {row, column}, static_cast<int8_t>(clamped));
+                std::clamp(rounded, static_cast<long double>(-128), static_cast<long double>(127));
+            m_output.storeFrom({row, column}, static_cast<int8_t>(clamped));
         }
     }
 
@@ -301,13 +298,11 @@ GemmRunInfo referenceRuntimeCanonical(const GemmProblem& problem) {
     const RuntimeMatrixReader<Accumulator> a(problem.a.values);
     const RuntimeMatrixReader<Accumulator> b(problem.b.values);
     const RuntimeMatrixReader<Accumulator> c(problem.c);
-    const RuntimeGemmOutputWriter<Accumulator> d(
-        problem.d, problem.epilogue.outputConversion);
+    const RuntimeGemmOutputWriter<Accumulator> d(problem.d, problem.epilogue.outputConversion);
     const RuntimeQuantizer<Accumulator> quantizeA(problem.a.computeType);
     const RuntimeQuantizer<Accumulator> quantizeB(problem.b.computeType);
-    const bool typeRoundsAfterEachStep =
-        problem.accumulatorType == ScalarType::Float16 ||
-        problem.accumulatorType == ScalarType::BFloat16;
+    const bool typeRoundsAfterEachStep = problem.accumulatorType == ScalarType::Float16 ||
+                                         problem.accumulatorType == ScalarType::BFloat16;
     const bool roundAfterEachStep =
         problem.accumulationRounding == AccumulationRounding::AfterProductAndSum ||
         (problem.accumulationRounding == AccumulationRounding::TypeDefault &&

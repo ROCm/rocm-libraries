@@ -209,7 +209,6 @@ inline ReductionRunInfo referenceMaximumAbsolute(TensorView input, MutableTensor
     std::vector<size_t> axes(input.shape().rank());
     std::iota(axes.begin(), axes.end(), 0);
     return referenceReduce(ReductionProblem(std::move(input), std::move(output), accumulatorType,
-                                            std::move(axes),
-                                            ReductionOperation::MaximumAbsolute));
+                                            std::move(axes), ReductionOperation::MaximumAbsolute));
 }
 }  // namespace roc::host_validation

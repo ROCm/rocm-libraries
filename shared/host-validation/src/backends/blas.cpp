@@ -97,8 +97,7 @@ void validateCommon(const GemmProblem& problem) {
             "BLAS backend requires A, B, C, D, and accumulator types to match.");
     if (problem.a.computeType || problem.b.computeType)
         throw std::invalid_argument("BLAS backend does not support compute-input quantization.");
-    if (!problem.a.preQuantizationScales.empty() ||
-        !problem.b.preQuantizationScales.empty())
+    if (!problem.a.preQuantizationScales.empty() || !problem.b.preQuantizationScales.empty())
         throw std::invalid_argument("BLAS backend does not support pre-quantization scaling.");
     if (problem.a.blockScale || problem.b.blockScale)
         throw std::invalid_argument("BLAS backend does not support block scaling.");
@@ -207,8 +206,7 @@ void validateTransforming(const GemmProblem& problem) {
                 "Transforming BLAS backend supports F32, F64, C64, and C128 accumulation.");
     }
     if (problem.a.blockScale || problem.b.blockScale)
-        throw std::invalid_argument(
-            "Transforming BLAS backend does not support block scaling.");
+        throw std::invalid_argument("Transforming BLAS backend does not support block scaling.");
     if (problem.epilogue.bias || problem.epilogue.scaleAlpha || problem.epilogue.scaleA ||
         problem.epilogue.scaleB || problem.epilogue.activation != Activation::None)
         throw std::invalid_argument(
@@ -222,25 +220,21 @@ void validateTransforming(const GemmProblem& problem) {
     const size_t n = problem.b.values.shape()[1];
     const size_t k = problem.a.values.shape()[1];
     if (m == 0 || n == 0 || k == 0)
-        throw std::invalid_argument(
-            "Transforming BLAS backend requires nonzero M, N, and K.");
+        throw std::invalid_argument("Transforming BLAS backend requires nonzero M, N, and K.");
     if (m > static_cast<size_t>(std::numeric_limits<int>::max()) ||
         n > static_cast<size_t>(std::numeric_limits<int>::max()) ||
         k > static_cast<size_t>(std::numeric_limits<int>::max()))
-        throw std::invalid_argument(
-            "Transforming BLAS backend dimensions exceed int.");
+        throw std::invalid_argument("Transforming BLAS backend dimensions exceed int.");
 }
 
 template <typename Accumulator>
 Tensor materializeOperand(const GemmOperand& operand, MathMode mathMode) {
     using namespace detail;
-    Tensor output(nativeScalarType<Accumulator>,
-                  columnMajorLayout(operand.values.shape()));
+    Tensor output(nativeScalarType<Accumulator>, columnMajorLayout(operand.values.shape()));
     const RuntimeMatrixReader<Accumulator> input(operand.values);
     const RuntimeMatrixWriter<Accumulator> writer(output.mutableView());
     const RuntimeQuantizer<Accumulator> quantize(operand.computeType);
-    const RuntimeMathFunction<Accumulator> operandMath =
-        runtimeMathFunction<Accumulator>(mathMode);
+    const RuntimeMathFunction<Accumulator> operandMath = runtimeMathFunction<Accumulator>(mathMode);
     std::vector<RuntimeVectorReader<Accumulator>> scaleReaders;
     scaleReaders.reserve(operand.preQuantizationScales.size());
     for (const VectorBinding& binding : operand.preQuantizationScales)
@@ -250,15 +244,12 @@ Tensor materializeOperand(const GemmOperand& operand, MathMode mathMode) {
     const size_t columns = operand.values.shape()[1];
     for (size_t row = 0; row < rows; ++row) {
         for (size_t column = 0; column < columns; ++column) {
-            Accumulator value =
-                conjugateIfNeeded(input(row, column), operand.conjugate);
+            Accumulator value = conjugateIfNeeded(input(row, column), operand.conjugate);
             for (size_t scaleIndex = 0; scaleIndex < scaleReaders.size(); ++scaleIndex) {
-                const VectorBinding& binding =
-                    operand.preQuantizationScales[scaleIndex];
-                const size_t index =
-                    binding.values.shape()[0] == 1
-                        ? 0
-                        : (binding.axis == MatrixAxis::Row ? row : column);
+                const VectorBinding& binding = operand.preQuantizationScales[scaleIndex];
+                const size_t index = binding.values.shape()[0] == 1
+                                         ? 0
+                                         : (binding.axis == MatrixAxis::Row ? row : column);
                 value *= scaleReaders[scaleIndex][index];
             }
             writer.store(row, column, operandMath(quantize(value)));
@@ -270,8 +261,7 @@ Tensor materializeOperand(const GemmOperand& operand, MathMode mathMode) {
 template <typename Accumulator>
 Tensor materializeMatrix(TensorView input) {
     using namespace detail;
-    Tensor output(nativeScalarType<Accumulator>,
-                  columnMajorLayout(input.shape()));
+    Tensor output(nativeScalarType<Accumulator>, columnMajorLayout(input.shape()));
     const RuntimeMatrixReader<Accumulator> reader(input);
     const RuntimeMatrixWriter<Accumulator> writer(output.mutableView());
     for (size_t row = 0; row < input.shape()[0]; ++row)
@@ -287,32 +277,25 @@ GemmRunInfo runTransforming(const GemmProblem& problem) {
     Tensor stagedB = materializeOperand<Accumulator>(problem.b, problem.mathMode);
     Tensor stagedC = materializeMatrix<Accumulator>(problem.c);
 
-    GemmProblem stagedProblem(
-        GemmOperand(stagedA.view()),
-        GemmOperand(stagedB.view()),
-        stagedC.view(),
-        stagedC.mutableView(),
-        nativeScalarType<Accumulator>);
+    GemmProblem stagedProblem(GemmOperand(stagedA.view()), GemmOperand(stagedB.view()),
+                              stagedC.view(), stagedC.mutableView(), nativeScalarType<Accumulator>);
     stagedProblem.epilogue.alpha = problem.epilogue.alpha;
     stagedProblem.epilogue.beta = problem.epilogue.beta;
 
     static const BlasGemmBackend blas;
-    referenceGemm(stagedProblem,
-                  {
-                      .backend = GemmBackend::Blas,
-                      .requireRequestedBackend = true,
-                      .backendImplementation = &blas,
-                  });
+    referenceGemm(stagedProblem, {
+                                     .backend = GemmBackend::Blas,
+                                     .requireRequestedBackend = true,
+                                     .backendImplementation = &blas,
+                                 });
 
     const RuntimeMatrixReader<Accumulator> stagedOutput(stagedC.view());
-    const RuntimeGemmOutputWriter<Accumulator> output(
-        problem.d, problem.epilogue.outputConversion);
+    const RuntimeGemmOutputWriter<Accumulator> output(problem.d, problem.epilogue.outputConversion);
     const Accumulator outputScale =
         runtimeScalar<Accumulator>(problem.epilogue.outputScale, "output scale");
     for (size_t row = 0; row < problem.d.shape()[0]; ++row)
         for (size_t column = 0; column < problem.d.shape()[1]; ++column)
-            output.store(row, column,
-                         stagedOutput(row, column) * outputScale);
+            output.store(row, column, stagedOutput(row, column) * outputScale);
 
     return {
         .backendUsed = GemmBackend::Blas,
@@ -381,8 +364,7 @@ GemmBackend TransformingBlasGemmBackend::backend() const {
     return GemmBackend::Blas;
 }
 
-GemmSupportInfo TransformingBlasGemmBackend::querySupport(
-    const GemmProblem& problem) const {
+GemmSupportInfo TransformingBlasGemmBackend::querySupport(const GemmProblem& problem) const {
     try {
         validateTransforming(problem);
         return {.supported = true, .reason = {}};
@@ -391,8 +373,7 @@ GemmSupportInfo TransformingBlasGemmBackend::querySupport(
     }
 }
 
-GemmRunInfo TransformingBlasGemmBackend::run(
-    const GemmProblem& problem) const {
+GemmRunInfo TransformingBlasGemmBackend::run(const GemmProblem& problem) const {
     const GemmSupportInfo support = querySupport(problem);
     if (!support) throw std::invalid_argument(support.reason);
 
