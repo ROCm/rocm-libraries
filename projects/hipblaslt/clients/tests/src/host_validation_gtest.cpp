@@ -22,9 +22,10 @@
 TEST(HostValidationDataInitializationBridge, GeneratesComplexTrigonometricValues)
 {
     std::array<std::complex<float>, 4> values{};
-    roc::host_validation::hipblaslt_adapter::initialize(std::span<std::complex<float>>(values),
-                                                        hipblaslt_initialization::trig_float,
-                                                        roc::host_validation::DataPattern::Sine);
+    roc::host_validation::hipblaslt_adapter::initialize(
+        std::span<std::complex<float>>(values),
+        hipblaslt_initialization::trig_float,
+        roc::host_validation::GenerationPattern::Sine);
 
     for(size_t index = 0; index < values.size(); ++index)
     {

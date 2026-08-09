@@ -11,7 +11,7 @@
 #include <hipblaslt_datatype2string.hpp>
 #include <limits>
 #include <roc/host_validation/adapters/hipblaslt/Types.hpp>
-#include <roc/host_validation/validation.hpp>
+#include <roc/host_validation/generation.hpp>
 #include <span>
 #include <utility>
 #include <vector>
@@ -220,7 +220,7 @@ namespace roc::host_validation::hipblaslt_adapter
     template <typename T>
     void initialize(std::span<T>             values,
                     hipblaslt_initialization initialization,
-                    DataPattern              trigonometricPattern = DataPattern::Cosine)
+                    GenerationPattern        trigonometricPattern = GenerationPattern::Cosine)
     {
         GenerationOptions options;
         options.seed = 69069;
@@ -237,7 +237,7 @@ namespace roc::host_validation::hipblaslt_adapter
             options.imaginary.stream = 1;
             break;
         case hipblaslt_initialization::trig_float:
-            options.real.pattern      = trigonometricPattern == DataPattern::Sine
+            options.real.pattern      = trigonometricPattern == GenerationPattern::Sine
                                             ? GenerationPattern::Sine
                                             : GenerationPattern::Cosine;
             options.imaginary.pattern = options.real.pattern == GenerationPattern::Sine
@@ -329,7 +329,7 @@ namespace roc::host_validation::hipblaslt_adapter
     void initialize(T*                       data,
                     size_t                   size,
                     hipblaslt_initialization initialization,
-                    DataPattern              trigonometricPattern = DataPattern::Cosine)
+                    GenerationPattern        trigonometricPattern = GenerationPattern::Cosine)
     {
         initialize(std::span<T>(data, size), initialization, trigonometricPattern);
     }

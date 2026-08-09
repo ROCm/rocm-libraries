@@ -527,17 +527,20 @@ void testGenerationAndComparison() {
     require(indexedValue >= -4 && indexedValue <= 5,
             "Counter-based integer generation exceeded its bounds.");
 
-    RandomGenerator generatorA(42);
-    RandomGenerator generatorB(42);
-    std::array<float, 32> a{};
-    std::array<float, 32> b{};
-    generatorA.fillBinary<float>(a);
-    generatorB.fillBinary<float>(b);
-    require(a == b, "Random generation is not repeatable for equal seeds.");
+    GenerationOptions binaryGeneration;
+    binaryGeneration.seed = 42;
+    binaryGeneration.real.pattern = GenerationPattern::CandidateSet;
+    binaryGeneration.real.candidates = {-1.0, 1.0};
+    Tensor a(ScalarType::Float32, Shape{32});
+    Tensor b(ScalarType::Float32, Shape{32});
+    generate(a.mutableView(), binaryGeneration);
+    generate(b.mutableView(), binaryGeneration);
+    require(compare(b.view(), a.view()).passed(),
+            "Random generation is not repeatable for equal seeds.");
 
-    b[7] += 1;
+    b.mutableView().storeFrom({7}, b.view().loadAs<float>({7}) + 1.0f);
     const auto result =
-        compare(std::span<const float>(b), std::span<const float>(a),
+        compare(b.view(), a.view(),
                 {.absoluteTolerance = 0.0, .relativeTolerance = 0.0, .maxReportedMismatches = 4});
     require(result.mismatches == 1, "Comparison did not count one mismatch.");
     require(result.reportedMismatches.size() == 1, "Comparison did not report one mismatch.");
@@ -568,8 +571,12 @@ void testGenerationAndComparison() {
             "Matrix generation modified padding.");
 
     Tensor runtimeExpected(ScalarType::Float32, Shape{2, 3});
-    RandomGenerator runtimeGenerator(7);
-    fill(runtimeExpected.mutableView(), DataPattern::UniformInteger, runtimeGenerator, -2, 2);
+    GenerationOptions runtimeGeneration;
+    runtimeGeneration.seed = 7;
+    runtimeGeneration.real.pattern = GenerationPattern::UniformInteger;
+    runtimeGeneration.real.parameter0 = -2;
+    runtimeGeneration.real.parameter1 = 2;
+    generate(runtimeExpected.mutableView(), runtimeGeneration);
     Tensor runtimeObserved = runtimeExpected;
     runtimeObserved.mutableView().storeFrom({1, 2},
                                             runtimeExpected.view().loadAs<float>({1, 2}) + 1.0f);
