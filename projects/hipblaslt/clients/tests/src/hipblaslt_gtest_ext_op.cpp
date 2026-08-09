@@ -12,6 +12,8 @@
 #include <hip/hip_runtime_api.h>
 #include <hipblaslt/hipblaslt-ext-op.h>
 #include <roc/host_validation/adapters/hipblaslt/HipblasltDataInitialization.hpp>
+#include <roc/host_validation/adapters/hipblaslt/Types.hpp>
+#include <roc/host_validation/validation.hpp>
 #include <limits>
 #include <numeric>
 #include <vector>
@@ -83,30 +85,6 @@ namespace
                     outC[j] = outC[j] + beta[j];
             }
         }
-    }
-
-    template <typename T>
-    T abs(T a)
-    {
-        return (a > 0) ? a : -a;
-    }
-
-    template <typename T>
-    T max(T a, T b)
-    {
-        return (a > b) ? a : b;
-    }
-
-    template <typename Ti, typename To>
-    void cpuAMax(To* out, Ti* in, std::uint32_t length)
-    {
-        // calculate amax
-        Ti m = 0;
-        for(int j = 0; j < length; j++)
-        {
-            m = max(m, abs(in[j]));
-        }
-        out[0] = To(m);
     }
 
 }
@@ -297,7 +275,13 @@ void AMaxTest(hipDataType type, hipDataType dtype, std::size_t m, std::size_t n)
 
     hipErr = hipMemcpyDtoH(cpuOutput.data(), gpuOutput, outNumBytes);
 
-    cpuAMax(refOutput.data(), cpuInput.data(), m * n);
+    using namespace roc::host_validation;
+    referenceMaximumAbsolute(
+        hipblaslt_adapter::tensorView(
+            cpuInput.data(), cpuInput.size(), Layout::contiguous(Shape{numElements})),
+        hipblaslt_adapter::mutableTensorView(
+            refOutput.data(), refOutput.size(), Layout::contiguous(Shape{})),
+        ScalarType::Float32);
 
     EXPECT_NEAR(float(refOutput[0]), float(cpuOutput[0]), 1e-5);
 

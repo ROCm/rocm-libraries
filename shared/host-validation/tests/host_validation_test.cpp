@@ -292,6 +292,16 @@ void testReferenceReduction() {
     require(run.outputElementsComputed == 3 && run.inputElementsRead == 24,
             "Reference reduction run information mismatch.");
     require(output == std::array<float, 3>{412, 492, 572}, "Reference reduction result mismatch.");
+
+    std::array<float, 1> maximumAbsolute{};
+    const ReductionRunInfo maximumRun = referenceMaximumAbsolute(
+        input.asConst(),
+        MutableTensorView::fromNative<float>(Layout::contiguous(Shape{}),
+                                             std::span<float>(maximumAbsolute)),
+        ScalarType::Float32);
+    require(maximumRun.outputElementsComputed == 1 && maximumRun.inputElementsRead == 24,
+            "Reference maximum-absolute run information mismatch.");
+    require(maximumAbsolute[0] == 123.0f, "Reference maximum-absolute result mismatch.");
 }
 
 void testStructuredSparsity() {

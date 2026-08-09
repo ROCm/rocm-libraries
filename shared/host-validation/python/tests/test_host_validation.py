@@ -1603,6 +1603,33 @@ class TensorAndGemmTests(unittest.TestCase):
             np.sum(integer_values, axis=1, dtype=np.int32),
         )
 
+    def test_reference_maximum_absolute_matches_numpy(self):
+        values = np.asarray(
+            [[-1.5, 2.25, np.nan], [-7.0, 3.5, 0.25]],
+            dtype=np.float32,
+        )
+        observed = hv.reference_maximum_absolute(
+            hv.from_numpy(values),
+            hv.ScalarType.Float16,
+            hv.ScalarType.Float32,
+        )
+        expected = np.asarray(
+            np.max(np.where(np.isnan(values), 0.0, np.abs(values))),
+            dtype=np.float16,
+        )
+        np.testing.assert_array_equal(hv.to_numpy(observed), expected)
+
+        all_nan = np.full((2, 3), np.nan, dtype=np.float32)
+        all_nan_observed = hv.reference_maximum_absolute(
+            hv.from_numpy(all_nan),
+            hv.ScalarType.Float32,
+            hv.ScalarType.Float32,
+        )
+        np.testing.assert_array_equal(
+            hv.to_numpy(all_nan_observed),
+            np.asarray(0.0, dtype=np.float32),
+        )
+
     def test_structured_sparsity_all_fixed_two_of_four_patterns(self):
         values = np.arange(1, 17, dtype=np.float32).reshape(2, 8)
         retained_position_sets = (
