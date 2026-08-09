@@ -20,6 +20,10 @@
 #include "engines/asm_sdpa_engine/plans/SdpaFwdPlanBuilder.hpp"
 #endif
 
+#ifdef HIPDNN_ENGINE_AOT_CATALOG
+#include "engines/aot_catalog_engine/CatalogEngine.hpp"
+#endif
+
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
@@ -63,6 +67,14 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
              engine->addPlanBuilder(std::make_unique<asm_sdpa_engine::SdpaFwdPlanBuilder>());
              engine->addPlanBuilder(std::make_unique<asm_sdpa_engine::SdpaBwdPlanBuilder>());
              return engine;
+         }},
+#endif
+#ifdef HIPDNN_ENGINE_AOT_CATALOG
+        // AOT_CATALOG_ENGINE
+        {aot_catalog_engine::CatalogEngine::staticId(),
+         [](const device::IDevicePropertyProvider& /*devicePropertyProvider*/)
+             -> std::unique_ptr<hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>> {
+             return std::make_unique<aot_catalog_engine::CatalogEngine>();
          }},
 #endif
     };

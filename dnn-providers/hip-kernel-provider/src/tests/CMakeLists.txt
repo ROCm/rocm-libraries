@@ -69,6 +69,34 @@ if(ENABLE_HIP_MLOPS_ENGINE)
     add_subdirectory(engines/hip_mlops_engine)
 endif()
 
+if(ENABLE_AOT_CATALOG_ENGINE)
+    target_sources(hip_kernel_provider_tests PRIVATE
+        engines/aot_catalog_engine/TestGemmNumericParity.cpp
+        engines/aot_catalog_engine/TestRmsNormNumericParity.cpp
+        engines/aot_catalog_engine/TestSdpaNumericParity.cpp
+        engines/aot_catalog_engine/TestTuneCache.cpp
+        engines/aot_catalog_engine/TestRmsNormSelection.cpp
+    )
+    # The AOT engine's headers (catalog/, launch/, plans/) are rooted at the
+    # engine dir, which is PRIVATE to hip_kernel_provider_impl -- add it here so
+    # the substrate test can include them directly.
+    target_include_directories(hip_kernel_provider_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../engines/aot_catalog_engine
+    )
+    # Point the test at the build-tree copy of the catalog (family.json + .co).
+    target_compile_definitions(hip_kernel_provider_tests PRIVATE
+        AOT_CATALOG_TEST_DIR="${CMAKE_BINARY_DIR}/hip_kernel_provider/aot_catalog"
+    )
+    # Build the rocKE-AOT kernel families before the tests so an isolated
+    # `ninja hip_kernel_provider_tests` populates the build-tree catalog rather than
+    # running against an empty one (which would silently skip every parity test).
+    # The property is empty when rocKE is unavailable, so this is a no-op then.
+    get_property(_aot_family_targets GLOBAL PROPERTY AOT_CATALOG_FAMILY_TARGETS)
+    if(_aot_family_targets)
+        add_dependencies(hip_kernel_provider_tests ${_aot_family_targets})
+    endif()
+endif()
+
 clang_tidy_check(hip_kernel_provider_tests)
 
 add_unit_test_target(hip_kernel_provider_tests ${CMAKE_CURRENT_BINARY_DIR})

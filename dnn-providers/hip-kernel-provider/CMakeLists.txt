@@ -49,6 +49,7 @@ option(HIPKERNELPROVIDER_ENABLE_TESTS "Build tests" ON)
 option(HIPKERNELPROVIDER_ENABLE_ROCKE "Build rocKE engine and smoke tests" OFF)
 option(ENABLE_ASM_SDPA_ENGINE "Build the ASM SDPA engine" ON)
 option(ENABLE_HIP_MLOPS_ENGINE "Build the HIP kernel engine" ON)
+option(ENABLE_AOT_CATALOG_ENGINE "Build the AOT catalog engine" ON)
 
 option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
 option(ENABLE_CLANG_FORMAT "Enable Clang-Format checks" ON)
@@ -75,6 +76,12 @@ if(ENABLE_HIP_MLOPS_ENGINE)
     message(STATUS "HIP kernel engine enabled")
 else()
     message(STATUS "HIP kernel engine disabled")
+endif()
+
+if(ENABLE_AOT_CATALOG_ENGINE)
+    message(STATUS "AOT catalog engine enabled")
+else()
+    message(STATUS "AOT catalog engine disabled")
 endif()
 
 list(
