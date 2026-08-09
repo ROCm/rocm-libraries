@@ -71,7 +71,11 @@ target_sources(host-validation
         BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/include"
         FILES
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/comparison.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/epilogue.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/generation.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/gemm.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/reduction.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/structured_sparsity.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/detail/comparison.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/detail/comparison_impl.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/detail/data_generation.hpp"
