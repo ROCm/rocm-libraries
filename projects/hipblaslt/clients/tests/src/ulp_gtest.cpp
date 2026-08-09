@@ -5,19 +5,110 @@
  *
  *******************************************************************************/
 
-// Host-only unit tests for the ULP (units-in-the-last-place) error helpers
-// declared in clients/common/include/ulp.hpp. These exercise the pure math /
-// dispatch logic and do not require a GPU.
+// Host-only unit tests for component-owned ULP (units-in-the-last-place)
+// arithmetic and the product-private type/layout adapter. These do not require
+// a GPU.
 
 #include <gtest/gtest.h>
 
-#include "ulp.hpp"
+#include <roc/host_validation/adapters/hipblaslt/HostComparison.hpp>
 
+#include <algorithm>
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <span>
 #include <vector>
 
 namespace
 {
+    inline int ulp_mantissa_bits(hipDataType type)
+    {
+        return roc::host_validation::ulpMantissaBits(
+            roc::host_validation::hipblaslt_adapter::scalarType(type));
+    }
+
+    template <typename T>
+    inline double ulp_as_double(T value)
+    {
+        return static_cast<double>(value);
+    }
+
+    inline double ulp_distance(double exact, double approximation, int mantissaBits)
+    {
+        return roc::host_validation::ulpDistance(exact, approximation, mantissaBits);
+    }
+
+    template <typename T>
+    inline void ulp_accumulate_general(int64_t M,
+                                       int64_t N,
+                                       int64_t lda,
+                                       int64_t stride,
+                                       T*      hCPU,
+                                       T*      hGPU,
+                                       int64_t batchCount,
+                                       int,
+                                       double& maxUlp,
+                                       double& sumUlp,
+                                       size_t& count)
+    {
+        if(M == 0 || N == 0 || batchCount == 0)
+            return;
+
+        using namespace roc::host_validation;
+        using namespace roc::host_validation::hipblaslt_adapter;
+
+        const Layout      layout          = comparisonLayout(M, N, lda, stride, batchCount);
+        const size_t      storageElements = comparisonStorageElements(layout);
+        ComparisonOptions options;
+        options.pointwise                  = false;
+        options.computePointwiseStatistics = false;
+        options.computeFrobenius           = false;
+        options.computeUlp                 = true;
+        options.ulpType                    = scalarType<T>();
+        options.maxReportedMismatches      = 0;
+        options.selection.indexOrder       = ComparisonIndexOrder::FirstDimensionFastest;
+
+        const ComparisonResult report = compare(std::span<const T>(hGPU, storageElements),
+                                                layout,
+                                                std::span<const T>(hCPU, storageElements),
+                                                layout,
+                                                options);
+        maxUlp                        = std::max(maxUlp, report.maximumUlp);
+        sumUlp += report.sumUlp;
+        count += report.ulpCompared;
+    }
+
+    inline void ulp_check_general(int64_t     M,
+                                  int64_t     N,
+                                  int64_t     lda,
+                                  int64_t     stride,
+                                  void*       hCPU,
+                                  void*       hGPU,
+                                  int64_t     batchCount,
+                                  double&     maxUlp,
+                                  double&     sumUlp,
+                                  size_t&     count,
+                                  hipDataType type)
+    {
+        using namespace roc::host_validation::hipblaslt_adapter;
+
+        HostComparisonRequest request;
+        request.rows                    = M;
+        request.columns                 = N;
+        request.leadingDimension        = lda;
+        request.batchStride             = stride;
+        request.batchCount              = batchCount;
+        request.expected                = hCPU;
+        request.observed                = hGPU;
+        request.type                    = type;
+        request.computeUnitsInLastPlace = true;
+        const auto report = compareHost(request).unitsInLastPlaceComparison;
+        maxUlp            = std::max(maxUlp, report.maximumUlp);
+        sumUlp += report.sumUlp;
+        count += report.ulpCompared;
+    }
+
     // 2^exp as a double, for building exact ULP steps.
     inline double p2(int exp)
     {

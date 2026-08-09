@@ -44,7 +44,6 @@
 #include "tensile_host.hpp"
 #include "utility.hpp"
 #endif
-#include "unit.hpp"
 #include "utility.hpp"
 #include <limits>
 

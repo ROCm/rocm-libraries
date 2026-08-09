@@ -3,8 +3,10 @@
 
 from __future__ import annotations
 
+import gc
 import math
 import unittest
+import weakref
 
 import numpy as np
 
@@ -171,6 +173,134 @@ class TensorAndGemmTests(unittest.TestCase):
         self.assertEqual(tensor.type, hv.ScalarType.Float32)
         self.assertEqual(tensor.shape, [3, 4])
         np.testing.assert_array_equal(hv.to_numpy(tensor), values)
+
+    def test_numpy_tensor_view_positive_stride_and_gaps(self):
+        storage = np.asarray(
+            [
+                1.0,
+                np.inf,
+                2.0,
+                np.inf,
+                3.0,
+                4.0,
+                np.inf,
+                5.0,
+                np.inf,
+                6.0,
+            ],
+            dtype=np.float32,
+        )
+        values = storage.reshape(2, 5)[:, ::2]
+        view = hv.TensorView.from_numpy(values)
+        expected = hv.from_numpy(
+            np.asarray([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=np.float32)
+        ).view()
+
+        self.assertEqual(view.type, hv.ScalarType.Float32)
+        self.assertEqual(view.shape, [2, 3])
+        self.assertEqual(view.strides, [5, 2])
+        self.assertEqual(view.offset, 0)
+        self.assertEqual(len(view.storage), storage.nbytes)
+        np.testing.assert_array_equal(hv.to_numpy(view), values)
+        self.assertTrue(hv.compare(view, expected).passed)
+
+        tolerance = hv.find_allclose_tolerance(
+            view, expected, [0.0], [0.0]
+        )
+        self.assertIsNotNone(tolerance)
+        self.assertEqual(tolerance.absolute, 0.0)
+        self.assertTrue(
+            hv.check_unused_tensor_storage(
+                view, allocated_elements=storage.size
+            ).passed
+        )
+
+    def test_numpy_tensor_view_negative_strides(self):
+        values = np.arange(24, dtype=np.float32).reshape(4, 6)[
+            ::-1, ::-2
+        ]
+        view = hv.TensorView.from_numpy(values)
+
+        self.assertEqual(view.shape, [4, 3])
+        self.assertEqual(view.strides, [-6, -2])
+        self.assertEqual(view.offset, 22)
+        self.assertEqual(len(view.storage), 23 * values.itemsize)
+        np.testing.assert_array_equal(hv.to_numpy(view), values)
+        self.assertTrue(
+            hv.compare(view, hv.from_numpy(values).view()).passed
+        )
+
+    def test_numpy_tensor_view_observes_mutation(self):
+        values = np.arange(6, dtype=np.float32).reshape(2, 3)
+        view = hv.TensorView.from_numpy(values)
+        expected = hv.from_numpy(values.copy()).view()
+        self.assertTrue(hv.compare(view, expected).passed)
+
+        values[1, 2] = -17.0
+        np.testing.assert_array_equal(hv.to_numpy(view), values)
+        self.assertFalse(hv.compare(view, expected).passed)
+
+    def test_numpy_tensor_view_retains_owner(self):
+        values = np.arange(6, dtype=np.float64)
+        owner = weakref.ref(values)
+        view = hv.TensorView.from_numpy(values)
+
+        del values
+        gc.collect()
+        self.assertIsNotNone(owner())
+        np.testing.assert_array_equal(
+            hv.to_numpy(view), np.arange(6, dtype=np.float64)
+        )
+
+        del view
+        gc.collect()
+        self.assertIsNone(owner())
+
+    def test_owning_tensor_view_retains_tensor(self):
+        tensor = hv.from_numpy(np.arange(6, dtype=np.float32))
+        view = tensor.view()
+
+        del tensor
+        gc.collect()
+        np.testing.assert_array_equal(
+            hv.to_numpy(view), np.arange(6, dtype=np.float32)
+        )
+
+    def test_numpy_tensor_view_accepts_read_only_array(self):
+        values = np.arange(6, dtype=np.int32).reshape(2, 3)
+        values.flags.writeable = False
+        view = hv.TensorView.from_numpy(values)
+
+        self.assertEqual(view.type, hv.ScalarType.Int32)
+        np.testing.assert_array_equal(hv.to_numpy(view), values)
+
+    def test_numpy_tensor_view_rejects_storage_conversion(self):
+        with self.assertRaises(TypeError):
+            hv.TensorView.from_numpy([1.0, 2.0])
+        with self.assertRaises(TypeError):
+            hv.TensorView.from_numpy(
+                np.arange(4, dtype=np.dtype(">f4"))
+            )
+        with self.assertRaises(ValueError):
+            hv.TensorView.from_numpy(
+                np.arange(4, dtype=np.float64),
+                hv.ScalarType.Float32,
+            )
+        with self.assertRaises(ValueError):
+            hv.TensorView.from_numpy(
+                np.arange(4, dtype=np.uint8),
+                hv.ScalarType.Float8E4M3,
+            )
+
+        byte_storage = np.arange(16, dtype=np.uint8)
+        byte_strided = np.ndarray(
+            shape=(3,),
+            dtype=np.int16,
+            buffer=byte_storage,
+            strides=(3,),
+        )
+        with self.assertRaises(ValueError):
+            hv.TensorView.from_numpy(byte_strided)
 
     def test_affine_layout_decode(self):
         storage = np.asarray(
@@ -350,6 +480,208 @@ class TensorAndGemmTests(unittest.TestCase):
         )
         self.assertFalse(sentinel_report.passed)
         self.assertEqual(sentinel_report.reported_mismatches[0].index, 2)
+
+    def test_default_comparison_policies_match_numpy(self):
+        real_values = np.asarray(
+            [
+                -5.0,
+                -4.0,
+                -3.0,
+                -2.25,
+                -2.0,
+                -1.1,
+                -1.02,
+                -1.0,
+                -0.05,
+                -0.005,
+                -0.0,
+                0.0,
+                0.005,
+                0.05,
+                1.0,
+                1.02,
+                1.1,
+                1.5,
+                2.0,
+                2.25,
+                2.5,
+                3.0,
+                4.0,
+                5.0,
+                np.inf,
+                -np.inf,
+                np.nan,
+            ],
+            dtype=np.float64,
+        )
+
+        real_types = [
+            hv.ScalarType.Float16,
+            hv.ScalarType.BFloat16,
+            hv.ScalarType.Float8E4M3,
+            hv.ScalarType.Float8E5M2,
+            hv.ScalarType.Float8E4M3Fnuz,
+            hv.ScalarType.Float8E5M2Fnuz,
+            hv.ScalarType.Float32,
+            hv.ScalarType.Float64,
+        ]
+        for scalar_type in real_types:
+            with self.subTest(scalar_type=scalar_type):
+                observed = hv.from_numpy(
+                    np.tile(real_values, real_values.size),
+                    scalar_type,
+                )
+                expected = hv.from_numpy(
+                    np.repeat(real_values, real_values.size),
+                    scalar_type,
+                )
+                observed_values = hv.to_numpy(observed, np.float64)
+                expected_values = hv.to_numpy(expected, np.float64)
+                options = hv.default_comparison_options(scalar_type)
+                options.compute_frobenius = False
+
+                with np.errstate(invalid="ignore"):
+                    difference = np.abs(observed_values - expected_values)
+                    tolerance = options.symmetric_relative_tolerance * (
+                        np.abs(observed_values)
+                        + np.abs(expected_values)
+                        + 1.0
+                    )
+                oracle = observed_values == expected_values
+                finite = np.isfinite(observed_values) & np.isfinite(
+                    expected_values
+                )
+                oracle |= finite & (difference < tolerance)
+
+                report = hv.compare(observed, expected, options)
+                self.assertEqual(
+                    report.mismatches,
+                    int(np.count_nonzero(~oracle)),
+                )
+                self.assertEqual(report.passed, bool(np.all(oracle)))
+
+        complex_values = np.asarray(
+            [
+                0.0 + 0.0j,
+                -0.0 + 0.0j,
+                1.0 + 1.0j,
+                1.0002 + 1.0002j,
+                1.001 + 1.0j,
+                1.0 + 1.001j,
+                complex(np.inf, 0.0),
+                complex(0.0, np.inf),
+                complex(np.nan, 0.0),
+                complex(0.0, np.nan),
+            ],
+            dtype=np.complex128,
+        )
+        for scalar_type in [
+            hv.ScalarType.ComplexFloat32,
+            hv.ScalarType.ComplexFloat64,
+        ]:
+            with self.subTest(scalar_type=scalar_type):
+                observed = hv.from_numpy(
+                    np.tile(complex_values, complex_values.size),
+                    scalar_type,
+                )
+                expected = hv.from_numpy(
+                    np.repeat(complex_values, complex_values.size),
+                    scalar_type,
+                )
+                observed_values = hv.to_numpy(observed, np.complex128)
+                expected_values = hv.to_numpy(expected, np.complex128)
+                options = hv.default_comparison_options(scalar_type)
+                options.compute_frobenius = False
+
+                def component_oracle(observed_component, expected_component):
+                    with np.errstate(invalid="ignore"):
+                        difference = np.abs(
+                            observed_component - expected_component
+                        )
+                        tolerance = (
+                            options.symmetric_relative_tolerance
+                            * (
+                                np.abs(observed_component)
+                                + np.abs(expected_component)
+                                + 1.0
+                            )
+                        )
+                    result = observed_component == expected_component
+                    finite = np.isfinite(observed_component) & np.isfinite(
+                        expected_component
+                    )
+                    return result | (finite & (difference < tolerance))
+
+                oracle = component_oracle(
+                    observed_values.real, expected_values.real
+                ) & component_oracle(
+                    observed_values.imag, expected_values.imag
+                )
+                report = hv.compare(observed, expected, options)
+                self.assertEqual(
+                    report.mismatches,
+                    int(np.count_nonzero(~oracle)),
+                )
+
+        for dtype, scalar_type in [
+            (np.int8, hv.ScalarType.Int8),
+            (np.int32, hv.ScalarType.Int32),
+            (np.uint32, hv.ScalarType.UInt32),
+        ]:
+            observed_values = np.asarray([0, 1, 2, 3], dtype=dtype)
+            expected_values = np.asarray([0, 1, 7, 3], dtype=dtype)
+            report = hv.compare(
+                hv.from_numpy(observed_values, scalar_type),
+                hv.from_numpy(expected_values, scalar_type),
+                hv.default_comparison_options(scalar_type),
+            )
+            self.assertEqual(
+                report.mismatches,
+                int(np.count_nonzero(observed_values != expected_values)),
+            )
+
+    def test_explicit_tolerance_strict_boundary(self):
+        observed = hv.from_numpy(
+            np.asarray([1.02, 0.0], dtype=np.float32)
+        )
+        expected = hv.from_numpy(
+            np.asarray([1.0, 1.0], dtype=np.float32)
+        )
+
+        defaults = hv.default_comparison_options(hv.ScalarType.Float32)
+        defaults.compute_frobenius = False
+        self.assertEqual(hv.compare(observed, expected, defaults).mismatches, 2)
+
+        overridden = hv.default_comparison_options(
+            hv.ScalarType.Float32, 0.01
+        )
+        overridden.compute_frobenius = False
+        self.assertEqual(
+            hv.compare(observed, expected, overridden).mismatches,
+            1,
+        )
+
+        exact_boundary = hv.default_comparison_options(
+            hv.ScalarType.Float32, 0.5
+        )
+        exact_boundary.compute_frobenius = False
+        boundary_observed = hv.from_numpy(
+            np.asarray([0.0], dtype=np.float32)
+        )
+        boundary_expected = hv.from_numpy(
+            np.asarray([1.0], dtype=np.float32)
+        )
+        self.assertFalse(
+            hv.compare(
+                boundary_observed, boundary_expected, exact_boundary
+            ).passed
+        )
+        exact_boundary.strict_tolerance = False
+        self.assertTrue(
+            hv.compare(
+                boundary_observed, boundary_expected, exact_boundary
+            ).passed
+        )
 
     def test_indexed_generation_matches_numpy(self):
         options = hv.GenerationOptions()
