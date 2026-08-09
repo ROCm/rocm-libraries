@@ -35,7 +35,6 @@
 #include "hipblaslt_vector.hpp"
 #include "near.hpp"
 #include "norm.hpp"
-#include "unit.hpp"
 #include "utility.hpp"
 #include <cmath>
 #include <hipblaslt/hipblaslt-ext.hpp>

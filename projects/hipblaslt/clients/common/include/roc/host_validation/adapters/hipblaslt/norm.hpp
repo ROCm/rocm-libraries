@@ -3,67 +3,10 @@
 
 #pragma once
 
-// Product-private hipBLASLt descriptor and tolerance-policy adapter.
-// Frobenius evidence is computed by roc::host-validation.
+// Product-private hipBLASLt Frobenius acceptance policy.
 
 #include <algorithm>
-#include <cmath>
-#include <cstddef>
-#include <cstdint>
-#include <roc/host_validation/adapters/hipblaslt/Comparison.hpp>
-#include <stdexcept>
-
-inline double norm_check_general(char        normType,
-                                 int64_t     M,
-                                 int64_t     N,
-                                 int64_t     lda,
-                                 int64_t     stride,
-                                 void*       hCPU,
-                                 void*       hGPU,
-                                 int64_t     batchCount,
-                                 hipDataType type)
-{
-    if(M == 0 || N == 0 || batchCount == 0)
-        return 0.0;
-    if(normType != 'F' && normType != 'f')
-        throw std::invalid_argument(
-            "The consolidated host comparison currently exposes Frobenius norm evidence.");
-
-    using namespace roc::host_validation;
-    using namespace roc::host_validation::hipblaslt_adapter;
-
-    const ScalarType scalar      = scalarType(type);
-    const size_t     storageBits = scalarTypeInfo(scalar).storageBits;
-    if(storageBits % 8 != 0)
-        throw std::invalid_argument(
-            "hipBLASLt norm comparison requires byte-addressable output storage.");
-    const size_t elementBytes = storageBits / 8;
-
-    ComparisonOptions options;
-    options.pointwise                  = false;
-    options.equalNaNs                  = true;
-    options.computePointwiseStatistics = false;
-    options.computeFrobenius           = true;
-    options.maxReportedMismatches      = 0;
-
-    double cumulativeError = 0.0;
-    for(int64_t batch = 0; batch < batchCount; ++batch)
-    {
-        const size_t           byteOffset = static_cast<size_t>(batch * stride) * elementBytes;
-        const auto*            expected   = static_cast<const std::byte*>(hCPU) + byteOffset;
-        const auto*            observed   = static_cast<const std::byte*>(hGPU) + byteOffset;
-        const ComparisonResult report
-            = compareBuffers(M, N, lda, 0, expected, observed, 1, type, options);
-        cumulativeError += report.relativeFrobeniusError;
-    }
-    return cumulativeError;
-}
-
-inline double norm_check_general(
-    char normType, int64_t M, int64_t N, int64_t lda, void* hCPU, void* hGPU, hipDataType type)
-{
-    return norm_check_general(normType, M, N, lda, 0, hCPU, hGPU, 1, type);
-}
+#include <roc/host_validation/adapters/hipblaslt/Types.hpp>
 
 // These are product-level acceptance policies, not numerical mechanics.
 // Problem/architecture-specific callers may widen them.
