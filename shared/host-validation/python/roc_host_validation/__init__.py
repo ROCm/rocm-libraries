@@ -92,3 +92,9 @@ def to_numpy(tensor, dtype=None) -> np.ndarray:
     if dtype is None:
         dtype = _NUMPY_DTYPES[tensor.type]
     return np.asarray(tensor.values, dtype=dtype).reshape(tensor.shape)
+
+
+def reference_gemm(*args, **kwargs):
+    """Run reference GEMM and return only its owning output tensor."""
+
+    return reference_gemm_result(*args, **kwargs).output  # noqa: F405
