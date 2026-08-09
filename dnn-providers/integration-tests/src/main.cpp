@@ -25,6 +25,8 @@
 #include "harness/SupportMatrixCollector.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/bundle/BundleRegistration.hpp"
+#include "harness/bundle/LoadedEngineTable.hpp"
+#include "harness/bundle/SupportClaimReport.hpp"
 #include "harness/bundle/UnverifiableBundleReport.hpp"
 
 namespace
@@ -115,6 +117,12 @@ int main(int argc, char** argv) noexcept
         parser.add_argument("--capture-bundles")
             .help("Capture C++ graph tests as JSON bundles into the given directory. "
                   "Each test writes a {suite}/{case}/{case}.json + .meta.json pair.");
+        parser.add_argument("--enforce-support-claims")
+            .default_value(false)
+            .implicit_value(true)
+            .help("Enforce engine support claims from .support.json sidecars. "
+                  "A broken claim (engine no longer supports a claimed graph) becomes "
+                  "a test FAIL instead of a silent SKIP.");
 
         std::vector<std::string> remainingArgs;
         try
@@ -266,6 +274,7 @@ int main(int argc, char** argv) noexcept
         opts.goldenDataDir = std::move(goldenDataDir);
         opts.verificationMode = verificationMode;
         opts.captureDir = std::move(captureDir);
+        opts.enforceSupportClaims = parser.get<bool>("--enforce-support-claims");
         hipdnn_integration_tests::TestConfig::initialize(std::move(opts));
 
         // Reconstruct argc/argv for GTest from remaining (unknown) args.
@@ -342,6 +351,8 @@ int main(int argc, char** argv) noexcept
                 std::move(engineNamesById));
         }
 
+        hipdnn_integration_tests::bundle::LoadedEngineTable::get().build(handle);
+
         hipdnn_integration_tests::bundle::registerBundleTests();
 
         const int result = RUN_ALL_TESTS();
@@ -349,6 +360,29 @@ int main(int argc, char** argv) noexcept
         // Print bundles that ended without a verdict (no oracle / reference bug).
         // Informational only — these SKIP, so they do not affect `result`.
         hipdnn_integration_tests::bundle::UnverifiableBundleReport::get().print();
+        hipdnn_integration_tests::bundle::SupportClaimReport::get().print();
+
+        int exitCode = result;
+
+        if(hipdnn_integration_tests::TestConfig::get().enforceSupportClaims()
+           && hipdnn_integration_tests::bundle::SupportClaimReport::get()
+                  .claimsFoundButNoneQueried())
+        {
+            std::cerr
+                << "\nFATAL: --enforce-support-claims is active and "
+                << hipdnn_integration_tests::bundle::SupportClaimReport::get()
+                       .getGraphsWithClaimsFound()
+                << " graph(s) carrying support\n"
+                   "       claims were discovered, but not one of them was ever queried. "
+                   "Enforcement\n"
+                   "       passed having verified nothing, so the run fails instead. Usual "
+                   "causes:\n"
+                   "         - no --test-engine was given, so there is no engine to check claims "
+                   "against\n"
+                   "         - the GPU or the engine plugin failed to load\n"
+                   "         - a --gtest_filter selected only graphs without claims\n";
+            exitCode = 1;
+        }
 
         // Guard against a silently empty run: bundles are enabled, yet nothing
         // was selected. This must be checked *after* RUN_ALL_TESTS(). GTest only
@@ -434,7 +468,7 @@ int main(int argc, char** argv) noexcept
         // Clean up shared handle and stream
         static_cast<void>(hipStreamDestroy(stream));
         hipdnnDestroy(handle);
-        return result;
+        return exitCode;
     }
     catch(const std::exception& e)
     {

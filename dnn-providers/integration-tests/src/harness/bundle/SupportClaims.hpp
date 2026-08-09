@@ -98,8 +98,8 @@ std::filesystem::path supportJsonPath(const std::filesystem::path& bundleJsonPat
 /// Load single-graph support claims from the {Name}.support.json companion of
 /// `bundleJsonPath`.
 ///
-/// Returns std::nullopt when the file does not exist — this is the normal,
-/// "not gated" case (RFC 0015 §5.3). If the file exists but is unparseable or
+/// Returns std::nullopt when the file does not exist — the normal "no sidecar,
+/// nothing claimed" case (RFC 0015 §5.3). If the file exists but is unparseable or
 /// fails validation, the parse error propagates as a thrown
 /// std::runtime_error: a checked-in support.json is machine-owned, so a
 /// broken one must fail the run rather than silently degrade.

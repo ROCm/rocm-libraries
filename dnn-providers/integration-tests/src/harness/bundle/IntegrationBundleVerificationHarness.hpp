@@ -19,6 +19,7 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include "harness/BundleMetadata.hpp"
 #include "harness/IReferenceGraphExecutor.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/TomlGuards.hpp"
@@ -177,6 +178,11 @@ private:
 
     // ── top-level dispatch ────────────────────────────────────────────────
     void runComparison();
+
+    // RFC 0015 §6 enforcement ladder: runs APPLICABILITY or BUILDABLE checks
+    // without allocating tensors or executing. Called from runComparison()
+    // when enforcement is active and the level is not FULL.
+    void enforceAtLevel(EnforcementLevel level);
     void runGoldenMode();
     void runExplicitRefMode(ReferenceExecutorType type);
     void runAutoMode();

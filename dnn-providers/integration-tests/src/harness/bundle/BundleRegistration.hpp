@@ -19,6 +19,8 @@
 #include "harness/TestConfig.hpp"
 #include "harness/bundle/BundleDiscovery.hpp"
 #include "harness/bundle/IntegrationBundleVerificationHarness.hpp"
+#include "harness/bundle/SupportClaimReport.hpp"
+#include "harness/bundle/SupportClaims.hpp"
 
 namespace hipdnn_integration_tests::bundle
 {
@@ -35,6 +37,7 @@ struct LoadedBundle
     std::string suiteName;
     std::string testName;
     std::shared_ptr<IntegrationTestBundle> bundle;
+    SupportClaimLocator claimLocator;
 };
 
 // A GTest test body that immediately fails with a stored diagnostic message.
@@ -136,11 +139,24 @@ inline LoadOutcome classifyBundle(const DiscoveredBundle& disc)
         return SkippedLoad{"Skipping bundle " + diagnosticPath.string() + ": " + toString(*error)};
     }
 
+    SupportClaimLocator locator;
+    locator.diagnosticPath = diagnosticPath.string();
+    if(disc.isTemplateSweepCase())
+    {
+        locator.sidecarPath = disc.jsonPath.parent_path() / "support.json";
+        locator.caseId      = disc.sweep->caseId;
+    }
+    else
+    {
+        locator.sidecarPath = supportJsonPath(diagnosticPath);
+    }
+
     return LoadedBundle{diagnosticPath,
                         disc.suiteName,
                         disc.testName,
                         std::make_shared<IntegrationTestBundle>(
-                            std::move(std::get<IntegrationTestBundle>(loadResult)))};
+                            std::move(std::get<IntegrationTestBundle>(loadResult))),
+                        locator};
 }
 
 // Registers one GTest test per preloaded bundle, run by the Engine executor.
@@ -165,10 +181,12 @@ inline void registerBundles(const std::vector<LoadedBundle>& bundles)
             nullptr,
             __FILE__,
             __LINE__,
-            [loaded = bundle.bundle, path = bundle.jsonPath]() -> ::testing::Test* {
+            [loaded = bundle.bundle,
+             path = bundle.jsonPath,
+             locator = bundle.claimLocator]() -> ::testing::Test* {
                 auto* test = new IntegrationBundleVerificationHarness(
                     /*requiresDevice=*/true);
-                test->setBundle(loaded, path);
+                test->setBundle(loaded, path, locator);
                 return test;
             });
     }
@@ -240,7 +258,17 @@ inline void registerBundleTests()
     bundles.reserve(discovered.size());
     for(const auto& disc : discovered)
     {
+        const auto sidecarPath = disc.isTemplateSweepCase()
+                                     ? disc.jsonPath.parent_path() / "support.json"
+                                     : supportJsonPath(disc.diagnosticPath());
+        SupportClaimReport::get().recordGraphFound();
+        if(std::filesystem::exists(sidecarPath))
+        {
+            SupportClaimReport::get().recordGraphWithClaims();
+        }
+
         auto outcome = detail::classifyBundle(disc);
+
         if(auto* failed = std::get_if<detail::FailedLoad>(&outcome))
         {
             HIPDNN_PLUGIN_LOG_ERROR(failed->message);

@@ -39,6 +39,8 @@
 #include "harness/SupportMatrixCollector.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/TomlGuards.hpp"
+#include "harness/bundle/SupportClaimReport.hpp"
+#include "harness/bundle/SupportVerdict.hpp"
 #include "harness/input-init/FillInputs.hpp"
 #include "harness/input-init/InputFillRecipes.hpp"
 #include "harness/tolerance/ToleranceResolver.hpp"
@@ -88,7 +90,25 @@ inline void checkEngineSupportOrSkip(hipdnn_frontend::graph::Graph& graph,
 
     if(TestConfig::get().hasEngineName())
     {
-        int64_t targetEngineId = TestConfig::get().getEngineId();
+        const int64_t targetEngineId = TestConfig::get().getEngineId();
+
+        // Graph tests have no sidecar — the empty path means the verdict is always
+        // NO_SIDECAR today, so nothing is recorded and nothing can fail here. This
+        // is a forward-looking seam: when graph tests gain sidecars, pass the path
+        // and enforcement activates with no other change.
+        const auto verdict = bundle::checkSupportClaim(
+            status.get_code(), engineIds, targetEngineId, /*bundlePath=*/{}, status.get_message());
+        if(verdict.verdict != bundle::SupportVerdict::NO_SIDECAR)
+        {
+            bundle::SupportClaimReport::get().record(verdict);
+        }
+
+        if(bundle::isFailure(verdict.verdict))
+        {
+            FAIL() << bundle::formatVerdictMessage(verdict);
+            return;
+        }
+
         if(status.is_bad()
            || std::find(engineIds.begin(), engineIds.end(), targetEngineId) == engineIds.end())
         {

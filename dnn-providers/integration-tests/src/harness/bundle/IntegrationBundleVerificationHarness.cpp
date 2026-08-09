@@ -25,6 +25,9 @@
 #include "harness/SharedHandle.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/TomlGuards.hpp"
+#include "harness/bundle/LoadedEngineTable.hpp"
+#include "harness/bundle/SupportClaimReport.hpp"
+#include "harness/bundle/SupportVerdict.hpp"
 #include "harness/bundle/UnverifiableBundleReport.hpp"
 #include "harness/gpu-graph-executor/GpuReferenceGraphExecutor.hpp"
 #include "harness/input-init/FillInputs.hpp"
@@ -55,9 +58,29 @@ void IntegrationBundleVerificationHarness::executeGraphThroughEngine(
                + std::to_string(engineIds.size()) + " ranked engine(s)";
     };
 
+    const auto allVerdicts = checkAllSupportClaims(status.get_code(),
+                                                   engineIds,
+                                                   _bundlePath,
+                                                   LoadedEngineTable::get().all(),
+                                                   status.get_message());
+    if(!allVerdicts.empty())
+    {
+        SupportClaimReport::get().recordGraphQueried();
+    }
+    for(const auto& v : allVerdicts)
+    {
+        SupportClaimReport::get().record(v);
+        if(isFailure(v.verdict))
+        {
+            FAIL() << formatVerdictMessage(v);
+            return;
+        }
+    }
+
     if(TestConfig::get().hasEngineName())
     {
-        int64_t targetEngineId = TestConfig::get().getEngineId();
+        const int64_t targetEngineId = TestConfig::get().getEngineId();
+
         if(status.is_bad()
            || std::find(engineIds.begin(), engineIds.end(), targetEngineId) == engineIds.end())
         {
@@ -125,8 +148,92 @@ VerificationMode IntegrationBundleVerificationHarness::getVerificationMode() con
     return TestConfig::get().getVerificationMode();
 }
 
+void IntegrationBundleVerificationHarness::enforceAtLevel(EnforcementLevel level)
+{
+    ASSERT_NE(level, EnforcementLevel::FULL)
+        << "enforceAtLevel() handles APPLICABILITY/BUILDABLE only; FULL uses the normal path";
+
+    auto handle = getSharedHandle();
+
+    const std::vector<uint8_t> graphBytes(
+        _bundle->graphBuffer.data(), _bundle->graphBuffer.data() + _bundle->graphBuffer.size());
+
+    hipdnn_frontend::graph::Graph graph;
+    auto err = graph.from_binary(handle, graphBytes);
+    ASSERT_TRUE(err.is_good()) << "from_binary failed: " << err.get_message();
+
+    std::vector<int64_t> engineIds;
+    auto status = graph.get_ranked_engine_ids(engineIds);
+
+    if(!TestConfig::get().hasEngineName())
+    {
+        skipUnverifiable("enforcement requires --test-engine");
+        return;
+    }
+
+    const auto allVerdicts = checkAllSupportClaims(status.get_code(),
+                                                   engineIds,
+                                                   _bundlePath,
+                                                   LoadedEngineTable::get().all(),
+                                                   status.get_message());
+    if(!allVerdicts.empty())
+    {
+        SupportClaimReport::get().recordGraphQueried();
+    }
+
+    const std::string rung
+        = level == EnforcementLevel::APPLICABILITY ? "applicability" : "buildable";
+
+    for(const auto& v : allVerdicts)
+    {
+        SupportClaimReport::get().record(v);
+        if(isFailure(v.verdict))
+        {
+            FAIL() << "[rung=" << rung << "] " << formatVerdictMessage(v);
+            return;
+        }
+    }
+
+    if(allVerdicts.empty())
+    {
+        skipUnverifiable("enforcement_level=" + rung
+                         + " but no support claims found for loaded engines");
+        return;
+    }
+
+    const int64_t targetEngineId = TestConfig::get().getEngineId();
+
+    if(status.is_bad()
+       || std::find(engineIds.begin(), engineIds.end(), targetEngineId) == engineIds.end())
+    {
+        throw EngineNotApplicableError("Engine " + std::string(TestConfig::get().getEngineName())
+                                       + " does not support this graph");
+    }
+
+    if(level == EnforcementLevel::APPLICABILITY)
+    {
+        return;
+    }
+
+    // BUILDABLE: additionally compile plans
+    graph.set_preferred_engine_id_ext(targetEngineId);
+    auto result = graph.create_execution_plans();
+    ASSERT_TRUE(result.is_good()) << "[rung=buildable] " << result.get_message();
+    result = graph.check_support();
+    ASSERT_TRUE(result.is_good()) << "[rung=buildable] " << result.get_message();
+    result = graph.build_plans();
+    ASSERT_TRUE(result.is_good()) << "[rung=buildable] " << result.get_message();
+}
+
 void IntegrationBundleVerificationHarness::runComparison()
 {
+    if(TestConfig::get().enforceSupportClaims()
+       && _bundle->metadata.enforcementLevel != EnforcementLevel::FULL)
+    {
+        enforceAtLevel(_bundle->metadata.enforcementLevel);
+        return;
+    }
+
     if(_bundle->outputTensorUids.empty())
     {
         skipUnverifiable("bundle has no output tensors to compare");
