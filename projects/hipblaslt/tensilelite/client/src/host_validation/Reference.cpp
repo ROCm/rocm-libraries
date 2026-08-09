@@ -643,19 +643,18 @@ namespace TensileLite
                 if(!globalSelection.selectsAll())
                     runtimeProblem.outputSelection
                         = OutputSelection::explicitIndices(selectedByBatch[batch]);
+                GemmInvocation invocation(std::move(runtimeProblem));
                 if (backendImplementation != nullptr) {
                     const GemmBackend backend = backendImplementation->backend();
-                    const GemmSupportInfo support =
-                        queryGemmSupport(runtimeProblem, backend, backendImplementation);
+                    invocation.execution = {
+                        .backend = backend,
+                        .requireRequestedBackend = true,
+                        .backendImplementation = backendImplementation,
+                    };
+                    const GemmSupportInfo support = queryGemmSupport(invocation);
                     if (!support) return false;
-                    referenceGemm(runtimeProblem, {
-                                                      .backend = backend,
-                                                      .requireRequestedBackend = true,
-                                                      .backendImplementation = backendImplementation,
-                                                  });
-                } else {
-                    referenceGemm(runtimeProblem);
                 }
+                referenceGemm(invocation);
 
                 if (useStandaloneEpilogue) {
                     EpilogueProblem epilogue(
@@ -665,7 +664,7 @@ namespace TensileLite
                     epilogue.activationParameter0 = activationParameter0;
                     epilogue.activationParameter1 = activationParameter1;
                     epilogue.outputScale = outputScale;
-                    epilogue.outputSelection = runtimeProblem.outputSelection;
+                    epilogue.outputSelection = invocation.problem.outputSelection;
                     std::optional<Tensor> gradientAuxiliary;
                     std::optional<Tensor> biasWorkspace;
                     if (problem.useGradient() && problem.useBias() &&
