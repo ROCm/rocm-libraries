@@ -7,7 +7,6 @@
 #include <roc/host_validation/adapters/hipblaslt/HipblasltDataInitialization.hpp>
 
 #include <algorithm>
-#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -228,24 +227,13 @@ namespace roc::host_validation::hipblaslt_adapter
                                                   ? requestedSpecialType
                                                   : int(state >> 16) % 3;
 
-            std::array<size_t, 3> indices{};
-            size_t                remainder = specialLinearIndex;
-            for(size_t dimension = 0; dimension < indices.size(); ++dimension)
-            {
-                indices[dimension] = remainder % view.shape()[dimension];
-                remainder /= view.shape()[dimension];
-            }
-
             GenerationOptions special;
             special.real.pattern = specialType == 0   ? GenerationPattern::TypeInfinity
                                    : specialType == 1 ? GenerationPattern::TypeNegativeInfinity
                                                       : GenerationPattern::TypeNaN;
             if(scalarTypeInfo(view.type()).category == ScalarCategory::Complex)
                 special.imaginary = special.real;
-
-            const ptrdiff_t offset = view.layout().elementOffset(indices);
-            generate(MutableTensorView(view.type(), Layout(Shape{1}, {1}, offset), view.storage()),
-                     special);
+            generateAt(view, specialLinearIndex, special);
         }
     } // namespace
 
