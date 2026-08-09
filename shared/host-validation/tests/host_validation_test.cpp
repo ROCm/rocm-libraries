@@ -43,7 +43,10 @@ void testRuntimeReferenceGemm() {
         TensorView::fromNative<float>(Layout::contiguous(Shape{2}), std::span<const float>(scaleB));
     problem.epilogue.activation = Activation::Relu;
 
-    const GemmRunInfo run = referenceGemm(problem);
+    GemmInvocation invocation(std::move(problem));
+    require(static_cast<bool>(queryGemmSupport(invocation)),
+            "Runtime reference GEMM invocation support mismatch.");
+    const GemmResult run = referenceGemm(invocation);
     require(run.backendUsed == GemmBackend::Canonical && run.outputElementsComputed == 4,
             "Runtime reference GEMM run information mismatch.");
 
@@ -56,7 +59,10 @@ void testRuntimeReferenceGemm() {
     require(compare(std::span<const float>(d), std::span<const float>(expected)).passed(),
             "Runtime reference GEMM result mismatch.");
 
-    const GemmRunInfo fallback = referenceGemm(problem, {.backend = GemmBackend::Tiled});
+    invocation.execution.backend = GemmBackend::Tiled;
+    require(!queryGemmSupport(invocation),
+            "Runtime reference GEMM invocation unexpectedly supports a missing backend.");
+    const GemmResult fallback = referenceGemm(invocation);
     require(fallback.backendUsed == GemmBackend::Canonical && fallback.fallbackReason.has_value(),
             "Runtime reference GEMM backend fallback mismatch.");
 }
