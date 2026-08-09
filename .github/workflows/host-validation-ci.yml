@@ -68,6 +68,7 @@ jobs:
           cmake --build "${RUNNER_TEMP}/host-validation-package-test" --parallel 2
           "${RUNNER_TEMP}/host-validation-package-test/host-validation-package-test"
           "${RUNNER_TEMP}/host-validation-package-test/host-validation-operations-package-test"
+          "${RUNNER_TEMP}/host-validation-package-test/host-validation-tiled-package-test"
           "${RUNNER_TEMP}/host-validation-package-test/host-validation-blas-package-test"
           "${RUNNER_TEMP}/host-validation-package-test/host-validation-mx-package-test"
           PYTHONPATH="$(find "${RUNNER_TEMP}/host-validation-install" \
