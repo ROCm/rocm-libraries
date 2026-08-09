@@ -3329,7 +3329,7 @@ inline void testing_aux_tensile_host_func(const Arguments& arg)
                 == rocisa::DataType::Float);
     ASSERT_TRUE(rocComputeType_to_tensile_type(rocblaslt_compute_f32_fast_bf16)
                 == rocisa::DataType::Float);
-    ASSERT_TRUE(rocComputeType_to_tensile_type(rocblaslt_compute_f16) == rocisa::DataType::Float);
+    ASSERT_TRUE(rocComputeType_to_tensile_type(rocblaslt_compute_f16) == rocisa::DataType::Half);
     ASSERT_TRUE(rocComputeType_to_tensile_type(rocblaslt_compute_f16_pedantic)
                 == rocisa::DataType::Half);
     ASSERT_TRUE(rocComputeType_to_tensile_type(rocblaslt_compute_f32) == rocisa::DataType::Float);

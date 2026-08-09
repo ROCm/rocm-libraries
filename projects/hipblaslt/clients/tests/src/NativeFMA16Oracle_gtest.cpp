@@ -61,7 +61,7 @@ namespace
     };
 }
 
-TEST(FP16ReferenceContract, OrdinaryFp16UsesFp32Accumulation)
+TEST(FP16ReferenceContract, OrdinaryFp16UsesFp16Accumulation)
 {
     constexpr int64_t k = 256;
     std::vector<hipblasLtHalf> A(k, hipblasLtHalf(1.0f));
@@ -96,10 +96,10 @@ TEST(FP16ReferenceContract, OrdinaryFp16UsesFp32Accumulation)
                               HIP_R_16F,
                               HIP_R_16F);
 
-    EXPECT_EQ(static_cast<float>(output), 2304.0f);
+    EXPECT_EQ(static_cast<float>(output), 2048.0f);
 }
 
-TEST(FP16ReferenceContract, ExactFp16RequiresExplicitSignal)
+TEST(FP16ReferenceContract, ExplicitExactFp16Reference)
 {
     constexpr int64_t k = 256;
     std::vector<hipblasLtHalf> A(k, hipblasLtHalf(1.0f));

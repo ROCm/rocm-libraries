@@ -218,6 +218,27 @@ def test_lite_mac_vector_widths_are_current_and_codegen_compatible():
             )
 
 
+def test_prompt_gemm_mappings_use_tuned_solutions():
+    hhh = _load_lite(LITE_ROOT / "vega10_Cijk_Alik_Bljk_HB.yaml")
+    qk = _load_classic(CLASSIC_ROOT / "vega10_Cijk_Alik_Bljk_SB_GB.yaml")
+
+    hhh_solutions = {solution["SolutionIndex"]: solution for solution in hhh[5]}
+    assert (hhh_solutions[37]["MacroTile0"], hhh_solutions[37]["MacroTile1"]) == (64, 128)
+    assert (hhh_solutions[38]["MacroTile0"], hhh_solutions[38]["MacroTile1"]) == (128, 64)
+
+    hhh_mappings = {tuple(entry[0]): entry[1][0] for entry in hhh[7]}
+    assert hhh_mappings[(8960, 16384, 1, 1536)] == 37
+    assert hhh_mappings[(128, 16384, 12, 16384)] == 38
+
+    assert [(solution["MacroTile0"], solution["MacroTile1"], solution["DepthU"]) for solution in qk[5]] == [
+        (256, 64, 12),
+        (128, 64, 8),
+    ]
+    qk_mappings = {tuple(entry[0]): entry[1][0] for entry in qk[7]}
+    assert qk_mappings[(256, 128, 12, 128, 256, 256, 256, 1536)] == 0
+    assert qk_mappings[(16384, 16384, 12, 128, 16384, 16384, 256, 1536)] == 1
+
+
 @pytest.mark.parametrize(
     "name,counts",
     {

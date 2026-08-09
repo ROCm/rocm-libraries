@@ -1916,7 +1916,9 @@ void testing_matmul_with_bias(const Arguments& arg,
     double gpu_time_used, cpu_time_used, gpu_mem_gbytes;
     gpu_time_used = cpu_time_used = gpu_mem_gbytes = 0.0;
     const bool exactFp16Reference
-        = arg.compute_type == HIPBLAS_COMPUTE_16F_PEDANTIC && isGfx90cDevice();
+        = (arg.compute_type == HIPBLAS_COMPUTE_16F
+           || arg.compute_type == HIPBLAS_COMPUTE_16F_PEDANTIC)
+          && isGfx90cDevice();
     bool                   HMM = arg.HMM;
     hipblaslt_local_handle handle{arg};
     hipStream_t            stream;

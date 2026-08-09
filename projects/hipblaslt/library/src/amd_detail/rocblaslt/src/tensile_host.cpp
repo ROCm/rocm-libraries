@@ -571,12 +571,11 @@ namespace
         return agg;
     }
 
-    rocisa::DataType roc2TensileType(rocblaslt_compute_type type, bool fallback = true)
+    rocisa::DataType roc2TensileType(rocblaslt_compute_type type)
     {
         switch(type)
         {
-        case rocblaslt_compute_f16: // FP16 input/output with FP32 accumulation
-            return fallback ? rocisa::DataType::Float : rocisa::DataType::Half;
+        case rocblaslt_compute_f16:
         case rocblaslt_compute_f16_pedantic:
             return rocisa::DataType::Half;
         case rocblaslt_compute_f32:
@@ -1791,7 +1790,7 @@ namespace
         auto b_type       = hipDataType_to_tensile_type(prob.b_type);
         auto c_type       = hipDataType_to_tensile_type(prob.c_type);
         auto d_type       = hipDataType_to_tensile_type(prob.d_type);
-        auto compute_type = roc2TensileType(prob.compute_type, false);
+        auto compute_type = roc2TensileType(prob.compute_type);
 
         // Tensor descriptors for a, b
         TensileLite::TensorDescriptor a, b;
@@ -1814,12 +1813,6 @@ namespace
         double alpha = 0, beta = 0;
         assignAlphaBeta(compute_type, a_type, prob.alpha, prob.beta, &alpha, &beta);
         auto k = prob.k && alpha ? prob.k : 0;
-
-        // Ordinary FP16 uses FP16 input/output with FP32 accumulation (HHS_BH).
-        if(prob.compute_type == rocblaslt_compute_f16)
-        {
-            compute_type = roc2TensileType(prob.compute_type, true);
-        }
 
         // clang-format off
         // If A is transposed, swap the free and bound dimensions and their ranks
@@ -2092,7 +2085,8 @@ namespace
         // The cached default problem is created before matrix dimensions are known.
         // Reconstruct true packed-half problems so derived leading-free sizes are
         // normalized from the real descriptors before solution predicates run.
-        if(prob.compute_type == rocblaslt_compute_f16_pedantic)
+        if(prob.compute_type == rocblaslt_compute_f16
+           || prob.compute_type == rocblaslt_compute_f16_pedantic)
         {
             tensileProblem = ConstructTensileProblem(prob);
             return;
@@ -2102,7 +2096,7 @@ namespace
         auto b_type       = hipDataType_to_tensile_type(prob.b_type);
         auto c_type       = hipDataType_to_tensile_type(prob.c_type);
         auto d_type       = hipDataType_to_tensile_type(prob.d_type);
-        auto compute_type = roc2TensileType(prob.compute_type, false);
+        auto compute_type = roc2TensileType(prob.compute_type);
 
         // Tensile Indices for contraction problem
         TensileLite::ContractionProblemGemm::FreeIndices  freeIndex(2);
@@ -2185,12 +2179,6 @@ namespace
 
         double alpha = 0, beta = 0;
         assignAlphaBeta(compute_type, a_type, prob.alpha, prob.beta, &alpha, &beta);
-
-        // Keep the update path consistent with createTensileProblem above.
-        if(prob.compute_type == rocblaslt_compute_f16)
-        {
-            compute_type = roc2TensileType(prob.compute_type, true);
-        }
 
         tensileProblem.updateProblem(freeIndex, batchIndex, boundIndex, beta, prob.workspaceSize);
 
@@ -2414,7 +2402,7 @@ namespace
  ***************************************************************/
     auto GetTensileInputs(const RocblasltContractionProblem& prob)
     {
-        auto compute_type = roc2TensileType(prob.compute_type, false);
+        auto compute_type = roc2TensileType(prob.compute_type);
 
         // Structure describing the inputs (A, B, C, D, alpha, beta)
         TensileLite::ContractionInputs inputs;
