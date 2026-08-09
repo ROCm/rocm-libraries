@@ -344,6 +344,10 @@ class TensorAndGemmTests(unittest.TestCase):
             parameter1=3,
         )
         self.assertTrue(hv.compare(first, second).passed)
+        np.testing.assert_array_equal(
+            hv.to_numpy(first),
+            np.asarray([[-2.0, -1.0, -2.0], [-3.0, 0.0, 0.0]], dtype=np.float32),
+        )
 
         changed_values = hv.to_numpy(second).copy()
         changed_values[1, 2] += 1
