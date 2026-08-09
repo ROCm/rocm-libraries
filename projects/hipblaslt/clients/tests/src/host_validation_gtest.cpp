@@ -183,6 +183,47 @@ TEST(HostValidationDataInitializationBridge, CounterBasedGenerationIsRepeatable)
     EXPECT_EQ(first, second);
 }
 
+TEST(HostValidationDataInitializationBridge, DeviceNormalGenerationIsRepeatable)
+{
+    constexpr size_t elements = 16;
+    void*            firstDevice{};
+    void*            secondDevice{};
+    ASSERT_EQ(hipMalloc(&firstDevice, elements * sizeof(float)), hipSuccess);
+    ASSERT_EQ(hipMalloc(&secondDevice, elements * sizeof(float)), hipSuccess);
+
+    auto initializeDevice = [](void* device) {
+        hipblaslt_init_device(ABC_dims::A,
+                              hipblaslt_initialization::norm_dist,
+                              false,
+                              device,
+                              4,
+                              4,
+                              4,
+                              HIP_R_32F,
+                              16,
+                              1);
+    };
+    initializeDevice(firstDevice);
+    initializeDevice(secondDevice);
+
+    std::array<float, elements> first{};
+    std::array<float, elements> second{};
+    EXPECT_EQ(hipMemcpy(first.data(),
+                        firstDevice,
+                        first.size() * sizeof(float),
+                        hipMemcpyDeviceToHost),
+              hipSuccess);
+    EXPECT_EQ(hipMemcpy(second.data(),
+                        secondDevice,
+                        second.size() * sizeof(float),
+                        hipMemcpyDeviceToHost),
+              hipSuccess);
+    EXPECT_EQ(first, second);
+
+    EXPECT_EQ(hipFree(firstDevice), hipSuccess);
+    EXPECT_EQ(hipFree(secondDevice), hipSuccess);
+}
+
 TEST(HostValidationDataInitializationBridge, LegacyHostEntryPointsUseTensorLayouts)
 {
     using Complex = std::complex<float>;

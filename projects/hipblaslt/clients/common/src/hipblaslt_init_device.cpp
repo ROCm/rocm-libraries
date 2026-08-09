@@ -972,10 +972,9 @@ void hipblaslt_init_device(ABC_dims                 abc,
             break;
         case hipblaslt_initialization::norm_dist:
             {
-                std::random_device rd;
-                auto base_seed = rd(); // Get a random seed for each run
-                fill_batch(A, M, N, lda, stride, batch_count, [base_seed] __host__ __device__ (size_t idx) -> T {
-                               return norm_dist<T>(base_seed, idx);
+                constexpr uint32_t kNormDistSeed = 69069u;
+                fill_batch(A, M, N, lda, stride, batch_count, [kNormDistSeed] __host__ __device__ (size_t idx) -> T {
+                               return norm_dist<T>(kNormDistSeed, idx);
                            });
                 break;
             }
