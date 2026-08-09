@@ -48,6 +48,7 @@ enum class GenerationPattern {
     AbsoluteCosine,
     SerialIndex,
     SerialDimension,
+    AffineIndexRemainder,
     Identity,
     CheckerboardUniformInteger,
     TypeMaximum,
@@ -88,6 +89,9 @@ struct GenerationPatternSpec {
     size_t dimension = 0;
     ScalarType sourceType = ScalarType::Count;
     GenerationTransform transform = GenerationTransform::None;
+    std::vector<int64_t> dimensionCoefficients;
+    int64_t affineOffset = 0;
+    int64_t remainderDivisor = 1;
     std::vector<double> candidates;
     std::vector<size_t> alternatingDimensions;
     size_t negativeParity = 0;
@@ -452,6 +456,44 @@ inline double baseGenerationValue(const GenerationPatternSpec& spec, uint64_t se
             if (spec.dimension >= shape.rank())
                 throw std::out_of_range("Generation dimension exceeds tensor rank.");
             return static_cast<double>(indices[spec.dimension]);
+        case GenerationPattern::AffineIndexRemainder: {
+            if (spec.dimensionCoefficients.size() != shape.rank())
+                throw std::invalid_argument(
+                    "Affine-index coefficient count must match the tensor rank.");
+            if (spec.remainderDivisor <= 0)
+                throw std::invalid_argument("Affine-index remainder divisor must be positive.");
+
+            int64_t value = spec.affineOffset;
+            for (size_t dimension = 0; dimension < shape.rank(); ++dimension) {
+                const int64_t coefficient = spec.dimensionCoefficients[dimension];
+                if (indices[dimension] > static_cast<size_t>(std::numeric_limits<int64_t>::max()))
+                    throw std::overflow_error("Affine-index coordinate exceeds Int64.");
+                const int64_t index = static_cast<int64_t>(indices[dimension]);
+                int64_t term = 0;
+                if (coefficient > 0) {
+                    if (index > std::numeric_limits<int64_t>::max() / coefficient)
+                        throw std::overflow_error("Affine-index multiplication overflow.");
+                    term = coefficient * index;
+                } else if (coefficient < 0) {
+                    if (coefficient == std::numeric_limits<int64_t>::min()) {
+                        if (index > 1)
+                            throw std::overflow_error("Affine-index multiplication overflow.");
+                        term = index == 0 ? 0 : std::numeric_limits<int64_t>::min();
+                    } else {
+                        const int64_t magnitude = -coefficient;
+                        if (index > std::numeric_limits<int64_t>::max() / magnitude)
+                            throw std::overflow_error("Affine-index multiplication overflow.");
+                        term = -(magnitude * index);
+                    }
+                }
+
+                if ((term > 0 && value > std::numeric_limits<int64_t>::max() - term) ||
+                    (term < 0 && value < std::numeric_limits<int64_t>::min() - term))
+                    throw std::overflow_error("Affine-index addition overflow.");
+                value += term;
+            }
+            return static_cast<double>(value % spec.remainderDivisor);
+        }
         case GenerationPattern::Identity:
             if (shape.rank() < 2)
                 throw std::invalid_argument("Identity generation requires rank at least two.");

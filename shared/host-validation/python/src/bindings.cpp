@@ -630,6 +630,7 @@ NB_MODULE(_roc_host_validation, module) {
         .value("AbsoluteCosine", GenerationPattern::AbsoluteCosine)
         .value("SerialIndex", GenerationPattern::SerialIndex)
         .value("SerialDimension", GenerationPattern::SerialDimension)
+        .value("AffineIndexRemainder", GenerationPattern::AffineIndexRemainder)
         .value("Identity", GenerationPattern::Identity)
         .value("CheckerboardUniformInteger", GenerationPattern::CheckerboardUniformInteger)
         .value("TypeMaximum", GenerationPattern::TypeMaximum)
@@ -885,6 +886,9 @@ NB_MODULE(_roc_host_validation, module) {
         .def_rw("dimension", &GenerationPatternSpec::dimension)
         .def_rw("source_type", &GenerationPatternSpec::sourceType)
         .def_rw("transform", &GenerationPatternSpec::transform)
+        .def_rw("dimension_coefficients", &GenerationPatternSpec::dimensionCoefficients)
+        .def_rw("affine_offset", &GenerationPatternSpec::affineOffset)
+        .def_rw("remainder_divisor", &GenerationPatternSpec::remainderDivisor)
         .def_rw("candidates", &GenerationPatternSpec::candidates)
         .def_rw("alternating_dimensions", &GenerationPatternSpec::alternatingDimensions)
         .def_rw("negative_parity", &GenerationPatternSpec::negativeParity);
