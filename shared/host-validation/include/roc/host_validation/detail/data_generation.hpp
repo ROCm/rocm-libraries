@@ -9,7 +9,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
-#include <random>
 #include <roc/host_validation/detail/tensor_views.hpp>
 #include <span>
 #include <stdexcept>
@@ -604,33 +603,30 @@ inline GenerationRunInfo generate(MutableTensorView destination, const Generatio
  */
 class RandomGenerator {
    public:
-    explicit RandomGenerator(uint32_t seed) : m_generator(seed) {}
+    explicit RandomGenerator(uint64_t seed, uint64_t stream = 0) : m_seed(seed), m_stream(stream) {}
 
     template <typename T>
     T binary() {
-        return static_cast<T>(m_binaryDistribution(m_generator) ? 1.0 : -1.0);
+        return static_cast<T>((next() & 1U) != 0 ? 1.0 : -1.0);
     }
 
     template <typename T>
     T uniformReal(double lower, double upper) {
-        std::uniform_real_distribution<double> distribution(lower, upper);
-        return static_cast<T>(distribution(m_generator));
+        return static_cast<T>(
+            lower + (upper - lower) * detail::indexedUniformUnit(m_seed, m_stream, m_counter++));
     }
 
     template <typename T>
     T uniformInteger(int lower, int upper) {
         static_assert(std::is_constructible_v<T, int> || std::is_arithmetic_v<T>);
-        std::uniform_int_distribution<int> distribution(lower, upper);
-        return static_cast<T>(distribution(m_generator));
+        return static_cast<T>(indexedUniformInteger(m_seed, m_stream, m_counter++, lower, upper));
     }
 
     template <typename T>
     T choose(std::span<const T> values) {
         if (values.empty())
             throw std::invalid_argument("RandomGenerator::choose requires non-empty values.");
-
-        std::uniform_int_distribution<size_t> distribution(0, values.size() - 1);
-        return values[distribution(m_generator)];
+        return values[next() % values.size()];
     }
 
     template <typename T>
@@ -653,15 +649,20 @@ class RandomGenerator {
         if (lowerMagnitude < 0 || lowerMagnitude > upperMagnitude)
             throw std::invalid_argument("Signed uniform-integer magnitudes are invalid.");
         for (auto& value : values) {
-            const int sign = m_binaryDistribution(m_generator) ? 1 : -1;
+            const int sign = (next() & 1U) != 0 ? 1 : -1;
             const int magnitude = uniformInteger<int>(lowerMagnitude, upperMagnitude);
             value = static_cast<T>(sign * magnitude);
         }
     }
 
    private:
-    std::mt19937 m_generator;
-    std::uniform_int_distribution<> m_binaryDistribution{0, 1};
+    uint64_t next() {
+        return counterRandom(m_seed, m_stream, m_counter++);
+    }
+
+    uint64_t m_seed = 0;
+    uint64_t m_stream = 0;
+    uint64_t m_counter = 0;
 };
 
 template <typename T>
