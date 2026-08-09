@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: MIT
 
 #include <array>
-#include <roc/host_validation/validation.hpp>
+#include <roc/host_validation/gemm.hpp>
+#include <roc/host_validation/generation.hpp>
+#include <roc/host_validation/reduction.hpp>
 #include <span>
 #include <utility>
 
@@ -34,5 +36,17 @@ int main() {
                              MutableTensorView::fromNative<float>(
                                  Layout::contiguous(Shape{}), std::span<float>(maximumAbsolute)),
                              ScalarType::Float32);
-    return maximumAbsolute[0] == 4 ? 0 : 1;
+    if (maximumAbsolute[0] != 4) return 1;
+
+    Tensor generated(ScalarType::Float32, Shape{4});
+    GenerationOptions generation;
+    generation.seed = 17;
+    generation.real.pattern = GenerationPattern::CandidateSet;
+    generation.real.candidates = {-2.0, 3.0};
+    generate(generated.mutableView(), generation);
+    for (size_t index = 0; index < generated.size(); ++index) {
+        const float value = generated.view().loadAs<float>({index});
+        if (value != -2.0f && value != 3.0f) return 1;
+    }
+    return 0;
 }

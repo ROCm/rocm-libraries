@@ -609,6 +609,7 @@ NB_MODULE(_roc_host_validation, module) {
     nb::enum_<GenerationPattern>(module, "GenerationPattern")
         .value("Zero", GenerationPattern::Zero)
         .value("Constant", GenerationPattern::Constant)
+        .value("CandidateSet", GenerationPattern::CandidateSet)
         .value("UniformInteger", GenerationPattern::UniformInteger)
         .value("AbsoluteUniformInteger", GenerationPattern::AbsoluteUniformInteger)
         .value("UniformReal", GenerationPattern::UniformReal)
@@ -872,6 +873,7 @@ NB_MODULE(_roc_host_validation, module) {
         .def_rw("dimension", &GenerationPatternSpec::dimension)
         .def_rw("source_type", &GenerationPatternSpec::sourceType)
         .def_rw("transform", &GenerationPatternSpec::transform)
+        .def_rw("candidates", &GenerationPatternSpec::candidates)
         .def_rw("alternating_dimensions", &GenerationPatternSpec::alternatingDimensions)
         .def_rw("negative_parity", &GenerationPatternSpec::negativeParity);
 
