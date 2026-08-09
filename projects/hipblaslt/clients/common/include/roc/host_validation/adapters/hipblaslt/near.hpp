@@ -3,14 +3,12 @@
 
 #pragma once
 
-// Product-private hipBLASLt tolerance-policy and descriptor adapter.
-// Absolute comparison is owned by roc::host-validation.
+// Product-private hipBLASLt tolerance policy.
 
 #include "hipblaslt_ostream.hpp"
-#include "hipblaslt_test.hpp"
 
 #include <limits>
-#include <roc/host_validation/adapters/hipblaslt/Comparison.hpp>
+#include <roc/host_validation/adapters/hipblaslt/Types.hpp>
 
 template <class Tc, class Ti, class To>
 static constexpr double sum_error_tolerance_for_gfx11 = std::numeric_limits<Tc>::epsilon();
@@ -61,41 +59,4 @@ inline double sum_error_tolerance_for_gfx11_type(hipDataType computeType,
         hipblaslt_cerr << "Error type in sum_error_tolerance_for_gfx11_type" << std::endl;
         return 0.0;
     }
-}
-
-inline void near_check_general(int64_t     M,
-                               int64_t     N,
-                               int64_t     lda,
-                               int64_t     stride,
-                               void*       hCPU,
-                               void*       hGPU,
-                               int64_t     batchCount,
-                               double      absoluteError,
-                               hipDataType type)
-{
-#ifdef GOOGLE_TEST
-    using namespace roc::host_validation;
-    using namespace roc::host_validation::hipblaslt_adapter;
-
-    ComparisonOptions options          = nearComparisonOptions(absoluteError);
-    options.computePointwiseStatistics = false;
-    options.computeFrobenius           = false;
-    options.maxReportedMismatches      = 10;
-    const ComparisonResult report
-        = compareBuffers(M, N, lda, stride, hCPU, hGPU, batchCount, type, options);
-    ASSERT_TRUE(report.passed()) << "near comparison found " << report.mismatches
-                                 << " mismatches in " << report.compared
-                                 << " values; max absolute difference "
-                                 << report.maxAbsoluteDifference << ", tolerance " << absoluteError;
-#else
-    (void)M;
-    (void)N;
-    (void)lda;
-    (void)stride;
-    (void)hCPU;
-    (void)hGPU;
-    (void)batchCount;
-    (void)absoluteError;
-    (void)type;
-#endif
 }

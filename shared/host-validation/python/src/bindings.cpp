@@ -9,7 +9,9 @@
 
 #include <algorithm>
 #include <complex>
+#include <cstdint>
 #include <cstring>
+#include <limits>
 #include <optional>
 #include <roc/host_validation/backends/tiled.hpp>
 #ifdef HOST_VALIDATION_PYTHON_HAS_MX
@@ -74,7 +76,7 @@ Value loadTensorValue(std::span<const std::byte> storage, ptrdiff_t logicalOffse
 }
 
 template <typename Value>
-void appendTensorValues(nb::list& result, const Tensor& tensor) {
+void appendTensorValues(nb::list& result, TensorView tensor) {
     using LoadFunction = Value (*)(std::span<const std::byte>, ptrdiff_t);
     const LoadFunction load = visitScalarType(
         tensor.type(), []<typename Tag>() -> LoadFunction { return &loadTensorValue<Value, Tag>; });
@@ -85,7 +87,7 @@ void appendTensorValues(nb::list& result, const Tensor& tensor) {
     });
 }
 
-nb::list tensorValues(const Tensor& tensor) {
+nb::list tensorValues(TensorView tensor) {
     nb::list result;
     const ScalarCategory category = scalarTypeInfo(tensor.type()).category;
     switch (category) {
@@ -107,6 +109,199 @@ nb::list tensorValues(const Tensor& tensor) {
             break;
     }
     return result;
+}
+
+nb::list tensorValues(const Tensor& tensor) {
+    return tensorValues(tensor.view());
+}
+
+struct NumpyStorageType {
+    ScalarType type;
+    size_t itemSize;
+};
+
+class ReadOnlyPythonBuffer {
+   public:
+    explicit ReadOnlyPythonBuffer(nb::handle owner) {
+        if (PyObject_GetBuffer(owner.ptr(), &m_view, PyBUF_RECORDS_RO) != 0)
+            throw nb::python_error();
+    }
+
+    ReadOnlyPythonBuffer(const ReadOnlyPythonBuffer&) = delete;
+    ReadOnlyPythonBuffer& operator=(const ReadOnlyPythonBuffer&) = delete;
+
+    ~ReadOnlyPythonBuffer() {
+        PyBuffer_Release(&m_view);
+    }
+
+    const Py_buffer& view() const {
+        return m_view;
+    }
+
+   private:
+    Py_buffer m_view{};
+};
+
+NumpyStorageType numpyStorageType(nb::handle array) {
+    const nb::object dtype = array.attr("dtype");
+    if (!nb::cast<bool>(dtype.attr("isnative")))
+        throw nb::type_error("TensorView.from_numpy requires a native-endian NumPy dtype.");
+
+    const std::string kind = nb::cast<std::string>(dtype.attr("kind"));
+    const size_t itemSize = nb::cast<size_t>(dtype.attr("itemsize"));
+    if (kind.size() == 1) {
+        switch (kind[0]) {
+            case 'b':
+                if (itemSize == 1) return {ScalarType::Boolean, itemSize};
+                break;
+            case 'u':
+                if (itemSize == 1) return {ScalarType::UInt8, itemSize};
+                if (itemSize == 2) return {ScalarType::UInt16, itemSize};
+                if (itemSize == 4) return {ScalarType::UInt32, itemSize};
+                if (itemSize == 8) return {ScalarType::UInt64, itemSize};
+                break;
+            case 'i':
+                if (itemSize == 1) return {ScalarType::Int8, itemSize};
+                if (itemSize == 2) return {ScalarType::Int16, itemSize};
+                if (itemSize == 4) return {ScalarType::Int32, itemSize};
+                if (itemSize == 8) return {ScalarType::Int64, itemSize};
+                break;
+            case 'f':
+                if (itemSize == 2) return {ScalarType::Float16, itemSize};
+                if (itemSize == 4) return {ScalarType::Float32, itemSize};
+                if (itemSize == 8) return {ScalarType::Float64, itemSize};
+                break;
+            case 'c':
+                if (itemSize == 8) return {ScalarType::ComplexFloat32, itemSize};
+                if (itemSize == 16) return {ScalarType::ComplexFloat64, itemSize};
+                break;
+        }
+    }
+
+    throw nb::type_error(
+        "TensorView.from_numpy supports only exact native NumPy bool, integer, "
+        "float16/32/64, and complex64/128 storage dtypes.");
+}
+
+ptrdiff_t checkedElementDelta(ptrdiff_t stride, size_t elementCount) {
+    if (stride == 0 || elementCount == 0) return 0;
+    if (!std::in_range<ptrdiff_t>(elementCount))
+        throw std::overflow_error("NumPy TensorView stride extent exceeds ptrdiff_t.");
+
+    const ptrdiff_t signedElementCount = static_cast<ptrdiff_t>(elementCount);
+    if (stride > 0) {
+        if (signedElementCount > std::numeric_limits<ptrdiff_t>::max() / stride)
+            throw std::overflow_error("NumPy TensorView stride extent overflow.");
+    } else if (stride == -1) {
+        return -signedElementCount;
+    } else if (signedElementCount > std::numeric_limits<ptrdiff_t>::min() / stride) {
+        throw std::overflow_error("NumPy TensorView stride extent overflow.");
+    }
+    return stride * signedElementCount;
+}
+
+ptrdiff_t checkedElementOffsetAdd(ptrdiff_t left, ptrdiff_t right) {
+    if ((right > 0 && left > std::numeric_limits<ptrdiff_t>::max() - right) ||
+        (right < 0 && left < std::numeric_limits<ptrdiff_t>::min() - right))
+        throw std::overflow_error("NumPy TensorView element offset overflow.");
+    return left + right;
+}
+
+size_t checkedStorageBytes(size_t elementCount, size_t itemSize) {
+    if (itemSize != 0 && elementCount > std::numeric_limits<size_t>::max() / itemSize)
+        throw std::overflow_error("NumPy TensorView storage byte count overflow.");
+    return elementCount * itemSize;
+}
+
+TensorView tensorViewFromNumpy(nb::object array, std::optional<ScalarType> requestedType) {
+    const nb::object numpyArrayType = nb::module_::import_("numpy").attr("ndarray");
+    if (!nb::isinstance(array, numpyArrayType))
+        throw nb::type_error("TensorView.from_numpy requires a NumPy ndarray.");
+
+    const NumpyStorageType storageType = numpyStorageType(array);
+    if (requestedType && *requestedType != storageType.type)
+        throw std::invalid_argument(
+            "TensorView.from_numpy scalar_type must exactly match the NumPy storage dtype.");
+    const ScalarType type = requestedType.value_or(storageType.type);
+
+    const ReadOnlyPythonBuffer buffer(array);
+    const Py_buffer& view = buffer.view();
+    if (view.ndim < 0 || (view.ndim > 0 && (!view.shape || !view.strides)))
+        throw std::invalid_argument("NumPy TensorView buffer geometry is invalid.");
+    if (view.itemsize <= 0 || static_cast<size_t>(view.itemsize) != storageType.itemSize)
+        throw std::invalid_argument("NumPy TensorView buffer item size does not match its dtype.");
+    if (!std::in_range<ptrdiff_t>(storageType.itemSize))
+        throw std::overflow_error("NumPy TensorView item size exceeds ptrdiff_t.");
+    const ptrdiff_t signedItemSize = static_cast<ptrdiff_t>(storageType.itemSize);
+
+    std::vector<size_t> tensorDimensions;
+    std::vector<ptrdiff_t> tensorStrides;
+    tensorDimensions.reserve(static_cast<size_t>(view.ndim));
+    tensorStrides.reserve(static_cast<size_t>(view.ndim));
+    bool empty = false;
+    for (Py_ssize_t dimension = 0; dimension < view.ndim; ++dimension) {
+        if (view.shape[dimension] < 0)
+            throw std::invalid_argument("NumPy TensorView extent is negative.");
+        if (!std::in_range<ptrdiff_t>(view.strides[dimension]))
+            throw std::overflow_error("NumPy TensorView byte stride exceeds ptrdiff_t.");
+        const size_t extent = static_cast<size_t>(view.shape[dimension]);
+        const ptrdiff_t byteStride = static_cast<ptrdiff_t>(view.strides[dimension]);
+        if (byteStride % signedItemSize != 0)
+            throw std::invalid_argument(
+                "NumPy TensorView byte strides must be exact multiples of item size.");
+        tensorDimensions.push_back(extent);
+        tensorStrides.push_back(byteStride / signedItemSize);
+        empty = empty || extent == 0;
+    }
+
+    Shape shape(std::move(tensorDimensions));
+    if (empty) {
+        return TensorView(
+            type, Layout(std::move(shape), std::move(tensorStrides)),
+            std::span<const std::byte>(reinterpret_cast<const std::byte*>(view.buf), 0));
+    }
+    if (!view.buf)
+        throw std::invalid_argument("Nonempty NumPy TensorView has a null data pointer.");
+
+    ptrdiff_t lowerOffset = 0;
+    ptrdiff_t upperOffset = 0;
+    for (size_t dimension = 0; dimension < tensorStrides.size(); ++dimension) {
+        const ptrdiff_t delta =
+            checkedElementDelta(tensorStrides[dimension], shape[dimension] - 1);
+        if (delta < 0)
+            lowerOffset = checkedElementOffsetAdd(lowerOffset, delta);
+        else
+            upperOffset = checkedElementOffsetAdd(upperOffset, delta);
+    }
+
+    if (lowerOffset == std::numeric_limits<ptrdiff_t>::min())
+        throw std::overflow_error("NumPy TensorView base offset overflow.");
+    const ptrdiff_t normalizedOffset = -lowerOffset;
+    const ptrdiff_t normalizedUpper =
+        checkedElementOffsetAdd(upperOffset, normalizedOffset);
+    if (!std::in_range<size_t>(normalizedOffset) ||
+        !std::in_range<size_t>(normalizedUpper))
+        throw std::overflow_error("NumPy TensorView addressed range exceeds size_t.");
+
+    const size_t prefixBytes =
+        checkedStorageBytes(static_cast<size_t>(normalizedOffset), storageType.itemSize);
+    const size_t normalizedUpperSize = static_cast<size_t>(normalizedUpper);
+    if (normalizedUpperSize == std::numeric_limits<size_t>::max())
+        throw std::overflow_error("NumPy TensorView addressed range overflow.");
+    const size_t storageBytes =
+        checkedStorageBytes(normalizedUpperSize + 1, storageType.itemSize);
+
+    const uintptr_t logicalAddress = reinterpret_cast<uintptr_t>(view.buf);
+    if (prefixBytes > logicalAddress)
+        throw std::overflow_error("NumPy TensorView base address underflow.");
+    const uintptr_t storageAddress = logicalAddress - prefixBytes;
+    if (storageBytes > std::numeric_limits<uintptr_t>::max() - storageAddress)
+        throw std::overflow_error("NumPy TensorView storage address overflow.");
+
+    return TensorView(
+        type, Layout(std::move(shape), std::move(tensorStrides), normalizedOffset),
+        std::span<const std::byte>(reinterpret_cast<const std::byte*>(storageAddress),
+                                   storageBytes));
 }
 
 Tensor tensorFromStorage(ScalarType type, std::vector<size_t> dimensions, nb::bytes rawStorage,
@@ -505,6 +700,22 @@ NB_MODULE(_roc_host_validation, module) {
         .def_prop_ro("strides", &strides)
         .def_prop_ro("offset", &Layout::offset);
 
+    nb::class_<TensorView>(module, "TensorView")
+        .def_static("from_numpy", &tensorViewFromNumpy, "array"_a,
+                    "scalar_type"_a = std::optional<ScalarType>{}, nb::keep_alive<0, 1>())
+        .def_prop_ro("type", &TensorView::type)
+        .def_prop_ro("shape", [](const TensorView& tensor) { return dimensions(tensor.shape()); })
+        .def_prop_ro("strides", [](const TensorView& tensor) { return strides(tensor.layout()); })
+        .def_prop_ro("offset", [](const TensorView& tensor) { return tensor.layout().offset(); })
+        .def_prop_ro("size", [](const TensorView& tensor) { return tensor.shape().elementCount(); })
+        .def_prop_ro("storage",
+                     [](const TensorView& tensor) {
+                         const auto storage = tensor.storage();
+                         return nb::bytes(reinterpret_cast<const char*>(storage.data()),
+                                          storage.size());
+                     })
+        .def_prop_ro("values", [](const TensorView& tensor) { return tensorValues(tensor); });
+
     nb::class_<Tensor>(module, "Tensor")
         .def(nb::init<ScalarType, Shape>())
         .def_static(
@@ -544,7 +755,8 @@ NB_MODULE(_roc_host_validation, module) {
                          return nb::bytes(reinterpret_cast<const char*>(storage.data()),
                                           storage.size());
                      })
-        .def_prop_ro("values", &tensorValues);
+        .def_prop_ro("values", [](const Tensor& tensor) { return tensorValues(tensor); })
+        .def("view", &Tensor::view, nb::keep_alive<0, 1>());
 
     nb::enum_<ComparisonIndexOrder>(module, "ComparisonIndexOrder")
         .value("FirstDimensionFastest",
@@ -864,6 +1076,12 @@ NB_MODULE(_roc_host_validation, module) {
             return compare(observed.view(), expected.view(), options);
         },
         "observed"_a, "expected"_a, "options"_a = ComparisonOptions{});
+    module.def(
+        "compare",
+        [](TensorView observed, TensorView expected, const ComparisonOptions& options) {
+            return compare(observed, expected, options);
+        },
+        "observed"_a, "expected"_a, "options"_a = ComparisonOptions{});
     module.def("default_comparison_options",
                &defaultComparisonOptions,
                "type"_a,
@@ -908,6 +1126,25 @@ NB_MODULE(_roc_host_validation, module) {
         "relative_candidates"_a,
         "options"_a = ComparisonOptions{});
     module.def(
+        "find_allclose_tolerance",
+        [](TensorView observed,
+           TensorView expected,
+           const std::vector<double>& absoluteCandidates,
+           const std::vector<double>& relativeCandidates,
+           const ComparisonOptions& options) {
+            return findAllCloseTolerance(
+                observed,
+                expected,
+                std::span<const double>(absoluteCandidates),
+                std::span<const double>(relativeCandidates),
+                options);
+        },
+        "observed"_a,
+        "expected"_a,
+        "absolute_candidates"_a,
+        "relative_candidates"_a,
+        "options"_a = ComparisonOptions{});
+    module.def(
         "check_unwritten_sentinel",
         [](const Tensor& tensor,
            SentinelRegion region,
@@ -931,6 +1168,22 @@ NB_MODULE(_roc_host_validation, module) {
            size_t maxReportedMismatches) {
             return checkUnusedTensorStorage(
                 tensor.view(),
+                allocatedElements,
+                region,
+                maxReportedMismatches);
+        },
+        "tensor"_a,
+        "allocated_elements"_a,
+        "region"_a = SentinelRegion::Inside,
+        "max_reported_mismatches"_a = 10);
+    module.def(
+        "check_unused_tensor_storage",
+        [](TensorView tensor,
+           size_t allocatedElements,
+           SentinelRegion region,
+           size_t maxReportedMismatches) {
+            return checkUnusedTensorStorage(
+                tensor,
                 allocatedElements,
                 region,
                 maxReportedMismatches);

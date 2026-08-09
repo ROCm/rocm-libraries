@@ -449,6 +449,8 @@ The NumPy suite independently checks:
 - finite low-precision round trips;
 - the OCP E8M0 no-zero contract;
 - affine layout decoding;
+- lifetime-safe read-only NumPy-backed tensor views, including gapped and
+  negative strides, mutation visibility, and owner retention;
 - deterministic generation, logical index ordering, complex component
   recipes, and structured comparison;
 - pointwise, selected, complex, non-finite, Frobenius, ULP, allclose-search,
@@ -462,8 +464,12 @@ The NumPy suite independently checks:
 - fixed/random N:M pruning, logical compression, packed-value preservation,
   and 2:4 metadata encoding against NumPy.
 
-The first binding deliberately copies between NumPy and `Tensor`. A follow-up
-should expose lifetime-safe non-owning NumPy-backed `TensorView` objects.
+`TensorView.from_numpy` borrows exact native NumPy bool, integer,
+FP16/FP32/FP64, and complex64/complex128 storage without copying. It retains
+the ndarray owner and normalizes signed strides into the component layout.
+Packed and decoded-only formats such as BF16, FP8, FP6, FP4, E8M0, and E5M3
+continue through the explicit owning/copying conversion path. Mutable
+NumPy-backed views are intentionally not exposed yet.
 
 ## Standalone tests
 

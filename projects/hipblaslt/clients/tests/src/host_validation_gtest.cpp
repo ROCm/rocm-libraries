@@ -3,11 +3,8 @@
 
 #include <roc/host_validation/adapters/hipblaslt/HipblasltDataInitialization.hpp>
 #include <roc/host_validation/adapters/hipblaslt/HipblasltReferenceGemm.hpp>
-#include <roc/host_validation/adapters/hipblaslt/allclose.hpp>
+#include <roc/host_validation/adapters/hipblaslt/HostComparison.hpp>
 #include <roc/host_validation/adapters/hipblaslt/hipblaslt_init.hpp>
-#include <roc/host_validation/adapters/hipblaslt/near.hpp>
-#include <roc/host_validation/adapters/hipblaslt/norm.hpp>
-#include <roc/host_validation/adapters/hipblaslt/unit.hpp>
 
 #include <gtest/gtest.h>
 
@@ -39,73 +36,140 @@ TEST(HostValidationComparisonBridge, FindsAllcloseToleranceAcrossBatches)
 {
     const std::array<float, 4> expected{1.0f, 2.0f, 3.0f, 4.0f};
     const std::array<float, 4> observed{1.0f, 2.00009f, 3.0f, 4.0f};
-    double atol = 1.0;
-    double rtol = 1.0;
+    roc::host_validation::hipblaslt_adapter::HostComparisonRequest request;
+    request.rows                  = 2;
+    request.columns               = 1;
+    request.leadingDimension      = 2;
+    request.batchStride           = 2;
+    request.batchCount            = 2;
+    request.expected              = expected.data();
+    request.observed              = observed.data();
+    request.type                  = HIP_R_32F;
+    request.findAllCloseTolerance = true;
 
-    EXPECT_TRUE(allclose_check_general('F',
-                                       2,
-                                       1,
-                                       2,
-                                       2,
-                                       const_cast<float*>(expected.data()),
-                                       const_cast<float*>(observed.data()),
-                                       2,
-                                       atol,
-                                       rtol,
-                                       HIP_R_32F));
-    EXPECT_EQ(atol, 1e-6);
-    EXPECT_EQ(rtol, 1e-4);
+    const auto report = roc::host_validation::hipblaslt_adapter::compareHost(request);
+    ASSERT_TRUE(report.allCloseTolerance);
+    EXPECT_EQ(report.allCloseTolerance->absolute, 1e-6);
+    EXPECT_EQ(report.allCloseTolerance->relative, 1e-4);
 }
 
 TEST(HostValidationComparisonBridge, ComputesRelativeFrobeniusEvidence)
 {
-    std::array<double, 2> expected{3.0, 4.0};
-    std::array<double, 2> observed{0.0, 4.0};
-    const double error = norm_check_general('F',
-                                            2,
-                                            1,
-                                            2,
-                                            2,
-                                            expected.data(),
-                                            observed.data(),
-                                            1,
-                                            HIP_R_64F);
-    EXPECT_DOUBLE_EQ(error, 0.6);
+    std::array<double, 2>                                          expected{3.0, 4.0};
+    std::array<double, 2>                                          observed{0.0, 4.0};
+    roc::host_validation::hipblaslt_adapter::HostComparisonRequest request;
+    request.rows                          = 2;
+    request.columns                       = 1;
+    request.leadingDimension              = 2;
+    request.batchStride                   = 2;
+    request.batchCount                    = 1;
+    request.expected                      = expected.data();
+    request.observed                      = observed.data();
+    request.type                          = HIP_R_64F;
+    request.computeRelativeFrobeniusError = true;
+    EXPECT_DOUBLE_EQ(
+        roc::host_validation::hipblaslt_adapter::compareHost(request).relativeFrobeniusError, 0.6);
 }
 
 TEST(HostValidationComparisonBridge, UnitNearAndSpecialValuePolicies)
 {
-    const float oneUlp = std::nextafter(1.0f, 2.0f);
-    std::array<float, 2> expected{1.0f,
-                                  std::numeric_limits<float>::infinity()};
-    std::array<float, 2> observed{oneUlp,
-                                  std::numeric_limits<float>::infinity()};
+    const float          oneUlp = std::nextafter(1.0f, 2.0f);
+    std::array<float, 2> expected{1.0f, std::numeric_limits<float>::infinity()};
+    std::array<float, 2> observed{oneUlp, std::numeric_limits<float>::infinity()};
 
-    unit_check_general(2,
-                       1,
-                       2,
-                       2,
-                       expected.data(),
-                       observed.data(),
-                       1,
-                       HIP_R_32F);
-    near_check_general(2,
-                       1,
-                       2,
-                       2,
-                       expected.data(),
-                       observed.data(),
-                       1,
-                       1e-6,
-                       HIP_R_32F);
-    check_special_value_consistency(2,
-                                    1,
-                                    2,
-                                    2,
-                                    expected.data(),
-                                    observed.data(),
-                                    1,
-                                    HIP_R_32F);
+    roc::host_validation::hipblaslt_adapter::HostComparisonRequest request;
+    request.rows             = 2;
+    request.columns          = 1;
+    request.leadingDimension = 2;
+    request.batchStride      = 2;
+    request.batchCount       = 1;
+    request.expected         = expected.data();
+    request.observed         = observed.data();
+    request.type             = HIP_R_32F;
+
+    request.pointwise = roc::host_validation::hipblaslt_adapter::HostPointwiseComparison::Unit;
+    EXPECT_TRUE(roc::host_validation::hipblaslt_adapter::compareHost(request).comparison.passed());
+
+    request.pointwise = roc::host_validation::hipblaslt_adapter::HostPointwiseComparison::Near;
+    request.absoluteTolerance = 1e-6;
+    EXPECT_TRUE(roc::host_validation::hipblaslt_adapter::compareHost(request).comparison.passed());
+
+    request.pointwise = roc::host_validation::hipblaslt_adapter::HostPointwiseComparison::Disabled;
+    request.requireSpecialValueConsistency = true;
+    EXPECT_EQ(roc::host_validation::hipblaslt_adapter::compareHost(request)
+                  .comparison.nonFiniteMismatches,
+              0);
+}
+
+TEST(HostValidationComparisonBridge, RunsTheCombinedHostComparisonProgram)
+{
+    const float                oneUlp = std::nextafter(1.0f, 2.0f);
+    const std::array<float, 4> expected{1.0f, 2.0f, 3.0f, 4.0f};
+    const std::array<float, 4> observed{oneUlp, 2.0f, 3.0f, 4.0f};
+
+    roc::host_validation::hipblaslt_adapter::HostComparisonRequest request;
+    request.rows             = 2;
+    request.columns          = 1;
+    request.leadingDimension = 2;
+    request.batchStride      = 2;
+    request.batchCount       = 2;
+    request.expected         = expected.data();
+    request.observed         = observed.data();
+    request.type             = HIP_R_32F;
+    request.pointwise = roc::host_validation::hipblaslt_adapter::HostPointwiseComparison::Unit;
+    request.requireSpecialValueConsistency = true;
+    request.computeRelativeFrobeniusError  = true;
+    request.findAllCloseTolerance          = true;
+    request.computeUnitsInLastPlace        = true;
+
+    const auto report = roc::host_validation::hipblaslt_adapter::compareHost(request);
+    EXPECT_TRUE(report.comparison.passed());
+    EXPECT_EQ(report.comparison.nonFiniteMismatches, 0);
+    EXPECT_DOUBLE_EQ(report.comparison.maximumUlp, 1.0);
+    EXPECT_DOUBLE_EQ(report.unitsInLastPlaceComparison.maximumUlp, 1.0);
+    EXPECT_DOUBLE_EQ(report.unitsInLastPlaceComparison.sumUlp, 1.0);
+    EXPECT_EQ(report.unitsInLastPlaceComparison.ulpCompared, 4);
+    EXPECT_GT(report.relativeFrobeniusError, 0.0);
+    ASSERT_TRUE(report.allCloseTolerance);
+    EXPECT_DOUBLE_EQ(report.allCloseTolerance->absolute, 1e-6);
+    EXPECT_DOUBLE_EQ(report.allCloseTolerance->relative, 1e-6);
+}
+
+TEST(HostValidationComparisonBridge, KeepsReportedUlpNonFinitePolicySeparate)
+{
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+
+    roc::host_validation::hipblaslt_adapter::HostComparisonRequest request;
+    request.rows             = 1;
+    request.columns          = 1;
+    request.leadingDimension = 1;
+    request.batchStride      = 1;
+    request.batchCount       = 1;
+    request.expected         = &nan;
+    request.observed         = &nan;
+    request.type             = HIP_R_32F;
+    request.pointwise = roc::host_validation::hipblaslt_adapter::HostPointwiseComparison::Unit;
+    request.requireSpecialValueConsistency = true;
+    request.computeUnitsInLastPlace        = true;
+
+    const auto report = roc::host_validation::hipblaslt_adapter::compareHost(request);
+    EXPECT_TRUE(report.comparison.passed());
+    EXPECT_EQ(report.comparison.nonFiniteMismatches, 0);
+    EXPECT_TRUE(std::isinf(report.unitsInLastPlaceComparison.maximumUlp));
+}
+
+TEST(HostValidationComparisonBridge, EmptyPointwiseRequestsStillValidateTheProductType)
+{
+    using namespace roc::host_validation::hipblaslt_adapter;
+
+    HostComparisonRequest request;
+    request.type      = HIPBLASLT_DATATYPE_INVALID;
+    request.pointwise = HostPointwiseComparison::Unit;
+    EXPECT_THROW(compareHost(request), std::invalid_argument);
+
+    request.pointwise                     = HostPointwiseComparison::Disabled;
+    request.computeRelativeFrobeniusError = true;
+    EXPECT_NO_THROW(compareHost(request));
 }
 
 TEST(HostValidationDataInitializationBridge, CounterBasedGenerationIsRepeatable)
