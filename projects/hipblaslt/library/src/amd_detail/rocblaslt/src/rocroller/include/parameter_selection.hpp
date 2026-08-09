@@ -30,7 +30,7 @@ struct SolutionParameters
     MachineInstructionSize machineInstruction;
 
     // Number of wave tiles to execute per workgroup
-    uint wavefrontSize  = 64;
+    unsigned int wavefrontSize  = 64;
     int  workgroupSizeX = 2 * wavefrontSize;
     int  workgroupSizeY = 2;
 

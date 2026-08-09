@@ -910,7 +910,7 @@ namespace rocRoller
                 return std::make_shared<Expression>(expr);
             }
 
-            ExpressionPtr call(ExpressionPtr expr) const
+            ExpressionPtr __cdecl call(ExpressionPtr expr) const
             {
                 if(!expr)
                     return expr;
@@ -930,7 +930,7 @@ namespace rocRoller
             }
         };
 
-        ExpressionPtr simplify(ExpressionPtr expr)
+        ExpressionPtr __cdecl simplify(ExpressionPtr expr)
         {
             auto visitor = SimplifyExpressionVisitor();
             return visitor.call(expr);
