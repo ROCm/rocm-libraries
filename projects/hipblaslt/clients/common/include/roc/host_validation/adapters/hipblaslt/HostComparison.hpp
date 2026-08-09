@@ -11,6 +11,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <hipblaslt/hipblaslt.h>
 #include <optional>
 #include <roc/host_validation/adapters/hipblaslt/Comparison.hpp>
 #include <span>
@@ -189,7 +190,7 @@ namespace roc::host_validation::hipblaslt_adapter
 
         if(request.findAllCloseTolerance)
         {
-            const Layout layout = comparisonLayout(request.rows,
+            const Layout      layout = comparisonLayout(request.rows,
                                                    request.columns,
                                                    request.leadingDimension,
                                                    request.batchStride,
