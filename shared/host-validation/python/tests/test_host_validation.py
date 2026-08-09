@@ -992,6 +992,43 @@ class TensorAndGemmTests(unittest.TestCase):
             np.asarray([[expected]], dtype=np.float32),
         )
 
+    def test_bfloat16_accumulator_rounding_policy_is_explicit(self):
+        a = np.full((1, 16), np.float32(0.1), dtype=np.float32)
+        b = np.full((16, 1), np.float32(0.1), dtype=np.float32)
+        c = np.zeros((1, 1), dtype=np.float32)
+
+        rounded = hv.reference_gemm(
+            hv.from_numpy(a),
+            hv.from_numpy(b),
+            hv.from_numpy(c),
+            hv.ScalarType.Float32,
+            hv.ScalarType.BFloat16,
+            accumulation_rounding=hv.AccumulationRounding.AfterProductAndSum,
+        )
+        full_precision = hv.reference_gemm(
+            hv.from_numpy(a),
+            hv.from_numpy(b),
+            hv.from_numpy(c),
+            hv.ScalarType.Float32,
+            hv.ScalarType.BFloat16,
+            accumulation_rounding=hv.AccumulationRounding.FullPrecision,
+        )
+
+        expected_rounded = np.float32(0.0)
+        for reduction in range(a.shape[1]):
+            product = quantize_bfloat16(np.float32(a[0, reduction] * b[reduction, 0]))
+            expected_rounded = quantize_bfloat16(np.float32(expected_rounded + product))
+        expected_full_precision = matmul_float32(a, b)
+        self.assertNotEqual(expected_rounded, expected_full_precision[0, 0])
+        np.testing.assert_array_equal(
+            hv.to_numpy(rounded),
+            np.asarray([[expected_rounded]], dtype=np.float32),
+        )
+        np.testing.assert_array_equal(
+            hv.to_numpy(full_precision),
+            expected_full_precision,
+        )
+
     def test_xfloat32_truncates_operand_mantissas(self):
         a = np.asarray([[1.234567, -2.345678]], dtype=np.float32)
         b = np.asarray([[3.456789], [4.567891]], dtype=np.float32)
