@@ -58,8 +58,8 @@ namespace
         using namespace roc::host_validation;
         using namespace roc::host_validation::hipblaslt_adapter;
 
-        const Layout      layout          = comparisonLayout(M, N, lda, stride, batchCount);
-        const size_t      storageElements = comparisonStorageElements(layout);
+        const Layout layout          = comparisonLayout(M, N, lda, stride, batchCount);
+        const size_t storageElements = storageBytesForLayout(scalarType<T>(), layout) / sizeof(T);
         ComparisonOptions options;
         options.pointwise                  = false;
         options.computePointwiseStatistics = false;
@@ -103,8 +103,8 @@ namespace
         request.observed                = hGPU;
         request.type                    = type;
         request.computeUnitsInLastPlace = true;
-        const auto report = compareHost(request).unitsInLastPlaceComparison;
-        maxUlp            = std::max(maxUlp, report.maximumUlp);
+        const auto report               = compareHost(request).unitsInLastPlaceComparison;
+        maxUlp                          = std::max(maxUlp, report.maximumUlp);
         sumUlp += report.sumUlp;
         count += report.ulpCompared;
     }
@@ -236,8 +236,17 @@ namespace
         double max_ulp = 0.0, sum_ulp = 0.0;
         size_t count = 0;
         ulp_accumulate_general<float>(
-            /*M*/ 2, /*N*/ 2, /*lda*/ 2, /*stride*/ 0, cpu.data(), gpu.data(),
-            /*batch*/ 1, /*mant_bits*/ 23, max_ulp, sum_ulp, count);
+            /*M*/ 2,
+            /*N*/ 2,
+            /*lda*/ 2,
+            /*stride*/ 0,
+            cpu.data(),
+            gpu.data(),
+            /*batch*/ 1,
+            /*mant_bits*/ 23,
+            max_ulp,
+            sum_ulp,
+            count);
 
         EXPECT_DOUBLE_EQ(max_ulp, 0.0);
         EXPECT_DOUBLE_EQ(sum_ulp, 0.0);
@@ -252,8 +261,17 @@ namespace
         double max_ulp = 0.0, sum_ulp = 0.0;
         size_t count = 0;
         ulp_accumulate_general<float>(
-            /*M*/ 0, /*N*/ 4, /*lda*/ 1, /*stride*/ 0, cpu.data(), gpu.data(),
-            /*batch*/ 1, /*mant_bits*/ 23, max_ulp, sum_ulp, count);
+            /*M*/ 0,
+            /*N*/ 4,
+            /*lda*/ 1,
+            /*stride*/ 0,
+            cpu.data(),
+            gpu.data(),
+            /*batch*/ 1,
+            /*mant_bits*/ 23,
+            max_ulp,
+            sum_ulp,
+            count);
 
         EXPECT_EQ(count, 0u);
         EXPECT_DOUBLE_EQ(max_ulp, 0.0);
@@ -263,7 +281,7 @@ namespace
     {
         // Column-major 2x2 with lda=3: row index 2 in each column is padding
         // and must not be compared. Fill padding with a huge mismatch.
-        const int64_t M = 2, N = 2, lda = 3;
+        const int64_t      M = 2, N = 2, lda = 3;
         std::vector<float> cpu(lda * N, 1.0f);
         std::vector<float> gpu(lda * N, 1.0f);
 
@@ -271,24 +289,34 @@ namespace
         gpu[3] = 1.0f + static_cast<float>(p2(-23));
 
         // Padding rows (idx 2 and 5) get a large mismatch that should be ignored.
-        cpu[2] = 5.0f;   gpu[2] = 999.0f;
-        cpu[5] = 5.0f;   gpu[5] = -999.0f;
+        cpu[2] = 5.0f;
+        gpu[2] = 999.0f;
+        cpu[5] = 5.0f;
+        gpu[5] = -999.0f;
 
         double max_ulp = 0.0, sum_ulp = 0.0;
         size_t count = 0;
-        ulp_accumulate_general<float>(
-            M, N, lda, /*stride*/ 0, cpu.data(), gpu.data(),
-            /*batch*/ 1, /*mant_bits*/ 23, max_ulp, sum_ulp, count);
+        ulp_accumulate_general<float>(M,
+                                      N,
+                                      lda,
+                                      /*stride*/ 0,
+                                      cpu.data(),
+                                      gpu.data(),
+                                      /*batch*/ 1,
+                                      /*mant_bits*/ 23,
+                                      max_ulp,
+                                      sum_ulp,
+                                      count);
 
-        EXPECT_EQ(count, 4u);                 // only M*N real elements
-        EXPECT_DOUBLE_EQ(max_ulp, 1.0);       // the single 1-ULP error
-        EXPECT_DOUBLE_EQ(sum_ulp, 1.0);       // everything else identical
+        EXPECT_EQ(count, 4u); // only M*N real elements
+        EXPECT_DOUBLE_EQ(max_ulp, 1.0); // the single 1-ULP error
+        EXPECT_DOUBLE_EQ(sum_ulp, 1.0); // everything else identical
     }
 
     TEST(UlpAccumulate, walks_all_batches_with_stride)
     {
         // 2 batches of a 1x2 matrix (lda=1), stride = lda*N = 2.
-        const int64_t M = 1, N = 2, lda = 1, stride = 2, batch = 2;
+        const int64_t      M = 1, N = 2, lda = 1, stride = 2, batch = 2;
         std::vector<float> cpu(stride * batch, 1.0f);
         std::vector<float> gpu = cpu;
 
@@ -297,11 +325,19 @@ namespace
 
         double max_ulp = 0.0, sum_ulp = 0.0;
         size_t count = 0;
-        ulp_accumulate_general<float>(
-            M, N, lda, stride, cpu.data(), gpu.data(),
-            batch, /*mant_bits*/ 23, max_ulp, sum_ulp, count);
+        ulp_accumulate_general<float>(M,
+                                      N,
+                                      lda,
+                                      stride,
+                                      cpu.data(),
+                                      gpu.data(),
+                                      batch,
+                                      /*mant_bits*/ 23,
+                                      max_ulp,
+                                      sum_ulp,
+                                      count);
 
-        EXPECT_EQ(count, 4u);           // M*N*batch
+        EXPECT_EQ(count, 4u); // M*N*batch
         EXPECT_DOUBLE_EQ(max_ulp, 2.0);
         EXPECT_DOUBLE_EQ(sum_ulp, 2.0);
     }
@@ -398,10 +434,9 @@ namespace
 
     TEST(UlpCheckGeneral, complex_float_dispatch)
     {
-        std::vector<std::complex<float>> cpu
-            = {{1.0f, 2.0f}, {3.0f, 4.0f}};
+        std::vector<std::complex<float>> cpu = {{1.0f, 2.0f}, {3.0f, 4.0f}};
         std::vector<std::complex<float>> gpu = cpu;
-        CheckResult r = run_check(cpu, gpu, 1, 2, HIP_C_32F);
+        CheckResult                      r   = run_check(cpu, gpu, 1, 2, HIP_C_32F);
 
         EXPECT_DOUBLE_EQ(r.max_ulp, 0.0);
         EXPECT_DOUBLE_EQ(r.sum_ulp, 0.0);
