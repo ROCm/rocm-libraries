@@ -1,6 +1,7 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include <roc/host_validation/adapters/hipblaslt/GroupedGemmDataInitialization.hpp>
 #include <roc/host_validation/adapters/hipblaslt/HipblasltDataInitialization.hpp>
 #include <roc/host_validation/adapters/hipblaslt/HipblasltReferenceGemm.hpp>
 #include <roc/host_validation/adapters/hipblaslt/HostComparison.hpp>
@@ -30,6 +31,38 @@ TEST(HostValidationDataInitializationBridge, GeneratesComplexTrigonometricValues
         EXPECT_FLOAT_EQ(values[index].real(), std::sin(static_cast<float>(index)));
         EXPECT_FLOAT_EQ(values[index].imag(), std::cos(static_cast<float>(index)));
     }
+}
+
+TEST(HostValidationDataInitializationBridge, GroupedGemmUsesStableRoleStreams)
+{
+    std::vector<float> a(5);
+    std::vector<float> b(7);
+    std::vector<float> c(4);
+    std::vector<float> bias(3);
+
+    roc::host_validation::hipblaslt_adapter::initializeGroupedGemm(
+        a,
+        static_cast<int64_t>(a.size()),
+        b,
+        static_cast<int64_t>(b.size()),
+        c,
+        static_cast<int64_t>(c.size()),
+        bias,
+        static_cast<int64_t>(bias.size()),
+        hipblaslt_initialization::rand_int);
+
+    constexpr uint64_t seed = 69069;
+    for(size_t index = 0; index < a.size(); ++index)
+        EXPECT_EQ(a[index], roc::host_validation::indexedUniformInteger(seed, 0, index, 1, 10));
+    for(size_t index = 0; index < b.size(); ++index)
+    {
+        const int magnitude = roc::host_validation::indexedUniformInteger(seed, 1, index, 1, 10);
+        EXPECT_EQ(b[index], (index & 1U) == 0 ? -magnitude : magnitude);
+    }
+    for(size_t index = 0; index < c.size(); ++index)
+        EXPECT_EQ(c[index], roc::host_validation::indexedUniformInteger(seed, 2, index, 1, 10));
+    for(size_t index = 0; index < bias.size(); ++index)
+        EXPECT_EQ(bias[index], roc::host_validation::indexedUniformInteger(seed, 3, index, 1, 10));
 }
 
 TEST(HostValidationComparisonBridge, FindsAllcloseToleranceAcrossBatches)
