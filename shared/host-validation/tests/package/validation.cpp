@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include <array>
+#include <roc/host_validation/axpby.hpp>
 #include <roc/host_validation/gemm.hpp>
 #include <roc/host_validation/generation.hpp>
 #include <roc/host_validation/reduction.hpp>
@@ -48,5 +49,16 @@ int main() {
         const float value = generated.view().loadAs<float>({index});
         if (value != -2.0f && value != 3.0f) return 1;
     }
+
+    Tensor axpbyOutput(ScalarType::Float32, Shape{1});
+    AxpbyProblem axpby(
+        TensorView::fromNative<float>(Layout::contiguous(Shape{1}), std::span<const float>(a)),
+        TensorView::fromNative<float>(Layout::contiguous(Shape{1}), std::span<const float>(b)),
+        axpbyOutput.mutableView(), ScalarType::Float32);
+    axpby.alpha = 2.0;
+    axpby.beta = -1.0;
+    if (referenceAxpby(axpby).elementsComputed != 1 ||
+        axpbyOutput.view().loadAs<float>({0}) != 1.0f)
+        return 1;
     return 0;
 }

@@ -285,6 +285,42 @@ class TensorAndGemmTests(unittest.TestCase):
             np.asarray([-6.0, -0.5, 1.5, 6.0], dtype=np.float32),
         )
 
+    def test_reference_axpby_matches_numpy(self):
+        x_values = np.asarray(
+            [[[1.0, -2.0], [3.0, 4.0]], [[-1.0, 2.0], [5.0, -6.0]]],
+            dtype=np.float16,
+        )
+        y_source = np.asarray(
+            [[[0.25, 1.1], [-3.5, 2.25]], [[4.0, -0.5], [1.75, 3.0]]],
+            dtype=np.float32,
+        )
+        x = hv.from_numpy(x_values)
+        y = hv.from_numpy(y_source, hv.ScalarType.BFloat16)
+        result = hv.reference_axpby(
+            x=x,
+            y=y,
+            output_type=hv.ScalarType.Float32,
+            accumulator_type=hv.ScalarType.Float32,
+            alpha=0.5,
+            beta=-1.25,
+        )
+
+        y_values = quantize_bfloat16(y_source)
+        expected = np.empty(x_values.shape, dtype=np.float32)
+        for index in np.ndindex(x_values.shape):
+            value = np.float32(0.0)
+            value = np.float32(value + np.float32(0.5) * np.float32(x_values[index]))
+            value = np.float32(value + np.float32(-1.25) * y_values[index])
+            expected[index] = value
+        np.testing.assert_array_equal(hv.to_numpy(result.output), expected)
+        self.assertEqual(result.run_info.elements_computed, expected.size)
+
+        y_only = hv.reference_axpby(y=y, beta=3.0)
+        np.testing.assert_array_equal(
+            hv.to_numpy(y_only.output),
+            np.float32(3.0) * y_values,
+        )
+
     def test_numpy_tensor_view_observes_mutation(self):
         values = np.arange(6, dtype=np.float32).reshape(2, 3)
         view = hv.TensorView.from_numpy(values)

@@ -5,6 +5,7 @@
 #include <roc/host_validation/adapters/hipblaslt/HipblasltDataInitialization.hpp>
 #include <roc/host_validation/adapters/hipblaslt/HipblasltReferenceGemm.hpp>
 #include <roc/host_validation/adapters/hipblaslt/HostComparison.hpp>
+#include <roc/host_validation/adapters/hipblaslt/MatrixTransformReference.hpp>
 #include <roc/host_validation/adapters/hipblaslt/hipblaslt_init.hpp>
 
 #include <gtest/gtest.h>
@@ -64,6 +65,59 @@ TEST(HostValidationDataInitializationBridge, GroupedGemmUsesStableRoleStreams)
         EXPECT_EQ(c[index], roc::host_validation::indexedUniformInteger(seed, 2, index, 1, 10));
     for(size_t index = 0; index < bias.size(); ++index)
         EXPECT_EQ(bias[index], roc::host_validation::indexedUniformInteger(seed, 3, index, 1, 10));
+}
+
+TEST(HostValidationMatrixTransformBridge, MapsLayoutsAndTransposes)
+{
+    constexpr size_t      rows        = 2;
+    constexpr size_t      columns     = 3;
+    constexpr size_t      batches     = 2;
+    constexpr size_t      batchStride = 12;
+    std::array<float, 20> a{};
+    std::array<float, 20> b{};
+    std::array<float, 20> observed{};
+
+    for(size_t batch = 0; batch < batches; ++batch)
+    {
+        for(size_t row = 0; row < rows; ++row)
+        {
+            for(size_t column = 0; column < columns; ++column)
+            {
+                const float aValue = static_cast<float>(1 + row + 2 * column + 3 * batch);
+                const float bValue = static_cast<float>(2 - static_cast<int>(row) + column + batch);
+                a[batch * batchStride + 2 * column + row]        = aValue;
+                b[batch * batchStride + 4 * row + column]        = bValue;
+                observed[batch * batchStride + row + 3 * column] = 2.0f * aValue - bValue;
+            }
+        }
+    }
+
+    roc::host_validation::hipblaslt_adapter::MatrixTransformReferenceArguments arguments;
+    arguments.observed               = observed.data();
+    arguments.observedStorageBytes   = sizeof(observed);
+    arguments.a                      = a.data();
+    arguments.aStorageBytes          = sizeof(a);
+    arguments.b                      = b.data();
+    arguments.bStorageBytes          = sizeof(b);
+    arguments.type                   = HIP_R_32F;
+    arguments.rows                   = rows;
+    arguments.columns                = columns;
+    arguments.batchCount             = batches;
+    arguments.leadingDimensionA      = 2;
+    arguments.leadingDimensionB      = 4;
+    arguments.leadingDimensionOutput = 3;
+    arguments.batchStride            = batchStride;
+    arguments.rowMajorA              = true;
+    arguments.rowMajorB              = true;
+    arguments.rowMajorOutput         = false;
+    arguments.transposeA             = true;
+    arguments.alpha                  = 2.0;
+    arguments.beta                   = -1.0;
+
+    const auto result
+        = roc::host_validation::hipblaslt_adapter::referenceMatrixTransform(arguments);
+    EXPECT_EQ(result.runInfo.elementsComputed, rows * columns * batches);
+    EXPECT_TRUE(result.comparison.passed());
 }
 
 TEST(HostValidationComparisonBridge, FindsAllcloseToleranceAcrossBatches)

@@ -11,11 +11,11 @@ comparison used by ROCm library clients and tests.
   - Builds with an ordinary host compiler and the C++ standard library.
 - `roc::host-validation`
   - Transitional validation operations layered on the tensor core.
-  - Exports `comparison.hpp`, `epilogue.hpp`, `generation.hpp`, `gemm.hpp`,
-    `reduction.hpp`, `structured_sparsity.hpp`, and the convenience umbrella
-    `validation.hpp`.
-  - Exposes runtime-typed generation, reference GEMM, reference epilogues,
-    reductions, structured sparsity, and comparison.
+  - Exports `axpby.hpp`, `comparison.hpp`, `epilogue.hpp`, `generation.hpp`,
+    `gemm.hpp`, `reduction.hpp`, `structured_sparsity.hpp`, and the
+    convenience umbrella `validation.hpp`.
+  - Exposes runtime-typed generation, tensor AXPBY, reference GEMM, reference
+    epilogues, reductions, structured sparsity, and comparison.
   - Implementation headers live under `roc/host_validation/detail/`; consumers
     include the operation header they need or `validation.hpp`.
 - `roc::host-validation-blas`
@@ -178,6 +178,22 @@ hipBLASLt and TensileLite keep private enum/type adapters. Common host
 initialization modes now translate to this API. Indexed `GenerationOptions`
 is the single public generation path; the former mutable, call-order-dependent
 generator has been removed.
+
+## Tensor linear combination
+
+`axpby.hpp` evaluates an arbitrary-layout elementwise linear combination with
+explicit accumulator and output storage types:
+
+```cpp
+AxpbyProblem problem(xView, yView, outputView, ScalarType::Float32);
+problem.alpha = 2.0;
+problem.beta = -0.5;
+AxpbyRunInfo run = referenceAxpby(problem);
+```
+
+Either input may be absent, but at least one is required. The views must share
+the output shape; strides, offsets, transposes, batching, and padding are
+represented entirely by their layouts.
 
 ## Structured tensor comparison
 
@@ -457,6 +473,8 @@ The `roc_host_validation` package currently provides:
   non-finite policy, Frobenius/ULP evidence, allclose search, and sentinel
   diagnostics;
 - `GenerationOptions`, `GenerationPatternSpec`, and `generate_tensor`;
+- `reference_axpby` with optional X/Y tensors, explicit alpha/beta,
+  accumulator type, and output type;
 - `reference_gemm` with runtime storage/output/accumulator types, alpha/beta,
   ordered pre-quantization factors, compute-input quantization, math mode,
   output scaling/conversion, and activation;
