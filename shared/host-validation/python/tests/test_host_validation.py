@@ -904,7 +904,7 @@ class TensorAndGemmTests(unittest.TestCase):
         )
         expected = 2.0 * (a @ b) - c
         np.testing.assert_array_equal(hv.to_numpy(observed), expected)
-        tiled = hv.reference_gemm(
+        tiled_result = hv.reference_gemm_result(
             hv.from_numpy(a),
             hv.from_numpy(b),
             hv.from_numpy(c),
@@ -914,7 +914,10 @@ class TensorAndGemmTests(unittest.TestCase):
             beta=-1.0,
             backend=hv.GemmBackend.Tiled,
         )
-        np.testing.assert_array_equal(hv.to_numpy(tiled), expected)
+        np.testing.assert_array_equal(hv.to_numpy(tiled_result.output), expected)
+        self.assertEqual(tiled_result.run_info.backend_used, hv.GemmBackend.Tiled)
+        self.assertIsNone(tiled_result.run_info.fallback_reason)
+        self.assertEqual(tiled_result.run_info.output_elements_computed, expected.size)
 
     def test_float64_gemm_matches_numpy(self):
         a = np.asarray([[0.25, -1.5], [2.0, 3.25]], dtype=np.float64)
@@ -952,12 +955,13 @@ class TensorAndGemmTests(unittest.TestCase):
         a = np.full((1, 64), np.float16(0.1), dtype=np.float16)
         b = np.full((64, 1), np.float16(0.1), dtype=np.float16)
         c = np.zeros((1, 1), dtype=np.float16)
-        observed = hv.reference_gemm(
+        result = hv.reference_gemm_result(
             hv.from_numpy(a),
             hv.from_numpy(b),
             hv.from_numpy(c),
             hv.ScalarType.Float16,
             hv.ScalarType.Float16,
+            backend=hv.GemmBackend.Automatic,
         )
 
         expected = np.float16(0)
@@ -965,9 +969,11 @@ class TensorAndGemmTests(unittest.TestCase):
             product = np.float16(a[0, reduction] * b[reduction, 0])
             expected = np.float16(expected + product)
         np.testing.assert_array_equal(
-            hv.to_numpy(observed, np.float32),
+            hv.to_numpy(result.output, np.float32),
             np.asarray([[expected]], dtype=np.float32),
         )
+        self.assertEqual(result.run_info.backend_used, hv.GemmBackend.Canonical)
+        self.assertIsNotNone(result.run_info.fallback_reason)
 
     def test_bfloat16_accumulator_rounds_product_and_sum_each_step(self):
         a = np.full((1, 16), np.float32(0.1), dtype=np.float32)

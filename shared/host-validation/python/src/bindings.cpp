@@ -28,6 +28,11 @@ using namespace nb::literals;
 using namespace roc::host_validation;
 
 namespace {
+struct PythonGemmResult {
+    Tensor output;
+    GemmRunInfo runInfo;
+};
+
 struct PythonEpilogueResult {
     Tensor output;
     std::optional<Tensor> rawOutput;
@@ -313,7 +318,7 @@ Tensor tensorFromStorage(ScalarType type, std::vector<size_t> dimensions, nb::by
     return Tensor::fromStorage(type, std::move(layout), std::move(storage));
 }
 
-Tensor referenceGemmOwned(
+PythonGemmResult referenceGemmOwned(
     const Tensor& a, const Tensor& b, const Tensor& c, ScalarType outputType,
     ScalarType accumulatorType, std::complex<double> alpha, std::complex<double> beta,
     std::optional<ScalarType> computeTypeA, std::optional<ScalarType> computeTypeB,
@@ -366,18 +371,18 @@ Tensor referenceGemmOwned(
     problem.epilogue.activationParameter1 = activationParameter1;
     problem.outputSelection = std::move(outputSelection);
     GemmInvocation invocation(std::move(problem));
-    if (backend == GemmBackend::Tiled) {
+    if (backend == GemmBackend::Automatic || backend == GemmBackend::Tiled) {
         static const TiledGemmBackend tiled;
         invocation.execution = {
-            .backend = GemmBackend::Tiled,
-            .requireRequestedBackend = true,
+            .backend = backend,
+            .requireRequestedBackend = backend == GemmBackend::Tiled,
             .backendImplementation = &tiled,
         };
     } else if (backend != GemmBackend::Canonical) {
         throw std::invalid_argument("Python reference_gemm exposes Canonical and Tiled backends.");
     }
-    referenceGemm(invocation);
-    return d;
+    GemmRunInfo runInfo = referenceGemm(invocation);
+    return {.output = std::move(d), .runInfo = std::move(runInfo)};
 }
 
 PythonEpilogueResult referenceEpilogueOwned(
@@ -563,6 +568,7 @@ NB_MODULE(_roc_host_validation, module) {
         .value("AfterProductAndSum", AccumulationRounding::AfterProductAndSum);
 
     nb::enum_<GemmBackend>(module, "GemmBackend")
+        .value("Automatic", GemmBackend::Automatic)
         .value("Canonical", GemmBackend::Canonical)
         .value("Tiled", GemmBackend::Tiled);
 
@@ -997,6 +1003,20 @@ NB_MODULE(_roc_host_validation, module) {
             },
             nb::rv_policy::reference_internal);
 
+    nb::class_<GemmRunInfo>(module, "GemmRunInfo")
+        .def_ro("backend_used", &GemmRunInfo::backendUsed)
+        .def_ro("fallback_reason", &GemmRunInfo::fallbackReason)
+        .def_ro("output_elements_computed", &GemmRunInfo::outputElementsComputed);
+
+    nb::class_<PythonGemmResult>(module, "GemmResult")
+        .def_prop_ro(
+            "output", [](const PythonGemmResult& result) -> const Tensor& { return result.output; },
+            nb::rv_policy::reference_internal)
+        .def_prop_ro(
+            "run_info",
+            [](const PythonGemmResult& result) -> const GemmRunInfo& { return result.runInfo; },
+            nb::rv_policy::reference_internal);
+
     nb::class_<PythonEpilogueResult>(module, "EpilogueResult")
         .def_prop_ro(
             "output",
@@ -1104,7 +1124,7 @@ NB_MODULE(_roc_host_validation, module) {
         },
         "tensor"_a, "allocated_elements"_a, "region"_a = SentinelRegion::Inside,
         "max_reported_mismatches"_a = 10);
-    module.def("reference_gemm", &referenceGemmOwned, "a"_a, "b"_a, "c"_a, "output_type"_a,
+    module.def("reference_gemm_result", &referenceGemmOwned, "a"_a, "b"_a, "c"_a, "output_type"_a,
                "accumulator_type"_a, "alpha"_a = 1.0, "beta"_a = 0.0,
                "compute_type_a"_a = std::optional<ScalarType>{},
                "compute_type_b"_a = std::optional<ScalarType>{}, "math_mode"_a = MathMode::Default,
