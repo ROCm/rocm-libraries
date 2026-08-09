@@ -380,18 +380,18 @@ Tensor referenceGemmOwned(
     problem.epilogue.activationParameter0 = activationParameter0;
     problem.epilogue.activationParameter1 = activationParameter1;
     problem.outputSelection = std::move(outputSelection);
-    if (backend == GemmBackend::Canonical) {
-        referenceGemm(problem);
-    } else if (backend == GemmBackend::Tiled) {
+    GemmInvocation invocation(std::move(problem));
+    if (backend == GemmBackend::Tiled) {
         static const TiledGemmBackend tiled;
-        referenceGemm(problem, {
-                                   .backend = GemmBackend::Tiled,
-                                   .requireRequestedBackend = true,
-                                   .backendImplementation = &tiled,
-                               });
-    } else {
+        invocation.execution = {
+            .backend = GemmBackend::Tiled,
+            .requireRequestedBackend = true,
+            .backendImplementation = &tiled,
+        };
+    } else if (backend != GemmBackend::Canonical) {
         throw std::invalid_argument("Python reference_gemm exposes Canonical and Tiled backends.");
     }
+    referenceGemm(invocation);
     return d;
 }
 

@@ -219,13 +219,18 @@ problem.mathMode = MathMode::XFloat32;           // optional operand math
 problem.epilogue.alpha = {1.0, 0.0};
 problem.epilogue.beta = {0.0, 0.0};
 
-GemmRunInfo run = referenceGemm(problem);
+GemmInvocation invocation(std::move(problem));
+invocation.execution.backend = GemmBackend::Automatic;
+
+GemmSupportInfo support = queryGemmSupport(invocation);
+GemmResult run = referenceGemm(invocation);
 ```
 
 The normalized shapes are A `[M,K]`, B `[K,N]`, and C/D `[M,N]`.
 Transpose, leading dimensions, padding, and adjusted base locations are
 represented by `Layout`; no product transpose or matrix-layout enum crosses
-the API.
+the API. Support queries and execution consume the same `GemmInvocation`, so
+backend selection cannot inspect a different numerical problem.
 
 `GemmProblem` currently supports:
 

@@ -4,6 +4,7 @@
 #include <array>
 #include <roc/host_validation/validation.hpp>
 #include <span>
+#include <utility>
 
 int main() {
     using namespace roc::host_validation;
@@ -21,6 +22,8 @@ int main() {
         TensorView::fromNative<float>(Layout::contiguous(Shape{1, 1}), std::span<const float>(c)),
         MutableTensorView::fromNative<float>(Layout::contiguous(Shape{1, 1}), std::span<float>(d)),
         ScalarType::Float32);
-    referenceGemm(problem);
+    GemmInvocation invocation(std::move(problem));
+    if (!queryGemmSupport(invocation)) return 1;
+    referenceGemm(invocation);
     return d[0] == 6 ? 0 : 1;
 }
