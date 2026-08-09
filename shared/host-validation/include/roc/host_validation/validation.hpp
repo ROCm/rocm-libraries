@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <roc/host_validation/axpby.hpp>
 #include <roc/host_validation/comparison.hpp>
 #include <roc/host_validation/epilogue.hpp>
 #include <roc/host_validation/gemm.hpp>

@@ -33,6 +33,11 @@ struct PythonGemmResult {
     GemmRunInfo runInfo;
 };
 
+struct PythonAxpbyResult {
+    Tensor output;
+    AxpbyRunInfo runInfo;
+};
+
 struct PythonEpilogueResult {
     Tensor output;
     std::optional<Tensor> rawOutput;
@@ -383,6 +388,21 @@ PythonGemmResult referenceGemmOwned(
     }
     GemmRunInfo runInfo = referenceGemm(invocation);
     return {.output = std::move(d), .runInfo = std::move(runInfo)};
+}
+
+PythonAxpbyResult referenceAxpbyOwned(std::optional<Tensor> x, std::optional<Tensor> y,
+                                      ScalarType outputType, ScalarType accumulatorType,
+                                      std::complex<double> alpha, std::complex<double> beta) {
+    if (!x && !y) throw std::invalid_argument("Python reference_axpby requires X or Y.");
+    const Shape& shape = x ? x->shape() : y->shape();
+    Tensor output(outputType, shape);
+    AxpbyProblem problem(x ? std::optional<TensorView>(x->view()) : std::nullopt,
+                         y ? std::optional<TensorView>(y->view()) : std::nullopt,
+                         output.mutableView(), accumulatorType);
+    problem.alpha = alpha;
+    problem.beta = beta;
+    const AxpbyRunInfo runInfo = referenceAxpby(problem);
+    return {.output = std::move(output), .runInfo = runInfo};
 }
 
 PythonEpilogueResult referenceEpilogueOwned(
@@ -997,6 +1017,19 @@ NB_MODULE(_roc_host_validation, module) {
             },
             nb::rv_policy::reference_internal);
 
+    nb::class_<AxpbyRunInfo>(module, "AxpbyRunInfo")
+        .def_ro("elements_computed", &AxpbyRunInfo::elementsComputed);
+
+    nb::class_<PythonAxpbyResult>(module, "AxpbyResult")
+        .def_prop_ro(
+            "output",
+            [](const PythonAxpbyResult& result) -> const Tensor& { return result.output; },
+            nb::rv_policy::reference_internal)
+        .def_prop_ro(
+            "run_info",
+            [](const PythonAxpbyResult& result) -> const AxpbyRunInfo& { return result.runInfo; },
+            nb::rv_policy::reference_internal);
+
     nb::class_<GemmRunInfo>(module, "GemmRunInfo")
         .def_ro("backend_used", &GemmRunInfo::backendUsed)
         .def_ro("fallback_reason", &GemmRunInfo::fallbackReason)
@@ -1108,6 +1141,9 @@ NB_MODULE(_roc_host_validation, module) {
         },
         "tensor"_a, "allocated_elements"_a, "region"_a = SentinelRegion::Inside,
         "max_reported_mismatches"_a = 10);
+    module.def("reference_axpby", &referenceAxpbyOwned, "x"_a = std::optional<Tensor>{},
+               "y"_a = std::optional<Tensor>{}, "output_type"_a = ScalarType::Float32,
+               "accumulator_type"_a = ScalarType::Float32, "alpha"_a = 1.0, "beta"_a = 1.0);
     module.def("reference_gemm_result", &referenceGemmOwned, "a"_a, "b"_a, "c"_a, "output_type"_a,
                "accumulator_type"_a, "alpha"_a = 1.0, "beta"_a = 0.0,
                "compute_type_a"_a = std::optional<ScalarType>{},
