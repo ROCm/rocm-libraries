@@ -384,11 +384,13 @@ TEST(HostValidationDataInitializationBridge, HostSideDeviceFillCopiesComponentSt
     EXPECT_EQ(hipFree(device), hipSuccess);
 }
 
-TEST(HostValidationCblasBridge, FloatGemm)
+TEST(HostValidationCblasBridge, DistinctHalfCAndFloatD)
 {
-    const std::array<float, 6> a{1, 4, 2, 5, 3, 6};
-    const std::array<float, 6> b{7, 9, 11, 8, 10, 12};
-    std::array<float, 4>       d{1, 1, 1, 1};
+    const std::array<float, 6>   a{1, 4, 2, 5, 3, 6};
+    const std::array<float, 6>   b{7, 9, 11, 8, 10, 12};
+    std::array<hipblasLtHalf, 6> c{1, 2, -99, 3, 4, -99};
+    const auto                   originalC = c;
+    std::array<float, 4>         d{-1, -2, -3, -4};
 
     hipblaslt_reference_gemm<float>(HIPBLAS_OP_N,
                                     HIPBLAS_OP_N,
@@ -401,6 +403,8 @@ TEST(HostValidationCblasBridge, FloatGemm)
                                     b.data(),
                                     3,
                                     3,
+                                    c.data(),
+                                    3,
                                     d.data(),
                                     2,
                                     nullptr,
@@ -411,15 +415,18 @@ TEST(HostValidationCblasBridge, FloatGemm)
                                     false,
                                     HIP_R_32F,
                                     HIP_R_32F,
+                                    HIP_R_16F,
                                     HIP_R_32F,
                                     HIP_R_32F,
                                     HIP_R_32F,
                                     HIP_R_32F);
 
-    EXPECT_FLOAT_EQ(d[0], 2 * 58 + 3);
-    EXPECT_FLOAT_EQ(d[1], 2 * 139 + 3);
-    EXPECT_FLOAT_EQ(d[2], 2 * 64 + 3);
-    EXPECT_FLOAT_EQ(d[3], 2 * 154 + 3);
+    for(size_t index = 0; index < c.size(); ++index)
+        EXPECT_FLOAT_EQ(static_cast<float>(c[index]), static_cast<float>(originalC[index]));
+    EXPECT_FLOAT_EQ(d[0], 2 * 58 + 3 * static_cast<float>(originalC[0]));
+    EXPECT_FLOAT_EQ(d[1], 2 * 139 + 3 * static_cast<float>(originalC[1]));
+    EXPECT_FLOAT_EQ(d[2], 2 * 64 + 3 * static_cast<float>(originalC[3]));
+    EXPECT_FLOAT_EQ(d[3], 2 * 154 + 3 * static_cast<float>(originalC[4]));
 }
 
 TEST(HostValidationCblasBridge, MixedHalfInputs)
@@ -441,6 +448,8 @@ TEST(HostValidationCblasBridge, MixedHalfInputs)
                                     0,
                                     d.data(),
                                     2,
+                                    d.data(),
+                                    2,
                                     nullptr,
                                     nullptr,
                                     nullptr,
@@ -449,6 +458,7 @@ TEST(HostValidationCblasBridge, MixedHalfInputs)
                                     false,
                                     HIP_R_16F,
                                     HIP_R_16F,
+                                    HIP_R_32F,
                                     HIP_R_32F,
                                     HIP_R_32F,
                                     HIP_R_16F,
@@ -481,12 +491,15 @@ TEST(HostValidationCblasBridge, QuantizesCombinedOperandScaleAndAlphaVector)
                                     0.0f,
                                     d.data(),
                                     1,
+                                    d.data(),
+                                    1,
                                     alphaVector.data(),
                                     scaleA.data(),
                                     nullptr,
                                     1.0f,
                                     false,
                                     false,
+                                    HIP_R_32F,
                                     HIP_R_32F,
                                     HIP_R_32F,
                                     HIP_R_32F,
@@ -518,6 +531,8 @@ TEST(HostValidationCblasBridge, AppliesOutputScaleBeforeNarrowConversion)
                                     0.0f,
                                     d.data(),
                                     1,
+                                    d.data(),
+                                    1,
                                     nullptr,
                                     nullptr,
                                     nullptr,
@@ -526,6 +541,7 @@ TEST(HostValidationCblasBridge, AppliesOutputScaleBeforeNarrowConversion)
                                     false,
                                     HIP_R_32F,
                                     HIP_R_32F,
+                                    HIP_R_16F,
                                     HIP_R_16F,
                                     HIP_R_32F,
                                     HIP_R_32F,
@@ -554,6 +570,8 @@ TEST(HostValidationCblasBridge, ConvertsFnuzOutputWithComponentCodec)
                                     0.0f,
                                     d.data(),
                                     1,
+                                    d.data(),
+                                    1,
                                     nullptr,
                                     nullptr,
                                     nullptr,
@@ -562,6 +580,7 @@ TEST(HostValidationCblasBridge, ConvertsFnuzOutputWithComponentCodec)
                                     false,
                                     HIP_R_32F,
                                     HIP_R_32F,
+                                    HIP_R_8F_E4M3_FNUZ,
                                     HIP_R_8F_E4M3_FNUZ,
                                     HIP_R_32F,
                                     HIP_R_32F,
@@ -589,6 +608,8 @@ TEST(HostValidationCblasBridge, SaturatesRoundedInt8Output)
                                     0.0f,
                                     d.data(),
                                     1,
+                                    d.data(),
+                                    1,
                                     nullptr,
                                     nullptr,
                                     nullptr,
@@ -597,6 +618,7 @@ TEST(HostValidationCblasBridge, SaturatesRoundedInt8Output)
                                     false,
                                     HIP_R_32F,
                                     HIP_R_32F,
+                                    HIP_R_8I,
                                     HIP_R_8I,
                                     HIP_R_32F,
                                     HIP_R_32F,
@@ -624,12 +646,15 @@ TEST(HostValidationCblasBridge, IntegerComputeUsesWideReferenceAndSaturatingOutp
                                       0,
                                       d.data(),
                                       1,
+                                      d.data(),
+                                      1,
                                       nullptr,
                                       nullptr,
                                       nullptr,
                                       1,
                                       false,
                                       false,
+                                      HIP_R_8I,
                                       HIP_R_8I,
                                       HIP_R_8I,
                                       HIP_R_8I,
@@ -661,12 +686,15 @@ TEST(HostValidationCblasBridge, TransposedPaddedScaleUsesLogicalRows)
                                     0.0f,
                                     d.data(),
                                     2,
+                                    d.data(),
+                                    2,
                                     nullptr,
                                     scaleA.data(),
                                     nullptr,
                                     1.0f,
                                     true,
                                     false,
+                                    HIP_R_32F,
                                     HIP_R_32F,
                                     HIP_R_32F,
                                     HIP_R_32F,
@@ -699,6 +727,8 @@ TEST(HostValidationCblasBridge, PackedFloat4InputUsesLogicalElementLayout)
         0.0f,
         d.data(),
         1,
+        d.data(),
+        1,
         nullptr,
         nullptr,
         nullptr,
@@ -706,6 +736,7 @@ TEST(HostValidationCblasBridge, PackedFloat4InputUsesLogicalElementLayout)
         false,
         false,
         static_cast<hipDataType>(HIP_R_4F_E2M1),
+        HIP_R_32F,
         HIP_R_32F,
         HIP_R_32F,
         HIP_R_32F,
@@ -737,12 +768,15 @@ TEST(HostValidationCblasBridge, ComplexConjugateTranspose)
                                       Complex(0, 0),
                                       d.data(),
                                       1,
+                                      d.data(),
+                                      1,
                                       nullptr,
                                       nullptr,
                                       nullptr,
                                       Complex(1, 0),
                                       false,
                                       false,
+                                      HIP_C_32F,
                                       HIP_C_32F,
                                       HIP_C_32F,
                                       HIP_C_32F,
@@ -777,12 +811,15 @@ TEST(HostValidationCblasBridge, LargeProblemUsesAcceleratedBackend)
                                     4,
                                     d.data(),
                                     m,
+                                    d.data(),
+                                    m,
                                     nullptr,
                                     nullptr,
                                     nullptr,
                                     1,
                                     false,
                                     false,
+                                    HIP_R_32F,
                                     HIP_R_32F,
                                     HIP_R_32F,
                                     HIP_R_32F,
@@ -811,12 +848,15 @@ TEST(HostValidationCblasBridge, ZeroReductionDoesNotRequireBlasOperands)
                                     3.0f,
                                     d.data(),
                                     1,
+                                    d.data(),
+                                    1,
                                     nullptr,
                                     nullptr,
                                     nullptr,
                                     1.0f,
                                     false,
                                     false,
+                                    HIP_R_32F,
                                     HIP_R_32F,
                                     HIP_R_32F,
                                     HIP_R_32F,

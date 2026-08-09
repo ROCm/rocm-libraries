@@ -122,8 +122,10 @@ void hipblaslt_reference_gemm(hipblasOperation_t       transA,
                               const void*              B,
                               int64_t                  ldb,
                               Tc                       beta,
-                              std::add_pointer_t<void> C,
+                              const void*              C,
                               int64_t                  ldc,
+                              std::add_pointer_t<void> D,
+                              int64_t                  ldd,
                               const void*              AlphaVec,
                               const void*              scaleAVec,
                               const void*              scaleBVec,
@@ -132,6 +134,7 @@ void hipblaslt_reference_gemm(hipblasOperation_t       transA,
                               bool                     isScaleBVec,
                               hipDataType              TiA,
                               hipDataType              TiB,
+                              hipDataType              TiC,
                               hipDataType              To,
                               hipDataType              Tc_enum,
                               hipDataType              TciA,
@@ -139,7 +142,7 @@ void hipblaslt_reference_gemm(hipblasOperation_t       transA,
                               bool                     isScaleAMXFormat,
                               bool                     isScaleBMXFormat)
 {
-    if(m < 0 || n < 0 || k < 0 || lda < 0 || ldb < 0 || ldc < 0)
+    if(m < 0 || n < 0 || k < 0 || lda < 0 || ldb < 0 || ldc < 0 || ldd < 0)
         throw std::invalid_argument(
             "hipBLASLt reference GEMM dimensions and strides must be nonnegative.");
 
@@ -150,6 +153,8 @@ void hipblaslt_reference_gemm(hipblasOperation_t       transA,
         roc::host_validation::hipblaslt_adapter::scalarType(TiA);
     const ScalarType typeB =
         roc::host_validation::hipblaslt_adapter::scalarType(TiB);
+    const ScalarType typeC =
+        roc::host_validation::hipblaslt_adapter::scalarType(TiC);
     const ScalarType outputType =
         roc::host_validation::hipblaslt_adapter::scalarType(To);
 
@@ -160,6 +165,7 @@ void hipblaslt_reference_gemm(hipblasOperation_t       transA,
     const Layout layoutA(Shape{rows, reduction}, {aRowStride, aColumnStride});
     const Layout layoutB(Shape{reduction, columns}, {bRowStride, bColumnStride});
     const Layout layoutC(Shape{rows, columns}, {1, ldc});
+    const Layout layoutD(Shape{rows, columns}, {1, ldd});
 
     GemmOperand operandA(tensorView(A, typeA, layoutA));
     GemmOperand operandB(tensorView(B, typeB, layoutB));
@@ -193,8 +199,8 @@ void hipblaslt_reference_gemm(hipblasOperation_t       transA,
 
     GemmProblem problem(std::move(operandA),
                         std::move(operandB),
-                        tensorView(C, outputType, layoutC),
-                        mutableTensorView(C, outputType, layoutC),
+                        tensorView(C, typeC, layoutC),
+                        mutableTensorView(D, outputType, layoutD),
                         compatibilityAccumulatorType<Tc>());
     problem.epilogue.alpha = runtimeScalar(alpha);
     problem.epilogue.beta = runtimeScalar(beta);
@@ -206,7 +212,8 @@ void hipblaslt_reference_gemm(hipblasOperation_t       transA,
     const bool useBlas =
         rows != 0 && columns != 0 && reduction != 0 &&
         (m > blasThreshold || n > blasThreshold || k > blasThreshold ||
-         lda > blasThreshold || ldb > blasThreshold || ldc > blasThreshold);
+         lda > blasThreshold || ldb > blasThreshold || ldc > blasThreshold ||
+         ldd > blasThreshold);
     GemmInvocation invocation(std::move(problem));
     if(useBlas)
     {
@@ -234,8 +241,10 @@ void hipblaslt_reference_gemm(hipblasOperation_t       transA,
                                                 const void*        B,                        \
                                                 int64_t            ldb,                      \
                                                 Tc                 beta,                     \
-                                                std::add_pointer_t<void> C,                  \
+                                                const void*        C,                        \
                                                 int64_t            ldc,                      \
+                                                std::add_pointer_t<void> D,                  \
+                                                int64_t            ldd,                      \
                                                 const void*        AlphaVec,                 \
                                                 const void*        scaleAVec,                 \
                                                 const void*        scaleBVec,                 \
@@ -244,6 +253,7 @@ void hipblaslt_reference_gemm(hipblasOperation_t       transA,
                                                 bool               isScaleBVec,              \
                                                 hipDataType        TiA,                      \
                                                 hipDataType        TiB,                      \
+                                                hipDataType        TiC,                      \
                                                 hipDataType        To,                       \
                                                 hipDataType        Tc_enum,                  \
                                                 hipDataType        TciA,                     \

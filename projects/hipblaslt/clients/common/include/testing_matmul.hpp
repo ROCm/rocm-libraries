@@ -2926,18 +2926,6 @@ void testing_matmul_with_bias(const Arguments& arg,
             if(arg.scaleE)
                 CHECK_HIP_ERROR(synchronize(dScaleE[i], hScaleE[i]));
 
-            //// copy data from CPU to device end
-            if(size_D_copy[i])
-            {
-                if(epilogue_on[i])
-                {
-                    transform_buf(hC[i], hD_gold_epl[i], To, Talpha);
-                }
-                else
-                {
-                    copy_buf(hC[i], hD_gold[i], To);
-                }
-            }
             if(epilogue_on[i])
             {
                 EXPECT_HIPBLAS_STATUS(
@@ -3246,11 +3234,6 @@ void testing_matmul_with_bias(const Arguments& arg,
                     swizzle_tensor_type(
                         tmp, hB[batchCount], TiB, arg, 1, N[i], K[i], ldb[i], false);
                     CHECK_HIP_ERROR(synchronize(dB[batchCount], tmp, block_count));
-                }
-                //// copy data from CPU to device end
-                if(size_D_copy[i])
-                {
-                    copy_buf(hC[batchCount], hD_gold[batchCount], To);
                 }
             }
             if(arg.scaleA == hipblaslt_scaling_format::Scalar)
@@ -4589,6 +4572,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                                   + stride_b[gemmIdx] * batchIdx * realDataTypeSize(TiB),
                         ldb[gemmIdx],
                         betaTemp,
+                        hC[gemmIdx].as<char>()
+                            + stride_c[gemmIdx] * batchIdx * realDataTypeSize(To),
+                        ldc[gemmIdx],
                         hD_gold_epl[gemmIdx].as<char>()
                             + stride_d[gemmIdx] * batchIdx * realDataTypeSize(Talpha),
                         ldd[gemmIdx],
@@ -4600,7 +4586,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                         (arg.scaleB == hipblaslt_scaling_format::Vector),
                         isScaleAMXFormat ? HIP_R_32F : TiA,
                         isScaleBMXFormat ? HIP_R_32F : TiB,
-                        Tc,
+                        To,
+                        Talpha,
                         Tc,
                         isScaleAMXFormat ? HIP_R_32F : TciA,
                         isScaleBMXFormat ? HIP_R_32F : TciB,
@@ -4750,6 +4737,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                                ptrB,
                                ldb[gemmIdx],
                                betaTemp,
+                               hC[batchIdx].as<char>(),
+                               ldc[gemmIdx],
                                hD_gold[batchIdx].as<char>(),
                                ldd[gemmIdx],
                                nullptr,
@@ -4760,6 +4749,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                (arg.scaleB == hipblaslt_scaling_format::Vector),
                                isScaleAMXFormat ? HIP_R_32F : TiA,
                                isScaleBMXFormat ? HIP_R_32F : TiB,
+                               To,
                                To,
                                Tc,
                                isScaleAMXFormat ? HIP_R_32F : TciA,
@@ -4791,6 +4781,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                                   + stride_b[gemmIdx] * batchIdx * realDataTypeSize(TiB),
                         ldb[gemmIdx],
                         betaTemp,
+                        hC[gemmIdx].as<char>()
+                            + stride_c[gemmIdx] * batchIdx * realDataTypeSize(To),
+                        ldc[gemmIdx],
                         hD_gold[gemmIdx].as<char>()
                             + stride_d[gemmIdx] * batchIdx * realDataTypeSize(To),
                         ldd[gemmIdx],
@@ -4802,6 +4795,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                         (arg.scaleB == hipblaslt_scaling_format::Vector),
                         isScaleAMXFormat ? HIP_R_32F : TiA,
                         isScaleBMXFormat ? HIP_R_32F : TiB,
+                        To,
                         To,
                         Tc,
                         isScaleAMXFormat ? HIP_R_32F : TciA,
