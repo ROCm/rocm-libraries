@@ -107,46 +107,51 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
     host_vector<Ti> h_A_full(size_A_full * batch_count);
     host_vector<Ti> h_B_full(size_B_full * batch_count);
     host_vector<To> h_C_full(size_C_full * batch_count);
-    host_vector<To> h_D_full(size_D_full * batch_count);   // GPU result with offset API
-    host_vector<To> h_D_gold(size_D_sub * batch_count);    // CPU reference
+    host_vector<To> h_D_full(size_D_full * batch_count); // GPU result with offset API
+    host_vector<To> h_D_gold(size_D_sub * batch_count); // CPU reference
 
-    // Initialize matrices with known pattern
-    // For negative offsets: base points to (padding + 0), data at (base + negative_offset) = padding region
-    // For positive offsets: base points to 0, data at (base + positive_offset) = offset region
-    for(int b = 0; b < batch_count; b++)
-    {
-        // Calculate base pointer for this batch (after padding for negative offsets)
-        Ti* A_base = h_A_full.data() + b * size_A_full + padding_a;
-        Ti* B_base = h_B_full.data() + b * size_B_full + padding_b;
-        To* C_base = h_C_full.data() + b * size_C_full + padding_c;
+    // Initialize matrices with known logical-coordinate patterns.
+    roc::host_validation::GenerationOptions aGeneration;
+    aGeneration.real.pattern = roc::host_validation::GenerationPattern::AffineIndexRemainder;
+    aGeneration.real.dimensionCoefficients = {1, 1, 1};
+    aGeneration.real.remainderDivisor      = 7;
+    aGeneration.real.valueOffset           = 1;
+    roc::host_validation::generate(
+        roc::host_validation::hipblaslt_adapter::mutableTensorView(
+            h_A_full.data(),
+            h_A_full.size(),
+            roc::host_validation::Layout(
+                roc::host_validation::Shape{size_t(A_row), size_t(A_col), size_t(batch_count)},
+                {1, static_cast<ptrdiff_t>(lda), static_cast<ptrdiff_t>(size_A_full)},
+                static_cast<ptrdiff_t>(padding_a) + static_cast<ptrdiff_t>(offset_a))),
+        aGeneration);
 
-        // Data location is at (base + offset)
-        // For negative offset: base + (-N) points backward into padding region
-        // For positive offset: base + (+N) points forward into buffer
-        Ti* A_batch = A_base + offset_a;
-        Ti* B_batch = B_base + offset_b;
-        To* C_batch = C_base + offset_c;
+    roc::host_validation::GenerationOptions bGeneration = aGeneration;
+    bGeneration.real.dimensionCoefficients              = {1, -1, 1};
+    bGeneration.real.remainderDivisor                   = 5;
+    roc::host_validation::generate(
+        roc::host_validation::hipblaslt_adapter::mutableTensorView(
+            h_B_full.data(),
+            h_B_full.size(),
+            roc::host_validation::Layout(
+                roc::host_validation::Shape{size_t(B_row), size_t(B_col), size_t(batch_count)},
+                {1, static_cast<ptrdiff_t>(ldb), static_cast<ptrdiff_t>(size_B_full)},
+                static_cast<ptrdiff_t>(padding_b) + static_cast<ptrdiff_t>(offset_b))),
+        bGeneration);
 
-        // Simple initialization: A and B with small integers.
-        roc::host_validation::generate(
-            roc::host_validation::MatrixView<Ti>(
-                A_batch, size_t(A_row), size_t(A_col), 1, static_cast<ptrdiff_t>(lda)),
-            [b](size_t row, size_t column) {
-                return (static_cast<int64_t>(row) + static_cast<int64_t>(column) + b) % 7 + 1;
-            });
-        roc::host_validation::generate(
-            roc::host_validation::MatrixView<Ti>(
-                B_batch, size_t(B_row), size_t(B_col), 1, static_cast<ptrdiff_t>(ldb)),
-            [b](size_t row, size_t column) {
-                return (static_cast<int64_t>(row) - static_cast<int64_t>(column) + b) % 5 + 1;
-            });
-        roc::host_validation::generate(
-            roc::host_validation::MatrixView<To>(
-                C_batch, size_t(M), size_t(N), 1, static_cast<ptrdiff_t>(ldc)),
-            [](size_t row, size_t column) {
-                return (static_cast<int64_t>(row) + static_cast<int64_t>(column)) % 3;
-            });
-    }
+    roc::host_validation::GenerationOptions cGeneration = aGeneration;
+    cGeneration.real.dimensionCoefficients              = {1, 1, 0};
+    cGeneration.real.remainderDivisor                   = 3;
+    cGeneration.real.valueOffset                        = 0;
+    roc::host_validation::generate(
+        roc::host_validation::hipblaslt_adapter::mutableTensorView(
+            h_C_full.data(),
+            h_C_full.size(),
+            roc::host_validation::Layout(
+                roc::host_validation::Shape{size_t(M), size_t(N), size_t(batch_count)},
+                {1, static_cast<ptrdiff_t>(ldc), static_cast<ptrdiff_t>(size_C_full)},
+                static_cast<ptrdiff_t>(padding_c) + static_cast<ptrdiff_t>(offset_c))),
+        cGeneration);
 
     // Allocate device memory
     device_vector<Ti> d_A_full(size_A_full * batch_count);
@@ -155,12 +160,12 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
     device_vector<To> d_D_full(size_D_full * batch_count);
 
     // Copy to device
-    CHECK_HIP_ERROR(
-        hipMemcpy(d_A_full, h_A_full.data(), sizeof(Ti) * size_A_full * batch_count, hipMemcpyHostToDevice));
-    CHECK_HIP_ERROR(
-        hipMemcpy(d_B_full, h_B_full.data(), sizeof(Ti) * size_B_full * batch_count, hipMemcpyHostToDevice));
-    CHECK_HIP_ERROR(
-        hipMemcpy(d_C_full, h_C_full.data(), sizeof(To) * size_C_full * batch_count, hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(hipMemcpy(
+        d_A_full, h_A_full.data(), sizeof(Ti) * size_A_full * batch_count, hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(hipMemcpy(
+        d_B_full, h_B_full.data(), sizeof(Ti) * size_B_full * batch_count, hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(hipMemcpy(
+        d_C_full, h_C_full.data(), sizeof(To) * size_C_full * batch_count, hipMemcpyHostToDevice));
 
     // Setup pointer arrays for base addresses
     // Base pointers must point AFTER the padding (for negative offset support)
