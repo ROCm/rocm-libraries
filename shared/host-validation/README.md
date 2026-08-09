@@ -450,6 +450,8 @@ The `roc_host_validation` package currently provides:
 - `reference_gemm` with runtime storage/output/accumulator types, alpha/beta,
   ordered pre-quantization factors, compute-input quantization, math mode,
   output scaling/conversion, and activation;
+- `reference_gemm_result` with the same operation plus backend, fallback, and
+  output-element execution evidence;
 - `reference_epilogue` with bias, forward/gradient activation, E, scale-D/E,
   gate residual, raw output, and AMax results; and
 - `reference_sum` with runtime input/output/accumulator types and explicit
