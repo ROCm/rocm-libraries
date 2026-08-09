@@ -677,8 +677,7 @@ inline uint32_t encodeBinaryFloat(ScalarType type, float value) {
     const auto format = binaryFloatFormat(type);
     if (std::isnan(value)) {
         if (!scalarTypeInfo(type).supportsNaN) {
-            const uint32_t signMask =
-                format.hasSign ? 1U << (format.totalBits - 1U) : 0U;
+            const uint32_t signMask = format.hasSign ? 1U << (format.totalBits - 1U) : 0U;
             const uint32_t sign = std::signbit(value) ? signMask : 0U;
             return sign | format.maximumPositiveFiniteRaw;
         }

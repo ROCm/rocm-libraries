@@ -3,10 +3,9 @@
 
 #pragma once
 
-#include <roc/host_validation/tensor.hpp>
-
 #include <cassert>
 #include <cstddef>
+#include <roc/host_validation/tensor.hpp>
 #include <stdexcept>
 
 namespace roc::host_validation {
@@ -76,8 +75,7 @@ class MatrixView {
     }
 
     ConstMatrixView<T> asConst() const {
-        return ConstMatrixView<T>(
-            m_data, m_rows, m_columns, m_rowStride, m_columnStride);
+        return ConstMatrixView<T>(m_data, m_rows, m_columns, m_rowStride, m_columnStride);
     }
 
    private:

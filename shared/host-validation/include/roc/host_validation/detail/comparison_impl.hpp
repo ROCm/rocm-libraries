@@ -46,8 +46,7 @@ inline ComparisonOptions nearComparisonOptions(double absoluteTolerance) {
 }
 
 inline ComparisonOptions allCloseComparisonOptions(double absoluteTolerance,
-                                                   double relativeTolerance,
-                                                   bool equalNaNs) {
+                                                   double relativeTolerance, bool equalNaNs) {
     ComparisonOptions options;
     options.absoluteTolerance = absoluteTolerance;
     options.relativeTolerance = relativeTolerance;
@@ -619,43 +618,80 @@ ComparisonValue loadComparisonValueKnown(std::span<const std::byte> storage,
     };
 
     if constexpr (type == ScalarType::Boolean)
-        return {static_cast<double>(readNativeUnchecked.template operator()<uint8_t>() != 0), 0.0,
-                false};
+        return {
+            static_cast<double>(readNativeUnchecked.template operator()<uint8_t>() != 0),
+            0.0,
+            false
+        };
     else if constexpr (type == ScalarType::UInt8)
-        return {static_cast<double>(readNativeUnchecked.template operator()<uint8_t>()), 0.0,
-                false};
+        return {
+            static_cast<double>(readNativeUnchecked.template operator()<uint8_t>()),
+            0.0,
+            false
+        };
     else if constexpr (type == ScalarType::Int8)
-        return {static_cast<double>(readNativeUnchecked.template operator()<int8_t>()), 0.0, false};
+        return {
+            static_cast<double>(readNativeUnchecked.template operator()<int8_t>()),
+            0.0,
+            false
+        };
     else if constexpr (type == ScalarType::UInt16)
-        return {static_cast<double>(readNativeUnchecked.template operator()<uint16_t>()), 0.0,
-                false};
+        return {
+            static_cast<double>(readNativeUnchecked.template operator()<uint16_t>()),
+            0.0,
+            false
+        };
     else if constexpr (type == ScalarType::Int16)
-        return {static_cast<double>(readNativeUnchecked.template operator()<int16_t>()), 0.0,
-                false};
+        return {
+            static_cast<double>(readNativeUnchecked.template operator()<int16_t>()),
+            0.0,
+            false
+        };
     else if constexpr (type == ScalarType::UInt32)
-        return {static_cast<double>(readNativeUnchecked.template operator()<uint32_t>()), 0.0,
-                false};
+        return {
+            static_cast<double>(readNativeUnchecked.template operator()<uint32_t>()),
+            0.0,
+            false
+        };
     else if constexpr (type == ScalarType::Int32)
-        return {static_cast<double>(readNativeUnchecked.template operator()<int32_t>()), 0.0,
-                false};
+        return {
+            static_cast<double>(readNativeUnchecked.template operator()<int32_t>()),
+            0.0,
+            false
+        };
     else if constexpr (type == ScalarType::UInt64)
-        return {static_cast<double>(readNativeUnchecked.template operator()<uint64_t>()), 0.0,
-                false};
+        return {
+            static_cast<double>(readNativeUnchecked.template operator()<uint64_t>()),
+            0.0,
+            false
+        };
     else if constexpr (type == ScalarType::Int64)
-        return {static_cast<double>(readNativeUnchecked.template operator()<int64_t>()), 0.0,
-                false};
+        return {
+            static_cast<double>(readNativeUnchecked.template operator()<int64_t>()),
+            0.0,
+            false
+        };
     else if constexpr (type == ScalarType::Float16)
         return {
             static_cast<double>(decodeFloat16(readNativeUnchecked.template operator()<uint16_t>())),
-            0.0, false};
+            0.0,
+            false
+        };
     else if constexpr (type == ScalarType::BFloat16)
-        return {static_cast<double>(
-                    decodeBFloat16(readNativeUnchecked.template operator()<uint16_t>())),
-                0.0, false};
+        return {
+            static_cast<double>(
+                decodeBFloat16(readNativeUnchecked.template operator()<uint16_t>())),
+            0.0,
+            false
+        };
     else if constexpr (type == ScalarType::Float32)
-        return {static_cast<double>(readNativeUnchecked.template operator()<float>()), 0.0, false};
+        return {
+            static_cast<double>(readNativeUnchecked.template operator()<float>()),
+            0.0,
+            false
+        };
     else if constexpr (type == ScalarType::Float64)
-        return {readNativeUnchecked.template operator()<double>(), 0.0, false};
+        return { readNativeUnchecked.template operator()<double>(), 0.0, false };
     else if constexpr (type == ScalarType::ComplexFloat32) {
         const auto value = readNativeUnchecked.template operator()<std::complex<float>>();
         return {static_cast<double>(value.real()), static_cast<double>(value.imag()), true};
@@ -665,12 +701,18 @@ ComparisonValue loadComparisonValueKnown(std::span<const std::byte> storage,
     } else if constexpr (type == ScalarType::Float8E4M3 || type == ScalarType::Float8E5M2 ||
                          type == ScalarType::Float8E4M3Fnuz || type == ScalarType::Float8E5M2Fnuz ||
                          type == ScalarType::E5M3)
-        return {static_cast<double>(
-                    decodeBinaryFloat(type, readNativeUnchecked.template operator()<uint8_t>())),
-                0.0, false};
+        return {
+            static_cast<double>(
+                decodeBinaryFloat(type, readNativeUnchecked.template operator()<uint8_t>())),
+            0.0,
+            false
+        };
     else if constexpr (type == ScalarType::E8M0)
-        return {static_cast<double>(decodeE8M0(readNativeUnchecked.template operator()<uint8_t>())),
-                0.0, false};
+        return {
+            static_cast<double>(decodeE8M0(readNativeUnchecked.template operator()<uint8_t>())),
+            0.0,
+            false
+        };
     else
         return comparisonValue(decodeScalarKnown<type, double>(storage, logicalOffset));
 }
@@ -1086,8 +1128,7 @@ inline std::optional<ComparisonTolerance> findAllCloseTolerance(
 
 inline SentinelResult checkUnwrittenSentinel(ScalarType type, std::span<const std::byte> storage,
                                              size_t firstElement, size_t elementCount,
-                                             SentinelRegion region,
-                                             size_t maxReportedMismatches) {
+                                             SentinelRegion region, size_t maxReportedMismatches) {
     const size_t storageBits = scalarTypeInfo(type).storageBits;
     if (storageBits == 0) throw std::invalid_argument("Sentinel scalar type has no storage.");
     const uint64_t requiredBits = static_cast<uint64_t>(firstElement + elementCount) * storageBits;

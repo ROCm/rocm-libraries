@@ -35,8 +35,7 @@ GemmRunInfo runTiled(const GemmProblem& problem) {
     const RuntimeMatrixReader<Accumulator> a(problem.a.values);
     const RuntimeMatrixReader<Accumulator> b(problem.b.values);
     const RuntimeMatrixReader<Accumulator> c(problem.c);
-    const RuntimeGemmOutputWriter<Accumulator> d(
-        problem.d, problem.epilogue.outputConversion);
+    const RuntimeGemmOutputWriter<Accumulator> d(problem.d, problem.epilogue.outputConversion);
     const RuntimeQuantizer<Accumulator> quantizeA(problem.a.computeType);
     const RuntimeQuantizer<Accumulator> quantizeB(problem.b.computeType);
     const RuntimeMathFunction<Accumulator> operandMath =
@@ -100,10 +99,8 @@ GemmRunInfo runTiled(const GemmProblem& problem) {
                     for (size_t reduction = 0; reduction < reductions; ++reduction) {
                         Accumulator value = conjugateIfNeeded(
                             a(rowBase + row, reductionBase + reduction), problem.a.conjugate);
-                        for (size_t scaleIndex = 0; scaleIndex < preScalesA.size();
-                             ++scaleIndex) {
-                            const auto& binding =
-                                problem.a.preQuantizationScales[scaleIndex];
+                        for (size_t scaleIndex = 0; scaleIndex < preScalesA.size(); ++scaleIndex) {
+                            const auto& binding = problem.a.preQuantizationScales[scaleIndex];
                             const size_t index =
                                 binding.values.shape()[0] == 1
                                     ? 0
@@ -118,10 +115,8 @@ GemmRunInfo runTiled(const GemmProblem& problem) {
                     for (size_t column = 0; column < columns; ++column) {
                         Accumulator value = conjugateIfNeeded(
                             b(reductionBase + reduction, columnBase + column), problem.b.conjugate);
-                        for (size_t scaleIndex = 0; scaleIndex < preScalesB.size();
-                             ++scaleIndex) {
-                            const auto& binding =
-                                problem.b.preQuantizationScales[scaleIndex];
+                        for (size_t scaleIndex = 0; scaleIndex < preScalesB.size(); ++scaleIndex) {
+                            const auto& binding = problem.b.preQuantizationScales[scaleIndex];
                             const size_t index =
                                 binding.values.shape()[0] == 1
                                     ? 0
