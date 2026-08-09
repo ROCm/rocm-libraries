@@ -234,7 +234,8 @@ inline double typeMaximum(ScalarType requestedType) {
         case ScalarType::UInt64:
         case ScalarType::Int64:
             throw std::invalid_argument(
-                "Type-derived generation does not represent 64-bit integer extrema through double.");
+                "Type-derived generation does not represent 64-bit integer extrema through "
+                "double.");
         case ScalarType::ComplexFloat32:
         case ScalarType::ComplexFloat64:
         case ScalarType::Count:
@@ -308,8 +309,7 @@ inline double typeDenormalMinimum(ScalarType requestedType) {
         case ScalarType::E5M3:
             return decodeBinaryFloat(type, 1U);
         default:
-            throw std::invalid_argument(
-                "Requested scalar type has no denormal minimum.");
+            throw std::invalid_argument("Requested scalar type has no denormal minimum.");
     }
 }
 
@@ -336,8 +336,7 @@ inline double typeDenormalMaximum(ScalarType requestedType) {
             return decodeBinaryFloat(type, (1U << format.mantissaBits) - 1U);
         }
         default:
-            throw std::invalid_argument(
-                "Requested scalar type has no denormal maximum.");
+            throw std::invalid_argument("Requested scalar type has no denormal maximum.");
     }
 }
 
@@ -356,10 +355,8 @@ inline double typeInfinity(ScalarType type, bool negative) {
                     : std::numeric_limits<double>::infinity();
 }
 
-inline double randomEncodedExponentValue(const GenerationPatternSpec& spec,
-                                         uint64_t seed,
-                                         size_t logicalIndex,
-                                         ScalarType destinationType) {
+inline double randomEncodedExponentValue(const GenerationPatternSpec& spec, uint64_t seed,
+                                         size_t logicalIndex, ScalarType destinationType) {
     ScalarType type = spec.sourceType == ScalarType::Count
                           ? generationComponentType(destinationType)
                           : generationComponentType(spec.sourceType);
@@ -370,25 +367,18 @@ inline double randomEncodedExponentValue(const GenerationPatternSpec& spec,
     const int lowerExponent = static_cast<int>(spec.parameter0);
     const int upperExponent = static_cast<int>(spec.parameter1);
     if (lowerExponent > upperExponent)
-        throw std::invalid_argument(
-            "Random encoded-exponent lower bound exceeds upper bound.");
+        throw std::invalid_argument("Random encoded-exponent lower bound exceeds upper bound.");
 
     const uint64_t randomBits = counterRandom(seed, spec.stream, logicalIndex);
-    const int exponent = static_cast<int>(
-                             randomBits %
-                             static_cast<uint64_t>(
-                                 upperExponent - lowerExponent + 1)) +
-                         lowerExponent;
-    const uint64_t exponentMask =
-        ((uint64_t{1} << info.exponentBits) - 1U) << info.mantissaBits;
+    const int exponent =
+        static_cast<int>(randomBits % static_cast<uint64_t>(upperExponent - lowerExponent + 1)) +
+        lowerExponent;
+    const uint64_t exponentMask = ((uint64_t{1} << info.exponentBits) - 1U) << info.mantissaBits;
     const uint64_t encoded =
         (randomBits & ~exponentMask) |
-        ((static_cast<uint64_t>(exponent + info.exponentBias)
-          << info.mantissaBits) &
-         exponentMask);
-    const uint64_t storageMask =
-        info.storageBits == 64 ? std::numeric_limits<uint64_t>::max()
-                               : ((uint64_t{1} << info.storageBits) - 1U);
+        ((static_cast<uint64_t>(exponent + info.exponentBias) << info.mantissaBits) & exponentMask);
+    const uint64_t storageMask = info.storageBits == 64 ? std::numeric_limits<uint64_t>::max()
+                                                        : ((uint64_t{1} << info.storageBits) - 1U);
     const uint64_t raw = encoded & storageMask;
 
     switch (type) {
@@ -412,8 +402,7 @@ inline double randomEncodedExponentValue(const GenerationPatternSpec& spec,
         case ScalarType::E8M0:
             return decodeE8M0(static_cast<uint8_t>(raw));
         default:
-            throw std::invalid_argument(
-                "Random encoded-exponent source type is unsupported.");
+            throw std::invalid_argument("Random encoded-exponent source type is unsupported.");
     }
 }
 
@@ -435,8 +424,7 @@ inline double baseGenerationValue(const GenerationPatternSpec& spec, uint64_t se
                 static_cast<int>(spec.parameter1))));
         case GenerationPattern::UniformReal: {
             if (spec.parameter0 > spec.parameter1)
-                throw std::invalid_argument(
-                    "Uniform-real lower bound exceeds upper bound.");
+                throw std::invalid_argument("Uniform-real lower bound exceeds upper bound.");
             const double unit = indexedUniformUnit(seed, spec.stream, logicalIndex);
             return spec.parameter0 + unit * (spec.parameter1 - spec.parameter0);
         }
@@ -496,14 +484,12 @@ inline double baseGenerationValue(const GenerationPatternSpec& spec, uint64_t se
             return maximum * (2.0 * unit - 1.0);
         }
         case GenerationPattern::RandomEncodedExponent:
-            return randomEncodedExponentValue(
-                spec, seed, logicalIndex, destinationType);
+            return randomEncodedExponentValue(spec, seed, logicalIndex, destinationType);
         case GenerationPattern::RawConstant:
         case GenerationPattern::UniformRawInteger:
         case GenerationPattern::RandomRawBits:
         case GenerationPattern::RawSerialDimension:
-            throw std::invalid_argument(
-                "Raw generation requires encoded storage output.");
+            throw std::invalid_argument("Raw generation requires encoded storage output.");
     }
     throw std::invalid_argument("Unsupported GenerationPattern.");
 }
@@ -511,8 +497,7 @@ inline double baseGenerationValue(const GenerationPatternSpec& spec, uint64_t se
 inline double generationValue(const GenerationPatternSpec& spec, uint64_t seed,
                               std::span<const size_t> indices, const Shape& shape,
                               size_t logicalIndex, ScalarType destinationType) {
-    double value =
-        baseGenerationValue(spec, seed, indices, shape, logicalIndex, destinationType);
+    double value = baseGenerationValue(spec, seed, indices, shape, logicalIndex, destinationType);
     switch (spec.transform) {
         case GenerationTransform::None:
             break;
@@ -568,33 +553,24 @@ inline GenerationRunInfo generate(MutableTensorView destination, const Generatio
         scalarTypeInfo(destination.type()).category == ScalarCategory::Complex;
     if (detail::isRawGenerationPattern(options.real.pattern)) {
         if (complexOutput)
-            throw std::invalid_argument(
-                "Raw generation does not support complex output.");
+            throw std::invalid_argument("Raw generation does not support complex output.");
         const uint16_t bits = scalarTypeInfo(destination.type()).storageBits;
         if (bits > 64)
-            throw std::invalid_argument(
-                "Raw generation supports scalar encodings up to 64 bits.");
+            throw std::invalid_argument("Raw generation supports scalar encodings up to 64 bits.");
 
-        detail::forEachIndex(destination.shape(),
-                             [&](std::span<const size_t> indices, size_t) {
-            const ptrdiff_t elementOffset =
-                destination.layout().elementOffset(indices);
-            const size_t logicalIndex = detail::logicalLinearIndex(
-                indices, destination.shape(), options.indexOrder);
-            const uint64_t raw = detail::rawGenerationValue(
-                options.real, options.seed, indices, destination.shape(), logicalIndex);
-            const uint64_t offsetBits =
-                detail::bitOffset(destination.type(), elementOffset);
+        detail::forEachIndex(destination.shape(), [&](std::span<const size_t> indices, size_t) {
+            const ptrdiff_t elementOffset = destination.layout().elementOffset(indices);
+            const size_t logicalIndex =
+                detail::logicalLinearIndex(indices, destination.shape(), options.indexOrder);
+            const uint64_t raw = detail::rawGenerationValue(options.real, options.seed, indices,
+                                                            destination.shape(), logicalIndex);
+            const uint64_t offsetBits = detail::bitOffset(destination.type(), elementOffset);
             if (bits <= 32) {
-                detail::writePackedBits(destination.storage(),
-                                        offsetBits,
-                                        bits,
+                detail::writePackedBits(destination.storage(), offsetBits, bits,
                                         static_cast<uint32_t>(raw));
             } else {
-                detail::writeNative<uint64_t>(
-                    destination.storage(),
-                    static_cast<size_t>(offsetBits / 8),
-                    raw);
+                detail::writeNative<uint64_t>(destination.storage(),
+                                              static_cast<size_t>(offsetBits / 8), raw);
             }
         });
         return {.elementsGenerated = destination.shape().elementCount()};
@@ -603,13 +579,13 @@ inline GenerationRunInfo generate(MutableTensorView destination, const Generatio
     detail::forEachIndex(destination.shape(), [&](std::span<const size_t> indices, size_t) {
         const size_t logicalIndex =
             detail::logicalLinearIndex(indices, destination.shape(), options.indexOrder);
-        const double real = detail::generationValue(options.real, options.seed, indices,
-                                                    destination.shape(), logicalIndex,
-                                                    destination.type());
+        const double real =
+            detail::generationValue(options.real, options.seed, indices, destination.shape(),
+                                    logicalIndex, destination.type());
         if (complexOutput) {
-            const double imaginary = detail::generationValue(
-                options.imaginary, options.seed, indices, destination.shape(), logicalIndex,
-                destination.type());
+            const double imaginary =
+                detail::generationValue(options.imaginary, options.seed, indices,
+                                        destination.shape(), logicalIndex, destination.type());
             destination.storeFrom(indices, std::complex<double>(real, imaginary));
         } else {
             destination.storeFrom(indices, real);
@@ -673,15 +649,12 @@ class RandomGenerator {
     }
 
     template <typename T>
-    void fillSignedUniformInteger(std::span<T> values, int lowerMagnitude,
-                                  int upperMagnitude) {
+    void fillSignedUniformInteger(std::span<T> values, int lowerMagnitude, int upperMagnitude) {
         if (lowerMagnitude < 0 || lowerMagnitude > upperMagnitude)
-            throw std::invalid_argument(
-                "Signed uniform-integer magnitudes are invalid.");
+            throw std::invalid_argument("Signed uniform-integer magnitudes are invalid.");
         for (auto& value : values) {
             const int sign = m_binaryDistribution(m_generator) ? 1 : -1;
-            const int magnitude =
-                uniformInteger<int>(lowerMagnitude, upperMagnitude);
+            const int magnitude = uniformInteger<int>(lowerMagnitude, upperMagnitude);
             value = static_cast<T>(sign * magnitude);
         }
     }

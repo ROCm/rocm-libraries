@@ -59,11 +59,9 @@ Accumulator activationGradientFactor(Activation activation, Accumulator value,
         case Activation::Relu:
             return value > Accumulator(0) ? Accumulator(1) : Accumulator(0);
         case Activation::Gelu:
-            return applyActivation(
-                Activation::GeluDerivative, value, parameter0, parameter1);
+            return applyActivation(Activation::GeluDerivative, value, parameter0, parameter1);
         case Activation::GeluScaling:
-            return applyActivation(
-                       Activation::GeluDerivative, value, parameter0, parameter1) *
+            return applyActivation(Activation::GeluDerivative, value, parameter0, parameter1) *
                    parameter0;
         case Activation::LeakyRelu:
             return value > Accumulator(0) ? Accumulator(1) : parameter0;
@@ -85,8 +83,7 @@ Accumulator activationGradientFactor(Activation activation, Accumulator value,
         }
         case Activation::Swish: {
             const Accumulator sigmoid = static_cast<Accumulator>(
-                1.0f /
-                (1.0f + std::exp(-static_cast<float>(parameter0 * value))));
+                1.0f / (1.0f + std::exp(-static_cast<float>(parameter0 * value))));
             return sigmoid + parameter0 * value * sigmoid * (Accumulator(1) - sigmoid);
         }
         case Activation::Clamp:

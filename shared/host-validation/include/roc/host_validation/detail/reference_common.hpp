@@ -227,9 +227,8 @@ Accumulator applyActivation(Activation activation, Accumulator value, Accumulato
                 return static_cast<Accumulator>(1.0f / (1.0f + std::exp(-x)));
             }
             case Activation::Tanh:
-                return static_cast<Accumulator>(
-                    std::tanh(static_cast<float>(value * parameter0)) *
-                    static_cast<float>(parameter1));
+                return static_cast<Accumulator>(std::tanh(static_cast<float>(value * parameter0)) *
+                                                static_cast<float>(parameter1));
             case Activation::Silu: {
                 const float x = static_cast<float>(value);
                 return static_cast<Accumulator>(x / (1.0f + std::exp(-x)));
