@@ -477,6 +477,15 @@ def build_attention_dense(
             readonly=True,
             align=4,
         )
+    block_tables = kv_lens = bt_stride = None
+    if spec.paged:
+        block_tables = b.param(
+            "block_tables", PtrType(I32, "global"), noalias=True, readonly=True, align=4
+        )
+        kv_lens = b.param(
+            "kv_lens", PtrType(I32, "global"), noalias=True, readonly=True, align=4
+        )
+        bt_stride = b.param("block_table_stride", I32)
     qk_scale = b.fmul(scale, b.const_f32(LOG2E))
 
     _exp2 = b.exp2_fast  # native v_exp_f32 (softmax arg always <= 0)
@@ -1734,6 +1743,12 @@ def attention_dense_signature(spec: AttentionDenseSpec):
     )
     if spec.varlen:
         sig = sig.ptr("cu_seqlens_q", "i32").ptr("cu_seqlens_kv", "i32")
+    if spec.paged:
+        sig = (
+            sig.ptr("block_tables", "i32")
+            .ptr("kv_lens", "i32")
+            .scalar("block_table_stride", "i32")
+        )
     return sig.build()
 
 
@@ -1757,6 +1772,8 @@ def run_attention_dense_torch(
     arch: str = "gfx950",
     cu_seqlens_q=None,
     cu_seqlens_kv=None,
+    block_tables=None,
+    kv_lens=None,
 ):
     """High-level framework entry: compile (cached) + launch the dense prefill
     kernel on torch tensors. ``q``/``k``/``v``/``out`` are dense contiguous
@@ -1785,6 +1802,10 @@ def run_attention_dense_torch(
         )
     if not spec.varlen and (cu_seqlens_q is not None or cu_seqlens_kv is not None):
         raise ValueError("cu_seqlens_* provided but spec.varlen is False")
+    if spec.paged and (block_tables is None or kv_lens is None):
+        raise ValueError("paged=True requires block_tables and kv_lens")
+    if not spec.paged and (block_tables is not None or kv_lens is not None):
+        raise ValueError("block_tables/kv_lens provided but spec.paged is False")
     from rocke.helpers.compile import compile_kernel
     from rocke.runtime import KernelLauncher, LaunchConfig
 
@@ -1812,6 +1833,10 @@ def run_attention_dense_torch(
     if spec.varlen:
         vals["cu_seqlens_q"] = cu_seqlens_q
         vals["cu_seqlens_kv"] = cu_seqlens_kv
+    if spec.paged:
+        vals["block_tables"] = block_tables
+        vals["kv_lens"] = kv_lens
+        vals["block_table_stride"] = int(block_tables.stride(0))
     launcher(
         vals,
         config=LaunchConfig(

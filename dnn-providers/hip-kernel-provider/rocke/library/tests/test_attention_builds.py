@@ -1163,6 +1163,26 @@ class TestAttentionHelpers(unittest.TestCase):
         self.assertFalse(s.paged)
         self.assertNotIn("pgd", s.kernel_name())
 
+    def test_gfx950_dense_paged_builds_and_signature(self):
+        """Paged ABI: the signature carries block_tables/kv_lens/block_table_stride,
+        and the paged spec builds on host (load path still contiguous at this stage)."""
+        from kernels.gfx950.attention_dense import (
+            AttentionDenseSpec,
+            attention_dense_signature,
+            build_attention_dense,
+        )
+
+        spec = AttentionDenseSpec(
+            batch=1, seqlen_q=8192, seqlen_kv=8192, num_query_heads=32,
+            num_kv_heads=8, head_size=128, causal=True, dtype="fp16",
+            sliding_window=4096, block_n=64, paged=True, block_size=16,
+            num_kv_blocks=512,
+        )
+        names = [p["name"] for p in attention_dense_signature(spec)]
+        for req in ("block_tables", "kv_lens", "block_table_stride"):
+            self.assertIn(req, names)
+        self.assertIsNotNone(build_attention_dense(spec, arch="gfx950"))
+
     def test_attention_3d_workspace_size_matches_shapes(self):
         p = UnifiedAttentionProblem(
             total_q=3,
