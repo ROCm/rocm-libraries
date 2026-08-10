@@ -33,25 +33,36 @@ constraint (§3). All kernels in a family share the algorithm's tunable knobs �
 knobs are baked into each `.co` at produce time, and their consequences surface as each
 kernel's per-kernel `constraints`.
 
+**Core vocabulary** — a one-line gloss of the nouns used throughout; each is
+expanded where it first matters.
+
+| term | what it is |
+|------|------------|
+| **op kind** | the operation class an adapter handles: `matmul`, `rmsnorm`, or `sdpa`. |
+| **adapter** | the fixed, reviewed C++ for one op kind; maps a hipDNN op graph to a launch (decode → problem → bindings → grid). One per op kind. |
+| **family** | one algorithm for one op kind on one arch, in `library/<arch>/<family>/`; carries all its dtypes' kernels together. |
+| **kernel** | one compiled variant: a `.co` plus a `kernels[]` entry (its `symbol`, ABI, grid, and `constraints`). |
+| **`.co`** | the ahead-of-time-compiled code object (HSACO) a kernel launches — a build product, never in git. |
+| **`family.json`** | a family's spec: its `kernels[]` list plus identity (name, op kind, arch). |
+| **producer** | the co-located `produce_<family>_co.py` that compiles the family's `.co`(s) at build time (calls rocKE as an external tool). |
+| **problem** (shape / key) | what an adapter's `decode` extracts from a graph — dtype, dims, capability facts; the keys that are legal in `constraints` and `grid`. |
+| **constraint** | a per-kernel rule (`equals` / `multiple_of`) on a problem key; **fail-closed** — all must hold or the kernel is skipped. |
+| **candidate** | a kernel whose constraints all hold for the current problem; when several apply, they are timed against each other. |
+| **catalog** | the on-disk tree of families the engine loads at runtime (`<arch>/<family>/`). |
+| **tune cache** | the remembered fastest candidate per problem, so later executes skip re-measuring. |
+| **decline** | when no kernel applies, the engine returns "not applicable" and another hipDNN engine serves the graph — never a wrong answer. |
+
 > **Design principle — a family folder is a self-contained unit.** Each
-> `library/<arch>/<family>/` folder owns **everything** about that family and
-> **only** that family: its `family.json` (the spec — kernels + constraints), its
-> `CMakeLists.txt` (which builds the `.co` to match the spec), the co-located
-> producer, *and* the tests that validate those kernels (numeric parity /
-> per-family selection). The purpose is hard isolation: **deleting a family is
-> just `rm -rf`-ing its folder — nothing is left dangling anywhere else, and no
-> other family is affected, including never losing another family's tests.** The
-> contract that makes this hold: **a family's tests must depend only on that
-> family** — no test in one family folder may reference another family's kernels or
-> symbols (e.g. the GEMM parity tests select their own kernel by symbol so the
-> reference and universal families are mutually independent). Tests that are *not*
-> about a single family — engine-substrate unit tests like the tune-cache and
-> SDPA-decode tests — deliberately live one level up, at the engine test level
-> (`src/tests/engines/aot_catalog_engine/`), not in any family folder. See §9.
+> `library/<arch>/<family>/` folder owns *everything* about one family and only
+> that family — its `family.json`, its `CMakeLists.txt`, its co-located producer,
+> and its tests — so adding a family is dropping in a folder and deleting one is
+> `rm -rf`, with nothing left dangling anywhere else. The testing contract that
+> makes this isolation hold (a family's tests depend only on that family) is
+> spelled out in [§9](#9-how-to-test).
 
 **New here? Jump to [§2 Quick start](#2-quick-start-the-self-serve-recipe)** — the 30-second
 recipe plus a top-to-bottom KA checklist.
-Sections [§1](#1-the-end-to-end-path-what-happens-at-runtime)–[§5](#5-measure-and-cache-tuning)
+Sections [§1](#1-the-big-picture-what-happens-at-runtime)–[§5](#5-measure-and-cache-tuning)
 are the engine mechanics that apply to **every** op. Sections §6–§8 are the per-op
 specifics (ABI, gotchas, decline boundary). [§9](#9-how-to-test)–[§11](#11-file-map)
 cover testing, adding a brand-new op, and the file map.
@@ -64,7 +75,7 @@ table, capability-key contract, copy-paste `family.json` template).
 
 ---
 
-## 1. The end-to-end path (what happens at runtime)
+## 1. The big picture: what happens at runtime
 
 ```
 torch op  (F.linear / F.rms_norm / F.scaled_dot_product_attention / …)
