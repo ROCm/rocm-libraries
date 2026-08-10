@@ -272,12 +272,14 @@ pipeline {
         stage("Determine CI Execution") {
             agent none
             steps {
-                script {
-                    loadCk()
-                    ck.runOnHealthyNode(rocmnode("nogpu")) {
-                        ck.checkoutComposableKernel()
-                        env.SHOULD_RUN_CI = String.valueOf(params.FORCE_CI.toBoolean() || ck.shouldRunCICheck())
-                        echo "SHOULD_RUN_CI: ${env.SHOULD_RUN_CI}"
+                ws("${env.WORKSPACE}-${env.BUILD_NUMBER}"){
+                    script {
+                        loadCk()
+                        ck.runOnHealthyNode(rocmnode("nogpu")) {
+                            ck.checkoutComposableKernel()
+                            env.SHOULD_RUN_CI = String.valueOf(params.FORCE_CI.toBoolean() || ck.shouldRunCICheck())
+                            echo "SHOULD_RUN_CI: ${env.SHOULD_RUN_CI}"
+                        }
                     }
                 }
             }
@@ -291,12 +293,14 @@ pipeline {
                 stage('Docker /opt/rocm'){
                     agent none
                     steps{
-                        script {
-                            loadCk()
-                            ck.runOnHealthyNode(rocmnode("nogpu")) {
-                                deleteDir()
-                                ck.buildDocker('/opt/rocm')
-                                cleanWs()
+                        ws("${env.WORKSPACE}-${env.BUILD_NUMBER}"){
+                            script {
+                                loadCk()
+                                ck.runOnHealthyNode(rocmnode("nogpu")) {
+                                    deleteDir()
+                                    ck.buildDocker('/opt/rocm')
+                                    cleanWs()
+                                }
                             }
                         }
                     }
@@ -310,17 +314,19 @@ pipeline {
             }
             agent none
             steps{
-                script {
-                    loadCk()
-                    ck.runOnHealthyNode(rocmnode("nogpu")) {
-                        deleteDir()
-                        ck.runStaticChecks()
-                        cleanWs()
+                ws("${env.WORKSPACE}-${env.BUILD_NUMBER}"){
+                    script {
+                        loadCk()
+                        ck.runOnHealthyNode(rocmnode("nogpu")) {
+                            deleteDir()
+                            ck.runStaticChecks()
+                            cleanWs()
+                        }
                     }
                 }
             }
         }
-         stage("Run Downstream Tests")
+        stage("Run Downstream Tests")
         {
             when {
                 beforeAgent true
