@@ -120,6 +120,8 @@ namespace roc::host_validation::hipblaslt_adapter
         problem.outputScale = scalarValue(arguments.outputScale, computeType, "output scale");
         problem.auxiliaryScale
             = scalarValue(arguments.auxiliaryScale, computeType, "auxiliary scale");
+        if(outputType == ScalarType::Int8)
+            problem.outputConversion = OutputConversion::SaturatingInt8;
         problem.activation            = arguments.activation;
         problem.activationApplication = arguments.activationApplication;
         problem.activationParameter0  = arguments.activationParameter0;
