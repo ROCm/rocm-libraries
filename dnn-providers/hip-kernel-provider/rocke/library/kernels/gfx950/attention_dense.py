@@ -607,9 +607,45 @@ def build_attention_dense(
     zero_soff = b.const_i32(0)
     K_lds_addr = b.smem_addr_of(K_lds)
     V_lds_addr = b.smem_addr_of(V_lds)
-    k_rsrc = b.buffer_rsrc(k, b.const_i32(B * Skv * Hkv * D * 2))
-    v_rsrc = b.buffer_rsrc(v, b.const_i32(B * Skv * Hkv * D * 2))
+    _kv_cache_bytes = b.const_i32(
+        (spec.num_kv_blocks * spec.block_size if spec.paged else B * Skv)
+        * Hkv * D * 2
+    )
+    k_rsrc = b.buffer_rsrc(k, _kv_cache_bytes)
+    v_rsrc = b.buffer_rsrc(v, _kv_cache_bytes)
     v_wave_off_i64 = b.zext(b.to_sgpr_u32(b.mul(wave, b.const_i32(WAVE_BYTES))), I64)
+    if spec.paged:
+        # Single-seq: seq_base folds to 0; the bt*bt_stride form keeps bt_stride
+        # live and generalizes to multi-seq. kv_lens[bt] bounds the page index.
+        _pg_seq_base = b.mul(bt, bt_stride)
+        _pg_kv_len = b.global_load_i32(kv_lens, bt)
+        _pg_n_pages = b.div(
+            b.add(_pg_kv_len, b.const_i32(spec.block_size - 1)),
+            b.const_i32(spec.block_size),
+        )
+
+    def _kv_row(gkey):
+        """Map a logical KV token index to the physical row to load.
+
+        Contiguous: the token index IS the row. Paged: translate through
+        block_tables into the physical token index of the
+        [num_blocks, block_size, Hkv, D] cache. seqlen_kv % block_n == 0 and
+        block_n % block_size == 0 (validated) keep every page index in
+        [0, n_pages); the mask is cheap insurance against an OOB block-table read."""
+        if not spec.paged:
+            return gkey
+        page = b.div(gkey, b.const_i32(spec.block_size))
+        tok_in_page = b.mod(gkey, b.const_i32(spec.block_size))
+        page_ok = b.cmp_lt(page, _pg_n_pages)
+        phys = b.masked_global_load(
+            block_tables,
+            b.add(_pg_seq_base, page),
+            page_ok,
+            b.const_i32(0),
+            dtype=I32,
+            align=4,
+        )
+        return b.add(b.mul(phys, b.const_i32(spec.block_size)), tok_in_page)
 
     def _async_load(rsrc, lds_base, buf_val, tile_key0, bytes_per_buf, group_bytes):
         """Async DMA one K/V tile into its LDS layout.
@@ -633,7 +669,8 @@ def build_attention_dense(
                 gkey = b.add(tile_key0, row)
                 gcol = b.mul(lane, b.const_i32(2))
                 voff = b.add(
-                    b.add(k_base, b.mul(gkey, b.const_i32(stride_k_tok))), gcol
+                    b.add(k_base, b.mul(_kv_row(gkey), b.const_i32(stride_k_tok))),
+                    gcol,
                 )
                 b.async_buffer_load_lds_addr(
                     rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, 1
@@ -654,7 +691,9 @@ def build_attention_dense(
                 )
                 row_base = b.smem_ptr_add(lds_base, row_lds_off)
                 gkey = b.add(b.add(tile_key0, row0), sub_row)
-                voff = b.add(b.add(k_base, b.mul(gkey, b.const_i32(stride_k_tok))), col)
+                voff = b.add(
+                    b.add(k_base, b.mul(_kv_row(gkey), b.const_i32(stride_k_tok))), col
+                )
                 b.async_buffer_load_lds_addr(
                     rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, 1
                 )
