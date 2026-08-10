@@ -27,10 +27,14 @@
 #pragma once
 
 #include "origami/hardware.hpp"
+#include "origami/math.hpp"
 #include "origami/types.hpp"
 #include "origami/origami_export.h"
 
-#include <vector>
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <limits>
 
 namespace origami {
 namespace streamk {
@@ -56,9 +60,9 @@ ORIGAMI_EXPORT size_t compute_number_of_output_tiles(size_t mt_m, size_t mt_n, s
  * @return reduction_t Selected reduction strategy
  */
 ORIGAMI_EXPORT reduction_t select_reduction(const problem_t& problem,
-                             const hardware_t& hardware,
-                             const config_t& config,
-                             grid_selection_t algorithm);
+                                            const hardware_t& hardware,
+                                            const config_t& config,
+                                            grid_selection_t algorithm);
 
 /**
  * @brief Based on the provided kernel config, select the best grid dimension.
@@ -70,19 +74,127 @@ ORIGAMI_EXPORT reduction_t select_reduction(const problem_t& problem,
  * @return size_t Dimensions of the grid launched.
  */
 ORIGAMI_EXPORT size_t select_grid_size(const problem_t& problem,
-                        const hardware_t& hardware,
-                        const config_t& config,
-                        grid_selection_t algorithm);
+                                       const hardware_t& hardware,
+                                       const config_t& config,
+                                       grid_selection_t algorithm);
+
+enum class threshold_metrics : uint8_t 
+{
+  grid_efficiency,
+  grid_waves,
+  tiles,
+  tiles_per_cu,
+  occupancy
+};
+
+enum class comparison_type : uint8_t 
+{ 
+  less_then_or_equal, 
+  greater_then 
+};
+
+struct threshold_rule 
+{
+  threshold_metrics feature;
+  double            threshold;
+  comparison_type   comparison;
+  hybrid_mode_t     mode;
+};
+
+template <class Arch>
+struct thresholds 
+{
+  static size_t output_tiles(const problem_t& problem, const config_t& config) {
+    return compute_number_of_output_tiles(config.mt.m, config.mt.n, problem.size.m, problem.size.n,
+                                          std::max<size_t>(problem.batch, 1));
+  }
+
+  static double feature_value(threshold_metrics metric, const problem_t& problem, const hardware_t& hardware,
+                              const config_t& config, size_t sm_count_target) {
+    switch (metric) 
+    {
+      case threshold_metrics::occupancy:
+      {
+        return (config.occupancy >= 0) ? static_cast<double>(config.occupancy) : std::numeric_limits<double>::quiet_NaN();
+      }
+      case threshold_metrics::tiles:
+      {
+        return static_cast<double>(output_tiles(problem, config)); 
+      }
+      case threshold_metrics::tiles_per_cu:
+      {
+        const size_t cus = (sm_count_target > 0) ? std::min<size_t>(sm_count_target, hardware.N_CU) : hardware.N_CU;
+        const double available_cus = static_cast<double>(cus ? cus : hardware.N_CU);
+        return static_cast<double>(output_tiles(problem, config)) / available_cus;
+      }
+      case threshold_metrics::grid_waves: 
+      {
+        const size_t grid = select_grid_size(problem, hardware, config, grid_selection_t::k_split_aware);
+        return grid ? static_cast<double>(output_tiles(problem, config)) / static_cast<double>(grid)
+                    : std::numeric_limits<double>::quiet_NaN();
+      }
+      case threshold_metrics::grid_efficiency: 
+      {
+        const size_t grid = select_grid_size(problem, hardware, config, grid_selection_t::k_split_aware);
+        if (!grid) 
+        {
+          return std::numeric_limits<double>::quiet_NaN();
+        }
+        const size_t tiles      = output_tiles(problem, config);
+        const size_t waves_ceil = math::safe_ceil_div(tiles, grid);
+        return waves_ceil ? static_cast<double>(tiles) / static_cast<double>(waves_ceil * grid) : 0.0;
+      }
+      default:
+        break;
+    }
+    return std::numeric_limits<double>::quiet_NaN();
+  }
+
+  static hybrid_mode_t select_hybrid_mode(const problem_t& problem, const hardware_t& hardware,
+                                          const config_t& config, size_t sm_count_target) {
+    for (const threshold_rule& rule : Arch::decision_tree) {
+      const double value = feature_value(rule.feature, problem, hardware, config, sm_count_target);
+      const bool   fires = (rule.comparison == comparison_type::less_then_or_equal) ? (value <= rule.threshold)
+                                                  : (value > rule.threshold);
+      if (fires) 
+      {
+        return rule.mode;
+      }
+    }
+    return hybrid_mode_t::static_;
+  }
+};
+
+struct gfx942_values : thresholds<gfx942_values> 
+{
+  static constexpr double grid_waves_threshold = 1.17;
+
+  static constexpr threshold_rule decision_tree[] = 
+  {
+      {threshold_metrics::grid_waves, grid_waves_threshold, comparison_type::greater_then, hybrid_mode_t::dynamic},
+  };
+};
+
+struct gfx950_values : thresholds<gfx950_values> 
+{
+  static constexpr double grid_efficiency_threshold = 0.23;
+  static constexpr double tiles_threshold           = 480;
+  static constexpr double occupancy_threshold       = 2.5;
+
+  static constexpr threshold_rule decision_tree[] = 
+  {
+      {threshold_metrics::tiles, tiles_threshold, comparison_type::less_then_or_equal, hybrid_mode_t::static_},
+      {threshold_metrics::grid_efficiency, grid_efficiency_threshold, comparison_type::greater_then, hybrid_mode_t::dynamic},
+      {threshold_metrics::occupancy, occupancy_threshold, comparison_type::less_then_or_equal, hybrid_mode_t::dynamic},
+  };
+};
 
 /**
  * @brief Pick the SK3-vs-SK4 sub-path for a StreamK=5 hybrid kernel.
  *
- * Decision rule fit to measured SK5 on(SK4)/off(SK3) sweeps on MI350X
- * (gfx950); see origami::streamk_hybrid_defaults_t for the thresholds.
- * Other architectures always return hybrid_mode_t::static_ until they are
- * tuned in a follow-up PR. Gates, in order: grid size (tiles), then whether
- * a cotenant currently holds any CU away from this kernel, then occupancy,
- * falling back to tiles-per-CU only once occupancy alone isn't decisive.
+ * Evaluates the per-architecture decision tree
+ * (fit to measured SK5 on(SK4)/off(SK3) sweeps). Architectures without a
+ * tuned list return hybrid_mode_t::static_.
  *
  * @param problem            Problem description (M, N, K, batch).
  * @param hardware           Hardware characteristics (@see origami::hardware_t).
@@ -92,10 +204,10 @@ ORIGAMI_EXPORT size_t select_grid_size(const problem_t& problem,
  *                           clamps hardware.N_CU from above.
  * @return hybrid_mode_t::static_ for SK3, hybrid_mode_t::dynamic for SK4.
  */
-ORIGAMI_EXPORT hybrid_mode_t select_hybrid_mode(const problem_t& problem,
-                                 const hardware_t& hardware,
-                                 const config_t& config,
-                                 size_t sm_count_target);
+ ORIGAMI_EXPORT hybrid_mode_t select_hybrid_mode(const problem_t& problem,
+    const hardware_t& hardware,
+    const config_t& config,
+    size_t sm_count_target);
 
 }  // namespace streamk
 }  // namespace origami
