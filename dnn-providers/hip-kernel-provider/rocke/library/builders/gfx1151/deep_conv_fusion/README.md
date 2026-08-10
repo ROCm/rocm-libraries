@@ -107,7 +107,7 @@ as `gfx11-generic`, not `gfx1151`).
 # 1. Correctness (bit-exact) — small single-CTA shape (grid (1,1,1)), runs
 #    anywhere that can build. W=128 satisfies the default 2x64 pool-tile divisor.
 PYTHONPATH=$(pwd) $VENV \
-  -m rocke.examples.gfx1151.deep_conv_fusion.deep_fused_conv_pool_verify \
+  -m builders.gfx1151.deep_conv_fusion.deep_fused_conv_pool_verify \
   --arch gfx1151 --verify --native-int --direct --h 4 --w 128 --c 8 --k0 32 --k1 24
 #   also try --h 32 --w 128 for a multi-CTA grid (1,8,1), or
 #   --h 16 --w 16 --pool-tile-h 2 --pool-tile-w 8 for a smaller-W multi-CTA shape.
@@ -116,7 +116,7 @@ PYTHONPATH=$(pwd) $VENV \
 #    and write the hsaco + sibling manifest.json without running. --conv1-int8 and
 #    --pk-maxpool are the non-default winner toggles and must be passed explicitly.
 PYTHONPATH=$(pwd) $VENV \
-  -m rocke.examples.gfx1151.deep_conv_fusion.deep_fused_conv_pool_verify \
+  -m builders.gfx1151.deep_conv_fusion.deep_fused_conv_pool_verify \
   --arch gfx11-generic --n 1 --h 2160 --w 3840 --c 8 --k0 32 --k1 24 \
   --conv1-int8 --pk-maxpool --emit-hsaco /tmp/deep/deep.hsaco
 
@@ -124,7 +124,7 @@ PYTHONPATH=$(pwd) $VENV \
 #    Verifies each config bit-exact, then benches round-robin and prints
 #    median ms / TFLOP/s / % vs baseline. Pick the candidate set with --suite.
 PYTHONPATH=$(pwd) $VENV \
-  -m rocke.examples.gfx1151.deep_conv_fusion.compare_configs \
+  -m builders.gfx1151.deep_conv_fusion.compare_configs \
   --h 2160 --w 3840 --rounds 5 --iters 50 --warmup 100 --suite warp
 
 # 4. Board-side interleaved A/B over prebuilt hsaco+manifest pairs (no toolchain needed).

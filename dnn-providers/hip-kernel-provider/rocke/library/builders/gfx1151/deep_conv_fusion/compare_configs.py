@@ -10,7 +10,7 @@ benches them round-robin for several rounds and reports the per-config median
 plus the ratio to the first (baseline) config.
 
 Usage:
-    python -m rocke.examples.gfx1151.deep_conv_fusion.compare_configs \
+    python -m builders.gfx1151.deep_conv_fusion.compare_configs \
         [--h 2160 --w 3840] [--rounds 5] [--iters 100]
 """
 
@@ -23,13 +23,13 @@ import sys
 import numpy as np
 
 from rocke.helpers import compile_kernel
-from rocke.instances.gfx1151.deep_fused_conv_pool import (
+from kernels.gfx1151.deep_fused_conv_pool import (
     build_deep_fused_conv_pool,
     deep_fused_conv_pool_grid,
     is_valid_spec,
     make_deep_fused_conv_pool_spec,
 )
-from rocke.examples.gfx1151.deep_conv_fusion.deep_fused_conv_pool_verify import (
+from builders.gfx1151.deep_conv_fusion.deep_fused_conv_pool_verify import (
     _as_u8_buffer,
     _make_inputs,
     _pack_args,

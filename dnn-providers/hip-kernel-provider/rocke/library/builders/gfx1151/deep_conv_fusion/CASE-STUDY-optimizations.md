@@ -356,7 +356,7 @@ gfx1151 board). `export PYTHONPATH=$(pwd)` and set `VENV` to your interpreter.
 # With the default 2x64 pool tile, W must be a multiple of 128 (H of 4); a
 # too-small shape exits "invalid spec: pool dims ... must be divisible ...".
 PYTHONPATH=$(pwd) $VENV \
-  -m rocke.examples.gfx1151.deep_conv_fusion.deep_fused_conv_pool_verify \
+  -m builders.gfx1151.deep_conv_fusion.deep_fused_conv_pool_verify \
   --arch gfx1151 --verify --native-int --direct --h 4 --w 128 --c 8 --k0 32 --k1 24
 #   also --h 32 --w 128 for the multi-CTA grid (1,8,1)
 
@@ -365,7 +365,7 @@ PYTHONPATH=$(pwd) $VENV \
 # additions --conv1-int8 --pk-maxpool, which are NOT yet default-on and must be
 # passed explicitly. Build hsaco + manifest for the board (gfx11-generic, NOT gfx1151):
 PYTHONPATH=$(pwd) $VENV \
-  -m rocke.examples.gfx1151.deep_conv_fusion.deep_fused_conv_pool_verify \
+  -m builders.gfx1151.deep_conv_fusion.deep_fused_conv_pool_verify \
   --arch gfx11-generic --n 1 --h 2160 --w 3840 --c 8 --k0 32 --k1 24 \
   --conv1-int8 --pk-maxpool \
   --emit-hsaco /tmp/deep/deep.hsaco
@@ -374,7 +374,7 @@ PYTHONPATH=$(pwd) $VENV \
 # auto-clocking board): compare_configs.py (in-process builds) or
 # compare_prebuilt.py (manifest-driven over prebuilt hsacos, with --rotate):
 PYTHONPATH=$(pwd) $VENV \
-  -m rocke.examples.gfx1151.deep_conv_fusion.compare_configs \
+  -m builders.gfx1151.deep_conv_fusion.compare_configs \
   --h 2160 --w 3840 --rounds 8 --iters 50 --warmup 200
 ```
 

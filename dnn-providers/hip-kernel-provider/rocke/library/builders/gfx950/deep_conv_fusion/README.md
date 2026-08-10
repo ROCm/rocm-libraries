@@ -49,8 +49,8 @@ VENV=python3   # or the path to your venv's python
 | `__init__.py` | package marker + module overview docstring |
 
 The kernel body itself is not in this directory — it lives in
-`rocke.instances.common.deep_fused_conv_pool` (arch-parametric) and is pinned to
-gfx950 by `rocke.instances.gfx950.deep_fused_conv_pool` (wave64, `32×32×16`
+`kernels.common.deep_fused_conv_pool` (arch-parametric) and is pinned to
+gfx950 by `kernels.gfx950.deep_fused_conv_pool` (wave64, `32×32×16`
 MFMA, kernel name `rocke_gfx950_deep_fused_conv_pool`).
 
 ## Run commands
@@ -63,14 +63,14 @@ reference. Defaults are the small exercise shape `N=1, H=16, W=16, C=8, K0=32,
 K1=24`:
 
 ```bash
-PYTHONPATH=$(pwd) $VENV -m rocke.examples.gfx950.deep_conv_fusion.deep_fused_conv_pool_verify --verify
+PYTHONPATH=$(pwd) $VENV -m builders.gfx950.deep_conv_fusion.deep_fused_conv_pool_verify --verify
 ```
 
 Time the kernel as well (warm launches, HIP events, reports `mean_ms` and
 `useful_TFLOPS`):
 
 ```bash
-PYTHONPATH=$(pwd) $VENV -m rocke.examples.gfx950.deep_conv_fusion.deep_fused_conv_pool_verify \
+PYTHONPATH=$(pwd) $VENV -m builders.gfx950.deep_conv_fusion.deep_fused_conv_pool_verify \
     --verify --bench --warmup 100 --iters 100
 ```
 
@@ -78,7 +78,7 @@ Verify at a custom shape (e.g. a larger feature map; spatial dims must keep the
 pool/pool-tile divisibility the validator requires):
 
 ```bash
-PYTHONPATH=$(pwd) $VENV -m rocke.examples.gfx950.deep_conv_fusion.deep_fused_conv_pool_verify \
+PYTHONPATH=$(pwd) $VENV -m builders.gfx950.deep_conv_fusion.deep_fused_conv_pool_verify \
     --verify --n 1 --h 64 --w 64 --c 8 --k0 32 --k1 24
 ```
 
@@ -122,7 +122,7 @@ percentage delta. It takes **no command-line flags** — the config list is in i
 `__main__` (currently the `4×4 tk32` baseline vs an `unroll_k` variant):
 
 ```bash
-PYTHONPATH=$(pwd) $VENV -m rocke.examples.gfx950.deep_conv_fusion.compare_pool_tile_configs
+PYTHONPATH=$(pwd) $VENV -m builders.gfx950.deep_conv_fusion.compare_pool_tile_configs
 ```
 
 ### Single launch for profiler capture
@@ -132,9 +132,9 @@ winning config (`pool_tile=4×4, tile_m=64, tile_k=32, tile_n=32, warp=2×1, mem
 so a `rocprofv3` counter pass sees minimal noise. It also takes no flags:
 
 ```bash
-PYTHONPATH=$(pwd) $VENV -m rocke.examples.gfx950.deep_conv_fusion.profile_best_config
+PYTHONPATH=$(pwd) $VENV -m builders.gfx950.deep_conv_fusion.profile_best_config
 # under a profiler, e.g.:
-# rocprofv3 ... -- $VENV -m rocke.examples.gfx950.deep_conv_fusion.profile_best_config
+# rocprofv3 ... -- $VENV -m builders.gfx950.deep_conv_fusion.profile_best_config
 ```
 
 ## Known-good configuration
@@ -196,7 +196,7 @@ idle).
   `32×32×16` fp16 MFMA atom; the gfx950 shim re-exports the common builder under
   the historical kernel name `rocke_gfx950_deep_fused_conv_pool`.
 - **Arch-parametric body.** The kernel source is shared in
-  `rocke.instances.common.deep_fused_conv_pool` and is driven by the resolved MMA
+  `kernels.common.deep_fused_conv_pool` and is driven by the resolved MMA
   op, so the same code can emit a gfx1201 WMMA path (wave32, `16×16×16`) — that
   lives in a separate `examples/gfx1201/deep_fused_conv_pool_verify.py` example,
   not here.

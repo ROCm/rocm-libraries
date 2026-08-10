@@ -10,7 +10,7 @@ body is the arch-parametric one in ``instances/common``; this driver only pins
 the WMMA geometry and reuses the gfx950 harness's numpy reference + verify/bench
 helpers (they are spec-generic). Must run on a gfx1201 device.
 
-  PYTHONPATH=python python3 -m rocke.examples.gfx1201.deep_fused_conv_pool_verify \
+  PYTHONPATH=python python3 -m builders.gfx1201.deep_fused_conv_pool_verify \
     --arch gfx1201 --verify --h 16 --w 16 --c 8 --k0 32 --k1 24
 """
 
@@ -23,7 +23,7 @@ from pathlib import Path
 from rocke.core.arch import ArchTarget
 from rocke.helpers import compile_kernel, make_conv_manifest, write_artifact
 from rocke.instances import ConvAccumulatorEpilogue, ConvProblem
-from rocke.instances.gfx1201.deep_fused_conv_pool import (
+from kernels.gfx1201.deep_fused_conv_pool import (
     Gfx1201DeepFusedConvPoolSpec,
     FusedConvPoolProblem,
     build_deep_fused_conv_pool,
@@ -34,7 +34,7 @@ from rocke.instances.gfx1201.deep_fused_conv_pool import (
 
 # The reference + launch helpers are arch-neutral (they only read ``spec.problem``
 # / ``spec.block_size`` and the common grid), so reuse them verbatim.
-from rocke.examples.gfx950.deep_conv_fusion.deep_fused_conv_pool_verify import (
+from builders.gfx950.deep_conv_fusion.deep_fused_conv_pool_verify import (
     _verify_artifact,
     _benchmark_artifact,
 )

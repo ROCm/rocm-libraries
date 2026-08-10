@@ -46,17 +46,11 @@ from rocke.instances import (
     BatchedGemmSpec,
     BatchedTranspose2DSpec,
     BlockScaleGemmSpec,
-    ConvProblem,
-    DirectConv16cSpec,
-    DirectConv4cSpec,
-    DirectConvProblem,
     ElementwiseSpec,
     FlatMMSpec,
     FusedMoeSpec,
     GemmMultiAbdSpec,
     GemmMultiDSpec,
-    Img2ColSpec,
-    ImplicitGemmConvSpec,
     LayerNorm2DSpec,
     MfmaGemmSpec,
     MoeSmoothQuantSpec,
@@ -79,14 +73,10 @@ from rocke.instances import (
     build_batched_gemm,
     build_batched_transpose2d,
     build_block_scale_gemm,
-    build_direct_conv_16c,
-    build_direct_conv_4c,
     build_elementwise,
     build_flatmm,
     build_gemm_multi_abd,
     build_gemm_multi_d,
-    build_img2col,
-    build_implicit_gemm_conv,
     build_layernorm2d,
     build_mfma_gemm,
     build_moe_gather,
@@ -155,29 +145,10 @@ def _base_gemm(name: str = "hip_audit_gemm") -> UniversalGemmSpec:
     return UniversalGemmSpec(name=name, tile=_base_tile(), trait=_base_trait())
 
 
-def _conv_problem() -> ConvProblem:
-    return ConvProblem(
-        N=1,
-        Hi=8,
-        Wi=8,
-        C=16,
-        K=16,
-        Y=3,
-        X=3,
-        sH=1,
-        sW=1,
-        pH=1,
-        pW=1,
-        dH=1,
-        dW=1,
-    )
-
-
 def make_cases(*, arch: str = "gfx950") -> List[Case]:
     base = _base_gemm()
     base_tile = _base_tile()
     base_trait = _base_trait()
-    convp = _conv_problem()
 
     # Thread the running arch's wavefront width into the wave-size-sensitive
     # specs (the BlockReduce2d XOR-butterfly + cross-warp fold in reduce2d).
@@ -255,13 +226,6 @@ def make_cases(*, arch: str = "gfx950") -> List[Case]:
             "small",
             lambda: build_batched_transpose2d(
                 BatchedTranspose2DSpec(tile_m=16, tile_n=16, vec=4)
-            ),
-        ),
-        Case(
-            "img2col",
-            "small",
-            lambda: build_img2col(
-                Img2ColSpec(problem=convp, block_tile_m=8, block_tile_k=64)
             ),
         ),
         Case(
@@ -451,44 +415,6 @@ def make_cases(*, arch: str = "gfx950") -> List[Case]:
             lambda: build_streamk_gemm(
                 StreamKGemmSpec(
                     M=64, N=64, K=32, tile_m=16, tile_n=16, tile_k=16, num_cus=4
-                )
-            ),
-        ),
-        Case(
-            "implicit_gemm_conv",
-            "conv",
-            lambda: build_implicit_gemm_conv(
-                ImplicitGemmConvSpec(
-                    problem=convp,
-                    name="hip_audit_conv",
-                    tile_m=64,
-                    tile_n=64,
-                    tile_k=64,
-                    warp_m=2,
-                    warp_n=2,
-                    warp_tile_m=32,
-                    warp_tile_n=32,
-                    warp_tile_k=16,
-                    pipeline="mem",
-                    epilogue="cshuffle",
-                )
-            ),
-        ),
-        Case(
-            "direct_conv_16c",
-            "conv",
-            lambda: build_direct_conv_16c(
-                DirectConv16cSpec(
-                    DirectConvProblem(N=1, H=8, W=8, groups=8, cpg=16, kpg=16)
-                )
-            ),
-        ),
-        Case(
-            "direct_conv_4c",
-            "conv",
-            lambda: build_direct_conv_4c(
-                DirectConv4cSpec(
-                    DirectConvProblem(N=1, H=8, W=8, groups=16, cpg=4, kpg=4)
                 )
             ),
         ),

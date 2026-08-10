@@ -33,7 +33,7 @@ from pathlib import Path
 
 from rocke.core.arch import ArchTarget
 from rocke.helpers import compile_kernel, make_conv_manifest, write_artifact
-from rocke.instances.common.conv_implicit_gemm import (
+from kernels.common.conv_implicit_gemm import (
     ConvDataSpec,
     ConvProblem,
     ImplicitGemmConvSpec,
