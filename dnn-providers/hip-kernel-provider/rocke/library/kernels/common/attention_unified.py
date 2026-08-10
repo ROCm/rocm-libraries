@@ -2588,6 +2588,21 @@ def _select_2d_block_m_per_warp(problem: UnifiedAttentionProblem) -> int:
 _PRE_BUMP_SMS = 120
 
 
+def _pre_bump_segments(problem: UnifiedAttentionProblem) -> int:
+    """Segment count the split-KV formula produced at the historical
+    ``num_sms=120`` (target 480) for this shape -- the arch-independent safe
+    ceiling every arch's clamp bounds to, so raising ``num_sms`` can never
+    over-split an already-3D shape. One source of truth (gfx942 / gfx950, and
+    gfx1250 when it lands) rather than pasted per arch.
+    """
+    num_2d = problem.total_num_q_blocks_upper_bound * problem.num_kv_heads
+    min_seg = 16 if problem.block_size <= 16 else 8
+    return max(
+        min(_next_power_of_2((_PRE_BUMP_SMS * 4 + num_2d - 1) // num_2d), 128),
+        min_seg,
+    )
+
+
 def _num_segments(problem: UnifiedAttentionProblem) -> int:
     """Mirror AITER ``select_3d_config`` num_segments derivation exactly."""
     attn_cfg, _ = problem.select_3d()
@@ -2598,12 +2613,7 @@ def _num_segments(problem: UnifiedAttentionProblem) -> int:
     # formula produced at the reference num_sms=120 -> target=480) is the
     # universally-safe ceiling: clamping to it can never do worse than shipped.
     if _resolve_attention_arch() == "gfx942" and problem.sliding_window == 0:
-        num_2d = problem.total_num_q_blocks_upper_bound * problem.num_kv_heads
-        min_seg = 16 if problem.block_size <= 16 else 8
-        pre_bump = max(
-            min(_next_power_of_2((_PRE_BUMP_SMS * 4 + num_2d - 1) // num_2d), 128),
-            min_seg,
-        )
+        pre_bump = _pre_bump_segments(problem)
         if problem.max_seqlen_q == 1:
             # DECODE: boundaries measured on gfx942 (Level 1, fp32-gated).
             if problem.max_seqlen_k <= 2048:
@@ -2635,12 +2645,7 @@ def _num_segments(problem: UnifiedAttentionProblem) -> int:
         # split), capturing the 2D->3D reroute win with zero over-split regression.
         # Cases proven on gfx950 silicon to benefit from a finer split are uncapped
         # later, each gated by its own measurement (not assumed from gfx942).
-        num_2d = problem.total_num_q_blocks_upper_bound * problem.num_kv_heads
-        min_seg = 16 if problem.block_size <= 16 else 8
-        pre_bump = max(
-            min(_next_power_of_2((_PRE_BUMP_SMS * 4 + num_2d - 1) // num_2d), 128),
-            min_seg,
-        )
+        pre_bump = _pre_bump_segments(problem)
         return min(segments, pre_bump)
     return segments
 
