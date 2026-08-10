@@ -565,7 +565,8 @@ void testing_gemm_grouped_batched_ex(const Arguments& arg)
     const void* const* dA_ptr = reinterpret_cast<const void* const*>(dA.ptr_on_device());
     const void* const* dB_ptr = reinterpret_cast<const void* const*>(dB.ptr_on_device());
     const void* const* dC_ptr = reinterpret_cast<const void* const*>(dC.ptr_on_device());
-    void* const*       dD_ptr = const_cast<void* const*>(dC_ptr);
+    // C alias D or inplace, rocblas to test out of place
+    void* const* dD_ptr = const_cast<void* const*>(dC_ptr);
 
     hipblas_init_matrix(hA, arg, hipblas_client_alpha_sets_nan, hipblas_general_matrix, true);
     hipblas_init_matrix(
