@@ -419,7 +419,9 @@ class AttentionDenseSpec:
             parts.append("varlen")
         if self.paged:
             parts.append(f"pgd{self.block_size}")
-            parts.append(f"nb{self.num_kv_blocks}")  # IR-live: sets the paged rsrc bound
+            parts.append(
+                f"nb{self.num_kv_blocks}"
+            )  # IR-live: sets the paged rsrc bound
         if self.lazy_rescale:
             parts.append("lazyrs")
         if self.persistent:
