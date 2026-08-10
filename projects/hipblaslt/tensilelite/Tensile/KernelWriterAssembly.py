@@ -89,7 +89,8 @@ from Tensile.Common import print2, printExit, printWarning, INDEX_CHARS, DebugCo
 from Tensile.Components.NonTemporal import decodeNonTemporal, forceCoherentNonTemporal
 from Tensile.Common.DataType import DataType
 from Tensile.Common.RegisterPool import RegisterPool, allocTmpGpr, allocTmpGprList
-from .Components.WorkGroupMappingAlgos import DefaultWGM, wgmXCC, SpaceFillingCurveWalk
+from .Components.WorkGroupMappingAlgos import DefaultWGM, wgmXCC, SpaceFillingCurveWalk, \
+  FusedA2AWgRemap
 
 from Tensile.KernelWriter import KernelWriter, ABMatrixInfo
 from Tensile.SolutionStructs.Naming import getKernelFileBase
@@ -3425,10 +3426,22 @@ class KernelWriterAssembly(KernelWriter):
     else:
       module.add(DefaultWGM(self, kernel, sgprWGM))
 
-    # Latch the grid-wide WG count before anything can borrow NumWorkGroups0/1.
+    # Lift the PUSH segment to the front of the dispatch order (D15 Step 2), then
+    # latch the grid-wide WG count before anything can borrow NumWorkGroups0/1, and
+    # resolve &counter3 here so the per-work-group tally in the epilogue is a bare
+    # atomic on a register pair rather than a kernarg load it has to wait on.
+    #
+    # The remap goes after DefaultWGM -- a runtime no-op at the WGM=1 every fused
+    # config runs -- and reads NumWorkGroups0/1 raw, so it also precedes the latch.
+    # Not for correctness: both orders compose bijections and the latch's product is
+    # order-independent. Reading the grid dims before anything reorders them is just
+    # the only order that does not require an argument.
     if kernel["FusedGemmA2A"]:
-      from .Components.GlobalWriteBatch import emitFusedA2ATotalWGsLatch
+      from .Components.GlobalWriteBatch import emitFusedA2ATotalWGsLatch, \
+        emitFusedA2ACounter3PtrLatch
+      module.add(FusedA2AWgRemap(self, kernel))
       emitFusedA2ATotalWGsLatch(module, "FusedTotalWGs")
+      emitFusedA2ACounter3PtrLatch(module, self, "FusedCounter3Ptr")
 
     return module
 

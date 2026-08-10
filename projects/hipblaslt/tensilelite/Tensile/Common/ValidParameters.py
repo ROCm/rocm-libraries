@@ -931,11 +931,6 @@ validParameters = { # we need to make sure this matches develop
     # PUSHed to remote recv[W,M,n_shard] slots, the remaining columns stored
     # locally. Requires StreamK=0 (data-parallel carrier). See ROCM-27524.
     "FusedGemmA2A": [0, 1],
-    # FusedA2ADrain: VESTIGIAL -- declared but never read by codegen. WHETHER a
-    # DRAIN runs is decided at runtime by the FusedDrain kernarg (offset 152).
-    # Historically meant to select barrier semantics (kernel exit == data
-    # received) for FusedGemmA2A=1; kept only so existing configs still parse.
-    "FusedA2ADrain": [0, 1],
     # Persistent-kernel debug: when True, the persistent loop never exits.
     # Used as a co-tenant load kernel for contended-perf benchmarking.
     # Termination is via process death. Requires StreamK = 3.
