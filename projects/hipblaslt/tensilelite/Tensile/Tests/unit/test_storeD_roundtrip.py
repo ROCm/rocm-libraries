@@ -47,10 +47,10 @@ from gpu_test_helpers import (
     hip,
     hip_check,
     init_rocisa,
-    requires_gpu,
+    GPU_MARKS,
 )
 
-pytestmark = requires_gpu
+pytestmark = GPU_MARKS
 
 # ---------------------------------------------------------------------------
 # Test configurations: (mt_a, mt_b, depth_u)

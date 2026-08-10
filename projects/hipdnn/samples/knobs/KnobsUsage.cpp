@@ -146,6 +146,8 @@ int main(int argc, char* argv[])
 {
     try
     {
+        RETURN_SUCCESS_IF_NO_DEVICE();
+
         bool useBenchmarking = false;
         for(int i = 1; i < argc; ++i)
         {
