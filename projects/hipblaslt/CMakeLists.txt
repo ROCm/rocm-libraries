@@ -289,7 +289,15 @@ if(HIPBLASLT_ENABLE_MXDATAGENERATOR
     set(_hipblaslt_mxdatagen_enabled TRUE)
 endif()
 
-if(NOT TARGET roc::host-validation)
+set(_hipblaslt_host_validation_enabled FALSE)
+if(HIPBLASLT_ENABLE_CLIENT
+        OR TENSILELITE_ENABLE_CLIENT
+        OR TENSILELITE_BUILD_TESTING)
+    set(_hipblaslt_host_validation_enabled TRUE)
+endif()
+
+if(_hipblaslt_host_validation_enabled
+        AND NOT TARGET roc::host-validation)
     set(_hipblaslt_host_validation_source
         "${CMAKE_CURRENT_SOURCE_DIR}/../../shared/host-validation"
     )
@@ -337,7 +345,9 @@ if(NOT TARGET roc::host-validation)
         )
     endif()
 endif()
-if(_hipblaslt_mxdatagen_enabled AND NOT TARGET roc::host-validation-mx)
+if(_hipblaslt_host_validation_enabled
+        AND _hipblaslt_mxdatagen_enabled
+        AND NOT TARGET roc::host-validation-mx)
     if(COMMAND roc_host_validation_enable_mx_backend)
         roc_host_validation_enable_mx_backend()
     else()
@@ -346,7 +356,9 @@ if(_hipblaslt_mxdatagen_enabled AND NOT TARGET roc::host-validation-mx)
         )
     endif()
 endif()
-if(HIPBLASLT_ENABLE_CLIENT AND NOT TARGET roc::host-validation-blas)
+if(_hipblaslt_host_validation_enabled
+        AND HIPBLASLT_ENABLE_CLIENT
+        AND NOT TARGET roc::host-validation-blas)
     if(COMMAND roc_host_validation_enable_blas_backend)
         roc_host_validation_enable_blas_backend()
     else()
