@@ -5477,7 +5477,7 @@ class Solution(collections.abc.Mapping):
     if state["LoopIters"] < 1:
       reject(state, printRejectionReason, "LoopIters need to greater than 0")
       return
-    if state["LoopIters"] == 1:
+    if state["HalfPLR"] and state["LoopIters"] == 1:
       reject(state, printRejectionReason, "HalfPLR only supports LoopIters > 1")
       return
 
