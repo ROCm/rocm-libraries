@@ -15,6 +15,7 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 ### Resolved Issues
 * [BatchNorm] Fixed an off-by-stride indexing bug in the backward CalcStats mean/variance remainder loop that caused a ~1% systematic bias in NCHW batch normalization backward results.
 * [Conv][gfx1250] Fixed an integer overflow in tensor operation kernels for large allocations that could cause memory access faults.
+* [Conv] Fixed a naive convolution solver failure mode where a global work size of 2^32 or more work-items silently failed to launch and left a stale HIP error visible after Find returned success; such launches are now rejected up front.
 
 ### Removed
 * Removed the OpenCL (OCL) backend; MIOpen now supports the HIP backend only.
