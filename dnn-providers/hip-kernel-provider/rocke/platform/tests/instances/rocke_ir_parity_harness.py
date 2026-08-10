@@ -126,6 +126,7 @@ def build_conv(
     pipeline="mem",
     epilogue="default",
     groups=1,
+    vector_size_c=None,
 ):
     def _build():
         from rocke.instances.common.conv_implicit_gemm import (
@@ -150,6 +151,7 @@ def build_conv(
             pipeline=pipeline,
             epilogue=epilogue,
             groups=groups,
+            vector_size_c=vector_size_c,
         )
         return build_implicit_gemm_conv(spec, arch=arch)
 
@@ -855,6 +857,7 @@ def cases():
             tile_m=64,
             tile_n=32,
             tile_k=16,
+            epilogue="cshuffle",
         ),
     )
     add(
@@ -891,6 +894,7 @@ def cases():
             tile_m=64,
             tile_n=32,
             tile_k=16,
+            epilogue="cshuffle",
         ),
     )
     add(
@@ -908,6 +912,7 @@ def cases():
             tile_m=32,
             tile_n=32,
             tile_k=16,
+            epilogue="cshuffle",
         ),
     )
     add(
@@ -925,6 +930,7 @@ def cases():
             tile_m=32,
             tile_n=32,
             tile_k=16,
+            epilogue="cshuffle",
         ),
     )
     add(
@@ -942,6 +948,7 @@ def cases():
             tile_m=32,
             tile_n=32,
             tile_k=16,
+            epilogue="cshuffle",
         ),
     )
     # gfx90a conv mirrors the gfx942 MFMA path (wave64, 16x16x16 atom). gfx1250
@@ -962,6 +969,47 @@ def cases():
             tile_m=64,
             tile_n=32,
             tile_k=16,
+            epilogue="cshuffle",
+        ),
+    )
+    # pipeline=basic: single-buffer global-read/compute overlap on gfx950.
+    add(
+        "conv",
+        "conv/gfx950/n1h8c16k32r3/basic_default",
+        "gfx950",
+        build_conv(
+            "irhash_conv_950_basic_a",
+            "gfx950",
+            conv1,
+            wave_size=64,
+            wtm=32,
+            wtn=32,
+            wtk=16,
+            tile_m=64,
+            tile_n=64,
+            tile_k=32,
+            pipeline="basic",
+            epilogue="default",
+            vector_size_c=1,
+        ),
+    )
+    add(
+        "conv",
+        "conv/gfx950/n1h8c16k32r3/basic_cshuffle",
+        "gfx950",
+        build_conv(
+            "irhash_conv_950_basic_b",
+            "gfx950",
+            conv1,
+            wave_size=64,
+            wtm=32,
+            wtn=32,
+            wtk=16,
+            tile_m=64,
+            tile_n=64,
+            tile_k=32,
+            pipeline="basic",
+            epilogue="cshuffle",
         ),
     )
 
@@ -1332,6 +1380,7 @@ def cases():
             k1=32,
             pool_tile_h=4,
             pool_tile_w=4,
+            epilogue="cshuffle",
         ),
     )
     add(
@@ -1348,6 +1397,7 @@ def cases():
             k1=32,
             pool_tile_h=4,
             pool_tile_w=4,
+            epilogue="cshuffle",
         ),
     )
     add(

@@ -120,6 +120,7 @@ jobs:
             -DROCM_LIBS_ENABLE_ROOT_CTEST=ON \
             -DENABLE_CLANG_FORMAT=OFF \
             -DHIPKERNELPROVIDER_ENABLE_ROCKE=ON \
+            -DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON \
             -DENABLE_CLANG_TIDY=OFF
 
       - name: Build
@@ -280,6 +281,7 @@ jobs:
             -DENABLE_CLANG_FORMAT=OFF \
             -DENABLE_CLANG_TIDY=ON \
             -DHIPKERNELPROVIDER_ENABLE_ROCKE=ON \
+            -DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON \
             -DCMAKE_CXX_CLANG_TIDY=/usr/bin/clang-tidy-20
 
       - name: Build

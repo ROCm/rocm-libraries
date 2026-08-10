@@ -3,7 +3,13 @@
 Documentation for rocFFT is available at
 [https://rocm.docs.amd.com/projects/rocFFT/en/latest/](https://rocm.docs.amd.com/projects/rocFFT/en/latest/).
 
-## Since last release (ROCm 7.14)
+## (Unreleased) rocFFT 1.0.40
+
+### Added
+
+* Added amdgcnspirv architecture to client programs, so that they are functional even on gfx architectures that they have not been explicitly compiled in.
+
+## rocFFT 1.0.39 for ROCm 10.0
 
 ### Optimized
 
