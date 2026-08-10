@@ -966,7 +966,8 @@ bool CDNA5ReadyQueue::findOldestFallbackNonWmma(DAGNode* pickedDS, DAGNode** out
     auto consider = [&](DAGNode* cand, int candKind) {
         if (cand == nullptr) return;
         const int wait = std::max(getMaxSrcDataWait(cand), getHazardWait(cand));
-        if (considerBest(cand, std::make_tuple(wait, (int)cand->id), best, bestKey)) kind = candKind;
+        if (considerBest(cand, std::make_tuple(wait, (int)cand->id), best, bestKey))
+            kind = candKind;
     };
 
     if (!globalReadQueue.empty()) consider(globalReadQueue.top(), kGlobalRead);
