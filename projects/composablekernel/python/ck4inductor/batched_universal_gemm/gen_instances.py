@@ -61,6 +61,11 @@ def parse_instances(
     this wrong shifts every subsequent field by two and yields plausible-looking garbage.
     """
 
+    # Rejected explicitly: an unrecognized value would fall
+    # through to the insert branch and silently shift every field by two.
+    if ds_mode not in ("overwrite", "insert"):
+        raise ValueError(f"ds_mode must be 'overwrite' or 'insert', got {ds_mode!r}")
+
     def maybe_int(s):
         try:
             return int(s)
@@ -97,20 +102,24 @@ def parse_instances(
             if i_next == -1:
                 break
 
-        if ds_mode == "overwrite":
-            # ds layout and dtype are parsed as placeholder; reset value
-            template_args[2] = tuple()  # ds layout
-            template_args[6] = tuple()  # ds dtype
-        else:
-            template_args.insert(2, tuple())  # ds layout
-            template_args.insert(6, tuple())  # ds dtype
-
+        # The Ds reconciliation has to sit inside the guard: `grep -inR` also matches
+        # comments and forward declarations, which yield too few template args, and
+        # subscript assignment then raises IndexError rather than TypeError. Left
+        # outside, one such line would abort enumeration instead of being skipped.
         try:
+            if ds_mode == "overwrite":
+                # ds layout and dtype are parsed as placeholder; reset value
+                template_args[2] = tuple()  # ds layout
+                template_args[6] = tuple()  # ds dtype
+            else:
+                template_args.insert(2, tuple())  # ds layout
+                template_args.insert(6, tuple())  # ds dtype
+
             new_instance = CKBatchedGemmOperation(
                 *template_args,  # type: ignore[arg-type]
             )
             op_instances.append(new_instance)
-        except TypeError as e:
+        except (TypeError, IndexError) as e:
             log.debug(f"{e} when parsing {line}")
     return op_instances
 
