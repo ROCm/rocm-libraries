@@ -584,6 +584,7 @@ static const rocke_isa_backend_t LL_BACKEND_GFX1250
        .encode_waitcnt = rocke_ll_encode_waitcnt_gfx11,
        .kind = ROCKE_LL_ISA_RDNA,
        .has_async_lds_counter = true,
+       .blocks_ds_load_tr16 = true,
        .emits_legacy_s_waitcnt = false,
        .emit_lds_barrier_drain = rocke_ll_emit_lds_barrier_drain_split,
        .ds_tr16_b128_spec = rocke_ll_tr16_spec_b128_gfx1250};

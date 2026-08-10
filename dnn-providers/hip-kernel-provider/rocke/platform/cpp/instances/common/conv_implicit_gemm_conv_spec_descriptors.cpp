@@ -316,6 +316,8 @@ rocke_implicit_gemm_conv_spec_t rocke_implicit_gemm_conv_spec_default(void)
 
     s.acc_epilogue = rocke_conv_acc_epilogue_default();
     s.cshuffle_no_alias = false; /* default: alias cshuffle C onto A/B */
+
+    s.num_load_waves = 2; /* wavelet pipeline: default 2 load waves */
     return s;
 }
 
@@ -323,6 +325,15 @@ int rocke_implicit_gemm_conv_spec_block_size(const rocke_implicit_gemm_conv_spec
 {
     /* warp_m * warp_n * wave_size */
     return s->warp_m * s->warp_n * s->wave_size;
+}
+
+int rocke_implicit_gemm_conv_spec_launch_block_size(const rocke_implicit_gemm_conv_spec_t* s)
+{
+    /* wavelet: block_size + num_load_waves * wave_size; else block_size */
+    int block_size = rocke_implicit_gemm_conv_spec_block_size(s);
+    if(s->pipeline != NULL && strcmp(s->pipeline, "wavelet") == 0)
+        return block_size + s->num_load_waves * s->wave_size;
+    return block_size;
 }
 
 int rocke_implicit_gemm_conv_spec_k_atoms_per_tile_k(const rocke_implicit_gemm_conv_spec_t* s)

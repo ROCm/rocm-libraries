@@ -114,6 +114,40 @@ static int make_cfg(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char**
         spec->epilogue = "cshuffle";
         *arch = "gfx950";
         return 0;
+    case 13:
+        /* wavelet pipeline, default epilogue (gfx1250 WMMA). */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->tile_m = 32;
+        spec->tile_n = 32;
+        spec->tile_k = 32;
+        spec->warp_m = 1;
+        spec->warp_n = 1;
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = 16;
+        spec->wave_size = 32;
+        spec->pipeline = "wavelet";
+        spec->epilogue = "default";
+        spec->num_load_waves = 2;
+        *arch = "gfx1250";
+        return 0;
+    case 14:
+        /* wavelet pipeline, cshuffle epilogue (gfx1250 WMMA). */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->tile_m = 32;
+        spec->tile_n = 32;
+        spec->tile_k = 32;
+        spec->warp_m = 1;
+        spec->warp_n = 1;
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = 16;
+        spec->wave_size = 32;
+        spec->pipeline = "wavelet";
+        spec->epilogue = "cshuffle";
+        spec->num_load_waves = 2;
+        *arch = "gfx1250";
+        return 0;
     default:
         return -1;
     }

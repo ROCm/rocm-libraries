@@ -278,8 +278,11 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
      */
     if(b->kernel != NULL)
     {
-        rocke_attr_set_int(
-            b, &b->kernel->attrs, "max_workgroup_size", rocke_warp_grid_block_size(&ctx->grid));
+        /* Wavelet uses launch_block_size (math + load waves); others use block_size. */
+        int mwgs = (spec->pipeline != NULL && strcmp(spec->pipeline, "wavelet") == 0)
+                       ? rocke_implicit_gemm_conv_spec_launch_block_size(spec)
+                       : rocke_warp_grid_block_size(&ctx->grid);
+        rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", mwgs);
     }
 
     rocke_value_t* wave = rocke_b_const_i32(b, spec->wave_size);
@@ -541,6 +544,10 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
 
     /* ---- loaders (exactly one family populated) ---- (986-1027) */
     ctx->async_dma = spec->async_dma;
+    ctx->have_async_loaders = false;
+    ctx->have_sync_loaders = false;
+    ctx->have_wavelet_loaders = false;
+
     if(ctx->async_dma)
     {
         rocke_status_t sa = rocke_async_tile_loader_from_tile(
@@ -553,7 +560,39 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
             return false;
         }
         ctx->have_async_loaders = true;
-        ctx->have_sync_loaders = false;
+    }
+    else if(spec->pipeline != NULL && strcmp(spec->pipeline, "wavelet") == 0)
+    {
+        /* Wavelet loaders are sized to num_load_waves * wave_size threads
+         * (load-wave-relative thread index is load_tid = tid - block_size). */
+        int load_threads = spec->num_load_waves * spec->wave_size;
+        int load_vec_a = spec->has_vector_size_a ? spec->vector_size_a : ctx->load_vec;
+        int load_vec_b = spec->has_vector_size_b ? spec->vector_size_b : ctx->load_vec;
+        rocke_status_t sa = rocke_coalesced_tile_loader_from_tile(
+            ctx->block_m, ctx->block_k, load_threads, load_vec_a, true, &ctx->a_wavelet_loader);
+        rocke_status_t sb = rocke_coalesced_tile_loader_from_tile(
+            ctx->block_n, ctx->block_k, load_threads, load_vec_b, true, &ctx->b_wavelet_loader);
+        if(sa != ROCKE_OK || sb != ROCKE_OK)
+        {
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "conv: wavelet tile loader from_tile failed");
+            return false;
+        }
+        ctx->have_wavelet_loaders = true;
+
+        /* Wavelet local state: load_tid, is_math, K_iters, epi_barriers. */
+        ctx->wavelet_n_math_warps = spec->warp_m * spec->warp_n;
+        ctx->wavelet_K_iters
+            = (rocke_conv_problem_k_gemm(ctx->p) + ctx->block_k - 1) / ctx->block_k;
+        /* _epi_barriers: cshuffle => 3 (no_alias => 1), else 0. */
+        if(spec->epilogue != NULL && strcmp(spec->epilogue, "cshuffle") == 0)
+            ctx->wavelet_epi_barriers = spec->cshuffle_no_alias ? 1 : 3;
+        else
+            ctx->wavelet_epi_barriers = 0;
+
+        rocke_value_t* c_nmath = rocke_b_const_i32(b, ctx->wavelet_n_math_warps);
+        ctx->wavelet_is_math = rocke_b_cmp_lt(b, ctx->warp_id, c_nmath);
+        ctx->wavelet_load_tid = rocke_b_sub(
+            b, ctx->tid, rocke_b_const_i32(b, rocke_implicit_gemm_conv_spec_block_size(spec)));
     }
     else
     {
@@ -572,7 +611,6 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
             return false;
         }
         ctx->have_sync_loaders = true;
-        ctx->have_async_loaders = false;
     }
 
     /* ---- schedule policy + prologue ---- (1029-1032) */
@@ -664,6 +702,10 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv(rocke_ir_builder_t* b,
     {
         rocke_conv_emit_kloop_basic(&ctx);
     }
+    else if(spec->pipeline != NULL && strcmp(spec->pipeline, "wavelet") == 0)
+    {
+        rocke_conv_emit_kloop_wavelet(&ctx);
+    }
     else if(!ctx.async_dma)
     {
         rocke_conv_emit_kloop_simple(&ctx);
@@ -674,8 +716,13 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv(rocke_ir_builder_t* b,
     }
 
     /* ---- epilogue (1349-1377): apply acc epilogue + dispatch the override /
-     * cshuffle / wmma-direct / mfma-direct chain. Reads ctx.final_accs. ---- */
-    rocke_conv_emit_epilogue(&ctx);
+     * cshuffle / wmma-direct / mfma-direct chain. Reads ctx.final_accs.
+     * Skipped for wavelet: the kloop driver emits the epilogue inline inside
+     * the math branch (it cannot be deferred outside the scf_if_else). ---- */
+    if(!ctx.epilogue_already_emitted)
+    {
+        rocke_conv_emit_epilogue(&ctx);
+    }
 
     if(!rocke_ir_builder_ok(b))
     {

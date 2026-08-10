@@ -245,6 +245,48 @@ def _spec(idx: int):
             ),
             "gfx950",
         )
+    if idx == 13:
+        # wavelet pipeline, default epilogue (gfx1250 WMMA).
+        p = _cp(N=8, Hi=56, Wi=56, C=64, K=64, fy=3, fx=3)
+        return (
+            ImplicitGemmConvSpec(
+                problem=p,
+                tile_m=32,
+                tile_n=32,
+                tile_k=32,
+                warp_m=1,
+                warp_n=1,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=16,
+                wave_size=32,
+                pipeline="wavelet",
+                epilogue="default",
+                num_load_waves=2,
+            ),
+            "gfx1250",
+        )
+    if idx == 14:
+        # wavelet pipeline, cshuffle epilogue (gfx1250 WMMA).
+        p = _cp(N=8, Hi=56, Wi=56, C=64, K=64, fy=3, fx=3)
+        return (
+            ImplicitGemmConvSpec(
+                problem=p,
+                tile_m=32,
+                tile_n=32,
+                tile_k=32,
+                warp_m=1,
+                warp_n=1,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=16,
+                wave_size=32,
+                pipeline="wavelet",
+                epilogue="cshuffle",
+                num_load_waves=2,
+            ),
+            "gfx1250",
+        )
     raise SystemExit(f"unknown config index {idx}")
 
 

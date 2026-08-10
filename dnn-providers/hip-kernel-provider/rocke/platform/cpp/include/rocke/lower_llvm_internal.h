@@ -195,6 +195,13 @@ typedef struct rocke_isa_backend
      * backend fact rather than tested by gfx-string prefix so the capability
      * has one definition site per backend, as in Python. */
     bool has_async_lds_counter;
+    /* Python Gfx1250Backend.blocks_ds_load_tr16: when true, vec==8
+     * smem_load_vN emits `volatile` to block the WMMA-aware backend pass from
+     * substituting ds_load_tr16_b128 (transposed LDS read) for the plain
+     * sequential ds_read_b128. Row-major LDS tiles (stored for coalesced
+     * writes) are mis-read by ds_load_tr16_b128, producing garbage WMMA
+     * inputs. Volatile is opaque to the substitution. True only on gfx1250. */
+    bool blocks_ds_load_tr16;
     /* Python ISABackend.emits_legacy_s_waitcnt. gfx1250 replaced the
      * monolithic s_waitcnt with split counters (s_wait_dscnt / s_wait_loadcnt
      * / ...) and llvm.amdgcn.s.waitcnt is NOT selectable there, so tile.s_waitcnt

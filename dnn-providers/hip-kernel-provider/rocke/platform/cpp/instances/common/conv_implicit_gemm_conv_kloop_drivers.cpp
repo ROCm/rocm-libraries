@@ -17,6 +17,8 @@
  * Phase functions (emit_load_phase / emit_mfma_phase) are peers reached through
  * the internal header; this TU touches only ctx + the builder it carries.
  */
+#include <string.h>
+
 #include "rocke/instance_conv_implicit_gemm_internal.h"
 
 /* ----- shared small helper: copy a working acc array into ctx->final_accs ----
@@ -386,4 +388,271 @@ void rocke_conv_emit_kloop_async(rocke_conv_build_ctx_t* ctx)
 
     /* return state */
     rocke_conv_set_final_accs(ctx, state, num_accs);
+}
+
+/* ===================================================================== *
+ * rocke_conv_emit_kloop_wavelet   (Python lines 1539-1797)
+ *
+ * Dedicated load-wave / math-wave split pipeline (CK Tile #8009).
+ *
+ * The workgroup is split into two roles identified by warp_id:
+ *   math waves  [0,         n_math_warps)  -- LDS reads + WMMA/MFMA + epilogue
+ *   load waves  [n_math_warps, total_warps) -- DRAM→register fetch + LDS write
+ *
+ * Two sub-paths:
+ *
+ *   WMMA path (ctx->is_wmma == true, e.g. gfx1250):
+ *     Uses scf_if_else (br i1) with a shared join block.  Both branches emit
+ *     s_barrier calls; the shared join prevents simplifycfg from removing them.
+ *
+ *   MFMA path (ctx->is_wmma == false, e.g. gfx942):
+ *     Uses exec-mask instructions (exec_and_saveexec / exec_xor /
+ *     exec_or_saveexec / exec_or) to flat-sequentially encode the split.
+ *     LLVM divergent branches would deadlock the barriers; exec-mask avoids
+ *     that by keeping all threads in one basic block while suppressing VGPR
+ *     writes for the inactive side.
+ *
+ * Barrier protocol (must be bit-identical in both branches):
+ *
+ *   MATH branch:
+ *     barrier_0
+ *     for i in 0..K_iters-2:
+ *       MFMA(LDS)
+ *       barrier_A   <- math done reading LDS
+ *       barrier_B   <- wait for load to write next tile
+ *     MFMA(LDS)     <- tail, no barriers
+ *     [epilogue -- emits epi_barriers barriers]
+ *
+ *   LOAD branch:
+ *     fetch tile 0 -> regs
+ *     store regs -> LDS
+ *     barrier_0
+ *     for i in 0..K_iters-2:
+ *       fetch tile i+1 -> regs    <- overlaps math MFMA
+ *       barrier_A                 <- wait for math to release LDS
+ *       store regs -> LDS
+ *       barrier_B                 <- signal LDS ready
+ *     [epilogue stub -- epi_barriers bare barriers, no stores]
+ * ===================================================================== */
+
+/* wavelet_fetch: issue buffer_load_vN for A and B into VGPR staging using
+ * load_tid (load-wave-relative thread index). Sets k_off_capture.
+ * Mirrors Python wavelet_fetch = a_wavelet_loader.fetch(b, k_off, load_tid). */
+static void wavelet_fetch(rocke_conv_build_ctx_t* ctx,
+                          rocke_value_t* k_off,
+                          rocke_ctl_staged_t* a_staged,
+                          rocke_ctl_staged_t* b_staged)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    ctx->k_off_capture = k_off;
+    rocke_coalesced_tile_loader_load_global(b,
+                                            &ctx->a_wavelet_loader,
+                                            ctx->wavelet_load_tid,
+                                            rocke_conv_a_descriptor,
+                                            ctx,
+                                            ctx->a_rsrc,
+                                            NULL,
+                                            a_staged);
+    rocke_coalesced_tile_loader_load_global(b,
+                                            &ctx->b_wavelet_loader,
+                                            ctx->wavelet_load_tid,
+                                            rocke_conv_b_descriptor,
+                                            ctx,
+                                            ctx->b_rsrc,
+                                            NULL,
+                                            b_staged);
+}
+
+/* wavelet_store: write staged VGPRs to LDS.
+ * Mirrors Python wavelet_store = a_wavelet_loader.store_fetched(b, a_regs, A_smem). */
+static void wavelet_store(rocke_conv_build_ctx_t* ctx,
+                          const rocke_ctl_staged_t* a_staged,
+                          const rocke_ctl_staged_t* b_staged,
+                          rocke_value_t* A_smem,
+                          rocke_value_t* B_smem)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_coalesced_tile_loader_store_lds(b, &ctx->a_wavelet_loader, A_smem, a_staged);
+    rocke_coalesced_tile_loader_store_lds(b, &ctx->b_wavelet_loader, B_smem, b_staged);
+}
+
+void rocke_conv_emit_kloop_wavelet(rocke_conv_build_ctx_t* ctx)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    const int K_iters = ctx->wavelet_K_iters;
+    const int num_accs = ctx->num_accs;
+    const int epi_barriers = ctx->wavelet_epi_barriers;
+    int it, i;
+
+    /* The wavelet driver emits the epilogue inline (inside the math branch).
+     * Signal the build driver to skip its epilogue call. */
+    ctx->epilogue_already_emitted = true;
+
+    rocke_value_t* A_smem = ctx->A_smem;
+    rocke_value_t* B_smem = ctx->B_smem;
+
+    rocke_ctl_staged_t a_staged;
+    rocke_ctl_staged_t b_staged;
+
+    if(ctx->is_wmma)
+    {
+        /* ----------------------------------------------------------------
+         * WMMA path: scf_if_else (gfx1250).
+         *
+         * gfx1250 has separate VMEM and WMMA issue slots, so load and math
+         * waves truly overlap without exec-mask interleaving. The LLVM br i1
+         * divergent branch is fine here — the hardware concurrency comes
+         * from the distinct issue queues, not from hardware scheduling at
+         * s_barrier.
+         * ---------------------------------------------------------------- */
+        rocke_if_else_t ife = rocke_b_scf_if_else(b, ctx->wavelet_is_math);
+
+        /* ---- MATH WAVE branch ---- */
+        rocke_value_t* current_accs[ROCKE_CONV_MAX_ACCS];
+        rocke_value_t* new_accs[ROCKE_CONV_MAX_ACCS];
+        for(i = 0; i < num_accs; ++i)
+            current_accs[i] = ctx->acc_inits[i];
+
+        rocke_b_region_enter(b, ife.then_region);
+        {
+            rocke_b_sync(b); /* barrier_0 */
+
+            for(it = 0; it < K_iters - 1; ++it)
+            {
+                ctx->k_off_capture = rocke_b_const_i32(b, it * ctx->block_k);
+                rocke_conv_emit_mfma_phase(ctx, A_smem, B_smem, current_accs, num_accs, new_accs);
+                for(i = 0; i < num_accs; ++i)
+                    current_accs[i] = new_accs[i];
+                rocke_b_sync(b); /* barrier_A */
+                rocke_b_sync(b); /* barrier_B */
+            }
+
+            /* tail MFMA -- no barriers */
+            ctx->k_off_capture = rocke_b_const_i32(b, (K_iters - 1) * ctx->block_k);
+            rocke_conv_emit_mfma_phase(ctx, A_smem, B_smem, current_accs, num_accs, new_accs);
+            for(i = 0; i < num_accs; ++i)
+                current_accs[i] = new_accs[i];
+
+            rocke_conv_set_final_accs(ctx, current_accs, num_accs);
+            rocke_conv_emit_epilogue(ctx);
+        }
+        rocke_b_region_leave(b);
+
+        /* ---- LOAD WAVE branch ---- */
+        rocke_b_region_enter(b, ife.else_region);
+        {
+            /* fetch tile 0 -> regs, store -> LDS, barrier_0 */
+            wavelet_fetch(ctx, rocke_b_const_i32(b, 0), &a_staged, &b_staged);
+            rocke_b_s_waitcnt(b, 0, -1, -1); /* vmcnt=0 */
+            wavelet_store(ctx, &a_staged, &b_staged, A_smem, B_smem);
+            rocke_b_s_waitcnt(b, -1, 0, -1); /* lgkmcnt=0 */
+            rocke_b_sync(b); /* barrier_0 */
+
+            for(it = 0; it < K_iters - 1; ++it)
+            {
+                wavelet_fetch(ctx,
+                              rocke_b_const_i32(b, (int64_t)(it + 1) * ctx->block_k),
+                              &a_staged,
+                              &b_staged);
+                rocke_b_sync(b); /* barrier_A */
+                rocke_b_s_waitcnt(b, 0, -1, -1); /* vmcnt=0 */
+                wavelet_store(ctx, &a_staged, &b_staged, A_smem, B_smem);
+                rocke_b_s_waitcnt(b, -1, 0, -1); /* lgkmcnt=0 */
+                rocke_b_sync(b); /* barrier_B */
+            }
+
+            /* epilogue stub: N_epi bare barriers matching the math branch */
+            for(i = 0; i < epi_barriers; ++i)
+                rocke_b_sync(b);
+        }
+        rocke_b_region_leave(b);
+    }
+    else
+    {
+        /* ----------------------------------------------------------------
+         * MFMA path: flat exec-mask split (gfx942).
+         *
+         * Math waves and load waves execute the same flat instruction stream.
+         * exec-mask ops gate which waves participate in each section:
+         *
+         *   exec_and_saveexec(load_mask) -> exec = load lanes; save = all
+         *   [load section with exec = load-wave lanes]
+         *   exec_or_saveexec(compl)      -> exec = all; tmp = load lanes
+         *   s_xor_b64 exec, exec, tmp    -> exec = math lanes
+         *   [math section with exec = math-wave lanes]
+         *   exec_or(exec_save)           -> restore exec = all
+         * ---------------------------------------------------------------- */
+
+        /* Build load_mask: i64 SGPR where load-wave lanes are set.
+         * v_cmp_ge_i32: mask = warp_id >= n_math_warps. */
+        rocke_value_t* c_nmath = rocke_b_const_i32(b, ctx->wavelet_n_math_warps);
+
+        /* Python: load_mask = b.inline_asm("v_cmp_ge_i32 $0, $1, $2", "=s,v,v",
+         *   [warp_id, c_nmath], result_type=I64) */
+        {
+            const rocke_type_t* i64_t = rocke_i64();
+            rocke_inline_asm_opts_t opts;
+            memset(&opts, 0, sizeof(opts));
+            opts.sideeffect = true;
+            opts.sideeffect_set = true;
+            rocke_value_t* operands[2];
+            operands[0] = ctx->warp_id;
+            operands[1] = c_nmath;
+            rocke_op_t* asm_op = rocke_b_inline_asm(
+                b, "v_cmp_ge_i32 $0, $1, $2", "=s,v,v", operands, 2, &i64_t, 1, &opts);
+            rocke_value_t* load_mask
+                = (asm_op && asm_op->num_results > 0) ? asm_op->results[0] : NULL;
+
+            rocke_value_t* exec_save = rocke_b_exec_and_saveexec(b, load_mask);
+            rocke_value_t* exec_compl = rocke_b_exec_xor(b, exec_save);
+
+            /* ---- LOAD SECTION (exec = load-wave lanes) ---- */
+            wavelet_fetch(ctx, rocke_b_const_i32(b, 0), &a_staged, &b_staged);
+            rocke_b_s_waitcnt(b, 0, -1, -1); /* vmcnt=0 */
+            wavelet_store(ctx, &a_staged, &b_staged, A_smem, B_smem);
+            rocke_b_s_waitcnt(b, -1, 0, -1); /* lgkmcnt=0 */
+            rocke_b_s_barrier_bare(b);
+
+            for(it = 0; it < K_iters - 1; ++it)
+            {
+                wavelet_fetch(ctx,
+                              rocke_b_const_i32(b, (int64_t)(it + 1) * ctx->block_k),
+                              &a_staged,
+                              &b_staged);
+                rocke_b_s_waitcnt(b, 0, -1, -1); /* vmcnt=0 */
+                wavelet_store(ctx, &a_staged, &b_staged, A_smem, B_smem);
+                rocke_b_s_waitcnt(b, -1, 0, -1); /* lgkmcnt=0 */
+                rocke_b_s_barrier_bare(b);
+            }
+
+            /* Join: switch exec from load lanes to math lanes. */
+            rocke_value_t* exec_tmp = rocke_b_exec_or_saveexec(b, exec_compl);
+            {
+                /* s_xor_b64 exec, exec, exec_tmp -> exec = math lanes only */
+                const rocke_inline_asm_opts_t xor_opts = {true, false, true, false};
+                rocke_b_inline_asm(
+                    b, "s_xor_b64 exec, exec, $0", "s", &exec_tmp, 1, NULL, 0, &xor_opts);
+            }
+
+            /* ---- MATH SECTION (exec = math-wave lanes) ---- */
+            rocke_value_t* current_accs[ROCKE_CONV_MAX_ACCS];
+            rocke_value_t* new_accs[ROCKE_CONV_MAX_ACCS];
+            for(i = 0; i < num_accs; ++i)
+                current_accs[i] = ctx->acc_inits[i];
+
+            for(it = 0; it < K_iters; ++it)
+            {
+                ctx->k_off_capture = rocke_b_const_i32(b, it * ctx->block_k);
+                rocke_conv_emit_mfma_phase(ctx, A_smem, B_smem, current_accs, num_accs, new_accs);
+                for(i = 0; i < num_accs; ++i)
+                    current_accs[i] = new_accs[i];
+            }
+
+            rocke_conv_set_final_accs(ctx, current_accs, num_accs);
+            rocke_conv_emit_epilogue(ctx);
+
+            /* Restore full exec for all waves. */
+            rocke_b_exec_or(b, exec_save);
+        }
+    }
 }

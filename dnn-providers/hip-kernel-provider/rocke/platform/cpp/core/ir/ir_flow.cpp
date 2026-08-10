@@ -1565,6 +1565,38 @@ rocke_if_t rocke_b_scf_if(rocke_ir_builder_t* b, rocke_value_t* cond)
     return out;
 }
 
+rocke_if_else_t rocke_b_scf_if_else(rocke_ir_builder_t* b, rocke_value_t* cond)
+{
+    rocke_if_else_t out;
+    rocke_region_t* then_r;
+    rocke_region_t* else_r;
+    rocke_region_t* regions[2];
+    rocke_op_t* op;
+
+    memset(&out, 0, sizeof(out));
+    if(!rocke_i_live(b))
+        return out;
+    if(!cond)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "scf_if_else: NULL cond");
+        return out;
+    }
+
+    then_r = rocke_i_new_region(b, "then");
+    else_r = rocke_i_new_region(b, "else");
+    if(!then_r || !else_r)
+        return out;
+    regions[0] = then_r;
+    regions[1] = else_r;
+    op = rocke_i_op(b, ROCKE_OP_SCF_IF_ELSE, &cond, 1, NULL, 0, NULL, regions, 2, "v", NULL);
+    if(!op)
+        return out;
+    out.op = op;
+    out.then_region = then_r;
+    out.else_region = else_r;
+    return out;
+}
+
 void rocke_b_ret(rocke_ir_builder_t* b)
 {
     if(!rocke_i_live(b))
