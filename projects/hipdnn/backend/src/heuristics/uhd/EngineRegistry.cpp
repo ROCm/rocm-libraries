@@ -105,7 +105,7 @@ void EngineRegistry::validateObjective(const EngineEntry& entry)
         std::ostringstream oss;
         oss << "UHD declares an unrecognized objective '" << cfg.objective
             << "'. Engine ID: " << entry.engineId << ", uhd='" << cfg.uhdId
-            << "'. Supported: \"max\", \"min\" (empty defaults to max).";
+            << R"('. Supported: "max", "min" (empty defaults to max).)";
         throw std::invalid_argument(oss.str());
     }
 }

@@ -369,12 +369,48 @@ TEST_F(TestJsonLogicEvaluator, DeeplyNestedExpressionIsRejected)
     std::string expr = "1";
     for(int i = 0; i < 512; ++i)
     {
-        expr = R"({"+": [)" + expr + ", 0]}";
+        expr.insert(0, R"({"+": [)");
+        expr.append(", 0]}");
     }
 
-    VariableContext ctx;
+    const VariableContext ctx;
     const JsonLogicEvaluator eval;
     EXPECT_THROW(eval.evaluateDouble(JsonLogicEvaluator::parse(expr), ctx), JsonLogicError);
+}
+
+TEST_F(TestJsonLogicEvaluator, DeeplyNestedAllPredicateIsRejected)
+{
+    // Regression: "all" evaluates its predicate in a rebuilt context, and that descent
+    // used to be made with the default depth of 0 rather than depth + 1. Because the
+    // counter reset at every level, nesting "all" inside its own predicate walked past
+    // MAX_EXPRESSION_DEPTH unbounded — the one operator that escaped the §16 bound.
+    // Nesting through the predicate position is what makes this fail before the fix;
+    // DeeplyNestedExpressionIsRejected nests only "+" and passes either way.
+    std::string expr = "true";
+    for(int i = 0; i < 512; ++i)
+    {
+        expr.insert(0, R"({"all": [[1], )");
+        expr.append("]}");
+    }
+
+    const VariableContext ctx;
+    const JsonLogicEvaluator eval;
+    EXPECT_THROW(eval.evaluateDouble(JsonLogicEvaluator::parse(expr), ctx), JsonLogicError);
+}
+
+TEST_F(TestJsonLogicEvaluator, ModeratelyNestedAllPredicateStillEvaluates)
+{
+    // The tightened bound must not reject a legitimately nested "all".
+    std::string expr = "true";
+    for(int i = 0; i < 8; ++i)
+    {
+        expr.insert(0, R"({"all": [[1], )");
+        expr.append("]}");
+    }
+
+    const VariableContext ctx;
+    const JsonLogicEvaluator eval;
+    EXPECT_NO_THROW(eval.evaluateDouble(JsonLogicEvaluator::parse(expr), ctx));
 }
 
 TEST_F(TestJsonLogicEvaluator, ModeratelyNestedExpressionStillEvaluates)
@@ -383,10 +419,11 @@ TEST_F(TestJsonLogicEvaluator, ModeratelyNestedExpressionStillEvaluates)
     std::string expr = "1";
     for(int i = 0; i < 16; ++i)
     {
-        expr = R"({"+": [)" + expr + ", 1]}";
+        expr.insert(0, R"({"+": [)");
+        expr.append(", 1]}");
     }
 
-    VariableContext ctx;
+    const VariableContext ctx;
     const JsonLogicEvaluator eval;
     EXPECT_DOUBLE_EQ(eval.evaluateDouble(JsonLogicEvaluator::parse(expr), ctx), 17.0);
 }
@@ -395,7 +432,7 @@ TEST_F(TestJsonLogicEvaluator, ModeratelyNestedExpressionStillEvaluates)
 
 TEST_F(TestJsonLogicEvaluator, ValueOrDefaultSuppliesDefaultForUnboundVariable)
 {
-    VariableContext ctx;
+    const VariableContext ctx;
     const JsonLogicEvaluator eval;
     const auto expr = JsonLogicEvaluator::parse(R"({"value_or_default": ["$q.missing", 7]})");
     EXPECT_DOUBLE_EQ(eval.evaluateDouble(expr, ctx), 7.0);
@@ -414,7 +451,7 @@ TEST_F(TestJsonLogicEvaluator, ValueOrDefaultDoesNotSwallowDivideByZero)
 
 TEST_F(TestJsonLogicEvaluator, ValueOrDefaultDoesNotSwallowArityErrors)
 {
-    VariableContext ctx;
+    const VariableContext ctx;
     const JsonLogicEvaluator eval;
     const auto expr = JsonLogicEvaluator::parse(R"({"value_or_default": [{"pow": [2]}, 7]})");
     EXPECT_THROW(eval.evaluateDouble(expr, ctx), JsonLogicError);

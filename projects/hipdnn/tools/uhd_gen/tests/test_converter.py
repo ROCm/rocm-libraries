@@ -14,21 +14,22 @@ import struct
 import tempfile
 from pathlib import Path
 
-import flatbuffers
-import lightgbm as lgb
-import numpy as np
 import pytest
 
-from uhd_gen.lgbm_to_flatbuffer import (
+# Must precede the imports below: these are optional, heavyweight training
+# dependencies, and importing them directly would turn a missing dep into a
+# collection error instead of a skip.
+flatbuffers = pytest.importorskip("flatbuffers")
+lgb = pytest.importorskip("lightgbm")
+np = pytest.importorskip("numpy")
+
+from uhd_gen.lgbm_to_flatbuffer import (  # noqa: E402
     GBDT_MODEL_FILE_IDENTIFIER,
+    _objective_name,
     build_gbdt_model,
     convert,
 )
-from uhd_gen.train_uhd import train_model
-
-# Skip tests if dependencies not available
-pytest.importorskip("lightgbm")
-pytest.importorskip("flatbuffers")
+from uhd_gen.train_uhd import train_model  # noqa: E402
 
 
 def _create_synthetic_data(n_samples: int = 1000, n_features: int = 5, seed: int = 42):
@@ -68,6 +69,37 @@ def _evaluate_flatbuffer_tree(
     assert len(buffer) > 0
     assert buffer[4:8] == GBDT_MODEL_FILE_IDENTIFIER
     return 0.0  # Placeholder
+
+
+class TestObjectiveName:
+    """Objective extraction across LightGBM dump_model shapes."""
+
+    @pytest.mark.parametrize(
+        ("dump", "expected"),
+        [
+            # LightGBM 4.x: a bare string. Reading this as a mapping raised
+            # AttributeError and broke every conversion.
+            ({"objective": "regression"}, "regression"),
+            # 4.x with trailing objective parameters; only the leading token names it.
+            ({"objective": "binary sigmoid:1"}, "binary"),
+            ({"objective": "multiclass num_class:3"}, "multiclass"),
+            # 2.x/3.x mapping form.
+            ({"objective": {"name": "regression_l1"}}, "regression_l1"),
+            # Degenerate inputs fall back rather than raising.
+            ({}, "regression"),
+            ({"objective": None}, "regression"),
+            ({"objective": ""}, "regression"),
+            ({"objective": {}}, "regression"),
+        ],
+    )
+    def test_objective_name(self, dump, expected):
+        assert _objective_name(dump) == expected
+
+    def test_real_lightgbm_dump_is_supported(self):
+        """The installed LightGBM's actual dump shape must convert, not just fixtures."""
+        X, y = _create_synthetic_data(n_samples=100, n_features=3)
+        model = _train_simple_model(X, y, num_trees=2)
+        assert _objective_name(model.dump_model()) == "regression"
 
 
 class TestConverter:

@@ -227,7 +227,7 @@ namespace
 /// Feature literals are tile sizes, dimensions and thresholds, so this bound is many
 /// orders of magnitude clear of anything real. Rejecting is the honest option: a
 /// signature we cannot canonicalize identically on both sides has no usable hash.
-constexpr double kMaxSafeNumericLiteral = 1e15;
+constexpr double MAX_SAFE_NUMERIC_LITERAL = 1e15;
 
 void validateNumericLiterals(const nlohmann::json& node)
 {
@@ -238,7 +238,7 @@ void validateNumericLiterals(const nlohmann::json& node)
         {
             throw JsonLogicError("features_signature contains a non-finite numeric literal");
         }
-        if(std::abs(value) >= kMaxSafeNumericLiteral)
+        if(std::abs(value) >= MAX_SAFE_NUMERIC_LITERAL)
         {
             throw JsonLogicError(
                 "features_signature contains the numeric literal " + node.dump()
@@ -276,6 +276,10 @@ nlohmann::json FeatureExtractor::parseSignatureEntry(const std::string& entry)
     // so it reaches the evaluator's variable branch.
     if(!entry.empty() && entry.front() == '$')
     {
+        // Not a braced init list: `nlohmann::json{entry}` builds a one-element
+        // *array*, not a string, which would reach the evaluator as the wrong node
+        // type. The explicit constructor call is required for correctness here.
+        // NOLINTNEXTLINE(modernize-return-braced-init-list)
         return nlohmann::json(entry);
     }
 

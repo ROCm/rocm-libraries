@@ -134,10 +134,10 @@ JsonLogicEvaluator::Value JsonLogicEvaluator::evaluate(const nlohmann::json& exp
     // Bound the descent (RFC 0019 §7.2 "safe, bounded interpreter"; §16 lists the
     // descriptor as author-controlled input). Without this a deeply nested expression
     // is a stack overflow, which the tree-walk bound in TreeDataAdapter does not cover.
-    if(depth > kMaxExpressionDepth)
+    if(depth > MAX_EXPRESSION_DEPTH)
     {
         throw JsonLogicError("JsonLogic expression exceeds the maximum nesting depth of "
-                             + std::to_string(kMaxExpressionDepth));
+                             + std::to_string(MAX_EXPRESSION_DEPTH));
     }
 
     // Literal number
@@ -171,11 +171,7 @@ JsonLogicEvaluator::Value JsonLogicEvaluator::evaluate(const nlohmann::json& exp
             return std::visit(
                 [](const auto& v) -> Value {
                     using T = std::decay_t<decltype(v)>;
-                    if constexpr(std::is_same_v<T, std::string>)
-                    {
-                        return v;
-                    }
-                    else if constexpr(std::is_same_v<T, bool>)
+                    if constexpr(std::is_same_v<T, std::string> || std::is_same_v<T, bool>)
                     {
                         return v;
                     }
@@ -608,14 +604,15 @@ JsonLogicEvaluator::Value JsonLogicEvaluator::evaluateOp(const std::string& op,
         {
             return true; // Empty array satisfies "all"
         }
-        // Note: $current binding would require context mutation;
-        // for now, we support literal arrays only
         for(const auto& item : arr)
         {
-            // Create temporary context with $current bound
+            // Evaluate the predicate in a copy of the context with $current bound to
+            // this element. Both descents carry depth + 1: the predicate is
+            // author-controlled and may itself nest "all", so omitting it here would
+            // reset the counter at every level and leave the recursion unbounded.
             VariableContext tempCtx = ctx;
             tempCtx.bind("$current", toDouble(evaluate(item, ctx, depth + 1)));
-            if(!toBool(evaluate(predicate, tempCtx)))
+            if(!toBool(evaluate(predicate, tempCtx, depth + 1)))
             {
                 return false;
             }

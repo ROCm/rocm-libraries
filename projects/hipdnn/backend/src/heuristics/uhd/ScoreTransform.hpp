@@ -28,13 +28,13 @@ namespace score_transform
 /// Kept in sync with the `transform` field's documented vocabulary in
 /// flatbuffers_sdk/schemas/uhd.fbs — a name the schema advertises but this list
 /// omits is a descriptor that passes schema review and then fails to load.
-inline constexpr std::array<const char*, 6> kSupportedTransforms
+inline constexpr std::array<const char*, 6> SUPPORTED_TRANSFORMS
     = {"", "identity", "log1p", "log", "exp", "sqrt"};
 
 /// Whether `transform` is a name this runtime can invert.
 inline bool isSupported(const std::string& transform)
 {
-    for(const auto* known : kSupportedTransforms)
+    for(const auto* known : SUPPORTED_TRANSFORMS)
     {
         if(transform == known)
         {
@@ -48,7 +48,7 @@ inline bool isSupported(const std::string& transform)
 inline std::string supportedTransformList()
 {
     std::string out;
-    for(const auto* known : kSupportedTransforms)
+    for(const auto* known : SUPPORTED_TRANSFORMS)
     {
         if(!out.empty())
         {
@@ -63,7 +63,7 @@ inline std::string supportedTransformList()
 ///
 /// @param rawScore Score from the model.
 /// @param transform Transform name from UhdConfig::scoreTransform. Must be one of
-///        kSupportedTransforms; unknown names fall through unchanged, which is only
+///        SUPPORTED_TRANSFORMS; unknown names fall through unchanged, which is only
 ///        safe because registration rejects them first.
 /// @returns Score in the units declared by the UHD.
 inline double applyInverse(double rawScore, const std::string& transform)

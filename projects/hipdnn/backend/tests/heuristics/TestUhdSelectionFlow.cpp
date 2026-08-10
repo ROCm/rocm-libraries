@@ -502,7 +502,7 @@ TEST_F(TestUhdSelectionFlow, RegisterAcceptsEverySupportedScoreTransform)
 {
     int64_t engineId = 100;
     for(const auto* transform :
-        hipdnn_backend::heuristics::uhd::score_transform::kSupportedTransforms)
+        hipdnn_backend::heuristics::uhd::score_transform::SUPPORTED_TRANSFORMS)
     {
         auto k1 = makeCandidate(1, 5);
         auto entry = createStaticOrderEngine(engineId, {k1});
@@ -1238,7 +1238,7 @@ protected:
     static FeatureExtractionContext::ValueMap deviceVarsForArch(const std::string& arch)
     {
         auto vars = defaultDeviceVars();
-        vars[hipdnn_backend::heuristics::uhd::kDeviceArchKey] = arch;
+        vars[hipdnn_backend::heuristics::uhd::DEVICE_ARCH_KEY] = arch;
         return vars;
     }
 

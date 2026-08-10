@@ -99,15 +99,12 @@ def build_gbdt_model(
     training_date_offset = builder.CreateString(
         datetime.now(timezone.utc).isoformat()
     )
-    objective_offset = builder.CreateString(
-        model_json.get("objective", {}).get("name", "regression")
-    )
+    objective_offset = builder.CreateString(_objective_name(model_json))
 
+    # LightGBM folds the shrinkage into the dumped leaf values, so the ensemble is
+    # summed with a unit rate. TreeDataAdapter::score() matches this by not applying
+    # a rate of its own; the field is provenance only.
     learning_rate = 1.0
-    if "objective" in model_json and "config" in model_json["objective"]:
-        learning_rate = float(
-            model_json["objective"]["config"].get("learning_rate", 1.0)
-        )
 
     # Build training_arches vector if provided
     training_arches_vec = None
@@ -142,6 +139,27 @@ def build_gbdt_model(
 
     builder.Finish(model_offset, file_identifier=GBDT_MODEL_FILE_IDENTIFIER)
     return bytes(builder.Output())
+
+
+def _objective_name(model_json: dict[str, Any]) -> str:
+    """Extract the bare objective name from a LightGBM model dump.
+
+    LightGBM 4.x reports `objective` as a string, sometimes carrying trailing
+    parameters (e.g. "binary sigmoid:1"); only the leading token names the
+    objective. Older 2.x/3.x dumps used a {"name": ..., "config": ...} mapping.
+    Both are accepted so an artifact produced against either version converts.
+    """
+    objective = model_json.get("objective")
+
+    if isinstance(objective, str):
+        # "binary sigmoid:1" -> "binary"; a bare "regression" is unchanged.
+        name = objective.split()[0] if objective.split() else ""
+        return name or "regression"
+
+    if isinstance(objective, dict):
+        return str(objective.get("name") or "regression")
+
+    return "regression"
 
 
 def _build_tree(builder: flatbuffers.Builder, root_node: dict[str, Any]) -> int:

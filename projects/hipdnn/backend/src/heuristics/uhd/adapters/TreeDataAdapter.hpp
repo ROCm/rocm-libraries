@@ -34,7 +34,8 @@ public:
                                                  const std::string& expectedFeaturesHash);
 
     /// Load from an in-memory buffer.
-    /// @param buffer Pointer to FlatBuffer data (must remain valid).
+    /// @param buffer FlatBuffer data. Copied into the adapter, so it need not outlive
+    ///        this call.
     /// @param size Size of buffer in bytes.
     /// @param expectedFeaturesHash Hash from UHD features_signature.
     /// @returns Adapter or nullptr if validation fails.
@@ -42,6 +43,14 @@ public:
         loadFromBuffer(const uint8_t* buffer, size_t size, const std::string& expectedFeaturesHash);
 
     ~TreeDataAdapter() override;
+
+    /// Non-copyable: `_model` points into `_ownedBuffer`, so a copy would leave the
+    /// new object's pointer aimed at the original's buffer and dangle as soon as the
+    /// original died. Declaring the destructor already suppresses the implicit move
+    /// operations, so deleting these leaves the type move-only-by-unique_ptr, which is
+    /// how every call site uses it.
+    TreeDataAdapter(const TreeDataAdapter&) = delete;
+    TreeDataAdapter& operator=(const TreeDataAdapter&) = delete;
 
     double score(const std::vector<double>& features) const override;
 

@@ -23,7 +23,7 @@ namespace hipdnn_backend::heuristics::uhd
 /// Spelled `arch` to match §7.1/§9.3 and gbdt_model.fbs, which both name
 /// `$device.arch`. The DeviceProperties FlatBuffer field it is populated from is
 /// still `architecture_name`; only the feature-namespace key is shortened.
-inline constexpr const char* kDeviceArchKey = "arch";
+inline constexpr const char* DEVICE_ARCH_KEY = "arch";
 
 /// @brief Result of scoring a single kernel candidate.
 struct ScoredCandidate

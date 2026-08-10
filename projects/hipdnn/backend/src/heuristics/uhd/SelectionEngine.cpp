@@ -96,7 +96,7 @@ SelectionResult SelectionEngine::select(int64_t engineId,
     // Check if device arch was seen during training (RFC 0019 §9.3).
     // A model trained only on gfx942 has no basis for ranking gfx950, so an
     // out-of-distribution device degrades rather than extrapolating.
-    auto archIt = deviceVars.find(kDeviceArchKey);
+    auto archIt = deviceVars.find(DEVICE_ARCH_KEY);
     if(archIt != deviceVars.end())
     {
         if(const auto* archStr = std::get_if<std::string>(&archIt->second))
@@ -331,8 +331,8 @@ SelectionResult SelectionEngine::applyDeclaredOrder(const std::vector<KernelCand
 {
     SelectionResult result;
 
-    static const std::vector<std::string> kDefaultOrder = {"priority", "id"};
-    const std::vector<std::string>& fields = orderFields.empty() ? kDefaultOrder : orderFields;
+    static const std::vector<std::string> s_defaultOrder = {"priority", "id"};
+    const std::vector<std::string>& fields = orderFields.empty() ? s_defaultOrder : orderFields;
 
     // Pre-resolve each candidate's key so the comparator does no lookups. A missing
     // field sorts after a present one, which keeps the order total and deterministic

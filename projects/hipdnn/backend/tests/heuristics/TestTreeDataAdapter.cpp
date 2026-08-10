@@ -30,8 +30,6 @@
 using hipdnn_backend::heuristics::uhd::TreeDataAdapter;
 using hipdnn_backend::heuristics::uhd::UhdAdapterType;
 
-namespace fb = hipdnn_flatbuffers_sdk::data_objects;
-
 namespace
 {
 
@@ -1076,9 +1074,9 @@ TEST_F(TestTreeDataAdapter, MutuallyRecursiveTreeTerminates)
 TEST_F(TestTreeDataAdapter, DeepButAcyclicTreeStillEvaluates)
 {
     // The bound is the node count, so a legitimate deep chain must not trip it.
-    constexpr int kDepth = 64;
+    constexpr int DEPTH = 64;
     GbdtModelBuilder::TreeSpec chain;
-    for(int i = 0; i < kDepth; ++i)
+    for(int i = 0; i < DEPTH; ++i)
     {
         chain.featureIndices.push_back(0);
         chain.thresholds.push_back(0.5);

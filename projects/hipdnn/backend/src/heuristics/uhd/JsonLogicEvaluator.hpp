@@ -111,7 +111,7 @@ public:
     Value evaluate(const nlohmann::json& expr, const VariableContext& ctx, size_t depth = 0) const;
 
     /// Maximum expression nesting the interpreter will descend.
-    static constexpr size_t kMaxExpressionDepth = 64;
+    static constexpr size_t MAX_EXPRESSION_DEPTH = 64;
 
     /// Extract all variable references from an expression.
     /// Returns variable names (e.g., "$device.cu_count", "$kernel.tile_m").
