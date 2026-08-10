@@ -130,11 +130,7 @@ const std::vector<hipfftLibraryPropertyType> enum_helper<hipfftLibraryPropertyTy
 
 TEST(hipfftTest, Create1dPlan)
 {
-    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
-       > unittest_prob)
-    {
-        GTEST_SKIP();
-    }
+    PROB_SKIP_UNITTEST();
     hipfftHandle plan   = hipfft_params::INVALID_PLAN_HANDLE;
     size_t       length = 1024;
     ASSERT_EQ(hipfftPlan1d(&plan, length, HIPFFT_C2C, 1), HIPFFT_SUCCESS);
@@ -144,11 +140,7 @@ TEST(hipfftTest, Create1dPlan)
 
 TEST(hipfftTest, CreatePlanMany)
 {
-    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
-       > unittest_prob)
-    {
-        GTEST_SKIP();
-    }
+    PROB_SKIP_UNITTEST();
     int const  rank         = 3;
     int const  nX           = 64;
     int const  nY           = 128;
@@ -266,11 +258,7 @@ TEST(hipfftTest, CreatePlanMany)
 
 TEST(hipfftTest, CreatePlanMany64)
 {
-    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
-       > unittest_prob)
-    {
-        GTEST_SKIP();
-    }
+    PROB_SKIP_UNITTEST();
     int const           rank               = 3;
     long long int const nX                 = 64;
     long long int const nY                 = 128;
@@ -382,11 +370,7 @@ TEST(hipfftTest, CreatePlanMany64)
 
 TEST(hipfftTest, hipfftGetSizeMany)
 {
-    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
-       > unittest_prob)
-    {
-        GTEST_SKIP();
-    }
+    PROB_SKIP_UNITTEST();
     int const  rank       = 3;
     int const  nX         = 33;
     int const  nY         = 128;
@@ -423,11 +407,7 @@ TEST(hipfftTest, hipfftGetSizeMany)
 
 TEST(hipfftTest, hipfftGetSizeMany64)
 {
-    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
-       > unittest_prob)
-    {
-        GTEST_SKIP();
-    }
+    PROB_SKIP_UNITTEST();
     int const           rank       = 3;
     long long int const nX         = 133;
     long long int const nY         = 354;
@@ -464,11 +444,7 @@ TEST(hipfftTest, hipfftGetSizeMany64)
 
 TEST(hipfftTest, CheckBufferSizeC2C)
 {
-    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
-       > unittest_prob)
-    {
-        GTEST_SKIP();
-    }
+    PROB_SKIP_UNITTEST();
     hipfftHandle plan = hipfft_params::INVALID_PLAN_HANDLE;
     ASSERT_EQ(hipfftCreate(&plan), HIPFFT_SUCCESS);
     size_t n        = 1024;
@@ -485,11 +461,7 @@ TEST(hipfftTest, CheckBufferSizeC2C)
 
 TEST(hipfftTest, CheckBufferSizeR2C)
 {
-    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
-       > unittest_prob)
-    {
-        GTEST_SKIP();
-    }
+    PROB_SKIP_UNITTEST();
     hipfftHandle plan = hipfft_params::INVALID_PLAN_HANDLE;
     ASSERT_EQ(hipfftCreate(&plan), HIPFFT_SUCCESS);
     // real forward transform cannot modify input, so we need to pick
@@ -518,11 +490,7 @@ TEST(hipfftTest, CheckBufferSizeR2C)
 
 TEST(hipfftTest, CheckBufferSizeC2R)
 {
-    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
-       > unittest_prob)
-    {
-        GTEST_SKIP();
-    }
+    PROB_SKIP_UNITTEST();
     hipfftHandle plan = hipfft_params::INVALID_PLAN_HANDLE;
     ASSERT_EQ(hipfftCreate(&plan), HIPFFT_SUCCESS);
     size_t n        = 2048;
@@ -548,11 +516,7 @@ TEST(hipfftTest, CheckBufferSizeC2R)
 
 TEST(hipfftTest, CheckBufferSizeD2Z)
 {
-    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
-       > unittest_prob)
-    {
-        GTEST_SKIP();
-    }
+    PROB_SKIP_UNITTEST();
     hipfftHandle plan = hipfft_params::INVALID_PLAN_HANDLE;
     ASSERT_EQ(hipfftCreate(&plan), HIPFFT_SUCCESS);
     // real forward transform cannot modify input, so we need to pick
@@ -583,11 +547,7 @@ TEST(hipfftTest, CheckBufferSizeD2Z)
 
 TEST(hipfftTest, CheckBufferSizeZ2D)
 {
-    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
-       > unittest_prob)
-    {
-        GTEST_SKIP();
-    }
+    PROB_SKIP_UNITTEST();
     hipfftHandle plan = hipfft_params::INVALID_PLAN_HANDLE;
     ASSERT_EQ(hipfftCreate(&plan), HIPFFT_SUCCESS);
     size_t n        = 2048;
@@ -616,11 +576,7 @@ TEST(hipfftTest, CheckBufferSizeZ2D)
 #ifdef __HIP_PLATFORM_AMD__
 TEST(hipfftTest, CheckNullWorkBuffer)
 {
-    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
-       > unittest_prob)
-    {
-        GTEST_SKIP();
-    }
+    PROB_SKIP_UNITTEST();
     hipfftHandle plan = hipfft_params::INVALID_PLAN_HANDLE;
     ASSERT_EQ(hipfftCreate(&plan), HIPFFT_SUCCESS);
     size_t n        = 2048;
@@ -635,11 +591,7 @@ TEST(hipfftTest, CheckNullWorkBuffer)
 
 TEST(hipfftTest, RunR2C)
 {
-    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
-       > unittest_prob)
-    {
-        GTEST_SKIP();
-    }
+    PROB_SKIP_UNITTEST();
     const size_t N = 4096;
     float        in[N];
     for(size_t i = 0; i < N; i++)
@@ -713,11 +665,7 @@ TEST(hipfftTest, RunR2C)
 // the out-place plan from working.
 TEST(hipfftTest, OutplaceOnly)
 {
-    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
-       > unittest_prob)
-    {
-        GTEST_SKIP();
-    }
+    PROB_SKIP_UNITTEST();
     static const int N_in_const  = 4;
     static const int N_out_const = N_in_const / 2 + 1;
     // mutable sizes for passing to hipFFT
@@ -791,11 +739,7 @@ TEST(hipfftTest, OutplaceOnly)
 static constexpr int absurd_version_or_property = std::numeric_limits<int>::min();
 TEST(hipfftTest, GetVersion)
 {
-    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
-       > unittest_prob)
-    {
-        GTEST_SKIP();
-    }
+    PROB_SKIP_UNITTEST();
     // valid use case(s)
     int tmp = absurd_version_or_property;
     EXPECT_EQ(hipfftGetVersion(&tmp), HIPFFT_SUCCESS);
@@ -805,11 +749,7 @@ TEST(hipfftTest, GetVersion)
 
 TEST(hipfftTest, GetProperty)
 {
-    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
-       > unittest_prob)
-    {
-        GTEST_SKIP();
-    }
+    PROB_SKIP_UNITTEST();
     // valid use case(s)
     int tmp;
     for(auto prop_type : enum_helper<hipfftLibraryPropertyType>::valid_values)

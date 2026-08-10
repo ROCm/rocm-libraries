@@ -205,8 +205,7 @@ void mlo_construct_norm::mloConstructFwd()
     _g_wk.clear();
     if(_norm_region == MLO_LRN_ACROSS_CHANNELS)
     {
-
-        _g_wk.push_back(map_size_4);
+        _g_wk.push_back(AlignUp(static_cast<size_t>(map_size_4), static_cast<size_t>(_grp_tile0)));
         _g_wk.push_back(1);
         _g_wk.push_back(_problem.GetBatchSize());
     }
@@ -309,8 +308,10 @@ void mlo_construct_norm::mloConstructBwd()
 
     if(_norm_region == MLO_LRN_ACROSS_CHANNELS)
     {
-        _g_wk.push_back(_in_df_width);
-        _g_wk.push_back(_in_df_height);
+        _g_wk.push_back(
+            AlignUp(static_cast<size_t>(_in_df_width), static_cast<size_t>(_grp_tile0)));
+        _g_wk.push_back(
+            AlignUp(static_cast<size_t>(_in_df_height), static_cast<size_t>(_grp_tile1)));
         _g_wk.push_back(_problem.GetBatchSize());
         _kernel_name = "MIOpenLRNAcrossChannelsBwd1";
     }
