@@ -24,24 +24,49 @@ using hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper;
 namespace
 {
 
-// log2(e): the kernel computes softmax base-2 (exp2), so it takes
-// scale_log2 = attn_scale * log2(e), not the raw scale. See the header.
+// log2(e): a base-2 (exp2) softmax kernel takes scale_log2 = attn_scale * log2(e),
+// not the raw scale. The adapter emits BOTH scale_log2 and scale_raw so a family's
+// args_signature can name whichever its kernel expects (see the header).
 constexpr float K_LOG2E = 1.4426950408889634F;
 
-// The S_q/S_kv tiling granularity the kernel's unmasked global loads require
-// (must match the family.json multiple_of predicate and the grid ceil_div).
-constexpr int64_t K_TILE_M = 16;
-
 // hipDNN element dtype -> the provider dtype token kernel authors use in
-// family.json constraints. Unsupported dtypes yield nullopt (decode declines).
+// family.json `dtype` constraints. Distinct tokens per fp8 encoding because the
+// OCP (E4M3/E5M2) and FNUZ variants are NOT interchangeable across archs -- a
+// gfx942/gfx950 kernel constrains dtype to its exact encoding. Unsupported
+// dtypes yield nullopt (decode declines -> another engine serves the graph).
 std::optional<std::string> providerDtype(data_objects::DataType dtype)
 {
     switch(dtype)
     {
     case data_objects::DataType::HALF: return std::string("f16");
     case data_objects::DataType::BFLOAT16: return std::string("bf16");
+    case data_objects::DataType::FP8_E4M3: return std::string("f8");
+    case data_objects::DataType::FP8_E5M2: return std::string("bf8");
+    case data_objects::DataType::FP8_E4M3_FNUZ: return std::string("f8fnuz");
+    case data_objects::DataType::FP8_E5M2_FNUZ: return std::string("bf8fnuz");
     default: return std::nullopt;
     }
+}
+
+// Byte width of one element, used to publish *_bytes stride variants for ABIs
+// (e.g. hand-written ASM) that take byte strides instead of element strides.
+int64_t elementBytes(data_objects::DataType dtype)
+{
+    switch(dtype)
+    {
+    case data_objects::DataType::HALF:
+    case data_objects::DataType::BFLOAT16: return 2;
+    case data_objects::DataType::FP8_E4M3:
+    case data_objects::DataType::FP8_E5M2:
+    case data_objects::DataType::FP8_E4M3_FNUZ:
+    case data_objects::DataType::FP8_E5M2_FNUZ: return 1;
+    default: return 0;
+    }
+}
+
+bool isFp8Token(const std::string& token)
+{
+    return token == "f8" || token == "bf8" || token == "f8fnuz" || token == "bf8fnuz";
 }
 
 int64_t problemInt(const catalog::ProblemShape& problem, const std::string& key)
@@ -55,11 +80,12 @@ int64_t problemInt(const catalog::ProblemShape& problem, const std::string& key)
     return std::get<int64_t>(it->second);
 }
 
-// The 15-arg ABI carries only a (token, head) stride pair per tensor -- there is
-// no batch-stride argument. The kernel therefore folds batch into the grid's z
-// axis assuming batch_stride == seqlen * stride_token. That holds trivially for
-// B==1 (z==0, no batch offset); for B>1 we require the packed relation to hold on
-// every tensor, else decline (a wrong batch offset would silently corrupt).
+// An ABI with only a (token, head) stride pair per tensor -- no batch-stride arg --
+// folds batch into the grid's z axis assuming batch_stride == seqlen * stride_token.
+// That holds trivially for B==1; for B>1 it holds only when the tensor is packed on
+// the batch axis. `batch_foldable` is published as a fact so a kernel that DOES take
+// a batch-stride arg is free to accept the non-packed case, while the gfx1151 kernel
+// (no batch-stride arg) constrains batch_foldable==true and declines otherwise.
 bool batchFoldable(const TensorAttributesWrapper& t, int64_t batch, int64_t seqLen)
 {
     if(batch == 1)
@@ -74,7 +100,7 @@ bool batchFoldable(const TensorAttributesWrapper& t, int64_t batch, int64_t seqL
 
 std::optional<catalog::ProblemShape> SdpaAdapter::decode(const IGraph& graph) const
 {
-    // Single SdpaAttributes node only (Tier-D allowlist for the POC).
+    // Single SdpaAttributes node only (the op adapter matches one node).
     if(!graph.isValid() || graph.nodeCount() != 1)
     {
         return std::nullopt;
@@ -85,55 +111,6 @@ std::optional<catalog::ProblemShape> SdpaAdapter::decode(const IGraph& graph) co
         return std::nullopt;
     }
     const auto& attrs = node.attributesAs<data_objects::SdpaAttributes>();
-
-    // Fail closed on every feature the mask=none forward kernel does not handle,
-    // mirroring the ASM SdpaFwdPlanBuilder::isApplicable. Any of these means a
-    // different kernel, so decline and let another engine serve the graph.
-    if(attrs.causal_mask() || attrs.causal_mask_bottom_right() || attrs.alibi_mask()
-       || attrs.padding_mask())
-    {
-        return std::nullopt; // masked attention -- our kernel is mask_mode="none"
-    }
-    if(attrs.attn_mask_tensor_uid().has_value() || attrs.block_mask_tensor_uid().has_value()
-       || attrs.sink_token_tensor_uid().has_value())
-    {
-        return std::nullopt; // additive/block/sink masking -- unsupported
-    }
-    if(attrs.dropout_probability().has_value() && attrs.dropout_probability().value() != 0.0F)
-    {
-        return std::nullopt; // dropout -- unsupported
-    }
-    if(attrs.dropout_mask_tensor_uid().has_value() || attrs.seed_tensor_uid().has_value()
-       || attrs.offset_tensor_uid().has_value())
-    {
-        return std::nullopt; // dropout plumbing -- unsupported
-    }
-    if(attrs.page_table_k_tensor_uid().has_value()
-       || attrs.page_table_v_tensor_uid().has_value())
-    {
-        return std::nullopt; // paged-KV -- unsupported
-    }
-    if(attrs.seq_len_q_tensor_uid().has_value() || attrs.seq_len_kv_tensor_uid().has_value())
-    {
-        return std::nullopt; // varlen / group batch mode -- unsupported
-    }
-    if(attrs.generate_stats().value_or(false) || attrs.stats_tensor_uid().has_value())
-    {
-        return std::nullopt; // LSE / stats output -- unsupported
-    }
-    if(attrs.descale_q_tensor_uid().has_value() || attrs.descale_k_tensor_uid().has_value()
-       || attrs.descale_v_tensor_uid().has_value() || attrs.descale_s_tensor_uid().has_value()
-       || attrs.scale_s_tensor_uid().has_value() || attrs.scale_o_tensor_uid().has_value())
-    {
-        return std::nullopt; // FP8 (de)scaling -- unsupported
-    }
-    // The scale is baked at plan-build from attn_scale_value (or the 1/sqrt(D)
-    // default). A runtime scale tensor would need LaunchAbi support we do not
-    // have, so decline rather than launch with a wrong scale.
-    if(attrs.scale_tensor_uid().has_value())
-    {
-        return std::nullopt;
-    }
 
     const auto& tensorMap = graph.getTensorMap();
     auto findTensor = [&](int64_t uid) -> const data_objects::TensorAttributes* {
@@ -160,6 +137,13 @@ std::optional<catalog::ProblemShape> SdpaAdapter::decode(const IGraph& graph) co
         const TensorAttributesWrapper v(vTensor);
         const TensorAttributesWrapper o(oTensor);
 
+        // ---- Universal safety gates ----------------------------------------
+        // These are correctness invariants no forward SDPA kernel can waive:
+        // violating one would make the strides()[1..3]/dims() accesses below (and
+        // in buildBindings) unsafe or the decoded shape meaningless. They stay in
+        // C++; every *feature* decision, by contrast, is published as a fact and
+        // decided by per-kernel family.json constraints.
+
         // All four operands are [B, H, S, D] (BHSD), rank 4.
         const auto qDims = q.dims();
         const auto kDims = k.dims();
@@ -179,7 +163,7 @@ std::optional<catalog::ProblemShape> SdpaAdapter::decode(const IGraph& graph) co
         const int64_t seqLenKv = kDims[2];
 
         // K/V must agree on head count and KV sequence length, and every head dim
-        // (Q, K, V, O) must match the single baked D. O must mirror Q's [B,H,Sq,D].
+        // (Q, K, V, O) must match the single D. O must mirror Q's [B,H,Sq,D].
         if(kDims[3] != headDim || vDims[3] != headDim)
         {
             return std::nullopt;
@@ -194,17 +178,18 @@ std::optional<catalog::ProblemShape> SdpaAdapter::decode(const IGraph& graph) co
             return std::nullopt;
         }
 
-        // Multi-head attention only: the kernel indexes K/V by the same head as Q
-        // and does not broadcast KV heads, so it cannot serve GQA/MQA. Decline in
-        // code when the KV head count differs (the family.json H_kv constraint is a
-        // data backstop; the header promises this gate, so enforce it here too).
-        if(numHeadsKv != numHeads)
+        // A KV head count that does not evenly divide the Q head count is a
+        // malformed GQA grouping (no integer group ratio) -- decline. A valid
+        // ratio (incl. 1 == MHA, numHeads == MQA) is published as gqa_ratio and
+        // left to per-kernel constraints.
+        if(numHeadsKv <= 0 || numHeads % numHeadsKv != 0)
         {
             return std::nullopt;
         }
+        const int64_t gqaRatio = numHeads / numHeadsKv;
 
-        // A single supported element dtype (f16 or bf16) across Q/K/V/O; the
-        // kernel reads and writes one dtype.
+        // A single supported element dtype across Q/K/V/O; the shape carries one
+        // dtype token and a mixed-I/O-dtype kernel is a documented future gate.
         const auto dtype = providerDtype(q.dataType());
         if(!dtype.has_value() || k.dataType() != q.dataType() || v.dataType() != q.dataType()
            || o.dataType() != q.dataType())
@@ -212,19 +197,8 @@ std::optional<catalog::ProblemShape> SdpaAdapter::decode(const IGraph& graph) co
             return std::nullopt;
         }
 
-        // Sequence lengths must be tile multiples: the kernel's global loads are
-        // unmasked along the S axes. (D is pinned to 64 by the family constraint,
-        // which is a multiple of 16, so no separate D check is needed here.)
-        if(seqLenQ % K_TILE_M != 0 || seqLenKv % K_TILE_M != 0)
-        {
-            return std::nullopt;
-        }
-
-        // The kernel has no D-stride arg: it assumes each operand's innermost (D)
-        // axis is contiguous and addresses within a row by element index. Decline a
-        // non-unit last-dim stride (a transposed/strided view) rather than silently
-        // mis-address. Also validates rank-4 strides, making the strides()[1..3]
-        // accesses in buildBindings/batchFoldable safe once decode accepts.
+        // Rank-4 strides on every operand -- makes the strides()[0..3] accesses in
+        // buildBindings/batchFoldable and the d_contiguous fact below safe.
         const auto qStrides = q.strides();
         const auto kStrides = k.strides();
         const auto vStrides = v.strides();
@@ -234,18 +208,51 @@ std::optional<catalog::ProblemShape> SdpaAdapter::decode(const IGraph& graph) co
         {
             return std::nullopt;
         }
-        if(qStrides[3] != 1 || kStrides[3] != 1 || vStrides[3] != 1 || oStrides[3] != 1)
-        {
-            return std::nullopt;
-        }
 
-        // Batch must be foldable into the grid z axis with only a token stride
-        // (no batch-stride ABI arg) -- see batchFoldable().
-        if(!batchFoldable(q, batch, seqLenQ) || !batchFoldable(o, batch, seqLenQ)
-           || !batchFoldable(k, batch, seqLenKv) || !batchFoldable(v, batch, seqLenKv))
-        {
-            return std::nullopt;
-        }
+        // ---- Published facts (the capability vocabulary) -------------------
+        // Structural facts a kernel opts into via constraints rather than a
+        // hard-coded decline. `d_contiguous`: innermost (D) axis is unit-stride on
+        // all operands -- a kernel with no D-stride arg constrains this true.
+        const bool dContiguous = qStrides[3] == 1 && kStrides[3] == 1 && vStrides[3] == 1
+                                 && oStrides[3] == 1;
+        const bool batchFold = batchFoldable(q, batch, seqLenQ)
+                               && batchFoldable(o, batch, seqLenQ)
+                               && batchFoldable(k, batch, seqLenKv)
+                               && batchFoldable(v, batch, seqLenKv);
+
+        // Masking / bias features (each formerly a hard decline).
+        const bool causal = attrs.causal_mask();
+        const bool causalBottomRight = attrs.causal_mask_bottom_right();
+        const bool hasAlibi = attrs.alibi_mask();
+        const bool hasPaddingMask = attrs.padding_mask();
+        const bool hasAttnMask = attrs.attn_mask_tensor_uid().has_value();
+        const bool hasBlockMask = attrs.block_mask_tensor_uid().has_value();
+        const bool hasSink = attrs.sink_token_tensor_uid().has_value();
+
+        // Dropout: a nonzero probability or any dropout-plumbing tensor.
+        const bool hasDropout = (attrs.dropout_probability().has_value()
+                                 && attrs.dropout_probability().value() != 0.0F)
+                                || attrs.dropout_mask_tensor_uid().has_value()
+                                || attrs.seed_tensor_uid().has_value()
+                                || attrs.offset_tensor_uid().has_value();
+
+        const bool paged = attrs.page_table_k_tensor_uid().has_value()
+                           || attrs.page_table_v_tensor_uid().has_value();
+        const bool varlen = attrs.seq_len_q_tensor_uid().has_value()
+                            || attrs.seq_len_kv_tensor_uid().has_value();
+        const bool genStats = attrs.generate_stats().value_or(false)
+                              || attrs.stats_tensor_uid().has_value();
+
+        // FP8 (de)scaling machinery, or an fp8 element dtype.
+        const bool fp8 = isFp8Token(*dtype) || attrs.descale_q_tensor_uid().has_value()
+                         || attrs.descale_k_tensor_uid().has_value()
+                         || attrs.descale_v_tensor_uid().has_value()
+                         || attrs.descale_s_tensor_uid().has_value()
+                         || attrs.scale_s_tensor_uid().has_value()
+                         || attrs.scale_o_tensor_uid().has_value();
+
+        // A runtime scale tensor (vs. the plan-time-baked attn_scale_value).
+        const bool runtimeScale = attrs.scale_tensor_uid().has_value();
 
         catalog::ProblemShape shape;
         shape.emplace("dtype", catalog::ShapeValue{*dtype});
@@ -255,7 +262,22 @@ std::optional<catalog::ProblemShape> SdpaAdapter::decode(const IGraph& graph) co
         shape.emplace("S_q", catalog::ShapeValue{seqLenQ});
         shape.emplace("S_kv", catalog::ShapeValue{seqLenKv});
         shape.emplace("D", catalog::ShapeValue{headDim});
-        shape.emplace("causal", catalog::ShapeValue{false});
+        shape.emplace("gqa_ratio", catalog::ShapeValue{gqaRatio});
+        shape.emplace("d_contiguous", catalog::ShapeValue{dContiguous});
+        shape.emplace("batch_foldable", catalog::ShapeValue{batchFold});
+        shape.emplace("causal", catalog::ShapeValue{causal});
+        shape.emplace("causal_bottom_right", catalog::ShapeValue{causalBottomRight});
+        shape.emplace("has_alibi", catalog::ShapeValue{hasAlibi});
+        shape.emplace("has_padding_mask", catalog::ShapeValue{hasPaddingMask});
+        shape.emplace("has_attn_mask", catalog::ShapeValue{hasAttnMask});
+        shape.emplace("has_block_mask", catalog::ShapeValue{hasBlockMask});
+        shape.emplace("has_sink", catalog::ShapeValue{hasSink});
+        shape.emplace("has_dropout", catalog::ShapeValue{hasDropout});
+        shape.emplace("paged", catalog::ShapeValue{paged});
+        shape.emplace("varlen", catalog::ShapeValue{varlen});
+        shape.emplace("gen_stats", catalog::ShapeValue{genStats});
+        shape.emplace("fp8", catalog::ShapeValue{fp8});
+        shape.emplace("runtime_scale", catalog::ShapeValue{runtimeScale});
         return shape;
     }
     catch(const std::exception& e)
@@ -269,7 +291,12 @@ catalog::LaunchBindings SdpaAdapter::buildBindings(const IGraph& graph,
                                                    const catalog::ProblemShape& problem,
                                                    const catalog::KernelEntry& kernel) const
 {
-    (void)kernel; // sdpa binds a fixed 15-arg ABI regardless of the chosen kernel
+    // The adapter emits a SUPERSET of named quantities; each family's
+    // args_signature selects and orders the subset its kernel takes (launch::
+    // bindArgs resolves by name and fails closed on an unemitted name). So a new
+    // arch is served as data as long as its ABI is drawn from this vocabulary;
+    // one added emission here (reviewed) is the single extension point.
+    (void)kernel;
 
     const auto& node = graph.getNodeWrapper(0);
     const auto& attrs = node.attributesAs<data_objects::SdpaAttributes>();
@@ -286,7 +313,7 @@ catalog::LaunchBindings SdpaAdapter::buildBindings(const IGraph& graph,
     };
 
     // BHSD layout: within-batch token stride is the S-axis stride (index 2), head
-    // stride is the H-axis stride (index 1). The kernel needs exactly this pair.
+    // stride is the H-axis stride (index 1), batch stride is the B-axis (index 0).
     const TensorAttributesWrapper q = tensorFor(attrs.q_tensor_uid());
     const TensorAttributesWrapper k = tensorFor(attrs.k_tensor_uid());
     const TensorAttributesWrapper v = tensorFor(attrs.v_tensor_uid());
@@ -296,37 +323,79 @@ catalog::LaunchBindings SdpaAdapter::buildBindings(const IGraph& graph,
     const float scale = attrs.attn_scale_value().value_or(
         1.0F / std::sqrt(static_cast<float>(headDim)));
     const float scaleLog2 = scale * K_LOG2E;
+    const int64_t elemBytes = elementBytes(q.dataType());
 
     catalog::LaunchBindings bindings;
     bindings.pointerUids.emplace("Q", attrs.q_tensor_uid());
     bindings.pointerUids.emplace("K", attrs.k_tensor_uid());
     bindings.pointerUids.emplace("V", attrs.v_tensor_uid());
     bindings.pointerUids.emplace("O", attrs.o_tensor_uid());
+    // Optional tensor operands: bound only when the graph carries them, so a
+    // kernel that names them gets them and one that doesn't is unaffected.
+    if(attrs.attn_mask_tensor_uid().has_value())
+    {
+        bindings.pointerUids.emplace("attn_mask", attrs.attn_mask_tensor_uid().value());
+    }
+    if(attrs.stats_tensor_uid().has_value())
+    {
+        // "stats" and "lse" are aliases for the log-sum-exp output tensor.
+        bindings.pointerUids.emplace("stats", attrs.stats_tensor_uid().value());
+        bindings.pointerUids.emplace("lse", attrs.stats_tensor_uid().value());
+    }
 
+    // Scale, both forms: base-2 (scale_log2) and raw (scale_raw).
     bindings.scalars.emplace("scale_log2", catalog::ScalarValue{scaleLog2});
+    bindings.scalars.emplace("scale_raw", catalog::ScalarValue{scale});
+
+    // Sequence lengths.
     bindings.scalars.emplace("seqlen_q", catalog::ScalarValue{problemInt(problem, "S_q")});
     bindings.scalars.emplace("seqlen_k", catalog::ScalarValue{problemInt(problem, "S_kv")});
 
-    bindings.scalars.emplace("stride_q_token", catalog::ScalarValue{q.strides()[2]});
-    bindings.scalars.emplace("stride_q_head", catalog::ScalarValue{q.strides()[1]});
-    bindings.scalars.emplace("stride_k_token", catalog::ScalarValue{k.strides()[2]});
-    bindings.scalars.emplace("stride_k_head", catalog::ScalarValue{k.strides()[1]});
-    bindings.scalars.emplace("stride_v_token", catalog::ScalarValue{v.strides()[2]});
-    bindings.scalars.emplace("stride_v_head", catalog::ScalarValue{v.strides()[1]});
-    bindings.scalars.emplace("stride_o_token", catalog::ScalarValue{o.strides()[2]});
-    bindings.scalars.emplace("stride_o_head", catalog::ScalarValue{o.strides()[1]});
+    // Per-tensor strides in element units and byte units (token / head / batch).
+    auto emitStrides = [&](const std::string& prefix, const TensorAttributesWrapper& t) {
+        const int64_t token = t.strides()[2];
+        const int64_t head = t.strides()[1];
+        const int64_t batch = t.strides()[0];
+        bindings.scalars.emplace("stride_" + prefix + "_token", catalog::ScalarValue{token});
+        bindings.scalars.emplace("stride_" + prefix + "_head", catalog::ScalarValue{head});
+        bindings.scalars.emplace("stride_" + prefix + "_batch", catalog::ScalarValue{batch});
+        bindings.scalars.emplace("stride_" + prefix + "_token_bytes",
+                                 catalog::ScalarValue{token * elemBytes});
+        bindings.scalars.emplace("stride_" + prefix + "_head_bytes",
+                                 catalog::ScalarValue{head * elemBytes});
+        bindings.scalars.emplace("stride_" + prefix + "_batch_bytes",
+                                 catalog::ScalarValue{batch * elemBytes});
+    };
+    emitStrides("q", q);
+    emitStrides("k", k);
+    emitStrides("v", v);
+    emitStrides("o", o);
+
+    // Dimensions / derived counts as scalar args, for ABIs that take them.
+    bindings.scalars.emplace("H", catalog::ScalarValue{problemInt(problem, "H")});
+    bindings.scalars.emplace("H_kv", catalog::ScalarValue{problemInt(problem, "H_kv")});
+    bindings.scalars.emplace("D", catalog::ScalarValue{headDim});
+    bindings.scalars.emplace("B", catalog::ScalarValue{problemInt(problem, "B")});
+    bindings.scalars.emplace("gqa_ratio", catalog::ScalarValue{problemInt(problem, "gqa_ratio")});
     return bindings;
 }
 
 launch::SymbolTable SdpaAdapter::gridSymbols(const catalog::ProblemShape& problem,
                                              const catalog::KernelEntry& kernel) const
 {
+    // Superset of grid symbols; a family's grid formula references whichever it
+    // needs and extra symbols are harmless. Heuristic grid transforms (axis-swap,
+    // mask-halving) are a deferred launch-layer extension point (see the README).
     (void)kernel;
 
     launch::SymbolTable symbols;
     symbols.emplace("S_q", problemInt(problem, "S_q"));
+    symbols.emplace("S_kv", problemInt(problem, "S_kv"));
     symbols.emplace("H", problemInt(problem, "H"));
+    symbols.emplace("H_kv", problemInt(problem, "H_kv"));
     symbols.emplace("B", problemInt(problem, "B"));
+    symbols.emplace("D", problemInt(problem, "D"));
+    symbols.emplace("gqa_ratio", problemInt(problem, "gqa_ratio"));
     return symbols;
 }
 

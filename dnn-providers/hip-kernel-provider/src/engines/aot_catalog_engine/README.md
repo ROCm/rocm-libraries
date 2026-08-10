@@ -25,7 +25,7 @@ Strix Halo, RDNA3.5):
 |------------|------------------|----------------------------------------------------|----|
 | `matmul`   | `GemmAdapter`    | `gemm_wmma_gfx1151`, `gemm_wmma_universal_gfx1151`  | [§6](#6-gemm--matmul) |
 | `rmsnorm`  | `RmsNormAdapter` | `rmsnorm2d_gfx1151`                                 | [§7](#7-rmsnorm) |
-| `sdpa`     | `SdpaAdapter`    | `fmha_wmma_fwd_gfx1151`                             | [§8](#8-sdpa-dense-flash-attention-forward) |
+| `sdpa`     | `SdpaAdapter`    | `fmha_wmma_fwd_gfx1151`                             | [§8](#8-sdpa-flash-attention-forward--the-universal-forward-adapter) |
 
 A **family is one algorithm**, not one dtype: every family carries its f16 *and* bf16
 kernels in a single flat `kernels[]` list, each kernel naming its own `dtype`
@@ -40,6 +40,9 @@ cover testing, adding a brand-new op, and the file map.
 [§12](#12-capabilities-and-limits-and-the-walls-beyond-gfx1151) is the honest
 capability map: what this design does well, and exactly where it stops — read it before
 scoping SDPA/conv work on gfx942/gfx950/gfx1250.
+[§13](#13-authoring-a-forward-sdpa-family-on-a-new-arch-gfx942gfx950) is the step-by-step
+handoff kit for authoring a **forward SDPA family on a new arch** as data (vocabulary
+table, capability-key contract, copy-paste `family.json` template).
 
 ---
 
@@ -300,10 +303,24 @@ instance `instances/common/rmsnorm2d_dynamic.py`; parity + selection tests
 
 ---
 
-## 8. SDPA (dense flash-attention forward)
+## 8. SDPA (flash-attention forward) — the universal forward adapter
 
-**op_kind `"sdpa"` · adapter `SdpaAdapter` · family `fmha_wmma_fwd_gfx1151` (f16 + bf16
-kernels flat).**
+**op_kind `"sdpa"` · adapter `SdpaAdapter` (universal forward) · family
+`fmha_wmma_fwd_gfx1151` (f16 + bf16 kernels flat).**
+
+`SdpaAdapter` is **one universal *forward* adapter**, not a gfx1151-shaped one. It decodes
+a single-node `SdpaAttributes` graph arch-neutrally, publishes the full **capability
+vocabulary** as problem-shape facts, and lets each kernel's `family.json` constraints
+decide applicability. It marshals a **superset** of by-name arguments, so a forward
+kernel's ABI on *any* arch is selected as data (its `args_signature` picks the subset it
+takes). The gfx1151 WMMA kernel below is the first family it serves; a gfx942/gfx950
+forward family is authored as data against the same adapter — see the handoff kit in
+[§13](#13-authoring-a-forward-sdpa-family-on-a-new-arch-gfx942gfx950).
+
+Only **universal, memory-safety invariants** remain hard C++ declines (single
+`SdpaAttributes` node; rank-4 BHSD Q/K/V/O; K/V agree on `H_kv`/`S_kv`/`D`; O mirrors Q;
+one supported dtype across Q/K/V/O; integer `gqa_ratio`). Every **feature** decision
+(causal, GQA, masks, fp8, …) moved from an `if` in the adapter to a *where* in data.
 
 ### The kernel (the shipped reference)
 rocKE's `build_wmma_fmha_fwd` (gfx1151 WMMA flash-attention forward), a thin adapter
@@ -316,8 +333,12 @@ over the unified `mfma_attention_fwd_inner_body`:
 - **Native bf16, no cast.** bf16 shares the f16 16×16×16 WMMA fragment layout on
   gfx1151, so the same inner body lowers to `wmma.f32.16x16x16.bf16` for bf16. f16 and
   bf16 are separate `.co`s within the one family, selected by the `dtype` constraint.
-- **`mask_mode="none"`, non-causal, MHA (H_kv == H).** The adapter declines anything
-  else (see the decline boundary below).
+- **`mask_mode="none"`, non-causal, MHA (H_kv == H), contiguous-D, batch-foldable.** These
+  are now expressed as **capability constraints in `family.json`** (`causal {equals
+  false}`, `gqa_ratio {equals 1}`, `d_contiguous {equals true}`, `batch_foldable {equals
+  true}`, and all the `has_* {equals false}`), not as adapter declines. A graph the kernel
+  can't serve fails the constraints → no candidate → the engine declines (aggregate
+  fail-closed), and another engine serves it.
 - **Grid** `(ceil_div(S_q,16), H, B)`, **block** `(32,1,1)` — one wave32 per CTA, each
   CTA owns a 16-row Q tile of one (head, batch). **Static LDS** → `sharedMemBytes = 0`;
   **no workspace**.
@@ -328,7 +349,7 @@ only because PyTorch has no fused flash backend there and falls to an unfused O(
 path — so treat that as "not the bottleneck," not a win over a tuned flash kernel.
 Tuning (LDS staging, multi-tile, larger Q tiles) grows data-only via §5.
 
-### ABI (15 args, exact order)
+### This kernel's ABI (15 args, exact order — a subset of the adapter vocabulary)
 
 | # | name | type | meaning |
 |---|------|------|---------|
@@ -348,46 +369,82 @@ Tuning (LDS staging, multi-tile, larger Q tiles) grows data-only via §5.
 |13 | `stride_o_token` | i32 | `o.stride(2)` |
 |14 | `stride_o_head` | i32 | `o.stride(1)` |
 
+These 15 names are the subset this kernel's `args_signature` selects from the adapter's
+**full argument vocabulary** — the complete emitted set (byte-stride variants, batch
+strides, raw scale, head/dim scalars, optional mask/stats pointers) is the arg-vocabulary
+reference table in [§13](#arg-vocabulary-reference). A different forward kernel picks a
+different subset; a name it needs that isn't emitted yet is one added line in
+`buildBindings` (reviewed C++, §13).
+
 #### ⚠️ Gotcha #1 — `scale_log2`, not the raw scale
 The softmax is computed **base-2** (`exp2`), so the kernel takes
 `scale_log2 = attn_scale * log2(e)` where `log2(e) = 1.4426950408889634`. The adapter
-does this multiply (from `attn_scale_value`, defaulting to `1/sqrt(D)`); your kernel
-must consume the already-multiplied value. A kernel that expects the *raw* scale is an
-ABI change (§4).
+emits **both** `scale_log2` (already multiplied, from `attn_scale_value`, defaulting to
+`1/sqrt(D)`) **and** `scale_raw` (unmultiplied); a kernel that wants the raw scale simply
+names `scale_raw` in its `args_signature` — no C++ change.
 
-#### ⚠️ Gotcha #2 — BHSD stride mapping, no batch-stride arg
+#### ⚠️ Gotcha #2 — BHSD stride mapping; batch-stride is available but this kernel folds
 Tensors are `[B,H,S,D]`: token stride is `stride(2)` (S axis), head stride is
-`stride(1)` (H axis). There is **no batch-stride argument** — the kernel folds batch
-into grid `z` assuming `batch_stride == seqlen * stride_token`. This holds trivially for
-`B == 1` (LTX). The adapter declines `B > 1` unless that packed relation holds on every
-tensor.
+`stride(1)` (H axis). This kernel takes **no batch-stride argument** — it folds batch into
+grid `z` assuming `batch_stride == seqlen * stride_token` (trivially true for `B == 1`,
+LTX). It therefore constrains `batch_foldable {equals true}`. The adapter *does* emit
+`stride_{q,k,v,o}_batch` (element and byte), so a kernel with a real batch-stride arg on
+another arch accepts the non-folded `B > 1` case as data.
 
-### Problem keys (`decode` emits)
+### Problem keys (`decode` publishes — the capability vocabulary)
+Numeric shape:
+
 | key | type | source |
 |-----|------|--------|
-| `dtype` | string | `"f16"` / `"bf16"` |
+| `dtype` | string | `"f16"`/`"bf16"`/`"f8"`/`"bf8"`/`"f8fnuz"`/`"bf8fnuz"` |
 | `B` | int | `q.dim(0)` |
 | `H` | int | `q.dim(1)` (query heads) |
 | `H_kv` | int | `k.dim(1)` (kv heads) |
 | `S_q` | int | `q.dim(2)` |
 | `S_kv` | int | `k.dim(2)` |
 | `D` | int | `q.dim(3)` (head dim) |
-| `causal` | bool | always `false` (masked graphs decline) |
+| `gqa_ratio` | int | `H / H_kv` (1 = MHA, H = MQA) |
 
-### Decline boundary
-`SdpaAdapter::decode` returns "not applicable" (→ another engine serves it) for **any**
-of: causal / causal-bottom-right / alibi / padding masks; additive `attn_mask`,
-`block_mask`, or `sink_token`; dropout ≠ 0 (or any dropout plumbing); paged-KV; varlen /
-group batch; LSE / stats output; FP8 (de)scale tensors; a **runtime** scale tensor;
-non-rank-4 tensors; mismatched dtype across Q/K/V/O; `D`/`H_kv` mismatch; `S_q % 16 != 0`
-or `S_kv % 16 != 0`; non-foldable `B > 1`. Handling any of these is a new decode
-capability → C++ change (§4).
+Capability facts (bool unless noted) — a kernel opts in/out via a constraint; see the
+[capability-key reference](#capability-key-reference) in §13 for the fail-closed warning:
+
+| key | true when |
+|-----|-----------|
+| `d_contiguous` | innermost (D) axis is unit-stride on Q/K/V/O |
+| `batch_foldable` | `B == 1`, or batch stride packs as `seqlen * stride_token` on all operands |
+| `causal` | `causal_mask` set |
+| `causal_bottom_right` | `causal_mask_bottom_right` set |
+| `has_alibi` | `alibi_mask` set |
+| `has_padding_mask` | `padding_mask` set |
+| `has_attn_mask` | an `attn_mask` tensor is present |
+| `has_block_mask` | a `block_mask` tensor is present |
+| `has_sink` | a `sink_token` tensor is present |
+| `has_dropout` | dropout prob ≠ 0, or any dropout-plumbing tensor |
+| `paged` | a page-table (K or V) tensor is present |
+| `varlen` | a `seq_len_q`/`seq_len_kv` (group-mode) tensor is present |
+| `gen_stats` | `generate_stats` set, or a stats tensor is present |
+| `fp8` | an fp8 element dtype, or any fp8 (de)scale tensor |
+| `runtime_scale` | a runtime `scale` tensor is present (vs. baked `attn_scale_value`) |
+
+### Decline boundary (now: universal safety only)
+`SdpaAdapter::decode` returns "not applicable" (→ another engine serves it) **only** for
+the memory-safety invariants above: not a single `SdpaAttributes` node; any of Q/K/V/O
+not rank-4 (dims or strides); K/V disagreeing on `H_kv`/`S_kv`/`D`; O not mirroring
+`[B,H,S_q,D]`; an unsupported or mismatched dtype across Q/K/V/O; a non-integer
+`gqa_ratio` (`H_kv` that doesn't divide `H`). **Everything else decodes** — causal, GQA,
+masks, fp8, varlen, paged — and applicability is decided by each kernel's `family.json`
+constraints. Serving a new feature is therefore, in the common case, **new data** (a
+family that constrains the fact appropriately), not adapter C++; it is only C++ if the
+kernel needs an argument the vocabulary doesn't yet emit or a grid the DSL can't express
+(§13, §12.3).
 
 ### Files
 Adapter `ops/SdpaAdapter.{hpp,cpp}`; data + co-located producer
 `library/gfx1151/fmha_wmma_fwd/{family.json, produce_fmha_fwd_co.py}`; parity test
-`TestSdpaNumericParity.cpp`; A/B rig `tools/sdpa_aot_ab.py`; model override + driver
-`tools/comfyui_hipdnn_sdpa_override.py`, `tools/ltx_sdpa_ab.py`.
+`TestSdpaNumericParity.cpp`; decode/bindings unit test `TestSdpaDecode.cpp` (host-only,
+no GPU); A/B rig `tools/sdpa_aot_ab.py`; model override + driver
+`tools/comfyui_hipdnn_sdpa_override.py`, `tools/ltx_sdpa_ab.py`. Authoring a new-arch
+forward family: [§13](#13-authoring-a-forward-sdpa-family-on-a-new-arch-gfx942gfx950).
 
 ---
 
@@ -523,23 +580,27 @@ The load-bearing precondition on *all* of that: **it is only data-free when the 
 has an adapter and the kernel fits that adapter's fixed ABI.** The rest of §12 is where
 that precondition fails.
 
-### 12.3 The ABI is per-adapter — and for SDPA it is hardcoded, not data-driven
+### 12.3 The ABI is per-adapter — SDPA forward now selects its ABI from data
 
-`family.json` carries an `args_signature` (§3), and `LaunchAbi` packs by name from it —
-but the adapter is still what *produces* those names/values, and it may ignore the
-signature entirely. `SdpaAdapter::buildBindings` does `(void)kernel;` and marshals a
-**fixed 15-arg BHSD signature** (§8): the SDPA ABI is baked into C++, not read from data.
-Consequences:
+`family.json` carries an `args_signature` (§3), and `LaunchAbi` packs by name from it. The
+adapter is what *produces* the by-name values; the signature selects and orders which of
+them a kernel takes. For **SDPA forward** this is now genuinely data-driven:
+`SdpaAdapter::buildBindings` emits a **superset vocabulary** — pointers Q/K/V/O plus
+optional mask/stats; `scale_log2` **and** `scale_raw`; `seqlen_q/k`; per-tensor token/
+head/**batch** strides in **element and byte** units; `H`/`H_kv`/`D`/`B`/`gqa_ratio`
+scalars (full table in §13). A forward kernel on gfx942/gfx950 that wants a real
+batch-stride arg, byte strides, a GQA-ratio arg, or the raw scale **names it in
+`args_signature`** — new JSON, not new C++. "Add an arch as a folder" (§12.2) now holds
+for SDPA forward too. Remaining C++-only cases:
 
-- The first SDPA kernel on another arch that exposes a **different ABI** — a real
-  batch-stride arg, a D-stride, a GQA-ratio arg, or the 16-byte SGPR-slot kernarg padding
-  the AITER ASM kernels need — is **new adapter C++**, not new JSON. "Add an arch as a
-  folder" (§12.2) holds for GEMM/RMSNorm, where the ABI is stable across shapes; it does
-  **not** hold for SDPA across arches.
-- **Computed args are an adapter escape hatch, per feature.** `scale_log2` and the stride
-  args are derived in `buildBindings` today (§8); that pattern generalizes to *any*
-  computed scalar — but each new one is a line of C++, not a data field. Byte-stride
-  conversion, a `tuneOpt` launch scalar, a GQA ratio: all adapter code.
+- **A quantity the vocabulary doesn't emit yet** (a novel launch scalar, a `tuneOpt`) is
+  one added emission in `buildBindings` — reviewed C++, but a single explicit extension
+  point, not a rewrite (§13).
+- **The 16-byte SGPR-slot kernarg padding** the hand-written AITER ASM kernels need is a
+  `packArgs` change in `LaunchAbi` (natural alignment today), deliberately deferred until
+  a real ASM forward kernel lands (§12.4).
+- **SDPA backward** is still fully C++/substrate work — it isn't a forward ABI at all (it
+  breaks one-candidate = one-launch; §12.4).
 
 ### 12.4 The walls for SDPA and conv on gfx942 / gfx950 / gfx1250
 
@@ -548,19 +609,182 @@ Grouped by what each actually requires — data, adapter C++, or a new substrate
 | Wall | What it needs | Class |
 |------|---------------|-------|
 | **New arch `.co` (CDNA MFMA, gfx1250)** | The C++ is arch-transparent, so the *catalog* side is data — **but** a producer must exist. gfx1151 producers `import ck_dsl.instances.gfx1151.*`; gfx942/gfx950 use MFMA (not WMMA) and need their own rocKE instances (different tile/occupancy), pinned to a churning `ck_dsl` API. | rocKE kernel work + data |
-| **GQA / MQA** (`H_kv != H`) | `SdpaAdapter::decode` declines it today (§8); modern LLM attention needs it. Decode gate + an ABI that carries the KV-head mapping. | adapter C++ (+ maybe ABI) |
-| **Causal / additive / padding masks** | Declined today (§8). This is the **76%-of-device-time prize** (causal SDPA). Decode capability + kernel bias/mask input + ABI arg. | adapter C++ + kernel |
-| **D=128, any-H** | Nominally data (a new `D equals 128` variant), *iff* the kernel compiles without VGPR spill on the single-wave body — the one place D=128 may force a kernel change. | data (with a kernel caveat) |
-| **varlen / paged-KV / FP8 descale** | All declined today (§8); needed for real serving. Each is a decode capability + ABI/kernel work. | adapter C++ + kernel |
+| **GQA / MQA** (`H_kv != H`) — *forward* | `decode` now publishes `gqa_ratio`; a forward kernel that handles grouped KV constrains it and names `H_kv`/`gqa_ratio` from the vocabulary. **Data, once a kernel exists.** | rocKE kernel work + **data** |
+| **Causal / additive / padding masks** — *forward* | `decode` now publishes `causal`, `has_attn_mask`, … A forward kernel with the mask/bias input constrains the fact and (for additive masks) names the `attn_mask` pointer. This is the **76%-of-device-time prize** (causal SDPA). **Data, once a kernel exists.** | rocKE kernel work + **data** |
+| **D=128, any-H** — *forward* | A new `D equals 128` (and `H equals …`) variant, *iff* the kernel compiles without VGPR spill on the single-wave body — the one place D may force a kernel change. | **data** (with a kernel caveat) |
+| **varlen / paged-KV / FP8 descale** — *forward* | `decode` now publishes `varlen`/`paged`/`fp8`; a forward kernel constrains the fact and names the relevant pointers/scales. FP8 has distinct dtype tokens per encoding (`f8`/`bf8`/`f8fnuz`/`bf8fnuz`). **Data, once a kernel exists.** | rocKE kernel work + **data** |
+| **A forward arg the vocabulary doesn't emit** | A novel launch scalar / `tuneOpt` a future forward kernel needs is one added emission in `buildBindings` (§13) — the single explicit extension point. | adapter C++ (one line) |
+| **SGPR-slot kernarg padding (hand-written ASM)** | `packArgs` uses natural alignment; AITER-style ASM forward kernels need 16-byte SGPR-slot padding. Deferred until a real ASM forward kernel lands. | launch-layer C++ |
+| **Heuristic grid transforms** | The grid DSL does `ceil_div`/constants (§3). ASM kernels want conditional transforms (mask-halving, hd192 axis-swap), a launch-time `tuneOpt` scalar, sub-arch selection (MI300 vs MI308), a uint32 stride gate. `gridSymbols` already emits the full symbol set; the transform logic is the deferred `evalGrid` piece. | launch-layer C++ |
 | **SDPA backward** | Breaks the model outright: `CatalogPlan` assumes **one candidate = one module = one launch**. Backward is a 3-stage pipeline (odo → dqdkdv → dq_convert) with a shape-derived workspace and an `accumulator_type` knob that drives *both* selection and workspace size. | **new substrate capability** (multi-kernel plan) |
-| **Heuristic grid transforms** | The grid DSL does `ceil_div`/constants (§3). ASM kernels want conditional transforms (mask-halving, hd192 axis-swap), a launch-time `tuneOpt` scalar, sub-arch selection (MI300 vs MI308), a uint32 stride gate. | adapter C++ |
 | **Conv2d/Conv3d** | No `ConvAdapter` exists yet (a new op, §10). Even once written, measure-and-cache degrades on conv's shape space (§12.1 #2) — the selection model, not just the adapter, is the limiter. Largest lift of all. | new adapter **+** a selection strategy beyond measure-all |
 
 **The one-line version.** This is a correct, data-extensible best-pick engine that excels
 when the op's ABI is fixed and the shape space is small and repeated — GEMM, norms,
-decode-shape attention. It extends for free along dtype / tile / arch-as-folder. It hits
-real walls the moment a new arch's SDPA or conv needs (a) a richer or different ABI
-(adapter C++, §12.3), (b) a multi-kernel plan such as SDPA backward (new substrate
-capability), or (c) selection over an unbounded shape space where timing-everything stops
-amortizing (conv, §12.1). Those are the deliberate edges — and they are essentially the
-Phase 4/5 roadmap.
+attention. It extends for free along dtype / tile / arch-as-folder, and — after the
+universal forward adapter — **SDPA forward across arches and features (GQA, causal, masks,
+fp8, varlen) is now data**, gated by `family.json` against a fixed by-name vocabulary,
+once a kernel that serves the case exists (§8, §13). It still hits real walls the moment
+work needs (a) a forward argument the vocabulary doesn't emit or a heuristic grid
+transform (a line of adapter/launch C++, §12.3), (b) a multi-kernel plan such as SDPA
+backward (new substrate capability), or (c) selection over an unbounded shape space where
+timing-everything stops amortizing (conv, §12.1). Those are the deliberate edges — and
+they are essentially the Phase 4/5 roadmap.
+
+---
+
+## 13. Authoring a forward SDPA family on a new arch (gfx942/gfx950)
+
+The universal forward adapter (§8) means bringing SDPA *forward* to gfx942/gfx950 is
+**mostly data**: produce a `.co`, map its ABI to the by-name vocabulary below, write a
+`family.json` whose capability constraints match exactly what the kernel handles, and copy
+the parity test. You touch C++ only if the kernel needs an argument the vocabulary doesn't
+emit yet (one reviewed line, see the arg table) or a grid the DSL can't express (§12.4).
+
+### Step checklist
+
+1. **Produce the `.co`.** Instantiate the forward kernel from rocKE's gfx942/gfx950
+   `ck_dsl` MFMA attention instances (not the gfx1151 WMMA ones — different tile/occupancy)
+   in a co-located `produce_<family>_co.py`, mirroring
+   `library/gfx1151/fmha_wmma_fwd/produce_fmha_fwd_co.py`. Pin the rocKE ref you build
+   against (the `ck_dsl` API churns).
+2. **Read the kernel's kernarg ABI and map each arg to a canonical vocabulary name**
+   (table below). If a quantity the kernel needs isn't emitted, add one emission in
+   `SdpaAdapter::buildBindings` — reviewed C++, the single explicit extension point.
+3. **Author `family.json`** (schema §3): `op_kind: "sdpa"`, `arch: "gfx942"`, one
+   `kernels[]` entry per variant with (a) numeric-shape constraints (`dtype`, `D`, `H`,
+   `H_kv`, `S_q`/`S_kv` `{multiple_of …}`), (b) **a capability constraint for every fact
+   the kernel does *not* universally handle** (see the warning below), (c) `grid`/`block`,
+   and (d) `args_signature` = the kernel's real ABI **in order**, drawn from the vocabulary.
+4. **Drop it under `library/gfx942/<family>/`** with a producer `CMakeLists.txt`
+   (auto-discovered by `library/CMakeLists.txt`; mirror the gfx1151 family's).
+5. **Copy the parity test.** `cp TestSdpaNumericParity.cpp` → new file, change `kArch`,
+   geometry (D/H/S), the dtype token, and the hand-built `LaunchBindings` to match the new
+   `args_signature`. The CPU reference softmax and tolerances carry over. Register it in
+   `src/tests/CMakeLists.txt`. (`TestSdpaDecode.cpp` is arch-neutral and already covers
+   decode itself — no per-arch copy needed.)
+
+### Arg-vocabulary reference
+
+Every canonical name `buildBindings` emits. Pick the subset your kernel takes into
+`args_signature` (in ABI order); `LaunchAbi::bindArgs` resolves by name and **fails closed
+on a name the adapter didn't emit**. All strides follow the BHSD mapping (token = S axis =
+`stride(2)`, head = H axis = `stride(1)`, batch = B axis = `stride(0)`).
+
+| name | type | meaning / derivation |
+|------|------|----------------------|
+| `Q` `K` `V` `O` | ptr | the four operands, by tensor uid |
+| `attn_mask` | ptr | additive mask tensor — **emitted only when the graph carries one** |
+| `stats` / `lse` | ptr | log-sum-exp output — aliases; emitted only when a stats tensor is present |
+| `scale_log2` | f32 | `attn_scale * log2(e)` (base-2 softmax; gotcha #1 §8) |
+| `scale_raw` | f32 | the un-multiplied `attn_scale` (default `1/sqrt(D)`) |
+| `seqlen_q` `seqlen_k` | i32/i64 | S_q, S_kv |
+| `stride_{q,k,v,o}_token` | i32/i64 | S-axis stride, **elements** |
+| `stride_{q,k,v,o}_head` | i32/i64 | H-axis stride, **elements** |
+| `stride_{q,k,v,o}_batch` | i32/i64 | B-axis stride, **elements** |
+| `stride_{q,k,v,o}_token_bytes` | i32/i64 | S-axis stride × element size (for byte-stride ABIs) |
+| `stride_{q,k,v,o}_head_bytes` | i32/i64 | H-axis stride × element size |
+| `stride_{q,k,v,o}_batch_bytes` | i32/i64 | B-axis stride × element size |
+| `H` `H_kv` `D` `B` | i32/i64 | head count, kv-head count, head dim, batch |
+| `gqa_ratio` | i32/i64 | `H / H_kv` |
+
+`type` in `args_signature` (`i32`/`i64`/`f32`) selects how the value is narrowed/packed
+(§3); the same emitted quantity can be taken as `i32` or `i64`. A quantity not in this
+table = one added `bindings.scalars.emplace(...)` in `buildBindings` (reviewed).
+
+### Capability-key reference
+
+Every fact `decode` publishes (full list with "true when" in §8). A kernel **opts in or
+out via a constraint** in `family.json`:
+
+- `{"causal": {"equals": false}}` — the kernel handles only the non-causal case.
+- `{"gqa_ratio": {"equals": 1}}` — MHA only. Use `{"min": 1}` or omit-with-care for a
+  GQA-capable kernel that reads `H_kv`/`gqa_ratio`.
+- `{"d_contiguous": {"equals": true}}`, `{"batch_foldable": {"equals": true}}` — structural
+  requirements of a kernel with no D-stride / no batch-stride arg.
+- `{"D": {"equals": 128}}`, `{"S_q": {"multiple_of": 64}}` — numeric-shape tiers.
+
+> ⚠️ **Omitting a capability constraint asserts the kernel handles that case.** This is the
+> deliberate tradeoff of data-gated selection: the adapter no longer declines features in
+> C++, so *a missing constraint is a claim*, not a safe default. If a kernel only does
+> non-causal MHA, it **must** carry `causal {equals false}`, `has_attn_mask {equals
+> false}`, `gqa_ratio {equals 1}`, etc. — otherwise a causal or GQA or masked graph will
+> **select it and compute a wrong answer**. Fail-closed for features now lives in your
+> `family.json`, not the adapter. (The universal memory-safety gates — rank-4, dtype match,
+> integer gqa_ratio — remain in C++ and always hold; §8 decline boundary.) The shipped
+> gfx1151 family constrains *every* capability key explicitly; copy that discipline.
+
+### Copy-paste `family.json` template
+
+Fill in `<arch>`, symbols/co_files, `D`/`H`/`H_kv`, the `multiple_of` tile sizes, and the
+`args_signature` your kernel actually uses. Constrain **every** capability key the kernel
+does not handle (the block below is the safe, fully-explicit default: non-causal MHA,
+contiguous-D, batch-foldable, no masks/dropout/paged/varlen/stats/fp8/runtime-scale — the
+same posture as the gfx1151 reference).
+
+```json
+{
+    "family": "fmha_<algo>_fwd_<arch>",
+    "op_kind": "sdpa",
+    "arch": "<arch>",
+    "dtype": ["f16", "bf16"],
+    "kernels": [
+        {
+            "symbol": "<exported_symbol_in_co>",
+            "co_file": "<symbol>.co",
+            "constraints": {
+                "dtype": { "equals": "f16" },
+                "D":     { "equals": 128 },
+                "H":     { "equals": 32 },
+                "H_kv":  { "equals": 32 },
+                "S_q":   { "multiple_of": 64 },
+                "S_kv":  { "multiple_of": 64 },
+                "gqa_ratio":           { "equals": 1 },
+                "d_contiguous":        { "equals": true },
+                "batch_foldable":      { "equals": true },
+                "causal":              { "equals": false },
+                "causal_bottom_right": { "equals": false },
+                "has_alibi":           { "equals": false },
+                "has_padding_mask":    { "equals": false },
+                "has_attn_mask":       { "equals": false },
+                "has_block_mask":      { "equals": false },
+                "has_sink":            { "equals": false },
+                "has_dropout":         { "equals": false },
+                "paged":               { "equals": false },
+                "varlen":              { "equals": false },
+                "gen_stats":           { "equals": false },
+                "fp8":                 { "equals": false },
+                "runtime_scale":       { "equals": false }
+            },
+            "grid": { "x": { "ceil_div": ["S_q", 64] }, "y": "H", "z": "B" },
+            "block": [256, 1, 1],
+            "args_signature": [
+                { "name": "Q", "type": "ptr" },
+                { "name": "K", "type": "ptr" },
+                { "name": "V", "type": "ptr" },
+                { "name": "O", "type": "ptr" },
+                { "name": "scale_log2", "type": "f32" },
+                { "name": "seqlen_q", "type": "i32" },
+                { "name": "seqlen_k", "type": "i32" },
+                { "name": "stride_q_token", "type": "i32" },
+                { "name": "stride_q_head",  "type": "i32" },
+                { "name": "stride_q_batch", "type": "i32" },
+                { "name": "stride_k_token", "type": "i32" },
+                { "name": "stride_k_head",  "type": "i32" },
+                { "name": "stride_k_batch", "type": "i32" },
+                { "name": "stride_v_token", "type": "i32" },
+                { "name": "stride_v_head",  "type": "i32" },
+                { "name": "stride_v_batch", "type": "i32" },
+                { "name": "stride_o_token", "type": "i32" },
+                { "name": "stride_o_head",  "type": "i32" },
+                { "name": "stride_o_batch", "type": "i32" }
+            ],
+            "workspace_bytes": 0
+        }
+    ]
+}
+```
+
+(The `args_signature` above shows a batch-stride-carrying ABI — a natural gfx942/gfx950
+shape that accepts `B > 1` non-folded — as a contrast to the gfx1151 kernel's 15-arg,
+no-batch-stride signature in §8. Take only the args your kernel really has.)

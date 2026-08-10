@@ -174,7 +174,11 @@ void runSdpaParity(const std::string& dtypeTok,
     }
 
     // Problem carries every key the family.json constrains, so candidatesFor's
-    // dtype filter alone disambiguates the f16 vs bf16 sibling family.
+    // dtype filter alone disambiguates the f16 vs bf16 sibling family. The
+    // universal adapter constrains a full capability vocabulary (satisfies() fails
+    // closed on any absent constrained key), so this hand-built shape mirrors what
+    // SdpaAdapter::decode would publish for the contiguous, non-causal, MHA gfx1151
+    // problem. TestSdpaDecode covers decode itself; this stays substrate-only.
     catalog::ProblemShape problem;
     problem.emplace("dtype", catalog::ShapeValue{dtypeTok});
     problem.emplace("D", catalog::ShapeValue{kHeadDim});
@@ -182,7 +186,22 @@ void runSdpaParity(const std::string& dtypeTok,
     problem.emplace("H_kv", catalog::ShapeValue{kNumHeads});
     problem.emplace("S_q", catalog::ShapeValue{kSeqQ});
     problem.emplace("S_kv", catalog::ShapeValue{kSeqKv});
+    problem.emplace("gqa_ratio", catalog::ShapeValue{static_cast<int64_t>(1)});
+    problem.emplace("d_contiguous", catalog::ShapeValue{true});
+    problem.emplace("batch_foldable", catalog::ShapeValue{true});
     problem.emplace("causal", catalog::ShapeValue{false});
+    problem.emplace("causal_bottom_right", catalog::ShapeValue{false});
+    problem.emplace("has_alibi", catalog::ShapeValue{false});
+    problem.emplace("has_padding_mask", catalog::ShapeValue{false});
+    problem.emplace("has_attn_mask", catalog::ShapeValue{false});
+    problem.emplace("has_block_mask", catalog::ShapeValue{false});
+    problem.emplace("has_sink", catalog::ShapeValue{false});
+    problem.emplace("has_dropout", catalog::ShapeValue{false});
+    problem.emplace("paged", catalog::ShapeValue{false});
+    problem.emplace("varlen", catalog::ShapeValue{false});
+    problem.emplace("gen_stats", catalog::ShapeValue{false});
+    problem.emplace("fp8", catalog::ShapeValue{false});
+    problem.emplace("runtime_scale", catalog::ShapeValue{false});
 
     const std::vector<catalog::Catalog::Candidate> candidates
         = cat.candidatesFor("sdpa", problem);

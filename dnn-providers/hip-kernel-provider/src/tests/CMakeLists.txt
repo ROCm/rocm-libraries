@@ -74,6 +74,7 @@ if(ENABLE_AOT_CATALOG_ENGINE)
         engines/aot_catalog_engine/TestGemmNumericParity.cpp
         engines/aot_catalog_engine/TestRmsNormNumericParity.cpp
         engines/aot_catalog_engine/TestSdpaNumericParity.cpp
+        engines/aot_catalog_engine/TestSdpaDecode.cpp
         engines/aot_catalog_engine/TestTuneCache.cpp
         engines/aot_catalog_engine/TestRmsNormSelection.cpp
     )

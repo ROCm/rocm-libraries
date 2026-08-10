@@ -1,29 +1,35 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 //
-// SDPA (scaled-dot-product / flash-attention forward) op adapter -- the third
-// proof op, and the deferred prize: attention is ~76% of LTX-Video device time.
-// It decodes a single-node SdpaAttributes graph into a ProblemShape keyed by
-// dtype/D/H/H_kv/S_q/S_kv/causal and resolves the 15-arg launch ABI the gfx1151
-// WMMA flash-attention .co expects (Q,K,V,O ptrs; scale_log2 f32; seqlen_q/k
-// i32; then 8 within-batch i32 strides {q,k,v,o} x {token,head}).
+// SDPA (scaled-dot-product / flash-attention FORWARD) op adapter -- universal
+// across archs: one adapter serves gfx1151 today and gfx942/gfx950 (and beyond)
+// as pure data. It decodes a single-node SdpaAttributes graph into a ProblemShape
+// and lets per-kernel family.json constraints decide applicability, rather than
+// hard-coding any one kernel's feature set in C++.
 //
-// The shipped kernel is rocKE's `build_wmma_fmha_fwd` (a thin adapter over the
-// unified `mfma_attention_fwd_inner_body`), built mask_mode="none", D=64, H=32,
-// MHA (H_kv==H), for f16 and NATIVE bf16. Because head_size/head_count are
-// compile-time but seqlen is a runtime arg, one D64/H32 kernel per dtype serves
-// both LTX self-attn (Sq=Sk=4096) AND cross-attn (Sq=4096, Sk=128).
+// decode() publishes the full CAPABILITY VOCABULARY as ProblemShape keys: the
+// numeric shape (dtype/B/H/H_kv/S_q/S_kv/D/gqa_ratio) plus a fact per feature
+// (causal, causal_bottom_right, has_alibi, has_padding_mask, has_attn_mask,
+// has_block_mask, has_sink, has_dropout, paged, varlen, gen_stats, fp8,
+// runtime_scale) and per structural property (d_contiguous, batch_foldable). A
+// kernel opts in/out of each via a constraint; a graph no kernel accepts yields
+// no candidate, so the engine declines and another serves it (aggregate fail-
+// closed). Only universal, memory-safety invariants stay as C++ declines
+// (single SdpaAttributes node; rank-4 BHSD Q/K/V/O; K/V agree on H_kv/S_kv/D; O
+// mirrors Q; consistent supported dtype; integer gqa_ratio; rank-4 strides).
 //
-// SCALE GOTCHA: the kernel takes `scale_log2 = attn_scale * log2(e)` (softmax is
-// computed base-2 via exp2), NOT the raw scale -- this adapter does that multiply.
+// buildBindings() emits a SUPERSET of named arguments (Q,K,V,O + optional
+// attn_mask/stats; scale_log2 and scale_raw; seqlen_q/k; per-tensor token/head/
+// batch strides in element AND byte units; H/H_kv/D/B/gqa_ratio). Each family's
+// args_signature selects and orders the subset its kernel takes; launch::bindArgs
+// resolves by name and fails closed on an unemitted name. A new quantity a future
+// kernel needs is one added emission here -- the single, explicit extension point.
 //
-// The adapter fails closed (declines) on everything LTX does not need, mirroring
-// the ASM engine's SdpaFwdPlanBuilder::isApplicable: masks (causal/alibi/padding/
-// attn_mask), dropout, paged-KV, stats, GQA (H_kv != H), a runtime scale tensor,
-// varlen/group mode (seq_len_* tensors), a non-D64 head dim, sequence lengths not
-// a multiple of 16, and any batch layout the single token/head stride pair cannot
-// fold (B>1 unless batch_stride == seqlen*stride_token). Declining lets another
-// engine serve the graph rather than risk a wrong result.
+// SCALE GOTCHA: a base-2 (exp2) softmax kernel takes `scale_log2 = attn_scale *
+// log2(e)`, NOT the raw scale; the adapter emits both so a family names whichever.
+//
+// See the engine README for the arg-vocabulary and capability-key reference
+// tables and the "authoring a forward SDPA family on a new arch" checklist.
 
 #pragma once
 
