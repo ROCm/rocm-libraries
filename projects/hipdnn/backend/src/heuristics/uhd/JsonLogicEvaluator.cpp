@@ -712,7 +712,10 @@ std::unordered_set<std::string> JsonLogicEvaluator::extractVariables(const nlohm
         if(e.is_string())
         {
             std::string s = e.get<std::string>();
-            if(!s.empty() && s[0] == '$')
+            // $current is bound by `all` for the duration of its predicate, so it is
+            // never supplied by the caller. Reporting it would make it look like a
+            // missing binding to getMissingVariables and the KMD coverage check.
+            if(!s.empty() && s[0] == '$' && s != "$current")
             {
                 vars.insert(s);
             }

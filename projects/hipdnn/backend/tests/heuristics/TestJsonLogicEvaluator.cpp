@@ -517,5 +517,16 @@ TEST_F(TestJsonLogicEvaluator, NumericLookingStringDoesNotImplicitlyConvert)
         JsonLogicError);
 }
 
+TEST_F(TestJsonLogicEvaluator, CurrentIsNotReportedAsAnExternalVariable)
+{
+    // `all` binds $current for its predicate, so it is never caller-supplied.
+    // Reporting it would look like a missing binding to getMissingVariables.
+    const auto expr = JsonLogicEvaluator::parse(
+        R"({"all": [[1, 2, 3], {">": ["$current", "$q.threshold"]}]})");
+    const auto vars = JsonLogicEvaluator::extractVariables(expr);
+
+    EXPECT_EQ(vars.count("$current"), 0u);
+    EXPECT_EQ(vars.count("$q.threshold"), 1u);
+}
 
 } // namespace
