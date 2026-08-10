@@ -100,6 +100,9 @@ def main():
             # Only run this project's own tests, so the test stage matches the
             # pinned (single-project) build.
             entry["projects_to_test"] = project_key
+            # Ensure fetch_artifact_args is set so the test downloads the correct artifacts
+            if "fetch_artifact_args" not in entry or not entry["fetch_artifact_args"]:
+                entry["fetch_artifact_args"] = f"--{project_key} --tests"
             coverage_projects.append(entry)
 
     # Output for GitHub Actions
