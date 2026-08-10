@@ -93,7 +93,9 @@ The binary dependency path must also be explicit:
 - `rocisa` is a separate package with a native `_rocisa` extension.
 - The `rocisa` package must be built against the same ROCm/TheRock dependency set expected by TensileLite.
 - Any compiled executable that a public TensileLite command invokes must be installed as a version-matched artifact under `ROCM_PATH`. Explicit user-provided paths can remain overrides, not the normal packaged path.
-- `pip install tensilelite` should fail clearly if the required `ROCM_PATH` artifact lookup cannot find `tensilelite-client`.
+- Client-using benchmark and validation workflows should fail clearly if the
+  required `ROCM_PATH` artifact lookup cannot find `tensilelite-client`; package
+  import and client-free code generation must not require it.
 
 ## User-Facing Names
 
@@ -135,7 +137,7 @@ The current tree shows why this matters:
 - `cpu-gemm-driver` is built beside `tensilelite-client`, but it is only used by TensileLite CTest coverage and should remain out of release artifacts.
 - `tensilelite-host` install rules are tied to shared-library builds. In the default static-host path, it is a build/link artifact rather than an independently installed runtime library.
 
-Those are not blockers, but they must be turned into intentional packaging choices. A package that imports successfully on a developer checkout but fails in a clean ROCm/TheRock install because `_rocisa`, `libstinkytofu`, or `tensilelite-client` is missing has not solved the integration problem.
+Those are not blockers, but they must be turned into intentional packaging choices. A package that imports successfully on a developer checkout but fails in a clean ROCm/TheRock install because `_rocisa` or `libstinkytofu` is missing has not solved the integration problem. A missing `tensilelite-client` is instead a targeted failure when a benchmark or validation workflow requests it.
 
 ## Feedback Requested
 
@@ -285,7 +287,10 @@ This refactor should not be considered done until it passes package-level, binar
 - Run `tensilelite-tensile-compat` smoke tests while that package exists.
 - Run unit tests and installed-wheel tests without adding the source tree to `PYTHONPATH`.
 - Run a scoped hipBLASLt device-library build with the package-based generator path.
-- Run installed-artifact tests that prove required runtime binaries are present. `tensilelite-client` must be present under `ROCM_PATH`; `cpu-gemm-driver` should not be required by release-artifact tests.
+- Run installed-artifact tests that prove client-using benchmark categories can
+  resolve `tensilelite-client` under `ROCM_PATH`; client-free categories must
+  not require it. `cpu-gemm-driver` should not be required by release-artifact
+  tests.
 - Smoke-test a downstream environment, such as GEKO, that depends on `tensilelite` without path injection after installing the matching `rocisa` package.
 - Add grep gates for accidental new uses of `Tensile/bin`, `python -m Tensile`, `from Tensile`, `import Tensile`, `PYTHONPATH`, `sys.path` mutation, `ROOT_PATH`, `SOURCE_PATH`, `CUSTOM_KERNEL_PATH`, and checkout-relative client paths.
 

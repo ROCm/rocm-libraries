@@ -48,9 +48,10 @@ python -m pip install --index-url <rocm-wheel-index> \
 python -m pip install --index-url <rocm-wheel-index> tensilelite
 ```
 
-Import fails deliberately when the wheel and ROCm release differ, when rocisa
-cannot be imported, or when the ROCm-owned client is missing. Released wheels
-are unbound and resolve only
+Import fails deliberately when the wheel and ROCm release differ or when rocisa
+cannot be imported. The client is resolved and validated only when a
+benchmark/validation workflow requests its path. Released wheels are unbound
+and resolve only
 `$ROCM_PATH/libexec/hipblaslt/tensilelite/tensilelite-client` (with `.exe` on
 Windows); `PATH` is never searched.
 
@@ -103,8 +104,8 @@ python -m tensilelite_configure_client --reset
 The client value must be an absolute executable whose exact `--version`
 matches the installed distribution. A configured binding is exclusive: a
 broken configured path never falls back to the production client. Configuration
-does not alter the wheel, and the client selection is frozen for each importing
-process. Use a fresh process after changing or resetting a binding.
+does not alter the wheel, and the client selection is frozen after its first
+request in a process. Use a fresh process after changing or resetting a binding.
 
 ## Tests
 

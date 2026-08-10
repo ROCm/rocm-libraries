@@ -18,8 +18,9 @@ from ._rocm import TensileLiteRuntimeError, validate_distribution
 
 
 _client: Path | None = None
-_custom = False
 _root: Path | None = None
+_root_source: str | None = None
+_distribution_version: str | None = None
 
 
 def _require_rocisa() -> None:
@@ -34,29 +35,36 @@ def _require_rocisa() -> None:
 
 
 def initialize(distribution_version: str) -> None:
-    """Validate and freeze the client selected by this installation."""
-    global _client, _custom, _root
+    """Validate generator prerequisites without requiring the optional client."""
+    global _client, _root, _root_source, _distribution_version
 
     _require_rocisa()
     validated = validate_distribution("tensilelite", distribution_version)
-    try:
-        selected, custom = selected_client(validated.root)
-        validate_client(selected, distribution_version)
-    except ClientBindingError as exc:
-        raise TensileLiteRuntimeError(
-            f"{exc}\n"
-            f"  selected root: {validated.root}\n"
-            f"  selected by: {validated.source}"
-        ) from exc
-    _client = selected
-    _custom = custom
+    _client = None
     _root = validated.root
+    _root_source = validated.source
+    _distribution_version = distribution_version
 
 
 def client_executable() -> Path:
-    """Return the client path frozen during package initialization."""
-    if _client is None:
+    """Return the validated client selected by this installation on first use."""
+    global _client
+
+    if _client is not None:
+        return _client
+    if _root is None or _root_source is None or _distribution_version is None:
         raise TensileLiteRuntimeError("TensileLite runtime has not been initialized.")
+
+    try:
+        selected, custom = selected_client(_root)
+        validate_client(selected, _distribution_version)
+    except ClientBindingError as exc:
+        raise TensileLiteRuntimeError(
+            f"{exc}\n"
+            f"  selected root: {_root}\n"
+            f"  selected by: {_root_source}"
+        ) from exc
+    _client = selected
     return _client
 
 
