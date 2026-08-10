@@ -515,6 +515,25 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
                 f"the single-buffer LDS is overwritten each K iteration and load/math "
                 f"waves execute sequentially rather than truly concurrently."
             )
+        # Guard against kernel IR so large that comgr takes minutes to compile.
+        # The WMMA K-loop is fully unrolled: each iteration emits
+        #   mfmas_per_warp_m × mfmas_per_warp_n WMMA calls,
+        # and the loop runs K_iters = ceil(K_gemm / tile_k) times.
+        # Empirically, cost > 4096 causes comgr_relocatable to take > 30 s
+        # (e.g. t512x512x32 w1x1 with cost=36864 never completes in practice).
+        # The cut-off is conservative enough that all practical tile shapes pass.
+        _mfmas_m = spec.tile_m // (spec.warp_m * spec.warp_tile_m)
+        _mfmas_n = spec.tile_n // (spec.warp_n * spec.warp_tile_n)
+        _k_iters = (spec.problem.K_gemm + spec.tile_k - 1) // spec.tile_k
+        _wmma_cost = _k_iters * _mfmas_m * _mfmas_n
+        _WMMA_COST_LIMIT = 4096
+        if _wmma_cost > _WMMA_COST_LIMIT:
+            return False, (
+                f"pipeline='wavelet' unrolled WMMA count {_wmma_cost} "
+                f"(K_iters={_k_iters} × mfmas={_mfmas_m}×{_mfmas_n}) "
+                f"exceeds compile-time limit {_WMMA_COST_LIMIT}; "
+                f"reduce tile_k, tile_m, or tile_n"
+            )
     if family == "wmma":
         if atom not in ((16, 16, 4), (16, 16, 16), (16, 16, 32)):
             return (
@@ -1636,9 +1655,7 @@ def build_implicit_gemm_conv(
                 b, spec.acc_epilogue, current_accs
             )
             if spec.epilogue == "cshuffle":
-                _emit_cshuffle_epilogue(
-                    b, spec, final_accs_math, grid, d_rsrc, op=op
-                )
+                _emit_cshuffle_epilogue(b, spec, final_accs_math, grid, d_rsrc, op=op)
             else:
                 _emit_direct_epilogue(b, spec, final_accs_math, grid, d_rsrc)
 

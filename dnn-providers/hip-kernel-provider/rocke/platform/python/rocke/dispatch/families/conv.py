@@ -282,7 +282,7 @@ def _make_candidate(
         select_spec=select,
         signature=lambda _spec: (),
         grid=_grid,
-        block=lambda spec: (int(spec.block_size), 1, 1),
+        block=lambda spec: (int(spec.launch_block_size), 1, 1),
         sweep_space=lambda req: (select(req),) if support(req)[0] else (),
     )
     return candidate

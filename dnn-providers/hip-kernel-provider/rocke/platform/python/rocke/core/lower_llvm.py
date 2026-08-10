@@ -2306,6 +2306,18 @@ class _Lowerer:
 
         For `vec=1` we still return `<1 x half>` (a one-element vector) so
         callers consistently see the same type; LLVM folds it to scalar.
+
+        On gfx1250 the load is marked ``volatile`` to prevent the AMDGPU
+        WMMA-aware backend pass from substituting ``ds_load_tr16_b128``
+        (transposed LDS read) in place of the plain sequential
+        ``ds_read_b128``.  The conv/GEMM kernels store LDS tiles row-major
+        for efficient coalesced writes; ``ds_load_tr16_b128`` assumes a
+        column-major (transposed) layout and produces wrong WMMA inputs when
+        the tile is row-major.  A volatile load is opaque to the substitution
+        and forces the plain ``ds_read_b128`` instruction, which reads
+        elements sequentially as stored.  The volatile fence cost is zero on
+        AMDGPU because LDS accesses are already sequentially consistent within
+        a wave; the only effect is blocking the unwanted rewrite.
         """
         smem = op.operands[0]
         indices = list(op.operands[1:])
@@ -2327,17 +2339,29 @@ class _Lowerer:
             2,  # type: ignore[attr-defined]
         )
         align = vec * elem_bytes
+        # gfx1250: mark 8-wide (128-bit) LDS loads volatile to block the WMMA-aware
+        # pass from substituting ds_load_tr16_b128 (transposed) in place of the plain
+        # sequential ds_read_b128.  Only 8-wide loads feed the 16x16x32 WMMA fragment
+        # (two back-to-back 8-wide loads build the <16 x half>); narrower loads never
+        # trigger this substitution.  Limiting volatile to vec==8 avoids marking every
+        # scalar LDS read volatile, which would block LLVM's CSE/hoisting and cause
+        # quadratic compilation time on large unrolled K-loops.
+        volatile = (
+            "volatile "
+            if vec == 8 and getattr(self._backend, "blocks_ds_load_tr16", False)
+            else ""
+        )
         if vec == 1:
             scalar = self._fresh("smem.s")
             self._current().emit(
-                f"  {scalar} = load {elem_ty}, ptr addrspace(3) {base}, align {align}"
+                f"  {scalar} = load {volatile}{elem_ty}, ptr addrspace(3) {base}, align {align}"
             )
             self._current().emit(
                 f"  {op.result.name} = insertelement <1 x {elem_ty}> undef, {elem_ty} {scalar}, i32 0"
             )
         else:
             self._current().emit(
-                f"  {op.result.name} = load <{vec} x {elem_ty}>, ptr addrspace(3) {base}, "
+                f"  {op.result.name} = load {volatile}<{vec} x {elem_ty}>, ptr addrspace(3) {base}, "
                 f"align {align}"
             )
 
@@ -3513,15 +3537,28 @@ class _Lowerer:
         self._current().emit(" call void @llvm.amdgcn.s.barrier()")
 
     def _op_tile_s_waitcnt(self, op: Op) -> None:
-        # gfx1250 (gfx1250): the split wait counters are inserted by the backend;
-        # the legacy s_waitcnt intrinsic is not selectable, so skip emission.
-        if not self._backend.emits_legacy_s_waitcnt:
-            return
-        # See rocke/_ir.py:s_waitcnt for the encoding contract.
-        self._need("s.waitcnt")
         vm = int(op.attrs.get("vmcnt", -1))
         lk = int(op.attrs.get("lgkmcnt", -1))
         ec = int(op.attrs.get("expcnt", -1))
+        if not self._backend.emits_legacy_s_waitcnt:
+            # gfx1250: monolithic s_waitcnt is not selectable; emit the split
+            # wait-counter intrinsics instead so that explicit s_waitcnt(vmcnt=0)
+            # / s_waitcnt(lgkmcnt=0) calls in the wavelet pipeline (and any
+            # other caller) correctly drain VMEM / LDS before dependent reads.
+            # Without this, b.s_waitcnt(vmcnt=0) is a silent no-op on gfx1250,
+            # causing wavelet_store to write registers before the VMEM fetch
+            # completes, producing garbage/NaN in LDS.
+            if vm >= 0:
+                self._need("s.wait.loadcnt")
+                self._current().emit(
+                    f"  call void @llvm.amdgcn.s.wait.loadcnt(i16 {vm})"
+                )
+            if lk >= 0:
+                self._need("s.wait.dscnt")
+                self._current().emit(f"  call void @llvm.amdgcn.s.wait.dscnt(i16 {lk})")
+            return
+        # See rocke/_ir.py:s_waitcnt for the encoding contract.
+        self._need("s.waitcnt")
         mask = self._backend.encode_waitcnt(vmcnt=vm, expcnt=ec, lgkmcnt=lk)
         self._current().emit(f"  call void @llvm.amdgcn.s.waitcnt(i32 {mask})")
 
