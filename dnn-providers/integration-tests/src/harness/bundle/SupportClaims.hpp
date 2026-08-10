@@ -16,6 +16,20 @@
 namespace hipdnn_integration_tests::bundle
 {
 
+/// Locates a specific support claim: the sidecar file, which case (if sweep),
+/// and the display path for reports. Constructed once at registration time and
+/// threaded through LoadedBundle -> harness -> checkAllSupportClaims.
+struct SupportClaimLocator
+{
+    std::filesystem::path sidecarPath; // X.support.json or sweepDir/support.json
+    std::string caseId; // empty for single-graph
+    std::string diagnosticPath; // for reports/messages (e.g. "dir/sweep.json#caseId")
+    bool isSweep() const
+    {
+        return !caseId.empty();
+    }
+};
+
 /// Per-engine support: arch token (e.g. "gfx942") -> set of supported platforms
 /// ("linux" / "windows"). Same shape/meaning in both claim shapes below.
 using ArchPlatformMap = std::map<std::string, std::set<std::string>>;

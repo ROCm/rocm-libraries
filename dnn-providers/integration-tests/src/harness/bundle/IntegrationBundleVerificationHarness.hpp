@@ -24,6 +24,7 @@
 #include "harness/TestConfig.hpp"
 #include "harness/TomlGuards.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
+#include "harness/bundle/SupportClaims.hpp"
 #include "harness/input-init/InputFillRecipes.hpp"
 
 namespace hipdnn_integration_tests::bundle
@@ -86,10 +87,13 @@ public:
     {
     }
 
-    void setBundle(std::shared_ptr<IntegrationTestBundle> bundle, std::filesystem::path path)
+    void setBundle(std::shared_ptr<IntegrationTestBundle> bundle,
+                   std::filesystem::path path,
+                   SupportClaimLocator claimLocator = {})
     {
         _bundle = std::move(bundle);
         _bundlePath = std::move(path);
+        _claimLocator = std::move(claimLocator);
 
         if(_bundle != nullptr && _bundle->metadata.seed.has_value())
         {
@@ -161,6 +165,7 @@ protected:
 private:
     bool _requiresDevice;
     std::filesystem::path _bundlePath;
+    SupportClaimLocator _claimLocator;
     std::shared_ptr<IntegrationTestBundle> _bundle;
     InputFillRecipes _inputFillRecipes;
 

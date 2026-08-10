@@ -11,6 +11,8 @@
 
 #include <hipdnn_frontend/Error.hpp>
 
+#include "harness/bundle/SupportClaims.hpp"
+
 namespace hipdnn_integration_tests::bundle
 {
 
@@ -147,13 +149,13 @@ SupportResult checkSupportClaim(hipdnn_frontend::ErrorCode errorCode,
 
 /// Multi-engine enforcement: evaluate every loaded engine's claim from a single
 /// query result. Loads the sidecar once and calls evaluateSupport per engine.
+/// Dispatches to single-graph or sweep-case claims based on locator.isSweep().
 /// NOT_ENFORCED verdicts (unclaimed + declined, the uninteresting majority) are
 /// filtered out — only SATISFIED, CLAIM_BROKEN, QUERY_ERRORED, and
-/// UNCLAIMED_SUPPORT are returned. Returns empty if bundlePath is empty (no
-/// bundle → no sidecar).
+/// UNCLAIMED_SUPPORT are returned. Returns empty when the sidecar file is absent.
 std::vector<SupportResult> checkAllSupportClaims(hipdnn_frontend::ErrorCode errorCode,
                                                  const std::vector<int64_t>& rankedIds,
-                                                 const std::filesystem::path& bundlePath,
+                                                 const SupportClaimLocator& locator,
                                                  const std::vector<LoadedEngine>& loadedEngines,
                                                  std::string_view queryMessage = {});
 

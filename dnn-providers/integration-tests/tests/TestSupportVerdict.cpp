@@ -380,4 +380,13 @@ TEST(TestSupportVerdict, CheckAllEmptyWhenNoBundlePath)
     EXPECT_TRUE(results.empty());
 }
 
+TEST(TestSupportVerdict, CheckAllEmptyWhenSidecarDoesNotExist)
+{
+    using hipdnn_integration_tests::bundle::SupportClaimLocator;
+    const SupportClaimLocator locator{"/no/such/file.support.json", {}, "Bundle.json"};
+    const std::vector<LoadedEngine> engines = {{ENGINE_A, "ENGINE_A"}};
+    const auto results = checkAllSupportClaims(ErrorCode::OK, {ENGINE_A}, locator, engines);
+    EXPECT_TRUE(results.empty());
+}
+
 // NOLINTEND(readability-identifier-naming)

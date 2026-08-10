@@ -4,6 +4,7 @@
 #include "harness/bundle/SupportVerdict.hpp"
 
 #include <algorithm>
+#include <fstream>
 #include <sstream>
 
 #include "common/PlatformUtils.hpp"
@@ -204,31 +205,57 @@ SupportResult checkSupportClaim(hipdnn_frontend::ErrorCode errorCode,
 
 std::vector<SupportResult> checkAllSupportClaims(hipdnn_frontend::ErrorCode errorCode,
                                                  const std::vector<int64_t>& rankedIds,
-                                                 const std::filesystem::path& bundlePath,
+                                                 const SupportClaimLocator& locator,
                                                  const std::vector<LoadedEngine>& loadedEngines,
                                                  std::string_view queryMessage)
 {
-    if(bundlePath.empty())
+    if(locator.sidecarPath.empty() || !std::filesystem::exists(locator.sidecarPath))
     {
         return {};
     }
 
-    const auto claims = loadSupportClaims(bundlePath);
-    const bool hasSidecar = claims.has_value();
+    std::ifstream file(locator.sidecarPath);
+    if(!file)
+    {
+        throw std::runtime_error("Could not open support claims file: "
+                                 + locator.sidecarPath.string());
+    }
+
+    auto json = nlohmann::json::parse(file, nullptr, /*allow_exceptions=*/false);
+    if(json.is_discarded())
+    {
+        throw std::runtime_error("support.json is not parseable JSON: "
+                                 + locator.sidecarPath.string());
+    }
+
+    std::optional<SupportClaims> singleClaims;
+    std::optional<SweepSupportClaims> sweepClaims;
+    if(locator.isSweep())
+    {
+        sweepClaims = parseSweepSupportClaimsJson(json, locator.sidecarPath.string());
+    }
+    else
+    {
+        singleClaims = parseSupportClaimsJson(json, locator.sidecarPath.string());
+    }
+
     const std::string arch = baseArchToken(TestConfig::get().getCurrentArch());
     const std::string platform = currentPlatform();
-    const std::string path = bundlePath.string();
 
     std::vector<SupportResult> results;
     for(const auto& engine : loadedEngines)
     {
-        const bool claimed = hasSidecar && claims->isClaimed(engine.name, arch, platform);
+        const bool claimed
+            = locator.isSweep()
+                  ? sweepClaims->isClaimed(locator.caseId, engine.name, arch, platform)
+                  : singleClaims->isClaimed(engine.name, arch, platform);
+
         auto result = evaluateSupport(errorCode,
                                       rankedIds,
                                       engine.id,
                                       claimed,
-                                      hasSidecar,
-                                      path,
+                                      /*hasSidecar=*/true,
+                                      locator.diagnosticPath,
                                       engine.name,
                                       arch,
                                       platform,

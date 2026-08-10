@@ -60,7 +60,7 @@ void IntegrationBundleVerificationHarness::executeGraphThroughEngine(
 
     const auto allVerdicts = checkAllSupportClaims(status.get_code(),
                                                    engineIds,
-                                                   _bundlePath,
+                                                   _claimLocator,
                                                    LoadedEngineTable::get().all(),
                                                    status.get_message());
     if(!allVerdicts.empty())
@@ -173,7 +173,7 @@ void IntegrationBundleVerificationHarness::enforceAtLevel(EnforcementLevel level
 
     const auto allVerdicts = checkAllSupportClaims(status.get_code(),
                                                    engineIds,
-                                                   _bundlePath,
+                                                   _claimLocator,
                                                    LoadedEngineTable::get().all(),
                                                    status.get_message());
     if(!allVerdicts.empty())
