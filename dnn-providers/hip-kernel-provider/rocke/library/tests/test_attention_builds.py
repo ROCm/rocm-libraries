@@ -1160,6 +1160,7 @@ class TestAttentionHelpers(unittest.TestCase):
         for kw in (
             dict(block_size=0, num_kv_blocks=512),  # page size 0
             dict(block_size=48, num_kv_blocks=512),  # not a divisor of block_n
+            dict(block_size=4, num_kv_blocks=512),  # < ROWS_PER_WAVE (8)
             dict(block_size=16, num_kv_blocks=0),  # num_kv_blocks 0
             dict(block_size=16, num_kv_blocks=512, batch=2),  # multi-seq
             dict(block_size=16, num_kv_blocks=512, varlen=True),

@@ -312,6 +312,15 @@ class AttentionDenseSpec:
                     f"block_n ({self.block_n}) must be a multiple of page "
                     f"block_size ({self.block_size})"
                 )
+            rows_per_wave = (
+                self.block_n // self.num_waves
+            )  # per-wave K/V rows; fit 1 page
+            if self.block_size < rows_per_wave or self.block_size % rows_per_wave != 0:
+                raise ValueError(
+                    f"paged block_size ({self.block_size}) must be >= and a multiple of "
+                    f"ROWS_PER_WAVE ({rows_per_wave} = block_n/{self.num_waves}) so each "
+                    f"wave's K/V rows stay within one page"
+                )
             if self.num_kv_blocks <= 0:
                 raise ValueError("paged=True requires num_kv_blocks > 0")
             # --- Not-yet-implemented shortcuts (deferred scope, NOT a permanent
