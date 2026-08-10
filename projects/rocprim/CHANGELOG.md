@@ -2,6 +2,12 @@
 
 Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projects/rocPRIM/en/latest/](https://rocm.docs.amd.com/projects/rocPRIM/en/latest/).
 
+## rocPRIM x.y.z for ROCm x.y (unreleased)
+
+### Optimized
+
+* Reduced branching in `device_search` and `device_find_end`.
+
 ## rocPRIM 5.0.0 for ROCm 10.2.0
 
 ### Changed
@@ -17,7 +23,6 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 ### Resolved Issues
 
 * Kernel tuner leaking defines and polluting header libraries.
-
 ## rocPRIM 4.6.0 for ROCm 10.0.0
 
 ### Added
@@ -42,7 +47,6 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 ### Optimized
 
 * Improved performance for the fallback path of lookback scan where the flag can't be fit into the same atomic load/store.
-* Reduced branching in `device_search` and `device_find_end`.
 
 ### Changed
 
