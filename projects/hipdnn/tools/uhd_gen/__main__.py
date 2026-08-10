@@ -37,6 +37,29 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+#: Substrings that mark a target as something you want less of. Used only to warn
+#: about an objective/target mismatch, never to override the caller's choice.
+_COST_METRIC_MARKERS = (
+    "latency",
+    "time",
+    "duration",
+    "elapsed",
+    "_ms",
+    "_us",
+    "_ns",
+    "sec",
+    "cost",
+    "error",
+    "loss",
+)
+
+
+def _looks_like_cost_metric(target: str) -> bool:
+    """Heuristic: does this target name describe something to minimize?"""
+    lowered = target.lower()
+    return any(marker in lowered for marker in _COST_METRIC_MARKERS)
+
+
 def main(argv: list[str] | None = None) -> int:
     """Main entry point."""
     parser = argparse.ArgumentParser(
@@ -59,6 +82,27 @@ def main(argv: list[str] | None = None) -> int:
         "--target",
         default="tflops",
         help="Target column name (default: tflops)",
+    )
+    parser.add_argument(
+        "--objective",
+        choices=("max", "min"),
+        default="max",
+        help="Whether the runtime should maximize or minimize the score "
+        "(default: max, correct for throughput targets like tflops). Pass 'min' "
+        "for a cost target such as latency_ms.",
+    )
+    parser.add_argument(
+        "--score-units",
+        default=None,
+        dest="score_units",
+        help="Units the score is expressed in (default: the --target column name).",
+    )
+    parser.add_argument(
+        "--calibrated",
+        action="store_true",
+        help="Declare the score cross-engine comparable (RFC 0019 §12.3). Only pass "
+        "this if the target really is calibrated across engines; it is not verified "
+        "here, and an unwarranted claim silently corrupts cross-engine comparison.",
     )
     parser.add_argument(
         "--group-by",
@@ -132,8 +176,16 @@ def main(argv: list[str] | None = None) -> int:
         logger.error("Missing target column: %s", args.target)
         return 1
 
+    if args.objective == "max" and _looks_like_cost_metric(args.target):
+        logger.warning(
+            "Target '%s' looks like a cost metric but --objective is 'max', so the "
+            "runtime will prefer the WORST kernel. Pass --objective min if that is "
+            "not what you want.",
+            args.target,
+        )
+
     logger.info("Training on features: %s", args.features)
-    logger.info("Target column: %s", args.target)
+    logger.info("Target column: %s (objective: %s)", args.target, args.objective)
     if args.group_by:
         logger.info("GroupKFold columns: %s", args.group_by)
 
@@ -174,8 +226,14 @@ def main(argv: list[str] | None = None) -> int:
         "adapter": "tree_data",
         "features_signature": features_signature,
         "features_hash": features_hash,
-        "objective": "max",
-        "score": {"units": "tflops", "calibrated": True, "transform": "log1p"},
+        "objective": args.objective,
+        # transform is log1p because train_uhd.train_model always fits on
+        # log1p(target); the runtime inverts it to recover the declared units.
+        "score": {
+            "units": args.score_units or args.target,
+            "calibrated": args.calibrated,
+            "transform": "log1p",
+        },
         "model": {"artifact": "model.bin"},
     }
     uhd_path = output_dir / "uhd.json"

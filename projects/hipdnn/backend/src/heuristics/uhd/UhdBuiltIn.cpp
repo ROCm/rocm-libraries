@@ -391,35 +391,40 @@ hipdnnPluginStatus_t policyFinalize(hipdnnHeuristicPolicyDescriptor_t desc, int3
             return HIPDNN_PLUGIN_STATUS_SUCCESS;
         }
 
-        // Run selection for each registered engine and collect results.
-        // For kernel-level selection, we rank kernels within each engine.
-        // For engine-level selection (RFC §12), we would compare best scores
-        // across engines — that's a future enhancement.
+        // Rank kernels within each registered engine. Engine ORDER is deliberately
+        // left alone: RFC 0019 §2 puts engine selection in RFC 0007's scope, not the
+        // UHD's, and this policy computes no engine-level ordering information.
+        //
+        // Every candidate engine is echoed back in input order, including engines
+        // absent from the registry and engines whose selection produced no ranking.
+        // Emitting a subset would silently delete engines from the plan:
+        // SelectionHeuristic::getSortedEngineIds accepts any subset of the input, and
+        // EngineHeuristicDescriptor::finalize adopts whatever comes back as the whole
+        // candidate list, so a dropped engine never reaches execution.
         d->sortedEngineIds.clear();
-        bool anyApplied = false;
+        d->sortedEngineIds.reserve(d->candidateEngineIds.size());
 
         for(const auto engineId : d->candidateEngineIds)
         {
+            d->sortedEngineIds.push_back(engineId);
+
             if(!registry.hasEngine(engineId))
             {
-                // Engine not in registry — skip (will be handled by fallback)
+                // No UHD for this engine; it keeps its place and is ranked by
+                // whichever policy owns engine order.
                 continue;
             }
 
             auto result = SelectionEngine::select(engineId, deviceVars, queryVars);
 
-            // RFC 0019 §6 step 6 requires failing *open*. Gate on hasOrdering(), not on
-            // `applied`: when the model is absent, mismatched, or throwing, selection
-            // still returns a valid priority+id ordering and the engine must stay in
-            // play. `applied` only reports whether selection completed, and gating on
-            // it here would drop the engine entirely on any model failure.
+            // RFC 0019 §6 step 6 requires failing *open*. hasOrdering() distinguishes
+            // "selection produced a kernel ranking" from "selection produced nothing";
+            // neither outcome may affect the engine's presence above.
             if(result.hasOrdering())
             {
-                anyApplied = true;
-                // The sorted kernel IDs are stored in the result but we
-                // don't have a place to return them in this API yet.
+                // The kernel ranking is computed but has nowhere to go: the heuristic
+                // plugin ABI carries engine IDs only.
                 // TODO(RFC-0017): Extend API to return per-engine kernel ranking.
-                d->sortedEngineIds.push_back(engineId);
 
                 // Report on trace.usedModel, not `applied`. An engine with no
                 // candidates completes with applied=true but never builds an adapter,
@@ -476,7 +481,18 @@ hipdnnPluginStatus_t policyFinalize(hipdnnHeuristicPolicyDescriptor_t desc, int3
             }
         }
 
-        *outApplied = anyApplied ? 1 : 0;
+        // Decline the engine-ordering decision.
+        //
+        // Returning applied=1 would make EngineHeuristicDescriptor::finalize adopt
+        // this policy's output and `break` the chain, so StaticOrdering would never
+        // run and its vendor precedence would be replaced by raw input order — a
+        // worse ordering, asserted by a policy that computed no ordering at all.
+        //
+        // The kernel ranking above is the UHD's actual product, and the plugin ABI
+        // cannot carry it yet. Until it can, the honest answer to "did you order these
+        // engines?" is no. Flip this once the ABI returns per-engine kernel rankings
+        // (TODO(RFC-0017)); the engine list is already populated correctly for it.
+        *outApplied = 0;
         d->finalized = true;
         return HIPDNN_PLUGIN_STATUS_SUCCESS;
     }

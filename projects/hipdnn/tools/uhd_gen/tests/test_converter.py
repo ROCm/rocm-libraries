@@ -22,7 +22,9 @@ import pytest
 flatbuffers = pytest.importorskip("flatbuffers")
 lgb = pytest.importorskip("lightgbm")
 np = pytest.importorskip("numpy")
+pytest.importorskip("pandas")  # imported transitively by uhd_gen.__main__
 
+from uhd_gen.__main__ import _looks_like_cost_metric  # noqa: E402
 from uhd_gen.lgbm_to_flatbuffer import (  # noqa: E402
     GBDT_MODEL_FILE_IDENTIFIER,
     _objective_name,
@@ -69,6 +71,69 @@ def _evaluate_flatbuffer_tree(
     assert len(buffer) > 0
     assert buffer[4:8] == GBDT_MODEL_FILE_IDENTIFIER
     return 0.0  # Placeholder
+
+
+class TestTrainModelCvPaths:
+    """Both cross-validation paths must actually run.
+
+    Regression: the no-group-columns path (the default) passed an int as
+    `folds=`, which lgb.cv rejects, and then hit `stratified=True` routing a
+    continuous target through StratifiedKFold. The tool could not train at all
+    without --group-by.
+    """
+
+    def test_trains_without_group_columns(self):
+        import pandas as pd
+
+        X, y = _create_synthetic_data(n_samples=200, n_features=3)
+        df = pd.DataFrame(X, columns=["a", "b", "c"])
+        df["target"] = y
+
+        model = train_model(df, ["a", "b", "c"], "target", None, num_boost_round=10)
+        assert model.num_trees() > 0
+
+    def test_trains_with_group_columns(self):
+        import pandas as pd
+
+        X, y = _create_synthetic_data(n_samples=200, n_features=3)
+        df = pd.DataFrame(X, columns=["a", "b", "c"])
+        df["target"] = y
+        df["grp"] = np.arange(len(df)) % 10
+
+        model = train_model(df, ["a", "b", "c"], "target", ["grp"], num_boost_round=10)
+        assert model.num_trees() > 0
+
+
+class TestCostMetricDetection:
+    """Guard on the objective/target mismatch.
+
+    `--target` is free-form while `objective` used to be hardcoded to "max", so
+    training on a latency column emitted a descriptor telling the runtime to
+    maximize latency. This heuristic only warns; it never overrides the caller.
+    """
+
+    @pytest.mark.parametrize(
+        "target",
+        [
+            "latency_ms",
+            "kernel_time_us",
+            "duration",
+            "elapsed_ns",
+            "total_sec",
+            "cost",
+            "rmse_error",
+            "val_loss",
+            "LATENCY_MS",
+        ],
+    )
+    def test_cost_metrics_are_flagged(self, target):
+        assert _looks_like_cost_metric(target)
+
+    @pytest.mark.parametrize(
+        "target", ["tflops", "throughput", "gflops", "bandwidth_gbps", "samples"]
+    )
+    def test_throughput_metrics_are_not_flagged(self, target):
+        assert not _looks_like_cost_metric(target)
 
 
 class TestObjectiveName:

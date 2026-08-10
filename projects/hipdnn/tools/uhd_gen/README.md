@@ -55,6 +55,9 @@ Rename the columns in your CSV to match.
 | `--input` | Yes | Path to benchmark CSV/JSON |
 | `--features` | Yes | Namespace-qualified feature column names (space-separated) |
 | `--target` | No | Target column name (default: `tflops`) |
+| `--objective` | No | `max` or `min` (default: `max`). Pass `min` for a cost target such as `latency_ms`, or the runtime will prefer the *worst* kernel. |
+| `--score-units` | No | Units the score is expressed in (default: the `--target` column name) |
+| `--calibrated` | No | Declare the score cross-engine comparable (RFC 0019 §12.3). Off by default; nothing here verifies the claim. |
 | `--group-by` | No | Columns for GroupKFold CV |
 | `--output-dir` | Yes | Output directory |
 | `--name` | No | UHD display name |
@@ -110,7 +113,7 @@ output_dir/
   "features_signature": ["$q.M", "$q.N", "$q.K", "$kernel.tile_m", ...],
   "features_hash": "sha256:...",
   "objective": "max",
-  "score": {"units": "tflops", "calibrated": true, "transform": "log1p"},
+  "score": {"units": "tflops", "calibrated": false, "transform": "log1p"},
   "model": {"artifact": "model.bin"}
 }
 ```

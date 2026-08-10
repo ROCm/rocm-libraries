@@ -9,6 +9,7 @@
  * createBuiltIn. These tests exercise the C ABI entry points through the wrapper.
  */
 
+#include "heuristics/uhd/EngineRegistry.hpp"
 #include "heuristics/uhd/UhdBuiltIn.hpp"
 #include "plugin/HeuristicPlugin.hpp"
 
@@ -19,6 +20,9 @@
 
 #include <vector>
 
+using hipdnn_backend::heuristics::uhd::EngineEntry;
+using hipdnn_backend::heuristics::uhd::EngineRegistry;
+using hipdnn_backend::heuristics::uhd::KernelCandidate;
 using hipdnn_backend::heuristics::uhd::populateFunctionTable;
 using hipdnn_backend::plugin::HeuristicPlugin;
 using hipdnn_backend::plugin::HeuristicPluginFunctionTable;
@@ -147,6 +151,79 @@ TEST_F(TestUhdBuiltIn, FinalizeWithNoEnginesDeclines)
 
     const bool applied = _plugin->finalize(_desc);
     EXPECT_FALSE(applied);
+}
+
+// ========== Engine preservation when the registry IS populated ==========
+//
+// The tests above all run with an empty registry, so policyFinalize declines before
+// it ever touches the engine list. These drive the other branch.
+
+class TestUhdBuiltInRegistered : public TestUhdBuiltIn
+{
+protected:
+    void SetUp() override
+    {
+        TestUhdBuiltIn::SetUp();
+        EngineRegistry::instance().clear();
+    }
+
+    void TearDown() override
+    {
+        // TestUhdBuiltIn's other cases require 100/200/300 to be absent from this
+        // process-wide singleton, so leaving anything behind would break them.
+        EngineRegistry::instance().clear();
+        TestUhdBuiltIn::TearDown();
+    }
+
+    static void registerStaticOrderEngine(int64_t engineId)
+    {
+        EngineEntry entry;
+        entry.engineId = engineId;
+        entry.engineName = "TestEngine_" + std::to_string(engineId);
+        entry.uhdConfig.uhdId = "uhd_" + std::to_string(engineId);
+        entry.uhdConfig.adapterType = "static_order";
+        entry.uhdConfig.staticOrderFields = {"priority", "id"};
+        entry.uhdConfig.objective = "max";
+
+        KernelCandidate k;
+        k.kernelId = 1;
+        k.priority = 0;
+        entry.candidates = {k};
+
+        EngineRegistry::instance().registerEngine(std::move(entry));
+    }
+};
+
+TEST_F(TestUhdBuiltInRegistered, FinalizeKeepsUnregisteredEngines)
+{
+    // Regression: engines absent from the UHD registry used to be `continue`d and
+    // omitted from sortedEngineIds. SelectionHeuristic::getSortedEngineIds accepts a
+    // subset and EngineHeuristicDescriptor::finalize adopts it as the whole candidate
+    // list, so registering one engine silently deleted every other engine from the
+    // plan. UHD ranks kernels; it must never remove an engine (RFC 0019 §2).
+    registerStaticOrderEngine(200);
+
+    const std::vector<int64_t> engineIds = {100, 200, 300};
+    _plugin->setEngineIds(_desc, engineIds.data(), engineIds.size());
+    _plugin->finalize(_desc);
+
+    const auto sorted = _plugin->getSortedEngineIds(_desc);
+    EXPECT_EQ(sorted, engineIds) << "every candidate engine must survive, in input order";
+}
+
+TEST_F(TestUhdBuiltInRegistered, FinalizeDeclinesSoEngineOrderingPolicyStillRuns)
+{
+    // UHD computes no engine ordering (RFC 0019 §2 leaves that to RFC 0007). Claiming
+    // applied=1 would make EngineHeuristicDescriptor::finalize adopt this output and
+    // break the policy chain, so StaticOrdering's vendor precedence would be replaced
+    // by raw input order.
+    registerStaticOrderEngine(200);
+
+    const std::vector<int64_t> engineIds = {100, 200, 300};
+    _plugin->setEngineIds(_desc, engineIds.data(), engineIds.size());
+
+    EXPECT_FALSE(_plugin->finalize(_desc))
+        << "UHD must decline the engine-ordering decision it did not make";
 }
 
 // ========== Get sorted engine IDs ==========

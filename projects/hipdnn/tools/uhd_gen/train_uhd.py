@@ -69,20 +69,26 @@ def train_model(
 
     train_data = lgb.Dataset(X, label=y, feature_name=feature_cols)
 
+    # `folds` takes precomputed splits; a plain split count goes in `nfold`. Passing
+    # the integer as `folds` raises AttributeError inside lgb.cv, which made the
+    # no-group-columns path — the default — fail outright.
     if group_cols:
         groups = df.groupby(group_cols).ngroup().values
-        cv_folds = list(GroupKFold(n_splits=n_splits).split(X, y, groups))
+        cv_kwargs = {"folds": list(GroupKFold(n_splits=n_splits).split(X, y, groups))}
         logger.info("Using GroupKFold with %d groups", len(np.unique(groups)))
     else:
-        cv_folds = n_splits
+        # stratified defaults to True, which routes through StratifiedKFold and
+        # rejects a continuous target ("Supported target types are: binary,
+        # multiclass"). This is a regressor, so plain KFold is what we want.
+        cv_kwargs = {"nfold": n_splits, "stratified": False}
         logger.info("Using standard KFold with %d splits", n_splits)
 
     cv_results = lgb.cv(
         params,
         train_data,
         num_boost_round=num_boost_round,
-        folds=cv_folds,
         callbacks=[lgb.early_stopping(early_stopping_rounds)],
+        **cv_kwargs,
     )
 
     # Get best iteration from CV
