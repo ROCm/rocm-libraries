@@ -164,18 +164,27 @@ JsonLogicEvaluator::Value JsonLogicEvaluator::evaluate(const nlohmann::json& exp
                 throw UndefinedVariableError("Undefined variable: " + s);
             }
 
-            // RFC 0019 §7.2 requires failing closed on a type error, not just on an
-            // unknown symbol. resolveDouble() reports a string-typed binding as
-            // quiet_NaN, which is indistinguishable from a legitimate missing value
-            // and would be scored as if it were data — a GBDT routes NaN down
-            // default_left and returns an ordinary leaf, so the garbage never surfaces.
-            if(std::holds_alternative<std::string>(*raw))
-            {
-                throw JsonLogicError("Type error: variable " + s +
-                                     " holds a string and cannot be used as a number");
-            }
-
-            return ctx.resolveDouble(s).value();
+            // Return the binding's own type. A string stays a string so `==` and `in`
+            // can compare it; using one where a number is required is caught in
+            // toDouble, which is the actual numeric context. Checking here instead
+            // would make every string-valued property uncomparable.
+            return std::visit(
+                [](const auto& v) -> Value {
+                    using T = std::decay_t<decltype(v)>;
+                    if constexpr(std::is_same_v<T, std::string>)
+                    {
+                        return v;
+                    }
+                    else if constexpr(std::is_same_v<T, bool>)
+                    {
+                        return v;
+                    }
+                    else
+                    {
+                        return static_cast<double>(v);
+                    }
+                },
+                *raw);
         }
         return s;
     }
@@ -200,6 +209,22 @@ JsonLogicEvaluator::Value JsonLogicEvaluator::evaluate(const nlohmann::json& exp
     }
 
     throw JsonLogicError("Unsupported expression type");
+}
+
+bool JsonLogicEvaluator::valuesEqual(const Value& a, const Value& b)
+{
+    const bool aIsString = std::holds_alternative<std::string>(a);
+    const bool bIsString = std::holds_alternative<std::string>(b);
+
+    if(aIsString != bIsString)
+    {
+        throw JsonLogicError("Type error: cannot compare a string against a number");
+    }
+    if(aIsString)
+    {
+        return std::get<std::string>(a) == std::get<std::string>(b);
+    }
+    return toDouble(a) == toDouble(b);
 }
 
 JsonLogicEvaluator::Value JsonLogicEvaluator::evaluateOp(const std::string& op,
@@ -405,7 +430,7 @@ JsonLogicEvaluator::Value JsonLogicEvaluator::evaluateOp(const std::string& op,
         {
             throw JsonLogicError("== requires exactly 2 arguments");
         }
-        return toDouble(vals[0]) == toDouble(vals[1]);
+        return valuesEqual(vals[0], vals[1]);
     }
 
     if(op == "!=")
@@ -415,7 +440,7 @@ JsonLogicEvaluator::Value JsonLogicEvaluator::evaluateOp(const std::string& op,
         {
             throw JsonLogicError("!= requires exactly 2 arguments");
         }
-        return toDouble(vals[0]) != toDouble(vals[1]);
+        return !valuesEqual(vals[0], vals[1]);
     }
 
     if(op == "<")
@@ -556,10 +581,9 @@ JsonLogicEvaluator::Value JsonLogicEvaluator::evaluateOp(const std::string& op,
         {
             throw JsonLogicError("in requires array as second argument");
         }
-        const double needleVal = toDouble(needle);
         for(const auto& item : haystack)
         {
-            if(toDouble(evaluate(item, ctx, depth + 1)) == needleVal)
+            if(valuesEqual(evaluate(item, ctx, depth + 1), needle))
             {
                 return true;
             }
@@ -728,15 +752,13 @@ double JsonLogicEvaluator::toDouble(const Value& v)
             }
             else
             {
-                // String -> try to parse as number
-                try
-                {
-                    return std::stod(val);
-                }
-                catch(...)
-                {
-                    return std::numeric_limits<double>::quiet_NaN();
-                }
+                // RFC 0019 §7.2: fail closed on a type error. Returning NaN here was
+                // silently wrong — a GBDT treats NaN as a missing value, routes it
+                // down default_left and returns an ordinary leaf, so a string used as
+                // a number was scored as data and never surfaced. Strings do not
+                // implicitly convert, even when they happen to parse.
+                throw JsonLogicError("Type error: string \"" + val +
+                                     "\" cannot be used where a number is required");
             }
         },
         v);

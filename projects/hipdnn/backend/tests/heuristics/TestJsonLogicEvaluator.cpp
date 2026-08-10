@@ -430,4 +430,92 @@ TEST_F(TestJsonLogicEvaluator, ValueOrDefaultDoesNotSwallowTypeErrors)
     EXPECT_THROW(eval.evaluateDouble(expr, ctx), JsonLogicError);
 }
 
+
+// ========== Comparisons are structural, not numeric coercion (RFC 0019 §7.2) ==========
+
+TEST_F(TestJsonLogicEvaluator, EqualityComparesStringsAsStrings)
+{
+    // Routing both sides through toDouble made every string comparison NaN == NaN,
+    // i.e. always false — so {"==": ["$kernel.dtype", "fp16"]} could never match.
+    VariableContext ctx;
+    ctx.bind("$kernel.dtype", std::string("fp16"));
+    const JsonLogicEvaluator eval;
+
+    EXPECT_TRUE(std::get<bool>(
+        eval.evaluate(JsonLogicEvaluator::parse(R"({"==": ["$kernel.dtype", "fp16"]})"), ctx)));
+    EXPECT_FALSE(std::get<bool>(
+        eval.evaluate(JsonLogicEvaluator::parse(R"({"==": ["$kernel.dtype", "bf16"]})"), ctx)));
+}
+
+TEST_F(TestJsonLogicEvaluator, InequalityComparesStringsAsStrings)
+{
+    VariableContext ctx;
+    ctx.bind("$kernel.dtype", std::string("fp16"));
+    const JsonLogicEvaluator eval;
+
+    EXPECT_TRUE(std::get<bool>(
+        eval.evaluate(JsonLogicEvaluator::parse(R"({"!=": ["$kernel.dtype", "bf16"]})"), ctx)));
+}
+
+TEST_F(TestJsonLogicEvaluator, InMatchesStringMembership)
+{
+    VariableContext ctx;
+    ctx.bind("$kernel.dtype", std::string("bf16"));
+    const JsonLogicEvaluator eval;
+
+    EXPECT_TRUE(std::get<bool>(eval.evaluate(
+        JsonLogicEvaluator::parse(R"({"in": ["$kernel.dtype", ["fp16", "bf16", "fp32"]]})"), ctx)));
+    EXPECT_FALSE(std::get<bool>(eval.evaluate(
+        JsonLogicEvaluator::parse(R"({"in": ["$kernel.dtype", ["fp16", "fp32"]]})"), ctx)));
+}
+
+TEST_F(TestJsonLogicEvaluator, NumericComparisonStillWorks)
+{
+    VariableContext ctx;
+    ctx.bind("$kernel.tile_m", 64.0);
+    const JsonLogicEvaluator eval;
+
+    EXPECT_TRUE(std::get<bool>(
+        eval.evaluate(JsonLogicEvaluator::parse(R"({"==": ["$kernel.tile_m", 64]})"), ctx)));
+    EXPECT_TRUE(std::get<bool>(eval.evaluate(
+        JsonLogicEvaluator::parse(R"({"in": ["$kernel.tile_m", [32, 64, 128]]})"), ctx)));
+}
+
+TEST_F(TestJsonLogicEvaluator, ComparingStringAgainstNumberIsATypeError)
+{
+    VariableContext ctx;
+    ctx.bind("$kernel.dtype", std::string("fp16"));
+    const JsonLogicEvaluator eval;
+
+    EXPECT_THROW(
+        eval.evaluate(JsonLogicEvaluator::parse(R"({"==": ["$kernel.dtype", 64]})"), ctx),
+        JsonLogicError);
+}
+
+TEST_F(TestJsonLogicEvaluator, StringInArithmeticIsATypeError)
+{
+    // The type check lives in the numeric context, so a string is fine to compare but
+    // never to compute with — and it does not silently become NaN.
+    VariableContext ctx;
+    ctx.bind("$kernel.dtype", std::string("fp16"));
+    const JsonLogicEvaluator eval;
+
+    EXPECT_THROW(
+        eval.evaluateDouble(JsonLogicEvaluator::parse(R"({"+": ["$kernel.dtype", 1]})"), ctx),
+        JsonLogicError);
+}
+
+TEST_F(TestJsonLogicEvaluator, NumericLookingStringDoesNotImplicitlyConvert)
+{
+    // "64" is a string. Parsing it would make the type system advisory.
+    VariableContext ctx;
+    ctx.bind("$kernel.label", std::string("64"));
+    const JsonLogicEvaluator eval;
+
+    EXPECT_THROW(
+        eval.evaluateDouble(JsonLogicEvaluator::parse(R"({"+": ["$kernel.label", 1]})"), ctx),
+        JsonLogicError);
+}
+
+
 } // namespace

@@ -125,7 +125,14 @@ private:
                      const VariableContext& ctx,
                      size_t depth) const;
 
+    /// Coerce to a number for a numeric context.
+    /// @throws JsonLogicError if the value is a string — RFC 0019 §7.2 requires
+    ///         failing closed on a type error rather than yielding NaN.
     static double toDouble(const Value& v);
+
+    /// Structural equality: strings compare as strings, numbers as numbers.
+    /// @throws JsonLogicError when comparing a string against a number.
+    static bool valuesEqual(const Value& a, const Value& b);
     static bool toBool(const Value& v);
 };
 
