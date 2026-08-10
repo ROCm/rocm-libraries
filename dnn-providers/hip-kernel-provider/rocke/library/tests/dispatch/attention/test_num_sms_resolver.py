@@ -81,14 +81,40 @@ def test_gfx942_fallback_off_box():
         p.restore()
 
 
-def test_other_archs_keep_legacy_120():
-    """Non-gfx942 archs are NOT auto-resolved yet (Future Scope) -> legacy 120."""
+def test_gfx950_device_query():
+    """gfx950 on a gfx950 box -> the live CU count (~256 on MI350-class)."""
     p = _Patch()
     try:
         p.attr(hipm, "get_device_arch", lambda *a, **k: "gfx950")
         p.attr(AC, "_device_num_cus", lambda: 256)
+        assert _resolve_num_cus(_req(num_sms=0, arch="gfx950")) == 256
+        p.attr(AC, "_device_num_cus", lambda: 208)  # smaller-CU gfx950 variant
+        assert _resolve_num_cus(_req(num_sms=0, arch="gfx950")) == 208
+    finally:
+        p.restore()
+
+
+def test_gfx950_fallback_off_box():
+    """gfx950 request off-box (running box != gfx950) -> legacy 120, never the wrong device's count."""
+    p = _Patch()
+    try:
+        p.attr(hipm, "get_device_arch", lambda *a, **k: "gfx942")  # a gfx942 box
+        p.attr(AC, "_device_num_cus", lambda: 304)  # must NOT be consulted
         assert _resolve_num_cus(_req(num_sms=0, arch="gfx950")) == 120
+        p.attr(hipm, "get_device_arch", lambda *a, **k: None)  # no visible device
+        assert _resolve_num_cus(_req(num_sms=0, arch="gfx950")) == 120
+    finally:
+        p.restore()
+
+
+def test_non_autoresolve_archs_keep_legacy_120():
+    """Archs outside the auto-resolve set keep the legacy 120, even on-box."""
+    p = _Patch()
+    try:
+        p.attr(hipm, "get_device_arch", lambda *a, **k: "gfx90a")
+        p.attr(AC, "_device_num_cus", lambda: 256)  # must NOT be consulted
         assert _resolve_num_cus(_req(num_sms=0, arch="gfx90a")) == 120
+        assert _resolve_num_cus(_req(num_sms=0, arch="gfx1250")) == 120
         assert _resolve_num_cus(_req(num_sms=0, arch="gfxZZZ")) == 120
     finally:
         p.restore()

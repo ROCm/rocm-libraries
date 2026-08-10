@@ -181,31 +181,41 @@ def _device_num_cus() -> "int | None":
         return None
 
 
+# Arches whose CU count is auto-resolved from the live device when the request
+# runs on-box. Every other arch keeps the legacy 120. Adding an arch here is the
+# only change needed to extend device-resolution to it (routing + the 3D segment
+# clamp read the resolved value through the shared _effective_target_ctas seam).
+_AUTO_RESOLVE_ARCHS = frozenset({"gfx942", "gfx950"})
+
+
 def _resolve_num_cus(req: AttentionRequest) -> int:
     """Resolve the split-KV device-subscription target (``num_sms``).
 
     ``num_sms`` is the dispatcher's "how many CUs does this device have" knob; it
     drives 2D<->3D routing (``select_path``) and the 3D segment count. Resolution:
       1. an explicit caller value (benchmarks pass a real count),
-      2. **verified on-box gfx942 only** -- the live device CU count, used ONLY
-         when the request targets gfx942 AND the build box IS gfx942, so a
-         cross-compile never bakes the wrong device's count into the kernel,
-      3. otherwise the legacy ``120`` (matches develop): every non-gfx942 arch,
-         and gfx942 built off-box / with no visible gfx942 device.
+      2. **verified on-box only** -- the live device CU count, used ONLY when the
+         request targets an arch in ``_AUTO_RESOLVE_ARCHS`` (gfx942, gfx950) AND
+         the build box IS that same arch, so a cross-compile never bakes the wrong
+         device's count into the kernel,
+      3. otherwise the legacy ``120`` (matches develop): every non-auto-resolve
+         arch, and an auto-resolve arch built off-box / with no visible matching
+         device.
     An explicit ``target_ctas`` on the spec supersedes all of the above. Because
     the resolved value feeds the 3D ``num_segments`` (a compiled-kernel constant),
-    the on-box value is device-dependent within gfx942 (varies across parts);
-    for a reproducible or cross-compile target pass an explicit ``num_sms`` or the
+    the on-box value is device-dependent within an arch (varies across parts); for
+    a reproducible or cross-compile target pass an explicit ``num_sms`` or the
     ``target_ctas`` spec override rather than relying on the live query.
     """
     n = int(req.num_sms)
     if n > 0:
         return n
-    if req.arch.lower() == "gfx942":
+    arch = req.arch.lower()
+    if arch in _AUTO_RESOLVE_ARCHS:
         try:
             from rocke.runtime.hip_module import get_device_arch
 
-            if get_device_arch() == "gfx942":
+            if get_device_arch() == arch:
                 cus = _device_num_cus()
                 if cus and cus > 0:
                     return cus
