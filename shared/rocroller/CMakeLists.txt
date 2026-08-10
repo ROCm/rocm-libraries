@@ -48,6 +48,39 @@ if(WIN32)
     if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_C_COMPILER_ID STREQUAL "Clang")
         add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:-fms-extensions;-fms-compatibility>")
     endif()
+
+    option(ROCROLLER_USE_BINSKIM_COMPLIANT_COMPILE_FLAGS "Prepare rocRoller for BinSkim Binary Analyzer" OFF)
+    option(ROCROLLER_USE_SPECTRE_MITIGATED_LIBRARIES "Use Spectre-mitigated libraries" OFF)
+
+    if(MSVC AND MSVC_VERSION GREATER_EQUAL 1900)
+        if(ROCROLLER_USE_BINSKIM_COMPLIANT_COMPILE_FLAGS)
+            message(STATUS "Control Flow Guard enabled")
+            add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:/guard:cf>)
+            add_link_options(/guard:cf /DYNAMICBASE)
+        endif()
+        if(ROCROLLER_USE_SPECTRE_MITIGATED_LIBRARIES)
+            message(STATUS "Using Spectre-mitigated libraries")
+            add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:/Qspectre>)
+        endif()
+    elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        if(ROCROLLER_USE_BINSKIM_COMPLIANT_COMPILE_FLAGS)
+            message(STATUS "Control Flow Guard enabled (Clang)")
+            add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:SHELL:-Xclang -cfguard>")
+            add_link_options(-Wl,-guard:cf)
+        endif()
+        if(ROCROLLER_USE_SPECTRE_MITIGATED_LIBRARIES)
+            message(WARNING "Spectre mitigated libraries are not yet available for Clang in this project.")
+        endif()
+    endif()
+
+    option(ROCROLLER_USE_MSVC_STATIC_RUNTIME "Link MSVC runtime library statically" OFF)
+
+    if(NOT ROCROLLER_USE_MSVC_STATIC_RUNTIME)
+        set(ROCROLLER_MSVC_RUNTIME_SUFFIX "DLL")
+    endif()
+    if(NOT CMAKE_MSVC_RUNTIME_LIBRARY)
+        set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>${ROCROLLER_MSVC_RUNTIME_SUFFIX}")
+    endif()
 endif()
 
 if(ROCROLLER_ENABLE_CPPCHECK)
@@ -159,11 +192,19 @@ if(ROCROLLER_ENABLE_LLVM)
 endif()
 
 if(ROCROLLER_BUILD_SHARED_LIBS)
-    add_library(rocroller SHARED)
+    set(BUILD_SHARED_LIBS ON CACHE BOOL "Build libraries as shared" FORCE)
 else()
-    add_library(rocroller STATIC)
-    set_target_properties(rocroller PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build libraries as shared" FORCE)
 endif()
+
+add_library(rocroller)
+set_target_properties(rocroller PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+include(GenerateExportHeader)
+generate_export_header(rocroller
+    EXPORT_FILE_NAME ${CMAKE_CURRENT_BINARY_DIR}/lib/include/rocRoller/rocRollerExport.hpp
+)
+
 set_target_properties(rocroller
     PROPERTIES
         VERSION ${ROCROLLER_VERSION}
@@ -265,8 +306,9 @@ target_link_libraries(rocroller
 target_include_directories(rocroller
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/lib/include>
+        $<INSTALL_INTERFACE:lib/include>
 )
-
 
 target_compile_features(rocroller PUBLIC cxx_std_20)
 
