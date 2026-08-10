@@ -33,9 +33,6 @@
 #include <numeric>
 #include <ostream>
 
-#include "miopen/env.hpp"
-#include "miopen/rnn/solvers.hpp"
-
 // Disable specific warnings
 #define MIO_RNN_DEBUG 0
 
@@ -453,7 +450,6 @@ size_t RNNDescriptor::GetMainSolWorkspaceSize(size_t batchLenSum,
         MIOPEN_THROW(miopenStatusInternalError, "wrong ioLayout");
 
     const bool is_bidirect = dirMode == miopenRNNbidirection;
-    // const bool isTraining = fwdMode == miopenRNNFWDMode_t::miopenRNNTraining;
 
     return (workspaceScale * nLayers * batchLenSum * hsize * typeSize) * (is_bidirect ? 2 : 1);
 }
@@ -1070,9 +1066,10 @@ RNNDescriptor::convertRNNBaseLayout(miopenRNNBaseLayout_t layout)
     case miopenRNNDataSeqMajorNotPadded: return {std::vector<unsigned int>{1, 0, 2}, false};
     case miopenRNNDataSeqMajorPadded: return {std::vector<unsigned int>{1, 0, 2}, true};
 
-    case miopenRNNDataUnknownLayout:
-    default: MIOPEN_THROW(miopenStatusBadParm, "error: Unknown miopenRNNBaseLayout_t "); break;
+    case miopenRNNDataUnknownLayout: break;
     }
+
+    MIOPEN_THROW(miopenStatusBadParm, "error: Unknown miopenRNNBaseLayout_t ");
 }
 
 miopenRNNBaseLayout_t RNNDescriptor::getBaseLayoutFromDataTensor(const SeqTensorDescriptor& desc)
@@ -1402,7 +1399,7 @@ void RNNDescriptor::RNNForward(const Handle& handle,
         MIOPEN_THROW(miopenStatusBadParm);
     }
 
-    if(reserveSpaceSize < GetMaxReserveSize(handle, xDesc))
+    if(fwdMode == miopenRNNTraining && reserveSpaceSize < GetMaxReserveSize(handle, xDesc))
     {
         MIOPEN_THROW("Reservespace is required");
     }

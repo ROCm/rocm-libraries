@@ -53,6 +53,7 @@ void Run2dDriver(miopenDataType_t prec)
     switch(prec)
     {
     case miopenFloat: params = GPU_conv_trans_FP32::GetParam(); break;
+
     case miopenHalf:
     case miopenFloat8_fnuz:
     case miopenBFloat8_fnuz:
@@ -64,8 +65,6 @@ void Run2dDriver(miopenDataType_t prec)
         FAIL() << "miopenHalf, miopenInt8, miopenBFloat16, miopenInt32, miopenDouble "
                   "data type not supported by "
                   "conv_trans test";
-
-    default: params = GPU_conv_trans_FP32::GetParam();
     }
 
     for(const auto& test_value : params)
@@ -90,7 +89,7 @@ bool IsTestSupportedForDevice(const miopen::Handle& handle)
     std::string devName = handle.GetDeviceName();
     if(devName == "gfx900" || devName == "gfx906" || devName == "gfx908" || devName == "gfx90a" ||
        devName == "gfx942" || miopen::StartsWith(devName, "gfx103") ||
-       miopen::StartsWith(devName, "gfx110"))
+       miopen::StartsWith(devName, "gfx110") || miopen::StartsWith(devName, "gfx115"))
         return true;
     else
         return false;
@@ -115,7 +114,7 @@ std::vector<std::string> GetTestCases(const std::string& precision)
     std::string gc_8  = " --group-count 8";
     std::string gc_32 = " --group-count 32";
 
-    const std::vector<std::string> test_cases = {
+    return {
         // clang-format off
     {flags + "--input	8	128	28	28	--weights	128	128	1	1" + psd0 + cmode_t + pmode_d},
     {flags + "--input	8	256	28	28	--weights	256	256	1	1" + psd0 + cmode_t + pmode_s},
@@ -135,8 +134,6 @@ std::vector<std::string> GetTestCases(const std::string& precision)
     {flags + "--input	100	6	4	4	--weights	6	4	1	1" + psd2 + cmode_t + pmode_d + gc_2}
         // clang-format on
     };
-
-    return test_cases;
 }
 
 } // namespace conv_trans

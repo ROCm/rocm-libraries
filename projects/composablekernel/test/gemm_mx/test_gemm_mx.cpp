@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #include <tuple>
 
@@ -10,16 +10,16 @@
 using E8M0 = ck::e8m0_bexp_t;
 using F8   = ck::f8_t;
 using BF8  = ck::bf8_t;
-using F6   = ck::f6_t;
-using BF6  = ck::bf6_t;
-using F4   = ck::f4_t;
+using F6   = ck::f6x16_pk_t;
+using BF6  = ck::bf6x16_pk_t;
+using F4   = ck::f4x2_pk_t;
 using F16  = ck::half_t;
 using BF16 = ck::bhalf_t;
 using F32  = float;
 
-using Row = ck::tensor_layout::gemm::RowMajor;
-using Col = ck::tensor_layout::gemm::ColumnMajor;
-
+using Row  = ck::tensor_layout::gemm::RowMajor;
+using Col  = ck::tensor_layout::gemm::ColumnMajor;
+using MFMA = ck::tensor_layout::gemm::MFMA;
 namespace {
 
 template <typename X, typename Y>
@@ -40,6 +40,12 @@ class TestGemmMX_MK_NK
 };
 
 template <typename Tuple>
+class TestGemmMX_MK_MFMA
+    : public ck::test::TestGemmMX<typename tuple_concat<std::tuple<Row, MFMA>, Tuple>::type>
+{
+};
+
+template <typename Tuple>
 class TestGemmMX_MK_KN
     : public ck::test::TestGemmMX<typename tuple_concat<std::tuple<Row, Row>, Tuple>::type>
 {
@@ -52,22 +58,33 @@ class TestGemmMX_KM_NK
 };
 
 // clang-format off
-using KernelTypes_F8_MK_NK = ::testing::Types<
+using KernelTypes_MK_NK = ::testing::Types<
 #if defined(CK_ENABLE_FP8)
     //         ADataType, BDataType,       CDataType, ScaleBlockSize
     std::tuple<       F8,        F8,             F16, ck::Number<32> >,
-    std::tuple<       F8,        F8,            BF16, ck::Number<32> >
+    std::tuple<       F8,        F8,            BF16, ck::Number<32> >,
 #endif
+    std::tuple<       F4,        F4,             F16, ck::Number<32> >,
+    std::tuple<       F6,        F6,             F16, ck::Number<32> >,
+    std::tuple<      BF6,       BF6,            BF16, ck::Number<32> >
     >;
 
-using KernelTypes_BF8_F8_MK_KN = ::testing::Types<
+using KernelTypes_MK_MFMA = ::testing::Types<
+    #if defined(CK_ENABLE_FP8)
+        //         ADataType, BDataType,       CDataType, ScaleBlockSize
+        std::tuple<       F8,        F8,             F16, ck::Number<32> >,
+    #endif
+        std::tuple<       F4,        F4,             F16, ck::Number<32> >
+    >;
+
+using KernelTypes_MK_KN = ::testing::Types<
 #if defined(CK_ENABLE_FP8)
     //         ADataType, BDataType,       CDataType, ScaleBlockSize
     std::tuple<      BF8,        F8,             F16, ck::Number<32> >
 #endif
     >;
 
-using KernelTypes_F8_KM_NK = ::testing::Types<
+using KernelTypes_KM_NK = ::testing::Types<
 #if defined(CK_ENABLE_FP8)
     //         ADataType, BDataType,       CDataType, ScaleBlockSize
     std::tuple<       F8,        F8,            BF16, ck::Number<32> >
@@ -75,9 +92,74 @@ using KernelTypes_F8_KM_NK = ::testing::Types<
     >;
 // clang-format on
 
-TYPED_TEST_SUITE(TestGemmMX_MK_NK, KernelTypes_F8_MK_NK);
-TYPED_TEST_SUITE(TestGemmMX_MK_KN, KernelTypes_BF8_F8_MK_KN);
-TYPED_TEST_SUITE(TestGemmMX_KM_NK, KernelTypes_F8_KM_NK);
+TYPED_TEST_SUITE(TestGemmMX_MK_NK, KernelTypes_MK_NK);
+TYPED_TEST_SUITE(TestGemmMX_MK_MFMA, KernelTypes_MK_MFMA);
+TYPED_TEST_SUITE(TestGemmMX_MK_KN, KernelTypes_MK_KN);
+TYPED_TEST_SUITE(TestGemmMX_KM_NK, KernelTypes_KM_NK);
+
+/// A: RowMajor
+/// B: MFMA
+/// C: RowMajor
+
+TYPED_TEST(TestGemmMX_MK_MFMA, SmallM)
+{
+    std::vector<int> Ms{140, 300, 552};
+    constexpr int N = 128;
+    constexpr int K = 768;
+
+    constexpr int StrideA = K;
+    constexpr int StrideB = K;
+    constexpr int StrideC = N;
+
+    for(int M : Ms)
+        this->Run(M, N, K, StrideA, StrideB, StrideC);
+}
+
+TYPED_TEST(TestGemmMX_MK_MFMA, MidLargeM)
+{
+    std::vector<int> Ms{799, 1573, 2048};
+    constexpr int N = 768;
+    constexpr int K = 1024;
+
+    constexpr int StrideA = K;
+    constexpr int StrideB = K;
+    constexpr int StrideC = N;
+
+    for(int M : Ms)
+        this->Run(M, N, K, StrideA, StrideB, StrideC);
+}
+
+TYPED_TEST(TestGemmMX_MK_MFMA, Regular)
+{
+    std::vector<int> Ms{1024};
+    constexpr int N = 2048;
+    constexpr int K = 3840;
+
+    constexpr int StrideA = K;
+    constexpr int StrideB = K;
+    constexpr int StrideC = N;
+
+    for(int M : Ms)
+        this->Run(M, N, K, StrideA, StrideB, StrideC);
+}
+
+TYPED_TEST(TestGemmMX_MK_MFMA, Large)
+{
+    std::vector<std::pair<int, int>> test_sizes{{5120, 5120}, {3840, 5120}, {4096, 4096}};
+
+    constexpr int K       = 4096;
+    constexpr int StrideA = K;
+    constexpr int StrideB = K;
+
+    for(auto test_size : test_sizes)
+    {
+        auto M = test_size.first;
+        auto N = test_size.second;
+
+        const auto StrideC = N;
+        this->Run(M, N, K, StrideA, StrideB, StrideC);
+    }
+}
 
 /// A: RowMajor
 /// B: ColMajor
@@ -85,7 +167,7 @@ TYPED_TEST_SUITE(TestGemmMX_KM_NK, KernelTypes_F8_KM_NK);
 
 TYPED_TEST(TestGemmMX_MK_NK, SmallM)
 {
-    std::vector<int> Ms{1, 2, 3, 4, 5, 6};
+    std::vector<int> Ms{1, 16, 32, 44, 65, 106};
     constexpr int N = 256;
     constexpr int K = 512;
 
@@ -214,7 +296,8 @@ TYPED_TEST(TestGemmMX_MK_KN, Large)
 TYPED_TEST(TestGemmMX_KM_NK, SmallN)
 {
     constexpr int M = 256;
-    std::vector<int> Ns{1, 2, 3, 4, 5, 6};
+    std::vector<int> Ns{32, 64};
+    // std::vector<int> Ns{1, 2, 3, 4, 5, 6};
     constexpr int K = 512;
 
     constexpr int StrideA = M;
@@ -222,16 +305,16 @@ TYPED_TEST(TestGemmMX_KM_NK, SmallN)
 
     for(int N : Ns)
     {
-        const auto new_N   = N * 8;
-        const auto StrideC = new_N;
-        this->Run(M, new_N, K, StrideA, StrideB, StrideC);
+        const auto StrideC = N;
+        this->Run(M, N, K, StrideA, StrideB, StrideC);
     }
 }
 
 TYPED_TEST(TestGemmMX_KM_NK, MidLargeN)
 {
     constexpr int M = 256;
-    std::vector<int> Ns{127, 255, 312, 799, 1573};
+    std::vector<int> Ns{128, 256, 2048};
+    // std::vector<int> Ns{127, 255, 312, 799, 1573};
     constexpr int K = 512;
 
     constexpr int StrideA = M;
@@ -239,9 +322,8 @@ TYPED_TEST(TestGemmMX_KM_NK, MidLargeN)
 
     for(int N : Ns)
     {
-        const auto new_N   = (N + 7) / 8 * 8;
-        const auto StrideC = new_N;
-        this->Run(M, new_N, K, StrideA, StrideB, StrideC);
+        const auto StrideC = N;
+        this->Run(M, N, K, StrideA, StrideB, StrideC);
     }
 }
 

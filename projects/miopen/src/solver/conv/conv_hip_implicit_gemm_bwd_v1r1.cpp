@@ -634,16 +634,27 @@ size_t ConvHipImplicitGemmBwdDataV1R1::GetWorkspaceSize(const ExecutionContext&,
 bool ConvHipImplicitGemmBwdDataV1R1::IsApplicable(const ExecutionContext& ctx,
                                                   const ProblemDescription& problem) const
 {
-#if WORKAROUND_SWDEV_498660
-    if(!env::enabled(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_BWD_V1R1))
-        return false;
-#endif
     if(env::disabled(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_BWD_V1R1))
         return false;
-    if(ThisSolverIsDeprecatedStatic::IsDisabled(ctx))
+    const std::string name = ctx.GetStream().GetDeviceName();
+    if(!(StartsWith(name, "gfx8") || StartsWith(name, "gfx90") || StartsWith(name, "gfx103")))
         return false;
-    if(problem.GetConv().attribute.deterministic)
-        return false;
+    // Reject non-deterministic configs when determinism is requested.
+    // BwdV1R1 uses AtomicAdd when stride < dilation*(kernel_size-1)+1.
+    // This causes non-deterministic results due to FP rounding order dependency.
+    if(problem.GetConv().attribute.deterministic.Get() != 0)
+    {
+        const auto y           = ProblemInterpreter::GetFilterHeightY(problem);
+        const auto x           = ProblemInterpreter::GetFilterWidthX(problem);
+        const auto stride_h    = ProblemInterpreter::GetAdjustedConvolutionStrideH(problem);
+        const auto stride_w    = ProblemInterpreter::GetAdjustedConvolutionStrideW(problem);
+        const auto dilation_h  = ProblemInterpreter::GetAdjustedConvolutionDilationH(problem);
+        const auto dilation_w  = ProblemInterpreter::GetAdjustedConvolutionDilationW(problem);
+        const auto threshold_h = dilation_h * (y - 1) + 1;
+        const auto threshold_w = dilation_w * (x - 1) + 1;
+        if(stride_h < threshold_h || stride_w < threshold_w)
+            return false;
+    }
     if(!ctx.use_hip_kernels)
         return false;
     if(problem.HasNonPackedTensors())
@@ -654,13 +665,9 @@ bool ConvHipImplicitGemmBwdDataV1R1::IsApplicable(const ExecutionContext& ctx,
         return false;
     if(!static_ck::IsComposableKernelSupportedHardware(ctx))
         return false;
-    if(problem.IsFp32())
-    {
-        // Missing instruction: v_mac_f32
-        const auto dev_name = ctx.GetStream().GetDeviceName();
-        if(dev_name == "gfx942")
-            return false;
-    }
+    // Missing instruction: v_mac_f32
+    if(problem.IsFp32() && static_ck::GfxHasMissingFp32Intrinsics(name))
+        return false;
     if(!problem.IsDirectionBackwardData())
         return false;
     if(!problem.Is2d() && !(problem.Is3d() && problem.IsFp32()))
@@ -847,8 +854,12 @@ ConvHipImplicitGemmBwdDataV1R1::GetSolution(const ExecutionContext& ctx,
         std::string(" -DCK_PARAM_DEPENDENT_GRID_SIZE=") + std::to_string(grid_size) +
         std::string(" -DCK_THREADWISE_GEMM_USE_AMD_INLINE_ASM=") + (static_ck::use_amd_inline_asm(ctx, problem) ? '1' : '0') +
         std::string(" -DCK_USE_AMD_INLINE_ASM=") + (static_ck::use_amd_inline_asm(ctx, problem) ? '1' : '0') +
+
+#if HIP_PACKAGE_VERSION_FLAT >= 6004000000
+        std::string(" -DCK_USE_AMD_BUFFER_PTR_TYPE=1") +
+#endif
         static_ck::get_static_ck_common_compiler_flag(ctx) +
-        ctx.general_compile_options;
+        ctx.general_compile_options + " --std=c++17";
     // clang-format on
     if(problem.Is3d())
     {

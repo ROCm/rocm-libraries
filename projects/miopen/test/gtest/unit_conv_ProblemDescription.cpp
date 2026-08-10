@@ -67,8 +67,7 @@ public:
     {
         using TestCase = TestCaseProblemDescription;
 
-        return std::vector
-        {
+        return std::vector{
             // clang-format off
             // 4D
             TestCase{
@@ -357,7 +356,7 @@ public:
             auto output = convDescriptor.GetForwardOutputTensor(
                 inLayoutDescriptor, weightsLayoutDescriptor, outLayoutDescriptor.GetType());
 
-            ASSERT_EQ(inLayoutDescriptor.GetLayout_t(), output.GetLayout_t());
+            ASSERT_EQ(inLayoutDescriptor.GetLayoutEnum(), output.GetLayoutEnum());
             ASSERT_EQ(inLayoutDescriptor.GetLayout_str(), output.GetLayout_str());
             ASSERT_EQ(inLayoutDescriptor.GetLayoutEnum(), output.GetLayoutEnum());
         }

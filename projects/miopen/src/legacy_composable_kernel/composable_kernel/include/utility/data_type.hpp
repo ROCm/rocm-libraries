@@ -1,3 +1,6 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
 #ifndef CK_FLOAT_TYPE_AMD_HPP
 #define CK_FLOAT_TYPE_AMD_HPP
 
@@ -5,7 +8,7 @@
 
 #include "miopen_cstdint.hpp"
 
-#ifndef MIOPEN_DONT_USE_HIP_RUNTIME_HEADERS
+#ifndef MIOPEN_HIP_RUNTIME_COMPILE
 #include <hip/hip_bfloat16.h>
 #endif
 

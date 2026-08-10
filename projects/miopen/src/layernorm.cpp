@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 
+#include "miopen/layernorm/problem_description.hpp"
 #include <miopen/find_solution.hpp>
 #include <miopen/float_equal.hpp>
 #include <miopen/kernel_cache.hpp>
@@ -33,6 +34,16 @@
 #include <miopen/tensor.hpp>
 
 namespace miopen {
+
+namespace layernorm {
+miopen::PerformanceDb GetDb(const miopen::ExecutionContext& context,
+                            const miopen::layernorm::ProblemDescriptionTag&)
+{
+    return {DbKinds::PerfDb,
+            context.GetPerfDbPath("layernorm"),
+            context.GetUserPerfDbPath("layernorm")};
+}
+} // namespace layernorm
 
 miopenStatus_t LayerNormForward(const Handle& handle,
                                 const TensorDescriptor& xDesc,
@@ -67,13 +78,109 @@ miopenStatus_t LayerNormForward(const Handle& handle,
         tmp.epsilon        = epsilon;
         tmp.normalized_dim = normalized_dim;
         tmp.mode           = mode;
+        tmp.stride         = problem.stride;
+        tmp.outer_size     = problem.outer_size;
+        tmp.inner_size     = problem.inner_size;
         return tmp;
     }();
 
     const auto algo    = AlgorithmName{"LayerNormForward"};
-    const auto solvers = solver::SolverContainer<solver::layernorm::Layernorm2DCKForward,
-                                                 solver::layernorm::Layernorm4DCKForward,
-                                                 solver::layernorm::LayernormForward>{};
+    const auto solvers = solver::SolverContainer<solver::layernorm::LayernormForward>{};
+
+    solvers.ExecutePrimitive(handle, problem, algo, invoke_params);
+
+    return miopenStatusSuccess;
+}
+
+std::size_t GetLayerNormBackwardWorkspaceSize(const Handle& handle,
+                                              const TensorDescriptor& dyDesc,
+                                              const TensorDescriptor& xDesc,
+                                              const TensorDescriptor& weightDesc,
+                                              const TensorDescriptor& meanDesc,
+                                              const TensorDescriptor& rstdDesc,
+                                              const TensorDescriptor& dxDesc,
+                                              const TensorDescriptor& dwDesc,
+                                              const TensorDescriptor& dbDesc,
+                                              miopenNormMode_t mode,
+                                              int32_t normalized_dim)
+{
+    auto ctx           = ExecutionContext{&handle};
+    const auto problem = layernorm::ProblemDescription{mode,
+                                                       dyDesc,
+                                                       xDesc,
+                                                       weightDesc,
+                                                       meanDesc,
+                                                       rstdDesc,
+                                                       dxDesc,
+                                                       dwDesc,
+                                                       dbDesc,
+                                                       normalized_dim};
+
+    const auto algo    = AlgorithmName{"LayerNormBackward"};
+    const auto solvers = solver::SolverContainer<solver::layernorm::LayernormBackward>{};
+
+    auto pair_size_vector = solvers.GetWorkspaceSizes(ctx, problem, true);
+
+    return pair_size_vector.empty() ? static_cast<size_t>(0) : pair_size_vector.front().second;
+}
+
+miopenStatus_t LayerNormBackward(const Handle& handle,
+                                 Data_t workspace,
+                                 size_t workspaceSizeInBytes,
+                                 const TensorDescriptor& dyDesc,
+                                 ConstData_t dy,
+                                 const TensorDescriptor& xDesc,
+                                 ConstData_t x,
+                                 const TensorDescriptor& weightDesc,
+                                 ConstData_t weight,
+                                 const TensorDescriptor& meanDesc,
+                                 ConstData_t mean,
+                                 const TensorDescriptor& rstdDesc,
+                                 ConstData_t rstd,
+                                 const TensorDescriptor& dxDesc,
+                                 Data_t dx,
+                                 const TensorDescriptor& dwDesc,
+                                 Data_t dw,
+                                 const TensorDescriptor& dbDesc,
+                                 Data_t db,
+                                 miopenNormMode_t mode,
+                                 int32_t normalized_dim)
+{
+    const auto problem = layernorm::ProblemDescription{mode,
+                                                       dyDesc,
+                                                       xDesc,
+                                                       weightDesc,
+                                                       meanDesc,
+                                                       rstdDesc,
+                                                       dxDesc,
+                                                       dwDesc,
+                                                       dbDesc,
+                                                       normalized_dim};
+
+    const auto invoke_params = [&]() {
+        auto tmp           = layernorm::BwdInvokeParams{};
+        tmp.type           = InvokeType::Run;
+        tmp.dyDesc         = &dyDesc;
+        tmp.workspace      = workspace;
+        tmp.workspace_size = workspaceSizeInBytes;
+        tmp.dy             = dy;
+        tmp.x              = x;
+        tmp.weight         = weight;
+        tmp.mean           = mean;
+        tmp.rstd           = rstd;
+        tmp.dx             = dx;
+        tmp.dw             = dw;
+        tmp.db             = db;
+        tmp.mode           = mode;
+        tmp.normalized_dim = normalized_dim;
+        tmp.stride         = problem.stride;
+        tmp.outer_size     = problem.outer_size;
+        tmp.inner_size     = problem.inner_size;
+        return tmp;
+    }();
+
+    const auto algo    = AlgorithmName{"LayerNormBackward"};
+    const auto solvers = solver::SolverContainer<solver::layernorm::LayernormBackward>{};
 
     solvers.ExecutePrimitive(handle, problem, algo, invoke_params);
 

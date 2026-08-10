@@ -1,11 +1,17 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2023, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
 #include "ck/utility/functional.hpp"
 #include "ck/utility/sequence.hpp"
+#include "ck/utility/tuple.hpp"
+#include "ck/utility/type.hpp"
 
+#if __clang_major__ >= 23
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+#endif
 namespace ck {
 
 namespace detail {
@@ -70,4 +76,47 @@ struct static_for<0, N, 1> : detail::make_applier<N>
     using detail::make_applier<N>::operator();
 };
 
+template <typename... Is>
+struct static_for_range
+{
+    template <typename F>
+    __host__ __device__ constexpr void operator()(F f) const
+    {
+        // tweak -fbracket-depth if compilation fails. Clang default limit is 256
+        (f(Is{}), ...);
+    }
+};
+
+template <typename... Ts>
+struct static_for_product;
+template <typename... Is>
+struct static_for_product<Tuple<Is...>> : public static_for_range<Is...>
+{
+};
+template <typename... Is, typename... Rest>
+struct static_for_product<Tuple<Is...>, Rest...>
+{
+    template <typename F>
+    __host__ __device__ constexpr void operator()(F f) const
+    {
+        static_for_product<Tuple<Is...>>{}([&](auto i0) {   //
+            static_for_product<Rest...>{}([&](auto... is) { //
+                f(i0, is...);
+            });
+        });
+    }
+};
+
+struct identity
+{
+    template <typename T>
+    __host__ __device__ constexpr T&& operator()(T&& arg) const noexcept
+    {
+        return ck::forward<T>(arg);
+    }
+};
+
 } // namespace ck
+#if __clang_major__ >= 23
+#pragma clang diagnostic pop
+#endif

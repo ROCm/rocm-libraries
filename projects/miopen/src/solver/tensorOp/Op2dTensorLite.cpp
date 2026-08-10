@@ -57,11 +57,13 @@ bool Op2dTensorLite::IsApplicable([[maybe_unused]] const ExecutionContext& conte
         int max_num_wg       = 4096;
 
         // for naive tensor ops
-        size_t RD_BLCK    = (clens[2] % 4 == 0) ? 4 : (clens[2] % 2 == 0) ? 2 : 1;
+        auto&& [RD_BLCK, READ_TYPE_UNUSED] =
+            GetRDBLCKandREADTYPEHIP(clens[2], bTensorDesc.GetType());
+        (void)READ_TYPE_UNUSED;
         size_t total_work = std::max(clens[2] / RD_BLCK, size_t(1));
         size_t grp_sz     = (total_work + local_threads - 1) / local_threads;
 
-        // opencl kernels are no longer supported, fallback to generic case
+        // fallback to generic case
         bool lite_applicable = grp_sz <= size_t(max_num_wg);
 
         bool is_lite = clens[0] == 1 && blens[0] == 1 && alens[0] == 1 &&
@@ -100,6 +102,7 @@ ConvSolution Op2dTensorLite::GetSolution([[maybe_unused]] const ExecutionContext
     const size_t c_cstride = cTensorDesc.GetStrides()[1];
 
     miopenDataType_t data_type = bTensorDesc.GetType();
+    bool fit_into_int          = aTensorDesc.AllDimsFitIntoInt();
 
     auto&& [num_wg, work_per_wg, bitmap] = GetBitmapAndWgInfo(blens, clens);
 
@@ -109,7 +112,7 @@ ConvSolution Op2dTensorLite::GetSolution([[maybe_unused]] const ExecutionContext
     size_t local_threads = 256;
 
     // for naive tensor ops
-    auto&& [RD_BLCK, READ_TYPE] = GetRDBLCKandREADTYPE(clens[2], data_type);
+    auto&& [RD_BLCK, READ_TYPE] = GetRDBLCKandREADTYPEHIP(clens[2], data_type);
 
     size_t total_work = std::max(clens[2] / RD_BLCK, size_t(1));
     size_t grp_sz     = (total_work + local_threads - 1) / local_threads;
@@ -117,18 +120,19 @@ ConvSolution Op2dTensorLite::GetSolution([[maybe_unused]] const ExecutionContext
     grp_sz        = std::min(size_t(max_num_wg), grp_sz);
     size_t glb_sz = local_threads * grp_sz;
 
-    size_t local_threads2 = 64;
-    size_t total_work2    = clens[1];
-    size_t grp_sz2        = (total_work2 + local_threads2 - 1) / local_threads2;
-    grp_sz2               = std::min(size_t(max_num_wg / grp_sz), grp_sz2);
-    size_t glb_sz2        = local_threads2 * grp_sz2;
+    constexpr size_t max_grid_dim_y = (1 << 16) - 1; // limit grid dim to 65535
+    size_t local_threads2           = 64;
+    size_t total_work2              = clens[1];
+    size_t grp_sz2                  = (total_work2 + local_threads2 - 1) / local_threads2;
+    grp_sz2 = std::min({size_t(max_num_wg / grp_sz), max_grid_dim_y / local_threads2, grp_sz2});
+    size_t glb_sz2 = local_threads2 * grp_sz2;
 
     const std::array<size_t, 3> vld{local_threads, 1, 1};
     const std::array<size_t, 3> vgd{glb_sz, glb_sz2, 1};
 
     KernelBuildParameters build_params = KernelBuildParameters{};
 
-    GetCommonParams(build_params, problem, false);
+    GetCommonParams(build_params, problem, true);
 
     build_params.Define("USE_2D_TENSOR_LITE");
     build_params.Define("RD_BLCK", std::to_string(RD_BLCK));
@@ -136,8 +140,8 @@ ConvSolution Op2dTensorLite::GetSolution([[maybe_unused]] const ExecutionContext
 
     auto kernel = KernelInfo{};
 
-    kernel.comp_options = build_params.GenerateFor(kbp::OpenCL{});
-    kernel.kernel_file  = "MIOpenTensorKernels.cl";
+    kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
+    kernel.kernel_file  = "MIOpenTensorKernelsHip.cpp";
     kernel.kernel_name  = "Op2dTensorLite";
 
     using std::begin, std::end;
@@ -145,37 +149,64 @@ ConvSolution Op2dTensorLite::GetSolution([[maybe_unused]] const ExecutionContext
     kernel.l_wk.insert(end(kernel.l_wk), begin(vld), end(vld));
     kernel.g_wk.insert(end(kernel.g_wk), begin(vgd), end(vgd));
 
-    result.invoker_factory =
-        [data_type, b_c = blens[1], a_cstride, b_cstride, c_cstride, total_work, total_work2](
-            const std::vector<Kernel> kernels) {
-            return [=](const Handle& handle_, const AnyInvokeParams& raw_params) {
-                decltype(auto) kernel = handle_.Run(kernels.front());
-                decltype(auto) params = raw_params.CastTo<miopen::tensorOp::InvokeParams>();
+    result.invoker_factory = [data_type,
+                              fit_into_int,
+                              b_c = blens[1],
+                              a_cstride,
+                              b_cstride,
+                              c_cstride,
+                              total_work,
+                              total_work2](const std::vector<Kernel> kernels) {
+        return [=](const Handle& handle_, const AnyInvokeParams& raw_params) {
+            decltype(auto) kernel_ = handle_.Run(kernels.front());
+            decltype(auto) params  = raw_params.CastTo<miopen::tensorOp::InvokeParams>();
 
-                visit_float(data_type, [&](auto as_float) {
-                    auto miopen_alpha0 = as_float(*(static_cast<const float*>(params.alpha0)));
-                    auto miopen_alpha1 = as_float(*(static_cast<const float*>(params.alpha1)));
-                    auto miopen_beta   = as_float(*(static_cast<const float*>(params.beta)));
+            visit_float(data_type, [&](auto as_float) {
+                auto miopen_alpha0 = as_float(*(static_cast<const float*>(params.alpha0)));
+                auto miopen_alpha1 = as_float(*(static_cast<const float*>(params.alpha1)));
+                auto miopen_beta   = as_float(*(static_cast<const float*>(params.beta)));
 
-                    kernel(params.ATensor,
-                           static_cast<int>(a_cstride),
-                           params.BTensor,
-                           static_cast<int>(b_cstride),
-                           params.CTensor,
-                           static_cast<int>(c_cstride),
-                           miopen_alpha0,
-                           miopen_alpha1,
-                           miopen_beta,
-                           static_cast<int64_t>(params.Aoffset),
-                           static_cast<int64_t>(params.Boffset),
-                           static_cast<int64_t>(params.Coffset),
-                           static_cast<int64_t>(total_work),
-                           static_cast<int64_t>(total_work2),
-                           static_cast<int>(!float_equal(miopen_beta, 0.0)),
-                           static_cast<int>(b_c == 1));
-                });
-            };
+                if(fit_into_int)
+                {
+                    kernel_(params.ATensor,
+                            static_cast<uint32_t>(a_cstride),
+                            params.BTensor,
+                            static_cast<uint32_t>(b_cstride),
+                            params.CTensor,
+                            static_cast<uint32_t>(c_cstride),
+                            miopen_alpha0,
+                            miopen_alpha1,
+                            miopen_beta,
+                            static_cast<uint64_t>(params.Aoffset),
+                            static_cast<uint64_t>(params.Boffset),
+                            static_cast<uint64_t>(params.Coffset),
+                            total_work,
+                            total_work2,
+                            static_cast<int>(!float_equal(miopen_beta, 0.0)),
+                            static_cast<int>(b_c == 1));
+                }
+                else
+                {
+                    kernel_(params.ATensor,
+                            static_cast<uint64_t>(a_cstride),
+                            params.BTensor,
+                            static_cast<uint64_t>(b_cstride),
+                            params.CTensor,
+                            static_cast<uint64_t>(c_cstride),
+                            miopen_alpha0,
+                            miopen_alpha1,
+                            miopen_beta,
+                            static_cast<uint64_t>(params.Aoffset),
+                            static_cast<uint64_t>(params.Boffset),
+                            static_cast<uint64_t>(params.Coffset),
+                            total_work,
+                            total_work2,
+                            static_cast<int>(!float_equal(miopen_beta, 0.0)),
+                            static_cast<int>(b_c == 1));
+                }
+            });
         };
+    };
     result.construction_params.push_back(kernel);
 
     return result;

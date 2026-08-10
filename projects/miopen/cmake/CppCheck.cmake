@@ -1,19 +1,19 @@
 ################################################################################
-# 
+#
 # MIT License
-# 
+#
 # Copyright (c) 2017 Advanced Micro Devices, Inc.
-# 
+#
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
 # to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
-# 
+#
 # The above copyright notice and this permission notice shall be included in all
 # copies or substantial portions of the Software.
-# 
+#
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 # FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -21,15 +21,15 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
-# 
+#
 ################################################################################
 
 include(CMakeParseArguments)
 include(ProcessorCount)
 include(Analyzers)
 
-find_program(CPPCHECK_EXE 
-    NAMES 
+find_program(CPPCHECK_EXE
+    NAMES
         cppcheck
     PATHS
         /opt/rocm/bin
@@ -41,6 +41,7 @@ set(CPPCHECK_BUILD_DIR ${CMAKE_BINARY_DIR}/cppcheck-build)
 file(MAKE_DIRECTORY ${CPPCHECK_BUILD_DIR})
 set_property(DIRECTORY APPEND PROPERTY ADDITIONAL_MAKE_CLEAN_FILES ${CPPCHECK_BUILD_DIR})
 
+# Configure cppcheck and create the miopen-cppcheck analyzer target.
 macro(enable_cppcheck)
     set(options FORCE)
     set(oneValueArgs)
@@ -90,9 +91,8 @@ macro(enable_cppcheck)
         file(GLOB_RECURSE GSRCS ${GLOBS})
         set(CPPCHECK_COMMAND
             ${CPPCHECK_EXE}
-            -q
-            # -v
-            # --report-progress
+            -v
+            --checkers-report=${CMAKE_BINARY_DIR}/cppcheck-checkers-report.txt
             ${CPPCHECK_FORCE}
             --cppcheck-build-dir=${CPPCHECK_BUILD_DIR}
             --platform=native
@@ -115,16 +115,25 @@ macro(enable_cppcheck)
             RESULT_VARIABLE RESULT
         )
         if(NOT RESULT EQUAL 0)
+            message(WARNING \"Cppcheck failed with exit code \${RESULT}\")
+            if(EXISTS \"${CMAKE_BINARY_DIR}/cppcheck-checkers-report.txt\")
+                file(READ \"${CMAKE_BINARY_DIR}/cppcheck-checkers-report.txt\" CHECKERS_REPORT)
+                message(WARNING \"\${CHECKERS_REPORT}\")
+            endif()
             message(FATAL_ERROR \"Cppcheck failed\")
         endif()
 ")
 
-    add_custom_target(cppcheck
+    # Project-prefixed target avoids collisions in superbuild contexts;
+    # unprefixed alias is created standalone-only for back-compat.
+    add_custom_target(miopen-cppcheck
         COMMAND ${CMAKE_COMMAND} -P ${CMAKE_BINARY_DIR}/cppcheck.cmake
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
         COMMENT "cppcheck: Running cppcheck..."
     )
-    mark_as_analyzer(cppcheck)
+    mark_as_analyzer(miopen-cppcheck)
+
+    if(NOT ROCM_LIBS_SUPERBUILD)
+        add_custom_target(cppcheck DEPENDS miopen-cppcheck COMMENT "Back-compat alias for miopen-cppcheck")
+    endif()
 endmacro()
-
-

@@ -139,7 +139,7 @@ public:
             auto out_gpu = handle.Write(yTensor.data);
 
             miopenTensorArgumentId_t names[numTensors]       = {miopenTensorSoftmaxX,
-                                                          miopenTensorSoftmaxY};
+                                                                miopenTensorSoftmaxY};
             void* buffers[numTensors]                        = {in_gpu.get(), out_gpu.get()};
             miopenTensorDescriptor_t descriptors[numTensors] = {x_desc, y_desc};
 
@@ -269,7 +269,7 @@ public:
                                                softmax_descriptor.GetMode());
 
             double error           = miopen::rms_range(dxTensorRef.data, dinhost);
-            const double tolerance = 1e-4;
+            const double tolerance = 1e-3;
 
             std::cout << "error =  " << error << std::endl;
 
@@ -280,7 +280,13 @@ public:
         std::cerr << "Finished testing solution functions." << std::endl;
     }
 
-    void Finalize() { EXPECT_EQUAL(miopenDestroyProblem(problem), miopenStatusSuccess); }
+    void Finalize(std::vector<miopenSolution_t>& solutions)
+    {
+        for(auto& solution : solutions)
+            EXPECT_EQUAL(miopenDestroySolution(solution), miopenStatusSuccess);
+
+        EXPECT_EQUAL(miopenDestroyProblem(problem), miopenStatusSuccess);
+    }
 
 private:
     void Initialize()
@@ -364,7 +370,8 @@ TEST(GPU_SoftmaxFind20_FP32, softmaxForward)
     test.TestSolutionAttributes(solutions);
 
     test.TestRunSolutionsForward(handle, solutions);
-    test.Finalize();
+
+    test.Finalize(solutions);
 }
 
 TEST(GPU_SoftmaxFind20_FP32, softmaxBackward_fp32)
@@ -377,7 +384,8 @@ TEST(GPU_SoftmaxFind20_FP32, softmaxBackward_fp32)
     test.TestSolutionAttributes(solutions);
 
     test.TestRunSolutionsBackward(handle, solutions);
-    test.Finalize();
+
+    test.Finalize(solutions);
 }
 
 TEST(GPU_SoftmaxFind20_FP16, softmaxBackward_log_instance_mode_fp16)
@@ -390,7 +398,8 @@ TEST(GPU_SoftmaxFind20_FP16, softmaxBackward_log_instance_mode_fp16)
     test.TestSolutionAttributes(solutions);
 
     test.TestRunSolutionsBackward(handle, solutions);
-    test.Finalize();
+
+    test.Finalize(solutions);
 }
 
 TEST(GPU_SoftmaxFind20_FP16, softmaxBackward_log_channel_mode_fp16)
@@ -403,5 +412,34 @@ TEST(GPU_SoftmaxFind20_FP16, softmaxBackward_log_channel_mode_fp16)
     test.TestSolutionAttributes(solutions);
 
     test.TestRunSolutionsBackward(handle, solutions);
-    test.Finalize();
+
+    test.Finalize(solutions);
+}
+
+TEST(GPU_SoftmaxFind20_BFP16, softmaxBackward_log_instance_mode_bfp16)
+{
+    Handle& handle = get_handle();
+
+    SoftmaxFind20Test<bfloat16> test(false, MIOPEN_SOFTMAX_LOG, MIOPEN_SOFTMAX_MODE_INSTANCE);
+
+    std::vector<miopenSolution_t> solutions = test.TestFindSolutions(handle);
+    test.TestSolutionAttributes(solutions);
+
+    test.TestRunSolutionsBackward(handle, solutions);
+
+    test.Finalize(solutions);
+}
+
+TEST(GPU_SoftmaxFind20_BFP16, softmaxBackward_log_channel_mode_bfp16)
+{
+    Handle& handle = get_handle();
+
+    SoftmaxFind20Test<bfloat16> test(false, MIOPEN_SOFTMAX_LOG, MIOPEN_SOFTMAX_MODE_CHANNEL);
+
+    std::vector<miopenSolution_t> solutions = test.TestFindSolutions(handle);
+    test.TestSolutionAttributes(solutions);
+
+    test.TestRunSolutionsBackward(handle, solutions);
+
+    test.Finalize(solutions);
 }

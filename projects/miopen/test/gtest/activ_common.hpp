@@ -58,12 +58,20 @@ public:
     template <class T, class Tparam>
     static T Forward(Tparam alpha, Tparam beta, Tparam gamma, T x)
     {
+        (void)alpha;
+        (void)beta;
+        (void)gamma;
         return x;
     }
 
     template <class T, class Tparam>
     static T Backward(Tparam alpha, Tparam beta, Tparam gamma, T dy, T x, T y)
     {
+        (void)alpha;
+        (void)beta;
+        (void)gamma;
+        (void)x;
+        (void)y;
         return dy;
     }
 };
@@ -74,12 +82,19 @@ public:
     template <class T, class Tparam>
     static Tparam Forward(Tparam alpha, Tparam beta, Tparam gamma, T x)
     {
+        (void)alpha;
+        (void)beta;
+        (void)gamma;
         return 1 / (1 + std::exp(-x));
     }
 
     template <class T, class Tparam>
     static Tparam Backward(Tparam alpha, Tparam beta, Tparam gamma, T dy, T x, T y)
     {
+        (void)alpha;
+        (void)beta;
+        (void)gamma;
+        (void)x;
         return static_cast<Tparam>(dy) * y * (static_cast<Tparam>(1) - y);
     }
 };
@@ -90,12 +105,15 @@ public:
     template <class T, class Tparam>
     static Tparam Forward(Tparam alpha, Tparam beta, Tparam gamma, T x)
     {
+        (void)gamma;
         return beta * std::tanh(alpha * x);
     }
 
     template <class T, class Tparam>
     static Tparam Backward(Tparam alpha, Tparam beta, Tparam gamma, T dy, T x, T y)
     {
+        (void)gamma;
+        (void)x;
         return dy * alpha * (beta - static_cast<Tparam>(y) * y / beta);
     }
 };
@@ -106,12 +124,19 @@ public:
     template <class T, class Tparam>
     static T Forward(Tparam alpha, Tparam beta, Tparam gamma, T x)
     {
+        (void)alpha;
+        (void)beta;
+        (void)gamma;
         return (x > static_cast<Tparam>(0)) ? x : static_cast<T>(0);
     }
 
     template <class T, class Tparam>
     static T Backward(Tparam alpha, Tparam beta, Tparam gamma, T dy, T x, T y)
     {
+        (void)alpha;
+        (void)beta;
+        (void)gamma;
+        (void)y;
         return (x > static_cast<Tparam>(0)) ? dy : static_cast<T>(0);
     }
 };
@@ -122,12 +147,19 @@ public:
     template <class T, class Tparam>
     static Tparam Forward(Tparam alpha, Tparam beta, Tparam gamma, T x)
     {
+        (void)alpha;
+        (void)beta;
+        (void)gamma;
         return std::log1p(std::exp(x));
     }
 
     template <class T, class Tparam>
     static Tparam Backward(Tparam alpha, Tparam beta, Tparam gamma, T dy, T x, T y)
     {
+        (void)alpha;
+        (void)beta;
+        (void)gamma;
+        (void)y;
         const Tparam threshold = 50.0;
         const Tparam expval    = std::exp(std::min(static_cast<Tparam>(x), threshold));
         return dy * expval / (expval + 1);
@@ -140,12 +172,19 @@ public:
     template <class T, class Tparam>
     static Tparam Forward(Tparam alpha, Tparam beta, Tparam gamma, T x)
     {
+        (void)alpha;
+        (void)beta;
+        (void)gamma;
         return std::abs(x);
     }
 
     template <class T, class Tparam>
     static Tparam Backward(Tparam alpha, Tparam beta, Tparam gamma, T dy, T x, T y)
     {
+        (void)alpha;
+        (void)beta;
+        (void)gamma;
+        (void)y;
         return dy * static_cast<Tparam>((x > static_cast<Tparam>(0)) ? 1 : -1);
     }
 };
@@ -163,6 +202,8 @@ public:
     template <class T, class Tparam>
     static Tparam Backward(Tparam alpha, Tparam beta, Tparam gamma, T dy, T x, T y)
     {
+        (void)gamma;
+        (void)dy;
         const auto v = alpha + beta * x;
         return v <= std::numeric_limits<decltype(v)>::epsilon() ? 0 : gamma * beta * y / v;
     }
@@ -174,12 +215,17 @@ public:
     template <class T, class Tparam>
     static Tparam Forward(Tparam alpha, Tparam beta, Tparam gamma, T x)
     {
+        (void)beta;
+        (void)gamma;
         return std::clamp(static_cast<Tparam>(x), static_cast<Tparam>(0), alpha);
     }
 
     template <class T, class Tparam>
     static T Backward(Tparam alpha, Tparam beta, Tparam gamma, T dy, T x, T y)
     {
+        (void)beta;
+        (void)gamma;
+        (void)y;
         Tparam x_native = x;
         return (x_native > 0 && x_native <= alpha) ? dy : static_cast<T>(0);
     }
@@ -191,6 +237,8 @@ public:
     template <class T, class Tparam>
     static Tparam Forward(Tparam alpha, Tparam beta, Tparam gamma, T x)
     {
+        (void)beta;
+        (void)gamma;
         Tparam x_native = x;
         return (x_native > 0) ? x_native : x_native * alpha;
     }
@@ -198,6 +246,9 @@ public:
     template <class T, class Tparam>
     static Tparam Backward(Tparam alpha, Tparam beta, Tparam gamma, T dy, T x, T y)
     {
+        (void)beta;
+        (void)gamma;
+        (void)y;
         return dy * ((x > static_cast<Tparam>(0)) ? 1 : alpha);
     }
 };
@@ -208,6 +259,8 @@ public:
     template <class T, class Tparam>
     static Tparam Forward(Tparam alpha, Tparam beta, Tparam gamma, T x)
     {
+        (void)beta;
+        (void)gamma;
         Tparam x_native = x;
         return (x_native > 0) ? x_native : alpha * std::expm1(x_native);
     }
@@ -215,6 +268,8 @@ public:
     template <class T, class Tparam>
     static Tparam Backward(Tparam alpha, Tparam beta, Tparam gamma, T dy, T x, T y)
     {
+        (void)beta;
+        (void)gamma;
         return dy * ((x > static_cast<Tparam>(0)) ? 1 : y + alpha);
     }
 };
@@ -258,7 +313,7 @@ public:
     using Type = float; // "Type" must be a native CPU type!
 };
 
-unsigned CpuActivationGetNumThreads(std::size_t num_jobs)
+std::size_t CpuActivationGetNumThreads(std::size_t num_jobs)
 {
     const unsigned max_num_hw_threads = std::thread::hardware_concurrency();
     return std::min(num_jobs, static_cast<std::size_t>(max_num_hw_threads));
@@ -319,31 +374,18 @@ void CpuActivationPackedMultiThread(std::size_t num_items, Ts&&... xs)
         return;
     }
 
-    const std::size_t max_num_jobs_per_thread  = Ceil(num_jobs, num_threads);
-    const std::size_t max_num_items_per_thread = max_num_items_per_job * max_num_jobs_per_thread;
-    const std::size_t remainder                = num_items % max_num_items_per_thread;
-    const auto num_async_threads               = num_threads - 1;
-
-    auto func_async = [&](unsigned thread_num) {
-        const auto offset = max_num_items_per_thread * thread_num;
-        const auto end    = offset + max_num_items_per_thread;
+    auto func = [&](std::size_t thread_num) {
+        const auto offset = num_items * thread_num / num_threads;
+        const auto end    = num_items * (thread_num + 1) / num_threads;
         DoCpuActivationPacked<direction, A>(offset, end, xs...);
     };
 
-    auto func_remainder = [&]() {
-        const auto offset = max_num_items_per_thread * num_async_threads;
-        const auto end    = offset + remainder;
-        DoCpuActivationPacked<direction, A>(offset, end, xs...);
-    };
+    std::vector<std::future<void>> threads;
+    threads.reserve(num_threads - 1);
+    for(std::size_t i = 0; i < num_threads - 1; ++i)
+        threads.push_back(std::async(std::launch::async, func, i));
 
-    std::vector<decltype(std::async(func_async, 0))> threads;
-    for(unsigned i = 0; i < num_async_threads; i++)
-        threads.push_back(std::async(std::launch::async, func_async, i));
-
-    if(remainder)
-        func_remainder();
-    else
-        func_async(num_async_threads);
+    func(num_threads - 1);
 
     for(auto& thread : threads)
         thread.wait();
@@ -356,7 +398,7 @@ void CpuActivationPacked(std::size_t num_items, Ts&&... xs)
 }
 
 template <Direction direction, class A, class... Ts>
-void CpuActivationNonPacked(std::size_t num_items, Ts&&... xs)
+[[noreturn]] void CpuActivationNonPacked(std::size_t /*num_items*/, Ts&&... /*xs*/)
 {
     throw std::runtime_error("CpuActivationNonPacked is not implemented yet");
 }
@@ -405,7 +447,8 @@ void CpuActivation(miopenActivationMode_t m, std::size_t num_items, Ts&&... xs)
     case miopenActivationELU:
         CpuActivation<direction, is_packed, activ_func::ActivationELU>(num_items, xs...);
         break;
-    default: throw std::runtime_error("Unknown activation mode");
+
+    case miopenActivationCLAMP: throw std::runtime_error("Unknown activation mode");
     }
 }
 

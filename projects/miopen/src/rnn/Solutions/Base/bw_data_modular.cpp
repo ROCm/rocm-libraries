@@ -173,25 +173,25 @@ void RNNBackwardDataModularAlgo::UpdateHStatePerTimeSeq(const Handle& handle,
                                                         SequenceDirection direction) const
 {
 
-    const auto [cur_batch, dcy_use_batch, cx_use_batch] =
-        [](const auto& seq, const BatchController& batch_c, const SequenceDirection dir) {
-            auto current_batch = batch_c.getBatchSize(seq.getPhisVal());
-            if(dir == SequenceDirection::Forward)
-            {
-                const auto dcy_batch = seq.isFirst()
-                                           ? current_batch
-                                           : batch_c.getBatchSize(seq.getPrev().getPhisVal());
-                const auto cx_batch  = current_batch;
-                return std::make_tuple(current_batch, dcy_batch, cx_batch);
-            }
-            else
-            {
-                const auto dcy_batch = current_batch;
-                const auto cx_batch =
-                    seq.isLast() ? current_batch : batch_c.getBatchSize(seq.getNext().getPhisVal());
-                return std::make_tuple(current_batch, dcy_batch, cx_batch);
-            }
-        }(seq, batchController, direction);
+    const auto [cur_batch, dcy_use_batch, cx_use_batch] = [](const auto& seq_,
+                                                             const BatchController& batch_c,
+                                                             const SequenceDirection dir) {
+        auto current_batch = batch_c.getBatchSize(seq_.getPhisVal());
+        if(dir == SequenceDirection::Forward)
+        {
+            const auto dcy_batch =
+                seq_.isFirst() ? current_batch : batch_c.getBatchSize(seq_.getPrev().getPhisVal());
+            const auto cx_batch = current_batch;
+            return std::make_tuple(current_batch, dcy_batch, cx_batch);
+        }
+        else
+        {
+            const auto dcy_batch = current_batch;
+            const auto cx_batch =
+                seq_.isLast() ? current_batch : batch_c.getBatchSize(seq_.getNext().getPhisVal());
+            return std::make_tuple(current_batch, dcy_batch, cx_batch);
+        }
+    }(seq, batchController, direction);
 
     return UpdateHStatePerTimeSeq(handle,
                                   dcy,
@@ -312,7 +312,7 @@ void RNNBackwardDataModularAlgo::PropDy(const Handle& handle,
     // bwd concat
     // currently supported only one type, but should be more
     auto [dy_src_desc, dy_data_ptr] =
-        [](const IOBufferDescriptor& dyInfo, const RNNDescriptor& rnnD, ConstData_t dy) {
+        [](const IOBufferDescriptor& dyInfo, const RNNDescriptor& rnnD, ConstData_t dy_) {
             const auto& dy_raw_size   = dyInfo.getFullSeqMajorSize();
             const auto& dy_raw_stride = dyInfo.getFullSeqMajorStrides();
 
@@ -330,7 +330,7 @@ void RNNBackwardDataModularAlgo::PropDy(const Handle& handle,
             auto dy_desc =
                 miopen::TensorDescriptor(rnnD.dataType, dy_normalized_size, dy_normalized_stride);
 
-            return std::make_tuple(dy_desc, dy);
+            return std::make_tuple(dy_desc, dy_);
         }(yInfo, rnnDesc, dy);
 
     const std::vector<size_t> ws_dst_strides = [](const auto& full_stride_ref) {
@@ -342,7 +342,7 @@ void RNNBackwardDataModularAlgo::PropDy(const Handle& handle,
 
         ws_ht_layer_size[0] = 1;
 
-        return ws_ht_layer_size;
+        return std::move(ws_ht_layer_size);
     }(workspaceInfo.hStateSizes);
 
     auto ws_dy_dst_desc = miopen::TensorDescriptor(rnn_data_type, ws_dst_size, ws_dst_strides);
@@ -619,8 +619,6 @@ void RNNBackwardDataModularAlgo::UpdateHStatePerTimeSeq(const Handle& handle,
             useCxIfGTBatch,
             hidden_vec,
             reservLayout.gateStride[1],
-            -666, // unused
-            -666, // unused
             cx,
             hiddenHxCxInfo.getOffset(getVirtualLayer(layer, direction), 0),
             reserveSpace,
@@ -750,25 +748,25 @@ void RNNBackwardModuleAlgoDynamic::realUpdateHStatePerTimeSeq(const Handle& hand
 {
     // Inited
 
-    const auto [cur_batch, dcy_use_batch, cx_use_batch] =
-        [](const auto& seq, const BatchController& batch_c, const SequenceDirection dir) {
-            auto current_batch = batch_c.getBatchSize(seq.getPhisVal());
-            if(dir == SequenceDirection::Forward)
-            {
-                const auto dcy_batch = seq.isFirst()
-                                           ? current_batch
-                                           : batch_c.getBatchSize(seq.getPrev().getPhisVal());
-                const auto cx_batch  = current_batch;
-                return std::make_tuple(current_batch, dcy_batch, cx_batch);
-            }
-            else
-            {
-                const auto dcy_batch = current_batch;
-                const auto cx_batch =
-                    seq.isLast() ? current_batch : batch_c.getBatchSize(seq.getNext().getPhisVal());
-                return std::make_tuple(current_batch, dcy_batch, cx_batch);
-            }
-        }(seq, realBatchController, direction);
+    const auto [cur_batch, dcy_use_batch, cx_use_batch] = [](const auto& seq_,
+                                                             const BatchController& batch_c,
+                                                             const SequenceDirection dir) {
+        auto current_batch = batch_c.getBatchSize(seq_.getPhisVal());
+        if(dir == SequenceDirection::Forward)
+        {
+            const auto dcy_batch =
+                seq_.isFirst() ? current_batch : batch_c.getBatchSize(seq_.getPrev().getPhisVal());
+            const auto cx_batch = current_batch;
+            return std::make_tuple(current_batch, dcy_batch, cx_batch);
+        }
+        else
+        {
+            const auto dcy_batch = current_batch;
+            const auto cx_batch =
+                seq_.isLast() ? current_batch : batch_c.getBatchSize(seq_.getNext().getPhisVal());
+            return std::make_tuple(current_batch, dcy_batch, cx_batch);
+        }
+    }(seq, realBatchController, direction);
 
     return UpdateHStatePerTimeSeq(handle,
                                   dcy,

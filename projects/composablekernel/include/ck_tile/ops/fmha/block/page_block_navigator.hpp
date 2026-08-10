@@ -1,11 +1,15 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2024, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/core/tensor/tile_window.hpp"
 
+#if __clang_major__ >= 23
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+#endif
 namespace ck_tile {
 
 // assume that we have only 1 page-block/tensor view
@@ -49,6 +53,27 @@ struct TrivialPageBlockNavigator
         ck_tile::move_tile_window(tile_window, step);
 
         return /*block_index=*/0;
+    }
+
+    template <typename TileWindow>
+    CK_TILE_HOST_DEVICE index_t
+    move_tile_window(index_t /*block_index*/,
+                     TileWindow& tile_window,
+                     const typename remove_cvref_t<TileWindow>::BottomTensorIndex& step,
+                     index_t /*id*/) const
+    {
+
+        ck_tile::move_tile_window(tile_window, step);
+        return 0;
+    }
+
+    template <typename TileWindow>
+    CK_TILE_HOST_DEVICE index_t
+    prefetch_table_id(index_t /*block_index*/,
+                      TileWindow /*tile_window*/,
+                      const typename remove_cvref_t<TileWindow>::BottomTensorIndex& /*step*/) const
+    {
+        return -1;
     }
 
     CK_TILE_HOST_DEVICE static constexpr WindowOrigin
@@ -151,6 +176,56 @@ struct PageBlockNavigator
         tile_window.set_bottom_tensor_view_data_ptr(get_block_ptr(new_block_index));
 
         return new_block_index;
+    }
+
+    template <typename TileWindow>
+    CK_TILE_HOST_DEVICE index_t
+    move_tile_window(index_t block_index,
+                     TileWindow& tile_window,
+                     const typename remove_cvref_t<TileWindow>::BottomTensorIndex& step,
+                     index_t id) const
+    {
+        ck_tile::move_tile_window(tile_window, step);
+
+        const WindowOrigin global_window_origin =
+            to_global_window_origin(block_index, tile_window.get_window_origin());
+        const WindowOrigin local_window_origin = to_local_window_origin(global_window_origin);
+
+        const index_t new_block_index = get_block_index(global_window_origin);
+        /// TODO: only update necessary attributes
+        tile_window.bottom_tensor_view_.desc_ =
+            (is_last_block(new_block_index) ? last_view : complete_view).get_tensor_descriptor();
+        tile_window.set_window_origin(local_window_origin);
+        if(id >= 0)
+            tile_window.set_bottom_tensor_view_data_ptr(physical_blocks + id * block_stride +
+                                                        fixed_offset);
+        else
+            tile_window.set_bottom_tensor_view_data_ptr(nullptr);
+
+        return new_block_index;
+    }
+
+    template <typename TileWindow>
+    CK_TILE_HOST_DEVICE index_t
+    prefetch_table_id(index_t block_index,
+                      TileWindow& tile_window,
+                      const typename remove_cvref_t<TileWindow>::BottomTensorIndex& step) const
+    {
+        auto local_tile_window = tile_window; // not affect origin window
+        ck_tile::move_tile_window(local_tile_window, step);
+
+        const WindowOrigin global_window_origin =
+            to_global_window_origin(block_index, local_tile_window.get_window_origin());
+        const index_t new_block_index = get_block_index(global_window_origin);
+
+        if(new_block_index < num_blocks)
+        {
+            return physical_block_indices[new_block_index];
+        }
+        else
+        {
+            return -1;
+        }
     }
 
     CK_TILE_HOST_DEVICE bool is_last_block(index_t block_index) const
@@ -285,3 +360,7 @@ CK_TILE_HOST_DEVICE auto make_page_block_navigator(copy_const_t<DataType, void>*
 }
 
 } // namespace ck_tile
+
+#if __clang_major__ >= 23
+#pragma clang diagnostic pop
+#endif

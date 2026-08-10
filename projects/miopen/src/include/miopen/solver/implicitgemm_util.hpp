@@ -100,7 +100,8 @@ static inline bool IsXdlopsSupport(const ExecutionContext& ctx)
     // 2) llvm intrin may has incorrect results
     const bool is_xdlops_supported = ctx.GetStream().GetDeviceName() == "gfx908" ||
                                      ctx.GetStream().GetDeviceName() == "gfx90a" ||
-                                     ctx.GetStream().GetDeviceName() == "gfx942";
+                                     ctx.GetStream().GetDeviceName() == "gfx942" ||
+                                     ctx.GetStream().GetDeviceName() == "gfx950";
     return is_xdlops_supported && !env::disabled(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_XDLOPS);
 }
 
@@ -176,7 +177,7 @@ inline T igemm_get_max_gks(T gemm_k, T gemm_k_per_block, T max_log2_splits)
         return 0;
     T rem      = gemm_k / gemm_k_per_block;
     T rem_pow2 = rem & (~(rem - 1));
-    T gks      = (T)log2(rem_pow2);
+    T gks      = static_cast<T>(log2(rem_pow2));
 
     if(gks > max_log2_splits)
         gks = max_log2_splits;

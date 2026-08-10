@@ -33,13 +33,12 @@
 #include <set>
 #include <vector>
 #include <cstdlib>
-#include "random.hpp"
 #include <numeric>
 
-#include <miopen/tensor.hpp>
+#include "gemm.hpp"
+#include "random.hpp"
 
-#define RNN_MM_TRANSPOSE 1
-#define RNN_MM_USEPARAGEMM 0
+#include <miopen/tensor.hpp>
 
 // complexity O(NlogN)
 inline std::vector<int> GetReverseOrderIndex(const std::vector<int>& base_index)
@@ -261,179 +260,6 @@ inline T dervactivfunc(T x, int actvf)
 }
 
 template <typename Dtype>
-void RNN_mm_cpu(const Dtype* a_ptr,
-                size_t a_cols,
-                size_t a_rows,
-                size_t a_stride,
-                int a_flags,
-                const Dtype* b_ptr,
-                size_t b_cols,
-                size_t b_rows,
-                size_t b_stride,
-                int b_flags,
-                Dtype* c_ptr,
-                size_t c_cols,
-                size_t c_rows,
-                size_t c_stride,
-                int /*c_flags*/,
-                double alpha,
-                double beta)
-{
-    if((!(a_flags & RNN_MM_TRANSPOSE) && !(b_flags & RNN_MM_TRANSPOSE) &&
-        ((a_cols != b_rows) || (a_rows != c_rows) || (b_cols != c_cols))) ||
-       ((a_flags & RNN_MM_TRANSPOSE) && (b_flags & RNN_MM_TRANSPOSE) &&
-        ((a_rows != b_cols) || (a_cols != c_rows) || (b_rows != c_cols))) ||
-       ((a_flags & RNN_MM_TRANSPOSE) && !(b_flags & RNN_MM_TRANSPOSE) &&
-        ((a_rows != b_rows) || (a_cols != c_rows) || (b_cols != c_cols))) ||
-       (!(a_flags & RNN_MM_TRANSPOSE) && (b_flags & RNN_MM_TRANSPOSE) &&
-        ((a_cols != b_cols) || (a_rows != c_rows) || (b_rows != c_cols))))
-    {
-        std::cout << "MM_CPU ERROR: " << a_cols << ", " << a_rows << "   " << b_cols << ", "
-                  << b_rows << "   " << c_cols << ", " << c_rows << std::endl;
-        return;
-    }
-
-    size_t inner_loop = (!(a_flags & RNN_MM_TRANSPOSE)) ? a_cols : a_rows;
-#if(!RNN_MM_USEPARAGEMM)
-    if(!(a_flags & RNN_MM_TRANSPOSE) && !(b_flags & RNN_MM_TRANSPOSE))
-    {
-        for(size_t n = 0; n < c_rows; ++n)
-        {
-            for(size_t k = 0; k < c_cols; ++k)
-            {
-                double mm_e = 0;
-                for(size_t m = 0; m < inner_loop; ++m)
-                {
-                    mm_e += static_cast<double>(a_ptr[n * a_stride + m]) *
-                            static_cast<double>(b_ptr[m * b_stride + k]);
-                }
-                c_ptr[n * c_stride + k] = static_cast<Dtype>(
-                    beta * static_cast<double>(c_ptr[n * c_stride + k]) + alpha * mm_e);
-            }
-        }
-    }
-    else if((a_flags & RNN_MM_TRANSPOSE) && !(b_flags & RNN_MM_TRANSPOSE))
-    {
-        for(size_t n = 0; n < c_rows; ++n)
-        {
-            for(size_t k = 0; k < c_cols; ++k)
-            {
-
-                double mm_e = 0;
-                for(size_t m = 0; m < inner_loop; ++m)
-                {
-                    mm_e += static_cast<double>(a_ptr[m * a_stride + n]) *
-                            static_cast<double>(b_ptr[m * b_stride + k]);
-#if 0
-					if (
-						(n == 0 && k == 33
-						|| n == 1 && k == 32
-						|| n == 3 && k == 1
-						|| n == 4 && k == 0
-
-						)
-						&& a_ptr[m*a_stride + n] * b_ptr[m*b_stride + k] != 0
-						)
-					{
-                        std::cout << "C:mm: " << n << ", " << k << ", " << m << ", " <<
-							mm_e, a_ptr[m*a_stride + n] << ", " <<
-                                b_ptr[m*b_stride + k] << ", " <<
-                                a_ptr[m*a_stride + n] * b_ptr[m*b_stride + k] << std::endl;
-					}
-#endif
-                }
-                c_ptr[n * c_stride + k] = static_cast<Dtype>(
-                    beta * static_cast<double>(c_ptr[n * c_stride + k]) + alpha * mm_e);
-            }
-        }
-    }
-    else if(!(a_flags & RNN_MM_TRANSPOSE) && (b_flags & RNN_MM_TRANSPOSE))
-    {
-        for(size_t n = 0; n < c_rows; ++n)
-        {
-            for(size_t k = 0; k < c_cols; ++k)
-            {
-                double mm_e = 0;
-
-                for(size_t m = 0; m < inner_loop; ++m)
-                {
-                    mm_e += static_cast<double>(a_ptr[n * a_stride + m]) *
-                            static_cast<double>(b_ptr[k * b_stride + m]);
-#if 0
-					if (n == 0 && k == 6 && static_cast<double>(a_ptr[n*a_stride + m] * b_ptr[k*b_stride + m] != 0)
-					{
-                        std::cout << m << ", " << mm_e << ", " << ", " << static_cast<double>(a_ptr[n*a_stride + m] << ", " << b_ptr[k*b_stride + m] << std::endl;
-					}
-#endif
-                }
-                c_ptr[n * c_stride + k] = static_cast<Dtype>(
-                    beta * static_cast<double>(c_ptr[n * c_stride + k]) + alpha * mm_e);
-            }
-        }
-    }
-    else
-    {
-        for(size_t n = 0; n < c_rows; ++n)
-        {
-            for(size_t k = 0; k < c_cols; ++k)
-            {
-                double mm_e = 0;
-                for(size_t m = 0; m < inner_loop; ++m)
-                {
-                    c_ptr[n * c_stride + k] +=
-                        static_cast<Dtype>(static_cast<double>(a_ptr[m * a_stride + n]) *
-                                           static_cast<double>(b_ptr[k * b_stride + m]));
-                }
-                c_ptr[n * c_stride + k] = static_cast<Dtype>(
-                    beta * static_cast<double>(c_ptr[n * c_stride + k]) + alpha * mm_e);
-            }
-        }
-#else
-    auto c_out = [&](int i, int j, double x) {
-        c_ptr[i * c_stride + j] =
-            static_cast<Dtype>(beta * static_cast<double>(c_ptr[i * c_stride + j]) + alpha * x);
-    };
-
-    if(!(a_flags & RNN_MM_TRANSPOSE) && !(b_flags & RNN_MM_TRANSPOSE))
-    {
-        gemm(c_rows,
-             c_cols,
-             inner_loop,
-             with_stride(a_ptr, a_stride),
-             with_stride(b_ptr, b_stride),
-             c_out);
-    }
-    else if((a_flags & RNN_MM_TRANSPOSE) && !(b_flags & RNN_MM_TRANSPOSE))
-    {
-        gemm(c_rows,
-             c_cols,
-             inner_loop,
-             miopen::flip(with_stride(a_ptr, a_stride)),
-             with_stride(b_ptr, b_stride),
-             c_out);
-    }
-    else if(!(a_flags & RNN_MM_TRANSPOSE) && (b_flags & RNN_MM_TRANSPOSE))
-    {
-        gemm(c_rows,
-             c_cols,
-             inner_loop,
-             with_stride(a_ptr, a_stride),
-             miopen::flip(with_stride(b_ptr, b_stride)),
-             c_out);
-    }
-    else
-    {
-        gemm(c_rows,
-             c_cols,
-             inner_loop,
-             miopen::flip(with_stride(a_ptr, a_stride)),
-             miopen::flip(with_stride(b_ptr, b_stride)),
-             c_out);
-#endif
-    }
-}
-
-template <typename Dtype>
 void RNN_mm_cpu_batched(const Dtype* a_ptr,
                         size_t a_cols,
                         size_t a_rows,
@@ -451,30 +277,28 @@ void RNN_mm_cpu_batched(const Dtype* a_ptr,
                         size_t c_rows,
                         size_t ldc,
                         size_t c_stride,
-                        int c_flags,
                         int batchCount,
                         double alpha,
                         double beta)
 {
     for(int i = 0; i < batchCount; ++i)
     {
-        RNN_mm_cpu(a_ptr + a_stride * i,
-                   a_cols,
-                   a_rows,
-                   lda,
-                   a_flags,
-                   b_ptr + b_stride * i,
-                   b_cols,
-                   b_rows,
-                   ldb,
-                   b_flags,
-                   c_ptr + c_stride * i,
-                   c_cols,
-                   c_rows,
-                   ldc,
-                   c_flags,
-                   alpha,
-                   beta);
+        gemm_cpu(a_ptr + a_stride * i,
+                 a_cols,
+                 a_rows,
+                 lda,
+                 a_flags == 1 ? true : false,
+                 b_ptr + b_stride * i,
+                 b_cols,
+                 b_rows,
+                 ldb,
+                 b_flags == 1 ? true : false,
+                 c_ptr + c_stride * i,
+                 c_cols,
+                 c_rows,
+                 ldc,
+                 alpha,
+                 beta);
     }
 }
 

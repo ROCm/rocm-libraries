@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -108,29 +108,61 @@ struct DeviceOperationInstanceFactory<
                              is_same_v<OutDataType, F16> && is_same_v<ComputeTypeA, F16> &&
                              is_same_v<ComputeTypeB, F16>)
                 {
+                    add_device_grouped_conv2d_bwd_data_xdl_v3_nhwgk_gkyxc_nhwgc_f16_instances(
+                        op_ptrs);
+                    add_device_grouped_conv2d_bwd_data_xdl_v3_nhwgk_gkyxc_nhwgc_f16_large_tensors_instances(
+                        op_ptrs);
                     add_device_grouped_conv2d_bwd_data_xdl_nhwgk_gkyxc_nhwgc_f16_instances(op_ptrs);
                     add_device_grouped_conv2d_bwd_data_xdl_nhwgk_gkyxc_nhwgc_f16_16_16_instances(
                         op_ptrs);
-                }
-#endif
-#ifdef CK_ENABLE_FP32
-                if constexpr(is_same_v<InDataType, F32> && is_same_v<WeiDataType, F32> &&
-                             is_same_v<OutDataType, F32> && is_same_v<ComputeTypeA, F32> &&
-                             is_same_v<ComputeTypeB, F32>)
-                {
-                    add_device_grouped_conv2d_bwd_data_xdl_nhwgk_gkyxc_nhwgc_f32_instances(op_ptrs);
-                    add_device_grouped_conv2d_bwd_data_xdl_nhwgk_gkyxc_nhwgc_f32_16_16_instances(
+                    add_device_grouped_conv2d_bwd_data_xdl_nhwgk_gkyxc_nhwgc_f16_optimized_loads_instances(
                         op_ptrs);
                 }
 #endif
+                if constexpr(is_same_v<InDataType, F32> && is_same_v<WeiDataType, F32> &&
+                             is_same_v<OutDataType, F32>)
+                {
+                    static_assert(is_same_v<ComputeTypeA, ComputeTypeB>,
+                                  "Error: this operator requires the same compute type");
+#ifdef CK_ENABLE_TF32
+                    if constexpr(is_same_v<ComputeTypeA, TF32>)
+                    {
+                        add_device_grouped_conv2d_bwd_data_xdl_nhwgk_gkyxc_nhwgc_f32_tf32_instances(
+                            op_ptrs);
+                        add_device_grouped_conv2d_bwd_data_xdl_nhwgk_gkyxc_nhwgc_f32_tf32_16_16_instances(
+                            op_ptrs);
+                        add_device_grouped_conv2d_bwd_data_xdl_nhwgk_gkyxc_nhwgc_f32_tf32_optimized_loads_instances(
+                            op_ptrs);
+                    }
+#endif
+#ifdef CK_ENABLE_FP32
+                    if constexpr(is_same_v<ComputeTypeA, F32>)
+                    {
+                        add_device_grouped_conv2d_bwd_data_xdl_v3_nhwgk_gkyxc_nhwgc_f32_large_tensors_instances(
+                            op_ptrs);
+                        add_device_grouped_conv2d_bwd_data_xdl_nhwgk_gkyxc_nhwgc_f32_instances(
+                            op_ptrs);
+                        add_device_grouped_conv2d_bwd_data_xdl_nhwgk_gkyxc_nhwgc_f32_16_16_instances(
+                            op_ptrs);
+                        add_device_grouped_conv2d_bwd_data_xdl_nhwgk_gkyxc_nhwgc_f32_optimized_loads_instances(
+                            op_ptrs);
+                    }
+#endif
+                }
 #ifdef CK_ENABLE_BF16
                 if constexpr(is_same_v<InDataType, BF16> && is_same_v<WeiDataType, BF16> &&
                              is_same_v<OutDataType, BF16> && is_same_v<ComputeTypeA, BF16> &&
                              is_same_v<ComputeTypeB, BF16>)
                 {
+                    add_device_grouped_conv2d_bwd_data_xdl_v3_nhwgk_gkyxc_nhwgc_bf16_instances(
+                        op_ptrs);
+                    add_device_grouped_conv2d_bwd_data_xdl_v3_nhwgk_gkyxc_nhwgc_bf16_large_tensors_instances(
+                        op_ptrs);
                     add_device_grouped_conv2d_bwd_data_xdl_nhwgk_gkyxc_nhwgc_bf16_instances(
                         op_ptrs);
                     add_device_grouped_conv2d_bwd_data_xdl_nhwgk_gkyxc_nhwgc_bf16_16_16_instances(
+                        op_ptrs);
+                    add_device_grouped_conv2d_bwd_data_xdl_nhwgk_gkyxc_nhwgc_bf16_optimized_loads_instances(
                         op_ptrs);
                 }
 #endif
@@ -247,9 +279,13 @@ struct DeviceOperationInstanceFactory<
                              is_same_v<OutDataType, F16> && is_same_v<ComputeTypeA, F16> &&
                              is_same_v<ComputeTypeB, F16>)
                 {
+                    add_device_grouped_conv3d_bwd_data_xdl_v3_ndhwgk_gkzyxc_ndhwgc_f16_large_tensors_instances(
+                        op_ptrs);
                     add_device_grouped_conv3d_bwd_data_xdl_ndhwgk_gkzyxc_ndhwgc_f16_instances(
                         op_ptrs);
                     add_device_grouped_conv3d_bwd_data_xdl_ndhwgk_gkzyxc_ndhwgc_f16_16_16_instances(
+                        op_ptrs);
+                    add_device_grouped_conv3d_bwd_data_xdl_ndhwgk_gkzyxc_ndhwgc_f16_optimized_loads_instances(
                         op_ptrs);
                 }
 #endif
@@ -262,25 +298,48 @@ struct DeviceOperationInstanceFactory<
                         op_ptrs);
                 }
 #endif
-#ifdef CK_ENABLE_FP32
                 if constexpr(is_same_v<InDataType, F32> && is_same_v<WeiDataType, F32> &&
-                             is_same_v<OutDataType, F32> && is_same_v<ComputeTypeA, F32> &&
-                             is_same_v<ComputeTypeB, F32>)
+                             is_same_v<OutDataType, F32>)
                 {
-                    add_device_grouped_conv3d_bwd_data_xdl_ndhwgk_gkzyxc_ndhwgc_f32_instances(
-                        op_ptrs);
-                    add_device_grouped_conv3d_bwd_data_xdl_ndhwgk_gkzyxc_ndhwgc_f32_16_16_instances(
-                        op_ptrs);
-                }
+                    static_assert(is_same_v<ComputeTypeA, ComputeTypeB>,
+                                  "Error: this operator requires the same compute type");
+#ifdef CK_ENABLE_FP32
+                    if constexpr(is_same_v<ComputeTypeA, F32>)
+                    {
+                        add_device_grouped_conv3d_bwd_data_xdl_v3_ndhwgk_gkzyxc_ndhwgc_f32_large_tensors_instances(
+                            op_ptrs);
+                        add_device_grouped_conv3d_bwd_data_xdl_ndhwgk_gkzyxc_ndhwgc_f32_instances(
+                            op_ptrs);
+                        add_device_grouped_conv3d_bwd_data_xdl_ndhwgk_gkzyxc_ndhwgc_f32_16_16_instances(
+                            op_ptrs);
+                        add_device_grouped_conv3d_bwd_data_xdl_ndhwgk_gkzyxc_ndhwgc_f32_optimized_loads_instances(
+                            op_ptrs);
+                    }
 #endif
+#ifdef CK_ENABLE_TF32
+                    if constexpr(is_same_v<ComputeTypeA, TF32>)
+                    {
+                        add_device_grouped_conv3d_bwd_data_xdl_ndhwgk_gkzyxc_ndhwgc_f32_tf32_instances(
+                            op_ptrs);
+                        add_device_grouped_conv3d_bwd_data_xdl_ndhwgk_gkzyxc_ndhwgc_f32_tf32_16_16_instances(
+                            op_ptrs);
+                        add_device_grouped_conv3d_bwd_data_xdl_ndhwgk_gkzyxc_ndhwgc_f32_tf32_optimized_loads_instances(
+                            op_ptrs);
+                    }
+#endif
+                }
 #ifdef CK_ENABLE_BF16
                 if constexpr(is_same_v<InDataType, BF16> && is_same_v<WeiDataType, BF16> &&
                              is_same_v<OutDataType, BF16> && is_same_v<ComputeTypeA, BF16> &&
                              is_same_v<ComputeTypeB, BF16>)
                 {
+                    add_device_grouped_conv3d_bwd_data_xdl_v3_ndhwgk_gkzyxc_ndhwgc_bf16_large_tensors_instances(
+                        op_ptrs);
                     add_device_grouped_conv3d_bwd_data_xdl_ndhwgk_gkzyxc_ndhwgc_bf16_instances(
                         op_ptrs);
                     add_device_grouped_conv3d_bwd_data_xdl_ndhwgk_gkzyxc_ndhwgc_bf16_16_16_instances(
+                        op_ptrs);
+                    add_device_grouped_conv3d_bwd_data_xdl_ndhwgk_gkzyxc_ndhwgc_bf16_optimized_loads_instances(
                         op_ptrs);
                 }
 #endif
@@ -379,6 +438,7 @@ struct DeviceOperationInstanceFactory<
                         op_ptrs);
                 }
 #endif
+
 #ifdef CK_ENABLE_INT8
                 if constexpr(is_same_v<InDataType, int8_t> && is_same_v<WeiDataType, int8_t> &&
                              is_same_v<OutDataType, int8_t> && is_same_v<ComputeTypeA, int8_t> &&
@@ -398,9 +458,24 @@ struct DeviceOperationInstanceFactory<
                              is_same_v<OutDataType, F16> && is_same_v<ComputeTypeA, F16> &&
                              is_same_v<ComputeTypeB, F16>)
                 {
+                    add_device_grouped_conv2d_bwd_data_wmma_v3_nhwgk_gkyxc_nhwgc_f16_instances(
+                        op_ptrs);
+                    add_device_grouped_conv2d_bwd_data_wmma_v3_nhwgk_gkyxc_nhwgc_f16_16_16_instances(
+                        op_ptrs);
                     add_device_grouped_conv2d_bwd_data_wmma_nhwgk_gkyxc_nhwgc_f16_instances(
                         op_ptrs);
                     add_device_grouped_conv2d_bwd_data_wmma_nhwgk_gkyxc_nhwgc_f16_1x1s1p0_instances(
+                        op_ptrs);
+                }
+#endif
+#ifdef CK_ENABLE_BF16
+                if constexpr(is_same_v<InDataType, BF16> && is_same_v<WeiDataType, BF16> &&
+                             is_same_v<OutDataType, BF16> && is_same_v<ComputeTypeA, BF16> &&
+                             is_same_v<ComputeTypeB, BF16>)
+                {
+                    add_device_grouped_conv2d_bwd_data_wmma_v3_nhwgk_gkyxc_nhwgc_bf16_instances(
+                        op_ptrs);
+                    add_device_grouped_conv2d_bwd_data_wmma_v3_nhwgk_gkyxc_nhwgc_bf16_16_16_instances(
                         op_ptrs);
                 }
 #endif
@@ -432,6 +507,7 @@ struct DeviceOperationInstanceFactory<
                         op_ptrs);
                 }
 #endif
+
 #ifdef CK_ENABLE_INT8
                 if constexpr(is_same_v<InDataType, int8_t> && is_same_v<WeiDataType, int8_t> &&
                              is_same_v<OutDataType, int8_t> && is_same_v<ComputeTypeA, int8_t> &&
@@ -456,6 +532,21 @@ struct DeviceOperationInstanceFactory<
                         op_ptrs);
                     add_device_grouped_conv3d_bwd_data_wmma_ndhwgk_gkzyxc_ndhwgc_f16_1x1s1p0_instances(
                         op_ptrs);
+                    add_device_grouped_conv3d_bwd_data_wmma_v3_ndhwgk_gkzyxc_ndhwgc_f16_instances(
+                        op_ptrs);
+                    add_device_grouped_conv3d_bwd_data_wmma_v3_ndhwgk_gkzyxc_ndhwgc_f16_16_16_instances(
+                        op_ptrs);
+                }
+#endif
+#ifdef CK_ENABLE_BF16
+                if constexpr(is_same_v<InDataType, BF16> && is_same_v<WeiDataType, BF16> &&
+                             is_same_v<OutDataType, BF16> && is_same_v<ComputeTypeA, BF16> &&
+                             is_same_v<ComputeTypeB, BF16>)
+                {
+                    add_device_grouped_conv3d_bwd_data_wmma_v3_ndhwgk_gkzyxc_ndhwgc_bf16_instances(
+                        op_ptrs);
+                    add_device_grouped_conv3d_bwd_data_wmma_v3_ndhwgk_gkzyxc_ndhwgc_bf16_16_16_instances(
+                        op_ptrs);
                 }
 #endif
 #ifdef CK_ENABLE_INT8
@@ -472,7 +563,6 @@ struct DeviceOperationInstanceFactory<
             }
         }
 #endif
-
         return op_ptrs;
     }
 };

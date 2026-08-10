@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -24,14 +24,14 @@ template <typename GridwiseElementwiseFunctor,
           typename ElementwiseOperation>
 __global__ void
 #if CK_USE_LAUNCH_BOUNDS
-    __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, CK_MIN_BLOCK_PER_CU)
+__launch_bounds__(CK_MAX_THREAD_PER_BLOCK, CK_MIN_BLOCK_PER_CU)
 #endif
-        kernel_elementwise(const InGridDescTuple in_grid_desc_tuple,
-                           const OutGridDescTuple out_grid_desc_tuple,
-                           const InDataTypePointerTuple p_in_global_tuple,
-                           const OutDataTypePointerTuple p_out_global_tuple,
-                           const Block2TileMap block_2_tile_map,
-                           const ElementwiseOperation elementwise_op)
+    kernel_elementwise(const InGridDescTuple in_grid_desc_tuple,
+                       const OutGridDescTuple out_grid_desc_tuple,
+                       const InDataTypePointerTuple p_in_global_tuple,
+                       const OutDataTypePointerTuple p_out_global_tuple,
+                       const Block2TileMap block_2_tile_map,
+                       const ElementwiseOperation elementwise_op)
 {
     GridwiseElementwiseFunctor::Run(in_grid_desc_tuple,
                                     out_grid_desc_tuple,
@@ -56,20 +56,20 @@ template <typename GridwiseElementwiseFunctorA,
           typename ElementwiseOperation>
 __global__ void
 #if CK_USE_LAUNCH_BOUNDS
-    __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, CK_MIN_BLOCK_PER_CU)
+__launch_bounds__(CK_MAX_THREAD_PER_BLOCK, CK_MIN_BLOCK_PER_CU)
 #endif
-        kernel_elementwise_dual(const InAGridDescTuple in_grid_desc_tuple_a,
-                                const InBGridDescTuple in_grid_desc_tuple_b,
-                                const OutAGridDescTuple out_grid_desc_tuple_a,
-                                const OutBGridDescTuple out_grid_desc_tuple_b,
-                                const InADataTypePointerTuple p_in_global_tuple_a,
-                                const InBDataTypePointerTuple p_in_global_tuple_b,
-                                const OutADataTypePointerTuple p_out_global_tuple_a,
-                                const OutBDataTypePointerTuple p_out_global_tuple_b,
-                                const Block2TileMapA block_2_tile_map_a,
-                                const Block2TileMapB block_2_tile_map_b,
-                                const ElementwiseOperation elementwise_op,
-                                const index_t a_grid_size)
+    kernel_elementwise_dual(const InAGridDescTuple in_grid_desc_tuple_a,
+                            const InBGridDescTuple in_grid_desc_tuple_b,
+                            const OutAGridDescTuple out_grid_desc_tuple_a,
+                            const OutBGridDescTuple out_grid_desc_tuple_b,
+                            const InADataTypePointerTuple p_in_global_tuple_a,
+                            const InBDataTypePointerTuple p_in_global_tuple_b,
+                            const OutADataTypePointerTuple p_out_global_tuple_a,
+                            const OutBDataTypePointerTuple p_out_global_tuple_b,
+                            const Block2TileMapA block_2_tile_map_a,
+                            const Block2TileMapB block_2_tile_map_b,
+                            const ElementwiseOperation elementwise_op,
+                            const index_t a_grid_size)
 {
     if(get_block_1d_id() < a_grid_size)
     {
@@ -112,27 +112,26 @@ template <typename GridwiseElementwiseFunctorA,
           index_t NumOutputsB>
 __global__ void
 #if CK_USE_LAUNCH_BOUNDS
-    __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, CK_MIN_BLOCK_PER_CU)
+__launch_bounds__(CK_MAX_THREAD_PER_BLOCK, CK_MIN_BLOCK_PER_CU)
 #endif
-        kernel_elementwise_batched_dual(
-            const InAGridDescTuple in_grid_desc_tuple_a,
-            const InBGridDescTuple in_grid_desc_tuple_b,
-            const OutAGridDescTuple out_grid_desc_tuple_a,
-            const OutBGridDescTuple out_grid_desc_tuple_b,
-            const InADataTypePointerTuple p_in_global_tuple_a,
-            const InBDataTypePointerTuple p_in_global_tuple_b,
-            const OutADataTypePointerTuple p_out_global_tuple_a,
-            const OutBDataTypePointerTuple p_out_global_tuple_b,
-            const Block2TileMapA block_2_tile_map_a,
-            const Block2TileMapB block_2_tile_map_b,
-            const ElementwiseOperation elementwise_op,
-            const index_t a_grid_size,
-            const index_t batch_count_a,
-            const index_t batch_count_b,
-            const std::array<index_t, NumInputsA> input_batch_strides_a,
-            const std::array<index_t, NumInputsB> input_batch_strides_b,
-            const std::array<index_t, NumOutputsA> output_batch_strides_a,
-            const std::array<index_t, NumOutputsB> output_batch_strides_b)
+    kernel_elementwise_batched_dual(const InAGridDescTuple in_grid_desc_tuple_a,
+                                    const InBGridDescTuple in_grid_desc_tuple_b,
+                                    const OutAGridDescTuple out_grid_desc_tuple_a,
+                                    const OutBGridDescTuple out_grid_desc_tuple_b,
+                                    const InADataTypePointerTuple p_in_global_tuple_a,
+                                    const InBDataTypePointerTuple p_in_global_tuple_b,
+                                    const OutADataTypePointerTuple p_out_global_tuple_a,
+                                    const OutBDataTypePointerTuple p_out_global_tuple_b,
+                                    const Block2TileMapA block_2_tile_map_a,
+                                    const Block2TileMapB block_2_tile_map_b,
+                                    const ElementwiseOperation elementwise_op,
+                                    const index_t a_grid_size,
+                                    const index_t batch_count_a,
+                                    const index_t batch_count_b,
+                                    const std::array<index_t, NumInputsA> input_batch_strides_a,
+                                    const std::array<index_t, NumInputsB> input_batch_strides_b,
+                                    const std::array<index_t, NumOutputsA> output_batch_strides_a,
+                                    const std::array<index_t, NumOutputsB> output_batch_strides_b)
 {
     static_assert(InAGridDescTuple::Size() == NumInputsA &&
                   InADataTypePointerTuple::Size() == NumInputsA);
@@ -214,29 +213,31 @@ template <typename GridwiseElementwiseFunctor,
           typename Block2TileMap,
           typename ElementwiseOperation,
           index_t NumInputs,
-          index_t NumOutputs>
+          index_t NumOutputs,
+          typename IndexType = index_t>
 __global__ void
 #if CK_USE_LAUNCH_BOUNDS
-    __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, CK_MIN_BLOCK_PER_CU)
+__launch_bounds__(CK_MAX_THREAD_PER_BLOCK, CK_MIN_BLOCK_PER_CU)
 #endif
-        kernel_batched_elementwise(const InGridDescTuple in_grid_desc_tuple,
-                                   const OutGridDescTuple out_grid_desc_tuple,
-                                   const InDataTypePointerTuple p_in_global_tuple,
-                                   const OutDataTypePointerTuple p_out_global_tuple,
-                                   const Block2TileMap block_2_tile_map,
-                                   const ElementwiseOperation elementwise_op,
-                                   const index_t batch_count,
-                                   const std::array<index_t, NumInputs> input_batch_strides,
-                                   const std::array<index_t, NumOutputs> output_batch_strides)
+    kernel_batched_elementwise(const InGridDescTuple in_grid_desc_tuple,
+                               const OutGridDescTuple out_grid_desc_tuple,
+                               const InDataTypePointerTuple p_in_global_tuple,
+                               const OutDataTypePointerTuple p_out_global_tuple,
+                               const Block2TileMap block_2_tile_map,
+                               const ElementwiseOperation elementwise_op,
+                               const IndexType batch_count,
+                               const std::array<IndexType, NumInputs> input_batch_strides,
+                               const std::array<IndexType, NumOutputs> output_batch_strides)
 {
     static_assert(InGridDescTuple::Size() == NumInputs &&
                   InDataTypePointerTuple::Size() == NumInputs);
     static_assert(OutGridDescTuple::Size() == NumOutputs &&
                   OutDataTypePointerTuple::Size() == NumOutputs);
 
-    const index_t num_blocks_per_batch =
+    const IndexType num_blocks_per_batch =
         __builtin_amdgcn_readfirstlane(get_grid_size() / batch_count);
-    const index_t g_idx = __builtin_amdgcn_readfirstlane(get_block_1d_id() / num_blocks_per_batch);
+    const IndexType g_idx =
+        __builtin_amdgcn_readfirstlane(get_block_1d_id() / num_blocks_per_batch);
 
     InDataTypePointerTuple p_in_global_with_offset_tuple;
     OutDataTypePointerTuple p_out_global_with_offset_tuple;
@@ -274,7 +275,8 @@ template <typename InGridDescTuple,
           typename InScalarPerVectorSeq,
           typename OutScalarPerVectorSeq,
           index_t SrcVectorDim,
-          index_t DstVectorDim>
+          index_t DstVectorDim,
+          typename IndexType = index_t>
 struct GridwiseElementwise
 {
     static constexpr index_t NumInput  = InDataTypePointerTuple::Size();
@@ -323,15 +325,19 @@ struct GridwiseElementwise
 
         const auto in_global_buf_tuple = generate_tuple(
             [&](auto I) {
-                return make_dynamic_buffer<AddressSpaceEnum::Global>(
-                    p_in_global_tuple[I], in_grid_desc_tuple[I].GetElementSpaceSize());
+                return make_dynamic_buffer<AddressSpaceEnum::Global,
+                                           AmdBufferCoherenceEnum::DefaultCoherence,
+                                           IndexType>(p_in_global_tuple[I],
+                                                      in_grid_desc_tuple[I].GetElementSpaceSize());
             },
             Number<NumInput>{});
 
         auto out_global_buf_tuple = generate_tuple(
             [&](auto I) {
-                return make_dynamic_buffer<AddressSpaceEnum::Global>(
-                    p_out_global_tuple[I], out_grid_desc_tuple[I].GetElementSpaceSize());
+                return make_dynamic_buffer<AddressSpaceEnum::Global,
+                                           AmdBufferCoherenceEnum::DefaultCoherence,
+                                           IndexType>(p_out_global_tuple[I],
+                                                      out_grid_desc_tuple[I].GetElementSpaceSize());
             },
             Number<NumOutput>{});
 
@@ -387,11 +393,13 @@ struct GridwiseElementwise
             uniform_sequence_gen_t<NumInput, 1>,
             uniform_sequence_gen_t<NumOutput, 1>,
             uniform_sequence_gen_t<NumInput, false>,
-            uniform_sequence_gen_t<NumOutput, false>>{in_grid_desc_tuple,
-                                                      input_thread_grid_offset,
-                                                      out_grid_desc_tuple,
-                                                      output_thread_grid_offset,
-                                                      elementwise_op};
+            uniform_sequence_gen_t<NumOutput, false>,
+            1,
+            IndexType>{in_grid_desc_tuple,
+                       input_thread_grid_offset,
+                       out_grid_desc_tuple,
+                       output_thread_grid_offset,
+                       elementwise_op};
         global_to_global_transfer.Run(
             in_grid_desc_tuple, in_global_buf_tuple, out_grid_desc_tuple, out_global_buf_tuple, I0);
     }

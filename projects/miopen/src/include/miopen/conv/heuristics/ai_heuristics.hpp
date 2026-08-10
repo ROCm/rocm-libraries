@@ -36,6 +36,7 @@
 #include <algorithm>
 #include <queue>
 #include <fstream>
+#include <optional>
 #include <miopen/miopen.h>
 #include <nlohmann/json.hpp>
 #include <miopen/db_path.hpp>
@@ -45,6 +46,97 @@
 
 namespace miopen {
 namespace ai {
+
+// Common utility functions for AI heuristics (2D, 3D, and KTN)
+namespace common {
+
+// Sign- and bounds-safe one-hot encoding. A label outside [0, num_classes) yields an all-zero
+// vector (and a warning): an unknown or negative category degrades to "no class" rather than
+// indexing out of range (static_cast<size_t> of a negative value would otherwise be undefined).
+// Defined in ai_heuristics.cpp.
+std::vector<int> OneHot(long long label, std::size_t num_classes);
+
+// Canonical metadata key for a datatype (e.g. miopenFloat -> "FP32"). The datatype->name mapping is
+// a stable property of the MIOpen C API; the name->index mapping (which can change per retrain) is
+// read from each model's metadata. Returns nullptr for a datatype no model encodes. Single source
+// of truth for all precision encoders (Metadata/MetadataND::EncodePrecision and candidate
+// selection). Defined in ai_heuristics.cpp.
+const char* DataTypeToEncodingKey(miopenDataType_t data_type);
+
+// Convolution direction. Selects the implicit-GEMM (M, N, K) dimension assignment in
+// EngineeredConvFeatures (the conv lowers to a different GEMM per direction). Dimensions are always
+// passed in the forward (driver) convention; this enum only chooses the GEMM formula.
+enum class ConvDirection
+{
+    Forward,
+    BackwardData,
+    BackwardWeights
+};
+
+// Derived 2D-convolution feature block shared by the TunaNet (ExtractTunaNetND2dFeatures) and
+// candidate-selection (EngineerCandidateSelectionInputFeatures) input encoders. Given the problem
+// dimensions (forward convention) and direction it returns the engineered tail (log-transformed
+// FLOPs/GEMM sizes, utilization and spatial/channel ratios) in a fixed order. Must match the
+// feature definitions the models were trained with. Single source of truth so the two paths cannot
+// drift. Defined in ai_heuristics.cpp.
+MIOPEN_INTERNALS_EXPORT std::vector<float> EngineeredConvFeatures(std::size_t N,
+                                                                  std::size_t C_in,
+                                                                  std::size_t C_out,
+                                                                  std::size_t H_in,
+                                                                  std::size_t W_in,
+                                                                  std::size_t H_out,
+                                                                  std::size_t W_out,
+                                                                  std::size_t K_h,
+                                                                  std::size_t K_w,
+                                                                  std::size_t groups,
+                                                                  std::size_t num_cu,
+                                                                  ConvDirection direction);
+
+/**
+ * @brief Load JSON from file path
+ * @param path File system path to JSON file
+ * @return Parsed JSON object
+ * @throws miopenStatusInternalError if file doesn't exist or can't be parsed
+ */
+inline nlohmann::json LoadJSON(const fs::path& path)
+{
+    if(!fs::exists(path))
+        MIOPEN_THROW(miopenStatusInternalError, "Unable to load file: " + path.string());
+    return nlohmann::json::parse(std::ifstream(path));
+}
+
+/**
+ * @brief Reverse a map (swap keys and values)
+ * @param map Original map to reverse
+ * @return Reversed map with keys and values swapped
+ */
+template <typename U, typename V>
+std::unordered_map<V, U> ReverseMap(const std::unordered_map<U, V>& map)
+{
+    std::unordered_map<V, U> reversed_map = {};
+    for(const auto& it : map)
+        reversed_map.emplace(std::make_pair(it.second, it.first));
+    return reversed_map;
+}
+
+/**
+ * @brief Lookup values from map using keys vector
+ * @param keys Vector of keys to lookup
+ * @param map Map to lookup values from
+ * @return Vector of values corresponding to keys
+ */
+template <typename U, typename V>
+std::vector<V> LookupValues(const std::vector<U>& keys, const std::unordered_map<U, V>& map)
+{
+    std::vector<V> values = {};
+    values.reserve(keys.size());
+    std::transform(keys.begin(), keys.end(), std::back_inserter(values), [&](const U& key) {
+        return map.at(key);
+    });
+    return values;
+}
+
+} // namespace common
 #if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
 namespace immed_mode {
 struct Metadata
@@ -74,6 +166,249 @@ class Model;
 MIOPEN_INTERNALS_EXPORT std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
                                                             const ExecutionContext& ctx,
                                                             const std::string& device);
+/**
+ * @brief ND-specific metadata handler for TunaNetND models
+ *
+ * This class provides a simple interface for accessing ND convolution metadata.
+ * All data is loaded during construction with proper error handling.
+ * Design matches 2D Metadata pattern for consistency.
+ */
+class MetadataND
+{
+private:
+    std::string model_prefix;
+    bool is_valid;   // Error handling flag
+    int spatial_dim; // 2 or 3 - dimension this model supports
+
+    // Loaded data (const members like 2D pattern)
+    std::vector<std::string> features;
+    size_t num_inputs;
+    size_t num_outputs;
+    size_t num_solvers;
+    size_t num_cu_3d = 0; // "gpu.num_cu" the model was trained with (0 when absent)
+    std::unordered_map<size_t, std::string> solver_map;
+    std::vector<float> features_mean;
+    std::vector<float> features_std;
+
+    // Encoding maps
+    std::unordered_map<std::string, int> direction_encodings_3d;
+    std::unordered_map<std::string, int> precision_encodings_3d;
+    std::unordered_map<std::string, int> in_layout_encodings;
+    std::unordered_map<std::string, int> fil_layout_encodings;
+    std::unordered_map<std::string, int> out_layout_encodings;
+
+    // Helper functions for construction
+    static std::optional<int> LoadSpatialDim(const std::string& arch);
+    static std::optional<std::vector<std::string>> LoadFeatures(const std::string& arch);
+    static std::optional<size_t> LoadNumInputs(const std::string& arch);
+    static std::optional<size_t> LoadNumCu(const std::string& arch);
+    static std::optional<size_t> LoadNumOutputs(const std::string& arch);
+    static std::optional<size_t> LoadNumSolvers(const std::string& arch);
+    static std::optional<std::unordered_map<size_t, std::string>>
+    LoadSolverMap(const std::string& arch);
+    static std::optional<std::vector<float>> LoadFeaturesMean(const std::string& arch,
+                                                              size_t num_inputs);
+    static std::optional<std::vector<float>> LoadFeaturesStd(const std::string& arch,
+                                                             size_t num_inputs);
+    static std::optional<std::unordered_map<std::string, int>>
+    LoadDirectionEncodings(const std::string& arch);
+    static std::optional<std::unordered_map<std::string, int>>
+    LoadPrecisionEncodings(const std::string& arch);
+    static std::optional<std::unordered_map<std::string, int>>
+    LoadInLayoutEncodings(const std::string& arch);
+    static std::optional<std::unordered_map<std::string, int>>
+    LoadFilLayoutEncodings(const std::string& arch);
+    static std::optional<std::unordered_map<std::string, int>>
+    LoadOutLayoutEncodings(const std::string& arch);
+
+public:
+    /**
+     * @brief Constructor - loads all metadata immediately with error handling
+     * @param device Device name (e.g., "gfx942", "gfx950")
+     * @param dim Spatial dimension (2 or 3)
+     * @note Does not throw - use IsValid() to check for errors
+     */
+    MIOPEN_INTERNALS_EXPORT explicit MetadataND(const std::string& device, const int& dim);
+
+    /**
+     * @brief Check if metadata was loaded successfully
+     * @return true if all data loaded correctly, false if any errors occurred
+     */
+    bool IsValid() const { return is_valid; }
+
+    /**
+     * @brief Get model_prefix for 3D models
+     * @return Model prefix string used during construction/loading
+     */
+    const std::string& GetModelPrefix() const { return model_prefix; }
+
+    /**
+     * @brief Get the spatial dimension this model supports
+     * @return 2 for 2D models, 3 for 3D models
+     */
+    int GetSpatialDim() const { return spatial_dim; }
+
+    /**
+     * @brief Get list of feature names used by 3D model
+     * @return Reference to feature names vector
+     * @note Call IsValid() first to ensure data is available
+     */
+    const std::vector<std::string>& GetFeatures() const { return features; }
+
+    /**
+     * @brief Get number of input features
+     * @return Number of inputs
+     */
+    size_t GetNumInputs() const { return num_inputs; }
+
+    /**
+     * @brief Compute-unit count the model was trained with (from "gpu.num_cu"), used to normalize
+     *        hardware-aware derived features. Returns 0 when absent.
+     */
+    size_t GetNumCu() const { return num_cu_3d; }
+
+    /**
+     * @brief One-hot class counts for the categorical input features, from the metadata encodings.
+     *        Used to size the engineered input one-hots so they track the trained model.
+     */
+    size_t GetPrecisionClassCount() const { return precision_encodings_3d.size(); }
+    size_t GetDirectionClassCount() const { return direction_encodings_3d.size(); }
+    size_t GetInLayoutClassCount() const { return in_layout_encodings.size(); }
+    size_t GetFilLayoutClassCount() const { return fil_layout_encodings.size(); }
+    size_t GetOutLayoutClassCount() const { return out_layout_encodings.size(); }
+
+    /**
+     * @brief Get number of output features
+     * @return Number of outputs
+     */
+    size_t GetNumOutputs() const { return num_outputs; }
+
+    /**
+     * @brief Get number of solvers
+     * @return Number of solvers
+     */
+    size_t GetNumSolvers() const { return num_solvers; }
+
+    /**
+     * @brief Get solver mapping (index to name)
+     * @return Reference to solver map
+     */
+    const std::unordered_map<size_t, std::string>& GetSolverMap() const { return solver_map; }
+
+    /**
+     * @brief Get feature mean values for normalization
+     * @return Reference to features mean vector
+     */
+    const std::vector<float>& GetFeaturesMean() const { return features_mean; }
+
+    /**
+     * @brief Get feature standard deviation values for normalization
+     * @return Reference to features std vector
+     */
+    const std::vector<float>& GetFeaturesStd() const { return features_std; }
+
+    /**
+     * @brief Encode convolution direction to integer
+     * @param dir Convolution direction (Forward/BackwardData/BackwardWeights)
+     * @return Encoded direction value, or 0 if direction not supported
+     */
+    MIOPEN_INTERNALS_EXPORT size_t EncodeDirection(miopen::conv::Direction dir) const;
+
+    /**
+     * @brief Encode data type to integer
+     * @param data_type Data type (FP32/FP16/BF16)
+     * @return Encoded precision value, or 0 if type not supported
+     */
+    MIOPEN_INTERNALS_EXPORT size_t EncodePrecision(miopenDataType_t data_type) const;
+
+    /**
+     * @brief Encode layout string to integer (generic)
+     * @param layout Layout string
+     * @return Encoded layout value, or 0 if layout not supported
+     */
+    MIOPEN_INTERNALS_EXPORT size_t EncodeLayout(const std::string& layout) const;
+
+    /**
+     * @brief Encode input layout string to integer
+     * @param layout Input layout string
+     * @return Encoded input layout value, or 0 if layout not supported
+     */
+    MIOPEN_INTERNALS_EXPORT size_t EncodeInLayout(const std::string& layout) const;
+
+    /**
+     * @brief Encode filter layout string to integer
+     * @param layout Filter layout string
+     * @return Encoded filter layout value, or 0 if layout not supported
+     */
+    MIOPEN_INTERNALS_EXPORT size_t EncodeFilLayout(const std::string& layout) const;
+
+    /**
+     * @brief Encode output layout string to integer
+     * @param layout Output layout string
+     * @return Encoded output layout value, or 0 if layout not supported
+     */
+    MIOPEN_INTERNALS_EXPORT size_t EncodeOutLayout(const std::string& layout) const;
+};
+
+/**
+ * @brief Abstract base class for ND AI heuristics models
+ *
+ * This class defines the interface for ND convolution AI heuristics models.
+ * Implementations should provide device-specific TunaNetND inference
+ * for predicting optimal ND convolution solvers (both 2D and 3D).
+ */
+class ModelND
+{
+public:
+    virtual ~ModelND() = default;
+
+    /**
+     * @brief Check if an ND convolution problem is supported by this model
+     * @param problem ND convolution problem description (2D or 3D)
+     * @param ctx Execution context
+     * @return true if problem is supported, false otherwise
+     */
+    virtual bool IsProblemSupported(const conv::ProblemDescription& problem,
+                                    const ExecutionContext& ctx) const = 0;
+
+    /**
+     * @brief Run TunaNetND inference on the given ND problem
+     * @param problem ND convolution problem description (2D or 3D)
+     * @return Vector of solver probabilities (one per solver)
+     */
+    virtual std::vector<float> Forward(const conv::ProblemDescription& problem) const = 0;
+
+    /**
+     * @brief Get solver index to name mapping
+     * @return Map from solver indices to solver names for result interpretation
+     */
+    virtual const std::unordered_map<size_t, std::string>& GetSolverMap() const = 0;
+
+protected:
+    /**
+     * @brief Extract numerical features from ND convolution problem
+     * @param problem ND convolution problem description
+     * @return Feature vector for TunaNetND input
+     */
+    virtual std::vector<float> ToFeatures(const conv::ProblemDescription& problem) const = 0;
+};
+
+/**
+ * @brief Factory function to create ND AI heuristics model for given device
+ * @param device GPU device name (e.g., "gfx942", "gfx950")
+ * @param dim Spatial dimension (2 or 3)
+ * @return Device-specific ND model instance, or nullptr if unsupported
+ */
+MIOPEN_INTERNALS_EXPORT std::unique_ptr<ModelND> GetNDModel(const std::string& device,
+                                                            const int& dim);
+
+/// Engineered 2D input-feature vector for the TunaNetND input encoder: categorical one-hots
+/// (layouts, precision, direction) sized from the metadata encodings, raw passthrough features, and
+/// the shared common::EngineeredConvFeatures derived block. isFwd selects the channel/spatial
+/// orientation. Exported for golden testing.
+MIOPEN_INTERNALS_EXPORT std::vector<float> ExtractTunaNetND2dFeatures(
+    const conv::ProblemDescription& problem, bool isFwd, const MetadataND& metadata);
+
 } // namespace immed_mode
 
 #endif // MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK

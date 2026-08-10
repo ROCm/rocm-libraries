@@ -23,464 +23,817 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-#ifndef MIOPEN_DONT_USE_HIP_RUNTIME_HEADERS
+#ifndef MIOPEN_HIP_RUNTIME_COMPILE
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
 #endif
-#include "miopen_cstdint.hpp"
 
 #include "float_types.h"
+#include "miopen_cstdint.hpp"
 
-template <typename TI, typename TO>
-__device__ void layernormfwdcontiguous(const TI* __restrict__ x,
-                                       const TI* __restrict__ weight,
-                                       const TI* __restrict__ bias,
-                                       TO* __restrict__ y,
-                                       TO* __restrict__ mean,
-                                       TO* __restrict__ rstd,
-                                       float eps,
-                                       uint64_t inner_size,
-                                       int32_t mode)
+template <int N>
+struct log2_floor
+{
+    constexpr static int value = log2_floor<(N >> 1)>::value + 1;
+};
+
+template <>
+struct log2_floor<1>
+{
+    constexpr static int value = 0;
+};
+
+template <int N>
+constexpr static int log2_floor_v = log2_floor<N>::value;
+
+template <int N>
+struct log2_ceil
+{
+    constexpr static int value = log2_floor_v<N> + (1 << log2_floor_v<N> == N ? 0 : 1);
+};
+
+template <int N>
+constexpr static int log2_ceil_v = log2_ceil<N>::value;
+
+using load_t = int4;
+
+template <typename T, unsigned int n>
+struct array
+{
+    T data[n];
+};
+
+template <typename T>
+static constexpr int load_factor = sizeof(load_t) / sizeof(T);
+
+template <typename T>
+using vec_t = array<T, load_factor<T>>;
+
+template <typename T, unsigned int BOUND = INNER_SIZE, unsigned int I_STRIDE = STRIDE>
+__forceinline__ __device__ static vec_t<T>
+load(uint64_t i, const uint64_t i_offset, const T* __restrict__ src)
+{
+    if(I_STRIDE == 1 && i + load_factor<T> < BOUND)
+    {
+        __builtin_amdgcn_sched_barrier(1);
+        const load_t value = *reinterpret_cast<const load_t*>(&src[i + i_offset]);
+        const auto values  = *reinterpret_cast<const vec_t<T>*>(&value);
+        return values;
+    }
+    else
+    {
+        __builtin_amdgcn_sched_barrier(1);
+        vec_t<T> values{{}};
+#pragma unroll
+        for(int k = 0; k < load_factor<T>; ++k)
+        {
+            if(i + k < BOUND)
+            {
+                values.data[k] = src[(i + k) * I_STRIDE + i_offset];
+            }
+        }
+        return values;
+    }
+}
+
+template <typename T, unsigned int BOUND = INNER_SIZE, bool USE_DEFAULT = false>
+__forceinline__ __device__ static vec_t<T> load_contiguous(
+    uint64_t i, const T* __restrict__ src, const T default_value = CVT_FP32_2FLOAT(0.0f))
+{
+    if(!USE_DEFAULT && i + load_factor<T> < BOUND)
+    {
+        const load_t value = *reinterpret_cast<const load_t*>(&src[i]);
+        const auto values  = *reinterpret_cast<const vec_t<T>*>(&value);
+        return values;
+    }
+    else
+    {
+        __builtin_amdgcn_sched_barrier(1);
+        vec_t<T> values = {{}};
+#pragma unroll
+        for(int k = 0; k < load_factor<T>; ++k)
+        {
+            if(i + k < BOUND)
+            {
+                if constexpr(USE_DEFAULT)
+                {
+                    values.data[k] = static_cast<T>(default_value);
+                }
+                else
+                {
+                    values.data[k] = src[i + k];
+                }
+            }
+        }
+        return values;
+    }
+}
+
+template <typename T>
+__forceinline__ __device__ static void
+store(uint64_t i, const uint64_t i_offset, T* __restrict__ dst, vec_t<T>& data)
+{
+    if(STRIDE == 1 && i + load_factor<T> < INNER_SIZE)
+    {
+        *reinterpret_cast<load_t*>(&dst[i * STRIDE + i_offset]) = *reinterpret_cast<load_t*>(&data);
+    }
+    else
+    {
+#pragma unroll
+        for(int k = 0; k < load_factor<T>; ++k)
+        {
+            if(i + k < INNER_SIZE)
+            {
+                dst[(i + k) * STRIDE + i_offset] = data.data[k];
+            }
+        }
+    }
+}
+
+__forceinline__ __device__ void get_indices(unsigned int& gid, unsigned int& o, unsigned int& s)
+{
+    if constexpr(SEPARATE_STRIDE)
+    {
+        o = blockIdx.x;
+        if constexpr(LOCAL_SIZE_Y > 1)
+        {
+            s = threadIdx.y;
+        }
+        else
+        {
+            s = blockIdx.y;
+        }
+        gid = o * STRIDE + s;
+    }
+    else
+    {
+        gid = blockIdx.x;
+        o   = blockIdx.x / STRIDE;
+        s   = blockIdx.x % STRIDE;
+    }
+}
+
+template <typename T>
+__forceinline__ __device__ void layernormfwd(const T* __restrict__ x,
+                                             const T* __restrict__ weight,
+                                             const T* __restrict__ bias,
+                                             T* __restrict__ y,
+                                             T* __restrict__ mean,
+                                             T* __restrict__ rstd,
+                                             const float epsilon)
 {
     /*
      * Each group works on a single channel.
      * Example)
-     * x dim = {N, C, L}, normalized shape = {C, L}
-     * outer_size = N, inner_size = C * L
+     * x dim = {N, C, L}, normalized shape = {C, L}, layout = NCHW or NHWC
+     * outer_size = N, inner_size = C * L, stride = 1
      *
      * Example2)
-     * x dim = {N, C, L}, normalized shape = {L}
-     * outer_size = N * C, inner_size = L
+     * x dim = {N, C, L}, normalized shape = {L}, layout = NCHW
+     * outer_size = N * C, inner_size = L, stride = 1
      *
-     * => gws = {outer_size * LOCAL_SIZE}, lws = {LOCAL_SIZE}
+     * Example3)
+     * x dim = {N, C, L}, normalized shape = {L}, layout = NHWC
+     * outer_size = N, inner_size = L, stride = C
+     *
+     * => gws = {outer_size * LOCAL_SIZE_X, stride}, lws = {LOCAL_SIZE_X, stride}
      */
 
     /*
      * Reduction to calculate mean and rstd
      */
 
-    const uint64_t gid = blockIdx.x;
-    const uint64_t lid = threadIdx.x;
-
-    FLOAT_ACCUM pmean = static_cast<FLOAT_ACCUM>(0);
-    FLOAT_ACCUM pvar  = static_cast<FLOAT_ACCUM>(0);
-    __shared__ FLOAT_ACCUM ltmp1[LOCAL_SIZE];
-    __shared__ FLOAT_ACCUM ltmp2[LOCAL_SIZE];
+    FLOAT_ACCUM pmean = CVT_FP32_2ACCUM(0.0f);
+    FLOAT_ACCUM pvar  = CVT_FP32_2ACCUM(0.0f);
 
     // reduce sum for mean and var
-    for(uint64_t i = lid; i < inner_size; i += LOCAL_SIZE)
+    unsigned int gid, o, s;
+    get_indices(gid, o, s);
+    const unsigned int offset = o * INNER_SIZE * STRIDE + s;
+    const unsigned int lid    = threadIdx.x;
+    if constexpr(VECTORIZED)
     {
-        size_t x_idx = gid * inner_size + i;
-
-        FLOAT_ACCUM tmp = CVT_FLOAT2ACCUM(x[x_idx]);
-        pmean += tmp;
-        pvar += tmp * tmp;
-    }
-
-    ltmp1[lid] = pmean;
-    ltmp2[lid] = pvar;
-    __syncthreads();
-    for(uint32_t i = LOCAL_SIZE >> 1; i > 0; i >>= 1)
-    {
-        if(lid < i)
+        unsigned int i = lid * load_factor<T>;
+        auto tmpx      = load(i, offset, x);
+        i += LOCAL_SIZE_X * load_factor<T>;
+        for(; i < INNER_SIZE; i += LOCAL_SIZE_X * load_factor<T>)
         {
-            ltmp1[lid] += ltmp1[lid + i];
-            ltmp2[lid] += ltmp2[lid + i];
+            auto tmp = load(i, offset, x);
+            __builtin_amdgcn_sched_barrier(1);
+#pragma unroll
+            for(int k = 0; k < load_factor<T>; ++k)
+            {
+                FLOAT_ACCUM px = CVT_FLOAT2ACCUM(tmpx.data[k]);
+                pmean += px;
+                pvar += px * px;
+            }
+            __builtin_amdgcn_sched_barrier(1);
+            tmpx = tmp;
         }
-        __syncthreads();
+#pragma unroll
+        for(int k = 0; k < load_factor<T>; ++k)
+        {
+            FLOAT_ACCUM px = CVT_FLOAT2ACCUM(tmpx.data[k]);
+            pmean += px;
+            pvar += px * px;
+        }
     }
-    pmean             = ltmp1[0] / inner_size;
-    pvar              = ltmp2[0] / inner_size - pmean * pmean;
-    FLOAT_ACCUM prstd = rsqrt(pvar + FLOAT_ACCUM(eps));
+    else
+    {
+        for(unsigned int i = lid; i < INNER_SIZE; i += LOCAL_SIZE_X)
+        {
+            unsigned int idx = i * STRIDE + offset;
 
+            FLOAT_ACCUM tmp = CVT_FLOAT2ACCUM(x[idx]);
+            pmean += tmp;
+            pvar += tmp * tmp;
+        }
+    }
+
+    __shared__ FLOAT_ACCUM ltmp1[LOCAL_SIZE_X];
+    __shared__ FLOAT_ACCUM ltmp2[LOCAL_SIZE_X];
+    FLOAT_ACCUM prstd;
+    if constexpr(LOCAL_SIZE_X > 1)
+    {
+        if constexpr(LOCAL_SIZE_Y > 1)
+        {
+            for(unsigned int j = 0; j < STRIDE; ++j)
+            {
+                if(j == s)
+                {
+                    ltmp1[lid] = pmean;
+                    ltmp2[lid] = pvar;
+                }
+                __syncthreads();
+                for(unsigned int k = LOCAL_SIZE_X >> 1; k > 0; k >>= 1)
+                {
+                    if(j == s && lid < k)
+                    {
+                        ltmp1[lid] += ltmp1[lid + k];
+                        ltmp2[lid] += ltmp2[lid + k];
+                    }
+                    __syncthreads();
+                }
+                if(j == s)
+                {
+                    pmean = ltmp1[0];
+                    pvar  = ltmp2[0];
+                }
+                __syncthreads();
+            }
+        }
+        else
+        {
+            ltmp1[lid] = pmean;
+            ltmp2[lid] = pvar;
+            __syncthreads();
+            for(unsigned int k = LOCAL_SIZE_X >> 1; k > 0; k >>= 1)
+            {
+                if(lid < k)
+                {
+                    ltmp1[lid] += ltmp1[lid + k];
+                    ltmp2[lid] += ltmp2[lid + k];
+                }
+                __syncthreads();
+            }
+            pmean = ltmp1[0];
+            pvar  = ltmp2[0];
+        }
+    }
+    pmean = pmean * CVT_FP32_2ACCUM(1.0f / INNER_SIZE);
+    pvar  = pvar * CVT_FP32_2ACCUM(1.0f / INNER_SIZE) - pmean * pmean;
+    prstd = rsqrtf(pvar + CVT_FP32_2ACCUM(epsilon));
     if(lid == 0)
     {
         if(mean)
+        {
             mean[gid] = CVT_ACCUM2FLOAT(pmean);
+        }
         if(rstd)
+        {
             rstd[gid] = CVT_ACCUM2FLOAT(prstd);
+        }
     }
 
     // forward calculation
-    for(uint64_t i = lid; i < inner_size; i += LOCAL_SIZE)
+    if constexpr(VECTORIZED)
     {
-        size_t idx = gid * inner_size + i;
-
-        FLOAT_ACCUM pweight;
-        FLOAT_ACCUM pbias;
-
-        pweight = (mode == MIOPEN_ELEMENTWISE_AFFINE) ? CVT_FP32_2ACCUM(1.0f)
-                                                      : CVT_FLOAT2ACCUM(weight[i]);
-        pbias =
-            (mode == MIOPEN_ELEMENTWISE_AFFINE) ? static_cast<FLOAT>(0) : CVT_FLOAT2ACCUM(bias[i]);
-
-        FLOAT_ACCUM val = (CVT_FLOAT2ACCUM(x[idx]) - pmean) * prstd * pweight + pbias;
-        y[idx]          = CVT_ACCUM2FLOAT(val);
-    }
-}
-
-template <typename TI, typename TO>
-__device__ void addlayernormfwdcontiguous(const TI* __restrict__ x,
-                                          const TI* __restrict__ x2,
-                                          const TI* __restrict__ weight,
-                                          const TI* __restrict__ bias,
-                                          TO* __restrict__ y,
-                                          TO* __restrict__ mean,
-                                          TO* __restrict__ rstd,
-                                          float eps,
-                                          uint64_t inner_size,
-                                          int32_t mode)
-{
-    const uint64_t gid = blockIdx.x;
-    const uint64_t lid = threadIdx.x;
-
-    FLOAT_ACCUM pmean = static_cast<FLOAT_ACCUM>(0);
-    FLOAT_ACCUM pvar  = static_cast<FLOAT_ACCUM>(0);
-    __shared__ FLOAT_ACCUM ltmp1[LOCAL_SIZE];
-    __shared__ FLOAT_ACCUM ltmp2[LOCAL_SIZE];
-
-    // reduce sum for mean and var
-    for(uint64_t i = lid; i < inner_size; i += LOCAL_SIZE)
-    {
-        size_t x_idx = gid * inner_size + i;
-
-        FLOAT_ACCUM tmp = CVT_FLOAT2ACCUM(x[x_idx]) + CVT_FLOAT2ACCUM(x2[x_idx]);
-        pmean += tmp;
-        pvar += tmp * tmp;
-    }
-
-    ltmp1[lid] = pmean;
-    ltmp2[lid] = pvar;
-    __syncthreads();
-    for(uint32_t i = LOCAL_SIZE >> 1; i > 0; i >>= 1)
-    {
-        if(lid < i)
+        unsigned int i = lid * load_factor<T>;
+        auto tmpx      = load(i, offset, x);
+        auto tmpweight = load_contiguous<T, INNER_SIZE, MODE == MIOPEN_ELEMENTWISE_AFFINE>(
+            i, weight, CVT_FP32_2FLOAT(1.0f));
+        auto tmpbias = load_contiguous<T, INNER_SIZE, MODE == MIOPEN_ELEMENTWISE_AFFINE>(
+            i, bias, CVT_FP32_2FLOAT(0.0f));
+        vec_t<T> tmpy{{}};
+        i += LOCAL_SIZE_X * load_factor<T>;
+        for(; i < INNER_SIZE; i += LOCAL_SIZE_X * load_factor<T>)
         {
-            ltmp1[lid] += ltmp1[lid + i];
-            ltmp2[lid] += ltmp2[lid + i];
+            auto tmp1 = load(i, offset, x);
+            auto tmp2 = load_contiguous<T, INNER_SIZE, MODE == MIOPEN_ELEMENTWISE_AFFINE>(
+                i, weight, CVT_FP32_2FLOAT(1.0f));
+            auto tmp3 = load_contiguous<T, INNER_SIZE, MODE == MIOPEN_ELEMENTWISE_AFFINE>(
+                i, bias, CVT_FP32_2FLOAT(0.0f));
+            vec_t<T> tmp4{{}};
+            __builtin_amdgcn_sched_barrier(1);
+#pragma unroll
+            for(unsigned int k = 0; k < load_factor<T>; ++k)
+            {
+                FLOAT_ACCUM px      = CVT_FLOAT2ACCUM(tmpx.data[k]);
+                FLOAT_ACCUM pweight = CVT_FLOAT2ACCUM(tmpweight.data[k]);
+                FLOAT_ACCUM pbias   = CVT_FLOAT2ACCUM(tmpbias.data[k]);
+
+                tmp4.data[k] = CVT_ACCUM2FLOAT((px - pmean) * prstd * pweight + pbias);
+            }
+            __builtin_amdgcn_sched_barrier(1);
+            tmpx      = tmp1;
+            tmpweight = tmp2;
+            tmpbias   = tmp3;
+            tmpy      = tmp4;
+            store(i - LOCAL_SIZE_X * load_factor<T>, offset, y, tmpy);
         }
-        __syncthreads();
-    }
-    pmean             = ltmp1[0] / inner_size;
-    pvar              = ltmp2[0] / inner_size - pmean * pmean;
-    FLOAT_ACCUM prstd = rsqrt(pvar + FLOAT_ACCUM(eps));
-
-    if(lid == 0)
-    {
-        if(mean)
-            mean[gid] = CVT_ACCUM2FLOAT(pmean);
-        if(rstd)
-            rstd[gid] = CVT_ACCUM2FLOAT(prstd);
-    }
-
-    // forward calculation
-    for(uint64_t i = lid; i < inner_size; i += LOCAL_SIZE)
-    {
-        size_t idx = gid * inner_size + i;
-
-        FLOAT_ACCUM pweight;
-        FLOAT_ACCUM pbias;
-
-        pweight = (mode == MIOPEN_ELEMENTWISE_AFFINE_FUSED_ADD) ? CVT_FP32_2ACCUM(1.0f)
-                                                                : CVT_FLOAT2ACCUM(weight[i]);
-        pbias   = (mode == MIOPEN_ELEMENTWISE_AFFINE_FUSED_ADD) ? static_cast<FLOAT>(0)
-                                                                : CVT_FLOAT2ACCUM(bias[i]);
-
-        FLOAT_ACCUM val =
-            (CVT_FLOAT2ACCUM(x[idx]) + CVT_FLOAT2ACCUM(x2[idx]) - pmean) * prstd * pweight + pbias;
-        y[idx] = CVT_ACCUM2FLOAT(val);
-    }
-}
-
-template <typename TI, typename TO>
-__device__ void t5layernormfwdcontiguous(const TI* __restrict__ x,
-                                         const TI* __restrict__ weight,
-                                         TO* __restrict__ y,
-                                         TO* __restrict__ rstd,
-                                         float eps,
-                                         uint64_t inner_size,
-                                         int32_t mode)
-{
-    const uint64_t gid = blockIdx.x;
-    const uint64_t lid = threadIdx.x;
-
-    FLOAT_ACCUM pvar = static_cast<FLOAT_ACCUM>(0);
-    __shared__ FLOAT_ACCUM ltmp[LOCAL_SIZE];
-
-    // reduce sum
-    for(uint64_t i = lid; i < inner_size; i += LOCAL_SIZE)
-    {
-        size_t x_idx = gid * inner_size + i;
-
-        FLOAT_ACCUM tmp = CVT_FLOAT2ACCUM(x[x_idx]);
-        pvar += tmp * tmp;
-    }
-
-    ltmp[lid] = pvar;
-    __syncthreads();
-    for(uint32_t i = LOCAL_SIZE >> 1; i > 0; i >>= 1)
-    {
-        if(lid < i)
+        tmpy = {{}};
+#pragma unroll
+        for(unsigned int k = 0; k < load_factor<T>; ++k)
         {
-            ltmp[lid] += ltmp[lid + i];
+            FLOAT_ACCUM px      = CVT_FLOAT2ACCUM(tmpx.data[k]);
+            FLOAT_ACCUM pweight = CVT_FLOAT2ACCUM(tmpweight.data[k]);
+            FLOAT_ACCUM pbias   = CVT_FLOAT2ACCUM(tmpbias.data[k]);
+
+            tmpy.data[k] = CVT_ACCUM2FLOAT((px - pmean) * prstd * pweight + pbias);
         }
-        __syncthreads();
+        store(i - LOCAL_SIZE_X * load_factor<T>, offset, y, tmpy);
     }
-    pvar              = ltmp[0] / inner_size;
-    FLOAT_ACCUM prstd = rsqrt(pvar + FLOAT_ACCUM(eps));
-
-    if(lid == 0)
+    else
     {
-        if(rstd)
-            rstd[gid] = CVT_ACCUM2FLOAT(prstd);
-    }
-
-    // forward calculation
-    for(uint64_t i = lid; i < inner_size; i += LOCAL_SIZE)
-    {
-        size_t idx = gid * inner_size + i;
-
-        FLOAT_ACCUM pweight;
-
-        pweight = (mode == MIOPEN_ELEMENTWISE_AFFINE_T5) ? CVT_FP32_2ACCUM(1.0f)
-                                                         : CVT_FLOAT2ACCUM(weight[i]);
-
-        FLOAT_ACCUM val = (CVT_FLOAT2ACCUM(x[idx])) * prstd * pweight;
-        y[idx]          = CVT_ACCUM2FLOAT(val);
-    }
-}
-
-template <typename TI, typename TO>
-__device__ void t5layernormbwdcontiguous(const TI* __restrict__ dy,
-                                         const TI* __restrict__ x,
-                                         const TI* __restrict__ weight,
-                                         const TI* __restrict__ rstd,
-                                         TO* __restrict__ dx,
-                                         uint64_t inner_size,
-                                         int32_t mode)
-{
-    const uint64_t gid = blockIdx.x;
-    const uint64_t lid = threadIdx.x;
-
-    __shared__ FLOAT_ACCUM ltmp[LOCAL_SIZE];
-
-    // reduce sum
-    FLOAT_ACCUM sum = 0;
-
-    for(uint64_t i = lid; i < inner_size; i += LOCAL_SIZE)
-    {
-        size_t x_idx = gid * inner_size + i;
-
-        FLOAT_ACCUM pweight = (mode == MIOPEN_ELEMENTWISE_AFFINE_T5) ? CVT_FP32_2ACCUM(1.0f)
-                                                                     : CVT_FLOAT2ACCUM(weight[i]);
-
-        FLOAT_ACCUM pdy = dy ? CVT_FLOAT2ACCUM(dy[x_idx]) : 0;
-        sum += pdy * CVT_FLOAT2ACCUM(x[x_idx]) * pweight;
-    }
-
-    ltmp[lid] = sum;
-    __syncthreads();
-    for(uint32_t i = LOCAL_SIZE >> 1; i > 0; i >>= 1)
-    {
-        if(lid < i)
+        for(unsigned int i = lid; i < INNER_SIZE; i += LOCAL_SIZE_X)
         {
-            ltmp[lid] += ltmp[lid + i];
+            unsigned int idx = i * STRIDE + offset;
+
+            FLOAT_ACCUM px      = CVT_FLOAT2ACCUM(x[idx]);
+            FLOAT_ACCUM pweight = (MODE == MIOPEN_ELEMENTWISE_AFFINE) ? CVT_FP32_2ACCUM(1.0f)
+                                                                      : CVT_FLOAT2ACCUM(weight[i]);
+            FLOAT_ACCUM pbias   = (MODE == MIOPEN_ELEMENTWISE_AFFINE) ? CVT_FP32_2ACCUM(0.0f)
+                                                                      : CVT_FLOAT2ACCUM(bias[i]);
+
+            y[idx] = CVT_ACCUM2FLOAT((px - pmean) * prstd * pweight + pbias);
         }
-        __syncthreads();
-    }
-
-    FLOAT_ACCUM ds    = ltmp[0];
-    FLOAT_ACCUM s     = 1.0f / inner_size;
-    FLOAT_ACCUM prstd = CVT_FLOAT2ACCUM(rstd[gid]);
-    FLOAT_ACCUM a     = ds * prstd * prstd * prstd * s;
-
-    for(uint64_t i = lid; i < inner_size; i += LOCAL_SIZE)
-    {
-        size_t idx = gid * inner_size + i;
-
-        FLOAT_ACCUM pweight = (mode == MIOPEN_ELEMENTWISE_AFFINE_T5) ? CVT_FP32_2ACCUM(1.0f)
-                                                                     : CVT_FLOAT2ACCUM(weight[i]);
-        FLOAT_ACCUM pdy     = dy ? CVT_FLOAT2ACCUM(dy[idx]) : 0;
-
-        FLOAT_ACCUM val = prstd * pdy * pweight - a * CVT_FLOAT2ACCUM(x[idx]);
-        dx[idx]         = CVT_ACCUM2FLOAT(val);
     }
 }
 
-template <typename TI, typename TO>
-__device__ void t5layernormbwdweightcontiguous(const TI* __restrict__ dy,
-                                               const TI* __restrict__ x,
-                                               const TI* __restrict__ rstd,
-                                               TO* __restrict__ dw,
-                                               uint64_t outer_size,
-                                               uint64_t inner_size)
+template <typename T>
+__forceinline__ __device__ void layernormbwd(const T* __restrict__ dy,
+                                             const T* __restrict__ x,
+                                             const T* __restrict__ weight,
+                                             const T* __restrict__ mean,
+                                             const T* __restrict__ rstd,
+                                             T* __restrict__ dx)
 {
-    const uint64_t gid = threadIdx.x + blockIdx.x * blockDim.x;
+    FLOAT_ACCUM sum_dy_weight   = CVT_FP32_2ACCUM(0.0f);
+    FLOAT_ACCUM sum_dy_weight_x = CVT_FP32_2ACCUM(0.0f);
 
-    FLOAT_ACCUM sum = static_cast<FLOAT_ACCUM>(0);
-    for(uint64_t i = 0; i < outer_size; ++i)
+    // Reduce sums
+    unsigned int gid, o, s;
+    get_indices(gid, o, s);
+    const unsigned int offset = o * INNER_SIZE * STRIDE + s;
+    const unsigned int lid    = threadIdx.x;
+    if constexpr(VECTORIZED)
     {
-        uint64_t input_idx = i * inner_size + gid;
+        unsigned int i = lid * load_factor<T>;
+        auto tmpdy     = load(i, offset, dy);
+        auto tmpweight = load_contiguous<T, INNER_SIZE, MODE == MIOPEN_ELEMENTWISE_AFFINE>(
+            i, weight, CVT_FP32_2FLOAT(1.0f));
+        auto tmpx = load(i, offset, x);
+        i += LOCAL_SIZE_X * load_factor<T>;
+        for(; i < INNER_SIZE; i += LOCAL_SIZE_X * load_factor<T>)
+        {
+            auto tmp1 = load(i, offset, dy);
+            auto tmp2 = load_contiguous<T, INNER_SIZE, MODE == MIOPEN_ELEMENTWISE_AFFINE>(
+                i, weight, CVT_FP32_2FLOAT(1.0f));
+            auto tmp3 = load(i, offset, x);
+            __builtin_amdgcn_sched_barrier(1);
+#pragma unroll
+            for(unsigned int k = 0; k < load_factor<T>; ++k)
+            {
+                FLOAT_ACCUM pdy     = CVT_FLOAT2ACCUM(tmpdy.data[k]);
+                FLOAT_ACCUM pweight = CVT_FLOAT2ACCUM(tmpweight.data[k]);
+                FLOAT_ACCUM px      = CVT_FLOAT2ACCUM(tmpx.data[k]);
 
-        FLOAT_ACCUM prstd = CVT_FLOAT2ACCUM(rstd[i]);
-        FLOAT_ACCUM pdy   = dy ? CVT_FLOAT2ACCUM(dy[input_idx]) : 0;
+                sum_dy_weight += pdy * pweight;
+                sum_dy_weight_x += pdy * pweight * px;
+            }
+            __builtin_amdgcn_sched_barrier(1);
+            tmpdy     = tmp1;
+            tmpweight = tmp2;
+            tmpx      = tmp3;
+        }
+#pragma unroll
+        for(unsigned int k = 0; k < load_factor<T>; ++k)
+        {
+            FLOAT_ACCUM pdy     = CVT_FLOAT2ACCUM(tmpdy.data[k]);
+            FLOAT_ACCUM pweight = CVT_FLOAT2ACCUM(tmpweight.data[k]);
+            FLOAT_ACCUM px      = CVT_FLOAT2ACCUM(tmpx.data[k]);
 
-        sum += pdy * CVT_FLOAT2ACCUM(x[input_idx]) * prstd;
+            sum_dy_weight += pdy * pweight;
+            sum_dy_weight_x += pdy * pweight * px;
+        }
+    }
+    else
+    {
+        for(unsigned int i = lid; i < INNER_SIZE; i += LOCAL_SIZE_X)
+        {
+            unsigned int idx = i * STRIDE + offset;
+
+            FLOAT_ACCUM px         = CVT_FLOAT2ACCUM(x[idx]);
+            FLOAT_ACCUM pdy_weight = CVT_FLOAT2ACCUM(dy[idx]) * ((MODE == MIOPEN_ELEMENTWISE_AFFINE)
+                                                                     ? CVT_FP32_2ACCUM(1.0f)
+                                                                     : CVT_FLOAT2ACCUM(weight[i]));
+
+            sum_dy_weight += pdy_weight;
+            sum_dy_weight_x += pdy_weight * px;
+        }
     }
 
-    if(dw)
+    __shared__ FLOAT_ACCUM ltmp1[LOCAL_SIZE_X];
+    __shared__ FLOAT_ACCUM ltmp2[LOCAL_SIZE_X];
+    if constexpr(LOCAL_SIZE_X > 1)
     {
-        dw[gid] = CVT_ACCUM2FLOAT(sum);
+        if constexpr(LOCAL_SIZE_Y > 1)
+        {
+            for(unsigned int j = 0; j < STRIDE; ++j)
+            {
+                if(j == s)
+                {
+                    ltmp1[lid] = sum_dy_weight;
+                    ltmp2[lid] = sum_dy_weight_x;
+                }
+                __syncthreads();
+                for(unsigned int k = LOCAL_SIZE_X >> 1; k > 0; k >>= 1)
+                {
+                    if(j == s && lid < k)
+                    {
+                        ltmp1[lid] += ltmp1[lid + k];
+                        ltmp2[lid] += ltmp2[lid + k];
+                    }
+                    __syncthreads();
+                }
+                if(j == s)
+                {
+                    sum_dy_weight   = ltmp1[0];
+                    sum_dy_weight_x = ltmp2[0];
+                }
+                __syncthreads();
+            }
+        }
+        else
+        {
+            ltmp1[lid] = sum_dy_weight;
+            ltmp2[lid] = sum_dy_weight_x;
+            __syncthreads();
+            for(unsigned int k = LOCAL_SIZE_X >> 1; k > 0; k >>= 1)
+            {
+                if(lid < k)
+                {
+                    ltmp1[lid] += ltmp1[lid + k];
+                    ltmp2[lid] += ltmp2[lid + k];
+                }
+                __syncthreads();
+            }
+            sum_dy_weight   = ltmp1[0];
+            sum_dy_weight_x = ltmp2[0];
+        }
+    }
+
+    constexpr FLOAT_ACCUM scale = CVT_FP32_2ACCUM(1.0f / INNER_SIZE);
+    FLOAT_ACCUM prstd           = CVT_FLOAT2ACCUM(rstd[gid]);
+    FLOAT_ACCUM pmean           = CVT_FLOAT2ACCUM(mean[gid]);
+    FLOAT_ACCUM a = prstd * prstd * prstd * scale * (sum_dy_weight_x - sum_dy_weight * pmean);
+    FLOAT_ACCUM b = prstd * sum_dy_weight * scale - a * pmean;
+
+    // Backward calculation
+    if constexpr(VECTORIZED)
+    {
+        unsigned int i = lid * load_factor<T>;
+        auto tmpdy     = load(i, offset, dy);
+        auto tmpweight = load_contiguous<T, INNER_SIZE, MODE == MIOPEN_ELEMENTWISE_AFFINE>(
+            i, weight, CVT_FP32_2FLOAT(1.0f));
+        auto tmpx = load(i, offset, x);
+        vec_t<T> tmpdx{{}};
+        i += LOCAL_SIZE_X * load_factor<T>;
+        for(; i < INNER_SIZE; i += LOCAL_SIZE_X * load_factor<T>)
+        {
+            auto tmp1 = load(i, offset, dy);
+            auto tmp2 = load_contiguous<T, INNER_SIZE, MODE == MIOPEN_ELEMENTWISE_AFFINE>(
+                i, weight, CVT_FP32_2FLOAT(1.0f));
+            auto tmp3 = load(i, offset, x);
+            vec_t<T> tmp4{{}};
+            __builtin_amdgcn_sched_barrier(1);
+#pragma unroll
+            for(unsigned int k = 0; k < load_factor<T>; ++k)
+            {
+                FLOAT_ACCUM pdy     = CVT_FLOAT2ACCUM(tmpdy.data[k]);
+                FLOAT_ACCUM pweight = CVT_FLOAT2ACCUM(tmpweight.data[k]);
+                FLOAT_ACCUM px      = CVT_FLOAT2ACCUM(tmpx.data[k]);
+
+                tmp4.data[k] = CVT_ACCUM2FLOAT(prstd * pdy * pweight - a * px - b);
+            }
+            __builtin_amdgcn_sched_barrier(1);
+            tmpdy     = tmp1;
+            tmpweight = tmp2;
+            tmpx      = tmp3;
+            tmpdx     = tmp4;
+            store(i - LOCAL_SIZE_X * load_factor<T>, offset, dx, tmpdx);
+        }
+        tmpdx = {{}};
+#pragma unroll
+        for(unsigned int k = 0; k < load_factor<T>; ++k)
+        {
+            FLOAT_ACCUM pdy     = CVT_FLOAT2ACCUM(tmpdy.data[k]);
+            FLOAT_ACCUM pweight = CVT_FLOAT2ACCUM(tmpweight.data[k]);
+            FLOAT_ACCUM px      = CVT_FLOAT2ACCUM(tmpx.data[k]);
+
+            tmpdx.data[k] = CVT_ACCUM2FLOAT(prstd * pdy * pweight - a * px - b);
+        }
+        store(i - LOCAL_SIZE_X * load_factor<T>, offset, dx, tmpdx);
+    }
+    else
+    {
+        for(unsigned int i = lid; i < INNER_SIZE; i += LOCAL_SIZE_X)
+        {
+            unsigned int idx = i * STRIDE + offset;
+
+            FLOAT_ACCUM px      = CVT_FLOAT2ACCUM(x[idx]);
+            FLOAT_ACCUM pdy     = CVT_FLOAT2ACCUM(dy[idx]);
+            FLOAT_ACCUM pweight = MODE == MIOPEN_ELEMENTWISE_AFFINE ? CVT_FP32_2ACCUM(1.0f)
+                                                                    : CVT_FLOAT2ACCUM(weight[i]);
+
+            dx[idx] = CVT_ACCUM2FLOAT(prstd * pdy * pweight - a * px - b);
+        }
     }
 }
 
-template <typename TI, typename TO>
-__device__ void t5layernormbwdweightcontiguousparallel(const TI* __restrict__ dy,
-                                                       const TI* __restrict__ x,
-                                                       const TI* __restrict__ rstd,
-                                                       TO* __restrict__ workspace,
-                                                       uint64_t outer_size,
-                                                       uint64_t inner_size,
-                                                       uint64_t parallel_size)
+template <typename T>
+__forceinline__ __device__ void layernormbwdweightbias(const T* __restrict__ dy,
+                                                       const T* __restrict__ x,
+                                                       const T* __restrict__ mean,
+                                                       const T* __restrict__ rstd,
+                                                       T* __restrict__ dw,
+                                                       T* __restrict__ db)
 {
-    const uint64_t gid = threadIdx.x + blockIdx.x * blockDim.x;
+    const unsigned int gid = threadIdx.x + blockIdx.x * LOCAL_SIZE_X;
 
-    if(gid >= inner_size * parallel_size)
+    if(gid >= INNER_SIZE)
         return;
 
-    uint64_t pid = gid / inner_size;
-
-    uint64_t input_idx = gid;
-
-    FLOAT_ACCUM sum = static_cast<FLOAT_ACCUM>(0);
-
-    if(dy)
+    if(dw || db)
     {
-        for(uint64_t i = pid; i < outer_size; i += parallel_size)
+        FLOAT_ACCUM sum_dw = CVT_FP32_2ACCUM(0.0f);
+        FLOAT_ACCUM sum_db = CVT_FP32_2ACCUM(0.0f);
+
+        // Backward calculation
+        if constexpr(VECTORIZED)
         {
+            for(unsigned int o = 0; o < OUTER_SIZE; ++o)
+            {
+                unsigned int s = 0;
+                auto tmpdy     = load<T, STRIDE, 1>(s, o * INNER_SIZE * STRIDE + gid * STRIDE, dy);
+                auto tmpx      = load<T, STRIDE, 1>(s, o * INNER_SIZE * STRIDE + gid * STRIDE, x);
+                auto tmprstd   = load<T, STRIDE, 1>(s, o * STRIDE, rstd);
+                auto tmpmean   = load<T, STRIDE, 1>(s, o * STRIDE, mean);
+                s += load_factor<T>;
+                for(; s < STRIDE; s += load_factor<T>)
+                {
+                    auto tmp1 = load<T, STRIDE, 1>(s, o * INNER_SIZE * STRIDE + gid * STRIDE, dy);
+                    auto tmp2 = load<T, STRIDE, 1>(s, o * INNER_SIZE * STRIDE + gid * STRIDE, x);
+                    auto tmp3 = load<T, STRIDE, 1>(s, o * STRIDE, rstd);
+                    auto tmp4 = load<T, STRIDE, 1>(s, o * STRIDE, mean);
+                    __builtin_amdgcn_sched_barrier(1);
+#pragma unroll
+                    for(unsigned int k = 0; k < load_factor<T>; ++k)
+                    {
+                        FLOAT_ACCUM pdy   = CVT_FLOAT2ACCUM(tmpdy.data[k]);
+                        FLOAT_ACCUM px    = CVT_FLOAT2ACCUM(tmpx.data[k]);
+                        FLOAT_ACCUM prstd = CVT_FLOAT2ACCUM(tmprstd.data[k]);
+                        FLOAT_ACCUM pmean = CVT_FLOAT2ACCUM(tmpmean.data[k]);
+
+                        sum_dw += prstd * pdy * (px - pmean);
+                        sum_db += pdy;
+                    }
+                    __builtin_amdgcn_sched_barrier(1);
+                    tmpdy   = tmp1;
+                    tmpx    = tmp2;
+                    tmprstd = tmp3;
+                    tmpmean = tmp4;
+                }
+#pragma unroll
+                for(unsigned int k = 0; k < load_factor<T>; ++k)
+                {
+                    FLOAT_ACCUM pdy   = CVT_FLOAT2ACCUM(tmpdy.data[k]);
+                    FLOAT_ACCUM px    = CVT_FLOAT2ACCUM(tmpx.data[k]);
+                    FLOAT_ACCUM prstd = CVT_FLOAT2ACCUM(tmprstd.data[k]);
+                    FLOAT_ACCUM pmean = CVT_FLOAT2ACCUM(tmpmean.data[k]);
+
+                    sum_dw += prstd * pdy * (px - pmean);
+                    sum_db += pdy;
+                }
+            }
+        }
+        else
+        {
+            for(unsigned int o = 0; o < OUTER_SIZE; ++o)
+            {
+                for(unsigned int s = 0; s < STRIDE; ++s)
+                {
+                    unsigned int idx = o * INNER_SIZE * STRIDE + gid * STRIDE + s;
+
+                    FLOAT_ACCUM px    = CVT_FLOAT2ACCUM(x[idx]);
+                    FLOAT_ACCUM prstd = CVT_FLOAT2ACCUM(rstd[o * STRIDE + s]);
+                    FLOAT_ACCUM pmean = CVT_FLOAT2ACCUM(mean[o * STRIDE + s]);
+                    FLOAT_ACCUM pdy   = CVT_FLOAT2ACCUM(dy[idx]);
+
+                    sum_dw += prstd * pdy * (px - pmean);
+                    sum_db += pdy;
+                }
+            }
+        }
+
+        if(dw)
+        {
+            dw[gid] = CVT_ACCUM2FLOAT(sum_dw);
+        }
+        if(db)
+        {
+            db[gid] = CVT_ACCUM2FLOAT(sum_db);
+        }
+    }
+}
+
+template <typename T>
+__forceinline__ __device__ void layernormbwdweightbiasparallel(const T* __restrict__ dy,
+                                                               const T* __restrict__ x,
+                                                               const T* __restrict__ mean,
+                                                               const T* __restrict__ rstd,
+                                                               T* __restrict__ workspace)
+{
+    const unsigned int gid = threadIdx.x + blockIdx.x * LOCAL_SIZE_X;
+
+    if(gid >= INNER_SIZE * PARALLEL_SIZE)
+        return;
+
+    const unsigned int pid   = gid / INNER_SIZE;
+    const unsigned int s_lid = (gid % INNER_SIZE) * STRIDE;
+
+    FLOAT_ACCUM sum_dw = CVT_FP32_2ACCUM(0.0f);
+    FLOAT_ACCUM sum_db = CVT_FP32_2ACCUM(0.0f);
+
+    // Backward calculation
+    if constexpr(VECTORIZED)
+    {
+        for(unsigned int o = pid; o < OUTER_SIZE; o += PARALLEL_SIZE)
+        {
+            unsigned int s = 0;
+            auto tmpdy     = load<T, STRIDE, 1>(s, o * INNER_SIZE * STRIDE + s_lid, dy);
+            auto tmpx      = load<T, STRIDE, 1>(s, o * INNER_SIZE * STRIDE + s_lid, x);
+            auto tmprstd   = load<T, STRIDE, 1>(s, o * STRIDE, rstd);
+            auto tmpmean   = load<T, STRIDE, 1>(s, o * STRIDE, mean);
+            s += load_factor<T>;
+            for(; s < STRIDE; s += load_factor<T>)
+            {
+                auto tmp1 = load<T, STRIDE, 1>(s, o * INNER_SIZE * STRIDE + s_lid, dy);
+                auto tmp2 = load<T, STRIDE, 1>(s, o * INNER_SIZE * STRIDE + s_lid, x);
+                auto tmp3 = load<T, STRIDE, 1>(s, o * STRIDE, rstd);
+                auto tmp4 = load<T, STRIDE, 1>(s, o * STRIDE, mean);
+                __builtin_amdgcn_sched_barrier(1);
+#pragma unroll
+                for(unsigned int k = 0; k < load_factor<T>; ++k)
+                {
+                    FLOAT_ACCUM pdy   = CVT_FLOAT2ACCUM(tmpdy.data[k]);
+                    FLOAT_ACCUM px    = CVT_FLOAT2ACCUM(tmpx.data[k]);
+                    FLOAT_ACCUM prstd = CVT_FLOAT2ACCUM(tmprstd.data[k]);
+                    FLOAT_ACCUM pmean = CVT_FLOAT2ACCUM(tmpmean.data[k]);
+
+                    sum_dw += prstd * pdy * (px - pmean);
+                    sum_db += pdy;
+                }
+                __builtin_amdgcn_sched_barrier(1);
+                tmpdy   = tmp1;
+                tmpx    = tmp2;
+                tmprstd = tmp3;
+                tmpmean = tmp4;
+            }
+#pragma unroll
+            for(unsigned int k = 0; k < load_factor<T>; ++k)
+            {
+                FLOAT_ACCUM pdy   = CVT_FLOAT2ACCUM(tmpdy.data[k]);
+                FLOAT_ACCUM px    = CVT_FLOAT2ACCUM(tmpx.data[k]);
+                FLOAT_ACCUM prstd = CVT_FLOAT2ACCUM(tmprstd.data[k]);
+                FLOAT_ACCUM pmean = CVT_FLOAT2ACCUM(tmpmean.data[k]);
+
+                sum_dw += pdy * prstd * (px - pmean);
+                sum_db += pdy;
+            }
+        }
+    }
+    else
+    {
+        for(unsigned int i = pid; i < OUTER_SIZE * STRIDE; i += PARALLEL_SIZE)
+        {
+            unsigned int o   = i / STRIDE;
+            unsigned int s   = i % STRIDE;
+            unsigned int idx = o * INNER_SIZE * STRIDE + s_lid + s;
+
+            FLOAT_ACCUM px    = CVT_FLOAT2ACCUM(x[idx]);
             FLOAT_ACCUM prstd = CVT_FLOAT2ACCUM(rstd[i]);
-            FLOAT_ACCUM pdy   = CVT_FLOAT2ACCUM(dy[input_idx]);
+            FLOAT_ACCUM pmean = CVT_FLOAT2ACCUM(mean[i]);
+            FLOAT_ACCUM pdy   = CVT_FLOAT2ACCUM(dy[idx]);
 
-            sum += pdy * CVT_FLOAT2ACCUM(x[input_idx]) * prstd;
-            input_idx += inner_size * parallel_size;
+            sum_dw += pdy * prstd * (px - pmean);
+            sum_db += pdy;
         }
     }
 
-    workspace[gid] = CVT_ACCUM2FLOAT(sum);
+    workspace[gid]                              = CVT_ACCUM2FLOAT(sum_dw);
+    workspace[gid + PARALLEL_SIZE * INNER_SIZE] = CVT_ACCUM2FLOAT(sum_db);
 }
 
-template <typename TI, typename TO>
-__device__ void t5layernormbwdcontiguousreduceSum(const TI* __restrict__ workspace,
-                                                  TO* __restrict__ dw,
-                                                  uint64_t inner_size,
-                                                  uint64_t parallel_size)
+template <typename T>
+__forceinline__ __device__ void
+layernormbwdreducesum(const T* __restrict__ workspace, T* __restrict__ dw, T* __restrict__ db)
 {
-    const uint64_t gid = threadIdx.x + blockIdx.x * blockDim.x;
+    const unsigned int gid = threadIdx.x + blockIdx.x * LOCAL_SIZE_X;
 
-    if(gid >= inner_size)
+    if(gid >= INNER_SIZE)
         return;
 
-    FLOAT_ACCUM sum = static_cast<FLOAT_ACCUM>(0);
-    for(uint64_t i = 0; i < parallel_size; ++i)
+    if(dw || db)
     {
-        uint64_t input_idx = i * inner_size + gid;
-        sum += CVT_FLOAT2ACCUM(workspace[input_idx]);
+        FLOAT_ACCUM sum_dw = CVT_FP32_2ACCUM(0.0f);
+        FLOAT_ACCUM sum_db = CVT_FP32_2ACCUM(0.0f);
+
+        for(unsigned int i = 0; i < PARALLEL_SIZE; ++i)
+        {
+            unsigned int idx = i * INNER_SIZE + gid;
+            sum_dw += CVT_FLOAT2ACCUM(workspace[idx]);
+            sum_db += CVT_FLOAT2ACCUM(workspace[idx + PARALLEL_SIZE * INNER_SIZE]);
+        }
+
+        if(dw)
+        {
+            dw[gid] = CVT_ACCUM2FLOAT(sum_dw);
+        }
+        if(db)
+        {
+            db[gid] = CVT_ACCUM2FLOAT(sum_db);
+        }
     }
-
-    if(dw)
-    {
-        dw[gid] = CVT_ACCUM2FLOAT(sum);
-    }
 }
 
-extern "C" __global__ void LayernormFwdContiguous(const INPUT_TYPE* __restrict__ x,
-                                                  const INPUT_TYPE* __restrict__ weight,
-                                                  const INPUT_TYPE* __restrict__ bias,
-                                                  OUTPUT_TYPE* __restrict__ y,
-                                                  OUTPUT_TYPE* __restrict__ mean,
-                                                  OUTPUT_TYPE* __restrict__ rstd,
-                                                  float eps,
-                                                  uint64_t inner_size,
-                                                  int32_t mode)
+extern "C" __global__ __launch_bounds__(LOCAL_SIZE_X* LOCAL_SIZE_Y) void LayernormFwd(
+    const DATA_TYPE* __restrict__ x,
+    const DATA_TYPE* __restrict__ weight,
+    const DATA_TYPE* __restrict__ bias,
+    DATA_TYPE* __restrict__ y,
+    DATA_TYPE* __restrict__ mean,
+    DATA_TYPE* __restrict__ rstd,
+    const float epsilon)
 {
-    // instantiate the kernel
-    layernormfwdcontiguous<INPUT_TYPE, OUTPUT_TYPE>(
-        x, weight, bias, y, mean, rstd, eps, inner_size, mode);
+    layernormfwd<DATA_TYPE>(x, weight, bias, y, mean, rstd, epsilon);
 }
 
-extern "C" __global__ void AddLayernormFwdContiguous(const INPUT_TYPE* __restrict__ x,
-                                                     const INPUT_TYPE* __restrict__ x2,
-                                                     const INPUT_TYPE* __restrict__ weight,
-                                                     const INPUT_TYPE* __restrict__ bias,
-                                                     OUTPUT_TYPE* __restrict__ y,
-                                                     OUTPUT_TYPE* __restrict__ mean,
-                                                     OUTPUT_TYPE* __restrict__ rstd,
-                                                     float eps,
-                                                     uint64_t inner_size,
-                                                     int32_t mode)
+extern "C" __global__ __launch_bounds__(LOCAL_SIZE_X* LOCAL_SIZE_Y) void LayernormBwd(
+    const DATA_TYPE* __restrict__ dy,
+    const DATA_TYPE* __restrict__ x,
+    const DATA_TYPE* __restrict__ weight,
+    const DATA_TYPE* __restrict__ mean,
+    const DATA_TYPE* __restrict__ rstd,
+    DATA_TYPE* __restrict__ dx)
 {
-    // instantiate the kernel
-    addlayernormfwdcontiguous<INPUT_TYPE, OUTPUT_TYPE>(
-        x, x2, weight, bias, y, mean, rstd, eps, inner_size, mode);
+    layernormbwd<DATA_TYPE>(dy, x, weight, mean, rstd, dx);
 }
 
-extern "C" __global__ void T5LayernormFwdContiguous(const INPUT_TYPE* __restrict__ x,
-                                                    const INPUT_TYPE* __restrict__ weight,
-                                                    OUTPUT_TYPE* __restrict__ y,
-                                                    OUTPUT_TYPE* __restrict__ rstd,
-                                                    float eps,
-                                                    uint64_t inner_size,
-                                                    int32_t mode)
+extern "C" __global__ __launch_bounds__(LOCAL_SIZE_X* LOCAL_SIZE_Y) void LayernormBwdWeightBias(
+    const DATA_TYPE* __restrict__ dy,
+    const DATA_TYPE* __restrict__ x,
+    const DATA_TYPE* __restrict__ mean,
+    const DATA_TYPE* __restrict__ rstd,
+    DATA_TYPE* __restrict__ dw,
+    DATA_TYPE* __restrict__ db)
 {
-    // instantiate the kernel
-    t5layernormfwdcontiguous<INPUT_TYPE, OUTPUT_TYPE>(x, weight, y, rstd, eps, inner_size, mode);
+    layernormbwdweightbias<DATA_TYPE>(dy, x, mean, rstd, dw, db);
 }
 
-extern "C" __global__ void T5LayernormBwdContiguous(const INPUT_TYPE* __restrict__ dy,
-                                                    const INPUT_TYPE* __restrict__ x,
-                                                    const INPUT_TYPE* __restrict__ weight,
-                                                    const INPUT_TYPE* __restrict__ rstd,
-                                                    OUTPUT_TYPE* __restrict__ dx,
-                                                    uint64_t inner_size,
-                                                    int32_t mode)
+extern "C" __global__
+__launch_bounds__(LOCAL_SIZE_X* LOCAL_SIZE_Y) void LayernormBwdWeightBiasParallel(
+    const DATA_TYPE* __restrict__ dy,
+    const DATA_TYPE* __restrict__ x,
+    const DATA_TYPE* __restrict__ mean,
+    const DATA_TYPE* __restrict__ rstd,
+    DATA_TYPE* __restrict__ workspace)
 {
-    // instantiate the kernel
-    t5layernormbwdcontiguous<INPUT_TYPE, OUTPUT_TYPE>(dy, x, weight, rstd, dx, inner_size, mode);
+    layernormbwdweightbiasparallel<DATA_TYPE>(dy, x, mean, rstd, workspace);
 }
 
-extern "C" __global__ void T5LayernormBwdWeightContiguous(const INPUT_TYPE* __restrict__ dy,
-                                                          const INPUT_TYPE* __restrict__ x,
-                                                          const INPUT_TYPE* __restrict__ rstd,
-                                                          OUTPUT_TYPE* __restrict__ dw,
-                                                          uint64_t outer_size,
-                                                          uint64_t inner_size)
+extern "C" __global__ __launch_bounds__(LOCAL_SIZE_X* LOCAL_SIZE_Y) void LayernormBwdReduceSum(
+    const DATA_TYPE* __restrict__ workspace, DATA_TYPE* __restrict__ dw, DATA_TYPE* __restrict__ db)
 {
-    // instantiate the kernel
-    t5layernormbwdweightcontiguous<INPUT_TYPE, OUTPUT_TYPE>(
-        dy, x, rstd, dw, outer_size, inner_size);
-}
-
-extern "C" __global__ void
-T5LayernormBwdWeightContiguousParallel(const INPUT_TYPE* __restrict__ dy,
-                                       const INPUT_TYPE* __restrict__ x,
-                                       const INPUT_TYPE* __restrict__ rstd,
-                                       OUTPUT_TYPE* __restrict__ workspace,
-                                       uint64_t outer_size,
-                                       uint64_t inner_size,
-                                       uint64_t parallel_size)
-{
-    // instantiate the kernel
-    t5layernormbwdweightcontiguousparallel<INPUT_TYPE, OUTPUT_TYPE>(
-        dy, x, rstd, workspace, outer_size, inner_size, parallel_size);
-}
-
-extern "C" __global__ void
-T5LayernormBwdContiguousReduceSum(const INPUT_TYPE* __restrict__ workspace,
-                                  OUTPUT_TYPE* __restrict__ dw,
-                                  uint64_t inner_size,
-                                  uint64_t parallel_size)
-{
-    // instantiate the kernel
-    t5layernormbwdcontiguousreduceSum<INPUT_TYPE, OUTPUT_TYPE>(
-        workspace, dw, inner_size, parallel_size);
+    layernormbwdreducesum<DATA_TYPE>(workspace, dw, db);
 }

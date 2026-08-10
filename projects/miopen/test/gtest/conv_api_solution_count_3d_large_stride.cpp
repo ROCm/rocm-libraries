@@ -1,5 +1,5 @@
-// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier: MIT
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
 //
 // API-level applicability sweep for 3D grouped CK xdlops solvers on shapes
 // whose total element-strides exceed INT_MAX, using reproducer family:

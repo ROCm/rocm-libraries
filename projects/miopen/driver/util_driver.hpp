@@ -32,21 +32,11 @@
 #include <cstring>
 #include <vector>
 
-#if MIOPEN_BACKEND_OPENCL
-#define STATUS_SUCCESS CL_SUCCESS
-typedef cl_int status_t;
-typedef cl_context context_t;
-#define DEFINE_CONTEXT(name) context_t name
-typedef cl_command_queue stream;
-#elif MIOPEN_BACKEND_HIP
 #define STATUS_SUCCESS 0
 typedef int status_t;
 typedef uint32_t context_t;
 #define DEFINE_CONTEXT(name) context_t name = 0
 typedef hipStream_t stream;
-#else // Unknown backend.
-// No definitions -> build errors if used.
-#endif
 
 // Tin is data type of input data,
 // Tout is data type of output data
@@ -105,7 +95,7 @@ void Col2ImCPU(std::vector<Tin> data_col,
                const int stride,
                std::vector<Tout> data_im)
 {
-    memset(data_im, 0, sizeof(Tout) * height * width * channels);
+    std::fill_n(data_im.begin(), height * width * channels, Tout(0));
     int height_col   = (height + 2 * pad - ksize) / stride + 1;
     int width_col    = (width + 2 * pad - ksize) / stride + 1;
     height_col       = (height_col < 0) ? 1 : height_col;
