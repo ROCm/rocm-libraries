@@ -132,6 +132,15 @@ if(HIPDNN_ENABLE_CUDNN_COMPATIBILITY AND HIPDNN_ENABLE_SDPA)
     )
 endif()
 
+# Node-coverage samples mirror the upstream cuDNN FE sample names.
+# Host-only: they build and validate the graph, no device required.
+if(HIPDNN_ENABLE_CUDNN_COMPATIBILITY)
+    add_hipdnn_sample(hipdnn_sample_cudnn_shim_conv_fprop cudnn_shim/ConvFprop.cpp)
+    add_hipdnn_sample(hipdnn_sample_cudnn_shim_matmul cudnn_shim/Matmul.cpp)
+    add_hipdnn_sample(hipdnn_sample_cudnn_shim_layernorm cudnn_shim/Layernorm.cpp)
+    add_hipdnn_sample(hipdnn_sample_cudnn_shim_pointwise cudnn_shim/Pointwise.cpp)
+endif()
+
 add_hipdnn_sample(hipdnn_sample_knobs_usage knobs/KnobsUsage.cpp)
 
 add_hipdnn_sample(hipdnn_sample_autotune autotune/AutotuneSample.cpp)
@@ -244,6 +253,13 @@ add_hipdnn_sample_test(hipdnn_sample_serialization_roundtrip)
 
 if(HIPDNN_ENABLE_CUDNN_COMPATIBILITY AND HIPDNN_ENABLE_SDPA)
     add_hipdnn_sample_test(hipdnn_sample_cudnn_shim_sdpa_round_trip)
+endif()
+
+if(HIPDNN_ENABLE_CUDNN_COMPATIBILITY)
+    add_hipdnn_sample_test(hipdnn_sample_cudnn_shim_conv_fprop)
+    add_hipdnn_sample_test(hipdnn_sample_cudnn_shim_matmul)
+    add_hipdnn_sample_test(hipdnn_sample_cudnn_shim_layernorm)
+    add_hipdnn_sample_test(hipdnn_sample_cudnn_shim_pointwise)
 endif()
 
 # Register knobs sample
