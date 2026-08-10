@@ -43,6 +43,18 @@ export(
 install(TARGETS hipdnn_plugin_sdk EXPORT hipdnn_plugin_sdk_targets COMPONENT Development)
 
 # cmake-lint: disable=E1122
+#
+# The ingestor/ headers are gated by HIPDNN_ENABLE_KERNEL_INGESTOR and compile to
+# nothing without it, but this glob is unconditional -- so without an explicit
+# exclusion they would ship in the SDK package even on a default build, changing the
+# installed artifacts of a build that has the feature turned off. They are work in
+# progress (RFC 0017) and not a supported surface, so they are installed only when the
+# feature that uses them is enabled.
+set(HIP_DNN_PLUGIN_SDK_INSTALL_EXCLUDE_PATTERNS "")
+if(NOT HIPDNN_ENABLE_KERNEL_INGESTOR)
+    list(APPEND HIP_DNN_PLUGIN_SDK_INSTALL_EXCLUDE_PATTERNS PATTERN "ingestor/*" EXCLUDE)
+endif()
+
 install(
     DIRECTORY ${HIP_DNN_PLUGIN_SDK_INCLUDE_DIR}/
     DESTINATION ${HIP_DNN_PLUGIN_SDK_INSTALL_INCLUDE_DIR}
@@ -52,6 +64,7 @@ install(
     PATTERN "*.hpp"
     PATTERN "*.h"
     PATTERN "*.h.in" EXCLUDE
+    ${HIP_DNN_PLUGIN_SDK_INSTALL_EXCLUDE_PATTERNS}
 )
 
 # Install generated version header

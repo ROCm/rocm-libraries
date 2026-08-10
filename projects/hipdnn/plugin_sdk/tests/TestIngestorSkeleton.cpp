@@ -1,0 +1,676 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
+#include <array>
+#include <memory>
+#include <string>
+#include <vector>
+
+#include <gtest/gtest.h>
+
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
+#include <hipdnn_plugin_sdk/ingestor/Catalog.hpp>
+#include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
+#include <hipdnn_plugin_sdk/ingestor/IKernelHeuristic.hpp>
+#include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
+#include <hipdnn_plugin_sdk/ingestor/LruCache.hpp>
+#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+
+/**
+ * @file TestIngestorSkeleton.cpp
+ * @brief Unit tests for the descriptor-driven kernel ingestor's SDK-side machinery.
+ *
+ * Covers the pieces every descriptor-backed engine depends on, independent of any
+ * provider: the bounded catalog cache, the native symbol registry's fail-closed
+ * behavior, the heuristic's ranking and tie-break order, and the state manager's
+ * matching, pruning, caching, and validation.
+ *
+ * Provider-specific behavior (the pointwise-add matchers and the real GPU dispatch)
+ * is covered by the hip-kernel-provider tests.
+ */
+namespace
+{
+
+using namespace hipdnn_plugin_sdk::ingestor;
+
+constexpr const char* BLOCK_SIZE = "block_size";
+constexpr const char* DTYPE = "dtype";
+
+/// A minimal IGraph. The SDK-side machinery reads only the graph's identity, so the
+/// rest of the interface throws: a test that starts depending on graph contents should
+/// fail loudly rather than silently match against an empty graph.
+class TestGraph : public hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph
+{
+public:
+    /// @param graphId The identity to carry, or nullopt to model a legacy or
+    ///        unfinalized graph that has none.
+    explicit TestGraph(std::optional<GraphId> graphId = std::nullopt)
+    {
+        flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Graph> graph;
+        if(graphId.has_value())
+        {
+            const auto uuid = hipdnn_flatbuffers_sdk::utilities::toFlatbufferUuid(*graphId);
+            auto name = _builder.CreateString("test_graph");
+            hipdnn_flatbuffers_sdk::data_objects::GraphBuilder graphBuilder(_builder);
+            graphBuilder.add_name(name);
+            graphBuilder.add_id(&uuid);
+            graph = graphBuilder.Finish();
+        }
+        else
+        {
+            graph = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(_builder, "test_graph");
+        }
+        _builder.Finish(graph);
+    }
+
+    const hipdnn_flatbuffers_sdk::data_objects::Graph& getGraph() const override
+    {
+        return *flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::Graph>(
+            _builder.GetBufferPointer());
+    }
+
+    bool isValid() const override
+    {
+        return true;
+    }
+
+    uint32_t nodeCount() const override
+    {
+        return 0;
+    }
+
+    bool hasOnlySupportedAttributes(
+        std::set<hipdnn_flatbuffers_sdk::data_objects::NodeAttributes> /*supported*/) const override
+    {
+        return true;
+    }
+
+    const hipdnn_flatbuffers_sdk::data_objects::Node& getNode(uint32_t /*index*/) const override
+    {
+        throw std::logic_error("TestGraph carries no nodes");
+    }
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::INodeWrapper&
+        getNodeWrapper(uint32_t /*index*/) const override
+    {
+        throw std::logic_error("TestGraph carries no nodes");
+    }
+
+    const std::vector<std::unique_ptr<hipdnn_flatbuffers_sdk::flatbuffer_utilities::INodeWrapper>>&
+        nodeWrappers() const override
+    {
+        throw std::logic_error("TestGraph carries no nodes");
+    }
+
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        getTensorMap() const override
+    {
+        return _tensors;
+    }
+
+private:
+    flatbuffers::FlatBufferBuilder _builder;
+    std::unordered_map<int64_t, const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>
+        _tensors;
+};
+
+GraphId makeGraphId(uint8_t seed)
+{
+    GraphId id{};
+    id.fill(seed);
+    return id;
+}
+
+/// Counts how often each matcher shape ran, so a test can assert that a graph-scoped
+/// matcher is evaluated once per (graph, device) while a kernel-scoped one is evaluated
+/// once per surviving kernel.
+struct MatcherCounters
+{
+    int graphCalls = 0;
+    int kernelCalls = 0;
+
+    void reset()
+    {
+        graphCalls = 0;
+        kernelCalls = 0;
+    }
+};
+
+MatcherCounters& counters()
+{
+    static MatcherCounters s_counters;
+    return s_counters;
+}
+
+bool acceptGraph(const MatchContext& /*context*/)
+{
+    ++counters().graphCalls;
+    return true;
+}
+
+bool rejectGraph(const MatchContext& /*context*/)
+{
+    ++counters().graphCalls;
+    return false;
+}
+
+/// Accepts only FLOAT kernels, so a pack carrying a HALF kernel is pruned down.
+bool acceptFloatKernels(const MatchContext& /*context*/, const KernelDefinition& kernel)
+{
+    ++counters().kernelCalls;
+    return kernel.getStringMetadata(DTYPE) == "FLOAT";
+}
+
+/// Bigger block size scores higher, so ranking has a defined winner.
+double scoreByBlockSize(const KernelDefinition& kernel, const MatchContext& /*context*/)
+{
+    return static_cast<double>(kernel.getIntMetadata(BLOCK_SIZE));
+}
+
+/// Every kernel scores the same, so ranking falls through to the tie-break.
+double scoreConstant(const KernelDefinition& /*kernel*/, const MatchContext& /*context*/)
+{
+    return 1.0;
+}
+
+MetadataSchema makeSchema()
+{
+    return {"kmd", "test schema", {{BLOCK_SIZE, int64_t{64}}, {DTYPE, std::string{"FLOAT"}}}};
+}
+
+EngineDescriptor makeEngine(std::vector<std::string> knobs = {BLOCK_SIZE})
+{
+    return {"ued", "test:engine", "uhd", "kmd", std::move(knobs)};
+}
+
+KernelDescriptor
+    makeKernel(std::string id, int64_t blockSize, std::string dtype, int64_t priority = 0)
+{
+    KernelDescriptor kernel;
+    kernel.id = std::move(id);
+    kernel.name = kernel.id;
+    kernel.sourceFile = "Test.cpp";
+    kernel.entryPoint = "TestKernel";
+    kernel.metadata = {{BLOCK_SIZE, blockSize}, {DTYPE, std::move(dtype)}};
+    kernel.priority = priority;
+    return kernel;
+}
+
+/// The pack shape the provider POC uses: two FLOAT kernels differing only in block size,
+/// plus a HALF kernel the kernel-scoped matcher prunes.
+KernelDescriptorPack makePack(std::vector<std::string> matcherIds)
+{
+    KernelDescriptorPack pack;
+    pack.id = "kdp";
+    pack.name = "test pack";
+    pack.matcherIds = std::move(matcherIds);
+    pack.engineId = "ued";
+    pack.dispatchId = "udd";
+    pack.kernels = {makeKernel("kernel_64_float", 64, "FLOAT"),
+                    makeKernel("kernel_256_float", 256, "FLOAT"),
+                    makeKernel("kernel_64_half", 64, "HALF")};
+    return pack;
+}
+
+/// Registers the symbols a test's descriptors name, and removes them afterwards so
+/// tests sharing the process-wide registry stay independent.
+class ScopedSymbols
+{
+public:
+    ScopedSymbols(std::string graphSymbol,
+                  GraphMatcherFn graphFn,
+                  std::string kernelSymbol,
+                  KernelMatcherFn kernelFn)
+        : _graphSymbol(std::move(graphSymbol))
+        , _kernelSymbol(std::move(kernelSymbol))
+    {
+        GraphMatcherRegistry::registerSymbol(_graphSymbol, graphFn);
+        KernelMatcherRegistry::registerSymbol(_kernelSymbol, kernelFn);
+        counters().reset();
+    }
+
+    ~ScopedSymbols()
+    {
+        GraphMatcherRegistry::unregisterSymbol(_graphSymbol);
+        KernelMatcherRegistry::unregisterSymbol(_kernelSymbol);
+    }
+
+    ScopedSymbols(const ScopedSymbols&) = delete;
+    ScopedSymbols& operator=(const ScopedSymbols&) = delete;
+
+private:
+    std::string _graphSymbol;
+    std::string _kernelSymbol;
+};
+
+using TestHandle = int;
+using StateManager = KernelIngestorStateManager<TestHandle>;
+
+std::unique_ptr<StateManager> makeStateManager(ScoreFn scoreFn = scoreByBlockSize,
+                                               size_t cacheCapacity
+                                               = StateManager::DEFAULT_CATALOG_CACHE_CAPACITY)
+{
+    std::vector<MatchDescriptor> matchers{
+        {"umd_graph", "graph scoped", MatchScope::GRAPH, "test.graph"},
+        {"umd_kernel", "kernel scoped", MatchScope::KERNEL, "test.kernel"}};
+    std::vector<DispatchDescriptor> dispatches{{"udd", "test dispatch", "test.dispatch"}};
+
+    return std::make_unique<StateManager>(
+        makeEngine(),
+        makeSchema(),
+        std::move(matchers),
+        std::move(dispatches),
+        std::vector<KernelDescriptorPack>{makePack({"umd_graph", "umd_kernel"})},
+        std::make_shared<NativeKernelHeuristic>(scoreFn),
+        cacheCapacity);
+}
+
+hipDeviceProp_t testDeviceProperties()
+{
+    hipDeviceProp_t properties{};
+    properties.warpSize = 64;
+    return properties;
+}
+
+// ---------------------------------------------------------------------------
+// LruCache
+// ---------------------------------------------------------------------------
+
+TEST(TestIngestorLruCache, ReturnsCachedValueWithinCapacity)
+{
+    LruCache<int, std::string> cache(2);
+    cache.put(1, "one");
+
+    const auto found = cache.get(1);
+
+    ASSERT_TRUE(found.has_value());
+    EXPECT_EQ(*found, "one");
+}
+
+TEST(TestIngestorLruCache, ReportsMissForAbsentKey)
+{
+    LruCache<int, std::string> cache(2);
+
+    EXPECT_FALSE(cache.get(42).has_value());
+}
+
+TEST(TestIngestorLruCache, EvictsLeastRecentlyUsedPastCapacity)
+{
+    LruCache<int, std::string> cache(2);
+    cache.put(1, "one");
+    cache.put(2, "two");
+    cache.put(3, "three");
+
+    EXPECT_FALSE(cache.get(1).has_value());
+    EXPECT_TRUE(cache.get(2).has_value());
+    EXPECT_TRUE(cache.get(3).has_value());
+    EXPECT_EQ(cache.size(), 2U);
+}
+
+TEST(TestIngestorLruCache, ReadingAnEntryProtectsItFromEviction)
+{
+    LruCache<int, std::string> cache(2);
+    cache.put(1, "one");
+    cache.put(2, "two");
+
+    // Touching 1 makes 2 the least recently used, so inserting 3 must evict 2, not 1.
+    ASSERT_TRUE(cache.get(1).has_value());
+    cache.put(3, "three");
+
+    EXPECT_TRUE(cache.get(1).has_value());
+    EXPECT_FALSE(cache.get(2).has_value());
+}
+
+TEST(TestIngestorLruCache, OverwritingAKeyDoesNotGrowTheCache)
+{
+    LruCache<int, std::string> cache(2);
+    cache.put(1, "one");
+    cache.put(1, "uno");
+
+    const auto found = cache.get(1);
+
+    ASSERT_TRUE(found.has_value());
+    EXPECT_EQ(*found, "uno");
+    EXPECT_EQ(cache.size(), 1U);
+}
+
+TEST(TestIngestorLruCache, RejectsZeroCapacity)
+{
+    // A zero-capacity cache would evict every entry as it was inserted, which is always
+    // a caller bug rather than a way to disable caching.
+    using IntCache = LruCache<int, int>;
+    EXPECT_THROW(IntCache(0), std::invalid_argument);
+}
+
+// ---------------------------------------------------------------------------
+// NativeRegistry
+// ---------------------------------------------------------------------------
+
+TEST(TestIngestorNativeRegistry, ResolvesARegisteredSymbol)
+{
+    GraphMatcherRegistry::registerSymbol("registry.resolves", acceptGraph);
+
+    EXPECT_EQ(GraphMatcherRegistry::resolve("registry.resolves"), acceptGraph);
+
+    GraphMatcherRegistry::unregisterSymbol("registry.resolves");
+}
+
+TEST(TestIngestorNativeRegistry, RejectsDuplicateRegistration)
+{
+    GraphMatcherRegistry::registerSymbol("registry.duplicate", acceptGraph);
+
+    // Two implementations behind one name leaves one silently unreachable, and which one
+    // wins would depend on static-init order.
+    EXPECT_THROW(GraphMatcherRegistry::registerSymbol("registry.duplicate", rejectGraph),
+                 std::runtime_error);
+
+    GraphMatcherRegistry::unregisterSymbol("registry.duplicate");
+}
+
+TEST(TestIngestorNativeRegistry, FailsClosedOnUnknownSymbol)
+{
+    // A descriptor naming a symbol the provider does not ship must surface as an error,
+    // never as an engine that quietly matches nothing.
+    EXPECT_THROW(GraphMatcherRegistry::resolve("registry.never_registered"), std::runtime_error);
+}
+
+// ---------------------------------------------------------------------------
+// IKernelHeuristic
+// ---------------------------------------------------------------------------
+
+TEST(TestIngestorHeuristic, RanksHigherScoringKernelsFirst)
+{
+    const TestGraph graph;
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    Catalog catalog;
+    catalog.entries = {{"low", "kdp", "udd", "s", "e", {{BLOCK_SIZE, int64_t{64}}}, 0},
+                       {"high", "kdp", "udd", "s", "e", {{BLOCK_SIZE, int64_t{256}}}, 0}};
+
+    const NativeKernelHeuristic heuristic(scoreByBlockSize);
+    const auto ranked = heuristic.rank(catalog, context);
+
+    ASSERT_EQ(ranked.size(), 2U);
+    EXPECT_EQ(ranked.front().kernelId, "high");
+}
+
+TEST(TestIngestorHeuristic, BreaksScoreTiesOnPriority)
+{
+    const TestGraph graph;
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    Catalog catalog;
+    catalog.entries = {{"a", "kdp", "udd", "s", "e", {{BLOCK_SIZE, int64_t{64}}}, 1},
+                       {"b", "kdp", "udd", "s", "e", {{BLOCK_SIZE, int64_t{64}}}, 5}};
+
+    const NativeKernelHeuristic heuristic(scoreConstant);
+    const auto ranked = heuristic.rank(catalog, context);
+
+    ASSERT_EQ(ranked.size(), 2U);
+    EXPECT_EQ(ranked.front().kernelId, "b");
+}
+
+TEST(TestIngestorHeuristic, BreaksRemainingTiesOnKernelIdForStabilityAcrossRuns)
+{
+    const TestGraph graph;
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    Catalog catalog;
+    // Deliberately inserted out of id order: the result must not depend on load order.
+    catalog.entries = {{"zulu", "kdp", "udd", "s", "e", {{BLOCK_SIZE, int64_t{64}}}, 0},
+                       {"alpha", "kdp", "udd", "s", "e", {{BLOCK_SIZE, int64_t{64}}}, 0}};
+
+    const NativeKernelHeuristic heuristic(scoreConstant);
+    const auto ranked = heuristic.rank(catalog, context);
+
+    ASSERT_EQ(ranked.size(), 2U);
+    EXPECT_EQ(ranked.front().kernelId, "alpha");
+}
+
+// ---------------------------------------------------------------------------
+// KernelIngestorStateManager
+// ---------------------------------------------------------------------------
+
+TEST(TestIngestorStateManager, KernelLevelMatcherPrunesTheCatalog)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", acceptFloatKernels);
+    const auto manager = makeStateManager();
+    const TestGraph graph(makeGraphId(1));
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    const auto definitions = manager->unsortedDefinitions(0, context);
+
+    // Three kernels in the pack; the HALF one does not survive.
+    ASSERT_EQ(definitions.size(), 2U);
+    for(const auto& definition : definitions)
+    {
+        EXPECT_EQ(definition.getStringMetadata(DTYPE), "FLOAT");
+    }
+}
+
+TEST(TestIngestorStateManager, GraphLevelMatcherFailurePrunesTheWholePack)
+{
+    const ScopedSymbols symbols("test.graph", rejectGraph, "test.kernel", acceptFloatKernels);
+    const auto manager = makeStateManager();
+    const TestGraph graph(makeGraphId(2));
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    EXPECT_TRUE(manager->unsortedDefinitions(0, context).empty());
+    // The whole point of the graph/kernel split: a pack that cannot serve the graph
+    // costs one matcher call, not one per kernel.
+    EXPECT_EQ(counters().graphCalls, 1);
+    EXPECT_EQ(counters().kernelCalls, 0);
+}
+
+TEST(TestIngestorStateManager, MatchesOncePerGraphAndDevice)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", acceptFloatKernels);
+    const auto manager = makeStateManager();
+    const TestGraph graph(makeGraphId(3));
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    manager->unsortedDefinitions(0, context);
+    manager->unsortedDefinitions(0, context);
+    manager->unsortedDefinitions(0, context);
+
+    EXPECT_EQ(counters().graphCalls, 1);
+    // One call per kernel in the pack, on the single uncached pass.
+    EXPECT_EQ(counters().kernelCalls, 3);
+}
+
+TEST(TestIngestorStateManager, MatchesSeparatelyPerDevice)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", acceptFloatKernels);
+    const auto manager = makeStateManager();
+    const TestGraph graph(makeGraphId(4));
+    const auto properties = testDeviceProperties();
+
+    manager->unsortedDefinitions(0, MatchContext{graph, 0, properties});
+    manager->unsortedDefinitions(1, MatchContext{graph, 1, properties});
+
+    // The same graph on a different device is a different problem: a kernel applicable
+    // on one device need not be applicable on another.
+    EXPECT_EQ(counters().graphCalls, 2);
+}
+
+TEST(TestIngestorStateManager, RematchesEveryCallWhenTheGraphHasNoIdentity)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", acceptFloatKernels);
+    const auto manager = makeStateManager();
+    // A legacy or unfinalized graph: there is no key to memoize under, and inventing one
+    // would alias unrelated graphs.
+    const TestGraph graph;
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    const auto first = manager->unsortedDefinitions(0, context);
+    const auto second = manager->unsortedDefinitions(0, context);
+
+    // Correct both times; only the caching is lost.
+    EXPECT_EQ(first.size(), 2U);
+    EXPECT_EQ(second.size(), 2U);
+    EXPECT_EQ(counters().graphCalls, 2);
+}
+
+TEST(TestIngestorStateManager, RematchesAfterCacheEviction)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", acceptFloatKernels);
+    const auto manager = makeStateManager(scoreByBlockSize, 1);
+    const auto properties = testDeviceProperties();
+    const TestGraph first(makeGraphId(5));
+    const TestGraph second(makeGraphId(6));
+
+    manager->unsortedDefinitions(0, MatchContext{first, 0, properties});
+    manager->unsortedDefinitions(0, MatchContext{second, 0, properties});
+    manager->unsortedDefinitions(0, MatchContext{first, 0, properties});
+
+    // Capacity 1, so the second graph evicted the first and it had to rematch. Eviction
+    // costs work, never a wrong answer.
+    EXPECT_EQ(counters().graphCalls, 3);
+}
+
+TEST(TestIngestorStateManager, SortedDefinitionsAreRankedBestFirst)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", acceptFloatKernels);
+    const auto manager = makeStateManager();
+    const TestGraph graph(makeGraphId(7));
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    const auto sorted = manager->sortedDefinitions(0, context);
+
+    ASSERT_EQ(sorted.size(), 2U);
+    EXPECT_EQ(sorted.front().getIntMetadata(BLOCK_SIZE), 256);
+}
+
+TEST(TestIngestorStateManager, RankingReusesTheAlreadyMatchedCatalog)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", acceptFloatKernels);
+    const auto manager = makeStateManager();
+    const TestGraph graph(makeGraphId(8));
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    manager->unsortedDefinitions(0, context);
+    manager->sortedDefinitions(0, context);
+    manager->sortedDefinitions(0, context);
+
+    // Ranking is a read of the cached catalog, never a rematch.
+    EXPECT_EQ(counters().graphCalls, 1);
+    EXPECT_EQ(counters().kernelCalls, 3);
+}
+
+TEST(TestIngestorStateManager, KnobValuesComeFromTheCatalogInRankedOrder)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", acceptFloatKernels);
+    const auto manager = makeStateManager();
+    const TestGraph graph(makeGraphId(9));
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    const auto values
+        = StateManager::knobValues(manager->sortedDefinitions(0, context), BLOCK_SIZE);
+
+    // The pruned HALF kernel also carried block_size 64, but it contributes no value:
+    // a knob offers what the surviving catalog implements, not the schema's range.
+    ASSERT_EQ(values.size(), 2U);
+    EXPECT_EQ(std::get<int64_t>(values[0]), 256);
+    EXPECT_EQ(std::get<int64_t>(values[1]), 64);
+}
+
+TEST(TestIngestorStateManager, CompletesKernelMetadataFromSchemaDefaults)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", acceptFloatKernels);
+
+    KernelDescriptorPack pack = makePack({"umd_graph", "umd_kernel"});
+    // A kernel that declares no metadata at all takes every schema default.
+    KernelDescriptor sparse;
+    sparse.id = "kernel_defaults";
+    sparse.name = sparse.id;
+    pack.kernels = {sparse};
+
+    std::vector<MatchDescriptor> matchers{
+        {"umd_graph", "graph scoped", MatchScope::GRAPH, "test.graph"},
+        {"umd_kernel", "kernel scoped", MatchScope::KERNEL, "test.kernel"}};
+    std::vector<DispatchDescriptor> dispatches{{"udd", "test dispatch", "test.dispatch"}};
+
+    const StateManager manager(makeEngine(),
+                               makeSchema(),
+                               std::move(matchers),
+                               std::move(dispatches),
+                               {pack},
+                               std::make_shared<NativeKernelHeuristic>(scoreByBlockSize));
+
+    const TestGraph graph(makeGraphId(10));
+    const auto properties = testDeviceProperties();
+    const auto definitions = manager.unsortedDefinitions(0, MatchContext{graph, 0, properties});
+
+    ASSERT_EQ(definitions.size(), 1U);
+    EXPECT_EQ(definitions.front().getIntMetadata(BLOCK_SIZE), 64);
+    EXPECT_EQ(definitions.front().getStringMetadata(DTYPE), "FLOAT");
+}
+
+TEST(TestIngestorStateManager, RejectsAPackNamingAnUnknownMatcher)
+{
+    std::vector<DispatchDescriptor> dispatches{{"udd", "test dispatch", "test.dispatch"}};
+
+    // A dangling cross-reference cannot be evaluated, so it is caught when the
+    // descriptor set is assembled rather than when a graph first arrives.
+    EXPECT_THROW(StateManager(makeEngine(),
+                              makeSchema(),
+                              {},
+                              std::move(dispatches),
+                              {makePack({"umd_missing"})},
+                              std::make_shared<NativeKernelHeuristic>(scoreByBlockSize)),
+                 std::invalid_argument);
+}
+
+TEST(TestIngestorStateManager, RejectsAPackNamingAnUnknownDispatchDescriptor)
+{
+    std::vector<MatchDescriptor> matchers{
+        {"umd_graph", "graph scoped", MatchScope::GRAPH, "test.graph"}};
+
+    EXPECT_THROW(StateManager(makeEngine(),
+                              makeSchema(),
+                              std::move(matchers),
+                              {},
+                              {makePack({"umd_graph"})},
+                              std::make_shared<NativeKernelHeuristic>(scoreByBlockSize)),
+                 std::invalid_argument);
+}
+
+TEST(TestIngestorStateManager, RejectsTwoKernelsSharingAMetadataTuple)
+{
+    std::vector<MatchDescriptor> matchers{
+        {"umd_graph", "graph scoped", MatchScope::GRAPH, "test.graph"}};
+    std::vector<DispatchDescriptor> dispatches{{"udd", "test dispatch", "test.dispatch"}};
+
+    KernelDescriptorPack pack = makePack({"umd_graph"});
+    // Same completed tuple as kernel_64_float: selection would have two indistinguishable
+    // candidates and no basis to prefer either.
+    pack.kernels.push_back(makeKernel("kernel_duplicate", 64, "FLOAT"));
+
+    EXPECT_THROW(StateManager(makeEngine(),
+                              makeSchema(),
+                              std::move(matchers),
+                              std::move(dispatches),
+                              {pack},
+                              std::make_shared<NativeKernelHeuristic>(scoreByBlockSize)),
+                 std::invalid_argument);
+}
+
+TEST(TestIngestorStateManager, RejectsAMissingHeuristic)
+{
+    EXPECT_THROW(StateManager(makeEngine(), makeSchema(), {}, {}, {}, nullptr),
+                 std::invalid_argument);
+}
+
+} // namespace
