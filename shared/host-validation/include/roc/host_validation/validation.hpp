@@ -9,5 +9,6 @@
 #include <roc/host_validation/gemm.hpp>
 #include <roc/host_validation/generation.hpp>
 #include <roc/host_validation/reduction.hpp>
+#include <roc/host_validation/softmax.hpp>
 #include <roc/host_validation/structured_sparsity.hpp>
 #include <roc/host_validation/tensor.hpp>

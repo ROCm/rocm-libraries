@@ -531,6 +531,41 @@ void testReferenceAxpby() {
         "Complex reference AXPBY mismatch.");
 }
 
+void testReferenceSoftmax() {
+    using namespace roc::host_validation;
+
+    const Shape shape{2, 3, 2};
+    Tensor input(ScalarType::Float16, Layout(shape, {1, 3, 10}));
+    Tensor output(ScalarType::Float32, Layout(shape, {1, 4, 12}));
+    for (size_t batch = 0; batch < 2; ++batch) {
+        for (size_t row = 0; row < 2; ++row) {
+            for (size_t column = 0; column < 3; ++column) {
+                input.mutableView().storeFrom(
+                    {row, column, batch},
+                    static_cast<float>(static_cast<int>(column) + 2 * static_cast<int>(row) -
+                                       static_cast<int>(batch)));
+            }
+        }
+    }
+
+    const SoftmaxRunInfo run = referenceSoftmax(
+        SoftmaxProblem(input.view(), output.mutableView(), 1, ScalarType::Float32));
+    require(run.slicesComputed == 4 && run.elementsComputed == shape.elementCount(),
+            "Reference softmax run information mismatch.");
+
+    for (size_t batch = 0; batch < 2; ++batch) {
+        for (size_t row = 0; row < 2; ++row) {
+            float sum = 0;
+            for (size_t column = 0; column < 3; ++column)
+                sum += output.view().loadAs<float>({row, column, batch});
+            require(std::abs(sum - 1.0f) < 1e-6f, "Reference softmax slice does not sum to one.");
+        }
+    }
+    require(output.view().loadAs<float>({0, 0, 0}) < output.view().loadAs<float>({0, 1, 0}) &&
+                output.view().loadAs<float>({0, 1, 0}) < output.view().loadAs<float>({0, 2, 0}),
+            "Reference softmax ordering mismatch.");
+}
+
 void testActivations() {
     using namespace roc::host_validation;
 
@@ -778,6 +813,7 @@ int main() {
     testStructuredSparsity();
     testIndexedGeneration();
     testReferenceAxpby();
+    testReferenceSoftmax();
     testActivations();
     testStridedAndOffsetViews();
     testGenerationAndComparison();
