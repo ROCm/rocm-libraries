@@ -80,6 +80,8 @@ class _ClassicPapWriter:
             ldsTensorTokenIdx=0,
             memTokenLdsBuffer0=0,
             memTokenLdsBuffer1=1,
+            numLDSBlk=2,
+            tdmPlusLdsBufRotate=False,
             staggerUCode=False,
             unrollIdx=0,
             use64bShadowLimit=use64b_shadow,
@@ -151,6 +153,7 @@ class _ClassicPapWriter:
 
 
 _ClassicPapWriter.setupPrefetchAcrossPersistentLoads = KernelWriter.setupPrefetchAcrossPersistentLoads
+_ClassicPapWriter._nextLdsToken = KernelWriter._nextLdsToken
 
 
 class _SetupNewTilePapTdmWriter:
@@ -162,6 +165,8 @@ class _SetupNewTilePapTdmWriter:
             ldsTensorTokenIdx=0,
             memTokenLdsBuffer0=0,
             memTokenLdsBuffer1=1,
+            numLDSBlk=2,
+            tdmPlusLdsBufRotate=False,
             staggerUCode=False,
             unrollIdx=0,
             # Capability/kernel state consumed by ClusterLoadTDM.find()'s
@@ -246,6 +251,9 @@ class _SetupNewTilePapTdmWriter:
 
     def isPrefetchAcrossPersistentEnabled(self, kernel):
         return KernelWriter.isPrefetchAcrossPersistentEnabled(self, kernel)
+
+    def _nextLdsToken(self, idx):
+        return KernelWriter._nextLdsToken(self, idx)
 
     def papTdmRestoreLdsBank(self, kernel, tpa, tpb):
         return self._module("papTdmRestoreLdsBank")
