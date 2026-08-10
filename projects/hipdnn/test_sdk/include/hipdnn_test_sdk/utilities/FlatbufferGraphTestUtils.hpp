@@ -1646,8 +1646,15 @@ inline flatbuffers::FlatBufferBuilder
                              = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
                              int32_t blockSize = 32,
                              bool withEpilogue = false,
-                             bool swapDequantOrder = false)
+                             bool swapDequantOrder = false,
+                             hipdnn_flatbuffers_sdk::data_objects::DataType xTypeB
+                             = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET)
 {
+    // B's input type defaults to A's (xType); pass xTypeB to build a mixed A/B
+    // graph (e.g. FP8 OCP A + FP4 B), which the MX path supports.
+    const auto effectiveXTypeB
+        = (xTypeB == hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET) ? xType : xTypeB;
+
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
         tensorAttributes;
@@ -1691,7 +1698,7 @@ inline flatbuffers::FlatBufferBuilder
     // B input (non-virtual)
     const int64_t xBUid = uid++;
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, xBUid, "x_b", xType, &xBStrides, &xBDims));
+        builder, xBUid, "x_b", effectiveXTypeB, &xBStrides, &xBDims));
 
     // B scale (non-virtual)
     const std::vector<int64_t> scaleBStrides = rowMajorStrides(scaleBDims);
