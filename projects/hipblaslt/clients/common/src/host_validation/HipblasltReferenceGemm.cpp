@@ -199,16 +199,16 @@ void hipblaslt_reference_gemm(hipblasOperation_t       transA,
             VectorBinding{scalarVector<Tc>(scaleBVec, isScaleBVec ? columns : 1),
                           MatrixAxis::Column});
 
-    GemmProblem problem(std::move(operandA),
+    GemmRequest request(std::move(operandA),
                         std::move(operandB),
                         tensorView(C, typeC, layoutC),
                         mutableTensorView(D, outputType, layoutD),
                         compatibilityAccumulatorType<Tc>());
-    problem.epilogue.alpha = runtimeScalar(alpha);
-    problem.epilogue.beta = runtimeScalar(beta);
-    problem.epilogue.outputScale = runtimeScalar(scaleD);
+    request.epilogue.alpha = runtimeScalar(alpha);
+    request.epilogue.beta = runtimeScalar(beta);
+    request.epilogue.outputScale = runtimeScalar(scaleD);
     if(outputType == ScalarType::Int8)
-        problem.epilogue.outputConversion = OutputConversion::SaturatingInt8;
+        request.epilogue.outputConversion = OutputConversion::SaturatingInt8;
 
     static constexpr int64_t blasThreshold = 600;
     const bool useBlas =
@@ -216,17 +216,21 @@ void hipblaslt_reference_gemm(hipblasOperation_t       transA,
         (m > blasThreshold || n > blasThreshold || k > blasThreshold ||
          lda > blasThreshold || ldb > blasThreshold || ldc > blasThreshold ||
          ldd > blasThreshold);
-    GemmInvocation invocation(std::move(problem));
     if(useBlas)
     {
         static const TransformingBlasGemmBackend backend;
-        invocation.execution = {
-            .backend = GemmBackend::Blas,
-            .requireRequestedBackend = true,
-            .backendImplementation = &backend,
-        };
+        referenceGemm(
+            request,
+            {
+                .backend = GemmBackend::Blas,
+                .requireRequestedBackend = true,
+            },
+            &backend);
     }
-    referenceGemm(invocation);
+    else
+    {
+        referenceGemm(request);
+    }
 
     (void)Tc_enum;
 }

@@ -1133,6 +1133,175 @@ class TensorAndGemmTests(unittest.TestCase):
                         expected[row, column] = data[row, column] * scales[scale_index]
                 np.testing.assert_array_equal(reference, expected)
 
+    def test_gemm_object_api_retains_owned_inputs_and_scaling(self):
+        a_values = np.asarray([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)
+        b_values = np.asarray([[5.0, 6.0], [7.0, 8.0]], dtype=np.float32)
+        c_values = np.asarray([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)
+        pre_scale_a = np.asarray([2.0, 3.0], dtype=np.float32)
+        pre_scale_b = np.asarray([0.5, 2.0], dtype=np.float32)
+        scale_alpha = np.asarray([1.0, 2.0], dtype=np.float32)
+        scale_a = np.asarray([2.0, 3.0], dtype=np.float32)
+        scale_b = np.asarray([4.0, 5.0], dtype=np.float32)
+        bias = np.asarray([1.0, -2.0], dtype=np.float32)
+
+        def make_request():
+            operand_a = hv.GemmOperand(hv.from_numpy(a_values))
+            operand_a.pre_quantization_scales = [
+                hv.VectorBinding(hv.from_numpy(pre_scale_a), hv.MatrixAxis.Row)
+            ]
+            operand_b = hv.GemmOperand(hv.from_numpy(b_values))
+            operand_b.pre_quantization_scales = [
+                hv.VectorBinding(hv.from_numpy(pre_scale_b), hv.MatrixAxis.Column)
+            ]
+            request = hv.GemmRequest(
+                operand_a,
+                operand_b,
+                hv.from_numpy(c_values),
+                output_type=hv.ScalarType.Float32,
+                accumulator_type=hv.ScalarType.Float32,
+            )
+            request.epilogue.alpha = 0.5
+            request.epilogue.beta = -1.0
+            request.epilogue.scale_alpha = hv.VectorBinding(
+                hv.from_numpy(scale_alpha), hv.MatrixAxis.Row
+            )
+            request.epilogue.scale_a = hv.from_numpy(scale_a)
+            request.epilogue.scale_b = hv.from_numpy(scale_b)
+            request.epilogue.bias = hv.VectorBinding(
+                hv.from_numpy(bias), hv.MatrixAxis.Row
+            )
+            request.epilogue.output_scale = 0.25
+            return request
+
+        request = make_request()
+        gc.collect()
+
+        scaled_a = np.float32(a_values * pre_scale_a[:, None])
+        scaled_b = np.float32(b_values * pre_scale_b[None, :])
+        accumulation = matmul_float32(scaled_a, scaled_b)
+        effective_alpha = np.float32(
+            np.float32(
+                np.float32(np.float32(0.5) * scale_a[:, None]) * scale_b[None, :]
+            )
+            * scale_alpha[:, None]
+        )
+        combined = np.float32(
+            np.float32(effective_alpha * accumulation)
+            + np.float32(np.float32(-1.0) * c_values)
+        )
+        expected = np.float32(np.float32(combined + bias[:, None]) * np.float32(0.25))
+
+        result = hv.reference_gemm_result(request)
+        np.testing.assert_array_equal(hv.to_numpy(result.output), expected)
+        np.testing.assert_array_equal(hv.to_numpy(hv.reference_gemm(request)), expected)
+        self.assertEqual(result.run_info.backend_used, hv.GemmBackend.Canonical)
+
+    def test_gemm_object_api_optional_c_requires_zero_beta(self):
+        a_values = np.asarray([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)
+        b_values = np.asarray([[5.0], [6.0]], dtype=np.float32)
+        request = hv.GemmRequest(
+            hv.GemmOperand(hv.from_numpy(a_values)),
+            hv.GemmOperand(hv.from_numpy(b_values)),
+            output_type=hv.ScalarType.Float32,
+            accumulator_type=hv.ScalarType.Float32,
+        )
+
+        self.assertIsNone(request.c)
+        np.testing.assert_array_equal(
+            hv.to_numpy(hv.reference_gemm(request)), a_values @ b_values
+        )
+
+        request.epilogue.beta = 1.0
+        with self.assertRaisesRegex(ValueError, "requires C"):
+            hv.reference_gemm(request)
+
+    def test_gemm_object_api_operand_quantization_and_block_scales(self):
+        operand_a = hv.GemmOperand(
+            hv.from_numpy(np.full((1, 8), 1.5, dtype=np.float32))
+        )
+        operand_a.compute_type = hv.ScalarType.Float16
+        operand_a.pre_quantization_scales = [
+            hv.VectorBinding(
+                hv.from_numpy(np.asarray([2.0], dtype=np.float32)),
+                hv.MatrixAxis.Row,
+            )
+        ]
+        operand_a.block_scale = hv.BlockScaleBinding(
+            hv.from_numpy(np.asarray([[2.0, 4.0]], dtype=np.float32)), 4
+        )
+
+        operand_b = hv.GemmOperand(
+            hv.from_numpy(np.full((8, 1), 2.0, dtype=np.float32))
+        )
+        operand_b.compute_type = hv.ScalarType.BFloat16
+        operand_b.pre_quantization_scales = [
+            hv.VectorBinding(
+                hv.from_numpy(np.asarray([0.5], dtype=np.float32)),
+                hv.MatrixAxis.Column,
+            )
+        ]
+        operand_b.block_scale = hv.BlockScaleBinding(
+            hv.from_numpy(np.asarray([[3.0, 5.0]], dtype=np.float32)), 4
+        )
+
+        request = hv.GemmRequest(
+            operand_a,
+            operand_b,
+            output_type=hv.ScalarType.Float32,
+            accumulator_type=hv.ScalarType.Float32,
+        )
+        np.testing.assert_array_equal(
+            hv.to_numpy(hv.reference_gemm(request)),
+            np.asarray([[312.0]], dtype=np.float32),
+        )
+
+    def test_gemm_object_api_conjugates_operands(self):
+        a_values = np.asarray(
+            [[1.0 + 2.0j, 3.0 - 4.0j], [-2.0 + 0.5j, 1.5 + 3.0j]],
+            dtype=np.complex64,
+        )
+        b_values = np.asarray([[2.0 - 1.0j], [0.5 + 2.0j]], dtype=np.complex64)
+        operand_a = hv.GemmOperand(hv.from_numpy(a_values))
+        operand_a.conjugate = True
+        request = hv.GemmRequest(
+            operand_a,
+            hv.GemmOperand(hv.from_numpy(b_values)),
+            output_type=hv.ScalarType.ComplexFloat32,
+            accumulator_type=hv.ScalarType.ComplexFloat32,
+        )
+
+        np.testing.assert_allclose(
+            hv.to_numpy(hv.reference_gemm(request)),
+            np.conjugate(a_values) @ b_values,
+            rtol=1e-6,
+            atol=1e-6,
+        )
+
+    def test_gemm_object_api_allocates_affine_output_for_tiled_execution(self):
+        a_values = np.asarray([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)
+        b_values = np.asarray([[5.0, 6.0, 7.0], [8.0, 9.0, 10.0]], dtype=np.float32)
+        output_layout = hv.Layout(hv.Shape([2, 3]), [9, 2], 1)
+        request = hv.GemmRequest(
+            hv.GemmOperand(hv.from_numpy(a_values)),
+            hv.GemmOperand(hv.from_numpy(b_values)),
+            output_type=hv.ScalarType.Float32,
+            accumulator_type=hv.ScalarType.Float32,
+            output_layout=output_layout,
+        )
+        execution = hv.GemmExecution(hv.GemmBackend.Tiled, True)
+
+        result = hv.reference_gemm_result(request, execution)
+        expected = a_values @ b_values
+        np.testing.assert_array_equal(hv.to_numpy(result.output), expected)
+        self.assertEqual(result.output.strides, [9, 2])
+        self.assertEqual(result.output.offset, 1)
+        self.assertEqual(result.run_info.backend_used, hv.GemmBackend.Tiled)
+
+        storage = np.frombuffer(result.output.storage, dtype=np.float32)
+        expected_storage = np.zeros(15, dtype=np.float32)
+        expected_storage[[1, 3, 5, 10, 12, 14]] = expected.reshape(-1)
+        np.testing.assert_array_equal(storage, expected_storage)
+
     def test_float32_gemm_matches_numpy(self):
         a = np.arange(15, dtype=np.float32).reshape(3, 5) - 4
         b = np.arange(20, dtype=np.float32).reshape(5, 4) - 7

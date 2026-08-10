@@ -279,28 +279,30 @@ The canonical reference-GEMM API is tensor-centric and runtime-typed:
 ```cpp
 GemmOperand a(TensorView);
 GemmOperand b(TensorView);
-GemmProblem problem(a, b, cView, dView, ScalarType::Float32);
+GemmRequest request(a, b, cView, dView, ScalarType::Float32);
 
-problem.a.computeType = ScalarType::Float8E4M3;  // optional MAC-input quantization
-problem.accumulationRounding = AccumulationRounding::FullPrecision;
-problem.mathMode = MathMode::XFloat32;           // optional operand math
-problem.epilogue.alpha = {1.0, 0.0};
-problem.epilogue.beta = {0.0, 0.0};
+request.a.computeType = ScalarType::Float8E4M3;  // optional MAC-input quantization
+request.accumulationRounding = AccumulationRounding::FullPrecision;
+request.mathMode = MathMode::XFloat32;           // optional operand math
+request.epilogue.alpha = {1.0, 0.0};
+request.epilogue.beta = {0.0, 0.0};
 
-GemmInvocation invocation(std::move(problem));
-invocation.execution.backend = GemmBackend::Automatic;
+GemmExecution execution;
+execution.backend = GemmBackend::Automatic;
 
-GemmSupportInfo support = queryGemmSupport(invocation);
-GemmResult run = referenceGemm(invocation);
+GemmSupportInfo support = queryGemmSupport(request, execution);
+GemmResult result = referenceGemm(request, execution);
 ```
 
 The normalized shapes are A `[M,K]`, B `[K,N]`, and C/D `[M,N]`.
 Transpose, leading dimensions, padding, and adjusted base locations are
 represented by `Layout`; no product transpose or matrix-layout enum crosses
-the API. Support queries and execution consume the same `GemmInvocation`, so
-backend selection cannot inspect a different numerical problem.
+the API. Support queries and execution consume the same `GemmRequest`.
+`GemmExecution` contains backend policy, while an optional backend
+implementation object is supplied at call time rather than becoming part of
+the numerical request.
 
-`GemmProblem` currently supports:
+`GemmRequest` currently supports:
 
 - F16, BF16, F32, F64, I32, complex-F32, and complex-F64 accumulation;
 - arbitrary runtime storage types supported by the tensor codecs;
@@ -318,14 +320,39 @@ backend selection cannot inspect a different numerical problem.
 - absolute, clipped/leaky ReLU, ReLU, GELU, GELU scaling and derivative,
   sigmoid, tanh, SiLU, Swish, clamp, and explicit ReLU derivative; and
 - canonical execution, pluggable object-oriented backend implementations,
-  backend support queries, fallback reporting, and grouped invocation.
+  backend support queries, and fallback reporting.
 
 Consumers construct this runtime API without passing product-specific types.
 The former typed reference GEMM and its function-pointer quantization bridge
 have been removed.
 
+Python exposes owning objects with the same numerical vocabulary:
+
+```python
+import roc_host_validation as hv
+
+a = hv.GemmOperand(hv.from_numpy(array_a))
+b = hv.GemmOperand(hv.from_numpy(array_b))
+request = hv.GemmRequest(
+    a,
+    b,
+    c=hv.from_numpy(array_c),
+    output_type=hv.ScalarType.Float32,
+    accumulator_type=hv.ScalarType.Float32,
+)
+request.epilogue.alpha = 2.0
+result = hv.reference_gemm_result(request)
+```
+
+The Python request retains owning tensors and allocates a fresh output using
+`output_type` and an optional affine `output_layout`. C may be omitted only
+when beta is exactly zero. C++ requests instead borrow caller-owned input and
+output views for the duration of the synchronous call. The flat Python
+`reference_gemm_result(a, b, c, ...)` overload remains as a compatibility
+wrapper while consumers migrate to the object API.
+
 The optional `BlasGemmBackend` implements the same interface for dense
-F32/F64/complex GEMM and is selected through `GemmRunOptions`.
+F32/F64/complex GEMM and is selected through `GemmExecution`.
 `TransformingBlasGemmBackend` additionally materializes runtime-typed,
 scaled, and compute-input-quantized operands into component-owned scratch,
 invokes the ordinary BLAS backend, and performs component-owned output

@@ -68,7 +68,7 @@ int validate(const Runner<TypeA, TypeB, TypeCD, AlphaType, BetaType>& runner)
         using namespace roc::host_validation;
         using namespace roc::host_validation::hipblaslt_adapter;
 
-        GemmProblem problem(GemmOperand(tensorView(aPtr + batchStrideA * b,
+        GemmRequest problem(GemmOperand(tensorView(aPtr + batchStrideA * b,
                                                    batchStrideA,
                                                    Layout(Shape{size_t(runner.m), size_t(runner.k)},
                                                           {1, static_cast<ptrdiff_t>(runner.m)}))),

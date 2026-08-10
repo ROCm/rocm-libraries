@@ -13,6 +13,7 @@
 #include <limits>
 #include <optional>
 #include <roc/host_validation/detail/reference_common.hpp>
+#include <roc/host_validation/gemm.hpp>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -21,98 +22,6 @@
 #include <vector>
 
 namespace roc::host_validation {
-enum class GemmBackend {
-    Automatic,
-    Canonical,
-    Tiled,
-    Blas,
-};
-
-enum class AccumulationRounding {
-    TypeDefault,
-    FullPrecision,
-    AfterProductAndSum,
-};
-
-struct BlockScaleBinding {
-    TensorView values;
-    size_t blockSize;
-};
-
-struct GemmOperand {
-    explicit GemmOperand(TensorView tensor) : values(std::move(tensor)) {}
-
-    TensorView values;
-    std::optional<ScalarType> computeType;
-    std::vector<VectorBinding> preQuantizationScales;
-    std::optional<BlockScaleBinding> blockScale;
-    bool conjugate = false;
-};
-
-struct GemmEpilogue {
-    std::complex<double> alpha = {1.0, 0.0};
-    std::complex<double> beta = {0.0, 0.0};
-    std::optional<VectorBinding> bias;
-    std::optional<VectorBinding> scaleAlpha;
-    std::optional<TensorView> scaleA;
-    std::optional<TensorView> scaleB;
-    std::complex<double> outputScale = {1.0, 0.0};
-    OutputConversion outputConversion = OutputConversion::Default;
-    Activation activation = Activation::None;
-    double activationParameter0 = 0.0;
-    double activationParameter1 = 0.0;
-};
-
-struct GemmProblem {
-    GemmProblem(GemmOperand aOperand, GemmOperand bOperand, TensorView cTensor,
-                MutableTensorView dTensor, ScalarType accumulator)
-        : a(std::move(aOperand)),
-          b(std::move(bOperand)),
-          c(std::move(cTensor)),
-          d(std::move(dTensor)),
-          accumulatorType(accumulator) {}
-
-    GemmOperand a;
-    GemmOperand b;
-    TensorView c;
-    MutableTensorView d;
-    ScalarType accumulatorType;
-    AccumulationRounding accumulationRounding = AccumulationRounding::TypeDefault;
-    MathMode mathMode = MathMode::Default;
-    GemmEpilogue epilogue;
-    OutputSelection outputSelection = OutputSelection::all();
-};
-
-struct GemmSupportInfo {
-    bool supported = false;
-    std::string reason;
-
-    explicit operator bool() const {
-        return supported;
-    }
-};
-
-struct GemmRunInfo {
-    GemmBackend backendUsed = GemmBackend::Canonical;
-    std::optional<std::string> fallbackReason;
-    size_t outputElementsComputed = 0;
-};
-
-class GemmBackendImplementation {
-   public:
-    virtual ~GemmBackendImplementation() = default;
-
-    virtual GemmBackend backend() const = 0;
-    virtual GemmSupportInfo querySupport(const GemmProblem&) const = 0;
-    virtual GemmRunInfo run(const GemmProblem&) const = 0;
-};
-
-struct GemmRunOptions {
-    GemmBackend backend = GemmBackend::Automatic;
-    bool requireRequestedBackend = false;
-    const GemmBackendImplementation* backendImplementation = nullptr;
-};
-
 namespace detail {
 inline bool isRuntimeGemmAccumulator(ScalarType type) {
     switch (type) {
@@ -129,7 +38,7 @@ inline bool isRuntimeGemmAccumulator(ScalarType type) {
     }
 }
 
-inline void validateRuntimeGemm(const GemmProblem& problem) {
+inline void validateRuntimeGemm(const GemmRequest& problem) {
     requireRank(problem.a.values.shape(), 2, "Reference GEMM", "A");
     requireRank(problem.b.values.shape(), 2, "Reference GEMM", "B");
     requireRank(problem.c.shape(), 2, "Reference GEMM", "C");
@@ -263,7 +172,7 @@ template <typename Accumulator>
 class RuntimeGemmFinalizer {
    public:
     explicit RuntimeGemmFinalizer(
-        const GemmProblem& problem,
+        const GemmRequest& problem,
         RuntimeQuantizer<Accumulator> quantizeAccumulator = RuntimeQuantizer<Accumulator>())
         : m_problem(problem),
           m_c(problem.c),
@@ -329,7 +238,7 @@ class RuntimeGemmFinalizer {
     }
 
    private:
-    const GemmProblem& m_problem;
+    const GemmRequest& m_problem;
     RuntimeMatrixReader<Accumulator> m_c;
     RuntimeMatrixOutputWriter<Accumulator> m_d;
     RuntimeQuantizer<Accumulator> m_quantizeAccumulator;
@@ -347,7 +256,7 @@ class RuntimeGemmFinalizer {
 };
 
 template <typename Accumulator>
-GemmRunInfo referenceRuntimeCanonical(const GemmProblem& problem) {
+GemmRunInfo referenceRuntimeCanonical(const GemmRequest& problem) {
     const RuntimeMatrixReader<Accumulator> a(problem.a.values);
     const RuntimeMatrixReader<Accumulator> b(problem.b.values);
     const RuntimeQuantizer<Accumulator> quantizeA(problem.a.computeType);
@@ -481,99 +390,4 @@ GemmRunInfo referenceRuntimeCanonical(const GemmProblem& problem) {
     };
 }
 }  // namespace detail
-
-inline GemmSupportInfo queryGemmSupport(const GemmProblem& problem, GemmBackend backend,
-                                        const GemmBackendImplementation* implementation = nullptr) {
-    try {
-        detail::validateRuntimeGemm(problem);
-    } catch (const std::exception& error) {
-        return {.supported = false, .reason = error.what()};
-    }
-
-    switch (backend) {
-        case GemmBackend::Automatic:
-        case GemmBackend::Canonical:
-            return {.supported = true, .reason = {}};
-        case GemmBackend::Tiled:
-        case GemmBackend::Blas:
-            if (implementation == nullptr)
-                return {
-                    .supported = false,
-                    .reason =
-                        "No implementation was supplied for the requested "
-                        "runtime GEMM backend.",
-                };
-            if (implementation->backend() != backend)
-                return {
-                    .supported = false,
-                    .reason =
-                        "The supplied runtime GEMM implementation does not "
-                        "match the requested backend.",
-                };
-            return implementation->querySupport(problem);
-    }
-    return {.supported = false, .reason = "Invalid reference GEMM backend."};
-}
-
-inline GemmRunInfo referenceGemm(const GemmProblem& problem, const GemmRunOptions& options = {}) {
-    GemmBackend backend = options.backend;
-    std::optional<std::string> fallbackReason;
-    if (backend == GemmBackend::Automatic) {
-        if (options.backendImplementation != nullptr) {
-            const GemmBackend implementationBackend = options.backendImplementation->backend();
-            const GemmSupportInfo implementationSupport =
-                queryGemmSupport(problem, implementationBackend, options.backendImplementation);
-            if (implementationSupport) return options.backendImplementation->run(problem);
-            fallbackReason = implementationSupport.reason;
-        }
-        backend = GemmBackend::Canonical;
-    }
-
-    const GemmSupportInfo requestedSupport =
-        queryGemmSupport(problem, backend, options.backendImplementation);
-    if (!requestedSupport) {
-        if (options.requireRequestedBackend) throw std::invalid_argument(requestedSupport.reason);
-        if (backend == GemmBackend::Canonical) throw std::invalid_argument(requestedSupport.reason);
-        fallbackReason = requestedSupport.reason;
-        backend = GemmBackend::Canonical;
-    } else if (backend != GemmBackend::Canonical) {
-        return options.backendImplementation->run(problem);
-    }
-
-    const GemmSupportInfo canonicalSupport = queryGemmSupport(problem, GemmBackend::Canonical);
-    if (!canonicalSupport) throw std::invalid_argument(canonicalSupport.reason);
-
-    GemmRunInfo result;
-    switch (problem.accumulatorType) {
-        case ScalarType::Float16:
-        case ScalarType::BFloat16:
-        case ScalarType::Float32:
-            result = detail::referenceRuntimeCanonical<float>(problem);
-            break;
-        case ScalarType::Float64:
-            result = detail::referenceRuntimeCanonical<double>(problem);
-            break;
-        case ScalarType::Int32:
-            result = detail::referenceRuntimeCanonical<int32_t>(problem);
-            break;
-        case ScalarType::ComplexFloat32:
-            result = detail::referenceRuntimeCanonical<std::complex<float>>(problem);
-            break;
-        case ScalarType::ComplexFloat64:
-            result = detail::referenceRuntimeCanonical<std::complex<double>>(problem);
-            break;
-        default:
-            throw std::invalid_argument("Unsupported runtime reference GEMM accumulator type.");
-    }
-    result.fallbackReason = std::move(fallbackReason);
-    return result;
-}
-
-inline std::vector<GemmRunInfo> referenceGroupedGemm(std::span<const GemmProblem> problems,
-                                                     const GemmRunOptions& options = {}) {
-    std::vector<GemmRunInfo> results;
-    results.reserve(problems.size());
-    for (const GemmProblem& problem : problems) results.push_back(referenceGemm(problem, options));
-    return results;
-}
 }  // namespace roc::host_validation

@@ -33,6 +33,70 @@ struct PythonGemmResult {
     GemmRunInfo runInfo;
 };
 
+struct PythonVectorBinding {
+    PythonVectorBinding(Tensor tensor, MatrixAxis selectedAxis)
+        : values(std::move(tensor)), axis(selectedAxis) {}
+
+    Tensor values;
+    MatrixAxis axis = MatrixAxis::Row;
+};
+
+struct PythonBlockScaleBinding {
+    PythonBlockScaleBinding(Tensor tensor, size_t selectedBlockSize)
+        : values(std::move(tensor)), blockSize(selectedBlockSize) {}
+
+    Tensor values;
+    size_t blockSize;
+};
+
+struct PythonGemmOperand {
+    explicit PythonGemmOperand(Tensor tensor) : values(std::move(tensor)) {}
+
+    Tensor values;
+    std::optional<ScalarType> computeType;
+    std::vector<PythonVectorBinding> preQuantizationScales;
+    std::optional<PythonBlockScaleBinding> blockScale;
+    bool conjugate = false;
+};
+
+struct PythonGemmEpilogue {
+    std::complex<double> alpha = {1.0, 0.0};
+    std::complex<double> beta = {0.0, 0.0};
+    std::optional<PythonVectorBinding> bias;
+    std::optional<PythonVectorBinding> scaleAlpha;
+    std::optional<Tensor> scaleA;
+    std::optional<Tensor> scaleB;
+    std::complex<double> outputScale = {1.0, 0.0};
+    OutputConversion outputConversion = OutputConversion::Default;
+    Activation activation = Activation::None;
+    double activationParameter0 = 0.0;
+    double activationParameter1 = 0.0;
+};
+
+struct PythonGemmRequest {
+    PythonGemmRequest(PythonGemmOperand operandA, PythonGemmOperand operandB,
+                      std::optional<Tensor> tensorC, ScalarType selectedOutputType,
+                      ScalarType selectedAccumulatorType,
+                      std::optional<Layout> selectedOutputLayout)
+        : a(std::move(operandA)),
+          b(std::move(operandB)),
+          c(std::move(tensorC)),
+          outputType(selectedOutputType),
+          outputLayout(std::move(selectedOutputLayout)),
+          accumulatorType(selectedAccumulatorType) {}
+
+    PythonGemmOperand a;
+    PythonGemmOperand b;
+    std::optional<Tensor> c;
+    ScalarType outputType;
+    std::optional<Layout> outputLayout;
+    ScalarType accumulatorType;
+    AccumulationRounding accumulationRounding = AccumulationRounding::TypeDefault;
+    MathMode mathMode = MathMode::Default;
+    PythonGemmEpilogue epilogue;
+    OutputSelection outputSelection = OutputSelection::all();
+};
+
 struct PythonAxpbyResult {
     Tensor output;
     AxpbyRunInfo runInfo;
@@ -335,6 +399,80 @@ Tensor tensorFromStorage(ScalarType type, std::vector<size_t> dimensions, nb::by
     return Tensor::fromStorage(type, std::move(layout), std::move(storage));
 }
 
+GemmOperand gemmOperandView(const PythonGemmOperand& operand) {
+    GemmOperand result(operand.values.view());
+    result.computeType = operand.computeType;
+    result.conjugate = operand.conjugate;
+    result.preQuantizationScales.reserve(operand.preQuantizationScales.size());
+    for (const PythonVectorBinding& binding : operand.preQuantizationScales) {
+        result.preQuantizationScales.push_back(VectorBinding{binding.values.view(), binding.axis});
+    }
+    if (operand.blockScale) {
+        result.blockScale =
+            BlockScaleBinding{operand.blockScale->values.view(), operand.blockScale->blockSize};
+    }
+    return result;
+}
+
+GemmEpilogue gemmEpilogueView(const PythonGemmEpilogue& epilogue) {
+    GemmEpilogue result;
+    result.alpha = epilogue.alpha;
+    result.beta = epilogue.beta;
+    if (epilogue.bias)
+        result.bias = VectorBinding{epilogue.bias->values.view(), epilogue.bias->axis};
+    if (epilogue.scaleAlpha) {
+        result.scaleAlpha =
+            VectorBinding{epilogue.scaleAlpha->values.view(), epilogue.scaleAlpha->axis};
+    }
+    if (epilogue.scaleA) result.scaleA = epilogue.scaleA->view();
+    if (epilogue.scaleB) result.scaleB = epilogue.scaleB->view();
+    result.outputScale = epilogue.outputScale;
+    result.outputConversion = epilogue.outputConversion;
+    result.activation = epilogue.activation;
+    result.activationParameter0 = epilogue.activationParameter0;
+    result.activationParameter1 = epilogue.activationParameter1;
+    return result;
+}
+
+const GemmBackendImplementation* pythonGemmBackendImplementation(
+    GemmBackend backend, bool useTiledForAutomatic = false) {
+    if (backend == GemmBackend::Tiled ||
+        (backend == GemmBackend::Automatic && useTiledForAutomatic)) {
+        static const TiledGemmBackend tiled;
+        return &tiled;
+    }
+    if (backend != GemmBackend::Automatic && backend != GemmBackend::Canonical)
+        throw std::invalid_argument("Python reference_gemm exposes Canonical and Tiled backends.");
+    return nullptr;
+}
+
+PythonGemmResult referenceGemmRequestOwned(const PythonGemmRequest& request,
+                                           const GemmExecution& execution) {
+    if (request.a.values.shape().rank() != 2 || request.b.values.shape().rank() != 2)
+        throw std::invalid_argument("Python GemmRequest requires rank-2 A and B tensors.");
+    if (!request.c && request.epilogue.beta != std::complex<double>{})
+        throw std::invalid_argument("Python GemmRequest requires C when epilogue beta is nonzero.");
+
+    const Shape outputShape{request.a.values.shape()[0], request.b.values.shape()[1]};
+    const Layout outputLayout =
+        request.outputLayout ? *request.outputLayout : Layout::contiguous(outputShape);
+    Tensor output(request.outputType, outputLayout);
+    std::optional<Tensor> zeroC;
+    if (!request.c) zeroC.emplace(request.outputType, outputShape);
+    const Tensor& c = request.c ? *request.c : *zeroC;
+
+    GemmRequest nativeRequest(gemmOperandView(request.a), gemmOperandView(request.b), c.view(),
+                              output.mutableView(), request.accumulatorType);
+    nativeRequest.accumulationRounding = request.accumulationRounding;
+    nativeRequest.mathMode = request.mathMode;
+    nativeRequest.epilogue = gemmEpilogueView(request.epilogue);
+    nativeRequest.outputSelection = request.outputSelection;
+
+    const GemmResult result =
+        referenceGemm(nativeRequest, execution, pythonGemmBackendImplementation(execution.backend));
+    return {.output = std::move(output), .runInfo = result.runInfo};
+}
+
 PythonGemmResult referenceGemmOwned(
     const Tensor& a, const Tensor& b, const Tensor& c, ScalarType outputType,
     ScalarType accumulatorType, std::complex<double> alpha, std::complex<double> beta,
@@ -375,30 +513,24 @@ PythonGemmResult referenceGemmOwned(
         operandA.blockScale = BlockScaleBinding{blockScaleA->view(), blockSizeA};
         operandB.blockScale = BlockScaleBinding{blockScaleB->view(), blockSizeB};
     }
-    GemmProblem problem(std::move(operandA), std::move(operandB), c.view(), d.mutableView(),
+    GemmRequest request(std::move(operandA), std::move(operandB), c.view(), d.mutableView(),
                         accumulatorType);
-    problem.accumulationRounding = accumulationRounding;
-    problem.mathMode = mathMode;
-    problem.epilogue.alpha = alpha;
-    problem.epilogue.beta = beta;
-    problem.epilogue.outputScale = outputScale;
-    problem.epilogue.outputConversion = outputConversion;
-    problem.epilogue.activation = activation;
-    problem.epilogue.activationParameter0 = activationParameter0;
-    problem.epilogue.activationParameter1 = activationParameter1;
-    problem.outputSelection = std::move(outputSelection);
-    GemmInvocation invocation(std::move(problem));
-    if (backend == GemmBackend::Automatic || backend == GemmBackend::Tiled) {
-        static const TiledGemmBackend tiled;
-        invocation.execution = {
-            .backend = backend,
-            .requireRequestedBackend = backend == GemmBackend::Tiled,
-            .backendImplementation = &tiled,
-        };
-    } else if (backend != GemmBackend::Canonical) {
-        throw std::invalid_argument("Python reference_gemm exposes Canonical and Tiled backends.");
-    }
-    GemmRunInfo runInfo = referenceGemm(invocation);
+    request.accumulationRounding = accumulationRounding;
+    request.mathMode = mathMode;
+    request.epilogue.alpha = alpha;
+    request.epilogue.beta = beta;
+    request.epilogue.outputScale = outputScale;
+    request.epilogue.outputConversion = outputConversion;
+    request.epilogue.activation = activation;
+    request.epilogue.activationParameter0 = activationParameter0;
+    request.epilogue.activationParameter1 = activationParameter1;
+    request.outputSelection = std::move(outputSelection);
+    const GemmExecution execution{
+        .backend = backend,
+        .requireRequestedBackend = backend == GemmBackend::Tiled,
+    };
+    GemmRunInfo runInfo =
+        referenceGemm(request, execution, pythonGemmBackendImplementation(backend, true)).runInfo;
     return {.output = std::move(d), .runInfo = std::move(runInfo)};
 }
 
@@ -822,6 +954,72 @@ NB_MODULE(_roc_host_validation, module) {
         .def_prop_ro("values", [](const Tensor& tensor) { return tensorValues(tensor); })
         .def("view", &Tensor::view, nb::keep_alive<0, 1>())
         .def("to", &Tensor::to, "type"_a);
+
+    nb::class_<PythonVectorBinding>(
+        module, "VectorBinding", "Owning row- or column-axis tensor binding used by GEMM requests.")
+        .def(nb::init<Tensor, MatrixAxis>(), "values"_a, "axis"_a = MatrixAxis::Row)
+        .def_rw("values", &PythonVectorBinding::values)
+        .def_rw("axis", &PythonVectorBinding::axis);
+
+    nb::class_<PythonBlockScaleBinding>(
+        module, "BlockScaleBinding",
+        "Owning tensor and reduction-block size used for GEMM block scaling.")
+        .def(nb::init<Tensor, size_t>(), "values"_a, "block_size"_a)
+        .def_rw("values", &PythonBlockScaleBinding::values)
+        .def_rw("block_size", &PythonBlockScaleBinding::blockSize);
+
+    nb::class_<PythonGemmOperand>(
+        module, "GemmOperand",
+        "Owning GEMM operand, including compute-input quantization and scaling metadata.")
+        .def(nb::init<Tensor>(), "values"_a)
+        .def_rw("values", &PythonGemmOperand::values)
+        .def_rw("compute_type", &PythonGemmOperand::computeType)
+        .def_rw("pre_quantization_scales", &PythonGemmOperand::preQuantizationScales)
+        .def_rw("block_scale", &PythonGemmOperand::blockScale)
+        .def_rw("conjugate", &PythonGemmOperand::conjugate);
+
+    nb::class_<PythonGemmEpilogue>(
+        module, "GemmEpilogue",
+        "Owning GEMM alpha/beta, vector scaling, activation, and output-conversion settings.")
+        .def(nb::init<>())
+        .def_rw("alpha", &PythonGemmEpilogue::alpha)
+        .def_rw("beta", &PythonGemmEpilogue::beta)
+        .def_rw("bias", &PythonGemmEpilogue::bias)
+        .def_rw("scale_alpha", &PythonGemmEpilogue::scaleAlpha)
+        .def_rw("scale_a", &PythonGemmEpilogue::scaleA)
+        .def_rw("scale_b", &PythonGemmEpilogue::scaleB)
+        .def_rw("output_scale", &PythonGemmEpilogue::outputScale)
+        .def_rw("output_conversion", &PythonGemmEpilogue::outputConversion)
+        .def_rw("activation", &PythonGemmEpilogue::activation)
+        .def_rw("activation_parameter0", &PythonGemmEpilogue::activationParameter0)
+        .def_rw("activation_parameter1", &PythonGemmEpilogue::activationParameter1);
+
+    nb::class_<GemmExecution>(
+        module, "GemmExecution",
+        "Call-time GEMM backend selection. Python supplies the built-in tiled implementation.")
+        .def(nb::init<>())
+        .def(nb::init<GemmBackend, bool>(), "backend"_a, "require_requested_backend"_a = false)
+        .def_rw("backend", &GemmExecution::backend)
+        .def_rw("require_requested_backend", &GemmExecution::requireRequestedBackend);
+
+    nb::class_<PythonGemmRequest>(
+        module, "GemmRequest",
+        "Owning GEMM numerical request. Each call allocates a fresh output tensor.")
+        .def(nb::init<PythonGemmOperand, PythonGemmOperand, std::optional<Tensor>, ScalarType,
+                      ScalarType, std::optional<Layout>>(),
+             "a"_a, "b"_a, "c"_a = std::optional<Tensor>{}, "output_type"_a = ScalarType::Float32,
+             "accumulator_type"_a = ScalarType::Float32,
+             "output_layout"_a = std::optional<Layout>{})
+        .def_rw("a", &PythonGemmRequest::a)
+        .def_rw("b", &PythonGemmRequest::b)
+        .def_rw("c", &PythonGemmRequest::c)
+        .def_rw("output_type", &PythonGemmRequest::outputType)
+        .def_rw("output_layout", &PythonGemmRequest::outputLayout)
+        .def_rw("accumulator_type", &PythonGemmRequest::accumulatorType)
+        .def_rw("accumulation_rounding", &PythonGemmRequest::accumulationRounding)
+        .def_rw("math_mode", &PythonGemmRequest::mathMode)
+        .def_rw("epilogue", &PythonGemmRequest::epilogue)
+        .def_rw("output_selection", &PythonGemmRequest::outputSelection);
 
     nb::enum_<ComparisonIndexOrder>(module, "ComparisonIndexOrder")
         .value("FirstDimensionFastest", ComparisonIndexOrder::FirstDimensionFastest)
@@ -1272,6 +1470,8 @@ NB_MODULE(_roc_host_validation, module) {
                "output_scale"_a = std::complex<double>(1.0, 0.0),
                "output_conversion"_a = OutputConversion::Default,
                "accumulation_rounding"_a = AccumulationRounding::TypeDefault);
+    module.def("reference_gemm_result", &referenceGemmRequestOwned, "request"_a,
+               "execution"_a = GemmExecution{});
     module.def("reference_epilogue", &referenceEpilogueOwned, "input"_a, "output_type"_a,
                "compute_type"_a, "bias"_a = std::optional<Tensor>{},
                "bias_axis"_a = MatrixAxis::Row, "activation"_a = Activation::None,
