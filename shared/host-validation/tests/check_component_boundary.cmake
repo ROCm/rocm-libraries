@@ -80,6 +80,15 @@ foreach(_private_header
     endif()
 endforeach()
 
+if(EXISTS
+   "${HOST_VALIDATION_SOURCE_DIR}/include/roc/host_validation/detail/tensor_views.hpp"
+)
+    message(
+        FATAL_ERROR
+        "Typed matrix views must remain in the public matrix_view.hpp header."
+    )
+endif()
+
 file(
     GLOB_RECURSE
     component_sources
