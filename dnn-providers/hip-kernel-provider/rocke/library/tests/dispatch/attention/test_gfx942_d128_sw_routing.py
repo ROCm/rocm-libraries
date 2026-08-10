@@ -241,6 +241,50 @@ class TestGfx942D128SwRouting(unittest.TestCase):
                     if p.block_size in (16, 32, 64):
                         _tiled_spec_from_problem(p)
 
+    def test_route_descriptor_matches_selectors(self):
+        # The _TiledRoute descriptor is the single source of truth: its disc
+        # knobs + real launch geometry MUST match the concrete values the
+        # per-selector functions return for every in-cohort problem, and
+        # route-is-not-None MUST track _gfx942_4warp_fast. Guards the #2/#3
+        # "cache-key discriminator / launch geometry can never silently
+        # disagree" contract: a future edit to a selector constant or to the
+        # descriptor that breaks the correspondence fails here.
+        with _PinArch("gfx942"):
+            incohort = (
+                _d128_problem(head_size=256, sliding_window=0, block_size=16),
+                _d128_problem(head_size=256, sliding_window=0, block_size=32),
+                _d128_problem(dtype="bf16", block_size=16),
+                _d128_problem(dtype="fp16", block_size=64),
+            )
+            for p in incohort:
+                route = au._gfx942_4warp_route(p)
+                tag = f"d{p.head_size} {p.dtype} bs{p.block_size} sw{p.sliding_window}"
+                self.assertIsNotNone(route, msg=tag)
+                self.assertTrue(au._gfx942_4warp_fast(p), msg=tag)
+                self.assertIs(route.builder, build_gfx942_4warp_gqa, msg=tag)
+                # Discriminator knobs + real geometry pinned to concrete values.
+                self.assertEqual(route.disc["num_warps"], 1, msg=tag)
+                self.assertEqual(route.disc["tile_size"], max(32, p.block_size), msg=tag)
+                self.assertEqual(route.disc["block_m_per_warp"], 32, msg=tag)
+                self.assertEqual(route.block_m, 128, msg=tag)
+                self.assertEqual(route.block_dim, (256, 1, 1), msg=tag)
+                # Selectors must read the descriptor (no silent divergence).
+                self.assertEqual(
+                    au._select_2d_num_warps(p), route.disc["num_warps"], msg=tag
+                )
+                self.assertEqual(
+                    au._select_2d_tile_size(p), route.disc["tile_size"], msg=tag
+                )
+                self.assertEqual(
+                    au._select_2d_block_m_per_warp(p),
+                    route.disc["block_m_per_warp"],
+                    msg=tag,
+                )
+            # Out-of-cohort (D128 causal): route is None and the boolean agrees.
+            off = _d128_problem(dtype="bf16", sliding_window=0)
+            self.assertIsNone(au._gfx942_4warp_route(off))
+            self.assertFalse(au._gfx942_4warp_fast(off))
+
 
 if __name__ == "__main__":
     unittest.main()
