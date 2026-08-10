@@ -469,6 +469,16 @@ PYTHONPATH=<rocKE>/projects/composablekernel/python \
 # /tmp/out now holds the family's <symbol>.co (pair with the checked-in family.json)
 ```
 
+> **Multi-arch builds (TheRock).** A family compiles **only when its arch is in the
+> build's `GPU_TARGETS`** (`AMDGPU_TARGETS` is honored as the legacy alias) — so a
+> gfx942 build never compiles the gfx1151 kernels, and vice versa. The family arch and
+> each target are matched on their `gfxNNN` base (feature suffixes like `:xnack-` are
+> dropped), mirroring the runtime device match. If **neither** variable is set (a
+> standalone dev build that never named targets) **all** families build. A requested
+> arch with no family folder is simply absent at runtime (the engine declines) — never
+> an error. This gate lives in `_aot_arch_requested()` in `library/CMakeLists.txt`;
+> future family adders should call it too.
+
 **2. C++ substrate parity test** — drives the engine substrate directly and compares to
 a CPU reference (`C=A@Bᵀ`, RMS over rows, or `softmax(scale·QKᵀ)·V`):
 ```
@@ -657,7 +667,8 @@ emit yet (one reviewed line, see the arg table) or a grid the DSL can't express 
    the kernel does *not* universally handle** (see the warning below), (c) `grid`/`block`,
    and (d) `args_signature` = the kernel's real ABI **in order**, drawn from the vocabulary.
 4. **Drop it under `library/gfx942/<family>/`** with a producer `CMakeLists.txt`
-   (auto-discovered by `library/CMakeLists.txt`; mirror the gfx1151 family's).
+   (auto-discovered by `library/CMakeLists.txt`; mirror the gfx1151 family's). It compiles
+   only when `gfx942` is in the build's `GPU_TARGETS` (see §9); a gfx1151-only build skips it.
 5. **Copy the parity test.** `cp TestSdpaNumericParity.cpp` → new file, change `kArch`,
    geometry (D/H/S), the dtype token, and the hand-built `LaunchBindings` to match the new
    `args_signature`. The CPU reference softmax and tolerances carry over. Register it in

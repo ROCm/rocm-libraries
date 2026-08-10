@@ -90,12 +90,46 @@ set(_AOT_CATALOG_INSTALL_DIR
     "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/hip_kernel_provider/aot_catalog")
 
 # ---------------------------------------------------------------------------
+# _aot_arch_requested(<arch> <out_var>) -- is <arch> in this build's target set?
+#
+# TheRock/ROCm pass the requested GPU targets in GPU_TARGETS (AMDGPU_TARGETS is
+# the legacy alias); a family builds only when its arch is among them, so a
+# gfx942-only build does NOT compile the gfx1151 kernels (and vice versa). Both
+# the family arch and each target are normalized to their gfxNNN base -- feature
+# suffixes like ":xnack-" are dropped -- mirroring the runtime device match in
+# hip_kernel_provider_common::getDeviceString. When NEITHER list is set (e.g. a
+# standalone dev build that never specified targets), ALL families build: the
+# original behavior, so nothing silently disappears.
+#
+# Any future family adder (e.g. aot_add_prebuilt_family) should gate on this too.
+# ---------------------------------------------------------------------------
+function(_aot_arch_requested arch out_var)
+    set(_targets "${GPU_TARGETS}")
+    if(NOT _targets)
+        set(_targets "${AMDGPU_TARGETS}")
+    endif()
+    if(NOT _targets)
+        set(${out_var} TRUE PARENT_SCOPE) # no target list -> build everything
+        return()
+    endif()
+    string(REGEX REPLACE ":.*$" "" _arch_base "${arch}")
+    foreach(_t IN LISTS _targets)
+        string(REGEX REPLACE ":.*$" "" _t_base "${_t}")
+        if(_t_base STREQUAL _arch_base)
+            set(${out_var} TRUE PARENT_SCOPE)
+            return()
+        endif()
+    endforeach()
+    set(${out_var} FALSE PARENT_SCOPE)
+endfunction()
+
+# ---------------------------------------------------------------------------
 # aot_add_rocke_family(ARCH <arch> FAMILY <family> PRODUCER <script.py>)
 #
 # Runs the co-located producer at build time to emit the family's .co into
 # ${AOT_CATALOG_BUILD_DIR}/<arch>/<family>/, stages the checked-in family.json
 # beside them, and installs the folder for packaging. No-op (with a STATUS note)
-# when rocKE is unavailable.
+# when the arch is not in this build's GPU_TARGETS or when rocKE is unavailable.
 # ---------------------------------------------------------------------------
 function(aot_add_rocke_family)
     cmake_parse_arguments(F "" "ARCH;FAMILY;PRODUCER" "" ${ARGN})
@@ -105,6 +139,16 @@ function(aot_add_rocke_family)
 
     set(_src ${CMAKE_CURRENT_SOURCE_DIR})
     set(_out ${AOT_CATALOG_BUILD_DIR}/${F_ARCH}/${F_FAMILY})
+
+    # Skip archs this build didn't ask for BEFORE touching rocKE -- an unwanted
+    # arch must not build even where rocKE is available.
+    _aot_arch_requested(${F_ARCH} _arch_ok)
+    if(NOT _arch_ok)
+        message(STATUS
+            "aot-catalog: skipping ${F_ARCH}/${F_FAMILY} "
+            "(arch not in GPU_TARGETS/AMDGPU_TARGETS for this build)")
+        return()
+    endif()
 
     if(NOT _AOT_ROCKE_OK)
         message(STATUS "aot-catalog: skipping rocKE family ${F_ARCH}/${F_FAMILY} (rocKE unavailable)")
