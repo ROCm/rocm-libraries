@@ -127,6 +127,11 @@ endif()
 
 if(UNIX AND NOT APPLE)
   function(add_abi04_provider target abi_ver soname version_script bsymbolic)
+    set(linker "${ARGV5}")
+    set(outdir "${ARGV6}")
+    if(outdir STREQUAL "")
+      set(outdir ${CMAKE_CURRENT_BINARY_DIR}/abi04-dso)
+    endif()
     add_library(${target} SHARED abi03_fixture_rocblas.cpp)
     target_compile_definitions(${target} PRIVATE ABI_VER=${abi_ver})
     target_link_options(${target} PRIVATE
@@ -135,8 +140,11 @@ if(UNIX AND NOT APPLE)
     if(bsymbolic)
       target_link_options(${target} PRIVATE "LINKER:-Bsymbolic")
     endif()
+    if(NOT linker STREQUAL "")
+      target_link_options(${target} PRIVATE "-fuse-ld=${linker}")
+    endif()
     set_target_properties(${target} PROPERTIES
-      LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/abi04-dso
+      LIBRARY_OUTPUT_DIRECTORY ${outdir}
       PREFIX "" OUTPUT_NAME "${soname}" SUFFIX "")
   endfunction()
 
@@ -176,6 +184,49 @@ if(UNIX AND NOT APPLE)
   else()
     message(STATUS
       "abi04_ldconfig_stub: ldconfig not found, ldconfig-stub test not registered")
+  endif()
+
+  include(CheckCXXSourceCompiles)
+  set(CMAKE_REQUIRED_LINK_OPTIONS -fuse-ld=lld)
+  check_cxx_source_compiles("int main(){return 0;}" ROCM_INTERFACES_HAVE_LLD)
+  unset(CMAKE_REQUIRED_LINK_OPTIONS)
+
+  if(ROCM_INTERFACES_HAVE_LLD)
+    set(_abi04_lld_dir ${CMAKE_CURRENT_BINARY_DIR}/abi04-dso-lld)
+    add_abi04_provider(abi04_rb5_lld 5 librocblas.so.5 abi04_rb5.map OFF lld ${_abi04_lld_dir})
+    add_abi04_provider(abi04_rb6_lld 6 librocblas.so.6 abi03_provA.map OFF lld ${_abi04_lld_dir})
+    add_abi04_provider(abi04_rb7_lld 7 librocblas.so.7 abi03_provB.map OFF lld ${_abi04_lld_dir})
+    add_abi04_provider(abi04_rb6_bsym_lld 6 librocblas_bsym.so.6 abi03_provA.map ON lld ${_abi04_lld_dir})
+    add_abi04_provider(abi04_rb7_bsym_lld 7 librocblas_bsym.so.7 abi03_provB.map ON lld ${_abi04_lld_dir})
+    add_dependencies(abi04_versioning_test
+      abi04_rb5_lld abi04_rb6_lld abi04_rb7_lld abi04_rb6_bsym_lld abi04_rb7_bsym_lld)
+
+    add_test(NAME rocm_interfaces.abi04_three_line_order_lld
+      COMMAND abi04_versioning_test three_line
+        $<TARGET_FILE:abi04_rb5_lld> $<TARGET_FILE:abi04_rb6_lld> $<TARGET_FILE:abi04_rb7_lld>)
+    add_test(NAME rocm_interfaces.abi04_bsymbolic_inert_lld
+      COMMAND abi04_versioning_test bsymbolic
+        $<TARGET_FILE:abi04_rb6_bsym_lld> $<TARGET_FILE:abi04_rb7_bsym_lld>)
+
+    add_test(NAME rocm_interfaces.abi04_multiple_default_def_rejected_lld
+      COMMAND ${CMAKE_COMMAND}
+        -DCXX=${CMAKE_CXX_COMPILER}
+        -DLINKER=lld
+        -DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/abi03_fixture_rocblas.cpp
+        -DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/abi04-dupdef-lld
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/check_multiple_default_def.cmake)
+
+    if(ROCM_INTERFACES_LDCONFIG)
+      add_test(NAME rocm_interfaces.abi04_ldconfig_stub_preserved_lld
+        COMMAND ${CMAKE_COMMAND}
+          -DLDCONFIG=${ROCM_INTERFACES_LDCONFIG}
+          -DDSO_DIR=${_abi04_lld_dir}
+          -DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/abi04-ldconfig-lld
+          -P ${CMAKE_CURRENT_SOURCE_DIR}/check_ldconfig_stub.cmake)
+    endif()
+  else()
+    message(STATUS
+      "abi04 lld matrix: -fuse-ld=lld unavailable, lld variants not registered")
   endif()
 endif()
 
