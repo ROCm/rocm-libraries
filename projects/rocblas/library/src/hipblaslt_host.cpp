@@ -558,8 +558,7 @@ namespace
 template <typename Ti, typename To, typename Tc>
 rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti, To, Tc>& prob,
                                               rocblas_gemm_algo                            algo,
-                                              int32_t  solution_index,
-                                              int32_t* selected_algo_index_out)
+                                              int32_t solution_index)
 {
 #if defined(HIPBLASLT_VERSION_MAJOR) && defined(HIPBLASLT_VERSION_MINOR) \
     && defined(HIPBLASLT_VERSION_PATCH)                                  \
@@ -733,10 +732,6 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
         if(!gsu_malloc)
         {
             throw rocblas_status_memory_error;
-        }
-        if(selected_algo_index_out)
-        {
-            *selected_algo_index_out = hipblaslt_ext::getIndexFromAlgo(heuristicResult.algo);
         }
         workspace = prob.handle->gsu_workspace;
         hipblaslt_alpha_beta_type<Tc> alpha, beta;
@@ -917,9 +912,6 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
             return init;
         }
 
-        if(selected_algo_index_out)
-            *selected_algo_index_out = hipblaslt_ext::getIndexFromAlgo(heuristicResult.algo);
-
         auto gsu_malloc = prob.handle->gsu_malloc_by_size(workspace_size);
 
         if(!gsu_malloc)
@@ -966,9 +958,6 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
         {
             return init;
         }
-
-        if(selected_algo_index_out)
-            *selected_algo_index_out = hipblaslt_ext::getIndexFromAlgo(heuristicResult.algo);
 
         auto gsu_malloc = prob.handle->gsu_malloc_by_size(workspace_size);
 
@@ -1208,64 +1197,52 @@ rocblas_status getAllSolutionsHipBlasLT(const RocblasContractionProblem<Ti, To, 
  ******************************************************************************/
 
 // Non-HPA/GEMM types
-template rocblas_status
-    runContractionProblemHipBlasLT(const RocblasContractionProblem<rocblas_half>&,
-                                   rocblas_gemm_algo algo,
-                                   int32_t           solution_index,
-                                   int32_t*          selected_algo_index_out);
+template rocblas_status runContractionProblemHipBlasLT(
+    const RocblasContractionProblem<rocblas_half>&, rocblas_gemm_algo algo, int32_t solution_index);
 
 template rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<float>&,
                                                        rocblas_gemm_algo algo,
-                                                       int32_t           solution_index,
-                                                       int32_t*          selected_algo_index_out);
+                                                       int32_t           solution_index);
 
 template rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<double>&,
                                                        rocblas_gemm_algo algo,
-                                                       int32_t           solution_index,
-                                                       int32_t*          selected_algo_index_out);
+                                                       int32_t           solution_index);
 
 template rocblas_status
     runContractionProblemHipBlasLT(const RocblasContractionProblem<rocblas_float_complex>&,
                                    rocblas_gemm_algo algo,
-                                   int32_t           solution_index,
-                                   int32_t*          selected_algo_index_out);
+                                   int32_t           solution_index);
 
 template rocblas_status
     runContractionProblemHipBlasLT(const RocblasContractionProblem<rocblas_double_complex>&,
                                    rocblas_gemm_algo algo,
-                                   int32_t           solution_index,
-                                   int32_t*          selected_algo_index_out);
+                                   int32_t           solution_index);
 
 // HPA types
 template rocblas_status runContractionProblemHipBlasLT(
     const RocblasContractionProblem<rocblas_half, rocblas_half, float>&,
     rocblas_gemm_algo algo,
-    int32_t           solution_index,
-    int32_t*          selected_algo_index_out);
+    int32_t           solution_index);
 
 template rocblas_status
     runContractionProblemHipBlasLT(const RocblasContractionProblem<rocblas_half, float, float>&,
                                    rocblas_gemm_algo algo,
-                                   int32_t           solution_index,
-                                   int32_t*          selected_algo_index_out);
+                                   int32_t           solution_index);
 
 template rocblas_status runContractionProblemHipBlasLT(
     const RocblasContractionProblem<rocblas_bfloat16, rocblas_bfloat16, float>&,
     rocblas_gemm_algo algo,
-    int32_t           solution_index,
-    int32_t*          selected_algo_index_out);
+    int32_t           solution_index);
 
 template rocblas_status
     runContractionProblemHipBlasLT(const RocblasContractionProblem<rocblas_bfloat16, float, float>&,
                                    rocblas_gemm_algo algo,
-                                   int32_t           solution_index,
-                                   int32_t*          selected_algo_index_out);
+                                   int32_t           solution_index);
 
 template rocblas_status
     runContractionProblemHipBlasLT(const RocblasContractionProblem<int8_t, int32_t, int32_t>&,
                                    rocblas_gemm_algo algo,
-                                   int32_t           solution_index,
-                                   int32_t*          selected_algo_index_out);
+                                   int32_t           solution_index);
 
 // ********** get all solutions explicits ********
 // Non-HPA/GEMM types

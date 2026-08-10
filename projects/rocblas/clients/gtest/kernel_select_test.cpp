@@ -158,14 +158,13 @@ TEST(KernelSelect, TrsmDecompositionParentApi)
                                 << "got " << lines << " in " << trace_path;
     EXPECT_NE(trace.find("-f gemm_strided_batched_ex"), std::string::npos);
     EXPECT_NE(trace.find("# source="), std::string::npos);
-    EXPECT_NE(trace.find("kernel="), std::string::npos);
 
     std::remove(trace_path.c_str());
 }
 
 // (2) Forcing ROCBLAS_USE_HIPBLASLT=0 should route every GEMM through Tensile.
-// Covers: source=tensile branch, capture of solution->name() / solution->index, and the
-// Tensile kernel-name format (Cijk_* is Tensile's canonical naming convention).
+// Covers: source=tensile branch, capture of solution->name(), and the Tensile kernel-name
+// format (Cijk_* is Tensile's canonical naming convention).
 TEST(KernelSelect, TensileBackendForced)
 {
 #ifndef BUILD_WITH_TENSILE

@@ -5,6 +5,10 @@ rocBLAS documentation is available at
 
 ## rocBLAS 5.7.0
 
+### Added
+
+* `ROCBLAS_LAYER=0x10` (`rocblas_layer_mode_log_kernel_select`): emits a `rocblas-bench`-replayable line per internal GEMM sub-problem, annotated with the selected kernel name (Tensile backend only) and the source backend (`hipblaslt` or `tensile`). Useful for decomposing higher-level BLAS3 calls (`trsm`, `trmm`, `syrk`, ...) into individually benchmarkable kernels. Lines also carry `fallback_from=` and `parent_api=` for context.
+
 ## rocBLAS 5.6.0
 
 ### Added
@@ -25,7 +29,6 @@ rocBLAS documentation is available at
 
 ### Added
 
-* `ROCBLAS_LAYER=0x10` (`rocblas_layer_mode_log_kernel_select`): emits a `rocblas-bench`-replayable line per internal GEMM sub-problem, annotated with the selected kernel name/index and the source backend (`hipblaslt`, `tensile`, or `source`). Useful for decomposing higher-level BLAS3 calls (`trsm`, `trmm`, `syrk`, ...) into individually benchmarkable kernels without parsing `TENSILE_DB`. Lines also carry `fallback_from=` and `parent_api=` for context.
 * Per-batch `alpha`/`beta` support for Level 2 batched and strided-batched `gemv` via `rocblas_set_batch_alpha_stride` and `rocblas_set_batch_beta_stride` (device pointer mode).
 * Per-batch `alpha` support for Level 2 batched and strided-batched `ger`, `geru`, and `gerc` via `rocblas_set_batch_alpha_stride` (device pointer mode).
 * Per-batch `alpha` (scalar vector) API support for `axpy_batched`, `axpy_strided_batched`, and their `_ex` forms through `rocblas_set_batch_alpha_stride` when `rocblas_handle` is in `rocblas_pointer_mode_device`.

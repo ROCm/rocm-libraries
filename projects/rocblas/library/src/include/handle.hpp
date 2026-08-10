@@ -957,13 +957,15 @@ public:
 // RAII helper that stamps the user-facing C API name onto the handle for the duration of a call.
 // Used by rocblas_layer_mode_log_kernel_select (0x10) to attribute each internal-GEMM trace line
 // to its parent API. Construct one line at the top of each *_impl after the handle null-check.
+// When kernel-select logging is off (the common case) this is a no-op: the constructor only tests
+// the layer bit and touches the handle when the bit is set, so it costs nothing on the hot path.
 // Save/restore protects against re-entry: if an internal path calls another rocBLAS API, the
 // outer name is restored on scope exit. Single-threaded per handle, matching the rest of rocBLAS.
 struct rocblas_internal_api_scope
 {
     rocblas_internal_api_scope(rocblas_handle h, const char* name)
-        : m_handle(h)
-        , m_prev(h ? h->current_api_name : nullptr)
+        : m_handle((h && (h->layer_mode & rocblas_layer_mode_log_kernel_select)) ? h : nullptr)
+        , m_prev(m_handle ? m_handle->current_api_name : nullptr)
     {
         if(m_handle)
             m_handle->current_api_name = name;

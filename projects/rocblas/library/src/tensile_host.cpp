@@ -1270,10 +1270,8 @@ rocblas_status runContractionProblem(const RocblasContractionProblem<Ti, To, Tc>
     // Capture is gated by the layer bit to avoid the std::string copy of solution->name() when off.
     const bool kernel_select_logging
         = prob.handle->layer_mode & rocblas_layer_mode_log_kernel_select;
-    bool        hipblaslt_attempted      = false;
-    int32_t     selected_hipblaslt_index = -1;
+    bool        hipblaslt_attempted = false;
     std::string selected_tensile_name;
-    int64_t     selected_tensile_index = -1;
 
     bool solutionBased = algo == rocblas_gemm_algo_solution_index;
     bool hipBLASLtOnly = false, TensileOnly = false;
@@ -1296,11 +1294,7 @@ rocblas_status runContractionProblem(const RocblasContractionProblem<Ti, To, Tc>
                 rocblas_int hipblaslt_idx = map_index_rocblas_to_hipblaslt(solution_index);
 
                 rocblas_internal_ostream msg;
-                auto                     hipblasltResult = runContractionProblemHipBlasLT(
-                    prob,
-                    algo,
-                    hipblaslt_idx,
-                    kernel_select_logging ? &selected_hipblaslt_index : nullptr);
+                auto hipblasltResult = runContractionProblemHipBlasLT(prob, algo, hipblaslt_idx);
 
                 if(hipblasltResult == rocblas_status_success || (solutionBased && hipBLASLtOnly))
                 {
@@ -1366,10 +1360,7 @@ rocblas_status runContractionProblem(const RocblasContractionProblem<Ti, To, Tc>
                 solution = library->findBestSolution(tensile_prob, *hardware, fitness_query);
 
             if(solution && kernel_select_logging)
-            {
-                selected_tensile_name  = solution->name();
-                selected_tensile_index = solution->index;
-            }
+                selected_tensile_name = solution->name();
 
             if(!solution)
             {
@@ -1500,23 +1491,13 @@ rocblas_status runContractionProblem(const RocblasContractionProblem<Ti, To, Tc>
         const char* parent_api
             = prob.handle->current_api_name ? prob.handle->current_api_name : "unknown";
 
-        rocblas_internal_ostream kernel_field;
-        if(hipblaslt_backend)
-            kernel_field << "kernel=hipblaslt_algo_index=" << selected_hipblaslt_index;
-        else if(!selected_tensile_name.empty())
-            kernel_field << "kernel=" << selected_tensile_name
-                         << " tensile_index=" << selected_tensile_index;
-        else
-            kernel_field << "kernel=unknown";
-
-        rocblas_internal_ostream source_field;
-        source_field << "# source=" << source;
-
-        rocblas_internal_ostream fallback_field;
-        fallback_field << "fallback_from=" << fallback;
-
-        rocblas_internal_ostream parent_field;
-        parent_field << "parent_api=" << parent_api;
+        // Trailing kernel-selection metadata, kept in one `#` comment so the bench line stays
+        // copy-pasteable. For tensile we keep the kernel name only.
+        rocblas_internal_ostream metadata_field;
+        metadata_field << "# source=" << source;
+        if(!hipblaslt_backend && !selected_tensile_name.empty())
+            metadata_field << " kernel=" << selected_tensile_name;
+        metadata_field << " fallback_from=" << fallback << " parent_api=" << parent_api;
 
         rocblas_internal_logger logger;
         logger.log_kernel_select(prob.handle,
@@ -1567,10 +1548,7 @@ rocblas_status runContractionProblem(const RocblasContractionProblem<Ti, To, Tc>
                                  solution_index,
                                  "--flags",
                                  (uint32_t)prob.flags,
-                                 source_field.str(),
-                                 kernel_field.str(),
-                                 fallback_field.str(),
-                                 parent_field.str());
+                                 metadata_field.str());
     }
 
     return status;

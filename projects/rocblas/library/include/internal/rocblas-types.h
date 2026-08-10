@@ -258,8 +258,8 @@ typedef enum rocblas_layer_mode_
     rocblas_layer_mode_log_internal = 0x8,
     /*! \brief Outputs to the same stream as trace logging a rocblas-bench-replayable line for each
      * internal GEMM sub-problem dispatched (including those produced by decomposed BLAS3 ops such as
-     * trsm, trmm, syrk, ...), annotated with the selected kernel name/index and the source backend
-     * (hipblaslt, tensile, or source). */
+     * trsm, trmm, syrk, ...), annotated with the selected kernel name (Tensile backend only) and the
+     * source backend (hipblaslt or tensile). */
     rocblas_layer_mode_log_kernel_select = 0x10,
 } rocblas_layer_mode;
 
