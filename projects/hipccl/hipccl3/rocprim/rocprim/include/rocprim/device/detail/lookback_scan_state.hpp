@@ -54,12 +54,10 @@
 #endif // ROCPRIM_DETAIL_LOOKBACK_SCAN_STATE_WITHOUT_SLOW_FENCES
 
 #ifndef ROCPRIM_DETAIL_LOOKBACK_SCAN_STATE_ATOMIC_ALIGNMENT
-    #if defined(__HIP_DEVICE_COMPILE__) \
-        && (defined(__gfx942__) || defined(__gfx950__) || defined(__gfx9_4_generic__))
-        #define ROCPRIM_DETAIL_LOOKBACK_SCAN_STATE_ATOMIC_ALIGNMENT 128
-    #else
-        #define ROCPRIM_DETAIL_LOOKBACK_SCAN_STATE_ATOMIC_ALIGNMENT 4
-    #endif
+    // Align atomics to this number of bytes. Extra caution should be given
+    // when specializing this value per architecture due to potential
+    // host-device mismatch.
+    #define ROCPRIM_DETAIL_LOOKBACK_SCAN_STATE_ATOMIC_ALIGNMENT 128
 #endif // ROCPRIM_DETAIL_LOOKBACK_SCAN_STATE_ATOMIC_ALIGNMENT
 
 extern "C" {
