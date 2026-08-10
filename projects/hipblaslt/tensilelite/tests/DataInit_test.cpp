@@ -145,6 +145,34 @@ TEST(HostValidationDataInitialization, GeneratesStridedProblemDependentPatterns)
     EXPECT_EQ(halfBits[3], 0xffffU);
 }
 
+TEST(HostValidationDataInitialization, SizesDescriptorStorageForTheRequestedType)
+{
+    TensorDescriptor bfloat16Descriptor(
+        "cross-type-bias",
+        rocisa::DataType::BFloat16,
+        {3, 1, 1},
+        {1, 3, 0});
+    std::array<float, 3> floatValues{-1.0f, -1.0f, -1.0f};
+
+    ASSERT_TRUE(tryHostValidationInitialize(rocisa::DataType::Float,
+                                            InitMode::Zero,
+                                            floatValues.data(),
+                                            bfloat16Descriptor,
+                                            fixedInitializationKey));
+    EXPECT_EQ(floatValues, (std::array<float, 3>{0.0f, 0.0f, 0.0f}));
+
+    TensorDescriptor halfDescriptor(
+        "cross-type-bias",
+        rocisa::DataType::Half,
+        {3, 1, 1},
+        {1, 3, 0});
+    ASSERT_TRUE(tryHostValidationInitialize(rocisa::DataType::Float,
+                                            InitMode::Random,
+                                            floatValues.data(),
+                                            halfDescriptor,
+                                            fixedInitializationKey));
+}
+
 TEST(HostValidationDataInitialization, HandlesIndexedAndEncodedRandomModes)
 {
     std::array<float, 4> values{-1, -1, -1, -1};

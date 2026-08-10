@@ -541,12 +541,13 @@ namespace TensileLite::Client
         for(const size_t stride : descriptor.strides())
             strides.push_back(static_cast<ptrdiff_t>(stride));
 
-        const size_t bytes = descriptor.totalAllocatedBytes();
+        Layout layout(Shape(descriptor.sizes()), std::move(strides));
+        const size_t bytes = roc::host_validation::storageBytesForLayout(*type, layout);
         if(array == nullptr && bytes != 0)
             throw std::invalid_argument("Null TensileLite tensor initialization buffer.");
         return generate(dataType,
                         mode,
-                        Layout(Shape(descriptor.sizes()), std::move(strides)),
+                        std::move(layout),
                         {static_cast<std::byte*>(array), bytes},
                         true,
                         key);
