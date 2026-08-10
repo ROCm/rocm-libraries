@@ -128,7 +128,27 @@ private:
     /// implicit `priority` and `id` fields every candidate carries.
     static FeatureExtractionContext::ValueMap buildKernelVars(const KernelCandidate& candidate);
 
-    /// Apply static ordering fallback.
+    /// Rank candidates by a declared field order (RFC 0019 §5 `static_order`).
+    ///
+    /// A comparator, not a scorer. Fields are compared pairwise in declaration order,
+    /// so there is no packed key to overflow and no features_signature to resolve —
+    /// `static_order` carries "no features, no model, no hash" per §5. Callers set
+    /// `applied`/`usedModel`: this is the model for a static_order UHD, and the
+    /// fail-open path for everything else.
+    ///
+    /// @param orderFields Field names, most significant first. Empty means
+    ///        priority then id, the §6 step 6 default.
+    static SelectionResult applyDeclaredOrder(const std::vector<KernelCandidate>& candidates,
+                                              const std::vector<std::string>& orderFields);
+
+    /// Resolve one order-field for a candidate. `priority` and `id` are implicit on
+    /// every candidate; any other name comes from its KMD metadata. Accepts both the
+    /// bare (`tile_m`) and namespaced (`$kernel.tile_m`) spelling.
+    /// @returns nullopt when the candidate does not carry the field.
+    static std::optional<double> lookupOrderField(const KernelCandidate& candidate,
+                                                  const std::string& field);
+
+    /// Apply static ordering fallback (RFC 0019 §6 step 6): priority then id.
     static SelectionResult applyStaticOrdering(const std::vector<KernelCandidate>& candidates,
                                                const std::string& reason);
 

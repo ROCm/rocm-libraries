@@ -47,6 +47,20 @@ SelectionResult SelectionEngine::select(int64_t engineId,
         return result;
     }
 
+    // static_order is a declared precedence, not a model (RFC 0019 §5: "no features,
+    // no model, no hash"). Rank with the comparator directly — no adapter, no feature
+    // extraction, no signature. Building a scorer for it forced a packed scalar key
+    // that could not represent a lexicographic order, and required a
+    // features_signature the RFC says static_order does not carry.
+    if(cfg.adapterType == "static_order")
+    {
+        auto ordered = applyDeclaredOrder(engine.candidates, cfg.staticOrderFields);
+        ordered.trace = result.trace;
+        ordered.applied = true;
+        ordered.trace.usedModel = true; // the declared order is the model
+        return ordered;
+    }
+
     // Every fallback below routes through here so the provenance gathered so far
     // (uhdId, adapterType, hashes, arch) survives into the returned trace. Returning
     // applyStaticOrdering() directly would hand back a default-constructed trace and
@@ -196,13 +210,6 @@ SelectionResult SelectionEngine::select(int64_t engineId,
                 sc.scoreValid = true;
             }
         }
-        catch(const AdapterOrderingError& e)
-        {
-            // The adapter is telling us the ranking as a whole is untrustworthy, not
-            // that this one candidate failed. Dropping the candidate and ranking the
-            // rest would return a confidently wrong winner, so degrade instead.
-            return degrade(std::string("adapter cannot order this candidate set: ") + e.what());
-        }
         catch(const std::exception&)
         {
             // Scoring failed for this candidate; mark invalid
@@ -292,47 +299,114 @@ FeatureExtractionContext::ValueMap SelectionEngine::buildKernelVars(const Kernel
     return kernelVars;
 }
 
+std::optional<double> SelectionEngine::lookupOrderField(const KernelCandidate& candidate,
+                                                        const std::string& field)
+{
+    // Order fields may be written bare or namespaced; both name the same thing.
+    const std::string bare =
+        field.rfind("$kernel.", 0) == 0 ? field.substr(std::string("$kernel.").size()) : field;
+
+    // priority and id are implicit on every candidate, so a static_order UHD can name
+    // them without the engine declaring any KMD metadata.
+    if(bare == "priority")
+    {
+        return static_cast<double>(candidate.priority);
+    }
+    if(bare == "id")
+    {
+        return static_cast<double>(candidate.kernelId);
+    }
+
+    const auto it = candidate.metadata.find(bare);
+    if(it == candidate.metadata.end())
+    {
+        return std::nullopt;
+    }
+    return it->second;
+}
+
+SelectionResult
+    SelectionEngine::applyDeclaredOrder(const std::vector<KernelCandidate>& candidates,
+                                        const std::vector<std::string>& orderFields)
+{
+    SelectionResult result;
+
+    static const std::vector<std::string> kDefaultOrder = {"priority", "id"};
+    const std::vector<std::string>& fields = orderFields.empty() ? kDefaultOrder : orderFields;
+
+    // Pre-resolve each candidate's key so the comparator does no lookups. A missing
+    // field sorts after a present one, which keeps the order total and deterministic
+    // without dropping the candidate.
+    struct Keyed
+    {
+        const KernelCandidate* candidate;
+        std::vector<std::optional<double>> key;
+    };
+
+    std::vector<Keyed> keyed;
+    keyed.reserve(candidates.size());
+    for(const auto& candidate : candidates)
+    {
+        Keyed k{&candidate, {}};
+        k.key.reserve(fields.size());
+        for(const auto& field : fields)
+        {
+            k.key.push_back(lookupOrderField(candidate, field));
+        }
+        keyed.push_back(std::move(k));
+    }
+
+    std::sort(keyed.begin(), keyed.end(), [](const Keyed& a, const Keyed& b) {
+        for(size_t i = 0; i < a.key.size(); ++i)
+        {
+            const auto& lhs = a.key[i];
+            const auto& rhs = b.key[i];
+            if(lhs.has_value() != rhs.has_value())
+            {
+                return lhs.has_value(); // present before missing
+            }
+            if(lhs.has_value() && *lhs != *rhs)
+            {
+                return *lhs < *rhs; // lower value ranks first
+            }
+        }
+        // Stable final arbitration; RFC 0019 §6 step 5 forbids declaration order.
+        return a.candidate->kernelId < b.candidate->kernelId;
+    });
+
+    result.scoredCandidates.reserve(keyed.size());
+    result.sortedKernelIds.reserve(keyed.size());
+    for(const auto& k : keyed)
+    {
+        ScoredCandidate sc;
+        sc.kernelId = k.candidate->kernelId;
+        sc.priority = k.candidate->priority;
+        // A declared order produces no score. Leaving scoreValid false keeps
+        // bestScore unset, so a static_order engine correctly declines to take part
+        // in the §12.3 cross-engine score comparison rather than inventing a number.
+        sc.score = 0.0;
+        sc.scoreValid = false;
+        result.scoredCandidates.push_back(sc);
+        result.sortedKernelIds.push_back(sc.kernelId);
+    }
+
+    if(!result.sortedKernelIds.empty())
+    {
+        result.bestKernelId = result.sortedKernelIds.front();
+    }
+
+    return result;
+}
+
 SelectionResult
     SelectionEngine::applyStaticOrdering(const std::vector<KernelCandidate>& candidates,
                                          const std::string& reason)
 {
-    SelectionResult result;
+    // The fail-open default is the same comparator with the default field order, so
+    // §6 step 6 and the static_order adapter are literally one code path.
+    auto result = applyDeclaredOrder(candidates, {});
     result.applied = false;
     result.fallbackReason = reason;
-
-    // Sort by priority (lower is better), then by id (lower is better)
-    std::vector<ScoredCandidate> scored;
-    scored.reserve(candidates.size());
-    for(const auto& c : candidates)
-    {
-        ScoredCandidate sc;
-        sc.kernelId = c.kernelId;
-        sc.priority = c.priority;
-        sc.score = 0.0;
-        sc.scoreValid = false;
-        scored.push_back(sc);
-    }
-
-    std::sort(scored.begin(), scored.end(), [](const ScoredCandidate& a, const ScoredCandidate& b) {
-        if(a.priority != b.priority)
-        {
-            return a.priority < b.priority;
-        }
-        return a.kernelId < b.kernelId;
-    });
-
-    result.scoredCandidates = scored;
-    result.sortedKernelIds.reserve(scored.size());
-    for(const auto& s : scored)
-    {
-        result.sortedKernelIds.push_back(s.kernelId);
-    }
-
-    if(!scored.empty())
-    {
-        result.bestKernelId = scored[0].kernelId;
-    }
-
     return result;
 }
 

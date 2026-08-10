@@ -5,7 +5,6 @@
 
 #include "FeatureExtractor.hpp"
 #include "ScoreTransform.hpp"
-#include "adapters/StaticOrderAdapter.hpp"
 #include "adapters/TreeDataAdapter.hpp"
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
@@ -226,13 +225,9 @@ std::shared_ptr<IUhdAdapter>
     // Create adapter based on type
     const auto& cfg = entry->uhdConfig;
 
-    if(cfg.adapterType == "static_order")
-    {
-        // StaticOrderAdapter needs the features signature to map field names to indices
-        auto adapter = StaticOrderAdapter::create(cfg.staticOrderFields, cfg.featuresSignature);
-        entry->cachedAdapter = std::move(adapter);
-    }
-    else if(cfg.adapterType == "tree_data")
+    // static_order never reaches here: SelectionEngine ranks it with the declared-order
+    // comparator instead of building a scorer.
+    if(cfg.adapterType == "tree_data")
     {
         // TreeDataAdapter loads from model file
         if(!cfg.modelArtifactPath.empty())

@@ -21,7 +21,6 @@
 #include "FeatureExtractor.hpp"
 #include "SelectionEngine.hpp"
 #include "adapters/IUhdAdapter.hpp"
-#include "adapters/StaticOrderAdapter.hpp"
 #include "adapters/TreeDataAdapter.hpp"
 #include "heuristics/BuiltInLogging.hpp"
 #include "logging/Logging.hpp"
