@@ -1007,8 +1007,9 @@ TEST_F(TestGraphDescriptor, PreservesOpaqueSerializedGraphId)
     GraphDescriptor descriptor;
     descriptor.deserializeGraph(identified.data(), identified.size());
     descriptor.buildSerializedGraph();
-    ASSERT_NE(unpack(descriptor)->id, nullptr);
-    EXPECT_EQ(hipdnn_flatbuffers_sdk::utilities::toUuidBytes(*unpack(descriptor)->id), opaqueId);
+    const auto roundTripped = unpack(descriptor);
+    ASSERT_NE(roundTripped->id, nullptr);
+    EXPECT_EQ(hipdnn_flatbuffers_sdk::utilities::toUuidBytes(*roundTripped->id), opaqueId);
 }
 
 TEST_F(TestGraphDescriptor, JsonRoundTripPreservesUuid)

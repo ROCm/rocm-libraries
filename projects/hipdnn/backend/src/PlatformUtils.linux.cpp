@@ -6,7 +6,6 @@
 #if defined(__linux__)
 
 #include "HipdnnException.hpp"
-#include <cerrno>
 #include <dlfcn.h>
 #include <spdlog/fmt/fmt.h>
 #include <sys/random.h>
@@ -83,26 +82,12 @@ std::string getSystemInfo()
 
 std::array<uint8_t, 16> generateUuidV4()
 {
+    // getentropy() fills the whole buffer or fails, for any request up to 256 bytes.
     std::array<uint8_t, 16> bytes{};
-    size_t filled = 0;
-    while(filled < bytes.size())
+    if(getentropy(bytes.data(), bytes.size()) != 0)
     {
-        const auto result = getrandom(bytes.data() + filled, bytes.size() - filled, 0);
-        if(result < 0)
-        {
-            if(errno == EINTR)
-            {
-                continue;
-            }
-            throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR,
-                                  "Failed to generate graph UUID using getrandom.");
-        }
-        if(result == 0)
-        {
-            throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR,
-                                  "Failed to generate graph UUID: getrandom returned no data.");
-        }
-        filled += static_cast<size_t>(result);
+        throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR,
+                              "Failed to generate graph UUID using getentropy.");
     }
 
     bytes[6] = static_cast<uint8_t>((bytes[6] & 0x0fU) | 0x40U);

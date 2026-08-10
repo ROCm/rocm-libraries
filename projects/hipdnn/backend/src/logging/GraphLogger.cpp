@@ -12,10 +12,8 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/Graph.hpp>
-#include <iomanip>
 #include <mutex>
 #include <nlohmann/json.hpp>
-#include <sstream>
 
 namespace hipdnn_backend::logging
 {
@@ -91,31 +89,32 @@ std::filesystem::path GraphLogger::getOutputDirectory()
 
 void GraphLogger::logGraph(const uint8_t* serializedGraph, size_t size)
 {
+    flatbuffers::Verifier verifier(serializedGraph, size);
+    if(!hipdnn_flatbuffers_sdk::data_objects::VerifyGraphBuffer(verifier))
+    {
+        HIPDNN_BACKEND_LOG_WARN("Not logging a graph whose buffer failed verification");
+        return;
+    }
+
     const auto* graph
         = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::Graph>(serializedGraph);
 
-    // Dumps are named by the graph's own ID. Re-finalizing a descriptor, or replaying a
-    // serialized graph, keeps that ID and so reuses one file; a graph rebuilt from scratch is a
-    // distinct graph object and earns its own. Naming by a content hash would also fold those
-    // rebuilds together, but it can collide, and a collision silently discards one graph under a
-    // name already claimed by another.
-    std::string filename;
-    if(graph->id() != nullptr)
+    // Only a finalized graph carries an ID, and a graph without one is still mutable, so its
+    // contents are not yet a stable thing to name. Dumps are named by that ID: re-finalizing a
+    // descriptor, or replaying a serialized graph, keeps it and so reuses one file, while a graph
+    // rebuilt from scratch is a distinct graph object and earns its own. Naming by a content hash
+    // would also fold rebuilds together, but it can collide, and a collision silently discards one
+    // graph under a name already claimed by another.
+    if(graph->id() == nullptr)
     {
-        filename = "graph_"
-                   + hipdnn_flatbuffers_sdk::utilities::formatUuid(
-                       hipdnn_flatbuffers_sdk::utilities::toUuidBytes(*graph->id()))
-                   + ".json";
+        HIPDNN_BACKEND_LOG_WARN("Not logging a graph without an identity; only a finalized graph "
+                                "has one");
+        return;
     }
-    else
-    {
-        // Unreachable via finalize(), which always assigns an ID before serializing. Kept so a
-        // pre-finalize buffer cannot land every graph on one filename.
-        std::ostringstream oss;
-        oss << "graph_" << std::hex << std::setfill('0') << std::setw(16)
-            << hipdnn_data_sdk::utilities::fnv1aHash(serializedGraph, size) << ".json";
-        filename = oss.str();
-    }
+
+    const auto graphId = hipdnn_flatbuffers_sdk::utilities::formatUuid(
+        hipdnn_flatbuffers_sdk::utilities::toUuidBytes(*graph->id()));
+    const auto graphName = graph->name() != nullptr ? graph->name()->str() : std::string();
 
     const auto outputDirectory = getOutputDirectory();
     if(outputDirectory.empty())
@@ -124,10 +123,13 @@ void GraphLogger::logGraph(const uint8_t* serializedGraph, size_t size)
         return;
     }
 
-    const auto fullPath = outputDirectory / filename;
+    const auto fullPath = outputDirectory / ("graph_" + graphId + ".json");
     if(std::filesystem::exists(fullPath))
     {
-        HIPDNN_BACKEND_LOG_INFO("Skipping duplicate graph logged to {}", fullPath.string());
+        HIPDNN_BACKEND_LOG_INFO("Skipping graph \"{}\" with id {}, already logged to {}",
+                                graphName,
+                                graphId,
+                                fullPath.string());
         return;
     }
 
@@ -138,11 +140,15 @@ void GraphLogger::logGraph(const uint8_t* serializedGraph, size_t size)
     {
         file << graphJson.dump(2);
         file.close();
-        HIPDNN_BACKEND_LOG_INFO("Graph logged to {}", fullPath.string());
+        HIPDNN_BACKEND_LOG_INFO(
+            "Writing graph \"{}\" with id {} to {}", graphName, graphId, fullPath.string());
     }
     else
     {
-        HIPDNN_BACKEND_LOG_WARN("Failed to open graph log file: {}", fullPath.string());
+        HIPDNN_BACKEND_LOG_WARN("Failed to open graph log file {} for graph \"{}\" with id {}",
+                                fullPath.string(),
+                                graphName,
+                                graphId);
     }
 }
 

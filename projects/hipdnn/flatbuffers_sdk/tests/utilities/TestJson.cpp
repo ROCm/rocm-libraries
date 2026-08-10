@@ -127,13 +127,16 @@ TEST(TestJson, RejectsInvalidGraphUuid)
     const auto* graph = GetGraph(builder.GetBufferPointer());
     auto graphJson = nlohmann::json(*graph);
 
-    for(const auto& id : nlohmann::json::array({42, "not-a-uuid"}))
-    {
-        graphJson["id"] = id;
-        flatbuffers::FlatBufferBuilder invalidBuilder;
-        EXPECT_THROW((void)hipdnn_flatbuffers_sdk::json::to<Graph>(invalidBuilder, graphJson),
-                     std::exception);
-    }
+    // A non-string id fails the type check; a malformed string fails parsing.
+    graphJson["id"] = 42;
+    flatbuffers::FlatBufferBuilder nonStringBuilder;
+    EXPECT_THROW((void)hipdnn_flatbuffers_sdk::json::to<Graph>(nonStringBuilder, graphJson),
+                 std::runtime_error);
+
+    graphJson["id"] = "not-a-uuid";
+    flatbuffers::FlatBufferBuilder malformedBuilder;
+    EXPECT_THROW((void)hipdnn_flatbuffers_sdk::json::to<Graph>(malformedBuilder, graphJson),
+                 std::invalid_argument);
 }
 
 TEST(TestJson, GraphToJsonAndBack)

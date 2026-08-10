@@ -16,6 +16,7 @@
 #include <hipdnn_flatbuffers_sdk/utilities/json/Graph.hpp>
 #include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
 #include <logging/GraphLogger.hpp>
+#include <logging/Logging.hpp>
 #include <nlohmann/json.hpp>
 #include <unordered_map>
 
@@ -48,6 +49,8 @@ void GraphDescriptor::finalize()
     }
     catch(...)
     {
+        // Uncovered by tests: reaching here needs buildSerializedGraph() to fail on operations
+        // that already validated, which no input can force through the public API.
         if(needsId)
         {
             _graphId.reset();
@@ -56,6 +59,10 @@ void GraphDescriptor::finalize()
     }
 
     HipdnnBackendDescriptorImpl<GraphDescriptor>::finalize();
+
+    HIPDNN_BACKEND_LOG_INFO("Finalized graph \"{}\" with id {}",
+                            _name,
+                            hipdnn_flatbuffers_sdk::utilities::formatUuid(*_graphId));
 
     if(logging::GraphLogger::isEnabled())
     {
@@ -402,6 +409,14 @@ void GraphDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeName,
     // Non-mutating attributes (e.g., HANDLE) set invalidate = false.
     if(invalidate)
     {
+        if(_graphId.has_value())
+        {
+            HIPDNN_BACKEND_LOG_DEBUG(
+                "Discarding id {} for graph \"{}\": its contents changed, so finalizing again "
+                "generates a new id",
+                hipdnn_flatbuffers_sdk::utilities::formatUuid(*_graphId),
+                _name);
+        }
         invalidateCache();
         _graphId.reset();
     }
@@ -457,6 +472,12 @@ void GraphDescriptor::deserializeGraph(const uint8_t* serializedGraph, size_t gr
         graph->tensors, [](const auto& tensor) { return tensor.get(); });
     _name = graph->name;
     _graphId = graphId;
+    if(_graphId.has_value())
+    {
+        HIPDNN_BACKEND_LOG_DEBUG("Deserialized graph \"{}\" with inherited id {}",
+                                 _name,
+                                 hipdnn_flatbuffers_sdk::utilities::formatUuid(*_graphId));
+    }
     _operations = std::move(unpacked);
 }
 

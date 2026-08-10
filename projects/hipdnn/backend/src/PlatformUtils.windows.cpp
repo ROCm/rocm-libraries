@@ -2,6 +2,8 @@
 // SPDX-License-Identifier:  MIT
 
 #ifdef _WIN32
+// Must precede every include: <stdlib.h> only declares rand_s when this is already defined, and
+// any header that reaches it first silently leaves rand_s undeclared.
 #define _CRT_RAND_S
 #endif
 

@@ -79,6 +79,19 @@ protected:
         return descriptor;
     }
 
+    // Same graph, stopping short of finalize, so it never receives an identity.
+    static GraphDescriptor buildUnfinalizedGraph(test_utilities::ConvOpBundle& bundle)
+    {
+        GraphDescriptor descriptor;
+        const std::array<HipdnnBackendDescriptor*, 1> ops = {bundle.convOp.get()};
+        descriptor.setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                                HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                1,
+                                static_cast<const void*>(ops.data()));
+        descriptor.buildSerializedGraph();
+        return descriptor;
+    }
+
     static std::vector<std::filesystem::path> getJsonFilesInDir(const std::filesystem::path& dir)
     {
         std::vector<std::filesystem::path> jsonFiles;
@@ -155,6 +168,30 @@ TEST_F(TestGraphLogger, ReLoggingSameFinalizedGraphIsDeduplicated)
     logging::GraphLogger::logGraph(static_cast<const uint8_t*>(serialized.ptr), serialized.size);
 
     EXPECT_EQ(getJsonFilesInDir(_tempDir).size(), 1u);
+}
+
+TEST_F(TestGraphLogger, UnfinalizedGraphIsNotLogged)
+{
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_GRAPH_DIR", _tempDirStr.c_str());
+    hipdnn_backend::logging::loggerShutdown();
+
+    auto bundle = test_utilities::createDefaultConvOp(HIPDNN_DATA_FLOAT);
+    const auto descriptor = buildUnfinalizedGraph(bundle);
+    const auto serialized = descriptor.getSerializedGraph();
+    logging::GraphLogger::logGraph(static_cast<const uint8_t*>(serialized.ptr), serialized.size);
+
+    EXPECT_TRUE(getJsonFilesInDir(_tempDir).empty());
+}
+
+TEST_F(TestGraphLogger, MalformedGraphIsNotLogged)
+{
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_GRAPH_DIR", _tempDirStr.c_str());
+    hipdnn_backend::logging::loggerShutdown();
+
+    const std::array<uint8_t, 8> garbage{};
+    logging::GraphLogger::logGraph(garbage.data(), garbage.size());
+
+    EXPECT_TRUE(getJsonFilesInDir(_tempDir).empty());
 }
 
 TEST_F(TestGraphLogger, DifferentGraphsLoggedSeparately)
