@@ -372,6 +372,12 @@ class CShuffleEpilogue:
     # barrier is elided -> lower small-tile latency, more LDS. Default False
     # keeps the aliased/low-LDS behavior (byte-identical).
     no_alias: bool = False
+    # Number of step-0 WAR barriers to emit when no_alias=False.
+    # Single-role pipelines (all waves are math waves): 1.
+    # Wavelet pipeline (split load/math waves): 2 —
+    #   barrier 0: MFMAs done; load waves may exit.
+    #   barrier 1: load waves exited; safe to overwrite A/B LDS with C writes.
+    war_barriers: int = 1
     # MFMA path: set by from_grid(); drives lane_to_output in store().
     atom: Optional[MfmaAtom] = None
     # WMMA path: set by from_grid_op(); uses c_frag_len / c_layout().coord() instead.
@@ -520,23 +526,20 @@ class CShuffleEpilogue:
         dist = _cshuffle_acc_distribution(_c_per_lane)
         traits = LoadStoreTraits(distribution=dist, vector_dim_y=1, scalar_per_vector=1)
 
-        # ---- step 0: reuse barriers (×2). ----
+        # ---- step 0: reuse barrier(s). ----
         # The common-LDS packer aliases this C staging tile onto the A/B
-        # staging bytes (non-interfering in program order). Two barriers are
-        # needed to match CK Tile's GemmPipelineAgBgCrWavelet protocol:
-        #   barrier 0: all MFMAs done; load waves may acknowledge and exit.
-        #   barrier 1: load waves have exited; safe to overwrite the A/B
-        #              LDS region with C scatter writes.
-        # Using only one barrier races: a fast wave's first C ds_write can
-        # clobber A/B bytes a slow wave is still reading for its tail MFMA.
-        #
-        # With ``no_alias`` the C tile has its own exclusive LDS bytes that
-        # never overlap A/B, so neither WAR can occur and both barriers are
-        # elided. The step-2 C-write->C-read barrier below is a genuine RAW
-        # and always stays.
+        # staging bytes (non-interfering in program order).
+        # war_barriers controls how many are emitted:
+        #   1 (default) — single-role pipelines: one barrier drains last LDS
+        #                 reads before C scatter writes begin.
+        #   2 (wavelet) — split load/math waves need two:
+        #                 barrier 0: MFMAs done; load waves may exit.
+        #                 barrier 1: load waves exited; A/B LDS safe to overwrite.
+        # With ``no_alias`` the C tile never overlaps A/B so all are elided.
+        # The step-2 C-write->C-read barrier is a genuine RAW and always stays.
         if not self.no_alias:
-            b.sync()
-            b.sync()
+            for _ in range(self.war_barriers):
+                b.sync()
 
         for mi in range(mfmas_m):
             for ni in range(mfmas_n):

@@ -117,8 +117,6 @@ class ImplicitGemmConvSpec:
       - `pipeline="compv4"`   : double-buffer LDS (ping-pong A_smem/B_smem)
                                 + sched hints + s_setprio to push the K-loop
                                 into compute steady state
-      - `pipeline="mem_db"`   : double-buffer LDS, no scheduler hints;
-                                WMMA-safe alternative to compv4 (gfx1250)
       - `pipeline="wavelet"`  : load/math wave specialization (CK Tile PR
                                 #8009). Appends ``num_load_waves`` extra waves
                                 to the workgroup; those waves handle all
@@ -134,10 +132,6 @@ class ImplicitGemmConvSpec:
                                 *WMMA (gfx1250)*: scf_if_else (LLVM br i1);
                                 separate VMEM/WMMA issue slots provide
                                 hardware concurrency without exec-masking.
-      - `pipeline="tdm"`      : TDM (Two-Dimensional Marching) — marches the
-                                tile computation diagonally through M×N,
-                                keeping A/B tiles live across output tiles to
-                                reduce LDS traffic on compute-bound shapes.
 
     Epilogue options:
       - `epilogue="default"`  : per-lane scalar dtype_d stores via the D
@@ -481,9 +475,7 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
     _ab_bytes = (
         _a_shape[0] * _a_shape[1] + _b_shape[0] * _b_shape[1]
     ) * _ab_dtype_bytes
-    _double = (
-        spec.pipeline in ("compv4", "mem_db", "tdm") or spec.async_dma or spec.unroll_k
-    )
+    _double = spec.pipeline in ("compv4",) or spec.async_dma or spec.unroll_k
     _ab_lds = _ab_bytes * (2 if _double else 1)
     # cshuffle stages tile_m×tile_n elements at dtype_d (fp16/bf16 = 2B, fp32 = 4B).
     _c_dtype_bytes = 4 if spec.data.dtype_d == "fp32" else 2
@@ -553,9 +545,9 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
                 False,
                 f"WMMA conv supports only 16x16x4, 16x16x16, or 16x16x32 (got {atom}) on {arch}",
             )
-        if spec.pipeline not in ("mem", "mem_db", "wavelet"):
+        if spec.pipeline not in ("mem", "wavelet"):
             return False, (
-                f"WMMA conv supports only 'mem', 'mem_db', or 'wavelet' pipeline "
+                f"WMMA conv supports only 'mem', or 'wavelet' pipeline "
                 f"(got {spec.pipeline!r}) on {arch}"
             )
         if spec.epilogue not in ("default", "cshuffle"):
@@ -1015,9 +1007,7 @@ def build_implicit_gemm_conv(
     # write into while the MFMA phase reads from the first. Force
     # double-buffering whenever the pipeline opts into async DMA,
     # regardless of the chosen `compv*` flag.
-    double_buffer = (
-        spec.pipeline in ("compv4", "mem_db", "tdm") or spec.async_dma or spec.unroll_k
-    )
+    double_buffer = spec.pipeline in ("compv4",) or spec.async_dma or spec.unroll_k
     if double_buffer:
         A_smem2 = b.smem_alloc(
             ir_dtype_a, lds_layout.storage_shape(block_m), name_hint="A_smem2"
@@ -1517,7 +1507,7 @@ def build_implicit_gemm_conv(
     # ---- the K loop ----
     # Three code paths:
     #
-    # 1) Sync path (`async_dma=False`, `unroll_k=False`, not `tdm`): emit a
+    # 1) Sync path (`async_dma=False`, `unroll_k=False`): emit a
     #    single `scf.for_iter` body (load + barrier + MFMA + barrier).
     #    No software pipelining; each iter waits for its own load.
     # The K-loop *structure* determines the branch — not the pipeline string.
@@ -2128,11 +2118,14 @@ def _emit_cshuffle_epilogue(
             p.C, p.K, spec.data.dtype_d
         )
         _cshuffle_kwargs["max_store_vec"] = vec_c
+    _war_barriers = 2 if spec.pipeline == "wavelet" else 1
     if op is not None and op.family == "wmma":
         _wmma_kwargs = {k: v for k, v in _cshuffle_kwargs.items() if k != "no_alias"}
         _epi = CShuffleEpilogue.from_grid_op(op=op, grid=grid, **_wmma_kwargs)
+        _epi = dc_replace(_epi, war_barriers=_war_barriers)
     else:
         _epi = CShuffleEpilogue.from_grid(atom=spec.atom, grid=grid, **_cshuffle_kwargs)
+        _epi = dc_replace(_epi, war_barriers=_war_barriers)
     _epi.store(
         b,
         accs=accs,
