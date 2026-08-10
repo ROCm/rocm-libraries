@@ -608,14 +608,15 @@ def build_attention_dense(
     K_lds_addr = b.smem_addr_of(K_lds)
     V_lds_addr = b.smem_addr_of(V_lds)
     _kv_cache_bytes = b.const_i32(
-        (spec.num_kv_blocks * spec.block_size if spec.paged else B * Skv)
-        * Hkv * D * 2
+        (spec.num_kv_blocks * spec.block_size if spec.paged else B * Skv) * Hkv * D * 2
     )
     k_rsrc = b.buffer_rsrc(k, _kv_cache_bytes)
     v_rsrc = b.buffer_rsrc(v, _kv_cache_bytes)
     v_wave_off_i64 = b.zext(b.to_sgpr_u32(b.mul(wave, b.const_i32(WAVE_BYTES))), I64)
     if spec.paged:
-        assert ROWS_PER_WAVE <= spec.block_size and spec.block_size % ROWS_PER_WAVE == 0, (
+        assert (
+            ROWS_PER_WAVE <= spec.block_size and spec.block_size % ROWS_PER_WAVE == 0
+        ), (
             f"per-wave block_tables hoist needs ROWS_PER_WAVE ({ROWS_PER_WAVE}) <= "
             f"block_size ({spec.block_size}) and dividing it evenly"
         )
@@ -649,8 +650,12 @@ def build_attention_dense(
                 _wg0 = b.add(tile_key0, b.mul(wave, b.const_i32(ROWS_PER_WAVE)))
                 _wpage = b.div(_wg0, b.const_i32(spec.block_size))
                 _wphys = b.masked_global_load(
-                    block_tables, b.add(_pg_seq_base, _wpage),
-                    b.cmp_lt(_wpage, _pg_n_pages), b.const_i32(0), dtype=I32, align=4,
+                    block_tables,
+                    b.add(_pg_seq_base, _wpage),
+                    b.cmp_lt(_wpage, _pg_n_pages),
+                    b.const_i32(0),
+                    dtype=I32,
+                    align=4,
                 )
                 _wphys_base = b.mul(_wphys, b.const_i32(spec.block_size))
             for r in range(ROWS_PER_WAVE):
@@ -662,7 +667,9 @@ def build_attention_dense(
                 gkey = b.add(tile_key0, row)
                 gcol = b.mul(lane, b.const_i32(2))
                 if spec.paged:
-                    kv_row = b.add(_wphys_base, b.mod(gkey, b.const_i32(spec.block_size)))
+                    kv_row = b.add(
+                        _wphys_base, b.mod(gkey, b.const_i32(spec.block_size))
+                    )
                 else:
                     kv_row = gkey
                 voff = b.add(
@@ -687,9 +694,7 @@ def build_attention_dense(
                 )
                 row_base = b.smem_ptr_add(lds_base, row_lds_off)
                 gkey = b.add(b.add(tile_key0, row0), sub_row)
-                voff = b.add(
-                    b.add(k_base, b.mul(gkey, b.const_i32(stride_k_tok))), col
-                )
+                voff = b.add(b.add(k_base, b.mul(gkey, b.const_i32(stride_k_tok))), col)
                 b.async_buffer_load_lds_addr(
                     rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, 1
                 )

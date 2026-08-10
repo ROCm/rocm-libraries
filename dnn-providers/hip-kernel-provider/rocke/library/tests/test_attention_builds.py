@@ -1148,13 +1148,15 @@ class TestAttentionHelpers(unittest.TestCase):
         )
         # Rejections (each a ValueError from __post_init__).
         for kw in (
-            dict(block_size=0, num_kv_blocks=512),           # page size 0
-            dict(block_size=48, num_kv_blocks=512),          # not a divisor of block_n
-            dict(block_size=16, num_kv_blocks=0),            # num_kv_blocks 0
-            dict(block_size=16, num_kv_blocks=512, batch=2), # multi-seq
+            dict(block_size=0, num_kv_blocks=512),  # page size 0
+            dict(block_size=48, num_kv_blocks=512),  # not a divisor of block_n
+            dict(block_size=16, num_kv_blocks=0),  # num_kv_blocks 0
+            dict(block_size=16, num_kv_blocks=512, batch=2),  # multi-seq
             dict(block_size=16, num_kv_blocks=512, varlen=True),
-            dict(block_size=16, num_kv_blocks=512, dtype="bf16"),        # not validated yet
-            dict(block_size=16, num_kv_blocks=512, sliding_window=0),    # not validated yet
+            dict(block_size=16, num_kv_blocks=512, dtype="bf16"),  # not validated yet
+            dict(
+                block_size=16, num_kv_blocks=512, sliding_window=0
+            ),  # not validated yet
         ):
             with self.subTest(kw=kw), self.assertRaises(ValueError):
                 AttentionDenseSpec(paged=True, **{**base, **kw})
@@ -1173,9 +1175,18 @@ class TestAttentionHelpers(unittest.TestCase):
         )
 
         spec = AttentionDenseSpec(
-            batch=1, seqlen_q=8192, seqlen_kv=8192, num_query_heads=32,
-            num_kv_heads=8, head_size=128, causal=True, dtype="fp16",
-            sliding_window=4096, block_n=64, paged=True, block_size=16,
+            batch=1,
+            seqlen_q=8192,
+            seqlen_kv=8192,
+            num_query_heads=32,
+            num_kv_heads=8,
+            head_size=128,
+            causal=True,
+            dtype="fp16",
+            sliding_window=4096,
+            block_n=64,
+            paged=True,
+            block_size=16,
             num_kv_blocks=512,
         )
         names = [p["name"] for p in attention_dense_signature(spec)]
