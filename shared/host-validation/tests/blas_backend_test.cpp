@@ -23,7 +23,7 @@ int main() {
     std::array<float, 4> d{1, 1, 1, 1};
     BlasGemmBackend backend;
 
-    GemmProblem problem(
+    GemmRequest problem(
         GemmOperand(
             TensorView::fromNative<float>(Layout(Shape{2, 3}, {1, 2}), std::span<const float>(a))),
         GemmOperand(
@@ -34,25 +34,33 @@ int main() {
     problem.epilogue.alpha = 2.0;
     problem.epilogue.beta = 3.0;
 
-    require(queryGemmSupport(problem, GemmBackend::Blas, &backend).supported,
+    require(queryGemmSupport(problem,
+                             {
+                                 .backend = GemmBackend::Blas,
+                                 .requireRequestedBackend = true,
+                             },
+                             &backend)
+                .supported,
             "BLAS backend unexpectedly rejected F32 GEMM.");
-    const GemmRunInfo run = referenceGemm(problem, {
-                                                       .backend = GemmBackend::Blas,
-                                                       .requireRequestedBackend = true,
-                                                       .backendImplementation = &backend,
-                                                   });
-    require(run.backendUsed == GemmBackend::Blas, "BLAS backend run information mismatch.");
+    const GemmResult result = referenceGemm(problem,
+                                            {
+                                                .backend = GemmBackend::Blas,
+                                                .requireRequestedBackend = true,
+                                            },
+                                            &backend);
+    require(result.runInfo.backendUsed == GemmBackend::Blas,
+            "BLAS backend run information mismatch.");
     require(d == std::array<float, 4>{119, 281, 131, 311}, "BLAS backend F32 result mismatch.");
 
     d.fill(1);
-    const GemmRunInfo automatic = referenceGemm(problem, {.backendImplementation = &backend});
+    const GemmRunInfo automatic = referenceGemm(problem, {}, &backend).runInfo;
     require(
         automatic.backendUsed == GemmBackend::Blas && d == std::array<float, 4>{119, 281, 131, 311},
         "Automatic runtime backend selection mismatch.");
 
     d.fill(1);
     problem.epilogue.activation = Activation::Relu;
-    const GemmRunInfo fallback = referenceGemm(problem, {.backendImplementation = &backend});
+    const GemmRunInfo fallback = referenceGemm(problem, {}, &backend).runInfo;
     require(fallback.backendUsed == GemmBackend::Canonical && fallback.fallbackReason.has_value() &&
                 d == std::array<float, 4>{119, 281, 131, 311},
             "Automatic runtime backend fallback mismatch.");
@@ -64,7 +72,7 @@ int main() {
     GemmOperand operandA(TensorView::fromNative<std::complex<float>>(
         Layout(Shape{1, 1}, {2, 1}), std::span<const std::complex<float>>(complexA)));
     operandA.conjugate = true;
-    GemmProblem complexProblem(
+    GemmRequest complexProblem(
         std::move(operandA),
         GemmOperand(TensorView::fromNative<std::complex<float>>(
             Layout::contiguous(Shape{1, 1}), std::span<const std::complex<float>>(complexB))),
@@ -73,11 +81,12 @@ int main() {
         MutableTensorView::fromNative<std::complex<float>>(
             Layout::contiguous(Shape{1, 1}), std::span<std::complex<float>>(complexD)),
         ScalarType::ComplexFloat32);
-    referenceGemm(complexProblem, {
-                                      .backend = GemmBackend::Blas,
-                                      .requireRequestedBackend = true,
-                                      .backendImplementation = &backend,
-                                  });
+    referenceGemm(complexProblem,
+                  {
+                      .backend = GemmBackend::Blas,
+                      .requireRequestedBackend = true,
+                  },
+                  &backend);
     require(complexD[0] == std::complex<float>(11, -2), "BLAS backend complex result mismatch.");
 
     const std::array<float, 1> transformedA{0.3f};
@@ -97,7 +106,7 @@ int main() {
         VectorBinding{TensorView::fromNative<float>(Layout::contiguous(Shape{1}),
                                                     std::span<const float>(transformedAlphaVector)),
                       MatrixAxis::Row});
-    GemmProblem transformedProblem(
+    GemmRequest transformedProblem(
         std::move(transformedOperandA),
         GemmOperand(TensorView::fromNative<float>(Layout::contiguous(Shape{1, 1}),
                                                   std::span<const float>(transformedB))),
@@ -110,11 +119,12 @@ int main() {
     transformedProblem.epilogue.beta = 3.0;
     transformedProblem.epilogue.outputScale = 4.0;
     TransformingBlasGemmBackend transformingBackend;
-    referenceGemm(transformedProblem, {
-                                          .backend = GemmBackend::Blas,
-                                          .requireRequestedBackend = true,
-                                          .backendImplementation = &transformingBackend,
-                                      });
+    referenceGemm(transformedProblem,
+                  {
+                      .backend = GemmBackend::Blas,
+                      .requireRequestedBackend = true,
+                  },
+                  &transformingBackend);
     require(transformedD[0] == 13.0f,
             "Transforming BLAS pre-quantization/finalization result mismatch.");
 
@@ -122,7 +132,7 @@ int main() {
     const std::array<float, 1> saturatingB{2.0f};
     const std::array<int8_t, 1> saturatingC{};
     std::array<int8_t, 1> saturatingD{};
-    GemmProblem saturatingProblem(
+    GemmRequest saturatingProblem(
         GemmOperand(TensorView::fromNative<float>(Layout::contiguous(Shape{1, 1}),
                                                   std::span<const float>(saturatingA))),
         GemmOperand(TensorView::fromNative<float>(Layout::contiguous(Shape{1, 1}),
@@ -133,11 +143,12 @@ int main() {
                                               std::span<int8_t>(saturatingD)),
         ScalarType::Float32);
     saturatingProblem.epilogue.outputConversion = OutputConversion::SaturatingInt8;
-    referenceGemm(saturatingProblem, {
-                                         .backend = GemmBackend::Blas,
-                                         .requireRequestedBackend = true,
-                                         .backendImplementation = &transformingBackend,
-                                     });
+    referenceGemm(saturatingProblem,
+                  {
+                      .backend = GemmBackend::Blas,
+                      .requireRequestedBackend = true,
+                  },
+                  &transformingBackend);
     require(saturatingD[0] == 127, "Transforming BLAS saturating output mismatch.");
 
     return 0;

@@ -24,7 +24,7 @@ void testRuntimeReferenceGemm() {
     const std::array<float, 2> scaleA{2, 3};
     const std::array<float, 2> scaleB{5, 7};
 
-    GemmProblem problem(
+    GemmRequest problem(
         GemmOperand(
             TensorView::fromNative<float>(Layout(Shape{2, 3}, {1, 2}), std::span<const float>(a))),
         GemmOperand(
@@ -43,12 +43,16 @@ void testRuntimeReferenceGemm() {
         TensorView::fromNative<float>(Layout::contiguous(Shape{2}), std::span<const float>(scaleB));
     problem.epilogue.activation = Activation::Relu;
 
-    GemmInvocation invocation(std::move(problem));
-    require(static_cast<bool>(queryGemmSupport(invocation)),
-            "Runtime reference GEMM invocation support mismatch.");
-    const GemmResult run = referenceGemm(invocation);
-    require(run.backendUsed == GemmBackend::Canonical && run.outputElementsComputed == 4,
+    GemmExecution execution;
+    require(static_cast<bool>(queryGemmSupport(problem, execution)),
+            "Runtime reference GEMM request support mismatch.");
+    const GemmResult result = referenceGemm(problem, execution);
+    require(result.runInfo.backendUsed == GemmBackend::Canonical &&
+                result.runInfo.outputElementsComputed == 4,
             "Runtime reference GEMM run information mismatch.");
+    require(result.output.shape() == Shape{2, 2} &&
+                result.output.storage().data() == reinterpret_cast<const std::byte*>(d.data()),
+            "Runtime reference GEMM result did not expose the caller-owned output.");
 
     const std::array<float, 4> expected{
         58 * 2 * 5 + 1 + 1,
@@ -59,11 +63,12 @@ void testRuntimeReferenceGemm() {
     require(compare(std::span<const float>(d), std::span<const float>(expected)).passed(),
             "Runtime reference GEMM result mismatch.");
 
-    invocation.execution.backend = GemmBackend::Tiled;
-    require(!queryGemmSupport(invocation),
-            "Runtime reference GEMM invocation unexpectedly supports a missing backend.");
-    const GemmResult fallback = referenceGemm(invocation);
-    require(fallback.backendUsed == GemmBackend::Canonical && fallback.fallbackReason.has_value(),
+    execution.backend = GemmBackend::Tiled;
+    require(!queryGemmSupport(problem, execution),
+            "Runtime reference GEMM request unexpectedly supports a missing backend.");
+    const GemmResult fallback = referenceGemm(problem, execution);
+    require(fallback.runInfo.backendUsed == GemmBackend::Canonical &&
+                fallback.runInfo.fallbackReason.has_value(),
             "Runtime reference GEMM backend fallback mismatch.");
 }
 
@@ -77,7 +82,7 @@ void testZeroGemmScalarsSuppressNonFiniteOperands() {
     const std::array<float, 4> finiteC{1, 2, 3, 4};
     std::array<float, 4> output{};
 
-    GemmProblem alphaZero(GemmOperand(TensorView::fromNative<float>(
+    GemmRequest alphaZero(GemmOperand(TensorView::fromNative<float>(
                               Layout::contiguous(Shape{2, 2}), std::span<const float>(nonFiniteA))),
                           GemmOperand(TensorView::fromNative<float>(
                               Layout::contiguous(Shape{2, 2}), std::span<const float>(nonFiniteB))),
@@ -95,7 +100,7 @@ void testZeroGemmScalarsSuppressNonFiniteOperands() {
     const std::array<float, 4> finiteA{1, 2, 3, 4};
     const std::array<float, 4> finiteB{5, 6, 7, 8};
     const std::array<float, 4> nonFiniteC{infinity, infinity, infinity, infinity};
-    GemmProblem betaZero(GemmOperand(TensorView::fromNative<float>(
+    GemmRequest betaZero(GemmOperand(TensorView::fromNative<float>(
                              Layout::contiguous(Shape{2, 2}), std::span<const float>(finiteA))),
                          GemmOperand(TensorView::fromNative<float>(
                              Layout::contiguous(Shape{2, 2}), std::span<const float>(finiteB))),
@@ -126,7 +131,7 @@ void testRuntimeMixedAndBlockScaledGemm() {
 
     GemmOperand operandA(a.view());
     operandA.computeType = ScalarType::Float4E2M1;
-    GemmProblem mixed(std::move(operandA), GemmOperand(b.view()), c.view(), d.mutableView(),
+    GemmRequest mixed(std::move(operandA), GemmOperand(b.view()), c.view(), d.mutableView(),
                       ScalarType::Float32);
     mixed.epilogue.beta = 1.0;
     referenceGemm(mixed);
@@ -152,7 +157,7 @@ void testRuntimeMixedAndBlockScaledGemm() {
     GemmOperand blockOperandB(blockB.view());
     blockOperandA.blockScale = BlockScaleBinding{scalesA.view(), 2};
     blockOperandB.blockScale = BlockScaleBinding{scalesB.view(), 2};
-    GemmProblem blockScaled(std::move(blockOperandA), std::move(blockOperandB), blockC.view(),
+    GemmRequest blockScaled(std::move(blockOperandA), std::move(blockOperandB), blockC.view(),
                             blockD.mutableView(), ScalarType::Float32);
     referenceGemm(blockScaled);
     require(blockD.view().loadAs<float>({0, 0}) == 2 * 2 * 8 + 2 * 4 * 16,
@@ -170,7 +175,7 @@ void testRuntimeComplexAndExplicitAxisGemm() {
     GemmOperand complexOperandA(TensorView::fromNative<std::complex<float>>(
         Layout::contiguous(Shape{1, 1}), std::span<const std::complex<float>>(complexA)));
     complexOperandA.conjugate = true;
-    GemmProblem complexProblem(
+    GemmRequest complexProblem(
         std::move(complexOperandA),
         GemmOperand(TensorView::fromNative<std::complex<float>>(
             Layout::contiguous(Shape{1, 1}), std::span<const std::complex<float>>(complexB))),
@@ -188,7 +193,7 @@ void testRuntimeComplexAndExplicitAxisGemm() {
     const std::array<float, 2> realC{0, 0};
     const std::array<float, 2> columnBias{2, 3};
     std::array<float, 2> realD{};
-    GemmProblem axisProblem(GemmOperand(TensorView::fromNative<float>(
+    GemmRequest axisProblem(GemmOperand(TensorView::fromNative<float>(
                                 Layout::contiguous(Shape{1, 1}), std::span<const float>(realA))),
                             GemmOperand(TensorView::fromNative<float>(
                                 Layout::contiguous(Shape{1, 2}), std::span<const float>(realB))),
@@ -214,7 +219,7 @@ void testOutputSelection() {
     const std::array<float, 4> c{};
     std::array<float, 4> d{-99, -99, -99, -99};
 
-    GemmProblem problem(
+    GemmRequest problem(
         GemmOperand(TensorView::fromNative<float>(Layout::contiguous(Shape{2, 2}),
                                                   std::span<const float>(a))),
         GemmOperand(TensorView::fromNative<float>(Layout::contiguous(Shape{2, 2}),
@@ -223,8 +228,8 @@ void testOutputSelection() {
         MutableTensorView::fromNative<float>(Layout::contiguous(Shape{2, 2}), std::span<float>(d)),
         ScalarType::Float32);
     problem.outputSelection = OutputSelection::explicitIndices({0, 3});
-    const GemmRunInfo run = referenceGemm(problem);
-    require(run.outputElementsComputed == 2,
+    const GemmResult result = referenceGemm(problem);
+    require(result.runInfo.outputElementsComputed == 2,
             "Selected-output GEMM reported the wrong element count.");
     require(d[0] == 19 && d[1] == -99 && d[2] == -99 && d[3] == 50,
             "Selected-output GEMM modified the wrong elements.");
@@ -668,7 +673,7 @@ void testActivations() {
     const std::array<float, 1> c{0};
     std::array<float, 1> d{};
 
-    GemmProblem problem(
+    GemmRequest problem(
         GemmOperand(TensorView::fromNative<float>(Layout::contiguous(Shape{1, 1}),
                                                   std::span<const float>(a))),
         GemmOperand(TensorView::fromNative<float>(Layout::contiguous(Shape{1, 1}),
@@ -706,7 +711,7 @@ void testStridedAndOffsetViews() {
     d.fill(-99);
 
     const Layout outputLayout(Shape{2, 2}, {1, 5}, 1);
-    GemmProblem problem(
+    GemmRequest problem(
         GemmOperand(
             TensorView::fromNative<float>(Layout(Shape{2, 3}, {4, 1}), std::span<const float>(a))),
         GemmOperand(

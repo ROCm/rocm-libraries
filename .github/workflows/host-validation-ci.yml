@@ -61,6 +61,8 @@ jobs:
         run: |
           cmake --install "${RUNNER_TEMP}/host-validation-build" \
             --prefix "${RUNNER_TEMP}/host-validation-install"
+          test ! -e \
+            "${RUNNER_TEMP}/host-validation-install/include/roc/host_validation/detail/reference_gemm.hpp"
           cmake -S shared/host-validation/tests/package \
             -B "${RUNNER_TEMP}/host-validation-package-test" \
             -G Ninja \

@@ -22,7 +22,7 @@ int main() {
     std::array<float, 4> d{};
     TiledGemmBackend backend;
 
-    GemmProblem problem(
+    GemmRequest problem(
         GemmOperand(
             TensorView::fromNative<float>(Layout(Shape{2, 3}, {1, 2}), std::span<const float>(a))),
         GemmOperand(
@@ -38,23 +38,32 @@ int main() {
     };
     problem.epilogue.activation = Activation::Relu;
 
-    require(queryGemmSupport(problem, GemmBackend::Tiled, &backend).supported,
+    require(queryGemmSupport(problem,
+                             {
+                                 .backend = GemmBackend::Tiled,
+                                 .requireRequestedBackend = true,
+                             },
+                             &backend)
+                .supported,
             "Tiled backend unexpectedly rejected the test GEMM.");
-    const GemmRunInfo run = referenceGemm(problem, {
-                                                       .backend = GemmBackend::Tiled,
-                                                       .requireRequestedBackend = true,
-                                                       .backendImplementation = &backend,
-                                                   });
-    require(run.backendUsed == GemmBackend::Tiled, "Tiled backend run information mismatch.");
+    const GemmResult result = referenceGemm(problem,
+                                            {
+                                                .backend = GemmBackend::Tiled,
+                                                .requireRequestedBackend = true,
+                                            },
+                                            &backend);
+    require(result.runInfo.backendUsed == GemmBackend::Tiled,
+            "Tiled backend run information mismatch.");
     require(d == std::array<float, 4>{120, 0, 132, 0}, "Tiled backend result mismatch.");
 
     d.fill(-99);
     problem.outputSelection = OutputSelection::explicitIndices({0});
-    referenceGemm(problem, {
-                               .backend = GemmBackend::Tiled,
-                               .requireRequestedBackend = true,
-                               .backendImplementation = &backend,
-                           });
+    referenceGemm(problem,
+                  {
+                      .backend = GemmBackend::Tiled,
+                      .requireRequestedBackend = true,
+                  },
+                  &backend);
     require(d == std::array<float, 4>{120, -99, -99, -99},
             "Tiled backend partial output selection mismatch.");
 
@@ -79,17 +88,18 @@ int main() {
                                       std::span<const float>(blockScaleB)),
         8,
     };
-    GemmProblem blockProblem(std::move(blockA), std::move(blockB),
+    GemmRequest blockProblem(std::move(blockA), std::move(blockB),
                              TensorView::fromNative<float>(Layout::contiguous(Shape{1, 1}),
                                                            std::span<const float>(zero)),
                              MutableTensorView::fromNative<float>(Layout::contiguous(Shape{1, 1}),
                                                                   std::span<float>(blockOutput)),
                              ScalarType::Float32);
-    referenceGemm(blockProblem, {
-                                    .backend = GemmBackend::Tiled,
-                                    .requireRequestedBackend = true,
-                                    .backendImplementation = &backend,
-                                });
+    referenceGemm(blockProblem,
+                  {
+                      .backend = GemmBackend::Tiled,
+                      .requireRequestedBackend = true,
+                  },
+                  &backend);
     require(blockOutput[0] == 640, "Tiled backend block scaling mismatch.");
     return 0;
 }

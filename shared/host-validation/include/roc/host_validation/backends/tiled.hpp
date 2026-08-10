@@ -3,13 +3,13 @@
 
 #pragma once
 
-#include <roc/host_validation/validation.hpp>
+#include <roc/host_validation/gemm.hpp>
 
 namespace roc::host_validation {
 class TiledGemmBackend final : public GemmBackendImplementation {
    public:
     GemmBackend backend() const override;
-    GemmSupportInfo querySupport(const GemmProblem& problem) const override;
-    GemmRunInfo run(const GemmProblem& problem) const override;
+    GemmSupportInfo querySupport(const GemmRequest& request) const override;
+    GemmRunInfo run(const GemmRequest& request) const override;
 };
 }  // namespace roc::host_validation
