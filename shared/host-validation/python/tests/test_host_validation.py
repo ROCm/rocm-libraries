@@ -360,6 +360,79 @@ class TensorAndGemmTests(unittest.TestCase):
         with self.assertRaises(IndexError):
             hv.reference_softmax(input_tensor, axis=source.ndim)
 
+    def test_reference_layer_norm_matches_numpy(self):
+        source = np.asarray(
+            [
+                [[1.0, -2.0], [3.25, 4.0], [-1.5, 0.5]],
+                [[5.0, 2.0], [7.0, -3.0], [8.5, 1.0]],
+            ],
+            dtype=np.float32,
+        )
+        gamma_source = np.asarray([1.0, 0.5, -2.0], dtype=np.float32)
+        beta_source = np.asarray([0.25, -0.5, 1.0], dtype=np.float32)
+        input_tensor = hv.from_numpy(source, hv.ScalarType.Float16)
+        gamma = hv.from_numpy(gamma_source, hv.ScalarType.Float16)
+        beta = hv.from_numpy(beta_source, hv.ScalarType.BFloat16)
+        epsilon = np.float32(1e-5)
+        result = hv.reference_layer_norm(
+            input_tensor,
+            axis=1,
+            epsilon=float(epsilon),
+            gamma=gamma,
+            beta=beta,
+        )
+
+        quantized = source.astype(np.float16).astype(np.float32)
+        gamma_values = gamma_source.astype(np.float16).astype(np.float32)
+        beta_values = quantize_bfloat16(beta_source)
+        expected = np.empty_like(quantized)
+        expected_mean = np.empty((2, 2), dtype=np.float32)
+        expected_inverse = np.empty((2, 2), dtype=np.float32)
+        for batch in range(quantized.shape[0]):
+            for column in range(quantized.shape[2]):
+                average = np.float32(0.0)
+                second_moment = np.float32(0.0)
+                for row in range(quantized.shape[1]):
+                    value = quantized[batch, row, column]
+                    delta = np.float32(value - average)
+                    average = np.float32(average + delta / np.float32(row + 1))
+                    delta_after_update = np.float32(value - average)
+                    second_moment = np.float32(
+                        second_moment + delta * delta_after_update
+                    )
+                inverse = np.float32(
+                    1.0
+                    / np.sqrt(
+                        np.float32(
+                            second_moment / np.float32(quantized.shape[1]) + epsilon
+                        )
+                    )
+                )
+                expected_mean[batch, column] = average
+                expected_inverse[batch, column] = inverse
+                for row in range(quantized.shape[1]):
+                    normalized = np.float32(
+                        np.float32(quantized[batch, row, column] - average) * inverse
+                    )
+                    expected[batch, row, column] = np.float32(
+                        np.float32(normalized * gamma_values[row]) + beta_values[row]
+                    )
+
+        np.testing.assert_allclose(
+            hv.to_numpy(result.output), expected, rtol=1e-6, atol=1e-6
+        )
+        np.testing.assert_allclose(
+            hv.to_numpy(result.mean), expected_mean, rtol=1e-6, atol=1e-6
+        )
+        np.testing.assert_allclose(
+            hv.to_numpy(result.inverse_variance),
+            expected_inverse,
+            rtol=1e-6,
+            atol=1e-6,
+        )
+        self.assertEqual(result.run_info.slices_computed, 4)
+        self.assertEqual(result.run_info.elements_computed, source.size)
+
     def test_numpy_tensor_view_observes_mutation(self):
         values = np.arange(6, dtype=np.float32).reshape(2, 3)
         view = hv.TensorView.from_numpy(values)

@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <roc/host_validation/detail/reference_common.hpp>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 namespace roc::host_validation {

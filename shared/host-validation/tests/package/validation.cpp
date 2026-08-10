@@ -6,6 +6,7 @@
 #include <roc/host_validation/axpby.hpp>
 #include <roc/host_validation/gemm.hpp>
 #include <roc/host_validation/generation.hpp>
+#include <roc/host_validation/layer_norm.hpp>
 #include <roc/host_validation/reduction.hpp>
 #include <roc/host_validation/softmax.hpp>
 #include <span>
@@ -76,6 +77,17 @@ int main() {
     if (softmax.slicesComputed != 1 ||
         std::abs(softmaxOutput.view().loadAs<float>({0, 0}) +
                  softmaxOutput.view().loadAs<float>({0, 1}) - 1.0f) > 1e-6f)
+        return 1;
+
+    Tensor layerNormOutput(ScalarType::Float32, Shape{1, 2});
+    Tensor layerNormMean(ScalarType::Float32, Shape{1});
+    Tensor layerNormInverseVariance(ScalarType::Float32, Shape{1});
+    LayerNormProblem layerNorm(softmaxInput.view(), layerNormOutput.mutableView(), 1,
+                               ScalarType::Float32);
+    layerNorm.mean = layerNormMean.mutableView();
+    layerNorm.inverseVariance = layerNormInverseVariance.mutableView();
+    if (referenceLayerNorm(layerNorm).slicesComputed != 1 ||
+        layerNormMean.view().loadAs<float>({0}) != 1.5f)
         return 1;
     return 0;
 }
