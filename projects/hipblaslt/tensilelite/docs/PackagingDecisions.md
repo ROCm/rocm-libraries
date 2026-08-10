@@ -73,16 +73,18 @@ Consequences:
 
 Decision:
 
-Released `tensilelite` wheels are supported only with the exact ROCm artifact
-set for which they were built. ROCm publishes the wheel through its wheel
-index and owns `tensilelite-client` under `ROCM_PATH`. A suitable `rocisa`
-distribution is supplied independently.
+Released `tensilelite` wheels are supported only with a complete ROCm SDK on
+the matching base release line. ROCm publishes the wheel through its wheel
+index and owns `tensilelite-client` under the selected ROCm root. The SDK may be
+a filesystem installation or TheRock's matching Python SDK with `devel`. A
+suitable `rocisa` distribution is supplied independently.
 
 Reasoning:
 
-The generator depends on ROCm compiler tools and native components that pip
-cannot provide. Treating the wheels as independently portable would create an
-untestable compatibility matrix and obscure missing system dependencies.
+The generator depends on ROCm compiler tools, native components, and the
+production client that TensileLite does not vendor. TheRock may supply that SDK
+through pip, but the TensileLite wheel remains coupled to the matching ROCm SDK
+rather than independently portable.
 
 Rejected alternatives:
 
@@ -94,8 +96,8 @@ Consequences:
 
 - `pip install` can install a wheel without ROCm, but first import fails with an
   actionable error.
-- Clean test environments install wheels from a ROCm/local wheelhouse and point
-  at a staged matching ROCm root.
+- Clean test environments install the matching complete ROCm SDK and TensileLite
+  wheels from the same ROCm/local wheelhouse.
 
 ### D3. Version scheme and generator-format version
 
@@ -132,10 +134,11 @@ Decision:
 
 Compatibility is established by:
 
-1. Resolving `ROCM_PATH`, falling back to `/opt/rocm` on Unix or the configured
-   ROCm SDK root on Windows.
-2. Comparing the exact full value of `$ROCM_PATH/.info/version` with the wheel's
-   `+rocmA.B.C` version segment.
+1. Resolving the active Python's TheRock SDK root when present, otherwise an
+   explicit `ROCM_PATH`, otherwise `/opt/rocm` on Unix. Windows without either
+   a Python SDK or `ROCM_PATH` fails clearly.
+2. Comparing the exact base value of `<resolved-root>/.info/version` with the
+   wheel's `+rocmA.B.C` version segment.
 3. Requiring fixed native artifact locations.
 4. Successfully importing the independently installed `rocisa` package.
 
@@ -149,8 +152,8 @@ boundary and avoids hashing binaries during every process import.
 
 Consequences:
 
-- Errors must report the expected release, discovered release, resolved root,
-  failed artifact, and remediation.
+- Errors must report the expected release, discovered release, selected root,
+  root-selection mechanism, failed artifact, and remediation.
 - rocisa loader and native-dependency errors are reported as dependency import
   failures without TensileLite interpreting rocisa's binary layout.
 
@@ -473,17 +476,19 @@ argument through the legacy benchmarking call graph.
 
 Decision:
 
-Both source and release builds derive the complete target ROCm version from the
-selected ROCm root's `.info/version`. Remove the branch-added `ROCM_VERSION`
-environment override from the canonical and compatibility package metadata
-flows and from CMake packaging commands.
+Build frontends supply one base ROCm version to the release-metadata composer.
+TheRock derives that value from its graph-owned `version.json` and passes it
+explicitly to hipBLASLt; standalone frontends derive it from the selected root's
+`.info/version`. The canonical and compatibility package metadata flows do not
+accept a loose ambient `ROCM_VERSION` override.
 
-At runtime, TensileLite resolves `ROCM_PATH` (with the established platform
-fallback), reads that root's `.info/version`, and requires an exact canonical
-match with the distribution's `+rocm...` local version. The full value,
-including nightly suffixes, participates in the comparison. Equality means
-release equality, not filesystem-path or inode identity, so an equivalent ROCm
-installation may be relocated or selected through a symlink.
+At runtime, TensileLite resolves one root through the established Python-SDK,
+explicit-root, and platform-fallback order, reads that root's `.info/version`,
+and requires an exact base-release match with the distribution's `+rocm...`
+local version. Full nightly, RC, and development publication identity is
+deferred. Equality means release equality, not filesystem-path or inode
+identity, so an equivalent ROCm installation may be relocated or selected
+through a symlink.
 
 Custom client selection overrides only the client locator. It never bypasses
 the ROCm release check or the requirement that rocisa import successfully.
