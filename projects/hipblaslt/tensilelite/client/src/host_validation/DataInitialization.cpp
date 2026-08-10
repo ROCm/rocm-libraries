@@ -10,7 +10,6 @@
 #include <roc/host_validation/validation.hpp>
 
 #include <algorithm>
-#include <atomic>
 #include <cstddef>
 #include <cstring>
 #include <optional>
@@ -23,6 +22,17 @@
 
 namespace TensileLite::Client
 {
+    std::uint64_t stableDataInitializationStream(std::string_view semanticName)
+    {
+        std::uint64_t hash = 1469598103934665603ULL;
+        for(const unsigned char character : semanticName)
+        {
+            hash ^= character;
+            hash *= 1099511628211ULL;
+        }
+        return hash;
+    }
+
     namespace
     {
         using roc::host_validation::GenerationOptions;
@@ -36,23 +46,6 @@ namespace TensileLite::Client
         using roc::host_validation::StructuredSparsitySelection;
         using roc::host_validation::StructuredSparsitySliceRange;
         using roc::host_validation::TensorView;
-
-        uint64_t stableStream(std::string_view name)
-        {
-            uint64_t hash = 1469598103934665603ULL;
-            for(const unsigned char character : name)
-            {
-                hash ^= character;
-                hash *= 1099511628211ULL;
-            }
-            return hash;
-        }
-
-        uint64_t nextUnnamedStream()
-        {
-            static std::atomic<uint64_t> stream{0};
-            return stream.fetch_add(1, std::memory_order_relaxed);
-        }
 
         std::optional<ScalarType> generationScalarType(rocisa::DataType type)
         {
@@ -87,13 +80,15 @@ namespace TensileLite::Client
             }
         }
 
-        std::optional<GenerationOptions> generationOptions(rocisa::DataType dataType,
-                                                           InitMode          mode,
-                                                           bool              problemDependent,
-                                                           std::optional<double> freeValue = std::nullopt)
+        std::optional<GenerationOptions> generationOptions(rocisa::DataType      dataType,
+                                                           InitMode              mode,
+                                                           bool                  problemDependent,
+                                                           std::uint64_t         seed,
+                                                           std::optional<double> freeValue
+                                                           = std::nullopt)
         {
             GenerationOptions options;
-            options.seed = 0x54454e53494c454cULL;
+            options.seed = seed;
             switch(mode)
             {
             case InitMode::Zero:
@@ -233,7 +228,7 @@ namespace TensileLite::Client
                    || dataType == rocisa::DataType::E5M3
                    || dataType == rocisa::DataType::Float4)
                     return generationOptions(
-                        dataType, InitMode::Random, problemDependent, freeValue);
+                        dataType, InitMode::Random, problemDependent, seed, freeValue);
                 if(dataType == rocisa::DataType::Int8
                    || dataType == rocisa::DataType::Int32
                    || dataType == rocisa::DataType::Int64)
@@ -464,33 +459,34 @@ namespace TensileLite::Client
             return pattern;
         }
 
-        bool generate(rocisa::DataType     dataType,
-                      InitMode             mode,
-                      Layout               layout,
-                      std::span<std::byte> storage,
-                      bool                 problemDependent,
-                      uint64_t             stream,
+        bool generate(rocisa::DataType      dataType,
+                      InitMode              mode,
+                      Layout                layout,
+                      std::span<std::byte>  storage,
+                      bool                  problemDependent,
+                      DataInitializationKey key,
                       std::optional<double> freeValue = std::nullopt)
         {
             const std::optional<ScalarType>        type = generationScalarType(dataType);
             const std::optional<GenerationOptions> options
-                = generationOptions(dataType, mode, problemDependent, freeValue);
+                = generationOptions(dataType, mode, problemDependent, key.seed, freeValue);
             if(!type || !options)
                 return false;
 
             GenerationOptions adjusted = *options;
-            adjusted.real.stream += 2 * stream;
-            adjusted.imaginary.stream += 2 * stream;
+            adjusted.real.stream += 2 * key.semanticStream;
+            adjusted.imaginary.stream += 2 * key.semanticStream;
             roc::host_validation::generate(MutableTensorView(*type, std::move(layout), storage),
                                            adjusted);
             return true;
         }
     } // namespace
 
-    bool tryHostValidationInitialize(rocisa::DataType dataType,
-                                     InitMode         mode,
-                                     void*            array,
-                                     size_t           elements)
+    bool tryHostValidationInitialize(rocisa::DataType      dataType,
+                                     InitMode              mode,
+                                     void*                 array,
+                                     size_t                elements,
+                                     DataInitializationKey key)
     {
         const std::optional<ScalarType> type = generationScalarType(dataType);
         if(!type)
@@ -504,14 +500,15 @@ namespace TensileLite::Client
                         Layout::contiguous(Shape{elements}),
                         {static_cast<std::byte*>(array), bytes},
                         false,
-                        nextUnnamedStream());
+                        key);
     }
 
-    bool tryHostValidationInitialize(rocisa::DataType dataType,
-                                     InitMode         mode,
-                                     void*            array,
-                                     size_t           elements,
-                                     double           freeValue)
+    bool tryHostValidationInitialize(rocisa::DataType      dataType,
+                                     InitMode              mode,
+                                     void*                 array,
+                                     size_t                elements,
+                                     DataInitializationKey key,
+                                     double                freeValue)
     {
         const std::optional<ScalarType> type = generationScalarType(dataType);
         if(!type)
@@ -525,14 +522,15 @@ namespace TensileLite::Client
                         Layout::contiguous(Shape{elements}),
                         {static_cast<std::byte*>(array), bytes},
                         false,
-                        nextUnnamedStream(),
+                        key,
                         freeValue);
     }
 
     bool tryHostValidationInitialize(rocisa::DataType        dataType,
                                      InitMode                mode,
                                      void*                   array,
-                                     TensorDescriptor const& descriptor)
+                                     TensorDescriptor const& descriptor,
+                                     DataInitializationKey   key)
     {
         const std::optional<ScalarType> type = generationScalarType(dataType);
         if(!type)
@@ -551,31 +549,30 @@ namespace TensileLite::Client
                         Layout(Shape(descriptor.sizes()), std::move(strides)),
                         {static_cast<std::byte*>(array), bytes},
                         true,
-                        stableStream(descriptor.getName()));
+                        key);
     }
 
-    double hostValidationDoubleValue(InitMode mode, double freeValue)
+    double hostValidationDoubleValue(InitMode mode, DataInitializationKey key, double freeValue)
     {
         double value = 0;
-        if(!tryHostValidationInitialize(
-               rocisa::DataType::Double, mode, &value, 1, freeValue))
+        if(!tryHostValidationInitialize(rocisa::DataType::Double, mode, &value, 1, key, freeValue))
             throw std::invalid_argument(
                 "TensileLite constant initialization mode is unsupported.");
         return value;
     }
 
-    double hostValidationUniformDouble(double lower, double upper)
+    double hostValidationUniformDouble(double lower, double upper, DataInitializationKey key)
     {
         if(lower > upper)
             throw std::invalid_argument(
                 "TensileLite uniform lower bound exceeds upper bound.");
 
         GenerationOptions options;
-        options.seed            = 0x54454e53494c454cULL;
+        options.seed            = key.seed;
         options.real.pattern    = GenerationPattern::UniformReal;
         options.real.parameter0 = lower;
         options.real.parameter1 = upper;
-        options.real.stream     = 2 * nextUnnamedStream();
+        options.real.stream     = 2 * key.semanticStream;
 
         double value = 0;
         roc::host_validation::generate(
