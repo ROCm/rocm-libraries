@@ -566,6 +566,44 @@ void testReferenceSoftmax() {
             "Reference softmax ordering mismatch.");
 }
 
+void testReferenceLayerNorm() {
+    using namespace roc::host_validation;
+
+    const Shape shape{2, 3, 2};
+    Tensor input(ScalarType::Float32, Layout(shape, {1, 3, 10}));
+    for (size_t batch = 0; batch < 2; ++batch) {
+        for (size_t row = 0; row < 2; ++row) {
+            for (size_t column = 0; column < 3; ++column)
+                input.mutableView().storeFrom({row, column, batch},
+                                              static_cast<float>(1 + column + 3 * row + 6 * batch));
+        }
+    }
+    const std::array<float, 3> gammaValues{1.0f, 2.0f, 0.5f};
+    const std::array<float, 3> betaValues{0.25f, -0.5f, 1.0f};
+    const Tensor gamma =
+        Tensor::fromValues(ScalarType::Float16, Shape{3}, std::span<const float>(gammaValues));
+    const Tensor beta =
+        Tensor::fromValues(ScalarType::BFloat16, Shape{3}, std::span<const float>(betaValues));
+    Tensor output(ScalarType::Float32, Layout(shape, {1, 4, 12}));
+    Tensor mean(ScalarType::Float32, Shape{2, 2});
+    Tensor inverseVariance(ScalarType::Float32, Shape{2, 2});
+
+    LayerNormProblem problem(input.view(), output.mutableView(), 1, ScalarType::Float32);
+    problem.mean = mean.mutableView();
+    problem.inverseVariance = inverseVariance.mutableView();
+    problem.gamma = gamma.view();
+    problem.beta = beta.view();
+    const LayerNormRunInfo run = referenceLayerNorm(problem);
+    require(run.slicesComputed == 4 && run.elementsComputed == shape.elementCount(),
+            "Reference LayerNorm run information mismatch.");
+    require(mean.view().loadAs<float>({0, 0}) == 2.0f, "Reference LayerNorm mean mismatch.");
+    require(std::abs(inverseVariance.view().loadAs<float>({0, 0}) -
+                     1.0f / std::sqrt(2.0f / 3.0f + 1e-5f)) < 1e-6f,
+            "Reference LayerNorm inverse variance mismatch.");
+    require(output.view().loadAs<float>({0, 1, 0}) == -0.5f,
+            "Reference LayerNorm affine output mismatch.");
+}
+
 void testActivations() {
     using namespace roc::host_validation;
 
@@ -814,6 +852,7 @@ int main() {
     testIndexedGeneration();
     testReferenceAxpby();
     testReferenceSoftmax();
+    testReferenceLayerNorm();
     testActivations();
     testStridedAndOffsetViews();
     testGenerationAndComparison();
