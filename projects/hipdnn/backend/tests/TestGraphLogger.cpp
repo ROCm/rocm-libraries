@@ -118,11 +118,6 @@ TEST_F(TestGraphLogger, GraphLoggedWhenEnabled)
     auto jsonFiles = getJsonFilesInDir(_tempDir);
     ASSERT_EQ(jsonFiles.size(), 1u);
 
-    // Verify filename format: graph_<16 hex chars>.json
-    auto filename = jsonFiles[0].filename().string();
-    EXPECT_EQ(filename.rfind("graph_", 0), 0u);
-    EXPECT_EQ(filename.rfind(".json"), filename.size() - 5);
-
     // Verify the file contains valid JSON with expected graph fields
     std::ifstream file(jsonFiles[0]);
     ASSERT_TRUE(file.is_open());
@@ -131,20 +126,23 @@ TEST_F(TestGraphLogger, GraphLoggedWhenEnabled)
     EXPECT_TRUE(j.contains("nodes"));
     EXPECT_TRUE(j.contains("tensors"));
     EXPECT_TRUE(j.contains("name"));
-    EXPECT_TRUE(j.contains("id"));
+    ASSERT_TRUE(j.contains("id"));
+
+    // The dump is named after the graph it holds.
+    EXPECT_EQ(jsonFiles[0].filename().string(), "graph_" + j["id"].get<std::string>() + ".json");
 }
 
-TEST_F(TestGraphLogger, EquivalentGraphsAreNotLoggedTwice)
+TEST_F(TestGraphLogger, EquivalentGraphsAreLoggedSeparately)
 {
     hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_GRAPH_DIR", _tempDirStr.c_str());
     hipdnn_backend::logging::loggerShutdown();
 
-    // IDs differ, but graph dumps are deduplicated by graph content.
+    // Two independently built graphs are two graph objects with two IDs, so each is dumped.
     auto descriptor1 = createAndFinalizeGraph();
     auto descriptor2 = createAndFinalizeGraph();
 
     auto jsonFiles = getJsonFilesInDir(_tempDir);
-    EXPECT_EQ(jsonFiles.size(), 1u);
+    EXPECT_EQ(jsonFiles.size(), 2u);
 }
 
 TEST_F(TestGraphLogger, ReLoggingSameFinalizedGraphIsDeduplicated)

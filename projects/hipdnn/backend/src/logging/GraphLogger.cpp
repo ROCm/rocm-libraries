@@ -10,6 +10,7 @@
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/Graph.hpp>
 #include <iomanip>
 #include <mutex>
@@ -88,34 +89,49 @@ std::filesystem::path GraphLogger::getOutputDirectory()
     return cachedPath;
 }
 
-void GraphLogger::logGraph(const uint8_t* serializedGraph, [[maybe_unused]] size_t size)
+void GraphLogger::logGraph(const uint8_t* serializedGraph, size_t size)
 {
-    auto* graph
+    const auto* graph
         = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::Graph>(serializedGraph);
-    const nlohmann::json graphJson = *graph;
-    auto graphContent = graphJson;
 
-    // Graph IDs distinguish logical graph lifetimes for runtime caches, but graph dumps are
-    // content-addressed. Exclude the ID from the hash so rebuilding an equivalent graph does not
-    // create another log file; retain it in graphJson for diagnostics.
-    graphContent.erase("id");
-    const auto hash = hipdnn_data_sdk::utilities::fnv1aHash(graphContent.dump());
+    // Dumps are named by the graph's own ID. Re-finalizing a descriptor, or replaying a
+    // serialized graph, keeps that ID and so reuses one file; a graph rebuilt from scratch is a
+    // distinct graph object and earns its own. Naming by a content hash would also fold those
+    // rebuilds together, but it can collide, and a collision silently discards one graph under a
+    // name already claimed by another.
+    std::string filename;
+    if(graph->id() != nullptr)
+    {
+        filename = "graph_"
+                   + hipdnn_flatbuffers_sdk::utilities::formatUuid(
+                       hipdnn_flatbuffers_sdk::utilities::toUuidBytes(*graph->id()))
+                   + ".json";
+    }
+    else
+    {
+        // Unreachable via finalize(), which always assigns an ID before serializing. Kept so a
+        // pre-finalize buffer cannot land every graph on one filename.
+        std::ostringstream oss;
+        oss << "graph_" << std::hex << std::setfill('0') << std::setw(16)
+            << hipdnn_data_sdk::utilities::fnv1aHash(serializedGraph, size) << ".json";
+        filename = oss.str();
+    }
 
-    std::ostringstream oss;
-    oss << "graph_" << std::hex << std::setfill('0') << std::setw(16) << hash << ".json";
-    auto fullPath = getOutputDirectory() / oss.str();
-
-    if(fullPath.empty())
+    const auto outputDirectory = getOutputDirectory();
+    if(outputDirectory.empty())
     {
         HIPDNN_BACKEND_LOG_WARN("Graph logging is enabled but no valid output directory is set");
         return;
     }
 
+    const auto fullPath = outputDirectory / filename;
     if(std::filesystem::exists(fullPath))
     {
         HIPDNN_BACKEND_LOG_INFO("Skipping duplicate graph logged to {}", fullPath.string());
         return;
     }
+
+    const nlohmann::json graphJson = *graph;
 
     std::ofstream file(fullPath);
     if(file.is_open())
