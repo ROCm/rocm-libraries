@@ -1195,6 +1195,34 @@ class TensorAndGemmTests(unittest.TestCase):
                     hv.to_numpy(beta_zero), finite_a @ finite_b
                 )
 
+    def test_gemm_finalization_matches_numpy_on_both_backends(self):
+        a = np.asarray([[1.0, -2.0], [3.0, 4.0]], dtype=np.float32)
+        b = np.asarray([[5.0, 6.0], [-7.0, 8.0]], dtype=np.float32)
+        c = np.asarray([[2.0, -3.0], [4.0, 5.0]], dtype=np.float32)
+        alpha = np.float32(0.75)
+        beta = np.float32(-0.5)
+        output_scale = np.float32(1.25)
+
+        accumulation = matmul_float32(a, b)
+        combined = np.float32(np.float32(alpha * accumulation) + np.float32(beta * c))
+        expected = np.float32(np.maximum(combined, np.float32(0.0)) * output_scale)
+
+        for backend in (hv.GemmBackend.Canonical, hv.GemmBackend.Tiled):
+            with self.subTest(backend=backend):
+                observed = hv.reference_gemm(
+                    hv.from_numpy(a),
+                    hv.from_numpy(b),
+                    hv.from_numpy(c),
+                    hv.ScalarType.Float32,
+                    hv.ScalarType.Float32,
+                    alpha=float(alpha),
+                    beta=float(beta),
+                    activation=hv.Activation.Relu,
+                    output_scale=float(output_scale),
+                    backend=backend,
+                )
+                np.testing.assert_array_equal(hv.to_numpy(observed), expected)
+
     def test_float64_gemm_matches_numpy(self):
         a = np.asarray([[0.25, -1.5], [2.0, 3.25]], dtype=np.float64)
         b = np.asarray([[4.0, 0.5], [-2.0, 1.25]], dtype=np.float64)
