@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include <vector>
+#include <limits>
 #include <cstdint>
 
 #include <miopen/conv/solvers.hpp>
@@ -532,6 +533,20 @@ bool ConvHipImplicitGemmGroupWrwXdlops::IsApplicable(
         return false;
     if(!problem.IsDirectionBackwardWrW())
         return false;
+
+    // gfx950 measured: CK's grouped weight-gradient kernel overflows 32-bit
+    // ELEMENT indexing (one power of two later than the backward-data path,
+    // which overflows on bytes). Every shape whose x-tensor exceeds INT_MAX
+    // elements returns wrong results; every shape below it passes.
+    // ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC handles these correctly and is
+    // selected instead.
+    {
+        constexpr std::size_t max_int32 = static_cast<std::size_t>(std::numeric_limits<int>::max());
+        if(problem.GetIn().GetElementSize() > max_int32 ||
+           problem.GetOut().GetElementSize() > max_int32 ||
+           problem.GetWeights().GetElementSize() > max_int32)
+            return false;
+    }
     if(!problem.Is2d())
         return false;
     if(!(problem.IsLayoutNHWC() || problem.IsLayoutDefault()))

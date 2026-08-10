@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include <vector>
+#include <limits>
 #include <cstdint>
 
 #include <miopen/conv/solvers.hpp>
@@ -500,6 +501,21 @@ bool ConvHipImplicitGemmGroupBwdXdlops::IsApplicable(
         return false;
     if(!problem.IsDirectionBackwardData())
         return false;
+
+    // gfx950 measured: CK's grouped backward-data kernel addresses global memory
+    // with 32-bit BYTE offsets. A tensor larger than INT_MAX *bytes* overflows
+    // that arithmetic and silently returns wrong results (verified: every shape
+    // whose x-tensor exceeds 2^31 bytes fails; every shape below it passes).
+    // ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC handles these correctly and is
+    // selected instead. Counterpart to the MISA int32 gates, which bound the
+    // opposite solver on the forward path.
+    {
+        constexpr std::size_t max_int32 = static_cast<std::size_t>(std::numeric_limits<int>::max());
+        if(problem.GetIn().GetNumBytes() > max_int32 ||
+           problem.GetOut().GetNumBytes() > max_int32 ||
+           problem.GetWeights().GetNumBytes() > max_int32)
+            return false;
+    }
     if(!problem.Is2d())
         return false;
     if(!(problem.IsLayoutNHWC() || problem.IsLayoutDefault()))
