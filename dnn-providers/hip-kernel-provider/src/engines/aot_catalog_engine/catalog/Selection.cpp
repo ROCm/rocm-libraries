@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <optional>
+#include <string>
 
 namespace aot_catalog_engine::catalog
 {
@@ -81,6 +82,27 @@ bool ruleHolds(const ConstraintRule& rule, const ShapeValue& value)
     return true;
 }
 
+std::string shapeValueToString(const ShapeValue& value)
+{
+    if(const auto* b = std::get_if<bool>(&value))
+    {
+        return *b ? "true" : "false";
+    }
+    if(const auto* i = std::get_if<int64_t>(&value))
+    {
+        return std::to_string(*i);
+    }
+    if(const auto* d = std::get_if<double>(&value))
+    {
+        return std::to_string(*d);
+    }
+    if(const auto* s = std::get_if<std::string>(&value))
+    {
+        return "\"" + *s + "\"";
+    }
+    return "?";
+}
+
 } // namespace
 
 bool satisfies(const Constraints& constraints, const ProblemShape& problem)
@@ -98,6 +120,40 @@ bool satisfies(const Constraints& constraints, const ProblemShape& problem)
         }
     }
     return true;
+}
+
+std::string explainMismatch(const Constraints& constraints, const ProblemShape& problem)
+{
+    for(const auto& [key, rule] : constraints)
+    {
+        auto it = problem.find(key);
+        if(it == problem.end())
+        {
+            return "constraint key '" + key
+                   + "' is absent from the decoded problem shape (fails closed -- likely a typo "
+                     "or a shape key the op adapter does not publish)";
+        }
+        if(!ruleHolds(rule, it->second))
+        {
+            return "constraint '" + key + "' not satisfied by value "
+                   + shapeValueToString(it->second);
+        }
+    }
+    return "";
+}
+
+std::string describeShape(const ProblemShape& problem)
+{
+    std::string out;
+    for(const auto& [key, value] : problem)
+    {
+        if(!out.empty())
+        {
+            out += ", ";
+        }
+        out += key + "=" + shapeValueToString(value);
+    }
+    return out;
 }
 
 } // namespace aot_catalog_engine::catalog

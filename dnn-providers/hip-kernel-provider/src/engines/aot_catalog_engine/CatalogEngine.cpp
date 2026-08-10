@@ -15,6 +15,8 @@
 
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
 
+#include "catalog/AotDebug.hpp"
+#include "catalog/Selection.hpp"
 #include "launch/ModuleLoader.hpp"
 #include "launch/PluginError.hpp"
 #include "ops/GemmAdapter.hpp"
@@ -24,6 +26,46 @@
 
 namespace aot_catalog_engine
 {
+
+namespace
+{
+
+// HIPDNN_AOT_DEBUG-only: an op adapter decoded the graph but no kernel matched.
+// Explain per kernel why, so a KA sees exactly which constraint (or missing
+// shape key) filtered their kernel out. Guarded by aotDebugEnabled() at the call
+// site, so the family walk only happens when debugging.
+void debugExplainNoCandidates(const std::string& opKind,
+                              const catalog::ProblemShape& problem,
+                              const catalog::Catalog& catalog)
+{
+    AOT_DEBUG("op '" << opKind << "' decoded (shape: " << catalog::describeShape(problem)
+                     << ") but NO catalog kernel matched:");
+    size_t familyCount = 0;
+    for(const auto& family : catalog.families())
+    {
+        if(family.opKind != opKind)
+        {
+            continue;
+        }
+        ++familyCount;
+        for(size_t i = 0; i < family.kernels.size(); ++i)
+        {
+            const std::string reason
+                = catalog::explainMismatch(family.kernels[i].constraints, problem);
+            AOT_DEBUG("  family '" << family.name << "' kernel[" << i << "] '"
+                                   << family.kernels[i].symbol << "': "
+                                   << (reason.empty() ? "matches (unexpected)" : reason));
+        }
+    }
+    if(familyCount == 0)
+    {
+        AOT_DEBUG("  no family with op_kind '" << opKind
+                                               << "' is loaded for this arch (check family.json "
+                                                  "'op_kind' and that the family built).");
+    }
+}
+
+} // namespace
 
 CatalogEngine::CatalogEngine()
 {
@@ -50,9 +92,13 @@ const catalog::Catalog& CatalogEngine::catalogForArch(const std::string& arch) c
     auto it = _catalogs.find(arch);
     if(it == _catalogs.end())
     {
-        it = _catalogs
-                 .emplace(arch, catalog::Catalog::loadForDevice(catalog::defaultCatalogDir(), arch))
-                 .first;
+        // Resolve here (not inside loadForDevice) so the debug header can report
+        // HOW the root was found; the per-family details print inside loadForDevice.
+        const catalog::CatalogDirResolution resolution = catalog::resolveCatalogDir();
+        AOT_DEBUG("resolving catalog for arch " << arch << ": root=" << resolution.dir
+                                                << " (" << catalog::catalogDirSourceName(resolution.source)
+                                                << ")");
+        it = _catalogs.emplace(arch, catalog::Catalog::loadForDevice(resolution.dir, arch)).first;
     }
     return it->second;
 }
@@ -68,15 +114,20 @@ std::optional<CatalogEngine::Match> CatalogEngine::matchGraph(
     catch(const std::exception& e)
     {
         HIPDNN_PLUGIN_LOG_ERROR("aot-catalog: could not query device arch: " << e.what());
+        AOT_DEBUG("could not query device arch -> declining: " << e.what());
         return std::nullopt;
     }
 
     const catalog::Catalog& catalog = catalogForArch(arch);
     if(catalog.empty())
     {
+        AOT_DEBUG("catalog for arch " << arch
+                                      << " is empty -> declining (no family loaded; see the "
+                                         "resolution/load lines above for the cause).");
         return std::nullopt;
     }
 
+    bool anyDecoded = false;
     for(const auto& adapter : _adapters)
     {
         std::optional<catalog::ProblemShape> problem = adapter->decode(opGraph);
@@ -84,11 +135,16 @@ std::optional<CatalogEngine::Match> CatalogEngine::matchGraph(
         {
             continue;
         }
+        anyDecoded = true;
 
         std::vector<catalog::Catalog::Candidate> candidates
             = catalog.candidatesFor(adapter->opKind(), *problem);
         if(candidates.empty())
         {
+            if(aotDebugEnabled())
+            {
+                debugExplainNoCandidates(adapter->opKind(), *problem, catalog);
+            }
             continue;
         }
 
@@ -97,6 +153,11 @@ std::optional<CatalogEngine::Match> CatalogEngine::matchGraph(
         return Match{adapter.get(), std::move(*problem), std::move(candidates)};
     }
 
+    if(!anyDecoded)
+    {
+        AOT_DEBUG("no op adapter decoded this graph -> declining (op is not one of "
+                  "gemm/rmsnorm/sdpa, or its attributes are unsupported).");
+    }
     return std::nullopt;
 }
 

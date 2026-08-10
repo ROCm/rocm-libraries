@@ -85,8 +85,11 @@ if(ENABLE_AOT_CATALOG_ENGINE)
         ${CMAKE_CURRENT_SOURCE_DIR}/../engines/aot_catalog_engine
     )
     # Point the test at the build-tree copy of the catalog (family.json + .co).
+    # Must match AOT_CATALOG_BUILD_DIR in aot_catalog_engine/CMakeLists.txt, which now
+    # places the catalog beside the plugin (${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}) so the
+    # runtime can self-locate it; the tests load it directly via this path.
     target_compile_definitions(hip_kernel_provider_tests PRIVATE
-        AOT_CATALOG_TEST_DIR="${CMAKE_BINARY_DIR}/hip_kernel_provider/aot_catalog"
+        AOT_CATALOG_TEST_DIR="${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}/hip_kernel_provider/aot_catalog"
     )
     # Build the rocKE-AOT kernel families before the tests so an isolated
     # `ninja hip_kernel_provider_tests` populates the build-tree catalog rather than

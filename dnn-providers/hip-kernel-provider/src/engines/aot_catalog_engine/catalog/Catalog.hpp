@@ -61,8 +61,33 @@ private:
     std::vector<Family> _families;
 };
 
-// Runtime catalog root: the HIPDNN_AOT_CATALOG_DIR environment variable if set,
-// else the HIPDNN_AOT_CATALOG_DIR compile define baked in by CMake.
+// How the runtime catalog root was resolved (for the HIPDNN_AOT_DEBUG dump).
+enum class CatalogDirSource
+{
+    Env,         // HIPDNN_AOT_CATALOG_DIR environment override (author opt-in).
+    SelfLocated, // Beside the loaded plugin .so: <module-dir>/<HIPDNN_AOT_CATALOG_RELDIR>.
+    Baked,       // Last-resort baked absolute install path (self-location failed).
+};
+
+struct CatalogDirResolution
+{
+    std::string dir;
+    CatalogDirSource source;
+};
+
+// Resolve the runtime catalog root, precedence:
+//   1. HIPDNN_AOT_CATALOG_DIR env var, if non-empty (explicit override wins).
+//   2. Beside the loaded plugin .so (self-located), used UNCONDITIONALLY when the
+//      module dir resolves -- even if that catalog is missing/empty. This is what
+//      keeps a locally-built / force-loaded plugin on its OWN build-tree catalog
+//      and stops it from silently crossing over to a system install's catalog.
+//   3. Baked absolute install path, only if the module dir cannot be resolved.
+CatalogDirResolution resolveCatalogDir();
+
+// Convenience wrapper around resolveCatalogDir().dir.
 std::string defaultCatalogDir();
+
+// Human-readable label for a CatalogDirSource (for diagnostics).
+const char* catalogDirSourceName(CatalogDirSource source);
 
 } // namespace aot_catalog_engine::catalog

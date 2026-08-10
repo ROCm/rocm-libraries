@@ -11,10 +11,15 @@
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <nlohmann/json.hpp>
 
+#include "catalog/AotDebug.hpp"
+#include "catalog/ModulePath.hpp"
 #include "catalog/Selection.hpp"
 
 #ifndef HIPDNN_AOT_CATALOG_DIR
 #error "HIPDNN_AOT_CATALOG_DIR must be defined (set via CMake compile definition)"
+#endif
+#ifndef HIPDNN_AOT_CATALOG_RELDIR
+#error "HIPDNN_AOT_CATALOG_RELDIR must be defined (set via CMake compile definition)"
 #endif
 
 namespace aot_catalog_engine::catalog
@@ -383,14 +388,47 @@ Family parseFamily(const json& obj, const fs::path& familyDir, const std::string
 
 } // namespace
 
-std::string defaultCatalogDir()
+const char* catalogDirSourceName(CatalogDirSource source)
 {
+    switch(source)
+    {
+    case CatalogDirSource::Env: return "env HIPDNN_AOT_CATALOG_DIR";
+    case CatalogDirSource::SelfLocated: return "self-located beside plugin .so";
+    case CatalogDirSource::Baked: return "baked install path (self-location failed)";
+    default: return "unknown";
+    }
+}
+
+CatalogDirResolution resolveCatalogDir()
+{
+    // 1. Explicit author override always wins.
     const std::string envDir = hipdnn_data_sdk::utilities::getEnv("HIPDNN_AOT_CATALOG_DIR");
     if(!envDir.empty())
     {
-        return envDir;
+        return {envDir, CatalogDirSource::Env};
     }
-    return HIPDNN_AOT_CATALOG_DIR;
+
+    // 2. Beside the loaded plugin .so. Used UNCONDITIONALLY when the module dir
+    //    resolves -- even if the catalog there is missing/empty -- so a locally
+    //    built or force-loaded plugin reads ITS OWN build-tree catalog and never
+    //    silently falls through to a system install's (the KA cross-contamination
+    //    footgun). Build and install trees both place the catalog at exactly
+    //    <plugin-dir>/HIPDNN_AOT_CATALOG_RELDIR, so one offset serves both.
+    const std::string moduleDir = thisModuleDir();
+    if(!moduleDir.empty())
+    {
+        const fs::path dir = fs::path(moduleDir) / HIPDNN_AOT_CATALOG_RELDIR;
+        return {dir.string(), CatalogDirSource::SelfLocated};
+    }
+
+    // 3. Module dir unresolvable (dladdr/GetModuleHandleEx failed): last-resort
+    //    baked absolute install path.
+    return {HIPDNN_AOT_CATALOG_DIR, CatalogDirSource::Baked};
+}
+
+std::string defaultCatalogDir()
+{
+    return resolveCatalogDir().dir;
 }
 
 Catalog Catalog::loadForDevice(const std::string& catalogDir, const std::string& arch)
@@ -403,8 +441,13 @@ Catalog Catalog::loadForDevice(const std::string& catalogDir, const std::string&
     {
         HIPDNN_PLUGIN_LOG_INFO("aot-catalog: no catalog directory for arch "
                                << arch << " at " << archDir.string() << " (engine will decline)");
+        AOT_DEBUG("no catalog directory for arch " << arch << " at " << archDir.string()
+                                                   << " -> engine declines every graph on this arch. "
+                                                   << "Check the catalog was built/installed and holds a '"
+                                                   << arch << "' subdir.");
         return Catalog{std::move(families)};
     }
+    AOT_DEBUG("scanning arch dir " << archDir.string());
 
     for(const auto& entry : fs::directory_iterator(archDir, ec))
     {
@@ -431,15 +474,21 @@ Catalog Catalog::loadForDevice(const std::string& catalogDir, const std::string&
                                                                   << families.back().kernels.size()
                                                                   << " kernels) from "
                                                                   << familyJson.string());
+            AOT_DEBUG("loaded family '" << families.back().name << "' op_kind='"
+                                        << families.back().opKind << "' ("
+                                        << families.back().kernels.size() << " kernels) from "
+                                        << familyJson.string());
         }
         catch(const std::exception& e)
         {
             // NO-THROW contract: log and skip the offending family.
             HIPDNN_PLUGIN_LOG_ERROR("aot-catalog: skipping " << familyJson.string() << ": "
                                                              << e.what());
+            AOT_DEBUG("SKIPPED family " << familyJson.string() << ": " << e.what());
         }
     }
 
+    AOT_DEBUG("loaded " << families.size() << " family(ies) for arch " << arch);
     return Catalog{std::move(families)};
 }
 

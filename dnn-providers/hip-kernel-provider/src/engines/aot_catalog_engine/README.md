@@ -500,6 +500,78 @@ census. The `tools/ltx_<op>_ab.py` drivers run the real `LTXVModel` (random weig
 native vs override, verify output parity, and print the census + a CUDA-event
 device-time breakdown.
 
+### Debugging: "my kernel isn't being selected"
+
+A missing/inapplicable kernel is a **silent fallback by design** — the engine declines
+and another engine serves the graph, so the model never miscomputes (§1). The flip side
+is that a kernel you *expected* to run just quietly doesn't, with no error. Worse, the
+engine's own `INFO`/`WARN`/`ERROR` breadcrumbs are invisible by default: `HIPDNN_LOG_LEVEL`
+defaults to `off`. Two env vars make the "why" visible:
+
+```
+HIPDNN_AOT_DEBUG=1     # always-on stderr trace of catalog resolution + load + per-graph decline
+HIPDNN_LOG_LEVEL=info  # the plugin-wide log level (also surfaces other engines' logs)
+```
+
+`HIPDNN_AOT_DEBUG=1` is the fast path — it prints, independent of the log level:
+
+- **Resolution:** the catalog root it chose and **how** (`env` / `self-located beside
+  plugin .so` / `baked install path`).
+- **Load:** the arch dir it scanned, each family loaded (name, op_kind, kernel count), and
+  each family **skipped** with the parse/`co_file` error — so a malformed `family.json` or a
+  missing `.co` is named, not swallowed.
+- **Decline:** which stage bailed — arch dir missing, catalog empty, no adapter decoded the
+  op, or an op decoded but **no kernel matched**. For the last it lists every kernel of that
+  op_kind and the first constraint that filtered it, including the common trap of a
+  **constraint key absent from the decoded problem shape** (a typo, or a key the adapter
+  doesn't publish — fail-closed, §3).
+
+Checklist when a kernel isn't picked:
+
+1. Is the catalog where the engine looked? Read the resolution line. By default the engine
+   **self-locates** the catalog beside the loaded plugin `.so` (see below) — if you built
+   locally but the line shows an install path, you loaded the installed plugin, not yours.
+2. Did the family load, or was it skipped? A skip line names the JSON/`.co` error.
+3. Did your op decode and your kernel's constraints hold? The decline dump names the failing
+   constraint key. Remember constraints are **fail-closed**: every constrained key must be
+   present in the decoded problem *and* satisfied (§3).
+4. Override the root explicitly if needed: `HIPDNN_AOT_CATALOG_DIR=/path/to/<catalog>` (the
+   dir that contains the `<arch>/` subdirs) always wins over self-location.
+
+#### Catalog resolution: self-location beside the plugin
+
+The engine resolves the catalog root in this order:
+
+1. **`HIPDNN_AOT_CATALOG_DIR`** env var, if set — explicit override, always wins.
+2. **Beside the loaded plugin `.so`** — `<plugin-dir>/hip_kernel_provider/aot_catalog`.
+   Both the build tree and the install tree place the catalog at exactly this offset, so a
+   single relative path serves both. This is used **unconditionally** when the plugin's own
+   directory can be determined, *even if that catalog is missing/empty*.
+3. **Baked install path** — only if the plugin's directory can't be resolved at all.
+
+Step 2 is deliberate: it means a **locally-built or force-loaded plugin reads its OWN
+build-tree catalog** and never silently crosses over to a system install's catalog (and
+vice-versa). If you `LD_LIBRARY_PATH`-force your local `hip_kernel_provider.so` while a real
+hipDNN is installed, you get *your* kernels, not the install's — the `HIPDNN_AOT_DEBUG`
+resolution line will read `self-located beside plugin .so`. (The AITER ASM engine does
+**not** yet self-locate — it resolves `HIPDNN_AITER_ASM_DIR` env → baked install path — so
+it has the same cross-contamination footgun; the same fix could be applied there if it
+becomes a problem.)
+
+#### Gotcha — stale `.co` after editing kernel internals
+
+The build re-runs a family's producer only when its `produce_<family>_co.py` or `family.json`
+changes (the `add_custom_command` DEPENDS on exactly those). Editing rocKE kernel *internals*
+that the producer pulls in — without touching the producer script or the JSON — will **not**
+re-trigger the `.co` rebuild, so you keep running the stale binary. Touch the producer (or
+delete the built `.co`) to force a rebuild. `HIPDNN_AOT_DEBUG=1` shows the `.co` path and load
+line so you can confirm which binary actually loaded.
+
+> **Future:** if these footguns recur often, a small `catalog-doctor` tool could formalize
+> this — dump the resolved root, validate every `family.json`, list families/kernels, and dry-
+> run a given problem shape against the constraints — instead of relying on the `HIPDNN_AOT_DEBUG`
+> trace. Not built yet; the env-var diagnostics above are the current "essentials."
+
 ---
 
 ## 10. Adding a brand-new op
