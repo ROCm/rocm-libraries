@@ -1115,7 +1115,7 @@ class TestAttentionHelpers(unittest.TestCase):
                 _assert_resources_fit(art, arch="gfx950", kernel_name=k.name)
 
     def test_gfx950_dense_paged_spec_admission(self):
-        """Paged spec fields + validation: accept the fp16 D128 SW single-seq
+        """Paged spec fields + validation: accept the fp16/bf16 D128 SW single-seq
         cohort, reject illegal / not-yet-validated combos. Pure-Python (no GPU)."""
         from kernels.gfx950.attention_dense import (
             AttentionDenseSpec,
@@ -1146,6 +1146,16 @@ class TestAttentionHelpers(unittest.TestCase):
                 paged=True, block_size=16, num_kv_blocks=512, **base
             ).kernel_name(),
         )
+        # Accept: bf16 too -- the paged mechanism is dtype-generic (both 2-byte).
+        ok_bf, why_bf = supports_attention_dense(
+            AttentionDenseSpec(
+                paged=True,
+                block_size=16,
+                num_kv_blocks=512,
+                **{**base, "dtype": "bf16"},
+            )
+        )
+        self.assertTrue(ok_bf, why_bf)
         # Rejections (each a ValueError from __post_init__).
         for kw in (
             dict(block_size=0, num_kv_blocks=512),  # page size 0
@@ -1153,7 +1163,6 @@ class TestAttentionHelpers(unittest.TestCase):
             dict(block_size=16, num_kv_blocks=0),  # num_kv_blocks 0
             dict(block_size=16, num_kv_blocks=512, batch=2),  # multi-seq
             dict(block_size=16, num_kv_blocks=512, varlen=True),
-            dict(block_size=16, num_kv_blocks=512, dtype="bf16"),  # not validated yet
             dict(
                 block_size=16, num_kv_blocks=512, sliding_window=0
             ),  # not validated yet
@@ -1196,30 +1205,32 @@ class TestAttentionHelpers(unittest.TestCase):
 
     def test_gfx950_dense_paged_prefill_compiles_and_fits_budget(self):
         """comgr build + resource-budget net for the PAGED gfx950 dense prefill
-        (fp16 D128 sliding-window, single-seq). Mirrors the non-paged dense budget
-        test; the block_tables indirection adds a load but must still fit."""
+        (fp16/bf16 D128 sliding-window, single-seq). Mirrors the non-paged dense
+        budget test; the block_tables indirection adds a load but must still fit."""
         from kernels import AttentionDenseSpec, build_attention_dense
 
-        spec = AttentionDenseSpec(
-            batch=1,
-            seqlen_q=8192,
-            seqlen_kv=8192,
-            num_query_heads=32,
-            num_kv_heads=8,
-            head_size=128,
-            causal=True,
-            dtype="fp16",
-            sliding_window=4096,
-            block_n=64,
-            paged=True,
-            block_size=16,
-            num_kv_blocks=512,
-        )
-        self.assertIn("pgd16", spec.kernel_name())
-        k = build_attention_dense(spec, arch="gfx950")
-        art = _compile_or_skip(k, arch="gfx950")
-        self.assertGreater(art.hsaco_bytes, 0)
-        _assert_resources_fit(art, arch="gfx950", kernel_name=k.name)
+        for dt in ("fp16", "bf16"):
+            spec = AttentionDenseSpec(
+                batch=1,
+                seqlen_q=8192,
+                seqlen_kv=8192,
+                num_query_heads=32,
+                num_kv_heads=8,
+                head_size=128,
+                causal=True,
+                dtype=dt,
+                sliding_window=4096,
+                block_n=64,
+                paged=True,
+                block_size=16,
+                num_kv_blocks=512,
+            )
+            with self.subTest(dtype=dt):
+                self.assertIn("pgd16", spec.kernel_name())
+                k = build_attention_dense(spec, arch="gfx950")
+                art = _compile_or_skip(k, arch="gfx950")
+                self.assertGreater(art.hsaco_bytes, 0)
+                _assert_resources_fit(art, arch="gfx950", kernel_name=k.name)
 
     def test_attention_3d_workspace_size_matches_shapes(self):
         p = UnifiedAttentionProblem(

@@ -319,8 +319,8 @@ class AttentionDenseSpec:
                 raise ValueError("paged is not supported with varlen (single-seq only)")
             if self.head_size != 128:
                 raise ValueError("paged requires head_size == 128")
-            if self.dtype != "fp16":
-                raise ValueError("paged validated for fp16 only in this revision")
+            if self.dtype not in ("fp16", "bf16"):
+                raise ValueError("paged validated for fp16/bf16 only in this revision")
             if self.sliding_window <= 0:
                 raise ValueError(
                     "paged validated for sliding_window>0 only in this revision"
