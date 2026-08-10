@@ -21,7 +21,7 @@ back to native and is logged.
 
 import logging
 
-from .base import OpOverride
+from .base import NotApplicable, OpOverride
 
 
 class RmsNormOverride(OpOverride):
@@ -39,12 +39,19 @@ class RmsNormOverride(OpOverride):
             self._ones_cache[key] = w
         return w
 
-    def _gate(self, input, ns, n):
+    def _gate(self, input, weight, ns, n):
         torch = self.state.torch
         if not input.is_cuda:
             return False, "input not on cuda"
         if input.dtype not in (torch.float16, torch.bfloat16):
             return False, f"dtype {self._tok(input.dtype)} (need f16/bf16)"
+        if weight is not None and weight.dtype != input.dtype:
+            # The graph declares the weight tensor as the input dtype and
+            # execute() passes its raw pointer, so a differing weight dtype
+            # (e.g. an fp32 norm scale) would be reinterpreted byte-for-byte ->
+            # silently wrong. Decline instead. (weight=None synthesises a
+            # matching-dtype ones-weight, so it is always fine.)
+            return False, f"weight dtype {self._tok(weight.dtype)} != input {self._tok(input.dtype)}"
         if input.dim() < 2:
             return False, "input rank < 2"
         if len(ns) != 1:
@@ -94,7 +101,7 @@ class RmsNormOverride(OpOverride):
             ns = (int(normalized_shape),)
         key = f"N={n},dtype={self._tok(dtype)}"
 
-        ok, reason = self._gate(input, ns, n)
+        ok, reason = self._gate(input, weight, ns, n)
         if not ok:
             self.note_native(key, reason)
             return real(input, normalized_shape, weight, eps)
@@ -117,6 +124,9 @@ class RmsNormOverride(OpOverride):
                           input.device)
             self.note_aot(key, weightless=1 if weightless else 0)
             return y.reshape(input.shape)
+        except NotApplicable as na:  # engine can't serve this shape -> native
+            self.note_native(key, str(na))
+            return real(input, normalized_shape, weight, eps)
         except Exception as ex:  # noqa: BLE001 -- any failure -> native, never break the model
             self.note_native(key, f"exception: {type(ex).__name__}: {ex}",
                              level=logging.WARNING)

@@ -27,7 +27,7 @@ native and is logged.
 import logging
 import math
 
-from .base import OpOverride
+from .base import NotApplicable, OpOverride
 
 #: The kernel bakes these; only seqlen is runtime. Must match the shipped family.
 BAKED_HEADS = 32
@@ -140,6 +140,9 @@ class SdpaOverride(OpOverride):
             }, q.device)
             self.note_aot(census_key)
             return o
+        except NotApplicable as na:  # engine can't serve this shape -> native
+            self.note_native(census_key, str(na))
+            return _native()
         except Exception as ex:  # noqa: BLE001 -- any failure -> native, never break the model
             self.note_native(census_key, f"exception: {type(ex).__name__}: {ex}",
                              level=logging.WARNING)

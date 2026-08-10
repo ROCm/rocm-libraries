@@ -113,8 +113,9 @@ def enable_logging(level=logging.INFO) -> None:
 
 def provider_ready() -> bool:
     """True if the environment bootstraps and a HIP device is available. Never
-    raises: a misconfigured environment simply returns False."""
+    raises: any failure (missing torch, unloadable backend, a HIP init error, or
+    a BootstrapError naming an unset env var) simply returns False."""
     try:
         return bootstrap().torch.cuda.is_available()
-    except BootstrapError:
+    except Exception:  # noqa: BLE001 -- a probe must never raise; report False
         return False

@@ -52,6 +52,7 @@ class OpOverride:
         self._installed = False
         self._real = None
         self._graph_cache = {}
+        self._nope_cache = {}  # graph-key -> reason, for shapes the engine rejects
         self._census = {}      # census-key -> {"aot": int, "native": int, **extras}
         self._fallbacks = {}   # reason -> count (the "gaps" tally)
         self.state = None      # bootstrap.State, set on install()
@@ -74,31 +75,45 @@ class OpOverride:
         """Return a cached ``{"graph", "ws"}`` for ``key``; on a miss, call
         ``build()`` (subclass returns a wired-but-unbuilt ``Graph``), run the
         shared finalise sequence, and cache it. ``describe`` is a short shape
-        string for the not-applicable message."""
+        string for the not-applicable message.
+
+        A shape the engine rejects is remembered too (:attr:`_nope_cache`): the
+        Python gate is coarse, so a key can pass the gate yet fail here, and
+        re-running the (non-trivial) ``build_operation_graph`` /
+        ``get_ranked_engine_ids`` probe on every call would be wasteful. The
+        rejection reason is cached and re-raised immediately on later calls, so
+        each such shape probes once and then falls back cheaply."""
         entry = self._graph_cache.get(key)
         if entry is not None:
             return entry
+        nope = self._nope_cache.get(key)
+        if nope is not None:
+            raise NotApplicable(nope)
 
         st = self.state
-        g = build()
+        try:
+            g = build()
 
-        err = g.build_operation_graph(st.handle)
-        if err.is_bad():
-            raise NotApplicable(f"build_operation_graph: {err.get_message()}")
+            err = g.build_operation_graph(st.handle)
+            if err.is_bad():
+                raise NotApplicable(f"build_operation_graph: {err.get_message()}")
 
-        ranked = g.get_ranked_engine_ids([st.hipdnn.HeuristicMode.FALLBACK])
-        if st.engine_id not in ranked:
-            raise NotApplicable(f"{st.engine_name} not applicable for {describe}")
+            ranked = g.get_ranked_engine_ids([st.hipdnn.HeuristicMode.FALLBACK])
+            if st.engine_id not in ranked:
+                raise NotApplicable(f"{st.engine_name} not applicable for {describe}")
 
-        err = g.create_execution_plan_ext(st.engine_id)
-        if err.is_bad():
-            raise NotApplicable(f"create_execution_plan_ext: {err.get_message()}")
-        err = g.check_support()
-        if err.is_bad():
-            raise NotApplicable(f"check_support: {err.get_message()}")
-        err = g.build_plans()
-        if err.is_bad():
-            raise NotApplicable(f"build_plans: {err.get_message()}")
+            err = g.create_execution_plan_ext(st.engine_id)
+            if err.is_bad():
+                raise NotApplicable(f"create_execution_plan_ext: {err.get_message()}")
+            err = g.check_support()
+            if err.is_bad():
+                raise NotApplicable(f"check_support: {err.get_message()}")
+            err = g.build_plans()
+            if err.is_bad():
+                raise NotApplicable(f"build_plans: {err.get_message()}")
+        except NotApplicable as na:
+            self._nope_cache[key] = str(na)
+            raise
 
         entry = {"graph": g, "ws": g.get_workspace_size()}
         self._graph_cache[key] = entry

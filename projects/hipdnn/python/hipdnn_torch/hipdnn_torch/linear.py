@@ -18,7 +18,7 @@ else falls back to native and is logged.
 
 import logging
 
-from .base import OpOverride
+from .base import NotApplicable, OpOverride
 
 
 class LinearOverride(OpOverride):
@@ -32,6 +32,11 @@ class LinearOverride(OpOverride):
             return False, f"dtype {self._tok(input.dtype)} (need f16/bf16)"
         if weight.dim() != 2:
             return False, "weight not 2-D"
+        if weight.dtype != input.dtype:
+            # The graph declares B as the input dtype and execute() passes the
+            # weight's raw pointer, so a differing weight dtype would be
+            # reinterpreted byte-for-byte -> silently wrong. Decline instead.
+            return False, f"weight dtype {self._tok(weight.dtype)} != input {self._tok(input.dtype)}"
         if input.dim() < 2:
             return False, "input rank < 2"
         k = int(input.shape[-1])
@@ -100,6 +105,9 @@ class LinearOverride(OpOverride):
                 extras["biased"] = 1
             self.note_aot(key, **extras)
             return y.reshape(*input.shape[:-1], n)
+        except NotApplicable as na:  # engine can't serve this shape -> native
+            self.note_native(key, str(na))
+            return real(input, weight, bias)
         except Exception as e:  # noqa: BLE001 -- any failure -> native, never break the model
             self.note_native(key, f"exception: {type(e).__name__}: {e}",
                              level=logging.WARNING)
