@@ -242,6 +242,16 @@ if(HIPBLASLT_ENABLE_ROCROLLER)
                 option(YAML_CPP_INSTALL "" ON)
                 set(BUILD_TESTING OFF)
                 set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
+                if(WIN32)
+                    # rocRoller's classes/functions carry no __declspec(dllexport)
+                    # annotations; a Windows DLL exports nothing by default (unlike
+                    # a Linux .so), so nearly every symbol is dropped from
+                    # rocroller.lib's import stub and hipblaslt.dll fails to link
+                    # with "unresolved external symbol". hipblaslt only consumes
+                    # rocroller internally, so build it static on Windows instead
+                    # of annotating its whole API surface for exporting.
+                    set(ROCROLLER_BUILD_SHARED_LIBS OFF)
+                endif()
                 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/rocroller" "${CMAKE_CURRENT_BINARY_DIR}/rocroller")
             endblock()
             if(NOT WIN32)
@@ -380,6 +390,25 @@ if(HIPBLASLT_ENABLE_HOST)
             ${CMAKE_DL_LIBS}
             ${rocTracer}
     )
+
+    if(WIN32 AND TARGET hip::amdhip64)
+        # clang's Windows HIP driver unconditionally appends the unversioned
+        # "amdhip64.lib" as a linker input whenever --hip-link is used (added by
+        # hip::device via hip-config-amd.cmake), regardless of the import lib's
+        # actual name. ROCm/TheRock Windows builds version that import lib (e.g.
+        # amdhip64_7.lib) to allow side-by-side installs, so the implicit lookup
+        # fails. Provide an unversioned alias on the link search path instead of
+        # patching clang.
+        set(HIPBLASLT_HIP_COMPAT_DIR "${CMAKE_CURRENT_BINARY_DIR}/hip_compat")
+        add_custom_command(TARGET hipblaslt PRE_LINK
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${HIPBLASLT_HIP_COMPAT_DIR}"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "$<TARGET_LINKER_FILE:hip::amdhip64>" "${HIPBLASLT_HIP_COMPAT_DIR}/amdhip64.lib"
+            COMMENT "Providing unversioned amdhip64.lib alias for clang's implicit HIP runtime link"
+            VERBATIM
+        )
+        target_link_directories(hipblaslt PRIVATE "${HIPBLASLT_HIP_COMPAT_DIR}")
+    endif()
 
     if(HIPBLASLT_ENABLE_ASAN OR HIPBLASLT_ENABLE_TSAN)
         hipblaslt_target_configure_sanitizers(hipblaslt PRIVATE)
