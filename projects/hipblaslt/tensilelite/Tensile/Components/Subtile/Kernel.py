@@ -1137,18 +1137,13 @@ def emitMfmaInstruction(writer, kernel, vgprTileA, vgprTileB, vgprTileC, vgprTil
     mxInstType = _selectF8F6F4InstType(kernel)
     if scaleAVgpr >= 0 and scaleBVgpr >= 0:
       # Use actual loaded scale VGPRs
-      # matrix_a_scale / matrix_b_scale flags are WMMA-v3 only (gfx1250).
-      # gfx950 MFMA does not support these operands; always pass 0.
-      isWMMA = kernel.get("MIArchVgpr", False) and writer.states.asmCaps.get("HasWMMA", False)
-      aSel = scaleAsel % 2 if isWMMA else 0
-      bSel = scaleBsel % 2 if isWMMA else 0
       module.add(MXMFMAInstruction(instType=mxInstType, accType=InstType.INST_F32, variant=[16,16,miK,1], \
                                    acc=dAccAlias(vgprDStart,opDSize), \
                                    a=aOperand, \
                                    b=bOperand, \
                                    acc2=cAccAlias(vgprCStart,opCSize), \
                                    mxsa=vgpr(scaleAVgpr), mxsb=vgpr(scaleBVgpr), \
-                                   mxScaleASel=aSel, mxScaleBSel=bSel, \
+                                   mxScaleASel=scaleAsel % 2, mxScaleBSel=scaleBsel % 2, \
                                    comment=comment))
     else:
       # Fallback: use unit scale VGPR pre-initialized to 0x7f7f7f7f (scale=1.0 E8M0).
