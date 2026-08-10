@@ -509,8 +509,7 @@ __device__ void amd_global_atomic_add_impl(const typename vector_type<T, N>::typ
     {
         vector_type<int32_t, N> tmp{src_thread_data};
         static_for<0, N, 1>{}([&](auto i) {
-            atomicAdd(c_style_pointer_cast<int32_t*>(addr) + i,
-                      tmp.template AsType<int32_t>()[i]);
+            atomicAdd(c_style_pointer_cast<int32_t*>(addr) + i, tmp.template AsType<int32_t>()[i]);
         });
     }
 }
@@ -802,8 +801,8 @@ amd_buffer_atomic_add(const typename vector_type_maker<T, N>::type::type src_thr
     else if(dst_thread_element_valid)
     {
         (void)dst_element_space_size;
-        amd_global_atomic_add_impl<scalar_t, vector_size>(
-            src_thread_data, p_dst_wave + dst_thread_element_offset);
+        amd_global_atomic_add_impl<scalar_t, vector_size>(src_thread_data,
+                                                          p_dst_wave + dst_thread_element_offset);
     }
 #else
     else

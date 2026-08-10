@@ -87,7 +87,8 @@ struct MulABScaleExpertWeight
     }
 };
 
-void preShuffleBuffer(const B0DataType* src, B0DataType* dst, int N, int K, int NXdl, int KPackGroup)
+void preShuffleBuffer(
+    const B0DataType* src, B0DataType* dst, int N, int K, int NXdl, int KPackGroup)
 {
     int NLane = NXdl;
     int KLane = ck::get_warp_size() / NLane;
@@ -412,8 +413,12 @@ int main(int argc, char* argv[])
     int NPerXdl    = device_op.GetPreShuffleParameters();
     int KPackGroup = device_op.GetPreShuffleKPackGroup();
 
-    preShuffleBuffer(
-        b0_e_n_k.mData.data(), b0_preshuffled.mData.data(), N * 2 * experts, K, NPerXdl, KPackGroup);
+    preShuffleBuffer(b0_e_n_k.mData.data(),
+                     b0_preshuffled.mData.data(),
+                     N * 2 * experts,
+                     K,
+                     NPerXdl,
+                     KPackGroup);
 
     b0_device_buf.ToDevice(b0_preshuffled.mData.data());
 

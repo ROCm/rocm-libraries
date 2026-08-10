@@ -42,9 +42,8 @@ TYPED_TEST(TEST_CKTILE_GGEMM_SUITE_NAME, SplitK)
     // On gfx1250 with fp8, K_Warp_Tile=64 so K must be >= k_batch * K_Warp_Tile = 128
     // for IsSupportedArgument to pass. All other cases use K_Warp_Tile=16, K=64 is fine.
 #if defined(CK_USE_GFX1250)
-    constexpr bool is_fp8_fp8 =
-        std::is_same_v<typename TestFixture::ADataType, ck_tile::fp8_t> &&
-        std::is_same_v<typename TestFixture::BDataType, ck_tile::fp8_t>;
+    constexpr bool is_fp8_fp8 = std::is_same_v<typename TestFixture::ADataType, ck_tile::fp8_t> &&
+                                std::is_same_v<typename TestFixture::BDataType, ck_tile::fp8_t>;
     const int k_start = is_fp8_fp8 ? 128 : 64;
 #else
     const int k_start = 64;

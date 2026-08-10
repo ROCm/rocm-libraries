@@ -566,11 +566,12 @@ struct GridwiseGemmMX_xdl_cshuffle_v3_bpreshuffle
                           GemmSpec == GemmSpecialization::MKPadding)
         {
             // pad K, but not N
-            const auto b_grid_desc_n_k = transform_tensor_descriptor(
-                b_grid_desc_nraw_kraw,
-                make_tuple(make_pass_through_transform(N), make_right_pad_transform(BK, BKPad - BK)),
-                make_tuple(Sequence<0>{}, Sequence<1>{}),
-                make_tuple(Sequence<0>{}, Sequence<1>{}));
+            const auto b_grid_desc_n_k =
+                transform_tensor_descriptor(b_grid_desc_nraw_kraw,
+                                            make_tuple(make_pass_through_transform(N),
+                                                       make_right_pad_transform(BK, BKPad - BK)),
+                                            make_tuple(Sequence<0>{}, Sequence<1>{}),
+                                            make_tuple(Sequence<0>{}, Sequence<1>{}));
 
             const auto b_grid_desc_bk0_n_bk1 = transform_tensor_descriptor(
                 b_grid_desc_n_k,
@@ -948,7 +949,6 @@ struct GridwiseGemmMX_xdl_cshuffle_v3_bpreshuffle
 
         static_assert(BKPerBlock % (ScaleBlockSize / BPackedSize) == 0,
                       "KPerBlock should be multiple of ScaleBlockSize");
-
 
         if constexpr(!(GemmSpec == tensor_operation::device::GemmSpecialization::MPadding ||
                        GemmSpec == tensor_operation::device::GemmSpecialization::MNPadding ||

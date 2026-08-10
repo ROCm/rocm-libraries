@@ -299,9 +299,8 @@ struct GridwiseMoeGemmBlockScale
 #if defined(__gfx125__)
     using preshuffle_mfma_selector =
         MfmaSelector<ComputeTypeA, MPerXdl, NPerXdl, ComputeTypeB, true>;
-    static constexpr index_t KPack =
-        math::max(math::lcm(AK1Number, BK1Number),
-                  preshuffle_mfma_selector::selected_mfma.k_per_blk);
+    static constexpr index_t KPack = math::max(math::lcm(AK1Number, BK1Number),
+                                               preshuffle_mfma_selector::selected_mfma.k_per_blk);
 #else
     static constexpr index_t KPack =
         math::max(math::lcm(AK1Number, BK1Number), mfma_selector::selected_mfma.k_per_blk);
