@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -53,8 +53,9 @@ namespace detail {
 __forceinline__ __device__ __host__ float2 box_muller(unsigned int x, unsigned int y)
 {
     float2 result;
-    float u = ROCRAND_2POW32_INV + (x * ROCRAND_2POW32_INV);
-    float v = ROCRAND_2POW32_INV_2PI + (y * ROCRAND_2POW32_INV_2PI);
+    float u = fmaf(x, ROCRAND_2POW32_INV, ROCRAND_2POW32_INV);
+    float v = fmaf(y, ROCRAND_2POW32_INV_2PI, ROCRAND_2POW32_INV_2PI);
+
     float s = sqrtf(-2.0f * logf(u));
     #ifdef __HIP_DEVICE_COMPILE__
         __sincosf(v, &result.x, &result.y);
@@ -80,11 +81,10 @@ __forceinline__ __device__ __host__ double2 box_muller_double(uint4 v)
     double2 result;
     unsigned long long int v1 = (unsigned long long int)v.x ^
         ((unsigned long long int)v.y << (53 - 32));
-    double u = ROCRAND_2POW53_INV_DOUBLE + (v1 * ROCRAND_2POW53_INV_DOUBLE);
+    double u = fma(v1, ROCRAND_2POW53_INV_DOUBLE, ROCRAND_2POW53_INV_DOUBLE);
     unsigned long long int v2 = (unsigned long long int)v.z ^
         ((unsigned long long int)v.w << (53 - 32));
-    double w = (ROCRAND_2POW53_INV_DOUBLE * 2.0) +
-        (v2 * (ROCRAND_2POW53_INV_DOUBLE * 2.0));
+    double w = fma(v2, ROCRAND_2POW53_INV_DOUBLE * 2.0, ROCRAND_2POW53_INV_DOUBLE * 2.0);
     double s = sqrt(-2.0 * log(u));
     #ifdef __HIP_DEVICE_COMPILE__
         sincospi(w, &result.x, &result.y);
@@ -110,8 +110,8 @@ __forceinline__ __device__ __host__ double2 box_muller_double(ulonglong2 v)
 __forceinline__ __device__ __host__ __half2 box_muller_half(unsigned short x, unsigned short y)
 {
     #if defined(ROCRAND_HALF_MATH_SUPPORTED)
-    __half u = __float2half(ROCRAND_2POW16_INV + (x * ROCRAND_2POW16_INV));
-    __half v = __float2half(ROCRAND_2POW16_INV_2PI + (y * ROCRAND_2POW16_INV_2PI));
+    __half u = __float2half(fmaf(x, ROCRAND_2POW16_INV, ROCRAND_2POW16_INV));
+    __half v = __float2half(fmaf(y, ROCRAND_2POW16_INV_2PI, ROCRAND_2POW16_INV_2PI));
     __half s = hsqrt(__hmul(__float2half(-2.0f), hlog(u)));
     return __half2 {
         __hmul(hsin(v), s),
@@ -119,8 +119,8 @@ __forceinline__ __device__ __host__ __half2 box_muller_half(unsigned short x, un
     };
     #else
     float2 r;
-    float u = ROCRAND_2POW16_INV + (x * ROCRAND_2POW16_INV);
-    float v = ROCRAND_2POW16_INV_2PI + (y * ROCRAND_2POW16_INV_2PI);
+    float u = fmaf(x, ROCRAND_2POW16_INV, ROCRAND_2POW16_INV);
+    float v = fmaf(y, ROCRAND_2POW16_INV_2PI, ROCRAND_2POW16_INV_2PI);
     float s = sqrtf(-2.0f * logf(u));
     #ifdef __HIP_DEVICE_COMPILE__
         __sincosf(v, &r.x, &r.y);
