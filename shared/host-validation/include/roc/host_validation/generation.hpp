@@ -5,8 +5,8 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <roc/host_validation/detail/tensor_views.hpp>
 #include <roc/host_validation/generation_primitives.hpp>
+#include <roc/host_validation/matrix_view.hpp>
 #include <span>
 #include <type_traits>
 #include <vector>

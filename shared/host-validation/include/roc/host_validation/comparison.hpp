@@ -12,7 +12,7 @@
 #include <cstring>
 #include <limits>
 #include <optional>
-#include <roc/host_validation/detail/tensor_views.hpp>
+#include <roc/host_validation/matrix_view.hpp>
 #include <roc/host_validation/tensor.hpp>
 #include <span>
 #include <stdexcept>
