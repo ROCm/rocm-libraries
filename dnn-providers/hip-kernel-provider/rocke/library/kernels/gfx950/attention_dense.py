@@ -304,6 +304,7 @@ class AttentionDenseSpec:
             if not self.causal:
                 raise ValueError("varlen requires causal=True")
         if self.paged:
+            # --- Hard layout / hardware invariants (permanent contract) ---
             if self.block_size <= 0:
                 raise ValueError("paged=True requires block_size > 0")
             if self.block_n % self.block_size != 0:
@@ -313,17 +314,26 @@ class AttentionDenseSpec:
                 )
             if self.num_kv_blocks <= 0:
                 raise ValueError("paged=True requires num_kv_blocks > 0")
+            # --- Not-yet-implemented shortcuts (deferred scope, NOT a permanent
+            #     contract; see the dense-paged design future-scope list). The paged
+            #     mechanism is general -- these cohorts are simply unverified so far and
+            #     are loud-rejected until each is validated on gfx950. Raised as
+            #     ValueError so supports_*() reports "unsupported" rather than faulting.
             if self.batch != 1:
-                raise ValueError("paged is single-sequence only (batch must be 1)")
+                raise ValueError("paged multi-sequence (batch>1) not yet implemented")
             if self.varlen:
-                raise ValueError("paged is not supported with varlen (single-seq only)")
+                raise ValueError("paged varlen not yet implemented (single-seq only)")
             if self.head_size != 128:
-                raise ValueError("paged requires head_size == 128")
+                raise ValueError("paged not yet implemented for head_size != 128")
+            # forward guard: unreachable while _DTYPE_IR == {fp16, bf16} (both
+            # validated); fires if a future dtype is added there before paged-validation.
             if self.dtype not in ("fp16", "bf16"):
-                raise ValueError("paged validated for fp16/bf16 only in this revision")
+                raise ValueError(
+                    f"paged not yet implemented for dtype={self.dtype} (fp16/bf16 only)"
+                )
             if self.sliding_window <= 0:
                 raise ValueError(
-                    "paged validated for sliding_window>0 only in this revision"
+                    "paged not yet implemented for plain-causal (sliding_window>0 only)"
                 )
 
     @property
@@ -1849,12 +1859,14 @@ def run_attention_dense_torch(
     from rocke.helpers.compile import compile_kernel
     from rocke.runtime import KernelLauncher, LaunchConfig
 
-    # `batch` is baked into the kernel (K/V buffer extents, and the persistent
-    # work-item count W = NQB*Hq*B) but is NOT part of kernel_name(), so it has
-    # to be part of the cache key: otherwise two specs differing only in batch
-    # collide and the second silently reuses the first binary. Keying here rather
-    # than widening kernel_name() keeps the emitted IR (and its hash) untouched.
-    key = (spec.kernel_name(), spec.batch)
+    # `batch` and (for paged) `num_kv_blocks` are baked into the kernel -- batch into
+    # the K/V buffer extents + persistent work-item count, num_kv_blocks into the paged
+    # buffer-resource bound -- but NEITHER is in kernel_name(), so both must be in the
+    # cache key. Otherwise two specs differing only there silently reuse the first
+    # binary; for a larger num_kv_blocks that means a too-small paged rsrc bound ->
+    # OOB block-table reads masked to 0 -> wrong output. Keying here (rather than
+    # widening kernel_name()) keeps the emitted IR hash untouched.
+    key = (spec.kernel_name(), spec.batch, spec.num_kv_blocks if spec.paged else 0)
     launcher = _DENSE_LAUNCHER_CACHE.get(key)
     if launcher is None:
         art = compile_kernel(
