@@ -5809,6 +5809,31 @@ def build_gfx942_4warp_gqa(
     K_lds = (
         b.smem_alloc(dtype, [64, HD], name_hint="Klds") if HD128_PIPE else None
     )  # D256/bs64 stays direct-K
+
+    # Build-time LDS-capacity guard (defense-in-depth behind the admission gate
+    # in ``supports_tiled_2d``). This builder's only LDS is the K/V staging:
+    # V_lds [64, HD] always, K_lds [64, HD] on the D128 double-buffer pipe --
+    # both live across the KV loop (the output epilogue stores direct-to-global,
+    # so there is no Acc_lds to alias). Assert the footprint fits the arch LDS
+    # capacity so a future tile/HD change that overflows LDS fails loudly here
+    # instead of silently spilling or aborting in comgr CODEGEN. Cap comes from
+    # the arch catalog (gfx942 -> 65536 B); ``<= cap`` matches the admission
+    # gate above (which rejects only ``> cap``).
+    from rocke.core.arch import ArchTarget
+
+    try:
+        _lds_cap = ArchTarget.from_gfx(arch).lds_capacity_bytes
+    except Exception:  # noqa: BLE001
+        _lds_cap = 65536
+    _bpe = 2  # fp16/bf16 (guaranteed by the dtype check above)
+    _v_lds_bytes = 64 * HD * _bpe
+    _k_lds_bytes = 64 * HD * _bpe if HD128_PIPE else 0
+    _lds_bytes = _v_lds_bytes + _k_lds_bytes
+    assert _lds_bytes <= _lds_cap, (
+        f"4-warp GQA kernel LDS footprint {_lds_bytes} B "
+        f"(V_lds {_v_lds_bytes} + K_lds {_k_lds_bytes}, HD={HD}, "
+        f"HD128_PIPE={HD128_PIPE}) exceeds the {arch} {_lds_cap} B LDS capacity"
+    )
     q_desc = TensorDescriptor.naive(
         "query_ptr", lengths=[1 << 30, H, HD], coord_names=("token", "head", "dim")
     )
