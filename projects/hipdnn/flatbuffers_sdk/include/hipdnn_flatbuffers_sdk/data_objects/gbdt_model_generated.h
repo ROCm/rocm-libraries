@@ -244,8 +244,13 @@ struct GbdtModelT : public ::flatbuffers::NativeTable {
 /// is exported from LightGBM or XGBoost training and converted to this FlatBuffer
 /// format at build time.
 ///
-/// Prediction: sum leaf_values from all trees after traversal, apply base_score
-/// and learning_rate: score = base_score + learning_rate * sum(leaf_values).
+/// Prediction: sum leaf_values from all trees after traversal, then add base_score:
+///     score = base_score + sum(leaf_values)
+///
+/// learning_rate is metadata only and must NOT be applied here. LightGBM's
+/// dump_model() already folds it into leaf_values, so multiplying again double-counts
+/// it. A producer whose leaf values exclude the learning rate must scale them before
+/// serializing. See TreeDataAdapter::score, which implements this formula.
 struct GbdtModel FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef GbdtModelT NativeTableType;
   typedef GbdtModelBuilder Builder;
