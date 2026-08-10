@@ -844,8 +844,8 @@ def _d256_gfx942_fast(problem: "UnifiedAttentionProblem") -> bool:
 
 def _d128_gfx942_swa_fast(problem: "UnifiedAttentionProblem") -> bool:
     """Route the D128 gfx942 **sliding-window** prefill cohort to the 4-warp
-    transposed-QK paged kernel (``build_gfx942_4warp_gqa``), ported from the
-    D256 fast path.
+    natural-QK (``S = Q @ K^T``) paged kernel (``build_gfx942_4warp_gqa``), ported
+    from the D256 fast path.
 
     Scope: **D128, sliding-window (``sliding_window > 0``), bf16 + fp16.** The
     4-warp kernel applies the windowed mask + windowed KV-skip in-kernel and is
