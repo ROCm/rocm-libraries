@@ -1,0 +1,35 @@
+# Fast feedback for the draft GitHub-hosted rocjitsu sidecar experiment.
+#
+# The normal sidecar consumes artifacts from the build job in its own workflow
+# run, so environment problems are otherwise discovered only after that build
+# finishes. This smoke workflow uses one known-good gfx950 artifact set to test
+# the hosted runner, artifact download, rocjitsu build, and detector workloads
+# independently of the slow build graph.
+
+name: rocjitsu hosted runner smoke
+
+on:
+  pull_request:
+    paths:
+      - ".github/scripts/run_rocjitsu_hipblaslt_race_check.sh"
+      - ".github/workflows/rocjitsu-hosted-runner-smoke.yml"
+      - ".github/workflows/therock-ci-linux.yml"
+      - ".github/workflows/therock-rocjitsu-race-check-linux.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rocjitsu-hosted-runner-smoke-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  gfx950:
+    name: gfx950 known-good artifact smoke
+    uses: ./.github/workflows/therock-rocjitsu-race-check-linux.yml
+    with:
+      # PR #10522 used this TheRock revision and produced a passing gfx950
+      # sidecar artifact set in run 31223149917.
+      therock_ref: 54d14392b27167b862bf5747f1d8cd1b13a4b23c
+      amdgpu_families: gfx950-dcgpu
+      artifact_run_id: "31223149917"

@@ -16,6 +16,10 @@ on:
       amdgpu_families:
         type: string
         required: true
+      artifact_run_id:
+        description: Optional existing workflow run whose artifacts should be tested
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -33,21 +37,12 @@ jobs:
     # available. This CPU-only job therefore does not require a TheRock runner.
     runs-on: ubuntu-24.04
     timeout-minutes: 90
-    container:
-      # Use a plain Ubuntu image without ROCm preinstalled. The ROCm runtime,
-      # compiler, hipBLASLt, and TensileLite all come from TheRock artifacts
-      # fetched below, so this job tests the PR-produced payload.
-      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
-      options: --ipc host
-        --user 0:0
-        --ulimit memlock=-1:-1
-        --security-opt seccomp=unconfined
     defaults:
       run:
         shell: bash
     env:
       VENV_DIR: ${{ github.workspace }}/.venv
-      ARTIFACT_RUN_ID: ${{ github.run_id }}
+      ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id || github.run_id }}
       OUTPUT_ARTIFACTS_DIR: ./build
       ROCM_PATH: ${{ github.workspace }}/build
       AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
@@ -90,8 +85,19 @@ jobs:
             shared/machine-readable-isa/isa
           sparse-checkout-cone-mode: true
 
-      # The pinned base image already provides CA certificates, CMake, Git, and
-      # Ninja. Install only the remaining host development files needed for the
+      - name: Report hosted runner environment
+        run: |
+          echo "RUNNER_NAME=${RUNNER_NAME}"
+          echo "RUNNER_OS=${RUNNER_OS}"
+          echo "RUNNER_ARCH=${RUNNER_ARCH}"
+          echo "ARTIFACT_RUN_ID=${ARTIFACT_RUN_ID}"
+          python3 --version
+          nproc
+          free -h
+          df -h "${GITHUB_WORKSPACE}"
+
+      # The GitHub-hosted image provides CA certificates, CMake, Git, and
+      # Ninja. Install only the remaining development files needed for the
       # local rocjitsu source build. ROCm runtime pieces come from TheRock
       # artifacts.
       - name: Install rocjitsu build dependencies
