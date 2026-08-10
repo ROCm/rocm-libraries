@@ -160,8 +160,8 @@ private:
     // The mutex only makes looking up / creating a cached comm thread-safe;
     // it does NOT make using a comm's collectives thread-safe (a comm still
     // must be used by one thread at a time)
-    static std::map<std::set<int>, std::shared_ptr<Impl>> comm_cache;
-    static std::mutex                                     comm_cache_mutex;
+    static std::map<std::set<int>, rocfft_rccl_comm_t> comm_cache;
+    static std::mutex                                  comm_cache_mutex;
 
     // shared so copies of the handle refer to the same RCCL state; the
     // Impl destructor (running exactly once when the last handle dies)
