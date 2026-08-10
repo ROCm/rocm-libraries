@@ -96,7 +96,7 @@ SelectionResult SelectionEngine::select(int64_t engineId,
     // Check if device arch was seen during training (RFC 0019 §9.3).
     // A model trained only on gfx942 has no basis for ranking gfx950, so an
     // out-of-distribution device degrades rather than extrapolating.
-    auto archIt = deviceVars.find(kArchitectureNameKey);
+    auto archIt = deviceVars.find(kDeviceArchKey);
     if(archIt != deviceVars.end())
     {
         if(const auto* archStr = std::get_if<std::string>(&archIt->second))
@@ -197,7 +197,7 @@ SelectionResult SelectionEngine::select(int64_t engineId,
             // equivalent to each other, breaking strict weak ordering and making
             // std::sort undefined. NaN reaches here without an exception because
             // VariableContext::resolveDouble yields quiet_NaN for a string-valued
-            // binding (e.g. a signature referencing $device.architecture_name), and
+            // binding (e.g. a signature referencing $device.arch), and
             // because ops like pow() propagate it silently.
             if(!std::isfinite(score))
             {

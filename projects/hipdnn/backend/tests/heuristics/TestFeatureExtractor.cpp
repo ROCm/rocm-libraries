@@ -399,11 +399,11 @@ TEST_F(TestFeatureExtractor, StringValuedBindingIsATypeError)
     // symbol. Yielding NaN here would be silently wrong: a GBDT treats NaN as a
     // missing value, routes it down default_left, and returns an ordinary leaf — so
     // the garbage would be scored as data and never surface.
-    const std::vector<std::string> signature = {"$device.architecture_name"};
+    const std::vector<std::string> signature = {"$device.arch"};
     const FeatureExtractor extractor(signature);
 
     FeatureExtractionContext ctx;
-    ctx.bindDeviceVars({{"architecture_name", std::string("gfx942")}});
+    ctx.bindDeviceVars({{"arch", std::string("gfx942")}});
 
     EXPECT_THROW(extractor.extract(ctx), JsonLogicError);
 }

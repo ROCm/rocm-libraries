@@ -332,7 +332,7 @@ FeatureExtractionContext::ValueMap extractDeviceVars(const fb::DevicePropertiesT
     deviceVars["total_global_mem"] = static_cast<int64_t>(props->total_global_mem);
     if(!props->architecture_name.empty())
     {
-        deviceVars["architecture_name"] = props->architecture_name;
+        deviceVars["arch"] = props->architecture_name;
     }
 
     return deviceVars;

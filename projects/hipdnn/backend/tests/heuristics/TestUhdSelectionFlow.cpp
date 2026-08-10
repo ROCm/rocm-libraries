@@ -719,7 +719,7 @@ TEST_F(TestUhdSelectionFlow, TraceArchWasTrainedDefaultsToTrue)
     EngineRegistry::instance().registerEngine(entry);
 
     const FeatureExtractionContext::ValueMap deviceVars = {
-        {"architecture_name", std::string("gfx942")},
+        {"arch", std::string("gfx942")},
         {"cu_count", 120.0},
     };
 
@@ -869,7 +869,7 @@ TEST_F(TestUhdSelectionFlow, CachedExtractorProducesConsistentResults)
 
     // Run selection 100 times and verify consistent results
     FeatureExtractionContext::ValueMap deviceVars;
-    deviceVars["architecture_name"] = std::string("gfx942");
+    deviceVars["arch"] = std::string("gfx942");
 
     FeatureExtractionContext::ValueMap queryVars;
     queryVars["m"] = 1024.0;
@@ -1253,7 +1253,7 @@ protected:
     static FeatureExtractionContext::ValueMap deviceVarsForArch(const std::string& arch)
     {
         auto vars = defaultDeviceVars();
-        vars[hipdnn_backend::heuristics::uhd::kArchitectureNameKey] = arch;
+        vars[hipdnn_backend::heuristics::uhd::kDeviceArchKey] = arch;
         return vars;
     }
 
@@ -1317,7 +1317,7 @@ TEST_F(TestUhdSelectionFlowTreeData, EmptyTrainingArchesMeansNoRestriction)
 
 TEST_F(TestUhdSelectionFlowTreeData, MissingArchKeySkipsTheCheck)
 {
-    // Device properties without an architecture_name cannot be checked; selection
+    // Device properties without an arch cannot be checked; selection
     // proceeds rather than degrading on missing information.
     registerTreeDataEngine(100, {"gfx942"});
 
@@ -1621,10 +1621,10 @@ TEST_F(TestUhdSelectionFlowTreeData, TraceRecordsDeviceArchFromDeviceVars)
 
 TEST_F(TestUhdSelectionFlowTreeData, StringDevicePropertyInSignatureDegrades)
 {
-    // architecture_name is bound as a string. RFC §7.2 makes that a type error rather
+    // $device.arch is bound as a string. RFC §7.2 makes that a type error rather
     // than a silent NaN, which a GBDT would otherwise route down default_left and
     // score as ordinary data.
-    registerScoringEngineWithSignature(100, {"$device.architecture_name"},
+    registerScoringEngineWithSignature(100, {"$device.arch"},
                                        {makeCandidate(1, 10), makeCandidate(2, 5)});
 
     auto result = SelectionEngine::select(100, deviceVarsForArch("gfx942"), defaultQueryVars());

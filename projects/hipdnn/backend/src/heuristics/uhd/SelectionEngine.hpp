@@ -17,9 +17,13 @@
 namespace hipdnn_backend::heuristics::uhd
 {
 
-/// Device-property key holding the GPU architecture name (e.g. "gfx942").
-/// Used for the RFC 0019 §9.3 training-coverage check.
-inline constexpr const char* kArchitectureNameKey = "architecture_name";
+/// Device-property key holding the GPU architecture (e.g. "gfx942"), bound as
+/// `$device.arch`. Used for the RFC 0019 §9.3 training-coverage check.
+///
+/// Spelled `arch` to match §7.1/§9.3 and gbdt_model.fbs, which both name
+/// `$device.arch`. The DeviceProperties FlatBuffer field it is populated from is
+/// still `architecture_name`; only the feature-namespace key is shortened.
+inline constexpr const char* kDeviceArchKey = "arch";
 
 /// @brief Result of scoring a single kernel candidate.
 struct ScoredCandidate
