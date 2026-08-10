@@ -1038,12 +1038,24 @@ class LraTileAssignmentMFMA(LraTileAssignment):
                 _segWavesPerComp = (num1DWaves // (kernel["NumWaves"] // 2)) if _segPacked else 1
                 if _segPacked and _segWavesPerComp > 1:
                     # [4,1]/[1,4]: _segWavesPerComp waves share each of the 2 comps. Split wtid0 into
-                    # compId (segment jump, post-pad) + within-comp wave offset (normal stride, pre-pad).
+                    # segment id (segment jump, post-pad) + within-comp wave offset (normal stride, pre-pad).
+                    # Baseline puts the segment jump on the component axis (wtid0 // wavesPerComp).
+                    # portSplit puts it on the read-port axis (wtid0 & 1) instead, so the two LDS read
+                    # ports (port = WaveIdx & 1) land in different segments; the within-comp offset then
+                    # rides wtid0 // 2. Requires wavesPerComp == 2 (numComp == numWaves // 2 == 2).
+                    _portSplit = (tc == "A" and _segOff.get("portSplitA", False)) or \
+                                 (tc == "B" and _segOff.get("portSplitB", False))
                     compReg = writer.vgprPool.checkOut(1, tag="segCompId")
-                    module.add(vectorStaticDivide(compReg, dummy, _segWavesPerComp, tmpVgprRes, \
-                        "seg interleave: compId = wtid0 // wavesPerComp(%u)" % _segWavesPerComp))
-                    module.add(vectorStaticRemainder(dummy, dummy, dummy, _segWavesPerComp, tmpVgprRes, tmpSgprInfo, \
-                        "seg interleave: withinComp = wtid0 %% %u" % _segWavesPerComp))
+                    if _portSplit:
+                        module.add(VAndB32(dst=vgpr(compReg), src0=1, src1=vgpr(dummy), \
+                            comment="seg interleave: segId = port = wtid0 & 1 (read-port axis)"))
+                        module.add(vectorStaticDivide(dummy, dummy, _segWavesPerComp, tmpVgprRes, \
+                            "seg interleave: withinComp = wtid0 // %u" % _segWavesPerComp))
+                    else:
+                        module.add(vectorStaticDivide(compReg, dummy, _segWavesPerComp, tmpVgprRes, \
+                            "seg interleave: compId = wtid0 // wavesPerComp(%u)" % _segWavesPerComp))
+                        module.add(vectorStaticRemainder(dummy, dummy, dummy, _segWavesPerComp, tmpVgprRes, tmpSgprInfo, \
+                            "seg interleave: withinComp = wtid0 %% %u" % _segWavesPerComp))
                     module.add(vectorStaticMultiplyAdd(vgpr(tReg), vgpr(dummy), strideWave, vgpr(tReg), tmpSgprInfo, \
                         "seg interleave: within-comp wave offset = withinComp * W0Stride(%u)" % strideWave))
                     segOff = writer.vgprPool.checkOut(1, tag="segWaveByteOff")

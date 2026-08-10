@@ -112,29 +112,10 @@ def _evaluate_asymmetric(state):
     activeTC = "A" if state["MIWaveGroup"][0] > 1 else "B"
     sharedTC = "B" if activeTC == "A" else "A"
 
-    # TODO: no port-split for [4,1]/[1,4] yet.
-    if state.get("TDMSplit"):
-        return _no("TDMSplit not yet supported with MIWaveGroup [4,1]/[1,4]")
-
-    # active must be coarse (VW == WaveTile).
-    if not _coarse(state, activeTC):
-        return _no("%s active: VW must be WaveTile (coarse)" % activeTC)
-
     fAct     = _footprint(state, activeTC)
     fActData = _data_bytes(state, activeTC)
     fSh      = _footprint(state, sharedTC)
     base     = state["LdsOffsetA"]
-
-    # A active only (baseline puts A at base, B after A+scales -> [1,4] can't shortcut): baseline
-    # already splits A0/A1 when comp0 data fits one segment and comp1 lands in the next.
-    if activeTC == "A" and (base % SEG) + fActData <= SEG and (base + fAct) // SEG != base // SEG:
-        return _no("baseline already separates A0/A1 into different segments "
-                   "(A active; comp0 data within one segment)")
-
-    # put the shared tensor between the two active comps. bcontig if that stride already crosses a
-    # segment; else aligned (pad to the boundary).
-    #   A active: [A0][B][A1] bBaseline    B active: [B0][A][B1] aBaseline
-    strideAct = fAct + 2 * fSh              # comp0 -> comp1 gap
     baselineKey = "bBaseline" if activeTC == "A" else "aBaseline"
     sharedBaseKey = "ldsBaseB" if activeTC == "A" else "ldsBaseA"
 
@@ -147,6 +128,56 @@ def _evaluate_asymmetric(state):
         if bMXSA is not None: o["ldsBaseMXSA"] = bMXSA
         if bMXSB is not None: o["ldsBaseMXSB"] = bMXSB
         return o
+
+    if state.get("TDMSplit"):
+        # Only coarse active is supported so far (fine active is a follow-up).
+        if not _coarse(state, activeTC):
+            return _no("TDMSplit asymmetric: fine active not yet supported")
+        # port-axis: active tensor's two comps split across LDS segments by the read-port axis
+        # (locked model: [active.port0][shared][active.port1] is conflict-free). Shared stays
+        # whole/baseline in the gap. Tight when the shared block already pushes port1 into a new
+        # segment; otherwise pad the port-axis stride up to the boundary (grows LDS, PGR2 + force).
+        portKey = "portSplitA" if activeTC == "A" else "portSplitB"
+        strideAct = fAct + 2 * fSh              # port0 -> port1 gap
+        c0end = (base + fActData - 1) // SEG    # last segment port0's data touches
+        c1 = (base + strideAct) // SEG
+        if c1 > c0end:
+            # shared block already separates the two ports into different segments; free.
+            o = _build_offsets(strideAct)
+            o[portKey] = True
+            return {"applicable": True, "aligned": False, "offsets": o,
+                    "blockSpan": 0, "reason": "portaxis-asym",
+                    "segmentMap": "PORTAXIS active=%s port0->seg%d port1->seg1" % (activeTC, base // SEG)}
+        # port1 still shares port0's segment: pad it to the next segment boundary. Grows LDS.
+        if state.get("PrefetchGlobalRead") != 2:        return _no("portaxis-asym small: PGR!=2")
+        if state.get("LDSSegmentInterleave", -1) == -1: return _no("auto: skip aligned (LDS growth)")
+        pre = _ceil_seg(base + strideAct) - base
+        o = _build_offsets(pre)
+        o[portKey] = True
+        blockSpan = base + pre + fAct
+        bMXSA, bMXSB, mxEnd = _mx_scale_bases(state, blockSpan)
+        if bMXSA is not None: o["ldsBaseMXSA"] = bMXSA
+        if bMXSB is not None: o["ldsBaseMXSB"] = bMXSB
+        blockSpan = max(blockSpan, mxEnd)
+        return {"applicable": True, "aligned": True, "offsets": o,
+                "blockSpan": blockSpan, "reason": "portaxis-asym-aligned",
+                "segmentMap": "PORTAXIS-ALIGNED active=%s seg%d/seg%d"
+                              % (activeTC, base // SEG, (base + pre) // SEG)}
+
+    # active must be coarse (VW == WaveTile).
+    if not _coarse(state, activeTC):
+        return _no("%s active: VW must be WaveTile (coarse)" % activeTC)
+
+    # A active only (baseline puts A at base, B after A+scales -> [1,4] can't shortcut): baseline
+    # already splits A0/A1 when comp0 data fits one segment and comp1 lands in the next.
+    if activeTC == "A" and (base % SEG) + fActData <= SEG and (base + fAct) // SEG != base // SEG:
+        return _no("baseline already separates A0/A1 into different segments "
+                   "(A active; comp0 data within one segment)")
+
+    # put the shared tensor between the two active comps. bcontig if that stride already crosses a
+    # segment; else aligned (pad to the boundary).
+    #   A active: [A0][B][A1] bBaseline    B active: [B0][A][B1] aBaseline
+    strideAct = fAct + 2 * fSh              # comp0 -> comp1 gap
 
     c0 = base // SEG
     # comp0 can span 2 segments (unaligned base); comp1 must start past its last one.

@@ -19220,13 +19220,26 @@ class KernelWriterAssembly(KernelWriter):
     ldsPadSize: int = int(kernel[f"LdsPad{tc}"] * bpe)
     if kernel.get("LDSSegmentInterleave") == 1 and tc in ("A", "B"):
       _segOff = kernel["LDSSegInterleaveOffsets"]
-      if tc == "A" and _segOff.get("portSplitA", False):
-        numVec = kernel["MIWaveTile"][ti] // kernel["VectorWidthA"]
-        vIdxFootprint = round(mt * du * bpe // dim1Divisor // numVec)   # per-vIdx, not the component jump
-        vIdxPad = vIdxFootprint // ldsBlockSizePerPad * ldsPadSize if ldsBlockSizePerPad != 0 and ldsPadSize != 0 else 0
-        return vIdxFootprint + vIdxPad
-      # Coarse A / non-bcontig B: component jump.
-      if tc == "A" or not _segOff.get("bBaseline", False):
+      _portSplit = (tc == "A" and _segOff.get("portSplitA", False)) or \
+                   (tc == "B" and _segOff.get("portSplitB", False))
+      if _portSplit:
+        vw = kernel["VectorWidthA"] if tc == "A" else kernel["VectorWidthB"]
+        numVec = kernel["MIWaveTile"][ti] // vw
+        numComp = kernel["NumWaves"] // 2
+        # One load-wave fills one component (its two TDMSplit halves L1/L2 stay in the same
+        # segment). Coarse (numVec==1): L2 lands one within-comp wave stride after L1, i.e. the
+        # per-wave footprint = per-component data / dim1Divisor. Fine (numVec>1): the same footprint
+        # falls out of the per-vIdx split, so both use mt*du*bpe / dim1Divisor / max(numVec, numComp).
+        splitDiv = numVec if numVec > 1 else numComp
+        halfFootprint = round(mt * du * bpe // dim1Divisor // splitDiv)
+        halfPad = halfFootprint // ldsBlockSizePerPad * ldsPadSize if ldsBlockSizePerPad != 0 and ldsPadSize != 0 else 0
+        return halfFootprint + halfPad
+      # Coarse active / non-bcontig baseline: component jump. Symmetric [2,2] sets neither
+      # aBaseline nor bBaseline, so both A and B fall through to the jump here; [4,1]/[1,4]
+      # mark the non-active tensor baseline (aBaseline for [1,4], bBaseline for [4,1]) and it
+      # takes the plain default footprint below instead.
+      if (tc == "A" and not _segOff.get("aBaseline", False)) or \
+         (tc == "B" and not _segOff.get("bBaseline", False)):
         return _segOff["writeStrideBytes"]
     half = round(mt * du * bpe // dim1Divisor)
     extraPadSize = half // ldsBlockSizePerPad * ldsPadSize if ldsBlockSizePerPad != 0 and ldsPadSize != 0 else 0
@@ -19522,8 +19535,9 @@ class KernelWriterAssembly(KernelWriter):
       _segAB = bool(kernel.get("LDSSegmentInterleave") == 1) and (
           (tc == "A" and not _segOffAB.get("aBaseline", False)) or
           (tc == "B" and not _segOffAB.get("bBaseline", False)))
-      _segPortSplitA = _segAB and tc == "A" and _segOffAB.get("portSplitA", False)
-      _segWaveJump = (_segAB and not kernel["TDMSplit"]) or _segPortSplitA
+      _segPortSplit = _segAB and ((tc == "A" and _segOffAB.get("portSplitA", False)) or
+                                  (tc == "B" and _segOffAB.get("portSplitB", False)))
+      _segWaveJump = (_segAB and not kernel["TDMSplit"]) or _segPortSplit
       _segFootprint = _segWaveJump and kernel["LDSSegInterleaveOffsets"].get("footprintPacked", False)
       if _segWaveJump:
           dataBytes = kernel["LDSSegInterleaveOffsets"]["writeStrideBytes"]

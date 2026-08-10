@@ -1651,10 +1651,16 @@ class LocalReadMFMA(LocalRead):
                                 # boundary. Split it into within-component (vCols) + component jump
                                 # (segCompByteOff, added post-pad below).
                                 segCompByteOff = 0
-                                _portSplitA = (kernel.get("LDSSegmentInterleave") == 1 and tc == "A"
-                                               and kernel["LDSSegInterleaveOffsets"].get("portSplitA", False))
-                                if _portSplitA:
-                                    # Fine A: drop the wave-group factor from the per-vIdx column stride so
+                                # Fine port-split (VW==WaveTile/2): the per-vIdx column stride carries the
+                                # within-port offset. Coarse port-split (numVectorsPerTile==1) puts the
+                                # whole segment jump on the wave axis (LraTileAssignment), so it takes the
+                                # normal per-vIdx path below (its segCompByteOff stays 0 within a wave).
+                                _portSplit = (kernel.get("LDSSegmentInterleave") == 1
+                                              and ((tc == "A" and kernel["LDSSegInterleaveOffsets"].get("portSplitA", False))
+                                                or (tc == "B" and kernel["LDSSegInterleaveOffsets"].get("portSplitB", False)))
+                                              and numVectorsPerTile > 1)
+                                if _portSplit:
+                                    # Fine: drop the wave-group factor from the per-vIdx column stride so
                                     # the two vIdx stay within this port's segment; the A0->A1 segment jump
                                     # is on the wave stride, not here.
                                     _shape = MIWaveGroupShape[tile01] // kernel["MIWaveGroup"][tile01]
