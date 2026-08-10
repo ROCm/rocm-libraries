@@ -35,7 +35,7 @@ GemmRunInfo runTiled(const GemmProblem& problem) {
     const RuntimeMatrixReader<Accumulator> a(problem.a.values);
     const RuntimeMatrixReader<Accumulator> b(problem.b.values);
     const RuntimeMatrixReader<Accumulator> c(problem.c);
-    const RuntimeGemmOutputWriter<Accumulator> d(problem.d, problem.epilogue.outputConversion);
+    const RuntimeMatrixOutputWriter<Accumulator> d(problem.d, problem.epilogue.outputConversion);
     const RuntimeQuantizer<Accumulator> quantizeA(problem.a.computeType);
     const RuntimeQuantizer<Accumulator> quantizeB(problem.b.computeType);
     const RuntimeMathFunction<Accumulator> operandMath =
@@ -81,6 +81,8 @@ GemmRunInfo runTiled(const GemmProblem& problem) {
         static_cast<Accumulator>(problem.epilogue.activationParameter0);
     const Accumulator activationParameter1 =
         static_cast<Accumulator>(problem.epilogue.activationParameter1);
+    const bool alphaIsZero = alpha == Accumulator(0);
+    const bool betaIsZero = beta == Accumulator(0);
 
     constexpr size_t tileRows = 32;
     constexpr size_t tileColumns = 32;
@@ -91,7 +93,8 @@ GemmRunInfo runTiled(const GemmProblem& problem) {
             const size_t columns = std::min(tileColumns, n - columnBase);
             std::vector<Accumulator> accumulator(rows * columns, Accumulator(0));
 
-            for (size_t reductionBase = 0; reductionBase < k; reductionBase += tileReduction) {
+            for (size_t reductionBase = 0; !alphaIsZero && reductionBase < k;
+                 reductionBase += tileReduction) {
                 const size_t reductions = std::min(tileReduction, k - reductionBase);
                 std::vector<Accumulator> aTile(rows * reductions);
                 std::vector<Accumulator> bTile(reductions * columns);
@@ -160,16 +163,18 @@ GemmRunInfo runTiled(const GemmProblem& problem) {
                     if (!selectedOutputs.empty() && !selectedOutputs[globalRow * n + globalColumn])
                         continue;
                     Accumulator effectiveAlpha = alpha;
-                    if (scaleA) effectiveAlpha *= (*scaleA)[globalRow];
-                    if (scaleB) effectiveAlpha *= (*scaleB)[globalColumn];
-                    if (scaleAlpha) {
-                        const MatrixAxis axis = problem.epilogue.scaleAlpha->axis;
-                        effectiveAlpha *=
-                            (*scaleAlpha)[axis == MatrixAxis::Row ? globalRow : globalColumn];
+                    if (!alphaIsZero) {
+                        if (scaleA) effectiveAlpha *= (*scaleA)[globalRow];
+                        if (scaleB) effectiveAlpha *= (*scaleB)[globalColumn];
+                        if (scaleAlpha) {
+                            const MatrixAxis axis = problem.epilogue.scaleAlpha->axis;
+                            effectiveAlpha *=
+                                (*scaleAlpha)[axis == MatrixAxis::Row ? globalRow : globalColumn];
+                        }
                     }
 
-                    Accumulator result = effectiveAlpha * accumulator[row * columns + column] +
-                                         beta * c(globalRow, globalColumn);
+                    Accumulator result = effectiveAlpha * accumulator[row * columns + column];
+                    if (!betaIsZero) result += beta * c(globalRow, globalColumn);
                     if (bias) {
                         const MatrixAxis axis = problem.epilogue.bias->axis;
                         result += (*bias)[axis == MatrixAxis::Row ? globalRow : globalColumn];

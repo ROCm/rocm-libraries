@@ -345,7 +345,7 @@ PythonGemmResult referenceGemmOwned(
     size_t blockSizeB, std::vector<Tensor> preQuantizationScalesA,
     std::vector<MatrixAxis> preQuantizationAxesA, std::vector<Tensor> preQuantizationScalesB,
     std::vector<MatrixAxis> preQuantizationAxesB, std::complex<double> outputScale,
-    GemmOutputConversion outputConversion, AccumulationRounding accumulationRounding) {
+    OutputConversion outputConversion, AccumulationRounding accumulationRounding) {
     if (a.shape().rank() != 2 || b.shape().rank() != 2)
         throw std::invalid_argument("Python reference_gemm requires rank-2 A and B tensors.");
 
@@ -462,7 +462,8 @@ PythonEpilogueResult referenceEpilogueOwned(
     std::optional<Tensor> auxiliaryInput, std::optional<ScalarType> auxiliaryOutputType,
     std::optional<Tensor> gateResidual, std::complex<double> outputScale,
     std::complex<double> auxiliaryScale, double activationParameter0, double activationParameter1,
-    bool includeRawOutput, bool includeAmax, OutputSelection outputSelection) {
+    OutputConversion outputConversion, bool includeRawOutput, bool includeAmax,
+    OutputSelection outputSelection) {
     Tensor output(outputType, input.shape());
     std::optional<Tensor> rawOutput;
     std::optional<Tensor> auxiliaryOutput;
@@ -480,6 +481,7 @@ PythonEpilogueResult referenceEpilogueOwned(
     if (bias) problem.bias = VectorBinding{bias->view(), biasAxis};
     problem.outputScale = outputScale;
     problem.auxiliaryScale = auxiliaryScale;
+    problem.outputConversion = outputConversion;
     problem.activation = activation;
     problem.activationApplication = activationApplication;
     problem.activationParameter0 = activationParameter0;
@@ -643,9 +645,9 @@ NB_MODULE(_roc_host_validation, module) {
         .value("Canonical", GemmBackend::Canonical)
         .value("Tiled", GemmBackend::Tiled);
 
-    nb::enum_<GemmOutputConversion>(module, "GemmOutputConversion")
-        .value("Default", GemmOutputConversion::Default)
-        .value("SaturatingInt8", GemmOutputConversion::SaturatingInt8);
+    nb::enum_<OutputConversion>(module, "OutputConversion")
+        .value("Default", OutputConversion::Default)
+        .value("SaturatingInt8", OutputConversion::SaturatingInt8);
 
     nb::enum_<MatrixAxis>(module, "MatrixAxis")
         .value("Row", MatrixAxis::Row)
@@ -1268,7 +1270,7 @@ NB_MODULE(_roc_host_validation, module) {
                "pre_quantization_scales_b"_a = std::vector<Tensor>{},
                "pre_quantization_axes_b"_a = std::vector<MatrixAxis>{},
                "output_scale"_a = std::complex<double>(1.0, 0.0),
-               "output_conversion"_a = GemmOutputConversion::Default,
+               "output_conversion"_a = OutputConversion::Default,
                "accumulation_rounding"_a = AccumulationRounding::TypeDefault);
     module.def("reference_epilogue", &referenceEpilogueOwned, "input"_a, "output_type"_a,
                "compute_type"_a, "bias"_a = std::optional<Tensor>{},
@@ -1280,8 +1282,8 @@ NB_MODULE(_roc_host_validation, module) {
                "output_scale"_a = std::complex<double>(1.0, 0.0),
                "auxiliary_scale"_a = std::complex<double>(1.0, 0.0),
                "activation_parameter0"_a = 0.0, "activation_parameter1"_a = 0.0,
-               "include_raw_output"_a = false, "include_amax"_a = false,
-               "output_selection"_a = OutputSelection::all());
+               "output_conversion"_a = OutputConversion::Default, "include_raw_output"_a = false,
+               "include_amax"_a = false, "output_selection"_a = OutputSelection::all());
     module.def("reference_sum", &referenceSumOwned, "input"_a, "output_type"_a,
                "accumulator_type"_a, "axes"_a);
     module.def("reference_maximum_absolute", &referenceMaximumAbsoluteOwned, "input"_a,

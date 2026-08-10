@@ -49,6 +49,11 @@ enum class MathMode {
     XFloat32,
 };
 
+enum class OutputConversion {
+    Default,
+    SaturatingInt8,
+};
+
 struct VectorBinding {
     TensorView values;
     MatrixAxis axis = MatrixAxis::Row;
@@ -328,6 +333,39 @@ class RuntimeMatrixWriter {
     ptrdiff_t m_rowStride;
     ptrdiff_t m_columnStride;
     RuntimeStoreFunction<Accumulator> m_store;
+};
+
+template <typename Accumulator>
+class RuntimeMatrixOutputWriter {
+   public:
+    RuntimeMatrixOutputWriter(MutableTensorView output, OutputConversion conversion)
+        : m_output(std::move(output)), m_defaultWriter(m_output), m_conversion(conversion) {
+        if (m_conversion == OutputConversion::SaturatingInt8 && m_output.type() != ScalarType::Int8)
+            throw std::invalid_argument(
+                "Saturating output conversion requires an Int8 output tensor.");
+    }
+
+    void store(size_t row, size_t column, Accumulator value) const {
+        if (m_conversion == OutputConversion::Default) {
+            m_defaultWriter.store(row, column, value);
+            return;
+        }
+
+        if constexpr (IsComplex<Accumulator>::value) {
+            throw std::invalid_argument(
+                "Saturating output conversion does not accept complex values.");
+        } else {
+            const long double rounded = std::nearbyint(static_cast<long double>(value));
+            const long double clamped =
+                std::clamp(rounded, static_cast<long double>(-128), static_cast<long double>(127));
+            m_output.storeFrom({row, column}, static_cast<int8_t>(clamped));
+        }
+    }
+
+   private:
+    MutableTensorView m_output;
+    RuntimeMatrixWriter<Accumulator> m_defaultWriter;
+    OutputConversion m_conversion;
 };
 
 template <typename Accumulator>

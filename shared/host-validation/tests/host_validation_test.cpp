@@ -67,6 +67,49 @@ void testRuntimeReferenceGemm() {
             "Runtime reference GEMM backend fallback mismatch.");
 }
 
+void testZeroGemmScalarsSuppressNonFiniteOperands() {
+    using namespace roc::host_validation;
+
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const float infinity = std::numeric_limits<float>::infinity();
+    const std::array<float, 4> nonFiniteA{nan, nan, nan, nan};
+    const std::array<float, 4> nonFiniteB{infinity, infinity, infinity, infinity};
+    const std::array<float, 4> finiteC{1, 2, 3, 4};
+    std::array<float, 4> output{};
+
+    GemmProblem alphaZero(GemmOperand(TensorView::fromNative<float>(
+                              Layout::contiguous(Shape{2, 2}), std::span<const float>(nonFiniteA))),
+                          GemmOperand(TensorView::fromNative<float>(
+                              Layout::contiguous(Shape{2, 2}), std::span<const float>(nonFiniteB))),
+                          TensorView::fromNative<float>(Layout::contiguous(Shape{2, 2}),
+                                                        std::span<const float>(finiteC)),
+                          MutableTensorView::fromNative<float>(Layout::contiguous(Shape{2, 2}),
+                                                               std::span<float>(output)),
+                          ScalarType::Float32);
+    alphaZero.epilogue.alpha = 0.0;
+    alphaZero.epilogue.beta = 2.0;
+    referenceGemm(alphaZero);
+    require(output == std::array<float, 4>{2, 4, 6, 8},
+            "Zero alpha propagated a non-finite GEMM operand.");
+
+    const std::array<float, 4> finiteA{1, 2, 3, 4};
+    const std::array<float, 4> finiteB{5, 6, 7, 8};
+    const std::array<float, 4> nonFiniteC{infinity, infinity, infinity, infinity};
+    GemmProblem betaZero(GemmOperand(TensorView::fromNative<float>(
+                             Layout::contiguous(Shape{2, 2}), std::span<const float>(finiteA))),
+                         GemmOperand(TensorView::fromNative<float>(
+                             Layout::contiguous(Shape{2, 2}), std::span<const float>(finiteB))),
+                         TensorView::fromNative<float>(Layout::contiguous(Shape{2, 2}),
+                                                       std::span<const float>(nonFiniteC)),
+                         MutableTensorView::fromNative<float>(Layout::contiguous(Shape{2, 2}),
+                                                              std::span<float>(output)),
+                         ScalarType::Float32);
+    betaZero.epilogue.beta = 0.0;
+    referenceGemm(betaZero);
+    require(output == std::array<float, 4>{19, 22, 43, 50},
+            "Zero beta propagated a non-finite C operand.");
+}
+
 void testRuntimeMixedAndBlockScaledGemm() {
     using namespace roc::host_validation;
 
@@ -267,6 +310,19 @@ void testReferenceEpilogue() {
     referenceEpilogue(gated);
     require(gatedOutput == std::array<float, 4>{-1.5f, 6.0f, -7.0f, -1.75f},
             "Reference gate-residual epilogue mismatch.");
+
+    const std::array<float, 4> int8Input{-200.0f, -128.5f, 126.5f, 300.0f};
+    std::array<int8_t, 4> int8Output{};
+    EpilogueProblem saturatingInt8(
+        TensorView::fromNative<float>(Layout::contiguous(Shape{2, 2}),
+                                      std::span<const float>(int8Input)),
+        MutableTensorView::fromNative<int8_t>(Layout::contiguous(Shape{2, 2}),
+                                              std::span<int8_t>(int8Output)),
+        ScalarType::Float32);
+    saturatingInt8.outputConversion = OutputConversion::SaturatingInt8;
+    referenceEpilogue(saturatingInt8);
+    require(int8Output == std::array<int8_t, 4>{-128, -128, 126, 127},
+            "Reference epilogue Int8 saturation mismatch.");
 }
 
 void testReferenceReduction() {
@@ -843,6 +899,7 @@ void testComparisonProgram() {
 
 int main() {
     testRuntimeReferenceGemm();
+    testZeroGemmScalarsSuppressNonFiniteOperands();
     testRuntimeMixedAndBlockScaledGemm();
     testRuntimeComplexAndExplicitAxisGemm();
     testOutputSelection();
