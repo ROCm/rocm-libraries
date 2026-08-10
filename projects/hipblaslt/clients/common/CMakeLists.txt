@@ -48,7 +48,6 @@ target_include_directories(hipblaslt-mxdatagen
 target_link_libraries(hipblaslt-mxdatagen
     PUBLIC
         hipblaslt::headers
-        roc::host-validation
         roc::host-validation-mx
         roc::mxDataGenerator
     PRIVATE

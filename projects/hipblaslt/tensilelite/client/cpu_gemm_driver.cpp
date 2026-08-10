@@ -756,7 +756,7 @@ int runGemm(size_t             m,
             if(computeInputB != dtypeEnumB)
                 operandB.computeType = toHostValidationScalarType(computeInputB);
 
-            GemmProblem problem(std::move(operandA),
+            GemmRequest problem(std::move(operandA),
                                 std::move(operandB),
                                 TensorView::fromNative<AccumulateT>(
                                     Layout(Shape{m, n}, {1, static_cast<ptrdiff_t>(m)}),

@@ -12,6 +12,15 @@ if(EXISTS "${HOST_VALIDATION_SOURCE_DIR}/adapters")
     )
 endif()
 
+if(EXISTS
+   "${HOST_VALIDATION_SOURCE_DIR}/include/roc/host_validation/detail/reference_gemm.hpp"
+)
+    message(
+        FATAL_ERROR
+        "Reference GEMM implementation must remain behind the compiled component boundary."
+    )
+endif()
+
 file(
     GLOB_RECURSE
     component_sources
@@ -19,6 +28,8 @@ file(
     "${HOST_VALIDATION_SOURCE_DIR}/include/*.hpp"
     "${HOST_VALIDATION_SOURCE_DIR}/src/*.c"
     "${HOST_VALIDATION_SOURCE_DIR}/src/*.cpp"
+    "${HOST_VALIDATION_SOURCE_DIR}/src/*.h"
+    "${HOST_VALIDATION_SOURCE_DIR}/src/*.hpp"
     "${HOST_VALIDATION_SOURCE_DIR}/python/*.cmake"
     "${HOST_VALIDATION_SOURCE_DIR}/python/src/*.cpp"
     "${HOST_VALIDATION_SOURCE_DIR}/python/tests/*.py"

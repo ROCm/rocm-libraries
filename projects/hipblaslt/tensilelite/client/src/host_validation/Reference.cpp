@@ -571,30 +571,30 @@ namespace TensileLite
                     gemmOutput = intermediate->mutableView();
                 }
 
-                GemmProblem runtimeProblem(
+                GemmRequest request(
                     std::move(operandA), std::move(operandB),
                     TensorView(typeC, layoutC, currentCStorage),
                     gemmOutput,
                     accumulatorType);
-                runtimeProblem.epilogue.alpha = alpha;
-                runtimeProblem.epilogue.beta = beta;
+                request.epilogue.alpha = alpha;
+                request.epilogue.beta = beta;
                 if (!useStandaloneEpilogue) {
-                    runtimeProblem.epilogue.activation = activation;
-                    runtimeProblem.epilogue.activationParameter0 = activationParameter0;
-                    runtimeProblem.epilogue.activationParameter1 = activationParameter1;
+                    request.epilogue.activation = activation;
+                    request.epilogue.activationParameter0 = activationParameter0;
+                    request.epilogue.activationParameter1 = activationParameter1;
                 }
                 if (problem.useScaleAlphaVec())
-                    runtimeProblem.epilogue.scaleAlpha = VectorBinding{
+                    request.epilogue.scaleAlpha = VectorBinding{
                         TensorView(alphaType, Layout::contiguous(Shape{scaleAlphaLength}),
                                    scaleAlphaStorage),
                         problem.getParams().factorDim() == 0 ? MatrixAxis::Row
                                                              : MatrixAxis::Column};
                 if (problem.useScaleAB() == "Vector") {
                     if (!preQuantizationScaleA)
-                        runtimeProblem.epilogue.scaleA =
+                        request.epilogue.scaleA =
                             TensorView(alphaType, Layout::contiguous(Shape{m}), scaleAStorage);
                     if (!preQuantizationScaleB)
-                        runtimeProblem.epilogue.scaleB =
+                        request.epilogue.scaleB =
                             TensorView(alphaType, Layout::contiguous(Shape{n}), scaleBStorage);
                 }
                 std::optional<VectorBinding> runtimeBias;
@@ -633,28 +633,27 @@ namespace TensileLite
                                    Layout(Shape{runtimeBiasLength}, {1}, runtimeBiasOffset),
                                    currentBiasStorage),
                         runtimeBiasAxis};
-                    if (!useStandaloneEpilogue) runtimeProblem.epilogue.bias = runtimeBias;
+                    if (!useStandaloneEpilogue) request.epilogue.bias = runtimeBias;
                 }
-                runtimeProblem.mathMode =
+                request.mathMode =
                     accumulatorType == ScalarType::Float32 &&
                             problem.f32XdlMathOp() == rocisa::DataType::XFloat32
                         ? MathMode::XFloat32
                         : MathMode::Default;
                 if(!globalSelection.selectsAll())
-                    runtimeProblem.outputSelection
+                    request.outputSelection
                         = OutputSelection::explicitIndices(selectedByBatch[batch]);
-                GemmInvocation invocation(std::move(runtimeProblem));
+                GemmExecution execution;
                 if (backendImplementation != nullptr) {
-                    const GemmBackend backend = backendImplementation->backend();
-                    invocation.execution = {
-                        .backend = backend,
+                    execution = {
+                        .backend = backendImplementation->backend(),
                         .requireRequestedBackend = true,
-                        .backendImplementation = backendImplementation,
                     };
-                    const GemmSupportInfo support = queryGemmSupport(invocation);
+                    const GemmSupportInfo support =
+                        queryGemmSupport(request, execution, backendImplementation);
                     if (!support) return false;
                 }
-                referenceGemm(invocation);
+                referenceGemm(request, execution, backendImplementation);
 
                 if (useStandaloneEpilogue) {
                     EpilogueProblem epilogue(
@@ -664,7 +663,7 @@ namespace TensileLite
                     epilogue.activationParameter0 = activationParameter0;
                     epilogue.activationParameter1 = activationParameter1;
                     epilogue.outputScale = outputScale;
-                    epilogue.outputSelection = invocation.problem.outputSelection;
+                    epilogue.outputSelection = request.outputSelection;
                     std::optional<Tensor> gradientAuxiliary;
                     std::optional<Tensor> biasWorkspace;
                     if (problem.useGradient() && problem.useBias() &&
