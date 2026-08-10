@@ -1901,18 +1901,12 @@ def _run_wgrad_sweep(
     rt = Runtime()
     results: List[Result] = []
 
-    for combo in combos:
-        (
-            tile_m,
-            tile_n,
-            tile_k,
-            warp_m,
-            warp_n,
-            warp_tile_mn,
-            pipeline,
-            epilogue,
-            split_k,
-        ) = combo
+    dY_dev = rt.alloc(dY_t.nbytes)
+    X_dev = rt.alloc(X_t.nbytes)
+    dW_dev = rt.alloc(dW_t.nbytes)
+    rt.memcpy_h2d(dY_dev, _u8(dY_t), dY_t.nbytes)
+    rt.memcpy_h2d(X_dev, _u8(X_t), X_t.nbytes)
+    rt.memset(dW_dev, 0, dW_t.nbytes)
 
     ref_out: torch.Tensor | None = None
     if args.verify or args.dump_fail:
@@ -1952,7 +1946,7 @@ def _run_wgrad_sweep(
             continue
 
         grid = _grid_for_wgrad_spec(spec, resolved_split_k)
-        block = (spec.launch_block_size, 1, 1)
+        block = (spec.block_size, 1, 1)
         stream = 0
 
         values = {

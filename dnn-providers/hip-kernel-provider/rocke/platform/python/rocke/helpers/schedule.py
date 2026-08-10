@@ -452,9 +452,8 @@ class SchedulePolicy:
             return cls(name="wmma_v1", emit_hints=True, mode="intrawave")
         if pipeline == "wavelet":
             # WAVELET pipeline — load/math wave specialization.
-            # Splits the workgroup into load waves (DRAM→LDS) and math waves
-            # (LDS reads + MFMA). The overlap is architectural on gfx1250 (separate
-            # issue slots), so no sched_group_barrier hints are needed.
+            # (WMMA) and math waves
+            # (LDS reads + WMMA). The overlap is architectural on gfx1250 (separate
             return cls(name="wavelet", emit_hints=False, mode="default")
         if pipeline == "basic":
             # CK pipeline_basic: naive single-buffer pipeline with global-read/
