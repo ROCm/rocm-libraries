@@ -694,11 +694,11 @@ Solutions:
   tailLoopOptB: false
 IndexOrder: [2, 3, 0, 1]
 ExactLogic:
-- - - [6514, 393216, 1, 641]
-    - [0, 0.0]
-  - - [65728, 4096, 1, 4096]
-    - [1, 0.0]
-- null
-- null
-- DeviceEfficiency
-- Equality
+- - [6514, 393216, 1, 641]
+  - [0, 0.0]
+- - [65728, 4096, 1, 4096]
+  - [1, 0.0]
+RangeLogic: null
+TileSelectionIndices: null
+PerfMetric: DeviceEfficiency
+LibraryType: Equality
