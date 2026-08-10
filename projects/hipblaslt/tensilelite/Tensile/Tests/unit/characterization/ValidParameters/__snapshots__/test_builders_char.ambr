@@ -1509,6 +1509,7 @@
     'Use64bShadowLimitMX',
     'UseCustomMainLoopSchedule',
     'UseDualFMAC',
+    'UseF32XEmulationInfSupport',
     'UseInstOffsetForGRO',
     'UsePLRPack',
     'UseSgprForGRO',
@@ -2838,6 +2839,15 @@
         True,
       ]),
       'len': 2,
+      'type': 'list',
+    }),
+    'UseF32XEmulationInfSupport': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 3,
       'type': 'list',
     }),
     'UseInstOffsetForGRO': dict({
