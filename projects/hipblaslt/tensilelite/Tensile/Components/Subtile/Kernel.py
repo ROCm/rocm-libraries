@@ -1136,15 +1136,29 @@ def emitMfmaInstruction(writer, kernel, vgprTileA, vgprTileB, vgprTileC, vgprTil
     # MX FP4: 16x16x128
     mxInstType = _selectF8F6F4InstType(kernel)
     if scaleAVgpr >= 0 and scaleBVgpr >= 0:
-      # Use actual loaded scale VGPRs
-      module.add(MXMFMAInstruction(instType=mxInstType, accType=InstType.INST_F32, variant=[16,16,miK,1], \
-                                   acc=dAccAlias(vgprDStart,opDSize), \
-                                   a=aOperand, \
-                                   b=bOperand, \
-                                   acc2=cAccAlias(vgprCStart,opCSize), \
-                                   mxsa=vgpr(scaleAVgpr), mxsb=vgpr(scaleBVgpr), \
-                                   mxScaleASel=scaleAsel % 2, mxScaleBSel=scaleBsel % 2, \
-                                   comment=comment))
+      # Use actual loaded scale VGPRs.
+      # Scale lane selection differs by ISA:
+      #   gfx1250 (WMMA): mxScaleASel/BSel -> matrix_a_scale / matrix_b_scale modifiers
+      #   gfx950  (MFMA): VOP3PModifiers   -> op_sel / op_sel_hi modifiers
+      _asmCaps = getattr(getattr(writer, "states", None), "asmCaps", {})
+      if _asmCaps.get("HasWMMA", False):
+        module.add(MXMFMAInstruction(instType=mxInstType, accType=InstType.INST_F32, variant=[16,16,miK,1], \
+                                     acc=dAccAlias(vgprDStart,opDSize), \
+                                     a=aOperand, \
+                                     b=bOperand, \
+                                     acc2=cAccAlias(vgprCStart,opCSize), \
+                                     mxsa=vgpr(scaleAVgpr), mxsb=vgpr(scaleBVgpr), \
+                                     mxScaleASel=scaleAsel % 2, mxScaleBSel=scaleBsel % 2, \
+                                     comment=comment))
+      else:
+        module.add(MXMFMAInstruction(instType=mxInstType, accType=InstType.INST_F32, variant=[16,16,miK,1], \
+                                     acc=dAccAlias(vgprDStart,opDSize), \
+                                     a=aOperand, \
+                                     b=bOperand, \
+                                     acc2=cAccAlias(vgprCStart,opCSize), \
+                                     mxsa=vgpr(scaleAVgpr), mxsb=vgpr(scaleBVgpr), \
+                                     vop3=VOP3PModifiers(op_sel=[scaleAsel%2, scaleBsel%2], op_sel_hi=[(scaleAsel>>1)%2, (scaleBsel>>1)%2]), \
+                                     comment=comment))
     else:
       # Fallback: use unit scale VGPR pre-initialized to 0x7f7f7f7f (scale=1.0 E8M0).
       # Initialized once in mainLoop() before emitMainAndExitLoops() — VMovB32 cannot live here
