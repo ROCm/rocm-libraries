@@ -215,6 +215,16 @@ class AttentionDenseSpec:
     #   (still within bf16/fp16 tolerance). ALWAYS-ON by default (parity-identical
     #   at 1.46e-3, ~+2% TFLOPS); set False only to disable for A/B.
     lazy_rescale: bool = True
+    # paged: read K/V from a paged cache [num_blocks, block_size, num_kv_heads,
+    #   head_size] via block_tables indirection instead of contiguous memory.
+    #   Single-sequence only in this revision. 0-cost when False (byte-identical IR).
+    paged: bool = False
+    # block_size: KV cache PAGE size (tokens per physical block). Distinct from
+    #   block_n (the compute KV tile). Required >0 and must divide block_n when paged.
+    block_size: int = 0
+    # num_kv_blocks: total physical blocks in the paged cache (key_cache.shape[0]).
+    #   Bounds the paged buffer resource. Required >0 when paged.
+    num_kv_blocks: int = 0
 
     def __post_init__(self) -> None:
         if self.dtype not in _DTYPE_IR:
@@ -293,6 +303,28 @@ class AttentionDenseSpec:
                 raise ValueError("varlen is not supported with persistent=True")
             if not self.causal:
                 raise ValueError("varlen requires causal=True")
+        if self.paged:
+            if self.block_size <= 0:
+                raise ValueError("paged=True requires block_size > 0")
+            if self.block_n % self.block_size != 0:
+                raise ValueError(
+                    f"block_n ({self.block_n}) must be a multiple of page "
+                    f"block_size ({self.block_size})"
+                )
+            if self.num_kv_blocks <= 0:
+                raise ValueError("paged=True requires num_kv_blocks > 0")
+            if self.batch != 1:
+                raise ValueError("paged is single-sequence only (batch must be 1)")
+            if self.varlen:
+                raise ValueError("paged is not supported with varlen (single-seq only)")
+            if self.head_size != 128:
+                raise ValueError("paged requires head_size == 128")
+            if self.dtype != "fp16":
+                raise ValueError("paged validated for fp16 only in this revision")
+            if self.sliding_window <= 0:
+                raise ValueError(
+                    "paged validated for sliding_window>0 only in this revision"
+                )
 
     @property
     def num_waves(self) -> int:
@@ -347,6 +379,8 @@ class AttentionDenseSpec:
             parts.append(f"swa{self.sliding_window}")
         if self.varlen:
             parts.append("varlen")
+        if self.paged:
+            parts.append(f"pgd{self.block_size}")
         if self.lazy_rescale:
             parts.append("lazyrs")
         if self.persistent:

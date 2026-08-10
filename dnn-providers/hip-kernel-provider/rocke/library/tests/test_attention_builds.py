@@ -1114,6 +1114,55 @@ class TestAttentionHelpers(unittest.TestCase):
                 self.assertGreater(art.hsaco_bytes, 0)
                 _assert_resources_fit(art, arch="gfx950", kernel_name=k.name)
 
+    def test_gfx950_dense_paged_spec_admission(self):
+        """Paged spec fields + validation: accept the fp16 D128 SW single-seq
+        cohort, reject illegal / not-yet-validated combos. Pure-Python (no GPU)."""
+        from kernels.gfx950.attention_dense import (
+            AttentionDenseSpec,
+            supports_attention_dense,
+        )
+
+        base = dict(
+            batch=1,
+            seqlen_q=8192,
+            seqlen_kv=8192,
+            num_query_heads=32,
+            num_kv_heads=8,
+            head_size=128,
+            causal=True,
+            dtype="fp16",
+            sliding_window=4096,
+            block_n=64,
+        )
+        # Accept: fp16 D128 SW single-seq, page size divides block_n.
+        ok, why = supports_attention_dense(
+            AttentionDenseSpec(paged=True, block_size=16, num_kv_blocks=512, **base)
+        )
+        self.assertTrue(ok, why)
+        # kernel name carries the paged tag (distinct binary / cache key).
+        self.assertIn(
+            "pgd16",
+            AttentionDenseSpec(
+                paged=True, block_size=16, num_kv_blocks=512, **base
+            ).kernel_name(),
+        )
+        # Rejections (each a ValueError from __post_init__).
+        for kw in (
+            dict(block_size=0, num_kv_blocks=512),           # page size 0
+            dict(block_size=48, num_kv_blocks=512),          # not a divisor of block_n
+            dict(block_size=16, num_kv_blocks=0),            # num_kv_blocks 0
+            dict(block_size=16, num_kv_blocks=512, batch=2), # multi-seq
+            dict(block_size=16, num_kv_blocks=512, varlen=True),
+            dict(block_size=16, num_kv_blocks=512, dtype="bf16"),        # not validated yet
+            dict(block_size=16, num_kv_blocks=512, sliding_window=0),    # not validated yet
+        ):
+            with self.subTest(kw=kw), self.assertRaises(ValueError):
+                AttentionDenseSpec(paged=True, **{**base, **kw})
+        # 0-cost when off: a non-paged spec is unaffected.
+        s = AttentionDenseSpec(**base)
+        self.assertFalse(s.paged)
+        self.assertNotIn("pgd", s.kernel_name())
+
     def test_attention_3d_workspace_size_matches_shapes(self):
         p = UnifiedAttentionProblem(
             total_q=3,
