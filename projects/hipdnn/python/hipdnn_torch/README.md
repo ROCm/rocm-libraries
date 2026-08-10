@@ -149,6 +149,54 @@ HIPDNN_TORCH_PROVIDER_SO=<...>/libhip_kernel_provider.so \
     python -c "import hipdnn_torch; print(hipdnn_torch.provider_ready())"
 ```
 
+## Getting a provider with the operations this layer needs
+
+> [!IMPORTANT]
+> hipDNN is an **early-release** library. Default builds ship a deliberately limited set
+> of providers and engines, and the more experimental ones are turned **off**.
+> `hipdnn_torch` only routes a call to hipDNN when a loaded engine actually serves that
+> operation and shape — otherwise it falls back to native PyTorch. So `provider_ready()`
+> can return `True` and your model can run correctly while **nothing routes**, simply
+> because the loaded provider doesn't yet cover `F.linear` / `F.rms_norm` /
+> `F.scaled_dot_product_attention`. Getting calls to route takes a **custom build** that
+> re-enables the pieces the default build leaves out.
+
+There are two independent gates, both off by default:
+
+**1. The provider itself is not in the default build.** The engine plugin this layer
+loads comes from `hip-kernel-provider`, which is **not** part of the default
+(`default:release`) or the "supported providers" presets — only the `hip-kernel-provider`,
+`hipdnn-providers-all`, and `hipdnn-dev-all` presets include it. Build it explicitly from
+the repository root:
+
+```bash
+cmake --preset hip-kernel-provider
+cmake --build build
+```
+
+(equivalently, add `hip-kernel-provider` to `ROCM_LIBS_ENABLE_COMPONENTS`). This produces
+the plugin under `build/.../hipdnn_plugins/engines/libhip_kernel_provider.so` — the path
+you point `HIPDNN_TORCH_PROVIDER_SO` at.
+
+**2. The engine that provides these ops is gated inside the provider.** Which engine
+serves matmul / RMSNorm / SDPA — and whether it's compiled at all — is controlled by its
+own CMake option, documented alongside that engine. `hipdnn_torch` selects the engine by
+name through `HIPDNN_TORCH_ENGINE` (default `AOT_CATALOG_ENGINE`); set it to match the
+engine your build actually registers.
+
+> [!NOTE]
+> The default engine name above, `AOT_CATALOG_ENGINE`, is **not yet on `develop`** — it
+> currently lives in the draft PR
+> [ROCm/rocm-libraries#10556](https://github.com/ROCm/rocm-libraries/pull/10556), which
+> adds the matmul / RMSNorm / SDPA op coverage this layer was built against. That PR's own
+> `README.md` is the authoritative source for its build option and setup (including which
+> flags to pass and which are *not* needed). To exercise that coverage today, build
+> `hip-kernel-provider` from that branch following its README, point
+> `HIPDNN_TORCH_PROVIDER_SO` at the resulting plugin, and leave `HIPDNN_TORCH_ENGINE` at
+> its default. That PR is also a good worked example of **how additional operation
+> coverage is added to hipDNN** — the same pattern (a new engine / kernel family behind a
+> build option) is how future ops will land and become routable here.
+
 ## Applicability & known limitations
 
 **This only intercepts calls that go through `torch.nn.functional`.** That covers a lot

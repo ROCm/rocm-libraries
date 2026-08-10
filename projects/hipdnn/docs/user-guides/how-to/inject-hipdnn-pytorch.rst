@@ -73,6 +73,18 @@ Verify the environment is wired up without running a model:
     HIPDNN_TORCH_PROVIDER_SO=<build>/lib/hipdnn_plugins/engines/libhip_kernel_provider.so \
         python -c "import hipdnn_torch; print(hipdnn_torch.provider_ready())"
 
+.. note::
+
+  hipDNN is an early-release library, and default builds ship a deliberately limited set
+  of providers and engines. The engine plugin this layer loads comes from
+  ``hip-kernel-provider``, which is not part of the default or "supported" build presets,
+  and the engine that serves ``F.linear`` / ``F.rms_norm`` /
+  ``F.scaled_dot_product_attention`` is gated behind its own build option. As a result,
+  ``provider_ready()`` can return ``True`` while nothing routes, simply because the loaded
+  build doesn't yet cover these operations. Turning that coverage on takes a custom build;
+  the ``hipdnn_torch`` README's "Getting a provider with the operations this layer needs"
+  section has the recipe and links to a worked example.
+
 Applicability and limitations
 =============================
 
