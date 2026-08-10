@@ -7,9 +7,10 @@
 #include <cstddef>
 #include <optional>
 #include <roc/host_validation/axpby.hpp>
-#include <roc/host_validation/detail/reference_common.hpp>
 #include <stdexcept>
 #include <utility>
+
+#include "reference_common.hpp"
 
 namespace roc::host_validation {
 namespace detail {
