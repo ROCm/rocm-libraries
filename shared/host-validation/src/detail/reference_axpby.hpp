@@ -6,31 +6,12 @@
 #include <complex>
 #include <cstddef>
 #include <optional>
+#include <roc/host_validation/axpby.hpp>
 #include <roc/host_validation/detail/reference_common.hpp>
 #include <stdexcept>
 #include <utility>
 
 namespace roc::host_validation {
-struct AxpbyProblem {
-    AxpbyProblem(std::optional<TensorView> xValues, std::optional<TensorView> yValues,
-                 MutableTensorView outputValues, ScalarType accumulator)
-        : x(std::move(xValues)),
-          y(std::move(yValues)),
-          output(std::move(outputValues)),
-          accumulatorType(accumulator) {}
-
-    std::optional<TensorView> x;
-    std::optional<TensorView> y;
-    MutableTensorView output;
-    ScalarType accumulatorType;
-    std::complex<double> alpha{1.0, 0.0};
-    std::complex<double> beta{1.0, 0.0};
-};
-
-struct AxpbyRunInfo {
-    size_t elementsComputed = 0;
-};
-
 namespace detail {
 inline void validateAxpby(const AxpbyProblem& problem) {
     if (!problem.x && !problem.y)
@@ -71,20 +52,4 @@ AxpbyRunInfo referenceAxpbyTyped(const AxpbyProblem& problem) {
     return {.elementsComputed = problem.output.shape().elementCount()};
 }
 }  // namespace detail
-
-inline AxpbyRunInfo referenceAxpby(const AxpbyProblem& problem) {
-    detail::validateAxpby(problem);
-    switch (problem.accumulatorType) {
-        case ScalarType::Float32:
-            return detail::referenceAxpbyTyped<float>(problem);
-        case ScalarType::Float64:
-            return detail::referenceAxpbyTyped<double>(problem);
-        case ScalarType::ComplexFloat32:
-            return detail::referenceAxpbyTyped<std::complex<float>>(problem);
-        case ScalarType::ComplexFloat64:
-            return detail::referenceAxpbyTyped<std::complex<double>>(problem);
-        default:
-            throw std::invalid_argument("Unsupported reference AXPBY accumulator type.");
-    }
-}
 }  // namespace roc::host_validation
