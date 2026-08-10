@@ -6,6 +6,6 @@
 namespace rocRoller
 {
 
-    class Instruction;
+    struct Instruction;
 
 }

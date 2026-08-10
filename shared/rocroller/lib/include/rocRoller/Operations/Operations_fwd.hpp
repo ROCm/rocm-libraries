@@ -13,21 +13,21 @@ namespace rocRoller
 {
     namespace Operations
     {
-        struct Tensor;
-        struct Scalar;
-        struct Literal;
-        struct BlockScale;
-        struct Scratch;
-        struct SubTileTranspose;
-        struct T_Load_Linear;
-        struct T_Load_Scalar;
-        struct T_Load_Tiled;
-        struct T_Mul;
-        struct T_Store_Linear;
-        struct T_Store_Tiled;
-        struct T_Execute;
+        class Tensor;
+        class Scalar;
+        class Literal;
+        class BlockScale;
+        class Scratch;
+        class SubTileTranspose;
+        class T_Load_Linear;
+        class T_Load_Scalar;
+        class T_Load_Tiled;
+        class T_Mul;
+        class T_Store_Linear;
+        class T_Store_Tiled;
+        class T_Execute;
         struct Nop;
-        struct RandomNumberGenerator;
+        class RandomNumberGenerator;
         using Operation = std::variant<Tensor,
                                        Scalar,
                                        Literal,
