@@ -7,11 +7,12 @@
 #include <cmath>
 #include <limits>
 #include <numeric>
-#include <roc/host_validation/detail/reference_common.hpp>
 #include <roc/host_validation/reduction.hpp>
 #include <stdexcept>
 #include <utility>
 #include <vector>
+
+#include "reference_common.hpp"
 
 namespace roc::host_validation {
 namespace detail {
