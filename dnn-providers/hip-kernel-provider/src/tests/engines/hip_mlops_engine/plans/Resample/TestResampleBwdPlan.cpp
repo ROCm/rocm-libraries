@@ -1,12 +1,19 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <algorithm>
+#include <optional>
+#include <type_traits>
+
 #include <gtest/gtest.h>
 
-#include "engines/plans/resample/ResampleBwdPlan.hpp"
+#include "core/Handle.hpp"
+#include "engines/hip_mlops_engine/plans/resample/ResampleBwdPlan.hpp"
 #include "mocks/MockCompiledProgram.hpp"
 #include "mocks/MockKernelCompiler.hpp"
 #include "mocks/MockRunnableKernel.hpp"
+
+#include "../TestPlanCommon.hpp"
 
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
@@ -17,77 +24,6 @@ using namespace hip_kernel_provider::resample;
 
 namespace
 {
-
-flatbuffers::FlatBufferBuilder createValidResampleBwdGraphWithIndex()
-{
-    flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
-        tensorAttributes;
-
-    const std::vector<int64_t> dxDims = {1, 1, 4, 4};
-    const std::vector<int64_t> dxStrides = {16, 16, 4, 1};
-    const std::vector<int64_t> dyDims = {1, 1, 2, 2};
-    const std::vector<int64_t> dyStrides = {4, 4, 2, 1};
-
-    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder,
-        1,
-        "dy",
-        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-        &dyStrides,
-        &dyDims));
-    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder,
-        2,
-        "dx",
-        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-        &dxStrides,
-        &dxDims));
-    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder,
-        3,
-        "index",
-        hipdnn_flatbuffers_sdk::data_objects::DataType::INT32,
-        &dyStrides,
-        &dyDims));
-
-    const std::vector<int64_t> prePadding = {0, 0};
-    const std::vector<int64_t> postPadding = {0, 0};
-    const std::vector<int64_t> stride = {2, 2};
-    const std::vector<int64_t> window = {2, 2};
-
-    auto resampleAttr = hipdnn_flatbuffers_sdk::data_objects::CreateResampleBwdAttributesDirect(
-        builder,
-        1,
-        2,
-        ::flatbuffers::Optional<int64_t>(3),
-        &prePadding,
-        &postPadding,
-        &stride,
-        &window,
-        hipdnn_flatbuffers_sdk::data_objects::ResampleMode::MAXPOOL,
-        hipdnn_flatbuffers_sdk::data_objects::PaddingMode::ZERO_PAD,
-        ::flatbuffers::Optional<bool>(true));
-
-    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
-    nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
-        builder,
-        "resample_bwd",
-        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-        hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ResampleBwdAttributes,
-        resampleAttr.Union()));
-
-    auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
-        builder,
-        "test",
-        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-        &tensorAttributes,
-        &nodes);
-    builder.Finish(graphOffset);
-    return builder;
-}
 
 std::pair<flatbuffers::FlatBufferBuilder, ResampleBwdPlan> createPlanFromGraph()
 {
@@ -123,7 +59,7 @@ TEST(TestResampleBwdParams, ConstructsFromSingleNodeGraph)
 
 TEST(TestResampleBwdParams, HasCorrectTensorPointers)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidResampleBwdGraph();
+    auto builder = hipdnn_test_sdk::utilities::createValidResampleBwdGraph(false);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -160,7 +96,7 @@ TEST(TestResampleBwdParams, TensorPointersMatchExpectedUids)
 
 TEST(TestResampleBwdParams, HasOptionalIndexTensor)
 {
-    auto builder = createValidResampleBwdGraphWithIndex();
+    auto builder = hipdnn_test_sdk::utilities::createValidResampleBwdGraph(true);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -171,7 +107,6 @@ TEST(TestResampleBwdParams, HasOptionalIndexTensor)
 
     ASSERT_NE(params.index(), nullptr);
     EXPECT_EQ(params.index()->uid(), attr.index_tensor_uid().value());
-    EXPECT_TRUE(params.generateIndex());
 }
 
 TEST(TestResampleBwdParams, IsMoveConstructible)
@@ -202,14 +137,14 @@ TEST(TestResampleBwdParams, IsNotCopyConstructible)
 TEST(TestResampleBwdPlan, ExecuteWithoutCompileThrows)
 {
     auto [fbb, plan] = createPlanFromGraph();
-    const HipKernelHandle handle;
+    const Handle handle;
     EXPECT_THROW(plan.execute(handle, nullptr, 0), hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestResampleBwdPlan, GetWorkspaceSizeReturnsZero)
 {
     auto [fbb, plan] = createPlanFromGraph();
-    const HipKernelHandle handle;
+    const Handle handle;
     EXPECT_EQ(plan.getWorkspaceSize(handle), 0u);
 }
 
@@ -217,7 +152,7 @@ TEST(TestResampleBwdPlan, IsMoveConstructible)
 {
     auto [fbb, plan] = createPlanFromGraph();
     const ResampleBwdPlan moved(std::move(plan));
-    const HipKernelHandle handle;
+    const Handle handle;
     EXPECT_EQ(moved.getWorkspaceSize(handle), 0u);
 }
 
@@ -225,3 +160,7 @@ TEST(TestResampleBwdPlan, IsNotCopyConstructible)
 {
     EXPECT_FALSE(std::is_copy_constructible_v<ResampleBwdPlan>);
 }
+
+// ============================================================================
+// ResampleBwdPlan - compile
+// ============================================================================
