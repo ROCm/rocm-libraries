@@ -30,6 +30,15 @@ if(EXISTS
     )
 endif()
 
+if(EXISTS
+   "${HOST_VALIDATION_SOURCE_DIR}/include/roc/host_validation/detail/reference_reduction.hpp"
+)
+    message(
+        FATAL_ERROR
+        "Reference reduction implementation must remain behind the compiled component boundary."
+    )
+endif()
+
 file(
     GLOB_RECURSE
     component_sources

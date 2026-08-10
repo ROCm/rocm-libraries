@@ -8,38 +8,12 @@
 #include <limits>
 #include <numeric>
 #include <roc/host_validation/detail/reference_common.hpp>
+#include <roc/host_validation/reduction.hpp>
 #include <stdexcept>
 #include <utility>
 #include <vector>
 
 namespace roc::host_validation {
-enum class ReductionOperation {
-    Sum,
-    MaximumAbsolute,
-};
-
-struct ReductionProblem {
-    ReductionProblem(TensorView inputTensor, MutableTensorView outputTensor, ScalarType accumulator,
-                     std::vector<size_t> reductionAxes,
-                     ReductionOperation reductionOperation = ReductionOperation::Sum)
-        : input(std::move(inputTensor)),
-          output(std::move(outputTensor)),
-          accumulatorType(accumulator),
-          axes(std::move(reductionAxes)),
-          operation(reductionOperation) {}
-
-    TensorView input;
-    MutableTensorView output;
-    ScalarType accumulatorType;
-    std::vector<size_t> axes;
-    ReductionOperation operation;
-};
-
-struct ReductionRunInfo {
-    size_t outputElementsComputed = 0;
-    size_t inputElementsRead = 0;
-};
-
 namespace detail {
 struct ReductionPlan {
     std::vector<bool> reducedDimensions;
@@ -177,38 +151,4 @@ ReductionRunInfo referenceReductionTyped(const ReductionProblem& problem,
     };
 }
 }  // namespace detail
-
-inline ReductionRunInfo referenceReduce(const ReductionProblem& problem) {
-    const detail::ReductionPlan plan = detail::validateReduction(problem);
-    switch (problem.accumulatorType) {
-        case ScalarType::Float16:
-        case ScalarType::BFloat16:
-        case ScalarType::Float32:
-            return detail::referenceReductionTyped<float>(problem, plan);
-        case ScalarType::Float64:
-            return detail::referenceReductionTyped<double>(problem, plan);
-        case ScalarType::Int32:
-            return detail::referenceReductionTyped<int32_t>(problem, plan);
-        case ScalarType::ComplexFloat32:
-            return detail::referenceReductionTyped<std::complex<float>>(problem, plan);
-        case ScalarType::ComplexFloat64:
-            return detail::referenceReductionTyped<std::complex<double>>(problem, plan);
-        default:
-            throw std::invalid_argument("Unsupported reference reduction accumulator type.");
-    }
-}
-
-inline ReductionRunInfo referenceSum(const ReductionProblem& problem) {
-    if (problem.operation != ReductionOperation::Sum)
-        throw std::invalid_argument("referenceSum requires a sum reduction problem.");
-    return referenceReduce(problem);
-}
-
-inline ReductionRunInfo referenceMaximumAbsolute(TensorView input, MutableTensorView output,
-                                                 ScalarType accumulatorType) {
-    std::vector<size_t> axes(input.shape().rank());
-    std::iota(axes.begin(), axes.end(), 0);
-    return referenceReduce(ReductionProblem(std::move(input), std::move(output), accumulatorType,
-                                            std::move(axes), ReductionOperation::MaximumAbsolute));
-}
 }  // namespace roc::host_validation
