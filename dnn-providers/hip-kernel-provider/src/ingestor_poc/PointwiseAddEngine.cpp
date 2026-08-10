@@ -12,6 +12,7 @@
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
 
 #include "engines/hip_mlops_engine/HipMlopsKernelCompiler.hpp"
+#include "ingestor_poc/HandleDeviceResolver.hpp"
 #include "ingestor_poc/NativeMatchers.hpp"
 #include "ingestor_poc/PointwiseAddDispatchHandler.hpp"
 #include "ingestor_poc/PointwiseAddPack.hpp"
@@ -22,16 +23,23 @@ namespace hip_kernel_provider::ingestor_poc
 namespace
 {
 
-int currentDeviceId()
+/**
+ * @brief The dispatch handler this pack's UDD resolves to.
+ *
+ * Process-lifetime, because the registry that holds it is. The registry stores a
+ * non-owning pointer, and a provider's container is created and destroyed along with
+ * its handles, so a handler owned by an engine would be freed while the registration
+ * still pointed at it -- and the next container's engine would resolve that dangling
+ * pointer rather than its own handler.
+ *
+ * The compiler it holds is a static for the same reason, and matches the module cache
+ * behind it, which is already process-wide.
+ */
+const PointwiseAddDispatchHandler& dispatchHandler()
 {
-    int deviceId = 0;
-    if(hipGetDevice(&deviceId) != hipSuccess)
-    {
-        // Catalogs are cached per device, so failing to resolve one is not fatal:
-        // device 0 keys the cache consistently and matching is unaffected.
-        return 0;
-    }
-    return deviceId;
+    static const HipMlopsKernelCompiler s_kernelCompiler;
+    static const PointwiseAddDispatchHandler s_dispatchHandler(s_kernelCompiler);
+    return s_dispatchHandler;
 }
 
 /**
@@ -46,34 +54,29 @@ int currentDeviceId()
  * process; from here it surfaces as a failed plugin creation the host can report.
  */
 std::shared_ptr<hipdnn_plugin_sdk::ingestor::KernelIngestorStateManager<Handle>>
-    registerThenBuildStateManager(const PointwiseAddDispatchHandler& dispatchHandler)
+    registerThenBuildStateManager()
 {
     static std::once_flag s_registered;
-    std::call_once(s_registered, [&dispatchHandler]() {
+    std::call_once(s_registered, []() {
         registerPointwiseAddMatchers();
-        registerPointwiseAddDispatch(dispatchHandler);
+        registerPointwiseAddDispatch(dispatchHandler());
     });
 
     return makePointwiseAddStateManager();
 }
 
 /**
- * @brief A generic engine plus the provider-owned machinery its kernels reach through
- *        the native registry.
+ * @brief A generic engine over this pack's descriptor set.
  *
- * The registry holds the dispatch handler by pointer, so something must own that handler
- * for as long as any plan built from it can execute. That is this type: the compiler and
- * handler are declared before the engine, so they are constructed first and destroyed
- * last, and the engine's plans never outlive the engine.
+ * Owns only what is scoped to one engine: the device resolver, and the state manager's
+ * catalog cache. The dispatch handler and its compiler are deliberately not members --
+ * see dispatchHandler() for why their lifetime has to exceed this engine's.
  */
 class PointwiseAddEngine : public hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>
 {
 public:
-    explicit PointwiseAddEngine(const device::IDevicePropertyProvider& devicePropertyProvider)
-        : _dispatchHandler(_kernelCompiler, devicePropertyProvider.getDeviceProperties())
-        , _engine(registerThenBuildStateManager(_dispatchHandler),
-                  devicePropertyProvider.getDeviceProperties(),
-                  currentDeviceId())
+    PointwiseAddEngine()
+        : _engine(registerThenBuildStateManager(), _deviceResolver)
     {
     }
 
@@ -114,17 +117,15 @@ public:
     }
 
 private:
-    HipMlopsKernelCompiler _kernelCompiler;
-    PointwiseAddDispatchHandler _dispatchHandler;
+    HandleDeviceResolver _deviceResolver;
     hipdnn_plugin_sdk::ingestor::GenericEngine<Handle, Settings, Context> _engine;
 };
 
 } // namespace
 
-std::unique_ptr<hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>>
-    makePointwiseAddEngine(const device::IDevicePropertyProvider& devicePropertyProvider)
+std::unique_ptr<hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>> makePointwiseAddEngine()
 {
-    return std::make_unique<PointwiseAddEngine>(devicePropertyProvider);
+    return std::make_unique<PointwiseAddEngine>();
 }
 
 } // namespace hip_kernel_provider::ingestor_poc

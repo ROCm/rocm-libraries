@@ -16,6 +16,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/ingestor/GenericPlanBuilder.hpp>
+#include <hipdnn_plugin_sdk/ingestor/IDeviceResolver.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IEngine.hpp>
 
@@ -47,17 +48,16 @@ public:
     using IEngineConfig = hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig;
 
     /**
-     * @param stateManager    The engine's descriptor state, already validated.
-     * @param deviceProperties Supplies `$device.*`. Held by value: providers hand these
-     *        out by value, so a reference would bind to a temporary.
-     * @param deviceId        The device this engine's catalogs are keyed on.
+     * @param stateManager   The engine's descriptor state, already validated.
+     * @param deviceResolver Answers which device each call is for, from the handle that
+     *        carries it. Held by reference; owned by the provider, which must keep it
+     *        alive for the engine's lifetime.
      */
     GenericEngine(std::shared_ptr<KernelIngestorStateManager<THandle>> stateManager,
-                  const hipDeviceProp_t& deviceProperties,
-                  DeviceId deviceId)
+                  const IDeviceResolver<THandle>& deviceResolver)
         : _stateManager(std::move(stateManager))
         , _id(hipdnn_data_sdk::utilities::engineNameToId(_stateManager->engine().name))
-        , _planBuilder(_stateManager, deviceProperties, deviceId)
+        , _planBuilder(_stateManager, deviceResolver)
     {
     }
 
