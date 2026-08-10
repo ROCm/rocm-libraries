@@ -91,7 +91,7 @@ RTCKernel::RTCGenerator RTCKernelTranspose::generate_from_node(const LeafNode&  
     bool tileAligned = node.length[0] % tileX == 0 && node.length[1] % tileX == 0;
 
     // Determine index type based on whether the kernel needs 64-bit indexing
-    IndexType itype = node.kernel_needs_64bit_indexing ? IndexType::INT64 : IndexType::INT32;
+    IndexType itype = node.kernel_needs_64bit_indexing ? IndexType::_64BIT : IndexType::_32BIT;
 
     TransposeSpecs specs{itype,
                          tileX,
@@ -140,9 +140,9 @@ RTCKernelArgs RTCKernelTranspose::get_launch_args(DeviceCallIn& data)
     // and widening them to INT64 would cost registers for nothing
 
     auto num_lengths = data.node->length.size();
-    kargs.append_index(num_lengths, IndexType::INT32);
-    kargs.append_index(data.node->length[0], IndexType::INT32);
-    kargs.append_index(data.node->length[1], IndexType::INT32);
+    kargs.append_index(num_lengths, IndexType::_32BIT);
+    kargs.append_index(data.node->length[0], IndexType::_32BIT);
+    kargs.append_index(data.node->length[1], IndexType::_32BIT);
     kargs.append_index(num_lengths > 2 ? data.node->length[2] : 1);
     kargs.append_ptr(kargs_lengths(data.node->devKernArg));
 
@@ -171,9 +171,9 @@ RTCKernelArgs RTCKernelTranspose::get_launch_args(DeviceCallIn& data)
                                          data.node->batch,
                                          std::multiplies<unsigned int>());
 
-    kargs.append_index(gridX, IndexType::INT32);
-    kargs.append_index(gridY, IndexType::INT32);
-    kargs.append_index(gridZ, IndexType::INT32);
+    kargs.append_index(gridX, IndexType::_32BIT);
+    kargs.append_index(gridY, IndexType::_32BIT);
+    kargs.append_index(gridZ, IndexType::_32BIT);
 
     // callback params
     kargs.append_ptr(data.callbacks.load_cb_fn);
