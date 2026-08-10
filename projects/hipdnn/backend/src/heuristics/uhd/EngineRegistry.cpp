@@ -81,6 +81,7 @@ void EngineRegistry::registerEngine(EngineEntry entry)
 
     validateFeaturesHash(entry);
     validateScoreTransform(entry);
+    validateObjective(entry);
 
     const int64_t engineId = entry.engineId;
 
@@ -88,6 +89,25 @@ void EngineRegistry::registerEngine(EngineEntry entry)
     // Replace the slot rather than assigning through it: a selection already holding
     // the previous snapshot keeps reading a consistent entry until it finishes.
     _engines[engineId] = std::make_shared<EngineEntry>(std::move(entry));
+}
+
+void EngineRegistry::validateObjective(const EngineEntry& entry)
+{
+    const UhdConfig& cfg = entry.uhdConfig;
+
+    // RFC 0019 §5 and §6 step 4 name exactly two values. sortByObjective computes
+    // `maximize = (objective != "min")`, so anything unrecognized — a typo, a case
+    // variant, "minimize" — silently maximizes. For a min-objective model that
+    // inverts the ranking with no diagnostic, which is the same class of silent
+    // corruption the score.transform check exists to prevent.
+    if(!cfg.objective.empty() && cfg.objective != "max" && cfg.objective != "min")
+    {
+        std::ostringstream oss;
+        oss << "UHD declares an unrecognized objective '" << cfg.objective
+            << "'. Engine ID: " << entry.engineId << ", uhd='" << cfg.uhdId
+            << "'. Supported: \"max\", \"min\" (empty defaults to max).";
+        throw std::invalid_argument(oss.str());
+    }
 }
 
 void EngineRegistry::validateScoreTransform(const EngineEntry& entry)

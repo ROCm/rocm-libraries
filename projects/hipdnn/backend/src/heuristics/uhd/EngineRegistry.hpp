@@ -171,6 +171,10 @@ private:
     /// @throws std::invalid_argument on an unsupported transform name.
     static void validateScoreTransform(const EngineEntry& entry);
 
+    /// Check that a declared objective is one of the two RFC 0019 §5 values.
+    /// @throws std::invalid_argument on any other value.
+    static void validateObjective(const EngineEntry& entry);
+
     /// Entries are held by shared_ptr so a reader can outlive a re-registration that
     /// replaces the entry (see getEngine).
     std::unordered_map<int64_t, std::shared_ptr<EngineEntry>> _engines;

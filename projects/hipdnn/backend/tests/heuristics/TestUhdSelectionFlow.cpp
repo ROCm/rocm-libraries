@@ -1611,4 +1611,41 @@ TEST_F(TestUhdSelectionFlow, CandidateMissingMetadataDoesNotInheritPreviousValue
         << "candidate without tile_m must not inherit the previous candidate's value";
 }
 
+
+// ========== objective vocabulary (RFC 0019 §5, §6 step 4) ==========
+
+TEST_F(TestUhdSelectionFlow, RegisterRejectsUnrecognizedObjective)
+{
+    // sortByObjective computes maximize = (objective != "min"), so a typo silently
+    // maximizes. For a min-objective model that inverts the ranking with no diagnostic.
+    auto k1 = makeCandidate(1, 5);
+    auto entry = createStaticOrderEngine(100, {k1});
+    entry.uhdConfig.objective = "minimize";
+
+    EXPECT_THROW(EngineRegistry::instance().registerEngine(entry), std::invalid_argument);
+}
+
+TEST_F(TestUhdSelectionFlow, RegisterRejectsWrongCaseObjective)
+{
+    auto k1 = makeCandidate(1, 5);
+    auto entry = createStaticOrderEngine(100, {k1});
+    entry.uhdConfig.objective = "MIN";
+
+    EXPECT_THROW(EngineRegistry::instance().registerEngine(entry), std::invalid_argument);
+}
+
+TEST_F(TestUhdSelectionFlow, RegisterAcceptsBothObjectiveValuesAndEmpty)
+{
+    int64_t engineId = 100;
+    for(const auto* objective : {"max", "min", ""})
+    {
+        auto k1 = makeCandidate(1, 5);
+        auto entry = createStaticOrderEngine(engineId, {k1});
+        entry.uhdConfig.objective = objective;
+        EXPECT_NO_THROW(EngineRegistry::instance().registerEngine(entry))
+            << "objective '" << objective << "' should be accepted";
+        ++engineId;
+    }
+}
+
 } // namespace
