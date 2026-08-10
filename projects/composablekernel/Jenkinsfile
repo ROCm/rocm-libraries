@@ -310,6 +310,7 @@ pipeline {
             }
             agent none
             steps{
+             node {
               ws("/var/jenkins/workspace/${env.JOB_NAME}-${env.BUILD_NUMBER}") {
                 script {
                     loadCk()
@@ -321,6 +322,7 @@ pipeline {
                     }
                 }
               }
+             }
             }
         }
         stage("Run Downstream Tests")
