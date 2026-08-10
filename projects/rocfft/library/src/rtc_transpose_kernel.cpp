@@ -145,7 +145,7 @@ RTCKernelArgs RTCKernelTranspose::get_launch_args(DeviceCallIn& data)
     kargs.append_index(num_lengths, IndexType::_32BIT);
     kargs.append_index(data.node->length[0], IndexType::_32BIT);
     kargs.append_index(data.node->length[1], IndexType::_32BIT);
-    kargs.append_index(num_lengths > 2 ? data.node->length[2] : 1);
+    kargs.append_index(num_lengths > 2 ? data.node->length[2] : 1, IndexType::_32BIT);
     kargs.append_ptr(kargs_lengths(data.node->devKernArg));
 
     kargs.append_index(data.node->inStride[0]);

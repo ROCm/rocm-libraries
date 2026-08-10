@@ -36,10 +36,10 @@ bool LeafNode::KernelNeeds64BitIndexing() const
         const auto& io_dist       = io == io_data_label::INPUT ? iDist : oDist;
         const auto& io_array_type = io == io_data_label::INPUT ? inArrayType : outArrayType;
         const auto& io_offset     = io == io_data_label::INPUT ? iOffset : oOffset;
-        const auto  io_length     = io == io_data_label::INPUT ? length : outputLength;
-        const auto  max_offset    = std::max(io_offset, io_offset);
+        const auto  io_length     = io == io_data_label::INPUT ? length : GetOutputLength();
+
         // Hermitian interleaved data may be re-interpreted as real data internally.
-        if((max_offset + compute_ptrdiff(io_length, io_stride, batch, io_dist))
+        if((io_offset + compute_ptrdiff(io_length, io_stride, batch, io_dist))
                * (io_array_type == rocfft_array_type_hermitian_interleaved ? 2 : 1)
            > static_cast<size_t>(INT32_MAX) + 1)
         {
