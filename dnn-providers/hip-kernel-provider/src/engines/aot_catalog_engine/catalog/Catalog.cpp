@@ -3,6 +3,7 @@
 
 #include "catalog/Catalog.hpp"
 
+#include <array>
 #include <filesystem>
 #include <fstream>
 #include <stdexcept>
@@ -224,7 +225,7 @@ GridFormula parseGridFormula(const json& obj)
     return grid;
 }
 
-void parseBlock(const json& value, uint32_t (&block)[3])
+void parseBlock(const json& value, std::array<uint32_t, 3>& block)
 {
     if(!value.is_array() || value.size() != 3)
     {
@@ -392,9 +393,9 @@ const char* catalogDirSourceName(CatalogDirSource source)
 {
     switch(source)
     {
-    case CatalogDirSource::Env: return "env HIPDNN_AOT_CATALOG_DIR";
-    case CatalogDirSource::SelfLocated: return "self-located beside plugin .so";
-    case CatalogDirSource::Baked: return "baked install path (self-location failed)";
+    case CatalogDirSource::ENV: return "env HIPDNN_AOT_CATALOG_DIR";
+    case CatalogDirSource::SELF_LOCATED: return "self-located beside plugin .so";
+    case CatalogDirSource::BAKED: return "baked install path (self-location failed)";
     default: return "unknown";
     }
 }
@@ -405,7 +406,7 @@ CatalogDirResolution resolveCatalogDir()
     const std::string envDir = hipdnn_data_sdk::utilities::getEnv("HIPDNN_AOT_CATALOG_DIR");
     if(!envDir.empty())
     {
-        return {envDir, CatalogDirSource::Env};
+        return {envDir, CatalogDirSource::ENV};
     }
 
     // 2. Beside the loaded plugin .so. Used UNCONDITIONALLY when the module dir
@@ -418,12 +419,12 @@ CatalogDirResolution resolveCatalogDir()
     if(!moduleDir.empty())
     {
         const fs::path dir = fs::path(moduleDir) / HIPDNN_AOT_CATALOG_RELDIR;
-        return {dir.string(), CatalogDirSource::SelfLocated};
+        return {dir.string(), CatalogDirSource::SELF_LOCATED};
     }
 
     // 3. Module dir unresolvable (dladdr/GetModuleHandleEx failed): last-resort
     //    baked absolute install path.
-    return {HIPDNN_AOT_CATALOG_DIR, CatalogDirSource::Baked};
+    return {HIPDNN_AOT_CATALOG_DIR, CatalogDirSource::BAKED};
 }
 
 std::string defaultCatalogDir()

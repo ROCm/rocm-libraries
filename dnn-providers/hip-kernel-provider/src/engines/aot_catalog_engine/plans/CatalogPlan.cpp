@@ -26,7 +26,7 @@ namespace
 
 // One warmup launch, discarded, then this many timed launches per candidate; the
 // median is the candidate's score. Small counts keep first-execute tuning cheap.
-constexpr int kTimedLaunches = 5;
+constexpr int TIMED_LAUNCHES = 5;
 
 // Build the single-candidate vector for the legacy ctor.
 std::vector<PlanCandidate> makeSingle(launch::HipModuleGuard module,
@@ -60,7 +60,6 @@ CatalogPlan::CatalogPlan(launch::HipModuleGuard module,
                              std::move(gridSymbols),
                              workspaceBytes,
                              std::move(kernelName)))
-    , _cache(nullptr)
 {
 }
 
@@ -89,7 +88,7 @@ void CatalogPlan::launchCandidate(const PlanCandidate& candidate,
                                   const Handle& handle,
                                   const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                                   uint32_t numDeviceBuffers,
-                                  void* workspace) const
+                                  void* workspace)
 {
     // uid -> device pointer, from the runtime device-buffer list.
     std::unordered_map<int64_t, void*> uidToPtr;
@@ -163,7 +162,7 @@ size_t CatalogPlan::tuneAndSelect(const Handle& handle,
                                   uint32_t numDeviceBuffers,
                                   void* workspace) const
 {
-    const hipStream_t stream = handle.getStream();
+    const hipStream_t stream = handle.getStream(); // NOLINT(misc-misplaced-const) hipStream_t is an opaque handle
 
     hipEvent_t startEvent = nullptr;
     hipEvent_t stopEvent = nullptr;
@@ -182,15 +181,15 @@ size_t CatalogPlan::tuneAndSelect(const Handle& handle,
         return 0;
     }
 
-    constexpr float kNoTime = std::numeric_limits<float>::max();
+    constexpr float NO_TIME = std::numeric_limits<float>::max();
     size_t bestIdx = 0;
-    float bestMs = kNoTime;
+    float bestMs = NO_TIME;
     std::ostringstream ranking;
 
     for(size_t i = 0; i < _candidates.size(); ++i)
     {
         const PlanCandidate& candidate = _candidates[i];
-        float median = kNoTime;
+        float median = NO_TIME;
         try
         {
             // Warmup (module code-object load, caches) -- discarded.
@@ -198,8 +197,8 @@ size_t CatalogPlan::tuneAndSelect(const Handle& handle,
             (void)hipStreamSynchronize(stream);
 
             std::vector<float> times;
-            times.reserve(static_cast<size_t>(kTimedLaunches));
-            for(int r = 0; r < kTimedLaunches; ++r)
+            times.reserve(static_cast<size_t>(TIMED_LAUNCHES));
+            for(int r = 0; r < TIMED_LAUNCHES; ++r)
             {
                 if(hipEventRecord(startEvent, stream) != hipSuccess)
                 {
@@ -240,7 +239,7 @@ size_t CatalogPlan::tuneAndSelect(const Handle& handle,
         }
     }
 
-    if(bestMs == kNoTime)
+    if(bestMs == NO_TIME)
     {
         HIPDNN_PLUGIN_LOG_WARN(
             "aot-catalog: no candidate timed successfully; falling back to first");

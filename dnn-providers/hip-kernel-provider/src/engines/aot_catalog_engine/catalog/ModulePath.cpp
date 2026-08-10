@@ -50,7 +50,7 @@ std::string thisModuleDir()
 
     if(modulePath.empty())
     {
-        return std::string();
+        return {};
     }
 
     std::error_code ec;

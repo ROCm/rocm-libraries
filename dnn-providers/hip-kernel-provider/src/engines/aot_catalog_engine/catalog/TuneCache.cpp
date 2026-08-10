@@ -69,7 +69,7 @@ std::string defaultCachePath()
     const fs::path tmp = fs::temp_directory_path(ec);
     if(ec)
     {
-        return std::string();
+        return {};
     }
     return (tmp / "hipdnn_aot_tune_cache.json").string();
 }

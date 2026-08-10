@@ -34,7 +34,7 @@ void aotDebugEmit(const std::string& message);
         if(::aot_catalog_engine::aotDebugEnabled())            \
         {                                                      \
             std::ostringstream _aotDbg;                        \
-            _aotDbg << streamExpr;                             \
+            _aotDbg << streamExpr; /* NOLINT(bugprone-macro-parentheses) streamExpr is a stream expression */ \
             ::aot_catalog_engine::aotDebugEmit(_aotDbg.str()); \
         }                                                      \
     } while(0)

@@ -64,9 +64,9 @@ private:
 // How the runtime catalog root was resolved (for the HIPDNN_AOT_DEBUG dump).
 enum class CatalogDirSource
 {
-    Env,         // HIPDNN_AOT_CATALOG_DIR environment override (author opt-in).
-    SelfLocated, // Beside the loaded plugin .so: <module-dir>/<HIPDNN_AOT_CATALOG_RELDIR>.
-    Baked,       // Last-resort baked absolute install path (self-location failed).
+    ENV,          // HIPDNN_AOT_CATALOG_DIR environment override (author opt-in).
+    SELF_LOCATED, // Beside the loaded plugin .so: <module-dir>/<HIPDNN_AOT_CATALOG_RELDIR>.
+    BAKED,        // Last-resort baked absolute install path (self-location failed).
 };
 
 struct CatalogDirResolution

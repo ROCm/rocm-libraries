@@ -14,11 +14,11 @@ bool aotDebugEnabled()
 {
     // Cached: the environment does not change mid-run, and this is hit on every
     // graph match. Treat empty/0/false/off as disabled; any other value enables.
-    static const bool enabled = [] {
+    static const bool s_enabled = [] {
         const std::string value = hipdnn_data_sdk::utilities::getEnv("HIPDNN_AOT_DEBUG");
         return !value.empty() && value != "0" && value != "false" && value != "off";
     }();
-    return enabled;
+    return s_enabled;
 }
 
 void aotDebugEmit(const std::string& message)

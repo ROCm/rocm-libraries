@@ -12,6 +12,7 @@
 
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <map>
@@ -117,7 +118,6 @@ inline uint32_t scalarTypeSizeBytes(ScalarType type)
     switch(type)
     {
     case ScalarType::F32:
-        return 4;
     case ScalarType::I32:
         return 4;
     case ScalarType::I64:
@@ -170,7 +170,7 @@ struct LaunchBindings
 struct LaunchMetadata
 {
     GridFormula grid;
-    uint32_t block[3] = {1, 1, 1};
+    std::array<uint32_t, 3> block = {1, 1, 1};
     uint32_t sharedMemBytes = 0;
     std::vector<KernelArgument> argsSignature;
 };

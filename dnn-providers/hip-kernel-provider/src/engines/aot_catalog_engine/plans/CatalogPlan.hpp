@@ -82,12 +82,12 @@ public:
 
 private:
     // Pack args + eval grid + hipModuleLaunchKernel for a single candidate.
-    // Throws PluginError on a launch failure.
-    void launchCandidate(const PlanCandidate& candidate,
-                         const Handle& handle,
-                         const hipdnnPluginDeviceBuffer_t* deviceBuffers,
-                         uint32_t numDeviceBuffers,
-                         void* workspace) const;
+    // Throws PluginError on a launch failure. Static: depends only on its args.
+    static void launchCandidate(const PlanCandidate& candidate,
+                                const Handle& handle,
+                                const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                                uint32_t numDeviceBuffers,
+                                void* workspace);
 
     // Time every candidate on the real buffers, record the fastest in the cache,
     // and return its index. Candidates that error while timing are skipped.
