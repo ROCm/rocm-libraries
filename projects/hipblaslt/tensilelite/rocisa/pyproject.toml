@@ -24,3 +24,11 @@ wheel.packages = []
 # build-client` triggers a fast no-op when nothing changed. {wheel_tag} keeps
 # per-interpreter/ABI build trees separate.
 build-dir = "build/{wheel_tag}"
+
+# Rebuild the extension on first import per interpreter, so an edit to the
+# C++ sources can never be silently ignored by an already-installed editable
+# .so. Requires build-dir above (there is nothing to incrementally rebuild
+# without it). A no-op ninja build costs milliseconds; the point is that
+# forgetting `invoke rocisa` stops being able to produce stale .s output.
+editable.rebuild = true
+editable.verbose = false
