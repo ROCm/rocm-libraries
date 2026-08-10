@@ -1183,6 +1183,33 @@ class TestAttentionHelpers(unittest.TestCase):
             self.assertIn(req, names)
         self.assertIsNotNone(build_attention_dense(spec, arch="gfx950"))
 
+    def test_gfx950_dense_paged_prefill_compiles_and_fits_budget(self):
+        """comgr build + resource-budget net for the PAGED gfx950 dense prefill
+        (fp16 D128 sliding-window, single-seq). Mirrors the non-paged dense budget
+        test; the block_tables indirection adds a load but must still fit."""
+        from kernels import AttentionDenseSpec, build_attention_dense
+
+        spec = AttentionDenseSpec(
+            batch=1,
+            seqlen_q=8192,
+            seqlen_kv=8192,
+            num_query_heads=32,
+            num_kv_heads=8,
+            head_size=128,
+            causal=True,
+            dtype="fp16",
+            sliding_window=4096,
+            block_n=64,
+            paged=True,
+            block_size=16,
+            num_kv_blocks=512,
+        )
+        self.assertIn("pgd16", spec.kernel_name())
+        k = build_attention_dense(spec, arch="gfx950")
+        art = _compile_or_skip(k, arch="gfx950")
+        self.assertGreater(art.hsaco_bytes, 0)
+        _assert_resources_fit(art, arch="gfx950", kernel_name=k.name)
+
     def test_attention_3d_workspace_size_matches_shapes(self):
         p = UnifiedAttentionProblem(
             total_q=3,
