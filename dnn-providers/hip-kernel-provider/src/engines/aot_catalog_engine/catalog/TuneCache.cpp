@@ -5,13 +5,13 @@
 
 #include <array>
 #include <cstdio>
-#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <string>
 #include <utility>
 #include <variant>
 
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <nlohmann/json.hpp>
 
@@ -58,9 +58,12 @@ std::string renderShapeValue(const ShapeValue& value)
 // <temp_dir>/hipdnn_aot_tune_cache.json.
 std::string defaultCachePath()
 {
-    if(const char* env = std::getenv("HIPDNN_AOT_TUNE_CACHE"); env != nullptr && env[0] != '\0')
+    // getEnv (data_sdk PlatformUtils) is cross-platform -- std::getenv trips
+    // MSVC's -Wdeprecated-declarations under -Werror on the Windows superbuild.
+    if(const std::string env = hipdnn_data_sdk::utilities::getEnv("HIPDNN_AOT_TUNE_CACHE");
+       !env.empty())
     {
-        return std::string(env);
+        return env;
     }
     std::error_code ec;
     const fs::path tmp = fs::temp_directory_path(ec);
