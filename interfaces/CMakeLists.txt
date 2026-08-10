@@ -110,6 +110,18 @@ endif()
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/rocm_interfaces_lto_linker_guard.cmake")
 rocm_interfaces_assert_lto_linker_supported()
 
+set(ROCM_INTERFACES_SANITIZE "" CACHE STRING
+    "Build the interfaces tree with a sanitizer (one of: thread)")
+set_property(CACHE ROCM_INTERFACES_SANITIZE PROPERTY STRINGS "" thread)
+if(ROCM_INTERFACES_SANITIZE STREQUAL "thread")
+  add_compile_options(-fsanitize=thread -g -fno-omit-frame-pointer)
+  add_link_options(-fsanitize=thread)
+elseif(NOT ROCM_INTERFACES_SANITIZE STREQUAL "")
+  message(FATAL_ERROR
+    "ROCM_INTERFACES_SANITIZE='${ROCM_INTERFACES_SANITIZE}' is not supported "
+    "(expected empty or 'thread').")
+endif()
+
 add_library(rocm_interfaces_runtime STATIC
   runtime/src/module.cpp
   runtime/src/provider_registry.cpp

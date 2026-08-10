@@ -145,3 +145,20 @@ add_test(NAME rocm_interfaces.lto_linker_guard_accepts_gnu_bfd
 add_test(NAME rocm_interfaces.lto_linker_guard_accepts_gnu_lld_without_lto
   COMMAND ${CMAKE_COMMAND} -DCASE=gnu_lld_nolto -DGUARD_MODULE=${_lto_guard_module}
     -P ${_lto_guard_driver})
+
+if(UNIX AND NOT APPLE AND ROCM_INTERFACES_SANITIZE STREQUAL "thread")
+  find_package(Threads REQUIRED)
+  add_executable(ops04_concurrency_test ops04_concurrency_test.cpp)
+  target_link_libraries(ops04_concurrency_test
+    PRIVATE rocm_interfaces_loader rocblas_loader_shadow Threads::Threads)
+  target_compile_definitions(ops04_concurrency_test PRIVATE
+    BLAS_CLASSIC_PROVIDER_PATH="$<TARGET_FILE:rocm_blas_classic_provider_recording>"
+    ROCBLAS_BRIDGE_PROVIDER_PATH="$<TARGET_FILE:rocm_rocblas_bridge_provider_recording>")
+  add_dependencies(ops04_concurrency_test
+    rocm_blas_classic_provider_recording
+    rocm_rocblas_bridge_provider_recording
+    rocblas_loader_shadow)
+  add_test(NAME rocm_interfaces.ops04_concurrency COMMAND ops04_concurrency_test)
+  set_tests_properties(rocm_interfaces.ops04_concurrency PROPERTIES
+    ENVIRONMENT "TSAN_OPTIONS=halt_on_error=0:exitcode=66")
+endif()
