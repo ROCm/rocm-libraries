@@ -12,7 +12,6 @@
 #include <cstdint>
 #include <limits>
 #include <optional>
-#include <roc/host_validation/detail/reference_common.hpp>
 #include <roc/host_validation/gemm.hpp>
 #include <span>
 #include <stdexcept>
@@ -20,6 +19,8 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
+
+#include "reference_common.hpp"
 
 namespace roc::host_validation {
 namespace detail {

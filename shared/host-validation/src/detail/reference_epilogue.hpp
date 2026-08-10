@@ -6,10 +6,11 @@
 #include <cmath>
 #include <complex>
 #include <optional>
-#include <roc/host_validation/detail/reference_common.hpp>
 #include <roc/host_validation/epilogue.hpp>
 #include <stdexcept>
 #include <string>
+
+#include "reference_common.hpp"
 
 namespace roc::host_validation {
 namespace detail {

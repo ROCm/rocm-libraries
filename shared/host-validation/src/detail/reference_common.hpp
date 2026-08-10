@@ -3,6 +3,8 @@
 
 #pragma once
 
+// Shared runtime arithmetic helpers for compiled reference operations.
+
 #include <algorithm>
 #include <array>
 #include <bit>
