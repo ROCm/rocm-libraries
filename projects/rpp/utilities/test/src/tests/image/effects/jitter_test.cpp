@@ -13,12 +13,25 @@ using namespace rpptest;
 
 namespace {
 
+// The three properties checked here take disjoint parameter sets (Identity only holds at k=1, the
+// others only mean anything at k>1), so the check is an axis of the grid rather than a separate
+// TEST_P body: GTest instantiates every body of a fixture against the whole param set, which would
+// generate (and skip) each check across the other checks' points as well.
+enum class Check { Identity, Window, Seed };
+
 // kernelSize is an odd square window size (3/5/7 per the API doc; kernelSize=1 is the RNG-free
 // identity corner used for the bit-exact golden).
 struct JitterParams {
     Rpp32u kernelSize;
+    Check check;
     std::string name() const {
-        return "k" + std::to_string(kernelSize);
+        std::string token = "k" + std::to_string(kernelSize);
+        switch (check) {
+            case Check::Identity: return token + "_Identity";
+            case Check::Window: return token + "_Window";
+            case Check::Seed: return token + "_Seed";
+        }
+        return token;
     }
 };
 
@@ -205,72 +218,62 @@ void run_jitter_seed_invariant(const TestConfig& cfg, const JitterParams& op) {
     EXPECT_TRUE(anyDiffer) << "different seeds produced identical output over the whole ROI";
 }
 
-// The union of the three intents' grids: the full dtype/layout/ROI grid at the identity corner
-// k=1, plus the narrower RNG-active slice at k={3,5}. Concatenated rather than crossed so the
-// dtype/layout axes are not needlessly re-run per kernelSize.
+// Identity gets the full dtype/layout/ROI grid at k=1; the RNG-active checks are narrower on
+// purpose -- Seed runs three full kernel invocations per case, and the window invariant is a
+// per-pixel candidate search over one integer and one float dtype rather than all four.
 std::vector<WithParams<JitterParams>> jitter_configs() {
     std::vector<WithParams<JitterParams>> configs = with_params<JitterParams>(
         make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
                      {Layout::PKD3, Layout::PLN3, Layout::PLN1}, {Roi::Full, Roi::Partial}),
-        {JitterParams{1}});
-    const std::vector<WithParams<JitterParams>> rng = with_params<JitterParams>(
+        {JitterParams{1, Check::Identity}});
+    const std::vector<WithParams<JitterParams>> window = with_params<JitterParams>(
         make_configs({DType::U8, DType::F32}, {Layout::PKD3, Layout::PLN1},
                      {Roi::Full, Roi::Partial}),
-        {JitterParams{3}, JitterParams{5}});
-    configs.insert(configs.end(), rng.begin(), rng.end());
+        {JitterParams{3, Check::Window}, JitterParams{5, Check::Window}});
+    const std::vector<WithParams<JitterParams>> seed = with_params<JitterParams>(
+        make_configs({DType::U8}, {Layout::PKD3}, {Roi::Full}), {JitterParams{5, Check::Seed}});
+    configs.insert(configs.end(), window.begin(), window.end());
+    configs.insert(configs.end(), seed.begin(), seed.end());
     return configs;
 }
 
 }  // namespace
 
-// Full names:
-// Image_Effects/JitterTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_k<N>
-// Image_Effects/JitterTest.ReachableWithinWindow/<same>
-// Image_Effects/JitterTest.SeedInvariant/<same>
-//
-// One fixture, one instantiation. GTest cross-instantiates every TEST_P body of a fixture against
-// the whole param set, so the grid is the union of what the three intents cover and each body skips
-// the points outside its own slice -- Correctness only holds at the identity corner k=1, while the
-// window/seed invariants only mean anything for k > 1.
+// Full name:
+// Image_Effects/JitterTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_k<N>_<Check>
 class JitterTest : public ::testing::TestWithParam<WithParams<JitterParams>> {};
 
 TEST_P(JitterTest, Correctness) {
     const auto& p = GetParam();
-    if (p.op.kernelSize != 1)
-        GTEST_SKIP() << "the bit-exact golden only holds at the RNG-free identity corner k=1";
-    switch (p.cfg.dtype) {
-        case DType::U8:
-            run_jitter_identity<Rpp8u>(p.cfg, p.op);
+    switch (p.op.check) {
+        case Check::Identity:
+            switch (p.cfg.dtype) {
+                case DType::U8:
+                    run_jitter_identity<Rpp8u>(p.cfg, p.op);
+                    break;
+                case DType::F16:
+                    run_jitter_identity<Rpp16f>(p.cfg, p.op);
+                    break;
+                case DType::F32:
+                    run_jitter_identity<Rpp32f>(p.cfg, p.op);
+                    break;
+                case DType::I8:
+                    run_jitter_identity<Rpp8s>(p.cfg, p.op);
+                    break;
+                default:
+                    FAIL() << "unsupported dtype for jitter";
+            }
             break;
-        case DType::F16:
-            run_jitter_identity<Rpp16f>(p.cfg, p.op);
+        case Check::Window:
+            if (p.cfg.dtype == DType::U8)
+                run_jitter_window<Rpp8u>(p.cfg, p.op);
+            else
+                run_jitter_window<Rpp32f>(p.cfg, p.op);
             break;
-        case DType::F32:
-            run_jitter_identity<Rpp32f>(p.cfg, p.op);
+        case Check::Seed:
+            run_jitter_seed_invariant<Rpp8u>(p.cfg, p.op);
             break;
-        case DType::I8:
-            run_jitter_identity<Rpp8s>(p.cfg, p.op);
-            break;
-        default:
-            FAIL() << "unsupported dtype for jitter";
     }
-}
-
-TEST_P(JitterTest, ReachableWithinWindow) {
-    const auto& p = GetParam();
-    if (p.op.kernelSize == 1) GTEST_SKIP() << "the window invariant is only meaningful for k > 1";
-    if (p.cfg.dtype == DType::U8)
-        run_jitter_window<Rpp8u>(p.cfg, p.op);
-    else
-        run_jitter_window<Rpp32f>(p.cfg, p.op);
-}
-
-TEST_P(JitterTest, SeedInvariant) {
-    const auto& p = GetParam();
-    if (p.op.kernelSize != 5 || p.cfg.dtype != DType::U8 || p.cfg.layout != Layout::PKD3 ||
-        p.cfg.roi != Roi::Full)
-        GTEST_SKIP() << "SeedInvariant covers the U8 PKD3 FullRoi k5 point";
-    run_jitter_seed_invariant<Rpp8u>(p.cfg, p.op);
 }
 
 INSTANTIATE_TEST_SUITE_P(Image_Effects, JitterTest, ::testing::ValuesIn(jitter_configs()),

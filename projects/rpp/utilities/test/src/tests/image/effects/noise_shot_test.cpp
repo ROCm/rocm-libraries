@@ -14,6 +14,24 @@ using namespace rpptest;
 
 namespace {
 
+// The three properties checked here take disjoint parameter sets, so the check is an axis of the
+// grid rather than a separate TEST_P body: GTest instantiates every body of a fixture against the
+// whole param set, which would generate (and skip) each narrow check across the full dtype/layout
+// grid. As an axis, each check is instantiated over exactly the points it covers.
+enum class Check { Identity, ValidRange, Seed };
+
+struct NoiseShotParams {
+    Check check;
+    std::string name() const {
+        switch (check) {
+            case Check::Identity: return "Identity";
+            case Check::ValidRange: return "ValidRange";
+            case Check::Seed: return "Seed";
+        }
+        return "UNK";
+    }
+};
+
 // noise_shot's public API doc only pins down the shotNoiseFactor = 0 corner (see
 // noise_shot_ref.hpp): the exact Poisson photon-count scaling for factor > 0 is not derivable
 // from the header comment alone, so it is deliberately left as an open question rather than
@@ -159,63 +177,68 @@ constexpr char kHostPoissonSkip[] =
     "shot_noise HOST Poisson sampler's rejection threshold overflows to +inf for ordinary pixel "
     "values at this factor, making the loop's runtime unbounded in practice";
 
+// Identity is checked over the full grid; the RNG-active checks are narrower on purpose -- Seed
+// runs three full kernel invocations per case, and ValidRange's storable-range notion is exercised
+// on one integer and one float dtype rather than all four.
+std::vector<WithParams<NoiseShotParams>> noise_shot_configs() {
+    std::vector<WithParams<NoiseShotParams>> configs = with_params<NoiseShotParams>(
+        make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
+                     {Layout::PKD3, Layout::PLN3, Layout::PLN1}, {Roi::Full, Roi::Partial}),
+        {NoiseShotParams{Check::Identity}});
+    const std::vector<WithParams<NoiseShotParams>> validRange = with_params<NoiseShotParams>(
+        make_configs({DType::U8, DType::F32}, {Layout::PKD3, Layout::PLN1},
+                     {Roi::Full, Roi::Partial}),
+        {NoiseShotParams{Check::ValidRange}});
+    const std::vector<WithParams<NoiseShotParams>> seed = with_params<NoiseShotParams>(
+        make_configs({DType::U8}, {Layout::PKD3}, {Roi::Full}), {NoiseShotParams{Check::Seed}});
+    configs.insert(configs.end(), validRange.begin(), validRange.end());
+    configs.insert(configs.end(), seed.begin(), seed.end());
+    return configs;
+}
+
 }  // namespace
 
-// Full names:
-// Image_Effects/NoiseShotTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>
-// Image_Effects/NoiseShotTest.ValidRangeInvariant/<same>
-// Image_Effects/NoiseShotTest.SeedInvariant/<same>
-//
-// One fixture, one instantiation. GTest cross-instantiates every TEST_P body of a fixture against
-// the whole param set, so the grid below is the union of what the three intents cover and each body
-// skips the points outside its own slice. The narrower slices are deliberate: SeedInvariant runs
-// three full kernel invocations per case, and ValidRangeInvariant's storable-range notion is
-// checked on one integer and one float dtype rather than all four.
-class NoiseShotTest : public ::testing::TestWithParam<TestConfig> {};
+// Full name:
+// Image_Effects/NoiseShotTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Check>
+class NoiseShotTest : public ::testing::TestWithParam<WithParams<NoiseShotParams>> {};
 
 TEST_P(NoiseShotTest, Correctness) {
-    const TestConfig& cfg = GetParam();
-    switch (cfg.dtype) {
-        case DType::U8:
-            run_noise_shot_identity<Rpp8u>(cfg);
+    const auto& p = GetParam();
+    const TestConfig& cfg = p.cfg;
+    if (p.op.check != Check::Identity && cfg.backend == RPP_HOST_BACKEND)
+        GTEST_SKIP() << kHostPoissonSkip;
+
+    switch (p.op.check) {
+        case Check::Identity:
+            switch (cfg.dtype) {
+                case DType::U8:
+                    run_noise_shot_identity<Rpp8u>(cfg);
+                    break;
+                case DType::F16:
+                    run_noise_shot_identity<Rpp16f>(cfg);
+                    break;
+                case DType::F32:
+                    run_noise_shot_identity<Rpp32f>(cfg);
+                    break;
+                case DType::I8:
+                    run_noise_shot_identity<Rpp8s>(cfg);
+                    break;
+                default:
+                    FAIL() << "unsupported dtype for noise_shot";
+            }
             break;
-        case DType::F16:
-            run_noise_shot_identity<Rpp16f>(cfg);
+        case Check::ValidRange:
+            if (cfg.dtype == DType::U8)
+                run_noise_shot_valid_range<Rpp8u>(cfg);
+            else
+                run_noise_shot_valid_range<Rpp32f>(cfg);
             break;
-        case DType::F32:
-            run_noise_shot_identity<Rpp32f>(cfg);
+        case Check::Seed:
+            run_noise_shot_seed_invariant<Rpp8u>(cfg);
             break;
-        case DType::I8:
-            run_noise_shot_identity<Rpp8s>(cfg);
-            break;
-        default:
-            FAIL() << "unsupported dtype for noise_shot";
     }
 }
 
-TEST_P(NoiseShotTest, ValidRangeInvariant) {
-    const TestConfig& cfg = GetParam();
-    if (cfg.layout == Layout::PLN3 || (cfg.dtype != DType::U8 && cfg.dtype != DType::F32))
-        GTEST_SKIP() << "ValidRangeInvariant covers U8/F32 on PKD3/PLN1";
-    if (cfg.backend == RPP_HOST_BACKEND) GTEST_SKIP() << kHostPoissonSkip;
-    if (cfg.dtype == DType::U8)
-        run_noise_shot_valid_range<Rpp8u>(cfg);
-    else
-        run_noise_shot_valid_range<Rpp32f>(cfg);
-}
-
-TEST_P(NoiseShotTest, SeedInvariant) {
-    const TestConfig& cfg = GetParam();
-    if (cfg.dtype != DType::U8 || cfg.layout != Layout::PKD3 || cfg.roi != Roi::Full)
-        GTEST_SKIP() << "SeedInvariant covers the U8 PKD3 FullRoi point";
-    if (cfg.backend == RPP_HOST_BACKEND) GTEST_SKIP() << kHostPoissonSkip;
-    run_noise_shot_seed_invariant<Rpp8u>(cfg);
-}
-
 INSTANTIATE_TEST_SUITE_P(Image_Effects, NoiseShotTest,
-                         ::testing::ValuesIn(make_configs({DType::U8, DType::F16, DType::F32,
-                                                           DType::I8},
-                                                          {Layout::PKD3, Layout::PLN3,
-                                                           Layout::PLN1},
-                                                          {Roi::Full, Roi::Partial})),
-                         config_param_name);
+                         ::testing::ValuesIn(noise_shot_configs()),
+                         op_config_name<NoiseShotParams>);
