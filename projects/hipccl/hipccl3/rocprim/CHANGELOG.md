@@ -2,6 +2,12 @@
 
 Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projects/rocPRIM/en/latest/](https://rocm.docs.amd.com/projects/rocPRIM/en/latest/).
 
+## rocPRIM 5.1.0 for ROCm 10.3.0
+
+### Optimizations
+
+* Reduced branching in `device_search` and `device_find_end`.
+
 ## rocPRIM 5.0.0 for ROCm 10.2.0
 
 ### Added
@@ -62,10 +68,9 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 
 * Added a parallel `device_topk`, which finds the largest/smallest K elements from an input array of keys.
 
-### Optimized
+### Optimizations
 
 * Improved performance for the fallback path of lookback scan where the flag can't be fit into the same atomic load/store.
-* Reduced branching in `device_search` and `device_find_end`.
 
 ### Changed
 
