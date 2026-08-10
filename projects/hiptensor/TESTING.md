@@ -1,10 +1,5 @@
 # hipTensor Testing Strategy
 
-- **Status:** Draft
-- **Owner:** Estevan Vedovelli (@evedovelli)
-- **Technical Lead:** TBD
-- **Last Updated:** 2026-08-06
-
 This document describes how hipTensor is tested today, which signals actually gate a merge, and
 where the gaps are. It follows the ROCm-wide TESTING.md template.
 
@@ -127,15 +122,17 @@ All device tests compare GPU results against a CPU reference implementation usin
 
 Tiers are applied to the installed tree only (`<prefix>/bin/hiptensor/CTestTestfile.cmake`). Labels are nested: a `quick` test also carries `standard`, `comprehensive`, and `full`.
 
-| Label | Config dir | Timeout | When run |
+| Label | Config dir | Duration | When run |
 |---|---|---|---|
-| `quick` | `validation/quick` | 15 min | PR smoke |
-| `standard` | `validation/standard` | 30 min | PR gate |
-| `comprehensive` | `validation/comprehensive` | 45 min | Nightly |
-| `full` | `validation/full` | 2 h | Nightly / release |
-| `ffm-quick` | `emulation/quick` | 2 h | FFM simulator PR |
-| `ffm-full` | `emulation/full` | 2 h | FFM simulator nightly |
-| `bench` | `bench` | — | Manual / nightly perf |
+| `quick` | `validation/quick` | Short | PR smoke |
+| `standard` | `validation/standard` | Medium | PR gate |
+| `comprehensive` | `validation/comprehensive` | Medium | Nightly |
+| `full` | `validation/full` | Long | Nightly / release |
+| `ffm-quick` | `emulation/quick` | Long | FFM simulator PR |
+| `ffm-full` | `emulation/full` | Long | FFM simulator nightly |
+| `bench` | `bench` | Very Long | Manual / nightly perf |
+
+> See [test_categories.yaml](test_categories.yaml) for the specific timeouts on each category.
 
 > **Anchored label selection:** Use `-L '^quick$'` not `-L 'quick'` — an unanchored regex matches `ffm-quick` as well.
 
