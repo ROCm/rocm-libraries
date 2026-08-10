@@ -393,6 +393,19 @@ def is_valid_spec_for_problem(
             f"N_gemm={problem.N_gemm} tile_n={spec.tile_n}"
         )
 
+    # Reject pipeline="basic" configs that would Python-unroll the K loop
+    # beyond 256 iterations — above this threshold IR size explodes and
+    # comgr compilation time grows unacceptably.
+    _MAX_BASIC_K_ITERS = 128
+    if spec.pipeline == "basic":
+        _k_iters = (problem.K_gemm + spec.tile_k - 1) // spec.tile_k
+        if _k_iters > _MAX_BASIC_K_ITERS:
+            return False, (
+                f"pipeline='basic' K-loop would unroll to {_k_iters} iterations "
+                f"(K_gemm={problem.K_gemm} tile_k={spec.tile_k}), "
+                f"exceeding the {_MAX_BASIC_K_ITERS}-iteration limit"
+            )
+
     return True, "ok"
 
 
