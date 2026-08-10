@@ -24,10 +24,14 @@
  *
  *******************************************************************************/
 
+#include <algorithm>
+#include <cstddef>
+#include <cstring>
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt.h>
 #include <iostream>
-#include <algorithm>
+#include <span>
+#include <stdexcept>
 
 #include "TensorDataManipulation.hpp"
 #include "datatype_interface.hpp"
@@ -189,35 +193,41 @@ int main()
 
     swizzleRunner_F8.run([&swizzleRunner_F8, &runner, m, n, k] {
         // convert inputs from reference runner to fp8
-        std::vector<hipblasLtHalf>     cpuAF16(m * k, hipblasLtHalf(0.f));
-        std::vector<hipblasLtHalf>     cpuBF16(k * n, hipblasLtHalf(0.f));
-        std::vector<hipblaslt_f8_fnuz> cpuAF8(m * k, hipblaslt_f8_fnuz(0.f));
-        std::vector<hipblaslt_f8_fnuz> cpuBF8(k * n, hipblaslt_f8_fnuz(0.f));
+        std::vector<hipblasLtHalf> cpuAF16(m * k, hipblasLtHalf(0.f));
+        std::vector<hipblasLtHalf> cpuBF16(k * n, hipblasLtHalf(0.f));
+        std::vector<std::byte>     cpuAF8(m * k);
+        std::vector<std::byte>     cpuBF8(k * n);
 
         CHECK_HIP_ERROR(hipMemcpy(cpuAF16.data(),
-                  runner.d_a,
-                  cpuAF16.size() * sizeof(hipblasLtHalf),
-                  hipMemcpyDeviceToHost));
+                                  runner.d_a,
+                                  cpuAF16.size() * sizeof(hipblasLtHalf),
+                                  hipMemcpyDeviceToHost));
         CHECK_HIP_ERROR(hipMemcpy(cpuBF16.data(),
-                  runner.d_b,
-                  cpuBF16.size() * sizeof(hipblasLtHalf),
-                  hipMemcpyDeviceToHost));
+                                  runner.d_b,
+                                  cpuBF16.size() * sizeof(hipblasLtHalf),
+                                  hipMemcpyDeviceToHost));
 
-        for(size_t i = 0; i < cpuAF16.size(); ++i)
-        {
-            cpuAF8[i] = hipblaslt_f8_fnuz(float(cpuAF16[i]));
-        }
-
-        for(size_t i = 0; i < cpuBF16.size(); ++i)
-        {
-            cpuBF8[i] = hipblaslt_f8_fnuz(float(cpuBF16[i]));
-        }
+        auto convertToFp8 = [](std::span<const hipblasLtHalf> source,
+                               std::span<std::byte>           destination) {
+            const roc::host_validation::Tensor converted
+                = roc::host_validation::hipblaslt_adapter::tensorView(
+                      source.data(),
+                      source.size(),
+                      roc::host_validation::Layout::contiguous(
+                          roc::host_validation::Shape{source.size()}))
+                      .to(roc::host_validation::ScalarType::Float8E4M3Fnuz);
+            if(converted.storage().size() != destination.size())
+                throw std::runtime_error("Converted FP8 storage size mismatch.");
+            std::memcpy(destination.data(), converted.storage().data(), converted.storage().size());
+        };
+        convertToFp8(cpuAF16, cpuAF8);
+        convertToFp8(cpuBF16, cpuBF8);
 
         // copy inputs from first runner for comparison and validation
         CHECK_HIP_ERROR(hipMemcpy(swizzleRunner_F8.d_a,
-                  cpuAF8.data(),
-                  m * k * sizeof(hipblaslt_f8_fnuz),
-                  hipMemcpyHostToDevice));
+                                  cpuAF8.data(),
+                                  m * k * sizeof(hipblaslt_f8_fnuz),
+                                  hipMemcpyHostToDevice));
         CHECK_HIP_ERROR(hipMemcpy(swizzleRunner_F8.d_b,
                   cpuBF8.data(),
                   n * k * sizeof(hipblaslt_f8_fnuz),
