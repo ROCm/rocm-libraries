@@ -21,29 +21,23 @@
  *
  * ************************************************************************ */
 
-/*!\file
- * \brief hipsparse-config.h provides the build-time feature configuration that
- * was baked in when the hipSPARSE library was compiled.
- *
- * The macros below are resolved by CMake at library build time and installed
- * alongside the library. Do NOT define them yourself: they describe how the
- * installed library was actually built, and overriding them makes the visible
- * API surface diverge from the compiled shared object.
- */
+#include "test.hpp"
+#include "testing_spgeam_csr.hpp"
 
-#ifndef HIPSPARSE_CONFIG_H
-#define HIPSPARSE_CONFIG_H
-
-/* Build-time feature flags baked in at compile time. */
-
-/* hipSPARSE 5.1 */
-#cmakedefine HIPSPARSE_WITH_SPGEAM
-
-/* hipSPARSE 4.7 */
-#cmakedefine HIPSPARSE_WITH_CSC_TRSV
-#cmakedefine HIPSPARSE_WITH_CSC_TRSM
-
-/* hipSPARSE 4.6 */
-#cmakedefine HIPSPARSE_WITH_SPMV_BSR
-
-#endif /* HIPSPARSE_CONFIG_H */
+// clang-format 19 (math-ci) rewrites "#if(" to "#if (", which clang-format
+// 18 (the repo pre-commit hook) reverts; disable so both formatters agree.
+// clang-format off
+#if(defined(HIPSPARSE_WITH_SPGEAM) && (!defined(CUDART_VERSION) || CUDART_VERSION >= 13030))
+// clang-format on
+TEST_ROUTINE(spgeam_csr,
+             generic,
+             arg.M,
+             arg.N,
+             arg.alpha,
+             arg.alphai,
+             arg.beta,
+             arg.betai,
+             arg.baseA,
+             arg.baseB,
+             arg.baseC);
+#endif
