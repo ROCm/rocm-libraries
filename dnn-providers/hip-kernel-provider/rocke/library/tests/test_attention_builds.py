@@ -1146,6 +1146,18 @@ class TestAttentionHelpers(unittest.TestCase):
                 paged=True, block_size=16, num_kv_blocks=512, **base
             ).kernel_name(),
         )
+        # num_kv_blocks is IR-live (sets the paged buffer-rsrc bound) so it MUST be part
+        # of the kernel identity -- else two cache sizes collide in the launcher cache and
+        # the larger reads later blocks as 0 (Copilot #4 / review W2). Assert distinctness.
+        n512 = AttentionDenseSpec(
+            paged=True, block_size=16, num_kv_blocks=512, **base
+        ).kernel_name()
+        n1024 = AttentionDenseSpec(
+            paged=True, block_size=16, num_kv_blocks=1024, **base
+        ).kernel_name()
+        self.assertNotEqual(n512, n1024)
+        self.assertIn("nb512", n512)
+        self.assertIn("nb1024", n1024)
         # Accept: bf16 too -- the paged mechanism is dtype-generic (both 2-byte).
         ok_bf, why_bf = supports_attention_dense(
             AttentionDenseSpec(

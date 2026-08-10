@@ -419,6 +419,7 @@ class AttentionDenseSpec:
             parts.append("varlen")
         if self.paged:
             parts.append(f"pgd{self.block_size}")
+            parts.append(f"nb{self.num_kv_blocks}")  # IR-live: sets the paged rsrc bound
         if self.lazy_rescale:
             parts.append("lazyrs")
         if self.persistent:
@@ -1869,7 +1870,16 @@ def run_attention_dense_torch(
     Varlen (``spec.varlen``): the kernel emits a 7-arg ABI (packed
     ``[total_tok, H, D]`` q/k/v/o + two int32 ``cu_seqlens`` [batch+1]); pass both
     ``cu_seqlens_q`` and ``cu_seqlens_kv`` or a ``ValueError`` is raised (they are
-    required — never silently launch the 5-arg ABI against a 7-arg kernel)."""
+    required — never silently launch the 5-arg ABI against a 7-arg kernel).
+
+    Paged (``spec.paged``): K/V are a PAGED CACHE, not dense tensors -- ``k``/``v``
+    are ``[num_kv_blocks, block_size, Hkv, D]`` and are addressed through
+    ``block_tables`` indirection. Pass ``block_tables`` (int32
+    ``[num_seqs, max_blocks_per_seq]``) and ``kv_lens`` (int32 ``[num_seqs]``); a
+    ``ValueError`` is raised if either is missing (or is supplied when
+    ``spec.paged`` is False). ``q``/``out`` stay dense/contiguous. Single-sequence
+    only in this revision (``batch == 1``); ``spec.block_size`` is the cache page
+    size and ``spec.num_kv_blocks`` MUST equal ``k.shape[0]``."""
     ok, why = supports_attention_dense(spec, arch=arch)
     if not ok:
         raise NotImplementedError(f"attention_dense unsupported for spec: {why}")
@@ -1887,14 +1897,12 @@ def run_attention_dense_torch(
     from rocke.helpers.compile import compile_kernel
     from rocke.runtime import KernelLauncher, LaunchConfig
 
-    # `batch` and (for paged) `num_kv_blocks` are baked into the kernel -- batch into
-    # the K/V buffer extents + persistent work-item count, num_kv_blocks into the paged
-    # buffer-resource bound -- but NEITHER is in kernel_name(), so both must be in the
-    # cache key. Otherwise two specs differing only there silently reuse the first
-    # binary; for a larger num_kv_blocks that means a too-small paged rsrc bound ->
-    # OOB block-table reads masked to 0 -> wrong output. Keying here (rather than
-    # widening kernel_name()) keeps the emitted IR hash untouched.
-    key = (spec.kernel_name(), spec.batch, spec.num_kv_blocks if spec.paged else 0)
+    # `batch` is baked into the kernel (K/V buffer extents + persistent work-item count)
+    # but deliberately kept OUT of kernel_name() to keep existing IR hashes stable, so it
+    # is keyed here. Paged `num_kv_blocks` is also IR-live (it sets the buffer-resource
+    # bound) but IS in kernel_name() (a paged-only tag, no golden impact), so the name
+    # alone distinguishes paged specs -- no separate key term needed.
+    key = (spec.kernel_name(), spec.batch)
     launcher = _DENSE_LAUNCHER_CACHE.get(key)
     if launcher is None:
         art = compile_kernel(
