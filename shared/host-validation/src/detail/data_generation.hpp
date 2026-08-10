@@ -9,105 +9,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
-#include <roc/host_validation/detail/tensor_views.hpp>
+#include <roc/host_validation/generation.hpp>
 #include <span>
 #include <stdexcept>
-#include <type_traits>
 #include <vector>
 
 namespace roc::host_validation {
-inline uint64_t counterRandom(uint64_t seed, uint64_t stream, uint64_t index) {
-    uint64_t value = seed ^ (stream + 0x9e3779b97f4a7c15ULL) ^ (index * 0xbf58476d1ce4e5b9ULL);
-    value += 0x9e3779b97f4a7c15ULL;
-    value = (value ^ (value >> 30)) * 0xbf58476d1ce4e5b9ULL;
-    value = (value ^ (value >> 27)) * 0x94d049bb133111ebULL;
-    return value ^ (value >> 31);
-}
-
-inline int indexedUniformInteger(uint64_t seed, uint64_t stream, uint64_t index, int lower,
-                                 int upper) {
-    if (lower > upper)
-        throw std::invalid_argument("indexedUniformInteger lower bound exceeds upper bound.");
-    const uint64_t range =
-        static_cast<uint64_t>(static_cast<int64_t>(upper) - static_cast<int64_t>(lower) + 1);
-    return static_cast<int>(static_cast<int64_t>(lower) +
-                            static_cast<int64_t>(counterRandom(seed, stream, index) % range));
-}
-
-enum class GenerationPattern {
-    Zero,
-    Constant,
-    CandidateSet,
-    UniformInteger,
-    AbsoluteUniformInteger,
-    UniformReal,
-    Normal,
-    Sine,
-    Cosine,
-    AbsoluteSine,
-    AbsoluteCosine,
-    SerialIndex,
-    SerialDimension,
-    AffineIndexRemainder,
-    Identity,
-    CheckerboardUniformInteger,
-    TypeMaximum,
-    TypeLowest,
-    TypeDenormalMinimum,
-    TypeDenormalMaximum,
-    TypeNaN,
-    TypeInfinity,
-    TypeNegativeInfinity,
-    TypeNegativeZero,
-    UniformTypeRange,
-    RandomEncodedExponent,
-    RawConstant,
-    UniformRawInteger,
-    RandomRawBits,
-    RawSerialDimension,
-};
-
-enum class LogicalIndexOrder {
-    FirstDimensionFastest,
-    LastDimensionFastest,
-};
-
-enum class GenerationTransform {
-    None,
-    Absolute,
-    Sine,
-    Cosine,
-};
-
-struct GenerationPatternSpec {
-    GenerationPattern pattern = GenerationPattern::Zero;
-    double parameter0 = 0.0;
-    double parameter1 = 1.0;
-    double valueScale = 1.0;
-    double valueOffset = 0.0;
-    uint64_t stream = 0;
-    size_t dimension = 0;
-    ScalarType sourceType = ScalarType::Count;
-    GenerationTransform transform = GenerationTransform::None;
-    std::vector<int64_t> dimensionCoefficients;
-    int64_t affineOffset = 0;
-    int64_t remainderDivisor = 1;
-    std::vector<double> candidates;
-    std::vector<size_t> alternatingDimensions;
-    size_t negativeParity = 0;
-};
-
-struct GenerationOptions {
-    uint64_t seed = 0;
-    LogicalIndexOrder indexOrder = LogicalIndexOrder::FirstDimensionFastest;
-    GenerationPatternSpec real;
-    GenerationPatternSpec imaginary;
-};
-
-struct GenerationRunInfo {
-    size_t elementsGenerated = 0;
-};
-
 namespace detail {
 inline size_t logicalLinearIndex(std::span<const size_t> indices, const Shape& shape,
                                  LogicalIndexOrder order) {
@@ -605,43 +512,4 @@ inline void generateElement(MutableTensorView destination, const GenerationOptio
     }
 }
 }  // namespace detail
-
-template <typename T, typename Generator>
-void generate(MatrixView<T> destination, Generator&& generator) {
-    for (size_t column = 0; column < destination.columns(); ++column) {
-        for (size_t row = 0; row < destination.rows(); ++row)
-            destination(row, column) = static_cast<T>(generator(row, column));
-    }
-}
-
-template <typename Generator>
-    requires(std::is_invocable_v<Generator&, std::span<const size_t>, size_t> ||
-             std::is_invocable_v<Generator&, std::span<const size_t>>)
-void generate(MutableTensorView destination, Generator&& generator) {
-    detail::forEachIndex(
-        destination.shape(), [&](std::span<const size_t> indices, size_t linearIndex) {
-            if constexpr (std::is_invocable_v<Generator&, std::span<const size_t>, size_t>)
-                destination.storeFrom(indices, generator(indices, linearIndex));
-            else
-                destination.storeFrom(indices, generator(indices));
-        });
-}
-
-inline GenerationRunInfo generate(MutableTensorView destination, const GenerationOptions& options) {
-    detail::forEachIndex(destination.shape(), [&](std::span<const size_t> indices, size_t) {
-        const size_t logicalIndex =
-            detail::logicalLinearIndex(indices, destination.shape(), options.indexOrder);
-        detail::generateElement(destination, options, indices, logicalIndex);
-    });
-    return {.elementsGenerated = destination.shape().elementCount()};
-}
-
-inline GenerationRunInfo generateAt(MutableTensorView destination, size_t logicalIndex,
-                                    const GenerationOptions& options) {
-    const std::vector<size_t> indices =
-        detail::logicalCoordinates(logicalIndex, destination.shape(), options.indexOrder);
-    detail::generateElement(destination, options, indices, logicalIndex);
-    return {.elementsGenerated = 1};
-}
-
 }  // namespace roc::host_validation

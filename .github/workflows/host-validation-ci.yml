@@ -65,6 +65,8 @@ jobs:
             test ! -e \
               "${RUNNER_TEMP}/host-validation-install/include/roc/host_validation/detail/${header}.hpp"
           done
+          test ! -e \
+            "${RUNNER_TEMP}/host-validation-install/include/roc/host_validation/detail/data_generation.hpp"
           cmake -S shared/host-validation/tests/package \
             -B "${RUNNER_TEMP}/host-validation-package-test" \
             -G Ninja \
