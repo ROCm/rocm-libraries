@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -16,17 +16,22 @@
  */
 
 #include <thrust/copy.h>
+#include <thrust/detail/libcxx_wrapper/std/__iterator/iterator_traits.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/zip_iterator.h>
 #include <thrust/sequence.h>
 #include <thrust/transform.h>
 #include <thrust/universal_vector.h>
 
-#include _THRUST_STD_INCLUDE(type_traits)
-
 #include "test_param_fixtures.hpp"
 #include "test_real_assertions.hpp"
 #include "test_utils.hpp"
+
+#include _THRUST_STD_INCLUDE(type_traits)
+
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <iterator>
+#endif
 
 using ZipIteratorTests32BitParams = ::testing::Types<Params<int>, Params<unsigned int>, Params<float>>;
 
@@ -55,6 +60,42 @@ TEST(ZipIterator32BitTests, UsingHip)
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   ASSERT_EQ(THRUST_DEVICE_SYSTEM, THRUST_DEVICE_SYSTEM_HIP);
+}
+
+// ensure that we properly support thrust::reverse_iterator from _THRUST_STD
+TEST(ZipIterator32BitTests, TestZipIteratorTraits)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  using base_it = thrust::host_vector<int>::iterator;
+
+  using it        = thrust::zip_iterator<thrust::tuple<base_it, base_it>>;
+  using traits    = _THRUST_STD::iterator_traits<it>;
+  using reference = thrust::detail::tuple_of_iterator_references<int&, int&>;
+
+  static_assert(_THRUST_STD::is_same_v<traits::difference_type, ptrdiff_t>);
+  static_assert(_THRUST_STD::is_same_v<traits::value_type, thrust::tuple<int, int>>);
+  static_assert(_THRUST_STD::is_same_v<traits::pointer, void>);
+
+  static_assert(_THRUST_STD::is_same_v<traits::reference, reference>);
+  static_assert(_THRUST_STD::is_same_v<traits::iterator_category, _THRUST_STD::random_access_iterator_tag>);
+
+  static_assert(_THRUST_STD::is_same_v<thrust::iterator_traversal_t<it>, thrust::random_access_traversal_tag>);
+
+  static_assert(::internal::is_cpp17_random_access_iterator<it>::value);
+
+#if _THRUST_HAS_DEVICE_SYSTEM_STD || THRUST_STD_VER >= 2020
+  static_assert(!_THRUST_STD::output_iterator<it, int>);
+#endif
+#if _THRUST_HAS_DEVICE_SYSTEM_STD // The fallback version of zip_iterator lacks these iterator concepts.
+  static_assert(_THRUST_STD::input_iterator<it>);
+  static_assert(_THRUST_STD::forward_iterator<it>);
+  static_assert(_THRUST_STD::bidirectional_iterator<it>);
+  static_assert(_THRUST_STD::random_access_iterator<it>);
+#endif
+#if _THRUST_HAS_DEVICE_SYSTEM_STD || THRUST_STD_VER >= 2020
+  static_assert(!_THRUST_STD::contiguous_iterator<it>);
+#endif
 }
 
 template <typename Vector>
@@ -155,7 +196,7 @@ TYPED_TEST(ZipIteratorNumericTests, TestZipIteratorReference)
   using IteratorTuple1 = tuple<Iterator1, Iterator2>;
   using ZipIterator1   = zip_iterator<IteratorTuple1>;
 
-  using zip_iterator_reference_type1 = typename iterator_reference<ZipIterator1>::type;
+  using zip_iterator_reference_type1 = thrust::detail::it_reference_t<ZipIterator1>;
 
   host_vector<T> h_variable(1);
 
@@ -174,7 +215,7 @@ TYPED_TEST(ZipIteratorNumericTests, TestZipIteratorReference)
   using IteratorTuple2 = tuple<Iterator3, Iterator4>;
   using ZipIterator2   = zip_iterator<IteratorTuple2>;
 
-  using zip_iterator_reference_type2 = typename iterator_reference<ZipIterator2>::type;
+  using zip_iterator_reference_type2 = thrust::detail::it_reference_t<ZipIterator2>;
 
   device_vector<T> d_variable(1);
 
@@ -377,25 +418,25 @@ TYPED_TEST(ZipIterator32BitTests, TestZipIteratorTransform)
     device_vector<T> d_result(size);
 
     // Tuples with 2 elements
-    transform(make_zip_iterator(h_data0.begin(), h_data1.begin()),
-              make_zip_iterator(h_data0.end(), h_data1.end()),
-              h_result.begin(),
-              SumTwoTuple());
-    transform(make_zip_iterator(d_data0.begin(), d_data1.begin()),
-              make_zip_iterator(d_data0.end(), d_data1.end()),
-              d_result.begin(),
-              SumTwoTuple());
+    thrust::transform(make_zip_iterator(h_data0.begin(), h_data1.begin()),
+                      make_zip_iterator(h_data0.end(), h_data1.end()),
+                      h_result.begin(),
+                      SumTwoTuple());
+    thrust::transform(make_zip_iterator(d_data0.begin(), d_data1.begin()),
+                      make_zip_iterator(d_data0.end(), d_data1.end()),
+                      d_result.begin(),
+                      SumTwoTuple());
     ASSERT_EQ(h_result, d_result);
 
     // Tuples with 3 elements
-    transform(make_zip_iterator(h_data0.begin(), h_data1.begin(), h_data2.begin()),
-              make_zip_iterator(h_data0.end(), h_data1.end(), h_data2.end()),
-              h_result.begin(),
-              SumThreeTuple());
-    transform(make_zip_iterator(d_data0.begin(), d_data1.begin(), d_data2.begin()),
-              make_zip_iterator(d_data0.end(), d_data1.end(), d_data2.end()),
-              d_result.begin(),
-              SumThreeTuple());
+    thrust::transform(make_zip_iterator(h_data0.begin(), h_data1.begin(), h_data2.begin()),
+                      make_zip_iterator(h_data0.end(), h_data1.end(), h_data2.end()),
+                      h_result.begin(),
+                      SumThreeTuple());
+    thrust::transform(make_zip_iterator(d_data0.begin(), d_data1.begin(), d_data2.begin()),
+                      make_zip_iterator(d_data0.end(), d_data1.end(), d_data2.end()),
+                      d_result.begin(),
+                      SumThreeTuple());
     ASSERT_EQ(h_result, d_result);
   }
 }
@@ -484,15 +525,15 @@ TEST(ZipIterator32BitTests, TestZipIteratorCopySoAToAoS)
   thrust::fill(d_aos.begin(), d_aos.end(), make_tuple(0, 0));
 
   thrust::copy(h_soa, h_soa + n, d_aos.begin());
-  ASSERT_EQ_QUIET(7, get<0>(d_soa[0]));
-  ASSERT_EQ_QUIET(13, get<1>(d_soa[0]));
+  ASSERT_EQ_QUIET(7, static_cast<int>(get<0>(d_soa[0]))); // needs casting due to GoogleTest limitation
+  ASSERT_EQ_QUIET(13, static_cast<int>(get<1>(d_soa[0]))); // needs casting due to GoogleTest limitation
 
   // device to device
   thrust::fill(d_aos.begin(), d_aos.end(), make_tuple(0, 0));
 
   thrust::copy(d_soa, d_soa + n, d_aos.begin());
-  ASSERT_EQ_QUIET(7, get<0>(d_soa[0]));
-  ASSERT_EQ_QUIET(13, get<1>(d_soa[0]));
+  ASSERT_EQ_QUIET(7, static_cast<int>(get<0>(d_soa[0]))); // needs casting due to GoogleTest limitation
+  ASSERT_EQ_QUIET(13, static_cast<int>(get<1>(d_soa[0]))); // needs casting due to GoogleTest limitation
 
   // device to host
   thrust::fill(h_aos.begin(), h_aos.end(), make_tuple(0, 0));

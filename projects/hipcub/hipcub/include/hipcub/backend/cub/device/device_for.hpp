@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
- * Modifications Copyright (c) 2024-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2024-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -33,13 +33,11 @@
 
 #include <cub/device/device_for.cuh> // IWYU pragma: export
 
-#if __cccl_lib_mdspan
-    #include <cuda/std/__mdspan/extents.h>
+#include <cuda/std/__mdspan/extents.h>
 BEGIN_HIPCUB_NAMESPACE
 template<class IndexType, size_t... Extents>
 using extents = ::cuda::std::extents<IndexType, Extents...>;
 END_HIPCUB_NAMESPACE
-#endif // __cccl_lib_mdspan
 
 BEGIN_HIPCUB_NAMESPACE
 
@@ -164,8 +162,7 @@ HIPCUB_RUNTIME_FUNCTION
             cub::DeviceFor::Bulk(d_temp_storage, temp_storage_bytes, shape, op, stream));
     }
 
-// ForEachInExtents only enables when the cccl mdspan extension is enabled
-#ifdef __cccl_lib_mdspan
+    // ForEachInExtents only enables when the cccl mdspan extension is enabled
     template<class IndexType, size_t... Extents, typename OpT>
     HIPCUB_RUNTIME_FUNCTION
     static hipError_t ForEachInExtents(void*   d_temp_storage,
@@ -189,7 +186,6 @@ HIPCUB_RUNTIME_FUNCTION
     {
         return hipCUDAErrorTohipError(cub::DeviceFor::ForEachInExtents(extents, op, stream));
     }
-#endif // __cccl_lib_mdspan
 };
 
 END_HIPCUB_NAMESPACE

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -26,7 +26,6 @@
 #include <hipcub/block/block_discontinuity.hpp>
 #include <hipcub/block/block_load.hpp>
 #include <hipcub/block/block_store.hpp>
-#include <hipcub/thread/thread_operators.hpp>
 
 template<class T, class Flag, unsigned int BlockSize, unsigned int ItemsPerThread, class FlagOp>
 struct params
@@ -73,8 +72,8 @@ bool apply(FlagOp flag_op, const T& a, const T& b, unsigned int)
 
 using Params = ::testing::Types<
     // Power of 2 BlockSize
-    params<unsigned int, int, 64U, 1, hipcub::Equality>,
-    params<int, bool, 128U, 1, hipcub::Inequality>,
+    params<unsigned int, int, 64U, 1, test_utils::equal>,
+    params<int, bool, 128U, 1, test_utils::not_equal>,
     params<float, int, 256U, 1, test_utils::less>,
     params<test_utils::half, int, 256U, 1, test_utils::less>,
     params<test_utils::bfloat16, int, 256U, 1, test_utils::less>,
@@ -87,18 +86,18 @@ using Params = ::testing::Types<
     params<test_utils::half, int, 37U, 1, test_utils::greater>,
     params<test_utils::bfloat16, int, 37U, 1, test_utils::greater>,
     params<long long, char, 510U, 1, test_utils::greater_equal>,
-    params<unsigned int, long long, 162U, 1, hipcub::Inequality>,
-    params<unsigned char, bool, 255U, 1, hipcub::Equality>,
+    params<unsigned int, long long, 162U, 1, test_utils::not_equal>,
+    params<unsigned char, bool, 255U, 1, test_utils::equal>,
 
     // Power of 2 BlockSize and ItemsPerThread > 1
     params<int, char, 64U, 2, custom_flag_op2<int>>,
     params<int, short, 128U, 4, test_utils::less>,
     params<unsigned short, unsigned char, 256U, 7, custom_flag_op2<unsigned short>>,
-    params<short, short, 512U, 8, hipcub::Equality>,
+    params<short, short, 512U, 8, test_utils::equal>,
 
     // Non-power of 2 BlockSize and ItemsPerThread > 1
     params<double, int, 33U, 5, custom_flag_op2<double>>,
-    params<double, unsigned int, 464U, 2, hipcub::Equality>,
+    params<double, unsigned int, 464U, 2, test_utils::equal>,
     params<test_utils::half, unsigned int, 464U, 2, test_utils::greater>,
     params<test_utils::bfloat16, unsigned int, 464U, 2, test_utils::greater>,
     params<unsigned short, int, 100U, 3, test_utils::greater>,
@@ -146,10 +145,10 @@ TYPED_TEST(HipcubBlockDiscontinuity, FlagHeads)
 
     using type = typename TestFixture::params::type;
     // std::vector<bool> is a special case that will cause an error in hipMemcpy
-    using stored_flag_type = typename std::conditional<
-        std::is_same<bool, typename TestFixture::params::flag_type>::value,
-        int,
-        typename TestFixture::params::flag_type>::type;
+    using stored_flag_type =
+        typename std::conditional<std::is_same_v<bool, typename TestFixture::params::flag_type>,
+                                  int,
+                                  typename TestFixture::params::flag_type>::type;
     using flag_type                   = typename TestFixture::params::flag_type;
     using flag_op_type                = typename TestFixture::params::flag_op_type;
     constexpr size_t block_size       = TestFixture::params::block_size;
@@ -284,10 +283,10 @@ TYPED_TEST(HipcubBlockDiscontinuity, FlagTails)
 
     using type = typename TestFixture::params::type;
     // std::vector<bool> is a special case that will cause an error in hipMemcpy
-    using stored_flag_type = typename std::conditional<
-        std::is_same<bool, typename TestFixture::params::flag_type>::value,
-        int,
-        typename TestFixture::params::flag_type>::type;
+    using stored_flag_type =
+        typename std::conditional<std::is_same_v<bool, typename TestFixture::params::flag_type>,
+                                  int,
+                                  typename TestFixture::params::flag_type>::type;
     using flag_type                   = typename TestFixture::params::flag_type;
     using flag_op_type                = typename TestFixture::params::flag_op_type;
     constexpr size_t block_size       = TestFixture::params::block_size;
@@ -451,10 +450,10 @@ TYPED_TEST(HipcubBlockDiscontinuity, FlagHeadsAndTails)
 
     using type = typename TestFixture::params::type;
     // std::vector<bool> is a special case that will cause an error in hipMemcpy
-    using stored_flag_type = typename std::conditional<
-        std::is_same<bool, typename TestFixture::params::flag_type>::value,
-        int,
-        typename TestFixture::params::flag_type>::type;
+    using stored_flag_type =
+        typename std::conditional<std::is_same_v<bool, typename TestFixture::params::flag_type>,
+                                  int,
+                                  typename TestFixture::params::flag_type>::type;
     using flag_type                   = typename TestFixture::params::flag_type;
     using flag_op_type                = typename TestFixture::params::flag_op_type;
     constexpr size_t block_size       = TestFixture::params::block_size;
