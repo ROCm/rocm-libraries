@@ -31,3 +31,16 @@ def test_invoke_install_is_a_discoverable_developer_workflow():
 def test_install_binds_the_actual_cmake_client_output(tmp_path):
     expected = tmp_path / "build/tensilelite/client/tensilelite-client"
     assert tasks._built_client_path(tmp_path / "build") == expected
+
+
+def test_install_derives_build_version_from_selected_rocm_root(tmp_path):
+    version_file = tmp_path / ".info" / "version"
+    version_file.parent.mkdir()
+    version_file.write_text("7.2.4\n", encoding="utf-8")
+
+    assert tasks._rocm_base_version(tmp_path) == "7.2.4"
+
+
+def test_install_rejects_rocm_root_without_version_metadata(tmp_path):
+    with pytest.raises(tasks.Exit, match="no readable version metadata"):
+        tasks._rocm_base_version(tmp_path)

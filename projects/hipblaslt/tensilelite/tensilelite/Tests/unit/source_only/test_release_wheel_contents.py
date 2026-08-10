@@ -18,7 +18,11 @@ def test_canonical_and_compatibility_release_wheels_validate_independently(tmp_p
     rocm_root = tmp_path / "rocm"
     (rocm_root / ".info").mkdir(parents=True)
     (rocm_root / ".info/version").write_text("7.2.4\n", encoding="utf-8")
-    environment = dict(os.environ, ROCM_PATH=str(rocm_root))
+    environment = dict(
+        os.environ,
+        ROCM_PATH=str(rocm_root),
+        TENSILELITE_ROCM_VERSION="7.2.4",
+    )
 
     for mode, source, pattern in (
         ("canonical", _SOURCE_ROOT, "tensilelite-*.whl"),

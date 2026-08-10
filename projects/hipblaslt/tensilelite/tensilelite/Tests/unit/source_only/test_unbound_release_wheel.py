@@ -35,7 +35,11 @@ def test_configuring_installation_does_not_modify_original_wheel(tmp_path):
             str(_SOURCE_ROOT),
         ],
         cwd=_SOURCE_ROOT,
-        env=dict(os.environ, ROCM_PATH=str(rocm_root)),
+        env=dict(
+            os.environ,
+            ROCM_PATH=str(rocm_root),
+            TENSILELITE_ROCM_VERSION="7.2.4",
+        ),
         capture_output=True,
         text=True,
     )

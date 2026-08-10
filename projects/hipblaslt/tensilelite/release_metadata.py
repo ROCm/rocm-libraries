@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 import re
 import sys
@@ -35,23 +34,12 @@ def component_version() -> str:
     return value
 
 
-def rocm_version(rocm_root: str | os.PathLike[str] | None = None) -> str:
-    root = Path(rocm_root) if rocm_root is not None else Path(os.environ.get("ROCM_PATH", "/opt/rocm"))
-    version_file = root / ".info" / "version"
-    try:
-        return canonical_rocm_version(version_file.read_text(encoding="utf-8"))
-    except OSError as exc:
-        raise RuntimeError(
-            "Point ROCM_PATH at an installation containing .info/version "
-            f"(looked at {version_file})."
-        ) from exc
-
-
-def distribution_version(rocm_root: str | os.PathLike[str] | None = None) -> str:
-    return f"{component_version()}+rocm{rocm_version(rocm_root)}"
+def distribution_version(rocm_version: str) -> str:
+    """Compose the distribution version from the selected base ROCm version."""
+    return f"{component_version()}+rocm{canonical_rocm_version(rocm_version)}"
 
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
-        raise SystemExit(f"usage: {Path(sys.argv[0]).name} ROCM_ROOT")
+        raise SystemExit(f"usage: {Path(sys.argv[0]).name} ROCM_VERSION")
     print(distribution_version(sys.argv[1]))

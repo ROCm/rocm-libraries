@@ -34,6 +34,22 @@ function(hipblaslt_resolve_build_rocm_root output)
     set(${output} "${_root}" PARENT_SCOPE)
 endfunction()
 
+function(hipblaslt_resolve_build_rocm_version output)
+    if(HIPBLASLT_ENABLE_THEROCK)
+        if(NOT THEROCK_ROCM_VERSION)
+            message(FATAL_ERROR
+                "HIPBLASLT_ENABLE_THEROCK requires THEROCK_ROCM_VERSION")
+        endif()
+        set(_version "${THEROCK_ROCM_VERSION}")
+    else()
+        hipblaslt_resolve_build_rocm_root(_root)
+        set(_version_file "${_root}/.info/version")
+        file(READ "${_version_file}" _version)
+        string(STRIP "${_version}" _version)
+    endif()
+    set(${output} "${_version}" PARENT_SCOPE)
+endfunction()
+
 function(hipblaslt_configure_tensilelite_python asan_options)
     if(NOT HIPBLASLT_ENABLE_DEVICE)
         set(HIPBLASLT_PYTHON_COMMAND "${Python3_EXECUTABLE}" PARENT_SCOPE)
@@ -67,6 +83,7 @@ function(hipblaslt_configure_tensilelite_python asan_options)
     set(_python_command
         "${CMAKE_COMMAND}" -E env
         "ROCM_PATH=${HIPBLASLT_BUILD_ROCM_ROOT}"
+        "TENSILELITE_ROCM_VERSION=${HIPBLASLT_BUILD_ROCM_VERSION}"
         "PYTHONPATH=$<TARGET_FILE_DIR:_rocisa>/.."
     )
     if(asan_options)
