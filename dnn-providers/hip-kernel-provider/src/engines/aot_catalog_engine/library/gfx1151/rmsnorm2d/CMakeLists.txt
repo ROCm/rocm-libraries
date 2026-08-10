@@ -8,3 +8,10 @@ aot_add_rocke_family(
     FAMILY   rmsnorm2d
     PRODUCER produce_rmsnorm2d_co.py
 )
+
+# This family's own numeric-parity + selection tests (self-contained; see ../../CMakeLists.txt).
+aot_add_family_test(
+    ARCH    gfx1151
+    SOURCES TestRmsNormNumericParity.cpp
+            TestRmsNormSelection.cpp
+)

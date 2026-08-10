@@ -33,6 +33,22 @@ constraint (§3). All kernels in a family share the algorithm's tunable knobs �
 knobs are baked into each `.co` at produce time, and their consequences surface as each
 kernel's per-kernel `constraints`.
 
+> **Design principle — a family folder is a self-contained unit.** Each
+> `library/<arch>/<family>/` folder owns **everything** about that family and
+> **only** that family: its `family.json` (the spec — kernels + constraints), its
+> `CMakeLists.txt` (which builds the `.co` to match the spec), the co-located
+> producer, *and* the tests that validate those kernels (numeric parity /
+> per-family selection). The purpose is hard isolation: **deleting a family is
+> just `rm -rf`-ing its folder — nothing is left dangling anywhere else, and no
+> other family is affected, including never losing another family's tests.** The
+> contract that makes this hold: **a family's tests must depend only on that
+> family** — no test in one family folder may reference another family's kernels or
+> symbols (e.g. the GEMM parity tests select their own kernel by symbol so the
+> reference and universal families are mutually independent). Tests that are *not*
+> about a single family — engine-substrate unit tests like the tune-cache and
+> SDPA-decode tests — deliberately live one level up, at the engine test level
+> (`src/tests/engines/aot_catalog_engine/`), not in any family folder. See §9.
+
 **New here? Jump to [§2 Quick start](#2-quick-start-the-self-serve-recipe)** — the 30-second
 recipe plus a top-to-bottom KA checklist.
 Sections [§1](#1-the-end-to-end-path-what-happens-at-runtime)–[§5](#5-measure-and-cache-tuning)
@@ -277,10 +293,10 @@ Constraints are `multiple_of` (16 for the reference; M/N `multiple_of 64`, K
 `multiple_of 32` for the tiled path — sub-tile shapes correctly fall back).
 
 ### Files
-Adapter `ops/GemmAdapter.{hpp,cpp}`; data + co-located producers
-`library/gfx1151/gemm_wmma/{family.json, produce_gemm_wmma_co.py}`,
-`library/gfx1151/gemm_wmma_universal/{family.json, produce_gemm_universal_co.py}`;
-parity test `TestGemmNumericParity.cpp`; A/B rig `tools/gemm_aot_ab.py`; model override +
+Adapter `ops/GemmAdapter.{hpp,cpp}`; data + co-located producers + per-family parity tests
+`library/gfx1151/gemm_wmma/{family.json, produce_gemm_wmma_co.py, TestGemmWmmaNumericParity.cpp}`,
+`library/gfx1151/gemm_wmma_universal/{family.json, produce_gemm_universal_co.py, TestGemmUniversalNumericParity.cpp}`;
+A/B rig `tools/gemm_aot_ab.py`; model override +
 driver `tools/comfyui_hipdnn_linear_override.py`, `tools/ltx_linear_ab.py`.
 
 ---
@@ -338,10 +354,9 @@ served by the override synthesizing a cached ones-weight.
 | `N` | int | normalized dim |
 
 ### Files
-Adapter `ops/RmsNormAdapter.{hpp,cpp}`; data + co-located producer
-`library/gfx1151/rmsnorm2d/{family.json, produce_rmsnorm2d_co.py}`; rocKE runtime-N
-instance `instances/common/rmsnorm2d_dynamic.py`; parity + selection tests
-`TestRmsNormNumericParity.cpp`, `TestRmsNormSelection.cpp`; A/B rig
+Adapter `ops/RmsNormAdapter.{hpp,cpp}`; data + co-located producer + per-family tests
+`library/gfx1151/rmsnorm2d/{family.json, produce_rmsnorm2d_co.py, TestRmsNormNumericParity.cpp, TestRmsNormSelection.cpp}`;
+rocKE runtime-N instance `instances/common/rmsnorm2d_dynamic.py`; A/B rig
 `tools/rmsnorm_aot_ab.py`; model override + driver
 `tools/comfyui_hipdnn_rmsnorm_override.py`, `tools/ltx_rmsnorm_ab.py`.
 
@@ -483,10 +498,11 @@ kernel needs an argument the vocabulary doesn't yet emit or a grid the DSL can't
 (§13, §12.3).
 
 ### Files
-Adapter `ops/SdpaAdapter.{hpp,cpp}`; data + co-located producer
-`library/gfx1151/fmha_wmma_fwd/{family.json, produce_fmha_fwd_co.py}`; parity test
-`TestSdpaNumericParity.cpp`; decode/bindings unit test `TestSdpaDecode.cpp` (host-only,
-no GPU); A/B rig `tools/sdpa_aot_ab.py`; model override + driver
+Adapter `ops/SdpaAdapter.{hpp,cpp}`; data + co-located producer + per-family parity test
+`library/gfx1151/fmha_wmma_fwd/{family.json, produce_fmha_fwd_co.py, TestSdpaNumericParity.cpp}`;
+engine-level decode/bindings unit test `src/tests/engines/aot_catalog_engine/TestSdpaDecode.cpp`
+(host-only, no GPU, arch-neutral — not tied to this family); A/B rig `tools/sdpa_aot_ab.py`;
+model override + driver
 `tools/comfyui_hipdnn_sdpa_override.py`, `tools/ltx_sdpa_ab.py`. Authoring a new-arch
 forward family: [§13](#13-authoring-a-forward-sdpa-family-on-a-new-arch-gfx942gfx950).
 
@@ -523,12 +539,43 @@ PYTHONPATH=<rocKE>/projects/composablekernel/python \
 > an error. This gate lives in `_aot_arch_requested()` in `library/CMakeLists.txt`;
 > future family adders should call it too.
 
+> **Build flags — rocKE is a build-time *tool*, not part of this engine.** Two
+> independent axes control what gets built; do not conflate them:
+> - **Axis A — the AOT engine + its kernel library.** `ENABLE_AOT_CATALOG_ENGINE`
+>   (default **ON**) compiles the engine into `libhip_kernel_provider.so` and pulls in
+>   `library/`. Whether any `.co` are actually produced is gated **only** on
+>   `ROCKE_PYTHON_DIR` (+ comgr) and `GPU_TARGETS` — *not* on any "enable rocKE" switch.
+>   Here rocKE is used purely as an **external compiler the producer calls**, resolved by
+>   path. This is the relationship that outlives rocKE's current location.
+> - **Axis B — the rocKE engine itself** (a *temporary tenant* that happens to live in
+>   `hip-kernel-provider/rocke/` today). `HIPKERNELPROVIDER_ENABLE_ROCKE` (default
+>   **OFF**) does `add_subdirectory(rocke)` to build that engine and its Python/smoke/CI
+>   tests. It has **zero** references anywhere under `aot_catalog_engine/` and does **not**
+>   affect `.co` production. When rocKE moves to its own home, Axis B goes away entirely
+>   and Axis A is unchanged — you just point `ROCKE_PYTHON_DIR` at wherever rocKE then
+>   lives, and it becomes a true external pre-dependency of the AOT compiles.
+
 **2. C++ substrate parity test** — drives the engine substrate directly and compares to
 a CPU reference (`C=A@Bᵀ`, RMS over rows, or `softmax(scale·QKᵀ)·V`):
 ```
 # configure with -DENABLE_AOT_CATALOG_ENGINE=ON, build hip_kernel_provider_tests
 ctest -R GemmNumericParity      # or RmsNorm* / SdpaNumericParity
 ```
+
+These parity/selection tests are **co-located in the family folder they test**
+(`library/<arch>/<family>/Test*.cpp`), not under `src/tests/` — the family folder is a
+self-contained unit (spec + build + tests), so removing a family removes its tests with
+it and touches no other family (see the design-principle callout near the top of this
+README). Each family's `CMakeLists.txt` registers its own test sources with
+`aot_add_family_test(ARCH … SOURCES …)`, which compiles them into
+`hip_kernel_provider_tests` **only when that arch is in the build's `GPU_TARGETS`** —
+the same gate the kernel build uses. The contract is that **a family's tests reference
+only that family's kernels**: e.g. the reference (`gemm_wmma`) and tiled
+(`gemm_wmma_universal`) GEMM families both match the same mult-of-16 shapes, so each of
+their tests selects its own kernel *by symbol* (`wmma_gemm` vs `ugemm`) rather than
+taking `candidates.front()`, and neither depends on the other existing. Tests that
+belong to **no single family** — the tune-cache and SDPA-decode engine-substrate unit
+tests — stay at the engine test level (`src/tests/engines/aot_catalog_engine/`).
 
 **3. A/B rig** — builds a single-node graph through the real frontend, hard-pins the AOT
 engine by hashed id, checks `allclose` vs the torch reference and times both:
@@ -628,7 +675,9 @@ For an op that isn't matmul/rmsnorm/sdpa, the pattern (mirror any existing adapt
    kernel) → LaunchBindings`, `gridSymbols(problem, kernel) → SymbolTable`.
 2. One `push_back` in `CatalogEngine.cpp`.
 3. One source line in this engine's `CMakeLists.txt`.
-4. A family dir `library/<arch>/<family>/` + producer + parity test, following §9.
+4. A self-contained family dir `library/<arch>/<family>/` holding `family.json`, its
+   `CMakeLists.txt` (producer + `aot_add_family_test`), the producer, and the parity
+   test(s) — following §9.
 
 No changes to `LaunchAbi`, the `Catalog` loader, `Selection`, `CatalogTypes`,
 `CatalogPlan`, or the other adapters are needed — the substrate is op-agnostic.
@@ -644,9 +693,10 @@ No changes to `LaunchAbi`, the `Catalog` loader, `Selection`, `CatalogTypes`,
 | Adapters | `ops/{Gemm,RmsNorm,Sdpa}Adapter.{hpp,cpp}` |
 | Catalog loader / selection / launch / tuning | `catalog/`, `plans/`, `launch/` |
 | Family library (discovery) | `library/CMakeLists.txt` (auto-discovers `<arch>/<family>/`) |
-| Per-family unit (edit these) | `library/<arch>/<family>/{family.json, CMakeLists.txt, produce_<family>_co.py}` |
+| Per-family unit — self-contained (edit these) | `library/<arch>/<family>/{family.json, CMakeLists.txt, produce_<family>_co.py, Test*.cpp}` |
 | Built `.co` (not in git) | `${AOT_CATALOG_BUILD_DIR}/<arch>/<family>/*.co` (emitted by the producer at build time) |
-| Substrate parity/selection tests | `src/tests/engines/aot_catalog_engine/Test*.cpp` |
+| Per-family parity/selection tests | `library/<arch>/<family>/Test*.cpp` (registered via `aot_add_family_test`; deleted with the family) |
+| Engine-substrate tests (not family-specific) | `src/tests/engines/aot_catalog_engine/{TestTuneCache,TestSdpaDecode}.cpp` |
 | A/B rigs | `tools/{gemm,rmsnorm,sdpa}_aot_ab.py` |
 | Model overrides + LTX drivers | `tools/comfyui_hipdnn_*_override.py`, `tools/ltx_*_ab.py` |
 
@@ -785,11 +835,13 @@ emit yet (one reviewed line, see the arg table) or a grid the DSL can't express 
 4. **Drop it under `library/gfx942/<family>/`** with a producer `CMakeLists.txt`
    (auto-discovered by `library/CMakeLists.txt`; mirror the gfx1151 family's). It compiles
    only when `gfx942` is in the build's `GPU_TARGETS` (see §9); a gfx1151-only build skips it.
-5. **Copy the parity test.** `cp TestSdpaNumericParity.cpp` → new file, change `kArch`,
-   geometry (D/H/S), the dtype token, and the hand-built `LaunchBindings` to match the new
-   `args_signature`. The CPU reference softmax and tolerances carry over. Register it in
-   `src/tests/CMakeLists.txt`. (`TestSdpaDecode.cpp` is arch-neutral and already covers
-   decode itself — no per-arch copy needed.)
+5. **Copy the parity test into the new family folder.** `cp` the gfx1151 family's
+   `TestSdpaNumericParity.cpp` → `library/gfx942/<family>/`, change `kArch`, geometry
+   (D/H/S), the dtype token, and the hand-built `LaunchBindings` to match the new
+   `args_signature`. The CPU reference softmax and tolerances carry over. Register it from
+   the family's own `CMakeLists.txt` with `aot_add_family_test(ARCH gfx942 SOURCES …)` — the
+   test lives with the family, not under `src/tests/`. (`TestSdpaDecode.cpp` is arch-neutral,
+   family-independent, and stays at the engine test level — no per-arch copy needed.)
 
 ### Arg-vocabulary reference
 

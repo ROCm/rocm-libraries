@@ -70,17 +70,28 @@ if(ENABLE_HIP_MLOPS_ENGINE)
 endif()
 
 if(ENABLE_AOT_CATALOG_ENGINE)
+    # Engine-level (substrate) tests live HERE because they are not tied to any
+    # one kernel family: TestTuneCache is pure host CPU-key/persistence logic, and
+    # TestSdpaDecode exercises the SDPA adapter's decode vocabulary (host-only).
+    # Every FAMILY-specific test (numeric parity / per-family selection) instead
+    # lives IN its family folder (library/<arch>/<family>/) and is contributed via
+    # the AOT_CATALOG_FAMILY_TEST_SOURCES global property below -- so deleting a
+    # family folder removes its kernels, its family.json AND its tests together,
+    # with no impact on any other family. See the engine README §9 and
+    # aot_add_family_test() in library/CMakeLists.txt.
     target_sources(hip_kernel_provider_tests PRIVATE
-        engines/aot_catalog_engine/TestGemmNumericParity.cpp
-        engines/aot_catalog_engine/TestRmsNormNumericParity.cpp
-        engines/aot_catalog_engine/TestSdpaNumericParity.cpp
         engines/aot_catalog_engine/TestSdpaDecode.cpp
         engines/aot_catalog_engine/TestTuneCache.cpp
-        engines/aot_catalog_engine/TestRmsNormSelection.cpp
     )
+    # Family-contributed test sources (absolute paths appended by each family's
+    # aot_add_family_test()). Empty when rocKE/the arch is unavailable -> no-op.
+    get_property(_aot_family_test_sources GLOBAL PROPERTY AOT_CATALOG_FAMILY_TEST_SOURCES)
+    if(_aot_family_test_sources)
+        target_sources(hip_kernel_provider_tests PRIVATE ${_aot_family_test_sources})
+    endif()
     # The AOT engine's headers (catalog/, launch/, plans/) are rooted at the
     # engine dir, which is PRIVATE to hip_kernel_provider_impl -- add it here so
-    # the substrate test can include them directly.
+    # the substrate + family tests can include them directly.
     target_include_directories(hip_kernel_provider_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../engines/aot_catalog_engine
     )

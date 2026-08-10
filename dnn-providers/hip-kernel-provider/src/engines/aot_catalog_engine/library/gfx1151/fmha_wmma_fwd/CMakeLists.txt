@@ -8,3 +8,9 @@ aot_add_rocke_family(
     FAMILY   fmha_wmma_fwd
     PRODUCER produce_fmha_fwd_co.py
 )
+
+# This family's own numeric-parity test (self-contained; see ../../CMakeLists.txt).
+aot_add_family_test(
+    ARCH    gfx1151
+    SOURCES TestSdpaNumericParity.cpp
+)

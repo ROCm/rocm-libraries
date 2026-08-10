@@ -189,6 +189,45 @@ function(aot_add_rocke_family)
 endfunction()
 
 # ---------------------------------------------------------------------------
+# aot_add_family_test(ARCH <arch> SOURCES <test.cpp> [<test2.cpp> ...])
+#
+# A family declares its OWN tests here, co-located in the family folder, so the
+# family folder is a fully self-contained unit: family.json (the spec) + the
+# CMakeLists that builds its .co + the tests that validate those .co, all in one
+# place. Deleting library/<arch>/<family>/ removes the kernels, the spec AND the
+# tests together -- nothing about that family is left dangling elsewhere.
+#
+# The named sources are appended (as absolute paths) to the
+# AOT_CATALOG_FAMILY_TEST_SOURCES global property, which src/tests/CMakeLists.txt
+# compiles into hip_kernel_provider_tests (that target owns the include dirs and
+# the AOT_CATALOG_TEST_DIR compile def these sources need). Gated on the same
+# _aot_arch_requested() check as the kernel build, so a family's tests compile
+# only when its arch is in this build's target set.
+#
+# CONTRACT: a family's tests must depend ONLY on that family -- no test here may
+# reference another family's kernels or symbols, so removing any one family can
+# never break another's tests. Cross-family or engine-substrate tests (e.g. the
+# tune-cache and SDPA-decode unit tests) do NOT belong in a family folder; they
+# live at the engine test level (src/tests/engines/aot_catalog_engine/).
+# ---------------------------------------------------------------------------
+function(aot_add_family_test)
+    cmake_parse_arguments(T "" "ARCH" "SOURCES" ${ARGN})
+    if(NOT T_ARCH OR NOT T_SOURCES)
+        message(FATAL_ERROR "aot_add_family_test: ARCH and SOURCES are required")
+    endif()
+
+    _aot_arch_requested(${T_ARCH} _arch_ok)
+    if(NOT _arch_ok)
+        return() # arch not in this build's target set -> its tests don't compile
+    endif()
+
+    foreach(_s IN LISTS T_SOURCES)
+        set_property(GLOBAL APPEND PROPERTY
+            AOT_CATALOG_FAMILY_TEST_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/${_s})
+    endforeach()
+endfunction()
+
+# ---------------------------------------------------------------------------
 # Auto-discover every library/<arch>/<family>/CMakeLists.txt.
 # ---------------------------------------------------------------------------
 file(GLOB _family_cmakes RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS
