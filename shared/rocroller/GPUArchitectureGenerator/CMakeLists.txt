@@ -32,6 +32,9 @@ add_executable(GPUArchitectureGenerator
     "${PROJECT_SOURCE_DIR}/lib/source/Utilities/Utils.cpp"
     "${PROJECT_SOURCE_DIR}/lib/source/Timer.cpp"
 )
+
+target_compile_definitions(GPUArchitectureGenerator PRIVATE ROCROLLER_STATIC_DEFINE)
+
 add_subdirectory(include)
 add_subdirectory(source)
 
