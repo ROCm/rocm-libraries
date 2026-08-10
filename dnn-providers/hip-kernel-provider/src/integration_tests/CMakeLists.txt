@@ -73,7 +73,7 @@ endif()
 
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     target_sources(hip_kernel_provider_integration_tests PRIVATE
-        ingestor_poc/IntegrationGpuKernelIngestor.cpp
+        kernel_ingestor_engine/IntegrationGpuKernelIngestor.cpp
     )
     # This target links only the SDKs, not hip_kernel_provider_private, so it does not
     # inherit the provider's gate and needs the definition set directly.

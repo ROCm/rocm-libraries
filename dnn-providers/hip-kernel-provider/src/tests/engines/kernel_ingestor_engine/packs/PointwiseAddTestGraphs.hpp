@@ -14,7 +14,7 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 
-namespace hip_kernel_provider::ingestor_poc::testing
+namespace hip_kernel_provider::kernel_ingestor_engine::testing
 {
 
 /// Tensor uids the builders below use, in argument order.
@@ -23,7 +23,7 @@ constexpr int64_t INPUT_B_UID = 2;
 constexpr int64_t OUTPUT_UID = 3;
 
 /**
- * @brief Builds a single-node pointwise graph, for driving the POC's matchers.
+ * @brief Builds a single-node pointwise graph, for driving this pack's matchers.
  *
  * Parameterized on everything the matchers gate, so a test can vary exactly one thing
  * and assert the effect: the operation, the element type, the tensor shape, and whether
@@ -150,6 +150,6 @@ inline hipdnn_flatbuffers_sdk::utilities::UuidBytes makeGraphId(uint8_t seed)
     return id;
 }
 
-} // namespace hip_kernel_provider::ingestor_poc::testing
+} // namespace hip_kernel_provider::kernel_ingestor_engine::testing
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

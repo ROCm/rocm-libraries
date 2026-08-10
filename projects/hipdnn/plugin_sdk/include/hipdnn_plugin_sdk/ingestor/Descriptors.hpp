@@ -150,7 +150,7 @@ struct KernelDescriptor
     DescriptorId id;
     std::string name;
     /// The kernel source. Real sources are a tagged union over kpack, hsaco, hip, and
-    /// rocke (RFC 0017 §7); this skeleton carries only what the embedded-source path
+    /// rocke (RFC 0017 §7); this carries only what the embedded-source path
     /// needs, and a real source kind is the packaging follow-up.
     std::string sourceFile;
     std::string entryPoint;

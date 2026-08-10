@@ -86,7 +86,7 @@ public:
     }
 
     /// Knob settings are read into provider settings here in the full design, where they
-    /// filter the catalog before ranking. This skeleton's engine exposes its knob for
+    /// filter the catalog before ranking. The first engine exposes its knob for
     /// reporting only, so there is nothing to carry across.
     void initializeExecutionSettings(const THandle& /*handle*/,
                                      const IGraph& /*opGraph*/,

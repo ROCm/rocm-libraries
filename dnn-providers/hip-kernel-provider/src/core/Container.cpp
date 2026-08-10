@@ -21,8 +21,8 @@
 #endif
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
-#include "ingestor_poc/PointwiseAddEngine.hpp"
-#include "ingestor_poc/PointwiseAddPack.hpp"
+#include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
+#include "engines/kernel_ingestor_engine/packs/PointwiseAddPack.hpp"
 #endif
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
@@ -71,15 +71,15 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
          }},
 #endif
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
-        // The kernel-ingestor POC's engine (RFC 0017). Registered statically here
+        // The kernel ingestor's engine (RFC 0017). Registered statically here
         // because engines are still a compile-time table; runtime loading of engine
         // descriptors replaces this entry with one built per installed UED file.
-        {ingestor_poc::pointwiseAddEngineId(),
+        {kernel_ingestor_engine::pointwiseAddEngineId(),
          [](const device::IDevicePropertyProvider& /*devicePropertyProvider*/)
              -> std::unique_ptr<hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>> {
              // Device facts are resolved per call from the handle rather than captured
              // here, so this engine needs nothing from the construction-time provider.
-             return ingestor_poc::makePointwiseAddEngine();
+             return kernel_ingestor_engine::makePointwiseAddEngine();
          }},
 #endif
     };

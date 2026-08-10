@@ -13,13 +13,13 @@
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 
-#include "ingestor_poc/NativeMatchers.hpp"
-#include "ingestor_poc/NativeSymbolNames.hpp"
-#include "tests/ingestor_poc/PointwiseAddGraphs.hpp"
+#include "engines/kernel_ingestor_engine/packs/PointwiseAddMatchers.hpp"
+#include "engines/kernel_ingestor_engine/packs/PointwiseAddSymbols.hpp"
+#include "tests/engines/kernel_ingestor_engine/packs/PointwiseAddTestGraphs.hpp"
 
 /**
  * @file TestNativeMatchers.cpp
- * @brief The POC's two matcher shapes: what each accepts, and what each refuses.
+ * @brief The pack's two matcher shapes: what each accepts, and what each refuses.
  *
  * The refusals matter more than the acceptances here. An under-specified decline accepts
  * a graph the kernel cannot serve, which is a wrong answer rather than a missed
@@ -28,8 +28,8 @@
 namespace
 {
 
-using namespace hip_kernel_provider::ingestor_poc;
-using namespace hip_kernel_provider::ingestor_poc::testing;
+using namespace hip_kernel_provider::kernel_ingestor_engine;
+using namespace hip_kernel_provider::kernel_ingestor_engine::testing;
 using hipdnn_plugin_sdk::ingestor::KernelDefinition;
 using hipdnn_plugin_sdk::ingestor::MatchContext;
 namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;

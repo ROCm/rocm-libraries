@@ -54,7 +54,7 @@ struct CatalogKeyHash
 /**
  * @brief The bound token state a matcher, scorer, or dispatch formula reads.
  *
- * RFC 0017 names five expression namespaces; this skeleton binds the two that do not
+ * RFC 0017 names five expression namespaces; this binds the two that do not
  * require a matcher to have run first — `$graph.*` (and the tensor and node fields
  * reached through it) and `$device.*`. The third, `$kernel.*`, arrives separately as a
  * KernelDefinition, because a kernel-scoped check is evaluated once per candidate while

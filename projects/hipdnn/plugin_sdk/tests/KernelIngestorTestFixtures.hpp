@@ -23,7 +23,7 @@
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
 
 /**
- * @file IngestorTestGraphs.hpp
+ * @file KernelIngestorTestFixtures.hpp
  * @brief Shared fixtures for the ingestor's SDK-level tests.
  *
  * Models the pack shape a real engine ships: two kernels that differ only in a ranking
@@ -35,9 +35,9 @@ namespace hipdnn_plugin_sdk::ingestor::testing
 
 constexpr const char* BLOCK_SIZE = "block_size";
 constexpr const char* DTYPE = "dtype";
-constexpr const char* GRAPH_MATCH_SYMBOL = "ingestor_test.graph_match";
-constexpr const char* KERNEL_MATCH_SYMBOL = "ingestor_test.kernel_match";
-constexpr const char* SCORE_SYMBOL = "ingestor_test.score";
+constexpr const char* GRAPH_MATCH_SYMBOL = "hipdnn.kernel_ingestor.test.graph_match";
+constexpr const char* KERNEL_MATCH_SYMBOL = "hipdnn.kernel_ingestor.test.kernel_match";
+constexpr const char* SCORE_SYMBOL = "hipdnn.kernel_ingestor.test.score";
 
 /// A minimal IGraph. The SDK-side machinery reads only the graph's identity, so the rest
 /// of the interface throws: a test that starts depending on graph contents should fail
@@ -205,7 +205,8 @@ inline std::unique_ptr<KernelIngestorStateManager<int>>
     std::vector<MatchDescriptor> matchers{
         {"umd_graph", "graph scoped", MatchScope::GRAPH, GRAPH_MATCH_SYMBOL},
         {"umd_kernel", "kernel scoped", MatchScope::KERNEL, KERNEL_MATCH_SYMBOL}};
-    std::vector<DispatchDescriptor> dispatches{{"udd", "test dispatch", "ingestor_test.dispatch"}};
+    std::vector<DispatchDescriptor> dispatches{
+        {"udd", "test dispatch", "hipdnn.kernel_ingestor.test.dispatch"}};
 
     KernelDescriptorPack pack;
     pack.id = "kdp";

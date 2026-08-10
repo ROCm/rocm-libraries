@@ -15,11 +15,11 @@
 #include "compilation/IKernelCompiler.hpp"
 #include "core/Handle.hpp"
 
-namespace hip_kernel_provider::ingestor_poc
+namespace hip_kernel_provider::kernel_ingestor_engine
 {
 
 /**
- * @brief The native dispatch behind this POC's UDD: sizes and launches a pointwise add.
+ * @brief The native dispatch behind this pack's UDD: sizes and launches a pointwise add.
  *
  * Holds the provider machinery a launch needs — a kernel compiler and the device
  * properties it compiles against — which is exactly why this interface exists: the SDK
@@ -75,6 +75,6 @@ private:
 /// The handler is registered by pointer and must outlive every plan built from it.
 void registerPointwiseAddDispatch(const PointwiseAddDispatchHandler& handler);
 
-} // namespace hip_kernel_provider::ingestor_poc
+} // namespace hip_kernel_provider::kernel_ingestor_engine
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

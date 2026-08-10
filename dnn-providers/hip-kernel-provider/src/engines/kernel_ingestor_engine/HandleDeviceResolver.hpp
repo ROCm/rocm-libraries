@@ -13,7 +13,7 @@
 
 #include "core/Handle.hpp"
 
-namespace hip_kernel_provider::ingestor_poc
+namespace hip_kernel_provider::kernel_ingestor_engine
 {
 
 /**
@@ -77,6 +77,6 @@ private:
     mutable std::unordered_map<hipdnn_plugin_sdk::ingestor::DeviceId, hipDeviceProp_t> _properties;
 };
 
-} // namespace hip_kernel_provider::ingestor_poc
+} // namespace hip_kernel_provider::kernel_ingestor_engine
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

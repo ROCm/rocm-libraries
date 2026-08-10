@@ -22,13 +22,13 @@
 #include "core/Container.hpp"
 #include "core/Handle.hpp"
 #include "engines/hip_mlops_engine/HipMlopsKernelCompiler.hpp"
-#include "ingestor_poc/NativeSymbolNames.hpp"
-#include "ingestor_poc/PointwiseAddDispatchHandler.hpp"
-#include "tests/ingestor_poc/PointwiseAddGraphs.hpp"
+#include "engines/kernel_ingestor_engine/packs/PointwiseAddDispatchHandler.hpp"
+#include "engines/kernel_ingestor_engine/packs/PointwiseAddSymbols.hpp"
+#include "tests/engines/kernel_ingestor_engine/packs/PointwiseAddTestGraphs.hpp"
 
 /**
  * @file TestPointwiseAddDispatchHandler.cpp
- * @brief The POC's dispatch: workspace sizing, and a real compile-and-launch.
+ * @brief The pack's dispatch: workspace sizing, and a real compile-and-launch.
  *
  * The launch tests run on device deliberately. A recorded no-op would exercise neither
  * the runtime compile nor the uid-to-pointer resolution, which are the two parts most
@@ -38,8 +38,8 @@ namespace
 {
 
 using namespace hip_kernel_provider;
-using namespace hip_kernel_provider::ingestor_poc;
-using namespace hip_kernel_provider::ingestor_poc::testing;
+using namespace hip_kernel_provider::kernel_ingestor_engine;
+using namespace hip_kernel_provider::kernel_ingestor_engine::testing;
 using hipdnn_plugin_sdk::ingestor::KernelDefinition;
 using hipdnn_plugin_sdk::ingestor::MatchContext;
 

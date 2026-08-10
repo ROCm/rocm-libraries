@@ -23,7 +23,7 @@
  * plan. In both cases the descriptor carries only a *symbol name*, never inline code,
  * and the provider resolves it from a registry that is part of its published contract.
  *
- * This skeleton uses that escape hatch as the only implementation: every UMD, UHD, and
+ * The first implementation uses that escape hatch throughout: every UMD, UHD, and
  * UDD names a symbol here rather than carrying an expression or a model. Replacing a
  * native symbol with real declarative data is a change to one descriptor field, not to
  * the ingestor — which is the property this arrangement exists to demonstrate.

@@ -14,10 +14,6 @@ add_library(
 
 add_subdirectory(engines)
 
-if(HIPDNN_ENABLE_KERNEL_INGESTOR)
-    add_subdirectory(ingestor_poc)
-endif()
-
 target_include_directories(hip_kernel_provider_impl PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_LIST_DIR}/../include

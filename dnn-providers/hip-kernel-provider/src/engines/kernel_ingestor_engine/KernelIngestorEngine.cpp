@@ -1,7 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include "ingestor_poc/PointwiseAddEngine.hpp"
+#include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
@@ -12,12 +12,12 @@
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
 
 #include "engines/hip_mlops_engine/HipMlopsKernelCompiler.hpp"
-#include "ingestor_poc/HandleDeviceResolver.hpp"
-#include "ingestor_poc/NativeMatchers.hpp"
-#include "ingestor_poc/PointwiseAddDispatchHandler.hpp"
-#include "ingestor_poc/PointwiseAddPack.hpp"
+#include "engines/kernel_ingestor_engine/HandleDeviceResolver.hpp"
+#include "engines/kernel_ingestor_engine/packs/PointwiseAddDispatchHandler.hpp"
+#include "engines/kernel_ingestor_engine/packs/PointwiseAddMatchers.hpp"
+#include "engines/kernel_ingestor_engine/packs/PointwiseAddPack.hpp"
 
-namespace hip_kernel_provider::ingestor_poc
+namespace hip_kernel_provider::kernel_ingestor_engine
 {
 
 namespace
@@ -128,6 +128,6 @@ std::unique_ptr<hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>> makePoint
     return std::make_unique<PointwiseAddEngine>();
 }
 
-} // namespace hip_kernel_provider::ingestor_poc
+} // namespace hip_kernel_provider::kernel_ingestor_engine
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

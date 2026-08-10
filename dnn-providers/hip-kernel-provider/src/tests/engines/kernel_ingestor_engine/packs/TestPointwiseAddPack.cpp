@@ -10,17 +10,17 @@
 
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 
-#include "ingestor_poc/NativeSymbolNames.hpp"
-#include "ingestor_poc/PointwiseAddPack.hpp"
+#include "engines/kernel_ingestor_engine/packs/PointwiseAddPack.hpp"
+#include "engines/kernel_ingestor_engine/packs/PointwiseAddSymbols.hpp"
 
 /**
  * @file TestPointwiseAddPack.cpp
- * @brief The POC's descriptor data: its shape, its cross-references, and its engine id.
+ * @brief The pack's descriptor data: its shape, its cross-references, and its engine id.
  */
 namespace
 {
 
-using namespace hip_kernel_provider::ingestor_poc;
+using namespace hip_kernel_provider::kernel_ingestor_engine;
 
 TEST(TestPointwiseAddPack, ShipsThreeKernelsCoveringTwoBlockSizesAndTwoDataTypes)
 {

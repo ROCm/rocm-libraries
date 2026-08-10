@@ -17,10 +17,10 @@
 #include <hipdnn_plugin_sdk/ingestor/LruCache.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
 
-#include "IngestorTestGraphs.hpp"
+#include "KernelIngestorTestFixtures.hpp"
 
 /**
- * @file TestIngestorSkeleton.cpp
+ * @file TestKernelIngestor.cpp
  * @brief Unit tests for the descriptor-driven kernel ingestor's SDK-side machinery.
  *
  * Covers the pieces every descriptor-backed engine depends on, independent of any
