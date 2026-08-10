@@ -35,7 +35,6 @@
 #include <roc/host_validation/adapters/hipblaslt/HipblasltDataInitialization.hpp>
 #include <cinttypes>
 #include <complex>
-#include <cstring>
 #include <hipblaslt/hipblaslt.h>
 #include <iostream>
 #include <omp.h>
@@ -1139,32 +1138,5 @@ inline void hipblaslt_init_zero(void* A, size_t start_offset, size_t end_offset,
     default:
         hipblaslt_cerr << "Error type in hipblaslt_init_zero" << std::endl;
         break;
-    }
-}
-/* ============================================================================================ */
-/*! \brief  matrix matrix initialization: copies from A into same position in B */
-template <typename T>
-void hipblaslt_copy_matrix(const T* A,
-                           T*       B,
-                           size_t   M,
-                           size_t   N,
-                           size_t   lda,
-                           size_t   ldb,
-                           size_t   stridea     = 0,
-                           size_t   strideb     = 0,
-                           size_t   batch_count = 1)
-{
-
-    for(size_t i_batch = 0; i_batch < batch_count; i_batch++)
-    {
-        size_t stride_offset_a = i_batch * stridea;
-        size_t stride_offset_b = i_batch * strideb;
-#pragma omp parallel for
-        for(size_t j = 0; j < N; ++j)
-        {
-            size_t offset_a = stride_offset_a + j * lda;
-            size_t offset_b = stride_offset_b + j * ldb;
-            memcpy(B + offset_b, A + offset_a, M * sizeof(T));
-        }
     }
 }
