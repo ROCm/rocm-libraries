@@ -269,6 +269,7 @@ pipeline {
         BUILD_GFX103 = "${env.BRANCH_NAME == 'develop' ? true : false}"
     }
     stages{
+      ws("/var/jenkins/workspace/${env.JOB_NAME}-${env.BUILD_NUMBER}") {
         stage("Determine CI Execution") {
             agent none
             steps {
@@ -310,15 +311,13 @@ pipeline {
             }
             agent none
             steps{
-                ws("${env.WORKSPACE}-${env.BUILD_NUMBER}"){
-                    script {
-                        loadCk()
-                        ck.runOnHealthyNode(rocmnode("nogpu")) {
-                            sh 'echo "The updated workspace is: $WORKSPACE"'
-                            deleteDir()
-                            ck.runStaticChecks()
-                            cleanWs()
-                        }
+                script {
+                    loadCk()
+                    ck.runOnHealthyNode(rocmnode("nogpu")) {
+                        sh 'echo "The updated workspace is: $WORKSPACE"'
+                        deleteDir()
+                        ck.runStaticChecks()
+                        cleanWs()
                     }
                 }
             }
@@ -928,6 +927,7 @@ pipeline {
                 }
             }
         }
+      }
     }
     post {
         success {
