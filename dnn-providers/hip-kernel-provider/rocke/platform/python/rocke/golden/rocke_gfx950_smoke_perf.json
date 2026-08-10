@@ -46,6 +46,13 @@
       "min_fraction": 0.5,
       "unit": "TFLOP/s"
     },
+    "conv_fwd_bf16_gfx950_N8H56W56C64K64R1S1": {
+      "baseline": 11.3,
+      "direction": "higher_is_better",
+      "metric": "best_tflops",
+      "min_fraction": 0.85,
+      "unit": "TFLOP/s"
+    },
     "gemm_fp16_rcr_2048x2048x2048": {
       "baseline": 399.52171307736805,
       "direction": "higher_is_better",
