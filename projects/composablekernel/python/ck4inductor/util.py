@@ -36,16 +36,19 @@ def _rocm_home():
     )
 
 
+def _include_roots(ck_dir, rocm_home):
+    return [
+        os.path.join(ck_dir, "include"),
+        os.path.join(ck_dir, "library", "include"),
+        os.path.join(rocm_home, "include"),
+    ]
+
+
 def include_roots():
     """The three -I roots the generated kernels are compiled against, in the
     same order as torch/_inductor/codegen/rocm/compile_command.py
     (_rocm_include_paths): CK first, ROCm last."""
-    ck_dir = _ck_dir()
-    return [
-        os.path.join(ck_dir, "include"),
-        os.path.join(ck_dir, "library", "include"),
-        os.path.join(_rocm_home(), "include"),
-    ]
+    return _include_roots(_ck_dir(), _rocm_home())
 
 
 def _try_compile(header, roots):
@@ -99,7 +102,12 @@ def check_headers(headers=_DIAGNOSTIC_HEADERS, try_compile=True):
           "ok": bool,   # every requested header path-resolved
         }
     """
-    roots = include_roots()
+    # Read each location once and derive everything from those values, so the
+    # roots probed and the roots reported cannot disagree if the environment
+    # changes mid-call.
+    ck_dir = _ck_dir()
+    rocm_home = _rocm_home()
+    roots = _include_roots(ck_dir, rocm_home)
     results = {}
     for hdr in headers:
         found_in = None
@@ -113,8 +121,8 @@ def check_headers(headers=_DIAGNOSTIC_HEADERS, try_compile=True):
             "compiled": _try_compile(hdr, roots) if try_compile else None,
         }
     return {
-        "ck_dir": _ck_dir(),
-        "rocm_home": _rocm_home(),
+        "ck_dir": ck_dir,
+        "rocm_home": rocm_home,
         "include_roots": roots,
         "headers": results,
         "ok": all(v["resolved"] for v in results.values()),
