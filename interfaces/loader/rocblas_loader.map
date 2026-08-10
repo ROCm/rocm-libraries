@@ -1,4 +1,4 @@
-{
+ROCBLAS_ABI_5 {
   global:
     rocblas_create_handle;
     rocblas_destroy_handle;

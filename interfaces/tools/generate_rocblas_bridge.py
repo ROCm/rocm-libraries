@@ -308,7 +308,7 @@ def write_link_test(functions: list[Function], path: Path) -> None:
 
 
 def write_version_script(functions: list[Function], path: Path) -> None:
-    lines = ["{", "  global:"]
+    lines = ["ROCBLAS_ABI_5 {", "  global:"]
     lines.extend(f"    {function.name};" for function in functions)
     lines.extend(["  local:", "    *;", "};", ""])
     path.write_text("\n".join(lines), encoding="utf-8")
