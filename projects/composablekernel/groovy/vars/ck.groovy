@@ -547,7 +547,7 @@ def runOnHealthyNode(String label, Closure body) {
         def attemptNode = null
         try {
             node(exclude(label, excluded)) {
-                ws("/var/jenkins/workspace/${env.JOB_NAME}-${env.BUILD_NUMBER}") {
+                ws("${env.WORKSPACE}-${env.BUILD_NUMBER}") {
                     sh 'echo "The updated workspace is: $WORKSPACE"'
                     attemptNode = env.NODE_NAME
                     echo "Node attempt ${attempt + 1}/${nodeAttempts} on ${attemptNode}"
