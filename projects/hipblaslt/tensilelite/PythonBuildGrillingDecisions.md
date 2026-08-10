@@ -2248,9 +2248,9 @@ and `TENSILELITE_ENABLE_CLIENT=OFF`. `hipblaslt-clients` retains its TensileLite
 host setting but restores `TENSILELITE_ENABLE_CLIENT=OFF`. The standalone
 `tensilelite` preset remains the explicit client-build preset.
 
-Replace the branch-added invariant tests which expect device generation to
-reject client/host-off configurations with focused positive configuration tests
-for these restored preset contracts. This supersedes Q113.
+Remove the branch-added invariant tests which expect device generation to
+reject client/host-off configurations. Existing device-build integration
+coverage validates the restored preset contracts. This supersedes Q113.
 
 ### Q127 — How do version consumers drive CMake targets?
 
