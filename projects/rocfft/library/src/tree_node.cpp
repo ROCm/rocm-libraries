@@ -20,7 +20,6 @@
 
 #include "tree_node.h"
 #include "../../shared/precision_type.h"
-#include "../../shared/ptrdiff.h"
 #include "function_pool.h"
 #include "kernel_launch.h"
 #include "logging.h"
@@ -105,28 +104,6 @@ FMKey LeafNode::GetKernelKey() const
         return FMKey::EmptyFMKey();
 
     return TreeNode::GetKernelKey();
-}
-
-bool LeafNode::KernelNeeds64BitIndexing() const
-{
-    for(auto io : {io_data_label::INPUT, io_data_label::OUTPUT})
-    {
-        const auto& io_stride     = io == io_data_label::INPUT ? inStride : outStride;
-        const auto& io_dist       = io == io_data_label::INPUT ? iDist : oDist;
-        const auto& io_array_type = io == io_data_label::INPUT ? inArrayType : outArrayType;
-        const auto& io_offset     = io == io_data_label::INPUT ? iOffset : oOffset;
-        const auto  io_length     = io == io_data_label::INPUT ? length : outputLength;
-        const auto  max_offset    = std::max(io_offset, io_offset);
-        // Hermitian interleaved data may be re-interpreted as real data internally.
-        if((max_offset + compute_ptrdiff(io_length, io_stride, batch, io_dist))
-               * (io_array_type == rocfft_array_type_hermitian_interleaved ? 2 : 1)
-           > static_cast<size_t>(INT32_MAX) + 1)
-        {
-            return true;
-        }
-    }
-
-    return false;
 }
 
 void LeafNode::GetKernelFactors()

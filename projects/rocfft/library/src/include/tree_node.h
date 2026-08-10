@@ -1002,22 +1002,18 @@ protected:
     {
         nodeType = NT_LEAF;
         scheme   = s;
-
-        // Determine if the kernel needs 64-bit indexing
-        kernel_needs_64bit_indexing = KernelNeeds64BitIndexing();
     }
 
 public:
-    bool                externalKernel              = false;
-    bool                need_twd_table              = false;
-    bool                twd_no_radices              = false;
-    bool                twd_attach_halfN            = false;
-    bool                kernel_needs_64bit_indexing = false;
-    std::vector<size_t> kernelFactors               = {};
-    std::vector<size_t> kernelFactorsPP = {}; // factors for off-direction partial pass(es)
-    size_t              bwd             = 1; // bwd, wgs, lds are for grid param lds_bytes
-    size_t              wgs             = 0;
-    size_t              lds             = 0;
+    bool                externalKernel   = false;
+    bool                need_twd_table   = false;
+    bool                twd_no_radices   = false;
+    bool                twd_attach_halfN = false;
+    std::vector<size_t> kernelFactors    = {};
+    std::vector<size_t> kernelFactorsPP  = {}; // factors for off-direction partial pass(es)
+    size_t              bwd              = 1; // bwd, wgs, lds are for grid param lds_bytes
+    size_t              wgs              = 0;
+    size_t              lds              = 0;
 
     void BuildTree_internal(SchemeTreeVec& child_scheme_trees = EmptySchemeTreeVec) final {
     } // nothing to do in leaf node

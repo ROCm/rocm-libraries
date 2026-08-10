@@ -90,8 +90,10 @@ RTCKernel::RTCGenerator RTCKernelTranspose::generate_from_node(const LeafNode&  
 
     bool tileAligned = node.length[0] % tileX == 0 && node.length[1] % tileX == 0;
 
-    // Determine index type based on whether the kernel needs 64-bit indexing
-    IndexType itype = node.kernel_needs_64bit_indexing ? IndexType::_64BIT : IndexType::_32BIT;
+    // Determine index type based on whether the kernel needs 64-bit indexing.
+    // This runs after buffer assignment, fusion and padding, so the node's
+    // lengths and strides are final.
+    IndexType itype = node.KernelNeeds64BitIndexing() ? IndexType::_64BIT : IndexType::_32BIT;
 
     TransposeSpecs specs{itype,
                          tileX,
