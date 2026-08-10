@@ -44,6 +44,34 @@ bool hasDestOverlap(const StinkyInstruction& inst, const StinkyRegister& reg) {
     return false;
 }
 
+enum class RegClass { Vgpr, Sgpr, Other };
+
+RegClass classifyReg(const StinkyRegister& reg) {
+    if (!reg.isRegister()) return RegClass::Other;
+
+    switch (reg.reg.type) {
+        case RegType::V:
+            return RegClass::Vgpr;
+        case RegType::S:
+        case RegType::SCC:
+        case RegType::VCC:
+        case RegType::VCC_LO:
+        case RegType::VCC_HI:
+        case RegType::EXEC:
+        case RegType::EXEC_LO:
+        case RegType::EXEC_HI:
+            return RegClass::Sgpr;
+        default:
+            return RegClass::Other;
+    }
+}
+
+bool isSamePropagatableClass(const StinkyRegister& dst, const StinkyRegister& src) {
+    const RegClass dstClass = classifyReg(dst);
+    const RegClass srcClass = classifyReg(src);
+    return dstClass != RegClass::Other && dstClass == srcClass;
+}
+
 class AsmMovePropagationPassImpl : public Pass {
    public:
     static constexpr const char* PassName = "AsmMovePropagationPass";
@@ -128,7 +156,7 @@ class AsmMovePropagationPassImpl : public Pass {
                 if (!oldSrc.isRegister()) continue;
 
                 StinkyRegister newSrc = resolveMappedSrc(oldSrc);
-                if (newSrc != oldSrc) {
+                if (newSrc != oldSrc && isSamePropagatableClass(oldSrc, newSrc)) {
                     inst->setSrcReg(i, newSrc);
                 }
             }
@@ -140,7 +168,7 @@ class AsmMovePropagationPassImpl : public Pass {
             if (!isEligibleMov(*inst)) continue;
             const StinkyRegister& dst = inst->getDestReg(0);
             const StinkyRegister& src = inst->getSrcReg(0);
-            if (dst != src) moveMap[dst] = src;
+            if (dst != src && isSamePropagatableClass(dst, src)) moveMap[dst] = src;
         }
 
         // Phase B - mov cleanup loop.

@@ -59,6 +59,18 @@ st.func @keep_move_when_potentially_liveout() {
   v2 = "st.v_add_f32"(v3, v4) { issueCycles = 1, latencyCycles = 5 }
 }
 
+#--- Do not propagate across register classes (v<-s).
+# CHECK-LABEL: @do_not_propagate_cross_class_move
+# CHECK: v0 = "st.v_mov_b32"(s1)
+# CHECK: v2 = "st.v_add_f32"(v0, v3)
+
+st.func @do_not_propagate_cross_class_move() {
+^entry:
+  v0 = "st.v_mov_b32"(s1) { issueCycles = 1, latencyCycles = 1 }
+  v2 = "st.v_add_f32"(v0, v3) { issueCycles = 1, latencyCycles = 5 }
+  v0 = "st.v_sub_f32"(v4, v5) { issueCycles = 1, latencyCycles = 5 }
+}
+
 #--- Remove identity move.
 # CHECK-LABEL: @remove_identity_move
 # CHECK-NOT: v_mov_b32
