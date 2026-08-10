@@ -557,7 +557,6 @@ def runOnHealthyNode(String label, Closure body) {
                 // adding here (otherwise preflight would wrongly demand a GPU).
                 preflight(!label.contains('nogpu'))
                 runInPlace(body, transientRetries)
-                }
             }
             return
         }
