@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -32,9 +32,9 @@
 
 #include "../../../config.hpp"
 
-#include "../thread/thread_operators.hpp"
-
 #include <rocprim/block/block_scan.hpp> // IWYU pragma: export
+
+#include _HIPCUB_STD_INCLUDE(functional)
 
 #include <type_traits>
 
@@ -121,12 +121,14 @@ public:
     }
 
     template<typename BlockPrefixCallbackOp>
-    HIPCUB_DEVICE inline
-    void InclusiveSum(T input, T& output, BlockPrefixCallbackOp& block_prefix_callback_op)
+    HIPCUB_DEVICE
+    inline void InclusiveSum(T input, T& output, BlockPrefixCallbackOp& block_prefix_callback_op)
     {
-        base_type::inclusive_scan(
-            input, output, temp_storage_, block_prefix_callback_op, ::hipcub::Sum()
-        );
+        base_type::inclusive_scan(input,
+                                  output,
+                                  temp_storage_,
+                                  block_prefix_callback_op,
+                                  _HIPCUB_STD::plus<>{});
     }
 
     template<int ITEMS_PER_THREAD>
@@ -145,13 +147,16 @@ public:
     }
 
     template<int ITEMS_PER_THREAD, typename BlockPrefixCallbackOp>
-    HIPCUB_DEVICE inline
-    void InclusiveSum(T(&input)[ITEMS_PER_THREAD], T(&output)[ITEMS_PER_THREAD],
-                      BlockPrefixCallbackOp& block_prefix_callback_op)
+    HIPCUB_DEVICE
+    inline void InclusiveSum(T (&input)[ITEMS_PER_THREAD],
+                             T (&output)[ITEMS_PER_THREAD],
+                             BlockPrefixCallbackOp& block_prefix_callback_op)
     {
-        base_type::inclusive_scan(
-            input, output, temp_storage_, block_prefix_callback_op, ::hipcub::Sum()
-        );
+        base_type::inclusive_scan(input,
+                                  output,
+                                  temp_storage_,
+                                  block_prefix_callback_op,
+                                  _HIPCUB_STD::plus<>{});
     }
 
     template<typename ScanOp>
@@ -241,12 +246,14 @@ public:
     }
 
     template<typename BlockPrefixCallbackOp>
-    HIPCUB_DEVICE inline
-    void ExclusiveSum(T input, T& output, BlockPrefixCallbackOp& block_prefix_callback_op)
+    HIPCUB_DEVICE
+    inline void ExclusiveSum(T input, T& output, BlockPrefixCallbackOp& block_prefix_callback_op)
     {
-        base_type::exclusive_scan(
-            input, output, temp_storage_, block_prefix_callback_op, ::hipcub::Sum()
-        );
+        base_type::exclusive_scan(input,
+                                  output,
+                                  temp_storage_,
+                                  block_prefix_callback_op,
+                                  _HIPCUB_STD::plus<>{});
     }
 
     template<int ITEMS_PER_THREAD>
@@ -265,13 +272,16 @@ public:
     }
 
     template<int ITEMS_PER_THREAD, typename BlockPrefixCallbackOp>
-    HIPCUB_DEVICE inline
-    void ExclusiveSum(T(&input)[ITEMS_PER_THREAD], T(&output)[ITEMS_PER_THREAD],
-                      BlockPrefixCallbackOp& block_prefix_callback_op)
+    HIPCUB_DEVICE
+    inline void ExclusiveSum(T (&input)[ITEMS_PER_THREAD],
+                             T (&output)[ITEMS_PER_THREAD],
+                             BlockPrefixCallbackOp& block_prefix_callback_op)
     {
-        base_type::exclusive_scan(
-            input, output, temp_storage_, block_prefix_callback_op, ::hipcub::Sum()
-        );
+        base_type::exclusive_scan(input,
+                                  output,
+                                  temp_storage_,
+                                  block_prefix_callback_op,
+                                  _HIPCUB_STD::plus<>{});
     }
 
     template<typename ScanOp>

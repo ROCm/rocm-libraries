@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -37,11 +37,10 @@
 #  pragma system_header
 #endif // no system header
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#if THRUST_HAS_HIP_COMPILER()
 
 #  include <thrust/system/hip/config.h>
 
-#  include <thrust/detail/minmax.h>
 #  include <thrust/detail/temporary_array.h>
 #  include <thrust/detail/type_traits.h>
 #  include <thrust/functional.h>
@@ -49,13 +48,14 @@
 #  include <thrust/system/hip/detail/par_to_seq.h>
 #  include <thrust/system/hip/detail/util.h>
 #  include <thrust/type_traits/is_contiguous_iterator.h>
+#  include <thrust/type_traits/unwrap_contiguous_iterator.h>
+
+#  include _THRUST_STD_INCLUDE(type_traits)
 
 // rocprim include
 #  include <rocprim/rocprim.hpp>
 
 #  include <cstdint>
-
-#  include _THRUST_STD_INCLUDE(type_traits)
 
 THRUST_NAMESPACE_BEGIN
 
@@ -130,11 +130,11 @@ adjacent_difference(execution_policy<Derived>& policy, InputIt first, InputIt la
   using UnwrapInputIt  = thrust::try_unwrap_contiguous_iterator_t<InputIt>;
   using UnwrapOutputIt = thrust::try_unwrap_contiguous_iterator_t<OutputIt>;
 
-  using InputValueT  = thrust::iterator_value_t<UnwrapInputIt>;
-  using OutputValueT = thrust::iterator_value_t<UnwrapOutputIt>;
+  using InputValueT  = thrust::detail::it_value_t<UnwrapInputIt>;
+  using OutputValueT = thrust::detail::it_value_t<UnwrapOutputIt>;
 
   constexpr bool can_compare_iterators =
-    _THRUST_STD::is_pointer<UnwrapInputIt>::value && _THRUST_STD::is_pointer<UnwrapOutputIt>::value
+    ::std::is_pointer<UnwrapInputIt>::value && ::std::is_pointer<UnwrapOutputIt>::value
     && std::is_same<InputValueT, OutputValueT>::value;
 
   auto first_unwrap  = thrust::try_unwrap_contiguous_iterator(first);
@@ -197,7 +197,7 @@ adjacent_difference(execution_policy<Derived>& policy, InputIt first, InputIt la
     {
       result = __adjacent_difference::adjacent_difference(policy, first, last, result, binary_op);
     }
-#  if !__THRUST_HAS_HIPRT__
+#  if defined(__HIP_DEVICE_COMPILE__)
     THRUST_DEVICE static void
     seq(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt& result, BinaryOp binary_op)
     {
@@ -205,7 +205,7 @@ adjacent_difference(execution_policy<Derived>& policy, InputIt first, InputIt la
     }
 # endif
   };
-#  if __THRUST_HAS_HIPRT__
+#  if !defined(__HIP_DEVICE_COMPILE__)
   workaround::par(policy, first, last, result, binary_op);
 #  else
   workaround::seq(policy, first, last, result, binary_op);
@@ -218,7 +218,7 @@ template <class Derived, class InputIt, class OutputIt>
 OutputIt THRUST_HOST_DEVICE
 adjacent_difference(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result)
 {
-  using input_type = typename iterator_traits<InputIt>::value_type;
+  using input_type = thrust::detail::it_value_t<InputIt>;
   return hip_rocprim::adjacent_difference(policy, first, last, result, minus<input_type>());
 }
 

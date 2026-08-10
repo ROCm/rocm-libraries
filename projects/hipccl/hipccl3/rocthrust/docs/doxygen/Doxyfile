@@ -944,7 +944,6 @@ WARN_LOGFILE           =
 # Note: If this tag is empty the current directory is searched.
 
 INPUT                  = ../../thrust \
-                         ../../thrust/async \
                          ../../thrust/iterator \
                          ../../thrust/mr \
                          ../../thrust/random \
@@ -2395,15 +2394,19 @@ INCLUDE_FILE_PATTERNS  =
 
 PREDEFINED             = THRUST_DOXYGEN_INVOKED \
                          THRUST_DEVICE_SYSTEM=5 \
-                         THRUST_CPP_DIALECT=2017 \
-                         "THRUST_INLINE_CONSTANT=inline constexpr" \
+                         THRUST_STD_VER=2017 \
+                         THRUST_GLOBAL_CONSTANT="inline constexpr" \
                          THRUST_NODISCARD=[[nodiscard]] \
                          THRUST_MR_DEFAULT_ALIGNMENT=alignof(std::max_align_t) \
                          __cpp_lib_remove_cvref=201711 \
                          THRUST_PREVENT_MACRO_SUBSTITUTION= \
                          THRUST_EXEC_CHECK_DISABLE= \
-                         THRUST_ALIAS_ATTRIBUTE(x)= \
+                         THRUST_HOST_DEVICE \
+                         THRUST_SUPPRESS_DEPRECATED_POP \
+                         THRUST_DIAG_SUPPRESS_MSVC(x)= \
                          THRUST_DEPRECATED_BECAUSE(x)= \
+                         THRUST_DEPRECATED= \
+                         THRUST_CONSTEXPR_CXX23 \
                          "__attribute__(x)=" \
                          "[[no_unique_address]]="
 

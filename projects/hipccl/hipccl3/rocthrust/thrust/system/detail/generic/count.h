@@ -18,6 +18,13 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/system/detail/generic/tag.h>
 
 THRUST_NAMESPACE_BEGIN
@@ -29,14 +36,14 @@ namespace generic
 {
 
 template <typename DerivedPolicy, typename InputIterator, typename EqualityComparable>
-THRUST_HOST_DEVICE typename thrust::iterator_traits<InputIterator>::difference_type
+THRUST_HOST_DEVICE thrust::detail::it_difference_t<InputIterator>
 count(thrust::execution_policy<DerivedPolicy>& exec,
       InputIterator first,
       InputIterator last,
       const EqualityComparable& value);
 
 template <typename DerivedPolicy, typename InputIterator, typename Predicate>
-THRUST_HOST_DEVICE typename thrust::iterator_traits<InputIterator>::difference_type
+THRUST_HOST_DEVICE thrust::detail::it_difference_t<InputIterator>
 count_if(thrust::execution_policy<DerivedPolicy>& exec, InputIterator first, InputIterator last, Predicate pred);
 
 } // end namespace generic

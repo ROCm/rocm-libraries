@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -40,7 +40,7 @@ template<typename InputIt, typename OutputIt, typename... Args>
 auto dispatch_adjacent_difference(std::true_type /*left*/,
                                   std::true_type /*copy*/,
                                   void* const    temporary_storage,
-                                  std::size_t&   storage_size,
+                                  size_t&        storage_size,
                                   const InputIt  input,
                                   const OutputIt output,
                                   Args&&... args)
@@ -56,7 +56,7 @@ template<typename InputIt, typename OutputIt, typename... Args>
 auto dispatch_adjacent_difference(std::false_type /*left*/,
                                   std::true_type /*copy*/,
                                   void* const    temporary_storage,
-                                  std::size_t&   storage_size,
+                                  size_t&        storage_size,
                                   const InputIt  input,
                                   const OutputIt output,
                                   Args&&... args)
@@ -72,7 +72,7 @@ template<typename InputIt, typename OutputIt, typename... Args>
 auto dispatch_adjacent_difference(std::true_type /*left*/,
                                   std::false_type /*copy*/,
                                   void* const   temporary_storage,
-                                  std::size_t&  storage_size,
+                                  size_t&       storage_size,
                                   const InputIt input,
                                   const OutputIt /*output*/,
                                   Args&&... args)
@@ -87,7 +87,7 @@ template<typename InputIt, typename OutputIt, typename... Args>
 auto dispatch_adjacent_difference(std::false_type /*left*/,
                                   std::false_type /*copy*/,
                                   void* const   temporary_storage,
-                                  std::size_t&  storage_size,
+                                  size_t&       storage_size,
                                   const InputIt input,
                                   const OutputIt /*output*/,
                                   Args&&... args)

@@ -14,10 +14,8 @@
  *  limitations under the License.
  */
 
-/*! \file normal_iterator.h
- *  \brief Defines the interface to an iterator class
- *         which adapts a pointer type.
- */
+//! \file normal_iterator.h
+//! \brief Defines the interface to an iterator class which adapts a pointer type.
 
 #pragma once
 
@@ -38,13 +36,13 @@
 THRUST_NAMESPACE_BEGIN
 namespace detail
 {
-
 template <typename Pointer>
 class normal_iterator : public iterator_adaptor<normal_iterator<Pointer>, Pointer>
 {
   using super_t = iterator_adaptor<normal_iterator<Pointer>, Pointer>;
 
 public:
+  // TODO(libhipcxx): replace inline with _CCCL_HIDE_FROM_ABI once libhipcxx gets ready
   inline normal_iterator() = default;
 
   THRUST_HOST_DEVICE normal_iterator(Pointer p)
@@ -52,23 +50,21 @@ public:
   {}
 
   template <typename OtherPointer>
-  THRUST_HOST_DEVICE normal_iterator(const normal_iterator<OtherPointer>& other,
-                                     thrust::detail::enable_if_convertible_t<OtherPointer, Pointer>* = 0)
+  THRUST_HOST_DEVICE
+  normal_iterator(const normal_iterator<OtherPointer>& other, enable_if_convertible_t<OtherPointer, Pointer>* = 0)
       : super_t(other.base())
   {}
-
-}; // end normal_iterator
+};
 
 template <typename Pointer>
-inline THRUST_HOST_DEVICE normal_iterator<Pointer> make_normal_iterator(Pointer ptr)
+THRUST_HOST_DEVICE normal_iterator<Pointer> make_normal_iterator(Pointer ptr)
 {
   return normal_iterator<Pointer>(ptr);
 }
-
 } // namespace detail
 
 template <typename T>
-struct proclaim_contiguous_iterator<thrust::detail::normal_iterator<T>> : true_type
+struct proclaim_contiguous_iterator<detail::normal_iterator<T>> : true_type
 {};
 
 THRUST_NAMESPACE_END
