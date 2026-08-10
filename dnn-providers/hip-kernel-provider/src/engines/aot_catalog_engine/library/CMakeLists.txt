@@ -87,7 +87,7 @@ endif()
 
 # The install root for the packaged catalog (mirrors the engine's baked default).
 set(_AOT_CATALOG_INSTALL_DIR
-    "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/hip_kernel_provider/aot_catalog")
+    "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/aot_catalog")
 
 # ---------------------------------------------------------------------------
 # _aot_arch_requested(<arch> <out_var>) -- is <arch> in this build's target set?

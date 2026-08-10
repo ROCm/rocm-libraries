@@ -587,7 +587,7 @@ Checklist when a kernel isn't picked:
 The engine resolves the catalog root in this order:
 
 1. **`HIPDNN_AOT_CATALOG_DIR`** env var, if set — explicit override, always wins.
-2. **Beside the loaded plugin `.so`** — `<plugin-dir>/hip_kernel_provider/aot_catalog`.
+2. **Beside the loaded plugin `.so`** — `<plugin-dir>/aot_catalog`.
    Both the build tree and the install tree place the catalog at exactly this offset, so a
    single relative path serves both. This is used **unconditionally** when the plugin's own
    directory can be determined, *even if that catalog is missing/empty*.
