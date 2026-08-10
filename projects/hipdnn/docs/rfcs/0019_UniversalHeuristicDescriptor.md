@@ -353,9 +353,17 @@ family), because the model is trained to rank exactly that catalog. Kernel selec
    UKD `priority`, then stable `id` — the same deterministic arbitration
    [RFC 0017 §5](0017_UniversalKernelDescriptor.md#5-matching-and-the-umd) defines. Declaration order
    is never used.
-6. **Fail open to a safe default.** If the model does not load, the feature contract mismatches, or the
-   scorer errors, selection degrades to `static_order` (priority + id). This keeps a bad or absent model
-   from breaking execution.
+6. **Degrade by failure class.** Two different failures get two different answers, split on whether the
+   model's scores are *absent* or *actively wrong* ([Section 6.3](#63-contract-enforcement)):
+   - **No information → fail open.** No model is declared, the artifact is missing, or the scorer errors
+     at evaluation. Selection degrades to `static_order` (priority + id). Nothing is known to be wrong,
+     priority order remains a valid answer, and a missing model must not break execution.
+   - **Broken contract → fail closed.** The feature contract mismatches — `features_hash` disagrees, a
+     `$kernel.*` reference is dangling, or the KMD pairing is incompatible. Here the model would score a
+     feature vector it was never trained on, so it ranks *confidently and wrongly* — worse than no model
+     at all. The UHD does not load and the engine **withdraws its catalog for this graph**, dropping out
+     of engine selection with a diagnostic. This is a mis-built package; it should be loud rather than
+     silently mis-ranking.
 
 The winner is a single UKD, which then dispatches through its pack's UDD
 ([RFC 0017 §6](0017_UniversalKernelDescriptor.md#6-dispatch-and-workspace)). A UHD only ranks; it never
@@ -508,8 +516,12 @@ generalizes to any ranker (LightGBM, ONNX, a custom scorer):
 3. **Vector → input.** Each adapter verifies its artifact accepts the resolved vector: `tree_data`
    checks feature count, `onnx` checks input arity/shape.
 
-Fail-closed on any mismatch. `features_hash` is optional for feature-less adapters (`static_order`)
-and advisory for `custom_library` that self-features.
+**All three checks fail closed** — a contract violation means the model's inputs are not the ones it was
+trained on, so its output is wrong rather than merely unavailable, and the engine withdraws its catalog
+rather than mis-rank it ([Section 5](#5-selection-flow) step 6). This is deliberately *not* the same
+response as a missing or erroring model, which fails open to `static_order`: the distinction is whether
+the scores are absent or actively misleading. `features_hash` is optional for feature-less adapters
+(`static_order`) and advisory for a `custom_library` that self-features.
 
 **Feature-vector portability.** Do we standardize one graph/device feature extractor so models are
 portable across UHDs, or keep it per-model via the spec? Recommendation: **per-model spec, shared source
@@ -834,39 +846,16 @@ the **matcher (UMD) pass** at the descriptor layer; that result **bubbles up** s
 are ruled out *before* the first plugin-policy layer ranks the survivors. So the descriptor/UHD layer
 runs (at least for applicability) *ahead of* engine selection, not strictly after it.
 
-- **Lazy load — but the trigger is *ranking*, not winning.** [RFC 0020 §8.1](0020_UniversalEngineDescriptor.md)
-  fixes the timing precisely: **engine identity is the eager exception** — every UED is parsed,
-  validated, and registered at plugin load so the host can enumerate engines — while the **UHD**, the
-  UDD, KDP bodies, and kernel sources all stay **lazy, loaded per graph** when one needs that engine's
-  catalog. So a UHD model is parsed on first use, not at startup. But "first use" is **any request that
-  ranks the engine's catalog — including one the engine goes on to lose**: a caller enumerating its
-  options queries knobs for every ranked engine, and answering a knob query means reporting the UHD's
-  top-ranked value as the default ([Section 3.2](#32-kmd-fields-and-knobs-as-a-view-onto-them)). So the
-  model must be cheap to load and cheap to rank with, not merely rare to touch. A provider that never
-  sees FMHA still never parses the FMHA model; a provider that *enumerates* FMHA engines does.
-- **Cache the loaded model — not on the handle.** After first load the parsed model / tree table /
-  native handle is cached for the **process**, not per `hipdnnHandle`.
-  [RFC 0017](0017_UniversalKernelDescriptor.md) moved caching off the handle deliberately: a handle can
-  be swapped between calls, rebound to another device, or destroyed while a plan built through it is
-  still in use, so handle lifetime has nothing to do with whether cached work is still valid.
-- **Cache results where the problem repeats,** using the descriptor system's cache key rather than a
-  bespoke one. [RFC 0017](0017_UniversalKernelDescriptor.md)'s applicability cache is keyed on
-  **`(engine id, graph id, device id)`** plus an **inventory generation counter**: the engine id because
-  the catalog is per-engine (without it one engine's catalog can answer for another in the same
-  provider), the device id because it is what `$device.*` resolved against, and the generation counter so
-  a newly dropped-in pack invalidates. Selection results should ride the same key — selection is a pure
-  function of (feature vector, candidate set), and that key already identifies both. **OPEN**: is the
-  in-process cache enough, or do we want a persistent cross-run cache (interacts with a future
-  [RFC 0007](0007_EngineSelectionHeuristicsFramework.md) "cache selector" policy)?
-- **Minimize init overhead.** Feature extraction is a fixed walk over the spec; inference is a handful
-  of tree evaluations per candidate. Keep the feature row and any scratch preallocated per session, as
-  [RFC 0017 §6](0017_UniversalKernelDescriptor.md#6-dispatch-and-workspace) does for launch. Overhead
-  is validated against the compiled-C baseline in
-  [RFC 0017 §12.1](0017_UniversalKernelDescriptor.md#121-testing-and-performance).
-
 ```
 Graph → Matcher pass (per engine) → Applicable engines → Policy ranking → Winner → Kernel selection
 ```
+
+This ordering is what makes the load-timing rule in [Section 9.2](#92-loading-and-caching) bite. Because
+applicability bubbles up before policy ranking, an engine's descriptor layer is touched for **every graph
+it might serve, including the ones it goes on to lose** — so "lazy" cannot mean "rare." The lazy-load
+trigger, the process-scoped model cache, and the shared
+`(engine id, graph id, device id)` + generation-counter result key are specified once in
+[Section 9.2](#92-loading-and-caching) and are not restated here.
 
 Additionally, the UHD's predictions can feed engine selection: the same layer that gates applicability
 can also report a *predicted performance*, so the policy can order engines by merit instead of a
@@ -1299,7 +1288,7 @@ using the parity and overhead checks of [RFC 0017 §12.1](0017_UniversalKernelDe
 |-------|-------------|-------|
 | 1 | `static_order` baseline | UHD schema + KDP membership + deterministic ranking. Every pack gets a working, model-free selector. Proves UED→UHD→child-UKD wiring end to end. |
 | 2 | `features_signature` + generic extractor | Inline signature, single extractor over shared namespaces, training↔runtime parity test, expression-op extension. |
-| 3 | `tree_data` + in-tree walker | Default shipping path. LightGBM model exported to data, evaluated by in-tree GBDT walker (reusing MIOpen's `LgbmForest`-style parser). Lands the real FMHA-fwd model. Adds lazy load + model cache. |
+| 3 | `tree_data` + in-tree walker | Default shipping path. LightGBM model exported to data, evaluated by a **new in-tree GBDT walker written for this work** — a bounded tree-table parser and evaluator with no external dependency. Lands the real FMHA-fwd model. Adds lazy load + model cache. |
 | 4 | Generation tool | Standalone tool that drives autotune across a shape corpus, trains a model, emits updated UED/UHD. |
 | 5 | `table` / CSV | Cheap bucketed heuristics for ops that don't warrant a model. |
 | 6 | `custom_library` | Compiled scorer `.so` for models the in-tree walker doesn't cover. Dependency + trust audit gated. |
@@ -1368,14 +1357,19 @@ land only when a concrete need appears.
 
 ### Structural
 
-5. **Overlapping packs.** Under the KDP model, two *packs* can match one graph. Their child kernels
-   are ranked by *different* UHDs whose scores are not comparable. Options: (a) forbid overlapping
-   packs for one engine — extend the deterministic-arbitration duplicate-match check in
-   [RFC 0017 §5](0017_UniversalKernelDescriptor.md#5-matching-and-the-umd) to overlapping-but-not-identical;
-   (b) rank each pack's group by its own UHD, then compare winners by `priority` only; (c) require
-   comparable `score.units` to compare across packs. Recommendation: (a) for v1 — packs for one engine
-   should partition the graph space, not overlap.
-   *(Impacts [Section 5](#5-selection-flow).)*
+5. **Independently-authored packs joining one engine.** The catalog is engine-scoped and one UHD ranks
+   the union across packs ([Section 5](#5-selection-flow)), so overlapping packs do *not* produce
+   incomparable scores — but they do produce a catalog the model may never have seen. A UHD trained on
+   pack A's kernels is asked to rank A ∪ B when B is dropped in later, and nothing in the load-time
+   contract check catches it: the `features_signature` still resolves, because B's kernels fill the same
+   KMD fields. The model silently extrapolates. Options: (a) adding a pack to an engine requires
+   republishing that engine's UHD, retrained over the union — safe, but couples pack authors to the
+   engine owner; (b) accept extrapolation, on the theory that a model over `$kernel.*` metadata
+   generalizes to unseen kernels with in-distribution metadata, and add a training-coverage warning to
+   the trace when a scored candidate falls outside the trained range; (c) restrict v1 to a single
+   authoring owner per engine. Recommendation: (a) for v1, with (b)'s coverage warning as the detection
+   mechanism — it is the only option that keeps drop-in packs honest about what the model actually knows.
+   *(Impacts [Section 5](#5-selection-flow), [Section 8.2](#82-model-updates), [Section 16](#16-risks).)*
 
 6. **Engine estimate (A) vs. config UHD (B).** Is A a distinct trained model, or derived from B as
    max predicted score over candidates? Distinct is cheaper for the quick policy (skips enumeration);
