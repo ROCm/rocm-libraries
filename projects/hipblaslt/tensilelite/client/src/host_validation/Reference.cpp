@@ -578,6 +578,8 @@ namespace TensileLite
                     accumulatorType);
                 request.epilogue.alpha = alpha;
                 request.epilogue.beta = beta;
+                if (!useStandaloneEpilogue && typeD == ScalarType::Int8)
+                    request.epilogue.outputConversion = OutputConversion::SaturatingInt8;
                 if (!useStandaloneEpilogue) {
                     request.epilogue.activation = activation;
                     request.epilogue.activationParameter0 = activationParameter0;
@@ -663,6 +665,8 @@ namespace TensileLite
                     epilogue.activationParameter0 = activationParameter0;
                     epilogue.activationParameter1 = activationParameter1;
                     epilogue.outputScale = outputScale;
+                    if (typeD == ScalarType::Int8)
+                        epilogue.outputConversion = OutputConversion::SaturatingInt8;
                     epilogue.outputSelection = request.outputSelection;
                     std::optional<Tensor> gradientAuxiliary;
                     std::optional<Tensor> biasWorkspace;
