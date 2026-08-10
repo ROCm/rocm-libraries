@@ -6,31 +6,14 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
-#include <roc/host_validation/detail/reference_common.hpp>
+#include <roc/host_validation/softmax.hpp>
 #include <stdexcept>
 #include <utility>
 #include <vector>
 
+#include "reference_common.hpp"
+
 namespace roc::host_validation {
-struct SoftmaxProblem {
-    SoftmaxProblem(TensorView inputValues, MutableTensorView outputValues, size_t softmaxAxis,
-                   ScalarType accumulator)
-        : input(std::move(inputValues)),
-          output(std::move(outputValues)),
-          axis(softmaxAxis),
-          accumulatorType(accumulator) {}
-
-    TensorView input;
-    MutableTensorView output;
-    size_t axis;
-    ScalarType accumulatorType;
-};
-
-struct SoftmaxRunInfo {
-    size_t slicesComputed = 0;
-    size_t elementsComputed = 0;
-};
-
 namespace detail {
 inline void validateSoftmax(const SoftmaxProblem& problem) {
     if (problem.input.shape() != problem.output.shape())
@@ -93,11 +76,4 @@ SoftmaxRunInfo referenceSoftmaxTyped(const SoftmaxProblem& problem) {
     };
 }
 }  // namespace detail
-
-inline SoftmaxRunInfo referenceSoftmax(const SoftmaxProblem& problem) {
-    detail::validateSoftmax(problem);
-    if (problem.accumulatorType == ScalarType::Float32)
-        return detail::referenceSoftmaxTyped<float>(problem);
-    return detail::referenceSoftmaxTyped<double>(problem);
-}
 }  // namespace roc::host_validation

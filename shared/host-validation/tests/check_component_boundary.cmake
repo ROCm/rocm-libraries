@@ -66,6 +66,20 @@ if(EXISTS
     )
 endif()
 
+foreach(_private_header
+        reference_common
+        reference_softmax
+        reference_layer_norm)
+    if(EXISTS
+       "${HOST_VALIDATION_SOURCE_DIR}/include/roc/host_validation/detail/${_private_header}.hpp"
+    )
+        message(
+            FATAL_ERROR
+            "${_private_header} implementation must remain behind the compiled component boundary."
+        )
+    endif()
+endforeach()
+
 file(
     GLOB_RECURSE
     component_sources
