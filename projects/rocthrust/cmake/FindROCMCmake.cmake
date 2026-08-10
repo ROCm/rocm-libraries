@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright 2021-2026 Advanced Micro Devices, Inc.
+# Copyright 2021-2025 Advanced Micro Devices, Inc.
 # ########################################################################
 
 if(NOT DEPENDENCIES_FORCE_DOWNLOAD)
@@ -18,7 +18,7 @@ if(NOT ROCmCMakeBuildTools_FOUND)
   FetchContent_Declare(
     rocm-cmake
     GIT_REPOSITORY https://github.com/ROCm/rocm-cmake.git
-    GIT_TAG        rocm-7.2.4
+    GIT_TAG        rocm-6.4.4
     ${SOURCE_SUBDIR_ARG}
   )
   FetchContent_MakeAvailable(rocm-cmake)
