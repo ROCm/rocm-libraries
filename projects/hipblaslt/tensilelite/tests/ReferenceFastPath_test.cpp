@@ -415,6 +415,54 @@ TEST(ReferenceRuntimeCanonical, HandlesInt32Accumulation)
     EXPECT_EQ(d, (std::vector<int32_t>{23, 34}));
 }
 
+TEST(ReferenceRuntimeCanonical, SaturatesInt8Destination)
+{
+    auto problem = makePackedProblem(rocisa::DataType::Int8,
+                                     rocisa::DataType::Int8,
+                                     rocisa::DataType::Int8,
+                                     1,
+                                     4,
+                                     1);
+    problem.setAlphaType(rocisa::DataType::Int32);
+    problem.setBetaType(rocisa::DataType::Int32);
+
+    std::vector<int8_t> a{100};
+    std::vector<int8_t> b{2, -2, 1, -1};
+    std::vector<int8_t> c(4, 0);
+    std::vector<int8_t> d(4, 0);
+
+    ContractionInputs inputs(
+        a.data(), b.data(), c.data(), d.data(), int32_t(1), int32_t(0));
+    ASSERT_TRUE(tryRuntimeCanonicalGemm(problem, inputs, /*elementsToValidate=*/-1));
+    EXPECT_EQ(d, (std::vector<int8_t>{127, -128, 100, -100}));
+}
+
+TEST(ReferenceStandaloneEpilogue, SaturatesInt8Destination)
+{
+    auto problem = makePackedProblem(rocisa::DataType::Int8,
+                                     rocisa::DataType::Int8,
+                                     rocisa::DataType::Int8,
+                                     1,
+                                     1,
+                                     1);
+    problem.setAlphaType(rocisa::DataType::Int32);
+    problem.setBetaType(rocisa::DataType::Int32);
+    problem.setUseE(true);
+    problem.setE(rocisa::DataType::Int8, problem.d().sizes(), problem.d().strides(), true);
+
+    std::vector<int8_t> a{100};
+    std::vector<int8_t> b{2};
+    std::vector<int8_t> c{0};
+    std::vector<int8_t> d{0};
+    std::vector<int8_t> e{0};
+
+    ContractionInputs inputs(
+        a.data(), b.data(), c.data(), d.data(), int32_t(1), int32_t(0));
+    inputs.e = e.data();
+    ASSERT_TRUE(tryRuntimeCanonicalGemm(problem, inputs, /*elementsToValidate=*/-1));
+    EXPECT_EQ(d[0], 127);
+}
+
 TEST(ReferenceRuntimeCanonical, RepresentsMirroredBoundIndexAsNegativeStride)
 {
     const size_t M = 2;
