@@ -60,8 +60,11 @@ ISA_GFX1250 = IsaVersion(12, 5, 0)
 
 # The two capabilities v0 lacks. Absent from the probed table, so every consumer
 # reads them with a True default and no other architecture changes behavior.
+# HasTDMMulticast is architectural (archCaps); HasWMMA_f4_32x16 is an opcode (asmCaps).
 CAP_MULTICAST = "HasTDMMulticast"
 CAP_FP4_32X16 = "HasWMMA_f4_32x16"
+# The one probed archCap v0 overrides (present in the table, flipped True->False).
+CAP_XCNT = "RequiresXCntForVolatileVMEM"
 
 FP4_32X16_REASON = "does not support the fp4 32x16 matrix-instruction shape"
 
@@ -192,7 +195,7 @@ def _synthetic_iim():
 def test_overrides_turn_off_both_v0_capabilities():
     iim = _synthetic_iim()
     applyArchCapOverrides(iim, [GFX1250V0])
-    assert iim[ISA_GFX1250].asmCaps[CAP_MULTICAST] is False
+    assert iim[ISA_GFX1250].archCaps[CAP_MULTICAST] is False
     assert iim[ISA_GFX1250].asmCaps[CAP_FP4_32X16] is False
 
 
@@ -201,7 +204,7 @@ def test_v1_leaves_both_capabilities_at_their_default():
     ``get(..., True)`` default keeps today's behavior."""
     iim = _synthetic_iim()
     applyArchCapOverrides(iim, [GFX1250])
-    assert CAP_MULTICAST not in iim[ISA_GFX1250].asmCaps
+    assert CAP_MULTICAST not in iim[ISA_GFX1250].archCaps
     assert CAP_FP4_32X16 not in iim[ISA_GFX1250].asmCaps
 
 
@@ -236,7 +239,7 @@ def test_predicated_stepping_still_gets_its_overrides(spec):
     every solution under the shipping stepping's capabilities."""
     iim = _synthetic_iim()
     applyArchCapOverrides(iim, [spec])
-    assert iim[ISA_GFX1250].asmCaps[CAP_MULTICAST] is False
+    assert iim[ISA_GFX1250].archCaps[CAP_MULTICAST] is False
     assert iim[ISA_GFX1250].asmCaps[CAP_FP4_32X16] is False
 
 
@@ -315,18 +318,26 @@ def test_probe_leaves_both_capabilities_absent_for_the_override_to_set(gfx1250_i
     """The premise the ``True`` defaults in Solution rest on: the real assembler
     probe never reports these keys, so v1 is byte-identical to before the split
     and v0 is the only architecture that changes behavior."""
-    assert CAP_MULTICAST not in gfx1250_iim[ISA_GFX1250].asmCaps
+    assert CAP_MULTICAST not in gfx1250_iim[ISA_GFX1250].archCaps
     assert CAP_FP4_32X16 not in gfx1250_iim[ISA_GFX1250].asmCaps
 
 
 def test_overrides_apply_on_top_of_really_probed_capabilities(gfx1250v0_iim):
     """Probe-then-override composed on a real capability map, not a synthetic one."""
-    asmCaps = gfx1250v0_iim[ISA_GFX1250].asmCaps
-    assert asmCaps[CAP_MULTICAST] is False
-    assert asmCaps[CAP_FP4_32X16] is False
+    info = gfx1250v0_iim[ISA_GFX1250]
+    assert info.archCaps[CAP_MULTICAST] is False
+    assert info.asmCaps[CAP_FP4_32X16] is False
     # Probed entries survive the override, which only adds the declared keys.
-    assert asmCaps["SupportedISA"]
-    assert "HasWMMA" in asmCaps
+    assert info.asmCaps["SupportedISA"]
+    assert "HasWMMA" in info.asmCaps
+
+
+def test_codegen_xcnt_delta_overrides_a_really_probed_archcap(gfx1250_iim):
+    """RequiresXCntForVolatileVMEM overrides a key rocisa really probes, so a typo
+    there would be a silent no-op rather than a behavior change. (HasTDMMulticast
+    also lives in archCaps but is a fill-missing key, guarded by the absent-key
+    test above.)"""
+    assert CAP_XCNT in gfx1250_iim[ISA_GFX1250].archCaps
 
 
 @pytest.fixture(scope="module")
@@ -673,6 +684,92 @@ def test_gfx1250_emits_multicast_gfx1250v0_does_not(gfx1250_cxx):
 
 
 # =========================================================================== #
+# XNACK-replay drain (``s_wait_xcnt``). Unlike multicast, this is a codegen-time
+# arch capability, not a solution parameter, so it does not travel through
+# ``applyArchCapOverrides``/``isaInfoMap``. The kernel writer reads
+# ``RequiresXCntForVolatileVMEM`` straight from the rocisa singleton
+# (``ti.getArchCaps()``), which is keyed by ISA (12,5,0) and cannot tell
+# gfx1250's steppings apart. The build-wide stepping name
+# (``globalParameters["StinkyTofuArchName"]``) is the only v0 signal at that
+# seam, and v0 silicon does not need the drain. The test derives on the
+# gfx1250 (v1) capability map: the only thing under test is the codegen seam, so
+# the *same* kernel must drop the drain purely from the stepping signal.
+# =========================================================================== #
+_STREAMK_CONFIG = os.path.join(
+    _CODEGEN_DIR, "data", "test_data", "_designed", "gfx1250", "streamk.yaml"
+)
+
+# StreamK tags every XNACK-replay drain with this fixed comment (its
+# ``preVolatileVmem`` call sites in Components/StreamK.py). Counting the marker
+# isolates the drain exactly, independent of any other ``s_wait_xcnt`` a pass
+# might emit, so the v1-vs-v0 comparison cannot be confounded.
+_XCNT_DRAIN_MARKER = "drain xnacks before volatile VMEM"
+
+
+def _emit_streamk_srcs(stepping):
+    """Emit the gfx1250 StreamK config's kernels, optionally under a v0 stepping.
+
+    Mirrors ``config_harness.emit_kernels_from_config`` but sets
+    ``globalParameters["StinkyTofuArchName"]`` inside the isolated globals so the
+    codegen seam sees the stepping (the harness never sets it). Returns the list
+    of canonicalized assembly strings.
+    """
+    if _CODEGEN_DIR not in sys.path:
+        sys.path.insert(0, _CODEGEN_DIR)
+    import codegen_harness as ch
+    import config_harness as cfgh
+    from Tensile.Common.GlobalParameters import globalParameters
+    from Tensile.Common.Types import DebugConfig
+    from Tensile.KernelWriterAssembly import KernelWriterAssembly
+    from Tensile.SolutionStructs.Naming import getKernelFileBase
+    from Tensile.TensileCreateLibrary.Run import (
+        generateKernelObjectsFromSolutions,
+        processKernelSource,
+    )
+
+    assembler, iim = cfgh._toolchain_for(GFX1250)
+    if not iim[ISA_GFX1250].asmCaps["SupportedISA"]:
+        pytest.skip("amdclang++ in this environment does not support gfx1250")
+
+    srcs = []
+    with cfgh._isolated_globals_with_isa(iim):
+        if stepping:
+            globalParameters["StinkyTofuArchName"] = stepping
+        sols = cfgh._solutions_from_config_unguarded(
+            _STREAMK_CONFIG, assembler, iim, limit_solutions=8
+        )
+        kernels = generateKernelObjectsFromSolutions(sols)
+        kernels = sorted(kernels, key=lambda k: getKernelFileBase(False, k))[:8]
+        kwa = KernelWriterAssembly(assembler, DebugConfig())
+        for kernel in kernels:
+            ri = ch._init_rocisa_for(kernel)
+            ch._prepare_kernel(kernel, False)
+            res = processKernelSource(
+                kwa, ri.getData(), ri.getOutputOptions(), False, kernel
+            )
+            srcs.append(ch.canonicalize_asm(res.src))
+    return srcs
+
+
+def test_gfx1250v0_streamk_drops_the_xcnt_drain(gfx1250_cxx):
+    """The XNACK-replay drain is gated on ``RequiresXCntForVolatileVMEM``, which
+    the codegen seam clears for v0 only. Emitting the *same* StreamK kernel under
+    v1 vs v0 and counting the drain marker isolates exactly the drain: v1 must
+    keep it (the ``> 0`` check guards against a vacuous pass) and v0 must drop
+    every one."""
+    v1_drains = sum(s.count(_XCNT_DRAIN_MARKER) for s in _emit_streamk_srcs(stepping=None))
+    v0_drains = sum(s.count(_XCNT_DRAIN_MARKER) for s in _emit_streamk_srcs(stepping=GFX1250V0))
+    assert v1_drains > 0, (
+        "gfx1250 (v1) StreamK should emit the XNACK-replay drain; without it "
+        "the v0 assertion below would pass vacuously"
+    )
+    assert v0_drains == 0, (
+        f"gfx1250 v0 must drop every RequiresXCntForVolatileVMEM drain "
+        f"(v1 drains={v1_drains}, v0 drains={v0_drains})"
+    )
+
+
+# =========================================================================== #
 # Round-trip. The stepping lives in the build's capability map, not in the
 # solution, so a re-parsed solution re-derives Multicast from whichever map the
 # reading build uses. That is inherent to having no solution parameter; this
@@ -831,9 +928,9 @@ def test_tensile_entry_point_applies_the_v0_overrides(
         [config, str(tmp_path / "out"), "--gpu-targets", GFX1250V0]
     )
 
-    asmCaps = captured["isaInfoMap"][ISA_GFX1250].asmCaps
-    assert asmCaps[CAP_MULTICAST] is False
-    assert asmCaps[CAP_FP4_32X16] is False
+    info = captured["isaInfoMap"][ISA_GFX1250]
+    assert info.archCaps[CAP_MULTICAST] is False
+    assert info.asmCaps[CAP_FP4_32X16] is False
 
 
 def test_tensile_entry_point_leaves_v1_capabilities_untouched(
@@ -847,9 +944,9 @@ def test_tensile_entry_point_leaves_v1_capabilities_untouched(
 
     TensileModule.Tensile([config, str(tmp_path / "out"), "--gpu-targets", GFX1250])
 
-    asmCaps = captured["isaInfoMap"][ISA_GFX1250].asmCaps
-    assert CAP_MULTICAST not in asmCaps
-    assert CAP_FP4_32X16 not in asmCaps
+    info = captured["isaInfoMap"][ISA_GFX1250]
+    assert CAP_MULTICAST not in info.archCaps
+    assert CAP_FP4_32X16 not in info.asmCaps
 
 
 # --------------------------------------------------------------------------- #
@@ -869,9 +966,9 @@ def test_config_architecture_selects_the_stepping(
 
     TensileModule.Tensile([config, str(tmp_path / "out")])
 
-    asmCaps = captured["isaInfoMap"][ISA_GFX1250].asmCaps
-    assert asmCaps[CAP_MULTICAST] is False
-    assert asmCaps[CAP_FP4_32X16] is False
+    info = captured["isaInfoMap"][ISA_GFX1250]
+    assert info.archCaps[CAP_MULTICAST] is False
+    assert info.asmCaps[CAP_FP4_32X16] is False
     assert captured["archNames"] == [GFX1250V0]
 
 
@@ -886,9 +983,9 @@ def test_config_architecture_of_the_shipping_stepping_adds_nothing(
 
     TensileModule.Tensile([config, str(tmp_path / "out")])
 
-    asmCaps = captured["isaInfoMap"][ISA_GFX1250].asmCaps
-    assert CAP_MULTICAST not in asmCaps
-    assert CAP_FP4_32X16 not in asmCaps
+    info = captured["isaInfoMap"][ISA_GFX1250]
+    assert CAP_MULTICAST not in info.archCaps
+    assert CAP_FP4_32X16 not in info.asmCaps
 
 
 def test_gpu_targets_overrides_the_config_architecture(
@@ -902,8 +999,8 @@ def test_gpu_targets_overrides_the_config_architecture(
 
     TensileModule.Tensile([config, str(tmp_path / "out"), "--gpu-targets", GFX1250])
 
-    asmCaps = captured["isaInfoMap"][ISA_GFX1250].asmCaps
-    assert CAP_MULTICAST not in asmCaps
+    info = captured["isaInfoMap"][ISA_GFX1250]
+    assert CAP_MULTICAST not in info.archCaps
     assert captured["archNames"] == [GFX1250]
 
 
@@ -920,7 +1017,7 @@ def test_config_architecture_for_an_isa_not_being_built_is_ignored(
     TensileModule.Tensile([config, str(tmp_path / "out")])
 
     assert captured["archNames"] == []
-    assert CAP_MULTICAST not in captured["isaInfoMap"][ISA_GFX1250].asmCaps
+    assert CAP_MULTICAST not in captured["isaInfoMap"][ISA_GFX1250].archCaps
 
 
 def test_config_architecture_naming_a_stepping_of_another_isa_is_rejected(
@@ -1142,9 +1239,9 @@ def test_createlibrary_entry_point_applies_the_v0_overrides(
     reaches the capability map by a different route than ``Tensile()``."""
     captured = _run_createlibrary(monkeypatch, tmp_path, GFX1250V0)
 
-    asmCaps = captured["isaInfoMap"][ISA_GFX1250].asmCaps
-    assert asmCaps[CAP_MULTICAST] is False
-    assert asmCaps[CAP_FP4_32X16] is False
+    info = captured["isaInfoMap"][ISA_GFX1250]
+    assert info.archCaps[CAP_MULTICAST] is False
+    assert info.asmCaps[CAP_FP4_32X16] is False
 
 
 def test_createlibrary_entry_point_normalizes_the_compiler_target(
@@ -1164,9 +1261,9 @@ def test_createlibrary_entry_point_leaves_v1_capabilities_untouched(
     entry point is byte-identical to before the split as well."""
     captured = _run_createlibrary(monkeypatch, tmp_path, GFX1250)
 
-    asmCaps = captured["isaInfoMap"][ISA_GFX1250].asmCaps
-    assert CAP_MULTICAST not in asmCaps
-    assert CAP_FP4_32X16 not in asmCaps
+    info = captured["isaInfoMap"][ISA_GFX1250]
+    assert CAP_MULTICAST not in info.archCaps
+    assert CAP_FP4_32X16 not in info.asmCaps
     assert captured["cmdlineArchs"] == [GFX1250]
 
 

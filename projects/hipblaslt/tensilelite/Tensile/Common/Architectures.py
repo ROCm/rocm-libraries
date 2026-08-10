@@ -82,22 +82,22 @@ gfxVariantMap = {
     "gfx950": ["gfx950:xnack+", "gfx950:xnack-"],
 }
 
-# Capability deltas the assembler cannot be probed for.
-#
-# gfx1250's two steppings report the same ISA (12,5,0) and share one compiler
-# target, so probing by trial assembly at `-mcpu=gfx1250` cannot tell them apart.
-# Declaring v0's deltas here and layering them onto the probed table keeps the
-# stepping out of the solution parameters: one build is one stepping, and the
-# difference arrives at solution derivation as an ordinary capability read.
-#
-# Every key must be absent from the probed table, so that consumers read it with
-# a `True` default and only v0 changes behavior.
+# The single declaration point for gfx1250 v0's capability deltas. Both ASIC
+# revisions share ISA (12,5,0) and assemble at `-mcpu=gfx1250`, so the probe
+# can't tell them apart; one build is one revision, so the deltas are declared
+# here and layered onto the probed table. Keys are grouped by capability nature
+# (instruction-shaped vs architectural), matching the dict each consumer reads.
 ARCH_CAP_OVERRIDES = {
     "gfx1250v0": {
-        # v0 has no TDM-multicast and no fp4 32x16 WMMA opcode.
+        # Instruction-shaped: v0 lacks the fp4 32x16 WMMA opcode.
         "asmCaps": {
-            "HasTDMMulticast": False,
             "HasWMMA_f4_32x16": False,
+        },
+        # Architectural: v0 has no TDM-multicast, and does not need the
+        # XNACK-replay drain before volatile/atomic VMEM.
+        "archCaps": {
+            "HasTDMMulticast": False,
+            "RequiresXCntForVolatileVMEM": False,
         },
     },
 }
