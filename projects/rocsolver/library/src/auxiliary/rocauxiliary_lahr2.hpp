@@ -90,9 +90,9 @@ ROCSOLVER_KERNEL void __launch_bounds__(DIM_X* DIM_Y)
 
         components:
             y  = Y(k:mm-1, c)
-            A1 = A(k:mm-1, c+1:mm-1)
+            A1 = A(k:mm-1, c+1:mm-k)
             A2 = Y(k:mm-1, 0:c-1)
-            x1 = A(k+c:mm-k, c)
+            x1 = A(k+c:mm-1, c)
             x2 = F(0:c-1, c)
             t  = tau(c)
 
@@ -100,7 +100,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(DIM_X* DIM_Y)
             y = t * (A1 * x1 - A2 * x2)
     ------------------------ */
     int m = mm - k;
-    int n = std::max((mm - k - c), c);
+    int n1 = mm - k - c;
+    int n2 = c;
     T* y = Y + idx2D(k, c, ldy);
     T* A1 = A + idx2D(k, c + 1, lda);
     int lda1 = lda;
@@ -119,16 +120,18 @@ ROCSOLVER_KERNEL void __launch_bounds__(DIM_X* DIM_Y)
     {
         ac = 0;
 
-        for(int j = idc; j < n; j += totalthsc)
+        for(int j = idc; j < n1; j += totalthsc)
         {
             // A1 * x1
-            if(i < m && j < mm - k - c)
-                ac += A1[i + j * lda1] * x1[j];
-
-            // A2 * x2
-            if(i < m && j < c)
-                ac -= A2[i + j * lda2] * x2[j];
+            ac += A1[i + j * lda1] * x1[j];
         }
+
+        for(int j = idc; j < n2; j += totalthsc)
+        {
+            // A2 * x2
+            ac -= A2[i + j * lda2] * x2[j];
+        }
+
         acs[tidr + tidc * DIM_X] = ac;
         __syncthreads();
 
