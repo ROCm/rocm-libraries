@@ -12,10 +12,10 @@ comparison used by ROCm library clients and tests.
 - `roc::host-validation`
   - Transitional validation operations layered on the tensor core.
   - Exports `axpby.hpp`, `comparison.hpp`, `epilogue.hpp`, `generation.hpp`,
-    `gemm.hpp`, `reduction.hpp`, `softmax.hpp`, `structured_sparsity.hpp`, and the
-    convenience umbrella `validation.hpp`.
+    `gemm.hpp`, `layer_norm.hpp`, `reduction.hpp`, `softmax.hpp`,
+    `structured_sparsity.hpp`, and the convenience umbrella `validation.hpp`.
   - Exposes runtime-typed generation, tensor AXPBY, reference GEMM, reference
-    epilogues, reductions, softmax, structured sparsity, and comparison.
+    epilogues, LayerNorm, reductions, softmax, structured sparsity, and comparison.
   - Implementation headers live under `roc/host_validation/detail/`; consumers
     include the operation header they need or `validation.hpp`.
 - `roc::host-validation-blas`
@@ -214,6 +214,25 @@ SoftmaxRunInfo run = referenceSoftmax(problem);
 Input/output storage types and layouts may differ. The accumulator is
 explicitly Float32 or Float64, and the implementation subtracts each slice's
 maximum before exponentiation.
+
+## LayerNorm
+
+`layer_norm.hpp` applies Welford population-variance normalization over one
+explicit tensor axis:
+
+```cpp
+LayerNormProblem problem(inputView, outputView, axis, ScalarType::Float32);
+problem.mean = meanView;
+problem.inverseVariance = inverseVarianceView;
+problem.gamma = gammaView;
+problem.beta = betaView;
+problem.epsilon = 1e-5;
+LayerNormRunInfo run = referenceLayerNorm(problem);
+```
+
+Mean/inverse-variance outputs and affine gamma/beta tensors are optional.
+Input/output layouts may differ; gamma and beta are vectors over the normalized
+axis.
 
 ## Structured tensor comparison
 
@@ -498,6 +517,8 @@ The `roc_host_validation` package currently provides:
   accumulator type, and output type;
 - `reference_softmax` with an explicit axis and runtime
   input/output/accumulator types;
+- `reference_layer_norm` with optional gamma/beta, mean/inverse-variance
+  outputs, epsilon, and an explicit normalized axis;
 - `reference_gemm` with runtime storage/output/accumulator types, alpha/beta,
   ordered pre-quantization factors, compute-input quantization, math mode,
   output scaling/conversion, and activation;
