@@ -323,6 +323,20 @@ class AttentionDenseSpec:
                 )
             if self.num_kv_blocks <= 0:
                 raise ValueError("paged=True requires num_kv_blocks > 0")
+            cache_bytes = (
+                self.num_kv_blocks
+                * self.block_size
+                * self.num_kv_heads
+                * self.head_size
+                * 2
+            )
+            if (
+                cache_bytes > 2**31 - 1
+            ):  # i32 byte-offset limit; i64 paging not yet impl.
+                raise ValueError(
+                    f"paged cache {cache_bytes} B exceeds i32 addressing (2 GiB); "
+                    "i64 paging not yet implemented"
+                )
             # --- Not-yet-implemented shortcuts (deferred scope, NOT a permanent
             #     contract; see the dense-paged design future-scope list). The paged
             #     mechanism is general -- these cohorts are simply unverified so far and
