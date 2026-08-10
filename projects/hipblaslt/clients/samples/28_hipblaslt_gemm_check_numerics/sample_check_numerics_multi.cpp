@@ -19,11 +19,13 @@
 
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt.h>
+#include <roc/host_validation/generation.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <span>
 #include <vector>
 
 #define CHECK_HIP(x)                                                                               \
@@ -142,7 +144,8 @@ int main(int argc, char** argv)
         inject_at = total / 2;
 
     if(const char* cn = std::getenv("HIPBLASLT_CHECK_NUMERICS"))
-        std::printf("HIPBLASLT_CHECK_NUMERICS=\"%s\"  total=%d  inject_at=%d\n", cn, total, inject_at);
+        std::printf(
+            "HIPBLASLT_CHECK_NUMERICS=\"%s\"  total=%d  inject_at=%d\n", cn, total, inject_at);
     else
         std::printf("HIPBLASLT_CHECK_NUMERICS not set. total=%d  inject_at=%d\n", total, inject_at);
 
@@ -151,17 +154,35 @@ int main(int argc, char** argv)
     CHECK_HBL(hipblasLtCreate(&handle));
     CHECK_HIP(hipStreamCreate(&stream));
 
-    std::vector<float> A_clean(M * K, 1.0f);
-    std::vector<float> B(K * N, 1.0f);
-    std::vector<float> A_dirty(M * K, 1.0f);
-    A_dirty[0] = std::nanf("");
+    std::vector<float>                      A_clean(M * K);
+    std::vector<float>                      B(K * N);
+    roc::host_validation::GenerationOptions ones;
+    ones.real.pattern    = roc::host_validation::GenerationPattern::Constant;
+    ones.real.parameter0 = 1.0;
+    roc::host_validation::generate(
+        roc::host_validation::MutableTensorView::fromNative<float>(
+            roc::host_validation::Layout::contiguous(roc::host_validation::Shape{A_clean.size()}),
+            std::span<float>(A_clean)),
+        ones);
+    roc::host_validation::generate(
+        roc::host_validation::MutableTensorView::fromNative<float>(
+            roc::host_validation::Layout::contiguous(roc::host_validation::Shape{B.size()}),
+            std::span<float>(B)),
+        ones);
+    std::vector<float>                      A_dirty = A_clean;
+    roc::host_validation::GenerationOptions nan;
+    nan.real.pattern = roc::host_validation::GenerationPattern::TypeNaN;
+    roc::host_validation::generateAt(
+        roc::host_validation::MutableTensorView::fromNative<float>(
+            roc::host_validation::Layout::contiguous(roc::host_validation::Shape{A_dirty.size()}),
+            std::span<float>(A_dirty)),
+        0,
+        nan);
 
     for(int i = 1; i <= total; ++i)
     {
         const bool dirty = (i == inject_at);
-        one_matmul(handle, stream,
-                   dirty ? A_dirty.data() : A_clean.data(),
-                   B.data(), i, dirty);
+        one_matmul(handle, stream, dirty ? A_dirty.data() : A_clean.data(), B.data(), i, dirty);
     }
 
     CHECK_HIP(hipStreamDestroy(stream));

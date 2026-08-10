@@ -36,6 +36,7 @@
 #include "hipblaslt_test.hpp"
 
 #include <hipblaslt/hipblaslt.h>
+#include <roc/host_validation/generation.hpp>
 
 #include <cmath>
 #include <cstdint>
@@ -43,6 +44,7 @@
 #include <iostream>
 #include <limits>
 #include <mutex>
+#include <span>
 #include <sstream>
 #include <streambuf>
 #include <string>
@@ -117,10 +119,30 @@ inline void testing_aux_check_numerics_gemm(const Arguments& arg)
         hipStream_t stream = nullptr;
         CHECK_HIP_ERROR(hipStreamCreate(&stream));
 
-        std::vector<float> A_clean(M * K, 1.0f);
-        std::vector<float> B_h(K * N, 1.0f);
-        std::vector<float> A_dirty = A_clean;
-        A_dirty[0]                 = std::numeric_limits<float>::quiet_NaN();
+        std::vector<float>                      A_clean(M * K);
+        std::vector<float>                      B_h(K * N);
+        roc::host_validation::GenerationOptions ones;
+        ones.real.pattern    = roc::host_validation::GenerationPattern::Constant;
+        ones.real.parameter0 = 1.0;
+        roc::host_validation::generate(roc::host_validation::MutableTensorView::fromNative<float>(
+                                           roc::host_validation::Layout::contiguous(
+                                               roc::host_validation::Shape{A_clean.size()}),
+                                           std::span<float>(A_clean)),
+                                       ones);
+        roc::host_validation::generate(
+            roc::host_validation::MutableTensorView::fromNative<float>(
+                roc::host_validation::Layout::contiguous(roc::host_validation::Shape{B_h.size()}),
+                std::span<float>(B_h)),
+            ones);
+        std::vector<float>                      A_dirty = A_clean;
+        roc::host_validation::GenerationOptions nan;
+        nan.real.pattern = roc::host_validation::GenerationPattern::TypeNaN;
+        roc::host_validation::generateAt(roc::host_validation::MutableTensorView::fromNative<float>(
+                                             roc::host_validation::Layout::contiguous(
+                                                 roc::host_validation::Shape{A_dirty.size()}),
+                                             std::span<float>(A_dirty)),
+                                         0,
+                                         nan);
 
         float *dA = nullptr, *dB = nullptr, *dC = nullptr, *dD = nullptr;
         CHECK_HIP_ERROR(hipMalloc(&dA, sizeof(float) * M * K));
