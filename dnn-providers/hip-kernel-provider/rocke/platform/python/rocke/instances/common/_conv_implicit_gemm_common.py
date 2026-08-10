@@ -178,6 +178,21 @@ class ConvProblem:
         return z * self.Y * self.X * self.cpg
 
     @property
+    def is_pointwise(self) -> bool:
+        """True when the conv reduces to an explicit GEMM (1x1 kernel, stride 1, no pad)."""
+        hw = (
+            self.Y == 1
+            and self.X == 1
+            and self.sH == 1
+            and self.sW == 1
+            and self.pH == 0
+            and self.pW == 0
+        )
+        if not self.is_3d:
+            return hw
+        return hw and self.Z == 1 and self.sD == 1 and self.pD == 0
+
+    @property
     def flops(self) -> int:
         return 2 * self.M * self.N_gemm * self.K_gemm * self.groups
 
