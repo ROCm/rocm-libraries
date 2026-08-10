@@ -1163,6 +1163,7 @@ class TestAttentionHelpers(unittest.TestCase):
             dict(block_size=16, num_kv_blocks=0),  # num_kv_blocks 0
             dict(block_size=16, num_kv_blocks=512, batch=2),  # multi-seq
             dict(block_size=16, num_kv_blocks=512, varlen=True),
+            dict(block_size=16, num_kv_blocks=512, persistent=True),
             dict(
                 block_size=16, num_kv_blocks=512, sliding_window=0
             ),  # not validated yet

@@ -323,6 +323,11 @@ class AttentionDenseSpec:
                 raise ValueError("paged multi-sequence (batch>1) not yet implemented")
             if self.varlen:
                 raise ValueError("paged varlen not yet implemented (single-seq only)")
+            if self.persistent:
+                raise ValueError(
+                    "paged + persistent not yet implemented "
+                    "(persistent builder is contiguous-only)"
+                )
             if self.head_size != 128:
                 raise ValueError("paged not yet implemented for head_size != 128")
             # forward guard: unreachable while _DTYPE_IR == {fp16, bf16} (both
