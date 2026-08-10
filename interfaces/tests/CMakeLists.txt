@@ -124,3 +124,24 @@ if(UNIX AND NOT APPLE)
   add_test(NAME rocm_interfaces.abi03_interpose_hazard
     COMMAND abi03_interpose_test negative)
 endif()
+
+set(_lto_guard_module ${CMAKE_SOURCE_DIR}/cmake/rocm_interfaces_lto_linker_guard.cmake)
+set(_lto_guard_driver ${CMAKE_CURRENT_SOURCE_DIR}/check_lto_linker_guard.cmake)
+
+add_test(NAME rocm_interfaces.lto_linker_guard_rejects_gnu_lld
+  COMMAND ${CMAKE_COMMAND} -DCASE=gnu_lld_lto -DGUARD_MODULE=${_lto_guard_module}
+    -P ${_lto_guard_driver})
+set_tests_properties(rocm_interfaces.lto_linker_guard_rejects_gnu_lld
+  PROPERTIES WILL_FAIL TRUE)
+
+add_test(NAME rocm_interfaces.lto_linker_guard_accepts_clang_lld
+  COMMAND ${CMAKE_COMMAND} -DCASE=clang_lld_lto -DGUARD_MODULE=${_lto_guard_module}
+    -P ${_lto_guard_driver})
+
+add_test(NAME rocm_interfaces.lto_linker_guard_accepts_gnu_bfd
+  COMMAND ${CMAKE_COMMAND} -DCASE=gnu_bfd_lto -DGUARD_MODULE=${_lto_guard_module}
+    -P ${_lto_guard_driver})
+
+add_test(NAME rocm_interfaces.lto_linker_guard_accepts_gnu_lld_without_lto
+  COMMAND ${CMAKE_COMMAND} -DCASE=gnu_lld_nolto -DGUARD_MODULE=${_lto_guard_module}
+    -P ${_lto_guard_driver})

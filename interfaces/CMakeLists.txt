@@ -107,6 +107,9 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
   add_compile_options(-Wall -Wextra -Wpedantic -Werror=return-type)
 endif()
 
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/rocm_interfaces_lto_linker_guard.cmake")
+rocm_interfaces_assert_lto_linker_supported()
+
 add_library(rocm_interfaces_runtime STATIC
   runtime/src/module.cpp
   runtime/src/provider_registry.cpp
