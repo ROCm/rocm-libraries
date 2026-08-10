@@ -1,6 +1,7 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <complex>
@@ -519,6 +520,25 @@ void testIndexedGeneration() {
     require(point.view().loadAs<float>({0, 1, 1}) == 7.0f,
             "Last-dimension-fast point generation mismatch.");
 
+    for (const LogicalIndexOrder order :
+         {LogicalIndexOrder::FirstDimensionFastest, LogicalIndexOrder::LastDimensionFastest}) {
+        Tensor whole(ScalarType::Float4E2M1, Shape{2, 3, 2});
+        Tensor elementwise(ScalarType::Float4E2M1, Shape{2, 3, 2});
+        GenerationOptions exactOptions;
+        exactOptions.seed = 0x12345678;
+        exactOptions.indexOrder = order;
+        exactOptions.real.pattern = GenerationPattern::UniformInteger;
+        exactOptions.real.parameter0 = -2;
+        exactOptions.real.parameter1 = 2;
+        exactOptions.real.stream = 9;
+        generate(whole.mutableView(), exactOptions);
+        for (size_t index = 0; index < whole.size(); ++index)
+            generateAt(elementwise.mutableView(), index, exactOptions);
+        require(std::equal(whole.storage().begin(), whole.storage().end(),
+                           elementwise.storage().begin(), elementwise.storage().end()),
+                "Whole-tensor and elementwise generation encodings differ.");
+    }
+
     Tensor affine(ScalarType::Float32, Shape{2, 3, 2});
     GenerationOptions affineOptions;
     affineOptions.real.pattern = GenerationPattern::AffineIndexRemainder;
@@ -744,9 +764,13 @@ void testGenerationAndComparison() {
             "Counter-based generation is not deterministic.");
     require(counterRandom(7, 3, 11) != counterRandom(7, 3, 12),
             "Counter-based generation does not vary by logical index.");
+    require(counterRandom(0, 0, 0) == 0x6e789e6aa1b965f4ULL &&
+                counterRandom(7, 3, 11) == 0xf6dd3a1482c56d3fULL &&
+                counterRandom(42, 9, 123456789) == 0x91a0834ef3c62df8ULL,
+            "Counter-based generation sequence changed.");
     const int indexedValue = indexedUniformInteger(7, 3, 11, -4, 5);
-    require(indexedValue >= -4 && indexedValue <= 5,
-            "Counter-based integer generation exceeded its bounds.");
+    require(indexedValue == 5 && indexedUniformInteger(42, 9, 123456789, -100, 100) == -31,
+            "Counter-based integer generation sequence changed.");
 
     GenerationOptions binaryGeneration;
     binaryGeneration.seed = 42;
