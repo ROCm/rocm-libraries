@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <stdexcept>
+
 #include <cstddef>
 #include <memory>
 #include <string>
@@ -10,6 +12,7 @@
 
 namespace hipdnn_backend::heuristics::uhd
 {
+
 
 /// @brief Adapter types matching UhdAdapter enum in uhd.fbs.
 enum class UhdAdapterType
@@ -76,9 +79,5 @@ public:
     virtual bool isTrainedForArch(const std::string& /*arch*/) const { return true; }
 };
 
-/// @brief Factory function type for creating adapters.
-using AdapterFactory =
-    std::unique_ptr<IUhdAdapter> (*)(const std::string& artifactPath,
-                                     const std::string& expectedFeaturesHash);
 
 } // namespace hipdnn_backend::heuristics::uhd

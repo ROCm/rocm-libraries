@@ -20,7 +20,6 @@
 #include "EngineRegistry.hpp"
 #include "FeatureExtractor.hpp"
 #include "SelectionEngine.hpp"
-#include "UhdModelCache.hpp"
 #include "adapters/IUhdAdapter.hpp"
 #include "adapters/StaticOrderAdapter.hpp"
 #include "adapters/TreeDataAdapter.hpp"
