@@ -260,11 +260,96 @@ inline void validateRuntimeGemm(const GemmProblem& problem) {
 }
 
 template <typename Accumulator>
+class RuntimeGemmFinalizer {
+   public:
+    explicit RuntimeGemmFinalizer(
+        const GemmProblem& problem,
+        RuntimeQuantizer<Accumulator> quantizeAccumulator = RuntimeQuantizer<Accumulator>())
+        : m_problem(problem),
+          m_c(problem.c),
+          m_d(problem.d, problem.epilogue.outputConversion),
+          m_quantizeAccumulator(std::move(quantizeAccumulator)),
+          m_alpha(
+              m_quantizeAccumulator(runtimeScalar<Accumulator>(problem.epilogue.alpha, "alpha"))),
+          m_beta(m_quantizeAccumulator(runtimeScalar<Accumulator>(problem.epilogue.beta, "beta"))),
+          m_outputScale(runtimeScalar<Accumulator>(problem.epilogue.outputScale, "output scale")),
+          m_activationParameter0(m_quantizeAccumulator(
+              static_cast<Accumulator>(problem.epilogue.activationParameter0))),
+          m_activationParameter1(m_quantizeAccumulator(
+              static_cast<Accumulator>(problem.epilogue.activationParameter1))),
+          m_alphaIsZero(m_alpha == Accumulator(0)),
+          m_betaIsZero(m_beta == Accumulator(0)) {
+        if (problem.epilogue.bias) m_bias.emplace(problem.epilogue.bias->values);
+        if (problem.epilogue.scaleAlpha) m_scaleAlpha.emplace(problem.epilogue.scaleAlpha->values);
+        if (problem.epilogue.scaleA) m_scaleA.emplace(*problem.epilogue.scaleA);
+        if (problem.epilogue.scaleB) m_scaleB.emplace(*problem.epilogue.scaleB);
+    }
+
+    bool alphaIsZero() const {
+        return m_alphaIsZero;
+    }
+
+    Accumulator multiply(Accumulator left, Accumulator right) const {
+        return m_quantizeAccumulator(left * right);
+    }
+
+    Accumulator add(Accumulator left, Accumulator right) const {
+        return m_quantizeAccumulator(left + right);
+    }
+
+    // Finalize a backend-produced raw accumulator.
+    void store(size_t row, size_t column, Accumulator accumulation) const {
+        Accumulator effectiveAlpha = m_alpha;
+        if (!m_alphaIsZero) {
+            if (m_scaleA) effectiveAlpha = multiply(effectiveAlpha, (*m_scaleA)[row]);
+            if (m_scaleB) effectiveAlpha = multiply(effectiveAlpha, (*m_scaleB)[column]);
+            if (m_scaleAlpha) {
+                const MatrixAxis axis = m_problem.epilogue.scaleAlpha->axis;
+                effectiveAlpha = multiply(effectiveAlpha,
+                                          (*m_scaleAlpha)[axis == MatrixAxis::Row ? row : column]);
+            }
+        }
+
+        Accumulator result = multiply(effectiveAlpha, accumulation);
+        if (!m_betaIsZero) result = add(result, multiply(m_beta, m_c(row, column)));
+        storeCombined(row, column, result);
+    }
+
+    // Finalize a value whose alpha/beta combination was already performed by
+    // the backend, preserving that backend's established floating-point order.
+    void storeCombined(size_t row, size_t column, Accumulator result) const {
+        if (m_bias) {
+            const MatrixAxis axis = m_problem.epilogue.bias->axis;
+            result = add(result, (*m_bias)[axis == MatrixAxis::Row ? row : column]);
+        }
+        result = m_quantizeAccumulator(applyActivation(
+            m_problem.epilogue.activation, result, m_activationParameter0, m_activationParameter1));
+        result *= m_outputScale;
+        m_d.store(row, column, result);
+    }
+
+   private:
+    const GemmProblem& m_problem;
+    RuntimeMatrixReader<Accumulator> m_c;
+    RuntimeMatrixOutputWriter<Accumulator> m_d;
+    RuntimeQuantizer<Accumulator> m_quantizeAccumulator;
+    std::optional<RuntimeVectorReader<Accumulator>> m_bias;
+    std::optional<RuntimeVectorReader<Accumulator>> m_scaleAlpha;
+    std::optional<RuntimeVectorReader<Accumulator>> m_scaleA;
+    std::optional<RuntimeVectorReader<Accumulator>> m_scaleB;
+    Accumulator m_alpha;
+    Accumulator m_beta;
+    Accumulator m_outputScale;
+    Accumulator m_activationParameter0;
+    Accumulator m_activationParameter1;
+    bool m_alphaIsZero;
+    bool m_betaIsZero;
+};
+
+template <typename Accumulator>
 GemmRunInfo referenceRuntimeCanonical(const GemmProblem& problem) {
     const RuntimeMatrixReader<Accumulator> a(problem.a.values);
     const RuntimeMatrixReader<Accumulator> b(problem.b.values);
-    const RuntimeMatrixReader<Accumulator> c(problem.c);
-    const RuntimeMatrixOutputWriter<Accumulator> d(problem.d, problem.epilogue.outputConversion);
     const RuntimeQuantizer<Accumulator> quantizeA(problem.a.computeType);
     const RuntimeQuantizer<Accumulator> quantizeB(problem.b.computeType);
     const bool typeRoundsAfterEachStep = problem.accumulatorType == ScalarType::Float16 ||
@@ -275,33 +360,20 @@ GemmRunInfo referenceRuntimeCanonical(const GemmProblem& problem) {
          typeRoundsAfterEachStep);
     const RuntimeQuantizer<Accumulator> quantizeAccumulator(
         roundAfterEachStep ? std::optional<ScalarType>(problem.accumulatorType) : std::nullopt);
+    const RuntimeGemmFinalizer<Accumulator> finalizer(problem, quantizeAccumulator);
     const RuntimeMathFunction<Accumulator> operandMath =
         runtimeMathFunction<Accumulator>(problem.mathMode);
-    auto multiplyAccumulator = [&](Accumulator left, Accumulator right) {
-        return quantizeAccumulator(left * right);
-    };
-    auto addAccumulator = [&](Accumulator left, Accumulator right) {
-        return quantizeAccumulator(left + right);
-    };
 
-    std::optional<RuntimeVectorReader<Accumulator>> bias;
     std::vector<RuntimeVectorReader<Accumulator>> preScalesA;
     std::vector<RuntimeVectorReader<Accumulator>> preScalesB;
-    std::optional<RuntimeVectorReader<Accumulator>> scaleAlpha;
-    std::optional<RuntimeVectorReader<Accumulator>> scaleA;
-    std::optional<RuntimeVectorReader<Accumulator>> scaleB;
     std::optional<RuntimeMatrixReader<Accumulator>> blockScaleA;
     std::optional<RuntimeMatrixReader<Accumulator>> blockScaleB;
-    if (problem.epilogue.bias) bias.emplace(problem.epilogue.bias->values);
     preScalesA.reserve(problem.a.preQuantizationScales.size());
     for (const VectorBinding& binding : problem.a.preQuantizationScales)
         preScalesA.emplace_back(binding.values);
     preScalesB.reserve(problem.b.preQuantizationScales.size());
     for (const VectorBinding& binding : problem.b.preQuantizationScales)
         preScalesB.emplace_back(binding.values);
-    if (problem.epilogue.scaleAlpha) scaleAlpha.emplace(problem.epilogue.scaleAlpha->values);
-    if (problem.epilogue.scaleA) scaleA.emplace(*problem.epilogue.scaleA);
-    if (problem.epilogue.scaleB) scaleB.emplace(*problem.epilogue.scaleB);
     if (problem.a.blockScale) {
         blockScaleA.emplace(problem.a.blockScale->values);
         blockScaleB.emplace(problem.b.blockScale->values);
@@ -310,23 +382,11 @@ GemmRunInfo referenceRuntimeCanonical(const GemmProblem& problem) {
     const size_t m = problem.a.values.shape()[0];
     const size_t k = problem.a.values.shape()[1];
     const size_t n = problem.b.values.shape()[1];
-    const Accumulator alpha =
-        quantizeAccumulator(runtimeScalar<Accumulator>(problem.epilogue.alpha, "alpha"));
-    const Accumulator beta =
-        quantizeAccumulator(runtimeScalar<Accumulator>(problem.epilogue.beta, "beta"));
-    const Accumulator outputScale =
-        runtimeScalar<Accumulator>(problem.epilogue.outputScale, "output scale");
-    const Accumulator activationParameter0 =
-        quantizeAccumulator(static_cast<Accumulator>(problem.epilogue.activationParameter0));
-    const Accumulator activationParameter1 =
-        quantizeAccumulator(static_cast<Accumulator>(problem.epilogue.activationParameter1));
-    const bool alphaIsZero = alpha == Accumulator(0);
-    const bool betaIsZero = beta == Accumulator(0);
 
     auto computeOutput = [&](size_t row, size_t column) {
         Accumulator sum = Accumulator(0);
 
-        if (!alphaIsZero && blockScaleA) {
+        if (!finalizer.alphaIsZero() && blockScaleA) {
             const size_t blockSizeA = problem.a.blockScale->blockSize;
             const size_t blockSizeB = problem.b.blockScale->blockSize;
             size_t blockBase = 0;
@@ -358,16 +418,16 @@ GemmRunInfo referenceRuntimeCanonical(const GemmProblem& problem) {
                     }
                     aValue = operandMath(quantizeA(aValue));
                     bValue = operandMath(quantizeB(bValue));
-                    blockSum = addAccumulator(blockSum, multiplyAccumulator(aValue, bValue));
+                    blockSum = finalizer.add(blockSum, finalizer.multiply(aValue, bValue));
                 }
 
                 const Accumulator scale =
-                    multiplyAccumulator((*blockScaleA)(row, blockBase / blockSizeA),
-                                        (*blockScaleB)(column, blockBase / blockSizeB));
-                sum = addAccumulator(sum, multiplyAccumulator(blockSum, scale));
+                    finalizer.multiply((*blockScaleA)(row, blockBase / blockSizeA),
+                                       (*blockScaleB)(column, blockBase / blockSizeB));
+                sum = finalizer.add(sum, finalizer.multiply(blockSum, scale));
                 blockBase = blockEnd;
             }
-        } else if (!alphaIsZero) {
+        } else if (!finalizer.alphaIsZero()) {
             for (size_t reduction = 0; reduction < k; ++reduction) {
                 Accumulator aValue = conjugateIfNeeded(a(row, reduction), problem.a.conjugate);
                 Accumulator bValue = conjugateIfNeeded(b(reduction, column), problem.b.conjugate);
@@ -388,31 +448,11 @@ GemmRunInfo referenceRuntimeCanonical(const GemmProblem& problem) {
                 }
                 aValue = operandMath(quantizeA(aValue));
                 bValue = operandMath(quantizeB(bValue));
-                sum = addAccumulator(sum, multiplyAccumulator(aValue, bValue));
+                sum = finalizer.add(sum, finalizer.multiply(aValue, bValue));
             }
         }
 
-        Accumulator effectiveAlpha = alpha;
-        if (!alphaIsZero) {
-            if (scaleA) effectiveAlpha = multiplyAccumulator(effectiveAlpha, (*scaleA)[row]);
-            if (scaleB) effectiveAlpha = multiplyAccumulator(effectiveAlpha, (*scaleB)[column]);
-            if (scaleAlpha) {
-                const MatrixAxis axis = problem.epilogue.scaleAlpha->axis;
-                effectiveAlpha = multiplyAccumulator(
-                    effectiveAlpha, (*scaleAlpha)[axis == MatrixAxis::Row ? row : column]);
-            }
-        }
-
-        Accumulator result = multiplyAccumulator(effectiveAlpha, sum);
-        if (!betaIsZero) result = addAccumulator(result, multiplyAccumulator(beta, c(row, column)));
-        if (bias) {
-            const MatrixAxis axis = problem.epilogue.bias->axis;
-            result = addAccumulator(result, (*bias)[axis == MatrixAxis::Row ? row : column]);
-        }
-        result = quantizeAccumulator(applyActivation(problem.epilogue.activation, result,
-                                                     activationParameter0, activationParameter1));
-        result *= outputScale;
-        d.store(row, column, result);
+        finalizer.store(row, column, sum);
     };
 
     const size_t logicalElements = problem.d.shape().elementCount();
