@@ -34,31 +34,22 @@ GemmRunInfo runTiled(const GemmProblem& problem) {
 
     const RuntimeMatrixReader<Accumulator> a(problem.a.values);
     const RuntimeMatrixReader<Accumulator> b(problem.b.values);
-    const RuntimeMatrixReader<Accumulator> c(problem.c);
-    const RuntimeMatrixOutputWriter<Accumulator> d(problem.d, problem.epilogue.outputConversion);
     const RuntimeQuantizer<Accumulator> quantizeA(problem.a.computeType);
     const RuntimeQuantizer<Accumulator> quantizeB(problem.b.computeType);
+    const RuntimeGemmFinalizer<Accumulator> finalizer(problem);
     const RuntimeMathFunction<Accumulator> operandMath =
         runtimeMathFunction<Accumulator>(problem.mathMode);
 
-    std::optional<RuntimeVectorReader<Accumulator>> bias;
     std::vector<RuntimeVectorReader<Accumulator>> preScalesA;
     std::vector<RuntimeVectorReader<Accumulator>> preScalesB;
-    std::optional<RuntimeVectorReader<Accumulator>> scaleAlpha;
-    std::optional<RuntimeVectorReader<Accumulator>> scaleA;
-    std::optional<RuntimeVectorReader<Accumulator>> scaleB;
     std::optional<RuntimeMatrixReader<Accumulator>> blockScaleA;
     std::optional<RuntimeMatrixReader<Accumulator>> blockScaleB;
-    if (problem.epilogue.bias) bias.emplace(problem.epilogue.bias->values);
     preScalesA.reserve(problem.a.preQuantizationScales.size());
     for (const VectorBinding& binding : problem.a.preQuantizationScales)
         preScalesA.emplace_back(binding.values);
     preScalesB.reserve(problem.b.preQuantizationScales.size());
     for (const VectorBinding& binding : problem.b.preQuantizationScales)
         preScalesB.emplace_back(binding.values);
-    if (problem.epilogue.scaleAlpha) scaleAlpha.emplace(problem.epilogue.scaleAlpha->values);
-    if (problem.epilogue.scaleA) scaleA.emplace(*problem.epilogue.scaleA);
-    if (problem.epilogue.scaleB) scaleB.emplace(*problem.epilogue.scaleB);
     if (problem.a.blockScale) {
         blockScaleA.emplace(problem.a.blockScale->values);
         blockScaleB.emplace(problem.b.blockScale->values);
@@ -73,16 +64,6 @@ GemmRunInfo runTiled(const GemmProblem& problem) {
         for (const size_t index : problem.outputSelection.indices(problem.d.shape().elementCount()))
             selectedOutputs[index] = true;
     }
-    const Accumulator alpha = runtimeScalar<Accumulator>(problem.epilogue.alpha, "alpha");
-    const Accumulator beta = runtimeScalar<Accumulator>(problem.epilogue.beta, "beta");
-    const Accumulator outputScale =
-        runtimeScalar<Accumulator>(problem.epilogue.outputScale, "output scale");
-    const Accumulator activationParameter0 =
-        static_cast<Accumulator>(problem.epilogue.activationParameter0);
-    const Accumulator activationParameter1 =
-        static_cast<Accumulator>(problem.epilogue.activationParameter1);
-    const bool alphaIsZero = alpha == Accumulator(0);
-    const bool betaIsZero = beta == Accumulator(0);
 
     constexpr size_t tileRows = 32;
     constexpr size_t tileColumns = 32;
@@ -93,7 +74,7 @@ GemmRunInfo runTiled(const GemmProblem& problem) {
             const size_t columns = std::min(tileColumns, n - columnBase);
             std::vector<Accumulator> accumulator(rows * columns, Accumulator(0));
 
-            for (size_t reductionBase = 0; !alphaIsZero && reductionBase < k;
+            for (size_t reductionBase = 0; !finalizer.alphaIsZero() && reductionBase < k;
                  reductionBase += tileReduction) {
                 const size_t reductions = std::min(tileReduction, k - reductionBase);
                 std::vector<Accumulator> aTile(rows * reductions);
@@ -162,27 +143,7 @@ GemmRunInfo runTiled(const GemmProblem& problem) {
                     const size_t globalColumn = columnBase + column;
                     if (!selectedOutputs.empty() && !selectedOutputs[globalRow * n + globalColumn])
                         continue;
-                    Accumulator effectiveAlpha = alpha;
-                    if (!alphaIsZero) {
-                        if (scaleA) effectiveAlpha *= (*scaleA)[globalRow];
-                        if (scaleB) effectiveAlpha *= (*scaleB)[globalColumn];
-                        if (scaleAlpha) {
-                            const MatrixAxis axis = problem.epilogue.scaleAlpha->axis;
-                            effectiveAlpha *=
-                                (*scaleAlpha)[axis == MatrixAxis::Row ? globalRow : globalColumn];
-                        }
-                    }
-
-                    Accumulator result = effectiveAlpha * accumulator[row * columns + column];
-                    if (!betaIsZero) result += beta * c(globalRow, globalColumn);
-                    if (bias) {
-                        const MatrixAxis axis = problem.epilogue.bias->axis;
-                        result += (*bias)[axis == MatrixAxis::Row ? globalRow : globalColumn];
-                    }
-                    result = applyActivation(problem.epilogue.activation, result,
-                                             activationParameter0, activationParameter1);
-                    result *= outputScale;
-                    d.store(globalRow, globalColumn, result);
+                    finalizer.store(globalRow, globalColumn, accumulator[row * columns + column]);
                 }
             }
         }

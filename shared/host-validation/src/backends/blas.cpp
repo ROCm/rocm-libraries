@@ -290,13 +290,10 @@ GemmRunInfo runTransforming(const GemmProblem& problem) {
                                  });
 
     const RuntimeMatrixReader<Accumulator> stagedOutput(stagedC.view());
-    const RuntimeMatrixOutputWriter<Accumulator> output(problem.d,
-                                                        problem.epilogue.outputConversion);
-    const Accumulator outputScale =
-        runtimeScalar<Accumulator>(problem.epilogue.outputScale, "output scale");
+    const RuntimeGemmFinalizer<Accumulator> finalizer(problem);
     for (size_t row = 0; row < problem.d.shape()[0]; ++row)
         for (size_t column = 0; column < problem.d.shape()[1]; ++column)
-            output.store(row, column, stagedOutput(row, column) * outputScale);
+            finalizer.storeCombined(row, column, stagedOutput(row, column));
 
     return {
         .backendUsed = GemmBackend::Blas,
