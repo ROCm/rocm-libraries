@@ -10,7 +10,7 @@
 
 namespace rocRoller
 {
-    struct AssemblyKernelArgument;
+    class AssemblyKernelArgument;
 
     using AssemblyKernelArgumentPtr = std::shared_ptr<AssemblyKernelArgument>;
 }
