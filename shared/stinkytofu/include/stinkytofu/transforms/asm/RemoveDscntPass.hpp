@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2026 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -21,29 +21,23 @@
  *
  * ************************************************************************ */
 
-/*!\file
- * \brief hipsparse-config.h provides the build-time feature configuration that
- * was baked in when the hipSPARSE library was compiled.
+#pragma once
+
+#include <memory>
+
+#include "stinkytofu/Export.hpp"
+
+namespace stinkytofu {
+class Pass;
+
+/**
+ * @brief Creates the RemoveDscnt pass.
  *
- * The macros below are resolved by CMake at library build time and installed
- * alongside the library. Do NOT define them yourself: they describe how the
- * installed library was actually built, and overriding them makes the visible
- * API surface diverge from the compiled shared object.
+ * Runs after StinkyWaitCntInsertionPass and only operates on basic blocks that
+ * are themselves loops (i.e. blocks with a self back-edge). The actual
+ * transformation logic is not yet implemented.
  */
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createRemoveDscntPass();
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createRemoveDscntPass(int dsProximityThreshold);
 
-#ifndef HIPSPARSE_CONFIG_H
-#define HIPSPARSE_CONFIG_H
-
-/* Build-time feature flags baked in at compile time. */
-
-/* hipSPARSE 5.1 */
-#cmakedefine HIPSPARSE_WITH_SPGEAM
-
-/* hipSPARSE 4.7 */
-#cmakedefine HIPSPARSE_WITH_CSC_TRSV
-#cmakedefine HIPSPARSE_WITH_CSC_TRSM
-
-/* hipSPARSE 4.6 */
-#cmakedefine HIPSPARSE_WITH_SPMV_BSR
-
-#endif /* HIPSPARSE_CONFIG_H */
+}  // namespace stinkytofu
