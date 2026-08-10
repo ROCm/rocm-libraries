@@ -4,13 +4,15 @@
 """CPU-only tests for the dispatch-layer num_sms resolver + target_ctas knob.
 
 ``num_sms`` drives 2D<->3D routing and the 3D segment count. It historically
-defaulted to a stale 120, under-subscribing gfx942 (304 CUs). The resolver turns
-the sentinel default into the live gfx942 CU count behind an explicit-caller
-override seam. Auto-resolution is scoped to gfx942 for now; other archs keep the
-legacy 120 (Future Scope). ``target_ctas`` is the direct device-subscription
-target override: when > 0 it replaces ``num_sms * 4`` for routing/segmentation
-without a device CU count. These tests mock the device query/arch (no GPU) and
-assert the resolution order plus the downstream routing/segment effects.
+defaulted to a stale 120, under-subscribing the device (e.g. 304-CU gfx942,
+~256-CU gfx950). The resolver turns the sentinel default into the live device CU
+count behind an explicit-caller override seam. Auto-resolution covers the arches
+in ``_AUTO_RESOLVE_ARCHS`` (gfx942 and gfx950); every other arch keeps the legacy
+120. gfx950's segment clamp is conservative -- the num_sms bump never raises an
+already-3D split. ``target_ctas`` is the direct device-subscription target
+override: when > 0 it replaces ``num_sms * 4`` for routing/segmentation without a
+device CU count. These tests mock the device query/arch (no GPU) and assert the
+resolution order plus the downstream routing/segment effects.
 """
 from __future__ import annotations
 
