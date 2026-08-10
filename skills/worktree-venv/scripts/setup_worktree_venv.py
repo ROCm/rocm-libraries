@@ -45,7 +45,7 @@ _FALLBACK_GLOBS = {
 # Binaries that mark a ROCm root, found at <root>/bin/<name>.
 _MARKER_BINARIES = ("amdclang++", "hipcc", "hipconfig")
 
-_BOOTSTRAP_HEADER = '''\
+_BOOTSTRAP_HEADER = """\
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
@@ -57,18 +57,18 @@ _BOOTSTRAP_HEADER = '''\
 
 import os
 import sys
-'''
+"""
 
-_SHARE_BLOCK = '''
+_SHARE_BLOCK = """
 
 # Reach the base venv's heavy dependencies without copying them. Appended,
 # never inserted, so a package installed in this worktree always wins.
 BASE_SITE_PACKAGES = r"{base_sp}"
 if BASE_SITE_PACKAGES not in sys.path:
     sys.path.append(BASE_SITE_PACKAGES)
-'''
+"""
 
-_ROCM_BLOCK = '''
+_ROCM_BLOCK = """
 
 # Pin the ROCm toolchain this venv was configured against. With
 # editable.rebuild, CMake runs on plain `import`, so this must hold for
@@ -101,7 +101,7 @@ if ROCM_CMAKE and ROCM_CMAKE not in os.environ.get("CMAKE_PREFIX_PATH", "").spli
     os.environ["CMAKE_PREFIX_PATH"] = (
         ROCM_CMAKE + os.pathsep + _existing if _existing else ROCM_CMAKE
     )
-'''
+"""
 
 
 def _venv_python(venv_dir: Path) -> Path:
@@ -115,7 +115,11 @@ def _venv_python(venv_dir: Path) -> Path:
 def _site_packages(python: Path) -> Path:
     """Ask an interpreter where its own purelib is (handles both platforms)."""
     out = subprocess.run(
-        [str(python), "-c", "import json,sysconfig; print(json.dumps(sysconfig.get_paths()))"],
+        [
+            str(python),
+            "-c",
+            "import json,sysconfig; print(json.dumps(sysconfig.get_paths()))",
+        ],
         capture_output=True,
         text=True,
         check=True,
@@ -148,7 +152,11 @@ def _root_from_binary(name: str) -> Path | None:
 
 def _classify(root: Path) -> str:
     parts = {p.lower() for p in root.parts}
-    return "wheel" if "site-packages" in parts or root.name == "_rocm_sdk_devel" else "system"
+    return (
+        "wheel"
+        if "site-packages" in parts or root.name == "_rocm_sdk_devel"
+        else "system"
+    )
 
 
 def detect_rocm(base_bin: Path | None, override: str | None) -> tuple[str, Path | None]:
@@ -215,7 +223,9 @@ def main() -> int:
         default=Path(os.environ.get("BASE_VENV", Path.home() / ".venv")),
         help="venv holding the shared heavy dependencies (default: $BASE_VENV or ~/.venv)",
     )
-    parser.add_argument("--name", default=".venv", help="venv dir name (default: .venv)")
+    parser.add_argument(
+        "--name", default=".venv", help="venv dir name (default: .venv)"
+    )
     parser.add_argument("--rocm-path", help="ROCm root; skips detection")
     parser.add_argument(
         "--standalone", action="store_true", help="never share the base venv"
