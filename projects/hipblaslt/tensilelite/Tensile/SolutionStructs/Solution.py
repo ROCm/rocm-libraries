@@ -1664,7 +1664,7 @@ class Solution(collections.abc.Mapping):
       # Note this bypasses the gate WITHOUT lowering the scheduler's weave
       # lookahead, so a forced sub-threshold tile emits the fused store with zero
       # pairs actually woven -- useful to isolate the guard-folding win from the
-      # overlap win, but lower TENSILE_WEAVE_LA instead to get both.
+      # overlap win, but lower TENSILE_PLSIN_DEBUG="TENSILE_WEAVE_LA=..." instead to get both.
       forcePlsinFp4F16 = (isFloat4
                           and destType.isHalf()
                           and plsinDebugEnv("TENSILE_PLSIN_FORCE_FP4_F16", "0") != "0")
@@ -1697,7 +1697,7 @@ class Solution(collections.abc.Mapping):
       # Overlap feasibility: the weave only weaves store-pairs with pair index >=
       # weaveLA. numStorePairs = MIWT0*MIWT1//2; at or below the threshold no pair
       # is woven, so PLSIN would be pure overhead. This reads the same
-      # TENSILE_WEAVE_LA override and the same production default as the
+      # TENSILE_PLSIN_DEBUG="TENSILE_WEAVE_LA=..." override and the same production default as the
       # scheduler (Components/Subtile/LogicalScheduler.py), so the gate and the
       # weave move together; pinning a separate constant here made the two
       # disagree whenever the override was set.

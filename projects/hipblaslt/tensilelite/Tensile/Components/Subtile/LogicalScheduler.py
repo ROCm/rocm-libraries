@@ -3580,7 +3580,7 @@ class LogicalScheduler:
         # Default ON for PLSIN kernels: postLoopStoreInNll is already the
         # fp4-input + UseSubtileImpl (+ gfx950/MI/<=256x256/...) gate (Solution.py),
         # so the init-hoist NGLL dual-arm is enabled automatically here. Opt out
-        # (byte-identical stock NGLL) with TENSILE_NGLL_INIT_HOIST=0 (test-only).
+        # (byte-identical stock NGLL) with TENSILE_PLSIN_DEBUG="TENSILE_NGLL_INIT_HOIST=0" (test-only).
         if plsinDebugEnv("TENSILE_NGLL_INIT_HOIST", "1") == "0":
             return plain
 
@@ -3612,7 +3612,7 @@ class LogicalScheduler:
         # Coord-hoist weaving is ON by default for eligible (<=256x256) PLSIN tiles
         # (spill tiles are already excluded upstream, so largeTile never trips for an
         # eligible kernel -- kept as a defensive guard). Opt out with
-        # TENSILE_NGLL_HOIST_COORDS=0 (test-only).
+        # TENSILE_PLSIN_DEBUG="TENSILE_NGLL_HOIST_COORDS=0" (test-only).
         if plsinDebugEnv("TENSILE_NGLL_HOIST_COORDS", "1") != "0" and not largeTile:
             from rocisa.instruction import MFMAInstruction, MXMFMAInstruction
             # Generate the coord instructions (also checks out the persistent coord
@@ -3717,7 +3717,7 @@ class LogicalScheduler:
         # unaffected. In production this is selected by the PLSINStoreMode solution
         # parameter (Lend vs Weave), so the host can pick the lend-general kernel for
         # store-bound shapes and the fused-general (weave) kernel for compute-bound
-        # shapes without a single-binary compromise. TENSILE_PLSIN_SMALLTILE_LEND=1
+        # shapes without a single-binary compromise. TENSILE_PLSIN_DEBUG="TENSILE_PLSIN_SMALLTILE_LEND=1"
         # remains a test-only override that forces Lend regardless of the parameter.
         paramLend = kernel.get("PLSINStoreMode", "Weave") == "Lend"
         envLend = plsinDebugEnv("TENSILE_PLSIN_SMALLTILE_LEND", "0") != "0"
