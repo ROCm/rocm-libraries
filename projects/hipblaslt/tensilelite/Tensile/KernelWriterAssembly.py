@@ -12048,8 +12048,9 @@ class KernelWriterAssembly(KernelWriter):
             self.vgprPool.checkIn(tmpvgpr)
       elif self.states.IncLdsBufSwitch:
         # IncLdsBufSwitch case, round back to 0
-        # (numLDSBlk>=3 is for DTL (and LocalWriteUseSgpr), and TDM TDMPlusLdsBuf path
-        # for TDM this is also how LDSBufferWriteInc gets initialized to 0 before the loop)
+        # (numLDSBlk>=3 is for DTL (and LocalWriteUseSgpr) and the non-DTL TDM
+        # TDMPlusLdsBuf path). On the TDM path this is also how LDSBufferWriteInc
+        # gets initialized to 0 before the loop.
         module.add(SMovB32(
           dst=sgpr("LDSBufferWriteInc"), \
           src=0, \
