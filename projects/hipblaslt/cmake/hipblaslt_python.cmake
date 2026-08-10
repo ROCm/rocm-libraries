@@ -57,12 +57,11 @@ function(hipblaslt_configure_tensilelite_python asan_options)
         return()
     endif()
 
-    if(NOT TARGET _rocisa OR NOT TARGET tensilelite-client)
+    if(NOT TARGET _rocisa)
         message(FATAL_ERROR
-            "Device generation requires the in-tree _rocisa and tensilelite-client targets")
+            "Device generation requires the in-tree _rocisa target")
     endif()
 
-    set(_source_root "${CMAKE_CURRENT_SOURCE_DIR}/tensilelite")
     set(_canonical_wheel
         "${CMAKE_CURRENT_BINARY_DIR}/tensilelite-release-wheels/tensilelite-${TENSILELITE_DISTRIBUTION_VERSION}-py3-none-any.whl")
     set(_install_stamp "${CMAKE_CURRENT_BINARY_DIR}/tensilelite-wheel-install.stamp")
@@ -78,7 +77,7 @@ function(hipblaslt_configure_tensilelite_python asan_options)
         USES_TERMINAL
     )
     add_custom_target(tensilelite-python-build-environment
-        DEPENDS "${_install_stamp}" _rocisa tensilelite-client)
+        DEPENDS "${_install_stamp}" _rocisa)
 
     set(_python_command
         "${CMAKE_COMMAND}" -E env
@@ -90,11 +89,7 @@ function(hipblaslt_configure_tensilelite_python asan_options)
         list(APPEND _python_command ${asan_options})
     endif()
     list(APPEND _python_command --
-        "${Python3_EXECUTABLE}"
-        "${_source_root}/scripts/run_tensilelite_python.py"
-        --client "$<TARGET_FILE:tensilelite-client>"
-        --python "${Python3_EXECUTABLE}"
-        --)
+        "${Python3_EXECUTABLE}")
 
     set(HIPBLASLT_PYTHON_COMMAND "${_python_command}" PARENT_SCOPE)
     set(HIPBLASLT_PYTHON_DEPS "tensilelite-python-build-environment" PARENT_SCOPE)

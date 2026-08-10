@@ -69,20 +69,10 @@ option(HIPBLASLT_VALIDATE_INSTALL "Run post-install per-base layout / .dat integ
 
 option(TENSILELITE_ENABLE_HOST "Build the tensilelite host library." ON)
 option(TENSILELITE_BUILD_TESTING "Build client when building tests" OFF)
-option(TENSILELITE_ENABLE_CLIENT "Build tensilelite client" ${HIPBLASLT_ENABLE_DEVICE})
+option(TENSILELITE_ENABLE_CLIENT "Build tensilelite client" ${TENSILELITE_BUILD_TESTING})
 option(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS
        "Install TensileLite Python packages and test tools into the test artifact tree."
        OFF)
-if(HIPBLASLT_ENABLE_DEVICE AND NOT TENSILELITE_ENABLE_HOST)
-    message(FATAL_ERROR
-        "HIPBLASLT_ENABLE_DEVICE=ON requires TENSILELITE_ENABLE_HOST=ON; "
-        "remove -DTENSILELITE_ENABLE_HOST=OFF or disable device generation")
-endif()
-if(HIPBLASLT_ENABLE_DEVICE AND NOT TENSILELITE_ENABLE_CLIENT)
-    message(FATAL_ERROR
-        "HIPBLASLT_ENABLE_DEVICE=ON requires TENSILELITE_ENABLE_CLIENT=ON; "
-        "remove -DTENSILELITE_ENABLE_CLIENT=OFF or disable device generation")
-endif()
 
 if(HIPBLASLT_ENABLE_CLIENT)
     option(HIPBLASLT_BUILD_TESTING "Build hipblaslt client tests." ON)
@@ -247,8 +237,18 @@ endif()
 set(HIPBLASLT_PYTHON_COMMAND "")
 set(HIPBLASLT_PYTHON_DEPS "")
 
-if(HIPBLASLT_ENABLE_DEVICE OR TENSILELITE_ENABLE_CLIENT
-        OR HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS)
+set(_tensilelite_needs_canonical_wheel FALSE)
+if(HIPBLASLT_ENABLE_DEVICE OR HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS)
+    set(_tensilelite_needs_canonical_wheel TRUE)
+endif()
+set(_tensilelite_needs_compatibility_wheel FALSE)
+if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS)
+    set(_tensilelite_needs_compatibility_wheel TRUE)
+endif()
+
+if(_tensilelite_needs_canonical_wheel
+        OR _tensilelite_needs_compatibility_wheel
+        OR TENSILELITE_ENABLE_CLIENT)
     set(_tensilelite_source_root "${CMAKE_CURRENT_SOURCE_DIR}/tensilelite")
     hipblaslt_resolve_build_rocm_root(HIPBLASLT_BUILD_ROCM_ROOT)
     hipblaslt_resolve_build_rocm_version(HIPBLASLT_BUILD_ROCM_VERSION)
@@ -273,6 +273,9 @@ if(HIPBLASLT_ENABLE_DEVICE OR TENSILELITE_ENABLE_CLIENT
     endif()
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
         ${_tensilelite_version_dependencies})
+endif()
+
+if(TENSILELITE_ENABLE_CLIENT)
     configure_file(
         "${_tensilelite_source_root}/client/TensileLiteClientVersion.hpp.in"
         "${CMAKE_CURRENT_BINARY_DIR}/tensilelite-client-generated/TensileLiteClientVersion.hpp"
@@ -687,15 +690,10 @@ if(HIPBLASLT_ENABLE_CLIENT AND (HIPBLASLT_BUILD_TESTING OR BUILD_TESTING))
     )
 endif()
 
-if(HIPBLASLT_ENABLE_DEVICE OR TENSILELITE_ENABLE_CLIENT
-        OR HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS)
+if(_tensilelite_needs_canonical_wheel OR _tensilelite_needs_compatibility_wheel)
     set(_tensilelite_src "${CMAKE_CURRENT_SOURCE_DIR}/tensilelite")
     set(_tensilelite_release_wheel_dir
         "${CMAKE_CURRENT_BINARY_DIR}/tensilelite-release-wheels")
-    set(_tensilelite_canonical_wheel
-        "${_tensilelite_release_wheel_dir}/tensilelite-${TENSILELITE_DISTRIBUTION_VERSION}-py3-none-any.whl")
-    set(_tensilelite_compatibility_wheel
-        "${_tensilelite_release_wheel_dir}/tensilelite_tensile_compat-${TENSILELITE_DISTRIBUTION_VERSION}-py3-none-any.whl")
     file(GLOB_RECURSE _tensilelite_wheel_sources CONFIGURE_DEPENDS
         "${_tensilelite_src}/tensilelite/*.py"
         "${_tensilelite_src}/tensilelite/CustomKernels/*.s"
@@ -705,94 +703,103 @@ if(HIPBLASLT_ENABLE_DEVICE OR TENSILELITE_ENABLE_CLIENT
         "${_tensilelite_src}/compat/tensilelite_tensile_compat/*.py"
     )
 
-    set(_tensilelite_canonical_stage "${CMAKE_CURRENT_BINARY_DIR}/tensilelite-wheel-canonical")
-    set(_tensilelite_canonical_stamp "${_tensilelite_canonical_stage}/.published")
-    add_custom_command(
-        OUTPUT "${_tensilelite_canonical_stamp}"
-        BYPRODUCTS "${_tensilelite_canonical_wheel}"
-        COMMAND ${CMAKE_COMMAND} -E rm -rf "${_tensilelite_canonical_stage}"
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${_tensilelite_canonical_stage}"
-        COMMAND ${CMAKE_COMMAND} -E env
-            "ROCM_PATH=${HIPBLASLT_BUILD_ROCM_ROOT}"
-            "TENSILELITE_ROCM_VERSION=${HIPBLASLT_BUILD_ROCM_VERSION}"
-            -- "${Python3_EXECUTABLE}" -m pip wheel
-            --disable-pip-version-check --no-build-isolation --no-deps
-            --wheel-dir "${_tensilelite_canonical_stage}"
-            "${_tensilelite_src}"
-        COMMAND "${Python3_EXECUTABLE}"
-            "${_tensilelite_src}/scripts/check_release_wheel_contents.py"
-            --mode canonical
-            --wheel "${_tensilelite_canonical_stage}/tensilelite-${TENSILELITE_DISTRIBUTION_VERSION}-py3-none-any.whl"
-            --expected-version "${TENSILELITE_DISTRIBUTION_VERSION}"
-            --source-root "${_tensilelite_src}"
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${_tensilelite_release_wheel_dir}"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${_tensilelite_canonical_stage}/tensilelite-${TENSILELITE_DISTRIBUTION_VERSION}-py3-none-any.whl"
-            "${_tensilelite_canonical_wheel}"
-        COMMAND ${CMAKE_COMMAND} -E touch "${_tensilelite_canonical_stamp}"
-        DEPENDS
-            ${_tensilelite_wheel_sources}
-            "${_tensilelite_src}/VERSION"
-            "${_tensilelite_src}/pyproject.toml"
-            "${_tensilelite_src}/setup.py"
-            "${_tensilelite_src}/MANIFEST.in"
-            "${_tensilelite_src}/release_metadata.py"
-            "${_tensilelite_src}/requirements.txt"
-            "${_tensilelite_src}/scripts/check_release_wheel_contents.py"
-            ${_tensilelite_version_dependencies}
-        COMMENT "Building the canonical TensileLite release wheel"
-        VERBATIM
-        USES_TERMINAL
-    )
-    add_custom_target(tensilelite-canonical-release-wheel
-        DEPENDS "${_tensilelite_canonical_stamp}")
+    if(_tensilelite_needs_canonical_wheel)
+        set(_tensilelite_canonical_wheel
+            "${_tensilelite_release_wheel_dir}/tensilelite-${TENSILELITE_DISTRIBUTION_VERSION}-py3-none-any.whl")
+        set(_tensilelite_canonical_stage "${CMAKE_CURRENT_BINARY_DIR}/tensilelite-wheel-canonical")
+        set(_tensilelite_canonical_stamp "${_tensilelite_canonical_stage}/.published")
+        add_custom_command(
+            OUTPUT "${_tensilelite_canonical_stamp}"
+            BYPRODUCTS "${_tensilelite_canonical_wheel}"
+            COMMAND ${CMAKE_COMMAND} -E rm -rf "${_tensilelite_canonical_stage}"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${_tensilelite_canonical_stage}"
+            COMMAND ${CMAKE_COMMAND} -E env
+                "ROCM_PATH=${HIPBLASLT_BUILD_ROCM_ROOT}"
+                "TENSILELITE_ROCM_VERSION=${HIPBLASLT_BUILD_ROCM_VERSION}"
+                -- "${Python3_EXECUTABLE}" -m pip wheel
+                --disable-pip-version-check --no-build-isolation --no-deps
+                --wheel-dir "${_tensilelite_canonical_stage}"
+                "${_tensilelite_src}"
+            COMMAND "${Python3_EXECUTABLE}"
+                "${_tensilelite_src}/scripts/check_release_wheel_contents.py"
+                --mode canonical
+                --wheel "${_tensilelite_canonical_stage}/tensilelite-${TENSILELITE_DISTRIBUTION_VERSION}-py3-none-any.whl"
+                --expected-version "${TENSILELITE_DISTRIBUTION_VERSION}"
+                --source-root "${_tensilelite_src}"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${_tensilelite_release_wheel_dir}"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${_tensilelite_canonical_stage}/tensilelite-${TENSILELITE_DISTRIBUTION_VERSION}-py3-none-any.whl"
+                "${_tensilelite_canonical_wheel}"
+            COMMAND ${CMAKE_COMMAND} -E touch "${_tensilelite_canonical_stamp}"
+            DEPENDS
+                ${_tensilelite_wheel_sources}
+                "${_tensilelite_src}/VERSION"
+                "${_tensilelite_src}/pyproject.toml"
+                "${_tensilelite_src}/setup.py"
+                "${_tensilelite_src}/MANIFEST.in"
+                "${_tensilelite_src}/release_metadata.py"
+                "${_tensilelite_src}/requirements.txt"
+                "${_tensilelite_src}/scripts/check_release_wheel_contents.py"
+                ${_tensilelite_version_dependencies}
+            COMMENT "Building the canonical TensileLite release wheel"
+            VERBATIM
+            USES_TERMINAL
+        )
+        add_custom_target(tensilelite-canonical-release-wheel
+            DEPENDS "${_tensilelite_canonical_stamp}")
+    endif()
 
-    set(_tensilelite_compatibility_stage
-        "${CMAKE_CURRENT_BINARY_DIR}/tensilelite-wheel-compatibility")
-    set(_tensilelite_compatibility_stamp
-        "${_tensilelite_compatibility_stage}/.published")
-    add_custom_command(
-        OUTPUT "${_tensilelite_compatibility_stamp}"
-        BYPRODUCTS "${_tensilelite_compatibility_wheel}"
-        COMMAND ${CMAKE_COMMAND} -E rm -rf "${_tensilelite_compatibility_stage}"
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${_tensilelite_compatibility_stage}"
-        COMMAND ${CMAKE_COMMAND} -E env
-            "ROCM_PATH=${HIPBLASLT_BUILD_ROCM_ROOT}"
-            "TENSILELITE_ROCM_VERSION=${HIPBLASLT_BUILD_ROCM_VERSION}"
-            -- "${Python3_EXECUTABLE}" -m pip wheel
-            --disable-pip-version-check --no-build-isolation --no-deps
-            --wheel-dir "${_tensilelite_compatibility_stage}"
-            "${_tensilelite_src}/compat"
-        COMMAND "${Python3_EXECUTABLE}"
-            "${_tensilelite_src}/scripts/check_release_wheel_contents.py"
-            --mode compatibility
-            --wheel "${_tensilelite_compatibility_stage}/tensilelite_tensile_compat-${TENSILELITE_DISTRIBUTION_VERSION}-py3-none-any.whl"
-            --expected-version "${TENSILELITE_DISTRIBUTION_VERSION}"
-            --source-root "${_tensilelite_src}"
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${_tensilelite_release_wheel_dir}"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${_tensilelite_compatibility_stage}/tensilelite_tensile_compat-${TENSILELITE_DISTRIBUTION_VERSION}-py3-none-any.whl"
-            "${_tensilelite_compatibility_wheel}"
-        COMMAND ${CMAKE_COMMAND} -E touch "${_tensilelite_compatibility_stamp}"
-        DEPENDS
-            ${_tensilelite_wheel_sources}
-            "${_tensilelite_src}/VERSION"
-            "${_tensilelite_src}/release_metadata.py"
-            "${_tensilelite_src}/compat/pyproject.toml"
-            "${_tensilelite_src}/compat/setup.py"
-            "${_tensilelite_src}/compat/MANIFEST.in"
-            "${_tensilelite_src}/compat/README.md"
-            "${_tensilelite_src}/scripts/check_release_wheel_contents.py"
-            ${_tensilelite_version_dependencies}
-        COMMENT "Building the Tensile compatibility release wheel"
-        VERBATIM
-        USES_TERMINAL
-    )
-    add_custom_target(tensilelite-compatibility-release-wheel
-        DEPENDS "${_tensilelite_compatibility_stamp}")
-    add_custom_target(tensilelite-build-release-wheels
-        DEPENDS tensilelite-canonical-release-wheel tensilelite-compatibility-release-wheel)
-    if(TARGET tensilelite-python-build-environment)
+    if(_tensilelite_needs_compatibility_wheel)
+        set(_tensilelite_compatibility_wheel
+            "${_tensilelite_release_wheel_dir}/tensilelite_tensile_compat-${TENSILELITE_DISTRIBUTION_VERSION}-py3-none-any.whl")
+        set(_tensilelite_compatibility_stage
+            "${CMAKE_CURRENT_BINARY_DIR}/tensilelite-wheel-compatibility")
+        set(_tensilelite_compatibility_stamp
+            "${_tensilelite_compatibility_stage}/.published")
+        add_custom_command(
+            OUTPUT "${_tensilelite_compatibility_stamp}"
+            BYPRODUCTS "${_tensilelite_compatibility_wheel}"
+            COMMAND ${CMAKE_COMMAND} -E rm -rf "${_tensilelite_compatibility_stage}"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${_tensilelite_compatibility_stage}"
+            COMMAND ${CMAKE_COMMAND} -E env
+                "ROCM_PATH=${HIPBLASLT_BUILD_ROCM_ROOT}"
+                "TENSILELITE_ROCM_VERSION=${HIPBLASLT_BUILD_ROCM_VERSION}"
+                -- "${Python3_EXECUTABLE}" -m pip wheel
+                --disable-pip-version-check --no-build-isolation --no-deps
+                --wheel-dir "${_tensilelite_compatibility_stage}"
+                "${_tensilelite_src}/compat"
+            COMMAND "${Python3_EXECUTABLE}"
+                "${_tensilelite_src}/scripts/check_release_wheel_contents.py"
+                --mode compatibility
+                --wheel "${_tensilelite_compatibility_stage}/tensilelite_tensile_compat-${TENSILELITE_DISTRIBUTION_VERSION}-py3-none-any.whl"
+                --expected-version "${TENSILELITE_DISTRIBUTION_VERSION}"
+                --source-root "${_tensilelite_src}"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${_tensilelite_release_wheel_dir}"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${_tensilelite_compatibility_stage}/tensilelite_tensile_compat-${TENSILELITE_DISTRIBUTION_VERSION}-py3-none-any.whl"
+                "${_tensilelite_compatibility_wheel}"
+            COMMAND ${CMAKE_COMMAND} -E touch "${_tensilelite_compatibility_stamp}"
+            DEPENDS
+                ${_tensilelite_wheel_sources}
+                "${_tensilelite_src}/VERSION"
+                "${_tensilelite_src}/release_metadata.py"
+                "${_tensilelite_src}/compat/pyproject.toml"
+                "${_tensilelite_src}/compat/setup.py"
+                "${_tensilelite_src}/compat/MANIFEST.in"
+                "${_tensilelite_src}/compat/README.md"
+                "${_tensilelite_src}/scripts/check_release_wheel_contents.py"
+                ${_tensilelite_version_dependencies}
+            COMMENT "Building the Tensile compatibility release wheel"
+            VERBATIM
+            USES_TERMINAL
+        )
+        add_custom_target(tensilelite-compatibility-release-wheel
+            DEPENDS "${_tensilelite_compatibility_stamp}")
+        add_custom_target(tensilelite-build-release-wheels
+            DEPENDS tensilelite-canonical-release-wheel tensilelite-compatibility-release-wheel)
+    endif()
+
+    if(TARGET tensilelite-python-build-environment AND TARGET tensilelite-canonical-release-wheel)
         add_dependencies(tensilelite-python-build-environment
             tensilelite-canonical-release-wheel)
     endif()
@@ -889,6 +896,14 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
         COMPONENT tests
         OPTIONAL
     )
+
+    if(TENSILELITE_ENABLE_CLIENT)
+        install(
+            TARGETS tensilelite-client
+            RUNTIME DESTINATION "${CMAKE_INSTALL_LIBEXECDIR}/hipblaslt/tensilelite"
+            COMPONENT tests
+        )
+    endif()
 
 endif()
 

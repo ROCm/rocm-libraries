@@ -17,7 +17,7 @@
     {
       "name": "tensilelite",
       "displayName": "TensileLite",
-      "description": "Configures just tensilelite host and client",
+      "description": "Configures just device-library generation",
       "inherits": "default:release",
       "cacheVariables": {
         "HIPBLASLT_BUILD_TESTING": "OFF",
@@ -68,8 +68,8 @@
         "HIPBLASLT_ENABLE_HOST": "OFF",
         "HIPBLASLT_ENABLE_DEVICE": "ON",
         "HIPBLASLT_ENABLE_CLIENT": "OFF",
-        "TENSILELITE_ENABLE_HOST": "ON",
-        "TENSILELITE_ENABLE_CLIENT": "ON",
+        "TENSILELITE_ENABLE_HOST": "OFF",
+        "TENSILELITE_ENABLE_CLIENT": "OFF",
         "ROCISA_BUILD_PYTHON": "OFF"
       }
     },
@@ -83,7 +83,7 @@
         "HIPBLASLT_ENABLE_DEVICE": "ON",
         "HIPBLASLT_ENABLE_CLIENT": "ON",
         "TENSILELITE_ENABLE_HOST": "ON",
-        "TENSILELITE_ENABLE_CLIENT": "ON",
+        "TENSILELITE_ENABLE_CLIENT": "OFF",
         "HIPBLASLT_ENABLE_SAMPLES": "OFF"
       }
     },
