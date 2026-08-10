@@ -125,6 +125,60 @@ if(UNIX AND NOT APPLE)
     COMMAND abi03_interpose_test negative)
 endif()
 
+if(UNIX AND NOT APPLE)
+  function(add_abi04_provider target abi_ver soname version_script bsymbolic)
+    add_library(${target} SHARED abi03_fixture_rocblas.cpp)
+    target_compile_definitions(${target} PRIVATE ABI_VER=${abi_ver})
+    target_link_options(${target} PRIVATE
+      "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/${version_script}"
+      "LINKER:-soname,${soname}")
+    if(bsymbolic)
+      target_link_options(${target} PRIVATE "LINKER:-Bsymbolic")
+    endif()
+    set_target_properties(${target} PROPERTIES
+      LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/abi04-dso
+      PREFIX "" OUTPUT_NAME "${soname}" SUFFIX "")
+  endfunction()
+
+  add_abi04_provider(abi04_rb5 5 librocblas.so.5 abi04_rb5.map OFF)
+  add_abi04_provider(abi04_rb6 6 librocblas.so.6 abi03_provA.map OFF)
+  add_abi04_provider(abi04_rb7 7 librocblas.so.7 abi03_provB.map OFF)
+  add_abi04_provider(abi04_rb6_bsym 6 librocblas_bsym.so.6 abi03_provA.map ON)
+  add_abi04_provider(abi04_rb7_bsym 7 librocblas_bsym.so.7 abi03_provB.map ON)
+
+  add_executable(abi04_versioning_test abi04_versioning_test.cpp)
+  target_link_libraries(abi04_versioning_test PRIVATE ${CMAKE_DL_LIBS})
+  add_dependencies(abi04_versioning_test
+    abi04_rb5 abi04_rb6 abi04_rb7 abi04_rb6_bsym abi04_rb7_bsym)
+
+  add_test(NAME rocm_interfaces.abi04_three_line_order
+    COMMAND abi04_versioning_test three_line
+      $<TARGET_FILE:abi04_rb5> $<TARGET_FILE:abi04_rb6> $<TARGET_FILE:abi04_rb7>)
+  add_test(NAME rocm_interfaces.abi04_bsymbolic_inert
+    COMMAND abi04_versioning_test bsymbolic
+      $<TARGET_FILE:abi04_rb6_bsym> $<TARGET_FILE:abi04_rb7_bsym>)
+
+  add_test(NAME rocm_interfaces.abi04_multiple_default_def_rejected
+    COMMAND ${CMAKE_COMMAND}
+      -DCXX=${CMAKE_CXX_COMPILER}
+      -DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/abi03_fixture_rocblas.cpp
+      -DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/abi04-dupdef
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/check_multiple_default_def.cmake)
+
+  find_program(ROCM_INTERFACES_LDCONFIG ldconfig PATHS /sbin /usr/sbin)
+  if(ROCM_INTERFACES_LDCONFIG)
+    add_test(NAME rocm_interfaces.abi04_ldconfig_stub_preserved
+      COMMAND ${CMAKE_COMMAND}
+        -DLDCONFIG=${ROCM_INTERFACES_LDCONFIG}
+        -DDSO_DIR=${CMAKE_CURRENT_BINARY_DIR}/abi04-dso
+        -DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/abi04-ldconfig
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/check_ldconfig_stub.cmake)
+  else()
+    message(STATUS
+      "abi04_ldconfig_stub: ldconfig not found, ldconfig-stub test not registered")
+  endif()
+endif()
+
 set(_lto_guard_module ${CMAKE_SOURCE_DIR}/cmake/rocm_interfaces_lto_linker_guard.cmake)
 set(_lto_guard_driver ${CMAKE_CURRENT_SOURCE_DIR}/check_lto_linker_guard.cmake)
 
