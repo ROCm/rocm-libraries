@@ -7,9 +7,9 @@ TestParameters:
 #
 # MatrixInstruction: [M, N, K, B, _, MIWT0, MIWT1, MIWG0, MIWG1]
 #
-# Problem groups:
-#   1) bf16 TN               - PGR 1/2, VectorWidthB (coarse + fine).
-#   2) mxf8 (MXFP8, block-32) - MX scales relocated after A/B; tight + aligned.
+# Problem groups (bf16 / mxf8 / mxf4). Each forks TDMSplit [False,True]:
+#   False -> bcontig-asym ([4,1]/[1,4] comp-axis); True + coarse [4,1]/[1,4] -> port-axis.
+#   Auto VectorWidth resolves to WaveTile (coarse) for these MIs, so no explicit VW is needed.
 
 GlobalParameters:
   PrintSolutionRejectionReason: True
@@ -72,7 +72,7 @@ BenchmarkProblems:
         - TDMIterateMode: [-1]
         - TDMInst: [3]
         - HalfPLR: [1]
-        - TDMSplit: [False]
+        - TDMSplit: [False, True]      # False=bcontig-asym; True+coarse [4,1]/[1,4]=port-axis
         - LDSSegmentInterleave: [-1, 0, 1]      # auto / baseline / force-on, all validated
         - PrefetchGlobalRead: [1, 2]            # PGR!=2 tight interleave coverage
         - TransposeLDS: [-1]
@@ -146,7 +146,7 @@ BenchmarkProblems:
         - TDMIterateMode: [-1]
         - TDMInst: [3]
         - HalfPLR: [3]
-        - TDMSplit: [False]
+        - TDMSplit: [False, True]      # False=bcontig-asym; True+coarse [4,1]/[1,4]=port-axis
         - LDSSegmentInterleave: [-1,0,1]
         - PrefetchGL2: [2]
         - TransposeLDS: [-1]
@@ -214,12 +214,15 @@ BenchmarkProblems:
           - [16, 16, 128, 1,  1,  8, 8,  2, 2]
           - [16, 16, 128, 1,  1,  8, 4,  2, 2]
           - [16, 16, 128, 1,  1,  8, 7,  2, 2]
+          # [4,1]/[1,4] coarse (auto VW resolves to WaveTile): TDMSplit=True -> port-axis.
+          - [16, 16, 128, 1,  1,  4, 8,  4, 1]   # MT256x128 [4,1] A active
+          - [16, 16, 128, 1,  1,  8, 4,  1, 4]   # MT128x256 [1,4] B active
         - DepthU: [512]
         - TDMIterateMode: [-1]
         - TDMInst: [3]
         - HalfPLR: [1]
         - TDMSplit: [False, True]
-        - LDSSegmentInterleave: [0,1]
+        - LDSSegmentInterleave: [-1, 0, 1]
         - PrefetchGL2: [2]
         - TransposeLDS: [-1]
         - LdsPadA: [-1]

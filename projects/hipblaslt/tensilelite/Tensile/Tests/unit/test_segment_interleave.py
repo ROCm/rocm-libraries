@@ -248,11 +248,81 @@ def test_miwg_1x4_large_tile_interleaves_not_baseline():
     assert r["offsets"]["aBaseline"] is True
 
 def test_miwg_asym_tdmsplit_not_supported():
-    # TDMSplit + asymmetric MIWaveGroup ([4,1]/[1,4]) is not supported yet -> reject
-    # (even where the fine port-split path would otherwise apply).
+    # TDMSplit + asymmetric MIWaveGroup ([4,1]/[1,4]) with a FINE active tensor is not supported
+    # yet -> reject (coarse active + TDMSplit is covered by the port-axis tests below).
     for miwg in ([4, 1], [1, 4]):
         r = evaluate(_vw8_state(MIWaveGroup=miwg, TDMSplit=1, VectorWidthA=4, VectorWidthB=4))
         assert r["applicable"] is False and "TDMSplit" in r["reason"], miwg
+
+def test_asym_4x1_coarse_tdmsplit_port_axis():
+    # Coarse A ([4,1], default VWA=8 == WaveTileA=8) + TDMSplit -> port-axis layout:
+    # [active.port0][shared][active.port1], shared (B) stays whole/baseline.
+    st = _vw8_state(MIWaveGroup=[4, 1], TDMSplit=1)
+    r = evaluate(st)
+    assert r["applicable"] and r["offsets"]["portSplitA"] is True
+    assert r["offsets"].get("bBaseline") is True
+    assert "portSplitB" not in r["offsets"]
+    # fAct=footprint(A)=66048, fSh=footprint(B)=16512 -> shared @ base+fAct, stride=fAct+2*fSh.
+    assert r["offsets"]["ldsBaseB"] == 66048
+    assert r["offsets"]["writeStrideBytes"] == 66048 + 2 * 16512
+    assert r["blockSpan"] == 0
+
+def test_asym_1x4_coarse_tdmsplit_port_axis():
+    # Mirror: coarse B ([1,4], default VWB=8 == WaveTileB=8) + TDMSplit -> port-axis, A shared.
+    st = _vw8_state(MIWaveGroup=[1, 4], TDMSplit=1)
+    r = evaluate(st)
+    assert r["applicable"] and r["offsets"]["portSplitB"] is True
+    assert r["offsets"].get("aBaseline") is True
+    assert "portSplitA" not in r["offsets"]
+    assert r["offsets"]["ldsBaseA"] == 66048
+    assert r["offsets"]["writeStrideBytes"] == 66048 + 2 * 16512
+
+def test_asym_tdmsplit_tight_reason():
+    # Coarse [4,1]+TDMSplit at DepthU=128: the shared B block already pushes port1 into the next
+    # segment (base+strideAct crosses base+fActData's segment) -> tight port-axis, no extra LDS.
+    r = evaluate(_vw8_state(MIWaveGroup=[4, 1], TDMSplit=1))
+    assert r["applicable"] is True and r["reason"] == "portaxis-asym"
+    assert r["aligned"] is False and r["blockSpan"] == 0
+    assert r["offsets"].get("portSplitA") is True
+
+def test_asym_tdmsplit_nontight_uses_aligned():
+    # Coarse [4,1]+TDMSplit, DepthU=64: fAct+2*fSh stays inside comp0's segment, so port1 does NOT
+    # cross on its own -> aligned fallback pads the port-axis stride to the next segment (grows LDS).
+    r = evaluate(_vw8_state(MIWaveGroup=[4, 1], TDMSplit=1, DepthU=64,
+                            PrefetchGlobalRead=2, LDSSegmentInterleave=1))
+    assert r["applicable"] is True and r["reason"] == "portaxis-asym-aligned"
+    assert r["aligned"] is True
+    o = r["offsets"]
+    # fAct=33024, fSh=8256, strideAct=49536 (<SEG) -> pre padded to SEG.
+    assert o.get("portSplitA") is True and o.get("bBaseline") is True
+    assert o["ldsBaseB"] == 33024 and o["writeStrideBytes"] == SEG
+    assert r["blockSpan"] == SEG + 33024               # base + pre + fAct
+
+def test_asym_tdmsplit_nontight_auto_skips():
+    # Auto (-1) refuses the LDS-growing aligned fallback for the port-axis asym branch.
+    r = evaluate(_vw8_state(MIWaveGroup=[4, 1], TDMSplit=1, DepthU=64, PrefetchGlobalRead=2))
+    assert r["applicable"] is False and "auto" in r["reason"]
+
+def test_asym_tdmsplit_nontight_needs_pgr2():
+    # The port-axis aligned fallback double-buffers -> requires PGR2.
+    r = evaluate(_vw8_state(MIWaveGroup=[4, 1], TDMSplit=1, DepthU=64,
+                            PrefetchGlobalRead=1, LDSSegmentInterleave=1))
+    assert r["applicable"] is False and "PGR" in r["reason"]
+
+def test_asym_tdmsplit_nontight_mirror_1x4_aligned():
+    # [1,4] mirror: B active, non-tight -> aligned fallback, aBaseline + portSplitB.
+    r = evaluate(_vw8_state(MIWaveGroup=[1, 4], TDMSplit=1, DepthU=64,
+                            PrefetchGlobalRead=2, LDSSegmentInterleave=1))
+    assert r["applicable"] is True and r["reason"] == "portaxis-asym-aligned"
+    o = r["offsets"]
+    assert o.get("portSplitB") is True and o.get("aBaseline") is True
+    assert o["ldsBaseA"] == 33024 and o["writeStrideBytes"] == SEG
+
+def test_asym_fine_tdmsplit_still_rejected():
+    # Fine A (VWA=2 < WaveTileA=8, not coarse) + TDMSplit: port-axis is coarse-only for now.
+    st = _vw8_state(MIWaveGroup=[4, 1], TDMSplit=1, VectorWidthA=2)
+    r = evaluate(st)
+    assert r["applicable"] is False and "TDMSplit" in r["reason"]
 
 def test_miwg_4x1_nonzero_base_no_false_baseline_shortcut():
     # fp8/fp4 LDS-transpose kernels use a half-wave shift (LdsOffsetA=4). With fActData==SEG the
