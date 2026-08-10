@@ -128,8 +128,18 @@ double JsonLogicEvaluator::evaluateDouble(const nlohmann::json& expr,
 }
 
 JsonLogicEvaluator::Value JsonLogicEvaluator::evaluate(const nlohmann::json& expr,
-                                                       const VariableContext& ctx) const
+                                                       const VariableContext& ctx,
+                                                       size_t depth) const
 {
+    // Bound the descent (RFC 0019 §7.2 "safe, bounded interpreter"; §16 lists the
+    // descriptor as author-controlled input). Without this a deeply nested expression
+    // is a stack overflow, which the tree-walk bound in TreeDataAdapter does not cover.
+    if(depth > kMaxExpressionDepth)
+    {
+        throw JsonLogicError("JsonLogic expression exceeds the maximum nesting depth of " +
+                             std::to_string(kMaxExpressionDepth));
+    }
+
     // Literal number
     if(expr.is_number())
     {
@@ -151,7 +161,7 @@ JsonLogicEvaluator::Value JsonLogicEvaluator::evaluate(const nlohmann::json& exp
             auto raw = ctx.resolve(s);
             if(!raw.has_value())
             {
-                throw JsonLogicError("Undefined variable: " + s);
+                throw UndefinedVariableError("Undefined variable: " + s);
             }
 
             // RFC 0019 §7.2 requires failing closed on a type error, not just on an
@@ -176,7 +186,7 @@ JsonLogicEvaluator::Value JsonLogicEvaluator::evaluate(const nlohmann::json& exp
         auto it = expr.begin();
         const std::string& op = it.key();
         const nlohmann::json& args = it.value();
-        return evaluateOp(op, args, ctx);
+        return evaluateOp(op, args, ctx, depth);
     }
 
     // Array: evaluate and return first element (or error)
@@ -186,7 +196,7 @@ JsonLogicEvaluator::Value JsonLogicEvaluator::evaluate(const nlohmann::json& exp
         {
             throw JsonLogicError("Empty array in expression");
         }
-        return evaluate(expr[0], ctx);
+        return evaluate(expr[0], ctx, depth + 1);
     }
 
     throw JsonLogicError("Unsupported expression type");
@@ -194,19 +204,20 @@ JsonLogicEvaluator::Value JsonLogicEvaluator::evaluate(const nlohmann::json& exp
 
 JsonLogicEvaluator::Value JsonLogicEvaluator::evaluateOp(const std::string& op,
                                                          const nlohmann::json& args,
-                                                         const VariableContext& ctx) const
+                                                         const VariableContext& ctx,
+                                                         size_t depth) const
 {
     // Ensure args is an array for most operations
     auto getArgs = [&]() -> std::vector<Value> {
         if(!args.is_array())
         {
-            return {evaluate(args, ctx)};
+            return {evaluate(args, ctx, depth + 1)};
         }
         std::vector<Value> result;
         result.reserve(args.size());
         for(const auto& arg : args)
         {
-            result.push_back(evaluate(arg, ctx));
+            result.push_back(evaluate(arg, ctx, depth + 1));
         }
         return result;
     };
@@ -452,11 +463,11 @@ JsonLogicEvaluator::Value JsonLogicEvaluator::evaluateOp(const std::string& op,
     {
         if(!args.is_array())
         {
-            return toBool(evaluate(args, ctx));
+            return toBool(evaluate(args, ctx, depth + 1));
         }
         for(const auto& arg : args)
         {
-            if(!toBool(evaluate(arg, ctx)))
+            if(!toBool(evaluate(arg, ctx, depth + 1)))
             {
                 return false;
             }
@@ -468,11 +479,11 @@ JsonLogicEvaluator::Value JsonLogicEvaluator::evaluateOp(const std::string& op,
     {
         if(!args.is_array())
         {
-            return toBool(evaluate(args, ctx));
+            return toBool(evaluate(args, ctx, depth + 1));
         }
         for(const auto& arg : args)
         {
-            if(toBool(evaluate(arg, ctx)))
+            if(toBool(evaluate(arg, ctx, depth + 1)))
             {
                 return true;
             }
@@ -500,15 +511,15 @@ JsonLogicEvaluator::Value JsonLogicEvaluator::evaluateOp(const std::string& op,
         // if/then/else chains: [cond1, val1, cond2, val2, ..., default]
         for(size_t i = 0; i + 1 < args.size(); i += 2)
         {
-            if(toBool(evaluate(args[i], ctx)))
+            if(toBool(evaluate(args[i], ctx, depth + 1)))
             {
-                return evaluate(args[i + 1], ctx);
+                return evaluate(args[i + 1], ctx, depth + 1);
             }
         }
         // If odd number of args, last is the default
         if(args.size() % 2 == 1)
         {
-            return evaluate(args[args.size() - 1], ctx);
+            return evaluate(args[args.size() - 1], ctx, depth + 1);
         }
         return false; // No default, all conditions false
     }
@@ -519,14 +530,16 @@ JsonLogicEvaluator::Value JsonLogicEvaluator::evaluateOp(const std::string& op,
         {
             throw JsonLogicError("value_or_default requires exactly 2 arguments");
         }
-        // Try to evaluate first arg; if it fails (undefined var), use default
+        // Only an absent binding falls through to the default. Catching every
+        // JsonLogicError here would turn a divide-by-zero, an arity mistake or a type
+        // error into a silent default — RFC 0019 §7.2 requires those to fail closed.
         try
         {
-            return evaluate(args[0], ctx);
+            return evaluate(args[0], ctx, depth + 1);
         }
-        catch(const JsonLogicError&)
+        catch(const UndefinedVariableError&)
         {
-            return evaluate(args[1], ctx);
+            return evaluate(args[1], ctx, depth + 1);
         }
     }
 
@@ -537,7 +550,7 @@ JsonLogicEvaluator::Value JsonLogicEvaluator::evaluateOp(const std::string& op,
         {
             throw JsonLogicError("in requires exactly 2 arguments");
         }
-        const Value needle = evaluate(args[0], ctx);
+        const Value needle = evaluate(args[0], ctx, depth + 1);
         const auto& haystack = args[1];
         if(!haystack.is_array())
         {
@@ -546,7 +559,7 @@ JsonLogicEvaluator::Value JsonLogicEvaluator::evaluateOp(const std::string& op,
         const double needleVal = toDouble(needle);
         for(const auto& item : haystack)
         {
-            if(toDouble(evaluate(item, ctx)) == needleVal)
+            if(toDouble(evaluate(item, ctx, depth + 1)) == needleVal)
             {
                 return true;
             }
@@ -577,7 +590,7 @@ JsonLogicEvaluator::Value JsonLogicEvaluator::evaluateOp(const std::string& op,
         {
             // Create temporary context with $current bound
             VariableContext tempCtx = ctx;
-            tempCtx.bind("$current", toDouble(evaluate(item, ctx)));
+            tempCtx.bind("$current", toDouble(evaluate(item, ctx, depth + 1)));
             if(!toBool(evaluate(predicate, tempCtx)))
             {
                 return false;
@@ -601,7 +614,7 @@ JsonLogicEvaluator::Value JsonLogicEvaluator::evaluateOp(const std::string& op,
         // it as a variable throws "Undefined variable" for every reference that is not
         // separately bound as a number — which made the synthesis below unreachable and
         // the operator unusable for its stated purpose.
-        const auto dim = static_cast<int>(toDouble(evaluate(args[1], ctx)));
+        const auto dim = static_cast<int>(toDouble(evaluate(args[1], ctx, depth + 1)));
 
         // Try to resolve $tensor.shape_N pattern
         if(args[0].is_string())

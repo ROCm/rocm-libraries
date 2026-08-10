@@ -359,4 +359,75 @@ TEST_F(TestJsonLogicEvaluator, UnknownOperatorThrows)
     EXPECT_THROW(_evaluator.evaluateDouble(expr, _ctx), JsonLogicError);
 }
 
+
+// ========== Bounded interpreter (RFC 0019 §7.2, §16) ==========
+
+TEST_F(TestJsonLogicEvaluator, DeeplyNestedExpressionIsRejected)
+{
+    // A descriptor is author-controlled input, so the interpreter is bounded. Without
+    // the depth limit this recurses until the stack gives out.
+    std::string expr = "1";
+    for(int i = 0; i < 512; ++i)
+    {
+        expr = R"({"+": [)" + expr + ", 0]}";
+    }
+
+    VariableContext ctx;
+    const JsonLogicEvaluator eval;
+    EXPECT_THROW(eval.evaluateDouble(JsonLogicEvaluator::parse(expr), ctx), JsonLogicError);
+}
+
+TEST_F(TestJsonLogicEvaluator, ModeratelyNestedExpressionStillEvaluates)
+{
+    // The bound must not reject expressions a real derived feature would use.
+    std::string expr = "1";
+    for(int i = 0; i < 16; ++i)
+    {
+        expr = R"({"+": [)" + expr + ", 1]}";
+    }
+
+    VariableContext ctx;
+    const JsonLogicEvaluator eval;
+    EXPECT_DOUBLE_EQ(eval.evaluateDouble(JsonLogicEvaluator::parse(expr), ctx), 17.0);
+}
+
+// ========== value_or_default only covers absent bindings (RFC 0019 §7.2) ==========
+
+TEST_F(TestJsonLogicEvaluator, ValueOrDefaultSuppliesDefaultForUnboundVariable)
+{
+    VariableContext ctx;
+    const JsonLogicEvaluator eval;
+    const auto expr = JsonLogicEvaluator::parse(R"({"value_or_default": ["$q.missing", 7]})");
+    EXPECT_DOUBLE_EQ(eval.evaluateDouble(expr, ctx), 7.0);
+}
+
+TEST_F(TestJsonLogicEvaluator, ValueOrDefaultDoesNotSwallowDivideByZero)
+{
+    // §7.2 requires failing closed on an invalid operation. Catching every
+    // JsonLogicError here would turn a genuine expression bug into a silent default.
+    VariableContext ctx;
+    ctx.bind("$q.n", 1.0);
+    const JsonLogicEvaluator eval;
+    const auto expr =
+        JsonLogicEvaluator::parse(R"({"value_or_default": [{"/": ["$q.n", 0]}, 7]})");
+    EXPECT_THROW(eval.evaluateDouble(expr, ctx), JsonLogicError);
+}
+
+TEST_F(TestJsonLogicEvaluator, ValueOrDefaultDoesNotSwallowArityErrors)
+{
+    VariableContext ctx;
+    const JsonLogicEvaluator eval;
+    const auto expr = JsonLogicEvaluator::parse(R"({"value_or_default": [{"pow": [2]}, 7]})");
+    EXPECT_THROW(eval.evaluateDouble(expr, ctx), JsonLogicError);
+}
+
+TEST_F(TestJsonLogicEvaluator, ValueOrDefaultDoesNotSwallowTypeErrors)
+{
+    VariableContext ctx;
+    ctx.bind("$q.name", std::string("gfx942"));
+    const JsonLogicEvaluator eval;
+    const auto expr = JsonLogicEvaluator::parse(R"({"value_or_default": ["$q.name", 7]})");
+    EXPECT_THROW(eval.evaluateDouble(expr, ctx), JsonLogicError);
+}
+
 } // namespace

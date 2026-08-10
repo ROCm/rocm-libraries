@@ -25,6 +25,17 @@ public:
     using std::runtime_error::runtime_error;
 };
 
+/// @brief Thrown specifically when a `$ref` names a variable that is not bound.
+///
+/// Distinguished from the other JsonLogicError cases so `value_or_default` can supply
+/// its default for an absent binding without also swallowing a type error or an
+/// invalid operation — RFC 0019 §7.2 requires those to fail closed.
+class UndefinedVariableError : public JsonLogicError
+{
+public:
+    using JsonLogicError::JsonLogicError;
+};
+
 /// @brief Variable resolution context for JsonLogic evaluation.
 ///
 /// Provides bindings for $device.*, $kernel.*, and $q.* namespaces.
@@ -93,7 +104,16 @@ public:
     double evaluateDouble(const nlohmann::json& expr, const VariableContext& ctx) const;
 
     /// Evaluate an expression to a generic value.
-    Value evaluate(const nlohmann::json& expr, const VariableContext& ctx) const;
+    /// Evaluate an expression to a generic value.
+    /// @param depth Current recursion depth; the interpreter is bounded per RFC 0019
+    ///        §7.2/§16, since a descriptor is author-controlled input and a deeply
+    ///        nested expression would otherwise overflow the stack.
+    Value evaluate(const nlohmann::json& expr,
+                   const VariableContext& ctx,
+                   size_t depth = 0) const;
+
+    /// Maximum expression nesting the interpreter will descend.
+    static constexpr size_t kMaxExpressionDepth = 64;
 
     /// Extract all variable references from an expression.
     /// Returns variable names (e.g., "$device.cu_count", "$kernel.tile_m").
@@ -102,7 +122,8 @@ public:
 private:
     Value evaluateOp(const std::string& op,
                      const nlohmann::json& args,
-                     const VariableContext& ctx) const;
+                     const VariableContext& ctx,
+                     size_t depth) const;
 
     static double toDouble(const Value& v);
     static bool toBool(const Value& v);
