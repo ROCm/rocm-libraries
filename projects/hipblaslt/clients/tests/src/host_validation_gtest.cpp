@@ -756,6 +756,76 @@ TEST(HostValidationCblasBridge, SaturatesRoundedInt8Output)
     EXPECT_EQ(d[0], 127);
 }
 
+TEST(HostValidationCblasBridge, ZeroScalarsSuppressNonFiniteInputs)
+{
+    const float nan      = std::numeric_limits<float>::quiet_NaN();
+    const float infinity = std::numeric_limits<float>::infinity();
+    const float finiteC  = 3.0f;
+    std::array<float, 1> output{};
+
+    hipblaslt_reference_gemm<float>(HIPBLAS_OP_N,
+                                    HIPBLAS_OP_N,
+                                    1,
+                                    1,
+                                    1,
+                                    0.0f,
+                                    &nan,
+                                    1,
+                                    &infinity,
+                                    1,
+                                    2.0f,
+                                    &finiteC,
+                                    1,
+                                    output.data(),
+                                    1,
+                                    nullptr,
+                                    nullptr,
+                                    nullptr,
+                                    1.0f,
+                                    false,
+                                    false,
+                                    HIP_R_32F,
+                                    HIP_R_32F,
+                                    HIP_R_32F,
+                                    HIP_R_32F,
+                                    HIP_R_32F,
+                                    HIP_R_32F,
+                                    HIP_R_32F);
+    EXPECT_EQ(output[0], 6.0f);
+
+    const float a = 2.0f;
+    const float b = 4.0f;
+    hipblaslt_reference_gemm<float>(HIPBLAS_OP_N,
+                                    HIPBLAS_OP_N,
+                                    1,
+                                    1,
+                                    1,
+                                    1.0f,
+                                    &a,
+                                    1,
+                                    &b,
+                                    1,
+                                    0.0f,
+                                    &infinity,
+                                    1,
+                                    output.data(),
+                                    1,
+                                    nullptr,
+                                    nullptr,
+                                    nullptr,
+                                    1.0f,
+                                    false,
+                                    false,
+                                    HIP_R_32F,
+                                    HIP_R_32F,
+                                    HIP_R_32F,
+                                    HIP_R_32F,
+                                    HIP_R_32F,
+                                    HIP_R_32F,
+                                    HIP_R_32F);
+    EXPECT_EQ(output[0], 8.0f);
+}
+
 TEST(HostValidationCblasBridge, IntegerComputeUsesWideReferenceAndSaturatingOutput)
 {
     const std::array<int8_t, 2> a{100, 100};

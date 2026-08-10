@@ -128,7 +128,7 @@ int main() {
         MutableTensorView::fromNative<int8_t>(Layout::contiguous(Shape{1, 1}),
                                               std::span<int8_t>(saturatingD)),
         ScalarType::Float32);
-    saturatingProblem.epilogue.outputConversion = GemmOutputConversion::SaturatingInt8;
+    saturatingProblem.epilogue.outputConversion = OutputConversion::SaturatingInt8;
     referenceGemm(saturatingProblem, {
                                          .backend = GemmBackend::Blas,
                                          .requireRequestedBackend = true,
