@@ -3774,6 +3774,9 @@ rocblas_status rocsolver_lacn2_template(rocblas_handle handle,
 }
 
 // Trapezoidal matrix-vector multiply (no transpose)
+// Performs
+//    y := alpha * A * x + beta * y,
+// where alpha and beta are scalars, x and y are vectors, and A is an m by n trapezoidal matrix.
 // (modified rocblas_trmvn_kernel from rocBLAS)
 // (grid = dim3(ceil(m / DIM_X), 1, batch_count), block = dim3(DIM_X, DIM_Y))
 template <rocblas_int DIM_X, rocblas_int DIM_Y, bool LOWER, bool UNIT, typename T, typename V, typename U1, typename U2, typename U3>
@@ -3850,6 +3853,10 @@ ROCSOLVER_KERNEL void __launch_bounds__(DIM_X* DIM_Y)
 }
 
 // Trapezoidal matrix-vector multiply (transpose / conjugate transpose)
+// Performs
+//    y := alpha * A^T * x + beta * y, (CONJ = false) or
+//    y := alpha * A^H * x + beta * y, (CONJ = true)
+// where alpha and beta are scalars, x and y are vectors, and A is an m by n trapezoidal matrix.
 // (grid = dim3(n, 1, batch_count), block = dim3(DIM_X))
 template <rocblas_int DIM_X, bool LOWER, bool UNIT, bool CONJ, typename T, typename V, typename U1, typename U2, typename U3>
 ROCSOLVER_KERNEL void __launch_bounds__(DIM_X) rocsolver_tzmvt_kernel(rocblas_int m,

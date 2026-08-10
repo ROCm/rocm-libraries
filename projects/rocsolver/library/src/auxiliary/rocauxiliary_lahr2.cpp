@@ -123,7 +123,7 @@ extern "C" {
     The reduced form is given by:
 
     \f[
-        B = Q'  A  Q
+        B = Q^H  A  Q
     \f]
 
     where the elements of B below the k-th subdiagonal are zero and Q is an orthogonal
@@ -139,7 +139,7 @@ extern "C" {
     matrix \f$H(i)\f$ is given by
 
     \f[
-        H(i) = I - \text{tau}[i] \cdot v_i^{} v_i'
+        H(i) = I - \text{tau}[i] \cdot v_i^{} v_i^H
     \f]
 
     where \f$\text{tau}[i]\f$ is the corresponding Householder scalar and the first \f$k+i\f$
@@ -148,7 +148,7 @@ extern "C" {
     LAHR2 returns the triangular factor ``T`` that is upper triangular where
 
     \f[
-        H = I - VTV'
+        H = I - VTV^H
     \f]
 
     and matrix ``Y`` that is given by
