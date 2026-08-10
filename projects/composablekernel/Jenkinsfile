@@ -268,10 +268,6 @@ pipeline {
         DOCKER_BUILDKIT = "1"
         BUILD_GFX103 = "${env.BRANCH_NAME == 'develop' ? true : false}"
     }
-    ws{
-        // Explicitly add the build number to the workspace path to avoid conflicts
-        // when the same branch builds multiple times on the same machine in parallel
-        ws("${env.WORKSPACE}-${env.BUILD_NUMBER}")
     stages{
         stage("Determine CI Execution") {
             agent none
@@ -929,7 +925,6 @@ pipeline {
                 }
             }
         }
-    }
     }
     post {
         success {

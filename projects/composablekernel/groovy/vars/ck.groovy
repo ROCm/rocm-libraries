@@ -547,6 +547,9 @@ def runOnHealthyNode(String label, Closure body) {
         def attemptNode = null
         try {
             node(exclude(label, excluded)) {
+                // Explicitly add the build number to the workspace path to avoid conflicts
+                // when the same branch builds multiple times on the same machine in parallel
+                customWorkspace "${env.WORKSPACE}-${env.BUILD_NUMBER}"
                 attemptNode = env.NODE_NAME
                 echo "Node attempt ${attempt + 1}/${nodeAttempts} on ${attemptNode}"
                 // Derive GPU requirement from the node label: only "nogpu" stages
@@ -554,6 +557,7 @@ def runOnHealthyNode(String label, Closure body) {
                 // adding here (otherwise preflight would wrongly demand a GPU).
                 preflight(!label.contains('nogpu'))
                 runInPlace(body, transientRetries)
+                }
             }
             return
         }
