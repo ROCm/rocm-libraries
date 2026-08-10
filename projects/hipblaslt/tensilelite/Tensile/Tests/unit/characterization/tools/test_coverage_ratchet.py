@@ -4,8 +4,10 @@
 
 These lock the ratchet's decision logic: a per-file drop beyond tolerance is a
 regression, a rise or an in-tolerance wobble is not, removed/added files are
-handled, and malformed input is a setup error rather than a false "pass". The
-ratchet is the enforcement mechanism, so its own behavior must be pinned.
+handled, and malformed input is a setup error rather than a false "pass". They
+also lock the direction ``update`` may move a floor: never down unless that file
+was named, so moving one floor cannot reset the others. The ratchet is the
+enforcement mechanism, so its own behavior must be pinned.
 """
 
 import argparse
@@ -126,18 +128,16 @@ def test_default_tolerance_absorbs_sub_arc_noise():
     # fail the gate.
     baseline = {"Tensile/Contractions.py": 88.16}
     current = {"Tensile/Contractions.py": 88.05}
-    assert (
-        ratchet.find_regressions(baseline, current, ratchet.DEFAULT_TOLERANCE) == []
-    )
+    assert ratchet.find_regressions(baseline, current, ratchet.DEFAULT_TOLERANCE) == []
 
 
 def test_default_tolerance_still_catches_a_real_regression():
     # The buffer is wide, not absent: a drop past it is still a failure.
     baseline = {"a.py": 90.0}
     current = {"a.py": 88.5}  # 1.5 pp, past the 1 pp buffer
-    assert ratchet.find_regressions(
-        baseline, current, ratchet.DEFAULT_TOLERANCE
-    ) == [("a.py", 90.0, 88.5)]
+    assert ratchet.find_regressions(baseline, current, ratchet.DEFAULT_TOLERANCE) == [
+        ("a.py", 90.0, 88.5)
+    ]
 
 
 def test_committed_baseline_tolerance_matches_the_default():
@@ -165,6 +165,80 @@ def test_write_baseline_creates_missing_parent_dir(tmp_path):
     out = tmp_path / "nested" / "coverage-baseline.json"
     ratchet.write_baseline({"a.py": 50.0}, out, tolerance=0.1)
     assert out.is_file()
+
+
+# --------------------------------------------------------------------------- #
+# ratchet_floors (update only ever strengthens the baseline)                   #
+# --------------------------------------------------------------------------- #
+def test_floor_rises_to_current():
+    floors, refused = ratchet.ratchet_floors({"a.py": 80.0}, {"a.py": 91.0})
+    assert floors == {"a.py": 91.0}
+    assert refused == []
+
+
+def test_floor_is_held_when_current_is_lower():
+    floors, refused = ratchet.ratchet_floors({"a.py": 80.0}, {"a.py": 61.0})
+    assert floors == {"a.py": 80.0}  # unchanged, not 61.0
+    assert refused == [("a.py", 80.0, 61.0)]
+
+
+def test_new_file_is_pinned_at_current():
+    floors, refused = ratchet.ratchet_floors({}, {"new.py": 42.0})
+    assert floors == {"new.py": 42.0}
+    assert refused == []
+
+
+def test_named_file_is_lowered():
+    floors, refused = ratchet.ratchet_floors(
+        {"a.py": 80.0}, {"a.py": 61.0}, allow_lower=["a.py"]
+    )
+    assert floors == {"a.py": 61.0}
+    assert refused == []
+
+
+def test_lowering_one_file_does_not_lower_another():
+    # The regression this whole mechanism exists for: an update run to move one
+    # file's floor must not quietly reset every other file to whatever the
+    # coverage run on disk happened to measure.
+    existing = {"named.py": 90.0, "bystander.py": 88.0}
+    current = {"named.py": 70.0, "bystander.py": 60.0}
+    floors, refused = ratchet.ratchet_floors(
+        existing, current, allow_lower=["named.py"]
+    )
+    assert floors["named.py"] == 70.0  # lowered, because it was named
+    assert floors["bystander.py"] == 88.0  # held, because it was not
+    assert refused == [("bystander.py", 88.0, 60.0)]
+
+
+def test_sub_precision_dip_is_not_a_fall():
+    # The baseline is written to 2 dp, so a difference it cannot represent must
+    # not count as lowering the floor (otherwise update refuses on float noise).
+    floors, refused = ratchet.ratchet_floors({"a.py": 73.39}, {"a.py": 73.3899})
+    assert floors == {"a.py": 73.39}
+    assert refused == []
+
+
+def test_multiple_refusals_sorted_biggest_drop_first():
+    existing = {"a.py": 90.0, "b.py": 90.0}
+    current = {"a.py": 88.0, "b.py": 70.0}
+    _, refused = ratchet.ratchet_floors(existing, current)
+    assert [row[0] for row in refused] == ["b.py", "a.py"]
+
+
+# --------------------------------------------------------------------------- #
+# remediation                                                                 #
+# --------------------------------------------------------------------------- #
+def test_remediation_names_every_offending_file():
+    text = ratchet.remediation(["pkg/a.py", "pkg/b.py"])
+    assert "--allow-lower pkg/a.py" in text
+    assert "--allow-lower pkg/b.py" in text
+
+
+def test_remediation_does_not_suggest_a_blanket_reset():
+    # The printed command must be copy-pasteable without also lowering files the
+    # developer never looked at, so it always carries an explicit file list.
+    text = ratchet.remediation(["pkg/a.py"])
+    assert "update --current coverage.json\n" not in text
 
 
 # --------------------------------------------------------------------------- #
@@ -197,6 +271,7 @@ def test_cmd_check_fails_and_names_offender(tmp_path, capsys):
     err = capsys.readouterr().err
     assert "pkg/a.py" in err
     assert "coverage_ratchet.py" in err  # remediation command is printed
+    assert "--allow-lower pkg/a.py" in err  # and it names only this file
 
 
 def test_cmd_check_missing_current_does_not_mask_upstream_failure(tmp_path, capsys):
@@ -249,7 +324,12 @@ def test_cmd_update_then_check_is_green(tmp_path):
     current = _write(tmp_path / "cov.json", _cov_json({"a.py": 73.4, "b.py": 100.0}))
     assert (
         ratchet.cmd_update(
-            _args(baseline=str(baseline), current=str(current), tolerance=None)
+            _args(
+                baseline=str(baseline),
+                current=str(current),
+                tolerance=None,
+                allow_lower=None,
+            )
         )
         == 0
     )
@@ -260,6 +340,96 @@ def test_cmd_update_then_check_is_green(tmp_path):
         )
         == 0
     )
+
+
+def _update_args(baseline, current, allow_lower=None):
+    return _args(
+        baseline=str(baseline),
+        current=str(current),
+        tolerance=None,
+        allow_lower=allow_lower,
+    )
+
+
+def test_cmd_update_refuses_to_lower_and_leaves_the_baseline_alone(tmp_path, capsys):
+    baseline = _write(
+        tmp_path / "base.json", {"tolerance": 1.0, "files": {"pkg/a.py": 90.0}}
+    )
+    before = baseline.read_bytes()
+    current = _write(tmp_path / "cov.json", _cov_json({"pkg/a.py": 70.0}))
+
+    assert ratchet.cmd_update(_update_args(baseline, current)) == 1
+    assert baseline.read_bytes() == before  # nothing written on refusal
+
+    err = capsys.readouterr().err
+    assert "refusing to lower" in err
+    assert "--allow-lower pkg/a.py" in err  # the exact flag to add
+
+
+def test_cmd_update_lowers_only_the_named_file(tmp_path):
+    baseline = _write(
+        tmp_path / "base.json",
+        {"tolerance": 1.0, "files": {"pkg/a.py": 90.0, "pkg/b.py": 88.0}},
+    )
+    current = _write(
+        tmp_path / "cov.json", _cov_json({"pkg/a.py": 70.0, "pkg/b.py": 95.0})
+    )
+
+    rc = ratchet.cmd_update(_update_args(baseline, current, allow_lower=["pkg/a.py"]))
+    assert rc == 0
+
+    saved = json.loads(baseline.read_text(encoding="utf-8"))["files"]
+    assert saved == {"pkg/a.py": 70.0, "pkg/b.py": 95.0}
+
+
+def test_cmd_update_warns_when_allow_lower_names_an_unknown_path(tmp_path, capsys):
+    # A typo'd path authorizes nothing. Saying so out loud keeps it from looking
+    # like the drop was reviewed and accepted.
+    baseline = _write(
+        tmp_path / "base.json", {"tolerance": 1.0, "files": {"pkg/a.py": 50.0}}
+    )
+    current = _write(tmp_path / "cov.json", _cov_json({"pkg/a.py": 60.0}))
+
+    rc = ratchet.cmd_update(
+        _update_args(baseline, current, allow_lower=["pkg/typo.py"])
+    )
+    assert rc == 0
+    assert "pkg/typo.py" in capsys.readouterr().err
+
+
+def test_main_update_refusal_returns_one(tmp_path):
+    baseline = _write(
+        tmp_path / "base.json", {"tolerance": 1.0, "files": {"a.py": 90.0}}
+    )
+    current = _write(tmp_path / "cov.json", _cov_json({"a.py": 50.0}))
+    rc = ratchet.main(
+        ["update", "--baseline", str(baseline), "--current", str(current)]
+    )
+    assert rc == 1
+
+
+def test_main_update_accepts_repeated_allow_lower(tmp_path):
+    baseline = _write(
+        tmp_path / "base.json",
+        {"tolerance": 1.0, "files": {"a.py": 90.0, "b.py": 90.0}},
+    )
+    current = _write(tmp_path / "cov.json", _cov_json({"a.py": 50.0, "b.py": 50.0}))
+    rc = ratchet.main(
+        [
+            "update",
+            "--baseline",
+            str(baseline),
+            "--current",
+            str(current),
+            "--allow-lower",
+            "a.py",
+            "--allow-lower",
+            "b.py",
+        ]
+    )
+    assert rc == 0
+    saved = json.loads(baseline.read_text(encoding="utf-8"))["files"]
+    assert saved == {"a.py": 50.0, "b.py": 50.0}
 
 
 def test_main_check_regression_returns_one(tmp_path):
