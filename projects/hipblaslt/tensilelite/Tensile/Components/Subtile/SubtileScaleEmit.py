@@ -200,7 +200,7 @@ def emitScaleGRPtrUpdate(ti, writer, kernel):
   module = Module()
   tc = ti.tc
 
-  useTdmForScale = writer.states.asmCaps["HasTDM"]
+  useTdmForScale = getattr(writer.states, "asmCaps", {}).get("HasTDM", False)
 
   if useTdmForScale:
     # TDM path (gfx1250): advance Address{tc} and sync descriptor for MXSA.
@@ -236,7 +236,7 @@ def emitScaleGRLDSSwap(ti, writer, kernel):
   module = Module()
   tc = ti.tc
 
-  useTdmForScale = writer.states.asmCaps["HasTDM"]
+  useTdmForScale = getattr(writer.states, "asmCaps", {}).get("HasTDM", False)
 
   if useTdmForScale:
     # TDM path (gfx1250): only swap for MXSA.  MXSB is aliased onto the
@@ -466,7 +466,7 @@ def globalReadDoScaleSubtile(tc, writer, kernel):
 
   # gfx1250 does not support buffer_load with lds modifier; use TDM
   # tensor_load_to_lds instead. gfx950 continues using SRD buffer loads.
-  useTdmForScale = writer.states.asmCaps["HasTDM"]
+  useTdmForScale = getattr(writer.states, "asmCaps", {}).get("HasTDM", False)
 
   if useTdmForScale:
     return _globalReadDoScaleSubtileTDM(tc, writer, kernel)
@@ -595,7 +595,7 @@ def emitSubtileScaleDsRead(tc, writer, kernel, scaleGroupIdx):
   # Each ds_load_b32 reads dimk bytes per lane.  Group stride = lanes * dimk
   # advances to the next batch of 32 M-rows within the same K-tile.
   wavelen = kernel["WavefrontSize"]
-  isWave32Gfx1250 = (wavelen == 32 and writer.states.asmCaps["HasTDM"])
+  isWave32Gfx1250 = (wavelen == 32 and getattr(writer.states, "asmCaps", {}).get("HasTDM", False))
   if isWave32Gfx1250:
     parentTc = tc[-1]
     mxBlock = kernel["ProblemType"][f"MXBlock{parentTc}"]
@@ -626,7 +626,7 @@ def localReadDoScaleSubtile(tc, writer, kernel):
   # For wave32 gfx1250: each ds_load covers wavelen M-rows.
   # numGroups = perWaveRows / wavelen (M-dimension groups).
   wavelen = kernel["WavefrontSize"]
-  isWave32Gfx1250 = (wavelen == 32 and writer.states.asmCaps["HasTDM"])
+  isWave32Gfx1250 = (wavelen == 32 and getattr(writer.states, "asmCaps", {}).get("HasTDM", False))
   if isWave32Gfx1250:
     parentTc = tc[-1]
     ti = 0 if parentTc == 'A' else 1
@@ -820,7 +820,7 @@ def _initTDMDescriptorMXScaleSubtile(writer, kernel, scaleTc):
 def globalReadScaleSwizzledDTLInitCommonSgpr(writer, kernel):
   module = Module()
 
-  useTdmForScale = writer.states.asmCaps["HasTDM"]
+  useTdmForScale = getattr(writer.states, "asmCaps", {}).get("HasTDM", False)
 
   if useTdmForScale:
     # gfx1250: init TDM descriptors for MX scales using subtile LDS layout.

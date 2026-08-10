@@ -51,6 +51,22 @@ from ...Common.DataType import DataType
 # 1. Dispatch bases
 ################################################################################
 
+
+def _setGlobalAddrOrInline(writer, module, group0, addrSgpr):
+  """Set TDM descriptor global addr via TDM component, with inline fallback."""
+  try:
+    from ...Components.TensorDataMover import TensorDataMoverLoad
+    comp = TensorDataMoverLoad.find(writer)
+  except Exception:
+    comp = None
+  if comp is not None:
+    module.add(comp.setGlobalAddr(group0, addrSgpr))
+  else:
+    module.add(SMovB64(dst=sgpr("%s+2" % group0, 2), src=sgpr(addrSgpr, 2),
+               comment="sync descriptor global addr"))
+    module.add(SOrB32(dst=sgpr("%s+3" % group0), src0=sgpr("%s+3" % group0),
+               src1=hex(2 << 30), comment="restore type field"))
+
 @singledispatch
 def _emitGlobalReadOffset(tag, tile, ti, writer, kernel):
   raise NotImplementedError(f"emitGlobalReadOffset not implemented for {type(tag).__name__}")
@@ -533,12 +549,10 @@ def _emitGRPtrUpdate_TLU0(tag, tile, ti, writer, kernel):
     module.add(SAddU64(dst=sgpr("Address%s" % tc, 2), src0=sgpr("Address%s" % tc, 2), src1=inc))
     # When B's Group0 is aliased onto A, don't sync B's addr to the
     # descriptor (it holds A's addr). B's addr is patched at load time.
-    _bAliased = (tc == 'B' and kernel["NumWaves"] > 1)
+    _bAliased = (tc == 'B' and kernel.get("NumWaves", 1) > 1)
     if not _bAliased:
-      from ...Components.TensorDataMover import TensorDataMoverLoad
-      comp = TensorDataMoverLoad.find(writer)
       group0 = "tdm%sGroup0" % tc
-      module.add(comp.setGlobalAddr(group0, "Address%s" % tc))
+      _setGlobalAddrOrInline(writer, module, group0, "Address%s" % tc)
     return module
 
   module = Module(f"GR Ptr Update ({tc})")
@@ -894,7 +908,7 @@ def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1):
       # When B's Group0 is aliased onto A (NumWaves > 1), patch the shared
       # Group0 with B's global addr and LDS addr before the load, then
       # restore A's state. Group1 is separate and already has B's fields.
-      _bAliased = (tc == 'B' and kernel["NumWaves"] > 1)
+      _bAliased = (tc == 'B' and kernel.get("NumWaves", 1) > 1)
       if _bAliased:
         module.addComment0("TDM B: patch aliased Group0 (A->B)")
         module.add(SMovB64(dst=sgpr("%s+2" % group0, 2), src=sgpr("AddressB", 2),
@@ -1016,7 +1030,7 @@ def globalReadLDSBufferSwap(tc, writer, kernel):
       module.add(SXorB32(dst=sgpr(ldsAddrSgpr), src0=sgpr(ldsAddrSgpr), src1=sgpr(swapSgpr), comment=""))
       # When B's Group0 is aliased onto A, only update the tracking SGPR.
       # The descriptor is patched with B's LDS addr at load time.
-      _bAliased = (tc == 'B' and kernel["NumWaves"] > 1)
+      _bAliased = (tc == 'B' and kernel.get("NumWaves", 1) > 1)
       if not _bAliased:
         group0 = "tdm%sGroup0" % tc
         module.add(SMovB32(dst=sgpr("%s+1" % group0), src=sgpr(ldsAddrSgpr), comment="sync descriptor LDS addr"))
@@ -1141,7 +1155,7 @@ def initTDMDescriptorSubtile(writer, kernel, tP):
 
   # When B's Group0 is aliased onto A, skip Group0 init (it would clobber
   # A's live descriptor). Only init B's separate Group1.
-  _bAliased = (tc == 'B' and kernel["NumWaves"] > 1)
+  _bAliased = (tc == 'B' and kernel.get("NumWaves", 1) > 1)
   if not _bAliased:
     mod.add(comp.initOperands(descSgprName(0), descSgprName(1), None, None))
     mod.add(comp.setGlobalAddr(descSgprName(0), f"Address{tc}"))
@@ -1280,11 +1294,9 @@ def tdmApplyStreamKOffsetSubtile(writer, kernel, tP):
   # When B's Group0 is aliased onto A, skip the descriptor sync for B —
   # the inline patch before each B tensor_load_to_lds will pick up the
   # updated AddressB.  Syncing here would clobber A's live descriptor.
-  _bAliased = (tc == 'B' and kernel["NumWaves"] > 1)
+  _bAliased = (tc == 'B' and kernel.get("NumWaves", 1) > 1)
   if not _bAliased:
-    from ...Components.TensorDataMover import TensorDataMoverLoad
-    _comp = TensorDataMoverLoad.find(writer)
-    mod.add(_comp.setGlobalAddr(group0, f"Address{tc}"))
+    _setGlobalAddrOrInline(writer, mod, group0, f"Address{tc}")
   return mod
 
 ##################################################
