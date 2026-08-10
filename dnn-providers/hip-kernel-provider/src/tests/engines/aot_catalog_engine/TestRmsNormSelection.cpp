@@ -139,7 +139,7 @@ void expectMatches(const std::vector<_Float16>& hostY, const std::vector<float>&
 }
 
 // Fixture holding the device buffers + a stream; hosts X/Gamma and the CPU ref.
-class RmsNormSelectionTest : public ::testing::Test
+class TestRmsNormSelection : public ::testing::Test
 {
 protected:
     void SetUp() override
@@ -614,7 +614,7 @@ bool allRuntimeN(const std::vector<std::string>& symbols)
 } // namespace
 
 // The N=2048 family exposes multiple perf variants that all match one problem.
-TEST_F(RmsNormSelectionTest, MultipleCandidatesForOneProblem)
+TEST_F(TestRmsNormSelection, MultipleCandidatesForOneProblem)
 {
     const catalog::Catalog cat = catalog::Catalog::loadForDevice(kCatalogDir, kArch);
     if(cat.empty())
@@ -643,7 +643,7 @@ TEST_F(RmsNormSelectionTest, MultipleCandidatesForOneProblem)
 
 // First execute tunes (records a winner among the candidates) and is correct;
 // the second execute hits the cache and stays correct.
-TEST_F(RmsNormSelectionTest, TunesRecordsAndCaches)
+TEST_F(TestRmsNormSelection, TunesRecordsAndCaches)
 {
     const catalog::Catalog cat = catalog::Catalog::loadForDevice(kCatalogDir, kArch);
     if(cat.empty())
@@ -692,7 +692,7 @@ TEST_F(RmsNormSelectionTest, TunesRecordsAndCaches)
 
 // Every shipped perf variant is individually numerically correct (each built as
 // a single-candidate plan, exercising the no-tuning launch path per symbol).
-TEST_F(RmsNormSelectionTest, EachVariantIsCorrect)
+TEST_F(TestRmsNormSelection, EachVariantIsCorrect)
 {
     const catalog::Catalog cat = catalog::Catalog::loadForDevice(kCatalogDir, kArch);
     if(cat.empty())
@@ -734,7 +734,7 @@ TEST_F(RmsNormSelectionTest, EachVariantIsCorrect)
 
 // On the listed N=2048 the runtime-N kernels join the static specializations
 // as candidates, the tuner records a valid winner, and output is correct.
-TEST(RmsNormRuntimeN, N2048CompetesWithSpecializations)
+TEST(TestRmsNormRuntimeN, N2048CompetesWithSpecializations)
 {
     if(!gpuIsArch(kArch))
     {
@@ -759,7 +759,7 @@ TEST(RmsNormRuntimeN, N2048CompetesWithSpecializations)
 
 // Flux hidden size 3072 is unlisted by the static family, so ONLY the
 // runtime-N kernels match -- and they are numerically correct.
-TEST(RmsNormRuntimeN, N3072RuntimeNOnly)
+TEST(TestRmsNormRuntimeN, N3072RuntimeNOnly)
 {
     if(!gpuIsArch(kArch))
     {
@@ -783,7 +783,7 @@ TEST(RmsNormRuntimeN, N3072RuntimeNOnly)
 // SD3.5 hidden size 2432 (also unlisted, also a multiple of 8): runtime-N is
 // again the sole match and correct. Covers a second real-workload shape that
 // no static specialization ships.
-TEST(RmsNormRuntimeN, N2432RuntimeNOnly)
+TEST(TestRmsNormRuntimeN, N2432RuntimeNOnly)
 {
     if(!gpuIsArch(kArch))
     {
@@ -812,7 +812,7 @@ TEST(RmsNormRuntimeN, N2432RuntimeNOnly)
 
 // N=2048 bf16: the four static specializations + two runtime-N variants all
 // match, the tuner records a valid winner, and output is correct.
-TEST(RmsNormBf16, N2048CompetesWithSpecializations)
+TEST(TestRmsNormBf16, N2048CompetesWithSpecializations)
 {
     if(!gpuIsArch(kArch))
     {
@@ -837,7 +837,7 @@ TEST(RmsNormBf16, N2048CompetesWithSpecializations)
 
 // N=4096 bf16 (LTX text-projection hidden size): static specializations +
 // runtime-N variants match, and output is correct.
-TEST(RmsNormBf16, N4096CompetesWithSpecializations)
+TEST(TestRmsNormBf16, N4096CompetesWithSpecializations)
 {
     if(!gpuIsArch(kArch))
     {
@@ -859,7 +859,7 @@ TEST(RmsNormBf16, N4096CompetesWithSpecializations)
 }
 
 // An unlisted bf16 N=3072: only the runtime-N kernels match, and correct.
-TEST(RmsNormBf16, N3072RuntimeNOnly)
+TEST(TestRmsNormBf16, N3072RuntimeNOnly)
 {
     if(!gpuIsArch(kArch))
     {

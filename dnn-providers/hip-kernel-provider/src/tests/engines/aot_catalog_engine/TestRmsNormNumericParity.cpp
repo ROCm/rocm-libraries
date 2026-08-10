@@ -72,7 +72,7 @@ float gammaVal(size_t n)
 
 } // namespace
 
-TEST(AotCatalogRmsNormNumericParity, RmsNorm2dF16MatchesReference)
+TEST(TestAotCatalogRmsNormNumericParity, RmsNorm2dF16MatchesReference)
 {
     if(!gpuIsArch(kArch))
     {

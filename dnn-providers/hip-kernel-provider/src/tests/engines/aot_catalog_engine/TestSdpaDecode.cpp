@@ -301,7 +301,7 @@ const ops::SdpaAdapter kAdapter;
 } // namespace
 
 // (a) decode publishes the full capability vocabulary for the baseline problem.
-TEST(AotCatalogSdpaDecode, PublishesFullVocabularyForGfx1151Shape)
+TEST(TestAotCatalogSdpaDecode, PublishesFullVocabularyForGfx1151Shape)
 {
     const BuiltGraph g = buildSdpaGraph(SdpaSpec{});
     const auto shape = kAdapter.decode(g.graph());
@@ -337,7 +337,7 @@ TEST(AotCatalogSdpaDecode, PublishesFullVocabularyForGfx1151Shape)
 }
 
 // (b) legacy gfx1151 bindings + grid symbols are byte-for-byte the shipped ABI.
-TEST(AotCatalogSdpaDecode, LegacyGfx1151BindingsPreserved)
+TEST(TestAotCatalogSdpaDecode, LegacyGfx1151BindingsPreserved)
 {
     const BuiltGraph g = buildSdpaGraph(SdpaSpec{});
     const auto shape = kAdapter.decode(g.graph());
@@ -377,21 +377,21 @@ TEST(AotCatalogSdpaDecode, LegacyGfx1151BindingsPreserved)
 }
 
 // (c) safety gates: malformed graphs still decline in C++.
-TEST(AotCatalogSdpaDecode, DeclinesNonRank4)
+TEST(TestAotCatalogSdpaDecode, DeclinesNonRank4)
 {
     SdpaSpec spec;
     spec.qRank = 3;
     EXPECT_FALSE(kAdapter.decode(buildSdpaGraph(spec).graph()).has_value());
 }
 
-TEST(AotCatalogSdpaDecode, DeclinesDtypeMismatch)
+TEST(TestAotCatalogSdpaDecode, DeclinesDtypeMismatch)
 {
     SdpaSpec spec;
     spec.kDtype = DataType::BFLOAT16; // K disagrees with Q/V/O
     EXPECT_FALSE(kAdapter.decode(buildSdpaGraph(spec).graph()).has_value());
 }
 
-TEST(AotCatalogSdpaDecode, DeclinesNonIntegerGqaRatio)
+TEST(TestAotCatalogSdpaDecode, DeclinesNonIntegerGqaRatio)
 {
     SdpaSpec spec;
     spec.H = 32;
@@ -399,7 +399,7 @@ TEST(AotCatalogSdpaDecode, DeclinesNonIntegerGqaRatio)
     EXPECT_FALSE(kAdapter.decode(buildSdpaGraph(spec).graph()).has_value());
 }
 
-TEST(AotCatalogSdpaDecode, DeclinesUnsupportedDtype)
+TEST(TestAotCatalogSdpaDecode, DeclinesUnsupportedDtype)
 {
     SdpaSpec spec;
     spec.dtype = DataType::INT32; // providerDtype -> nullopt
@@ -409,7 +409,7 @@ TEST(AotCatalogSdpaDecode, DeclinesUnsupportedDtype)
 // (d) the boundary moved to data: feature-rich graphs now DECODE (publish facts)
 // where the old adapter hard-declined. No gfx1151 kernel accepts them, so the
 // engine still declines in aggregate -- but that decision now lives in family.json.
-TEST(AotCatalogSdpaDecode, CausalGraphDecodes)
+TEST(TestAotCatalogSdpaDecode, CausalGraphDecodes)
 {
     SdpaSpec spec;
     spec.causal = true;
@@ -418,7 +418,7 @@ TEST(AotCatalogSdpaDecode, CausalGraphDecodes)
     EXPECT_TRUE(boolFact(*shape, "causal"));
 }
 
-TEST(AotCatalogSdpaDecode, GqaGraphDecodes)
+TEST(TestAotCatalogSdpaDecode, GqaGraphDecodes)
 {
     SdpaSpec spec;
     spec.H = 32;
@@ -429,7 +429,7 @@ TEST(AotCatalogSdpaDecode, GqaGraphDecodes)
     EXPECT_EQ(intFact(*shape, "gqa_ratio"), 4);
 }
 
-TEST(AotCatalogSdpaDecode, AttnMaskGraphDecodes)
+TEST(TestAotCatalogSdpaDecode, AttnMaskGraphDecodes)
 {
     SdpaSpec spec;
     spec.attnMask = true;
@@ -438,7 +438,7 @@ TEST(AotCatalogSdpaDecode, AttnMaskGraphDecodes)
     EXPECT_TRUE(boolFact(*shape, "has_attn_mask"));
 }
 
-TEST(AotCatalogSdpaDecode, NonFoldableBatchDecodes)
+TEST(TestAotCatalogSdpaDecode, NonFoldableBatchDecodes)
 {
     SdpaSpec spec;
     spec.B = 2; // contiguous BHSD, H>1 -> batch not foldable, but still valid
@@ -448,7 +448,7 @@ TEST(AotCatalogSdpaDecode, NonFoldableBatchDecodes)
     EXPECT_FALSE(boolFact(*shape, "batch_foldable"));
 }
 
-TEST(AotCatalogSdpaDecode, NonContiguousDDecodes)
+TEST(TestAotCatalogSdpaDecode, NonContiguousDDecodes)
 {
     SdpaSpec spec;
     spec.innerMult = 2; // D axis stride 2 -> not contiguous
@@ -457,7 +457,7 @@ TEST(AotCatalogSdpaDecode, NonContiguousDDecodes)
     EXPECT_FALSE(boolFact(*shape, "d_contiguous"));
 }
 
-TEST(AotCatalogSdpaDecode, Bf16ShapeDecodesWithBf16Token)
+TEST(TestAotCatalogSdpaDecode, Bf16ShapeDecodesWithBf16Token)
 {
     SdpaSpec spec;
     spec.dtype = DataType::BFLOAT16;
@@ -469,7 +469,7 @@ TEST(AotCatalogSdpaDecode, Bf16ShapeDecodesWithBf16Token)
 
 // The baseline (no optional operands) binds ONLY Q/K/V/O -- every optional
 // pointer name is absent, so a kernel that named one would fail closed.
-TEST(AotCatalogSdpaDecode, OptionalPointersAbsentOnBaseline)
+TEST(TestAotCatalogSdpaDecode, OptionalPointersAbsentOnBaseline)
 {
     const BuiltGraph g = buildSdpaGraph(SdpaSpec{});
     const auto shape = kAdapter.decode(g.graph());
@@ -502,7 +502,7 @@ TEST(AotCatalogSdpaDecode, OptionalPointersAbsentOnBaseline)
 
 // A graph carrying mask/sink/paged/varlen/runtime-scale operands binds each of
 // those pointers by name (the feature surface decode() flags as facts).
-TEST(AotCatalogSdpaDecode, OptionalFeaturePointersBoundWhenPresent)
+TEST(TestAotCatalogSdpaDecode, OptionalFeaturePointersBoundWhenPresent)
 {
     SdpaSpec spec;
     spec.attnMask = true;
@@ -532,7 +532,7 @@ TEST(AotCatalogSdpaDecode, OptionalFeaturePointersBoundWhenPresent)
 
 // An fp8 graph publishes fp8=true and binds every (de)scale pointer a quantizing
 // forward kernel names -- the gap this change closes.
-TEST(AotCatalogSdpaDecode, Fp8DescalePointersBound)
+TEST(TestAotCatalogSdpaDecode, Fp8DescalePointersBound)
 {
     SdpaSpec spec;
     spec.dtype = DataType::FP8_E4M3;

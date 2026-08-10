@@ -363,7 +363,7 @@ float f16ToFloat(_Float16 h)
 
 } // namespace
 
-TEST(AotCatalogSdpaNumericParity, WmmaFmhaFwdF16MatchesReference)
+TEST(TestAotCatalogSdpaNumericParity, WmmaFmhaFwdF16MatchesReference)
 {
     if(!gpuIsArch(kArch))
     {
@@ -372,7 +372,7 @@ TEST(AotCatalogSdpaNumericParity, WmmaFmhaFwdF16MatchesReference)
     runSdpaParity<_Float16>("f16", f16FromFloat, f16ToFloat, 2e-2f, 2e-2f);
 }
 
-TEST(AotCatalogSdpaNumericParity, WmmaFmhaFwdBf16MatchesReference)
+TEST(TestAotCatalogSdpaNumericParity, WmmaFmhaFwdBf16MatchesReference)
 {
     if(!gpuIsArch(kArch))
     {

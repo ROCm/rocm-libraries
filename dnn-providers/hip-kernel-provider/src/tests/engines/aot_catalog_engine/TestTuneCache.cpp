@@ -27,7 +27,7 @@ std::string tempCachePath(const std::string& tag)
     return (fs::temp_directory_path() / ("hipdnn_aot_tunecache_test_" + tag + ".json")).string();
 }
 
-class TuneCacheTest : public ::testing::Test
+class TestTuneCache : public ::testing::Test
 {
 protected:
     void SetUp() override
@@ -50,7 +50,7 @@ protected:
 
 // The key is deterministic and independent of the order shape keys are inserted
 // (ProblemShape is an ordered map), and renders each variant type predictably.
-TEST(AotCatalogTuneCacheKey, IsDeterministicAndCanonical)
+TEST(TestAotCatalogTuneCacheKey, IsDeterministicAndCanonical)
 {
     ProblemShape a;
     a.emplace("dtype", ShapeValue{std::string("f16")});
@@ -75,7 +75,7 @@ TEST(AotCatalogTuneCacheKey, IsDeterministicAndCanonical)
     EXPECT_NE(keyA, problemKey("rmsnorm2d_gfx1151_bf16", a));
 }
 
-TEST(AotCatalogTuneCacheKey, RendersEachVariantType)
+TEST(TestAotCatalogTuneCacheKey, RendersEachVariantType)
 {
     ProblemShape p;
     p.emplace("causal", ShapeValue{true});
@@ -87,7 +87,7 @@ TEST(AotCatalogTuneCacheKey, RendersEachVariantType)
 }
 
 // store() then lookup() returns the winning symbol; an unknown key misses.
-TEST_F(TuneCacheTest, StoreThenLookup)
+TEST_F(TestTuneCache, StoreThenLookup)
 {
     TuneCache cache(_path);
     EXPECT_FALSE(cache.lookup("k1").has_value());
@@ -101,7 +101,7 @@ TEST_F(TuneCacheTest, StoreThenLookup)
 }
 
 // store() persists to JSON; a fresh cache on the same path reloads the winner.
-TEST_F(TuneCacheTest, PersistsAndReloads)
+TEST_F(TestTuneCache, PersistsAndReloads)
 {
     {
         TuneCache cache(_path);
@@ -121,7 +121,7 @@ TEST_F(TuneCacheTest, PersistsAndReloads)
 
 // Deleting the cache file forces a re-tune: a fresh cache on the now-missing
 // path starts empty (this is how tests/users invalidate stale decisions).
-TEST_F(TuneCacheTest, DeletingFileForcesRetune)
+TEST_F(TestTuneCache, DeletingFileForcesRetune)
 {
     {
         TuneCache cache(_path);
@@ -139,7 +139,7 @@ TEST_F(TuneCacheTest, DeletingFileForcesRetune)
 
 // An empty path disables persistence entirely: store/lookup still work in
 // memory, and nothing is written to disk.
-TEST(AotCatalogTuneCacheNoPersist, EmptyPathIsMemoryOnly)
+TEST(TestAotCatalogTuneCacheNoPersist, EmptyPathIsMemoryOnly)
 {
     TuneCache cache(std::string{});
     cache.store("k1", "kernel_a", 1.0);

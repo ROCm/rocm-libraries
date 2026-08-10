@@ -111,7 +111,7 @@ const catalog::KernelEntry*
 
 } // namespace
 
-TEST(AotCatalogGemmNumericParity, WmmaGemmF16MatchesReference)
+TEST(TestAotCatalogGemmNumericParity, WmmaGemmF16MatchesReference)
 {
     if(!gpuIsArch(kArch))
     {
@@ -261,7 +261,7 @@ TEST(AotCatalogGemmNumericParity, WmmaGemmF16MatchesReference)
 // of 32). Non-square-in-blocks + multi-block is the gate on the grid_order NM
 // contract (block_id.x -> N, block_id.y -> M) that is INVERTED vs the reference
 // kernel: get it backwards and this test computes a transposed/garbage C.
-TEST(AotCatalogGemmNumericParity, WmmaUniversalGemmF16MatchesReference)
+TEST(TestAotCatalogGemmNumericParity, WmmaUniversalGemmF16MatchesReference)
 {
     if(!gpuIsArch(kArch))
     {
@@ -400,7 +400,7 @@ TEST(AotCatalogGemmNumericParity, WmmaUniversalGemmF16MatchesReference)
 
 // Tiled universal-GEMM bf16 parity -- bf16 sibling of the tiled f16 test above,
 // same tile-crossing M=N=128, K=64 and same ugemm_* selection.
-TEST(AotCatalogGemmNumericParity, WmmaUniversalGemmBf16MatchesReference)
+TEST(TestAotCatalogGemmNumericParity, WmmaUniversalGemmBf16MatchesReference)
 {
     if(!gpuIsArch(kArch))
     {
@@ -541,7 +541,7 @@ TEST(AotCatalogGemmNumericParity, WmmaUniversalGemmBf16MatchesReference)
 // module load -> LaunchAbi pack/grid) against the shipped gfx1151 wmma_gemm bf16
 // .co, added self-serve as a sibling family (dtype constraint bf16) with NO
 // engine change. RCR C[M,N] = A[M,K] * B[N,K]^T, bf16 in / f32 acc / bf16 out.
-TEST(AotCatalogGemmNumericParity, WmmaGemmBf16MatchesReference)
+TEST(TestAotCatalogGemmNumericParity, WmmaGemmBf16MatchesReference)
 {
     if(!gpuIsArch(kArch))
     {
