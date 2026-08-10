@@ -78,9 +78,13 @@ run_diff --mode ir --canonical --only <family>
   temporaries in source order. See
   [`invariants.md`](./invariants.md#2-the-ir-builder-must-emit-operands-left-to-right).
 
-### `RANGE_DRIFT` on `fmha_appendkv` or `gfx1151_wmma_gemm_iu8_dequant`
-Pre-existing and benign: the C emitter enumerates a slightly wider config range
-than the Python reference; the in-range bytes are identical. Not a failure.
+### `RANGE_DRIFT` on any family
+The two emitters enumerate different config counts: one stopped sampling before
+the other. **This fails the gate.** Identical bytes in the overlapping range do
+not settle the question, because the configs only one side emitted were never
+compared at all. Fix the narrower emitter's config table so both enumerate the
+same range. (`fmha_appendkv` and `gfx1151_wmma_gemm_iu8_dequant` were once
+waived here; both are GREEN now and the waiver is gone with them.)
 
 ### `--check-golden` fails after a change I *meant* to make
 If you intentionally changed what a kernel emits, re-bless the golden **from a
@@ -95,7 +99,7 @@ signal that protects the contract.
 You didn't build it (or built it elsewhere). Build into the default location, or
 pass `--archive`:
 ```bash
-cmake -S Cpp -B /tmp/rocke_verify -DCMAKE_BUILD_TYPE=Release && cmake --build /tmp/rocke_verify -j
+cmake -S cpp -B /tmp/rocke_verify -DCMAKE_BUILD_TYPE=Release && cmake --build /tmp/rocke_verify -j
 # default archive path is $TMPDIR/rocke_verify/librocke_core.a
 ```
 `tools/check_byte_identity.py` does the build + gate together.
@@ -113,8 +117,8 @@ your environment provides (e.g. `sudo -n -E <venv>/bin/python …`), and write
 artifacts somewhere you own (e.g. `/tmp`), not into a root-owned repo path.
 
 ### `No module named 'rocke'` / `Cpp`
-`PYTHONPATH` isn't pointing at `dnn-providers/hip-kernel-provider/rocKE/Python`. Set it
-(`PYTHONPATH=<…>/dnn-providers/hip-kernel-provider/rocKE/Python`) and run from there.
+`PYTHONPATH` isn't pointing at `dnn-providers/hip-kernel-provider/rocke/platform/python`. Set it
+(`PYTHONPATH=<…>/dnn-providers/hip-kernel-provider/rocke/platform/python`) and run from there.
 
 ### A probe can't find `llvm-readelf` / `objdump`
 The ROCm `bin/` directory isn't on `PATH`. Add it.

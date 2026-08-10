@@ -313,4 +313,30 @@ typedef enum
      */
     HIPDNN_BACKEND_PROFILING_CONTROL_EXT = 34,
 
+    /**
+     * @brief Layernorm backward operation descriptor
+     *
+     * Represents a backward layer normalization operation with output
+     * gradient (DY), input (X), scale, mean, inverse variance, input
+     * gradient (DX), scale gradient and bias gradient tensors, a backward
+     * layernorm operator, and a compute data type
+     */
+    HIPDNN_BACKEND_OPERATION_LAYERNORM_BACKWARD_DESCRIPTOR_EXT = 35,
+
+    /**
+     * @brief Resample backward operation descriptor
+     *
+     * Represents a resample backward operation (pooling gradient)
+     * with DY input, optional index input, and DX output.
+     */
+    HIPDNN_BACKEND_OPERATION_RESAMPLE_BWD_DESCRIPTOR = 36,
+
+    /**
+     * @brief MoE grouped matmul operation descriptor
+     *
+     * Represents forward grouped matrix multiplication over routed mixture-of-experts
+     * tokens, with mode-dependent routing tensors.
+     */
+    HIPDNN_BACKEND_OPERATION_MOE_GROUPED_MATMUL_DESCRIPTOR = 37,
+
 } hipdnnBackendDescriptorType_t;

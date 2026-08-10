@@ -3,7 +3,7 @@
 
 cmake_minimum_required(VERSION 3.16)
 
-if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR AND NOT DEFINED CMAKE_TOOLCHAIN_FILE)
     include(${CMAKE_CURRENT_LIST_DIR}/../../cmake/modules/default_amdclang.cmake)
 endif()
 
@@ -171,6 +171,16 @@ option(BUILD_SHARED_LIBS "Build shared libraries" ON)
 option(STINKYTOFU_INSTALL_RPATH_USE_LINK_PATH
     "Use link-dependency dirs as the installed libstinkytofu RPATH" OFF)
 
+# Unit tests default ON for standalone StinkyTofu builds and OFF when vendored as
+# a sub-project. This must be defined before stinkytofu_static is conditionally
+# created for shared-library test builds.
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    set(_stinkytofu_build_tests_default ON)
+else()
+    set(_stinkytofu_build_tests_default OFF)
+endif()
+option(STINKYTOFU_BUILD_TESTS "Build StinkyTofu unit tests" ${_stinkytofu_build_tests_default})
+
 # dladdr() used in IntrinsicRegistry.cpp requires -ldl
 # Threads required for std::call_once (separate libpthread on glibc < 2.34)
 find_package(Threads REQUIRED)
@@ -285,13 +295,6 @@ endif()
 ##===----------------------------------------------------------------------===##
 # Unit tests
 ##===----------------------------------------------------------------------===##
-# Option to build unit tests
-if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-    set(_stinkytofu_build_tests_default ON)
-else()
-    set(_stinkytofu_build_tests_default OFF)
-endif()
-option(STINKYTOFU_BUILD_TESTS "Build StinkyTofu unit tests" ${_stinkytofu_build_tests_default})
 if(STINKYTOFU_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
@@ -347,12 +350,26 @@ install(FILES
 )
 
 # --------------------------------------------------------------------------- #
+# Documentation (Doxygen + Sphinx, published to Read the Docs)
+# --------------------------------------------------------------------------- #
+if(ROCmCMakeBuildTools_FOUND)
+    add_subdirectory(docs)
+else()
+    message(STATUS "ROCmCMakeBuildTools not found — skipping docs target.")
+endif()
+
+# --------------------------------------------------------------------------- #
 # clang-tidy
 # --------------------------------------------------------------------------- #
 option(ENABLE_CLANG_TIDY "Enable clang-tidy targets" OFF)
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/modules")
-include(ClangTidy)
-add_clang_tidy_custom_target()
+# ClangTidy.cmake lives in the superbuild's cmake/modules, outside this
+# subproject. Only reach for it when the feature is actually requested, so a
+# standalone or partial checkout of shared/stinkytofu can still configure.
+if(ENABLE_CLANG_TIDY)
+    list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/modules")
+    include(ClangTidy)
+    add_clang_tidy_custom_target()
+endif()
 
 # Build-tree export so find_package() works without installing.
 # Write targets to stinkytofu-targets.cmake (not stinkytofuConfig.cmake) to

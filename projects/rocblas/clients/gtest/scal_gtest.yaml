@@ -329,4 +329,22 @@ Tests:
        - scal_batched_ex: *single_double_precisions_complex_real
        - scal_strided_batched_ex: *single_double_precisions_complex_real
 
+# per-batch alpha (rocblas_set_batch_alpha_stride) coverage, device pointer mode only
+# stride_c 1 is the densely packed alpha[batch] layout, stride_c 2 a strided layout
+  - name: scal_stride_alpha
+    category: pre_checkin
+    N: [ 5, 33792 ]
+    incx: *incx_range_small
+    alpha_beta: *alpha_beta_range_small
+    batch_count: [ 3 ]
+    stride_scale: [ 1 ]
+    alpha_beta_stride: true
+    stride_c: [ 1, 2 ] # alpha stride
+    pointer_mode_host: false
+    function:
+      - scal_batched:  *single_double_precisions_complex_real
+      - scal_strided_batched:  *single_double_precisions_complex_real
+      - scal_batched_ex: *scal_ex_bfloat_half_single_double_complex_real_precisions
+      - scal_strided_batched_ex: *scal_ex_bfloat_half_single_double_complex_real_precisions
+
 ...

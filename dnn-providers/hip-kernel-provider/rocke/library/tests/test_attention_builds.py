@@ -25,6 +25,8 @@ from __future__ import annotations
 
 import unittest
 
+import pytest
+
 from rocke import lower_kernel_to_llvm
 
 from kernels import (
@@ -38,6 +40,225 @@ from kernels import (
     build_unified_attention_reduce,
     supports_native_unified_attention,
 )
+
+
+def _patch_resolved_arch(arch: str):
+    """Pin the resolved attention arch for a test, on every module that reads it.
+
+    ``_resolve_attention_arch`` is defined in ``kernels.common.attention_unified``
+    but imported *by name* into other modules (e.g.
+    ``builders.common.attention_spec_builder``), so each holds its own binding.
+    Patching only the defining module leaves the spec builder resolving the real
+    device arch -- which silently ignores the test's requested arch on any host
+    whose GPU differs (e.g. an ``arch='gfx950'`` case on a gfx942 box). Patch
+    every by-name importer so the pin actually reaches the builder.
+    """
+    from unittest import mock
+
+    import builders.common.attention_spec_builder as _asb
+    import kernels.common.attention_unified as _au
+
+    targets = [_au]
+    if getattr(_asb, "_resolve_attention_arch", None) is not None:
+        targets.append(_asb)
+    return _MultiPatch(
+        [
+            mock.patch.object(m, "_resolve_attention_arch", return_value=arch)
+            for m in targets
+        ]
+    )
+
+
+class _MultiPatch:
+    """Enter/exit a list of ``mock.patch`` context managers as one."""
+
+    def __init__(self, patches):
+        self._patches = patches
+
+    def __enter__(self):
+        for p in self._patches:
+            p.start()
+        return self
+
+    def __exit__(self, *exc):
+        for p in reversed(self._patches):
+            p.stop()
+        return False
+
+
+# ---------------------------------------------------------------------
+# comgr build + resource-budget smoke (no torch, no GPU launch)
+# ---------------------------------------------------------------------
+#
+# The IR-text asserts elsewhere in this file stop at ``lower_kernel_to_llvm`` and
+# never invoke comgr -- so a kernel that lowers to valid-looking IR but is
+# rejected at codegen (e.g. LDS over the arch cap, register overflow, an ISA
+# intrinsic invalid for the target) sails through. That is exactly the gap that
+# let the fp16 D128 prefill LDS-overflow regression reach ``develop`` and 8 perf
+# sweeps (81920 B > the gfx942 64 KB cap) before the dashboard caught it.
+#
+# ``compile_kernel`` runs the full comgr pipeline (IR -> BC -> relocatable ->
+# HSACO) and needs NEITHER torch NOR a GPU, and can target any arch from any box
+# via the ``arch=`` triple -- so it is CI-able on a plain comgr/LLVM host. The
+# helpers below reach comgr and additionally assert the emitted kernel fits the
+# arch resource budget (LDS today; the readelf-parsed HSACO also carries VGPR/
+# SGPR for future soft-occupancy checks).
+
+
+def _compile_or_skip(kernel, *, arch: str):
+    """Compile ``kernel`` through comgr for ``arch``; skip (not fail) when the
+    comgr toolchain is unavailable so the test is a no-op on hosts without it.
+
+    A failed *compile* (raised ``ComgrError``) is a real defect and propagates.
+    Only a missing/broken toolchain skips."""
+    try:
+        from rocke.helpers.compile import compile_kernel
+    except Exception as e:  # pragma: no cover - env-dependent
+        pytest.skip(f"comgr toolchain unavailable: {e}")
+    try:
+        return compile_kernel(kernel, arch=arch, capture_ir_text=False)
+    except ImportError as e:  # pragma: no cover - env-dependent
+        pytest.skip(f"comgr toolchain unavailable: {e}")
+
+
+def _assert_resources_fit(art, *, arch: str, kernel_name: str = ""):
+    """Assert the emitted HSACO fits ``arch``'s resource budget.
+
+    Two distinct failure modes, because comgr treats them differently:
+
+    - **LDS over the arch cap** -- comgr *hard-errors* at codegen (no fallback),
+      so the bare compile already catches it; the explicit cap check here fires
+      one step earlier with a readable diagnostic instead of a raw ComgrError,
+      and catches the *soft* case (fits the hard cap but a change grew it toward
+      the ceiling).
+    - **Register (VGPR) over-subscription** -- the compiler does NOT fail; it
+      *spills to scratch* and the kernel still compiles, then runs at reduced
+      occupancy with scratch traffic. A pass/fail compile check is blind to this,
+      so we assert ``scratch_bytes == 0`` as the arch-agnostic no-spill signal.
+
+    Resource fields come from ``group_segment_fixed_size`` /
+    ``private_segment_fixed_size`` in the code object, read via ``llvm-readelf``
+    (present in any ROCm image; no GPU). Skips only if readelf is unavailable."""
+    import tempfile
+    from pathlib import Path
+
+    from rocke.analysis.isa import analyze_hsaco
+    from rocke.core.arch.target import ArchTarget
+
+    cap = ArchTarget.from_gfx(arch).lds_capacity_bytes
+    hsaco = bytes(art.hsaco)
+    with tempfile.NamedTemporaryFile(suffix=".hsaco", delete=True) as fh:
+        fh.write(hsaco)
+        fh.flush()
+        try:
+            res = analyze_hsaco(Path(fh.name)).resources
+        except (FileNotFoundError, RuntimeError) as e:  # pragma: no cover
+            pytest.skip(f"HSACO introspection tool unavailable: {e}")
+
+    name = kernel_name or "kernel"
+    lds = res.lds_bytes
+    if lds is None:  # pragma: no cover - metadata shape drift
+        pytest.skip("could not parse group_segment_fixed_size from HSACO")
+    assert lds <= cap, (
+        f"{name} LDS {lds} B exceeds {arch} cap {cap} B (over by {lds - cap} B) "
+        f"-- comgr codegen rejection at larger tiles / seq"
+    )
+    # Register overflow does not fail the compile -- it spills. Any scratch use is
+    # a register-budget regression (occupancy cliff), so treat it as a failure.
+    scratch = res.scratch_bytes
+    if scratch is not None:
+        assert scratch == 0, (
+            f"{name} spills {scratch} B to scratch on {arch} (VGPR {res.vgpr_count}) "
+            f"-- register over-subscription; kernel compiles but loses occupancy"
+        )
+
+
+# The shipped 2D-tiled attention geometries the provider dispatches, spanning the
+# regressed axes: (arch x dtype x head_dim), at a prefill seq large enough to
+# exercise the flash path that overflowed LDS in the fp16 D128 prefill regression.
+#
+# Specs are built via the REAL selector (``au._tiled_spec_from_problem``) from a
+# ``UnifiedAttentionProblem`` -- the same path the provider ships -- so the test
+# exercises the actual dispatch decision and picks up arch-correct spec fields
+# instead of a hand-guessed geometry (each arch's spec class carries different
+# fields). Kept curated, not a cartesian product: one compile per shipped variant.
+def _budget_problem(
+    *,
+    head_size,
+    num_query_heads,
+    num_kv_heads,
+    dtype,
+    seq=2048,
+    block_size=64,
+    sliding_window=0,
+):
+    return UnifiedAttentionProblem(
+        total_q=seq,
+        num_seqs=1,
+        num_query_heads=num_query_heads,
+        num_kv_heads=num_kv_heads,
+        head_size=head_size,
+        block_size=block_size,
+        max_seqlen_q=seq,
+        max_seqlen_k=seq,
+        dtype=dtype,
+        sliding_window=sliding_window,
+    )
+
+
+_TILED_2D_BUDGET_GEOMETRIES = [
+    # (label, arch, problem_kwargs)
+    (
+        "fp16_d128_gqa32x8",
+        "gfx942",
+        dict(head_size=128, num_query_heads=32, num_kv_heads=8, dtype="fp16"),
+    ),
+    (
+        "bf16_d128_gqa32x8",
+        "gfx942",
+        dict(head_size=128, num_query_heads=32, num_kv_heads=8, dtype="bf16"),
+    ),
+    (
+        "fp16_d128_gqa32x8",
+        "gfx950",
+        dict(head_size=128, num_query_heads=32, num_kv_heads=8, dtype="fp16"),
+    ),
+    (
+        "bf16_d128_gqa32x8",
+        "gfx950",
+        dict(head_size=128, num_query_heads=32, num_kv_heads=8, dtype="bf16"),
+    ),
+    (
+        "fp16_d64_gqa64x8",
+        "gfx942",
+        dict(head_size=64, num_query_heads=64, num_kv_heads=8, dtype="fp16"),
+    ),
+    # Sliding-window D128 takes a SEPARATE non-ring geometry (the flash/ring
+    # paths gate on ``sliding_window == 0``; SW picks its own tile), so LDS/reg
+    # pressure changes there are not covered by the plain-causal rows above.
+    (
+        "fp16_d128_sw_gqa32x8",
+        "gfx942",
+        dict(
+            head_size=128,
+            num_query_heads=32,
+            num_kv_heads=8,
+            dtype="fp16",
+            sliding_window=128,
+        ),
+    ),
+    (
+        "bf16_d128_sw_gqa32x8",
+        "gfx942",
+        dict(
+            head_size=128,
+            num_query_heads=32,
+            num_kv_heads=8,
+            dtype="bf16",
+            sliding_window=128,
+        ),
+    ),
+]
 
 
 # ---------------------------------------------------------------------
@@ -573,6 +794,11 @@ class TestAttentionHelpers(unittest.TestCase):
         # MFMA atoms for QK (16x16x32) and PV (16x16x16 since T=16 < 32).
         self.assertIn("@llvm.amdgcn.mfma.f32.16x16x32.f16", ll)
         self.assertIn("@llvm.amdgcn.mfma.f32.16x16x16f16", ll)
+        # Reach comgr: valid IR is not enough -- assert it actually codegens and
+        # fits the LDS cap (the step the IR-text asserts above never exercise).
+        art = _compile_or_skip(k, arch="gfx950")
+        self.assertGreater(art.hsaco_bytes, 0)
+        _assert_resources_fit(art, arch="gfx950", kernel_name=k.name)
         # Cross-lane softmax reduction. The 16-lane intra-row-group
         # butterfly lowers to ``ds_swizzle`` SWAP mode rather than
         # ``ds_bpermute`` for the row-group masks ≤ 16. (Larger butterfly
@@ -583,6 +809,61 @@ class TestAttentionHelpers(unittest.TestCase):
         self.assertIn("0xFFF0000000000000", ll)
         # `qq_bias_stride_0` is the very last kernel param.
         self.assertIn("i32 %qq_bias_stride_0", ll)
+
+    def test_gfx942_bf16_swa_decode_no_fp8_loader_assert(self):
+        """Regression: bf16 windowed-decode must not trip the fp8-loader assert.
+
+        gfx942 2D built the fp8 chunk-count assert unconditionally. A bf16
+        SWA/decode small-tile config (T=16, HD=64, THREADS=256) gives
+        fp8_total_chunks=128; 128 % 256 != 0 raised AssertionError.         The fp8
+        loader is never used for bf16, so the guard (``if KV_FP8:``, matching
+        the 3D builder) is load-bearing.
+
+        gfx942 has since stopped accepting the fp8 K/V cache altogether -- its
+        PV path needs ``ds_read_tr_b8``, a gfx950-only transpose read -- so the
+        chunk-count assert is now unreachable here and the guarantee worth
+        pinning is the stronger one: the spec refuses fp8 K/V up front rather
+        than emitting IR comgr cannot select.
+        """
+        from kernels.gfx942.attention_tiled_2d import (
+            UnifiedAttention2DTiledSpec,
+            build_unified_attention_2d_tiled,
+        )
+
+        # Precondition that makes this a regression test, not a smoke test:
+        # the config must be one the old unconditional assert rejected, i.e.
+        # (T*HD)//8 not divisible by THREADS=num_warps*64. T=16,HD=64,nw=4 ->
+        # 128 chunks, 256 threads -> 128 % 256 != 0.
+        T, HD, THREADS = 16, 64, 4 * 64
+        self.assertNotEqual(((T * HD) // 8) % THREADS, 0)
+
+        spec = UnifiedAttention2DTiledSpec(
+            head_size=64,
+            block_size=16,
+            num_query_heads=64,
+            num_kv_heads=8,  # gpt-oss 64/8 GQA
+            dtype="bf16",
+            use_sinks=True,
+            sliding_window=128,
+            has_softcap=False,
+            num_warps=4,
+            tile_size=16,
+            block_m_per_warp=16,
+        )
+        k = build_unified_attention_2d_tiled(spec, arch="gfx942")
+        ll = lower_kernel_to_llvm(k, arch="gfx942")
+        self.assertIn("define amdgpu_kernel void", ll)
+        # The bf16 kernel must emit no fp8 dequant path.
+        self.assertNotIn("@llvm.amdgcn.cvt.f32.fp8", ll)
+
+        # Asking gfx942 for fp8 K/V is refused at construction, naming the
+        # gfx950-only instruction that makes it impossible. Pinned because the
+        # failure it replaces -- emitting IR that comgr then cannot select --
+        # surfaces far from its cause.
+        import dataclasses
+
+        with self.assertRaisesRegex(ValueError, "fp8 K/V cache"):
+            dataclasses.replace(spec, kv_storage_dtype="fp8e4m3")
 
     def test_unified_attention_2d_tiled_half_local_pv_compiles(self):
         """The R4 half-local PV variant emits 32x32 MFMA with its suffixes."""
@@ -728,6 +1009,13 @@ class TestAttentionHelpers(unittest.TestCase):
         # factor (`-inf - overall_max -> 0`).
         self.assertIn("@llvm.exp2.f32", red_ll)
         self.assertIn("fcmp ogt", red_ll)
+        # Reach comgr for both the segment and reduce kernels + LDS budget.
+        seg_art = _compile_or_skip(seg, arch="gfx950")
+        self.assertGreater(seg_art.hsaco_bytes, 0)
+        _assert_resources_fit(seg_art, arch="gfx950", kernel_name=seg.name)
+        red_art = _compile_or_skip(red, arch="gfx950")
+        self.assertGreater(red_art.hsaco_bytes, 0)
+        _assert_resources_fit(red_art, arch="gfx950", kernel_name=red.name)
 
     def test_unified_attention_3d_tiled_alibi_qq_bias(self):
         """ALiBi/QQ-bias on the 3D segment kernel emit the same primitives."""
@@ -760,6 +1048,71 @@ class TestAttentionHelpers(unittest.TestCase):
         # Both ALiBi and QQ-bias kernel-name suffixes show up.
         self.assertIn("_alibi", ll)
         self.assertIn("_qqb", ll)
+
+    def test_tiled_2d_shipped_geometries_compile_and_fit_budget(self):
+        """comgr build + resource-budget net over the shipped 2D-tiled geometries.
+
+        Regression net for codegen failures that IR-text lowering misses. Each
+        shipped (arch, dtype, D) flash variant must actually codegen through comgr
+        and fit its arch resource budget. Catches, in one pass:
+
+        - hard codegen rejections (LDS over the arch cap -- the fp16 D128 prefill
+          regression, 81920 B > gfx942's 64 KB cap; invalid ISA; malformed IR):
+          the compile step itself raises.
+        - LDS growth toward the cap: the explicit cap assert.
+        - register over-subscription: comgr does NOT fail on this -- it spills to
+          scratch and compiles anyway -- so ``_assert_resources_fit`` asserts no
+          scratch spill.
+
+        No torch, no GPU launch -- comgr targets each arch via its triple, so
+        this runs on any comgr/LLVM host regardless of the box's own GPU.
+        """
+        import kernels.common.attention_unified as au
+        from kernels import build_unified_attention_2d_tiled
+
+        for label, arch, problem_kwargs in _TILED_2D_BUDGET_GEOMETRIES:
+            with self.subTest(geometry=label, arch=arch):
+                with _patch_resolved_arch(arch):
+                    problem = _budget_problem(**problem_kwargs)
+                    spec = au._tiled_spec_from_problem(problem)
+                    k = build_unified_attention_2d_tiled(spec, arch=arch)
+                    art = _compile_or_skip(k, arch=arch)
+                    self.assertGreater(art.hsaco_bytes, 0)
+                    _assert_resources_fit(art, arch=arch, kernel_name=k.name)
+
+    def test_gfx950_dense_prefill_compiles_and_fits_budget(self):
+        """comgr build + resource-budget net for the gfx950 dense flash-attn
+        prefill kernel (``build_attention_dense``, its own builder / ABI -- NOT
+        routed through the unified 2D-tiled path the matrix above covers).
+
+        Dense bakes shape in at build time and is LDS-heavy (tunable V pad via
+        ``ROCKE_DENSE_VPAD``), so it is a live over-budget risk on its own. Covers
+        both the default and persistent (grid-stride) variants. gfx950-only,
+        torch-free -- comgr targets gfx950 via its triple.
+        """
+        from dataclasses import replace
+
+        from kernels import AttentionDenseSpec, build_attention_dense
+
+        base = AttentionDenseSpec(
+            batch=1,
+            seqlen_q=2048,
+            seqlen_kv=2048,
+            num_query_heads=32,
+            num_kv_heads=8,
+            head_size=128,
+            causal=True,
+            dtype="bf16",
+        )
+        for label, spec in (
+            ("default", base),
+            ("persistent", replace(base, persistent=True)),
+        ):
+            with self.subTest(variant=label):
+                k = build_attention_dense(spec, arch="gfx950")
+                art = _compile_or_skip(k, arch="gfx950")
+                self.assertGreater(art.hsaco_bytes, 0)
+                _assert_resources_fit(art, arch="gfx950", kernel_name=k.name)
 
     def test_attention_3d_workspace_size_matches_shapes(self):
         p = UnifiedAttentionProblem(
@@ -829,9 +1182,7 @@ class TestAttentionHelpers(unittest.TestCase):
         ``TypeError`` here (its gate signature lacked the parameter), which
         broke the gfx950 SDPA dispatch path for ``backend in {tiled, auto}``.
         """
-        from unittest import mock
         from kernels import supports_native_unified_attention_tiled
-        import kernels.common.attention_unified as au
 
         p = UnifiedAttentionProblem(
             total_q=128,
@@ -847,7 +1198,7 @@ class TestAttentionHelpers(unittest.TestCase):
         # Pin the routed arch so the test is deterministic on any host (the
         # default fallback is gfx950, which is exactly the broken path).
         for arch in ("gfx950", "gfx942"):
-            with mock.patch.object(au, "_resolve_attention_arch", return_value=arch):
+            with _patch_resolved_arch(arch):
                 # Must not raise (the regression was a TypeError on the kwarg).
                 ok, reason = supports_native_unified_attention_tiled(p)
                 self.assertIsInstance(ok, bool)
@@ -883,7 +1234,6 @@ class TestAttentionHelpers(unittest.TestCase):
         runtime would not pick) while still failing on a ``TypeError`` (the
         signature-drift class).
         """
-        from unittest import mock
         import kernels.common.attention_unified as au
         from kernels import (
             supports_native_unified_attention,
@@ -898,9 +1248,7 @@ class TestAttentionHelpers(unittest.TestCase):
             spec_3d_cls = au._tiled_3d_impl(arch)[0]
             for label, p in matrix:
                 with self.subTest(arch=arch, cfg=label):
-                    with mock.patch.object(
-                        au, "_resolve_attention_arch", return_value=arch
-                    ):
+                    with _patch_resolved_arch(arch):
                         path = p.select_path()
                         self.assertIn(path, ("2d", "3d"))
                         for gate in (
@@ -948,7 +1296,6 @@ class TestAttentionHelpers(unittest.TestCase):
         here is a latent wrong-CTA-count trap for any future caller. Pin them
         equal.
         """
-        from unittest import mock
         import kernels.common.attention_unified as au
 
         p = UnifiedAttentionProblem(
@@ -962,7 +1309,7 @@ class TestAttentionHelpers(unittest.TestCase):
             max_seqlen_k=2048,
             dtype="fp16",
         )
-        with mock.patch.object(au, "_resolve_attention_arch", return_value="gfx942"):
+        with _patch_resolved_arch("gfx942"):
             self.assertTrue(
                 au._enable_gfx942_l4(p), "shape must be in the gfx942 L4 flash region"
             )
@@ -970,6 +1317,42 @@ class TestAttentionHelpers(unittest.TestCase):
                 au._select_2d_num_warps(p),
                 au._select_gfx942_flash_num_warps(p),
             )
+
+    def test_gfx942_d64_decode_num_warps(self):
+        """gfx942 D64 decode picks num_warps=1; prefill keeps num_warps=4.
+
+        Decode (max_seqlen_q == 1) is memory-bound and wins at nw=1 (BLOCK_M=32,
+        4x the CTAs of nw=4). Prefill is compute-bound and stays at nw=4. fp8
+        decode is excluded from the nw=1 lever (dequant-bound, wants more warps),
+        so it also stays at nw=4. This branch is the production geometry change;
+        pin it so a refactor can't silently revert it. The C++ selector mirrors
+        this exactly (see attention_unified_selectors.cpp); the run_all.py
+        byte-identity gate enforces the two agree.
+        """
+        import kernels.common.attention_unified as au
+
+        def _p(max_seqlen_q, use_fp8=False):
+            return UnifiedAttentionProblem(
+                total_q=max_seqlen_q,
+                num_seqs=1,
+                num_query_heads=64,
+                num_kv_heads=8,
+                head_size=64,
+                block_size=16,
+                max_seqlen_q=max_seqlen_q,
+                max_seqlen_k=2048,
+                dtype="bf16",
+                use_sinks=True,
+                use_fp8=use_fp8,
+            )
+
+        with _patch_resolved_arch("gfx942"):
+            self.assertEqual(au._select_2d_num_warps(_p(1)), 1)  # decode
+            self.assertEqual(au._select_2d_num_warps(_p(512)), 4)  # prefill
+            self.assertEqual(au._select_2d_num_warps(_p(2048)), 4)  # prefill
+            self.assertEqual(
+                au._select_2d_num_warps(_p(1, use_fp8=True)), 4
+            )  # fp8 decode excluded
 
     def test_tiled_3d_dispatch_gate_accepts_kwargs_per_arch(self):
         """Regression: the shared dispatch entry
@@ -981,8 +1364,6 @@ class TestAttentionHelpers(unittest.TestCase):
         missing-field break that took out production decode), mirroring the 2D
         dispatch test one path over.
         """
-        from unittest import mock
-        import kernels.common.attention_unified as au
         from kernels import supports_native_unified_attention_3d_tiled
 
         p = UnifiedAttentionProblem(
@@ -997,7 +1378,7 @@ class TestAttentionHelpers(unittest.TestCase):
             dtype="fp16",
         )
         for arch in ("gfx950", "gfx942"):
-            with mock.patch.object(au, "_resolve_attention_arch", return_value=arch):
+            with _patch_resolved_arch(arch):
                 # Must not raise (the regression was a TypeError on the kwarg).
                 ok, reason = supports_native_unified_attention_3d_tiled(p)
                 self.assertIsInstance(ok, bool)
@@ -1017,7 +1398,6 @@ class TestAttentionHelpers(unittest.TestCase):
         ignored-field contract that lets the shared builder pass those kwargs
         unconditionally.
         """
-        from unittest import mock
         import kernels.common.attention_unified as au
 
         p = UnifiedAttentionProblem(
@@ -1032,11 +1412,11 @@ class TestAttentionHelpers(unittest.TestCase):
             dtype="fp16",
         )
         for arch in ("gfx942", "gfx950"):
-            with mock.patch.object(au, "_resolve_attention_arch", return_value=arch):
+            with _patch_resolved_arch(arch):
                 spec = au._tiled_3d_spec_from_problem(p)
                 self.assertIsInstance(spec, au._tiled_3d_impl(arch)[0])
         # The gfx942-only 3D knobs are inert on gfx950 (ignored-field contract).
-        with mock.patch.object(au, "_resolve_attention_arch", return_value="gfx950"):
+        with _patch_resolved_arch("gfx950"):
             self.assertIsNone(au._gfx942_3d_tile_size_override(p))
             self.assertFalse(au._enable_gfx942_3d_invariant_hoist(p))
             self.assertFalse(au._enable_gfx942_3d_wide_kv_load(p))
@@ -1056,7 +1436,6 @@ class TestAttentionHelpers(unittest.TestCase):
         whichever branch fires on the relevant arch, pinning the largest
         (~25-flag) silent surface.
         """
-        from unittest import mock
         import kernels.common.attention_unified as au
 
         def problem(**kw):
@@ -1109,9 +1488,7 @@ class TestAttentionHelpers(unittest.TestCase):
         for label, p, arches in cases:
             for arch in arches:
                 with self.subTest(cfg=label, arch=arch):
-                    with mock.patch.object(
-                        au, "_resolve_attention_arch", return_value=arch
-                    ):
+                    with _patch_resolved_arch(arch):
                         spec = au._tiled_spec_from_problem(p)
                         self.assertIsInstance(spec, au._tiled_2d_impl(arch)[0])
 
@@ -1180,10 +1557,9 @@ class TestAttentionHelpers(unittest.TestCase):
         global->LDS DMA (``raw.ptr.buffer.load.lds``) -- and that it does NOT emit
         the gfx950 wide 16x16x32 MFMA. Pure codegen, no GPU.
         """
-        from unittest import mock
         import kernels.common.attention_unified as au
 
-        with mock.patch.object(au, "_resolve_attention_arch", return_value="gfx942"):
+        with _patch_resolved_arch("gfx942"):
             (
                 UnifiedAttention3DTiledSpec,
                 UnifiedAttentionReduceTiledSpec,
@@ -1656,8 +2032,13 @@ class TestAttentionHarnessTimers(unittest.TestCase):
         from pathlib import Path
         from unittest import mock
 
-        # Import torch BEFORE patching sys.modules so torch stays in the
+        import pytest
+
+        # The harness's reference implementation imports torch at module scope,
+        # so it cannot be loaded without torch; skip torch-free instead of
+        # erroring. Import torch BEFORE patching sys.modules so it stays in the
         # parent process's module table after ``mock.patch.dict`` exits.
+        pytest.importorskip("torch")
         import torch  # noqa: F401
 
         # The harness moved into the library tree (builders/); resolve it via the

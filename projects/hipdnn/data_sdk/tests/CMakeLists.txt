@@ -33,9 +33,12 @@ add_executable(
     utilities/TestEngineNames.cpp
     utilities/TestFloats.cpp
     utilities/TestMigratableMemory.cpp
+    utilities/TestPackedFp4Tensor.cpp
     utilities/TestPlatformUtils.cpp
     utilities/TestScopedResource.cpp
+    utilities/TestRaggedTensor.cpp
     utilities/TestShallowHostOnlyMigratableMemory.cpp
+    utilities/TestShallowRaggedTensor.cpp
     utilities/TestShallowTensor.cpp
     utilities/TestShapeUtilities.cpp
     utilities/TestStringUtil.cpp
@@ -61,4 +64,4 @@ target_link_libraries(
 )
 
 clang_tidy_check(hipdnn_data_sdk_tests)
-add_unit_test_target(hipdnn_data_sdk_tests ${CMAKE_CURRENT_BINARY_DIR})
+add_hipdnn_test(hipdnn_data_sdk_tests ${CMAKE_CURRENT_BINARY_DIR})
