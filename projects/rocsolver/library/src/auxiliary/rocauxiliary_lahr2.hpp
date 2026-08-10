@@ -46,6 +46,7 @@ ROCSOLVER_BEGIN_NAMESPACE
 
 /***** Kernel to compute column of Y *****/
 /*****************************************/
+// (grid = dim3(ceil(mm / DIM_X), 1, batch_count), block = dim3(DIM_X, DIM_Y))
 template <rocblas_int DIM_X, rocblas_int DIM_Y, typename T, typename U>
 ROCSOLVER_KERNEL void __launch_bounds__(DIM_X* DIM_Y)
     lahr2_computeY_kernel(const rocblas_int mm,
@@ -114,11 +115,11 @@ ROCSOLVER_KERNEL void __launch_bounds__(DIM_X* DIM_Y)
     __shared__ T acs[DIM_X * DIM_Y];
     T ac;
 
-    for(int i = idr; i < m; i += DIM_X)
+    for(int i = idr; i < m; i += totalthsr)
     {
         ac = 0;
 
-        for(int j = idc; j < n; j += DIM_Y)
+        for(int j = idc; j < n; j += totalthsc)
         {
             // A1 * x1
             if(i < m && j < mm - k - c)
