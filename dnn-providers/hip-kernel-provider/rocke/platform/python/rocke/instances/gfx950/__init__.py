@@ -8,14 +8,8 @@ capability (e.g. ``ds_read_*_tr_*`` transpose-LDS, MX fp4/fp6 MFMA, the wider
 versus the shared ``instances/common/`` version. Shared, arch-polymorphic
 kernels belong in ``instances/common/``.
 
+The gfx950 deep-fused conv/pool builder moved to the rocke *library*
+convolution vertical: :mod:`kernels.gfx950.deep_fused_conv_pool`.
+
 See ``dsl_docs/architecture/multi_arch_data_layout.md``.
 """
-
-from .deep_fused_conv_pool import (  # noqa: F401
-    FusedConvPoolProblem,
-    Gfx950DeepFusedConvPoolSpec,
-    build_deep_fused_conv_pool,
-    deep_fused_conv_pool_grid,
-    deep_fused_conv_pool_signature,
-    is_valid_spec as is_valid_deep_fused_conv_pool_spec,
-)

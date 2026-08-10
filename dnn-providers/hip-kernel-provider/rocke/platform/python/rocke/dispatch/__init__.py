@@ -5,8 +5,11 @@
 
 The dispatcher started with FP16 RCR GEMM only; it now also implements BF16 RCR
 GEMM (the worked template for further dtypes/layouts) and carries documented
-scaffolds for the remaining operator families (conv, moe, norm) in
-:mod:`rocke.dispatch.families`. The basic request/result contract
+scaffolds for the remaining operator families (moe, norm) in
+:mod:`rocke.dispatch.families`. Carved-out verticals own their own
+dispatchers in the rocke library (``dispatch.attention``, ``dispatch.conv``)
+and reach back into :mod:`rocke.dispatch.core` for the shared contracts.
+The basic request/result contract
 (``OperatorRequest`` / ``DispatchResult`` / ``CandidateRegistry``) is shared by
 all families.
 """
@@ -24,10 +27,8 @@ from .core import (
     ShapeRange,
 )
 from .families import (
-    ConvRequest,
     MoeRequest,
     NormRequest,
-    dispatch_conv,
     dispatch_moe,
     dispatch_norm,
 )
@@ -58,10 +59,8 @@ __all__ = [
     "gemm_fp16_sweep_space",
     "gemm_bf16_sweep_space",
     # operator families
-    "ConvRequest",
     "MoeRequest",
     "NormRequest",
-    "dispatch_conv",
     "dispatch_moe",
     "dispatch_norm",
 ]

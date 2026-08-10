@@ -86,7 +86,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace as dc_replace
 from typing import List, Optional, Sequence, Tuple
 
-from ...core.ir import (
+from rocke.core.ir import (
     BF16,
     F32,
     I32,
@@ -96,17 +96,17 @@ from ...core.ir import (
     Type,
     Value,
 )
-from ...helpers.atoms import MfmaAtom, mfma_atom
-from ...helpers.epilogues import CShuffleEpilogue, DirectEpilogue
-from ...helpers.geometry import WarpGrid
-from ...helpers.layouts import LdsLayout
-from ...helpers.loads import AsyncTileLoader, CoalescedTileLoader
-from ...helpers.mfma_gemm_inner import decode_mfma_lanes
-from ...helpers.pipeline import SoftwarePipeline
-from ...helpers.schedule import SchedulePolicy
-from ...helpers.spec import kernel_name_join
-from ...helpers.tensor_view import make_buffer_resource
-from ...helpers.transforms import TensorDescriptor, pad, unmerge_magic
+from rocke.helpers.atoms import MfmaAtom, mfma_atom
+from rocke.helpers.epilogues import CShuffleEpilogue, DirectEpilogue
+from rocke.helpers.geometry import WarpGrid
+from rocke.helpers.layouts import LdsLayout
+from rocke.helpers.loads import AsyncTileLoader, CoalescedTileLoader
+from rocke.helpers.mfma_gemm_inner import decode_mfma_lanes
+from rocke.helpers.pipeline import SoftwarePipeline
+from rocke.helpers.schedule import SchedulePolicy
+from rocke.helpers.spec import kernel_name_join
+from rocke.helpers.tensor_view import make_buffer_resource
+from rocke.helpers.transforms import TensorDescriptor, pad, unmerge_magic
 from ._conv_implicit_gemm_common import (
     ConvAccumulatorEpilogue,
     ConvDataSpec,
@@ -487,7 +487,7 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
     LDS budget — the same gates as the forward :func:`~.conv_implicit_gemm.is_valid_spec`
     but applied to the wgrad GEMM dimensions (M=K, N=Y*X*C, K_red=N*Ho*Wo).
     """
-    from ...core.arch import ArchTarget
+    from rocke.core.arch import ArchTarget
 
     try:
         target = ArchTarget.from_gfx(arch)
@@ -597,13 +597,13 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
 
 
 def _wgrad_mma_family(arch: str) -> str:
-    from ...core.arch import ArchTarget
+    from rocke.core.arch import ArchTarget
 
     return "wmma" if ArchTarget.from_gfx(arch).wave_size == 32 else "mma"
 
 
 def _resolve_wgrad_op(spec: WgradConvSpec, arch: str):
-    from ...core.arch import ArchTarget
+    from rocke.core.arch import ArchTarget
 
     target = ArchTarget.from_gfx(arch)
     op = target.mma.op_for_shape(
@@ -657,7 +657,7 @@ def build_implicit_gemm_conv_wgrad(
     """
     # Resolve split_k=-1 (auto) before validate() so validation sees the real value.
     if spec.split_k == -1:
-        from ...helpers.split_k import select_split_k_wgrad
+        from rocke.helpers.split_k import select_split_k_wgrad
         from dataclasses import replace as _dc_replace
 
         decision = select_split_k_wgrad(
@@ -762,7 +762,7 @@ def build_implicit_gemm_conv_wgrad(
 
     # Chiplet swizzle (same logic as forward; tile counts from wgrad GEMM dims)
     if spec.chiplet_swizzle:
-        from ...helpers.grid import chiplet_aware_super_tile
+        from rocke.helpers.grid import chiplet_aware_super_tile
 
         num_pid_m = (wg_M + block_m - 1) // block_m
         num_pid_n = (wg_N + block_n - 1) // block_n
@@ -918,7 +918,7 @@ def build_implicit_gemm_conv_wgrad(
         k_off_capture[0] = k_off
 
         if spec.async_dma:
-            from ...core.ir import CACHE_STREAM
+            from rocke.core.ir import CACHE_STREAM
 
             a_slot = a_loader.bind(b, smem_dst=A_dst, wave_id=warp_id)
             a_slot.issue(
@@ -1199,8 +1199,8 @@ def _emit_wgrad_split_k_epilogue(
     we support.  If ``c_per_lane`` is odd the last element falls back to
     a scalar f32 atomic-add to avoid reading out of bounds.
     """
-    from ...helpers.atoms import c_warp_params, make_c_warp_dstr_encoding
-    from ...helpers.distribution import make_static_tile_distribution
+    from rocke.helpers.atoms import c_warp_params, make_c_warp_dstr_encoding
+    from rocke.helpers.distribution import make_static_tile_distribution
 
     dtype_d = spec.data.dtype_d
     p = spec.problem

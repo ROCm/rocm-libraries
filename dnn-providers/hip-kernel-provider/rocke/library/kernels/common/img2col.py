@@ -43,16 +43,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal, Tuple
 
-from ...core.ir import F16, I32, IRBuilder, KernelDef, PtrType
-from ...helpers.distribution import (
+from rocke.core.ir import F16, I32, IRBuilder, KernelDef, PtrType
+from rocke.helpers.distribution import (
     TileDistributionEncoding,
     load_tile,
     make_load_store_traits,
     make_static_tile_distribution,
 )
-from ...helpers.spec import SignatureBuilder, ceil_div_grid, kernel_name_join
-from ...helpers.tensor_view import make_buffer_resource, view_from_transforms_descriptor
-from ...helpers.transforms import TensorDescriptor, unmerge_magic
+from rocke.helpers.spec import SignatureBuilder, ceil_div_grid, kernel_name_join
+from rocke.helpers.tensor_view import make_buffer_resource, view_from_transforms_descriptor
+from rocke.helpers.transforms import TensorDescriptor, unmerge_magic
 from .conv_implicit_gemm import ConvProblem, make_a_descriptor
 
 
@@ -117,7 +117,7 @@ def is_valid_spec(spec: Img2ColSpec, arch: str = "gfx950") -> Tuple[bool, str]:
     against the :class:`rocke.core.arch.ArchTarget` table (an unknown
     gfx name is rejected) but otherwise does not constrain the kernel.
     """
-    from ...core.arch import ArchTarget
+    from rocke.core.arch import ArchTarget
 
     try:
         target = ArchTarget.from_gfx(arch)

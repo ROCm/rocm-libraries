@@ -27,7 +27,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Optional, Sequence, Tuple
 
-from ...core.ir import (
+from rocke.core.ir import (
     BF16,
     F16,
     F32,
@@ -35,8 +35,8 @@ from ...core.ir import (
     Type,
     Value,
 )
-from ...helpers.spec import choose_load_vec
-from ...helpers.transforms import TensorDescriptor, embed, pad, unmerge_magic
+from rocke.helpers.spec import choose_load_vec
+from rocke.helpers.transforms import TensorDescriptor, embed, pad, unmerge_magic
 
 
 # ---------------------------------------------------------------------

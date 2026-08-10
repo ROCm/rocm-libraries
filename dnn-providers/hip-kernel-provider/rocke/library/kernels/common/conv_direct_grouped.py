@@ -71,7 +71,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Tuple
 
-from ...core.ir import (
+from rocke.core.ir import (
     F16,
     I32,
     IRBuilder,
@@ -79,7 +79,7 @@ from ...core.ir import (
     PtrType,
     Value,
 )
-from ...helpers.transforms import TensorDescriptor, embed, unmerge_magic
+from rocke.helpers.transforms import TensorDescriptor, embed, unmerge_magic
 
 
 @dataclass(frozen=True)
@@ -170,7 +170,7 @@ class DirectConv16cSpec:
         return self.problem.KH
 
     def kernel_name(self) -> str:
-        from ...helpers.spec import kernel_name_join
+        from rocke.helpers.spec import kernel_name_join
 
         p = self.problem
         return kernel_name_join(
@@ -212,7 +212,7 @@ def is_valid_spec_16c(
     The atom legality is sourced from
     :class:`rocke.core.arch.ArchTarget`.
     """
-    from ...core.arch import ArchTarget
+    from rocke.core.arch import ArchTarget
 
     try:
         target = ArchTarget.from_gfx(arch)
@@ -839,7 +839,7 @@ class DirectConv4cSpec:
         return (self.block_groups // 16) * self.wave_size
 
     def kernel_name(self) -> str:
-        from ...helpers.spec import kernel_name_join
+        from rocke.helpers.spec import kernel_name_join
 
         p = self.problem
         return kernel_name_join(
@@ -874,7 +874,7 @@ def is_valid_spec_4c(spec: DirectConv4cSpec, arch: str = "gfx950") -> Tuple[bool
     because the catalog lists only the warp-tile (16x16 / 32x32) shapes,
     while comgr selects the 4x4x4 intrinsic directly on both targets.
     """
-    from ...core.arch import ArchTarget
+    from rocke.core.arch import ArchTarget
 
     try:
         ArchTarget.from_gfx(arch)

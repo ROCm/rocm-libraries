@@ -4,7 +4,7 @@
 """Convolution (forward implicit-GEMM) dispatcher family.
 
 Worked implementation mirroring :mod:`rocke.dispatch.gemm.bf16_rcr`. Backed by
-:mod:`rocke.instances.common.conv_implicit_gemm` (the NHWC x KRSC -> NHWK
+:mod:`kernels.common.conv_implicit_gemm` (the NHWC x KRSC -> NHWK
 forward implicit-GEMM emitter).
 
 The implicit-GEMM problem reduces to a GEMM of
@@ -33,14 +33,14 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Callable, Sequence, Tuple
 
-from ...core.arch import ArchTarget
-from ...instances.common.conv_implicit_gemm import (
+from rocke.core.arch import ArchTarget
+from kernels.common.conv_implicit_gemm import (
     ConvProblem,
     ImplicitGemmConvSpec,
     build_implicit_gemm_conv,
     is_valid_spec as _conv_is_valid_spec,
 )
-from ..core import (
+from rocke.dispatch.core import (
     Capability,
     CandidateRegistry,
     DispatchResult,

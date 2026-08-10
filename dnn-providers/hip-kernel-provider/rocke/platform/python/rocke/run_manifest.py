@@ -25,9 +25,6 @@ from pathlib import Path
 from typing import Callable, Dict, Optional, Tuple
 
 from .runtime.hip_module import Runtime
-from .instances.common.deep_fused_conv_pool import (
-    run_deep_fused_conv_pool_fp16_manifest_problem,
-)
 from .instances.common.manifest_runner.conv import run_conv_manifest_problem
 from .instances.common.manifest_runner.gemm import (
     run_batched_gemm_manifest_problem,
@@ -38,9 +35,6 @@ from .instances.common.manifest_runner.matmul_nbits import (
     run_matmul_nbits_manifest_problem,
 )
 from .instances.common.manifest_runner.simple_ops import run_simple_op_manifest_problem
-from .instances.gfx1151.deep_fused_conv_pool import (
-    run_deep_fused_conv_pool_i8i4_manifest_problem,
-)
 
 # Try to import torch-based launcher, fall back to direct HIP timing if unavailable
 try:
@@ -107,12 +101,12 @@ def _register_builtin_runners() -> None:
     register_manifest_runner("gemm_iu8", run_gemm_iu8_manifest_problem)
     register_manifest_runner("batched_gemm_fp16", run_batched_gemm_manifest_problem)
     register_manifest_runner("matmul_nbits_fp16", run_matmul_nbits_manifest_problem)
-    register_manifest_runner(
-        "deep_fused_conv_pool_i8i4", run_deep_fused_conv_pool_i8i4_manifest_problem
-    )
-    register_manifest_runner(
-        "deep_fused_conv_pool_fp16", run_deep_fused_conv_pool_fp16_manifest_problem
-    )
+    # The deep-fused conv/pool kinds ("deep_fused_conv_pool_fp16" /
+    # "_i8i4") are NOT registered here: their buffer knowledge lives with the
+    # kernels, which moved to the rocke library convolution vertical. The
+    # library registers them via ``kernels.manifest`` on ``import kernels``.
+    # This registry exists precisely so a family outside this package can be
+    # served without editing the shipped wheel.
 
 
 _register_builtin_runners()

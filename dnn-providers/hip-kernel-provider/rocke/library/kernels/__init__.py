@@ -164,3 +164,47 @@ from .common.sparse_attention import (  # noqa: F401
     vsa_sparse_attention_grid,
     vsa_sparse_attention_signature,
 )
+
+# ---------------------------------------------------------------------
+# Convolution vertical
+# ---------------------------------------------------------------------
+# Implicit-GEMM fwd/wgrad, grouped direct conv, deep-fused conv+pool and the
+# img2col materialiser, carved out of ``rocke.instances`` the same way the
+# SDPA/MHA family was. Arch-divergent deep-fused conv/pool bodies live in the
+# ``gfx950`` / ``gfx1151`` / ``gfx1201`` subpackages; import those directly
+# rather than binding one arch's builder here.
+from .common.conv_direct_grouped import (  # noqa: F401
+    DirectConv4cSpec,
+    DirectConv16cSpec,
+    DirectConvProblem,
+    build_direct_conv_4c,
+    build_direct_conv_16c,
+)
+from .common.conv_implicit_gemm import (  # noqa: F401
+    ConvAccumulatorEpilogue,
+    ConvProblem,
+    ImplicitGemmConvSpec,
+    build_implicit_gemm_conv,
+    make_a_descriptor,
+    make_b_descriptor,
+    make_d_descriptor,
+)
+from .common.conv_implicit_gemm_wgrad import (  # noqa: F401
+    WgradConvSpec,
+    build_implicit_gemm_conv_wgrad,
+    is_valid_wgrad_spec,
+    make_dy_descriptor,
+    make_dw_descriptor,
+    make_x_wgrad_descriptor,
+)
+from .common.img2col import (  # noqa: F401
+    Img2ColSpec,
+    build_img2col,
+    img2col_grid,
+    img2col_signature,
+    is_valid_spec as is_valid_img2col_spec,
+)
+
+# Registers the vertical's deep-fused conv/pool manifest runners with
+# ``rocke.run_manifest`` (the platform no longer ships them).
+from . import manifest  # noqa: F401,E402

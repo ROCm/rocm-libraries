@@ -47,18 +47,18 @@ import struct
 from dataclasses import dataclass
 from typing import List, Sequence, Tuple
 
-from ...core.ir import F16, I8, I16, I32, IRBuilder, PtrType, Value, VectorType
-from ...helpers.geometry import WarpGrid
-from ...helpers.schedule import DS_READ, MFMA, SchedulePolicy
-from ...helpers.spec import kernel_name_join
-from ...runtime.hip_module import Runtime
-from ..common._matmul_nbits_common import (
+from rocke.core.ir import F16, I8, I16, I32, IRBuilder, PtrType, Value, VectorType
+from rocke.helpers.geometry import WarpGrid
+from rocke.helpers.schedule import DS_READ, MFMA, SchedulePolicy
+from rocke.helpers.spec import kernel_name_join
+from rocke.runtime.hip_module import Runtime
+from rocke.instances.common._matmul_nbits_common import (
     MatMulNBitsSpec,
     pack_i4_weights_for_matmul_nbits,
 )
 from ..common.conv_implicit_gemm import ConvProblem, _emit_frag_smem_load
-from ..common.gemm_universal import TileSpec
-from ..common.manifest_runner.utils import as_u8_buffer, nbytes, require_numpy
+from rocke.instances.common.gemm_universal import TileSpec
+from rocke.instances.common.manifest_runner.utils import as_u8_buffer, nbytes, require_numpy
 from ..gfx950.deep_fused_conv_pool import FusedConvPoolProblem
 
 _WMMA = 16
@@ -495,7 +495,7 @@ def is_valid_spec(
         )
     p = spec.problem
     c = p.conv
-    from ...core.arch import ArchTarget
+    from rocke.core.arch import ArchTarget
 
     try:
         target = ArchTarget.from_gfx(arch)
@@ -1827,7 +1827,7 @@ def _stage_conv1_w1(
 ) -> None:
     """Unpack packed-int4 conv1 weights ``W1[K1, K0/2]`` (2 codes/byte, low
     nibble = even k0) into ``w1_smem[tile_n, K0]`` as fp16 codes; padding -> 0."""
-    from ...helpers.i4_dequant import unpack_i4_byte_to_pair_i32
+    from rocke.helpers.i4_dequant import unpack_i4_byte_to_pair_i32
 
     p = spec.problem
     c = p.conv
@@ -1909,7 +1909,7 @@ def _stage_conv1_w1_i8(
     nibble = even k0) into ``w1_smem[tile_n, K0]`` as sign-extended int4 codes in
     i8 lanes (byte-per-code), for the iu8 conv1 atom; padding -> 0. Twin of
     :func:`_stage_conv1_w1` but stores int8 bytes instead of fp16 codes."""
-    from ...helpers.i4_dequant import unpack_i4_byte_to_pair_i32
+    from rocke.helpers.i4_dequant import unpack_i4_byte_to_pair_i32
 
     p = spec.problem
     c = p.conv
@@ -2689,7 +2689,7 @@ def build_deep_fused_conv_pool(
     if not ok:
         raise ValueError(f"invalid gfx1151 deep fused conv/pool spec: {why}")
 
-    from ...core.arch import ArchTarget
+    from rocke.core.arch import ArchTarget
 
     target = ArchTarget.from_gfx(arch)
     op = target.mma.op_for_shape(

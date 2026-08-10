@@ -31,20 +31,20 @@ import struct
 from dataclasses import dataclass
 from typing import Optional, Sequence, Tuple
 
-from ...core.ir import F16, I32, IRBuilder, PtrType, Value
-from ...runtime.hip_module import Runtime
-from ...helpers.distribution import (
+from rocke.core.ir import F16, I32, IRBuilder, PtrType, Value
+from rocke.runtime.hip_module import Runtime
+from rocke.helpers.distribution import (
     LoadStoreTraits,
     make_static_distributed_tensor,
     store_tile_cshuffle,
 )
-from ...helpers.epilogues import _cshuffle_acc_distribution
-from ...helpers.geometry import WarpGrid
-from ...helpers.layouts import LdsLayout
-from ...helpers.loads import CoalescedTileLoader
-from ...helpers.spec import SignatureBuilder, kernel_name_join
-from ...helpers.tensor_view import make_buffer_resource, make_lds_view
-from ...helpers.mfma_gemm_inner import load_smem_frag_contiguous_f16
+from rocke.helpers.epilogues import _cshuffle_acc_distribution
+from rocke.helpers.geometry import WarpGrid
+from rocke.helpers.layouts import LdsLayout
+from rocke.helpers.loads import CoalescedTileLoader
+from rocke.helpers.spec import SignatureBuilder, kernel_name_join
+from rocke.helpers.tensor_view import make_buffer_resource, make_lds_view
+from rocke.helpers.mfma_gemm_inner import load_smem_frag_contiguous_f16
 from .conv_implicit_gemm import (
     ConvAccumulatorEpilogue,
     ConvProblem,
@@ -54,7 +54,7 @@ from .conv_implicit_gemm import (
     _apply_accumulator_epilogue,
     _resolve_conv_op,
 )
-from .manifest_runner.utils import as_u8_buffer, nbytes, require_numpy
+from rocke.instances.common.manifest_runner.utils import as_u8_buffer, nbytes, require_numpy
 
 __all__ = [
     "FusedConvPoolProblem",

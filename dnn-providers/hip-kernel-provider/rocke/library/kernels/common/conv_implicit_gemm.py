@@ -58,7 +58,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace as dc_replace
 from typing import Callable, List, Optional, Sequence, Tuple
 
-from ...core.ir import (
+from rocke.core.ir import (
     BF16,
     F32,
     I32,
@@ -68,18 +68,18 @@ from ...core.ir import (
     Type,
     Value,
 )
-from ...helpers.atoms import MfmaAtom, mfma_atom
-from ...helpers.epilogues import CShuffleEpilogue, DirectEpilogue
-from ...helpers.geometry import WarpGrid
-from ...helpers.layouts import LdsLayout
-from ...helpers.loads import AsyncTileLoader, CoalescedTileLoader
-from ...helpers.mfma_gemm_inner import decode_mfma_lanes
-from ...helpers.pipeline import SoftwarePipeline
-from ...helpers.schedule import SchedulePolicy
-from ...helpers.tensor_view import (
+from rocke.helpers.atoms import MfmaAtom, mfma_atom
+from rocke.helpers.epilogues import CShuffleEpilogue, DirectEpilogue
+from rocke.helpers.geometry import WarpGrid
+from rocke.helpers.layouts import LdsLayout
+from rocke.helpers.loads import AsyncTileLoader, CoalescedTileLoader
+from rocke.helpers.mfma_gemm_inner import decode_mfma_lanes
+from rocke.helpers.pipeline import SoftwarePipeline
+from rocke.helpers.schedule import SchedulePolicy
+from rocke.helpers.tensor_view import (
     make_buffer_resource,
 )
-from ...helpers.transforms import TensorDescriptor, embed, pad, unmerge_magic
+from rocke.helpers.transforms import TensorDescriptor, embed, pad, unmerge_magic
 from ._conv_implicit_gemm_common import (  # noqa: F401 — re-exported for callers
     ConvAccumulatorEpilogue,
     ConvDataSpec,
@@ -248,7 +248,7 @@ class ImplicitGemmConvSpec:
         )
 
     def kernel_name(self) -> str:
-        from ...helpers.spec import kernel_name_join
+        from rocke.helpers.spec import kernel_name_join
 
         p = self.problem
         return kernel_name_join(
@@ -376,7 +376,7 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
     with a structured reason instead of crashing comgr at lower time
     (``LLVM ERROR: Cannot select intrinsic ...``).
     """
-    from ...core.arch import ArchTarget
+    from rocke.core.arch import ArchTarget
 
     try:
         target = ArchTarget.from_gfx(arch)
@@ -505,7 +505,7 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
 
 
 def _conv_mma_family(arch: str) -> str:
-    from ...core.arch import ArchTarget
+    from rocke.core.arch import ArchTarget
 
     return "wmma" if ArchTarget.from_gfx(arch).wave_size == 32 else "mma"
 
@@ -519,7 +519,7 @@ def _resolve_conv_op(spec: ImplicitGemmConvSpec, arch: str):
     fragment loads and the accumulator scatter — the cross-arch contract that
     lets one conv body emit both ISAs.
     """
-    from ...core.arch import ArchTarget
+    from rocke.core.arch import ArchTarget
 
     target = ArchTarget.from_gfx(arch)
     op = target.mma.op_for_shape(
@@ -897,7 +897,7 @@ def build_implicit_gemm_conv(
     # so the downstream helpers (loaders, epilogues) automatically
     # pick up the remapped origins.
     if spec.chiplet_swizzle:
-        from ...helpers.grid import chiplet_aware_super_tile
+        from rocke.helpers.grid import chiplet_aware_super_tile
 
         num_pid_m = (p.M + block_m - 1) // block_m
         num_pid_n = (p.N_gemm + block_n - 1) // block_n
@@ -1147,7 +1147,7 @@ def build_implicit_gemm_conv(
             # the loads as streaming keeps them from evicting useful
             # cache lines (e.g. the B matrix's columns that *will* be
             # re-read across multiple M-tiles within the same XCD).
-            from ...core.ir import CACHE_STREAM
+            from rocke.core.ir import CACHE_STREAM
 
             a_slot = a_loader.bind(b, smem_dst=A_dst, wave_id=warp_id)
             a_slot.issue(

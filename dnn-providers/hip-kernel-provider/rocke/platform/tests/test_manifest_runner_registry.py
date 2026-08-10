@@ -14,17 +14,21 @@ import unittest
 
 from rocke.run_manifest import register_manifest_runner, registered_manifest_kinds
 
-# Every kind the pre-registry branch chain handled. Losing one of these is a
-# silent loss of the ability to run an already-emitted manifest, so the list is
-# spelled out rather than derived.
+# Every kind the pre-registry branch chain handled that the PLATFORM still
+# ships. Losing one of these is a silent loss of the ability to run an
+# already-emitted manifest, so the list is spelled out rather than derived.
+#
+# "deep_fused_conv_pool_fp16" / "_i8i4" are deliberately absent: their buffer
+# knowledge lives with the deep-fused conv/pool kernels, which are part of the
+# rocke library convolution vertical. ``kernels.manifest`` registers them on
+# ``import kernels`` -- the extension path this registry was built for. The
+# library side asserts that in library/tests/test_conv_manifest.py.
 _CHAIN_KINDS = frozenset(
     {
         "batched_gemm_fp16",
         "conv_bf16",
         "conv_fp16",
         "conv_fp32",
-        "deep_fused_conv_pool_fp16",
-        "deep_fused_conv_pool_i8i4",
         "elementwise_fp16",
         "gemm_fp16",
         "gemm_iu8",
