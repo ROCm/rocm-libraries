@@ -90,7 +90,10 @@ jobs:
           # Builds the public/private split (wrapper + libMIOpen_private.so) to
           # exercise the MIOPEN_ENABLE_HIPDNN_WRAPPER=ON path: the compile-time
           # -include rename must apply cleanly across every private TU and the
-          # wrapper must link against the private library.
+          # wrapper must link against the private library. miopen_gtest is built
+          # as well so a real consumer links against the wrapper, proving the split
+          # still satisfies both the public C API and the internal C++ symbols the
+          # tests use.
           - name: MIOpen Flag-On Wrapper Build-Only
             job_id: flag-on-build
             cmake_extra_flags: >-
@@ -102,7 +105,7 @@ jobs:
               -DMIOPEN_ENABLE_HIPDNN_WRAPPER=ON
               -DCMAKE_PREFIX_PATH=/opt/rocm
               -DGPU_TARGETS="gfx942"
-            build_target: --target MIOpen
+            build_target: --target MIOpen --target miopen_gtest
 
           # Flag-off byte-equivalence gate (RFC 0001, ALMIOPEN-2341). Builds the
           # default (MIOPEN_ENABLE_HIPDNN_WRAPPER=OFF) single libMIOpen.so and
