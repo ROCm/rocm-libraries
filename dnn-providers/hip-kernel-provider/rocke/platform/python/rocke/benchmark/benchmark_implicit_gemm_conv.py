@@ -1946,7 +1946,7 @@ def _run_wgrad_sweep(
             continue
 
         grid = _grid_for_wgrad_spec(spec, resolved_split_k)
-        block = (spec.launch_block_size, 1, 1)
+        block = (spec.block_size, 1, 1)
         stream = 0
 
         values = {
