@@ -51,6 +51,7 @@ from ...instances.common.conv_implicit_gemm_dgrad import (
 )
 from ...instances.common._conv_implicit_gemm_common import ConvDataSpec, ConvProblem
 from ..core import (
+    Capability,
     CandidateRegistry,
     DispatchResult,
     KernelCandidate,
@@ -192,6 +193,10 @@ def _selector_matches(
     return True, "ok"
 
 
+_CDNA_GFX950_ONLY = ("gfx950",)
+_CDNA_ALL = ("gfx90a", "gfx942", "gfx950")
+_RDNA_WMMA = ("gfx1151", "gfx1201")
+
 # ---- per-candidate spec factories ----------------------------------------
 
 
@@ -329,6 +334,7 @@ def _make_candidate(
     priority: int,
     spec_fn: Callable[[ConvDgradRequest, str], DgradConvSpec],
     arch_family: str,
+    arches: Tuple[str, ...],
     dtype_filter: tuple = ("fp16", "bf16"),
 ) -> KernelCandidate:
     def support(req: OperatorRequest) -> Tuple[bool, str]:
@@ -364,7 +370,8 @@ def _make_candidate(
         spec_id=spec_id,
         abi_version=CONV_DGRAD_ABI_VERSION,
         priority=priority,
-        supports=support,
+        capability=Capability(arches=arches, dtypes=dtype_filter),
+        _supports=support,
         select_spec=select,
         signature=_signature,
         grid=_grid,
@@ -383,6 +390,7 @@ CONV_DGRAD_REGISTRY.extend(
             priority=10,
             spec_fn=_spec_cdna_hiperf_gfx950,
             arch_family="cdna",
+            arches=_CDNA_GFX950_ONLY,
             dtype_filter=("fp16", "bf16"),
         ),
         _make_candidate(
@@ -391,6 +399,7 @@ CONV_DGRAD_REGISTRY.extend(
             priority=20,
             spec_fn=_spec_cdna_hiperf,
             arch_family="cdna",
+            arches=_CDNA_ALL,
             dtype_filter=("fp16", "bf16"),
         ),
         _make_candidate(
@@ -399,6 +408,7 @@ CONV_DGRAD_REGISTRY.extend(
             priority=30,
             spec_fn=_spec_cdna_mem,
             arch_family="cdna",
+            arches=_CDNA_ALL,
             dtype_filter=("fp16", "bf16"),
         ),
         _make_candidate(
@@ -407,6 +417,7 @@ CONV_DGRAD_REGISTRY.extend(
             priority=10,
             spec_fn=_spec_cdna_fp32,
             arch_family="cdna",
+            arches=_CDNA_ALL,
             dtype_filter=("fp32",),
         ),
         _make_candidate(
@@ -415,6 +426,7 @@ CONV_DGRAD_REGISTRY.extend(
             priority=10,
             spec_fn=_spec_rdna_wmma,
             arch_family="rdna",
+            arches=_RDNA_WMMA,
             dtype_filter=("fp16", "bf16"),
         ),
     )

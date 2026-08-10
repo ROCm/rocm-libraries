@@ -83,7 +83,7 @@ class TestConvDgradDispatch(unittest.TestCase):
     def test_gfx942_hiperf_gfx950_candidate_unsupported(self):
         for c in conv_dgrad_candidates():
             if c.spec_id == "cdna_hiperf_gfx950_64x64":
-                ok, why = c.supports(_dgrad("gfx942"))
+                ok, _ = c.admits(_dgrad("gfx942"))
                 self.assertFalse(ok)
 
     # ---- RDNA selection -------------------------------------------------------
@@ -104,17 +104,15 @@ class TestConvDgradDispatch(unittest.TestCase):
         req = _dgrad("gfx950")
         for c in conv_dgrad_candidates():
             if "rdna" in c.name:
-                ok, why = c.supports(req)
+                ok, _ = c.admits(req)
                 self.assertFalse(ok)
-                self.assertIn("family", why)
 
     def test_cdna_candidates_unsupported_on_rdna(self):
         req = ConvDgradRequest(N=2, C=32, K=32, Hi=16, Wi=16, Y=1, X=1, arch="gfx1151")
         for c in conv_dgrad_candidates():
             if "cdna" in c.name:
-                ok, why = c.supports(req)
+                ok, _ = c.admits(req)
                 self.assertFalse(ok)
-                self.assertIn("family", why)
 
     # ---- grid and signature --------------------------------------------------
 
