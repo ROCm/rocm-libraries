@@ -14,6 +14,8 @@ function(add_recording_provider target source output_name)
     OUTPUT_NAME ${output_name}
     PREFIX "lib"
   )
+  target_link_options(${target} PRIVATE
+    "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/recording_provider.map")
 endfunction()
 
 add_recording_provider(rocm_blas_provider_recording blas_provider.cpp
@@ -46,3 +48,5 @@ set_target_properties(rocm_rocblas_bridge_provider_recording PROPERTIES
   VISIBILITY_INLINES_HIDDEN ON
   OUTPUT_NAME rocblas-provider-bruteforce-recording
   PREFIX "lib")
+target_link_options(rocm_rocblas_bridge_provider_recording PRIVATE
+  "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/recording_provider.map")
