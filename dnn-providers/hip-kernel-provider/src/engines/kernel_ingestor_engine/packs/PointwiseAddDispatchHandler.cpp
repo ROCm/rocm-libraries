@@ -1,7 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include "ingestor_poc/PointwiseAddDispatchHandler.hpp"
+#include "engines/kernel_ingestor_engine/packs/PointwiseAddDispatchHandler.hpp"
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
@@ -12,10 +12,10 @@
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
 
 #include "compilation/KernelCompileOptions.hpp"
-#include "ingestor_poc/NativeMatchers.hpp"
-#include "ingestor_poc/NativeSymbolNames.hpp"
+#include "engines/kernel_ingestor_engine/packs/PointwiseAddMatchers.hpp"
+#include "engines/kernel_ingestor_engine/packs/PointwiseAddSymbols.hpp"
 
-namespace hip_kernel_provider::ingestor_poc
+namespace hip_kernel_provider::kernel_ingestor_engine
 {
 
 using namespace hipdnn_plugin_sdk::ingestor;
@@ -156,6 +156,6 @@ void registerPointwiseAddDispatch(const PointwiseAddDispatchHandler& handler)
     DispatchRegistry<Handle>::registerSymbol(std::string(DISPATCH_SYMBOL), &handler);
 }
 
-} // namespace hip_kernel_provider::ingestor_poc
+} // namespace hip_kernel_provider::kernel_ingestor_engine
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

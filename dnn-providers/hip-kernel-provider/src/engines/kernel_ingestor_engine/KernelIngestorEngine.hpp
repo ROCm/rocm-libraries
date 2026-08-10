@@ -13,7 +13,7 @@
 #include "core/Handle.hpp"
 #include "core/Settings.hpp"
 
-namespace hip_kernel_provider::ingestor_poc
+namespace hip_kernel_provider::kernel_ingestor_engine
 {
 
 /**
@@ -28,6 +28,6 @@ namespace hip_kernel_provider::ingestor_poc
  */
 std::unique_ptr<hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>> makePointwiseAddEngine();
 
-} // namespace hip_kernel_provider::ingestor_poc
+} // namespace hip_kernel_provider::kernel_ingestor_engine
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

@@ -31,14 +31,14 @@ add_executable(
 include("${CMAKE_CURRENT_SOURCE_DIR}/../cmake/KernelEmbedding.cmake")
 add_kernels_for_embedding(TARGET hip_kernel_provider_tests FILES ${CMAKE_CURRENT_SOURCE_DIR}/kernels/vector_add.cpp)
 
-# The ingestor POC's dispatch handler compiles this kernel at plan-build time, and
+# The kernel ingestor's dispatch handler compiles this kernel at plan-build time, and
 # kernel sources are embedded per target, so the test binary needs its own copy.
 # It is embedded from a configure-time copy rather than from the original path: a source
 # file registered for embedding in two directories lands in both directories'
 # CMAKE_CONFIGURE_DEPENDS, which Ninja rejects as two rules generating one file.
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     configure_file(
-        ${CMAKE_CURRENT_SOURCE_DIR}/../ingestor_poc/kernels/PointwiseAdd.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/../engines/kernel_ingestor_engine/kernels/PointwiseAdd.cpp
         ${CMAKE_CURRENT_BINARY_DIR}/kernels/PointwiseAdd.cpp
         COPYONLY
     )
@@ -87,7 +87,7 @@ if(ENABLE_HIP_MLOPS_ENGINE)
 endif()
 
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
-    add_subdirectory(ingestor_poc)
+    add_subdirectory(engines/kernel_ingestor_engine)
 endif()
 
 clang_tidy_check(hip_kernel_provider_tests)

@@ -37,7 +37,7 @@
  * the pieces agree with one another through the ABI, which is the whole claim of a
  * data-driven ingestor.
  */
-namespace hip_kernel_provider::ingestor_poc::integration
+namespace hip_kernel_provider::kernel_ingestor_engine::integration
 {
 
 namespace
@@ -48,7 +48,7 @@ namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 constexpr int64_t INPUT_A_UID = 1;
 constexpr int64_t INPUT_B_UID = 2;
 constexpr int64_t OUTPUT_UID = 3;
-constexpr const char* ENGINE_NAME = "kernel_ingestor_poc:PointwiseAdd";
+constexpr const char* ENGINE_NAME = "hipkernel:PointwiseAdd";
 constexpr const char* BLOCK_SIZE_KNOB = "block_size";
 
 /// Workspace the pack's larger-block kernel declares, which the engine reports as the
@@ -56,7 +56,7 @@ constexpr const char* BLOCK_SIZE_KNOB = "block_size";
 constexpr size_t EXPECTED_WORKSPACE_BYTES = 1024;
 
 /// A serialized single-node pointwise-ADD graph over 1-element 4-D FLOAT tensors: the
-/// one shape this POC's pack accepts.
+/// one shape this pack accepts.
 flatbuffers::DetachedBuffer buildPointwiseAddGraph(bool withIdentity = true)
 {
     flatbuffers::FlatBufferBuilder builder;
@@ -85,7 +85,7 @@ flatbuffers::DetachedBuffer buildPointwiseAddGraph(bool withIdentity = true)
                                        data_objects::NodeAttributes::PointwiseAttributes,
                                        attributes.Union()));
 
-    auto name = builder.CreateString("ingestor_poc_pointwise_add");
+    auto name = builder.CreateString("pointwise_add");
     auto tensorsVector = builder.CreateVector(tensors);
     auto nodesVector = builder.CreateVector(nodes);
 
@@ -590,6 +590,6 @@ TEST_F(IntegrationGpuKernelIngestor, ExecutesAGraphThatCannotBeCached)
 
 } // namespace
 
-} // namespace hip_kernel_provider::ingestor_poc::integration
+} // namespace hip_kernel_provider::kernel_ingestor_engine::integration
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

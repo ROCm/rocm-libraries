@@ -16,10 +16,10 @@
 #include <hipdnn_plugin_sdk/ingestor/LruCache.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
 
-#include "IngestorTestGraphs.hpp"
+#include "KernelIngestorTestFixtures.hpp"
 
 /**
- * @file TestIngestorConcurrency.cpp
+ * @file TestKernelIngestorConcurrency.cpp
  * @brief The ingestor's shared state under concurrent use.
  *
  * One engine, and therefore one catalog cache, is shared by every handle in the process,

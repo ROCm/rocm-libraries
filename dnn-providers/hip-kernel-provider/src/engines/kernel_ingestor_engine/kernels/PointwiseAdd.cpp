@@ -1,7 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-// The kernel behind the kernel-ingestor POC's descriptor pack. Deliberately the
+// The kernel behind the pointwise-add descriptor pack. Deliberately the
 // narrowest useful operation: elementwise add over a single-element tensor.
 //
 // HIP_PLUGIN_POINTWISE_ADD_TYPE is the element type, supplied per compilation from the

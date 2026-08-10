@@ -7,7 +7,7 @@
 
 #include <string_view>
 
-namespace hip_kernel_provider::ingestor_poc
+namespace hip_kernel_provider::kernel_ingestor_engine
 {
 
 /**
@@ -25,16 +25,16 @@ namespace hip_kernel_provider::ingestor_poc
  */
 
 /// Graph-scoped applicability: a single-node pointwise ADD over 1-element tensors.
-inline constexpr std::string_view GRAPH_MATCHER_SYMBOL = "pointwise_add_poc.graph_match";
+inline constexpr std::string_view GRAPH_MATCHER_SYMBOL = "hipkernel.pointwise_add.graph_match";
 
 /// Kernel-scoped applicability: the kernel's dtype must be the graph's dtype.
-inline constexpr std::string_view KERNEL_MATCHER_SYMBOL = "pointwise_add_poc.kernel_match";
+inline constexpr std::string_view KERNEL_MATCHER_SYMBOL = "hipkernel.pointwise_add.kernel_match";
 
 /// Kernel-selection score.
-inline constexpr std::string_view SCORE_SYMBOL = "pointwise_add_poc.score";
+inline constexpr std::string_view SCORE_SYMBOL = "hipkernel.pointwise_add.score";
 
 /// Workspace sizing and launch.
-inline constexpr std::string_view DISPATCH_SYMBOL = "pointwise_add_poc.dispatch";
+inline constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.pointwise_add.dispatch";
 
 /**
  * @brief The engine name, hashed into hipDNN's engine-id space.
@@ -47,12 +47,12 @@ inline constexpr std::string_view DISPATCH_SYMBOL = "pointwise_add_poc.dispatch"
  * defined by data, so it registers its name when it is constructed rather than at build
  * time — which is the behavior this pack exists to demonstrate.
  */
-inline constexpr std::string_view ENGINE_NAME = "kernel_ingestor_poc:PointwiseAdd";
+inline constexpr std::string_view ENGINE_NAME = "hipkernel:PointwiseAdd";
 
 /// The KMD fields this engine's kernels vary along.
 inline constexpr std::string_view BLOCK_SIZE_FIELD = "block_size";
 inline constexpr std::string_view DTYPE_FIELD = "dtype";
 
-} // namespace hip_kernel_provider::ingestor_poc
+} // namespace hip_kernel_provider::kernel_ingestor_engine
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

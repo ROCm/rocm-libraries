@@ -8,7 +8,7 @@
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 
-namespace hip_kernel_provider::ingestor_poc
+namespace hip_kernel_provider::kernel_ingestor_engine
 {
 
 /**
@@ -64,6 +64,6 @@ PointwiseAddBinding pointwiseAddBinding(const hipdnn_plugin_sdk::ingestor::Match
 /// engine that is never constructed should not have mutated process-wide registries.
 void registerPointwiseAddMatchers();
 
-} // namespace hip_kernel_provider::ingestor_poc
+} // namespace hip_kernel_provider::kernel_ingestor_engine
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

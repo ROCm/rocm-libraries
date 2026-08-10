@@ -1,7 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include "ingestor_poc/PointwiseAddPack.hpp"
+#include "engines/kernel_ingestor_engine/packs/PointwiseAddPack.hpp"
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
@@ -11,9 +11,9 @@
 #include <hipdnn_plugin_sdk/ingestor/IKernelHeuristic.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
 
-#include "ingestor_poc/NativeSymbolNames.hpp"
+#include "engines/kernel_ingestor_engine/packs/PointwiseAddSymbols.hpp"
 
-namespace hip_kernel_provider::ingestor_poc
+namespace hip_kernel_provider::kernel_ingestor_engine
 {
 
 using namespace hipdnn_plugin_sdk::ingestor;
@@ -24,13 +24,13 @@ namespace
 // Descriptor ids. Real descriptors carry GUIDs so any author can mint one locally
 // without colliding with another's; readable names serve the same role for a pack that
 // is built in memory and never shared.
-constexpr const char* ENGINE_ID = "poc.ued.pointwise_add";
-constexpr const char* SCHEMA_ID = "poc.kmd.pointwise_add";
-constexpr const char* HEURISTIC_ID = "poc.uhd.pointwise_add";
-constexpr const char* GRAPH_MATCHER_ID = "poc.umd.pointwise_add.graph";
-constexpr const char* KERNEL_MATCHER_ID = "poc.umd.pointwise_add.kernel";
-constexpr const char* DISPATCH_ID = "poc.udd.pointwise_add";
-constexpr const char* PACK_ID = "poc.kdp.pointwise_add";
+constexpr const char* ENGINE_ID = "hipkernel.ued.pointwise_add";
+constexpr const char* SCHEMA_ID = "hipkernel.kmd.pointwise_add";
+constexpr const char* HEURISTIC_ID = "hipkernel.uhd.pointwise_add";
+constexpr const char* GRAPH_MATCHER_ID = "hipkernel.umd.pointwise_add.graph";
+constexpr const char* KERNEL_MATCHER_ID = "hipkernel.umd.pointwise_add.kernel";
+constexpr const char* DISPATCH_ID = "hipkernel.udd.pointwise_add";
+constexpr const char* PACK_ID = "hipkernel.kdp.pointwise_add";
 
 KernelDescriptor
     makeKernel(const std::string& id, int64_t blockSize, const std::string& dtype, int64_t priority)
@@ -86,16 +86,16 @@ PointwiseAddDescriptorSet buildPointwiseAddDescriptorSet()
 
     KernelDescriptorPack pack;
     pack.id = PACK_ID;
-    pack.name = "kernel_ingestor_poc:pointwise_add";
+    pack.name = "hipkernel:pointwise_add";
     pack.matcherIds = {GRAPH_MATCHER_ID, KERNEL_MATCHER_ID};
     pack.engineId = ENGINE_ID;
     pack.dispatchId = DISPATCH_ID;
     // Three kernels, each earning its place: the two FLOAT entries differ only in block
     // size, so ranking has an order to produce and the block_size knob has a real value
     // set; the HALF entry is what the kernel-scoped matcher prunes on a FLOAT graph.
-    pack.kernels = {makeKernel("poc.ukd.add_f32_block64", 64, "FLOAT", 0),
-                    makeKernel("poc.ukd.add_f32_block256", 256, "FLOAT", 0),
-                    makeKernel("poc.ukd.add_f16_block64", 64, "HALF", 0)};
+    pack.kernels = {makeKernel("hipkernel.ukd.pointwise_add.f32_block64", 64, "FLOAT", 0),
+                    makeKernel("hipkernel.ukd.pointwise_add.f32_block256", 256, "FLOAT", 0),
+                    makeKernel("hipkernel.ukd.pointwise_add.f16_block64", 64, "HALF", 0)};
     set.packs = {std::move(pack)};
 
     return set;
@@ -123,6 +123,6 @@ std::shared_ptr<KernelIngestorStateManager<Handle>> makePointwiseAddStateManager
         std::make_shared<NativeKernelHeuristic>(ScoreRegistry::resolve(std::string(SCORE_SYMBOL))));
 }
 
-} // namespace hip_kernel_provider::ingestor_poc
+} // namespace hip_kernel_provider::kernel_ingestor_engine
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

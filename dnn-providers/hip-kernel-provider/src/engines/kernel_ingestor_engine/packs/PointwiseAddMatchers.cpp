@@ -1,7 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include "ingestor_poc/NativeMatchers.hpp"
+#include "engines/kernel_ingestor_engine/packs/PointwiseAddMatchers.hpp"
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
@@ -14,9 +14,9 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
 
-#include "ingestor_poc/NativeSymbolNames.hpp"
+#include "engines/kernel_ingestor_engine/packs/PointwiseAddSymbols.hpp"
 
-namespace hip_kernel_provider::ingestor_poc
+namespace hip_kernel_provider::kernel_ingestor_engine
 {
 
 using namespace hipdnn_plugin_sdk::ingestor;
@@ -43,7 +43,7 @@ constexpr uint32_t MIN_SUPPORTED_RANK = 4;
 constexpr uint32_t MAX_SUPPORTED_RANK = 5;
 
 /// True when the tensor is a supported rank holding exactly one element -- the whole of
-/// this POC's supported problem space.
+/// this pack's supported problem space.
 bool isSingleElement(const data_objects::TensorAttributes& tensor)
 {
     const auto* dims = tensor.dims();
@@ -126,7 +126,7 @@ bool pointwiseAddGraphMatches(const MatchContext& context)
         return false;
     }
 
-    // One element each: this POC's kernel indexes element 0 and nothing else.
+    // One element each: this pack's kernel indexes element 0 and nothing else.
     if(!isSingleElement(*inputA) || !isSingleElement(*inputB) || !isSingleElement(*output))
     {
         return false;
@@ -184,6 +184,6 @@ void registerPointwiseAddMatchers()
     ScoreRegistry::registerSymbol(std::string(SCORE_SYMBOL), &pointwiseAddScore);
 }
 
-} // namespace hip_kernel_provider::ingestor_poc
+} // namespace hip_kernel_provider::kernel_ingestor_engine
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR
