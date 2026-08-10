@@ -2,10 +2,12 @@
 // SPDX-License-Identifier: MIT
 
 #include <array>
+#include <cmath>
 #include <roc/host_validation/axpby.hpp>
 #include <roc/host_validation/gemm.hpp>
 #include <roc/host_validation/generation.hpp>
 #include <roc/host_validation/reduction.hpp>
+#include <roc/host_validation/softmax.hpp>
 #include <span>
 #include <utility>
 
@@ -63,6 +65,17 @@ int main() {
     axpby.beta = -1.0;
     if (referenceAxpby(axpby).elementsComputed != 1 ||
         axpbyOutput.view().loadAs<float>({0}) != 1.0f)
+        return 1;
+
+    const std::array<float, 2> softmaxValues{1.0f, 2.0f};
+    const Tensor softmaxInput =
+        Tensor::fromNativeValues<float>(Shape{1, 2}, std::span<const float>(softmaxValues));
+    Tensor softmaxOutput(ScalarType::Float32, Shape{1, 2});
+    const SoftmaxRunInfo softmax = referenceSoftmax(
+        SoftmaxProblem(softmaxInput.view(), softmaxOutput.mutableView(), 1, ScalarType::Float32));
+    if (softmax.slicesComputed != 1 ||
+        std::abs(softmaxOutput.view().loadAs<float>({0, 0}) +
+                 softmaxOutput.view().loadAs<float>({0, 1}) - 1.0f) > 1e-6f)
         return 1;
     return 0;
 }
