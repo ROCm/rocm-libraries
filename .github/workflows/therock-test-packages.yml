@@ -95,11 +95,14 @@ jobs:
       therock_ref: ${{ inputs.therock_ref }}
       amdgpu_families: ${{ inputs.amdgpu_families }}
       # Per-component runner selection:
-      #   1. Multi-GPU components use the multi-GPU runner
-      #   2. CPU-only components use standard GitHub runners
-      #   3. Per-component runner (set by fetch_test_configurations.py)
+      #   1. Coverage workflows use the explicit test_runs_on input (e.g., codecov-poc)
+      #   2. Multi-GPU components use the multi-GPU runner
+      #   3. CPU-only components use standard GitHub runners
+      #   4. Per-component runner (set by fetch_test_configurations.py)
       test_runs_on: >-
         ${{
+          (inputs.coverage_enabled && inputs.test_runs_on != '' &&
+            inputs.test_runs_on) ||
           (matrix.components.multi_gpu_runner != '' &&
             matrix.components.multi_gpu_runner) ||
           (matrix.components.linux_cpu_runner == true &&
