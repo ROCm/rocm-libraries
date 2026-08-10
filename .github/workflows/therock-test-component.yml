@@ -145,7 +145,9 @@ jobs:
 
       - name: Pre-test coverage debug diagnostics
         if: ${{ inputs.coverage_enabled }}
+        continue-on-error: true
         run: |
+          set +e
           echo "===== COVERAGE DEBUG: Pre-test diagnostics ====="
           echo "--- Environment ---"
           echo "LLVM_PROFILE_FILE=${LLVM_PROFILE_FILE:-NOT SET}"
@@ -154,36 +156,44 @@ jobs:
           echo "PWD=$(pwd)"
 
           echo "--- GPU Info ---"
-          rocminfo | grep -A 5 "Name:" || echo "rocminfo failed"
-          hipconfig --platform || echo "hipconfig failed"
+          command -v rocminfo && rocminfo | grep -A 5 "Name:" || echo "rocminfo not available"
+          command -v hipconfig && hipconfig --platform || echo "hipconfig not available"
 
           echo "--- hipRAND library verification ---"
-          HIPRAND_SO=$(find ./build -name "libhiprand.so*" -type f ! -name "*.debug" | head -1)
+          HIPRAND_SO=$(find ./build -name "libhiprand.so*" -type f ! -name "*.debug" 2>/dev/null | head -1)
           if [ -n "$HIPRAND_SO" ]; then
             echo "Found libhiprand.so at: $HIPRAND_SO"
-            echo "Real path: $(readlink -f "$HIPRAND_SO")"
-            ls -lh "$HIPRAND_SO"
-            echo "File type:"
-            file "$HIPRAND_SO"
+            echo "Real path: $(readlink -f "$HIPRAND_SO" 2>/dev/null || echo "N/A")"
+            ls -lh "$HIPRAND_SO" 2>/dev/null || echo "ls failed"
+            command -v file && file "$HIPRAND_SO" || echo "file command not available"
             echo "Coverage instrumentation check (__llvm_profile symbols):"
-            nm "$HIPRAND_SO" | grep -c "__llvm_profile" || echo "NO __llvm_profile symbols found!"
-            nm "$HIPRAND_SO" | grep "__llvm_profile" | head -20 || echo "No symbols to show"
-            echo "Depends:"
-            ldd "$HIPRAND_SO" | head -20
+            if command -v nm >/dev/null; then
+              COUNT=$(nm "$HIPRAND_SO" 2>/dev/null | grep -c "__llvm_profile" || echo 0)
+              echo "  Count: $COUNT"
+              if [ "$COUNT" -gt 0 ]; then
+                nm "$HIPRAND_SO" 2>/dev/null | grep "__llvm_profile" | head -20
+              else
+                echo "  NO __llvm_profile symbols found!"
+              fi
+            else
+              echo "  nm command not available"
+            fi
+            echo "Linked libraries:"
+            ldd "$HIPRAND_SO" 2>/dev/null | head -20 || echo "ldd failed"
           else
             echo "ERROR: libhiprand.so not found!"
-            find ./build -name "*.so" -type f | head -20
+            find ./build -name "*.so" -type f 2>/dev/null | head -20
           fi
 
           echo "--- Test binary verification ---"
-          TEST_BIN=$(find ./build -name "test_hiprand_api" -type f | head -1)
+          TEST_BIN=$(find ./build -name "test_hiprand_api" -type f 2>/dev/null | head -1)
           if [ -n "$TEST_BIN" ]; then
             echo "Found test binary at: $TEST_BIN"
-            ls -lh "$TEST_BIN"
-            echo "Linked libraries:"
-            ldd "$TEST_BIN" | grep -E "hiprand|hip|amdhip" || echo "No hiprand/hip libs found in ldd"
+            ls -lh "$TEST_BIN" 2>/dev/null || echo "ls failed"
+            echo "Linked libraries (hiprand/hip):"
+            ldd "$TEST_BIN" 2>/dev/null | grep -E "hiprand|hip|amdhip" || echo "No hiprand/hip libs found in ldd"
             echo "RPATH/RUNPATH:"
-            readelf -d "$TEST_BIN" | grep -E "RPATH|RUNPATH" || echo "No RPATH/RUNPATH"
+            readelf -d "$TEST_BIN" 2>/dev/null | grep -E "RPATH|RUNPATH" || echo "No RPATH/RUNPATH"
           else
             echo "ERROR: test_hiprand_api not found!"
           fi
@@ -194,7 +204,7 @@ jobs:
             echo "Profile directory: $PROF_DIR"
             ls -ld "$PROF_DIR" 2>/dev/null || echo "Profile dir does not exist yet"
             echo "Disk space:"
-            df -h "$PROF_DIR" 2>/dev/null || df -h .
+            df -h "$PROF_DIR" 2>/dev/null || df -h . 2>/dev/null || echo "df failed"
           fi
           echo "===== END Pre-test diagnostics ====="
 
