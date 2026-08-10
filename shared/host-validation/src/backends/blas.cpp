@@ -14,6 +14,8 @@
 #include <string>
 #include <type_traits>
 
+#include "detail/reference_gemm.hpp"
+
 namespace roc::host_validation {
 namespace {
 struct BlasMatrixLayout {
@@ -86,8 +88,9 @@ T* typedMutableData(const MutableTensorView& view, const char* name) {
     return reinterpret_cast<T*>(const_cast<std::byte*>(data));
 }
 
-void validateCommon(const GemmProblem& problem) {
-    const GemmSupportInfo canonical = queryGemmSupport(problem, GemmBackend::Canonical);
+void validateCommon(const GemmRequest& problem) {
+    const GemmSupportInfo canonical =
+        queryGemmSupport(problem, {.backend = GemmBackend::Canonical});
     if (!canonical) throw std::invalid_argument(canonical.reason);
 
     if (problem.a.values.type() != problem.accumulatorType ||
@@ -130,7 +133,7 @@ void validateCommon(const GemmProblem& problem) {
 }
 
 template <typename T>
-GemmRunInfo runReal(const GemmProblem& problem) {
+GemmRunInfo runReal(const GemmRequest& problem) {
     const auto aLayout = toBlasLayout(problem.a.values, problem.a.conjugate, "A");
     const auto bLayout = toBlasLayout(problem.b.values, problem.b.conjugate, "B");
     const int m = static_cast<int>(problem.a.values.shape()[0]);
@@ -158,7 +161,7 @@ GemmRunInfo runReal(const GemmProblem& problem) {
 }
 
 template <typename T>
-GemmRunInfo runComplex(const GemmProblem& problem) {
+GemmRunInfo runComplex(const GemmRequest& problem) {
     const auto aLayout = toBlasLayout(problem.a.values, problem.a.conjugate, "A");
     const auto bLayout = toBlasLayout(problem.b.values, problem.b.conjugate, "B");
     const int m = static_cast<int>(problem.a.values.shape()[0]);
@@ -191,8 +194,9 @@ Layout columnMajorLayout(const Shape& shape) {
     return Layout(shape, {1, static_cast<ptrdiff_t>(shape[0])});
 }
 
-void validateTransforming(const GemmProblem& problem) {
-    const GemmSupportInfo canonical = queryGemmSupport(problem, GemmBackend::Canonical);
+void validateTransforming(const GemmRequest& problem) {
+    const GemmSupportInfo canonical =
+        queryGemmSupport(problem, {.backend = GemmBackend::Canonical});
     if (!canonical) throw std::invalid_argument(canonical.reason);
 
     switch (problem.accumulatorType) {
@@ -271,23 +275,24 @@ Tensor materializeMatrix(TensorView input) {
 }
 
 template <typename Accumulator>
-GemmRunInfo runTransforming(const GemmProblem& problem) {
+GemmRunInfo runTransforming(const GemmRequest& problem) {
     using namespace detail;
     Tensor stagedA = materializeOperand<Accumulator>(problem.a, problem.mathMode);
     Tensor stagedB = materializeOperand<Accumulator>(problem.b, problem.mathMode);
     Tensor stagedC = materializeMatrix<Accumulator>(problem.c);
 
-    GemmProblem stagedProblem(GemmOperand(stagedA.view()), GemmOperand(stagedB.view()),
+    GemmRequest stagedProblem(GemmOperand(stagedA.view()), GemmOperand(stagedB.view()),
                               stagedC.view(), stagedC.mutableView(), nativeScalarType<Accumulator>);
     stagedProblem.epilogue.alpha = problem.epilogue.alpha;
     stagedProblem.epilogue.beta = problem.epilogue.beta;
 
     static const BlasGemmBackend blas;
-    referenceGemm(stagedProblem, {
-                                     .backend = GemmBackend::Blas,
-                                     .requireRequestedBackend = true,
-                                     .backendImplementation = &blas,
-                                 });
+    referenceGemm(stagedProblem,
+                  {
+                      .backend = GemmBackend::Blas,
+                      .requireRequestedBackend = true,
+                  },
+                  &blas);
 
     const RuntimeMatrixReader<Accumulator> stagedOutput(stagedC.view());
     const RuntimeGemmFinalizer<Accumulator> finalizer(problem);
@@ -307,7 +312,7 @@ GemmBackend BlasGemmBackend::backend() const {
     return GemmBackend::Blas;
 }
 
-GemmSupportInfo BlasGemmBackend::querySupport(const GemmProblem& problem) const {
+GemmSupportInfo BlasGemmBackend::querySupport(const GemmRequest& problem) const {
     try {
         validateCommon(problem);
         switch (problem.accumulatorType) {
@@ -340,7 +345,7 @@ GemmSupportInfo BlasGemmBackend::querySupport(const GemmProblem& problem) const 
     }
 }
 
-GemmRunInfo BlasGemmBackend::run(const GemmProblem& problem) const {
+GemmRunInfo BlasGemmBackend::run(const GemmRequest& problem) const {
     const GemmSupportInfo support = querySupport(problem);
     if (!support) throw std::invalid_argument(support.reason);
 
@@ -362,7 +367,7 @@ GemmBackend TransformingBlasGemmBackend::backend() const {
     return GemmBackend::Blas;
 }
 
-GemmSupportInfo TransformingBlasGemmBackend::querySupport(const GemmProblem& problem) const {
+GemmSupportInfo TransformingBlasGemmBackend::querySupport(const GemmRequest& problem) const {
     try {
         validateTransforming(problem);
         return {.supported = true, .reason = {}};
@@ -371,7 +376,7 @@ GemmSupportInfo TransformingBlasGemmBackend::querySupport(const GemmProblem& pro
     }
 }
 
-GemmRunInfo TransformingBlasGemmBackend::run(const GemmProblem& problem) const {
+GemmRunInfo TransformingBlasGemmBackend::run(const GemmRequest& problem) const {
     const GemmSupportInfo support = querySupport(problem);
     if (!support) throw std::invalid_argument(support.reason);
 

@@ -3,28 +3,114 @@
 
 #pragma once
 
-#include <roc/host_validation/detail/reference_gemm.hpp>
+#include <complex>
+#include <cstddef>
+#include <optional>
+#include <roc/host_validation/operation_types.hpp>
+#include <string>
 #include <utility>
+#include <vector>
 
 namespace roc::host_validation {
-struct GemmInvocation {
-    explicit GemmInvocation(GemmProblem value, GemmRunOptions options = {})
-        : problem(std::move(value)), execution(std::move(options)) {}
-
-    GemmProblem problem;
-    GemmRunOptions execution;
+enum class GemmBackend {
+    Automatic,
+    Canonical,
+    Tiled,
+    Blas,
 };
 
-using GemmResult = GemmRunInfo;
+enum class AccumulationRounding {
+    TypeDefault,
+    FullPrecision,
+    AfterProductAndSum,
+};
 
-inline GemmSupportInfo queryGemmSupport(const GemmInvocation& invocation) {
-    if (invocation.execution.backend == GemmBackend::Automatic)
-        return queryGemmSupport(invocation.problem, GemmBackend::Canonical);
-    return queryGemmSupport(invocation.problem, invocation.execution.backend,
-                            invocation.execution.backendImplementation);
-}
+struct BlockScaleBinding {
+    TensorView values;
+    size_t blockSize;
+};
 
-inline GemmResult referenceGemm(const GemmInvocation& invocation) {
-    return referenceGemm(invocation.problem, invocation.execution);
-}
+struct GemmOperand {
+    explicit GemmOperand(TensorView tensor) : values(std::move(tensor)) {}
+
+    TensorView values;
+    std::optional<ScalarType> computeType;
+    std::vector<VectorBinding> preQuantizationScales;
+    std::optional<BlockScaleBinding> blockScale;
+    bool conjugate = false;
+};
+
+struct GemmEpilogue {
+    std::complex<double> alpha = {1.0, 0.0};
+    std::complex<double> beta = {0.0, 0.0};
+    std::optional<VectorBinding> bias;
+    std::optional<VectorBinding> scaleAlpha;
+    std::optional<TensorView> scaleA;
+    std::optional<TensorView> scaleB;
+    std::complex<double> outputScale = {1.0, 0.0};
+    OutputConversion outputConversion = OutputConversion::Default;
+    Activation activation = Activation::None;
+    double activationParameter0 = 0.0;
+    double activationParameter1 = 0.0;
+};
+
+struct GemmRequest {
+    GemmRequest(GemmOperand aOperand, GemmOperand bOperand, TensorView cTensor,
+                MutableTensorView dTensor, ScalarType accumulator)
+        : a(std::move(aOperand)),
+          b(std::move(bOperand)),
+          c(std::move(cTensor)),
+          d(std::move(dTensor)),
+          accumulatorType(accumulator) {}
+
+    GemmOperand a;
+    GemmOperand b;
+    TensorView c;
+    MutableTensorView d;
+    ScalarType accumulatorType;
+    AccumulationRounding accumulationRounding = AccumulationRounding::TypeDefault;
+    MathMode mathMode = MathMode::Default;
+    GemmEpilogue epilogue;
+    OutputSelection outputSelection = OutputSelection::all();
+};
+
+struct GemmSupportInfo {
+    bool supported = false;
+    std::string reason;
+
+    explicit operator bool() const {
+        return supported;
+    }
+};
+
+struct GemmRunInfo {
+    GemmBackend backendUsed = GemmBackend::Canonical;
+    std::optional<std::string> fallbackReason;
+    size_t outputElementsComputed = 0;
+};
+
+struct GemmExecution {
+    GemmBackend backend = GemmBackend::Automatic;
+    bool requireRequestedBackend = false;
+};
+
+struct GemmResult {
+    TensorView output;
+    GemmRunInfo runInfo;
+};
+
+class GemmBackendImplementation {
+   public:
+    virtual ~GemmBackendImplementation() = default;
+
+    virtual GemmBackend backend() const = 0;
+    virtual GemmSupportInfo querySupport(const GemmRequest&) const = 0;
+    virtual GemmRunInfo run(const GemmRequest&) const = 0;
+};
+
+GemmSupportInfo queryGemmSupport(const GemmRequest& request, const GemmExecution& execution = {},
+                                 const GemmBackendImplementation* backendImplementation = nullptr);
+
+GemmResult referenceGemm(const GemmRequest& request, const GemmExecution& execution = {},
+                         const GemmBackendImplementation* backendImplementation = nullptr);
 }  // namespace roc::host_validation

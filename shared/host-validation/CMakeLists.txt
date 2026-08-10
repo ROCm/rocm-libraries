@@ -32,7 +32,9 @@ option(HOST_VALIDATION_BUILD_BENCHMARKS
 add_library(host-validation-core INTERFACE)
 add_library(roc::host-validation-core ALIAS host-validation-core)
 
-add_library(host-validation INTERFACE)
+add_library(host-validation STATIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/gemm.cpp"
+)
 add_library(roc::host-validation ALIAS host-validation)
 
 add_library(host-validation-tiled STATIC
@@ -54,19 +56,19 @@ target_sources(host-validation-core
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/tensor.hpp"
 )
 
-target_compile_features(host-validation INTERFACE cxx_std_20)
+target_compile_features(host-validation PUBLIC cxx_std_20)
 target_include_directories(host-validation
-    INTERFACE
+    PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 target_link_libraries(host-validation
-    INTERFACE
+    PUBLIC
         roc::host-validation-core
 )
 
 target_sources(host-validation
-    INTERFACE
+    PUBLIC
         FILE_SET HEADERS
         BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/include"
         FILES
@@ -76,6 +78,7 @@ target_sources(host-validation
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/generation.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/gemm.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/layer_norm.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/operation_types.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/reduction.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/softmax.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/structured_sparsity.hpp"
@@ -85,7 +88,6 @@ target_sources(host-validation
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/detail/reference_axpby.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/detail/reference_common.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/detail/reference_epilogue.hpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/detail/reference_gemm.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/detail/reference_layer_norm.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/detail/reference_reduction.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/detail/reference_softmax.hpp"
@@ -93,9 +95,19 @@ target_sources(host-validation
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/detail/tensor_views.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/validation.hpp"
 )
+set_target_properties(host-validation
+    PROPERTIES
+        CXX_VISIBILITY_PRESET hidden
+        POSITION_INDEPENDENT_CODE ON
+        VISIBILITY_INLINES_HIDDEN ON
+)
 
 target_compile_features(host-validation-tiled PUBLIC cxx_std_20)
 target_link_libraries(host-validation-tiled PUBLIC roc::host-validation)
+target_include_directories(host-validation-tiled
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
 target_sources(host-validation-tiled
     PUBLIC
         FILE_SET HEADERS
@@ -105,7 +117,9 @@ target_sources(host-validation-tiled
 )
 set_target_properties(host-validation-tiled
     PROPERTIES
+        CXX_VISIBILITY_PRESET hidden
         POSITION_INDEPENDENT_CODE ON
+        VISIBILITY_INLINES_HIDDEN ON
 )
 
 # Add the optional BLAS-backed GEMM implementation to the current build.
@@ -122,6 +136,10 @@ function(roc_host_validation_enable_blas_backend)
     )
     add_library(roc::host-validation-blas ALIAS host-validation-blas)
     target_compile_features(host-validation-blas PUBLIC cxx_std_20)
+    target_include_directories(host-validation-blas
+        PRIVATE
+            "${_host_validation_source_dir}/src"
+    )
     target_link_libraries(host-validation-blas
         PUBLIC
             roc::host-validation
@@ -140,14 +158,16 @@ function(roc_host_validation_enable_blas_backend)
     )
     set_target_properties(host-validation-blas
         PROPERTIES
+            CXX_VISIBILITY_PRESET hidden
             POSITION_INDEPENDENT_CODE ON
+            VISIBILITY_INLINES_HIDDEN ON
     )
     # cmake-lint: disable=E1122
     install(TARGETS host-validation-blas
         EXPORT host-validation-targets
         ARCHIVE
             DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-            COMPONENT runtime
+            COMPONENT devel
         FILE_SET HEADERS
             DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
             COMPONENT devel
@@ -186,7 +206,7 @@ function(roc_host_validation_enable_mx_backend)
     target_compile_features(host-validation-mx PUBLIC cxx_std_20)
     target_link_libraries(host-validation-mx
         PUBLIC
-            roc::host-validation
+            roc::host-validation-core
         PRIVATE
             roc::mxDataGenerator
     )
@@ -199,14 +219,16 @@ function(roc_host_validation_enable_mx_backend)
     )
     set_target_properties(host-validation-mx
         PROPERTIES
+            CXX_VISIBILITY_PRESET hidden
             POSITION_INDEPENDENT_CODE ON
+            VISIBILITY_INLINES_HIDDEN ON
     )
     # cmake-lint: disable=E1122
     install(TARGETS host-validation-mx
         EXPORT host-validation-targets
         ARCHIVE
             DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-            COMPONENT runtime
+            COMPONENT devel
         FILE_SET HEADERS
             DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
             COMPONENT devel
@@ -229,8 +251,12 @@ if(HOST_VALIDATION_BUILD_TESTING)
     add_subdirectory(tests)
 endif()
 
+# cmake-lint: disable=E1122
 install(TARGETS host-validation-core host-validation host-validation-tiled
     EXPORT host-validation-targets
+    ARCHIVE
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+        COMPONENT devel
     FILE_SET HEADERS
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
         COMPONENT devel
@@ -240,24 +266,66 @@ set(HOST_VALIDATION_INSTALL_CMAKEDIR
     "${CMAKE_INSTALL_LIBDIR}/cmake/ROCHostValidation"
 )
 
-set(HOST_VALIDATION_PACKAGE_HAS_BLAS OFF)
-if(TARGET host-validation-blas)
-    set(HOST_VALIDATION_PACKAGE_HAS_BLAS ON)
-endif()
-set(HOST_VALIDATION_PACKAGE_HAS_MX OFF)
-if(TARGET host-validation-mx)
-    set(HOST_VALIDATION_PACKAGE_HAS_MX ON)
-endif()
-
-configure_package_config_file(
-    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/ROCHostValidationConfig.cmake.in"
-    "${CMAKE_CURRENT_BINARY_DIR}/ROCHostValidationConfig.cmake"
-    INSTALL_DESTINATION "${HOST_VALIDATION_INSTALL_CMAKEDIR}"
+set_property(
+    GLOBAL PROPERTY ROC_HOST_VALIDATION_PACKAGE_SOURCE_DIR
+    "${CMAKE_CURRENT_SOURCE_DIR}"
 )
-write_basic_package_version_file(
-    "${CMAKE_CURRENT_BINARY_DIR}/ROCHostValidationConfigVersion.cmake"
-    VERSION "${PROJECT_VERSION}"
-    COMPATIBILITY SameMajorVersion
+set_property(
+    GLOBAL PROPERTY ROC_HOST_VALIDATION_PACKAGE_BINARY_DIR
+    "${CMAKE_CURRENT_BINARY_DIR}"
+)
+set_property(
+    GLOBAL PROPERTY ROC_HOST_VALIDATION_PACKAGE_INSTALL_CMAKEDIR
+    "${HOST_VALIDATION_INSTALL_CMAKEDIR}"
+)
+set_property(
+    GLOBAL PROPERTY ROC_HOST_VALIDATION_PACKAGE_VERSION
+    "${PROJECT_VERSION}"
+)
+
+# Finalize package metadata after parent projects may enable optional backends.
+function(roc_host_validation_finalize_package)
+    get_property(
+        _host_validation_source_dir
+        GLOBAL PROPERTY ROC_HOST_VALIDATION_PACKAGE_SOURCE_DIR
+    )
+    get_property(
+        _host_validation_binary_dir
+        GLOBAL PROPERTY ROC_HOST_VALIDATION_PACKAGE_BINARY_DIR
+    )
+    get_property(
+        _host_validation_install_cmakedir
+        GLOBAL PROPERTY ROC_HOST_VALIDATION_PACKAGE_INSTALL_CMAKEDIR
+    )
+    get_property(
+        _host_validation_version
+        GLOBAL PROPERTY ROC_HOST_VALIDATION_PACKAGE_VERSION
+    )
+
+    set(HOST_VALIDATION_PACKAGE_HAS_BLAS OFF)
+    if(TARGET host-validation-blas)
+        set(HOST_VALIDATION_PACKAGE_HAS_BLAS ON)
+    endif()
+    set(HOST_VALIDATION_PACKAGE_HAS_MX OFF)
+    if(TARGET host-validation-mx)
+        set(HOST_VALIDATION_PACKAGE_HAS_MX ON)
+    endif()
+
+    configure_package_config_file(
+        "${_host_validation_source_dir}/cmake/ROCHostValidationConfig.cmake.in"
+        "${_host_validation_binary_dir}/ROCHostValidationConfig.cmake"
+        INSTALL_DESTINATION "${_host_validation_install_cmakedir}"
+    )
+    write_basic_package_version_file(
+        "${_host_validation_binary_dir}/ROCHostValidationConfigVersion.cmake"
+        VERSION "${_host_validation_version}"
+        COMPATIBILITY SameMajorVersion
+    )
+endfunction()
+
+cmake_language(
+    DEFER DIRECTORY "${CMAKE_SOURCE_DIR}"
+    CALL roc_host_validation_finalize_package
 )
 
 install(EXPORT host-validation-targets

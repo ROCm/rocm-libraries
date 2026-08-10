@@ -1,6 +1,7 @@
 @PACKAGE_INIT@
 
 include(CMakeFindDependencyMacro)
+
 if(@HOST_VALIDATION_PACKAGE_HAS_BLAS@)
     find_dependency(BLAS)
 endif()

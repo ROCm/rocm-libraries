@@ -905,7 +905,7 @@ int test_hipblaslt(hipDataType                 in_datatype,
                     const size_t cElements = storageElements(size_t(m[i]), size_t(n[i]), 1, ldc[i]);
                     const size_t dElements = storageElements(size_t(m[i]), size_t(n[i]), 1, ldd[i]);
 
-                    GemmProblem problem(
+                    GemmRequest problem(
                         GemmOperand(tensorView(a_ptr + i3 * stride_a[i],
                                                aElements,
                                                Layout(Shape{size_t(m[i]), size_t(k[i])},

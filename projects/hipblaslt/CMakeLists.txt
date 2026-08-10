@@ -368,6 +368,44 @@ if(_hipblaslt_host_validation_enabled
     endif()
 endif()
 
+if(_hipblaslt_host_validation_enabled)
+    foreach(_host_validation_target
+            host-validation
+            host-validation-tiled
+            host-validation-blas
+            host-validation-mx)
+        if(NOT TARGET ${_host_validation_target})
+            continue()
+        endif()
+
+        if(HIPBLASLT_ENABLE_ASAN OR HIPBLASLT_ENABLE_TSAN)
+            hipblaslt_target_configure_sanitizers(${_host_validation_target} PRIVATE)
+        elseif(TENSILELITE_ENABLE_HOST_ASAN)
+            target_compile_options(${_host_validation_target}
+                PRIVATE
+                    -fsanitize=address
+                    -fno-omit-frame-pointer
+            )
+        elseif(TENSILELITE_ENABLE_HOST_TSAN)
+            target_compile_options(${_host_validation_target}
+                PRIVATE
+                    -fsanitize=thread
+            )
+        endif()
+
+        if(HIPBLASLT_ENABLE_COVERAGE OR TENSILELITE_ENABLE_COVERAGE)
+            target_compile_options(${_host_validation_target}
+                PRIVATE
+                    -g
+                    -O0
+                    -fprofile-instr-generate
+                    -fcoverage-mapping
+            )
+        endif()
+    endforeach()
+    unset(_host_validation_target)
+endif()
+
 add_library(hipblaslt-headers INTERFACE)
 add_library(hipblaslt::headers ALIAS hipblaslt-headers)
 target_include_directories(hipblaslt-headers

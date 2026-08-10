@@ -8,10 +8,13 @@
 #include <stdexcept>
 #include <vector>
 
+#include "detail/reference_gemm.hpp"
+
 namespace roc::host_validation {
 namespace {
-void validateTiled(const GemmProblem& problem) {
-    const GemmSupportInfo canonical = queryGemmSupport(problem, GemmBackend::Canonical);
+void validateTiled(const GemmRequest& problem) {
+    const GemmSupportInfo canonical =
+        queryGemmSupport(problem, {.backend = GemmBackend::Canonical});
     if (!canonical) throw std::invalid_argument(canonical.reason);
     if (problem.accumulatorType != ScalarType::Float32 &&
         problem.accumulatorType != ScalarType::Float64)
@@ -29,7 +32,7 @@ void validateTiled(const GemmProblem& problem) {
 }
 
 template <typename Accumulator>
-GemmRunInfo runTiled(const GemmProblem& problem) {
+GemmRunInfo runTiled(const GemmRequest& problem) {
     using namespace detail;
 
     const RuntimeMatrixReader<Accumulator> a(problem.a.values);
@@ -161,7 +164,7 @@ GemmBackend TiledGemmBackend::backend() const {
     return GemmBackend::Tiled;
 }
 
-GemmSupportInfo TiledGemmBackend::querySupport(const GemmProblem& problem) const {
+GemmSupportInfo TiledGemmBackend::querySupport(const GemmRequest& problem) const {
     try {
         validateTiled(problem);
         return {.supported = true, .reason = {}};
@@ -170,7 +173,7 @@ GemmSupportInfo TiledGemmBackend::querySupport(const GemmProblem& problem) const
     }
 }
 
-GemmRunInfo TiledGemmBackend::run(const GemmProblem& problem) const {
+GemmRunInfo TiledGemmBackend::run(const GemmRequest& problem) const {
     const GemmSupportInfo support = querySupport(problem);
     if (!support) throw std::invalid_argument(support.reason);
     switch (problem.accumulatorType) {
