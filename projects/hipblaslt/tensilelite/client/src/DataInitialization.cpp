@@ -633,6 +633,7 @@ namespace TensileLite
         DataInitialization::DataInitialization(po::variables_map const&    args,
                                                ClientProblemFactory const& problemFactory)
             : m_maxBatch(0)
+            , m_initializationSeed(args["init-seed"].as<unsigned int>())
             , m_stridedBatched(args["strided-batched"].as<bool>())
             , m_sparse(args["sparse"].as<int>())
             , m_cEqualsD(args["c-equal-d"].as<bool>() || args["sparse"].as<int>())
@@ -1024,7 +1025,12 @@ namespace TensileLite
                     double value = 0.0;
                     if(activationAdditionalArgs.empty())
                     {
-                        value = hostValidationUniformDouble(-2.0, 2.0);
+                        value = hostValidationUniformDouble(
+                            -2.0,
+                            2.0,
+                            DataInitializationKey{m_initializationSeed,
+                                                  stableDataInitializationStream(
+                                                      m_cdata[i].name + ".activation-argument")});
                     }
                     else
                     {
@@ -1087,8 +1093,12 @@ namespace TensileLite
                     // Init and copy valid from cpu to gpu, only copies when != dependent data
                     if(!m_problemDependentData)
                     {
-
-                        initArray(p.first, it.init, pUnit.cpuInput.valid.get(), pUnit.maxElements);
+                        initArray(p.first,
+                                  it.init,
+                                  pUnit.cpuInput.valid.get(),
+                                  pUnit.maxElements,
+                                  DataInitializationKey{m_initializationSeed,
+                                                        stableDataInitializationStream(it.name)});
                         HIP_CHECK_EXC(
                             hipMemcpy(pUnit.gpuInput.valid.get(),
                                       pUnit.cpuInput.valid.get(),
@@ -1101,7 +1111,10 @@ namespace TensileLite
                         initArray(p.first,
                                   InitMode::BadOutput,
                                   pUnit.cpuInput.bad.get(),
-                                  pUnit.maxElements);
+                                  pUnit.maxElements,
+                                  DataInitializationKey{
+                                      m_initializationSeed,
+                                      stableDataInitializationStream(it.name + ".bad-output")});
                         HIP_CHECK_EXC(
                             hipMemcpy(pUnit.gpuInput.bad.get(),
                                       pUnit.cpuInput.bad.get(),
@@ -1442,7 +1455,10 @@ namespace TensileLite
                                           m_vdata[i].init,
                                           (void*)((int8_t*)p.second.cpuInput.valid.get()
                                                   + gemmInitOffset),
-                                          tensors[i]);
+                                          tensors[i],
+                                          DataInitializationKey{
+                                              m_initializationSeed,
+                                              stableDataInitializationStream(m_vdata[i].name)});
                                 // FIXME: Should we init unused part to 0?
                                 if((problem.gemms[j].sparse() == 1
                                     && i == ContractionProblemGemm::TENSOR::A)
@@ -1532,7 +1548,10 @@ namespace TensileLite
                             initArray(p.first,
                                       m_vdata[i].init,
                                       p.second.cpuInput.valid.get(),
-                                      tensors[i]);
+                                      tensors[i],
+                                      DataInitializationKey{
+                                          m_initializationSeed,
+                                          stableDataInitializationStream(m_vdata[i].name)});
                             if((problem.sparse() == 1 && i == ContractionProblemGemm::TENSOR::A)
                                || (problem.sparse() == 2 && i == ContractionProblemGemm::TENSOR::B))
                             {
@@ -1736,10 +1755,13 @@ namespace TensileLite
                     if(p.second.initDescriptor[0] != tensors[i])
                     {
                         p.second.initDescriptor[0] = tensors[i];
-                        initArray(p.first,
-                                  m_vdata[i].init,
-                                  p.second.cpuInput.valid.get(),
-                                  tensors[i]);
+                        initArray(
+                            p.first,
+                            m_vdata[i].init,
+                            p.second.cpuInput.valid.get(),
+                            tensors[i],
+                            DataInitializationKey{m_initializationSeed,
+                                                  stableDataInitializationStream(m_vdata[i].name)});
                     }
                 }
             };
@@ -2088,11 +2110,14 @@ namespace TensileLite
                     prop.dataType = problem.constants()[i].dataType;
                     auto assignGeneratedValue = [&]<typename T>() {
                         T value{};
-                        if(!tryHostValidationInitialize(prop.dataType,
-                                                        prop.init,
-                                                        &value,
-                                                        TypeInfo<T>::Packing,
-                                                        prop.freeValue))
+                        if(!tryHostValidationInitialize(
+                               prop.dataType,
+                               prop.init,
+                               &value,
+                               TypeInfo<T>::Packing,
+                               DataInitializationKey{m_initializationSeed,
+                                                     stableDataInitializationStream(prop.name)},
+                               prop.freeValue))
                             throw std::invalid_argument(
                                 "TensileLite constant mode/type is not represented "
                                 "by host-validation.");
