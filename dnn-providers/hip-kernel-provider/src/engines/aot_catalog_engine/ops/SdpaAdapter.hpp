@@ -18,12 +18,17 @@
 // (single SdpaAttributes node; rank-4 BHSD Q/K/V/O; K/V agree on H_kv/S_kv/D; O
 // mirrors Q; consistent supported dtype; integer gqa_ratio; rank-4 strides).
 //
-// buildBindings() emits a SUPERSET of named arguments (Q,K,V,O + optional
-// attn_mask/stats; scale_log2 and scale_raw; seqlen_q/k; per-tensor token/head/
-// batch strides in element AND byte units; H/H_kv/D/B/gqa_ratio). Each family's
-// args_signature selects and orders the subset its kernel takes; launch::bindArgs
-// resolves by name and fails closed on an unemitted name. A new quantity a future
-// kernel needs is one added emission here -- the single, explicit extension point.
+// buildBindings() emits a SUPERSET of named arguments. Always: Q,K,V,O; scale_log2
+// and scale_raw; seqlen_q/k; per-tensor token/head/batch strides in element AND
+// byte units; H/H_kv/D/B/gqa_ratio. Bound only when the graph carries them (each a
+// forward feature decode() also flags as a fact): attn_mask, block_mask, sink,
+// scale_tensor (runtime scale), seqlen_q_ptr/seqlen_kv_ptr (varlen), page_table_k/v
+// (paged), dropout_mask/dropout_scale/dropout_seed/dropout_offset/rng_dump,
+// descale_q/k/v/s + scale_s/scale_o + amax_s/amax_o (fp8), and stats/lse/max/sum_exp
+// (softmax stats outputs). Each family's args_signature selects and orders the
+// subset its kernel takes; launch::bindArgs resolves by name and fails closed on an
+// unemitted name. A new quantity a future kernel needs is one added emission here --
+// the single, explicit extension point.
 //
 // SCALE GOTCHA: a base-2 (exp2) softmax kernel takes `scale_log2 = attn_scale *
 // log2(e)`, NOT the raw scale; the adapter emits both so a family names whichever.

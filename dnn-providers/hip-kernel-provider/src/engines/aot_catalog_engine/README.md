@@ -671,14 +671,18 @@ Every canonical name `buildBindings` emits. Pick the subset your kernel takes in
 on a name the adapter didn't emit**. All strides follow the BHSD mapping (token = S axis =
 `stride(2)`, head = H axis = `stride(1)`, batch = B axis = `stride(0)`).
 
+Names in the **Optional pointers** block are bound **only when the graph carries that
+tensor** — each pairs with a capability fact `decode` publishes (constrain the fact, then
+name the pointer). Naming an optional pointer whose tensor is absent fails closed, so a
+kernel and its `family.json` constraints must agree.
+
 | name | type | meaning / derivation |
 |------|------|----------------------|
+| **Always emitted** | | |
 | `Q` `K` `V` `O` | ptr | the four operands, by tensor uid |
-| `attn_mask` | ptr | additive mask tensor — **emitted only when the graph carries one** |
-| `stats` / `lse` | ptr | log-sum-exp output — aliases; emitted only when a stats tensor is present |
 | `scale_log2` | f32 | `attn_scale * log2(e)` (base-2 softmax; gotcha #1 §8) |
 | `scale_raw` | f32 | the un-multiplied `attn_scale` (default `1/sqrt(D)`) |
-| `seqlen_q` `seqlen_k` | i32/i64 | S_q, S_kv |
+| `seqlen_q` `seqlen_k` | i32/i64 | S_q, S_kv (fixed-length scalar values) |
 | `stride_{q,k,v,o}_token` | i32/i64 | S-axis stride, **elements** |
 | `stride_{q,k,v,o}_head` | i32/i64 | H-axis stride, **elements** |
 | `stride_{q,k,v,o}_batch` | i32/i64 | B-axis stride, **elements** |
@@ -687,10 +691,24 @@ on a name the adapter didn't emit**. All strides follow the BHSD mapping (token 
 | `stride_{q,k,v,o}_batch_bytes` | i32/i64 | B-axis stride × element size |
 | `H` `H_kv` `D` `B` | i32/i64 | head count, kv-head count, head dim, batch |
 | `gqa_ratio` | i32/i64 | `H / H_kv` |
+| **Optional pointers** (bound only when the tensor is present) | | pairs with fact |
+| `attn_mask` | ptr | additive mask tensor — `has_attn_mask` |
+| `block_mask` | ptr | block-sparse mask table — `has_block_mask` |
+| `sink` | ptr | attention-sink token tensor — `has_sink` |
+| `scale_tensor` | ptr | runtime scale tensor — `runtime_scale` |
+| `seqlen_q_ptr` `seqlen_kv_ptr` | ptr | varlen cumulative-seqlen tables — `varlen` |
+| `page_table_k` `page_table_v` | ptr | paged-KV block tables — `paged` |
+| `dropout_mask` `dropout_scale` `dropout_seed` `dropout_offset` `rng_dump` | ptr | dropout plumbing — `has_dropout` |
+| `descale_q` `descale_k` `descale_v` `descale_s` | ptr | fp8 input/intermediate descales — `fp8` |
+| `scale_s` `scale_o` | ptr | fp8 output scales — `fp8` |
+| `amax_s` `amax_o` | ptr | fp8 output amax accumulators — `fp8` |
+| `stats` / `lse` | ptr | log-sum-exp output — aliases — `gen_stats` |
+| `max` `sum_exp` | ptr | split-form softmax stats outputs — `gen_stats` |
 
 `type` in `args_signature` (`i32`/`i64`/`f32`) selects how the value is narrowed/packed
 (§3); the same emitted quantity can be taken as `i32` or `i64`. A quantity not in this
-table = one added `bindings.scalars.emplace(...)` in `buildBindings` (reviewed).
+table = one added `bindings.scalars.emplace(...)` (scalar) or `bindOptionalPtr(...)`
+(pointer) in `buildBindings` (reviewed).
 
 ### Capability-key reference
 

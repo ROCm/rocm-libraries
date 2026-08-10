@@ -87,6 +87,7 @@ struct SdpaSpec
     bool paged = false;
     bool varlen = false;
     bool runtimeScale = false;
+    bool fp8Descale = false; // adds descale_q/k/v/s + scale_s/o operand tensors
     std::optional<float> attnScaleValue; // baked plan-time scale (vs. 1/sqrt(D))
 };
 
@@ -158,6 +159,12 @@ BuiltGraph buildSdpaGraph(const SdpaSpec& spec)
     fb::Optional<int64_t> pageTableKUid = fb::nullopt;
     fb::Optional<int64_t> seqLenQUid = fb::nullopt;
     fb::Optional<int64_t> scaleUid = fb::nullopt;
+    fb::Optional<int64_t> descaleQUid = fb::nullopt;
+    fb::Optional<int64_t> descaleKUid = fb::nullopt;
+    fb::Optional<int64_t> descaleVUid = fb::nullopt;
+    fb::Optional<int64_t> descaleSUid = fb::nullopt;
+    fb::Optional<int64_t> scaleSUid = fb::nullopt;
+    fb::Optional<int64_t> scaleOUid = fb::nullopt;
     if(spec.attnMask)
     {
         attnMaskUid = fb::Optional<int64_t>(addPlaceholder("attn_mask", spec.dtype));
@@ -182,6 +189,15 @@ BuiltGraph buildSdpaGraph(const SdpaSpec& spec)
     {
         scaleUid = fb::Optional<int64_t>(addPlaceholder("scale", DataType::FLOAT));
     }
+    if(spec.fp8Descale)
+    {
+        descaleQUid = fb::Optional<int64_t>(addPlaceholder("descale_q", DataType::FLOAT));
+        descaleKUid = fb::Optional<int64_t>(addPlaceholder("descale_k", DataType::FLOAT));
+        descaleVUid = fb::Optional<int64_t>(addPlaceholder("descale_v", DataType::FLOAT));
+        descaleSUid = fb::Optional<int64_t>(addPlaceholder("descale_s", DataType::FLOAT));
+        scaleSUid = fb::Optional<int64_t>(addPlaceholder("scale_s", DataType::FLOAT));
+        scaleOUid = fb::Optional<int64_t>(addPlaceholder("scale_o", DataType::FLOAT));
+    }
 
     const auto attn = data_objects::CreateSdpaAttributes(
         builder,
@@ -201,12 +217,12 @@ BuiltGraph buildSdpaGraph(const SdpaSpec& spec)
         fb::nullopt,          // page_table_v_tensor_uid
         blockMaskUid,         // block_mask_tensor_uid
         sinkUid,              // sink_token_tensor_uid
-        fb::nullopt,          // descale_q_tensor_uid
-        fb::nullopt,          // descale_k_tensor_uid
-        fb::nullopt,          // descale_v_tensor_uid
-        fb::nullopt,          // descale_s_tensor_uid
-        fb::nullopt,          // scale_s_tensor_uid
-        fb::nullopt,          // scale_o_tensor_uid
+        descaleQUid,          // descale_q_tensor_uid
+        descaleKUid,          // descale_k_tensor_uid
+        descaleVUid,          // descale_v_tensor_uid
+        descaleSUid,          // descale_s_tensor_uid
+        scaleSUid,            // scale_s_tensor_uid
+        scaleOUid,            // scale_o_tensor_uid
         fb::nullopt,          // stats_tensor_uid
         fb::nullopt,          // max_tensor_uid
         fb::nullopt,          // sum_exp_tensor_uid
@@ -436,4 +452,79 @@ TEST(AotCatalogSdpaDecode, Bf16ShapeDecodesWithBf16Token)
     ASSERT_TRUE(shape.has_value());
     EXPECT_EQ(strFact(*shape, "dtype"), "bf16");
     EXPECT_FALSE(boolFact(*shape, "fp8"));
+}
+
+// The baseline (no optional operands) binds ONLY Q/K/V/O -- every optional
+// pointer name is absent, so a kernel that named one would fail closed.
+TEST(AotCatalogSdpaDecode, OptionalPointersAbsentOnBaseline)
+{
+    const BuiltGraph g = buildSdpaGraph(SdpaSpec{});
+    const auto shape = kAdapter.decode(g.graph());
+    ASSERT_TRUE(shape.has_value());
+    const catalog::KernelEntry kernel;
+    const catalog::LaunchBindings b = kAdapter.buildBindings(g.graph(), *shape, kernel);
+
+    for(const char* name : {"attn_mask", "block_mask", "sink", "scale_tensor", "seqlen_q_ptr",
+                            "seqlen_kv_ptr", "page_table_k", "page_table_v", "descale_q",
+                            "descale_k", "descale_v", "descale_s", "scale_s", "scale_o", "stats",
+                            "lse", "max", "sum_exp"})
+    {
+        EXPECT_EQ(b.pointerUids.count(name), 0U) << "unexpected optional pointer '" << name << "'";
+    }
+}
+
+// A graph carrying mask/sink/paged/varlen/runtime-scale operands binds each of
+// those pointers by name (the feature surface decode() flags as facts).
+TEST(AotCatalogSdpaDecode, OptionalFeaturePointersBoundWhenPresent)
+{
+    SdpaSpec spec;
+    spec.attnMask = true;
+    spec.blockMask = true;
+    spec.sink = true;
+    spec.paged = true;
+    spec.varlen = true;
+    spec.runtimeScale = true;
+    const BuiltGraph g = buildSdpaGraph(spec);
+    const auto shape = kAdapter.decode(g.graph());
+    ASSERT_TRUE(shape.has_value());
+    const catalog::KernelEntry kernel;
+    const catalog::LaunchBindings b = kAdapter.buildBindings(g.graph(), *shape, kernel);
+
+    // Every present operand is bound to a placeholder uid (>4, i.e. not Q/K/V/O).
+    for(const char* name : {"attn_mask", "block_mask", "sink", "page_table_k", "seqlen_q_ptr",
+                            "scale_tensor"})
+    {
+        auto it = b.pointerUids.find(name);
+        ASSERT_NE(it, b.pointerUids.end()) << "missing optional pointer '" << name << "'";
+        EXPECT_GT(it->second, 4) << "pointer '" << name << "' bound to an operand uid";
+    }
+    // page_table_v / seqlen_kv_ptr were not supplied by this graph -> still absent.
+    EXPECT_EQ(b.pointerUids.count("page_table_v"), 0U);
+    EXPECT_EQ(b.pointerUids.count("seqlen_kv_ptr"), 0U);
+}
+
+// An fp8 graph publishes fp8=true and binds every (de)scale pointer a quantizing
+// forward kernel names -- the gap this change closes.
+TEST(AotCatalogSdpaDecode, Fp8DescalePointersBound)
+{
+    SdpaSpec spec;
+    spec.dtype = DataType::FP8_E4M3;
+    spec.fp8Descale = true;
+    const BuiltGraph g = buildSdpaGraph(spec);
+    const auto shape = kAdapter.decode(g.graph());
+    ASSERT_TRUE(shape.has_value()) << "fp8 graph should decode";
+    EXPECT_EQ(strFact(*shape, "dtype"), "f8");
+    EXPECT_TRUE(boolFact(*shape, "fp8"));
+
+    const catalog::KernelEntry kernel;
+    const catalog::LaunchBindings b = kAdapter.buildBindings(g.graph(), *shape, kernel);
+    for(const char* name : {"descale_q", "descale_k", "descale_v", "descale_s", "scale_s", "scale_o"})
+    {
+        auto it = b.pointerUids.find(name);
+        ASSERT_NE(it, b.pointerUids.end()) << "missing fp8 pointer '" << name << "'";
+        EXPECT_GT(it->second, 4) << "fp8 pointer '" << name << "' bound to an operand uid";
+    }
+
+    // Byte strides collapse to element strides at 1 byte/element for fp8.
+    EXPECT_EQ(scalarI64(b, "stride_q_token_bytes"), scalarI64(b, "stride_q_token"));
 }

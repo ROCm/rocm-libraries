@@ -330,18 +330,65 @@ catalog::LaunchBindings SdpaAdapter::buildBindings(const IGraph& graph,
     bindings.pointerUids.emplace("K", attrs.k_tensor_uid());
     bindings.pointerUids.emplace("V", attrs.v_tensor_uid());
     bindings.pointerUids.emplace("O", attrs.o_tensor_uid());
-    // Optional tensor operands: bound only when the graph carries them, so a
-    // kernel that names them gets them and one that doesn't is unaffected.
-    if(attrs.attn_mask_tensor_uid().has_value())
-    {
-        bindings.pointerUids.emplace("attn_mask", attrs.attn_mask_tensor_uid().value());
-    }
+
+    // Optional tensor operands: bound by name only when the graph carries them, so
+    // a kernel that names one in its args_signature gets it and one that doesn't is
+    // unaffected. This covers the full forward feature surface decode() publishes as
+    // facts (masks, paged KV, varlen, dropout, fp8 (de)scaling, extra stats/LSE
+    // outputs) -- a family constrains itself to a feature via the fact, then names
+    // the corresponding pointer(s) here. A missing name still fails closed in
+    // launch::bindArgs, so omitting one is safe; adding a new optional operand is
+    // one bindOptionalPtr() line (the single, reviewed extension point).
+    auto bindOptionalPtr = [&](const char* name, ::flatbuffers::Optional<int64_t> uid) {
+        if(uid.has_value())
+        {
+            bindings.pointerUids.emplace(name, uid.value());
+        }
+    };
+
+    bindOptionalPtr("attn_mask", attrs.attn_mask_tensor_uid());
+    bindOptionalPtr("block_mask", attrs.block_mask_tensor_uid());
+    bindOptionalPtr("sink", attrs.sink_token_tensor_uid());
+
+    // Runtime scale operand (vs. the plan-time-baked attn_scale_value / scale_log2).
+    bindOptionalPtr("scale_tensor", attrs.scale_tensor_uid());
+
+    // Variable-length sequence tables (pointers), distinct from the seqlen_q/k
+    // scalar values emitted below for the fixed-length case.
+    bindOptionalPtr("seqlen_q_ptr", attrs.seq_len_q_tensor_uid());
+    bindOptionalPtr("seqlen_kv_ptr", attrs.seq_len_kv_tensor_uid());
+
+    // Paged-KV block tables.
+    bindOptionalPtr("page_table_k", attrs.page_table_k_tensor_uid());
+    bindOptionalPtr("page_table_v", attrs.page_table_v_tensor_uid());
+
+    // Dropout plumbing.
+    bindOptionalPtr("dropout_mask", attrs.dropout_mask_tensor_uid());
+    bindOptionalPtr("dropout_scale", attrs.dropout_scale_tensor_uid());
+    bindOptionalPtr("dropout_seed", attrs.seed_tensor_uid());
+    bindOptionalPtr("dropout_offset", attrs.offset_tensor_uid());
+    bindOptionalPtr("rng_dump", attrs.rng_dump_tensor_uid());
+
+    // FP8 (de)scaling factors: descale inputs/intermediates, scale outputs, and the
+    // output amax accumulators a quantizing kernel writes back.
+    bindOptionalPtr("descale_q", attrs.descale_q_tensor_uid());
+    bindOptionalPtr("descale_k", attrs.descale_k_tensor_uid());
+    bindOptionalPtr("descale_v", attrs.descale_v_tensor_uid());
+    bindOptionalPtr("descale_s", attrs.descale_s_tensor_uid());
+    bindOptionalPtr("scale_s", attrs.scale_s_tensor_uid());
+    bindOptionalPtr("scale_o", attrs.scale_o_tensor_uid());
+    bindOptionalPtr("amax_s", attrs.amax_s_tensor_uid());
+    bindOptionalPtr("amax_o", attrs.amax_o_tensor_uid());
+
+    // Log-sum-exp / softmax statistics outputs. "stats" and "lse" alias the same
+    // combined LSE tensor; max + sum_exp are the split form some kernels emit.
     if(attrs.stats_tensor_uid().has_value())
     {
-        // "stats" and "lse" are aliases for the log-sum-exp output tensor.
         bindings.pointerUids.emplace("stats", attrs.stats_tensor_uid().value());
         bindings.pointerUids.emplace("lse", attrs.stats_tensor_uid().value());
     }
+    bindOptionalPtr("max", attrs.max_tensor_uid());
+    bindOptionalPtr("sum_exp", attrs.sum_exp_tensor_uid());
 
     // Scale, both forms: base-2 (scale_log2) and raw (scale_raw).
     bindings.scalars.emplace("scale_log2", catalog::ScalarValue{scaleLog2});
