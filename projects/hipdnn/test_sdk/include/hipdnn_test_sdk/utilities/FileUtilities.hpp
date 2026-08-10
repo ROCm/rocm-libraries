@@ -8,10 +8,6 @@
 #include <iostream>
 #include <vector>
 
-#include <gtest/gtest.h>
-
-#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
-
 namespace hipdnn_test_sdk::utilities
 {
 
@@ -88,22 +84,6 @@ inline std::vector<std::filesystem::path>
 
     std::sort(paths.begin(), paths.end());
     return paths;
-}
-
-/// Scan golden reference data directory for bundle JSON files.
-/// Returns a gtest parameter generator. On failure or empty directory, returns
-/// a sentinel empty-path so SetUp() can GTEST_SKIP() gracefully.
-inline auto getGoldenReferenceParams(const std::filesystem::path& subDirectory)
-{
-    auto dir = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory()
-               / "../lib/golden_reference_data" / subDirectory;
-
-    auto paths = scanBundleJsonFiles(dir);
-    if(paths.empty())
-    {
-        return testing::ValuesIn(std::vector<std::filesystem::path>{""});
-    }
-    return testing::ValuesIn(paths);
 }
 
 }

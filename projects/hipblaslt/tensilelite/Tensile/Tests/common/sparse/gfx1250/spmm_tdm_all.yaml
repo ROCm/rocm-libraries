@@ -1,10 +1,10 @@
 TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
 GlobalParameters:
+  SyncsPerBenchmark: 0
   NumElementsToValidate: -1
   KernelTime: False
-  # NewClient: 2
-  BoundsCheck: False
+  BoundsCheck: 0
   # PrintSolutionRejectionReason: True
   ValidationMaxToPrint: 4      # maximum number of mismatches to print
   ValidationPrintValids: False # print matches too
@@ -22,12 +22,10 @@ GlobalParameters:
   NumWarmups: 0
   EnqueuesPerSync: 1
   PrintWinnersOnly: True
-  # MinKForGSU: 1
   Architecture: gfx1250
   CpuThreads: 1
   KeepBuildTmp: True
   PrintLevel: 2
-  ROCmAgentEnumeratorPath: rocm_agent_enumerator
 
 BenchmarkProblems:
 # ########################################################
@@ -81,14 +79,14 @@ BenchmarkProblems:
         - VectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
         - 1LDSBuffer: [0]
-        - SourceSwap: [0]
-        - DirectToVgprSparseMetadata: [0]
+        - SourceSwap: [false]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
         - DirectToVgprA: [False]
         - DirectToVgprB: [False]
         - WavefrontSize: [32]
-        - ExpandPointerSwap: [1]
+        - ExpandPointerSwap: [true]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -100,6 +98,7 @@ BenchmarkProblems:
           # - Exact: [32, 32, 1, 128]
           - Exact: [64, 64, 1, 128]
           - Exact: [128, 128, 1, 256]
+          - Exact: [1024, 1024, 1, 1024]
         - ActivationArgs:
           - [Enum: none]
 
@@ -153,14 +152,14 @@ BenchmarkProblems:
         - VectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
         - 1LDSBuffer: [0]
-        - SourceSwap: [1] # sparse B
-        - DirectToVgprSparseMetadata: [0]
+        - SourceSwap: [true] # sparse B
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
         - DirectToVgprA: [False]
         - DirectToVgprB: [False]
         - WavefrontSize: [32]
-        - ExpandPointerSwap: [1]
+        - ExpandPointerSwap: [true]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -171,6 +170,7 @@ BenchmarkProblems:
           - Exact: [32, 32, 1, 64]
           # - Exact: [32, 32, 1, 128]
           - Exact: [64, 64, 1, 128]
+          - Exact: [1024, 1024, 1, 1024]
         - ActivationArgs:
           - [Enum: none]
 
@@ -225,14 +225,14 @@ BenchmarkProblems:
         - VectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
         - 1LDSBuffer: [0]
-        - SourceSwap: [0]
-        - DirectToVgprSparseMetadata: [0]
+        - SourceSwap: [false]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
         - DirectToVgprA: [False]
         - DirectToVgprB: [False]
         - WavefrontSize: [32]
-        - ExpandPointerSwap: [1]
+        - ExpandPointerSwap: [true]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -244,6 +244,7 @@ BenchmarkProblems:
           # - Exact: [64, 64, 1, 64]
           # - Exact: [32, 32, 1, 128]
           - Exact: [64, 64, 1, 256]
+          - Exact: [1024, 1024, 1, 1024]
         - ActivationArgs:
           - [Enum: none]
 
@@ -299,14 +300,14 @@ BenchmarkProblems:
         - VectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
         - 1LDSBuffer: [0]
-        - SourceSwap: [1]
-        - DirectToVgprSparseMetadata: [0]
+        - SourceSwap: [true]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
         - DirectToVgprA: [False]
         - DirectToVgprB: [False]
         - WavefrontSize: [32]
-        - ExpandPointerSwap: [1]
+        - ExpandPointerSwap: [true]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -321,7 +322,7 @@ BenchmarkProblems:
           # - Exact: [128, 128, 1, 64] 
           - Exact: [128, 128, 1, 256]
           # - Exact: [256, 256, 1, 256] 
-          # - Exact: [1024, 1024, 1, 1024] 
+          - Exact: [1024, 1024, 1, 1024] 
         - ActivationArgs:
           - [Enum: none]
 
@@ -375,14 +376,14 @@ BenchmarkProblems:
         - VectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
         - 1LDSBuffer: [0]
-        - SourceSwap: [0]
-        - DirectToVgprSparseMetadata: [0]
+        - SourceSwap: [false]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
         - DirectToVgprA: [False]
         - DirectToVgprB: [False]
         - WavefrontSize: [32]
-        - ExpandPointerSwap: [1]
+        - ExpandPointerSwap: [true]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -393,6 +394,7 @@ BenchmarkProblems:
           - Exact: [32, 32, 1, 64]
           # - Exact: [32, 32, 1, 128]
           - Exact: [64, 64, 1, 128]
+          - Exact: [1024, 1024, 1, 1024]
         - ActivationArgs:
           - [Enum: none]
 
@@ -448,14 +450,14 @@ BenchmarkProblems:
         - VectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
         - 1LDSBuffer: [0]
-        - SourceSwap: [0]
-        - DirectToVgprSparseMetadata: [0]
+        - SourceSwap: [false]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
         - DirectToVgprA: [False]
         - DirectToVgprB: [False]
         - WavefrontSize: [32]
-        - ExpandPointerSwap: [1]
+        - ExpandPointerSwap: [true]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -466,6 +468,7 @@ BenchmarkProblems:
           - Exact: [32, 32, 1, 64]
           # - Exact: [32, 32, 1, 128]
           - Exact: [64, 64, 1, 256]
+          - Exact: [1024, 1024, 1, 1024]
         - ActivationArgs:
           - [Enum: none]
 ########################################################
@@ -520,14 +523,14 @@ BenchmarkProblems:
         - VectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
         - 1LDSBuffer: [0]
-        - SourceSwap: [0]
-        - DirectToVgprSparseMetadata: [0]
+        - SourceSwap: [false]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
         - DirectToVgprA: [False]
         - DirectToVgprB: [False]
         - WavefrontSize: [32]
-        - ExpandPointerSwap: [1]
+        - ExpandPointerSwap: [true]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -538,6 +541,7 @@ BenchmarkProblems:
           - Exact: [32, 32, 1, 64]
           # - Exact: [32, 32, 1, 128]
           - Exact: [64, 64, 1, 256]
+          - Exact: [1024, 1024, 1, 1024]
         - ActivationArgs:
           - [Enum: none]
 
@@ -592,14 +596,14 @@ BenchmarkProblems:
         - VectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
         - 1LDSBuffer: [0]
-        - SourceSwap: [0]
-        - DirectToVgprSparseMetadata: [0]
+        - SourceSwap: [false]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
         - DirectToVgprA: [False]
         - DirectToVgprB: [False]
         - WavefrontSize: [32]
-        - ExpandPointerSwap: [1]
+        - ExpandPointerSwap: [true]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -610,6 +614,7 @@ BenchmarkProblems:
           - Exact: [32, 32, 1, 64]
           # - Exact: [32, 32, 1, 128]
           - Exact: [64, 64, 1, 256]
+          - Exact: [1024, 1024, 1, 1024]
         - ActivationArgs:
           - [Enum: none]
 
@@ -664,14 +669,14 @@ BenchmarkProblems:
         - VectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
         - 1LDSBuffer: [0]
-        - SourceSwap: [0]
-        - DirectToVgprSparseMetadata: [0]
+        - SourceSwap: [false]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
         - DirectToVgprA: [False]
         - DirectToVgprB: [False]
         - WavefrontSize: [32]
-        - ExpandPointerSwap: [1]
+        - ExpandPointerSwap: [true]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -682,5 +687,6 @@ BenchmarkProblems:
           - Exact: [32, 32, 1, 64]
           # - Exact: [32, 32, 1, 128]
           - Exact: [64, 64, 1, 256]
+          - Exact: [1024, 1024, 1, 1024]
         - ActivationArgs:
           - [Enum: none]

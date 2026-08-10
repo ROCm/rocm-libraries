@@ -13,6 +13,7 @@
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_test_sdk/utilities/HipErrorHandler.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
+#include <iomanip>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -21,6 +22,8 @@
 #include "harness/SharedHandle.hpp"
 #include "harness/SupportMatrixCollector.hpp"
 #include "harness/TestConfig.hpp"
+#include "harness/bundle/BundleRegistration.hpp"
+#include "harness/bundle/UnverifiableBundleReport.hpp"
 
 namespace
 {
@@ -90,6 +93,25 @@ int main(int argc, char** argv) noexcept
             .default_value(std::string("support_matrix.md"))
             .implicit_value(std::string("support_matrix.md"))
             .help("Generate a markdown support matrix file (default: support_matrix.md).");
+        parser.add_argument("--allow-bundles")
+            .default_value(false)
+            .implicit_value(true)
+            .help("Enable bundle test registration (default: false). "
+                  "Set --allow-bundles or HIPDNN_TEST_ALLOW_BUNDLES=1 env var to enable.");
+        parser.add_argument("--gd", "--golden-data-dir")
+            .help("Path to the integration test bundle data directory. "
+                  "Defaults to <exe>/../lib/integration-test-bundles/. "
+                  "Can also be set via HIPDNN_TEST_GOLDEN_DATA_DIR env var.");
+        // --verification-mode governs BUNDLE tests (how the engine's output is
+        // verified). It is independent of --reference-executor, which governs the
+        // parameterized tests (which ref executor is exercised as the SUT).
+        parser.add_argument("--vm", "--verification-mode")
+            .help("How bundle engine output is verified: 'auto' (default; golden -> "
+                  "GPU ref -> CPU ref -> skip), 'golden', 'gpu', or 'cpu'. "
+                  "Can also be set via HIPDNN_TEST_VERIFICATION_MODE env var.");
+        parser.add_argument("--capture-bundles")
+            .help("Capture C++ graph tests as JSON bundles into the given directory. "
+                  "Each test writes a {suite}/{case}/{case}.json + .meta.json pair.");
 
         std::vector<std::string> remainingArgs;
         try
@@ -150,6 +172,50 @@ int main(int argc, char** argv) noexcept
             }
         }
 
+        // Parse --allow-bundles, --golden-data-dir, --verification-mode
+        auto allowBundles = parser.get<bool>("--allow-bundles");
+
+        std::optional<std::filesystem::path> goldenDataDir;
+        if(parser.is_used("--golden-data-dir"))
+        {
+            goldenDataDir = parser.get<std::string>("--golden-data-dir");
+            if(!std::filesystem::exists(*goldenDataDir))
+            {
+                std::cerr << "Error: --golden-data-dir path does not exist: " << *goldenDataDir
+                          << "\n";
+                return 1;
+            }
+            if(!std::filesystem::is_directory(*goldenDataDir))
+            {
+                std::cerr << "Error: --golden-data-dir is not a directory: " << *goldenDataDir
+                          << "\n";
+                return 1;
+            }
+        }
+
+        // Parse --verification-mode (case-insensitive); invalid value -> exit 1.
+        std::optional<hipdnn_integration_tests::VerificationMode> verificationMode;
+        if(parser.is_used("--verification-mode"))
+        {
+            try
+            {
+                verificationMode = hipdnn_integration_tests::parseVerificationMode(
+                    parser.get<std::string>("--verification-mode"));
+            }
+            catch(const std::exception& e)
+            {
+                std::cerr << "Error: " << e.what() << '\n';
+                return 1;
+            }
+        }
+
+        // Parse --capture-bundles argument
+        std::optional<std::filesystem::path> captureDir;
+        if(parser.is_used("--capture-bundles"))
+        {
+            captureDir = parser.get<std::string>("--capture-bundles");
+        }
+
         // Parse --test-article argument and load explicit plugin if provided
         std::optional<std::filesystem::path> articlePath;
         if(parser.is_used("--test-article"))
@@ -185,12 +251,18 @@ int main(int argc, char** argv) noexcept
             hipdnn_integration_tests::SupportMatrixCollector::get().setOutputPath(outputFile);
         }
 
-        hipdnn_integration_tests::TestConfig::initialize(std::move(articlePath),
-                                                         std::move(engineName),
-                                                         failOnUnsupported,
-                                                         skipGraphValidation,
-                                                         std::move(configPath),
-                                                         refExecType);
+        hipdnn_integration_tests::TestConfigOptions opts;
+        opts.articlePath = std::move(articlePath);
+        opts.engineName = std::move(engineName);
+        opts.failOnUnsupported = failOnUnsupported;
+        opts.skipGraphValidation = skipGraphValidation;
+        opts.configPath = std::move(configPath);
+        opts.referenceExecutorType = refExecType;
+        opts.allowBundles = allowBundles;
+        opts.goldenDataDir = std::move(goldenDataDir);
+        opts.verificationMode = verificationMode;
+        opts.captureDir = std::move(captureDir);
+        hipdnn_integration_tests::TestConfig::initialize(std::move(opts));
 
         // Reconstruct argc/argv for GTest from remaining (unknown) args.
         // argv[0] (program name) must be first — GTest requires it.
@@ -246,7 +318,28 @@ int main(int argc, char** argv) noexcept
             return 1;
         }
 
+        hipdnn_integration_tests::bundle::registerBundleTests();
+
         const int result = RUN_ALL_TESTS();
+
+        // Print bundles that ended without a verdict (no oracle / reference bug).
+        // Informational only — these SKIP, so they do not affect `result`.
+        hipdnn_integration_tests::bundle::UnverifiableBundleReport::get().print();
+
+        {
+            const auto* unit = ::testing::UnitTest::GetInstance();
+            const int total = unit->test_to_run_count();
+            const int passed = unit->successful_test_count();
+            const int skip = unit->skipped_test_count();
+            const int failed = unit->failed_test_count();
+            const double pct = total > 0 ? 100.0 * passed / total : 0.0;
+
+            std::cerr << "\n==== TEST COVERAGE SUMMARY ====\n"
+                      << "Passed:  " << passed << " / " << total << " (" << std::fixed
+                      << std::setprecision(1) << pct << "%)\n"
+                      << "Skipped: " << skip << "\n"
+                      << "Failed:  " << failed << "\n";
+        }
 
         // Generate support matrix if requested
         if(hipdnn_integration_tests::SupportMatrixCollector::get().isEnabled())

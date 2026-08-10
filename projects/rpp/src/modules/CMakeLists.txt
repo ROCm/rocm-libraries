@@ -24,6 +24,7 @@ SOFTWARE.
 
 project(modules)
 
+## Remove audio augmentation sources when audio support is disabled.
 function(remove_audio_augmentations SOURCE_LIST BACKEND)
     if( "${BACKEND}" STREQUAL "HIP")
         list(REMOVE_ITEM ${SOURCE_LIST}
@@ -49,6 +50,7 @@ function(remove_audio_augmentations SOURCE_LIST BACKEND)
     set(${SOURCE_LIST} ${${SOURCE_LIST}} PARENT_SCOPE)
 endfunction()
 
+## Disable FMA for tensor sources that require precise math behavior.
 function(add_fma_property)
     set_source_files_properties(tensor/rppt_tensor_audio_augmentations.cpp
                                 tensor/rppt_tensor_statistical_operations.cpp
@@ -94,8 +96,6 @@ if( "${BACKEND}" STREQUAL "HIP")
     endif()
     message("-- ${Green}HIP kernels added${ColourReset}")
 
-    # Set compiler flags
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${HIP_HIPCC_FLAGS}")
     add_fma_property()
 
     # Add HIP specific includes

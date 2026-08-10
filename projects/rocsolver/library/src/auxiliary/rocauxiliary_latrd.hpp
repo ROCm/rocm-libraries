@@ -82,13 +82,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(MAX_THDS) latrd_dot_scale_axpy(const I n
     }
 
     // reduce squared entries to find squared norm of x
-    norm2 += shift_left(norm2, 1);
-    norm2 += shift_left(norm2, 2);
-    norm2 += shift_left(norm2, 4);
-    norm2 += shift_left(norm2, 8);
-    norm2 += shift_left(norm2, 16);
-    if(warpSize > 32)
-        norm2 += shift_left(norm2, 32);
+    reduce_wave_sum(norm2);
     if(tid % warpSize == 0)
         sval[tid / warpSize] = norm2;
     __syncthreads();
@@ -229,9 +223,7 @@ rocblas_status rocsolver_latrd_template(rocblas_handle handle,
     rocblas_get_stream(handle, &stream);
 
     // everything must be executed with scalars on the device
-    rocblas_pointer_mode old_mode;
-    rocblas_get_pointer_mode(handle, &old_mode);
-    rocblas_set_pointer_mode(handle, rocblas_pointer_mode_device);
+    rocblas_pointer_mode_saver saver(handle, rocblas_pointer_mode_device);
 
     if(uplo == rocblas_fill_lower)
     {
@@ -395,7 +387,6 @@ rocblas_status rocsolver_latrd_template(rocblas_handle handle,
         }
     }
 
-    rocblas_set_pointer_mode(handle, old_mode);
     return rocblas_status_success;
 }
 

@@ -50,6 +50,48 @@ namespace ai {
 // Common utility functions for AI heuristics (2D, 3D, and KTN)
 namespace common {
 
+// Sign- and bounds-safe one-hot encoding. A label outside [0, num_classes) yields an all-zero
+// vector (and a warning): an unknown or negative category degrades to "no class" rather than
+// indexing out of range (static_cast<size_t> of a negative value would otherwise be undefined).
+// Defined in ai_heuristics.cpp.
+std::vector<int> OneHot(long long label, std::size_t num_classes);
+
+// Canonical metadata key for a datatype (e.g. miopenFloat -> "FP32"). The datatype->name mapping is
+// a stable property of the MIOpen C API; the name->index mapping (which can change per retrain) is
+// read from each model's metadata. Returns nullptr for a datatype no model encodes. Single source
+// of truth for all precision encoders (Metadata/MetadataND::EncodePrecision and candidate
+// selection). Defined in ai_heuristics.cpp.
+const char* DataTypeToEncodingKey(miopenDataType_t data_type);
+
+// Convolution direction. Selects the implicit-GEMM (M, N, K) dimension assignment in
+// EngineeredConvFeatures (the conv lowers to a different GEMM per direction). Dimensions are always
+// passed in the forward (driver) convention; this enum only chooses the GEMM formula.
+enum class ConvDirection
+{
+    Forward,
+    BackwardData,
+    BackwardWeights
+};
+
+// Derived 2D-convolution feature block shared by the TunaNet (ExtractTunaNetND2dFeatures) and
+// candidate-selection (EngineerCandidateSelectionInputFeatures) input encoders. Given the problem
+// dimensions (forward convention) and direction it returns the engineered tail (log-transformed
+// FLOPs/GEMM sizes, utilization and spatial/channel ratios) in a fixed order. Must match the
+// feature definitions the models were trained with. Single source of truth so the two paths cannot
+// drift. Defined in ai_heuristics.cpp.
+MIOPEN_INTERNALS_EXPORT std::vector<float> EngineeredConvFeatures(std::size_t N,
+                                                                  std::size_t C_in,
+                                                                  std::size_t C_out,
+                                                                  std::size_t H_in,
+                                                                  std::size_t W_in,
+                                                                  std::size_t H_out,
+                                                                  std::size_t W_out,
+                                                                  std::size_t K_h,
+                                                                  std::size_t K_w,
+                                                                  std::size_t groups,
+                                                                  std::size_t num_cu,
+                                                                  ConvDirection direction);
+
 /**
  * @brief Load JSON from file path
  * @param path File system path to JSON file
@@ -143,6 +185,7 @@ private:
     size_t num_inputs;
     size_t num_outputs;
     size_t num_solvers;
+    size_t num_cu_3d = 0; // "gpu.num_cu" the model was trained with (0 when absent)
     std::unordered_map<size_t, std::string> solver_map;
     std::vector<float> features_mean;
     std::vector<float> features_std;
@@ -158,6 +201,7 @@ private:
     static std::optional<int> LoadSpatialDim(const std::string& arch);
     static std::optional<std::vector<std::string>> LoadFeatures(const std::string& arch);
     static std::optional<size_t> LoadNumInputs(const std::string& arch);
+    static std::optional<size_t> LoadNumCu(const std::string& arch);
     static std::optional<size_t> LoadNumOutputs(const std::string& arch);
     static std::optional<size_t> LoadNumSolvers(const std::string& arch);
     static std::optional<std::unordered_map<size_t, std::string>>
@@ -216,6 +260,22 @@ public:
      * @return Number of inputs
      */
     size_t GetNumInputs() const { return num_inputs; }
+
+    /**
+     * @brief Compute-unit count the model was trained with (from "gpu.num_cu"), used to normalize
+     *        hardware-aware derived features. Returns 0 when absent.
+     */
+    size_t GetNumCu() const { return num_cu_3d; }
+
+    /**
+     * @brief One-hot class counts for the categorical input features, from the metadata encodings.
+     *        Used to size the engineered input one-hots so they track the trained model.
+     */
+    size_t GetPrecisionClassCount() const { return precision_encodings_3d.size(); }
+    size_t GetDirectionClassCount() const { return direction_encodings_3d.size(); }
+    size_t GetInLayoutClassCount() const { return in_layout_encodings.size(); }
+    size_t GetFilLayoutClassCount() const { return fil_layout_encodings.size(); }
+    size_t GetOutLayoutClassCount() const { return out_layout_encodings.size(); }
 
     /**
      * @brief Get number of output features
@@ -341,6 +401,13 @@ protected:
  */
 MIOPEN_INTERNALS_EXPORT std::unique_ptr<ModelND> GetNDModel(const std::string& device,
                                                             const int& dim);
+
+/// Engineered 2D input-feature vector for the TunaNetND input encoder: categorical one-hots
+/// (layouts, precision, direction) sized from the metadata encodings, raw passthrough features, and
+/// the shared common::EngineeredConvFeatures derived block. isFwd selects the channel/spatial
+/// orientation. Exported for golden testing.
+MIOPEN_INTERNALS_EXPORT std::vector<float> ExtractTunaNetND2dFeatures(
+    const conv::ProblemDescription& problem, bool isFwd, const MetadataND& metadata);
 
 } // namespace immed_mode
 

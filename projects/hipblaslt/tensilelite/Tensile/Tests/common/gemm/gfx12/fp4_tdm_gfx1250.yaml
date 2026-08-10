@@ -5,8 +5,7 @@ GlobalParameters:
   SyncsPerBenchmark: 0
   NumElementsToValidate: -1
   KernelTime: True
-  NewClient: 2
-  BoundsCheck: False
+  BoundsCheck: 0
   PrintSolutionRejectionReason: True
   ValidationMaxToPrint: 4      # maximum number of mismatches to print
   ValidationPrintValids: False # print matches too
@@ -20,7 +19,6 @@ GlobalParameters:
   NumWarmups: 1
   EnqueuesPerSync: 1
   PrintWinnersOnly: False
-  MinKForGSU: 1
   Architecture: gfx1250
   # KeepBuildTmp: True
   PrintLevel: 2
@@ -54,6 +52,8 @@ BenchmarkProblems:
           - [16, 16, 128, 1,  1,  1, 1,  2, 2]
           - [16, 16, 128, 1,  1,  2, 2,  1, 1]
           - [16, 16, 128, 1,  1,  8, 8,  2, 2]
+          - [32, 16, 128, 1,  1,  1, 2,  1, 1]
+          - [32, 16, 128, 1,  1,  4, 8,  2, 2]
         - DepthU: [128, 256]
         - LocalReadVectorWidth: [32]
         - ScheduleIterAlg: [0]
@@ -72,10 +72,10 @@ BenchmarkProblems:
         - WaveSeparateGlobalReadA: [0]
         - WaveSeparateGlobalReadB: [0]
         - 1LDSBuffer: [0]
-        - GlobalReadPerMfma: [1]
+        - GlobalReadPerMfma: [1.0]
         - LocalWritePerMfma: [-1]
         - StoreVectorWidth: [-1]
-        - SourceSwap: [1]
+        - SourceSwap: [true, false]
         - WavefrontSize: [32]
         - TDMInst: [3]
         - StaggerU: [0, 4, 16]
@@ -117,6 +117,8 @@ BenchmarkProblems:
           - [16, 16, 128, 1,  1,  1, 1,  2, 2]
           - [16, 16, 128, 1,  1,  2, 2,  1, 1]
           - [16, 16, 128, 1,  1,  8, 8,  2, 2]
+          - [32, 16, 128, 1,  1,  1, 2,  1, 1]
+          - [32, 16, 128, 1,  1,  4, 8,  2, 2]
         - DepthU: [128, 256]
         - LDSTrInst: [True]
         - LocalReadVectorWidth: [32]
@@ -136,10 +138,10 @@ BenchmarkProblems:
         - WaveSeparateGlobalReadA: [0]
         - WaveSeparateGlobalReadB: [0]
         - 1LDSBuffer: [0]
-        - GlobalReadPerMfma: [1]
+        - GlobalReadPerMfma: [1.0]
         - LocalWritePerMfma: [-1]
         - StoreVectorWidth: [-1]
-        - SourceSwap: [1]
+        - SourceSwap: [true, false]
         - WavefrontSize: [32]
         - TDMInst: [3]
         - StaggerU: [0, 4, 16]
@@ -181,6 +183,8 @@ BenchmarkProblems:
           - [16, 16, 128, 1,  1,  1, 1,  2, 2]
           - [16, 16, 128, 1,  1,  2, 2,  1, 1]
           - [16, 16, 128, 1,  1,  8, 8,  2, 2]
+          - [32, 16, 128, 1,  1,  1, 2,  1, 1]
+          - [32, 16, 128, 1,  1,  4, 8,  2, 2]
         - DepthU: [128, 256]
         - LDSTrInst: [True]
         - LocalReadVectorWidth: [32]
@@ -200,10 +204,10 @@ BenchmarkProblems:
         - WaveSeparateGlobalReadA: [0]
         - WaveSeparateGlobalReadB: [0]
         - 1LDSBuffer: [0]
-        - GlobalReadPerMfma: [1]
+        - GlobalReadPerMfma: [1.0]
         - LocalWritePerMfma: [-1]
         - StoreVectorWidth: [-1]
-        - SourceSwap: [1]
+        - SourceSwap: [true, false]
         - WavefrontSize: [32]
         - TDMInst: [3]
         - StaggerU: [0, 4, 16]
@@ -245,6 +249,8 @@ BenchmarkProblems:
           - [16, 16, 128, 1,  1,  1, 1,  2, 2]
           - [16, 16, 128, 1,  1,  2, 2,  1, 1]
           - [16, 16, 128, 1,  1,  8, 8,  2, 2]
+          - [32, 16, 128, 1,  1,  1, 2,  1, 1]
+          - [32, 16, 128, 1,  1,  4, 8,  2, 2]
         - DepthU: [128, 256]
         - LDSTrInst: [True]
         - LocalReadVectorWidth: [32]
@@ -264,10 +270,10 @@ BenchmarkProblems:
         - WaveSeparateGlobalReadA: [0]
         - WaveSeparateGlobalReadB: [0]
         - 1LDSBuffer: [0]
-        - GlobalReadPerMfma: [1]
+        - GlobalReadPerMfma: [1.0]
         - LocalWritePerMfma: [-1]
         - StoreVectorWidth: [-1]
-        - SourceSwap: [1]
+        - SourceSwap: [true, false]
         - WavefrontSize: [32]
         - TDMInst: [3]
         - StaggerU: [0, 4, 16]
