@@ -1989,6 +1989,295 @@ can configure a regular installed wheel from its exact CMake client before the
 final ROCm tree exists because the installation key comes from site-packages,
 not from the source checkout or final ROCm layout.
 
+### Q115 — When must TensileLite require `tensilelite-client`?
+
+**Question:** Must `tensilelite-client` be an import-time and device-generation
+prerequisite, or only a capability-specific dependency when TensileLite actually
+uses the executable?
+
+**Decision: Accepted — require it only at actual client execution.**
+
+`import tensilelite`, command-line help, logic validation,
+`TensileCreateLibrary`, and hipBLASLt device-library generation must work when
+`tensilelite-client` is absent. The package resolves and validates the client
+only immediately before an operation launches it, such as benchmark or retune
+execution. Q122 later refines this to validate at the first explicit request
+for the client path; imports and device generation remain client-free.
+
+**Rationale:** Current device-library generation is a Python/rocisa/toolchain
+flow; it does not execute the native client. Making the client an import-time
+or pre-generation prerequisite prevents otherwise valid device-library builds
+and wrongly couples the generator to a benchmark/validation capability.
+
+**Supersession and scope:** This supersedes Q004 and Q102, plus the
+client-as-precondition portions of Q007, Q014/Q014A, Q097, Q099, Q106, Q112,
+Q113, and Q114. In particular, no CMake device-generation path may build,
+install, bind, or validate the client merely to import TensileLite or generate
+device libraries. The earlier Windows requirement in Q099 to build and bind the
+client solely for device generation is therefore superseded.
+
+### Q116 — What is TheRock's optional-client policy?
+
+**Question:** After removing the client from the device-generation dependency
+graph, should TheRock still package it, and should the feature branch's Windows
+enablement remain?
+
+**Decision: Accepted — retain a packaged client, but restore the Windows
+disablement.**
+
+`tensilelite-client` remains a separately consumable TheRock artifact for the
+benchmark/validation capability that actually uses it. It is not a transient
+build-time input: an artifact consumer may use the packaged executable without
+requiring any later device-library-generation build to produce or bind it.
+
+Restore `develop`'s Windows behavior: Windows does not enable, build, install,
+or bind `tensilelite-client` merely because hipBLASLt device libraries are
+enabled. Non-Windows client builds and their artifact packaging are selected by
+the explicit benchmark/validation artifact policy, not by device generation.
+
+**Rationale:** Packaging preserves the client for its real downstream use while
+Q115 removes an unrelated build-time coupling. Restoring the Windows disablement
+also removes work introduced solely to satisfy that coupling.
+
+**Supersession:** This supersedes Q099's Windows-parity requirement and Q113's
+client/device-generation invariant. It retains the existence of a packaged
+client artifact; Q117 resolves its current ownership.
+
+### Q117 — Which artifact owns the optional client now?
+
+**Question:** Should the non-Windows `tensilelite-client` be packaged with the
+production BLAS runtime (`blas_lib`) or the benchmark/test payload (`blas_test`)
+while the Python package and client are still maturing?
+
+**Decision: Accepted — restore `blas_test` ownership for now.**
+
+Restore TheRock base behavior: package
+`libexec/hipblaslt/tensilelite/tensilelite-client` in the non-Windows
+`blas_test` artifact. Do not include it in `blas_lib`. The executable therefore
+remains available to the packaged benchmark/validation consumers that use it,
+without making it part of every production BLAS runtime installation.
+
+**Implementation consequence:** Restore the matching `develop` install
+ownership: install the client only for the non-Windows TensileLite test-artifact
+workflow and under CMake's `tests` component. TheRock's `blas_test` selector,
+not `blas_lib`, includes that installed path. This is a consequence of the
+accepted artifact ownership, not a separate decision.
+
+**Rationale:** The current client and Python package have not yet reached the
+maturity required for production-runtime ownership. `blas_test` preserves a
+real artifact-based execution path while avoiding premature production
+distribution.
+
+**Supersession and future direction:** This supersedes Q098's current
+production-runtime ownership decision and resolves Q116's open ownership
+boundary. Moving the client to `blas_lib` is a deliberate future change once
+both the Python package and client have matured sufficiently; it is not an
+automatic consequence of a build or packaging change. The concrete maturity
+criteria remain to be decided before that promotion.
+
+### Q118 — Should `invoke install` remain a full development setup?
+
+**Question:** Should the Linux source-development convenience command
+`invoke install` stop building and binding `tensilelite-client` now that the
+package and device-generation paths no longer require it by default?
+
+**Decision: Accepted — keep the full development workflow.**
+
+`invoke install` continues to build rocisa and `tensilelite-client`, install
+TensileLite editably, and bind that exact built client. Its purpose is to make
+development and end-to-end testing of both TensileLite and its benchmark/
+validation client convenient in one command.
+
+**Scope boundary:** This is an explicit source-development convenience, not a
+general package-install or hipBLASLt code-generation requirement. It does not
+weaken Q115: importing TensileLite or generating device libraries must not
+require a client, and CMake must not build or bind one merely for those flows.
+
+### Q119 — Which CMake model should device generation use?
+
+**Question:** For the hipBLASLt device-generation path, should the current
+wheel-install/client-binding graph keep the canonical wheel while dropping the
+client prerequisite?
+
+**Decision: Accepted — use the canonical wheel without the client.**
+
+`HIPBLASLT_ENABLE_DEVICE=ON` must support both
+`TENSILELITE_ENABLE_CLIENT=OFF` and `TENSILELITE_ENABLE_HOST=OFF`. Device
+generation constructs the canonical TensileLite wheel and force-installs it
+with `--no-deps` into the selected Python environment before logic validation
+or device-library creation. Those Python commands import TensileLite from the
+installed canonical wheel; the build-tree rocisa package remains available only
+through the command-scoped `PYTHONPATH`.
+
+The canonical wheel is part of the normal build whenever device generation or
+the TensileLite test-artifact workflow needs the Python package. The
+compatibility wheel remains part of the release/artifact-test workflow defined
+in Q123.
+
+Device generation does not build, configure, bind, validate, or launch
+`tensilelite-client`, and it does not require the TensileLite C++ host target.
+Q118 remains the intentional full source-development exception. Every other
+client, package, artifact, and testing decision continues to be considered and
+recorded independently.
+
+### Q120 — Should client selection and binding change?
+
+**Question:** Once client validation is deferred to actual use, should
+TensileLite replace its existing standard-path resolver and explicit
+per-installation client binding registry?
+
+**Decision: Accepted — no mechanism change.**
+
+Keep the current standard `ROCM_PATH/libexec/hipblaslt/tensilelite` resolver,
+the explicit `tensilelite-configure-client` binding mechanism for custom and
+source-development clients, and its client-version validation. The resolver and
+validation mechanism remain unchanged; Q122 defines the deferred lookup
+boundary. No import path reads, resolves, or validates the client.
+
+This preserves Q118's full `invoke install` workflow and lets assembled
+artifact-test environments use the standard path without an explicit binding.
+
+### Q121 — What remains eager at package import?
+
+**Question:** After removing client resolution from package initialization,
+should `import tensilelite` also defer its existing rocisa and ROCm-release
+validation?
+
+**Decision: Accepted — defer only the client.**
+
+Import continues to require an importable rocisa and a ROCm installation whose
+release matches the TensileLite distribution. It must not resolve, read a
+binding for, execute, or validate `tensilelite-client`. Client selection and
+validation occur only at the later execution boundary defined by Q115.
+
+**Rationale:** rocisa and the matching ROCm toolchain remain prerequisites for
+the generator package, while the client is an independent benchmark/validation
+capability. Keeping the existing rocisa and ROCm checks limits this change to
+the requested client decoupling.
+
+### Q122 — When does a client-path request validate the client?
+
+**Question:** Once client lookup is removed from imports, may
+`getClientExecutablePath()` return a missing path while a caller merely writes
+a run script, or must every returned client path already be valid?
+
+**Decision: Accepted — a returned client path is always validated.**
+
+Importing TensileLite or any of its modules does not look up the client.
+However, the first explicit request for the client path resolves the configured
+or standard client and performs the existing file, executable, and version
+validation. It returns a valid path or fails with that diagnostic.
+
+Consequently, normal script/configuration generation that asks for the client
+path fails when the client is absent. This is intentional: callers may rely on
+a returned path being usable. CPU-only paths remain unaffected because they do
+not request a client path.
+
+**Test direction:** Restore the `develop`-equivalent real-resolver test for a
+missing path and a valid path, adapted to the current binding mechanism. Keep
+writer tests that mock the resolver as isolated script-format tests; they do
+not claim a real client exists.
+
+**Supersession:** This refines Q115 and Q120's deferred-validation timing. It
+supersedes Q115's earlier statement that emitting a script/configuration does
+not require the executable.
+
+### Q123 — Does TheRock continue testing its release wheels?
+
+**Question:** Since CMake device generation uses the canonical wheel, should
+TheRock continue constructing and testing its canonical and compatibility
+wheels from reconstructed artifacts?
+
+**Decision: Accepted — yes, unchanged.**
+
+Continue producing both the canonical `tensilelite` and compatibility wheels,
+staging them as artifacts, and running their reconstructed-artifact test
+coverage. This verifies the distributable Python packages in an environment
+separate from CMake device generation.
+
+**Scope boundary:** Q119 makes the canonical wheel the CMake device-generation
+input. It does not reduce package production, packaging validation, or
+artifact-test coverage.
+
+### Q124 — Must every wheel test phase require the client?
+
+**Question:** Should the release-wheel runner retain its feature-branch-wide
+`tensilelite-client --version` gate, or follow the existing category model in
+which only client-executing tests require the client?
+
+**Decision: Accepted — retain the existing category model; no new split is
+needed.**
+
+Wheel discovery and installation must not consult `tensilelite-client`. The
+existing generic test categories already separate capability use:
+
+- rocisa and TensileLite unit categories run client-free; and
+- the `ffm-quick` common-GEMM category requires and validates the client when
+  it actually builds and runs kernels.
+
+Remove the runner's universal `client --version` gate. Do not add a parallel
+test-runner structure or reduce wheel coverage. This restores `develop`'s
+capability-specific test behavior while retaining the branch's wheel artifact
+coverage.
+
+### Q125 — How does the artifact runner select release wheels without a client?
+
+**Question:** After removing the client-version gate, what client-free rule
+selects the canonical and compatibility wheels from a reconstructed artifact?
+
+**Decision: Accepted — use the wheel artifact's own metadata.**
+
+Require exactly one canonical `tensilelite` wheel and exactly one compatibility
+wheel. Their parsed wheel versions must match. Keep the existing build-time
+wheel-content validation, which verifies each wheel's filename and metadata
+version and the compatibility wheel's exact canonical-wheel dependency pin.
+
+Do not introduce another artifact-time version authority and do not consult
+`tensilelite-client` to discover or validate the wheels.
+
+### Q126 — How do the standard hipBLASLt presets select the client?
+
+**Question:** After restoring `develop`'s client independence from device
+generation, should the `gemm-libs` and `hipblaslt-clients` presets retain the
+feature branch's client enablement?
+
+**Decision: Accepted — restore their `develop` settings.**
+
+`gemm-libs` enables device generation with both `TENSILELITE_ENABLE_HOST=OFF`
+and `TENSILELITE_ENABLE_CLIENT=OFF`. `hipblaslt-clients` retains its TensileLite
+host setting but restores `TENSILELITE_ENABLE_CLIENT=OFF`. The standalone
+`tensilelite` preset remains the explicit client-build preset.
+
+Replace the branch-added invariant tests which expect device generation to
+reject client/host-off configurations with focused positive configuration tests
+for these restored preset contracts. This supersedes Q113.
+
+### Q127 — How do version consumers drive CMake targets?
+
+**Question:** Which CMake targets should compute the shared TensileLite release
+version, build release wheels, and generate the native client's version header?
+
+**Decision: Accepted — separate the consumers while preserving one version
+authority.**
+
+`VERSION` plus `release_metadata.py` remain the sole logical version authority.
+CMake computes `TENSILELITE_DISTRIBUTION_VERSION` whenever either a wheel or
+the client version header needs it.
+
+- The canonical wheel is built whenever device generation or test-artifact
+  packaging needs the Python package. It is a direct dependency of device
+  generation and is force-installed before the generator commands run.
+- The compatibility wheel is built for the release/artifact-test workflow,
+  where it is staged and tested.
+- `TensileLiteClientVersion.hpp` is generated only when
+  `TENSILELITE_ENABLE_CLIENT=ON`, because only `tensilelite-client` includes
+  it.
+
+The CMake Python environment for device generation depends on the canonical
+wheel and `_rocisa`, not on `tensilelite-client`. Remove its client-binding
+wrapper from that path. This preserves canonical-wheel code generation while
+removing the client dependency.
+
 ## Confirmed TheRock build/test facts
 
 ### Build
