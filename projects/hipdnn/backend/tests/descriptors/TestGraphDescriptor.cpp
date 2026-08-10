@@ -1025,6 +1025,9 @@ TEST_F(TestGraphDescriptor, JsonRoundTripPreservesUuid)
     const auto expectedId = hipdnn_flatbuffers_sdk::utilities::toUuidBytes(*originalGraph->id);
 
     const auto json = original.getSerializedJsonGraph();
+    EXPECT_EQ(nlohmann::json::parse(json).at("id"),
+              hipdnn_flatbuffers_sdk::utilities::formatUuid(expectedId));
+
     GraphDescriptor revived;
     GraphDescriptor::createFromJsonGraph(revived, json.c_str(), json.size());
     revived.buildSerializedGraph();
