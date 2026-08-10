@@ -200,6 +200,32 @@ using DeviceConvFwdFactoryT = std::tuple<
         2,  // InScalarPerVector
         2,  // OutScalarPerVector
         RequirePadding>,
+    // NEW: fills the missing tile-28 step in this family's own 7/14/[28]/56/112
+    // progression. NBatch/SubTileH/SubTileW/InScalarPerVector are copied from the
+    // tile-28 instances already shipped for OTHER filters at this exact tile size
+    // (5x5 stride-1 pad-2 tile-28, and 3x3 stride-2 pad-1 tile-28 below) - every
+    // shipped tile-28 instance uses (32,4,4) regardless of filter/stride, and
+    // InScalarPerVector=4 at tile width 28 in the stride-1 case. UNVERIFIED for
+    // this exact (filter=3, stride=1) combination until built and measured.
+    ck::tensor_operation::device::DeviceGroupedConvFwd<
+        NDimSpatial,
+        BlockSize,
+        DType,
+        DType,
+        AccType,
+        DType,
+        S<28, 28>,                            // BlockTileSize
+        3,                                    // FilterSize
+        ck::Tuple<S<1, 1>, S<1, 1>, S<1, 1>>, // FilterParam(dilation, stride, padding)
+        InElementOp,
+        WeiElementOp,
+        OutElementOp,
+        32, // NBatch
+        4,  // SubTileH
+        4,  // SubTileW
+        4,  // InScalarPerVector
+        4,  // OutScalarPerVector
+        RequirePadding>,
     ck::tensor_operation::device::DeviceGroupedConvFwd<
         NDimSpatial,
         BlockSize,
@@ -240,6 +266,32 @@ using DeviceConvFwdFactoryT = std::tuple<
         RequirePadding>
 
     ,
+    // NEW: fills the missing tile-14 step in this family's own 28/112 set (now
+    // 14/28/112). Parameters copied from the only other shipped stride-2 tile-14
+    // instance (5x5 stride-2 pad-2 tile-14): NBatch/SubTile is the universal
+    // <=28-tile tuple (32,4,4), and stride-2 halves OutScalarPerVector relative to
+    // InScalarPerVector, matching every other stride-2 instance in this file.
+    // UNVERIFIED for this exact (filter=3, stride=2) combination until built and
+    // measured.
+    ck::tensor_operation::device::DeviceGroupedConvFwd<
+        NDimSpatial,
+        BlockSize,
+        DType,
+        DType,
+        AccType,
+        DType,
+        S<14, 14>,                            // BlockTileSize
+        3,                                    // FilterSize
+        ck::Tuple<S<1, 1>, S<2, 2>, S<1, 1>>, // FilterParam(dilation, stride, padding)
+        InElementOp,
+        WeiElementOp,
+        OutElementOp,
+        32, // NBatch
+        4,  // SubTileH
+        4,  // SubTileW
+        2,  // InScalarPerVector
+        1,  // OutScalarPerVector
+        RequirePadding>,
     ck::tensor_operation::device::DeviceGroupedConvFwd<
         NDimSpatial,
         BlockSize,
@@ -258,6 +310,32 @@ using DeviceConvFwdFactoryT = std::tuple<
         4,  // SubTileW
         4,  // InScalarPerVector
         2,  // OutScalarPerVector
+        RequirePadding>,
+    // NEW: fills the missing tile-56 step (now 14/28/[56]/112). Parameters copied
+    // from the only other shipped stride-2 tile-56 instance (5x5 stride-2 pad-2
+    // tile-56): tile-56 universally uses (NBatch=8, SubTile=7x8) regardless of
+    // filter/stride elsewhere in this file, and InScalarPerVector=8 with
+    // OutScalarPerVector halved for stride-2, matching that pattern.
+    // UNVERIFIED for this exact (filter=3, stride=2) combination until built and
+    // measured.
+    ck::tensor_operation::device::DeviceGroupedConvFwd<
+        NDimSpatial,
+        BlockSize,
+        DType,
+        DType,
+        AccType,
+        DType,
+        S<56, 56>,                            // BlockTileSize
+        3,                                    // FilterSize
+        ck::Tuple<S<1, 1>, S<2, 2>, S<1, 1>>, // FilterParam(dilation, stride, padding)
+        InElementOp,
+        WeiElementOp,
+        OutElementOp,
+        8, // NBatch
+        7, // SubTileH
+        8, // SubTileW
+        8, // InScalarPerVector
+        4, // OutScalarPerVector
         RequirePadding>,
     ck::tensor_operation::device::DeviceGroupedConvFwd<
         NDimSpatial,
