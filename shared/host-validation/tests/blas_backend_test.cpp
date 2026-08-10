@@ -82,7 +82,7 @@ int main() {
 
     const std::array<float, 1> transformedA{0.3f};
     const std::array<float, 1> transformedB{1.0f};
-    const std::array<float, 1> transformedC{0.0f};
+    const std::array<float, 1> transformedC{1.0f};
     const std::array<float, 1> transformedScaleA{0.7f};
     const std::array<float, 1> transformedAlphaVector{0.6f};
     std::array<float, 1> transformedD{};
@@ -106,13 +106,17 @@ int main() {
         MutableTensorView::fromNative<float>(Layout::contiguous(Shape{1, 1}),
                                              std::span<float>(transformedD)),
         ScalarType::Float32);
+    transformedProblem.epilogue.alpha = 2.0;
+    transformedProblem.epilogue.beta = 3.0;
+    transformedProblem.epilogue.outputScale = 4.0;
     TransformingBlasGemmBackend transformingBackend;
     referenceGemm(transformedProblem, {
                                           .backend = GemmBackend::Blas,
                                           .requireRequestedBackend = true,
                                           .backendImplementation = &transformingBackend,
                                       });
-    require(transformedD[0] == 0.125f, "Transforming BLAS pre-quantization result mismatch.");
+    require(transformedD[0] == 13.0f,
+            "Transforming BLAS pre-quantization/finalization result mismatch.");
 
     const std::array<float, 1> saturatingA{63.75f};
     const std::array<float, 1> saturatingB{2.0f};
