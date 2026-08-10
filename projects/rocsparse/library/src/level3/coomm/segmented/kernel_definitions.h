@@ -43,6 +43,7 @@ namespace rocsparse
                                            I       N,
                                            I       K,
                                            int64_t nnz,
+                                           int64_t batch_count,
                                            int64_t batch_stride_A,
                                            ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                                            I* __restrict__ row_block_red,
@@ -64,28 +65,32 @@ namespace rocsparse
 
         if(alpha != static_cast<T>(0))
         {
-            rocsparse::coommnn_segmented_main_device<BLOCKSIZE, WF_SIZE, LOOPS, TRANSB>(
-                conj_A,
-                conj_B,
-                M,
-                N,
-                K,
-                nnz,
-                batch_stride_A,
-                alpha,
-                row_block_red,
-                val_block_red,
-                coo_row_ind,
-                coo_col_ind,
-                coo_val,
-                dense_B,
-                ldb,
-                batch_stride_B,
-                dense_C,
-                ldc,
-                batch_stride_C,
-                order_C,
-                idx_base);
+            for(int64_t batch = hipBlockIdx_z; batch < batch_count; batch += hipGridDim_z)
+            {
+                rocsparse::coommnn_segmented_main_device<BLOCKSIZE, WF_SIZE, LOOPS, TRANSB>(
+                    conj_A,
+                    conj_B,
+                    M,
+                    N,
+                    K,
+                    nnz,
+                    batch_stride_A,
+                    alpha,
+                    row_block_red,
+                    val_block_red,
+                    coo_row_ind,
+                    coo_col_ind,
+                    coo_val,
+                    dense_B,
+                    ldb,
+                    batch_stride_B,
+                    dense_C,
+                    ldc,
+                    batch_stride_C,
+                    order_C,
+                    idx_base,
+                    batch);
+            }
         }
     }
 
@@ -106,6 +111,7 @@ namespace rocsparse
                                                 I       N,
                                                 I       K,
                                                 int64_t nnz,
+                                                int64_t batch_count,
                                                 int64_t batch_stride_A,
                                                 ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                                                 I* __restrict__ row_block_red,
@@ -128,29 +134,33 @@ namespace rocsparse
 
         if(alpha != static_cast<T>(0))
         {
-            rocsparse::coommnn_segmented_remainder_device<BLOCKSIZE, WF_SIZE, LOOPS, TRANSB>(
-                conj_A,
-                conj_B,
-                colB_offset,
-                M,
-                N,
-                K,
-                nnz,
-                batch_stride_A,
-                alpha,
-                row_block_red,
-                val_block_red,
-                coo_row_ind,
-                coo_col_ind,
-                coo_val,
-                dense_B,
-                ldb,
-                batch_stride_B,
-                dense_C,
-                ldc,
-                batch_stride_C,
-                order_C,
-                idx_base);
+            for(int64_t batch = hipBlockIdx_z; batch < batch_count; batch += hipGridDim_z)
+            {
+                rocsparse::coommnn_segmented_remainder_device<BLOCKSIZE, WF_SIZE, LOOPS, TRANSB>(
+                    conj_A,
+                    conj_B,
+                    colB_offset,
+                    M,
+                    N,
+                    K,
+                    nnz,
+                    batch_stride_A,
+                    alpha,
+                    row_block_red,
+                    val_block_red,
+                    coo_row_ind,
+                    coo_col_ind,
+                    coo_val,
+                    dense_B,
+                    ldb,
+                    batch_stride_B,
+                    dense_C,
+                    ldc,
+                    batch_stride_C,
+                    order_C,
+                    idx_base,
+                    batch);
+            }
         }
     }
 }
@@ -164,6 +174,7 @@ namespace rocsparse
             I       N,                                                                 \
             I       K,                                                                 \
             int64_t nnz,                                                               \
+            int64_t batch_count,                                                       \
             int64_t batch_stride_A,                                                    \
             ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),                             \
             I* __restrict__ row_block_red,                                             \
@@ -191,6 +202,7 @@ namespace rocsparse
             I       N,                                                                      \
             I       K,                                                                      \
             int64_t nnz,                                                                    \
+            int64_t batch_count,                                                            \
             int64_t batch_stride_A,                                                         \
             ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),                                  \
             I* __restrict__ row_block_red,                                                  \
