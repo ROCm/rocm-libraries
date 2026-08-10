@@ -328,7 +328,7 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
                          + (columns - 1) * size_t(std::abs(columnStride));
               };
 
-        GemmProblem problem(
+        GemmRequest problem(
             GemmOperand(
                 tensorView(A_sub,
                            storageElements(size_t(M), size_t(K), aRowStride, aColumnStride),
