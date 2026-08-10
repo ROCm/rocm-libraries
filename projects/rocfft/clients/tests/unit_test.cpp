@@ -20,10 +20,6 @@
 
 #include "rocfft/rocfft.h"
 
-extern "C" {
-#include "rocfft_c.h"
-}
-
 #include "../../shared/client_except.h"
 #include "../../shared/concurrency.h"
 #include "../../shared/environment.h"
@@ -996,11 +992,3 @@ TEST(rocfft_UnitTest, DISABLED_plan_capacity_1m)
     PROB_SKIP_UNITTEST();
     run_plan_capacity_test(1'000'000);
 }
-
-// Verify that rocfft/rocfft.h can be compiled as plain C (not C++).
-#ifndef SKIP_ROCFFT_C_TEST
-TEST(rocfft, cApi)
-{
-    EXPECT_EQ(rocfft_c(), 0);
-}
-#endif

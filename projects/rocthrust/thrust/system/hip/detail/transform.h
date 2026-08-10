@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
+ * Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -37,10 +37,9 @@
 #  pragma system_header
 #endif // no system header
 
-#if THRUST_HAS_HIP_COMPILER()
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 #  include <thrust/system/hip/config.h>
 
-#  include <thrust/detail/libcxx_wrapper/__functional/address_stability.h>
 #  include <thrust/distance.h>
 #  include <thrust/iterator/zip_iterator.h>
 #  include <thrust/system/hip/detail/dispatch.h>
@@ -265,7 +264,7 @@ OutputIt THRUST_HIP_FUNCTION transform_if(
   TransformOp transform_op,
   Predicate predicate)
 {
-  using size_type     = thrust::detail::it_difference_t<InputIt>;
+  using size_type     = typename iterator_traits<InputIt>::difference_type;
   size_type num_items = static_cast<size_type>(thrust::distance(first, last));
   return __transform::unary(policy, first, result, num_items, stencil, transform_op, predicate);
 } // func transform_if
@@ -310,7 +309,7 @@ OutputIt THRUST_HIP_FUNCTION transform_if(
   TransformOp transform_op,
   Predicate predicate)
 {
-  using size_type     = thrust::detail::it_difference_t<InputIt1>;
+  using size_type     = typename iterator_traits<InputIt1>::difference_type;
   size_type num_items = static_cast<size_type>(thrust::distance(first1, last1));
   return __transform::binary(policy, first1, first2, result, num_items, stencil, transform_op, predicate);
 } // func transform_if
@@ -333,7 +332,7 @@ OutputIt THRUST_HIP_FUNCTION transform(
     result,
     transform_op,
     __transform::always_true_predicate());
-}
+} // func transform
 } // namespace hip_rocprim
 
 THRUST_NAMESPACE_END
