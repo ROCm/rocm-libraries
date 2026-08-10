@@ -310,19 +310,14 @@ pipeline {
             }
             agent none
             steps{
-             node {
-              ws("/var/jenkins/workspace/${env.JOB_NAME}-${env.BUILD_NUMBER}") {
                 script {
                     loadCk()
                     ck.runOnHealthyNode(rocmnode("nogpu")) {
-                        sh 'echo "The updated workspace is: $WORKSPACE"'
                         deleteDir()
                         ck.runStaticChecks()
                         cleanWs()
                     }
                 }
-              }
-             }
             }
         }
         stage("Run Downstream Tests")
