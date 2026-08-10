@@ -45,9 +45,8 @@ reusable descriptor referenced by ID (a GUID). Given multiple kernels that apply
 ranks them and picks the best one. It replaces hand-coded dispatch logic with a declarative, drop-in
 artifact.
 
-The **UED (engine) owns the UHD pipeline**: an ordered list of heuristics — usually a single one —
-shared by every pack that joins the engine ([Section 4.2](#42-the-selection-pipeline-a-list-of-uhds)).
-Many KDPs may name the same engine, and thus share its selectors. The UED also owns the **KMD (Kernel Metadata
+The **UED (engine) owns the UHD**: one heuristic per engine, shared by every pack that joins it. Many
+KDPs may name the same engine, and thus share its one UHD. The UED also owns the **KMD (Kernel Metadata
 Descriptor)** — the explicit declaration of compilation knobs (tile size, block size, split-K, dtype,
 and the like, each with a type and optional default) that distinguish kernel variants. The KMD *is* the
 feature space the UHD ranks over, so the two are coupled — though only a *breaking* KMD change forces a
@@ -56,7 +55,7 @@ retrain; additive changes and dispatch-only fields do not ([Section 3.3](#33-cou
 This RFC defines:
 
 1. **UHD schema** — how a selection model is described as data ([Section 4](#4-uhd-schema))
-2. **Ownership model** — UED owns the UHD pipeline and one KMD; KDPs join the engine ([Section 3](#3-ownership-model))
+2. **Ownership model** — UED owns one UHD and one KMD; KDPs join the engine ([Section 3](#3-ownership-model))
 3. **Selection flow** — how a UHD ranks matched kernels ([Section 5](#5-selection-flow))
 4. **Engine integration** — applicability bubbles up before engines are ranked; the tooling produces
    two heuristics (a cheap engine estimate and the fine-grained config UHD); two policies (quick vs.
@@ -108,9 +107,9 @@ matcher and launch machinery ([RFC 0017 §5–6](0017_UniversalKernelDescriptor.
 
 ```
 UED (engine)
- ├── heuristics: [UHD ids] ← ordered selection pipeline (usually one entry)
- ├── metadata:  KMD id     ← one metadata schema per engine, shared by every stage
- └── knobs: [...]          ← user-facing runtime parameters
+ ├── heuristic: UHD id    ← one selector per engine
+ ├── metadata:  KMD id    ← one metadata schema per engine
+ └── knobs: [...]         ← user-facing runtime parameters
 
 KDP (pack)
  ├── engine: UED id       ← joins an engine
@@ -129,10 +128,10 @@ In JSON form:
 // The UED owns the selector + metadata schema; the KDP joins the engine and adds kernels.
 {
   "schema": "hipdnn.ued/v1",
-  "id":         "efc9eae4-…",        // engine identity
-  "heuristics": ["ae896b07-…"],      // ordered UHD pipeline; one entry is the common case (Section 4.2)
-  "metadata":   "9ae0b215-…",        // KMD: the variant-field schema this engine's kernels fill
-  "knobs":      ["split_k", "tile_m"] // names of KMD fields this engine exposes to the user (Section 3.2)
+  "id":        "efc9eae4-…",        // engine identity
+  "heuristic": "ae896b07-…",        // UHD: the selector for this engine's kernels   <-- membership
+  "metadata":  "9ae0b215-…",        // KMD: the variant-field schema this engine's kernels fill
+  "knobs":     ["split_k", "tile_m"] // names of KMD fields this engine exposes to the user (Section 3.2)
 }
 
 {
@@ -186,7 +185,7 @@ KMD field, as `metadata`) versus the user (the exposed subset) — not two diffe
 ### 3.3 Coupling Rules
 
 **The KMD is the schema for `$kernel.*`, and the UED owns both it and the UHD.** The UED references one
-KMD and its UHD pipeline, and every child UKD's `metadata` fills the KMD's fields, validated at load. Putting both
+KMD and one UHD, and every child UKD's `metadata` fills the KMD's fields, validated at load. Putting both
 on the UED is deliberate — the KMD *is* the feature space the UHD ranks over, so they are coupled. But
 the coupling is **conditional, not unconditional** (matching [RFC 0017](0017_UniversalKernelDescriptor.md)):
 
@@ -206,7 +205,7 @@ This gives the UHD a firm, checkable contract:
 - **A UKD is one point in the KMD-declared field space** — its `metadata`, and its unique key in the catalog.
 - **The collection of those points is the KDP** (a pack joining one engine, adding a matcher set, a UDD,
   and the kernel vector); the **UHD and KMD belong to the UED (engine)**, shared by every pack that joins
-  it. `arch` is a KDP property, so one engine — and its UHD pipeline and KMD — spans arches.
+  it. `arch` is a KDP property, so one engine — and its one UHD/KMD — spans arches.
 - **The UHD's `features_signature` `$kernel.*` references must be a subset of the KMD fields** — a
   load-time check ([Section 6.3](#63-contract-enforcement)). The KMD is the authority on *what fields
   exist*; the `features_signature` picks *which subset* it ranks on (the rest may serve the UDD), and how
@@ -223,9 +222,8 @@ the arches its engine serves. **OPEN:** See [Open Question 2](#schema-and-traini
 
 ## 4. UHD Schema
 
-A UHD is a small, reusable scoring recipe. It names a `role` (its position in the selection pipeline),
-an `adapter` (ranking mechanism), a `features_signature` (model inputs), an objective, and — for model
-adapters — a model artifact.
+A UHD is a small, reusable scoring recipe. It names an `adapter` (ranking mechanism), a
+`features_signature` (model inputs), an objective, and — for model adapters — a model artifact.
 
 Because a UED spans arches (`arch` is a KDP property in [RFC 0017](0017_UniversalKernelDescriptor.md)),
 a UHD is **per-engine and arch-aware**: one model taking `$device.*` features so it generalizes across
@@ -235,9 +233,8 @@ the arches its engine serves — not one model per arch.
 // tree_data — the default; a GBDT tree table, shipped as data with the engine's descriptor set
 {
   "schema":  "hipdnn.uhd/v1",
-  "id":      "ae896b07-80cd-473c-b3f4-6a8892998519",   // GUID; referenced by the UED's heuristics[]
+  "id":      "ae896b07-80cd-473c-b3f4-6a8892998519",   // GUID; referenced by the UED (one per engine)
   "name":    "rocKE FMHA fwd selector",                // per-engine, arch-aware — not per-arch
-  "role":    "rank",                                   // terminal stage (Section 4.2); default if omitted
   "adapter": "tree_data",                              // the ranking mechanism (Section 7)
 
   // ordered model inputs; order + form must match training (Section 6)
@@ -302,52 +299,36 @@ pure ranker forecloses that and leaves only the rank-ordering fallback. We likel
 preserve the absolute option, keeping ranking as the fallback rather than the only mode. Decide per-UHD
 via `objective` / `score`, or standardize. See [Open Question 1](#schema-and-training).
 
-### 4.2 The selection pipeline: a list of UHDs
+### 4.2 Future: a list of UHDs, when there is no catalog to rank
 
-A UED names an **ordered list** of UHDs, not a single one. Each stage declares a `role`:
+Everything above assumes a **finite, enumerable catalog** — the engine's AOT-compiled kernels that pass
+the matchers. One UHD scores those candidates and picks a winner. That holds for every AOT case and is
+what this RFC specifies.
 
-| `role` | Input | Output | Purpose |
-|---|---|---|---|
-| **`narrow`** | the current candidate set | a **subset** of it (top-K, or above a threshold) | cheaply shrink a large catalog before expensive scoring |
-| **`rank`** | the current candidate set | an **ordering** + predicted score | the terminal stage; produces the winner and the figure of merit |
+**JIT breaks the assumption.** When kernels are generated rather than pre-compiled, the candidate space
+is the *combinatorial product of the knobs* — tile sizes × warp layout × pipeline × padding × … — which
+can be far too large to enumerate, let alone score one candidate at a time. In that regime there may be
+**no catalog to rank at all**, so a single "score every candidate and argmax" heuristic has nothing to
+iterate over.
 
-Rules:
+The natural extension is for a UED to carry an **ordered list of UHDs** rather than one: a first
+heuristic reduces the intractable knob space to a small, plausible candidate set — generating or
+bounding it rather than filtering an existing list — and a second does the usual predicted-TFLOPS
+ranking over that set. The two stages reuse everything in this RFC (adapters, `features_signature`,
+`derived`, the contract checks); only the *number* of heuristics and the first stage's output contract
+differ.
 
-- **The pipeline must end in exactly one `rank` stage.** `narrow` stages may precede it, zero or more.
-- **The common case is a one-element list** — `heuristics: [<rank>]` — which behaves exactly as a single
-  UHD does today. AOT and JIT engines alike will normally have just this; the pipeline exists for the
-  cases that need it. `role` defaults to `rank` when omitted, so a single-UHD engine writes nothing new.
-- **Every stage shares the engine's one KMD** and therefore one feature space. This preserves
-  [RFC 0017](0017_UniversalKernelDescriptor.md)'s stated rationale for a single selector ("a single
-  selector ranks all of the engine's kernels over one feature space") — only the *cardinality* changes,
-  not the one-feature-space property. Each stage still has its **own** `features_signature`, so a
-  `narrow` stage can use a much smaller, cheaper feature set than the `rank` stage.
-- **`narrow` is an optimization, so it fails open.** If a `narrow` stage's model is missing, fails its
-  contract check, or errors, the provider **skips that stage** and passes the full candidate set
-  through. Skipping narrowing is always semantically safe — only slower. (A failing `rank` stage falls
-  back to `static_order` as in [Section 5](#5-selection-flow).)
+This is **not designed here.** It is recorded so the single-UHD schema is not mistaken for a permanent
+constraint, and so the JIT work has a named place to land. Two things it would need, neither settled:
 
-**Why narrow at all.** Scoring is per-candidate ([Section 9.3](#93-efficient-evaluation-expressive-spec-fast-hot-path)),
-so a catalog of N kernels costs N model evaluations. With a cheap first stage costing `c` per candidate
-and an expensive ranker costing `e`, a pipeline pays `c·N + e·K` instead of `e·N`, which wins whenever
-`K ≪ N` and `c ≪ e`. This is the standard cheap-recall → expensive-rerank split. For a small catalog it
-is pure overhead — hence the one-element default.
-
-**Not in scope: generating candidates.** A stage that *synthesizes* configurations that do not yet exist
-(the natural JIT case — emitting new KMD tuples rather than subsetting an existing catalog) has a
-different output contract: it feeds the build path, not just selection. That is catalog *synthesis*, and
-it belongs with the JIT / package-creation work
-([Section 14](#14-package-creation-time-selection-knobs-and-aot-kernels)), not a selection-time UHD role.
-See [Open Question 8](#structural).
-
-> **Cross-RFC dependency — unresolved.** [RFC 0017](0017_UniversalKernelDescriptor.md) specifies a UED
-> field `heuristic` holding **one** UHD id, and [RFC 0020](0020_UniversalEngineDescriptor.md)
-> ([PR #10603](https://github.com/ROCm/rocm-libraries/pull/10603)) now makes that **normative**: a
-> required, UUID-patterned `heuristic` string in the `hipdnn.ued/1.0` JSON Schema. The pipeline needs an
-> ordered list, so this cannot be adopted unilaterally and must be settled with the UED RFC's author.
-> The least disruptive shape is probably to leave the required `heuristic` as the terminal `rank` stage
-> and add an optional `pre_heuristics: []` for `narrow` stages — strictly additive to the existing
-> schema. See [Open Question 9](#structural).
+- **A UED that can name more than one heuristic.** [RFC 0017](0017_UniversalKernelDescriptor.md) and
+  [RFC 0020](0020_UniversalEngineDescriptor.md) both specify a single `heuristic` id, so a list is a
+  schema change for whoever picks this up — additive if the existing field stays the terminal ranking
+  stage.
+- **An output contract for the first stage.** Emitting candidate configurations that do not yet exist is
+  not ranking; it produces new KMD tuples and feeds the build path, which is closer to catalog
+  *synthesis* ([Section 14](#14-package-creation-time-selection-knobs-and-aot-kernels)) than to
+  selection. Whether that belongs in a UHD at all is the open question.
 
 ---
 
@@ -356,35 +337,29 @@ See [Open Question 8](#structural).
 The generic engine first builds the **catalog**: the set of the engine's kernels that pass every matcher
 for this graph ([RFC 0017 §5](0017_UniversalKernelDescriptor.md#5-matching-and-the-umd)), each carrying
 its build `metadata`. The catalog is *engine*-scoped — the union across every KDP that joins the engine —
-and the engine owns the UHD pipeline that ranks it, so the candidates and their selectors arrive together.
+and the engine owns the UHD that ranks it, so the candidates and their selector arrive together.
 
 All kernels joining one engine should be mutually substitutable for the graphs they co-match (same op
-family), because the models are trained to rank exactly that catalog. Kernel selection then runs the
-engine's **UHD pipeline** ([Section 4.2](#42-the-selection-pipeline-a-list-of-uhds)):
+family), because the model is trained to rank exactly that catalog. Kernel selection then:
 
-1. **Start from the catalog.** The applicable kernels for this graph are the initial candidate set.
+1. **Start from the catalog.** The applicable kernels for this graph are the candidate set.
 2. **Extract the shared features once.** Problem and device features are identical for every candidate,
    so they are computed once per graph ([Section 6](#6-feature-extraction)); only each candidate's
    `$kernel.*` metadata varies.
-3. **Run each `narrow` stage in order (zero or more).** Score the current candidates with that stage's
-   model and keep its top-K / above-threshold subset. A `narrow` stage that is missing or fails its
-   contract check is **skipped**, passing the full set through — narrowing is an optimization, never a
-   correctness requirement.
-4. **Run the terminal `rank` stage.** Score each surviving candidate — one inference call per candidate
-   over its feature row — producing the ordering and the predicted figure of merit.
-5. **Choose by objective.** `max` (or `min`) over the scores; the winner is the selected kernel.
-6. **Tie-break deterministically.** On equal scores (or when the stage declines), fall through to
-   explicit UKD `priority`, then stable `id` — the same deterministic arbitration
+3. **Score each candidate.** Invoke the UHD's scorer per candidate — for a model adapter, one inference
+   call per candidate over its feature row.
+4. **Choose by objective.** `max` (or `min`) over the scores; the winner is the selected kernel.
+5. **Tie-break deterministically.** On equal scores (or when the UHD declines), fall through to explicit
+   UKD `priority`, then stable `id` — the same deterministic arbitration
    [RFC 0017 §5](0017_UniversalKernelDescriptor.md#5-matching-and-the-umd) defines. Declaration order
    is never used.
-7. **Fail open to a safe default.** If the `rank` stage's model does not load, its feature contract
-   mismatches, or its scorer errors, selection degrades to `static_order` (priority + id). This keeps a
-   bad or absent model from breaking execution.
+6. **Fail open to a safe default.** If the model does not load, the feature contract mismatches, or the
+   scorer errors, selection degrades to `static_order` (priority + id). This keeps a bad or absent model
+   from breaking execution.
 
-With the common one-element pipeline (`[rank]`), steps 3 collapses away and this is exactly single-UHD
-selection. The winner is a single UKD, which then dispatches through its pack's UDD
-([RFC 0017 §6](0017_UniversalKernelDescriptor.md#6-dispatch-and-workspace)). A UHD only ranks or
-narrows; it never launches, mutates the graph, or touches device memory.
+The winner is a single UKD, which then dispatches through its pack's UDD
+([RFC 0017 §6](0017_UniversalKernelDescriptor.md#6-dispatch-and-workspace)). A UHD only ranks; it never
+launches, mutates the graph, or touches device memory.
 
 ---
 
@@ -721,7 +696,7 @@ provider builds. A model can still be compiled (Treelite `.so`), as long as it s
 artifact *alongside* the engine's descriptor set, not statically linked into `libhipdnn_provider.so`.
 `custom_library` mirrors [RFC 0017](0017_UniversalKernelDescriptor.md)'s native-predicate / custom-plan
 escape hatches — same "author ships a `.so`, provider `dlopen`s it" pattern.
-**OPEN:** See [Open Question 12](#operational) (dependency + trust audit).
+**OPEN:** See [Open Question 11](#operational) (dependency + trust audit).
 
 ### 7.3 Initial Support
 
@@ -817,7 +792,7 @@ Selection runs on the plan-build path, so its cost must be small and paid at mos
   [RFC 0020 §3](0020_UniversalEngineDescriptor.md) keeps those two id spaces distinct. The engine id because the
   catalog is per-engine, the device id because it is what `$device.*` resolved against, and the
   generation counter so a newly dropped-in pack invalidates. **OPEN:** in-process only vs. a persistent
-  cross-run cache — see [Open Question 10](#operational).
+  cross-run cache — see [Open Question 9](#operational).
 
 ### 9.3 Efficient evaluation (expressive spec, fast hot path)
 
@@ -1036,7 +1011,7 @@ provider-specific service.
    times its kernels across a corpus of problem shapes, trains a model, and emits an updated UED/UHD —
    same descriptor kind, now `adapter: tree_data` pointing at an exported model. Dropping that updated
    engine descriptor set back in upgrades the pack from trivial ordering to a trained heuristic in place.
-   **OPEN:** See [Open Question 11](#operational) (shape corpus location).
+   **OPEN:** See [Open Question 10](#operational) (shape corpus location).
 
 Because the shipped and generated heuristics are the same descriptor kind differing only in `adapter`
 and fields, the tool only rewrites data; it never introduces a new interface. The tool runs over
@@ -1346,7 +1321,6 @@ land only when a concrete need appears.
 | **KMD↔UHD coupling** | a *breaking* KMD change (removed/reinterpreted field) invalidates the trained model; a training-coverage gap degrades ranking silently | KMD-version check at load, fail closed on incompatible pairing or dangling `features_signature` ref; additive changes need no retrain until exposed ([§3.3](#33-coupling-rules)); training-coverage warning in the trace |
 | **Dependency creep** | Pressure to link `liblightgbm` at runtime | In-tree `tree_data` default; runtime deps stay opt-in only |
 | **Bad/stale model** | Model picks worse than first-match | Fail-open to `static_order`; generic-vs-baseline parity gate; model provenance in trace |
-| **`narrow` stage drops the best kernel** | A pruning stage that discards the true winner is **unrecoverable** — the `rank` stage cannot rank what it never saw, and the loss is silent (a plausible kernel still runs). Qualitatively worse than a bad ranker, which at least sees every candidate. | Measure **recall@K of the narrow stage against the full-catalog winner** during generation and gate on it; keep K conservative; a `narrow` stage is always skippable, so ship it only when recall is proven ([Section 4.2](#42-the-selection-pipeline-a-list-of-uhds)); surface the pre- and post-narrow candidate counts in the trace ([Section 12](#12-observability)) |
 | **Miscalibrated cross-engine scores** | Absolute score misleads engine selection | Train calibratable TFLOPS from start; fall back to rank-ordering at policy level if calibration unreliable |
 | **Cache key incompleteness** | Result cache returns wrong kernel | Fingerprint must include problem + candidate set + device |
 | **Drop-in trust** | Model artifact is author-controlled input | Bounded loader/evaluator; inherit [RFC 0017 §10](0017_UniversalKernelDescriptor.md#10-packaging-and-delivery) trust rules |
@@ -1413,43 +1387,30 @@ land only when a concrete need appears.
    static ordering for it — acceptable for v1, but limits performance-based engine ranking.
    *(Impacts [Section 11.2](#112-two-engine-selection-policies-rfc-0007).)*
 
-8. **A `generate` role?** The pipeline ships `narrow` and `rank`
-    ([Section 4.2](#42-the-selection-pipeline-a-list-of-uhds)). A stage that *synthesizes* candidates
-    that do not yet exist — the JIT case, emitting new KMD tuples rather than subsetting a catalog —
-    has a different output contract and feeds the build path, not just selection. Does it become a
-    third UHD role, or does it belong entirely to the JIT / package-creation work
-    ([Section 14](#14-package-creation-time-selection-knobs-and-aot-kernels))? Recommendation: keep it
-    out of the UHD until the JIT path is real; a selection-time descriptor that can mutate the catalog
-    blurs the line between choosing and building.
-
-9. **Cross-RFC: `heuristics[]` on the UED — now a concrete conflict.**
-    [RFC 0020](0020_UniversalEngineDescriptor.md) ([PR #10603](https://github.com/ROCm/rocm-libraries/pull/10603),
-    AICK-1703) specifies `heuristic` as a **required single UUID string** in a *normative* JSON Schema
-    (`hipdnn.ued/1.0`), not just prose — it is in `required[]` and typed with a UUID pattern. The
-    pipeline of [Section 4.2](#42-the-selection-pipeline-a-list-of-uhds) needs an ordered list, so this
-    must be resolved with the UED RFC's author before either lands. A one-element list is behaviourally
-    identical to a single id, so the options are: (a) `heuristics: [uuid, …]` replacing `heuristic`;
-    (b) keep `heuristic` as the required terminal `rank` stage and add an optional `pre_heuristics: []`
-    for `narrow` stages, which is strictly additive to `hipdnn.ued/1.0`; or (c) drop the pipeline.
-    **(b) is the least disruptive** — it leaves the existing required field and its schema untouched.
-    *(Impacts [Section 3.1](#31-descriptor-relationships), [Section 4.2](#42-the-selection-pipeline-a-list-of-uhds).)*
+8. **JIT and a multi-UHD engine.** When the candidate space is combinatorial rather than an enumerable
+   catalog ([Section 4.2](#42-future-a-list-of-uhds-when-there-is-no-catalog-to-rank)), selection needs a
+   stage that *produces* a tractable candidate set before anything can be ranked. Does that stage belong
+   in a UHD — making a UED name an ordered list of them — or is it catalog synthesis that belongs with
+   the JIT / package-creation work ([Section 14](#14-package-creation-time-selection-knobs-and-aot-kernels))?
+   Its output contract (new KMD tuples, feeding the build path) differs from ranking, which argues for
+   the latter. Deferred until the JIT path is real.
 
 ### Operational
 
-10. **Caching scope.** The in-process cache keyed on `(engine id, graph id, device id)` + inventory
+9. **Caching scope.** The in-process cache keyed on `(engine id, graph id, device id)` + inventory
    generation counter is sufficient for repeated graphs within a session. Persistent cross-run caching
    interacts with a future [RFC 0007](0007_EngineSelectionHeuristicsFramework.md) "cache selector"
    policy — defer until that policy is designed.
    *(Impacts [Section 9.2](#92-loading-and-caching).)*
 
-11. **Shape corpus location.** The variant space is fixed (the pack's UKDs, timed via autotune), but
+10. **Shape corpus location.** The variant space is fixed (the pack's UKDs, timed via autotune), but
    the **shape corpus** and any **runtime-knob grid** need a home. A validity *constraint*
    (`min:1, max:8`) expresses which values are *legal*, not which to *sample*, so a swept axis needs
    an explicit `sweep_values` / grid hint, not an inferred range. Standardize: tool-side config (less
    coupled, easier to iterate) or descriptor field (reproducible from pack alone)?
    *(Impacts [Section 13.5](#135-sweep-space-grid-vs-constraint).)*
 
-12. **Dependency + trust audit.** Needs deeper investigation: the exact allowed dependency surface
+11. **Dependency + trust audit.** Needs deeper investigation: the exact allowed dependency surface
     for a shipped provider (license, distro packaging, ROCm image contents), and for `custom_library`
     the trust/signing rules for dropping in author-compiled native code. The former decides whether
     the in-tree tree-walker must be fully first-party or may vendor a third-party evaluator; the
@@ -1460,17 +1421,10 @@ land only when a concrete need appears.
 
 ## 18. Glossary
 
-- **UHD (Universal Heuristic Descriptor):** One kernel-selection model, owned by the UED, that operates
-  on the engine's catalog for a graph. Per-engine and arch-aware (takes `$device.*`).
+- **UHD (Universal Heuristic Descriptor):** One kernel-selection model, owned by the UED (one per
+  engine), that ranks the engine's catalog for a graph and picks a winner. Per-engine and arch-aware
+  (takes `$device.*`).
 
-- **UHD pipeline:** The UED's ordered `heuristics` list — zero or more `narrow` stages followed by
-  exactly one terminal `rank` stage. The common case is a single `rank` entry, identical to single-UHD
-  selection ([Section 4.2](#42-the-selection-pipeline-a-list-of-uhds)).
-
-- **`role` (`narrow` / `rank`):** A UHD's position in the pipeline. **`narrow`** cheaply shrinks the
-  candidate set (top-K or threshold) and is always skippable — it fails open to passing the full set
-  through. **`rank`** is terminal: it produces the final ordering and the predicted figure of merit, and
-  falls back to `static_order` on failure. `role` defaults to `rank` when omitted.
 
 - **Catalog:** The set of an engine's kernels that pass every matcher for one graph — engine-scoped, the
   union across every KDP joining that engine ([RFC 0017](0017_UniversalKernelDescriptor.md)). The
@@ -1487,8 +1441,7 @@ land only when a concrete need appears.
   the UHD ranks on and the `features_signature` references
   ([Section 3.2](#32-kmd-fields-and-knobs-as-a-view-onto-them)).
 
-- **UED (Universal Engine Descriptor):** The UED names an ordered `heuristics` list (the UHD pipeline,
-  usually one entry) and one KMD. They are coupled — the KMD
+- **UED (Universal Engine Descriptor):** The UED names one UHD and one KMD. They are coupled — the KMD
   is the feature space the UHD ranks over — so the engine owns both; a *breaking* KMD change requires
   retraining the UHD, while additive changes and dispatch-only fields do not
   ([Section 3.3](#33-coupling-rules)).
