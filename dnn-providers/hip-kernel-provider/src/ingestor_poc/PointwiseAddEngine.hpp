@@ -12,7 +12,6 @@
 #include "core/Context.hpp"
 #include "core/Handle.hpp"
 #include "core/Settings.hpp"
-#include "device/IDevicePropertyProvider.hpp"
 
 namespace hip_kernel_provider::ingestor_poc
 {
@@ -27,8 +26,7 @@ namespace hip_kernel_provider::ingestor_poc
  * This function is what a UED loader replaces: given descriptor files, the same generic
  * engine is constructed from parsed data instead of from a hardcoded pack.
  */
-std::unique_ptr<hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>>
-    makePointwiseAddEngine(const device::IDevicePropertyProvider& devicePropertyProvider);
+std::unique_ptr<hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>> makePointwiseAddEngine();
 
 } // namespace hip_kernel_provider::ingestor_poc
 

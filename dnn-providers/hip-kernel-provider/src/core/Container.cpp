@@ -75,9 +75,11 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
         // because engines are still a compile-time table; runtime loading of engine
         // descriptors replaces this entry with one built per installed UED file.
         {ingestor_poc::pointwiseAddEngineId(),
-         [](const device::IDevicePropertyProvider& devicePropertyProvider)
+         [](const device::IDevicePropertyProvider& /*devicePropertyProvider*/)
              -> std::unique_ptr<hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>> {
-             return ingestor_poc::makePointwiseAddEngine(devicePropertyProvider);
+             // Device facts are resolved per call from the handle rather than captured
+             // here, so this engine needs nothing from the construction-time provider.
+             return ingestor_poc::makePointwiseAddEngine();
          }},
 #endif
     };

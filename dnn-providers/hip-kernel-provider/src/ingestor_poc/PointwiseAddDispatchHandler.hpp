@@ -36,11 +36,12 @@ class PointwiseAddDispatchHandler
 {
 public:
     /// @param kernelCompiler Owned by the engine, which outlives this handler.
-    /// @param deviceProperties Copied: the provider hands these out by value.
-    PointwiseAddDispatchHandler(const compilation::IKernelCompiler& kernelCompiler,
-                                hipDeviceProp_t deviceProperties)
+    ///
+    /// Device properties are not held: they arrive per call on the MatchContext, so a
+    /// kernel is always compiled for the device the call is actually for rather than
+    /// for whichever device was current when this handler was built.
+    explicit PointwiseAddDispatchHandler(const compilation::IKernelCompiler& kernelCompiler)
         : _kernelCompiler(kernelCompiler)
-        , _deviceProperties(deviceProperties)
     {
     }
 
@@ -67,7 +68,6 @@ public:
 
 private:
     const compilation::IKernelCompiler& _kernelCompiler;
-    hipDeviceProp_t _deviceProperties;
 };
 
 /// @brief Registers @p handler under this pack's dispatch symbol.

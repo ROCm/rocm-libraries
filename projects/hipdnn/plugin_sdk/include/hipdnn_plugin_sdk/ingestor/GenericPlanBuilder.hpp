@@ -15,6 +15,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GenericPlan.hpp>
+#include <hipdnn_plugin_sdk/ingestor/IDeviceResolver.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IPlanBuilder.hpp>
 
@@ -45,22 +46,21 @@ public:
 
     /// @param stateManager The engine's descriptor state. Shared rather than owned so the
     ///        engine and its builder read one catalog cache.
-    /// @param deviceProperties Supplies `$device.*`. Held by value: providers hand these
-    ///        out by value, so a reference would bind to a temporary.
+    /// @param deviceResolver Answers which device each call is for. Held by reference;
+    ///        owned by the engine, which outlives its builder.
     GenericPlanBuilder(std::shared_ptr<KernelIngestorStateManager<THandle>> stateManager,
-                       hipDeviceProp_t deviceProperties,
-                       DeviceId deviceId)
+                       const IDeviceResolver<THandle>& deviceResolver)
         : _stateManager(std::move(stateManager))
-        , _deviceProperties(deviceProperties)
-        , _deviceId(deviceId)
+        , _deviceResolver(deviceResolver)
     {
     }
 
     /// Applicable exactly when some kernel survived matching. Deliberately does not rank:
     /// a membership test needs no order, so the heuristic is never run here.
-    bool isApplicable(const THandle& /*handle*/, const IGraph& opGraph) const override
+    bool isApplicable(const THandle& handle, const IGraph& opGraph) const override
     {
-        return !_stateManager->unsortedDefinitions(_deviceId, contextFor(opGraph)).empty();
+        const auto deviceId = _deviceResolver.deviceId(handle);
+        return !_stateManager->unsortedDefinitions(deviceId, contextFor(deviceId, opGraph)).empty();
     }
 
     /**
@@ -70,13 +70,14 @@ public:
      * launch one at a time on one stream, so a candidate's scratch is live only while it
      * runs. A kernel needing less over-allocates, which is accepted.
      */
-    size_t getMaxWorkspaceSize(const THandle& /*handle*/,
+    size_t getMaxWorkspaceSize(const THandle& handle,
                                const IGraph& opGraph,
                                const TSettings& /*executionSettings*/) const override
     {
-        const auto context = contextFor(opGraph);
+        const auto deviceId = _deviceResolver.deviceId(handle);
+        const auto context = contextFor(deviceId, opGraph);
         size_t maxBytes = 0;
-        for(const auto& kernel : _stateManager->sortedDefinitions(_deviceId, context))
+        for(const auto& kernel : _stateManager->sortedDefinitions(deviceId, context))
         {
             const auto dispatcher = _stateManager->getDispatchDetails(kernel);
             maxBytes = std::max(maxBytes, dispatcher.handler->workspaceBytes(kernel));
@@ -102,13 +103,14 @@ public:
      *         RFC 0017 §8.6 makes that a bug, not a legal outcome, so it surfaces as a
      *         failed plan build rather than a silent decline.
      */
-    void buildPlan(const THandle& /*handle*/,
+    void buildPlan(const THandle& handle,
                    const IGraph& opGraph,
                    const IEngineConfig& /*engineConfig*/,
                    TContext& executionContext) const override
     {
-        const auto context = contextFor(opGraph);
-        const auto ranked = _stateManager->sortedDefinitions(_deviceId, context);
+        const auto deviceId = _deviceResolver.deviceId(handle);
+        const auto context = contextFor(deviceId, opGraph);
+        const auto ranked = _stateManager->sortedDefinitions(deviceId, context);
         if(ranked.empty())
         {
             throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
@@ -129,11 +131,13 @@ public:
      * first, so leaving every knob alone reproduces the out-of-the-box selection.
      */
     std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT>
-        getCustomKnobs(const THandle& /*handle*/, const IGraph& opGraph) const override
+        getCustomKnobs(const THandle& handle, const IGraph& opGraph) const override
     {
         using namespace hipdnn_flatbuffers_sdk::data_objects;
 
-        const auto ranked = _stateManager->sortedDefinitions(_deviceId, contextFor(opGraph));
+        const auto deviceId = _deviceResolver.deviceId(handle);
+        const auto ranked
+            = _stateManager->sortedDefinitions(deviceId, contextFor(deviceId, opGraph));
         std::vector<KnobT> knobs;
         if(ranked.empty())
         {
@@ -188,14 +192,13 @@ public:
     }
 
 private:
-    MatchContext contextFor(const IGraph& opGraph) const
+    MatchContext contextFor(DeviceId deviceId, const IGraph& opGraph) const
     {
-        return MatchContext{opGraph, _deviceId, _deviceProperties};
+        return MatchContext{opGraph, deviceId, _deviceResolver.deviceProperties(deviceId)};
     }
 
     std::shared_ptr<KernelIngestorStateManager<THandle>> _stateManager;
-    hipDeviceProp_t _deviceProperties;
-    DeviceId _deviceId;
+    const IDeviceResolver<THandle>& _deviceResolver;
 };
 
 } // namespace hipdnn_plugin_sdk::ingestor

@@ -17,6 +17,9 @@
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+
+#include "core/Container.hpp"
 #include "core/Handle.hpp"
 #include "engines/hip_mlops_engine/HipMlopsKernelCompiler.hpp"
 #include "ingestor_poc/NativeSymbolNames.hpp"
@@ -140,7 +143,7 @@ private:
 TEST(TestPointwiseAddDispatch, ReportsWorkspaceFromKernelMetadata)
 {
     const HipMlopsKernelCompiler compiler;
-    const PointwiseAddDispatchHandler handler(compiler, hipDeviceProp_t{});
+    const PointwiseAddDispatchHandler handler(compiler);
 
     // The two surviving kernels report different requirements, so the engine's
     // "maximum across survivors" has something to actually maximize over.
@@ -151,7 +154,7 @@ TEST(TestPointwiseAddDispatch, ReportsWorkspaceFromKernelMetadata)
 TEST(TestPointwiseAddDispatch, WorkspaceDoesNotDependOnTheGraph)
 {
     const HipMlopsKernelCompiler compiler;
-    const PointwiseAddDispatchHandler handler(compiler, hipDeviceProp_t{});
+    const PointwiseAddDispatchHandler handler(compiler);
 
     // Workspace is asked before a kernel is chosen and before any plan exists, so it
     // must be answerable from the kernel alone.
@@ -169,7 +172,7 @@ TEST(TestPointwiseAddDispatch, LaunchesARealAddOnDevice)
 
     const GraphFixture fixture(buildPointwiseGraph());
     const HipMlopsKernelCompiler compiler;
-    const PointwiseAddDispatchHandler handler(compiler, fixture.deviceProperties());
+    const PointwiseAddDispatchHandler handler(compiler);
 
     const auto prepared = handler.prepare(fixture.context(), makeKernel(64, "FLOAT"));
     ASSERT_NE(prepared, nullptr);
@@ -190,7 +193,7 @@ TEST(TestPointwiseAddDispatch, LaunchesTheSameResultForEitherBlockSize)
 
     const GraphFixture fixture(buildPointwiseGraph());
     const HipMlopsKernelCompiler compiler;
-    const PointwiseAddDispatchHandler handler(compiler, fixture.deviceProperties());
+    const PointwiseAddDispatchHandler handler(compiler);
 
     // block_size reaches the compiler and the launch geometry, so both kernels are
     // genuinely different builds; a one-element add must still agree.
@@ -214,7 +217,7 @@ TEST(TestPointwiseAddDispatch, PreparedLaunchIsReusableAcrossExecutions)
 
     const GraphFixture fixture(buildPointwiseGraph());
     const HipMlopsKernelCompiler compiler;
-    const PointwiseAddDispatchHandler handler(compiler, fixture.deviceProperties());
+    const PointwiseAddDispatchHandler handler(compiler);
 
     // A plan is built once and may execute many times with different buffers, so
     // preparation must hold nothing tied to one execution.
@@ -240,12 +243,52 @@ TEST(TestPointwiseAddDispatch, RefusesToPrepareAGraphTheMatcherRejects)
 
     const GraphFixture fixture(buildTwoNodePointwiseGraph());
     const HipMlopsKernelCompiler compiler;
-    const PointwiseAddDispatchHandler handler(compiler, fixture.deviceProperties());
+    const PointwiseAddDispatchHandler handler(compiler);
 
     // Preparation reads the operand binding the matcher established, so a graph that
     // never matched cannot be prepared.
     EXPECT_THROW(handler.prepare(fixture.context(), makeKernel(64, "FLOAT")),
                  hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+TEST(TestPointwiseAddDispatch, DispatchStaysResolvableAcrossContainerLifetimes)
+{
+    SKIP_IF_NO_DEVICES();
+
+    // A container is destroyed when its last handle closes, and a process that opens
+    // handles again builds a new one. This pack's implementations are registered once in
+    // a process-wide registry, so anything registered there must outlive every container
+    // -- a handler owned by a container's engine would be freed while the registration
+    // still pointed at it.
+    //
+    // This asserts the invariant holds: after a container is destroyed and rebuilt, the
+    // registered dispatch still resolves and still runs. It does NOT by itself prove the
+    // absence of a use-after-free, because a freed handler carrying no per-instance state
+    // usually keeps answering. What catches that is the integration binary's exit status:
+    // owning the handler on the engine makes hip_kernel_provider_integration_tests abort
+    // at process teardown while every test still reports as passing.
+    {
+        const core::Container first;
+    }
+
+    const core::Container second;
+
+    const auto* handler = hipdnn_plugin_sdk::ingestor::DispatchRegistry<Handle>::resolve(
+        std::string(DISPATCH_SYMBOL));
+    ASSERT_NE(handler, nullptr);
+
+    const GraphFixture fixture(buildPointwiseGraph());
+    const auto prepared = handler->prepare(fixture.context(), makeKernel(64, "FLOAT"));
+    ASSERT_NE(prepared, nullptr);
+
+    const AddBuffers buffers(2.0f, 5.0f);
+    const auto descriptors = buffers.descriptors();
+    const Handle handle;
+
+    handler->launch(handle, *prepared, descriptors.data(), descriptors.size(), nullptr);
+    ASSERT_EQ(hipSuccess, hipDeviceSynchronize());
+
+    EXPECT_FLOAT_EQ(buffers.readResult(), 7.0f);
 }
 
 } // namespace
