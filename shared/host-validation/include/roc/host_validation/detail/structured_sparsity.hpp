@@ -10,7 +10,7 @@
 #include <cstring>
 #include <limits>
 #include <optional>
-#include <roc/host_validation/detail/data_generation.hpp>
+#include <roc/host_validation/generation_primitives.hpp>
 #include <span>
 #include <stdexcept>
 #include <utility>
