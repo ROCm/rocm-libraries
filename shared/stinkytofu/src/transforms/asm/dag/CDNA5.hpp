@@ -84,13 +84,13 @@ struct CDNA5Config {
     // explicit non-sentinel user config wins over these.
     int dsReadPerWmma;
     int globalReadPerWmma;
-    int tensorLoadLoopSpaceRatio;
+    int tensorLoadWmmaSpace;
 };
 
 constexpr CDNA5Config kGfx1250Config = {
     /*dsReadPerWmma=*/3,
     /*globalReadPerWmma=*/1,
-    /*tensorLoadLoopSpaceRatio=*/0,
+    /*tensorLoadWmmaSpace=*/0,
 };
 
 // gfx1250v0: starts from the gfx1250 values. TODO(tuning): fill in gfx1250v0's real
@@ -398,10 +398,9 @@ class CDNA5ReadyQueue : public ReadyQueue {
         const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.dsReadPerWmma;
         return cfg > 0 ? (cfg < INT_MAX ? cfg : config_.dsReadPerWmma) : config_.dsReadPerWmma;
     }
-    float tensorLoadLoopSpaceRatio() const {
-        const float cfg =
-            getPassContext().getPassFeatureConfig().dagFeatures.tensorLoadLoopSpaceRatio;
-        return cfg > 0.0f ? cfg : config_.tensorLoadLoopSpaceRatio;
+    int tensorLoadWmmaSpace() const {
+        const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.tensorLoadWmmaSpace;
+        return cfg > 0 ? cfg : config_.tensorLoadWmmaSpace;
     }
     bool dsReadQueueFull() const {
         return dsReadInflight_.full();
@@ -1924,32 +1923,29 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         // so they do not drift to different windows.
         for (const auto& [afterBarrier, afterOutput] : afterThresholds) {
             if (beforeThresholds.find(afterBarrier) != beforeThresholds.end()) continue;
-            const int afterWindow = std::max(0, afterOutput.overlapWmmaWindow);
             const int afterEnd = afterOutput.afterThreshold;
-            const int afterBegin = std::max(0, afterEnd - afterWindow);
             for (const auto& [beforeBarrier, beforeOutput] : beforeThresholds) {
                 if (afterBarrier == beforeBarrier) continue;
                 if (afterThresholds.find(beforeBarrier) != afterThresholds.end()) continue;
                 const int beforeBegin = beforeOutput.beforeThreshold;
-                const int beforeWindow = std::max(0, beforeOutput.wmmaWindowsNeeded);
-                const int beforeEnd = beforeBegin + beforeWindow;
-                const bool overlap = (afterBegin < beforeEnd) && (beforeBegin < afterEnd);
-                if (overlap) {
+                const int totalWmma = std::max(1, wmmaIssueConfig.issuedCount);
+                const int targetTensorLoadWmmaSpace = this->tensorLoadWmmaSpace();
+                if (targetTensorLoadWmmaSpace > 0) {
                     auto afterIt = barrierWmmaThresholds_.find(afterBarrier);
                     auto beforeIt = barrierWmmaThresholds_.find(beforeBarrier);
                     if (afterIt != barrierWmmaThresholds_.end() &&
                         beforeIt != barrierWmmaThresholds_.end()) {
-                        const int mergedThreshold = (afterIt->second + beforeIt->second) / 2;
-                        afterIt->second = mergedThreshold;
-                        beforeIt->second = mergedThreshold;
+                        const int deltaAfter = targetTensorLoadWmmaSpace / 2;
+                        const int deltaBefore = (targetTensorLoadWmmaSpace + 1) / 2;
+                        afterIt->second = std::clamp(afterIt->second - deltaAfter, 0, totalWmma);
+                        beforeIt->second = std::clamp(beforeIt->second + deltaBefore, 0, totalWmma);
                     }
                 }
                 PASS_DEBUG(std::cerr
                            << "[CDNA5 onInitRegion after-before exclusive overlap] afterBarrier="
                            << afterBarrier << " beforeBarrier=" << beforeBarrier
-                           << " afterThreshold=" << afterEnd << " afterWmmaWindow=" << afterWindow
-                           << " beforeThreshold=" << beforeBegin << " beforeWmmaWindow="
-                           << beforeWindow << " overlap=" << overlap << "\n");
+                           << " afterThreshold=" << afterEnd << " beforeThreshold=" << beforeBegin
+                           << " targetTensorLoadWmmaSpace=" << targetTensorLoadWmmaSpace << "\n");
             }
         }
 
