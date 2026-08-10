@@ -5,46 +5,22 @@
  *
  *******************************************************************************/
 
-#include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <hip/hip_runtime_api.h>
 #include <hipblaslt/hipblaslt-ext-op.h>
+#include <limits>
 #include <roc/host_validation/adapters/hipblaslt/HipblasltDataInitialization.hpp>
 #include <roc/host_validation/adapters/hipblaslt/Types.hpp>
 #include <roc/host_validation/validation.hpp>
-#include <limits>
-#include <numeric>
 #include <vector>
 
 #include "hipblaslt_arguments.hpp"
 
 namespace
 {
-    template <typename DType>
-    void cpuSoftmax(DType* m, DType* a, std::uint32_t numRows, std::uint32_t numCols)
-    {
-        for(std::uint32_t i = 0; i < numRows; ++i)
-        {
-            const auto rowMax = *std::max_element(a + i * numCols, a + i * numCols + numCols);
-            auto       rowSum = 0.f;
-            std::transform(a + i * numCols,
-                           a + i * numCols + numCols,
-                           m + i * numCols,
-                           [&rowSum, rowMax](auto v) {
-                               const auto u = std::exp(v - rowMax);
-                               rowSum += u;
-                               return u;
-                           });
-
-            std::transform(m + i * numCols,
-                           m + i * numCols + numCols,
-                           m + i * numCols,
-                           [rowSum](auto v) { return v / rowSum; });
-        }
-    }
-
     template <typename DType>
     void cpuLayerNorm(DType*        out,
                       DType*        mean,
@@ -144,14 +120,22 @@ TEST_P(ExtOpSoftmaxTest, softmaxSuccess)
     EXPECT_EQ(hipblasltErr, HIPBLAS_STATUS_SUCCESS);
     err = hipDeviceSynchronize();
     ASSERT_EQ(err, hipSuccess);
-    std::vector<float> cpuRef(m * n, 0.f);
-    cpuSoftmax(cpuRef.data(), input.data(), m, n);
     err = hipMemcpyDtoH(output.data(), gpuOutput, m * n * sizeof(float));
+    ASSERT_EQ(err, hipSuccess);
 
-    for(std::size_t i = 0; i < m * n; ++i)
-    {
-        EXPECT_NEAR(output[i], cpuRef[i], 1e-5);
-    }
+    using namespace roc::host_validation;
+    using namespace roc::host_validation::hipblaslt_adapter;
+    Tensor expected(ScalarType::Float32, Shape{m, n});
+    referenceSoftmax(
+        SoftmaxProblem(tensorView(input.data(), input.size(), Layout::contiguous(Shape{m, n})),
+                       expected.mutableView(),
+                       1,
+                       ScalarType::Float32));
+    const ComparisonResult comparison
+        = compare(tensorView(output.data(), output.size(), Layout::contiguous(Shape{m, n})),
+                  expected.view(),
+                  nearComparisonOptions(1e-5));
+    EXPECT_TRUE(comparison.passed());
 
     err = hipFree(gpuInput);
     err = hipFree(gpuOutput);
