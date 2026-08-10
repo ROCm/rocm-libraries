@@ -25,24 +25,51 @@ constexpr std::array<uint32_t, 64> K = {
     0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
     0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2};
 
-constexpr uint32_t rotr(uint32_t x, uint32_t n) { return (x >> n) | (x << (32 - n)); }
+constexpr uint32_t rotr(uint32_t x, uint32_t n)
+{
+    return (x >> n) | (x << (32 - n));
+}
 
-constexpr uint32_t ch(uint32_t x, uint32_t y, uint32_t z) { return (x & y) ^ (~x & z); }
+constexpr uint32_t ch(uint32_t x, uint32_t y, uint32_t z)
+{
+    return (x & y) ^ (~x & z);
+}
 
-constexpr uint32_t maj(uint32_t x, uint32_t y, uint32_t z) { return (x & y) ^ (x & z) ^ (y & z); }
+constexpr uint32_t maj(uint32_t x, uint32_t y, uint32_t z)
+{
+    return (x & y) ^ (x & z) ^ (y & z);
+}
 
-constexpr uint32_t sigma0(uint32_t x) { return rotr(x, 2) ^ rotr(x, 13) ^ rotr(x, 22); }
+constexpr uint32_t sigma0(uint32_t x)
+{
+    return rotr(x, 2) ^ rotr(x, 13) ^ rotr(x, 22);
+}
 
-constexpr uint32_t sigma1(uint32_t x) { return rotr(x, 6) ^ rotr(x, 11) ^ rotr(x, 25); }
+constexpr uint32_t sigma1(uint32_t x)
+{
+    return rotr(x, 6) ^ rotr(x, 11) ^ rotr(x, 25);
+}
 
-constexpr uint32_t gamma0(uint32_t x) { return rotr(x, 7) ^ rotr(x, 18) ^ (x >> 3); }
+constexpr uint32_t gamma0(uint32_t x)
+{
+    return rotr(x, 7) ^ rotr(x, 18) ^ (x >> 3);
+}
 
-constexpr uint32_t gamma1(uint32_t x) { return rotr(x, 17) ^ rotr(x, 19) ^ (x >> 10); }
+constexpr uint32_t gamma1(uint32_t x)
+{
+    return rotr(x, 17) ^ rotr(x, 19) ^ (x >> 10);
+}
 
 std::string sha256(const std::string& input)
 {
-    std::array<uint32_t, 8> h = {0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
-                                  0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
+    std::array<uint32_t, 8> h = {0x6a09e667,
+                                 0xbb67ae85,
+                                 0x3c6ef372,
+                                 0xa54ff53a,
+                                 0x510e527f,
+                                 0x9b05688c,
+                                 0x1f83d9ab,
+                                 0x5be0cd19};
 
     // Pre-processing: padding
     std::vector<uint8_t> msg(input.begin(), input.end());
@@ -63,10 +90,10 @@ std::string sha256(const std::string& input)
         std::array<uint32_t, 64> w{};
         for(size_t i = 0; i < 16; ++i)
         {
-            w[i] = (static_cast<uint32_t>(msg[chunk + i * 4]) << 24) |
-                   (static_cast<uint32_t>(msg[chunk + i * 4 + 1]) << 16) |
-                   (static_cast<uint32_t>(msg[chunk + i * 4 + 2]) << 8) |
-                   (static_cast<uint32_t>(msg[chunk + i * 4 + 3]));
+            w[i] = (static_cast<uint32_t>(msg[chunk + i * 4]) << 24)
+                   | (static_cast<uint32_t>(msg[chunk + i * 4 + 1]) << 16)
+                   | (static_cast<uint32_t>(msg[chunk + i * 4 + 2]) << 8)
+                   | (static_cast<uint32_t>(msg[chunk + i * 4 + 3]));
         }
         for(size_t i = 16; i < 64; ++i)
         {
@@ -214,10 +241,10 @@ void validateNumericLiterals(const nlohmann::json& node)
         if(std::abs(value) >= kMaxSafeNumericLiteral)
         {
             throw JsonLogicError(
-                "features_signature contains the numeric literal " + node.dump() +
-                ", whose magnitude is at or above 1e15. The generator and the runtime "
-                "render such values differently, so the features_hash would not match. "
-                "Rescale the feature instead.");
+                "features_signature contains the numeric literal " + node.dump()
+                + ", whose magnitude is at or above 1e15. The generator and the runtime "
+                  "render such values differently, so the features_hash would not match. "
+                  "Rescale the feature instead.");
         }
         return;
     }
@@ -277,10 +304,10 @@ FeatureExtractor::FeatureExtractor(const std::vector<std::string>& signature)
         // {"shape": ["$kernel", 0]} reads $kernel.shape_0. Testing only for the
         // "$kernel." prefix would file that entry as shared, so it would be evaluated
         // in the shared pass before any kernel metadata is bound.
-        const bool kernelDependent =
-            std::any_of(vars.begin(), vars.end(), [&kernelPrefix](const std::string& v) {
-                return v == "$kernel" || v.rfind(kernelPrefix, 0) == 0;
-            });
+        const bool kernelDependent
+            = std::any_of(vars.begin(), vars.end(), [&kernelPrefix](const std::string& v) {
+                  return v == "$kernel" || v.rfind(kernelPrefix, 0) == 0;
+              });
 
         const size_t index = _parsedExprs.size() - 1;
         if(kernelDependent)
@@ -326,9 +353,9 @@ void FeatureExtractor::extractKernelInto(const FeatureExtractionContext& ctx,
 {
     if(row.size() != _parsedExprs.size())
     {
-        throw JsonLogicError("extractKernelInto: row width " + std::to_string(row.size()) +
-                             " does not match signature width " +
-                             std::to_string(_parsedExprs.size()));
+        throw JsonLogicError("extractKernelInto: row width " + std::to_string(row.size())
+                             + " does not match signature width "
+                             + std::to_string(_parsedExprs.size()));
     }
 
     for(const size_t i : _kernelIndices)
@@ -404,8 +431,8 @@ bool FeatureExtractor::validateAgainstKmdFields(
     return true;
 }
 
-std::vector<std::string>
-    FeatureExtractor::getMissingKmdFields(const std::unordered_set<std::string>& kmdFieldNames) const
+std::vector<std::string> FeatureExtractor::getMissingKmdFields(
+    const std::unordered_set<std::string>& kmdFieldNames) const
 {
     const std::string kernelPrefix = "$kernel.";
     std::vector<std::string> missing;

@@ -43,13 +43,13 @@ struct UhdConfig
     std::string objective = "max"; // "max" or "min"
 
     // Score metadata for cross-engine comparison (RFC §5, §12.3)
-    std::string scoreUnits;           // e.g., "tflops", "ms"
-    bool scoreCalibrated = false;     // cross-engine comparable?
-    std::string scoreTransform;       // e.g., "log1p", "identity"
+    std::string scoreUnits; // e.g., "tflops", "ms"
+    bool scoreCalibrated = false; // cross-engine comparable?
+    std::string scoreTransform; // e.g., "log1p", "identity"
 
     // Adapter configuration
     std::string adapterType = "static_order"; // "static_order", "tree_data", etc.
-    std::string modelArtifactPath;            // for tree_data/onnx/custom_library
+    std::string modelArtifactPath; // for tree_data/onnx/custom_library
     std::vector<std::string> staticOrderFields = {"priority", "id"}; // for static_order
 };
 
@@ -126,7 +126,8 @@ public:
     ///
     /// @param entry Snapshot from getEngine().
     /// @returns Adapter or nullptr if entry is null or adapter creation fails.
-    std::shared_ptr<IUhdAdapter> getOrCreateAdapter(const std::shared_ptr<const EngineEntry>& entry) const;
+    std::shared_ptr<IUhdAdapter>
+        getOrCreateAdapter(const std::shared_ptr<const EngineEntry>& entry) const;
 
     /// Get or create the feature extractor for a specific engine snapshot.
     /// @param entry Snapshot from getEngine().

@@ -108,9 +108,7 @@ public:
     /// @param depth Current recursion depth; the interpreter is bounded per RFC 0019
     ///        §7.2/§16, since a descriptor is author-controlled input and a deeply
     ///        nested expression would otherwise overflow the stack.
-    Value evaluate(const nlohmann::json& expr,
-                   const VariableContext& ctx,
-                   size_t depth = 0) const;
+    Value evaluate(const nlohmann::json& expr, const VariableContext& ctx, size_t depth = 0) const;
 
     /// Maximum expression nesting the interpreter will descend.
     static constexpr size_t kMaxExpressionDepth = 64;

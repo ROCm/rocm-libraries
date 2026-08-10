@@ -85,8 +85,8 @@ TEST_F(TestFeatureExtractor, ExtractsMultipleFeatures)
 TEST_F(TestFeatureExtractor, ExtractsComputedFeatures)
 {
     const std::vector<std::string> signature = {
-        R"({"+": ["$kernel.tile_m", "$kernel.tile_n"]})",    // 64 + 64 = 128
-        R"({"*": ["$q.batch", "$q.seqlen"]})",               // 32 * 512 = 16384
+        R"({"+": ["$kernel.tile_m", "$kernel.tile_n"]})", // 64 + 64 = 128
+        R"({"*": ["$q.batch", "$q.seqlen"]})", // 32 * 512 = 16384
         R"({"ceil_div": ["$device.cu_count", "$kernel.tile_m"]})", // ceil(120/64) = 2
     };
     const FeatureExtractor extractor(signature);
@@ -411,8 +411,8 @@ TEST_F(TestFeatureExtractor, StringValuedBindingIsATypeError)
 TEST_F(TestFeatureExtractor, NumericBindingsOfEveryTypeStillResolve)
 {
     // The type check must reject only strings — double, int64 and bool all convert.
-    const std::vector<std::string> signature = {
-        "$device.as_double", "$device.as_int", "$device.as_bool"};
+    const std::vector<std::string> signature
+        = {"$device.as_double", "$device.as_int", "$device.as_bool"};
     const FeatureExtractor extractor(signature);
 
     FeatureExtractionContext ctx;
@@ -467,8 +467,7 @@ TEST_F(TestFeatureExtractor, PermutedSignatureProducesDifferentHash)
 
 TEST_F(TestFeatureExtractor, HashMatchesGeneratorForBareReferences)
 {
-    const std::vector<std::string> signature = {
-        "$q.batch", "$kernel.tile_m", "$device.cu_count"};
+    const std::vector<std::string> signature = {"$q.batch", "$kernel.tile_m", "$device.cu_count"};
     EXPECT_EQ(FeatureExtractor::computeHash(signature), "sha256:fe9d0487031089e0");
 }
 
@@ -490,8 +489,8 @@ TEST_F(TestFeatureExtractor, HashMatchesGeneratorForDerivedExpression)
 
 TEST_F(TestFeatureExtractor, HashMatchesGeneratorForNestedExpression)
 {
-    const std::vector<std::string> signature = {
-        R"({"log2": [{"*": ["$q.batch", "$q.num_heads"]}]})"};
+    const std::vector<std::string> signature
+        = {R"({"log2": [{"*": ["$q.batch", "$q.num_heads"]}]})"};
     EXPECT_EQ(FeatureExtractor::computeHash(signature), "sha256:8f014cf81bab5f8c");
 }
 
@@ -510,8 +509,7 @@ TEST_F(TestFeatureExtractor, HashMatchesGeneratorForEmptySignature)
 TEST_F(TestFeatureExtractor, RejectsFloatAtScientificNotationThreshold)
 {
     // nlohmann renders this "1e+15", Python "1000000000000000.0".
-    EXPECT_THROW(FeatureExtractor::computeHash({R"({">": ["$q.batch", 1e15]})"}),
-                 JsonLogicError);
+    EXPECT_THROW(FeatureExtractor::computeHash({R"({">": ["$q.batch", 1e15]})"}), JsonLogicError);
 }
 
 TEST_F(TestFeatureExtractor, RejectsIntegerBeyondInt64)
@@ -548,9 +546,8 @@ TEST_F(TestFeatureExtractor, AcceptsRealisticFeatureLiterals)
 TEST_F(TestFeatureExtractor, RejectionAppliesToNestedLiterals)
 {
     // The walk has to reach literals buried in operator trees, not just top level.
-    EXPECT_THROW(
-        FeatureExtractor::computeHash({R"({"log2": [{"+": ["$q.batch", 1e16]}]})"}),
-        JsonLogicError);
+    EXPECT_THROW(FeatureExtractor::computeHash({R"({"log2": [{"+": ["$q.batch", 1e16]}]})"}),
+                 JsonLogicError);
 }
 
 TEST_F(TestFeatureExtractor, ConstructorRejectsUnsafeLiteralToo)
@@ -565,11 +562,11 @@ TEST_F(TestFeatureExtractor, ConstructorRejectsUnsafeLiteralToo)
 TEST_F(TestFeatureExtractor, PartitionsSignatureByKernelDependence)
 {
     const std::vector<std::string> signature = {
-        "$device.cu_count",                             // shared
-        "$q.batch",                                     // shared
-        "$kernel.tile_m",                               // per-candidate
-        R"({"*": ["$q.batch", "$kernel.tile_m"]})",     // per-candidate (mixed)
-        R"({"*": ["$q.batch", "$device.cu_count"]})",   // shared (derived, no kernel ref)
+        "$device.cu_count", // shared
+        "$q.batch", // shared
+        "$kernel.tile_m", // per-candidate
+        R"({"*": ["$q.batch", "$kernel.tile_m"]})", // per-candidate (mixed)
+        R"({"*": ["$q.batch", "$device.cu_count"]})", // shared (derived, no kernel ref)
     };
     const FeatureExtractor extractor(signature);
 

@@ -82,8 +82,8 @@ SelectionResult SelectionEngine::select(int64_t engineId,
     auto adapter = EngineRegistry::instance().getOrCreateAdapter(enginePtr);
     if(adapter == nullptr)
     {
-        HIPDNN_SDK_LOG_WARN("UHD: engine " << engineId << " uhd='" << cfg.uhdId
-                                           << "' adapter '" << cfg.adapterType
+        HIPDNN_SDK_LOG_WARN("UHD: engine " << engineId << " uhd='" << cfg.uhdId << "' adapter '"
+                                           << cfg.adapterType
                                            << "' could not be created; using static order");
         return degrade("adapter creation failed");
     }
@@ -130,8 +130,8 @@ SelectionResult SelectionEngine::select(int64_t engineId,
     if(!adapterHash.empty() && !cfg.featuresHash.empty() && adapterHash != cfg.featuresHash)
     {
         result.trace.featuresHashMatch = false;
-        return degrade("features hash mismatch: adapter=" + adapterHash +
-                       " config=" + cfg.featuresHash);
+        return degrade("features hash mismatch: adapter=" + adapterHash
+                       + " config=" + cfg.featuresHash);
     }
 
     // Build the context once and reuse it. Device and query bindings are shared by
@@ -162,9 +162,9 @@ SelectionResult SelectionEngine::select(int64_t engineId,
     // "all candidates failed scoring".
     if(!adapter->validateFeatureCount(sharedRow.size()))
     {
-        return degrade("feature count mismatch: signature has " +
-                       std::to_string(sharedRow.size()) + " features, model expects " +
-                       std::to_string(adapter->expectedFeatureCount()));
+        return degrade("feature count mismatch: signature has " + std::to_string(sharedRow.size())
+                       + " features, model expects "
+                       + std::to_string(adapter->expectedFeatureCount()));
     }
 
     // Score each candidate
@@ -221,8 +221,8 @@ SelectionResult SelectionEngine::select(int64_t engineId,
     }
 
     // Check if any candidates were scored successfully
-    const bool anyValid =
-        std::any_of(scored.begin(), scored.end(), [](const ScoredCandidate& s) { return s.scoreValid; });
+    const bool anyValid = std::any_of(
+        scored.begin(), scored.end(), [](const ScoredCandidate& s) { return s.scoreValid; });
 
     if(!anyValid)
     {
@@ -281,7 +281,8 @@ SelectionResult SelectionEngine::scoreOnly(int64_t engineId,
     return select(engineId, deviceVars, queryVars);
 }
 
-FeatureExtractionContext::ValueMap SelectionEngine::buildKernelVars(const KernelCandidate& candidate)
+FeatureExtractionContext::ValueMap
+    SelectionEngine::buildKernelVars(const KernelCandidate& candidate)
 {
     FeatureExtractionContext::ValueMap kernelVars;
     kernelVars.reserve(candidate.metadata.size() + 2);
@@ -303,8 +304,8 @@ std::optional<double> SelectionEngine::lookupOrderField(const KernelCandidate& c
                                                         const std::string& field)
 {
     // Order fields may be written bare or namespaced; both name the same thing.
-    const std::string bare =
-        field.rfind("$kernel.", 0) == 0 ? field.substr(std::string("$kernel.").size()) : field;
+    const std::string bare
+        = field.rfind("$kernel.", 0) == 0 ? field.substr(std::string("$kernel.").size()) : field;
 
     // priority and id are implicit on every candidate, so a static_order UHD can name
     // them without the engine declaring any KMD metadata.
@@ -325,9 +326,8 @@ std::optional<double> SelectionEngine::lookupOrderField(const KernelCandidate& c
     return it->second;
 }
 
-SelectionResult
-    SelectionEngine::applyDeclaredOrder(const std::vector<KernelCandidate>& candidates,
-                                        const std::vector<std::string>& orderFields)
+SelectionResult SelectionEngine::applyDeclaredOrder(const std::vector<KernelCandidate>& candidates,
+                                                    const std::vector<std::string>& orderFields)
 {
     SelectionResult result;
 
@@ -398,9 +398,8 @@ SelectionResult
     return result;
 }
 
-SelectionResult
-    SelectionEngine::applyStaticOrdering(const std::vector<KernelCandidate>& candidates,
-                                         const std::string& reason)
+SelectionResult SelectionEngine::applyStaticOrdering(const std::vector<KernelCandidate>& candidates,
+                                                     const std::string& reason)
 {
     // The fail-open default is the same comparator with the default field order, so
     // §6 step 6 and the static_order adapter are literally one code path.
@@ -420,7 +419,8 @@ void SelectionEngine::sortByObjective(std::vector<ScoredCandidate>& candidates,
 {
     const bool maximize = (objective != "min");
 
-    std::sort(candidates.begin(), candidates.end(),
+    std::sort(candidates.begin(),
+              candidates.end(),
               [maximize](const ScoredCandidate& a, const ScoredCandidate& b) {
                   // Invalid scores sort to the end
                   if(a.scoreValid != b.scoreValid)

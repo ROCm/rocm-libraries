@@ -45,17 +45,17 @@ struct SelectionTrace
     std::vector<std::string> trainingArches;
 
     // Selection path
-    std::string adapterType;          // "tree_data", "static_order", etc.
-    bool usedModel = false;           // true if model scored, false if fallback
-    std::string fallbackReason;       // if usedModel==false, why
+    std::string adapterType; // "tree_data", "static_order", etc.
+    bool usedModel = false; // true if model scored, false if fallback
+    std::string fallbackReason; // if usedModel==false, why
 
     // Arch validation (RFC 0019 §9.3)
-    bool archWasTrained = true;       // false if device arch not in training set
-    std::string deviceArch;           // the device arch being checked
+    bool archWasTrained = true; // false if device arch not in training set
+    std::string deviceArch; // the device arch being checked
 
     // Feature contract
-    std::string featuresHashModel;    // hash from model artifact
-    std::string featuresHashConfig;   // hash from UHD config
+    std::string featuresHashModel; // hash from model artifact
+    std::string featuresHashConfig; // hash from UHD config
     bool featuresHashMatch = true;
 };
 
@@ -67,7 +67,7 @@ struct SelectionResult
     /// selection, not a failure. Use `trace.usedModel` to ask the narrower question of
     /// whether the model actually scored anything.
     bool applied = false;
-    std::vector<int64_t> sortedKernelIds;          // kernels sorted by score (best first)
+    std::vector<int64_t> sortedKernelIds; // kernels sorted by score (best first)
     std::vector<ScoredCandidate> scoredCandidates; // full scoring details
 
     // Best candidate info (for score-only mode, RFC §12.1)
@@ -90,7 +90,10 @@ struct SelectionResult
     ///
     /// The `applied` disjunct covers the engine that registered no candidates: there
     /// is nothing to rank, but selection did not fail, so the engine is not dropped.
-    bool hasOrdering() const { return applied || !sortedKernelIds.empty(); }
+    bool hasOrdering() const
+    {
+        return applied || !sortedKernelIds.empty();
+    }
 };
 
 // score_transform now lives in ScoreTransform.hpp so EngineRegistry can validate a

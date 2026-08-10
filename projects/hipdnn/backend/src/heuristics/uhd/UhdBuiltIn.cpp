@@ -57,8 +57,9 @@ constexpr const char* POLICY_NAME = "SelectionHeuristic::UHD";
 hipdnnCallback_t gLoggingCallback = nullptr;
 hipdnnSeverity_t gLogLevel = HIPDNN_SEV_INFO;
 
-#define UHD_LOG(severity, ...) \
-    HIPDNN_BUILTIN_HEURISTIC_LOG(gLoggingCallback, gLogLevel, severity, "[BuiltInUHD] ", __VA_ARGS__)
+#define UHD_LOG(severity, ...)    \
+    HIPDNN_BUILTIN_HEURISTIC_LOG( \
+        gLoggingCallback, gLogLevel, severity, "[BuiltInUHD] ", __VA_ARGS__)
 
 int64_t policyId()
 {
@@ -296,7 +297,8 @@ hipdnnPluginStatus_t policySetSerializedGraph(hipdnnHeuristicPolicyDescriptor_t 
     try
     {
         auto* d = reinterpret_cast<PolicyDescriptor*>(desc);
-        if(serializedGraph != nullptr && serializedGraph->ptr != nullptr && serializedGraph->size > 0)
+        if(serializedGraph != nullptr && serializedGraph->ptr != nullptr
+           && serializedGraph->size > 0)
         {
             const auto* data = reinterpret_cast<const uint8_t*>(serializedGraph->ptr);
             d->serializedGraph.assign(data, data + serializedGraph->size);

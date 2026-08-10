@@ -47,7 +47,10 @@ public:
     void bind(const std::string& fullName, VariableContext::ValueType value);
 
     /// Get the underlying VariableContext for evaluation.
-    const VariableContext& getContext() const { return _ctx; }
+    const VariableContext& getContext() const
+    {
+        return _ctx;
+    }
 
     /// Clear all bindings.
     void clear();
@@ -96,13 +99,22 @@ public:
     void extractKernelInto(const FeatureExtractionContext& ctx, std::vector<double>& row) const;
 
     /// Get the number of features in the signature.
-    size_t featureCount() const { return _parsedExprs.size(); }
+    size_t featureCount() const
+    {
+        return _parsedExprs.size();
+    }
 
     /// Number of signature entries that reference $kernel.* (re-evaluated per candidate).
-    size_t kernelDependentCount() const { return _kernelIndices.size(); }
+    size_t kernelDependentCount() const
+    {
+        return _kernelIndices.size();
+    }
 
     /// Get all variable references in the signature.
-    const std::unordered_set<std::string>& getVariableRefs() const { return _varRefs; }
+    const std::unordered_set<std::string>& getVariableRefs() const
+    {
+        return _varRefs;
+    }
 
     /// Validate that all referenced variables in the signature are present in context.
     bool validateContext(const FeatureExtractionContext& ctx) const;
@@ -130,7 +142,10 @@ public:
     static std::string computeHash(const std::vector<std::string>& signature);
 
     /// Get the hash of this extractor's signature.
-    const std::string& getSignatureHash() const { return _signatureHash; }
+    const std::string& getSignatureHash() const
+    {
+        return _signatureHash;
+    }
 
     /// Validate that a set of KMD field names covers all $kernel.* references.
     /// Returns true if every $kernel.<field> in the signature has a matching field name.

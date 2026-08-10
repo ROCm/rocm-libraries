@@ -321,7 +321,8 @@ TEST_F(TestJsonLogicEvaluator, NestedWithVariables)
     _ctx.bind("$device.cu_count", 120.0);
     _ctx.bind("$kernel.tile_m", 64.0);
     // ceil_div($device.cu_count, $kernel.tile_m) = ceil(120/64) = 2
-    auto expr = JsonLogicEvaluator::parse(R"({"ceil_div": ["$device.cu_count", "$kernel.tile_m"]})");
+    auto expr
+        = JsonLogicEvaluator::parse(R"({"ceil_div": ["$device.cu_count", "$kernel.tile_m"]})");
     EXPECT_DOUBLE_EQ(_evaluator.evaluateDouble(expr, _ctx), 2.0);
 }
 
@@ -358,7 +359,6 @@ TEST_F(TestJsonLogicEvaluator, UnknownOperatorThrows)
     auto expr = JsonLogicEvaluator::parse(R"({"unknown_op": [1, 2]})");
     EXPECT_THROW(_evaluator.evaluateDouble(expr, _ctx), JsonLogicError);
 }
-
 
 // ========== Bounded interpreter (RFC 0019 §7.2, §16) ==========
 
@@ -408,8 +408,7 @@ TEST_F(TestJsonLogicEvaluator, ValueOrDefaultDoesNotSwallowDivideByZero)
     VariableContext ctx;
     ctx.bind("$q.n", 1.0);
     const JsonLogicEvaluator eval;
-    const auto expr =
-        JsonLogicEvaluator::parse(R"({"value_or_default": [{"/": ["$q.n", 0]}, 7]})");
+    const auto expr = JsonLogicEvaluator::parse(R"({"value_or_default": [{"/": ["$q.n", 0]}, 7]})");
     EXPECT_THROW(eval.evaluateDouble(expr, ctx), JsonLogicError);
 }
 
@@ -429,7 +428,6 @@ TEST_F(TestJsonLogicEvaluator, ValueOrDefaultDoesNotSwallowTypeErrors)
     const auto expr = JsonLogicEvaluator::parse(R"({"value_or_default": ["$q.name", 7]})");
     EXPECT_THROW(eval.evaluateDouble(expr, ctx), JsonLogicError);
 }
-
 
 // ========== Comparisons are structural, not numeric coercion (RFC 0019 §7.2) ==========
 
@@ -487,9 +485,8 @@ TEST_F(TestJsonLogicEvaluator, ComparingStringAgainstNumberIsATypeError)
     ctx.bind("$kernel.dtype", std::string("fp16"));
     const JsonLogicEvaluator eval;
 
-    EXPECT_THROW(
-        eval.evaluate(JsonLogicEvaluator::parse(R"({"==": ["$kernel.dtype", 64]})"), ctx),
-        JsonLogicError);
+    EXPECT_THROW(eval.evaluate(JsonLogicEvaluator::parse(R"({"==": ["$kernel.dtype", 64]})"), ctx),
+                 JsonLogicError);
 }
 
 TEST_F(TestJsonLogicEvaluator, StringInArithmeticIsATypeError)
@@ -521,8 +518,8 @@ TEST_F(TestJsonLogicEvaluator, CurrentIsNotReportedAsAnExternalVariable)
 {
     // `all` binds $current for its predicate, so it is never caller-supplied.
     // Reporting it would look like a missing binding to getMissingVariables.
-    const auto expr = JsonLogicEvaluator::parse(
-        R"({"all": [[1, 2, 3], {">": ["$current", "$q.threshold"]}]})");
+    const auto expr
+        = JsonLogicEvaluator::parse(R"({"all": [[1, 2, 3], {">": ["$current", "$q.threshold"]}]})");
     const auto vars = JsonLogicEvaluator::extractVariables(expr);
 
     EXPECT_EQ(vars.count("$current"), 0u);

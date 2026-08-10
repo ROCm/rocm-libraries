@@ -58,7 +58,10 @@ protected:
         EngineRegistry::instance().clear();
     }
 
-    void TearDown() override { EngineRegistry::instance().clear(); }
+    void TearDown() override
+    {
+        EngineRegistry::instance().clear();
+    }
 
     // Helper to create a simple engine with static_order adapter
     static EngineEntry createStaticOrderEngine(int64_t engineId,
@@ -187,7 +190,6 @@ TEST_F(TestUhdSelectionFlow, StaticOrderTieBreaksByIdWhenPriorityEqual)
 
 // ========== Objective Tests ==========
 
-
 // ========== Score Transform Tests ==========
 
 TEST_F(TestUhdSelectionFlow, ScoreTransformLog1pInverseApplied)
@@ -258,7 +260,6 @@ TEST_F(TestUhdSelectionFlow, RegistryClearRemovesAllEngines)
 
 // ========== Adapter Creation Tests ==========
 
-
 TEST_F(TestUhdSelectionFlow, GetOrCreateAdapterCachesAdapter)
 {
     auto entry = createStaticOrderEngine(100, {});
@@ -302,7 +303,6 @@ TEST_F(TestUhdSelectionFlow, SelectionUsesKernelMetadata)
 }
 
 // ========== Score-Only Mode ==========
-
 
 // ========== Multiple Engines ==========
 
@@ -351,9 +351,8 @@ TEST_F(TestUhdSelectionFlow, AdapterWithoutHashSkipsMismatchGuard)
     // compute it rather than inventing one. StaticOrderAdapter reports an empty hash,
     // and the mismatch guard only fires when both sides are non-empty — so this
     // exercises the "adapter carries no hash" path, which must still apply the model.
-    entry.uhdConfig.featuresHash =
-        hipdnn_backend::heuristics::uhd::FeatureExtractor::computeHash(
-            entry.uhdConfig.featuresSignature);
+    entry.uhdConfig.featuresHash = hipdnn_backend::heuristics::uhd::FeatureExtractor::computeHash(
+        entry.uhdConfig.featuresSignature);
     entry.candidates = {k1, k2};
 
     EngineRegistry::instance().registerEngine(entry);
@@ -390,7 +389,6 @@ TEST_F(TestUhdSelectionFlow, UnknownAdapterTypeFallsBackToStaticOrder)
     EXPECT_EQ(result.sortedKernelIds[0], 2); // priority 5 < priority 10
     EXPECT_EQ(result.sortedKernelIds[1], 1);
 }
-
 
 // ========== Registry Edge Cases ==========
 
@@ -451,7 +449,6 @@ TEST_F(TestUhdSelectionFlow, SnapshotSurvivesReregistration)
     EXPECT_EQ(current->candidates[0].kernelId, 9);
 }
 
-
 TEST_F(TestUhdSelectionFlow, NullSnapshotYieldsNullAdapterAndExtractor)
 {
     const std::shared_ptr<const hipdnn_backend::heuristics::uhd::EngineEntry> none;
@@ -476,8 +473,6 @@ TEST_F(TestUhdSelectionFlow, SnapshotSurvivesRegistryClear)
 }
 
 // ========== Calibrated Score Transform Tests ==========
-
-
 
 TEST_F(TestUhdSelectionFlow, RegisterRejectsUnsupportedScoreTransform)
 {
@@ -528,9 +523,8 @@ TEST_F(TestUhdSelectionFlow, SupportedTransformsCoverTheSchemaVocabulary)
 
     for(const auto* documented : {"identity", "log1p", "exp"})
     {
-        EXPECT_TRUE(xform::isSupported(documented))
-            << "uhd.fbs documents transform '" << documented
-            << "' but the runtime cannot invert it";
+        EXPECT_TRUE(xform::isSupported(documented)) << "uhd.fbs documents transform '" << documented
+                                                    << "' but the runtime cannot invert it";
     }
 }
 
@@ -542,8 +536,6 @@ TEST_F(TestUhdSelectionFlow, ExpTransformInvertsToLog)
     const double target = 4.5;
     EXPECT_NEAR(xform::applyInverse(xform::applyForward(target, "exp"), "exp"), target, 1e-9);
 }
-
-
 
 // ========== Mixed Valid/Invalid Candidates ==========
 
@@ -710,7 +702,6 @@ TEST_F(TestUhdSelectionFlow, TraceRecordsFallbackReasonOnEngineNotFound)
     EXPECT_NE(result.trace.fallbackReason.find("not found"), std::string::npos);
 }
 
-
 TEST_F(TestUhdSelectionFlow, TraceArchWasTrainedDefaultsToTrue)
 {
     // Static order adapter returns true for isTrainedForArch (no restriction)
@@ -809,7 +800,8 @@ TEST_F(TestUhdSelectionFlow, RegisterEngineValidationErrorMessageListsMissingFie
     catch(const std::invalid_argument& e)
     {
         const std::string msg = e.what();
-        EXPECT_NE(msg.find("tile_m"), std::string::npos) << "Message should mention tile_m: " << msg;
+        EXPECT_NE(msg.find("tile_m"), std::string::npos)
+            << "Message should mention tile_m: " << msg;
         EXPECT_NE(msg.find("split_k"), std::string::npos)
             << "Message should mention split_k: " << msg;
     }
@@ -922,7 +914,8 @@ TEST_F(TestUhdSelectionFlow, GetOrCreateExtractorReturnsSameInstance)
 
     ASSERT_NE(extractor1, nullptr);
     ASSERT_NE(extractor2, nullptr);
-    EXPECT_EQ(extractor1.get(), extractor2.get()) << "Extractor should be cached and return same instance";
+    EXPECT_EQ(extractor1.get(), extractor2.get())
+        << "Extractor should be cached and return same instance";
 }
 
 // ========== features_hash contract at registration (RFC §7.3) ==========
@@ -944,8 +937,8 @@ TEST_F(TestUhdSelectionFlow, RegisterRejectsHashOfPermutedSignature)
 
     std::vector<std::string> permuted = entry.uhdConfig.featuresSignature;
     std::reverse(permuted.begin(), permuted.end());
-    entry.uhdConfig.featuresHash =
-        hipdnn_backend::heuristics::uhd::FeatureExtractor::computeHash(permuted);
+    entry.uhdConfig.featuresHash
+        = hipdnn_backend::heuristics::uhd::FeatureExtractor::computeHash(permuted);
 
     EXPECT_THROW(EngineRegistry::instance().registerEngine(entry), std::invalid_argument);
 }
@@ -954,9 +947,8 @@ TEST_F(TestUhdSelectionFlow, RegisterAcceptsMatchingHash)
 {
     auto k1 = makeCandidate(1, 5);
     auto entry = createStaticOrderEngine(100, {k1});
-    entry.uhdConfig.featuresHash =
-        hipdnn_backend::heuristics::uhd::FeatureExtractor::computeHash(
-            entry.uhdConfig.featuresSignature);
+    entry.uhdConfig.featuresHash = hipdnn_backend::heuristics::uhd::FeatureExtractor::computeHash(
+        entry.uhdConfig.featuresSignature);
 
     EXPECT_NO_THROW(EngineRegistry::instance().registerEngine(entry));
 }
@@ -984,9 +976,8 @@ TEST_F(TestUhdSelectionFlow, RegisterAcceptsBareReferenceSignature)
     entry.uhdConfig.featuresSignature = {"$kernel.priority", "$kernel.id"};
     entry.uhdConfig.staticOrderFields = {"priority", "id"};
     entry.uhdConfig.objective = "max";
-    entry.uhdConfig.featuresHash =
-        hipdnn_backend::heuristics::uhd::FeatureExtractor::computeHash(
-            entry.uhdConfig.featuresSignature);
+    entry.uhdConfig.featuresHash = hipdnn_backend::heuristics::uhd::FeatureExtractor::computeHash(
+        entry.uhdConfig.featuresSignature);
     entry.candidates = {k1, k2};
 
     ASSERT_NO_THROW(EngineRegistry::instance().registerEngine(entry));
@@ -1058,9 +1049,6 @@ TEST_F(TestUhdSelectionFlow, HasOrderingIsFalseWhenEngineMissing)
     EXPECT_FALSE(result.hasOrdering());
 }
 
-
-
-
 TEST_F(TestUhdSelectionFlow, MalformedSignatureEntryThrowsInvalidArgument)
 {
     // registerEngine documents std::invalid_argument; a malformed entry makes the
@@ -1126,10 +1114,10 @@ protected:
         TestUhdSelectionFlow::SetUp();
         // Name the artifact after the running test so parallel suites don't collide.
         const auto* info = ::testing::UnitTest::GetInstance()->current_test_info();
-        _modelPath =
-            (std::filesystem::temp_directory_path() /
-             ("uhd_arch_test_" + std::string(info != nullptr ? info->name() : "unknown") + ".bin"))
-                .string();
+        _modelPath = (std::filesystem::temp_directory_path()
+                      / ("uhd_arch_test_" + std::string(info != nullptr ? info->name() : "unknown")
+                         + ".bin"))
+                         .string();
     }
 
     void TearDown() override
@@ -1145,8 +1133,7 @@ protected:
         namespace uhd_test = hipdnn_backend::heuristics::uhd::testing;
 
         const std::vector<std::string> signature = {"$kernel.priority"};
-        const auto hash =
-            hipdnn_backend::heuristics::uhd::FeatureExtractor::computeHash(signature);
+        const auto hash = hipdnn_backend::heuristics::uhd::FeatureExtractor::computeHash(signature);
 
         uhd_test::GbdtModelTestBuilder builder;
         builder.setNumFeatures(static_cast<int32_t>(signature.size()))
@@ -1188,8 +1175,7 @@ protected:
         namespace uhd_test = hipdnn_backend::heuristics::uhd::testing;
 
         const std::vector<std::string> signature = {"$kernel.priority"};
-        const auto hash =
-            hipdnn_backend::heuristics::uhd::FeatureExtractor::computeHash(signature);
+        const auto hash = hipdnn_backend::heuristics::uhd::FeatureExtractor::computeHash(signature);
 
         uhd_test::GbdtModelTestBuilder::TreeSpec split;
         split.featureIndices = {0, 0, 0};
@@ -1228,8 +1214,7 @@ protected:
                                             const std::vector<KernelCandidate>& candidates)
     {
         namespace uhd_test = hipdnn_backend::heuristics::uhd::testing;
-        const auto hash =
-            hipdnn_backend::heuristics::uhd::FeatureExtractor::computeHash(signature);
+        const auto hash = hipdnn_backend::heuristics::uhd::FeatureExtractor::computeHash(signature);
 
         uhd_test::GbdtModelTestBuilder builder;
         builder.setNumFeatures(static_cast<int32_t>(signature.size()))
@@ -1350,15 +1335,13 @@ TEST_F(TestUhdSelectionFlow, CandidateMissingMetadataDoesNotInheritPreviousValue
     ASSERT_EQ(result.scoredCandidates.size(), 2u);
 
     // Exactly the candidate carrying tile_m scores; the other is marked invalid.
-    const auto scoredWithout =
-        std::find_if(result.scoredCandidates.begin(),
-                     result.scoredCandidates.end(),
-                     [](const auto& sc) { return sc.kernelId == 2; });
+    const auto scoredWithout = std::find_if(result.scoredCandidates.begin(),
+                                            result.scoredCandidates.end(),
+                                            [](const auto& sc) { return sc.kernelId == 2; });
     ASSERT_NE(scoredWithout, result.scoredCandidates.end());
     EXPECT_FALSE(scoredWithout->scoreValid)
         << "candidate without tile_m must not inherit the previous candidate's value";
 }
-
 
 // ========== objective vocabulary (RFC 0019 §5, §6 step 4) ==========
 
@@ -1397,9 +1380,6 @@ TEST_F(TestUhdSelectionFlow, RegisterAcceptsBothObjectiveValuesAndEmpty)
 }
 
 // ========== static_order packing stays exact (RFC 0019 §6 step 5) ==========
-
-
-
 
 // ========== static_order is a declared precedence, not a score (RFC 0019 §5) ==========
 
@@ -1529,7 +1509,6 @@ TEST_F(TestUhdSelectionFlow, StaticOrderReportsNoScore)
     EXPECT_FALSE(result.bestScore.has_value());
 }
 
-
 // ========== Scoring behaviour, on a real tree_data model ==========
 //
 // These previously used static_order as a stand-in for a scorer. That conflation is
@@ -1552,8 +1531,7 @@ TEST_F(TestUhdSelectionFlowTreeData, MaxObjectiveSelectsHighestScore)
 
 TEST_F(TestUhdSelectionFlowTreeData, MinObjectiveSelectsLowestScore)
 {
-    registerScoringEngine(100, {makeCandidate(1, 10), makeCandidate(2, 5)},
-                          7.0, 2.0, 1.0, "min");
+    registerScoringEngine(100, {makeCandidate(1, 10), makeCandidate(2, 5)}, 7.0, 2.0, 1.0, "min");
 
     auto result = SelectionEngine::select(100, defaultDeviceVars(), defaultQueryVars());
 
@@ -1624,8 +1602,8 @@ TEST_F(TestUhdSelectionFlowTreeData, StringDevicePropertyInSignatureDegrades)
     // $device.arch is bound as a string. RFC §7.2 makes that a type error rather
     // than a silent NaN, which a GBDT would otherwise route down default_left and
     // score as ordinary data.
-    registerScoringEngineWithSignature(100, {"$device.arch"},
-                                       {makeCandidate(1, 10), makeCandidate(2, 5)});
+    registerScoringEngineWithSignature(
+        100, {"$device.arch"}, {makeCandidate(1, 10), makeCandidate(2, 5)});
 
     auto result = SelectionEngine::select(100, deviceVarsForArch("gfx942"), defaultQueryVars());
 

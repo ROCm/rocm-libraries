@@ -120,7 +120,8 @@ std::vector<int64_t> EngineHeuristicDescriptor::resolveHeuristicPolicyOrder()
     };
     HIPDNN_BACKEND_LOG_WARN(
         "No heuristic policy order configured, falling back to built-in defaults "
-        "[SelectionHeuristic::Config, SelectionHeuristic::UHD, SelectionHeuristic::StaticOrdering]. "
+        "[SelectionHeuristic::Config, SelectionHeuristic::UHD, "
+        "SelectionHeuristic::StaticOrdering]. "
         "Set HIPDNN_HEUR_POLICY_ORDER or the descriptor attribute to silence "
         "this warning.");
     return policyIds;

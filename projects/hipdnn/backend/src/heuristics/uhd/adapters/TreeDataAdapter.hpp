@@ -31,38 +31,55 @@ public:
     /// @param expectedFeaturesHash Hash from UHD features_signature.
     /// @returns Adapter or nullptr if loading/validation fails.
     static std::unique_ptr<TreeDataAdapter> load(const std::string& modelPath,
-                                                  const std::string& expectedFeaturesHash);
+                                                 const std::string& expectedFeaturesHash);
 
     /// Load from an in-memory buffer.
     /// @param buffer Pointer to FlatBuffer data (must remain valid).
     /// @param size Size of buffer in bytes.
     /// @param expectedFeaturesHash Hash from UHD features_signature.
     /// @returns Adapter or nullptr if validation fails.
-    static std::unique_ptr<TreeDataAdapter> loadFromBuffer(const uint8_t* buffer,
-                                                            size_t size,
-                                                            const std::string& expectedFeaturesHash);
+    static std::unique_ptr<TreeDataAdapter>
+        loadFromBuffer(const uint8_t* buffer, size_t size, const std::string& expectedFeaturesHash);
 
     ~TreeDataAdapter() override;
 
     double score(const std::vector<double>& features) const override;
 
-    UhdAdapterType type() const override { return UhdAdapterType::TREE_DATA; }
+    UhdAdapterType type() const override
+    {
+        return UhdAdapterType::TREE_DATA;
+    }
 
-    size_t expectedFeatureCount() const override { return _numFeatures; }
+    size_t expectedFeatureCount() const override
+    {
+        return _numFeatures;
+    }
 
-    const std::string& getFeaturesHash() const override { return _featuresHash; }
+    const std::string& getFeaturesHash() const override
+    {
+        return _featuresHash;
+    }
 
     /// Get the number of trees in the ensemble.
-    size_t treeCount() const { return _treeCount; }
+    size_t treeCount() const
+    {
+        return _treeCount;
+    }
 
     /// Get the model version string (RFC 0019 §13: model provenance).
     /// Empty if not set in the model.
-    std::string getModelVersion() const override { return _modelVersion; }
+    std::string getModelVersion() const override
+    {
+        return _modelVersion;
+    }
 
     /// Get the list of GPU architectures the model was trained on.
     /// Empty if not set in the model.
     /// RFC 0019 §9.2: used for out-of-distribution detection.
-    std::vector<std::string> getTrainingArches() const override { return _trainingArches; }
+    std::vector<std::string> getTrainingArches() const override
+    {
+        return _trainingArches;
+    }
 
     /// Check if the given architecture was seen during training.
     /// Returns true if training_arches is empty (no restriction) or if arch is in the list.

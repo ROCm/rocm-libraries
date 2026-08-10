@@ -136,8 +136,8 @@ JsonLogicEvaluator::Value JsonLogicEvaluator::evaluate(const nlohmann::json& exp
     // is a stack overflow, which the tree-walk bound in TreeDataAdapter does not cover.
     if(depth > kMaxExpressionDepth)
     {
-        throw JsonLogicError("JsonLogic expression exceeds the maximum nesting depth of " +
-                             std::to_string(kMaxExpressionDepth));
+        throw JsonLogicError("JsonLogic expression exceeds the maximum nesting depth of "
+                             + std::to_string(kMaxExpressionDepth));
     }
 
     // Literal number
@@ -760,8 +760,8 @@ double JsonLogicEvaluator::toDouble(const Value& v)
                 // down default_left and returns an ordinary leaf, so a string used as
                 // a number was scored as data and never surfaced. Strings do not
                 // implicitly convert, even when they happen to parse.
-                throw JsonLogicError("Type error: string \"" + val +
-                                     "\" cannot be used where a number is required");
+                throw JsonLogicError("Type error: string \"" + val
+                                     + "\" cannot be used where a number is required");
             }
         },
         v);

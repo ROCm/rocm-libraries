@@ -28,8 +28,8 @@ namespace score_transform
 /// Kept in sync with the `transform` field's documented vocabulary in
 /// flatbuffers_sdk/schemas/uhd.fbs — a name the schema advertises but this list
 /// omits is a descriptor that passes schema review and then fails to load.
-inline constexpr std::array<const char*, 6> kSupportedTransforms = {
-    "", "identity", "log1p", "log", "exp", "sqrt"};
+inline constexpr std::array<const char*, 6> kSupportedTransforms
+    = {"", "identity", "log1p", "log", "exp", "sqrt"};
 
 /// Whether `transform` is a name this runtime can invert.
 inline bool isSupported(const std::string& transform)

@@ -73,7 +73,8 @@ void EngineRegistry::registerEngine(EngineEntry entry)
                 oss << missingFields[i];
             }
             oss << ". Engine ID: " << entry.engineId
-                << ". Ensure all $kernel.* fields in features_signature are present in candidate metadata.";
+                << ". Ensure all $kernel.* fields in features_signature are present in candidate "
+                   "metadata.";
             throw std::invalid_argument(oss.str());
         }
     }
@@ -156,8 +157,8 @@ void EngineRegistry::validateFeaturesHash(const EngineEntry& entry)
             // that only catches invalid_argument.
             std::ostringstream oss;
             oss << "UHD features_signature contains an entry that is neither a bare $ref "
-                << "nor valid JsonLogic. Engine ID: " << entry.engineId << ", uhd='"
-                << cfg.uhdId << "': " << e.what();
+                << "nor valid JsonLogic. Engine ID: " << entry.engineId << ", uhd='" << cfg.uhdId
+                << "': " << e.what();
             throw std::invalid_argument(oss.str());
         }
 
@@ -296,8 +297,8 @@ std::shared_ptr<FeatureExtractor>
     // Create extractor from features signature if non-empty
     if(!entry->uhdConfig.featuresSignature.empty())
     {
-        entry->cachedExtractor =
-            std::make_shared<FeatureExtractor>(entry->uhdConfig.featuresSignature);
+        entry->cachedExtractor
+            = std::make_shared<FeatureExtractor>(entry->uhdConfig.featuresSignature);
     }
 
     return entry->cachedExtractor;
