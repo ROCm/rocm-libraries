@@ -3,7 +3,7 @@
 #
 # Co-located, build-time producer for the fmha_wmma_fwd family: emit the gfx1151
 # WMMA flash-attention forward .co (HSACO), for f16 and NATIVE bf16, into the
-# directory given as argv[1]. Runtime never touches ck_dsl -- the per-family
+# directory given as argv[1]. Runtime never touches rocke -- the per-family
 # CMakeLists runs this at build time to drop the .co next to the checked-in
 # family.json (family.json is the source of truth; this script emits .co ONLY).
 #
@@ -11,11 +11,11 @@
 #   cd /home/brpepers/rocKE/projects/composablekernel/python
 #   PYTHONPATH=. python3 produce_fmha_fwd_co.py <out_dir>
 # The kernel symbols are auto-derived and MUST match the co_file names in
-# family.json (ck_dsl_wmma_fmha_fwd_wmma16x16x16_H64_HQ32_HK32_{f16,bf16}_none_vgather).
+# family.json (rocke_wmma_fmha_fwd_wmma16x16x16_H64_HQ32_HK32_{f16,bf16}_none_vgather).
 #
 # WHAT THIS BUILDS: rocKE's real gfx1151 WMMA attention forward
-# `ck_dsl.instances.gfx1151.wmma_fmha_fwd.build_wmma_fmha_fwd`, a thin adapter
-# over the unified `mfma_attention_fwd_inner_body`. We use ck_dsl purely as a
+# `rocke.instances.gfx1151.wmma_fmha_fwd.build_wmma_fmha_fwd`, a thin adapter
+# over the unified `mfma_attention_fwd_inner_body`. We use rocke purely as a
 # *library*. The bf16 build is NATIVE (no fp16 cast): bf16 shares the f16 WMMA
 # 16x16x16 fragment layout on gfx1151, so the same inner body lowers to the
 # `wmma.f32.16x16x16.bf16` intrinsic when the dtype is bf16.
@@ -29,8 +29,8 @@
 import os
 import sys
 
-from ck_dsl.helpers.compile import compile_kernel
-from ck_dsl.instances.gfx1151.wmma_fmha_fwd import (
+from rocke.helpers.compile import compile_kernel
+from rocke.instances.gfx1151.wmma_fmha_fwd import (
     WmmaFmhaFwdSpec,
     build_wmma_fmha_fwd,
     is_valid_spec,
@@ -63,14 +63,25 @@ def main() -> int:
     out_dir = sys.argv[1] if len(sys.argv) > 1 else "."
     os.makedirs(out_dir, exist_ok=True)
 
+    skipped = []
     for dtype in _DTYPES:
         spec = _build_spec(dtype)
         ok, why = is_valid_spec(spec, arch=ARCH)
         if not ok:
+            # This producer only runs (via the per-family CMakeLists) when rocKE is
+            # available and the arch matches, so every dtype is expected to compile.
+            # A skip means the sweep and the checked-in family.json have diverged;
+            # emitting a partial family would let the missing .co drop BOTH kernels
+            # at catalog load (parseKernel throws -> parseFamily aborts the file).
+            # Record it and fail below rather than exit 0 with an incomplete family.
             print(f"SKIP {dtype}: {why}")
+            skipped.append(dtype)
             continue
 
         artifact = compile_kernel(build_wmma_fmha_fwd(spec, arch=ARCH), arch=ARCH)
+        if not artifact.hsaco:
+            print(f"ERROR {dtype}: compiled .co is empty", file=sys.stderr)
+            return 1
         symbol = artifact.kernel_name
         co_file = symbol + ".co"
         with open(os.path.join(out_dir, co_file), "wb") as f:
@@ -81,6 +92,14 @@ def main() -> int:
             f"bytes={len(artifact.hsaco)} path={os.path.join(out_dir, co_file)}"
         )
 
+    if skipped:
+        print(
+            f"ERROR: {len(skipped)} kernel(s) skipped ({', '.join(skipped)}); the "
+            "family.json would be incomplete -- failing the build (see issue 3 / "
+            "the engine README).",
+            file=sys.stderr,
+        )
+        return 1
     return 0
 
 

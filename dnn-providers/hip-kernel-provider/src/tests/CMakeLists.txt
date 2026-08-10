@@ -106,10 +106,24 @@ if(ENABLE_AOT_CATALOG_ENGINE)
     # `ninja hip_kernel_provider_tests` populates the build-tree catalog rather than
     # running against an empty one (which would silently skip every parity test).
     # The property is empty when rocKE is unavailable, so this is a no-op then.
+    #
+    # That same property also tells the tests whether the catalog is EXPECTED to be
+    # populated: if any family target was registered, rocKE was available and the
+    # arch was requested, so a producer ran and the build-tree catalog must be
+    # non-empty at test time. AOT_ROCKE_FAMILIES_EXPECTED=1 flips the parity/
+    # selection tests from GTEST_SKIP to FAIL on an empty catalog (see
+    # AotCatalogTestSupport.hpp) so a silent producer/loader failure that empties
+    # the catalog can't leave CI green. When rocKE is off the property is empty and
+    # the def is 0, keeping empty-catalog an expected skip on TheRock CI.
     get_property(_aot_family_targets GLOBAL PROPERTY AOT_CATALOG_FAMILY_TARGETS)
     if(_aot_family_targets)
         add_dependencies(hip_kernel_provider_tests ${_aot_family_targets})
+        set(_aot_families_expected 1)
+    else()
+        set(_aot_families_expected 0)
     endif()
+    target_compile_definitions(hip_kernel_provider_tests PRIVATE
+        AOT_ROCKE_FAMILIES_EXPECTED=${_aot_families_expected})
 endif()
 
 clang_tidy_check(hip_kernel_provider_tests)

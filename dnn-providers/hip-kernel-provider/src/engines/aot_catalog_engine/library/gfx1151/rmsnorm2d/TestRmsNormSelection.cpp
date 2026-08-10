@@ -27,6 +27,7 @@
 #include <vector>
 
 #include "catalog/Catalog.hpp"
+#include "engines/aot_catalog_engine/AotCatalogTestSupport.hpp"
 #include "catalog/CatalogTypes.hpp"
 #include "catalog/TuneCache.hpp"
 #include "core/Handle.hpp"
@@ -75,11 +76,19 @@ float gammaVal(size_t n)
 
 // Build the (X,Gamma,Y,M,N,eps) launch bindings + grid symbols the RmsNormAdapter
 // would produce -- identical for every perf variant of the family.
-PlanCandidate makeCandidate(const catalog::KernelEntry& kernel)
+// Returns nullopt when the module fails to load. A value-returning helper cannot
+// host ASSERT_* (it expands to `return;`), so the module check must be a fatal
+// assertion at the (void) call site -- otherwise an EXPECT here would record the
+// failure but let execution fall through to `*module`, dereferencing an empty
+// optional. Callers ASSERT_TRUE(has_value()) before using the result.
+std::optional<PlanCandidate> makeCandidate(const catalog::KernelEntry& kernel)
 {
     std::optional<launch::HipModuleGuard> module
         = launch::loadKernelModule(kernel.coPath, kernel.symbol);
-    EXPECT_TRUE(module.has_value()) << "failed to load " << kernel.coPath;
+    if(!module.has_value())
+    {
+        return std::nullopt;
+    }
 
     catalog::LaunchBindings bindings;
     bindings.pointerUids.emplace("X", 1);
@@ -278,12 +287,19 @@ std::vector<float> referenceForShape(size_t rows,
     return ref;
 }
 
-PlanCandidate
+// Returns nullopt on module-load failure (see makeCandidate). The callers here
+// return ShapeOutcome (non-void), so they cannot ASSERT_*; on nullopt they
+// ADD_FAILURE and bail with the partial outcome, which the test-level ASSERTs
+// then flag via the (empty) symbol list.
+std::optional<PlanCandidate>
     makeCandidateForShape(const catalog::KernelEntry& kernel, size_t rows, size_t cols, float eps)
 {
     std::optional<launch::HipModuleGuard> module
         = launch::loadKernelModule(kernel.coPath, kernel.symbol);
-    EXPECT_TRUE(module.has_value()) << "failed to load " << kernel.coPath;
+    if(!module.has_value())
+    {
+        return std::nullopt;
+    }
 
     catalog::LaunchBindings bindings;
     bindings.pointerUids.emplace("X", 1);
@@ -337,8 +353,15 @@ ShapeOutcome runShapeAndCheck(size_t rows, size_t cols, float eps, const std::st
     planCandidates.reserve(candidates.size());
     for(const catalog::Catalog::Candidate& candidate : candidates)
     {
+        std::optional<PlanCandidate> built
+            = makeCandidateForShape(*candidate.kernel, rows, cols, eps);
+        if(!built.has_value())
+        {
+            ADD_FAILURE() << "failed to build candidate for " << candidate.kernel->symbol;
+            return outcome; // bail with the partial outcome; caller asserts on it
+        }
         outcome.symbols.push_back(candidate.kernel->symbol);
-        planCandidates.push_back(makeCandidateForShape(*candidate.kernel, rows, cols, eps));
+        planCandidates.push_back(std::move(*built));
     }
 
     // Host inputs + CPU reference.
@@ -485,8 +508,15 @@ ShapeOutcome runShapeAndCheckBf16(size_t rows, size_t cols, float eps, const std
     planCandidates.reserve(candidates.size());
     for(const catalog::Catalog::Candidate& candidate : candidates)
     {
+        std::optional<PlanCandidate> built
+            = makeCandidateForShape(*candidate.kernel, rows, cols, eps);
+        if(!built.has_value())
+        {
+            ADD_FAILURE() << "failed to build candidate for " << candidate.kernel->symbol;
+            return outcome; // bail with the partial outcome; caller asserts on it
+        }
         outcome.symbols.push_back(candidate.kernel->symbol);
-        planCandidates.push_back(makeCandidateForShape(*candidate.kernel, rows, cols, eps));
+        planCandidates.push_back(std::move(*built));
     }
 
     // Host inputs (bf16 bit patterns) + f32 CPU reference from the same values.
@@ -620,8 +650,7 @@ TEST_F(TestRmsNormSelection, MultipleCandidatesForOneProblem)
     const catalog::Catalog cat = catalog::Catalog::loadForDevice(CATALOG_DIR, ARCH);
     if(cat.empty())
     {
-        GTEST_SKIP() << "empty AOT catalog at " << CATALOG_DIR
-                     << "; build with -DROCKE_PYTHON_DIR to populate it (see the engine README)";
+        AOT_SKIP_OR_FAIL_ON_EMPTY_CATALOG(CATALOG_DIR);
     }
 
     catalog::ProblemShape problem;
@@ -649,8 +678,7 @@ TEST_F(TestRmsNormSelection, TunesRecordsAndCaches)
     const catalog::Catalog cat = catalog::Catalog::loadForDevice(CATALOG_DIR, ARCH);
     if(cat.empty())
     {
-        GTEST_SKIP() << "empty AOT catalog at " << CATALOG_DIR
-                     << "; build with -DROCKE_PYTHON_DIR to populate it (see the engine README)";
+        AOT_SKIP_OR_FAIL_ON_EMPTY_CATALOG(CATALOG_DIR);
     }
 
     catalog::ProblemShape problem;
@@ -667,8 +695,11 @@ TEST_F(TestRmsNormSelection, TunesRecordsAndCaches)
     planCandidates.reserve(candidates.size());
     for(const catalog::Catalog::Candidate& candidate : candidates)
     {
+        std::optional<PlanCandidate> built = makeCandidate(*candidate.kernel);
+        ASSERT_TRUE(built.has_value())
+            << "failed to build candidate for " << candidate.kernel->symbol;
         symbols.push_back(candidate.kernel->symbol);
-        planCandidates.push_back(makeCandidate(*candidate.kernel));
+        planCandidates.push_back(std::move(*built));
     }
 
     const std::string key = catalog::problemKey(candidates.front().family->name, problem);
@@ -698,8 +729,7 @@ TEST_F(TestRmsNormSelection, EachVariantIsCorrect)
     const catalog::Catalog cat = catalog::Catalog::loadForDevice(CATALOG_DIR, ARCH);
     if(cat.empty())
     {
-        GTEST_SKIP() << "empty AOT catalog at " << CATALOG_DIR
-                     << "; build with -DROCKE_PYTHON_DIR to populate it (see the engine README)";
+        AOT_SKIP_OR_FAIL_ON_EMPTY_CATALOG(CATALOG_DIR);
     }
 
     catalog::ProblemShape problem;
@@ -714,7 +744,9 @@ TEST_F(TestRmsNormSelection, EachVariantIsCorrect)
     for(const catalog::Catalog::Candidate& candidate : candidates)
     {
         const catalog::KernelEntry& kernel = *candidate.kernel;
-        PlanCandidate pc = makeCandidate(kernel);
+        std::optional<PlanCandidate> built = makeCandidate(kernel);
+        ASSERT_TRUE(built.has_value()) << "failed to build candidate for " << kernel.symbol;
+        PlanCandidate pc = std::move(*built);
         const CatalogPlan plan(std::move(pc.module),
                                pc.launch,
                                std::move(pc.bindings),
@@ -743,8 +775,7 @@ TEST(TestRmsNormRuntimeN, N2048CompetesWithSpecializations)
     }
     if(catalog::Catalog::loadForDevice(CATALOG_DIR, ARCH).empty())
     {
-        GTEST_SKIP() << "empty AOT catalog at " << CATALOG_DIR
-                     << "; build with -DROCKE_PYTHON_DIR to populate it (see the engine README)";
+        AOT_SKIP_OR_FAIL_ON_EMPTY_CATALOG(CATALOG_DIR);
     }
     const std::string cachePath
         = (fs::temp_directory_path() / "hipdnn_aot_rmsnorm_dyn_2048.json").string();
@@ -768,8 +799,7 @@ TEST(TestRmsNormRuntimeN, N3072RuntimeNOnly)
     }
     if(catalog::Catalog::loadForDevice(CATALOG_DIR, ARCH).empty())
     {
-        GTEST_SKIP() << "empty AOT catalog at " << CATALOG_DIR
-                     << "; build with -DROCKE_PYTHON_DIR to populate it (see the engine README)";
+        AOT_SKIP_OR_FAIL_ON_EMPTY_CATALOG(CATALOG_DIR);
     }
     const std::string cachePath
         = (fs::temp_directory_path() / "hipdnn_aot_rmsnorm_dyn_3072.json").string();
@@ -792,8 +822,7 @@ TEST(TestRmsNormRuntimeN, N2432RuntimeNOnly)
     }
     if(catalog::Catalog::loadForDevice(CATALOG_DIR, ARCH).empty())
     {
-        GTEST_SKIP() << "empty AOT catalog at " << CATALOG_DIR
-                     << "; build with -DROCKE_PYTHON_DIR to populate it (see the engine README)";
+        AOT_SKIP_OR_FAIL_ON_EMPTY_CATALOG(CATALOG_DIR);
     }
     const std::string cachePath
         = (fs::temp_directory_path() / "hipdnn_aot_rmsnorm_dyn_2432.json").string();
@@ -821,8 +850,7 @@ TEST(TestRmsNormBf16, N2048CompetesWithSpecializations)
     }
     if(catalog::Catalog::loadForDevice(CATALOG_DIR, ARCH).empty())
     {
-        GTEST_SKIP() << "empty AOT catalog at " << CATALOG_DIR
-                     << "; build with -DROCKE_PYTHON_DIR to populate it (see the engine README)";
+        AOT_SKIP_OR_FAIL_ON_EMPTY_CATALOG(CATALOG_DIR);
     }
     const std::string cachePath
         = (fs::temp_directory_path() / "hipdnn_aot_rmsnorm_bf16_2048.json").string();
@@ -846,8 +874,7 @@ TEST(TestRmsNormBf16, N4096CompetesWithSpecializations)
     }
     if(catalog::Catalog::loadForDevice(CATALOG_DIR, ARCH).empty())
     {
-        GTEST_SKIP() << "empty AOT catalog at " << CATALOG_DIR
-                     << "; build with -DROCKE_PYTHON_DIR to populate it (see the engine README)";
+        AOT_SKIP_OR_FAIL_ON_EMPTY_CATALOG(CATALOG_DIR);
     }
     const std::string cachePath
         = (fs::temp_directory_path() / "hipdnn_aot_rmsnorm_bf16_4096.json").string();
@@ -868,8 +895,7 @@ TEST(TestRmsNormBf16, N3072RuntimeNOnly)
     }
     if(catalog::Catalog::loadForDevice(CATALOG_DIR, ARCH).empty())
     {
-        GTEST_SKIP() << "empty AOT catalog at " << CATALOG_DIR
-                     << "; build with -DROCKE_PYTHON_DIR to populate it (see the engine README)";
+        AOT_SKIP_OR_FAIL_ON_EMPTY_CATALOG(CATALOG_DIR);
     }
     const std::string cachePath
         = (fs::temp_directory_path() / "hipdnn_aot_rmsnorm_bf16_3072.json").string();

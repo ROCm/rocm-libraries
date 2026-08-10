@@ -16,12 +16,15 @@
                     "equals": "f16"
                 },
                 "M": {
+                    "min": 1,
                     "multiple_of": 64
                 },
                 "N": {
+                    "min": 1,
                     "multiple_of": 64
                 },
                 "K": {
+                    "min": 1,
                     "multiple_of": 32
                 }
             },
@@ -81,12 +84,15 @@
                     "equals": "f16"
                 },
                 "M": {
+                    "min": 1,
                     "multiple_of": 128
                 },
                 "N": {
+                    "min": 1,
                     "multiple_of": 128
                 },
                 "K": {
+                    "min": 1,
                     "multiple_of": 32
                 }
             },
@@ -146,12 +152,15 @@
                     "equals": "f16"
                 },
                 "M": {
+                    "min": 1,
                     "multiple_of": 128
                 },
                 "N": {
+                    "min": 1,
                     "multiple_of": 128
                 },
                 "K": {
+                    "min": 1,
                     "multiple_of": 32
                 }
             },
@@ -211,12 +220,15 @@
                     "equals": "f16"
                 },
                 "M": {
+                    "min": 1,
                     "multiple_of": 128
                 },
                 "N": {
+                    "min": 1,
                     "multiple_of": 64
                 },
                 "K": {
+                    "min": 1,
                     "multiple_of": 32
                 }
             },
@@ -276,12 +288,15 @@
                     "equals": "f16"
                 },
                 "M": {
+                    "min": 1,
                     "multiple_of": 128
                 },
                 "N": {
+                    "min": 1,
                     "multiple_of": 128
                 },
                 "K": {
+                    "min": 1,
                     "multiple_of": 32
                 }
             },
@@ -341,12 +356,15 @@
                     "equals": "f16"
                 },
                 "M": {
+                    "min": 1,
                     "multiple_of": 64
                 },
                 "N": {
+                    "min": 1,
                     "multiple_of": 64
                 },
                 "K": {
+                    "min": 1,
                     "multiple_of": 32
                 }
             },
@@ -406,12 +424,15 @@
                     "equals": "bf16"
                 },
                 "M": {
+                    "min": 1,
                     "multiple_of": 64
                 },
                 "N": {
+                    "min": 1,
                     "multiple_of": 64
                 },
                 "K": {
+                    "min": 1,
                     "multiple_of": 32
                 }
             },
@@ -471,12 +492,15 @@
                     "equals": "bf16"
                 },
                 "M": {
+                    "min": 1,
                     "multiple_of": 128
                 },
                 "N": {
+                    "min": 1,
                     "multiple_of": 128
                 },
                 "K": {
+                    "min": 1,
                     "multiple_of": 32
                 }
             },
@@ -536,12 +560,15 @@
                     "equals": "bf16"
                 },
                 "M": {
+                    "min": 1,
                     "multiple_of": 128
                 },
                 "N": {
+                    "min": 1,
                     "multiple_of": 128
                 },
                 "K": {
+                    "min": 1,
                     "multiple_of": 32
                 }
             },
@@ -601,12 +628,15 @@
                     "equals": "bf16"
                 },
                 "M": {
+                    "min": 1,
                     "multiple_of": 128
                 },
                 "N": {
+                    "min": 1,
                     "multiple_of": 64
                 },
                 "K": {
+                    "min": 1,
                     "multiple_of": 32
                 }
             },
@@ -666,12 +696,15 @@
                     "equals": "bf16"
                 },
                 "M": {
+                    "min": 1,
                     "multiple_of": 128
                 },
                 "N": {
+                    "min": 1,
                     "multiple_of": 128
                 },
                 "K": {
+                    "min": 1,
                     "multiple_of": 32
                 }
             },
@@ -731,12 +764,15 @@
                     "equals": "bf16"
                 },
                 "M": {
+                    "min": 1,
                     "multiple_of": 64
                 },
                 "N": {
+                    "min": 1,
                     "multiple_of": 64
                 },
                 "K": {
+                    "min": 1,
                     "multiple_of": 32
                 }
             },

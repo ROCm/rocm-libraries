@@ -31,6 +31,7 @@
 #include <vector>
 
 #include "catalog/Catalog.hpp"
+#include "engines/aot_catalog_engine/AotCatalogTestSupport.hpp"
 #include "catalog/CatalogTypes.hpp"
 #include "core/Handle.hpp"
 #include "launch/LaunchAbi.hpp"
@@ -129,8 +130,7 @@ TEST(TestAotCatalogGemmNumericParity, WmmaGemmF16MatchesReference)
     const catalog::Catalog cat = catalog::Catalog::loadForDevice(CATALOG_DIR, ARCH);
     if(cat.empty())
     {
-        GTEST_SKIP() << "empty AOT catalog at " << CATALOG_DIR
-                     << "; build with -DROCKE_PYTHON_DIR to populate it (see the engine README)";
+        AOT_SKIP_OR_FAIL_ON_EMPTY_CATALOG(CATALOG_DIR);
     }
 
     constexpr size_t M = 64;
@@ -279,8 +279,7 @@ TEST(TestAotCatalogGemmNumericParity, WmmaGemmBf16MatchesReference)
     const catalog::Catalog cat = catalog::Catalog::loadForDevice(CATALOG_DIR, ARCH);
     if(cat.empty())
     {
-        GTEST_SKIP() << "empty AOT catalog at " << CATALOG_DIR
-                     << "; build with -DROCKE_PYTHON_DIR to populate it (see the engine README)";
+        AOT_SKIP_OR_FAIL_ON_EMPTY_CATALOG(CATALOG_DIR);
     }
 
     constexpr size_t M = 64;

@@ -3,7 +3,7 @@
 #
 # Co-located, build-time producer for the gemm_wmma family: emit the gfx1151
 # no-LDS one-wave-per-16x16-tile *reference* WMMA GEMM (RCR) .co (HSACO), for
-# f16 and bf16, into argv[1]. Runtime never touches ck_dsl -- the per-family
+# f16 and bf16, into argv[1]. Runtime never touches rocke -- the per-family
 # CMakeLists runs this at build time to drop the .co next to the checked-in
 # family.json (family.json is the source of truth; this script emits .co ONLY).
 #
@@ -13,7 +13,7 @@
 #
 # TWO DTYPES, TWO SOURCES:
 #   * f16  -- built from rocKE's real instance
-#     `ck_dsl.instances.gfx1151.wmma_gemm.build_wmma_gemm` (WmmaGemmSpec hard-
+#     `rocke.instances.gfx1151.wmma_gemm.build_wmma_gemm` (WmmaGemmSpec hard-
 #     restricts dtype to "fp16" via a __post_init__ guard). We use it as a
 #     *library* (no rocKE edit).
 #   * bf16 -- WmmaGemmSpec rejects bf16, so rather than EDIT that rocKE instance
@@ -26,7 +26,7 @@
 # block [32,1,1] (one wave per 16x16 output tile), grid (ceil(M/16), ceil(N/16),
 # 1) grid_order "MN" (block_id.x -> M-tile), ABI (A,B,C ptrs; M,N,K i32),
 # workspace 0, RCR layout. Symbols are auto-derived and MUST match family.json's
-# co_file names (ck_dsl_wmma_gemm_wmma16x16x16_{fp16,bf16}_rcr_xm).
+# co_file names (rocke_wmma_gemm_wmma16x16x16_{fp16,bf16}_rcr_xm).
 #
 # CRITICAL gfx1151 gotcha: this is a wave32 kernel (max_workgroup_size = 32). The
 # WMMA fragment ABI does the cross-lane distribution; there are no shuffles, so
@@ -36,9 +36,9 @@
 import os
 import sys
 
-from ck_dsl.core.ir import BF16, I32, IRBuilder, PtrType
-from ck_dsl.helpers.compile import compile_kernel
-from ck_dsl.instances.gfx1151.wmma_gemm import WmmaGemmSpec, build_wmma_gemm
+from rocke.core.ir import BF16, I32, IRBuilder, PtrType
+from rocke.helpers.compile import compile_kernel
+from rocke.instances.gfx1151.wmma_gemm import WmmaGemmSpec, build_wmma_gemm
 
 ARCH = "gfx1151"
 
@@ -49,7 +49,7 @@ _WAVE = 32
 
 
 def _build_wmma_gemm_bf16(symbol: str):
-    """Replicate ck_dsl.instances.gfx1151.wmma_gemm.build_wmma_gemm for bf16
+    """Replicate rocke.instances.gfx1151.wmma_gemm.build_wmma_gemm for bf16
     (WmmaGemmSpec rejects non-fp16). RCR: C[M,N] = A[M,K] @ B[N,K]^T, one wave
     (32 lanes) per 16x16 output tile, no LDS."""
     elem = BF16
@@ -106,6 +106,10 @@ def _build_wmma_gemm_bf16(symbol: str):
 
 def _emit(out_dir, symbol, kernel):
     artifact = compile_kernel(kernel, arch=ARCH)
+    # A zero-byte .co passes the fs::exists gate at catalog load and is catalogued
+    # as a valid kernel, failing only later at hipModuleLoad; fail loudly here.
+    if not artifact.hsaco:
+        raise SystemExit(f"ERROR {symbol}: compiled .co is empty")
     out_path = os.path.join(out_dir, symbol + ".co")
     with open(out_path, "wb") as f:
         f.write(artifact.hsaco)
@@ -118,11 +122,11 @@ def main() -> int:
 
     # f16 via the real rocKE instance (WmmaGemmSpec dtype defaults to "fp16",
     # block_x_is_m=True -> symbol order "xm").
-    f16_spec = WmmaGemmSpec(name="ck_dsl_wmma_gemm", dtype="fp16")
+    f16_spec = WmmaGemmSpec(name="rocke_wmma_gemm", dtype="fp16")
     _emit(out_dir, f16_spec.kernel_name(), build_wmma_gemm(f16_spec, arch=ARCH))
 
     # bf16 via the replicated body (symbol mirrors the fp16 spelling convention).
-    bf16_symbol = "ck_dsl_wmma_gemm_wmma16x16x16_bf16_rcr_xm"
+    bf16_symbol = "rocke_wmma_gemm_wmma16x16x16_bf16_rcr_xm"
     _emit(out_dir, bf16_symbol, _build_wmma_gemm_bf16(bf16_symbol))
 
     return 0

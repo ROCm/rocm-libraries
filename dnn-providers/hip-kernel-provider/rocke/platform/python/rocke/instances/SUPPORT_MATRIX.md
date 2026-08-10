@@ -24,6 +24,7 @@ atom (CDNA: `pipeline=mem`/`compv*`; gfx1151: `pipeline=mem`, `epilogue=default`
 | `elementwise` | ✅ | ✅ | ✅ |
 | `reduce2d` | ✅ | ✅ | ✅ |
 | `rmsnorm2d` | ✅ | ✅ | ✅ |
+| `rmsnorm2d_dynamic` | ✅ | ✅ | ✅ | runtime-N (one binary serves every N % vec == 0) |
 | `layernorm2d` | ✅ | ✅ | ✅ |
 | `add_rmsnorm2d_bf16` | ✅ | ✅ | ✅ |
 | `add_rmsnorm2d_rdquant` | ✅ | ✅ | ✅ |

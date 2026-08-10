@@ -106,6 +106,76 @@ bool batchFoldable(const TensorAttributesWrapper& t, int64_t batch, int64_t seqL
     return strides.size() == 4 && strides[0] == seqLen * strides[2];
 }
 
+// Mask classification, resolved from the full attribute set.
+//
+// This intentionally DUPLICATES asm_sdpa_engine::plan_utils::getMaskType rather
+// than including it. The AOT catalog engine is a throwaway POC and must stay
+// fully decoupled from the ASM SDPA engine so it can be removed cleanly later; a
+// cross-engine include would leave the ASM engine's header on the AOT engine's
+// dependency graph. The precedence rules below must be kept in sync with that
+// source of truth by hand.
+//
+// Two sources can describe the mask: the modern left_bound / right_bound /
+// diagonal_alignment trio, and the deprecated causal_mask /
+// causal_mask_bottom_right booleans. When a deprecated boolean is set it wins and
+// the trio is ignored; otherwise the trio is authoritative. The deprecated
+// booleans are mutually exclusive. left_bound / right_bound are Optional; an
+// unset bound is treated as unbounded (-1), so a partially specified trio (e.g.
+// only right_bound = 0) still derives a mask rather than silently reading as
+// NO_MASK. The deprecated booleans default to false with no has_*() accessor, so
+// "explicitly false" and "unset" are indistinguishable and both mean "not
+// requested".
+enum class AotMaskType
+{
+    NO_MASK,
+    TOP_LEFT_CAUSAL,
+    BOTTOM_RIGHT_CAUSAL,
+    SLIDING_WINDOW
+};
+
+AotMaskType resolveMaskType(const data_objects::SdpaAttributes& attrs)
+{
+    const bool causalDeprecated = attrs.causal_mask();
+    const bool bottomRightDeprecated = attrs.causal_mask_bottom_right();
+
+    // The two deprecated booleans are mutually exclusive; a graph setting both is
+    // malformed. Throwing here is caught by decode()'s std::exception handler,
+    // which declines the graph (another engine / native serves it).
+    if(causalDeprecated && bottomRightDeprecated)
+    {
+        throwPluginError(HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+                         "aot-catalog(sdpa): causal_mask and causal_mask_bottom_right are "
+                         "mutually exclusive but both are set");
+    }
+
+    // Deprecated booleans take precedence: when either is set, defer to it and
+    // ignore the modern bounds trio.
+    if(causalDeprecated)
+    {
+        return AotMaskType::TOP_LEFT_CAUSAL;
+    }
+    if(bottomRightDeprecated)
+    {
+        return AotMaskType::BOTTOM_RIGHT_CAUSAL;
+    }
+
+    // No deprecated boolean set: the modern bounds trio is authoritative. An
+    // unset bound means unbounded, represented here as -1.
+    const int64_t left = attrs.left_bound().has_value() ? attrs.left_bound().value() : -1;
+    const int64_t right = attrs.right_bound().has_value() ? attrs.right_bound().value() : -1;
+    if(left == -1 && right == -1) // both unbounded
+    {
+        return AotMaskType::NO_MASK;
+    }
+    if(left == -1 && right == 0) // causal: attend up to the diagonal
+    {
+        return attrs.diagonal_alignment() == data_objects::DiagonalAlignment::BOTTOM_RIGHT
+                   ? AotMaskType::BOTTOM_RIGHT_CAUSAL
+                   : AotMaskType::TOP_LEFT_CAUSAL;
+    }
+    return AotMaskType::SLIDING_WINDOW; // anything else is a sliding window
+}
+
 } // namespace
 
 std::optional<catalog::ProblemShape> SdpaAdapter::decode(const IGraph& graph) const
@@ -228,19 +298,34 @@ std::optional<catalog::ProblemShape> SdpaAdapter::decode(const IGraph& graph) co
                                && batchFoldable(k, batch, seqLenKv)
                                && batchFoldable(v, batch, seqLenKv);
 
-        // Masking / bias features (each formerly a hard decline).
-        const bool causal = attrs.causal_mask();
-        const bool causalBottomRight = attrs.causal_mask_bottom_right();
+        // Masking / bias features (each formerly a hard decline). The mask facts
+        // are derived from the resolved mask type so a graph expressing a causal
+        // mask via the modern left_bound/right_bound/diagonal_alignment trio is
+        // classified identically to one using the deprecated booleans -- reading
+        // the deprecated booleans alone would misclassify the trio form as
+        // NO_MASK and hand a masked problem to an unmasked kernel.
+        const AotMaskType maskType = resolveMaskType(attrs);
+        const bool causal = maskType == AotMaskType::TOP_LEFT_CAUSAL;
+        const bool causalBottomRight = maskType == AotMaskType::BOTTOM_RIGHT_CAUSAL;
+        const bool hasDiagonalBand = maskType == AotMaskType::SLIDING_WINDOW;
         const bool hasAlibi = attrs.alibi_mask();
         const bool hasPaddingMask = attrs.padding_mask();
         const bool hasAttnMask = attrs.attn_mask_tensor_uid().has_value();
         const bool hasBlockMask = attrs.block_mask_tensor_uid().has_value();
         const bool hasSink = attrs.sink_token_tensor_uid().has_value();
 
-        // Dropout: a nonzero probability or any dropout-plumbing tensor.
+        // A non-default mma_core_mode pins the softmax/matmul compute dtype; a
+        // kernel baked for the default (UNSET) mode cannot honor it, so publish it
+        // as a fact those kernels constrain to false.
+        const bool hasMmaCoreMode = attrs.mma_core_mode() != data_objects::DataType::UNSET;
+
+        // Dropout: a nonzero probability or any dropout-plumbing tensor. The
+        // dropout_scale tensor is part of that plumbing -- omitting it here let a
+        // graph carrying only dropout_scale read as dropout-free.
         const bool hasDropout = (attrs.dropout_probability().has_value()
                                  && attrs.dropout_probability().value() != 0.0F)
                                 || attrs.dropout_mask_tensor_uid().has_value()
+                                || attrs.dropout_scale_tensor_uid().has_value()
                                 || attrs.seed_tensor_uid().has_value()
                                 || attrs.offset_tensor_uid().has_value();
 
@@ -275,6 +360,8 @@ std::optional<catalog::ProblemShape> SdpaAdapter::decode(const IGraph& graph) co
         shape.emplace("batch_foldable", catalog::ShapeValue{batchFold});
         shape.emplace("causal", catalog::ShapeValue{causal});
         shape.emplace("causal_bottom_right", catalog::ShapeValue{causalBottomRight});
+        shape.emplace("has_diagonal_band", catalog::ShapeValue{hasDiagonalBand});
+        shape.emplace("has_mma_core_mode", catalog::ShapeValue{hasMmaCoreMode});
         shape.emplace("has_alibi", catalog::ShapeValue{hasAlibi});
         shape.emplace("has_padding_mask", catalog::ShapeValue{hasPaddingMask});
         shape.emplace("has_attn_mask", catalog::ShapeValue{hasAttnMask});

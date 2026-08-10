@@ -49,7 +49,12 @@ option(HIPKERNELPROVIDER_ENABLE_TESTS "Build tests" ON)
 option(HIPKERNELPROVIDER_ENABLE_ROCKE "Build rocKE engine and smoke tests" OFF)
 option(ENABLE_ASM_SDPA_ENGINE "Build the ASM SDPA engine" ON)
 option(ENABLE_HIP_MLOPS_ENGINE "Build the HIP kernel engine" ON)
-option(ENABLE_AOT_CATALOG_ENGINE "Build the AOT catalog engine" ON)
+# OFF by default: the AOT catalog engine is a throwaway POC (see
+# src/engines/aot_catalog_engine/README.md) and must not ship in a normal build. It
+# is opted into explicitly by the dedicated build lane that also sets ROCKE_PYTHON_DIR
+# to populate the catalog; a default-ON here would silently register an unpopulated
+# engine in every downstream build.
+option(ENABLE_AOT_CATALOG_ENGINE "Build the AOT catalog engine (throwaway POC; off by default)" OFF)
 
 option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
 option(ENABLE_CLANG_FORMAT "Enable Clang-Format checks" ON)

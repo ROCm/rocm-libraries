@@ -15,12 +15,12 @@
 import sys
 import os
 
-from ck_dsl.instances.common.rmsnorm2d import RMSNorm2DSpec, build_rmsnorm2d
-from ck_dsl.instances.common.rmsnorm2d_dynamic import (
+from rocke.instances.common.rmsnorm2d import RMSNorm2DSpec, build_rmsnorm2d
+from rocke.instances.common.rmsnorm2d_dynamic import (
     RMSNorm2DDynamicSpec,
     build_rmsnorm2d_dynamic,
 )
-from ck_dsl.helpers.compile import compile_kernel
+from rocke.helpers.compile import compile_kernel
 
 ARCH = "gfx1151"
 
@@ -95,6 +95,10 @@ def _emit_static(out_dir, configs, dtype):
         artifact = compile_kernel(kernel, arch=ARCH)
 
         symbol = spec.kernel_name()
+        # A zero-byte .co passes the fs::exists gate at catalog load and is
+        # catalogued as valid, failing only later at hipModuleLoad; fail loudly here.
+        if not artifact.hsaco:
+            raise SystemExit(f"ERROR {symbol}: compiled .co is empty")
         out_path = os.path.join(out_dir, symbol + ".co")
         with open(out_path, "wb") as f:
             f.write(artifact.hsaco)
@@ -118,6 +122,10 @@ def _emit_dynamic(out_dir, configs, dtype):
         artifact = compile_kernel(kernel, arch=ARCH)
 
         symbol = spec.kernel_name()
+        # A zero-byte .co passes the fs::exists gate at catalog load and is
+        # catalogued as valid, failing only later at hipModuleLoad; fail loudly here.
+        if not artifact.hsaco:
+            raise SystemExit(f"ERROR {symbol}: compiled .co is empty")
         out_path = os.path.join(out_dir, symbol + ".co")
         with open(out_path, "wb") as f:
             f.write(artifact.hsaco)

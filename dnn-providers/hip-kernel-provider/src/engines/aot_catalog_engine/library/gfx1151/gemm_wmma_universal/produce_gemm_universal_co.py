@@ -3,7 +3,7 @@
 #
 # Co-located, build-time producer for the gemm_wmma_universal family: emit a
 # gfx1151 *tiled* WMMA GEMM (RCR) .co (HSACO) sweep, for f16 and bf16, into
-# argv[1]. Runtime never touches ck_dsl -- the per-family CMakeLists runs this at
+# argv[1]. Runtime never touches rocke -- the per-family CMakeLists runs this at
 # build time to drop the .co next to the checked-in family.json (family.json is
 # the source of truth; this script emits .co ONLY).
 #
@@ -14,17 +14,19 @@
 # WHY THIS FILE EXISTS (vs. produce_gemm_wmma_co.py): that producer builds the
 # no-LDS one-wave-per-16x16-tile *reference* kernel -- correct but ~3-12x slower
 # than hipBLASLt. This one calls rocKE's real tiled builder
-# `ck_dsl.instances.common.gemm_universal.build_universal_gemm`, which emits an
+# `rocke.instances.common.gemm_universal.build_universal_gemm`, which emits an
 # LDS-staged, register-blocked, multi-WMMA-per-workgroup GEMM (verified on gfx1151
-# upstream via examples/common/universal_gemm_verify.py). We use ck_dsl purely as a
+# upstream via examples/common/universal_gemm_verify.py). We use rocke purely as a
 # *library* -- NO rocKE edit -- exactly mirroring that example's known-good spec.
 #
 # TILE/PIPELINE SWEEP: emits a sweep of tile/warp/pipeline configs (bigger tiles
 # quarter the A/B global traffic; wmma_v1 is the alternate compute schedule) so
-# the engine's TuneCache can measure-and-pick the fastest per shape. Configs the
-# gfx1151 WMMA gate (`GemmPipelinePolicy.validate`) rejects are skipped with a
-# printed reason. Symbols are auto-derived and MUST match family.json's co_file
-# names (ugemm_gfx1151_{fp16,bf16}_t..._w..._wt16x16x16_..._intrawave_default).
+# the engine's TuneCache can measure-and-pick the fastest per shape. Every row is
+# chosen to be valid on gfx1151; if the gfx1151 WMMA gate
+# (`GemmPipelinePolicy.validate`) rejects one, the sweep has diverged from the arch
+# and the build FAILS (a partial family would silently drop at catalog load).
+# Symbols are auto-derived and MUST match family.json's co_file names
+# (ugemm_gfx1151_{fp16,bf16}_t..._w..._wt16x16x16_..._intrawave_default).
 #
 # LAUNCH CONTRACT (encoded in family.json): block (block_size,1,1); grid
 # (ceil(N/tile_n), ceil(M/tile_m), 1) grid_order "NM" (block_id.x -> N-tile --
@@ -37,10 +39,10 @@
 import os
 import sys
 
-from ck_dsl.core.arch import ArchTarget
-from ck_dsl.helpers.compile import compile_kernel
-from ck_dsl.instances import GemmPipelinePolicy
-from ck_dsl.instances.common.gemm_universal import (
+from rocke.core.arch import ArchTarget
+from rocke.helpers.compile import compile_kernel
+from rocke.instances import GemmPipelinePolicy
+from rocke.instances.common.gemm_universal import (
     DataSpec,
     TileSpec,
     TraitSpec,
@@ -58,7 +60,8 @@ _DTYPES = ["fp16", "bf16"]
 # The sweep. Each row is (tile_m, tile_n, tile_k, warp_m, warp_n, pipeline). The
 # per-warp register-blocking repeat is derived = tile_/(warp_*warp_tile_). Bigger
 # tiles = fewer redundant A/B global loads (the LTX-shape lever); wmma_v1 is the
-# alternate schedule. Invalid-on-gfx1151 rows are skipped by the policy gate.
+# alternate schedule. Every row must be valid on gfx1151 -- a policy rejection
+# fails the build (see the sweep note above).
 _SWEEP = [
     (64, 64, 32, 2, 2, "mem"),
     (128, 128, 32, 4, 4, "mem"),
@@ -130,22 +133,32 @@ def main() -> int:
     policy = GemmPipelinePolicy()
 
     seen = set()
+    skipped = []
     for dtype in _DTYPES:
         for tm, tn, tk, wm, wn, pipeline in _SWEEP:
             spec = _build_spec(dtype, target, tm, tn, tk, wm, wn, pipeline)
             res = policy.validate(target, spec)
             if not res.ok:
+                # Every row in _SWEEP is chosen to be valid on this arch, and this
+                # producer only runs when rocKE + the arch match, so a rejection
+                # means the sweep and the gfx1151 WMMA policy have diverged. Emitting
+                # a partial family would let the missing .co drop the WHOLE family at
+                # catalog load, so record it and fail below rather than exit 0.
                 print(
                     f"SKIP {dtype} t{tm}x{tn}x{tk} w{wm}x{wn} {pipeline}: {res.reason}"
                 )
+                skipped.append(f"{dtype} t{tm}x{tn}x{tk} w{wm}x{wn} {pipeline}")
                 continue
 
             artifact = compile_kernel(build_universal_gemm(spec, arch=ARCH), arch=ARCH)
             symbol = artifact.kernel_name
             if symbol in seen:
-                continue  # dedupe identical configs
+                continue  # dedupe identical configs (not a skip -- no family entry)
             seen.add(symbol)
 
+            if not artifact.hsaco:
+                print(f"ERROR {symbol}: compiled .co is empty", file=sys.stderr)
+                return 1
             out_path = os.path.join(out_dir, symbol + ".co")
             with open(out_path, "wb") as f:
                 f.write(artifact.hsaco)
@@ -155,6 +168,14 @@ def main() -> int:
                 f"bytes={len(artifact.hsaco)}"
             )
 
+    if skipped:
+        print(
+            f"ERROR: {len(skipped)} sweep row(s) rejected by the gfx1151 policy "
+            f"({'; '.join(skipped)}); the family.json would be incomplete -- failing "
+            "the build (see issue 3 / the engine README).",
+            file=sys.stderr,
+        )
+        return 1
     return 0
 
 

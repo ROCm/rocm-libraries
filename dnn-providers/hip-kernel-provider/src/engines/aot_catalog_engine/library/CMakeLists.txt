@@ -36,38 +36,38 @@ endif()
 # rocKE availability (resolved once; per-family CMakeLists read _AOT_ROCKE_OK).
 # ---------------------------------------------------------------------------
 set(ROCKE_PYTHON_DIR "" CACHE PATH
-    "Path to rocKE's ck_dsl python package dir (.../projects/composablekernel/python). \
+    "Path to rocKE's rocke python package dir (.../hip-kernel-provider/rocke/platform/python). \
 Required ONLY to build rocKE-AOT kernel families; leave empty to skip them.")
 set(ROCKE_COMGR_LIB "" CACHE FILEPATH
     "Optional path to libamd_comgr.so for the rocKE producer (else it uses \
-CK_DSL_COMGR_LIB from the environment or /opt/rocm).")
+ROCKE_COMGR_LIB from the environment or /opt/rocm).")
 
 find_package(Python3 COMPONENTS Interpreter QUIET)
 
 set(_AOT_ROCKE_OK TRUE)
-if(NOT ROCKE_PYTHON_DIR OR NOT EXISTS "${ROCKE_PYTHON_DIR}/ck_dsl")
+if(NOT ROCKE_PYTHON_DIR OR NOT EXISTS "${ROCKE_PYTHON_DIR}/rocke")
     set(_AOT_ROCKE_OK FALSE)
     message(WARNING
         "aot-catalog: ROCKE_PYTHON_DIR not set or invalid -- rocKE-AOT kernel "
         "families will be SKIPPED (engine still builds; GPU parity tests skip on "
-        "the empty catalog). Set -DROCKE_PYTHON_DIR=<rocKE>/projects/composablekernel/python "
+        "the empty catalog). Set -DROCKE_PYTHON_DIR=<hip-kernel-provider>/rocke/platform/python "
         "to build kernels.")
 elseif(NOT Python3_Interpreter_FOUND)
     set(_AOT_ROCKE_OK FALSE)
     message(WARNING "aot-catalog: Python3 interpreter not found -- rocKE-AOT families skipped.")
 endif()
 
-# The producer compiles .co in-process via libamd_comgr.so (ck_dsl's comgr runtime),
+# The producer compiles .co in-process via libamd_comgr.so (rocke's comgr runtime),
 # NOT hipcc. Resolve it the SAME way the producer will at build time -- explicit
-# ROCKE_COMGR_LIB, else $CK_DSL_COMGR_LIB from the environment, else the ROCm default
+# ROCKE_COMGR_LIB, else $ROCKE_COMGR_LIB from the environment, else the ROCm default
 # -- so a box that has rocKE's python tree but NO comgr SKIPS the families (build
 # still succeeds) instead of hard-failing when the producer throws mid-build.
 if(_AOT_ROCKE_OK)
     set(_aot_comgr "")
     if(ROCKE_COMGR_LIB AND EXISTS "${ROCKE_COMGR_LIB}")
         set(_aot_comgr "${ROCKE_COMGR_LIB}")
-    elseif(DEFINED ENV{CK_DSL_COMGR_LIB} AND EXISTS "$ENV{CK_DSL_COMGR_LIB}")
-        set(_aot_comgr "$ENV{CK_DSL_COMGR_LIB}")
+    elseif(DEFINED ENV{ROCKE_COMGR_LIB} AND EXISTS "$ENV{ROCKE_COMGR_LIB}")
+        set(_aot_comgr "$ENV{ROCKE_COMGR_LIB}")
     else()
         find_library(_AOT_COMGR_LIB NAMES amd_comgr
             HINTS "$ENV{ROCM_PATH}/lib" "$ENV{ROCM_PATH}/lib64" /opt/rocm/lib /opt/rocm/lib64)
@@ -79,7 +79,7 @@ if(_AOT_ROCKE_OK)
         set(_AOT_ROCKE_OK FALSE)
         message(WARNING
             "aot-catalog: rocKE python found but libamd_comgr.so was not (checked "
-            "ROCKE_COMGR_LIB, \$CK_DSL_COMGR_LIB, and the ROCm lib dirs) -- rocKE-AOT "
+            "ROCKE_COMGR_LIB, \$ROCKE_COMGR_LIB, and the ROCm lib dirs) -- rocKE-AOT "
             "families SKIPPED (engine still builds; GPU parity tests skip on the empty "
             "catalog). Set -DROCKE_COMGR_LIB=<path/to/libamd_comgr.so> to build kernels.")
     endif()
@@ -155,10 +155,29 @@ function(aot_add_rocke_family)
         return()
     endif()
 
-    # Env for the producer: PYTHONPATH -> ck_dsl; optional comgr override.
+    # Guard a partial/half-added family folder. The folder was auto-discovered by
+    # its CMakeLists alone, but the build-time custom command below needs BOTH the
+    # producer script and the checked-in family.json; if either is missing the
+    # command fails cryptically mid-build (python can't find the producer, or the
+    # family.json copy errors). Warn and skip -- mirroring the rocKE-absence handling
+    # above -- so an incomplete folder never breaks the rest of the catalog build.
+    if(NOT EXISTS ${_src}/${F_PRODUCER})
+        message(WARNING
+            "aot-catalog: skipping ${F_ARCH}/${F_FAMILY} -- producer script "
+            "'${F_PRODUCER}' not found in ${_src} (partial family folder?)")
+        return()
+    endif()
+    if(NOT EXISTS ${_src}/family.json)
+        message(WARNING
+            "aot-catalog: skipping ${F_ARCH}/${F_FAMILY} -- family.json not found "
+            "in ${_src} (partial family folder?)")
+        return()
+    endif()
+
+    # Env for the producer: PYTHONPATH -> rocke; optional comgr override.
     set(_env PYTHONPATH=${ROCKE_PYTHON_DIR})
     if(ROCKE_COMGR_LIB)
-        list(APPEND _env CK_DSL_COMGR_LIB=${ROCKE_COMGR_LIB})
+        list(APPEND _env ROCKE_COMGR_LIB=${ROCKE_COMGR_LIB})
     endif()
 
     set(_stamp ${CMAKE_CURRENT_BINARY_DIR}/${F_FAMILY}.stamp)

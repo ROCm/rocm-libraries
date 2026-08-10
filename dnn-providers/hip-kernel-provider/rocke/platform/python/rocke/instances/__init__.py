@@ -138,6 +138,13 @@ from .common.rmsnorm2d import (  # noqa: F401
     rmsnorm2d_grid,
     rmsnorm2d_signature,
 )
+from .common.rmsnorm2d_dynamic import (  # noqa: F401
+    RMSNorm2DDynamicSpec,
+    build_rmsnorm2d_dynamic,
+    is_valid_spec as is_valid_rmsnorm2d_dynamic_spec,
+    rmsnorm2d_dynamic_grid,
+    rmsnorm2d_dynamic_signature,
+)
 from .common.reduce import (  # noqa: F401
     Reduce2DSpec,
     ReduceOp,

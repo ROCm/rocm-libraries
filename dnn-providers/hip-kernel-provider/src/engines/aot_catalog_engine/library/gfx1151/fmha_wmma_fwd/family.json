@@ -9,8 +9,8 @@
     "_comment": "Algorithm-level family: one folder per algorithm, every kernel carries its own dtype constraint (f16/bf16). All kernels share the same algorithm and tunable knob-space; the knobs are baked into each .co at produce time and surface here as each kernel's constraints. Catalog::candidatesFor gathers by op_kind and gates per-kernel on the dtype constraint, so f16 and bf16 coexist with no engine change.",
     "kernels": [
         {
-            "symbol": "ck_dsl_wmma_fmha_fwd_wmma16x16x16_H64_HQ32_HK32_f16_none_vgather",
-            "co_file": "ck_dsl_wmma_fmha_fwd_wmma16x16x16_H64_HQ32_HK32_f16_none_vgather.co",
+            "symbol": "rocke_wmma_fmha_fwd_wmma16x16x16_H64_HQ32_HK32_f16_none_vgather",
+            "co_file": "rocke_wmma_fmha_fwd_wmma16x16x16_H64_HQ32_HK32_f16_none_vgather.co",
             "_constraints_comment": "The numeric-shape constraints (dtype/D/H/H_kv/S_q/S_kv) plus the capability constraints below pin this kernel to exactly the graphs it can serve. Each capability key is a fact the SdpaAdapter publishes; equals:false/true here reproduces what used to be a hard C++ decline (mask_mode=none, MHA-only, contiguous-D, batch-foldable). Omitting a capability constraint would ASSERT this kernel handles that case -- see the engine README capability-key table.",
             "constraints": {
                 "dtype": {
@@ -26,9 +26,11 @@
                     "equals": 32
                 },
                 "S_q": {
+                    "min": 1,
                     "multiple_of": 16
                 },
                 "S_kv": {
+                    "min": 1,
                     "multiple_of": 16
                 },
                 "gqa_ratio": {
@@ -44,6 +46,12 @@
                     "equals": false
                 },
                 "causal_bottom_right": {
+                    "equals": false
+                },
+                "has_diagonal_band": {
+                    "equals": false
+                },
+                "has_mma_core_mode": {
                     "equals": false
                 },
                 "has_alibi": {
@@ -160,8 +168,8 @@
             "workspace_bytes": 0
         },
         {
-            "symbol": "ck_dsl_wmma_fmha_fwd_wmma16x16x16_H64_HQ32_HK32_bf16_none_vgather",
-            "co_file": "ck_dsl_wmma_fmha_fwd_wmma16x16x16_H64_HQ32_HK32_bf16_none_vgather.co",
+            "symbol": "rocke_wmma_fmha_fwd_wmma16x16x16_H64_HQ32_HK32_bf16_none_vgather",
+            "co_file": "rocke_wmma_fmha_fwd_wmma16x16x16_H64_HQ32_HK32_bf16_none_vgather.co",
             "_constraints_comment": "See the f16 kernel above: same capability constraints, differing only in dtype.",
             "constraints": {
                 "dtype": {
@@ -177,9 +185,11 @@
                     "equals": 32
                 },
                 "S_q": {
+                    "min": 1,
                     "multiple_of": 16
                 },
                 "S_kv": {
+                    "min": 1,
                     "multiple_of": 16
                 },
                 "gqa_ratio": {
@@ -195,6 +205,12 @@
                     "equals": false
                 },
                 "causal_bottom_right": {
+                    "equals": false
+                },
+                "has_diagonal_band": {
+                    "equals": false
+                },
+                "has_mma_core_mode": {
                     "equals": false
                 },
                 "has_alibi": {

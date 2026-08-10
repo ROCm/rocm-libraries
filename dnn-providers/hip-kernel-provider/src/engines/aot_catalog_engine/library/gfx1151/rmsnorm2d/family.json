@@ -9,8 +9,8 @@
     "_comment": "Algorithm-level family: one folder per algorithm, every kernel carries its own dtype constraint (f16/bf16). All kernels share the same algorithm and tunable knob-space; the knobs are baked into each .co at produce time and surface here as each kernel's constraints. Catalog::candidatesFor gathers by op_kind and gates per-kernel on the dtype constraint, so f16 and bf16 coexist with no engine change.",
     "kernels": [
         {
-            "symbol": "ck_dsl_rmsnorm2d_fwd_f16_N2048_b256_v4",
-            "co_file": "ck_dsl_rmsnorm2d_fwd_f16_N2048_b256_v4.co",
+            "symbol": "rocke_rmsnorm2d_fwd_f16_N2048_b256_v4",
+            "co_file": "rocke_rmsnorm2d_fwd_f16_N2048_b256_v4.co",
             "constraints": {
                 "dtype": {
                     "equals": "f16"
@@ -58,8 +58,8 @@
             "workspace_bytes": 0
         },
         {
-            "symbol": "ck_dsl_rmsnorm2d_fwd_f16_N2048_b512_v4",
-            "co_file": "ck_dsl_rmsnorm2d_fwd_f16_N2048_b512_v4.co",
+            "symbol": "rocke_rmsnorm2d_fwd_f16_N2048_b512_v4",
+            "co_file": "rocke_rmsnorm2d_fwd_f16_N2048_b512_v4.co",
             "constraints": {
                 "dtype": {
                     "equals": "f16"
@@ -107,8 +107,8 @@
             "workspace_bytes": 0
         },
         {
-            "symbol": "ck_dsl_rmsnorm2d_fwd_f16_N2048_b128_v8",
-            "co_file": "ck_dsl_rmsnorm2d_fwd_f16_N2048_b128_v8.co",
+            "symbol": "rocke_rmsnorm2d_fwd_f16_N2048_b128_v8",
+            "co_file": "rocke_rmsnorm2d_fwd_f16_N2048_b128_v8.co",
             "constraints": {
                 "dtype": {
                     "equals": "f16"
@@ -156,8 +156,8 @@
             "workspace_bytes": 0
         },
         {
-            "symbol": "ck_dsl_rmsnorm2d_fwd_f16_N2048_b64_v8",
-            "co_file": "ck_dsl_rmsnorm2d_fwd_f16_N2048_b64_v8.co",
+            "symbol": "rocke_rmsnorm2d_fwd_f16_N2048_b64_v8",
+            "co_file": "rocke_rmsnorm2d_fwd_f16_N2048_b64_v8.co",
             "constraints": {
                 "dtype": {
                     "equals": "f16"
@@ -205,8 +205,8 @@
             "workspace_bytes": 0
         },
         {
-            "symbol": "ck_dsl_rmsnorm2d_fwd_f16_N1024_b256_v4",
-            "co_file": "ck_dsl_rmsnorm2d_fwd_f16_N1024_b256_v4.co",
+            "symbol": "rocke_rmsnorm2d_fwd_f16_N1024_b256_v4",
+            "co_file": "rocke_rmsnorm2d_fwd_f16_N1024_b256_v4.co",
             "constraints": {
                 "dtype": {
                     "equals": "f16"
@@ -254,8 +254,8 @@
             "workspace_bytes": 0
         },
         {
-            "symbol": "ck_dsl_rmsnorm2d_fwd_f16_N1024_b128_v8",
-            "co_file": "ck_dsl_rmsnorm2d_fwd_f16_N1024_b128_v8.co",
+            "symbol": "rocke_rmsnorm2d_fwd_f16_N1024_b128_v8",
+            "co_file": "rocke_rmsnorm2d_fwd_f16_N1024_b128_v8.co",
             "constraints": {
                 "dtype": {
                     "equals": "f16"
@@ -303,8 +303,8 @@
             "workspace_bytes": 0
         },
         {
-            "symbol": "ck_dsl_rmsnorm2d_fwd_f16_N4096_b512_v4",
-            "co_file": "ck_dsl_rmsnorm2d_fwd_f16_N4096_b512_v4.co",
+            "symbol": "rocke_rmsnorm2d_fwd_f16_N4096_b512_v4",
+            "co_file": "rocke_rmsnorm2d_fwd_f16_N4096_b512_v4.co",
             "constraints": {
                 "dtype": {
                     "equals": "f16"
@@ -352,8 +352,8 @@
             "workspace_bytes": 0
         },
         {
-            "symbol": "ck_dsl_rmsnorm2d_fwd_f16_N4096_b256_v8",
-            "co_file": "ck_dsl_rmsnorm2d_fwd_f16_N4096_b256_v8.co",
+            "symbol": "rocke_rmsnorm2d_fwd_f16_N4096_b256_v8",
+            "co_file": "rocke_rmsnorm2d_fwd_f16_N4096_b256_v8.co",
             "constraints": {
                 "dtype": {
                     "equals": "f16"
@@ -401,14 +401,15 @@
             "workspace_bytes": 0
         },
         {
-            "symbol": "ck_dsl_rmsnorm2d_fwd_dyn_f16_b256_v4",
-            "co_file": "ck_dsl_rmsnorm2d_fwd_dyn_f16_b256_v4.co",
+            "symbol": "rocke_rmsnorm2d_fwd_dyn_f16_b256_v4",
+            "co_file": "rocke_rmsnorm2d_fwd_dyn_f16_b256_v4.co",
             "_comment": "Runtime-N: N read from the i32 arg. No N==<n> rule, so it matches any N that is a multiple of vec=4 (vec-aligned rows). Sole match for unlisted N (3072, 2432, ...); competes with the static specializations on 1024/2048/4096.",
             "constraints": {
                 "dtype": {
                     "equals": "f16"
                 },
                 "N": {
+                    "min": 1,
                     "multiple_of": 4
                 }
             },
@@ -451,14 +452,15 @@
             "workspace_bytes": 0
         },
         {
-            "symbol": "ck_dsl_rmsnorm2d_fwd_dyn_f16_b128_v8",
-            "co_file": "ck_dsl_rmsnorm2d_fwd_dyn_f16_b128_v8.co",
+            "symbol": "rocke_rmsnorm2d_fwd_dyn_f16_b128_v8",
+            "co_file": "rocke_rmsnorm2d_fwd_dyn_f16_b128_v8.co",
             "_comment": "Runtime-N: N read from the i32 arg. No N==<n> rule, so it matches any N that is a multiple of vec=8 (vec-aligned rows). Sole match for unlisted N (3072, 2432, ...); competes with the static specializations on 1024/2048/4096.",
             "constraints": {
                 "dtype": {
                     "equals": "f16"
                 },
                 "N": {
+                    "min": 1,
                     "multiple_of": 8
                 }
             },
@@ -501,8 +503,8 @@
             "workspace_bytes": 0
         },
         {
-            "symbol": "ck_dsl_rmsnorm2d_fwd_bf16_N2048_b256_v4",
-            "co_file": "ck_dsl_rmsnorm2d_fwd_bf16_N2048_b256_v4.co",
+            "symbol": "rocke_rmsnorm2d_fwd_bf16_N2048_b256_v4",
+            "co_file": "rocke_rmsnorm2d_fwd_bf16_N2048_b256_v4.co",
             "constraints": {
                 "dtype": {
                     "equals": "bf16"
@@ -550,8 +552,8 @@
             "workspace_bytes": 0
         },
         {
-            "symbol": "ck_dsl_rmsnorm2d_fwd_bf16_N2048_b512_v4",
-            "co_file": "ck_dsl_rmsnorm2d_fwd_bf16_N2048_b512_v4.co",
+            "symbol": "rocke_rmsnorm2d_fwd_bf16_N2048_b512_v4",
+            "co_file": "rocke_rmsnorm2d_fwd_bf16_N2048_b512_v4.co",
             "constraints": {
                 "dtype": {
                     "equals": "bf16"
@@ -599,8 +601,8 @@
             "workspace_bytes": 0
         },
         {
-            "symbol": "ck_dsl_rmsnorm2d_fwd_bf16_N2048_b128_v8",
-            "co_file": "ck_dsl_rmsnorm2d_fwd_bf16_N2048_b128_v8.co",
+            "symbol": "rocke_rmsnorm2d_fwd_bf16_N2048_b128_v8",
+            "co_file": "rocke_rmsnorm2d_fwd_bf16_N2048_b128_v8.co",
             "constraints": {
                 "dtype": {
                     "equals": "bf16"
@@ -648,8 +650,8 @@
             "workspace_bytes": 0
         },
         {
-            "symbol": "ck_dsl_rmsnorm2d_fwd_bf16_N2048_b64_v8",
-            "co_file": "ck_dsl_rmsnorm2d_fwd_bf16_N2048_b64_v8.co",
+            "symbol": "rocke_rmsnorm2d_fwd_bf16_N2048_b64_v8",
+            "co_file": "rocke_rmsnorm2d_fwd_bf16_N2048_b64_v8.co",
             "constraints": {
                 "dtype": {
                     "equals": "bf16"
@@ -697,8 +699,8 @@
             "workspace_bytes": 0
         },
         {
-            "symbol": "ck_dsl_rmsnorm2d_fwd_bf16_N4096_b512_v4",
-            "co_file": "ck_dsl_rmsnorm2d_fwd_bf16_N4096_b512_v4.co",
+            "symbol": "rocke_rmsnorm2d_fwd_bf16_N4096_b512_v4",
+            "co_file": "rocke_rmsnorm2d_fwd_bf16_N4096_b512_v4.co",
             "constraints": {
                 "dtype": {
                     "equals": "bf16"
@@ -746,8 +748,8 @@
             "workspace_bytes": 0
         },
         {
-            "symbol": "ck_dsl_rmsnorm2d_fwd_bf16_N4096_b256_v8",
-            "co_file": "ck_dsl_rmsnorm2d_fwd_bf16_N4096_b256_v8.co",
+            "symbol": "rocke_rmsnorm2d_fwd_bf16_N4096_b256_v8",
+            "co_file": "rocke_rmsnorm2d_fwd_bf16_N4096_b256_v8.co",
             "constraints": {
                 "dtype": {
                     "equals": "bf16"
@@ -795,14 +797,15 @@
             "workspace_bytes": 0
         },
         {
-            "symbol": "ck_dsl_rmsnorm2d_fwd_dyn_bf16_b256_v4",
-            "co_file": "ck_dsl_rmsnorm2d_fwd_dyn_bf16_b256_v4.co",
+            "symbol": "rocke_rmsnorm2d_fwd_dyn_bf16_b256_v4",
+            "co_file": "rocke_rmsnorm2d_fwd_dyn_bf16_b256_v4.co",
             "_comment": "Runtime-N: N read from the i32 arg. No N==<n> rule, so it matches any N that is a multiple of vec=4 (vec-aligned rows). Sole match for unlisted N; competes with the static specializations on 2048/4096.",
             "constraints": {
                 "dtype": {
                     "equals": "bf16"
                 },
                 "N": {
+                    "min": 1,
                     "multiple_of": 4
                 }
             },
@@ -845,14 +848,15 @@
             "workspace_bytes": 0
         },
         {
-            "symbol": "ck_dsl_rmsnorm2d_fwd_dyn_bf16_b128_v8",
-            "co_file": "ck_dsl_rmsnorm2d_fwd_dyn_bf16_b128_v8.co",
+            "symbol": "rocke_rmsnorm2d_fwd_dyn_bf16_b128_v8",
+            "co_file": "rocke_rmsnorm2d_fwd_dyn_bf16_b128_v8.co",
             "_comment": "Runtime-N: N read from the i32 arg. No N==<n> rule, so it matches any N that is a multiple of vec=8 (vec-aligned rows). Sole match for unlisted N; competes with the static specializations on 2048/4096.",
             "constraints": {
                 "dtype": {
                     "equals": "bf16"
                 },
                 "N": {
+                    "min": 1,
                     "multiple_of": 8
                 }
             },

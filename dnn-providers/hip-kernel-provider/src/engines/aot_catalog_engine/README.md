@@ -187,7 +187,7 @@ Each `kernels[]` entry:
 |-------------------|---------|
 | `symbol`          | the kernel's exported symbol *inside* the `.co` (for `hipModuleGetFunction`); also the tune-cache key. **Unique per candidate.** |
 | `co_file`         | `.co` filename, relative to the family dir. |
-| `constraints`     | map `problem_key → rule`. Rules: `{"equals": v}` (int/string/bool) and `{"multiple_of": n}`. **Fail-closed:** every constrained key must be present in the decoded problem *and* every rule must hold, or the candidate is skipped. This is how the `dtype` constraint selects the f16 vs bf16 kernels within one family. |
+| `constraints`     | map `problem_key → rule`. **Required and non-empty** — a kernel that constrains nothing asserts it handles *every* problem shape (see the ⚠️ note below), so an omitted or empty map is a load-time error, not a wildcard. Rules (integer keys unless noted): `{"equals": v}` (int/string/bool), `{"not_equals": v}`, `{"one_of": [..]}`, `{"min": n}` / `{"max": n}` (inclusive bounds), and `{"multiple_of": n}`. **Fail-closed:** every constrained key must be present in the decoded problem *and* every rule must hold, or the candidate is skipped. This is how the `dtype` constraint selects the f16 vs bf16 kernels within one family. **Zero-extent guard:** `multiple_of` alone admits `0` (since `0 % n == 0`), which would select a kernel for a degenerate `M/N/K==0` (or `seqlen==0`) problem and launch a zero/garbage grid — so every `multiple_of` dim also carries `"min": 1` to reject non-positive extents. |
 | `grid`            | per-axis `x`/`y`/`z`. A value is a constant, a problem-key string (`"M"`, `"H"`, `"B"`), or `{"ceil_div": ["<key>", n]}`. Evaluated from that op's `gridSymbols`. |
 | `block`           | `[x,y,z]` constant workgroup size. |
 | `shared_mem_bytes`| omit for static-LDS kernels (defaults to 0). |
@@ -196,6 +196,18 @@ Each `kernels[]` entry:
 
 The set of legal `constraints`/`grid` keys is exactly the **problem keys the adapter
 emits** for that op — listed per op in §6–§8.
+
+> ⚠️ **Unknown fields are rejected, not ignored.** The loader fails the file on any
+> unrecognized key in a family, kernel, constraint rule, or `args_signature` entry. This
+> closes a *fail-open* footgun: a misspelled **field name** (`"constraint"` for
+> `"constraints"`, `"mutiple_of"` for `"multiple_of"`) would otherwise be silently dropped,
+> quietly discarding the predicate it was meant to carry — the opposite failure mode from a
+> typo *inside* a constraints map, which fails closed. To annotate a file, use the
+> **`_`-prefixed comment convention** (any key starting with `_`, e.g. `_comment`) — those
+> are the only non-schema keys accepted. Note also that a family's `arch` field (if present)
+> must match the arch directory it lives under (`library/<arch>/<family>/`); a mismatch is a
+> load error, since a file copied into the wrong arch folder would load kernels built for the
+> wrong GPU.
 
 > ⚠️ **Under-constraining is the one way this engine returns a wrong answer.** Constraints
 > are the *only* thing standing between a kernel and a problem it cannot actually serve. A
@@ -482,8 +494,10 @@ Capability facts (bool unless noted) — a kernel opts in/out via a constraint; 
 |-----|-----------|
 | `d_contiguous` | innermost (D) axis is unit-stride on Q/K/V/O |
 | `batch_foldable` | `B == 1`, or batch stride packs as `seqlen * stride_token` on all operands |
-| `causal` | `causal_mask` set |
-| `causal_bottom_right` | `causal_mask_bottom_right` set |
+| `causal` | mask resolves to top-left causal (deprecated `causal_mask`, or the `left_bound`/`right_bound`/`diagonal_alignment` trio) |
+| `causal_bottom_right` | mask resolves to bottom-right causal (deprecated `causal_mask_bottom_right`, or the trio with `diagonal_alignment = BOTTOM_RIGHT`) |
+| `has_diagonal_band` | mask resolves to a sliding window (a bounded `left_bound`/`right_bound` that is not plain causal) |
+| `has_mma_core_mode` | `mma_core_mode` is set to a non-default (non-`UNSET`) compute dtype |
 | `has_alibi` | `alibi_mask` set |
 | `has_padding_mask` | `padding_mask` set |
 | `has_attn_mask` | an `attn_mask` tensor is present |
@@ -532,7 +546,10 @@ set (points at `<rocKE>/projects/composablekernel/python`; comgr via `ROCKE_COMG
 or `/opt/rocm`) — the `.co` are **built products, never checked into git**; the
 family's `library/CMakeLists.txt` compiles them into the build/install tree
 (`${AOT_CATALOG_BUILD_DIR}/<arch>/<family>/`). With `ROCKE_PYTHON_DIR` unset the family
-is skipped (empty catalog → engine declines, parity tests skip). To run one by hand:
+is skipped (empty catalog → engine declines, parity tests skip — see §9.2). Conversely,
+when `ROCKE_PYTHON_DIR` **is** set the producer *must* succeed: it exits non-zero on any
+skipped/empty kernel so a partial family fails the build rather than silently shipping an
+incomplete catalog. To run one by hand:
 ```
 PYTHONPATH=<rocKE>/projects/composablekernel/python \
     python3 library/gfx1151/fmha_wmma_fwd/produce_fmha_fwd_co.py /tmp/out
@@ -552,11 +569,24 @@ PYTHONPATH=<rocKE>/projects/composablekernel/python \
 > **Build flags — rocKE is a build-time *tool*, not part of this engine.** Two
 > independent axes control what gets built; do not conflate them:
 > - **Axis A — the AOT engine + its kernel library.** `ENABLE_AOT_CATALOG_ENGINE`
->   (default **ON**) compiles the engine into `libhip_kernel_provider.so` and pulls in
->   `library/`. Whether any `.co` are actually produced is gated **only** on
->   `ROCKE_PYTHON_DIR` (+ comgr) and `GPU_TARGETS` — *not* on any "enable rocKE" switch.
->   Here rocKE is used purely as an **external compiler the producer calls**, resolved by
->   path. This is the relationship that outlives rocKE's current location.
+>   (default **OFF** — this is a throwaway POC and must not ship in a normal build)
+>   compiles the engine into `libhip_kernel_provider.so` and pulls in `library/`. It is
+>   opted into by a **dedicated build lane** (see below) that configures
+>   `-DENABLE_AOT_CATALOG_ENGINE=ON`; that lane is what keeps the engine compiling and its
+>   tests running now that it is off the default path. Whether any `.co` are actually
+>   produced is gated **only** on `ROCKE_PYTHON_DIR` (+ comgr) and `GPU_TARGETS` — *not* on
+>   any "enable rocKE" switch. Here rocKE is used purely as an **external compiler the
+>   producer calls**, resolved by path. This is the relationship that outlives rocKE's
+>   current location.
+>
+>   **Paired build lane.** Because the default is now OFF, an explicit lane must configure
+>   the engine ON or it will bitrot. The lane configures
+>   `-DENABLE_AOT_CATALOG_ENGINE=ON -DROCKE_PYTHON_DIR=<rocKE python> -DGPU_TARGETS=gfx1151`,
+>   builds `hip_kernel_provider_tests` (the AOT GTests compile into that shared binary), and
+>   runs `ctest`. With `ROCKE_PYTHON_DIR` set the producer *must* succeed (families are
+>   expected → an empty catalog is a hard test failure, per `AOT_ROCKE_FAMILIES_EXPECTED`
+>   below); without it the engine still builds but the parity tests skip on the empty
+>   catalog. TheRock's default lanes leave the engine OFF and are unaffected.
 > - **Axis B — the rocKE engine itself** (a *temporary tenant* that happens to live in
 >   `hip-kernel-provider/rocke/` today). `HIPKERNELPROVIDER_ENABLE_ROCKE` (default
 >   **OFF**) does `add_subdirectory(rocke)` to build that engine and its Python/smoke/CI
@@ -571,6 +601,16 @@ a CPU reference (`C=A@Bᵀ`, RMS over rows, or `softmax(scale·QKᵀ)·V`):
 # configure with -DENABLE_AOT_CATALOG_ENGINE=ON, build hip_kernel_provider_tests
 ctest -R GemmNumericParity      # or RmsNorm* / SdpaNumericParity
 ```
+
+**Empty-catalog behavior is deliberately asymmetric.** When rocKE was unavailable at
+configure time (no `ROCKE_PYTHON_DIR`), no families were built and these tests **skip** on
+the empty catalog — the expected state on TheRock CI today, which never has rocKE. But when
+the build *did* configure rocKE-AOT families for its arch (the `AOT_CATALOG_FAMILY_TARGETS`
+global is non-empty), CMake compiles the tests with `AOT_ROCKE_FAMILIES_EXPECTED=1` and an
+empty catalog becomes a **hard failure** instead of a skip (see
+`AOT_SKIP_OR_FAIL_ON_EMPTY_CATALOG` in `src/tests/engines/aot_catalog_engine/AotCatalogTestSupport.hpp`).
+This closes the gap where a producer or loader that silently dropped every kernel would
+otherwise leave CI green over a total failure.
 
 These parity/selection tests are **co-located in the family folder they test**
 (`library/<arch>/<family>/Test*.cpp`), not under `src/tests/` — the family folder is a
@@ -846,7 +886,8 @@ emit yet (one reviewed line, see the arg table) or a grid the DSL can't express 
    `SdpaAdapter::buildBindings` — reviewed C++, the single explicit extension point.
 3. **Author `family.json`** (schema §3): `op_kind: "sdpa"`, `arch: "gfx942"`, one
    `kernels[]` entry per variant with (a) numeric-shape constraints (`dtype`, `D`, `H`,
-   `H_kv`, `S_q`/`S_kv` `{multiple_of …}`), (b) **a capability constraint for every fact
+   `H_kv`, `S_q`/`S_kv` `{ "min": 1, "multiple_of": … }` — the `min: 1` rejects a
+   zero-extent seqlen that `multiple_of` alone would admit), (b) **a capability constraint for every fact
    the kernel does *not* universally handle** (see the warning below), (c) `grid`/`block`,
    and (d) `args_signature` = the kernel's real ABI **in order**, drawn from the vocabulary.
 4. **Drop it under `library/gfx942/<family>/`** with a producer `CMakeLists.txt`
@@ -894,7 +935,8 @@ kernel and its `family.json` constraints must agree.
 | `scale_tensor` | ptr | runtime scale tensor — `runtime_scale` |
 | `seqlen_q_ptr` `seqlen_kv_ptr` | ptr | varlen cumulative-seqlen tables — `varlen` |
 | `page_table_k` `page_table_v` | ptr | paged-KV block tables — `paged` |
-| `dropout_mask` `dropout_scale` `dropout_seed` `dropout_offset` `rng_dump` | ptr | dropout plumbing — `has_dropout` |
+| `dropout_mask` `dropout_scale` `dropout_seed` `dropout_offset` | ptr | dropout plumbing — `has_dropout` |
+| `rng_dump` | ptr | optional RNG debug dump output — independently settable, does not gate `has_dropout` |
 | `descale_q` `descale_k` `descale_v` `descale_s` | ptr | fp8 input/intermediate descales — `fp8` |
 | `scale_s` `scale_o` | ptr | fp8 output scales — `fp8` |
 | `amax_s` `amax_o` | ptr | fp8 output amax accumulators — `fp8` |
@@ -951,13 +993,15 @@ same posture as the gfx1151 reference).
                 "D":     { "equals": 128 },
                 "H":     { "equals": 32 },
                 "H_kv":  { "equals": 32 },
-                "S_q":   { "multiple_of": 64 },
-                "S_kv":  { "multiple_of": 64 },
+                "S_q":   { "min": 1, "multiple_of": 64 },
+                "S_kv":  { "min": 1, "multiple_of": 64 },
                 "gqa_ratio":           { "equals": 1 },
                 "d_contiguous":        { "equals": true },
                 "batch_foldable":      { "equals": true },
                 "causal":              { "equals": false },
                 "causal_bottom_right": { "equals": false },
+                "has_diagonal_band":   { "equals": false },
+                "has_mma_core_mode":   { "equals": false },
                 "has_alibi":           { "equals": false },
                 "has_padding_mask":    { "equals": false },
                 "has_attn_mask":       { "equals": false },

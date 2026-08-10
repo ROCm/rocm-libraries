@@ -36,6 +36,7 @@
 #include <vector>
 
 #include "catalog/Catalog.hpp"
+#include "engines/aot_catalog_engine/AotCatalogTestSupport.hpp"
 #include "catalog/CatalogTypes.hpp"
 #include "core/Handle.hpp"
 #include "launch/LaunchAbi.hpp"
@@ -76,19 +77,57 @@ bool gpuIsArch(const std::string& arch)
     return name.rfind(arch, 0) == 0;
 }
 
-// Deterministic small inputs kept in a tight range so the softmax and the D-length
-// dot products stay well within f16/bf16 precision.
+// Deterministic inputs designed so the reference output is a genuine,
+// non-degenerate softmax-weighted mixture of V -- the property the previous
+// generators lacked. The earlier inputs produced near-uniform softmax weights over
+// a zero-KV-mean V, so the reference O was ~1e-4 everywhere and the numeric
+// assertion passed even for a kernel that emitted all zeros, used the raw
+// (non-log2) scale, or read only part of the KV axis. This version defeats all
+// three:
+//
+//  * SCORE SHAPE: a single "signal" lane (d == 0) carries a wide ramp across the KV
+//    tokens; every other lane carries only small deterministic values. The Q.K^T
+//    score is therefore dominated by that ramp and, after SCALE, spans ~0..3 -- the
+//    softmax is sharply NON-uniform, so the log2-vs-raw scale trap changes the
+//    weights. The ramp direction alternates by head, so for even heads the weight
+//    mass sits in the high KV tokens (j >= 32); dropping any KV tile then changes O
+//    materially (the "reads only the first N keys" trap).
+//  * V MEAN: V is strictly positive with a period (7) that does not divide
+//    S_kv = 48, so it has a nonzero KV-axis mean and O is O(1), not ~1e-4.
+//
+// The reference is computed from the SAME dtype-rounded inputs (refQ/refK/refV), so
+// the tolerance at the call sites covers only kernel arithmetic (the P->f16/bf16
+// cast before the second WMMA and the hardware exp2), not input rounding.
+constexpr float SIGNAL_SPAN = 24.0f; // * SCALE(0.125) -> score span ~3.0
+
 float qVal(int64_t h, int64_t i, int64_t d)
 {
-    return static_cast<float>((h * 3 + i * 7 + d * 2) % 5) * 0.125f - 0.25f;
+    if(d == 0)
+    {
+        // Query projection onto the signal lane, ramped across queries so the
+        // weights (and thus O rows) vary with i as well as with the key ramp.
+        return 0.5f + 0.5f * static_cast<float>(i) / static_cast<float>(SEQ_Q - 1);
+    }
+    // Small off-signal values: exercise every D lane without disturbing the score.
+    return 0.0625f * static_cast<float>(((h + i + d) % 3) - 1);
 }
 float kVal(int64_t h, int64_t j, int64_t d)
 {
-    return static_cast<float>((h * 5 + j * 3 + d * 2) % 4) * 0.125f - 0.1875f;
+    if(d == 0)
+    {
+        // Wide ramp across KV tokens; direction alternates by head so the softmax
+        // peak lands in the high-j region for even heads and the low-j region for
+        // odd heads -- across heads this covers the full KV axis.
+        const float t = static_cast<float>(j) / static_cast<float>(SEQ_KV - 1); // 0..1
+        return (h % 2 == 0) ? SIGNAL_SPAN * t : SIGNAL_SPAN * (1.0f - t);
+    }
+    return 0.0625f * static_cast<float>(((h * 2 + j + d) % 3) - 1);
 }
 float vVal(int64_t h, int64_t j, int64_t d)
 {
-    return static_cast<float>((h * 2 + j * 5 + d * 3) % 6) * 0.125f - 0.3125f;
+    // Strictly positive, varying across (j, d); period 7 does not divide S_kv = 48,
+    // so the KV-axis mean is nonzero and O has real dynamic range (~0.25..1.0).
+    return 0.25f + 0.125f * static_cast<float>((h + j * 2 + d * 3) % 7);
 }
 
 // bf16 host storage: bfloat16 == the top 16 bits of an IEEE f32, so the device
@@ -170,8 +209,7 @@ void runSdpaParity(const std::string& dtypeTok,
     const catalog::Catalog cat = catalog::Catalog::loadForDevice(CATALOG_DIR, ARCH);
     if(cat.empty())
     {
-        GTEST_SKIP() << "empty AOT catalog at " << CATALOG_DIR
-                     << "; build with -DROCKE_PYTHON_DIR to populate it (see the engine README)";
+        AOT_SKIP_OR_FAIL_ON_EMPTY_CATALOG(CATALOG_DIR);
     }
 
     // Problem carries every key the family.json constrains, so candidatesFor's
@@ -192,6 +230,8 @@ void runSdpaParity(const std::string& dtypeTok,
     problem.emplace("batch_foldable", catalog::ShapeValue{true});
     problem.emplace("causal", catalog::ShapeValue{false});
     problem.emplace("causal_bottom_right", catalog::ShapeValue{false});
+    problem.emplace("has_diagonal_band", catalog::ShapeValue{false});
+    problem.emplace("has_mma_core_mode", catalog::ShapeValue{false});
     problem.emplace("has_alibi", catalog::ShapeValue{false});
     problem.emplace("has_padding_mask", catalog::ShapeValue{false});
     problem.emplace("has_attn_mask", catalog::ShapeValue{false});
@@ -370,6 +410,14 @@ TEST(TestAotCatalogSdpaNumericParity, WmmaFmhaFwdF16MatchesReference)
     {
         GTEST_SKIP() << "no " << ARCH << " GPU present";
     }
+    // Tolerance derivation: reference O lies in ~0.25..1.0 (a convex mix of V), so
+    // this is ~2% of the output's dynamic range. With the reference built from the
+    // same rounded inputs, the only kernel-side error is the P->f16 cast before the
+    // second WMMA (P in [0,1], ~2^-11 relative) plus the hardware exp2 (~1 ULP) --
+    // well under 2e-2. Conversely a zeroed output (~0.6 off), the raw-vs-log2 scale
+    // mix-up (softmax spans ~3 units, so the two weightings diverge by >>2%), or
+    // dropping the high-j KV tile (which for even heads holds most of the mass) all
+    // exceed it. See the generator comment above.
     runSdpaParity<_Float16>("f16", f16FromFloat, f16ToFloat, 2e-2f, 2e-2f);
 }
 
@@ -379,6 +427,9 @@ TEST(TestAotCatalogSdpaNumericParity, WmmaFmhaFwdBf16MatchesReference)
     {
         GTEST_SKIP() << "no " << ARCH << " GPU present";
     }
-    // bf16 has a 7-bit mantissa (~2 decimal digits) -> looser tolerance than f16.
+    // bf16 has a 7-bit mantissa (~2 decimal digits), so the P->bf16 cast before the
+    // second WMMA contributes ~2^-8 (~0.4%) relative error -> 5e-2 (~5% of the
+    // ~0.25..1.0 output range). The same mutations that break the f16 case (zeroed
+    // output, raw-vs-log2 scale, truncated KV) exceed it by a wide margin.
     runSdpaParity<uint16_t>("bf16", floatToBf16, bf16ToFloat, 5e-2f, 5e-2f);
 }

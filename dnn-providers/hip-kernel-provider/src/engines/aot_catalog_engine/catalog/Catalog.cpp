@@ -6,6 +6,7 @@
 #include <array>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <stdexcept>
 
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
@@ -58,6 +59,45 @@ std::string getRequiredString(const json& obj, const std::string& key)
     return value.get<std::string>();
 }
 
+// Reject any field name not in `allowed`, except the '_'-prefixed comment
+// convention the checked-in family.json files use (e.g. "_comment",
+// "_constraints_comment"). family.json selection is fail-CLOSED by design, but a
+// misspelled FIELD NAME fails OPEN: e.g. a kernel entry spelling "constraints" as
+// "constraint" silently loses its whole predicate set and matches every problem
+// of its op kind, and "mutiple_of" inside a rule silently drops that divisibility
+// check. There is no schema validator in the load path, so this is the only place
+// that guarantee is enforced -- fail loudly on any key we do not recognize.
+void rejectUnknownKeys(const json& obj, const char* context,
+                       std::initializer_list<const char*> allowed)
+{
+    if(!obj.is_object())
+    {
+        return; // shape is validated by the caller's field accessors
+    }
+    for(const auto& item : obj.items())
+    {
+        const std::string& key = item.key();
+        if(!key.empty() && key.front() == '_')
+        {
+            continue; // '_'-prefixed keys are the comment convention -- allowed
+        }
+        bool recognized = false;
+        for(const char* candidate : allowed)
+        {
+            if(key == candidate)
+            {
+                recognized = true;
+                break;
+            }
+        }
+        if(!recognized)
+        {
+            fail("unknown field '" + key + "' in " + context
+                 + " (misspelled? only listed fields and '_'-prefixed comments are allowed)");
+        }
+    }
+}
+
 // ---- Value + constraint parsing ---------------------------------------------
 
 ShapeValue parseShapeValue(const json& value)
@@ -87,6 +127,8 @@ ConstraintRule parseRule(const json& obj)
     {
         fail("constraint rule must be an object");
     }
+    rejectUnknownKeys(obj, "constraint rule",
+                      {"equals", "not_equals", "one_of", "min", "max", "multiple_of"});
 
     ConstraintRule rule;
     if(obj.contains("equals"))
@@ -246,6 +288,8 @@ void parseBlock(const json& value, std::array<uint32_t, 3>& block)
 
 KernelArgument parseArgument(const json& obj)
 {
+    rejectUnknownKeys(obj, "args_signature entry", {"name", "type", "size_bytes"});
+
     KernelArgument arg;
     arg.name = getRequiredString(obj, "name");
     const std::string type = getRequiredString(obj, "type");
@@ -325,6 +369,10 @@ LaunchMetadata parseLaunch(const json& obj)
 
 KernelEntry parseKernel(const json& obj, const fs::path& familyDir)
 {
+    rejectUnknownKeys(obj, "kernel entry",
+                      {"symbol", "co_file", "constraints", "workspace_bytes", "shared_mem_bytes",
+                       "grid", "block", "args_signature"});
+
     KernelEntry entry;
     entry.symbol = getRequiredString(obj, "symbol");
 
@@ -336,9 +384,15 @@ KernelEntry parseKernel(const json& obj, const fs::path& familyDir)
     }
     entry.coPath = coPath.string();
 
-    if(obj.contains("constraints"))
+    // 'constraints' is REQUIRED and must be non-empty. A kernel with no constraints
+    // would ASSERT it handles every ProblemShape (selection omits absent keys), so an
+    // accidentally-missing or empty map is a silent fail-OPEN. Require it explicitly.
+    entry.constraints = parseConstraints(requireMember(obj, "constraints"));
+    if(entry.constraints.empty())
     {
-        entry.constraints = parseConstraints(obj.at("constraints"));
+        fail("kernel '" + entry.symbol
+             + "' has an empty 'constraints' map; a kernel that constrains nothing claims to "
+               "handle every problem shape -- list at least a dtype constraint");
     }
     if(obj.contains("workspace_bytes"))
     {
@@ -357,10 +411,26 @@ KernelEntry parseKernel(const json& obj, const fs::path& familyDir)
 
 Family parseFamily(const json& obj, const fs::path& familyDir, const std::string& arch)
 {
+    rejectUnknownKeys(obj, "family", {"family", "op_kind", "arch", "dtype", "kernels"});
+
     Family family;
     family.name = getRequiredString(obj, "family");
     family.opKind = getRequiredString(obj, "op_kind");
     family.arch = arch;
+
+    // The catalog directory (<catalog>/<arch>/<family>) is the authority for arch.
+    // If the file also declares "arch", it must agree -- a mismatch means the file was
+    // copied into the wrong arch folder, which would silently load kernels built for
+    // another GPU. Cross-check rather than trust the (ignored-for-selection) field.
+    if(obj.contains("arch"))
+    {
+        const std::string declaredArch = getRequiredString(obj, "arch");
+        if(declaredArch != arch)
+        {
+            fail("family '" + family.name + "' declares arch '" + declaredArch
+                 + "' but lives in the '" + arch + "' catalog directory");
+        }
+    }
 
     if(obj.contains("dtype"))
     {
