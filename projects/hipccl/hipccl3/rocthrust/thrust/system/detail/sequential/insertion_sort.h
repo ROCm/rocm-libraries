@@ -18,6 +18,14 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 #include <thrust/detail/function.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/system/detail/sequential/copy_backward.h>
@@ -34,7 +42,7 @@ THRUST_EXEC_CHECK_DISABLE
 template <typename RandomAccessIterator, typename StrictWeakOrdering>
 THRUST_HOST_DEVICE void insertion_sort(RandomAccessIterator first, RandomAccessIterator last, StrictWeakOrdering comp)
 {
-  using value_type = typename thrust::iterator_value<RandomAccessIterator>::type;
+  using value_type = thrust::detail::it_value_t<RandomAccessIterator>;
 
   if (first == last)
   {
@@ -78,8 +86,8 @@ template <typename RandomAccessIterator1, typename RandomAccessIterator2, typena
 THRUST_HOST_DEVICE void insertion_sort_by_key(
   RandomAccessIterator1 first1, RandomAccessIterator1 last1, RandomAccessIterator2 first2, StrictWeakOrdering comp)
 {
-  using value_type1 = typename thrust::iterator_value<RandomAccessIterator1>::type;
-  using value_type2 = typename thrust::iterator_value<RandomAccessIterator2>::type;
+  using value_type1 = thrust::detail::it_value_t<RandomAccessIterator1>;
+  using value_type2 = thrust::detail::it_value_t<RandomAccessIterator2>;
 
   if (first1 == last1)
   {

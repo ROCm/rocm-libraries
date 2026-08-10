@@ -18,6 +18,13 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/execution_policy.h>
 #include <thrust/mr/allocator.h>
 #include <thrust/system/detail/adl/per_device_resource.h>
@@ -61,7 +68,7 @@ public:
   template <typename U>
   struct rebind
   {
-    /*! The typedef \p other gives the type of the rebound \p per_device_allocator.
+    /*! The alias \p other gives the type of the rebound \p per_device_allocator.
      */
     using other = per_device_allocator<U, Upstream, ExecutionPolicy>;
   };

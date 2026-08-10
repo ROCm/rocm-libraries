@@ -22,6 +22,13 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/execution_policy.h>
 
 THRUST_NAMESPACE_BEGIN
@@ -43,9 +50,8 @@ THRUST_NAMESPACE_BEGIN
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
  *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward
- * Iterator</a>, and \p ForwardIterator is mutable. \tparam Generator is a model of <a
- * href="https://en.cppreference.com/w/cpp/utility/functional">Generator</a>, and \p Generator's \c result_type is
- * convertible to \p ForwardIterator's \c value_type.
+ * Iterator</a>, and \p ForwardIterator is mutable.
+ *  \tparam Generator A nullary function with a return type convertible to \p ForwardIterator's \c value_type.
  *
  *  The following code snippet demonstrates how to fill a \c host_vector with random numbers,
  *  using the standard C library function \c rand using the \p thrust::host execution policy for parallelization:
@@ -82,9 +88,8 @@ generate(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
  *             elements in the range <tt>[first,last)</tt>.
  *
  *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward
- * Iterator</a>, and \p ForwardIterator is mutable. \tparam Generator is a model of <a
- * href="https://en.cppreference.com/w/cpp/utility/functional">Generator</a>, and \p Generator's \c result_type is
- * convertible to \p ForwardIterator's \c value_type.
+ * Iterator</a>, and \p ForwardIterator is mutable.
+ *  \tparam Generator A nullary function with a return type convertible to \p ForwardIterator's \c value_type.
  *
  *  The following code snippet demonstrates how to fill a \c host_vector with random numbers,
  *  using the standard C library function \c rand.
@@ -121,9 +126,8 @@ void generate(ForwardIterator first, ForwardIterator last, Generator gen);
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
  *  \tparam OutputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output
- * Iterator</a>. \tparam Size is an integral type (either signed or unsigned). \tparam Generator is a model of <a
- * href="https://en.cppreference.com/w/cpp/utility/functional">Generator</a>, and \p Generator's \c result_type is
- * convertible to a type in \p OutputIterator's set of \c value_types.
+ * Iterator</a>. \tparam Size is an integral type (either signed or unsigned).
+ *  \tparam Generator A nullary function with a return type convertible to \p ForwardIterator's \c value_type.
  *
  *  The following code snippet demonstrates how to fill a \c host_vector with random numbers,
  *  using the standard C library function \c rand using the \p thrust::host execution policy for parallelization:
@@ -157,9 +161,8 @@ THRUST_HOST_DEVICE OutputIterator generate_n(
  *             elements in the range <tt>[first,first + n)</tt>.
  *
  *  \tparam OutputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output
- * Iterator</a>. \tparam Size is an integral type (either signed or unsigned). \tparam Generator is a model of <a
- * href="https://en.cppreference.com/w/cpp/utility/functional">Generator</a>, and \p Generator's \c result_type is
- * convertible to a type in \p OutputIterator's set of \c value_types.
+ * Iterator</a>. \tparam Size is an integral type (either signed or unsigned).
+ *  \tparam Generator A nullary function with a return type convertible to \p ForwardIterator's \c value_type.
  *
  *  The following code snippet demonstrates how to fill a \c host_vector with random numbers,
  *  using the standard C library function \c rand.

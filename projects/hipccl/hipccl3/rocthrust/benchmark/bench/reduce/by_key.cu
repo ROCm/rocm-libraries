@@ -30,6 +30,7 @@
 #include "bench_utils.hpp"
 
 // rocThrust
+#include <thrust/detail/config/namespace.h>
 #include <thrust/device_vector.h>
 #include <thrust/execution_policy.h>
 #include <thrust/reduce.h>

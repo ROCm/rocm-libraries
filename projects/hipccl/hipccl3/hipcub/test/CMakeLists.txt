@@ -95,6 +95,13 @@ set_target_properties(hipcub_generate_resource_spec PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
   OUTPUT_NAME "generate_resource_spec"
 )
+
+if(HIP_COMPILER STREQUAL "nvcc")
+    set_source_files_properties(${GEN_RES_SPEC_PATH}
+        PROPERTIES LANGUAGE CUDA)
+endif()
+
+target_compile_options(generate_resource_spec PRIVATE -Wno-unused-command-line-argument)
 target_link_libraries(hipcub_generate_resource_spec PRIVATE hip::host)
 # This test may still get the offload-compress flag passed. Since it does not include any kernel
 # code it will give an unused-command-line-argument warning.
