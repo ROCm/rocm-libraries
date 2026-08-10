@@ -18,6 +18,7 @@
 
 #include <hip/hip_runtime.h>
 
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -37,10 +38,10 @@ namespace
 using namespace aot_catalog_engine;
 
 // Baked in by CMake: the build-tree copy of the catalog (<arch>/<family>/...).
-constexpr const char* kCatalogDir = AOT_CATALOG_TEST_DIR;
+constexpr const char* CATALOG_DIR = AOT_CATALOG_TEST_DIR;
 
 // The shipped .co is gfx1151-only; the test is meaningful only on that arch.
-constexpr const char* kArch = "gfx1151";
+constexpr const char* ARCH = "gfx1151";
 
 bool gpuIsArch(const std::string& arch)
 {
@@ -74,24 +75,24 @@ float gammaVal(size_t n)
 
 TEST(TestAotCatalogRmsNormNumericParity, RmsNorm2dF16MatchesReference)
 {
-    if(!gpuIsArch(kArch))
+    if(!gpuIsArch(ARCH))
     {
-        GTEST_SKIP() << "no " << kArch << " GPU present";
+        GTEST_SKIP() << "no " << ARCH << " GPU present";
     }
 
     // 1. Load the catalog and select the rmsnorm kernel for an f16 M/N problem.
     //    N must equal the value baked into the shipped kernel (exact-match
     //    applicability, unlike GEMM's multiple_of predicates).
-    const catalog::Catalog cat = catalog::Catalog::loadForDevice(kCatalogDir, kArch);
+    const catalog::Catalog cat = catalog::Catalog::loadForDevice(CATALOG_DIR, ARCH);
     if(cat.empty())
     {
-        GTEST_SKIP() << "empty AOT catalog at " << kCatalogDir
+        GTEST_SKIP() << "empty AOT catalog at " << CATALOG_DIR
                      << "; build with -DROCKE_PYTHON_DIR to populate it (see the engine README)";
     }
 
     constexpr size_t M = 8;
     constexpr size_t N = 2048;
-    constexpr float kEps = 1e-5f;
+    constexpr float EPS = 1e-5f;
 
     catalog::ProblemShape problem;
     problem.emplace("dtype", catalog::ShapeValue{std::string("f16")});
@@ -118,7 +119,7 @@ TEST(TestAotCatalogRmsNormNumericParity, RmsNorm2dF16MatchesReference)
     bindings.pointerUids.emplace("Y", 3);
     bindings.scalars.emplace("M", catalog::ScalarValue{static_cast<int64_t>(M)});
     bindings.scalars.emplace("N", catalog::ScalarValue{static_cast<int64_t>(N)});
-    bindings.scalars.emplace("eps", catalog::ScalarValue{kEps});
+    bindings.scalars.emplace("eps", catalog::ScalarValue{EPS});
 
     launch::SymbolTable gridSymbols;
     gridSymbols.emplace("M", static_cast<int64_t>(M));
@@ -156,14 +157,14 @@ TEST(TestAotCatalogRmsNormNumericParity, RmsNorm2dF16MatchesReference)
         {
             // Read back the f16-rounded value so the reference sees the same
             // inputs the kernel does.
-            const float x = static_cast<float>(hostX[m * N + n]);
+            const auto x = static_cast<float>(hostX[m * N + n]);
             sumSquares += x * x;
         }
-        const float invRms = 1.0f / std::sqrt(sumSquares / static_cast<float>(N) + kEps);
+        const float invRms = 1.0f / std::sqrt(sumSquares / static_cast<float>(N) + EPS);
         for(size_t n = 0; n < N; ++n)
         {
-            const float x = static_cast<float>(hostX[m * N + n]);
-            const float g = static_cast<float>(hostGamma[n]);
+            const auto x = static_cast<float>(hostX[m * N + n]);
+            const auto g = static_cast<float>(hostGamma[n]);
             reference[m * N + n] = x * invRms * g;
         }
     }
@@ -191,13 +192,14 @@ TEST(TestAotCatalogRmsNormNumericParity, RmsNorm2dF16MatchesReference)
     Handle handle;
     handle.setStream(stream);
 
-    const hipdnnPluginDeviceBuffer_t buffers[3] = {
+    const std::array<hipdnnPluginDeviceBuffer_t, 3> buffers = {{
         {1, deviceX},
         {2, deviceGamma},
         {3, deviceY},
-    };
+    }};
 
-    ASSERT_NO_THROW(plan.execute(handle, buffers, 3, nullptr));
+    ASSERT_NO_THROW(
+        plan.execute(handle, buffers.data(), static_cast<uint32_t>(buffers.size()), nullptr));
     ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
 
     ASSERT_EQ(
@@ -209,7 +211,7 @@ TEST(TestAotCatalogRmsNormNumericParity, RmsNorm2dF16MatchesReference)
     {
         for(size_t n = 0; n < N; ++n)
         {
-            const float got = static_cast<float>(hostY[m * N + n]);
+            const auto got = static_cast<float>(hostY[m * N + n]);
             const float want = reference[m * N + n];
             const float tol = std::max(2e-2f, 3e-2f * std::fabs(want));
             ASSERT_NEAR(got, want, tol) << "mismatch at (" << m << "," << n << ")";

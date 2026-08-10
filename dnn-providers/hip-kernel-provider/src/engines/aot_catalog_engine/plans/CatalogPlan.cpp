@@ -162,8 +162,9 @@ size_t CatalogPlan::tuneAndSelect(const Handle& handle,
                                   uint32_t numDeviceBuffers,
                                   void* workspace) const
 {
-    const hipStream_t stream
-        = handle.getStream(); // NOLINT(misc-misplaced-const) hipStream_t is an opaque handle
+    // hipStream_t is an opaque handle, so the const qualifies the handle value.
+    // NOLINTNEXTLINE(misc-misplaced-const)
+    const hipStream_t stream = handle.getStream();
 
     hipEvent_t startEvent = nullptr;
     hipEvent_t stopEvent = nullptr;

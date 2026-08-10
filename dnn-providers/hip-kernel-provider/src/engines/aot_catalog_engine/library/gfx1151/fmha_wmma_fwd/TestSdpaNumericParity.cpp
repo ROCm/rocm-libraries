@@ -26,6 +26,7 @@
 #include <hip/hip_runtime.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -47,16 +48,16 @@ namespace
 using namespace aot_catalog_engine;
 
 // Baked in by CMake: the build-tree copy of the catalog (<arch>/<family>/...).
-constexpr const char* kCatalogDir = AOT_CATALOG_TEST_DIR;
+constexpr const char* CATALOG_DIR = AOT_CATALOG_TEST_DIR;
 
 // The shipped .co is gfx1151-only; the test is meaningful only on that arch.
-constexpr const char* kArch = "gfx1151";
+constexpr const char* ARCH = "gfx1151";
 
 // Baked kernel geometry (D and H are compile-time facts of the shipped .co).
-constexpr int64_t kHeadDim = 64; // D
-constexpr int64_t kNumHeads = 32; // H == H_kv (MHA)
-constexpr int64_t kSeqQ = 32; // 2 query tiles of 16
-constexpr int64_t kSeqKv = 48; // 3 key tiles of 16 (asymmetric on purpose)
+constexpr int64_t HEAD_DIM = 64; // D
+constexpr int64_t NUM_HEADS = 32; // H == H_kv (MHA)
+constexpr int64_t SEQ_Q = 32; // 2 query tiles of 16
+constexpr int64_t SEQ_KV = 48; // 3 key tiles of 16 (asymmetric on purpose)
 
 bool gpuIsArch(const std::string& arch)
 {
@@ -116,41 +117,41 @@ std::vector<float> referenceAttention(const std::vector<float>& q,
                                       const std::vector<float>& v,
                                       float scale)
 {
-    std::vector<float> out(static_cast<size_t>(kNumHeads * kSeqQ * kHeadDim), 0.0f);
-    for(int64_t h = 0; h < kNumHeads; ++h)
+    std::vector<float> out(static_cast<size_t>(NUM_HEADS * SEQ_Q * HEAD_DIM), 0.0f);
+    for(int64_t h = 0; h < NUM_HEADS; ++h)
     {
-        for(int64_t i = 0; i < kSeqQ; ++i)
+        for(int64_t i = 0; i < SEQ_Q; ++i)
         {
-            std::vector<float> scores(static_cast<size_t>(kSeqKv), 0.0f);
+            std::vector<float> scores(static_cast<size_t>(SEQ_KV), 0.0f);
             float maxScore = -std::numeric_limits<float>::infinity();
-            for(int64_t j = 0; j < kSeqKv; ++j)
+            for(int64_t j = 0; j < SEQ_KV; ++j)
             {
                 float dot = 0.0f;
-                for(int64_t d = 0; d < kHeadDim; ++d)
+                for(int64_t d = 0; d < HEAD_DIM; ++d)
                 {
-                    dot += q[static_cast<size_t>((h * kSeqQ + i) * kHeadDim + d)]
-                           * k[static_cast<size_t>((h * kSeqKv + j) * kHeadDim + d)];
+                    dot += q[static_cast<size_t>((h * SEQ_Q + i) * HEAD_DIM + d)]
+                           * k[static_cast<size_t>((h * SEQ_KV + j) * HEAD_DIM + d)];
                 }
                 const float s = dot * scale;
                 scores[static_cast<size_t>(j)] = s;
                 maxScore = std::max(maxScore, s);
             }
             float denom = 0.0f;
-            for(int64_t j = 0; j < kSeqKv; ++j)
+            for(int64_t j = 0; j < SEQ_KV; ++j)
             {
                 const float e = std::exp(scores[static_cast<size_t>(j)] - maxScore);
                 scores[static_cast<size_t>(j)] = e;
                 denom += e;
             }
-            for(int64_t d = 0; d < kHeadDim; ++d)
+            for(int64_t d = 0; d < HEAD_DIM; ++d)
             {
                 float acc = 0.0f;
-                for(int64_t j = 0; j < kSeqKv; ++j)
+                for(int64_t j = 0; j < SEQ_KV; ++j)
                 {
                     acc += scores[static_cast<size_t>(j)]
-                           * v[static_cast<size_t>((h * kSeqKv + j) * kHeadDim + d)];
+                           * v[static_cast<size_t>((h * SEQ_KV + j) * HEAD_DIM + d)];
                 }
-                out[static_cast<size_t>((h * kSeqQ + i) * kHeadDim + d)] = acc / denom;
+                out[static_cast<size_t>((h * SEQ_Q + i) * HEAD_DIM + d)] = acc / denom;
             }
         }
     }
@@ -166,10 +167,10 @@ void runSdpaParity(const std::string& dtypeTok,
                    float absTol,
                    float relTol)
 {
-    const catalog::Catalog cat = catalog::Catalog::loadForDevice(kCatalogDir, kArch);
+    const catalog::Catalog cat = catalog::Catalog::loadForDevice(CATALOG_DIR, ARCH);
     if(cat.empty())
     {
-        GTEST_SKIP() << "empty AOT catalog at " << kCatalogDir
+        GTEST_SKIP() << "empty AOT catalog at " << CATALOG_DIR
                      << "; build with -DROCKE_PYTHON_DIR to populate it (see the engine README)";
     }
 
@@ -181,11 +182,11 @@ void runSdpaParity(const std::string& dtypeTok,
     // problem. TestSdpaDecode covers decode itself; this stays substrate-only.
     catalog::ProblemShape problem;
     problem.emplace("dtype", catalog::ShapeValue{dtypeTok});
-    problem.emplace("D", catalog::ShapeValue{kHeadDim});
-    problem.emplace("H", catalog::ShapeValue{kNumHeads});
-    problem.emplace("H_kv", catalog::ShapeValue{kNumHeads});
-    problem.emplace("S_q", catalog::ShapeValue{kSeqQ});
-    problem.emplace("S_kv", catalog::ShapeValue{kSeqKv});
+    problem.emplace("D", catalog::ShapeValue{HEAD_DIM});
+    problem.emplace("H", catalog::ShapeValue{NUM_HEADS});
+    problem.emplace("H_kv", catalog::ShapeValue{NUM_HEADS});
+    problem.emplace("S_q", catalog::ShapeValue{SEQ_Q});
+    problem.emplace("S_kv", catalog::ShapeValue{SEQ_KV});
     problem.emplace("gqa_ratio", catalog::ShapeValue{static_cast<int64_t>(1)});
     problem.emplace("d_contiguous", catalog::ShapeValue{true});
     problem.emplace("batch_foldable", catalog::ShapeValue{true});
@@ -214,22 +215,22 @@ void runSdpaParity(const std::string& dtypeTok,
     ASSERT_TRUE(module.has_value()) << "failed to load " << kernel.coPath;
 
     // Contiguous BHSD, B=1: stride_token = D (S-axis step), stride_head = S*D.
-    const int64_t strideQtoken = kHeadDim;
-    const int64_t strideQhead = kSeqQ * kHeadDim;
-    const int64_t strideKtoken = kHeadDim;
-    const int64_t strideKhead = kSeqKv * kHeadDim;
+    const int64_t strideQtoken = HEAD_DIM;
+    const int64_t strideQhead = SEQ_Q * HEAD_DIM;
+    const int64_t strideKtoken = HEAD_DIM;
+    const int64_t strideKhead = SEQ_KV * HEAD_DIM;
 
-    constexpr float kScale = 0.125f; // 1/sqrt(64)
-    constexpr float kLog2e = 1.4426950408889634f;
+    constexpr float SCALE = 0.125f; // 1/sqrt(64)
+    constexpr float LOG2E = 1.4426950408889634f;
 
     catalog::LaunchBindings bindings;
     bindings.pointerUids.emplace("Q", 1);
     bindings.pointerUids.emplace("K", 2);
     bindings.pointerUids.emplace("V", 3);
     bindings.pointerUids.emplace("O", 4);
-    bindings.scalars.emplace("scale_log2", catalog::ScalarValue{kScale * kLog2e});
-    bindings.scalars.emplace("seqlen_q", catalog::ScalarValue{kSeqQ});
-    bindings.scalars.emplace("seqlen_k", catalog::ScalarValue{kSeqKv});
+    bindings.scalars.emplace("scale_log2", catalog::ScalarValue{SCALE * LOG2E});
+    bindings.scalars.emplace("seqlen_q", catalog::ScalarValue{SEQ_Q});
+    bindings.scalars.emplace("seqlen_k", catalog::ScalarValue{SEQ_KV});
     bindings.scalars.emplace("stride_q_token", catalog::ScalarValue{strideQtoken});
     bindings.scalars.emplace("stride_q_head", catalog::ScalarValue{strideQhead});
     bindings.scalars.emplace("stride_k_token", catalog::ScalarValue{strideKtoken});
@@ -240,8 +241,8 @@ void runSdpaParity(const std::string& dtypeTok,
     bindings.scalars.emplace("stride_o_head", catalog::ScalarValue{strideQhead});
 
     launch::SymbolTable gridSymbols;
-    gridSymbols.emplace("S_q", kSeqQ);
-    gridSymbols.emplace("H", kNumHeads);
+    gridSymbols.emplace("S_q", SEQ_Q);
+    gridSymbols.emplace("H", NUM_HEADS);
     gridSymbols.emplace("B", static_cast<int64_t>(1));
 
     const CatalogPlan plan(std::move(*module),
@@ -251,8 +252,8 @@ void runSdpaParity(const std::string& dtypeTok,
                            kernel.workspaceBytes,
                            kernel.symbol);
 
-    const size_t qElems = static_cast<size_t>(kNumHeads * kSeqQ * kHeadDim);
-    const size_t kvElems = static_cast<size_t>(kNumHeads * kSeqKv * kHeadDim);
+    const auto qElems = static_cast<size_t>(NUM_HEADS * SEQ_Q * HEAD_DIM);
+    const auto kvElems = static_cast<size_t>(NUM_HEADS * SEQ_KV * HEAD_DIM);
 
     // Build device inputs as dtype, and a float mirror (post-rounding) for the
     // reference so the comparison isolates kernel error, not dtype rounding.
@@ -264,22 +265,22 @@ void runSdpaParity(const std::string& dtypeTok,
     std::vector<float> refK(kvElems);
     std::vector<float> refV(kvElems);
 
-    for(int64_t h = 0; h < kNumHeads; ++h)
+    for(int64_t h = 0; h < NUM_HEADS; ++h)
     {
-        for(int64_t i = 0; i < kSeqQ; ++i)
+        for(int64_t i = 0; i < SEQ_Q; ++i)
         {
-            for(int64_t d = 0; d < kHeadDim; ++d)
+            for(int64_t d = 0; d < HEAD_DIM; ++d)
             {
-                const size_t idx = static_cast<size_t>((h * kSeqQ + i) * kHeadDim + d);
+                const auto idx = static_cast<size_t>((h * SEQ_Q + i) * HEAD_DIM + d);
                 hostQ[idx] = toStore(qVal(h, i, d));
                 refQ[idx] = fromStore(hostQ[idx]);
             }
         }
-        for(int64_t j = 0; j < kSeqKv; ++j)
+        for(int64_t j = 0; j < SEQ_KV; ++j)
         {
-            for(int64_t d = 0; d < kHeadDim; ++d)
+            for(int64_t d = 0; d < HEAD_DIM; ++d)
             {
-                const size_t idx = static_cast<size_t>((h * kSeqKv + j) * kHeadDim + d);
+                const auto idx = static_cast<size_t>((h * SEQ_KV + j) * HEAD_DIM + d);
                 hostK[idx] = toStore(kVal(h, j, d));
                 hostV[idx] = toStore(vVal(h, j, d));
                 refK[idx] = fromStore(hostK[idx]);
@@ -288,7 +289,7 @@ void runSdpaParity(const std::string& dtypeTok,
         }
     }
 
-    const std::vector<float> reference = referenceAttention(refQ, refK, refV, kScale);
+    const std::vector<float> reference = referenceAttention(refQ, refK, refV, SCALE);
 
     void* deviceQ = nullptr;
     void* deviceK = nullptr;
@@ -315,27 +316,27 @@ void runSdpaParity(const std::string& dtypeTok,
     Handle handle;
     handle.setStream(stream);
 
-    const hipdnnPluginDeviceBuffer_t buffers[4] = {
+    const std::array<hipdnnPluginDeviceBuffer_t, 4> buffers = {{
         {1, deviceQ},
         {2, deviceK},
         {3, deviceV},
         {4, deviceO},
-    };
+    }};
 
-    ASSERT_NO_THROW(plan.execute(handle, buffers, 4, nullptr));
+    ASSERT_NO_THROW(plan.execute(handle, buffers.data(), 4, nullptr));
     ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
 
     ASSERT_EQ(
         hipMemcpy(hostO.data(), deviceO, hostO.size() * sizeof(StoreT), hipMemcpyDeviceToHost),
         hipSuccess);
 
-    for(int64_t h = 0; h < kNumHeads; ++h)
+    for(int64_t h = 0; h < NUM_HEADS; ++h)
     {
-        for(int64_t i = 0; i < kSeqQ; ++i)
+        for(int64_t i = 0; i < SEQ_Q; ++i)
         {
-            for(int64_t d = 0; d < kHeadDim; ++d)
+            for(int64_t d = 0; d < HEAD_DIM; ++d)
             {
-                const size_t idx = static_cast<size_t>((h * kSeqQ + i) * kHeadDim + d);
+                const auto idx = static_cast<size_t>((h * SEQ_Q + i) * HEAD_DIM + d);
                 const float got = fromStore(hostO[idx]);
                 const float want = reference[idx];
                 const float tol = std::max(absTol, relTol * std::fabs(want));
@@ -365,18 +366,18 @@ float f16ToFloat(_Float16 h)
 
 TEST(TestAotCatalogSdpaNumericParity, WmmaFmhaFwdF16MatchesReference)
 {
-    if(!gpuIsArch(kArch))
+    if(!gpuIsArch(ARCH))
     {
-        GTEST_SKIP() << "no " << kArch << " GPU present";
+        GTEST_SKIP() << "no " << ARCH << " GPU present";
     }
     runSdpaParity<_Float16>("f16", f16FromFloat, f16ToFloat, 2e-2f, 2e-2f);
 }
 
 TEST(TestAotCatalogSdpaNumericParity, WmmaFmhaFwdBf16MatchesReference)
 {
-    if(!gpuIsArch(kArch))
+    if(!gpuIsArch(ARCH))
     {
-        GTEST_SKIP() << "no " << kArch << " GPU present";
+        GTEST_SKIP() << "no " << ARCH << " GPU present";
     }
     // bf16 has a 7-bit mantissa (~2 decimal digits) -> looser tolerance than f16.
     runSdpaParity<uint16_t>("bf16", floatToBf16, bf16ToFloat, 5e-2f, 5e-2f);

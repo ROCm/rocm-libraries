@@ -18,6 +18,7 @@
 
 #include <hip/hip_runtime.h>
 
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -38,10 +39,10 @@ namespace
 using namespace aot_catalog_engine;
 
 // Baked in by CMake: the build-tree copy of the catalog (<arch>/<family>/...).
-constexpr const char* kCatalogDir = AOT_CATALOG_TEST_DIR;
+constexpr const char* CATALOG_DIR = AOT_CATALOG_TEST_DIR;
 
 // The shipped .co is gfx1151-only; the test is meaningful only on that arch.
-constexpr const char* kArch = "gfx1151";
+constexpr const char* ARCH = "gfx1151";
 
 bool gpuIsArch(const std::string& arch)
 {
@@ -120,15 +121,15 @@ const catalog::KernelEntry*
 // kernel: get it backwards and this test computes a transposed/garbage C.
 TEST(TestAotCatalogGemmUniversalNumericParity, WmmaUniversalGemmF16MatchesReference)
 {
-    if(!gpuIsArch(kArch))
+    if(!gpuIsArch(ARCH))
     {
-        GTEST_SKIP() << "no " << kArch << " GPU present";
+        GTEST_SKIP() << "no " << ARCH << " GPU present";
     }
 
-    const catalog::Catalog cat = catalog::Catalog::loadForDevice(kCatalogDir, kArch);
+    const catalog::Catalog cat = catalog::Catalog::loadForDevice(CATALOG_DIR, ARCH);
     if(cat.empty())
     {
-        GTEST_SKIP() << "empty AOT catalog at " << kCatalogDir
+        GTEST_SKIP() << "empty AOT catalog at " << CATALOG_DIR
                      << "; build with -DROCKE_PYTHON_DIR to populate it (see the engine README)";
     }
 
@@ -225,13 +226,13 @@ TEST(TestAotCatalogGemmUniversalNumericParity, WmmaUniversalGemmF16MatchesRefere
     Handle handle;
     handle.setStream(stream);
 
-    const hipdnnPluginDeviceBuffer_t buffers[3] = {
+    const std::array<hipdnnPluginDeviceBuffer_t, 3> buffers = {{
         {1, deviceA},
         {2, deviceB},
         {3, deviceC},
-    };
+    }};
 
-    ASSERT_NO_THROW(plan.execute(handle, buffers, 3, nullptr));
+    ASSERT_NO_THROW(plan.execute(handle, buffers.data(), 3, nullptr));
     ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
 
     ASSERT_EQ(
@@ -242,7 +243,7 @@ TEST(TestAotCatalogGemmUniversalNumericParity, WmmaUniversalGemmF16MatchesRefere
     {
         for(size_t j = 0; j < N; ++j)
         {
-            const float got = static_cast<float>(hostC[i * N + j]);
+            const auto got = static_cast<float>(hostC[i * N + j]);
             const float want = reference[i * N + j];
             const float tol = std::max(1e-2f, 2e-2f * std::fabs(want));
             ASSERT_NEAR(got, want, tol) << "mismatch at (" << i << "," << j << ")";
@@ -259,15 +260,15 @@ TEST(TestAotCatalogGemmUniversalNumericParity, WmmaUniversalGemmF16MatchesRefere
 // same tile-crossing M=N=128, K=64 and same ugemm_* selection.
 TEST(TestAotCatalogGemmUniversalNumericParity, WmmaUniversalGemmBf16MatchesReference)
 {
-    if(!gpuIsArch(kArch))
+    if(!gpuIsArch(ARCH))
     {
-        GTEST_SKIP() << "no " << kArch << " GPU present";
+        GTEST_SKIP() << "no " << ARCH << " GPU present";
     }
 
-    const catalog::Catalog cat = catalog::Catalog::loadForDevice(kCatalogDir, kArch);
+    const catalog::Catalog cat = catalog::Catalog::loadForDevice(CATALOG_DIR, ARCH);
     if(cat.empty())
     {
-        GTEST_SKIP() << "empty AOT catalog at " << kCatalogDir
+        GTEST_SKIP() << "empty AOT catalog at " << CATALOG_DIR
                      << "; build with -DROCKE_PYTHON_DIR to populate it (see the engine README)";
     }
 
@@ -364,13 +365,13 @@ TEST(TestAotCatalogGemmUniversalNumericParity, WmmaUniversalGemmBf16MatchesRefer
     Handle handle;
     handle.setStream(stream);
 
-    const hipdnnPluginDeviceBuffer_t buffers[3] = {
+    const std::array<hipdnnPluginDeviceBuffer_t, 3> buffers = {{
         {1, deviceA},
         {2, deviceB},
         {3, deviceC},
-    };
+    }};
 
-    ASSERT_NO_THROW(plan.execute(handle, buffers, 3, nullptr));
+    ASSERT_NO_THROW(plan.execute(handle, buffers.data(), 3, nullptr));
     ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
 
     ASSERT_EQ(

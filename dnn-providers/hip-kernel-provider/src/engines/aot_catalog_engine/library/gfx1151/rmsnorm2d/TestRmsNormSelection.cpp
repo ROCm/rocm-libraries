@@ -16,6 +16,7 @@
 #include <hip/hip_runtime.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -40,12 +41,12 @@ using namespace aot_catalog_engine;
 namespace fs = std::filesystem;
 
 // Baked in by CMake: the build-tree copy of the catalog (<arch>/<family>/...).
-constexpr const char* kCatalogDir = AOT_CATALOG_TEST_DIR;
-constexpr const char* kArch = "gfx1151";
+constexpr const char* CATALOG_DIR = AOT_CATALOG_TEST_DIR;
+constexpr const char* ARCH = "gfx1151";
 
 constexpr size_t M = 8;
 constexpr size_t N = 2048;
-constexpr float kEps = 1e-5f;
+constexpr float EPS = 1e-5f;
 
 bool gpuIsArch(const std::string& arch)
 {
@@ -86,7 +87,7 @@ PlanCandidate makeCandidate(const catalog::KernelEntry& kernel)
     bindings.pointerUids.emplace("Y", 3);
     bindings.scalars.emplace("M", catalog::ScalarValue{static_cast<int64_t>(M)});
     bindings.scalars.emplace("N", catalog::ScalarValue{static_cast<int64_t>(N)});
-    bindings.scalars.emplace("eps", catalog::ScalarValue{kEps});
+    bindings.scalars.emplace("eps", catalog::ScalarValue{EPS});
 
     launch::SymbolTable gridSymbols;
     gridSymbols.emplace("M", static_cast<int64_t>(M));
@@ -110,14 +111,14 @@ std::vector<float> reference(const std::vector<_Float16>& hostX,
         float sumSquares = 0.0f;
         for(size_t n = 0; n < N; ++n)
         {
-            const float x = static_cast<float>(hostX[m * N + n]);
+            const auto x = static_cast<float>(hostX[m * N + n]);
             sumSquares += x * x;
         }
-        const float invRms = 1.0f / std::sqrt(sumSquares / static_cast<float>(N) + kEps);
+        const float invRms = 1.0f / std::sqrt(sumSquares / static_cast<float>(N) + EPS);
         for(size_t n = 0; n < N; ++n)
         {
-            const float x = static_cast<float>(hostX[m * N + n]);
-            const float g = static_cast<float>(hostGamma[n]);
+            const auto x = static_cast<float>(hostX[m * N + n]);
+            const auto g = static_cast<float>(hostGamma[n]);
             ref[m * N + n] = x * invRms * g;
         }
     }
@@ -130,7 +131,7 @@ void expectMatches(const std::vector<_Float16>& hostY, const std::vector<float>&
     {
         for(size_t n = 0; n < N; ++n)
         {
-            const float got = static_cast<float>(hostY[m * N + n]);
+            const auto got = static_cast<float>(hostY[m * N + n]);
             const float want = ref[m * N + n];
             const float tol = std::max(2e-2f, 3e-2f * std::fabs(want));
             ASSERT_NEAR(got, want, tol) << "mismatch at (" << m << "," << n << ")";
@@ -144,9 +145,9 @@ class TestRmsNormSelection : public ::testing::Test
 protected:
     void SetUp() override
     {
-        if(!gpuIsArch(kArch))
+        if(!gpuIsArch(ARCH))
         {
-            GTEST_SKIP() << "no " << kArch << " GPU present";
+            GTEST_SKIP() << "no " << ARCH << " GPU present";
         }
 
         _hostX.resize(M * N);
@@ -207,13 +208,13 @@ protected:
     // Run `plan`, copy Y back into _hostY, and assert it matches the CPU ref.
     void runAndCheck(const CatalogPlan& plan)
     {
-        const hipdnnPluginDeviceBuffer_t buffers[3] = {
+        const std::array<hipdnnPluginDeviceBuffer_t, 3> buffers = {{
             {1, _deviceX},
             {2, _deviceGamma},
             {3, _deviceY},
-        };
+        }};
         ASSERT_EQ(hipMemset(_deviceY, 0, M * N * sizeof(_Float16)), hipSuccess);
-        ASSERT_NO_THROW(plan.execute(_handle, buffers, 3, nullptr));
+        ASSERT_NO_THROW(plan.execute(_handle, buffers.data(), 3, nullptr));
         ASSERT_EQ(hipStreamSynchronize(_stream), hipSuccess);
         ASSERT_EQ(
             hipMemcpy(_hostY.data(), _deviceY, M * N * sizeof(_Float16), hipMemcpyDeviceToHost),
@@ -263,14 +264,14 @@ std::vector<float> referenceForShape(size_t rows,
         float sumSquares = 0.0f;
         for(size_t n = 0; n < cols; ++n)
         {
-            const float x = static_cast<float>(hostX[m * cols + n]);
+            const auto x = static_cast<float>(hostX[m * cols + n]);
             sumSquares += x * x;
         }
         const float invRms = 1.0f / std::sqrt(sumSquares / static_cast<float>(cols) + eps);
         for(size_t n = 0; n < cols; ++n)
         {
-            const float x = static_cast<float>(hostX[m * cols + n]);
-            const float g = static_cast<float>(hostGamma[n]);
+            const auto x = static_cast<float>(hostX[m * cols + n]);
+            const auto g = static_cast<float>(hostGamma[n]);
             ref[m * cols + n] = x * invRms * g;
         }
     }
@@ -317,7 +318,7 @@ ShapeOutcome runShapeAndCheck(size_t rows, size_t cols, float eps, const std::st
 {
     ShapeOutcome outcome;
 
-    const catalog::Catalog cat = catalog::Catalog::loadForDevice(kCatalogDir, kArch);
+    const catalog::Catalog cat = catalog::Catalog::loadForDevice(CATALOG_DIR, ARCH);
     EXPECT_FALSE(cat.empty());
 
     catalog::ProblemShape problem;
@@ -380,13 +381,13 @@ ShapeOutcome runShapeAndCheck(size_t rows, size_t cols, float eps, const std::st
     catalog::TuneCache cache(cachePath);
     const CatalogPlan plan(std::move(planCandidates), &cache, key);
 
-    const hipdnnPluginDeviceBuffer_t buffers[3] = {
+    const std::array<hipdnnPluginDeviceBuffer_t, 3> buffers = {{
         {1, deviceX},
         {2, deviceGamma},
         {3, deviceY},
-    };
+    }};
     EXPECT_EQ(hipMemset(deviceY, 0, rows * cols * sizeof(_Float16)), hipSuccess);
-    EXPECT_NO_THROW(plan.execute(handle, buffers, 3, nullptr));
+    EXPECT_NO_THROW(plan.execute(handle, buffers.data(), 3, nullptr));
     EXPECT_EQ(hipStreamSynchronize(stream), hipSuccess);
     EXPECT_EQ(
         hipMemcpy(hostY.data(), deviceY, rows * cols * sizeof(_Float16), hipMemcpyDeviceToHost),
@@ -399,7 +400,7 @@ ShapeOutcome runShapeAndCheck(size_t rows, size_t cols, float eps, const std::st
     {
         for(size_t n = 0; n < cols; ++n)
         {
-            const float got = static_cast<float>(hostY[m * cols + n]);
+            const auto got = static_cast<float>(hostY[m * cols + n]);
             const float want = ref[m * cols + n];
             const float tol = std::max(2e-2f, 3e-2f * std::fabs(want));
             if(std::fabs(got - want) > tol)
@@ -465,7 +466,7 @@ ShapeOutcome runShapeAndCheckBf16(size_t rows, size_t cols, float eps, const std
 {
     ShapeOutcome outcome;
 
-    const catalog::Catalog cat = catalog::Catalog::loadForDevice(kCatalogDir, kArch);
+    const catalog::Catalog cat = catalog::Catalog::loadForDevice(CATALOG_DIR, ARCH);
     EXPECT_FALSE(cat.empty());
 
     catalog::ProblemShape problem;
@@ -543,13 +544,13 @@ ShapeOutcome runShapeAndCheckBf16(size_t rows, size_t cols, float eps, const std
     catalog::TuneCache cache(cachePath);
     const CatalogPlan plan(std::move(planCandidates), &cache, key);
 
-    const hipdnnPluginDeviceBuffer_t buffers[3] = {
+    const std::array<hipdnnPluginDeviceBuffer_t, 3> buffers = {{
         {1, deviceX},
         {2, deviceGamma},
         {3, deviceY},
-    };
+    }};
     EXPECT_EQ(hipMemset(deviceY, 0, rows * cols * sizeof(uint16_t)), hipSuccess);
-    EXPECT_NO_THROW(plan.execute(handle, buffers, 3, nullptr));
+    EXPECT_NO_THROW(plan.execute(handle, buffers.data(), 3, nullptr));
     EXPECT_EQ(hipStreamSynchronize(stream), hipSuccess);
     EXPECT_EQ(
         hipMemcpy(hostY.data(), deviceY, rows * cols * sizeof(uint16_t), hipMemcpyDeviceToHost),
@@ -616,10 +617,10 @@ bool allRuntimeN(const std::vector<std::string>& symbols)
 // The N=2048 family exposes multiple perf variants that all match one problem.
 TEST_F(TestRmsNormSelection, MultipleCandidatesForOneProblem)
 {
-    const catalog::Catalog cat = catalog::Catalog::loadForDevice(kCatalogDir, kArch);
+    const catalog::Catalog cat = catalog::Catalog::loadForDevice(CATALOG_DIR, ARCH);
     if(cat.empty())
     {
-        GTEST_SKIP() << "empty AOT catalog at " << kCatalogDir
+        GTEST_SKIP() << "empty AOT catalog at " << CATALOG_DIR
                      << "; build with -DROCKE_PYTHON_DIR to populate it (see the engine README)";
     }
 
@@ -645,10 +646,10 @@ TEST_F(TestRmsNormSelection, MultipleCandidatesForOneProblem)
 // the second execute hits the cache and stays correct.
 TEST_F(TestRmsNormSelection, TunesRecordsAndCaches)
 {
-    const catalog::Catalog cat = catalog::Catalog::loadForDevice(kCatalogDir, kArch);
+    const catalog::Catalog cat = catalog::Catalog::loadForDevice(CATALOG_DIR, ARCH);
     if(cat.empty())
     {
-        GTEST_SKIP() << "empty AOT catalog at " << kCatalogDir
+        GTEST_SKIP() << "empty AOT catalog at " << CATALOG_DIR
                      << "; build with -DROCKE_PYTHON_DIR to populate it (see the engine README)";
     }
 
@@ -694,10 +695,10 @@ TEST_F(TestRmsNormSelection, TunesRecordsAndCaches)
 // a single-candidate plan, exercising the no-tuning launch path per symbol).
 TEST_F(TestRmsNormSelection, EachVariantIsCorrect)
 {
-    const catalog::Catalog cat = catalog::Catalog::loadForDevice(kCatalogDir, kArch);
+    const catalog::Catalog cat = catalog::Catalog::loadForDevice(CATALOG_DIR, ARCH);
     if(cat.empty())
     {
-        GTEST_SKIP() << "empty AOT catalog at " << kCatalogDir
+        GTEST_SKIP() << "empty AOT catalog at " << CATALOG_DIR
                      << "; build with -DROCKE_PYTHON_DIR to populate it (see the engine README)";
     }
 
@@ -736,18 +737,18 @@ TEST_F(TestRmsNormSelection, EachVariantIsCorrect)
 // as candidates, the tuner records a valid winner, and output is correct.
 TEST(TestRmsNormRuntimeN, N2048CompetesWithSpecializations)
 {
-    if(!gpuIsArch(kArch))
+    if(!gpuIsArch(ARCH))
     {
-        GTEST_SKIP() << "no " << kArch << " GPU present";
+        GTEST_SKIP() << "no " << ARCH << " GPU present";
     }
-    if(catalog::Catalog::loadForDevice(kCatalogDir, kArch).empty())
+    if(catalog::Catalog::loadForDevice(CATALOG_DIR, ARCH).empty())
     {
-        GTEST_SKIP() << "empty AOT catalog at " << kCatalogDir
+        GTEST_SKIP() << "empty AOT catalog at " << CATALOG_DIR
                      << "; build with -DROCKE_PYTHON_DIR to populate it (see the engine README)";
     }
     const std::string cachePath
         = (fs::temp_directory_path() / "hipdnn_aot_rmsnorm_dyn_2048.json").string();
-    const ShapeOutcome o = runShapeAndCheck(8, 2048, kEps, cachePath);
+    const ShapeOutcome o = runShapeAndCheck(8, 2048, EPS, cachePath);
 
     EXPECT_GE(o.symbols.size(), 5u)
         << "N=2048 should offer static specializations + runtime-N variants";
@@ -761,18 +762,18 @@ TEST(TestRmsNormRuntimeN, N2048CompetesWithSpecializations)
 // runtime-N kernels match -- and they are numerically correct.
 TEST(TestRmsNormRuntimeN, N3072RuntimeNOnly)
 {
-    if(!gpuIsArch(kArch))
+    if(!gpuIsArch(ARCH))
     {
-        GTEST_SKIP() << "no " << kArch << " GPU present";
+        GTEST_SKIP() << "no " << ARCH << " GPU present";
     }
-    if(catalog::Catalog::loadForDevice(kCatalogDir, kArch).empty())
+    if(catalog::Catalog::loadForDevice(CATALOG_DIR, ARCH).empty())
     {
-        GTEST_SKIP() << "empty AOT catalog at " << kCatalogDir
+        GTEST_SKIP() << "empty AOT catalog at " << CATALOG_DIR
                      << "; build with -DROCKE_PYTHON_DIR to populate it (see the engine README)";
     }
     const std::string cachePath
         = (fs::temp_directory_path() / "hipdnn_aot_rmsnorm_dyn_3072.json").string();
-    const ShapeOutcome o = runShapeAndCheck(8, 3072, kEps, cachePath);
+    const ShapeOutcome o = runShapeAndCheck(8, 3072, EPS, cachePath);
 
     ASSERT_FALSE(o.symbols.empty()) << "no candidate matched the unlisted N=3072";
     EXPECT_TRUE(allRuntimeN(o.symbols))
@@ -785,18 +786,18 @@ TEST(TestRmsNormRuntimeN, N3072RuntimeNOnly)
 // no static specialization ships.
 TEST(TestRmsNormRuntimeN, N2432RuntimeNOnly)
 {
-    if(!gpuIsArch(kArch))
+    if(!gpuIsArch(ARCH))
     {
-        GTEST_SKIP() << "no " << kArch << " GPU present";
+        GTEST_SKIP() << "no " << ARCH << " GPU present";
     }
-    if(catalog::Catalog::loadForDevice(kCatalogDir, kArch).empty())
+    if(catalog::Catalog::loadForDevice(CATALOG_DIR, ARCH).empty())
     {
-        GTEST_SKIP() << "empty AOT catalog at " << kCatalogDir
+        GTEST_SKIP() << "empty AOT catalog at " << CATALOG_DIR
                      << "; build with -DROCKE_PYTHON_DIR to populate it (see the engine README)";
     }
     const std::string cachePath
         = (fs::temp_directory_path() / "hipdnn_aot_rmsnorm_dyn_2432.json").string();
-    const ShapeOutcome o = runShapeAndCheck(8, 2432, kEps, cachePath);
+    const ShapeOutcome o = runShapeAndCheck(8, 2432, EPS, cachePath);
 
     ASSERT_FALSE(o.symbols.empty()) << "no candidate matched the unlisted N=2432";
     EXPECT_TRUE(allRuntimeN(o.symbols))
@@ -814,18 +815,18 @@ TEST(TestRmsNormRuntimeN, N2432RuntimeNOnly)
 // match, the tuner records a valid winner, and output is correct.
 TEST(TestRmsNormBf16, N2048CompetesWithSpecializations)
 {
-    if(!gpuIsArch(kArch))
+    if(!gpuIsArch(ARCH))
     {
-        GTEST_SKIP() << "no " << kArch << " GPU present";
+        GTEST_SKIP() << "no " << ARCH << " GPU present";
     }
-    if(catalog::Catalog::loadForDevice(kCatalogDir, kArch).empty())
+    if(catalog::Catalog::loadForDevice(CATALOG_DIR, ARCH).empty())
     {
-        GTEST_SKIP() << "empty AOT catalog at " << kCatalogDir
+        GTEST_SKIP() << "empty AOT catalog at " << CATALOG_DIR
                      << "; build with -DROCKE_PYTHON_DIR to populate it (see the engine README)";
     }
     const std::string cachePath
         = (fs::temp_directory_path() / "hipdnn_aot_rmsnorm_bf16_2048.json").string();
-    const ShapeOutcome o = runShapeAndCheckBf16(8, 2048, kEps, cachePath);
+    const ShapeOutcome o = runShapeAndCheckBf16(8, 2048, EPS, cachePath);
 
     EXPECT_GE(o.symbols.size(), 5u)
         << "N=2048 bf16 should offer static specializations + runtime-N variants";
@@ -839,18 +840,18 @@ TEST(TestRmsNormBf16, N2048CompetesWithSpecializations)
 // runtime-N variants match, and output is correct.
 TEST(TestRmsNormBf16, N4096CompetesWithSpecializations)
 {
-    if(!gpuIsArch(kArch))
+    if(!gpuIsArch(ARCH))
     {
-        GTEST_SKIP() << "no " << kArch << " GPU present";
+        GTEST_SKIP() << "no " << ARCH << " GPU present";
     }
-    if(catalog::Catalog::loadForDevice(kCatalogDir, kArch).empty())
+    if(catalog::Catalog::loadForDevice(CATALOG_DIR, ARCH).empty())
     {
-        GTEST_SKIP() << "empty AOT catalog at " << kCatalogDir
+        GTEST_SKIP() << "empty AOT catalog at " << CATALOG_DIR
                      << "; build with -DROCKE_PYTHON_DIR to populate it (see the engine README)";
     }
     const std::string cachePath
         = (fs::temp_directory_path() / "hipdnn_aot_rmsnorm_bf16_4096.json").string();
-    const ShapeOutcome o = runShapeAndCheckBf16(8, 4096, kEps, cachePath);
+    const ShapeOutcome o = runShapeAndCheckBf16(8, 4096, EPS, cachePath);
 
     EXPECT_GE(o.symbols.size(), 3u)
         << "N=4096 bf16 should offer static specializations + runtime-N variants";
@@ -861,18 +862,18 @@ TEST(TestRmsNormBf16, N4096CompetesWithSpecializations)
 // An unlisted bf16 N=3072: only the runtime-N kernels match, and correct.
 TEST(TestRmsNormBf16, N3072RuntimeNOnly)
 {
-    if(!gpuIsArch(kArch))
+    if(!gpuIsArch(ARCH))
     {
-        GTEST_SKIP() << "no " << kArch << " GPU present";
+        GTEST_SKIP() << "no " << ARCH << " GPU present";
     }
-    if(catalog::Catalog::loadForDevice(kCatalogDir, kArch).empty())
+    if(catalog::Catalog::loadForDevice(CATALOG_DIR, ARCH).empty())
     {
-        GTEST_SKIP() << "empty AOT catalog at " << kCatalogDir
+        GTEST_SKIP() << "empty AOT catalog at " << CATALOG_DIR
                      << "; build with -DROCKE_PYTHON_DIR to populate it (see the engine README)";
     }
     const std::string cachePath
         = (fs::temp_directory_path() / "hipdnn_aot_rmsnorm_bf16_3072.json").string();
-    const ShapeOutcome o = runShapeAndCheckBf16(8, 3072, kEps, cachePath);
+    const ShapeOutcome o = runShapeAndCheckBf16(8, 3072, EPS, cachePath);
 
     ASSERT_FALSE(o.symbols.empty()) << "no bf16 candidate matched the unlisted N=3072";
     EXPECT_TRUE(allRuntimeN(o.symbols))
