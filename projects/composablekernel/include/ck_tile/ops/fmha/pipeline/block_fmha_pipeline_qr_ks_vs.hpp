@@ -434,7 +434,7 @@ struct BlockFmhaPipelineQRKSVS
             {
                 return make_tile_window(k_scale_dram_block_window_tmp.get_bottom_tensor_view(),
                                         k_scale_dram_block_window_tmp.get_window_lengths(),
-                                        {seqlen_k_start, 0});
+                                        {kv_load_start, 0});
             }
             else
             {
@@ -446,7 +446,7 @@ struct BlockFmhaPipelineQRKSVS
             {
                 return make_tile_window(v_scale_dram_block_window_tmp.get_bottom_tensor_view(),
                                         v_scale_dram_block_window_tmp.get_window_lengths(),
-                                        {0, seqlen_k_start / kVScaleGranularity},
+                                        {0, kv_load_start / kVScaleGranularity},
                                         Policy::template MakeVScaleRegTileDistribution<Problem>());
             }
             else
@@ -776,7 +776,7 @@ struct BlockFmhaPipelineQRKSVS
             }
             if constexpr(kHasSink)
             {
-                if(i_total_loops == 0)
+                if(i_total_loops == num_sink_loop - 1)
                     move_tile_window(bias_dram_window, {0, seqlen_k_start - sink_seq_end});
             }
             move_tile_window(bias_dram_window, {0, kN0});
@@ -1188,10 +1188,18 @@ struct BlockFmhaPipelineQRKSVS
             // move K tile windows
             if constexpr(kHasSink)
             {
-                if(i_total_loops == 0)
+                if(i_total_loops == num_sink_loop - 1)
                 {
                     move_tile_window(k_dram_block_window, {seqlen_k_start - sink_seq_end, 0});
                     move_tile_window(v_dram_window, {0, seqlen_k_start - sink_seq_end});
+                    if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::MX)
+                    {
+                        move_tile_window(k_scale_dram_block_window,
+                                         {seqlen_k_start - sink_seq_end, 0});
+                        move_tile_window(
+                            v_scale_dram_window,
+                            {0, (seqlen_k_start - sink_seq_end) / kVScaleGranularity});
+                    }
                 }
             }
             move_tile_window(k_dram_block_window, {kN0, 0});
