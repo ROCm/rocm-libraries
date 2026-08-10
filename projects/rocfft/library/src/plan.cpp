@@ -5990,7 +5990,7 @@ void RuntimeCompilePlan(ExecPlan& execPlan)
     // gfx1250 hotswap fails with function pointer callbacks, so they can't work there.
     bool need_callbacks = !array_type_is_planar(load_node->inArrayType)
                           && !array_type_is_planar(store_node->outArrayType)
-                          && strcmp(execPlan.deviceProp.gcnArchName, "gfx1250") != 0;
+                          && strncmp(execPlan.deviceProp.gcnArchName, "gfx1250", 7) != 0;
 
     // don't spend time compiling callback
     if(need_callbacks && !is_tuning)
