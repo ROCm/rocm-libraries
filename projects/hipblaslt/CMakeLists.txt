@@ -28,6 +28,7 @@ include(GenerateExportHeader)
 include(CMakeDependentOption)
 
 include(fetch_rocm_cmake)
+include(hipblaslt_materialize_monorepo_paths)
 include(hipblaslt_python)
 include(hipblaslt_target_configure_sanitizers)
 include(tensilelite_supported_architectures)
@@ -292,7 +293,28 @@ if(NOT TARGET roc::host-validation)
     set(_hipblaslt_host_validation_source
         "${CMAKE_CURRENT_SOURCE_DIR}/../../shared/host-validation"
     )
-    if(EXISTS "${_hipblaslt_host_validation_source}/CMakeLists.txt")
+    if(NOT EXISTS "${_hipblaslt_host_validation_source}/CMakeLists.txt")
+        find_package(ROCHostValidation CONFIG QUIET)
+    endif()
+    if(NOT TARGET roc::host-validation
+            AND NOT EXISTS
+                "${_hipblaslt_host_validation_source}/CMakeLists.txt")
+        set(_hipblaslt_shared_paths shared/host-validation)
+        if(_hipblaslt_mxdatagen_enabled)
+            list(APPEND _hipblaslt_shared_paths shared/mxdatagenerator)
+        endif()
+        hipblaslt_materialize_monorepo_paths(
+            _hipblaslt_materialized_root
+            ${_hipblaslt_shared_paths}
+        )
+        if(_hipblaslt_materialized_root)
+            set(_hipblaslt_host_validation_source
+                "${_hipblaslt_materialized_root}/shared/host-validation"
+            )
+        endif()
+    endif()
+    if(NOT TARGET roc::host-validation
+            AND EXISTS "${_hipblaslt_host_validation_source}/CMakeLists.txt")
         block(SCOPE_FOR VARIABLES)
             set(HOST_VALIDATION_BUILD_TESTING OFF)
             set(HOST_VALIDATION_BUILD_BLAS_BACKEND ${HIPBLASLT_ENABLE_CLIENT})
@@ -305,15 +327,14 @@ if(NOT TARGET roc::host-validation)
                 EXCLUDE_FROM_ALL
             )
         endblock()
-    else()
-        find_package(ROCHostValidation CONFIG QUIET)
-        if(NOT TARGET roc::host-validation)
-            message(FATAL_ERROR
-                "hipBLASLt requires the standalone ROCHostValidation component. "
-                "Include shared/host-validation in a monorepo sparse checkout or "
-                "install the ROCHostValidation package and add it to CMAKE_PREFIX_PATH."
-            )
-        endif()
+    endif()
+    if(NOT TARGET roc::host-validation)
+        message(FATAL_ERROR
+            "hipBLASLt requires the standalone ROCHostValidation component. "
+            "Include shared/host-validation in a monorepo sparse checkout, "
+            "configure from a Git checkout that can materialize that path, or "
+            "install the ROCHostValidation package and add it to CMAKE_PREFIX_PATH."
+        )
     endif()
 endif()
 if(_hipblaslt_mxdatagen_enabled AND NOT TARGET roc::host-validation-mx)
