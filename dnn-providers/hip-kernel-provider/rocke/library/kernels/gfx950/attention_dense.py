@@ -648,11 +648,15 @@ def build_attention_dense(
     zero_soff = b.const_i32(0)
     K_lds_addr = b.smem_addr_of(K_lds)
     V_lds_addr = b.smem_addr_of(V_lds)
-    _kv_cache_bytes = b.const_i32(
+    # Emit a SEPARATE b.const_i32 per buffer_rsrc (NOT a shared IR node): develop
+    # emits two consts here, so sharing one silently breaks paged=False byte-identity
+    # (the attention_dense representative-IR golden). ``_kv_cache_elems`` is a plain
+    # Python int; paged widens the bound to the whole cache, contiguous keeps B*Skv.
+    _kv_cache_elems = (
         (spec.num_kv_blocks * spec.block_size if spec.paged else B * Skv) * Hkv * D * 2
     )
-    k_rsrc = b.buffer_rsrc(k, _kv_cache_bytes)
-    v_rsrc = b.buffer_rsrc(v, _kv_cache_bytes)
+    k_rsrc = b.buffer_rsrc(k, b.const_i32(_kv_cache_elems))
+    v_rsrc = b.buffer_rsrc(v, b.const_i32(_kv_cache_elems))
     v_wave_off_i64 = b.zext(b.to_sgpr_u32(b.mul(wave, b.const_i32(WAVE_BYTES))), I64)
     if spec.paged:
         assert (
