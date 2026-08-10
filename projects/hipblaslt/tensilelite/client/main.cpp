@@ -247,7 +247,7 @@ namespace TensileLite
                 ("deterministic-mode",       po::value<bool>()->default_value(false), "Enforce deterministic summation patterns"
                                                                                       "by not splitting U among workgroups")
 
-                ("init-seed",                po::value<unsigned int>()->default_value(0), "Fixed seed for srand; zero is a valid deterministic seed")
+                ("init-seed",                po::value<unsigned int>()->default_value(0), "Fixed seed for srand and host initialization; zero is a valid deterministic seed")
                 ("init-a",                   po::value<InitMode>()->default_value(InitMode::Random), "Initialization for A")
                 ("init-b",                   po::value<InitMode>()->default_value(InitMode::Random), "Initialization for B")
                 ("init-c",                   po::value<InitMode>()->default_value(InitMode::Random), "Initialization for C")
@@ -1044,9 +1044,11 @@ int main(int argc, const char* argv[])
     // Enable timing instrumentation if requested
     g_timingInstrumentationEnabled = args["timing-instrumentation"].as<bool>();
 
-    // Set srand
+    // Seed legacy rand consumers and component-backed host initialization.
     const unsigned int seed = args["init-seed"].as<unsigned int>();
-    std::cout << std::endl << "srand seed is set to " << seed << std::endl << std::endl;
+    std::cout << std::endl
+              << "srand and host initialization seed is set to " << seed << std::endl
+              << std::endl;
     srand(seed);
 
     ClientProblemFactory problemFactory(args);

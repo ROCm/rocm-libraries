@@ -37,6 +37,8 @@
 #include <mxDataGen.hpp>
 
 #include <cstddef>
+#include <cstdint>
+#include <string_view>
 
 #include "RunListener.hpp"
 
@@ -113,19 +115,34 @@ namespace TensileLite
             Count
         };
 
-        bool tryHostValidationInitialize(
-            rocisa::DataType dataType, InitMode mode, void* array, size_t elements);
-        bool tryHostValidationInitialize(rocisa::DataType dataType,
-                                         InitMode         mode,
-                                         void*            array,
-                                         size_t           elements,
-                                         double           freeValue);
-        bool tryHostValidationInitialize(rocisa::DataType        dataType,
-                                         InitMode                 mode,
-                                         void*                    array,
-                                         TensorDescriptor const& descriptor);
-        double hostValidationDoubleValue(InitMode mode, double freeValue = 0.0);
-        double hostValidationUniformDouble(double lower, double upper);
+        struct DataInitializationKey
+        {
+            std::uint64_t seed;
+            std::uint64_t semanticStream;
+        };
+
+        std::uint64_t stableDataInitializationStream(std::string_view semanticName);
+
+        bool   tryHostValidationInitialize(rocisa::DataType      dataType,
+                                           InitMode              mode,
+                                           void*                 array,
+                                           size_t                elements,
+                                           DataInitializationKey key);
+        bool   tryHostValidationInitialize(rocisa::DataType      dataType,
+                                           InitMode              mode,
+                                           void*                 array,
+                                           size_t                elements,
+                                           DataInitializationKey key,
+                                           double                freeValue);
+        bool   tryHostValidationInitialize(rocisa::DataType        dataType,
+                                           InitMode                mode,
+                                           void*                   array,
+                                           TensorDescriptor const& descriptor,
+                                           DataInitializationKey   key);
+        double hostValidationDoubleValue(InitMode              mode,
+                                         DataInitializationKey key,
+                                         double                freeValue = 0.0);
+        double hostValidationUniformDouble(double lower, double upper, DataInitializationKey key);
 
         static bool IsProblemDependent(InitMode const& mode)
         {
@@ -458,9 +475,13 @@ namespace TensileLite
                                          hipStream_t                    stream);
 
             template <typename S>
-            void initArray(rocisa::DataType dataType, InitMode initMode, void* array, S descriptor)
+            void initArray(rocisa::DataType      dataType,
+                           InitMode              initMode,
+                           void*                 array,
+                           S                     descriptor,
+                           DataInitializationKey key)
             {
-                if(tryHostValidationInitialize(dataType, initMode, array, descriptor))
+                if(tryHostValidationInitialize(dataType, initMode, array, descriptor, key))
                     return;
                 throw std::invalid_argument(
                     "TensileLite CPU initialization mode/type is not represented "
@@ -718,7 +739,8 @@ namespace TensileLite
 
             std::shared_ptr<ProblemInputs> m_cachedGPUInputs;
 
-            size_t m_maxBatch;
+            size_t        m_maxBatch;
+            std::uint64_t m_initializationSeed;
 
             size_t m_workspaceSize;
 
