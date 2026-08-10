@@ -2628,6 +2628,20 @@ def _num_segments(problem: UnifiedAttentionProblem) -> int:
             # is unmeasured -> clamp to the pre-bump baseline so the routing bump can
             # never over-split prefill (identical to the shipped num_sms=120 split).
             return min(segments, pre_bump)
+    if _resolve_attention_arch() == "gfx950" and problem.sliding_window == 0:
+        # CONSERVATIVE gfx950 clamp: bound EVERY already-3D shape to the pre-bump
+        # (num_sms=120 -> target 480) baseline split. This guarantees the routing
+        # bump never over-splits an already-3D shape (byte-identical to the legacy
+        # split), capturing the 2D->3D reroute win with zero over-split regression.
+        # Cases proven on gfx950 silicon to benefit from a finer split are uncapped
+        # later, each gated by its own measurement (not assumed from gfx942).
+        num_2d = problem.total_num_q_blocks_upper_bound * problem.num_kv_heads
+        min_seg = 16 if problem.block_size <= 16 else 8
+        pre_bump = max(
+            min(_next_power_of_2((_PRE_BUMP_SMS * 4 + num_2d - 1) // num_2d), 128),
+            min_seg,
+        )
+        return min(segments, pre_bump)
     return segments
 
 

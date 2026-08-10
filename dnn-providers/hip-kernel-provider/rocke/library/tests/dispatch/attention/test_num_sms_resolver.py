@@ -227,6 +227,30 @@ def test_segments_bounded_after_bump():
         p.restore()
 
 
+def test_gfx950_segments_conservatively_clamped():
+    """Conservative gfx950 clamp: the num_sms bump never raises the 3D split for
+    ANY already-3D shape (including D64 / long-kv that gfx942 leaves uncapped)."""
+    p = _Patch()
+    try:
+        au._RESOLVED_ATTENTION_ARCH = None
+        p.attr(au, "_resolve_attention_arch", lambda: "gfx950")
+        # Live gfx950 count ~256; every case must equal its num_sms=120 split.
+        cases = [
+            dict(nq=32, nk=8, D=128, kv=2048, batch=1),
+            dict(nq=32, nk=8, D=128, kv=8192, batch=1),
+            dict(nq=32, nk=8, D=128, kv=32768, batch=1),  # gfx942 uncaps this; gfx950 clamps it
+            dict(nq=32, nk=4, D=64, kv=8192, batch=1),  # gfx942 uncaps D64; gfx950 clamps it
+            dict(nq=32, nk=4, D=64, kv=32768, batch=1),
+        ]
+        for c in cases:
+            s120 = au._num_segments(_prob(120, **c))
+            s256 = au._num_segments(_prob(256, **c))
+            assert s120 == s256, f"gfx950 over-split {c}: {s120} -> {s256}"
+    finally:
+        au._RESOLVED_ATTENTION_ARCH = None
+        p.restore()
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     fails = 0
