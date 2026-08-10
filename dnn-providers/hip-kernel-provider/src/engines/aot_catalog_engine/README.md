@@ -68,7 +68,7 @@ table, capability-key contract, copy-paste `family.json` template).
 
 ```
 torch op  (F.linear / F.rms_norm / F.scaled_dot_product_attention / …)
-        │  (optional) a tools/comfyui_hipdnn_*_override.py monkeypatch
+        │  (optional) a torch-functional monkeypatch that routes to AOT (§9)
         ▼
 hipDNN frontend  ──►  single-node op graph  (Matmul / RmsNorm / Sdpa attributes)
         ▼
@@ -109,7 +109,8 @@ kernel is a fallback, never a wrong answer.
 3. Build the provider (rocKE-AOT families run their producer → emit `.co` + stage
    `family.json` into the build tree; see §9), **or** for a quick data-only iteration
    point `HIPDNN_AOT_CATALOG_DIR` at a populated `<arch>/<family>/` tree directly.
-4. Verify with the A/B rig / parity test (§9).
+4. Verify with the substrate parity test (§9); real-model E2E additionally needs the
+   hipDNN→PyTorch injection layer (a separate PR; §9).
 
 To add a **tuning candidate** for a shape you already serve, you only do step 1+3:
 append another `kernels[]` entry with overlapping constraints. `CatalogPlan` measures
@@ -135,8 +136,9 @@ Work top to bottom; each rung says *why* and where it is spelled out.
       a too-broad one miscomputes.
 - [ ] **Build the provider** (producer emits `.co`, stages `family.json`; §9) — or point
       `HIPDNN_AOT_CATALOG_DIR` at a populated tree for a data-only iteration.
-- [ ] **Verify correctness** — substrate parity test **and** the frontend A/B rig (§9),
-      not one or the other.
+- [ ] **Verify correctness** — the substrate parity test is the required, hermetic gate
+      (§9); real-model E2E is the fuller check but needs the hipDNN→PyTorch injection
+      layer (a separate PR; §9).
 - [ ] **If your kernel isn't selected**, set `HIPDNN_AOT_DEBUG=1` and read the resolution
       / load / decline trace (§9 "Debugging").
 - [ ] **Know when you have left data-only and need reviewed C++**: a changed ABI, a new
@@ -262,7 +264,7 @@ transpose is expressed by **strides**. `GemmAdapter::decode` reads logical dims 
 **gates on RCR strides**: A `[M,K]` row-major, B logical `[K,N]` with strides `{1,K}`
 (physical `[N,K]` weight), C `[M,N]` row-major. Anything else declines. This is exactly
 `nn.Linear`'s `x @ weightᵀ`. The kernel has **no epilogue** — bias/activation are the
-caller's job (the `comfyui_hipdnn_linear_override` adds bias natively post-matmul).
+caller's job (a model override adds bias natively post-matmul).
 
 ### ABI (6 args, exact order)
 
@@ -295,9 +297,8 @@ Constraints are `multiple_of` (16 for the reference; M/N `multiple_of 64`, K
 ### Files
 Adapter `ops/GemmAdapter.{hpp,cpp}`; data + co-located producers + per-family parity tests
 `library/gfx1151/gemm_wmma/{family.json, produce_gemm_wmma_co.py, TestGemmWmmaNumericParity.cpp}`,
-`library/gfx1151/gemm_wmma_universal/{family.json, produce_gemm_universal_co.py, TestGemmUniversalNumericParity.cpp}`;
-A/B rig `tools/gemm_aot_ab.py`; model override +
-driver `tools/comfyui_hipdnn_linear_override.py`, `tools/ltx_linear_ab.py`.
+`library/gfx1151/gemm_wmma_universal/{family.json, produce_gemm_universal_co.py, TestGemmUniversalNumericParity.cpp}`.
+Real-model E2E additionally needs the hipDNN→PyTorch injection layer (separate PR; §9).
 
 ---
 
@@ -356,9 +357,8 @@ served by the override synthesizing a cached ones-weight.
 ### Files
 Adapter `ops/RmsNormAdapter.{hpp,cpp}`; data + co-located producer + per-family tests
 `library/gfx1151/rmsnorm2d/{family.json, produce_rmsnorm2d_co.py, TestRmsNormNumericParity.cpp, TestRmsNormSelection.cpp}`;
-rocKE runtime-N instance `instances/common/rmsnorm2d_dynamic.py`; A/B rig
-`tools/rmsnorm_aot_ab.py`; model override + driver
-`tools/comfyui_hipdnn_rmsnorm_override.py`, `tools/ltx_rmsnorm_ab.py`.
+rocKE runtime-N instance `instances/common/rmsnorm2d_dynamic.py`.
+Real-model E2E additionally needs the hipDNN→PyTorch injection layer (separate PR; §9).
 
 ---
 
@@ -501,18 +501,17 @@ kernel needs an argument the vocabulary doesn't yet emit or a grid the DSL can't
 Adapter `ops/SdpaAdapter.{hpp,cpp}`; data + co-located producer + per-family parity test
 `library/gfx1151/fmha_wmma_fwd/{family.json, produce_fmha_fwd_co.py, TestSdpaNumericParity.cpp}`;
 engine-level decode/bindings unit test `src/tests/engines/aot_catalog_engine/TestSdpaDecode.cpp`
-(host-only, no GPU, arch-neutral — not tied to this family); A/B rig `tools/sdpa_aot_ab.py`;
-model override + driver
-`tools/comfyui_hipdnn_sdpa_override.py`, `tools/ltx_sdpa_ab.py`. Authoring a new-arch
+(host-only, no GPU, arch-neutral — not tied to this family).
+Real-model E2E additionally needs the hipDNN→PyTorch injection layer (separate PR; §9).
+Authoring a new-arch
 forward family: [§13](#13-authoring-a-forward-sdpa-family-on-a-new-arch-gfx942gfx950).
 
 ---
 
 ## 9. How to test
 
-All Python runs use the provider-compatible torch venv + WSL shim (see the
-`reference_pytorch_hipdnn_env` note); do not perturb ComfyUI's own venv. Each op has the
-same four rungs:
+Verification has three rungs. Rungs 1–2 live here and are what you run to land a family;
+rung 3 (real-model E2E) is provided by the separate hipDNN→PyTorch injection layer:
 
 **1. Producer (build-time codegen)** — each rocKE-AOT family owns a co-located
 `produce_<family>_co.py` that emits **every** kernel (all dtypes) the `family.json`
@@ -577,19 +576,27 @@ taking `candidates.front()`, and neither depends on the other existing. Tests th
 belong to **no single family** — the tune-cache and SDPA-decode engine-substrate unit
 tests — stay at the engine test level (`src/tests/engines/aot_catalog_engine/`).
 
-**3. A/B rig** — builds a single-node graph through the real frontend, hard-pins the AOT
-engine by hashed id, checks `allclose` vs the torch reference and times both:
-```
-LD_LIBRARY_PATH=$HOME/aot-ab-venv/wsl-shim \
-    $HOME/aot-ab-venv/bin/python tools/sdpa_aot_ab.py   # or gemm_aot_ab / rmsnorm_aot_ab
-```
+**3. Real-model E2E — the hipDNN→PyTorch injection layer (a separate PR).** The hermetic
+substrate parity test above proves a family's kernels are correct *in isolation*. Proving
+the op is correct **and** actually selected inside a real PyTorch model needs a **second
+piece**: a way to inject hipDNN into PyTorch. That is a thin layer which monkeypatches the
+torch functionals (`F.linear` / `F.rms_norm` / `F.scaled_dot_product_attention`) so
+supported calls route through a hard-pinned AOT graph (with a native fallback otherwise),
+keeps an intercept census (AOT hits vs native fallbacks per shape/dtype), and A/Bs
+`allclose` + timing against stock PyTorch — end to end, up to running a real model.
 
-**4. Model E2E** — `tools/comfyui_hipdnn_<op>_override.py` monkeypatches the torch
-functional (`F.linear` / `F.rms_norm` / `F.scaled_dot_product_attention`), routing
-supported calls through the AOT graph with native fallback otherwise and an intercept
-census. The `tools/ltx_<op>_ab.py` drivers run the real `LTXVModel` (random weights)
-native vs override, verify output parity, and print the census + a CUDA-event
-device-time breakdown.
+This injection layer is **general-purpose** — it is how you drive *any* hipDNN engine from
+PyTorch, not specific to this throwaway catalog engine — so it will land as **its own PR
+in the hipDNN project** (a reusable "inject hipDNN into PyTorch" example) rather than being
+checked in here. Treat it as the second half of the E2E story: this engine + its families
+(rungs 1–2) make the kernels selectable; the injection layer makes a real model exercise
+them.
+
+> **Honest-baseline caveat for SDPA A/Bs.** On gfx1151, vanilla
+> `F.scaled_dot_product_attention` silently falls back to the **unfused math path**
+> (~9× slower), which flatters any AOT comparison. A fair A/B must set
+> `TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1` **before** importing torch and force each
+> real fused backend (FLASH_ATTENTION / EFFICIENT_ATTENTION) explicitly.
 
 ### Debugging: "my kernel isn't being selected"
 
@@ -697,10 +704,9 @@ No changes to `LaunchAbi`, the `Catalog` loader, `Selection`, `CatalogTypes`,
 | Built `.co` (not in git) | `${AOT_CATALOG_BUILD_DIR}/<arch>/<family>/*.co` (emitted by the producer at build time) |
 | Per-family parity/selection tests | `library/<arch>/<family>/Test*.cpp` (registered via `aot_add_family_test`; deleted with the family) |
 | Engine-substrate tests (not family-specific) | `src/tests/engines/aot_catalog_engine/{TestTuneCache,TestSdpaDecode}.cpp` |
-| A/B rigs | `tools/{gemm,rmsnorm,sdpa}_aot_ab.py` |
-| Model overrides + LTX drivers | `tools/comfyui_hipdnn_*_override.py`, `tools/ltx_*_ab.py` |
+| Real-model E2E (hipDNN→PyTorch injection) | separate PR in the hipDNN project (not checked in here; §9) |
 
-(`tools/` and `src/tests/` paths are relative to the repo root; the rest are relative to
+(`src/tests/` paths are relative to the repo root; the rest are relative to
 this engine directory. The `.co` kernel binaries are **churning rocKE build products**
 and are compiled at build time, not vendored into git.)
 
