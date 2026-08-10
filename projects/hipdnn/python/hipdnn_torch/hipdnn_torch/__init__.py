@@ -102,7 +102,9 @@ def enable_logging(level=logging.INFO) -> None:
     """Attach a simple stream handler to the ``hipdnn_torch`` logger so native
     fallbacks are printed. Call once; safe to call again (won't double-attach)."""
     for h in log.handlers:
-        if isinstance(h, logging.StreamHandler) and not isinstance(h, logging.NullHandler):
+        # NullHandler is not a StreamHandler, so the import-time null handler is
+        # skipped; only a real stream handler we added earlier counts.
+        if isinstance(h, logging.StreamHandler):
             log.setLevel(level)
             return
     handler = logging.StreamHandler()

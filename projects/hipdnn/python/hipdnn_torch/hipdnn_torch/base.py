@@ -51,6 +51,10 @@ class OpOverride:
     def __init__(self):
         self._installed = False
         self._real = None
+        # graph-key -> {"graph", "ws"} for shapes the engine serves. Grows once
+        # per distinct shape and holds hipDNN Graph objects (GPU resources); it
+        # is never evicted. Fine for a bring-up tool whose shape set is bounded,
+        # but a very-many-shapes, long-running process would accumulate memory.
         self._graph_cache = {}
         self._nope_cache = {}  # graph-key -> reason, for shapes the engine rejects
         self._census = {}      # census-key -> {"aot": int, "native": int, **extras}
