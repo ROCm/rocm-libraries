@@ -1292,9 +1292,13 @@ inline __device__ void naive_conv_bwd_nhwc(dst_data_t* __restrict__ p_in,
                 cur_wo /= sx;
                 if(cur_wo >= wo)
                     valid_w &= 0;
-                for(int ik = 0; ik < k_per_group; ik++)
+                // Keep this guard outside the ik loop. It does not depend on ik, and leaving it
+                // inside costs an exec save/restore and two extra branches on every iteration,
+                // splitting the loop across three basic blocks. Hoisting it also skips the loop
+                // entirely for a filter position that reaches no output pixel.
+                if(valid_h & valid_w)
                 {
-                    if(valid_h & valid_w)
+                    for(int ik = 0; ik < k_per_group; ik++)
                     {
                         if constexpr(ASSUME_PACKED)
                         {
