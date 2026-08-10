@@ -393,10 +393,14 @@ const char* catalogDirSourceName(CatalogDirSource source)
 {
     switch(source)
     {
-    case CatalogDirSource::ENV: return "env HIPDNN_AOT_CATALOG_DIR";
-    case CatalogDirSource::SELF_LOCATED: return "self-located beside plugin .so";
-    case CatalogDirSource::BAKED: return "baked install path (self-location failed)";
-    default: return "unknown";
+    case CatalogDirSource::ENV:
+        return "env HIPDNN_AOT_CATALOG_DIR";
+    case CatalogDirSource::SELF_LOCATED:
+        return "self-located beside plugin .so";
+    case CatalogDirSource::BAKED:
+        return "baked install path (self-location failed)";
+    default:
+        return "unknown";
     }
 }
 
@@ -442,10 +446,10 @@ Catalog Catalog::loadForDevice(const std::string& catalogDir, const std::string&
     {
         HIPDNN_PLUGIN_LOG_INFO("aot-catalog: no catalog directory for arch "
                                << arch << " at " << archDir.string() << " (engine will decline)");
-        AOT_DEBUG("no catalog directory for arch " << arch << " at " << archDir.string()
-                                                   << " -> engine declines every graph on this arch. "
-                                                   << "Check the catalog was built/installed and holds a '"
-                                                   << arch << "' subdir.");
+        AOT_DEBUG("no catalog directory for arch "
+                  << arch << " at " << archDir.string()
+                  << " -> engine declines every graph on this arch. "
+                  << "Check the catalog was built/installed and holds a '" << arch << "' subdir.");
         return Catalog{std::move(families)};
     }
     AOT_DEBUG("scanning arch dir " << archDir.string());

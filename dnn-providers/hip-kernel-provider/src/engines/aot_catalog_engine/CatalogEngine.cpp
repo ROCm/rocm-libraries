@@ -53,8 +53,8 @@ void debugExplainNoCandidates(const std::string& opKind,
             const std::string reason
                 = catalog::explainMismatch(family.kernels[i].constraints, problem);
             AOT_DEBUG("  family '" << family.name << "' kernel[" << i << "] '"
-                                   << family.kernels[i].symbol << "': "
-                                   << (reason.empty() ? "matches (unexpected)" : reason));
+                                   << family.kernels[i].symbol
+                                   << "': " << (reason.empty() ? "matches (unexpected)" : reason));
         }
     }
     if(familyCount == 0)
@@ -95,8 +95,8 @@ const catalog::Catalog& CatalogEngine::catalogForArch(const std::string& arch) c
         // Resolve here (not inside loadForDevice) so the debug header can report
         // HOW the root was found; the per-family details print inside loadForDevice.
         const catalog::CatalogDirResolution resolution = catalog::resolveCatalogDir();
-        AOT_DEBUG("resolving catalog for arch " << arch << ": root=" << resolution.dir
-                                                << " (" << catalog::catalogDirSourceName(resolution.source)
+        AOT_DEBUG("resolving catalog for arch " << arch << ": root=" << resolution.dir << " ("
+                                                << catalog::catalogDirSourceName(resolution.source)
                                                 << ")");
         it = _catalogs.emplace(arch, catalog::Catalog::loadForDevice(resolution.dir, arch)).first;
     }

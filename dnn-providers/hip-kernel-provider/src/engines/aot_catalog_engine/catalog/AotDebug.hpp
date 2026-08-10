@@ -28,13 +28,14 @@ void aotDebugEmit(const std::string& message);
 
 // Stream-style, mirrors HIPDNN_PLUGIN_LOG_*: AOT_DEBUG("root=" << dir << " ...").
 // The stream expression is only evaluated when HIPDNN_AOT_DEBUG is enabled.
-#define AOT_DEBUG(streamExpr)                                  \
-    do                                                         \
-    {                                                          \
-        if(::aot_catalog_engine::aotDebugEnabled())            \
-        {                                                      \
-            std::ostringstream _aotDbg;                        \
-            _aotDbg << streamExpr; /* NOLINT(bugprone-macro-parentheses) streamExpr is a stream expression */ \
-            ::aot_catalog_engine::aotDebugEmit(_aotDbg.str()); \
-        }                                                      \
+#define AOT_DEBUG(streamExpr)                                                                             \
+    do                                                                                                    \
+    {                                                                                                     \
+        if(::aot_catalog_engine::aotDebugEnabled())                                                       \
+        {                                                                                                 \
+            std::ostringstream _aotDbg;                                                                   \
+            _aotDbg                                                                                       \
+                << streamExpr; /* NOLINT(bugprone-macro-parentheses) streamExpr is a stream expression */ \
+            ::aot_catalog_engine::aotDebugEmit(_aotDbg.str());                                            \
+        }                                                                                                 \
     } while(0)

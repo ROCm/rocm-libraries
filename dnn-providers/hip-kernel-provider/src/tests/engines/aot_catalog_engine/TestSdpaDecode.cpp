@@ -68,12 +68,12 @@ struct SdpaSpec
 {
     DataType dtype = DataType::HALF;
     std::optional<DataType> kDtype; // set != dtype to force a dtype-mismatch decline
-    int64_t B = 1;
-    int64_t H = 32;
-    int64_t Hkv = 32;
-    int64_t Sq = 32;
-    int64_t Skv = 48;
-    int64_t D = 64;
+    int64_t b = 1;
+    int64_t h = 32;
+    int64_t hkv = 32;
+    int64_t sq = 32;
+    int64_t skv = 48;
+    int64_t d = 64;
     int qRank = 4; // set to 3 to force a non-rank-4 decline
     int64_t innerMult = 1; // 2 -> non-contiguous D
     bool causal = false;
@@ -113,15 +113,15 @@ BuiltGraph buildSdpaGraph(const SdpaSpec& spec)
     std::vector<int64_t> qDims;
     if(spec.qRank == 4)
     {
-        qDims = {spec.B, spec.H, spec.Sq, spec.D};
+        qDims = {spec.b, spec.h, spec.sq, spec.d};
     }
     else
     {
-        qDims = {spec.H, spec.Sq, spec.D};
+        qDims = {spec.h, spec.sq, spec.d};
     }
-    const std::vector<int64_t> kDims = {spec.B, spec.Hkv, spec.Skv, spec.D};
-    const std::vector<int64_t> vDims = {spec.B, spec.Hkv, spec.Skv, spec.D};
-    const std::vector<int64_t> oDims = {spec.B, spec.H, spec.Sq, spec.D};
+    const std::vector<int64_t> kDims = {spec.b, spec.hkv, spec.skv, spec.d};
+    const std::vector<int64_t> vDims = {spec.b, spec.hkv, spec.skv, spec.d};
+    const std::vector<int64_t> oDims = {spec.b, spec.h, spec.sq, spec.d};
 
     const std::vector<int64_t> qStrides = contiguousStrides(qDims, spec.innerMult);
     const std::vector<int64_t> kStrides = contiguousStrides(kDims, spec.innerMult);
@@ -199,49 +199,59 @@ BuiltGraph buildSdpaGraph(const SdpaSpec& spec)
         scaleOUid = fb::Optional<int64_t>(addPlaceholder("scale_o", DataType::FLOAT));
     }
 
-    const auto attn = data_objects::CreateSdpaAttributes(
-        builder,
-        qUid,
-        kUid,
-        vUid,
-        oUid,
-        attnMaskUid,
-        scaleUid,
-        seqLenQUid, // seq_len_q_tensor_uid
-        fb::nullopt, // seq_len_kv_tensor_uid
-        fb::nullopt, // seed_tensor_uid
-        fb::nullopt, // offset_tensor_uid
-        fb::nullopt, // dropout_mask_tensor_uid
-        fb::nullopt, // dropout_scale_tensor_uid
-        pageTableKUid, // page_table_k_tensor_uid
-        fb::nullopt, // page_table_v_tensor_uid
-        blockMaskUid, // block_mask_tensor_uid
-        sinkUid, // sink_token_tensor_uid
-        descaleQUid, // descale_q_tensor_uid
-        descaleKUid, // descale_k_tensor_uid
-        descaleVUid, // descale_v_tensor_uid
-        descaleSUid, // descale_s_tensor_uid
-        scaleSUid, // scale_s_tensor_uid
-        scaleOUid, // scale_o_tensor_uid
-        fb::nullopt, // stats_tensor_uid
-        fb::nullopt, // max_tensor_uid
-        fb::nullopt, // sum_exp_tensor_uid
-        fb::nullopt, // rng_dump_tensor_uid
-        fb::nullopt, // amax_s_tensor_uid
-        fb::nullopt, // amax_o_tensor_uid
-        spec.genStats ? fb::Optional<bool>(true) : fb::nullopt,
-        spec.alibi,
-        spec.padding,
-        spec.causal,
-        spec.causalBottomRight,
-        fb::nullopt, // dropout_probability
-        spec.attnScaleValue ? fb::Optional<float>(*spec.attnScaleValue) : fb::nullopt,
-        fb::nullopt, // left_bound
-        fb::nullopt, // right_bound
-        fb::nullopt, // max_seq_len_kv
-        data_objects::DiagonalAlignment::TOP_LEFT,
-        DataType::FLOAT,
-        data_objects::AttentionImplementation::AUTO);
+    // Move the plan-time scale across optional types without an optional->value->
+    // optional round trip (bugprone-optional-value-conversion): bind the value to a
+    // named float first, then construct the flatbuffers Optional from it.
+    fb::Optional<float> attnScale = fb::nullopt;
+    if(spec.attnScaleValue.has_value())
+    {
+        const float scaleValue = spec.attnScaleValue.value();
+        attnScale = fb::Optional<float>(scaleValue);
+    }
+
+    const auto attn
+        = data_objects::CreateSdpaAttributes(builder,
+                                             qUid,
+                                             kUid,
+                                             vUid,
+                                             oUid,
+                                             attnMaskUid,
+                                             scaleUid,
+                                             seqLenQUid, // seq_len_q_tensor_uid
+                                             fb::nullopt, // seq_len_kv_tensor_uid
+                                             fb::nullopt, // seed_tensor_uid
+                                             fb::nullopt, // offset_tensor_uid
+                                             fb::nullopt, // dropout_mask_tensor_uid
+                                             fb::nullopt, // dropout_scale_tensor_uid
+                                             pageTableKUid, // page_table_k_tensor_uid
+                                             fb::nullopt, // page_table_v_tensor_uid
+                                             blockMaskUid, // block_mask_tensor_uid
+                                             sinkUid, // sink_token_tensor_uid
+                                             descaleQUid, // descale_q_tensor_uid
+                                             descaleKUid, // descale_k_tensor_uid
+                                             descaleVUid, // descale_v_tensor_uid
+                                             descaleSUid, // descale_s_tensor_uid
+                                             scaleSUid, // scale_s_tensor_uid
+                                             scaleOUid, // scale_o_tensor_uid
+                                             fb::nullopt, // stats_tensor_uid
+                                             fb::nullopt, // max_tensor_uid
+                                             fb::nullopt, // sum_exp_tensor_uid
+                                             fb::nullopt, // rng_dump_tensor_uid
+                                             fb::nullopt, // amax_s_tensor_uid
+                                             fb::nullopt, // amax_o_tensor_uid
+                                             spec.genStats ? fb::Optional<bool>(true) : fb::nullopt,
+                                             spec.alibi,
+                                             spec.padding,
+                                             spec.causal,
+                                             spec.causalBottomRight,
+                                             fb::nullopt, // dropout_probability
+                                             attnScale,
+                                             fb::nullopt, // left_bound
+                                             fb::nullopt, // right_bound
+                                             fb::nullopt, // max_seq_len_kv
+                                             data_objects::DiagonalAlignment::TOP_LEFT,
+                                             DataType::FLOAT,
+                                             data_objects::AttentionImplementation::AUTO);
 
     std::vector<fb::Offset<data_objects::Node>> nodes;
     nodes.push_back(data_objects::CreateNodeDirect(builder,
@@ -296,7 +306,7 @@ float scalarF32(const catalog::LaunchBindings& b, const std::string& key)
     return std::get<float>(it->second);
 }
 
-const ops::SdpaAdapter kAdapter;
+const ops::SdpaAdapter ADAPTER;
 
 } // namespace
 
@@ -304,7 +314,7 @@ const ops::SdpaAdapter kAdapter;
 TEST(TestAotCatalogSdpaDecode, PublishesFullVocabularyForGfx1151Shape)
 {
     const BuiltGraph g = buildSdpaGraph(SdpaSpec{});
-    const auto shape = kAdapter.decode(g.graph());
+    const auto shape = ADAPTER.decode(g.graph());
     ASSERT_TRUE(shape.has_value()) << "baseline gfx1151-shaped graph should decode";
 
     EXPECT_EQ(strFact(*shape, "dtype"), "f16");
@@ -340,11 +350,11 @@ TEST(TestAotCatalogSdpaDecode, PublishesFullVocabularyForGfx1151Shape)
 TEST(TestAotCatalogSdpaDecode, LegacyGfx1151BindingsPreserved)
 {
     const BuiltGraph g = buildSdpaGraph(SdpaSpec{});
-    const auto shape = kAdapter.decode(g.graph());
+    const auto shape = ADAPTER.decode(g.graph());
     ASSERT_TRUE(shape.has_value());
 
     const catalog::KernelEntry kernel; // adapter ignores it ((void)kernel)
-    const catalog::LaunchBindings b = kAdapter.buildBindings(g.graph(), *shape, kernel);
+    const catalog::LaunchBindings b = ADAPTER.buildBindings(g.graph(), *shape, kernel);
 
     // Pointers Q,K,V,O bound to their tensor uids.
     ASSERT_EQ(b.pointerUids.at("Q"), 1);
@@ -353,8 +363,8 @@ TEST(TestAotCatalogSdpaDecode, LegacyGfx1151BindingsPreserved)
     ASSERT_EQ(b.pointerUids.at("O"), 4);
 
     // scale_log2 = (1/sqrt(64)) * log2(e).
-    constexpr float kExpectedScaleLog2 = 0.125F * 1.4426950408889634F;
-    EXPECT_NEAR(scalarF32(b, "scale_log2"), kExpectedScaleLog2, 1e-7F);
+    constexpr float EXPECTED_SCALE_LOG2 = 0.125F * 1.4426950408889634F;
+    EXPECT_NEAR(scalarF32(b, "scale_log2"), EXPECTED_SCALE_LOG2, 1e-7F);
 
     EXPECT_EQ(scalarI64(b, "seqlen_q"), 32);
     EXPECT_EQ(scalarI64(b, "seqlen_k"), 48);
@@ -370,7 +380,7 @@ TEST(TestAotCatalogSdpaDecode, LegacyGfx1151BindingsPreserved)
     EXPECT_EQ(scalarI64(b, "stride_o_head"), 32 * 64);
 
     // Grid symbols the family's grid formula (ceil_div(S_q,16), H, B) references.
-    const launch::SymbolTable syms = kAdapter.gridSymbols(*shape, kernel);
+    const launch::SymbolTable syms = ADAPTER.gridSymbols(*shape, kernel);
     EXPECT_EQ(syms.at("S_q"), 32);
     EXPECT_EQ(syms.at("H"), 32);
     EXPECT_EQ(syms.at("B"), 1);
@@ -381,29 +391,29 @@ TEST(TestAotCatalogSdpaDecode, DeclinesNonRank4)
 {
     SdpaSpec spec;
     spec.qRank = 3;
-    EXPECT_FALSE(kAdapter.decode(buildSdpaGraph(spec).graph()).has_value());
+    EXPECT_FALSE(ADAPTER.decode(buildSdpaGraph(spec).graph()).has_value());
 }
 
 TEST(TestAotCatalogSdpaDecode, DeclinesDtypeMismatch)
 {
     SdpaSpec spec;
     spec.kDtype = DataType::BFLOAT16; // K disagrees with Q/V/O
-    EXPECT_FALSE(kAdapter.decode(buildSdpaGraph(spec).graph()).has_value());
+    EXPECT_FALSE(ADAPTER.decode(buildSdpaGraph(spec).graph()).has_value());
 }
 
 TEST(TestAotCatalogSdpaDecode, DeclinesNonIntegerGqaRatio)
 {
     SdpaSpec spec;
-    spec.H = 32;
-    spec.Hkv = 7; // 32 % 7 != 0 -> malformed grouping
-    EXPECT_FALSE(kAdapter.decode(buildSdpaGraph(spec).graph()).has_value());
+    spec.h = 32;
+    spec.hkv = 7; // 32 % 7 != 0 -> malformed grouping
+    EXPECT_FALSE(ADAPTER.decode(buildSdpaGraph(spec).graph()).has_value());
 }
 
 TEST(TestAotCatalogSdpaDecode, DeclinesUnsupportedDtype)
 {
     SdpaSpec spec;
     spec.dtype = DataType::INT32; // providerDtype -> nullopt
-    EXPECT_FALSE(kAdapter.decode(buildSdpaGraph(spec).graph()).has_value());
+    EXPECT_FALSE(ADAPTER.decode(buildSdpaGraph(spec).graph()).has_value());
 }
 
 // (d) the boundary moved to data: feature-rich graphs now DECODE (publish facts)
@@ -413,7 +423,7 @@ TEST(TestAotCatalogSdpaDecode, CausalGraphDecodes)
 {
     SdpaSpec spec;
     spec.causal = true;
-    const auto shape = kAdapter.decode(buildSdpaGraph(spec).graph());
+    const auto shape = ADAPTER.decode(buildSdpaGraph(spec).graph());
     ASSERT_TRUE(shape.has_value()) << "causal graph should decode, not decline";
     EXPECT_TRUE(boolFact(*shape, "causal"));
 }
@@ -421,9 +431,9 @@ TEST(TestAotCatalogSdpaDecode, CausalGraphDecodes)
 TEST(TestAotCatalogSdpaDecode, GqaGraphDecodes)
 {
     SdpaSpec spec;
-    spec.H = 32;
-    spec.Hkv = 8; // gqa_ratio = 4
-    const auto shape = kAdapter.decode(buildSdpaGraph(spec).graph());
+    spec.h = 32;
+    spec.hkv = 8; // gqa_ratio = 4
+    const auto shape = ADAPTER.decode(buildSdpaGraph(spec).graph());
     ASSERT_TRUE(shape.has_value()) << "GQA graph should decode, not decline";
     EXPECT_EQ(intFact(*shape, "H_kv"), 8);
     EXPECT_EQ(intFact(*shape, "gqa_ratio"), 4);
@@ -433,7 +443,7 @@ TEST(TestAotCatalogSdpaDecode, AttnMaskGraphDecodes)
 {
     SdpaSpec spec;
     spec.attnMask = true;
-    const auto shape = kAdapter.decode(buildSdpaGraph(spec).graph());
+    const auto shape = ADAPTER.decode(buildSdpaGraph(spec).graph());
     ASSERT_TRUE(shape.has_value()) << "masked graph should decode, not decline";
     EXPECT_TRUE(boolFact(*shape, "has_attn_mask"));
 }
@@ -441,8 +451,8 @@ TEST(TestAotCatalogSdpaDecode, AttnMaskGraphDecodes)
 TEST(TestAotCatalogSdpaDecode, NonFoldableBatchDecodes)
 {
     SdpaSpec spec;
-    spec.B = 2; // contiguous BHSD, H>1 -> batch not foldable, but still valid
-    const auto shape = kAdapter.decode(buildSdpaGraph(spec).graph());
+    spec.b = 2; // contiguous BHSD, H>1 -> batch not foldable, but still valid
+    const auto shape = ADAPTER.decode(buildSdpaGraph(spec).graph());
     ASSERT_TRUE(shape.has_value()) << "B>1 graph should decode, not decline";
     EXPECT_EQ(intFact(*shape, "B"), 2);
     EXPECT_FALSE(boolFact(*shape, "batch_foldable"));
@@ -452,7 +462,7 @@ TEST(TestAotCatalogSdpaDecode, NonContiguousDDecodes)
 {
     SdpaSpec spec;
     spec.innerMult = 2; // D axis stride 2 -> not contiguous
-    const auto shape = kAdapter.decode(buildSdpaGraph(spec).graph());
+    const auto shape = ADAPTER.decode(buildSdpaGraph(spec).graph());
     ASSERT_TRUE(shape.has_value()) << "non-contiguous-D graph should decode, not decline";
     EXPECT_FALSE(boolFact(*shape, "d_contiguous"));
 }
@@ -461,7 +471,7 @@ TEST(TestAotCatalogSdpaDecode, Bf16ShapeDecodesWithBf16Token)
 {
     SdpaSpec spec;
     spec.dtype = DataType::BFLOAT16;
-    const auto shape = kAdapter.decode(buildSdpaGraph(spec).graph());
+    const auto shape = ADAPTER.decode(buildSdpaGraph(spec).graph());
     ASSERT_TRUE(shape.has_value());
     EXPECT_EQ(strFact(*shape, "dtype"), "bf16");
     EXPECT_FALSE(boolFact(*shape, "fp8"));
@@ -472,10 +482,10 @@ TEST(TestAotCatalogSdpaDecode, Bf16ShapeDecodesWithBf16Token)
 TEST(TestAotCatalogSdpaDecode, OptionalPointersAbsentOnBaseline)
 {
     const BuiltGraph g = buildSdpaGraph(SdpaSpec{});
-    const auto shape = kAdapter.decode(g.graph());
+    const auto shape = ADAPTER.decode(g.graph());
     ASSERT_TRUE(shape.has_value());
     const catalog::KernelEntry kernel;
-    const catalog::LaunchBindings b = kAdapter.buildBindings(g.graph(), *shape, kernel);
+    const catalog::LaunchBindings b = ADAPTER.buildBindings(g.graph(), *shape, kernel);
 
     for(const char* name : {"attn_mask",
                             "block_mask",
@@ -512,10 +522,10 @@ TEST(TestAotCatalogSdpaDecode, OptionalFeaturePointersBoundWhenPresent)
     spec.varlen = true;
     spec.runtimeScale = true;
     const BuiltGraph g = buildSdpaGraph(spec);
-    const auto shape = kAdapter.decode(g.graph());
+    const auto shape = ADAPTER.decode(g.graph());
     ASSERT_TRUE(shape.has_value());
     const catalog::KernelEntry kernel;
-    const catalog::LaunchBindings b = kAdapter.buildBindings(g.graph(), *shape, kernel);
+    const catalog::LaunchBindings b = ADAPTER.buildBindings(g.graph(), *shape, kernel);
 
     // Every present operand is bound to a placeholder uid (>4, i.e. not Q/K/V/O).
     for(const char* name :
@@ -538,13 +548,13 @@ TEST(TestAotCatalogSdpaDecode, Fp8DescalePointersBound)
     spec.dtype = DataType::FP8_E4M3;
     spec.fp8Descale = true;
     const BuiltGraph g = buildSdpaGraph(spec);
-    const auto shape = kAdapter.decode(g.graph());
+    const auto shape = ADAPTER.decode(g.graph());
     ASSERT_TRUE(shape.has_value()) << "fp8 graph should decode";
     EXPECT_EQ(strFact(*shape, "dtype"), "f8");
     EXPECT_TRUE(boolFact(*shape, "fp8"));
 
     const catalog::KernelEntry kernel;
-    const catalog::LaunchBindings b = kAdapter.buildBindings(g.graph(), *shape, kernel);
+    const catalog::LaunchBindings b = ADAPTER.buildBindings(g.graph(), *shape, kernel);
     for(const char* name :
         {"descale_q", "descale_k", "descale_v", "descale_s", "scale_s", "scale_o"})
     {
