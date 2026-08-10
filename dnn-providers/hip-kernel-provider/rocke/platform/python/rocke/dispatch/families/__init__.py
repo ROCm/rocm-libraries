@@ -46,6 +46,16 @@ of a constraint that silently never matches.
 from __future__ import annotations
 
 from .conv import CONV_REGISTRY, ConvRequest, dispatch_conv
+from .conv_wgrad import (
+    CONV_WGRAD_REGISTRY,
+    CONV_WGRAD_WORKSPACE_HARD_CAP,
+    ConvWgradRequest,
+    ConvWgradWorkspaceSpec,
+    compute_wgrad_workspace_spec,
+    dispatch_conv_wgrad,
+    query_wgrad_support,
+    wgrad_stage2_grid,
+)
 from .moe import MOE_REGISTRY, MoeRequest, dispatch_moe
 from .norm import NORM_REGISTRY, NormRequest, dispatch_norm
 
@@ -53,6 +63,14 @@ __all__ = [
     "CONV_REGISTRY",
     "ConvRequest",
     "dispatch_conv",
+    "CONV_WGRAD_REGISTRY",
+    "CONV_WGRAD_WORKSPACE_HARD_CAP",
+    "ConvWgradRequest",
+    "ConvWgradWorkspaceSpec",
+    "compute_wgrad_workspace_spec",
+    "dispatch_conv_wgrad",
+    "query_wgrad_support",
+    "wgrad_stage2_grid",
     "MOE_REGISTRY",
     "MoeRequest",
     "dispatch_moe",
