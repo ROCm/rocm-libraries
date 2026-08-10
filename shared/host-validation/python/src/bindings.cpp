@@ -43,6 +43,13 @@ struct PythonSoftmaxResult {
     SoftmaxRunInfo runInfo;
 };
 
+struct PythonLayerNormResult {
+    Tensor output;
+    Tensor mean;
+    Tensor inverseVariance;
+    LayerNormRunInfo runInfo;
+};
+
 struct PythonEpilogueResult {
     Tensor output;
     std::optional<Tensor> rawOutput;
@@ -416,6 +423,37 @@ PythonSoftmaxResult referenceSoftmaxOwned(const Tensor& input, ScalarType output
     const SoftmaxRunInfo runInfo =
         referenceSoftmax(SoftmaxProblem(input.view(), output.mutableView(), axis, accumulatorType));
     return {.output = std::move(output), .runInfo = runInfo};
+}
+
+PythonLayerNormResult referenceLayerNormOwned(const Tensor& input, ScalarType outputType,
+                                              ScalarType statisticsType, ScalarType accumulatorType,
+                                              size_t axis, double epsilon,
+                                              std::optional<Tensor> gamma,
+                                              std::optional<Tensor> beta) {
+    if (axis >= input.shape().rank())
+        throw std::out_of_range("Python reference_layer_norm axis exceeds input rank.");
+    std::vector<size_t> statisticsDimensions;
+    statisticsDimensions.reserve(input.shape().rank() - 1);
+    for (size_t dimension = 0; dimension < input.shape().rank(); ++dimension) {
+        if (dimension != axis) statisticsDimensions.push_back(input.shape()[dimension]);
+    }
+
+    Tensor output(outputType, input.layout());
+    Tensor mean(statisticsType, Shape(statisticsDimensions));
+    Tensor inverseVariance(statisticsType, Shape(std::move(statisticsDimensions)));
+    LayerNormProblem problem(input.view(), output.mutableView(), axis, accumulatorType);
+    problem.mean = mean.mutableView();
+    problem.inverseVariance = inverseVariance.mutableView();
+    if (gamma) problem.gamma = gamma->view();
+    if (beta) problem.beta = beta->view();
+    problem.epsilon = epsilon;
+    const LayerNormRunInfo runInfo = referenceLayerNorm(problem);
+    return {
+        .output = std::move(output),
+        .mean = std::move(mean),
+        .inverseVariance = std::move(inverseVariance),
+        .runInfo = runInfo,
+    };
 }
 
 PythonEpilogueResult referenceEpilogueOwned(
@@ -1063,6 +1101,32 @@ NB_MODULE(_roc_host_validation, module) {
             },
             nb::rv_policy::reference_internal);
 
+    nb::class_<LayerNormRunInfo>(module, "LayerNormRunInfo")
+        .def_ro("slices_computed", &LayerNormRunInfo::slicesComputed)
+        .def_ro("elements_computed", &LayerNormRunInfo::elementsComputed);
+
+    nb::class_<PythonLayerNormResult>(module, "LayerNormResult")
+        .def_prop_ro(
+            "output",
+            [](const PythonLayerNormResult& result) -> const Tensor& { return result.output; },
+            nb::rv_policy::reference_internal)
+        .def_prop_ro(
+            "mean",
+            [](const PythonLayerNormResult& result) -> const Tensor& { return result.mean; },
+            nb::rv_policy::reference_internal)
+        .def_prop_ro(
+            "inverse_variance",
+            [](const PythonLayerNormResult& result) -> const Tensor& {
+                return result.inverseVariance;
+            },
+            nb::rv_policy::reference_internal)
+        .def_prop_ro(
+            "run_info",
+            [](const PythonLayerNormResult& result) -> const LayerNormRunInfo& {
+                return result.runInfo;
+            },
+            nb::rv_policy::reference_internal);
+
     nb::class_<GemmRunInfo>(module, "GemmRunInfo")
         .def_ro("backend_used", &GemmRunInfo::backendUsed)
         .def_ro("fallback_reason", &GemmRunInfo::fallbackReason)
@@ -1187,6 +1251,10 @@ NB_MODULE(_roc_host_validation, module) {
     module.def("reference_softmax", &referenceSoftmaxOwned, "input"_a,
                "output_type"_a = ScalarType::Float32, "accumulator_type"_a = ScalarType::Float32,
                "axis"_a = 0);
+    module.def("reference_layer_norm", &referenceLayerNormOwned, "input"_a,
+               "output_type"_a = ScalarType::Float32, "statistics_type"_a = ScalarType::Float32,
+               "accumulator_type"_a = ScalarType::Float32, "axis"_a = 0, "epsilon"_a = 1e-5,
+               "gamma"_a = std::optional<Tensor>{}, "beta"_a = std::optional<Tensor>{});
     module.def("reference_gemm_result", &referenceGemmOwned, "a"_a, "b"_a, "c"_a, "output_type"_a,
                "accumulator_type"_a, "alpha"_a = 1.0, "beta"_a = 0.0,
                "compute_type_a"_a = std::optional<ScalarType>{},

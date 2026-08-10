@@ -23,16 +23,15 @@
  * SOFTWARE.
  *
  *******************************************************************************/
+#include <cstdlib>
 #include <hip/hip_runtime.h>
 #include <hip/hip_runtime_api.h>
 #include <hipblaslt/hipblaslt-ext-op.h>
-#include <hipblaslt/hipblaslt.h>
-#include <hipblaslt_datatype2string.hpp>
-#include <roc/host_validation/adapters/hipblaslt/HipblasltDataInitialization.hpp>
 #include <iostream>
-#include <numeric>
-#include <random>
-#include <type_traits>
+#include <roc/host_validation/adapters/hipblaslt/HipblasltDataInitialization.hpp>
+#include <roc/host_validation/adapters/hipblaslt/Types.hpp>
+#include <roc/host_validation/validation.hpp>
+#include <string>
 #include <vector>
 
 void printUsage(char* programName)
@@ -45,47 +44,6 @@ void printUsage(char* programName)
               << "\t-a, --affine\t\t\t\tEnable Gamma and Beta, default is false\n"
               << "\t--initialization \t\tInitialize matrix data. Options: rand_int, trig_float, "
                  "hpl(floating), special, zero. (default is hpl)\n";
-}
-
-void cpuLayerNorm(float*        out,
-                  float*        gpuMean,
-                  float*        gpuInvvar,
-                  float*        in,
-                  std::uint32_t batch,
-                  std::uint32_t length,
-                  float         eps   = 1e-05,
-                  float*        gamma = nullptr,
-                  float*        beta  = nullptr)
-{
-    // calculate gpuMean
-    for(int i = 0; i < batch; i++)
-    {
-        int    count = 0;
-        float* inC   = in + i * length;
-        float* outC  = out + i * length;
-
-        for(int j = 0; j < length; j++)
-        {
-            count        = count + 1;
-            float delta  = inC[j] - gpuMean[i];
-            gpuMean[i]   = gpuMean[i] + delta / count;
-            float delta2 = inC[j] - gpuMean[i];
-            gpuInvvar[i] = gpuInvvar[i] + delta * delta2;
-        }
-        gpuInvvar[i] = 1 / std::sqrt((gpuInvvar[i] / length) + eps);
-
-        // calculate gpuInvvar
-        for(int j = 0; j < length; j++)
-        {
-            outC[j] = (inC[j] - gpuMean[i]) * gpuInvvar[i];
-
-            if(gamma != nullptr)
-                outC[j] = outC[j] * gamma[j];
-
-            if(beta != nullptr)
-                outC[j] = outC[j] + beta[j];
-        }
-    }
 }
 
 int parseArgs(
@@ -143,61 +101,24 @@ int parseArgs(
     return EXIT_SUCCESS;
 }
 
-void dumpBuffer(const char* title, float* data, int M, int N)
+void reportComparison(const char* title, const roc::host_validation::ComparisonResult& comparison)
 {
-    std::cout << "----- " << title << "----- " << std::endl;
-    for(int m = 0; m < M; m++)
-    {
-        for(int n = 0; n < N; n++)
-        {
-            std::cout << data[m * N + n] << " ";
-        }
-        std::cout << std::endl;
-    }
-    std::cout << std::endl;
-}
-
-template <typename T>
-void compare(const char* title, const std::vector<T>& cpuOutput, const std::vector<T>& refOutput)
-{
-    float maxErr = 0.0;
-    int   gpunan = 0;
-    int   cpunan = 0;
-    int   gpuinf = 0;
-    int   cpuinf = 0;
-    for(int i = 0; i < cpuOutput.size(); i++)
-    {
-        float err = std::abs(refOutput[i] - cpuOutput[i]);
-        maxErr    = (maxErr > err) ? maxErr : err;
-        if(std::isnan(cpuOutput[i]))
-        {
-            gpunan += 1;
-        }
-        if(std::isnan(refOutput[i]))
-        {
-            cpunan += 1;
-        }
-        if(std::isinf(cpuOutput[i]))
-        {
-            gpuinf += 1;
-        }
-        if(std::isinf(refOutput[i]))
-        {
-            cpuinf += 1;
-        }
-    }
-
     std::cout << "----- " << title << " result"
               << " -----" << std::endl;
-    if(gpunan)
-        std::cout << "gpunan: " << gpunan << std::endl;
-    if(cpunan)
-        std::cout << "cpunan: " << cpunan << std::endl;
-    if(gpuinf)
-        std::cout << "gpuinf: " << gpuinf << std::endl;
-    if(cpuinf)
-        std::cout << "cpuinf: " << cpuinf << std::endl;
-    std::cout << "max error : " << maxErr << std::endl;
+    std::cout << "status: " << (comparison.passed() ? "PASS" : "FAIL") << std::endl;
+    std::cout << "compared: " << comparison.compared << std::endl;
+    std::cout << "mismatches: " << comparison.mismatches << std::endl;
+    std::cout << "matched NaNs: " << comparison.matchedNaNs << std::endl;
+    std::cout << "matched infinities: " << comparison.matchedInfinities << std::endl;
+    std::cout << "non-finite mismatches: " << comparison.nonFiniteMismatches << std::endl;
+    std::cout << "max error: " << comparison.maxAbsoluteDifference << std::endl;
+
+    for(const auto& mismatch : comparison.reportedMismatches)
+    {
+        std::cout << "index " << mismatch.index << ": observed " << mismatch.observed
+                  << ", expected " << mismatch.expected << ", absolute difference "
+                  << mismatch.absoluteDifference << std::endl;
+    }
 }
 
 template <typename DType>
@@ -243,8 +164,8 @@ int main(int argc, char** argv)
     std::vector<float> cpuMean(m, 0.f);
     std::vector<float> cpuInvvar(m, 0.f);
     std::vector<float> cpuInput(numElements, 0.f);
-    std::vector<float> cpuGamma(n, 1.f);
-    std::vector<float> cpuBeta(n, 0.f);
+    std::vector<float> cpuGamma(affine ? n : 0, 1.f);
+    std::vector<float> cpuBeta(affine ? n : 0, 0.f);
 
     std::vector<float> refOutput(numElements, 0.f);
     std::vector<float> refMean(m, 0.f);
@@ -275,22 +196,48 @@ int main(int argc, char** argv)
     hipErr = hipMemcpyDtoH(cpuMean.data(), gpuMean, m * elementNumBytes);
     hipErr = hipMemcpyDtoH(cpuInvvar.data(), gpuInvvar, m * elementNumBytes);
 
-    cpuLayerNorm(refOutput.data(),
-                 refMean.data(),
-                 refInvvar.data(),
-                 cpuInput.data(),
-                 m,
-                 n,
-                 1e-05,
-                 cpuGamma.data(),
-                 cpuBeta.data());
+    using namespace roc::host_validation;
+    using namespace roc::host_validation::hipblaslt_adapter;
+    const Layout            tensorLayout     = Layout::contiguous(Shape{m, n});
+    const Layout            statisticsLayout = Layout::contiguous(Shape{m});
+    const MutableTensorView referenceOutputView
+        = mutableTensorView(refOutput.data(), refOutput.size(), tensorLayout);
+    const MutableTensorView referenceMeanView
+        = mutableTensorView(refMean.data(), refMean.size(), statisticsLayout);
+    const MutableTensorView referenceInverseVarianceView
+        = mutableTensorView(refInvvar.data(), refInvvar.size(), statisticsLayout);
 
-    //    dumpBuffer("GPU", cpuOutput.data(), m, n);
-    //    dumpBuffer("CPU", refOutput.data(), m, n);
+    LayerNormProblem problem(tensorView(cpuInput.data(), cpuInput.size(), tensorLayout),
+                             referenceOutputView,
+                             1,
+                             ScalarType::Float32);
+    problem.mean            = referenceMeanView;
+    problem.inverseVariance = referenceInverseVarianceView;
+    problem.epsilon         = 1e-5;
+    if(affine)
+    {
+        const Layout affineLayout = Layout::contiguous(Shape{n});
+        problem.gamma             = tensorView(cpuGamma.data(), cpuGamma.size(), affineLayout);
+        problem.beta              = tensorView(cpuBeta.data(), cpuBeta.size(), affineLayout);
+    }
+    referenceLayerNorm(problem);
 
-    compare("Output", cpuOutput, refOutput);
-    compare("Mean", cpuMean, refMean);
-    compare("Invvar", cpuInvvar, refInvvar);
+    const ComparisonOptions comparisonOptions = nearComparisonOptions(1e-5);
+    reportComparison(
+        "Output",
+        roc::host_validation::compare(tensorView(cpuOutput.data(), cpuOutput.size(), tensorLayout),
+                                      referenceOutputView.asConst(),
+                                      comparisonOptions));
+    reportComparison(
+        "Mean",
+        roc::host_validation::compare(tensorView(cpuMean.data(), cpuMean.size(), statisticsLayout),
+                                      referenceMeanView.asConst(),
+                                      comparisonOptions));
+    reportComparison("Invvar",
+                     roc::host_validation::compare(
+                         tensorView(cpuInvvar.data(), cpuInvvar.size(), statisticsLayout),
+                         referenceInverseVarianceView.asConst(),
+                         comparisonOptions));
 
     hipEvent_t beg, end;
     hipErr      = hipEventCreate(&beg);
@@ -326,5 +273,9 @@ int main(int argc, char** argv)
     hipErr = hipFree(gpuMean);
     hipErr = hipFree(gpuInvvar);
     hipErr = hipFree(gpuInput);
+    if(gpuGamma)
+        hipErr = hipFree(gpuGamma);
+    if(gpuBeta)
+        hipErr = hipFree(gpuBeta);
     return 0;
 }
