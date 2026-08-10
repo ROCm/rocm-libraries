@@ -6,9 +6,14 @@
 #include <Reference.hpp>
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/DataTypes.hpp>
+#include <roc/host_validation/comparison.hpp>
+#include <roc/host_validation/generation.hpp>
 
-#include <cmath>
-#include <random>
+#include <cstddef>
+#include <cstdint>
+#include <span>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 using namespace TensileLite;
@@ -16,12 +21,8 @@ using namespace TensileLite::Client;
 
 namespace
 {
-    ContractionProblemGemm makeMXProblem(rocisa::DataType typeA,
-                                         rocisa::DataType typeB,
-                                         size_t           M,
-                                         size_t           N,
-                                         size_t           K,
-                                         int              mxBlock)
+    ContractionProblemGemm makeMXProblem(
+        rocisa::DataType typeA, rocisa::DataType typeB, size_t M, size_t N, size_t K, int mxBlock)
     {
         auto problem = ContractionProblemGemm::GEMM_Strides(false,
                                                             false,
@@ -52,27 +53,24 @@ namespace
         return problem;
     }
 
-    void fillBinary(std::vector<Float8>& buf, std::mt19937& gen)
+    template <typename T>
+    void generateValues(std::vector<T>&                             values,
+                        roc::host_validation::ScalarType            type,
+                        roc::host_validation::GenerationPatternSpec pattern,
+                        std::uint64_t                               seed,
+                        std::uint64_t                               stream)
     {
-        std::uniform_int_distribution<> coin(0, 1);
-        for(auto& v : buf)
-            v = Float8(coin(gen) ? 1.0f : -1.0f);
-    }
+        static_assert(std::is_trivially_copyable_v<T>);
+        using namespace roc::host_validation;
 
-    void fillScales(std::vector<E8>& buf, std::mt19937& gen)
-    {
-        std::uniform_real_distribution<float> mag(1.0f, 4.0f);
-        for(auto& v : buf)
-            v = E8(mag(gen));
-    }
-
-    float maxAbsDiff(std::vector<float> const& a, std::vector<float> const& b)
-    {
-        EXPECT_EQ(a.size(), b.size());
-        float maxDiff = 0.0f;
-        for(size_t i = 0; i < a.size(); ++i)
-            maxDiff = std::max(maxDiff, std::fabs(a[i] - b[i]));
-        return maxDiff;
+        pattern.stream = stream;
+        GenerationOptions options;
+        options.seed = seed;
+        options.real = std::move(pattern);
+        generate(MutableTensorView(type,
+                                   Layout::contiguous(Shape{values.size()}),
+                                   std::as_writable_bytes(std::span<T>(values))),
+                 options);
     }
 } // namespace
 
@@ -85,16 +83,16 @@ TEST(ReferenceMXFastPath, RejectsMixedInputTypesWithMXFP4)
     const size_t K       = 128;
     const int    mxBlock = 32;
 
-    auto problemA = makeMXProblem(
-        rocisa::DataType::Float4, rocisa::DataType::Float, M, N, K, mxBlock);
+    auto problemA
+        = makeMXProblem(rocisa::DataType::Float4, rocisa::DataType::Float, M, N, K, mxBlock);
     EXPECT_FALSE(isFastPathEligible(problemA));
 
-    auto problemB = makeMXProblem(
-        rocisa::DataType::Float, rocisa::DataType::Float4, M, N, K, mxBlock);
+    auto problemB
+        = makeMXProblem(rocisa::DataType::Float, rocisa::DataType::Float4, M, N, K, mxBlock);
     EXPECT_FALSE(isFastPathEligible(problemB));
 
-    auto problemBoth = makeMXProblem(
-        rocisa::DataType::Float4, rocisa::DataType::Float4, M, N, K, mxBlock);
+    auto problemBoth
+        = makeMXProblem(rocisa::DataType::Float4, rocisa::DataType::Float4, M, N, K, mxBlock);
     EXPECT_TRUE(isFastPathEligible(problemBoth));
 }
 
@@ -109,8 +107,8 @@ TEST(ReferenceMXFastPath, MatchesSlowPathForScaledFP8Gemm)
     const size_t K       = 128;
     const int    mxBlock = 32;
 
-    auto problem = makeMXProblem(
-        rocisa::DataType::Float8, rocisa::DataType::Float8, M, N, K, mxBlock);
+    auto problem
+        = makeMXProblem(rocisa::DataType::Float8, rocisa::DataType::Float8, M, N, K, mxBlock);
     ASSERT_TRUE(isFastPathEligible(problem));
 
     std::vector<Float8> a(M * K);
@@ -121,11 +119,16 @@ TEST(ReferenceMXFastPath, MatchesSlowPathForScaledFP8Gemm)
     std::vector<E8>     mxsa(problem.mxsa().totalAllocatedElements());
     std::vector<E8>     mxsb(problem.mxsb().totalAllocatedElements());
 
-    std::mt19937 gen(12345);
-    fillBinary(a, gen);
-    fillBinary(b, gen);
-    fillScales(mxsa, gen);
-    fillScales(mxsb, gen);
+    roc::host_validation::GenerationPatternSpec binary;
+    binary.pattern    = roc::host_validation::GenerationPattern::CandidateSet;
+    binary.candidates = {-1.0, 1.0};
+    roc::host_validation::GenerationPatternSpec scale;
+    scale.pattern    = roc::host_validation::GenerationPattern::CandidateSet;
+    scale.candidates = {1.0, 2.0, 4.0};
+    generateValues(a, roc::host_validation::ScalarType::Float8E4M3, binary, 12345, 0);
+    generateValues(b, roc::host_validation::ScalarType::Float8E4M3, binary, 12345, 1);
+    generateValues(mxsa, roc::host_validation::ScalarType::E8M0, scale, 12345, 2);
+    generateValues(mxsb, roc::host_validation::ScalarType::E8M0, scale, 12345, 3);
 
     ContractionInputs inputsSlow(a.data(), b.data(), c.data(), dSlow.data(), 1.0f, 0.0f);
     inputsSlow.mxsa = mxsa.data();
@@ -138,7 +141,13 @@ TEST(ReferenceMXFastPath, MatchesSlowPathForScaledFP8Gemm)
     SolveGemmCPU(problem, inputsSlow, /*elementsToValidate=*/-1, /*tryFastPath=*/false);
     ASSERT_TRUE(tryRuntimeTiledGemm(problem, inputsFast, /*elementsToValidate=*/-1));
 
-    EXPECT_LT(maxAbsDiff(dSlow, dFast), 1e-3f);
+    const auto comparison
+        = roc::host_validation::compare(std::span<const float>(dFast),
+                                        std::span<const float>(dSlow),
+                                        roc::host_validation::nearComparisonOptions(1e-3));
+    EXPECT_TRUE(comparison.passed())
+        << "mismatches=" << comparison.mismatches
+        << " max_absolute_difference=" << comparison.maxAbsoluteDifference;
 }
 
 TEST(ReferenceMXFastPath, MatchesSlowPathWithBetaAndBias)
@@ -148,8 +157,8 @@ TEST(ReferenceMXFastPath, MatchesSlowPathWithBetaAndBias)
     const size_t K       = 96;
     const int    mxBlock = 32;
 
-    auto problem = makeMXProblem(
-        rocisa::DataType::Float8, rocisa::DataType::Float8, M, N, K, mxBlock);
+    auto problem
+        = makeMXProblem(rocisa::DataType::Float8, rocisa::DataType::Float8, M, N, K, mxBlock);
     problem.setUseBias(1);
     problem.setBias(rocisa::DataType::Float, M, M);
     ASSERT_TRUE(isFastPathEligible(problem));
@@ -163,30 +172,45 @@ TEST(ReferenceMXFastPath, MatchesSlowPathWithBetaAndBias)
     std::vector<E8>     mxsa(problem.mxsa().totalAllocatedElements());
     std::vector<E8>     mxsb(problem.mxsb().totalAllocatedElements());
 
-    std::mt19937 gen(54321);
-    fillBinary(a, gen);
-    fillBinary(b, gen);
-    fillScales(mxsa, gen);
-    fillScales(mxsb, gen);
-    for(auto& v : c)
-        v = 0.25f;
-    for(auto& v : bias)
-        v = 0.5f;
+    roc::host_validation::GenerationPatternSpec binary;
+    binary.pattern    = roc::host_validation::GenerationPattern::CandidateSet;
+    binary.candidates = {-1.0, 1.0};
+    roc::host_validation::GenerationPatternSpec scale;
+    scale.pattern    = roc::host_validation::GenerationPattern::CandidateSet;
+    scale.candidates = {1.0, 2.0, 4.0};
+    roc::host_validation::GenerationPatternSpec cPattern;
+    cPattern.pattern    = roc::host_validation::GenerationPattern::Constant;
+    cPattern.parameter0 = 0.25;
+    roc::host_validation::GenerationPatternSpec biasPattern;
+    biasPattern.pattern    = roc::host_validation::GenerationPattern::Constant;
+    biasPattern.parameter0 = 0.5;
+    generateValues(a, roc::host_validation::ScalarType::Float8E4M3, binary, 54321, 0);
+    generateValues(b, roc::host_validation::ScalarType::Float8E4M3, binary, 54321, 1);
+    generateValues(mxsa, roc::host_validation::ScalarType::E8M0, scale, 54321, 2);
+    generateValues(mxsb, roc::host_validation::ScalarType::E8M0, scale, 54321, 3);
+    generateValues(c, roc::host_validation::ScalarType::Float32, cPattern, 54321, 4);
+    generateValues(bias, roc::host_validation::ScalarType::Float32, biasPattern, 54321, 5);
 
     ContractionInputs inputsSlow(a.data(), b.data(), c.data(), dSlow.data(), 1.0f, 0.5f);
-    inputsSlow.mxsa  = mxsa.data();
-    inputsSlow.mxsb  = mxsb.data();
-    inputsSlow.bias  = bias.data();
+    inputsSlow.mxsa = mxsa.data();
+    inputsSlow.mxsb = mxsb.data();
+    inputsSlow.bias = bias.data();
 
     ContractionInputs inputsFast(a.data(), b.data(), c.data(), dFast.data(), 1.0f, 0.5f);
-    inputsFast.mxsa  = mxsa.data();
-    inputsFast.mxsb  = mxsb.data();
-    inputsFast.bias  = bias.data();
+    inputsFast.mxsa = mxsa.data();
+    inputsFast.mxsb = mxsb.data();
+    inputsFast.bias = bias.data();
 
     SolveGemmCPU(problem, inputsSlow, /*elementsToValidate=*/-1, /*tryFastPath=*/false);
     ASSERT_TRUE(tryRuntimeTiledGemm(problem, inputsFast, /*elementsToValidate=*/-1));
 
-    EXPECT_LT(maxAbsDiff(dSlow, dFast), 1e-3f);
+    const auto comparison
+        = roc::host_validation::compare(std::span<const float>(dFast),
+                                        std::span<const float>(dSlow),
+                                        roc::host_validation::nearComparisonOptions(1e-3));
+    EXPECT_TRUE(comparison.passed())
+        << "mismatches=" << comparison.mismatches
+        << " max_absolute_difference=" << comparison.maxAbsoluteDifference;
 }
 
 #else
