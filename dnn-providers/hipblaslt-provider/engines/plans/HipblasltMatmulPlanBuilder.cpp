@@ -6,11 +6,13 @@
 #include <string>
 
 #include <hipblaslt/hipblaslt.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 #include "HipblasltMatmulPlan.hpp"
 #include "HipblasltMatmulPlanBuilder.hpp"
+#include "Workarounds.hpp"
 
 namespace hipblaslt_plugin
 {
@@ -287,6 +289,7 @@ bool HipblasltMatmulPlanBuilder::isApplicable(
     const HipdnnEnginePluginHandle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
+    REJECT_IF_WORKAROUND_ISSUE_9962(handle);
     try
     {
         auto nodeAttrs = getNodeAttrs(opGraph);

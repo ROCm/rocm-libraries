@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (c) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -77,17 +77,18 @@ void run_function(const func_map& map, const Arguments& arg, const std::string& 
 
 // Template to dispatch testing_gemm_strided_batched_ex for performance tests
 // the test is marked invalid when (Ti, To, Tc) not in (H/H/S, B/B/S, I8/I8/32, I8/H/I32)
-template <typename Ti, typename To = Ti, typename Tc = To, typename TBias = Ti, typename = void>
+template <typename Ti, typename To = Ti, typename Tc = To, typename TBias = Ti, typename TGate = Ti, typename = void>
 struct perf_sparse : hipsparselt_test_invalid
 {
 };
 
-template <typename Ti, typename To, typename Tc, typename TBias>
+template <typename Ti, typename To, typename Tc, typename TBias, typename TGate>
 struct perf_sparse<
     Ti,
     To,
     Tc,
     TBias,
+    TGate,
     std::enable_if_t<
         (std::is_same<Ti, To>{} && (std::is_same<Ti, __half>{} || std::is_same<Ti, hip_bfloat16>{})
          && std::is_same<Tc, float>{})
@@ -133,10 +134,10 @@ struct perf_sparse<
             {"compress_batched", testing_compress<Ti, To, Tc, hipsparselt_batch_type::batched>},
             {"compress_strided_batched",
              testing_compress<Ti, To, Tc, hipsparselt_batch_type::strided_batched>},
-            {"spmm", testing_spmm<Ti, To, Tc, TBias>},
-            {"spmm_batched", testing_spmm<Ti, To, Tc, TBias, hipsparselt_batch_type::batched>},
+            {"spmm", testing_spmm<Ti, To, Tc, TBias, TGate>},
+            {"spmm_batched", testing_spmm<Ti, To, Tc, TBias, TGate, hipsparselt_batch_type::batched>},
             {"spmm_strided_batched",
-             testing_spmm<Ti, To, Tc, TBias, hipsparselt_batch_type::strided_batched>},
+             testing_spmm<Ti, To, Tc, TBias, TGate, hipsparselt_batch_type::strided_batched>},
         };
         run_function(map, arg);
     }
@@ -180,6 +181,8 @@ int run_bench_test(Arguments& arg, const std::string& filter, bool any_stride, b
                                         : (arg.orderB == 'C' ? arg.N : arg.K);
     int64_t min_ldc = arg.orderC == 'C' ? arg.M : arg.N;
     int64_t min_ldd = arg.orderD == 'C' ? arg.M : arg.N;
+    // Gate matrix has same shape/order as D
+    int64_t min_ldg = min_ldd;
     if(arg.lda < min_lda)
     {
         hipsparselt_cout << "hipsparselt-bench INFO: lda < min_lda, set lda = " << min_lda
@@ -200,9 +203,15 @@ int run_bench_test(Arguments& arg, const std::string& filter, bool any_stride, b
     }
     if(arg.ldd < min_ldd)
     {
-        hipsparselt_cout << "hipsparselt-bench INFO: ldd < min_ldd, set ldd = " << min_ldc
+        hipsparselt_cout << "hipsparselt-bench INFO: ldd < min_ldd, set ldd = " << min_ldd
                          << std::endl;
         arg.ldd = min_ldd;
+    }
+    if(arg.ldg < min_ldg)
+    {
+        hipsparselt_cout << "hipsparselt-bench INFO: ldg < min_ldg, set ldg = " << min_ldg
+                         << std::endl;
+        arg.ldg = min_ldg;
     }
 
     int64_t min_stride_a = arg.lda
@@ -213,6 +222,7 @@ int run_bench_test(Arguments& arg, const std::string& filter, bool any_stride, b
                                                 : (arg.orderB == 'C' ? arg.K : arg.N));
     int64_t min_stride_c    = arg.ldc * (arg.orderC == 'C' ? arg.N : arg.M);
     int64_t min_stride_d    = arg.ldd * (arg.orderD == 'C' ? arg.N : arg.M);
+    int64_t min_stride_gate = arg.ldg * (arg.orderD == 'C' ? arg.N : arg.M);
     int64_t min_bias_stride = arg.M;
 
     // force using min_stride when stride is -1
@@ -241,6 +251,12 @@ int run_bench_test(Arguments& arg, const std::string& filter, bool any_stride, b
         hipsparselt_cout << "hipsparselt-bench INFO: stride_d < min_stride_d, set stride_d = "
                          << min_stride_d << std::endl;
         arg.stride_d = min_stride_d;
+    }
+    if(arg.stride_gate == -1 || (!any_stride && arg.stride_gate < min_stride_gate && arg.stride_gate != 0))
+    {
+        hipsparselt_cout << "hipsparselt-bench INFO: stride_gate < min_stride_gate, set stride_gate = "
+                         << min_stride_gate << std::endl;
+        arg.stride_gate = min_stride_gate;
     }
     if(arg.bias_stride == -1
        || (!any_stride && arg.bias_stride < min_bias_stride && arg.bias_stride != 0))
@@ -294,6 +310,7 @@ try
     std::string d_type;
     std::string compute_type;
     std::string bias_type;
+    std::string gate_type;
     std::string initialization;
     std::string filter;
     std::string activation_type;
@@ -337,6 +354,10 @@ try
          value<int64_t>(&arg.ldd)->default_value(-1),
          "Leading dimension of matrix D.")
 
+        ("ldg",
+         value<int64_t>(&arg.ldg)->default_value(-1),
+         "Leading dimension of gate residual matrix (default: same as ldd).")
+
         ("any_stride",
          value<bool>(&any_stride)->default_value(false),
          "Do not modify input strides based on leading dimensions")
@@ -356,6 +377,10 @@ try
         ("stride_d",
          value<int64_t>(&arg.stride_d)->default_value(-1),
          "Specific stride of strided_batched matrix D, second dimension * leading dimension.")
+
+        ("stride_gate",
+         value<int64_t>(&arg.stride_gate)->default_value(-1),
+         "Specific stride of strided_batched gate residual matrix, second dimension * leading dimension.")
 
         ("alpha",
           value<float>(&arg.alpha)->default_value(1.0), "specifies the scalar alpha")
@@ -460,6 +485,10 @@ try
          value<std::string>(&bias_type), "Precision of bias. (default: f16_r - when input precision is f16_r, bf16_r - when input precision is bf16_r, f32_r - when input precision is i8_r ) "
          "Options: s,f32_r,h,f16_r,b,bf16_r")
 
+        ("gate_type",
+         value<std::string>(&gate_type), "Precision of gate residual matrix. (default: same as a_type) "
+         "Options: s,f32_r,h,f16_r,b,bf16_r,f8_r")
+
         ("device",
          value<int>(&device_id)->default_value(0),
          "Set default device to be used for subsequent program runs")
@@ -519,6 +548,10 @@ try
         ("alpha_vector_scaling",
          bool_switch(&arg.alpha_vector_scaling)->default_value(false),
          "Apply alpha vector scaling")
+
+        ("gate_residual",
+         bool_switch(&arg.gate_residual)->default_value(false),
+         "Apply gate residual: D[i,j] = gate[i,j] * spmm_result[i,j] + gate[i,j]")
 
         ("help,h", "produces this help message")
 
@@ -648,6 +681,17 @@ try
 #endif
         if(!valid)
             throw std::invalid_argument("Invalid value for --bias_type " + bias_type);
+    }
+
+    if(gate_type == "")
+    {
+        arg.gate_type = arg.a_type;
+    }
+    else
+    {
+        arg.gate_type = string_to_hip_datatype(gate_type);
+        if(arg.gate_type == static_cast<hipDataType>(-1))
+            throw std::invalid_argument("Invalid value for --gate_type " + gate_type);
     }
 
     arg.initialization = string2hipsparselt_initialization(initialization);

@@ -7,6 +7,8 @@
 #include <flatbuffers/flatbuffers.h>
 #include <gtest/gtest.h>
 
+#include <optional>
+
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
@@ -33,6 +35,8 @@
 #include <hipdnn_data_sdk/utilities/TensorView.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/serialized_graph_and_plan_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceResampleFwd.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
@@ -304,6 +308,39 @@ public:
             serializedGraph.data(), serializedGraph.size(), variantPack);
     }
 
+    static void runLayernormBackwardTest(
+        hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,
+        hipdnn_flatbuffers_sdk::data_objects::DataType scaleBiasDataType,
+        hipdnn_flatbuffers_sdk::data_objects::DataType meanInvVarianceDataType,
+        hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType)
+    {
+        const unsigned int seed = getGlobalTestSeed();
+        const std::vector<int64_t> dims = {1, 3, 14, 14};
+
+        auto graph = buildLayernormBpropGraph(inputDataType,
+                                              scaleBiasDataType,
+                                              meanInvVarianceDataType,
+                                              computeDataType,
+                                              dims,
+                                              2, // normalize over last 2 dims
+                                              TensorLayout::NCHW);
+
+        auto result = graph->validate();
+        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+
+        auto [serializedGraph, serErr] = graph->to_binary();
+        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+        const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
+
+        LayernormBpropTensorBundle tensorBundle(
+            graphWrapper.getNodeWrapper(0), graphWrapper.getTensorMap(), seed);
+
+        auto variantPack = tensorBundle.toHostVariantPack();
+
+        CpuReferenceGraphExecutor().execute(
+            serializedGraph.data(), serializedGraph.size(), variantPack);
+    }
+
     static void runRMSNormTest(hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,
                                hipdnn_flatbuffers_sdk::data_objects::DataType scaleDataType,
                                hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType)
@@ -354,6 +391,58 @@ public:
 
         CpuReferenceGraphExecutor().execute(
             serializedGraph.data(), serializedGraph.size(), variantPack);
+    }
+
+    static void runResampleFwdTest(bool generateIndex)
+    {
+        auto builder
+            = createValidResampleFwdGraph(generateIndex ? std::optional<bool>(true) : std::nullopt);
+        const GraphWrapper graphWrapper(builder.GetBufferPointer(), builder.GetSize());
+
+        Tensor<float> xTensor({1, 1, 4, 4});
+        Tensor<float> yTensor({1, 1, 2, 2});
+        Tensor<float> directXTensor({1, 1, 4, 4});
+        Tensor<float> directYTensor({1, 1, 2, 2});
+        for(size_t i = 0; i < xTensor.elementCount(); ++i)
+        {
+            xTensor.memory().hostData()[i] = static_cast<float>(i + 1);
+            directXTensor.memory().hostData()[i] = static_cast<float>(i + 1);
+        }
+        xTensor.memory().markHostModified();
+        directXTensor.memory().markHostModified();
+
+        std::unordered_map<int64_t, void*> variantPack{{1, xTensor.memory().hostData()},
+                                                       {2, yTensor.memory().hostData()}};
+
+        Tensor<int32_t> indexTensor({1, 1, 2, 2});
+        Tensor<int32_t> directIndexTensor({1, 1, 2, 2});
+        if(generateIndex)
+        {
+            variantPack[3] = indexTensor.memory().hostData();
+        }
+
+        CpuReferenceGraphExecutor().execute(
+            builder.GetBufferPointer(), builder.GetSize(), variantPack);
+
+        CpuFpReferenceResampleFwd::forward<float, float, float, int32_t>(
+            directXTensor,
+            directYTensor,
+            {0, 0},
+            {2, 2},
+            {2, 2},
+            ResampleMode::MAXPOOL,
+            PaddingMode::ZERO_PAD,
+            generateIndex ? &directIndexTensor : nullptr);
+
+        const CpuFpReferenceValidation<float> validator(0.0f, 0.0f);
+        EXPECT_TRUE(validator.allClose(directYTensor, yTensor));
+        if(generateIndex)
+        {
+            EXPECT_EQ(indexTensor.memory().hostData()[0], directIndexTensor.memory().hostData()[0]);
+            EXPECT_EQ(indexTensor.memory().hostData()[1], directIndexTensor.memory().hostData()[1]);
+            EXPECT_EQ(indexTensor.memory().hostData()[2], directIndexTensor.memory().hostData()[2]);
+            EXPECT_EQ(indexTensor.memory().hostData()[3], directIndexTensor.memory().hostData()[3]);
+        }
     }
 
 #ifdef HIPDNN_ENABLE_SDPA
@@ -630,6 +719,22 @@ TEST(TestCpuReferenceGraphExecutor, LayernormAllBFloat16)
         DataType::BFLOAT16, DataType::BFLOAT16, DataType::BFLOAT16, DataType::BFLOAT16);
 }
 
+TEST(TestCpuReferenceGraphExecutor, LayernormBackwardAllFloats)
+{
+    TestCpuReferenceGraphExecutor::runLayernormBackwardTest(
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
+}
+TEST(TestCpuReferenceGraphExecutor, LayernormBackwardAllHalfs)
+{
+    TestCpuReferenceGraphExecutor::runLayernormBackwardTest(
+        DataType::HALF, DataType::HALF, DataType::HALF, DataType::HALF);
+}
+TEST(TestCpuReferenceGraphExecutor, LayernormBackwardAllBFloat16)
+{
+    TestCpuReferenceGraphExecutor::runLayernormBackwardTest(
+        DataType::BFLOAT16, DataType::BFLOAT16, DataType::BFLOAT16, DataType::BFLOAT16);
+}
+
 TEST(TestCpuReferenceGraphExecutor, RMSNormAllFloats)
 {
     TestCpuReferenceGraphExecutor::runRMSNormTest(
@@ -661,6 +766,16 @@ TEST(TestCpuReferenceGraphExecutor, RMSNormBwdAllBFloat16)
 {
     TestCpuReferenceGraphExecutor::runRMSBwdNormTest(
         DataType::BFLOAT16, DataType::BFLOAT16, DataType::BFLOAT16);
+}
+
+TEST(TestCpuReferenceGraphExecutor, ResampleFwdAllFloats)
+{
+    TestCpuReferenceGraphExecutor::runResampleFwdTest(false);
+}
+
+TEST(TestCpuReferenceGraphExecutor, ResampleFwdWithIndexAllFloats)
+{
+    TestCpuReferenceGraphExecutor::runResampleFwdTest(true);
 }
 
 #ifdef HIPDNN_ENABLE_SDPA

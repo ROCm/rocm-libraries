@@ -18,6 +18,7 @@
 #include <hip_kernel_provider_common/SdpaConfigEnumerations.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_backward_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <mutex>
@@ -187,21 +188,6 @@ std::optional<fmha_v3_bwdConfig> findConfig(const CFG& registry,
         return cfg;
     }
     return std::nullopt;
-}
-
-// Query the HIP device string for the stream, logging `logPrefix` on failure.
-// Returns std::nullopt when the HIP runtime throws.
-std::optional<std::string> tryGetDeviceString(hipStream_t stream, const char* logPrefix)
-{
-    try
-    {
-        return hip_kernel_provider_common::getDeviceString(stream);
-    }
-    catch(const std::exception& e)
-    {
-        HIPDNN_PLUGIN_LOG_ERROR(logPrefix << e.what());
-        return std::nullopt;
-    }
 }
 
 // Backward kernels live in a flat layout under
@@ -454,10 +440,16 @@ bool SdpaBwdPlanBuilder::isApplicable(
     // NOLINTNEXTLINE(readability-identifier-naming)
     static const char* HIP_KERNEL_LOG_PREFIX = "[SdpaBwdPlanBuilder::isApplicable] ";
 
+    // Execute-time override shapes can diverge from the compile-time dims this
+    // builder matched exactly; the family serves fixed prebuilt shapes, so decline
+    // rather than risk a mismatch (RFC 0008 §4.6).
+    HIP_KERNEL_RETURN_FALSE_IF(opGraph.getGraph().is_override_shape_enabled(),
+                               "Graph has override shapes enabled");
+
     auto& nodeWrappers = opGraph.nodeWrappers();
 
     auto deviceStringOpt
-        = tryGetDeviceString(handle.getStream(), "Could not query device string: ");
+        = plan_utils::tryGetDeviceString(handle.getStream(), "Could not query device string: ");
     if(!deviceStringOpt)
     {
         return false;
@@ -490,6 +482,19 @@ bool SdpaBwdPlanBuilder::isApplicable(
     HIP_KERNEL_RETURN_FALSE_IF(attrs.dropout_mask_tensor_uid(),
                                "dropout_mask tensor not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.dbias_tensor_uid(), "dbias tensor not supported");
+
+    // Accept scale_tensor_uid only when it is a runtime pass-by-value scalar
+    // (RFC 0016).  Non-pass-by-value scale tensors are not supported.
+    if(attrs.scale_tensor_uid().has_value())
+    {
+        const auto& scaleTensorMap = opGraph.getTensorMap();
+        const auto scaleIt = scaleTensorMap.find(attrs.scale_tensor_uid().value());
+        HIP_KERNEL_RETURN_FALSE_IF(scaleIt == scaleTensorMap.end(),
+                                   "scale_tensor_uid not found in tensor map");
+        HIP_KERNEL_RETURN_FALSE_IF(
+            !hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(scaleIt->second),
+            "scale tensor must be pass-by-value (compile-time constant or runtime)");
+    }
 
     // --- Validate required tensors ---
 
@@ -620,9 +625,10 @@ bool SdpaBwdPlanBuilder::isApplicable(
         HIPDNN_PLUGIN_LOG_INFO(std::string{HIP_KERNEL_LOG_PREFIX} + e.what());
         return false;
     }
-    HIP_KERNEL_RETURN_FALSE_IF(maskType != MaskType::NO_MASK,
-                               "Masked attention not currently dispatched (Mask type ordinal: "
-                                   + std::to_string(static_cast<int>(maskType)) + ")");
+    // Mask types NO_MASK (0), TOP_LEFT_CAUSAL (1), BOTTOM_RIGHT_CAUSAL (2),
+    // and SLIDING_WINDOW (3) are all dispatched. The DQDKDV CSV registry
+    // carries rows for each mask ordinal; ODO and DQ_CONVERT are mask-agnostic
+    // (always mask=0). Applicability is gated by the registry lookup below.
 
     const int bf16CvtValue = (dataTypeId == "fp16") ? BF16_CVT_FP16_SENTINEL
                                                     : static_cast<int>(getRoundingMode(attrs));
@@ -726,12 +732,12 @@ size_t SdpaBwdPlanBuilder::getMaxWorkspaceSize(
     auto batch = static_cast<size_t>(qTensor->dims()->Get(0));
     auto headsQ = static_cast<size_t>(qTensor->dims()->Get(1));
     auto seqLenQ = static_cast<size_t>(qTensor->dims()->Get(2));
-    auto headDim = static_cast<size_t>(qTensor->dims()->Get(3));
+    auto headDimQk = static_cast<size_t>(qTensor->dims()->Get(3));
 
     const AccumulatorType accType
         = executionSettings.accumulatorType.value_or(AccumulatorType::A32);
 
-    return sdpaBwdWorkspaceSize(batch, headsQ, seqLenQ, headDim, accType);
+    return sdpaBwdWorkspaceSize(batch, headsQ, seqLenQ, headDimQk, accType);
 }
 
 void SdpaBwdPlanBuilder::initializeExecutionSettings(
@@ -788,8 +794,8 @@ void SdpaBwdPlanBuilder::buildPlan(
     const AccumulatorType accType
         = executionContext.executionSettings().accumulatorType.value_or(AccumulatorType::A32);
 
-    auto deviceStringOpt
-        = tryGetDeviceString(handle.getStream(), "Failed to query device properties with error: ");
+    auto deviceStringOpt = plan_utils::tryGetDeviceString(
+        handle.getStream(), "Failed to query device properties with error: ");
     if(!deviceStringOpt)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -899,14 +905,23 @@ void SdpaBwdPlanBuilder::buildPlan(
     auto statsStrideHead = static_cast<unsigned int>(statsStrides->Get(1));
 
     // -------------------------------------------------------------------------
-    // 3. Attention scale
+    // 3. Attention scale — resolve as ScalarOperand (RFC 0016)
     // -------------------------------------------------------------------------
-    // Default to 1/sqrt(D_qk) if not provided
-    float attnScale = 1.0f / std::sqrt(static_cast<float>(headDimQk));
-    auto scaleValue = sdpaAttrs.attn_scale_value();
-    if(scaleValue.has_value())
+    hipdnn_plugin_sdk::ScalarOperand attnScale{};
+    if(sdpaAttrs.scale_tensor_uid().has_value())
     {
-        attnScale = scaleValue.value();
+        attnScale = hipdnn_plugin_sdk::makeScalarOperand(
+            tensorMap, sdpaAttrs.scale_tensor_uid().value(), "attn_scale");
+    }
+    else
+    {
+        float scaleVal = sdpaAttrs.attn_scale_value().value_or(
+            1.0f / std::sqrt(static_cast<float>(headDimQk)));
+        attnScale = hipdnn_plugin_sdk::ScalarOperand{
+            0,
+            hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+            false,
+            hipdnn_plugin_sdk::ScalarValue{scaleVal}};
     }
 
     // -------------------------------------------------------------------------
@@ -1050,7 +1065,7 @@ void SdpaBwdPlanBuilder::buildPlan(
     // -------------------------------------------------------------------------
     // 5. Load kernel modules for resolved stages
     // -------------------------------------------------------------------------
-    auto odoKernel = loadKernelModule(odoResolved.coPath, odoResolved.knlName.c_str());
+    auto odoKernel = moduleCache().getOrLoad(odoResolved.coPath, odoResolved.knlName.c_str());
     if(!odoKernel)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -1059,7 +1074,8 @@ void SdpaBwdPlanBuilder::buildPlan(
                 + odoResolved.coPath);
     }
 
-    auto dqdkdvKernel = loadKernelModule(dqdkdvResolved.coPath, dqdkdvResolved.knlName.c_str());
+    auto dqdkdvKernel
+        = moduleCache().getOrLoad(dqdkdvResolved.coPath, dqdkdvResolved.knlName.c_str());
     if(!dqdkdvKernel)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -1068,18 +1084,19 @@ void SdpaBwdPlanBuilder::buildPlan(
                 + dqdkdvResolved.coPath);
     }
 
-    std::optional<HipModuleGuard> postKernel;
+    std::optional<CachedModule> postKernel;
     if(dqConvertResolved)
     {
-        postKernel
-            = loadKernelModule(dqConvertResolved->coPath, dqConvertResolved->knlName.c_str());
-        if(!postKernel)
+        auto loaded = moduleCache().getOrLoad(dqConvertResolved->coPath,
+                                              dqConvertResolved->knlName.c_str());
+        if(!loaded)
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                 "SdpaBwdPlanBuilder::buildPlan: failed to load dq_convert kernel module from "
                     + dqConvertResolved->coPath);
         }
+        postKernel = std::move(loaded);
     }
 
     // -------------------------------------------------------------------------
@@ -1139,11 +1156,30 @@ void SdpaBwdPlanBuilder::buildPlan(
     params.statsStrideBatch = statsStrideBatch;
     params.attnScale = attnScale;
     params.accumulatorType = accType;
+    params.maskOrdinal = static_cast<int32_t>(maskType);
+    if(maskType == MaskType::SLIDING_WINDOW)
+    {
+        params.windowLeft = sdpaAttrs.left_bound().has_value()
+                                ? static_cast<int32_t>(sdpaAttrs.left_bound().value())
+                                : -1;
+        params.windowRight = sdpaAttrs.right_bound().has_value()
+                                 ? static_cast<int32_t>(sdpaAttrs.right_bound().value())
+                                 : -1;
+        params.topLeftAlignment
+            = sdpaAttrs.diagonal_alignment()
+              != hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment::BOTTOM_RIGHT;
+    }
 
-    // postKernel is nullopt for the A16 path; the optional-taking ctor handles
-    // both paths uniformly.
-    executionContext.setPlan(std::make_unique<SdpaBwdPlan>(
-        std::move(*odoKernel), std::move(*dqdkdvKernel), std::move(postKernel), params));
+    if(postKernel)
+    {
+        executionContext.setPlan(std::make_unique<SdpaBwdPlan>(
+            std::move(odoKernel), std::move(dqdkdvKernel), std::move(*postKernel), params));
+    }
+    else
+    {
+        executionContext.setPlan(
+            std::make_unique<SdpaBwdPlan>(std::move(odoKernel), std::move(dqdkdvKernel), params));
+    }
 }
 
 std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> SdpaBwdPlanBuilder::getCustomKnobs(
