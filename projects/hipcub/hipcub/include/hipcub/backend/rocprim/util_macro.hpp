@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2011, Duane Merrill.  All rights reserved.
- * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2024, Advanced Micro Devices, Inc.  All rights reserved.
+ * Copyright (c) 2011-2026, NVIDIA CORPORATION.  All rights reserved.
+ * Modifications Copyright (c) 2024-2026, Advanced Micro Devices, Inc.  All rights reserved.
  * 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -36,68 +36,12 @@
 
 BEGIN_HIPCUB_NAMESPACE
 
-/**
- * \addtogroup UtilModule
- * @{
- */
-
-#ifndef DOXYGEN_SHOULD_SKIP_THIS
-    #define HIPCUB_PREVENT_MACRO_SUBSTITUTION
-template<typename T, typename U>
-constexpr __host__ __device__
-auto min HIPCUB_PREVENT_MACRO_SUBSTITUTION(T&& t, U&& u)
-    -> decltype(t < u ? std::forward<T>(t) : std::forward<U>(u))
-{
-    return t < u ? std::forward<T>(t) : std::forward<U>(u);
-}
-
-template<typename T, typename U>
-constexpr __host__ __device__
-auto max HIPCUB_PREVENT_MACRO_SUBSTITUTION(T&& t, U&& u)
-    -> decltype(t < u ? std::forward<U>(u) : std::forward<T>(t))
-{
-    return t < u ? std::forward<U>(u) : std::forward<T>(t);
-}
-    #undef HIPCUB_PREVENT_MACRO_SUBSTITUTION
-#endif
-
-/// Deprecated since rocm [7.1]
-#ifndef HIPCUB_MAX
-    /// Select maximum(a, b)
-    #define HIPCUB_MAX(a, b) (((b) > (a)) ? (b) : (a))
-#endif
-
-/// Deprecated since rocm [7.1]
-#ifndef HIPCUB_MIN
-    /// Select minimum(a, b)
-    #define HIPCUB_MIN(a, b) (((b) < (a)) ? (b) : (a))
-#endif
-
-/// Deprecated since rocm [7.1]
-#ifndef HIPCUB_QUOTIENT_FLOOR
-    /// Quotient of x/y rounded down to nearest integer
-    #define HIPCUB_QUOTIENT_FLOOR(x, y) ((x) / (y))
-#endif
-
-/// Deprecated since rocm [7.1]
-#ifndef HIPCUB_QUOTIENT_CEILING
-    /// Quotient of x/y rounded up to nearest integer
-    #define HIPCUB_QUOTIENT_CEILING(x, y) (((x) + (y)-1) / (y))
-#endif
-
-/// Deprecated since rocm [7.1]
-#ifndef HIPCUB_ROUND_UP_NEAREST
-    /// x rounded up to the nearest multiple of y
-    #define HIPCUB_ROUND_UP_NEAREST(x, y) (HIPCUB_QUOTIENT_CEILING(x, y) * y)
-#endif
-
-/// Deprecated since rocm [7.1]
-#ifndef HIPCUB_ROUND_DOWN_NEAREST
-    /// x rounded down to the nearest multiple of y
-    #define HIPCUB_ROUND_DOWN_NEAREST(x, y) (((x) / (y)) * y)
-#endif
-
-/** @} */ // end group UtilModule
+// RAPIDS cuDF needs to avoid unrolling some loops in sort to prevent compile time issues
+#if defined(CCCL_AVOID_SORT_UNROLL)
+    #define _CCCL_SORT_MAYBE_UNROLL() _CCCL_PRAGMA_NOUNROLL()
+#else // ^^^ CCCL_AVOID_SORT_UNROLL ^^^ / vvv !CCCL_AVOID_SORT_UNROLL vvv
+    #define _CCCL_SORT_MAYBE_UNROLL() _CCCL_PRAGMA_UNROLL_FULL()
+#endif // !CCCL_AVOID_SORT_UNROLL
 
 END_HIPCUB_NAMESPACE
 

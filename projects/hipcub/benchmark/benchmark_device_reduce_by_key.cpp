@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -33,8 +33,8 @@
 template<class Key, class Value, size_t MaxLength, class BinaryFunction>
 class reduce_by_key_benchmark : public primbench::benchmark_interface
 {
-    static constexpr bool is_sum = std::is_same_v<BinaryFunction, hipcub::Sum>;
-    static constexpr bool is_min = std::is_same_v<BinaryFunction, hipcub::Min>;
+    static constexpr bool is_sum = std::is_same_v<BinaryFunction, benchmark_utils::plus>;
+    static constexpr bool is_min = std::is_same_v<BinaryFunction, benchmark_utils::minimum>;
     static_assert(is_sum || is_min, "unknown binary function");
 
     primbench::json meta() const override
@@ -63,7 +63,7 @@ class reduce_by_key_benchmark : public primbench::benchmark_interface
         while(offset < items)
         {
             const size_t key_count = key_counts[unique_count % key_counts.size()];
-            const size_t end       = std::min(items, offset + key_count);
+            const size_t end       = _HIPCUB_STD::min(items, offset + key_count);
             for(size_t i = offset; i < end; i++)
             {
                 keys_input[i] = unique_count;
@@ -148,11 +148,11 @@ class reduce_by_key_benchmark : public primbench::benchmark_interface
 template<size_t MaxLength>
 void add_benchmarks(primbench::executor& executor)
 {
-    CREATE_BENCHMARKS(hipcub::Sum);
-    CREATE_BENCHMARK(int64_t, custom_double2, hipcub::Sum);
-    CREATE_BENCHMARKS(hipcub::Min);
+    CREATE_BENCHMARKS(benchmark_utils::plus);
+    CREATE_BENCHMARK(int64_t, custom_double2, benchmark_utils::plus);
+    CREATE_BENCHMARKS(benchmark_utils::minimum);
 #ifdef HIPCUB_ROCPRIM_API
-    CREATE_BENCHMARK(int64_t, custom_double2, hipcub::Min);
+    CREATE_BENCHMARK(int64_t, custom_double2, benchmark_utils::minimum);
 #endif
 }
 

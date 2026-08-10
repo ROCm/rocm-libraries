@@ -26,10 +26,11 @@
 #  pragma system_header
 #endif // no system header
 #include <thrust/detail/allocator/allocator_traits.h>
-#include <thrust/detail/integer_traits.h>
 #include <thrust/detail/memory_wrapper.h>
 #include <thrust/detail/type_deduction.h>
 #include <thrust/detail/type_traits/is_call_possible.h>
+
+#include _THRUST_STD_INCLUDE(limits)
 
 #include <new>
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
@@ -267,7 +268,7 @@ THRUST_HOST_DEVICE _THRUST_STD::enable_if_t<!has_member_max_size<Alloc>::value,
 max_size(const Alloc&)
 {
   using size_type = typename allocator_traits<Alloc>::size_type;
-  return thrust::detail::integer_traits<size_type>::const_max;
+  return _THRUST_STD::numeric_limits<size_type>::max();
 }
 
 template <typename Alloc>

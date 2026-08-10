@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -37,11 +37,11 @@
 #  pragma system_header
 #endif // no system header
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#if THRUST_HAS_HIP_COMPILER()
 #  include <thrust/system/hip/config.h>
 
+#  include <thrust/detail/libcxx_wrapper/std/__functional/identity.h>
 #  include <thrust/distance.h>
-#  include <thrust/functional.h>
 #  include <thrust/iterator/zip_iterator.h>
 #  include <thrust/pair.h>
 #  include <thrust/system/hip/detail/execution_policy.h>
@@ -71,7 +71,7 @@ template <class ValueType, class InputIt1, class InputIt2, class BinaryOp>
 struct transform_pair_of_input_iterators_t
 {
   using self_t            = transform_pair_of_input_iterators_t;
-  using difference_type   = typename iterator_traits<InputIt1>::difference_type;
+  using difference_type   = thrust::detail::it_difference_t<InputIt1>;
   using value_type        = ValueType;
   using pointer           = void;
   using reference         = value_type;
@@ -210,7 +210,7 @@ template <class Derived, class InputIt1, class InputIt2>
 pair<InputIt1, InputIt2> THRUST_HOST_DEVICE
 mismatch(execution_policy<Derived>& policy, InputIt1 first1, InputIt1 last1, InputIt2 first2)
 {
-  using InputType1 = typename thrust::iterator_value<InputIt1>::type;
+  using InputType1 = thrust::detail::it_value_t<InputIt1>;
   return hip_rocprim::mismatch(policy, first1, last1, first2, equal_to<InputType1>());
 }
 

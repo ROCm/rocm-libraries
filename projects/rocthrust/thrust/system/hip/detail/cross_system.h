@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -29,9 +29,17 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
+#include <thrust/detail/type_deduction.h>
 #include <thrust/system/cpp/detail/execution_policy.h>
 #include <thrust/system/hip/detail/execution_policy.h>
-#include <thrust/system/hip/detail/guarded_hip_runtime_api.h>
 
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
@@ -81,18 +89,19 @@ direction_of_copy(thrust::system::hip::execution_policy<Sys1> const&, thrust::cp
     THRUST_DECLTYPE_RETURNS(thrust::detail::integral_constant<hipMemcpyKind, hipMemcpyDeviceToDevice>{})
 
       template <class Sys1, class Sys2>
-      constexpr THRUST_HOST_DEVICE auto direction_of_copy(execution_policy<cross_system<Sys1, Sys2>> const& systems)
-        THRUST_DECLTYPE_RETURNS(
-          direction_of_copy(derived_cast(derived_cast(systems).sys1), derived_cast(derived_cast(systems).sys2)))
+      constexpr
+  THRUST_HOST_DEVICE auto direction_of_copy(execution_policy<cross_system<Sys1, Sys2>> const& systems)
+    THRUST_DECLTYPE_RETURNS(
+      direction_of_copy(derived_cast(derived_cast(systems).sys1), derived_cast(derived_cast(systems).sys2)))
 
-          template <typename ExecutionPolicy0,
-                    typename ExecutionPolicy1,
-                    // MSVC2015 WAR: put decltype here instead of in trailing return type
-                    typename Direction =
-                      decltype(direction_of_copy(std::declval<ExecutionPolicy0>(), std::declval<ExecutionPolicy1>()))>
-          constexpr THRUST_HOST_DEVICE auto is_device_to_host_copy(
-            ExecutionPolicy0 const&, ExecutionPolicy1 const&) noexcept
-  -> thrust::detail::integral_constant<bool, hipMemcpyDeviceToHost == Direction::value>
+      template <typename ExecutionPolicy0,
+                typename ExecutionPolicy1,
+                // MSVC2015 WAR: put decltype here instead of in trailing return type
+                typename Direction =
+                  decltype(direction_of_copy(std::declval<ExecutionPolicy0>(), std::declval<ExecutionPolicy1>()))>
+      constexpr THRUST_HOST_DEVICE thrust::detail::
+        integral_constant<bool, hipMemcpyDeviceToHost == Direction::value> is_device_to_host_copy(
+          ExecutionPolicy0 const& /*exec0*/, ExecutionPolicy1 const& /*exec1*/) noexcept
 {
   return {};
 }
@@ -100,8 +109,8 @@ direction_of_copy(thrust::system::hip::execution_policy<Sys1> const&, thrust::cp
 template <typename ExecutionPolicy,
           // MSVC2015 WAR: put decltype here instead of in trailing return type
           typename Direction = decltype(direction_of_copy(std::declval<ExecutionPolicy>()))>
-constexpr THRUST_HOST_DEVICE auto is_device_to_host_copy(ExecutionPolicy const&) noexcept
-  -> thrust::detail::integral_constant<bool, hipMemcpyDeviceToHost == Direction::value>
+constexpr THRUST_HOST_DEVICE thrust::detail::integral_constant<bool, hipMemcpyDeviceToHost == Direction::value>
+is_device_to_host_copy(ExecutionPolicy const& /*exec*/) noexcept
 {
   return {};
 }
@@ -111,8 +120,8 @@ template <
   typename ExecutionPolicy1,
   // MSVC2015 WAR: put decltype here instead of in trailing return type
   typename Direction = decltype(direction_of_copy(std::declval<ExecutionPolicy0>(), std::declval<ExecutionPolicy1>()))>
-constexpr THRUST_HOST_DEVICE auto is_host_to_device_copy(ExecutionPolicy0 const&, ExecutionPolicy1 const&) noexcept
-  -> thrust::detail::integral_constant<bool, hipMemcpyHostToDevice == Direction::value>
+constexpr THRUST_HOST_DEVICE thrust::detail::integral_constant<bool, hipMemcpyHostToDevice == Direction::value>
+is_host_to_device_copy(ExecutionPolicy0 const& /*exec0*/, ExecutionPolicy1 const& /*exec1*/) noexcept
 {
   return {};
 }
@@ -120,8 +129,8 @@ constexpr THRUST_HOST_DEVICE auto is_host_to_device_copy(ExecutionPolicy0 const&
 template <typename ExecutionPolicy,
           // MSVC2015 WAR: put decltype here instead of in trailing return type
           typename Direction = decltype(direction_of_copy(std::declval<ExecutionPolicy>()))>
-constexpr THRUST_HOST_DEVICE auto is_host_to_device_copy(ExecutionPolicy const&) noexcept
-  -> thrust::detail::integral_constant<bool, hipMemcpyHostToDevice == Direction::value>
+constexpr THRUST_HOST_DEVICE thrust::detail::integral_constant<bool, hipMemcpyHostToDevice == Direction::value>
+is_host_to_device_copy(ExecutionPolicy const& /*exec*/) noexcept
 {
   return {};
 }
@@ -131,8 +140,8 @@ template <
   typename ExecutionPolicy1,
   // MSVC2015 WAR: put decltype here instead of in trailing return type
   typename Direction = decltype(direction_of_copy(std::declval<ExecutionPolicy0>(), std::declval<ExecutionPolicy1>()))>
-constexpr THRUST_HOST_DEVICE auto is_device_to_device_copy(ExecutionPolicy0 const&, ExecutionPolicy1 const&) noexcept
-  -> thrust::detail::integral_constant<bool, hipMemcpyDeviceToDevice == Direction::value>
+constexpr THRUST_HOST_DEVICE thrust::detail::integral_constant<bool, hipMemcpyDeviceToDevice == Direction::value>
+is_device_to_device_copy(ExecutionPolicy0 const& /*exec0*/, ExecutionPolicy1 const& /*exec1*/) noexcept
 {
   return {};
 }
@@ -140,8 +149,8 @@ constexpr THRUST_HOST_DEVICE auto is_device_to_device_copy(ExecutionPolicy0 cons
 template <typename ExecutionPolicy,
           // MSVC2015 WAR: put decltype here instead of in trailing return type
           typename Direction = decltype(direction_of_copy(std::declval<ExecutionPolicy>()))>
-constexpr THRUST_HOST_DEVICE auto is_device_to_device_copy(ExecutionPolicy const&) noexcept
-  -> thrust::detail::integral_constant<bool, hipMemcpyDeviceToDevice == Direction::value>
+constexpr THRUST_HOST_DEVICE thrust::detail::integral_constant<bool, hipMemcpyDeviceToDevice == Direction::value>
+is_device_to_device_copy(ExecutionPolicy const& /*exec*/) noexcept
 {
   return {};
 }

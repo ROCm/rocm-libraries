@@ -1,6 +1,6 @@
 /*
  *  Copyright 2018 NVIDIA Corporation
- *  Modifications Copyright 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -42,7 +42,7 @@ namespace mr
  *  \{
  */
 
-#if !THRUST_DOXYGEN_INVOKED
+#ifndef THRUST_DOXYGEN_INVOKED
 class new_delete_resource_base : public memory_resource<>
 {
 public:
@@ -87,7 +87,7 @@ public:
 #  endif
   }
 };
-#endif // !THRUST_DOXYGEN_INVOKED
+#endif
 
 /*! A memory resource that uses global operators new and delete to allocate and deallocate memory. Uses
  * alignment-enabled overloads when available, otherwise uses regular overloads and implements alignment requirements by
