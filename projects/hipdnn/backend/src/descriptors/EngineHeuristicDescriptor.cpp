@@ -95,6 +95,24 @@ std::vector<int64_t> EngineHeuristicDescriptor::resolveHeuristicPolicyOrder()
     // canonical last-resort fallback and always succeeds when there is at least
     // one candidate. Vendor heuristic plugins may be inserted via env or descriptor
     // attribute above.
+    //
+    // NOTE: `SelectionHeuristic::StaticOrdering` here is NOT RFC 0019's `static_order`
+    // UHD adapter, despite the names. They operate at different levels:
+    //
+    //   StaticOrdering (this policy, RFC 0007)  ranks ENGINES. Input is the candidate
+    //     engine ids; the order comes from a fixed vendor precedence in
+    //     sortEngineIds() (MIOpen, ASM_SDPA, rocKE, …), overridable with
+    //     HIPDNN_HEUR_FALLBACK_ENGINE_ORDER.
+    //
+    //   static_order (a UHD adapter, RFC 0019 §5)  ranks KERNELS within one engine.
+    //     The order comes from that engine's own descriptor `order` field
+    //     (priority, id, or any KMD field) and never leaves the engine.
+    //
+    // RFC 0019 §2 draws the same line: kernel selection is UHD's scope, engine
+    // selection is RFC 0007's. Both can run for one graph — UHD ranks kernels, then
+    // StaticOrdering ranks whatever engines remain. Read §6 step 6's "degrades to
+    // static_order (priority + id)" as the kernel comparator in SelectionEngine, not
+    // as a hand-off to this policy.
     std::vector<int64_t> policyIds = {
         hipdnn_data_sdk::utilities::policyNameToId("SelectionHeuristic::Config"),
         hipdnn_data_sdk::utilities::policyNameToId("SelectionHeuristic::UHD"),

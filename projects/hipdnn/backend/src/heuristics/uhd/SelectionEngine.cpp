@@ -404,6 +404,11 @@ SelectionResult
 {
     // The fail-open default is the same comparator with the default field order, so
     // §6 step 6 and the static_order adapter are literally one code path.
+    //
+    // Unrelated to the `SelectionHeuristic::StaticOrdering` policy despite the name:
+    // that one ranks engines by a fixed vendor precedence (RFC 0007). This ranks
+    // kernels within a single engine. See the default-chain comment in
+    // EngineHeuristicDescriptor::resolveHeuristicPolicyOrder.
     auto result = applyDeclaredOrder(candidates, {});
     result.applied = false;
     result.fallbackReason = reason;
