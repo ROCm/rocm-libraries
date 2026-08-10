@@ -95,8 +95,9 @@ float bf16ToFloat(uint16_t b)
 // mult-of-16, the tiled gemm_wmma_universal_* is mult-of-64), so candidates.front()
 // is ambiguous. The universal-GEMM tests below pick their kernel explicitly by the
 // "ugemm" symbol prefix the tiled builder emits.
-const catalog::KernelEntry* findCandidateBySymbol(
-    const std::vector<catalog::Catalog::Candidate>& candidates, const std::string& needle)
+const catalog::KernelEntry*
+    findCandidateBySymbol(const std::vector<catalog::Catalog::Candidate>& candidates,
+                          const std::string& needle)
 {
     for(const auto& cand : candidates)
     {
@@ -209,12 +210,12 @@ TEST(AotCatalogGemmNumericParity, WmmaGemmF16MatchesReference)
     ASSERT_EQ(hipMalloc(&deviceA, hostA.size() * sizeof(_Float16)), hipSuccess);
     ASSERT_EQ(hipMalloc(&deviceB, hostB.size() * sizeof(_Float16)), hipSuccess);
     ASSERT_EQ(hipMalloc(&deviceC, hostC.size() * sizeof(_Float16)), hipSuccess);
-    ASSERT_EQ(hipMemcpy(deviceA, hostA.data(), hostA.size() * sizeof(_Float16),
-                        hipMemcpyHostToDevice),
-              hipSuccess);
-    ASSERT_EQ(hipMemcpy(deviceB, hostB.data(), hostB.size() * sizeof(_Float16),
-                        hipMemcpyHostToDevice),
-              hipSuccess);
+    ASSERT_EQ(
+        hipMemcpy(deviceA, hostA.data(), hostA.size() * sizeof(_Float16), hipMemcpyHostToDevice),
+        hipSuccess);
+    ASSERT_EQ(
+        hipMemcpy(deviceB, hostB.data(), hostB.size() * sizeof(_Float16), hipMemcpyHostToDevice),
+        hipSuccess);
     ASSERT_EQ(hipMemset(deviceC, 0, hostC.size() * sizeof(_Float16)), hipSuccess);
 
     hipStream_t stream = nullptr;
@@ -232,9 +233,9 @@ TEST(AotCatalogGemmNumericParity, WmmaGemmF16MatchesReference)
     ASSERT_NO_THROW(plan.execute(handle, buffers, 3, nullptr));
     ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
 
-    ASSERT_EQ(hipMemcpy(hostC.data(), deviceC, hostC.size() * sizeof(_Float16),
-                        hipMemcpyDeviceToHost),
-              hipSuccess);
+    ASSERT_EQ(
+        hipMemcpy(hostC.data(), deviceC, hostC.size() * sizeof(_Float16), hipMemcpyDeviceToHost),
+        hipSuccess);
 
     // 6. Compare. f16 has ~3 decimal digits; scale tolerance with magnitude.
     for(size_t i = 0; i < M; ++i)
@@ -353,12 +354,12 @@ TEST(AotCatalogGemmNumericParity, WmmaUniversalGemmF16MatchesReference)
     ASSERT_EQ(hipMalloc(&deviceA, hostA.size() * sizeof(_Float16)), hipSuccess);
     ASSERT_EQ(hipMalloc(&deviceB, hostB.size() * sizeof(_Float16)), hipSuccess);
     ASSERT_EQ(hipMalloc(&deviceC, hostC.size() * sizeof(_Float16)), hipSuccess);
-    ASSERT_EQ(hipMemcpy(deviceA, hostA.data(), hostA.size() * sizeof(_Float16),
-                        hipMemcpyHostToDevice),
-              hipSuccess);
-    ASSERT_EQ(hipMemcpy(deviceB, hostB.data(), hostB.size() * sizeof(_Float16),
-                        hipMemcpyHostToDevice),
-              hipSuccess);
+    ASSERT_EQ(
+        hipMemcpy(deviceA, hostA.data(), hostA.size() * sizeof(_Float16), hipMemcpyHostToDevice),
+        hipSuccess);
+    ASSERT_EQ(
+        hipMemcpy(deviceB, hostB.data(), hostB.size() * sizeof(_Float16), hipMemcpyHostToDevice),
+        hipSuccess);
     ASSERT_EQ(hipMemset(deviceC, 0, hostC.size() * sizeof(_Float16)), hipSuccess);
 
     hipStream_t stream = nullptr;
@@ -376,9 +377,9 @@ TEST(AotCatalogGemmNumericParity, WmmaUniversalGemmF16MatchesReference)
     ASSERT_NO_THROW(plan.execute(handle, buffers, 3, nullptr));
     ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
 
-    ASSERT_EQ(hipMemcpy(hostC.data(), deviceC, hostC.size() * sizeof(_Float16),
-                        hipMemcpyDeviceToHost),
-              hipSuccess);
+    ASSERT_EQ(
+        hipMemcpy(hostC.data(), deviceC, hostC.size() * sizeof(_Float16), hipMemcpyDeviceToHost),
+        hipSuccess);
 
     for(size_t i = 0; i < M; ++i)
     {
@@ -492,12 +493,12 @@ TEST(AotCatalogGemmNumericParity, WmmaUniversalGemmBf16MatchesReference)
     ASSERT_EQ(hipMalloc(&deviceA, hostA.size() * sizeof(uint16_t)), hipSuccess);
     ASSERT_EQ(hipMalloc(&deviceB, hostB.size() * sizeof(uint16_t)), hipSuccess);
     ASSERT_EQ(hipMalloc(&deviceC, hostC.size() * sizeof(uint16_t)), hipSuccess);
-    ASSERT_EQ(hipMemcpy(deviceA, hostA.data(), hostA.size() * sizeof(uint16_t),
-                        hipMemcpyHostToDevice),
-              hipSuccess);
-    ASSERT_EQ(hipMemcpy(deviceB, hostB.data(), hostB.size() * sizeof(uint16_t),
-                        hipMemcpyHostToDevice),
-              hipSuccess);
+    ASSERT_EQ(
+        hipMemcpy(deviceA, hostA.data(), hostA.size() * sizeof(uint16_t), hipMemcpyHostToDevice),
+        hipSuccess);
+    ASSERT_EQ(
+        hipMemcpy(deviceB, hostB.data(), hostB.size() * sizeof(uint16_t), hipMemcpyHostToDevice),
+        hipSuccess);
     ASSERT_EQ(hipMemset(deviceC, 0, hostC.size() * sizeof(uint16_t)), hipSuccess);
 
     hipStream_t stream = nullptr;
@@ -515,9 +516,9 @@ TEST(AotCatalogGemmNumericParity, WmmaUniversalGemmBf16MatchesReference)
     ASSERT_NO_THROW(plan.execute(handle, buffers, 3, nullptr));
     ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
 
-    ASSERT_EQ(hipMemcpy(hostC.data(), deviceC, hostC.size() * sizeof(uint16_t),
-                        hipMemcpyDeviceToHost),
-              hipSuccess);
+    ASSERT_EQ(
+        hipMemcpy(hostC.data(), deviceC, hostC.size() * sizeof(uint16_t), hipMemcpyDeviceToHost),
+        hipSuccess);
 
     for(size_t i = 0; i < M; ++i)
     {
@@ -632,12 +633,12 @@ TEST(AotCatalogGemmNumericParity, WmmaGemmBf16MatchesReference)
     ASSERT_EQ(hipMalloc(&deviceA, hostA.size() * sizeof(uint16_t)), hipSuccess);
     ASSERT_EQ(hipMalloc(&deviceB, hostB.size() * sizeof(uint16_t)), hipSuccess);
     ASSERT_EQ(hipMalloc(&deviceC, hostC.size() * sizeof(uint16_t)), hipSuccess);
-    ASSERT_EQ(hipMemcpy(deviceA, hostA.data(), hostA.size() * sizeof(uint16_t),
-                        hipMemcpyHostToDevice),
-              hipSuccess);
-    ASSERT_EQ(hipMemcpy(deviceB, hostB.data(), hostB.size() * sizeof(uint16_t),
-                        hipMemcpyHostToDevice),
-              hipSuccess);
+    ASSERT_EQ(
+        hipMemcpy(deviceA, hostA.data(), hostA.size() * sizeof(uint16_t), hipMemcpyHostToDevice),
+        hipSuccess);
+    ASSERT_EQ(
+        hipMemcpy(deviceB, hostB.data(), hostB.size() * sizeof(uint16_t), hipMemcpyHostToDevice),
+        hipSuccess);
     ASSERT_EQ(hipMemset(deviceC, 0, hostC.size() * sizeof(uint16_t)), hipSuccess);
 
     hipStream_t stream = nullptr;
@@ -655,9 +656,9 @@ TEST(AotCatalogGemmNumericParity, WmmaGemmBf16MatchesReference)
     ASSERT_NO_THROW(plan.execute(handle, buffers, 3, nullptr));
     ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
 
-    ASSERT_EQ(hipMemcpy(hostC.data(), deviceC, hostC.size() * sizeof(uint16_t),
-                        hipMemcpyDeviceToHost),
-              hipSuccess);
+    ASSERT_EQ(
+        hipMemcpy(hostC.data(), deviceC, hostC.size() * sizeof(uint16_t), hipMemcpyDeviceToHost),
+        hipSuccess);
 
     // bf16 has a 7-bit mantissa (~2 decimal digits) -> looser tolerance than f16.
     for(size_t i = 0; i < M; ++i)

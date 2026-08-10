@@ -53,10 +53,10 @@ constexpr const char* kCatalogDir = AOT_CATALOG_TEST_DIR;
 constexpr const char* kArch = "gfx1151";
 
 // Baked kernel geometry (D and H are compile-time facts of the shipped .co).
-constexpr int64_t kHeadDim = 64;  // D
+constexpr int64_t kHeadDim = 64; // D
 constexpr int64_t kNumHeads = 32; // H == H_kv (MHA)
-constexpr int64_t kSeqQ = 32;     // 2 query tiles of 16
-constexpr int64_t kSeqKv = 48;    // 3 key tiles of 16 (asymmetric on purpose)
+constexpr int64_t kSeqQ = 32; // 2 query tiles of 16
+constexpr int64_t kSeqKv = 48; // 3 key tiles of 16 (asymmetric on purpose)
 
 bool gpuIsArch(const std::string& arch)
 {
@@ -203,8 +203,7 @@ void runSdpaParity(const std::string& dtypeTok,
     problem.emplace("fp8", catalog::ShapeValue{false});
     problem.emplace("runtime_scale", catalog::ShapeValue{false});
 
-    const std::vector<catalog::Catalog::Candidate> candidates
-        = cat.candidatesFor("sdpa", problem);
+    const std::vector<catalog::Catalog::Candidate> candidates = cat.candidatesFor("sdpa", problem);
     ASSERT_FALSE(candidates.empty()) << "no sdpa candidate for the " << dtypeTok << " problem";
     const catalog::KernelEntry& kernel = *candidates.front().kernel;
     ASSERT_NE(kernel.symbol.find(dtypeTok), std::string::npos)
@@ -299,15 +298,15 @@ void runSdpaParity(const std::string& dtypeTok,
     ASSERT_EQ(hipMalloc(&deviceK, hostK.size() * sizeof(StoreT)), hipSuccess);
     ASSERT_EQ(hipMalloc(&deviceV, hostV.size() * sizeof(StoreT)), hipSuccess);
     ASSERT_EQ(hipMalloc(&deviceO, hostO.size() * sizeof(StoreT)), hipSuccess);
-    ASSERT_EQ(hipMemcpy(deviceQ, hostQ.data(), hostQ.size() * sizeof(StoreT),
-                        hipMemcpyHostToDevice),
-              hipSuccess);
-    ASSERT_EQ(hipMemcpy(deviceK, hostK.data(), hostK.size() * sizeof(StoreT),
-                        hipMemcpyHostToDevice),
-              hipSuccess);
-    ASSERT_EQ(hipMemcpy(deviceV, hostV.data(), hostV.size() * sizeof(StoreT),
-                        hipMemcpyHostToDevice),
-              hipSuccess);
+    ASSERT_EQ(
+        hipMemcpy(deviceQ, hostQ.data(), hostQ.size() * sizeof(StoreT), hipMemcpyHostToDevice),
+        hipSuccess);
+    ASSERT_EQ(
+        hipMemcpy(deviceK, hostK.data(), hostK.size() * sizeof(StoreT), hipMemcpyHostToDevice),
+        hipSuccess);
+    ASSERT_EQ(
+        hipMemcpy(deviceV, hostV.data(), hostV.size() * sizeof(StoreT), hipMemcpyHostToDevice),
+        hipSuccess);
     ASSERT_EQ(hipMemset(deviceO, 0, hostO.size() * sizeof(StoreT)), hipSuccess);
 
     hipStream_t stream = nullptr;
@@ -326,9 +325,9 @@ void runSdpaParity(const std::string& dtypeTok,
     ASSERT_NO_THROW(plan.execute(handle, buffers, 4, nullptr));
     ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
 
-    ASSERT_EQ(hipMemcpy(hostO.data(), deviceO, hostO.size() * sizeof(StoreT),
-                        hipMemcpyDeviceToHost),
-              hipSuccess);
+    ASSERT_EQ(
+        hipMemcpy(hostO.data(), deviceO, hostO.size() * sizeof(StoreT), hipMemcpyDeviceToHost),
+        hipSuccess);
 
     for(int64_t h = 0; h < kNumHeads; ++h)
     {

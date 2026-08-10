@@ -145,7 +145,7 @@ void TuneCache::loadLocked()
     catch(const std::exception& e)
     {
         HIPDNN_PLUGIN_LOG_WARN("aot-catalog: ignoring unreadable tune cache '"
-                                  << _path << "': " << e.what());
+                               << _path << "': " << e.what());
         return;
     }
 
@@ -192,7 +192,7 @@ void TuneCache::saveLocked() const
         if(!out.is_open())
         {
             HIPDNN_PLUGIN_LOG_WARN("aot-catalog: could not open tune cache '" << tmpPath
-                                                                                 << "' for writing");
+                                                                              << "' for writing");
             return;
         }
         out << root.dump(2);
@@ -208,7 +208,7 @@ void TuneCache::saveLocked() const
     if(ec)
     {
         HIPDNN_PLUGIN_LOG_WARN("aot-catalog: could not commit tune cache '"
-                                  << _path << "': " << ec.message());
+                               << _path << "': " << ec.message());
         std::error_code rmEc;
         fs::remove(tmpPath, rmEc);
     }

@@ -175,10 +175,12 @@ TEST(AotCatalogRmsNormNumericParity, RmsNorm2dF16MatchesReference)
     ASSERT_EQ(hipMalloc(&deviceX, hostX.size() * sizeof(_Float16)), hipSuccess);
     ASSERT_EQ(hipMalloc(&deviceGamma, hostGamma.size() * sizeof(_Float16)), hipSuccess);
     ASSERT_EQ(hipMalloc(&deviceY, hostY.size() * sizeof(_Float16)), hipSuccess);
-    ASSERT_EQ(hipMemcpy(deviceX, hostX.data(), hostX.size() * sizeof(_Float16),
-                        hipMemcpyHostToDevice),
-              hipSuccess);
-    ASSERT_EQ(hipMemcpy(deviceGamma, hostGamma.data(), hostGamma.size() * sizeof(_Float16),
+    ASSERT_EQ(
+        hipMemcpy(deviceX, hostX.data(), hostX.size() * sizeof(_Float16), hipMemcpyHostToDevice),
+        hipSuccess);
+    ASSERT_EQ(hipMemcpy(deviceGamma,
+                        hostGamma.data(),
+                        hostGamma.size() * sizeof(_Float16),
                         hipMemcpyHostToDevice),
               hipSuccess);
     ASSERT_EQ(hipMemset(deviceY, 0, hostY.size() * sizeof(_Float16)), hipSuccess);
@@ -198,9 +200,9 @@ TEST(AotCatalogRmsNormNumericParity, RmsNorm2dF16MatchesReference)
     ASSERT_NO_THROW(plan.execute(handle, buffers, 3, nullptr));
     ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
 
-    ASSERT_EQ(hipMemcpy(hostY.data(), deviceY, hostY.size() * sizeof(_Float16),
-                        hipMemcpyDeviceToHost),
-              hipSuccess);
+    ASSERT_EQ(
+        hipMemcpy(hostY.data(), deviceY, hostY.size() * sizeof(_Float16), hipMemcpyDeviceToHost),
+        hipSuccess);
 
     // 6. Compare. f16 has ~3 decimal digits; scale tolerance with magnitude.
     for(size_t m = 0; m < M; ++m)

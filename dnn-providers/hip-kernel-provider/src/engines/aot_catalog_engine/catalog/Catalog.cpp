@@ -427,9 +427,10 @@ Catalog Catalog::loadForDevice(const std::string& catalogDir, const std::string&
             }
             const json obj = json::parse(stream);
             families.push_back(parseFamily(obj, entry.path(), arch));
-            HIPDNN_PLUGIN_LOG_INFO("aot-catalog: loaded family '"
-                                   << families.back().name << "' (" << families.back().kernels.size()
-                                   << " kernels) from " << familyJson.string());
+            HIPDNN_PLUGIN_LOG_INFO("aot-catalog: loaded family '" << families.back().name << "' ("
+                                                                  << families.back().kernels.size()
+                                                                  << " kernels) from "
+                                                                  << familyJson.string());
         }
         catch(const std::exception& e)
         {

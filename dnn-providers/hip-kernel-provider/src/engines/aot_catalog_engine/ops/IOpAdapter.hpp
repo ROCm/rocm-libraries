@@ -40,11 +40,13 @@ public:
     // scalar value) from the graph and decoded problem.
     virtual catalog::LaunchBindings buildBindings(const IGraph& graph,
                                                   const catalog::ProblemShape& problem,
-                                                  const catalog::KernelEntry& kernel) const = 0;
+                                                  const catalog::KernelEntry& kernel) const
+        = 0;
 
     // Build the grid symbol table (e.g. M,N,K) the kernel's grid formula uses.
     virtual launch::SymbolTable gridSymbols(const catalog::ProblemShape& problem,
-                                            const catalog::KernelEntry& kernel) const = 0;
+                                            const catalog::KernelEntry& kernel) const
+        = 0;
 };
 
 } // namespace aot_catalog_engine::ops

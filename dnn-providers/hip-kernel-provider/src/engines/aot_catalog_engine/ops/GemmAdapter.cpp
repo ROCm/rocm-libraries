@@ -29,10 +29,14 @@ std::optional<std::string> providerDtype(data_objects::DataType dtype)
 {
     switch(dtype)
     {
-    case data_objects::DataType::HALF: return std::string("f16");
-    case data_objects::DataType::BFLOAT16: return std::string("bf16");
-    case data_objects::DataType::FLOAT: return std::string("f32");
-    default: return std::nullopt;
+    case data_objects::DataType::HALF:
+        return std::string("f16");
+    case data_objects::DataType::BFLOAT16:
+        return std::string("bf16");
+    case data_objects::DataType::FLOAT:
+        return std::string("f32");
+    default:
+        return std::nullopt;
     }
 }
 

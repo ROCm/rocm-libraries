@@ -74,7 +74,7 @@ struct SdpaSpec
     int64_t Sq = 32;
     int64_t Skv = 48;
     int64_t D = 64;
-    int qRank = 4;         // set to 3 to force a non-rank-4 decline
+    int qRank = 4; // set to 3 to force a non-rank-4 decline
     int64_t innerMult = 1; // 2 -> non-contiguous D
     bool causal = false;
     bool causalBottomRight = false;
@@ -132,14 +132,14 @@ BuiltGraph buildSdpaGraph(const SdpaSpec& spec)
     const int64_t kUid = 2;
     const int64_t vUid = 3;
     const int64_t oUid = 4;
-    tensors.push_back(
-        data_objects::CreateTensorAttributesDirect(builder, qUid, "q", spec.dtype, &qStrides, &qDims));
+    tensors.push_back(data_objects::CreateTensorAttributesDirect(
+        builder, qUid, "q", spec.dtype, &qStrides, &qDims));
     tensors.push_back(
         data_objects::CreateTensorAttributesDirect(builder, kUid, "k", kType, &kStrides, &kDims));
-    tensors.push_back(
-        data_objects::CreateTensorAttributesDirect(builder, vUid, "v", spec.dtype, &vStrides, &vDims));
-    tensors.push_back(
-        data_objects::CreateTensorAttributesDirect(builder, oUid, "o", spec.dtype, &oStrides, &oDims));
+    tensors.push_back(data_objects::CreateTensorAttributesDirect(
+        builder, vUid, "v", spec.dtype, &vStrides, &vDims));
+    tensors.push_back(data_objects::CreateTensorAttributesDirect(
+        builder, oUid, "o", spec.dtype, &oStrides, &oDims));
 
     // Optional operand tensors. Their contents are irrelevant to decode (which
     // only checks uid presence), so a rank-1 placeholder keeps them well-formed.
@@ -207,45 +207,48 @@ BuiltGraph buildSdpaGraph(const SdpaSpec& spec)
         oUid,
         attnMaskUid,
         scaleUid,
-        seqLenQUid,           // seq_len_q_tensor_uid
-        fb::nullopt,          // seq_len_kv_tensor_uid
-        fb::nullopt,          // seed_tensor_uid
-        fb::nullopt,          // offset_tensor_uid
-        fb::nullopt,          // dropout_mask_tensor_uid
-        fb::nullopt,          // dropout_scale_tensor_uid
-        pageTableKUid,        // page_table_k_tensor_uid
-        fb::nullopt,          // page_table_v_tensor_uid
-        blockMaskUid,         // block_mask_tensor_uid
-        sinkUid,              // sink_token_tensor_uid
-        descaleQUid,          // descale_q_tensor_uid
-        descaleKUid,          // descale_k_tensor_uid
-        descaleVUid,          // descale_v_tensor_uid
-        descaleSUid,          // descale_s_tensor_uid
-        scaleSUid,            // scale_s_tensor_uid
-        scaleOUid,            // scale_o_tensor_uid
-        fb::nullopt,          // stats_tensor_uid
-        fb::nullopt,          // max_tensor_uid
-        fb::nullopt,          // sum_exp_tensor_uid
-        fb::nullopt,          // rng_dump_tensor_uid
-        fb::nullopt,          // amax_s_tensor_uid
-        fb::nullopt,          // amax_o_tensor_uid
+        seqLenQUid, // seq_len_q_tensor_uid
+        fb::nullopt, // seq_len_kv_tensor_uid
+        fb::nullopt, // seed_tensor_uid
+        fb::nullopt, // offset_tensor_uid
+        fb::nullopt, // dropout_mask_tensor_uid
+        fb::nullopt, // dropout_scale_tensor_uid
+        pageTableKUid, // page_table_k_tensor_uid
+        fb::nullopt, // page_table_v_tensor_uid
+        blockMaskUid, // block_mask_tensor_uid
+        sinkUid, // sink_token_tensor_uid
+        descaleQUid, // descale_q_tensor_uid
+        descaleKUid, // descale_k_tensor_uid
+        descaleVUid, // descale_v_tensor_uid
+        descaleSUid, // descale_s_tensor_uid
+        scaleSUid, // scale_s_tensor_uid
+        scaleOUid, // scale_o_tensor_uid
+        fb::nullopt, // stats_tensor_uid
+        fb::nullopt, // max_tensor_uid
+        fb::nullopt, // sum_exp_tensor_uid
+        fb::nullopt, // rng_dump_tensor_uid
+        fb::nullopt, // amax_s_tensor_uid
+        fb::nullopt, // amax_o_tensor_uid
         spec.genStats ? fb::Optional<bool>(true) : fb::nullopt,
         spec.alibi,
         spec.padding,
         spec.causal,
         spec.causalBottomRight,
-        fb::nullopt,          // dropout_probability
+        fb::nullopt, // dropout_probability
         spec.attnScaleValue ? fb::Optional<float>(*spec.attnScaleValue) : fb::nullopt,
-        fb::nullopt,          // left_bound
-        fb::nullopt,          // right_bound
-        fb::nullopt,          // max_seq_len_kv
+        fb::nullopt, // left_bound
+        fb::nullopt, // right_bound
+        fb::nullopt, // max_seq_len_kv
         data_objects::DiagonalAlignment::TOP_LEFT,
         DataType::FLOAT,
         data_objects::AttentionImplementation::AUTO);
 
     std::vector<fb::Offset<data_objects::Node>> nodes;
-    nodes.push_back(data_objects::CreateNodeDirect(
-        builder, "sdpa_fwd", spec.dtype, data_objects::NodeAttributes::SdpaAttributes, attn.Union()));
+    nodes.push_back(data_objects::CreateNodeDirect(builder,
+                                                   "sdpa_fwd",
+                                                   spec.dtype,
+                                                   data_objects::NodeAttributes::SdpaAttributes,
+                                                   attn.Union()));
 
     const auto graphOffset = data_objects::CreateGraphDirect(
         builder, "test", DataType::FLOAT, DataType::HALF, DataType::BFLOAT16, &tensors, &nodes);
@@ -315,9 +318,19 @@ TEST(AotCatalogSdpaDecode, PublishesFullVocabularyForGfx1151Shape)
 
     EXPECT_TRUE(boolFact(*shape, "d_contiguous"));
     EXPECT_TRUE(boolFact(*shape, "batch_foldable"));
-    for(const char* key : {"causal", "causal_bottom_right", "has_alibi", "has_padding_mask",
-                           "has_attn_mask", "has_block_mask", "has_sink", "has_dropout", "paged",
-                           "varlen", "gen_stats", "fp8", "runtime_scale"})
+    for(const char* key : {"causal",
+                           "causal_bottom_right",
+                           "has_alibi",
+                           "has_padding_mask",
+                           "has_attn_mask",
+                           "has_block_mask",
+                           "has_sink",
+                           "has_dropout",
+                           "paged",
+                           "varlen",
+                           "gen_stats",
+                           "fp8",
+                           "runtime_scale"})
     {
         EXPECT_FALSE(boolFact(*shape, key)) << "expected " << key << " == false on baseline";
     }
@@ -464,10 +477,24 @@ TEST(AotCatalogSdpaDecode, OptionalPointersAbsentOnBaseline)
     const catalog::KernelEntry kernel;
     const catalog::LaunchBindings b = kAdapter.buildBindings(g.graph(), *shape, kernel);
 
-    for(const char* name : {"attn_mask", "block_mask", "sink", "scale_tensor", "seqlen_q_ptr",
-                            "seqlen_kv_ptr", "page_table_k", "page_table_v", "descale_q",
-                            "descale_k", "descale_v", "descale_s", "scale_s", "scale_o", "stats",
-                            "lse", "max", "sum_exp"})
+    for(const char* name : {"attn_mask",
+                            "block_mask",
+                            "sink",
+                            "scale_tensor",
+                            "seqlen_q_ptr",
+                            "seqlen_kv_ptr",
+                            "page_table_k",
+                            "page_table_v",
+                            "descale_q",
+                            "descale_k",
+                            "descale_v",
+                            "descale_s",
+                            "scale_s",
+                            "scale_o",
+                            "stats",
+                            "lse",
+                            "max",
+                            "sum_exp"})
     {
         EXPECT_EQ(b.pointerUids.count(name), 0U) << "unexpected optional pointer '" << name << "'";
     }
@@ -491,8 +518,8 @@ TEST(AotCatalogSdpaDecode, OptionalFeaturePointersBoundWhenPresent)
     const catalog::LaunchBindings b = kAdapter.buildBindings(g.graph(), *shape, kernel);
 
     // Every present operand is bound to a placeholder uid (>4, i.e. not Q/K/V/O).
-    for(const char* name : {"attn_mask", "block_mask", "sink", "page_table_k", "seqlen_q_ptr",
-                            "scale_tensor"})
+    for(const char* name :
+        {"attn_mask", "block_mask", "sink", "page_table_k", "seqlen_q_ptr", "scale_tensor"})
     {
         auto it = b.pointerUids.find(name);
         ASSERT_NE(it, b.pointerUids.end()) << "missing optional pointer '" << name << "'";
@@ -518,7 +545,8 @@ TEST(AotCatalogSdpaDecode, Fp8DescalePointersBound)
 
     const catalog::KernelEntry kernel;
     const catalog::LaunchBindings b = kAdapter.buildBindings(g.graph(), *shape, kernel);
-    for(const char* name : {"descale_q", "descale_k", "descale_v", "descale_s", "scale_s", "scale_o"})
+    for(const char* name :
+        {"descale_q", "descale_k", "descale_v", "descale_s", "scale_s", "scale_o"})
     {
         auto it = b.pointerUids.find(name);
         ASSERT_NE(it, b.pointerUids.end()) << "missing fp8 pointer '" << name << "'";

@@ -168,12 +168,12 @@ protected:
         ASSERT_EQ(hipMalloc(&_deviceX, M * N * sizeof(_Float16)), hipSuccess);
         ASSERT_EQ(hipMalloc(&_deviceGamma, N * sizeof(_Float16)), hipSuccess);
         ASSERT_EQ(hipMalloc(&_deviceY, M * N * sizeof(_Float16)), hipSuccess);
-        ASSERT_EQ(hipMemcpy(_deviceX, _hostX.data(), M * N * sizeof(_Float16),
-                            hipMemcpyHostToDevice),
-                  hipSuccess);
-        ASSERT_EQ(hipMemcpy(_deviceGamma, _hostGamma.data(), N * sizeof(_Float16),
-                            hipMemcpyHostToDevice),
-                  hipSuccess);
+        ASSERT_EQ(
+            hipMemcpy(_deviceX, _hostX.data(), M * N * sizeof(_Float16), hipMemcpyHostToDevice),
+            hipSuccess);
+        ASSERT_EQ(
+            hipMemcpy(_deviceGamma, _hostGamma.data(), N * sizeof(_Float16), hipMemcpyHostToDevice),
+            hipSuccess);
         ASSERT_EQ(hipStreamCreate(&_stream), hipSuccess);
         _handle.setStream(_stream);
     }
@@ -215,9 +215,9 @@ protected:
         ASSERT_EQ(hipMemset(_deviceY, 0, M * N * sizeof(_Float16)), hipSuccess);
         ASSERT_NO_THROW(plan.execute(_handle, buffers, 3, nullptr));
         ASSERT_EQ(hipStreamSynchronize(_stream), hipSuccess);
-        ASSERT_EQ(hipMemcpy(_hostY.data(), _deviceY, M * N * sizeof(_Float16),
-                            hipMemcpyDeviceToHost),
-                  hipSuccess);
+        ASSERT_EQ(
+            hipMemcpy(_hostY.data(), _deviceY, M * N * sizeof(_Float16), hipMemcpyDeviceToHost),
+            hipSuccess);
         expectMatches(_hostY, _ref);
     }
 
@@ -251,7 +251,8 @@ protected:
 // (Flux 3072, SD3.5 2432) that the static specializations don't cover. They
 // use only EXPECT_* because a value-returning helper can't host ASSERT_*.
 
-std::vector<float> referenceForShape(size_t rows, size_t cols,
+std::vector<float> referenceForShape(size_t rows,
+                                     size_t cols,
                                      const std::vector<_Float16>& hostX,
                                      const std::vector<_Float16>& hostGamma,
                                      float eps)
@@ -276,8 +277,8 @@ std::vector<float> referenceForShape(size_t rows, size_t cols,
     return ref;
 }
 
-PlanCandidate makeCandidateForShape(const catalog::KernelEntry& kernel, size_t rows,
-                                    size_t cols, float eps)
+PlanCandidate
+    makeCandidateForShape(const catalog::KernelEntry& kernel, size_t rows, size_t cols, float eps)
 {
     std::optional<launch::HipModuleGuard> module
         = launch::loadKernelModule(kernel.coPath, kernel.symbol);
@@ -306,14 +307,13 @@ PlanCandidate makeCandidateForShape(const catalog::KernelEntry& kernel, size_t r
 struct ShapeOutcome
 {
     std::vector<std::string> symbols; // candidate symbols, in catalog order
-    std::string winner;               // tuned winner (empty if single/none)
+    std::string winner; // tuned winner (empty if single/none)
 };
 
 // Full end-to-end for one (rows, cols): load candidates, allocate real device
 // buffers, run a multi-candidate tuned plan, and EXPECT numerical correctness.
 // Returns the candidate symbols + the tuned winner; removes its cache file.
-ShapeOutcome runShapeAndCheck(size_t rows, size_t cols, float eps,
-                              const std::string& cachePath)
+ShapeOutcome runShapeAndCheck(size_t rows, size_t cols, float eps, const std::string& cachePath)
 {
     ShapeOutcome outcome;
 
@@ -365,12 +365,12 @@ ShapeOutcome runShapeAndCheck(size_t rows, size_t cols, float eps,
     EXPECT_EQ(hipMalloc(&deviceX, rows * cols * sizeof(_Float16)), hipSuccess);
     EXPECT_EQ(hipMalloc(&deviceGamma, cols * sizeof(_Float16)), hipSuccess);
     EXPECT_EQ(hipMalloc(&deviceY, rows * cols * sizeof(_Float16)), hipSuccess);
-    EXPECT_EQ(hipMemcpy(deviceX, hostX.data(), rows * cols * sizeof(_Float16),
-                        hipMemcpyHostToDevice),
-              hipSuccess);
-    EXPECT_EQ(hipMemcpy(deviceGamma, hostGamma.data(), cols * sizeof(_Float16),
-                        hipMemcpyHostToDevice),
-              hipSuccess);
+    EXPECT_EQ(
+        hipMemcpy(deviceX, hostX.data(), rows * cols * sizeof(_Float16), hipMemcpyHostToDevice),
+        hipSuccess);
+    EXPECT_EQ(
+        hipMemcpy(deviceGamma, hostGamma.data(), cols * sizeof(_Float16), hipMemcpyHostToDevice),
+        hipSuccess);
     EXPECT_EQ(hipStreamCreate(&stream), hipSuccess);
 
     Handle handle;
@@ -388,9 +388,9 @@ ShapeOutcome runShapeAndCheck(size_t rows, size_t cols, float eps,
     EXPECT_EQ(hipMemset(deviceY, 0, rows * cols * sizeof(_Float16)), hipSuccess);
     EXPECT_NO_THROW(plan.execute(handle, buffers, 3, nullptr));
     EXPECT_EQ(hipStreamSynchronize(stream), hipSuccess);
-    EXPECT_EQ(hipMemcpy(hostY.data(), deviceY, rows * cols * sizeof(_Float16),
-                        hipMemcpyDeviceToHost),
-              hipSuccess);
+    EXPECT_EQ(
+        hipMemcpy(hostY.data(), deviceY, rows * cols * sizeof(_Float16), hipMemcpyDeviceToHost),
+        hipSuccess);
 
     // Correctness (single aggregate EXPECT to avoid per-element spam).
     size_t mismatches = 0;
@@ -406,16 +406,15 @@ ShapeOutcome runShapeAndCheck(size_t rows, size_t cols, float eps,
             {
                 if(mismatches == 0)
                 {
-                    firstMismatch = "(" + std::to_string(m) + "," + std::to_string(n)
-                                    + ") got=" + std::to_string(got)
-                                    + " want=" + std::to_string(want);
+                    firstMismatch = "(" + std::to_string(m) + "," + std::to_string(n) + ") got="
+                                    + std::to_string(got) + " want=" + std::to_string(want);
                 }
                 ++mismatches;
             }
         }
     }
-    EXPECT_EQ(mismatches, 0u)
-        << "M=" << rows << " N=" << cols << " first mismatch " << firstMismatch;
+    EXPECT_EQ(mismatches, 0u) << "M=" << rows << " N=" << cols << " first mismatch "
+                              << firstMismatch;
 
     const std::optional<std::string> winner = cache.lookup(key);
     if(winner.has_value())
@@ -462,8 +461,7 @@ float bf16ToFloat(uint16_t b)
 // bf16 analog of runShapeAndCheck: loads the bf16 family candidates for one
 // (rows, cols), runs a multi-candidate tuned plan on real device buffers, and
 // EXPECTs numerical correctness at a bf16-appropriate tolerance.
-ShapeOutcome runShapeAndCheckBf16(size_t rows, size_t cols, float eps,
-                                  const std::string& cachePath)
+ShapeOutcome runShapeAndCheckBf16(size_t rows, size_t cols, float eps, const std::string& cachePath)
 {
     ShapeOutcome outcome;
 
@@ -530,12 +528,12 @@ ShapeOutcome runShapeAndCheckBf16(size_t rows, size_t cols, float eps,
     EXPECT_EQ(hipMalloc(&deviceX, rows * cols * sizeof(uint16_t)), hipSuccess);
     EXPECT_EQ(hipMalloc(&deviceGamma, cols * sizeof(uint16_t)), hipSuccess);
     EXPECT_EQ(hipMalloc(&deviceY, rows * cols * sizeof(uint16_t)), hipSuccess);
-    EXPECT_EQ(hipMemcpy(deviceX, hostX.data(), rows * cols * sizeof(uint16_t),
-                        hipMemcpyHostToDevice),
-              hipSuccess);
-    EXPECT_EQ(hipMemcpy(deviceGamma, hostGamma.data(), cols * sizeof(uint16_t),
-                        hipMemcpyHostToDevice),
-              hipSuccess);
+    EXPECT_EQ(
+        hipMemcpy(deviceX, hostX.data(), rows * cols * sizeof(uint16_t), hipMemcpyHostToDevice),
+        hipSuccess);
+    EXPECT_EQ(
+        hipMemcpy(deviceGamma, hostGamma.data(), cols * sizeof(uint16_t), hipMemcpyHostToDevice),
+        hipSuccess);
     EXPECT_EQ(hipStreamCreate(&stream), hipSuccess);
 
     Handle handle;
@@ -553,9 +551,9 @@ ShapeOutcome runShapeAndCheckBf16(size_t rows, size_t cols, float eps,
     EXPECT_EQ(hipMemset(deviceY, 0, rows * cols * sizeof(uint16_t)), hipSuccess);
     EXPECT_NO_THROW(plan.execute(handle, buffers, 3, nullptr));
     EXPECT_EQ(hipStreamSynchronize(stream), hipSuccess);
-    EXPECT_EQ(hipMemcpy(hostY.data(), deviceY, rows * cols * sizeof(uint16_t),
-                        hipMemcpyDeviceToHost),
-              hipSuccess);
+    EXPECT_EQ(
+        hipMemcpy(hostY.data(), deviceY, rows * cols * sizeof(uint16_t), hipMemcpyDeviceToHost),
+        hipSuccess);
 
     // Correctness at bf16 tolerance (7-bit mantissa -> looser than f16).
     size_t mismatches = 0;
@@ -571,16 +569,15 @@ ShapeOutcome runShapeAndCheckBf16(size_t rows, size_t cols, float eps,
             {
                 if(mismatches == 0)
                 {
-                    firstMismatch = "(" + std::to_string(m) + "," + std::to_string(n)
-                                    + ") got=" + std::to_string(got)
-                                    + " want=" + std::to_string(want);
+                    firstMismatch = "(" + std::to_string(m) + "," + std::to_string(n) + ") got="
+                                    + std::to_string(got) + " want=" + std::to_string(want);
                 }
                 ++mismatches;
             }
         }
     }
-    EXPECT_EQ(mismatches, 0u)
-        << "bf16 M=" << rows << " N=" << cols << " first mismatch " << firstMismatch;
+    EXPECT_EQ(mismatches, 0u) << "bf16 M=" << rows << " N=" << cols << " first mismatch "
+                              << firstMismatch;
 
     const std::optional<std::string> winner = cache.lookup(key);
     if(winner.has_value())

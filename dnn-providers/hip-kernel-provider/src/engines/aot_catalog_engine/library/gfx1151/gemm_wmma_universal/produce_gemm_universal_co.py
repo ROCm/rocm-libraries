@@ -99,9 +99,9 @@ def _build_spec(dtype, target, tm, tn, tk, wm, wn, pipeline):
         warp_tile_k=wtk,
     )
     trait = TraitSpec(
-        pipeline=pipeline,        # only mem/wmma_v1 are legal on the gfx1151 WMMA path
+        pipeline=pipeline,  # only mem/wmma_v1 are legal on the gfx1151 WMMA path
         scheduler="intrawave",
-        epilogue="default",       # cshuffle is MFMA-only on this arch
+        epilogue="default",  # cshuffle is MFMA-only on this arch
         pad_m=False,
         pad_n=False,
         pad_k=False,
@@ -131,11 +131,13 @@ def main() -> int:
 
     seen = set()
     for dtype in _DTYPES:
-        for (tm, tn, tk, wm, wn, pipeline) in _SWEEP:
+        for tm, tn, tk, wm, wn, pipeline in _SWEEP:
             spec = _build_spec(dtype, target, tm, tn, tk, wm, wn, pipeline)
             res = policy.validate(target, spec)
             if not res.ok:
-                print(f"SKIP {dtype} t{tm}x{tn}x{tk} w{wm}x{wn} {pipeline}: {res.reason}")
+                print(
+                    f"SKIP {dtype} t{tm}x{tn}x{tk} w{wm}x{wn} {pipeline}: {res.reason}"
+                )
                 continue
 
             artifact = compile_kernel(build_universal_gemm(spec, arch=ARCH), arch=ARCH)

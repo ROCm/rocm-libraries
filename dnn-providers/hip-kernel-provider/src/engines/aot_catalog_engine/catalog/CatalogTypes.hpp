@@ -44,14 +44,14 @@ struct ConstraintRule
     std::optional<ShapeValue> equals;
     std::optional<ShapeValue> notEquals;
     std::vector<ShapeValue> oneOf;
-    std::optional<int64_t> min;        // inclusive lower bound (integer keys)
-    std::optional<int64_t> max;        // inclusive upper bound (integer keys)
+    std::optional<int64_t> min; // inclusive lower bound (integer keys)
+    std::optional<int64_t> max; // inclusive upper bound (integer keys)
     std::optional<int64_t> multipleOf; // divisibility (integer keys)
 
     bool empty() const
     {
-        return !equals.has_value() && !notEquals.has_value() && oneOf.empty()
-               && !min.has_value() && !max.has_value() && !multipleOf.has_value();
+        return !equals.has_value() && !notEquals.has_value() && oneOf.empty() && !min.has_value()
+               && !max.has_value() && !multipleOf.has_value();
     }
 };
 
@@ -72,8 +72,8 @@ struct GridValue
 
 enum class GridAxisKind
 {
-    VALUE,     // just `value`
-    CEIL_DIV,  // (numerator + denominator - 1) / denominator
+    VALUE, // just `value`
+    CEIL_DIV, // (numerator + denominator - 1) / denominator
     FLOOR_DIV, // numerator / denominator
 };
 
@@ -116,10 +116,14 @@ inline uint32_t scalarTypeSizeBytes(ScalarType type)
 {
     switch(type)
     {
-    case ScalarType::F32: return 4;
-    case ScalarType::I32: return 4;
-    case ScalarType::I64: return 8;
-    default: return 0;
+    case ScalarType::F32:
+        return 4;
+    case ScalarType::I32:
+        return 4;
+    case ScalarType::I64:
+        return 8;
+    default:
+        return 0;
     }
 }
 
@@ -179,8 +183,8 @@ struct LaunchMetadata
 // workspace need, and launch metadata.
 struct KernelEntry
 {
-    std::string symbol;      // exported function name in the .co/HSACO
-    std::string coPath;      // absolute path to the .co/HSACO on disk
+    std::string symbol; // exported function name in the .co/HSACO
+    std::string coPath; // absolute path to the .co/HSACO on disk
     Constraints constraints; // applicability (Tier A + simple Tier B)
     size_t workspaceBytes = 0;
     LaunchMetadata launch;
@@ -191,9 +195,9 @@ struct KernelEntry
 struct Family
 {
     std::string name;
-    std::string opKind;              // selects the op adapter ("matmul", ...)
+    std::string opKind; // selects the op adapter ("matmul", ...)
     std::vector<std::string> dtypes; // informational
-    std::string arch;                // gfx string this family was built for
+    std::string arch; // gfx string this family was built for
     std::vector<KernelEntry> kernels;
 };
 

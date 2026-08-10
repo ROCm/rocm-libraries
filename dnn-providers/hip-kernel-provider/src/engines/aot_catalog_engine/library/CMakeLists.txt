@@ -129,7 +129,8 @@ function(aot_add_rocke_family)
         COMMENT "aot-catalog: building ${F_ARCH}/${F_FAMILY} kernels via rocKE"
         VERBATIM
     )
-    add_custom_target(aot_family_${F_ARCH}_${F_FAMILY} ALL DEPENDS ${_stamp})
+    add_custom_target(aot_family_${F_ARCH}_${F_FAMILY} ALL DEPENDS ${_stamp}
+        COMMENT "aot-catalog: ${F_ARCH}/${F_FAMILY} family (kernels + family.json)")
 
     # Record the target so consumers (e.g. the test binary) can depend on the whole
     # set -- an isolated `ninja hip_kernel_provider_tests` must build the catalog
@@ -137,6 +138,7 @@ function(aot_add_rocke_family)
     set_property(GLOBAL APPEND PROPERTY
         AOT_CATALOG_FAMILY_TARGETS aot_family_${F_ARCH}_${F_FAMILY})
 
+    # cmake-lint: disable=E1122
     install(DIRECTORY ${_out}/
             DESTINATION ${_AOT_CATALOG_INSTALL_DIR}/${F_ARCH}/${F_FAMILY}
             FILES_MATCHING PATTERN "*.co" PATTERN "family.json")

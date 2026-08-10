@@ -30,9 +30,12 @@ std::optional<std::string> providerDtype(data_objects::DataType dtype)
 {
     switch(dtype)
     {
-    case data_objects::DataType::HALF: return std::string("f16");
-    case data_objects::DataType::BFLOAT16: return std::string("bf16");
-    default: return std::nullopt;
+    case data_objects::DataType::HALF:
+        return std::string("f16");
+    case data_objects::DataType::BFLOAT16:
+        return std::string("bf16");
+    default:
+        return std::nullopt;
     }
 }
 
@@ -160,8 +163,7 @@ std::optional<catalog::ProblemShape> RmsNormAdapter::decode(const IGraph& graph)
         // providerDtype() already declines anything else; we only require the
         // three operands agree so the baked ABI dtype token is unambiguous.
         const auto dtype = providerDtype(x.dataType());
-        if(!dtype.has_value() || scale.dataType() != x.dataType()
-           || y.dataType() != x.dataType())
+        if(!dtype.has_value() || scale.dataType() != x.dataType() || y.dataType() != x.dataType())
         {
             return std::nullopt;
         }
@@ -181,7 +183,8 @@ std::optional<catalog::ProblemShape> RmsNormAdapter::decode(const IGraph& graph)
     }
     catch(const std::exception& e)
     {
-        HIPDNN_PLUGIN_LOG_INFO("aot-catalog(rmsnorm): declining graph, decode failed: " << e.what());
+        HIPDNN_PLUGIN_LOG_INFO(
+            "aot-catalog(rmsnorm): declining graph, decode failed: " << e.what());
         return std::nullopt;
     }
 }

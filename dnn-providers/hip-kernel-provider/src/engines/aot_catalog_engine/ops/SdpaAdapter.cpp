@@ -38,13 +38,20 @@ std::optional<std::string> providerDtype(data_objects::DataType dtype)
 {
     switch(dtype)
     {
-    case data_objects::DataType::HALF: return std::string("f16");
-    case data_objects::DataType::BFLOAT16: return std::string("bf16");
-    case data_objects::DataType::FP8_E4M3: return std::string("f8");
-    case data_objects::DataType::FP8_E5M2: return std::string("bf8");
-    case data_objects::DataType::FP8_E4M3_FNUZ: return std::string("f8fnuz");
-    case data_objects::DataType::FP8_E5M2_FNUZ: return std::string("bf8fnuz");
-    default: return std::nullopt;
+    case data_objects::DataType::HALF:
+        return std::string("f16");
+    case data_objects::DataType::BFLOAT16:
+        return std::string("bf16");
+    case data_objects::DataType::FP8_E4M3:
+        return std::string("f8");
+    case data_objects::DataType::FP8_E5M2:
+        return std::string("bf8");
+    case data_objects::DataType::FP8_E4M3_FNUZ:
+        return std::string("f8fnuz");
+    case data_objects::DataType::FP8_E5M2_FNUZ:
+        return std::string("bf8fnuz");
+    default:
+        return std::nullopt;
     }
 }
 
@@ -55,12 +62,15 @@ int64_t elementBytes(data_objects::DataType dtype)
     switch(dtype)
     {
     case data_objects::DataType::HALF:
-    case data_objects::DataType::BFLOAT16: return 2;
+    case data_objects::DataType::BFLOAT16:
+        return 2;
     case data_objects::DataType::FP8_E4M3:
     case data_objects::DataType::FP8_E5M2:
     case data_objects::DataType::FP8_E4M3_FNUZ:
-    case data_objects::DataType::FP8_E5M2_FNUZ: return 1;
-    default: return 0;
+    case data_objects::DataType::FP8_E5M2_FNUZ:
+        return 1;
+    default:
+        return 0;
     }
 }
 
@@ -172,8 +182,7 @@ std::optional<catalog::ProblemShape> SdpaAdapter::decode(const IGraph& graph) co
         {
             return std::nullopt;
         }
-        if(oDims[0] != batch || oDims[1] != numHeads || oDims[2] != seqLenQ
-           || oDims[3] != headDim)
+        if(oDims[0] != batch || oDims[1] != numHeads || oDims[2] != seqLenQ || oDims[3] != headDim)
         {
             return std::nullopt;
         }
@@ -213,10 +222,9 @@ std::optional<catalog::ProblemShape> SdpaAdapter::decode(const IGraph& graph) co
         // Structural facts a kernel opts into via constraints rather than a
         // hard-coded decline. `d_contiguous`: innermost (D) axis is unit-stride on
         // all operands -- a kernel with no D-stride arg constrains this true.
-        const bool dContiguous = qStrides[3] == 1 && kStrides[3] == 1 && vStrides[3] == 1
-                                 && oStrides[3] == 1;
-        const bool batchFold = batchFoldable(q, batch, seqLenQ)
-                               && batchFoldable(o, batch, seqLenQ)
+        const bool dContiguous
+            = qStrides[3] == 1 && kStrides[3] == 1 && vStrides[3] == 1 && oStrides[3] == 1;
+        const bool batchFold = batchFoldable(q, batch, seqLenQ) && batchFoldable(o, batch, seqLenQ)
                                && batchFoldable(k, batch, seqLenKv)
                                && batchFoldable(v, batch, seqLenKv);
 
@@ -238,10 +246,10 @@ std::optional<catalog::ProblemShape> SdpaAdapter::decode(const IGraph& graph) co
 
         const bool paged = attrs.page_table_k_tensor_uid().has_value()
                            || attrs.page_table_v_tensor_uid().has_value();
-        const bool varlen = attrs.seq_len_q_tensor_uid().has_value()
-                            || attrs.seq_len_kv_tensor_uid().has_value();
-        const bool genStats = attrs.generate_stats().value_or(false)
-                              || attrs.stats_tensor_uid().has_value();
+        const bool varlen
+            = attrs.seq_len_q_tensor_uid().has_value() || attrs.seq_len_kv_tensor_uid().has_value();
+        const bool genStats
+            = attrs.generate_stats().value_or(false) || attrs.stats_tensor_uid().has_value();
 
         // FP8 (de)scaling machinery, or an fp8 element dtype.
         const bool fp8 = isFp8Token(*dtype) || attrs.descale_q_tensor_uid().has_value()
@@ -320,8 +328,8 @@ catalog::LaunchBindings SdpaAdapter::buildBindings(const IGraph& graph,
     const TensorAttributesWrapper o = tensorFor(attrs.o_tensor_uid());
 
     const int64_t headDim = problemInt(problem, "D");
-    const float scale = attrs.attn_scale_value().value_or(
-        1.0F / std::sqrt(static_cast<float>(headDim)));
+    const float scale
+        = attrs.attn_scale_value().value_or(1.0F / std::sqrt(static_cast<float>(headDim)));
     const float scaleLog2 = scale * K_LOG2E;
     const int64_t elemBytes = elementBytes(q.dataType());
 

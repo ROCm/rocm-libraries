@@ -51,16 +51,14 @@ const catalog::Catalog& CatalogEngine::catalogForArch(const std::string& arch) c
     if(it == _catalogs.end())
     {
         it = _catalogs
-                 .emplace(arch,
-                          catalog::Catalog::loadForDevice(catalog::defaultCatalogDir(), arch))
+                 .emplace(arch, catalog::Catalog::loadForDevice(catalog::defaultCatalogDir(), arch))
                  .first;
     }
     return it->second;
 }
 
 std::optional<CatalogEngine::Match> CatalogEngine::matchGraph(
-    const Handle& handle,
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
+    const Handle& handle, const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     std::string arch;
     try

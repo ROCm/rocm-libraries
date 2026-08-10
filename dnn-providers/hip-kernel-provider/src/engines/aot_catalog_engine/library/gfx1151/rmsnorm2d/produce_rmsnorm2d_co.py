@@ -34,16 +34,16 @@ ARCH = "gfx1151"
 # (N, block_size, vec) -> elems_per_thread
 CONFIGS = [
     # N=2048 per-shape perf spread (single-pass through two-pass)
-    (2048, 256, 4),   # ept=8  (baseline; already shipped)
-    (2048, 512, 4),   # ept=4
-    (2048, 128, 8),   # ept=16
-    (2048, 64, 8),    # ept=32 (streaming two-pass)
+    (2048, 256, 4),  # ept=8  (baseline; already shipped)
+    (2048, 512, 4),  # ept=4
+    (2048, 128, 8),  # ept=16
+    (2048, 64, 8),  # ept=32 (streaming two-pass)
     # N=1024 shape tier
-    (1024, 256, 4),   # ept=4
-    (1024, 128, 8),   # ept=8
+    (1024, 256, 4),  # ept=4
+    (1024, 128, 8),  # ept=8
     # N=4096 shape tier
-    (4096, 512, 4),   # ept=8
-    (4096, 256, 8),   # ept=16
+    (4096, 512, 4),  # ept=8
+    (4096, 256, 8),  # ept=16
 ]
 
 # bf16 static tier. LTX-Video (and most diffusion transformers) run in bf16, and

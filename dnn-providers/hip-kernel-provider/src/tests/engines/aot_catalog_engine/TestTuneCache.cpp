@@ -32,8 +32,7 @@ class TuneCacheTest : public ::testing::Test
 protected:
     void SetUp() override
     {
-        _path = tempCachePath(
-            ::testing::UnitTest::GetInstance()->current_test_info()->name());
+        _path = tempCachePath(::testing::UnitTest::GetInstance()->current_test_info()->name());
         std::error_code ec;
         fs::remove(_path, ec);
         fs::remove(_path + ".tmp", ec);

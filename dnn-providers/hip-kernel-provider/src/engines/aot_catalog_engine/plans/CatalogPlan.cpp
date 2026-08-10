@@ -120,8 +120,7 @@ void CatalogPlan::launchCandidate(const PlanCandidate& candidate,
 
     const std::vector<catalog::ScalarValue> bound
         = launch::bindArgs(candidate.launch.argsSignature, bindings, resolver);
-    const std::vector<std::byte> kernargs
-        = launch::packArgs(candidate.launch.argsSignature, bound);
+    const std::vector<std::byte> kernargs = launch::packArgs(candidate.launch.argsSignature, bound);
     const launch::Grid grid = launch::evalGrid(candidate.launch.grid, candidate.gridSymbols);
 
     // HIP_LAUNCH_PARAM buffer mechanism: pass the packed kernarg blob by pointer
@@ -227,9 +226,9 @@ size_t CatalogPlan::tuneAndSelect(const Handle& handle,
         }
         catch(const std::exception& e)
         {
-            HIPDNN_PLUGIN_LOG_WARN("aot-catalog: candidate '" << candidate.symbol
-                                                              << "' failed while tuning, skipping: "
-                                                              << e.what());
+            HIPDNN_PLUGIN_LOG_WARN("aot-catalog: candidate '"
+                                   << candidate.symbol
+                                   << "' failed while tuning, skipping: " << e.what());
             continue;
         }
 
