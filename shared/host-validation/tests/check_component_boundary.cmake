@@ -89,6 +89,15 @@ if(EXISTS
     )
 endif()
 
+if(EXISTS
+   "${HOST_VALIDATION_SOURCE_DIR}/include/roc/host_validation/detail/comparison.hpp"
+)
+    message(
+        FATAL_ERROR
+        "The unused comparison forwarding header must not be installed."
+    )
+endif()
+
 file(
     GLOB_RECURSE
     component_sources

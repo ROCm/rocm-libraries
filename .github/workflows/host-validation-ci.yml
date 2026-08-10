@@ -78,6 +78,8 @@ jobs:
             "${RUNNER_TEMP}/host-validation-install/include/roc/host_validation/detail/structured_sparsity.hpp"
           test ! -e \
             "${RUNNER_TEMP}/host-validation-install/include/roc/host_validation/detail/tensor_views.hpp"
+          test ! -e \
+            "${RUNNER_TEMP}/host-validation-install/include/roc/host_validation/detail/comparison.hpp"
           cmake -S shared/host-validation/tests/package \
             -B "${RUNNER_TEMP}/host-validation-package-test" \
             -G Ninja \

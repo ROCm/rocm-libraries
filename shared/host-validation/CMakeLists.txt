@@ -91,7 +91,6 @@ target_sources(host-validation
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/reduction.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/softmax.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/structured_sparsity.hpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/detail/comparison.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/detail/comparison_impl.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/validation.hpp"
 )
