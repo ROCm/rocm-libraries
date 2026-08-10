@@ -307,3 +307,21 @@ layout): importing it is torch-free and side-effect free, all environment discov
 centralized in `bootstrap.py`, and the public API is a stable surface. That wheel, and
 catalog-metadata-driven SDPA bakes, are the documented next steps — not part of this
 initial drop.
+
+## Going further
+
+The functional monkeypatch this package ships is the shallowest of several ways to route
+a framework's operations through hipDNN. Two design references in [`reference/`](reference/)
+cover the fuller landscape — the deeper integration tiers, their tradeoffs, and how they
+differ from what is implemented here. They are point-in-time design notes (roadmap and
+provider maturity will age), written to guide both internal integration work and third
+parties integrating with hipDNN:
+
+- [`reference/pytorch-integration-techniques.md`](reference/pytorch-integration-techniques.md)
+  — the general PyTorch path. Sets the functional monkeypatch (this package) and the
+  ATen-dispatch override side by side (§3.1), then covers the deeper tiers above them: a
+  C++ extension, TorchInductor fusion, and a native backend.
+- [`reference/vllm-integration-techniques.md`](reference/vllm-integration-techniques.md)
+  — vLLM specifically. vLLM bypasses `torch.nn.functional` for its hottest operations, so
+  the monkeypatch here does not cover it; this charts the vLLM-specific path from a
+  `ROCM_HIPDNN` attention-backend plugin to a first-class backend.
