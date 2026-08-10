@@ -6,8 +6,9 @@
 - Sibling: **RFC 0018 Universal Match Descriptor (UMD) and the Graph Matcher** ([PR #10341](https://github.com/ROCm/rocm-libraries/pull/10341)) — the matcher follow-up from the same series, with a working implementation. It pins the **JsonLogic** expression language and the `$`-token namespaces (`$q.*`, `$kernel.*`, `$device.*`) that this RFC's `features_signature` consumes ([Section 6](#6-feature-extraction)). Its `JsonLogic.hpp` — a compile-once / evaluate-many implementation with the `$`-sigil convention and the operator set below — is the concrete evaluator this RFC's feature extractor reuses.
 - Related: [RFC 0007 Engine Selection and Heuristics Framework](0007_EngineSelectionHeuristicsFramework.md), [RFC 0013 Autotune](0013_Autotune.md) (the benchmarking substrate for heuristic generation, [Section 13](#13-model-generation-pipeline))
 
-> **Numbering note.** The UMD follow-up also drafted as "RFC 0018"; that number is taken by the matcher
-> RFC, so this document is **0019**. Both are follow-ups of the same [RFC 0017 §12.2](0017_UniversalKernelDescriptor.md#122-follow-up-rfcs) series.
+> **Numbering note.** This document is **0019** in the [RFC 0017 §12.2](0017_UniversalKernelDescriptor.md#122-follow-up-rfcs)
+> follow-up series: **0018** is the UMD / graph matcher, **0019** is this (UHD + kernel selection), and
+> **0020** is the UED + engine registry ([PR #10603](https://github.com/ROCm/rocm-libraries/pull/10603)).
 
 > **Draft note.** This is a first pass to frame the design and drive discussion, not a finished
 > spec. Sections marked **OPEN** carry decisions we still need to make. It is grounded in the existing
@@ -339,11 +340,14 @@ it belongs with the JIT / package-creation work
 ([Section 14](#14-package-creation-time-selection-knobs-and-aot-kernels)), not a selection-time UHD role.
 See [Open Question 8](#structural).
 
-> **Cross-RFC dependency.** [RFC 0017](0017_UniversalKernelDescriptor.md) currently specifies a UED
-> field `heuristic` holding **one** UHD id (its descriptor table, UED schema example, concepts diagram,
-> and glossary). This RFC needs that to become an ordered `heuristics` list. The change is additive in
-> spirit — a one-element list is today's behavior — but it is a real 0017 schema change to coordinate,
-> not something this RFC can adopt unilaterally.
+> **Cross-RFC dependency — unresolved.** [RFC 0017](0017_UniversalKernelDescriptor.md) specifies a UED
+> field `heuristic` holding **one** UHD id, and [RFC 0020](0020_UniversalEngineDescriptor.md)
+> ([PR #10603](https://github.com/ROCm/rocm-libraries/pull/10603)) now makes that **normative**: a
+> required, UUID-patterned `heuristic` string in the `hipdnn.ued/1.0` JSON Schema. The pipeline needs an
+> ordered list, so this cannot be adopted unilaterally and must be settled with the UED RFC's author.
+> The least disruptive shape is probably to leave the required `heuristic` as the terminal `rank` stage
+> and add an optional `pre_heuristics: []` for `narrow` stages — strictly additive to the existing
+> schema. See [Open Question 9](#structural).
 
 ---
 
@@ -808,7 +812,9 @@ Selection runs on the plan-build path, so its cost must be small and paid at mos
   through it is still in use, so handle lifetime says nothing about cache validity.
 - **Result cache on the descriptor cache key.** Selection is a pure function of (feature vector,
   candidate set). Reuse RFC 0017's applicability cache key — **`(engine id, graph id, device id)` plus
-  the inventory generation counter** — rather than a bespoke fingerprint: the engine id because the
+  the inventory generation counter** — rather than a bespoke fingerprint. "Engine id" here is the
+  **64-bit id** hipDNN keys on (the FNV-1a hash of the UED `name`), not the descriptor GUID;
+  [RFC 0020 §3](0020_UniversalEngineDescriptor.md) keeps those two id spaces distinct. The engine id because the
   catalog is per-engine, the device id because it is what `$device.*` resolved against, and the
   generation counter so a newly dropped-in pack invalidates. **OPEN:** in-process only vs. a persistent
   cross-run cache — see [Open Question 10](#operational).
@@ -853,15 +859,16 @@ the **matcher (UMD) pass** at the descriptor layer; that result **bubbles up** s
 are ruled out *before* the first plugin-policy layer ranks the survivors. So the descriptor/UHD layer
 runs (at least for applicability) *ahead of* engine selection, not strictly after it.
 
-- **Lazy load — but the trigger is *ranking*, not winning.** An engine's UHD model is loaded/parsed on
-  first use rather than at provider startup or descriptor discovery (the UED itself loads eagerly per
-  [RFC 0017 §3](0017_UniversalKernelDescriptor.md#3-how-it-works); its model artifact stays lazy). But
-  "first use" is **any request that ranks the engine's catalog — including one the engine goes on to
-  lose**: a caller enumerating its options queries knobs for every ranked engine, and answering a knob
-  query means reporting the UHD's top-ranked value as the default
-  ([Section 3.2](#32-kmd-fields-and-knobs-as-a-view-onto-them)). So the model must be cheap to load and
-  cheap to rank with, not merely rare to touch. A provider that never sees FMHA still never parses the
-  FMHA model; a provider that *enumerates* FMHA engines does.
+- **Lazy load — but the trigger is *ranking*, not winning.** [RFC 0020 §8.1](0020_UniversalEngineDescriptor.md)
+  fixes the timing precisely: **engine identity is the eager exception** — every UED is parsed,
+  validated, and registered at plugin load so the host can enumerate engines — while the **UHD**, the
+  UDD, KDP bodies, and kernel sources all stay **lazy, loaded per graph** when one needs that engine's
+  catalog. So a UHD model is parsed on first use, not at startup. But "first use" is **any request that
+  ranks the engine's catalog — including one the engine goes on to lose**: a caller enumerating its
+  options queries knobs for every ranked engine, and answering a knob query means reporting the UHD's
+  top-ranked value as the default ([Section 3.2](#32-kmd-fields-and-knobs-as-a-view-onto-them)). So the
+  model must be cheap to load and cheap to rank with, not merely rare to touch. A provider that never
+  sees FMHA still never parses the FMHA model; a provider that *enumerates* FMHA engines does.
 - **Cache the loaded model — not on the handle.** After first load the parsed model / tree table /
   native handle is cached for the **process**, not per `hipdnnHandle`.
   [RFC 0017](0017_UniversalKernelDescriptor.md) moved caching off the handle deliberately: a handle can
@@ -1415,9 +1422,16 @@ land only when a concrete need appears.
     out of the UHD until the JIT path is real; a selection-time descriptor that can mutate the catalog
     blurs the line between choosing and building.
 
-9. **Cross-RFC: `heuristics[]` on the UED.** [RFC 0017](0017_UniversalKernelDescriptor.md) specifies a
-    single `heuristic` id. The pipeline needs an ordered list. Coordinate the schema change; a
-    one-element list is behaviourally identical to today, so the migration is mechanical.
+9. **Cross-RFC: `heuristics[]` on the UED — now a concrete conflict.**
+    [RFC 0020](0020_UniversalEngineDescriptor.md) ([PR #10603](https://github.com/ROCm/rocm-libraries/pull/10603),
+    AICK-1703) specifies `heuristic` as a **required single UUID string** in a *normative* JSON Schema
+    (`hipdnn.ued/1.0`), not just prose — it is in `required[]` and typed with a UUID pattern. The
+    pipeline of [Section 4.2](#42-the-selection-pipeline-a-list-of-uhds) needs an ordered list, so this
+    must be resolved with the UED RFC's author before either lands. A one-element list is behaviourally
+    identical to a single id, so the options are: (a) `heuristics: [uuid, …]` replacing `heuristic`;
+    (b) keep `heuristic` as the required terminal `rank` stage and add an optional `pre_heuristics: []`
+    for `narrow` stages, which is strictly additive to `hipdnn.ued/1.0`; or (c) drop the pipeline.
+    **(b) is the least disruptive** — it leaves the existing required field and its schema untouched.
     *(Impacts [Section 3.1](#31-descriptor-relationships), [Section 4.2](#42-the-selection-pipeline-a-list-of-uhds).)*
 
 ### Operational
@@ -1478,6 +1492,11 @@ land only when a concrete need appears.
   is the feature space the UHD ranks over — so the engine owns both; a *breaking* KMD change requires
   retraining the UHD, while additive changes and dispatch-only fields do not
   ([Section 3.3](#33-coupling-rules)).
+
+- **`global.` knobs:** hipDNN's reserved knob namespace ([RFC 0004](0004_EngineConfigKnobs.md)), which a
+  descriptor-backed engine implements like any other engine. Per
+  [RFC 0020 §5](0020_UniversalEngineDescriptor.md) it is **separate from** the UED's `knobs` list and the
+  two do not overlap — so `global.` knobs are not KMD fields and are not part of the UHD's feature space.
 
 - **Knob:** A **KMD field the engine chooses to expose** to the user — a name in the UED's `knobs`, and
   nothing more (the KMD already declares the field's type and default). Only KMD fields can be knobs; a
