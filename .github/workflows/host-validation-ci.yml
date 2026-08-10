@@ -61,7 +61,7 @@ jobs:
         run: |
           cmake --install "${RUNNER_TEMP}/host-validation-build" \
             --prefix "${RUNNER_TEMP}/host-validation-install"
-          for header in reference_gemm reference_epilogue; do
+          for header in reference_gemm reference_epilogue reference_reduction; do
             test ! -e \
               "${RUNNER_TEMP}/host-validation-install/include/roc/host_validation/detail/${header}.hpp"
           done
