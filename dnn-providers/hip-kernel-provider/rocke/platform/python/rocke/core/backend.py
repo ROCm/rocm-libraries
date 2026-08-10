@@ -1046,6 +1046,25 @@ def _name_of(spec: Any) -> str:
     return getattr(spec, "name", "?")
 
 
+# ---------------------------------------------------------------------
+# Public backend API for out-of-tree kernel verticals
+# ---------------------------------------------------------------------
+# Kernel trees that live outside the platform SDK (e.g. rocke/library's
+# `kernels` package) need the same python/cpp/both driver the in-tree
+# ``lower_*`` wrappers use, without reaching for underscore-private names.
+# These are stable aliases, not new machinery: the one-way layering rule
+# (library -> platform, never the reverse) means the vertical owns its
+# ``lower_*`` wrapper and calls back into this driver.
+#
+#   lower_family  -- the family-agnostic python/cpp/both driver
+#   import_engine -- import the `rocke_engine` extension (raises BackendError
+#                    with build guidance when unavailable)
+#   name_of       -- spec -> display name used in differential diagnostics
+lower_family = _lower_family
+import_engine = _import_engine
+name_of = _name_of
+
+
 def lower_batched_gemm(
     spec: Any,
     *,

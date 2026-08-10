@@ -402,6 +402,20 @@ def lower_universal_gemm_to_cktile(spec: Any, *, kernel_name: str | None = None)
 # ---------------------------------------------------------------------
 
 
+def _is_implicit_gemm_conv_spec(spec: Any) -> bool:
+    """Structural (duck-typed) check for an ``ImplicitGemmConvSpec``.
+
+    The convolution kernel tree lives in the rocke *library* vertical
+    (``kernels.common.conv_implicit_gemm``), which the platform SDK must not
+    import (one-way layering: library -> platform, never the reverse). The
+    emitter only reads attributes off the spec, so recognise it structurally
+    instead of by ``isinstance``.
+    """
+    return type(spec).__name__ == "ImplicitGemmConvSpec" and all(
+        hasattr(spec, attr) for attr in ("problem", "pipeline", "epilogue")
+    )
+
+
 def lower_implicit_gemm_conv_to_cktile(
     spec: Any, *, kernel_name: str | None = None
 ) -> str:
@@ -421,9 +435,7 @@ def lower_implicit_gemm_conv_to_cktile(
     and are passed to the launcher at runtime via
     ``ck_tile::GroupedConvFwdHostArgs``.
     """
-    from ..instances.common.conv_implicit_gemm import ImplicitGemmConvSpec
-
-    if not isinstance(spec, ImplicitGemmConvSpec):
+    if not _is_implicit_gemm_conv_spec(spec):
         raise TypeError(
             f"lower_implicit_gemm_conv_to_cktile expects ImplicitGemmConvSpec, "
             f"got {type(spec).__name__}"
@@ -634,14 +646,15 @@ def lower_spec_to_cktile(spec: Any, *, kernel_name: str | None = None) -> str:
 
     Supported spec types are listed in the module docstring.
     """
-    # Lazy-imports keep this entry point usable when only one of the
-    # instance subpackages is wired up.
+    # Lazy-import keeps this entry point usable when only one of the
+    # instance subpackages is wired up. The conv spec is recognised
+    # structurally -- its kernel tree lives in the library vertical, which
+    # the platform SDK must not import.
     from ..instances.common.gemm_universal import UniversalGemmSpec
-    from ..instances.common.conv_implicit_gemm import ImplicitGemmConvSpec
 
     if isinstance(spec, UniversalGemmSpec):
         return lower_universal_gemm_to_cktile(spec, kernel_name=kernel_name)
-    if isinstance(spec, ImplicitGemmConvSpec):
+    if _is_implicit_gemm_conv_spec(spec):
         return lower_implicit_gemm_conv_to_cktile(spec, kernel_name=kernel_name)
     raise NotImplementedError(
         f"no CK Tile lowering for {type(spec).__name__}; supported: "
