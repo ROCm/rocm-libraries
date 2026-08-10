@@ -269,7 +269,6 @@ pipeline {
         BUILD_GFX103 = "${env.BRANCH_NAME == 'develop' ? true : false}"
     }
     stages{
-      ws("/var/jenkins/workspace/${env.JOB_NAME}-${env.BUILD_NUMBER}") {
         stage("Determine CI Execution") {
             agent none
             steps {
@@ -311,6 +310,7 @@ pipeline {
             }
             agent none
             steps{
+              ws("/var/jenkins/workspace/${env.JOB_NAME}-${env.BUILD_NUMBER}") {
                 script {
                     loadCk()
                     ck.runOnHealthyNode(rocmnode("nogpu")) {
@@ -320,6 +320,7 @@ pipeline {
                         cleanWs()
                     }
                 }
+              }
             }
         }
         stage("Run Downstream Tests")
@@ -927,7 +928,6 @@ pipeline {
                 }
             }
         }
-      }
     }
     post {
         success {
