@@ -407,10 +407,6 @@ class StateValues:
   scheduleGROverBarrier: bool            = False
   numLDSBlk: int                         = 0
   IncLdsBufSwitch: bool                  = False
-  # When True, LDS memory tokens rotate 0->1->2->0 (mod numLDSBlk) instead of the
-  # binary 0<->1 toggle. Only set for the non-DTL TDM TDMPlusLdsBuf 3-buffer path
-  # so DTL / PGR>=3 keep their original (binary) token stream byte-for-byte.
-  tdmPlusLdsBufRotate: bool              = False
   # First token of the TDMSplit half-1 block used when tokens rotate. Buffer
   # tokens occupy 0..numLDSBlk-1 and metadata uses memTokenLdsBufferMeta (4), so
   # the half-1 block starts past both to keep every token unambiguous.
@@ -4795,7 +4791,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
         if isSwapAndResetLwoIter: # ResetLroIter
           if kernel["ExpertSchedulingMode"] > 0:
             pointerLWCode.add(SWaitAlu(vm_vsrc=0, comment="wait for local read to vgpr complete"))
-          if kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["_ScheduleIterAlg"] == 0 and kernel["PrefetchGlobalRead"] == 2:
+          if kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["_ScheduleIterAlg"] == 0 and \
+             kernel["PrefetchGlobalRead"] == 2 and kernel["TDMPlusLdsBuf"] != 1:
             pointerLWCode.add(self._wait(kernel, tensorParametersA, tensorParametersB, -1, -1, 0, \
               "wait for local read before cross-wave TDM swap sync"))
             pointerLWCode.add(self._syncThreads(
@@ -7427,15 +7424,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
        ((kernel["ProblemType"]["MXBlockA"] or kernel["ProblemType"]["MXBlockB"]) or \
          kernel["StoreSwapAddr"] and not kernel["UseCustomMainLoopSchedule"]):
       self.states.useCommonSgprSwap = True
-    # 3-buffer TDM (TDMPlusLdsBuf) needs the memory tokens to follow the physical
-    # LDS buffer (0->1->2->0) so the auto barrier pass neither misses a
-    # write/read hazard nor over-syncs the prefetch the 3rd buffer is meant to
-    # hide. All other paths (2 buffers, DTL, PGR>=3) keep the binary toggle.
-    self.states.tdmPlusLdsBufRotate = bool(
-        self.states.IncLdsBufSwitch
-        and kernel["enableTDMA"] and kernel["enableTDMB"]
-        and kernel.get("TDMPlusLdsBuf", 0)
-        and kernel["PrefetchGlobalRead"] == 2)
     # set memory token by LDS buffer setting
     self.states.memTokenLdsBufferMeta = 4
     if kernel["1LDSBuffer"]:
@@ -7447,8 +7435,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.states.memTokenLdsBuffer1 = 1
       # [bufferParity][half]; half-0 reuses buffer token so MXSA/MXSB share it
       self.states.memTokenLdsSplit = [[self.states.memTokenLdsBuffer0, 2], [self.states.memTokenLdsBuffer1, 6]]
-    if self.states.tdmPlusLdsBufRotate:
-      # Rotating tokens reach numLDSBlk-1, so memTokenLdsSplit needs one row per
+    if kernel["TDMPlusLdsBuf"] == 1:
+      # Rotating tokens (see _nextLdsToken) reach numLDSBlk-1, so memTokenLdsSplit needs one row per
       # physical buffer (indexing row 2 of the 2-row table above is out of range),
       # and buffer token 2 would otherwise collide with that table's half-1 token
       # for buffer 0 -- the barrier pass would then treat writes to buffer 2 and
@@ -11418,14 +11406,21 @@ class KernelWriter(metaclass=abc.ABCMeta):
   def _nextLdsToken(self, idx: int) -> int:
     """Advance an LDS memory-token index to the next physical buffer.
 
-    For the 3-buffer non-DTL TDM TDMPlusLdsBuf path (``tdmPlusLdsBufRotate``) the
-    tokens rotate 0->1->2->0 (mod ``numLDSBlk``) so each token names exactly one
-    physical LDS buffer and stays in lockstep with the modulo-N address rotation
-    in ``tdmSwapLdsOffset`` / ``localReadSwapOffsets``. Every other configuration
-    (2 buffers, DTL, PGR>=3) keeps the original binary 0<->1 toggle so its token
-    stream is byte-for-byte unchanged.
+    For the 3-buffer non-DTL TDM TDMPlusLdsBuf path the tokens rotate 0->1->2->0
+    (mod ``numLDSBlk``) so each token names exactly one physical LDS buffer and
+    stays in lockstep with the modulo-N address rotation in ``tdmSwapLdsOffset`` /
+    ``localReadSwapOffsets``. That keeps the auto barrier pass from either missing
+    a write/read hazard or over-syncing the prefetch the 3rd buffer exists to
+    hide. Every other configuration (2 buffers, DTL, PGR>=3) keeps the original
+    binary 0<->1 toggle so its token stream is byte-for-byte unchanged.
+
+    ``TDMPlusLdsBuf == 1`` alone names this path: assignDerivedParameters clears
+    the parameter unless TDM A+B + PGR2, and pins NumLdsBlk to 3 wherever it stays
+    set (the one path that falls back to 2 buffers also clears it), so numLDSBlk
+    needs no separate check here. It is compared against 1 rather than tested for
+    truth because the unresolved auto value is -1, which is itself truthy.
     """
-    if self.states.tdmPlusLdsBufRotate:
+    if self.states.kernel.get("TDMPlusLdsBuf", 0) == 1:
       return (idx + 1) % self.states.numLDSBlk
     return self.states.memTokenLdsBuffer1 if idx == self.states.memTokenLdsBuffer0 \
       else self.states.memTokenLdsBuffer0
