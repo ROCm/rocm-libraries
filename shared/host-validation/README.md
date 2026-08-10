@@ -12,10 +12,10 @@ comparison used by ROCm library clients and tests.
 - `roc::host-validation`
   - Transitional validation operations layered on the tensor core.
   - Exports `axpby.hpp`, `comparison.hpp`, `epilogue.hpp`, `generation.hpp`,
-    `gemm.hpp`, `reduction.hpp`, `structured_sparsity.hpp`, and the
+    `gemm.hpp`, `reduction.hpp`, `softmax.hpp`, `structured_sparsity.hpp`, and the
     convenience umbrella `validation.hpp`.
   - Exposes runtime-typed generation, tensor AXPBY, reference GEMM, reference
-    epilogues, reductions, structured sparsity, and comparison.
+    epilogues, reductions, softmax, structured sparsity, and comparison.
   - Implementation headers live under `roc/host_validation/detail/`; consumers
     include the operation header they need or `validation.hpp`.
 - `roc::host-validation-blas`
@@ -200,6 +200,20 @@ AxpbyRunInfo run = referenceAxpby(problem);
 Either input may be absent, but at least one is required. The views must share
 the output shape; strides, offsets, transposes, batching, and padding are
 represented entirely by their layouts.
+
+## Softmax
+
+`softmax.hpp` computes a numerically stabilized softmax over one explicit
+tensor axis:
+
+```cpp
+SoftmaxProblem problem(inputView, outputView, axis, ScalarType::Float32);
+SoftmaxRunInfo run = referenceSoftmax(problem);
+```
+
+Input/output storage types and layouts may differ. The accumulator is
+explicitly Float32 or Float64, and the implementation subtracts each slice's
+maximum before exponentiation.
 
 ## Structured tensor comparison
 
@@ -482,6 +496,8 @@ The `roc_host_validation` package currently provides:
   `generate_at`;
 - `reference_axpby` with optional X/Y tensors, explicit alpha/beta,
   accumulator type, and output type;
+- `reference_softmax` with an explicit axis and runtime
+  input/output/accumulator types;
 - `reference_gemm` with runtime storage/output/accumulator types, alpha/beta,
   ordered pre-quantization factors, compute-input quantization, math mode,
   output scaling/conversion, and activation;
