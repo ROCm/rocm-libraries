@@ -118,21 +118,16 @@ class ImplicitGemmConvSpec:
                                 + sched hints + s_setprio to push the K-loop
                                 into compute steady state
       - `pipeline="wavelet"`  : load/math wave specialization (CK Tile PR
-                                #8009). Appends ``num_load_waves`` extra waves
-                                to the workgroup; those waves handle all
+                                #8009). **gfx1250/WMMA only** — rejected by
+                                ``is_valid_spec`` on MFMA/CDNA targets.
+                                Appends ``num_load_waves`` extra waves to
+                                the workgroup; those waves handle all
                                 DRAM→LDS transfers while the standard
-                                warp_m × warp_n waves run MFMA/WMMA
-                                exclusively. Single-buffer LDS shared by
-                                both roles. Two codegen paths:
-                                *MFMA (gfx942/gfx950)*: exec-mask split
-                                (s_and_saveexec_b64 / s_xor_b64) so all
-                                waves execute both sections with different
-                                exec masks; s_barrier interleaves load and
-                                math via the hardware wavefront scheduler.
-                                *WMMA (gfx1250)*: scf_if_else (LLVM br i1);
-                                separate VMEM/WMMA issue slots provide
-                                hardware concurrency without exec-masking.
-
+                                warp_m × warp_n waves run WMMA exclusively.
+                                Single-buffer LDS shared by both roles.
+                                Uses scf_if_else (LLVM br i1); separate
+                                VMEM/WMMA issue slots provide hardware
+                                concurrency without exec-masking.
     Epilogue options:
       - `epilogue="default"`  : per-lane scalar dtype_d stores via the D
                                 descriptor; correctness-first.
