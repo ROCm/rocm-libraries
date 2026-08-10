@@ -10,7 +10,8 @@
 namespace stinkytofu {
 class Pass;
 
-/// Removes NOP instructions (s_nop and v_nop) from selected basic blocks.
-STINKYTOFU_EXPORT std::unique_ptr<Pass> createStinkyRemoveNopPass();
+/// Removes NOP instructions from selected basic blocks. By default both s_nop and v_nop
+/// are removed; pass vNopOnly=true to remove only v_nop.
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createStinkyRemoveNopPass(bool vNopOnly = false);
 
 }  // namespace stinkytofu
