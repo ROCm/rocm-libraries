@@ -11,6 +11,7 @@
 #include <fstream>
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <nlohmann/json.hpp>
 #include <thread>
@@ -76,19 +77,6 @@ protected:
                                 1,
                                 static_cast<const void*>(&handle));
         descriptor.finalize();
-        return descriptor;
-    }
-
-    // Same graph, stopping short of finalize, so it never receives an identity.
-    static GraphDescriptor buildUnfinalizedGraph(test_utilities::ConvOpBundle& bundle)
-    {
-        GraphDescriptor descriptor;
-        const std::array<HipdnnBackendDescriptor*, 1> ops = {bundle.convOp.get()};
-        descriptor.setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
-                                HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                1,
-                                static_cast<const void*>(ops.data()));
-        descriptor.buildSerializedGraph();
         return descriptor;
     }
 
@@ -170,15 +158,17 @@ TEST_F(TestGraphLogger, ReLoggingSameFinalizedGraphIsDeduplicated)
     EXPECT_EQ(getJsonFilesInDir(_tempDir).size(), 1u);
 }
 
-TEST_F(TestGraphLogger, UnfinalizedGraphIsNotLogged)
+TEST_F(TestGraphLogger, GraphWithoutIdIsNotLogged)
 {
     hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_GRAPH_DIR", _tempDirStr.c_str());
     hipdnn_backend::logging::loggerShutdown();
 
-    auto bundle = test_utilities::createDefaultConvOp(HIPDNN_DATA_FLOAT);
-    const auto descriptor = buildUnfinalizedGraph(bundle);
-    const auto serialized = descriptor.getSerializedGraph();
-    logging::GraphLogger::logGraph(static_cast<const uint8_t*>(serialized.ptr), serialized.size);
+    // The guard is the missing id, not the route that produced it: a legacy graph carrying no id
+    // reaches the logger the same way a graph serialized before finalizing does.
+    auto builder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
+    ASSERT_EQ(hipdnn_flatbuffers_sdk::data_objects::GetGraph(builder.GetBufferPointer())->id(),
+              nullptr);
+    logging::GraphLogger::logGraph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_TRUE(getJsonFilesInDir(_tempDir).empty());
 }
