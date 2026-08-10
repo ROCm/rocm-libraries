@@ -183,6 +183,11 @@ namespace TensileLite
             }
         }
 
+        int smCountTarget() const
+        {
+            return m_smCountTarget;
+        }
+
     private:
         int16_t          m_gsu            = 0; // default value
         bool             m_gsuc           = false; // default value
