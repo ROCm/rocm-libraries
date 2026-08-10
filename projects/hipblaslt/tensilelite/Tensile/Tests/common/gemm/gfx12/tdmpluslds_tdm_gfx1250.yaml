@@ -11,8 +11,8 @@ GlobalParameters:
   DataInitTypeA: 3
   DataInitTypeB: 3
   DataInitTypeD: 2
-  DataInitTypeAlpha: 3
-  DataInitTypeBeta: 3
+  DataInitTypeAlpha: 2
+  DataInitTypeBeta: 1
   NumWarmups: 0
   EnqueuesPerSync: 1
   PrintWinnersOnly: False
@@ -60,7 +60,6 @@ BenchmarkProblems:
         - LDSTrInst: [False]
         - StaggerU: [0]
         - ScheduleIterAlg: [0]
-        - HalfPLR: [0,3]
         - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [1,2]
         - TDMPlusLdsBuf: [-1,0,1]
@@ -71,8 +70,8 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [-1]
         - VectorWidthA: [-1]
         - VectorWidthB: [-1]
-        - LocalReadVectorWidth: [8]
-        - 1LDSBuffer: [0]
+        - LocalReadVectorWidth: [-1]
+        - 1LDSBuffer: [0,1]
         - SourceSwap: [false]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
