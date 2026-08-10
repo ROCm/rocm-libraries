@@ -6,18 +6,17 @@ Documentation for rocSPARSE is available at
 ## (Unreleased) rocSPARSE 5.1.0
 
 ### Added
+* Added the `rocsparse_spmat_scale` generic routine for sparse matrix scaling (`C = alpha * A`). It writes to `C` `alpha` times the values of `A` and does not copy the sparsity pattern (`C` is assumed to already have the same sparsity pattern as `A`). `alpha` is passed as a self-describing scalar dense vector descriptor that can reside in host or device memory, so no temporary storage buffer is required.  In-place operation (`C == A`) is supported.  COO, COO AoS, CSR, CSC, BSR, ELL, Blocked ELL, and SELL formats are supported.
+* Added the `rocsparse_dnvec_descr_create_scalar` auxiliary routine, which creates a size-one dense vector descriptor for a host or device scalar.
 * Added batched support to the SpMM algorithm `rocsparse_spmm_alg_csr_nnz_split`.
 
 ### Resolved issues
-* Fixed the atomic COO algorithm in `rocsparse_spmm`, which failed with `hipErrorInvalidConfiguration` for batch counts greater than 65,535 because the kernel launch grid exceeded the maximum supported batch dimension.
-* Fixed `rocsparse_spmm` with the segmented atomic COO algorithm, which failed with `hipErrorInvalidConfiguration` for batch counts exceeding 65535 because the batch dimension of the kernel launch grid exceeded the maximum grid dimension.
-* Fixed `rocsparse_spmm` with the row-split CSR algorithm, which failed with `hipErrorInvalidConfiguration` for batch counts exceeding 65535 because the batch dimension of the kernel launch grid exceeded the maximum grid dimension.
+* Fixed `rocsparse_spmm` with the segmented COO, atomic COO, segmented-atomic COO, and row-split CSR algorithms, which failed with `hipErrorInvalidConfiguration` for batch counts exceeding 65535 because the batch dimension of the kernel launch grid exceeded the maximum supported grid dimension.
+* Fixed an issue with `rocsparse_spmm` when using the nnz-split algorithm with the CSR or CSC format. The operation produced incorrect results because the segmented-block-reduction helper had shared-memory pointer parameters marked `__restrict__`, while threads in the block must read values written by other threads. The `__restrict__` attribute has now been removed.
 
-## (Unreleased) rocSPARSE 5.0.0
+## rocSPARSE 5.0.0 for ROCm 10.0
 
 ### Added
-* Added the `rocsparse_spmat_scale` generic routine for sparse matrix scaling (`C = alpha * A`). It writes to `C` `alpha` times the values of `A` and does not copy the sparsity pattern (`C` is assumed to already have the same sparsity pattern as `A`). `alpha` is passed as a self-describing scalar dense vector descriptor that can reside in host or device memory, so no temporary storage buffer is required.  In-place operation (`C == A`) is supported.  COO, COO AoS, CSR, CSC, BSR, ELL, Blocked ELL, and SELL formats are supported.
-* Added the `rocsparse_dnvec_descr_create_scalar` auxiliary routine, which creates a size-one dense vector descriptor for a host or device scalar.
 * Added Blocked ELL format support to the `rocsparse_dense_to_sparse` routine, including the new `rocsparse_bell_set_pointers` function to set the Blocked ELL array pointers.
 * Added CSC format support to `rocsparse_spsv` and `rocsparse_sptrsv`.
 * Added CSC format support to `rocsparse_spsm` and `rocsparse_sptrsm`.
@@ -29,7 +28,6 @@ Documentation for rocSPARSE is available at
 
 ### Resolved issues
 * Fixed an issue with `rocsparse_spmm`, which produced incorrect results for the Blocked ELL sparse format.
-* Fixed an issue with `rocsparse_spmm` when using the nnz-split algorithm with the CSR or CSC format. The operation produced incorrect results because the segmented-block-reduction helper had shared-memory pointer parameters marked `__restrict__`, while threads in the block must read values written by other threads. The `__restrict__` attribute has now been removed.
 
 ### Removed
 * The deprecated `rocsparse_indextype_u16` enum.
