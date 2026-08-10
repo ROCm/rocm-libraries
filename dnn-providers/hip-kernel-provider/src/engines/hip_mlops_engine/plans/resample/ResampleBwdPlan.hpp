@@ -4,18 +4,20 @@
 #pragma once
 
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
-
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 
-#include "HipKernelHandle.hpp"
-#include "hip/ICompiledProgram.hpp"
-#include "hip/IRunnableKernel.hpp"
+#include "compilation/ICompiledProgram.hpp"
+#include "compilation/IKernelCompiler.hpp"
+#include "compilation/IRunnableKernel.hpp"
+#include "core/Handle.hpp"
 
 #include <memory>
+#include <unordered_map>
+#include <vector>
 
 namespace hip_kernel_provider
 {
-class IKernelCompiler;
+using namespace compilation;
 
 namespace resample
 {
@@ -45,7 +47,6 @@ public:
     const std::vector<int64_t>& window() const;
     hipdnn_flatbuffers_sdk::data_objects::ResampleMode resampleMode() const;
     hipdnn_flatbuffers_sdk::data_objects::PaddingMode paddingMode() const;
-    bool generateIndex() const;
     hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType() const;
 
 private:
@@ -58,11 +59,10 @@ private:
     std::vector<int64_t> _window;
     hipdnn_flatbuffers_sdk::data_objects::ResampleMode _resampleMode;
     hipdnn_flatbuffers_sdk::data_objects::PaddingMode _paddingMode;
-    bool _generateIndex;
     hipdnn_flatbuffers_sdk::data_objects::DataType _computeDataType;
 };
 
-class ResampleBwdPlan : public hipdnn_plugin_sdk::IPlan<HipKernelHandle>
+class ResampleBwdPlan : public hipdnn_plugin_sdk::IPlan<Handle>
 {
 public:
     explicit ResampleBwdPlan(ResampleBwdParams&& params);
@@ -71,13 +71,13 @@ public:
     ResampleBwdPlan& operator=(const ResampleBwdPlan&) = delete;
 
     ResampleBwdPlan(ResampleBwdPlan&&) = default;
-    ResampleBwdPlan& operator=(ResampleBwdPlan&&) = default;
+    ResampleBwdPlan& operator=(ResampleBwdPlan&&) = delete;
 
-    size_t getWorkspaceSize(const HipKernelHandle& handle) const override;
+    size_t getWorkspaceSize(const Handle& handle) const override;
 
     void compile(const IKernelCompiler& kernelCompiler, const hipDeviceProp_t& deviceProperties);
 
-    void execute(const HipKernelHandle& handle,
+    void execute(const Handle& handle,
                  const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                  uint32_t numDeviceBuffers,
                  void* workspace = nullptr) const override;
@@ -90,5 +90,5 @@ private:
     std::unique_ptr<IRunnableKernel> _runnableKernel;
 };
 
-} // namespace hip_kernel_provider::resample
+} // namespace resample
 } // namespace hip_kernel_provider

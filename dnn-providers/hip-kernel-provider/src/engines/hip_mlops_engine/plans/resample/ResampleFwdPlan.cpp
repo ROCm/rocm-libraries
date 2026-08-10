@@ -253,8 +253,7 @@ void ResampleFwdPlan::compile(const IKernelCompiler& kernelCompiler,
                                 _params.prePadding(),
                                 _params.postPadding(),
                                 _params.stride(),
-                                _params.window(),
-                                "ResampleFwd");
+                                _params.window());
     if(_params.index() != nullptr)
     {
         validateResampleIndexShape(*_params.index(), yDims, "ResampleFwd");

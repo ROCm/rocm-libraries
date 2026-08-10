@@ -3,32 +3,21 @@
 
 #include "ResampleBwdPlan.hpp"
 
-#include "hip/IKernelCompiler.hpp"
-
-#include <cstddef>
-#include <cstdint>
-#include <hipdnn_data_sdk/logging/Logger.hpp>
-#include <hipdnn_data_sdk/utilities/Constants.hpp>
-#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include "compilation/KernelCompileOptions.hpp"
+#include "core/Utils.hpp"
+#include "engines/hip_mlops_engine/plans/PlanUtils.hpp"
+#include "engines/hip_mlops_engine/plans/resample/ResamplePlanUtils.hpp"
 
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
+#include <cstdint>
+#include <limits>
+#include <numeric>
+
 namespace hip_kernel_provider::resample
 {
-
-namespace
-{
-
-std::vector<int64_t> toVector(const flatbuffers::Vector<int64_t>* values)
-{
-    if(values == nullptr)
-    {
-        return {};
-    }
-    return {values->begin(), values->end()};
-}
-
-} // namespace
+using namespace hip_kernel_provider::compilation;
+using namespace hip_kernel_provider::core::utils;
 
 ResampleBwdParams::ResampleBwdParams(
     const hipdnn_flatbuffers_sdk::data_objects::ResampleBwdAttributes& attributes,
@@ -41,14 +30,12 @@ ResampleBwdParams::ResampleBwdParams(
     , _index(attributes.index_tensor_uid().has_value()
                  ? tensorMap.at(attributes.index_tensor_uid().value())
                  : nullptr)
-    , _prePadding(toVector(attributes.pre_padding()))
-    , _postPadding(toVector(attributes.post_padding()))
-    , _stride(toVector(attributes.stride()))
-    , _window(toVector(attributes.window()))
+    , _prePadding(toStdVector(attributes.pre_padding()))
+    , _postPadding(toStdVector(attributes.post_padding()))
+    , _stride(toStdVector(attributes.stride()))
+    , _window(toStdVector(attributes.window()))
     , _resampleMode(attributes.resample_mode())
     , _paddingMode(attributes.padding_mode())
-    , _generateIndex(attributes.generate_index().has_value() ? attributes.generate_index().value()
-                                                             : false)
     , _computeDataType(computeDataType)
 {
 }
@@ -98,11 +85,6 @@ hipdnn_flatbuffers_sdk::data_objects::PaddingMode ResampleBwdParams::paddingMode
     return _paddingMode;
 }
 
-bool ResampleBwdParams::generateIndex() const
-{
-    return _generateIndex;
-}
-
 hipdnn_flatbuffers_sdk::data_objects::DataType ResampleBwdParams::computeDataType() const
 {
     return _computeDataType;
@@ -113,7 +95,7 @@ ResampleBwdPlan::ResampleBwdPlan(ResampleBwdParams&& params)
 {
 }
 
-size_t ResampleBwdPlan::getWorkspaceSize([[maybe_unused]] const HipKernelHandle& handle) const
+size_t ResampleBwdPlan::getWorkspaceSize([[maybe_unused]] const Handle& handle) const
 {
     // No workspace needed for resample backward
     return 0;
@@ -128,7 +110,7 @@ void ResampleBwdPlan::compile([[maybe_unused]] const IKernelCompiler& kernelComp
 }
 
 // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
-void ResampleBwdPlan::execute([[maybe_unused]] const HipKernelHandle& handle,
+void ResampleBwdPlan::execute([[maybe_unused]] const Handle& handle,
                               [[maybe_unused]] const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                               [[maybe_unused]] uint32_t numDeviceBuffers,
                               [[maybe_unused]] void* workspace) const

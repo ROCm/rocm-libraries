@@ -1,15 +1,15 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <algorithm>
-#include <exception>
-#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
-#include <hipdnn_plugin_sdk/PluginLogging.hpp>
-#include <set>
-
 #include "ResampleBwdPlanBuilder.hpp"
-// #include "engines/plans/resample/ResampleApplicabilityChecks.hpp"
-#include "engines/plans/resample/ResampleBwdPlan.hpp"
+
+#include "ResampleApplicabilityChecks.hpp"
+#include "ResampleBwdPlan.hpp"
+
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
+
+#include <algorithm>
+#include <set>
 
 namespace hip_kernel_provider::resample
 {
@@ -22,7 +22,7 @@ ResampleBwdPlanBuilder::ResampleBwdPlanBuilder(
 }
 
 bool ResampleBwdPlanBuilder::isApplicable(
-    [[maybe_unused]] const HipKernelHandle& handle,
+    [[maybe_unused]] const Handle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     auto anyNodeIsNotF32Compute = [&]() {
@@ -81,20 +81,20 @@ bool ResampleBwdPlanBuilder::isApplicable(
 }
 
 size_t ResampleBwdPlanBuilder::getMaxWorkspaceSize(
-    [[maybe_unused]] const HipKernelHandle& handle,
+    [[maybe_unused]] const Handle& handle,
     [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
-    [[maybe_unused]] const HipKernelSettings& executionSettings) const
+    [[maybe_unused]] const Settings& executionSettings) const
 {
     // Resample backward plan currently does not require any workspace.
     return 0u;
 }
 
 void ResampleBwdPlanBuilder::initializeExecutionSettings(
-    [[maybe_unused]] const HipKernelHandle& handle,
+    [[maybe_unused]] const Handle& handle,
     [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig&
         engineConfig,
-    [[maybe_unused]] HipKernelSettings& executionSettings) const
+    [[maybe_unused]] Settings& executionSettings) const
 {
 }
 
@@ -102,12 +102,12 @@ namespace
 {
 
 void buildPlanSingleNode(
-    [[maybe_unused]] const HipKernelHandle& handle,
+    [[maybe_unused]] const Handle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::INodeWrapper& nodeWrapper,
     const IKernelCompiler& kernelCompiler,
     const IDevicePropertyProvider& devicePropertyProvider,
-    HipKernelContext& executionContext)
+    Context& executionContext)
 {
     const auto& attr
         = nodeWrapper.attributesAs<hipdnn_flatbuffers_sdk::data_objects::ResampleBwdAttributes>();
@@ -121,11 +121,11 @@ void buildPlanSingleNode(
 } // namespace
 
 void ResampleBwdPlanBuilder::buildPlan(
-    const HipKernelHandle& handle,
+    const Handle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig&
         engineConfig,
-    HipKernelContext& executionContext) const
+    Context& executionContext) const
 {
     const auto& nodeWrapper = opGraph.getNodeWrapper(0);
     const auto nodeName = nodeWrapper.name();
@@ -136,7 +136,7 @@ void ResampleBwdPlanBuilder::buildPlan(
 }
 
 std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> ResampleBwdPlanBuilder::getCustomKnobs(
-    [[maybe_unused]] const HipKernelHandle& handle,
+    [[maybe_unused]] const Handle& handle,
     [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     return {};
