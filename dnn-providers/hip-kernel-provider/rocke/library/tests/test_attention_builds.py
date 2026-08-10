@@ -815,11 +815,15 @@ class TestAttentionHelpers(unittest.TestCase):
 
         gfx942 2D built the fp8 chunk-count assert unconditionally. A bf16
         SWA/decode small-tile config (T=16, HD=64, THREADS=256) gives
-        fp8_total_chunks=128; 128 % 256 != 0 raised AssertionError. The fp8
+        fp8_total_chunks=128; 128 % 256 != 0 raised AssertionError.         The fp8
         loader is never used for bf16, so the guard (``if KV_FP8:``, matching
-        the 3D builder) is load-bearing: gfx942 *does* support fp8 K/V via
-        ``kv_storage_dtype='fp8e4m3'`` (the 2D gate admits it), so the assert
-        must fire for fp8 and stay dormant for bf16.
+        the 3D builder) is load-bearing.
+
+        gfx942 has since stopped accepting the fp8 K/V cache altogether -- its
+        PV path needs ``ds_read_tr_b8``, a gfx950-only transpose read -- so the
+        chunk-count assert is now unreachable here and the guarantee worth
+        pinning is the stronger one: the spec refuses fp8 K/V up front rather
+        than emitting IR comgr cannot select.
         """
         from kernels.gfx942.attention_tiled_2d import (
             UnifiedAttention2DTiledSpec,
@@ -852,13 +856,14 @@ class TestAttentionHelpers(unittest.TestCase):
         # The bf16 kernel must emit no fp8 dequant path.
         self.assertNotIn("@llvm.amdgcn.cvt.f32.fp8", ll)
 
-        # The guard must not neuter fp8 validation: the same geometry with
-        # fp8 K/V still trips the chunk-count assert (128 % 256 != 0).
+        # Asking gfx942 for fp8 K/V is refused at construction, naming the
+        # gfx950-only instruction that makes it impossible. Pinned because the
+        # failure it replaces -- emitting IR that comgr then cannot select --
+        # surfaces far from its cause.
         import dataclasses
 
-        fp8_spec = dataclasses.replace(spec, kv_storage_dtype="fp8e4m3")
-        with self.assertRaisesRegex(AssertionError, "fp8 loader"):
-            build_unified_attention_2d_tiled(fp8_spec, arch="gfx942")
+        with self.assertRaisesRegex(ValueError, "fp8 K/V cache"):
+            dataclasses.replace(spec, kv_storage_dtype="fp8e4m3")
 
     def test_unified_attention_2d_tiled_half_local_pv_compiles(self):
         """The R4 half-local PV variant emits 32x32 MFMA with its suffixes."""
