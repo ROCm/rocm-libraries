@@ -325,6 +325,41 @@ class TensorAndGemmTests(unittest.TestCase):
             np.float32(3.0) * y_values,
         )
 
+    def test_reference_softmax_matches_numpy(self):
+        source = np.asarray(
+            [
+                [[1.0, -2.0], [3.25, 4.0], [-1.5, 0.5]],
+                [[100.0, 2.0], [99.0, -3.0], [98.0, 1.0]],
+            ],
+            dtype=np.float32,
+        )
+        input_tensor = hv.from_numpy(source, hv.ScalarType.Float16)
+        result = hv.reference_softmax(input_tensor, axis=1)
+
+        quantized = source.astype(np.float16).astype(np.float32)
+        expected = np.empty_like(quantized)
+        for batch in range(quantized.shape[0]):
+            for column in range(quantized.shape[2]):
+                maximum = np.max(quantized[batch, :, column])
+                exponentials = np.empty(quantized.shape[1], dtype=np.float32)
+                total = np.float32(0.0)
+                for row in range(quantized.shape[1]):
+                    value = np.float32(
+                        np.exp(np.float32(quantized[batch, row, column] - maximum))
+                    )
+                    exponentials[row] = value
+                    total = np.float32(total + value)
+                for row in range(quantized.shape[1]):
+                    expected[batch, row, column] = np.float32(exponentials[row] / total)
+
+        np.testing.assert_allclose(
+            hv.to_numpy(result.output), expected, rtol=1e-6, atol=1e-7
+        )
+        self.assertEqual(result.run_info.slices_computed, 4)
+        self.assertEqual(result.run_info.elements_computed, source.size)
+        with self.assertRaises(IndexError):
+            hv.reference_softmax(input_tensor, axis=source.ndim)
+
     def test_numpy_tensor_view_observes_mutation(self):
         values = np.arange(6, dtype=np.float32).reshape(2, 3)
         view = hv.TensorView.from_numpy(values)

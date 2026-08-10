@@ -28,9 +28,8 @@
 #include <hipblaslt/hipblaslt-ext-op.h>
 #include <hipblaslt/hipblaslt.h>
 #include <hipblaslt_datatype2string.hpp>
-#include <roc/host_validation/adapters/hipblaslt/HipblasltDataInitialization.hpp>
 #include <iostream>
-#include <numeric>
+#include <roc/host_validation/adapters/hipblaslt/HipblasltDataInitialization.hpp>
 #include <vector>
 
 void printUsage(char* programName)
@@ -119,8 +118,7 @@ int main(int argc, char** argv)
     auto        hipErr = hipMalloc(&input, numElements * elementNumBytes);
     hipErr             = hipMalloc(&output, numElements * elementNumBytes);
     std::vector<float> data(numElements, 0.f);
-    // std::iota(begin(data), end(data), 0.f);
-    initData(input, numElements, init);
+    initData(data.data(), numElements, init);
     hipErr = hipMemcpyHtoD(input, data.data(), numElements * elementNumBytes);
     hipStream_t stream{};
     hipErr = hipStreamCreate(&stream);

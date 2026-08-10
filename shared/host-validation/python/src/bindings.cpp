@@ -38,6 +38,11 @@ struct PythonAxpbyResult {
     AxpbyRunInfo runInfo;
 };
 
+struct PythonSoftmaxResult {
+    Tensor output;
+    SoftmaxRunInfo runInfo;
+};
+
 struct PythonEpilogueResult {
     Tensor output;
     std::optional<Tensor> rawOutput;
@@ -402,6 +407,14 @@ PythonAxpbyResult referenceAxpbyOwned(std::optional<Tensor> x, std::optional<Ten
     problem.alpha = alpha;
     problem.beta = beta;
     const AxpbyRunInfo runInfo = referenceAxpby(problem);
+    return {.output = std::move(output), .runInfo = runInfo};
+}
+
+PythonSoftmaxResult referenceSoftmaxOwned(const Tensor& input, ScalarType outputType,
+                                          ScalarType accumulatorType, size_t axis) {
+    Tensor output(outputType, input.layout());
+    const SoftmaxRunInfo runInfo =
+        referenceSoftmax(SoftmaxProblem(input.view(), output.mutableView(), axis, accumulatorType));
     return {.output = std::move(output), .runInfo = runInfo};
 }
 
@@ -1034,6 +1047,22 @@ NB_MODULE(_roc_host_validation, module) {
             [](const PythonAxpbyResult& result) -> const AxpbyRunInfo& { return result.runInfo; },
             nb::rv_policy::reference_internal);
 
+    nb::class_<SoftmaxRunInfo>(module, "SoftmaxRunInfo")
+        .def_ro("slices_computed", &SoftmaxRunInfo::slicesComputed)
+        .def_ro("elements_computed", &SoftmaxRunInfo::elementsComputed);
+
+    nb::class_<PythonSoftmaxResult>(module, "SoftmaxResult")
+        .def_prop_ro(
+            "output",
+            [](const PythonSoftmaxResult& result) -> const Tensor& { return result.output; },
+            nb::rv_policy::reference_internal)
+        .def_prop_ro(
+            "run_info",
+            [](const PythonSoftmaxResult& result) -> const SoftmaxRunInfo& {
+                return result.runInfo;
+            },
+            nb::rv_policy::reference_internal);
+
     nb::class_<GemmRunInfo>(module, "GemmRunInfo")
         .def_ro("backend_used", &GemmRunInfo::backendUsed)
         .def_ro("fallback_reason", &GemmRunInfo::fallbackReason)
@@ -1155,6 +1184,9 @@ NB_MODULE(_roc_host_validation, module) {
     module.def("reference_axpby", &referenceAxpbyOwned, "x"_a = std::optional<Tensor>{},
                "y"_a = std::optional<Tensor>{}, "output_type"_a = ScalarType::Float32,
                "accumulator_type"_a = ScalarType::Float32, "alpha"_a = 1.0, "beta"_a = 1.0);
+    module.def("reference_softmax", &referenceSoftmaxOwned, "input"_a,
+               "output_type"_a = ScalarType::Float32, "accumulator_type"_a = ScalarType::Float32,
+               "axis"_a = 0);
     module.def("reference_gemm_result", &referenceGemmOwned, "a"_a, "b"_a, "c"_a, "output_type"_a,
                "accumulator_type"_a, "alpha"_a = 1.0, "beta"_a = 0.0,
                "compute_type_a"_a = std::optional<ScalarType>{},
