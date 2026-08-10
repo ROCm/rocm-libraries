@@ -24,10 +24,17 @@ from .core import (
     ShapeRange,
 )
 from .families import (
+    ConvRequest,
+    ConvWgradRequest,
+    ConvWgradWorkspaceSpec,
     MoeRequest,
     NormRequest,
+    compute_wgrad_workspace_spec,
+    dispatch_conv,
+    dispatch_conv_wgrad,
     dispatch_moe,
     dispatch_norm,
+    query_wgrad_support,
 )
 from .gemm import (
     GemmRequest,
@@ -56,8 +63,15 @@ __all__ = [
     "gemm_fp16_sweep_space",
     "gemm_bf16_sweep_space",
     # operator families
+    "ConvRequest",
+    "ConvWgradRequest",
+    "ConvWgradWorkspaceSpec",
     "MoeRequest",
     "NormRequest",
+    "compute_wgrad_workspace_spec",
+    "dispatch_conv",
+    "dispatch_conv_wgrad",
     "dispatch_moe",
     "dispatch_norm",
+    "query_wgrad_support",
 ]

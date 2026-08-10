@@ -21,12 +21,15 @@
 #   8  -- 3-D conv (Z/Di), mem/default, gfx950
 #   9  -- split-K=4 bf16 output (packed bf16 atomic + accumulation-error path), gfx950
 #   10 -- chiplet swizzle enabled, gfx950
+#   11 -- split-K=4, two_stage=True (workspace-store epilogue), fp16, gfx950
+#   12 -- split-K=4, two_stage=True (workspace-store epilogue), fp16, gfx942
 #   (async_dma omitted: C++ async load path does not yet honour the wgrad A-descriptor
 #    override, so it would produce different IR and break the byte-identity gate)
 #
 # Negative cases (configs 100+) verify that invalid specs are rejected:
 #   100 -- odd C with fp16 split-K (must raise ValueError)
 #   102 -- split_k > 1 on RDNA gfx1151 (must raise ValueError)
+#   103 -- two_stage=True with split_k=1 (must raise ValueError)
 # (These illustrate the validator contract. The C emitter defines only cases
 # 0-10, so run_diff.py stops at the shared END before reaching 100+; these
 # configs are not exercised by the differential gate.)
@@ -268,6 +271,49 @@ def _spec(idx: int):
             ),
             "gfx950",
         )
+    if idx == 11:
+        # Two-stage deterministic: workspace-store epilogue instead of atomic-add.
+        # split_k=4, two_stage=True, fp16 output, gfx950.
+        p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3)
+        return (
+            WgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="default",
+                split_k=4,
+                two_stage=True,
+            ),
+            "gfx950",
+        )
+    if idx == 12:
+        # Two-stage deterministic, gfx942 (16x16x16 MFMA only).
+        p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3)
+        return (
+            WgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="default",
+                split_k=4,
+                two_stage=True,
+            ),
+            "gfx942",
+        )
 
     # ----------------------------------------------------------------
     # Negative cases: these specs must be REJECTED by the validator.
@@ -314,6 +360,27 @@ def _spec(idx: int):
                 split_k=4,
             ),
             "gfx1151",
+        )
+    if idx == 103:
+        # two_stage=True with split_k=1 -- must raise ValueError.
+        p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3)
+        return (
+            WgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="default",
+                split_k=1,
+                two_stage=True,
+            ),
+            "gfx950",
         )
     raise SystemExit(f"unknown config index {idx}")
 

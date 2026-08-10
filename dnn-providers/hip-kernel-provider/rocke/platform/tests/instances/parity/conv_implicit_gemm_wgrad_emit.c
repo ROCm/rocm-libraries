@@ -22,6 +22,8 @@
  *   8  3-D conv N4Di14H14W14C32_K32Z3Y3X3, t64x64x64, w2x2, a32x32x16, mem/default, gfx950
  *   9  N8H56W56C64_K64Y3X3, t64x64x64, w2x2, a32x32x16, mem/default,      gfx950, split_k=4 bf16
  *  10  N8H56W56C64_K64Y3X3, t64x64x64, w2x2, a32x32x16, mem/default,      gfx950, chiplet_swizzle
+ *  11  N8H56W56C64_K64Y3X3, t64x64x64, w2x2, a32x32x16, mem/default,      gfx950, split_k=4 two_stage fp16
+ *  12  N8H56W56C64_K64Y3X3, t64x64x64, w2x2, a16x16x16, mem/default,      gfx942, split_k=4 two_stage fp16
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -124,6 +126,24 @@ static int make_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const 
         spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
         spec->chiplet_swizzle = true;
         *arch = "gfx950";
+        return 0;
+    case 11:
+        /* Two-stage deterministic: workspace-store epilogue, split_k=4, fp16, gfx950. */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->split_k = 4;
+        spec->two_stage = true;
+        *arch = "gfx950";
+        return 0;
+    case 12:
+        /* Two-stage deterministic: workspace-store epilogue, split_k=4, fp16, gfx942
+         * (16x16x16 MFMA only). */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = 16;
+        spec->split_k = 4;
+        spec->two_stage = true;
+        *arch = "gfx942";
         return 0;
     default:
         return -1;
