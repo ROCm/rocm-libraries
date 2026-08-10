@@ -44,4 +44,6 @@ Tests:
   alpha: 1
   beta: [ 0, 1 ]
   batch_count: 2
+  with_flags: [ false, true ]
   api: [ C, C_64, FORTRAN_64 ]
+  backend_flags: AMD
