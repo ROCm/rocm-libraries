@@ -52,7 +52,10 @@ For a shorter download process, use sparse checkout to only clone the hipblaslt 
 git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-libraries.git
 cd rocm-libraries
 git sparse-checkout init --cone
-git sparse-checkout set projects/hipblaslt
+git sparse-checkout set \
+    projects/hipblaslt \
+    shared/host-validation \
+    shared/mxdatagenerator
 git checkout develop # or the branch you are starting from
 ```
 
