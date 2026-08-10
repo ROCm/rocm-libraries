@@ -240,8 +240,12 @@ def test_gfx950_segments_conservatively_clamped():
         cases = [
             dict(nq=32, nk=8, D=128, kv=2048, batch=1),
             dict(nq=32, nk=8, D=128, kv=8192, batch=1),
-            dict(nq=32, nk=8, D=128, kv=32768, batch=1),  # gfx942 uncaps this; gfx950 clamps it
-            dict(nq=32, nk=4, D=64, kv=8192, batch=1),  # gfx942 uncaps D64; gfx950 clamps it
+            dict(
+                nq=32, nk=8, D=128, kv=32768, batch=1
+            ),  # gfx942 uncaps this; gfx950 clamps it
+            dict(
+                nq=32, nk=4, D=64, kv=8192, batch=1
+            ),  # gfx942 uncaps D64; gfx950 clamps it
             dict(nq=32, nk=4, D=64, kv=32768, batch=1),
         ]
         for c in cases:
