@@ -38,6 +38,7 @@ add_library(host-validation STATIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src/generation.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/gemm.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/reduction.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/structured_sparsity.cpp"
 )
 add_library(roc::host-validation ALIAS host-validation)
 
@@ -92,7 +93,6 @@ target_sources(host-validation
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/detail/reference_common.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/detail/reference_layer_norm.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/detail/reference_softmax.hpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/detail/structured_sparsity.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/detail/tensor_views.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/validation.hpp"
 )
