@@ -23,63 +23,25 @@
 ################################################################################
 
 import os
-import re
 
 from pathlib import Path
-from typing import List, NamedTuple, Union
+from typing import List, NamedTuple
 
 from tensilelite.Common.Utilities import isRhel8, print2
-
-DEFAULT_ROCM_BIN_PATH_POSIX = Path("/opt/rocm/bin")
-DEFAULT_ROCM_LLVM_BIN_PATH_POSIX = Path("/opt/rocm/lib/llvm/bin")
-DEFAULT_ROCM_BIN_PATH_WINDOWS = Path("C:/Program Files/AMD/ROCm")
-
 
 osSelect = lambda linux, windows: linux if os.name != "nt" else windows
 
 
-def _windowsLatestRocmBin(path: Union[Path, str]) -> Path:
-    """
-    Get the path to the latest ROCm bin directory, on Windows.
+def _selectedRoot() -> Path:
+    """Return the ROCm root frozen during TensileLite initialization."""
+    from tensilelite import _runtime
 
-    This function assumes that ROCm versions are differentiated with the form ``X.Y``.
-
-    Args:
-        path: The path to the ROCm root directory, typically ``C:/Program Files/AMD/ROCm``.
-
-    Returns:
-        The path to the ROCm bin directory for the latest ROCm version.
-        Typically of the form ``C:/Program Files/AMD/ROCm/X.Y/bin``.
-        May return ``None`` if no ``X.Y`` subdirectories exist, perhaps due to
-        a partial uninstall.
-    """
-    path = Path(path)
-    pattern = re.compile(r"^\d+\.\d+$")
-    versions = list(filter(lambda d: d.is_dir() and pattern.match(d.name), path.iterdir()))
-    if len(versions) == 0:
-        return None
-    latest = max(versions, key=lambda d: tuple(map(int, d.name.split("."))))
-    return latest / "bin"
+    return _runtime.rocm_root()
 
 
 def _windowsSearchPaths() -> List[Path]:
-    defaultPath = DEFAULT_ROCM_BIN_PATH_WINDOWS
-    searchPaths = []
-
-    if os.environ.get("HIP_PATH"):
-        hipPaths = [Path(p) / "bin" for p in os.environ["HIP_PATH"].split(os.pathsep)]
-        searchPaths.extend(hipPaths)
-
-    if Path(defaultPath).exists():
-        latestRocmBin = _windowsLatestRocmBin(defaultPath)
-        if latestRocmBin:
-            searchPaths.append(latestRocmBin)
-
-    if os.environ.get("PATH"):
-        envPath = [Path(p) for p in os.environ["PATH"].split(os.pathsep)]
-        searchPaths.extend(envPath)
-
-    return searchPaths
+    root = _selectedRoot()
+    return [root / "bin", root / "lib" / "llvm" / "bin"]
 
 
 def _windowsWithExtensions(exe: str) -> List[str]:
@@ -91,26 +53,8 @@ def _windowsWithExtensions(exe: str) -> List[str]:
 
 
 def _posixSearchPaths() -> List[Path]:
-
-    searchPaths = []
-
-    if os.environ.get("ROCM_PATH"):
-        for p in os.environ["ROCM_PATH"].split(os.pathsep):
-            searchPaths.append(Path(p) / "bin")
-            searchPaths.append(Path(p) / "lib" / "llvm" / "bin")
-
-    searchPaths.extend(
-        [
-            DEFAULT_ROCM_BIN_PATH_POSIX,
-            DEFAULT_ROCM_LLVM_BIN_PATH_POSIX,
-        ]
-    )
-
-    if os.environ.get("PATH"):
-        envPath = [Path(p) for p in os.environ["PATH"].split(os.pathsep)]
-        searchPaths.extend(envPath)
-
-    return searchPaths
+    root = _selectedRoot()
+    return [root / "bin", root / "lib" / "llvm" / "bin"]
 
 
 class ToolchainDefaults(NamedTuple):
@@ -118,7 +62,7 @@ class ToolchainDefaults(NamedTuple):
     CXX_COMPILER = osSelect(linux="amdclang++", windows="clang++.exe")
     C_COMPILER = osSelect(linux="amdclang", windows="clang.exe")
     OFFLOAD_BUNDLER = osSelect(linux="clang-offload-bundler", windows="clang-offload-bundler.exe")
-    DEVICE_ENUMERATOR = osSelect(linux="rocm_agent_enumerator" if isRhel8() or inFFMEnv else "amdgpu-arch", windows="hipinfo")
+    DEVICE_ENUMERATOR = osSelect(linux="offload-arch", windows="hipinfo")
     ASSEMBLER = osSelect(linux="amdclang++", windows="clang++.exe")
     HIP_CONFIG = osSelect(linux="hipconfig", windows="hipconfig.exe")
 
@@ -194,7 +138,7 @@ def supportedDeviceEnumerator(enumerator: str) -> bool:
     """
     if os.name == "nt":
         return _supportedComponent(enumerator, ["hipinfo", "hipInfo"])
-    return _supportedComponent(enumerator, ["rocm_agent_enumerator", "amdgpu-arch"])
+    return _supportedComponent(enumerator, ["offload-arch", "amdgpu-arch", "rocm_agent_enumerator"])
 
 
 def _exeExists(file: Path) -> bool:
@@ -212,7 +156,7 @@ def _exeExists(file: Path) -> bool:
 
 def _validateExecutable(file: str, searchPaths: List[Path]) -> str:
     """
-    Validate that the given toolchain component is in the PATH and executable.
+    Validate that the given toolchain component is below the selected root and executable.
 
     Args:
         file: The executable to validate.
@@ -250,7 +194,7 @@ def _validateExecutable(file: str, searchPaths: List[Path]) -> str:
 
 def validateToolchain(*args: str):
     """
-    Validate that the given toolchain components are in the PATH and executable,
+    Validate that the given toolchain components are below the selected root and executable,
     returning the absolute path to each.
 
     Args:
@@ -261,7 +205,7 @@ def validateToolchain(*args: str):
 
     Raises:
         ValueError: If no toolchain components are provided.
-        FileNotFoundError: If a toolchain component is not found in the PATH.
+        FileNotFoundError: If a toolchain component is not found below the selected root.
     """
     if not args:
         raise ValueError("No toolchain components to validate, at least one argument is required")
@@ -271,3 +215,28 @@ def validateToolchain(*args: str):
     out = (_validateExecutable(x, searchPaths) for x in args)
 
     return next(out) if len(args) == 1 else tuple(out)
+
+
+def deviceEnumeratorCandidates(explicit: str | None = None) -> tuple[str, ...]:
+    """Return validated device-enumerator paths in fallback order."""
+    if explicit is not None:
+        return (validateToolchain(explicit),)
+    if os.name == "nt":
+        return (validateToolchain(ToolchainDefaults.DEVICE_ENUMERATOR),)
+
+    names = ["offload-arch", "amdgpu-arch"]
+    if isRhel8() or ToolchainDefaults.inFFMEnv:
+        names.append("rocm_agent_enumerator")
+
+    paths = []
+    for name in names:
+        try:
+            paths.append(validateToolchain(name))
+        except FileNotFoundError:
+            continue
+    if paths:
+        return tuple(paths)
+    raise FileNotFoundError(
+        "No supported device enumerator is executable below the selected root: "
+        f"{_selectedRoot()}"
+    )

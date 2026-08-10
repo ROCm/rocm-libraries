@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version as package_version
+from importlib.util import find_spec
 import os
 from pathlib import Path
 import re
@@ -22,6 +23,13 @@ class TensileLiteRuntimeError(ImportError):
 class ValidatedRocm:
     root: Path
     version: str
+    source: str
+
+
+@dataclass(frozen=True)
+class ResolvedRocmRoot:
+    root: Path
+    source: str
 
 
 _RELEASE_RE = re.compile(r"^[0-9]+(?:\.[0-9]+){2}(?:[a-z0-9.]+)?$", re.IGNORECASE)
@@ -56,49 +64,77 @@ def expected_rocm_version(distribution: str, distribution_version: str | None = 
     return canonical_rocm_version(local[len("rocm") :])
 
 
-def _windows_sdk_root() -> Path:
+def _validated_root(root: Path, source: str) -> ResolvedRocmRoot:
+    if not root.is_dir():
+        raise TensileLiteRuntimeError(
+            "ROCm installation not found.\n"
+            f"  selected root: {root}\n"
+            f"  selected by: {source}"
+        )
+    return ResolvedRocmRoot(root.resolve(), source)
+
+
+def _python_sdk_root() -> ResolvedRocmRoot | None:
+    if find_spec("rocm_sdk") is None:
+        return None
+
     try:
         proc = subprocess.run(
-            ["rocm-sdk", "path", "--root"],
+            [sys.executable, "-m", "rocm_sdk", "path", "--root"],
             check=True,
             capture_output=True,
             text=True,
             timeout=10,
         )
     except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        detail = ""
+        if isinstance(exc, subprocess.CalledProcessError) and exc.stderr:
+            detail = f"\n  rocm_sdk diagnostic: {exc.stderr.strip()}"
         raise TensileLiteRuntimeError(
-            "ROCM_PATH is unset and the Windows ROCm SDK root could not be resolved. "
-            "Set ROCM_PATH to the matching SDK installation."
+            "The active Python ROCm SDK could not resolve its devel root.\n"
+            "  selected by: active Python rocm_sdk\n"
+            "Install the matching rocm[libraries,devel,device-...] SDK."
+            f"{detail}"
         ) from exc
-    return Path(proc.stdout.strip())
-
-
-def resolve_rocm_root() -> Path:
-    explicit = os.environ.get("ROCM_PATH")
-    root = Path(explicit).expanduser() if explicit else (
-        _windows_sdk_root() if sys.platform == "win32" else Path("/opt/rocm")
-    )
-    if not root.is_dir():
+    root_text = proc.stdout.strip()
+    if not root_text:
         raise TensileLiteRuntimeError(
-            "ROCm installation not found.\n"
-            f"  resolved root: {root}\n"
-            "Set ROCM_PATH to the ROCm release matching the installed Python wheel."
+            "The active Python ROCm SDK returned an empty devel root.\n"
+            "  selected by: active Python rocm_sdk"
         )
-    return root.resolve()
+    return _validated_root(Path(root_text), "active Python rocm_sdk")
+
+
+def resolve_rocm_root() -> ResolvedRocmRoot:
+    python_sdk = _python_sdk_root()
+    if python_sdk is not None:
+        return python_sdk
+
+    explicit = os.environ.get("ROCM_PATH")
+    if explicit:
+        return _validated_root(Path(explicit).expanduser(), "explicit ROCM_PATH")
+    if sys.platform != "win32":
+        return _validated_root(Path("/opt/rocm"), "/opt/rocm")
+    raise TensileLiteRuntimeError(
+        "ROCm installation not found.\n"
+        "  selected by: no active Python rocm_sdk or explicit ROCM_PATH\n"
+        "Install the matching rocm[libraries,devel,device-...] SDK or set ROCM_PATH."
+    )
 
 
 def validate_distribution(
     distribution: str, distribution_version: str | None = None
 ) -> ValidatedRocm:
     expected = expected_rocm_version(distribution, distribution_version)
-    root = resolve_rocm_root()
-    version_file = root / ".info" / "version"
+    resolved = resolve_rocm_root()
+    version_file = resolved.root / ".info" / "version"
     try:
         actual = canonical_rocm_version(version_file.read_text(encoding="utf-8"))
     except OSError as exc:
         raise TensileLiteRuntimeError(
             "The resolved ROCm installation has no readable release metadata.\n"
-            f"  ROCm root: {root}\n"
+            f"  selected root: {resolved.root}\n"
+            f"  selected by: {resolved.source}\n"
             f"  expected file: {version_file}"
         ) from exc
     if actual != expected:
@@ -108,7 +144,8 @@ def validate_distribution(
             f"  {distribution} version: {shown_version}\n"
             f"  expected ROCm: {expected}\n"
             f"  found ROCm: {actual}\n"
-            f"  ROCm root: {root}\n"
+            f"  selected root: {resolved.root}\n"
+            f"  selected by: {resolved.source}\n"
             "Install the wheel from the matching ROCm wheel index or select the matching ROCM_PATH."
         )
-    return ValidatedRocm(root, actual)
+    return ValidatedRocm(resolved.root, actual, resolved.source)

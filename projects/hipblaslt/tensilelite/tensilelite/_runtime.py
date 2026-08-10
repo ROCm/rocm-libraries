@@ -19,6 +19,7 @@ from ._rocm import TensileLiteRuntimeError, validate_distribution
 
 _client: Path | None = None
 _custom = False
+_root: Path | None = None
 
 
 def _require_rocisa() -> None:
@@ -34,7 +35,7 @@ def _require_rocisa() -> None:
 
 def initialize(distribution_version: str) -> None:
     """Validate and freeze the client selected by this installation."""
-    global _client, _custom
+    global _client, _custom, _root
 
     _require_rocisa()
     validated = validate_distribution("tensilelite", distribution_version)
@@ -42,9 +43,14 @@ def initialize(distribution_version: str) -> None:
         selected, custom = selected_client(validated.root)
         validate_client(selected, distribution_version)
     except ClientBindingError as exc:
-        raise TensileLiteRuntimeError(str(exc)) from exc
+        raise TensileLiteRuntimeError(
+            f"{exc}\n"
+            f"  selected root: {validated.root}\n"
+            f"  selected by: {validated.source}"
+        ) from exc
     _client = selected
     _custom = custom
+    _root = validated.root
 
 
 def client_executable() -> Path:
@@ -52,3 +58,10 @@ def client_executable() -> Path:
     if _client is None:
         raise TensileLiteRuntimeError("TensileLite runtime has not been initialized.")
     return _client
+
+
+def rocm_root() -> Path:
+    """Return the ROCm root frozen during package initialization."""
+    if _root is None:
+        raise TensileLiteRuntimeError("TensileLite runtime has not been initialized.")
+    return _root
