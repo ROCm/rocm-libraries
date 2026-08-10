@@ -33,6 +33,8 @@ constraint (§3). All kernels in a family share the algorithm's tunable knobs �
 knobs are baked into each `.co` at produce time, and their consequences surface as each
 kernel's per-kernel `constraints`.
 
+**New here? Jump to [§2 Quick start](#2-quick-start-the-self-serve-recipe)** — the 30-second
+recipe plus a top-to-bottom KA checklist.
 Sections [§1](#1-the-end-to-end-path-what-happens-at-runtime)–[§5](#5-measure-and-cache-tuning)
 are the engine mechanics that apply to **every** op. Sections §6–§8 are the per-op
 specifics (ABI, gotchas, decline boundary). [§9](#9-how-to-test)–[§11](#11-file-map)
@@ -76,7 +78,9 @@ kernel is a fallback, never a wrong answer.
 
 ---
 
-## 2. Self-serve recipe (the 30-second version)
+## 2. Quick start (the self-serve recipe)
+
+**The 30-second version** — bring a kernel into hipDNN as data:
 
 1. Compile your kernel to a code object for the target arch with the **exact ABI** for
    its op kind (§6–§8). For a rocKE-AOT family the family's co-located producer script
@@ -94,6 +98,34 @@ kernel is a fallback, never a wrong answer.
 To add a **tuning candidate** for a shape you already serve, you only do step 1+3:
 append another `kernels[]` entry with overlapping constraints. `CatalogPlan` measures
 all applicable candidates on the first execute and caches the fastest per problem (§5).
+
+### KA checklist (the thorough version)
+
+Work top to bottom; each rung says *why* and where it is spelled out.
+
+- [ ] **Confirm an adapter already handles your op** — `matmul` / `rmsnorm` / `sdpa`
+      (§6–§8). If not, you have a **genuinely new op**: that needs a small reviewed C++
+      adapter first (§10) and is **not** data-only.
+- [ ] **Compile the `.co` for the exact target arch, with the op's exact ABI** — arg
+      names, types, and order (§6–§8). A rocKE-AOT family's co-located producer does this
+      at build time (§9).
+- [ ] **Write / extend `family.json`** (§3): one `kernels[]` entry per `.co`, pointing at
+      it by `co_file`, with `grid` / `block` / `args_signature` and a constraint for every
+      problem key your kernel handles.
+- [ ] **Constrain fail-closed** (⚠️ the one way this engine returns a *wrong* answer — see
+      the warning in §3). For each key you left *unconstrained*, ask: *will my kernel be
+      correct for every value this key can take?* If not, add the constraint. When in
+      doubt, over-constrain — a too-narrow kernel simply isn't picked (safe fallback, §1);
+      a too-broad one miscomputes.
+- [ ] **Build the provider** (producer emits `.co`, stages `family.json`; §9) — or point
+      `HIPDNN_AOT_CATALOG_DIR` at a populated tree for a data-only iteration.
+- [ ] **Verify correctness** — substrate parity test **and** the frontend A/B rig (§9),
+      not one or the other.
+- [ ] **If your kernel isn't selected**, set `HIPDNN_AOT_DEBUG=1` and read the resolution
+      / load / decline trace (§9 "Debugging").
+- [ ] **Know when you have left data-only and need reviewed C++**: a changed ABI, a new
+      capability to *decode*, or a grid the DSL can't express (§4); or a brand-new op
+      (§10). These require an adapter edit + rebuild + review — data alone won't do it.
 
 ---
 
@@ -135,6 +167,18 @@ Each `kernels[]` entry:
 
 The set of legal `constraints`/`grid` keys is exactly the **problem keys the adapter
 emits** for that op — listed per op in §6–§8.
+
+> ⚠️ **Under-constraining is the one way this engine returns a wrong answer.** Constraints
+> are the *only* thing standing between a kernel and a problem it cannot actually serve. A
+> key you leave unconstrained is an implicit claim that your kernel is correct for *every*
+> value that key can take. Forget the `dtype` constraint and a bf16 problem can select your
+> f16 kernel; forget a static kernel's `N` and it matches *every* `N` and computes garbage;
+> for SDPA, omit a capability key (`causal`, `gqa_ratio`, a mask fact — §8) and a graph with
+> that feature selects a kernel that silently ignores it. The adapters guarantee only
+> **memory safety** (rank / dtype / shape agreement); **correctness of *applicability* is
+> entirely your `family.json`.** When in doubt, over-constrain: a too-narrow kernel just
+> isn't picked (a safe fallback that another engine serves, §1); a too-broad one
+> miscomputes. Every shipped family constrains its keys explicitly — copy that discipline.
 
 ---
 
