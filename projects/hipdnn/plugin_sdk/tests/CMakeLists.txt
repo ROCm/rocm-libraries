@@ -27,6 +27,7 @@ add_executable(hipdnn_plugin_sdk_tests
     TestVersion.cpp
     TestPluginDeviceBuffers.cpp
     TestRuntimePassByValue.cpp
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:TestIngestorSkeleton.cpp>
 )
 
 target_compile_options(hipdnn_plugin_sdk_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS} ${HIPDNN_NO_RTTI_OPTIONS})

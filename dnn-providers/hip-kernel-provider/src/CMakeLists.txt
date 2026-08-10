@@ -14,6 +14,10 @@ add_library(
 
 add_subdirectory(engines)
 
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    add_subdirectory(ingestor_poc)
+endif()
+
 target_include_directories(hip_kernel_provider_impl PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_LIST_DIR}/../include
@@ -44,6 +48,10 @@ endif()
 
 if(ENABLE_HIP_MLOPS_ENGINE)
     target_compile_definitions(hip_kernel_provider_private PUBLIC HIPDNN_ENGINE_HIP_MLOPS=1)
+endif()
+
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    target_compile_definitions(hip_kernel_provider_private PUBLIC HIPDNN_ENABLE_KERNEL_INGESTOR=1)
 endif()
 
 # hip_kernel_provider - SHARED library (the actual plugin)

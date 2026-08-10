@@ -20,6 +20,11 @@
 #include "engines/asm_sdpa_engine/plans/SdpaFwdPlanBuilder.hpp"
 #endif
 
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+#include "ingestor_poc/PointwiseAddEngine.hpp"
+#include "ingestor_poc/PointwiseAddPack.hpp"
+#endif
+
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
@@ -63,6 +68,16 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
              engine->addPlanBuilder(std::make_unique<asm_sdpa_engine::SdpaFwdPlanBuilder>());
              engine->addPlanBuilder(std::make_unique<asm_sdpa_engine::SdpaBwdPlanBuilder>());
              return engine;
+         }},
+#endif
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+        // The kernel-ingestor POC's engine (RFC 0017). Registered statically here
+        // because engines are still a compile-time table; runtime loading of engine
+        // descriptors replaces this entry with one built per installed UED file.
+        {ingestor_poc::pointwiseAddEngineId(),
+         [](const device::IDevicePropertyProvider& devicePropertyProvider)
+             -> std::unique_ptr<hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>> {
+             return ingestor_poc::makePointwiseAddEngine(devicePropertyProvider);
          }},
 #endif
     };
