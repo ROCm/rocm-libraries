@@ -3,6 +3,8 @@
 
 #pragma once
 
+// Lightweight typed matrix views used by generic generation and comparison.
+
 #include <cassert>
 #include <cstddef>
 #include <roc/host_validation/tensor.hpp>
