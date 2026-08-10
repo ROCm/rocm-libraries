@@ -615,6 +615,10 @@ def build_attention_dense(
     v_rsrc = b.buffer_rsrc(v, _kv_cache_bytes)
     v_wave_off_i64 = b.zext(b.to_sgpr_u32(b.mul(wave, b.const_i32(WAVE_BYTES))), I64)
     if spec.paged:
+        assert ROWS_PER_WAVE <= spec.block_size and spec.block_size % ROWS_PER_WAVE == 0, (
+            f"per-wave block_tables hoist needs ROWS_PER_WAVE ({ROWS_PER_WAVE}) <= "
+            f"block_size ({spec.block_size}) and dividing it evenly"
+        )
         # Single-seq: seq_base folds to 0; the bt*bt_stride form keeps bt_stride
         # live and generalizes to multi-seq. kv_lens[bt] bounds the page index.
         _pg_seq_base = b.mul(bt, bt_stride)
@@ -623,29 +627,6 @@ def build_attention_dense(
             b.add(_pg_kv_len, b.const_i32(spec.block_size - 1)),
             b.const_i32(spec.block_size),
         )
-
-    def _kv_row(gkey):
-        """Map a logical KV token index to the physical row to load.
-
-        Contiguous: the token index IS the row. Paged: translate through
-        block_tables into the physical token index of the
-        [num_blocks, block_size, Hkv, D] cache. seqlen_kv % block_n == 0 and
-        block_n % block_size == 0 (validated) keep every page index in
-        [0, n_pages); the mask is cheap insurance against an OOB block-table read."""
-        if not spec.paged:
-            return gkey
-        page = b.div(gkey, b.const_i32(spec.block_size))
-        tok_in_page = b.mod(gkey, b.const_i32(spec.block_size))
-        page_ok = b.cmp_lt(page, _pg_n_pages)
-        phys = b.masked_global_load(
-            block_tables,
-            b.add(_pg_seq_base, page),
-            page_ok,
-            b.const_i32(0),
-            dtype=I32,
-            align=4,
-        )
-        return b.add(b.mul(phys, b.const_i32(spec.block_size)), tok_in_page)
 
     def _async_load(rsrc, lds_base, buf_val, tile_key0, bytes_per_buf, group_bytes):
         """Async DMA one K/V tile into its LDS layout.
@@ -660,6 +641,18 @@ def build_attention_dense(
         is unchanged."""
         buf_off = b.mul(b.zext(buf_val, I64), b.const_i64(bytes_per_buf))
         if ROWS_PER_INSTR == 1:
+            if spec.paged:
+                # All ROWS_PER_WAVE rows of this wave fall in ONE page (asserted at
+                # setup), so the block_tables lookup is wave-uniform -- hoist it out
+                # of the row loop (was per-row: ~ROWS_PER_WAVE x fewer indirection
+                # loads + div/mask). Per-row cost is then just a mod + add.
+                _wg0 = b.add(tile_key0, b.mul(wave, b.const_i32(ROWS_PER_WAVE)))
+                _wpage = b.div(_wg0, b.const_i32(spec.block_size))
+                _wphys = b.masked_global_load(
+                    block_tables, b.add(_pg_seq_base, _wpage),
+                    b.cmp_lt(_wpage, _pg_n_pages), b.const_i32(0), dtype=I32, align=4,
+                )
+                _wphys_base = b.mul(_wphys, b.const_i32(spec.block_size))
             for r in range(ROWS_PER_WAVE):
                 row = b.add(b.mul(wave, b.const_i32(ROWS_PER_WAVE)), b.const_i32(r))
                 row_lds_off = b.add(
@@ -668,9 +661,12 @@ def build_attention_dense(
                 row_base = b.smem_ptr_add(lds_base, row_lds_off)
                 gkey = b.add(tile_key0, row)
                 gcol = b.mul(lane, b.const_i32(2))
+                if spec.paged:
+                    kv_row = b.add(_wphys_base, b.mod(gkey, b.const_i32(spec.block_size)))
+                else:
+                    kv_row = gkey
                 voff = b.add(
-                    b.add(k_base, b.mul(_kv_row(gkey), b.const_i32(stride_k_tok))),
-                    gcol,
+                    b.add(k_base, b.mul(kv_row, b.const_i32(stride_k_tok))), gcol
                 )
                 b.async_buffer_load_lds_addr(
                     rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, 1
@@ -692,7 +688,7 @@ def build_attention_dense(
                 row_base = b.smem_ptr_add(lds_base, row_lds_off)
                 gkey = b.add(b.add(tile_key0, row0), sub_row)
                 voff = b.add(
-                    b.add(k_base, b.mul(_kv_row(gkey), b.const_i32(stride_k_tok))), col
+                    b.add(k_base, b.mul(gkey, b.const_i32(stride_k_tok))), col
                 )
                 b.async_buffer_load_lds_addr(
                     rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, 1
