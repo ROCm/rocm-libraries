@@ -631,6 +631,9 @@ std::string GraphDescriptor::toString() const
     std::string str = "GraphDescriptor: {handle=";
     str += _handle != nullptr ? fmt::format("{:p}", static_cast<const void*>(_handle)) : "null";
     str += ", name=" + (_name.empty() ? std::string("(empty)") : _name);
+    str += ", id="
+           + (_graphId.has_value() ? hipdnn_flatbuffers_sdk::utilities::formatUuid(*_graphId)
+                                   : std::string("(none)"));
     str += ", serializedGraphSize=" + std::to_string(_graphSerializedBuffer.size());
     str += '}';
     return str;

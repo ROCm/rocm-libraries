@@ -1036,6 +1036,22 @@ TEST_F(TestGraphDescriptor, JsonRoundTripPreservesUuid)
     EXPECT_EQ(hipdnn_flatbuffers_sdk::utilities::toUuidBytes(*revivedGraph->id), expectedId);
 }
 
+TEST_F(TestGraphDescriptor, ToStringReportsGraphId)
+{
+    auto builder = createValidGraph();
+    auto serialized = builder.Release();
+
+    GraphDescriptor descriptor;
+    descriptor.deserializeGraph(serialized.data(), serialized.size());
+    EXPECT_NE(descriptor.toString().find("id=(none)"), std::string::npos);
+
+    setHandle(descriptor);
+    descriptor.finalize();
+    const auto id = hipdnn_flatbuffers_sdk::utilities::formatUuid(
+        hipdnn_flatbuffers_sdk::utilities::toUuidBytes(*unpack(descriptor)->id));
+    EXPECT_NE(descriptor.toString().find("id=" + id), std::string::npos);
+}
+
 // ============================================================================
 // HIPDNN_ATTR_OPERATIONGRAPH_IS_OVERRIDE_SHAPE_ENABLED_EXT (RFC 0008)
 // ============================================================================

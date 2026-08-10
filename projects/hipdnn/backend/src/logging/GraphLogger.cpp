@@ -99,12 +99,9 @@ void GraphLogger::logGraph(const uint8_t* serializedGraph, size_t size)
     const auto* graph
         = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::Graph>(serializedGraph);
 
-    // Only a finalized graph carries an ID, and a graph without one is still mutable, so its
-    // contents are not yet a stable thing to name. Dumps are named by that ID: re-finalizing a
-    // descriptor, or replaying a serialized graph, keeps it and so reuses one file, while a graph
-    // rebuilt from scratch is a distinct graph object and earns its own. Naming by a content hash
-    // would also fold rebuilds together, but it can collide, and a collision silently discards one
-    // graph under a name already claimed by another.
+    // Dumps are named by the graph's ID, so re-finalizing a descriptor or replaying a serialized
+    // graph reuses one file, while a graph rebuilt from scratch is a distinct graph object and
+    // gets its own.
     if(graph->id() == nullptr)
     {
         HIPDNN_BACKEND_LOG_WARN("Not logging a graph without an identity; only a finalized graph "
