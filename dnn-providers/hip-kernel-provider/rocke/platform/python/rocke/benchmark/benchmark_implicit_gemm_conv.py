@@ -64,12 +64,7 @@ _TILE_K = (16, 32, 64)
 _WARP_MN = (1, 2, 4, 8)
 _WARP_MN_GFX1250 = (1, 2, 4, 8, 16)
 _WARP_TILE_MN = (16, 32)
-_PIPELINES = (
-    "mem",
-    "compv3",
-    "compv4",
-    "wavelet",
-)
+_PIPELINES = ("mem", "compv3", "compv4", "wavelet", "basic")
 _EPILOGUES = ("default", "cshuffle")
 # Split-K degrees swept when --split-k 0 (auto) is passed for wgrad.
 _SPLIT_K_AUTO = (1, 2, 4, 8, 16, 32, 64, 128)
@@ -96,6 +91,9 @@ class Result:
     ms: float
     tflops: float
     gbps: float
+    vec_a: int = 1
+    vec_b: int = 1
+    vec_c: int = 1
     passed: bool | None = None  # None when --verify was not requested
 
 
@@ -1676,6 +1674,7 @@ def _run_sweep(
         cur_gbps = (bytes_xfer / ms) * 1e-6
         n_run += 1
 
+        _va, _vb, _vc = ImplicitGemmConvSpec.default_vector_sizes(p.C, p.K, dtype)
         results.append(
             Result(
                 kernel_name=artifact.kernel_name,
@@ -1692,6 +1691,9 @@ def _run_sweep(
                 ms=ms,
                 tflops=cur_tflops,
                 gbps=cur_gbps,
+                vec_a=_va,
+                vec_b=_vb,
+                vec_c=_vc,
                 passed=kernel_passed,
             )
         )
@@ -1701,6 +1703,7 @@ def _run_sweep(
             f"warp={warp_m}x{warp_n} "
             f"atom={warp_tile_mn}x{warp_tile_mn}x{warp_tile_k} "
             f"{pipeline}/{epilogue:9s} "
+            f"vec={_va}/{_vb}/{_vc} "
             f"{cur_tflops:6.1f} TFLOPS  {ms:.3f} ms",
             flush=True,
         )
@@ -1723,7 +1726,7 @@ def _run_sweep(
     top_n = min(args.top, len(results))
 
     show_verify = args.verify
-    width = 84 if show_verify else 72
+    width = 96 if show_verify else 84
     print(f"\n{'='*width}")
     print(f"Top {top_n} configurations for {arch} {dtype} {p.short()}")
     print(f"{'='*width}")
@@ -1739,6 +1742,7 @@ def _run_sweep(
             f"tile={r.tile_m}x{r.tile_n}x{r.tile_k} "
             f"warp={r.warp_m}x{r.warp_n} "
             f"atom={r.warp_tile_mn}x{r.warp_tile_mn}x{r.warp_tile_k} "
+            f"vec={r.vec_a}/{r.vec_b}/{r.vec_c} "
             f"{r.pipeline}/{r.epilogue}"
         )
         if show_verify:
@@ -1869,6 +1873,8 @@ def _run_wgrad_sweep(
         f"(split_k={_spk_label}) ...",
         flush=True,
     )
+    if p.is_pointwise:
+        print("  (pointwise 1x1/s1/p0 — using explicit GEMM descriptors)", flush=True)
 
     # ---------------------------------------------------------------------------
     # Phase 1 – filter + IR build: validate every combo and build KernelDef IR.
@@ -1895,12 +1901,18 @@ def _run_wgrad_sweep(
     rt = Runtime()
     results: List[Result] = []
 
-    dY_dev = rt.alloc(dY_t.nbytes)
-    X_dev = rt.alloc(X_t.nbytes)
-    dW_dev = rt.alloc(dW_t.nbytes)
-    rt.memcpy_h2d(dY_dev, _u8(dY_t), dY_t.nbytes)
-    rt.memcpy_h2d(X_dev, _u8(X_t), X_t.nbytes)
-    rt.memset(dW_dev, 0, dW_t.nbytes)
+    for combo in combos:
+        (
+            tile_m,
+            tile_n,
+            tile_k,
+            warp_m,
+            warp_n,
+            warp_tile_mn,
+            pipeline,
+            epilogue,
+            split_k,
+        ) = combo
 
     ref_out: torch.Tensor | None = None
     if args.verify or args.dump_fail:
@@ -1998,6 +2010,9 @@ def _run_wgrad_sweep(
         cur_gbps = (bytes_xfer / ms) * 1e-6
         n_run += 1
 
+        _va, _vb, _vc = WgradConvSpec.default_vector_sizes(
+            p.C, p.K, dtype, split_k=resolved_split_k
+        )
         results.append(
             Result(
                 kernel_name=artifact.kernel_name,
@@ -2014,6 +2029,9 @@ def _run_wgrad_sweep(
                 ms=ms,
                 tflops=cur_tflops,
                 gbps=cur_gbps,
+                vec_a=_va,
+                vec_b=_vb,
+                vec_c=_vc,
             )
         )
 
@@ -2022,6 +2040,7 @@ def _run_wgrad_sweep(
             f"warp={warp_m}x{warp_n} "
             f"atom={warp_tile_mn}x{warp_tile_mn}x{warp_tile_k} "
             f"{pipeline}/{epilogue:9s} spk{resolved_split_k:<3d} "
+            f"vec={_va}/{_vb}/{_vc} "
             f"{cur_tflops:6.1f} TFLOPS  {ms:.3f} ms",
             flush=True,
         )
@@ -2039,17 +2058,18 @@ def _run_wgrad_sweep(
     results.sort(key=lambda r: r.tflops, reverse=True)
     top_n = min(args.top, len(results))
 
-    print(f"\n{'='*72}")
+    print(f"\n{'='*84}")
     print(f"Top {top_n} wgrad configurations for {arch} {dtype} {p.short()}")
-    print(f"{'='*72}")
+    print(f"{'='*84}")
     hdr = f"{'rank':>4}  {'TFLOPS':>7}  {'ms':>8}  {'GBps':>7}  config"
     print(hdr)
-    print("-" * 72)
+    print("-" * 84)
     for rank, r in enumerate(results[:top_n], 1):
         cfg_str = (
             f"tile={r.tile_m}x{r.tile_n}x{r.tile_k} "
             f"warp={r.warp_m}x{r.warp_n} "
             f"atom={r.warp_tile_mn}x{r.warp_tile_mn}x{r.warp_tile_k} "
+            f"vec={r.vec_a}/{r.vec_b}/{r.vec_c} "
             f"{r.pipeline}/{r.epilogue} spk{r.split_k}"
         )
         print(f"{rank:>4}  {r.tflops:>7.1f}  {r.ms:>8.3f}  {r.gbps:>7.1f}  {cfg_str}")

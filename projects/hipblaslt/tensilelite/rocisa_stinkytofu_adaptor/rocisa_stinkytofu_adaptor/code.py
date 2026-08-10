@@ -2182,6 +2182,10 @@ class SignatureBase(Item):
         self.kernelDescriptor.setGprs(totalVgprs, totalAgprs, totalSgprs)
         self.codeMeta.setGprs(totalVgprs, totalSgprs)
 
+    @property
+    def offset(self) -> int:
+        return self.codeMeta.offset
+
     def addArg(
         self,
         name: str,

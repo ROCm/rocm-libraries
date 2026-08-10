@@ -39,7 +39,9 @@
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
 #include "stinkytofu/transforms/asm/EstimateAsmCyclesPass.hpp"
 #include "stinkytofu/transforms/asm/FlattenCalleesPass.hpp"
+#include "stinkytofu/transforms/asm/Gfx1250HazardPass.hpp"
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
+#include "stinkytofu/transforms/asm/InsertCoexecHazardPass.hpp"
 #include "stinkytofu/transforms/asm/InsertDelayAluPass.hpp"
 #include "stinkytofu/transforms/asm/InsertInitialUnclausedVmemPass.hpp"
 #include "stinkytofu/transforms/asm/InsertVgprMsbPass.hpp"
@@ -49,6 +51,7 @@
 #include "stinkytofu/transforms/asm/RederiveExpertScopePass.hpp"
 #include "stinkytofu/transforms/asm/RegionClonePass.hpp"
 #include "stinkytofu/transforms/asm/RemoveDelayAluPass.hpp"
+#include "stinkytofu/transforms/asm/RemoveDscntPass.hpp"
 #include "stinkytofu/transforms/asm/RemoveInstructionPass.hpp"
 #include "stinkytofu/transforms/asm/RemoveWaitAluPass.hpp"
 #include "stinkytofu/transforms/asm/SetMatrixReusePass.hpp"
@@ -78,7 +81,10 @@ void addGfx1250RegionPasses(PassManager& pm, const StinkyAsmModule& module, OptL
 
     pm.addPass(createCFGBuilderPass());
     if (enableWaitCnt) {
-        pm.addPass(createStinkyRemoveWaitCntPass());
+        // TODO: remove this temporary SIA4/SIA0 split once a dedicated hazard pass
+        // handles xcnt placement.
+        pm.addPass(createStinkyRemoveWaitCntPass(/*removeTensorWaitCnt=*/true,
+                                                 /*removeXcntWaitCnt=*/optLevel == OptLevel::O3));
         pm.addPass(createStinkyRemoveNopPass());
     }
 
@@ -112,6 +118,7 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
         // strip s_wait_alu before scheduling (whole-kernel)
         pm.addPass(createRemoveWaitAluPass(module.getFunctions()));
     }
+    pm.addPass(createStinkyRemoveNopPass(/*vNopOnly=*/true));
     PB.applyExtensionPoint(PipelineExtensionPoint::BeforeRegionPasses, pm, module);
 
     // -- region: loopWithPrefetch + noLoadLoopBody --
@@ -124,6 +131,8 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
             passFeatureConfig.dagFeatures.distributeGlobalRead = true;
             passFeatureConfig.dagFeatures.dsReadQueueDepth = moduleOptions.DsReadQueueDepth;
             passFeatureConfig.dagFeatures.dsReadDrainLatency = moduleOptions.DsReadDrainLatency;
+            passFeatureConfig.dagFeatures.dsReadThrottleLatency =
+                moduleOptions.DsReadThrottleLatency;
             passFeatureConfig.dagFeatures.globalReadQueueDepth = moduleOptions.GlobalReadQueueDepth;
             passFeatureConfig.dagFeatures.globalReadDrainLatency =
                 moduleOptions.GlobalReadDrainLatency;
@@ -147,6 +156,7 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
             WaitCntInsertionOptions waitCntOptions;
             waitCntOptions.enableLoopCarriedTokenDeps = moduleOptions.EnableLoopCarriedTokenDeps;
             innerPM.addPass(createStinkyWaitCntInsertionPass(waitCntOptions));
+            if (runScheduler) innerPM.addPass(createRemoveDscntPass());
         }
         pm.addPass(createKernelToRegionsPassAdaptor(module, {"loopWithPrefetch", "noLoadLoopBody"},
                                                     std::move(innerPM)));
@@ -160,9 +170,7 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
     // the module opts in. Must precede InsertVgprMsbPass so the new
     // branches/labels are present when MSB configuration is materialized.
     if (moduleOptions.ClusterBarrier) {
-        pm.addPass(createInsertClusterBarrierPass(/*isKernelScope=*/true,
-                                                  /*pgrValue=*/moduleOptions.PrefetchGlobalRead,
-                                                  /*plrValue=*/moduleOptions.PrefetchLocalRead));
+        pm.addPass(createInsertClusterBarrierPass());
     }
 
     // Build the CFG after the flat region splice-backs so RegionClonePass can match its
@@ -182,6 +190,8 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
         pm.addPass(createInsertWaitAluPass(module, moduleOptions.EnableESM2TrackValuVsrc));
     }
 
+    pm.addPass(createInsertCoexecHazardPass(module));
+
     pm.addPass(createMemTokenConsistencyCheckPass());
 
     if (runScheduler) {
@@ -193,6 +203,11 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
     // Pass the whole-kernel function list so the pass walks the entry plus callable functions,
     // each in isolation (reuse never chains across a call site or a function boundary).
     pm.addPass(createSetMatrixReusePass(module.getFunctions()));
+
+    // Run after the final CFG build but before flatten/SW-prefetch: this pass
+    // covers final per-function code, while SW-prefetch owns its hints' XCnt waits.
+    constexpr bool kEnableXcntDrainProfile = false;
+    pm.addPass(createGfx1250HazardPass(module.getFunctions(), kEnableXcntDrainProfile));
 
     // Re-merge callable functions into the entry at their ASM placement markers so
     // SwInstructionPrefetchRelStaticPass sees a single linear stream / legacy emission

@@ -21,9 +21,11 @@ target_sources(stinkytofu_objs PRIVATE
     StinkyDAGSchedulerPass.cpp
     SetMatrixReusePass.cpp
     StinkyWaitCntInsertionPass.cpp
+    Gfx1250HazardPass.cpp
     waitcnt/WaitDataflow.cpp
     waitcnt/ShallowPredPromotion.cpp
     StinkyRemoveWaitCntPass.cpp
+    RemoveDscntPass.cpp
     StinkyRemoveNopPass.cpp
     StinkyBuildImplicitDependencyPass.cpp
     RegionClonePass.cpp
@@ -40,6 +42,7 @@ target_sources(stinkytofu_objs PRIVATE
     InsertWaitAluPass.cpp
     RederiveExpertScopePass.cpp
     EstimateAsmCyclesPass.cpp
+    InsertCoexecHazardPass.cpp
     StinkyWmmaVgprReorderPass.cpp
     FlattenCalleesPass.cpp
 )
