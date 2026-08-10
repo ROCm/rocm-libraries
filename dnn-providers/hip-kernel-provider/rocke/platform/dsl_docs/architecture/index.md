@@ -40,6 +40,8 @@ builders are cataloged separately in [`../instances/index.md`](../instances/inde
 
 - [`kernel_opt_design.md`](kernel_opt_design.md) — proposal for combining current
   gfx950 tiled-2D attention optimization controls.
+- [`wavescope_integration.md`](wavescope_integration.md) — how source locations
+  reach an ATT trace, and how to use the viewer during an optimization pass.
 
 Experiment summaries are historical evidence tied to their stated hardware,
 toolchain, and configuration. They are not current performance promises.

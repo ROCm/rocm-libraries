@@ -37,6 +37,12 @@ post-processing:
 - `stage2_capture/`
   - `capture_att_trace.py` — one-command `rocprofv3 --att` capture: preflights the
     decoder, discovers the kernel name, decodes, and reports each dispatch
+- `wavescope/` — capture and post-process traces for the WaveScope viewer
+  - `capture_wavescope_trace.py` — wraps `stage2_capture` with the source-location
+    env and the sidecar step, so the trace opens with Python correlation
+  - `emit_inline_frames.py` — `inline_frames.json` sidecar recovering the inlining
+    call stack rocprofv3 flattens away
+  - `README.md`                    — install the extension, capture, and read a trace
 - `stage3_extract_isa/`
   - `count_instructions.py`
   - `extract_isa.py`

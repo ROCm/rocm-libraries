@@ -24,6 +24,8 @@ Design constraints:
 
 from __future__ import annotations
 
+import os
+import sys
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
@@ -247,11 +249,129 @@ class KernelDef:
         return int(self.attrs.get("max_workgroup_size", 256))
 
 
+# -------------------------- source locations ------------------------------
+
+# Opt-in only. Capturing a Python frame per op costs real time on dispatch
+# sweeps that build thousands of kernels, and populating ``Op.loc`` makes the
+# lowering emit debug metadata, which changes the emitted ``.ll`` bytes. Both
+# are unwanted by default, so this stays off unless a caller asks for it.
+LOC_CAPTURE_ENV = "ROCKE_DEBUG_LOC"
+
+# Frames inside ``core/`` are the builder machinery itself (this file, the
+# helpers it calls, the isa backends), never the code that asked for an op.
+_CORE_DIR = os.path.dirname(os.path.abspath(__file__))
+_CORE_PREFIX = _CORE_DIR + os.sep
+
+# Where the authoring stack stops being the user's. Above the outermost
+# interesting frame sits whatever launched the build -- runpy, unittest, a test
+# runner in site-packages -- and none of it emitted any GPU instruction.
+_STDLIB_DIR = os.path.dirname(os.path.abspath(os.__file__))
+
+# A kernel built through several layers of helpers is ~8 frames deep; the cap is
+# only there so a pathological recursion cannot produce unbounded metadata.
+_MAX_LOC_FRAMES = 16
+
+_ABSPATH: Dict[str, str] = {}
+_FRAME_ROLE: Dict[str, str] = {}  # abs path -> "core" | "runner" | "user"
+_CODE_POSITIONS: Dict[Any, List[Any]] = {}
+
+# Frames are joined innermost-first; each is "<abs path>:<line>:<column>:<func>".
+# Packing the whole chain into the existing ``Op.loc`` string keeps the IR schema
+# and the ``@loc`` serialization format unchanged, so it still round-trips to the
+# C++ engine untouched.
+LOC_FRAME_SEP = ";"
+
+
+def loc_capture_default() -> bool:
+    """Whether ``IRBuilder`` captures source locations unless told otherwise."""
+
+    return os.environ.get(LOC_CAPTURE_ENV, "") not in ("", "0")
+
+
+def _abspath(filename: str) -> str:
+    cached = _ABSPATH.get(filename)
+    if cached is None:
+        cached = os.path.abspath(filename)
+        _ABSPATH[filename] = cached
+    return cached
+
+
+def _frame_role(filename: str) -> str:
+    cached = _FRAME_ROLE.get(filename)
+    if cached is None:
+        if filename.startswith("<"):  # <frozen importlib...>, <string>, ...
+            cached = "runner"
+        else:
+            path = _abspath(filename)
+            if path.startswith(_CORE_PREFIX):
+                cached = "core"
+            elif path.startswith(_STDLIB_DIR + os.sep) or "site-packages" in path:
+                cached = "runner"
+            else:
+                cached = "user"
+        _FRAME_ROLE[filename] = cached
+    return cached
+
+
+def _frame_column(frame: Any) -> int:
+    """1-based column of the bytecode currently executing in ``frame``, or 0.
+
+    Several ops routinely share one Python line here (``b.add(b.mul(x, y), z)``
+    is three), so the column is what tells them apart.
+    """
+
+    code = frame.f_code
+    positions = _CODE_POSITIONS.get(code)
+    if positions is None:
+        # co_positions() is 3.11+; without it every op on a line collapses.
+        getter = getattr(code, "co_positions", None)
+        positions = list(getter()) if getter is not None else []
+        _CODE_POSITIONS[code] = positions
+    if not positions:
+        return 0
+    index = frame.f_lasti // 2  # instructions are 2 bytes wide
+    if not 0 <= index < len(positions):
+        return 0
+    col = positions[index][2]
+    # co_positions is 0-based and may be None; DWARF columns are 1-based.
+    return col + 1 if col is not None else 0
+
+
+def current_source_loc() -> Optional[str]:
+    """Return the authoring call stack as ``"file:line:col:func"`` frames.
+
+    Innermost first, joined by ``;``. The innermost frame is what actually asked
+    for the op -- often a one-line ``helpers/`` emitter -- and the frames above
+    it are the call sites that lead there, which is what makes a hot line
+    interpretable: 60 instructions on one ``global_load_f16`` line say nothing
+    until you can see which phase of the kernel asked for them. The lowering
+    turns the chain into DWARF inlining scopes.
+
+    Paths are absolutized so a kernel built via a relative path still yields
+    locations a trace viewer can resolve later.
+    """
+
+    frames: List[str] = []
+    frame = sys._getframe()
+    while frame is not None and len(frames) < _MAX_LOC_FRAMES:
+        filename = frame.f_code.co_filename
+        role = _frame_role(filename)
+        if role == "runner":
+            break
+        if role == "user":
+            frames.append(
+                f"{_abspath(filename)}:{frame.f_lineno}"
+                f":{_frame_column(frame)}:{frame.f_code.co_name}"
+            )
+        frame = frame.f_back
+    return LOC_FRAME_SEP.join(frames) if frames else None
+
+
 # ----------------------------- Builder -----------------------------------
 
 
 class IRBuilder:
-    def __init__(self, kernel_name: str) -> None:
+    def __init__(self, kernel_name: str, *, capture_loc: Optional[bool] = None) -> None:
         self._counter = 0
         self._region_stack: List[Region] = []
         self._params: List[Param] = []
@@ -261,6 +381,14 @@ class IRBuilder:
             params=self._params,
             body=Region("entry"),
         )
+        self._capture_loc = (
+            loc_capture_default() if capture_loc is None else bool(capture_loc)
+        )
+        if self._capture_loc:
+            # Carried on the kernel (not on the lowerer) so it survives
+            # serialization to the C++ engine and so a kernel built with
+            # locations lowers with debug info no matter which backend runs it.
+            self.kernel.attrs["debug_info"] = True
         self._region_stack.append(self.kernel.body)
 
     # ----- naming -----
@@ -272,6 +400,11 @@ class IRBuilder:
     # ----- region management -----
 
     def _emit(self, op: Op) -> None:
+        # Every op reaches a region through here, including the control-flow ops
+        # that build their Op directly rather than going through _op, so this is
+        # the one place a location has to be stamped.
+        if self._capture_loc and op.loc is None:
+            op.loc = current_source_loc()
         self._region_stack[-1].ops.append(op)
 
     def push_region(self, region: Region) -> None:
