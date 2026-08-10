@@ -278,8 +278,13 @@ hipError_t
     partition(void* const temporary_storage, size_t& storage_size, TempStoragePartition partition)
 {
     const auto layout = partition.get_layout();
-    // Make sure the user wont try to allocate 0 bytes of memory.
-    const size_t required_size = std::max(layout.size, minimum_allocation_size);
+
+    // Include worst-case alignment padding (layout.alignment - 1) so unaligned user-provided
+    // base pointers can be safely shifted to the required boundary without overflowing the buffer.
+    const size_t alignment_padding = (layout.alignment > 0) ? (layout.alignment - 1) : 0;
+
+    const size_t required_size
+        = std::max<size_t>(layout.size, minimum_allocation_size) + alignment_padding;
 
     if(temporary_storage == nullptr)
     {
@@ -291,7 +296,16 @@ hipError_t
         return hipErrorInvalidValue;
     }
 
-    partition.set_storage(temporary_storage);
+    // Shift the physical pointer forward.
+    void* aligned_storage = temporary_storage;
+    if(layout.alignment > 0)
+    {
+        uintptr_t ptr_val = reinterpret_cast<uintptr_t>(temporary_storage);
+        size_t    offset  = (layout.alignment - (ptr_val % layout.alignment)) % layout.alignment;
+        aligned_storage   = reinterpret_cast<void*>(ptr_val + offset);
+    }
+
+    partition.set_storage(aligned_storage);
 
     return hipSuccess;
 }

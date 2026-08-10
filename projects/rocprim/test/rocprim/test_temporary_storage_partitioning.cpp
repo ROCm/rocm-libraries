@@ -160,7 +160,13 @@ TEST(RocprimTemporaryStoragePartitioningTests, Sequence)
     const size_t expected_offset_d = expected_offset_c + layout_c.size;
     const size_t expected_offset_e
         = rocprim::detail::align_size(expected_offset_d, alignof(type_e));
-    const size_t expected_size = expected_offset_e + elements_e * sizeof(type_e);
+
+    const size_t max_alignment
+        = std::max({layout_a.alignment, layout_b.alignment, layout_c.alignment, alignof(type_e)});
+
+    const size_t expected_size = expected_offset_e + elements_e * sizeof(type_e)
+                                 + (max_alignment > 0 ? max_alignment - 1 : 0);
+
     ASSERT_EQ(storage_size, expected_size);
 
     common::device_ptr<void> temporary_storage(storage_size);
@@ -216,8 +222,13 @@ TEST(RocprimTemporaryStoragePartitioningTests, MutuallyExclusive)
     const size_t expected_align_bc = std::max(alignof(type_c), layout_b.alignment);
     const size_t expected_offset_bc
         = rocprim::detail::align_size(elements_a * sizeof(type_a), expected_align_bc);
-    const size_t expected_size
-        = expected_offset_bc + std::max(elements_c * sizeof(type_c), layout_b.size);
+
+    const size_t max_alignment = std::max({alignof(type_a), layout_b.alignment, alignof(type_c)});
+
+    const size_t expected_size = expected_offset_bc
+                                 + std::max(elements_c * sizeof(type_c), layout_b.size)
+                                 + (max_alignment > 0 ? max_alignment - 1 : 0);
+
     ASSERT_EQ(storage_size, expected_size);
 
     common::device_ptr<void> temporary_storage(storage_size);
@@ -255,7 +266,7 @@ TEST(RocprimTemporaryStoragePartitioningTests, InsufficientAllocation)
     size_t storage_size;
     result = partition(nullptr, storage_size);
     ASSERT_EQ(result, hipSuccess);
-    ASSERT_EQ(storage_size, size * 2);
+    ASSERT_EQ(storage_size, (size * 2) + (alignment - 1));
 
     storage_size -= 1;
     common::device_ptr<void> temporary_storage(storage_size);
