@@ -196,6 +196,13 @@ SelectionResult SelectionEngine::select(int64_t engineId,
                 sc.scoreValid = true;
             }
         }
+        catch(const AdapterOrderingError& e)
+        {
+            // The adapter is telling us the ranking as a whole is untrustworthy, not
+            // that this one candidate failed. Dropping the candidate and ranking the
+            // rest would return a confidently wrong winner, so degrade instead.
+            return degrade(std::string("adapter cannot order this candidate set: ") + e.what());
+        }
         catch(const std::exception&)
         {
             // Scoring failed for this candidate; mark invalid

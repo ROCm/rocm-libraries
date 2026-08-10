@@ -7,6 +7,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <stdexcept>
+#include <string>
 
 namespace hipdnn_backend::heuristics::uhd
 {
@@ -71,33 +73,73 @@ std::unique_ptr<StaticOrderAdapter>
 
 double StaticOrderAdapter::score(const std::vector<double>& features) const
 {
-    // Compute a composite score where earlier fields have exponentially higher weight.
-    // Lower field values yield higher scores (for "max" objective ranking).
+    // Pack the ordered fields into one descending score, most-significant field first:
+    //   score = -sum_i(RADIX^(n-1-i) * field_i)
     //
-    // Score = sum_i(weight_i * -field_i)
-    // where weight_i = 1e10^(numFields - i - 1)
+    // This only reproduces a true lexicographic order while every term stays exactly
+    // representable. Beyond that the low-order fields fall off the end of the mantissa
+    // and the ranking silently stops matching priority-then-id, which RFC 0019 §6
+    // step 5 requires to be deterministic. Rather than misrank, throw: SelectionEngine
+    // marks the candidate invalid, and once no candidate scores it degrades to
+    // applyStaticOrdering(), whose direct (priority, id) comparator is exact.
     //
-    // This ensures field[0] dominates, then field[1], etc.
-
+    // TODO(RFC-0019 §6): the real fix is an ordering interface rather than a packed
+    // scalar — IUhdAdapter::score() cannot express a lexicographic key. Until then the
+    // exactness guard keeps the failure honest.
     if(_orderFieldIndices.empty())
     {
         return 0.0;
     }
 
-    double score = 0.0;
-    double weight = std::pow(1e10, static_cast<double>(_orderFieldIndices.size() - 1));
+    constexpr double kRadix = 1e10;
+    // Doubles carry 2^53 of exact integer range; the packed value must stay inside it.
+    constexpr double kExactLimit = 9007199254740992.0; // 2^53
 
+    double score = 0.0;
+    double weight = std::pow(kRadix, static_cast<double>(_orderFieldIndices.size() - 1));
+
+    size_t position = 0;
     for(const size_t idx : _orderFieldIndices)
     {
         if(idx < features.size())
         {
-            // Negate so lower values get higher scores
-            score += weight * (-features[idx]);
+            const double field = features[idx];
+            if(!std::isfinite(field) || field < 0.0)
+            {
+                throw AdapterOrderingError(
+                    "StaticOrderAdapter: order field is negative or non-finite, so the "
+                    "packed ordering would not be monotonic");
+            }
+
+            // Every field below the most significant one occupies a fixed-width digit.
+            // A value at or above the radix carries into the place above it, so a
+            // less-significant field can outrank a more-significant one — e.g. with
+            // (priority, id), an id of 2e10 outweighs a whole unit of priority.
+            if(position > 0 && field >= kRadix)
+            {
+                throw AdapterOrderingError(
+                    "StaticOrderAdapter: order field value " + std::to_string(field) +
+                    " is at or above the packing radix, so it would carry into a "
+                    "more-significant field and invert the ranking");
+            }
+
+            const double term = weight * field;
+            if(!std::isfinite(term) || score + term >= kExactLimit)
+            {
+                throw AdapterOrderingError(
+                    "StaticOrderAdapter: packed order value exceeds the range a double "
+                    "represents exactly, so the ranking would not match the declared "
+                    "field order");
+            }
+
+            // Negate so lower field values sort first under a "max" objective.
+            score += term;
         }
-        weight /= 1e10;
+        weight /= kRadix;
+        ++position;
     }
 
-    return score;
+    return -score;
 }
 
 } // namespace hipdnn_backend::heuristics::uhd

@@ -13,6 +13,16 @@
 namespace hipdnn_backend::heuristics::uhd
 {
 
+/// @brief Thrown when an adapter cannot produce a trustworthy ordering for a set.
+///
+/// Distinct from a per-candidate scoring failure: this says the ranking as a whole
+/// would be wrong, so the caller must degrade rather than drop the offending candidate
+/// and rank the rest (RFC 0019 §6 step 5 requires a deterministic order).
+class AdapterOrderingError : public std::runtime_error
+{
+public:
+    using std::runtime_error::runtime_error;
+};
 
 /// @brief Adapter types matching UhdAdapter enum in uhd.fbs.
 enum class UhdAdapterType

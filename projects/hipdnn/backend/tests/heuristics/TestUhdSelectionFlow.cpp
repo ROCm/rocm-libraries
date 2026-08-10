@@ -1648,4 +1648,42 @@ TEST_F(TestUhdSelectionFlow, RegisterAcceptsBothObjectiveValuesAndEmpty)
     }
 }
 
+// ========== static_order packing stays exact (RFC 0019 §6 step 5) ==========
+
+TEST_F(TestUhdSelectionFlow, StaticOrderDegradesRatherThanMisrankLargeIds)
+{
+    // The packed score cannot represent (priority, id) lexicographically once the id
+    // is large: priority=0,id=2e10 would score below priority=1,id=0 and lose, which
+    // contradicts priority-then-id ordering. Scoring must fail so selection falls back
+    // to the exact comparator instead of returning a wrong winner.
+    auto low = makeCandidate(20000000000L, 0); // large id, best priority
+    auto high = makeCandidate(1, 1);           // small id, worse priority
+
+    auto entry = createStaticOrderEngine(100, {low, high});
+    EngineRegistry::instance().registerEngine(entry);
+
+    auto result = SelectionEngine::select(100, defaultDeviceVars(), defaultQueryVars());
+
+    EXPECT_FALSE(result.applied) << "packing cannot represent this range exactly";
+    EXPECT_TRUE(result.hasOrdering());
+    ASSERT_EQ(result.sortedKernelIds.size(), 2u);
+    // The fallback comparator is exact: priority 0 wins regardless of id.
+    EXPECT_EQ(result.sortedKernelIds[0], 20000000000L);
+}
+
+TEST_F(TestUhdSelectionFlow, StaticOrderStillRanksOrdinaryIds)
+{
+    auto k1 = makeCandidate(1, 10);
+    auto k2 = makeCandidate(2, 5);
+
+    auto entry = createStaticOrderEngine(100, {k1, k2});
+    EngineRegistry::instance().registerEngine(entry);
+
+    auto result = SelectionEngine::select(100, defaultDeviceVars(), defaultQueryVars());
+
+    EXPECT_TRUE(result.applied);
+    ASSERT_EQ(result.sortedKernelIds.size(), 2u);
+    EXPECT_EQ(result.sortedKernelIds[0], 2);
+}
+
 } // namespace
