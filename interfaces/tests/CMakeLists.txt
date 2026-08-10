@@ -91,3 +91,36 @@ add_test(NAME rocm_interfaces.install_consumer
     -DCONSUMER_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/install_consumer
     -DDEPENDENCY_PREFIX=${CMAKE_PREFIX_PATH}
     -P ${CMAKE_CURRENT_SOURCE_DIR}/check_install.cmake)
+
+if(UNIX AND NOT APPLE)
+  function(add_abi03_provider target abi_ver soname version_script)
+    add_library(${target} SHARED abi03_fixture_rocblas.cpp)
+    target_compile_definitions(${target} PRIVATE ABI_VER=${abi_ver})
+    target_link_options(${target} PRIVATE
+      "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/${version_script}"
+      "LINKER:-soname,${soname}")
+    set_target_properties(${target} PROPERTIES
+      LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/abi03-dso
+      PREFIX "" OUTPUT_NAME "${soname}" SUFFIX "")
+  endfunction()
+
+  add_abi03_provider(abi03_provA 6 libprovA.so.6 abi03_provA.map)
+  add_abi03_provider(abi03_provB 7 libprovB.so.7 abi03_provB.map)
+  add_abi03_provider(abi03_anonA 6 libanonA.so abi03_anon.map)
+  add_abi03_provider(abi03_anonB 7 libanonB.so abi03_anon.map)
+
+  add_executable(abi03_interpose_test abi03_interpose_test.cpp)
+  target_link_libraries(abi03_interpose_test PRIVATE ${CMAKE_DL_LIBS})
+  target_compile_definitions(abi03_interpose_test PRIVATE
+    PROV_A_PATH="$<TARGET_FILE:abi03_provA>"
+    PROV_B_PATH="$<TARGET_FILE:abi03_provB>"
+    ANON_A_PATH="$<TARGET_FILE:abi03_anonA>"
+    ANON_B_PATH="$<TARGET_FILE:abi03_anonB>")
+  add_dependencies(abi03_interpose_test
+    abi03_provA abi03_provB abi03_anonA abi03_anonB)
+
+  add_test(NAME rocm_interfaces.abi03_coresidency
+    COMMAND abi03_interpose_test positive)
+  add_test(NAME rocm_interfaces.abi03_interpose_hazard
+    COMMAND abi03_interpose_test negative)
+endif()
