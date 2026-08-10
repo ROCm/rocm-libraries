@@ -7,43 +7,11 @@
 #include <complex>
 #include <optional>
 #include <roc/host_validation/detail/reference_common.hpp>
+#include <roc/host_validation/epilogue.hpp>
 #include <stdexcept>
 #include <string>
 
 namespace roc::host_validation {
-enum class ActivationApplication {
-    Forward,
-    Gradient,
-};
-
-struct EpilogueProblem {
-    EpilogueProblem(TensorView inputTensor, MutableTensorView outputTensor, ScalarType compute)
-        : input(std::move(inputTensor)), output(std::move(outputTensor)), computeType(compute) {}
-
-    TensorView input;
-    MutableTensorView output;
-    ScalarType computeType;
-    std::optional<MutableTensorView> rawOutput;
-    std::optional<MutableTensorView> auxiliaryOutput;
-    std::optional<TensorView> auxiliaryInput;
-    std::optional<TensorView> gateResidual;
-    std::optional<MutableTensorView> amax;
-    bool accumulateAmax = false;
-    std::optional<VectorBinding> bias;
-    std::complex<double> outputScale = {1.0, 0.0};
-    std::complex<double> auxiliaryScale = {1.0, 0.0};
-    OutputConversion outputConversion = OutputConversion::Default;
-    Activation activation = Activation::None;
-    ActivationApplication activationApplication = ActivationApplication::Forward;
-    double activationParameter0 = 0.0;
-    double activationParameter1 = 0.0;
-    OutputSelection outputSelection = OutputSelection::all();
-};
-
-struct EpilogueRunInfo {
-    size_t outputElementsComputed = 0;
-};
-
 namespace detail {
 template <typename Accumulator>
 Accumulator activationGradientFactor(Activation activation, Accumulator value,
@@ -210,18 +178,4 @@ EpilogueRunInfo referenceEpilogueTyped(const EpilogueProblem& problem) {
     return {.outputElementsComputed = computedElements};
 }
 }  // namespace detail
-
-inline EpilogueRunInfo referenceEpilogue(const EpilogueProblem& problem) {
-    detail::validateEpilogue(problem);
-    switch (problem.computeType) {
-        case ScalarType::Float32:
-            return detail::referenceEpilogueTyped<float>(problem);
-        case ScalarType::Float64:
-            return detail::referenceEpilogueTyped<double>(problem);
-        case ScalarType::Int32:
-            return detail::referenceEpilogueTyped<int32_t>(problem);
-        default:
-            throw std::invalid_argument("Unsupported reference epilogue compute type.");
-    }
-}
 }  // namespace roc::host_validation
