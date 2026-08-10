@@ -1163,6 +1163,38 @@ class TensorAndGemmTests(unittest.TestCase):
         self.assertIsNone(tiled_result.run_info.fallback_reason)
         self.assertEqual(tiled_result.run_info.output_elements_computed, expected.size)
 
+    def test_zero_gemm_scalars_suppress_non_finite_operands(self):
+        finite_c = np.asarray([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)
+        finite_a = np.asarray([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)
+        finite_b = np.asarray([[5.0, 6.0], [7.0, 8.0]], dtype=np.float32)
+        for backend in (hv.GemmBackend.Canonical, hv.GemmBackend.Tiled):
+            with self.subTest(backend=backend):
+                alpha_zero = hv.reference_gemm(
+                    hv.from_numpy(np.full((2, 2), np.nan, dtype=np.float32)),
+                    hv.from_numpy(np.full((2, 2), np.inf, dtype=np.float32)),
+                    hv.from_numpy(finite_c),
+                    hv.ScalarType.Float32,
+                    hv.ScalarType.Float32,
+                    alpha=0.0,
+                    beta=2.0,
+                    backend=backend,
+                )
+                np.testing.assert_array_equal(hv.to_numpy(alpha_zero), 2.0 * finite_c)
+
+                beta_zero = hv.reference_gemm(
+                    hv.from_numpy(finite_a),
+                    hv.from_numpy(finite_b),
+                    hv.from_numpy(np.full((2, 2), np.inf, dtype=np.float32)),
+                    hv.ScalarType.Float32,
+                    hv.ScalarType.Float32,
+                    alpha=1.0,
+                    beta=0.0,
+                    backend=backend,
+                )
+                np.testing.assert_array_equal(
+                    hv.to_numpy(beta_zero), finite_a @ finite_b
+                )
+
     def test_float64_gemm_matches_numpy(self):
         a = np.asarray([[0.25, -1.5], [2.0, 3.25]], dtype=np.float64)
         b = np.asarray([[4.0, 0.5], [-2.0, 1.25]], dtype=np.float64)
@@ -1481,7 +1513,7 @@ class TensorAndGemmTests(unittest.TestCase):
             hv.from_numpy(np.asarray([[0]], dtype=np.int8)),
             hv.ScalarType.Int8,
             hv.ScalarType.Float32,
-            output_conversion=hv.GemmOutputConversion.SaturatingInt8,
+            output_conversion=hv.OutputConversion.SaturatingInt8,
         )
         np.testing.assert_array_equal(
             hv.to_numpy(saturated_int8), np.asarray([[127]], dtype=np.int8)
@@ -1519,7 +1551,7 @@ class TensorAndGemmTests(unittest.TestCase):
                     hv.ScalarType.Int8,
                     hv.ScalarType.Float32,
                     backend=backend,
-                    output_conversion=hv.GemmOutputConversion.SaturatingInt8,
+                    output_conversion=hv.OutputConversion.SaturatingInt8,
                 )
                 output = hv.to_numpy(observed)
                 np.testing.assert_array_equal(output, expected)
@@ -1653,6 +1685,18 @@ class TensorAndGemmTests(unittest.TestCase):
         np.testing.assert_array_equal(
             hv.to_numpy(selected.raw_output),
             np.asarray([[0.0, 1.0], [3.0, 0.0]], dtype=np.float32),
+        )
+
+        int8_values = np.asarray([[-200.0, -128.5], [126.5, 300.0]], dtype=np.float32)
+        saturated = hv.reference_epilogue(
+            hv.from_numpy(int8_values),
+            hv.ScalarType.Int8,
+            hv.ScalarType.Float32,
+            output_conversion=hv.OutputConversion.SaturatingInt8,
+        )
+        np.testing.assert_array_equal(
+            hv.to_numpy(saturated.output),
+            np.clip(np.rint(int8_values), -128, 127).astype(np.int8),
         )
 
     def test_reference_gradient_epilogue_matches_numpy(self):

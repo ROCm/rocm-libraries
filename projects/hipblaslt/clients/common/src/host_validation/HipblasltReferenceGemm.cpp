@@ -208,7 +208,7 @@ void hipblaslt_reference_gemm(hipblasOperation_t       transA,
     problem.epilogue.beta = runtimeScalar(beta);
     problem.epilogue.outputScale = runtimeScalar(scaleD);
     if(outputType == ScalarType::Int8)
-        problem.epilogue.outputConversion = GemmOutputConversion::SaturatingInt8;
+        problem.epilogue.outputConversion = OutputConversion::SaturatingInt8;
 
     static constexpr int64_t blasThreshold = 600;
     const bool useBlas =

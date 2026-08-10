@@ -28,11 +28,6 @@ enum class GemmBackend {
     Blas,
 };
 
-enum class GemmOutputConversion {
-    Default,
-    SaturatingInt8,
-};
-
 enum class AccumulationRounding {
     TypeDefault,
     FullPrecision,
@@ -62,7 +57,7 @@ struct GemmEpilogue {
     std::optional<TensorView> scaleA;
     std::optional<TensorView> scaleB;
     std::complex<double> outputScale = {1.0, 0.0};
-    GemmOutputConversion outputConversion = GemmOutputConversion::Default;
+    OutputConversion outputConversion = OutputConversion::Default;
     Activation activation = Activation::None;
     double activationParameter0 = 0.0;
     double activationParameter1 = 0.0;
@@ -212,7 +207,7 @@ inline void validateRuntimeGemm(const GemmProblem& problem) {
         (problem.epilogue.alpha.imag() != 0.0 || problem.epilogue.beta.imag() != 0.0 ||
          problem.epilogue.outputScale.imag() != 0.0))
         throw std::invalid_argument("Reference GEMM real accumulator has a complex scalar.");
-    if (problem.epilogue.outputConversion == GemmOutputConversion::SaturatingInt8 &&
+    if (problem.epilogue.outputConversion == OutputConversion::SaturatingInt8 &&
         problem.d.type() != ScalarType::Int8)
         throw std::invalid_argument(
             "Reference GEMM saturating output conversion currently requires Int8 output.");
@@ -265,40 +260,11 @@ inline void validateRuntimeGemm(const GemmProblem& problem) {
 }
 
 template <typename Accumulator>
-class RuntimeGemmOutputWriter {
-   public:
-    RuntimeGemmOutputWriter(MutableTensorView output, GemmOutputConversion conversion)
-        : m_output(std::move(output)), m_defaultWriter(m_output), m_conversion(conversion) {}
-
-    void store(size_t row, size_t column, Accumulator value) const {
-        if (m_conversion == GemmOutputConversion::Default) {
-            m_defaultWriter.store(row, column, value);
-            return;
-        }
-
-        if constexpr (IsComplex<Accumulator>::value) {
-            throw std::invalid_argument(
-                "Saturating GEMM output conversion does not accept complex values.");
-        } else {
-            const long double rounded = std::nearbyint(static_cast<long double>(value));
-            const long double clamped =
-                std::clamp(rounded, static_cast<long double>(-128), static_cast<long double>(127));
-            m_output.storeFrom({row, column}, static_cast<int8_t>(clamped));
-        }
-    }
-
-   private:
-    MutableTensorView m_output;
-    RuntimeMatrixWriter<Accumulator> m_defaultWriter;
-    GemmOutputConversion m_conversion;
-};
-
-template <typename Accumulator>
 GemmRunInfo referenceRuntimeCanonical(const GemmProblem& problem) {
     const RuntimeMatrixReader<Accumulator> a(problem.a.values);
     const RuntimeMatrixReader<Accumulator> b(problem.b.values);
     const RuntimeMatrixReader<Accumulator> c(problem.c);
-    const RuntimeGemmOutputWriter<Accumulator> d(problem.d, problem.epilogue.outputConversion);
+    const RuntimeMatrixOutputWriter<Accumulator> d(problem.d, problem.epilogue.outputConversion);
     const RuntimeQuantizer<Accumulator> quantizeA(problem.a.computeType);
     const RuntimeQuantizer<Accumulator> quantizeB(problem.b.computeType);
     const bool typeRoundsAfterEachStep = problem.accumulatorType == ScalarType::Float16 ||
@@ -354,11 +320,13 @@ GemmRunInfo referenceRuntimeCanonical(const GemmProblem& problem) {
         quantizeAccumulator(static_cast<Accumulator>(problem.epilogue.activationParameter0));
     const Accumulator activationParameter1 =
         quantizeAccumulator(static_cast<Accumulator>(problem.epilogue.activationParameter1));
+    const bool alphaIsZero = alpha == Accumulator(0);
+    const bool betaIsZero = beta == Accumulator(0);
 
     auto computeOutput = [&](size_t row, size_t column) {
         Accumulator sum = Accumulator(0);
 
-        if (blockScaleA) {
+        if (!alphaIsZero && blockScaleA) {
             const size_t blockSizeA = problem.a.blockScale->blockSize;
             const size_t blockSizeB = problem.b.blockScale->blockSize;
             size_t blockBase = 0;
@@ -399,7 +367,7 @@ GemmRunInfo referenceRuntimeCanonical(const GemmProblem& problem) {
                 sum = addAccumulator(sum, multiplyAccumulator(blockSum, scale));
                 blockBase = blockEnd;
             }
-        } else {
+        } else if (!alphaIsZero) {
             for (size_t reduction = 0; reduction < k; ++reduction) {
                 Accumulator aValue = conjugateIfNeeded(a(row, reduction), problem.a.conjugate);
                 Accumulator bValue = conjugateIfNeeded(b(reduction, column), problem.b.conjugate);
@@ -425,16 +393,18 @@ GemmRunInfo referenceRuntimeCanonical(const GemmProblem& problem) {
         }
 
         Accumulator effectiveAlpha = alpha;
-        if (scaleA) effectiveAlpha = multiplyAccumulator(effectiveAlpha, (*scaleA)[row]);
-        if (scaleB) effectiveAlpha = multiplyAccumulator(effectiveAlpha, (*scaleB)[column]);
-        if (scaleAlpha) {
-            const MatrixAxis axis = problem.epilogue.scaleAlpha->axis;
-            effectiveAlpha = multiplyAccumulator(
-                effectiveAlpha, (*scaleAlpha)[axis == MatrixAxis::Row ? row : column]);
+        if (!alphaIsZero) {
+            if (scaleA) effectiveAlpha = multiplyAccumulator(effectiveAlpha, (*scaleA)[row]);
+            if (scaleB) effectiveAlpha = multiplyAccumulator(effectiveAlpha, (*scaleB)[column]);
+            if (scaleAlpha) {
+                const MatrixAxis axis = problem.epilogue.scaleAlpha->axis;
+                effectiveAlpha = multiplyAccumulator(
+                    effectiveAlpha, (*scaleAlpha)[axis == MatrixAxis::Row ? row : column]);
+            }
         }
 
-        Accumulator result = addAccumulator(multiplyAccumulator(effectiveAlpha, sum),
-                                            multiplyAccumulator(beta, c(row, column)));
+        Accumulator result = multiplyAccumulator(effectiveAlpha, sum);
+        if (!betaIsZero) result = addAccumulator(result, multiplyAccumulator(beta, c(row, column)));
         if (bias) {
             const MatrixAxis axis = problem.epilogue.bias->axis;
             result = addAccumulator(result, (*bias)[axis == MatrixAxis::Row ? row : column]);

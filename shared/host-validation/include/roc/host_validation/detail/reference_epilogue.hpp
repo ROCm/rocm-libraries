@@ -32,6 +32,7 @@ struct EpilogueProblem {
     std::optional<VectorBinding> bias;
     std::complex<double> outputScale = {1.0, 0.0};
     std::complex<double> auxiliaryScale = {1.0, 0.0};
+    OutputConversion outputConversion = OutputConversion::Default;
     Activation activation = Activation::None;
     ActivationApplication activationApplication = ActivationApplication::Forward;
     double activationParameter0 = 0.0;
@@ -135,7 +136,7 @@ inline void validateEpilogue(const EpilogueProblem& problem) {
 template <typename Accumulator>
 EpilogueRunInfo referenceEpilogueTyped(const EpilogueProblem& problem) {
     const RuntimeMatrixReader<Accumulator> input(problem.input);
-    const RuntimeMatrixWriter<Accumulator> output(problem.output);
+    const RuntimeMatrixOutputWriter<Accumulator> output(problem.output, problem.outputConversion);
     std::optional<RuntimeMatrixWriter<Accumulator>> rawOutput;
     std::optional<RuntimeMatrixWriter<Accumulator>> auxiliaryOutput;
     std::optional<RuntimeMatrixReader<Accumulator>> auxiliaryInput;

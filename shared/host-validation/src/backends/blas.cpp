@@ -106,7 +106,7 @@ void validateCommon(const GemmProblem& problem) {
     if (problem.epilogue.bias || problem.epilogue.scaleAlpha || problem.epilogue.scaleA ||
         problem.epilogue.scaleB || problem.epilogue.activation != Activation::None ||
         problem.epilogue.outputScale != std::complex<double>(1.0, 0.0) ||
-        problem.epilogue.outputConversion != GemmOutputConversion::Default)
+        problem.epilogue.outputConversion != OutputConversion::Default)
         throw std::invalid_argument("BLAS backend does not support a fused epilogue.");
     if (problem.c.layout() != problem.d.layout() ||
         adjustedStorage(problem.c) != adjustedStorage(problem.d))
@@ -290,7 +290,8 @@ GemmRunInfo runTransforming(const GemmProblem& problem) {
                                  });
 
     const RuntimeMatrixReader<Accumulator> stagedOutput(stagedC.view());
-    const RuntimeGemmOutputWriter<Accumulator> output(problem.d, problem.epilogue.outputConversion);
+    const RuntimeMatrixOutputWriter<Accumulator> output(problem.d,
+                                                        problem.epilogue.outputConversion);
     const Accumulator outputScale =
         runtimeScalar<Accumulator>(problem.epilogue.outputScale, "output scale");
     for (size_t row = 0; row < problem.d.shape()[0]; ++row)
