@@ -81,7 +81,6 @@ def set_github_output(outputs: Mapping[str, str]):
                 f.write(f"{k}<<{delimiter}\n{v}\n{delimiter}\n")
             else:
                 f.write(f"{k}={v}\n")
-            f.write(f"{k}={v}\n")
 
 
 def append_step_summary(summary: str):
