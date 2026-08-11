@@ -89,6 +89,7 @@ option(ROCSPARSE_ENABLE_ILU0_BOOST_SIGN "Preserve the pivot sign/phase in the IL
 option(BUILD_WITH_OFFLOAD_COMPRESS
        "Enable offload compression during compilation" ON)
 option(ROCSPARSE_ENABLE_HANDLE_CREATE "Build rocsparse_handle_create/destroy: non-blocking handle creation on a user-defined stream" ON)
+option(ROCSPARSE_ENABLE_SPMAT_SCALE "Build rocsparse_spmat_scale and its scalar dense vector descriptor helper rocsparse_dnvec_descr_create_scalar" ON)
 option(BUILD_WITH_ILDLT0 "Build rocSPARSE with incomplete LDL^T (zero fill-in) factorization support" ON)
 option(BUILD_WITH_U16_REMOVED "Build rocSPARSE with the deprecated rocsparse_indextype_u16 index type removed" ON)
 option(BUILD_WITH_CSC_TRSV "Enable CSC format support in rocsparse_spsv and rocsparse_sptrsv" ON)
