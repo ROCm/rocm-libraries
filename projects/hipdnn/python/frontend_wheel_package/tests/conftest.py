@@ -33,6 +33,9 @@ def _gpu_available():
     return True
 
 
+_stub_active = False
+
+
 def _load_test_good_plugin():
     """Load the "good" engine plugin, in ABSOLUTE mode, for the whole session.
 
@@ -53,15 +56,25 @@ def _load_test_good_plugin():
     unconditionally by the superbuild, and CI always sets
     HIPDNN_TEST_GOOD_PLUGIN_PATH to its installed path -- a missing/unset
     path here means required test infrastructure is missing, so tests fail
-    hard rather than silently skipping.
+    hard rather than silently skipping. A handful of tests genuinely need a
+    real provider engine (e.g. querying loaded MIOpen engine metadata, or a
+    real engine's execute-time variant-pack validation); those check
+    ``stub_engine_active()`` and skip themselves instead.
 
     Must run before any handle is created (pytest_configure, not a
     fixture).
     """
+    global _stub_active
     plugin_path = os.environ.get("HIPDNN_TEST_GOOD_PLUGIN_PATH")
     if not plugin_path or not os.path.isfile(plugin_path):
         return
     hipdnn.set_engine_plugin_paths([plugin_path], hipdnn.PluginLoadingMode.ABSOLUTE)
+    _stub_active = True
+
+
+def stub_engine_active() -> bool:
+    """Return True once the ABSOLUTE-mode test stub has replaced real engine discovery."""
+    return _stub_active
 
 
 def pytest_configure(config):

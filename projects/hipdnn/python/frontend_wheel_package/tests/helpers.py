@@ -17,22 +17,6 @@ def create_float_graph():
     return graph
 
 
-def build_operation_graph(graph, handle=None):
-    """Validate and lower the graph to a backend operation graph.
-
-    Stops before create_execution_plans, which requires a provider engine
-    applicable to the op. The python wheel test environment only loads the
-    miopen provider, so ops without a miopen engine (e.g. matmul, standalone
-    pointwise) cannot get an execution plan here. Creates a handle if one is
-    not supplied and returns it for reuse.
-    """
-    if handle is None:
-        handle = hipdnn.create_handle()
-    assert graph.validate().is_good()
-    assert graph.build_operation_graph(handle).is_good()
-    return handle
-
-
 def build_all_plans(graph, handle=None):
     """Validate, build the operation graph, and create/check/build execution plans.
 

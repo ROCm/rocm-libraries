@@ -7,6 +7,8 @@ import pytest
 
 import hipdnn_frontend as hipdnn
 
+from .conftest import stub_engine_active
+
 
 @pytest.mark.gpu
 class TestHandle:
@@ -38,6 +40,11 @@ class TestHandle:
         set_stream(handle, 0)
         assert get_stream(handle) == 0
 
+    @pytest.mark.skipif(
+        stub_engine_active(),
+        reason="needs the real MIOpen engine loaded; incompatible with the "
+        "ABSOLUTE-mode test stub that replaces default engine discovery",
+    )
     def test_get_engine_info_for_loaded_engine(self):
         """The loaded MIOpen engine exposes all provider metadata."""
         graph = hipdnn.Graph().set_preferred_engine_id_ext("MIOPEN_ENGINE")

@@ -10,6 +10,7 @@ import pytest
 
 import hipdnn_frontend as hipdnn
 
+from .conftest import stub_engine_active
 from .helpers import build_all_plans, create_float_graph
 from .test_conv_fprop import build_conv_fprop_graph
 
@@ -97,6 +98,11 @@ class TestValidationErrors:
 class TestExecutionErrors:
     """Execution and resource failures (require GPU)."""
 
+    @pytest.mark.skipif(
+        stub_engine_active(),
+        reason="the ABSOLUTE-mode test stub's execute() is a no-op that never "
+        "validates variant-pack completeness; only a real engine does",
+    )
     def test_missing_variant_pack_entry_fails_execute(self):
         """Executing with an incomplete variant pack returns a bad result."""
         graph, x, weight, y = build_conv_fprop_graph(
