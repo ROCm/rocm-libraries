@@ -85,6 +85,7 @@ if(ENABLE_AOT_CATALOG_ENGINE)
     target_sources(hip_kernel_provider_tests PRIVATE
         engines/aot_catalog_engine/TestSdpaDecode.cpp
         engines/aot_catalog_engine/TestTuneCache.cpp
+        engines/aot_catalog_engine/TestWorkspaceExpr.cpp
     )
     # Family-contributed test sources (absolute paths appended by each family's
     # aot_add_family_test()). Empty when rocKE/the arch is unavailable -> no-op.

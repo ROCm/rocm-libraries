@@ -7,7 +7,9 @@
 #include <filesystem>
 #include <fstream>
 #include <initializer_list>
+#include <map>
 #include <stdexcept>
+#include <string>
 
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
@@ -268,6 +270,109 @@ GridFormula parseGridFormula(const json& obj)
     return grid;
 }
 
+// ---- Workspace-expression parsing -------------------------------------------
+
+// One recognized operator key -> (WsOp, exact-or-minimum arity). exactArity>0
+// means the array must hold exactly that many children; exactArity==0 means
+// "variadic, >= minArity".
+struct WsOpSpec
+{
+    WsOp op;
+    size_t exactArity; // 0 => variadic
+    size_t minArity;
+};
+
+WorkspaceExpr parseWorkspaceExpr(const json& value)
+{
+    WorkspaceExpr expr;
+
+    // Shorthand scalars: a bare integer is a LITERAL (the back-compat path --
+    // every existing "workspace_bytes": 0 lands here), a bare string a SYMBOL.
+    if(value.is_number_integer())
+    {
+        expr.op = WsOp::LITERAL;
+        expr.literal = value.get<int64_t>();
+        if(expr.literal < 0)
+        {
+            fail("'workspace_bytes' literal must be non-negative");
+        }
+        return expr;
+    }
+    if(value.is_string())
+    {
+        expr.op = WsOp::SYMBOL;
+        expr.symbol = value.get<std::string>();
+        return expr;
+    }
+
+    if(!value.is_object())
+    {
+        fail("workspace expression must be an integer, a symbol string, or an operator object");
+    }
+
+    // An operator node is an object with EXACTLY one recognized op key whose
+    // value is an array of child expressions. Stricter than grid axes (which
+    // allow an 'add' companion key): the JSON-AST discipline is one op per node.
+    static const std::map<std::string, WsOpSpec> kOps = {
+        {"mul", {WsOp::MUL, 0, 1}},
+        {"add", {WsOp::ADD, 0, 1}},
+        {"min", {WsOp::MIN, 0, 1}},
+        {"max", {WsOp::MAX, 0, 1}},
+        {"sub", {WsOp::SUB, 2, 2}},
+        {"ceil_div", {WsOp::CEIL_DIV, 2, 2}},
+        {"floor_div", {WsOp::FLOOR_DIV, 2, 2}},
+        {"align_up", {WsOp::ALIGN_UP, 2, 2}},
+    };
+
+    const WsOpSpec* spec = nullptr;
+    std::string opKey;
+    for(const auto& [key, node] : value.items())
+    {
+        auto it = kOps.find(key);
+        if(it == kOps.end())
+        {
+            fail("workspace expression has unknown operator key '" + key
+                 + "' (expected one of mul|add|sub|min|max|ceil_div|floor_div|align_up)");
+        }
+        if(spec != nullptr)
+        {
+            fail("workspace expression object must hold exactly one operator key, found '" + opKey
+                 + "' and '" + key + "'");
+        }
+        spec = &it->second;
+        opKey = key;
+    }
+    if(spec == nullptr)
+    {
+        fail("workspace expression object needs exactly one operator key");
+    }
+
+    const json& operands = value.at(opKey);
+    if(!operands.is_array())
+    {
+        fail("workspace operator '" + opKey + "' needs an array of operands");
+    }
+    if(spec->exactArity != 0 && operands.size() != spec->exactArity)
+    {
+        fail("workspace operator '" + opKey + "' takes exactly "
+             + std::to_string(spec->exactArity) + " operands, got "
+             + std::to_string(operands.size()));
+    }
+    if(operands.size() < spec->minArity)
+    {
+        fail("workspace operator '" + opKey + "' needs at least "
+             + std::to_string(spec->minArity) + " operand(s)");
+    }
+
+    expr.op = spec->op;
+    expr.args.reserve(operands.size());
+    for(const auto& operand : operands)
+    {
+        expr.args.push_back(parseWorkspaceExpr(operand));
+    }
+    return expr;
+}
+
 void parseBlock(const json& value, std::array<uint32_t, 3>& block)
 {
     if(!value.is_array() || value.size() != 3)
@@ -402,14 +507,12 @@ KernelEntry parseKernel(const json& obj, const fs::path& familyDir)
              + "' has an empty 'constraints' map; a kernel that constrains nothing claims to "
                "handle every problem shape -- list at least a dtype constraint");
     }
+    // 'workspace_bytes' is either a static integer (constant scratch, the common
+    // case -- absent field defaults to LITERAL 0) or a JSON-AST expression over
+    // the problem's grid symbols + `elem_size`, evaluated per-problem at launch.
     if(obj.contains("workspace_bytes"))
     {
-        const int64_t workspace = obj.at("workspace_bytes").get<int64_t>();
-        if(workspace < 0)
-        {
-            fail("'workspace_bytes' must be non-negative");
-        }
-        entry.workspaceBytes = static_cast<size_t>(workspace);
+        entry.workspace = parseWorkspaceExpr(obj.at("workspace_bytes"));
     }
 
     // Launch metadata lives at the kernel top level (grid/block/args_signature).

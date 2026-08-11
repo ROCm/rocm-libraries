@@ -24,6 +24,7 @@ using catalog::GridFormula;
 using catalog::KernelArgument;
 using catalog::LaunchBindings;
 using catalog::ScalarValue;
+using catalog::WorkspaceExpr;
 
 // Grid symbol table: symbol name (e.g. "M", "BN") -> integer value, built by
 // the op adapter from the decoded problem.
@@ -59,5 +60,11 @@ struct Grid
 // Evaluate each grid axis over `symbols`. Throws if a referenced symbol is
 // missing or an axis evaluates negative.
 Grid evalGrid(const GridFormula& formula, const SymbolTable& symbols);
+
+// Evaluate a workspace-size expression over `symbols` (the kernel's grid
+// symbols plus, when the dtype is known, `elem_size`). Throws (fails closed) if
+// a referenced symbol is missing, a divisor/alignment is zero, or the result is
+// negative. Returns the byte count of scratch the kernel needs for this problem.
+int64_t evalWorkspace(const WorkspaceExpr& expr, const SymbolTable& symbols);
 
 } // namespace aot_catalog_engine::launch

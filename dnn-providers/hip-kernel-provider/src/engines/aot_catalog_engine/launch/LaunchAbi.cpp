@@ -3,6 +3,7 @@
 
 #include "launch/LaunchAbi.hpp"
 
+#include <algorithm>
 #include <cstring>
 #include <string>
 
@@ -16,6 +17,8 @@ using catalog::GridAxis;
 using catalog::GridAxisKind;
 using catalog::GridValue;
 using catalog::ScalarType;
+using catalog::WorkspaceExpr;
+using catalog::WsOp;
 
 namespace
 {
@@ -199,6 +202,114 @@ Grid evalGrid(const GridFormula& formula, const SymbolTable& symbols)
     grid.y = static_cast<uint32_t>(evalGridAxis(formula.y, symbols));
     grid.z = static_cast<uint32_t>(evalGridAxis(formula.z, symbols));
     return grid;
+}
+
+int64_t evalWorkspace(const WorkspaceExpr& expr, const SymbolTable& symbols)
+{
+    switch(expr.op)
+    {
+    case WsOp::LITERAL:
+        return expr.literal;
+    case WsOp::SYMBOL:
+    {
+        auto it = symbols.find(expr.symbol);
+        if(it == symbols.end())
+        {
+            throwPluginError(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                             "aot-catalog: workspace references undefined symbol '" + expr.symbol
+                                 + "'");
+        }
+        return it->second;
+    }
+    case WsOp::MUL:
+    {
+        int64_t result = 1;
+        for(const auto& arg : expr.args)
+        {
+            result *= evalWorkspace(arg, symbols);
+        }
+        return result;
+    }
+    case WsOp::ADD:
+    {
+        int64_t result = 0;
+        for(const auto& arg : expr.args)
+        {
+            result += evalWorkspace(arg, symbols);
+        }
+        return result;
+    }
+    case WsOp::MIN:
+    {
+        int64_t result = evalWorkspace(expr.args.front(), symbols);
+        for(size_t i = 1; i < expr.args.size(); ++i)
+        {
+            result = std::min(result, evalWorkspace(expr.args[i], symbols));
+        }
+        return result;
+    }
+    case WsOp::MAX:
+    {
+        int64_t result = evalWorkspace(expr.args.front(), symbols);
+        for(size_t i = 1; i < expr.args.size(); ++i)
+        {
+            result = std::max(result, evalWorkspace(expr.args[i], symbols));
+        }
+        return result;
+    }
+    case WsOp::SUB:
+    {
+        const int64_t lhs = evalWorkspace(expr.args[0], symbols);
+        const int64_t rhs = evalWorkspace(expr.args[1], symbols);
+        const int64_t result = lhs - rhs;
+        if(result < 0)
+        {
+            throwPluginError(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                             "aot-catalog: workspace 'sub' evaluated to a negative value");
+        }
+        return result;
+    }
+    case WsOp::CEIL_DIV:
+    {
+        const int64_t num = evalWorkspace(expr.args[0], symbols);
+        const int64_t den = evalWorkspace(expr.args[1], symbols);
+        if(den == 0)
+        {
+            throwPluginError(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                             "aot-catalog: workspace ceil_div by zero");
+        }
+        return (num + den - 1) / den;
+    }
+    case WsOp::FLOOR_DIV:
+    {
+        const int64_t num = evalWorkspace(expr.args[0], symbols);
+        const int64_t den = evalWorkspace(expr.args[1], symbols);
+        if(den == 0)
+        {
+            throwPluginError(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                             "aot-catalog: workspace floor_div by zero");
+        }
+        return num / den;
+    }
+    case WsOp::ALIGN_UP:
+    {
+        const int64_t value = evalWorkspace(expr.args[0], symbols);
+        const int64_t align = evalWorkspace(expr.args[1], symbols);
+        if(align == 0)
+        {
+            throwPluginError(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                             "aot-catalog: workspace align_up by zero");
+        }
+        return ((value + align - 1) / align) * align;
+    }
+    default:
+        break;
+    }
+
+    // Unreachable: parseWorkspaceExpr only emits the ops above. Fail closed if a
+    // new op is ever added to the enum without a case here.
+    throwPluginError(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                     "aot-catalog: unhandled workspace operator");
 }
 
 } // namespace aot_catalog_engine::launch

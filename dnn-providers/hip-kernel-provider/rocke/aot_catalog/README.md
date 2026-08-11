@@ -195,7 +195,7 @@ Each `kernels[]` entry:
 | `grid`            | per-axis `x`/`y`/`z`. A value is a constant, a problem-key string (`"M"`, `"H"`, `"B"`), or `{"ceil_div": ["<key>", n]}`. Evaluated from that op's `gridSymbols`. |
 | `block`           | `[x,y,z]` constant workgroup size. |
 | `shared_mem_bytes`| omit for static-LDS kernels (defaults to 0). |
-| `workspace_bytes` | this kernel's scratch need (0 for all shipped reference kernels). |
+| `workspace_bytes` | this kernel's scratch need — either a **constant** (an integer, e.g. `0` as on every shipped kernel) **or** a **data-driven expression** over the problem's `grid` keys plus `elem_size`, evaluated per-problem. A kernel that needs scratch sets this **and** names a `ptr` arg called `workspace` in its `args_signature`; the engine reserves `max(workspace_bytes)` over the applicable candidates, allocates one buffer, and binds it to that arg. The expression is a small JSON-AST (see [§4](#workspace-a-constant-or-a-data-driven-expression)); a bare integer is just the degenerate case. This makes shape-scaled scratch (conv im2col, split-K) authorable — but note conv still needs an adapter and a selection strategy ([§10](#10-adding-a-brand-new-op)). |
 | `args_signature`  | the launch ABI as an ordered list of `{name,type}` (`ptr`/`i32`/`f32`). **Must match the op's ABI order exactly** (§6–§8); `LaunchAbi` packs by name in this order. |
 
 The set of legal `constraints`/`grid` keys is exactly the **problem keys the adapter
@@ -250,6 +250,55 @@ For a genuinely new op, see §10. For the full capability/limits map (which SDPA
 extensions on gfx942/gfx950/gfx1250 are data, which are adapter C++, and which need a new
 substrate capability), see the **capabilities-and-limits section of the
 [engine README](../../src/engines/aot_catalog_engine/README.md)**.
+
+### Workspace: a constant, or a data-driven expression
+
+`workspace_bytes` (§3) sizes the scratch buffer the engine allocates and binds to a kernel's
+`workspace` `ptr` arg. The framework must size it **before** tuning knows which candidate
+wins, so at plan time the engine evaluates each applicable candidate's expression for this
+problem and reserves the **max** across them (`plans/CatalogPlan.cpp`), allocates that one
+buffer, and binds it. It accepts two forms:
+
+- a **constant** — a bare integer (`0` on every shipped kernel), the value you know at
+  authoring time; or
+- a **JSON-AST expression** over the kernel's `grid` symbols (`M`, `N`, `K`, … — whatever the
+  adapter publishes) plus the injected `elem_size` symbol (element width in bytes for the
+  problem's dtype), evaluated per-problem. A constant is just a LITERAL node, so nothing about
+  the old behavior changed.
+
+The node vocabulary (v1) is arithmetic + clamp only:
+
+| node | form | meaning |
+|------|------|---------|
+| literal | `256` | integer constant |
+| symbol | `"M"` | a grid symbol, or `"elem_size"` |
+| `mul` / `add` / `min` / `max` | `{"mul": [a, b, …]}` | variadic (≥ 1 operand) |
+| `sub` | `{"sub": [a, b]}` | `a - b` (must be ≥ 0) |
+| `ceil_div` / `floor_div` | `{"ceil_div": [a, b]}` | integer division |
+| `align_up` | `{"align_up": [a, b]}` | round `a` up to a multiple of `b` |
+
+Example — an im2col buffer of `align_up(M · N · elem_size, 256)`:
+
+```json
+"workspace_bytes": { "align_up": [ { "mul": ["M", "N", "elem_size"] }, 256 ] }
+```
+
+Evaluation is **fail-closed**: a symbol the problem doesn't publish, a divide/align by zero,
+or a negative `sub` throws and the engine declines rather than launching with a wrong size.
+Malformed expressions (unknown op key, wrong arity) are rejected at **load** time, skipping
+just that family (§3 unknown-key discipline).
+
+**Deliberately out of v1:** conditionals (`?:`/`if`) and infix syntax. An algorithm branch
+whose scratch differs (split-K vs none, im2col vs Winograd) is modeled as **separate kernels**
+with their own `constraints` + expression — the selector already branches, so no ternary is
+needed. Overflow of the int64 product and exotic dtypes (`elem_size` is absent, so referencing
+it fails closed) are known gaps.
+
+**This removes one conv blocker, not all of them.** Shape-scaled scratch is now expressible,
+but convolution still needs a `ConvAdapter` (to decode and publish `N,C,H,W,…`) **and** a
+selection strategy beyond measure-and-cache for its unbounded shape space (engine README §4.1,
+[§10](#10-adding-a-brand-new-op)). SDPA backward likewise needs a multi-kernel plan, not just a
+workspace expression (engine README §4.3). Data-driven workspace ≠ conv works.
 
 ---
 
@@ -321,6 +370,43 @@ Copy the grid block from the matching family; do not assume M-then-N.
 
 Constraints are `multiple_of` (16 for the reference; M/N `multiple_of 64`, K
 `multiple_of 32` for the tiled path — sub-tile shapes correctly fall back).
+
+### Example — a complete `kernels[]` entry (the shipped reference f16 kernel)
+This is the simplest end-to-end shape of "a kernel instance with conditions" — copy it as
+your starting point. (The bf16 kernel is the same entry with `"dtype": {"equals": "bf16"}`
+and its own `.co`; both live flat in the one `gemm_wmma/family.json`.)
+
+```json
+{
+    "symbol": "rocke_wmma_gemm_wmma16x16x16_fp16_rcr_xm",
+    "co_file": "rocke_wmma_gemm_wmma16x16x16_fp16_rcr_xm.co",
+    "constraints": {
+        "dtype": { "equals": "f16" },
+        "M": { "min": 1, "multiple_of": 16 },
+        "N": { "min": 1, "multiple_of": 16 },
+        "K": { "min": 1, "multiple_of": 16 }
+    },
+    "grid":  { "x": { "ceil_div": ["M", 16] }, "y": { "ceil_div": ["N", 16] }, "z": 1 },
+    "block": [32, 1, 1],
+    "args_signature": [
+        { "name": "A", "type": "ptr" }, { "name": "B", "type": "ptr" },
+        { "name": "C", "type": "ptr" },
+        { "name": "M", "type": "i32" }, { "name": "N", "type": "i32" },
+        { "name": "K", "type": "i32" }
+    ],
+    "workspace_bytes": 0
+}
+```
+
+- **Add a dtype** → append a second entry with a different `dtype` constraint and its `.co`
+  (zero C++, §4).
+- **Add a tuning candidate** for shapes you already serve (e.g. a faster tiled kernel) →
+  append an entry with *overlapping* constraints and a distinct `symbol`; `CatalogPlan`
+  measures both and caches the winner per shape (§5). This is exactly how the tiled
+  `gemm_wmma_universal` family coexists with this reference one.
+- **Narrow a kernel** to only the shapes it's correct for → tighten its constraints
+  (`{"equals": …}`, tighter `multiple_of`, `min`/`max` bounds). When unsure, over-constrain
+  (§3 ⚠️).
 
 ### Files
 Adapter `src/engines/aot_catalog_engine/ops/GemmAdapter.{hpp,cpp}`; data + co-located
@@ -710,7 +796,27 @@ reviewed C++ adapter) and this subsystem (a data-only family):
    and the parity test(s) — following §9.
 
 No changes to `LaunchAbi`, the `Catalog` loader, `Selection`, `CatalogTypes`,
-`CatalogPlan`, or the other adapters are needed — the substrate is op-agnostic.
+`CatalogPlan`, or the other adapters are needed — the substrate is op-agnostic **for an op
+that fits it.**
+
+> ⚠️ **A new adapter is necessary but not always sufficient.** The step list above holds for
+> an op whose selection is measure-and-cache over a small, repeated shape space. An op that
+> breaks that assumption needs **more than an adapter** — and the two most likely next ops
+> both do:
+> - **Convolution.** Its workspace *is* now expressible — im2col/split-K scratch as an
+>   `elem_size`-scaled expression ([§4 workspace note](#workspace-a-constant-or-a-data-driven-expression))
+>   — so that blocker is gone. What remains: its key space
+>   `(N,C,H,W,K,R,S,stride,pad,dilation,dtype)` is effectively unbounded per model, so
+>   measure-and-cache thrashes and never amortizes (engine README §4.1). A viable conv path
+>   still needs a `ConvAdapter` **and** a selection strategy beyond measure-all — a larger lift
+>   than "write a `ConvAdapter`," even with workspace solved.
+> - **SDPA backward** (and any **multi-kernel plan**) breaks the
+>   one-candidate = one-module = one-launch assumption baked into `CatalogPlan`: backward is a
+>   3-stage pipeline with a shape-derived workspace. Also a substrate change.
+>
+> The full "data vs adapter-C++ vs new-substrate-capability" map is in the
+> **[engine README §4](../../src/engines/aot_catalog_engine/README.md#4-capabilities-and-limits)**.
+> If you're scoping one of these, budget for the substrate work, not just an adapter.
 
 ---
 

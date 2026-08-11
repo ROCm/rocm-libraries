@@ -37,6 +37,36 @@ using ShapeValue = std::variant<bool, int64_t, double, std::string>;
 // by Selection::satisfies against each kernel's constraints.
 using ProblemShape = std::map<std::string, ShapeValue>;
 
+// Byte width of one element for the problem's "dtype" token, used to inject the
+// `elem_size` symbol into workspace-expression evaluation. Returns nullopt when
+// the problem has no string "dtype" key or the token is unmapped -- a workspace
+// expression that then references `elem_size` fails closed as "undefined
+// symbol" rather than silently using a wrong width. This is intentionally a
+// separate table from scalarTypeSizeBytes/argSizeBytes, which size kernarg
+// slots (ptr/i32/i64), NOT element dtypes.
+inline std::optional<int64_t> elementSizeBytes(const ProblemShape& problem)
+{
+    auto it = problem.find("dtype");
+    if(it == problem.end() || !std::holds_alternative<std::string>(it->second))
+    {
+        return std::nullopt;
+    }
+    const std::string& token = std::get<std::string>(it->second);
+    if(token == "f16" || token == "bf16")
+    {
+        return 2;
+    }
+    if(token == "f8" || token == "bf8" || token == "f8fnuz" || token == "bf8fnuz")
+    {
+        return 1;
+    }
+    if(token == "f32")
+    {
+        return 4;
+    }
+    return std::nullopt;
+}
+
 // Applicability predicate for a single shape key (Tier A + simple Tier B). All
 // present sub-predicates must hold. An all-empty rule matches nothing (fail
 // closed) -- mirrors PR #9207's AttributeRule::empty() semantics.
@@ -94,6 +124,43 @@ struct GridFormula
     GridAxis x;
     GridAxis y;
     GridAxis z;
+};
+
+// -----------------------------------------------------------------------------
+// Workspace-size expression (JSON-as-AST)
+// -----------------------------------------------------------------------------
+
+// A kernel's scratch need is a small arithmetic expression over the problem's
+// grid symbols (M, N, K, ...) plus the injected `elem_size` symbol, evaluated
+// per-problem. The JSON *is* the tree -- no infix parser, so precedence and
+// parentheses come for free. A bare integer is a LITERAL, i.e. today's static
+// constant is just the degenerate expression (fully back-compatible).
+//
+// Conditionals are deliberately absent: algorithm branches (split-K vs none,
+// im2col vs Winograd) are modeled as separate kernels with their own
+// constraints + workspace expr; the selector already branches. See the READMEs.
+enum class WsOp
+{
+    LITERAL, // `literal`
+    SYMBOL, // `symbol` resolved from the runtime symbol table
+    MUL, // product of args (>= 1)
+    ADD, // sum of args (>= 1)
+    SUB, // args[0] - args[1] (result must be non-negative)
+    CEIL_DIV, // (args[0] + args[1] - 1) / args[1]
+    FLOOR_DIV, // args[0] / args[1]
+    MIN, // minimum of args (>= 1)
+    MAX, // maximum of args (>= 1)
+    ALIGN_UP, // ceil_div(args[0], args[1]) * args[1]
+};
+
+// Recursive expression node, mirroring GridValue/GridAxis. LITERAL uses
+// `literal`; SYMBOL uses `symbol`; every operator uses `args`.
+struct WorkspaceExpr
+{
+    WsOp op = WsOp::LITERAL;
+    int64_t literal = 0;
+    std::string symbol;
+    std::vector<WorkspaceExpr> args;
 };
 
 // -----------------------------------------------------------------------------
@@ -186,7 +253,7 @@ struct KernelEntry
     std::string symbol; // exported function name in the .co/HSACO
     std::string coPath; // absolute path to the .co/HSACO on disk
     Constraints constraints; // applicability (Tier A + simple Tier B)
-    size_t workspaceBytes = 0;
+    WorkspaceExpr workspace; // scratch need; defaults to LITERAL 0 (no scratch)
     LaunchMetadata launch;
 };
 

@@ -65,6 +65,22 @@ void debugExplainNoCandidates(const std::string& opKind,
     }
 }
 
+// Symbol table for evaluating a kernel's workspace expression: the adapter's
+// grid symbols (M, N, K, ...) plus `elem_size` when the problem's dtype is
+// known. Referencing `elem_size` for an unmapped dtype fails closed in
+// evalWorkspace as "undefined symbol" rather than silently using a wrong width.
+launch::SymbolTable workspaceSymbols(const ops::IOpAdapter& adapter,
+                                     const catalog::ProblemShape& problem,
+                                     const catalog::KernelEntry& kernel)
+{
+    launch::SymbolTable symbols = adapter.gridSymbols(problem, kernel);
+    if(const std::optional<int64_t> elemSize = catalog::elementSizeBytes(problem))
+    {
+        symbols.emplace("elem_size", *elemSize);
+    }
+    return symbols;
+}
+
 } // namespace
 
 CatalogEngine::CatalogEngine()
@@ -196,11 +212,16 @@ size_t CatalogEngine::getMaxWorkspaceSize(
         return 0;
     }
     // The winner isn't known until the first execute times the candidates, so
-    // reserve the max any candidate needs (each uses <= its own <= max).
+    // reserve the max any candidate needs (each uses <= its own <= max). Each
+    // candidate's workspace is an expression over its grid symbols + elem_size,
+    // evaluated against this problem (a bare integer is the degenerate case).
     size_t maxBytes = 0;
     for(const catalog::Catalog::Candidate& candidate : match->candidates)
     {
-        maxBytes = std::max(maxBytes, candidate.kernel->workspaceBytes);
+        const launch::SymbolTable symbols
+            = workspaceSymbols(*match->adapter, match->problem, *candidate.kernel);
+        const int64_t bytes = launch::evalWorkspace(candidate.kernel->workspace, symbols);
+        maxBytes = std::max(maxBytes, static_cast<size_t>(bytes));
     }
     return maxBytes;
 }
@@ -276,13 +297,18 @@ void CatalogEngine::initializeExecutionContext(
         }
 
         catalog::LaunchBindings bindings = adapter.buildBindings(opGraph, match->problem, kernel);
-        launch::SymbolTable gridSymbols = adapter.gridSymbols(match->problem, kernel);
+        // The workspace symbol table (grid symbols + elem_size) also drives grid
+        // eval at launch; the extra elem_size symbol is harmless there. Evaluate
+        // the workspace expression now so the plan caches a concrete byte count.
+        launch::SymbolTable gridSymbols = workspaceSymbols(adapter, match->problem, kernel);
+        const auto workspaceBytes
+            = static_cast<size_t>(launch::evalWorkspace(kernel.workspace, gridSymbols));
 
         planCandidates.push_back(PlanCandidate{std::move(*module),
                                                kernel.launch,
                                                std::move(bindings),
                                                std::move(gridSymbols),
-                                               kernel.workspaceBytes,
+                                               workspaceBytes,
                                                kernel.symbol});
     }
 

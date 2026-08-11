@@ -218,6 +218,11 @@ Along the axes the design was built for, coverage grows as data:
 - **SDPA forward across arches and features** (GQA, causal, masks, fp8, varlen) is now data
   too, gated by `family.json` against the universal forward adapter's fixed by-name
   vocabulary — once a kernel that serves the case exists.
+- **Shape-scaled workspace as data** — `workspace_bytes` accepts a JSON-AST expression over
+  the problem's grid symbols + `elem_size`, evaluated per-problem (a bare integer is the
+  degenerate constant). So im2col/split-K-style scratch that grows with the problem is now
+  authorable without a C++ change; the evaluator is arithmetic + clamp only (no conditionals —
+  those are modeled as separate candidates). See the authoring guide's workspace note.
 
 The load-bearing precondition on all of that: **it is only data-free when the op already
 has an adapter and the kernel fits that adapter's fixed ABI.**
@@ -230,12 +235,14 @@ has an adapter and the kernel fits that adapter's fixed ABI.**
   `packArgs` change in `LaunchAbi` (natural alignment today), deferred until a real ASM
   forward kernel lands.
 - **SDPA backward** — breaks the model outright: `CatalogPlan` assumes one candidate = one
-  module = one launch. Backward is a 3-stage pipeline (odo → dqdkdv → dq_convert) with a
-  shape-derived workspace and an `accumulator_type` knob that drives both selection and
-  workspace size. **New substrate capability** (multi-kernel plan).
-- **Conv2d/Conv3d** — no `ConvAdapter` exists yet (a new op); even once written,
-  measure-and-cache degrades on conv's unbounded shape space (§4.1 #2). Largest lift:
-  a new adapter **plus** a selection strategy beyond measure-all.
+  module = one launch. Backward is a 3-stage pipeline (odo → dqdkdv → dq_convert); its
+  workspace is now sizeable as an expression (§4.2), but the multi-kernel plan and the
+  `accumulator_type` knob that drives selection are not. **New substrate capability**
+  (multi-kernel plan).
+- **Conv2d/Conv3d** — no `ConvAdapter` exists yet (a new op). Its workspace is now expressible
+  as data (§4.2), so that is no longer the blocker; what remains is that measure-and-cache
+  degrades on conv's unbounded shape space (§4.1 #2). Largest lift: a new adapter **plus** a
+  selection strategy beyond measure-all.
 
 **One line:** a correct, data-extensible best-pick engine that excels when the op's ABI is
 fixed and the shape space is small and repeated — GEMM, norms, attention. It extends for
