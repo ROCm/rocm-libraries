@@ -115,6 +115,75 @@ if(_AOT_ROCKE_OK)
             "rocke-AOT families SKIPPED (engine still builds; GPU parity tests skip on "
             "the empty catalog). Set -DROCKE_COMGR_LIB=<path/to/libamd_comgr.so> to build kernels.")
     endif()
+
+    # ---------------------------------------------------------------------------
+    # Resolve comgr's TRANSITIVE dependency dirs (its LLVM/Clang/LLD shared libs).
+    #
+    # The amd_comgr CMake package's imported target carries ONLY comgr's own include
+    # + library location -- NOTHING about its LLVM deps -- so forwarding the comgr
+    # path is necessary but NOT sufficient. In a hermetic split-stage build (TheRock)
+    # comgr and its LLVM libs live in SEPARATE stage dirs, so the producer's ctypes
+    # loader fails ENOENT on an existing libamd_comgr (the deps, not comgr, are what
+    # the loader can't find). C++ consumers in this repo (e.g. shared/rocroller) avoid
+    # this by linking the LLVM libs so the dep dir is baked into RPATH; our producer is
+    # a Python interpreter and can't, so we must put those dirs on its loader path.
+    #
+    # We can't read the comgr package config's dep dirs (it has none), and the LLVM
+    # stage dir isn't derivable from a find_package target, so DISCOVER it: probe a
+    # curated set of dirs near comgr (hermetic sibling stages + the ROCm llvm subdir)
+    # and keep those that actually contain LLVM/Clang shared libs. Self-contained --
+    # no TheRock-side var required. comgr's own dir is always included (co-staged deps).
+    # ---------------------------------------------------------------------------
+    set(_aot_comgr_dep_dirs "")
+    if(_aot_comgr)
+        get_filename_component(_comgr_dir "${_aot_comgr}" DIRECTORY)          # .../amd-comgr/stage/lib
+        get_filename_component(_comgr_stage "${_comgr_dir}" DIRECTORY)        # .../amd-comgr/stage
+        get_filename_component(_comgr_proj "${_comgr_stage}" DIRECTORY)       # .../amd-comgr
+        get_filename_component(_compiler_root "${_comgr_proj}" DIRECTORY)     # .../compiler (hermetic)
+
+        if(WIN32)
+            set(_dep_probe "LLVM*.dll" "libLLVM*.dll" "clang-cpp*.dll" "libclang*.dll" "lld*.dll")
+        else()
+            set(_dep_probe "libLLVM*.so*" "libclang-cpp*.so*" "liblld*.so*")
+        endif()
+
+        # comgr's own dir first (co-staged deps), then sibling compiler stages that in
+        # a hermetic tree hold amd-llvm's shared libs, then a real ROCm install layout.
+        set(_dep_candidates
+            "${_comgr_dir}"
+            "${_comgr_dir}/../bin"
+            "${_compiler_root}/amd-llvm/stage/lib"
+            "${_compiler_root}/amd-llvm/dist/lib"
+            "${_compiler_root}/amd-llvm/build/lib"
+            "${_compiler_root}/amd-llvm/lib"
+            "${_compiler_root}/amd-llvm/stage/bin"
+            "${_compiler_root}/amd-llvm/dist/bin"
+            "$ENV{ROCM_PATH}/lib" "$ENV{ROCM_PATH}/lib/llvm/lib" "$ENV{ROCM_PATH}/bin"
+            "$ENV{HIP_PATH}/bin"
+            /opt/rocm/lib /opt/rocm/lib/llvm/lib)
+        foreach(_d IN LISTS _dep_candidates)
+            if(IS_DIRECTORY "${_d}")
+                set(_found_here FALSE)
+                foreach(_p IN LISTS _dep_probe)
+                    file(GLOB _hit "${_d}/${_p}")
+                    if(_hit)
+                        set(_found_here TRUE)
+                        break()
+                    endif()
+                endforeach()
+                # Always keep comgr's own dir (co-staged private deps); keep others only
+                # when they actually contain LLVM/Clang libs.
+                if(_found_here OR _d STREQUAL _comgr_dir)
+                    get_filename_component(_dabs "${_d}" ABSOLUTE)
+                    list(APPEND _aot_comgr_dep_dirs "${_dabs}")
+                endif()
+            endif()
+        endforeach()
+        if(_aot_comgr_dep_dirs)
+            list(REMOVE_DUPLICATES _aot_comgr_dep_dirs)
+            message(STATUS "aot-catalog: comgr dependency dirs -> ${_aot_comgr_dep_dirs}")
+        endif()
+    endif()
 endif()
 
 # ---------------------------------------------------------------------------
@@ -205,16 +274,31 @@ function(rocke_add_aot_family)
 
     # Env for the producer: quiet the C++-engine fallback (the pure-Python lowerer
     # is used when the rocke_engine extension is absent), and -- crucially -- tell
-    # the producer where comgr is. The producer runs under ${ROCKE_PYENV_PYTHON}, a
-    # bare build-local venv with NEITHER the rocm-sdk wheel NOR ROCM_PATH/HIP_PATH
-    # on its environment, so rocke.runtime.comgr's own discovery has nothing to go
-    # on -- on Windows especially it then cannot find amd_comgr.dll or its dependent
-    # DLLs and the producer aborts. We already resolved comgr above (_aot_comgr);
-    # forward that as the explicit override, plus the ROCm root so the loader can
-    # register the DLL's directory (its dependencies live beside it).
+    # the producer where comgr AND its transitive deps are. The producer runs under
+    # ${ROCKE_PYENV_PYTHON}, a bare build-local venv with NEITHER the rocm-sdk wheel
+    # NOR ROCM_PATH/HIP_PATH on its environment, so rocke.runtime.comgr's own
+    # discovery has nothing to go on. We forward:
+    #   * ROCKE_COMGR_LIB -- the resolved comgr path (the .so/.dll to dlopen).
+    #   * LD_LIBRARY_PATH (POSIX) -- comgr's dep dirs, so the loader resolves comgr's
+    #     LLVM/Clang deps. Forwarding the comgr path alone is NOT enough: comgr and
+    #     its LLVM libs live in separate stage dirs in a hermetic build, so dlopen of
+    #     an EXISTING libamd_comgr fails ENOENT on the unresolved deps. (POSIX only:
+    #     the Windows path separator is ';', which collides with CMake list syntax.)
+    #   * ROCKE_COMGR_DEP_DIRS ('|'-joined) -- same dep dirs for the Windows loader,
+    #     which registers them via os.add_dll_directory (LD_LIBRARY_PATH is a no-op
+    #     there). '|' avoids both the CMake list sep and the Windows path sep.
+    #   * ROCM_PATH -- the ROCm root, when known.
     set(_env ROCKE_CPP_QUIET_FALLBACK=1)
     if(_aot_comgr)
         list(APPEND _env ROCKE_COMGR_LIB=${_aot_comgr})
+    endif()
+    if(_aot_comgr_dep_dirs)
+        if(NOT WIN32)
+            string(JOIN ":" _ld_extra ${_aot_comgr_dep_dirs})
+            list(APPEND _env "LD_LIBRARY_PATH=${_ld_extra}:$ENV{LD_LIBRARY_PATH}")
+        endif()
+        string(JOIN "|" _dep_joined ${_aot_comgr_dep_dirs})
+        list(APPEND _env "ROCKE_COMGR_DEP_DIRS=${_dep_joined}")
     endif()
     if(ROCM_PATH)
         list(APPEND _env ROCM_PATH=${ROCM_PATH})

@@ -242,3 +242,33 @@ def _add_dll_dir(path: str) -> None:
             os.add_dll_directory(d)
         except (OSError, AttributeError):
             pass
+
+
+def _register_dep_dirs(env_var: str) -> None:
+    """On Windows, register EXTRA dependency directories named in ``env_var`` so the
+    loader can resolve a library's transitive DLLs that do NOT sit beside it.
+
+    A hermetic build stages a lib (e.g. comgr) and its deps (comgr's LLVM/Clang
+    DLLs) in separate dirs, so registering only the lib's own dir (:func:`_add_dll_dir`)
+    is not enough. The build wires the discovered dep dirs into ``env_var`` joined by
+    ``|`` and/or ``os.pathsep``; we add each via ``os.add_dll_directory``.
+
+    No-op off Windows: on POSIX the dynamic loader honors the process's
+    ``LD_LIBRARY_PATH`` (which the build sets before launching the producer), and dirs
+    added after start would not help ``ctypes.CDLL`` anyway.
+    """
+    if not _IS_WINDOWS:
+        return
+    raw = os.environ.get(env_var)
+    if not raw:
+        return
+    parts: List[str] = []
+    for chunk in raw.split("|"):
+        parts.extend(chunk.split(os.pathsep))
+    for d in parts:
+        d = d.strip()
+        if d and os.path.isdir(d):
+            try:
+                os.add_dll_directory(d)
+            except (OSError, AttributeError):
+                pass
