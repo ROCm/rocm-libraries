@@ -53,7 +53,11 @@ class TestGfx950ConvSmoke(unittest.TestCase):
     )
 
     def _run_benchmark(
-        self, dtype: str, direction: str = "fwd", timeout: int = 600
+        self,
+        dtype: str,
+        direction: str = "fwd",
+        timeout: int = 600,
+        extra_args: list | None = None,
     ) -> str:
         env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
         cmd = [
@@ -76,6 +80,8 @@ class TestGfx950ConvSmoke(unittest.TestCase):
         ]
         if direction == "wgrad":
             cmd += ["--split-k", "-1"]
+        if extra_args:
+            cmd += extra_args
         proc = subprocess.run(
             cmd,
             env=env,
@@ -87,8 +93,29 @@ class TestGfx950ConvSmoke(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, out[-3500:])
         return out
 
-    def _verify_and_sweep(self, dtype: str, baseline_key: str, direction: str = "fwd"):
-        out = self._run_benchmark(dtype, direction=direction)
+    _POINTWISE_ARGS = [
+        "--Y",
+        "1",
+        "--X",
+        "1",
+        "--pH",
+        "0",
+        "--pW",
+        "0",
+        "--sH",
+        "1",
+        "--sW",
+        "1",
+    ]
+
+    def _verify_and_sweep(
+        self,
+        dtype: str,
+        baseline_key: str,
+        direction: str = "fwd",
+        extra_args: list | None = None,
+    ):
+        out = self._run_benchmark(dtype, direction=direction, extra_args=extra_args)
 
         self.assertNotIn(
             "FAIL", out, f"conv {dtype} correctness failure:\n{out[-3500:]}"
@@ -123,6 +150,22 @@ class TestGfx950ConvSmoke(unittest.TestCase):
         self._verify_and_sweep(
             "fp32", "conv_wgrad_fp32_gfx950_N8H56W56C64K64R3S3", direction="wgrad"
         )
+
+    def test_conv_pointwise_bf16(self):
+        self._verify_and_sweep(
+            "bf16",
+            "conv_fwd_bf16_gfx950_N8H56W56C64K64R1S1",
+            extra_args=self._POINTWISE_ARGS,
+        )
+
+    # TODO: Reenable after threshold calculation implementation
+    # def test_conv_pointwise_wgrad_bf16(self):
+    #     self._verify_and_sweep(
+    #         "bf16",
+    #         "conv_wgrad_bf16_gfx950_N8H56W56C64K64R1S1",
+    #         direction="wgrad",
+    #         extra_args=self._POINTWISE_ARGS,
+    #     )
 
 
 if __name__ == "__main__":
