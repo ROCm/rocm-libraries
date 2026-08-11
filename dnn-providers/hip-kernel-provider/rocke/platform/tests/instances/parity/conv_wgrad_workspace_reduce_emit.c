@@ -43,48 +43,48 @@ static int make_cfg(int idx, rocke_wgrad_reduce_spec_t* spec, const char** arch)
     switch(idx)
     {
     case 0:
-        spec->wg_M         = 64;
-        spec->wg_N         = 576;
-        spec->dtype_d      = "fp16";
+        spec->wg_M = 64;
+        spec->wg_N = 576;
+        spec->dtype_d = "fp16";
         spec->problem_short = "N1H4W4C64_K64Y3X3";
         return 0;
     case 1:
-        spec->wg_M         = 64;
-        spec->wg_N         = 576;
-        spec->dtype_d      = "bf16";
+        spec->wg_M = 64;
+        spec->wg_N = 576;
+        spec->dtype_d = "bf16";
         spec->problem_short = "N1H4W4C64_K64Y3X3";
         return 0;
     case 2:
-        spec->wg_M         = 64;
-        spec->wg_N         = 576;
-        spec->dtype_d      = "fp32";
+        spec->wg_M = 64;
+        spec->wg_N = 576;
+        spec->dtype_d = "fp32";
         spec->problem_short = "N1H4W4C64_K64Y3X3";
         return 0;
     case 3:
-        spec->wg_M         = 32;
-        spec->wg_N         = 72;
-        spec->dtype_d      = "fp16";
+        spec->wg_M = 32;
+        spec->wg_N = 72;
+        spec->dtype_d = "fp16";
         spec->problem_short = "N1H4W4C8_K32Y3X3";
         return 0;
     case 4:
-        spec->wg_M         = 64;
-        spec->wg_N         = 576;
-        spec->dtype_d      = "fp16";
+        spec->wg_M = 64;
+        spec->wg_N = 576;
+        spec->dtype_d = "fp16";
         spec->problem_short = "N1H4W4C64_K64Y3X3";
         *arch = "gfx942";
         return 0;
     case 5:
-        spec->wg_M         = 32;
-        spec->wg_N         = 72;
-        spec->dtype_d      = "bf16";
+        spec->wg_M = 32;
+        spec->wg_N = 72;
+        spec->dtype_d = "bf16";
         spec->problem_short = "N1H4W4C8_K32Y3X3";
         return 0;
     case 6:
-        spec->wg_M         = 64;
-        spec->wg_N         = 576;
-        spec->dtype_d      = "fp16";
-        spec->tile_m       = 8;
-        spec->tile_n       = 32;
+        spec->wg_M = 64;
+        spec->wg_N = 576;
+        spec->dtype_d = "fp16";
+        spec->tile_m = 8;
+        spec->tile_n = 32;
         spec->problem_short = "N1H4W4C64_K64Y3X3";
         return 0;
     default:
@@ -99,7 +99,7 @@ int main(int argc, char** argv)
         fprintf(stderr, "usage: %s <config_index> [ll|ir|verify]\n", argv[0]);
         return 2;
     }
-    int idx        = atoi(argv[1]);
+    int idx = atoi(argv[1]);
     const char* mode = (argc > 2) ? argv[2] : "ll";
 
     rocke_wgrad_reduce_spec_t spec;
@@ -124,8 +124,8 @@ int main(int argc, char** argv)
     if(strcmp(mode, "ll") == 0)
     {
         char* llvm_text = NULL;
-        rocke_status_t st =
-            rocke_lower_kernel_to_llvm(kernel, ROCKE_LLVM_FLAVOR_AUTO, arch, &llvm_text);
+        rocke_status_t st
+            = rocke_lower_kernel_to_llvm(kernel, ROCKE_LLVM_FLAVOR_AUTO, arch, &llvm_text);
         if(st != ROCKE_OK || !llvm_text)
         {
             fprintf(stderr, "lower failed: status=%d\n", (int)st);
@@ -150,8 +150,8 @@ int main(int argc, char** argv)
     }
     else if(strcmp(mode, "verify") == 0)
     {
-        char** msgs   = NULL;
-        int    nmsg   = 0;
+        char** msgs = NULL;
+        int nmsg = 0;
         rocke_verify(kernel, &msgs, &nmsg);
         for(int i = 0; i < nmsg; i++)
         {
