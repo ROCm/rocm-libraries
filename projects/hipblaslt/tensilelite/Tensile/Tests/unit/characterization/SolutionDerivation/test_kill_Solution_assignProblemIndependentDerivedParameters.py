@@ -203,6 +203,7 @@ def test_emi_undetermined_rejects(real_state, isa_info_map, capsys):
 def test_matrix_inst_m4_branch(real_state, isa_info_map):
     st = _reset(real_state)
     st["MIBlock"] = [4, 16, 16, 1, 1, 1]
+    st["SourceSwap"] = False
     APIDP(st, False, isa_info_map)
     assert st["MatrixInstM"] == 4
     assert st["ThreadTile0"] == 4 and st["ThreadTile1"] == 1
