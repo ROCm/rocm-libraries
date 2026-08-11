@@ -99,10 +99,11 @@ _ACTIVATION_ARG_INDEX = {
 _PASSTHROUGH_KEYS = {"ProblemType", "InternalSupportParams", "KernelLanguage", "CustomKernelName"}
 
 def isCustomKernelConfig(config):
-    if "CustomKernel" in config and config["CustomKernel"]["name"]:
-        if config["CustomKernel"].get("generated", False):
-            return False
-        return True
+    # CustomKernel may be absent, None, or the -1 placeholder for an unset parameter,
+    # so check that it is a populated dict before reaching into it.
+    ck = config.get("CustomKernel")
+    if isinstance(ck, dict) and ck.get("name"):
+        return not ck.get("generated", False)
     return bool(config.get("CustomKernelName", ""))
 
 def getCustomKernelFilepath(name, directory=CUSTOM_KERNEL_PATH):

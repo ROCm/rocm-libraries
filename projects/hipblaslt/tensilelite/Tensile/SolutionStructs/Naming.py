@@ -154,8 +154,9 @@ def getParameterValueAbbreviation(key, value):
 
 def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInternalArgs):
 
-  if "CustomKernel" in state and state["CustomKernel"]["name"]:
-    return state["CustomKernel"]["name"]
+  ck = state.get("CustomKernel")
+  if isinstance(ck, dict) and ck.get("name"):
+    return ck["name"]
   if state.get("CustomKernelName", ""):
     return state["CustomKernelName"]
 
@@ -254,9 +255,9 @@ def shortenFileBase(splitGSU, kernel):
 
 
 def getKernelFileBase(splitGSU: bool, kernel):
-  if "CustomKernel" in kernel and kernel["CustomKernel"]["name"] \
-      and not kernel["CustomKernel"].get("generated", False):
-    fileBase = kernel["CustomKernel"]["name"]
+  ck = kernel.get("CustomKernel")
+  if isinstance(ck, dict) and ck.get("name") and not ck.get("generated", False):
+    fileBase = ck["name"]
   elif kernel.get("CustomKernelName", ""):
     fileBase = kernel["CustomKernelName"]
   else:

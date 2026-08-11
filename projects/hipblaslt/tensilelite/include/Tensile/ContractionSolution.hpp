@@ -209,14 +209,16 @@ namespace TensileLite
 
     struct CustomKernel
     {
+        // Every member needs a default: mapOptional leaves absent keys untouched, so an
+        // incomplete logic file would otherwise deserialize into indeterminate values.
         std::string name;
         std::vector<CustomArgDefinition> args;
-        dim3 macrotile;
-        dim3 threads;
-        vector3<CustomGridSize> grid;
-        CustomWorkspaceType workspaceType;
-        size_t workspaceSizePerElemC;
-        size_t workspaceSizePerElemBias;
+        dim3 macrotile{0, 0, 0};
+        dim3 threads{0, 0, 0};
+        vector3<CustomGridSize> grid{CustomGridSize::One, CustomGridSize::One, CustomGridSize::One};
+        CustomWorkspaceType workspaceType = CustomWorkspaceType::None;
+        size_t workspaceSizePerElemC      = 0;
+        size_t workspaceSizePerElemBias   = 0;
         // True when this CustomKernel was auto-populated for a Tensile-generated
         // kernel (vs. a hand-written custom kernel).  Generated kernels still
         // rely on sizeMapping for workspace/Stream-K decisions, so several code

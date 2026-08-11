@@ -675,9 +675,9 @@ def parseLibraryLogicData(
         solutionState["AssignedProblemIndependentDerivedParameters"] = False
         solutionState["AssignedDerivedParameters"] = False
         customKernelName = None
-        if "CustomKernel" in solutionState and solutionState["CustomKernel"]["name"] \
-                and not solutionState["CustomKernel"].get("generated", False):
-            customKernelName = solutionState["CustomKernel"]["name"]
+        ck = solutionState.get("CustomKernel")
+        if isinstance(ck, dict) and ck.get("name") and not ck.get("generated", False):
+            customKernelName = ck["name"]
         elif solutionState.get("CustomKernelName", ""):
             customKernelName = solutionState["CustomKernelName"]
 

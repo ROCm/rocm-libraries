@@ -4879,9 +4879,10 @@ class Solution(collections.abc.Mapping):
           else:
             reject(state, printRejectionReason, "%s's padded address is inconsistent"%tc)
 
+    ck = state.get("CustomKernel")
     isActualCustomKernel = bool(state.get("CustomKernelName", "")) or \
-        ("CustomKernel" in state and state["CustomKernel"]["name"] != ""
-         and not state["CustomKernel"].get("generated", False))
+        (isinstance(ck, dict) and bool(ck.get("name"))
+         and not ck.get("generated", False))
     if(not isActualCustomKernel):
       checkLdsBlockSizePerPad("A")
       checkLdsBlockSizePerPad("B")

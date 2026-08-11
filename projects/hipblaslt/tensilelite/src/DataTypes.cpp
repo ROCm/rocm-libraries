@@ -509,6 +509,10 @@ namespace TensileLite
             return CustomArgType::int8;
         else if(str == toString(CustomArgType::uint8))
             return CustomArgType::uint8;
+        else if(str == toString(CustomArgType::int16))
+            return CustomArgType::int16;
+        else if(str == toString(CustomArgType::uint16))
+            return CustomArgType::uint16;
         else if(str == toString(CustomArgType::int32))
             return CustomArgType::int32;
         else if(str == toString(CustomArgType::uint32))

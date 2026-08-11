@@ -2515,11 +2515,24 @@ namespace TensileLite
                 case CustomArgSemantic::SizeSumDiv2:
                     rv.args.appendCustomType("SizeSumDiv2", problem.problemSizes()[problem.problemSizes().size() - 1] / 2, arg.type);
                     break;
+                // size() is unsigned, so a problem with too few dimensions would wrap the
+                // index to a huge value and read out of bounds; fall back to 1 (an
+                // identity summation extent) instead.
                 case CustomArgSemantic::SizeSum1:
-                    rv.args.appendCustomType("SizeSum1", problem.problemSizes()[problem.problemSizes().size() - 2], arg.type);
+                    rv.args.appendCustomType(
+                        "SizeSum1",
+                        problem.problemSizes().size() >= 2
+                            ? problem.problemSizes()[problem.problemSizes().size() - 2]
+                            : 1,
+                        arg.type);
                     break;
                 case CustomArgSemantic::SizeSum2:
-                    rv.args.appendCustomType("SizeSum2", problem.problemSizes()[problem.problemSizes().size() - 3], arg.type);
+                    rv.args.appendCustomType(
+                        "SizeSum2",
+                        problem.problemSizes().size() >= 3
+                            ? problem.problemSizes()[problem.problemSizes().size() - 3]
+                            : 1,
+                        arg.type);
                     break;
                 case CustomArgSemantic::StrideA0:
                     rv.args.appendCustomType("StrideA0", problem.a().strides()[1], arg.type);
@@ -2631,24 +2644,28 @@ namespace TensileLite
                     rv.args.appendCustomType("StrideCK", splitKStride, arg.type);
                     break;
                 }
+                // The lowercase names are load-bearing: KernelArguments::append matches
+                // on "alpha"/"beta" to promote a sub-32-bit compute type to 32 bits, which
+                // is what a custom kernel's declared 32-bit scalar slot expects. Spelling
+                // them any other way emits the narrow type instead and shifts every
+                // argument that follows.
                 case CustomArgSemantic::Alpha:
-                    rv.args.append("Alpha", inputs.alpha, problem.alphaType());
-                    if(problem.alphaType() == rocisa::DataType::Half)
-                        rv.args.append("Alpha_2", inputs.alpha, problem.alphaType());
+                    rv.args.append("alpha", inputs.alpha, problem.alphaType());
                     break;
                 case CustomArgSemantic::Beta:
-                    rv.args.append("Beta", inputs.beta, problem.betaType());
-                    if(problem.betaType() == rocisa::DataType::Half)
-                        rv.args.append("Beta_2", inputs.beta, problem.betaType());
+                    rv.args.append("beta", inputs.beta, problem.betaType());
                     break;
                 case CustomArgSemantic::SplitK:
                 {
-                    // AITER kernel expects log2(GSU) rather than the raw GSU value
-                    uint32_t gsu = sizeMapping.globalSplitU;
-                    uint32_t splitK = 0;
-                    if(gsu > 1)
+                    // AITER kernel expects log2(GSU) rather than the raw GSU value.
+                    // Derive it from the runtime-effective gsu, not sizeMapping's
+                    // compiled-in value: a user-specified or adaptively-downgraded GSU
+                    // must agree with the grid/workspace sizing and with StrideCK above.
+                    uint32_t remaining = gsu;
+                    uint32_t splitK    = 0;
+                    if(remaining > 1)
                     {
-                        while(gsu >>= 1)
+                        while(remaining >>= 1)
                             splitK++;
                     }
                     rv.args.appendCustomType("SplitK", splitK, arg.type);
@@ -2866,9 +2883,13 @@ namespace TensileLite
                     break;
 
                 // ---- Packed batch dimension divisors ----
+                // arg.index comes from the kernel's custom.config, so it is untrusted;
+                // fall back to a dimension of 1 rather than indexing out of bounds.
                 case CustomArgSemantic::MagicNumberSize:
                 {
-                    uint32_t dimSize = problem.problemSizes()[arg.index];
+                    uint32_t dimSize = arg.index < problem.problemSizes().size()
+                                           ? problem.problemSizes()[arg.index]
+                                           : 1;
                     uint32_t magicShift;
                     uint32_t magicNum = magicNumber(sizeMapping.magicDivAlg, dimSize, &magicShift);
                     rv.args.template append<uint32_t>("MagicNumberSize", magicNum);
@@ -2876,7 +2897,9 @@ namespace TensileLite
                 }
                 case CustomArgSemantic::MagicShiftSize:
                 {
-                    uint32_t dimSize = problem.problemSizes()[arg.index];
+                    uint32_t dimSize = arg.index < problem.problemSizes().size()
+                                           ? problem.problemSizes()[arg.index]
+                                           : 1;
                     uint32_t magicShift;
                     magicNumber(sizeMapping.magicDivAlg, dimSize, &magicShift);
                     rv.args.template append<uint32_t>("MagicShiftSize", magicShift);
