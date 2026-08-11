@@ -1287,8 +1287,13 @@ def getPytorchTestsCmds() {
 def getAiterTestsCmds() {
     return [
         // Pre-compile FlyDSL MoE AOT cache before the tests.
-        "cd /home/jenkins/workspace/aiter && AITER_AOT_IMPORT=1 HIP_VISIBLE_DEVICES=-1 python3 aiter/aot/flydsl/moe.py",
-        "cd /home/jenkins/workspace/aiter && AITER_AOT_IMPORT=1 HIP_VISIBLE_DEVICES=-1 python3 aiter/aot/flydsl/mxfp4_moe.py",
+        "cd /home/jenkins/workspace/aiter && AITER_AOT_IMPORT=1 python3 aiter/aot/flydsl/moe.py",
+        // No GPU needed here: the script pins FLYDSL_GPU_ARCH=gfx950 and reads cu_num from the CSV.
+        // Hiding it is required -- with a device visible, aiter's cached CompiledFunction escapes
+        // COMPILE_ONLY and launches the reduce kernel on the AOT host dummy buffers (SIGABRT).
+        // 99 is an out-of-range ordinal matching no agent; -1 aborts (rocprofiler-sdk rejects
+        // non-ordinal tokens). moe.py above keeps its GPU: it forks per kernel and autodetects arch.
+        "cd /home/jenkins/workspace/aiter && AITER_AOT_IMPORT=1 HIP_VISIBLE_DEVICES=99 python3 aiter/aot/flydsl/mxfp4_moe.py",
         "python3 /home/jenkins/workspace/aiter/op_tests/test_gemm_a8w8.py",
         "python3 /home/jenkins/workspace/aiter/op_tests/test_gemm_a8w8_blockscale.py",
         "python3 /home/jenkins/workspace/aiter/op_tests/test_mha.py",
