@@ -96,9 +96,12 @@ jobs:
 
       - name: Fetch sources
         timeout-minutes: 30
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config --global core.longpaths true
-          python ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-libraries --no-include-ml-frameworks
+          git config --global url."https://x-access-token:${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
+          python ./TheRock/build_tools/fetch_sources.py --jobs 12 --depth 1 --no-include-rocm-libraries --no-include-ml-frameworks
 
       - name: Configure Projects
         env:

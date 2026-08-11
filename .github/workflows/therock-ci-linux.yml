@@ -59,9 +59,12 @@ jobs:
 
       # safe.directory must be set before Runner health status
       - name: Adjust git config
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config --global --add safe.directory $PWD
           git config fetch.parallel 10
+          git config --global url."https://x-access-token:${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
 
       - name: Setup ccache
         run: |
@@ -87,7 +90,7 @@ jobs:
         timeout-minutes: 30
         run: |
           # contains() matches the literal "=THEROCK_ENABLE_IREE_LIBS=ON" emitted by therock_matrix.py
-          ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-libraries --no-include-ml-frameworks ${{ contains(inputs.cmake_options, 'THEROCK_ENABLE_IREE_LIBS=ON') && '--include-iree-libs' || '' }}
+          ./TheRock/build_tools/fetch_sources.py --jobs 12 --depth 1 --no-include-rocm-libraries --no-include-ml-frameworks ${{ contains(inputs.cmake_options, 'THEROCK_ENABLE_IREE_LIBS=ON') && '--include-iree-libs' || '' }}
 
       - name: Configure Projects
         env:
