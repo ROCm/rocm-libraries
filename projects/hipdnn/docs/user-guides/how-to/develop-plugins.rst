@@ -207,7 +207,7 @@ In general, the best practices consist of:
 Example engine plugin implementation
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-A fully functional example of a hipDNN engine plugin is available `here <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/samples/example_engine_plugin/README.md>`_
+A fully functional example of a hipDNN engine plugin is available `here <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/samples/example_engine_plugin/README.md>`_.
 
 Build configuration
 ~~~~~~~~~~~~~~~~~~~
