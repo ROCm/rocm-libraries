@@ -230,6 +230,29 @@ if(UNIX AND NOT APPLE)
   endif()
 endif()
 
+if(UNIX AND NOT APPLE)
+  add_library(abi06_data_rb6 SHARED
+    abi03_fixture_rocblas.cpp
+    ${ROCM_INTERFACES_SOURCE_ROOT}/projects/rocrand/library/src/rocrand_sobol32_precomputed.cpp)
+  target_compile_definitions(abi06_data_rb6 PRIVATE ABI_VER=6 __HIP_PLATFORM_AMD__=1)
+  target_include_directories(abi06_data_rb6 PRIVATE
+    ${ROCM_INTERFACES_SOURCE_ROOT}/projects/rocrand/library/include
+    /opt/rocm/include)
+  target_link_options(abi06_data_rb6 PRIVATE
+    "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/abi06_data.map"
+    "LINKER:-soname,librocblas.so.6")
+  set_target_properties(abi06_data_rb6 PROPERTIES
+    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/abi06-dso
+    PREFIX "" OUTPUT_NAME "librocblas.so.6" SUFFIX "")
+
+  add_executable(abi06_data_test abi06_data_test.cpp)
+  target_link_libraries(abi06_data_test PRIVATE ${CMAKE_DL_LIBS})
+  add_dependencies(abi06_data_test abi06_data_rb6)
+
+  add_test(NAME rocm_interfaces.abi06_data_version_node
+    COMMAND abi06_data_test $<TARGET_FILE:abi06_data_rb6>)
+endif()
+
 set(_lto_guard_module ${CMAKE_SOURCE_DIR}/cmake/rocm_interfaces_lto_linker_guard.cmake)
 set(_lto_guard_driver ${CMAKE_CURRENT_SOURCE_DIR}/check_lto_linker_guard.cmake)
 
