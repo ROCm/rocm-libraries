@@ -93,6 +93,53 @@ NextEvent getNextEvent(
     return it->second;
 }
 
+struct MovePropStats {
+    uint64_t inputVmov = 0;
+    uint64_t inputSmov = 0;
+    uint64_t erasedVmov = 0;
+    uint64_t erasedSmov = 0;
+    uint64_t erasedIdentityVmov = 0;
+    uint64_t erasedIdentitySmov = 0;
+    uint64_t erasedRedefinedVmov = 0;
+    uint64_t erasedRedefinedSmov = 0;
+
+    void add(const MovePropStats& other) {
+        inputVmov += other.inputVmov;
+        inputSmov += other.inputSmov;
+        erasedVmov += other.erasedVmov;
+        erasedSmov += other.erasedSmov;
+        erasedIdentityVmov += other.erasedIdentityVmov;
+        erasedIdentitySmov += other.erasedIdentitySmov;
+        erasedRedefinedVmov += other.erasedRedefinedVmov;
+        erasedRedefinedSmov += other.erasedRedefinedSmov;
+    }
+};
+
+void countInputMovStat(const StinkyInstruction& inst, MovePropStats& stats) {
+    if (inst.getUnifiedOpcode() == GFX::v_mov_b32) {
+        stats.inputVmov++;
+    } else if (inst.getUnifiedOpcode() == GFX::s_mov_b32) {
+        stats.inputSmov++;
+    }
+}
+
+void countErasedMovStat(const StinkyInstruction& inst, MovePropStats& stats, bool identity) {
+    const bool isVmov = inst.getUnifiedOpcode() == GFX::v_mov_b32;
+    if (isVmov) {
+        stats.erasedVmov++;
+        if (identity)
+            stats.erasedIdentityVmov++;
+        else
+            stats.erasedRedefinedVmov++;
+    } else {
+        stats.erasedSmov++;
+        if (identity)
+            stats.erasedIdentitySmov++;
+        else
+            stats.erasedRedefinedSmov++;
+    }
+}
+
 class AsmMovePropagationPassImpl : public Pass {
    public:
     static constexpr const char* PassName = "AsmMovePropagationPass";
@@ -107,10 +154,23 @@ class AsmMovePropagationPassImpl : public Pass {
     }
 
     PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
+        MovePropStats totalStats;
         for (BasicBlock& bb : func) {
             if (!passCtx.shouldProcessBasicBlock(bb)) continue;
-            runOnBasicBlock(bb);
+            totalStats.add(runOnBasicBlock(bb));
         }
+        func.setMetaData("AsmMovePropagationPass.inputVmov", totalStats.inputVmov);
+        func.setMetaData("AsmMovePropagationPass.inputSmov", totalStats.inputSmov);
+        func.setMetaData("AsmMovePropagationPass.erasedVmov", totalStats.erasedVmov);
+        func.setMetaData("AsmMovePropagationPass.erasedSmov", totalStats.erasedSmov);
+        func.setMetaData("AsmMovePropagationPass.erasedIdentityVmov",
+                         totalStats.erasedIdentityVmov);
+        func.setMetaData("AsmMovePropagationPass.erasedIdentitySmov",
+                         totalStats.erasedIdentitySmov);
+        func.setMetaData("AsmMovePropagationPass.erasedRedefinedVmov",
+                         totalStats.erasedRedefinedVmov);
+        func.setMetaData("AsmMovePropagationPass.erasedRedefinedSmov",
+                         totalStats.erasedRedefinedSmov);
         return preserveCFGAnalyses();
     }
 
@@ -133,7 +193,8 @@ class AsmMovePropagationPassImpl : public Pass {
     //     - dst is redefined before any later use in the same block.
     //     - identity mov (mov x, x)
     //   Otherwise keep the mov conservatively (it may be live-out).
-    void runOnBasicBlock(BasicBlock& bb) {
+    MovePropStats runOnBasicBlock(BasicBlock& bb) {
+        MovePropStats stats;
         std::vector<StinkyInstruction*> instructions;
         for (IRBase& node : bb) {
             if (node.getType() == IRBase::IRType::StinkyTofu) {
@@ -185,6 +246,7 @@ class AsmMovePropagationPassImpl : public Pass {
             }
 
             if (!isEligibleMov(*inst)) continue;
+            countInputMovStat(*inst, stats);
             const StinkyRegister& dst = inst->getDestReg(0);
             const StinkyRegister& src = inst->getSrcReg(0);
             if (dst != src && isSamePropagatableClass(dst, src)) moveMap[dst] = src;
@@ -205,10 +267,12 @@ class AsmMovePropagationPassImpl : public Pass {
 
                 // Identity move has no semantic effect.
                 if (dst == src) {
+                    countErasedMovStat(*inst, stats, /*identity=*/true);
                     toErase.push_back(inst);
                 } else if (getNextEvent(dst, nextEvents) == NextEvent::Def) {
                     // Erase mov only when dst is redefined before any later use in this BB.
                     // Otherwise keep it conservatively (it may still be live-out).
+                    countErasedMovStat(*inst, stats, /*identity=*/false);
                     toErase.push_back(inst);
                 }
             }
@@ -226,6 +290,7 @@ class AsmMovePropagationPassImpl : public Pass {
         for (StinkyInstruction* inst : toErase) {
             inst->erase();
         }
+        return stats;
     }
 };
 

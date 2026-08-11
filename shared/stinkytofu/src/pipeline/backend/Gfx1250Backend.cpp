@@ -213,9 +213,10 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
         }
 
         pm.addPass(createRegionClonePass(moduleOptions.CloneList));
-        pm.addPass(createAsmMovePropagationPass());
         mpm.addPass(createMainOnlyAdaptor(std::move(pm)));
     }
+
+    mpm.addPass(createFunctionToModuleAdaptor(createAsmMovePropagationPass()));
 
     // MSB is materialized for the entry function and every callable function
     // (each function owns its VGPR MSB hardware state).
