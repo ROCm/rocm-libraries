@@ -130,30 +130,25 @@ static ck_tile::HostTensor<T> preshuffle_host_b(const T* b_host, int64_t K, int6
     }
 }
 
-// Cache the shuffled B so the (host) preshuffle + reorder is paid ONCE per
-// distinct (B pointer, K, N), not on every dispatcher_run_gemm call. Old-TE
-// shuffles B a single time per callable; the A/B perf sweep calls run() in a
-// warmup+repeat loop with the same B, so recomputing the shuffle every call
-// would (a) add non-kernel host work between iterations and (b) make the sweep
-// apples-to-oranges. The kernel-timed region (g_dispatcher->run) never contained
-// the shuffle, but hoisting it keeps the per-iteration host path launch-only.
+// Shuffled-B cache. SAFE BY DEFAULT: the cache is OFF unless explicitly opted
+// into, so every dispatcher_run_gemm recomputes the host shuffle from the B the
+// caller actually passed. This is the only correct default across the public
+// Python API, where GpuGemmRunner.run() builds a fresh (encoded) B temporary on
+// every call: once that temporary is freed, numpy may hand back the SAME address
+// for a different same-shaped B, so a (pointer, K, N) key cannot distinguish
+// them and a pointer-keyed cache would silently serve stale weights. Recomputing
+// each call is also free of timing risk -- the shuffle + H2D copy run BEFORE the
+// single g_dispatcher->run() (the only kernel-timed region), never inside it.
 //
-// IMMUTABILITY CONTRACT (correctness foot-gun -- read before reusing this API):
-//   The cache is keyed on (b_host pointer, K, N). It CANNOT detect that the
-//   BYTES behind an unchanged pointer were mutated in place between calls. If a
-//   caller reuses the same host buffer but rewrites its contents, this returns
-//   the STALE shuffle and the kernel computes on the wrong weights.
-//   Contract: for a fixed (b_host, K, N) the contents of *b_host must be
-//   immutable for the process lifetime (the benchmark sweep honours this -- it
-//   allocates B once and never mutates it). A correctness caller that mutates B
-//   under a reused pointer MUST opt into recompute (see below) or pass a fresh
-//   buffer.
-//
-// OPT-IN RECOMPUTE: set the environment variable
-//   CK_DISPATCHER_PRESHUFFLE_NO_CACHE=1
-// to force the shuffle to be recomputed on every call, bypassing the cache
-// entirely. This trades the per-call host reorder cost for guaranteed-fresh
-// bytes -- the safe choice for any caller that mutates B in place.
+// OPT-IN CACHE (perf sweeps only): set
+//   CK_DISPATCHER_PRESHUFFLE_CACHE=1
+// to reuse the shuffle across calls keyed on (b_host pointer, K, N). This is
+// valid ONLY under a strict IMMUTABILITY CONTRACT: for a fixed (b_host, K, N)
+// the bytes behind *b_host must stay immutable for the process lifetime and the
+// same B object must be kept alive across the repeated calls (so its address is
+// not reused for different contents). The A/B perf sweep honours this -- it
+// allocates B once per shape and never mutates or frees it between iterations --
+// and only there does the cross-call cache avoid redundant host reorder work.
 struct ShuffledBCache
 {
     const void* b_host = nullptr;
@@ -166,34 +161,34 @@ struct ShuffledBCache
 };
 static ShuffledBCache g_shuffled_b_cache;
 
-// Whether the (pointer,K,N)-keyed cache is disabled. Resolved once from the
-// environment. When true, every call recomputes the shuffle, so a caller that
-// mutates B in place under a reused pointer can never be served stale bytes.
-static bool preshuffle_cache_disabled()
+// Whether the (pointer,K,N)-keyed cache is enabled. OFF by default; resolved
+// once from the environment. Only a caller that guarantees the IMMUTABILITY
+// CONTRACT above (perf sweep) should turn this on -- otherwise a reused pointer
+// with different contents would be served stale bytes.
+static bool preshuffle_cache_enabled()
 {
-    static const bool disabled = []() {
-        const char* v = std::getenv("CK_DISPATCHER_PRESHUFFLE_NO_CACHE");
+    static const bool enabled = []() {
+        const char* v = std::getenv("CK_DISPATCHER_PRESHUFFLE_CACHE");
         return v != nullptr && v[0] != '\0' && v[0] != '0';
     }();
-    return disabled;
+    return enabled;
 }
 
-// Return a pointer to the shuffled bytes for this B, reusing the cache when the
-// (pointer, K, N) matches the last call. Not thread-safe (bridge is single-
-// threaded), which matches the rest of this translation unit. See the
-// IMMUTABILITY CONTRACT above: a reused pointer with mutated contents is served
-// stale unless CK_DISPATCHER_PRESHUFFLE_NO_CACHE is set.
+// Return a pointer to the shuffled bytes for this B. By default recomputes the
+// shuffle every call (safe: never serves stale bytes). Reuses the cache only
+// when CK_DISPATCHER_PRESHUFFLE_CACHE is set AND the (pointer, K, N) matches the
+// last call. Not thread-safe (bridge is single-threaded), which matches the rest
+// of this translation unit.
 static const BDataType* get_shuffled_b(const BDataType* b_host, int64_t K, int64_t N)
 {
-    const bool no_cache = preshuffle_cache_disabled();
-    if(no_cache || !(g_shuffled_b_cache.data && g_shuffled_b_cache.b_host == b_host &&
-                     g_shuffled_b_cache.K == K && g_shuffled_b_cache.N == N))
+    const bool use_cache = preshuffle_cache_enabled();
+    if(!use_cache || !(g_shuffled_b_cache.data && g_shuffled_b_cache.b_host == b_host &&
+                       g_shuffled_b_cache.K == K && g_shuffled_b_cache.N == N))
     {
         g_shuffled_b_cache.data = std::make_shared<ck_tile::HostTensor<BDataType>>(
             preshuffle_host_b<BDataType>(b_host, K, N));
-        // When the cache is disabled leave the key fields as-is (they are only
-        // consulted on the cached path, which no_cache always skips); the fresh
-        // shuffle above is returned directly below.
+        // Record the key so a subsequent cached lookup can match. When caching is
+        // off these fields are simply never consulted (use_cache short-circuits).
         g_shuffled_b_cache.b_host = b_host;
         g_shuffled_b_cache.K      = K;
         g_shuffled_b_cache.N      = N;
@@ -435,13 +430,14 @@ int dispatcher_is_supported(int64_t M, int64_t N, int64_t K)
 /**
  * Run GEMM on GPU via dispatcher
  *
- * PRESHUFFLE IMMUTABILITY CONTRACT (weight-preshuffled kernels only):
- *   The host B-shuffle is cached keyed on (B pointer, K, N) and CANNOT detect
- *   in-place mutation of the bytes behind an unchanged pointer. Callers MUST
- *   treat B as immutable for a fixed (B, K, N) across calls, OR set the env var
- *   CK_DISPATCHER_PRESHUFFLE_NO_CACHE=1 to force a fresh shuffle every call.
- *   Reusing the same pointer with mutated contents (without the env opt-out)
- *   silently computes on stale weights. Non-preshuffle kernels are unaffected.
+ * PRESHUFFLE (weight-preshuffled kernels only):
+ *   The host B-shuffle is recomputed every call by default, so the kernel always
+ *   runs on the B the caller passed -- safe with no lifetime assumptions. Perf
+ *   sweeps that reuse one immutable B per shape may set the env var
+ *   CK_DISPATCHER_PRESHUFFLE_CACHE=1 to reuse the shuffle across calls (keyed on
+ *   (B pointer, K, N)); under that opt-in the caller MUST keep B alive and its
+ *   bytes immutable for a fixed (B, K, N), or a reused address silently computes
+ *   on stale weights. Non-preshuffle kernels are unaffected.
  */
 int dispatcher_run_gemm(
     const void* A, const void* B, void* C, int64_t M, int64_t N, int64_t K, float* time_ms)
@@ -511,9 +507,10 @@ int dispatcher_run_gemm(
     // unchanged. B_host stays the logical (unshuffled) B so the Python-side
     // numpy reference (A @ B) remains valid.
     {
-        // Shuffle is cached across calls (see get_shuffled_b): the host reorder
-        // runs once per distinct B, so only the H2D copy + kernel launch remain
-        // on the repeated benchmark path -- matching Old-TE's one-shuffle model.
+        // Recomputes the host reorder each call by default (safe); reuses it
+        // across calls only when CK_DISPATCHER_PRESHUFFLE_CACHE is set (perf
+        // sweep, immutable B). Either way the shuffle runs here, before the timed
+        // g_dispatcher->run() below, so it never affects the kernel measurement.
         const BDataType* b_shuffled = get_shuffled_b(B_host, K, N);
         if(hipMemcpy(B_dev, b_shuffled, K * N * sizeof(BDataType), hipMemcpyHostToDevice) !=
            hipSuccess)

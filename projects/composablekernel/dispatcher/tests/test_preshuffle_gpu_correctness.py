@@ -106,7 +106,7 @@ def _make_preshuffle_config(gfx_arch: str) -> GemmKernelConfig:
     )
 
 
-def test_preshuffle_fp16(gfx_arch: str) -> tuple[str, str]:
+def _run_preshuffle_fp16(gfx_arch: str) -> tuple[str, str]:
     cfg = _make_preshuffle_config(gfx_arch)
     if not cfg.name.endswith("_preshuffle"):
         return FAIL, f"preshuffle/fp16: name {cfg.name!r} missing _preshuffle token"
@@ -151,6 +151,27 @@ def test_preshuffle_fp16(gfx_arch: str) -> tuple[str, str]:
                   f"kernel={runner.kernel_name}")
 
 
+def test_preshuffle_fp16_gpu() -> None:
+    """pytest entry point.
+
+    Named without a bare ``gfx_arch`` parameter so pytest does not try to
+    resolve a nonexistent fixture; skips cleanly when no supported GPU/hipcc
+    is present, otherwise asserts the on-device result matches the reference.
+    """
+    import pytest
+
+    if not _has_gpu():
+        pytest.skip("no supported GPU detected (rocminfo); preshuffle GPU test skipped")
+    try:
+        status, detail = _run_preshuffle_fp16(_resolve_arch(None))
+    except FileNotFoundError as exc:
+        # Broad pytest runs may execute without a compiled dispatcher (unit-only
+        # stage). The on-device check needs the built .so, so skip cleanly rather
+        # than fail collection when the build artifacts are absent.
+        pytest.skip(f"dispatcher not built; preshuffle GPU test skipped ({exc})")
+    assert status == PASS, detail
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Preshuffle GEMM GPU correctness test")
     parser.add_argument("--gfx", default=None, help="GPU arch (default: auto-detect)")
@@ -170,7 +191,7 @@ def main() -> int:
     log.info("Running preshuffle GEMM GPU correctness on %s", gfx)
 
     try:
-        status, detail = test_preshuffle_fp16(gfx)
+        status, detail = _run_preshuffle_fp16(gfx)
     except Exception as exc:  # noqa: BLE001
         status, detail = FAIL, f"preshuffle/fp16: exception: {exc}"
 
