@@ -81,6 +81,8 @@ ExpectedBinaryFormat expectedFormat(ScalarType type) {
             return {5, 2, 16, 8, true};
         case ScalarType::E5M3:
             return {5, 3, 15, 8, false};
+        case ScalarType::E4M3:
+            return {4, 3, 7, 7, false};
         default:
             throw std::invalid_argument("No expected binary format.");
     }
@@ -98,6 +100,8 @@ bool expectedNaN(ScalarType type, uint32_t raw) {
         case ScalarType::E5M3:
         case ScalarType::E8M0:
             return raw == 0xffU;
+        case ScalarType::E4M3:
+            return (raw & 0x7fU) == 0x7fU;
         default:
             return false;
     }
@@ -117,7 +121,9 @@ float expectedBinaryDecode(ScalarType type, uint32_t raw) {
         return negative ? -std::numeric_limits<float>::infinity()
                         : std::numeric_limits<float>::infinity();
 
-    const uint32_t magnitude = format.hasSign ? raw & (signMask - 1U) : raw;
+    const uint32_t payloadMask = (1U << format.totalBits) - 1U;
+    const uint32_t magnitude =
+        format.hasSign ? raw & (signMask - 1U) : raw & payloadMask;
     const uint32_t exponentMask = (1U << format.exponentBits) - 1U;
     const uint32_t mantissaMask = (1U << format.mantissaBits) - 1U;
     const uint32_t exponent = (magnitude >> format.mantissaBits) & exponentMask;
@@ -143,7 +149,10 @@ void testExhaustiveBinaryFormat(ScalarType type) {
             require(observed == expected, "Binary format infinity decode mismatch.");
         } else {
             require(observed == expected, "Binary format finite decode mismatch.");
-            require(encodeRaw(type, observed) == raw, "Binary format finite round-trip mismatch.");
+            const uint32_t canonicalRaw =
+                type == ScalarType::E4M3 ? raw & 0x7fU : raw;
+            require(encodeRaw(type, observed) == canonicalRaw,
+                    "Binary format finite round-trip mismatch.");
         }
     }
 }
@@ -226,6 +235,7 @@ int main() {
     testExhaustiveBinaryFormat(ScalarType::Float8E4M3Fnuz);
     testExhaustiveBinaryFormat(ScalarType::Float8E5M2Fnuz);
     testExhaustiveBinaryFormat(ScalarType::E5M3);
+    testExhaustiveBinaryFormat(ScalarType::E4M3);
 
     require(encodeRaw(ScalarType::Float8E4M3, 1.0625f) == 0x38,
             "FP8 E4M3 lower-even midpoint rounding mismatch.");
@@ -251,17 +261,23 @@ int main() {
         "Finite-only minifloat NaN saturation mismatch.");
     require(encodeRaw(ScalarType::E5M3, 1.0f) == 0x78 && encodeRaw(ScalarType::E5M3, 2.0f) == 0x80,
             "E5M3 scale encoding mismatch.");
+    require(encodeRaw(ScalarType::E4M3, 1.0f) == 0x38 && encodeRaw(ScalarType::E4M3, 2.0f) == 0x40,
+            "E4M3 scale encoding mismatch.");
     require(
-        encodeRaw(ScalarType::E5M3, -0.0f) == 0x00 && encodeRaw(ScalarType::E8M0, -0.0f) == 0x00,
+        encodeRaw(ScalarType::E5M3, -0.0f) == 0x00 &&
+            encodeRaw(ScalarType::E4M3, -0.0f) == 0x00 &&
+            encodeRaw(ScalarType::E8M0, -0.0f) == 0x00,
         "Unsigned scale negative-zero encoding mismatch.");
 
-    bool negativeScaleThrew = false;
-    try {
-        (void)encodeRaw(ScalarType::E5M3, -1.0f);
-    } catch (const std::domain_error&) {
-        negativeScaleThrew = true;
+    for (const ScalarType scaleType : {ScalarType::E5M3, ScalarType::E4M3}) {
+        bool negativeScaleThrew = false;
+        try {
+            (void)encodeRaw(scaleType, -1.0f);
+        } catch (const std::domain_error&) {
+            negativeScaleThrew = true;
+        }
+        require(negativeScaleThrew, "Negative scale did not fail.");
     }
-    require(negativeScaleThrew, "Negative E5M3 scale did not fail.");
 
     std::vector<std::byte> e8Raw{std::byte{0},   std::byte{1},   std::byte{127},
                                  std::byte{128}, std::byte{254}, std::byte{255}};
