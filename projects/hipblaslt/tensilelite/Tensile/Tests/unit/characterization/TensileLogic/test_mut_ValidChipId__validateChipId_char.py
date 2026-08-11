@@ -120,8 +120,9 @@ def test_variant_directory_missing_own_chip_id_reports_placement(tmp_path, capsy
 
 
 def test_extract_failure_reports_via_outer_except(tmp_path, capsys):
-    """A logic file with no Device line fails ``_extractArchInfo`` and returns
-    ``False`` through the extract-time ``except LogicFileError``.
+    """A logic file with only three list-format header lines fails
+    ``_extractArchInfo``'s list-length check and returns ``False`` through the
+    extract-time ``except LogicFileError``.
 
     Reaches the first ``except`` -> report -> ``return False``. Kills the
     ``report_path``/``placement_path`` ``None``/``and`` mutants (which drop the
@@ -136,7 +137,9 @@ def test_extract_failure_reports_via_outer_except(tmp_path, capsys):
     result = _validateChipId(logic)
     assert result is False
     err = capsys.readouterr().err
-    assert err.startswith("Error: Chip ID validation failed: No device IDs found:")
+    assert err.startswith(
+        "Error: Chip ID validation failed: Expected at least 4 list-format header lines"
+    )
     assert f"(file: {logic})\n" == err[err.index(" (file: ") + 1:]
 
 
