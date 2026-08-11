@@ -1,6 +1,6 @@
 .. meta::
    :description: Using primbench with rocRAND
-   :keywords: ROCm libraries, rocRAND, ROCm, benchmarking, tools
+   :keywords: ROCm libraries, primbench, ROCm, benchmarking, tools
 
 *****************************
 Benchmarking with Primbench
