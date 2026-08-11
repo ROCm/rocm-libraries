@@ -135,7 +135,12 @@ typedef struct rocke_implicit_gemm_conv_spec
 
     const char* pipeline; /* default "mem"     */
     const char* epilogue; /* default "default" */
+    /* async_dma tri-state mirrors Python Optional[bool]:
+     *   async_dma_auto=true, async_dma=false : None  (auto-detect at build time)
+     *   async_dma_auto=false, async_dma=true : True  (force async)
+     *   async_dma_auto=false, async_dma=false: False (force sync) */
     bool async_dma; /* default false */
+    bool async_dma_auto; /* default true  (Python None) */
     bool unroll_k; /* default false */
 
     bool has_lds_k_pad; /* false => Python None */
@@ -224,6 +229,13 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
                                             const char* arch,
                                             char* reason,
                                             size_t reason_cap);
+
+/* _can_use_async_dma(spec, arch)   (Python lines 530-563)
+ *
+ * Returns true if async DMA (raw_ptr_buffer_load_lds) can be auto-enabled for
+ * this spec+arch. Called when spec.async_dma_auto is true (Python None). Returns
+ * false silently on any incompatibility so the caller falls back to the sync path. */
+bool rocke_conv_can_use_async_dma(const rocke_implicit_gemm_conv_spec_t* s, const char* arch);
 
 /* ============================================================ *
  * Descriptor builders   (Python lines 509-629)

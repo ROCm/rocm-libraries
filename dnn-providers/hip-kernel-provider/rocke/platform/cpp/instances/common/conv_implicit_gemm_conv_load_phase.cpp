@@ -227,7 +227,7 @@ void rocke_conv_emit_load_phase(rocke_conv_build_ctx_t* ctx,
     /* k_off_capture[0] = k_off */
     ctx->k_off_capture = k_off;
 
-    if(spec->async_dma)
+    if(ctx->async_dma)
     {
         /* CACHE_STREAM (SLC=1): each K-tile is consumed exactly once by the
          * MFMA phase of the same iter then overwritten by the next iter's

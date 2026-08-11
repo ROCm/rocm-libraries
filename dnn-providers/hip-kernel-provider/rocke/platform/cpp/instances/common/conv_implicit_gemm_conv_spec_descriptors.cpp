@@ -47,6 +47,7 @@
 #include "rocke/arena.h"
 #include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_*, has_shape, op_for_shape */
 #include "rocke/helper_rocke.helpers.atoms.h" /* rocke_mfma_atom */
+#include "rocke/helper_rocke.helpers.loads.h" /* rocke_async_tile_loader_choose_dwords */
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join, rocke_choose_load_vec */
 #include "rocke/helper_rocke.helpers.transforms.h" /* descriptor DAG + transforms */
 
@@ -283,6 +284,7 @@ rocke_implicit_gemm_conv_spec_t rocke_implicit_gemm_conv_spec_default(void)
     s.pipeline = "mem";
     s.epilogue = "default";
     s.async_dma = false;
+    s.async_dma_auto = true; /* Python default: None = auto-detect */
     s.unroll_k = false;
 
     s.has_lds_k_pad = false;
@@ -531,7 +533,7 @@ bool rocke_implicit_gemm_conv_spec_effective_lds_layout(const rocke_implicit_gem
         l.k_pad = s->lds_k_pad;
         l.requires_packed_async = false;
     }
-    else if(s->async_dma)
+    else if(s->async_dma && !s->async_dma_auto)
     {
         /* LdsLayout.packed_async(logical_cols=tile_k) -> k_pad=0 */
         l.logical_cols = s->tile_k;
@@ -620,14 +622,15 @@ bool rocke_implicit_gemm_conv_spec_validate(const rocke_implicit_gemm_conv_spec_
         {
             return false;
         }
-        if(s->async_dma && !rocke_conv_lds_layout_validate_for_async(&layout, reason, reason_cap))
+        if(s->async_dma && !s->async_dma_auto
+           && !rocke_conv_lds_layout_validate_for_async(&layout, reason, reason_cap))
         {
             return false;
         }
     }
 
-    /* if async_dma and lds_k_pad not in (None, 0): raise ValueError(...) */
-    if(s->async_dma && s->has_lds_k_pad && s->lds_k_pad != 0)
+    /* if async_dma is True and lds_k_pad not in (None, 0): raise ValueError(...) */
+    if(s->async_dma && !s->async_dma_auto && s->has_lds_k_pad && s->lds_k_pad != 0)
     {
         ROCKE_CSPEC_REJECT("async_dma requires lds_k_pad to be 0/None because "
                            "raw_ptr_buffer_load_lds writes a packed lane-contiguous tile");
@@ -773,10 +776,13 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
         ab_bytes = (s->tile_m * lds_layout.row_stride + s->tile_n * lds_layout.row_stride)
                    * ab_dtype_bytes;
 
-        double_buf
-            = ((s->pipeline && strcmp(s->pipeline, "compv4") == 0) || s->async_dma || s->unroll_k)
-                  ? 1
-                  : 0;
+        /* For LDS budget: async_dma_auto means None (auto), which may or may not
+         * enable double-buffering at build time. For the static budget check we
+         * must be conservative: assume double-buffer when auto (same as True). */
+        double_buf = ((s->pipeline && strcmp(s->pipeline, "compv4") == 0) || s->async_dma
+                      || s->async_dma_auto || s->unroll_k)
+                         ? 1
+                         : 0;
         ab_lds = ab_bytes * (double_buf ? 2 : 1);
 
         is_cshuffle = (s->epilogue && strcmp(s->epilogue, "cshuffle") == 0);
@@ -827,7 +833,7 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
                 s->epilogue ? s->epilogue : "",
                 arch);
         }
-        if(s->async_dma)
+        if(s->async_dma && !s->async_dma_auto)
         {
             ROCKE_CONVVS_REJECT("WMMA conv does not support async_dma on %s", arch);
         }
@@ -852,6 +858,68 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
     return true;
 
 #undef ROCKE_CONVVS_REJECT
+}
+
+/* ===================================================================== *
+ *  _can_use_async_dma(spec, arch)   (Python lines 530-563)
+ *
+ *  Called when spec.async_dma_auto is true. Returns false silently on any
+ *  incompatibility so the caller falls back to the sync path without raising.
+ * ===================================================================== */
+
+bool rocke_conv_can_use_async_dma(const rocke_implicit_gemm_conv_spec_t* s, const char* arch)
+{
+    const rocke_archtarget_t* target;
+    int elem_bytes_a;
+    int elem_bytes_b;
+    int block_size;
+    int dummy;
+
+    if(s == NULL || arch == NULL)
+    {
+        return false;
+    }
+    target = rocke_archtarget_from_gfx(arch);
+    if(target == NULL)
+    {
+        return false;
+    }
+    if(!target->memory.has_async_lds)
+    {
+        return false;
+    }
+    if(s->pipeline != NULL && strcmp(s->pipeline, "basic") == 0)
+    {
+        return false;
+    }
+    /* wmma (wave32) does not support async_dma yet */
+    if(target->wave_size == 32)
+    {
+        return false;
+    }
+    if(s->has_lds_k_pad && s->lds_k_pad != 0)
+    {
+        return false;
+    }
+    elem_bytes_a = (s->dtype_a && strcmp(s->dtype_a, "fp32") == 0) ? 4 : 2;
+    elem_bytes_b = (s->dtype_b && strcmp(s->dtype_b, "fp32") == 0) ? 4 : 2;
+    block_size = rocke_implicit_gemm_conv_spec_block_size(s);
+
+    /* AsyncTileLoader.choose_dwords raises ValueError when the tile cannot be
+     * issued: mirror that by returning false on ROCKE_ERR_VALUE. */
+    if(rocke_async_tile_loader_choose_dwords(
+           s->tile_m, s->tile_k, block_size, 4 / elem_bytes_a, &dummy)
+       != ROCKE_OK)
+    {
+        return false;
+    }
+    if(rocke_async_tile_loader_choose_dwords(
+           s->tile_n, s->tile_k, block_size, 4 / elem_bytes_b, &dummy)
+       != ROCKE_OK)
+    {
+        return false;
+    }
+    return true;
 }
 
 /* ===================================================================== *

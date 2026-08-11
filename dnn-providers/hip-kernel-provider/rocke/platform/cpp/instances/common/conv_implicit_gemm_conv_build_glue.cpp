@@ -158,6 +158,18 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         }
     }
 
+    /* ---- Resolve async mode (Python lines 878-891) ----
+     * spec.async_dma_auto=true => None => auto-detect; True/False are taken as-is.
+     * ctx->async_dma is the resolved bool used for all downstream decisions. */
+    if(!spec->async_dma_auto)
+    {
+        ctx->async_dma = spec->async_dma;
+    }
+    else
+    {
+        ctx->async_dma = rocke_conv_can_use_async_dma(spec, ctx->arch);
+    }
+
     /* ---- b.kernel.attrs["waves_per_eu"] = spec.waves_per_eu ---- (792-795)
      * The builder `b` is already constructed with spec.kernel_name() by the
      * caller (the Python `b = IRBuilder(spec.kernel_name())`). */
@@ -366,30 +378,36 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         ctx->block_n_off_v = ctx->grid.block_n_off;
     }
 
-    /* ---- LDS plan ---- (894-896). lds_layout = spec.effective_lds_layout():
-     * sync path pads each K-row by +8 halves (when tile_k >= 16) to dodge LDS
-     * bank conflicts; the async / packed path uses +0 (lane-contiguous LDS).
-     * Ported via the LdsLayout accessor (spec_descriptors TU) so the derivation
-     * + layout.validate() + (on the async path) validate_for_async() match
-     * Python. On rejection set the builder's sticky error and bail. */
+    /* ---- LDS plan ---- (Python lines 1001-1008).
+     * When use_async=True Python uses LdsLayout.packed_async(block_k) directly,
+     * bypassing spec.effective_lds_layout() (which would only return packed_async
+     * for spec.async_dma==True, not for the auto-detected path).
+     * When use_async=False the sync path is derived from spec.effective_lds_layout(). */
     {
         char lds_reason[ROCKE_ERR_MSG_CAP];
-        /* spec.validate() (above) already ran effective_lds_layout +
-         * validate_for_async, so these cannot fail here for a validated spec;
-         * route the population through the accessor anyway (single source of
-         * truth) and surface any error defensively. */
-        if(!rocke_implicit_gemm_conv_spec_effective_lds_layout(
-               spec, &ctx->lds_layout, lds_reason, sizeof(lds_reason)))
+        if(ctx->async_dma)
         {
-            rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", lds_reason);
-            return false;
+            /* LdsLayout.packed_async(block_k): k_pad=0, row_stride=block_k */
+            ctx->lds_layout.logical_cols = ctx->block_k;
+            ctx->lds_layout.k_pad = 0;
+            ctx->lds_layout.row_stride = ctx->block_k;
+            ctx->lds_layout.requires_packed_async = true;
+            ctx->lds_layout.swizzle = NULL;
+            if(!rocke_conv_lds_layout_validate_for_async(
+                   &ctx->lds_layout, lds_reason, sizeof(lds_reason)))
+            {
+                rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", lds_reason);
+                return false;
+            }
         }
-        if(spec->async_dma
-           && !rocke_conv_lds_layout_validate_for_async(
-               &ctx->lds_layout, lds_reason, sizeof(lds_reason)))
+        else
         {
-            rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", lds_reason);
-            return false;
+            if(!rocke_implicit_gemm_conv_spec_effective_lds_layout(
+                   spec, &ctx->lds_layout, lds_reason, sizeof(lds_reason)))
+            {
+                rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", lds_reason);
+                return false;
+            }
         }
     }
 
@@ -404,9 +422,9 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         ctx->A_smem = rocke_b_smem_alloc(b, rocke_f16(), a_shape, 2, "A_smem");
         ctx->B_smem = rocke_b_smem_alloc(b, rocke_f16(), b_shape, 2, "B_smem");
 
-        /* double_buffer = compv4 || async_dma || unroll_k */
+        /* double_buffer = compv4 || use_async || unroll_k */
         ctx->double_buffer = (spec->pipeline != NULL && strcmp(spec->pipeline, "compv4") == 0)
-                             || spec->async_dma || spec->unroll_k;
+                             || ctx->async_dma || spec->unroll_k;
         if(ctx->double_buffer)
         {
             ctx->A_smem2 = rocke_b_smem_alloc(b, rocke_f16(), a_shape, 2, "A_smem2");
@@ -540,7 +558,7 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     ctx->k_off_capture = NULL; /* Python: k_off_capture = [None] */
 
     /* ---- loaders (exactly one family populated) ---- (986-1027) */
-    ctx->async_dma = spec->async_dma;
+    /* ctx->async_dma already resolved at the top of ctx_init (auto vs explicit). */
     if(ctx->async_dma)
     {
         rocke_status_t sa = rocke_async_tile_loader_from_tile(
@@ -631,6 +649,20 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv(rocke_ir_builder_t* b,
     if(!rocke_conv_build_ctx_init(&ctx, b, spec, arch, overrides))
     {
         return NULL;
+    }
+
+    /* Python line 891: if use_async and spec.async_dma is None: b.kernel.name += "_async"
+     * In C: append "_async" when auto-detected async is active. */
+    if(ctx.async_dma && spec->async_dma_auto && b->kernel != NULL && b->kernel->name != NULL)
+    {
+        size_t base_len = strlen(b->kernel->name);
+        char* new_name = (char*)rocke_arena_alloc(&b->arena, base_len + 7);
+        if(new_name != NULL)
+        {
+            memcpy(new_name, b->kernel->name, base_len);
+            memcpy(new_name + base_len, "_async", 7); /* includes NUL */
+            b->kernel->name = new_name;
+        }
     }
 
     /* ---- K-loop driver selection (1276-1347) ----
