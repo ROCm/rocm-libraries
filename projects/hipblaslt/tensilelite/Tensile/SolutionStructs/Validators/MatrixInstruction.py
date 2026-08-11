@@ -239,10 +239,23 @@ def validateMIParameters(
         assert miEnabled == False, elineno()
         return True
 
-    assert solution["MatrixInstM"] == mi4[0]
-    assert solution["MatrixInstN"] == mi4[1]
-    assert solution["MatrixInstK"] == mi4[2]
-    assert solution["MatrixInstB"] == mi4[3]
+    # When SourceSwap is enabled the M and N of the matrix instruction are
+    # swapped relative to the MatrixInstruction list (list stay,
+    # so validate against the swapped order in that case.
+    if solution.get("SourceSwap", False):
+        assert solution["MatrixInstM"] == mi4[1], (
+            f"{elineno()}: SourceSwap MatrixInstM {solution['MatrixInstM']} != MI[1] {mi4[1]}")
+        assert solution["MatrixInstN"] == mi4[0], (
+            f"{elineno()}: SourceSwap MatrixInstN {solution['MatrixInstN']} != MI[0] {mi4[0]}")
+    else:
+        assert solution["MatrixInstM"] == mi4[0], (
+            f"{elineno()}: MatrixInstM {solution['MatrixInstM']} != MI[0] {mi4[0]}")
+        assert solution["MatrixInstN"] == mi4[1], (
+            f"{elineno()}: MatrixInstN {solution['MatrixInstN']} != MI[1] {mi4[1]}")
+    assert solution["MatrixInstK"] == mi4[2], (
+        f"{elineno()}: MatrixInstK {solution['MatrixInstK']} != MI[2] {mi4[2]}")
+    assert solution["MatrixInstB"] == mi4[3], (
+        f"{elineno()}: MatrixInstB {solution['MatrixInstB']} != MI[3] {mi4[3]}")
 
     assert mi4 in validMatrixInstructions, f"{elineno()} : invalid MI4: {str(mi4)} for type {miDataType.toChar()}"
 
