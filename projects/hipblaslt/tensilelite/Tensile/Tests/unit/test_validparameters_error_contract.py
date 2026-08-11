@@ -60,9 +60,12 @@ def _intISPKey():
 
 
 class TestGetExpectedTypesEmptyList:
-    def test_empty_list_value_is_not_registered(self):
-        result = _getExpectedTypes({"Foo": [], "Bar": [1, 2]})
-        assert "Foo" not in result
+    def test_empty_list_value_raises_valueerror(self):
+        with pytest.raises(ValueError, match=r"Invalid parameter value: Foo = \[\]"):
+            _getExpectedTypes({"Foo": [], "Bar": [1, 2]})
+
+    def test_nonempty_list_value_is_registered(self):
+        result = _getExpectedTypes({"Bar": [1, 2]})
         assert result["Bar"] == {int}
 
 
