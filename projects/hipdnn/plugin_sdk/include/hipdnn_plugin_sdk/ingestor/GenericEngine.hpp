@@ -126,8 +126,12 @@ public:
         }
 
         auto knobs = builder.CreateVector(knobOffsets);
-        auto engineDetails
-            = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(builder, _id, knobs);
+        // The UED's notes reach the caller the same way every other engine's do. Passing
+        // nothing here would report a descriptor-backed engine as having no behavior
+        // notes at all, which is a claim rather than an omission.
+        auto behaviorNotes = builder.CreateVector(_engine.behaviorNotes);
+        auto engineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(
+            builder, _id, knobs, behaviorNotes);
         builder.Finish(engineDetails);
 
         auto detachedBuffer = std::make_unique<flatbuffers::DetachedBuffer>(builder.Release());

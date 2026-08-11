@@ -8,6 +8,7 @@
 #include <string>
 
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_plugin_sdk/BehaviorNote.h>
 #include <hipdnn_plugin_sdk/ingestor/IKernelHeuristic.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
 
@@ -78,6 +79,10 @@ PointwiseAddDescriptorSet buildPointwiseAddDescriptorSet()
     // block_size is exposed to the caller; dtype is not, because it is pinned by the
     // graph rather than chosen. Exposing it would offer a choice nothing can serve.
     set.engine.knobs = {std::string(BLOCK_SIZE_FIELD)};
+    // True of this engine today: the dispatch handler compiles its kernel through hiprtc
+    // when the plan is built. A pack whose kernels ship prebuilt in a kpack would not
+    // declare this, so it is a property of the pack rather than of the ingestor.
+    set.engine.behaviorNotes = {HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION};
 
     set.matchers = {
         {GRAPH_MATCHER_ID,
@@ -133,7 +138,7 @@ std::shared_ptr<KernelIngestorStateManager<Handle>> makePointwiseAddStateManager
         std::move(set.matchers),
         std::move(set.dispatches),
         std::move(set.packs),
-        std::make_shared<NativeKernelHeuristic>(ScoreRegistry::resolve(std::string(SCORE_SYMBOL))));
+        std::make_shared<NativeKernelHeuristic>(std::string(SCORE_SYMBOL)));
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine

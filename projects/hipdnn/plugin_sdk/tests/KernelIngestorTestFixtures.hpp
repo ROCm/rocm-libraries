@@ -270,7 +270,7 @@ inline std::unique_ptr<KernelIngestorStateManager<int>>
         std::move(matchers),
         std::move(dispatches),
         std::vector<KernelDescriptorPack>{std::move(pack)},
-        std::make_shared<NativeKernelHeuristic>(&scoreByBlockSize),
+        std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
         cacheCapacity);
 }
 

@@ -6,6 +6,9 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <algorithm>
+#include <mutex>
+#include <string>
+#include <utility>
 #include <vector>
 
 #include <hipdnn_plugin_sdk/ingestor/Catalog.hpp>
@@ -94,26 +97,45 @@ public:
 /**
  * @brief An IKernelHeuristic whose score() is a native function resolved by symbol.
  *
- * The UHD escape hatch: the descriptor names a symbol, this resolves it. The
- * data-driven form loads a model artifact and assembles its feature vector from the
- * bound token state instead — the UHD follow-up RFC — and slots in here as another
- * IKernelHeuristic.
+ * The UHD escape hatch: the descriptor names a symbol, this resolves it. The data-driven
+ * form loads a model artifact and assembles its feature vector from the bound token state
+ * instead (the UHD follow-up RFC), and slots in here as another IKernelHeuristic.
+ *
+ * **Constructing a heuristic must stay cheap; whatever it selects with loads on first
+ * use.** RFC 0017 §8.1 admits the heuristic at applicability only as a name: "The
+ * heuristic is named but **not** loaded; nothing ranks yet", and §3 generalizes it,
+ * "a heuristic model is not read until something needs the catalog ranked". An engine
+ * whose matchers reject a graph must never pay for its selector.
+ *
+ * That contract lives here rather than one level up, because only the adapter knows what
+ * "loading" costs it. This one holds a symbol name and resolves it on first score(); a
+ * LightGBM adapter would hold an artifact path and read the model there. Either way the
+ * object is constructible before any graph is seen, which is what lets the engine own it
+ * outright instead of threading a factory through the state manager.
  */
 class NativeKernelHeuristic : public IKernelHeuristic
 {
 public:
-    explicit NativeKernelHeuristic(ScoreFn scoreFn)
-        : _scoreFn(scoreFn)
+    /// @param scoreSymbol Resolved from the registry on first use, not here, so
+    ///        constructing this costs nothing an engine that never ranks would pay.
+    explicit NativeKernelHeuristic(std::string scoreSymbol)
+        : _scoreSymbol(std::move(scoreSymbol))
     {
     }
 
     double score(const KernelDefinition& kernel, const MatchContext& context) const override
     {
+        std::call_once(_resolved, [this]() { _scoreFn = ScoreRegistry::resolve(_scoreSymbol); });
         return _scoreFn(kernel, context);
     }
 
 private:
-    ScoreFn _scoreFn;
+    std::string _scoreSymbol;
+    /// Resolved once, on the first call that needs an order. Mutable because score() is
+    /// logically const: resolving is an implementation detail of answering, and a plan
+    /// may rank from several threads at once.
+    mutable std::once_flag _resolved;
+    mutable ScoreFn _scoreFn = nullptr;
 };
 
 } // namespace hipdnn_plugin_sdk::ingestor
