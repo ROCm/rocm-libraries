@@ -62,3 +62,29 @@ HIPDNN_MAP_TO_ID(AutotunePluginEngineC, -20);
 HIPDNN_MAP_TO_ID(AutotunePluginEngineFails, -21);
 HIPDNN_MAP_TO_ID(AutotunePluginEnginePrimingOnlyFails, -22);
 HIPDNN_MAP_TO_ID(AutotunePluginEngineWorkspaceGrows, -23);
+
+// Hashed-name fake: its engine id is the FNV-1a-64 hash of its own engine name,
+// "TEST_HASHED_NAME_ENGINE", reproducing the id/name identity that
+// HIPDNN_REGISTER_ENGINE establishes for production plugins. The literal is
+// precomputed because engineNameToId() is not usable in a constant expression:
+// it delegates to fnv1aHash(), which uses reinterpret_cast. Tests that rely on
+// the identity assert it at runtime against engineNameToId().
+HIPDNN_MAP_TO_ID(HashedNamePlugin, static_cast<int64_t>(0xD134891277747B22ULL));
+
+namespace hipdnn_tests::plugin_constants
+{
+// Engine names reported by the named test plugins, both through the optional
+// `hipdnnEnginePluginGetEngineName` entry point and in `EngineDetails.name`.
+// All of these names are plugin-supplied and deliberately absent from the
+// data_sdk engine-name registry.
+//
+// The good-default and execute-fails plugins keep hardcoded engine ids that
+// their names do not hash back to, which is what makes them fixtures for
+// name/id disagreement. The hashed-name plugin is the opposite fixture: its id
+// is exactly engineNameToId() of its name, so filters that resolve a name by
+// hashing it -- deselect_engines(names), set_preferred_engine_id_ext -- reach
+// its engine.
+inline constexpr const char* K_GOOD_DEFAULT_PLUGIN_ENGINE_NAME = "TEST_GOOD_DEFAULT_ENGINE";
+inline constexpr const char* K_EXECUTE_FAILS_PLUGIN_ENGINE_NAME = "TEST_EXECUTE_FAILS_ENGINE";
+inline constexpr const char* K_HASHED_NAME_PLUGIN_ENGINE_NAME = "TEST_HASHED_NAME_ENGINE";
+} // namespace hipdnn_tests::plugin_constants

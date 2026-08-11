@@ -796,6 +796,24 @@ for (const auto& path : paths) {
 }
 ```
 
+### Engine Names
+
+The plugin names its own engines. `ExampleProviderContainer::getEngineName()`
+maps each engine ID to a string, and `EnginePluginImpl.inl` exports that as the
+`hipdnnEnginePluginGetEngineName` entry point. hipDNN calls it whenever it needs
+a display name, so `hipdnn_list_engines`, frontend logging, and the
+`HIPDNN_ATTR_ENGINE_NAME_EXT` engine-descriptor attribute all show
+`EXAMPLE_PROVIDER_RELU_ENGINE` rather than a hexadecimal engine ID.
+
+A plugin distributed as a drop-in pack supplies its engine names the same way,
+with no change to hipDNN's own source. The built-in registry covers only engines
+built into the hipDNN tree, and hipDNN consults it only when the plugin providing
+an engine reports no name of its own.
+
+The returned pointer must remain valid for the lifetime of the loaded library — a
+string literal or an entry in a static table. See the "Engine Names" section of
+`docs/PluginDevelopment.md` for the full status contract.
+
 ### Engine Selection
 
 By default, hipDNN selects the best engine using heuristic ranking. To force

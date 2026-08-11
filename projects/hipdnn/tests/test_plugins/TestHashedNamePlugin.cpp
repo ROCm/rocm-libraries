@@ -3,17 +3,23 @@
 
 #include "TestPluginCommon.hpp"
 #include "TestPluginEngineIdMap.hpp"
+
 // NOLINTNEXTLINE
 thread_local char
     hipdnn_plugin_sdk::PluginLastErrorManager::s_lastError[HIPDNN_PLUGIN_ERROR_STRING_MAX_LENGTH]
     = "";
 
-class GoodDefaultPlugin : public TestPluginBase
+// A well-behaved plugin whose engine id is the hash of its own engine name.
+// Production plugins get that identity from HIPDNN_REGISTER_ENGINE, which
+// derives the id from the name; the other fake plugins hardcode unrelated ids.
+// Without a fake that honours the identity, no test can exercise a filter that
+// resolves an engine name by hashing it, such as deselect_engines(names).
+class HashedNamePlugin : public TestPluginBase
 {
 public:
     const char* getPluginName() const override
     {
-        return HIPDNN_COMPONENT_NAME;
+        return "test_HashedNamePlugin";
     }
     const char* getPluginVersion() const override
     {
@@ -27,11 +33,11 @@ public:
 
     int64_t getEngineId() const override
     {
-        return hipdnn_tests::plugin_constants::engineId<GoodDefaultPlugin>();
+        return hipdnn_tests::plugin_constants::engineId<HashedNamePlugin>();
     }
     const char* getEngineName() const override
     {
-        return hipdnn_tests::plugin_constants::K_GOOD_DEFAULT_PLUGIN_ENGINE_NAME;
+        return hipdnn_tests::plugin_constants::K_HASHED_NAME_PLUGIN_ENGINE_NAME;
     }
     uint32_t getNumEngines() const override
     {
@@ -46,11 +52,11 @@ public:
 // Initialize plugin instance on load
 __attribute__((constructor)) static void initializePlugin()
 {
-    TestPluginBase::setInstance(std::make_unique<GoodDefaultPlugin>());
+    TestPluginBase::setInstance(std::make_unique<HashedNamePlugin>());
 }
 
 // Register all standard plugin API functions PLUS the optional engine-name
-// entry point. This is the only plugin installed to test_plugins/default, so it
-// is the one discovered by directory scans that need a named engine.
+// entry point, so the engine name reaches the backend through tier 1 of the
+// name-resolution chain as well as through EngineDetails.name.
 REGISTER_TEST_PLUGIN_API()
 REGISTER_TEST_PLUGIN_ENGINE_NAME_API()

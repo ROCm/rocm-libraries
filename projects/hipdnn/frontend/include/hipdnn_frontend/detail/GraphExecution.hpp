@@ -7,6 +7,7 @@
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
 #include <hipdnn_frontend/detail/CreateBackendDescriptor.hpp>
+#include <hipdnn_frontend/detail/DescriptorUnpackHelpers.hpp>
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
 #include <hipdnn_frontend/detail/VariantPackHelpers.hpp>
 
@@ -45,8 +46,13 @@ inline Error tensorLookupToVariantPack(
     return {ErrorCode::OK, ""};
 }
 
-// Resolve a backend engine ID to its human-readable name.
-// Falls back to a hex string (e.g., "0x1A2B") for unknown engines.
+/// Resolve a backend engine ID to its human-readable name.
+/// Falls back to the canonical zero-padded hexadecimal rendering of the ID
+/// (e.g., "0x0000000000001A2B") for unknown engines, matching what the backend
+/// produces for the same engine.
+/// This overload only sees engines built into the frontend's static registry;
+/// prefer the descriptor-aware overload below whenever an engine descriptor is
+/// available, because that one also names engines supplied by a plugin.
 inline std::string resolveEngineName(int64_t engineId)
 {
     try
@@ -55,10 +61,30 @@ inline std::string resolveEngineName(int64_t engineId)
     }
     catch(const std::out_of_range&)
     {
-        std::ostringstream oss;
-        oss << "0x" << std::hex << engineId;
-        return oss.str();
+        return hipdnn_data_sdk::utilities::formatEngineIdHex(engineId);
     }
+}
+
+/// Resolve a finalized engine descriptor to its human-readable name.
+/// The backend owns the name and reports it through HIPDNN_ATTR_ENGINE_NAME_EXT,
+/// which covers plugin-supplied engines that the frontend's static registry
+/// cannot see. Falls back to the ID-only overload when the backend reports no
+/// name — including against an older backend that does not know the attribute,
+/// which getDescriptorAttrString() reports as an empty value rather than an error.
+inline std::string resolveEngineName(hipdnnBackendDescriptor_t engineDesc, int64_t engineId)
+{
+    if(engineDesc != nullptr)
+    {
+        std::string engineName;
+        auto err = getDescriptorAttrString(
+            engineDesc, HIPDNN_ATTR_ENGINE_NAME_EXT, engineName, "engine name.");
+        if(err.is_good() && !engineName.empty())
+        {
+            return engineName;
+        }
+    }
+
+    return resolveEngineName(engineId);
 }
 
 // Execute a graph using a specific execution plan descriptor and a

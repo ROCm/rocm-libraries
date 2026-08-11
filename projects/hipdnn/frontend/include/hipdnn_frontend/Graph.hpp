@@ -204,6 +204,14 @@ private:
     std::unique_ptr<detail::ScopedHipdnnBackendDescriptor> _graphDesc;
     bool _graphDescFinalized = false;
 
+    // Engine ID -> display name, memoised for the lifetime of _graphDesc.
+    // Resolving a name asks the backend through a throwaway engine descriptor whose
+    // finalization polls every loaded plugin, and the same engine is named many
+    // times over an autotune run, so the answer is cached. Keyed only by engine ID
+    // because every entry is resolved against the current _graphDesc, which means
+    // the cache must be dropped whenever that descriptor is replaced.
+    mutable std::unordered_map<int64_t, std::string> _engineNameCache;
+
 protected:
     // A compiled execution plan containing both the engine config and execution
     // plan descriptors, along with metadata identifying which engine and knob
@@ -750,6 +758,7 @@ private:
     {
         _graphDesc = std::move(desc);
         _graphDescFinalized = finalized;
+        _engineNameCache.clear();
     }
 
     /// Clear the graph descriptor and finalization state
@@ -757,6 +766,7 @@ private:
     {
         _graphDesc.reset();
         _graphDescFinalized = false;
+        _engineNameCache.clear();
     }
 
     /// Finalize an existing unfinalized descriptor by adding a handle and finalizing
@@ -797,6 +807,52 @@ private:
     bool hasReadyGraphDesc() const
     {
         return hasValidGraphDesc() && _graphDescFinalized;
+    }
+
+    /// Resolve an engine ID to the display name to report for it.
+    ///
+    /// Prefers the name the backend reports for an engine descriptor built against
+    /// this graph, because that is the only way to name an engine supplied by an
+    /// engine plugin; falls back to the built-in engine name registry and then to
+    /// a hex rendering of the ID. Results are memoised in _engineNameCache.
+    ///
+    /// Before the graph is built there is no descriptor to ask, so the answer is
+    /// the registry/hex one and is deliberately not cached — it would otherwise
+    /// mask the backend name once the graph does get built.
+    std::string engineNameFor(int64_t engineId) const
+    {
+        if(!hasReadyGraphDesc())
+        {
+            return detail::resolveEngineName(engineId);
+        }
+
+        const auto cached = _engineNameCache.find(engineId);
+        if(cached != _engineNameCache.end())
+        {
+            return cached->second;
+        }
+
+        detail::ScopedHipdnnBackendDescriptor engineDesc;
+        const bool haveEngineDesc = hipdnn_frontend::detail::createEngineDescriptorForGraph(
+                                        engineDesc, _graphDesc->get(), engineId)
+                                        .is_good();
+
+        std::string engineName = haveEngineDesc
+                                     ? detail::resolveEngineName(engineDesc.get(), engineId)
+                                     : detail::resolveEngineName(engineId);
+
+        _engineNameCache.emplace(engineId, engineName);
+        return engineName;
+    }
+
+    /// Record a name already resolved from an engine descriptor built elsewhere,
+    /// so engineNameFor() does not rebuild a descriptor for the same engine.
+    void cacheEngineName(int64_t engineId, const std::string& engineName) const
+    {
+        if(hasReadyGraphDesc())
+        {
+            _engineNameCache.insert_or_assign(engineId, engineName);
+        }
     }
 
     void assignUnsetTensorUids()
@@ -1277,21 +1333,23 @@ private:
                         config,
                         spec.supportsExhaustive,
                         /*ranExhaustive=*/false,
-                        /*exhaustiveNotRunReason=*/std::string{}));
+                        /*exhaustiveNotRunReason=*/std::string{},
+                        engineNameFor(spec.engineId)));
                     ++filteredCount;
                     continue;
                 }
                 if(_barredEngineIds.count(spec.engineId) > 0)
                 {
-                    nonBenchmarkedResults.push_back(autotune::detail::makeBarredResult(
-                        spec.engineId,
-                        spec.knobSettings,
-                        spec.workspaceSize,
-                        int64_t{-1},
-                        config,
-                        spec.supportsExhaustive,
-                        /*ranExhaustive=*/false,
-                        /*exhaustiveNotRunReason=*/std::string{}));
+                    nonBenchmarkedResults.push_back(
+                        autotune::detail::makeBarredResult(spec.engineId,
+                                                           spec.knobSettings,
+                                                           spec.workspaceSize,
+                                                           int64_t{-1},
+                                                           config,
+                                                           spec.supportsExhaustive,
+                                                           /*ranExhaustive=*/false,
+                                                           /*exhaustiveNotRunReason=*/std::string{},
+                                                           engineNameFor(spec.engineId)));
                     ++barredCount;
                     continue;
                 }
@@ -1471,7 +1529,8 @@ private:
                         "Plan failed compile: " + compileErr.get_message(),
                         spec.supportsExhaustive,
                         primingOutcomes[specIdx].ranExhaustive,
-                        primingOutcomes[specIdx].exhaustiveNotRunReason));
+                        primingOutcomes[specIdx].exhaustiveNotRunReason,
+                        engineNameFor(spec.engineId)));
                     ++failedCompileCount;
                     continue;
                 }
@@ -1490,7 +1549,8 @@ private:
                         "Plan failed finalize: " + finErr.get_message(),
                         spec.supportsExhaustive,
                         primingOutcomes[specIdx].ranExhaustive,
-                        primingOutcomes[specIdx].exhaustiveNotRunReason));
+                        primingOutcomes[specIdx].exhaustiveNotRunReason,
+                        engineNameFor(spec.engineId)));
                     ++failedFinalizeCount;
                     continue;
                 }
@@ -1510,7 +1570,8 @@ private:
                         config,
                         spec.supportsExhaustive,
                         primingOutcomes[specIdx].ranExhaustive,
-                        primingOutcomes[specIdx].exhaustiveNotRunReason));
+                        primingOutcomes[specIdx].exhaustiveNotRunReason,
+                        engineNameFor(spec.engineId)));
                     ++barredCount;
                     continue;
                 }
@@ -1536,7 +1597,8 @@ private:
                         maxWorkspaceSize,
                         spec.supportsExhaustive,
                         primingOutcomes[specIdx].ranExhaustive,
-                        primingOutcomes[specIdx].exhaustiveNotRunReason));
+                        primingOutcomes[specIdx].exhaustiveNotRunReason,
+                        engineNameFor(spec.engineId)));
                     ++workspaceSkippedCount;
                     continue;
                 }
@@ -1644,22 +1706,24 @@ private:
                         "Plan failed to finalize during build_plans.",
                         supportsExhaustive,
                         /*ranExhaustive=*/false,
-                        /*exhaustiveNotRunReason=*/std::string{}));
+                        /*exhaustiveNotRunReason=*/std::string{},
+                        engineNameFor(plan.engineId)));
                     ++failedFinalizeCount;
                     continue;
                 }
 
                 if(plan.barred)
                 {
-                    nonBenchmarkedResults.push_back(autotune::detail::makeBarredResult(
-                        plan.engineId,
-                        plan.knobSettings,
-                        plan.workspaceSize,
-                        plan.workspaceSize,
-                        config,
-                        supportsExhaustive,
-                        /*ranExhaustive=*/false,
-                        /*exhaustiveNotRunReason=*/std::string{}));
+                    nonBenchmarkedResults.push_back(
+                        autotune::detail::makeBarredResult(plan.engineId,
+                                                           plan.knobSettings,
+                                                           plan.workspaceSize,
+                                                           plan.workspaceSize,
+                                                           config,
+                                                           supportsExhaustive,
+                                                           /*ranExhaustive=*/false,
+                                                           /*exhaustiveNotRunReason=*/std::string{},
+                                                           engineNameFor(plan.engineId)));
                     ++barredCount;
                     continue;
                 }
@@ -1676,7 +1740,8 @@ private:
                         config,
                         supportsExhaustive,
                         /*ranExhaustive=*/false,
-                        /*exhaustiveNotRunReason=*/std::string{}));
+                        /*exhaustiveNotRunReason=*/std::string{},
+                        engineNameFor(plan.engineId)));
                     ++filteredCount;
                     continue;
                 }
@@ -1692,7 +1757,8 @@ private:
                         maxWorkspaceSize,
                         supportsExhaustive,
                         /*ranExhaustive=*/false,
-                        /*exhaustiveNotRunReason=*/std::string{}));
+                        /*exhaustiveNotRunReason=*/std::string{},
+                        engineNameFor(plan.engineId)));
                     ++workspaceSkippedCount;
                     continue;
                 }
@@ -1768,7 +1834,8 @@ private:
                                                         info.knobSettings,
                                                         info.estimatedWorkspaceSize,
                                                         info.compiledWorkspaceSize,
-                                                        config);
+                                                        config,
+                                                        engineNameFor(info.engineId));
 
             {
                 const char* iterLabel = "max";
@@ -3295,14 +3362,32 @@ public:
             EngineConfigInfo info;
             info.engineId = engineIds[i];
 
-            // Resolve engine name with hex fallback for unknown engines
-            info.engineName = detail::resolveEngineName(engineIds[i]);
-
-            // Get knobs for this engine (failure is non-fatal; info.knobs stays empty)
-            auto knobErr = get_knobs_for_engine(engineIds[i], info.knobs);
-            if(knobErr.is_bad())
+            // One engine descriptor answers both the name and the knob query, so
+            // build it once here rather than through the single-purpose helpers.
+            detail::ScopedHipdnnBackendDescriptor engineDesc;
+            auto engineDescErr = hipdnn_frontend::detail::createEngineDescriptorForGraph(
+                engineDesc, _graphDesc->get(), engineIds[i]);
+            if(engineDescErr.is_bad())
             {
-                HIPDNN_FE_LOG_WARN("Failed to get knobs for engine " << engineIds[i]);
+                HIPDNN_FE_LOG_WARN("Failed to describe engine " << engineIds[i] << ": "
+                                                                << engineDescErr.get_message());
+            }
+
+            // Ask the backend for the engine name, which covers plugin-supplied
+            // engines; registry and hex fallbacks apply for anything unnamed.
+            info.engineName = engineDescErr.is_good()
+                                  ? detail::resolveEngineName(engineDesc.get(), engineIds[i])
+                                  : detail::resolveEngineName(engineIds[i]);
+            cacheEngineName(engineIds[i], info.engineName);
+
+            // Knobs for this engine (failure is non-fatal; info.knobs stays empty)
+            if(engineDescErr.is_good())
+            {
+                auto knobErr = detail::unpackKnobsFromDescriptors(engineDesc.get(), info.knobs);
+                if(knobErr.is_bad())
+                {
+                    HIPDNN_FE_LOG_WARN("Failed to get knobs for engine " << engineIds[i]);
+                }
             }
 
             // Check for benchmarking knob (supportsExhaustive)
@@ -4033,7 +4118,10 @@ public:
         }
 
         const auto& plan = _compiledPlans[static_cast<size_t>(plan_index)];
-        name = detail::resolveEngineName(plan.engineId);
+
+        // Ask the backend for the engine name, which covers plugin-supplied
+        // engines; registry and hex fallbacks apply for anything unnamed.
+        name = engineNameFor(plan.engineId);
 
         return {ErrorCode::OK, ""};
     }
@@ -4138,6 +4226,11 @@ public:
      * during @c build_plans() and @c autotuneImpl(). Accumulates across
      * calls (set union).
      *
+     * Names are hashed to engine IDs without consulting the built-in engine
+     * name registry, so engines supplied by a plugin can be deselected by name
+     * too. A name that matches no engine simply bars nothing; the info-level
+     * log of each name-to-ID mapping is what makes a typo diagnosable.
+     *
      * @param engine_names Engine names to deselect (e.g. {"MIOPEN_ENGINE"})
      * @return Reference to @c *this for method chaining
      */
@@ -4149,13 +4242,9 @@ public:
         }
         for(const auto& name : engine_names)
         {
-            if(!hipdnn_data_sdk::utilities::isEngineNameRegistered(name))
-            {
-                HIPDNN_FE_LOG_WARN("deselect_engines(): unknown engine name '" << name
-                                                                               << "', skipping");
-                continue;
-            }
-            _barredEngineIds.insert(hipdnn_data_sdk::utilities::engineNameToId(name));
+            const int64_t engineId = hipdnn_data_sdk::utilities::engineNameToId(name);
+            HIPDNN_FE_LOG_INFO("deselect_engines(): '" << name << "' -> engine ID " << engineId);
+            _barredEngineIds.insert(engineId);
         }
         HIPDNN_FE_LOG_INFO("deselect_engines(): stored engine filter (" << _barredEngineIds.size()
                                                                         << " engine(s))");

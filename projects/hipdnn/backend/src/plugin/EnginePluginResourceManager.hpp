@@ -8,6 +8,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -131,6 +132,16 @@ public:
 
     virtual size_t getEngineCount() const;
     virtual std::vector<EngineInfo> getEngineInfos() const;
+
+    /// @brief Resolves the display name for an engine using the canonical four-tier
+    /// chain: plugin entry point -> EngineDetails.name -> static registry -> hex ID.
+    /// Never throws; always returns a non-empty string.
+    /// @param engineId    Engine ID as reported by the owning plugin.
+    /// @param detailsName Tier-2 candidate from EngineDetails.name, or std::nullopt
+    ///                    in schema-less contexts such as getEngineInfos(). The
+    ///                    referenced storage must outlive this call.
+    [[nodiscard]] virtual std::string
+        resolveEngineName(int64_t engineId, std::optional<std::string_view> detailsName) const;
 
     // Inherited from base: getLoadedPluginFiles()
     using PluginResourceManagerBase::getLoadedPluginFiles;

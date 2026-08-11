@@ -373,6 +373,18 @@ public:
     virtual const char* getPluginVersion() const = 0;
     virtual const char* getPluginApiVersion() const = 0;
     virtual int64_t getEngineId() const = 0;
+
+    /// Engine name this plugin reports for its engine, or `nullptr` when the
+    /// plugin supplies no name. Feeds both the optional
+    /// `hipdnnEnginePluginGetEngineName` entry point and `EngineDetails.name`,
+    /// so a plugin that returns `nullptr` here presents the backend with an
+    /// engine that has no plugin-supplied name at all. Overrides must return
+    /// storage that outlives the call, such as a string literal.
+    virtual const char* getEngineName() const
+    {
+        return nullptr;
+    }
+
     virtual uint32_t getNumEngines() const = 0;
     virtual uint32_t getNumApplicableEngines() const = 0;
     virtual bool supportsEngineOperations() const
@@ -585,6 +597,51 @@ public:
         });
     }
 
+    /// Services the optional engine-name entry point emitted by
+    /// `REGISTER_TEST_PLUGIN_ENGINE_NAME_API()`.
+    ///
+    /// Follows the status contract documented on the entry point: `BAD_PARAM`
+    /// for an engine id this plugin does not expose at all,
+    /// `NOT_APPLICABLE` when the engine is exposed but the plugin supplies no
+    /// name for it. The backend treats both as "no plugin-supplied name" and
+    /// falls through to the next name-resolution tier. The returned pointer is
+    /// the plugin's own static string storage, so it outlives the call.
+    static hipdnnPluginStatus_t enginePluginGetEngineName(int64_t engineId, const char** name)
+    {
+        LOG_API_ENTRY("engineId=" << engineId << ", name=" << static_cast<const void*>(name));
+
+        hipdnnPluginStatus_t nameStatus = HIPDNN_PLUGIN_STATUS_BAD_PARAM;
+
+        const auto status = hipdnn_plugin_sdk::tryCatch([&, apiName = __func__]() {
+            hipdnn_plugin_sdk::throwIfNull(name);
+            hipdnn_plugin_sdk::throwIfNull(getInstance());
+
+            if(engineId == getInstance()->getEngineId())
+            {
+                const char* engineName = getInstance()->getEngineName();
+                if(engineName != nullptr)
+                {
+                    *name = engineName;
+                    nameStatus = HIPDNN_PLUGIN_STATUS_SUCCESS;
+                }
+                else
+                {
+                    nameStatus = HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE;
+                }
+            }
+
+            LOG_API_SUCCESS(apiName,
+                            "engineId=" << engineId << ", status=" << static_cast<int>(nameStatus));
+        });
+
+        if(status != HIPDNN_PLUGIN_STATUS_SUCCESS)
+        {
+            return status;
+        }
+
+        return nameStatus;
+    }
+
     static hipdnnPluginStatus_t enginePluginCreate(hipdnnEnginePluginHandle_t* handle)
     {
         LOG_API_ENTRY("handlePtr=" << static_cast<void*>(handle));
@@ -686,8 +743,14 @@ public:
             // the frontend checks before serializing a plan alongside the graph.
             const std::vector<int32_t> behaviorNotes{
                 static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION)};
+            // A null name leaves the details `name` field unset, which is how a
+            // plugin that supplies no engine name presents itself.
             auto newEngineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetailsDirect(
-                builder, getInstance()->getEngineId(), nullptr, &behaviorNotes);
+                builder,
+                getInstance()->getEngineId(),
+                nullptr,
+                &behaviorNotes,
+                getInstance()->getEngineName());
             builder.Finish(newEngineDetails);
             auto serializedDetails = builder.Release();
 
@@ -1256,4 +1319,18 @@ private:
                                                                        overrideShapes,    \
                                                                        overrideStrides);  \
     }                                                                                     \
+    } // extern "C"
+
+/// Emits only the optional engine-name C symbol for fake plugins.
+///
+/// Invoked alongside `REGISTER_TEST_PLUGIN_API()` by the plugins that name
+/// their engine. Plugins that invoke only the base macro export no engine-name
+/// symbol and so exercise the backend's fallback name resolution.
+#define REGISTER_TEST_PLUGIN_ENGINE_NAME_API()                               \
+    extern "C" {                                                             \
+    HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t        \
+        hipdnnEnginePluginGetEngineName(int64_t engineId, const char** name) \
+    {                                                                        \
+        return TestPluginBase::enginePluginGetEngineName(engineId, name);    \
+    }                                                                        \
     } // extern "C"

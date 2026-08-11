@@ -8269,7 +8269,7 @@ TEST_F(TestGraph, GetPlanNameAtIndexValid)
     std::string name;
     auto result = graph.get_plan_name_at_index(0, name);
     EXPECT_TRUE(result.is_good());
-    EXPECT_EQ(name, "0x0");
+    EXPECT_EQ(name, "0x0000000000000000");
 }
 
 TEST_F(TestGraph, GetPlanNameAtIndexOutOfBounds)
@@ -8427,14 +8427,22 @@ TEST_F(TestGraph, DeselectEnginesCompiledPlanPath)
     EXPECT_EQ(barredIds.count(MIOPEN_ENGINE_ID), 1u);
 }
 
-TEST_F(TestGraph, DeselectEnginesUnknownNameSkipped)
+TEST_F(TestGraph, DeselectEnginesUnregisteredNameIsHashed)
 {
+    // A plugin-supplied engine is absent from the frontend's engine name
+    // registry, so names are hashed unconditionally instead of being skipped.
+    const std::string unregisteredName = "nonexistent_engine_xyz";
+    ASSERT_FALSE(hipdnn_data_sdk::utilities::isEngineNameRegistered(unregisteredName));
+
     hipdnn_frontend::GraphTestUtils graph;
     graph.injectPlanSpec(1, 0);
     graph.injectPlanSpec(2, 0);
 
-    graph.deselect_engines({"nonexistent_engine_xyz"});
+    graph.deselect_engines({unregisteredName});
     EXPECT_EQ(graph.getPlanSpecsCount(), 2u);
+
+    auto barredIds = graph.getBarredEngineIds();
+    EXPECT_EQ(barredIds.count(hipdnn_data_sdk::utilities::engineNameToId(unregisteredName)), 1u);
 }
 
 TEST_F(TestGraph, DeselectEnginesEmptyList)
@@ -8452,6 +8460,148 @@ TEST_F(TestGraph, DeselectEnginesNoOp)
     hipdnn_frontend::GraphTestUtils graph;
     auto& ref = graph.deselect_engines({"MIOPEN_ENGINE"});
     EXPECT_EQ(&ref, &graph);
+}
+
+// ---------------------------------------------------------------------------
+// Engine name resolution tests
+// ---------------------------------------------------------------------------
+
+// An engine ID absent from the built-in engine name registry, standing in for a
+// plugin-supplied engine. The ID-only chain renders it as "0x0000000000001A2B".
+static constexpr int64_t ENGINE_ID_WITHOUT_REGISTRY_NAME = 0x1A2B;
+
+// Sets up the two-call HIPDNN_ATTR_ENGINE_NAME_EXT read (count query, then data
+// query) so the mocked backend reports engineName for an engine descriptor.
+static void expectEngineNameQuery(::testing::NiceMock<Mock_hipdnn_backend>& mockBackend,
+                                  const std::string& engineName)
+{
+    const auto byteCount = static_cast<int64_t>(engineName.size() + 1);
+
+    EXPECT_CALL(
+        mockBackend,
+        backendGetAttribute(_, HIPDNN_ATTR_ENGINE_NAME_EXT, HIPDNN_TYPE_CHAR, 0, _, nullptr))
+        .WillOnce(DoAll(SetArgPointee<4>(byteCount), Return(HIPDNN_STATUS_SUCCESS)));
+
+    EXPECT_CALL(mockBackend,
+                backendGetAttribute(
+                    _, HIPDNN_ATTR_ENGINE_NAME_EXT, HIPDNN_TYPE_CHAR, Ne(0), _, Ne(nullptr)))
+        .WillOnce(DoAll(SetArgPointee<4>(byteCount),
+                        Invoke([engineName](hipdnnBackendDescriptor_t,
+                                            hipdnnBackendAttributeName_t,
+                                            hipdnnBackendAttributeType_t,
+                                            int64_t,
+                                            int64_t*,
+                                            void* arrayOfElements) {
+                            std::memcpy(arrayOfElements, engineName.c_str(), engineName.size() + 1);
+                        }),
+                        Return(HIPDNN_STATUS_SUCCESS)));
+}
+
+TEST_F(TestGraph, ResolveEngineNamePrefersBackendName)
+{
+    expectEngineNameQuery(*_mockBackend, "EXAMPLE_PROVIDER_RELU_ENGINE");
+
+    auto* engineDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(_fakeDescs.data());
+    EXPECT_EQ(detail::resolveEngineName(engineDesc, ENGINE_ID_WITHOUT_REGISTRY_NAME),
+              "EXAMPLE_PROVIDER_RELU_ENGINE");
+}
+
+TEST_F(TestGraph, ResolveEngineNameDegradesToRegistryWhenAttributeUnsupported)
+{
+    // An older backend that does not know the attribute at all.
+    EXPECT_CALL(
+        *_mockBackend,
+        backendGetAttribute(_, HIPDNN_ATTR_ENGINE_NAME_EXT, HIPDNN_TYPE_CHAR, 0, _, nullptr))
+        .WillOnce(Return(HIPDNN_STATUS_NOT_SUPPORTED));
+
+    auto* engineDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(_fakeDescs.data());
+    EXPECT_EQ(detail::resolveEngineName(engineDesc, hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID),
+              "MIOPEN_ENGINE");
+}
+
+TEST_F(TestGraph, ResolveEngineNameFallsBackToHexOnEmptyBackendName)
+{
+    EXPECT_CALL(
+        *_mockBackend,
+        backendGetAttribute(_, HIPDNN_ATTR_ENGINE_NAME_EXT, HIPDNN_TYPE_CHAR, 0, _, nullptr))
+        .WillOnce(DoAll(SetArgPointee<4>(int64_t{0}), Return(HIPDNN_STATUS_SUCCESS)));
+
+    auto* engineDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(_fakeDescs.data());
+    EXPECT_EQ(detail::resolveEngineName(engineDesc, ENGINE_ID_WITHOUT_REGISTRY_NAME),
+              "0x0000000000001A2B");
+}
+
+TEST_F(TestGraph, ResolveEngineNameFallsBackWhenBackendQueryFails)
+{
+    EXPECT_CALL(
+        *_mockBackend,
+        backendGetAttribute(_, HIPDNN_ATTR_ENGINE_NAME_EXT, HIPDNN_TYPE_CHAR, 0, _, nullptr))
+        .WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
+    EXPECT_CALL(*_mockBackend, getLastErrorString(_, _)).Times(AnyNumber());
+
+    auto* engineDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(_fakeDescs.data());
+    EXPECT_EQ(detail::resolveEngineName(engineDesc, hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID),
+              "MIOPEN_ENGINE");
+}
+
+TEST_F(TestGraph, ResolveEngineNameWithNullDescriptorSkipsBackend)
+{
+    EXPECT_CALL(*_mockBackend, backendGetAttribute(_, HIPDNN_ATTR_ENGINE_NAME_EXT, _, _, _, _))
+        .Times(0);
+
+    EXPECT_EQ(detail::resolveEngineName(nullptr, hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID),
+              "MIOPEN_ENGINE");
+}
+
+// Graph::engineNameFor() is private, so the graph-level behaviour is exercised
+// through get_plan_name_at_index(), which reports the name of a compiled plan's
+// engine and is the shortest public path to it.
+
+TEST_F(TestGraph, PlanNameAtIndexReportsBackendEngineName)
+{
+    hipdnn_frontend::GraphTestUtils graph;
+    buildGraphAndMockEngine(_mockBackend, graph, _handle, /*engineDescTimes=*/1);
+    expectEngineNameQuery(*_mockBackend, "EXAMPLE_PROVIDER_RELU_ENGINE");
+    graph.injectCompiledPlan(ENGINE_ID_WITHOUT_REGISTRY_NAME, /*workspaceSize=*/0);
+
+    std::string name;
+    ASSERT_TRUE(graph.get_plan_name_at_index(0, name).is_good());
+    EXPECT_EQ(name, "EXAMPLE_PROVIDER_RELU_ENGINE");
+}
+
+TEST_F(TestGraph, PlanNameAtIndexResolvesEachEngineOnlyOnce)
+{
+    // Naming an engine costs a full engine-descriptor build and finalize, which
+    // polls every loaded plugin, so the answer is memoised per engine ID. Both
+    // engineDescTimes and the single-shot name query below would fail if a repeat
+    // query reached the backend.
+    hipdnn_frontend::GraphTestUtils graph;
+    buildGraphAndMockEngine(_mockBackend, graph, _handle, /*engineDescTimes=*/1);
+    expectEngineNameQuery(*_mockBackend, "EXAMPLE_PROVIDER_RELU_ENGINE");
+    graph.injectCompiledPlan(ENGINE_ID_WITHOUT_REGISTRY_NAME, /*workspaceSize=*/0);
+    graph.injectCompiledPlan(ENGINE_ID_WITHOUT_REGISTRY_NAME, /*workspaceSize=*/0);
+
+    std::string firstName;
+    std::string secondName;
+    ASSERT_TRUE(graph.get_plan_name_at_index(0, firstName).is_good());
+    ASSERT_TRUE(graph.get_plan_name_at_index(1, secondName).is_good());
+    EXPECT_EQ(firstName, "EXAMPLE_PROVIDER_RELU_ENGINE");
+    EXPECT_EQ(secondName, firstName);
+}
+
+TEST_F(TestGraph, PlanNameAtIndexWithoutBuiltGraphSkipsBackend)
+{
+    // No graph descriptor exists yet, so there is nothing to build an engine
+    // descriptor against and the registry answers on its own.
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINE_DESCRIPTOR, _))
+        .Times(0);
+
+    hipdnn_frontend::GraphTestUtils graph;
+    graph.injectCompiledPlan(hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID, /*workspaceSize=*/0);
+
+    std::string name;
+    ASSERT_TRUE(graph.get_plan_name_at_index(0, name).is_good());
+    EXPECT_EQ(name, "MIOPEN_ENGINE");
 }
 
 // ---------------------------------------------------------------------------

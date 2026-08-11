@@ -62,5 +62,10 @@ NB_MODULE(hipdnn_frontend_python, m) // NOLINT(modernize-avoid-c-arrays)
         },
         nb::arg("engine_id"),
         "Look up the registered engine name for a given engine ID. "
-        "Returns an empty string if the ID is not registered.");
+        "Returns an empty string if the ID is not registered.\n\n"
+        "Only engines built into hipDNN are registered. Engines supplied by an "
+        "engine plugin are not, so this returns an empty string for them: an "
+        "engine ID on its own carries no plugin context. To name a plugin "
+        "engine, enumerate engines through a handle with "
+        "Handle.get_engine_info(), which asks the backend for the name.");
 }

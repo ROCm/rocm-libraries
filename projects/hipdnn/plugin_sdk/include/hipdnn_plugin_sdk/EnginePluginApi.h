@@ -365,6 +365,35 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
         const int64_t* const* override_shapes,
         const int64_t* const* override_strides);
 
+/**
+ * @brief Retrieves the canonical, human-readable name of a specific engine.
+ *
+ * Introduced in engine plugin API 1.4.0 and optional: the host decides purely on
+ * whether the symbol is exported, never on the API version the plugin reports.
+ * A plugin that does not export it, or that answers with any status other than
+ * HIPDNN_PLUGIN_STATUS_SUCCESS, has its engines named by the host instead — from
+ * the static engine name registry, and failing that a hexadecimal rendering of
+ * the engine ID.
+ *
+ * The host checks that engineNameToId(name) == engine_id and logs a warning on
+ * mismatch; the plugin is NOT rejected. A future strict or opt-in validation
+ * mode may be added.
+ *
+ * The name is an opaque, plugin-chosen string with no required format.
+ *
+ * @param[in] engine_id Engine ID (must come from hipdnnEnginePluginGetAllEngineIds).
+ * @param[out] name Receives a NUL-terminated string owned by the plugin. Must
+ *                  remain valid for the lifetime of the loaded library.
+ * @return HIPDNN_PLUGIN_STATUS_SUCCESS on success;
+ *         HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE if this plugin exposes the engine
+ *         but supplies no name for it — this is the generated default for
+ *         containers that do not implement getEngineName;
+ *         HIPDNN_PLUGIN_STATUS_BAD_PARAM if engine_id is not exposed by this
+ *         plugin at all.
+ */
+HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
+    hipdnnEnginePluginGetEngineName(int64_t engine_id, const char** name);
+
 /** @} */ // End of EnginePluginFunctions group
 
 #ifdef __cplusplus

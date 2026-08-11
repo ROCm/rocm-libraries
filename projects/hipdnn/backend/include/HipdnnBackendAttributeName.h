@@ -405,6 +405,17 @@ typedef enum
     /** @brief Device properties for this engine */
     HIPDNN_ATTR_ENGINE_DEVICEPROP = 1007,
 
+    /**
+     * @brief Human-readable name of this engine (HIPDNN_TYPE_CHAR, extension).
+     *
+     * Read-only. The name is supplied by the backend: it is resolved from the
+     * owning plugin when available, then from the engine details payload, then
+     * from the built-in engine name registry, and finally from a hexadecimal
+     * rendering of the engine ID. The value is therefore never empty for a
+     * finalized engine descriptor.
+     */
+    HIPDNN_ATTR_ENGINE_NAME_EXT = 1008,
+
     /** @} */
 
     /**

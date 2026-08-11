@@ -74,6 +74,8 @@ The heuristic implementation in hipDNN is not implemented.
 
 To fix the problem, use a combination of ``graph::get_ranked_engine_ids()`` and ``graph::set_preferred_engine_id_ext()`` if you need more detailed control over engine selection.
 
+Both ``graph::set_preferred_engine_id_ext()`` and ``graph::deselect_engines()`` also accept engine names, which is usually more readable than a numeric ID. Names work for engines supplied by plugins as well as for engines built into hipDNN, because the name is hashed to the engine ID and doesn't have to be listed in hipDNN's built-in registry. To see the names available on your system, run ``hipdnn_list_engines``. See :ref:`engine-names` for how a plugin reports the names of the engines it provides.
+
 Error: Different memory utilities for allocating device memory
 --------------------------------------------------------------
 

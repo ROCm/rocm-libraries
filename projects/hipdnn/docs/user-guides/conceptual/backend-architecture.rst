@@ -271,6 +271,7 @@ Engine descriptor (``HIPDNN_BACKEND_ENGINE_DESCRIPTOR``)
 - Represents a backend engine.
 - Contains engine ID, and a set of behavioral notes and configurable settings.
 - Retrieved from engine config descriptor.
+- Exposes the resolved engine name through the read-only ``HIPDNN_ATTR_ENGINE_NAME_EXT`` attribute (``HIPDNN_TYPE_CHAR``). The backend fills it during ``hipdnnBackendFinalize()`` from the name the providing plugin reports, falling back to the engine details payload, then the built-in registry, then a hexadecimal rendering of the engine ID, so it's never empty. See :ref:`engine-names`.
 
 Execution plan descriptor (``HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR``)
 ------------------------------------------------------------------------

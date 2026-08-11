@@ -29,6 +29,10 @@ public:
     {
         return hipdnn_tests::plugin_constants::engineId<ExecuteFailsPlugin>();
     }
+    const char* getEngineName() const override
+    {
+        return hipdnn_tests::plugin_constants::K_EXECUTE_FAILS_PLUGIN_ENGINE_NAME;
+    }
     uint32_t getNumEngines() const override
     {
         return 1;
@@ -52,5 +56,8 @@ __attribute__((constructor)) static void initializePlugin()
     TestPluginBase::setInstance(std::make_unique<ExecuteFailsPlugin>());
 }
 
-// Register all API functions
+// Register all standard plugin API functions PLUS the optional engine-name
+// entry point. Paired with test_good_plugin, which omits it, this gives the
+// engine-filtering tests one named and one unnamed engine in the same load set.
 REGISTER_TEST_PLUGIN_API()
+REGISTER_TEST_PLUGIN_ENGINE_NAME_API()

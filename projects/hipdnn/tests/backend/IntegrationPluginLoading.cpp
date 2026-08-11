@@ -9,18 +9,23 @@
 #include <HipdnnBackendAttributeType.h>
 #include <HipdnnBackendHeuristicType.h>
 #include <hipdnn_backend.h>
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_plugin_sdk/EnginePluginApi.h>
 #include <hipdnn_plugin_sdk/PluginApi.h>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <test_plugins/TestPluginConstants.hpp>
 #include <test_plugins/TestPluginEngineIdMap.hpp>
 
+#include <algorithm>
 #include <filesystem>
 #include <gtest/gtest.h>
 #include <spdlog/spdlog.h>
+#include <string>
+#include <vector>
 
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_tests::plugin_constants;
@@ -85,6 +90,46 @@ protected:
 
 namespace
 {
+// Installs a user log callback and raises the backend's global log level, then
+// puts both back on scope exit. The restoration has to be unconditional: a
+// failed assertion inside a test leaves the rest of the test body unrun, and a
+// callback or log level left installed contaminates every later test in the
+// binary.
+class ScopedBackendLogCapture
+{
+public:
+    ScopedBackendLogCapture(hipdnnUserLogCallback_t callback,
+                            hipdnnSeverity_t level,
+                            void* userData)
+        : _callback(callback)
+        , _userData(userData)
+    {
+        EXPECT_EQ(hipdnnBackendGetGlobalLogLevel_ext(&_originalLevel), HIPDNN_STATUS_SUCCESS);
+        EXPECT_EQ(
+            hipdnnSetUserLogCallback_ext(_callback, level, HIPDNN_LOG_CALLBACK_SYNC, _userData),
+            HIPDNN_STATUS_SUCCESS);
+        EXPECT_EQ(hipdnnBackendSetGlobalLogLevel_ext(level), HIPDNN_STATUS_SUCCESS);
+    }
+
+    ~ScopedBackendLogCapture()
+    {
+        EXPECT_EQ(hipdnnSetUserLogCallback_ext(
+                      _callback, HIPDNN_SEV_OFF, HIPDNN_LOG_CALLBACK_SYNC, _userData),
+                  HIPDNN_STATUS_SUCCESS);
+        EXPECT_EQ(hipdnnBackendSetGlobalLogLevel_ext(_originalLevel), HIPDNN_STATUS_SUCCESS);
+    }
+
+    ScopedBackendLogCapture(const ScopedBackendLogCapture&) = delete;
+    ScopedBackendLogCapture& operator=(const ScopedBackendLogCapture&) = delete;
+    ScopedBackendLogCapture(ScopedBackendLogCapture&&) = delete;
+    ScopedBackendLogCapture& operator=(ScopedBackendLogCapture&&) = delete;
+
+private:
+    hipdnnUserLogCallback_t _callback;
+    void* _userData;
+    hipdnnSeverity_t _originalLevel{HIPDNN_SEV_OFF};
+};
+
 void createHeuristicDescriptor(hipdnnBackendDescriptor_t* heuristicDescriptor,
                                hipdnnBackendDescriptor_t* graph,
                                bool finalize = false)
@@ -113,6 +158,87 @@ void createHeuristicDescriptor(hipdnnBackendDescriptor_t* heuristicDescriptor,
     {
         EXPECT_EQ(hipdnnBackendFinalize(*heuristicDescriptor), HIPDNN_STATUS_SUCCESS);
     }
+}
+
+// One engine as reported by hipdnnGetEngineInfo_ext.
+struct ReportedEngine
+{
+    int64_t engineId{0};
+    std::string engineName;
+};
+
+// Enumerate every loaded engine through the public two-call hipdnnGetEngineInfo_ext pattern,
+// the same path tools/ListEngines.cpp drives.
+std::vector<ReportedEngine> queryReportedEngines(hipdnnHandle_t handle)
+{
+    std::vector<ReportedEngine> engines;
+
+    auto engineCount = size_t{0};
+    EXPECT_EQ(hipdnnGetEngineCount_ext(handle, &engineCount), HIPDNN_STATUS_SUCCESS);
+    engines.reserve(engineCount);
+
+    for(size_t index = 0; index < engineCount; ++index)
+    {
+        auto engineId = int64_t{0};
+        auto engineNameLen = size_t{0};
+        auto pluginNameLen = size_t{0};
+        auto versionLen = size_t{0};
+        auto typeLen = size_t{0};
+        EXPECT_EQ(hipdnnGetEngineInfo_ext(handle,
+                                          index,
+                                          &engineId,
+                                          nullptr,
+                                          &engineNameLen,
+                                          nullptr,
+                                          &pluginNameLen,
+                                          nullptr,
+                                          &versionLen,
+                                          nullptr,
+                                          &typeLen),
+                  HIPDNN_STATUS_SUCCESS);
+
+        std::vector<char> engineName(engineNameLen);
+        std::vector<char> pluginName(pluginNameLen);
+        std::vector<char> version(versionLen);
+        std::vector<char> type(typeLen);
+        EXPECT_EQ(hipdnnGetEngineInfo_ext(handle,
+                                          index,
+                                          nullptr,
+                                          engineName.data(),
+                                          &engineNameLen,
+                                          pluginName.data(),
+                                          &pluginNameLen,
+                                          version.data(),
+                                          &versionLen,
+                                          type.data(),
+                                          &typeLen),
+                  HIPDNN_STATUS_SUCCESS);
+
+        engines.push_back(ReportedEngine{engineId, std::string(engineName.data())});
+    }
+
+    return engines;
+}
+
+// Render every reported engine as "name (0xID)" so a failing expectation shows the whole listing.
+std::string describeReportedEngines(const std::vector<ReportedEngine>& engines)
+{
+    std::string description;
+    for(const auto& engine : engines)
+    {
+        description += "  " + engine.engineName + " ("
+                       + hipdnn_data_sdk::utilities::formatEngineIdHex(engine.engineId) + ")\n";
+    }
+    return description;
+}
+
+// Load a single engine plugin by absolute path, replacing any previously configured paths.
+void setSingleEnginePluginPath(const std::string& pluginPath)
+{
+    const std::array<const char*, 1> paths = {pluginPath.c_str()};
+    ASSERT_EQ(
+        hipdnnSetEnginePluginPaths_ext(paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
+        HIPDNN_STATUS_SUCCESS);
 }
 } // namespace
 
@@ -386,4 +512,95 @@ TEST_F(IntegrationPluginLoading, PluginWithIncompatibleApiVersion)
     EXPECT_NE(std::string{buffer.data()}.find("does not match expected engine API major version"),
               std::string::npos);
     EXPECT_EQ(test_util::getLoadedPlugins(_handle).size(), 0);
+}
+
+// End-to-end regression coverage for ALMIOPEN-1782: a plugin that exports
+// hipdnnEnginePluginGetEngineName must have that name surfaced verbatim by
+// hipdnnGetEngineInfo_ext, which is the same query tools/ListEngines.cpp prints from.
+TEST_F(IntegrationPluginLoading, PluginSuppliedEngineNameIsReportedByGetEngineInfo)
+{
+    const std::string pluginPath = hipdnn_tests::plugin_constants::testDefaultGoodPluginPath();
+    ASSERT_NO_FATAL_FAILURE(setSingleEnginePluginPath(pluginPath));
+
+    ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
+
+    const auto engines = queryReportedEngines(_handle);
+    ASSERT_FALSE(engines.empty());
+
+    const auto expectedId = hipdnn_tests::plugin_constants::engineId<GoodDefaultPlugin>();
+    const auto engine
+        = std::find_if(engines.begin(), engines.end(), [expectedId](const auto& candidate) {
+              return candidate.engineId == expectedId;
+          });
+
+    ASSERT_NE(engine, engines.end())
+        << "Engine " << hipdnn_data_sdk::utilities::formatEngineIdHex(expectedId)
+        << " was not reported. Reported engines:\n"
+        << describeReportedEngines(engines);
+
+    EXPECT_EQ(engine->engineName, hipdnn_tests::plugin_constants::K_GOOD_DEFAULT_PLUGIN_ENGINE_NAME)
+        << "Reported engines:\n"
+        << describeReportedEngines(engines);
+}
+
+// A plugin that exports neither hipdnnEnginePluginGetEngineName nor an EngineDetails.name, and
+// whose id is absent from the static registry, falls through to the zero-padded uppercase
+// hexadecimal rendering of its engine id.
+TEST_F(IntegrationPluginLoading, PluginWithoutEngineNameEntryPointFallsBackToHexId)
+{
+    ASSERT_NO_FATAL_FAILURE(
+        setSingleEnginePluginPath(hipdnn_tests::plugin_constants::testGoodPluginPath()));
+
+    ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
+
+    const auto engines = queryReportedEngines(_handle);
+    ASSERT_FALSE(engines.empty());
+
+    const auto expectedId = hipdnn_tests::plugin_constants::engineId<GoodPlugin>();
+    const auto engine
+        = std::find_if(engines.begin(), engines.end(), [expectedId](const auto& candidate) {
+              return candidate.engineId == expectedId;
+          });
+
+    ASSERT_NE(engine, engines.end())
+        << "Engine " << hipdnn_data_sdk::utilities::formatEngineIdHex(expectedId)
+        << " was not reported. Reported engines:\n"
+        << describeReportedEngines(engines);
+
+    EXPECT_EQ(engine->engineName, "0xFFFFFFFFFFFFFFFE") << "Reported engines:\n"
+                                                        << describeReportedEngines(engines);
+}
+
+// test_good_default_plugin carries a hardcoded engine id that its name deliberately does not hash
+// back to, so name resolution reports the disagreement while keeping the plugin-reported id.
+TEST_F(IntegrationPluginLoading, PluginSuppliedEngineNameNotMatchingIdLogsWarning)
+{
+    // The recorder is constructed first so that it saves, and on destruction restores, the log
+    // level in force before this test touched it. The scope guard nests inside it and is destroyed
+    // first, so the two restorations unwind in the order they were applied.
+    auto recorder
+        = hipdnn_test_sdk::utilities::IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+
+    const ScopedBackendLogCapture logCapture(
+        hipdnn_test_sdk::utilities::IsolatedLogRecorder::getIsolatedUserRecordingCallback(),
+        HIPDNN_SEV_WARN,
+        this);
+
+    const std::string pluginPath = hipdnn_tests::plugin_constants::testDefaultGoodPluginPath();
+    ASSERT_NO_FATAL_FAILURE(setSingleEnginePluginPath(pluginPath));
+
+    ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
+
+    const auto engines = queryReportedEngines(_handle);
+    EXPECT_FALSE(engines.empty());
+
+    const std::string expectedFragment
+        = std::string("reports engine name '")
+          + hipdnn_tests::plugin_constants::K_GOOD_DEFAULT_PLUGIN_ENGINE_NAME + "' for engine ID "
+          + hipdnn_data_sdk::utilities::formatEngineIdHex(
+              hipdnn_tests::plugin_constants::engineId<GoodDefaultPlugin>());
+
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, expectedFragment))
+        << "Expected a name/id disagreement warning. Captured logs:\n"
+        << recorder.getRecordedLogsAsString();
 }

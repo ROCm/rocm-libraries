@@ -226,6 +226,47 @@ install(TARGETS ${TEST_NO_API_VERSION_PLUGIN_NAME} LIBRARY DESTINATION ${HIPDNN_
         RUNTIME DESTINATION ${HIPDNN_TEST_PLUGIN_INSTALL_DIR}
 )
 
+# libhipdnn_test_engine_plugin1.so or hipdnn_test_engine_plugin1.dll (used by
+# TestEnginePluginResourceManager.cpp)
+#
+# The only consumer of EnginePluginImpl.inl inside the main build. Its container
+# omits the optional getEngineName member, so compiling this target is itself the
+# assertion that engine naming stayed optional for containers, and loading it
+# proves the generated entry point is exported and reports NOT_APPLICABLE.
+#
+# It lives in its own codegen_fixture/ subdirectory rather than beside the flat
+# test plugins above: this is a real, loadable engine plugin, and the plugins in
+# ${HIPDNN_TEST_PLUGIN_DIR} include one that deliberately fails to load. Output
+# directory, install destination and rpath origin all take the suffix together,
+# otherwise the isolation holds in the build tree but not in the installed tree.
+set(CODEGEN_FIXTURE_OUTPUT_DIR "${HIPDNN_TEST_PLUGIN_DIR}/codegen_fixture")
+set(CODEGEN_FIXTURE_INSTALL_DIR "${HIPDNN_TEST_PLUGIN_INSTALL_DIR}/codegen_fixture")
+
+add_library(${TEST_ENGINE_PLUGIN1_NAME} SHARED plugins/codegen_fixture/CodegenFixturePlugin.cpp
+                                               plugins/codegen_fixture/CodegenFixturePluginPublic.cpp
+)
+target_link_libraries(${TEST_ENGINE_PLUGIN1_NAME} PRIVATE hipdnn_data_sdk hipdnn_flatbuffers_sdk
+                                                          hipdnn_plugin_sdk hip::host
+)
+set_target_properties(${TEST_ENGINE_PLUGIN1_NAME} PROPERTIES CXX_VISIBILITY_PRESET hidden)
+target_compile_options(${TEST_ENGINE_PLUGIN1_NAME} PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+target_compile_definitions(${TEST_ENGINE_PLUGIN1_NAME} PRIVATE HIPDNN_COMPONENT_NAME="codegenFixture")
+clang_tidy_check(${TEST_ENGINE_PLUGIN1_NAME})
+add_dependencies(hipdnn_backend_tests ${TEST_ENGINE_PLUGIN1_NAME})
+
+set_target_properties(
+    ${TEST_ENGINE_PLUGIN1_NAME}
+    PROPERTIES
+        LIBRARY_OUTPUT_DIRECTORY "${CODEGEN_FIXTURE_OUTPUT_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY "${CODEGEN_FIXTURE_OUTPUT_DIR}"
+        ARCHIVE_OUTPUT_DIRECTORY "${CODEGEN_FIXTURE_OUTPUT_DIR}"
+        THEROCK_INSTALL_RPATH_ORIGIN "${CODEGEN_FIXTURE_INSTALL_DIR}"
+)
+
+install(TARGETS ${TEST_ENGINE_PLUGIN1_NAME} LIBRARY DESTINATION ${CODEGEN_FIXTURE_INSTALL_DIR}
+        RUNTIME DESTINATION ${CODEGEN_FIXTURE_INSTALL_DIR}
+)
+
 # Add dependencies on heuristic test plugins (built in tests/test_plugins/)
 # Note: These targets are forward references - they will be created when tests/test_plugins/
 # is processed later. CMake resolves these dependencies at build time.

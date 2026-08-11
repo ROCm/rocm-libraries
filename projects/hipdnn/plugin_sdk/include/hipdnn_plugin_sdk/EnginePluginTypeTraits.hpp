@@ -59,6 +59,27 @@ struct HasCopyEngineIds<
 };
 
 /**
+ * @brief Check for static getEngineName method.
+ *
+ * This member is optional. Containers that provide it supply human-readable
+ * engine names through hipdnnEnginePluginGetEngineName; containers that omit it
+ * still export the entry point, which reports
+ * HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE.
+ */
+template <typename T, typename = void>
+struct HasGetEngineName : std::false_type
+{
+};
+
+template <typename T>
+struct HasGetEngineName<
+    T,
+    std::void_t<decltype(T::getEngineName(std::declval<int64_t>(), std::declval<const char**>()))>>
+    : std::true_type
+{
+};
+
+/**
  * @brief Validates that a container type meets all requirements.
  *
  * This function uses static_assert to provide clear error messages if
@@ -67,6 +88,9 @@ struct HasCopyEngineIds<
  * Required methods:
  * - EngineManager& getEngineManager()
  * - static uint32_t copyEngineIds(int64_t*, uint32_t, uint32_t&)
+ *
+ * Optional methods (detected, never required):
+ * - static hipdnnPluginStatus_t getEngineName(int64_t, const char**)
  */
 template <typename ContainerType>
 constexpr void validateContainerType()

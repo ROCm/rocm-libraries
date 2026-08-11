@@ -9,6 +9,7 @@ table EngineDetails {
     engine_id: int64;
     knobs: [Knob];
     behavior_notes: [int32];
+    name: string;
 }
 
 root_type EngineDetails;

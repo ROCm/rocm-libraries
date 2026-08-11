@@ -5,6 +5,7 @@
 
 #include <flatbuffers/flatbuffers.h>
 #include <memory>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -22,6 +23,7 @@ public:
     virtual const hipdnn_flatbuffers_sdk::data_objects::EngineDetails& getEngineDetails() const = 0;
     virtual bool isValid() const = 0;
     virtual int64_t engineId() const = 0;
+    virtual std::string name() const = 0;
 
     virtual uint32_t knobCount() const = 0;
     virtual std::vector<int32_t> behaviorNotes() const = 0;
@@ -72,6 +74,18 @@ public:
         throwIfNotValid();
 
         return _shallowEngineDetails->engine_id();
+    }
+
+    std::string name() const override
+    {
+        throwIfNotValid();
+
+        auto rawName = _shallowEngineDetails->name();
+        if(rawName == nullptr)
+        {
+            return {};
+        }
+        return rawName->str();
     }
 
     uint32_t knobCount() const override

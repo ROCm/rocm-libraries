@@ -59,6 +59,11 @@ add_test_plugin(${TEST_GOOD_PLUGIN_NAME} TestGoodPlugin.cpp)
 # test_execute_fails_plugin is a plugin that fails during execution
 add_test_plugin(${TEST_EXECUTE_FAILS_PLUGIN_NAME} TestExecuteFailsPlugin.cpp)
 
+# test_hashed_name_plugin is a well-behaved plugin whose engine id is the hash of its own engine
+# name, mirroring what HIPDNN_REGISTER_ENGINE does for production plugins. It lives in custom/ so
+# that default/ keeps holding exactly one plugin.
+add_test_plugin(${TEST_HASHED_NAME_PLUGIN_NAME} TestHashedNamePlugin.cpp)
+
 # test_no_applicable_engines_a/b_plugin is a plugin that reports no applicable engines
 add_test_plugin(${TEST_NO_APPLICABLE_ENGINES_A_PLUGIN_NAME} TestNoApplicableEnginesAPlugin.cpp)
 add_test_plugin(${TEST_NO_APPLICABLE_ENGINES_B_PLUGIN_NAME} TestNoApplicableEnginesBPlugin.cpp)

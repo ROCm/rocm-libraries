@@ -42,6 +42,22 @@ inline constexpr std::string_view K_TENSOR_ATTRIBUTE_ALIGNMENT_MIN_VERSION
 // is rejected. Must equal the highest feature-gated version constant above.
 inline constexpr std::string_view K_MAX_SUPPORTED_API_VERSION = K_RAGGED_TENSOR_MIN_API_VERSION;
 
+// Minimum engine plugin API version that exports `hipdnnEnginePluginGetEngineName`,
+// the plugin-supplied engine name entry point. Deliberately NOT one of the
+// graph-gated floors above: it is not a graph feature, so it is excluded from
+// `computeMinimumEnginePluginApiVersion(...)` and `K_MAX_SUPPORTED_API_VERSION`
+// stays at 1.3.0. Nothing in a serialized graph can require engine naming, and
+// raising the deserialize ceiling would silently widen which graphs are accepted.
+//
+// ⛔ Documentation only — do NOT gate engine naming on this value. The runtime
+// predicate is symbol presence (`EnginePlugin::hasEngineName()`), which the SDK
+// headers the plugin compiled against decide for it. The reported API version is
+// a self-declared string that most plugins either omit (falling back to the 1.0.0
+// baseline) or hardcode to an older release, so a version gate here would deny
+// naming to essentially every plugin that exists. This constant records which
+// release introduced the entry point, for plugin authors and release notes.
+inline constexpr std::string_view K_ENGINE_NAME_MIN_API_VERSION = "1.4.0";
+
 /// @brief Computes the minimum engine plugin API version a graph requires,
 /// from the graph-level feature flags gating additive plugin ABI surface.
 ///

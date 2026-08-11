@@ -14,10 +14,16 @@
 #include "mocks/MockHandle.hpp"
 
 #include <gtest/gtest.h>
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
 
+#include <cstring>
 #include <memory>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <vector>
 
 using namespace hipdnn_backend;
 using namespace plugin;
@@ -61,21 +67,66 @@ public:
             HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, &engineId));
     }
 
-    void makeEngineFinalized() const
+    /// Sets every mock expectation finalize() consumes except the engine name
+    /// resolution, which the caller pins separately.
+    void expectFinalizeCalls(int64_t engineId) const
     {
         setGraph();
-        setGlobalIndex(ENGINE_ID);
+        setGlobalIndex(engineId);
         EXPECT_CALL(*getMockGraph(), getHandle()).WillOnce(Return(_mockHandle.get()));
         EXPECT_CALL(*_mockHandle, getPluginResourceManager())
             .WillOnce(Return(_mockEnginePluginResourceManager));
         EXPECT_CALL(*_mockEnginePluginResourceManager, getApplicableEngineIds(_, _))
-            .WillOnce(Return(std::vector<int64_t>{ENGINE_ID}));
+            .WillOnce(Return(std::vector<int64_t>{engineId}));
         EXPECT_CALL(*_mockEnginePluginResourceManager, getEngineDetails(_, _, _))
             .WillOnce(Invoke([this](int64_t, const GraphDescriptor*, hipdnnPluginConstData_t* d) {
                 *d = this->_serializedEngineDetails;
             }));
         EXPECT_CALL(*_mockEnginePluginResourceManager, destroyEngineDetails(_, _));
+    }
+
+    void makeEngineFinalized() const
+    {
+        expectFinalizeCalls(ENGINE_ID);
+        // The mock resolves to the hexadecimal rendering of the engine ID by
+        // default, matching the resolver's last-resort tier.
+        EXPECT_CALL(*_mockEnginePluginResourceManager, resolveEngineName(_, _));
         ASSERT_NO_THROW(getEngineDescriptor()->finalize());
+    }
+
+    /// Captures the tier-2 candidate the descriptor hands to the resolver and
+    /// pins the name it answers with. A disengaged @p resolvedName keeps the
+    /// resolver's hexadecimal fallback.
+    void expectResolveEngineName(int64_t engineId, const std::optional<std::string>& resolvedName)
+    {
+        EXPECT_CALL(*_mockEnginePluginResourceManager, resolveEngineName(engineId, _))
+            .WillOnce(Invoke(
+                [this, resolvedName](int64_t id, std::optional<std::string_view> detailsName) {
+                    _capturedDetailsName
+                        = detailsName ? std::optional<std::string>(*detailsName) : std::nullopt;
+                    _resolverCalled = true;
+                    return resolvedName.value_or(hipdnn_data_sdk::utilities::formatEngineIdHex(id));
+                }));
+    }
+
+    /// Two-call read of HIPDNN_ATTR_ENGINE_NAME_EXT: count, then value.
+    std::string getEngineName() const
+    {
+        auto engine = getEngineDescriptor();
+
+        int64_t elementCount = 0;
+        EXPECT_NO_THROW(engine->getAttribute(
+            HIPDNN_ATTR_ENGINE_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &elementCount, nullptr));
+        EXPECT_GT(elementCount, 0);
+
+        std::vector<char> buffer(static_cast<size_t>(elementCount));
+        int64_t returnedCount = 0;
+        EXPECT_NO_THROW(engine->getAttribute(HIPDNN_ATTR_ENGINE_NAME_EXT,
+                                             HIPDNN_TYPE_CHAR,
+                                             elementCount,
+                                             &returnedCount,
+                                             buffer.data()));
+        return {buffer.data()};
     }
 
 protected:
@@ -125,9 +176,25 @@ protected:
         _serializedEngineDetails = {_engineDetailsBuffer.data(), _engineDetailsBuffer.size()};
     }
 
+    void serializeEngineDetailsWithName(int64_t engineId, const char* name)
+    {
+        flatbuffers::FlatBufferBuilder builder;
+        auto engineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetailsDirect(
+            builder, engineId, nullptr, nullptr, name);
+        builder.Finish(engineDetails);
+        _engineDetailsBuffer = builder.Release();
+        _serializedEngineDetails = {_engineDetailsBuffer.data(), _engineDetailsBuffer.size()};
+    }
+
     static constexpr int64_t ENGINE_ID = 0;
+    /// An engine ID that the static name registry does not know about.
+    static constexpr int64_t UNREGISTERED_ENGINE_ID = 0x0123456789ABCDEF;
     flatbuffers::DetachedBuffer _engineDetailsBuffer;
     hipdnnPluginConstData_t _serializedEngineDetails;
+    /// Tier-2 candidate observed by the resolver: disengaged when the engine has
+    /// no details, engaged and empty when the details carry no name.
+    std::optional<std::string> _capturedDetailsName;
+    bool _resolverCalled = false;
 };
 
 TEST_F(TestEngineDescriptor, CreateEngineDescriptor)
@@ -406,6 +473,7 @@ TEST_F(TestEngineDescriptor, FinalizePreservesUnknownBehaviorNote)
             *d = this->_serializedEngineDetails;
         }));
     EXPECT_CALL(*_mockEnginePluginResourceManager, destroyEngineDetails(_, _));
+    EXPECT_CALL(*_mockEnginePluginResourceManager, resolveEngineName(_, _));
 
     auto engine = getEngineDescriptor();
     ASSERT_NO_THROW(engine->finalize());
@@ -542,6 +610,185 @@ TEST_F(TestEngineDescriptor, GetEngineIdReturnsValueIfFinalized)
     ASSERT_EQ(engineId, 0);
 }
 
+// HIPDNN_ATTR_ENGINE_NAME_EXT cases.
+//
+// The four-tier resolution chain itself lives in
+// EnginePluginResourceManager::resolveEngineName(), which is mocked here. What
+// these cases pin is the descriptor's half of the contract, and only that: the
+// tier-2 candidate it derives from the engine details and hands over, and its
+// publishing of whatever name comes back. The descriptor holds no opinion about
+// which tier answered, so a stubbed answer is the whole of what it can observe.
+//
+// Consequently the tier a stubbed answer stands for is a matter of the case's
+// intent rather than anything the code decides here, and no case below settles
+// precedence between tiers -- only that the descriptor defers to the resolver
+// over the name it read for itself. Precedence, and tier 3, which no mocked
+// resolver can reach, are covered against the real chain in
+// TestEnginePluginResourceManager.cpp.
+
+TEST_F(TestEngineDescriptor, GetEngineNameFromEngineDetails)
+{
+    serializeEngineDetailsWithName(ENGINE_ID, "EXAMPLE_PROVIDER_RELU_ENGINE");
+
+    expectFinalizeCalls(ENGINE_ID);
+    expectResolveEngineName(ENGINE_ID, "EXAMPLE_PROVIDER_RELU_ENGINE");
+    ASSERT_NO_THROW(getEngineDescriptor()->finalize());
+
+    // The engine details supplied a name, so the descriptor offers it as the
+    // tier-2 candidate. Handing it over intact is the assertion; that the
+    // resolver then answers with it is a stub, not a finding.
+    EXPECT_TRUE(_resolverCalled);
+    ASSERT_TRUE(_capturedDetailsName.has_value());
+    EXPECT_EQ(*_capturedDetailsName, "EXAMPLE_PROVIDER_RELU_ENGINE");
+
+    EXPECT_EQ(getEngineName(), "EXAMPLE_PROVIDER_RELU_ENGINE");
+}
+
+TEST_F(TestEngineDescriptor, GetEngineNamePublishesResolverAnswerNotItsOwnCandidate)
+{
+    // An engine ID the static registry already names, so the resolver's answer
+    // below differs from every name reachable without the plugin entry point.
+    const int64_t registeredEngineId = hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID;
+    serializeEngineDetailsWithName(registeredEngineId, "DETAILS_ENGINE");
+
+    expectFinalizeCalls(registeredEngineId);
+    expectResolveEngineName(registeredEngineId, "PACK_SUPPLIED_ENGINE");
+    ASSERT_NO_THROW(getEngineDescriptor()->finalize());
+
+    // The descriptor still hands over the candidate it holds even though the
+    // resolver overrules it, because the resolver needs it to detect exactly
+    // this disagreement.
+    EXPECT_TRUE(_resolverCalled);
+    ASSERT_TRUE(_capturedDetailsName.has_value());
+    EXPECT_EQ(*_capturedDetailsName, "DETAILS_ENGINE");
+
+    // What the descriptor publishes is the resolver's answer, never the name it
+    // read out of the engine details and never the registry's.
+    EXPECT_EQ(getEngineName(), "PACK_SUPPLIED_ENGINE");
+    EXPECT_NE(getEngineName(), "DETAILS_ENGINE");
+    EXPECT_NE(getEngineName(), hipdnn_data_sdk::utilities::MIOPEN_ENGINE_NAME);
+}
+
+TEST_F(TestEngineDescriptor, GetEngineNameWithoutNameInEngineDetails)
+{
+    // The default fixture buffer carries an engine ID and nothing else, so the
+    // candidate the descriptor derives is present but empty. The stub stands in
+    // for a resolver that found nothing in any tier.
+    expectFinalizeCalls(ENGINE_ID);
+    expectResolveEngineName(ENGINE_ID, std::nullopt);
+    ASSERT_NO_THROW(getEngineDescriptor()->finalize());
+
+    EXPECT_TRUE(_resolverCalled);
+    ASSERT_TRUE(_capturedDetailsName.has_value());
+    EXPECT_TRUE(_capturedDetailsName->empty());
+
+    EXPECT_EQ(getEngineName(), hipdnn_data_sdk::utilities::formatEngineIdHex(ENGINE_ID));
+}
+
+TEST_F(TestEngineDescriptor, GetEngineNameForUnknownEngineIdUsesHex)
+{
+    serializeEngineDetails(UNREGISTERED_ENGINE_ID);
+
+    expectFinalizeCalls(UNREGISTERED_ENGINE_ID);
+    expectResolveEngineName(UNREGISTERED_ENGINE_ID, std::nullopt);
+    ASSERT_NO_THROW(getEngineDescriptor()->finalize());
+
+    // A hexadecimal name is published verbatim, zero padding and all: the
+    // descriptor applies no formatting of its own to what it is handed.
+    EXPECT_TRUE(_resolverCalled);
+    EXPECT_EQ(getEngineName(), "0x0123456789ABCDEF");
+}
+
+TEST_F(TestEngineDescriptor, GetEngineNameEmptyNameInEngineDetails)
+{
+    serializeEngineDetailsWithName(ENGINE_ID, "");
+
+    expectFinalizeCalls(ENGINE_ID);
+    expectResolveEngineName(ENGINE_ID, std::nullopt);
+    ASSERT_NO_THROW(getEngineDescriptor()->finalize());
+
+    // An unset schema string reads back as an empty one, and the descriptor
+    // forwards it as an engaged candidate rather than suppressing it. Deciding
+    // that empty means absent is the resolver's job, not the descriptor's.
+    EXPECT_TRUE(_resolverCalled);
+    ASSERT_TRUE(_capturedDetailsName.has_value());
+    EXPECT_TRUE(_capturedDetailsName->empty());
+
+    EXPECT_EQ(getEngineName(), hipdnn_data_sdk::utilities::formatEngineIdHex(ENGINE_ID));
+}
+
+TEST_F(TestEngineDescriptor, FinalizeFailsBeforeNameResolutionWhenEngineDetailsMissing)
+{
+    // The plugin answers with no engine details at all. finalize() declares a
+    // disengaged tier-2 candidate for exactly this case, but the candidate is
+    // unreachable today: EngineDetailsWrapper refuses to construct around an
+    // empty buffer, so finalize() fails before the resolver is consulted.
+    setGraph();
+    setGlobalIndex(ENGINE_ID);
+    EXPECT_CALL(*getMockGraph(), getHandle()).WillOnce(Return(_mockHandle.get()));
+    EXPECT_CALL(*_mockHandle, getPluginResourceManager())
+        .WillOnce(Return(_mockEnginePluginResourceManager));
+    EXPECT_CALL(*_mockEnginePluginResourceManager, getApplicableEngineIds(_, _))
+        .WillOnce(Return(std::vector<int64_t>{ENGINE_ID}));
+
+    // No action: the out parameter is left null, as a plugin that has nothing to
+    // report would leave it.
+    EXPECT_CALL(*_mockEnginePluginResourceManager, getEngineDetails(_, _, _));
+    EXPECT_CALL(*_mockEnginePluginResourceManager, resolveEngineName(_, _)).Times(0);
+
+    ASSERT_THROW_HIPDNN_STATUS(getEngineDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
+    EXPECT_FALSE(_resolverCalled);
+}
+
+TEST_F(TestEngineDescriptor, GetEngineNameInvalidType)
+{
+    auto engine = getEngineDescriptor();
+    makeEngineFinalized();
+
+    int64_t elementCount = 0;
+    ASSERT_THROW_HIPDNN_STATUS(
+        engine->getAttribute(
+            HIPDNN_ATTR_ENGINE_NAME_EXT, HIPDNN_TYPE_INT64, 0, &elementCount, nullptr),
+        HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestEngineDescriptor, GetEngineNameNotFinalized)
+{
+    auto engine = getEngineDescriptor();
+
+    int64_t elementCount = 0;
+    ASSERT_THROW_HIPDNN_STATUS(
+        engine->getAttribute(
+            HIPDNN_ATTR_ENGINE_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &elementCount, nullptr),
+        HIPDNN_STATUS_NOT_INITIALIZED);
+}
+
+TEST_F(TestEngineDescriptor, SetEngineNameIsRejected)
+{
+    auto engine = getEngineDescriptor();
+    const char* name = "USER_SUPPLIED_ENGINE";
+
+    // The name is backend-provided; the attribute is read-only.
+    ASSERT_THROW_HIPDNN_STATUS(engine->setAttribute(HIPDNN_ATTR_ENGINE_NAME_EXT,
+                                                    HIPDNN_TYPE_CHAR,
+                                                    static_cast<int64_t>(std::strlen(name)),
+                                                    name),
+                               HIPDNN_STATUS_NOT_SUPPORTED);
+}
+
+TEST_F(TestEngineDescriptor, ToStringReportsEngineName)
+{
+    serializeEngineDetailsWithName(ENGINE_ID, "EXAMPLE_PROVIDER_RELU_ENGINE");
+
+    expectFinalizeCalls(ENGINE_ID);
+    expectResolveEngineName(ENGINE_ID, "EXAMPLE_PROVIDER_RELU_ENGINE");
+    ASSERT_NO_THROW(getEngineDescriptor()->finalize());
+
+    EXPECT_TRUE(_resolverCalled);
+    EXPECT_NE(getEngineDescriptor()->toString().find("engineName=EXAMPLE_PROVIDER_RELU_ENGINE"),
+              std::string::npos);
+}
+
 // Test fixture for EngineDescriptor with knobs
 class TestEngineDescriptorWithKnobs : public TestEngineDescriptor
 {
@@ -608,6 +855,7 @@ protected:
                 *d = this->_serializedEngineDetailsWithKnobs;
             }));
         EXPECT_CALL(*_mockEnginePluginResourceManager, destroyEngineDetails(_, _));
+        EXPECT_CALL(*_mockEnginePluginResourceManager, resolveEngineName(_, _));
         ASSERT_NO_THROW(getEngineDescriptor()->finalize());
     }
 

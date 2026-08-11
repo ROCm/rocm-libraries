@@ -85,6 +85,31 @@ bool readIsOverrideShapeEnabled(const GraphDescriptor& graphDesc)
     return flag;
 }
 
+/// Checks a plugin-supplied engine name against the RFC 0003 name-to-ID hash.
+///
+/// Log-and-continue by design: the plugin-reported ID stays canonical because
+/// routing, `preferred_engine_id`, and serialized graphs all key on it, while
+/// the reported name is still used for display. A cosmetic naming defect in a
+/// third-party engine pack must not make that vendor's kernels unavailable.
+void warnOnEngineNameIdMismatch(std::string_view pluginName,
+                                int64_t engineId,
+                                std::string_view engineName)
+{
+    const auto hashedId = hipdnn_data_sdk::utilities::engineNameToId(engineName);
+    if(hashedId == engineId)
+    {
+        return;
+    }
+
+    HIPDNN_BACKEND_LOG_WARN(
+        "Plugin '{}' reports engine name '{}' for engine ID {}, but that name hashes to {}. "
+        "Keeping the plugin-reported ID; the name is used for display only.",
+        pluginName,
+        engineName,
+        hipdnn_data_sdk::utilities::formatEngineIdHex(engineId),
+        hipdnn_data_sdk::utilities::formatEngineIdHex(hashedId));
+}
+
 } // namespace
 
 // Static accessor implementations for CRTP base class
@@ -153,14 +178,9 @@ std::vector<EngineInfo> EnginePluginResourceManager::getEngineInfos() const
             info.type = pluginType;
             info.pluginName = pluginName;
 
-            try
-            {
-                info.engineName = hipdnn_data_sdk::utilities::getEngineNameFromId(id);
-            }
-            catch(const std::out_of_range&)
-            {
-                info.engineName = hipdnn_data_sdk::utilities::formatEngineIdHex(id);
-            }
+            // Schema-less context: there is no graph and therefore no
+            // EngineDetails, so the tier-2 candidate is unavailable here.
+            info.engineName = resolveEngineName(id, std::nullopt);
 
             infos.push_back(std::move(info));
         }
@@ -172,6 +192,82 @@ std::vector<EngineInfo> EnginePluginResourceManager::getEngineInfos() const
 
     _cachedEngineInfos = infos;
     return infos;
+}
+
+std::string EnginePluginResourceManager::resolveEngineName(
+    int64_t engineId, std::optional<std::string_view> detailsName) const
+{
+    const EnginePlugin* owningPlugin = nullptr;
+    const auto handleIt = _engineIdToHandle.find(engineId);
+    if(handleIt != _engineIdToHandle.end())
+    {
+        const auto pluginIt = _handleToPlugin.find(handleIt->second);
+        if(pluginIt != _handleToPlugin.end())
+        {
+            owningPlugin = pluginIt->second;
+        }
+    }
+
+    const std::string_view pluginName = owningPlugin != nullptr
+                                            ? std::string_view(owningPlugin->cachedName())
+                                            : std::string_view("<unknown>");
+
+    // Tier 1: the owning plugin's hipdnnEnginePluginGetEngineName entry point.
+    //
+    // Symbol presence is the whole predicate. The plugin's self-reported API
+    // version is deliberately NOT consulted: it is a string the plugin chooses,
+    // most plugins in and out of tree either omit it or hardcode an older value,
+    // and gating on it would deny naming to every one of them. Symbol presence
+    // is decided instead by the SDK headers the plugin compiled against, so it
+    // cannot disagree with reality. The name is display-only (nothing dispatches
+    // on it), and `hipdnnEnginePluginGetEngineName` is a new name inside the
+    // reserved `hipdnnEnginePlugin*` prefix, so there is no older symbol whose
+    // semantics could be mistaken for this one.
+    std::optional<std::string> entryPointName;
+    if(owningPlugin != nullptr && owningPlugin->hasEngineName())
+    {
+        entryPointName = owningPlugin->getEngineName(engineId);
+    }
+
+    if(entryPointName.has_value())
+    {
+        // The entry point is authoritative; EngineDetails.name is a graph-scoped
+        // echo of it. A disagreement is a plugin defect worth reporting, not
+        // worth failing over.
+        if(detailsName.has_value() && !detailsName->empty() && *detailsName != *entryPointName)
+        {
+            HIPDNN_BACKEND_LOG_WARN(
+                "Plugin '{}' names engine {} '{}' through hipdnnEnginePluginGetEngineName but "
+                "'{}' in EngineDetails.name; using '{}'",
+                pluginName,
+                hipdnn_data_sdk::utilities::formatEngineIdHex(engineId),
+                *entryPointName,
+                *detailsName,
+                *entryPointName);
+        }
+
+        warnOnEngineNameIdMismatch(pluginName, engineId, *entryPointName);
+        return *entryPointName;
+    }
+
+    // Tier 2: the EngineDetails.name candidate. Unavailable in schema-less
+    // contexts such as getEngineInfos(), which pass std::nullopt.
+    if(detailsName.has_value() && !detailsName->empty())
+    {
+        warnOnEngineNameIdMismatch(pluginName, engineId, *detailsName);
+        return std::string(*detailsName);
+    }
+
+    // Tier 3: the in-tree static engine name registry.
+    try
+    {
+        return std::string(hipdnn_data_sdk::utilities::getEngineNameFromId(engineId));
+    }
+    catch(const std::out_of_range&)
+    {
+        // Tier 4: a hexadecimal rendering of the ID, always available.
+        return hipdnn_data_sdk::utilities::formatEngineIdHex(engineId);
+    }
 }
 
 std::shared_ptr<EnginePluginResourceManager> EnginePluginResourceManager::create()

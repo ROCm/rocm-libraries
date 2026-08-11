@@ -33,6 +33,10 @@ set(TEST_KNOBS_PLUGIN_NAME "test_knobs_plugin")
 set(TEST_KNOB_CONSTRAINT_VALIDATION_PLUGIN_NAME "test_knob_constraint_validation_plugin")
 set(TEST_INCOMPATIBLE_VERSION_PLUGIN_NAME "test_incompatible_version_plugin")
 
+# Hashed-name fake: its engine id is the hash of its own engine name, so
+# name-hashing filters such as deselect_engines(names) reach its engine.
+set(TEST_HASHED_NAME_PLUGIN_NAME "test_hashed_name_plugin")
+
 # Override-execute fake plugin names
 set(HIPDNN_TEST_OVERRIDE_IMPLEMENTING_PLUGIN_TARGET "test_override_implementing_plugin")
 set(HIPDNN_TEST_OVERRIDE_OMITTING_PLUGIN_TARGET "test_override_omitting_plugin")

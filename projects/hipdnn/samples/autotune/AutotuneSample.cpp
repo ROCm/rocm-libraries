@@ -20,7 +20,6 @@
 #include <unordered_map>
 #include <vector>
 
-#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_frontend.hpp>
@@ -29,24 +28,6 @@
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_data_sdk;
-
-// --- Helpers ---
-
-/// Retrieves the engine name for a given engine ID. Returns a hex-formatted
-/// fallback string when the engine ID is not in the registered engine map.
-static std::string getEngineName(int64_t engineId)
-{
-    try
-    {
-        return std::string(utilities::getEngineNameFromId(engineId));
-    }
-    catch(const std::out_of_range&)
-    {
-        std::ostringstream oss;
-        oss << "engine_0x" << std::hex << std::uppercase << engineId;
-        return oss.str();
-    }
-}
 
 // --- ConvGraph helper ---
 
@@ -253,10 +234,11 @@ static void demonstrateExhaustiveAutotune(hipdnnHandle_t handle,
     for(const auto& result : results)
     {
         const std::string rankStr = result.rank >= 0 ? std::to_string(result.rank) : "FAIL";
-        const std::string name
-            = result.engineName.empty() ? getEngineName(result.engineId) : result.engineName;
 
-        std::cout << "  " << std::left << std::setw(6) << rankStr << std::setw(30) << name;
+        // autotune() resolves engineName through the backend, so plugin-supplied
+        // engines are named here and unnamed ones already carry a hex rendering.
+        std::cout << "  " << std::left << std::setw(6) << rankStr << std::setw(30)
+                  << result.engineName;
 
         if(result.succeeded)
         {
@@ -336,9 +318,9 @@ static void demonstrateFilteredAutotune(hipdnnHandle_t handle,
     std::cout << "  Discovered " << configs.size() << " engine(s):\n";
     for(const auto& cfg : configs)
     {
-        const std::string name
-            = cfg.engineName.empty() ? getEngineName(cfg.engineId) : cfg.engineName;
-        std::cout << "    " << name << " (workspace=" << cfg.estimatedWorkspaceSize
+        // get_engine_configs() resolves engineName through the backend, so
+        // plugin-supplied engines are named rather than shown as a bare ID.
+        std::cout << "    " << cfg.engineName << " (workspace=" << cfg.estimatedWorkspaceSize
                   << ", exhaustive=" << (cfg.supportsExhaustive ? "yes" : "no")
                   << ", knobs=" << cfg.knobs.size() << ")\n";
     }
@@ -507,10 +489,10 @@ static void demonstrateCompiledPlanAutotune(hipdnnHandle_t handle,
     for(size_t i = 0; i < results.size(); ++i)
     {
         const auto& result = results[i];
-        const std::string name
-            = result.engineName.empty() ? getEngineName(result.engineId) : result.engineName;
 
-        std::cout << "  " << std::left << std::setw(6) << i << std::setw(30) << name
+        // autotune() resolves engineName through the backend, so plugin-supplied
+        // engines are named here and unnamed ones already carry a hex rendering.
+        std::cout << "  " << std::left << std::setw(6) << i << std::setw(30) << result.engineName
                   << std::setw(14) << result.workspaceSize;
 
         if(result.succeeded)

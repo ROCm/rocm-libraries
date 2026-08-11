@@ -5,6 +5,7 @@
 #include <hip/hip_runtime.h>
 #include <hipdnn_backend.h>
 #include <hipdnn_data_sdk/types.hpp>
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_frontend.hpp>
@@ -16,6 +17,7 @@
 #include <numeric>
 #include <random>
 #include <sstream>
+#include <string>
 #include <vector>
 
 // NOLINTBEGIN(google-global-names-in-headers)
@@ -502,9 +504,15 @@ bool run(F&& f)
 // ENGINE SELECTION
 
 // Applies the engine preference from `config` (--engine-id or --engine-name) to `graph`.
-// An unrecognized --engine-name almost always indicates a typo, so this exits with an
-// error rather than silently continuing with a default/unintended engine. Centralized
-// here so every sample gets consistent validation instead of duplicating this logic.
+// The name is hashed to an engine ID unconditionally, because an engine supplied by an
+// engine plugin is never in the built-in name registry and gating on it would leave every
+// such engine unaddressable by name. The preference is soft: one that matches no engine
+// config is discarded when the graph is built and the heuristic's pick runs instead, so
+// nothing here can tell a plugin engine apart from a typo. The name-to-ID mapping is
+// echoed to leave a trace, but a preference that went unused is only detectable after the
+// graph is built, by comparing get_preferred_engine_id_ext() against the plan's actual
+// engine. Centralized here so every sample selects engines the same way instead of
+// duplicating this logic.
 inline void setPreferredEngine(hipdnn_frontend::graph::Graph& graph, const Config& config)
 {
     if(config.engineId != -1)
@@ -513,14 +521,12 @@ inline void setPreferredEngine(hipdnn_frontend::graph::Graph& graph, const Confi
     }
     else if(!config.engineName.empty())
     {
-        if(!hipdnn_data_sdk::utilities::isEngineNameRegistered(config.engineName))
-        {
-            std::cerr << "Error: Unknown engine name: " << config.engineName << '\n';
-            exit(EXIT_FAILURE);
-        }
+        const int64_t engineId = hipdnn_data_sdk::utilities::engineNameToId(config.engineName);
 
-        graph.set_preferred_engine_id_ext(
-            hipdnn_data_sdk::utilities::engineNameToId(config.engineName));
+        std::cout << "  engine name '" << config.engineName << "' maps to engine ID "
+                  << hipdnn_data_sdk::utilities::formatEngineIdHex(engineId) << '\n';
+
+        graph.set_preferred_engine_id_ext(engineId);
     }
 }
 
@@ -529,6 +535,29 @@ inline void setPreferredEngine(const std::shared_ptr<hipdnn_frontend::graph::Gra
                                const Config& config)
 {
     setPreferredEngine(*graph, config);
+}
+
+// Resolves `engineId` to the name the backend reports for it against `graph`, which is the
+// only way to name an engine supplied by an engine plugin: the frontend's built-in registry
+// never sees those. `graph` must already be built (build_operation_graph()). Falls back to
+// the frontend's own registry/hex rendering when the engine is not among the graph's engine
+// configs, so callers always get a printable name and never an exception.
+inline std::string getEngineName(hipdnn_frontend::graph::Graph& graph, int64_t engineId)
+{
+    std::vector<hipdnn_frontend::EngineConfigInfo> engineConfigs;
+
+    if(graph.get_engine_configs(engineConfigs).is_good())
+    {
+        for(const auto& engineConfig : engineConfigs)
+        {
+            if(engineConfig.engineId == engineId && !engineConfig.engineName.empty())
+            {
+                return engineConfig.engineName;
+            }
+        }
+    }
+
+    return hipdnn_frontend::detail::resolveEngineName(engineId);
 }
 
 // TENSOR HELPERS
