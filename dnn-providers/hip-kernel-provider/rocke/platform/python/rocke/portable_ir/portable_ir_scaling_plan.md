@@ -56,6 +56,11 @@ for the directory map and how to run each piece):
   Python lowerer — **45/45 buildable kernels byte-identical on gfx942 and gfx950**
   (flavor pinned). A `tile.buffer_load_vN`/`store_vN` → `*_f16` opcode **alias** in
   the portable-IR layer (engine core untouched) made the conv kernels round-trip.
+- **Multi-axis rolling** (`src/roll_nd.py`, `drivers/roll_nd_coverage.py`): one
+  recipe now covers a family's non-reduction axes' **cross product** rather than one
+  axis at a time — 4/4 priority families, no VM change. See
+  [Multi-axis rolling](#multi-axis-rolling-delivered--one-recipe-per-axis-cross-product)
+  and the [pitfalls](#pitfalls--sharp-edges) it surfaced.
 
 ## Step 1 — universal capture: build-time interception recorder  ✅ DONE
 
@@ -105,6 +110,9 @@ hard-coded to attention head_size (D=64/128, VEC=8).
   parametric recipe, then **verifies it against every sample AND held-out point**.
   On any failure it returns `(None, reason)` — the caller keeps concrete per-shape
   recipes (graceful degradation; **never a wrong roll**).
+- `src/roll_nd.py` — the `roll_nd(build_at, axes={...}, structural_axis=...)`
+  driver: the same contract over **several axes at once**, so one recipe covers
+  their cross product. See "Multi-axis rolling" below.
 
 **Multi-run per level (delivered).** A single level can hold several independent
 runs (GEMM pipeline-nest + CShuffle; two unrolled loops). The roller finds the
@@ -213,6 +221,148 @@ Step 4 that only T1 `tile_n` and T4 `hidden` compress structurally; T2 and T3 ro
 constants only. Note: `tile_k` is a *separate* GEMM axis that still hits a
 non-affine LDS-sizing case.
 
+### Multi-axis rolling (delivered) — one recipe per axis cross product
+
+Everything above parameterizes ONE axis, so covering `k` axes cost `k` recipes and
+none of them moved together. `src/roll_nd.py` covers the cross product with a
+single recipe.
+
+**Why the non-reduction axes first.** A kernel's axes split by what they do to the
+trace. The **reduction** axis (GEMM `tile_k`, attention `head_size`) drives the hot
+loop, so moving it changes structure — op counts, vector widths, LDS sizing — and
+needs structural inference. The **outer** axes (inter-tile problem shape,
+intra-tile geometry) frequently leave the instruction sequence completely alone and
+move only **constants**: five of the seven gated axes emit an identical op count at
+every value. That second group needs no structural inference at all, and a
+constant model composes across axes for free, which is what makes the cross
+product reachable cheaply.
+
+**Architecture: annotate, then roll.** The aligner is pairwise (`align(la, lb)`)
+and the fan/run machinery is built on that, so rather than rewriting it to consume
+`T` traces, the axis dependence is pushed into the **concrete** traces before
+structural rolling starts:
+
+1. Record the base point, then one **probe** per axis that moves that axis alone.
+2. Check each probe is structurally identical to the base — same op at every
+   position, and no non-integer field moved (`_nonint_key` guards against a dtype
+   string that tracks an axis). A probe that fails this names a *structural* axis,
+   which belongs to `structural_axis=` instead.
+3. Solve every integer-bearing field — typed-int attrs and integers inside result
+   types, the same set `_merge_instr` parameterizes — and rewrite it as an intexpr
+   over `{spec: axis}`.
+4. Optionally roll a structural axis **on top** of the annotated traces.
+5. Verify with the oracle at every cross-product point and every holdout.
+
+Step 4 composes because `merge_intexpr` reconciles two intexpr *trees* that differ
+only at integer leaves, fitting each differing leaf in the structural axis. So a
+constant may depend on the structural axis and a shape axis at once — the mixed
+case emits `{add: [{mul: [{spec: S}, 2]}, {mul: [{spec: N}, 8]}]}` while the run
+still compresses to a `static_for`.
+
+**The solve** (`roller.affine_solve` / `affine_intexpr`) is exact — Gaussian
+elimination over `Fraction`, no least squares — and is rejected unless it
+reproduces every sample point. Per-axis expressibility mirrors `_linear_expr`: an
+integer coefficient becomes a `mul`, a unit fraction `1/d` becomes a `div` (the
+`count = axis // vec` shape), and any other fractional coefficient is refused
+because `div` floors and a non-unit fraction would only agree by luck.
+
+**The probe/verify asymmetry is the safety argument.** Inference reads
+`1 + sum(n_j - 1)` traces; verification checks `prod(n_j)` grid points plus
+holdouts. That gap is deliberate — see the first pitfall below.
+
+**Measured** (`drivers/roll_nd_coverage.py`, ~0.9 s, no comgr or GPU):
+
+| Family | Axes | Grid | Held out | Traces recorded | `static_for` |
+|---|---|---|---|---|---|
+| conv_implicit_gemm | `N`, `K` | 4 | 3 | **3** | 0 |
+| attention_dense | `seqlen_kv`, `num_query_heads` | 4 | 1 | **3** | 0 |
+| fused_moe/gather | `hidden`*, `tokens` | 4 | 1 | **4** | 1 |
+| gemm_universal | `tile_n`* | 2 | 2 | **2** | 5 |
+
+`*` = also rolled structurally. The **C VM needed no change**: a multi-axis
+constant is still an intexpr over spec values, so `--int N=.. --int K=..` binds
+both, and the standalone CLI replays the two-axis conv recipe to byte-identical
+`.ll` at all 7 points including `N=64, K=512` (8x the base on *both* axes at once).
+Unit tests: `tests/test_roll_nd.py`; CI lanes:
+`tests/portable_ir/test_recipe_roller.py::test_roll_nd_cross_product` and
+`::test_standalone_cli_replays_multi_axis_recipe`.
+
+## Pitfalls & sharp edges
+
+Each of these bit during development and is now either gated or pinned by a test.
+They are recorded because most of them look like success until something checks.
+
+**1. A cross term fits every one-axis probe perfectly.** Three points in general
+position determine an affine function of two axes, so a constant scaling with
+`N*K` matches the base and both one-axis probes *exactly* and is wrong everywhere
+else. This is why verification sweeps the whole grid instead of trusting the fit,
+and why the interior points matter as much as the extrapolated ones. Pinned by
+`test_cross_term_refused_at_interior_point`; a real instance is conv `C`
+(predicted 9, actual 8).
+
+**2. Holdouts inside the sampled box prove almost nothing.** Two-point inference
+fails by *extrapolating*, so a holdout must sit outside the sampled range to have
+teeth — the quadratic probe is only caught because a held-out `N` predicts 14
+against an actual 16. Interpolated holdouts would have passed.
+
+**3. `div` is floor division.** A unit-fraction coefficient agrees only where the
+axis is divisible by `d`. Verified points are therefore the contract: a JIT caller
+binding an arbitrary spec value can leave the verified set and get a silently
+floored constant. Keep spec values on the family's natural multiples, or add the
+value to the gate.
+
+**4. The oracle does not check the kernel symbol.** `recipes_equiv` compares
+programs only, so a recipe whose `kernel_name_fmt` does not track the axis passes
+every oracle check while emitting the *wrong symbol*. Reproduced: a kernel named
+after a derived quantity (`g{3N+1}`) rolls "successfully" through `roll()` and
+emits `derived_g10` at every `N`, wrong at `N=2` and `N=9`, with
+`recipes_equiv == True` at all of them. Two things save this in practice — the
+`.ll` SHA gates compare text that contains the symbol, and `roll_nd` verifies the
+name at every point and refuses with a precise reason — but **`roll()` plus the
+oracle alone is not sufficient** to conclude a rolled recipe is shippable. Pinned
+by `test_name_carrying_a_derived_quantity_is_refused`; teaching `recipes_equiv` to
+compare names is the real fix.
+
+**5. Sample-point order is load-bearing.** The aligner requires the larger axis
+value to record *more* ops; reversed, it refuses with `shorter-at-larger-axis`.
+That refusal is also how a genuinely shrinking trace shows up (GEMM `tile_m`).
+
+**6. Non-monotonic axes cannot be rescued by re-sampling.** GEMM `tile_m` moves
+the k-loop body 90 -> 81 -> 114 ops over 16/32/64: `tile.mma` scales cleanly
+(2 -> 4 -> 8) while the load path *re-vectorizes* under it
+(`memref.global_load_vN` 3 -> 2 -> 3, address arithmetic 33 -> 28 -> 42). Sampling
+32/64 or 64/128 instead does not help — there is no regime in which it is affine.
+Axes like this need opcode/vector-width selection (P3 `static_if`), not a better
+constant fit. Do not read a refusal as "sample differently".
+
+**7. An axis that changes nothing looks like coverage.** MoE `tokens` moves **zero**
+constants — the kernel is already token-agnostic — so "rolled over 2 axes" there is
+really one axis plus a kernel-name suffix. When claiming coverage, check whether
+the axis actually moved the body (the gate's `static_for` column and distinct-SHA
+count both expose this).
+
+**8. In-run ladder constants that also depend on a constant axis refuse.** After
+annotation such a constant is an intexpr, so `_is_const_int` is false and
+`_roll_run`'s ladder inference skips it, leaving one block's expression in the
+template; the oracle then rejects the roll (predicted 12, actual 8 on a synthetic).
+Safe, but it means "structural axis + shape axis" only composes when the shape axis
+stays *out* of the unrolled block's per-iteration constants. Fixing it means
+teaching the ladder step to fit intexpr leaves in the loop var, the same way
+`merge_intexpr` does for the structural axis. Pinned by
+`test_shape_axis_inside_the_ladder_refuses`.
+
+**9. Run-boundary phase.** `_run_candidates` anchors at the first divergence and
+walks back in whole periods, so when the tail after a run repeats the block's
+signatures in a *rotated* order the only candidate offered starts mid-block and
+swallows a tail constant. Declines rather than mis-rolls; reproduces identically
+through single-axis `roll`, so it is not multi-axis-specific. Pinned by
+`test_rotated_run_boundary_refuses_rather_than_mis_rolls`.
+
+**10. A point is a dict, not a value.** `roll` takes bare axis values and
+`roll_nd` takes one dict per point; mixing them up (or omitting an axis from a
+point) now raises a message naming the mistake rather than failing deep inside
+verification. Pinned by `test_point_must_be_a_dict_not_a_bare_value`.
+
 ## C recipe VM — parametric surface complete (on-device JIT)
 
 `cpp/portable_ir/recipe_vm.cpp` now expands the rolled recipes on-device (no CPython),
@@ -256,10 +406,13 @@ Still to generalize (the survey's remaining patterns):
    `k % P`, first/last) rolls into a `static_for` whose body guards sub-bodies
    with `static_if` on the (compile-time) loop index. The VM picks the right body
    per iteration -> exact ops reproduced.
-4. **Multi-axis constant parameterization.** Today: `coeff * head_size` from two
-   traces. Generalize to N spec axes via an N+1 trace solve (linear inference per
-   axis) with an assertion guard; non-linear constants stay concrete or are
-   declared spec inputs.
+4. **Multi-axis constant parameterization.** ✅ **DONE** — `src/roll_nd.py`. An
+   exact affine solve over N axes (`v = c0 + sum m_j*x_j`, unit fractions rendered
+   as `div`) from `1 + sum(n_j - 1)` traces, verified across the whole axis cross
+   product plus held-out points, so one recipe replaces one-per-axis. A
+   structural axis composes on top. Non-affine constants are refused, not
+   approximated: conv `C` (spatial product) and GEMM `tile_m` (non-monotonic,
+   re-vectorizing load path) both decline. See P2 under "Phasing & effort".
 5. **Runtime-loop conversion (opt-in, NOT byte-identical).** Where a compile-time
    unroll is value- (not structure-) dependent and a looped kernel is acceptable,
    convert to runtime `scf.for`. This changes codegen, so it is a kernel variant,
@@ -301,10 +454,10 @@ difficulty-ordered plan would put it (see Phasing).
 
 | Tier | Families | Loop profile | Roller needs | Risk | Measured status |
 |---|---|---|---|---|---|
-| **T1: GEMM** | gemm_universal (+batched/grouped/streamk/mfma/mx/block_scale/multi_d) | `k_atoms x mfmas` nests + 1 runtime K-`scf.for`; pipeline + CShuffle | nested roll + peel; helper-expansion macros | medium | **rolls structurally** on `tile_n` (195 vs 322 ops); `tile_m`/`tile_k` refused |
-| **T2: conv** | conv_implicit_gemm, conv_direct, img2col, pooling | implicit-GEMM nests over spatial windows | T1 + non-affine spatial constants | medium | rolls on `K`, `N` — **constants only**, op count flat; `tile_m`/`tile_n`/`C` refused |
-| **T3: attention** | scalar unified 2d/3d/reduce (DONE for 2d), FMHA fwd/bwd/varlen/paged/splitkv/headgroup/fp8, sage/sparse, tiled gfx942/gfx950 | runtime KV `scf.for` + huge spec-`if` flag forks + compile-time tile nests | full roller + `static_if` flag handling; per-arch | high | rolls on `seqlen_kv`, `num_query_heads` — **constants only**; `head_size`/`block_n` refused |
-| **T4: MoE** | fused_moe (5), moe_gemm_fused (4), moe_fused_mega(+fp8), moe_sorting (4), moe_smoothquant | GEMM skeleton + phase routing (`static_if`) | T1 + multi-phase | medium | **rolls structurally** on `hidden` (21 vs 27 ops); `tokens` constants only; `hidden@128` refused |
+| **T1: GEMM** | gemm_universal (+batched/grouped/streamk/mfma/mx/block_scale/multi_d) | `k_atoms x mfmas` nests + 1 runtime K-`scf.for`; pipeline + CShuffle | nested roll + peel; helper-expansion macros | medium | **rolls structurally** on `tile_n` (195 vs 322 ops); `tile_m` non-monotonic, `tile_k` refused |
+| **T2: conv** | conv_implicit_gemm, conv_direct, img2col, pooling | implicit-GEMM nests over spatial windows | T1 + non-affine spatial constants | medium | **one recipe covers the `(N,K)` cross product** from 3 traces — constants only, op count flat; `C` non-affine; `tile_m`/`tile_n` refused |
+| **T3: attention** | scalar unified 2d/3d/reduce (DONE for 2d), FMHA fwd/bwd/varlen/paged/splitkv/headgroup/fp8, sage/sparse, tiled gfx942/gfx950 | runtime KV `scf.for` + huge spec-`if` flag forks + compile-time tile nests | full roller + `static_if` flag handling; per-arch | high | **one recipe covers `(seqlen_kv, num_query_heads)`** from 3 traces — constants only; `head_size`/`block_n` refused |
+| **T4: MoE** | fused_moe (5), moe_gemm_fused (4), moe_fused_mega(+fp8), moe_sorting (4), moe_smoothquant | GEMM skeleton + phase routing (`static_if`) | T1 + multi-phase | medium | **rolls structurally** on `hidden` (21 vs 27 ops) **and carries `tokens` in the same recipe**; `hidden@128` refused |
 | **T5: deep-fused conv** | deep_fused_conv_pool | conv0→conv1→pool; pool tile enters address math as a spatial product | multi-axis / polynomial constant inference **and** spatial-output unroll rolling | high | refused (diagnosed, see Step 2) |
 | *(untiered)* small ops | elementwise, reduce, layernorm2d, rmsnorm2d, transpose, permute, topk_softmax, smoothquant | shallow `range(vec)` + reductions | index roll + peel | low | the pattern the roller handles best (probe `qk_block` rolls 78×); not competing for priority |
 
@@ -318,6 +471,11 @@ op count: the kernel emits the same instructions at every axis value and only th
 family, held-out values included) without buying storage. Both are wins, but only
 the first is the "storage payoff" the phasing language promises, and conv is
 currently in the second group.
+
+That said, the constants-only axes are no longer *separate* recipes. Multi-axis
+rolling (P2, `src/roll_nd.py`) folds a family's non-reduction axes into ONE recipe
+covering their cross product, so the artifact count is now per family rather than
+per family-times-axis, and the axes move together instead of one at a time.
 
 **Difficulty no longer tracks tier order.** The high-expansion helpers
 (`SoftwarePipeline`, `CShuffleEpilogue`, `AsyncTileLoader`,
@@ -349,14 +507,24 @@ a rolled recipe cannot replay names verbatim the way a concrete one does, but
 the recipe carries Python's per-op `result_name_hint` and the roller keeps
 Python's lane naming for loop-carry fans, so both engines mint the same names
 off the same counter. A checksum therefore suffices to compare the rolled path.
-Extend both drivers over `instances/SUPPORT_MATRIX.md` for the full shape grid.
+
+**Delivered (multi-axis tier):** `drivers/roll_nd_coverage.py` gates the axis
+*cross product* — 4/4 families, every grid point and every holdout verified
+against its own concrete recording, plus the kernel name at each point (pitfall 4).
+It needs neither librocke nor comgr, so unlike the lanes above it cannot skip;
+`--ll` adds an `.ll` SHA report in the same currency as the rolled gate. The driver
+also re-probes the axis pairs it *refuses* and fails if one starts working, so the
+frontier recorded in this document cannot drift silently.
+
+Extend all three drivers over `instances/SUPPORT_MATRIX.md` for the full shape grid.
 
 ## Step 6 — productization
 
 - `record_kernel(build_fn) -> (kernel, recipe)` (interception recorder) — **done**
   (`src/recording_builder.py`).
 - `roll(build_at, axis, ...) -> parametric recipe` (multi-trace driver + roller) —
-  **done** (`src/roll.py`).
+  **done** (`src/roll.py`); `roll_nd(build_at, axes={...})` for an axis cross
+  product — **done** (`src/roll_nd.py`).
 - A bundle writer emitting CBOR recipes keyed by `(key, arch)` — **done**
   (`src/recipe_bundle.py`, schema `rocke.bundle/v1`; the C VM serves a recipe by
   key via `rocke_recipe_run_from_bundle_cbor`). zstd compression is the remaining
@@ -381,7 +549,7 @@ roller extension that then covers all future instances of that pattern.**
 
 | New instance | Record (concrete / CPython-free) | Roll (storage win) |
 |---|---|---|
-| uses existing primitives, parametrization already in the roller's pattern library (single-axis index rolls incl. runs inside a region, loop-carry fans, spec-scaled constants, spec-parametric types/attrs — **not** peel or `static_if` cases, see P2/P3) | **0 code** — records + lowers byte-identically automatically | **name the one structural axis and its sample points** (`roll(build_at, axis=…, sample_points=…)`) — 0 code |
+| uses existing primitives, parametrization already in the roller's pattern library (single-axis index rolls incl. runs inside a region, loop-carry fans, affine multi-axis constants, spec-parametric types/attrs — **not** peel or `static_if` cases, see P2/P3) | **0 code** — records + lowers byte-identically automatically | **name the axes and their sample values** (`roll_nd(build_at, axes={…}, structural_axis=…)`, or `roll(…)` for a single axis) — 0 code |
 | uses a genuinely new structural-variation pattern | **0 code** | **extend the roller once**; the extension is amortized across every future instance with that pattern |
 | introduces a brand-new IRBuilder op (primitive) | **0 code** (captured as a generic op) | unaffected, *but* see caveat below |
 
@@ -415,11 +583,13 @@ failures, across all tiers (see Step 1).
   returns are fine; multi-kernel emitters need one `record_kernel` call per
   returned kernel. (These are the 3 `record_coverage.py` skips — harness plumbing,
   not recorder gaps.)
-- **Non-linear / data-dependent constants.** The multi-axis solver infers
-  *linear* spec-scaled constants (with an assertion guard). Non-linear constants
-  stay concrete or must be declared explicit spec inputs. Value- (not structure-)
-  dependent unrolls are only convertible via the opt-in runtime-loop path, which
-  is **not** byte-identical and is never the default.
+- **Non-linear / data-dependent constants.** The multi-axis solver infers *affine*
+  spec-scaled constants only. A non-affine constant makes the whole roll decline
+  (the caller keeps concrete per-point recipes) rather than being approximated —
+  and because verification spans the axis cross product, a constant that looks
+  affine along each axis alone but carries a cross term is caught too. Value- (not
+  structure-) dependent unrolls are only convertible via the opt-in runtime-loop
+  path, which is **not** byte-identical and is never the default.
 - **Arch SSOT.** New instances inherit arch handling for free *if* the arch is in
   `arch_specs.json` + the backend registry; a genuinely new target must be added
   there first, and recipes carrying `arch` spec fields regenerated. (All targets
@@ -452,21 +622,69 @@ remaining work is not read as done:
 linear spec-scaled constants; spec-parametric **types and attrs**; automatic
 kernel-name parameterization.
 
-*Still open — the three mechanisms this phase actually lists:*
+**Multi-axis inference — landed for the non-reduction axes** (`src/roll_nd.py`,
+gated by `drivers/roll_nd_coverage.py`). One recipe now covers a *cross product*
+of axes instead of one recipe per axis, which is the coverage the tier table
+promises. Every integer-bearing field is fitted as an exact affine function of
+several axes at once, `v = c0 + sum_j m_j*x_j`, with a unit-fraction coefficient
+rendered as `div` (the `count = axis // vec` shape). A structural axis may be
+rolled *on top* of that model, so a constant can depend on the structural axis and
+a shape axis simultaneously.
+
+Measured, oracle-verified at every grid point and every held-out point:
+
+| Family | Axes | Grid | Held out | Traces recorded | `static_for` |
+|---|---|---|---|---|---|
+| conv_implicit_gemm | `N`, `K` | 4 | 3 | **3** | 0 |
+| attention_dense | `seqlen_kv`, `num_query_heads` | 4 | 1 | **3** | 0 |
+| fused_moe/gather | `hidden`*, `tokens` | 4 | 1 | **4** | 1 |
+| gemm_universal | `tile_n`* | 2 | 2 | **2** | 5 |
+
+`*` = also rolled structurally. The recording asymmetry is the point: inference
+reads `1 + sum(n_j - 1)` traces (3 for a 2x2 grid) while verification checks
+`prod(n_j)` grid points plus the holdouts, so a **cross term** — a constant
+scaling with `N*K` — fits every one-axis probe exactly and is still caught at the
+first interior point. `tests/test_roll_nd.py` pins that case.
+
+The C VM needed **no change**: a multi-axis constant is still an intexpr over spec
+values, so `--int N=.. --int K=..` binds both. The standalone CLI replays the
+two-axis conv recipe to byte-identical `.ll` at all 7 points, including
+`N=64, K=512` (8x the base on both axes at once).
+
+*Still open — the two other mechanisms this phase lists, plus one newly
+characterized:*
 - **Nested rolling** in the intended sense (a *nest* of loops rolled
   innermost-out, each level its own `static_for`). The roller emits **no nested
   `static_for`** on any family today; what works is one run per level.
 - **Peeling.** Not implemented. Boundary-special iterations are only *named* as a
   hypothesis in a refusal message; there is no peel code path.
-- **Multi-axis inference.** Not implemented. `roll_two` takes one axis and exactly
-  two traces. The recipe format and the C VM already handle N spec variables, so
-  this is an inference gap, not a format gap. See "Multi-axis constant
-  parameterization" in Step 2 for the intended N+1-trace solve — and note that
-  design covers *constant* inference only, not multi-axis **structural**
-  inference.
+- **Multi-axis *structural* inference.** The landed work models constants across
+  axes; it does not discover a *loop nest* whose trip counts belong to different
+  axes. GEMM's mma nest is exactly that shape (`mfmas_m x mfmas_n`), so it is the
+  natural next step — but see the `tile_m` finding below for why it is not just an
+  inference gap.
+- **Run-boundary phase.** `_run_candidates` anchors block boundaries at the first
+  divergence and walks back in whole periods, so when the tail following a run
+  repeats the block's signatures in a rotated order, the only candidate offered
+  starts mid-block and swallows a tail constant. The oracle catches it and the
+  roll is declined, so this costs compression rather than correctness. Reproduced
+  by `test_rotated_run_boundary_refuses_rather_than_mis_rolls`, and it reproduces
+  identically through single-axis `roll`, so it is not multi-axis-specific.
 
-Consequently T1 rolls on `tile_n` but not `tile_m`/`tile_k`, and T2 rolls
-constants only.
+Two axes are refused for reasons worth recording, because neither is fixed by more
+inference:
+- **conv `C`** enters the spatial-product constants non-affinely (predicted 9,
+  actual 8 at a held-out point) — it needs polynomial, not affine, inference.
+- **GEMM `tile_m`** is **non-monotonic**: over `tile_m` = 16/32/64 the k-loop body
+  goes 90 -> 81 -> 114 ops, because `tile.mma` scales cleanly (2 -> 4 -> 8) while
+  the load path *re-vectorizes* (`memref.global_load_vN` 3 -> 2 -> 3, address
+  arithmetic 33 -> 28 -> 42). No affine model exists in any regime — sampling
+  32/64 or 64/128 instead of 16/32 does not help. Covering the GEMM tuning space
+  therefore needs opcode/vector-width selection (P3-style `static_if`), not a
+  better constant fit.
+
+Consequently T1 rolls on `tile_n` but not `tile_m`/`tile_k`; T2 and T3 now cover
+their shape cross products, still with zero `static_for`.
 
 ### P3 — `static_if` flag/case handling · ❌ NOT STARTED
 
@@ -499,19 +717,25 @@ the #4, so it moves earlier than the old ordering implied.
   subgraph, the recipe approaches concrete size for that region — acceptable
   (correct, just less compact); revisit with recipe "macro ops" if needed.
 - **Non-byte-identical only acceptable** for the opt-in runtime-loop conversion;
-  everything else must pass the oracle.
+  everything else must pass the oracle — noting that the oracle compares *programs*
+  and not the kernel symbol, so it is necessary and not sufficient (pitfall 4).
 - **Arch SSOT drift:** recipes carry `arch` spec fields; regenerate when
   `arch_specs.json` changes; the matrix oracle catches divergence.
+
+These are project-level risks. For the engineering traps that bit while building
+the roller — cross terms that fit every probe, floor-division extrapolation, an
+axis that changes nothing — see [Pitfalls & sharp edges](#pitfalls--sharp-edges).
 
 ## Bottom line
 
 Record is universal and cheap (interception recorder), and it is **done** — the
 CPython-free path is available for every kernel that builds, proven byte-identical
 at both `.ll` and HSACO. Roll is the incremental win and is **partially done**:
-every priority tier except deep-fused conv rolls on at least one axis, but only
-GEMM and MoE compress structurally, and the three mechanisms that would broaden
-this — nested loop-nest rolling, peeling, and multi-axis inference — plus
-`static_if` case inference are all still open (P2/P3). Arch stays a ~2-3 recipe
+every priority tier except deep-fused conv rolls, and each one now covers its
+non-reduction axes' cross product in a single recipe — but only GEMM and MoE
+compress *structurally*, and the mechanisms that would broaden this further
+(nested loop-nest rolling, peeling, multi-axis **structural** inference) plus
+`static_if` case inference are still open (P2/P3). Arch stays a ~2-3 recipe
 family multiplier rather than one artifact per gfx target. The byte-identical
 oracle is what keeps the whole effort safe: a roller that cannot prove a pattern
 declines and the concrete path still ships, so unfinished phases cost coverage,

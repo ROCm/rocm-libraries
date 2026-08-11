@@ -263,7 +263,7 @@ probed axes were refused:
 
 | Family | Axis | Roller refusal |
 |---|---|---|
-| `gemm_universal` | `tile_m` | shorter-at-larger-axis: op count shrinks as the axis grows |
+| `gemm_universal` | `tile_m` | shorter-at-larger-axis — and in fact **non-monotonic**: 90 → 81 → 114 ops over 16/32/64 (see below) |
 | `gemm_universal` | `tile_k` | verify failed: k-atom constant not affine in `tile_k` |
 | `conv_implicit_gemm` | `tile_n` | no run candidate: trace lengths 59 vs 83 do not segment |
 | `conv_implicit_gemm` | `tile_m` | no run candidate: trace lengths 160 vs 184 do not segment |
@@ -283,11 +283,34 @@ treating `block_n` as a separate recipe family. Likewise `fused_moe :: hidden` a
 `global_load_vN`) — a structural change, not a parametric one, and it rolls
 cleanly once sampling starts at 512 where the width is stable.
 
+`gemm_universal :: tile_m` was later measured properly and is worth separating from
+the rest: it is not merely shrinking but **non-monotonic** (90 → 81 → 114 ops over
+16/32/64), because `tile.mma` scales cleanly (2 → 4 → 8) while the load path
+re-vectorizes underneath it (`memref.global_load_vN` 3 → 2 → 3, address arithmetic
+33 → 28 → 42). There is therefore no sampling window in which it is affine —
+closing it needs opcode/vector-width selection (`static_if`), not a better solver.
+
+**Since this assessment, the constants-only axes roll together.** `src/roll_nd.py`
+covers an axis *cross product* in one recipe (conv `N`×`K`, attention
+`seqlen_kv`×`num_query_heads`, MoE `hidden`×`tokens`, gated by
+`drivers/roll_nd_coverage.py`), so the count above is now per family rather than
+per family-times-axis. The refusals in the table stand, and `C` and `tile_m` were
+re-probed as *pairs* and refused again.
+
 The safety property holds throughout: **every refusal is a refusal, not a wrong
 answer.** The roller verifies against the Python oracle at sampled and held-out
 points and falls back to concrete per-shape recipes when inference fails. Across
 every probe in this assessment, the roller never emitted an incorrect recipe. A
 refusal costs compression, never correctness.
+
+One boundary on that claim, found while extending the roller: the oracle
+(`recipes_equiv`) compares **programs, not kernel names**. A recipe whose
+`kernel_name_fmt` does not track its axes passes every oracle check while emitting
+the wrong symbol — demonstrated with a kernel named after a derived quantity, where
+`roll()` reports success and the oracle agrees at every point. The `.ll`/HSACO
+gates do catch it (the symbol is in the compared text) and `roll_nd` checks names
+explicitly, so no shipped artifact is affected; but "the oracle passed" is not by
+itself sufficient grounds to ship a rolled recipe.
 
 ### `.ll` parity overstates what is shippable — P1
 
@@ -376,6 +399,8 @@ the stable family key and the varying spec values.
 | 7 | Provider `ArtifactStore` path not integrated | P1 | Marked "pending integration" in the plan | Wire recipe expansion behind a C-JIT flag |
 | 8 | Bundle key hygiene unenforced | P2 | Names embed parametrized spec values | Enforce family key vs spec separation |
 | 9 | Non-linear axes unsupported | P2 | `block_n`, conv `C` refusals | Richer intexpr grammar, or separate families |
+| 10 | Oracle cannot see kernel names | P2 | `roll()` + `recipes_equiv` accepts a recipe emitting a wrong symbol | Compare `kernel_name_fmt` in `recipes_equiv` (`roll_nd` already checks it) |
+| 11 | Tuning axes need opcode selection, not affine fits | P2 | `tile_m` non-monotonic 90 → 81 → 114 | `static_if` over vector width / opcode (P3 in the scaling plan) |
 
 ## Success criteria and acceptance test plan
 
@@ -392,7 +417,8 @@ enforceable in CI today given gaps 1–3; 6–7 need the cache and provider work
 | 5 | Device numerics match the Python-built kernel | `gpu_replay` | Passing previously; not re-run here |
 | 6 | Cold JIT within budget on a cache miss; cache hit avoids comgr | new bench | **Not implemented** (gap 6) |
 | 7 | Provider serves a recipe-backed kernel behind the C-JIT flag | integration test | **Not implemented** (gap 7) |
-| 8 | Roller never emits an incorrect recipe; refusals degrade to concrete | oracle in `roll()` | **Holding** across all probes |
+| 8 | Roller never emits an incorrect recipe; refusals degrade to concrete | oracle in `roll()` | **Holding** across all probes, with the kernel-name caveat above (gap 10) |
+| 9 | One recipe covers a family's non-reduction axis **cross product** | `roll_nd_coverage` | **Passing** 4/4 families, every grid point + holdout |
 
 Two notes on the plan. Criteria 3 and 4 now both hold, so CI can gate the rolled
 path on a `.ll` checksum and treat the HSACO compile as the slower confirming

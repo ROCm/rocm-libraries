@@ -167,6 +167,12 @@ leave no trace in the emitted IR. `scf_for` and `scf_if` emit real control flow.
 These reach constant values, integer attr values, and *type size fields* —
 vector counts and smem shapes — so a recipe can size its LDS from the spec.
 
+Because the ops nest, a value that is affine in *several* spec variables needs no
+new grammar: it is nested binary `add`s over one term per axis, e.g.
+`{"add": [{"mul": [{"spec": "S"}, 2]}, {"mul": [{"spec": "N"}, 8]}]}`. This is why
+multi-axis rolling (`src/roll_nd.py`) required no VM change — the VM already
+evaluates the tree, and multiple axes simply bind more `spec` entries.
+
 **Parametric recipes** add two more moves. Register names may contain
 `{var}`/`{spec}` tokens substituted at expansion (`"acc_m{lane}_n0"`), and
 `scf_for` `iter`/`results` plus `emit` `in` lists may hold a rolled group
@@ -206,7 +212,8 @@ Recipes are not hand-written. `RecordingIRBuilder`
 calls a production builder makes, so `record_kernel(thunk)` returns both the
 `KernelDef` and the recipe that reproduces it. `roller.py` then folds several
 concrete traces into one parametric recipe by finding the structure that varies
-with the spec.
+with the spec — over one axis (`src/roll.py`) or over several axes' cross product
+(`src/roll_nd.py`).
 
 This is why the recorder needs its own coverage gate
 (`drivers/record_coverage.py`): a builder that reaches an `IRBuilder` method the

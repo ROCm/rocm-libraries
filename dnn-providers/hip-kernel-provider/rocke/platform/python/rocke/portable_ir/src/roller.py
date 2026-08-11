@@ -149,6 +149,135 @@ def _linear_expr(
 
 
 # --------------------------------------------------------------------------
+# affine inference over N axes (the multi-axis generalization of _linear_expr)
+# --------------------------------------------------------------------------
+# `_linear_expr` fits one axis from two points. The functions below fit SEVERAL
+# axes at once -- v = c0 + sum_j m_j * x_j -- from a set of sample points, which
+# is what lets ONE recipe cover a cross product of non-reduction (shape / outer
+# tile) axes instead of one recipe per axis. The reduction axis is deliberately
+# not a target: it drives the hot loop's structure, not just its constants.
+#
+# The solve is EXACT (Fractions, no least squares) and is rejected unless it
+# reproduces every sample point, so an axis that enters non-linearly (a spatial
+# product, a clamped vector width) is refused rather than approximated.
+def affine_solve(
+    points: List[Tuple[int, ...]], vals: List[int]
+) -> Optional[List[Fraction]]:
+    """Exact affine fit v = c0 + sum_j m_j*x_j over ALL given points.
+
+    Returns [c0, m_0, ...] as Fractions, or None when the system is
+    inconsistent (no affine model reproduces every sample). An underdetermined
+    system is resolved to the minimum-support solution (unconstrained
+    coefficients come back 0), so an axis that never varies gets m_j = 0."""
+    if not points:
+        return None
+    naxes = len(points[0])
+    if any(len(p) != naxes for p in points) or len(vals) != len(points):
+        return None
+    ncol = naxes + 1
+    rows = [
+        [Fraction(1)] + [Fraction(x) for x in p] + [Fraction(v)]
+        for p, v in zip(points, vals)
+    ]
+    piv: List[int] = []
+    r = 0
+    for c in range(ncol):
+        pr = next((k for k in range(r, len(rows)) if rows[k][c] != 0), None)
+        if pr is None:
+            continue
+        rows[r], rows[pr] = rows[pr], rows[r]
+        pv = rows[r][c]
+        rows[r] = [x / pv for x in rows[r]]
+        for k in range(len(rows)):
+            if k != r and rows[k][c] != 0:
+                f = rows[k][c]
+                rows[k] = [x - f * y for x, y in zip(rows[k], rows[r])]
+        piv.append(c)
+        r += 1
+        if r == len(rows):
+            break
+    # An all-zero coefficient row with a non-zero rhs means no affine model fits.
+    for k in range(r, len(rows)):
+        if all(x == 0 for x in rows[k][:ncol]) and rows[k][ncol] != 0:
+            return None
+    sol = [Fraction(0)] * ncol
+    for i, c in enumerate(piv):
+        sol[c] = rows[i][ncol]
+    for p, v in zip(points, vals):
+        if sol[0] + sum(m * x for m, x in zip(sol[1:], p)) != v:
+            return None
+    return sol
+
+
+def affine_intexpr(axes: List[str], sol: List[Fraction]) -> Optional[Any]:
+    """Render an `affine_solve` result as an intexpr over {spec:axis} terms.
+
+    Mirrors `_linear_expr`'s expressibility rules per term: an integer
+    coefficient becomes a `mul` (elided at 1), and a unit fraction 1/d becomes a
+    `div` -- the shape of constant that shows up as `count = axis // vec`. Any
+    other fractional coefficient is refused, because `div` is floor division and
+    a non-unit fraction would only agree with the builder by luck."""
+    if len(sol) != len(axes) + 1:
+        return None
+    c0, coeffs = sol[0], sol[1:]
+    if c0.denominator != 1:
+        return None
+    terms: List[Any] = []
+    for axis, m in zip(axes, coeffs):
+        if m == 0:
+            continue
+        ref = {"spec": axis}
+        if m.denominator == 1:
+            terms.append(ref if m == 1 else {"mul": [ref, int(m)]})
+        elif m.numerator == 1:
+            terms.append({"div": [ref, m.denominator]})
+        else:
+            return None
+    k = int(c0)
+    if not terms:
+        return k
+    expr = terms[0]
+    for t in terms[1:]:
+        expr = {"add": [expr, t]}
+    if k == 0:
+        return expr
+    return {"add": [expr, k]} if k > 0 else {"sub": [expr, -k]}
+
+
+def merge_intexpr(ea: Any, eb: Any, axis: str, a0: int, a1: int) -> Optional[Any]:
+    """Merge two intexpr trees that differ only at integer leaves, fitting each
+    differing leaf linearly in `axis`.
+
+    This is what lets a constant depend on BOTH a structural axis and a
+    multi-axis constant model: the constant-axis annotation has already turned
+    the value into a tree, so the structural merge has to reconcile trees rather
+    than plain ints. Returns None if the trees differ in shape."""
+    if ea == eb:
+        return copy.deepcopy(eb)
+    if isinstance(ea, bool) or isinstance(eb, bool):
+        return None
+    if isinstance(ea, int) and isinstance(eb, int):
+        return _linear_expr(axis, a0, ea, a1, eb)
+    if isinstance(ea, list) and isinstance(eb, list) and len(ea) == len(eb):
+        out = []
+        for x, y in zip(ea, eb):
+            m = merge_intexpr(x, y, axis, a0, a1)
+            if m is None:
+                return None
+            out.append(m)
+        return out
+    if isinstance(ea, dict) and isinstance(eb, dict) and set(ea) == set(eb):
+        out = {}
+        for k in ea:
+            m = merge_intexpr(ea[k], eb[k], axis, a0, a1)
+            if m is None:
+                return None
+            out[k] = m
+        return out
+    return None
+
+
+# --------------------------------------------------------------------------
 # merge two structurally-identical instructions, parameterizing spec-scaled ints
 # --------------------------------------------------------------------------
 def _merge_type(ta: Any, tb: Any, axis: str, a0: int, a1: int) -> Any:
@@ -202,13 +331,11 @@ def _merge_instr(
                 av, bv = aa[key], ba[key]
                 if av == bv:
                     continue
-                if (
-                    av.get("t") == "i"
-                    and bv.get("t") == "i"
-                    and isinstance(av.get("v"), int)
-                    and isinstance(bv.get("v"), int)
-                ):
-                    expr = _linear_expr(axis, a0, av["v"], a1, bv["v"])
+                if av.get("t") == "i" and bv.get("t") == "i":
+                    # Plain ints fit directly; already-parametric trees (a
+                    # multi-axis constant annotation) are merged leaf-wise so a
+                    # constant may depend on the structural axis AND others.
+                    expr = merge_intexpr(av["v"], bv["v"], axis, a0, a1)
                     if expr is None:
                         return None
                     out["attrs"][key] = {"t": "i", "v": expr}

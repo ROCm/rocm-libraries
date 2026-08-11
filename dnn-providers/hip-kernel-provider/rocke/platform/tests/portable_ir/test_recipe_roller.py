@@ -195,3 +195,115 @@ json.dump(shas, open(out + "/shas.json", "w"))
             f"tile_n={v} ({held}): standalone replay of the rolled recipe "
             f"diverged from the Python lowerer"
         )
+
+
+# --------------------------------------------------------------------------
+# multi-axis: one recipe per family covering an axis CROSS PRODUCT
+# --------------------------------------------------------------------------
+_ND_DRIVER = "rocke.portable_ir.drivers.roll_nd_coverage"
+
+# Two shape axes, fitted from 3 traces and verified at 7 points. 64/512 is 8x the
+# base on both axes at once, which no fitted trace comes near.
+_CONV_GRID = (
+    {"N": 8, "K": 64},
+    {"N": 8, "K": 128},
+    {"N": 16, "K": 64},
+    {"N": 16, "K": 128},
+)
+_CONV_HOLDOUTS = ({"N": 32, "K": 256}, {"N": 8, "K": 256}, {"N": 64, "K": 512})
+
+
+def test_roll_nd_cross_product():
+    """One recipe covers a family's whole non-reduction axis cross product.
+
+    The lanes above roll ONE axis per recipe with the others pinned, so k axes
+    cost k recipes and none of them move together. This gates the combined
+    model: every grid point AND every extrapolated point reproduces its own
+    concrete recording, and the kernel name reconstructs at each one.
+
+    It needs neither librocke nor comgr (the oracle is the Python expander), so
+    unlike the lanes above it cannot skip -- a regression here always shows up.
+    """
+    r = subprocess.run(
+        [sys.executable, "-u", "-m", _ND_DRIVER, "--ll"],
+        cwd=str(_PLATFORM),
+        env=_env(),
+        capture_output=True,
+        text=True,
+    )
+    assert r.returncode == 0, r.stdout[-8000:] + r.stderr[-4000:]
+    assert "families rolled       : 4/4" in r.stdout, (
+        "a family stopped rolling over its axis cross product:\n" + r.stdout[-8000:]
+    )
+    # The refusal list is part of the contract: if an axis starts rolling, the
+    # driver trips too, so the frontier in the docs cannot drift silently.
+    assert "NOW ROLLS" not in r.stdout, r.stdout[-4000:]
+
+
+def test_standalone_cli_replays_multi_axis_recipe(tmp_path):
+    """A binary with no Python replays a TWO-AXIS recipe to Python's exact .ll.
+
+    This is the claim that matters for the C stack: multi-axis rolling needed no
+    VM change, because a multi-axis constant is still just an intexpr over spec
+    values. Both axes are bound at the command line (`--int N=.. --int K=..`),
+    including at a point 8x the base on both axes at once.
+    """
+    cli = _replay_cli()
+    if cli is None:
+        pytest.skip(
+            "replay CLI not built; "
+            "`cmake --build <build> --target rocke_portable_ir_replay_cli` "
+            "or point ROCKE_REPLAY_CLI at it"
+        )
+    points = list(_CONV_GRID + _CONV_HOLDOUTS)
+    author = f"""
+import json, sys
+from rocke.core.lower_llvm import lower_kernel_to_llvm
+from rocke.portable_ir.drivers.roll_hsaco_parity import _conv
+from rocke.portable_ir.src import recipe_bundle
+from rocke.portable_ir.src.roll_nd import roll_nd
+
+out, flavor = sys.argv[1], sys.argv[2]
+r = roll_nd(_conv, axes={{"N": [8, 16], "K": [64, 128]}},
+            holdout_points={list(_CONV_HOLDOUTS)})
+if not r.ok:
+    raise SystemExit("roll_nd failed: " + str(r.reason))
+open(out + "/conv.recipe.cbor", "wb").write(recipe_bundle.cbor_encode(r.recipe))
+shas = {{}}
+for pt in {points}:
+    ll = lower_kernel_to_llvm(_conv(**pt), llvm_flavor=flavor, arch="{_ARCH}")
+    shas[json.dumps(pt, sort_keys=True)] = __import__("hashlib").sha256(
+        ll.encode()).hexdigest()
+json.dump(shas, open(out + "/shas.json", "w"))
+"""
+    flavor = os.environ.get("ROCKE_LLVM_FLAVOR", "llvm20")
+    r = _run([sys.executable, "-c", author, str(tmp_path), flavor])
+    assert r.returncode == 0, r.stdout[-4000:] + r.stderr[-4000:]
+
+    import json
+
+    want = json.loads((tmp_path / "shas.json").read_text())
+    recipe = tmp_path / "conv.recipe.cbor"
+    for pt in points:
+        cmd = [
+            cli,
+            "--recipe",
+            str(recipe),
+            "--cbor",
+            "--arch",
+            _ARCH,
+            "--flavor",
+            flavor,
+        ]
+        for axis, v in pt.items():
+            cmd += ["--int", f"{axis}={v}"]
+        got = subprocess.run(cmd, capture_output=True, text=True)
+        assert got.returncode == 0, f"{pt}: {got.stderr[-2000:]}"
+        held = "held-out" if pt in _CONV_HOLDOUTS else "sampled"
+        assert (
+            hashlib.sha256(got.stdout.encode()).hexdigest()
+            == want[json.dumps(pt, sort_keys=True)]
+        ), (
+            f"{pt} ({held}): standalone replay of the multi-axis recipe "
+            f"diverged from the Python lowerer"
+        )

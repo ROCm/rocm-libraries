@@ -43,6 +43,8 @@ a recording.
         ONE recorded trace  →  concrete recipe   → replays exactly that shape
         TWO recorded traces →  parametric recipe → replays the whole family,
                                                    held-out shapes included
+      1+Σ(nⱼ-1)     traces →  parametric recipe → replays the CROSS PRODUCT of
+       (one probe per axis)                        several axes (§3b)
 ```
 
 **Why it is trustworthy.** The C side is not a reimplementation of the Python
@@ -62,7 +64,8 @@ Terms used throughout, in plain language:
 | **SSA** | Static Single Assignment: every value is written exactly once, so each instruction result gets its own name (`%tid7`). Why "names" come up so often below. |
 | **KernelDef** | The in-memory Python object holding that instruction list. What a `build_*` function returns. |
 | **Recipe** | The recorded log of ops. *Concrete* = one shape. *Parametric* = has a `spec` (free variables) plus loops/formulas, so it covers many shapes. |
-| **Roll** | Turning several concrete recipes into one parametric recipe by finding the repetition. |
+| **Roll** | Turning several concrete recipes into one parametric recipe by finding the repetition. Over one axis (`roll`) or several at once (`roll_nd`). |
+| **Axis** | A shape or tuning dimension the recipe is parametric in (`hidden`, `tile_n`, `N`). A *structural* axis changes which instructions are emitted; a *constants-only* axis leaves the instruction sequence alone and moves only the numbers in it. |
 | **Replay** | Re-running a recipe through the C VM to rebuild the IR, then lowering it. |
 | **JSON** | Human-readable text wire format. Used for debugging and for the concrete portable-IR graph. |
 | **CBOR** | *Concise Binary Object Representation* (RFC 8949) — a binary format with the same data model as JSON (maps, arrays, strings, ints, bools). Same content, smaller and faster to parse, not human-readable. This is the shipping form. |
@@ -248,6 +251,69 @@ times with constants `0, 512, … 3584`, a case never recorded.
 kernel's. A loop you want in the finished kernel is `scf.for`, recorded as its
 own instruction with a body region.
 
+### 3b. Several axes at once
+
+`roll` moves one axis, so covering two of them costs two recipes and neither moves
+with the other. `roll_nd` covers the whole cross product with one recipe:
+
+```python
+from rocke.portable_ir.src.roll_nd import roll_nd, roll_nd_report
+
+r = roll_nd(build_conv,                      # called as build_conv(N=…, K=…)
+            axes={"N": [8, 16], "K": [64, 128]},
+            holdout_points=[{"N": 64, "K": 512}])
+print(roll_nd_report(r))
+# rolled: 1 recipe (1074 ops) covers 5 points from 3 recorded traces
+#         (concrete total=5370 ops; 5.0x)
+```
+
+The header now declares both axes, and each integer field is solved as an affine
+function of all of them — here conv's address math yields `{"mul": [{"spec": "K"},
+54]}` and `{"mul": [{"spec": "N"}, 2916]}` among 33 such expressions:
+
+```json
+{"spec": [{"name": "N", "kind": "int"}, {"name": "K", "kind": "int"}],
+ "kernel_name_fmt": "conv_K{K}_N{N}_N{N}H56W56C64_K{K}Y3X3_t32x32x32_w1x1_a16x16x16_mem_default"}
+```
+
+Note what carries the cross product: in this kernel **no single constant depends on
+both axes** — different constants track different axes, and one recipe covers the
+grid because all of them are solved together. A field genuinely scaling with `N*K`
+would be *refused*, not fitted (see below). Fields that do combine axes appear when
+a constants-only axis meets a structural one, e.g.
+`{"add": [{"mul": [{"spec": "S"}, 2]}, {"mul": [{"spec": "N"}, 8]}]}`.
+
+Read the `5.0x` as an **artifact-count** win, not compression: the recipe has
+exactly the concrete op count (1074), because these axes move only constants. One
+file now serves five shapes; it is not smaller than one of them. Axes that
+restructure (`static_for`) are what shrink the op count.
+
+Replay binds every axis — `--int N=64 --int K=512`, or `spec_int` entries in C.
+Nothing in the VM changed to support this: a multi-axis constant is still an
+intexpr over spec values.
+
+Choosing axes, in order of what actually matters:
+
+- **Leave the reduction axis out.** GEMM `tile_k`, attention `head_size` — these
+  drive the hot loop, so they change *structure*, not just constants. If one axis
+  does restructure, name it `structural_axis=` and it gets the full structural
+  roller while the rest stay constant models.
+- **Put a holdout outside the sampled box.** An interpolated holdout mostly
+  re-tests the fit; extrapolation is where a wrong model shows up.
+- **Read `n_recorded` against `len(points)`.** Inference records
+  `1 + Σ(nⱼ−1)` traces while verification checks the full grid plus holdouts. That
+  gap is the point: a constant scaling with `N*K` fits every one-axis probe exactly
+  and is only caught in the grid's interior.
+- **A refusal is a real answer.** `r.reason` names the field and axis, and the
+  caller keeps concrete per-point recipes. Some axes are not affine in any
+  regime — GEMM `tile_m` re-vectorizes its load path, so re-sampling will not help.
+
+The [scaling plan](portable_ir_scaling_plan.md#pitfalls--sharp-edges) collects the
+traps in full, including the one that survives the oracle: `recipes_equiv` compares
+programs and **not** the kernel symbol, so a recipe whose name does not track its
+axes can pass every oracle check and still emit the wrong symbol. `roll_nd` checks
+the name at every point; `roll` does not.
+
 ### 4. CBOR: the shipping form
 
 CBOR is JSON's data model in binary. Encoding is one call, and it round-trips
@@ -432,8 +498,9 @@ portable_ir/
 │   ├── recording_builder.py   RecordingIRBuilder + record_kernel (the recorder)
 │   ├── kerneldef_to_recipe.py KernelDef → concrete recipe (post-hoc walk)
 │   ├── recipe_recorder.py     idiomatic parametric authoring surface
-│   ├── roller.py              multi-trace structural roller
+│   ├── roller.py              multi-trace structural roller + affine solver
 │   ├── roll.py                roll(build_at, axis, …) driver (records + verifies)
+│   ├── roll_nd.py             roll_nd(build_at, axes={…}) — one recipe, N axes
 │   ├── recipe_bundle.py       CBOR codec + bundle (rocke.bundle/v1)
 │   └── online.py              ctypes binding to the C backend (recipe/IR → .ll)
 ├── utils/
@@ -449,8 +516,9 @@ portable_ir/
 │   ├── bench_online.py            compile-timeline benchmark
 │   ├── parity_matrix.py           concrete-path .ll parity gate (all kernels × arches)
 │   ├── hsaco_parity.py            concrete-path HSACO byte-identity gate
-│   └── roll_hsaco_parity.py       rolled-path .ll sha + HSACO gate, incl. held-out
-├── tests/          unittest suites (recorder drift, roller, CBOR/bundle)
+│   ├── roll_hsaco_parity.py       rolled-path .ll sha + HSACO gate, incl. held-out
+│   └── roll_nd_coverage.py        multi-axis gate: one recipe per axis cross product
+├── tests/          unittest suites (recorder drift, roller, multi-axis, CBOR/bundle)
 └── portable_ir_scaling_plan.md
 ```
 
@@ -515,6 +583,11 @@ or reorders ops.
 - Every gate includes **held-out** axis values, and the negative control is
   checked: replaying at the wrong spec value must differ. Otherwise an all-pass
   result would not distinguish a working roller from a vacuous comparison.
+- The Python oracle (`recipes_equiv`) compares **programs, not the kernel symbol**.
+  A recipe whose name does not track its axes therefore passes every oracle check
+  while emitting the wrong symbol; the `.ll` gates catch it because the symbol is
+  in the text, and `roll_nd` checks the name at each point directly. Treat the
+  oracle as necessary but not sufficient (scaling plan, pitfall 4).
 
 ## Running things
 
@@ -537,6 +610,10 @@ python3 -m rocke.portable_ir.drivers.hsaco_parity        # ... and their HSACO
 # held-out axis values. --no-hsaco stops at .ll (no comgr, ~2s).
 python3 -m rocke.portable_ir.drivers.roll_hsaco_parity [--no-hsaco]
 
+# multi-axis: ONE recipe per family covering its axis cross product, verified at
+# every grid point + holdout. Pure Python (~1s); --ll adds an .ll sha report.
+python3 -m rocke.portable_ir.drivers.roll_nd_coverage [--ll]
+
 # on-device: record -> CBOR -> C replay -> comgr -> launch -> check numerics
 python3 -m rocke.portable_ir.drivers.gpu_replay --device 0 --verbose
 
@@ -553,7 +630,8 @@ comgr is available.
 ## When does a new kernel need code here?
 
 - **Concrete / CPython-free path:** never — it records and lowers automatically.
-- **Rolling (shape coverage):** usually just declare the structural spec axes; a
+- **Rolling (shape coverage):** usually just declare the spec axes and their sample
+  values (naming which one, if any, is structural); a
   genuinely new structural-variation pattern needs a one-time roller extension
   (then amortized across all future kernels of that pattern). When the roller
   cannot prove a pattern it **declines** and says why, and the concrete path
