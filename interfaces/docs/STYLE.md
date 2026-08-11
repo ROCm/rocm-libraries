@@ -38,8 +38,9 @@ these rules when you add or edit a chapter.
   order is clearer seen than read; do not diagram the trivial.
 - Link generously between chapters and into the reference layer. A reader should never have
   to guess where the precise version lives.
-- Do not add comments to code samples. The surrounding prose is the explanation; a code
-  comment is a smell (and the repo bans them outside Python docstrings).
+- Do not add comments to code samples. The surrounding prose is the explanation; in these
+  docs a code comment is a smell. (This is a house rule for the doc samples, not a
+  repository-wide policy - the tree's own C/C++ sources carry substantive comments.)
 - Keep the reference layer as reference. Do not rewrite `provider-protocols.md` or
   `rocblas-provider-clusters.md` into this voice - they are normative and already precise.
   Link to them.

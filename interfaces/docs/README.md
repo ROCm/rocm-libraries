@@ -16,7 +16,7 @@ shows the two failures this layer exists to prevent - a caller welded to your in
 and a provider `.so` leaking 170 libstdc++ symbols into the process - and why a versioned
 boundary is the fix.
 
-Then read in this order:
+Then read the chapters in order (02 is also step 2 below):
 
 | Read | Chapter | What you get |
 | --- | --- | --- |
@@ -25,7 +25,8 @@ Then read in this order:
 | 3 | [03-abi-and-versioning-contract.md](03-abi-and-versioning-contract.md) | The normative contract: version-node registry, symbol-map idioms, SONAME rules, the reusable non-vacuity proof recipe. |
 | 4 | [04-hardening.md](04-hardening.md) | Each hardening step, threat before fix, every claim citing the ctest that proves it. |
 | 5 | [05-extending.md](05-extending.md) | How-to recipes: add a provider, add a version node, add an ABI proof, change a public API. |
-| 6 | [07-status-and-roadmap.md](07-status-and-roadmap.md) | What is done, what is committed next, what is aspirational. |
+| 6 | [provider-protocols.md](provider-protocols.md) | The provider protocol specification (the C ABI tables, per domain). This is the conceptual chapter 06; it keeps its original unnumbered filename, which is why the numbered chapters jump from 05 to 07. |
+| 7 | [07-status-and-roadmap.md](07-status-and-roadmap.md) | What is done, what is committed next, what is aspirational. |
 
 ## Who this is for
 
@@ -39,19 +40,23 @@ Then read in this order:
 
 ## The reference layer
 
-The chapters above are the human-friendly path. Beneath them sit four precise, normative
-reference documents that predate this set and remain the source of truth for their topics.
-The chapters link into these where exactness matters; they are not rewritten here.
+The chapters above are the human-friendly path. Beneath them sit three supporting reference
+documents that predate this set. They differ in status and none is a settled, normative
+source of truth; the chapters link into them where the detail matters and do not rewrite
+them here.
 
-- [provider-protocols.md](provider-protocols.md) - the provider protocol specification
-  (the C ABI tables, per domain).
 - [rocblas-provider-clusters.md](rocblas-provider-clusters.md) - the rocBLAS narrowing map:
-  how 1,213 public declarations classify into provider primitives.
+  how 1,213 public declarations classify into provider primitives. It is directional input,
+  not an adopted provider ABI (see its own opening note).
 - [audit-findings.md](audit-findings.md) - the initial ABI audit (hipSOLVER facade,
-  enum coupling, RAND visibility, the rocRAND header defect).
-- [api-change-process.md](api-change-process.md) - the original change-process notes, now
-  absorbed into [03](03-abi-and-versioning-contract.md) and
-  [05](05-extending.md); kept as a short pointer.
+  enum coupling, RAND visibility, the rocRAND header defect). It is a findings record from
+  that audit, not a contract.
+- [api-change-process.md](api-change-process.md) - a compatibility pointer only: its content
+  has been absorbed into [03](03-abi-and-versioning-contract.md) and
+  [05](05-extending.md), and the stub remains so existing links do not break.
+
+The provider protocol specification (provider-protocols.md) is the one genuinely normative
+reference; it now appears as chapter 06 in the reading order above.
 
 ## Writing these docs
 

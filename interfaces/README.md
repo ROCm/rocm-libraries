@@ -11,7 +11,7 @@ test that proves it.
 
 The working vertical slice contains:
 
-- A versioned common provider bootstrap and cross-platform module loader.
+- A versioned common provider bootstrap and a cross-platform module-load primitive (dlopen/LoadLibrary); the ABI-versioning hardening it wraps is Linux/ELF only.
 - Narrow BLAS, solver, and RAND protocol headers.
 - A generated `librocblas-loader.so.5` shadow DSO implementing all 1,213 declarations in the
   current rocBLAS C header through a typed brute-force compatibility table.
@@ -47,7 +47,7 @@ target linkage name, C linkage, visibility, inline marker, and templated kind; r
 includes layout where Clang can form one. `hipblaslt-ext` and the rocRAND/hipRAND C++ headers
 are deliberately separate profiles so C++ ABI does not disappear inside a C-only inventory.
 The check target regenerates all profiles and byte-compares them with `api/snapshots`; it is
-the presubmit hook for draft-to-launch header drift.
+the intended presubmit hook for draft-to-launch header drift, run manually today (it is not yet wired into an automated presubmit).
 
 This tree temporarily stages the public rocBLAS and rocRAND headers directly from their
 projects. This is deliberate migration scaffolding: those headers are in scope to move

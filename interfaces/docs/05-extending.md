@@ -18,23 +18,38 @@ add one:
 3. Register the target through `add_recording_provider()` (or the equivalent) in
    `providers/recording/CMakeLists.txt` so it inherits the `--version-script` that hides
    everything but the one symbol.
-4. Use the host services for allocation, deallocation, and tracing - never `malloc` or
-   `printf` directly. Do not retain any pointer from the request record after the call
-   returns.
+4. Route all logging through the host `trace` callback - never `printf`. Use the host
+   `allocate`/`deallocate` callbacks for memory that crosses the ABI boundary or that the
+   host must own or free; a provider's own private context (created in `create_context`,
+   released in `destroy_context`) may use its internal allocator, as the recording
+   providers do with `new`/`delete`. Do not retain any pointer from the request record
+   after the call returns.
 
-**Lock it.** The `rocm_interfaces.exports` test already iterates every provider DSO and
-asserts a single exported symbol, so a new provider is covered the moment it is registered
-that way. If it exports more than one symbol, that test fails - which is the point.
+**Lock it.** The `rocm_interfaces.exports` test asserts that each listed provider DSO
+exports only `rocm_interfaces_provider_query_v1` and carries the named version node. It
+does NOT auto-discover providers: it checks a fixed, manually maintained list. A new
+provider is covered only after you add it in two places - the `-D<NAME>_PROVIDER=`
+arguments to the test in `tests/CMakeLists.txt` and the matching
+`foreach(... IN ITEMS ...)` in `tests/check_exports.cmake`. Until both are edited the new
+DSO is never inspected and could leak symbols while the test stays green, so treat those
+two edits as the final step of this recipe. Auto-deriving the provider list is tracked in
+[07-status-and-roadmap.md](07-status-and-roadmap.md).
 
 ## Recipe: add a version node (a new ABI major)
 
 You add a node when a public library gains a new incompatible major that must coexist with
 the old one.
 
-1. Write a version script naming the exported symbols under the new node, e.g.
-   `ROCBLAS_ABI_8 { global: rocblas_*; local: *; };`. For C++ symbols use mangled-name
-   globs (`_ZN<len><ns><len><class>*`, plus `_ZTVN..`/`_ZTIN..`/`_ZTSN..` for RTTI), not
-   source spellings.
+1. Write a version script that names the exported symbols under the new node with an
+   explicit allowlist, one symbol per line, following `loader/rocblas_loader.map` (which
+   lists each symbol by name), e.g. `ROCBLAS_ABI_8 { global: rocblas_create_handle;
+   rocblas_sgemm; /* ...each symbol... */ local: *; };`. Do NOT use a wildcard such as
+   `global: rocblas_*`: a glob is not a frozen allowlist - once the node ages into the old
+   major, any future symbol whose name matches is silently admitted into the supposedly
+   frozen ABI. Use an explicit or generated symbol list (the `exports` test already pins
+   the loader to the generated `rocblas_bridge.exports` allowlist). For C++ symbols use
+   mangled-name globs (`_ZN<len><ns><len><class>*`, plus `_ZTVN..`/`_ZTIN..`/`_ZTSN..` for
+   RTTI), not source spellings.
 2. Apply it with `target_link_options(<tgt> PRIVATE
    "LINKER:--version-script=<file>")`, following the idiom in
    `loader/rocblas_loader.map`'s target.
@@ -108,9 +123,16 @@ major indirects through edge allocation.
 
 ### Draft-to-launch drift
 
-During rollout, every presubmit extracts the current source headers and byte-compares them
-with the draft snapshots (`rocm-interfaces-check-api-snapshots`). A drift failure is resolved
-by updating both the current-major mapping and any already-created compatibility major.
+During rollout, header drift is caught by the `rocm-interfaces-check-api-snapshots` build
+target, which extracts the current source headers and byte-compares them with the draft
+snapshots. This is an opt-in maintainer step today, not an automated gate: the target is
+not part of the default build (ALL), CTest, or any wired presubmit, so a maintainer must
+run it as a required manual step (`cmake --build <build> --target
+rocm-interfaces-check-api-snapshots`). Wiring it, and `check_api_policy.py` (which
+currently has no build or test invocation), into an automated presubmit gate is tracked as
+ASPIRATIONAL API-process evolution in
+[07-status-and-roadmap.md](07-status-and-roadmap.md). A drift failure is resolved by
+updating both the current-major mapping and any already-created compatibility major.
 Immediately before cutover, regenerate against the exact release branch, audit exports from
 the built binaries, and archive those snapshots as the immutable baseline for that major.
 

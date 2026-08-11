@@ -4,18 +4,25 @@ Status: proposed design, prototype-backed. The failures below are real and repro
 the fixes are in this tree, each proven by a named test.
 
 Most of the time, a ROCm math library and its callers get along fine. The trouble starts
-on the day you want to change something. This chapter is about that day - four ways the
-boundary fails without deliberate versioning, and what each one costs.
+on the day you want to change something. This chapter is about that day - the ways the
+boundary fails without deliberate versioning, and what each one costs. The threat-model
+table at the end enumerates the six distinct threats; the sections below group them into
+failure stories.
 
-## Failure 1: the caller is welded to your internals
+## Failure 1: a bare exported symbol locks you to one provider
 
-Ship rocBLAS. A caller links `librocblas.so` and calls `rocblas_sgemm`. That works, and it
-keeps working - which is the problem. Every symbol you exported is now a promise.
+Ship rocBLAS. A caller links `librocblas.so` and calls `rocblas_sgemm`. The exported C
+symbol freezes the call ABI, not the internals, so changing how `sgemm` runs is already
+allowed - rocBLAS routes some paths through hipBLASLt and falls back to its legacy solutions
+(see [audit-findings.md](audit-findings.md)). A stable C function is, by itself, an
+implementation seam for behavior.
 
-The day you want to reimplement `sgemm` - route it through hipBLASLt, try a new heuristic,
-split the work across two libraries - you cannot, because the caller reaches your internals
-directly. There is no seam to change behind. Your implementation and your ABI are the same
-surface, so you cannot move one without moving the other.
+What a bare symbol does not give you is provider replacement. The caller is bound to rocBLAS
+as the sole provider of `rocblas_sgemm`, so you cannot drop in a different implementation of
+the domain without relinking the caller. A provider that build-depends on another - rocBLAS
+on hipBLASLt - cannot be swapped for it independently, and no package boundary says who owns
+the symbol. You get one implementation, welded to one package, that only its own author can
+replace.
 
 The fix is a seam: the caller talks to a stable loader, the implementation lives behind a
 provider protocol, and the two never share symbols by accident. Selection happens once, at
@@ -70,15 +77,19 @@ build choices can break that stamping without any error:
   survive by `rocm_interfaces.abi06_data_version_node`,
   `rocm_interfaces.abi05_cpp_mangled_version_node`, and
   `rocm_interfaces.abi04_asan_version_node_survives`.
-- **A concurrency bug in the loader itself.** The registry that hands out providers is
-  shared across threads; a data race there corrupts every downstream dispatch. Regression-
-  locked under ThreadSanitizer by `rocm_interfaces.ops04_concurrency`.
+## Failure 5: a data race in the loader corrupts every dispatch
+
+The failures above are about what the symbols say. This one is about the loader itself. The
+registry that hands out providers is shared across threads; a data race there - two contexts
+selecting at once, a torn module refcount - corrupts every downstream dispatch, and races do
+not fail deterministically, so a unit test can pass a thousand times and still be broken.
+Regression-locked under ThreadSanitizer by `rocm_interfaces.ops04_concurrency`.
 
 ## The threat model, on one page
 
 | Threat | What breaks | The mechanism that stops it | Proven by |
 | --- | --- | --- | --- |
-| Caller welded to internals | Cannot reimplement without breaking callers | Loader/provider seam; selection frozen at context creation | `abi03_coresidency`, architecture design |
+| Locked to one provider | Cannot replace the whole implementation or swap providers without relinking | Loader/provider seam; selection frozen at context creation | `abi03_coresidency`, architecture design |
 | C++ symbol leakage | Two libraries share `std::` symbols; wrong code runs | Version-script allowlist: export one symbol, hide the rest | `exports` |
 | Interposition across majors | New library calls old library's implementation | Named ELF version nodes per major | `abi03_interpose_hazard`, `abi03_coresidency` |
 | Toolchain drops versioning | Symbols emitted unversioned, silently | Configure-time GCC-LTO-plus-lld guard | `lto_linker_guard_rejects_gnu_lld` |

@@ -10,9 +10,16 @@ attach where they should, and the loader survives being hammered by threads. Thi
 walks each hardening step in the order it was built. For each: the threat first, then the
 fix, then the test that would fail if the fix regressed.
 
-The whole suite runs green. In a canonical amdclang++/ld.lld build it registers 26 tests;
-the definitions total 28 (some are gated on optional linkers and sanitizers). Names, not
-counts, are what you should cite - they do not drift.
+The whole suite runs green. `tests/CMakeLists.txt` defines 28 tests (grep `add_test`); how
+many register depends on which optional linkers and sanitizers your toolchain offers. As last
+verified on 2026-08-11, a canonical amdclang++/ld.lld build registered 26, all passing.
+Names, not counts, are what you should cite - they do not drift.
+
+Platform scope. Every proof in this chapter is Linux/ELF-specific. The export, version-node,
+co-residency, ldconfig, and linker-guard tests are registered only under UNIX AND NOT APPLE in
+tests/CMakeLists.txt, and the mechanism they exercise (ELF version scripts, SONAMEs, dlvsym,
+ldconfig) has no Windows/PE or macOS/Mach-O analogue here. Windows/PE and Darwin are out of
+scope and unproven; the DLL/PE ABI-versioning mechanism is not addressed by this contract.
 
 ## 1. Stop the provider leaking libstdc++ symbols (RES-02)
 
@@ -30,9 +37,10 @@ the single symbol a provider may expose and sends everything else to `local: *`.
 bridge target uniformly.
 
 **Proof.** `rocm_interfaces.exports` builds every provider DSO and asserts each exports
-exactly one dynamic symbol (`rocm_interfaces_provider_query_v1`) - one line from `nm -D`,
-not 176. Landed in commit `a929517` (`fix(interfaces): stop recording providers leaking
-libstdc++ symbols`).
+exactly one defined, non-absolute dynamic symbol (`rocm_interfaces_provider_query_v1`) - the
+checker runs `nm -D --defined-only --with-symbol-versions` and ignores the absolute
+version-node entry, so it is one callable export, not 176. Landed in commit `a929517`
+(`fix(interfaces): stop recording providers leaking libstdc++ symbols`).
 
 ## 2. Give the exports names, so majors can coexist (ABI-03, named nodes)
 
@@ -41,12 +49,19 @@ libstdc++ symbols`).
 caller to whichever it saw first. The allowlist controls *what* is exported; it does not
 control *which definition wins*.
 
-**Fix.** Named ELF version nodes. `loader/rocblas_loader.map` tags the 11 real loader entry
-points with `ROCBLAS_ABI_5`, so they emit as `rocblas_sgemm@@ROCBLAS_ABI_5` and friends. The
-`exports` check was upgraded from a symbol-count assertion to a version-node assertion at the
-same time.
+**Fix.** Named ELF version nodes. The generated `rocblas_bridge.map` tags the bridge loader
+entry points with `ROCBLAS_ABI_5`, so they emit as `rocblas_sgemm@@ROCBLAS_ABI_5` and friends;
+the static `loader/rocblas_loader.map` applies the same `ROCBLAS_ABI_5` node to the 11-symbol
+narrow loader (`rocblas_narrow_loader_shadow`). The `exports` check was upgraded from a
+symbol-count assertion to a version-node assertion at the same time.
 
-**Proof.** `rocm_interfaces.exports` (now node-aware). Landed in commit `ba093ad`
+**Proof.** `rocm_interfaces.exports` (now node-aware). It inspects `rocblas_loader_shadow` and
+`rocblas_narrow_v2_loader_shadow` (both built from the generated `rocblas_bridge.map`) plus the
+provider DSOs; it does not inspect `rocblas_narrow_loader_shadow`, the target that carries the
+static 11-symbol `loader/rocblas_loader.map`. That narrow loader is exercised today only by the
+behavioral `rocm_interfaces.rocblas_narrow_shadow` test, so its node-versioning is not asserted
+by the exports check (NEXT, tracked in
+[07-status-and-roadmap.md](07-status-and-roadmap.md)). Landed in commit `ba093ad`
 (`feat(interfaces): assign named version nodes to loader and provider exports`).
 
 ## 3. Prove the nodes actually defeat interposition (ABI-03, co-residency)
@@ -68,13 +83,16 @@ maps - `abi03_provA.map` (`ROCBLAS_ABI_6`), `abi03_provB.map` (`ROCBLAS_ABI_7`),
 Landed in commit `8832c9a` (`test(interfaces): prove ABI version-node co-residency defeats
 interposition`).
 
-## 4. Refuse a toolchain that silently drops versioning (RES-03)
+## 4. Refuse a toolchain that cannot stamp version nodes (RES-03)
 
 **Threat.** The version nodes are stamped by the linker. GCC link-time optimization with the
-LLVM linker (lld) drops the version-script assignments entirely - lld carries no GCC LTO
-plugin and cannot resolve symbol-to-node assignments out of GCC LTO IR. The build succeeds.
-The symbols come out unversioned. You discover this the day two majors interpose in the
-field.
+LLVM linker (lld) cannot resolve the version-script symbol-to-node assignments out of GCC LTO
+IR - lld carries no GCC LTO plugin. The recorded RES-03 spike shows this pairing fails hard at
+link time: ld.lld emits 'version script assignment of ROCBLAS_ABI_5 to symbol rocblas_sgemm
+failed: symbol not defined' for every versioned symbol and produces no DSO (res03/build-lld-fat/err5
+in the exec spike). Without a guard, this surfaces as a confusing raw linker error deep in an
+otherwise ordinary build rather than a named, actionable failure - and any future lld change
+that resolved the symbols instead of erroring would silently emit unversioned exports.
 
 **Fix.** Fail the build instead. `rocm_interfaces_assert_lto_linker_supported()` in
 `cmake/rocm_interfaces_lto_linker_guard.cmake` detects LTO (IPO or `-flto` in flags) plus
@@ -82,7 +100,10 @@ lld (`CMAKE_LINKER_TYPE=LLD`, `-fuse-ld=lld`, `--ld-path=*lld`, or a matching
 `CMAKE_LINKER`) plus a non-Clang compiler, and raises `FATAL_ERROR` naming RES-03. It is
 included and called in `interfaces/CMakeLists.txt`, so it is real enforcement, not a lint.
 
-**Proof.** A `cmake -P` driver exercises four cases:
+**Proof.** A `cmake -P` driver (`tests/check_lto_linker_guard.cmake`) exercises four cases.
+Each case sets synthetic toolchain variables (`CMAKE_CXX_COMPILER_ID`, IPO, and linker flags)
+and runs the `rocm_interfaces_assert_lto_linker_supported()` predicate, so these tests validate
+the guard's detection logic; they do not themselves invoke a compiler or linker:
 
 - `rocm_interfaces.lto_linker_guard_rejects_gnu_lld` - the dangerous combination, marked
   `WILL_FAIL TRUE`.
@@ -106,8 +127,11 @@ shared-registry `select`+`add_module`, multi-stream/multi-device dispatch, the b
 `call_once`, a hot-path in-flight probe, and the jit-cache forward-obligation double. It is
 registered as `rocm_interfaces.ops04_concurrency` only under UNIX with a ThreadSanitizer
 build (`ROCM_INTERFACES_SANITIZE=thread`), with `TSAN_OPTIONS=halt_on_error=0:exitcode=66`
-so a race fails the test. Non-vacuity: the binary carries 171 `__tsan_` symbols, confirming
-it is genuinely instrumented rather than a silent non-sanitized fallback. Landed in commit
+so a race fails the test. Non-vacuity (one-time observation, not asserted by CTest): a local
+TSan build's binary carried 171 `__tsan_` symbols, confirming it was genuinely instrumented
+rather than a silent non-sanitized fallback; the registered test does not itself count
+`__tsan_` symbols and relies on `TSAN_OPTIONS=halt_on_error=0:exitcode=66` to fail on a race.
+Landed in commit
 `df8512b` (`test(interfaces): regression-lock loader/registry concurrency under TSan`).
 
 ## 6. Prove the versioning holds across every symbol shape (ABI-01/02)
@@ -116,7 +140,8 @@ The nodes work for ordinary function symbols (steps 2-3). The remaining risk is 
 quietly fail on some *other* shape of symbol. This is the ABI-01/02 proof suite. Each test
 follows the non-vacuity recipe in
 [03-abi-and-versioning-contract.md](03-abi-and-versioning-contract.md): positive, negative
-control, genuineness.
+control, genuineness, except the ASan case (6d), whose node assertion is a substring match
+with no negative control (see 6d).
 
 ### 6a. The core invariants (commit `897293e`)
 
@@ -124,14 +149,31 @@ Built from the ABI-03 fixture with `abi04_rb5.map` (`ROCBLAS_ABI_5`) plus the pr
 maps, producing `librocblas.so.{5,6,7}` and `-Bsymbolic` variants:
 
 - `rocm_interfaces.abi04_three_line_order` - the three `dlvsym` lines resolve to `ABI_5/6/7`
-  in both orders. Negative control: give all three the same `.6` node and the check fails
-  (the `ABI_5`/`ABI_7` nodes are absent). Discriminating.
-- `rocm_interfaces.abi04_bsymbolic_inert` - a `-Bsymbolic` DSO carries `DT_FLAGS SYMBOLIC`
-  (a plain DSO does not), yet co-residency resolution is identical. This proves `-Bsymbolic`
-  is inert for co-residency and the *version node* is the mechanism.
-- `rocm_interfaces.abi04_multiple_default_def_rejected` - a duplicate version-script
-  collapses to a single `@@`; a synthetic two-`@@` input trips a `FATAL`. Proves you cannot
-  ship two default definitions.
+  in both load orders, and each handle's cross-node lookup (the wrong node on the same symbol)
+  returns null. That cross-node-nil assertion is what makes it discriminating: it is invoked
+  only with the distinct `rb5`/`rb6`/`rb7` DSOs, and the test binary has just `three_line` and
+  `bsymbolic` modes. A dedicated same-node negative build (all three given the `.6` node so the
+  `ABI_5`/`ABI_7` lookups fail) is NEXT, not done - see
+  [07-status-and-roadmap.md](07-status-and-roadmap.md).
+- `rocm_interfaces.abi04_bsymbolic_inert` - loads two `-Bsymbolic` DSOs and asserts each
+  `rocblas_sgemm` resolves to its own node with cross-node nil, the same co-residency check as
+  `abi04_three_line_order`. This is a one-time observation that co-residency resolution still
+  holds for `-Bsymbolic` builds, not a discriminating proof that `-Bsymbolic` is inert: the
+  test does not read `DT_FLAGS SYMBOLIC`, does not compare against a plain DSO in the same run,
+  and the fixture (`abi03_fixture_rocblas.cpp`) has no internal interposable reference for
+  `-Bsymbolic` to bind, so its result would not change if the flag mattered. Tightening it into
+  a discriminating control (assert `DT_FLAGS SYMBOLIC` is present, add a plain-DSO comparison,
+  and give the fixture an internal call) is tracked in
+  [07-status-and-roadmap.md](07-status-and-roadmap.md).
+- `rocm_interfaces.abi04_multiple_default_def_rejected` - links a version script that names
+  `rocblas_sgemm` as a default (`global`) symbol in two nodes (`ROCBLAS_ABI_6` and
+  `ROCBLAS_ABI_7`) and observes the toolchain's response. It passes on any link failure (read
+  as the linker rejecting the duplicate default definition) and, when the link succeeds, fails
+  only if `nm` reports more than one `rocblas_sgemm@@` definition; a zero- or one-`@@` result
+  also passes. It does not synthesize a genuine two-`@@` DSO, so today it confirms the linker's
+  own behavior rather than independently proving a two-default-definition DSO is rejected.
+  Forcing a real two-`@@` input is COMMITTED-NEXT (see
+  [07-status-and-roadmap.md](07-status-and-roadmap.md)).
 - `rocm_interfaces.abi04_ldconfig_stub_preserved` - `ldconfig -n` leaves the
   `librocblas.so -> librocblas.so.6` stub intact and the `ROCBLAS_ABI_6` node survives.
 
@@ -141,8 +183,10 @@ maps, producing `librocblas.so.{5,6,7}` and `-Bsymbolic` variants:
 `ROCM_INTERFACES_HAVE_LLD` probe. When lld is present, four lld-built mirrors run:
 `abi04_three_line_order_lld`, `abi04_bsymbolic_inert_lld`,
 `abi04_multiple_default_def_rejected_lld`, `abi04_ldconfig_stub_preserved_lld`.
-Non-vacuity: the lld DSO's `.comment` stamps `Linker: AMD LLD`, which a bfd DSO lacks - proof
-it is genuinely lld and not a silent bfd fallback.
+Non-vacuity (one-time observation, not asserted by CTest): the lld DSO's `.comment` stamps
+`Linker: AMD LLD`, which a bfd DSO lacks - evidence it is genuinely lld and not a silent bfd
+fallback. The registered `abi04_*_lld` tests are gated on the configure-time
+`ROCM_INTERFACES_HAVE_LLD` probe and do not themselves inspect `.comment`.
 
 ### 6c. A real data object (commit `04ade2b`)
 
@@ -155,9 +199,17 @@ wrong-node lookup returns null.
 ### 6d. A build under AddressSanitizer (commit `0081ba5`)
 
 **Threat.** ASan rewrites the binary; the node could be lost in the process.
-**Proof.** `rocm_interfaces.abi04_asan_version_node_survives` builds an `-fsanitize=address`
-DSO (via `ROCM_INTERFACES_SANITIZE=address`) and asserts `ROCBLAS_ABI_6` survives *and* the
-DSO carries `__asan_` symbols - so a no-ASan fallback cannot pass it.
+**Proof (partial - node definition, not per-symbol binding).**
+`rocm_interfaces.abi04_asan_version_node_survives` builds an `-fsanitize=address` DSO (via
+`ROCM_INTERFACES_SANITIZE=address`), asserts the DSO carries `__asan_` symbols (genuineness, so
+a no-ASan fallback cannot pass it), and asserts the string `ROCBLAS_ABI_6` appears in
+`nm -D --with-symbol-versions` output. That second assertion is a loose substring match: the
+linker emits an absolute node symbol `ROCBLAS_ABI_6@@ROCBLAS_ABI_6` whenever the version node
+is defined, so the match passes on the node metadata alone and does not prove the `@@` default
+binding on `rocblas_sgemm` the way 6a/6c/6e do, nor distinguish `@@` (default) from `@`
+(non-default). Unlike the other node tests it has no negative control. Tightening it to assert
+`rocblas_sgemm@@ROCBLAS_ABI_6` explicitly is tracked in
+[07-status-and-roadmap.md](07-status-and-roadmap.md).
 
 ### 6e. C++ mangled names and RTTI (commit `769f4aa`, tightened in `f681132`)
 
@@ -166,18 +218,22 @@ are emitted as default-visibility weak symbols with mangled names; a naive map m
 **Fix and proof.** `rocm_interfaces.abi05_cpp_mangled_version_node` builds a DSO forcing
 out-of-line emission of `rocrand_cpp::error` (fixture `abi05_fixture_rocrand_cpp.cpp`, which
 must `#include <cstdio>` before the rocRAND header - see the header defect in
-[audit-findings.md](audit-findings.md)) and asserts, via mangled-name globs in
-`abi05_rocrand_cpp.map`, that the methods (`_ZN11rocrand_cpp5error*`, `_ZNK..`) and the RTTI
-(`_ZTVN..`, `_ZTIN..`) all carry `@@ROCBLAS_ABI_6`. Registration is gated on a
+[audit-findings.md](audit-findings.md)) and asserts that the methods and the RTTI all carry `@@ROCBLAS_ABI_6`. The version script
+`abi05_rocrand_cpp.map` assigns the node with namespace-wide globs (`_ZN11rocrand_cpp*`,
+`_ZNK11rocrand_cpp*`, `_ZTVN..`, `_ZTIN..`, `_ZTSN..`); the checker
+`check_cpp_mangled_version.cmake` narrows the positive count to the `rocrand_cpp::error` class
+component (`_ZN11rocrand_cpp5error`, `_ZNK11rocrand_cpp5error`, `_ZTVN..5error`,
+`_ZTIN..5error`), so only that class's members and RTTI are counted. Registration is gated on a
 `ROCM_INTERFACES_HAVE_ROCRAND_CPP` host-compile probe so a toolchain without the header does
 not break configure; an lld mirror runs too.
 
 Non-vacuity here was proven with four mutations: node dropped -> fail; RTTI globs removed ->
 fail (RTTI is a hard assertion, not best-effort); no ODR-use -> fail; anonymous map -> the
 same eight symbols export with zero nodes. A final adversarial review caught one live defect
-- the method match was over-broad, matching the bare namespace prefix `_ZN11rocrand_cpp`
-(which also catches namespace-scope free functions) rather than the class component - fixed
-in commit `f681132` to require `_ZN11rocrand_cpp5error`. The anonymous-control loop was left
+- the checker's method match was over-broad, matching the bare namespace prefix
+`_ZN11rocrand_cpp` (which also catches namespace-scope free functions) rather than the class
+component - fixed in commit `f681132` (which edits `check_cpp_mangled_version.cmake`, not the
+map) to require `_ZN11rocrand_cpp5error`. The anonymous-control loop was left
 broad on purpose: its job is to count everything and assert no node leaked, so a wider net
 is stricter.
 
@@ -188,12 +244,12 @@ is stricter.
 | 1 RES-02 | 170 leaked libstdc++ symbols | `exports` |
 | 2 named nodes | bare symbols interpose across majors | `exports` |
 | 3 co-residency | is the node mechanism real | `abi03_coresidency`, `abi03_interpose_hazard` |
-| 4 RES-03 guard | toolchain drops versioning silently | `lto_linker_guard_rejects_gnu_lld` + 3 accepts |
+| 4 RES-03 guard | g++ LTO + lld cannot stamp version nodes | `lto_linker_guard_rejects_gnu_lld` + 3 accepts |
 | 5 OPS-04 | loader/registry data race | `ops04_concurrency` |
 | 6a core | node fails on ordering / dup-def / ldconfig | `abi04_three_line_order`, `abi04_bsymbolic_inert`, `abi04_multiple_default_def_rejected`, `abi04_ldconfig_stub_preserved` |
 | 6b lld | node fails under the other linker | the four `abi04_*_lld` |
 | 6c data | node fails on a data object | `abi06_data_version_node` |
-| 6d ASan | node lost under ASan | `abi04_asan_version_node_survives` |
+| 6d ASan | node lost under ASan | `abi04_asan_version_node_survives` (node-definition + `__asan_` only; see 6d) |
 | 6e C++/RTTI | node misses mangled + RTTI symbols | `abi05_cpp_mangled_version_node` (+ `_lld`) |
 
 To add a new proof of your own, follow the recipe in [05-extending.md](05-extending.md).
