@@ -113,6 +113,21 @@ inline void validateRuntimeGemm(const GemmRequest& problem) {
         throw std::invalid_argument("XFloat32 math mode requires a Float32 accumulator.");
     if (complexAccumulator && problem.epilogue.activation != Activation::None)
         throw std::invalid_argument("Complex reference GEMM does not support activation.");
+    if (problem.accumulatorType == ScalarType::Int32) {
+        switch (problem.epilogue.activation) {
+            case Activation::None:
+            case Activation::Absolute:
+            case Activation::ClippedRelu:
+            case Activation::Relu:
+            case Activation::LeakyRelu:
+            case Activation::ReluDerivative:
+            case Activation::Clamp:
+                break;
+            default:
+                throw std::invalid_argument(
+                    "Int32 reference GEMM does not support floating-point activation.");
+        }
+    }
     if (!complexAccumulator &&
         (problem.epilogue.alpha.imag() != 0.0 || problem.epilogue.beta.imag() != 0.0 ||
          problem.epilogue.outputScale.imag() != 0.0))
@@ -183,10 +198,10 @@ class RuntimeGemmFinalizer {
               m_quantizeAccumulator(runtimeScalar<Accumulator>(problem.epilogue.alpha, "alpha"))),
           m_beta(m_quantizeAccumulator(runtimeScalar<Accumulator>(problem.epilogue.beta, "beta"))),
           m_outputScale(runtimeScalar<Accumulator>(problem.epilogue.outputScale, "output scale")),
-          m_activationParameter0(m_quantizeAccumulator(
-              static_cast<Accumulator>(problem.epilogue.activationParameter0))),
-          m_activationParameter1(m_quantizeAccumulator(
-              static_cast<Accumulator>(problem.epilogue.activationParameter1))),
+          m_activationParameter0(m_quantizeAccumulator(runtimeScalar<Accumulator>(
+              {problem.epilogue.activationParameter0, 0.0}, "activation parameter 0"))),
+          m_activationParameter1(m_quantizeAccumulator(runtimeScalar<Accumulator>(
+              {problem.epilogue.activationParameter1, 0.0}, "activation parameter 1"))),
           m_alphaIsZero(m_alpha == Accumulator(0)),
           m_betaIsZero(m_beta == Accumulator(0)) {
         if (problem.epilogue.bias) m_bias.emplace(problem.epilogue.bias->values);
@@ -200,11 +215,11 @@ class RuntimeGemmFinalizer {
     }
 
     Accumulator multiply(Accumulator left, Accumulator right) const {
-        return m_quantizeAccumulator(left * right);
+        return m_quantizeAccumulator(wrappingMultiply(left, right));
     }
 
     Accumulator add(Accumulator left, Accumulator right) const {
-        return m_quantizeAccumulator(left + right);
+        return m_quantizeAccumulator(wrappingAdd(left, right));
     }
 
     // Finalize a backend-produced raw accumulator.
@@ -234,7 +249,7 @@ class RuntimeGemmFinalizer {
         }
         result = m_quantizeAccumulator(applyActivation(
             m_problem.epilogue.activation, result, m_activationParameter0, m_activationParameter1));
-        result *= m_outputScale;
+        result = multiply(result, m_outputScale);
         m_d.store(row, column, result);
     }
 
@@ -316,7 +331,7 @@ GemmRunInfo referenceRuntimeCanonical(const GemmRequest& problem) {
                             binding.values.shape()[0] == 1
                                 ? 0
                                 : (binding.axis == MatrixAxis::Row ? row : reduction);
-                        aValue *= preScalesA[scaleIndex][index];
+                        aValue = finalizer.multiply(aValue, preScalesA[scaleIndex][index]);
                     }
                     for (size_t scaleIndex = 0; scaleIndex < preScalesB.size(); ++scaleIndex) {
                         const auto& binding = problem.b.preQuantizationScales[scaleIndex];
@@ -324,7 +339,7 @@ GemmRunInfo referenceRuntimeCanonical(const GemmRequest& problem) {
                             binding.values.shape()[0] == 1
                                 ? 0
                                 : (binding.axis == MatrixAxis::Row ? reduction : column);
-                        bValue *= preScalesB[scaleIndex][index];
+                        bValue = finalizer.multiply(bValue, preScalesB[scaleIndex][index]);
                     }
                     aValue = operandMath(quantizeA(aValue));
                     bValue = operandMath(quantizeB(bValue));
@@ -346,7 +361,7 @@ GemmRunInfo referenceRuntimeCanonical(const GemmRequest& problem) {
                     const size_t index = binding.values.shape()[0] == 1
                                              ? 0
                                              : (binding.axis == MatrixAxis::Row ? row : reduction);
-                    aValue *= preScalesA[scaleIndex][index];
+                    aValue = finalizer.multiply(aValue, preScalesA[scaleIndex][index]);
                 }
                 for (size_t scaleIndex = 0; scaleIndex < preScalesB.size(); ++scaleIndex) {
                     const auto& binding = problem.b.preQuantizationScales[scaleIndex];
@@ -354,7 +369,7 @@ GemmRunInfo referenceRuntimeCanonical(const GemmRequest& problem) {
                         binding.values.shape()[0] == 1
                             ? 0
                             : (binding.axis == MatrixAxis::Row ? reduction : column);
-                    bValue *= preScalesB[scaleIndex][index];
+                    bValue = finalizer.multiply(bValue, preScalesB[scaleIndex][index]);
                 }
                 aValue = operandMath(quantizeA(aValue));
                 bValue = operandMath(quantizeB(bValue));

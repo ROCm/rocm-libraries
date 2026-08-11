@@ -126,6 +126,40 @@ def matmul_float32(left, right):
     return result
 
 
+def wrap_int32(value):
+    unsigned = int(value) & 0xFFFFFFFF
+    return unsigned if unsigned < 0x80000000 else unsigned - 0x100000000
+
+
+def add_int32(left, right):
+    return wrap_int32(int(left) + int(right))
+
+
+def multiply_int32(left, right):
+    return wrap_int32(int(left) * int(right))
+
+
+def gemm_int32_exact(left, right, initial, alpha=1, beta=0, output_scale=1):
+    left = np.asarray(left)
+    right = np.asarray(right)
+    initial = np.asarray(initial)
+    result = np.empty((left.shape[0], right.shape[1]), dtype=np.int32)
+    for row in range(left.shape[0]):
+        for column in range(right.shape[1]):
+            accumulation = 0
+            for reduction in range(left.shape[1]):
+                product = multiply_int32(
+                    int(left[row, reduction]), int(right[reduction, column])
+                )
+                accumulation = add_int32(accumulation, product)
+            combined = add_int32(
+                multiply_int32(int(alpha), accumulation),
+                multiply_int32(int(beta), int(initial[row, column])),
+            )
+            result[row, column] = multiply_int32(combined, int(output_scale))
+    return result
+
+
 class CodecTests(unittest.TestCase):
     def assert_values_equal(self, observed, expected):
         observed = np.asarray(observed)
@@ -811,6 +845,43 @@ class TensorAndGemmTests(unittest.TestCase):
                 int(np.count_nonzero(observed_values != expected_values)),
             )
 
+    def test_integer_comparison_is_exact_beyond_float64_precision(self):
+        observed_unsigned = np.asarray(
+            [2**53, 2**63, np.iinfo(np.uint64).max],
+            dtype=np.uint64,
+        )
+        expected_unsigned = np.asarray(
+            [2**53 + 1, 2**63, np.iinfo(np.uint64).max - 1],
+            dtype=np.uint64,
+        )
+        unsigned_report = hv.compare(
+            hv.from_numpy(observed_unsigned),
+            hv.from_numpy(expected_unsigned),
+        )
+        self.assertEqual(
+            unsigned_report.mismatches,
+            int(np.count_nonzero(observed_unsigned != expected_unsigned)),
+        )
+        self.assertFalse(unsigned_report.passed)
+
+        observed_signed = np.asarray(
+            [np.iinfo(np.int64).min, 2**53, np.iinfo(np.int64).max],
+            dtype=np.int64,
+        )
+        expected_signed = np.asarray(
+            [np.iinfo(np.int64).max, 2**53 + 1, np.iinfo(np.int64).max],
+            dtype=np.int64,
+        )
+        signed_report = hv.compare(
+            hv.from_numpy(observed_signed),
+            hv.from_numpy(expected_signed),
+        )
+        self.assertEqual(
+            signed_report.mismatches,
+            int(np.count_nonzero(observed_signed != expected_signed)),
+        )
+        self.assertFalse(signed_report.passed)
+
     def test_explicit_tolerance_strict_boundary(self):
         observed = hv.from_numpy(np.asarray([1.02, 0.0], dtype=np.float32))
         expected = hv.from_numpy(np.asarray([1.0, 1.0], dtype=np.float32))
@@ -1410,7 +1481,7 @@ class TensorAndGemmTests(unittest.TestCase):
             hv.to_numpy(observed), expected, rtol=1e-15, atol=0.0
         )
 
-    def test_int32_accumulator_gemm_matches_numpy(self):
+    def test_int32_accumulator_gemm_matches_exact_integer_oracle(self):
         a = np.asarray([[1, 3], [2, 4]], dtype=np.int8)
         b = np.asarray([[5], [6]], dtype=np.int8)
         c = np.zeros((2, 1), dtype=np.int32)
@@ -1421,8 +1492,49 @@ class TensorAndGemmTests(unittest.TestCase):
             hv.ScalarType.Int32,
             hv.ScalarType.Int32,
         )
-        expected = a.astype(np.int32) @ b.astype(np.int32)
+        expected = gemm_int32_exact(a, b, c)
         np.testing.assert_array_equal(hv.to_numpy(observed), expected)
+
+    def test_int32_accumulator_gemm_wraps_without_float_proxy(self):
+        reduction = 140_000
+        a = np.full((1, reduction), 127, dtype=np.int8)
+        b = np.full((reduction, 1), 127, dtype=np.int8)
+        c = np.asarray([[np.iinfo(np.int32).max]], dtype=np.int32)
+        alpha = 2
+        beta = 2
+        output_scale = -3
+        observed = hv.reference_gemm(
+            hv.from_numpy(a),
+            hv.from_numpy(b),
+            hv.from_numpy(c),
+            hv.ScalarType.Int32,
+            hv.ScalarType.Int32,
+            alpha=alpha,
+            beta=beta,
+            output_scale=output_scale,
+        )
+        expected = gemm_int32_exact(
+            a,
+            b,
+            c,
+            alpha=alpha,
+            beta=beta,
+            output_scale=output_scale,
+        )
+        np.testing.assert_array_equal(hv.to_numpy(observed), expected)
+
+    def test_int32_accumulator_rejects_fractional_scalar_proxy(self):
+        values = np.ones((1, 1), dtype=np.int8)
+        initial = np.zeros((1, 1), dtype=np.int32)
+        with self.assertRaises(ValueError):
+            hv.reference_gemm(
+                hv.from_numpy(values),
+                hv.from_numpy(values),
+                hv.from_numpy(initial),
+                hv.ScalarType.Int32,
+                hv.ScalarType.Int32,
+                alpha=0.5,
+            )
 
     def test_float16_accumulator_rounds_each_step(self):
         a = np.full((1, 64), np.float16(0.1), dtype=np.float16)
