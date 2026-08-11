@@ -73,9 +73,9 @@ GPU cache clearing
 
 Residual data in GPU caches from a previous batch can artificially speed up the next batch, adding variance between the first batch and later ones.
 
-To simulate a cold-cache scenario, Primbench writes to a large GPU buffer between batch iterations, evicting cached data. The buffer size is controlled by the ``PRIMBENCH_GPU_CACHE_SIZE`` compile-time macro.
+To simulate a cold-cache scenario, Primbench writes to a large GPU buffer before each kernel launch, evicting cached data. The buffer size is controlled by the ``PRIMBENCH_GPU_CACHE_SIZE`` compile-time macro.
 
-When ``settings.hot`` is true, cache clearing between batches is skipped. This mode measures cache-warm performance. The ``hot`` setting is recorded in ``context.settings.hot`` in the JSON output.
+When ``settings.hot`` is true, cache clearing before kernel launches is skipped. This mode measures cache-warm performance. The ``hot`` setting is recorded in ``context.settings.hot`` in the JSON output.
 
 Noise timeout
 =============

@@ -40,7 +40,7 @@ The ``general`` sub-object records information about the GPU, backend, monitorin
    * - ``backend``
      - Backend used. Object with ``name``, version strings for the runtime and driver, a nested ``compiler`` object with ``name`` and ``version``, and a ``hip_version`` field.
    * - ``monitoring``
-     - GPU monitoring. Object with ``name``and ``version``. Omitted when monitoring is disabled through ``-DPRIMBENCH_NO_MONITORING``.
+     - GPU monitoring. Object with ``name`` and ``version``. Omitted when monitoring is disabled through ``-DPRIMBENCH_NO_MONITORING``.
    * - ``temperature_type``
      - GPU temperature sensor used. Omitted when monitoring is disabled.
    * - ``host_name``

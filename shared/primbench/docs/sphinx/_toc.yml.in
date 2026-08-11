@@ -12,9 +12,6 @@ subtrees:
       - file: how-to/validate-output
       - file: how-to/use-primbench
         title: Use Primbench
-  - caption: Tutorials
-    entries:
-      - file: tutorials/copy-benchmark
   - caption: Reference
     entries:
       - file: reference/primbench-api

@@ -6,7 +6,7 @@
 Configure benchmark settings
 ******************************
 
-Primbench benchmarks accept configuration through the ``primbench::settings`` struct, command-line arguments, and compile-time macros. This guide covers each mechanism and shows how to combine them. For the full list of command-line options, see :doc:`Command-line options </reference/cli-options>`. For details on JSON and CSV output structure, see :doc:`JSON output format </reference/json-output-format>`.
+Primbench benchmarks accept configuration through the ``primbench::settings`` struct, command-line arguments, and compile-time macros. For the full list of command-line options, see :doc:`Command-line options </reference/cli-options>`. For details on JSON and CSV output structure, see :doc:`JSON output format </reference/json-output-format>`.
 
 Pass settings programmatically
 ================================
@@ -71,6 +71,8 @@ Specializations that don't match the regex are skipped entirely.
 
 Control output files and formatting
 =====================================
+
+Primbench writes results to JSON by default and optionally to CSV.
 
 JSON output
 -----------

@@ -6,7 +6,7 @@
 Primbench API
 ***********************
 
-This page documents the core types for defining and running GPU benchmarks with Primbench, the ``state`` object passed into ``run()``, the JSON builder, and the user-facing macros and utility functions. For command-line option details, see :doc:`Command-line options </reference/cli-options>`. For correctness validation workflows, see :doc:`Validate benchmark output </how-to/validate-output>`.
+The core types for defining and running GPU benchmarks with Primbench include the ``state`` object passed into ``run()``, the JSON builder, and the user-facing macros and utility functions. For command-line option details, see :doc:`Command-line options </reference/cli-options>`. For correctness validation workflows, see :doc:`Validate benchmark output </how-to/validate-output>`.
 
 Command-line values override any programmatic ``settings`` values passed to the ``executor`` constructor.
 
@@ -46,7 +46,7 @@ Manages the benchmark lifecycle: parses command-line arguments, queues benchmark
 Benchmark state
 ===============
 
-The ``state`` object is passed to ``benchmark_interface::run()`` and serves as the primary interface for declaring throughput metrics, registering the kernel lambda, setting up per-iteration callbacks, and running correctness tests. It also exposes the GPU stream and the current input size.
+The ``state`` object serves as the primary interface for declaring throughput metrics, registering the kernel lambda, setting up per-iteration callbacks, and running correctness tests. It is passed to ``benchmark_interface::run()``, and exposes the GPU stream and the current input size.
 
 Public fields
 -------------
@@ -74,14 +74,14 @@ Register the kernel lambda that the executor times, and an optional callback tha
 Correctness testing
 -------------------
 
-Register a callable that validates kernel output. The callable runs once after timing completes. Use ``PRIMBENCH_ASSERT`` inside the test callable to check results.
+Register a callable that validates kernel output. The callable runs once after the warmup batch, before timed iterations begin. Use ``PRIMBENCH_ASSERT`` inside the test callable to check results.
 
 .. doxygenfunction:: primbench::detail::state::test
 
 JSON builder
 ============
 
-The ``json`` class is a lightweight builder used inside ``benchmark_interface::meta()`` to attach algorithm names, type names, and custom fields to a benchmark specialization. Calls to ``add()`` can be chained, and nested ``json`` objects are supported.
+The ``json`` struct is a lightweight builder used inside ``benchmark_interface::meta()`` to attach algorithm names, type names, and custom fields to a benchmark specialization. Calls to ``add()`` can be chained, and nested ``json`` objects are supported.
 
 .. doxygenstruct:: primbench::detail::json
    :members:

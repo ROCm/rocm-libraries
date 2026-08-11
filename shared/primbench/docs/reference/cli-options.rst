@@ -11,7 +11,7 @@ Primbench benchmarks accept command-line options that override the corresponding
 For details on setting values programmatically before parsing the command line, see :doc:`Configure benchmark settings </how-to/configure-settings>`. For the ``settings`` struct and the rest of the benchmark API, see :doc:`Primbench API </reference/primbench-api>`.
 
 Options reference
-*****************
+=================
 
 .. list-table::
    :header-rows: 1
@@ -75,11 +75,11 @@ Options reference
 
    * - ``--min-gpu-temp``
      - ``uint16_t`` / ``50``
-     - Minimum GPU temperature (°C). The benchmark waits for the GPU to cool to or below this temperature before starting a specialization.
+     - Minimum GPU temperature (°C). If the GPU is below this temperature, Primbench runs warmup workloads until it reaches this threshold before starting a specialization.
 
    * - ``--max-gpu-temp``
      - ``uint16_t`` / ``60``
-     - Maximum GPU temperature (°C). The benchmark warms the GPU to at least this temperature before starting a specialization.
+     - Maximum GPU temperature (°C). If the GPU exceeds this temperature, Primbench waits for it to cool below this threshold before starting a specialization.
 
    * - ``--max-warming-secs``
      - ``double`` / ``60.0``
@@ -102,7 +102,7 @@ Options reference
      - Maximum duration in seconds before stream blocking times out.
 
 Size suffixes
-*************
+=============
 
 The ``--size`` option accepts an optional suffix to specify the unit:
 
@@ -113,8 +113,6 @@ The ``--size`` option accepts an optional suffix to specify the unit:
 When no suffix is provided, the value is interpreted as raw bytes.
 
 Programmatic defaults and CLI precedence
-****************************************
+========================================
 
-Each option corresponds to a field in the ``settings`` struct. You can set default values programmatically before passing ``settings`` to the executor; any value supplied on the command line overrides the programmatic default. See :doc:`Configure benchmark settings </how-to/configure-settings>` for examples of combining programmatic and command-line configuration.
-
-For background on how the noise-reduction options (``--noise-timeout-secs``, ``--batch-window-size``, ``--noise-tolerance-percent``) interact, see :doc:`Noise reduction in primbench </conceptual/noise-reduction>`. For details on the JSON and CSV output controlled by ``--json-out``, ``--csv-out``, ``--output-batches``, and ``--spaces-per-indent``, see :doc:`JSON output format </reference/json-output-format>`.
+Each option corresponds to a field in the ``settings`` struct. You can set default values programmatically before passing ``settings`` to the executor; any value supplied on the command line overrides the programmatic default. See :doc:`Configure benchmark settings </how-to/configure-settings>` for examples of combining programmatic and command line configuration.

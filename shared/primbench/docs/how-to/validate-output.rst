@@ -6,7 +6,7 @@
 Validate benchmark output
 **************************
 
-Primbench includes built-in correctness checking so you can verify that your GPU kernel produces the expected results alongside performance measurements. This page describes how to register a correctness test, assert scalar and container equality, handle unknown expected values, specify floating-point tolerances, disable testing, and restore in-place-modified inputs.
+Primbench includes built-in correctness checking so you can verify that your GPU kernel produces the expected results alongside performance measurements.
 
 Register a correctness test
 ============================

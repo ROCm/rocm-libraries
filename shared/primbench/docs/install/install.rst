@@ -44,7 +44,7 @@ Primbench behavior is controlled by preprocessor macros passed at compile time.
    * - ``-DPRIMBENCH_NO_TEST``
      - Disables correctness-test execution. ``state.test()`` lambdas are not called.
    * - ``-DPRIMBENCH_GPU_CACHE_SIZE=n``
-     - Sets the size in bytes of the buffer used to evict GPU caches before each batch. Defaults to ``256 * MiB``.
+     - Sets the size in bytes of the buffer used to evict GPU caches before each kernel launch. Defaults to ``256 * MiB``.
    * - ``-DBRANCH_NAME=\"name\"``
      - Embeds the Git branch name in ``context.general.branch_name`` of the JSON output.
    * - ``-DCOMMIT_HASH=\"hash\"``

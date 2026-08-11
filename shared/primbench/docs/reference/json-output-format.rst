@@ -11,9 +11,9 @@ Primbench writes benchmark results to a JSON file and, optionally, a CSV file. T
 JSON builder
 ============
 
-The ``json`` class is a lightweight JSON builder passed to ``benchmark_interface::meta()`` so that each benchmark specialization can describe itself with algorithm names, type names, and custom fields. These key-value pairs appear in the ``meta`` field of each specialization in the output file. Calls to ``add()`` can be chained, and nested ``json`` objects are supported.
+The ``json`` struct is a lightweight JSON builder passed to ``benchmark_interface::meta()`` so that each benchmark specialization can describe itself with algorithm names, type names, and custom fields. These key-value pairs appear in the ``meta`` field of each specialization in the output file. Calls to ``add()`` can be chained, and nested ``json`` objects are supported.
 
-.. doxygenclass:: primbench::json
+.. doxygenstruct:: primbench::json
    :members:
 
 Results file structure
@@ -27,12 +27,12 @@ The ``context`` object
 The ``context`` object captures every detail of the environment and configuration used for the benchmark run. It contains four sub-objects.
 
 ``results_version``
-^^^^^^^^^^^^^^^^^^^
+~~~~~~~~~~~~~~~~~~^
 
 A string indicating the results schema version, for example ``"4.0.0"``. This field appears at the top level of ``context``, not inside a sub-object.
 
 ``general``
-^^^^^^^^^^^
+~~~~~~~~~^^
 
 The ``general`` sub-object records information about the GPU, backend, monitoring library, and host:
 
@@ -42,26 +42,26 @@ The ``general`` sub-object records information about the GPU, backend, monitorin
 - The ``gpu`` field is an object with ``name``, ``arch``, and ``pci_bus_id`` fields describing the active GPU.
 - The ``backend`` field is an object with a ``name`` of ``"hip"`` or ``"cuda"``, version strings for the runtime and driver, and a nested ``compiler`` object with ``name`` and ``version``. For HIP backends, a ``hip_version`` field is also present.
 - The ``monitoring`` field is an object with ``name`` (``"amdsmi"`` on HIP or ``"nvml"`` on CUDA) and ``version``. This field is omitted when monitoring is disabled through ``-DPRIMBENCH_NO_MONITORING``.
-- The ``temperature_type`` field names the GPU temperature sensor in use, for example ``"edge"`` or ``"hotspot"`` on AMD GPUs or ``"gpu"`` on NVIDIA GPUs. Omitted when monitoring is disabled.
+- The ``temperature_type`` field names the GPU temperature sensor in use, for example ``"edge"`` or ``"hotspot"``. Omitted when monitoring is disabled.
 - The ``host_name`` field records the hostname of the machine.
 - The ``date`` field is a local timestamp in RFC 3339 format, ``yyyy-mm-ddTHH:MM:SS±HH:MM``.
 - The ``branch_name`` field is present only when the ``BRANCH_NAME`` macro is defined at compile time.
 - The ``commit_hash`` field is present only when the ``COMMIT_HASH`` macro is defined at compile time.
 
 ``settings``
-^^^^^^^^^^^^
+~~~~~~~~~~~~
 
 The ``settings`` sub-object is a verbatim serialization of the ``primbench::settings`` struct. It includes every configurable field in ``primbench::settings``, including ``size``, ``hot``, ``seed``, ``json_out``, ``csv_out``, ``filter``, ``dry``, ``min_gpu_ms_per_batch``, ``min_secs``, ``noise_timeout_secs``, ``batch_window_size``, ``noise_tolerance_percent``, ``min_gpu_temp``, ``max_gpu_temp``, ``max_warming_secs``, ``max_cooling_secs``, ``output_batches``, ``spaces_per_indent``, and ``stream_blocking_timeout_secs``. When a setting is provided both programmatically and on the command line, the command-line value takes precedence.
 
 Field descriptions for each setting appear in :doc:`Configure benchmark settings </how-to/configure-settings>` and :doc:`Command-line options </reference/cli-options>`.
 
 ``custom_settings``
-^^^^^^^^^^^^^^^^^^^
+~~~~~~~~~~~~~~~~~~^
 
 When the benchmark registers additional command-line arguments through ``executor.get<T>()``, a ``custom_settings`` object appears in ``context``. Each key is the argument name, and the value is the argument's parsed value. This object is omitted when no custom arguments are registered.
 
 ``flags``
-^^^^^^^^^
+~~~~~~~~~
 
 The ``flags`` sub-object records which runtime flags were active. Currently the only flag is ``sync``, a boolean.
 

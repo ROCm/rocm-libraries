@@ -30,10 +30,6 @@ The Primbench public repository is at `ROCm/rocm-libraries <https://github.com/R
       * :doc:`Validate benchmark output <how-to/validate-output>`
       * :doc:`Use Primbench <how-to/use-primbench>`
 
-   .. grid-item-card:: Tutorials
-
-      * :doc:`Write a copy benchmark <tutorials/copy-benchmark>`
-
    .. grid-item-card:: Reference
 
       * :doc:`Primbench API <reference/primbench-api>`
