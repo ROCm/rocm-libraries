@@ -93,11 +93,11 @@ ARCH_CAP_OVERRIDES = {
         "asmCaps": {
             "HasWMMA_f4_32x16": False,
         },
-        # Architectural: v0 has no TDM-multicast, and does not need the
-        # XNACK-replay drain before volatile/atomic VMEM.
+        # Architectural: v0 has no TDM-multicast. NOTE: v0 still requires the
+        # XNACK-replay xcnt drain + SMEM dst/base overlap fix (RequiresXCntForVolatileVMEM),
+        # so it is intentionally NOT overridden here and inherits the probed default (True).
         "archCaps": {
             "HasTDMMulticast": False,
-            "RequiresXCntForVolatileVMEM": False,
         },
     },
 }
