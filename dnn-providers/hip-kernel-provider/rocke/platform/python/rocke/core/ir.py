@@ -87,6 +87,20 @@ _MMA_RESULT_HINT: Dict[str, str] = {
 }
 
 
+def _check_u16(op: str, field: str, value: int) -> int:
+    """Range-check an immediate the intrinsic declares as ``i16``.
+
+    LLVM truncates a too-wide immediate silently (``i16 70000`` becomes
+    ``i16 4464``), which turns an out-of-range wait count into a *wrong* wait
+    count with no diagnostic. Raise instead; masking here would be equally
+    silent.
+    """
+    v = int(value)
+    if not 0 <= v <= 0xFFFF:
+        raise ValueError(f"{op} {field} must fit an unsigned i16 (0..65535), got {v}")
+    return v
+
+
 def _mma_c_frag_len(op_id: str) -> int:
     """Accumulator fragment length for ``op_id`` from the arch SSOT.
 
@@ -1050,6 +1064,41 @@ class IRBuilder:
             result_name_hint="atom_bf16",
         ).result
 
+    def global_atomic_add_pk_f16(
+        self,
+        ptr: Value,
+        idx: Value,
+        value: Value,
+        *,
+        ordering: str = "monotonic",
+    ) -> Value:
+        """Packed-fp16 atomic add: two fp16 lanes per transaction.
+
+        Lowers to AMDGPU's ``llvm.amdgcn.global.atomic.fadd.v2f16``
+        intrinsic (gfx940+); returns the pre-add value. ``value``
+        must be a ``<2 x f16>`` vector and the pointer must reach
+        into an fp16 buffer with an even element index.
+        """
+        if ordering not in ("monotonic", "acquire", "release", "acq_rel", "seq_cst"):
+            raise ValueError(f"unknown ordering {ordering!r}")
+        if not isinstance(value.type, VectorType):
+            raise ValueError(
+                f"global_atomic_add_pk_f16 expects <2 x f16> input, "
+                f"got {value.type.name}"
+            )
+        if value.type.elem != F16 or value.type.count != 2:
+            raise ValueError(
+                f"global_atomic_add_pk_f16 expects <2 x f16> input, "
+                f"got {value.type.name}"
+            )
+        return self._op(
+            "memref.global_atomic_add_pk_f16",
+            [ptr, idx, value],
+            [value.type],
+            attrs={"elem_type": "f16", "vec": 2, "ordering": ordering},
+            result_name_hint="atom_f16",
+        ).result
+
     def fp16_zero(self) -> Value:
         return self._op(
             "arith.constant",
@@ -1178,6 +1227,15 @@ class IRBuilder:
 
     def global_load_bf16(self, ptr: Value, idx: Value, *, align: int = 2) -> Value:
         return self.global_load(ptr, idx, BF16, align=align)
+
+    def global_load_i8(self, ptr: Value, idx: Value, *, align: int = 1) -> Value:
+        return self.global_load(ptr, idx, I8, align=align)
+
+    def global_load_i16(self, ptr: Value, idx: Value, *, align: int = 2) -> Value:
+        return self.global_load(ptr, idx, I16, align=align)
+
+    def global_load_bf8e5m2(self, ptr: Value, idx: Value, *, align: int = 1) -> Value:
+        return self.global_load(ptr, idx, BF8E5M2, align=align)
 
     def global_load_fp8e4m3(self, ptr: Value, idx: Value, *, align: int = 1) -> Value:
         return self.global_load(ptr, idx, FP8E4M3, align=align)
@@ -2176,6 +2234,234 @@ class IRBuilder:
             result_name_hint="sw",
         ).result
 
+    def ds_swizzle(self, data: Value, offset: int) -> Value:
+        """``llvm.amdgcn.ds.swizzle`` with a raw offset immediate.
+
+        For XOR-butterfly softmax reductions prefer :meth:`ds_swizzle_xor`,
+        which encodes the SWAP-mode offset. This primitive exposes the full
+        ``ds_swizzle_b32`` immediate space for future relayout kernels.
+        """
+        if data.type.name != "i32":
+            raise ValueError("ds_swizzle requires i32 data")
+        return self._op(
+            "tile.ds_swizzle",
+            [data],
+            [I32],
+            attrs={"offset": int(offset) & 0xFFFFFFFF},
+            result_name_hint="dssw",
+        ).result
+
+    def mov_dpp8(self, data: Value, sel: int) -> Value:
+        """``llvm.amdgcn.mov.dpp8`` — 8-lane DPP gather within a row.
+
+        ``sel`` is a 24-bit lane-select immediate (high 8 bits must be zero).
+        Supports ``i32`` and ``f32`` operands.
+        """
+        if data.type.name not in ("i32", "f32"):
+            raise ValueError("mov_dpp8 requires i32 or f32 data")
+        if not (0 <= int(sel) <= 0xFFFFFF):
+            raise ValueError(f"mov_dpp8 sel must fit in 24 bits, got {sel}")
+        return self._op(
+            "tile.mov_dpp8",
+            [data],
+            [data.type],
+            attrs={"sel": int(sel) & 0xFFFFFF},
+            result_name_hint="dpp8",
+        ).result
+
+    def wave_reduce(
+        self,
+        v: Value,
+        reduce_op: str,
+        *,
+        strategy: int = 0,
+    ) -> Value:
+        """``llvm.amdgcn.wave.reduce.*`` — single-instruction wave reduction.
+
+        ``reduce_op`` is one of ``fmax``, ``fadd``, ``add``, ``max``, ``min``
+        (typed by ``v``: ``f32`` for float ops, ``i32`` for integer ops).
+        ``strategy`` selects the lowering path (0=default, 1=iterative, 2=DPP).
+        """
+        ty = v.type.name
+        allowed = {
+            "f32": ("fmax", "fadd"),
+            "i32": ("add", "max", "min"),
+        }
+        if ty not in allowed or reduce_op not in allowed[ty]:
+            raise ValueError(
+                f"wave_reduce unsupported pair reduce_op={reduce_op!r} type={ty!r}"
+            )
+        return self._op(
+            "tile.wave_reduce",
+            [v],
+            [v.type],
+            attrs={"reduce_op": reduce_op, "strategy": int(strategy)},
+            result_name_hint="wred",
+        ).result
+
+    def readlane(self, v: Value, lane: Value) -> Value:
+        """``llvm.amdgcn.readlane`` — read ``lane``'s value (uniform lane index)."""
+        if v.type.name not in ("i32", "f32"):
+            raise ValueError("readlane supports i32 or f32")
+        if lane.type.name != "i32":
+            raise ValueError("readlane lane index must be i32")
+        return self._op(
+            "tile.readlane",
+            [v, lane],
+            [v.type],
+            result_name_hint="rlane",
+        ).result
+
+    def writelane(self, uniform_val: Value, lane: Value, passthrough: Value) -> Value:
+        """``llvm.amdgcn.writelane`` — write ``uniform_val`` into ``lane``.
+
+        ``uniform_val`` and ``lane`` must be uniform across the wave; other
+        lanes receive ``passthrough``.
+        """
+        if uniform_val.type.name not in ("i32", "f32"):
+            raise ValueError("writelane supports i32 or f32")
+        if passthrough.type != uniform_val.type:
+            raise ValueError("writelane passthrough must match uniform_val type")
+        if lane.type.name != "i32":
+            raise ValueError("writelane lane index must be i32")
+        return self._op(
+            "tile.writelane",
+            [uniform_val, lane, passthrough],
+            [uniform_val.type],
+            result_name_hint="wlane",
+        ).result
+
+    def permlane16(
+        self,
+        old: Value,
+        src0: Value,
+        src1: Value,
+        src2: Value,
+        *,
+        fi: bool = False,
+        bound_ctrl: bool = False,
+    ) -> Value:
+        """``llvm.amdgcn.permlane16`` — gfx10+ 16-lane permute network."""
+        for op in (old, src0, src1, src2):
+            if op.type.name != "i32":
+                raise ValueError("permlane16 requires i32 operands")
+        return self._op(
+            "tile.permlane16",
+            [old, src0, src1, src2],
+            [I32],
+            attrs={"fi": bool(fi), "bound_ctrl": bool(bound_ctrl)},
+            result_name_hint="pl16",
+        ).result
+
+    def permlane64(self, src: Value) -> Value:
+        """``llvm.amdgcn.permlane64`` — gfx11 wave64 half-lane relayout."""
+        if src.type.name != "i32":
+            raise ValueError("permlane64 requires i32 operand")
+        return self._op(
+            "tile.permlane64",
+            [src],
+            [I32],
+            result_name_hint="pl64",
+        ).result
+
+    def alignbyte(self, a: Value, b: Value, shift: Value) -> Value:
+        """``llvm.amdgcn.alignbyte`` — byte-align/shift two i32 sources."""
+        for op in (a, b, shift):
+            if op.type.name != "i32":
+                raise ValueError("alignbyte requires i32 operands")
+        return self._op(
+            "tile.alignbyte",
+            [a, b, shift],
+            [I32],
+            result_name_hint="algn",
+        ).result
+
+    def s_wqm(self, mask: Value) -> Value:
+        """``llvm.amdgcn.s.wqm`` — whole-quad-mode bitmask (uniform input)."""
+        if mask.type.name not in ("i32", "i64"):
+            raise ValueError("s_wqm requires i32 or i64 mask")
+        return self._op(
+            "tile.s_wqm",
+            [mask],
+            [mask.type],
+            result_name_hint="wqm",
+        ).result
+
+    def av_load_b128(self, ptr: Value) -> Value:
+        """``llvm.amdgcn.av.load.b128`` — agent-scope 128-bit vector load."""
+        return self._op(
+            "tile.av_load_b128",
+            [ptr],
+            [VectorType(I32, 4)],
+            result_name_hint="avld",
+        ).result
+
+    def av_store_b128(self, ptr: Value, data: Value) -> None:
+        """``llvm.amdgcn.av.store.b128`` — agent-scope 128-bit vector store."""
+        if (
+            not isinstance(data.type, VectorType)
+            or data.type.count != 4
+            or data.type.elem != I32
+        ):
+            raise ValueError("av_store_b128 requires <4 x i32> data")
+        self._op("tile.av_store_b128", [ptr, data])
+
+    def s_alloc_vgpr(self, count: int) -> Value:
+        """``llvm.amdgcn.s.alloc.vgpr`` — dynamic VGPR allocation (gfx12+)."""
+        if count <= 0:
+            raise ValueError("s_alloc_vgpr count must be positive")
+        return self._op(
+            "tile.s_alloc_vgpr",
+            [],
+            [I32],
+            attrs={"count": int(count)},
+            result_name_hint="valloc",
+        ).result
+
+    def asyncmark(self) -> None:
+        """``llvm.amdgcn.asyncmark`` — tag a point in the async LDS stream."""
+        self._op("tile.asyncmark")
+
+    def wait_asyncmark(self, n: int = 0) -> None:
+        """``llvm.amdgcn.wait.asyncmark`` — wait for the Nth prior asyncmark."""
+        self._op(
+            "tile.wait_asyncmark",
+            attrs={"n": _check_u16("wait_asyncmark", "n", n)},
+        )
+
+    def s_wait_event(self, imm: int = 0) -> None:
+        """``llvm.amdgcn.s.wait.event`` — block on an export/event bitmask."""
+        self._op(
+            "tile.s_wait_event",
+            attrs={"imm": _check_u16("s_wait_event", "imm", imm)},
+        )
+
+    def s_prefetch_inst(self, ptr: Value, length: Value) -> None:
+        """``llvm.amdgcn.s.prefetch.inst`` — instruction-cache prefetch."""
+        self._op("tile.s_prefetch_inst", [ptr, length])
+
+    def buffer_load_lds_async(
+        self,
+        rsrc: Value,
+        lds_ptr: Value,
+        voffset: Value,
+        soffset: Value,
+        dwords: int,
+        coherency: int = 0,
+    ) -> None:
+        """LLVM 23 async-marker variant of :meth:`async_buffer_load_lds`."""
+        if dwords not in (1, 3, 4):
+            raise ValueError(
+                f"buffer_load_lds_async dwords must be 1, 3, or 4 (got {dwords})"
+            )
+        if coherency not in (0, 1, 2, 3):
+            raise ValueError(f"coherency must be 0..3 (got {coherency})")
+        self._op(
+            "tile.buffer_load_lds_async",
+            [rsrc, lds_ptr, voffset, soffset],
+            attrs={"dwords": int(dwords), "aux": int(coherency)},
+        )
+
     def mov_dpp(
         self,
         data: Value,
@@ -2778,7 +3064,10 @@ class IRBuilder:
         On non-gfx1250 backends this is a no-op (the counter does not exist);
         callers must only emit it on the gfx1250 async-to-LDS path.
         """
-        self._op("tile.s_wait_asynccnt", attrs={"n": int(n)})
+        self._op(
+            "tile.s_wait_asynccnt",
+            attrs={"n": _check_u16("s_wait_asynccnt", "n", n)},
+        )
 
     def global_load_async_to_lds(
         self,
@@ -2805,9 +3094,9 @@ class IRBuilder:
         the gfx12 cachepolicy immediate (bits[0:2]=th, bits[3:4]=scope); 0 is
         the default, 2 (``CACHE_STREAM``/SLC) suits one-shot streaming loads.
         """
-        if width_bytes not in (4, 8, 16):
+        if width_bytes not in (1, 4, 8, 16):
             raise ValueError(
-                f"global_load_async_to_lds width_bytes must be 4, 8, or 16 "
+                f"global_load_async_to_lds width_bytes must be 1, 4, 8, or 16 "
                 f"(got {width_bytes})"
             )
         if coherency not in (0, 1, 2, 3):
@@ -3623,6 +3912,16 @@ PURE_OP_NAMES = {
     "arith.cvt_scalef32_pk_bf8_f32",
     "tile.ds_read_tr_b8",
     "tile.ds_swizzle_xor",
+    "tile.ds_swizzle",
+    "tile.mov_dpp8",
+    "tile.wave_reduce",
+    "tile.readlane",
+    "tile.writelane",
+    "tile.permlane16",
+    "tile.permlane64",
+    "tile.alignbyte",
+    "tile.s_wqm",
+    "tile.av_load_b128",
     "tile.dpp_xor",
     "tile.permlane32_swap",
     "tile.perm_b32",

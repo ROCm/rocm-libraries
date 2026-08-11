@@ -34,27 +34,30 @@
 // `git grep WORKAROUND_ISSUE_5409` finds them all.
 // ----------------------------------------------------------------------------
 
-#include "MiopenUtils.hpp"
-
+#include <hipdnn_plugin_sdk/ArchMatch.hpp>
+#include <hipdnn_plugin_sdk/DeviceQuery.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 #include <exception>
 
-#define REJECT_IF_WORKAROUND_ISSUE_5409(handle)                                                \
-    do                                                                                         \
-    {                                                                                          \
-        try                                                                                    \
-        {                                                                                      \
-            if(::miopen_plugin::miopen_utils::getDeviceArch((handle).getStream()) == "gfx90a") \
-            {                                                                                  \
-                HIPDNN_PLUGIN_LOG_INFO("Plan builder disabled on gfx90a (issue 5409)");        \
-                return false;                                                                  \
-            }                                                                                  \
-        }                                                                                      \
-        catch(const std::exception& issue_5409_e)                                              \
-        {                                                                                      \
-            HIPDNN_PLUGIN_LOG_INFO(                                                            \
-                "Arch query failed; treating as not-applicable: " << issue_5409_e.what());     \
-            return false;                                                                      \
-        }                                                                                      \
+#define REJECT_IF_WORKAROUND_ISSUE_5409(handle)                                            \
+    do                                                                                     \
+    {                                                                                      \
+        try                                                                                \
+        {                                                                                  \
+            if(::hipdnn_plugin_sdk::archMatches(                                           \
+                   ::hipdnn_plugin_sdk::getDeviceArch((handle).getStream()),               \
+                   "gfx90a",                                                               \
+                   ::hipdnn_plugin_sdk::ArchMatchMode::PREFIX))                            \
+            {                                                                              \
+                HIPDNN_PLUGIN_LOG_INFO("Plan builder disabled on gfx90a (issue 5409)");    \
+                return false;                                                              \
+            }                                                                              \
+        }                                                                                  \
+        catch(const std::exception& issue_5409_e)                                          \
+        {                                                                                  \
+            HIPDNN_PLUGIN_LOG_INFO(                                                        \
+                "Arch query failed; treating as not-applicable: " << issue_5409_e.what()); \
+            return false;                                                                  \
+        }                                                                                  \
     } while(0)

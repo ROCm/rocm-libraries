@@ -77,15 +77,15 @@ def build_decode_gemv_matmul_nbits(
             )
             with kloop as (j, accs):
                 acc = accs[0]
-                byte = b.global_load(Bp, b.add(b_byte_base, j), I8)
+                byte = b.global_load_i8(Bp, b.add(b_byte_base, j))
                 lo, hi = unpack_i4_byte_to_pair_f32(b, byte)
                 kgrp = b.div(j, c_half_group)
                 scale = b.global_load(Sp, b.add(b_scale_base, kgrp), scale_t)
                 scale_f32 = b.cast_to_f32(scale)
                 k_even = b.mul(j, c2)
-                a_lo = b.cast_to_f32(b.global_load(A, b.add(a_row_base, k_even), F16))
+                a_lo = b.cast_to_f32(b.global_load_f16(A, b.add(a_row_base, k_even)))
                 a_hi = b.cast_to_f32(
-                    b.global_load(A, b.add(a_row_base, b.add(k_even, c1)), F16)
+                    b.global_load_f16(A, b.add(a_row_base, b.add(k_even, c1)))
                 )
                 prod = b.fadd(
                     b.fmul(a_lo, b.fmul(lo, scale_f32)),
