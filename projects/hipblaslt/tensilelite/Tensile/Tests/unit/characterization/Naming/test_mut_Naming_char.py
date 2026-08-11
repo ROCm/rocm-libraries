@@ -60,6 +60,8 @@ def test_key_no_internal_args_masks_grouped_gemm_only_without_user_args(
     plain_key = N.getKeyNoInternalArgs(plain, splitGSU=False)
 
     assert (grouped_key == plain_key) is same_key
+    assert ("_GG" in grouped_key) is support_user_args
+    assert "_GG" not in plain_key
     assert grouped["ProblemType"]["GroupedGemm"] is True
 
 
@@ -163,6 +165,8 @@ def test_kernel_name_masks_grouped_gemm_only_without_user_args(
     plain_name = N.getKernelNameMin(plain, splitGSU=False)
 
     assert (grouped_name == plain_name) is same_name
+    assert ("_GG" in grouped_name) is support_user_args
+    assert "_GG" not in plain_name
     assert grouped["ProblemType"]["GroupedGemm"] is True
 
 
