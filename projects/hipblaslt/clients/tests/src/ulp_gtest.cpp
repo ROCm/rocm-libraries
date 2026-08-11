@@ -12,6 +12,7 @@
 #include <gtest/gtest.h>
 
 #include <roc/host_validation/adapters/hipblaslt/HostComparison.hpp>
+#include <roc/host_validation/typed_comparison.hpp>
 
 #include <algorithm>
 #include <cmath>

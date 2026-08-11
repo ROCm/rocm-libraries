@@ -1,35 +1,27 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#pragma once
+#include <algorithm>
+#include <array>
+#include <bit>
+#include <cmath>
+#include <complex>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <limits>
+#include <optional>
+#include <roc/host_validation/typed_comparison.hpp>
+#include <span>
+#include <stdexcept>
+#include <type_traits>
+#include <utility>
+#include <vector>
 
 namespace roc::host_validation {
 
-inline constexpr double defaultSymmetricRelativeTolerance(ScalarType type) {
-    switch (type) {
-        case ScalarType::Float16:
-            return 0.01;
-        case ScalarType::BFloat16:
-            return 0.1;
-        case ScalarType::Float8E4M3:
-        case ScalarType::Float8E4M3Fnuz:
-            return 0.125;
-        case ScalarType::Float8E5M2:
-        case ScalarType::Float8E5M2Fnuz:
-            return 0.25;
-        case ScalarType::Float32:
-        case ScalarType::ComplexFloat32:
-            return 0.0002;
-        case ScalarType::Float64:
-        case ScalarType::ComplexFloat64:
-            return 1e-12;
-        default:
-            return 0.0;
-    }
-}
-
-inline ComparisonOptions defaultComparisonOptions(
-    ScalarType type, std::optional<double> symmetricRelativeTolerance) {
+ComparisonOptions defaultComparisonOptions(ScalarType type,
+                                           std::optional<double> symmetricRelativeTolerance) {
     ComparisonOptions options;
     options.symmetricRelativeTolerance =
         symmetricRelativeTolerance.value_or(defaultSymmetricRelativeTolerance(type));
@@ -38,15 +30,15 @@ inline ComparisonOptions defaultComparisonOptions(
     return options;
 }
 
-inline ComparisonOptions nearComparisonOptions(double absoluteTolerance) {
+ComparisonOptions nearComparisonOptions(double absoluteTolerance) {
     ComparisonOptions options;
     options.absoluteTolerance = absoluteTolerance;
     options.equalNaNs = true;
     return options;
 }
 
-inline ComparisonOptions allCloseComparisonOptions(double absoluteTolerance,
-                                                   double relativeTolerance, bool equalNaNs) {
+ComparisonOptions allCloseComparisonOptions(double absoluteTolerance, double relativeTolerance,
+                                            bool equalNaNs) {
     ComparisonOptions options;
     options.absoluteTolerance = absoluteTolerance;
     options.relativeTolerance = relativeTolerance;
@@ -54,7 +46,7 @@ inline ComparisonOptions allCloseComparisonOptions(double absoluteTolerance,
     return options;
 }
 
-inline int ulpMantissaBits(ScalarType type) {
+int ulpMantissaBits(ScalarType type) {
     const auto& info = scalarTypeInfo(type);
     if (info.category == ScalarCategory::SignedInteger ||
         info.category == ScalarCategory::UnsignedInteger ||
@@ -64,7 +56,7 @@ inline int ulpMantissaBits(ScalarType type) {
     return info.mantissaBits;
 }
 
-inline double ulpDistance(double exact, double approximation, int mantissaBits) {
+double ulpDistance(double exact, double approximation, int mantissaBits) {
     if (exact == approximation) return 0.0;
     if (!std::isfinite(exact) || !std::isfinite(approximation))
         return std::numeric_limits<double>::infinity();
@@ -79,81 +71,6 @@ inline double ulpDistance(double exact, double approximation, int mantissaBits) 
 }
 
 namespace detail {
-template <typename T>
-ComparisonValue comparisonValue(const T& value) {
-    using Value = std::remove_cvref_t<T>;
-    if constexpr (RuntimeIsComplexV<Value>) {
-        return {
-            static_cast<double>(value.real()),
-            static_cast<double>(value.imag()),
-            true,
-        };
-    } else {
-        return {static_cast<double>(value), 0.0, false};
-    }
-}
-
-inline bool isZeroWithOppositeSign(double observed, double expected) {
-    return observed == 0.0 && expected == 0.0 && std::signbit(observed) != std::signbit(expected);
-}
-
-struct ComponentResult {
-    bool close = false;
-    bool matchedNaN = false;
-    bool matchedInfinity = false;
-    bool nonFiniteMismatch = false;
-    bool signedZeroMismatch = false;
-    double difference = 0.0;
-    double tolerance = 0.0;
-    double relativeDifference = 0.0;
-    double symmetricRelativeDifference = 0.0;
-};
-
-inline ComponentResult compareComponent(double observed, double expected,
-                                        const ComparisonOptions& options) {
-    ComponentResult result;
-
-    if (std::isnan(observed) || std::isnan(expected)) {
-        result.matchedNaN = options.equalNaNs && std::isnan(observed) && std::isnan(expected);
-        result.close = result.matchedNaN;
-        result.nonFiniteMismatch = !result.close;
-        result.difference = result.close ? 0.0 : std::numeric_limits<double>::infinity();
-        result.relativeDifference = result.difference;
-        result.symmetricRelativeDifference = result.difference;
-        return result;
-    }
-
-    if (std::isinf(observed) || std::isinf(expected)) {
-        result.matchedInfinity = observed == expected;
-        result.close = result.matchedInfinity;
-        result.nonFiniteMismatch = !result.close;
-        result.difference = result.close ? 0.0 : std::numeric_limits<double>::infinity();
-        result.relativeDifference = result.difference;
-        result.symmetricRelativeDifference = result.difference;
-        return result;
-    }
-
-    if (!options.equalSignedZero && isZeroWithOppositeSign(observed, expected)) {
-        result.signedZeroMismatch = true;
-        result.close = false;
-        return result;
-    }
-
-    result.difference = std::abs(observed - expected);
-    result.tolerance =
-        options.absoluteTolerance + options.relativeTolerance * std::abs(expected) +
-        options.symmetricRelativeTolerance * (std::abs(observed) + std::abs(expected) + 1.0);
-    result.relativeDifference =
-        expected == 0.0 ? (result.difference == 0.0 ? 0.0 : std::numeric_limits<double>::infinity())
-                        : result.difference / std::abs(expected);
-    result.symmetricRelativeDifference =
-        result.difference / (std::abs(observed) + std::abs(expected) + 1.0);
-    result.close =
-        observed == expected || (options.strictTolerance ? result.difference < result.tolerance
-                                                         : result.difference <= result.tolerance);
-    return result;
-}
-
 inline double valueMagnitude(const ComparisonValue& value) {
     return value.complex ? std::hypot(value.real, value.imaginary) : std::abs(value.real);
 }
@@ -245,9 +162,6 @@ inline double ulpDistanceForType(double exact, double approximation, ScalarType 
     return ulpDistance(exact, approximation, ulpMantissaBits(type));
 }
 
-inline void coordinatesForLinearIndex(size_t logicalIndex, const Shape& shape,
-                                      ComparisonIndexOrder order, std::span<size_t> coordinates);
-
 class ComparisonAccumulator {
    public:
     ComparisonAccumulator(const ComparisonOptions& options, const Shape& shape)
@@ -260,10 +174,11 @@ class ComparisonAccumulator {
     }
 
     void observeReal(size_t logicalIndex, ptrdiff_t observedOffset, ptrdiff_t expectedOffset,
-                     double observed, double expected) {
+                     double observed, double expected,
+                     std::optional<bool> pointwiseDecision = std::nullopt) {
         ++m_result.compared;
-        if (observed == expected &&
-            (m_options.equalSignedZero || !isZeroWithOppositeSign(observed, expected)) &&
+        if ((!pointwiseDecision || *pointwiseDecision) && observed == expected &&
+            (m_options.equalSignedZero || !oppositeZeroSigns(observed, expected)) &&
             !m_options.computeFrobenius && !m_options.computeUlp &&
             !m_options.reportMatchingElements) {
             m_result.matchedInfinities += static_cast<size_t>(std::isinf(observed));
@@ -272,11 +187,12 @@ class ComparisonAccumulator {
 
         --m_result.compared;
         observe(logicalIndex, observedOffset, expectedOffset, ComparisonValue{observed, 0.0, false},
-                ComparisonValue{expected, 0.0, false});
+                ComparisonValue{expected, 0.0, false}, pointwiseDecision);
     }
 
     void observe(size_t logicalIndex, ptrdiff_t observedOffset, ptrdiff_t expectedOffset,
-                 const ComparisonValue& observed, const ComparisonValue& expected) {
+                 const ComparisonValue& observed, const ComparisonValue& expected,
+                 std::optional<bool> pointwiseDecision = std::nullopt) {
         ++m_result.compared;
 
         const bool complexValue = observed.complex || expected.complex;
@@ -284,10 +200,11 @@ class ComparisonAccumulator {
         const bool exactImaginary = !complexValue || observed.imaginary == expected.imaginary;
         const bool signedZeroMatches =
             m_options.equalSignedZero ||
-            (!isZeroWithOppositeSign(observed.real, expected.real) &&
-             (!complexValue || !isZeroWithOppositeSign(observed.imaginary, expected.imaginary)));
-        if (exactReal && exactImaginary && signedZeroMatches && !m_options.computeFrobenius &&
-            !m_options.computeUlp && !m_options.reportMatchingElements) {
+            (!oppositeZeroSigns(observed.real, expected.real) &&
+             (!complexValue || !oppositeZeroSigns(observed.imaginary, expected.imaginary)));
+        if ((!pointwiseDecision || *pointwiseDecision) && exactReal && exactImaginary &&
+            signedZeroMatches && !m_options.computeFrobenius && !m_options.computeUlp &&
+            !m_options.reportMatchingElements) {
             m_result.matchedInfinities += static_cast<size_t>(std::isinf(observed.real));
             if (complexValue)
                 m_result.matchedInfinities += static_cast<size_t>(std::isinf(observed.imaginary));
@@ -299,9 +216,8 @@ class ComparisonAccumulator {
             complexValue ? compareComponent(observed.imaginary, expected.imaginary, m_options)
                          : ComponentResult{.close = true};
 
-        const bool close = real.close && imaginary.close;
+        const bool close = pointwiseDecision.value_or(real.close && imaginary.close);
         const bool nonFiniteMismatch = real.nonFiniteMismatch || imaginary.nonFiniteMismatch;
-        const bool signedZeroMismatch = real.signedZeroMismatch || imaginary.signedZeroMismatch;
 
         if (m_options.computePointwiseStatistics) {
             m_result.matchedNaNs +=
@@ -309,7 +225,8 @@ class ComparisonAccumulator {
             m_result.matchedInfinities += static_cast<size_t>(real.matchedInfinity) +
                                           static_cast<size_t>(imaginary.matchedInfinity);
             m_result.nonFiniteMismatches += nonFiniteMismatch;
-            m_result.signedZeroMismatches += signedZeroMismatch;
+            m_result.signedZeroMismatches +=
+                real.signedZeroMismatch || imaginary.signedZeroMismatch;
         }
 
         double difference =
@@ -435,25 +352,6 @@ class ComparisonAccumulator {
     long double m_expectedSquares = 0.0;
 };
 
-inline void coordinatesForLinearIndex(size_t logicalIndex, const Shape& shape,
-                                      ComparisonIndexOrder order, std::span<size_t> coordinates) {
-    if (coordinates.size() != shape.rank())
-        throw std::invalid_argument("Comparison coordinate rank mismatch.");
-
-    if (order == ComparisonIndexOrder::FirstDimensionFastest) {
-        for (size_t dimension = 0; dimension < shape.rank(); ++dimension) {
-            coordinates[dimension] = logicalIndex % shape[dimension];
-            logicalIndex /= shape[dimension];
-        }
-    } else {
-        for (size_t dimension = shape.rank(); dimension > 0; --dimension) {
-            const size_t index = dimension - 1;
-            coordinates[index] = logicalIndex % shape[index];
-            logicalIndex /= shape[index];
-        }
-    }
-}
-
 template <typename Function>
 void forEachSelectedIndex(const Shape& shape, const ComparisonSelection& selection,
                           Function&& function) {
@@ -472,135 +370,62 @@ void forEachSelectedIndex(const Shape& shape, const ComparisonSelection& selecti
     }
 }
 
-inline bool advanceCoordinates(std::span<size_t> coordinates, const Shape& shape,
-                               ComparisonIndexOrder order,
-                               std::span<const ptrdiff_t> observedStrides,
-                               std::span<const ptrdiff_t> expectedStrides,
-                               ptrdiff_t& observedOffset, ptrdiff_t& expectedOffset) {
-    const auto advanceDimension = [&](size_t dimension) {
-        ++coordinates[dimension];
-        observedOffset += observedStrides[dimension];
-        expectedOffset += expectedStrides[dimension];
-        if (coordinates[dimension] < shape[dimension]) return true;
-        coordinates[dimension] = 0;
-        observedOffset -= static_cast<ptrdiff_t>(shape[dimension]) * observedStrides[dimension];
-        expectedOffset -= static_cast<ptrdiff_t>(shape[dimension]) * expectedStrides[dimension];
-        return false;
-    };
-
-    if (order == ComparisonIndexOrder::FirstDimensionFastest) {
-        for (size_t dimension = 0; dimension < shape.rank(); ++dimension)
-            if (advanceDimension(dimension)) return true;
-    } else {
-        for (size_t dimension = shape.rank(); dimension > 0; --dimension)
-            if (advanceDimension(dimension - 1)) return true;
-    }
-    return false;
-}
-
 template <typename Function>
-void forEachSelectedOffsetPair(const Layout& observedLayout, const Layout& expectedLayout,
+bool forEachRegularSelectedRun(const Layout& observedLayout, const Layout& expectedLayout,
                                const ComparisonSelection& selection, Function&& function) {
-    if (observedLayout.shape() != expectedLayout.shape())
-        throw std::invalid_argument("Comparison offset traversal shape mismatch.");
-    if (selection.stride == 0)
-        throw std::invalid_argument("Comparison selection stride must be non-zero.");
-
     const Shape& shape = observedLayout.shape();
     const size_t total = shape.elementCount();
-    if (selection.first >= total || selection.maxElements == 0) return;
+    if (selection.first >= total || selection.maxElements == 0) return true;
+    if (selection.first != 0 || selection.stride != 1 || shape.rank() == 0) return false;
 
-    if (shape.rank() == 0) {
-        function(0, observedLayout.offset(), expectedLayout.offset());
-        return;
-    }
-
-    if (selection.first == 0 && selection.stride == 1) {
-        const bool firstDimensionFastest =
-            selection.indexOrder == ComparisonIndexOrder::FirstDimensionFastest;
-        const size_t innerDimension = firstDimensionFastest ? 0 : shape.rank() - 1;
-        const size_t innerSize = shape[innerDimension];
-        const size_t selectedTotal = std::min(total, selection.maxElements);
-        const size_t outerCount = (selectedTotal + innerSize - 1) / innerSize;
-        std::vector<size_t> coordinates(shape.rank(), 0);
-
-        for (size_t outerIndex = 0; outerIndex < outerCount; ++outerIndex) {
-            size_t remaining = outerIndex;
-            ptrdiff_t observedBase = observedLayout.offset();
-            ptrdiff_t expectedBase = expectedLayout.offset();
-
-            if (firstDimensionFastest) {
-                for (size_t dimension = 1; dimension < shape.rank(); ++dimension) {
-                    coordinates[dimension] = remaining % shape[dimension];
-                    remaining /= shape[dimension];
-                    observedBase += static_cast<ptrdiff_t>(coordinates[dimension]) *
-                                    observedLayout.strides()[dimension];
-                    expectedBase += static_cast<ptrdiff_t>(coordinates[dimension]) *
-                                    expectedLayout.strides()[dimension];
-                }
-            } else {
-                for (size_t dimension = shape.rank() - 1; dimension > 0; --dimension) {
-                    const size_t index = dimension - 1;
-                    coordinates[index] = remaining % shape[index];
-                    remaining /= shape[index];
-                    observedBase += static_cast<ptrdiff_t>(coordinates[index]) *
-                                    observedLayout.strides()[index];
-                    expectedBase += static_cast<ptrdiff_t>(coordinates[index]) *
-                                    expectedLayout.strides()[index];
-                }
-            }
-
-            const size_t logicalBase = outerIndex * innerSize;
-            const size_t count = std::min(innerSize, selectedTotal - logicalBase);
-            for (size_t innerIndex = 0; innerIndex < count; ++innerIndex) {
-                function(logicalBase + innerIndex,
-                         observedBase + static_cast<ptrdiff_t>(innerIndex) *
-                                            observedLayout.strides()[innerDimension],
-                         expectedBase + static_cast<ptrdiff_t>(innerIndex) *
-                                            expectedLayout.strides()[innerDimension]);
-            }
-        }
-        return;
-    }
-
+    const bool firstDimensionFastest =
+        selection.indexOrder == ComparisonIndexOrder::FirstDimensionFastest;
+    const size_t innerDimension = firstDimensionFastest ? 0 : shape.rank() - 1;
+    const size_t innerSize = shape[innerDimension];
+    const size_t selectedTotal = std::min(total, selection.maxElements);
+    const size_t outerCount = (selectedTotal + innerSize - 1) / innerSize;
     std::vector<size_t> coordinates(shape.rank(), 0);
-    coordinatesForLinearIndex(selection.first, shape, selection.indexOrder, coordinates);
-    ptrdiff_t observedOffset = observedLayout.elementOffset(coordinates);
-    ptrdiff_t expectedOffset = expectedLayout.elementOffset(coordinates);
 
-    if (selection.stride == 1) {
-        size_t logicalIndex = selection.first;
-        size_t selected = 0;
-        while (logicalIndex < total && selected < selection.maxElements) {
-            function(logicalIndex, observedOffset, expectedOffset);
-            ++selected;
-            ++logicalIndex;
-            if (logicalIndex >= total || selected >= selection.maxElements) break;
-            if (!advanceCoordinates(coordinates, shape, selection.indexOrder,
-                                    observedLayout.strides(), expectedLayout.strides(),
-                                    observedOffset, expectedOffset))
-                break;
+    for (size_t outerIndex = 0; outerIndex < outerCount; ++outerIndex) {
+        size_t remaining = outerIndex;
+        ptrdiff_t observedBase = observedLayout.offset();
+        ptrdiff_t expectedBase = expectedLayout.offset();
+
+        if (firstDimensionFastest) {
+            for (size_t dimension = 1; dimension < shape.rank(); ++dimension) {
+                coordinates[dimension] = remaining % shape[dimension];
+                remaining /= shape[dimension];
+                observedBase += static_cast<ptrdiff_t>(coordinates[dimension]) *
+                                observedLayout.strides()[dimension];
+                expectedBase += static_cast<ptrdiff_t>(coordinates[dimension]) *
+                                expectedLayout.strides()[dimension];
+            }
+        } else {
+            for (size_t dimension = shape.rank() - 1; dimension > 0; --dimension) {
+                const size_t index = dimension - 1;
+                coordinates[index] = remaining % shape[index];
+                remaining /= shape[index];
+                observedBase +=
+                    static_cast<ptrdiff_t>(coordinates[index]) * observedLayout.strides()[index];
+                expectedBase +=
+                    static_cast<ptrdiff_t>(coordinates[index]) * expectedLayout.strides()[index];
+            }
         }
-        return;
-    }
 
-    size_t selected = 0;
-    for (size_t logicalIndex = selection.first;
-         logicalIndex < total && selected < selection.maxElements; ++selected) {
-        coordinatesForLinearIndex(logicalIndex, shape, selection.indexOrder, coordinates);
-        function(logicalIndex, observedLayout.elementOffset(coordinates),
-                 expectedLayout.elementOffset(coordinates));
-        if (selection.stride > std::numeric_limits<size_t>::max() - logicalIndex) break;
-        logicalIndex += selection.stride;
+        const size_t logicalBase = outerIndex * innerSize;
+        const size_t count = std::min(innerSize, selectedTotal - logicalBase);
+        function(logicalBase, observedBase, observedLayout.strides()[innerDimension], expectedBase,
+                 expectedLayout.strides()[innerDimension], count);
     }
+    return true;
 }
 
 inline ComparisonValue loadComparisonValue(const TensorView& view, ptrdiff_t logicalOffset) {
     const auto storage = view.storage();
     if (scalarTypeInfo(view.type()).category == ScalarCategory::Complex)
-        return comparisonValue(
+        return typedComparisonValue(
             decodeScalar<std::complex<double>>(view.type(), storage, logicalOffset));
-    return comparisonValue(decodeScalar<double>(view.type(), storage, logicalOffset));
+    return typedComparisonValue(decodeScalar<double>(view.type(), storage, logicalOffset));
 }
 
 template <typename Tag>
@@ -714,24 +539,54 @@ ComparisonValue loadComparisonValueKnown(std::span<const std::byte> storage,
             false
         };
     else
-        return comparisonValue(decodeScalarKnown<type, double>(storage, logicalOffset));
+        return typedComparisonValue(decodeScalarKnown<type, double>(storage, logicalOffset));
 }
 
 template <typename Tag>
 auto loadFastComparisonReal(std::span<const std::byte> storage, ptrdiff_t logicalOffset) {
     constexpr ScalarType type = Tag::type;
+    constexpr ScalarCategory category = scalarTypeInfo(type).category;
+
+    const auto readNativeUnchecked = [&]<typename T>() {
+        T value;
+        std::memcpy(&value, storage.data() + static_cast<size_t>(logicalOffset) * sizeof(T),
+                    sizeof(T));
+        return value;
+    };
+
     if constexpr (type == ScalarType::Float32) {
-        float value;
-        std::memcpy(&value, storage.data() + static_cast<size_t>(logicalOffset) * sizeof(float),
-                    sizeof(value));
-        return value;
+        return readNativeUnchecked.template operator()<float>();
     } else if constexpr (type == ScalarType::Float64) {
-        double value;
-        std::memcpy(&value, storage.data() + static_cast<size_t>(logicalOffset) * sizeof(double),
-                    sizeof(value));
-        return value;
+        return readNativeUnchecked.template operator()<double>();
+    } else if constexpr (category == ScalarCategory::Boolean) {
+        return readNativeUnchecked.template operator()<uint8_t>() != 0;
+    } else if constexpr (category == ScalarCategory::SignedInteger) {
+        if constexpr (std::is_void_v<typename Tag::Storage>)
+            return decodeScalarKnown<type, int64_t>(storage, logicalOffset);
+        else
+            return readNativeUnchecked.template operator()<typename Tag::Storage>();
+    } else if constexpr (category == ScalarCategory::UnsignedInteger) {
+        return readNativeUnchecked.template operator()<typename Tag::Storage>();
     } else {
         return loadComparisonValueKnown<Tag>(storage, logicalOffset).real;
+    }
+}
+
+template <typename Tag>
+bool knownPointwiseDecision(const TensorView& observed, ptrdiff_t observedOffset,
+                            const TensorView& expected, ptrdiff_t expectedOffset,
+                            const ComparisonOptions& options) {
+    if constexpr (scalarTypeInfo(Tag::type).category == ScalarCategory::Complex) {
+        const ComparisonValue observedValue =
+            loadComparisonValueKnown<Tag>(observed.storage(), observedOffset);
+        const ComparisonValue expectedValue =
+            loadComparisonValueKnown<Tag>(expected.storage(), expectedOffset);
+        return pointwiseValuesClose(observedValue.real, expectedValue.real, options) &&
+               pointwiseValuesClose(observedValue.imaginary, expectedValue.imaginary, options);
+    } else {
+        return pointwiseValuesClose(loadFastComparisonReal<Tag>(observed.storage(), observedOffset),
+                                    loadFastComparisonReal<Tag>(expected.storage(), expectedOffset),
+                                    options);
     }
 }
 
@@ -757,27 +612,66 @@ inline bool isUnwrittenSentinelValue(ScalarType type, const ComparisonValue& val
     return false;
 }
 
-template <typename Observed, typename Expected>
-inline bool valuesCloseFast(Observed observed, Expected expected,
-                            const ComparisonOptions& options) {
-    if (observed == expected)
-        return options.equalSignedZero || !isZeroWithOppositeSign(observed, expected);
-    if (std::isnan(observed) || std::isnan(expected))
-        return options.equalNaNs && std::isnan(observed) && std::isnan(expected);
-    if (std::isinf(observed) || std::isinf(expected)) return false;
-
-    const double difference = std::abs(observed - expected);
-    const double tolerance =
-        options.absoluteTolerance + options.relativeTolerance * std::abs(expected) +
-        options.symmetricRelativeTolerance * (std::abs(observed) + std::abs(expected) + 1.0);
-    return options.strictTolerance ? difference < tolerance : difference <= tolerance;
-}
-
 template <typename Tag>
 ComparisonResult comparePointwiseOnlyKnown(const TensorView& observed, const TensorView& expected,
                                            const ComparisonOptions& options) {
     const auto run = [&]<typename Predicate>(Predicate predicate) {
         ComparisonResult result;
+        if (options.selection.first == 0 && options.selection.stride == 1 &&
+            options.selection.indexOrder == ComparisonIndexOrder::FirstDimensionFastest &&
+            observed.shape().rank() != 0) {
+            const Shape& shape = observed.shape();
+            const size_t innerSize = shape[0];
+            const size_t selectedTotal =
+                std::min(shape.elementCount(), options.selection.maxElements);
+            if (selectedTotal == 0) return result;
+            const size_t outerCount = (selectedTotal + innerSize - 1) / innerSize;
+            std::vector<size_t> coordinates(shape.rank(), 0);
+
+            for (size_t outerIndex = 0; outerIndex < outerCount; ++outerIndex) {
+                size_t remaining = outerIndex;
+                ptrdiff_t observedBase = observed.layout().offset();
+                ptrdiff_t expectedBase = expected.layout().offset();
+                for (size_t dimension = 1; dimension < shape.rank(); ++dimension) {
+                    coordinates[dimension] = remaining % shape[dimension];
+                    remaining /= shape[dimension];
+                    observedBase += static_cast<ptrdiff_t>(coordinates[dimension]) *
+                                    observed.layout().strides()[dimension];
+                    expectedBase += static_cast<ptrdiff_t>(coordinates[dimension]) *
+                                    expected.layout().strides()[dimension];
+                }
+
+                const size_t logicalBase = outerIndex * innerSize;
+                const size_t count = std::min(innerSize, selectedTotal - logicalBase);
+                for (size_t innerIndex = 0; innerIndex < count; ++innerIndex) {
+                    const ptrdiff_t observedOffset =
+                        observedBase +
+                        static_cast<ptrdiff_t>(innerIndex) * observed.layout().strides()[0];
+                    const ptrdiff_t expectedOffset =
+                        expectedBase +
+                        static_cast<ptrdiff_t>(innerIndex) * expected.layout().strides()[0];
+                    bool close = false;
+                    if constexpr (scalarTypeInfo(Tag::type).category == ScalarCategory::Complex) {
+                        const ComparisonValue observedValue =
+                            loadComparisonValueKnown<Tag>(observed.storage(), observedOffset);
+                        const ComparisonValue expectedValue =
+                            loadComparisonValueKnown<Tag>(expected.storage(), expectedOffset);
+                        close = predicate(observedValue.real, expectedValue.real);
+                        close =
+                            close && predicate(observedValue.imaginary, expectedValue.imaginary);
+                    } else {
+                        close = predicate(
+                            loadFastComparisonReal<Tag>(observed.storage(), observedOffset),
+                            loadFastComparisonReal<Tag>(expected.storage(), expectedOffset));
+                    }
+                    result.mismatches += static_cast<size_t>(!close);
+                }
+            }
+            result.compared = selectedTotal;
+            result.pointwisePassed = result.mismatches == 0;
+            return result;
+        }
+
         forEachSelectedOffsetPair(
             observed.layout(), expected.layout(), options.selection,
             [&](size_t, ptrdiff_t observedOffset, ptrdiff_t expectedOffset) {
@@ -805,135 +699,21 @@ ComparisonResult comparePointwiseOnlyKnown(const TensorView& observed, const Ten
         options.absoluteTolerance == 0.0 && options.relativeTolerance == 0.0) {
         const double tolerance = options.symmetricRelativeTolerance;
         return run([tolerance](auto observedValue, auto expectedValue) {
-            using Real = decltype(observedValue - expectedValue);
-            const Real typedTolerance = static_cast<Real>(tolerance);
-            return observedValue == expectedValue ||
-                   std::abs(observedValue - expectedValue) <
-                       typedTolerance * (std::abs(observedValue) + std::abs(expectedValue) +
-                                         static_cast<Real>(1));
-        });
-    }
-
-    if (options.equalSignedZero && !options.equalNaNs && !options.strictTolerance &&
-        options.absoluteTolerance == 0.0 && options.relativeTolerance == 0.0 &&
-        options.symmetricRelativeTolerance == 0.0)
-        return run(
-            [](auto observedValue, auto expectedValue) { return observedValue == expectedValue; });
-
-    return run([&options](auto observedValue, auto expectedValue) {
-        return valuesCloseFast(observedValue, expectedValue, options);
-    });
-}
-
-template <typename Value>
-auto fastTypedComparisonValue(const Value& value) {
-    using Type = std::remove_cvref_t<Value>;
-    if constexpr (std::is_same_v<Type, double> || std::is_integral_v<Type>)
-        return value;
-    else if constexpr (std::is_same_v<Type, float>)
-        return value;
-    else
-        return static_cast<float>(value);
-}
-
-template <typename Observed, typename Expected>
-ComparisonResult comparePointwiseOnlyTyped(const TypedTensorView<Observed>& observed,
-                                           const TypedTensorView<Expected>& expected,
-                                           const ComparisonOptions& options) {
-    const Layout& observedLayout = observed.layout();
-    const Layout& expectedLayout = expected.layout();
-    const auto observedStorage = observed.storage();
-    const auto expectedStorage = expected.storage();
-    const auto run = [&]<typename Predicate>(Predicate predicate) {
-        ComparisonResult result;
-        if (options.selection.first == 0 && options.selection.stride == 1 &&
-            options.selection.indexOrder == ComparisonIndexOrder::FirstDimensionFastest &&
-            observedLayout.shape().rank() != 0) {
-            const Shape& shape = observedLayout.shape();
-            const size_t innerSize = shape[0];
-            const size_t selectedTotal =
-                std::min(shape.elementCount(), options.selection.maxElements);
-            const size_t outerCount = (selectedTotal + innerSize - 1) / innerSize;
-            std::vector<size_t> coordinates(shape.rank(), 0);
-
-            for (size_t outerIndex = 0; outerIndex < outerCount; ++outerIndex) {
-                size_t remaining = outerIndex;
-                ptrdiff_t observedBase = observedLayout.offset();
-                ptrdiff_t expectedBase = expectedLayout.offset();
-                for (size_t dimension = 1; dimension < shape.rank(); ++dimension) {
-                    coordinates[dimension] = remaining % shape[dimension];
-                    remaining /= shape[dimension];
-                    observedBase += static_cast<ptrdiff_t>(coordinates[dimension]) *
-                                    observedLayout.strides()[dimension];
-                    expectedBase += static_cast<ptrdiff_t>(coordinates[dimension]) *
-                                    expectedLayout.strides()[dimension];
-                }
-
-                const size_t logicalBase = outerIndex * innerSize;
-                const size_t count = std::min(innerSize, selectedTotal - logicalBase);
-                for (size_t innerIndex = 0; innerIndex < count; ++innerIndex) {
-                    const ptrdiff_t observedOffset =
-                        observedBase +
-                        static_cast<ptrdiff_t>(innerIndex) * observedLayout.strides()[0];
-                    const ptrdiff_t expectedOffset =
-                        expectedBase +
-                        static_cast<ptrdiff_t>(innerIndex) * expectedLayout.strides()[0];
-                    bool close = false;
-                    if constexpr (RuntimeIsComplexV<std::remove_cvref_t<Observed>> ||
-                                  RuntimeIsComplexV<std::remove_cvref_t<Expected>>) {
-                        const ComparisonValue observedValue =
-                            comparisonValue(observedStorage[observedOffset]);
-                        const ComparisonValue expectedValue =
-                            comparisonValue(expectedStorage[expectedOffset]);
-                        close = predicate(observedValue.real, expectedValue.real);
-                        close =
-                            close && predicate(observedValue.imaginary, expectedValue.imaginary);
-                    } else {
-                        close =
-                            predicate(fastTypedComparisonValue(observedStorage[observedOffset]),
-                                      fastTypedComparisonValue(expectedStorage[expectedOffset]));
-                    }
-                    result.mismatches += static_cast<size_t>(!close);
-                }
+            if constexpr (std::is_integral_v<decltype(observedValue)> &&
+                          std::is_integral_v<decltype(expectedValue)>) {
+                return observedValue == expectedValue ||
+                       integralDifference(observedValue, expectedValue) <
+                           static_cast<long double>(tolerance) *
+                               (integralMagnitude(observedValue) +
+                                integralMagnitude(expectedValue) + 1.0L);
+            } else {
+                using Real = decltype(observedValue - expectedValue);
+                const Real typedTolerance = static_cast<Real>(tolerance);
+                return observedValue == expectedValue ||
+                       std::abs(observedValue - expectedValue) <
+                           typedTolerance * (std::abs(observedValue) + std::abs(expectedValue) +
+                                             static_cast<Real>(1));
             }
-            result.compared = selectedTotal;
-            result.pointwisePassed = result.mismatches == 0;
-            return result;
-        }
-
-        forEachSelectedOffsetPair(
-            observedLayout, expectedLayout, options.selection,
-            [&](size_t, ptrdiff_t observedOffset, ptrdiff_t expectedOffset) {
-                ++result.compared;
-                bool close = false;
-                if constexpr (RuntimeIsComplexV<std::remove_cvref_t<Observed>> ||
-                              RuntimeIsComplexV<std::remove_cvref_t<Expected>>) {
-                    const ComparisonValue observedValue =
-                        comparisonValue(observedStorage[observedOffset]);
-                    const ComparisonValue expectedValue =
-                        comparisonValue(expectedStorage[expectedOffset]);
-                    close = predicate(observedValue.real, expectedValue.real);
-                    close = close && predicate(observedValue.imaginary, expectedValue.imaginary);
-                } else {
-                    close = predicate(fastTypedComparisonValue(observedStorage[observedOffset]),
-                                      fastTypedComparisonValue(expectedStorage[expectedOffset]));
-                }
-                result.mismatches += static_cast<size_t>(!close);
-            });
-        result.pointwisePassed = result.mismatches == 0;
-        return result;
-    };
-
-    if (options.equalSignedZero && !options.equalNaNs && options.strictTolerance &&
-        options.absoluteTolerance == 0.0 && options.relativeTolerance == 0.0) {
-        const double tolerance = options.symmetricRelativeTolerance;
-        return run([tolerance](auto observedValue, auto expectedValue) {
-            using Real = decltype(observedValue - expectedValue);
-            const Real typedTolerance = static_cast<Real>(tolerance);
-            return observedValue == expectedValue ||
-                   std::abs(observedValue - expectedValue) <
-                       typedTolerance * (std::abs(observedValue) + std::abs(expectedValue) +
-                                         static_cast<Real>(1));
         });
     }
 
@@ -949,65 +729,68 @@ ComparisonResult comparePointwiseOnlyTyped(const TypedTensorView<Observed>& obse
 }
 }  // namespace detail
 
-inline double encodedUlpDistance(double exact, double approximation, ScalarType type) {
+double encodedUlpDistance(double exact, double approximation, ScalarType type) {
     return detail::encodedUlpDistance(exact, approximation, type);
 }
 
-template <typename Observed, typename Expected>
-bool valuesClose(const Observed& observed, const Expected& expected,
-                 const ComparisonOptions& options) {
-    const ComparisonValue observedValue = detail::comparisonValue(observed);
-    const ComparisonValue expectedValue = detail::comparisonValue(expected);
-    const detail::ComponentResult real =
-        detail::compareComponent(observedValue.real, expectedValue.real, options);
-    if (!real.close) return false;
-    if (observedValue.complex || expectedValue.complex)
-        return detail::compareComponent(observedValue.imaginary, expectedValue.imaginary, options)
-            .close;
-    return true;
-}
-
-template <typename Observed, typename Expected>
-ComparisonResult compare(const TypedTensorView<Observed>& observed,
-                         const TypedTensorView<Expected>& expected,
-                         const ComparisonOptions& options) {
-    if (observed.shape() != expected.shape())
+namespace detail {
+ComparisonResult compareWithPairLoader(const Layout& observedLayout, const void* observedStorage,
+                                       const Layout& expectedLayout, const void* expectedStorage,
+                                       ComparisonPairChunkLoader pairLoader,
+                                       const ComparisonOptions& options) {
+    if (observedLayout.shape() != expectedLayout.shape())
         throw std::invalid_argument("Host validation comparison shape mismatch.");
+    if (pairLoader == nullptr)
+        throw std::invalid_argument("Host validation comparison callback is null.");
 
-    if (options.pointwise && !options.computePointwiseStatistics && !options.computeFrobenius &&
-        !options.computeUlp && !options.relativeFrobeniusTolerance &&
-        !options.maximumUlpTolerance) {
-        ComparisonResult result = detail::comparePointwiseOnlyTyped(observed, expected, options);
-        const bool needsSamples = options.maxReportedMismatches != 0 &&
-                                  (options.reportMatchingElements || result.mismatches != 0);
-        if (!needsSamples) return result;
+    ComparisonAccumulator accumulator(options, observedLayout.shape());
+    constexpr size_t chunkSize = 32;
+    std::array<ComparisonPair, chunkSize> pairs;
+    const auto observePair = [&](size_t logicalIndex, ptrdiff_t observedOffset,
+                                 ptrdiff_t expectedOffset, const ComparisonPair& pair) {
+        accumulator.observe(
+            logicalIndex, observedOffset, expectedOffset, pair.observed, pair.expected,
+            options.pointwise ? std::optional<bool>(pair.pointwiseClose) : std::nullopt);
+    };
 
-        ComparisonOptions detailed = options;
-        detailed.computePointwiseStatistics = true;
-        return compare(observed, expected, detailed);
-    }
-
-    detail::ComparisonAccumulator accumulator(options, observed.shape());
-    const auto observedStorage = observed.storage();
-    const auto expectedStorage = expected.storage();
-    detail::forEachSelectedOffsetPair(
-        observed.layout(), expected.layout(), options.selection,
-        [&](size_t logicalIndex, ptrdiff_t observedOffset, ptrdiff_t expectedOffset) {
-            accumulator.observe(logicalIndex, observedOffset, expectedOffset,
-                                detail::comparisonValue(observedStorage[observedOffset]),
-                                detail::comparisonValue(expectedStorage[expectedOffset]));
+    const bool usedRegularRuns = forEachRegularSelectedRun(
+        observedLayout, expectedLayout, options.selection,
+        [&](size_t logicalBase, ptrdiff_t observedBase, ptrdiff_t observedStride,
+            ptrdiff_t expectedBase, ptrdiff_t expectedStride, size_t count) {
+            for (size_t first = 0; first < count; first += chunkSize) {
+                const size_t current = std::min(chunkSize, count - first);
+                const ptrdiff_t observedChunk =
+                    observedBase + static_cast<ptrdiff_t>(first) * observedStride;
+                const ptrdiff_t expectedChunk =
+                    expectedBase + static_cast<ptrdiff_t>(first) * expectedStride;
+                pairLoader(observedStorage, observedChunk, observedStride, expectedStorage,
+                           expectedChunk, expectedStride, current, options, pairs.data());
+                for (size_t index = 0; index < current; ++index)
+                    observePair(logicalBase + first + index,
+                                observedChunk + static_cast<ptrdiff_t>(index) * observedStride,
+                                expectedChunk + static_cast<ptrdiff_t>(index) * expectedStride,
+                                pairs[index]);
+            }
         });
+    if (!usedRegularRuns) {
+        forEachSelectedOffsetPair(
+            observedLayout, expectedLayout, options.selection,
+            [&](size_t logicalIndex, ptrdiff_t observedOffset, ptrdiff_t expectedOffset) {
+                pairLoader(observedStorage, observedOffset, 0, expectedStorage, expectedOffset, 0,
+                           1, options, pairs.data());
+                observePair(logicalIndex, observedOffset, expectedOffset, pairs[0]);
+            });
+    }
     return accumulator.finish();
 }
+}  // namespace detail
 
-inline ComparisonResult compare(const TensorView& observed, const TensorView& expected,
-                                const ComparisonOptions& options) {
+ComparisonResult compare(const TensorView& observed, const TensorView& expected,
+                         const ComparisonOptions& options) {
     if (observed.shape() != expected.shape())
         throw std::invalid_argument("Host validation tensor comparison shape mismatch.");
 
-    if (observed.type() == expected.type() && options.pointwise &&
-        !options.computePointwiseStatistics && !options.computeFrobenius && !options.computeUlp &&
-        !options.relativeFrobeniusTolerance && !options.maximumUlpTolerance) {
+    if (observed.type() == expected.type() && detail::pointwiseOnlyComparison(options)) {
         ComparisonResult result = visitScalarType(observed.type(), [&]<typename Tag>() {
             return detail::comparePointwiseOnlyKnown<Tag>(observed, expected, options);
         });
@@ -1026,12 +809,18 @@ inline ComparisonResult compare(const TensorView& observed, const TensorView& ex
             detail::forEachSelectedOffsetPair(
                 observed.layout(), expected.layout(), options.selection,
                 [&](size_t logicalIndex, ptrdiff_t observedOffset, ptrdiff_t expectedOffset) {
+                    const std::optional<bool> decision =
+                        options.pointwise
+                            ? std::optional<bool>(detail::knownPointwiseDecision<Tag>(
+                                  observed, observedOffset, expected, expectedOffset, options))
+                            : std::nullopt;
                     if constexpr (scalarTypeInfo(Tag::type).category == ScalarCategory::Complex) {
                         accumulator.observe(logicalIndex, observedOffset, expectedOffset,
                                             detail::loadComparisonValueKnown<Tag>(
                                                 observed.storage(), observedOffset),
                                             detail::loadComparisonValueKnown<Tag>(
-                                                expected.storage(), expectedOffset));
+                                                expected.storage(), expectedOffset),
+                                            decision);
                     } else {
                         accumulator.observeReal(logicalIndex, observedOffset, expectedOffset,
                                                 detail::loadComparisonValueKnown<Tag>(
@@ -1039,7 +828,8 @@ inline ComparisonResult compare(const TensorView& observed, const TensorView& ex
                                                     .real,
                                                 detail::loadComparisonValueKnown<Tag>(
                                                     expected.storage(), expectedOffset)
-                                                    .real);
+                                                    .real,
+                                                decision);
                     }
                 });
         });
@@ -1055,9 +845,8 @@ inline ComparisonResult compare(const TensorView& observed, const TensorView& ex
     return accumulator.finish();
 }
 
-template <typename Observed, typename Expected>
-std::optional<ComparisonTolerance> findAllCloseTolerance(const TypedTensorView<Observed>& observed,
-                                                         const TypedTensorView<Expected>& expected,
+std::optional<ComparisonTolerance> findAllCloseTolerance(const TensorView& observed,
+                                                         const TensorView& expected,
                                                          std::span<const double> absoluteCandidates,
                                                          std::span<const double> relativeCandidates,
                                                          ComparisonOptions options) {
@@ -1073,25 +862,9 @@ std::optional<ComparisonTolerance> findAllCloseTolerance(const TypedTensorView<O
     return std::nullopt;
 }
 
-inline std::optional<ComparisonTolerance> findAllCloseTolerance(
-    const TensorView& observed, const TensorView& expected,
-    std::span<const double> absoluteCandidates, std::span<const double> relativeCandidates,
-    ComparisonOptions options) {
-    for (const double absolute : absoluteCandidates) {
-        for (const double relative : relativeCandidates) {
-            options.absoluteTolerance = absolute;
-            options.relativeTolerance = relative;
-            options.symmetricRelativeTolerance = 0.0;
-            if (compare(observed, expected, options).passed())
-                return ComparisonTolerance{absolute, relative};
-        }
-    }
-    return std::nullopt;
-}
-
-inline SentinelResult checkUnwrittenSentinel(ScalarType type, std::span<const std::byte> storage,
-                                             size_t firstElement, size_t elementCount,
-                                             SentinelRegion region, size_t maxReportedMismatches) {
+SentinelResult checkUnwrittenSentinel(ScalarType type, std::span<const std::byte> storage,
+                                      size_t firstElement, size_t elementCount,
+                                      SentinelRegion region, size_t maxReportedMismatches) {
     const size_t storageBits = scalarTypeInfo(type).storageBits;
     if (storageBits == 0) throw std::invalid_argument("Sentinel scalar type has no storage.");
     const uint64_t requiredBits = static_cast<uint64_t>(firstElement + elementCount) * storageBits;
@@ -1106,10 +879,11 @@ inline SentinelResult checkUnwrittenSentinel(ScalarType type, std::span<const st
         const ptrdiff_t offset = static_cast<ptrdiff_t>(firstElement + index);
         ComparisonValue value;
         if (scalarTypeInfo(type).category == ScalarCategory::Complex)
-            value = detail::comparisonValue(
+            value = detail::typedComparisonValue(
                 detail::decodeScalar<std::complex<double>>(type, storage, offset));
         else
-            value = detail::comparisonValue(detail::decodeScalar<double>(type, storage, offset));
+            value =
+                detail::typedComparisonValue(detail::decodeScalar<double>(type, storage, offset));
         if (!detail::isUnwrittenSentinelValue(type, value)) {
             ++result.mismatches;
             if (result.reportedMismatches.size() < maxReportedMismatches)
@@ -1119,9 +893,8 @@ inline SentinelResult checkUnwrittenSentinel(ScalarType type, std::span<const st
     return result;
 }
 
-inline SentinelResult checkUnusedTensorStorage(const TensorView& logicalTensor,
-                                               size_t allocatedElements, SentinelRegion region,
-                                               size_t maxReportedMismatches) {
+SentinelResult checkUnusedTensorStorage(const TensorView& logicalTensor, size_t allocatedElements,
+                                        SentinelRegion region, size_t maxReportedMismatches) {
     const auto& layout = logicalTensor.layout();
     std::vector<bool> used(allocatedElements, false);
     detail::forEachSelectedIndex(

@@ -5,6 +5,7 @@
 
 // Product-private TensileLite adapter.
 
+#include <roc/host_validation/typed_comparison.hpp>
 #include <roc/host_validation/validation.hpp>
 
 #include <Tensile/Activation.hpp>
