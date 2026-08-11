@@ -77,6 +77,18 @@ int main() {
                               std::as_bytes(std::span<const int32_t>(reversedStorage)));
     require(reversed.loadAs<int32_t>({0}) == 3 && reversed.loadAs<int32_t>({2}) == 1,
             "Negative-stride tensor layout mismatch.");
+    const TypedTensorView<int32_t> typedReversed(Layout(Shape{3}, std::vector<ptrdiff_t>{-1}, 2),
+                                                 std::span<const int32_t>(reversedStorage));
+    require(typedReversed.at({0}) == 3 && typedReversed.at({2}) == 1,
+            "Typed tensor view did not bind storage and layout.");
+    bool rejectedShortTypedStorage = false;
+    try {
+        static_cast<void>(TypedTensorView<int32_t>(Layout::contiguous(Shape{4}),
+                                                   std::span<const int32_t>(reversedStorage)));
+    } catch (const std::invalid_argument&) {
+        rejectedShortTypedStorage = true;
+    }
+    require(rejectedShortTypedStorage, "Typed tensor view accepted undersized storage.");
     const Tensor reversedFloat = reversed.to(ScalarType::Float32);
     require(reversedFloat.layout() == reversed.layout() &&
                 reversedFloat.view().loadAs<float>({0}) == 3.0f &&

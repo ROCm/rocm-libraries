@@ -131,8 +131,9 @@ void dumpBuffer(const char* title, Dtype* data, int N)
 template <typename T>
 void compare(const char* title, const std::vector<T>& cpuOutput, const std::vector<T>& refOutput)
 {
-    const auto report = roc::host_validation::compare(std::span<const T>(cpuOutput),
-                                                      std::span<const T>(refOutput));
+    const auto report = roc::host_validation::compare(
+        roc::host_validation::TypedTensorView<T>(std::span<const T>(cpuOutput)),
+        roc::host_validation::TypedTensorView<T>(std::span<const T>(refOutput)));
     std::cout << title << " max error : " << report.maxAbsoluteDifference << std::endl;
 }
 
