@@ -135,12 +135,21 @@ def test_dense_numeric_vs_fp32_sdpa(dtype, d, hq, hkv, persistent):
     run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
     torch.cuda.synchronize()
 
-    # fp32 SDPA oracle in [B,H,S,D] layout with native GQA.
+    # fp32 SDPA oracle in [B,H,S,D] layout. GQA is expanded HERE, by repeating each
+    # kv head to its query heads, rather than via the ``enable_gqa=`` kwarg: that
+    # kwarg is a recent addition to ``scaled_dot_product_attention``, and on an older
+    # ROCm torch passing it raises TypeError -- which ERRORS the whole gpu cohort
+    # instead of leaving it to the device gate. ``repeat_interleave`` along the head
+    # axis is exactly what ``enable_gqa`` does internally, and it is the mapping the
+    # kernel itself uses (hkv = hq // gqa), so the asserted reference is unchanged.
+    # rep == 1 (the MHA row) makes it a plain copy, matching the old
+    # ``enable_gqa=(hkv != hq)`` no-op.
+    rep = hq // hkv
     qf = q.transpose(1, 2).float()
-    kf = k.transpose(1, 2).float()
-    vf = v.transpose(1, 2).float()
+    kf = k.transpose(1, 2).float().repeat_interleave(rep, dim=1)
+    vf = v.transpose(1, 2).float().repeat_interleave(rep, dim=1)
     ref = F.scaled_dot_product_attention(
-        qf, kf, vf, is_causal=True, scale=scale, enable_gqa=(hkv != hq)
+        qf, kf, vf, is_causal=True, scale=scale
     ).transpose(
         1, 2
     )  # -> [B,S,Hq,D]
