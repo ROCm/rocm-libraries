@@ -6406,11 +6406,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # recalcLocalReadAddressesAB() below resets numReadsIterCoalesced{A,B} to 1,
       # so capture the wider-local-read state first.
       tdm = kernel["enableTDMA"] and kernel["enableTDMB"]
-      tdmtailWasWiderLR = (self.states.numReadsIterCoalescedA > 1 or
+      tdmTailWasWiderLR = (self.states.numReadsIterCoalescedA > 1 or
                            self.states.numReadsIterCoalescedB > 1)
       # TDM tail may keep using whichever LDS buffer the swap parity left it in
       # (no forced buffer 0), unless wider local read needs the offset recomputed.
-      needResetLROffsets = not kernel["1LDSBuffer"] and (not tdm or tdmtailWasWiderLR)
+      needResetLROffsets = not kernel["1LDSBuffer"] and (not tdm or tdmTailWasWiderLR)
       # change local read policy from wider local read to one unit of K at a time
       # DirectToVgpr case, use original wider local read instead of recalculating local read address
       if not (kernel["DirectToVgprA"] or kernel["DirectToVgprB"]):
@@ -6423,7 +6423,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         # recalculated address and the tail reads the wrong LDS layout. The 2-buffer
         # reset masks the address in place instead, which is why only 3+ buffers care.
         # Guards match the recalc's own: tail loop, not UseDotInstruction, wider reads.
-        if self.states.IncLdsBufSwitch and tdmtailWasWiderLR \
+        if self.states.IncLdsBufSwitch and tdmTailWasWiderLR \
             and not kernel["UseDotInstruction"]:
           module.addComment1("Tail: re-snapshot LocalReadAddrOrig after recalc")
           if self.states.a.numVgprLocalReadAddr > 0:
