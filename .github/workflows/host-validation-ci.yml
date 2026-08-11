@@ -37,7 +37,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes libopenblas-dev ninja-build
           python -m pip install --upgrade pip
-          python -m pip install nanobind numpy
+          python -m pip install ml_dtypes nanobind numpy
 
       - name: Configure
         run: |
