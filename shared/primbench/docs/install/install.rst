@@ -7,7 +7,7 @@
 Install Primbench
 ***********************
 
-Primbenc is a single-header library. No build step, package installation, or linking against a Primbench binary is required.
+Primbench is a single-header library. No build step, package installation, or linking against a Primbench binary is required.
 
 Copy `primbench.hpp <https://github.com/ROCm/rocm-libraries/blob/develop/shared/primbench/primbench.hpp>`_ to your include directory or use the ``-I`` compiler option to point to the path to ``primbench.hpp``.
 
