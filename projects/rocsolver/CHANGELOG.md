@@ -10,6 +10,11 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Removed
 ### Optimized
 ### Resolved issues
+
+* Fixed a loss of accuracy in STEDC, and therefore in SYEVD and HEEVD, for matrices
+  whose norm is very small. The tridiagonal matrix is now normalized before the
+  divide-and-conquer phase, matching the behavior of LAPACK's STEDC.
+
 ### Known issues
 ### Upcoming changes
 
