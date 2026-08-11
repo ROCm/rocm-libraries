@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Per-phase spill / occupancy probe for the gfx942 dense kernel (AICK-1664).
+"""Per-phase spill / occupancy probe for the gfx942 dense kernel.
 
 Kept across P0-P4: re-run after every lever to confirm 0 spill and to see which
 resource (VGPR at D64, LDS at D128) is the occupancy limiter. Compiles the gfx942 dense
@@ -32,6 +32,7 @@ def main() -> int:
     from kernels.gfx942.attention_dense import (
         AttentionDenseSpec,
         build_attention_dense,
+        _tuned_waves_per_eu,
     )
     from rocke.helpers.compile import compile_kernel
     from probe_occupancy import (
@@ -47,7 +48,17 @@ def main() -> int:
     print("-" * 84)
     worst_spill = 0
     for label, s in SHAPES:
-        spec = AttentionDenseSpec(batch=1, block_n=64, **s)
+        # waves_per_eu is NOT left at the dataclass default: it is a per-config
+        # tuned value that the dispatch spec factory fills from the kernel's own
+        # policy, and it changes register allocation. Probing at the default would
+        # report the spill/occupancy of a config nobody ships -- which is exactly
+        # what hid bf16 D64 (the one config with an override) from this gate.
+        spec = AttentionDenseSpec(
+            batch=1,
+            block_n=64,
+            waves_per_eu=_tuned_waves_per_eu(s["head_size"], s["dtype"]),
+            **s,
+        )
         kd = build_attention_dense(spec, arch="gfx942")
         art = compile_kernel(kd, arch="gfx942", capture_ir_text=False)
         notes = parse_hsaco_notes(art.hsaco)
@@ -112,6 +123,22 @@ SHAPES = [
             num_kv_heads=4,
             head_size=64,
             dtype="fp16",
+            causal=True,
+        ),
+    ),
+    # bf16 D64 is the ONE shipped config with a waves_per_eu override (4, not 2), so
+    # it is the row this probe most needs: the override is what forces the allocator
+    # down far enough for a 2nd workgroup, and it is the row most likely to spill if
+    # a lever raises register pressure. It was missing until now.
+    (
+        "d64_bf16_16x4_s512",
+        dict(
+            seqlen_q=512,
+            seqlen_kv=512,
+            num_query_heads=16,
+            num_kv_heads=4,
+            head_size=64,
+            dtype="bf16",
             causal=True,
         ),
     ),
