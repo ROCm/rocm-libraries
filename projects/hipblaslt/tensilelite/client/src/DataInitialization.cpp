@@ -1860,6 +1860,8 @@ namespace TensileLite
                                                    : problem.boundIndices()[0].b;
                   auto const  freeIdx  = isMatrixA ? problem.freeIndicesA()[0].i
                                                    : problem.freeIndicesB()[0].i;
+                  int const scaleBlockRowSize = boundIdx == 0 ? static_cast<int>(mxBlock) : 1;
+                  int const scaleBlockColSize = boundIdx == 1 ? static_cast<int>(mxBlock) : 1;
                   size_t const compactKBlocks
                       = (dataDesc.sizes()[boundIdx] + mxBlock - 1) / mxBlock;
                   size_t const paddedKBlocks = scaleDesc.sizes()[boundIdx];
@@ -1880,8 +1882,8 @@ namespace TensileLite
                                       cols,
                                       stride,
                                       transposed,
-                                      isMatrixA ? mxBlock : 1,
-                                      isMatrixA ? 1 : mxBlock,
+                                      scaleBlockRowSize,
+                                      scaleBlockColSize,
                                       isMatrixA,
                                       MXScaleLayout::None,
                                       initModeToMXMethod(dataInitMode),
@@ -1899,35 +1901,37 @@ namespace TensileLite
                   // copy stays canonical for the CPU reference.
                   if(swizzleLayout != MXScaleLayout::None && pristineScale.gpuInput.valid)
                   {
-                      size_t const eltSize
-                          = DataTypeInfo::Get(scaleDesc.dataType()).elementSize;
-                      size_t const canonicalScaleElems = scaleDesc.totalAllocatedElements();
-
-                      // gfx1250 dimk pads the fast dim up to dimk = 128/mxBlock.
-                      // The scale tensor is allocated unpadded on gfx1250, so size
-                      // the staging buffer for the padded worst case.
-                      size_t swizzledScaleElems = canonicalScaleElems;
+                      size_t const slowDim = kFast ? compactFree : compactKBlocks;
+                      size_t const fastDim = kFast ? compactKBlocks : compactFree;
+                      size_t swizzledScaleElemsPerBatch = slowDim * fastDim;
                       if(swizzleLayout == MXScaleLayout::GFX1250 && mxBlock > 0)
                       {
-                          size_t const slowDim = static_cast<size_t>(cols);
-                          size_t const fastDim
-                              = static_cast<size_t>(rows) / static_cast<size_t>(mxBlock);
                           size_t const dimk = 128u / static_cast<size_t>(mxBlock);
                           size_t const paddedFast
                               = (dimk == 0) ? fastDim
                                             : ((fastDim + dimk - 1) / dimk) * dimk;
-                          size_t const paddedElemsPerBatch = slowDim * paddedFast;
-                          size_t const totalPaddedElems    = paddedElemsPerBatch * batchCount;
-                          if(totalPaddedElems > swizzledScaleElems)
-                              swizzledScaleElems = totalPaddedElems;
+                          swizzledScaleElemsPerBatch = slowDim * paddedFast;
                       }
-                      size_t const gpuScaleBytes = swizzledScaleElems * eltSize;
+                      else if(swizzleLayout == MXScaleLayout::GFX950)
+                      {
+                          size_t const paddedSlow = ((slowDim + 31) / 32) * 32;
+                          size_t const paddedFast = ((fastDim + 7) / 8) * 8;
+                          swizzledScaleElemsPerBatch = paddedSlow * paddedFast;
+                      }
+
+                      size_t const canonicalScaleBytesPerBatch
+                          = batchCount > 1 ? scaleBatchStrideBytes
+                                           : scaleDesc.totalAllocatedBytes();
+                      size_t const swizzledScaleBytesPerBatch
+                          = std::max(canonicalScaleBytesPerBatch,
+                                     swizzledScaleElemsPerBatch * scaleElemSize);
+                      size_t const gpuScaleBytes = swizzledScaleBytesPerBatch * batchCount;
                       std::vector<uint8_t> gpuScaleBuf(gpuScaleBytes, 0);
                       for(size_t b = 0; b < batchCount; b++)
                       {
                           auto* dataPtr = static_cast<uint8_t*>(pristineData.cpuInput.valid.get())
                                           + b * dataBatchStrideBytes;
-                          auto* scalePtr = gpuScaleBuf.data() + b * scaleBatchStrideBytes;
+                          auto* scalePtr = gpuScaleBuf.data() + b * swizzledScaleBytesPerBatch;
                           generateMXInput(hipDataT,
                                           hipScaleT,
                                           dataPtr,
@@ -1936,8 +1940,8 @@ namespace TensileLite
                                           cols,
                                           stride,
                                           transposed,
-                                          isMatrixA ? mxBlock : 1,
-                                          isMatrixA ? 1 : mxBlock,
+                                          scaleBlockRowSize,
+                                          scaleBlockColSize,
                                           isMatrixA,
                                           swizzleLayout,
                                           initModeToMXMethod(dataInitMode),

@@ -34,6 +34,13 @@ if(TARGET host-validation-mx)
         PRIVATE
             roc::host-validation-mx
     )
+    if(TARGET OpenMP::OpenMP_CXX)
+        target_link_libraries(
+            host-validation-mx-tests
+            PRIVATE
+                OpenMP::OpenMP_CXX
+        )
+    endif()
     add_test(NAME host-validation-mx-tests COMMAND host-validation-mx-tests)
 endif()
 

@@ -1328,8 +1328,8 @@ void testing_matmul_with_bias(const Arguments& arg,
     std::vector<HipHostBuffer> hScaleAlphaVec, hScaleA, hScaleB, hScaleC, hScaleD, hScaleE,
         hAmaxD_gold, hAmaxD, hD_gold_epl, hD_gold_ScaleAlpha, hBias_gold_epl;
 
-    // These two vectors store the float values of MX data. mxDataGenerator
-    // can generate MX data and return the corresponding float values. The float
+    // These two vectors store the float values of MX data. Host validation
+    // generates MX data and returns the corresponding float values. The float
     // values can be directly used for CPU verification (hipblaslt_reference_gemm) instead
     // of converting the MX data to float again.
     std::vector<std::vector<float>> refA, refB;
@@ -1341,6 +1341,9 @@ void testing_matmul_with_bias(const Arguments& arg,
     bool mx_use_rocroller = MXUseRocroller();
 
     // Need to split into two for loop to calculate the rotating buffer
+    auto divideRoundUp = [](size_t value, size_t divisor) {
+        return value / divisor + static_cast<size_t>(value % divisor != 0);
+    };
     int64_t totalRotatingSizeNeeded = 0;
     for(int i = 0; i < gemm_count; i++)
     {
@@ -1485,8 +1488,14 @@ void testing_matmul_with_bias(const Arguments& arg,
                     // Account for padding in the swizzled MX layout
                     size_t MXBlock_A   = blockSize(arg.scaleA);
                     size_t dimk        = 128 / MXBlock_A;
-                    size_t scaleA_r    = A_row[i] / ((transA == HIPBLAS_OP_T) ? MXBlock_A : 1);
-                    size_t scaleA_c    = A_col[i] / ((transA == HIPBLAS_OP_T) ? 1 : MXBlock_A);
+                    size_t scaleA_r
+                        = transA == HIPBLAS_OP_T
+                              ? divideRoundUp(static_cast<size_t>(A_row[i]), MXBlock_A)
+                              : static_cast<size_t>(A_row[i]);
+                    size_t scaleA_c
+                        = transA == HIPBLAS_OP_T
+                              ? static_cast<size_t>(A_col[i])
+                              : divideRoundUp(static_cast<size_t>(A_col[i]), MXBlock_A);
                     bool   kAlongRowsA = (transA == HIPBLAS_OP_T);
                     size_t kDim        = kAlongRowsA ? scaleA_r : scaleA_c;
                     size_t mnDim       = kAlongRowsA ? scaleA_c : scaleA_r;
@@ -1512,8 +1521,14 @@ void testing_matmul_with_bias(const Arguments& arg,
                     // Account for padding in the swizzled MX layout
                     size_t MXBlock_B   = blockSize(arg.scaleB);
                     size_t dimk        = 128 / MXBlock_B;
-                    size_t scaleB_r    = B_row[i] / ((transB == HIPBLAS_OP_T) ? 1 : MXBlock_B);
-                    size_t scaleB_c    = B_col[i] / ((transB == HIPBLAS_OP_T) ? MXBlock_B : 1);
+                    size_t scaleB_r
+                        = transB == HIPBLAS_OP_T
+                              ? static_cast<size_t>(B_row[i])
+                              : divideRoundUp(static_cast<size_t>(B_row[i]), MXBlock_B);
+                    size_t scaleB_c
+                        = transB == HIPBLAS_OP_T
+                              ? divideRoundUp(static_cast<size_t>(B_col[i]), MXBlock_B)
+                              : static_cast<size_t>(B_col[i]);
                     bool   kAlongRowsB = (transB == HIPBLAS_OP_N);
                     size_t kDim        = kAlongRowsB ? scaleB_r : scaleB_c;
                     size_t mnDim       = kAlongRowsB ? scaleB_c : scaleB_r;
@@ -2236,8 +2251,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                                       A_col[i],
                                       lda[i],
                                       transA == HIPBLAS_OP_T,
-                                      blockSize(arg.scaleA),
-                                      1,
+                                      scaleA_row,
+                                      scaleA_col,
                                       /*isMatrixA=*/true,
                                       scaleLayoutA,
                                       hipblaslt_initialization2string(arg.initialization),
@@ -2298,7 +2313,7 @@ void testing_matmul_with_bias(const Arguments& arg,
         if(isBlockScaling(arg.scaleB))
         {
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
-            // MX B always goes through mxDataGenerator (mirrors the A side above).
+            // MX B always goes through host validation (mirrors the A side above).
             if(arg.initialization != hipblaslt_initialization::hpl
                && arg.initialization != hipblaslt_initialization::trig_float
                && arg.initialization != hipblaslt_initialization::uniform_01
@@ -2347,8 +2362,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                                       B_col[i],
                                       ldb[i],
                                       transB == HIPBLAS_OP_T,
-                                      1,
-                                      blockSize(arg.scaleB),
+                                      scaleB_row,
+                                      scaleB_col,
                                       /*isMatrixA=*/false,
                                       scaleLayoutB,
                                       hipblaslt_initialization2string(arg.initialization),

@@ -4,14 +4,12 @@ on:
   pull_request:
     paths:
       - "shared/host-validation/**"
-      - "shared/mxdatagenerator/**"
       - ".github/workflows/host-validation-ci.yml"
   push:
     branches:
       - develop
     paths:
       - "shared/host-validation/**"
-      - "shared/mxdatagenerator/**"
       - ".github/workflows/host-validation-ci.yml"
   workflow_dispatch:
 
@@ -21,6 +19,11 @@ permissions:
 concurrency:
   group: host-validation-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
+env:
+  BLIS_NUM_THREADS: "2"
+  OMP_NUM_THREADS: "2"
+  OPENBLAS_NUM_THREADS: "2"
 
 jobs:
   standalone:
@@ -92,6 +95,14 @@ jobs:
             -G Ninja \
             -DCMAKE_PREFIX_PATH="${RUNNER_TEMP}/host-validation-install"
           cmake --build "${RUNNER_TEMP}/host-validation-package-test" --parallel 2
+          cmake -S shared/host-validation/tests/package/core_only \
+            -B "${RUNNER_TEMP}/host-validation-core-package-test" \
+            -G Ninja \
+            -DCMAKE_PREFIX_PATH="${RUNNER_TEMP}/host-validation-install" \
+            -DCMAKE_DISABLE_FIND_PACKAGE_BLAS=TRUE \
+            -DCMAKE_DISABLE_FIND_PACKAGE_OpenMP=TRUE
+          cmake --build "${RUNNER_TEMP}/host-validation-core-package-test" --parallel 2
+          "${RUNNER_TEMP}/host-validation-core-package-test/host-validation-core-package-test"
           "${RUNNER_TEMP}/host-validation-package-test/host-validation-package-test"
           "${RUNNER_TEMP}/host-validation-package-test/host-validation-operations-package-test"
           "${RUNNER_TEMP}/host-validation-package-test/host-validation-comparison-package-test"
