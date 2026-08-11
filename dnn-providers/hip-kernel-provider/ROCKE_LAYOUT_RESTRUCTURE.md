@@ -170,3 +170,65 @@ Non-attention platform code is otherwise unchanged.
   `hip-kernel-provider`, off POC / PR #9533).
 - Optional later: rename `platform/Python` to `platform/python`, `Cpp` to `cpp`.
 ```
+
+---
+
+# Addendum: the convolution carve
+
+The SDPA carve above was scoped as "everything non-attention stays in
+platform". The convolution family has since been carved out the same way,
+making `library/` a two-vertical tree (`SDPA/MHA` + `convolution`) rather
+than a single-vertical one. The rules are unchanged; this records what conv
+needed that attention did not.
+
+## What moved
+
+| `library/` dir | Source (from platform) |
+|---|---|
+| `kernels/common/` | `instances/common/{conv_implicit_gemm, _conv_implicit_gemm_common, conv_implicit_gemm_wgrad, conv_direct_grouped, deep_fused_conv_pool, img2col}.py` |
+| `kernels/{gfx950,gfx1151,gfx1201}/` | `instances/<arch>/deep_fused_conv_pool.py` (new `gfx1201` package) |
+| `kernels/lowering.py` | the conv `lower_*` wrappers + `*_spec_to_dict` adapters from `core/backend.py` |
+| `kernels/manifest.py` | new — registers the `deep_fused_conv_pool_*` manifest runners |
+| `builders/` | `examples/common/bake_off_{direct_conv_16c,direct_conv_4c,implicit_gemm}.py`, `examples/{gfx950,gfx1151}/deep_conv_fusion/`, `examples/gfx1201/deep_fused_conv_pool_verify.py`, plus the conv slices split out of `hip_lowering_parity.py` and `heuristics/gen_sweep_data.py` |
+| `dispatch/conv.py` | `dispatch/families/conv.py` |
+| `tests/` | the 8 conv `*_emit.py`/`.c` parity pairs, the dispatch suite, the gfx950 smoke test, and the conv-kernel-subject tests from `test_rocke.py` |
+| `benchmarks/common/` | `benchmark/{benchmark_implicit_gemm_conv,conv_reference}.py` |
+
+`img2col` moves with conv: it top-level imports `ConvProblem` /
+`make_a_descriptor` and exists only to materialise the implicit-GEMM A operand.
+
+## Three things conv needed that attention did not
+
+1. **`core/backend.py` was wired for conv.** Attention has no `lower_*` entry
+   there; conv had four. Each builds a `py_fn` closure that imports its Python
+   builder, which the SDK may no longer do. Resolved by exposing
+   `lower_family` / `import_engine` / `name_of` as public aliases in
+   `core/backend.py` and moving the wrappers to `kernels/lowering.py`.
+   Backend selection, the differential comparison and the error taxonomy stay
+   shared with every in-tree family.
+2. **`core/lower_cktile.py` type-guarded on the conv spec.** Two lazy imports
+   of `ImplicitGemmConvSpec` for `isinstance`. `lower_implicit_gemm_conv_to_cktile`
+   stays in platform as a lowering backend (alongside `lower_llvm` /
+   `lower_hip`); the guard is now structural (`_is_implicit_gemm_conv_spec`).
+3. **`run_manifest.py` shipped two conv runners.** The kind registry already
+   exposed `register_manifest_runner` for "a family whose buffer knowledge
+   lives outside this package"; `kernels/manifest.py` uses it. The plain
+   `conv_*` runner is pure buffer marshalling and stays in platform.
+
+## Clarification to §5's one-way rule
+
+The rule constrains the **SDK package** (`platform/python/rocke/`), which holds
+zero `kernels` / `builders` imports. `platform/tests/` is exempt and already
+was: `tests/instances/rocke_ir_parity_harness.py` lazily imports
+`kernels.common.attention_unified` in ten places. Conv follows that precedent —
+the IR parity harness and the platform tests that use a conv spec as a vehicle
+for *platform* behaviour (CDNA primitives, target intrinsics, pack-args ABI,
+CK Tile / HIP lowering coverage) stay put and import `kernels.*`.
+
+## Verification performed
+
+- All 24 conv parity-emitter SHAs byte-identical to `develop`.
+- `run_diff.find_families()` enumerates the same 68 families before and after.
+- AST sweep: no stale `rocke.instances` conv import anywhere in the tree.
+- SDK package holds no library import; `import rocke` works with the library
+  absent from `sys.path`.

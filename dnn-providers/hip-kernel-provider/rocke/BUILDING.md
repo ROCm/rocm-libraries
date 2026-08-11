@@ -5,11 +5,12 @@
 | Root | Packages | Installed in product? |
 |------|----------|-----------------------|
 | `platform/python` | `rocke` (authoring SDK + engine frontend) | yes (wheel / CMake) |
-| `library`         | `kernels`, `builders`, `dispatch` (SDPA/MHA) | **no** — build-time only |
+| `library`         | `kernels`, `builders`, `dispatch` (SDPA/MHA, convolution) | **no** — build-time only |
 
-The package import name is `rocke`; the SDPA product lives under separate
-top-level packages. Because the two halves sit under different roots, every
-process that touches both needs both roots resolvable.
+The package import name is `rocke`; the carved-out kernel verticals (SDPA/MHA
+and convolution) live under separate top-level packages. Because the two halves
+sit under different roots, every process that touches both needs both roots
+resolvable.
 
 We do **not** scatter `sys.path` surgery across scripts. Instead both roots are
 **editable-installed** once into an environment, after which `rocke`, `kernels`,

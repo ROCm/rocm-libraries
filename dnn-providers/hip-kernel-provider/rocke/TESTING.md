@@ -26,7 +26,8 @@ docs own that concrete detail, and this one defers to them:
 | [**`platform/dsl_docs/development/testing.md`**](platform/dsl_docs/development/testing.md) | how to run & debug tests locally | "how do I run this / why did it fail?" |
 
 **Scope: the whole rocKE engine** — both the `platform/` tree (core engines, IR,
-dispatch) and the `library/` tree (the attention kernel surface). Platform vs.
+dispatch) and the `library/` tree (the attention and convolution kernel
+surfaces). Platform vs.
 library is an **emerging modular boundary**; the strategy spans both today and
 will evolve to reflect that modularity. Out of scope: `ck4inductor` /
 `example/ck_tile/dsl` tests, which drive external packages and live in
@@ -304,7 +305,7 @@ Read coverage from the emitter configs ([`platform/tests/README.md`](platform/te
 
 | # | Gap | Impact | Target |
 |---|---|---|---|
-| G6 | **Orphaned `library/` behavioral pytest** | Attention *platform behavior* (builds, dispatch wiring, golden IR) runs in no gated tier — only its parity emitters ride the gate | Gate a `library` pytest tier |
+| G6 | **Orphaned `library/` behavioral pytest** | Attention and convolution *platform behavior* (builds, dispatch wiring, golden IR) runs in no gated tier — only their parity emitters ride the gate | Gate a `library` pytest tier |
 | G7 | **Orphaned `platform/python` pytest** (heuristics, benchmark) | Platform unit tests outside `platform/tests` never run in gate or CI | Collect or relocate them |
 
 ### 7.3 What "green" does and does not mean today

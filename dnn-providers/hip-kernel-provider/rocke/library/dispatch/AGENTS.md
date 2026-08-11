@@ -108,3 +108,23 @@ PYTHONPATH=library:platform/python python -m unittest discover \
 ```
 
 All dispatch tests complete in < 1 s.
+
+---
+
+# Convolution dispatcher
+
+`conv.py` is the second family in this package, carved out of the platform's
+`rocke.dispatch.families.conv` alongside the convolution kernels. It follows
+the same contract as the attention dispatcher above: it owns the
+`CONV_REGISTRY`, `ConvRequest` and `dispatch_conv`, and reaches back into
+`rocke.dispatch.core` for the shared `CandidateRegistry` / `Capability` /
+`DispatchResult` machinery.
+
+Candidates build specs from `kernels.common.conv_implicit_gemm`
+(`ImplicitGemmConvSpec`), so the module imports the kernel tree directly
+rather than through `rocke.instances` — the conv builders no longer live in
+the platform SDK.
+
+Tests: `library/tests/dispatch/conv/test_conv.py`.
+
+    python -m unittest discover -s library/tests/dispatch/conv -p "test_*.py" -v
