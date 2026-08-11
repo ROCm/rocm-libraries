@@ -34,6 +34,7 @@ add_library(roc::host-validation-core ALIAS host-validation-core)
 
 add_library(host-validation STATIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src/axpby.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/comparison.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/epilogue.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/generation.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/gemm.cpp"
@@ -90,7 +91,7 @@ target_sources(host-validation
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/reduction.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/softmax.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/structured_sparsity.hpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/detail/comparison_impl.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/typed_comparison.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/validation.hpp"
 )
 set_target_properties(host-validation

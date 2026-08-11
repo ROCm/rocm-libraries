@@ -107,6 +107,30 @@ if(EXISTS
     )
 endif()
 
+if(EXISTS
+   "${HOST_VALIDATION_SOURCE_DIR}/include/roc/host_validation/detail/comparison_impl.hpp"
+)
+    message(
+        FATAL_ERROR
+        "Comparison implementation must remain behind the compiled component boundary."
+    )
+endif()
+
+file(
+    READ
+    "${HOST_VALIDATION_SOURCE_DIR}/include/roc/host_validation/comparison.hpp"
+    comparison_header
+)
+foreach(forbidden IN ITEMS "typed_comparison" "detail/comparison" "template <")
+    string(FIND "${comparison_header}" "${forbidden}" position)
+    if(NOT position EQUAL -1)
+        message(
+            FATAL_ERROR
+            "Canonical comparison facade exposes typed implementation text: ${forbidden}"
+        )
+    endif()
+endforeach()
+
 file(
     GLOB_RECURSE
     component_sources
