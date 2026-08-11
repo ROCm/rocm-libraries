@@ -17,6 +17,7 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
+#include <hipdnn_plugin_sdk/ingestor/IDeviceResolver.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelHeuristic.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
@@ -170,6 +171,25 @@ public:
 
     ScopedTestSymbols(const ScopedTestSymbols&) = delete;
     ScopedTestSymbols& operator=(const ScopedTestSymbols&) = delete;
+};
+
+/// A device resolver for tests that construct an engine. Reports one fixed device, since
+/// nothing here exercises multi-device behavior.
+class TestDeviceResolver : public IDeviceResolver<int>
+{
+public:
+    DeviceId deviceId(const int& /*handle*/) const override
+    {
+        return 0;
+    }
+
+    const hipDeviceProp_t& deviceProperties(DeviceId /*deviceId*/) const override
+    {
+        return _properties;
+    }
+
+private:
+    hipDeviceProp_t _properties = testDeviceProperties();
 };
 
 /// A descriptor id from a short seed, so a fixture can name ids readably while the type

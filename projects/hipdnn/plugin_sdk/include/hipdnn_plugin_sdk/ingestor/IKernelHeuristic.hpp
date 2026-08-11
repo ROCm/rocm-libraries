@@ -22,23 +22,20 @@ namespace hipdnn_plugin_sdk::ingestor
  * One level below hipDNN's engine-selection heuristic, which decides *which engine*
  * handles a graph and is untouched by this system.
  *
- * Two levels of interface, deliberately:
+ * An implementation supplies `score()` and nothing else. It ranks one kernel at a time
+ * and never sees the catalog, so a kernel's score cannot depend on which other kernels
+ * are present. That is what makes filtering and ranking commute: a knob-filtered subset
+ * ranks exactly as it did in the whole catalog, so the kernel a knob setting selects is
+ * the kernel the reported default named. The failure it prevents, a reported default
+ * that a knob setting then contradicts, is silent and surfaces to a user rather than to
+ * the author who caused it.
  *
- * - `score()` ranks one kernel at a time and never sees the catalog. Because a kernel's
- *   score cannot depend on which other kernels are present, filtering and ranking
- *   commute: a knob-filtered subset ranks exactly as it did in the whole catalog, so the
- *   kernel a knob setting selects is the kernel the reported default named. That failure
- *   — a reported default a knob setting then contradicts — is silent and surfaces to a
- *   user rather than to the author who caused it, which is why the property is
- *   structural here rather than advisory.
- *
- * - `rank()` is virtual and receives the whole catalog. A future selector that must
- *   reason over the candidate set as a whole (spreading a choice across a batch, or
- *   ranking by a criterion only meaningful relatively) overrides it.
- *
- * **Overriding `rank()` forfeits the consistency guarantee above.** An override must
- * state what a knob-filtered query then means for it; the default implementation is the
- * shape every day-one descriptor-backed heuristic should use.
+ * RFC 0017 §9.2 makes that structural rather than advisory: the scorer interface "takes
+ * one kernel at a time and is never handed the catalog, so a scorer that ranks relative
+ * to its peers cannot be written against it". `rank()` is therefore non-virtual. A
+ * selector that must reason over the candidate set as a whole is admitted by the
+ * heuristic follow-up RFC, which owns deciding what a knob-filtered query means once
+ * ranking is no longer per kernel; re-opening this for override then is additive.
  */
 class IKernelHeuristic
 {
@@ -51,34 +48,45 @@ public:
     /**
      * @brief Orders @p catalog best-first.
      *
-     * The default implementation scores each entry independently and sorts descending,
-     * breaking ties deterministically: first on the kernel's explicit `priority`, then on
-     * its descriptor id compared as bytes. That id order carries no meaning — it is
-     * chosen only for being stable across runs, load orders, and machines, so two
-     * processes given the same catalog always choose the same kernel.
+     * Scores each entry independently and sorts descending, breaking ties
+     * deterministically: first on the kernel's explicit `priority`, then on its
+     * descriptor id compared as bytes. That id order carries no meaning — it is chosen
+     * only for being stable across runs, load orders, and machines, so two processes
+     * given the same catalog always choose the same kernel.
+     *
+     * Each kernel is scored exactly once, before sorting, rather than inside the
+     * comparator. A scorer is a model evaluation in the data-driven form, so scoring
+     * from the comparator would run inference O(n log n) times for an n-kernel catalog
+     * instead of n, and would also let a scorer that is not perfectly deterministic
+     * produce an inconsistent ordering.
      */
-    virtual std::vector<KernelDefinition> rank(const Catalog& catalog,
-                                               const MatchContext& context) const
+    std::vector<KernelDefinition> rank(const Catalog& catalog, const MatchContext& context) const
     {
-        std::vector<KernelDefinition> ranked = catalog.entries;
+        std::vector<std::pair<double, const KernelDefinition*>> scored;
+        scored.reserve(catalog.entries.size());
+        for(const auto& entry : catalog.entries)
+        {
+            scored.emplace_back(score(entry, context), &entry);
+        }
 
-        std::stable_sort(
-            ranked.begin(),
-            ranked.end(),
-            [this, &context](const KernelDefinition& lhs, const KernelDefinition& rhs) {
-                const double lhsScore = score(lhs, context);
-                const double rhsScore = score(rhs, context);
-                if(lhsScore != rhsScore)
-                {
-                    return lhsScore > rhsScore;
-                }
-                if(lhs.priority != rhs.priority)
-                {
-                    return lhs.priority > rhs.priority;
-                }
-                return lhs.kernelId < rhs.kernelId;
-            });
+        std::stable_sort(scored.begin(), scored.end(), [](const auto& lhs, const auto& rhs) {
+            if(lhs.first != rhs.first)
+            {
+                return lhs.first > rhs.first;
+            }
+            if(lhs.second->priority != rhs.second->priority)
+            {
+                return lhs.second->priority > rhs.second->priority;
+            }
+            return lhs.second->kernelId < rhs.second->kernelId;
+        });
 
+        std::vector<KernelDefinition> ranked;
+        ranked.reserve(scored.size());
+        for(const auto& [_, entry] : scored)
+        {
+            ranked.push_back(*entry);
+        }
         return ranked;
     }
 };

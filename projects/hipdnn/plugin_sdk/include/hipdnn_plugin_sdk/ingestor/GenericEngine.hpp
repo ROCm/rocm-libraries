@@ -5,9 +5,12 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <stdexcept>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -56,6 +59,12 @@ public:
      * @param deviceResolver Answers which device each call is for, from the handle that
      *        carries it. Held by reference; owned by the provider, which must keep it
      *        alive for the engine's lifetime.
+     *
+     * @throws std::invalid_argument if a knob names no field in the engine's metadata
+     *         schema. RFC 0017 §4 makes that a load error: a knob is only a name, with
+     *         the field supplying its type, its default and its legal values, so a knob
+     *         matching no field can never be reported or honoured. Caught here because
+     *         this is the one place holding both the UED and its KMD.
      */
     GenericEngine(EngineDescriptor engine,
                   std::shared_ptr<KernelIngestorStateManager<THandle>> stateManager,
@@ -65,6 +74,19 @@ public:
         , _id(hipdnn_data_sdk::utilities::engineNameToId(_engine.name))
         , _planBuilder(_engine, _stateManager, deviceResolver)
     {
+        const auto& fields = _stateManager->metadataSchema().fields;
+        for(const auto& knob : _engine.knobs)
+        {
+            const auto declared
+                = std::any_of(fields.begin(), fields.end(), [&knob](const MetadataField& field) {
+                      return field.name == knob;
+                  });
+            if(!declared)
+            {
+                throw std::invalid_argument("engine '" + _engine.name + "' exposes knob '" + knob
+                                            + "', which its metadata schema does not declare");
+            }
+        }
     }
 
     /// The descriptor this engine was built from, for diagnostics and for a caller that

@@ -37,12 +37,16 @@ inline flatbuffers::FlatBufferBuilder
                         const std::vector<int64_t>& dims = {1, 1, 1, 1},
                         std::optional<hipdnn_flatbuffers_sdk::utilities::UuidBytes> graphId
                         = std::nullopt,
-                        bool binary = true)
+                        bool binary = true,
+                        const std::optional<std::vector<int64_t>>& explicitStrides = std::nullopt)
 {
     namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 
     flatbuffers::FlatBufferBuilder builder;
-    const std::vector<int64_t> strides(dims.size(), 1);
+    // Packed strides by default; an explicit set lets a test describe a view into a
+    // larger buffer, whose stride order the layout classifier may not accept.
+    const std::vector<int64_t> strides
+        = explicitStrides.has_value() ? *explicitStrides : std::vector<int64_t>(dims.size(), 1);
 
     std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensors;
     for(const auto uid : {INPUT_A_UID, INPUT_B_UID, OUTPUT_UID})

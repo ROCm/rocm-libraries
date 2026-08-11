@@ -135,6 +135,24 @@ TEST(TestPointwiseAddGraphMatcher, AcceptsTheUpperSupportedRank)
     EXPECT_TRUE(pointwiseAddGraphMatches(fixture.context()));
 }
 
+TEST(TestPointwiseAddGraphMatcher, RefusesAStrideOrderTheDispatchPathCannotClassify)
+{
+    // Same class as the rank refusal above, and the same root cause: the provider's
+    // compile options derive a layout from the tensor's strides and throw on any 4D
+    // order that is neither NCHW nor NHWC. A 1-element tensor viewing into a larger
+    // buffer can carry such an order, so without this the matcher accepts a graph the
+    // plan build then fails on, which RFC 0017 section 8.6 forbids.
+    const GraphFixture fixture(
+        buildPointwiseGraph(data_objects::PointwiseMode::ADD,
+                            data_objects::DataType::FLOAT,
+                            {1, 1, 1, 1},
+                            std::nullopt,
+                            /*binary=*/true,
+                            /*explicitStrides=*/std::vector<int64_t>{8, 2, 4, 1}));
+
+    EXPECT_FALSE(pointwiseAddGraphMatches(fixture.context()));
+}
+
 TEST(TestPointwiseAddGraphMatcher, RefusesAUnaryPointwise)
 {
     const GraphFixture fixture(buildPointwiseGraph(data_objects::PointwiseMode::ADD,

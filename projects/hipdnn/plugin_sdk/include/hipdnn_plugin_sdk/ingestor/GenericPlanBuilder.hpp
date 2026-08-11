@@ -64,8 +64,7 @@ public:
     /// a membership test needs no order, so the heuristic is never run here.
     bool isApplicable(const THandle& handle, const IGraph& opGraph) const override
     {
-        const auto deviceId = _deviceResolver.deviceId(handle);
-        return !_stateManager->unsortedDefinitions(deviceId, contextFor(deviceId, opGraph)).empty();
+        return !_stateManager->unsortedDefinitions(contextFor(handle, opGraph)).empty();
     }
 
     /**
@@ -79,13 +78,16 @@ public:
                                const IGraph& opGraph,
                                const TSettings& /*executionSettings*/) const override
     {
-        const auto deviceId = _deviceResolver.deviceId(handle);
-        const auto context = contextFor(deviceId, opGraph);
+        const auto context = contextFor(handle, opGraph);
         size_t maxBytes = 0;
-        for(const auto& kernel : _stateManager->sortedDefinitions(deviceId, context))
+        // Unsorted deliberately: a maximum over the survivors is order-independent, and
+        // this call arrives for every candidate engine. Ranking here would load and run
+        // each engine's heuristic to compute a number that does not depend on the order,
+        // which is the cost the lazy-ranking split exists to avoid.
+        for(const auto& kernel : _stateManager->unsortedDefinitions(context))
         {
             const auto dispatcher = _stateManager->getDispatchDetails(kernel);
-            maxBytes = std::max(maxBytes, dispatcher.handler->workspaceBytes(kernel));
+            maxBytes = std::max(maxBytes, dispatcher.handler->workspaceBytes(context, kernel));
         }
         return maxBytes;
     }
@@ -113,9 +115,8 @@ public:
                    const IEngineConfig& /*engineConfig*/,
                    TContext& executionContext) const override
     {
-        const auto deviceId = _deviceResolver.deviceId(handle);
-        const auto context = contextFor(deviceId, opGraph);
-        const auto ranked = _stateManager->sortedDefinitions(deviceId, context);
+        const auto context = contextFor(handle, opGraph);
+        const auto ranked = _stateManager->sortedDefinitions(context);
         if(ranked.empty())
         {
             throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
@@ -140,9 +141,7 @@ public:
     {
         using namespace hipdnn_flatbuffers_sdk::data_objects;
 
-        const auto deviceId = _deviceResolver.deviceId(handle);
-        const auto ranked
-            = _stateManager->sortedDefinitions(deviceId, contextFor(deviceId, opGraph));
+        const auto ranked = _stateManager->sortedDefinitions(contextFor(handle, opGraph));
         std::vector<KnobT> knobs;
         if(ranked.empty())
         {
@@ -197,8 +196,11 @@ public:
     }
 
 private:
-    MatchContext contextFor(DeviceId deviceId, const IGraph& opGraph) const
+    /// Binds the graph and the device this call is for. Resolving the device here, once
+    /// per call, is what keeps the cache key and the matchers reading the same one.
+    MatchContext contextFor(const THandle& handle, const IGraph& opGraph) const
     {
+        const auto deviceId = _deviceResolver.deviceId(handle);
         return MatchContext{opGraph, deviceId, _deviceResolver.deviceProperties(deviceId)};
     }
 

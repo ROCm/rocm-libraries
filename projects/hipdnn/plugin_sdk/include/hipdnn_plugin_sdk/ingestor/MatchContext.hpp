@@ -30,9 +30,33 @@ using GraphId = hipdnn_flatbuffers_sdk::utilities::UuidBytes;
 /// still live, so keying on it would tie cached work to a lifetime unrelated to that
 /// work's validity. Two handles on one device share an entry; one handle rebound to
 /// another device does not.
-using CatalogKey = std::pair<GraphId, DeviceId>;
+///
+/// RFC 0017 §8.1 keys this on (engine id, graph id, device id) and §8.6 folds in a
+/// descriptor-inventory generation. Neither is present, and both omissions are scoped
+/// rather than free:
+///
+/// - The engine id is implicit because one state manager serves one engine and owns this
+///   cache, so no other engine's catalog can reach it. That holds only while a state
+///   manager is never shared across engines.
+/// - The generation retires cached verdicts when a discovery scan changes the pack
+///   inventory. Nothing is loaded from a file yet, so the inventory is fixed at compile
+///   time and the generation would be a constant.
+///
+/// Both become real key components once engines are built from UED files and packs can
+/// be dropped in. This is a struct rather than a std::pair so adding them then does not
+/// change how the key is spelled at its use sites.
+struct CatalogKey
+{
+    GraphId graphId;
+    DeviceId deviceId;
 
-/// std::hash has no std::pair specialization, so the cache needs this explicitly.
+    bool operator==(const CatalogKey& other) const noexcept
+    {
+        return graphId == other.graphId && deviceId == other.deviceId;
+    }
+};
+
+/// A user-defined key has no std::hash, so the cache is given this explicitly.
 struct CatalogKeyHash
 {
     size_t operator()(const CatalogKey& key) const noexcept
@@ -41,12 +65,12 @@ struct CatalogKeyHash
         // folding its bytes and mixing the device ordinal in is sufficient here; this
         // keys an in-process cache and is never persisted or exposed.
         size_t hash = 1469598103934665603ULL;
-        for(const uint8_t byte : key.first)
+        for(const uint8_t byte : key.graphId)
         {
             hash ^= static_cast<size_t>(byte);
             hash *= 1099511628211ULL;
         }
-        hash ^= static_cast<size_t>(key.second) + 0x9e3779b9ULL + (hash << 6U) + (hash >> 2U);
+        hash ^= static_cast<size_t>(key.deviceId) + 0x9e3779b9ULL + (hash << 6U) + (hash >> 2U);
         return hash;
     }
 };

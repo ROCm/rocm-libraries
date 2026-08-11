@@ -97,7 +97,8 @@ const data_objects::TensorAttributes& firstInput(const MatchContext& context,
 
 } // namespace
 
-size_t PointwiseAddDispatchHandler::workspaceBytes(const KernelDefinition& kernel) const
+size_t PointwiseAddDispatchHandler::workspaceBytes(const MatchContext& /*context*/,
+                                                   const KernelDefinition& kernel) const
 {
     return kernel.getIntMetadata(std::string(BLOCK_SIZE_FIELD)) == LARGE_BLOCK_SIZE
                ? LARGE_BLOCK_WORKSPACE_BYTES
