@@ -242,6 +242,7 @@ template <ck::index_t NDimSpatial,
           BlockGemmPipelineScheduler Scheduler,
           BlockGemmPipelineVersion PipelineVersion>
 using device_grouped_conv_bwd_weight_v3_xdl_c_shuffle_bf16_large_k_instances = std::tuple<
+#if defined(CK_USE_GFX1250)
     // clang-format off
         //#########################################|       Num| InLayout| WeiLayout| OutLayout| InData| WeiData| OutData| AccData|          In|         Wei|         Out|              ConvBackward| Block|  MPer|  NPer| K0Per| K1| MPer| NPer| MXdl| NXdl|  ABlockTransfer|   ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockLds|  BBlockTransfer| BBlockTransfer| BBlockTransfer| BlockTransfer| BBlockTransfer| BBlockTransfer| BBlockLds|    CShuffle|    CShuffle|   CBlockTransfer|  CBlockTransfer| BlockGemm| BlockGemm|
         //#########################################|       Dim|         |          |          |   Type|    Type|    Type|    Type| Elementwise| Elementwise| Elementwise|                    Weight|  Size| Block| Block| Block|   |  XDL|  XDL|  Per|  Per|   ThreadCluster|    ThreadCluster| SrcAccessOrder|   SrcVectorDim|      SrcScalar|      DstScalar| AddExtraM|   ThreadCluster|  ThreadCluster| SrcAccessOrder|  SrcVectorDim|      SrcScalar|      DstScalar| AddExtraN| MXdlPerWave| NXdlPerWave|   ClusterLengths| ScalarPerVector|  Pipeline|  Pipeline|
@@ -257,6 +258,7 @@ using device_grouped_conv_bwd_weight_v3_xdl_c_shuffle_bf16_large_k_instances = s
         DeviceGroupedConvBwdWeight_Xdl_CShuffleV3< NDimSpatial,  ALayout,   BLayout,   ELayout,   BF16,    BF16,    BF16,     F32, PassThrough, PassThrough, PassThrough,                  ConvSpec,   512,    64,   128,   512, 16,   16,   16,    2,    1,     S<32, 8, 2>,       S<2, 0, 1>,     S<2, 0, 1>,              1,              8,              8,      true,     S<16,16, 2>,     S<2, 0, 1>,     S<2, 0, 1>,             1,              8,              8,      true,           1,           1,   S<1, 32, 1,16>,               8, Scheduler, PipelineVersion>,
         DeviceGroupedConvBwdWeight_Xdl_CShuffleV3< NDimSpatial,  ALayout,   BLayout,   ELayout,   BF16,    BF16,    BF16,     F32, PassThrough, PassThrough, PassThrough,                  ConvSpec,   512,    64,   128,   512, 16,   16,   16,    2,    1,     S<32, 8, 2>,       S<2, 0, 1>,     S<2, 0, 1>,              1,              8,              8,      true,     S<16,16, 2>,     S<2, 0, 1>,     S<2, 0, 1>,             1,              8,              8,      true,           1,           1,   S<1, 32, 1,16>,               8, Scheduler, PipelineVersion>
     //clang-format on
+#endif
     >;
 
 // large-tensor variants (uses ck::long_index_t for index arithmetic; requires packed tensors)
