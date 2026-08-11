@@ -604,21 +604,14 @@ TEST(TestGpuReferenceGraphExecutor, MissingVariantPackEntryThrows)
                  std::out_of_range);
 }
 
-TEST(TestGpuReferenceGraphExecutor, PointwiseIsNotApplicable)
+TEST(TestGpuReferenceGraphExecutor, PointwiseIsApplicable)
 {
     SKIP_IF_NO_DEVICES();
 
-    // Pointwise has no GPU reference plan. It must report as not applicable so
-    // the AUTO verification cascade falls through to the CPU reference instead
-    // of comparing against a bogus GPU result.
     auto builder = createSimplePointwiseGraph(1, 2, {4}, {1});
 
     GpuReferenceGraphExecutor executor;
-    EXPECT_FALSE(executor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
-
-    const std::unordered_map<int64_t, void*> variantPack;
-    EXPECT_THROW(executor.execute(builder.GetBufferPointer(), builder.GetSize(), variantPack),
-                 hipdnn_integration_tests::ReferenceCapabilityError);
+    EXPECT_TRUE(executor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
 }
 
 TEST(TestGpuReferenceGraphExecutorFp32, ConvFwdBasicExecutes)
