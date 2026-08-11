@@ -115,6 +115,17 @@ rocke_value_t* rocke_conv_a_descriptor(rocke_ir_builder_t* b,
     /* k_val = b_.add(k_off_capture[0], col) */
     rocke_value_t* k_val = rocke_b_add(b, ctx->k_off_capture, col);
 
+    /* Pointwise fast path: flat offset = m * C + c, valid = (m < M) & (c < C) */
+    if(ctx->is_pointwise)
+    {
+        rocke_value_t* m_val = rocke_b_add(b, ctx->block_m_off_v, row);
+        rocke_value_t* off = rocke_b_add(b, rocke_b_mul(b, m_val, ctx->ir_c_C_pw), k_val);
+        rocke_value_t* m_ok = rocke_b_cmp_lt(b, m_val, ctx->ir_c_M_pw);
+        rocke_value_t* c_ok = rocke_b_cmp_lt(b, k_val, ctx->ir_c_C_pw);
+        *out_valid = rocke_b_land(b, m_ok, c_ok);
+        return off;
+    }
+
     if(ov != NULL && ov->a_mhw_index_fn != NULL)
     {
         /* Decomposed A descriptor: feed (n, ho, wo) straight in, skipping the
@@ -173,6 +184,16 @@ rocke_value_t* rocke_conv_b_descriptor(rocke_ir_builder_t* b,
     rocke_value_t* k_out = rocke_b_add(b, ctx->block_n_off_v, row);
     rocke_value_t* kg = rocke_b_add(b, ctx->k_off_capture, col);
 
+    /* Pointwise fast path: flat offset = k_out * C + c, valid = (k_out < K) & (c < C) */
+    if(ctx->is_pointwise)
+    {
+        rocke_value_t* off = rocke_b_add(b, rocke_b_mul(b, k_out, ctx->ir_c_C_pw), kg);
+        rocke_value_t* k_ok = rocke_b_cmp_lt(b, k_out, ctx->ir_c_K_pw);
+        rocke_value_t* c_ok = rocke_b_cmp_lt(b, kg, ctx->ir_c_C_pw);
+        *out_valid = rocke_b_land(b, k_ok, c_ok);
+        return off;
+    }
+
     const char* names[2] = {"k_out", "k_gemm"};
     rocke_value_t* vals[2] = {k_out, kg};
     rocke_value_t* off = NULL;
@@ -224,16 +245,14 @@ void rocke_conv_emit_load_phase(rocke_conv_build_ctx_t* ctx,
                                            0x7FFFFFFF, /* oob_sentinel default = (1 << 31) - 1 */
                                            ROCKE_CACHE_STREAM);
 
-        rocke_async_tile_loader_slot_t b_slot;
-        rocke_async_tile_loader_bind(b, &ctx->b_loader, B_dst, ctx->warp_id, &b_slot);
-        rocke_async_tile_loader_slot_issue(b,
-                                           &b_slot,
-                                           ctx->tid,
-                                           ctx->b_rsrc,
-                                           rocke_conv_b_descriptor,
-                                           ctx,
-                                           0x7FFFFFFF,
-                                           ROCKE_CACHE_STREAM);
+        {
+            rocke_loads_descriptor_fn b_fn
+                = (ctx->b_descriptor_fn != NULL) ? ctx->b_descriptor_fn : rocke_conv_b_descriptor;
+            rocke_async_tile_loader_slot_t b_slot;
+            rocke_async_tile_loader_bind(b, &ctx->b_loader, B_dst, ctx->warp_id, &b_slot);
+            rocke_async_tile_loader_slot_issue(
+                b, &b_slot, ctx->tid, ctx->b_rsrc, b_fn, ctx, 0x7FFFFFFF, ROCKE_CACHE_STREAM);
+        }
         return;
     }
 
@@ -257,6 +276,67 @@ void rocke_conv_emit_load_phase(rocke_conv_build_ctx_t* ctx,
                                          ctx->a_rsrc,
                                          NULL); /* use_buffer_rsrc => ptr unused */
     }
-    rocke_coalesced_tile_loader_load(
-        b, &ctx->b_sync_loader, ctx->tid, B_dst, rocke_conv_b_descriptor, ctx, ctx->b_rsrc, NULL);
+    {
+        rocke_loads_descriptor_fn b_fn
+            = (ctx->b_descriptor_fn != NULL) ? ctx->b_descriptor_fn : rocke_conv_b_descriptor;
+        rocke_coalesced_tile_loader_load(
+            b, &ctx->b_sync_loader, ctx->tid, B_dst, b_fn, ctx, ctx->b_rsrc, NULL);
+    }
+}
+
+/* ===================================================================== *
+ *  rocke_conv_emit_global_read -- split load, phase 1 of 2.
+ *
+ *  Mirrors Python emit_global_read(k_off) -> (k_off, a_staged, b_staged).
+ *  Sets ctx->k_off_capture = k_off (so the descriptor closures see the
+ *  correct tile offset during load_global), then issues only the
+ *  buffer_load_vN ops for A and B into VGPR SSA values stored in
+ *  *a_staged / *b_staged. The smem_store_vN ops are deferred to
+ *  rocke_conv_emit_lds_write. Only valid on the sync (non-async-DMA) path.
+ * ===================================================================== */
+void rocke_conv_emit_global_read(rocke_conv_build_ctx_t* ctx,
+                                 rocke_value_t* k_off,
+                                 rocke_ctl_staged_t* a_staged,
+                                 rocke_ctl_staged_t* b_staged)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    /* k_off_capture[0] = k_off */
+    ctx->k_off_capture = k_off;
+    rocke_coalesced_tile_loader_load_global(b,
+                                            &ctx->a_sync_loader,
+                                            ctx->tid,
+                                            rocke_conv_a_descriptor,
+                                            ctx,
+                                            ctx->a_rsrc,
+                                            NULL,
+                                            a_staged);
+    rocke_coalesced_tile_loader_load_global(b,
+                                            &ctx->b_sync_loader,
+                                            ctx->tid,
+                                            rocke_conv_b_descriptor,
+                                            ctx,
+                                            ctx->b_rsrc,
+                                            NULL,
+                                            b_staged);
+}
+
+/* ===================================================================== *
+ *  rocke_conv_emit_lds_write -- split load, phase 2 of 2.
+ *
+ *  Mirrors Python emit_lds_write(staged_tuple, A_dst, B_dst).
+ *  Restores ctx->k_off_capture = k_off (from the staged tuple's recorded
+ *  offset), then emits smem_store_vN for the VGPRs staged by a prior
+ *  rocke_conv_emit_global_read call.
+ * ===================================================================== */
+void rocke_conv_emit_lds_write(rocke_conv_build_ctx_t* ctx,
+                               rocke_value_t* k_off,
+                               const rocke_ctl_staged_t* a_staged,
+                               const rocke_ctl_staged_t* b_staged,
+                               rocke_value_t* A_dst,
+                               rocke_value_t* B_dst)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    ctx->k_off_capture = k_off;
+    rocke_coalesced_tile_loader_store_lds(b, &ctx->a_sync_loader, A_dst, a_staged);
+    rocke_coalesced_tile_loader_store_lds(b, &ctx->b_sync_loader, B_dst, b_staged);
 }
