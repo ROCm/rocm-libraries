@@ -211,10 +211,68 @@ const std::vector<std::unique_ptr<ISolversFinder>>& GetConvSolverFinders()
 
 } // namespace conv
 
-static float TryNaiveWithTimeout(const Handle& handle,
-                                 const Invoker& invoker,
-                                 const AnyInvokeParams& invoke_ctx,
-                                 float best_time)
+namespace {
+
+struct NaiveWarmup
+{
+    enum class Status
+    {
+        Completed,
+        TimedOut,
+        ScratchUnavailable,
+        UnsupportedInvokeParams,
+    };
+
+    Status status;
+    float elapsed;
+};
+
+/// Redirects the handle onto a pooled stream with profiling off, restoring both
+/// on scope exit so no early return can strand the handle off the root stream.
+struct AutoPoolStream
+{
+    AutoPoolStream(const Handle& h, int pool_id) : handle(h), prev_profiling(h.IsProfilingEnabled())
+    {
+        handle.SetStreamFromPool(pool_id);
+        handle.EnableProfiling(false);
+    }
+
+    ~AutoPoolStream()
+    {
+        handle.SetStreamFromPool(0);
+        handle.EnableProfiling(prev_profiling);
+    }
+
+    AutoPoolStream(const AutoPoolStream&)            = delete;
+    AutoPoolStream& operator=(const AutoPoolStream&) = delete;
+
+private:
+    const Handle& handle;
+    bool prev_profiling;
+};
+
+std::string NaiveSkipReason(NaiveWarmup::Status status, float best_time)
+{
+    switch(status)
+    {
+    case NaiveWarmup::Status::TimedOut:
+        return "exceeded " + std::to_string(env::value(MIOPEN_NAIVE_TIMEOUT_FACTOR)) +
+               "% of best non-naive time (" + std::to_string(best_time) + " ms)";
+    case NaiveWarmup::Status::ScratchUnavailable:
+        return "output tensor exceeds the scratch buffer cap";
+    case NaiveWarmup::Status::UnsupportedInvokeParams:
+        return "invoke params type does not support scratch redirection";
+    case NaiveWarmup::Status::Completed: break;
+    }
+    return "completed";
+}
+
+} // namespace
+
+static NaiveWarmup TryNaiveWithTimeout(const Handle& handle,
+                                       const Invoker& invoker,
+                                       const AnyInvokeParams& invoke_ctx,
+                                       float best_time)
 {
     std::shared_ptr<ScratchAllocation> scratch;
     AnyInvokeParams scratch_ctx;
@@ -224,7 +282,7 @@ static float TryNaiveWithTimeout(const Handle& handle,
         auto params = invoke_ctx.CastTo<conv::DataInvokeParams>();
         scratch     = handle.GetScratchBuffer(params.tensors.outDesc.GetNumBytes());
         if(!scratch)
-            return -1.0f;
+            return {NaiveWarmup::Status::ScratchUnavailable, 0.0f};
         params.tensors.out = scratch->buffer.get();
         scratch_ctx        = AnyInvokeParams{params};
     }
@@ -233,24 +291,18 @@ static float TryNaiveWithTimeout(const Handle& handle,
         auto params = invoke_ctx.CastTo<conv::WrWInvokeParams>();
         scratch     = handle.GetScratchBuffer(params.tensors.dwDesc.GetNumBytes());
         if(!scratch)
-            return -1.0f;
+            return {NaiveWarmup::Status::ScratchUnavailable, 0.0f};
         params.tensors.dw = scratch->buffer.get();
         scratch_ctx       = AnyInvokeParams{params};
     }
     else
-        return -1.0f;
+        return {NaiveWarmup::Status::UnsupportedInvokeParams, 0.0f};
 
     auto& tracker = handle.GetStreamTracker();
     auto slot     = tracker.acquire(handle);
     slot.scratch  = scratch;
 
-    handle.SetStreamFromPool(slot.pool_id);
-    handle.EnableProfiling(false);
-
-    auto guard = [&] {
-        handle.SetStreamFromPool(0);
-        handle.EnableProfiling(true);
-    };
+    AutoPoolStream stream_guard{handle, slot.pool_id};
 
     HipEventPtr ev_start = make_hip_event();
     HipEventPtr ev_stop  = make_hip_event();
@@ -267,7 +319,6 @@ static float TryNaiveWithTimeout(const Handle& handle,
     }
     catch(...)
     {
-        guard();
         tracker.abandon(slot);
         throw;
     }
@@ -288,18 +339,16 @@ static float TryNaiveWithTimeout(const Handle& handle,
         std::this_thread::yield();
     }
 
-    guard();
-
     if(finished)
     {
         tracker.release(slot);
         float warmup_elapsed = 0.0f;
         (void)hipEventElapsedTime(&warmup_elapsed, ev_start.get(), ev_stop.get());
-        return warmup_elapsed;
+        return {NaiveWarmup::Status::Completed, warmup_elapsed};
     }
 
     tracker.abandon(slot);
-    return -1.0f;
+    return {NaiveWarmup::Status::TimedOut, 0.0f};
 }
 
 /// Register invoker only for the best solution within algorithm.
@@ -421,18 +470,17 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
 
             if(cutoff_naive)
             {
-                const float warmup = TryNaiveWithTimeout(
+                const auto warmup = TryNaiveWithTimeout(
                     handle, invoker, invoke_ctx, core_result.find_search_best_time);
-                if(warmup < 0)
+                if(warmup.status != NaiveWarmup::Status::Completed)
                 {
-                    MIOPEN_LOG_I("Timeout: Naive Solver "
-                                 << algorithm_name.ToString() << ":" << sol.solver_id
-                                 << " exceeded " << env::value(MIOPEN_NAIVE_TIMEOUT_FACTOR)
-                                 << "% best budget (" << core_result.find_search_best_time
-                                 << " ms)");
+                    MIOPEN_LOG_I(
+                        "Skipped naive solver "
+                        << algorithm_name.ToString() << ":" << sol.solver_id << ": "
+                        << NaiveSkipReason(warmup.status, core_result.find_search_best_time));
                     continue;
                 }
-                first_elapsed = warmup;
+                first_elapsed = warmup.elapsed;
                 i             = 1;
             }
 

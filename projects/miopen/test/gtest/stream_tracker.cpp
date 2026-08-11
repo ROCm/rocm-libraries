@@ -148,6 +148,68 @@ TEST_F(GPU_StreamTracker_FP32, CascadeAbandonReclaim)
     }
 }
 
+TEST_F(GPU_StreamTracker_FP32, SweepReclaimsIdleStream)
+{
+    auto slot        = tracker.acquire(handle);
+    int abandoned_id = slot.pool_id;
+    tracker.abandon(std::move(slot));
+
+    tracker.sweep();
+
+    auto reclaimed = tracker.acquire(handle);
+    EXPECT_EQ(reclaimed.pool_id, abandoned_id);
+    tracker.release(reclaimed);
+}
+
+TEST_F(GPU_StreamTracker_FP32, SweepLeavesBusyStreamDraining)
+{
+    auto slot = tracker.acquire(handle);
+
+    StreamGate gate;
+    ASSERT_EQ(hipLaunchHostFunc(slot.stream, StreamGate::callback, &gate), hipSuccess);
+
+    int abandoned_id = slot.pool_id;
+    auto busy_stream = slot.stream;
+    tracker.abandon(std::move(slot));
+
+    tracker.sweep();
+
+    // Still gated, so the slot must not have been reclaimed
+    auto next = tracker.acquire(handle);
+    EXPECT_NE(next.pool_id, abandoned_id);
+    tracker.release(next);
+
+    gate.open();
+    ASSERT_EQ(hipStreamSynchronize(busy_stream), hipSuccess);
+
+    tracker.sweep();
+
+    // available_ is LIFO, so the just-swept slot is on top
+    auto reclaimed = tracker.acquire(handle);
+    EXPECT_EQ(reclaimed.pool_id, abandoned_id);
+    tracker.release(reclaimed);
+}
+
+TEST_F(GPU_StreamTracker_FP32, SweepReleasesScratch)
+{
+    auto prev     = handle.GetScratchBuffer(1);
+    const auto sz = (prev ? prev->size : 0) + 65536;
+    prev.reset();
+
+    auto scratch = handle.GetScratchBuffer(sz);
+    ASSERT_NE(scratch, nullptr);
+    ASSERT_EQ(scratch.use_count(), 1);
+
+    auto slot    = tracker.acquire(handle);
+    slot.scratch = scratch;
+    tracker.abandon(std::move(slot));
+    ASSERT_EQ(scratch.use_count(), 2); // local + draining slot
+
+    // No work on the stream, so sweep reclaims and drops the slot's reference
+    tracker.sweep();
+    EXPECT_EQ(scratch.use_count(), 1);
+}
+
 TEST_F(GPU_StreamTracker_FP32, ScratchAllocateAndReuse)
 {
     auto s1 = handle.GetScratchBuffer(1024);

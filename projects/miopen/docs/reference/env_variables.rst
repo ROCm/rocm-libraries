@@ -113,6 +113,14 @@ and :doc:`Performance database <../conceptual/perfdb>`.
         | is returned to an async pool for later reclamation. Naive
         | solvers are still used as a fallback when no non-naive solver
         | succeeds.
+        |
+        | Limitation: a skipped kernel keeps reading the caller's input
+        | tensors until it finishes. Freeing those tensors with
+        | ``hipFree`` is safe because it synchronizes the device first,
+        | but ``hipFreeAsync`` is ordered only against the stream it is
+        | given and can unmap memory the skipped kernel is still
+        | reading. Disable this option if the application frees
+        | convolution inputs through the stream-ordered allocator.
       - | 1 or unset: Enable (default)
         | 0: Disable
 
