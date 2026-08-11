@@ -10415,88 +10415,6 @@ class KernelWriterAssembly(KernelWriter):
     return imod
 
   ##############################################################################
-  # Max legal global-read byte offset for transpose loads (GLTr / DirectToVgpr).
-  #
-  # Transpose global loads (global_load_tr) use a bare 2-register address with
-  # NO buffer num_records bounds, unlike buffer_load. Without a clamp, a tile
-  # whose free dim is smaller than the macro-tile (e.g. N=8 padded to MT1=64) --
-  # or, more generally, the last K step of a small tensor -- reads past the end
-  # of the operand and faults when it abuts an unmapped page.
-  #
-  # The exact in-bounds byte limit is the SAME value buffer_load enforces in
-  # hardware via its SRD num_records word: Srd+2 holds
-  #   (tensor2dSize - tileStart)*bpe + prePad
-  # i.e. the number of valid bytes from the current SRD base to the tensor end.
-  # computeLoadSrd already computes it, and incrementSrd keeps it live (it
-  # decrements ShadowLimit and refreshes Srd+2 before each K step), so at every
-  # load site Srd+2 is the correct remaining-bytes bound -- for BOTH the free-dim
-  # (N) edge and the K direction, with no per-lane re-derivation and independent
-  # of dtype / tile geometry / WaveSeparate / LocalSplitU.
-  #
-  # So the bound is (Srd+2 - bytesPerLoad): the last byte offset from which a full
-  # bytesPerLoad-wide transpose vector still ends at or before the tensor end. The
-  # caller VMinI32-clamps each per-load offset to it.
-  #
-  # The clamp is applied ONLY on a genuinely partial free-dim tile
-  # (rem = Size - WG*MT < MacroTile). On a full tile every lane is in range, and
-  # the per-WG/per-batch tensor-end limit can legitimately fall between valid lane
-  # offsets (notably for batched full-tile DTVB1 kernels, which load correctly with
-  # no clamp at all) -- clamping there would truncate valid lanes into an OOB
-  # address. For full tiles the bound is raised to INT_MAX so the downstream signed
-  # VMinI32 is a guaranteed no-op (== upstream behavior).
-  #
-  # When the tensor exceeds 2^32 bytes, Srd+2 holds BufferLimit (0xFFFFFFFF); the
-  # INT_MAX cap likewise keeps the clamp a no-op (huge tensors never hit the edge).
-  #
-  # Returns the checked-out bound vgpr (caller must vgprPool.checkIn it), or
-  # None if not a transpose B load / no headroom.
-  ##############################################################################
-  def calcMaxGroForGLTr(self, module, kernel, tP, preventOverflow=False):
-    tc = tP["tensorChar"]
-    isTr = (tc == "A" or tc == "B") and kernel["enableGLTr%s"%tc]
-    if not isTr:
-      return None
-
-    # Operand B only: A transpose loads are not the proven faulting operand and
-    # adding a clamp there pushes VGPR-tight DTVA1 full tiles over the cap.
-    if not tP["isB"]:
-      return None
-
-    module.addComment1("Max read address offset for GLTr%s (= Srd+2 num_records - bytesPerLoad)"%tc)
-
-    # One scratch vgpr for the bound. If the pool is at the cap (main-loop path
-    # with preventOverflow), skip rather than fail kernel generation.
-    try:
-      maxGroVgpr = self.vgprPool.checkOut(1, 'maxGroVgpr', preventOverflow)
-    except RuntimeError:
-      return None
-
-    bytesPerLoad = int(tP["bpeGR"] * tP["glvw"])  # b64 (fp8 glvw8) / b128 (fp16 glvw8)
-    mt = kernel[tP["mt"]]
-    with self.allocTmpSgpr(2, tag="calcMaxGroForGLTr_limit") as tmpSgprInfo:
-      limitSgpr = tmpSgprInfo.idx
-      remSgpr   = tmpSgprInfo.idx + 1
-      # bound = min(Srd+2 - bytesPerLoad, INT_MAX); Srd+2 == BufferLimit(0xFFFFFFFF)
-      # for >2^32 tensors -> min with INT_MAX makes the signed VMinI32 at the load
-      # site a no-op.
-      module.add(SSubU32(dst=sgpr(limitSgpr), src0=sgpr("Srd%s+2"%tc), src1=bytesPerLoad, comment="GLTr%s: tensor-end byte limit - bytesPerLoad(%u)"%(tc, bytesPerLoad)))
-      module.add(SMinU32(dst=sgpr(limitSgpr), src0=sgpr(limitSgpr), src1=0x7FFFFFFF, comment="GLTr%s: cap at INT_MAX (huge tensor -> no-op clamp)"%tc))
-      # Apply the clamp ONLY on a genuinely partial free-dim tile (rem = Size-WG*MT
-      # < MT); on a full tile every lane is in range and the tensor-end byte limit
-      # can sit between valid lanes (esp. for batched/full-tile DTVB1 kernels where
-      # the load is already correct without any clamp), so a clamp would truncate
-      # valid lanes -> OOB. For full tiles raise the bound to INT_MAX (no-op).
-      if tP["tlu"] and kernel["EdgeType"] == "ShiftPtr":
-        module.add(SMulI32(dst=sgpr(remSgpr), src0=sgpr(tP["wg"]), src1=mt, comment="GLTr%s: WG*MT"%tc))
-        module.add(SSubI32(dst=sgpr(remSgpr), src0=self.sizeRef(tP["idx"]), src1=sgpr(remSgpr), comment="GLTr%s: rem = Size%s - WG*MT (valid free-dim elems this tile)"%(tc, tP["tileChar"])))
-        module.add(SCmpGeI32(src0=sgpr(remSgpr), src1=mt, comment="GLTr%s: full tile? (rem >= MT)"%tc))
-        module.add(SCSelectB32(dst=sgpr(limitSgpr), src0=0x7FFFFFFF, src1=sgpr(limitSgpr), comment="GLTr%s: full tile -> INT_MAX (no-op); partial -> tensor-end limit"%tc))
-      module.add(VMovB32(dst=vgpr(maxGroVgpr), src=sgpr(limitSgpr), comment="GLTr%s: bound -> vgpr for per-load VMinI32"%tc))
-
-    module.addSpaceLine()
-    return maxGroVgpr
-
-  ##############################################################################
   # Global Read:
   # globalReadTrueGuardK is called for loads in the tail loop
   # Must ensure each load is in bounds - either using buffer bounds
@@ -10517,9 +10435,22 @@ class KernelWriterAssembly(KernelWriter):
     ########################################
 
     if isTr:
-      # DirectToVgpr case, we need to calculate max address (shared with the
-      # main-loop global read path via calcMaxGroForGLTr).
-      maxGroVgpr = self.calcMaxGroForGLTr(module, kernel, tP)
+      # global_load_tr has no num_records field, so nothing bounds it in hardware.
+      # Clamp each offset to the limit buffer_load would enforce: Srd+2 minus one
+      # load width, saturated into non-negative i32 for the signed VMinI32 below.
+      # Keep SSubU32/SCSelectB32 adjacent -- SCSelectB32 reads SCC (the borrow).
+      module.addComment1("Max read address offset for GLTr%s (= Srd+2 num_records - bytesPerLoad)"%tc)
+
+      maxGroVgpr = self.vgprPool.checkOut(1, tag="globalReadGuardK_maxGroVgpr")
+      bytesPerLoad = int(tP["bpeGR"] * tP["glvw"])
+      with self.allocTmpSgpr(1, tag="globalReadGuardK_gltrLimit") as tmpSgprInfo:
+        limitSgpr = tmpSgprInfo.idx
+        module.add(SSubU32(dst=sgpr(limitSgpr), src0=sgpr("Srd%s+2"%tc), src1=bytesPerLoad, comment="GLTr%s: tensor-end byte limit - bytesPerLoad(%u)"%(tc, bytesPerLoad)))
+        module.add(SCSelectB32(dst=sgpr(limitSgpr), src0=0, src1=sgpr(limitSgpr), comment="GLTr%s: saturate at 0 if the subtract borrowed"%tc))
+        module.add(SMinU32(dst=sgpr(limitSgpr), src0=sgpr(limitSgpr), src1=0x7FFFFFFF, comment="GLTr%s: cap at INT_MAX (huge tensor -> no-op clamp)"%tc))
+        module.add(VMovB32(dst=vgpr(maxGroVgpr), src=sgpr(limitSgpr), comment="GLTr%s: bound -> vgpr for per-load VMinI32"%tc))
+
+      module.addSpaceLine()
     elif not kernel["BufferLoad"]:
       with self.allocTmpSgpr(2, tag="globalReadGuardK_tmpSgprInfo3") as tmpSgprInfo:
         tmpSgpr = tmpSgprInfo.idx
@@ -10906,7 +10837,7 @@ class KernelWriterAssembly(KernelWriter):
                     or (tP["isM"] and self.states.asmCaps["HasSWMMAC_gfx1250"]):
                     module.add(VMovB32(dst=vgpr(loadVgpr), src=0, comment="set to zero to avoid unexpected value"))
 
-                  if isTr and maxGroVgpr is not None:
+                  if isTr:
                     module.add(VMinI32(dst=vgpr(offsetVgpr), src0=vgpr(maxGroVgpr), src1=vgpr(offsetVgpr), comment="truncated load: clamp GRO to legal range"))
 
                   if (kernel["ProblemType"]["DataType%s"%tcDataType].isHalf() or kernel["ProblemType"]["DataType%s"%tcDataType].isBFloat16()) and not tP["isM"] and self.states.asmCaps["HasWMMA_V3"]:
@@ -11143,8 +11074,7 @@ class KernelWriterAssembly(KernelWriter):
           module.add(SBarrier(comment="debug"))
 
       if isTr:
-        if maxGroVgpr is not None:
-          self.vgprPool.checkIn(maxGroVgpr)
+        self.vgprPool.checkIn(maxGroVgpr)
 
     # BufferLoad=0 VGPRs are local to each call — always free them
     if not isTr and not kernel["BufferLoad"]:
@@ -11600,19 +11530,6 @@ class KernelWriterAssembly(KernelWriter):
       instOffset       = 0
       prevLdsOffset    = 0
 
-      # For transpose loads (no buffer num_records bounds) compute the tensor-end
-      # byte limit (= Srd+2 - bytesPerLoad) so each load below can be clamped into
-      # range. Returns None when not a transpose B load; checked back in after the
-      # load loop. Emitted into imod.header (not imod.middle) so the global-read
-      # scheduler in SIA.py, which indexes imod.middle.getItem(0), is not disturbed.
-      #
-      # Scoped to operand B: A transpose loads are not the proven faulting operand
-      # and adding a clamp on the VGPR-tight DTVA1 full tiles can exceed the cap.
-      if tc == "B":
-        maxGroVgpr = self.calcMaxGroForGLTr(imod.header, kernel, tP, preventOverflow=True)
-      else:
-        maxGroVgpr = None
-
       if g2lBufIdx >= 1:
         # G2L vgpr base string. DirectToVgpr or swapAB case. Need to toggle destination vreg set
         destVgprPrefix = "G2L%s%u"%(tc, g2lBufIdx + 1)
@@ -11729,15 +11646,6 @@ class KernelWriterAssembly(KernelWriter):
 
                 useBuffer = not isTr
 
-                # Transpose loads (global_load_tr) carry no buffer num_records
-                # bounds. Clamp each per-lane GRO to the tensor-end byte limit
-                # (Srd+2 - bytesPerLoad) so no load reads past the operand -- the
-                # same bound buffer_load enforces in hardware. Covers both the
-                # free-dim (N<MT1) edge and the K direction. No-op for in-range
-                # lanes and for >2^32 tensors. See calcMaxGroForGLTr.
-                if isTr and maxGroVgpr is not None:
-                  loadModule.add(VMinI32(dst=vgpr(offsetVgpr), src0=vgpr(maxGroVgpr), src1=vgpr(offsetVgpr), comment="GLTr%s: clamp GRO to tensor-end byte limit (avoid OOB)"%tc))
-
                 loadModule.add( self.chooseGlobalRead(useBuffer, \
                           bpl, destVgpr=destVgpr, \
                           addr0=vgpr(offsetVgpr), addr1=sgpr("Srd%s"%tc, 2 if isTr else 4), \
@@ -11797,9 +11705,6 @@ class KernelWriterAssembly(KernelWriter):
                         glc=isGlc, slc=isSlc, nt=isNT, lds=isLds, \
                         hi16=0, \
                         comment="G -> Reg ValuMetadata", scope=scope, th=th, nv=nv))
-
-      if maxGroVgpr is not None:
-        self.vgprPool.checkIn(maxGroVgpr)
     if tc == "A" and record[0] == True:
       self.globalread_gpr_record.a.addrVgpr = []
       self.globalread_gpr_record.a.offset = []
@@ -16713,6 +16618,8 @@ class KernelWriterAssembly(KernelWriter):
         return GlobalLoadTR8B64(dst=vgpr(destVgpr, rpv), vaddr=addr0, saddr=addr1, modifier=modifier, comment=comment)
       elif bpl==16:
         return GlobalLoadTR16B128(dst=vgpr(destVgpr, rpv), vaddr=addr0, saddr=addr1, modifier=modifier, comment=comment)
+      else:
+        assert 0, "%s\nchooseGlobalRead: bad bpl %u for transpose load"%(self.states.kernelName,bpl)
     else:
       modifier = GLOBALModifiers(offset=int(offset), glc=glc, slc=slc, dlc=False, scope=CacheScope.SCOPE_NONE, lds=lds, isStore=False)
       saddr_off = vgpr("off", 1, False, False, True)
