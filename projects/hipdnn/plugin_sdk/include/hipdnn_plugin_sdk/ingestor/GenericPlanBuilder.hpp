@@ -44,13 +44,18 @@ public:
     using IGraph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph;
     using IEngineConfig = hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig;
 
-    /// @param stateManager The engine's descriptor state. Shared rather than owned so the
-    ///        engine and its builder read one catalog cache.
+    /// @param engine The UED whose knobs this builder reports and whose name its
+    ///        diagnostics carry. Held by reference; owned by the engine, which outlives
+    ///        its builder.
+    /// @param stateManager The descriptor state to select over. Shared rather than owned
+    ///        so the engine and its builder read one catalog cache.
     /// @param deviceResolver Answers which device each call is for. Held by reference;
     ///        owned by the engine, which outlives its builder.
-    GenericPlanBuilder(std::shared_ptr<KernelIngestorStateManager<THandle>> stateManager,
+    GenericPlanBuilder(const EngineDescriptor& engine,
+                       std::shared_ptr<KernelIngestorStateManager<THandle>> stateManager,
                        const IDeviceResolver<THandle>& deviceResolver)
-        : _stateManager(std::move(stateManager))
+        : _engine(engine)
+        , _stateManager(std::move(stateManager))
         , _deviceResolver(deviceResolver)
     {
     }
@@ -114,7 +119,7 @@ public:
         if(ranked.empty())
         {
             throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                                        "engine '" + _stateManager->engine().name
+                                        "engine '" + _engine.name
                                             + "' accepted this graph but has no applicable kernel");
         }
 
@@ -144,7 +149,7 @@ public:
             return knobs;
         }
 
-        for(const auto& knobName : _stateManager->engine().knobs)
+        for(const auto& knobName : _engine.knobs)
         {
             const auto values = KernelIngestorStateManager<THandle>::knobValues(ranked, knobName);
 
@@ -168,8 +173,8 @@ public:
 
             KnobT knob;
             knob.knob_id = knobName;
-            knob.description = "Kernel metadata field '" + knobName + "' of engine '"
-                               + _stateManager->engine().name + "'";
+            knob.description
+                = "Kernel metadata field '" + knobName + "' of engine '" + _engine.name + "'";
 
             IntValueT defaultValue;
             // knobValues() preserves ranked order, so the first entry is the top-ranked
@@ -197,6 +202,7 @@ private:
         return MatchContext{opGraph, deviceId, _deviceResolver.deviceProperties(deviceId)};
     }
 
+    const EngineDescriptor& _engine;
     std::shared_ptr<KernelIngestorStateManager<THandle>> _stateManager;
     const IDeviceResolver<THandle>& _deviceResolver;
 };

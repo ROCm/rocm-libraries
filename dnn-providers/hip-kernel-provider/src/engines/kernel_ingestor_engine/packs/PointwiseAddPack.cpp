@@ -17,6 +17,7 @@ namespace hip_kernel_provider::kernel_ingestor_engine
 {
 
 using namespace hipdnn_plugin_sdk::ingestor;
+using hipdnn_flatbuffers_sdk::utilities::parseUuid;
 
 namespace
 {
@@ -24,24 +25,31 @@ namespace
 // Descriptor ids. Real descriptors carry GUIDs so any author can mint one locally
 // without colliding with another's; readable names serve the same role for a pack that
 // is built in memory and never shared.
-constexpr const char* ENGINE_ID = "hipkernel.ued.pointwise_add";
-constexpr const char* SCHEMA_ID = "hipkernel.kmd.pointwise_add";
-constexpr const char* HEURISTIC_ID = "hipkernel.uhd.pointwise_add";
-constexpr const char* GRAPH_MATCHER_ID = "hipkernel.umd.pointwise_add.graph";
-constexpr const char* KERNEL_MATCHER_ID = "hipkernel.umd.pointwise_add.kernel";
-constexpr const char* DISPATCH_ID = "hipkernel.udd.pointwise_add";
-constexpr const char* PACK_ID = "hipkernel.kdp.pointwise_add";
+// Descriptor ids are stable GUIDs, minted once for this pack and never regenerated:
+// they are how other descriptors name these, so changing one silently breaks a
+// cross-reference. Authored descriptors will carry the same values as text and reach
+// this form through parseUuid().
+const DescriptorId ENGINE_ID = parseUuid("8f1a6c30-7d24-4a0e-9b51-2c6d84f0a911");
+const DescriptorId SCHEMA_ID = parseUuid("b27e4d15-3f89-4c62-8a07-51de93b4c7a2");
+const DescriptorId HEURISTIC_ID = parseUuid("4c9b0e72-16a5-4d38-b6f4-8e20a7c15d63");
+const DescriptorId GRAPH_MATCHER_ID = parseUuid("e5d38a04-9c71-4b2f-83a6-7f14b0d29e58");
+const DescriptorId KERNEL_MATCHER_ID = parseUuid("1a7f52c8-b036-4e91-95d2-6c83af407b14");
+const DescriptorId DISPATCH_ID = parseUuid("93b6c1e7-2058-4fa3-8d17-4b95e2c60fa8");
+const DescriptorId PACK_ID = parseUuid("7d024fb9-5e13-4c86-a92b-08f37d1c4e50");
 
-KernelDescriptor
-    makeKernel(const std::string& id, int64_t blockSize, const std::string& dtype, int64_t priority)
+KernelDescriptor makeKernel(const DescriptorId& id,
+                            const std::string& variant,
+                            int64_t blockSize,
+                            const std::string& dtype,
+                            int64_t priority)
 {
     KernelDescriptor kernel;
     kernel.id = id;
-    kernel.name = "pointwise add (" + dtype + ", block " + std::to_string(blockSize) + ")";
+    kernel.name = "pointwise_add." + variant;
     kernel.sourceFile = "PointwiseAdd.cpp";
     kernel.entryPoint = "PointwiseAdd";
-    kernel.metadata
-        = {{std::string(BLOCK_SIZE_FIELD), blockSize}, {std::string(DTYPE_FIELD), dtype}};
+    kernel.metadata = {{std::string(BLOCK_SIZE_FIELD), MetadataValue{blockSize}},
+                       {std::string(DTYPE_FIELD), MetadataValue{dtype}}};
     kernel.priority = priority;
     return kernel;
 }
@@ -54,8 +62,10 @@ PointwiseAddDescriptorSet buildPointwiseAddDescriptorSet()
 
     set.schema.id = SCHEMA_ID;
     set.schema.name = "pointwise add variant fields";
-    set.schema.fields = {{std::string(BLOCK_SIZE_FIELD), int64_t{64}},
-                         {std::string(DTYPE_FIELD), std::string{"FLOAT"}}};
+    // block_size defaults, so a kernel may omit it. dtype does not: every kernel bakes
+    // one, and a kernel that failed to state it would silently inherit another's.
+    set.schema.fields = {{std::string(BLOCK_SIZE_FIELD), MetadataType::INT, int64_t{64}},
+                         {std::string(DTYPE_FIELD), MetadataType::STRING, std::nullopt}};
 
     set.heuristic.id = HEURISTIC_ID;
     set.heuristic.name = "pointwise add selector";
@@ -93,9 +103,13 @@ PointwiseAddDescriptorSet buildPointwiseAddDescriptorSet()
     // Three kernels, each earning its place: the two FLOAT entries differ only in block
     // size, so ranking has an order to produce and the block_size knob has a real value
     // set; the HALF entry is what the kernel-scoped matcher prunes on a FLOAT graph.
-    pack.kernels = {makeKernel("hipkernel.ukd.pointwise_add.f32_block64", 64, "FLOAT", 0),
-                    makeKernel("hipkernel.ukd.pointwise_add.f32_block256", 256, "FLOAT", 0),
-                    makeKernel("hipkernel.ukd.pointwise_add.f16_block64", 64, "HALF", 0)};
+    pack.kernels
+        = {makeKernel(
+               parseUuid("2f8c17d6-4a90-4b53-9e18-c05a63b782d4"), "f32_block64", 64, "FLOAT", 0),
+           makeKernel(
+               parseUuid("a41b93e5-6d72-4f08-b3c9-15e847d0629f"), "f32_block256", 256, "FLOAT", 0),
+           makeKernel(
+               parseUuid("c6e20a48-8b31-4d97-a052-9f4173e8b5c1"), "f16_block64", 64, "HALF", 0)};
     set.packs = {std::move(pack)};
 
     return set;
@@ -115,7 +129,6 @@ std::shared_ptr<KernelIngestorStateManager<Handle>> makePointwiseAddStateManager
     auto set = buildPointwiseAddDescriptorSet();
 
     return std::make_shared<KernelIngestorStateManager<Handle>>(
-        std::move(set.engine),
         std::move(set.schema),
         std::move(set.matchers),
         std::move(set.dispatches),

@@ -40,15 +40,16 @@ namespace
 using namespace hip_kernel_provider;
 using namespace hip_kernel_provider::kernel_ingestor_engine;
 using namespace hip_kernel_provider::kernel_ingestor_engine::testing;
+using hipdnn_flatbuffers_sdk::utilities::parseUuid;
 using hipdnn_plugin_sdk::ingestor::KernelDefinition;
 using hipdnn_plugin_sdk::ingestor::MatchContext;
 
 KernelDefinition makeKernel(int64_t blockSize, const std::string& dtype)
 {
     KernelDefinition kernel;
-    kernel.kernelId = "test.kernel";
-    kernel.packId = "test.pack";
-    kernel.dispatchId = "test.dispatch";
+    kernel.kernelId = parseUuid("00000000-0000-4000-8000-000000000001");
+    kernel.packId = parseUuid("00000000-0000-4000-8000-000000000002");
+    kernel.dispatchId = parseUuid("00000000-0000-4000-8000-000000000003");
     kernel.sourceFile = "PointwiseAdd.cpp";
     kernel.entryPoint = "PointwiseAdd";
     kernel.metadata

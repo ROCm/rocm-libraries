@@ -78,7 +78,7 @@ std::string elementTypeFor(const KernelDefinition& kernel)
     // rather than defaulted: a silent fallback would compile the wrong kernel.
     throw hipdnn_plugin_sdk::HipdnnPluginException(
         HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-        "kernel '" + kernel.kernelId + "' declares unsupported dtype '" + dtype + "'");
+        "kernel '" + toString(kernel.kernelId) + "' declares unsupported dtype '" + dtype + "'");
 }
 
 const data_objects::TensorAttributes& firstInput(const MatchContext& context,

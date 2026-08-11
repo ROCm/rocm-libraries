@@ -48,17 +48,30 @@ public:
     using IEngineConfig = hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig;
 
     /**
-     * @param stateManager   The engine's descriptor state, already validated.
+     * @param engine         The UED this engine is. A UED is 1:1 with a hipDNN engine, so
+     *        the engine owns it: its name is this engine's identity, and its knob list is
+     *        what this engine exposes to a caller.
+     * @param stateManager   The descriptor state this engine selects over, already
+     *        validated.
      * @param deviceResolver Answers which device each call is for, from the handle that
      *        carries it. Held by reference; owned by the provider, which must keep it
      *        alive for the engine's lifetime.
      */
-    GenericEngine(std::shared_ptr<KernelIngestorStateManager<THandle>> stateManager,
+    GenericEngine(EngineDescriptor engine,
+                  std::shared_ptr<KernelIngestorStateManager<THandle>> stateManager,
                   const IDeviceResolver<THandle>& deviceResolver)
-        : _stateManager(std::move(stateManager))
-        , _id(hipdnn_data_sdk::utilities::engineNameToId(_stateManager->engine().name))
-        , _planBuilder(_stateManager, deviceResolver)
+        : _engine(std::move(engine))
+        , _stateManager(std::move(stateManager))
+        , _id(hipdnn_data_sdk::utilities::engineNameToId(_engine.name))
+        , _planBuilder(_engine, _stateManager, deviceResolver)
     {
+    }
+
+    /// The descriptor this engine was built from, for diagnostics and for a caller that
+    /// needs the engine's declared knobs or notes.
+    const EngineDescriptor& descriptor() const
+    {
+        return _engine;
     }
 
     int64_t id() const override
@@ -122,6 +135,7 @@ public:
     }
 
 private:
+    EngineDescriptor _engine;
     std::shared_ptr<KernelIngestorStateManager<THandle>> _stateManager;
     int64_t _id;
     GenericPlanBuilder<THandle, TSettings, TContext> _planBuilder;

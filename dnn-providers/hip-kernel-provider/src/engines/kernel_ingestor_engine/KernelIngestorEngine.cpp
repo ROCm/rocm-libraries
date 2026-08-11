@@ -76,7 +76,9 @@ class PointwiseAddEngine : public hipdnn_plugin_sdk::IEngine<Handle, Settings, C
 {
 public:
     PointwiseAddEngine()
-        : _engine(registerThenBuildStateManager(), _deviceResolver)
+        : _engine(buildPointwiseAddDescriptorSet().engine,
+                  registerThenBuildStateManager(),
+                  _deviceResolver)
     {
     }
 

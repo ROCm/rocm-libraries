@@ -84,37 +84,59 @@ double scoreConstant(const KernelDefinition& /*kernel*/, const MatchContext& /*c
 
 MetadataSchema makeSchema()
 {
-    return {"kmd", "test schema", {{BLOCK_SIZE, int64_t{64}}, {DTYPE, std::string{"FLOAT"}}}};
+    return {SCHEMA_ID,
+            "test schema",
+            {{BLOCK_SIZE, MetadataType::INT, MetadataValue{int64_t{64}}},
+             {DTYPE, MetadataType::STRING, std::nullopt}}};
 }
 
-EngineDescriptor makeEngine(std::vector<std::string> knobs = {BLOCK_SIZE})
-{
-    return {"ued", "test:engine", "uhd", "kmd", std::move(knobs)};
-}
-
-KernelDescriptor makeKernel(const std::string& id,
+KernelDescriptor makeKernel(const DescriptorId& id,
+                            const std::string& name,
                             int64_t blockSize,
                             const std::string& dtype,
                             int64_t priority = 0)
 {
-    auto kernel = makeTestKernel(id, blockSize, dtype);
+    auto kernel = makeTestKernel(id, name, blockSize, dtype);
     kernel.priority = priority;
     return kernel;
 }
 
 /// The pack shape a real engine ships, wired to the counting matchers above.
-KernelDescriptorPack makePack(std::vector<std::string> matcherIds)
+KernelDescriptorPack makePack(const std::vector<DescriptorId>& matcherIds)
 {
     KernelDescriptorPack pack;
-    pack.id = "kdp";
+    pack.id = PACK_ID;
     pack.name = "test pack";
-    pack.matcherIds = std::move(matcherIds);
-    pack.engineId = "ued";
-    pack.dispatchId = "udd";
-    pack.kernels = {makeKernel("kernel_64_float", 64, "FLOAT"),
-                    makeKernel("kernel_256_float", 256, "FLOAT"),
-                    makeKernel("kernel_64_half", 64, "HALF")};
+    pack.matcherIds = matcherIds;
+    pack.engineId = ENGINE_ID;
+    pack.dispatchId = DISPATCH_ID;
+    pack.kernels = {makeKernel(testId(0x64), "kernel_64_float", 64, "FLOAT"),
+                    makeKernel(testId(0x65), "kernel_256_float", 256, "FLOAT"),
+                    makeKernel(testId(0x66), "kernel_64_half", 64, "HALF")};
     return pack;
+}
+
+std::vector<MatchDescriptor> makeTestMatchers()
+{
+    return {{GRAPH_MATCHER_ID, "graph scoped", MatchScope::GRAPH, "test.graph"},
+            {KERNEL_MATCHER_ID, "kernel scoped", MatchScope::KERNEL, "test.kernel"}};
+}
+
+std::vector<DispatchDescriptor> makeTestDispatches()
+{
+    return {{DISPATCH_ID, "test dispatch", "test.dispatch"}};
+}
+
+/// A catalog entry, for the ranking tests that build one directly.
+KernelDefinition makeDefinition(const DescriptorId& id, int64_t blockSize, int64_t priority = 0)
+{
+    return {id,
+            PACK_ID,
+            DISPATCH_ID,
+            "Test.cpp",
+            "TestKernel",
+            {{BLOCK_SIZE, MetadataValue{blockSize}}},
+            priority};
 }
 
 /// Registers counting matchers under this file's own symbol names, so these tests
@@ -156,16 +178,15 @@ std::unique_ptr<StateManager> makeStateManager(ScoreFn scoreFn = scoreByBlockSiz
                                                = StateManager::DEFAULT_CATALOG_CACHE_CAPACITY)
 {
     std::vector<MatchDescriptor> matchers{
-        {"umd_graph", "graph scoped", MatchScope::GRAPH, "test.graph"},
-        {"umd_kernel", "kernel scoped", MatchScope::KERNEL, "test.kernel"}};
-    std::vector<DispatchDescriptor> dispatches{{"udd", "test dispatch", "test.dispatch"}};
+        {GRAPH_MATCHER_ID, "graph scoped", MatchScope::GRAPH, "test.graph"},
+        {KERNEL_MATCHER_ID, "kernel scoped", MatchScope::KERNEL, "test.kernel"}};
+    std::vector<DispatchDescriptor> dispatches{{DISPATCH_ID, "test dispatch", "test.dispatch"}};
 
     return std::make_unique<StateManager>(
-        makeEngine(),
         makeSchema(),
         std::move(matchers),
         std::move(dispatches),
-        std::vector<KernelDescriptorPack>{makePack({"umd_graph", "umd_kernel"})},
+        std::vector<KernelDescriptorPack>{makePack({GRAPH_MATCHER_ID, KERNEL_MATCHER_ID})},
         std::make_shared<NativeKernelHeuristic>(scoreFn),
         cacheCapacity);
 }
@@ -283,14 +304,15 @@ TEST(TestIngestorHeuristic, RanksHigherScoringKernelsFirst)
     const MatchContext context{graph, 0, properties};
 
     Catalog catalog;
-    catalog.entries = {{"low", "kdp", "udd", "s", "e", {{BLOCK_SIZE, int64_t{64}}}, 0},
-                       {"high", "kdp", "udd", "s", "e", {{BLOCK_SIZE, int64_t{256}}}, 0}};
+    const auto lowId = testId(0x01);
+    const auto highId = testId(0x02);
+    catalog.entries = {makeDefinition(lowId, 64), makeDefinition(highId, 256)};
 
     const NativeKernelHeuristic heuristic(scoreByBlockSize);
     const auto ranked = heuristic.rank(catalog, context);
 
     ASSERT_EQ(ranked.size(), 2U);
-    EXPECT_EQ(ranked.front().kernelId, "high");
+    EXPECT_EQ(ranked.front().kernelId, highId);
 }
 
 TEST(TestIngestorHeuristic, BreaksScoreTiesOnPriority)
@@ -300,14 +322,15 @@ TEST(TestIngestorHeuristic, BreaksScoreTiesOnPriority)
     const MatchContext context{graph, 0, properties};
 
     Catalog catalog;
-    catalog.entries = {{"a", "kdp", "udd", "s", "e", {{BLOCK_SIZE, int64_t{64}}}, 1},
-                       {"b", "kdp", "udd", "s", "e", {{BLOCK_SIZE, int64_t{64}}}, 5}};
+    const auto lowPriorityId = testId(0x01);
+    const auto highPriorityId = testId(0x02);
+    catalog.entries = {makeDefinition(lowPriorityId, 64, 1), makeDefinition(highPriorityId, 64, 5)};
 
     const NativeKernelHeuristic heuristic(scoreConstant);
     const auto ranked = heuristic.rank(catalog, context);
 
     ASSERT_EQ(ranked.size(), 2U);
-    EXPECT_EQ(ranked.front().kernelId, "b");
+    EXPECT_EQ(ranked.front().kernelId, highPriorityId);
 }
 
 TEST(TestIngestorHeuristic, BreaksRemainingTiesOnKernelIdForStabilityAcrossRuns)
@@ -318,14 +341,16 @@ TEST(TestIngestorHeuristic, BreaksRemainingTiesOnKernelIdForStabilityAcrossRuns)
 
     Catalog catalog;
     // Deliberately inserted out of id order: the result must not depend on load order.
-    catalog.entries = {{"zulu", "kdp", "udd", "s", "e", {{BLOCK_SIZE, int64_t{64}}}, 0},
-                       {"alpha", "kdp", "udd", "s", "e", {{BLOCK_SIZE, int64_t{64}}}, 0}};
+    // Inserted highest-id first: the result must not depend on load order.
+    const auto lowerId = testId(0x01);
+    const auto higherId = testId(0x02);
+    catalog.entries = {makeDefinition(higherId, 64), makeDefinition(lowerId, 64)};
 
     const NativeKernelHeuristic heuristic(scoreConstant);
     const auto ranked = heuristic.rank(catalog, context);
 
     ASSERT_EQ(ranked.size(), 2U);
-    EXPECT_EQ(ranked.front().kernelId, "alpha");
+    EXPECT_EQ(ranked.front().kernelId, lowerId);
 }
 
 // ---------------------------------------------------------------------------
@@ -482,26 +507,21 @@ TEST(TestIngestorStateManager, KnobValuesComeFromTheCatalogInRankedOrder)
     EXPECT_EQ(std::get<int64_t>(values[1]), 64);
 }
 
-TEST(TestIngestorStateManager, CompletesKernelMetadataFromSchemaDefaults)
+TEST(TestIngestorStateManager, CompletesAnOmittedFieldFromItsSchemaDefault)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
 
-    KernelDescriptorPack pack = makePack({"umd_graph", "umd_kernel"});
-    // A kernel that declares no metadata at all takes every schema default.
+    KernelDescriptorPack pack = makePack({GRAPH_MATCHER_ID, KERNEL_MATCHER_ID});
+    // Omits block_size, which defaults, and states dtype, which does not.
     KernelDescriptor sparse;
-    sparse.id = "kernel_defaults";
-    sparse.name = sparse.id;
+    sparse.id = testId(0x70);
+    sparse.name = "kernel_defaults";
+    sparse.metadata = {{DTYPE, MetadataValue{std::string{"FLOAT"}}}};
     pack.kernels = {sparse};
 
-    std::vector<MatchDescriptor> matchers{
-        {"umd_graph", "graph scoped", MatchScope::GRAPH, "test.graph"},
-        {"umd_kernel", "kernel scoped", MatchScope::KERNEL, "test.kernel"}};
-    std::vector<DispatchDescriptor> dispatches{{"udd", "test dispatch", "test.dispatch"}};
-
-    const StateManager manager(makeEngine(),
-                               makeSchema(),
-                               std::move(matchers),
-                               std::move(dispatches),
+    const StateManager manager(makeSchema(),
+                               makeTestMatchers(),
+                               makeTestDispatches(),
                                {pack},
                                std::make_shared<NativeKernelHeuristic>(scoreByBlockSize));
 
@@ -514,50 +534,83 @@ TEST(TestIngestorStateManager, CompletesKernelMetadataFromSchemaDefaults)
     EXPECT_EQ(definitions.front().getStringMetadata(DTYPE), "FLOAT");
 }
 
+TEST(TestIngestorStateManager, RejectsAKernelOmittingAFieldWithNoDefault)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+
+    KernelDescriptorPack pack = makePack({GRAPH_MATCHER_ID, KERNEL_MATCHER_ID});
+    // dtype declares no default, so every kernel must state it. Omitting it would
+    // otherwise produce a catalog key the author never wrote.
+    KernelDescriptor missingDtype;
+    missingDtype.id = testId(0x71);
+    missingDtype.name = "kernel_missing_dtype";
+    missingDtype.metadata = {{BLOCK_SIZE, MetadataValue{int64_t{64}}}};
+    pack.kernels = {missingDtype};
+
+    // Caught when the descriptor set is assembled, not when a graph first arrives: the
+    // completed tuple is the kernel's catalog key, so it has to exist before matching.
+    EXPECT_THROW(StateManager(makeSchema(),
+                              makeTestMatchers(),
+                              makeTestDispatches(),
+                              {pack},
+                              std::make_shared<NativeKernelHeuristic>(scoreByBlockSize)),
+                 std::invalid_argument);
+}
+
+TEST(TestIngestorStateManager, RejectsAKernelSupplyingAFieldOfTheWrongType)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+
+    KernelDescriptorPack pack = makePack({GRAPH_MATCHER_ID, KERNEL_MATCHER_ID});
+    // block_size is declared INT. A string here would otherwise surface far away, as a
+    // bad_variant_access inside a matcher or a scorer.
+    KernelDescriptor wrongType;
+    wrongType.id = testId(0x72);
+    wrongType.name = "kernel_wrong_type";
+    wrongType.metadata = {{BLOCK_SIZE, MetadataValue{std::string{"64"}}},
+                          {DTYPE, MetadataValue{std::string{"FLOAT"}}}};
+    pack.kernels = {wrongType};
+
+    EXPECT_THROW(StateManager(makeSchema(),
+                              makeTestMatchers(),
+                              makeTestDispatches(),
+                              {pack},
+                              std::make_shared<NativeKernelHeuristic>(scoreByBlockSize)),
+                 std::invalid_argument);
+}
+
 TEST(TestIngestorStateManager, RejectsAPackNamingAnUnknownMatcher)
 {
-    std::vector<DispatchDescriptor> dispatches{{"udd", "test dispatch", "test.dispatch"}};
-
     // A dangling cross-reference cannot be evaluated, so it is caught when the
     // descriptor set is assembled rather than when a graph first arrives.
-    EXPECT_THROW(StateManager(makeEngine(),
-                              makeSchema(),
+    EXPECT_THROW(StateManager(makeSchema(),
                               {},
-                              std::move(dispatches),
-                              {makePack({"umd_missing"})},
+                              makeTestDispatches(),
+                              {makePack({testId(0xFF)})},
                               std::make_shared<NativeKernelHeuristic>(scoreByBlockSize)),
                  std::invalid_argument);
 }
 
 TEST(TestIngestorStateManager, RejectsAPackNamingAnUnknownDispatchDescriptor)
 {
-    std::vector<MatchDescriptor> matchers{
-        {"umd_graph", "graph scoped", MatchScope::GRAPH, "test.graph"}};
-
-    EXPECT_THROW(StateManager(makeEngine(),
-                              makeSchema(),
-                              std::move(matchers),
+    EXPECT_THROW(StateManager(makeSchema(),
+                              makeTestMatchers(),
                               {},
-                              {makePack({"umd_graph"})},
+                              {makePack({GRAPH_MATCHER_ID})},
                               std::make_shared<NativeKernelHeuristic>(scoreByBlockSize)),
                  std::invalid_argument);
 }
 
 TEST(TestIngestorStateManager, RejectsTwoKernelsSharingAMetadataTuple)
 {
-    std::vector<MatchDescriptor> matchers{
-        {"umd_graph", "graph scoped", MatchScope::GRAPH, "test.graph"}};
-    std::vector<DispatchDescriptor> dispatches{{"udd", "test dispatch", "test.dispatch"}};
-
-    KernelDescriptorPack pack = makePack({"umd_graph"});
+    KernelDescriptorPack pack = makePack({GRAPH_MATCHER_ID});
     // Same completed tuple as kernel_64_float: selection would have two indistinguishable
     // candidates and no basis to prefer either.
-    pack.kernels.push_back(makeKernel("kernel_duplicate", 64, "FLOAT"));
+    pack.kernels.push_back(makeKernel(testId(0x73), "kernel_duplicate", 64, "FLOAT"));
 
-    EXPECT_THROW(StateManager(makeEngine(),
-                              makeSchema(),
-                              std::move(matchers),
-                              std::move(dispatches),
+    EXPECT_THROW(StateManager(makeSchema(),
+                              makeTestMatchers(),
+                              makeTestDispatches(),
                               {pack},
                               std::make_shared<NativeKernelHeuristic>(scoreByBlockSize)),
                  std::invalid_argument);
@@ -565,8 +618,7 @@ TEST(TestIngestorStateManager, RejectsTwoKernelsSharingAMetadataTuple)
 
 TEST(TestIngestorStateManager, RejectsAMissingHeuristic)
 {
-    EXPECT_THROW(StateManager(makeEngine(), makeSchema(), {}, {}, {}, nullptr),
-                 std::invalid_argument);
+    EXPECT_THROW(StateManager(makeSchema(), {}, {}, {}, nullptr), std::invalid_argument);
 }
 
 } // namespace
