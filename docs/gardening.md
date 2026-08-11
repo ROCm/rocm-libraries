@@ -48,56 +48,47 @@ As an example to include an admin: *we have a critical feature but develop is br
 
 ### Pushing through a known infra failure
 
-The most common bypass request is a PR blocked by a CI failure that has nothing to do with the
-change. Before pushing one of those through, confirm all of the following:
+The most common bypass request is a PR blocked by a CI failure unrelated to the change. Every one of
+these must hold:
 
-- The run has finished. A verdict read off an in-progress run is not a verdict; a queued lane
-  turning green routinely changes the conclusion.
-- The failing check is one that actually blocks the merge. See
-  [First pass triage](#first-pass-triage) for how to list the required checks. If the red check is
-  not in that set there is nothing to bypass, and the answer is that the author can merge normally.
-- Every blocking failure matches a known infra issue that is already filed, and you can link it.
-- The failing check is unrelated to what the PR actually changes.
-- The failure is not specific to this PR: it reproduces on other PRs, or it survives a re-run.
-- No new, different failure is hiding behind the known one.
+Precondition | Keypoint
+---- | ---------
+Run has finished | A verdict read off an in-progress run is not a verdict
+Failing check is **required** | If it is advisory there is nothing to bypass; the author can merge normally
+Known issue exists | Filed, and you can link it
+Unrelated to the diff | The change cannot plausibly cause it
+Not specific to this PR | It reproduces elsewhere, or survives a re-run
+Nothing new hiding behind it | No second, different failure in the same job
 
-Then ask the question that list does not cover: **would waiting fix this?** A lane that has been
-broken for weeks with no assignee will not repair itself, and a bypass is the right call. A platform
-outage, a single unlucky runner, or a breakage already fixed on `develop` all clear on their own or
-with a fresh run, and a bypass there spends an audit record to save an hour.
+Then ask what the list does not: **would waiting fix this?** A lane broken for weeks with no
+assignee will not repair itself, so bypass it. A platform outage, one unlucky runner, or a breakage
+already fixed on `develop` clears on its own or with a fresh run, so wait.
 
-Leave the reasoning on the PR *before* you merge: the check that failed, the issue it maps to, and
-why the change is not the cause. Say plainly what you are not vouching for, because an infra
-classification does not cover numerical correctness, performance, or any lane that never ran.
-Writing that boundary down is what keeps the bypass honest, and the note is what saves the next
-gardener from re-deriving the same conclusion.
+When you do push it through:
 
-When you merge, preserve the description the author wrote. An override that regenerates the commit
-message will drop tracking lines such as `JIRA ID`, which the repository's policy checks and the
-downstream tooling depend on. Afterwards keep an eye on the post-submit run for that merge, since
-pushing it through makes the outcome yours, and because the post-submit run is where the evidence
-you agreed to skip finally appears.
+- **Rationale in the thread first** - the check, the issue it maps to, why the change is not
+  to blame.
+- **State what you are not vouching for.** An infra classification does not cover numerics,
+  performance, or any lane that never ran.
+- **Preserve the author's description.** A regenerated commit message drops tracking lines such as
+  `JIRA ID` that the policy checks and downstream tooling depend on.
+- **Watch the post-submit run.** Pushing it through makes the outcome yours, and that run is where
+  the evidence you skipped finally appears.
 
 ### When the answer is no
 
-Declining is a normal outcome, and most requests end here. A refusal is only useful if it arrives
-with the next step attached:
+Declining is the common outcome. Make it actionable:
 
-- **File the issue** if nothing tracks the failure yet: the run and job links, the failing step, and
-  the error text. Assign it to the team that owns the failing lane rather than leaving it
-  unassigned, and label it so the next gardener finds it.
-- **Route it.** Code failures go to the [CODEOWNERS](../.github/CODEOWNERS) for the paths involved,
-  CI system failures to the owning [CI team](#ci-teams), and fleet-level failures to the SRE
-  rotation.
-- **Reply where the request was made**, both in the PR thread and in the gardening channel if it was
-  raised there, with the classification and the links behind it.
-- **Say what would change the answer, with a date.** "If the only remaining failure is still
-  `<issue>` and no owner has replied by `<date>`, I will push it through" is something the reporter
-  can plan around. "Not yet" is not, and reads as stalling.
+- **File it** - run and job links, failing step, error text - and **assign an owner** rather than
+  leaving it unassigned.
+- **Route it** - code to the [CODEOWNERS](../.github/CODEOWNERS), CI system to the owning
+  [CI team](#ci-teams), fleet to the [SRE rotation](#working-with-the-sre-rotation).
+- **Reply where it was asked** - the PR thread, and the gardening channel if it was raised there.
+- **Give a dated condition** - "if only `<issue>` remains and no owner has replied by `<date>`, I
+  will push it through". "Not yet" reads as stalling.
 
-A bypass that is offered to you is still your decision. Reporters will sometimes say up front that
-they are comfortable with one; that removes their objection, not the requirement to keep the tree
-green.
+A bypass offered to you is still your call: it removes the reporter's objection, not the requirement
+to keep the tree green.
 
 ## Scope of Gardeners and Developers
 
@@ -119,148 +110,126 @@ Developer responsibilities:
 
 ### First pass triage
 
-Most requests reach a gardener as "my PR is blocked, can someone take a look?". The lists above say
-which of those are yours; these steps are the first pass that gets you to that answer quickly.
+Most requests arrive as "my PR is blocked, can someone look?". Steps 1-3 are cheap and often end it.
 
-1. Ask for a precise pointer. A PR link on its own is rarely enough. Ask for the failing run URL,
-   the failing job URL, and roughly when the problem was seen. A run that looked stuck when it was
-   reported has often finished by the time you look at it. Also read what is being asked: "can you
-   confirm these are unrelated?" is a request for a classification, and answering it with an offer
-   to bypass skips a step the reporter did not ask you to skip.
-2. Establish which checks actually block the merge. A red check is not automatically a blocker. The
-   branch ruleset lists the required contexts, and reading it needs no admin rights:
+\# | Step | Keypoint
+---- | ------- | ---------
+1 | **Get a pointer** | Run URL, job URL, and roughly when. Classify the ask too: *"confirm these are unrelated"* asks for analysis, not for a bypass
+2 | **List the required checks** | Only these block a merge, and the set is per repository
+3 | **Read the merge state** | Says whether a bypass is even the question
+4 | **Confirm it is current** | Never triage an in-flight run; a queued lane flips verdicts
+5 | **Find the existing issue** | Search the error text across both repositories, not by label
+6 | **Re-run, or re-dispatch** | A re-run replays the *same* merge commit
+7 | **Answer in the thread** | The classification, the links behind it, and who owns the next step
 
-   ```bash
-   gh api repos/ROCm/rocm-libraries/rulesets --jq '.[] | "\(.id) \(.name) \(.target)"'
-   gh api repos/ROCm/rocm-libraries/rulesets/<RULESET_ID> \
-     --jq '[.rules[] | select(.type=="required_status_checks")
-            | .parameters.required_status_checks[].context]'
-   ```
+```bash
+# 2 - required contexts on the base branch (needs no admin rights)
+gh api repos/ROCm/rocm-libraries/rulesets --jq '.[] | "\(.id) \(.name) \(.target)"'
+gh api repos/ROCm/rocm-libraries/rulesets/<RULESET_ID> \
+  --jq '[.rules[] | select(.type=="required_status_checks")
+         | .parameters.required_status_checks[].context]'
+# 3 - is there anything to bypass?
+gh pr view <PR_NUMBER> --repo ROCm/rocm-libraries --json mergeStateStatus,reviewDecision
+# 4 - current state of every check
+gh pr checks <PR_NUMBER> --repo ROCm/rocm-libraries
+# 5 - both repositories, by error text
+gh search issues "<error text>" --repo ROCm/rocm-libraries --repo ROCm/TheRock --state open
+# 6 - re-run only the failed jobs
+gh run rerun --failed <RUN_ID>
+```
 
-   On `develop` in this repository that is `TheRock CI Summary`, `Math CI Summary`, and
-   `pre-commit`. Everything else — packaging install lanes, coverage thresholds, multi-arch
-   aggregates — is advisory. Those are still worth triaging and still worth an issue, but they do
-   not stop a merge and never need a bypass. Enumerate rather than remember: `rocm-systems` requires
-   `TheRock CI Summary` and `HIP NVIDIA CI Summary` on its `develop` and does not require
-   `pre-commit` at all, so an answer does not carry from one repository to the other.
-3. Read the merge state before proposing anything. Two fields say whether there is work for a
-   gardener here at all:
+**Required checks (step 2).** On `develop`, `rocm-libraries` requires `TheRock CI Summary`,
+`Math CI Summary` and `pre-commit`, while `rocm-systems` requires `TheRock CI Summary` and
+`HIP NVIDIA CI Summary` and no `pre-commit`. The two `gardening.md` files differ by six lines, so
+enumerate rather than assume. Everything outside the set - packaging install lanes, coverage
+thresholds, aggregates - is advisory: worth an issue, never worth a bypass.
 
-   ```bash
-   gh pr view <PR_NUMBER> --repo ROCm/rocm-libraries --json mergeStateStatus,reviewDecision
-   ```
+**Merge state (step 3).**
 
-   `mergeStateStatus` | `reviewDecision` | What it means for you
-   ---- | ------- | ---------
-   `BLOCKED` | `REVIEW_REQUIRED` | Review is missing. Nothing is bypassable yet; route to the [CODEOWNERS](../.github/CODEOWNERS) for the paths the PR touches.
-   `BLOCKED` | `APPROVED` | A required check is red or was never reported. This is the case the bypass criteria are written for.
-   `UNSTABLE` | `APPROVED` | Every failing check is outside the required set. The author can squash it themselves; say so rather than offering a bypass.
-   `BEHIND` / `DIRTY` | any | The branch needs updating or has conflicts, which is the author's to do.
+`mergeStateStatus` | `reviewDecision` | What it means
+---- | ------- | ---------
+`BLOCKED` | `REVIEW_REQUIRED` | Review is missing. Nothing to bypass; route to the [CODEOWNERS](../.github/CODEOWNERS)
+`BLOCKED` | `APPROVED` | A required check is red or never reported - the bypass case
+`UNSTABLE` | `APPROVED` | Every red is advisory. The author can squash it themselves
+`BEHIND` / `DIRTY` | any | The branch needs updating or has conflicts, which is the author's job
 
-   A required check that was never dispatched belongs in the second row rather than the first: it
-   will never report, so auto-merge cannot fire and waiting does not help. Compare the required
-   contexts against the check runs actually present on the head commit before assuming a check is
-   merely slow.
-4. Confirm the current state, and confirm the run has finished.
-   `gh pr checks <PR_NUMBER> --repo ROCm/rocm-libraries` shows whether the check is still failing,
-   passed on a retry, or never started. While a run is still going, triage only the required checks
-   that have already failed and say that the rest is not in yet. If it is green now, say so and ask
-   for the earlier run rather than guessing which failure was meant.
-5. Search for an existing issue before digging into logs. Many reports turn out to be an
-   already-tracked failure, and linking that issue is faster and more useful than a fresh
-   investigation. Search on the error text or the failing job name rather than on a label, and
-   search [ROCm/TheRock](https://github.com/ROCm/TheRock/issues) as well as this repository: the
-   TheRock-driven lanes and the build and packaging code live there, so a failure that surfaces on a
-   rocm-libraries PR is often already filed against TheRock.
+A required check that **never dispatched** belongs in row 2, not row 1: it can never report, so
+auto-merge never fires and waiting does not help.
 
-   ```bash
-   gh search issues "<error text>" --repo ROCm/rocm-libraries --repo ROCm/TheRock --state open
-   ```
+**Why search TheRock as well (step 5).** It owns the build, the packaging, and the TheRock-driven
+lanes, so a failure surfacing on a PR here is frequently already filed there. Its issues often sit
+on a triage board with no labels at all, and its infra labels are `infra`, `infra-timeout`,
+`infra-machine`, `test-infra` and `test-flaky` rather than `gardener`. The
+[gardener known bugs](https://github.com/ROCm/rocm-libraries/issues?q=is%3Aissue%20state%3Aopen%20label%3Agardener)
+list still helps for this repository.
 
-   Searching by label alone will miss things. TheRock issues are often tracked on a triage board
-   with no labels at all, and the infrastructure ones use `infra`, `infra-timeout`, `infra-machine`,
-   `test-infra`, or `test-flaky` rather than `gardener`. The
-   [gardener known bugs](https://github.com/ROCm/rocm-libraries/issues?q=is%3Aissue%20state%3Aopen%20label%3Agardener)
-   list is still worth a look for this repository.
-6. Re-run or re-dispatch before escalating, and know which one you need. Infra flakes such as host
-   timeouts, GPU sanity check hangs, and runner resource errors frequently clear on
-   `gh run rerun --failed <RUN_ID>`, which is far cheaper than a hand-off. But pre-submit CI builds
-   the merge of the PR with its base, and a re-run replays that *same* merge commit, so it cannot
-   pick up a fix that landed on `develop` after the run was created. Moving onto a current base
-   needs the workflows dispatched again: adding and removing a label does that without touching the
-   author's branch or adding a commit, as long as the label is not one the CI matrix parses. A
-   failure that survives a fresh run on a current base, or that reproduces on unrelated PRs, is
-   worth an issue.
-7. Answer in the thread. Say what you found, link the run, job, or issue you based it on, and name
-   who owns the next step. A reply with no links leaves the next gardener to redo the same work.
+**Re-run versus re-dispatch (step 6).** Pre-submit CI builds the merge of the PR with its base, and
+a re-run replays that same merge commit: it clears a flake, but cannot pick up a fix that landed on
+`develop` afterwards. That needs a fresh dispatch, and adding then removing a label does it with no
+commit and no change to the author's branch - provided the label is not one the CI matrix parses. An
+internal gate that ignores label events needs a push.
 
-That is enough to reach one of a small number of outcomes:
+**Outcomes.**
 
 What you found | What you do
 ---- | ---------
-Nothing red in the required set | Say the PR is not blocked by CI, and point at whatever is actually blocking it. File issues for the advisory reds if they are untracked.
-Every required red maps to a filed infra issue and is unrelated to the diff | The bypass criteria in [Notes on Privileges](#pushing-through-a-known-infra-failure) apply. Post the reasoning, then merge with the author's original description preserved.
-A required red is real, is new, or you cannot explain it | Do not bypass. File it, assign an owner, and say what would change your mind.
-The job produced no result at all | Dispatch a fresh run. If it recurs across PRs, it is an infrastructure failure, not a PR failure.
-Runners offline, queues growing, jobs stuck across many PRs | Hand it to the SRE rotation; see below.
+Nothing red in the required set | Not blocked by CI. Point at the real blocker, and file issues for untracked advisory reds
+Every required red is a filed infra issue, unrelated to the diff | The [bypass criteria](#pushing-through-a-known-infra-failure) apply
+A required red is real, new, or unexplained | Do not bypass. File it, assign an owner, give a dated condition
+No result at all - the job died before running | Fresh run. Recurring across PRs makes it an infra issue
+Runners offline, queues growing, jobs stuck across PRs | Hand it to the [SRE rotation](#working-with-the-sre-rotation)
 
 If none of that resolves it, route it with the in-scope rules: CI system failures go to the owning
 [CI team](#ci-teams), code failures go to the [CODEOWNERS](../.github/CODEOWNERS).
 
 ### Reading the failure
 
-Most misclassifications come from taking a red mark at face value.
+Do not take a red mark at face value.
 
-**A job that died before it ran anything is no result, not a failure.** A checkout that times out, a
-runner that is killed, an action download that fails: none of these say the change is broken, and
-none of them say it is sound either. Report them as missing signal rather than as unrelated
-failures, so nobody counts them as coverage the change does not have. Wrapper errors are the same
-trap one level up — a message about the container implementation failing is the runner reporting
-that some step was killed, so read the timestamps above it. A gap of exactly the step timeout is an
-infra timeout; an error immediately above it is the real fault.
-
-**A summary check is an aggregate, so count the jobs before declaring a lane dead.**
+Symptom | Read it as
+---- | ---------
+Job died in checkout, setup, or action download | **No result**, not a failure - and not evidence the change is sound either
+`Executing the custom container implementation failed` | The runner wrapper reporting a killed step. Read the timestamps above it
+Gap equal to the step timeout | An infra timeout
+Error immediately above the wrapper message | The real fault
+A `Summary` check is red | An aggregate. Count jobs before calling a lane dead
+Scattered shards fail while siblings pass | A resource or throttling signature
+A whole lane fails identically | Not throttling - look for a real cause
 
 ```bash
 gh api "repos/ROCm/rocm-libraries/actions/runs/<RUN_ID>/jobs?per_page=100" --paginate \
   --jq '.jobs[] | select(.conclusion != "success") | "\(.conclusion)\t\(.name)"'
 ```
 
-A scattered subset of shards failing while their siblings pass is the signature of a resource or
-throttling problem; an entire lane failing the same way is not. Note also that this endpoint returns
-only the latest attempt, so a re-run erases the earlier failures — take a timestamp with your
-numbers if you are measuring how widely something has spread.
+That endpoint returns only the latest attempt, so a re-run erases the earlier failures. Timestamp
+your numbers when you are measuring how far something has spread.
 
-When arguing that a failure is not the PR's fault, two things are much stronger than "it passed on a
-re-run":
+Two arguments are much stronger than "it passed on a re-run":
 
-- **The change cannot reach the failing job**, because of a guard in the build files, a path filter
-  on the workflow, or an architecture the diff does not touch. Expand the lane's architecture family
-  before relying on this: lanes are named by family and diffs by individual architecture, and those
-  are frequently the same thing.
-- **A control that differs only in the change.** The same job failing at the same time on a branch
-  without it, or better, a sibling job in the same run on the same commit that passed. Same run,
-  same commit, one green and one timed out is the cleanest control available and costs nothing to
-  find.
+- **Unreachable diff** - a build guard, a path filter, or an architecture the change does not touch.
+  Expand the lane's architecture family first: lanes are named by family, diffs by architecture, and
+  the two are often the same thing.
+- **A control differing only in the change** - the same job failing at the same time on a branch
+  without it, or better, a sibling job in the same run and on the same commit that passed.
 
 ### Working with the SRE rotation
 
-A separate SRE rotation owns the machines the CI runs on: runner health, queue pressure, offline or
-stuck runners, and the hosted build capacity. The division is that the gardener owns the verdict on
-a given PR or post-submit failure, and the SRE owns the fleet that produced it. Hand a failure over
-when the cause is the fleet rather than any particular job — jobs queued or stuck for more than
-about ten minutes across many PRs, runners offline or an architecture label with no capacity, or
-checkout and setup steps failing at a rate that is not specific to one workflow. The AMD-internal
-[SRE playbook](https://amd.atlassian.net/wiki/spaces/MLSE/pages/1453823456/TheRock+SRE+Playbook)
-lists the runner health report and infrastructure dashboards that confirm this in a couple of
-minutes, along with the alert thresholds the SRE rotation works to and the channel to raise it in.
+The gardener owns the verdict on a PR or post-submit failure; a separate SRE rotation owns the fleet
+that produced it. Hand it over when the cause is the fleet rather than one job:
 
-When one infrastructure fault is blocking every PR in the queue, escalating it *is* the work.
-Pushing them through one at a time costs a bypass each time, teaches nobody anything, and grows
-linearly with the queue. Bring numbers instead: how many jobs, over what window, and which step they
-share. Attributing failures to the first failing step rather than to the job is what makes those
-numbers hold up, since aggregate and notification jobs otherwise count the same root cause several
-times over.
+- Jobs queued or stuck beyond roughly ten minutes, across many PRs rather than one.
+- Runners offline, or an architecture label with no capacity.
+- Checkout or setup steps failing at a rate that is not specific to one workflow.
+
+The AMD-internal
+[SRE playbook](https://amd.atlassian.net/wiki/spaces/MLSE/pages/1453823456/TheRock+SRE+Playbook)
+lists the runner health report, the dashboards that confirm this in a couple of minutes, the alert
+thresholds the rotation works to, and the channel to raise it in.
+
+When one fault is blocking the whole queue, escalating it *is* the work: a bypass per PR costs a
+bypass each time and fixes nothing. Bring numbers - how many jobs, over what window, and which step
+they share. Attribute to the **first failing step** rather than to the job, or aggregate and
+notification jobs will count the same root cause several times over.
 
 ### Beyond the Responsibilities
 
