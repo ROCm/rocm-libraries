@@ -7,15 +7,17 @@
 ``Tensile.Common.Utilities.SpinnyThing.increment``.
 
 Pins the exact observable behavior of ``increment``: on each call it writes
-``"\\b" + self.chars[self.index]`` to stdout, flushes, and advances
-``self.index`` forward by one modulo ``len(self.chars)`` (4). The ``value``
-parameter is accepted but never referenced in the body; its default (1) is only
-observable through the function signature, so that is pinned via introspection.
+``"\\b" + self.chars[self.index]`` to stdout (the char at the pre-advance
+index), flushes, and advances ``self.index`` by ``value`` modulo
+``len(self.chars)`` (4). The ``value`` parameter defaults to 1, so a bare
+``increment()`` steps forward by one; a non-default ``value`` steps by that
+amount and is genuinely used by the index update.
 
 Required kills:
-* ``mutmut_1`` (``value=1`` -> ``value=2``): the parameter is dead in the body,
-  so the only distinguishing observation is the signature default. Pinned by
-  ``inspect.signature`` below.
+* ``mutmut_1`` (``value=1`` -> ``value=2``): the default advance changes from one
+  step to two, observable both through the signature default and through the
+  index after a bare ``increment()``. Pinned by ``inspect.signature`` below and
+  by the per-call index assertions.
 * ``mutmut_4`` (``"\\b"`` -> ``"XX\\bXX"``): changes the written erase prefix.
   Pinned by exact ``capsys`` payload assertions.
 """
@@ -78,20 +80,22 @@ def test_increment_wraps_modulo_chars_length():
 
 
 def test_increment_value_parameter_default_is_one():
-    # The `value` parameter is accepted but never used in the body; its current
-    # default is 1. Pinned via signature introspection.
+    # The `value` parameter defaults to 1. Pinned via signature introspection.
     # Kills mutmut_1 (value=1 -> value=2).
     sig = inspect.signature(U.SpinnyThing.increment)
     assert sig.parameters["value"].default == 1
 
 
-def test_increment_ignores_passed_value_argument(capsys):
-    # `value` has no effect on behavior: passing any value yields the same
-    # index advance and written payload as the default call.
+def test_increment_uses_passed_value_argument(capsys):
+    # `value` is added to the index (mod len(chars)), so it genuinely drives the
+    # advance: increment(99) from index 0 lands at (0 + 99) % 4 == 3, and a
+    # subsequent value=0 leaves the index unchanged. The written payload is
+    # always the char at the *pre-advance* index. Kills mutants that drop the
+    # `+ value` term (which would advance by one regardless of the argument).
     spinner = U.SpinnyThing()
     spinner.increment(99)
-    assert spinner.index == 1
+    assert spinner.index == 3
     assert capsys.readouterr().out == "\b|"
     spinner.increment(value=0)
-    assert spinner.index == 2
-    assert capsys.readouterr().out == "\b/"
+    assert spinner.index == 3
+    assert capsys.readouterr().out == "\b\\"
