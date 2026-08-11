@@ -730,9 +730,10 @@ DEF_FORMAT(VGLOBAL,
 // hazards bucket it as VMEM (EV_VGPR_VMEM_READ) -- not FLAT. NOTE: like all returning
 // atomics, it is NOT tracked by the waitcnt dataflow (returning atomics are untracked) --
 // the consumer's wait is emitted manually by the caller.
+// ImplicitReadEXEC: the hardware reads EXEC.
 DEF_FORMAT(VGLOBAL_ATOMIC_SADDR,
     .parent = VGLOBAL,
-    .flags = {GLOBALAtomic},
+    .flags = {GLOBALAtomic, ImplicitReadEXEC},
     .fields = {
         {D0, vdst, vgpr, 32},
         {S0, vaddr, vgpr, 32},

@@ -311,6 +311,7 @@ namespace rocsparse
                                                                        n,
                                                                        k,
                                                                        mat_A->nnz,
+                                                                       mat_C->batch_count,
                                                                        mat_A->descr,
                                                                        alpha_type,
                                                                        mat_A->data_type,

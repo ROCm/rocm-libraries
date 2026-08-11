@@ -12,6 +12,10 @@
  * hipDNN's version and from the cuDNN *runtime* version in
  * `cudnn_runtime_version.h`. Consumers gate on `CUDNN_FRONTEND_VERSION` (e.g.
  * PyTorch's `MHA.cpp`), so it must match upstream. Pinned to cuDNN FE v1.24.0.
+ *
+ * This pin is also the single source of truth for the shim's node signatures:
+ * `detail/graph_wrapper.h` static_asserts on `CUDNN_FRONTEND_VERSION` so a bump
+ * here cannot land without re-diffing every node arity against upstream.
  */
 
 #pragma once

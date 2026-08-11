@@ -31,6 +31,9 @@ include(shared_third_party)
 
 # --- Options and cache variables ---
 option(ROCM_LIBS_SUPERBUILD "Enable superbuild mode" ON)
+option(HIPDNN_ENABLE_KERNEL_INGESTOR
+    "Enable the generic kernel ingestor in the hipDNN superbuild" ON
+)
 
 set(ROCM_LIBS_ENABLE_COMPONENTS "all"
     CACHE STRING "Semicolon-separated list of components to build (default: 'all')"
