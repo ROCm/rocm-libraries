@@ -282,6 +282,12 @@ scalar `valuesClose` helper and typed allclose-tolerance search were removed;
 one-element values use ordinary tensors, while tolerance search remains on the
 canonical runtime-typed API.
 
+The exhaustive numerical policy matrix is tested through the Python API
+against NumPy and raw-bit Python oracles. C++ comparison tests retain layout,
+selection, typed-wrapper, exact-integer, packaging, sanitizer, and performance
+contracts rather than serving as a second independent source of numerical
+truth.
+
 The same API accepts runtime `TensorView` objects or typed caller-owned
 storage through `TypedTensorView<T>`:
 
