@@ -122,9 +122,13 @@ to cuDNN-shaped knobs only when all of the following are true:
 
 Native knobs that cannot be represented this way are omitted with a warning.
 
-When creating a plan, cuDNN `KnobType_t` keys are converted to hipDNN string knob
-IDs before forwarding to native hipDNN. Unsupported cuDNN knob types return
-`INVALID_VALUE`.
+When creating a plan, each cuDNN `KnobType_t` key is resolved against the knobs the
+target engine actually exposes, so a choice lands on the provider's own knob ID (for
+example `miopen.tile_size`) rather than on a guessed bare name. A knob choice is
+never silently dropped: `INVALID_VALUE` is returned for a key the engine does not
+expose, for a key that more than one of the engine's knobs maps onto, and for a value
+the native knob cannot hold (a string-valued knob, or a magnitude past 2^53 for a
+float-valued knob). Integer choices are widened to `double` for float-valued knobs.
 
 ## Workspace and shared-memory caps
 

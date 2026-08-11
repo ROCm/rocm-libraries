@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -126,27 +127,24 @@ TEST(TestCudnnShimKnobWrapper, NormalizedKnobIdRenamesWorkspaceSizeLimit)
     EXPECT_EQ(fe::detail::normalizedKnobId("workspace"), "workspace");
 }
 
-TEST(TestCudnnShimKnobWrapper, EveryMappedKnobTypeRoundTrips)
+TEST(TestCudnnShimKnobWrapper, EveryMappedKnobTypeNameResolvesBackToItsType)
 {
-    std::unordered_set<std::string> seenIds;
     for(const auto knobType : mappedKnobTypes())
     {
-        const auto knobId = fe::detail::toHipdnnKnobId(knobType);
-        ASSERT_TRUE(knobId.has_value())
-            << "KnobType_t " << static_cast<int>(knobType) << " has no hipDNN id";
-        EXPECT_TRUE(seenIds.insert(*knobId).second) << "duplicate hipDNN id " << *knobId;
+        std::string knobName = fe::detail::knobTypeName(knobType);
+        std::transform(knobName.begin(), knobName.end(), knobName.begin(), [](unsigned char ch) {
+            return static_cast<char>(std::tolower(ch));
+        });
 
-        const auto roundTripped = fe::detail::fromHipdnnKnobId(*knobId);
-        ASSERT_TRUE(roundTripped.has_value()) << "hipDNN id " << *knobId << " maps back to nothing";
-        EXPECT_EQ(*roundTripped, knobType) << "hipDNN id " << *knobId
-                                           << " maps back to a different "
-                                              "KnobType_t";
+        const auto resolved = fe::detail::fromHipdnnKnobId(knobName);
+        ASSERT_TRUE(resolved.has_value()) << "cuDNN knob " << knobName << " maps back to nothing";
+        EXPECT_EQ(*resolved, knobType)
+            << "cuDNN knob " << knobName << " maps back to a different KnobType_t";
     }
 }
 
 TEST(TestCudnnShimKnobWrapper, UnmappedKnobIdsAreRejected)
 {
-    EXPECT_EQ(fe::detail::toHipdnnKnobId(fe::KnobType_t::NOT_SET), std::nullopt);
     EXPECT_EQ(fe::detail::fromHipdnnKnobId("definitely_not_a_knob"), std::nullopt);
     EXPECT_EQ(fe::detail::fromHipdnnKnobId(""), std::nullopt);
 }
@@ -246,30 +244,119 @@ TEST(TestCudnnShimKnobWrapper, ProjectNativeKnobsKeepsProjectableKnobsInOrder)
     EXPECT_EQ(cudnnKnobs[0].type, fe::KnobType_t::OCCUPANCY);
 }
 
-TEST(TestCudnnShimKnobWrapper, MakeNativeKnobSettingsMapsEveryChoice)
+TEST(TestCudnnShimKnobWrapper, MakeNativeKnobSettingsUsesTheEnginesOwnKnobIds)
 {
+    const std::vector<hipdnn_frontend::Knob> engineKnobs
+        = {makeIntNativeKnob("miopen.tile_size", 8, 1024, 4),
+           makeIntNativeKnob("global.workspace_size_limit", 0, 4096, 1),
+           makeIntNativeKnob("stages", 1, 8, 1),
+           makeIntNativeKnob("provider.not_a_cudnn_knob", 1, 8, 1)};
     const std::unordered_map<fe::KnobType_t, int64_t> choices = {{fe::KnobType_t::TILE_SIZE, 256},
                                                                  {fe::KnobType_t::WORKSPACE, 4096},
                                                                  {fe::KnobType_t::STAGES, 3}};
 
     std::vector<hipdnn_frontend::KnobSetting> nativeSettings
         = {{"stale", int64_t{1}}, {"also_stale", int64_t{2}}};
-    const auto error = fe::detail::makeNativeKnobSettings(choices, nativeSettings);
+    const auto error = fe::detail::makeNativeKnobSettings(choices, engineKnobs, nativeSettings);
 
     ASSERT_TRUE(error.is_good()) << error.get_message();
     ASSERT_EQ(nativeSettings.size(), 3U);
     EXPECT_EQ(findSetting(nativeSettings, "stale"), nullptr);
-    expectInt64Setting(nativeSettings, "tile_size", 256);
+    expectInt64Setting(nativeSettings, "miopen.tile_size", 256);
     expectInt64Setting(nativeSettings, "global.workspace_size_limit", 4096);
     expectInt64Setting(nativeSettings, "stages", 3);
 }
 
+TEST(TestCudnnShimKnobWrapper, MakeNativeKnobSettingsRejectsKnobTypeTheEngineDoesNotExpose)
+{
+    const std::vector<hipdnn_frontend::Knob> engineKnobs
+        = {makeIntNativeKnob("miopen.tile_size", 8, 1024, 4)};
+    const std::unordered_map<fe::KnobType_t, int64_t> choices = {{fe::KnobType_t::STAGES, 3}};
+
+    std::vector<hipdnn_frontend::KnobSetting> nativeSettings;
+    const auto error = fe::detail::makeNativeKnobSettings(choices, engineKnobs, nativeSettings);
+
+    ASSERT_TRUE(error.is_bad());
+    EXPECT_EQ(error.get_code(), fe::error_code_t::INVALID_VALUE);
+    EXPECT_NE(error.get_message().find("STAGES"), std::string::npos) << error.get_message();
+}
+
 TEST(TestCudnnShimKnobWrapper, MakeNativeKnobSettingsRejectsUnmappedKnobType)
 {
+    const std::vector<hipdnn_frontend::Knob> engineKnobs
+        = {makeIntNativeKnob("miopen.tile_size", 8, 1024, 4)};
     const std::unordered_map<fe::KnobType_t, int64_t> choices = {{fe::KnobType_t::NOT_SET, 1}};
 
     std::vector<hipdnn_frontend::KnobSetting> nativeSettings;
-    const auto error = fe::detail::makeNativeKnobSettings(choices, nativeSettings);
+    const auto error = fe::detail::makeNativeKnobSettings(choices, engineKnobs, nativeSettings);
+
+    ASSERT_TRUE(error.is_bad());
+    EXPECT_EQ(error.get_code(), fe::error_code_t::INVALID_VALUE);
+}
+
+TEST(TestCudnnShimKnobWrapper, MakeNativeKnobSettingsRejectsAmbiguousKnobType)
+{
+    const std::vector<hipdnn_frontend::Knob> engineKnobs
+        = {makeIntNativeKnob("miopen.tile_size", 8, 1024, 4),
+           makeIntNativeKnob("hipblaslt.tile_size", 8, 1024, 4),
+           makeIntNativeKnob("stages", 1, 8, 1)};
+
+    std::vector<hipdnn_frontend::KnobSetting> nativeSettings;
+    const auto error = fe::detail::makeNativeKnobSettings(
+        {{fe::KnobType_t::TILE_SIZE, 256}}, engineKnobs, nativeSettings);
+
+    ASSERT_TRUE(error.is_bad());
+    EXPECT_EQ(error.get_code(), fe::error_code_t::INVALID_VALUE);
+    EXPECT_NE(error.get_message().find("TILE_SIZE"), std::string::npos) << error.get_message();
+
+    // A knob type outside the collision is unaffected.
+    const auto unambiguous = fe::detail::makeNativeKnobSettings(
+        {{fe::KnobType_t::STAGES, 3}}, engineKnobs, nativeSettings);
+
+    ASSERT_TRUE(unambiguous.is_good()) << unambiguous.get_message();
+    expectInt64Setting(nativeSettings, "stages", 3);
+}
+
+TEST(TestCudnnShimKnobWrapper, MakeNativeKnobSettingsWidensIntChoiceOntoFloatKnob)
+{
+    const std::vector<hipdnn_frontend::Knob> engineKnobs = {makeNativeKnob(
+        "provider.occupancy", 0.5, std::make_shared<hipdnn_frontend::FloatConstraint>(0.0, 8.0))};
+
+    std::vector<hipdnn_frontend::KnobSetting> nativeSettings;
+    const auto error = fe::detail::makeNativeKnobSettings(
+        {{fe::KnobType_t::OCCUPANCY, 4}}, engineKnobs, nativeSettings);
+
+    ASSERT_TRUE(error.is_good()) << error.get_message();
+    ASSERT_EQ(nativeSettings.size(), 1U);
+    EXPECT_EQ(nativeSettings[0].knobId(), "provider.occupancy");
+    const auto* value = std::get_if<double>(&nativeSettings[0].value());
+    ASSERT_NE(value, nullptr) << "float knob did not receive a double value";
+    EXPECT_DOUBLE_EQ(*value, 4.0);
+}
+
+TEST(TestCudnnShimKnobWrapper, MakeNativeKnobSettingsRejectsFloatKnobValueThatWouldRound)
+{
+    const std::vector<hipdnn_frontend::Knob> engineKnobs = {makeNativeKnob(
+        "provider.occupancy", 0.5, std::make_shared<hipdnn_frontend::FloatConstraint>(0.0, 1e19))};
+
+    std::vector<hipdnn_frontend::KnobSetting> nativeSettings;
+    const auto error = fe::detail::makeNativeKnobSettings(
+        {{fe::KnobType_t::OCCUPANCY, (int64_t{1} << 53) + 1}}, engineKnobs, nativeSettings);
+
+    ASSERT_TRUE(error.is_bad());
+    EXPECT_EQ(error.get_code(), fe::error_code_t::INVALID_VALUE);
+}
+
+TEST(TestCudnnShimKnobWrapper, MakeNativeKnobSettingsRejectsStringKnob)
+{
+    const std::vector<hipdnn_frontend::Knob> engineKnobs
+        = {makeNativeKnob("provider.kernel_cfg",
+                          std::string("fast"),
+                          std::make_shared<hipdnn_frontend::StringConstraint>(16))};
+
+    std::vector<hipdnn_frontend::KnobSetting> nativeSettings;
+    const auto error = fe::detail::makeNativeKnobSettings(
+        {{fe::KnobType_t::KERNEL_CFG, 1}}, engineKnobs, nativeSettings);
 
     ASSERT_TRUE(error.is_bad());
     EXPECT_EQ(error.get_code(), fe::error_code_t::INVALID_VALUE);

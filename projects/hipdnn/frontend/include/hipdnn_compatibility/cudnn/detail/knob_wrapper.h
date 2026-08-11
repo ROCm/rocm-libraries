@@ -171,69 +171,71 @@ inline std::optional<KnobType_t> fromHipdnnKnobId(const std::string& knobId)
     return std::nullopt;
 }
 
-inline std::optional<std::string> toHipdnnKnobId(KnobType_t knobType)
+// Diagnostic-only cuDNN spelling of a knob type. Deliberately not a hipDNN knob
+// id: the id a knob type maps onto is resolved per engine, never guessed.
+inline const char* knobTypeName(KnobType_t knobType)
 {
     switch(knobType)
     {
     case KnobType_t::SWIZZLE:
-        return "swizzle";
+        return "SWIZZLE";
     case KnobType_t::TILE_SIZE:
-        return "tile_size";
+        return "TILE_SIZE";
     case KnobType_t::EDGE:
-        return "edge";
+        return "EDGE";
     case KnobType_t::MULTIPLY:
-        return "multiply";
+        return "MULTIPLY";
     case KnobType_t::SPLIT_K_BUF:
-        return "split_k_buf";
+        return "SPLIT_K_BUF";
     case KnobType_t::TILEK:
-        return "tilek";
+        return "TILEK";
     case KnobType_t::STAGES:
-        return "stages";
+        return "STAGES";
     case KnobType_t::REDUCTION_MODE:
-        return "reduction_mode";
+        return "REDUCTION_MODE";
     case KnobType_t::SPLIT_K_SLC:
-        return "split_k_slc";
+        return "SPLIT_K_SLC";
     case KnobType_t::IDX_MODE:
-        return "idx_mode";
+        return "IDX_MODE";
     case KnobType_t::SPECFILT:
-        return "specfilt";
+        return "SPECFILT";
     case KnobType_t::KERNEL_CFG:
-        return "kernel_cfg";
+        return "KERNEL_CFG";
     case KnobType_t::WORKSPACE:
-        return "global.workspace_size_limit";
+        return "WORKSPACE";
     case KnobType_t::TILE_CGA_M:
-        return "tile_cga_m";
+        return "TILE_CGA_M";
     case KnobType_t::TILE_CGA_N:
-        return "tile_cga_n";
+        return "TILE_CGA_N";
     case KnobType_t::BLOCK_SIZE:
-        return "block_size";
+        return "BLOCK_SIZE";
     case KnobType_t::OCCUPANCY:
-        return "occupancy";
+        return "OCCUPANCY";
     case KnobType_t::ARRAY_SIZE_PER_THREAD:
-        return "array_size_per_thread";
+        return "ARRAY_SIZE_PER_THREAD";
     case KnobType_t::SPLIT_COLS:
-        return "split_cols";
+        return "SPLIT_COLS";
     case KnobType_t::TILE_ROWS:
-        return "tile_rows";
+        return "TILE_ROWS";
     case KnobType_t::TILE_COLS:
-        return "tile_cols";
+        return "TILE_COLS";
     case KnobType_t::LOAD_SIZE:
-        return "load_size";
+        return "LOAD_SIZE";
     case KnobType_t::CTA_COUNT:
-        return "cta_count";
+        return "CTA_COUNT";
     case KnobType_t::STREAM_K:
-        return "stream_k";
+        return "STREAM_K";
     case KnobType_t::SPLIT_P_SLC:
-        return "split_p_slc";
+        return "SPLIT_P_SLC";
     case KnobType_t::TILE_M:
-        return "tile_m";
+        return "TILE_M";
     case KnobType_t::TILE_N:
-        return "tile_n";
+        return "TILE_N";
     case KnobType_t::WARP_SPEC_CFG:
-        return "warp_spec_cfg";
+        return "WARP_SPEC_CFG";
     case KnobType_t::NOT_SET:
     default:
-        return std::nullopt;
+        return "NOT_SET";
     }
 }
 
@@ -290,19 +292,96 @@ inline void projectNativeKnobs(const std::vector<hipdnn_frontend::Knob>& nativeK
     }
 }
 
+// Resolve cuDNN knob types against the knobs the engine actually exposes, so a
+// choice lands on the provider's real id ("miopen.tile_size") rather than on a
+// guessed bare name. Entries point into engineKnobs, which must outlive the map.
+// Two engine knobs can normalize onto the same cuDNN type; that collision is
+// stored as a null entry so it only fails if the caller sets that type.
+inline std::unordered_map<KnobType_t, const hipdnn_frontend::Knob*>
+    buildKnobTypeLookup(const std::vector<hipdnn_frontend::Knob>& engineKnobs)
+{
+    std::unordered_map<KnobType_t, const hipdnn_frontend::Knob*> lookup;
+    lookup.reserve(engineKnobs.size());
+    for(const auto& engineKnob : engineKnobs)
+    {
+        const auto knobType = fromHipdnnKnobId(engineKnob.knobId());
+        if(!knobType.has_value())
+        {
+            continue;
+        }
+        auto [entry, inserted] = lookup.emplace(*knobType, &engineKnob);
+        if(!inserted)
+        {
+            entry->second = nullptr;
+        }
+    }
+    return lookup;
+}
+
+// cuDNN carries knob values as int64 only, so widen to the native knob's declared
+// type where that is lossless and reject otherwise, rather than letting a
+// mistyped value fail later inside constraint validation.
+inline error_t appendNativeKnobSetting(const hipdnn_frontend::Knob& engineKnob,
+                                       int64_t value,
+                                       std::vector<hipdnn_frontend::KnobSetting>& nativeSettings)
+{
+    switch(engineKnob.valueType())
+    {
+    case hipdnn_frontend::KnobValueType::INT64:
+        nativeSettings.emplace_back(engineKnob.knobId(), value);
+        return {};
+    case hipdnn_frontend::KnobValueType::FLOAT64:
+    {
+        // Past 2^53 the widening to double silently rounds.
+        constexpr int64_t exactDoubleLimit = int64_t{1} << 53;
+        if(value > exactDoubleLimit || value < -exactDoubleLimit)
+        {
+            return {error_code_t::INVALID_VALUE,
+                    "cuDNN knob value " + std::to_string(value) + " does not fit hipDNN knob '"
+                        + engineKnob.knobId() + "' without rounding"};
+        }
+        nativeSettings.emplace_back(engineKnob.knobId(), static_cast<double>(value));
+        return {};
+    }
+    case hipdnn_frontend::KnobValueType::STRING:
+    case hipdnn_frontend::KnobValueType::NOT_SET:
+    default:
+        return {error_code_t::INVALID_VALUE,
+                "hipDNN knob '" + engineKnob.knobId()
+                    + "' does not take an integer value and cannot be set through the cuDNN "
+                      "knob API"};
+    }
+}
+
 inline error_t makeNativeKnobSettings(const std::unordered_map<KnobType_t, int64_t>& cudnnChoices,
+                                      const std::vector<hipdnn_frontend::Knob>& engineKnobs,
                                       std::vector<hipdnn_frontend::KnobSetting>& nativeSettings)
 {
     nativeSettings.clear();
     nativeSettings.reserve(cudnnChoices.size());
+
+    const auto lookup = buildKnobTypeLookup(engineKnobs);
     for(const auto& [knobType, value] : cudnnChoices)
     {
-        auto knobId = toHipdnnKnobId(knobType);
-        if(!knobId.has_value())
+        const auto entry = lookup.find(knobType);
+        if(entry == lookup.end())
         {
-            return {error_code_t::INVALID_VALUE, "Unsupported cuDNN knob type for hipDNN shim"};
+            return {error_code_t::INVALID_VALUE,
+                    std::string("cuDNN knob ") + knobTypeName(knobType)
+                        + " is not exposed by this engine"};
         }
-        nativeSettings.emplace_back(*knobId, value);
+        if(entry->second == nullptr)
+        {
+            return {error_code_t::INVALID_VALUE,
+                    std::string("cuDNN knob ") + knobTypeName(knobType)
+                        + " is ambiguous: this engine exposes several knobs that map onto it"};
+        }
+
+        auto error = appendNativeKnobSetting(*entry->second, value, nativeSettings);
+        if(error.is_bad())
+        {
+            return error;
+        }
     }
     return {};
 }

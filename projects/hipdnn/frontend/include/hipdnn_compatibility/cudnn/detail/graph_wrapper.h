@@ -282,10 +282,18 @@ public:
 
         int64_t nativeEngineId = -1;
         CHECK_CUDNN_FRONTEND_ERROR(mapEngineIndex(engineIndex, nativeEngineId));
+
+        // Resolve the cuDNN knob enums against this engine's own knob ids; an
+        // unresolved choice is an error, never a silently dropped setting.
         std::vector<hipdnn_frontend::KnobSetting> settings;
-        CHECK_CUDNN_FRONTEND_ERROR(
-            hipdnn_frontend::compatibility::cudnn_frontend::detail::makeNativeKnobSettings(
-                knobs, settings));
+        if(!knobs.empty())
+        {
+            std::vector<hipdnn_frontend::Knob> nativeKnobs;
+            CHECK_CUDNN_FRONTEND_ERROR(_graph.get_knobs_for_engine(nativeEngineId, nativeKnobs));
+            CHECK_CUDNN_FRONTEND_ERROR(
+                hipdnn_frontend::compatibility::cudnn_frontend::detail::makeNativeKnobSettings(
+                    knobs, nativeKnobs, settings));
+        }
 
         CHECK_CUDNN_FRONTEND_ERROR(_graph.create_execution_plan_ext(nativeEngineId, settings));
         CHECK_CUDNN_FRONTEND_ERROR(applyPendingPlanFilters());
