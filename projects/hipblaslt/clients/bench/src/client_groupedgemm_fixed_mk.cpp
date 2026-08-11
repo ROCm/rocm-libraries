@@ -38,6 +38,7 @@
 #include <limits>
 #include <roc/host_validation/adapters/hipblaslt/GroupedGemmDataInitialization.hpp>
 #include <roc/host_validation/adapters/hipblaslt/Types.hpp>
+#include <roc/host_validation/typed_comparison.hpp>
 #include <roc/host_validation/validation.hpp>
 #include <span>
 #include <stdexcept>

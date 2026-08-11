@@ -3,20 +3,12 @@
 
 #pragma once
 
-#include <algorithm>
-#include <bit>
-#include <cmath>
-#include <complex>
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
 #include <limits>
 #include <optional>
 #include <roc/host_validation/tensor.hpp>
 #include <span>
-#include <stdexcept>
-#include <type_traits>
-#include <utility>
 #include <vector>
 
 namespace roc::host_validation {
@@ -148,56 +140,58 @@ struct SentinelResult {
     }
 };
 
-inline constexpr double defaultSymmetricRelativeTolerance(ScalarType type);
+inline constexpr double defaultSymmetricRelativeTolerance(ScalarType type) {
+    switch (type) {
+        case ScalarType::Float16:
+            return 0.01;
+        case ScalarType::BFloat16:
+            return 0.1;
+        case ScalarType::Float8E4M3:
+        case ScalarType::Float8E4M3Fnuz:
+            return 0.125;
+        case ScalarType::Float8E5M2:
+        case ScalarType::Float8E5M2Fnuz:
+            return 0.25;
+        case ScalarType::Float32:
+        case ScalarType::ComplexFloat32:
+            return 0.0002;
+        case ScalarType::Float64:
+        case ScalarType::ComplexFloat64:
+            return 1e-12;
+        default:
+            return 0.0;
+    }
+}
 
-inline ComparisonOptions defaultComparisonOptions(
+ComparisonOptions defaultComparisonOptions(
     ScalarType type, std::optional<double> symmetricRelativeTolerance = std::nullopt);
 
-inline ComparisonOptions nearComparisonOptions(double absoluteTolerance);
+ComparisonOptions nearComparisonOptions(double absoluteTolerance);
 
-inline ComparisonOptions allCloseComparisonOptions(double absoluteTolerance,
-                                                   double relativeTolerance,
-                                                   bool equalNaNs = false);
+ComparisonOptions allCloseComparisonOptions(double absoluteTolerance, double relativeTolerance,
+                                            bool equalNaNs = false);
 
-inline int ulpMantissaBits(ScalarType type);
+int ulpMantissaBits(ScalarType type);
 
-inline double ulpDistance(double exact, double approximation, int mantissaBits);
+double ulpDistance(double exact, double approximation, int mantissaBits);
 
-inline double encodedUlpDistance(double exact, double approximation, ScalarType type);
+double encodedUlpDistance(double exact, double approximation, ScalarType type);
 
-template <typename Observed, typename Expected>
-bool valuesClose(const Observed& observed, const Expected& expected,
-                 const ComparisonOptions& options = {});
-
-template <typename Observed, typename Expected>
-ComparisonResult compare(const TypedTensorView<Observed>& observed,
-                         const TypedTensorView<Expected>& expected,
+ComparisonResult compare(const TensorView& observed, const TensorView& expected,
                          const ComparisonOptions& options = {});
 
-inline ComparisonResult compare(const TensorView& observed, const TensorView& expected,
-                                const ComparisonOptions& options = {});
-
-template <typename Observed, typename Expected>
-std::optional<ComparisonTolerance> findAllCloseTolerance(const TypedTensorView<Observed>& observed,
-                                                         const TypedTensorView<Expected>& expected,
+std::optional<ComparisonTolerance> findAllCloseTolerance(const TensorView& observed,
+                                                         const TensorView& expected,
                                                          std::span<const double> absoluteCandidates,
                                                          std::span<const double> relativeCandidates,
                                                          ComparisonOptions options = {});
 
-inline std::optional<ComparisonTolerance> findAllCloseTolerance(
-    const TensorView& observed, const TensorView& expected,
-    std::span<const double> absoluteCandidates, std::span<const double> relativeCandidates,
-    ComparisonOptions options = {});
+SentinelResult checkUnwrittenSentinel(ScalarType type, std::span<const std::byte> storage,
+                                      size_t firstElement, size_t elementCount,
+                                      SentinelRegion region = SentinelRegion::Unspecified,
+                                      size_t maxReportedMismatches = 10);
 
-inline SentinelResult checkUnwrittenSentinel(ScalarType type, std::span<const std::byte> storage,
-                                             size_t firstElement, size_t elementCount,
-                                             SentinelRegion region = SentinelRegion::Unspecified,
-                                             size_t maxReportedMismatches = 10);
-
-inline SentinelResult checkUnusedTensorStorage(const TensorView& logicalTensor,
-                                               size_t allocatedElements,
-                                               SentinelRegion region = SentinelRegion::Inside,
-                                               size_t maxReportedMismatches = 10);
+SentinelResult checkUnusedTensorStorage(const TensorView& logicalTensor, size_t allocatedElements,
+                                        SentinelRegion region = SentinelRegion::Inside,
+                                        size_t maxReportedMismatches = 10);
 }  // namespace roc::host_validation
-
-#include <roc/host_validation/detail/comparison_impl.hpp>

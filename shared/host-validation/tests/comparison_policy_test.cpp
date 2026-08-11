@@ -41,30 +41,39 @@ void recordExpectation(bool actual, bool expected, const char* expression, int l
     recordExpectation(static_cast<bool>(expression), false, #expression, __LINE__)
 
 template <typename T>
+bool close(T observed, T expected, const roc::host_validation::ComparisonOptions& options) {
+    const std::array<T, 1> observedStorage{observed};
+    const std::array<T, 1> expectedStorage{expected};
+    return roc::host_validation::compare(
+               roc::host_validation::TensorView::fromNative(std::span<const T>(observedStorage)),
+               roc::host_validation::TensorView::fromNative(std::span<const T>(expectedStorage)),
+               options)
+        .passed();
+}
+
+template <typename T>
 std::enable_if_t<std::is_integral_v<T>, bool> close(T observed, T expected) {
-    return roc::host_validation::valuesClose(observed, expected);
+    return close(observed, expected, {});
 }
 
 bool close(float observed, float expected) {
-    return roc::host_validation::valuesClose(
-        observed, expected, roc::host_validation::defaultComparisonOptions(ScalarType::Float32));
+    return close(observed, expected,
+                 roc::host_validation::defaultComparisonOptions(ScalarType::Float32));
 }
 
 bool close(double observed, double expected) {
-    return roc::host_validation::valuesClose(
-        observed, expected, roc::host_validation::defaultComparisonOptions(ScalarType::Float64));
+    return close(observed, expected,
+                 roc::host_validation::defaultComparisonOptions(ScalarType::Float64));
 }
 
 bool close(std::complex<float> observed, std::complex<float> expected) {
-    return roc::host_validation::valuesClose(
-        observed, expected,
-        roc::host_validation::defaultComparisonOptions(ScalarType::ComplexFloat32));
+    return close(observed, expected,
+                 roc::host_validation::defaultComparisonOptions(ScalarType::ComplexFloat32));
 }
 
 bool close(std::complex<double> observed, std::complex<double> expected) {
-    return roc::host_validation::valuesClose(
-        observed, expected,
-        roc::host_validation::defaultComparisonOptions(ScalarType::ComplexFloat64));
+    return close(observed, expected,
+                 roc::host_validation::defaultComparisonOptions(ScalarType::ComplexFloat64));
 }
 
 Tensor quantizedScalar(ScalarType type, float value) {
@@ -86,9 +95,10 @@ bool close(const Tensor& observed, const Tensor& expected) {
         throw std::invalid_argument(
             "Quantized scalar comparison requires matching one-element tensors.");
 
-    return roc::host_validation::valuesClose(
-        observed.view().loadAs<float>({0}), expected.view().loadAs<float>({0}),
-        roc::host_validation::defaultComparisonOptions(observed.type()));
+    return roc::host_validation::compare(
+               observed.view(), expected.view(),
+               roc::host_validation::defaultComparisonOptions(observed.type()))
+        .passed();
 }
 
 void testFloat() {
@@ -518,16 +528,16 @@ void testComplexDouble() {
 
 void testExplicitToleranceContract() {
     const auto defaults = roc::host_validation::defaultComparisonOptions(ScalarType::Float32);
-    EXPECT_FALSE(roc::host_validation::valuesClose(1.0f, 1.02f, defaults));
+    EXPECT_FALSE(close(1.0f, 1.02f, defaults));
 
     const auto overridden =
         roc::host_validation::defaultComparisonOptions(ScalarType::Float32, 0.01);
-    EXPECT_TRUE(roc::host_validation::valuesClose(1.0f, 1.02f, overridden));
+    EXPECT_TRUE(close(1.0f, 1.02f, overridden));
 
     auto exactBoundary = roc::host_validation::defaultComparisonOptions(ScalarType::Float32, 0.5);
-    EXPECT_FALSE(roc::host_validation::valuesClose(0.0f, 1.0f, exactBoundary));
+    EXPECT_FALSE(close(0.0f, 1.0f, exactBoundary));
     exactBoundary.strictTolerance = false;
-    EXPECT_TRUE(roc::host_validation::valuesClose(0.0f, 1.0f, exactBoundary));
+    EXPECT_TRUE(close(0.0f, 1.0f, exactBoundary));
 }
 
 void runExpectationSet(std::string_view name, void (*test)()) {
