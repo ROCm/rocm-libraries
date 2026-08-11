@@ -1540,12 +1540,14 @@ def _enable_single_batch_combo(problem: UnifiedAttentionProblem) -> bool:
         return False
     # fp16 D128 sliding-window (block_size==16 only) routes to the transposed-
     # 32x32 fp32 online-softmax path (~1.65x faster here than the narrow 16x16
-    # path; both numerically equal). Scoped to block_size==16: at bs in {32,64} the combo also
-    # pulls in the default-on _enable_d128_small_tile / _enable_softmax_mfma_
-    # interleave levers (neither excludes SW), which yield block_m=128 >
-    # tile_size=64 with use_k_single_buffer -> uncaught ValueError at launch.
-    # bf16 D128 SW and all other SW shapes stay on their existing paths; the
-    # no-SW VALU sub-flags auto-disable for SW via _enable_transposed_subflags.
+    # path; both numerically equal). Scoped to block_size==16 because that is the
+    # cohort we measured. bs in {32,64} would now also build safely under the
+    # combo -- the _enable_k_single_buffer geometry guard derives block_m <=
+    # tile_size, so the former block_m=128 > tile_size=64 collision no longer
+    # raises -- but their combo speedup is unmeasured, so they keep their
+    # existing routing. bf16 D128 SW and all other SW shapes also stay on their
+    # existing paths; the no-SW VALU sub-flags auto-disable for SW via
+    # _enable_transposed_subflags.
     if problem.sliding_window > 0 and not (
         problem.head_size == 128
         and problem.dtype == "fp16"
