@@ -65,21 +65,11 @@ _SUPPORTED_ARCHES = ("gfx90a", "gfx942", "gfx950")
 BRIDGE_PERMUTE_N = False
 
 
-def _detect_gpu_arch_via_amd_smi():
-    """Best-effort arch via the shared amd-smi-first smi_utils wrapper.
-
-    Returns a ``gfxNNN`` string, or ``None`` if the wrapper is unavailable or
-    neither amd-smi nor rocm-smi resolves an arch (callers fall back to
-    rocminfo).
-    """
-    try:
-        import sys as _sys
-        _common = Path(__file__).resolve().parents[2] / "tile_engine" / "ops" / "common"
-        if str(_common) not in _sys.path:
-            _sys.path.insert(0, str(_common))
-        import smi_utils  # noqa: E402
-        return smi_utils.detect_gpu_arch()
-    except Exception:
+try:
+    # Reuse the single canonical amd-smi bridge instead of re-implementing it.
+    from dispatcher_common import _detect_gpu_arch_via_amd_smi
+except Exception:  # noqa: BLE001 - standalone use without dispatcher_common on path
+    def _detect_gpu_arch_via_amd_smi() -> Optional[str]:
         return None
 
 

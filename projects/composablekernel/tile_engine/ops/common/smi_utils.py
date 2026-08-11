@@ -106,7 +106,7 @@ def fetch_live_normalized_fields() -> dict[str, object]:
     )
 
 
-def detect_gpu_arch(fallback=None):
+def detect_gpu_arch(fallback: Optional[str] = None) -> Optional[str]:
     """Return the GPU gfx arch string (e.g. "gfx950"), preferring amd-smi.
 
     Tries amd-smi ``static`` (TARGET_GRAPHICS_VERSION) first, then rocm-smi
@@ -114,12 +114,14 @@ def detect_gpu_arch(fallback=None):
     throughout this module. Returns ``fallback`` if neither yields an arch.
     """
     for tool in _smi_order():
+        if shutil.which(tool) is None:
+            continue
         try:
             if tool == _AMD_SMI:
                 arch = parse_amd_gfx(_run_cmd([_AMD_SMI, "static"]))
             else:
                 arch = parse_rocm_gfx(_run_cmd([_ROCM_SMI, "--showproductname"]))
-        except Exception:
+        except Exception:  # noqa: BLE001 - tool present but query failed; try next
             arch = None
         if arch:
             return arch
