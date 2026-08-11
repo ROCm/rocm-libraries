@@ -341,7 +341,9 @@ RppStatus rppt_phase(RppPtr_t srcPtr1, RppPtr_t srcPtr2, RpptDescPtr srcDescPtr,
  * in pinned / HIP memory (for HIP backend) or HOST memory (for HOST backend) (1D tensor of size =
  * batchSize * numberOfDimensions * 2) \param [in] rppHandle RPP HIP/HOST handle created with
  * <tt>\ref rppCreate()</tt> \param [in] executionBackend execution backend to run the augmentation
- * on (RppBackend::RPP_HOST_BACKEND or RppBackend::RPP_HIP_BACKEND) \return A <tt> \ref
+ * on (RppBackend::RPP_HOST_BACKEND or RppBackend::RPP_HIP_BACKEND) \note srcGenericDescPtr and
+ * dstGenericDescPtr must have densely packed strides (no row/plane padding) -
+ * RPP_ERROR_INVALID_STRIDES is returned otherwise. \return A <tt> \ref
  * RppStatus</tt> enumeration. \retval RPP_SUCCESS Successful completion. \retval RPP_ERROR*
  * Unsuccessful completion.
  */
@@ -526,7 +528,9 @@ RppStatus rppt_lens_correction(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t
  * backend) for each element in source tensor (tensor of batchSize * number of dimensions * 2
  * values) \param [in] rppHandle RPP HIP/HOST handle created with <tt>\ref rppCreate()</tt> \param
  * [in] executionBackend backend for execution (RppBackend::RPP_HOST_BACKEND or
- * RppBackend::RPP_HIP_BACKEND) \return A <tt> \ref RppStatus</tt> enumeration. \retval RPP_SUCCESS
+ * RppBackend::RPP_HIP_BACKEND) \note srcGenericDescPtr and dstGenericDescPtr must have densely
+ * packed strides (no row/plane padding) - RPP_ERROR_INVALID_STRIDES is returned otherwise.
+ * \return A <tt> \ref RppStatus</tt> enumeration. \retval RPP_SUCCESS
  * Successful completion. \retval RPP_ERROR* Unsuccessful completion. \ingroup
  * group_tensor_geometric
  */
@@ -580,8 +584,10 @@ RppStatus rppt_warp_perspective(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_
  * tensor srcPtr2 in pinned / HIP memory (for HIP backend) or HOST memory (for HOST backend) \param
  * [in] rppHandle RPP HIP/HOST handle created with <tt>\ref rppCreateWithBatchSize()</tt> \param
  * [in] executionBackend backend for execution (RppBackend::RPP_HOST_BACKEND or
- * RppBackend::RPP_HIP_BACKEND) \return A <tt> \ref RppStatus</tt> enumeration. \retval RPP_SUCCESS
- * Successful completion. \retval RPP_ERROR* Unsuccessful completion.
+ * RppBackend::RPP_HIP_BACKEND) \note srcPtr1GenericDescPtr, srcPtr2GenericDescPtr and
+ * dstGenericDescPtr must have densely packed strides (no row/plane padding) -
+ * RPP_ERROR_INVALID_STRIDES is returned otherwise. \return A <tt> \ref RppStatus</tt> enumeration.
+ * \retval RPP_SUCCESS Successful completion. \retval RPP_ERROR* Unsuccessful completion.
  */
 RppStatus rppt_concat(RppPtr_t srcPtr1, RppPtr_t srcPtr2, RpptGenericDescPtr srcPtr1GenericDescPtr,
                       RpptGenericDescPtr srcPtr2GenericDescPtr, RppPtr_t dstPtr,

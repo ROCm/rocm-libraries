@@ -176,6 +176,8 @@ RppStatus rppt_magnitude(RppPtr_t srcPtr1, RppPtr_t srcPtr2, RpptDescPtr srcDesc
  * dstGenericDescPtr destination tensor descriptor \param [in] roiTensor values to represent
  * dimensions of input tensor (tensor in pinned / HIP memory (for HIP backend) or HOST memory (for
  * HOST backend)) \param [in] rppHandle RPP HIP/HOST handle created with <tt>\ref rppCreate()</tt>
+ * \note srcGenericDescPtr and dstGenericDescPtr must have densely packed strides (no row/plane
+ * padding) - RPP_ERROR_INVALID_STRIDES is returned otherwise.
  * \return A <tt> \ref RppStatus</tt> enumeration.
  * \retval RPP_SUCCESS Successful completion.
  * \retval RPP_ERROR* Unsuccessful completion.
@@ -194,6 +196,8 @@ RppStatus rppt_log(RppPtr_t srcPtr, RpptGenericDescPtr srcGenericDescPtr, RppPtr
  * dstGenericDescPtr destination tensor descriptor \param [in] roiTensor values to represent
  * dimensions of input tensor (tensor in pinned / HIP memory (for HIP backend) or HOST memory (for
  * HOST backend)) \param [in] rppHandle RPP HIP/HOST handle created with <tt>\ref rppCreate()</tt>
+ * \note srcGenericDescPtr and dstGenericDescPtr must have densely packed strides (no row/plane
+ * padding) - RPP_ERROR_INVALID_STRIDES is returned otherwise.
  * \return A <tt> \ref RppStatus</tt> enumeration.
  * \retval RPP_SUCCESS Successful completion.
  * \retval RPP_ERROR* Unsuccessful completion.
@@ -216,6 +220,8 @@ RppStatus rppt_log1p(RppPtr_t srcPtr, RpptGenericDescPtr srcGenericDescPtr, RppP
  * represent dimensions of first input tensor \param [in] roiTensor2 values to represent dimensions
  * of second input tensor \param [in] rppHandle RPP HIP/HOST handle created with <tt>\ref
  * rppCreate()</tt> \param [in] executionBackend Backend type (RPP_HOST_BACKEND or RPP_HIP_BACKEND)
+ * \note srcGenericDescPtr1, srcGenericDescPtr2 and dstGenericDescPtr must have densely packed
+ * strides (no row/plane padding) - RPP_ERROR_INVALID_STRIDES is returned otherwise.
  * \return A <tt> \ref RppStatus</tt> enumeration.
  * \retval RPP_SUCCESS Successful completion.
  * \retval RPP_ERROR* Unsuccessful completion.
@@ -242,6 +248,8 @@ RppStatus rppt_tensor_add_tensor(RppPtr_t srcPtr1, RppPtr_t srcPtr2,
  * represent dimensions of first input tensor \param [in] roiTensor2 values to represent dimensions
  * of second input tensor \param [in] rppHandle RPP HIP/HOST handle created with <tt>\ref
  * rppCreate()</tt> \param [in] executionBackend Backend type (RPP_HOST_BACKEND or RPP_HIP_BACKEND)
+ * \note srcGenericDescPtr1, srcGenericDescPtr2 and dstGenericDescPtr must have densely packed
+ * strides (no row/plane padding) - RPP_ERROR_INVALID_STRIDES is returned otherwise.
  * \return A <tt> \ref RppStatus</tt> enumeration.
  * \retval RPP_SUCCESS Successful completion.
  * \retval RPP_ERROR* Unsuccessful completion.
@@ -268,6 +276,8 @@ RppStatus rppt_tensor_subtract_tensor(RppPtr_t srcPtr1, RppPtr_t srcPtr2,
  * represent dimensions of first input tensor \param [in] roiTensor2 values to represent dimensions
  * of second input tensor \param [in] rppHandle RPP HIP/HOST handle created with <tt>\ref
  * rppCreate()</tt> \param [in] executionBackend Backend type (RPP_HOST_BACKEND or RPP_HIP_BACKEND)
+ * \note srcGenericDescPtr1, srcGenericDescPtr2 and dstGenericDescPtr must have densely packed
+ * strides (no row/plane padding) - RPP_ERROR_INVALID_STRIDES is returned otherwise.
  * \return A <tt> \ref RppStatus</tt> enumeration.
  * \retval RPP_SUCCESS Successful completion.
  * \retval RPP_ERROR* Unsuccessful completion.
@@ -294,6 +304,8 @@ RppStatus rppt_tensor_multiply_tensor(RppPtr_t srcPtr1, RppPtr_t srcPtr2,
  * represent dimensions of first input tensor \param [in] roiTensor2 values to represent dimensions
  * of second input tensor \param [in] rppHandle RPP HIP/HOST handle created with <tt>\ref
  * rppCreate()</tt> \param [in] executionBackend Backend type (RPP_HOST_BACKEND or RPP_HIP_BACKEND)
+ * \note srcGenericDescPtr1, srcGenericDescPtr2 and dstGenericDescPtr must have densely packed
+ * strides (no row/plane padding) - RPP_ERROR_INVALID_STRIDES is returned otherwise.
  * \return A <tt> \ref RppStatus</tt> enumeration.
  * \retval RPP_SUCCESS Successful completion.
  * \retval RPP_ERROR* Unsuccessful completion.

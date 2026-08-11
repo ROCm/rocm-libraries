@@ -151,8 +151,10 @@ RppStatus rppt_bitwise_not(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dst
  * srcPtr1roiTensor values to represent dimensions of input tensor srcPtr1 \param [in]
  * srcPtr2roiTensor values to represent dimensions of input tensor srcPtr2 \param [in] rppHandle RPP
  * HIP/HOST handle created with <tt>\ref rppCreate()</tt> \param [in] executionBackend backend for
- * execution (RppBackend::RPP_HOST_BACKEND or RppBackend::RPP_HIP_BACKEND) \return A <tt> \ref
- * RppStatus</tt> enumeration. \retval RPP_SUCCESS Successful completion. \retval RPP_ERROR*
+ * execution (RppBackend::RPP_HOST_BACKEND or RppBackend::RPP_HIP_BACKEND) \note
+ * srcPtr1GenericDescPtr, srcPtr2GenericDescPtr and dstGenericDescPtr must have densely packed
+ * strides (no row/plane padding) - RPP_ERROR_INVALID_STRIDES is returned otherwise. \return A <tt>
+ * \ref RppStatus</tt> enumeration. \retval RPP_SUCCESS Successful completion. \retval RPP_ERROR*
  * Unsuccessful completion.
  */
 RppStatus rppt_tensor_and_tensor(RppPtr_t srcPtr1, RppPtr_t srcPtr2,
@@ -178,8 +180,10 @@ RppStatus rppt_tensor_and_tensor(RppPtr_t srcPtr1, RppPtr_t srcPtr2,
  * srcPtr1roiTensor values to represent dimensions of input tensor srcPtr1 \param [in]
  * srcPtr2roiTensor values to represent dimensions of input tensor srcPtr2 \param [in] rppHandle RPP
  * HIP/HOST handle created with <tt>\ref rppCreate()</tt> \param [in] executionBackend backend for
- * execution (RppBackend::RPP_HOST_BACKEND or RppBackend::RPP_HIP_BACKEND) \return A <tt> \ref
- * RppStatus</tt> enumeration. \retval RPP_SUCCESS Successful completion. \retval RPP_ERROR*
+ * execution (RppBackend::RPP_HOST_BACKEND or RppBackend::RPP_HIP_BACKEND) \note
+ * srcPtr1GenericDescPtr, srcPtr2GenericDescPtr and dstGenericDescPtr must have densely packed
+ * strides (no row/plane padding) - RPP_ERROR_INVALID_STRIDES is returned otherwise. \return A <tt>
+ * \ref RppStatus</tt> enumeration. \retval RPP_SUCCESS Successful completion. \retval RPP_ERROR*
  * Unsuccessful completion.
  */
 RppStatus rppt_tensor_or_tensor(RppPtr_t srcPtr1, RppPtr_t srcPtr2,
@@ -205,8 +209,10 @@ RppStatus rppt_tensor_or_tensor(RppPtr_t srcPtr1, RppPtr_t srcPtr2,
  * srcPtr1roiTensor values to represent dimensions of input tensor srcPtr1 \param [in]
  * srcPtr2roiTensor values to represent dimensions of input tensor srcPtr2 \param [in] rppHandle RPP
  * HIP/HOST handle created with <tt>\ref rppCreate()</tt> \param [in] executionBackend backend for
- * execution (RppBackend::RPP_HOST_BACKEND or RppBackend::RPP_HIP_BACKEND) \return A <tt> \ref
- * RppStatus</tt> enumeration. \retval RPP_SUCCESS Successful completion. \retval RPP_ERROR*
+ * execution (RppBackend::RPP_HOST_BACKEND or RppBackend::RPP_HIP_BACKEND) \note
+ * srcPtr1GenericDescPtr, srcPtr2GenericDescPtr and dstGenericDescPtr must have densely packed
+ * strides (no row/plane padding) - RPP_ERROR_INVALID_STRIDES is returned otherwise. \return A <tt>
+ * \ref RppStatus</tt> enumeration. \retval RPP_SUCCESS Successful completion. \retval RPP_ERROR*
  * Unsuccessful completion.
  */
 RppStatus rppt_tensor_xor_tensor(RppPtr_t srcPtr1, RppPtr_t srcPtr2,

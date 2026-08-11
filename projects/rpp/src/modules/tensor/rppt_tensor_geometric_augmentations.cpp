@@ -1430,6 +1430,9 @@ RppStatus rppt_slice(RppPtr_t srcPtr, RpptGenericDescPtr srcGenericDescPtr, RppP
     if (srcGenericDescPtr->dataType != dstGenericDescPtr->dataType)
         return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
     if (srcGenericDescPtr->layout != dstGenericDescPtr->layout) return RPP_ERROR_LAYOUT_MISMATCH;
+    if (!rppt_generic_desc_is_dense(srcGenericDescPtr) ||
+        !rppt_generic_desc_is_dense(dstGenericDescPtr))
+        return RPP_ERROR_INVALID_STRIDES;
     rpp::Handle& handle = rpp::deref(rppHandle);
     [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
@@ -1819,6 +1822,9 @@ RppStatus rppt_transpose(RppPtr_t srcPtr, RpptGenericDescPtr srcGenericDescPtr, 
                          Rpp32u* roiTensor, rppHandle_t rppHandle, RppBackend executionBackend) {
     if (srcGenericDescPtr->dataType != dstGenericDescPtr->dataType)
         return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
+    if (!rppt_generic_desc_is_dense(srcGenericDescPtr) ||
+        !rppt_generic_desc_is_dense(dstGenericDescPtr))
+        return RPP_ERROR_INVALID_STRIDES;
     rpp::Handle& handle = rpp::deref(rppHandle);
     [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
@@ -2131,6 +2137,10 @@ RppStatus rppt_concat(RppPtr_t srcPtr1, RppPtr_t srcPtr2, RpptGenericDescPtr src
     if ((srcPtr1GenericDescPtr->dataType != srcPtr2GenericDescPtr->dataType) ||
         (srcPtr1GenericDescPtr->dataType != dstGenericDescPtr->dataType))
         return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
+    if (!rppt_generic_desc_is_dense(srcPtr1GenericDescPtr) ||
+        !rppt_generic_desc_is_dense(srcPtr2GenericDescPtr) ||
+        !rppt_generic_desc_is_dense(dstGenericDescPtr))
+        return RPP_ERROR_INVALID_STRIDES;
 
     rpp::Handle& handle = rpp::deref(rppHandle);
     [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();

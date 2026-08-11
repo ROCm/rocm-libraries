@@ -90,4 +90,18 @@ inline int check_roi_out_of_bounds(RpptROIPtr roiPtrImage, RpptDescPtr srcDescPt
     return 0;
 }
 
+// Generic-tensor ops (Misc domain, RpptGenericDesc-based) require strides that are densely packed
+// per sample - no row/plane padding slack between the innermost extent and the stride of the next
+// outer dimension. This walks the per-sample axes (index 1..numDims-1) from innermost outward and
+// checks each stride equals the running dense product; the batch axis (index 0) is left unchecked,
+// since batch spacing is unrelated to the row-padding convention this guards against.
+inline bool rppt_generic_desc_is_dense(RpptGenericDescPtr descPtr) {
+    Rpp32u expectedStride = 1;
+    for (int i = static_cast<int>(descPtr->numDims) - 1; i >= 1; i--) {
+        if (descPtr->strides[i] != expectedStride) return false;
+        expectedStride *= descPtr->dims[i];
+    }
+    return true;
+}
+
 #endif  // RPPT_VALIDATE_OPERATIONS_FUNCTIONS

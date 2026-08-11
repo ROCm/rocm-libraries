@@ -140,7 +140,9 @@ RppStatus rppt_tensor_max(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t maxA
  * roiTensor values to represent dimensions of input tensor (in pinned / HIP memory (for HIP
  * backend) or HOST memory (for HOST backend)) \param [in] rppHandle RPP HIP/HOST handle created
  * with <tt>\ref rppCreate()</tt> \param [in] executionBackend execution backend to run the
- * operation on (RppBackend::RPP_HOST_BACKEND or RppBackend::RPP_HIP_BACKEND) \return A <tt> \ref
+ * operation on (RppBackend::RPP_HOST_BACKEND or RppBackend::RPP_HIP_BACKEND) \note
+ * srcGenericDescPtr and dstGenericDescPtr must have densely packed strides (no row/plane padding) -
+ * RPP_ERROR_INVALID_STRIDES is returned otherwise. \return A <tt> \ref
  * RppStatus</tt> enumeration. \retval RPP_SUCCESS Successful completion. \retval RPP_ERROR*
  * Unsuccessful completion.
  */

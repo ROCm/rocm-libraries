@@ -37,12 +37,23 @@ __global__ void fill_value_ncdhw_hip_tensor(T* dstPtr, uint3 dstStridesCDH, int 
     }
 
     uint dstIdx = (id_z * dstStridesCDH.y) + (id_y * dstStridesCDH.z) + id_x;
-    d_float8 val_f8;
-    val_f8.f4[0] = MAKE_FLOAT4(*fillValue);
-    val_f8.f4[1] = val_f8.f4[0];
-    for (int c = 0; c < channels; c++) {
-        rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &val_f8);
-        dstIdx += dstStridesCDH.x;
+
+    // A full 8-wide store would overrun the row when the row width isn't a multiple of 8 and the
+    // descriptor's strides are dense (no padding slack to absorb the overrun); fall back to a
+    // scalar fill for that partial tail block instead of assuming padding is present.
+    if (id_x + 8 <= dstDimsDHW.z) {
+        d_float8 val_f8;
+        val_f8.f4[0] = MAKE_FLOAT4(*fillValue);
+        val_f8.f4[1] = val_f8.f4[0];
+        for (int c = 0; c < channels; c++) {
+            rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &val_f8);
+            dstIdx += dstStridesCDH.x;
+        }
+    } else {
+        for (int c = 0; c < channels; c++) {
+            for (int x = id_x; x < dstDimsDHW.z; x++) dstPtr[dstIdx + (x - id_x)] = *fillValue;
+            dstIdx += dstStridesCDH.x;
+        }
     }
 }
 
@@ -59,14 +70,23 @@ __global__ void fill_value_ndhwc_hip_tensor(T* dstPtr, uint2 dstStridesDH, uint3
     }
 
     uint dstIdx = (id_z * dstStridesDH.x) + (id_y * dstStridesDH.y) + id_x * 3;
-    d_float24 val_f24;
-    val_f24.f4[0] = MAKE_FLOAT4(*fillValue);
-    val_f24.f4[1] = val_f24.f4[0];
-    val_f24.f4[2] = val_f24.f4[0];
-    val_f24.f4[3] = val_f24.f4[0];
-    val_f24.f4[4] = val_f24.f4[0];
-    val_f24.f4[5] = val_f24.f4[0];
-    rpp_hip_pack_float24_pkd3_and_store24_pkd3(dstPtr + dstIdx, &val_f24);
+
+    // A full 8-pixel (24-element) store would overrun the row when the pixel width isn't a
+    // multiple of 8 and the descriptor's strides are dense; fall back to a scalar per-pixel fill
+    // for the tail instead of assuming padding is present.
+    if (id_x + 8 <= dstDimsDHW.z) {
+        d_float24 val_f24;
+        val_f24.f4[0] = MAKE_FLOAT4(*fillValue);
+        val_f24.f4[1] = val_f24.f4[0];
+        val_f24.f4[2] = val_f24.f4[0];
+        val_f24.f4[3] = val_f24.f4[0];
+        val_f24.f4[4] = val_f24.f4[0];
+        val_f24.f4[5] = val_f24.f4[0];
+        rpp_hip_pack_float24_pkd3_and_store24_pkd3(dstPtr + dstIdx, &val_f24);
+    } else {
+        for (int x = id_x; x < dstDimsDHW.z; x++)
+            for (int c = 0; c < 3; c++) dstPtr[dstIdx + (x - id_x) * 3 + c] = *fillValue;
+    }
 }
 
 template <typename T>
@@ -84,12 +104,24 @@ __global__ void slice_ncdhw_hip_tensor(T* srcPtr, uint3 srcStridesCDH, T* dstPtr
     uint srcIdx = (id_z * srcStridesCDH.y) + (id_y * srcStridesCDH.z) + id_x;
     uint dstIdx = (id_z * dstStridesCDH.y) + (id_y * dstStridesCDH.z) + id_x;
 
-    d_float8 val_f8;
-    for (int c = 0; c < channels; c++) {
-        rpp_hip_load8_and_unpack_to_float8(srcPtr + srcIdx, &val_f8);
-        rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &val_f8);
-        srcIdx += srcStridesCDH.x;
-        dstIdx += dstStridesCDH.x;
+    // A full 8-wide load/store would overrun the row (reading/writing into the next row) when the
+    // row width isn't a multiple of 8 and the descriptors are densely strided; fall back to a
+    // scalar copy for that partial tail block instead of assuming padding is present.
+    if (id_x + 8 <= validShapeDHW.z) {
+        d_float8 val_f8;
+        for (int c = 0; c < channels; c++) {
+            rpp_hip_load8_and_unpack_to_float8(srcPtr + srcIdx, &val_f8);
+            rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &val_f8);
+            srcIdx += srcStridesCDH.x;
+            dstIdx += dstStridesCDH.x;
+        }
+    } else {
+        for (int c = 0; c < channels; c++) {
+            for (int x = id_x; x < validShapeDHW.z; x++)
+                dstPtr[dstIdx + (x - id_x)] = srcPtr[srcIdx + (x - id_x)];
+            srcIdx += srcStridesCDH.x;
+            dstIdx += dstStridesCDH.x;
+        }
     }
 }
 
@@ -108,9 +140,18 @@ __global__ void slice_ndhwc_hip_tensor(T* srcPtr, uint2 srcStridesDH, T* dstPtr,
     uint srcIdx = (id_z * srcStridesDH.x) + (id_y * srcStridesDH.y) + (id_x * 3);
     uint dstIdx = (id_z * dstStridesDH.x) + (id_y * dstStridesDH.y) + (id_x * 3);
 
-    d_float24 val_f24;
-    rpp_hip_load24_pkd3_and_unpack_to_float24_pln3(srcPtr + srcIdx, &val_f24);
-    rpp_hip_pack_float24_pln3_and_store24_pkd3(dstPtr + dstIdx, &val_f24);
+    // A full 8-pixel (24-element) load/store would overrun the row when the pixel width isn't a
+    // multiple of 8 and the descriptors are densely strided; fall back to a scalar per-pixel copy
+    // for the tail instead of assuming padding is present.
+    if (id_x + 8 <= validShapeDHW.z) {
+        d_float24 val_f24;
+        rpp_hip_load24_pkd3_and_unpack_to_float24_pln3(srcPtr + srcIdx, &val_f24);
+        rpp_hip_pack_float24_pln3_and_store24_pkd3(dstPtr + dstIdx, &val_f24);
+    } else {
+        for (int x = id_x; x < validShapeDHW.z; x++)
+            for (int c = 0; c < 3; c++)
+                dstPtr[dstIdx + (x - id_x) * 3 + c] = srcPtr[srcIdx + (x - id_x) * 3 + c];
+    }
 }
 
 template <typename T>

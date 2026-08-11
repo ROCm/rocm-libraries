@@ -246,6 +246,9 @@ RppStatus rppt_normalize(RppPtr_t srcPtr, RpptGenericDescPtr srcGenericDescPtr, 
                          Rpp32u* roiTensor, rppHandle_t rppHandle, RppBackend executionBackend) {
     if (srcGenericDescPtr->dataType != dstGenericDescPtr->dataType)
         return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
+    if (!rppt_generic_desc_is_dense(srcGenericDescPtr) ||
+        !rppt_generic_desc_is_dense(dstGenericDescPtr))
+        return RPP_ERROR_INVALID_STRIDES;
     rpp::Handle& handle = rpp::deref(rppHandle);
     [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 

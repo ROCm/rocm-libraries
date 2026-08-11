@@ -222,6 +222,10 @@ RppStatus rppt_tensor_and_tensor(RppPtr_t srcPtr1, RppPtr_t srcPtr2,
         return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
     if (srcPtr1GenericDescPtr->dataType != dstGenericDescPtr->dataType)
         return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
+    if (!rppt_generic_desc_is_dense(srcPtr1GenericDescPtr) ||
+        !rppt_generic_desc_is_dense(srcPtr2GenericDescPtr) ||
+        !rppt_generic_desc_is_dense(dstGenericDescPtr))
+        return RPP_ERROR_INVALID_STRIDES;
 
     // When broadcast is disabled, ensure that all tensor shapes and ROIs match
     if (broadcastMode == RpptBroadcastMode::RPP_BROADCAST_DISABLE) {
@@ -357,6 +361,10 @@ RppStatus rppt_tensor_or_tensor(RppPtr_t srcPtr1, RppPtr_t srcPtr2,
         return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
     if (srcPtr1GenericDescPtr->dataType != dstGenericDescPtr->dataType)
         return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
+    if (!rppt_generic_desc_is_dense(srcPtr1GenericDescPtr) ||
+        !rppt_generic_desc_is_dense(srcPtr2GenericDescPtr) ||
+        !rppt_generic_desc_is_dense(dstGenericDescPtr))
+        return RPP_ERROR_INVALID_STRIDES;
 
     // When broadcast is disabled, ensure that all tensor shapes and ROIs match
     if (broadcastMode == RpptBroadcastMode::RPP_BROADCAST_DISABLE) {
@@ -492,6 +500,10 @@ RppStatus rppt_tensor_xor_tensor(RppPtr_t srcPtr1, RppPtr_t srcPtr2,
         return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
     if (srcPtr1GenericDescPtr->dataType != dstGenericDescPtr->dataType)
         return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
+    if (!rppt_generic_desc_is_dense(srcPtr1GenericDescPtr) ||
+        !rppt_generic_desc_is_dense(srcPtr2GenericDescPtr) ||
+        !rppt_generic_desc_is_dense(dstGenericDescPtr))
+        return RPP_ERROR_INVALID_STRIDES;
 
     // When broadcast is disabled, ensure that all tensor shapes and ROIs match
     if (broadcastMode == RpptBroadcastMode::RPP_BROADCAST_DISABLE) {

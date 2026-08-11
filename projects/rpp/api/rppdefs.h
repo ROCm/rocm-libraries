@@ -223,6 +223,10 @@ typedef enum {
     RPP_ERROR_HIP_LAUNCH = -28,
     /*! \brief Internal HIP/GPU runtime error \ingroup group_rppdefs */
     RPP_ERROR_HIP_RUNTIME = -29,
+    /*! \brief Generic-tensor descriptor strides are not densely packed (row/plane padding is not
+       supported - the descriptor's per-sample strides must exactly match its dims). \ingroup
+       group_rppdefs */
+    RPP_ERROR_INVALID_STRIDES = -30,
 } RppStatus;
 
 /*! \brief RPP RppBackend type enums
