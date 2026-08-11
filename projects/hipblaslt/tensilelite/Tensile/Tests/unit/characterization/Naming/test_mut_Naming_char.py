@@ -41,13 +41,25 @@ def test_key_no_internal_args_masks_raw_grouped_gemm_config(make_state):
     assert grouped["ProblemType"]["GroupedGemm"] is True
 
 
-def test_key_no_internal_args_masks_grouped_gemm_but_restores_it(make_state):
-    grouped = make_state(ProblemType=ProblemType({"DataType": 0, "GroupedGemm": True}, False))
-    plain = make_state(ProblemType=ProblemType({"DataType": 0, "GroupedGemm": False}, False))
-
-    assert N.getKeyNoInternalArgs(grouped, splitGSU=False) == N.getKeyNoInternalArgs(
-        plain, splitGSU=False
+@pytest.mark.parametrize(("support_user_args", "same_key"), [(False, True), (True, False)])
+def test_key_no_internal_args_masks_grouped_gemm_only_without_user_args(
+    make_state, support_user_args, same_key
+):
+    grouped = make_state(
+        ProblemType=ProblemType(
+            {"DataType": 0, "GroupedGemm": True, "SupportUserArgs": support_user_args}, False
+        )
     )
+    plain = make_state(
+        ProblemType=ProblemType(
+            {"DataType": 0, "GroupedGemm": False, "SupportUserArgs": support_user_args}, False
+        )
+    )
+
+    grouped_key = N.getKeyNoInternalArgs(grouped, splitGSU=False)
+    plain_key = N.getKeyNoInternalArgs(plain, splitGSU=False)
+
+    assert (grouped_key == plain_key) is same_key
     assert grouped["ProblemType"]["GroupedGemm"] is True
 
 
@@ -132,13 +144,25 @@ def test_names_distinguish_auto_and_fixed_wgmxcc_and_restore_state(make_state):
     assert fixed_state["WorkGroupMappingXCC"] == 8
 
 
-def test_kernel_name_masks_grouped_gemm_and_restores_problem_type(make_state):
-    grouped = make_state(ProblemType=ProblemType({"DataType": 0, "GroupedGemm": True}, False))
-    plain = make_state(ProblemType=ProblemType({"DataType": 0, "GroupedGemm": False}, False))
-
-    assert N.getKernelNameMin(grouped, splitGSU=False) == N.getKernelNameMin(
-        plain, splitGSU=False
+@pytest.mark.parametrize(("support_user_args", "same_name"), [(False, True), (True, False)])
+def test_kernel_name_masks_grouped_gemm_only_without_user_args(
+    make_state, support_user_args, same_name
+):
+    grouped = make_state(
+        ProblemType=ProblemType(
+            {"DataType": 0, "GroupedGemm": True, "SupportUserArgs": support_user_args}, False
+        )
     )
+    plain = make_state(
+        ProblemType=ProblemType(
+            {"DataType": 0, "GroupedGemm": False, "SupportUserArgs": support_user_args}, False
+        )
+    )
+
+    grouped_name = N.getKernelNameMin(grouped, splitGSU=False)
+    plain_name = N.getKernelNameMin(plain, splitGSU=False)
+
+    assert (grouped_name == plain_name) is same_name
     assert grouped["ProblemType"]["GroupedGemm"] is True
 
 
