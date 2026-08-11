@@ -93,6 +93,7 @@ class UnifiedAttentionProblem:
     use_alibi: bool = False
     use_qq_bias: bool = False
     use_fp8: bool = False
+    fp8_fnuz: bool = False
     num_cus: int = 120
     # Direct device-subscription target override (concurrent workgroups / CTAs).
     # 0 => auto: derive as ``num_cus * 4``. When > 0, this takes precedence over
@@ -403,6 +404,30 @@ UNIFIED_BLOCK_SIZES: Tuple[int, ...] = (16, 32, 64)
 UNIFIED_DTYPES: Tuple[str, ...] = ("fp16", "bf16")
 
 
+def _reject_ocp_fp8_on_fnuz_arch(
+    problem: UnifiedAttentionProblem, arch: str
+) -> Optional[Tuple[bool, str]]:
+    if not problem.use_fp8 or problem.fp8_fnuz:
+        return None
+    from rocke.core.arch import ArchTarget
+    from .fmha_fwd_fp8 import _FNUZ_FP8_TARGET_FAMILIES
+
+    try:
+        target = ArchTarget.from_gfx(arch)
+    except KeyError as e:
+        return False, str(e)
+    if target.target_family in _FNUZ_FP8_TARGET_FAMILIES:
+        return False, (
+            f"fp8 K/V on {arch} (target_family={target.target_family!r}) "
+            f"decodes via the native e4m3fnuz/e5m2fnuz format, not OCP "
+            f"e4m3fn/e5m2; this path assumes OCP bytes and would silently "
+            f"mis-decode K/V. Quantise K/V to fnuz and set "
+            f"UnifiedAttentionProblem(fp8_fnuz=True), or run the OCP-fp8 "
+            f"attention on gfx950 / gfx11."
+        )
+    return None
+
+
 def supports_native_unified_attention(
     problem: UnifiedAttentionProblem,
 ) -> Tuple[bool, str]:
@@ -430,6 +455,9 @@ def supports_native_unified_attention(
     if problem.dtype not in UNIFIED_DTYPES:
         return False, f"unsupported dtype {problem.dtype}"
     if problem.use_fp8:
+        rejected = _reject_ocp_fp8_on_fnuz_arch(problem, _resolve_attention_arch())
+        if rejected is not None:
+            return rejected
         if problem.q_dtype is not None and problem.q_dtype not in ("fp16", "bf16"):
             return False, f"scalar 2D kernel: unsupported q_dtype {problem.q_dtype!r}"
     elif problem.q_dtype is not None:
@@ -535,6 +563,9 @@ def supports_native_unified_attention_3d_tiled(
 ) -> Tuple[bool, str]:
     """Return whether the optimized tiled MFMA 3D split-KV path can run this."""
     arch = _resolve_attention_arch()
+    rejected = _reject_ocp_fp8_on_fnuz_arch(problem, arch)
+    if rejected is not None:
+        return rejected
     *_, supports_tiled_3d = _tiled_3d_impl(arch)
     return supports_tiled_3d(
         head_size=problem.head_size,
