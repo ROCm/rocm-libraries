@@ -115,6 +115,9 @@
         "support": {
           "gfx90a": [
             "linux"
+          ],
+          "gfx942": [
+            "linux"
           ]
         }
       }
@@ -233,6 +236,9 @@
         ],
         "support": {
           "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
             "linux"
           ]
         }

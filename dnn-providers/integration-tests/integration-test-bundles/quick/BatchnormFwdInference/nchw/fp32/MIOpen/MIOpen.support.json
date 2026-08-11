@@ -3,10 +3,16 @@
     "HIP_MLOPS_ENGINE": {
       "gfx90a": [
         "linux"
+      ],
+      "gfx942": [
+        "linux"
       ]
     },
     "MIOPEN_ENGINE": {
       "gfx90a": [
+        "linux"
+      ],
+      "gfx942": [
         "linux"
       ]
     }
