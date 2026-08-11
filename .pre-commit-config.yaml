@@ -26,6 +26,7 @@ exclude: |
     projects/hipsparse/.*|
     projects/hipsparselt/.*|
     projects/hiptensor/.*|
+    projects/hipthreads/.*|
     projects/rocblas/.*|
     projects/rocfft/.*|
     projects/rocprim/.*|
@@ -47,7 +48,7 @@ exclude: |
     # Generated hipDNN FlatBuffers headers
     projects/hipdnn/flatbuffers_sdk/include/hipdnn_flatbuffers_sdk/data_objects/.*_generated\.h|
     # Reference data (auto-generated)
-    dnn-providers/integration-tests/integration_test_bundles/.*|
+    dnn-providers/integration-tests/integration-test-bundles/.*|
     # Generated files (see rocrand/tools/ _generator.cpp files)
     projects/rocrand/library/.*constants\.(cpp|h)|
     projects/rocrand/library/.*precomputed\.(cpp|h)|
@@ -55,11 +56,9 @@ exclude: |
     projects/miopen/.*\.s$|
     projects/miopen/.*\.inc$|
     projects/miopen/.*\.model$|
-    # RPP exclusion list
-    projects/rpp/utilities/test_suite/TEST_IMAGES/three_images_yuv/.*|
-    projects/rpp/utilities/test_suite/REFERENCE_OUTPUT/yuv_to_rgb/.*|
-    projects/rpp/utilities/test_suite/REFERENCE_OUTPUT/yuv_to_rgb_cubic_v/.*|
-    projects/rpp/utilities/test_suite/REFERENCE_OUTPUT/yuv_to_rgb-linear_v/.*
+    # RPP exclusion list - raw test data with no early NUL byte, which pre-commit would
+    # otherwise treat as text and corrupt. Matched by extension so new data stays covered.
+    projects/rpp/.*\.(bin|rgb|yuv)$
 
 
 repos:
