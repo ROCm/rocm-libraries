@@ -114,6 +114,31 @@ def _skip_if_sdpa_disabled(expected_type):
         pytest.skip("SDPA disabled")
 
 
+# CustomOpAttributes serializes flat input_tensor_uids/output_tensor_uids arrays
+# rather than per-role keys, so there are no <role>_tensor_uid entries to check.
+_OPS_WITHOUT_TENSOR_ROLES = frozenset({"CustomOpAttributes"})
+
+
+def _node_tensor_roles(node):
+    """Every ``<role>_tensor_uid`` entry a serialized node exposes.
+
+    The layout is not uniform. Most operations nest their tensors under
+    ``inputs``/``outputs`` maps, while reduction and both resample directions
+    write the keys straight onto the node (ReductionAttributes.hpp,
+    ResampleFwdAttributes.hpp), so all three levels are scanned. Values are
+    usually a scalar uid, but vector-valued roles -- batchnorm's peer_stats --
+    carry a list of them.
+    """
+    roles = {}
+    for section in (node, node.get("inputs") or {}, node.get("outputs") or {}):
+        roles.update(
+            (key, value)
+            for key, value in section.items()
+            if key.endswith("_tensor_uid")
+        )
+    return roles
+
+
 class TestJsonSerialization:
     """Topology-only JSON round-trips for every graph operation (no GPU required)."""
 
@@ -140,6 +165,45 @@ class TestJsonSerialization:
         # catches state the JSON writer echoes but from_json() failed to load.
         assert restored.to_json() == json_str
         assert restored.to_binary() == graph.to_binary()
+
+    @pytest.mark.parametrize(
+        "build_graph, expected_type", _OPERATION_CASE_PARAMS, ids=_OPERATION_CASE_IDS
+    )
+    def test_each_tensor_lands_in_its_named_role(self, build_graph, expected_type):
+        """Every ``<role>_tensor_uid`` points at the tensor named ``<role>``.
+
+        Catches a binding that forwards its positional arguments into the wrong
+        attribute slots -- ``layernorm(x, scale, bias)`` filling bias from
+        scale. Sibling tensors usually share a shape, so validation, lowering,
+        and stubbed execution all still pass; the serialized role map is the
+        only place that wiring is observable from Python.
+
+        Builders name each tensor after the role it belongs in; tensors the
+        frontend synthesizes carry no name and are skipped.
+        """
+        _skip_if_sdpa_disabled(expected_type)
+
+        document = json.loads(build_graph().to_json())
+        name_by_uid = {tensor["uid"]: tensor["name"] for tensor in document["tensors"]}
+        node = document["nodes"][0]
+        roles = _node_tensor_roles(node)
+
+        if expected_type in _OPS_WITHOUT_TENSOR_ROLES:
+            assert not roles
+            return
+        assert roles, f"{expected_type} serialized no tensor roles"
+
+        for key, value in roles.items():
+            expected_name = key.removesuffix("_tensor_uid")
+            uids = value if isinstance(value, list) else [value]
+            for uid in uids:
+                actual = name_by_uid.get(uid)
+                if not actual:
+                    continue
+                assert actual == expected_name, (
+                    f"{expected_type}.{key} -> uid {uid} is named {actual!r}, "
+                    f"expected {expected_name!r}"
+                )
 
 
 class TestBinarySerialization:

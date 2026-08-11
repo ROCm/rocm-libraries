@@ -197,11 +197,6 @@ jobs:
           $env:ROCM_PATH = $env:ROCM_SDK_PATH
           $env:HIP_PATH = $env:ROCM_SDK_PATH
           $env:PATH = "$env:ROCM_SDK_PATH/bin;$env:ROCM_SDK_PATH/lib;$env:PATH"
-          # test_good_plugin is built unconditionally by the superbuild (projects/hipdnn/CMakeLists.txt
-          # adds tests/ unconditionally) and installed by the earlier "Patch ROCm SDK with superbuild
-          # outputs" step. Wiring it here is what makes the stubbed-execution tests (ops with no real
-          # provider engine) actually exercise execute() in CI instead of skipping every run.
-          $env:HIPDNN_TEST_GOOD_PLUGIN_PATH = "$env:ROCM_SDK_PATH\bin\test_plugins\custom\test_good_plugin.dll"
           & $python -m pytest -q projects/hipdnn/python/frontend_wheel_package/tests
 
   hipdnn-linux-superbuild:
@@ -340,12 +335,10 @@ jobs:
 
       - name: Run frontend wheel tests
         run: |
-          # test_good_plugin is built unconditionally by the superbuild (projects/hipdnn/CMakeLists.txt
-          # adds tests/ unconditionally) and installed by the earlier "Patch ROCm SDK with superbuild
-          # outputs" step. Wiring it here is what makes the stubbed-execution tests (ops with no real
-          # provider engine) actually exercise execute() in CI instead of skipping every run.
-          LD_LIBRARY_PATH="$ROCM_SDK_PATH/lib:${LD_LIBRARY_PATH:-}" \
-            HIPDNN_TEST_GOOD_PLUGIN_PATH="$ROCM_SDK_PATH/lib/test_plugins/custom/libtest_good_plugin.so" \
+          # ROCM_PATH is what conftest.py resolves test_good_plugin from;
+          # LD_LIBRARY_PATH is how the wheel's extension finds libhipdnn_backend.
+          ROCM_PATH="$ROCM_SDK_PATH" \
+            LD_LIBRARY_PATH="$ROCM_SDK_PATH/lib:${LD_LIBRARY_PATH:-}" \
             "$VENV_PATH/bin/python" -m pytest -q projects/hipdnn/python/frontend_wheel_package/tests
 
   hipdnn_build_summary:

@@ -28,14 +28,20 @@ def _scalar_tensor(value=1e-5):
     return tensor
 
 
-def _unpack(outputs, count):
-    """Return a node's multi-output tuple, asserting its bound type and arity.
+def _unpack(outputs, count, kind=tuple):
+    """Return a node's multi-output container, asserting its bound type and arity.
 
-    The bindings return ``nb::make_tuple``; a list or a changed arity is a
-    binding regression. Unpacking alone catches the arity but not the type,
-    and it reports as a bare ValueError from inside a builder.
+    ``kind`` is the Python type the binding is contracted to produce, and it
+    differs by how the node is bound. Lambdas that call ``nb::make_tuple``
+    yield a ``tuple``; methods bound directly off a C++ signature returning
+    ``std::array``/``std::vector`` (batchnorm, batchnorm_backward, custom_op)
+    yield a ``list``. Unpacking alone catches a changed arity but not a
+    changed container, and it reports as a bare ValueError from inside a
+    builder.
     """
-    assert isinstance(outputs, tuple), f"expected tuple, got {type(outputs).__name__}"
+    assert isinstance(
+        outputs, kind
+    ), f"expected {kind.__name__}, got {type(outputs).__name__}"
     assert len(outputs) == count, f"expected {count} outputs, got {len(outputs)}"
     return outputs
 
@@ -46,17 +52,17 @@ def build_pointwise_add_graph(n=16, c=16, h=16, w=16):
     graph.set_name("pointwise_add_test")
 
     a = hipdnn.Tensor.create([n, c, h, w], hipdnn.DataType.FLOAT)
-    a.set_name("a")
+    a.set_name("in_0")
 
     b = hipdnn.Tensor.create([n, c, h, w], hipdnn.DataType.FLOAT)
-    b.set_name("b")
+    b.set_name("in_1")
 
     attrs = hipdnn.PointwiseAttributes()
     attrs.set_name("pointwise_add_node")
     attrs.set_mode(hipdnn.PointwiseMode.ADD)
 
     out = graph.pointwise(a, b, attrs)
-    out.set_name("out")
+    out.set_name("out_0")
     out.set_output(True)
 
     return graph, a, b, out
@@ -68,16 +74,16 @@ def build_matmul_graph(m=4, k=3, n=5):
     graph.set_name("matmul_test")
 
     a = hipdnn.Tensor.create([m, k], hipdnn.DataType.FLOAT)
-    a.set_name("A")
+    a.set_name("a")
 
     b = hipdnn.Tensor.create([k, n], hipdnn.DataType.FLOAT)
-    b.set_name("B")
+    b.set_name("b")
 
     attrs = hipdnn.MatmulAttributes()
     attrs.set_name("matmul_node")
 
     c = graph.matmul(a, b, attrs)
-    c.set_name("C")
+    c.set_name("c")
     c.set_output(True)
 
     return graph, a, b, c
@@ -91,10 +97,10 @@ def build_conv_fprop_graph(
     graph.set_name("conv_fprop_test")
 
     x = hipdnn.Tensor.create([n, c, h, w], hipdnn.DataType.FLOAT)
-    x.set_name("input_x")
+    x.set_name("x")
 
     weight = hipdnn.Tensor.create([k, c, r, s], hipdnn.DataType.FLOAT)
-    weight.set_name("weight")
+    weight.set_name("w")
 
     conv_attrs = hipdnn.ConvFpropAttributes()
     conv_attrs.set_name("conv_fprop_node")
@@ -103,7 +109,7 @@ def build_conv_fprop_graph(
     conv_attrs.set_dilation([dil, dil])
 
     y = graph.conv_fprop(x, weight, conv_attrs)
-    y.set_name("output_y")
+    y.set_name("y")
     y.set_output(True)
 
     return graph, x, weight, y
@@ -120,10 +126,10 @@ def build_conv_dgrad_graph(
     graph.set_name("conv_dgrad_test")
 
     dy = hipdnn.Tensor.create([n, k, out_h, out_w], hipdnn.DataType.FLOAT)
-    dy.set_name("output_gradient_dy")
+    dy.set_name("dy")
 
     weight = hipdnn.Tensor.create([k, c, r, s], hipdnn.DataType.FLOAT)
-    weight.set_name("weight")
+    weight.set_name("w")
 
     conv_attrs = hipdnn.ConvDgradAttributes()
     conv_attrs.set_name("conv_dgrad_node")
@@ -134,7 +140,7 @@ def build_conv_dgrad_graph(
 
     dx = graph.conv_dgrad(dy, weight, conv_attrs)
     dx.set_dim([n, c, h, w])
-    dx.set_name("input_gradient_dx")
+    dx.set_name("dx")
     dx.set_output(True)
 
     return graph, dy, weight, dx
@@ -151,10 +157,10 @@ def build_conv_wgrad_graph(
     graph.set_name("conv_wgrad_test")
 
     dy = hipdnn.Tensor.create([n, k, out_h, out_w], hipdnn.DataType.FLOAT)
-    dy.set_name("output_gradient_dy")
+    dy.set_name("dy")
 
     x = hipdnn.Tensor.create([n, c, h, w], hipdnn.DataType.FLOAT)
-    x.set_name("input_x")
+    x.set_name("x")
 
     conv_attrs = hipdnn.ConvWgradAttributes()
     conv_attrs.set_name("conv_wgrad_node")
@@ -165,7 +171,7 @@ def build_conv_wgrad_graph(
 
     dw = graph.conv_wgrad(dy, x, conv_attrs)
     dw.set_dim([k, c, r, s])
-    dw.set_name("weight_gradient_dw")
+    dw.set_name("dw")
     dw.set_output(True)
 
     return graph, dy, x, dw
@@ -199,7 +205,7 @@ def build_batchnorm_training_graph(n=4, c=8, h=8, w=8):
     attrs.set_epsilon(epsilon)
 
     outputs = graph.batchnorm(x, scale, bias, attrs)
-    y, mean, inv_variance, _next_mean, _next_var = _unpack(outputs, 5)
+    y, mean, inv_variance, _next_mean, _next_var = _unpack(outputs, 5, list)
     y.set_name("y")
     y.set_output(True)
     mean.set_name("mean")
@@ -231,7 +237,7 @@ def build_batchnorm_backward_graph(n=4, c=8, h=8, w=8):
     attrs.set_name("batchnorm_backward_node")
 
     outputs = graph.batchnorm_backward(dy, x, scale, attrs)
-    dx, dscale, dbias = _unpack(outputs, 3)
+    dx, dscale, dbias = _unpack(outputs, 3, list)
     dx.set_name("dx")
     dx.set_output(True)
     dscale.set_name("dscale")
@@ -285,12 +291,18 @@ def build_batchnorm_inference_variance_graph(n=4, c=8, h=8, w=8):
     graph.set_name("batchnorm_inference_variance_test")
 
     x = hipdnn.Tensor.create([n, c, h, w], hipdnn.DataType.FLOAT)
+    x.set_name("x")
     mean = hipdnn.Tensor.create([1, c, 1, 1], hipdnn.DataType.FLOAT)
+    mean.set_name("mean")
     variance = hipdnn.Tensor.create([1, c, 1, 1], hipdnn.DataType.FLOAT)
+    variance.set_name("variance")
     scale = hipdnn.Tensor.create([1, c, 1, 1], hipdnn.DataType.FLOAT)
+    scale.set_name("scale")
     bias = hipdnn.Tensor.create([1, c, 1, 1], hipdnn.DataType.FLOAT)
+    bias.set_name("bias")
     epsilon = hipdnn.Tensor()
     epsilon.set_value(1e-5)
+    epsilon.set_name("epsilon")
 
     y = graph.batchnorm_inference_variance_ext(
         x,
@@ -301,6 +313,7 @@ def build_batchnorm_inference_variance_graph(n=4, c=8, h=8, w=8):
         epsilon,
         hipdnn.BatchnormInferenceAttributesVarianceExt(),
     )
+    y.set_name("y")
     y.set_output(True)
 
     return graph, x, mean, variance, scale, bias, y
@@ -314,18 +327,24 @@ def build_layernorm_graph():
     """
     graph = create_float_graph()
     x = hipdnn.Tensor.create([2, 6, 4], hipdnn.DataType.FLOAT)
+    x.set_name("x")
     scale = hipdnn.Tensor.create([6, 4], hipdnn.DataType.FLOAT)
+    scale.set_name("scale")
     bias = hipdnn.Tensor.create([6, 4], hipdnn.DataType.FLOAT)
+    bias.set_name("bias")
+    epsilon = _scalar_tensor()
+    epsilon.set_name("epsilon")
 
     outputs = graph.layernorm(
         x,
         scale,
         bias,
         hipdnn.LayernormAttributes()
-        .set_epsilon(_scalar_tensor())
+        .set_epsilon(epsilon)
         .set_forward_phase(hipdnn.NormFwdPhase.INFERENCE),
     )
     y, mean, inv_variance = _unpack(outputs, 3)
+    y.set_name("y")
     y.set_output(True)
 
     return graph, x, scale, bias, y, mean, inv_variance
@@ -338,19 +357,31 @@ def build_layernorm_backward_graph():
     """
     graph = create_float_graph()
     dy = hipdnn.Tensor.create([16, 64, 32, 32], hipdnn.DataType.FLOAT)
+    dy.set_name("dy")
     x = hipdnn.Tensor.create([16, 64, 32, 32], hipdnn.DataType.FLOAT)
+    x.set_name("x")
     scale = hipdnn.Tensor.create([1, 64, 32, 32], hipdnn.DataType.FLOAT)
+    scale.set_name("scale")
+    mean = hipdnn.Tensor.create([16, 1, 1, 1], hipdnn.DataType.FLOAT)
+    mean.set_name("mean")
+    inv_variance = hipdnn.Tensor.create([16, 1, 1, 1], hipdnn.DataType.FLOAT)
+    inv_variance.set_name("inv_variance")
+    epsilon = _scalar_tensor()
+    epsilon.set_name("epsilon")
 
     outputs = graph.layernorm_backward(
         dy,
         x,
         scale,
         hipdnn.LayernormBackwardAttributes()
-        .set_mean(hipdnn.Tensor.create([16, 1, 1, 1], hipdnn.DataType.FLOAT))
-        .set_inv_variance(hipdnn.Tensor.create([16, 1, 1, 1], hipdnn.DataType.FLOAT))
-        .set_epsilon(_scalar_tensor()),
+        .set_mean(mean)
+        .set_inv_variance(inv_variance)
+        .set_epsilon(epsilon),
     )
     dx, dscale, dbias = _unpack(outputs, 3)
+    dx.set_name("dx")
+    dscale.set_name("dscale")
+    dbias.set_name("dbias")
     dx.set_output(True)
     dscale.set_output(True)
     dbias.set_output(True)
@@ -362,16 +393,22 @@ def build_rmsnorm_graph():
     """Build a training-phase rmsnorm graph returning (graph, x, scale, y, inv_rms)."""
     graph = create_float_graph()
     x = hipdnn.Tensor.create([2, 64, 32, 32], hipdnn.DataType.FLOAT)
+    x.set_name("x")
     scale = hipdnn.Tensor.create([1, 64, 32, 32], hipdnn.DataType.FLOAT)
+    scale.set_name("scale")
+    epsilon = _scalar_tensor()
+    epsilon.set_name("epsilon")
 
     outputs = graph.rmsnorm(
         x,
         scale,
         hipdnn.RMSNormAttributes()
-        .set_epsilon(_scalar_tensor())
+        .set_epsilon(epsilon)
         .set_forward_phase(hipdnn.NormFwdPhase.TRAINING),
     )
     y, inv_rms = _unpack(outputs, 2)
+    y.set_name("y")
+    inv_rms.set_name("inv_rms")
     y.set_output(True)
     inv_rms.set_output(True)
 
@@ -386,14 +423,20 @@ def build_rmsnorm_backward_graph():
     """
     graph = create_float_graph()
     dy = hipdnn.Tensor.create([1, 64, 32, 32], hipdnn.DataType.FLOAT)
+    dy.set_name("dy")
     x = hipdnn.Tensor.create([1, 64, 32, 32], hipdnn.DataType.FLOAT)
+    x.set_name("x")
     scale = hipdnn.Tensor.create([1, 64, 32, 32], hipdnn.DataType.FLOAT)
+    scale.set_name("scale")
     inv_rms = hipdnn.Tensor.create([1, 1, 1, 1], hipdnn.DataType.FLOAT)
+    inv_rms.set_name("inv_rms")
 
     outputs = graph.rmsnorm_backward(
         dy, x, scale, inv_rms, hipdnn.RMSNormBackwardAttributes()
     )
     dx, dscale, dbias = _unpack(outputs, 3)
+    dx.set_name("dx")
+    dscale.set_name("dscale")
     dx.set_output(True)
     dscale.set_output(True)
 
@@ -408,13 +451,16 @@ def build_block_scale_dequantize_graph():
     """
     graph = create_float_graph()
     x = hipdnn.Tensor.create([2, 64, 32, 32], hipdnn.DataType.FLOAT)
+    x.set_name("x")
     scale = hipdnn.Tensor.create([2, 2, 32, 32], hipdnn.DataType.FLOAT)
+    scale.set_name("scale")
 
     y = graph.block_scale_dequantize(
         x,
         scale,
         hipdnn.BlockScaleDequantizeAttributes().set_block_size([32]),
     )
+    y.set_name("y")
 
     return graph, x, scale, y
 
@@ -423,12 +469,15 @@ def build_block_scale_quantize_graph():
     """Build a block_scale_quantize graph returning (graph, x, y, scale)."""
     graph = create_float_graph()
     x = hipdnn.Tensor.create([2, 64, 32, 32], hipdnn.DataType.FLOAT)
+    x.set_name("x")
 
     outputs = graph.block_scale_quantize(
         x,
         hipdnn.BlockScaleQuantizeAttributes().set_block_size(32),
     )
     y, scale = _unpack(outputs, 2)
+    y.set_name("y")
+    scale.set_name("scale")
     for output in (y, scale):
         output.set_output(True)
         output.set_data_type(hipdnn.DataType.FLOAT)
@@ -446,14 +495,17 @@ def build_reduction_graph(with_output_tensor=False):
     """
     graph = create_float_graph()
     x = hipdnn.Tensor.create([4, 8], hipdnn.DataType.FLOAT)
+    x.set_name("in")
     attrs = hipdnn.ReductionAttributes().set_mode(hipdnn.ReductionMode.ADD)
 
     if with_output_tensor:
         output = hipdnn.Tensor.create([1, 8], hipdnn.DataType.FLOAT)
+        output.set_name("out")
         output.set_output(True)
         node_output = graph.reduction(x, output, attrs)
     else:
         output = node_output = graph.reduction(x, attrs)
+        output.set_name("out")
         output.set_dim([1, 8]).set_stride([8, 1]).set_output(True)
 
     return graph, x, output, node_output
@@ -467,10 +519,15 @@ def build_moe_grouped_matmul_graph():
     """
     graph = create_float_graph()
     token = hipdnn.Tensor.create([1, 8, 16], hipdnn.DataType.FLOAT)
+    token.set_name("token")
     weight = hipdnn.Tensor.create([2, 16, 32], hipdnn.DataType.FLOAT)
+    weight.set_name("weight")
     first_token_offset = hipdnn.Tensor.create([2, 1, 1], hipdnn.DataType.INT32)
+    first_token_offset.set_name("first_token_offset")
     token_index = hipdnn.Tensor.create([1, 8, 1], hipdnn.DataType.INT32)
+    token_index.set_name("token_index")
     token_ks = hipdnn.Tensor.create([1, 8, 1], hipdnn.DataType.INT32)
+    token_ks.set_name("token_ks")
 
     output = graph.moe_grouped_matmul(
         token,
@@ -482,6 +539,7 @@ def build_moe_grouped_matmul_graph():
         .set_mode(hipdnn.MoeGroupedMatmulMode.SCATTER)
         .set_top_k(2),
     )
+    output.set_name("output")
     output.set_output(True)
     output.set_data_type(hipdnn.DataType.FLOAT)
 
@@ -499,7 +557,7 @@ def build_custom_op_graph():
         2,
         hipdnn.CustomOpAttributes().set_custom_op_id("example.identity"),
     )
-    y0, y1 = _unpack(outputs, 2)
+    y0, y1 = _unpack(outputs, 2, list)
     for output in (y0, y1):
         output.set_dim([4, 8]).set_stride([8, 1]).set_output(True)
         output.set_data_type(hipdnn.DataType.FLOAT)
@@ -527,8 +585,10 @@ def build_resample_graph():
     """
     graph = create_float_graph()
     x = hipdnn.Tensor.create([1, 3, 4, 4], hipdnn.DataType.FLOAT)
+    x.set_name("x")
 
     y, index = _unpack(graph.resample(x, _resample_fwd_attributes()), 2)
+    y.set_name("y")
     y.set_output(True)
 
     return graph, x, y, index
@@ -538,8 +598,10 @@ def build_resample_fwd_graph():
     """Build a maxpool ``resample_fwd`` graph returning (graph, x, y)."""
     graph = create_float_graph()
     x = hipdnn.Tensor.create([1, 3, 4, 4], hipdnn.DataType.FLOAT)
+    x.set_name("x")
 
     y = graph.resample_fwd(x, _resample_fwd_attributes())
+    y.set_name("y")
     y.set_output(True)
     y.set_data_type(hipdnn.DataType.FLOAT)
 
@@ -555,6 +617,7 @@ def build_resample_bwd_graph(with_index=False):
     """
     graph = create_float_graph()
     dy = hipdnn.Tensor.create([1, 3, 16, 16], hipdnn.DataType.FLOAT)
+    dy.set_name("dy")
 
     if with_index:
         attrs = (
@@ -567,6 +630,7 @@ def build_resample_bwd_graph(with_index=False):
             .set_window([2, 2])
         )
         index = hipdnn.Tensor.create([1, 3, 16, 16], hipdnn.DataType.INT32)
+        index.set_name("index")
         dx = graph.resample_bwd(dy, attrs, index=index)
     else:
         attrs = (
@@ -581,6 +645,7 @@ def build_resample_bwd_graph(with_index=False):
         index = None
         dx = graph.resample_bwd(dy, attrs)
 
+    dx.set_name("dx")
     dx.set_output(True)
     dx.set_data_type(hipdnn.DataType.FLOAT)
 
@@ -595,11 +660,16 @@ def build_sdpa_graph():
     """
     graph = create_float_graph()
     q = hipdnn.Tensor.create([2, 8, 16, 64], hipdnn.DataType.FLOAT)
+    q.set_name("q")
     k = hipdnn.Tensor.create([2, 8, 32, 64], hipdnn.DataType.FLOAT)
+    k.set_name("k")
     v = hipdnn.Tensor.create([2, 8, 32, 64], hipdnn.DataType.FLOAT)
+    v.set_name("v")
 
     outputs = graph.sdpa(q, k, v, hipdnn.SdpaAttributes().set_generate_stats(True))
     o, stats = _unpack(outputs, 2)
+    o.set_name("o")
+    stats.set_name("stats")
     o.set_output(True)
 
     return graph, q, k, v, o, stats
@@ -614,16 +684,25 @@ def build_sdpa_backward_graph():
     """
     graph = create_float_graph()
     q = hipdnn.Tensor.create([2, 8, 16, 64], hipdnn.DataType.FLOAT)
+    q.set_name("q")
     k = hipdnn.Tensor.create([2, 8, 32, 64], hipdnn.DataType.FLOAT)
+    k.set_name("k")
     v = hipdnn.Tensor.create([2, 8, 32, 64], hipdnn.DataType.FLOAT)
+    v.set_name("v")
     o = hipdnn.Tensor.create([2, 8, 16, 64], hipdnn.DataType.FLOAT)
+    o.set_name("o")
     d_o = hipdnn.Tensor.create([2, 8, 16, 64], hipdnn.DataType.FLOAT)
+    d_o.set_name("do")
     stats = hipdnn.Tensor.create([2, 8, 16, 1], hipdnn.DataType.FLOAT)
+    stats.set_name("stats")
 
     outputs = graph.sdpa_backward(
         q, k, v, o, d_o, stats, hipdnn.SdpaBackwardAttributes()
     )
     dq, dk, dv = _unpack(outputs, 3)
+    dq.set_name("dq")
+    dk.set_name("dk")
+    dv.set_name("dv")
     for output in (dq, dk, dv):
         output.set_output(True)
 
