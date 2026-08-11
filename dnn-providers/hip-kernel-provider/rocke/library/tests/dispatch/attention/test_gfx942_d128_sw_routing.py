@@ -5,8 +5,9 @@
 D128 sliding-window (SWA) prefill on gfx942 is routed to the 4-warp natural-QK
 paged kernel (``build_gfx942_4warp_gqa`` -- the same kernel already in develop
 for the D256 fast path), NOT the non-ring wide flash. The 4-warp kernel applies
-the windowed mask + windowed KV-skip in-kernel and is ~3.7x faster than the wide
-flash for this cohort (measured MI300X). These tests guard that routing:
+the windowed mask + windowed KV-skip in-kernel and is ~4x faster than the
+non-ring wide flash at block_size 16 (narrowing to ~1.2-1.3x at block_size 64;
+MI300X, GQA 32/8, window 4096). These tests guard that routing:
 
   * bf16 + fp16 D128 SW (bs 16/32/64) take the 4-warp cohort
     (``_gfx942_4warp_fast`` / ``_d128_gfx942_swa_fast``),

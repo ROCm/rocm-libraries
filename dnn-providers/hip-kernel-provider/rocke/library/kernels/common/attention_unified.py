@@ -878,9 +878,19 @@ def _d128_gfx942_swa_fast(problem: "UnifiedAttentionProblem") -> bool:
     from the D256 fast path.
 
     Scope: **D128, sliding-window (``sliding_window > 0``), bf16 + fp16.** The
-    4-warp kernel applies the windowed mask + windowed KV-skip in-kernel and is
-    ~3.7x faster than the non-ring wide flash for this cohort (measured MI300X,
-    bs16). D128 *causal* stays on develop's flash/ring path (not yet compared).
+    4-warp kernel applies the windowed mask + windowed KV-skip in-kernel.
+
+    Perf (4-warp vs the non-ring wide flash it replaces; both routes, same
+    inputs/node/HIP-event timer; MI300X gfx942, GQA 32/8, window 4096; every
+    cohort bit-identical vs an fp32 windowed reference): ~4x at ``block_size``
+    16 (fp16 4.2x / bf16 4.0x), ~3.1x / 1.4x at 32 (fp16 / bf16), ~1.2-1.3x at
+    64 (64-key tiles drop the double-buffer pipeline). The bs16 uplift rises
+    2.9x -> 4.2x with Sq (2048 -> 8192, then saturates), is flat across batch
+    (num_seqs 1/2/4 at long Sq), and holds for any KV >= window (windowed
+    KV-skip caps per-query work). *Which* ``block_size`` production serves is
+    unconfirmed (needs hipDNN/David); routing is net-positive at every bs
+    (bs64 previously fell to the scalar kernel). D128 *causal* stays on
+    develop's flash/ring path (not yet compared).
     Same discriminator + launch contract as ``_d256_gfx942_fast``; D128's
     ``V_lds`` is 16 KB (half of D256).
     """
