@@ -40,6 +40,8 @@ For example, from ``copy_benchmark.cpp``:
     {
       return primbench::json{}.add("algo", "copy").add("type", primbench::name<T>());
     }
+    [...]
+  }
 
 Define the algorithm to benchmark. It is passed to ``state.run()`` in the implementation of ``primbench::benchmark_interface::run()``.
 
