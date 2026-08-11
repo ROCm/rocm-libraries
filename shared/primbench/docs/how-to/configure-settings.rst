@@ -50,7 +50,7 @@ Benchmarks can register additional options that appear in ``--help`` output. Cal
 
    size_t dimensions = executor.get<size_t>("dimensions", 3, "The number of dimensions");
 
-When the user passes ``--dimensions 5`` on the command line, ``dimensions`` receives the value ``5``. If there are any custom options, they are written to ``context.custom_settings`` in the JSON output.
+When you pass ``--dimensions 5`` on the command line, ``dimensions`` receives the value ``5``. If there are any custom options, they are written to ``context.custom_settings`` in the JSON output.
 
 Filter specializations with ``--filter``
 ==========================================
