@@ -60,6 +60,13 @@ else()
     message(STATUS "hipDNN: SDPA support disabled")
 endif()
 
+# Gates the generic kernel ingestor build-time logic (dynamic engine loading,
+# kpack bundling/packaging, dynamic engine registration). See RFC 0017
+# (docs/rfcs/0017_UniversalKernelDescriptor.md). No gated code exists yet;
+# this option is declared ahead of it so TheRock's forwarded
+# -DHIPDNN_ENABLE_KERNEL_INGESTOR=<value> (FLAGS.cmake) has a receiver.
+option(HIPDNN_ENABLE_KERNEL_INGESTOR "Enable the generic kernel ingestor" OFF)
+
 # Gates install of the cuDNN-compatibility shim headers and build/run of its
 # tests. The shim sources always exist in the tree; this option controls only
 # whether they are installed and tested.
