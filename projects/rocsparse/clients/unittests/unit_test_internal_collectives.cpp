@@ -32,9 +32,15 @@
 // ROCSPARSE_DEVICE_ILF collective (blockreduce_*, wfreduce_*, wfsegmented_reduce,
 // segmented_blockreduce, dichotomic_search, popc, shfl_*, assign_ilu0_boost_value,
 // ...), launch it on one block/warp via rocsparse_ut::launch_single_block /
-// launch_single_warp, and assert on the readback via rocsparse_ut::to_host. This
-// card (gfx1201) is wavefront 32; guard/skip wf64-only branches with
-// rocsparse_ut::device_warp_size().
+// launch_single_warp, and assert on the readback via rocsparse_ut::to_host.
+//
+// Wavefront-size policy: warp collectives are templated on the wavefront size and
+// instantiated for BOTH 32 and 64. Tests dispatch at runtime to the instantiation
+// matching rocsparse_ut::device_warp_size() (via launch_warp_by_size), so the
+// 32-lane path runs on wave32 parts (e.g. gfx1201) and the 64-lane path on wave64
+// parts (e.g. gfx94x/gfx950). No wavefront path is skipped or hard-coded. The real
+// per-routine tests live in the collectives PR; this foundation TU only proves the
+// harness links and runs.
 //
 #include "unit_test_utils.hpp"
 
@@ -44,6 +50,8 @@
 #include <hip/hip_runtime.h>
 #include <vector>
 
+// Placeholder that proves the device unit-test harness compiles, links the
+// compiled-in library TUs, and runs on the GPU. Always passes.
 TEST(internal_collectives, harness_smoke)
 {
     SUCCEED();

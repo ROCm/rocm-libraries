@@ -46,6 +46,9 @@
 #include <gtest/gtest.h>
 #include <vector>
 
+// Placeholder proving the device harness links the compiled-in host-building-
+// block TUs and runs; the real selector/partitioner tests live in the hostblocks
+// PR. Always passes.
 TEST(internal_hostblocks, harness_smoke)
 {
     SUCCEED();

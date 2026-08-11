@@ -41,6 +41,9 @@
 #include <hip/hip_runtime.h>
 #include <vector>
 
+// Placeholder proving the device harness links the compiled-in info-struct TUs
+// and runs; the real member-function tests live in the infostructs PR. Always
+// passes.
 TEST(internal_infostructs, harness_smoke)
 {
     SUCCEED();
