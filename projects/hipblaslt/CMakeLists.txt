@@ -454,7 +454,6 @@ if(HIPBLASLT_ENABLE_HOST)
             COMMAND ${CMAKE_COMMAND} -E make_directory "${HIPBLASLT_HIP_COMPAT_DIR}"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "$<TARGET_LINKER_FILE:hip::amdhip64>" "${HIPBLASLT_HIP_COMPAT_DIR}/amdhip64.lib"
-            COMMENT "Providing unversioned amdhip64.lib alias for clang's implicit HIP runtime link"
             VERBATIM
         )
         target_link_directories(hipblaslt PRIVATE "${HIPBLASLT_HIP_COMPAT_DIR}")

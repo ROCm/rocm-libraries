@@ -27,7 +27,6 @@ macro(rocblas_workaround_amdhip64_missing TARGET_NAME)
             COMMAND ${CMAKE_COMMAND} -E make_directory "${_rocblas_hip_compat_dir}"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "$<TARGET_LINKER_FILE:hip::amdhip64>" "${_rocblas_hip_compat_dir}/amdhip64.lib"
-            COMMENT "Providing unversioned amdhip64.lib alias for clang's implicit HIP runtime link"
             VERBATIM
         )
         target_link_directories(${TARGET_NAME} PRIVATE "${_rocblas_hip_compat_dir}")
