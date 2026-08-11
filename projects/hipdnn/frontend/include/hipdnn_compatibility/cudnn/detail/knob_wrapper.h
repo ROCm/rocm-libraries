@@ -333,8 +333,8 @@ inline error_t appendNativeKnobSetting(const hipdnn_frontend::Knob& engineKnob,
     case hipdnn_frontend::KnobValueType::FLOAT64:
     {
         // Past 2^53 the widening to double silently rounds.
-        constexpr int64_t exactDoubleLimit = int64_t{1} << 53;
-        if(value > exactDoubleLimit || value < -exactDoubleLimit)
+        constexpr int64_t EXACT_DOUBLE_LIMIT = int64_t{1} << 53;
+        if(value > EXACT_DOUBLE_LIMIT || value < -EXACT_DOUBLE_LIMIT)
         {
             return {error_code_t::INVALID_VALUE,
                     "cuDNN knob value " + std::to_string(value) + " does not fit hipDNN knob '"
