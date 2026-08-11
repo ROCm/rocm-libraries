@@ -855,20 +855,20 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
     endif()
     install(
         DIRECTORY "${_tensilelite_src}/rocisa/rocisa/"
-        DESTINATION "${_tensilelite_install_dest}/rocisa/rocisa"
+        DESTINATION "${_tensilelite_install_dest}/rocisa"
         COMPONENT tests
         FILES_MATCHING PATTERN "*.py"
         PATTERN "__pycache__" EXCLUDE
     )
     install(TARGETS _rocisa
-        LIBRARY DESTINATION "${_tensilelite_install_dest}/rocisa/rocisa" COMPONENT tests
-        RUNTIME DESTINATION "${_tensilelite_install_dest}/rocisa/rocisa" COMPONENT tests
+        LIBRARY DESTINATION "${_tensilelite_install_dest}/rocisa" COMPONENT tests
+        RUNTIME DESTINATION "${_tensilelite_install_dest}/rocisa" COMPONENT tests
     )
     if(TARGET stinkytofu::stinkytofu AND NOT WIN32)
         install(FILES
             "$<TARGET_FILE:stinkytofu::stinkytofu>"
             "$<TARGET_SONAME_FILE:stinkytofu::stinkytofu>"
-            DESTINATION "${_tensilelite_install_dest}/rocisa/rocisa"
+            DESTINATION "${_tensilelite_install_dest}/rocisa"
             COMPONENT tests
         )
     endif()
