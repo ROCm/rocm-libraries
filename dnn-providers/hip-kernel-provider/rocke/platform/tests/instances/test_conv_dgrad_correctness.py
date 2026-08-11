@@ -28,9 +28,7 @@ import unittest
 
 from rocke.runtime.hip_module import get_device_arch
 
-_PYDIR = os.path.join(
-    os.path.dirname(__file__), "..", "..", "python"
-)
+_PYDIR = os.path.join(os.path.dirname(__file__), "..", "..", "python")
 
 ARCH = get_device_arch(0)
 _HAS_TORCH = importlib.util.find_spec("torch") is not None
@@ -99,22 +97,56 @@ class TestConvDgradCorrectness(unittest.TestCase):
     def test_fp16_stride1(self):
         """fp16 dgrad, stride=1 — single sub-GEMM, direct-store epilogue."""
         self._verify(
-            "--dtype", "fp16",
-            "--N", "4", "--Hi", "16", "--Wi", "16",
-            "--C", "32", "--K", "32", "--Y", "3", "--X", "3",
-            "--pH", "1", "--pW", "1",
-            "--split-k", "1",
+            "--dtype",
+            "fp16",
+            "--N",
+            "4",
+            "--Hi",
+            "16",
+            "--Wi",
+            "16",
+            "--C",
+            "32",
+            "--K",
+            "32",
+            "--Y",
+            "3",
+            "--X",
+            "3",
+            "--pH",
+            "1",
+            "--pW",
+            "1",
+            "--split-k",
+            "1",
             label="fp16 stride=1",
         )
 
     def test_bf16_stride1(self):
         """bf16 dgrad, stride=1."""
         self._verify(
-            "--dtype", "bf16",
-            "--N", "4", "--Hi", "16", "--Wi", "16",
-            "--C", "32", "--K", "32", "--Y", "3", "--X", "3",
-            "--pH", "1", "--pW", "1",
-            "--split-k", "1",
+            "--dtype",
+            "bf16",
+            "--N",
+            "4",
+            "--Hi",
+            "16",
+            "--Wi",
+            "16",
+            "--C",
+            "32",
+            "--K",
+            "32",
+            "--Y",
+            "3",
+            "--X",
+            "3",
+            "--pH",
+            "1",
+            "--pW",
+            "1",
+            "--split-k",
+            "1",
             label="bf16 stride=1",
         )
 
@@ -123,11 +155,28 @@ class TestConvDgradCorrectness(unittest.TestCase):
         if ARCH not in _CDNA_ARCHES:
             self.skipTest(f"fp32 dgrad candidates are CDNA-only; running on {ARCH}")
         self._verify(
-            "--dtype", "fp32",
-            "--N", "2", "--Hi", "16", "--Wi", "16",
-            "--C", "32", "--K", "32", "--Y", "3", "--X", "3",
-            "--pH", "1", "--pW", "1",
-            "--split-k", "1",
+            "--dtype",
+            "fp32",
+            "--N",
+            "2",
+            "--Hi",
+            "16",
+            "--Wi",
+            "16",
+            "--C",
+            "32",
+            "--K",
+            "32",
+            "--Y",
+            "3",
+            "--X",
+            "3",
+            "--pH",
+            "1",
+            "--pW",
+            "1",
+            "--split-k",
+            "1",
             label="fp32 stride=1",
         )
 
@@ -136,32 +185,68 @@ class TestConvDgradCorrectness(unittest.TestCase):
     def test_fp16_stride2(self):
         """fp16 dgrad, stride=2 — tilde decomposition with atomic epilogue."""
         if ARCH not in _CDNA_ARCHES:
-            self.skipTest(
-                f"stride>1 dgrad requires CDNA atomic-add; running on {ARCH}"
-            )
+            self.skipTest(f"stride>1 dgrad requires CDNA atomic-add; running on {ARCH}")
         self._verify(
-            "--dtype", "fp16",
-            "--N", "2", "--Hi", "16", "--Wi", "16",
-            "--C", "32", "--K", "32", "--Y", "3", "--X", "3",
-            "--pH", "1", "--pW", "1",
-            "--sH", "2", "--sW", "2",
-            "--split-k", "1",
+            "--dtype",
+            "fp16",
+            "--N",
+            "2",
+            "--Hi",
+            "16",
+            "--Wi",
+            "16",
+            "--C",
+            "32",
+            "--K",
+            "32",
+            "--Y",
+            "3",
+            "--X",
+            "3",
+            "--pH",
+            "1",
+            "--pW",
+            "1",
+            "--sH",
+            "2",
+            "--sW",
+            "2",
+            "--split-k",
+            "1",
             label="fp16 stride=2",
         )
 
     def test_bf16_stride2(self):
         """bf16 dgrad, stride=2."""
         if ARCH not in _CDNA_ARCHES:
-            self.skipTest(
-                f"stride>1 dgrad requires CDNA atomic-add; running on {ARCH}"
-            )
+            self.skipTest(f"stride>1 dgrad requires CDNA atomic-add; running on {ARCH}")
         self._verify(
-            "--dtype", "bf16",
-            "--N", "2", "--Hi", "16", "--Wi", "16",
-            "--C", "32", "--K", "32", "--Y", "3", "--X", "3",
-            "--pH", "1", "--pW", "1",
-            "--sH", "2", "--sW", "2",
-            "--split-k", "1",
+            "--dtype",
+            "bf16",
+            "--N",
+            "2",
+            "--Hi",
+            "16",
+            "--Wi",
+            "16",
+            "--C",
+            "32",
+            "--K",
+            "32",
+            "--Y",
+            "3",
+            "--X",
+            "3",
+            "--pH",
+            "1",
+            "--pW",
+            "1",
+            "--sH",
+            "2",
+            "--sW",
+            "2",
+            "--split-k",
+            "1",
             label="bf16 stride=2",
         )
 
@@ -170,15 +255,30 @@ class TestConvDgradCorrectness(unittest.TestCase):
     def test_fp16_split_k(self):
         """fp16 dgrad, split_k auto-selected — exercises atomic reduction path."""
         if ARCH not in _CDNA_ARCHES:
-            self.skipTest(
-                f"split_k dgrad requires CDNA atomic-add; running on {ARCH}"
-            )
+            self.skipTest(f"split_k dgrad requires CDNA atomic-add; running on {ARCH}")
         self._verify(
-            "--dtype", "fp16",
-            "--N", "4", "--Hi", "28", "--Wi", "28",
-            "--C", "64", "--K", "128", "--Y", "3", "--X", "3",
-            "--pH", "1", "--pW", "1",
-            "--split-k", "-1",
+            "--dtype",
+            "fp16",
+            "--N",
+            "4",
+            "--Hi",
+            "28",
+            "--Wi",
+            "28",
+            "--C",
+            "64",
+            "--K",
+            "128",
+            "--Y",
+            "3",
+            "--X",
+            "3",
+            "--pH",
+            "1",
+            "--pW",
+            "1",
+            "--split-k",
+            "-1",
             label="fp16 split_k=auto",
         )
 
@@ -187,11 +287,28 @@ class TestConvDgradCorrectness(unittest.TestCase):
     def test_fp16_resnet_shape(self):
         """fp16 dgrad, ResNet-style shape N8 H56 W56 C64 K64 R3 S3."""
         self._verify(
-            "--dtype", "fp16",
-            "--N", "8", "--Hi", "56", "--Wi", "56",
-            "--C", "64", "--K", "64", "--Y", "3", "--X", "3",
-            "--pH", "1", "--pW", "1",
-            "--split-k", "-1",
+            "--dtype",
+            "fp16",
+            "--N",
+            "8",
+            "--Hi",
+            "56",
+            "--Wi",
+            "56",
+            "--C",
+            "64",
+            "--K",
+            "64",
+            "--Y",
+            "3",
+            "--X",
+            "3",
+            "--pH",
+            "1",
+            "--pW",
+            "1",
+            "--split-k",
+            "-1",
             label="fp16 resnet N8H56W56C64K64",
         )
 
