@@ -108,6 +108,9 @@ def validate(wheel: Path, mode: str, source_root: Path, expected_version: str) -
         forbidden = _forbidden(names)
         if forbidden:
             problems.append("forbidden entries:\n  " + "\n  ".join(forbidden))
+        bound_clients = sorted(name for name in names if name.endswith("client.json"))
+        if bound_clients:
+            problems.append("wheel must not contain client bindings: " + ", ".join(bound_clients))
 
         requirements = [Requirement(value) for value in metadata.get_all("Requires-Dist", [])]
         if mode == "canonical":

@@ -161,16 +161,9 @@ def test_diagnose_env_failure_stale_interpreter(tmp_path):
     assert "uv sync" in joined
 
 
-def test_diagnose_env_failure_missing_dependency(tmp_path):
-    out = "ModuleNotFoundError: No module named 'syrupy'"
-    lines = hook.diagnose_env_failure(out, tmp_path)
-    joined = "\n".join(lines)
-    assert "missing required packages" in joined
-    assert "uv sync" in joined
-
-
-def test_diagnose_env_failure_missing_xdist(tmp_path):
-    out = "ModuleNotFoundError: No module named 'xdist'"
+@pytest.mark.parametrize("module", ["syrupy", "xdist"])
+def test_diagnose_env_failure_missing_dependency(tmp_path, module):
+    out = f"ModuleNotFoundError: No module named '{module}'"
     lines = hook.diagnose_env_failure(out, tmp_path)
     joined = "\n".join(lines)
     assert "missing required packages" in joined

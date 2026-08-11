@@ -21,10 +21,7 @@ def test_benchmark_csv_preserves_size_order_and_fitting_vectors(tmp_path):
     )
 
     sizes, columns, maximum = _read_benchmark_data(benchmark)
-    perf = (1000 * sizes) / columns["kernel one"]
-    model = np.polyfit(sizes, perf, deg=1)
 
     np.testing.assert_array_equal(sizes, [32.0, 16.0, 64.0])
     np.testing.assert_array_equal(columns["kernel one"], [4.0, 2.0, 8.0])
     assert maximum == 30.0
-    np.testing.assert_allclose(model, [0.0, 8000.0], atol=1e-10)

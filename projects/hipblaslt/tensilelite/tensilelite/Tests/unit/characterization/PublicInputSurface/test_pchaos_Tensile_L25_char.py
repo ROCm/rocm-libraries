@@ -38,11 +38,6 @@ def test_module_guard_false_import_succeeds():
     M = importlib.import_module("tensilelite.tensilelite")
     # The module's __name__ attribute is the dotted import name, not "__main__".
     assert M.__name__ == "tensilelite.tensilelite"
-
-
-def test_module_guard_false_name_is_not_main():
-    """The loaded module's __name__ is NOT '__main__', confirming the FALSE branch."""
-    M = importlib.import_module("tensilelite.tensilelite")
     assert M.__name__ != "__main__"
 
 

@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import zipfile
 
 import pytest
 
@@ -67,3 +68,25 @@ def test_canonical_and_compatibility_release_wheels_validate_independently(tmp_p
             text=True,
         )
         assert validation.returncode == 0, validation.stderr
+
+        with zipfile.ZipFile(wheel, "a") as archive:
+            metadata = next(name for name in archive.namelist() if name.endswith(".dist-info/METADATA"))
+            archive.writestr(metadata.rsplit("/", 1)[0] + "/client.json", "/tmp/client")
+        bound_validation = subprocess.run(
+            [
+                sys.executable,
+                str(_VALIDATOR),
+                "--mode",
+                mode,
+                "--wheel",
+                str(wheel),
+                "--expected-version",
+                "5.0.0+rocm7.2.4",
+                "--source-root",
+                str(_SOURCE_ROOT),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert bound_validation.returncode != 0
+        assert "wheel must not contain client bindings" in bound_validation.stderr

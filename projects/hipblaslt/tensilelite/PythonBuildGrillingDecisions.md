@@ -2173,11 +2173,6 @@ path fails when the client is absent. This is intentional: callers may rely on
 a returned path being usable. CPU-only paths remain unaffected because they do
 not request a client path.
 
-**Test direction:** Restore the `develop`-equivalent real-resolver test for a
-missing path and a valid path, adapted to the current binding mechanism. Keep
-writer tests that mock the resolver as isolated script-format tests; they do
-not claim a real client exists.
-
 **Supersession:** This refines Q115 and Q120's deferred-validation timing. It
 supersedes Q115's earlier statement that emitting a script/configuration does
 not require the executable.

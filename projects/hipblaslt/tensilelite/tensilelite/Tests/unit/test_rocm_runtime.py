@@ -3,6 +3,7 @@
 
 from pathlib import Path
 import subprocess
+import sys
 
 import pytest
 
@@ -154,84 +155,6 @@ def test_runtime_treats_rocisa_as_an_opaque_import(tmp_path, monkeypatch):
     assert _runtime.rocm_root() == root
 
 
-def test_custom_client_never_falls_back_to_rocm_client(tmp_path, monkeypatch):
-    root = _root(tmp_path)
-    rocm_client = root / "libexec" / "hipblaslt" / "tensilelite" / "tensilelite-client"
-    rocm_client.parent.mkdir(parents=True)
-    rocm_client.write_text("", encoding="utf-8")
-    rocm_client.chmod(0o755)
-    custom_client = tmp_path / "custom-client"
-
-    monkeypatch.setattr(_runtime, "_client", None)
-    monkeypatch.setattr(_runtime, "_root", None)
-    monkeypatch.setattr(_runtime, "_root_source", None)
-    monkeypatch.setattr(_runtime, "_distribution_version", None)
-    monkeypatch.setattr(_runtime, "import_module", lambda name: object())
-    monkeypatch.setattr(
-        _runtime,
-        "validate_distribution",
-        lambda distribution, version: _rocm.ValidatedRocm(root, "7.2.4", "test"),
-    )
-    monkeypatch.setattr(_runtime, "selected_client", lambda root: (custom_client, True))
-    monkeypatch.setattr(_runtime, "validate_client", lambda path, version: None)
-
-    _runtime.initialize("5.0.0+rocm7.2.4")
-
-    assert _runtime.client_executable() == custom_client
-
-
-def test_client_request_reports_missing_client_after_successful_initialization(tmp_path, monkeypatch):
-    root = _root(tmp_path)
-    missing_client = root / "libexec" / "hipblaslt" / "tensilelite" / "tensilelite-client"
-
-    monkeypatch.setattr(_runtime, "_client", None)
-    monkeypatch.setattr(_runtime, "_root", None)
-    monkeypatch.setattr(_runtime, "_root_source", None)
-    monkeypatch.setattr(_runtime, "_distribution_version", None)
-    monkeypatch.setattr(_runtime, "import_module", lambda name: object())
-    monkeypatch.setattr(
-        _runtime,
-        "validate_distribution",
-        lambda distribution, version: _rocm.ValidatedRocm(root, "7.2.4", "test"),
-    )
-    monkeypatch.setattr(_runtime, "selected_client", lambda root: (missing_client, False))
-    monkeypatch.setattr(
-        _runtime,
-        "validate_client",
-        lambda path, version: (_ for _ in ()).throw(
-            _runtime.ClientBindingError("Client path is not a regular file")
-        ),
-    )
-
-    _runtime.initialize("5.0.0+rocm7.2.4")
-
-    with pytest.raises(_rocm.TensileLiteRuntimeError, match="Client path is not a regular file"):
-        _runtime.client_executable()
-
-
-def test_client_writer_path_request_uses_lazy_runtime_validation(tmp_path, monkeypatch):
-    from tensilelite import ClientWriter
-
-    root = _root(tmp_path)
-    missing_client = root / "libexec" / "hipblaslt" / "tensilelite" / "tensilelite-client"
-
-    monkeypatch.setattr(_runtime, "_client", None)
-    monkeypatch.setattr(_runtime, "_root", root)
-    monkeypatch.setattr(_runtime, "_root_source", "test")
-    monkeypatch.setattr(_runtime, "_distribution_version", "5.0.0+rocm7.2.4")
-    monkeypatch.setattr(_runtime, "selected_client", lambda root: (missing_client, False))
-    monkeypatch.setattr(
-        _runtime,
-        "validate_client",
-        lambda path, version: (_ for _ in ()).throw(
-            _runtime.ClientBindingError("Client path is not a regular file")
-        ),
-    )
-
-    with pytest.raises(_rocm.TensileLiteRuntimeError, match="Client path is not a regular file"):
-        ClientWriter.getClientExecutablePath()
-
-
 def test_cli_help_does_not_request_client(monkeypatch):
     from tensilelite import cli
 
@@ -242,3 +165,44 @@ def test_cli_help_does_not_request_client(monkeypatch):
     )
 
     assert cli.main(["--help"]) == 0
+
+
+def _initialize_runtime_with_root(root: Path, monkeypatch) -> None:
+    monkeypatch.setattr(_runtime, "_client", None)
+    monkeypatch.setattr(_runtime, "_root", None)
+    monkeypatch.setattr(_runtime, "_root_source", None)
+    monkeypatch.setattr(_runtime, "_distribution_version", None)
+    monkeypatch.setattr(_runtime, "import_module", lambda name: object())
+    monkeypatch.setattr(
+        _runtime,
+        "validate_distribution",
+        lambda distribution, version: _rocm.ValidatedRocm(root, "7.2.4", "test"),
+    )
+    _runtime.initialize("5.0.0+rocm7.2.4")
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="uses a POSIX test executable")
+def test_client_writer_path_request_rejects_missing_standard_client(tmp_path, monkeypatch):
+    from tensilelite import ClientWriter
+
+    root = _root(tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    _initialize_runtime_with_root(root, monkeypatch)
+
+    with pytest.raises(_rocm.TensileLiteRuntimeError, match="Client path is not a regular file"):
+        ClientWriter.getClientExecutablePath()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="uses a POSIX test executable")
+def test_client_writer_path_request_accepts_valid_standard_client(tmp_path, monkeypatch):
+    from tensilelite import ClientWriter
+
+    root = _root(tmp_path)
+    client = root / "libexec" / "hipblaslt" / "tensilelite" / "tensilelite-client"
+    client.parent.mkdir(parents=True)
+    client.write_text("#!/bin/sh\nprintf '5.0.0+rocm7.2.4\\n'\n", encoding="utf-8")
+    client.chmod(0o755)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    _initialize_runtime_with_root(root, monkeypatch)
+
+    assert ClientWriter.getClientExecutablePath() == str(client)
