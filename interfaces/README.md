@@ -1,8 +1,13 @@
-# ROCm library interfaces spike
+# ROCm library interfaces
 
-This tree prototypes a stable public-loader boundary and narrow implementation-provider
-protocols for ROCm math libraries. It is intentionally standalone: it does not alter the
-existing math-library builds or install canonical ROCm library names.
+Status: proposed design, prototype-backed. This tree prototypes a stable public-loader
+boundary and narrow implementation-provider protocols for ROCm math libraries. It is
+intentionally standalone: it does not alter the existing math-library builds or install
+canonical ROCm library names.
+
+**New here? Start with the documentation set: [docs/README.md](docs/README.md).** It explains
+why the boundary exists, how the three layers fit together, and links every capability to the
+test that proves it.
 
 The working vertical slice contains:
 
@@ -17,7 +22,7 @@ The working vertical slice contains:
 - Loadable solver and RAND recording providers.
 - Parser-based API extraction using Clang LibTooling.
 - API-policy and append-only enum validation tooling.
-- Host-only unit and DSO integration tests.
+- Host-only unit and DSO integration tests, plus the ABI hardening proof suite.
 - An isolated shadow package-config/install consumer test.
 
 ## Build
@@ -44,7 +49,7 @@ are deliberately separate profiles so C++ ABI does not disappear inside a C-only
 The check target regenerates all profiles and byte-compares them with `api/snapshots`; it is
 the presubmit hook for draft-to-launch header drift.
 
-The spike temporarily stages the public rocBLAS and rocRAND headers directly from their
+This tree temporarily stages the public rocBLAS and rocRAND headers directly from their
 projects. This is deliberate migration scaffolding: those headers are in scope to move
 under `interfaces/`. HIP is different; the real implementation must retain a normal
 package dependency on CLR's exported `hip::host` target.
@@ -61,6 +66,17 @@ Canonical mode is intentionally absent until every exported declaration is class
 all required adapters exist, package-config parity is demonstrated, and coexistence tests
 cover the ABI majors being published.
 
-See [provider-protocols.md](docs/provider-protocols.md),
-[rocblas-provider-clusters.md](docs/rocblas-provider-clusters.md), and
+## Documentation
+
+- [docs/README.md](docs/README.md) - the documentation index and read order.
+- [docs/01-architecture.md](docs/01-architecture.md) - how the layers fit together.
+- [docs/02-why-a-stable-boundary.md](docs/02-why-a-stable-boundary.md) - the threat model.
+- [docs/03-abi-and-versioning-contract.md](docs/03-abi-and-versioning-contract.md) - the normative contract.
+- [docs/04-hardening.md](docs/04-hardening.md) - each proof and what it stops.
+- [docs/05-extending.md](docs/05-extending.md) - how-to recipes.
+- [docs/07-status-and-roadmap.md](docs/07-status-and-roadmap.md) - done vs planned.
+
+Reference layer: [provider-protocols.md](docs/provider-protocols.md),
+[rocblas-provider-clusters.md](docs/rocblas-provider-clusters.md),
+[audit-findings.md](docs/audit-findings.md),
 [api-change-process.md](docs/api-change-process.md).
