@@ -76,11 +76,24 @@ int dispatcher_initialize()
         std::cerr << "dispatcher_initialize: could not query device architecture\n";
         return -1;
     }
+    // GFX_ARCH is injected at compile time by CMake (e.g. "gfx942" or "gfx950").
+    // Validate that the runtime device matches the compiled kernel architecture so
+    // that we don't attempt to launch a kernel image on a mismatched device.
+    // gfx90a is intentionally excluded: fp8/bf8 CompV3 kernels require native FP8
+    // hardware which gfx90a lacks (produces NaN without -DCK_USE_OCP_FP8).
     const std::string arch(props.gcnArchName);
-    if(arch.rfind("gfx950", 0) != 0 && arch.rfind("gfx942", 0) != 0 && arch.rfind("gfx90a", 0) != 0)
+    const std::string compiled_arch(GFX_ARCH);
+    if(arch.rfind("gfx950", 0) != 0 && arch.rfind("gfx942", 0) != 0)
     {
         std::cerr << "dispatcher_initialize: unsupported GPU architecture '" << arch
-                  << "' (supported: gfx90a, gfx942, gfx950)\n";
+                  << "' (supported: gfx942, gfx950; fp8/bf8 kernels require native FP8 hardware)\n";
+        return -1;
+    }
+    if(arch.rfind(compiled_arch, 0) != 0)
+    {
+        std::cerr << "dispatcher_initialize: runtime device architecture '" << arch
+                  << "' does not match compile-time GFX_ARCH '" << compiled_arch
+                  << "'; this .so was compiled for a different device\n";
         return -1;
     }
     // release: make the device-property query results visible to any thread
@@ -142,9 +155,29 @@ int dispatcher_run_rowcolquant_gemm(const void* A,
         std::cerr << "dispatcher_run_rowcolquant_gemm: null pointer argument\n";
         return -1;
     }
-    if(M <= 0 || N <= 0 || K <= 0 || QK_A <= 0 || QK_B <= 0)
+    if(M <= 0 || N <= 0 || K <= 0)
     {
         std::cerr << "dispatcher_run_rowcolquant_gemm: invalid dimensions\n";
+        return -1;
+    }
+    if(k_batch <= 0)
+    {
+        std::cerr << "dispatcher_run_rowcolquant_gemm: k_batch must be >= 1, got " << k_batch
+                  << " (k_batch is used as a divisor in split-K)\n";
+        return -1;
+    }
+    // RowColQuant kernel indexes M AQ values (per-row) and N BQ values (per-col) directly.
+    // Smaller counts cause device out-of-bounds reads; QK_A must equal M, QK_B must equal N.
+    if(QK_A != M)
+    {
+        std::cerr << "dispatcher_run_rowcolquant_gemm: QK_A must equal M (" << M
+                  << ") for RowColQuant; got QK_A=" << QK_A << "\n";
+        return -1;
+    }
+    if(QK_B != N)
+    {
+        std::cerr << "dispatcher_run_rowcolquant_gemm: QK_B must equal N (" << N
+                  << ") for RowColQuant; got QK_B=" << QK_B << "\n";
         return -1;
     }
 
@@ -255,7 +288,23 @@ int dispatcher_run_rowcolquant_gemm(const void* A,
         1,                // rotating_count
     };
 
-    float exec_time = SelectedKernel::launch(gemm_descs, stream_cfg, kargs_dev);
+    float exec_time = -1.0f;
+    try
+    {
+        exec_time = SelectedKernel::launch(gemm_descs, stream_cfg, kargs_dev);
+    }
+    catch(const std::exception& e)
+    {
+        std::cerr << "dispatcher_run_rowcolquant_gemm: kernel launch threw: " << e.what() << "\n";
+        cleanup();
+        return -3;
+    }
+    catch(...)
+    {
+        std::cerr << "dispatcher_run_rowcolquant_gemm: kernel launch threw unknown exception\n";
+        cleanup();
+        return -3;
+    }
 
     if(exec_time < 0.0f)
     {

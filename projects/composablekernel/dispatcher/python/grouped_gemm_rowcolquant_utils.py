@@ -352,6 +352,11 @@ class RowColQuantGpuGemmRunner:
 
         if c_dtype is None:
             c_dtype = np.float16
+        if c_dtype != np.float16:
+            raise ValueError(
+                f"c_dtype must be float16 (the compiled ABI always writes CDataType=half); "
+                f"got {c_dtype}"
+            )
 
         C = np.zeros((M, N), dtype=c_dtype)
 

@@ -314,19 +314,12 @@ if(ROWCOLQUANT_GEMM_KERNEL_HEADERS)
 else()
     message(WARNING
         "No RowColQuant GEMM kernel header found in ${CMAKE_BINARY_DIR}/generated_kernels/. "
-        "dispatcher_grouped_gemm_rowcolquant_lib will be built without a kernel and will fail "
-        "at load time. Run unified_grouped_gemm_rowcolquant_codegen.py --output-dir "
-        "${CMAKE_BINARY_DIR}/generated_kernels/ before configuring to fix this.")
-    add_library(dispatcher_grouped_gemm_rowcolquant_lib SHARED grouped_gemm_rowcolquant_ctypes_lib.cpp)
-    target_include_directories(dispatcher_grouped_gemm_rowcolquant_lib PRIVATE
-        ${PROJECT_SOURCE_DIR}/include
-        ${PROJECT_SOURCE_DIR}/dispatcher/include
-    )
-    target_link_libraries(dispatcher_grouped_gemm_rowcolquant_lib PRIVATE hip::device)
-    set_target_properties(dispatcher_grouped_gemm_rowcolquant_lib PROPERTIES
-        POSITION_INDEPENDENT_CODE ON
-        CXX_STANDARD 17
-    )
+        "dispatcher_grouped_gemm_rowcolquant_lib will NOT be built. "
+        "Run unified_grouped_gemm_rowcolquant_codegen.py --output-dir "
+        "${CMAKE_BINARY_DIR}/generated_kernels/ before configuring to enable this target.")
+    # Do not define the target: the source requires force-included symbols (SelectedKernel,
+    # ADataType, KERNEL_NAME, etc.) that only exist in the generated header. Without it
+    # the build fails at compile time, not load time, breaking any all-target build.
 endif()
 
 # =============================================================================
@@ -367,19 +360,12 @@ if(TENSORQUANT_GEMM_KERNEL_HEADERS)
 else()
     message(WARNING
         "No TensorQuant GEMM kernel header found in ${CMAKE_BINARY_DIR}/generated_kernels/. "
-        "dispatcher_grouped_gemm_tensorquant_lib will be built without a kernel and will fail "
-        "at load time. Run unified_grouped_gemm_tensorquant_codegen.py --output-dir "
-        "${CMAKE_BINARY_DIR}/generated_kernels/ before configuring to fix this.")
-    add_library(dispatcher_grouped_gemm_tensorquant_lib SHARED grouped_gemm_tensorquant_ctypes_lib.cpp)
-    target_include_directories(dispatcher_grouped_gemm_tensorquant_lib PRIVATE
-        ${PROJECT_SOURCE_DIR}/include
-        ${PROJECT_SOURCE_DIR}/dispatcher/include
-    )
-    target_link_libraries(dispatcher_grouped_gemm_tensorquant_lib PRIVATE hip::device)
-    set_target_properties(dispatcher_grouped_gemm_tensorquant_lib PROPERTIES
-        POSITION_INDEPENDENT_CODE ON
-        CXX_STANDARD 17
-    )
+        "dispatcher_grouped_gemm_tensorquant_lib will NOT be built. "
+        "Run unified_grouped_gemm_tensorquant_codegen.py --output-dir "
+        "${CMAKE_BINARY_DIR}/generated_kernels/ before configuring to enable this target.")
+    # Do not define the target: the source requires force-included symbols (SelectedKernel,
+    # ADataType, KERNEL_NAME, etc.) that only exist in the generated header. Without it
+    # the build fails at compile time, not load time, breaking any all-target build.
 endif()
 
 # =============================================================================
