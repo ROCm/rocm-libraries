@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <mxDataGenerator/PreSwizzle.hpp>
 #include <stdexcept>
 #include <utility>
@@ -42,6 +43,45 @@ namespace
     double normDistStdDevFor(ScalarType dataType)
     {
         return dataType == ScalarType::Float4E2M1 ? 5.0 : 1.0;
+    }
+
+    ScalarType scaleScalarType(hipDataType scaleType)
+    {
+        if(scaleType == HIP_R_8F_E4M3)
+            return ScalarType::E4M3;
+        return roc::host_validation::hipblaslt_adapter::scalarType(scaleType);
+    }
+
+    bool recipesEqual(const MxGenerationRecipe& first, const MxGenerationRecipe& second)
+    {
+        return first.mode == second.mode && first.parameter0 == second.parameter0
+               && first.parameter1 == second.parameter1;
+    }
+
+    bool isRandomLike(MxGenerationMode mode)
+    {
+        return mode == MxGenerationMode::Bounded
+               || mode == MxGenerationMode::BoundedAlternatingSign
+               || mode == MxGenerationMode::Unbounded || mode == MxGenerationMode::Normal;
+    }
+
+    bool isConstantScaleRecipe(MxGenerationMode mode)
+    {
+        switch(mode)
+        {
+        case MxGenerationMode::Zeros:
+        case MxGenerationMode::Ones:
+        case MxGenerationMode::NegativeOnes:
+        case MxGenerationMode::Twos:
+        case MxGenerationMode::Maximum:
+        case MxGenerationMode::DenormalMinimum:
+        case MxGenerationMode::DenormalMaximum:
+        case MxGenerationMode::NaN:
+        case MxGenerationMode::Infinity:
+            return true;
+        default:
+            return false;
+        }
     }
 
     MxGenerationRecipe generationRecipe(std::string_view initMethod,
@@ -162,17 +202,41 @@ std::vector<float> generateMXInput(hipDataType            dataType,
                                    std::string_view const scaleInitMethod,
                                    uint32_t               seed)
 {
+    if(data == nullptr || scale == nullptr)
+        throw std::invalid_argument("generateMXInput requires non-null data and scale outputs.");
+    if constexpr(sizeof(size_t) < sizeof(uint64_t))
+    {
+        if(row > std::numeric_limits<size_t>::max() || col > std::numeric_limits<size_t>::max())
+            throw std::overflow_error("generateMXInput dimensions exceed size_t.");
+    }
+    if(stride > static_cast<uint64_t>(std::numeric_limits<ptrdiff_t>::max()))
+        throw std::overflow_error("generateMXInput leading dimension exceeds ptrdiff_t.");
+    if(scaleBlockRowSize <= 0 || scaleBlockColSize <= 0)
+        throw std::invalid_argument("generateMXInput scale block dimensions must be positive.");
+    const size_t blockRows = static_cast<size_t>(scaleBlockRowSize);
+    const size_t blockColumns = static_cast<size_t>(scaleBlockColSize);
+    if(blockRows > std::numeric_limits<size_t>::max() / blockColumns)
+        throw std::overflow_error("generateMXInput scale block size overflow.");
+    if(blockRows > 1 && blockColumns > 1)
+        throw std::invalid_argument("generateMXInput supports blocking along one tensor axis.");
+
     const ScalarType hostDataType = roc::host_validation::hipblaslt_adapter::scalarType(dataType);
     MxGenerationProblem problem;
     problem.dataType  = hostDataType;
-    problem.scaleType = roc::host_validation::hipblaslt_adapter::scalarType(scaleType);
+    problem.scaleType = scaleScalarType(scaleType);
     problem.shape = roc::host_validation::Shape{static_cast<size_t>(row), static_cast<size_t>(col)};
     problem.leadingDimension = static_cast<ptrdiff_t>(stride);
-    problem.blockSize        = static_cast<size_t>(scaleBlockRowSize * scaleBlockColSize);
-    problem.blockAxis        = ((isMatrixA && isTranspose) || (!isMatrixA && !isTranspose)) ? 0 : 1;
+    problem.blockSize        = blockRows * blockColumns;
+    problem.blockAxis        = blockColumns > 1 ? 1 : 0;
     problem.data             = generationRecipe(initMethod, hostDataType, min_val, max_val);
     if(!scaleInitMethod.empty())
-        problem.scale = generationRecipe(scaleInitMethod, hostDataType, -1.0f, 1.0f);
+    {
+        MxGenerationRecipe const scaleRecipe
+            = generationRecipe(scaleInitMethod, hostDataType, -1.0f, 1.0f);
+        if(recipesEqual(problem.data, scaleRecipe)
+           || (isRandomLike(problem.data.mode) && isConstantScaleRecipe(scaleRecipe.mode)))
+            problem.scale = scaleRecipe;
+    }
     problem.seed = seed;
 
     roc::host_validation::MxGenerationResult result = roc::host_validation::generateMx(problem);
@@ -180,18 +244,25 @@ std::vector<float> generateMXInput(hipDataType            dataType,
 
     std::vector<uint8_t> scaleBytes(result.scales.storage().size());
     std::memcpy(scaleBytes.data(), result.scales.storage().data(), scaleBytes.size());
-    const size_t elementsPerBlock = problem.blockSize;
-    const size_t scaleRows
-        = elementsPerBlock == 0
-              ? 0
-              : (static_cast<size_t>(row) + elementsPerBlock - 1) / elementsPerBlock;
+    const size_t blockedScaleExtent
+        = (problem.shape[problem.blockAxis] + problem.blockSize - 1) / problem.blockSize;
+    const size_t fastScaleExtent
+        = problem.blockAxis == 0 ? blockedScaleExtent : problem.shape[0];
+    const size_t slowScaleExtent
+        = problem.blockAxis == 0 ? problem.shape[1] : blockedScaleExtent;
     scaleBytes = swizzleScaleBytes(
-        std::move(scaleBytes), scaleLayout, static_cast<size_t>(col), scaleRows, elementsPerBlock);
+        std::move(scaleBytes),
+        scaleLayout,
+        slowScaleExtent,
+        fastScaleExtent,
+        problem.blockSize);
     std::memcpy(scale, scaleBytes.data(), scaleBytes.size());
 
-    std::vector<float> reference(row * col);
+    std::vector<float> reference(problem.shape.elementCount());
     std::memcpy(
         reference.data(), result.reference.storage().data(), reference.size() * sizeof(float));
+    (void)isTranspose;
+    (void)isMatrixA;
     return reference;
 }
 
