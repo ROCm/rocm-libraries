@@ -28,11 +28,11 @@
 #   100 -- odd C with fp16 split-K (must raise ValueError)
 #   101 -- groups=2 (must raise ValueError)
 #   102 -- split_k > 1 on RDNA gfx1151 (must raise ValueError)
-from rocke.instances.common.conv_implicit_gemm_wgrad import (
+from kernels.common.conv_implicit_gemm_wgrad import (
     WgradConvSpec,
     build_implicit_gemm_conv_wgrad,
 )
-from rocke.instances.common._conv_implicit_gemm_common import ConvProblem
+from kernels.common._conv_implicit_gemm_common import ConvProblem
 from _emit_common import run_emit
 
 
@@ -162,7 +162,7 @@ def _spec(idx: int):
     if idx == 7:
         # Split-K=4 with fp32 output, gfx950.
         p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3)
-        from rocke.instances.common._conv_implicit_gemm_common import ConvDataSpec
+        from kernels.common._conv_implicit_gemm_common import ConvDataSpec
 
         return (
             WgradConvSpec(
@@ -224,7 +224,7 @@ def _spec(idx: int):
         # Split-K=4 with bf16 output -- exercises packed bf16 atomic +
         # accumulation-error path (the newest codegen, previously untested).
         p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3)
-        from rocke.instances.common._conv_implicit_gemm_common import ConvDataSpec
+        from kernels.common._conv_implicit_gemm_common import ConvDataSpec
 
         return (
             WgradConvSpec(

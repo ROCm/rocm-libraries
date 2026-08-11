@@ -199,7 +199,7 @@ class TestBindingRatchet(unittest.TestCase):
     }
 
     def _registries(self):
-        from rocke.dispatch.families.conv import CONV_REGISTRY
+        from dispatch.conv import CONV_REGISTRY
         from rocke.dispatch.families.moe import MOE_REGISTRY
         from rocke.dispatch.families.norm import NORM_REGISTRY
         from rocke.dispatch.gemm.bf16_rcr import GEMM_BF16_REGISTRY

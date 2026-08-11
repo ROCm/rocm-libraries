@@ -596,14 +596,6 @@ from rocke.instances import (
     TraitSpec,
     UniversalGemmSpec,
     build_universal_gemm,
-    ConvProblem,
-    ImplicitGemmConvSpec,
-    build_implicit_gemm_conv,
-    DirectConvProblem,
-    DirectConv16cSpec,
-    DirectConv4cSpec,
-    build_direct_conv_16c,
-    build_direct_conv_4c,
     ElementwiseSpec,
     build_elementwise,
     Reduce2DSpec,
@@ -618,6 +610,16 @@ from rocke.instances import (
     build_batched_gemm,
     GroupedGemmSpec,
     build_grouped_gemm,
+)
+from kernels import (
+    ConvProblem,
+    ImplicitGemmConvSpec,
+    build_implicit_gemm_conv,
+    DirectConvProblem,
+    DirectConv16cSpec,
+    DirectConv4cSpec,
+    build_direct_conv_16c,
+    build_direct_conv_4c,
 )
 from rocke.core.lower_cktile import (
     lower_spec_to_cktile,

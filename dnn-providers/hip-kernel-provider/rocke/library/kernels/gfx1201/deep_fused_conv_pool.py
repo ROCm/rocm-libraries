@@ -3,7 +3,7 @@
 
 """gfx1201 (RDNA4, wave32, WMMA) deep-fused conv + maxpool — thin arch shim.
 
-The kernel body lives in :mod:`rocke.instances.common.deep_fused_conv_pool`,
+The kernel body lives in :mod:`kernels.common.deep_fused_conv_pool`,
 authored once and driven by the resolved :class:`~rocke.core.arch.MmaOp` so the
 same code emits both the MFMA (gfx950) and WMMA (gfx1201) paths. This module only
 pins the gfx1201 geometry (wave32, 16x16x16 WMMA atom) and re-exports the common

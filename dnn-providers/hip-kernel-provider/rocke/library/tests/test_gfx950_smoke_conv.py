@@ -63,7 +63,7 @@ class TestGfx950ConvSmoke(unittest.TestCase):
         cmd = [
             sys.executable,
             "-m",
-            "rocke.benchmark.benchmark_implicit_gemm_conv",
+            "benchmarks.common.benchmark_implicit_gemm_conv",
             "--arch",
             "gfx950",
             "--dtype",

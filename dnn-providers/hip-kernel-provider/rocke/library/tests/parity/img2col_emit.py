@@ -7,8 +7,8 @@
 # Img2ColSpec, builds the kernel via build_img2col(arch='gfx950') and prints
 # lower_kernel_to_llvm(arch='gfx950') to stdout so it can be byte-compared with
 # the C emitter img2col_emit.c.
-from rocke.instances.common.img2col import Img2ColSpec, build_img2col
-from rocke.instances.common.conv_implicit_gemm import ConvProblem
+from kernels.common.img2col import Img2ColSpec, build_img2col
+from kernels.common.conv_implicit_gemm import ConvProblem
 from _emit_common import run_emit
 
 

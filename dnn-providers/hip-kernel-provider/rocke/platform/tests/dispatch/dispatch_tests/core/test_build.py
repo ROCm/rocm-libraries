@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import unittest
 
-from rocke.dispatch.families.conv import ConvRequest, dispatch_conv
+from dispatch.conv import ConvRequest, dispatch_conv
 from rocke.dispatch.families.moe import MoeRequest, dispatch_moe
 from rocke.dispatch.families.norm import NormRequest, dispatch_norm
 from rocke.dispatch.gemm.bf16_rcr import dispatch_gemm_bf16
@@ -101,7 +101,7 @@ class TestBuildRatchet(unittest.TestCase):
     """Every platform family requires a build; none may quietly stop."""
 
     def _registries(self):
-        from rocke.dispatch.families.conv import CONV_REGISTRY
+        from dispatch.conv import CONV_REGISTRY
         from rocke.dispatch.families.moe import MOE_REGISTRY
         from rocke.dispatch.families.norm import NORM_REGISTRY
         from rocke.dispatch.gemm.bf16_rcr import GEMM_BF16_REGISTRY

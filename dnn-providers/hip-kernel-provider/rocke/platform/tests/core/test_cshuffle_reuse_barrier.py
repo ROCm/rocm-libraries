@@ -101,7 +101,7 @@ def test_conv_cshuffle_has_reuse_barrier():
     """The conv implicit-GEMM cshuffle path (double-buffered compv4, via the
     shared ``CShuffleEpilogue`` helper) emits the reuse barrier before the first
     C store."""
-    from rocke.instances.common.conv_implicit_gemm import (
+    from kernels.common.conv_implicit_gemm import (
         ConvProblem,
         ImplicitGemmConvSpec,
         build_implicit_gemm_conv,
@@ -186,7 +186,7 @@ def test_conv_cshuffle_no_alias_lds_budget_is_per_case():
     uses max(ab, c); no-alias uses ab + c. A spec whose max(ab, c) fits gfx950's
     LDS but whose ab + c overflows it must be accepted aliased and rejected
     no-alias (regression for yraparti's PR #8844 review comment)."""
-    from rocke.instances.common.conv_implicit_gemm import (
+    from kernels.common.conv_implicit_gemm import (
         ConvProblem,
         ImplicitGemmConvSpec,
         is_valid_spec,

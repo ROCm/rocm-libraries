@@ -64,8 +64,9 @@ CK Tile small-op counterparts (Tier 1)
 Each builder ships with a matching `_signature(spec)` and `_grid(...)`
 helper for use with :class:`rocke.runtime.launcher.KernelLauncher`.
 End-to-end parity vs torch reference for all of these is exercised by
-:mod:`rocke.examples.common.ck_tile_parity`; the GEMM parity driver lives in
-:mod:`rocke.examples.common.bake_off_implicit_gemm`.
+:mod:`rocke.examples.common.ck_tile_parity`. The implicit-GEMM bake-off
+driver moved to the library convolution vertical
+(``python -m builders.common.bake_off_implicit_gemm``).
 """
 
 from .common.gemm_universal import (  # noqa: F401

@@ -10,7 +10,7 @@
 # byte-compared with the C emitter conv_direct_grouped_emit.c.
 import sys
 
-from rocke.instances.common.conv_direct_grouped import (
+from kernels.common.conv_direct_grouped import (
     DirectConvProblem,
     DirectConv16cSpec,
     DirectConv4cSpec,

@@ -14,7 +14,7 @@ from __future__ import annotations
 import unittest
 
 from rocke.core.arch import ArchTarget, known_arches
-from rocke.dispatch.families.conv import CONV_REGISTRY, ConvRequest
+from dispatch.conv import CONV_REGISTRY, ConvRequest
 from rocke.dispatch.families.moe import MOE_REGISTRY, MoeRequest
 from rocke.dispatch.families.norm import NORM_REGISTRY, NormRequest
 

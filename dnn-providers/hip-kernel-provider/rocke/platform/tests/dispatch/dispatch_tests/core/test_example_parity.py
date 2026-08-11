@@ -25,7 +25,7 @@ import unittest
 
 from rocke.core.arch import ArchTarget
 from rocke.core.ir_serialize import canonical_equal
-from rocke.dispatch.families.conv import CONV_REGISTRY, ConvRequest, dispatch_conv
+from dispatch.conv import CONV_REGISTRY, ConvRequest, dispatch_conv
 from rocke.dispatch.families.moe import MOE_REGISTRY, MoeRequest, dispatch_moe
 from rocke.dispatch.families.norm import NORM_REGISTRY, NormRequest, dispatch_norm
 from rocke.dispatch.gemm.bf16_rcr import GEMM_BF16_REGISTRY
@@ -180,7 +180,7 @@ class TestExampleParity(unittest.TestCase):
         # examples/common/bake_off_implicit_gemm.py defaults: 64x64x64 tiles,
         # 2x2 warps, 32x32 atom at the catalog's largest legal K, mem pipeline,
         # cshuffle epilogue -- which is conv's cdna_cshuffle candidate.
-        from rocke.instances.common.conv_implicit_gemm import (
+        from kernels.common.conv_implicit_gemm import (
             ConvProblem,
             ImplicitGemmConvSpec,
             build_implicit_gemm_conv,

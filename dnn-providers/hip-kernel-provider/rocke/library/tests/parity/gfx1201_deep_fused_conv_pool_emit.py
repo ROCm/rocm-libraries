@@ -10,7 +10,7 @@
 # (re-exported common driver, arch="gfx1201") and prints
 # lower_kernel_to_llvm(arch="gfx1201") to stdout so it can be byte-compared with
 # the C emitter gfx1201_deep_fused_conv_pool_emit.c.
-from rocke.instances.gfx1201.deep_fused_conv_pool import (
+from kernels.gfx1201.deep_fused_conv_pool import (
     make_deep_fused_conv_pool_spec,
     build_deep_fused_conv_pool,
 )

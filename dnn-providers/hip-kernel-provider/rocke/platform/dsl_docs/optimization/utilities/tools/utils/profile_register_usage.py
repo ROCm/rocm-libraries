@@ -18,7 +18,7 @@ from rocke.helpers import (  # noqa: E402
     make_conv_manifest,
     write_artifact,
 )
-from rocke.instances.common.conv_implicit_gemm import (  # noqa: E402
+from kernels.common.conv_implicit_gemm import (  # noqa: E402
     ConvProblem,
     ImplicitGemmConvSpec,
     build_implicit_gemm_conv,

@@ -3,7 +3,7 @@
 
 """gfx950 (CDNA, wave64, MFMA) deep-fused conv + maxpool — thin arch shim.
 
-The kernel body now lives in :mod:`rocke.instances.common.deep_fused_conv_pool`,
+The kernel body now lives in :mod:`kernels.common.deep_fused_conv_pool`,
 authored once and driven by the resolved :class:`~rocke.core.arch.MmaOp` so the
 same code emits both the MFMA (gfx950) and WMMA (gfx1201) paths. This module only
 pins the gfx950 geometry (wave64, 32x32x16 MFMA atom) and re-exports the common
