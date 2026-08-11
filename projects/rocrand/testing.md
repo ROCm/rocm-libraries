@@ -108,7 +108,7 @@ Because engines and distributions are decoupled, `test/internal/` includes libra
 | --- | --- | --- | --- |
 | Build (Linux, Windows) | Yes | TheRock / Math CI | Multi-OS, multi-arch build matrix (gfx94X, gfx950, gfx11xx incl. gfx1151) |
 | Unit tests | Yes | Component team /TheRock /Math CI | |
-| Formatting | Yes | CI | Ran with pre-comit |
+| Formatting | Yes | CI | Ran with pre-commit |
 | Code coverage | No | Component team / codecov | Informational (Codecov); no enforced threshold |
 
 ### PR Test Classification
@@ -120,7 +120,7 @@ Because engines and distributions are decoupled, `test/internal/` includes libra
 
 
 ## Coverage
-* **Tooling:** `CODE_COVERAGE=ON` (clang only) compiles with `-fprofile-instr-generate -fcoverage-mapping` and defines `CODE_COVERAGE_ENABLED`. Codecov is wired up (`codecov.yml`), reporting range `50...75`. No `gcovr`/`lcov` report target is wired into the repo today.
+* **Tooling:** `CODE_COVERAGE=ON` (clang only) compiles with `-fprofile-instr-generate -fcoverage-mapping` and defines `CODE_COVERAGE_ENABLED`. No `gcovr`/`lcov` report target is wired into the repo today.
 * **Target:** long-term > 95% (phased, aspirational); near-term ≥ 80% of hardware-independent paths where practical.
 * **Scope / excluded paths:** Codecov ignores `benchmark/`, `build/`, `cmake/`, `docs/`, `hipRAND/`, `python/`, `scripts/`, `test/`, `tools/`. Coverage is measured on Linux/clang; Windows coverage is not tracked separately.
 
@@ -140,7 +140,7 @@ Because engines and distributions are decoupled, `test/internal/` includes libra
 
 ### Nightly Validation
 * **standard** category (`ctest -L standard`) — full GoogleTest run (timeout budget up to 4 hours).
-* **ffm-quick / ffm-full** categories (`ctest -L ffm-quick`) — FFM-focused runs (timeout budget up to 2 hours).
+* **ffm-quick / ffm-full** categories (`ctest -L ffm-quick`) — Full-Feature-Matrix focused runs (timeout budget up to 2 hours).
 * Slow/niche tests enabled via `RUN_SLOW_TESTS=1`.
 * Additional hardware coverage: gfx94X, gfx950, and gfx11xx (specifically gfx1151).
 * cuRAND parity and Fortran-wrapper suites run here rather than on PRs.

@@ -56,7 +56,7 @@ The sequence a developer follows from writing code to getting it merged:
 ### Coverage expectation
 * Long-term goal across ROCm components is **> 95%** unit-test line coverage; this is **not mandated initially** and will be pursued in phases.
 * Realistic near-term target for rocThrust: **≥ 80% of hardware-independent paths where practical.**
-* **Current state:** CI reports roughly **91.6%** line coverage because coverage.
+* **Current state:** CI reports roughly **91.6%** line coverage.
 
 ## Integration Testing Strategy
 **Purpose:** validate behavior that requires a GPU, the rocPRIM backend, the HIP runtime, or cross-configuration interaction — i.e. essentially all algorithm behavior, since rocThrust dispatches kernels.
@@ -113,7 +113,7 @@ rocThrust performance testing is getting reworked to use `Primbench` instead of 
 | --- | --- | --- | --- |
 | Build (Linux, Windows) | Yes | TheRock / Math CI | Multi-OS, multi-arch build matrix (gfx94X, gfx950, gfx11xx incl. gfx1151) |
 | Unit tests | Yes | Component team /TheRock /Math CI | |
-| Formatting | Yes | CI | Ran with pre-comit |
+| Formatting | Yes | CI | Ran with pre-commit |
 | Code coverage | No | Component team / codecov | Informational (Codecov); no enforced threshold |
 
 ### PR Test Classification
