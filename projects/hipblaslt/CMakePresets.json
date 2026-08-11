@@ -17,7 +17,7 @@
     {
       "name": "tensilelite",
       "displayName": "TensileLite",
-      "description": "Configures just device-library generation",
+      "description": "Configures just tensilelite host and client",
       "inherits": "default:release",
       "cacheVariables": {
         "HIPBLASLT_BUILD_TESTING": "OFF",
@@ -62,7 +62,7 @@
     {
       "name": "gemm-libs",
       "displayName": "Build gemm libraries",
-      "description": "Configures just tensilelite host and client",
+      "description": "Configures just device-library generation",
       "inherits": "default:release",
       "cacheVariables": {
         "HIPBLASLT_ENABLE_HOST": "OFF",

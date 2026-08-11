@@ -140,8 +140,8 @@ uv run invoke precommit-install
 Device generation builds the canonical controlled-artifact wheel, installs it
 into the single CMake-selected Python with `--force-reinstall --no-deps`, and
 uses only the in-tree raw rocisa package through a command-scoped `PYTHONPATH`.
-Every generator command refreshes the keyed binding to its exact built client.
-Do not run two configurations concurrently against one Python environment.
+It does not resolve or bind `tensilelite-client`. Do not run two configurations
+concurrently against one Python environment.
 
 Device-generation builds require Python 3.10 and Python development headers;
 stable-ABI rocisa builds require Python 3.12. A true host-only build does not
