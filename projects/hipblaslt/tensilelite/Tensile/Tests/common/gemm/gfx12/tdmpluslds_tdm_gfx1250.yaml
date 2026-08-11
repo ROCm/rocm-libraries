@@ -44,6 +44,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
+          - [16, 16, 32, 1,  1,  2, 2,  1, 1]
           - [16, 16, 32, 1,  1,  2, 2,  2, 2]
           - [16, 16, 32, 1,  1,  4, 4,  2, 2]
         - DepthU: [64,128,256]
