@@ -55,14 +55,12 @@ endif()
 
 add_executable(rocroller-codegen-stress "${CMAKE_CURRENT_SOURCE_DIR}/src/codegen_stress_test.cpp")
 target_link_libraries(rocroller-codegen-stress
-    PUBLIC
+    PRIVATE
         roc::rocroller-interface
-        rocroller::common-test-utilities
         CLI11::CLI11
-        ${BLAS_LIBRARIES}
 )
 if(ROCROLLER_BUILD_SHARED_LIBS) # why are we using this logic
-    target_link_libraries(rocroller-codegen-stress PUBLIC ${llvm_yaml_libs})
+    target_link_libraries(rocroller-codegen-stress PRIVATE ${llvm_yaml_libs})
 endif()
 
 if(ROCROLLER_ENABLE_ASAN)
