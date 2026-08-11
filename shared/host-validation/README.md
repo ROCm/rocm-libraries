@@ -360,6 +360,14 @@ the numerical request.
 - canonical execution, pluggable object-oriented backend implementations,
   backend support queries, and fallback reporting.
 
+Int32 GEMM arithmetic never uses floating-point values as an accumulator
+proxy. Products, partial sums, alpha/beta combination, integer scales and
+integer epilogue arithmetic use explicitly defined two's-complement wrapping
+modulo `2^32`. Integer scalar parameters must be finite, integral and within
+the Int32 range before entering the operation. Python oracle tests use Python
+integers plus explicit wrapping rather than relying on NumPy's implicit
+integer-matmul accumulation behavior.
+
 Consumers construct this runtime API without passing product-specific types.
 The former typed reference GEMM and its function-pointer quantization bridge
 have been removed.

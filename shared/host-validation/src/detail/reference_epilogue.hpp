@@ -77,6 +77,23 @@ inline void validateEpilogue(const EpilogueProblem& problem) {
     if (scalarTypeInfo(problem.input.type()).category == ScalarCategory::Complex ||
         scalarTypeInfo(problem.output.type()).category == ScalarCategory::Complex)
         throw std::invalid_argument("Reference epilogue does not support complex tensors.");
+    if (problem.computeType == ScalarType::Int32) {
+        switch (problem.activation) {
+            case Activation::None:
+            case Activation::Absolute:
+            case Activation::ClippedRelu:
+            case Activation::Relu:
+            case Activation::LeakyRelu:
+            case Activation::ReluDerivative:
+            case Activation::Clamp:
+                break;
+            default:
+                throw std::invalid_argument(
+                    "Int32 reference epilogue does not support floating-point activation.");
+        }
+        if (problem.amax)
+            throw std::invalid_argument("Int32 reference epilogue does not support AMax.");
+    }
 
     auto validateMatrix = [&](const auto& view, const char* name) {
         requireRank(view.shape(), 2, "Reference epilogue", name);
@@ -120,8 +137,10 @@ EpilogueRunInfo referenceEpilogueTyped(const EpilogueProblem& problem) {
     const Accumulator outputScale = runtimeScalar<Accumulator>(problem.outputScale, "output scale");
     const Accumulator auxiliaryScale =
         runtimeScalar<Accumulator>(problem.auxiliaryScale, "auxiliary scale");
-    const Accumulator parameter0 = static_cast<Accumulator>(problem.activationParameter0);
-    const Accumulator parameter1 = static_cast<Accumulator>(problem.activationParameter1);
+    const Accumulator parameter0 =
+        runtimeScalar<Accumulator>({problem.activationParameter0, 0.0}, "activation parameter 0");
+    const Accumulator parameter1 =
+        runtimeScalar<Accumulator>({problem.activationParameter1, 0.0}, "activation parameter 1");
     Accumulator maximum = Accumulator(0);
     if (problem.amax && problem.accumulateAmax) maximum = problem.amax->loadAs<Accumulator>({0});
 
@@ -131,26 +150,27 @@ EpilogueRunInfo referenceEpilogueTyped(const EpilogueProblem& problem) {
         Accumulator value = input(row, column);
         if (bias) {
             const MatrixAxis axis = problem.bias->axis;
-            value += (*bias)[axis == MatrixAxis::Row ? row : column];
+            value = wrappingAdd(value, (*bias)[axis == MatrixAxis::Row ? row : column]);
         }
 
-        if (auxiliaryOutput) auxiliaryOutput->store(row, column, value * auxiliaryScale);
+        if (auxiliaryOutput)
+            auxiliaryOutput->store(row, column, wrappingMultiply(value, auxiliaryScale));
 
         if (problem.activationApplication == ActivationApplication::Gradient) {
             const Accumulator factor = activationGradientFactor(
                 problem.activation, (*auxiliaryInput)(row, column), parameter0, parameter1);
-            value *= factor;
+            value = wrappingMultiply(value, factor);
         } else {
             value = applyActivation(problem.activation, value, parameter0, parameter1);
         }
 
         if (problem.amax) maximum = std::max(maximum, static_cast<Accumulator>(std::abs(value)));
 
-        value *= outputScale;
+        value = wrappingMultiply(value, outputScale);
         if (rawOutput) rawOutput->store(row, column, value);
         if (gateResidual) {
             const Accumulator gate = (*gateResidual)(row, column);
-            value = gate * value + gate;
+            value = wrappingAdd(wrappingMultiply(gate, value), gate);
         }
         output.store(row, column, value);
     };
