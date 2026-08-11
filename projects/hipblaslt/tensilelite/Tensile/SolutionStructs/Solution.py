@@ -5275,12 +5275,12 @@ class Solution(collections.abc.Mapping):
         # so reserve the real per-buffer span (max() never shrinks the baseline).
         ldsNumBytesAB = max(ldsNumBytesAB, (numLdsBlk - 1) * offsetBlk + _segRes["blockSpan"])
       # decrement numLdsBlk for DtlPlusLdsBuf if it exceeds MaxLDS
-      # PGR 2 case, fall back to 2 LDS buffers (need to use StoreSwapAddr in that case)
+      # PGR 2 case, reject kernel (need to use StoreSwapAddr in that case)
       if state["DtlPlusLdsBuf"] and ldsNumBytesAB > state["MaxLDS"]:
         numLdsBlk -= 1
         # continue with original logic for PGR2 + numLdsBlk==2
         if state["PrefetchGlobalRead"] == 2:
-          if (offsetBlk + roundupOffsetBlk) > state["MaxLDS"]:
+          if  (offsetBlk + roundupOffsetBlk) > state["MaxLDS"]:
             state["StoreSwapAddr"] = True
           else:
             offsetBlk = roundupOffsetBlk

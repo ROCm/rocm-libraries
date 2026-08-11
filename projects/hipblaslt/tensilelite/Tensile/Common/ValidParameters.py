@@ -365,13 +365,13 @@ validParameters = { # we need to make sure this matches develop
     # -1: auto (enable this for PGR>=3)
     #  0: disable
     #  1: enable (force to 0 if not applicable)
-    # IF LDS size exceeds maxLDS, disable (set 0) and continue with one less LDS
-    # buffer; PGR==2 additionally falls back to StoreSwapAddr or a power-of-two block.
-    # 1LDSBuffer will be 0 if DtlPlusLdsBuf is enabled
+    # IF LDS size exceeds maxLDS,
+    #   PGR>=3: disable (set 0) and continue
+    #   PGR==2: reject (use -1 or 0 in that case)
+    # 1LDSBuffer will be 0 if DtlPlusLdsBuf if enabled
     "DtlPlusLdsBuf": [-1,0,1],
     # Force allocating PGR+1 (i.e. 3) LDS buffers when PrefetchGlobalRead==2,
-    # if we have enough LDS memory size. Same idea as DtlPlusLdsBuf but it does
-    # NOT require DirectToLdsA+B; it targets the TDM (datamover) PGR2 path
+    # if we have enough LDS memory size. It targets the TDM (datamover) PGR2 path
     # (e.g. gfx1250). The extra LDS block lets the next-iteration global reads be
     # scheduled over the barrier without colliding with the buffer currently
     # being read.
@@ -381,12 +381,6 @@ validParameters = { # we need to make sure this matches develop
     #     fit is rejected by the usual LDS size check)
     # Silently downgraded to 0 without TDM on both A and B, for
     # PrefetchGlobalRead!=2, and for StreamK.
-    # TDMSplit, HalfPLR and wider local reads are all supported: TDMSplit's two
-    # half-loads get their own memory tokens per LDS buffer so the auto-barrier pass
-    # keeps them apart, the HalfPLR tail fixup advances the local reads onto the TDM
-    # write buffer (which rotates correctly for any number of buffers), and the
-    # wider-local-read tail re-snapshots LocalReadAddrOrig after the read addresses
-    # are recomputed, since with 3+ buffers Orig is the base the tail reset restores.
     # 1LDSBuffer never competes with this: TDM already resolves 1LDSBuffer==-1 to 0
     # and rejects 1LDSBuffer==1 with PGR2.
     "TDMPlusLdsBuf": [-1,0,1],

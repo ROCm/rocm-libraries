@@ -19962,6 +19962,10 @@ class KernelWriterAssembly(KernelWriter):
     return mod
 
   def tdmResetTailLdsBuffer(self, kernel: Mapping, ldsAddrSgprName: str) -> Module:
+    # LdsOffsetA_Blk is a byte offset, not necessarily a power of two, so buffer 1
+    # has to be detected by comparison and removed by subtraction. Using it as an
+    # AND mask aliases every descriptor base that shares bits with it (B and the MX
+    # scales do), which moves the tail writes into a different tensor's LDS region.
     mod = Module("TDM reset tail LDS buffer")
     blkOffset: int = kernel["LdsOffsetA_Blk"]
     if blkOffset == 0:
