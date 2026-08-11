@@ -69,12 +69,11 @@ namespace
         options.maxReportedMismatches      = 0;
         options.selection.indexOrder       = ComparisonIndexOrder::FirstDimensionFastest;
 
-        const ComparisonResult report = compare(std::span<const T>(hGPU, storageElements),
-                                                layout,
-                                                std::span<const T>(hCPU, storageElements),
-                                                layout,
-                                                options);
-        maxUlp                        = std::max(maxUlp, report.maximumUlp);
+        const ComparisonResult report
+            = compare(TypedTensorView<T>(layout, std::span<const T>(hGPU, storageElements)),
+                      TypedTensorView<T>(layout, std::span<const T>(hCPU, storageElements)),
+                      options);
+        maxUlp = std::max(maxUlp, report.maximumUlp);
         sumUlp += report.sumUlp;
         count += report.ulpCompared;
     }

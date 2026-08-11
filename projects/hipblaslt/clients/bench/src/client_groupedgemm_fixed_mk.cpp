@@ -39,6 +39,7 @@
 #include <roc/host_validation/adapters/hipblaslt/GroupedGemmDataInitialization.hpp>
 #include <roc/host_validation/adapters/hipblaslt/Types.hpp>
 #include <roc/host_validation/validation.hpp>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -939,17 +940,22 @@ int test_hipblaslt(hipDataType                 in_datatype,
                     }
                     referenceGemm(problem);
 
+                    ComparisonOptions comparisonOptions{
+                        .symmetricRelativeTolerance = std::nextafter(0.001, 0.0),
+                        .maxReportedMismatches      = 10};
+                    comparisonOptions.selection.indexOrder
+                        = ComparisonIndexOrder::FirstDimensionFastest;
+                    const Layout comparisonLayout(
+                        Shape{size_t(m[i]), size_t(n[i])}, {1, ldd[i]});
                     const auto comparison = roc::host_validation::compare(
-                        roc::host_validation::ConstMatrixView<Tout>(
-                            hd[i].data() + i3 * stride_d[i],
-                            size_t(m[i]),
-                            size_t(n[i]),
-                            1,
-                            ldd[i]),
-                        roc::host_validation::ConstMatrixView<Tout>(
-                            d_ptr + i3 * stride_d[i], size_t(m[i]), size_t(n[i]), 1, ldd[i]),
-                        {.symmetricRelativeTolerance = std::nextafter(0.001, 0.0),
-                         .maxReportedMismatches      = 10});
+                        TypedTensorView<Tout>(
+                            comparisonLayout,
+                            std::span<const Tout>(
+                                hd[i].data() + i3 * stride_d[i], dElements)),
+                        TypedTensorView<Tout>(
+                            comparisonLayout,
+                            std::span<const Tout>(d_ptr + i3 * stride_d[i], dElements)),
+                        comparisonOptions);
                     passed = passed && comparison.passed();
                     for(const auto& mismatch : comparison.reportedMismatches)
                     {

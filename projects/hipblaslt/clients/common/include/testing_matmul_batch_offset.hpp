@@ -41,6 +41,7 @@
 #include <hipblaslt/hipblaslt.h>
 #include <roc/host_validation/adapters/hipblaslt/Types.hpp>
 #include <roc/host_validation/validation.hpp>
+#include <span>
 
 /* ============================================================================================ */
 /*! \brief  Test for 64-bit batch offset support in general batched GEMM                        */
@@ -405,13 +406,20 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
             To* result_gpu = h_D_full.data() + b * size_D_full + padding_d + offset_d;
             To* result_cpu = h_D_gold.data() + b * size_D_sub;
 
+            const roc::host_validation::Layout comparisonLayout(
+                roc::host_validation::Shape{size_t(M), size_t(N)},
+                {1, static_cast<ptrdiff_t>(ldd)});
+            roc::host_validation::ComparisonOptions comparisonOptions{
+                .absoluteTolerance     = std::nextafter(tol, 0.0),
+                .maxReportedMismatches = 0};
+            comparisonOptions.selection.indexOrder
+                = roc::host_validation::ComparisonIndexOrder::FirstDimensionFastest;
             const auto comparison = roc::host_validation::compare(
-                roc::host_validation::ConstMatrixView<To>(
-                    result_gpu, size_t(M), size_t(N), 1, static_cast<ptrdiff_t>(ldd)),
-                roc::host_validation::ConstMatrixView<To>(
-                    result_cpu, size_t(M), size_t(N), 1, static_cast<ptrdiff_t>(ldd)),
-                {.absoluteTolerance = std::nextafter(tol, 0.0),
-                 .maxReportedMismatches = 0});
+                roc::host_validation::TypedTensorView<To>(
+                    comparisonLayout, std::span<const To>(result_gpu, size_D_sub)),
+                roc::host_validation::TypedTensorView<To>(
+                    comparisonLayout, std::span<const To>(result_cpu, size_D_sub)),
+                comparisonOptions);
             max_error = std::max(max_error, comparison.maxAbsoluteDifference);
             all_close = all_close && comparison.passed();
         }

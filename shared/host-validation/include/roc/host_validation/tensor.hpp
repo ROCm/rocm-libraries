@@ -918,6 +918,46 @@ inline size_t storageBytesForLayout(ScalarType type, const Layout& layout) {
 
 class Tensor;
 
+template <typename T>
+class TypedTensorView {
+   public:
+    static_assert(!std::is_const_v<T>, "TypedTensorView element type must not be const-qualified.");
+
+    explicit TypedTensorView(std::span<const T> storage)
+        : TypedTensorView(Layout::contiguous(Shape{storage.size()}), storage) {}
+
+    TypedTensorView(Layout layout, std::span<const T> storage)
+        : m_layout(std::move(layout)), m_storage(storage) {
+        const auto [lower, upper] = detail::elementBounds(m_layout);
+        if (lower < 0 || (upper >= 0 && static_cast<size_t>(upper) >= m_storage.size()))
+            throw std::invalid_argument("TypedTensorView storage is too small for its layout.");
+    }
+
+    const Shape& shape() const {
+        return m_layout.shape();
+    }
+
+    const Layout& layout() const {
+        return m_layout;
+    }
+
+    std::span<const T> storage() const {
+        return m_storage;
+    }
+
+    const T& at(std::span<const size_t> indices) const {
+        return m_storage[static_cast<size_t>(m_layout.elementOffset(indices))];
+    }
+
+    const T& at(std::initializer_list<size_t> indices) const {
+        return at(std::span<const size_t>(indices.begin(), indices.size()));
+    }
+
+   private:
+    Layout m_layout;
+    std::span<const T> m_storage;
+};
+
 class TensorView {
    public:
     TensorView(ScalarType type, Layout layout, std::span<const std::byte> storage)
@@ -929,6 +969,11 @@ class TensorView {
     template <typename T>
     static TensorView fromNative(Layout layout, std::span<const T> values) {
         return TensorView(nativeScalarType<T>, std::move(layout), std::as_bytes(values));
+    }
+
+    template <typename T>
+    static TensorView fromNative(std::span<const T> values) {
+        return fromNative(Layout::contiguous(Shape{values.size()}), values);
     }
 
     ScalarType type() const {

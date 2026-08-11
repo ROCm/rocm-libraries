@@ -6,7 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <roc/host_validation/generation_primitives.hpp>
-#include <roc/host_validation/matrix_view.hpp>
+#include <roc/host_validation/tensor.hpp>
 #include <span>
 #include <type_traits>
 #include <vector>
@@ -80,14 +80,6 @@ struct GenerationOptions {
 struct GenerationRunInfo {
     size_t elementsGenerated = 0;
 };
-
-template <typename T, typename Generator>
-void generate(MatrixView<T> destination, Generator&& generator) {
-    for (size_t column = 0; column < destination.columns(); ++column) {
-        for (size_t row = 0; row < destination.rows(); ++row)
-            destination(row, column) = static_cast<T>(generator(row, column));
-    }
-}
 
 template <typename Generator>
     requires(std::is_invocable_v<Generator&, std::span<const size_t>, size_t> ||

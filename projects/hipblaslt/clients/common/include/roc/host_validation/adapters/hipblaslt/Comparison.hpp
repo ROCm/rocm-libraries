@@ -56,11 +56,12 @@ namespace roc::host_validation::hipblaslt_adapter
                       "Typed hipBLASLt comparison requires native scalar storage.");
         const size_t storageElements = storageBytesForLayout(scalar, layout) / sizeof(T);
         options.selection.indexOrder = ComparisonIndexOrder::FirstDimensionFastest;
-        return compare(std::span<const T>(static_cast<const T*>(observed), storageElements),
-                       layout,
-                       std::span<const T>(static_cast<const T*>(expected), storageElements),
-                       layout,
-                       options);
+        return compare(
+            TypedTensorView<T>(
+                layout, std::span<const T>(static_cast<const T*>(observed), storageElements)),
+            TypedTensorView<T>(
+                layout, std::span<const T>(static_cast<const T*>(expected), storageElements)),
+            options);
     }
 
     inline ComparisonResult compareBuffers(int64_t           rows,

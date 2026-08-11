@@ -14,6 +14,14 @@ void require(bool condition, const char* message) {
     if (!condition) throw std::runtime_error(message);
 }
 
+struct CallerDefinedFloat {
+    float value;
+
+    operator float() const {
+        return value;
+    }
+};
+
 void testRuntimeReferenceGemm() {
     using namespace roc::host_validation;
 
@@ -61,7 +69,9 @@ void testRuntimeReferenceGemm() {
         64 * 2 * 7 + 1 + 1,
         0,
     };
-    require(compare(std::span<const float>(d), std::span<const float>(expected)).passed(),
+    require(compare(TensorView::fromNative(std::span<const float>(d)),
+                    TensorView::fromNative(std::span<const float>(expected)))
+                .passed(),
             "Runtime reference GEMM result mismatch.");
 
     execution.backend = GemmBackend::Tiled;
@@ -800,16 +810,17 @@ void testGenerationAndComparison() {
         std::numeric_limits<double>::infinity(),
         std::numeric_limits<double>::infinity(),
     };
-    const auto nonFiniteResult =
-        compare(std::span<const double>(nonFiniteA), std::span<const double>(nonFiniteB),
-                {.relativeTolerance = 1.0});
+    const auto nonFiniteResult = compare(
+        TensorView::fromNative(std::span<const double>(nonFiniteA)),
+        TensorView::fromNative(std::span<const double>(nonFiniteB)), {.relativeTolerance = 1.0});
     require(nonFiniteResult.mismatches == 1,
             "Comparison did not distinguish finite and infinite values.");
 
     std::array<int, 8> generated;
     generated.fill(-1);
-    generate(MatrixView<int>(generated.data() + 1, 2, 2, 1, 3),
-             [](size_t row, size_t column) { return 10 * column + row; });
+    generate(MutableTensorView::fromNative<int>(
+                 Layout(Shape{2, 2}, std::vector<ptrdiff_t>{1, 3}, 1), std::span<int>(generated)),
+             [](std::span<const size_t> indices) { return 10 * indices[1] + indices[0]; });
     require(generated[1] == 0 && generated[2] == 1 && generated[4] == 10 && generated[5] == 11,
             "Matrix generation produced incorrect logical values.");
     require(generated[0] == -1 && generated[3] == -1 && generated[7] == -1,
@@ -844,14 +855,26 @@ void testComparisonProgram() {
     ComparisonOptions selected;
     selected.selection.indexOrder = ComparisonIndexOrder::FirstDimensionFastest;
     selected.selection.stride = 2;
-    const auto selectedResult = compare(std::span<const float>(observedStorage), layout,
-                                        std::span<const float>(expectedStorage), layout, selected);
+    const auto selectedResult =
+        compare(TensorView::fromNative(layout, std::span<const float>(observedStorage)),
+                TensorView::fromNative(layout, std::span<const float>(expectedStorage)), selected);
     require(selectedResult.compared == 3 && selectedResult.mismatches == 1,
             "Selected comparison visited the wrong logical elements.");
     require(selectedResult.reportedMismatches[0].index == 4 &&
                 selectedResult.reportedMismatches[0].coordinates == std::vector<size_t>({0, 2}) &&
                 selectedResult.reportedMismatches[0].observedOffset == 6,
             "Selected comparison reported the wrong logical location.");
+
+    const std::array<CallerDefinedFloat, 3> customObserved{
+        CallerDefinedFloat{1.0f}, CallerDefinedFloat{2.0f}, CallerDefinedFloat{3.0f}};
+    const std::array<CallerDefinedFloat, 3> customExpected{
+        CallerDefinedFloat{1.0f}, CallerDefinedFloat{2.0f}, CallerDefinedFloat{3.0f}};
+    require(compare(TypedTensorView<CallerDefinedFloat>(
+                        std::span<const CallerDefinedFloat>(customObserved)),
+                    TypedTensorView<CallerDefinedFloat>(
+                        std::span<const CallerDefinedFloat>(customExpected)))
+                .passed(),
+            "Typed tensor comparison rejected a caller-defined scalar type.");
 
     const std::array<double, 3> expected{3.0, 4.0, 0.0};
     const std::array<double, 3> observed{0.0, 4.0, 3.0};
@@ -861,7 +884,8 @@ void testComparisonProgram() {
     metrics.computeUlp = true;
     metrics.ulpType = ScalarType::Float64;
     const auto metricResult =
-        compare(std::span<const double>(observed), std::span<const double>(expected), metrics);
+        compare(TensorView::fromNative(std::span<const double>(observed)),
+                TensorView::fromNative(std::span<const double>(expected)), metrics);
     require(std::abs(metricResult.frobeniusExpected - 5.0) < 1e-12 &&
                 std::abs(metricResult.frobeniusObserved - 5.0) < 1e-12 &&
                 std::abs(metricResult.frobeniusDifference - std::sqrt(18.0)) < 1e-12 &&
@@ -877,7 +901,8 @@ void testComparisonProgram() {
     ulp.ulpType = ScalarType::Float64;
     ulp.maximumUlpTolerance = 1.0;
     const auto ulpResult =
-        compare(std::span<const double>(ulpObserved), std::span<const double>(ulpExpected), ulp);
+        compare(TensorView::fromNative(std::span<const double>(ulpObserved)),
+                TensorView::fromNative(std::span<const double>(ulpExpected)), ulp);
     require(ulpResult.maximumUlp == 1.0 && ulpResult.averageUlp == 1.0 && ulpResult.ulpPassed,
             "Comparison ULP evidence is incorrect.");
     require(encodedUlpDistance(0.0, static_cast<double>(std::numeric_limits<float>::denorm_min()),
@@ -892,9 +917,9 @@ void testComparisonProgram() {
     const auto complexObserved = complexExpected;
     ComparisonOptions nonFinite;
     nonFinite.equalNaNs = true;
-    const auto nonFiniteResult =
-        compare(std::span<const std::complex<double>>(complexObserved),
-                std::span<const std::complex<double>>(complexExpected), nonFinite);
+    const auto nonFiniteResult = compare(
+        TensorView::fromNative(std::span<const std::complex<double>>(complexObserved)),
+        TensorView::fromNative(std::span<const std::complex<double>>(complexExpected)), nonFinite);
     require(nonFiniteResult.passed() && nonFiniteResult.matchedInfinities == 1 &&
                 nonFiniteResult.matchedNaNs == 1,
             "Complex non-finite comparison policy is incorrect.");
@@ -904,8 +929,8 @@ void testComparisonProgram() {
     const std::array<double, 1> closeObserved{1.00009};
     const std::array<double, 1> closeExpected{1.0};
     const auto tolerance = findAllCloseTolerance(
-        std::span<const double>(closeObserved), Layout::contiguous(Shape{1}),
-        std::span<const double>(closeExpected), Layout::contiguous(Shape{1}),
+        TensorView::fromNative(std::span<const double>(closeObserved)),
+        TensorView::fromNative(std::span<const double>(closeExpected)),
         std::span<const double>(absoluteCandidates), std::span<const double>(relativeCandidates));
     require(tolerance && tolerance->absolute == 1e-4 && tolerance->relative == 0.0,
             "Allclose tolerance search selected the wrong candidate.");
