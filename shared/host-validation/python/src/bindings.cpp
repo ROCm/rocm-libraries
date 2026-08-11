@@ -761,7 +761,8 @@ NB_MODULE(_roc_host_validation, module) {
         .value("Int4", ScalarType::Int4)
         .value("Int12", ScalarType::Int12)
         .value("E8M0", ScalarType::E8M0)
-        .value("E5M3", ScalarType::E5M3);
+        .value("E5M3", ScalarType::E5M3)
+        .value("E4M3", ScalarType::E4M3);
 
     nb::enum_<MathMode>(module, "MathMode")
         .value("Default", MathMode::Default)

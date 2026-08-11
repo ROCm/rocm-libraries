@@ -123,6 +123,8 @@ inline double encodedUlpDistance(double exact, double approximation, ScalarType 
         case ScalarType::Float6E2M3:
         case ScalarType::Float6E3M2:
         case ScalarType::Float4E2M1:
+        case ScalarType::E5M3:
+        case ScalarType::E4M3:
             exactEncoding =
                 orderedFloatingEncoding(encodeBinaryFloat(type, static_cast<float>(exact)),
                                         scalarTypeInfo(type).storageBits);
@@ -525,7 +527,7 @@ ComparisonValue loadComparisonValueKnown(std::span<const std::byte> storage,
         return {value.real(), value.imag(), true};
     } else if constexpr (type == ScalarType::Float8E4M3 || type == ScalarType::Float8E5M2 ||
                          type == ScalarType::Float8E4M3Fnuz || type == ScalarType::Float8E5M2Fnuz ||
-                         type == ScalarType::E5M3)
+                         type == ScalarType::E5M3 || type == ScalarType::E4M3)
         return {
             static_cast<double>(
                 decodeBinaryFloat(type, readNativeUnchecked.template operator()<uint8_t>())),

@@ -57,6 +57,7 @@ enum class ScalarType : uint16_t {
     Int12,
     E8M0,
     E5M3,
+    E4M3,
     Count,
 };
 
@@ -103,6 +104,7 @@ inline constexpr std::array<ScalarTypeInfo, static_cast<size_t>(ScalarType::Coun
         {"i12", ScalarCategory::SignedInteger, 12, 0, 0, 0, false, false},
         {"e8m0", ScalarCategory::Scale, 8, 8, 0, 127, true, false},
         {"e5m3", ScalarCategory::Scale, 8, 5, 3, 15, true, false},
+        {"e4m3", ScalarCategory::Scale, 8, 4, 3, 7, true, false},
     }};
 
 inline constexpr const ScalarTypeInfo& scalarTypeInfo(ScalarType type) {
@@ -204,6 +206,7 @@ using Int4Tag = ScalarTag<ScalarType::Int4, void>;
 using Int12Tag = ScalarTag<ScalarType::Int12, void>;
 using E8M0Tag = ScalarTag<ScalarType::E8M0, uint8_t>;
 using E5M3Tag = ScalarTag<ScalarType::E5M3, uint8_t>;
+using E4M3Tag = ScalarTag<ScalarType::E4M3, uint8_t>;
 }  // namespace detail
 
 template <typename Visitor, typename... Args>
@@ -286,6 +289,9 @@ decltype(auto) visitScalarType(ScalarType type, Visitor&& visitor, Args&&... arg
                 std::forward<Args>(args)...);
         case ScalarType::E5M3:
             return std::forward<Visitor>(visitor).template operator()<detail::E5M3Tag>(
+                std::forward<Args>(args)...);
+        case ScalarType::E4M3:
+            return std::forward<Visitor>(visitor).template operator()<detail::E4M3Tag>(
                 std::forward<Args>(args)...);
         case ScalarType::Count:
             break;
@@ -613,6 +619,8 @@ inline BinaryFloatFormat binaryFloatFormat(ScalarType type) {
             return {5, 2, 16, 8, true, false, false, 0x7f, 0, 0x80};
         case ScalarType::E5M3:
             return {5, 3, 15, 8, false, false, false, 0xfe, 0, 0xff};
+        case ScalarType::E4M3:
+            return {4, 3, 7, 7, false, false, false, 0x7e, 0, 0x7f};
         default:
             throw std::invalid_argument(
                 "ScalarType is not a supported binary floating-point format.");
@@ -630,6 +638,8 @@ inline bool isBinaryFloatNaN(ScalarType type, uint32_t raw) {
             return raw == 0x80U;
         case ScalarType::E5M3:
             return raw == 0xffU;
+        case ScalarType::E4M3:
+            return (raw & 0x7fU) == 0x7fU;
         default:
             return false;
     }
@@ -662,7 +672,9 @@ inline float decodeBinaryFloat(ScalarType type, uint32_t raw) {
         return negative ? -std::numeric_limits<float>::infinity()
                         : std::numeric_limits<float>::infinity();
 
-    const uint32_t magnitude = format.hasSign ? raw & (signMask - 1U) : raw;
+    const uint32_t payloadMask = (1U << format.totalBits) - 1U;
+    const uint32_t magnitude =
+        format.hasSign ? raw & (signMask - 1U) : raw & payloadMask;
     const float value = decodeFiniteBinaryFloatMagnitude(magnitude, format);
     return negative ? -value : value;
 }
@@ -820,7 +832,8 @@ Target decodeScalarKnown(std::span<const std::byte> storage, ptrdiff_t logicalOf
     else if constexpr (Type == ScalarType::Float4E2M1 || Type == ScalarType::Float6E2M3 ||
                        Type == ScalarType::Float6E3M2 || Type == ScalarType::Float8E4M3 ||
                        Type == ScalarType::Float8E5M2 || Type == ScalarType::Float8E4M3Fnuz ||
-                       Type == ScalarType::Float8E5M2Fnuz || Type == ScalarType::E5M3)
+                       Type == ScalarType::Float8E5M2Fnuz || Type == ScalarType::E5M3 ||
+                       Type == ScalarType::E4M3)
         return static_cast<Target>(decodeBinaryFloat(
             Type, readPackedBits(storage, offsetBits, scalarTypeInfo(Type).storageBits)));
     else if constexpr (Type == ScalarType::E8M0)
@@ -896,7 +909,8 @@ void encodeScalarKnown(std::span<std::byte> storage, ptrdiff_t logicalOffset, So
     } else if constexpr (Type == ScalarType::Float4E2M1 || Type == ScalarType::Float6E2M3 ||
                          Type == ScalarType::Float6E3M2 || Type == ScalarType::Float8E4M3 ||
                          Type == ScalarType::Float8E5M2 || Type == ScalarType::Float8E4M3Fnuz ||
-                         Type == ScalarType::Float8E5M2Fnuz || Type == ScalarType::E5M3)
+                         Type == ScalarType::Float8E5M2Fnuz || Type == ScalarType::E5M3 ||
+                         Type == ScalarType::E4M3)
         writePackedBits(storage, offsetBits, scalarTypeInfo(Type).storageBits,
                         encodeBinaryFloat(Type, static_cast<float>(scalar)));
     else if constexpr (Type == ScalarType::E8M0)
