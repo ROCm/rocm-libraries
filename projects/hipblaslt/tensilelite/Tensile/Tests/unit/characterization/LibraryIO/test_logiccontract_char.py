@@ -386,12 +386,13 @@ def test_create_library_logic_roundtrip_dict(monkeypatch, snapshot):
 
 
 def test_create_library_logic_rangelogic(monkeypatch):
-    """A non-None rangeLogic (logicTuple[4]) is carried verbatim into data[8]."""
+    """A non-None rangeLogic (logicTuple[4]) is carried verbatim into
+    ``data["RangeLogic"]`` of the dict-format output."""
     monkeypatch.setattr(L, "getCUCount", lambda: 304)
     lt = _logic_tuple({(1, 1, 1): [0, 1.0]})
     lt[4] = [[[64, 64, 1], [0, 2.0]]]
     data = L.createLibraryLogic("aquavanjaram", "gfx90a", ["Device 0049"], "Matching", lt)
-    assert data[8] == [[[64, 64, 1], [0, 2.0]]]
+    assert data["RangeLogic"] == [[[64, 64, 1], [0, 2.0]]]
 
 
 def test_create_library_logic_len5_reaches_cucount(monkeypatch):
@@ -407,8 +408,9 @@ def test_create_library_logic_len5_reaches_cucount(monkeypatch):
 
 
 def test_create_library_logic_len6_processes_tile(monkeypatch):
-    """A length-6 logicTuple with a truthy index-5 enables tileSelection and
-    processes the tile solutions before the trailing positional reads raise."""
+    """A length-6 logicTuple with a truthy index-5 (tileSelection solutions)
+    processes those solutions before the trailing positional read of
+    logicTuple[7] raises IndexError."""
     monkeypatch.setattr(L, "getCUCount", lambda: 304)
     seen = []
 
@@ -423,15 +425,16 @@ def test_create_library_logic_len6_processes_tile(monkeypatch):
     assert seen == [1]
 
 
-def test_create_library_logic_guard_reads_index5(monkeypatch):
-    """The tileSelection guard reads logicTuple[5], not [6]: a truthy index-5
-    with a falsy index-6 still enables tileSelection."""
+def test_create_library_logic_tile_falsy_indices(monkeypatch):
+    """tileSelection is enabled whenever tileSelectionIndices (logicTuple[6]) is
+    not None -- even a falsy empty list -- and the index-5 tileSelection
+    solutions are appended to ``data["Solutions"]`` in the dict-format output."""
     monkeypatch.setattr(L, "getCUCount", lambda: 304)
     lt = _logic_tuple({(1, 1, 1): [0, 1.0]}, tile=True)
     lt[6] = []
     data = L.createLibraryLogic("aquavanjaram", "gfx90a", ["Device 0049"], "Matching", lt)
-    assert len(data[5]) == 2
-    assert data[9] == {"TileSelectionIndices": []}
+    assert len(data["Solutions"]) == 2
+    assert data["TileSelectionIndices"] == {"TileSelectionIndices": []}
 
 
 # ===========================================================================
