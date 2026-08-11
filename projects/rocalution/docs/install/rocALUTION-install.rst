@@ -23,9 +23,11 @@ rocALUTION is part of the ROCm HPC SDK on Linux. It is not included in the
 ROCm Core SDK, and it is not installed by the default ``amdrocm`` metapackage.
 For the most complete installation, install the ``amdrocm-hpc-sdk`` metapackage.
 
-For instructions, see :doc:`Install AMD ROCm <rocm:install/rocm>`. Use the
-selector panel on that page to view instructions appropriate for your system
-environment.
+For instructions on installing the ROCm HPC SDK, see
+:doc:`Install ROCm HPC SDK <rocm:components/hpc-sdk/install>`. For general
+ROCm installation, see :doc:`Install AMD ROCm <rocm:install/rocm>`. Use the
+selector panel on the ROCm install page to view instructions appropriate for
+your system environment.
 
 .. _install-rocalution-linux:
 

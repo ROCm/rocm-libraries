@@ -192,27 +192,15 @@ compiler during the CMake configuration process.
 
    You need CMake 3.5 or later to build rocALUTION.
 
-Set ``ROCM_PATH`` to your ROCm installation directory, where
-``path_to_local_ROCm_installation_directory`` is the absolute path to the ROCm
-installation directory. The location depends on your ROCm version:
-
-.. list-table::
-   :header-rows: 1
-   :widths: 40 60
-
-   * - ROCm version
-     - Installation path
-   * - 7.13 and later
-     - ``/opt/rocm/core-<version>``, for example ``/opt/rocm/core-7.14``
-   * - 7.2.x and earlier
-     - ``/opt/rocm``
+Set ``ROCM_PATH`` to your ROCm installation directory. The following example uses
+ROCm 7.14:
 
 You can build rocALUTION using the following commands:
 
 .. code-block:: shell
 
    # Set the ROCm installation path
-   export ROCM_PATH=path_to_local_ROCm_installation_directory
+   export ROCM_PATH=/opt/rocm/core-7.14
 
    # Create and change to build directory
    mkdir -p build/release
