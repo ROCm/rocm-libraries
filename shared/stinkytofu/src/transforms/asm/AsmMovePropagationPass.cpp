@@ -128,9 +128,7 @@ class AsmMovePropagationPassImpl : public Pass {
             while (true) {
                 auto it = moveMap.find(resolved);
                 if (it == moveMap.end()) break;
-                const StinkyRegister& next = it->second;
-                if (next == resolved) break;
-                resolved = next;
+                resolved = it->second;
             }
             return resolved;
         };
