@@ -280,7 +280,12 @@ the bulk of the performance gain (AITER reports 17× over non-absorbed naive MLA
 >
 > Compare ~16 flop/byte for GQA-8 decode: MLA's geometry *permits* an intensity ceiling
 > ~15× GQA's. Both balances are ≈1307 TFLOPS bf16 divided by the relevant bandwidth:
-> 5.3 TB/s HBM gives 247 flop/byte, ~17 TB/s MALL gives 77.
+> 5.3 TB/s HBM gives 247 flop/byte, 17 TB/s Infinity Cache gives 77. Both bandwidths are
+> AMD's published **theoretical peaks** for MI300X (192 GB HBM3 at 5.3 TB/s; 256 MB MALL
+> at 17 TB/s). Measured Infinity Cache throughput is below peak — the subsystem is high
+> latency (~218 ns) as well as high bandwidth — so 77 is an upper bound on the MALL
+> balance and the real knee, if MALL is the tier that binds, arrives at a lower
+> `BLOCK_H` than the table suggests.
 >
 > **Which balance applies is unmeasured, and it changes the conclusion.** §4's estimate
 > assumes the KV working set is MALL-resident, so the redundant reads head-batching
@@ -554,8 +559,11 @@ one-head-per-workgroup kernel, because the grid shape determines the spec. Its *
 > ≈16× on the flash loop; 2.6× end-to-end at `B = 1`, ~13× at `B = 32`.
 >
 > **What the model is.** Redundant-read bandwidth only:
-> `kv_len × 1152 B × (H_q / BLOCK_H) × B`, over ~17 TB/s on the assumption that the
-> 9.4 MB KV working set is MALL-resident but does not fit one XCD's 4 MB L2. The 16× is
+> `kv_len × 1152 B × (H_q / BLOCK_H) × B`, over 17 TB/s because the 9.4 MB KV working
+> set is MALL-resident but does not fit one XCD's L2. That follows from the CDNA3
+> hierarchy rather than being assumed: L2 is 4 MB **per XCD** and sits above a shared
+> 256 MB Infinity Cache, so head workgroups scattered across the 8 XCDs miss L2, hit
+> MALL, and do not re-read HBM. 17 TB/s is a theoretical peak (§2.4). The 16× is
 > therefore exactly `128 / 8`, the read-amplification ratio. **The M=1 MFMA lane waste
 > is not in these numbers**, nor is any latency, launch or occupancy term.
 >
