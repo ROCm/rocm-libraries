@@ -64,14 +64,14 @@ struct KernelDefinition
         auto it = metadata.find(field);
         if(it == metadata.end())
         {
-            throw std::out_of_range("kernel '" + kernelId + "' has no metadata field '" + field
-                                    + "'");
+            throw std::out_of_range("kernel '" + toString(kernelId) + "' has no metadata field '"
+                                    + field + "'");
         }
         const auto* value = std::get_if<int64_t>(&it->second);
         if(value == nullptr)
         {
-            throw std::invalid_argument("metadata field '" + field + "' of kernel '" + kernelId
-                                        + "' is not an integer");
+            throw std::invalid_argument("metadata field '" + field + "' of kernel '"
+                                        + toString(kernelId) + "' is not an integer");
         }
         return *value;
     }
@@ -82,14 +82,14 @@ struct KernelDefinition
         auto it = metadata.find(field);
         if(it == metadata.end())
         {
-            throw std::out_of_range("kernel '" + kernelId + "' has no metadata field '" + field
-                                    + "'");
+            throw std::out_of_range("kernel '" + toString(kernelId) + "' has no metadata field '"
+                                    + field + "'");
         }
         const auto* value = std::get_if<std::string>(&it->second);
         if(value == nullptr)
         {
-            throw std::invalid_argument("metadata field '" + field + "' of kernel '" + kernelId
-                                        + "' is not a string");
+            throw std::invalid_argument("metadata field '" + field + "' of kernel '"
+                                        + toString(kernelId) + "' is not a string");
         }
         return *value;
     }

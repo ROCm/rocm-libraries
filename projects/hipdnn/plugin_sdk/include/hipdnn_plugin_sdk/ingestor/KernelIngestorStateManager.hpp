@@ -44,8 +44,8 @@ struct KernelDispatcher
  * @brief The engine's view of its own kernels: which apply to a graph, in what order,
  *        and how to launch one.
  *
- * Holds an engine's descriptor set (one UED, its KMD and UHD, and the packs naming it)
- * and answers the three questions hipDNN's four host calls reduce to:
+ * Holds the descriptor state one engine selects over (its KMD and UHD, and the packs
+ * naming it) and answers the three questions hipDNN's four host calls reduce to:
  *
  * | Host call                    | Answered by                                    |
  * |------------------------------|------------------------------------------------|
@@ -73,9 +73,8 @@ public:
     static constexpr size_t DEFAULT_CATALOG_CACHE_CAPACITY = 256;
 
     /**
-     * @param engine     The UED this manager serves.
-     * @param schema     That engine's KMD. Supplies the defaults completing each kernel's
-     *                   metadata tuple.
+     * @param schema     The engine's KMD. Supplies the defaults completing each kernel's
+     *                   metadata tuple, and the field types a value is checked against.
      * @param matchers   Every UMD any of @p packs references, by id.
      * @param dispatches Every UDD any of @p packs references, by id.
      * @param packs      The KDPs naming this engine.
@@ -87,15 +86,13 @@ public:
      *         be evaluated, and duplicate catalog keys leave selection with two
      *         indistinguishable candidates and no basis to prefer either.
      */
-    KernelIngestorStateManager(EngineDescriptor engine,
-                               MetadataSchema schema,
+    KernelIngestorStateManager(MetadataSchema schema,
                                std::vector<MatchDescriptor> matchers,
                                std::vector<DispatchDescriptor> dispatches,
                                std::vector<KernelDescriptorPack> packs,
                                std::shared_ptr<IKernelHeuristic> heuristic,
                                size_t catalogCacheCapacity = DEFAULT_CATALOG_CACHE_CAPACITY)
-        : _engine(std::move(engine))
-        , _schema(std::move(schema))
+        : _schema(std::move(schema))
         , _packs(std::move(packs))
         , _heuristic(std::move(heuristic))
         , _catalogCache(catalogCacheCapacity)
@@ -115,11 +112,6 @@ public:
         }
 
         validateAndIndexPacks();
-    }
-
-    const EngineDescriptor& engine() const
-    {
-        return _engine;
     }
 
     const MetadataSchema& metadataSchema() const
@@ -183,9 +175,9 @@ public:
         auto it = _dispatches.find(kernel.dispatchId);
         if(it == _dispatches.end())
         {
-            throw std::runtime_error("kernel '" + kernel.kernelId
-                                     + "' names unknown dispatch descriptor '" + kernel.dispatchId
-                                     + "'");
+            throw std::runtime_error("kernel '" + toString(kernel.kernelId)
+                                     + "' names unknown dispatch descriptor '"
+                                     + toString(kernel.dispatchId) + "'");
         }
 
         return {kernel, DispatchRegistry<THandle>::resolve(it->second.dispatchSymbol)};
@@ -226,15 +218,16 @@ private:
             {
                 if(_matchers.find(matcherId) == _matchers.end())
                 {
-                    throw std::invalid_argument("pack '" + pack.id + "' names unknown matcher '"
-                                                + matcherId + "'");
+                    throw std::invalid_argument("pack '" + toString(pack.id)
+                                                + "' names unknown matcher '" + toString(matcherId)
+                                                + "'");
                 }
             }
             if(_dispatches.find(pack.dispatchId) == _dispatches.end())
             {
-                throw std::invalid_argument("pack '" + pack.id
+                throw std::invalid_argument("pack '" + toString(pack.id)
                                             + "' names unknown dispatch descriptor '"
-                                            + pack.dispatchId + "'");
+                                            + toString(pack.dispatchId) + "'");
             }
 
             for(const auto& kernel : pack.kernels)
@@ -243,9 +236,9 @@ private:
                 if(std::find(seenKeys.begin(), seenKeys.end(), key) != seenKeys.end())
                 {
                     throw std::invalid_argument(
-                        "kernel '" + kernel.id
-                        + "' duplicates the metadata tuple of another kernel in engine '"
-                        + _engine.name + "'; the tuple is the catalog key and must be unique");
+                        "kernel '" + toString(kernel.id)
+                        + "' duplicates the metadata tuple of another kernel under schema '"
+                        + _schema.name + "'; the tuple is the catalog key and must be unique");
                 }
                 seenKeys.push_back(std::move(key));
             }
@@ -258,10 +251,37 @@ private:
     MetadataValues completeMetadata(const KernelDescriptor& kernel) const
     {
         MetadataValues complete = kernel.metadata;
+
         for(const auto& field : _schema.fields)
         {
-            complete.emplace(field.name, field.defaultValue);
+            auto it = complete.find(field.name);
+
+            if(it == complete.end())
+            {
+                // A field with no default is one every kernel must state for itself, so
+                // an omission is an authoring error rather than a silent fallback: it
+                // would otherwise produce a catalog key the author never wrote.
+                if(!field.defaultValue.has_value())
+                {
+                    throw std::invalid_argument("kernel '" + toString(kernel.id)
+                                                + "' omits metadata field '" + field.name
+                                                + "', which declares no default");
+                }
+                complete.emplace(field.name, *field.defaultValue);
+                continue;
+            }
+
+            // The KMD declares each field's type, so a value of the wrong one is caught
+            // here rather than surfacing as a bad_variant_access from a matcher or a
+            // scorer, far from the descriptor that caused it.
+            if(metadataTypeOf(it->second) != field.type)
+            {
+                throw std::invalid_argument("kernel '" + toString(kernel.id)
+                                            + "' supplies metadata field '" + field.name
+                                            + "' with a value of the wrong type");
+            }
         }
+
         return complete;
     }
 
@@ -374,10 +394,9 @@ private:
         return true;
     }
 
-    EngineDescriptor _engine;
     MetadataSchema _schema;
-    std::unordered_map<DescriptorId, MatchDescriptor> _matchers;
-    std::unordered_map<DescriptorId, DispatchDescriptor> _dispatches;
+    std::unordered_map<DescriptorId, MatchDescriptor, DescriptorIdHash> _matchers;
+    std::unordered_map<DescriptorId, DispatchDescriptor, DescriptorIdHash> _dispatches;
     std::vector<KernelDescriptorPack> _packs;
     std::shared_ptr<IKernelHeuristic> _heuristic;
     /// Mutable because the query methods are logically const: they answer questions about

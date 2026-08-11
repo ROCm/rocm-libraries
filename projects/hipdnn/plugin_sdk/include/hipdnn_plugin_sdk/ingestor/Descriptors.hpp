@@ -7,9 +7,12 @@
 
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <string>
 #include <variant>
 #include <vector>
+
+#include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 
 /**
  * @file Descriptors.hpp
@@ -40,14 +43,65 @@
 namespace hipdnn_plugin_sdk::ingestor
 {
 
-/// A descriptor cross-reference. Stable and globally unique in the real system (a GUID);
-/// any unique string here, since nothing is loaded from a file yet.
-using DescriptorId = std::string;
+/// A descriptor cross-reference: the stable, globally unique id every descriptor
+/// carries, and the only way descriptors name one another.
+///
+/// A 128-bit UUID rather than a string, matching the graph identity hipDNN mints at
+/// finalization, so the two id spaces in this system are one type. RFC 0017 §4 chooses
+/// GUIDs so any author can mint an id locally that never collides with another's, with
+/// no central allocation authority; `parseUuid` and `formatUuid` in the same header
+/// convert to and from the text form descriptor files carry.
+using DescriptorId = hipdnn_flatbuffers_sdk::utilities::UuidBytes;
 
-/// A value a kernel supplies for a KMD-declared field. The KMD declares which type each
-/// field holds; a UKD carrying the wrong alternative for a field is a load error the
-/// validating loader reports (not modelled here, since nothing is loaded).
-using MetadataValue = std::variant<int64_t, std::string>;
+/// @brief A descriptor id in its canonical text form, for diagnostics.
+inline std::string toString(const DescriptorId& id)
+{
+    return hipdnn_flatbuffers_sdk::utilities::formatUuid(id);
+}
+
+/// Hash for keying maps on a descriptor id. std::array has no std::hash, and a
+/// specialization for it cannot be added without opening namespace std over a standard
+/// type, so this is passed explicitly to the containers that need it.
+struct DescriptorIdHash
+{
+    size_t operator()(const DescriptorId& id) const noexcept
+    {
+        // The id is a UUID, already well distributed, so an FNV-1a fold over its bytes
+        // is sufficient for an in-process map and is never persisted or exposed.
+        size_t hash = 1469598103934665603ULL;
+        for(const uint8_t byte : id)
+        {
+            hash ^= static_cast<size_t>(byte);
+            hash *= 1099511628211ULL;
+        }
+        return hash;
+    }
+};
+
+/// A value a kernel supplies for a KMD-declared field.
+///
+/// Spans the primitive types a descriptor field can hold. `int64_t` and `double` are the
+/// widest signed integer and floating-point forms, so a narrower authored value converts
+/// into one without loss; `bool` is distinct because a flag compares and prints
+/// differently from the integer 1.
+using MetadataValue = std::variant<bool, int64_t, double, std::string>;
+
+/// The type a KMD field holds. Kept as an explicit enum, and ordered to match
+/// MetadataValue's alternatives, so a field can declare its type without also having to
+/// supply a value of it.
+enum class MetadataType
+{
+    BOOL,
+    INT,
+    FLOAT,
+    STRING,
+};
+
+/// @brief The type of a value, for checking one against its field's declaration.
+inline MetadataType metadataTypeOf(const MetadataValue& value)
+{
+    return static_cast<MetadataType>(value.index());
+}
 
 /// A kernel's complete metadata tuple: every KMD field name mapped to this kernel's
 /// value for it. RFC 0017 §4 makes this tuple the kernel's identity to the catalog, so
@@ -59,8 +113,17 @@ using MetadataValues = std::map<std::string, MetadataValue>;
 struct MetadataField
 {
     std::string name;
+    /// What this field holds. Declared separately from the default because a field need
+    /// not have one, and a kernel supplying the wrong alternative is a load error the
+    /// validating loader reports against this.
+    MetadataType type = MetadataType::INT;
     /// The value a kernel that omits this field is taken to have supplied.
-    MetadataValue defaultValue;
+    ///
+    /// Optional, because a field can be mandatory: RFC 0017 §4 marks a UKD's metadata
+    /// entries `optional` individually, so a field with no default is one every kernel
+    /// in the engine must state for itself, and omitting it is a load error rather than
+    /// a silent fallback.
+    std::optional<MetadataValue> defaultValue;
 };
 
 /// KMD: the metadata schema, one per engine, shared by every kernel the engine owns.
@@ -149,9 +212,19 @@ struct KernelDescriptor
 {
     DescriptorId id;
     std::string name;
-    /// The kernel source. Real sources are a tagged union over kpack, hsaco, hip, and
-    /// rocke (RFC 0017 §7); this carries only what the embedded-source path
-    /// needs, and a real source kind is the packaging follow-up.
+    /// Where this kernel's code comes from.
+    ///
+    /// A named source file plus an entry point, which is what the embedded-source path
+    /// this engine currently compiles through needs. The real form is a tagged union
+    /// over the source kinds of RFC 0017 §7, one alternative per supported kind, so a
+    /// descriptor states which kind it carries rather than every kind sharing two
+    /// strings.
+    ///
+    /// Shipped AOT kernels converge on one of those kinds: they are always packed into
+    /// a kpack and loaded dynamically from it, so the field these two become is a kpack
+    /// library plus the symbol to resolve inside it. The other kinds (`hsaco`, `hip`,
+    /// `rocke`) describe how a kernel is *built*, and the build-time packaging step
+    /// lowers each of them to that same kpack form before install.
     std::string sourceFile;
     std::string entryPoint;
     /// This kernel's values for the KMD's fields. Omitted fields take the KMD default;

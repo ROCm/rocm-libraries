@@ -68,6 +68,10 @@ PointwiseAddDescriptorSet buildPointwiseAddDescriptorSet();
 int64_t pointwiseAddEngineId();
 
 /// @brief Builds the state manager backing this pack.
+///
+/// Carries only what selection needs: the KMD, the matchers and dispatch descriptors the
+/// packs reference, the packs themselves, and the resolved heuristic. The UED is not
+/// among them, because a UED is 1:1 with a hipDNN engine and is owned by the engine.
 std::shared_ptr<hipdnn_plugin_sdk::ingestor::KernelIngestorStateManager<Handle>>
     makePointwiseAddStateManager();
 

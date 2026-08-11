@@ -172,16 +172,48 @@ public:
     ScopedTestSymbols& operator=(const ScopedTestSymbols&) = delete;
 };
 
-inline KernelDescriptor
-    makeTestKernel(const std::string& id, int64_t blockSize, const std::string& dtype)
+/// A descriptor id from a short seed, so a fixture can name ids readably while the type
+/// stays the real 128-bit one.
+inline DescriptorId testId(uint8_t seed)
+{
+    DescriptorId id{};
+    id.fill(seed);
+    return id;
+}
+
+inline const DescriptorId ENGINE_ID = testId(0xE0);
+inline const DescriptorId SCHEMA_ID = testId(0xE1);
+inline const DescriptorId HEURISTIC_ID = testId(0xE2);
+inline const DescriptorId GRAPH_MATCHER_ID = testId(0xE3);
+inline const DescriptorId KERNEL_MATCHER_ID = testId(0xE4);
+inline const DescriptorId DISPATCH_ID = testId(0xE5);
+inline const DescriptorId PACK_ID = testId(0xE6);
+
+inline KernelDescriptor makeTestKernel(const DescriptorId& id,
+                                       const std::string& name,
+                                       int64_t blockSize,
+                                       const std::string& dtype)
 {
     KernelDescriptor kernel;
     kernel.id = id;
-    kernel.name = id;
+    kernel.name = name;
     kernel.sourceFile = "Test.cpp";
     kernel.entryPoint = "TestKernel";
-    kernel.metadata = {{BLOCK_SIZE, blockSize}, {DTYPE, dtype}};
+    kernel.metadata = {{BLOCK_SIZE, MetadataValue{blockSize}}, {DTYPE, MetadataValue{dtype}}};
     return kernel;
+}
+
+/// The UED the fixture engine is built from. Separate from the state manager, which
+/// holds only what selection reads.
+inline EngineDescriptor makeTestEngine()
+{
+    EngineDescriptor engine;
+    engine.id = ENGINE_ID;
+    engine.name = "test:engine";
+    engine.heuristicId = HEURISTIC_ID;
+    engine.metadataSchemaId = SCHEMA_ID;
+    engine.knobs = {BLOCK_SIZE};
+    return engine;
 }
 
 /// Two FLOAT kernels differing only in block size, plus a HALF kernel the kernel-scoped
@@ -191,35 +223,29 @@ inline std::unique_ptr<KernelIngestorStateManager<int>>
                          = KernelIngestorStateManager<int>::DEFAULT_CATALOG_CACHE_CAPACITY)
 {
     MetadataSchema schema;
-    schema.id = "kmd";
+    schema.id = SCHEMA_ID;
     schema.name = "test schema";
-    schema.fields = {{BLOCK_SIZE, int64_t{64}}, {DTYPE, std::string{"FLOAT"}}};
-
-    EngineDescriptor engine;
-    engine.id = "ued";
-    engine.name = "test:engine";
-    engine.heuristicId = "uhd";
-    engine.metadataSchemaId = "kmd";
-    engine.knobs = {BLOCK_SIZE};
+    // block_size defaults; dtype is mandatory, so every kernel below states it.
+    schema.fields = {{BLOCK_SIZE, MetadataType::INT, MetadataValue{int64_t{64}}},
+                     {DTYPE, MetadataType::STRING, std::nullopt}};
 
     std::vector<MatchDescriptor> matchers{
-        {"umd_graph", "graph scoped", MatchScope::GRAPH, GRAPH_MATCH_SYMBOL},
-        {"umd_kernel", "kernel scoped", MatchScope::KERNEL, KERNEL_MATCH_SYMBOL}};
+        {GRAPH_MATCHER_ID, "graph scoped", MatchScope::GRAPH, GRAPH_MATCH_SYMBOL},
+        {KERNEL_MATCHER_ID, "kernel scoped", MatchScope::KERNEL, KERNEL_MATCH_SYMBOL}};
     std::vector<DispatchDescriptor> dispatches{
-        {"udd", "test dispatch", "hipdnn.kernel_ingestor.test.dispatch"}};
+        {DISPATCH_ID, "test dispatch", "hipdnn.kernel_ingestor.test.dispatch"}};
 
     KernelDescriptorPack pack;
-    pack.id = "kdp";
+    pack.id = PACK_ID;
     pack.name = "test pack";
-    pack.matcherIds = {"umd_graph", "umd_kernel"};
-    pack.engineId = "ued";
-    pack.dispatchId = "udd";
-    pack.kernels = {makeTestKernel("kernel_64_float", 64, "FLOAT"),
-                    makeTestKernel("kernel_256_float", 256, "FLOAT"),
-                    makeTestKernel("kernel_64_half", 64, "HALF")};
+    pack.matcherIds = {GRAPH_MATCHER_ID, KERNEL_MATCHER_ID};
+    pack.engineId = ENGINE_ID;
+    pack.dispatchId = DISPATCH_ID;
+    pack.kernels = {makeTestKernel(testId(0x64), "kernel_64_float", 64, "FLOAT"),
+                    makeTestKernel(testId(0x65), "kernel_256_float", 256, "FLOAT"),
+                    makeTestKernel(testId(0x66), "kernel_64_half", 64, "HALF")};
 
     return std::make_unique<KernelIngestorStateManager<int>>(
-        std::move(engine),
         std::move(schema),
         std::move(matchers),
         std::move(dispatches),

@@ -54,7 +54,8 @@ public:
         {
             throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                                         "dispatch handler for kernel '"
-                                            + _dispatcher.kernel.kernelId + "' prepared no launch");
+                                            + toString(_dispatcher.kernel.kernelId)
+                                            + "' prepared no launch");
         }
     }
 
@@ -71,8 +72,8 @@ public:
         if(_workspaceBytes > 0 && workspace == nullptr)
         {
             throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
-                                        "kernel '" + _dispatcher.kernel.kernelId + "' requires "
-                                            + std::to_string(_workspaceBytes)
+                                        "kernel '" + toString(_dispatcher.kernel.kernelId)
+                                            + "' requires " + std::to_string(_workspaceBytes)
                                             + " workspace bytes but none was provided");
         }
 
