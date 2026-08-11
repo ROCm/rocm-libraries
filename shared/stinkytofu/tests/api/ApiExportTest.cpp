@@ -72,6 +72,7 @@
 #include "stinkytofu/transforms/asm/RaiseVgprMsbPass.hpp"
 #include "stinkytofu/transforms/asm/RedundantMovEliminationPass.hpp"
 #include "stinkytofu/transforms/asm/RemoveDelayAluPass.hpp"
+#include "stinkytofu/transforms/asm/RemoveDscntPass.hpp"
 #include "stinkytofu/transforms/asm/RemoveInstructionPass.hpp"
 #include "stinkytofu/transforms/asm/RemoveWaitAluPass.hpp"
 #include "stinkytofu/transforms/asm/SetMatrixReusePass.hpp"
@@ -241,6 +242,7 @@ TEST(ApiExport, PassFactories) {
     EXPECT_NE(createSetMatrixReusePass(), nullptr);
     EXPECT_NE(createStinkyBuildImplicitDependencyPass(), nullptr);
     EXPECT_NE(createStinkyRemoveWaitCntPass(), nullptr);
+    EXPECT_NE(createRemoveDscntPass(), nullptr);
     EXPECT_NE(createStinkyRemoveNopPass(), nullptr);
     EXPECT_NE(createStinkyWaitCntInsertionPass(), nullptr);
     EXPECT_NE(createGfx1250HazardPass(), nullptr);

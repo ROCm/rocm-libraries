@@ -25,6 +25,7 @@ target_sources(stinkytofu_objs PRIVATE
     waitcnt/WaitDataflow.cpp
     waitcnt/ShallowPredPromotion.cpp
     StinkyRemoveWaitCntPass.cpp
+    RemoveDscntPass.cpp
     StinkyRemoveNopPass.cpp
     StinkyBuildImplicitDependencyPass.cpp
     RegionClonePass.cpp
