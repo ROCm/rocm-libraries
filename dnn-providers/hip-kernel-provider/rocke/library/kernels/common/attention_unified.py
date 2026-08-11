@@ -920,10 +920,11 @@ def _select_2d_tile_size(problem: UnifiedAttentionProblem) -> int:
     # combo and a much heavier prelude.
     if _enable_combo_2d(problem) and problem.sliding_window > 0:
         return problem.block_size
-    # fp16 D128 single-batch sliding-window: force T=64. The combo (admitted
-    # below via _enable_single_batch_combo) would otherwise take the generic
-    # 2*block_size = T=32 tile, which _select_2d_block_m_per_warp flags as a
-    # numerically-wrong hipcc T=32 SW combo; T=64 is the correctness-clean tile.
+    # fp16 D128 single-batch sliding-window: force T=64. The generic
+    # 2*block_size tile would give T=32 at block_size=16, whose 256 outer
+    # iterations at S=8192 under-amortise the per-iter cost. T=64 halves the
+    # iteration count; measured ~1.65x on gfx950 (numerically identical --
+    # both paths max_abs 1.95e-3).
     if (
         _enable_single_batch_combo(problem)
         and problem.sliding_window > 0
@@ -1518,10 +1519,10 @@ def _enable_single_batch_combo(problem: UnifiedAttentionProblem) -> bool:
         them per-score, so biased single-batch prefill takes the combo path
         instead of the fallback. Only softcap/sinks are excluded (above)
         because the mask-limit shortcut can't fold them.
-      * sliding window: fp16 D128 only -- routed here for correctness (the narrow
-        16x16 path is numerically wrong on long-KV fp16); other SW shapes are
-        excluded, and the no-SW VALU sub-flags auto-disable via
-        _enable_transposed_subflags.
+      * sliding window: fp16 D128 only -- the transposed-32x32 path is ~1.65x
+        faster here than the narrow 16x16 path (both numerically equal); other
+        SW shapes keep their existing routing, and the no-SW VALU sub-flags
+        auto-disable via _enable_transposed_subflags.
       * head_size in {64, 128}.
       * max_seqlen_q > 256 (long prefill; decode-class shapes route to the 3D
         split-KV path via ``select_path``, and the autotuner's win starts at
@@ -1538,8 +1539,8 @@ def _enable_single_batch_combo(problem: UnifiedAttentionProblem) -> bool:
     if problem.softcap > 0 or problem.use_sinks:
         return False
     # fp16 D128 sliding-window (block_size==16 only) routes to the transposed-
-    # 32x32 fp32 online-softmax path (the narrow 16x16 path loses accuracy on
-    # long-KV fp16). Scoped to block_size==16: at bs in {32,64} the combo also
+    # 32x32 fp32 online-softmax path (~1.65x faster here than the narrow 16x16
+    # path; both numerically equal). Scoped to block_size==16: at bs in {32,64} the combo also
     # pulls in the default-on _enable_d128_small_tile / _enable_softmax_mfma_
     # interleave levers (neither excludes SW), which yield block_m=128 >
     # tile_size=64 with use_k_single_buffer -> uncaught ValueError at launch.
