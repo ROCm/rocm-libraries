@@ -275,6 +275,46 @@ if(UNIX AND NOT APPLE)
   endif()
 endif()
 
+if(UNIX AND NOT APPLE)
+  include(CheckCXXSourceCompiles)
+  set(CMAKE_REQUIRED_FLAGS "-D__HIP_PLATFORM_AMD__")
+  set(CMAKE_REQUIRED_INCLUDES "${ROCM_INTERFACES_STAGED_INCLUDE}" /opt/rocm/include)
+  check_cxx_source_compiles("
+#include <cstdio>
+#include <rocrand/rocrand.hpp>
+int main(){ rocrand_cpp::error e(ROCRAND_STATUS_SUCCESS); return e.what()==nullptr; }
+" ROCM_INTERFACES_HAVE_ROCRAND_CPP)
+  unset(CMAKE_REQUIRED_FLAGS)
+  unset(CMAKE_REQUIRED_INCLUDES)
+
+  if(ROCM_INTERFACES_HAVE_ROCRAND_CPP)
+    add_test(NAME rocm_interfaces.abi05_cpp_mangled_version_node
+      COMMAND ${CMAKE_COMMAND}
+        -DCXX=${CMAKE_CXX_COMPILER}
+        -DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/abi05_fixture_rocrand_cpp.cpp
+        -DMAP=${CMAKE_CURRENT_SOURCE_DIR}/abi05_rocrand_cpp.map
+        -DROCRAND_INC=${ROCM_INTERFACES_STAGED_INCLUDE}
+        -DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/abi05-cpp-mangled
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/check_cpp_mangled_version.cmake)
+
+    if(ROCM_INTERFACES_HAVE_LLD)
+      add_test(NAME rocm_interfaces.abi05_cpp_mangled_version_node_lld
+        COMMAND ${CMAKE_COMMAND}
+          -DCXX=${CMAKE_CXX_COMPILER}
+          -DLINKER=lld
+          -DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/abi05_fixture_rocrand_cpp.cpp
+          -DMAP=${CMAKE_CURRENT_SOURCE_DIR}/abi05_rocrand_cpp.map
+          -DROCRAND_INC=${ROCM_INTERFACES_STAGED_INCLUDE}
+          -DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/abi05-cpp-mangled-lld
+          -P ${CMAKE_CURRENT_SOURCE_DIR}/check_cpp_mangled_version.cmake)
+    endif()
+  else()
+    message(STATUS
+      "abi05 cpp mangled: rocrand.hpp not host-compilable with the configured "
+      "compiler, C++ mangled-export version-node test not registered")
+  endif()
+endif()
+
 set(_lto_guard_module ${CMAKE_SOURCE_DIR}/cmake/rocm_interfaces_lto_linker_guard.cmake)
 set(_lto_guard_driver ${CMAKE_CURRENT_SOURCE_DIR}/check_lto_linker_guard.cmake)
 
