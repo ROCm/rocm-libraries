@@ -138,8 +138,8 @@ RTCKernelArgs RTCKernelTranspose::get_launch_args(DeviceCallIn& data)
     kargs.append_ptr(data.node->twiddles_large);
 
     // NOTE:
-    // Kargs appended as index type INT32 are all bounded by grid limits,
-    // and widening them to INT64 would cost registers for nothing
+    // Kargs appended as index type 32BIT are all bounded by grid limits,
+    // and widening them to 64BIT would cost registers for nothing
 
     auto num_lengths = data.node->length.size();
     kargs.append_index(num_lengths, IndexType::_32BIT);
