@@ -1,0 +1,80 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# DESIGNED config for the bf16 UseSubtileImpl epilogue PEEL (gfx950, wave64).
+#
+# Drives the 16bit subtile store fast-path in GlobalWriteBatch.py that is gated
+# by `is16bitSubtile` (UseSubtileImpl + non-edge + bf16/fp16 dest + HPA + wave64):
+# a guard-free/mask-free interior body plus a guarded boundary body, with the
+# N-group skip label co-located in the store module (the Stage-14 routing fix).
+#
+# ActivationFuncCall matches the shipped gfx950 subtile solutions (all of which set
+# it False) so the emitted epilogue mirrors production; StreamK=0 (DP) keeps the
+# non-edge subtile store on the D-output 16bit path.
+# CPU-only emit — no GPU, no compile, no hardware access.
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  SleepPercent: 0
+  NumElementsToValidate: 0
+  NumWarmups: 0
+  NumBenchmarks: 1
+  EnqueuesPerSync: 1
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      UseBias: 1
+      UseScaleAlphaVec: 1
+      Activation: True
+      ActivationType: hipblaslt_all
+      ActivationComputeDataType: s
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        # 3 MIWaveTile/WaveGroup shapes x StreamK{0,5} x PGR{1,2} = 12 kernels.
+        # The MI shapes vary maxTt0/maxBlockIdxN, so the peel's interior M/N extents
+        # (derived in _emitSubtileStorePeel) differ per kernel rather than being pinned
+        # to one geometry. StreamK=5 additionally covers the PartialsBuffer finishing-WG
+        # final store to D, which is the other reachable is16bitSubtile store site.
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 8, 8, 2, 2]   # 2x2 WG, MIWaveTile 8x8
+          - [16, 16, 32, 1, 1, 4, 4, 2, 2]   # 2x2 WG, MIWaveTile 4x4
+          - [16, 16, 32, 1, 1, 2, 2, 1, 1]   # 1x1 WG, single-wave subtile
+        - DepthU: [64]
+        - PrefetchGlobalRead: [1, 2]
+        - PrefetchLocalRead: [0]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StaggerU: [0]
+        - StreamK: [0, 5]
+        - UseSubtileImpl: [True]
+        - ActivationFuncCall: [False]
+        - SourceSwap: [True]
+        - NonTemporalD: [0]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 128]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: none]
+          - [Enum: relu]
