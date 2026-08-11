@@ -109,7 +109,7 @@ if(HIP_COMPILER STREQUAL "nvcc")
     set(CUDA_HOST_COMPILER ${CMAKE_CXX_COMPILER})
 else()
     target_link_libraries(rocrand PRIVATE hip::device)
-    target_link_libraries(rocrand PUBLIC hip::host)
+    rocrand_workaround_amdhip64_missing(rocrand)	
 endif()
 
 rocm_set_soversion(rocrand ${rocrand_SOVERSION})

@@ -57,6 +57,7 @@ function(add_rocrand_link_test TEST_SOURCES)
 
     if(HIP_COMPILER STREQUAL "clang")
         target_link_libraries(${TEST_TARGET} hip::device)
+        rocrand_workaround_amdhip64_missing(${TEST_TARGET})
     endif()
     set_target_properties(
         ${TEST_TARGET}
