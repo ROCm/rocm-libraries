@@ -9,36 +9,26 @@ import hipdnn_frontend as hipdnn
 
 import numpy as np
 
-from .helpers import (
-    call_attribute_methods,
-    build_all_plans,
-    create_float_graph,
-    execute_zeros,
-)
+from .graph_builders import build_custom_op_graph
+from .helpers import build_all_plans, call_attribute_methods, execute_zeros
 
 
 @pytest.mark.gpu
 class TestCustomOp:
-    """Tests for custom operation-graph construction."""
+    """Tests for custom op plan-building and stubbed execution."""
 
     def test_execution_succeeds(self):
-        graph = create_float_graph()
-        a = hipdnn.Tensor.create([4, 8], hipdnn.DataType.FLOAT)
-        b = hipdnn.Tensor.create([4, 8], hipdnn.DataType.FLOAT)
-        outputs = graph.custom_op(
-            [a, b],
-            2,
-            hipdnn.CustomOpAttributes().set_custom_op_id("example.identity"),
-        )
-        for output in outputs:
-            output.set_dim([4, 8]).set_stride([8, 1]).set_output(True)
-            output.set_data_type(hipdnn.DataType.FLOAT)
+        graph, a, b, y0, y1 = build_custom_op_graph()
 
         handle = build_all_plans(graph)
         execute_zeros(
             graph,
-            [(a, np.float32), (b, np.float32)]
-            + [(output, np.float32) for output in outputs],
+            [
+                (a, np.float32),
+                (b, np.float32),
+                (y0, np.float32),
+                (y1, np.float32),
+            ],
             handle,
         )
 

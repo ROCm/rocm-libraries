@@ -8,72 +8,11 @@ import pytest
 
 import hipdnn_frontend as hipdnn
 
-from .helpers import (
-    call_attribute_methods,
-    build_all_plans,
-    create_float_graph,
-    execute_zeros,
+from .graph_builders import (
+    build_batchnorm_inference_graph,
+    build_batchnorm_inference_variance_graph,
 )
-
-
-def build_batchnorm_inference_graph(n=4, c=8, h=8, w=8):
-    """Build a batchnorm inference graph.
-
-    Returns (graph, x, mean, inv_variance, scale, bias, y). Per-channel
-    mean/inv_variance/scale/bias use [1, C, 1, 1] shapes.
-    """
-    graph = create_float_graph()
-    graph.set_name("batchnorm_inference_test")
-
-    x = hipdnn.Tensor.create([n, c, h, w], hipdnn.DataType.FLOAT)
-    x.set_name("x")
-
-    mean = hipdnn.Tensor.create([1, c, 1, 1], hipdnn.DataType.FLOAT)
-    mean.set_name("mean")
-
-    inv_variance = hipdnn.Tensor.create([1, c, 1, 1], hipdnn.DataType.FLOAT)
-    inv_variance.set_name("inv_variance")
-
-    scale = hipdnn.Tensor.create([1, c, 1, 1], hipdnn.DataType.FLOAT)
-    scale.set_name("scale")
-
-    bias = hipdnn.Tensor.create([1, c, 1, 1], hipdnn.DataType.FLOAT)
-    bias.set_name("bias")
-
-    attrs = hipdnn.BatchnormInferenceAttributes()
-    attrs.set_name("batchnorm_inference_node")
-
-    y = graph.batchnorm_inference(x, mean, inv_variance, scale, bias, attrs)
-    y.set_name("y")
-    y.set_output(True)
-
-    return graph, x, mean, inv_variance, scale, bias, y
-
-
-def build_batchnorm_inference_variance_graph(n=4, c=8, h=8, w=8):
-    """Build batchnorm inference from variance and a compile-time epsilon."""
-    graph = create_float_graph()
-    graph.set_name("batchnorm_inference_variance_test")
-
-    x = hipdnn.Tensor.create([n, c, h, w], hipdnn.DataType.FLOAT)
-    mean = hipdnn.Tensor.create([1, c, 1, 1], hipdnn.DataType.FLOAT)
-    variance = hipdnn.Tensor.create([1, c, 1, 1], hipdnn.DataType.FLOAT)
-    scale = hipdnn.Tensor.create([1, c, 1, 1], hipdnn.DataType.FLOAT)
-    bias = hipdnn.Tensor.create([1, c, 1, 1], hipdnn.DataType.FLOAT)
-    epsilon = hipdnn.Tensor()
-    epsilon.set_value(1e-5)
-
-    y = graph.batchnorm_inference_variance_ext(
-        x,
-        mean,
-        variance,
-        scale,
-        bias,
-        epsilon,
-        hipdnn.BatchnormInferenceAttributesVarianceExt(),
-    )
-    y.set_output(True)
-    return graph, x, mean, variance, scale, bias, y
+from .helpers import build_all_plans, call_attribute_methods, execute_zeros
 
 
 @pytest.mark.gpu

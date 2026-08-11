@@ -9,42 +9,18 @@ import hipdnn_frontend as hipdnn
 
 import numpy as np
 
-from .helpers import (
-    call_attribute_methods,
-    build_all_plans,
-    create_float_graph,
-    execute_zeros,
-)
-
-
-def _scalar():
-    tensor = hipdnn.Tensor.create([1], hipdnn.DataType.FLOAT)
-    tensor.set_value(1e-5)
-    return tensor
+from .graph_builders import build_layernorm_backward_graph, build_layernorm_graph
+from .helpers import build_all_plans, call_attribute_methods, execute_zeros
 
 
 @pytest.mark.gpu
 class TestLayernorm:
-    """Tests for layer normalization operation-graph construction."""
+    """Tests for layer normalization plan-building and stubbed execution."""
 
     def test_execution_succeeds(self):
-        graph = create_float_graph()
-        x = hipdnn.Tensor.create([2, 6, 4], hipdnn.DataType.FLOAT)
-        scale = hipdnn.Tensor.create([6, 4], hipdnn.DataType.FLOAT)
-        bias = hipdnn.Tensor.create([6, 4], hipdnn.DataType.FLOAT)
-        outputs = graph.layernorm(
-            x,
-            scale,
-            bias,
-            hipdnn.LayernormAttributes()
-            .set_epsilon(_scalar())
-            .set_forward_phase(hipdnn.NormFwdPhase.INFERENCE),
-        )
-        assert isinstance(outputs, tuple)
-        assert outputs[0] is not None
-        assert outputs[1:] == (None, None)
-        y = outputs[0]
-        y.set_output(True)
+        graph, x, scale, bias, y, mean, inv_variance = build_layernorm_graph()
+        # INFERENCE phase produces no statistics.
+        assert (mean, inv_variance) == (None, None)
 
         handle = build_all_plans(graph)
         execute_zeros(
@@ -56,34 +32,22 @@ class TestLayernorm:
 
 @pytest.mark.gpu
 class TestLayernormBackward:
-    """Tests for layer normalization backward operation-graph construction."""
+    """Tests for layer normalization backward plan-building and stubbed execution."""
 
     def test_execution_succeeds(self):
-        graph = create_float_graph()
-        dy = hipdnn.Tensor.create([16, 64, 32, 32], hipdnn.DataType.FLOAT)
-        x = hipdnn.Tensor.create([16, 64, 32, 32], hipdnn.DataType.FLOAT)
-        scale = hipdnn.Tensor.create([1, 64, 32, 32], hipdnn.DataType.FLOAT)
-        outputs = graph.layernorm_backward(
-            dy,
-            x,
-            scale,
-            hipdnn.LayernormBackwardAttributes()
-            .set_mean(hipdnn.Tensor.create([16, 1, 1, 1], hipdnn.DataType.FLOAT))
-            .set_inv_variance(
-                hipdnn.Tensor.create([16, 1, 1, 1], hipdnn.DataType.FLOAT)
-            )
-            .set_epsilon(_scalar()),
-        )
-        assert isinstance(outputs, tuple)
-        assert len(outputs) == 3
-        for output in outputs:
-            output.set_output(True)
+        graph, dy, x, scale, dx, dscale, dbias = build_layernorm_backward_graph()
 
         handle = build_all_plans(graph)
         execute_zeros(
             graph,
-            [(dy, np.float32), (x, np.float32), (scale, np.float32)]
-            + [(output, np.float32) for output in outputs],
+            [
+                (dy, np.float32),
+                (x, np.float32),
+                (scale, np.float32),
+                (dx, np.float32),
+                (dscale, np.float32),
+                (dbias, np.float32),
+            ],
             handle,
         )
 

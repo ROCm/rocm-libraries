@@ -11,8 +11,8 @@ import pytest
 import hipdnn_frontend as hipdnn
 
 from .conftest import stub_engine_active
+from .graph_builders import build_conv_fprop_graph
 from .helpers import build_all_plans, create_float_graph
-from .test_conv_fprop import build_conv_fprop_graph
 
 
 def _hipdnn_project_root() -> Path:

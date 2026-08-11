@@ -9,37 +9,18 @@ import hipdnn_frontend as hipdnn
 
 import numpy as np
 
-from .helpers import (
-    call_attribute_methods,
-    build_all_plans,
-    create_float_graph,
-    execute_zeros,
-)
+from .graph_builders import build_moe_grouped_matmul_graph
+from .helpers import build_all_plans, call_attribute_methods, execute_zeros
 
 
 @pytest.mark.gpu
 class TestMoeGroupedMatmul:
-    """Tests for MoE grouped matmul operation-graph construction."""
+    """Tests for MoE grouped matmul plan-building and stubbed execution."""
 
     def test_execution_succeeds(self):
-        graph = create_float_graph()
-        token = hipdnn.Tensor.create([1, 8, 16], hipdnn.DataType.FLOAT)
-        weight = hipdnn.Tensor.create([2, 16, 32], hipdnn.DataType.FLOAT)
-        first_token_offset = hipdnn.Tensor.create([2, 1, 1], hipdnn.DataType.INT32)
-        token_index = hipdnn.Tensor.create([1, 8, 1], hipdnn.DataType.INT32)
-        token_ks = hipdnn.Tensor.create([1, 8, 1], hipdnn.DataType.INT32)
-        output = graph.moe_grouped_matmul(
-            token,
-            weight,
-            first_token_offset,
-            token_index,
-            token_ks,
-            hipdnn.MoeGroupedMatmulAttributes()
-            .set_mode(hipdnn.MoeGroupedMatmulMode.SCATTER)
-            .set_top_k(2),
+        graph, token, weight, first_token_offset, token_index, token_ks, output = (
+            build_moe_grouped_matmul_graph()
         )
-        output.set_output(True)
-        output.set_data_type(hipdnn.DataType.FLOAT)
 
         handle = build_all_plans(graph)
         execute_zeros(

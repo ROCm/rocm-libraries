@@ -9,68 +9,37 @@ import hipdnn_frontend as hipdnn
 
 import numpy as np
 
-from .helpers import (
-    call_attribute_methods,
-    build_all_plans,
-    create_float_graph,
-    execute_zeros,
-)
-
-
-def _scalar():
-    tensor = hipdnn.Tensor.create([1], hipdnn.DataType.FLOAT)
-    tensor.set_value(1e-5)
-    return tensor
+from .graph_builders import build_rmsnorm_backward_graph, build_rmsnorm_graph
+from .helpers import build_all_plans, call_attribute_methods, execute_zeros
 
 
 @pytest.mark.gpu
 class TestRMSNorm:
-    """Tests for RMS normalization operation-graph construction."""
+    """Tests for RMS normalization plan-building and stubbed execution."""
 
     def test_execution_succeeds(self):
-        graph = create_float_graph()
-        x = hipdnn.Tensor.create([2, 64, 32, 32], hipdnn.DataType.FLOAT)
-        scale = hipdnn.Tensor.create([1, 64, 32, 32], hipdnn.DataType.FLOAT)
-        outputs = graph.rmsnorm(
-            x,
-            scale,
-            hipdnn.RMSNormAttributes()
-            .set_epsilon(_scalar())
-            .set_forward_phase(hipdnn.NormFwdPhase.TRAINING),
-        )
-        assert isinstance(outputs, tuple)
-        assert len(outputs) == 2
-        for output in outputs:
-            output.set_output(True)
+        graph, x, scale, y, inv_rms = build_rmsnorm_graph()
 
         handle = build_all_plans(graph)
         execute_zeros(
             graph,
-            [(x, np.float32), (scale, np.float32)]
-            + [(output, np.float32) for output in outputs],
+            [
+                (x, np.float32),
+                (scale, np.float32),
+                (y, np.float32),
+                (inv_rms, np.float32),
+            ],
             handle,
         )
 
 
 @pytest.mark.gpu
 class TestRMSNormBackward:
-    """Tests for RMS normalization backward operation-graph construction."""
+    """Tests for RMS normalization backward plan-building and stubbed execution."""
 
     def test_execution_succeeds(self):
-        graph = create_float_graph()
-        dy = hipdnn.Tensor.create([1, 64, 32, 32], hipdnn.DataType.FLOAT)
-        x = hipdnn.Tensor.create([1, 64, 32, 32], hipdnn.DataType.FLOAT)
-        scale = hipdnn.Tensor.create([1, 64, 32, 32], hipdnn.DataType.FLOAT)
-        inv_rms = hipdnn.Tensor.create([1, 1, 1, 1], hipdnn.DataType.FLOAT)
-        outputs = graph.rmsnorm_backward(
-            dy, x, scale, inv_rms, hipdnn.RMSNormBackwardAttributes()
-        )
-        assert isinstance(outputs, tuple)
-        assert len(outputs) == 3
-        dx, dscale, dbias = outputs
+        graph, dy, x, scale, inv_rms, dx, dscale, dbias = build_rmsnorm_backward_graph()
         assert dbias is None  # requires set_compute_dbias(True), not requested here
-        dx.set_output(True)
-        dscale.set_output(True)
 
         handle = build_all_plans(graph)
         execute_zeros(

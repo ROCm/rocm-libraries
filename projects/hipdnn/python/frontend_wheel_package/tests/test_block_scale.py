@@ -9,53 +9,35 @@ import hipdnn_frontend as hipdnn
 
 import numpy as np
 
-from .helpers import (
-    call_attribute_methods,
-    build_all_plans,
-    create_float_graph,
-    execute_zeros,
+from .graph_builders import (
+    build_block_scale_dequantize_graph,
+    build_block_scale_quantize_graph,
 )
+from .helpers import build_all_plans, call_attribute_methods, execute_zeros
 
 
 @pytest.mark.gpu
 class TestBlockScaleDequantize:
-    """Tests for block-scale dequantization operation-graph construction."""
+    """Tests for block-scale dequantization plan-building."""
 
-    def test_builds_operation_graph(self):
+    def test_plan_build_succeeds(self):
         """Dequantize output y must stay virtual (fused-only op); no standalone execute."""
-        graph = create_float_graph()
-        x = hipdnn.Tensor.create([2, 64, 32, 32], hipdnn.DataType.FLOAT)
-        scale = hipdnn.Tensor.create([2, 2, 32, 32], hipdnn.DataType.FLOAT)
-        graph.block_scale_dequantize(
-            x,
-            scale,
-            hipdnn.BlockScaleDequantizeAttributes().set_block_size([32]),
-        )
+        graph = build_block_scale_dequantize_graph()[0]
 
         build_all_plans(graph)
 
 
 @pytest.mark.gpu
 class TestBlockScaleQuantize:
-    """Tests for block-scale quantization operation-graph construction."""
+    """Tests for block-scale quantization plan-building and stubbed execution."""
 
     def test_execution_succeeds(self):
-        graph = create_float_graph()
-        x = hipdnn.Tensor.create([2, 64, 32, 32], hipdnn.DataType.FLOAT)
-        outputs = graph.block_scale_quantize(
-            x,
-            hipdnn.BlockScaleQuantizeAttributes().set_block_size(32),
-        )
-        assert isinstance(outputs, tuple)
-        assert len(outputs) == 2
-        for output in outputs:
-            output.set_output(True)
-            output.set_data_type(hipdnn.DataType.FLOAT)
+        graph, x, y, scale = build_block_scale_quantize_graph()
 
         handle = build_all_plans(graph)
         execute_zeros(
             graph,
-            [(x, np.float32)] + [(output, np.float32) for output in outputs],
+            [(x, np.float32), (y, np.float32), (scale, np.float32)],
             handle,
         )
 

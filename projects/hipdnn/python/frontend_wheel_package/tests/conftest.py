@@ -37,32 +37,16 @@ _stub_active = False
 
 
 def _load_test_good_plugin():
-    """Load the "good" engine plugin, in ABSOLUTE mode, for the whole session.
+    """Load the ``test_good_plugin`` stub in ABSOLUTE mode for the whole session.
 
-    The plugin (``test_good_plugin`` CMake target) is a software-only stub:
-    it claims applicability to any graph unconditionally and its execute()
-    is a no-op. ABSOLUTE mode replaces default engine discovery (MIOpen/
-    hipblaslt/hip-kernel-provider) instead of adding to it, so GoodPlugin is
-    the only engine ever loaded. Loading it ADDITIVE alongside a real
-    provider makes two engines applicable to the same op, which empirically
-    triggers a real intermittent GPU memory fault in MIOpen/ROCr (confirmed
-    via AMD_LOG_LEVEL=3 tracing) -- not fixable from this repo.
+    The stub claims every graph and its execute() is a no-op, giving stubbed
+    execution for every op; numeric correctness is the C++ tests' job. ABSOLUTE
+    mode ensures it is the only engine loaded, so no test silently runs against
+    a real provider -- the few that need one check ``stub_engine_active()`` and
+    skip themselves.
 
-    Consequence: this test suite verifies that the Python<->C++ binding
-    layer wires through and executes without erroring; it does not verify
-    real numeric correctness against a real provider engine (that is
-    covered by the C++ backend's CpuReferenceGraphExecutor-based tests, run
-    separately via ctest). test_good_plugin is built and installed
-    unconditionally by the superbuild, and CI always sets
-    HIPDNN_TEST_GOOD_PLUGIN_PATH to its installed path -- a missing/unset
-    path here means required test infrastructure is missing, so tests fail
-    hard rather than silently skipping. A handful of tests genuinely need a
-    real provider engine (e.g. querying loaded MIOpen engine metadata, or a
-    real engine's execute-time variant-pack validation); those check
-    ``stub_engine_active()`` and skip themselves instead.
-
-    Must run before any handle is created (pytest_configure, not a
-    fixture).
+    CI sets HIPDNN_TEST_GOOD_PLUGIN_PATH to the installed plugin. Must run
+    before any handle is created, hence pytest_configure rather than a fixture.
     """
     global _stub_active
     plugin_path = os.environ.get("HIPDNN_TEST_GOOD_PLUGIN_PATH")

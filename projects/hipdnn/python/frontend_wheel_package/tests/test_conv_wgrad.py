@@ -8,43 +8,8 @@ import pytest
 
 import hipdnn_frontend as hipdnn
 
-from .helpers import (
-    call_attribute_methods,
-    build_all_plans,
-    create_float_graph,
-    execute_zeros,
-)
-
-
-def build_conv_wgrad_graph(
-    n=16, c=16, h=16, w=16, k=16, r=3, s=3, stride=1, pad=1, dil=1
-):
-    """Build a conv_wgrad graph returning (graph, dy, x, dw)."""
-    out_h = (h + 2 * pad - dil * (r - 1) - 1) // stride + 1
-    out_w = (w + 2 * pad - dil * (s - 1) - 1) // stride + 1
-
-    graph = create_float_graph()
-    graph.set_name("conv_wgrad_test")
-
-    dy = hipdnn.Tensor.create([n, k, out_h, out_w], hipdnn.DataType.FLOAT)
-    dy.set_name("output_gradient_dy")
-
-    x = hipdnn.Tensor.create([n, c, h, w], hipdnn.DataType.FLOAT)
-    x.set_name("input_x")
-
-    conv_attrs = hipdnn.ConvWgradAttributes()
-    conv_attrs.set_name("conv_wgrad_node")
-    conv_attrs.set_pre_padding([pad, pad])
-    conv_attrs.set_post_padding([pad, pad])
-    conv_attrs.set_stride([stride, stride])
-    conv_attrs.set_dilation([dil, dil])
-
-    dw = graph.conv_wgrad(dy, x, conv_attrs)
-    dw.set_dim([k, c, r, s])
-    dw.set_name("weight_gradient_dw")
-    dw.set_output(True)
-
-    return graph, dy, x, dw
+from .graph_builders import build_conv_wgrad_graph
+from .helpers import build_all_plans, call_attribute_methods, execute_zeros
 
 
 @pytest.mark.gpu

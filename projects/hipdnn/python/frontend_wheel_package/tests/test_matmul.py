@@ -9,33 +9,8 @@ import hipdnn_frontend as hipdnn
 
 import numpy as np
 
-from .helpers import (
-    call_attribute_methods,
-    build_all_plans,
-    create_float_graph,
-    execute_zeros,
-)
-
-
-def build_matmul_graph(m=4, k=3, n=5):
-    """Build a matmul graph (A [M, K] x B [K, N] -> C [M, N])."""
-    graph = create_float_graph()
-    graph.set_name("matmul_test")
-
-    a = hipdnn.Tensor.create([m, k], hipdnn.DataType.FLOAT)
-    a.set_name("A")
-
-    b = hipdnn.Tensor.create([k, n], hipdnn.DataType.FLOAT)
-    b.set_name("B")
-
-    attrs = hipdnn.MatmulAttributes()
-    attrs.set_name("matmul_node")
-
-    c = graph.matmul(a, b, attrs)
-    c.set_name("C")
-    c.set_output(True)
-
-    return graph, a, b, c
+from .graph_builders import build_matmul_graph
+from .helpers import build_all_plans, call_attribute_methods, execute_zeros
 
 
 @pytest.mark.gpu

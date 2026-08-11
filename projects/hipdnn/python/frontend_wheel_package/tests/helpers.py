@@ -94,9 +94,9 @@ def call_attribute_methods(value, calls):
 
     ``calls`` is an iterable of ``(setter, args, getter, expected)`` tuples:
       - ``setter``/``args``: method name and positional arguments for the setter call.
-      - ``getter``: paired getter method name, or ``None`` when the field has no getter
-        method (e.g. an SDPA scalar exposed only via a ``def_rw`` property; use
-        ``access_attribute_properties`` for those).
+      - ``getter``: paired getter method name, or the name of the ``def_rw`` property
+        the field is exposed through when it has no getter method (e.g. SDPA scalars).
+        ``None`` only when the field is unreadable from Python.
       - ``expected``: value compared against the getter's return with ``==``. Tensor
         fields compare equal only to the exact object passed to the setter (no
         ``__eq__`` override), so use a distinct tensor per field to catch a setter
@@ -110,17 +110,8 @@ def call_attribute_methods(value, calls):
         assert result is value, f"{setter}() did not return self"
         if getter is None:
             continue
-        actual = getattr(value, getter)()
+        attribute = getattr(value, getter)
+        actual = attribute() if callable(attribute) else attribute
         assert (
             actual == expected
-        ), f"{getter}() returned {actual!r}, expected {expected!r}"
-
-
-def access_attribute_properties(value, assignments):
-    """Set each attribute property and assert it reads back the assigned value."""
-    for name, assignment in assignments:
-        setattr(value, name, assignment)
-        actual = getattr(value, name)
-        assert (
-            actual == assignment
-        ), f"{name} returned {actual!r}, expected {assignment!r}"
+        ), f"{getter} returned {actual!r}, expected {expected!r}"

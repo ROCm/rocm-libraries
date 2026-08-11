@@ -9,34 +9,8 @@ import hipdnn_frontend as hipdnn
 
 import numpy as np
 
-from .helpers import (
-    call_attribute_methods,
-    build_all_plans,
-    create_float_graph,
-    execute_zeros,
-)
-
-
-def build_pointwise_add_graph(n=16, c=16, h=16, w=16):
-    """Build an elementwise-add pointwise graph returning (graph, a, b, out)."""
-    graph = create_float_graph()
-    graph.set_name("pointwise_add_test")
-
-    a = hipdnn.Tensor.create([n, c, h, w], hipdnn.DataType.FLOAT)
-    a.set_name("a")
-
-    b = hipdnn.Tensor.create([n, c, h, w], hipdnn.DataType.FLOAT)
-    b.set_name("b")
-
-    attrs = hipdnn.PointwiseAttributes()
-    attrs.set_name("pointwise_add_node")
-    attrs.set_mode(hipdnn.PointwiseMode.ADD)
-
-    out = graph.pointwise(a, b, attrs)
-    out.set_name("out")
-    out.set_output(True)
-
-    return graph, a, b, out
+from .graph_builders import build_pointwise_add_graph
+from .helpers import build_all_plans, call_attribute_methods, execute_zeros
 
 
 @pytest.mark.gpu

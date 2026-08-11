@@ -9,36 +9,19 @@ import hipdnn_frontend as hipdnn
 
 import numpy as np
 
-from .helpers import (
-    access_attribute_properties,
-    call_attribute_methods,
-    build_all_plans,
-    create_float_graph,
-    execute_zeros,
-)
-
-
-def test_methods_follow_the_build_feature_gate():
-    assert hasattr(hipdnn.Graph, "sdpa") == hasattr(hipdnn.Graph, "sdpa_backward")
+from .graph_builders import build_sdpa_backward_graph, build_sdpa_graph
+from .helpers import build_all_plans, call_attribute_methods, execute_zeros
 
 
 @pytest.mark.gpu
 class TestSdpa:
-    """Tests for SDPA operation-graph construction."""
+    """Tests for SDPA plan-building and stubbed execution."""
 
     def test_execution_succeeds_when_enabled(self):
         if not hasattr(hipdnn.Graph, "sdpa"):
             pytest.skip("SDPA disabled")
 
-        graph = create_float_graph()
-        q = hipdnn.Tensor.create([2, 8, 16, 64], hipdnn.DataType.FLOAT)
-        k = hipdnn.Tensor.create([2, 8, 32, 64], hipdnn.DataType.FLOAT)
-        v = hipdnn.Tensor.create([2, 8, 32, 64], hipdnn.DataType.FLOAT)
-        outputs = graph.sdpa(q, k, v, hipdnn.SdpaAttributes().set_generate_stats(True))
-        assert isinstance(outputs, tuple)
-        assert len(outputs) == 2
-        o = outputs[0]
-        o.set_output(True)
+        graph, q, k, v, o, _stats = build_sdpa_graph()
 
         handle = build_all_plans(graph)
         execute_zeros(
@@ -50,26 +33,13 @@ class TestSdpa:
 
 @pytest.mark.gpu
 class TestSdpaBackward:
-    """Tests for SDPA backward operation-graph construction."""
+    """Tests for SDPA backward plan-building and stubbed execution."""
 
     def test_execution_succeeds_when_enabled(self):
         if not hasattr(hipdnn.Graph, "sdpa_backward"):
             pytest.skip("SDPA disabled")
 
-        graph = create_float_graph()
-        q = hipdnn.Tensor.create([2, 8, 16, 64], hipdnn.DataType.FLOAT)
-        k = hipdnn.Tensor.create([2, 8, 32, 64], hipdnn.DataType.FLOAT)
-        v = hipdnn.Tensor.create([2, 8, 32, 64], hipdnn.DataType.FLOAT)
-        o = hipdnn.Tensor.create([2, 8, 16, 64], hipdnn.DataType.FLOAT)
-        d_o = hipdnn.Tensor.create([2, 8, 16, 64], hipdnn.DataType.FLOAT)
-        stats = hipdnn.Tensor.create([2, 8, 16, 1], hipdnn.DataType.FLOAT)
-        outputs = graph.sdpa_backward(
-            q, k, v, o, d_o, stats, hipdnn.SdpaBackwardAttributes()
-        )
-        assert isinstance(outputs, tuple)
-        assert len(outputs) == 3
-        for output in outputs:
-            output.set_output(True)
+        graph, q, k, v, o, d_o, stats, dq, dk, dv = build_sdpa_backward_graph()
 
         handle = build_all_plans(graph)
         execute_zeros(
@@ -81,8 +51,10 @@ class TestSdpaBackward:
                 (o, np.float32),
                 (d_o, np.float32),
                 (stats, np.float32),
-            ]
-            + [(output, np.float32) for output in outputs],
+                (dq, np.float32),
+                (dk, np.float32),
+                (dv, np.float32),
+            ],
             handle,
         )
 
@@ -150,60 +122,53 @@ class TestSdpaAttributeBindings:
                     "get_compute_data_type",
                     hipdnn.DataType.FLOAT,
                 ),
-                # These fluent setters have no matching getter method; the paired
-                # def_rw property (verified below via access_attribute_properties)
-                # is the only way to read the value back.
-                ("set_generate_stats", (True,), None, None),
-                ("set_alibi_mask", (True,), None, None),
-                ("set_padding_mask", (True,), None, None),
-                ("set_causal_mask", (True,), None, None),
-                ("set_causal_mask_bottom_right", (True,), None, None),
+                # These fluent setters have no getter method; the paired def_rw
+                # property is the only way to read the value back. Each value is
+                # read immediately after it is set, while the fields set later are
+                # still at their defaults, so a setter wired to the wrong member
+                # fails here.
+                ("set_generate_stats", (True,), "generate_stats", True),
+                ("set_alibi_mask", (True,), "alibi_mask", True),
+                ("set_padding_mask", (True,), "padding_mask", True),
+                ("set_causal_mask", (True,), "causal_mask", True),
+                (
+                    "set_causal_mask_bottom_right",
+                    (True,),
+                    "causal_mask_bottom_right",
+                    True,
+                ),
                 # set_dropout(prob, mask, scale) is a convenience wrapper over the
-                # standalone dropout setters; its components round-trip there.
+                # standalone dropout setters; mask and scale round-trip there.
                 (
                     "set_dropout",
-                    (0.25, tensors["dropout_mask"], tensors["dropout_scale"]),
-                    None,
-                    None,
+                    (0.125, tensors["dropout_mask"], tensors["dropout_scale"]),
+                    "dropout_probability",
+                    0.125,
                 ),
-                ("set_dropout_probability", (0.25,), None, None),
-                ("set_attn_scale", (0.5,), None, None),
-                ("set_diagonal_band_left_bound", (1,), None, None),
-                ("set_diagonal_band_right_bound", (1,), None, None),
-                ("set_paged_attention_max_seq_len_kv", (1,), None, None),
+                ("set_dropout_probability", (0.25,), "dropout_probability", 0.25),
+                ("set_attn_scale", (0.5,), "attn_scale_value", 0.5),
+                ("set_diagonal_band_left_bound", (1,), "left_bound", 1),
+                ("set_diagonal_band_right_bound", (2,), "right_bound", 2),
+                ("set_paged_attention_max_seq_len_kv", (3,), "max_seq_len_kv", 3),
                 (
                     "set_diagonal_alignment",
                     (hipdnn.DiagonalAlignment.TOP_LEFT,),
-                    None,
-                    None,
+                    "diagonal_alignment",
+                    hipdnn.DiagonalAlignment.TOP_LEFT,
                 ),
-                ("set_mma_core_mode", (hipdnn.DataType.FLOAT,), None, None),
+                (
+                    "set_mma_core_mode",
+                    (hipdnn.DataType.FLOAT,),
+                    "mma_core_mode",
+                    hipdnn.DataType.FLOAT,
+                ),
                 (
                     "set_implementation",
                     (hipdnn.AttentionImplementation.UNIFIED,),
-                    None,
-                    None,
+                    "implementation",
+                    hipdnn.AttentionImplementation.UNIFIED,
                 ),
-                ("set_unfuse_fma", (True,), None, None),
-            ),
-        )
-        access_attribute_properties(
-            attributes,
-            (
-                ("generate_stats", True),
-                ("alibi_mask", True),
-                ("padding_mask", True),
-                ("causal_mask", True),
-                ("causal_mask_bottom_right", True),
-                ("dropout_probability", 0.25),
-                ("attn_scale_value", 0.5),
-                ("left_bound", 1),
-                ("right_bound", 1),
-                ("max_seq_len_kv", 1),
-                ("diagonal_alignment", hipdnn.DiagonalAlignment.TOP_LEFT),
-                ("mma_core_mode", hipdnn.DataType.FLOAT),
-                ("implementation", hipdnn.AttentionImplementation.UNIFIED),
-                ("unfuse_fma_hint", True),
+                ("set_unfuse_fma", (True,), "unfuse_fma_hint", True),
             ),
         )
 
@@ -251,38 +216,29 @@ class TestSdpaAttributeBindings:
                     "get_compute_data_type",
                     hipdnn.DataType.FLOAT,
                 ),
-                ("set_alibi_mask", (True,), None, None),
-                ("set_padding_mask", (True,), None, None),
-                ("set_causal_mask", (True,), None, None),
-                ("set_causal_mask_bottom_right", (True,), None, None),
+                ("set_alibi_mask", (True,), "alibi_mask", True),
+                ("set_padding_mask", (True,), "padding_mask", True),
+                ("set_causal_mask", (True,), "causal_mask", True),
+                (
+                    "set_causal_mask_bottom_right",
+                    (True,),
+                    "causal_mask_bottom_right",
+                    True,
+                ),
                 (
                     "set_dropout",
                     (0.25, tensors["dropout_mask"], tensors["dropout_scale"]),
-                    None,
-                    None,
+                    "dropout_probability",
+                    0.25,
                 ),
-                ("set_attn_scale", (0.5,), None, None),
-                ("set_diagonal_band_left_bound", (1,), None, None),
-                ("set_diagonal_band_right_bound", (1,), None, None),
+                ("set_attn_scale", (0.5,), "attn_scale_value", 0.5),
+                ("set_diagonal_band_left_bound", (1,), "left_bound", 1),
+                ("set_diagonal_band_right_bound", (2,), "right_bound", 2),
                 (
                     "set_diagonal_alignment",
                     (hipdnn.DiagonalAlignment.TOP_LEFT,),
-                    None,
-                    None,
+                    "diagonal_alignment",
+                    hipdnn.DiagonalAlignment.TOP_LEFT,
                 ),
-            ),
-        )
-        access_attribute_properties(
-            attributes,
-            (
-                ("alibi_mask", True),
-                ("padding_mask", True),
-                ("causal_mask", True),
-                ("causal_mask_bottom_right", True),
-                ("dropout_probability", 0.25),
-                ("attn_scale_value", 0.5),
-                ("left_bound", 1),
-                ("right_bound", 1),
-                ("diagonal_alignment", hipdnn.DiagonalAlignment.TOP_LEFT),
             ),
         )
