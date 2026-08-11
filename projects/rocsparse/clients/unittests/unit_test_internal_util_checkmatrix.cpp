@@ -55,6 +55,9 @@ class CheckMatrixCsc : public HandleTest
 {
 };
 
+// check_matrix_csc on a valid 2x2 CSC identity: the buffer-size query and the
+// device validation must both succeed and report data_status == success. (The
+// query result is a prerequisite of the check, so the two stages stay together.)
 TEST_F(CheckMatrixCsc, buffer_size_then_check)
 {
     // 2x2 identity in CSC: col_ptr = {0,1,2}, row_ind = {0,1}, val = {1,1}.
@@ -64,9 +67,10 @@ TEST_F(CheckMatrixCsc, buffer_size_then_check)
     ASSERT_TRUE(col_ptr.ptr && row_ind.ptr && val.ptr);
 
     size_t buffer_size = 0;
-    ASSERT_EQ(rocsparse_scheck_matrix_csc_buffer_size(
-                  handle, 2, 2, 2, val, col_ptr, row_ind, BASE, GENERAL, LOWER, SORTED, &buffer_size),
-              rocsparse_status_success);
+    ASSERT_EQ(
+        rocsparse_scheck_matrix_csc_buffer_size(
+            handle, 2, 2, 2, val, col_ptr, row_ind, BASE, GENERAL, LOWER, SORTED, &buffer_size),
+        rocsparse_status_success);
 
     device_vector<char> tmp{buffer_size ? buffer_size : size_t(1)};
     ASSERT_TRUE(tmp.ptr);
@@ -89,6 +93,8 @@ TEST_F(CheckMatrixCsc, buffer_size_then_check)
     EXPECT_EQ(data_status, rocsparse_data_status_success);
 }
 
+// check_matrix_csc bad args: invalid handle / negative size / invalid base enum
+// / null value array on the buffer-size query, and null temp buffer on the check.
 TEST_F(CheckMatrixCsc, bad_args)
 {
     device_vector<int32_t> col_ptr{std::vector<int32_t>{0, 1, 2}};
@@ -120,20 +126,10 @@ TEST_F(CheckMatrixCsc, bad_args)
               rocsparse_status_invalid_pointer);
 
     rocsparse_data_status ds;
-    EXPECT_EQ(rocsparse_scheck_matrix_csc(handle,
-                                          2,
-                                          2,
-                                          2,
-                                          val,
-                                          col_ptr,
-                                          row_ind,
-                                          BASE,
-                                          GENERAL,
-                                          LOWER,
-                                          SORTED,
-                                          &ds,
-                                          nullptr),
-              rocsparse_status_invalid_pointer);
+    EXPECT_EQ(
+        rocsparse_scheck_matrix_csc(
+            handle, 2, 2, 2, val, col_ptr, row_ind, BASE, GENERAL, LOWER, SORTED, &ds, nullptr),
+        rocsparse_status_invalid_pointer);
 }
 
 // ===========================================================================
@@ -143,6 +139,8 @@ class CheckMatrixEll : public HandleTest
 {
 };
 
+// check_matrix_ell on a valid 2x2 ELL identity (ell_width 1): buffer-size query
+// and validation succeed with data_status == success.
 TEST_F(CheckMatrixEll, buffer_size_then_check)
 {
     // 2x2 identity in ELL: ell_width = 1, val = {1,1}, col_ind = {0,1}.
@@ -159,12 +157,15 @@ TEST_F(CheckMatrixEll, buffer_size_then_check)
     ASSERT_TRUE(tmp.ptr);
 
     rocsparse_data_status data_status;
-    ASSERT_EQ(rocsparse_scheck_matrix_ell(
-                  handle, 2, 2, 1, val, col_ind, BASE, GENERAL, LOWER, SORTED, &data_status, tmp.ptr),
-              rocsparse_status_success);
+    ASSERT_EQ(
+        rocsparse_scheck_matrix_ell(
+            handle, 2, 2, 1, val, col_ind, BASE, GENERAL, LOWER, SORTED, &data_status, tmp.ptr),
+        rocsparse_status_success);
     EXPECT_EQ(data_status, rocsparse_data_status_success);
 }
 
+// check_matrix_ell bad args: invalid handle, negative size, and the ELL-only
+// restriction that non-general / invalid matrix_type enums are rejected.
 TEST_F(CheckMatrixEll, bad_args)
 {
     device_vector<int32_t> col_ind{std::vector<int32_t>{0, 1}};
@@ -211,6 +212,8 @@ class CheckMatrixGebsr : public HandleTest
 {
 };
 
+// check_matrix_gebsr on a valid 2x2 block-identity (1x1 blocks): buffer-size
+// query and validation succeed with data_status == success.
 TEST_F(CheckMatrixGebsr, buffer_size_then_check)
 {
     // 2x2 block identity, 1x1 blocks: row_ptr = {0,1,2}, col_ind = {0,1}, val = {1,1}.
@@ -219,7 +222,7 @@ TEST_F(CheckMatrixGebsr, buffer_size_then_check)
     device_vector<float>   val{std::vector<float>{1.0f, 1.0f}};
     ASSERT_TRUE(row_ptr.ptr && col_ind.ptr && val.ptr);
 
-    const rocsparse_direction dir = rocsparse_direction_row;
+    const rocsparse_direction dir         = rocsparse_direction_row;
     size_t                    buffer_size = 0;
     ASSERT_EQ(rocsparse_scheck_matrix_gebsr_buffer_size(handle,
                                                         dir,
@@ -262,17 +265,20 @@ TEST_F(CheckMatrixGebsr, buffer_size_then_check)
     EXPECT_EQ(data_status, rocsparse_data_status_success);
 }
 
+// check_matrix_gebsr bad args: invalid handle, invalid direction enum, negative
+// size, and null buffer-size pointer are each rejected.
 TEST_F(CheckMatrixGebsr, bad_args)
 {
-    device_vector<int32_t> row_ptr{std::vector<int32_t>{0, 1, 2}};
-    device_vector<int32_t> col_ind{std::vector<int32_t>{0, 1}};
-    device_vector<float>   val{std::vector<float>{1.0f, 1.0f}};
+    device_vector<int32_t>    row_ptr{std::vector<int32_t>{0, 1, 2}};
+    device_vector<int32_t>    col_ind{std::vector<int32_t>{0, 1}};
+    device_vector<float>      val{std::vector<float>{1.0f, 1.0f}};
     const rocsparse_direction dir = rocsparse_direction_row;
     size_t                    bs  = 0;
 
-    EXPECT_EQ(rocsparse_scheck_matrix_gebsr_buffer_size(
-                  nullptr, dir, 2, 2, 2, 1, 1, val, row_ptr, col_ind, BASE, GENERAL, LOWER, SORTED, &bs),
-              rocsparse_status_invalid_handle);
+    EXPECT_EQ(
+        rocsparse_scheck_matrix_gebsr_buffer_size(
+            nullptr, dir, 2, 2, 2, 1, 1, val, row_ptr, col_ind, BASE, GENERAL, LOWER, SORTED, &bs),
+        rocsparse_status_invalid_handle);
     EXPECT_EQ(rocsparse_scheck_matrix_gebsr_buffer_size(handle,
                                                         static_cast<rocsparse_direction>(-1),
                                                         2,
@@ -289,11 +295,25 @@ TEST_F(CheckMatrixGebsr, bad_args)
                                                         SORTED,
                                                         &bs),
               rocsparse_status_invalid_value);
-    EXPECT_EQ(rocsparse_scheck_matrix_gebsr_buffer_size(
-                  handle, dir, -1, 2, 2, 1, 1, val, row_ptr, col_ind, BASE, GENERAL, LOWER, SORTED, &bs),
-              rocsparse_status_invalid_size);
-    EXPECT_EQ(rocsparse_scheck_matrix_gebsr_buffer_size(
-                  handle, dir, 2, 2, 2, 1, 1, val, row_ptr, col_ind, BASE, GENERAL, LOWER, SORTED, nullptr),
+    EXPECT_EQ(
+        rocsparse_scheck_matrix_gebsr_buffer_size(
+            handle, dir, -1, 2, 2, 1, 1, val, row_ptr, col_ind, BASE, GENERAL, LOWER, SORTED, &bs),
+        rocsparse_status_invalid_size);
+    EXPECT_EQ(rocsparse_scheck_matrix_gebsr_buffer_size(handle,
+                                                        dir,
+                                                        2,
+                                                        2,
+                                                        2,
+                                                        1,
+                                                        1,
+                                                        val,
+                                                        row_ptr,
+                                                        col_ind,
+                                                        BASE,
+                                                        GENERAL,
+                                                        LOWER,
+                                                        SORTED,
+                                                        nullptr),
               rocsparse_status_invalid_pointer);
 }
 
@@ -304,6 +324,8 @@ class CheckMatrixGebsc : public HandleTest
 {
 };
 
+// check_matrix_gebsc on a valid 2x2 block-identity in GEBSC (1x1 blocks):
+// buffer-size query and validation succeed with data_status == success.
 TEST_F(CheckMatrixGebsc, buffer_size_then_check)
 {
     // 2x2 block identity in GEBSC, 1x1 blocks: col_ptr={0,1,2}, row_ind={0,1}.
@@ -312,7 +334,7 @@ TEST_F(CheckMatrixGebsc, buffer_size_then_check)
     device_vector<float>   val{std::vector<float>{1.0f, 1.0f}};
     ASSERT_TRUE(col_ptr.ptr && row_ind.ptr && val.ptr);
 
-    const rocsparse_direction dir = rocsparse_direction_row;
+    const rocsparse_direction dir         = rocsparse_direction_row;
     size_t                    buffer_size = 0;
     ASSERT_EQ(rocsparse_scheck_matrix_gebsc_buffer_size(handle,
                                                         dir,
@@ -355,19 +377,35 @@ TEST_F(CheckMatrixGebsc, buffer_size_then_check)
     EXPECT_EQ(data_status, rocsparse_data_status_success);
 }
 
+// check_matrix_gebsc bad args: invalid handle and null buffer-size pointer are
+// rejected by the buffer-size query.
 TEST_F(CheckMatrixGebsc, bad_args)
 {
-    device_vector<int32_t> col_ptr{std::vector<int32_t>{0, 1, 2}};
-    device_vector<int32_t> row_ind{std::vector<int32_t>{0, 1}};
-    device_vector<float>   val{std::vector<float>{1.0f, 1.0f}};
+    device_vector<int32_t>    col_ptr{std::vector<int32_t>{0, 1, 2}};
+    device_vector<int32_t>    row_ind{std::vector<int32_t>{0, 1}};
+    device_vector<float>      val{std::vector<float>{1.0f, 1.0f}};
     const rocsparse_direction dir = rocsparse_direction_row;
     size_t                    bs  = 0;
 
-    EXPECT_EQ(rocsparse_scheck_matrix_gebsc_buffer_size(
-                  nullptr, dir, 2, 2, 2, 1, 1, val, col_ptr, row_ind, BASE, GENERAL, LOWER, SORTED, &bs),
-              rocsparse_status_invalid_handle);
-    EXPECT_EQ(rocsparse_scheck_matrix_gebsc_buffer_size(
-                  handle, dir, 2, 2, 2, 1, 1, val, col_ptr, row_ind, BASE, GENERAL, LOWER, SORTED, nullptr),
+    EXPECT_EQ(
+        rocsparse_scheck_matrix_gebsc_buffer_size(
+            nullptr, dir, 2, 2, 2, 1, 1, val, col_ptr, row_ind, BASE, GENERAL, LOWER, SORTED, &bs),
+        rocsparse_status_invalid_handle);
+    EXPECT_EQ(rocsparse_scheck_matrix_gebsc_buffer_size(handle,
+                                                        dir,
+                                                        2,
+                                                        2,
+                                                        2,
+                                                        1,
+                                                        1,
+                                                        val,
+                                                        col_ptr,
+                                                        row_ind,
+                                                        BASE,
+                                                        GENERAL,
+                                                        LOWER,
+                                                        SORTED,
+                                                        nullptr),
               rocsparse_status_invalid_pointer);
 }
 
@@ -378,6 +416,9 @@ class CheckMatrixHyb : public HandleTest
 {
 };
 
+// check_matrix_hyb: build a HYB from a 3x3 identity CSR (csr2hyb, auto
+// partition) then validate it; the buffer-size query and check succeed with
+// data_status == success.
 TEST_F(CheckMatrixHyb, build_then_check)
 {
     // 3x3 identity CSR -> HYB (auto partition).
@@ -414,18 +455,23 @@ TEST_F(CheckMatrixHyb, build_then_check)
     EXPECT_EQ(rocsparse_destroy_mat_descr(descr), rocsparse_status_success);
 }
 
+// check_matrix_hyb bad args: invalid handle, null hyb matrix, null buffer-size
+// pointer, and null temp buffer on the check are each rejected.
 TEST_F(CheckMatrixHyb, bad_args)
 {
     rocsparse_hyb_mat hyb = nullptr;
     ASSERT_EQ(rocsparse_create_hyb_mat(&hyb), rocsparse_status_success);
 
     size_t bs = 0;
-    EXPECT_EQ(rocsparse_check_matrix_hyb_buffer_size(nullptr, hyb, BASE, GENERAL, LOWER, SORTED, &bs),
-              rocsparse_status_invalid_handle);
-    EXPECT_EQ(rocsparse_check_matrix_hyb_buffer_size(handle, nullptr, BASE, GENERAL, LOWER, SORTED, &bs),
-              rocsparse_status_invalid_pointer);
-    EXPECT_EQ(rocsparse_check_matrix_hyb_buffer_size(handle, hyb, BASE, GENERAL, LOWER, SORTED, nullptr),
-              rocsparse_status_invalid_pointer);
+    EXPECT_EQ(
+        rocsparse_check_matrix_hyb_buffer_size(nullptr, hyb, BASE, GENERAL, LOWER, SORTED, &bs),
+        rocsparse_status_invalid_handle);
+    EXPECT_EQ(
+        rocsparse_check_matrix_hyb_buffer_size(handle, nullptr, BASE, GENERAL, LOWER, SORTED, &bs),
+        rocsparse_status_invalid_pointer);
+    EXPECT_EQ(
+        rocsparse_check_matrix_hyb_buffer_size(handle, hyb, BASE, GENERAL, LOWER, SORTED, nullptr),
+        rocsparse_status_invalid_pointer);
 
     rocsparse_data_status ds;
     EXPECT_EQ(rocsparse_check_matrix_hyb(handle, hyb, BASE, GENERAL, LOWER, SORTED, &ds, nullptr),

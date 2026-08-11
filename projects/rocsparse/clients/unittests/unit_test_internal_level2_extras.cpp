@@ -61,6 +61,8 @@ namespace
 
     // Configure an spmv_descr for float/none/default and run the two-stage
     // (analysis then compute) v2_spmv pipeline against spmat A and dnvecs x,y.
+    // A is always the m x n identity here and x = ones, alpha = 1, beta = 0, so
+    // y = alpha*A*x + beta*y = ones(m); the result is read back and checked.
     void run_v2_spmv(rocsparse_handle handle, rocsparse_spmat_descr A, int64_t m, int64_t n)
     {
         device_vector<float> x{std::vector<float>(size_t(n), 1.0f)};
@@ -74,19 +76,15 @@ namespace
         rocsparse_spmv_descr spmv_descr = nullptr;
         ASSERT_EQ(rocsparse_create_spmv_descr(&spmv_descr), rocsparse_status_success);
 
-        const rocsparse_spmv_alg  alg  = rocsparse_spmv_alg_default;
-        const rocsparse_operation op   = rocsparse_operation_none;
-        const rocsparse_datatype  sdt  = DT;
-        const rocsparse_datatype  cdt  = DT;
+        const rocsparse_spmv_alg  alg = rocsparse_spmv_alg_default;
+        const rocsparse_operation op  = rocsparse_operation_none;
+        const rocsparse_datatype  sdt = DT;
+        const rocsparse_datatype  cdt = DT;
         ASSERT_EQ(rocsparse_spmv_set_input(
                       handle, spmv_descr, rocsparse_spmv_input_alg, &alg, sizeof(alg), nullptr),
                   rocsparse_status_success);
-        ASSERT_EQ(rocsparse_spmv_set_input(handle,
-                                           spmv_descr,
-                                           rocsparse_spmv_input_operation,
-                                           &op,
-                                           sizeof(op),
-                                           nullptr),
+        ASSERT_EQ(rocsparse_spmv_set_input(
+                      handle, spmv_descr, rocsparse_spmv_input_operation, &op, sizeof(op), nullptr),
                   rocsparse_status_success);
         ASSERT_EQ(rocsparse_spmv_set_input(handle,
                                            spmv_descr,
@@ -158,6 +156,13 @@ namespace
                   rocsparse_status_success);
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
+        // A = I, x = ones, beta = 0 => y = ones(m).
+        auto hy = to_host(y.ptr, size_t(m));
+        for(int64_t i = 0; i < m; ++i)
+        {
+            EXPECT_FLOAT_EQ(hy[size_t(i)], 1.0f) << "y[" << i << "]";
+        }
+
         EXPECT_EQ(rocsparse_destroy_spmv_descr(spmv_descr), rocsparse_status_success);
         EXPECT_EQ(rocsparse_destroy_dnvec_descr(dx), rocsparse_status_success);
         EXPECT_EQ(rocsparse_destroy_dnvec_descr(dy), rocsparse_status_success);
@@ -171,6 +176,7 @@ class V2Spmv : public HandleTest
 {
 };
 
+// v2_spmv on a CSR 3x3 identity: y = A*x = ones(3) (checked in run_v2_spmv).
 TEST_F(V2Spmv, csr)
 {
     device_vector<int32_t> row_ptr{std::vector<int32_t>{0, 1, 2, 3}};
@@ -185,6 +191,7 @@ TEST_F(V2Spmv, csr)
     EXPECT_EQ(rocsparse_destroy_spmat_descr(A), rocsparse_status_success);
 }
 
+// v2_spmv on a COO 3x3 identity: y = A*x = ones(3) (checked in run_v2_spmv).
 TEST_F(V2Spmv, coo)
 {
     device_vector<int32_t> row_ind{std::vector<int32_t>{0, 1, 2}};
@@ -216,14 +223,8 @@ TEST_F(V2Spmv, bad_args)
     ASSERT_EQ(rocsparse_create_spmv_descr(&spmv_descr), rocsparse_status_success);
 
     size_t bs = 0;
-    EXPECT_EQ(rocsparse_v2_spmv_buffer_size(nullptr,
-                                            spmv_descr,
-                                            A,
-                                            dx,
-                                            dx,
-                                            rocsparse_v2_spmv_stage_analysis,
-                                            &bs,
-                                            nullptr),
+    EXPECT_EQ(rocsparse_v2_spmv_buffer_size(
+                  nullptr, spmv_descr, A, dx, dx, rocsparse_v2_spmv_stage_analysis, &bs, nullptr),
               rocsparse_status_invalid_handle);
 
     EXPECT_EQ(rocsparse_destroy_spmv_descr(spmv_descr), rocsparse_status_success);
@@ -239,6 +240,8 @@ class BsrxMV : public HandleTest
 {
 };
 
+// bsrxmv with a block-diagonal identity (two 2x2 identity blocks) and both
+// block-rows selected by the mask: y = A*x = x = {1,2,3,4}.
 TEST_F(BsrxMV, masked_diagonal)
 {
     // bsrxmv is only implemented for block_dim >= 2, so use 2x2 blocks.
@@ -254,9 +257,9 @@ TEST_F(BsrxMV, masked_diagonal)
     device_vector<int32_t> end_ptr{std::vector<int32_t>{1, 2}};
     device_vector<int32_t> col_ind{std::vector<int32_t>{0, 1}};
     // Two 2x2 identity blocks (row-major) -> block-diagonal identity.
-    device_vector<float>   val{std::vector<float>{1.0f, 0.0f, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f}};
-    device_vector<float>   x{std::vector<float>{1.0f, 2.0f, 3.0f, 4.0f}};
-    device_vector<float>   y{std::vector<float>(4, 0.0f)};
+    device_vector<float> val{std::vector<float>{1.0f, 0.0f, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f}};
+    device_vector<float> x{std::vector<float>{1.0f, 2.0f, 3.0f, 4.0f}};
+    device_vector<float> y{std::vector<float>(4, 0.0f)};
     ASSERT_TRUE(mask.ptr && row_ptr.ptr && end_ptr.ptr && col_ind.ptr && val.ptr && x.ptr && y.ptr);
 
     MatDescr    descr;
@@ -281,6 +284,9 @@ TEST_F(BsrxMV, masked_diagonal)
                                 y),
               rocsparse_status_success);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+    // Block-diagonal identity => y = x.
+    EXPECT_EQ(to_host(y.ptr, 4), (std::vector<float>{1.0f, 2.0f, 3.0f, 4.0f}));
 }
 
 TEST_F(BsrxMV, bad_args)
@@ -323,14 +329,16 @@ class Gemvi : public HandleTest
 {
 };
 
+// gemvi y = alpha*A*x_sparse + beta*y with dense A = [[1,3],[2,4]] and sparse x
+// = {index 0 -> 5}. Only column 0 of A contributes: y = 5*{1,2} = {5,10}.
 TEST_F(Gemvi, dense_times_sparse_vector)
 {
     const rocsparse_int m = 2, n = 2, nnz = 1;
 
     size_t buffer_size = 0;
-    ASSERT_EQ(rocsparse_sgemvi_buffer_size(
-                  handle, rocsparse_operation_none, m, n, nnz, &buffer_size),
-              rocsparse_status_success);
+    ASSERT_EQ(
+        rocsparse_sgemvi_buffer_size(handle, rocsparse_operation_none, m, n, nnz, &buffer_size),
+        rocsparse_status_success);
     device_vector<char> tmp{buffer_size ? buffer_size : size_t(1)};
     ASSERT_TRUE(tmp.ptr);
 

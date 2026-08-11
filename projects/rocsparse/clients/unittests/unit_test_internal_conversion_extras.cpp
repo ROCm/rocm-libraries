@@ -74,17 +74,56 @@ namespace
 
 // ===========================================================================
 // gebsr2gebsc : transpose a GEBSR matrix into GEBSC layout.
+//
+// With 1x1 blocks this is exactly a CSR -> CSC transpose. The input GEBSR
+// matrix is the non-symmetric
+//
+//     A = | 0  2 |     (row-major GEBSR: row 0 -> col 1 = 2, row 1 -> col 0 = 3)
+//         | 3  0 |
+//
+// so the transpose is observable in the output layout:
+//   bsc_col_ptr = {0, 1, 2}, bsc_row_ind = {1, 0}, bsc_val = {3, 2}.
 // ===========================================================================
+namespace
+{
+    // Shared, hoisted description of the tiny GEBSR input used by the tests below
+    // (mb = nb = nnzb = 2, 1x1 blocks, zero-based).
+    const std::vector<int32_t> gebsr_row_ptr{0, 1, 2};
+    const std::vector<int32_t> gebsr_col_ind{1, 0};
+    const std::vector<float>   gebsr_val{2.0f, 3.0f};
+
+    // Expected GEBSC (transpose) of the matrix above.
+    const std::vector<int32_t> expected_bsc_col_ptr{0, 1, 2};
+    const std::vector<int32_t> expected_bsc_row_ind{1, 0};
+    const std::vector<float>   expected_bsc_val{3.0f, 2.0f};
+}
+
 class Gebsr2Gebsc : public HandleTest
 {
 };
 
-TEST_F(Gebsr2Gebsc, buffer_size_then_convert)
+// gebsr2gebsc_buffer_size: the buffer-size query alone must succeed and report a
+// size (it drives the sort scratch estimate). Split out from the convert case.
+TEST_F(Gebsr2Gebsc, buffer_size)
 {
-    // 2x2 block identity, 1x1 blocks.
-    device_vector<int32_t> row_ptr{std::vector<int32_t>{0, 1, 2}};
-    device_vector<int32_t> col_ind{std::vector<int32_t>{0, 1}};
-    device_vector<float>   val{std::vector<float>{2.0f, 3.0f}};
+    device_vector<int32_t> row_ptr{gebsr_row_ptr};
+    device_vector<int32_t> col_ind{gebsr_col_ind};
+    device_vector<float>   val{gebsr_val};
+    ASSERT_TRUE(row_ptr.ptr && col_ind.ptr && val.ptr);
+
+    size_t buffer_size = 0;
+    ASSERT_EQ(rocsparse_sgebsr2gebsc_buffer_size(
+                  handle, 2, 2, 2, val, row_ptr, col_ind, 1, 1, &buffer_size),
+              rocsparse_status_success);
+}
+
+// gebsr2gebsc (numeric): transpose the 2x2 matrix and verify the produced
+// GEBSC arrays (col_ptr / row_ind / val) equal the analytic transpose.
+TEST_F(Gebsr2Gebsc, transpose_values)
+{
+    device_vector<int32_t> row_ptr{gebsr_row_ptr};
+    device_vector<int32_t> col_ind{gebsr_col_ind};
+    device_vector<float>   val{gebsr_val};
     ASSERT_TRUE(row_ptr.ptr && col_ind.ptr && val.ptr);
 
     size_t buffer_size = 0;
@@ -117,20 +156,33 @@ TEST_F(Gebsr2Gebsc, buffer_size_then_convert)
                                      tmp.ptr),
               rocsparse_status_success);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+    EXPECT_EQ(to_host(bsc_col_ptr.ptr, 3), expected_bsc_col_ptr);
+    EXPECT_EQ(to_host(bsc_row_ind.ptr, 2), expected_bsc_row_ind);
+    EXPECT_EQ(to_host(bsc_val.ptr, 2), expected_bsc_val);
 }
 
+// gebsr2gebsc bad args: null handle and null buffer-size pointer are rejected.
 TEST_F(Gebsr2Gebsc, bad_args)
 {
-    device_vector<int32_t> row_ptr{std::vector<int32_t>{0, 1, 2}};
-    device_vector<int32_t> col_ind{std::vector<int32_t>{0, 1}};
-    device_vector<float>   val{std::vector<float>{2.0f, 3.0f}};
+    device_vector<int32_t> row_ptr{gebsr_row_ptr};
+    device_vector<int32_t> col_ind{gebsr_col_ind};
+    device_vector<float>   val{gebsr_val};
     size_t                 bs = 0;
 
-    EXPECT_EQ(rocsparse_sgebsr2gebsc_buffer_size(
-                  nullptr, 2, 2, 2, val, row_ptr, col_ind, 1, 1, &bs),
-              rocsparse_status_invalid_handle);
-    EXPECT_EQ(rocsparse_sgebsr2gebsc_buffer_size(
-                  handle, 2, 2, 2, val, row_ptr, col_ind, 1, 1, nullptr),
+    EXPECT_EQ(
+        rocsparse_sgebsr2gebsc_buffer_size(nullptr, 2, 2, 2, val, row_ptr, col_ind, 1, 1, &bs),
+        rocsparse_status_invalid_handle);
+    EXPECT_EQ(
+        rocsparse_sgebsr2gebsc_buffer_size(handle, 2, 2, 2, val, row_ptr, col_ind, 1, 1, nullptr),
+        rocsparse_status_invalid_pointer);
+    // Null value / index arrays are rejected by the buffer-size query.
+    EXPECT_EQ(
+        rocsparse_sgebsr2gebsc_buffer_size(handle, 2, 2, 2, nullptr, row_ptr, col_ind, 1, 1, &bs),
+        rocsparse_status_invalid_pointer);
+    EXPECT_EQ(rocsparse_sgebsr2gebsc_buffer_size(handle, 2, 2, 2, val, nullptr, col_ind, 1, 1, &bs),
+              rocsparse_status_invalid_pointer);
+    EXPECT_EQ(rocsparse_sgebsr2gebsc_buffer_size(handle, 2, 2, 2, val, row_ptr, nullptr, 1, 1, &bs),
               rocsparse_status_invalid_pointer);
 }
 
@@ -141,6 +193,10 @@ class PruneCsr2CsrByPct : public HandleTest
 {
 };
 
+// prune_csr2csr_by_percentage full pipeline: buffer_size -> nnz -> compute on
+// A = diag(1, 4) pruning the smallest 50% of the magnitudes. The single largest
+// entry (4 at row 1, col 1) must survive: nnz_C = 1, val_C = {4}, col_ind_C = {1},
+// row_ptr_C = {0, 0, 1}.
 TEST_F(PruneCsr2CsrByPct, full_pipeline)
 {
     // A = 2x2 with entries {1, 4} (identity pattern), prune bottom 50%.
@@ -216,6 +272,13 @@ TEST_F(PruneCsr2CsrByPct, full_pipeline)
                                                      tmp.ptr),
               rocsparse_status_success);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+    // Pruning the smaller-magnitude half of {1, 4} keeps only the 4.
+    EXPECT_EQ(nnz_C, 1);
+    EXPECT_EQ(to_host(row_ptr_C.ptr, 3), (std::vector<int32_t>{0, 0, 1}));
+    ASSERT_GE(nnz_C, 1);
+    EXPECT_EQ(to_host(col_ind_C.ptr, 1), (std::vector<int32_t>{1}));
+    EXPECT_FLOAT_EQ(to_host(val_C.ptr, 1)[0], 4.0f);
 }
 
 TEST_F(PruneCsr2CsrByPct, bad_args)
@@ -271,6 +334,11 @@ class PruneDense2CsrByPct : public HandleTest
 {
 };
 
+// prune_dense2csr_by_percentage full pipeline: buffer_size -> nnz -> compute on
+// dense A = [[1,0],[0,4]] pruning the smallest 50% of the magnitudes. Unlike the
+// csr2csr variant, the percentile here is taken over *all* m*n = 4 dense entries
+// (including the two zeros), so the 50% cut removes exactly those two zeros and
+// keeps both nonzeros: nnz = 2, row_ptr = {0,1,2}, col_ind = {0,1}, val = {1,4}.
 TEST_F(PruneDense2CsrByPct, full_pipeline)
 {
     // 2x2 dense column-major A = [[1,0],[0,4]] (lda = 2).
@@ -316,6 +384,13 @@ TEST_F(PruneDense2CsrByPct, full_pipeline)
                   handle, 2, 2, A, 2, percentage, descr.d, val, row_ptr, col_ind, info.i, tmp.ptr),
               rocsparse_status_success);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+    // The 50% cut over all 4 dense entries drops the two zeros; both nonzeros stay.
+    EXPECT_EQ(nnz, 2);
+    EXPECT_EQ(to_host(row_ptr.ptr, 3), (std::vector<int32_t>{0, 1, 2}));
+    ASSERT_GE(nnz, 2);
+    EXPECT_EQ(to_host(col_ind.ptr, 2), (std::vector<int32_t>{0, 1}));
+    EXPECT_EQ(to_host(val.ptr, 2), (std::vector<float>{1.0f, 4.0f}));
 }
 
 TEST_F(PruneDense2CsrByPct, bad_args)

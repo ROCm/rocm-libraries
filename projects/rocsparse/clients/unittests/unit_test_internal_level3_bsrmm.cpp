@@ -61,6 +61,9 @@ class BsrMM : public HandleTest
 {
 };
 
+// bsrmm C = alpha*A*B + beta*C with A = 2x2 block identity (1x1 blocks),
+// B = [[1,2],[3,4]] (column-major {1,3,2,4}), alpha=1, beta=0. Since A = I the
+// result is exactly B, so C (column-major) must equal {1,3,2,4}.
 TEST_F(BsrMM, identity_times_dense)
 {
     const rocsparse_direction dir       = rocsparse_direction_row;
@@ -74,8 +77,8 @@ TEST_F(BsrMM, identity_times_dense)
     device_vector<int32_t> col_ind{std::vector<int32_t>{0, 1}};
     device_vector<float>   val{std::vector<float>{1.0f, 1.0f}};
     // B column-major 2x2 = [[1,2],[3,4]] -> {1,3,2,4}
-    device_vector<float>   B{std::vector<float>{1.0f, 3.0f, 2.0f, 4.0f}};
-    device_vector<float>   C{std::vector<float>(4, 0.0f)};
+    device_vector<float> B{std::vector<float>{1.0f, 3.0f, 2.0f, 4.0f}};
+    device_vector<float> C{std::vector<float>(4, 0.0f)};
     ASSERT_TRUE(row_ptr.ptr && col_ind.ptr && val.ptr && B.ptr && C.ptr);
 
     MatDescr descr;
@@ -104,9 +107,11 @@ TEST_F(BsrMM, identity_times_dense)
               rocsparse_status_success);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
-    // A = I so C = B.
+    // A = I so C = B (column-major {1,3,2,4}).
     auto hc = to_host(C.ptr, 4);
     EXPECT_FLOAT_EQ(hc[0], 1.0f);
+    EXPECT_FLOAT_EQ(hc[1], 3.0f);
+    EXPECT_FLOAT_EQ(hc[2], 2.0f);
     EXPECT_FLOAT_EQ(hc[3], 4.0f);
 }
 
@@ -171,6 +176,8 @@ class GebsrMM : public HandleTest
 {
 };
 
+// gebsrmm C = alpha*A*B + beta*C, same tiny identity problem as BsrMM but via
+// the general block API (row_block_dim == col_block_dim == 1). C == B.
 TEST_F(GebsrMM, identity_times_dense)
 {
     const rocsparse_direction dir = rocsparse_direction_row;
@@ -209,8 +216,11 @@ TEST_F(GebsrMM, identity_times_dense)
               rocsparse_status_success);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
+    // A = I so C = B (column-major {1,3,2,4}).
     auto hc = to_host(C.ptr, 4);
     EXPECT_FLOAT_EQ(hc[0], 1.0f);
+    EXPECT_FLOAT_EQ(hc[1], 3.0f);
+    EXPECT_FLOAT_EQ(hc[2], 2.0f);
     EXPECT_FLOAT_EQ(hc[3], 4.0f);
 }
 

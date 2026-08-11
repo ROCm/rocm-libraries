@@ -61,6 +61,9 @@ class BsrGeam : public HandleTest
 {
 };
 
+// bsrgeam C = alpha*A + beta*B on 2x2 block-identity A, B (1x1 blocks) with
+// val_A = {1,1}, val_B = {2,2}, alpha = beta = 1. Same pattern => nnzb_C = 2 and
+// each diagonal block value is 1*1 + 1*2 = 3.
 TEST_F(BsrGeam, full_pipeline)
 {
     const rocsparse_direction dir       = rocsparse_direction_row;
@@ -185,7 +188,7 @@ TEST_F(BsrGeam, bad_args)
                                      &nnzb_C),
               rocsparse_status_invalid_size);
 
-    const float alpha = 1.0f, beta = 1.0f;
+    const float            alpha = 1.0f, beta = 1.0f;
     device_vector<int32_t> col_ind_C{size_t(2)};
     device_vector<float>   val_C{size_t(2)};
     EXPECT_EQ(rocsparse_sbsrgeam(nullptr,
@@ -226,6 +229,9 @@ class SpGeam : public HandleTest
 {
 };
 
+// spgeam full pipeline (analysis -> compute) on CSR A = I(3), B = 2*I(3) with
+// alpha = beta = 1: C = 1*I + 1*(2I) = 3*I, so nnz_C = 3, row_ptr_C = {0,1,2,3},
+// col_ind_C = {0,1,2}, val_C = {3,3,3}.
 TEST_F(SpGeam, csr_full_pipeline)
 {
     // A = B = 3x3 identity (CSR).
@@ -258,34 +264,22 @@ TEST_F(SpGeam, csr_full_pipeline)
     ASSERT_EQ(rocsparse_spgeam_set_input(
                   handle, descr, rocsparse_spgeam_input_alg, &alg, sizeof(alg), p_error),
               rocsparse_status_success);
-    ASSERT_EQ(rocsparse_spgeam_set_input(handle,
-                                         descr,
-                                         rocsparse_spgeam_input_operation_A,
-                                         &trans_A,
-                                         sizeof(trans_A),
-                                         p_error),
-              rocsparse_status_success);
-    ASSERT_EQ(rocsparse_spgeam_set_input(handle,
-                                         descr,
-                                         rocsparse_spgeam_input_operation_B,
-                                         &trans_B,
-                                         sizeof(trans_B),
-                                         p_error),
-              rocsparse_status_success);
-    ASSERT_EQ(rocsparse_spgeam_set_input(handle,
-                                         descr,
-                                         rocsparse_spgeam_input_scalar_datatype,
-                                         &sdt,
-                                         sizeof(sdt),
-                                         p_error),
-              rocsparse_status_success);
-    ASSERT_EQ(rocsparse_spgeam_set_input(handle,
-                                         descr,
-                                         rocsparse_spgeam_input_compute_datatype,
-                                         &cdt,
-                                         sizeof(cdt),
-                                         p_error),
-              rocsparse_status_success);
+    ASSERT_EQ(
+        rocsparse_spgeam_set_input(
+            handle, descr, rocsparse_spgeam_input_operation_A, &trans_A, sizeof(trans_A), p_error),
+        rocsparse_status_success);
+    ASSERT_EQ(
+        rocsparse_spgeam_set_input(
+            handle, descr, rocsparse_spgeam_input_operation_B, &trans_B, sizeof(trans_B), p_error),
+        rocsparse_status_success);
+    ASSERT_EQ(
+        rocsparse_spgeam_set_input(
+            handle, descr, rocsparse_spgeam_input_scalar_datatype, &sdt, sizeof(sdt), p_error),
+        rocsparse_status_success);
+    ASSERT_EQ(
+        rocsparse_spgeam_set_input(
+            handle, descr, rocsparse_spgeam_input_compute_datatype, &cdt, sizeof(cdt), p_error),
+        rocsparse_status_success);
 
     // Analysis stage (matC == nullptr).
     size_t buffer_size = 0;
@@ -328,33 +322,21 @@ TEST_F(SpGeam, csr_full_pipeline)
                   &matC, 3, 3, nnz_C, row_ptr_C, col_ind_C, val_C, GIT, GIT, GBASE, GDT),
               rocsparse_status_success);
 
-    ASSERT_EQ(rocsparse_spgeam_buffer_size(handle,
-                                           descr,
-                                           matA,
-                                           matB,
-                                           matC,
-                                           rocsparse_spgeam_stage_compute,
-                                           &buffer_size,
-                                           p_error),
-              rocsparse_status_success);
+    ASSERT_EQ(
+        rocsparse_spgeam_buffer_size(
+            handle, descr, matA, matB, matC, rocsparse_spgeam_stage_compute, &buffer_size, p_error),
+        rocsparse_status_success);
 
     // scalar_alpha/beta store the passed pointer itself as the scalar location
     // (set_scalar_A/B(data)); the expected size is sizeof(void*) and the pointed-to
     // scalars must outlive the compute call.
     const float alpha = 1.0f, beta = 1.0f;
-    ASSERT_EQ(rocsparse_spgeam_set_input(handle,
-                                         descr,
-                                         rocsparse_spgeam_input_scalar_alpha,
-                                         &alpha,
-                                         sizeof(void*),
-                                         p_error),
-              rocsparse_status_success);
-    ASSERT_EQ(rocsparse_spgeam_set_input(handle,
-                                         descr,
-                                         rocsparse_spgeam_input_scalar_beta,
-                                         &beta,
-                                         sizeof(void*),
-                                         p_error),
+    ASSERT_EQ(
+        rocsparse_spgeam_set_input(
+            handle, descr, rocsparse_spgeam_input_scalar_alpha, &alpha, sizeof(void*), p_error),
+        rocsparse_status_success);
+    ASSERT_EQ(rocsparse_spgeam_set_input(
+                  handle, descr, rocsparse_spgeam_input_scalar_beta, &beta, sizeof(void*), p_error),
               rocsparse_status_success);
 
     device_vector<char> buf2{buffer_size ? buffer_size : size_t(1)};
@@ -370,6 +352,12 @@ TEST_F(SpGeam, csr_full_pipeline)
                                p_error),
               rocsparse_status_success);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+    // C = I + 2I = 3I.
+    EXPECT_EQ(nnz_C, 3);
+    EXPECT_EQ(to_host(row_ptr_C.ptr, 4), (std::vector<int32_t>{0, 1, 2, 3}));
+    EXPECT_EQ(to_host(col_ind_C.ptr, 3), (std::vector<int32_t>{0, 1, 2}));
+    EXPECT_EQ(to_host(val_C.ptr, 3), (std::vector<float>{3.0f, 3.0f, 3.0f}));
 
     EXPECT_EQ(rocsparse_destroy_spmat_descr(matA), rocsparse_status_success);
     EXPECT_EQ(rocsparse_destroy_spmat_descr(matB), rocsparse_status_success);
