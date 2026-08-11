@@ -63,14 +63,21 @@ def _load_lib() -> ctypes.CDLL:
     # torch-shipped libamd_comgr is preferred over /opt/rocm when torch is
     # in the process.
     err = None
+    tried: List[str] = []
     for p in _candidate_lib_paths("amd_comgr", "ROCKE_COMGR_LIB", ["3"]):
+        exists = os.path.exists(p) if os.path.isabs(p) else None
+        tried.append(p if exists is None else f"{p} (exists={exists})")
         try:
             _add_dll_dir(p)
             return ctypes.CDLL(p)
         except OSError as e:
             err = e
     name = "amd_comgr.dll" if _IS_WINDOWS else "libamd_comgr.so"
-    raise ComgrError(f"cannot load {name} ({err!r})")
+    raise ComgrError(
+        f"cannot load {name} ({err!r}); tried {tried}. "
+        "Set ROCKE_COMGR_LIB to the full path of the comgr shared library, or "
+        "put its directory (with its dependent libraries) on the loader path."
+    )
 
 
 # Lazy: resolved on first call so that rocke and torch can be imported

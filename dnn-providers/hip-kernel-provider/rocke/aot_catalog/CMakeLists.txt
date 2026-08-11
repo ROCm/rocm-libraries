@@ -181,11 +181,21 @@ function(rocke_add_aot_family)
         return()
     endif()
 
-    # Env for the producer: optional comgr override; quiet the C++-engine fallback
-    # (the pure-Python lowerer is used when the rocke_engine extension is absent).
+    # Env for the producer: quiet the C++-engine fallback (the pure-Python lowerer
+    # is used when the rocke_engine extension is absent), and -- crucially -- tell
+    # the producer where comgr is. The producer runs under ${ROCKE_PYENV_PYTHON}, a
+    # bare build-local venv with NEITHER the rocm-sdk wheel NOR ROCM_PATH/HIP_PATH
+    # on its environment, so rocke.runtime.comgr's own discovery has nothing to go
+    # on -- on Windows especially it then cannot find amd_comgr.dll or its dependent
+    # DLLs and the producer aborts. We already resolved comgr above (_aot_comgr);
+    # forward that as the explicit override, plus the ROCm root so the loader can
+    # register the DLL's directory (its dependencies live beside it).
     set(_env ROCKE_CPP_QUIET_FALLBACK=1)
-    if(ROCKE_COMGR_LIB)
-        list(APPEND _env ROCKE_COMGR_LIB=${ROCKE_COMGR_LIB})
+    if(_aot_comgr)
+        list(APPEND _env ROCKE_COMGR_LIB=${_aot_comgr})
+    endif()
+    if(ROCM_PATH)
+        list(APPEND _env ROCM_PATH=${ROCM_PATH})
     endif()
 
     set(_stamp ${CMAKE_CURRENT_BINARY_DIR}/${F_FAMILY}.stamp)
