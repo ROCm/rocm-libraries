@@ -159,7 +159,8 @@ std::vector<float> generateMXInput(hipDataType            dataType,
                                    std::string_view const initMethod,
                                    float                  min_val,
                                    float                  max_val,
-                                   std::string_view const scaleInitMethod)
+                                   std::string_view const scaleInitMethod,
+                                   uint32_t               seed)
 {
     const ScalarType hostDataType = roc::host_validation::hipblaslt_adapter::scalarType(dataType);
     MxGenerationProblem problem;
@@ -172,6 +173,7 @@ std::vector<float> generateMXInput(hipDataType            dataType,
     problem.data             = generationRecipe(initMethod, hostDataType, min_val, max_val);
     if(!scaleInitMethod.empty())
         problem.scale = generationRecipe(scaleInitMethod, hostDataType, -1.0f, 1.0f);
+    problem.seed = seed;
 
     roc::host_validation::MxGenerationResult result = roc::host_validation::generateMx(problem);
     std::memcpy(data, result.data.storage().data(), result.data.storage().size());
