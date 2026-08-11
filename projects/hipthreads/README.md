@@ -1,10 +1,13 @@
 # hipThreads : C++-style concurrency library for AMD GPUs
 
+> [!NOTE]
+> The published hipThreads documentation is available [here](https://rocm.docs.amd.com/projects/hipThreads/en/latest/) in an organized, easy-to-read format, with search and a table of contents. The documentation source files are located in the `projects/hipThreads/docs/` folder. As with all ROCm projects, the documentation is open source.
+
 ## Introduction
 
 hipThreads is a C++-style concurrency library for AMD GPUs that brings familiar threading abstractions to GPU programming by implementing C++ threading and synchronization primitives for GPU code.
 
-The library offers a compatible interface to the C++ Standard Library threading facilities, you can write familiar concurrency code using `hip::thread`, `hip::mutex`, `hip::lock_guard`, `hip::condition_variable`, 
+The library offers a compatible interface to the C++ Standard Library threading facilities, you can write familiar concurrency code using `hip::wthread`, `hip::mutex`, `hip::lock_guard`, `hip::condition_variable`,
 and other primitives. The library supports cooperative threading, standard synchronization primitives, and multi-fiber execution (width parameter) to leverage GPU SIMD architecture.
 
 
@@ -12,7 +15,7 @@ and other primitives. The library supports cooperative threading, standard synch
 
 If you have existing CPU code using `std::thread`, porting to GPU with hipThreads requires minimal changes:
 
-1. Replace `std::thread` with `hip::thread` 
+1. Replace `std::thread` with `hip::wthread`
 2. Add `__device__` annotation to lambdas/functions running on GPU
 3. Handle GPU memory allocation (CPU and GPU have separate memory pools)
 
@@ -47,7 +50,7 @@ Sample code demonstrating hipThreads usage can be found in the `examples/` direc
 
 ### SAXPY — Incremental GPU Porting
 
-The SAXPY example shows how to incrementally port CPU-parallel algorithms to GPU using `hip::thread`, demonstrating the natural progression from `std::thread` to optimized GPU execution.
+The SAXPY example shows how to incrementally port CPU-parallel algorithms to GPU using `hip::wthread`, demonstrating the natural progression from `std::thread` to optimized GPU execution.
 
 To build and run:
 
@@ -61,7 +64,7 @@ cmake --build ./build
 
 ### llama3.c — LLM Inference
 
-The `examples/llama3.c` directory contains a port of [llama3.c](https://github.com/jameswdelancey/llama3.c) (a minimal LLaMA 3 inference engine in C) to `hip::thread`. See the [llama3.c README](https://github.com/jameswdelancey/llama3.c/blob/master/README.md) for full details on model setup and options.
+The `examples/llama3.c` directory contains a port of [llama3.c](https://github.com/jameswdelancey/llama3.c) (a minimal LLaMA 3 inference engine in C) to `hip::wthread`. See the [llama3.c README](https://github.com/jameswdelancey/llama3.c/blob/master/README.md) for full details on model setup and options.
 
 To build:
 
@@ -112,7 +115,7 @@ GPU hardware imposes constraints that have no counterpart on the CPU (avoiding d
 
 ## Performance Tuning
 
-hipThreads launches a fixed number of scheduler slots ("vcores"), reported by `hip::thread::hardware_concurrency()`. The number of vcores per WGP defaults to `16`, which works well across the bundled samples on Navi (Radeon) cards, but the best value is architecture- and workload-dependent. You can tune it without rebuilding by setting the `HIPTHREADS_VCORES_PER_WGP` environment variable, or change the compiled-in default with `-DHIPTHREADS_DEFAULT_VCORES_PER_WGP=<n>` when building from source. See [Tune scheduler concurrency](https://rocm.docs.amd.com/projects/hipThreads/en/latest/how-to/tune-scheduler-concurrency.html) for details.
+hipThreads launches a fixed number of scheduler slots ("vcores"), reported by `hip::wthread::hardware_concurrency()`. The number of vcores per WGP defaults to `16`, which works well across the bundled samples on Navi (Radeon) cards, but the best value is architecture- and workload-dependent. You can tune it without rebuilding by setting the `HIPTHREADS_VCORES_PER_WGP` environment variable, or change the compiled-in default with `-DHIPTHREADS_DEFAULT_VCORES_PER_WGP=<n>` when building from source. See [Tune scheduler concurrency](https://rocm.docs.amd.com/projects/hipThreads/en/latest/how-to/tune-scheduler-concurrency.html) for details.
 
 ## License
 

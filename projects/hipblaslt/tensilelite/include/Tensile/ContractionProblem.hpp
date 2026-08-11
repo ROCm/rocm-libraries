@@ -1637,6 +1637,11 @@ namespace TensileLite
         unsigned char const* metadata   = nullptr;
         void const*          compressed = nullptr;
 
+        int64_t batchOffsetA = 0;
+        int64_t batchOffsetB = 0;
+        int64_t batchOffsetC = 0;
+        int64_t batchOffsetD = 0;
+
         // Constants
         ConstantVariant              alpha = static_cast<float>(0);
         ConstantVariant              beta  = static_cast<float>(0);

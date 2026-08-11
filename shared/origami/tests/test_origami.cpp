@@ -137,6 +137,43 @@ TEST_CASE("Origami: hardware_arch_enum", "[origami]") {
   }
 }
 
+TEST_CASE("Origami: gfx1250 complex matrix instructions", "[origami]") {
+  auto hardware = make_hardware(1250);
+
+  struct ComplexMiCase {
+    origami::data_type_t complex_dtype;
+    origami::data_type_t base_dtype;
+    const char* string_dtype;
+  };
+
+  const ComplexMiCase cases[] = {{origami::data_type_t::ComplexFloat,
+                                  origami::data_type_t::Float,
+                                  "c32"},
+                                 {origami::data_type_t::ComplexDouble,
+                                  origami::data_type_t::Double,
+                                  "c64"}};
+
+  for (const auto& tc : cases) {
+    DYNAMIC_SECTION(tc.string_dtype) {
+      const auto instructions = hardware.get_valid_matrix_instructions(tc.complex_dtype);
+      REQUIRE(instructions.size() == 1);
+      REQUIRE(instructions[0].m == 16);
+      REQUIRE(instructions[0].n == 16);
+      REQUIRE(instructions[0].k == 4);
+
+      const size_t base_latency    = hardware.get_mi_latency(16, 16, 4, tc.base_dtype);
+      const size_t complex_latency = hardware.get_mi_latency(16, 16, 4, tc.complex_dtype);
+      REQUIRE(base_latency > 0);
+      REQUIRE(complex_latency == base_latency * 4);
+
+      const auto from_string =
+          hardware.get_valid_matrix_instructions(origami::string_to_datatype(tc.string_dtype));
+      REQUIRE(from_string.size() == 1);
+      REQUIRE(from_string[0] == instructions[0]);
+    }
+  }
+}
+
 TEST_CASE("Origami: has_MALL", "[origami]") {
   for (int gpu_arch : test_architectures) {
     DYNAMIC_SECTION("gfx" << gpu_arch << " - MALL support check") {
@@ -925,14 +962,14 @@ TEST_CASE("Origami: select_workgroup_mapping unit test", "[Origami]") {
       REQUIRE(out_wgm_batch.wgmxcc == 0);
       REQUIRE(out_wgm_batch.wgm == 1);
 
-      // Test 3: Test small GEMMs (numMTs <= NUM_XCD)
+      // Test 3: Test small GEMMs
       auto problem_small = make_problem(1024, 1024, 1024);
       auto skGrid_small  = (1024 + 256 - 1) / 256 * (1024 + 256 - 1) / 256;
       auto out_wgm_problem_small =
           origami::select_workgroup_mapping(problem_small, hardware, config, skGrid_small);
       REQUIRE(out_wgm_problem_small.wgmxccchunk == default_wgmxccchunk);
       REQUIRE(out_wgm_problem_small.wgmxcc == default_wgmxcc);
-      REQUIRE(out_wgm_problem_small.wgm == 1);
+      REQUIRE(out_wgm_problem_small.wgm == 2);
 
       // Test 4: Test cases where splitFactor is multiple of NUM_XCD
       auto out_wgm_split_multiple_num_xcd =
@@ -963,31 +1000,88 @@ TEST_CASE("Origami: select_workgroup_mapping unit test", "[Origami]") {
       REQUIRE(out_wgm.wgmxccchunk == default_wgmxccchunk);
       REQUIRE(out_wgm.wgmxcc == default_wgmxcc);
       if (gpu_arch == 942)
-        REQUIRE(out_wgm.wgm == 4);
+        REQUIRE(out_wgm.wgm == 8);
       else if (gpu_arch == 950)
-        REQUIRE(out_wgm.wgm == 4);
+        REQUIRE(out_wgm.wgm == 8);
+      else if (gpu_arch == 1250)
+        REQUIRE(out_wgm.wgm == 8);
 
-      // Test 8: K-split StreamK (skGrid > tiles) must NOT use the chunk transform.
-      // Splitting a tile across multiple workgroups requires the StreamK fixup, whose
-      // spin-wait handoff assumes a tile's co-op workgroups stay in consecutive physical
-      // order. The chunk remap reorders them and can deadlock, so chunking must be off.
+      // K-coherent split-K needs a grid that splits K within one wave of
+      // workgroups, so these cases use fewer tiles than the machine has CUs.
+      // bf16 with MT_K=64 gives 128 bytes per k-iter, one full cache line.
+      auto split_problem     = make_problem(2048, 2048, 65536);
+      size_t numMTs_split    = (2048 / 256) * (2048 / 256);  // 64 tiles
+      size_t skGrid_one_wave = 256;                          // <= N_CU on every test arch
+      REQUIRE(skGrid_one_wave <= hardware.N_CU);
+
+      // Test 8: K-coherent split-K mapping is selected when split-K workgroups
+      // cover cache-line-aligned K chunks and the split factor is useful across XCDs.
       {
-        auto skGrid_split = 2 * numMT_M * numMT_N;  // split_factor = 2 (skGrid > tiles)
+        auto split_config = config;
+        split_config.mt.k = 64;
 
-        // Non-temporal case that produces a non-zero chunk for a data-parallel grid
-        // (see Test 1) must report chunk == 0 once the grid is K-split.
-        config.cache_hints_a = 4;
-        config.cache_hints_b = 3;
-        auto out_wgm_split_nt =
-            origami::select_workgroup_mapping(problem, hardware, config, skGrid_split);
-        REQUIRE(out_wgm_split_nt.wgmxccchunk == 0);
-        config.cache_hints_a = 0;
-        config.cache_hints_b = 0;
+        auto out_wgm_splitk = origami::select_workgroup_mapping(
+            split_problem, hardware, split_config, skGrid_one_wave);
+        REQUIRE(out_wgm_splitk.wgmxccsplitk == skGrid_one_wave / numMTs_split);
+        REQUIRE(out_wgm_splitk.wgmxccchunk == skGrid_one_wave / hardware.NUM_XCD);
+        REQUIRE(out_wgm_splitk.wgmxcc == hardware.NUM_XCD);
+      }
 
-        // Main path (no cache hints) must also report chunk == 0 when K-split.
-        auto out_wgm_split =
-            origami::select_workgroup_mapping(problem, hardware, config, skGrid_split);
-        REQUIRE(out_wgm_split.wgmxccchunk == 0);
+      // Non-multiple skGrid is allowed: the first K*MN workgroups are remapped and
+      // tail workgroups are identity-mapped by codegen.
+      {
+        auto split_config = config;
+        split_config.mt.k = 64;
+        auto skGrid_with_tail = skGrid_one_wave - 1;
+
+        auto out_wgm_splitk_tail = origami::select_workgroup_mapping(
+            split_problem, hardware, split_config, skGrid_with_tail);
+        REQUIRE(out_wgm_splitk_tail.wgmxccsplitk == skGrid_with_tail / numMTs_split);
+        REQUIRE(out_wgm_splitk_tail.wgmxccchunk == skGrid_with_tail / hardware.NUM_XCD);
+        REQUIRE(out_wgm_splitk_tail.wgmxcc == hardware.NUM_XCD);
+      }
+
+      // A grid larger than the CU budget spans more than one wave of workgroups,
+      // so there are no k-levels to group and the mapping stays disabled. This
+      // also keeps the chunk inside the 8-bit field of the kernel argument.
+      {
+        auto split_config = config;
+        split_config.mt.k = 64;
+
+        for (size_t skGrid_multi_wave :
+             {hardware.N_CU + 1, 2 * hardware.N_CU, 3 * hardware.N_CU}) {
+          INFO("skGrid=" << skGrid_multi_wave << " N_CU=" << hardware.N_CU);
+          auto out_wgm_multi_wave = origami::select_workgroup_mapping(
+              split_problem, hardware, split_config, skGrid_multi_wave);
+          REQUIRE(out_wgm_multi_wave.wgmxccsplitk == 0);
+        }
+      }
+
+      // A CU budget below the physical count tightens the gate: the same grid
+      // that fits a full machine spans more than one wave of the budget.
+      {
+        auto split_config      = config;
+        split_config.mt.k      = 64;
+        auto capped_problem    = split_problem;
+        capped_problem.num_cus = skGrid_one_wave / 2;
+
+        auto out_wgm_capped = origami::select_workgroup_mapping(
+            capped_problem, hardware, split_config, skGrid_one_wave);
+        REQUIRE(out_wgm_capped.wgmxccsplitk == 0);
+      }
+
+      // If the split factor is already XCD-aligned, hardware round-robin dispatch
+      // distributes k-splits evenly and K-coherent remapping should stay disabled.
+      {
+        auto split_config = config;
+        split_config.mt.k = 64;
+        auto skGrid_xcd_aligned = hardware.NUM_XCD * numMT_M * numMT_N;
+
+        auto out_wgm_splitk_xcd_aligned =
+            origami::select_workgroup_mapping(problem, hardware, split_config, skGrid_xcd_aligned);
+        REQUIRE(out_wgm_splitk_xcd_aligned.wgmxccsplitk == 0);
+        REQUIRE(out_wgm_splitk_xcd_aligned.wgmxccchunk == 0);
+        REQUIRE(out_wgm_splitk_xcd_aligned.wgmxcc == 0);
       }
     }
   }
@@ -1288,4 +1382,42 @@ TEST_CASE("Origami: num_cus changes selected config", "[origami]") {
       REQUIRE(capped_mt.n == 192);
     }
   }
+}
+
+TEST_CASE("gfx950 pci_chip_id id75a0 vs id75a8", "[hardware]") {
+  using origami::hardware_t;
+  const auto c_def = hardware_t::get_gfx950_arch_constants(std::nullopt);
+  const auto c_v2 = hardware_t::get_gfx950_arch_constants(std::make_optional(0x75a8));
+  REQUIRE(c_def.mem1_perf_ratio != c_v2.mem1_perf_ratio);
+  REQUIRE(c_def.mem2_perf_ratio != c_v2.mem2_perf_ratio);
+  REQUIRE(c_def.mem3_perf_ratio != c_v2.mem3_perf_ratio);
+  REQUIRE(c_def.mem_bw_per_wg_coefficients != c_v2.mem_bw_per_wg_coefficients);
+  REQUIRE(c_def.parallel_mi_cu == c_v2.parallel_mi_cu);
+
+  const auto g942_v2 = hardware_t::get_arch_constants(
+      hardware_t::architecture_t::gfx942, std::make_optional(0x75a8));
+  const auto g942_def =
+      hardware_t::get_arch_constants(hardware_t::architecture_t::gfx942);
+  REQUIRE(g942_v2.mem1_perf_ratio == g942_def.mem1_perf_ratio);
+
+  const auto hw_def = hardware_t::get_hardware_for_arch(hardware_t::architecture_t::gfx950,
+                                                        256,               // N_CU
+                                                        65536,             // lds_capacity
+                                                        512 * 1024,        // rf_capacity
+                                                        4 * 1024 * 1024,   // L2_capacity
+                                                        2'100'000,         // compute_clock_khz
+                                                        std::nullopt);     // pci_chip_id
+  const auto hw_v2 = hardware_t::get_hardware_for_arch(hardware_t::architecture_t::gfx950,
+                                                       128,
+                                                       65536,
+                                                       512 * 1024,
+                                                       4 * 1024 * 1024,
+                                                       2'100'000,
+                                                       std::make_optional(0x75a8));
+  REQUIRE(hw_def.mem1_perf_ratio != hw_v2.mem1_perf_ratio);
+  REQUIRE(hw_def.mem_bw_per_wg_coefficients == c_def.mem_bw_per_wg_coefficients);
+  REQUIRE(hw_v2.mem_bw_per_wg_coefficients == c_v2.mem_bw_per_wg_coefficients);
+  REQUIRE_FALSE(hw_def.pci_chip_id.has_value());
+  REQUIRE(hw_v2.pci_chip_id.has_value());
+  REQUIRE(hw_v2.pci_chip_id.value() == 0x75a8);
 }

@@ -122,12 +122,11 @@ protected:
         const ShallowTensor<DataType> shallowV(
             vTensor.rawHostData(), vTensor.dims(), vTensor.strides());
         ShallowTensor<DataType> shallowO(oTensor.rawHostData(), oTensor.dims(), oTensor.strides());
-        // Stats (LSE) is [B, H_q, S_q] for the CPU reference, but the graph may
-        // lower it as 4D. Use the correct 3D dims with contiguous strides.
-        const std::vector<int64_t> statsDims3d
-            = {qTensor.dims()[0], qTensor.dims()[1], qTensor.dims()[2]};
-        const std::vector<int64_t> statsStrides3d = generateStrides(statsDims3d);
-        ShallowTensor<float> shallowStats(statsTensor.rawHostData(), statsDims3d, statsStrides3d);
+        // Stats (LSE) is [B, H_q, S_q, 1] for the CPU reference
+        const std::vector<int64_t> statsDims
+            = {qTensor.dims()[0], qTensor.dims()[1], qTensor.dims()[2], 1};
+        const std::vector<int64_t> statsStrides = generateStrides(statsDims);
+        ShallowTensor<float> shallowStats(statsTensor.rawHostData(), statsDims, statsStrides);
 
         CpuFpReferenceSdpa::forward<DataType, DataType, DataType, DataType, float>(
             shallowQ,
@@ -165,7 +164,7 @@ protected:
 
         // Stats (LSE) dims: [B, H_q, S_q] with contiguous strides
         const std::vector<int64_t> statsDims
-            = {testCase.qDims[0], testCase.qDims[1], testCase.qDims[2]};
+            = {testCase.qDims[0], testCase.qDims[1], testCase.qDims[2], 1};
         auto statsStrides = generateStrides(statsDims);
 
         Graph graph;

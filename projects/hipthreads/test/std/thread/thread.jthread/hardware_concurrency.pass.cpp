@@ -23,7 +23,7 @@ static_assert(noexcept(::std::jthread::hardware_concurrency()));
 
 int main(int, char**) {
   ::std::same_as<unsigned int> decltype(auto) result = ::std::jthread::hardware_concurrency();
-  assert(result == hip::thread::hardware_concurrency());
+  assert(result == hip::wthread::hardware_concurrency());
 
   return 0;
 }
