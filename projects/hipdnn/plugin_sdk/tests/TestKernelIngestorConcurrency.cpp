@@ -128,7 +128,7 @@ TEST(TestIngestorStateManagerConcurrency, ServesOneGraphFromManyThreadsConsisten
         for(int i = 0; i < ITERATIONS_PER_THREAD; ++i)
         {
             const MatchContext context{graph, 0, properties};
-            const auto definitions = manager->unsortedDefinitions(0, context);
+            const auto definitions = manager->unsortedDefinitions(context);
             ASSERT_EQ(definitions.size(), 2U);
         }
     });
@@ -147,7 +147,7 @@ TEST(TestIngestorStateManagerConcurrency, RanksConsistentlyFromManyThreads)
         for(int i = 0; i < ITERATIONS_PER_THREAD; ++i)
         {
             const MatchContext context{graph, 0, properties};
-            const auto ranked = manager->sortedDefinitions(0, context);
+            const auto ranked = manager->sortedDefinitions(context);
             ASSERT_EQ(ranked.size(), 2U);
             EXPECT_EQ(ranked.front().getIntMetadata(std::string(BLOCK_SIZE)), 256);
         }
@@ -168,7 +168,7 @@ TEST(TestIngestorStateManagerConcurrency, KeepsPerDeviceCatalogsDistinct)
         for(int i = 0; i < ITERATIONS_PER_THREAD; ++i)
         {
             const MatchContext context{graph, deviceId, properties};
-            const auto definitions = manager->unsortedDefinitions(deviceId, context);
+            const auto definitions = manager->unsortedDefinitions(context);
             ASSERT_EQ(definitions.size(), 2U);
         }
     });
@@ -187,7 +187,7 @@ TEST(TestIngestorStateManagerConcurrency, ServesUncacheableGraphsConcurrently)
         for(int i = 0; i < ITERATIONS_PER_THREAD; ++i)
         {
             const MatchContext context{graph, 0, properties};
-            ASSERT_EQ(manager->unsortedDefinitions(0, context).size(), 2U);
+            ASSERT_EQ(manager->unsortedDefinitions(context).size(), 2U);
         }
     });
 }
@@ -208,7 +208,7 @@ TEST(TestIngestorStateManagerConcurrency, EvictsUnderConcurrentDistinctGraphs)
 
             // Eviction costs a rematch and never a wrong answer, so the result is the
             // same whether this call hit the cache or rebuilt the catalog.
-            ASSERT_EQ(manager->unsortedDefinitions(0, context).size(), 2U);
+            ASSERT_EQ(manager->unsortedDefinitions(context).size(), 2U);
         }
     });
 }

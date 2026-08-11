@@ -12,6 +12,7 @@
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Catalog.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
+#include <hipdnn_plugin_sdk/ingestor/GenericEngine.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelHeuristic.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
 #include <hipdnn_plugin_sdk/ingestor/LruCache.hpp>
@@ -365,7 +366,7 @@ TEST(TestIngestorStateManager, KernelLevelMatcherPrunesTheCatalog)
     const auto properties = testDeviceProperties();
     const MatchContext context{graph, 0, properties};
 
-    const auto definitions = manager->unsortedDefinitions(0, context);
+    const auto definitions = manager->unsortedDefinitions(context);
 
     // Three kernels in the pack; the HALF one does not survive.
     ASSERT_EQ(definitions.size(), 2U);
@@ -383,7 +384,7 @@ TEST(TestIngestorStateManager, GraphLevelMatcherFailurePrunesTheWholePack)
     const auto properties = testDeviceProperties();
     const MatchContext context{graph, 0, properties};
 
-    EXPECT_TRUE(manager->unsortedDefinitions(0, context).empty());
+    EXPECT_TRUE(manager->unsortedDefinitions(context).empty());
     // The whole point of the graph/kernel split: a pack that cannot serve the graph
     // costs one matcher call, not one per kernel.
     EXPECT_EQ(counters().graphCalls, 1);
@@ -398,13 +399,68 @@ TEST(TestIngestorStateManager, MatchesOncePerGraphAndDevice)
     const auto properties = testDeviceProperties();
     const MatchContext context{graph, 0, properties};
 
-    manager->unsortedDefinitions(0, context);
-    manager->unsortedDefinitions(0, context);
-    manager->unsortedDefinitions(0, context);
+    manager->unsortedDefinitions(context);
+    manager->unsortedDefinitions(context);
+    manager->unsortedDefinitions(context);
 
     EXPECT_EQ(counters().graphCalls, 1);
     // One call per kernel in the pack, on the single uncached pass.
     EXPECT_EQ(counters().kernelCalls, 3);
+}
+
+TEST(TestIngestorStateManager, EvaluatesASharedGraphMatcherOncePerGraphNotOncePerPack)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+
+    // Matchers are shared by id across packs, so the broadly shared checks are what prune
+    // the candidate set fast. Re-running one per pack that lists it would make the most
+    // shared check the most expensive, inverting the property the graph/kernel split
+    // exists to provide.
+    auto first = makePack({GRAPH_MATCHER_ID, KERNEL_MATCHER_ID});
+    auto second = makePack({GRAPH_MATCHER_ID, KERNEL_MATCHER_ID});
+    second.id = testId(0x80);
+    // A distinct metadata tuple: the uniqueness rule is engine-wide, not per pack, so
+    // the second pack cannot repeat a block size the first already uses.
+    second.kernels = {makeKernel(testId(0x81), "second_pack_kernel", 512, "FLOAT")};
+
+    const StateManager manager(makeSchema(),
+                               makeTestMatchers(),
+                               makeTestDispatches(),
+                               {first, second},
+                               std::make_shared<NativeKernelHeuristic>(scoreByBlockSize));
+
+    const TestGraph graph(makeGraphId(20));
+    const auto properties = testDeviceProperties();
+    const auto definitions = manager.unsortedDefinitions(MatchContext{graph, 0, properties});
+
+    // Two packs, one shared graph-scoped matcher: evaluated once.
+    EXPECT_EQ(counters().graphCalls, 1);
+    // Two FLOAT survivors from the first pack plus one from the second.
+    EXPECT_EQ(definitions.size(), 3U);
+}
+
+TEST(TestIngestorStateManager, ASharedGraphMatcherFailurePrunesEveryPackListingIt)
+{
+    const ScopedSymbols symbols("test.graph", rejectGraph, "test.kernel", countingFloatKernels);
+
+    auto first = makePack({GRAPH_MATCHER_ID, KERNEL_MATCHER_ID});
+    auto second = makePack({GRAPH_MATCHER_ID, KERNEL_MATCHER_ID});
+    second.id = testId(0x82);
+    second.kernels = {makeKernel(testId(0x83), "second_pack_kernel", 512, "FLOAT")};
+
+    const StateManager manager(makeSchema(),
+                               makeTestMatchers(),
+                               makeTestDispatches(),
+                               {first, second},
+                               std::make_shared<NativeKernelHeuristic>(scoreByBlockSize));
+
+    const TestGraph graph(makeGraphId(21));
+    const auto properties = testDeviceProperties();
+
+    EXPECT_TRUE(manager.unsortedDefinitions(MatchContext{graph, 0, properties}).empty());
+    // One failing evaluation disqualifies both packs, and no per-kernel work runs at all.
+    EXPECT_EQ(counters().graphCalls, 1);
+    EXPECT_EQ(counters().kernelCalls, 0);
 }
 
 TEST(TestIngestorStateManager, MatchesSeparatelyPerDevice)
@@ -414,8 +470,8 @@ TEST(TestIngestorStateManager, MatchesSeparatelyPerDevice)
     const TestGraph graph(makeGraphId(4));
     const auto properties = testDeviceProperties();
 
-    manager->unsortedDefinitions(0, MatchContext{graph, 0, properties});
-    manager->unsortedDefinitions(1, MatchContext{graph, 1, properties});
+    manager->unsortedDefinitions(MatchContext{graph, 0, properties});
+    manager->unsortedDefinitions(MatchContext{graph, 1, properties});
 
     // The same graph on a different device is a different problem: a kernel applicable
     // on one device need not be applicable on another.
@@ -432,8 +488,8 @@ TEST(TestIngestorStateManager, RematchesEveryCallWhenTheGraphHasNoIdentity)
     const auto properties = testDeviceProperties();
     const MatchContext context{graph, 0, properties};
 
-    const auto first = manager->unsortedDefinitions(0, context);
-    const auto second = manager->unsortedDefinitions(0, context);
+    const auto first = manager->unsortedDefinitions(context);
+    const auto second = manager->unsortedDefinitions(context);
 
     // Correct both times; only the caching is lost.
     EXPECT_EQ(first.size(), 2U);
@@ -449,9 +505,9 @@ TEST(TestIngestorStateManager, RematchesAfterCacheEviction)
     const TestGraph first(makeGraphId(5));
     const TestGraph second(makeGraphId(6));
 
-    manager->unsortedDefinitions(0, MatchContext{first, 0, properties});
-    manager->unsortedDefinitions(0, MatchContext{second, 0, properties});
-    manager->unsortedDefinitions(0, MatchContext{first, 0, properties});
+    manager->unsortedDefinitions(MatchContext{first, 0, properties});
+    manager->unsortedDefinitions(MatchContext{second, 0, properties});
+    manager->unsortedDefinitions(MatchContext{first, 0, properties});
 
     // Capacity 1, so the second graph evicted the first and it had to rematch. Eviction
     // costs work, never a wrong answer.
@@ -466,7 +522,7 @@ TEST(TestIngestorStateManager, SortedDefinitionsAreRankedBestFirst)
     const auto properties = testDeviceProperties();
     const MatchContext context{graph, 0, properties};
 
-    const auto sorted = manager->sortedDefinitions(0, context);
+    const auto sorted = manager->sortedDefinitions(context);
 
     ASSERT_EQ(sorted.size(), 2U);
     EXPECT_EQ(sorted.front().getIntMetadata(BLOCK_SIZE), 256);
@@ -480,9 +536,9 @@ TEST(TestIngestorStateManager, RankingReusesTheAlreadyMatchedCatalog)
     const auto properties = testDeviceProperties();
     const MatchContext context{graph, 0, properties};
 
-    manager->unsortedDefinitions(0, context);
-    manager->sortedDefinitions(0, context);
-    manager->sortedDefinitions(0, context);
+    manager->unsortedDefinitions(context);
+    manager->sortedDefinitions(context);
+    manager->sortedDefinitions(context);
 
     // Ranking is a read of the cached catalog, never a rematch.
     EXPECT_EQ(counters().graphCalls, 1);
@@ -497,8 +553,7 @@ TEST(TestIngestorStateManager, KnobValuesComeFromTheCatalogInRankedOrder)
     const auto properties = testDeviceProperties();
     const MatchContext context{graph, 0, properties};
 
-    const auto values
-        = StateManager::knobValues(manager->sortedDefinitions(0, context), BLOCK_SIZE);
+    const auto values = StateManager::knobValues(manager->sortedDefinitions(context), BLOCK_SIZE);
 
     // The pruned HALF kernel also carried block_size 64, but it contributes no value:
     // a knob offers what the surviving catalog implements, not the schema's range.
@@ -527,7 +582,7 @@ TEST(TestIngestorStateManager, CompletesAnOmittedFieldFromItsSchemaDefault)
 
     const TestGraph graph(makeGraphId(10));
     const auto properties = testDeviceProperties();
-    const auto definitions = manager.unsortedDefinitions(0, MatchContext{graph, 0, properties});
+    const auto definitions = manager.unsortedDefinitions(MatchContext{graph, 0, properties});
 
     ASSERT_EQ(definitions.size(), 1U);
     EXPECT_EQ(definitions.front().getIntMetadata(BLOCK_SIZE), 64);
@@ -549,6 +604,31 @@ TEST(TestIngestorStateManager, RejectsAKernelOmittingAFieldWithNoDefault)
 
     // Caught when the descriptor set is assembled, not when a graph first arrives: the
     // completed tuple is the kernel's catalog key, so it has to exist before matching.
+    EXPECT_THROW(StateManager(makeSchema(),
+                              makeTestMatchers(),
+                              makeTestDispatches(),
+                              {pack},
+                              std::make_shared<NativeKernelHeuristic>(scoreByBlockSize)),
+                 std::invalid_argument);
+}
+
+TEST(TestIngestorStateManager, RejectsAKernelSupplyingAFieldTheSchemaDoesNotDeclare)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+
+    KernelDescriptorPack pack = makePack({GRAPH_MATCHER_ID, KERNEL_MATCHER_ID});
+    // A misspelled field name is the common case, and left in place it fails twice over:
+    // the real field silently takes its default, and the stray value joins the catalog
+    // key, where nothing downstream can read it. Two kernels differing only in such a
+    // value would both enter the catalog with selection unable to tell them apart.
+    KernelDescriptor undeclared;
+    undeclared.id = testId(0x74);
+    undeclared.name = "kernel_undeclared_field";
+    undeclared.metadata = {{BLOCK_SIZE, MetadataValue{int64_t{64}}},
+                           {DTYPE, MetadataValue{std::string{"FLOAT"}}},
+                           {"blocksize", MetadataValue{int64_t{128}}}};
+    pack.kernels = {undeclared};
+
     EXPECT_THROW(StateManager(makeSchema(),
                               makeTestMatchers(),
                               makeTestDispatches(),
@@ -619,6 +699,129 @@ TEST(TestIngestorStateManager, RejectsTwoKernelsSharingAMetadataTuple)
 TEST(TestIngestorStateManager, RejectsAMissingHeuristic)
 {
     EXPECT_THROW(StateManager(makeSchema(), {}, {}, {}, nullptr), std::invalid_argument);
+}
+
+// ---------------------------------------------------------------------------
+// GenericEngine: engine-level descriptor validation
+// ---------------------------------------------------------------------------
+
+/// Minimal stand-ins for the provider types GenericEngine is parameterized on. Only the
+/// members the engine actually touches are present, so a change that starts depending on
+/// more of a real handle or context fails here rather than compiling silently.
+struct StubHandle
+{
+    void storeEngineDetailsDetachedBuffer(const void* /*ptr*/,
+                                          std::unique_ptr<flatbuffers::DetachedBuffer> buffer)
+    {
+        _buffers.push_back(std::move(buffer));
+    }
+
+private:
+    std::vector<std::unique_ptr<flatbuffers::DetachedBuffer>> _buffers;
+};
+
+struct StubSettings
+{
+};
+
+struct StubContext
+{
+    void setExecutionSettings(const StubSettings& /*settings*/) {}
+
+    void setPlan(std::unique_ptr<hipdnn_plugin_sdk::IPlan<StubHandle>> plan)
+    {
+        _plan = std::move(plan);
+    }
+
+    bool hasPlan() const
+    {
+        return _plan != nullptr;
+    }
+
+private:
+    std::unique_ptr<hipdnn_plugin_sdk::IPlan<StubHandle>> _plan;
+};
+
+/// A device resolver over StubHandle, for the engine-level tests.
+class StubDeviceResolver : public IDeviceResolver<StubHandle>
+{
+public:
+    DeviceId deviceId(const StubHandle& /*handle*/) const override
+    {
+        return 0;
+    }
+
+    const hipDeviceProp_t& deviceProperties(DeviceId /*deviceId*/) const override
+    {
+        return _properties;
+    }
+
+private:
+    hipDeviceProp_t _properties = testDeviceProperties();
+};
+
+using StubEngine = GenericEngine<StubHandle, StubSettings, StubContext>;
+
+/// The engine-level tests need a state manager over StubHandle, which the shared fixture
+/// builds over int, so this mirrors it for the stub handle type.
+std::unique_ptr<KernelIngestorStateManager<StubHandle>> makeStubStateManager()
+{
+    MetadataSchema schema;
+    schema.id = SCHEMA_ID;
+    schema.name = "test schema";
+    schema.fields = {{BLOCK_SIZE, MetadataType::INT, MetadataValue{int64_t{64}}},
+                     {DTYPE, MetadataType::STRING, std::nullopt}};
+
+    KernelDescriptorPack pack;
+    pack.id = PACK_ID;
+    pack.name = "test pack";
+    pack.matcherIds = {GRAPH_MATCHER_ID};
+    pack.engineId = ENGINE_ID;
+    pack.dispatchId = DISPATCH_ID;
+    pack.kernels = {makeTestKernel(testId(0x64), "kernel_64_float", 64, "FLOAT")};
+
+    return std::make_unique<KernelIngestorStateManager<StubHandle>>(
+        std::move(schema),
+        std::vector<MatchDescriptor>{
+            {GRAPH_MATCHER_ID, "graph scoped", MatchScope::GRAPH, GRAPH_MATCH_SYMBOL}},
+        std::vector<DispatchDescriptor>{
+            {DISPATCH_ID, "test dispatch", "hipdnn.kernel_ingestor.test.dispatch"}},
+        std::vector<KernelDescriptorPack>{std::move(pack)},
+        std::make_shared<NativeKernelHeuristic>(&scoreByBlockSize));
+}
+
+EngineDescriptor makeEngineWithKnobs(std::vector<std::string> knobs)
+{
+    EngineDescriptor engine;
+    engine.id = ENGINE_ID;
+    engine.name = "test:engine";
+    engine.heuristicId = HEURISTIC_ID;
+    engine.metadataSchemaId = SCHEMA_ID;
+    engine.knobs = std::move(knobs);
+    return engine;
+}
+
+TEST(TestIngestorGenericEngine, AcceptsAKnobNamingADeclaredMetadataField)
+{
+    const ScopedTestSymbols symbols;
+    const StubDeviceResolver resolver;
+
+    EXPECT_NO_THROW(
+        (StubEngine(makeEngineWithKnobs({BLOCK_SIZE}), makeStubStateManager(), resolver)));
+}
+
+TEST(TestIngestorGenericEngine, RejectsAKnobNamingNoMetadataField)
+{
+    const ScopedTestSymbols symbols;
+    const StubDeviceResolver resolver;
+
+    // A knob is only a name: the field it points at supplies the type, the default and
+    // the legal values, so a knob matching no field can never be reported or honoured.
+    // Left unchecked it is silently dropped, which reads to a caller exactly like a knob
+    // the engine chose not to expose.
+    EXPECT_THROW(
+        (StubEngine(makeEngineWithKnobs({"no_such_field"}), makeStubStateManager(), resolver)),
+        std::invalid_argument);
 }
 
 } // namespace

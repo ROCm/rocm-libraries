@@ -54,7 +54,8 @@ public:
      * indistinguishable from not being wired up at all.
      */
     size_t
-        workspaceBytes(const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel) const override;
+        workspaceBytes(const hipdnn_plugin_sdk::ingestor::MatchContext& context,
+                       const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel) const override;
 
     std::unique_ptr<hipdnn_plugin_sdk::ingestor::PreparedDispatch>
         prepare(const hipdnn_plugin_sdk::ingestor::MatchContext& context,

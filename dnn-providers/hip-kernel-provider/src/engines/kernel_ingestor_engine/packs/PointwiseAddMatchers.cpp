@@ -14,6 +14,7 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
 
+#include "core/Utils.hpp"
 #include "engines/kernel_ingestor_engine/packs/PointwiseAddSymbols.hpp"
 
 namespace hip_kernel_provider::kernel_ingestor_engine
@@ -42,8 +43,30 @@ const data_objects::TensorAttributes* findTensor(const MatchContext& context, in
 constexpr uint32_t MIN_SUPPORTED_RANK = 4;
 constexpr uint32_t MAX_SUPPORTED_RANK = 5;
 
-/// True when the tensor is a supported rank holding exactly one element -- the whole of
-/// this pack's supported problem space.
+/// True when the tensor's stride order is one the dispatch path can classify.
+///
+/// The same constraint as the rank bound above, from the same function: compile options
+/// derive a layout from the strides and throw on any order that is neither channel-first
+/// nor channel-last. A one-element tensor can still carry an unclassifiable order when it
+/// views into a larger buffer, so element count does not imply a usable layout.
+bool hasSupportedLayout(const data_objects::TensorAttributes& tensor)
+{
+    try
+    {
+        static_cast<void>(core::utils::isChannelLastLayout(&tensor));
+        return true;
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException&)
+    {
+        // Asking the classifier directly keeps this gate and the dispatch path on one
+        // definition of "supported layout"; restating its rules here would let the two
+        // drift, which is exactly how the rank half of this constraint got missed.
+        return false;
+    }
+}
+
+/// True when the tensor is a supported rank and layout holding exactly one element --
+/// the whole of this pack's supported problem space.
 bool isSingleElement(const data_objects::TensorAttributes& tensor)
 {
     const auto* dims = tensor.dims();
@@ -57,7 +80,12 @@ bool isSingleElement(const data_objects::TensorAttributes& tensor)
     {
         elements *= dim;
     }
-    return elements == 1;
+    if(elements != 1)
+    {
+        return false;
+    }
+
+    return hasSupportedLayout(tensor);
 }
 
 /// The graph's element type, taken from the first input. The matcher below requires

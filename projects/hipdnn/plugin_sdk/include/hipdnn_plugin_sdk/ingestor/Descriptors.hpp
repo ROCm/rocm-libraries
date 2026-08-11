@@ -119,10 +119,11 @@ struct MetadataField
     MetadataType type = MetadataType::INT;
     /// The value a kernel that omits this field is taken to have supplied.
     ///
-    /// Optional, because a field can be mandatory: RFC 0017 §4 marks a UKD's metadata
-    /// entries `optional` individually, so a field with no default is one every kernel
-    /// in the engine must state for itself, and omitting it is a load error rather than
-    /// a silent fallback.
+    /// Optional, because a field can be mandatory. RFC 0017 §4's KMD example carries
+    /// `optional` and `default` as separate attributes on the field; those collapse here,
+    /// since a field that is mandatory has no default to fall back on. A kernel omitting
+    /// such a field is a load error rather than a silent fallback to a catalog key its
+    /// author never wrote.
     std::optional<MetadataValue> defaultValue;
 };
 
@@ -170,6 +171,13 @@ struct EngineDescriptor
 
 /// Which inputs a matcher reads, which decides how often it runs and what its failure
 /// prunes (RFC 0017 §5, "applicability is a cheap, shared-matcher pass").
+///
+/// Authored per matcher here, which is provisional. RFC 0017 §5 puts the split inside a
+/// single matcher's criteria tree rather than across matchers: `conv.tile_fit` mixes
+/// graph-bound dims and `$kernel.*` in one `and`, and the `$kernel.*` clauses are the
+/// ones re-evaluated per candidate. Once the criteria language lands this becomes a
+/// derived property, computed from whether a matcher's expression references `$kernel.*`,
+/// and a matcher with mixed clauses is evaluated per clause rather than classified whole.
 enum class MatchScope
 {
     /// Reads only graph and device facts, so it runs once per (graph, device) and its

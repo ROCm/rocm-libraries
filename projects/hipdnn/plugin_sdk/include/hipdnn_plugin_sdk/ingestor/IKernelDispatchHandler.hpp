@@ -64,11 +64,18 @@ public:
      * @brief Global scratch this kernel requires, in bytes.
      *
      * Answered per kernel, before selection, so the engine can report the maximum across
-     * every kernel the caller's knobs leave in the catalog. Taking only the kernel keeps
-     * the answer independent of which other kernels happen to be present.
+     * every kernel the caller's knobs leave in the catalog. The answer stays independent
+     * of which other kernels are present: the catalog is never passed in.
+     *
+     * Takes the bound token state as well as the kernel because a workspace requirement
+     * is a formula over graph dimensions as much as over kernel metadata. RFC 0017 §6's
+     * worked example is `batch * num_heads * seqlen_q * 4`, which a signature over the
+     * kernel alone cannot express, and the declarative evaluator that eventually replaces
+     * a native handler has to.
      */
     // NOLINTNEXTLINE(portability-template-virtual-member-function)
-    virtual size_t workspaceBytes(const KernelDefinition& kernel) const = 0;
+    virtual size_t workspaceBytes(const MatchContext& context, const KernelDefinition& kernel) const
+        = 0;
 
     /**
      * @brief Resolves everything @p kernel's launch needs from the bound token state.

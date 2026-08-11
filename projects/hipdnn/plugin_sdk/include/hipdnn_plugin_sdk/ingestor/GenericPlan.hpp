@@ -47,7 +47,7 @@ public:
      */
     GenericPlan(KernelDispatcher<THandle> dispatcher, const MatchContext& context)
         : _dispatcher(std::move(dispatcher))
-        , _workspaceBytes(_dispatcher.handler->workspaceBytes(_dispatcher.kernel))
+        , _workspaceBytes(_dispatcher.handler->workspaceBytes(context, _dispatcher.kernel))
         , _prepared(_dispatcher.handler->prepare(context, _dispatcher.kernel))
     {
         if(_prepared == nullptr)

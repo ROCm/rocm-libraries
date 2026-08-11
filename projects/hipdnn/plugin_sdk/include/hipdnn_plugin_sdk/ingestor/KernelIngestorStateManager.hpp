@@ -120,7 +120,8 @@ public:
     }
 
     /**
-     * @brief Every kernel that applies to @p graph on @p deviceId, in no particular order.
+     * @brief Every kernel that applies to the graph and device @p context names, in no
+     *        particular order.
      *
      * On a cache hit, returns the cached catalog. Otherwise runs the matchers in pruning
      * order — each pack's graph-scoped matchers first, since one failure disqualifies the
@@ -131,22 +132,21 @@ public:
      * would alias unrelated graphs), so it is matched fresh every call. That costs time,
      * never correctness.
      */
-    std::vector<KernelDefinition> unsortedDefinitions(DeviceId deviceId,
-                                                      const MatchContext& context) const
+    std::vector<KernelDefinition> unsortedDefinitions(const MatchContext& context) const
     {
-        return catalogFor(deviceId, context).entries;
+        return catalogFor(context).entries;
     }
 
     /**
-     * @brief Every kernel that applies to @p graph on @p deviceId, best first.
+     * @brief Every kernel that applies to the graph and device @p context names, best
+     *        first.
      *
      * Returns the cached order if there is one; otherwise ranks the catalog and caches
      * that order. If the catalog itself is missing, it is built first.
      */
-    std::vector<KernelDefinition> sortedDefinitions(DeviceId deviceId,
-                                                    const MatchContext& context) const
+    std::vector<KernelDefinition> sortedDefinitions(const MatchContext& context) const
     {
-        Catalog catalog = catalogFor(deviceId, context);
+        Catalog catalog = catalogFor(context);
         if(catalog.isSorted)
         {
             return catalog.entries;
@@ -155,7 +155,7 @@ public:
         catalog.entries = _heuristic->rank(catalog, context);
         catalog.isSorted = true;
 
-        if(const auto key = cacheKey(deviceId, context); key.has_value())
+        if(const auto key = cacheKey(context); key.has_value())
         {
             _catalogCache.put(*key, catalog);
         }
@@ -245,18 +245,23 @@ private:
         }
     }
 
-    /// A kernel's declared values plus the KMD's defaults for every field it omitted.
-    /// This completed tuple, not the descriptor id, is what identifies the kernel to
-    /// matching and ranking.
+    /// A kernel's declared values for the fields its engine's KMD declares, with the
+    /// KMD's defaults filled in for the ones it omitted. This completed tuple, not the
+    /// descriptor id, is what identifies the kernel to matching and ranking.
+    ///
+    /// Built from the schema's field list rather than from the kernel's own map, because
+    /// the KMD fields are the only per-kernel input selection has: a value the schema
+    /// never declared is unreadable to a matcher or a scorer, so admitting one into the
+    /// key would let two kernels that selection cannot tell apart both enter the catalog.
     MetadataValues completeMetadata(const KernelDescriptor& kernel) const
     {
-        MetadataValues complete = kernel.metadata;
+        MetadataValues complete;
 
         for(const auto& field : _schema.fields)
         {
-            auto it = complete.find(field.name);
+            auto it = kernel.metadata.find(field.name);
 
-            if(it == complete.end())
+            if(it == kernel.metadata.end())
             {
                 // A field with no default is one every kernel must state for itself, so
                 // an omission is an authoring error rather than a silent fallback: it
@@ -280,24 +285,42 @@ private:
                                             + "' supplies metadata field '" + field.name
                                             + "' with a value of the wrong type");
             }
+            complete.emplace(field.name, it->second);
+        }
+
+        // A value the schema does not declare cannot be read by anything downstream, so
+        // it is almost always a misspelled field name. Left in place it would be doubly
+        // silent: the real field takes its default, and the stray value joins the key.
+        for(const auto& [name, value] : kernel.metadata)
+        {
+            if(complete.find(name) == complete.end())
+            {
+                throw std::invalid_argument("kernel '" + toString(kernel.id)
+                                            + "' supplies metadata field '" + name
+                                            + "', which its engine's metadata schema does "
+                                              "not declare");
+            }
         }
 
         return complete;
     }
 
-    std::optional<CatalogKey> cacheKey(DeviceId deviceId, const MatchContext& context) const
+    /// The device comes from the context rather than a separate argument: taking it
+    /// twice would let a caller cache one device's catalog under another device's key,
+    /// which is a wrong answer rather than a missed hit.
+    std::optional<CatalogKey> cacheKey(const MatchContext& context) const
     {
         const auto graphId = tryGetGraphId(context.graph);
         if(!graphId.has_value())
         {
             return std::nullopt;
         }
-        return CatalogKey{*graphId, deviceId};
+        return CatalogKey{*graphId, context.deviceId};
     }
 
-    Catalog catalogFor(DeviceId deviceId, const MatchContext& context) const
+    Catalog catalogFor(const MatchContext& context) const
     {
-        const auto key = cacheKey(deviceId, context);
+        const auto key = cacheKey(context);
         if(key.has_value())
         {
             if(auto cached = _catalogCache.get(*key); cached.has_value())
@@ -316,24 +339,32 @@ private:
         return catalog;
     }
 
+    /// A graph-scoped matcher's verdict for one (graph, device), keyed by matcher id.
+    ///
+    /// Matchers are shared by id across packs, so the same check would otherwise be
+    /// re-run once per pack that lists it.
+    using GraphMatcherMemo = std::unordered_map<DescriptorId, bool, DescriptorIdHash>;
+
     /**
      * @brief Runs every pack's matchers over @p context, cheapest and broadest first.
      *
-     * Graph-scoped matchers read only graph and device facts, so each runs once for the
-     * whole pack and one failure disqualifies every kernel in it without any per-kernel
-     * work. Only then do the kernel-scoped matchers run, once per surviving kernel.
+     * Graph-scoped matchers read only graph and device facts, so each is evaluated once
+     * per (graph, device) no matter how many packs list it, and one failure disqualifies
+     * every kernel in every pack that lists it without any per-kernel work. Only then do
+     * the kernel-scoped matchers run, once per surviving kernel.
      *
-     * That ordering is the point of splitting matchers by scope: it is what keeps
-     * applicability cheap for an engine whose packs do not apply, which is most engines
-     * for most graphs.
+     * That ordering, and that sharing, are the point of splitting matchers by scope: the
+     * broadly shared checks are what prune the candidate set fast, so an engine whose
+     * packs do not apply pays for each distinct check once rather than once per pack.
      */
     Catalog buildCatalog(const MatchContext& context) const
     {
         Catalog catalog;
+        GraphMatcherMemo graphVerdicts;
 
         for(const auto& pack : _packs)
         {
-            if(!graphLevelMatchersPass(pack, context))
+            if(!graphLevelMatchersPass(pack, context, graphVerdicts))
             {
                 continue;
             }
@@ -358,7 +389,9 @@ private:
         return catalog;
     }
 
-    bool graphLevelMatchersPass(const KernelDescriptorPack& pack, const MatchContext& context) const
+    bool graphLevelMatchersPass(const KernelDescriptorPack& pack,
+                                const MatchContext& context,
+                                GraphMatcherMemo& graphVerdicts) const
     {
         for(const auto& matcherId : pack.matcherIds)
         {
@@ -367,7 +400,15 @@ private:
             {
                 continue;
             }
-            if(!GraphMatcherRegistry::resolve(matcher.matchSymbol)(context))
+
+            auto memo = graphVerdicts.find(matcherId);
+            if(memo == graphVerdicts.end())
+            {
+                const bool passed = GraphMatcherRegistry::resolve(matcher.matchSymbol)(context);
+                memo = graphVerdicts.emplace(matcherId, passed).first;
+            }
+
+            if(!memo->second)
             {
                 return false;
             }

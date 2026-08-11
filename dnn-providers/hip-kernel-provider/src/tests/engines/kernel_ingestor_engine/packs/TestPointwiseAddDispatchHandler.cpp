@@ -143,24 +143,30 @@ private:
 
 TEST(TestPointwiseAddDispatch, ReportsWorkspaceFromKernelMetadata)
 {
+    const GraphFixture fixture(buildPointwiseGraph());
     const HipMlopsKernelCompiler compiler;
     const PointwiseAddDispatchHandler handler(compiler);
 
     // The two surviving kernels report different requirements, so the engine's
     // "maximum across survivors" has something to actually maximize over.
-    EXPECT_EQ(handler.workspaceBytes(makeKernel(64, "FLOAT")), 0U);
-    EXPECT_EQ(handler.workspaceBytes(makeKernel(256, "FLOAT")), 1024U);
+    EXPECT_EQ(handler.workspaceBytes(fixture.context(), makeKernel(64, "FLOAT")), 0U);
+    EXPECT_EQ(handler.workspaceBytes(fixture.context(), makeKernel(256, "FLOAT")), 1024U);
 }
 
-TEST(TestPointwiseAddDispatch, WorkspaceDoesNotDependOnTheGraph)
+TEST(TestPointwiseAddDispatch, ReportsWorkspaceWithoutSeeingTheRestOfTheCatalog)
 {
+    const GraphFixture fixture(buildPointwiseGraph());
     const HipMlopsKernelCompiler compiler;
     const PointwiseAddDispatchHandler handler(compiler);
 
-    // Workspace is asked before a kernel is chosen and before any plan exists, so it
-    // must be answerable from the kernel alone.
-    EXPECT_EQ(handler.workspaceBytes(makeKernel(256, "FLOAT")),
-              handler.workspaceBytes(makeKernel(256, "HALF")));
+    // The query is answered per kernel, before selection and before any plan exists, so
+    // the answer must not depend on which other kernels are in the catalog. Asking twice
+    // for the same kernel, either side of a different one, gives the same number.
+    const auto first = handler.workspaceBytes(fixture.context(), makeKernel(256, "FLOAT"));
+    static_cast<void>(handler.workspaceBytes(fixture.context(), makeKernel(64, "FLOAT")));
+    const auto second = handler.workspaceBytes(fixture.context(), makeKernel(256, "FLOAT"));
+
+    EXPECT_EQ(first, second);
 }
 
 // ---------------------------------------------------------------------------
