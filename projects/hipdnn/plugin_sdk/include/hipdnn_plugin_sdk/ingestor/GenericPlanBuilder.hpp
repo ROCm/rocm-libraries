@@ -52,10 +52,10 @@ public:
     /// @param deviceResolver Answers which device each call is for. Held by reference;
     ///        owned by the engine, which outlives its builder.
     GenericPlanBuilder(const EngineDescriptor& engine,
-                       std::shared_ptr<KernelIngestorStateManager<THandle>> stateManager,
+                       const KernelIngestorStateManager<THandle>& stateManager,
                        const IDeviceResolver<THandle>& deviceResolver)
         : _engine(engine)
-        , _stateManager(std::move(stateManager))
+        , _stateManager(stateManager)
         , _deviceResolver(deviceResolver)
     {
     }
@@ -64,7 +64,7 @@ public:
     /// a membership test needs no order, so the heuristic is never run here.
     bool isApplicable(const THandle& handle, const IGraph& opGraph) const override
     {
-        return !_stateManager->unsortedDefinitions(contextFor(handle, opGraph)).empty();
+        return !_stateManager.unsortedDefinitions(contextFor(handle, opGraph)).empty();
     }
 
     /**
@@ -79,15 +79,18 @@ public:
                                const TSettings& /*executionSettings*/) const override
     {
         const auto context = contextFor(handle, opGraph);
+        // Unsorted, but still one lookup for the entries and the bound state together.
+        const auto catalog = _stateManager.unsortedCatalog(context);
         size_t maxBytes = 0;
         // Unsorted deliberately: a maximum over the survivors is order-independent, and
         // this call arrives for every candidate engine. Ranking here would load and run
         // each engine's heuristic to compute a number that does not depend on the order,
         // which is the cost the lazy-ranking split exists to avoid.
-        for(const auto& kernel : _stateManager->unsortedDefinitions(context))
+        for(const auto& kernel : catalog.entries)
         {
-            const auto dispatcher = _stateManager->getDispatchDetails(kernel);
-            maxBytes = std::max(maxBytes, dispatcher.handler->workspaceBytes(context, kernel));
+            const auto dispatcher = _stateManager.getDispatchDetails(kernel);
+            maxBytes = std::max(maxBytes,
+                                dispatcher.handler->workspaceBytes(context, catalog.bound, kernel));
         }
         return maxBytes;
     }
@@ -116,7 +119,10 @@ public:
                    TContext& executionContext) const override
     {
         const auto context = contextFor(handle, opGraph);
-        const auto ranked = _stateManager->sortedDefinitions(context);
+        // One lookup for both the order and the bound state: asking separately would
+        // match twice for a graph that carries no identity and so cannot be cached.
+        const auto catalog = _stateManager.sortedCatalog(context);
+        const auto& ranked = catalog.entries;
         if(ranked.empty())
         {
             throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
@@ -125,7 +131,7 @@ public:
         }
 
         executionContext.setPlan(std::make_unique<GenericPlan<THandle>>(
-            _stateManager->getDispatchDetails(ranked.front()), context));
+            _stateManager.getDispatchDetails(ranked.front()), context, catalog.bound));
     }
 
     /**
@@ -141,7 +147,7 @@ public:
     {
         using namespace hipdnn_flatbuffers_sdk::data_objects;
 
-        const auto ranked = _stateManager->sortedDefinitions(contextFor(handle, opGraph));
+        const auto ranked = _stateManager.sortedDefinitions(contextFor(handle, opGraph));
         std::vector<KnobT> knobs;
         if(ranked.empty())
         {
@@ -205,7 +211,10 @@ private:
     }
 
     const EngineDescriptor& _engine;
-    std::shared_ptr<KernelIngestorStateManager<THandle>> _stateManager;
+    /// Held by reference; owned by the engine, which owns this builder and so outlives
+    /// it. Sharing ownership here would reintroduce exactly the cross-engine aliasing the
+    /// engine's ownership rules out.
+    const KernelIngestorStateManager<THandle>& _stateManager;
     const IDeviceResolver<THandle>& _deviceResolver;
 };
 

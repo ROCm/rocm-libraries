@@ -72,9 +72,15 @@ public:
      * worked example is `batch * num_heads * seqlen_q * 4`, which a signature over the
      * kernel alone cannot express, and the declarative evaluator that eventually replaces
      * a native handler has to.
+     *
+     * @param bound What matching already resolved about this graph. Read rather than
+     *        re-derived: RFC 0017 §8.5 gives matching the job of binding the fields the
+     *        launch uses, and §8.1 requires that nothing be re-matched afterwards.
      */
     // NOLINTNEXTLINE(portability-template-virtual-member-function)
-    virtual size_t workspaceBytes(const MatchContext& context, const KernelDefinition& kernel) const
+    virtual size_t workspaceBytes(const MatchContext& context,
+                                  const BoundTokens& bound,
+                                  const KernelDefinition& kernel) const
         = 0;
 
     /**
@@ -82,9 +88,14 @@ public:
      *
      * Called once, at plan build, while @p context is still valid. The returned object is
      * owned by the plan and must not reference anything in @p context.
+     *
+     * @param bound What matching resolved about this graph, for the same reason
+     *        workspaceBytes() takes it: the values a launch needs were already found once
+     *        and re-finding them here would be a second, divergeable notion of the graph.
      */
     // NOLINTNEXTLINE(portability-template-virtual-member-function)
     virtual std::unique_ptr<PreparedDispatch> prepare(const MatchContext& context,
+                                                      const BoundTokens& bound,
                                                       const KernelDefinition& kernel) const
         = 0;
 

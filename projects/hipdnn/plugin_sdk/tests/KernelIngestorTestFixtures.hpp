@@ -133,7 +133,7 @@ inline hipDeviceProp_t testDeviceProperties()
     return properties;
 }
 
-inline bool acceptAnyGraph(const MatchContext& /*context*/)
+inline bool acceptAnyGraph(const MatchContext& /*context*/, BoundTokens& /*bound*/)
 {
     return true;
 }

@@ -18,7 +18,8 @@ namespace hip_kernel_provider::kernel_ingestor_engine
  * Reads only graph facts, so the ingestor evaluates it once per (graph, device) and one
  * failure disqualifies every kernel in the pack without any per-kernel work.
  */
-bool pointwiseAddGraphMatches(const hipdnn_plugin_sdk::ingestor::MatchContext& context);
+bool pointwiseAddGraphMatches(const hipdnn_plugin_sdk::ingestor::MatchContext& context,
+                              hipdnn_plugin_sdk::ingestor::BoundTokens& bound);
 
 /**
  * @brief Kernel-scoped applicability: does this kernel's dtype match the graph's?
@@ -56,7 +57,7 @@ struct PointwiseAddBinding
  *
  * @throws HipdnnPluginException if the graph is not one this matcher accepts.
  */
-PointwiseAddBinding pointwiseAddBinding(const hipdnn_plugin_sdk::ingestor::MatchContext& context);
+PointwiseAddBinding pointwiseAddBinding(const hipdnn_plugin_sdk::ingestor::BoundTokens& bound);
 
 /// @brief Registers this pack's matchers and scorer under their symbol names.
 ///

@@ -9,6 +9,8 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <string>
+#include <unordered_map>
 
 #include <hip/hip_runtime_api.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
@@ -32,19 +34,22 @@ using GraphId = hipdnn_flatbuffers_sdk::utilities::UuidBytes;
 /// another device does not.
 ///
 /// RFC 0017 §8.1 keys this on (engine id, graph id, device id) and §8.6 folds in a
-/// descriptor-inventory generation. Neither is present, and both omissions are scoped
-/// rather than free:
+/// descriptor-inventory generation. Neither appears here, for different reasons:
 ///
-/// - The engine id is implicit because one state manager serves one engine and owns this
-///   cache, so no other engine's catalog can reach it. That holds only while a state
-///   manager is never shared across engines.
+/// - The engine id is constant within any one cache, because GenericEngine owns its
+///   state manager outright (std::unique_ptr, not shared) and the state manager owns
+///   this cache. One engine, one UED, one catalog: an entry cannot be reached from an
+///   engine other than the one that wrote it, so storing the id would only repeat a
+///   value every entry already agrees on. This is enforced by the ownership, not by
+///   convention -- a second engine cannot be handed this manager.
 /// - The generation retires cached verdicts when a discovery scan changes the pack
 ///   inventory. Nothing is loaded from a file yet, so the inventory is fixed at compile
 ///   time and the generation would be a constant.
 ///
-/// Both become real key components once engines are built from UED files and packs can
-/// be dropped in. This is a struct rather than a std::pair so adding them then does not
-/// change how the key is spelled at its use sites.
+/// The generation becomes a real key component once packs can be dropped in; the engine
+/// id stays out for as long as the ownership above holds. This is a struct rather than a
+/// std::pair so adding a member then does not change how the key is spelled at its use
+/// sites.
 struct CatalogKey
 {
     GraphId graphId;
@@ -74,6 +79,21 @@ struct CatalogKeyHash
         return hash;
     }
 };
+
+/**
+ * @brief What matching resolved about one graph, carried forward to dispatch.
+ *
+ * RFC 0017 §8.5: "Matching does double duty: it decides the kernel applies, and it binds
+ * the fields the launch will use", and §8.1 keeps that state alongside the catalog so
+ * "nothing is re-matched" once a graph has been matched. A dispatch formula reading
+ * `$q.uid` is reading a value the matcher already resolved, not re-deriving it from the
+ * graph with a second notion of what the graph looks like.
+ *
+ * Keyed by the token name a descriptor would write. Values are int64 because every token
+ * a matcher binds today is a tensor uid or a dimension; a wider value type is the
+ * expression-language follow-up's to choose, and widening it is additive.
+ */
+using BoundTokens = std::unordered_map<std::string, int64_t>;
 
 /**
  * @brief The bound token state a matcher, scorer, or dispatch formula reads.

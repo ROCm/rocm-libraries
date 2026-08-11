@@ -53,6 +53,21 @@ inline constexpr std::string_view ENGINE_NAME = "hipkernel:PointwiseAdd";
 inline constexpr std::string_view BLOCK_SIZE_FIELD = "block_size";
 inline constexpr std::string_view DTYPE_FIELD = "dtype";
 
+/**
+ * @brief The tokens this pack's graph matcher binds for its dispatch handler to read.
+ *
+ * Written once here for the same reason the symbol names are: the matcher writes these
+ * and the dispatch handler reads them, and a typo on either side would otherwise be a
+ * runtime lookup failure rather than a compile error.
+ *
+ * These are the native stand-in for the `$`-prefixed names a descriptor's dispatch
+ * formulas would reference (RFC 0017 §5). Once the expression language lands, a UMD
+ * declares these names in its patterns and a UDD reads them by the same names.
+ */
+inline constexpr std::string_view INPUT_A_TOKEN = "pointwise_add.input_a.uid";
+inline constexpr std::string_view INPUT_B_TOKEN = "pointwise_add.input_b.uid";
+inline constexpr std::string_view OUTPUT_TOKEN = "pointwise_add.output.uid";
+
 } // namespace hip_kernel_provider::kernel_ingestor_engine
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

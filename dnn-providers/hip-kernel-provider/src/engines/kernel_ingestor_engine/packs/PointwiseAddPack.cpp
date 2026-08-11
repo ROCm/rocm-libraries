@@ -129,11 +129,11 @@ int64_t pointwiseAddEngineId()
     return hipdnn_data_sdk::utilities::engineNameToId(ENGINE_NAME);
 }
 
-std::shared_ptr<KernelIngestorStateManager<Handle>> makePointwiseAddStateManager()
+std::unique_ptr<KernelIngestorStateManager<Handle>> makePointwiseAddStateManager()
 {
     auto set = buildPointwiseAddDescriptorSet();
 
-    return std::make_shared<KernelIngestorStateManager<Handle>>(
+    return std::make_unique<KernelIngestorStateManager<Handle>>(
         std::move(set.schema),
         std::move(set.matchers),
         std::move(set.dispatches),

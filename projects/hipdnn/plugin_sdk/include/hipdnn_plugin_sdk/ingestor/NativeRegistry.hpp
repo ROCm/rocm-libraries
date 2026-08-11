@@ -37,7 +37,17 @@ namespace hipdnn_plugin_sdk::ingestor
 
 /// A graph-scoped applicability check: reads only graph and device facts, so it runs
 /// once per (graph, device) and its failure prunes every kernel in the pack.
-using GraphMatcherFn = bool (*)(const MatchContext&);
+///
+/// On success it also writes what it resolved about the graph into @p bound, which the
+/// catalog keeps and dispatch reads back. RFC 0017 §8.5 gives matching this double duty
+/// deliberately: the matcher already walked the graph to decide the kernel applies, so
+/// the launch reuses those values rather than re-deriving them. A matcher that binds
+/// nothing simply leaves @p bound alone.
+///
+/// Only graph-scoped matchers bind. Kernel-scoped ones run once per candidate, so what
+/// they resolved would be per-kernel state with nowhere in the catalog to live; the
+/// tokens a launch needs describe the problem, not the kernel chosen for it.
+using GraphMatcherFn = bool (*)(const MatchContext&, BoundTokens& bound);
 
 /// A kernel-scoped applicability check: also reads the candidate's metadata, so it runs
 /// once per surviving kernel and disqualifies that kernel alone.

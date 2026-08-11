@@ -98,6 +98,7 @@ const data_objects::TensorAttributes& firstInput(const MatchContext& context,
 } // namespace
 
 size_t PointwiseAddDispatchHandler::workspaceBytes(const MatchContext& /*context*/,
+                                                   const BoundTokens& /*bound*/,
                                                    const KernelDefinition& kernel) const
 {
     return kernel.getIntMetadata(std::string(BLOCK_SIZE_FIELD)) == LARGE_BLOCK_SIZE
@@ -105,13 +106,12 @@ size_t PointwiseAddDispatchHandler::workspaceBytes(const MatchContext& /*context
                : 0;
 }
 
-std::unique_ptr<PreparedDispatch>
-    PointwiseAddDispatchHandler::prepare(const MatchContext& context,
-                                         const KernelDefinition& kernel) const
+std::unique_ptr<PreparedDispatch> PointwiseAddDispatchHandler::prepare(
+    const MatchContext& context, const BoundTokens& bound, const KernelDefinition& kernel) const
 {
-    // Re-reads the operand uids the matcher bound, rather than re-deriving them here
-    // with a second notion of what this graph looks like.
-    const auto binding = pointwiseAddBinding(context);
+    // Reads the operand uids the matcher bound, rather than re-deriving them here with a
+    // second notion of what this graph looks like.
+    const auto binding = pointwiseAddBinding(bound);
 
     const auto blockSize
         = static_cast<unsigned int>(kernel.getIntMetadata(std::string(BLOCK_SIZE_FIELD)));
