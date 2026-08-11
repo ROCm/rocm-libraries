@@ -11,7 +11,7 @@ subtrees:
       - file: how-to/configure-settings
       - file: how-to/validate-output
       - file: how-to/use-primbench
-        title: Use primbench
+        title: Use Primbench
   - caption: Tutorials
     entries:
       - file: tutorials/copy-benchmark
