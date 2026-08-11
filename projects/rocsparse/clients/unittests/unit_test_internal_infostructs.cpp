@@ -57,6 +57,8 @@ using namespace rocsparse_ut;
 // ===========================================================================
 // harness smoke
 // ===========================================================================
+// Placeholder proving the device harness links the compiled-in info-struct TUs
+// and runs on the GPU. Always passes.
 TEST(internal_infostructs, harness_smoke)
 {
     SUCCEED();
@@ -65,6 +67,8 @@ TEST(internal_infostructs, harness_smoke)
 // ===========================================================================
 // rocsparse::numeric_boost
 // ===========================================================================
+// numeric_boost default construction: boost disabled, all pointers null, tol
+// datatype defaults to f32_r and both pointer modes to the sentinel -1.
 TEST(internal_infostructs, numeric_boost_default_ctor)
 {
     rocsparse::numeric_boost b;
@@ -76,6 +80,8 @@ TEST(internal_infostructs, numeric_boost_default_ctor)
     EXPECT_EQ(b.get_val_pointer_mode(), static_cast<rocsparse_pointer_mode>(-1));
 }
 
+// numeric_boost::define stores enable flag, tol/val pointer modes, tol datatype,
+// and the tol/val pointers verbatim; each getter reads back the defined value.
 TEST(internal_infostructs, numeric_boost_define)
 {
     rocsparse::numeric_boost b;
@@ -98,6 +104,8 @@ TEST(internal_infostructs, numeric_boost_define)
     EXPECT_EQ(b.get_val(), &val);
 }
 
+// numeric_boost individual setters each update exactly their field; every getter
+// reflects the value just set (enable, tol/val ptrs, tol datatype, pointer modes).
 TEST(internal_infostructs, numeric_boost_setters)
 {
     rocsparse::numeric_boost b;
@@ -120,6 +128,8 @@ TEST(internal_infostructs, numeric_boost_setters)
     EXPECT_EQ(b.get_val_pointer_mode(), rocsparse_pointer_mode_host);
 }
 
+// numeric_boost::copy performs a field-by-field copy: every getter on the
+// destination equals the corresponding getter on the source after copy.
 TEST(internal_infostructs, numeric_boost_copy)
 {
     const double tol = 1.0e-6;
@@ -147,6 +157,9 @@ TEST(internal_infostructs, numeric_boost_copy)
 // ===========================================================================
 // _rocsparse_csrmv_info::clear (+ adaptive/lrb/nnzsplit clear)
 // ===========================================================================
+// _rocsparse_csrmv_info::clear resets every scalar bookkeeping field to its zero
+// default, nulls the CSR pointers, and clears the adaptive/lrb/nnzsplit sub-info
+// sizes (freeing only null device pointers here, which is safe).
 TEST(internal_infostructs, csrmv_info_clear_resets_fields)
 {
     _rocsparse_csrmv_info info;
@@ -180,6 +193,8 @@ TEST(internal_infostructs, csrmv_info_clear_resets_fields)
     EXPECT_EQ(info.nnzsplit.size, 0u);
 }
 
+// adaptive/lrb/nnzsplit sub-info clear() on freshly constructed (null-pointer)
+// structs is null-safe and leaves size == 0 with every device pointer null.
 TEST(internal_infostructs, csrmv_subinfo_clear_null_safe)
 {
     _rocsparse_adaptive_info adaptive;
@@ -207,6 +222,8 @@ TEST(internal_infostructs, csrmv_subinfo_clear_null_safe)
 // ===========================================================================
 // rocsparse csrgemm_info create / copy / destroy
 // ===========================================================================
+// create_csrgemm_info allocates an info with documented defaults: buffer_size 0,
+// not initialized, and both mul and add enabled; destroy then frees it.
 TEST(internal_infostructs, csrgemm_info_create_defaults)
 {
     rocsparse_csrgemm_info info = nullptr;
@@ -221,11 +238,14 @@ TEST(internal_infostructs, csrgemm_info_create_defaults)
     EXPECT_EQ(rocsparse::destroy_csrgemm_info(info), rocsparse_status_success);
 }
 
+// create_csrgemm_info with a null out-pointer is rejected with invalid_pointer.
 TEST(internal_infostructs, csrgemm_info_create_invalid_pointer)
 {
     EXPECT_EQ(rocsparse::create_csrgemm_info(nullptr), rocsparse_status_invalid_pointer);
 }
 
+// copy_csrgemm_info copies all four fields (buffer_size, is_initialized, mul,
+// add) from src to dst; the destination reads back exactly the source values.
 TEST(internal_infostructs, csrgemm_info_copy)
 {
     rocsparse_csrgemm_info src = nullptr;
@@ -249,6 +269,8 @@ TEST(internal_infostructs, csrgemm_info_copy)
     EXPECT_EQ(rocsparse::destroy_csrgemm_info(dst), rocsparse_status_success);
 }
 
+// copy_csrgemm_info invalid-argument coverage: null dst, null src, and aliasing
+// (dst == src) are each rejected with invalid_pointer.
 TEST(internal_infostructs, csrgemm_info_copy_invalid_pointer)
 {
     rocsparse_csrgemm_info info = nullptr;
@@ -262,6 +284,7 @@ TEST(internal_infostructs, csrgemm_info_copy_invalid_pointer)
     EXPECT_EQ(rocsparse::destroy_csrgemm_info(info), rocsparse_status_success);
 }
 
+// destroy_csrgemm_info(nullptr) is a documented no-op that returns success.
 TEST(internal_infostructs, csrgemm_info_destroy_null_is_success)
 {
     EXPECT_EQ(rocsparse::destroy_csrgemm_info(nullptr), rocsparse_status_success);
@@ -277,6 +300,8 @@ TEST(internal_infostructs, csrgemm_info_destroy_null_is_success)
 // _rocsparse_mat_info constructor and destructor-routing) rather than by
 // compiling in common/rocsparse_mat_info.cpp. See the report / findings note.
 // ===========================================================================
+// _rocsparse_mat_info create/destroy round-trip through the public C API:
+// create yields a non-null handle and destroy returns success.
 TEST(internal_infostructs, mat_info_create_destroy_roundtrip)
 {
     rocsparse_mat_info info = nullptr;
@@ -285,6 +310,7 @@ TEST(internal_infostructs, mat_info_create_destroy_roundtrip)
     EXPECT_EQ(rocsparse_destroy_mat_info(info), rocsparse_status_success);
 }
 
+// rocsparse_destroy_mat_info(nullptr) is a documented no-op that returns success.
 TEST(internal_infostructs, mat_info_destroy_null_is_success)
 {
     EXPECT_EQ(rocsparse_destroy_mat_info(nullptr), rocsparse_status_success);
