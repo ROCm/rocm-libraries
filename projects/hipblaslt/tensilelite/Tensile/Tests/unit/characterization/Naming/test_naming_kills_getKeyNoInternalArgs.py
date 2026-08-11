@@ -59,13 +59,29 @@ def test_unwraps_state_attr(make_state):
 
 def test_masks_grouped_gemm_in_key(make_state):
     """Kills mutants that write the GroupedGemm mask to the wrong ProblemType
-    key (mutmut_26/27/28): GroupedGemm must be forced to False for the key, so a
-    GroupedGemm=True state and a GroupedGemm=False state produce the SAME key."""
+    key (mutmut_26/27/28). The mask is gated on ``SupportUserArgs``: with it off,
+    GroupedGemm is forced to False for the key, so a GroupedGemm=True state and a
+    GroupedGemm=False state produce the SAME key. With it on the mask is skipped,
+    so the two keys DIFFER and the GroupedGemm=True key carries a distinguishing
+    ``_GG_`` tag -- pinning the ``if not SupportUserArgs`` guard (kills its flip)."""
     s_true = make_state()
+    s_true["ProblemType"]["SupportUserArgs"] = False
     s_true["ProblemType"]["GroupedGemm"] = True
     s_false = make_state()
+    s_false["ProblemType"]["SupportUserArgs"] = False
     s_false["ProblemType"]["GroupedGemm"] = False
     assert getKeyNoInternalArgs(s_true, True) == getKeyNoInternalArgs(s_false, True)
+
+    g_true = make_state()
+    g_true["ProblemType"]["SupportUserArgs"] = True
+    g_true["ProblemType"]["GroupedGemm"] = True
+    g_false = make_state()
+    g_false["ProblemType"]["SupportUserArgs"] = True
+    g_false["ProblemType"]["GroupedGemm"] = False
+    key_true = getKeyNoInternalArgs(g_true, True)
+    key_false = getKeyNoInternalArgs(g_false, True)
+    assert key_true != key_false
+    assert "_GG_" in key_true and "_GG_" not in key_false
 
 
 def test_restores_grouped_gemm(make_state):
