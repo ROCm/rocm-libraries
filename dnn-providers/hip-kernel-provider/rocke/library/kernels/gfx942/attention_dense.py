@@ -4,7 +4,7 @@
 """Dense flash-attention prefill kernel for gfx942 (CDNA3).
 
 Port of the gfx950 dense prefill kernel (``kernels/gfx950/attention_dense.py``,
-from PR #9480 / AICK-1663) to CDNA3. Tracked by **AICK-1664**.
+from PR #9480) to CDNA3.
 
 This is a SEPARATE kernel from the gfx950 sibling by design: the gfx950 body bakes
 in CDNA4-only primitives that do not exist on gfx942, so the two algorithms
@@ -32,7 +32,8 @@ Why this is a port, not a copy (the CDNA3 deltas)
     It is lifted here for D128 fp16 as :func:`_use_cfvst` — the barrier caveat is
     that V publication becomes an in-loop ``ds_write``, so the tile-START rendezvous
     needs an lgkmcnt drain (``sync_lds_only``), not a bare barrier. The disproof
-    procedure and its evidence are recorded in the AICK-1664 plan.
+    procedure and its evidence are recorded in the gfx942 dense-prefill
+    optimization plan, which is kept outside the repo.
   * **LDS / occupancy.** gfx942 has 64 KB LDS/CU (vs gfx950's 160 KB); occupancy /
     ``num_persistent`` / block sizing must be re-derived for the 228- and 304-CU
     gfx942 parts rather than inherited from the gfx950 tuning.
@@ -74,9 +75,9 @@ catastrophically so: occupancy does not move (the register floor co-limits) and 
 K/V bank conflicts come straight back.
 
 Measured conflict rates, pipe utilisation and per-lever deltas are recorded outside
-the repo -- see the AICK-1664 plan and the protected results page.
+the repo -- see the optimization plan and the protected results page.
 
-Implementation status (see the AICK-1664 plan for the full ordered work list)
+Implementation status (the optimization plan holds the full ordered work list)
 -----------------------------------------------------------------------------
   * P0  enablement + 32x32x8 atom + K-loop doubling ............ DONE (this file)
   * P1  conflict-free V (perm_b32 store-path transpose) ........ DONE (D128 fp16)
@@ -90,12 +91,14 @@ Implementation status (see the AICK-1664 plan for the full ordered work list)
         uses -- one lever, not a per-arch duplicate), golden re-blessed against the
         shipped path; wide4 / K-single-buf still TODO. D128 -> 2 WG/CU is the open
         item and needs the LDS and register floors cut together -- see "Problem
-        category" above. ``BLOCK_M`` is a further occupancy axis: contrary to the
+        category" above. ``block_m`` is a further occupancy axis: contrary to the
         gfx950 sibling's "kernel FAULTS at other values" comment, every ``BLOCK_M``
         use in THIS body is parametric (the invariant is ``BLOCK_M == 32 * WAVES``),
         but shrinking it adds CTAs without adding a CTA/CU -- LDS is BLOCK_M-
         invariant -- and costs VGPRs on the K-side DMA addressing, so it is a modest
-        win on two of four shapes and a loss elsewhere; not wired.)
+        win on two of four shapes and a loss elsewhere; now exposed as
+        ``Gfx942DenseTuning.block_m`` so re-testing it is a sweep argument rather
+        than a source edit, and still DEFAULT-OFF at the shared ``_BLOCK_M``.)
   * P4  persistent grid-stride + qb/hkv_major decode .......... DONE (both decodes;
         shared _run_work_item body; auto-on for large Sq via dispatch, validated
         cross-part for every config by the ON/OFF ablation -- KEEP everywhere)
@@ -129,7 +132,7 @@ bf16 spills over the waves-per-eu=2 cap (a P2/P3 register-headroom item). The le
 is numerically identity-preserving (same MFMA operands; only the LDS layout and read
 width change) -- the cohort's ``max_abs`` is unchanged from the naive path. The
 conflict-free vehicle was proven correct cross-part before being lifted (see the
-AICK-1664 plan for the disproof procedure).
+optimization plan for the disproof procedure).
 
 P0 is CORRECTNESS-FIRST: the naive-V path (D64 / bf16-D128) is non-pipelined (a
 single LDS buffer) and reads V element-wise; the remaining perf levers (P2-P4) layer
@@ -146,9 +149,17 @@ module: batch / seqlen / heads / head_size / causal / dtype / knobs are arch-neu
 (compile-time shape + tuning). gfx942-specific tuning DEFAULTS (e.g. num_persistent
 for the gfx942 CU count) are applied in the builder / dispatch layer, not by forking
 the dataclass.
+
+Knobs that are gfx942-ONLY -- because gfx950 either cannot emit them or emits them
+from a different derivation -- live in :class:`Gfx942DenseTuning` instead, a
+gfx942-owned struct threaded through every entry point with a shipped default. It
+never touches ``AttentionDenseSpec.kernel_name()`` (the emitted symbol, and a gfx950
+golden), and it is invisible to dispatch: production always takes the default.
 """
 
 from __future__ import annotations
+
+from dataclasses import dataclass
 
 from rocke.core.ir import (
     IRBuilder,
@@ -165,7 +176,10 @@ from rocke.helpers.attention import mfma_32x32x8_for_dtype
 
 # The spec is arch-neutral (compile-time shape + tuning knobs); reuse it rather
 # than fork the dataclass. gfx942-specific defaults live in the builder/dispatch.
-from kernels.gfx950.attention_dense import AttentionDenseSpec, _BLOCK_M
+from kernels.gfx950.attention_dense import (
+    AttentionDenseSpec,
+    _BLOCK_M,
+)
 
 # C-output lane maps: IDENTICAL between the 32x32x8 (gfx942) and 32x32x16 (gfx950)
 # atoms (mfma_atom_catalog.md), so the softmax reductions + epilogue port verbatim.
@@ -194,72 +208,198 @@ if _BLOCK_M % 32 != 0:
         f"uncovered by any wave -- never computed and never written"
     )
 
-# K-row bank-conflict pad, in elements. INHERITED from the gfx950 sibling and NOT
-# re-derived for gfx942's bank geometry / LDS size -- that retune is a P3 item. Only
-# applied when one K row is packed per async-DMA instruction; see
-# _lds_row_stride for why D64 cannot carry it.
-# SETTLED (do not re-attempt): DROPPING this pad (and the cfvst V pad) to cut D128
-# LDS under the 32 KB needed for a 2nd WG/CU is PROVEN-NEGATIVE and catastrophically
-# so -- D128 stays 1 WG/CU even unpadded because the register floor co-limits, so the
-# pads are removed for nothing and the K/QK + cfvst V bank conflicts come back. Only
-# the VALUE is still open to retune; the pads themselves stay.
-_LDS_ROW_PAD = 8
 
-# V^T row (token axis) bank-conflict pad, in elements, for the P1 conflict-free-V
-# store. V_lds is transposed to [D, block_n] (dim-major, token inner) so the PV
-# A-operand read is a contiguous ds_read_b64; the pad spaces the dim rows so the
-# per-lane 4-token reads land in distinct banks (token stride block_n+8 dwords ->
-# 8-bank / 4-way at block_n=64, matching the D128 QK path). Lifted from the proven
-# attention_tiled_2d cfvst vehicle (v_pad=8); a gfx942 re-derivation is a P3 item.
-_V_ROW_PAD = 8
+@dataclass(frozen=True)
+class Gfx942DenseTuning:
+    """gfx942-private codegen knobs for the dense prefill body.
 
-# --- D64 K-LDS bank-conflict fix (AICK-1664 Hypothesis #3) -- ADOPTED, not pending. ---
-# There is NO gfx942-private switch for this: the pad amount is the SHARED
-# ``AttentionDenseSpec.lds_k_group_pad`` (default 8), which gfx950 owns and this
-# builder reuses verbatim via _k_group_pad_active / _k_group_stride. Both arches
-# pad between async-DMA row-GROUPS by the same formula for the same reason; gfx942
-# arrived at it from a measured ~2x ON/OFF ablation and gfx950 from a bank/phase
-# model, and both landed on 8. Set the field to 0 to reproduce the unpadded layout
-# for A/B -- that IS the probe, so no module-level override constant is needed.
-# MECHANISM (corrected): the static codegen A/B is IDENTICAL with the pad on and off
-# (VGPR, LDS-instruction stream and s_nop all unchanged), so the once-hypothesised
-# "frees registers -> more ILP, compounding" mechanism is DEBUNKED. The win is purely
-# eliminated bank-conflict REPLAY -- the same ds_read replayed ~8x at 32-way instead
-# of ~4-way -- which is a runtime effect invisible to any static probe.
-# With a non-zero pad the D64 K_lds takes a *row-group boundary pad* (group stride
-# rows_per_instr*D + pad elements) so the do_qk K reads drop from a full 32-way bank
-# conflict to 4-way (matching D128), WITHOUT losing async-DMA efficiency (the
-# contiguous 2-rows-per-instruction DMA still writes one whole group per instruction;
-# the pad sits at the group boundary it never touches). This is the "swizzled LDS
-# layout" arm of the hypothesis (strictly better than "ROWS_PER_INSTR=1 + half DMA
-# efficiency"). The read decomposes krow -> (group = krow >> 1, within = krow & 1).
+    SEPARATE from :class:`AttentionDenseSpec` on purpose, and not a fork of it. The
+    spec is the arch-neutral compile-time PROBLEM (shape, plus the tuning gfx950 also
+    owns) and it is emitted into the IR as the kernel symbol via
+    ``spec.kernel_name()`` -- extending it would move an 18-case gfx950 golden
+    (``platform/tests/golden/rocke_representative_ir_sha256.json``) and the C++/Python
+    parity gate. This struct is the gfx942 SWEEP surface instead: dispatch leaves
+    every field at its default, so it is invisible in production and fully
+    addressable from a harness.
 
-# Runbook lever 7 (optimization_runbook.md §8.4): iglp_opt is the canned backend
-# MFMA / ds_read / ds_write interleave (llvm.amdgcn.iglp.opt), distinct from the
-# proven-negative s_setprio / sched_barrier hints (plan §2 DO-NOT-PORT). Its
-# precondition is in-loop ds_write traffic to interleave against the MFMAs -- which
-# only the P1 cfvst path has (V is stored to V_lds inside the loop; the naive path
-# is direct-load, 0 ds_write, so iglp is a priori neutral). Placed once at the top of
-# the main-loop body per the runbook.
-#
-# RESOLVED -- do not re-attempt. This is no longer a pending probe: the GPU timing it
-# was gated on has been run, cross-part, on the cfvst config it was supposed to help.
-#   * Static (runbook §8.4): the intrinsic is a compile-time scheduler DIRECTIVE and
-#     leaves NO runtime instruction -- the ISA opcode histogram is unchanged and
-#     ds_read / ds_write / mfma counts are identical, with no spill or LDS delta. So
-#     the effect could never be confirmed by artifact and had to be timed.
-#   * Timed: PROVEN-NEUTRAL on both parts. Its only visible effect is shifting the
-#     architected-VGPR / AGPR split (88/128 -> 128/128 at fp16 D128) at equal total
-#     registers, which does not move the clock.
-# The neutrality is itself the useful result, per runbook §8.6 (barrier-bound vs
-# schedule-bound): a canned MFMA/DS interleave buying nothing means the main loop is
-# NOT schedule-bound -- it is barrier-rendezvous-bound, which no scheduling hint can
-# fix. That is consistent with the measured occupancy bound in the module docstring,
-# and it is why the whole scheduling-hint family stays unported. Stays default OFF.
-_IGLP = False
+    Tri-state fields: ``None`` means "use the measured policy"
+    ---------------------------------------------------------
+    ``use_cfvst`` / ``use_exp2_fast`` / ``waves_per_eu`` default to ``None``, which
+    resolves through the shipping policy (:func:`_use_cfvst`, :func:`_use_exp2_fast`,
+    and ``spec.waves_per_eu`` -- which the gfx942 dispatch fills from
+    :func:`_tuned_waves_per_eu`). That tri-state is the whole point of the struct: a
+    harness that omits a VALUED field freezes the config at whatever the default
+    happened to be the day it was written and then silently reports a stale verdict
+    (that is exactly how a real +79% got reported as -17% in this tree). A harness
+    that omits a ``None`` field auto-tracks whatever ships. Omission becomes safe.
+
+    The policy functions stay the SINGLE resolution point -- their docstrings are the
+    evidence ledger, and their verdicts are deliberately NOT copied into the defaults
+    here, so there is nothing to drift.
+
+    Naming / launcher-cache safety
+    ------------------------------
+    Every field that can change codegen is tagged into :func:`gfx942_kernel_name`,
+    but ONLY when it differs from the default (or, for the tri-state fields, from
+    what the policy would have produced) -- so at shipped defaults the names, and the
+    goldens, are byte-identical. Conditional tagging is the existing idiom
+    (``AttentionDenseSpec.kernel_name`` emits ``kpad{N}`` only on the packed path and
+    ``persist{N}`` only when persistent), and it is load-bearing rather than
+    cosmetic: ``_DENSE_LAUNCHER_CACHE`` is keyed on the kernel name and its
+    ``assert art.kernel_name == key`` PASSES on a name collision, so an untagged
+    IR-affecting knob silently serves a stale binary. This kernel has shipped that
+    exact bug twice (``batch``, then ``waves_per_eu``).
+
+    :func:`supports_attention_dense` validates this struct, not just the builder: the
+    module contract is that ``supports(spec, tuning=t)[0] is True`` implies
+    ``build_attention_dense(spec, tuning=t)`` succeeds.
+    """
+
+    # block_m: query rows per CTA. The wave count is block_m // 32 and the CTA is
+    #   waves*64 threads. Defaults to the IMPORTED ``_BLOCK_M`` rather than a repeated
+    #   literal so the default cannot drift from the constant the grid helper and the
+    #   gfx950 sibling pin. It is a gfx942-only tunable, and must stay one: the gfx950
+    #   builder FAULTS at any other value (its causal mask and P relayout hardcode
+    #   256 -- ``kernels/gfx950/attention_dense.py:83-84``) and pins the module
+    #   constant regardless of any field, so this can never become a shared-spec
+    #   field. Every ``block_m`` use in THIS body is parametric.
+    #   Status: an OPEN occupancy axis. Shrinking it adds CTAs without adding a
+    #   CTA/CU (the LDS footprint is block_m-invariant) and costs VGPRs on the K-side
+    #   DMA addressing, so it measured a modest win on two of four shapes and a loss
+    #   elsewhere -- which is why it is a sweep knob here instead of a source edit.
+    block_m: int = _BLOCK_M
+
+    # lds_row_pad: K_lds per-ROW bank-conflict pad, in elements. Applied only when one
+    #   K row is packed per async-DMA instruction (D128 here); see
+    #   :func:`_lds_row_stride` for why D64 cannot carry a per-row pad and uses the
+    #   per-GROUP ``spec.lds_k_group_pad`` instead. The two are DIFFERENT,
+    #   mutually-exclusive levers that merely happen to share the value 8.
+    #
+    #   SETTLED -- but scoped strictly to REMOVAL. Dropping this pad (and
+    #   ``v_row_pad``) to cut D128 LDS under the 32 KB a 2nd WG/CU needs is
+    #   PROVEN-NEGATIVE and catastrophically so: D128 stays at 1 WG/CU even unpadded
+    #   because the register floor co-limits, so the pads come out for nothing and the
+    #   K/QK (and cfvst V) bank conflicts come straight back. Do not re-attempt pad
+    #   REMOVAL.
+    #
+    #   The VALUE is a different question and it is OPEN. 8 is INHERITED from the
+    #   gfx950 sibling and has never been re-derived for gfx942. Two concrete reasons
+    #   to distrust it:
+    #     * Bank geometry does not transfer. gfx950 has 64 LDS banks, gfx942 has 32
+    #       (``platform/dsl_docs/optimization/arch/gfx950.md`` §21.2 "LDS specifics"
+    #       table; ``platform/dsl_docs/optimization/arch/gfx942.md`` §21.2), and the
+    #       shared pad derivation is written against the 64-bank model verbatim --
+    #       "LDS delivers 64 banks x 4 B = 256 B/cycle" (``AttentionDenseSpec``'s
+    #       ``lds_k_group_pad`` comment in ``kernels/gfx950/attention_dense.py``). The
+    #       same gfx950 table also lists the preferred swizzle as *padding* for
+    #       gfx950 and *XOR* for gfx942, so even the FORM of the fix is not obviously
+    #       transferable, let alone the magnitude.
+    #     * 8 did not survive a sweep on the arch it came from. gfx950's own sweep of
+    #       the analogous V pad measured conflicts {pad 0: 30, pad 8: 29, pad 16: 11,
+    #       pad 32: 0} -- i.e. +8 was essentially indistinguishable from no pad at all
+    #       (``kernels/gfx950/attention_dense.py`` module docstring / ``_LDS_PAD_V``).
+    #   Re-deriving both pad VALUES on gfx942 is the pad-value sweep tracked in the
+    #   optimization plan; THIS field is the knob that sweep turns.
+    lds_row_pad: int = 8
+
+    # v_row_pad: V^T row (token axis) bank-conflict pad, in elements, for the P1
+    #   conflict-free-V store. V_lds is transposed to [D, block_n] (dim-major, token
+    #   inner) so the PV A-operand read is a contiguous ds_read_b64; the pad spaces
+    #   the dim rows so the per-lane 4-token reads land in distinct banks (token
+    #   stride block_n+8 dwords -> 8-bank / 4-way at block_n=64, matching the D128 QK
+    #   path). Lifted from the proven ``attention_tiled_2d`` cfvst vehicle (v_pad=8).
+    #   Same status as ``lds_row_pad``: pad REMOVAL is settled-negative, the pad VALUE
+    #   is inherited-and-not-re-derived-for-gfx942 and therefore OPEN -- and this is
+    #   the very pad whose gfx950 sweep found 8 ~= no pad at all (see above).
+    #   Read in exactly two places -- the :func:`_lds_bytes` budget and the ``V_lds``
+    #   allocation in the builder -- and BOTH read this one field, so the budget can
+    #   no longer drift from the allocation.
+    v_row_pad: int = 8
+
+    # use_cfvst: force the P1 conflict-free perm_b32 store-path V transpose on/off.
+    #   None (default) -> :func:`_use_cfvst`, which owns the measured verdict.
+    #   Forcing it ON where the policy says OFF is REJECTED by
+    #   supports_attention_dense (D64 regresses under it -- VGPR-bound; bf16 D128
+    #   spills past the waves-per-eu cap), so this field can only turn cfvst off, or
+    #   pin it on where it already is.
+    use_cfvst: bool | None = None
+
+    # use_exp2_fast: force the P2 single-instruction exp2 on/off.
+    #   None (default) -> :func:`_use_exp2_fast`, which owns the measured verdict
+    #   (on everywhere except bf16 D128, which spills). Numerically safe in both
+    #   directions here -- both softmax arguments are always <= 0 -- so unlike
+    #   ``use_cfvst`` this one is a pure perf A/B and is not gated.
+    use_exp2_fast: bool | None = None
+
+    # waves_per_eu: override the emitted ``amdgpu-waves-per-eu`` attribute.
+    #   None (default) -> ``spec.waves_per_eu``, which the gfx942 dispatch spec
+    #   factory fills from :func:`_tuned_waves_per_eu` -- so ``None`` auto-tracks the
+    #   measured policy end to end without this struct restating it. The RESOLVED
+    #   value is what lands in the ``wpe{N}`` name token and in the kernel attribute,
+    #   so the name and the binary cannot disagree.
+    waves_per_eu: int | None = None
+
+    # iglp: emit runbook lever 7 (optimization_runbook.md §8.4) -- ``iglp_opt``, the
+    #   canned backend MFMA / ds_read / ds_write interleave (llvm.amdgcn.iglp.opt),
+    #   distinct from the proven-negative s_setprio / sched_barrier hints (plan §2
+    #   DO-NOT-PORT). Its precondition is in-loop ds_write traffic to interleave
+    #   against the MFMAs -- which only the P1 cfvst path has (V is stored to V_lds
+    #   inside the loop; the naive path is direct-load, 0 ds_write, so iglp is a
+    #   priori neutral). Placed once at the top of the main-loop body per the runbook.
+    #
+    #   RESOLVED -- do not re-attempt. This is no longer a pending probe: the GPU
+    #   timing it was gated on has been run, cross-part, on the cfvst config it was
+    #   supposed to help.
+    #     * Static (runbook §8.4): the intrinsic is a compile-time scheduler DIRECTIVE
+    #       and leaves NO runtime instruction -- the ISA opcode histogram is unchanged
+    #       and ds_read / ds_write / mfma counts are identical, with no spill or LDS
+    #       delta. So the effect could never be confirmed by artifact and had to be
+    #       timed.
+    #     * Timed: PROVEN-NEUTRAL on both parts. Its only visible effect is shifting
+    #       the architected-VGPR / AGPR split (88/128 -> 128/128 at fp16 D128) at
+    #       equal total registers, which does not move the clock.
+    #   The neutrality is itself the useful result, per runbook §8.6 (barrier-bound vs
+    #   schedule-bound): a canned MFMA/DS interleave buying nothing means the main
+    #   loop is NOT schedule-bound -- it is barrier-rendezvous-bound, which no
+    #   scheduling hint can fix. That matches the measured occupancy bound in the
+    #   module docstring, and it is why the whole scheduling-hint family stays
+    #   unported. Stays default OFF; it is kept as a knob only because it toggles IR.
+    iglp: bool = False
+
+    def resolved_use_cfvst(self, spec: AttentionDenseSpec) -> bool:
+        """Resolved conflict-free-V decision (``None`` -> :func:`_use_cfvst`)."""
+        if self.use_cfvst is None:
+            return _use_cfvst(spec.head_size, spec.dtype)
+        return bool(self.use_cfvst)
+
+    def resolved_use_exp2_fast(self, spec: AttentionDenseSpec) -> bool:
+        """Resolved exp2_fast decision (``None`` -> :func:`_use_exp2_fast`)."""
+        if self.use_exp2_fast is None:
+            return _use_exp2_fast(spec.head_size, spec.dtype)
+        return bool(self.use_exp2_fast)
+
+    def resolved_waves_per_eu(self, spec: AttentionDenseSpec) -> int:
+        """Resolved ``amdgpu-waves-per-eu`` (``None`` -> ``spec.waves_per_eu``).
+
+        ``spec.waves_per_eu`` is itself filled from :func:`_tuned_waves_per_eu` by
+        ``dispatch.attention.gfx942._dense_spec``, so leaving this ``None`` tracks the
+        measured policy rather than pinning today's number -- while a hand-built spec
+        keeps whatever it asked for (which is what keeps every existing caller and
+        golden byte-identical)."""
+        if self.waves_per_eu is None:
+            return int(spec.waves_per_eu)
+        return int(self.waves_per_eu)
+
+
+# The shipped configuration. Used both as the default argument of every public entry
+# point (so every existing caller keeps working unchanged) and as the comparison
+# baseline for the conditional name tags below -- one object, so a default and its
+# "is this the default?" test cannot drift apart.
+_DEFAULT_TUNING = Gfx942DenseTuning()
 
 __all__ = [
     "AttentionDenseSpec",
+    "Gfx942DenseTuning",
     "supports_attention_dense",
     "build_attention_dense",
     "attention_dense_grid",
@@ -270,7 +410,46 @@ __all__ = [
 ]
 
 
-def gfx942_kernel_name(spec: AttentionDenseSpec) -> str:
+def _tuning_name_tags(spec: AttentionDenseSpec, tuning: "Gfx942DenseTuning") -> str:
+    """Name suffix for every :class:`Gfx942DenseTuning` field that is NOT shipped.
+
+    Empty string at the shipped configuration -- which is the property that keeps the
+    goldens and every cached kernel name byte-identical -- and non-empty, uniquely, for
+    any other tuning. The tri-state fields are compared against what the POLICY would
+    have produced, not against the raw ``None``, so ``use_cfvst=True`` on the config
+    the policy already turns on is (correctly) the same kernel and the same name.
+
+    Deliberately tagged on "differs from the default", not on "is live in this
+    build": at D64 a non-default ``lds_row_pad`` emits identical IR (D64 takes the
+    per-GROUP pad instead), so this over-tags there and costs one duplicate compile.
+    That direction is free; the other direction -- under-tagging a knob that DOES
+    move IR -- silently serves a stale binary out of ``_DENSE_LAUNCHER_CACHE``, which
+    is the bug this whole tagging scheme exists to prevent.
+
+    ``waves_per_eu`` needs no tag here: the resolved value is already emitted as the
+    ``wpe{N}`` token by :func:`gfx942_kernel_name` itself.
+    """
+    parts: list[str] = []
+    if tuning.block_m != _DEFAULT_TUNING.block_m:
+        parts.append(f"bm{tuning.block_m}")
+    if tuning.lds_row_pad != _DEFAULT_TUNING.lds_row_pad:
+        parts.append(f"krowpad{tuning.lds_row_pad}")
+    if tuning.v_row_pad != _DEFAULT_TUNING.v_row_pad:
+        parts.append(f"vrowpad{tuning.v_row_pad}")
+    cfvst = tuning.resolved_use_cfvst(spec)
+    if cfvst != _use_cfvst(spec.head_size, spec.dtype):
+        parts.append("cfvst1" if cfvst else "cfvst0")
+    e2f = tuning.resolved_use_exp2_fast(spec)
+    if e2f != _use_exp2_fast(spec.head_size, spec.dtype):
+        parts.append("e2f1" if e2f else "e2f0")
+    if tuning.iglp != _DEFAULT_TUNING.iglp:
+        parts.append("iglp1" if tuning.iglp else "iglp0")
+    return "".join(f"_{p}" for p in parts)
+
+
+def gfx942_kernel_name(
+    spec: AttentionDenseSpec, tuning: "Gfx942DenseTuning" = _DEFAULT_TUNING
+) -> str:
     """Kernel name carrying every compile-time-baked parameter the shared name omits.
 
     ``AttentionDenseSpec.kernel_name()`` omits both ``batch`` and ``waves_per_eu``,
@@ -292,11 +471,22 @@ def gfx942_kernel_name(spec: AttentionDenseSpec) -> str:
     packed path. Adding a second gfx942 tag would restate the same fact under a
     different name -- exactly the duplication that collapsing the two spec fields
     removed.
+
+    ``tuning`` appends :func:`_tuning_name_tags`, which is EMPTY at the shipped
+    configuration: the default name is byte-identical to the pre-tuning-struct one,
+    so no golden moves, while any non-default sweep point gets its own identity (and
+    therefore its own ``_DENSE_LAUNCHER_CACHE`` entry). The ``wpe`` token carries the
+    RESOLVED waves-per-eu, so a ``tuning.waves_per_eu`` override moves the name and
+    the emitted attribute together.
     """
-    return f"{spec.kernel_name()}_gfx942_b{spec.batch}_wpe{spec.waves_per_eu}"
+    wpe = tuning.resolved_waves_per_eu(spec)
+    return (
+        f"{spec.kernel_name()}_gfx942_b{spec.batch}_wpe{wpe}"
+        f"{_tuning_name_tags(spec, tuning)}"
+    )
 
 
-# In-scope for the gfx942 port (AICK-1664). supports_attention_dense rejects
+# In-scope for the gfx942 dense-prefill port. supports_attention_dense rejects
 # everything outside this AND every mode the builder cannot emit, so a True result
 # from it means build_attention_dense succeeds. That equivalence is what keeps the
 # dispatch arm from selecting a spec it cannot build.
@@ -391,79 +581,130 @@ def _tuned_waves_per_eu(head_size: int, dtype: str) -> int:
     return 2
 
 
-def _lds_row_stride(head_size: int) -> int:
+def _lds_row_stride(
+    head_size: int, tuning: "Gfx942DenseTuning" = _DEFAULT_TUNING
+) -> int:
     """K_lds / V_lds row stride in ELEMENTS for one head size.
 
     D128 packs ONE row per async-DMA instruction (64 lanes x 2 elems = 128 elems =
-    one D128 row), so the row can carry the bank-conflict pad. D64 packs TWO rows
-    per instruction, which requires a contiguous UNPADDED stride -- a padded row
-    would not be adjacent to the next one, so the single instruction could not
-    cover both. D64 therefore takes LDS bank conflicts on the QK reads; widening
-    that path is a P3 lever, not an oversight.
+    one D128 row), so the row can carry the bank-conflict pad
+    (``tuning.lds_row_pad``). D64 packs TWO rows per instruction, which requires a
+    contiguous UNPADDED stride -- a padded row would not be adjacent to the next one,
+    so the single instruction could not cover both. D64 therefore pads between
+    row-GROUPS instead (``spec.lds_k_group_pad`` / :func:`_k_group_stride`), and
+    ``tuning.lds_row_pad`` is inert there.
 
     Shared by the builder and :func:`supports_attention_dense` so the budget check
     cannot drift from the actual allocation.
     """
-    return head_size + _LDS_ROW_PAD if _rows_per_instr(head_size) == 1 else head_size
+    if _rows_per_instr(head_size) == 1:
+        return head_size + tuning.lds_row_pad
+    return head_size
 
 
-def _k_group_pad_active(spec: AttentionDenseSpec) -> bool:
+def _k_group_pad_active(
+    spec: AttentionDenseSpec, tuning: "Gfx942DenseTuning" = _DEFAULT_TUNING
+) -> bool:
     """Whether the D64 K-LDS row-group bank-conflict pad is EMITTED for ``spec``.
 
-    Reads the SHARED ``spec.lds_k_group_pad``, which gfx950 owns and gfx942 reuses
-    verbatim: both arches pad between async-DMA row-GROUPS by the same formula
-    (``rows_per_instr * head_size + pad``) for the same reason, so this is one lever
-    with one field rather than a per-arch duplicate. gfx942 derived the pad from a
-    measured ~2x ON/OFF ablation, gfx950 from a bank/phase model, and both landed on
-    the same 8-element default.
+    ADOPTED, not pending. There is NO gfx942-private switch: the pad amount is the
+    SHARED ``spec.lds_k_group_pad``, which gfx950 owns and gfx942 reuses verbatim.
+    Both arches pad between async-DMA row-GROUPS by the same formula
+    (``rows_per_instr * head_size + pad``, see :func:`_k_group_stride`) for the same
+    reason, so this is one lever with one field rather than a per-arch duplicate.
+    gfx942 derived the pad from a measured ~2x ON/OFF ablation, gfx950 from a
+    bank/phase model, and both landed on the same 8-element default.
 
     Active only on the PACKED path (``rows_per_instr > 1``, i.e. D64 here): D128
     already carries a per-row K pad via :func:`_lds_row_stride`, so it must never
     be re-padded. ``lds_k_group_pad=0`` reproduces the unpadded layout for A/B --
     which is also how the pad's ~2x is priced, no module-level probe constant needed.
+
+    What the pad does
+    -----------------
+    With a non-zero pad the D64 ``K_lds`` takes a *row-group boundary* pad, so the
+    ``do_qk`` K reads drop from a full 32-way bank conflict to 4-way (matching D128)
+    WITHOUT losing async-DMA efficiency: the contiguous 2-rows-per-instruction DMA
+    still writes one whole group per instruction, and the pad sits at the group
+    boundary it never touches. This is the "swizzled LDS layout" arm of the
+    hypothesis, and it is strictly better than the other arm that was considered --
+    ``ROWS_PER_INSTR=1`` plus half the DMA efficiency.
+
+    MECHANISM (corrected -- a proven negative, do not re-derive)
+    -----------------------------------------------------------
+    The static codegen A/B is IDENTICAL with the pad on and off: VGPR count, the
+    LDS-instruction stream and the ``s_nop`` padding are all unchanged. The
+    once-hypothesised "the pad frees registers -> more ILP -> compounding win"
+    mechanism is therefore DEBUNKED. The win is purely eliminated bank-conflict
+    REPLAY -- the same ``ds_read`` replayed ~8x at 32-way instead of ~4-way -- which
+    is a runtime effect and is invisible to any static probe. Re-running a static
+    A/B to "explain" this lever will find nothing; only a timed run prices it.
+
+    ``tuning`` is accepted (and ignored) so every LDS-geometry helper takes the same
+    ``(spec, tuning)`` call convention: this pad is a SPEC field, not a gfx942 tuning
+    field, precisely because gfx950 emits the identical layout from the identical
+    formula. Threading the parameter here keeps a future caller from having to know
+    which of the two pads it is looking at.
     """
+    del tuning  # spec-owned lever; see docstring
     return spec.lds_k_group_pad > 0 and _rows_per_instr(spec.head_size) > 1
 
 
-def _k_group_stride(spec: AttentionDenseSpec) -> int:
+def _k_group_stride(
+    spec: AttentionDenseSpec, tuning: "Gfx942DenseTuning" = _DEFAULT_TUNING
+) -> int:
     """K_lds physical group stride in ELEMENTS when the row-group pad is active.
 
     A group is ROWS_PER_INSTR (=2 at D64) contiguous rows written by one async-DMA
     instruction; the pad sits at the group boundary (never DMA-touched). Identical
-    to the gfx950 builder's ``LDROW = K_GROUP * D + spec.lds_k_group_pad``."""
+    to the gfx950 builder's ``LDROW = K_GROUP * D + spec.lds_k_group_pad``.
+    ``tuning`` is accepted and ignored for the call-convention reason given in
+    :func:`_k_group_pad_active`."""
+    del tuning  # spec-owned lever; see _k_group_pad_active
     return _rows_per_instr(spec.head_size) * spec.head_size + spec.lds_k_group_pad
 
 
-def _lds_bytes(spec: AttentionDenseSpec) -> int:
+def _lds_bytes(
+    spec: AttentionDenseSpec, tuning: "Gfx942DenseTuning" = _DEFAULT_TUNING
+) -> int:
     """Total LDS footprint: ``K_lds[1, block_n, row_stride] + V_lds[1, D, block_n+pad]``.
 
     K keeps the natural ``[token, dim]`` layout with :func:`_lds_row_stride` (async
     DMA target). V is TRANSPOSED to ``[dim, token]`` for the P1 conflict-free store, so
-    its footprint is ``D * (block_n + _V_ROW_PAD)`` rather than ``block_n * row_stride``.
-    2 bytes/element is exact for every dtype in ``_SUPPORTED_DTYPES`` (bf16/fp16) and
+    its footprint is ``D * (block_n + tuning.v_row_pad)`` rather than
+    ``block_n * row_stride``. 2 bytes/element is exact for every dtype in
+    ``_SUPPORTED_DTYPES`` (bf16/fp16) and
     must be revisited if a narrower or wider element type is added. Shared with the
     budget check in :func:`supports_attention_dense` so the two cannot drift.
 
     When :func:`_k_group_pad_active` (the D64 bank-conflict pad), K instead takes the
     2-row-group layout ``K_lds[1, block_n // rows_per_instr, _k_group_stride]`` --
-    +``_LDS_ROW_PAD`` elements per group (D128 and the kpad-off D64 path are unchanged).
+    +``spec.lds_k_group_pad`` elements per group (D128 and the kpad-off D64 path are
+    unchanged).
+
+    ``tuning.v_row_pad`` is read HERE and in the builder's ``V_lds`` allocation, and
+    nowhere else. Both sites read the same resolved struct, which is what stops the
+    budget from silently under-counting the allocation.
     """
-    if _k_group_pad_active(spec):
+    if _k_group_pad_active(spec, tuning):
         rpi = _rows_per_instr(spec.head_size)
-        k_bytes = (spec.block_n // rpi) * _k_group_stride(spec) * 2
+        k_bytes = (spec.block_n // rpi) * _k_group_stride(spec, tuning) * 2
     else:
-        k_bytes = spec.block_n * _lds_row_stride(spec.head_size) * 2
-    if _use_cfvst(spec.head_size, spec.dtype):
+        k_bytes = spec.block_n * _lds_row_stride(spec.head_size, tuning) * 2
+    if tuning.resolved_use_cfvst(spec):
         # V transposed to [dim, token+pad] for the conflict-free store (D128).
-        v_bytes = spec.head_size * (spec.block_n + _V_ROW_PAD) * 2
+        v_bytes = spec.head_size * (spec.block_n + tuning.v_row_pad) * 2
     else:
         # V keeps the natural [token, dim] async-DMA layout (D64, naive read).
-        v_bytes = spec.block_n * _lds_row_stride(spec.head_size) * 2
+        v_bytes = spec.block_n * _lds_row_stride(spec.head_size, tuning) * 2
     return k_bytes + v_bytes
 
 
 def supports_attention_dense(
-    spec: AttentionDenseSpec, *, arch: str = "gfx942"
+    spec: AttentionDenseSpec,
+    *,
+    arch: str = "gfx942",
+    tuning: "Gfx942DenseTuning" = _DEFAULT_TUNING,
 ) -> tuple[bool, str]:
     """Return ``(ok, reason)`` for one gfx942 dense-prefill config.
 
@@ -473,17 +714,22 @@ def supports_attention_dense(
     out-of-scope request fall through to another candidate instead of selecting
     this arm and failing at build time.
 
-    In scope (AICK-1664): gfx942, bf16/fp16, D64/D128, MHA/GQA including
+    That contract covers the ``tuning`` struct too, not just the spec: an illegal
+    :class:`Gfx942DenseTuning` is rejected HERE, with a structured reason, rather
+    than only blowing up inside the builder (or -- worse -- building a config that is
+    known to spill or to read past its tile).
+
+    In scope for this port: gfx942, bf16/fp16, D64/D128, MHA/GQA including
     non-power-of-2 groups, causal or full, the default grid AND the P4 persistent
-    grid-stride variant, ``block_n`` dividing the 256-row query tile, within the LDS
-    budget and 32-bit addressing. varlen / ragged / sliding-window are later
-    follow-ups (rejected below).
+    grid-stride variant, ``block_n`` dividing the ``tuning.block_m`` query tile,
+    within the LDS budget and 32-bit addressing. varlen / ragged / sliding-window are
+    later follow-ups (rejected below).
     """
     if arch != "gfx942":
         return False, f"kernels.gfx942.attention_dense is gfx942-only (got {arch})"
-    # Type FIRST: every check below dereferences an attribute, so a non-spec
-    # argument would raise AttributeError out of a function whose whole contract is
-    # that it returns a structured (False, reason) instead of raising.
+    # Type FIRST: every check below dereferences a spec attribute, so a non-spec
+    # argument would raise AttributeError out of this (bool, str) API instead of
+    # returning the structured rejection the contract promises.
     if not isinstance(spec, AttentionDenseSpec):
         return False, f"spec must be an AttentionDenseSpec, got {type(spec).__name__}"
     if spec.dtype not in _SUPPORTED_DTYPES:
@@ -494,7 +740,7 @@ def supports_attention_dense(
     if spec.head_size not in _SUPPORTED_HEAD_SIZES:
         return False, (
             f"gfx942 attention_dense scope is D{list(_SUPPORTED_HEAD_SIZES)} "
-            f"(D256 is AICK-1495/1496), got D{spec.head_size}"
+            f"(D256 is served by its own wide-atom candidates), got D{spec.head_size}"
         )
     # Re-run the dataclass validators (shape multiples, GQA divisibility, knob
     # ranges) so a hand-built spec is rejected with a structured reason. Iterate the
@@ -528,36 +774,108 @@ def supports_attention_dense(
     # --- Mode scope. The body implements the default-grid AND the P4 persistent
     # grid-stride variant, both uniform dense self-attention. Checked HERE and not
     # only in the builder so that support() and build() agree on exactly one set of
-    # specs. Persistent needs Sq % _BLOCK_M == 0 (the grid-stride work count
-    # W = (Sq // _BLOCK_M) * Hq * B floors); ragged (the ceil case) is rejected
-    # just below, and the dataclass then enforces seqlen_q % 256 == 0, so the floor
-    # is exact for every spec that reaches the persistent builder.
+    # specs. Persistent needs Sq % block_m == 0 (the grid-stride work count
+    # W = (Sq // block_m) * Hq * B floors); ragged (the ceil case) is rejected
+    # just below, and the seqlen_q check under "Tuning struct" then makes the floor
+    # exact for every spec that reaches the persistent builder.
     if spec.varlen:
-        return False, "gfx942 attention_dense P0: varlen not yet supported"
+        return False, "gfx942 attention_dense: varlen not yet supported"
     if spec.ragged:
-        return False, "gfx942 attention_dense P0: ragged not yet supported"
+        return False, "gfx942 attention_dense: ragged not yet supported"
     if spec.sliding_window:
-        return False, "gfx942 attention_dense P0: sliding_window not yet supported"
+        return False, "gfx942 attention_dense: sliding_window not yet supported"
 
-    # --- Tile geometry. The causal KV-loop clamp uses n_per = _BLOCK_M //
-    # block_n, a FLOOR: a block_n that does not divide the query tile silently drops
-    # every key past the last whole sub-tile, and block_n > _BLOCK_M makes n_per 0
-    # -> zero-trip loop -> l == 0 -> rcp(0) -> NaN. Neither fails loudly, so reject.
-    if _BLOCK_M % spec.block_n != 0:
+    # --- Tuning struct (gfx942-private sweep knobs). Validated here rather than only
+    # in the builder because the module contract is support() => build(): a knob that
+    # only the builder rejects is the same dispatch fall-through hole every other
+    # check in this function exists to close. Every branch below is inert at
+    # _DEFAULT_TUNING, so the shipped behaviour is unchanged.
+    #
+    # block_m: the wave count is block_m // 32, a FLOOR. At a non-multiple of 32 the
+    # emitted waves under-cover the query tile and the top block_m % 32 rows of every
+    # block are never computed and never written -- a silent wrong answer with no
+    # fault (the same invariant the module-scope _BLOCK_M guard binds for the
+    # default). block_m // 32 * 64 is the CTA thread count, capped at 1024 by the
+    # hardware workgroup limit.
+    if tuning.block_m <= 0 or tuning.block_m % 32 != 0:
         return False, (
-            f"block_n must divide the {_BLOCK_M}-row query tile (got "
+            f"tuning.block_m must be a positive multiple of 32, got "
+            f"{tuning.block_m}: the body derives WAVES = block_m // 32, which floors, "
+            f"so a non-multiple leaves the top rows of every query block uncovered by "
+            f"any wave -- never computed and never written"
+        )
+    if tuning.block_m // 32 * 64 > 1024:
+        return False, (
+            f"tuning.block_m={tuning.block_m} needs a "
+            f"{tuning.block_m // 32 * 64}-thread CTA, past the 1024-thread workgroup "
+            f"maximum"
+        )
+    # Q is read with a plain global_load_vN (no buffer bound), and the epilogue stores
+    # the same rows, so a query tile that runs past seqlen_q reads and writes out of
+    # bounds. Implied by the dataclass (seqlen_q % 256 == 0) at the default block_m.
+    if spec.seqlen_q % tuning.block_m != 0:
+        return False, (
+            f"seqlen_q={spec.seqlen_q} must be a multiple of "
+            f"tuning.block_m={tuning.block_m}: the last query tile would otherwise "
+            f"run past seqlen_q, and Q/O are addressed without a bounds check"
+        )
+    # Pads, in elements. The QK / cfvst-V reads are smem_load_vN(n=4) = 8-byte
+    # payloads, which the lowering stamps `align 8` on unconditionally; the column
+    # index inside a row is always a multiple of 4 elements, so keeping the PITCH a
+    # multiple of 4 elements is what keeps that alignment contract true. A pitch that
+    # breaks it keeps the ds_read and silently returns the wrong data or faults --
+    # the same failure mode the spec's lds_k_group_pad % 8 check guards for ds_read_b128.
+    for _pad_name, _pad in (
+        ("lds_row_pad", tuning.lds_row_pad),
+        ("v_row_pad", tuning.v_row_pad),
+    ):
+        if _pad < 0 or _pad % 4 != 0:
+            return False, (
+                f"tuning.{_pad_name} must be a non-negative multiple of 4 elements "
+                f"(8 bytes) so the LDS pitch stays aligned for the n=4 ds_read, got "
+                f"{_pad}"
+            )
+    _wpe = tuning.resolved_waves_per_eu(spec)
+    if _wpe <= 0:
+        return False, (
+            f"resolved waves_per_eu must be positive, got {_wpe} (tuning."
+            f"waves_per_eu={tuning.waves_per_eu}, spec.waves_per_eu="
+            f"{spec.waves_per_eu})"
+        )
+    # cfvst forced ON where the policy says OFF. Both cases the policy excludes are
+    # known-bad, not merely untuned: D64 (rows-per-DMA > 1) is VGPR-bound, so the
+    # register round-trip regresses it AND the transposed store no longer matches the
+    # packed async-DMA layout the naive path relies on; bf16 D128 spills past the
+    # waves-per-eu cap on the .1k schedule. Turning cfvst OFF is always legal (it is
+    # the naive path), so only the ON direction is gated. See _use_cfvst.
+    if tuning.resolved_use_cfvst(spec) and not _use_cfvst(spec.head_size, spec.dtype):
+        return False, (
+            f"tuning.use_cfvst=True is rejected at D{spec.head_size}/{spec.dtype}: "
+            f"the conflict-free-V store is measured-negative there (D64 is VGPR-bound "
+            f"and regresses; bf16 D128 spills past the waves-per-eu cap), and it is "
+            f"only tile-exact on the rows-per-DMA==1 fp16 path -- see _use_cfvst"
+        )
+
+    # --- Tile geometry. The causal KV-loop clamp uses n_per = block_m //
+    # block_n, a FLOOR: a block_n that does not divide the query tile silently drops
+    # every key past the last whole sub-tile, and block_n > block_m makes n_per 0
+    # -> zero-trip loop -> l == 0 -> rcp(0) -> NaN. Neither fails loudly, so reject.
+    if tuning.block_m % spec.block_n != 0:
+        return False, (
+            f"block_n must divide the {tuning.block_m}-row query tile (got "
             f"block_n={spec.block_n}; the spec also requires block_n % 32 == 0, so "
             f"use 32, 64, 128 or 256). Load-bearing for causal=True, where "
-            f"n_per = {_BLOCK_M} // block_n floors and drops keys; enforced "
+            f"n_per = {tuning.block_m} // block_n floors and drops keys; enforced "
             f"unconditionally so the two grids cannot diverge by a knob"
         )
 
     # --- Wave/tile divisibility, mirrored from the builder so support() and build()
     # agree on exactly one set of specs (the module contract at the top of this file).
-    # The condition below is ALSO enforced in _build_attention_dense_single_buffer; without it
-    # here, a spec support() accepted would die in the builder with a ValueError --
+    # The condition below is ALSO enforced in _build_attention_dense_single_buffer;
+    # without it here, a spec support() accepted would die in the builder with a
+    # ValueError --
     # precisely the dispatch fall-through hole this gate exists to close.
-    _waves = _BLOCK_M // 32
+    _waves = tuning.block_m // 32
     _rpi = _rows_per_instr(spec.head_size)
     if spec.block_n % _waves != 0 or (spec.block_n // _waves) % _rpi != 0:
         return False, (
@@ -569,7 +887,7 @@ def supports_attention_dense(
     # guard, so the CTA thread count must divide the block count. Gated on the cfvst
     # predicate: the naive-V path never reads these quantities, and checking it
     # unconditionally would reject specs the naive path builds fine.
-    if _use_cfvst(spec.head_size, spec.dtype):
+    if tuning.resolved_use_cfvst(spec):
         _threads = _waves * 64
         _vblocks = (spec.block_n // 2) * (spec.head_size // 2)
         if _vblocks % _threads != 0:
@@ -580,7 +898,7 @@ def supports_attention_dense(
 
     # --- LDS budget. Without this, an over-budget tile reaches comgr and fails with
     # an opaque CODEGEN_BC_TO_RELOCATABLE abort instead of a structured reason.
-    lds_bytes = _lds_bytes(spec)
+    lds_bytes = _lds_bytes(spec, tuning)
     from ..common.attention_arch import attention_lds_capacity_bytes
 
     capacity = attention_lds_capacity_bytes(arch)
@@ -612,34 +930,46 @@ def supports_attention_dense(
 
 
 def build_attention_dense(
-    spec: AttentionDenseSpec, *, arch: str = "gfx942"
+    spec: AttentionDenseSpec,
+    *,
+    arch: str = "gfx942",
+    tuning: "Gfx942DenseTuning" = _DEFAULT_TUNING,
 ) -> KernelDef:
     """Emit the gfx942 dense flash-attention prefill kernel for ``spec``.
 
-    Delegates to :func:`_build_attention_dense_single_buffer`, the correctness-first
-    non-pipelined body (32x32x8 atom + K-loop doubling). Every scope restriction --
-    including the modes deferred to P1-P4 -- lives in
+    Delegates to :func:`_build_attention_dense_single_buffer`, the single-LDS-buffer
+    (NBUF=1) body (32x32x8 atom + K-loop doubling). NBUF=1 is the only axis that name
+    describes: the body carries the full shipped lever set (cfvst, exp2_fast, fused
+    rescale, per-config waves-per-eu, persistent grid-stride), so it is not a
+    correctness-first stand-in for a later tuned body. Every scope restriction --
+    including the modes deferred to later follow-ups -- lives in
     :func:`supports_attention_dense`, which is consulted here, so this function is a
     thin gate-plus-delegate and cannot reject a spec that ``supports`` accepted.
 
+    ``tuning`` is the gfx942-private sweep struct (:class:`Gfx942DenseTuning`); its
+    default is the shipped configuration, so an existing caller that never mentions it
+    gets byte-identical IR and a byte-identical kernel name.
+
     :raises NotImplementedError: ``arch`` is not gfx942.
-    :raises ValueError: ``spec`` is outside the supported set; the message carries
-        :func:`supports_attention_dense`'s structured reason (out-of-scope dtype or
-        head size, a mode deferred to a later phase, a ``block_n`` that does not
-        divide the query tile, an over-budget LDS footprint, or an extent past the
-        32-bit addressing limit).
+    :raises ValueError: ``spec``/``tuning`` is outside the supported set; the message
+        carries :func:`supports_attention_dense`'s structured reason (out-of-scope
+        dtype or head size, a mode deferred to a later phase, a ``block_n`` that does
+        not divide the query tile, an illegal tuning override, an over-budget LDS
+        footprint, or an extent past the 32-bit addressing limit).
     """
     if arch != "gfx942":
         raise NotImplementedError(
             f"kernels.gfx942.attention_dense is gfx942-only (got {arch})"
         )
-    ok, why = supports_attention_dense(spec, arch=arch)
+    ok, why = supports_attention_dense(spec, arch=arch, tuning=tuning)
     if not ok:
         raise ValueError(f"unsupported gfx942 attention_dense spec: {why}")
-    return _build_attention_dense_single_buffer(spec)
+    return _build_attention_dense_single_buffer(spec, tuning)
 
 
-def _build_attention_dense_single_buffer(spec: AttentionDenseSpec) -> KernelDef:
+def _build_attention_dense_single_buffer(
+    spec: AttentionDenseSpec, tuning: "Gfx942DenseTuning" = _DEFAULT_TUNING
+) -> KernelDef:
     """gfx942 dense prefill body: 32x32x8 atom + K-loop doubling.
 
     Non-pipelined (NBUF=1): per KV tile load→wait→QK→mask→softmax→PV, single LDS
@@ -656,7 +986,7 @@ def _build_attention_dense_single_buffer(spec: AttentionDenseSpec) -> KernelDef:
     causal = spec.causal
     dtype = _DTYPE_IR[spec.dtype]
 
-    BLOCK_M = _BLOCK_M
+    BLOCK_M = tuning.block_m  # _BLOCK_M at the shipped default
     WAVES = BLOCK_M // 32  # 8
     BN = spec.block_n
 
@@ -669,9 +999,12 @@ def _build_attention_dense_single_buffer(spec: AttentionDenseSpec) -> KernelDef:
     stride_k_tok = Hkv * D
     ROWS_PER_INSTR = _rows_per_instr(D)  # 1 for D128, 2 for D64
 
-    b = IRBuilder(gfx942_kernel_name(spec))
+    b = IRBuilder(gfx942_kernel_name(spec, tuning))
     b.kernel.attrs["max_workgroup_size"] = WAVES * 64
-    b.kernel.attrs["waves_per_eu"] = int(spec.waves_per_eu)
+    # The RESOLVED waves-per-eu, so the emitted attribute and the wpe{N} token in the
+    # name above are the same number by construction (a name/binary mismatch here is
+    # what makes the name-keyed launcher cache serve a stale HSACO).
+    b.kernel.attrs["waves_per_eu"] = tuning.resolved_waves_per_eu(spec)
 
     q = b.param(
         "q_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
@@ -704,14 +1037,14 @@ def _build_attention_dense_single_buffer(spec: AttentionDenseSpec) -> KernelDef:
     # LDS-budget check in supports_attention_dense so the two cannot drift. The one
     # exception is when _k_group_pad_active(spec): D64 K_lds then takes the padded
     # [1, block_n // rows_per_instr, _k_group_stride] 2-row-group layout below.
-    USE_CFVST = _use_cfvst(D, spec.dtype)  # P1 conflict-free V: D128 fp16 only
-    LDROW = _lds_row_stride(D)
-    # AICK-1664 (Hypothesis #3): D64 K_lds with a row-group boundary pad, sized by the
-    # shared spec.lds_k_group_pad (0 disables it -- that is the A/B probe).
-    KPAD_D64 = _k_group_pad_active(spec)
+    USE_CFVST = tuning.resolved_use_cfvst(spec)  # P1 conflict-free V: D128 fp16 only
+    LDROW = _lds_row_stride(D, tuning)
+    # Hypothesis #3 (D64 K-LDS bank conflicts): K_lds with a row-group boundary pad,
+    # sized by the shared spec.lds_k_group_pad (0 disables it -- that is the A/B probe).
+    KPAD_D64 = _k_group_pad_active(spec, tuning)
     if KPAD_D64:
         K_GROUP = ROWS_PER_INSTR  # rows per async-DMA instruction (=2 at D64)
-        K_GROUP_STRIDE = _k_group_stride(spec)  # rows_per_instr*D + pad elems
+        K_GROUP_STRIDE = _k_group_stride(spec, tuning)  # rows_per_instr*D + pad elems
         K_lds = b.smem_alloc(
             dtype, [1, BN // K_GROUP, K_GROUP_STRIDE], name_hint="Klds"
         )
@@ -719,10 +1052,12 @@ def _build_attention_dense_single_buffer(spec: AttentionDenseSpec) -> KernelDef:
         K_lds = b.smem_alloc(dtype, [1, BN, LDROW], name_hint="Klds")
     if USE_CFVST:
         # V stored TRANSPOSED (P1 conflict-free V): [dim, token] with token inner and
-        # padded by _V_ROW_PAD, so the PV A-operand read is a contiguous ds_read_b64
-        # rather than P0's 4 element-wise ds_read_u16. Filled by the perm_b32 store
-        # path below.
-        V_LDROW = BN + _V_ROW_PAD
+        # padded by tuning.v_row_pad, so the PV A-operand read is a contiguous
+        # ds_read_b64 rather than P0's 4 element-wise ds_read_u16. Filled by the
+        # perm_b32 store path below. This is one of exactly TWO reads of v_row_pad --
+        # the other is the _lds_bytes budget -- and both take it from the same
+        # resolved struct, so the budget cannot under-count this allocation.
+        V_LDROW = BN + tuning.v_row_pad
         V_lds = b.smem_alloc(dtype, [1, D, V_LDROW], name_hint="VldsT")
     else:
         # V keeps the natural [token, dim] async-DMA layout (D64: VGPR-bound, cfvst
@@ -744,8 +1079,8 @@ def _build_attention_dense_single_buffer(spec: AttentionDenseSpec) -> KernelDef:
     # than rely on the dataclass validator staying that strict.
     # Raised, not asserted: `python -O` strips asserts, and skipped DMA rows are a
     # SILENT wrong answer (uninitialized LDS consumed as garbage, no fault) -- the
-    # same reasoning as the _BLOCK_M guard at module scope. Mirrored in
-    # supports_attention_dense so support() and build() cannot disagree.
+    # same reasoning as the `_BLOCK_M % 32` wave-coverage guard at module scope.
+    # Mirrored in supports_attention_dense so support() and build() cannot disagree.
     if BN % WAVES != 0 or ROWS_PER_WAVE % ROWS_PER_INSTR != 0:
         raise ValueError(
             f"block_n={BN} over {WAVES} waves gives ROWS_PER_WAVE={ROWS_PER_WAVE}, "
@@ -767,7 +1102,7 @@ def _build_attention_dense_single_buffer(spec: AttentionDenseSpec) -> KernelDef:
     # row into V_lds[dim, token]. The consumer read_v then reads 4 consecutive tokens
     # at a fixed dim as a single ds_read_b64. Lifted from the proven
     # attention_tiled_2d cfvst vehicle, after a cross-part correctness disproof of its
-    # parked sign-flip symptom (procedure recorded in the AICK-1664 plan).
+    # parked sign-flip symptom (procedure recorded in the optimization plan).
     # The block loop is statically unrolled (V_ITEMS is small: 4 at D128/BN64), which
     # is well under the tiled_2d full-unroll IR-explosion threshold.
     THREADS = WAVES * 64
@@ -912,7 +1247,7 @@ def _build_attention_dense_single_buffer(spec: AttentionDenseSpec) -> KernelDef:
                         b.const_i32(it * ROWS_PER_INSTR),
                     )
                     if group_pad:
-                        # 2-row-group boundary pad (AICK-1664 probe): the DMA still
+                        # 2-row-group boundary pad (the D64 K-pad probe): the DMA still
                         # writes one whole group (ROWS_PER_INSTR contiguous rows)
                         # per instruction, but consecutive groups are spaced by the
                         # padded K_GROUP_STRIDE so do_qk's krow reads land 4-way (not
@@ -991,7 +1326,7 @@ def _build_attention_dense_single_buffer(spec: AttentionDenseSpec) -> KernelDef:
                     # 2-row-group padded K_lds[1, BN//2, 2*D+pad]: decompose the
                     # logical krow into (group = krow >> 1, within = krow & 1); the
                     # padded group stride spreads consecutive krow across 4 (not 32)
-                    # banks (AICK-1664 probe). col stays within the D-wide row.
+                    # banks (the D64 K-pad probe). col stays within the D-wide row.
                     k_group = b.lshr(krow, b.const_i32(1))
                     k_within_off = b.mul(b.land(krow, b.const_i32(1)), b.const_i32(D))
                 for ks in range(K_STEPS):
@@ -1062,7 +1397,7 @@ def _build_attention_dense_single_buffer(spec: AttentionDenseSpec) -> KernelDef:
             l_i = carry[1]
             o_acc = list(carry[2 : 2 + D_TILES])
 
-            if _IGLP:
+            if tuning.iglp:
                 # Runbook lever 7: one canned-scheduler hint at the loop-body top.
                 # Only meaningful on the cfvst path (in-loop ds_write to interleave).
                 b.iglp_opt(0)
@@ -1114,7 +1449,7 @@ def _build_attention_dense_single_buffer(spec: AttentionDenseSpec) -> KernelDef:
             # MFMA-starving residual once conflict-free V (P1) lands. Enabled for
             # every config except bf16 D128, which spills on the .1k schedule -- the
             # spill rationale and the matrix live in _use_exp2_fast's docstring.
-            exp2 = b.exp2_fast if _use_exp2_fast(D, spec.dtype) else b.exp2
+            exp2 = b.exp2_fast if tuning.resolved_use_exp2_fast(spec) else b.exp2
             alpha = exp2(b.fsub(m_i, m_new))
 
             # P2 fused/lazy rescale: compute each exp2 inline, accumulate l_local, and
@@ -1261,20 +1596,34 @@ def _build_attention_dense_single_buffer(spec: AttentionDenseSpec) -> KernelDef:
 # --- public geometry / ABI surface (arch-neutral; mirrors the gfx950 helpers) ---
 
 
-def attention_dense_grid(spec: AttentionDenseSpec) -> tuple[int, int, int]:
+def attention_dense_grid(
+    spec: AttentionDenseSpec, tuning: "Gfx942DenseTuning" = _DEFAULT_TUNING
+) -> tuple[int, int, int]:
     """Launch grid: persistent = 1-D grid of ``num_persistent`` CTAs; default =
-    one CTA per (query-block, query-head, batch)."""
+    one CTA per (query-block, query-head, batch).
+
+    Sized from ``tuning.block_m`` (``_BLOCK_M`` at the default) so the grid and the
+    body's query tiling cannot disagree -- a mismatch writes some rows twice and
+    others never."""
     if spec.persistent:
         return (spec.num_persistent, 1, 1)
     # ceil kept for parity with the gfx950 helper; on gfx942 it is always exact,
-    # because ragged is rejected and the dataclass then enforces seqlen_q % 256 == 0.
-    nqb = (spec.seqlen_q + _BLOCK_M - 1) // _BLOCK_M
+    # because ragged is rejected and supports_attention_dense then enforces
+    # seqlen_q % block_m == 0.
+    nqb = (spec.seqlen_q + tuning.block_m - 1) // tuning.block_m
     return (nqb, spec.num_query_heads, spec.batch)
 
 
-def attention_dense_block(spec: AttentionDenseSpec) -> tuple[int, int, int]:
-    """CTA block dims: ``num_waves`` wave64s."""
-    return (spec.num_waves * 64, 1, 1)
+def attention_dense_block(
+    spec: AttentionDenseSpec, tuning: "Gfx942DenseTuning" = _DEFAULT_TUNING
+) -> tuple[int, int, int]:
+    """CTA block dims: ``tuning.block_m // 32`` wave64s.
+
+    Derived from the tuning field rather than ``spec.num_waves`` (which the gfx950
+    spec hardcodes to ``_BLOCK_M // 32``) so a block_m sweep point launches the
+    thread count the body actually emits; identical at the default."""
+    del spec  # geometry is fully determined by block_m
+    return (tuning.block_m // 32 * 64, 1, 1)
 
 
 def attention_dense_signature(spec: AttentionDenseSpec):
@@ -1315,6 +1664,7 @@ def run_attention_dense_torch(
     arch: str = "gfx942",
     cu_seqlens_q=None,
     cu_seqlens_kv=None,
+    tuning: "Gfx942DenseTuning" = _DEFAULT_TUNING,
 ):
     """High-level framework entry: compile (cached) + launch the gfx942 dense prefill
     kernel on torch tensors. ``q``/``out`` are ``[B, S, Hq, D]`` and ``k``/``v`` are
@@ -1324,16 +1674,20 @@ def run_attention_dense_torch(
     (``spec.persistent``) -- ``attention_dense_grid`` picks the right launch shape.
 
     Mirrors ``kernels.gfx950.attention_dense.run_attention_dense_torch`` but keys the
-    launcher cache on :func:`gfx942_kernel_name` (not the shared ``kernel_name()``): this
-    kernel bakes ``batch`` into the buffer-resource extents and ``waves_per_eu`` into
-    the register-allocation attribute, both of which ``kernel_name()`` omits -- so two
-    specs differing only in batch (or wpe) MUST NOT share a cached binary, or a B>1
+    launcher cache on :func:`gfx942_kernel_name` (not the shared ``kernel_name()``):
+    this kernel bakes ``batch`` into the buffer-resource extents and ``waves_per_eu``
+    into the register-allocation attribute, both of which ``kernel_name()`` omits -- so
+    two specs differing only in batch (or wpe) MUST NOT share a cached binary, or a B>1
     launch is served the B=1 kernel and reads out of bounds.
 
     varlen / ragged are rejected by :func:`supports_attention_dense` on gfx942, so the
     ABI is always the 5-arg (q, k, v, o, scale) form; passing ``cu_seqlens_*`` is a
-    caller error rather than a silently-ignored argument."""
-    ok, why = supports_attention_dense(spec, arch=arch)
+    caller error rather than a silently-ignored argument.
+
+    ``tuning`` (:class:`Gfx942DenseTuning`) defaults to the shipped configuration and
+    is folded into the cache key through :func:`gfx942_kernel_name`, so two tunings
+    that emit different IR can never share a cached launcher."""
+    ok, why = supports_attention_dense(spec, arch=arch, tuning=tuning)
     if not ok:
         raise NotImplementedError(f"attention_dense unsupported for spec: {why}")
     if cu_seqlens_q is not None or cu_seqlens_kv is not None:
@@ -1344,12 +1698,13 @@ def run_attention_dense_torch(
     from rocke.helpers.compile import compile_kernel
     from rocke.runtime import KernelLauncher, LaunchConfig
 
-    # batch- and wpe-unique cache key (see docstring): gfx942_kernel_name, not kernel_name.
-    key = gfx942_kernel_name(spec)
+    # batch-, wpe- and tuning-unique cache key (see docstring): gfx942_kernel_name,
+    # not the shared kernel_name.
+    key = gfx942_kernel_name(spec, tuning)
     launcher = _DENSE_LAUNCHER_CACHE.get(key)
     if launcher is None:
         art = compile_kernel(
-            build_attention_dense(spec, arch=arch),
+            build_attention_dense(spec, arch=arch, tuning=tuning),
             arch=arch,
             backend="python",
             capture_ir_text=False,
@@ -1364,8 +1719,8 @@ def run_attention_dense_torch(
     launcher(
         {"q_ptr": q, "k_ptr": k, "v_ptr": v, "o_ptr": out, "scale": float(scale)},
         config=LaunchConfig(
-            grid=attention_dense_grid(spec),
-            block=attention_dense_block(spec),
+            grid=attention_dense_grid(spec, tuning),
+            block=attention_dense_block(spec, tuning),
             stream=int(stream),
         ),
     )
