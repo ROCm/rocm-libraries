@@ -29,8 +29,8 @@ Because the test runs after the warmup kernel launch, the GPU output buffers alr
 
 Use the ``PRIMBENCH_ASSERT`` macro to compare actual values against expected values. It works with:
 
-- Scalar arithmetic types — compare a single value against an expected scalar.
-- Iterable containers — compare element-wise against another container or a brace-enclosed initializer list.
+- Scalar arithmetic types: compare a single value against an expected scalar.
+- Iterable containers: compare element-wise against another container or a brace-enclosed initializer list.
 
 On mismatch, ``PRIMBENCH_ASSERT`` prints the file name, line number, and the mismatched values to ``stderr``, then exits the program.
 
