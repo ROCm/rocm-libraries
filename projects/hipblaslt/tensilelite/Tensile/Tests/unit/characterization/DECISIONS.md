@@ -379,13 +379,7 @@ paths): DataType → `Tensile/Common/DataType.py`; CommonTypes →
 
 **M5 — accepted equivalent mutants (Naming).** These survivors are
 behaviorally equivalent on the characterized surface:
-- `Tensile.SolutionStructs.Naming.x_getKeyNoInternalArgs__mutmut_{51,52,53,54,61,65}`
-  alter the first WGMXCC normalization, but `_getName` immediately normalizes
-  the same value to `1` and the outer helper restores the original value.
-- `Tensile.SolutionStructs.Naming.x_getParameterValueAbbreviation__mutmut_{24,25}`
-  alter the exception in an unreachable final branch: the preceding type test
-  admits only tuple, list, and dict, and those three branches are exhaustive.
-- `Tensile.SolutionStructs.Naming.x__getName__mutmut_{55,56}` change the masked
+- `Tensile.SolutionStructs.Naming.x__getName__mutmut_{70,71}` change the masked
   GSU string from `"M"` to another string; every form reaches the same pinned
   string-versus-integer `TypeError` before the value can affect a name.
 
