@@ -129,7 +129,8 @@ inline double typeMaximum(ScalarType requestedType) {
         case ScalarType::Float8E5M2:
         case ScalarType::Float8E4M3Fnuz:
         case ScalarType::Float8E5M2Fnuz:
-        case ScalarType::E5M3: {
+        case ScalarType::E5M3:
+        case ScalarType::E4M3: {
             const BinaryFloatFormat format = binaryFloatFormat(type);
             return decodeBinaryFloat(type, format.maximumPositiveFiniteRaw);
         }
@@ -162,6 +163,7 @@ inline double typeLowest(ScalarType requestedType) {
         case ScalarType::UInt64:
         case ScalarType::E8M0:
         case ScalarType::E5M3:
+        case ScalarType::E4M3:
             return 0.0;
         case ScalarType::Int8:
             return std::numeric_limits<int8_t>::min();
@@ -215,6 +217,7 @@ inline double typeDenormalMinimum(ScalarType requestedType) {
         case ScalarType::Float8E4M3Fnuz:
         case ScalarType::Float8E5M2Fnuz:
         case ScalarType::E5M3:
+        case ScalarType::E4M3:
             return decodeBinaryFloat(type, 1U);
         default:
             throw std::invalid_argument("Requested scalar type has no denormal minimum.");
@@ -239,7 +242,8 @@ inline double typeDenormalMaximum(ScalarType requestedType) {
         case ScalarType::Float8E5M2:
         case ScalarType::Float8E4M3Fnuz:
         case ScalarType::Float8E5M2Fnuz:
-        case ScalarType::E5M3: {
+        case ScalarType::E5M3:
+        case ScalarType::E4M3: {
             const BinaryFloatFormat format = binaryFloatFormat(type);
             return decodeBinaryFloat(type, (1U << format.mantissaBits) - 1U);
         }
@@ -306,6 +310,7 @@ inline double randomEncodedExponentValue(const GenerationPatternSpec& spec, uint
         case ScalarType::Float8E4M3Fnuz:
         case ScalarType::Float8E5M2Fnuz:
         case ScalarType::E5M3:
+        case ScalarType::E4M3:
             return decodeBinaryFloat(type, static_cast<uint32_t>(raw));
         case ScalarType::E8M0:
             return decodeE8M0(static_cast<uint8_t>(raw));
