@@ -35,6 +35,7 @@ _NUMPY_DTYPES = {
     ScalarType.Int12: np.int16,  # noqa: F405
     ScalarType.E8M0: np.float32,  # noqa: F405
     ScalarType.E5M3: np.float32,  # noqa: F405
+    ScalarType.E4M3: np.float32,  # noqa: F405
 }
 
 _SCALAR_TYPES_FROM_NUMPY = {
