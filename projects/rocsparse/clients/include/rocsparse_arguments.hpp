@@ -351,9 +351,10 @@ struct Arguments
     }
 
     template <typename T>
-    T get_percentage() const
+    floating_data_t<T> get_percentage() const
     {
-        return (rocsparse_isnan(percentage)) ? static_cast<T>(0) : percentage;
+        return (rocsparse_isnan(percentage)) ? static_cast<floating_data_t<T>>(0)
+                                             : floating_data_t<T>(percentage);
     }
 
 private:

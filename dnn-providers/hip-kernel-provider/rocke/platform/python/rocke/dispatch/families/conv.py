@@ -12,7 +12,7 @@ The implicit-GEMM problem reduces to a GEMM of
 predicate therefore composes:
 
 * family request errors (positive dims, known arch, Ho/Wo > 0),
-* the arch-family gate (CDNA candidates off RDNA and vice versa),
+* the declared ``Capability`` (explicit gfx targets, dtype, layout),
 * the instance's ``is_valid_spec`` (tile/atom/arch + WMMA narrowing), and
 * a no-padding GEMM-divisibility check on the DERIVED GEMM dims (these
   shape-generic conv kernels do not pad, mirroring the GEMM family).
@@ -24,8 +24,8 @@ Candidate set (f16 forward conv):
 * ``cdna_mem``        64x64x32, 16x16x16 atom, mem pipeline (gfx942 + gfx950),
 * ``rdna_wmma``       16x16x16 atom, mem pipeline (RDNA wave32).
 
-``auto`` ranks by priority: cshuffle (10) before mem (20); the arch-family +
-atom + divisibility gates decide which are actually selectable for a request.
+``auto`` ranks by priority: cshuffle (10) before mem (20); the declared arch
+list + atom + divisibility gates decide which are selectable for a request.
 """
 
 from __future__ import annotations
@@ -37,9 +37,11 @@ from ...core.arch import ArchTarget
 from ...instances.common.conv_implicit_gemm import (
     ConvProblem,
     ImplicitGemmConvSpec,
+    build_implicit_gemm_conv,
     is_valid_spec as _conv_is_valid_spec,
 )
 from ..core import (
+    Capability,
     CandidateRegistry,
     DispatchResult,
     KernelCandidate,
@@ -84,6 +86,69 @@ class ConvRequest(OperatorRequest):
         d["dtype"] = _conv_dtype(self.dtype)
         d["layout"] = self.layout.upper()
         return d
+
+    def dims(self) -> dict[str, int]:
+        """Stored dims plus the derived ones conv kernels actually tile over.
+
+        ``Ho``/``Wo`` and the implicit-GEMM ``M``/``N_gemm``/``K_gemm`` are what
+        the tiling is checked against, not the stored ``Hi``/``Wi``. They are
+        omitted rather than raised when the shape is degenerate enough that
+        ``ConvProblem`` refuses to build, since stage 1 reports that properly.
+        """
+        d = {
+            name: int(getattr(self, name))
+            for name in (
+                "N",
+                "C",
+                "K",
+                "Hi",
+                "Wi",
+                "Y",
+                "X",
+                "G",
+                "stride_h",
+                "stride_w",
+                "pad_h",
+                "pad_w",
+                "dilation_h",
+                "dilation_w",
+            )
+        }
+        try:
+            p = _problem(self)
+            d.update(
+                Ho=int(p.Ho),
+                Wo=int(p.Wo),
+                M=int(p.M),
+                N_gemm=int(p.N_gemm),
+                K_gemm=int(p.K_gemm),
+            )
+        except Exception:
+            pass
+        return d
+
+
+CONV_DIM_VOCABULARY = (
+    "N",
+    "C",
+    "K",
+    "Hi",
+    "Wi",
+    "Y",
+    "X",
+    "G",
+    "stride_h",
+    "stride_w",
+    "pad_h",
+    "pad_w",
+    "dilation_h",
+    "dilation_w",
+    "Ho",
+    "Wo",
+    "M",
+    "N_gemm",
+    "K_gemm",
+)
 
 
 def _conv_dtype(dtype: str) -> str:
@@ -141,16 +206,6 @@ def _request_errors(req: OperatorRequest) -> list[str]:
     return errors
 
 
-def _arch_family_supported(req: ConvRequest, arch_family: str) -> Tuple[bool, str]:
-    target = ArchTarget.from_gfx(req.arch)
-    if target.family != arch_family:
-        return False, (
-            f"{arch_family!r}-family candidate does not support "
-            f"{target.family!r}-family arch {req.arch}"
-        )
-    return True, "ok"
-
-
 def _selector_matches(req: ConvRequest, candidate: KernelCandidate) -> Tuple[bool, str]:
     algorithm = req.algorithm.strip().lower()
     spec_id = req.spec_id.strip().lower()
@@ -197,6 +252,7 @@ def _spec_cdna_mem(req: ConvRequest, name: str) -> ImplicitGemmConvSpec:
         wave_size=ArchTarget.from_gfx(req.arch).wave_size,
         pipeline="mem",
         epilogue="default",
+        vector_size_c=1,
     )
 
 
@@ -215,6 +271,34 @@ def _spec_rdna_wmma(req: ConvRequest, name: str) -> ImplicitGemmConvSpec:
         wave_size=ArchTarget.from_gfx(req.arch).wave_size,
         pipeline="mem",
         epilogue="default",
+        vector_size_c=1,
+    )
+
+
+def _spec_gfx1250_wmma(req: ConvRequest, name: str) -> ImplicitGemmConvSpec:
+    """gfx1250: the RDNA WMMA shape, retargeted to the atom gfx1250 actually has.
+
+    gfx1250's f16 WMMA is 16x16x**32**, where gfx12's is 16x16x16, so
+    ``warp_tile_k`` doubles and ``tile_k`` with it. Tiles stay at 32x32 rather
+    than following the CDNA candidates to 64x64: these kernels do not pad, so
+    the tile size is also the divisibility gate, and there is no gfx1250 conv
+    tuning data to justify trading coverage for a larger tile.
+    """
+    return ImplicitGemmConvSpec(
+        problem=_problem(req),
+        name=name,
+        tile_m=32,
+        tile_n=32,
+        tile_k=32,
+        warp_m=2,
+        warp_n=2,
+        warp_tile_m=16,
+        warp_tile_n=16,
+        warp_tile_k=32,
+        wave_size=ArchTarget.from_gfx(req.arch).wave_size,
+        pipeline="mem",
+        epilogue="default",
+        vector_size_c=1,
     )
 
 
@@ -245,16 +329,13 @@ def _make_candidate(
     spec_id: str,
     priority: int,
     spec_fn: Callable[[ConvRequest, str], ImplicitGemmConvSpec],
-    arch_family: str,
+    arches: Tuple[str, ...],
 ) -> KernelCandidate:
     def support(req: OperatorRequest) -> Tuple[bool, str]:
         errors = _request_errors(req)
         if errors:
             return False, "; ".join(errors)
         assert isinstance(req, ConvRequest)
-        ok, why = _arch_family_supported(req, arch_family)
-        if not ok:
-            return False, why
         ok, why = _selector_matches(req, candidate)
         if not ok:
             return False, why
@@ -265,7 +346,7 @@ def _make_candidate(
         return _gemm_dims_divide(req, spec)
 
     def select(req: OperatorRequest) -> ImplicitGemmConvSpec:
-        ok, why = support(req)
+        ok, why = candidate.admits(req)
         if not ok:
             raise ValueError(f"{name} does not support request: {why}")
         assert isinstance(req, ConvRequest)
@@ -278,12 +359,14 @@ def _make_candidate(
         spec_id=spec_id,
         abi_version=CONV_ABI_VERSION,
         priority=priority,
-        supports=support,
+        capability=Capability(arches=arches, dtypes=("f16",), layouts=("NHWC",)),
+        _supports=support,
         select_spec=select,
         signature=lambda _spec: (),
         grid=_grid,
         block=lambda spec: (int(spec.block_size), 1, 1),
-        sweep_space=lambda req: (select(req),) if support(req)[0] else (),
+        sweep_space=lambda req: (select(req),) if candidate.admits(req)[0] else (),
+        build=build_implicit_gemm_conv,
     )
     return candidate
 
@@ -296,7 +379,23 @@ def _grid(spec: ImplicitGemmConvSpec, req: OperatorRequest) -> Tuple[int, int, i
     return (gn, gm, 1)
 
 
-CONV_REGISTRY = CandidateRegistry(_FAMILY)
+# Explicit gfx targets, not a cdna/rdna label. gfx1250 is the reason: it is
+# CDNA-family at wave32, so a "cdna" gate admitted it to both wave64 MFMA
+# candidates while the WMMA candidate that suits it geometrically rejected it --
+# wrong in both directions from one label. Only the spec validator kept that
+# from becoming a misroute. The cshuffle candidate needs the 32x32x16 f16 atom,
+# which gfx942 and gfx90a do not have.
+_CDNA_CSHUFFLE = ("gfx950",)
+_CDNA_MEM = ("gfx90a", "gfx942", "gfx950")
+_RDNA_WMMA = ("gfx11-generic", "gfx1151", "gfx1201")
+# gfx1250 gets its own entry rather than joining _RDNA_WMMA: same WMMA family,
+# different atom shape (K=32 vs K=16), so sharing the list would mean sharing
+# a spec that does not fit.
+_GFX1250_WMMA = ("gfx1250",)
+
+CONV_REGISTRY = CandidateRegistry(
+    _FAMILY, dim_vocabulary=CONV_DIM_VOCABULARY, require_build=True
+)
 CONV_REGISTRY.extend(
     (
         _make_candidate(
@@ -304,21 +403,28 @@ CONV_REGISTRY.extend(
             spec_id="cdna_cshuffle_64x64",
             priority=10,
             spec_fn=_spec_cdna_cshuffle,
-            arch_family="cdna",
+            arches=_CDNA_CSHUFFLE,
         ),
         _make_candidate(
             name="conv_igemm_cdna_mem",
             spec_id="cdna_mem_64x64",
             priority=20,
             spec_fn=_spec_cdna_mem,
-            arch_family="cdna",
+            arches=_CDNA_MEM,
         ),
         _make_candidate(
             name="conv_igemm_rdna_wmma",
             spec_id="rdna_wmma_32x32",
             priority=10,
             spec_fn=_spec_rdna_wmma,
-            arch_family="rdna",
+            arches=_RDNA_WMMA,
+        ),
+        _make_candidate(
+            name="conv_igemm_gfx1250_wmma",
+            spec_id="gfx1250_wmma_32x32",
+            priority=10,
+            spec_fn=_spec_gfx1250_wmma,
+            arches=_GFX1250_WMMA,
         ),
     )
 )
