@@ -3,13 +3,8 @@
 Documentation for rocThrust available at
 [https://rocm.docs.amd.com/projects/rocThrust/en/latest/](https://rocm.docs.amd.com/projects/rocThrust/en/latest/).
 
-<<<<<<< HEAD
-## rocThrust 5.0.0 for ROCm 10.0
-
-=======
 ## rocThrust 4.6.0 for ROCm 10.0
  
->>>>>>> cf186055722 (feat(hipcub, rocprim, rocthrust) Revert CCCL 3.0 changes (#10464))
 ### Added
  
 * True global support in hipstdpar
