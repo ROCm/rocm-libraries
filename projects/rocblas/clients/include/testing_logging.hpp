@@ -654,6 +654,8 @@ void testing_logging(const Arguments& arg)
     // Smoke check for ROCBLAS_LAYER=0x10 (rocblas_layer_mode_log_kernel_select). We don't
     // golden-file the line because the selected kernel name varies by GPU arch and backend
     // build — just assert at least one bench-style record with the expected schema was emitted.
+    // Only source=/parent_api= are always present; kernel= is emitted for the Tensile backend
+    // only, so it is intentionally not required here (hipBLASLt-routed GEMMs omit it).
     if constexpr(!rocblas_is_complex<T>)
     {
         const fs::path kernel_select_fspath
@@ -679,7 +681,6 @@ void testing_logging(const Arguments& arg)
         {
             if(line.find("-f gemm_strided_batched_ex") != std::string::npos
                && line.find("# source=") != std::string::npos
-               && line.find("kernel=") != std::string::npos
                && line.find("parent_api=") != std::string::npos)
             {
                 found = true;
