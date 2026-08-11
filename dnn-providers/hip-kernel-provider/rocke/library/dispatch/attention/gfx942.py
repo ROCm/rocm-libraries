@@ -138,7 +138,7 @@ def _dense_spec(req: OperatorRequest):
       than the shared 256. It drives BOTH the auto persistent decision and the grid
       size, so it is resolved before the mode branch.
     * ``waves_per_eu`` comes from the kernel's own per-config policy
-      (``_p0_waves_per_eu``), so the ``kernel_name`` tag and the emitted binary
+      (``_tuned_waves_per_eu``), so the ``kernel_name`` tag and the emitted binary
       cannot disagree.
 
     The D64 K row-group pad is deliberately NOT set here: it is the shared
@@ -149,7 +149,7 @@ def _dense_spec(req: OperatorRequest):
     The spec dataclass itself is REUSED from the gfx950 kernel module (as the gfx942
     kernel body reuses it); it is arch-neutral, only its tuned values differ.
     """
-    from kernels.gfx942.attention_dense import _p0_waves_per_eu
+    from kernels.gfx942.attention_dense import _tuned_waves_per_eu
     from kernels.gfx950.attention_dense import AttentionDenseSpec, _BLOCK_M
 
     assert isinstance(req, AttentionRequest)
@@ -190,7 +190,7 @@ def _dense_spec(req: OperatorRequest):
         num_persistent=np,
         persist_decode=req.dense_persist_decode.strip().lower(),
         ragged=ragged,
-        waves_per_eu=_p0_waves_per_eu(head_size, dtype),
+        waves_per_eu=_tuned_waves_per_eu(head_size, dtype),
     )
 
 
@@ -258,7 +258,7 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
         if not ok:
             raise ValueError(f"{name} does not support request: {why}")
         assert isinstance(req, AttentionRequest)
-        from kernels.gfx942.attention_dense import p0_kernel_name
+        from kernels.gfx942.attention_dense import gfx942_kernel_name
 
         problem = _problem(req)
         dense_spec = _dense_spec(req)
@@ -272,9 +272,9 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
             name="rocke_attention_dense_gfx942",
             # batch-unique: the kernel bakes batch into its buffer extents, which
             # the shared AttentionDenseSpec.kernel_name() omits -- two batches would
-            # otherwise collide in the name cache. p0_kernel_name adds it, plus the
+            # otherwise collide in the name cache. gfx942_kernel_name adds it, plus the
             # wpe/kpad tags for the tuning folded in above.
-            kernel_name_override=p0_kernel_name(dense_spec),
+            kernel_name_override=gfx942_kernel_name(dense_spec),
         )
 
     candidate = KernelCandidate(

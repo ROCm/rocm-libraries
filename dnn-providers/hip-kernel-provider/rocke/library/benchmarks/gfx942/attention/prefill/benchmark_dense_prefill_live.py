@@ -54,7 +54,7 @@ from kernels.gfx942.attention_dense import (  # noqa: E402
     attention_dense_grid,
     attention_dense_signature,
     build_attention_dense,
-    p0_kernel_name,
+    gfx942_kernel_name,
     supports_attention_dense,
 )
 from rocke.helpers.compile import compile_kernel  # noqa: E402
@@ -106,7 +106,9 @@ _LAUNCHER_CACHE: dict = {}
 
 
 def _dense_launcher(spec: AttentionDenseSpec) -> KernelLauncher:
-    key = p0_kernel_name(spec)  # batch-unique (kernel bakes batch into buffer extents)
+    key = gfx942_kernel_name(
+        spec
+    )  # batch-unique (kernel bakes batch into buffer extents)
     lch = _LAUNCHER_CACHE.get(key)
     if lch is not None:
         return lch
@@ -197,10 +199,10 @@ def bench_dense(
     ms = time_launches(call, warmup=warmup, iters=iters, stream=stream)
     synchronize_and_release(stream)
     tf = _flops(B, S, causal, 0, Hq, D) / (ms * 1e-3) / 1e12
-    # p0_kernel_name, not spec.kernel_name(): the latter omits batch and
+    # gfx942_kernel_name, not spec.kernel_name(): the latter omits batch and
     # waves_per_eu, so a B=4 row would report the B=1 symbol -- the exact confusion
     # behind the cache-collision bug this field exists to make visible.
-    return ms, tf, max_err, p0_kernel_name(spec)
+    return ms, tf, max_err, gfx942_kernel_name(spec)
 
 
 # --------------------------------------------------------------------------- #

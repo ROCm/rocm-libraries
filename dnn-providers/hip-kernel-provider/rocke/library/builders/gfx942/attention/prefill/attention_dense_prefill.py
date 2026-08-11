@@ -39,7 +39,7 @@ from kernels.gfx942.attention_dense import (  # noqa: E402
     attention_dense_grid,
     attention_dense_signature,
     build_attention_dense,
-    p0_kernel_name,
+    gfx942_kernel_name,
     supports_attention_dense,
 )
 from rocke.helpers.compile import compile_kernel  # noqa: E402
@@ -144,7 +144,7 @@ def run(
     tf = flops / (ms * 1e-3) / 1e12
     status = "PASS" if (not check or err < 2e-2) else "FAIL"
     print(
-        f"[{p0_kernel_name(spec)}] {ms:.4f} ms  {tf:.1f} TFLOPS  "
+        f"[{gfx942_kernel_name(spec)}] {ms:.4f} ms  {tf:.1f} TFLOPS  "
         f"max_abs={err:.2e}  {status}"
     )
     return ms, tf, err

@@ -16,7 +16,7 @@ fp32 SDPA reference across the in-scope cohort on **both** gfx942 parts (228-CU 
 
 The tuning is **per (head_size, dtype)**, not global — see the lever table below for
 which config gets which lever and why. Levers default OFF at module scope
-(`_P0_D64_KPAD`, `_P0_IGLP`), so a non-dispatch build is byte-identical and the
+(`_P0_D64_KPAD`, `_IGLP`), so a non-dispatch build is byte-identical and the
 gfx950 golden is untouched by construction.
 
 Still rejected with a structured reason by `supports_attention_dense`: varlen, ragged,
@@ -143,7 +143,7 @@ magnitudes live outside the repo per `AGENTS.md`.
 | `waves_per_eu=3` at **fp16 D64** | reaches 2 WG/CU but loses more ILP than the second workgroup buys |
 | Drop K/V LDS pads to reach 2 WG/CU at D128 | D128 stays 1 WG/CU even unpadded (register floor co-limits), so it only reintroduces bank conflicts — **catastrophic** |
 | `block_n=32` (all configs) | halving the KV tile doubles the tile/grid count; the extra loop and barrier overhead outweighs the LDS relief. Marginally positive on **bf16 D128** but **part-dependent**, so not wired — it would need a CU-count-aware policy |
-| `iglp_opt` (`_P0_IGLP`) | resource- and performance-neutral cross-part: the canned GEMM interleave does not match this loop, which is barrier-rendezvous-bound. Kept as a default-off knob |
+| `iglp_opt` (`_IGLP`) | resource- and performance-neutral cross-part: the canned GEMM interleave does not match this loop, which is barrier-rendezvous-bound. Kept as a default-off knob |
 | Smaller `BLOCK_M` | a *fully filled* grid at `BLOCK_M=64` measured **slower** than a one-third-filled one at 256 — 2 waves/CTA leaves half the CU's matrix cores unreachable at 1 CTA/CU. `BLOCK_M=128` is a small win on two configs only; not promoted |
 | cfvst load/store chunking | does not bound register pressure: the later chunks' loads carry no dependency on the earlier ones, so LLVM hoists them above the intervening full `s_waitcnt(vmcnt=0)`, which then covers them anyway |
 | PV-only `s_setprio` | **proven-negative** on gfx942 `attention_tiled_2d`. Note this is one lever in one placement — it is *not* a verdict on the scheduling-intrinsic family, and hand-written `sched_group_barrier` remains open |
@@ -162,7 +162,7 @@ Full-cohort parity and perf are driven by the live harness at
 `benchmarks/gfx942/attention/prefill/benchmark_dense_prefill_live.py` (`--mode all`),
 which is the numeric gate for this kernel — the same role the bench plays on gfx950.
 
-`_p0_occupancy.py` is the static resource guard (VGPR / AGPR / spill / LDS, comgr only,
+`_occupancy_probe.py` is the static resource guard (VGPR / AGPR / spill / LDS, comgr only,
 no GPU): re-run it after any lever change to confirm 0 spill and to see which resource
 is the occupancy limiter.
 

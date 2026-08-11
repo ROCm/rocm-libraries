@@ -29,7 +29,7 @@ Why this is a port, not a copy (the CDNA3 deltas)
     parked "1/8 sign-flip" symptom was reproduced-or-disproven before anything was
     lifted: DISPROVEN cross-part (both the 228- and 304-CU parts, bit-identical, no
     sign mismatches), so the vehicle is proven correct rather than merely untested.
-    It is lifted here for D128 fp16 as :func:`_p0_use_cfvst` — the barrier caveat is
+    It is lifted here for D128 fp16 as :func:`_use_cfvst` — the barrier caveat is
     that V publication becomes an in-loop ``ds_write``, so the tile-START rendezvous
     needs an lgkmcnt drain (``sync_lds_only``), not a bare barrier. The disproof
     procedure and its evidence are recorded in the AICK-1664 plan.
@@ -84,7 +84,7 @@ Implementation status (see the AICK-1664 plan for the full ordered work list)
         but bf16 D128; fused rescale bit-identical, enables bf16 D64 exp2_fast)
   * P3  occupancy: waves-per-eu tune (bf16 D64 -> wpe4 = 2 WG/CU),
         D64 K bank-pad, wide4 (WG=256), K single-buffer ........... IN PROGRESS
-        (waves-per-eu DONE via _p0_waves_per_eu; **D64 K bank-pad DONE and ADOPTED**
+        (waves-per-eu DONE via _tuned_waves_per_eu; **D64 K bank-pad DONE and ADOPTED**
         -- cross-part-confirmed large win on both D64 dtypes, wired per-config via
         the SHARED ``spec.lds_k_group_pad`` (the same field and formula gfx950
         uses -- one lever, not a per-arch duplicate), golden re-blessed against the
@@ -121,7 +121,7 @@ P5 is deliberately no-op for this kernel (a decision, not code):
     waits entangles with the K async DMA, which shares the same counter -- see the
     reverted cfvst-chunking experiment recorded in the ``V_ITEMS`` NOTE below.
 
-P1 conflict-free V (:func:`_p0_use_cfvst`): V is stored TRANSPOSED via a perm_b32
+P1 conflict-free V (:func:`_use_cfvst`): V is stored TRANSPOSED via a perm_b32
 store-path transpose so the PV A-operand read is a contiguous ds_read_b64 instead of
 P0's 4 element-wise ds_read_u16 (128 -> ~32 LDS instrs/tile at D128). Gated to
 **D128 fp16**: D64 is VGPR-bound so the register round-trip regresses it, and D128
@@ -165,11 +165,7 @@ from rocke.helpers.attention import mfma_32x32x8_for_dtype
 
 # The spec is arch-neutral (compile-time shape + tuning knobs); reuse it rather
 # than fork the dataclass. gfx942-specific defaults live in the builder/dispatch.
-from kernels.gfx950.attention_dense import (  # noqa: F401
-    AttentionDenseSpec,
-    _BLOCK_M,
-    align_up,
-)
+from kernels.gfx950.attention_dense import AttentionDenseSpec, _BLOCK_M
 
 # C-output lane maps: IDENTICAL between the 32x32x8 (gfx942) and 32x32x16 (gfx950)
 # atoms (mfma_atom_catalog.md), so the softmax reductions + epilogue port verbatim.
@@ -178,29 +174,36 @@ from kernels.gfx942.attention_tiled_2d import _mfma_32x32_c_row, _mfma_32x32_c_c
 LOG2E = 1.4426950408889634
 _DTYPE_IR = {"bf16": BF16, "fp16": F16}
 
-# P0 pipeline constants (mirror gfx950; NBUF=1 = non-pipelined for correctness-first).
-_P0_BLOCK_M = 256  # query rows per CTA (8 wave64s)
-# The kernel body tiles on _P0_BLOCK_M, attention_dense_grid sizes the launch grid
-# from the shared _BLOCK_M, and supports_attention_dense's block_n divisibility
-# check uses _P0_BLOCK_M. If those ever diverge the grid and the kernel disagree
-# silently (rows written twice / never), so bind them at import instead of by comment.
-if _P0_BLOCK_M != _BLOCK_M:  # not an `assert`: python -O would strip it
+# Pipeline constants (mirror gfx950; this body is NBUF=1, a single LDS buffer).
+# The kernel body tiles on the SHARED _BLOCK_M (256 query rows per CTA = 8 wave64s),
+# attention_dense_grid sizes the launch grid from it, and supports_attention_dense's
+# block_n divisibility check uses it -- one constant, imported from the gfx950 sibling,
+# so the grid and the kernel body cannot disagree silently (rows written twice/never).
+#
+# What that single constant still has to satisfy for THIS body: the wave count is
+# WAVES = _BLOCK_M // 32, a FLOOR. At a non-multiple of 32 the emitted wave count
+# under-covers the query tile and the top _BLOCK_M % 32 rows of every block get no
+# wave at all -- they are never computed and never written, a silent wrong answer with
+# no fault. Bind the invariant at import instead of by comment. Not an `assert`:
+# `python -O` strips asserts and this guards a silent wrong answer.
+if _BLOCK_M % 32 != 0:
     raise ValueError(
-        f"_P0_BLOCK_M ({_P0_BLOCK_M}) must match the shared _BLOCK_M ({_BLOCK_M}): "
-        f"the launch grid and the kernel body would disagree silently, writing "
-        f"query rows twice or not at all"
+        f"_BLOCK_M ({_BLOCK_M}) must be a multiple of 32: the gfx942 dense body "
+        f"derives its wave count as WAVES = _BLOCK_M // 32, which floors, so a "
+        f"non-multiple leaves the top {_BLOCK_M % 32} query rows of every block "
+        f"uncovered by any wave -- never computed and never written"
     )
 
 # K-row bank-conflict pad, in elements. INHERITED from the gfx950 sibling and NOT
 # re-derived for gfx942's bank geometry / LDS size -- that retune is a P3 item. Only
 # applied when one K row is packed per async-DMA instruction; see
-# _p0_lds_row_stride for why D64 cannot carry it.
+# _lds_row_stride for why D64 cannot carry it.
 # SETTLED (do not re-attempt): DROPPING this pad (and the cfvst V pad) to cut D128
 # LDS under the 32 KB needed for a 2nd WG/CU is PROVEN-NEGATIVE and catastrophically
 # so -- D128 stays 1 WG/CU even unpadded because the register floor co-limits, so the
 # pads are removed for nothing and the K/QK + cfvst V bank conflicts come back. Only
 # the VALUE is still open to retune; the pads themselves stay.
-_P0_LDS_PAD = 8
+_LDS_ROW_PAD = 8
 
 # V^T row (token axis) bank-conflict pad, in elements, for the P1 conflict-free-V
 # store. V_lds is transposed to [D, block_n] (dim-major, token inner) so the PV
@@ -208,12 +211,12 @@ _P0_LDS_PAD = 8
 # per-lane 4-token reads land in distinct banks (token stride block_n+8 dwords ->
 # 8-bank / 4-way at block_n=64, matching the D128 QK path). Lifted from the proven
 # attention_tiled_2d cfvst vehicle (v_pad=8); a gfx942 re-derivation is a P3 item.
-_P0_V_PAD = 8
+_V_ROW_PAD = 8
 
 # --- D64 K-LDS bank-conflict fix (AICK-1664 Hypothesis #3) -- ADOPTED, not pending. ---
 # There is NO gfx942-private switch for this: the pad amount is the SHARED
 # ``AttentionDenseSpec.lds_k_group_pad`` (default 8), which gfx950 owns and this
-# builder reuses verbatim via _p0_d64_kpad_active / _p0_k_group_stride. Both arches
+# builder reuses verbatim via _k_group_pad_active / _k_group_stride. Both arches
 # pad between async-DMA row-GROUPS by the same formula for the same reason; gfx942
 # arrived at it from a measured ~2x ON/OFF ablation and gfx950 from a bank/phase
 # model, and both landed on 8. Set the field to 0 to reproduce the unpadded layout
@@ -253,7 +256,7 @@ _P0_V_PAD = 8
 # NOT schedule-bound -- it is barrier-rendezvous-bound, which no scheduling hint can
 # fix. That is consistent with the measured occupancy bound in the module docstring,
 # and it is why the whole scheduling-hint family stays unported. Stays default OFF.
-_P0_IGLP = False
+_IGLP = False
 
 __all__ = [
     "AttentionDenseSpec",
@@ -262,12 +265,12 @@ __all__ = [
     "attention_dense_grid",
     "attention_dense_block",
     "attention_dense_signature",
-    "p0_kernel_name",
+    "gfx942_kernel_name",
     "run_attention_dense_torch",
 ]
 
 
-def p0_kernel_name(spec: AttentionDenseSpec) -> str:
+def gfx942_kernel_name(spec: AttentionDenseSpec) -> str:
     """Kernel name carrying every compile-time-baked parameter the shared name omits.
 
     ``AttentionDenseSpec.kernel_name()`` omits both ``batch`` and ``waves_per_eu``,
@@ -312,7 +315,7 @@ _INT32_LIMIT = 2**31
 _DMA_ELEMS_PER_INSTR = 64 * 4 // 2  # = 128
 
 
-def _p0_rows_per_instr(head_size: int) -> int:
+def _rows_per_instr(head_size: int) -> int:
     """K/V rows packed into one async-DMA instruction (1 at D128, 2 at D64).
 
     Single definition of the packing rule that BOTH the LDS row stride and the
@@ -322,7 +325,7 @@ def _p0_rows_per_instr(head_size: int) -> int:
     return _DMA_ELEMS_PER_INSTR // head_size
 
 
-def _p0_use_exp2_fast(head_size: int, dtype: str) -> bool:
+def _use_exp2_fast(head_size: int, dtype: str) -> bool:
     """Whether softmax uses ``exp2_fast`` (one v_exp_f32, no range-reduction guard).
 
     Enabled everywhere EXCEPT bf16 D128. exp2_fast is a strict VALU reduction and the
@@ -343,7 +346,7 @@ def _p0_use_exp2_fast(head_size: int, dtype: str) -> bool:
     return dtype == "fp16" or head_size != 128
 
 
-def _p0_use_cfvst(head_size: int, dtype: str) -> bool:
+def _use_cfvst(head_size: int, dtype: str) -> bool:
     """Whether to feed V through the P1 conflict-free perm_b32 store-path transpose.
 
     D128 **fp16** only. Measured on gfx942 (both parts):
@@ -357,10 +360,10 @@ def _p0_use_cfvst(head_size: int, dtype: str) -> bool:
         fix is a P3 occupancy item.
     Gate on rows-per-DMA == 1 (D128) AND fp16 so the LDS budget and the body agree.
     """
-    return _p0_rows_per_instr(head_size) == 1 and dtype == "fp16"
+    return _rows_per_instr(head_size) == 1 and dtype == "fp16"
 
 
-def _p0_waves_per_eu(head_size: int, dtype: str) -> int:
+def _tuned_waves_per_eu(head_size: int, dtype: str) -> int:
     """Tuned ``amdgpu-waves-per-eu`` per config (P3 occupancy).
 
     Default 2 (one WG/CU = 2 waves/SIMD at this kernel's ~175-217 VGPR). The one
@@ -388,7 +391,7 @@ def _p0_waves_per_eu(head_size: int, dtype: str) -> int:
     return 2
 
 
-def _p0_lds_row_stride(head_size: int) -> int:
+def _lds_row_stride(head_size: int) -> int:
     """K_lds / V_lds row stride in ELEMENTS for one head size.
 
     D128 packs ONE row per async-DMA instruction (64 lanes x 2 elems = 128 elems =
@@ -401,10 +404,10 @@ def _p0_lds_row_stride(head_size: int) -> int:
     Shared by the builder and :func:`supports_attention_dense` so the budget check
     cannot drift from the actual allocation.
     """
-    return head_size + _P0_LDS_PAD if _p0_rows_per_instr(head_size) == 1 else head_size
+    return head_size + _LDS_ROW_PAD if _rows_per_instr(head_size) == 1 else head_size
 
 
-def _p0_d64_kpad_active(spec: AttentionDenseSpec) -> bool:
+def _k_group_pad_active(spec: AttentionDenseSpec) -> bool:
     """Whether the D64 K-LDS row-group bank-conflict pad is EMITTED for ``spec``.
 
     Reads the SHARED ``spec.lds_k_group_pad``, which gfx950 owns and gfx942 reuses
@@ -415,47 +418,47 @@ def _p0_d64_kpad_active(spec: AttentionDenseSpec) -> bool:
     the same 8-element default.
 
     Active only on the PACKED path (``rows_per_instr > 1``, i.e. D64 here): D128
-    already carries a per-row K pad via :func:`_p0_lds_row_stride`, so it must never
+    already carries a per-row K pad via :func:`_lds_row_stride`, so it must never
     be re-padded. ``lds_k_group_pad=0`` reproduces the unpadded layout for A/B --
     which is also how the pad's ~2x is priced, no module-level probe constant needed.
     """
-    return spec.lds_k_group_pad > 0 and _p0_rows_per_instr(spec.head_size) > 1
+    return spec.lds_k_group_pad > 0 and _rows_per_instr(spec.head_size) > 1
 
 
-def _p0_k_group_stride(spec: AttentionDenseSpec) -> int:
+def _k_group_stride(spec: AttentionDenseSpec) -> int:
     """K_lds physical group stride in ELEMENTS when the row-group pad is active.
 
     A group is ROWS_PER_INSTR (=2 at D64) contiguous rows written by one async-DMA
     instruction; the pad sits at the group boundary (never DMA-touched). Identical
     to the gfx950 builder's ``LDROW = K_GROUP * D + spec.lds_k_group_pad``."""
-    return _p0_rows_per_instr(spec.head_size) * spec.head_size + spec.lds_k_group_pad
+    return _rows_per_instr(spec.head_size) * spec.head_size + spec.lds_k_group_pad
 
 
-def _p0_lds_bytes(spec: AttentionDenseSpec) -> int:
+def _lds_bytes(spec: AttentionDenseSpec) -> int:
     """Total LDS footprint: ``K_lds[1, block_n, row_stride] + V_lds[1, D, block_n+pad]``.
 
-    K keeps the natural ``[token, dim]`` layout with :func:`_p0_lds_row_stride` (async
+    K keeps the natural ``[token, dim]`` layout with :func:`_lds_row_stride` (async
     DMA target). V is TRANSPOSED to ``[dim, token]`` for the P1 conflict-free store, so
-    its footprint is ``D * (block_n + _P0_V_PAD)`` rather than ``block_n * row_stride``.
+    its footprint is ``D * (block_n + _V_ROW_PAD)`` rather than ``block_n * row_stride``.
     2 bytes/element is exact for every dtype in ``_SUPPORTED_DTYPES`` (bf16/fp16) and
     must be revisited if a narrower or wider element type is added. Shared with the
     budget check in :func:`supports_attention_dense` so the two cannot drift.
 
-    When :func:`_p0_d64_kpad_active` (the D64 bank-conflict pad), K instead takes the
-    2-row-group layout ``K_lds[1, block_n // rows_per_instr, _p0_k_group_stride]`` --
-    +``_P0_LDS_PAD`` elements per group (D128 and the kpad-off D64 path are unchanged).
+    When :func:`_k_group_pad_active` (the D64 bank-conflict pad), K instead takes the
+    2-row-group layout ``K_lds[1, block_n // rows_per_instr, _k_group_stride]`` --
+    +``_LDS_ROW_PAD`` elements per group (D128 and the kpad-off D64 path are unchanged).
     """
-    if _p0_d64_kpad_active(spec):
-        rpi = _p0_rows_per_instr(spec.head_size)
-        k_bytes = (spec.block_n // rpi) * _p0_k_group_stride(spec) * 2
+    if _k_group_pad_active(spec):
+        rpi = _rows_per_instr(spec.head_size)
+        k_bytes = (spec.block_n // rpi) * _k_group_stride(spec) * 2
     else:
-        k_bytes = spec.block_n * _p0_lds_row_stride(spec.head_size) * 2
-    if _p0_use_cfvst(spec.head_size, spec.dtype):
+        k_bytes = spec.block_n * _lds_row_stride(spec.head_size) * 2
+    if _use_cfvst(spec.head_size, spec.dtype):
         # V transposed to [dim, token+pad] for the conflict-free store (D128).
-        v_bytes = spec.head_size * (spec.block_n + _P0_V_PAD) * 2
+        v_bytes = spec.head_size * (spec.block_n + _V_ROW_PAD) * 2
     else:
         # V keeps the natural [token, dim] async-DMA layout (D64, naive read).
-        v_bytes = spec.block_n * _p0_lds_row_stride(spec.head_size) * 2
+        v_bytes = spec.block_n * _lds_row_stride(spec.head_size) * 2
     return k_bytes + v_bytes
 
 
@@ -522,8 +525,8 @@ def supports_attention_dense(
     # --- Mode scope. The body implements the default-grid AND the P4 persistent
     # grid-stride variant, both uniform dense self-attention. Checked HERE and not
     # only in the builder so that support() and build() agree on exactly one set of
-    # specs. Persistent needs Sq % _P0_BLOCK_M == 0 (the grid-stride work count
-    # W = (Sq // _P0_BLOCK_M) * Hq * B floors); ragged (the ceil case) is rejected
+    # specs. Persistent needs Sq % _BLOCK_M == 0 (the grid-stride work count
+    # W = (Sq // _BLOCK_M) * Hq * B floors); ragged (the ceil case) is rejected
     # just below, and the dataclass then enforces seqlen_q % 256 == 0, so the floor
     # is exact for every spec that reaches the persistent builder.
     if spec.varlen:
@@ -533,26 +536,26 @@ def supports_attention_dense(
     if spec.sliding_window:
         return False, "gfx942 attention_dense P0: sliding_window not yet supported"
 
-    # --- Tile geometry. The causal KV-loop clamp uses n_per = _P0_BLOCK_M //
+    # --- Tile geometry. The causal KV-loop clamp uses n_per = _BLOCK_M //
     # block_n, a FLOOR: a block_n that does not divide the query tile silently drops
-    # every key past the last whole sub-tile, and block_n > _P0_BLOCK_M makes n_per 0
+    # every key past the last whole sub-tile, and block_n > _BLOCK_M makes n_per 0
     # -> zero-trip loop -> l == 0 -> rcp(0) -> NaN. Neither fails loudly, so reject.
-    if _P0_BLOCK_M % spec.block_n != 0:
+    if _BLOCK_M % spec.block_n != 0:
         return False, (
-            f"block_n must divide the {_P0_BLOCK_M}-row query tile (got "
+            f"block_n must divide the {_BLOCK_M}-row query tile (got "
             f"block_n={spec.block_n}; the spec also requires block_n % 32 == 0, so "
             f"use 32, 64, 128 or 256). Load-bearing for causal=True, where "
-            f"n_per = {_P0_BLOCK_M} // block_n floors and drops keys; enforced "
+            f"n_per = {_BLOCK_M} // block_n floors and drops keys; enforced "
             f"unconditionally so the two grids cannot diverge by a knob"
         )
 
     # --- Wave/tile divisibility, mirrored from the builder so support() and build()
     # agree on exactly one set of specs (the module contract at the top of this file).
-    # The condition below is ALSO enforced in _build_attention_dense_p0; without it
+    # The condition below is ALSO enforced in _build_attention_dense_single_buffer; without it
     # here, a spec support() accepted would die in the builder with a ValueError --
     # precisely the dispatch fall-through hole this gate exists to close.
-    _waves = _P0_BLOCK_M // 32
-    _rpi = _p0_rows_per_instr(spec.head_size)
+    _waves = _BLOCK_M // 32
+    _rpi = _rows_per_instr(spec.head_size)
     if spec.block_n % _waves != 0 or (spec.block_n // _waves) % _rpi != 0:
         return False, (
             f"block_n={spec.block_n} over {_waves} waves gives ROWS_PER_WAVE="
@@ -563,7 +566,7 @@ def supports_attention_dense(
     # guard, so the CTA thread count must divide the block count. Gated on the cfvst
     # predicate: the naive-V path never reads these quantities, and checking it
     # unconditionally would reject specs the naive path builds fine.
-    if _p0_use_cfvst(spec.head_size, spec.dtype):
+    if _use_cfvst(spec.head_size, spec.dtype):
         _threads = _waves * 64
         _vblocks = (spec.block_n // 2) * (spec.head_size // 2)
         if _vblocks % _threads != 0:
@@ -574,7 +577,7 @@ def supports_attention_dense(
 
     # --- LDS budget. Without this, an over-budget tile reaches comgr and fails with
     # an opaque CODEGEN_BC_TO_RELOCATABLE abort instead of a structured reason.
-    lds_bytes = _p0_lds_bytes(spec)
+    lds_bytes = _lds_bytes(spec)
     from ..common.attention_arch import attention_lds_capacity_bytes
 
     capacity = attention_lds_capacity_bytes(arch)
@@ -610,7 +613,7 @@ def build_attention_dense(
 ) -> KernelDef:
     """Emit the gfx942 dense flash-attention prefill kernel for ``spec``.
 
-    Delegates to :func:`_build_attention_dense_p0`, the correctness-first
+    Delegates to :func:`_build_attention_dense_single_buffer`, the correctness-first
     non-pipelined body (32x32x8 atom + K-loop doubling). Every scope restriction --
     including the modes deferred to P1-P4 -- lives in
     :func:`supports_attention_dense`, which is consulted here, so this function is a
@@ -630,10 +633,10 @@ def build_attention_dense(
     ok, why = supports_attention_dense(spec, arch=arch)
     if not ok:
         raise ValueError(f"unsupported gfx942 attention_dense spec: {why}")
-    return _build_attention_dense_p0(spec)
+    return _build_attention_dense_single_buffer(spec)
 
 
-def _build_attention_dense_p0(spec: AttentionDenseSpec) -> KernelDef:
+def _build_attention_dense_single_buffer(spec: AttentionDenseSpec) -> KernelDef:
     """gfx942 dense prefill body: 32x32x8 atom + K-loop doubling.
 
     Non-pipelined (NBUF=1): per KV tile load→wait→QK→mask→softmax→PV, single LDS
@@ -650,7 +653,7 @@ def _build_attention_dense_p0(spec: AttentionDenseSpec) -> KernelDef:
     causal = spec.causal
     dtype = _DTYPE_IR[spec.dtype]
 
-    BLOCK_M = _P0_BLOCK_M
+    BLOCK_M = _BLOCK_M
     WAVES = BLOCK_M // 32  # 8
     BN = spec.block_n
 
@@ -661,9 +664,9 @@ def _build_attention_dense_p0(spec: AttentionDenseSpec) -> KernelDef:
     gqa = Hq // Hkv
     stride_q_tok = Hq * D
     stride_k_tok = Hkv * D
-    ROWS_PER_INSTR = _p0_rows_per_instr(D)  # 1 for D128, 2 for D64
+    ROWS_PER_INSTR = _rows_per_instr(D)  # 1 for D128, 2 for D64
 
-    b = IRBuilder(p0_kernel_name(spec))
+    b = IRBuilder(gfx942_kernel_name(spec))
     b.kernel.attrs["max_workgroup_size"] = WAVES * 64
     b.kernel.attrs["waves_per_eu"] = int(spec.waves_per_eu)
 
@@ -694,18 +697,18 @@ def _build_attention_dense_p0(spec: AttentionDenseSpec) -> KernelDef:
     # persistent grid it is REUSED across every work item the CTA strides over, and
     # for the default grid it is the single tile) ----
     # Padded for D128 (one row per DMA instr), unpadded for D64 (two rows per
-    # instr need a contiguous stride) -- see _p0_lds_row_stride. Shared with the
+    # instr need a contiguous stride) -- see _lds_row_stride. Shared with the
     # LDS-budget check in supports_attention_dense so the two cannot drift. The one
-    # exception is when _p0_d64_kpad_active(spec): D64 K_lds then takes the padded
-    # [1, block_n // rows_per_instr, _p0_k_group_stride] 2-row-group layout below.
-    USE_CFVST = _p0_use_cfvst(D, spec.dtype)  # P1 conflict-free V: D128 fp16 only
-    LDROW = _p0_lds_row_stride(D)
+    # exception is when _k_group_pad_active(spec): D64 K_lds then takes the padded
+    # [1, block_n // rows_per_instr, _k_group_stride] 2-row-group layout below.
+    USE_CFVST = _use_cfvst(D, spec.dtype)  # P1 conflict-free V: D128 fp16 only
+    LDROW = _lds_row_stride(D)
     # AICK-1664 (Hypothesis #3): D64 K_lds with a row-group boundary pad, sized by the
     # shared spec.lds_k_group_pad (0 disables it -- that is the A/B probe).
-    KPAD_D64 = _p0_d64_kpad_active(spec)
+    KPAD_D64 = _k_group_pad_active(spec)
     if KPAD_D64:
         K_GROUP = ROWS_PER_INSTR  # rows per async-DMA instruction (=2 at D64)
-        K_GROUP_STRIDE = _p0_k_group_stride(spec)  # rows_per_instr*D + pad elems
+        K_GROUP_STRIDE = _k_group_stride(spec)  # rows_per_instr*D + pad elems
         K_lds = b.smem_alloc(
             dtype, [1, BN // K_GROUP, K_GROUP_STRIDE], name_hint="Klds"
         )
@@ -713,14 +716,14 @@ def _build_attention_dense_p0(spec: AttentionDenseSpec) -> KernelDef:
         K_lds = b.smem_alloc(dtype, [1, BN, LDROW], name_hint="Klds")
     if USE_CFVST:
         # V stored TRANSPOSED (P1 conflict-free V): [dim, token] with token inner and
-        # padded by _P0_V_PAD, so the PV A-operand read is a contiguous ds_read_b64
+        # padded by _V_ROW_PAD, so the PV A-operand read is a contiguous ds_read_b64
         # rather than P0's 4 element-wise ds_read_u16. Filled by the perm_b32 store
         # path below.
-        V_LDROW = BN + _P0_V_PAD
+        V_LDROW = BN + _V_ROW_PAD
         V_lds = b.smem_alloc(dtype, [1, D, V_LDROW], name_hint="VldsT")
     else:
         # V keeps the natural [token, dim] async-DMA layout (D64: VGPR-bound, cfvst
-        # regresses it -- see _p0_use_cfvst); read element-wise in read_v.
+        # regresses it -- see _use_cfvst); read element-wise in read_v.
         V_lds = b.smem_alloc(dtype, [1, BN, LDROW], name_hint="Vlds")
 
     n_ktiles = Skv // BN
@@ -738,7 +741,7 @@ def _build_attention_dense_p0(spec: AttentionDenseSpec) -> KernelDef:
     # than rely on the dataclass validator staying that strict.
     # Raised, not asserted: `python -O` strips asserts, and skipped DMA rows are a
     # SILENT wrong answer (uninitialized LDS consumed as garbage, no fault) -- the
-    # same reasoning as the _P0_BLOCK_M guard at module scope. Mirrored in
+    # same reasoning as the _BLOCK_M guard at module scope. Mirrored in
     # supports_attention_dense so support() and build() cannot disagree.
     if BN % WAVES != 0 or ROWS_PER_WAVE % ROWS_PER_INSTR != 0:
         raise ValueError(
@@ -775,7 +778,7 @@ def _build_attention_dense_p0(spec: AttentionDenseSpec) -> KernelDef:
         # CFVST-PATH-ONLY. Computing this unconditionally would reject specs the
         # NAIVE V path builds fine: at D64/block_n=32 with a 1024-thread CTA,
         # V_BLOCKS=512 < THREADS=1024 and the check fires even though `read_v` never
-        # touches V_BLOCKS there (D64 is naive-V by _p0_use_cfvst). Raised, not
+        # touches V_BLOCKS there (D64 is naive-V by _use_cfvst). Raised, not
         # asserted, for the reason stated at the DMA row-split guard above:
         # `python -O` strips asserts, and this one guards a silent wrong answer (an
         # unguarded tail item would read past the tile).
@@ -1056,7 +1059,7 @@ def _build_attention_dense_p0(spec: AttentionDenseSpec) -> KernelDef:
             l_i = carry[1]
             o_acc = list(carry[2 : 2 + D_TILES])
 
-            if _P0_IGLP:
+            if _IGLP:
                 # Runbook lever 7: one canned-scheduler hint at the loop-body top.
                 # Only meaningful on the cfvst path (in-loop ds_write to interleave).
                 b.iglp_opt(0)
@@ -1107,8 +1110,8 @@ def _build_attention_dense_p0(spec: AttentionDenseSpec) -> KernelDef:
             # large negatives to 0). Cuts ~99 VALU/tile at D128, the dominant
             # MFMA-starving residual once conflict-free V (P1) lands. Enabled for
             # every config except bf16 D128, which spills on the .1k schedule -- the
-            # spill rationale and the matrix live in _p0_use_exp2_fast's docstring.
-            exp2 = b.exp2_fast if _p0_use_exp2_fast(D, spec.dtype) else b.exp2
+            # spill rationale and the matrix live in _use_exp2_fast's docstring.
+            exp2 = b.exp2_fast if _use_exp2_fast(D, spec.dtype) else b.exp2
             alpha = exp2(b.fsub(m_i, m_new))
 
             # P2 fused/lazy rescale: compute each exp2 inline, accumulate l_local, and
@@ -1318,7 +1321,7 @@ def run_attention_dense_torch(
     (``spec.persistent``) -- ``attention_dense_grid`` picks the right launch shape.
 
     Mirrors ``kernels.gfx950.attention_dense.run_attention_dense_torch`` but keys the
-    launcher cache on :func:`p0_kernel_name` (not the shared ``kernel_name()``): this
+    launcher cache on :func:`gfx942_kernel_name` (not the shared ``kernel_name()``): this
     kernel bakes ``batch`` into the buffer-resource extents and ``waves_per_eu`` into
     the register-allocation attribute, both of which ``kernel_name()`` omits -- so two
     specs differing only in batch (or wpe) MUST NOT share a cached binary, or a B>1
@@ -1338,8 +1341,8 @@ def run_attention_dense_torch(
     from rocke.helpers.compile import compile_kernel
     from rocke.runtime import KernelLauncher, LaunchConfig
 
-    # batch- and wpe-unique cache key (see docstring): p0_kernel_name, not kernel_name.
-    key = p0_kernel_name(spec)
+    # batch- and wpe-unique cache key (see docstring): gfx942_kernel_name, not kernel_name.
+    key = gfx942_kernel_name(spec)
     launcher = _DENSE_LAUNCHER_CACHE.get(key)
     if launcher is None:
         art = compile_kernel(

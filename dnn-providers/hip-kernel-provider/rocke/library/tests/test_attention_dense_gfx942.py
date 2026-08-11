@@ -34,17 +34,18 @@ from kernels.gfx942.attention_dense import (
     attention_dense_block,
     attention_dense_grid,
     build_attention_dense,
-    p0_kernel_name,
+    gfx942_kernel_name,
     run_attention_dense_torch,
     supports_attention_dense,
-    _p0_d64_kpad_active,
-    _p0_k_group_stride,
-    _p0_use_exp2_fast,
-    _p0_waves_per_eu,
+    _k_group_pad_active,
+    _k_group_stride,
+    _use_exp2_fast,
+    _tuned_waves_per_eu,
+    # Query rows per CTA. IMPORTED, not redefined: a third copy of 256 in the test
+    # would let the test keep passing after the kernel's tile changed under it.
+    _BLOCK_M,
 )
 
-# Query rows per CTA baked into the P0 body; block_n must divide it.
-_BLOCK_M = 256
 _EXPECTED_WORKGROUP_SIZE = (_BLOCK_M // 32) * 64  # 8 wave64s = 512 threads
 
 
@@ -87,7 +88,7 @@ def test_build_emits_kernel_for_in_scope_cohort(dtype, d, causal, hq, hkv):
         dtype=dtype, head_size=d, causal=causal, num_query_heads=hq, num_kv_heads=hkv
     )
     kd = build_attention_dense(spec, arch="gfx942")
-    assert kd.name == p0_kernel_name(spec)
+    assert kd.name == gfx942_kernel_name(spec)
     assert kd.attrs["max_workgroup_size"] == _EXPECTED_WORKGROUP_SIZE
 
 
@@ -99,14 +100,14 @@ def test_build_rejects_non_gfx942():
 # --------------------------------------------------------------------------- #
 # kernel-name identity: batch is baked into the buffer extents but omitted from
 # the shared kernel_name(), so a name-keyed cache would serve the B=1 binary for
-# a B>1 launch and read out of bounds. p0_kernel_name() is the guard.
+# a B>1 launch and read out of bounds. gfx942_kernel_name() is the guard.
 # --------------------------------------------------------------------------- #
-def test_p0_kernel_name_covers_every_baked_parameter():
+def test_kernel_name_covers_every_baked_parameter():
     """batch and waves_per_eu are both baked into the artifact but omitted from the
     shared kernel_name(): batch sizes the buffer-resource extents, waves_per_eu is
     emitted as amdgpu-waves-per-eu and changes register allocation. Either one
     colliding in a name-keyed cache serves the wrong binary."""
-    assert p0_kernel_name(_spec(waves_per_eu=2)) != p0_kernel_name(
+    assert gfx942_kernel_name(_spec(waves_per_eu=2)) != gfx942_kernel_name(
         _spec(waves_per_eu=3)
     )
     a = build_attention_dense(_spec(waves_per_eu=2), arch="gfx942")
@@ -115,10 +116,10 @@ def test_p0_kernel_name_covers_every_baked_parameter():
     assert a.name != c.name
 
 
-def test_p0_kernel_name_is_batch_unique():
-    names = {p0_kernel_name(_spec(batch=b)) for b in (1, 2, 4, 8)}
+def test_kernel_name_is_batch_unique():
+    names = {gfx942_kernel_name(_spec(batch=b)) for b in (1, 2, 4, 8)}
     assert len(names) == 4, f"batch must disambiguate the kernel name, got {names}"
-    assert "_b4_" in p0_kernel_name(_spec(batch=4))
+    assert "_b4_" in gfx942_kernel_name(_spec(batch=4))
 
 
 def test_build_bakes_batch_into_the_emitted_symbol():
@@ -439,7 +440,7 @@ def test_exp2_fast_gate_matches_the_spill_measured_matrix(head_size, dtype, expe
     VGPR. Every other config has the headroom. This pins the exact enabled set so a
     future edit that flips one arm has to update this matrix on purpose.
     """
-    assert _p0_use_exp2_fast(head_size, dtype) is expected
+    assert _use_exp2_fast(head_size, dtype) is expected
 
 
 @pytest.mark.parametrize(
@@ -451,7 +452,7 @@ def test_softmax_emits_the_gated_exp2_intrinsic(head_size, dtype):
 
     exp2_fast lowers to ``math.exp2_fast`` (llvm.amdgcn.exp2.f32 -> one v_exp_f32);
     plain exp2 lowers to ``math.exp2`` (llvm.exp2.f32, guarded range reduction). The
-    softmax path must emit exactly one family, matching :func:`_p0_use_exp2_fast`, so
+    softmax path must emit exactly one family, matching :func:`_use_exp2_fast`, so
     the bf16-D128 spill guard is not silently defeated by an IR-level fallback.
     Parametrized (not a plain loop) so each config's failure is isolated -- the gate
     boundary case bf16 D128 must be reported even if an earlier config regresses.
@@ -461,7 +462,7 @@ def test_softmax_emits_the_gated_exp2_intrinsic(head_size, dtype):
     names = [n for op in kernel.body.ops for n in _walk_op_names(op)]
     has_fast = "math.exp2_fast" in names
     has_plain = "math.exp2" in names
-    if _p0_use_exp2_fast(head_size, dtype):
+    if _use_exp2_fast(head_size, dtype):
         assert has_fast and not has_plain, (
             f"{dtype} D{head_size}: gate says exp2_fast but IR has "
             f"fast={has_fast} plain={has_plain}"
@@ -531,9 +532,9 @@ def test_waves_per_eu_selector_matches_measured_matrix(head_size, dtype, expecte
 
     Only bf16 D64 is overridden (to 4); every other config keeps the default 2. This
     pins the exact matrix so a future edit that flips one arm must update it on purpose
-    (see :func:`_p0_waves_per_eu` for the per-config measurement rationale).
+    (see :func:`_tuned_waves_per_eu` for the per-config measurement rationale).
     """
-    assert _p0_waves_per_eu(head_size, dtype) == expected
+    assert _tuned_waves_per_eu(head_size, dtype) == expected
 
 
 def test_build_bakes_the_tuned_waves_per_eu_attribute():
@@ -542,14 +543,14 @@ def test_build_bakes_the_tuned_waves_per_eu_attribute():
     waves_per_eu changes register allocation and is baked into both the kernel_name
     (``wpe{N}``) and the attribute, so a spec built at waves_per_eu=4 must emit the 4
     attribute -- otherwise the name and the binary disagree (the cache-collision class
-    of bug guarded elsewhere by :func:`p0_kernel_name`).
+    of bug guarded elsewhere by :func:`gfx942_kernel_name`).
     """
     spec = _spec(head_size=64, dtype="bf16", waves_per_eu=4)
     kernel = build_attention_dense(spec, arch="gfx942")
     assert kernel.attrs.get("waves_per_eu") == 4
     # anchored on the full baked suffix, not a bare "_wpe4" (which "_wpe14" would
     # also match): batch + arch + wpe are all part of the identity.
-    assert p0_kernel_name(spec).endswith("_gfx942_b1_wpe4")
+    assert gfx942_kernel_name(spec).endswith("_gfx942_b1_wpe4")
 
 
 def test_dispatch_applies_gfx942_waves_per_eu_tuning_and_leaves_gfx950_alone():
@@ -617,8 +618,8 @@ def test_dispatch_applies_gfx942_waves_per_eu_tuning_and_leaves_gfx950_alone():
     assert kernel.attrs.get("waves_per_eu") == 4
     # The K row-group pad needs no gfx942 tag: the SHARED name already carries
     # kpad{N} for it, so the gfx942 suffix ends at the waves-per-eu bump.
-    assert p0_kernel_name(tuned).endswith("_wpe4")
-    assert "_kpad8_" in p0_kernel_name(tuned)
+    assert gfx942_kernel_name(tuned).endswith("_wpe4")
+    assert "_kpad8_" in gfx942_kernel_name(tuned)
 
 
 # --------------------------------------------------------------------------- #
@@ -629,7 +630,7 @@ def test_k_group_pad_active_only_on_the_packed_path(head_size, expected):
     """The pad applies on the PACKED path only (rows_per_instr > 1, i.e. D64 here).
     D128 packs one row per DMA instruction and already carries a per-row K pad, so
     re-padding it would double-count. Same gate gfx950 spells `128 // head_size > 1`."""
-    assert _p0_d64_kpad_active(_spec(head_size=head_size)) is expected
+    assert _k_group_pad_active(_spec(head_size=head_size)) is expected
 
 
 def test_k_group_stride_matches_the_gfx950_formula():
@@ -638,9 +639,9 @@ def test_k_group_stride_matches_the_gfx950_formula():
     two arches have silently forked a shared spec field."""
     for d, rpi in ((64, 2), (128, 1)):
         spec = _spec(head_size=d)
-        assert _p0_k_group_stride(spec) == rpi * d + spec.lds_k_group_pad
+        assert _k_group_stride(spec) == rpi * d + spec.lds_k_group_pad
     # the shipped D64 value, spelled out so a default change is loud
-    assert _p0_k_group_stride(_spec(head_size=64)) == 136  # 2*64 + 8
+    assert _k_group_stride(_spec(head_size=64)) == 136  # 2*64 + 8
 
 
 def test_k_group_pad_zero_reproduces_the_unpadded_layout():
@@ -652,25 +653,27 @@ def test_k_group_pad_zero_reproduces_the_unpadded_layout():
 
     on = _spec(head_size=64, dtype="fp16")
     off = dataclasses.replace(on, lds_k_group_pad=0)
-    assert _p0_d64_kpad_active(on) is True
-    assert _p0_d64_kpad_active(off) is False
-    assert p0_kernel_name(on) != p0_kernel_name(off)
-    assert "_kpad8_" in p0_kernel_name(on)
-    assert "_kpad0_" in p0_kernel_name(off)
+    assert _k_group_pad_active(on) is True
+    assert _k_group_pad_active(off) is False
+    assert gfx942_kernel_name(on) != gfx942_kernel_name(off)
+    assert "_kpad8_" in gfx942_kernel_name(on)
+    assert "_kpad0_" in gfx942_kernel_name(off)
     for spec in (on, off):
-        assert build_attention_dense(spec, arch="gfx942").name == p0_kernel_name(spec)
+        assert build_attention_dense(spec, arch="gfx942").name == gfx942_kernel_name(
+            spec
+        )
 
 
 def test_k_group_pad_is_inert_at_d128():
     """D128 must ignore the field entirely -- no layout change, no name change --
-    since its K pad is per-row via _p0_lds_row_stride."""
+    since its K pad is per-row via _lds_row_stride."""
     import dataclasses
 
     d128 = _spec(head_size=128, dtype="fp16")
     for pad in (0, 8, 24):
         alt = dataclasses.replace(d128, lds_k_group_pad=pad)
-        assert _p0_d64_kpad_active(alt) is False
-        assert p0_kernel_name(alt) == p0_kernel_name(d128)
+        assert _k_group_pad_active(alt) is False
+        assert gfx942_kernel_name(alt) == gfx942_kernel_name(d128)
 
 
 def test_dispatch_ships_the_padded_d64_path_without_restating_the_pad():
@@ -718,8 +721,8 @@ def test_dispatch_ships_the_padded_d64_path_without_restating_the_pad():
 
     # D64 ships padded on both dtypes; D128 is inert.
     for dtype in ("fp16", "bf16"):
-        assert _p0_d64_kpad_active(_dense_spec(_req(dtype, 64, "gfx942"))) is True
-        assert _p0_d64_kpad_active(_dense_spec(_req(dtype, 128, "gfx942"))) is False
+        assert _k_group_pad_active(_dense_spec(_req(dtype, 64, "gfx942"))) is True
+        assert _k_group_pad_active(_dense_spec(_req(dtype, 128, "gfx942"))) is False
     # gfx950's factory also leaves the field at the shared default -- neither arm
     # restates it, which is the point of unifying them.
     assert _dense_spec_gfx950(_req("fp16", 64, "gfx950")).lds_k_group_pad == 8
@@ -727,9 +730,9 @@ def test_dispatch_ships_the_padded_d64_path_without_restating_the_pad():
     # End-to-end: the dispatched D64 spec's pad reaches the emitted symbol + layout.
     tuned = _dense_spec(_req("fp16", 64, "gfx942"))
     kernel = build_attention_dense(tuned, arch="gfx942")
-    assert kernel.name == p0_kernel_name(tuned)
+    assert kernel.name == gfx942_kernel_name(tuned)
     assert "_kpad8_" in kernel.name
-    assert _p0_k_group_stride(tuned) == 136
+    assert _k_group_stride(tuned) == 136
 
 
 # --------------------------------------------------------------------------- #
@@ -761,9 +764,9 @@ def test_persistent_kernel_name_carries_the_persist_tag():
     body), so a shared name would collide in the launcher/HSACO cache."""
     default = _spec(head_size=128, dtype="fp16")
     persist = _spec(head_size=128, dtype="fp16", persistent=True, num_persistent=304)
-    assert "persist304" in p0_kernel_name(persist)
-    assert "persist" not in p0_kernel_name(default)
-    assert p0_kernel_name(persist) != p0_kernel_name(default)
+    assert "persist304" in gfx942_kernel_name(persist)
+    assert "persist" not in gfx942_kernel_name(default)
+    assert gfx942_kernel_name(persist) != gfx942_kernel_name(default)
 
 
 def test_persistent_and_default_share_one_inner_body():
