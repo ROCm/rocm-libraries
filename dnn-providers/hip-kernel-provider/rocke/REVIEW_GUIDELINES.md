@@ -24,23 +24,18 @@ precondition, not an alternative, to what follows.
 | Merge policy: branch name, title, test-in-diff, forbidden files, `pre-commit` | [`../../../docs/LIBRARIES_PR_BOT_FAQ.md`](../../../docs/LIBRARIES_PR_BOT_FAQ.md), [`../../../CONTRIBUTING.md`](../../../CONTRIBUTING.md) |
 | Start-here routing for the rocKE tree | [`README.md`](README.md) |
 
-In particular, the **byte-identity / two-engine** rules (mirror every emission change in both
-engines; preserve operand order; re-bless the golden only for an intentional IR change; the
-differential `.ll` gate is the definition of done, not "the unit tests pass") are owned by the
-invariants and engine-contributing docs above — enforce them, but they are not repeated here.
-
-Likewise, this doc does **not** restate the authoring **Definition of Done** in
-[`KERNEL_AUTHORING.md`](KERNEL_AUTHORING.md). Before applying the judgment below, a reviewer
-first confirms the change cleared that DoD for its change type — especially the steps a
-diff-only read misses: an **on-GPU numeric** test (not spec-only geometry), **dispatcher
+From that DoD ([`KERNEL_AUTHORING.md`](KERNEL_AUTHORING.md)), the steps a diff-only read misses —
+check each explicitly: **on-GPU numeric** test (not spec-only geometry), **dispatcher
 registration**, **end-user visibility** (the support matrix), **docs discoverability**
-(`instances/index.md`), golden re-bless in the same change, promote-to-`platform` for reusable
-optimizations, and the local check runner green on **each affected arch**.
+([`instances/index.md`](platform/dsl_docs/instances/index.md)), and promote-to-`platform` for
+reusable optimizations. Run the local check runner green on each affected arch — a separate run
+per device, as the numeric lane only covers the visible GPU (see the *Local testing matrix* in
+[`KERNEL_AUTHORING.md`](KERNEL_AUTHORING.md)).
 
 Four review-time notes that sit *on top of* the byte-identity contract and are easy to get wrong:
 
 - **A green representative-golden is not cross-engine proof.** The golden is a Python-drift
-  snapshot; cross-engine agreement is the separate differential gate (`check_byte_identity.py`),
+  snapshot; cross-engine agreement is the separate differential gate ([`check_byte_identity.py`](platform/tools/check_byte_identity.py)),
   which builds the C++ engine. Adding a golden entry never proves the two engines agree.
 - **Green fast-CI does not prove the C++ engine compiles or matches** — it is frequently not
   built in the default job. Review the C++ side by hand, and run the differential gate when a
