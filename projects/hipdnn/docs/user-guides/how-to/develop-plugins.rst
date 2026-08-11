@@ -204,14 +204,10 @@ In general, the best practices consist of:
 - Validating and documenting supported operations, hardware requirements, and limitations.
 - Including unit tests and integration tests.
 
-Key files reference
-~~~~~~~~~~~~~~~~~~~
+Example engine plugin implementation
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-- `Plugin API interface <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h>`_
-- `Example plugin implementation <https://github.com/ROCm/rocm-libraries/blob/develop/dnn-providers/hip-kernel-provider/src/HipKernelContainer.cpp>`_
-- `Example engine manager <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/EngineManager.hpp>`_
-- `Example engine implementation <https://github.com/ROCm/rocm-libraries/blob/develop/dnn-providers/miopen-provider/engines/MiopenEngine.cpp>`_
-
+A fully functional example of a hipDNN engine plugin is available `here <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/samples/example_engine_plugin/README.md>`_
 
 Build configuration
 ~~~~~~~~~~~~~~~~~~~
@@ -463,7 +459,7 @@ Integration tests validate end-to-end functionality of your plugin:
     - **Smoke**: These tests are designed to test features using the smallest possible shape and run quickly (the combined smoke test run time must be under 5 mins).
     - **Full**: These tests can contain regression shapes, large shapes, or slow shapes.
 
-For a comprehensive example of an integration test, see `IntegrationGpuBatchnormForwardInference.cpp <https://github.com/ROCm/rocm-libraries/blob/develop/dnn-providers/miopen-provider/integration_tests/IntegrationGpuBatchnormForwardInference.cpp>`_.
+For a comprehensive example of an integration test, see `Integration Tests <https://github.com/ROCm/rocm-libraries/blob/develop/dnn-providers/integration-tests/README.md>`_ in the hipDNN repo.
 
 .. note::
 
