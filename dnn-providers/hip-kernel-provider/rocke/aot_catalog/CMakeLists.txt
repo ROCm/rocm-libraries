@@ -179,6 +179,34 @@ if(_AOT_ROCKE_OK)
                 endif()
             endif()
         endforeach()
+
+        # comgr / LLVM further depend on TheRock's BUNDLED sysdeps
+        # (librocm_sysdeps_*.so.* -- zlib/zstd/etc.), which live in a rocm_sysdeps/lib
+        # SUBDIR reached only via an $ORIGIN-relative RPATH. That subdir is on NEITHER
+        # the curated dirs above NOR LD_LIBRARY_PATH (which is not recursive), so a comgr
+        # whose LLVM deps now resolve STILL fails ENOENT on e.g. librocm_sysdeps_z.so.1.
+        # Recursively locate the sysdeps under the comgr + amd-llvm project trees (bounded
+        # to those two projects, NOT all of compiler/) and add their dirs -- one sweep
+        # covers every bundled sysdeps lib. Non-hermetic/local builds simply find none.
+        if(WIN32)
+            set(_sysdep_glob "rocm_sysdeps_*.dll" "librocm_sysdeps_*.dll")
+        else()
+            set(_sysdep_glob "librocm_sysdeps_*.so*")
+        endif()
+        set(_sysdep_roots "${_comgr_proj}" "${_compiler_root}/amd-llvm")
+        foreach(_root IN LISTS _sysdep_roots)
+            if(IS_DIRECTORY "${_root}")
+                foreach(_g IN LISTS _sysdep_glob)
+                    file(GLOB_RECURSE _sysdep_hits "${_root}/${_g}")
+                    foreach(_h IN LISTS _sysdep_hits)
+                        get_filename_component(_hd "${_h}" DIRECTORY)
+                        get_filename_component(_hd "${_hd}" ABSOLUTE)
+                        list(APPEND _aot_comgr_dep_dirs "${_hd}")
+                    endforeach()
+                endforeach()
+            endif()
+        endforeach()
+
         if(_aot_comgr_dep_dirs)
             list(REMOVE_DUPLICATES _aot_comgr_dep_dirs)
             message(STATUS "aot-catalog: comgr dependency dirs -> ${_aot_comgr_dep_dirs}")
