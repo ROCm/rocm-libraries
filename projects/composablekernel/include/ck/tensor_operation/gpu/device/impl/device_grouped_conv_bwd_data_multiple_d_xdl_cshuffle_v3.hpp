@@ -149,11 +149,11 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
             if constexpr(HasMainKBlockLoop || NoMainKBlockLoop)
             {
                 GridwiseGemm::template Run<AGridDesc_AK0_M_AK1,
-                                        BGridDesc_BK0_N_BK1,
-                                        EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
-                                        HasMainKBlockLoop,
-                                        EGlobalMemoryDataOperation,
-                                        TailNum>(
+                                           BGridDesc_BK0_N_BK1,
+                                           EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
+                                           HasMainKBlockLoop,
+                                           EGlobalMemoryDataOperation,
+                                           TailNum>(
                     karg.p_a_grid + a_batch_offset,
                     karg.p_b_grid + b_batch_offset,
                     karg.p_c_grid + e_batch_offset,
@@ -171,11 +171,11 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
                 if(gemm_kernel_args[group_id].HasMainKBlockLoop_)
                 {
                     GridwiseGemm::template Run<AGridDesc_AK0_M_AK1,
-                                            BGridDesc_BK0_N_BK1,
-                                            EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
-                                            true,
-                                            EGlobalMemoryDataOperation,
-                                            TailNum>(
+                                               BGridDesc_BK0_N_BK1,
+                                               EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
+                                               true,
+                                               EGlobalMemoryDataOperation,
+                                               TailNum>(
                         karg.p_a_grid + a_batch_offset,
                         karg.p_b_grid + b_batch_offset,
                         karg.p_c_grid + e_batch_offset,
@@ -191,11 +191,11 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
                 else
                 {
                     GridwiseGemm::template Run<AGridDesc_AK0_M_AK1,
-                                            BGridDesc_BK0_N_BK1,
-                                            EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
-                                            false,
-                                            EGlobalMemoryDataOperation,
-                                            TailNum>(
+                                               BGridDesc_BK0_N_BK1,
+                                               EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
+                                               false,
+                                               EGlobalMemoryDataOperation,
+                                               TailNum>(
                         karg.p_a_grid + a_batch_offset,
                         karg.p_b_grid + b_batch_offset,
                         karg.p_c_grid + e_batch_offset,

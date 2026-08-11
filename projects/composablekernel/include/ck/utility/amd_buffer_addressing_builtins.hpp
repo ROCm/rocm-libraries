@@ -494,7 +494,7 @@ __device__ void amd_global_atomic_add_impl(const typename vector_type<T, N>::typ
         vector_type<float, N> tmp{src_thread_data};
         static_for<0, N, 1>{}([&](auto i) {
             __builtin_amdgcn_global_atomic_fadd_f32(bit_cast<float*>(addr) + i,
-                                                       tmp.template AsType<float>()[i]);
+                                                    tmp.template AsType<float>()[i]);
         });
     }
 }
@@ -776,8 +776,8 @@ amd_buffer_atomic_add(const typename vector_type_maker<T, N>::type::type src_thr
 #ifdef __gfx125__
     if(dst_thread_element_valid)
     {
-        amd_global_atomic_add_impl<scalar_t, vector_size>(
-            src_thread_data, p_dst_wave + dst_thread_element_offset);
+        amd_global_atomic_add_impl<scalar_t, vector_size>(src_thread_data,
+                                                          p_dst_wave + dst_thread_element_offset);
     }
 #else
     const int32x4_t dst_wave_buffer_resource =

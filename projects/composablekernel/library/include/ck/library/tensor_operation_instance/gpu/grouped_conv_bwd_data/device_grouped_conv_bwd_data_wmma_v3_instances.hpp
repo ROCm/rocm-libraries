@@ -148,7 +148,6 @@ using device_grouped_conv_bwd_data_wmma_v3_bf16_large_tiles_instances = std::tup
     // clang-format on
     >;
 
-
 } // namespace instance
 } // namespace device
 } // namespace tensor_operation
