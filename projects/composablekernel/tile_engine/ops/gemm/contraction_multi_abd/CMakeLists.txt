@@ -152,13 +152,19 @@ foreach(datatype IN LISTS CONTRACTION_MULTI_ABD_DATATYPE)
             message(FATAL_ERROR "Config file not found: ${json_blob}")
         endif()
 
-        # Build codegen config JSON for this (datatype, layout, dim, tensor-count) combo
-        set(_cma_config_json
+        # Build the per-operation overrides (dtype, layout, tensor counts, dim counts,
+        # elementwise ops) as a JSON fragment that will be MERGED on top of the tile/trait
+        # ranges read from json_blob. Tile/trait ranges come from the selected config file;
+        # per-operation scalars override only the fields listed here.
+        # Include max_instances only when non-empty so codegen can cap kernel count.
+        if(CONTRACTION_MULTI_ABD_MAX_INSTANCES STREQUAL "")
+            set(_cma_max_inst_json "")
+        else()
+            set(_cma_max_inst_json ",\"max_instances\":${CONTRACTION_MULTI_ABD_MAX_INSTANCES}")
+        endif()
+
+        set(_cma_overrides_json
             "{\"dtypes\":[\"${datatype}\"],\"layouts\":[\"${layout}\"],\
-\"pipelines\":[\"compv3\",\"compv4\",\"mem\"],\
-\"epilogues\":[\"cshuffle\",\"default2d\"],\
-\"schedulers\":[\"intrawave\"],\
-\"pad_options\":[{\"pad_m\":false,\"pad_n\":false,\"pad_k\":false}],\
 \"num_a_tensors\":[${CONTRACTION_MULTI_ABD_NUM_A_TENSORS}],\
 \"num_b_tensors\":[${CONTRACTION_MULTI_ABD_NUM_B_TENSORS}],\
 \"num_d_tensors\":[${CONTRACTION_MULTI_ABD_NUM_D_TENSORS}],\
@@ -168,12 +174,27 @@ foreach(datatype IN LISTS CONTRACTION_MULTI_ABD_DATATYPE)
 \"num_dim_k\":${CONTRACTION_MULTI_ABD_NUM_DIM_K}}],\
 \"a_elementwise\":\"${CONTRACTION_MULTI_ABD_A_ELEMENTWISE}\",\
 \"b_elementwise\":\"${CONTRACTION_MULTI_ABD_B_ELEMENTWISE}\",\
-\"cde_elementwise\":\"${CONTRACTION_MULTI_ABD_CDE_ELEMENTWISE}\"}"
+\"cde_elementwise\":\"${CONTRACTION_MULTI_ABD_CDE_ELEMENTWISE}\"${_cma_max_inst_json}}"
         )
 
-        # Write config to file so the Python script can read it
+        # Merge: start from json_blob (tile/trait ranges), then layer overrides on top.
+        # Use a Python one-liner so we do not need to parse JSON in CMake.
         set(_cma_config_file "${working_path}/codegen_config.json")
-        file(WRITE ${_cma_config_file} "${_cma_config_json}")
+        execute_process(
+            COMMAND ${Python3_EXECUTABLE} -c
+                "import json,sys; \
+base=json.load(open('${json_blob}')); \
+ovr=json.loads(sys.argv[1]); \
+base.update(ovr); \
+open('${_cma_config_file}','w').write(json.dumps(base))"
+                "${_cma_overrides_json}"
+            RESULT_VARIABLE _cma_merge_ret
+            ERROR_VARIABLE  _cma_merge_err
+        )
+        if(NOT _cma_merge_ret EQUAL 0)
+            message(FATAL_ERROR
+                "Failed to merge contraction_multi_abd config JSON: ${_cma_merge_err}")
+        endif()
 
         # Run codegen to list kernel names (--list-name)
         execute_process(

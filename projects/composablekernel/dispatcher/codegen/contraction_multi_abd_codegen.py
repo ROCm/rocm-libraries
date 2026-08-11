@@ -115,12 +115,18 @@ def make_contraction_multi_abd_kernel_name(
     num_dim_m: int,
     num_dim_n: int,
     num_dim_k: int,
+    a_elementwise: str = "PassThrough",
+    b_elementwise: str = "PassThrough",
+    cde_elementwise: str = "AddDs",
 ) -> str:
     """
     Construct the canonical kernel name.
 
     This function is the single source of truth for the kernel name string.
     It is imported by contraction_multi_abd_utils.py so both sides stay byte-exact.
+
+    Elementwise operation traits are included so that two configs that differ
+    only in elementwise op produce distinct names and distinct .so files.
     """
     pad_m_str = "True" if pad_m else "False"
     pad_n_str = "True" if pad_n else "False"
@@ -140,6 +146,7 @@ def make_contraction_multi_abd_kernel_name(
         f"_{tile_str}"
         f"_na{num_a_tensor}_nb{num_b_tensor}_nd{num_d_tensor}"
         f"_g{num_dim_g}_m{num_dim_m}_n{num_dim_n}_k{num_dim_k}"
+        f"_ew{a_elementwise}_{b_elementwise}_{cde_elementwise}"
     )
 
 
@@ -211,6 +218,9 @@ class ContractionMultiABDKernelSpec:
             num_dim_m=self.num_dim_m,
             num_dim_n=self.num_dim_n,
             num_dim_k=self.num_dim_k,
+            a_elementwise=self.a_elementwise,
+            b_elementwise=self.b_elementwise,
+            cde_elementwise=self.cde_elementwise,
         )
 
 
@@ -261,9 +271,17 @@ class ContractionMultiABDHeaderGenerator:
         ds_dtype_defs  = "\n".join(
             f"using D{i}DataType = {dtype_ck};" for i in range(spec.num_d_tensor)
         )
+        as_layout_defs = "\n".join(
+            f"using A{i}Layout = {a_layout_ck};" for i in range(spec.num_a_tensor)
+        )
+        bs_layout_defs = "\n".join(
+            f"using B{i}Layout = {b_layout_ck};" for i in range(spec.num_b_tensor)
+        )
         ds_layout_defs = "\n".join(
             f"using D{i}Layout = {e_layout_ck};" for i in range(spec.num_d_tensor)
         )
+        as_layout_list = ", ".join(f"A{i}Layout" for i in range(spec.num_a_tensor))
+        bs_layout_list = ", ".join(f"B{i}Layout" for i in range(spec.num_b_tensor))
         ds_layout_list = ", ".join(f"D{i}Layout" for i in range(spec.num_d_tensor))
 
         pad_m_str = "true"  if spec.pad_m      else "false"
@@ -372,14 +390,16 @@ static constexpr ck_tile::index_t NumDimN    = {spec.num_dim_n};
 static constexpr ck_tile::index_t NumDimK    = {spec.num_dim_k};
 
 // ---------------------------------------------------------------------------
-// Layout aliases
+// Layout aliases -- per-tensor, then tuple for multi-ABD pipeline
 // ---------------------------------------------------------------------------
 using ALayout  = {a_layout_ck};
 using BLayout  = {b_layout_ck};
 using ELayout  = {e_layout_ck};
-using AsLayout = ALayout;
-using BsLayout = BLayout;
+{as_layout_defs}
+{bs_layout_defs}
 {ds_layout_defs}
+using AsLayout = ck_tile::tuple<{as_layout_list}>;
+using BsLayout = ck_tile::tuple<{bs_layout_list}>;
 using DsLayout = ck_tile::tuple<{ds_layout_list}>;
 
 // ---------------------------------------------------------------------------
@@ -604,6 +624,19 @@ def generate_kernels(output_dir: Path, config: dict, *, max_workers: int = 8) ->
     output_dir.mkdir(parents=True, exist_ok=True)
 
     specs = build_specs(config)
+
+    # Honor max_instances cap if set (from CONTRACTION_MULTI_ABD_MAX_INSTANCES CMake var).
+    max_instances = config.get("max_instances", None)
+    if max_instances:
+        try:
+            cap = int(max_instances)
+            if cap > 0 and len(specs) > cap:
+                log.info("Capping kernel instances from %d to %d (max_instances=%d)",
+                         len(specs), cap, cap)
+                specs = specs[:cap]
+        except (ValueError, TypeError):
+            pass
+
     log.info("Generating %d kernel headers in %s", len(specs), output_dir)
 
     def _gen(spec):

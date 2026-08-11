@@ -4,13 +4,15 @@
 #pragma once
 
 #include <array>
-#include <iostream>
-#include <iomanip>
-#include <vector>
-#include <string>
-#include <functional>
-#include <stdexcept>
+#include <cmath>
+#include <cstdlib>
 #include <cstring>
+#include <functional>
+#include <iomanip>
+#include <iostream>
+#include <stdexcept>
+#include <string>
+#include <vector>
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/host.hpp"
@@ -261,9 +263,53 @@ inline void run_contraction_multi_abd_benchmark(const ContractionMultiABDProblem
                                                                   problem.n_dims,
                                                                   problem.k_dims);
 
+    // Verify: CPU reference (simple passthrough -- sum over K, uniform input)
+    std::vector<EDataType> he_ref;
+    if(verify)
+    {
+        // Reference: E[g,m,n] = sum_k A[g,m,k] * B[g,n,k] * NumATensors * NumBTensors
+        // With ha = 1/K and hb = 1/K: each pair contributes 1.0; total = NumA * NumB.
+        // D tensors are zero so epilogue adds nothing extra.
+        const float expected = static_cast<float>(NumATensors) * static_cast<float>(NumBTensors);
+        he_ref.resize(G * M * N, static_cast<EDataType>(expected));
+    }
+
     ck_tile::stream_config stream{nullptr, gpu_timer, log ? 1 : 0, n_warmup, n_repeat};
 
     float avg_time = SelectedKernel::launch(args, stream);
+
+    // Guard against unsupported-arguments return (-1) before computing throughput.
+    if(avg_time < 0.0f)
+    {
+        std::cerr << "error: kernel " << KERNEL_NAME
+                  << " returned unsupported-arguments signal (avg_time=" << avg_time
+                  << "); aborting benchmark.\n";
+        std::exit(1);
+    }
+
+    if(verify)
+    {
+        // Copy E back to host and compare
+        e_buf.FromDevice(he.data());
+        bool pass = true;
+        for(int i = 0; i < G * M * N; ++i)
+        {
+            const float got = static_cast<float>(he[i]);
+            const float ref = static_cast<float>(he_ref[i]);
+            const float diff = std::abs(got - ref);
+            if(diff > 1e-3f * std::abs(ref) + 1e-5f)
+            {
+                std::cerr << "verify FAILED at index " << i
+                          << ": got=" << got << " ref=" << ref << "\n";
+                pass = false;
+                break;
+            }
+        }
+        if(pass)
+            std::cout << "verify PASSED\n";
+        else
+            std::exit(1);
+    }
 
     size_t flop = 2ULL * G * M * N * K;
     size_t num_byte =

@@ -345,12 +345,28 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/batched_contraction_multi_abd_ctypes_lib.c
         list(SORT CMA_KERNEL_HEADERS)
         list(GET CMA_KERNEL_HEADERS 0 CMA_KERNEL_HEADER)
         message(STATUS "Found batched-contraction-multi-abd kernel for ctypes lib: ${CMA_KERNEL_HEADER}")
+
+        # Resolve the GPU architecture for the CMake-driven build path.
+        # The Python bridge always passes -DGFX_ARCH=... explicitly via hipcc;
+        # here we derive a sensible default from CMAKE_HIP_ARCHITECTURES.
+        if(NOT DEFINED CK_TILE_CMA_GFX_ARCH OR CK_TILE_CMA_GFX_ARCH STREQUAL "")
+            if(CMAKE_HIP_ARCHITECTURES)
+                list(GET CMAKE_HIP_ARCHITECTURES 0 _cma_gfx_arch)
+            else()
+                set(_cma_gfx_arch "gfx942")
+            endif()
+            set(CK_TILE_CMA_GFX_ARCH "${_cma_gfx_arch}" CACHE STRING
+                "GPU architecture for dispatcher_batched_contraction_multi_abd_lib (CMake path)")
+        endif()
+        message(STATUS "Batched-Contraction Multi-ABD ctypes lib GFX_ARCH: ${CK_TILE_CMA_GFX_ARCH}")
+
         add_ctypes_library(dispatcher_batched_contraction_multi_abd_lib
             batched_contraction_multi_abd_ctypes_lib.cpp
             KERNEL_HEADER ${CMA_KERNEL_HEADER}
         )
         target_compile_definitions(dispatcher_batched_contraction_multi_abd_lib PRIVATE
             CK_TILE_SINGLE_KERNEL_INCLUDE
+            GFX_ARCH="${CK_TILE_CMA_GFX_ARCH}"
         )
     else()
         message(STATUS

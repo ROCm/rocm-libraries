@@ -150,6 +150,9 @@ class ContractionMultiABDKernelConfig:
             num_dim_m=self.num_dim_m,
             num_dim_n=self.num_dim_n,
             num_dim_k=self.num_dim_k,
+            a_elementwise=self.a_elementwise,
+            b_elementwise=self.b_elementwise,
+            cde_elementwise=self.cde_elementwise,
         )
 
     def to_codegen_config(self) -> dict:
@@ -348,6 +351,44 @@ class ContractionMultiABDDispatcherLib:
         All arrays must be C-contiguous numpy arrays.
         Returns (return_code, time_ms).
         """
+        # Validate tensor counts and shapes before passing raw pointers to C.
+        # The C shim uses G*M*K, G*N*K, G*M*N element counts -- a smaller array
+        # would cause an out-of-bounds read inside hipMemcpy.
+        expected_a_elems = problem.G_total * problem.M_total * problem.K_total
+        expected_b_elems = problem.G_total * problem.N_total * problem.K_total
+        expected_e_elems = problem.G_total * problem.M_total * problem.N_total
+
+        for i, a in enumerate(As):
+            if a.size != expected_a_elems:
+                raise ValueError(
+                    f"As[{i}] has {a.size} elements but problem requires "
+                    f"G*M*K = {expected_a_elems}"
+                )
+            if not a.flags["C_CONTIGUOUS"]:
+                raise ValueError(f"As[{i}] must be C-contiguous")
+        for i, b in enumerate(Bs):
+            if b.size != expected_b_elems:
+                raise ValueError(
+                    f"Bs[{i}] has {b.size} elements but problem requires "
+                    f"G*N*K = {expected_b_elems}"
+                )
+            if not b.flags["C_CONTIGUOUS"]:
+                raise ValueError(f"Bs[{i}] must be C-contiguous")
+        for i, d in enumerate(Ds):
+            if d.size != expected_e_elems:
+                raise ValueError(
+                    f"Ds[{i}] has {d.size} elements but problem requires "
+                    f"G*M*N = {expected_e_elems}"
+                )
+            if not d.flags["C_CONTIGUOUS"]:
+                raise ValueError(f"Ds[{i}] must be C-contiguous")
+        if E.size != expected_e_elems:
+            raise ValueError(
+                f"E has {E.size} elements but problem requires G*M*N = {expected_e_elems}"
+            )
+        if not E.flags["C_CONTIGUOUS"]:
+            raise ValueError("E must be C-contiguous")
+
         num_a, num_b, num_d = len(As), len(Bs), len(Ds)
 
         # Build void** arrays of pointers
@@ -505,6 +546,11 @@ class ContractionMultiABDRunner:
 
         Returns ContractionMultiABDResult with E shape [G..., M..., N...].
         """
+        if not As:
+            raise ValueError("As must be non-empty")
+        if not Bs:
+            raise ValueError("Bs must be non-empty")
+
         As = [np.ascontiguousarray(a) for a in As]
         Bs = [np.ascontiguousarray(b) for b in Bs]
         Ds = [np.ascontiguousarray(d) for d in Ds]
