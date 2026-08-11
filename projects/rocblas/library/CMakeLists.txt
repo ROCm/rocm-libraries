@@ -49,9 +49,9 @@ function( rocblas_library_settings lib_target_ )
   message(STATUS "** rocblas_library_settings: ${lib_target_}")
 
   target_include_directories( ${lib_target_} PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/library/src>
-    $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/library/include>
-    $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/library/include/internal>
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src>
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/include>
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/include/internal>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include/rocblas/internal>
     $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include/rocblas>
