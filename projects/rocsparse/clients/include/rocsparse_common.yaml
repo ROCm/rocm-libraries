@@ -696,7 +696,7 @@ Defaults:
   beta: 0.0
   betai: 0.0
   threshold: 1.0
-  percentage: 0.0
+  percentage: 50.0
   tol: 0.0
   transA: rocsparse_operation_none
   transB: rocsparse_operation_none

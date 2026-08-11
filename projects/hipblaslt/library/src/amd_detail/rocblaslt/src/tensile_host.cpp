@@ -37,6 +37,7 @@
 #include "include/check_numerics_matrix.hpp"
 #include "rocblaslt-types.h"
 #include "rocblaslt_mat_utils.hpp"
+#include "rocblaslt_secure_env.hpp"
 #include "tensile_host.hpp"
 
 #ifdef HIPBLASLT_USE_ROCROLLER
@@ -89,22 +90,26 @@ RocblasltContractionProblem::RocblasltContractionProblem(hipblasOperation_t     
                                                          const void* const*     batch_A,
                                                          int64_t                ld_a,
                                                          int64_t                batch_stride_a,
+                                                         int64_t                batch_offset_a,
                                                          hipDataType            b_type,
                                                          const void*            B,
                                                          const void* const*     batch_B,
                                                          int64_t                ld_b,
                                                          int64_t                batch_stride_b,
+                                                         int64_t                batch_offset_b,
                                                          const void*            beta,
                                                          hipDataType            c_type,
                                                          const void*            C,
                                                          const void* const*     batch_C,
                                                          int64_t                ld_c,
                                                          int64_t                batch_stride_c,
+                                                         int64_t                batch_offset_c,
                                                          hipDataType            d_type,
                                                          void*                  D,
                                                          void* const*           batch_D,
                                                          int64_t                ld_d,
                                                          int64_t                batch_stride_d,
+                                                         int64_t                batch_offset_d,
                                                          void*                  E,
                                                          void* const*           batch_E,
                                                          int64_t                ld_e,
@@ -152,12 +157,14 @@ RocblasltContractionProblem::RocblasltContractionProblem(hipblasOperation_t     
     , row_stride_a(1)
     , col_stride_a(ld_a)
     , batch_stride_a(batch_stride_a)
+    , batch_offset_a(batch_offset_a)
     , b_type(b_type)
     , B(B)
     , batch_B(batch_B)
     , row_stride_b(1)
     , col_stride_b(ld_b)
     , batch_stride_b(batch_stride_b)
+    , batch_offset_b(batch_offset_b)
     , beta(beta)
     , c_type(c_type)
     , C(C)
@@ -165,12 +172,14 @@ RocblasltContractionProblem::RocblasltContractionProblem(hipblasOperation_t     
     , row_stride_c(1)
     , col_stride_c(ld_c)
     , batch_stride_c(batch_stride_c)
+    , batch_offset_c(batch_offset_c)
     , d_type(d_type)
     , D(D)
     , batch_D(batch_D)
     , row_stride_d(1)
     , col_stride_d(ld_d)
     , batch_stride_d(batch_stride_d)
+    , batch_offset_d(batch_offset_d)
     , E(E)
     , batch_E(batch_E)
     , row_stride_e(1)
@@ -2416,6 +2425,23 @@ namespace
         inputs.batchC = reinterpret_cast<void const* const*>(prob.batch_C);
         inputs.batchD = reinterpret_cast<void* const*>(prob.batch_D);
 
+        // The batch offsets are specified by the user in elements; convert them to
+        // bytes here so the kernel/assembly can add them straight to byte addresses.
+        // Only data types whose element size is at least one byte are supported
+        // (sub-byte types such as fp4/fp6 are rejected during argument validation).
+        inputs.batchOffsetA
+            = prob.batch_offset_a
+              * size_t(TensileLite::DataTypeInfo::Get(hip2TensileType(prob.a_type)).elementSize);
+        inputs.batchOffsetB
+            = prob.batch_offset_b
+              * size_t(TensileLite::DataTypeInfo::Get(hip2TensileType(prob.b_type)).elementSize);
+        inputs.batchOffsetC
+            = prob.batch_offset_c
+              * size_t(TensileLite::DataTypeInfo::Get(hip2TensileType(prob.c_type)).elementSize);
+        inputs.batchOffsetD
+            = prob.batch_offset_d
+              * size_t(TensileLite::DataTypeInfo::Get(hip2TensileType(prob.d_type)).elementSize);
+
         // Set the GSU workspace
         inputs.ws            = prob.workspace;
         inputs.workspaceSize = prob.workspaceSize;
@@ -2779,7 +2805,14 @@ namespace
             // The name of the current GPU platform
             std::string processor = rocblaslt_internal_get_arch_name();
 
-            const char* env = getenv("HIPBLASLT_TENSILE_LIBPATH");
+            // ROCM-26729 / SEC-00896: use the privilege-aware accessor so a
+            // process in a secure execution context cannot be redirected to an
+            // attacker-controlled code-object directory via inherited
+            // environment. Probe the privilege state once and reuse it for both
+            // the lookup and the suppression diagnostic.
+            const bool  is_privileged = rocblaslt_process_is_privileged();
+            const char* env
+                = rocblaslt_secure_getenv_impl("HIPBLASLT_TENSILE_LIBPATH", is_privileged);
             if(env)
             {
                 if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
@@ -2792,6 +2825,17 @@ namespace
             }
             else
             {
+                if(rocblaslt_env_suppressed_for_security_impl("HIPBLASLT_TENSILE_LIBPATH",
+                                                              is_privileged))
+                {
+                    std::ostringstream msg;
+                    msg << "Ignoring HIPBLASLT_TENSILE_LIBPATH because the process is running "
+                           "in a secure execution context (set-uid/set-gid or another "
+                           "credential-changing exec, such as file capabilities); falling back "
+                           "to the default library location."
+                        << std::endl;
+                    log_error(__func__, msg.str());
+                }
                 // Find the location of librocblaslt.so
                 // Fall back on hard-coded path if static library or not found
                 std::optional<std::filesystem::path> default_lib_path;
@@ -4460,6 +4504,24 @@ rocblaslt_status getAllSolutions(MyProblem&                                     
     int duplicated_counts = 0;
     for(auto solution : solutions)
     {
+        // Custom kernels don't support general batched mode (pointer arrays)
+        // Only check for ContractionProblemGemm (grouped gemm doesn't use batchMode)
+        if constexpr(std::is_same<MyProblem, TensileLite::ContractionProblemGemm>::value)
+        {
+            if(prob.batchMode() == TensileLite::ContractionProblemGemm::BATCHMODE::POINTER_ARRAY
+               && !solution->sizeMapping.customKernelName.empty())
+            {
+                if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
+                {
+                    std::ostringstream msg;
+                    msg << "Skipping custom kernel " << solution->sizeMapping.customKernelName
+                        << " - does not support batch_mode=POINTER_ARRAY" << std::endl;
+                    log_info(__func__, msg.str());
+                }
+                continue;
+            }
+        }
+
         //workaround: findAllSolutions should get all solutions without duplications
         bool duplicated_sol = false;
         for(int j = 0; j < i; j++)
