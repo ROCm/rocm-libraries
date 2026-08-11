@@ -1,8 +1,8 @@
 # rocRAND Testing Strategy (TESTING.md)
 
-Status: Draft
-Owner: @RobsonRLemos
-Technical Lead: @stanleytsang-amd
+Status: Draft\
+Owner: @RobsonRLemos\
+Technical Lead: @stanleytsang-amd\
 Last Updated: 05/08/2026
 
 ## Component Overview
@@ -57,7 +57,7 @@ Because engines and distributions are decoupled, `test/internal/` includes libra
 * **Current state:** CI reports roughly **50%** line coverage because coverage instrumentation currently captures host-side code only, while most of rocRAND is device code. This is the single largest coverage gap. An initiative to adopt LLVM device-code coverage is expected to close it.
 
 ## Integration Testing Strategy
-**Purpose:** validate behavior that requires a real GPU, runtime layers, or cross-API interaction — behavior that cannot be validated by host-only unit tests.
+**Purpose:** validate behavior that requires a GPU, runtime layers, or cross-API interaction — behavior that cannot be validated by host-only unit tests.
 
 | Test Type | Location | Purpose | GPU Required | Frequency |
 | --- | --- | --- | --- | --- |
@@ -114,7 +114,7 @@ Because engines and distributions are decoupled, `test/internal/` includes libra
 ### PR Test Classification
 | Status | Applies to |
 | --- | --- |
-| Trusted gate | The full test suite is ran on multiple PGU architectures. |
+| Trusted gate | The full test suite is ran on multiple GPU architectures. |
 | Informational | codecov |
 | Unstable / flaky |  |
 
