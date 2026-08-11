@@ -53,7 +53,7 @@ Alternatively, if you want to install hipTensor without additional ROCm librarie
      for a single AMD GPU architecture. Omit this to install for all
      architectures at the cost of disk space.
 
-   For example: ``amdrocm-hiptensor7.14-gfx-950 amdrocm-hiptensor-dev7.14``
+   For example: ``amdrocm-hiptensor7.14-gfx950 amdrocm-hiptensor-dev7.14``
 
    Use the following command to install the desired hipTensor development package
    release for supported GPU architectures:  
