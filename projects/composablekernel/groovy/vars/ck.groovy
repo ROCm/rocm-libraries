@@ -77,6 +77,7 @@ def cloneUpdateRefRepo() {
     // The mirror lives on the machine's filesystem, so the lock has to be keyed on the machine.
     // NODE_NAME is per Jenkins agent, and several agents can now share one machine, which would
     // let them clone/fetch into the same mirror concurrently.
+    // MIOpen shares this mirror and locks on the same label, so the two must be kept identical.
     def hostId = sh(script: 'hostname', returnStdout: true).trim()
     def lockLabel = "git ref repo lock - ${hostId}"
     def folderExists = sh(
