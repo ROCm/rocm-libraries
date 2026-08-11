@@ -69,6 +69,7 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
     endif()
     list(APPEND CMAKE_PREFIX_PATH /opt/rocm/hip /opt/rocm)
     find_package(hip REQUIRED)
+    find_package(amd_comgr REQUIRED)
 
     # Locate origami: prefer the monorepo sibling, fall back to installed package.
     if(NOT TARGET roc::origami)
