@@ -1,13 +1,17 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""On-GPU numeric lane for the gfx942 dense flash-attn kernel (AICK-1664).
+"""On-GPU numeric lane for the gfx942 dense flash-attn kernel.
 
 Drives the PUBLIC entry point ``run_attention_dense_torch`` end-to-end on a real
 gfx942 GPU and checks max_abs against an fp32 ``scaled_dot_product_attention``
 oracle, for both the default and the P4 persistent grid. This is the committed,
 CI-collectable form of the acceptance criterion's "functional GPU-numeric bench,
 both variants, vs torch fp32 SDPA" -- previously only an out-of-tree verifier.
+
+Specs come from the gfx942 DISPATCH factory, never hand-rolled (see :func:`_spec`),
+so every row compiles the binary that actually ships rather than one that differs
+from it by an untracked tuning default.
 
 Every test is marked ``gpu`` and gated with a device skipif, so it is a graceful
 skip on a CPU CI box and only executes on a gfx942 (MI300X) ROCm runner. Select
@@ -23,10 +27,7 @@ import math
 
 import pytest
 
-from kernels.gfx942.attention_dense import (
-    AttentionDenseSpec,
-    run_attention_dense_torch,
-)
+from kernels.gfx942.attention_dense import run_attention_dense_torch
 
 
 def _gpu_ready():
@@ -64,18 +65,50 @@ _COHORT = [
 
 
 def _spec(dtype, d, hq, hkv, persistent, *, batch=1, sq=512):
-    return AttentionDenseSpec(
-        batch=batch,
-        seqlen_q=sq,
-        seqlen_kv=sq,
-        num_query_heads=hq,
-        num_kv_heads=hkv,
-        head_size=d,
-        dtype=dtype,
-        causal=True,
-        block_n=64,
-        persistent=persistent,
-        num_persistent=304,
+    """The SHIPPED gfx942 dense spec for a cohort row, built through the dispatch
+    factory (``dispatch.attention.gfx942._dense_spec``) rather than hand-rolled.
+
+    Hand-rolling the spec silently pins every tuned lever to the shared (gfx950)
+    dataclass default, so the lane would assert on configs that do not ship. The
+    concrete one this cohort hit: ``waves_per_eu``. Dispatch resolves it from the
+    kernel's own policy (``_tuned_waves_per_eu``), which returns 4 for bf16/D64 --
+    the row ``_COHORT`` above labels "the wpe=4 config" -- while the dataclass default
+    is 2. That is not a cosmetic difference: ``waves_per_eu`` is emitted as the
+    ``amdgpu-waves-per-eu`` attribute, changes register allocation, and is tagged into
+    ``gfx942_kernel_name`` as ``wpe{N}``, so wpe2 and wpe4 are DIFFERENT binaries.
+    ``num_persistent`` was likewise hard-coded to 304 beside a dispatch constant that
+    already resolves to 304 -- left at the request default here so ``_dense_spec``
+    substitutes the gfx942 CU count itself and the two cannot drift apart.
+
+    Deriving the spec from the factory (the pattern
+    ``test_attention_dense_gfx942_golden.py::mk_dispatch`` uses for its D64 cases)
+    also means a future gfx942 tuning change is picked up here with no edit.
+
+    Only ``dense_persistent`` is pinned rather than left on "auto": the cohort asserts
+    BOTH grid variants at one fixed Sq, where "auto" would pick a single one. Every
+    other lever -- block_n, the D64 K row-group pad, persist_decode, ragged -- is
+    whatever the shipped path folds in.
+    """
+    # Imported lazily, mirroring the golden sibling: keeps module import (and hence
+    # CPU collection of this gpu-marked file) independent of the dispatch package.
+    from dispatch.attention import AttentionRequest
+    from dispatch.attention.gfx942 import _dense_spec
+
+    return _dense_spec(
+        AttentionRequest(
+            batch=batch,
+            nhead_q=hq,
+            nhead_k=hkv,
+            seqlen_q=sq,
+            seqlen_k=sq,
+            hdim_q=d,
+            hdim_v=d,
+            arch="gfx942",
+            mask_type=1,  # causal
+            dtype=dtype,
+            algorithm="attention_dense",
+            dense_persistent="on" if persistent else "off",
+        )
     )
 
 
