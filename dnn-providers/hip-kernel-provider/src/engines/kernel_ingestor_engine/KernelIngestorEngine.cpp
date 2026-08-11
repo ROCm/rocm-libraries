@@ -53,7 +53,7 @@ const PointwiseAddDispatchHandler& dispatchHandler()
  * throw from a global constructor would escape during dlopen() and terminate the
  * process; from here it surfaces as a failed plugin creation the host can report.
  */
-std::shared_ptr<hipdnn_plugin_sdk::ingestor::KernelIngestorStateManager<Handle>>
+std::unique_ptr<hipdnn_plugin_sdk::ingestor::KernelIngestorStateManager<Handle>>
     registerThenBuildStateManager()
 {
     static std::once_flag s_registered;

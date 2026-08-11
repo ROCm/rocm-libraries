@@ -31,9 +31,18 @@ namespace
 using namespace hip_kernel_provider::kernel_ingestor_engine;
 using namespace hip_kernel_provider::kernel_ingestor_engine::testing;
 using hipdnn_flatbuffers_sdk::utilities::parseUuid;
+using hipdnn_plugin_sdk::ingestor::BoundTokens;
 using hipdnn_plugin_sdk::ingestor::KernelDefinition;
 using hipdnn_plugin_sdk::ingestor::MatchContext;
 namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
+
+/// Runs the graph matcher where only its verdict is under test, discarding what it
+/// bound. What it binds on success is asserted separately, below.
+bool matches(const MatchContext& context)
+{
+    BoundTokens bound;
+    return pointwiseAddGraphMatches(context, bound);
+}
 
 hipDeviceProp_t testDeviceProperties()
 {
@@ -85,7 +94,7 @@ TEST(TestPointwiseAddGraphMatcher, AcceptsASingleElementFloatAdd)
 {
     const GraphFixture fixture(buildPointwiseGraph());
 
-    EXPECT_TRUE(pointwiseAddGraphMatches(fixture.context()));
+    EXPECT_TRUE(matches(fixture.context()));
 }
 
 TEST(TestPointwiseAddGraphMatcher, AcceptsAHalfPrecisionAdd)
@@ -95,14 +104,14 @@ TEST(TestPointwiseAddGraphMatcher, AcceptsAHalfPrecisionAdd)
     const GraphFixture fixture(
         buildPointwiseGraph(data_objects::PointwiseMode::ADD, data_objects::DataType::HALF));
 
-    EXPECT_TRUE(pointwiseAddGraphMatches(fixture.context()));
+    EXPECT_TRUE(matches(fixture.context()));
 }
 
 TEST(TestPointwiseAddGraphMatcher, RefusesAnotherPointwiseOperation)
 {
     const GraphFixture fixture(buildPointwiseGraph(data_objects::PointwiseMode::MUL));
 
-    EXPECT_FALSE(pointwiseAddGraphMatches(fixture.context()));
+    EXPECT_FALSE(matches(fixture.context()));
 }
 
 TEST(TestPointwiseAddGraphMatcher, RefusesMultiElementTensors)
@@ -112,7 +121,7 @@ TEST(TestPointwiseAddGraphMatcher, RefusesMultiElementTensors)
     const GraphFixture fixture(buildPointwiseGraph(
         data_objects::PointwiseMode::ADD, data_objects::DataType::FLOAT, {1, 1, 2, 2}));
 
-    EXPECT_FALSE(pointwiseAddGraphMatches(fixture.context()));
+    EXPECT_FALSE(matches(fixture.context()));
 }
 
 TEST(TestPointwiseAddGraphMatcher, RefusesARankTheDispatchPathCannotServe)
@@ -124,7 +133,7 @@ TEST(TestPointwiseAddGraphMatcher, RefusesARankTheDispatchPathCannotServe)
     const GraphFixture fixture(
         buildPointwiseGraph(data_objects::PointwiseMode::ADD, data_objects::DataType::FLOAT, {1}));
 
-    EXPECT_FALSE(pointwiseAddGraphMatches(fixture.context()));
+    EXPECT_FALSE(matches(fixture.context()));
 }
 
 TEST(TestPointwiseAddGraphMatcher, AcceptsTheUpperSupportedRank)
@@ -132,7 +141,7 @@ TEST(TestPointwiseAddGraphMatcher, AcceptsTheUpperSupportedRank)
     const GraphFixture fixture(buildPointwiseGraph(
         data_objects::PointwiseMode::ADD, data_objects::DataType::FLOAT, {1, 1, 1, 1, 1}));
 
-    EXPECT_TRUE(pointwiseAddGraphMatches(fixture.context()));
+    EXPECT_TRUE(matches(fixture.context()));
 }
 
 TEST(TestPointwiseAddGraphMatcher, RefusesAStrideOrderTheDispatchPathCannotClassify)
@@ -150,7 +159,7 @@ TEST(TestPointwiseAddGraphMatcher, RefusesAStrideOrderTheDispatchPathCannotClass
                             /*binary=*/true,
                             /*explicitStrides=*/std::vector<int64_t>{8, 2, 4, 1}));
 
-    EXPECT_FALSE(pointwiseAddGraphMatches(fixture.context()));
+    EXPECT_FALSE(matches(fixture.context()));
 }
 
 TEST(TestPointwiseAddGraphMatcher, RefusesAUnaryPointwise)
@@ -161,7 +170,7 @@ TEST(TestPointwiseAddGraphMatcher, RefusesAUnaryPointwise)
                                                    std::nullopt,
                                                    /*binary=*/false));
 
-    EXPECT_FALSE(pointwiseAddGraphMatches(fixture.context()));
+    EXPECT_FALSE(matches(fixture.context()));
 }
 
 TEST(TestPointwiseAddGraphMatcher, RefusesAMultiNodeGraph)
@@ -170,7 +179,7 @@ TEST(TestPointwiseAddGraphMatcher, RefusesAMultiNodeGraph)
     // problem even though it contains this one.
     const GraphFixture fixture(buildTwoNodePointwiseGraph());
 
-    EXPECT_FALSE(pointwiseAddGraphMatches(fixture.context()));
+    EXPECT_FALSE(matches(fixture.context()));
 }
 
 // ---------------------------------------------------------------------------
@@ -223,24 +232,33 @@ TEST(TestPointwiseAddScore, PrefersTheLargerBlockSize)
               pointwiseAddScore(makeKernel(64, "FLOAT"), fixture.context()));
 }
 
-TEST(TestPointwiseAddBinding, ReportsTheOperandUidsInArgumentOrder)
+TEST(TestPointwiseAddBinding, TheMatcherBindsTheOperandUidsItResolved)
 {
-    // Dispatch binds its arguments from these, rather than re-deriving the graph shape
+    // Matching does double duty: deciding the kernel applies also binds the fields the
+    // launch will use, so dispatch reads these rather than re-deriving the graph shape
     // with a second notion of what a pointwise add looks like.
     const GraphFixture fixture(buildPointwiseGraph());
 
-    const auto binding = pointwiseAddBinding(fixture.context());
+    BoundTokens bound;
+    ASSERT_TRUE(pointwiseAddGraphMatches(fixture.context(), bound));
 
+    const auto binding = pointwiseAddBinding(bound);
     EXPECT_EQ(binding.inputA, INPUT_A_UID);
     EXPECT_EQ(binding.inputB, INPUT_B_UID);
     EXPECT_EQ(binding.output, OUTPUT_UID);
 }
 
-TEST(TestPointwiseAddBinding, RefusesAGraphTheMatcherWouldReject)
+TEST(TestPointwiseAddBinding, ARejectedGraphBindsNothingToDispatchFrom)
 {
+    // A matcher that declines must not leave partial bindings behind: its pack is pruned,
+    // so anything it wrote would be state no surviving kernel could correctly read.
     const GraphFixture fixture(buildTwoNodePointwiseGraph());
 
-    EXPECT_THROW(pointwiseAddBinding(fixture.context()), hipdnn_plugin_sdk::HipdnnPluginException);
+    BoundTokens bound;
+    ASSERT_FALSE(pointwiseAddGraphMatches(fixture.context(), bound));
+
+    EXPECT_TRUE(bound.empty());
+    EXPECT_THROW(pointwiseAddBinding(bound), hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 } // namespace

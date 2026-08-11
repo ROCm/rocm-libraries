@@ -67,12 +67,12 @@ public:
      *         this is the one place holding both the UED and its KMD.
      */
     GenericEngine(EngineDescriptor engine,
-                  std::shared_ptr<KernelIngestorStateManager<THandle>> stateManager,
+                  std::unique_ptr<KernelIngestorStateManager<THandle>> stateManager,
                   const IDeviceResolver<THandle>& deviceResolver)
         : _engine(std::move(engine))
         , _stateManager(std::move(stateManager))
         , _id(hipdnn_data_sdk::utilities::engineNameToId(_engine.name))
-        , _planBuilder(_engine, _stateManager, deviceResolver)
+        , _planBuilder(_engine, *_stateManager, deviceResolver)
     {
         const auto& fields = _stateManager->metadataSchema().fields;
         for(const auto& knob : _engine.knobs)
@@ -162,7 +162,10 @@ public:
 
 private:
     EngineDescriptor _engine;
-    std::shared_ptr<KernelIngestorStateManager<THandle>> _stateManager;
+    /// Owned outright: see the constructor for why this must not be shared. Held by
+    /// pointer rather than by value so the plan builder can bind a reference to it in the
+    /// member initializer list, which needs a stable address.
+    std::unique_ptr<KernelIngestorStateManager<THandle>> _stateManager;
     int64_t _id;
     GenericPlanBuilder<THandle, TSettings, TContext> _planBuilder;
 };

@@ -59,13 +59,19 @@ MatcherCounters& counters()
     return s_counters;
 }
 
-bool acceptGraph(const MatchContext& /*context*/)
+/// An arbitrary value acceptGraph binds, so a test can prove it reached dispatch intact.
+constexpr int64_t BOUND_TOKEN_VALUE = 4242;
+
+bool acceptGraph(const MatchContext& /*context*/, BoundTokens& bound)
 {
     ++counters().graphCalls;
+    // Stands in for the tensor uids and dimensions a real matcher resolves: the point
+    // under test is that whatever matching bound reaches dispatch without a re-match.
+    bound["test.bound_token"] = BOUND_TOKEN_VALUE;
     return true;
 }
 
-bool rejectGraph(const MatchContext& /*context*/)
+bool rejectGraph(const MatchContext& /*context*/, BoundTokens& /*bound*/)
 {
     ++counters().graphCalls;
     return false;
@@ -540,6 +546,47 @@ TEST(TestIngestorStateManager, RematchesEveryCallWhenTheGraphHasNoIdentity)
     EXPECT_EQ(first.size(), 2U);
     EXPECT_EQ(second.size(), 2U);
     EXPECT_EQ(counters().graphCalls, 2);
+}
+
+TEST(TestIngestorStateManager, CarriesWhatMatchingBoundThroughToDispatch)
+{
+    // RFC 0017 section 8.5: matching does double duty, deciding a kernel applies and
+    // binding the fields the launch will use. A dispatch handler must read those values
+    // rather than re-deriving them from the graph with a second notion of its shape.
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const auto properties = testDeviceProperties();
+    const TestGraph graph;
+    const MatchContext context{graph, 0, properties};
+
+    const auto bound = manager->unsortedCatalog(context).bound;
+
+    ASSERT_EQ(bound.count("test.bound_token"), 1U);
+    EXPECT_EQ(bound.at("test.bound_token"), BOUND_TOKEN_VALUE);
+}
+
+TEST(TestIngestorStateManager, ReadingBoundStateAfterMatchingDoesNotRematch)
+{
+    // Section 8.1 keeps the bound token state alongside the catalog precisely so that
+    // "nothing is re-matched" once a graph has been matched. Recovering these values by
+    // re-running the matcher would be correct and quietly quadratic.
+    //
+    // The graph carries an identity, so there is a cache entry to serve the second and
+    // third reads. A graph without one is matched fresh every call by design; that is why
+    // the entries and the bound state come back from a single call rather than two.
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const auto properties = testDeviceProperties();
+    const TestGraph graph(makeGraphId(11));
+    const MatchContext context{graph, 0, properties};
+
+    static_cast<void>(manager->unsortedCatalog(context));
+    const auto afterMatching = counters().graphCalls;
+
+    static_cast<void>(manager->unsortedCatalog(context).bound);
+    static_cast<void>(manager->sortedCatalog(context).bound);
+
+    EXPECT_EQ(counters().graphCalls, afterMatching);
 }
 
 TEST(TestIngestorStateManager, RematchesAfterCacheEviction)

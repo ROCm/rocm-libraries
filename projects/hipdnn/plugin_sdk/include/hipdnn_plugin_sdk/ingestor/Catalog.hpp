@@ -8,6 +8,7 @@
 #include <vector>
 
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
+#include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 
 namespace hipdnn_plugin_sdk::ingestor
 {
@@ -27,6 +28,16 @@ struct Catalog
 {
     std::vector<KernelDefinition> entries;
     bool isSorted = false;
+    /// What this engine's graph-scoped matchers resolved about the graph, merged across
+    /// the packs that survived. Cached with the entries because RFC 0017 §8.1 keeps the
+    /// bound token state alongside the catalog, so a plan build reads these rather than
+    /// re-running a matcher to recover them.
+    ///
+    /// Merged rather than kept per pack: a token name means the same thing to every pack
+    /// in an engine, since they all read one graph through one metadata schema. Two packs
+    /// binding one name to different values would be an authoring error the loader should
+    /// reject, not a state this needs to represent.
+    BoundTokens bound;
 };
 
 } // namespace hipdnn_plugin_sdk::ingestor

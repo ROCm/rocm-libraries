@@ -55,10 +55,12 @@ public:
      */
     size_t
         workspaceBytes(const hipdnn_plugin_sdk::ingestor::MatchContext& context,
+                       const hipdnn_plugin_sdk::ingestor::BoundTokens& bound,
                        const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel) const override;
 
     std::unique_ptr<hipdnn_plugin_sdk::ingestor::PreparedDispatch>
         prepare(const hipdnn_plugin_sdk::ingestor::MatchContext& context,
+                const hipdnn_plugin_sdk::ingestor::BoundTokens& bound,
                 const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel) const override;
 
     void launch(const Handle& handle,

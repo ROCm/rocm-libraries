@@ -23,6 +23,7 @@
 #include "core/Handle.hpp"
 #include "engines/hip_mlops_engine/HipMlopsKernelCompiler.hpp"
 #include "engines/kernel_ingestor_engine/packs/PointwiseAddDispatchHandler.hpp"
+#include "engines/kernel_ingestor_engine/packs/PointwiseAddMatchers.hpp"
 #include "engines/kernel_ingestor_engine/packs/PointwiseAddSymbols.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/PointwiseAddTestGraphs.hpp"
 
@@ -41,8 +42,22 @@ using namespace hip_kernel_provider;
 using namespace hip_kernel_provider::kernel_ingestor_engine;
 using namespace hip_kernel_provider::kernel_ingestor_engine::testing;
 using hipdnn_flatbuffers_sdk::utilities::parseUuid;
+using hipdnn_plugin_sdk::ingestor::BoundTokens;
 using hipdnn_plugin_sdk::ingestor::KernelDefinition;
 using hipdnn_plugin_sdk::ingestor::MatchContext;
+
+/// The bindings a real plan build would hand the handler, produced the way the state
+/// manager produces them: by running the graph matcher. Building them by hand instead
+/// would let these tests pass against a matcher that binds the wrong uids.
+BoundTokens bindingsFor(const MatchContext& context)
+{
+    BoundTokens bound;
+    if(!pointwiseAddGraphMatches(context, bound))
+    {
+        throw std::logic_error("test graph does not match the pack it is dispatched against");
+    }
+    return bound;
+}
 
 KernelDefinition makeKernel(int64_t blockSize, const std::string& dtype)
 {
@@ -149,8 +164,12 @@ TEST(TestPointwiseAddDispatch, ReportsWorkspaceFromKernelMetadata)
 
     // The two surviving kernels report different requirements, so the engine's
     // "maximum across survivors" has something to actually maximize over.
-    EXPECT_EQ(handler.workspaceBytes(fixture.context(), makeKernel(64, "FLOAT")), 0U);
-    EXPECT_EQ(handler.workspaceBytes(fixture.context(), makeKernel(256, "FLOAT")), 1024U);
+    EXPECT_EQ(handler.workspaceBytes(
+                  fixture.context(), bindingsFor(fixture.context()), makeKernel(64, "FLOAT")),
+              0U);
+    EXPECT_EQ(handler.workspaceBytes(
+                  fixture.context(), bindingsFor(fixture.context()), makeKernel(256, "FLOAT")),
+              1024U);
 }
 
 TEST(TestPointwiseAddDispatch, ReportsWorkspaceWithoutSeeingTheRestOfTheCatalog)
@@ -162,9 +181,12 @@ TEST(TestPointwiseAddDispatch, ReportsWorkspaceWithoutSeeingTheRestOfTheCatalog)
     // The query is answered per kernel, before selection and before any plan exists, so
     // the answer must not depend on which other kernels are in the catalog. Asking twice
     // for the same kernel, either side of a different one, gives the same number.
-    const auto first = handler.workspaceBytes(fixture.context(), makeKernel(256, "FLOAT"));
-    static_cast<void>(handler.workspaceBytes(fixture.context(), makeKernel(64, "FLOAT")));
-    const auto second = handler.workspaceBytes(fixture.context(), makeKernel(256, "FLOAT"));
+    const auto first = handler.workspaceBytes(
+        fixture.context(), bindingsFor(fixture.context()), makeKernel(256, "FLOAT"));
+    static_cast<void>(handler.workspaceBytes(
+        fixture.context(), bindingsFor(fixture.context()), makeKernel(64, "FLOAT")));
+    const auto second = handler.workspaceBytes(
+        fixture.context(), bindingsFor(fixture.context()), makeKernel(256, "FLOAT"));
 
     EXPECT_EQ(first, second);
 }
@@ -181,7 +203,8 @@ TEST(TestPointwiseAddDispatch, LaunchesARealAddOnDevice)
     const HipMlopsKernelCompiler compiler;
     const PointwiseAddDispatchHandler handler(compiler);
 
-    const auto prepared = handler.prepare(fixture.context(), makeKernel(64, "FLOAT"));
+    const auto prepared = handler.prepare(
+        fixture.context(), bindingsFor(fixture.context()), makeKernel(64, "FLOAT"));
     ASSERT_NE(prepared, nullptr);
 
     const AddBuffers buffers(3.0f, 4.0f);
@@ -206,7 +229,8 @@ TEST(TestPointwiseAddDispatch, LaunchesTheSameResultForEitherBlockSize)
     // genuinely different builds; a one-element add must still agree.
     for(const int64_t blockSize : {64, 256})
     {
-        const auto prepared = handler.prepare(fixture.context(), makeKernel(blockSize, "FLOAT"));
+        const auto prepared = handler.prepare(
+            fixture.context(), bindingsFor(fixture.context()), makeKernel(blockSize, "FLOAT"));
         const AddBuffers buffers(1.5f, 2.25f);
         const auto descriptors = buffers.descriptors();
         const Handle handle;
@@ -228,7 +252,8 @@ TEST(TestPointwiseAddDispatch, PreparedLaunchIsReusableAcrossExecutions)
 
     // A plan is built once and may execute many times with different buffers, so
     // preparation must hold nothing tied to one execution.
-    const auto prepared = handler.prepare(fixture.context(), makeKernel(64, "FLOAT"));
+    const auto prepared = handler.prepare(
+        fixture.context(), bindingsFor(fixture.context()), makeKernel(64, "FLOAT"));
     const Handle handle;
 
     for(const auto& [a, b, expected] : std::vector<std::array<float, 3>>{
@@ -244,17 +269,18 @@ TEST(TestPointwiseAddDispatch, PreparedLaunchIsReusableAcrossExecutions)
     }
 }
 
-TEST(TestPointwiseAddDispatch, RefusesToPrepareAGraphTheMatcherRejects)
+TEST(TestPointwiseAddDispatch, RefusesToPrepareWithoutTheMatcherSBindings)
 {
     SKIP_IF_NO_DEVICES();
 
-    const GraphFixture fixture(buildTwoNodePointwiseGraph());
+    const GraphFixture fixture(buildPointwiseGraph());
     const HipMlopsKernelCompiler compiler;
     const PointwiseAddDispatchHandler handler(compiler);
 
-    // Preparation reads the operand binding the matcher established, so a graph that
-    // never matched cannot be prepared.
-    EXPECT_THROW(handler.prepare(fixture.context(), makeKernel(64, "FLOAT")),
+    // Preparation reads the operand uids the matcher bound rather than re-deriving them,
+    // so bindings that never came from this pack's matcher are a wiring error. It must
+    // fail loudly instead of guessing which tensor is which operand.
+    EXPECT_THROW(handler.prepare(fixture.context(), BoundTokens{}, makeKernel(64, "FLOAT")),
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
@@ -285,7 +311,8 @@ TEST(TestPointwiseAddDispatch, DispatchStaysResolvableAcrossContainerLifetimes)
     ASSERT_NE(handler, nullptr);
 
     const GraphFixture fixture(buildPointwiseGraph());
-    const auto prepared = handler->prepare(fixture.context(), makeKernel(64, "FLOAT"));
+    const auto prepared = handler->prepare(
+        fixture.context(), bindingsFor(fixture.context()), makeKernel(64, "FLOAT"));
     ASSERT_NE(prepared, nullptr);
 
     const AddBuffers buffers(2.0f, 5.0f);

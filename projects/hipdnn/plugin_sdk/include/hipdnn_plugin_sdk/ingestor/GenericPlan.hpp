@@ -44,11 +44,17 @@ public:
      * @param context    Bound graph and device state. Read during construction to
      *                   prepare the launch; not retained, because a plan outlives the
      *                   graph reference this carries.
+     * @param bound      What matching resolved about the graph, from the catalog that
+     *                   selected this kernel. Passed in rather than recovered here: the
+     *                   plan is built from a matched catalog, so re-running a matcher to
+     *                   rediscover these would repeat work already cached.
      */
-    GenericPlan(KernelDispatcher<THandle> dispatcher, const MatchContext& context)
+    GenericPlan(KernelDispatcher<THandle> dispatcher,
+                const MatchContext& context,
+                const BoundTokens& bound)
         : _dispatcher(std::move(dispatcher))
-        , _workspaceBytes(_dispatcher.handler->workspaceBytes(context, _dispatcher.kernel))
-        , _prepared(_dispatcher.handler->prepare(context, _dispatcher.kernel))
+        , _workspaceBytes(_dispatcher.handler->workspaceBytes(context, bound, _dispatcher.kernel))
+        , _prepared(_dispatcher.handler->prepare(context, bound, _dispatcher.kernel))
     {
         if(_prepared == nullptr)
         {

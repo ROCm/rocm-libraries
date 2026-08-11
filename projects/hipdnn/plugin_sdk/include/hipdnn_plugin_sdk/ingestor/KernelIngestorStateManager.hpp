@@ -138,6 +138,27 @@ public:
     }
 
     /**
+     * @brief The unranked catalog and the state matching bound, from one lookup.
+     *
+     * RFC 0017 §8.1 keeps the bound token state alongside the catalog so that "nothing
+     * is re-matched" after applicability: a dispatch handler sizing a workspace reads the
+     * values the matcher already resolved rather than walking the graph again with a
+     * second notion of what it looks like.
+     *
+     * Returned together with the entries rather than through a separate accessor because
+     * a caller needing both would otherwise match twice for a graph carrying no identity,
+     * which is exactly the case with no cache to absorb the repeat.
+     *
+     * `bound` is empty when no graph-scoped matcher bound anything, which is legal: a
+     * pack whose launch geometry is fully determined by kernel metadata has nothing to
+     * bind.
+     */
+    Catalog unsortedCatalog(const MatchContext& context) const
+    {
+        return catalogFor(context);
+    }
+
+    /**
      * @brief Every kernel that applies to the graph and device @p context names, best
      *        first.
      *
@@ -146,10 +167,23 @@ public:
      */
     std::vector<KernelDefinition> sortedDefinitions(const MatchContext& context) const
     {
+        return sortedCatalog(context).entries;
+    }
+
+    /**
+     * @brief The ranked catalog and the state matching bound, from one lookup.
+     *
+     * A plan build needs both, and asking for them separately means two calls into the
+     * cache -- or, for a graph carrying no identity and so no cache entry, two full
+     * matching passes. Returning them together makes "match once" hold for the
+     * uncacheable case as well, which is the case that can least afford the second pass.
+     */
+    Catalog sortedCatalog(const MatchContext& context) const
+    {
         Catalog catalog = catalogFor(context);
         if(catalog.isSorted)
         {
-            return catalog.entries;
+            return catalog;
         }
 
         catalog.entries = _heuristic->rank(catalog, context);
@@ -160,7 +194,7 @@ public:
             _catalogCache.put(*key, catalog);
         }
 
-        return catalog.entries;
+        return catalog;
     }
 
     /**
@@ -342,7 +376,9 @@ private:
     /// A graph-scoped matcher's verdict for one (graph, device), keyed by matcher id.
     ///
     /// Matchers are shared by id across packs, so the same check would otherwise be
-    /// re-run once per pack that lists it.
+    /// re-run once per pack that lists it. The memo covers what the matcher *bound* as
+    /// well as whether it passed, since re-running it to recover its bindings would
+    /// defeat the memo entirely.
     using GraphMatcherMemo = std::unordered_map<DescriptorId, bool, DescriptorIdHash>;
 
     /**
@@ -364,7 +400,7 @@ private:
 
         for(const auto& pack : _packs)
         {
-            if(!graphLevelMatchersPass(pack, context, graphVerdicts))
+            if(!graphLevelMatchersPass(pack, context, graphVerdicts, catalog.bound))
             {
                 continue;
             }
@@ -389,9 +425,14 @@ private:
         return catalog;
     }
 
+    /// @param bound Accumulates what the matchers resolved, for the catalog to keep.
+    ///        Written straight into the catalog's map: a matcher that passes contributes
+    ///        its bindings, and one that fails prunes its pack, so nothing it wrote can
+    ///        be read by a kernel that survives.
     bool graphLevelMatchersPass(const KernelDescriptorPack& pack,
                                 const MatchContext& context,
-                                GraphMatcherMemo& graphVerdicts) const
+                                GraphMatcherMemo& graphVerdicts,
+                                BoundTokens& bound) const
     {
         for(const auto& matcherId : pack.matcherIds)
         {
@@ -404,7 +445,11 @@ private:
             auto memo = graphVerdicts.find(matcherId);
             if(memo == graphVerdicts.end())
             {
-                const bool passed = GraphMatcherRegistry::resolve(matcher.matchSymbol)(context);
+                // Binds on the first evaluation only. A later pack listing this same
+                // matcher reuses both the verdict and the bindings it already wrote,
+                // which is the whole point of memoizing across packs.
+                const bool passed
+                    = GraphMatcherRegistry::resolve(matcher.matchSymbol)(context, bound);
                 memo = graphVerdicts.emplace(matcherId, passed).first;
             }
 

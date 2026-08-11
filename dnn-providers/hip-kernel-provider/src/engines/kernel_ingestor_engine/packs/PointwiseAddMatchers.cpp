@@ -119,7 +119,7 @@ std::string dataTypeName(data_objects::DataType dataType)
 
 } // namespace
 
-bool pointwiseAddGraphMatches(const MatchContext& context)
+bool pointwiseAddGraphMatches(const MatchContext& context, BoundTokens& bound)
 {
     // Exactly one node: a prebuilt kernel serves one complete graph, so anything larger
     // is a different problem even if it contains this one.
@@ -162,7 +162,18 @@ bool pointwiseAddGraphMatches(const MatchContext& context)
 
     // Uniform dtype across operands. Mixed-precision add is a different kernel, and
     // accepting it here would hand one binary operands it cannot read.
-    return inputA->data_type() == inputB->data_type() && inputA->data_type() == output->data_type();
+    if(inputA->data_type() != inputB->data_type() || inputA->data_type() != output->data_type())
+    {
+        return false;
+    }
+
+    // Bind what the launch needs, now that the walk that found it has succeeded. The
+    // dispatch handler reads these back instead of re-walking the graph, so there is one
+    // notion of which tensor is which operand rather than two that can drift apart.
+    bound[std::string(INPUT_A_TOKEN)] = attributes.in_0_tensor_uid();
+    bound[std::string(INPUT_B_TOKEN)] = attributes.in_1_tensor_uid().value();
+    bound[std::string(OUTPUT_TOKEN)] = attributes.out_0_tensor_uid();
+    return true;
 }
 
 bool pointwiseAddKernelMatches(const MatchContext& context, const KernelDefinition& kernel)
@@ -187,20 +198,23 @@ double pointwiseAddScore(const KernelDefinition& kernel, const MatchContext& /*c
     return static_cast<double>(kernel.getIntMetadata(std::string(BLOCK_SIZE_FIELD)));
 }
 
-PointwiseAddBinding pointwiseAddBinding(const MatchContext& context)
+PointwiseAddBinding pointwiseAddBinding(const BoundTokens& bound)
 {
-    if(!pointwiseAddGraphMatches(context))
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM, "graph is not a single-node 1-element pointwise add");
-    }
+    // Every token was written by the graph matcher that admitted this graph, so a missing
+    // one means the catalog was built by a matcher other than ours -- a wiring error, not
+    // a graph this pack should decline.
+    const auto read = [&bound](std::string_view token) {
+        const auto it = bound.find(std::string(token));
+        if(it == bound.end())
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                "pointwise add dispatch is missing bound token '" + std::string(token) + "'");
+        }
+        return it->second;
+    };
 
-    const auto& attributes
-        = context.graph.getNodeWrapper(0).attributesAs<data_objects::PointwiseAttributes>();
-
-    return {attributes.in_0_tensor_uid(),
-            attributes.in_1_tensor_uid().value(),
-            attributes.out_0_tensor_uid()};
+    return {read(INPUT_A_TOKEN), read(INPUT_B_TOKEN), read(OUTPUT_TOKEN)};
 }
 
 void registerPointwiseAddMatchers()
