@@ -901,11 +901,18 @@ static void rv_exec_instr(rvm_t* vm, const jd_val_t* instr)
         const jd_val_t* outs = rocke_jget(instr, "outs");
         const rocke_type_t* rtypes[16];
         const char* binds[16];
+        /* Python's result_name_hint, recorded per instruction. Under exact_names
+         * it is redundant (the bind is the finished name); for a rolled recipe it
+         * is what makes the VM's fresh names match Python's -- "%mul14" instead
+         * of "%v14" -- since both sides append the same builder counter. Absent
+         * (older recipe) -> NULL -> the engine's "v", i.e. prior behavior. */
+        const char* res_pfx = NULL;
         int n_res = 0;
         if(!vm->failed && out && out->kind == JD_OBJ)
         {
             rtypes[0] = rv_type(vm, rocke_jget(out, "type"));
             binds[0] = rv_bind_name(vm, out, "r");
+            res_pfx = rocke_jstr(rocke_jget(out, "pfx"));
             n_res = 1;
         }
         else if(!vm->failed && outs && outs->kind == JD_ARR)
@@ -916,6 +923,10 @@ static void rv_exec_instr(rvm_t* vm, const jd_val_t* instr)
                 rtypes[i] = rv_type(vm, rocke_jget(outs->arr[i], "type"));
                 binds[i] = rv_bind_name(vm, outs->arr[i], "r");
             }
+            /* One hint per op in Python (`_op` names every result from the same
+             * hint), so the first entry speaks for all of them. */
+            if(n_res > 0)
+                res_pfx = rocke_jstr(rocke_jget(outs->arr[0], "pfx"));
         }
         rocke_attr_map_t m;
         if(!vm->failed)
@@ -944,7 +955,7 @@ static void rv_exec_instr(rvm_t* vm, const jd_val_t* instr)
             }
         }
         rocke_op_t* built = rocke_b_op(
-            vm->b, opcode, ops, n_ops, n_res ? rtypes : NULL, n_res, &m, NULL, 0, NULL, NULL);
+            vm->b, opcode, ops, n_ops, n_res ? rtypes : NULL, n_res, &m, NULL, 0, res_pfx, NULL);
         if(!built || !rocke_ir_builder_ok(vm->b))
         {
             rv_fail(vm,

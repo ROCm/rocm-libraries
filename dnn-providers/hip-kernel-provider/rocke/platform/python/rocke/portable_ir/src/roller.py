@@ -914,6 +914,33 @@ class _Roller:
                 out.extend(run_instrs)
         return out
 
+    @staticmethod
+    def _lane_prefix(*name_lists: List[str]) -> Optional[str]:
+        """Python's own naming for a loop-carry fan, as a lane-indexed prefix.
+
+        Builders name a fan's iter-args positionally -- ``acc_m0_n0``,
+        ``acc_m0_n1``, ... -- so when every lane `i` is ``<prefix><i>`` the
+        roller can carry Python's names through instead of minting synthetic
+        ``__faN_`` ones. The prefix extends to lane counts never sampled, which
+        is what makes it usable on a parametric fan. Returns None when the names
+        are not simply the lane index (a 2-D ``acc_m{m}_n{n}`` fan, say), which
+        leaves the synthetic naming in place: still correct, just
+        alpha-equivalent rather than byte-identical."""
+        prefix: Optional[str] = None
+        for names in name_lists:
+            if not names:
+                return None
+            for i, nm in enumerate(names):
+                tail = str(i)
+                if not nm.endswith(tail) or len(nm) == len(tail):
+                    return None
+                p = nm[: -len(tail)]
+                if prefix is None:
+                    prefix = p
+                elif p != prefix:
+                    return None
+        return prefix
+
     def _roll_fan(
         self, a: Dict[str, Any], b: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
@@ -951,7 +978,14 @@ class _Roller:
         fid = self._fan
         self._fan += 1
         fv = f"fa{fid}"
-        acc_fmt, res_fmt, new_fmt = f"__fa{fid}_", f"__fr{fid}_", f"__fn{fid}_"
+        res_fmt, new_fmt = f"__fr{fid}_", f"__fn{fid}_"
+        # The iter-arg names reach the emitted .ll (the loop-carry phis), so
+        # prefer Python's own lane naming over a synthetic one. res_/new_ are
+        # internal threading the backend renames, and stay synthetic.
+        acc_fmt = (
+            self._lane_prefix([m["name"] for m in iter_a], [m["name"] for m in iter_b])
+            or f"__fa{fid}_"
+        )
         lanes = {"for": {"var": fv, "lo": 0, "hi": count, "step": 1}}
 
         saved_results = dict(self.result_refs)

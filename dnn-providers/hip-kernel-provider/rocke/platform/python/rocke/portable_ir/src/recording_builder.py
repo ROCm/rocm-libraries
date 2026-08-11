@@ -48,15 +48,39 @@ def _bare(name: str) -> str:
     return name[1:] if isinstance(name, str) and name.startswith("%") else name
 
 
+def result_pfx(op: Op) -> str:
+    """The ``result_name_hint`` Python used to name this op's results, or "".
+
+    Python names every value ``%<hint><counter>`` (``IRBuilder._fresh``). A
+    *concrete* recipe does not need the hint -- its binds are the finished names
+    and the VM replays them verbatim. A *rolled* recipe does: one instruction
+    expands N times, so each expansion must draw a fresh counter, and without the
+    hint the VM falls back to the engine default "v" and emits ``%v14`` where
+    Python wrote ``%mul14``. Recording the hint here (rather than mirroring
+    Python's per-opcode table in C++) keeps the two engines from drifting: the
+    hint travels with the data, so a new op needs no C++ change.
+
+    Set by :meth:`RecordingIRBuilder._op` on the Op itself, so the post-hoc
+    ``kerneldef_to_recipe`` walk over the same objects agrees with the live
+    recording."""
+    pfx = getattr(op, "_rec_pfx", None)
+    return pfx if isinstance(pfx, str) and pfx and pfx != "v" else ""
+
+
 def _result_fields(op: Op) -> Dict[str, Any]:
     """0 results -> {}; 1 -> {"out": {...}}; N>1 -> {"outs": [...]}."""
     if not op.results:
         return {}
+    pfx = result_pfx(op)
+    extra = {"pfx": pfx} if pfx else {}
     if len(op.results) == 1:
         r = op.results[0]
-        return {"out": {"bind": _reg(r), "type": _type_to_json(r.type)}}
+        return {"out": {"bind": _reg(r), "type": _type_to_json(r.type), **extra}}
     return {
-        "outs": [{"bind": _reg(r), "type": _type_to_json(r.type)} for r in op.results]
+        "outs": [
+            {"bind": _reg(r), "type": _type_to_json(r.type), **extra}
+            for r in op.results
+        ]
     }
 
 
@@ -165,8 +189,26 @@ class RecordingIRBuilder(IRBuilder):
         self._rec_body: List[Dict[str, Any]] = []
         self._rec_stack: List[List] = [self._rec_body]
         self._region_bodies: Dict[int, List] = {}
+        self._pending_pfx: str = ""
 
     # ----- interception -----
+
+    def _op(self, name: str, *a: Any, **k: Any) -> Op:
+        """Capture the result-name hint so the recipe can carry it.
+
+        ``_op`` emits from inside itself, so the hint has to be parked before
+        delegating -- ``_emit`` reads it off ``_pending_pfx``. Ops built without
+        going through ``_op`` simply record no hint, which is the same "v"
+        default Python would have used."""
+        hint = k.get("result_name_hint")
+        if hint is None and len(a) >= 6:
+            hint = a[5]
+        prev = self._pending_pfx
+        self._pending_pfx = hint if isinstance(hint, str) else "v"
+        try:
+            return super()._op(name, *a, **k)
+        finally:
+            self._pending_pfx = prev
 
     def param(self, name: str, t, **attrs: Any):
         v = super().param(name, t, **attrs)
@@ -182,6 +224,8 @@ class RecordingIRBuilder(IRBuilder):
         return v
 
     def _emit(self, op: Op) -> None:
+        if self._pending_pfx and getattr(op, "_rec_pfx", None) is None:
+            op._rec_pfx = self._pending_pfx
         instr, bodies = shallow_instr(op)
         self._rec_stack[-1].append(instr)
         # Map each of this op's regions to the recipe body it should fill, so the

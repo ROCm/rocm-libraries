@@ -73,7 +73,7 @@ dataclass/descriptor logic executes normally; only emitted ops are captured.
   `outs`).
 - **Coverage proven:** `drivers/record_coverage.py` drives the recorder off the
   parity spec set — **55/65 emitters record faithfully, 0 recorder failures**,
-  spanning T1 small ops, T2 GEMM/conv, T3 MoE, and T4 attention (scalar unified
+  spanning small ops and every tier — GEMM, conv, attention, MoE (scalar unified
   2D, tiled gfx942/gfx950 2D/3D, WMMA gfx1151/gfx1201). The 10 skips are bespoke
   multi-kernel / multi-arg *emitter* signatures in the reuse harness, not recorder
   gaps.
@@ -111,21 +111,23 @@ runs (GEMM pipeline-nest + CShuffle; two unrolled loops). The roller finds the
 first run (divergence-anchored, candidate periods tried smallest-first), rolls
 it, and **recurses on the remainder** — validated on a synthetic two-run kernel.
 
-**Validated tiered status** (`roll_coverage.py`, `tests/test_roller.py`):
+**Validated per-probe status** (`roll_coverage.py`, `tests/test_roller.py`). One
+representative kernel per tier, not the tier's full family list — tiers are
+numbered per Step 4:
 
 | Tier | Kernel | Axis | Status |
 |---|---|---|---|
-| T1 small op | `qk_block` vec8 dot | head_size | **rolled 78×** |
-| T2 GEMM | `gemm_universal` k-atom nest | tile_k | fallback (oracle-rejected) |
+| T1 GEMM | `gemm_universal` k-atom nest | tile_k | fallback (oracle-rejected) |
 | T3 attention | **unified-attention 2D** (Section-3 kernel) | head_size | **rolled 54×** |
-| T4 deep fused conv | **`deep_fused_conv_pool`** conv0→conv1→pool | pool tile | fallback (diagnosed) |
+| T5 deep fused conv | **`deep_fused_conv_pool`** conv0→conv1→pool | pool tile | fallback (diagnosed) |
+| *(untiered)* small op | `qk_block` vec8 dot | head_size | **rolled 78×** |
 
 Also: a synthetic kernel with **two carries + two ladders** rolls, and a
 quadratic-constant kernel is correctly **rejected at held-out N** (2-point fit
 predicted 14, actual 16) → concrete. The held-out check makes two-trace
 inference safe; the oracle makes every reported roll byte-equivalent.
 
-**Variable loop-carry fan (T4) — capability delivered.** A runtime `scf.for`
+**Variable loop-carry fan (T5) — capability delivered.** A runtime `scf.for`
 whose iter-arg count scales with the axis (e.g. `deep_fused_conv_pool`'s per-
 output-row mfma accumulators, 2→4 as the pool tile grows) is now representable
 and rollable:
@@ -170,7 +172,7 @@ Validated on a fan + full reduction-over-results synthetic (`test_roller.py::
 TestParametricFanExpander::test_auto_roll_fan_with_reduction`), byte-equivalent
 at held-out lane counts.
 
-**GEMM + CShuffle (T2) — body-rolling mechanism delivered; one blocker left.**
+**GEMM + CShuffle (T1) — body-rolling mechanism delivered; one blocker left.**
 `gemm_universal` over `tile_n` (fixed warp grid) is **affine-clean** and a genuine
 variable-fan target (K-loop carries `mfmas_m × mfmas_n` accumulators, `16→32→64`).
 The fan body is now rolled via the general aligner with the full lane machinery:
@@ -205,9 +207,11 @@ roller:
 
 Verified byte-equivalent at sampled (32/64) and held-out (128/256/96/192)
 `tile_n`. (`test_roller.py::TestRollGemmCShuffle`, `::TestLaneAnalysis`.)
-Coverage is now **T1/T2/T3 rolled, T4 fallback** (conv-pool's non-affine
-spatial-product constants). Note: `tile_k` is a *separate* GEMM axis that still
-hits a non-affine LDS-sizing case.
+Coverage is now **T1–T4 rolled on at least one axis each, T5 fallback**
+(conv-pool's non-affine spatial-product constants) — with the caveat recorded in
+Step 4 that only T1 `tile_n` and T4 `hidden` compress structurally; T2 and T3 roll
+constants only. Note: `tile_k` is a *separate* GEMM axis that still hits a
+non-affine LDS-sizing case.
 
 ## C recipe VM — parametric surface complete (on-device JIT)
 
@@ -283,21 +287,42 @@ Arch enters three ways (`core/arch` SSOT `arch_specs.json`, `core/isa` backends,
   independently.
 
 Net arch multiplier on artifact count: **#arch-families (~2-3)**, not
-#gfx-targets. gfx1250 is not yet in the SSOT; add it to `arch_specs.json` +
-backend registry before recording.
+#gfx-targets. gfx1250 **is** now in `arch_specs.json` (alongside gfx90a, gfx942,
+gfx950, gfx1151, gfx1201) with kernels under `instances/gfx1250/`, so it needs no
+SSOT work before recording.
 
 ## Step 4 — operator tiers (rollout order)
 
-| Tier | Families | Loop profile | Roller needs | Risk |
-|---|---|---|---|---|
-| **T1: small ops** | elementwise, reduce, layernorm2d, rmsnorm2d, transpose, permute, topk_softmax, smoothquant | shallow `range(vec)` + reductions | index roll + peel | low |
-| **T2: GEMM/conv** | gemm_universal (+batched/grouped/streamk/mfma/mx/block_scale/multi_d), conv_implicit_gemm, conv_direct, img2col, pooling, deep_fused_conv_pool | `k_atoms x mfmas` nests + 1 runtime K-`scf.for`; pipeline + CShuffle | nested roll + peel; helper-expansion macros | medium |
-| **T3: MoE** | fused_moe (5), moe_gemm_fused (4), moe_fused_mega(+fp8), moe_sorting (4), moe_smoothquant | GEMM skeleton + phase routing (`static_if`) | T2 + multi-phase | medium |
-| **T4: attention** | scalar unified 2d/3d/reduce (DONE for 2d), FMHA fwd/bwd/varlen/paged/splitkv/headgroup/fp8, sage/sparse, tiled gfx942/gfx950 | runtime KV `scf.for` + huge spec-`if` flag forks + compile-time tile nests | full roller + `static_if` flag handling; per-arch | high |
+Tiers are ordered by **product priority**, not by difficulty: GEMM, conv,
+attention, MoE, then deep-fused conv. Attention deliberately precedes MoE even
+though it is the hardest tier, which has a scheduling consequence — the
+`static_if` flag/case work that both tiers need is pulled earlier than a
+difficulty-ordered plan would put it (see Phasing).
 
-T1->T4 also matches helper-expansion difficulty: the high-expansion helpers
+| Tier | Families | Loop profile | Roller needs | Risk | Measured status |
+|---|---|---|---|---|---|
+| **T1: GEMM** | gemm_universal (+batched/grouped/streamk/mfma/mx/block_scale/multi_d) | `k_atoms x mfmas` nests + 1 runtime K-`scf.for`; pipeline + CShuffle | nested roll + peel; helper-expansion macros | medium | **rolls structurally** on `tile_n` (195 vs 322 ops); `tile_m`/`tile_k` refused |
+| **T2: conv** | conv_implicit_gemm, conv_direct, img2col, pooling | implicit-GEMM nests over spatial windows | T1 + non-affine spatial constants | medium | rolls on `K`, `N` — **constants only**, op count flat; `tile_m`/`tile_n`/`C` refused |
+| **T3: attention** | scalar unified 2d/3d/reduce (DONE for 2d), FMHA fwd/bwd/varlen/paged/splitkv/headgroup/fp8, sage/sparse, tiled gfx942/gfx950 | runtime KV `scf.for` + huge spec-`if` flag forks + compile-time tile nests | full roller + `static_if` flag handling; per-arch | high | rolls on `seqlen_kv`, `num_query_heads` — **constants only**; `head_size`/`block_n` refused |
+| **T4: MoE** | fused_moe (5), moe_gemm_fused (4), moe_fused_mega(+fp8), moe_sorting (4), moe_smoothquant | GEMM skeleton + phase routing (`static_if`) | T1 + multi-phase | medium | **rolls structurally** on `hidden` (21 vs 27 ops); `tokens` constants only; `hidden@128` refused |
+| **T5: deep-fused conv** | deep_fused_conv_pool | conv0→conv1→pool; pool tile enters address math as a spatial product | multi-axis / polynomial constant inference **and** spatial-output unroll rolling | high | refused (diagnosed, see Step 2) |
+| *(untiered)* small ops | elementwise, reduce, layernorm2d, rmsnorm2d, transpose, permute, topk_softmax, smoothquant | shallow `range(vec)` + reductions | index roll + peel | low | the pattern the roller handles best (probe `qk_block` rolls 78×); not competing for priority |
+
+Two notes on reading that status column.
+
+**"Rolls" does not imply structural compression.** Of the seven axes gated today,
+only two — GEMM `tile_n` and MoE `hidden` — actually emit a `static_for` and
+shrink the op count. The other five produce a recipe with *exactly* the concrete
+op count: the kernel emits the same instructions at every axis value and only the
+**constants** move, so rolling buys shape coverage (one artifact serves the
+family, held-out values included) without buying storage. Both are wins, but only
+the first is the "storage payoff" the phasing language promises, and conv is
+currently in the second group.
+
+**Difficulty no longer tracks tier order.** The high-expansion helpers
 (`SoftwarePipeline`, `CShuffleEpilogue`, `AsyncTileLoader`,
-`mfma_attention_*_inner_body`) concentrate in T2-T4.
+`mfma_attention_*_inner_body`) concentrate in T1, T3, and T5 under this ordering,
+so effort is front- and back-loaded rather than ramping.
 
 ## Step 5 — validation harness (the safety net)
 
@@ -308,14 +333,23 @@ A matrix regression that, for each (kernel family, shape set, arch):
 
 This makes rolling safe-by-construction: any mis-roll fails the comparison.
 
-**Delivered (device-free tier):** `drivers/parity_matrix.py` is the
+**Delivered (concrete tier):** `drivers/parity_matrix.py` is the
 parameterized matrix runner over every parity-emitter kernel × arch,
 checking BOTH backend paths
 (engine import + recipe VM) against the Python lowerer at the `.ll` level
-(byte-identical) with one flavor pinned — **45/45 buildable kernels byte-identical
-on gfx942 and gfx950**. The byte-identical-HSACO tier (adds comgr) is the per-shape
-`run_*_demo.sh` set; extend both over `instances/SUPPORT_MATRIX.md` for the full
-shape grid.
+(byte-identical) with one flavor pinned — **46/46 buildable kernels byte-identical
+on gfx942 and gfx950**.
+
+**Delivered (rolled tier):** `drivers/roll_hsaco_parity.py` closes the two gaps
+that leaves open — it exercises the *rolled* parametric recipe rather than a
+concrete trace, and compares final **HSACO** rather than IR text: 22/22 points
+byte-identical across gemm/conv/attention_dense/fused_moe on gfx950, 8 of them
+at held-out axis values. Rolled `.ll` is byte-identical too, at all 22 points:
+a rolled recipe cannot replay names verbatim the way a concrete one does, but
+the recipe carries Python's per-op `result_name_hint` and the roller keeps
+Python's lane naming for loop-carry fans, so both engines mint the same names
+off the same counter. A checksum therefore suffices to compare the rolled path.
+Extend both drivers over `instances/SUPPORT_MATRIX.md` for the full shape grid.
 
 ## Step 6 — productization
 
@@ -331,9 +365,12 @@ shape grid.
   `online.c`).
 - The provider's `ArtifactStore` recipe path (VM expand alongside `.hsaco`/`.ll`,
   gated by a provider-side C-JIT flag) — **pending integration**.
-- CI runs the parity matrix and the device replay gate
-  (`tests/portable_ir/test_portable_ir.py`, `drivers/gpu_replay.py`) on every
-  kernel change.
+- CI running the parity matrix, the rolled-recipe HSACO gate, and the device
+  replay gate (`tests/portable_ir/test_portable_ir.py`,
+  `drivers/roll_hsaco_parity.py`, `drivers/gpu_replay.py`) on every kernel
+  change — **not wired yet**; no workflow references rocke. These gates are
+  run by hand today. See
+  [`portable_ir_production_readiness.md`](../../../dsl_docs/architecture/portable_ir_production_readiness.md).
 
 ## Onboarding a new instance — what code (if any) is required?
 
@@ -344,7 +381,7 @@ roller extension that then covers all future instances of that pattern.**
 
 | New instance | Record (concrete / CPython-free) | Roll (storage win) |
 |---|---|---|
-| uses existing primitives, parametrization already in the roller's pattern library (index/nested rolls, peel, `static_if` cases, linear spec-scaled constants) | **0 code** — records + lowers byte-identically automatically | **declare structural spec axes only** (input to `roll(build_fn, spec_axes, arch)`) — 0 code |
+| uses existing primitives, parametrization already in the roller's pattern library (single-axis index rolls incl. runs inside a region, loop-carry fans, spec-scaled constants, spec-parametric types/attrs — **not** peel or `static_if` cases, see P2/P3) | **0 code** — records + lowers byte-identically automatically | **name the one structural axis and its sample points** (`roll(build_at, axis=…, sample_points=…)`) — 0 code |
 | uses a genuinely new structural-variation pattern | **0 code** | **extend the roller once**; the extension is amortized across every future instance with that pattern |
 | introduces a brand-new IRBuilder op (primitive) | **0 code** (captured as a generic op) | unaffected, *but* see caveat below |
 
@@ -384,15 +421,73 @@ failures, across all tiers (see Step 1).
   dependent unrolls are only convertible via the opt-in runtime-loop path, which
   is **not** byte-identical and is never the default.
 - **Arch SSOT.** New instances inherit arch handling for free *if* the arch is in
-  `arch_specs.json` + the backend registry; a new target (e.g. gfx1250) must be
-  added there first, and recipes carrying `arch` spec fields regenerated.
+  `arch_specs.json` + the backend registry; a genuinely new target must be added
+  there first, and recipes carrying `arch` spec fields regenerated. (All targets
+  currently in the plan's scope, gfx1250 included, are already registered.)
 
 ## Phasing & effort
 
-1. **P1 (small):** interception recorder + matrix oracle -> *all 78 kernels record concretely, byte-identical*. Unlocks the CPython-free path universally (no storage win yet).
-2. **P2:** generalize roller (nested + peel + multi-axis) -> roll **T1 + T2** (the bulk of kernel count, biggest storage payoff on GEMM/conv shape families).
-3. **P3:** `static_if` flag/case handling -> roll **T3 + T4** (attention flag forks, MoE phases) per arch-family.
-4. **P4:** add gfx1250 to SSOT + backends; CBOR/zstd bundle + provider `ArtifactStore` recipe path; ship.
+Status below is measured, not planned; each claim names the gate that produced it.
+
+### P1 — recorder + parity oracle · ✅ DONE
+
+Interception recorder plus the matrix oracle, unlocking the CPython-free path
+(no storage win). Gates: `parity_matrix` 46/46 byte-identical `.ll` on gfx942 and
+gfx950 across both replay paths; `hsaco_parity` 45/45 gfx950 and 32/32 gfx942
+byte-identical HSACO; `record_coverage` 0 recorder failures across the surface.
+
+The original wording promised *all 78 kernels*. The measurable surface is smaller:
+56 kernels reach the comparison, 12 are build-skipped, and 10 are correctly
+declined by the lowerer as wrong-arch. The **mechanism** is universal; the 78
+figure is not a gate anyone runs.
+
+### P2 — generalize the roller · 🟡 PARTIAL (outcome ahead of mechanisms)
+
+Target was rolling T1 (GEMM) + T2 (conv). The tier goals are partly met, but
+through different machinery than this phase names — worth separating so the
+remaining work is not read as done:
+
+*Delivered:* single-axis run rolling, including runs nested **inside** an
+`scf.for`/`scf.if` body; variable loop-carry fan rolling with lane-label analysis;
+linear spec-scaled constants; spec-parametric **types and attrs**; automatic
+kernel-name parameterization.
+
+*Still open — the three mechanisms this phase actually lists:*
+- **Nested rolling** in the intended sense (a *nest* of loops rolled
+  innermost-out, each level its own `static_for`). The roller emits **no nested
+  `static_for`** on any family today; what works is one run per level.
+- **Peeling.** Not implemented. Boundary-special iterations are only *named* as a
+  hypothesis in a refusal message; there is no peel code path.
+- **Multi-axis inference.** Not implemented. `roll_two` takes one axis and exactly
+  two traces. The recipe format and the C VM already handle N spec variables, so
+  this is an inference gap, not a format gap. See "Multi-axis constant
+  parameterization" in Step 2 for the intended N+1-trace solve — and note that
+  design covers *constant* inference only, not multi-axis **structural**
+  inference.
+
+Consequently T1 rolls on `tile_n` but not `tile_m`/`tile_k`, and T2 rolls
+constants only.
+
+### P3 — `static_if` flag/case handling · ❌ NOT STARTED
+
+Needed for T3 attention flag forks and T4 MoE phase routing. The VM executes
+`static_if` and hand-authored recipes use it (`examples/mini_attn.py` forks on
+`use_norm`), but **nothing infers it**: the roller emits zero `static_if` across
+every family that rolls today. Flag-fork coverage is therefore manual authoring
+only. Under the reprioritized tiers this phase gates the #3 priority rather than
+the #4, so it moves earlier than the old ordering implied.
+
+### P4 — targets, packaging, integration · 🟡 PARTIAL
+
+- **gfx1250 in the arch SSOT + backends — done**, though as general arch work
+  rather than portable-IR work: `arch_specs.json` carries it alongside gfx90a,
+  gfx942, gfx950, gfx1151, gfx1201, and there are `instances/gfx1250/` kernels.
+- **CBOR bundle — done** and gated: codec, `(key, arch)` container, C-side lookup,
+  exact round-trip.
+- **zstd compression — not started.**
+- **Provider `ArtifactStore` recipe path — not started**; the symbol does not
+  appear in the source. Tracked as gap 7 of the production readiness review.
+- **Ship — blocked**, on the P0 shared-library linker collision (gap 1).
 
 ## Risks & fallbacks
 
@@ -410,9 +505,14 @@ failures, across all tiers (see Step 1).
 
 ## Bottom line
 
-Record is universal and cheap (interception recorder) — it makes the CPython-free
-path available for all 78 kernels immediately. Roll is the incremental
-storage win, scaled by generalizing the roller (nested + peel + `static_if` +
-multi-axis) tier by tier, with arch handled as ~2-3 recipe families plus
-`static_if` on catalog predicates. The byte-identical HSACO matrix oracle keeps
-the whole effort safe.
+Record is universal and cheap (interception recorder), and it is **done** — the
+CPython-free path is available for every kernel that builds, proven byte-identical
+at both `.ll` and HSACO. Roll is the incremental win and is **partially done**:
+every priority tier except deep-fused conv rolls on at least one axis, but only
+GEMM and MoE compress structurally, and the three mechanisms that would broaden
+this — nested loop-nest rolling, peeling, and multi-axis inference — plus
+`static_if` case inference are all still open (P2/P3). Arch stays a ~2-3 recipe
+family multiplier rather than one artifact per gfx target. The byte-identical
+oracle is what keeps the whole effort safe: a roller that cannot prove a pattern
+declines and the concrete path still ships, so unfinished phases cost coverage,
+never correctness.

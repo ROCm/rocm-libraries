@@ -70,9 +70,13 @@ def _op_to_instr(op):
         return {"op": "ret"}
     instr = {"op": "emit", "opcode": op.name, "in": [_reg(o) for o in op.operands]}
     if op.results:
+        from rocke.portable_ir.src.recording_builder import result_pfx
+
+        pfx = result_pfx(op)
         instr["out"] = {
             "bind": _reg(op.results[0]),
             "type": _type_to_json(op.results[0].type),
+            **({"pfx": pfx} if pfx else {}),
         }
     if op.attrs:
         instr["attrs"] = _attrs_to_json(op.attrs)

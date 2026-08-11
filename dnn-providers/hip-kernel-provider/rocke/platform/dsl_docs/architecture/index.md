@@ -24,6 +24,9 @@ builders are cataloged separately in [`../instances/index.md`](../instances/inde
 - [`portable_ir_schema.md`](portable_ir_schema.md) — the JSON/CBOR artifact
   schemas the C++ engine replays at runtime, and the byte-identity and device
   gates on that path.
+- [`portable_ir_production_readiness.md`](portable_ir_production_readiness.md) —
+  assessment of that path against production requirements: measured evidence,
+  gap analysis, and the acceptance plan for the implementation story.
 
 ## Addressing and layout
 
