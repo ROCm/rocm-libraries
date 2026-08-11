@@ -33,7 +33,7 @@ fails on an unknown spelling; there is no catch-all category. The current closur
 
 This closes the current header surface, not the adoption binary audit. Release Linux and
 Windows rocBLAS artifacts may still contain accidental C++ or unheadered C exports; those
-must be added to the relevant public ABI-line façade or deliberately removed before its
+must be added to the relevant public ABI-line facade or deliberately removed before its
 immutable launch snapshot.
 
 | Cluster | Public callables | Proposed provider primitive |

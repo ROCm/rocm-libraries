@@ -29,7 +29,7 @@ Protocol operations use canonical public family enum and status types wherever o
 
 - BLAS and solver use rocBLAS public types and `rocblas_status`.
 - RAND uses rocRAND public types and `rocrand_status`.
-- hipBLAS, hipBLASLt, hipSOLVER, and hipRAND are façades whose aliases and translations are
+- hipBLAS, hipBLASLt, hipSOLVER, and hipRAND are facades whose aliases and translations are
   checked against the canonical provider family.
 
 There is no duplicate normalized status namespace at the operation boundary. Protocol-only
@@ -58,8 +58,8 @@ supports both required deployment shapes:
 - A replacement implementation ships one DSO whose query function returns the classic table
   for the BLAS domain and the LT table for the BLASLt domain.
 - The legacy migration keeps rocBLAS/Tensile and hipBLASLt/TensileLite in separate provider
-  DSOs—concretely `librocblas-provider-tensile.so` and
-  `libhipblaslt-provider-tensilelite.so`—and assigns their manifest entries the same cohort
+  DSOs--concretely `librocblas-provider-tensile.so` and
+  `libhipblaslt-provider-tensilelite.so`--and assigns their manifest entries the same cohort
   identity.
 
 An integrated replacement may instead use a name such as
@@ -69,7 +69,7 @@ contracts and domain queries are the compatibility mechanism.
 
 Physical module identity is therefore not required; compatible cohort identity is. rocBLAS
 fallback may only consult the LT entry selected from its own cohort. Provider-owned algorithm
-tokens cannot cross cohort boundaries. hipBLAS is a public façade over the same cohort and
+tokens cannot cross cohort boundaries. hipBLAS is a public facade over the same cohort and
 has no provider protocol of its own.
 
 Each domain owns its provider-private context lifecycle. In particular, a hipBLASLt provider
@@ -149,7 +149,7 @@ of the public provider SDK and may not accept a loader/public handle.
 
 Requests describe public rocBLAS data and policy enums, index width, dense operands, pivots,
 tau, info, workspace, and operation-specific dimensions. Workspace query and execution are
-separate operations so a façade can preserve both rocSOLVER and hipSOLVER conventions.
+separate operations so a facade can preserve both rocSOLVER and hipSOLVER conventions.
 
 The full protocol is divided into:
 
@@ -162,14 +162,14 @@ The full protocol is divided into:
 - Sparse direct and iterative solve.
 - Refactorization.
 
-Dense hipSOLVER is a grandfathered public façade. Its loader handle participates in the same
+Dense hipSOLVER is a grandfathered public facade. Its loader handle participates in the same
 BLAS/solver cohort and initially reproduces the existing fact that `hipsolverCreate` creates
 a rocBLAS-compatible context. Loader-owned Jacobi, SVD, parameter, sparse, and refactor
 objects use dynamic allocation during migration. Sparse and refactor handles are explicit
 child contexts rather than casts of a dense handle.
 
 Host LAPACK fallbacks, logging activation, device-memory-size queries, and workspace mutation
-are façade policy and are inventoried individually. They must not leak into the narrow solver
+are facade policy and are inventoried individually. They must not leak into the narrow solver
 provider contract merely because the current hipSOLVER implementation performs them.
 
 ## RAND protocol
@@ -184,7 +184,7 @@ discrete operations. Output type and distribution parameters are explicit becaus
 API often encodes them in the function name. The provider also covers discrete-distribution
 lifecycle and direction-vector/scramble-constant queries.
 
-hipRAND is a public façade over this protocol and has no separate provider contract. RAND
+hipRAND is a public facade over this protocol and has no separate provider contract. RAND
 provider DSOs must hide all C++ template and weak implementation artifacts; only the query
 symbol is exported.
 

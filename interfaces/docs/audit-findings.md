@@ -1,6 +1,6 @@
 # Initial ABI audit findings
 
-## hipSOLVER is a public façade ABI
+## hipSOLVER is a public facade ABI
 
 `hipsolver.h` is installed as the master header and includes the dense, dense64, sparse,
 refactor, types, and functions headers even though their paths contain `internal`.
@@ -16,14 +16,14 @@ or initially preserve the identical handle object.
 
 hipSOLVER is not only a thin symbol rename. It also owns dynamically allocated Jacobi/SVD
 info objects, workspace policy, sparse and refactor objects, logging behavior, and a host
-LAPACK fallback for functionality absent from rocSOLVER. It remains a façade with no new
+LAPACK fallback for functionality absent from rocSOLVER. It remains a facade with no new
 provider protocol, but every one of those behaviors needs an explicit edge classification.
 
 ## Public enum coupling
 
 hipSOLVER re-declares or aliases hipBLAS operation, fill, diagonal, and side values. These
 numeric relationships are already public compatibility constraints. Provider protocols now
-use canonical rocBLAS/rocRAND public enum and status types directly, and façade builds must
+use canonical rocBLAS/rocRAND public enum and status types directly, and facade builds must
 static-assert every promised alias.
 
 ## rocBLAS and hipBLASLt behavior
