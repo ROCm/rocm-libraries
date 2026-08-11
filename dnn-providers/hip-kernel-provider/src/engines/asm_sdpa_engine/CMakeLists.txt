@@ -122,23 +122,27 @@ if(NOT EXISTS "${_KPACK_PYTHON_DIR}/rocm_kpack/kpack.py")
         "Set -DKPACK_PYTHON_DIR=<rocm-systems>/shared/kpack/python")
 endif()
 
-# --- Ensure zstandard is available (required by rocm_kpack) ---
-execute_process(
-    COMMAND ${Python3_EXECUTABLE} -c "import zstandard"
-    RESULT_VARIABLE _zstd_check
-    OUTPUT_QUIET ERROR_QUIET
-)
-if(NOT _zstd_check EQUAL 0)
-    message(STATUS "Installing Python 'zstandard' package (required by rocm_kpack)...")
+# --- Ensure rocm_kpack runtime dependencies are available ---
+set(_KPACK_PIP_DEPS "zstandard>=0.20.0" "msgpack")
+foreach(_dep ${_KPACK_PIP_DEPS})
+    string(REGEX REPLACE "[>=<].*" "" _mod "${_dep}")
     execute_process(
-        COMMAND ${Python3_EXECUTABLE} -m pip install "zstandard>=0.20.0"
-        RESULT_VARIABLE _pip_result
+        COMMAND ${Python3_EXECUTABLE} -c "import ${_mod}"
+        RESULT_VARIABLE _dep_check
+        OUTPUT_QUIET ERROR_QUIET
     )
-    if(NOT _pip_result EQUAL 0)
-        message(FATAL_ERROR "Failed to install 'zstandard' Python package. "
-            "Install manually via: pip install zstandard>=0.20.0")
+    if(NOT _dep_check EQUAL 0)
+        message(STATUS "Installing Python '${_dep}' package (required by rocm_kpack)...")
+        execute_process(
+            COMMAND ${Python3_EXECUTABLE} -m pip install "${_dep}"
+            RESULT_VARIABLE _pip_result
+        )
+        if(NOT _pip_result EQUAL 0)
+            message(FATAL_ERROR "Failed to install '${_dep}' Python package. "
+                "Install manually via: pip install ${_dep}")
+        endif()
     endif()
-endif()
+endforeach()
 
 # --- Per-arch kpack packing custom commands ---
 set(ASM_KPACK_PACK_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/asm/asm_kernels/pack.py")
