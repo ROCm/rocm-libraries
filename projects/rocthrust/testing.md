@@ -3,7 +3,7 @@
 Status: Draft\
 Owner: @RobsonRLemos\
 Technical Lead: @stanleytsang-amd\
-Last Updated: 08/11/2026
+Last Updated: August 11, 2026
 
 ## Component Overview
 rocThrust is the ROCm parallel-algorithms library — a HIP port of NVIDIA's Thrust. It provides a high-level, STL-like C++ template interface (`thrust::sort`, `thrust::reduce`, `thrust::transform`, iterators, `device_vector`, execution policies, memory resources, etc.) implemented on top of **rocPRIM** and optimized for AMD GPUs. It sits one layer above rocPRIM in the ROCm math stack and is source-compatible with CUDA Thrust so existing Thrust code ports to AMD GPUs with minimal changes.

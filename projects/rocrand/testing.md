@@ -3,7 +3,7 @@
 Status: Draft\
 Owner: @RobsonRLemos\
 Technical Lead: @stanleytsang-amd\
-Last Updated: 05/08/2026
+Last Updated: August 05, 2026
 
 ## Component Overview
 rocRAND is the ROCm pseudorandom and quasirandom number generation library, implemented in HIP and optimized for AMD GPUs. It is a foundational math primitive that sits directly on top of HIP/ROCm and serves as the backend for `hipRAND` (the ROCm equivalent of `cuRAND`).
