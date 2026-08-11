@@ -67,7 +67,9 @@ The core layer is GEMM- and AMDGPU-agnostic. It contains only:
 - `Layout`;
 - owning, runtime-typed `Tensor`;
 - non-owning, runtime-typed `TensorView`; and
-- non-owning, runtime-typed `MutableTensorView`.
+- non-owning, runtime-typed `MutableTensorView`; and
+- the narrow compile-time `TypedTensorView<T>` adapter used for caller-defined
+  scalar wrappers and measured hot paths.
 
 The core public header must not include or name GEMM, GPU runtimes, GPU
 architectures, product enums, test frameworks, BLAS, generation policies,
@@ -110,6 +112,7 @@ Tensor::mutableView();
 Tensor::to(ScalarType);
 
 TensorView::fromNative(Layout, nativeValues);
+TensorView::fromNative(nativeValues);
 TensorView::type();
 TensorView::shape();
 TensorView::layout();
@@ -120,12 +123,22 @@ TensorView::to(ScalarType);
 MutableTensorView::fromNative(Layout, nativeValues);
 MutableTensorView::loadAs<T>(indices);
 MutableTensorView::storeFrom(indices, value);
+
+TypedTensorView<T>::TypedTensorView(Layout, nativeValues);
+TypedTensorView<T>::TypedTensorView(nativeValues);
+TypedTensorView<T>::shape();
+TypedTensorView<T>::layout();
+TypedTensorView<T>::storage();
+TypedTensorView<T>::at(indices);
 ```
 
 `Tensor` owns its bytes and has value semantics: copying it performs a deep
-copy. Views never own storage. Layout strides and offsets are measured in
-logical scalar elements, including for sub-byte formats; the tensor layer
-performs the element-to-bit addressing internally.
+copy. Views never own storage. `TypedTensorView<T>` binds storage and layout
+without requiring `T` to be a component-native scalar type; this is how
+product wrappers cross the typed comparison boundary without becoming
+component dependencies. Layout strides and offsets are measured in logical
+scalar elements, including for sub-byte formats; the tensor layer performs the
+element-to-bit addressing internally.
 
 `to(ScalarType)` performs explicit runtime storage conversion while preserving
 shape, strides, and offset. Same-type conversion copies the layout's required
@@ -262,10 +275,19 @@ One plan can select logical elements and collect:
 - unwritten-sentinel checks before, inside, and after logical tensor storage.
 
 The same API accepts runtime `TensorView` objects or typed caller-owned
-storage. Typed adapters are useful for product scalar wrappers and preserve a
+storage through `TypedTensorView<T>`:
+
+```cpp
+TypedTensorView<ExternalHalf> observed(layout, observedStorage);
+TypedTensorView<ExternalHalf> expected(layout, expectedStorage);
+ComparisonResult report = compare(observed, expected, options);
+```
+
+The typed adapter is useful for product scalar wrappers and preserves a
 vectorizable hot path without placing numerical comparison code in the
-product. hipBLASLt and TensileLite now retain only descriptor/type
-translation, host readback, option selection, and formatting/reporting.
+product. It is not a second rank-specific tensor hierarchy. hipBLASLt and
+TensileLite now retain only descriptor/type translation, host readback, option
+selection, and formatting/reporting.
 
 This ownership deliberately excludes hipBLASLt's runtime device
 `check_numerics_matrix` facility. That HIP kernel scans device memory for

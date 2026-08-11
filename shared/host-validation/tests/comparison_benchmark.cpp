@@ -52,6 +52,8 @@ int main(int argc, char** argv) {
         TensorView::fromNative<float>(layout, std::span<const float>(expected));
     const TensorView observedView =
         TensorView::fromNative<float>(layout, std::span<const float>(observed));
+    const TypedTensorView<float> typedExpectedView(layout, std::span<const float>(expected));
+    const TypedTensorView<float> typedObservedView(layout, std::span<const float>(observed));
     ComparisonOptions options = defaultComparisonOptions(ScalarType::Float32);
     options.computePointwiseStatistics = false;
     options.computeFrobenius = false;
@@ -64,10 +66,8 @@ int main(int argc, char** argv) {
     if (!report.passed() || report.compared != elements) return 1;
 
     ComparisonResult typedReport;
-    const double typedComponentSeconds = bestSeconds([&] {
-        typedReport = compare(std::span<const float>(observed), layout,
-                              std::span<const float>(expected), layout, options);
-    });
+    const double typedComponentSeconds =
+        bestSeconds([&] { typedReport = compare(typedObservedView, typedExpectedView, options); });
     if (!typedReport.passed() || typedReport.compared != elements) return 1;
 
     size_t offsetTraversalMismatches = 0;

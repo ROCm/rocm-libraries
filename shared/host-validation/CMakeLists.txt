@@ -86,7 +86,6 @@ target_sources(host-validation
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/generation_primitives.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/gemm.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/layer_norm.hpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/matrix_view.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/operation_types.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/reduction.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/softmax.hpp"
