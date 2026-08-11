@@ -482,39 +482,6 @@ inline std::unique_ptr<StateManager>
         cacheCapacity);
 }
 
-// ---------------------------------------------------------------------------
-// A no-op dispatch handler, generic over the handle type: sufficient wherever a test
-// needs buildPlan() or initializeExecutionContext() to succeed without asserting on the
-// launch itself. Shared by TestGenericEngine.cpp and TestGenericPlanBuilder.cpp.
-// ---------------------------------------------------------------------------
-
-template <typename THandle>
-class NoopDispatchHandler : public IKernelDispatchHandler<THandle>
-{
-public:
-    size_t workspaceBytes(const MatchContext& /*context*/,
-                          const BoundTokens& /*bound*/,
-                          const KernelDefinition& /*kernel*/) const override
-    {
-        return 0;
-    }
-
-    std::unique_ptr<PreparedDispatch> prepare(const MatchContext& /*context*/,
-                                              const BoundTokens& /*bound*/,
-                                              const KernelDefinition& /*kernel*/) const override
-    {
-        return std::make_unique<PreparedDispatch>();
-    }
-
-    void launch(const THandle& /*handle*/,
-                const PreparedDispatch& /*prepared*/,
-                const hipdnnPluginDeviceBuffer_t* /*deviceBuffers*/,
-                uint32_t /*numDeviceBuffers*/,
-                void* /*workspace*/) const override
-    {
-    }
-};
-
 /// Registers @p handler under @p symbol in DispatchRegistry<THandle> for a test's
 /// duration.
 template <typename THandle>
