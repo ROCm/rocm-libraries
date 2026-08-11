@@ -23,6 +23,7 @@
 
 #include <gtest/gtest.h>
 
+#include <string>
 #include <vector>
 
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
@@ -349,6 +350,43 @@ st.func @test_ds_read_wmma() {
     EXPECT_EQ(waitcnts[1].waitData->vscnt, -1);
     EXPECT_EQ(waitcnts[1].waitData->dscnt, -1);
     EXPECT_EQ(waitcnts[1].waitData->kmcnt, -1);
+}
+
+TEST_F(WaitCntInsertionTest, WaitCountIsCappedAtMaxInFlightMinusOne) {
+    std::string irString = R"(
+st.func @test_wait_count_cap() {
+^entry:
+)";
+    for (int i = 0; i < 65; ++i) {
+        irString += "  v" + std::to_string(i) +
+                    " = \"st.ds_load_b32\"(v100) { issueCycles = 1, latencyCycles = 52 }\n";
+    }
+    irString += R"(  v200 = "st.v_add_f32"(v0, v0) { issueCycles = 1, latencyCycles = 1 }
+}
+)";
+
+    StinkyIRConverter converter(getArch());
+    auto* func = parseIR(irString, converter);
+    ASSERT_NE(func, nullptr);
+
+    runInsertionPass(*func);
+
+    BasicBlock& entryBB = *func->begin();
+    auto waitcnts = getAllWaitCnts(entryBB);
+
+    ASSERT_EQ(waitcnts.size(), 1) << "The first load should still be tracked after 65 issues";
+
+    StinkyInstruction* add = findNthInst(entryBB, GFX::v_add_f32, 0);
+    ASSERT_NE(add, nullptr);
+
+    int addPos = getInstructionPosition(entryBB, add);
+    EXPECT_EQ(waitcnts[0].position, addPos - 1);
+    EXPECT_EQ(waitcnts[0].waitData->dlcnt, 63)
+        << "64 in-flight DS ops ahead of the producer must clamp to max wait count 63";
+    EXPECT_EQ(waitcnts[0].waitData->vlcnt, -1);
+    EXPECT_EQ(waitcnts[0].waitData->vscnt, -1);
+    EXPECT_EQ(waitcnts[0].waitData->dscnt, -1);
+    EXPECT_EQ(waitcnts[0].waitData->kmcnt, -1);
 }
 
 /**

@@ -224,7 +224,11 @@ INSTANTIATE_TEST_SUITE_P(
                    std::tuple{3, 2, 1, -1, -1, 200, 520, -1, "t:128,30"},
                    std::tuple{2, 1, -1, -1, -1, 99, 32, -1, "b:4,35"},
                    std::tuple{1, 2, 1, -1, -1, 33, 0, -1, "2"},
-                   std::tuple{1, 2, 1, -1, -1, 1, 10, 32, "2"})));
+                   std::tuple{1, 2, 1, -1, -1, 1, 10, 32, "2"},
+                   // d=128 on gfx1250: seqlen<2048 selects the qr_tdm decode (b64) tile,
+                   // seqlen>=2048 the prefill (b128) tile
+                   std::tuple{1, 2, 1, 128, 128, 512, 512, -1, "0"},
+                   std::tuple{1, 2, 1, 128, 128, 2048, 2048, -1, "0"})));
 
 TEST_P(AllLong, DataTypeConfig)
 {
@@ -1302,4 +1306,112 @@ TEST_P(PaddingCases, DataTypeConfig)
                                                1,    // num_splits
                                                COMMON_ARGS);
     CHECK_RESULT(result);
+}
+
+// ============================================================================
+// Host-only unit tests for fmha_batch_prefill_select_kv_load_mode() (in
+// fmha_fwd.hpp). Guards ROCm/aiter#3824: when page_block_size < kN0 the paged-KV
+// gather uses one SRD whose signed int32 voffset spans the whole K (or V) pool,
+// so base[31:0] + pool_bytes silently wraps once it crosses INT32_MAX (~2GB) -
+// even for sub-2GB pools placed high in the VA space.
+// ============================================================================
+
+namespace {
+
+using ck_tile::BlockAttentionKVCacheLoadModeEnum;
+
+constexpr auto kBuffer = BlockAttentionKVCacheLoadModeEnum::BUFFER_LOAD;
+constexpr auto kGlobal = BlockAttentionKVCacheLoadModeEnum::GLOBAL_LOAD_LDS;
+
+// The selector only reads the low 32 bits of the base VA; it never dereferences.
+const void* as_ptr(std::uint64_t va) { return reinterpret_cast<const void*>(va); }
+
+// Same low-32 base and single stride for both K and V.
+BlockAttentionKVCacheLoadModeEnum select(ck_tile::index_t page_block_size,
+                                         ck_tile::index_t kN0,
+                                         ck_tile::index_t num_total_pages,
+                                         ck_tile::index_t batch_stride,
+                                         ck_tile::index_t element_bytes,
+                                         std::uint64_t base_va)
+{
+    return fmha_batch_prefill_select_kv_load_mode(page_block_size,
+                                                  kN0,
+                                                  num_total_pages,
+                                                  batch_stride,
+                                                  batch_stride,
+                                                  element_bytes,
+                                                  as_ptr(base_va),
+                                                  as_ptr(base_va));
+}
+
+} // namespace
+
+// Fast path: page >= kN0 rebases the SRD per page, so BUFFER_LOAD is always safe
+// regardless of base VA or pool size.
+TEST(FmhaBatchPrefillKvLoadMode, PageGeKN0_AlwaysBufferLoad)
+{
+    const std::uint64_t high_base = 0xF000'0000ULL; // ~3.75GB low32
+    EXPECT_EQ(select(256, 128, 1'000'000, 256, 2, high_base), kBuffer);
+    EXPECT_EQ(select(128, 128, 1'000'000, 256, 2, high_base), kBuffer);
+}
+
+// Core boundary: base + pool == INT32_MAX stays BUFFER_LOAD (strictly-greater
+// comparison); one byte more flips to GLOBAL_LOAD_LDS.
+TEST(FmhaBatchPrefillKvLoadMode, ExactInt32MaxBoundary)
+{
+    // sum == INT32_MAX -> BUFFER_LOAD.
+    EXPECT_EQ(select(32, 128, 1, INT32_MAX, 1, 0x0ULL), kBuffer);
+    // sum == INT32_MAX + 1 -> GLOBAL_LOAD_LDS.
+    EXPECT_EQ(select(32, 128, 1, INT32_MAX, 1, 0x1ULL), kGlobal);
+}
+
+// The #3824 regression: a sub-2GB pool that is safe at a low base faults when
+// the allocator places it high in the VA space (the (2GB,4GB] danger band a
+// naive 0xFFFFFFFF/4GB check would miss).
+TEST(FmhaBatchPrefillKvLoadMode, SubTwoGiBPool_HighBaseTipsOverflow)
+{
+    const ck_tile::index_t pages = 500'000, stride = 256, ebytes = 2;
+    const auto pool = static_cast<std::uint64_t>(pages) * stride * ebytes; // ~244MB < 2GB
+    EXPECT_EQ(select(32, 128, pages, stride, ebytes, 0x0010'0000ULL), kBuffer);
+    const std::uint64_t high_base = 0x8000'0000ULL - pool / 2; // sum lands above 2GB
+    EXPECT_EQ(select(32, 128, pages, stride, ebytes, high_base), kGlobal);
+}
+
+// K and V are allocated independently: either one overflowing forces
+// GLOBAL_LOAD_LDS; neither overflowing stays BUFFER_LOAD.
+TEST(FmhaBatchPrefillKvLoadMode, PerTensorIndependence)
+{
+    const ck_tile::index_t pages = 500'000, ebytes = 2;
+    const std::uint64_t high = 0x8000'0000ULL - 0x0800'0000ULL; // near 2GB
+    const std::uint64_t low  = 0x0010'0000ULL;
+
+    // Only K overflows.
+    EXPECT_EQ(fmha_batch_prefill_select_kv_load_mode(
+                  32, 128, pages, 512, 1, ebytes, as_ptr(high), as_ptr(low)),
+              kGlobal);
+    // Only V overflows.
+    EXPECT_EQ(fmha_batch_prefill_select_kv_load_mode(
+                  32, 128, pages, 1, 512, ebytes, as_ptr(low), as_ptr(high)),
+              kGlobal);
+    // Neither overflows.
+    EXPECT_EQ(fmha_batch_prefill_select_kv_load_mode(
+                  32, 128, pages, 1, 1, ebytes, as_ptr(low), as_ptr(low)),
+              kBuffer);
+}
+
+// Scattered 1D paged KV (page_size=1 LINEAR + SGLANG_PAGE_TABLE_1D): the page
+// table holds arbitrary physical-page indices into the whole KV pool, so
+// num_total_pages does not bound the per-page voffset and the signed int32 SRD
+// offset can wrap independently of base[31:0] + pool_bytes. Single-token pages
+// (page_block_size == 1) must always take GLOBAL_LOAD_LDS, even when the
+// address-overflow check alone would keep BUFFER_LOAD.
+TEST(FmhaBatchPrefillKvLoadMode, SinglePageAlwaysGlobalLoad)
+{
+    // Low base, tiny in-bounds pool: the #9214 overflow check alone would pick
+    // BUFFER_LOAD, but a single-token page must be routed to GLOBAL_LOAD_LDS.
+    EXPECT_EQ(select(1, 128, 1'000, 64, 2, 0x0010'0000ULL), kGlobal);
+    // A >1 sub-tile page with the same in-bounds address keeps the BUFFER_LOAD
+    // fast path: the guard is scoped to page_block_size == 1 and does not regress
+    // the cases #9214 already handles.
+    EXPECT_EQ(select(32, 128, 1'000, 64, 2, 0x0010'0000ULL), kBuffer);
 }
