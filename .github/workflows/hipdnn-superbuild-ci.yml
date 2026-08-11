@@ -121,6 +121,7 @@ jobs:
             -DENABLE_CLANG_FORMAT=OFF \
             -DHIPKERNELPROVIDER_ENABLE_ROCKE=ON \
             -DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON \
+            -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON \
             -DENABLE_CLANG_TIDY=OFF
 
       - name: Build
@@ -282,6 +283,7 @@ jobs:
             -DENABLE_CLANG_TIDY=ON \
             -DHIPKERNELPROVIDER_ENABLE_ROCKE=ON \
             -DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON \
+            -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON \
             -DCMAKE_CXX_CLANG_TIDY=/usr/bin/clang-tidy-20
 
       - name: Build
