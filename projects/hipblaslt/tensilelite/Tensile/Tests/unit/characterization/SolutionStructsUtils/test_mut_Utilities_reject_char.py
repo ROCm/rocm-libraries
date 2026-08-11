@@ -66,7 +66,7 @@ def test_reject_none_state_with_default_print_is_safe(capsys):
     assert capsys.readouterr().out == "\nreject: "
 
 
-def test_reject_print_with_missing_solution_index_uses_sentinel(capsys):
+def test_reject_missing_solution_index_does_not_raise(capsys):
     state = {"Valid": True}
 
     assert reject(state, True) is True

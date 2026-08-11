@@ -31,38 +31,31 @@ def test_key_no_internal_args_uses_wrapped_state_and_restores_every_field(make_s
     assert state == before
 
 
-def test_key_no_internal_args_masks_raw_grouped_gemm_config(make_state):
-    grouped = make_state(ProblemType={"DataType": 0, "GroupedGemm": True})
-    plain = make_state(ProblemType={"DataType": 0, "GroupedGemm": False})
-
-    assert N.getKeyNoInternalArgs(grouped, splitGSU=False) == N.getKeyNoInternalArgs(
-        plain, splitGSU=False
-    )
-    assert grouped["ProblemType"]["GroupedGemm"] is True
-
-
-@pytest.mark.parametrize(("support_user_args", "same_key"), [(False, True), (True, False)])
-def test_key_no_internal_args_masks_grouped_gemm_only_without_user_args(
-    make_state, support_user_args, same_key
+@pytest.mark.parametrize("naming_fn", [N.getKeyNoInternalArgs, N.getKernelNameMin])
+@pytest.mark.parametrize("problem_type_form", ["raw", "object"])
+@pytest.mark.parametrize("support_user_args", [None, False, True])
+def test_naming_masks_grouped_gemm_only_without_user_args(
+    make_state, naming_fn, problem_type_form, support_user_args
 ):
-    grouped = make_state(
-        ProblemType=ProblemType(
-            {"DataType": 0, "GroupedGemm": True, "SupportUserArgs": support_user_args}, False
-        )
-    )
-    plain = make_state(
-        ProblemType=ProblemType(
-            {"DataType": 0, "GroupedGemm": False, "SupportUserArgs": support_user_args}, False
-        )
-    )
+    def problem_type(grouped_gemm):
+        config = {"DataType": 0, "GroupedGemm": grouped_gemm}
+        if support_user_args is not None:
+            config["SupportUserArgs"] = support_user_args
+        if problem_type_form == "raw":
+            return config
+        return ProblemType(config, False)
 
-    grouped_key = N.getKeyNoInternalArgs(grouped, splitGSU=False)
-    plain_key = N.getKeyNoInternalArgs(plain, splitGSU=False)
+    grouped = make_state(ProblemType=problem_type(True))
+    plain = make_state(ProblemType=problem_type(False))
+    grouped_name = naming_fn(grouped, splitGSU=False)
+    plain_name = naming_fn(plain, splitGSU=False)
+    effective_support_user_args = support_user_args if support_user_args is not None else problem_type_form == "object"
 
-    assert (grouped_key == plain_key) is same_key
-    assert ("_GG" in grouped_key) is support_user_args
-    assert "_GG" not in plain_key
+    assert (grouped_name == plain_name) is not effective_support_user_args
+    assert ("_GG" in grouped_name) is effective_support_user_args
+    assert "_GG" not in plain_name
     assert grouped["ProblemType"]["GroupedGemm"] is True
+    assert plain["ProblemType"]["GroupedGemm"] is False
 
 
 def test_key_no_internal_args_normalizes_only_fixed_wgmxcc(make_state):
@@ -72,6 +65,17 @@ def test_key_no_internal_args_normalizes_only_fixed_wgmxcc(make_state):
 
     assert fixed_four == fixed_eight
     assert auto != fixed_four
+
+
+def test_key_no_internal_args_masks_dispatch_only_stagger_u(make_state):
+    baseline = make_state(StaggerU=0)
+    varied = make_state(StaggerU=32)
+
+    assert N.getKeyNoInternalArgs(baseline, splitGSU=False) == N.getKeyNoInternalArgs(
+        varied, splitGSU=False
+    )
+    assert baseline["StaggerU"] == 0
+    assert varied["StaggerU"] == 32
 
 
 def test_key_no_internal_args_split_gsu_boundaries(make_state):
@@ -89,13 +93,6 @@ def test_kernel_name_split_gsu_boundary_two_preserves_pinned_typeerror(make_stat
     # GSU=4 alone cannot distinguish `> 1` from a `> 2` boundary mutant.
     with pytest.raises(TypeError):
         N.getKernelNameMin(make_state(GlobalSplitU=2), splitGSU=True)
-
-
-def test_kernel_name_split_gsu_auto_preserves_pinned_typeerror(make_state):
-    # Keep the automatic sentinel in its own node so mutmut selects this path
-    # independently from the parametrized characterization test.
-    with pytest.raises(TypeError):
-        N.getKernelNameMin(make_state(GlobalSplitU=-1), splitGSU=True)
 
 
 def test_kernel_name_unsplit_gsu_auto_is_masked(make_state):
@@ -144,40 +141,6 @@ def test_names_distinguish_auto_and_fixed_wgmxcc_and_restore_state(make_state):
     assert fixed == another_fixed
     assert auto_state["WorkGroupMappingXCC"] == -1
     assert fixed_state["WorkGroupMappingXCC"] == 8
-
-
-@pytest.mark.parametrize(("support_user_args", "same_name"), [(False, True), (True, False)])
-def test_kernel_name_masks_grouped_gemm_only_without_user_args(
-    make_state, support_user_args, same_name
-):
-    grouped = make_state(
-        ProblemType=ProblemType(
-            {"DataType": 0, "GroupedGemm": True, "SupportUserArgs": support_user_args}, False
-        )
-    )
-    plain = make_state(
-        ProblemType=ProblemType(
-            {"DataType": 0, "GroupedGemm": False, "SupportUserArgs": support_user_args}, False
-        )
-    )
-
-    grouped_name = N.getKernelNameMin(grouped, splitGSU=False)
-    plain_name = N.getKernelNameMin(plain, splitGSU=False)
-
-    assert (grouped_name == plain_name) is same_name
-    assert ("_GG" in grouped_name) is support_user_args
-    assert "_GG" not in plain_name
-    assert grouped["ProblemType"]["GroupedGemm"] is True
-
-
-def test_kernel_name_masks_raw_grouped_gemm_config(make_state):
-    grouped = make_state(ProblemType={"DataType": 0, "GroupedGemm": True})
-    plain = make_state(ProblemType={"DataType": 0, "GroupedGemm": False})
-
-    assert N.getKernelNameMin(grouped, splitGSU=False) == N.getKernelNameMin(
-        plain, splitGSU=False
-    )
-    assert grouped["ProblemType"]["GroupedGemm"] is True
 
 
 @pytest.mark.parametrize("missing", ["MacroTile0", "MacroTile1", "DepthU"])
