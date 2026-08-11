@@ -28,6 +28,7 @@
 #include <hipblaslt/hipblaslt-ext.hpp>
 #include <iostream>
 #include <roc/host_validation/adapters/hipblaslt/Types.hpp>
+#include <roc/host_validation/typed_comparison.hpp>
 #include <roc/host_validation/validation.hpp>
 
 #include "helper.h"

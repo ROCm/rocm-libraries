@@ -5,7 +5,9 @@
 #include <array>
 #include <cmath>
 #include <complex>
+#include <cstdint>
 #include <limits>
+#include <roc/host_validation/typed_comparison.hpp>
 #include <roc/host_validation/validation.hpp>
 #include <stdexcept>
 
@@ -846,6 +848,43 @@ void testGenerationAndComparison() {
 void testComparisonProgram() {
     using namespace roc::host_validation;
 
+    const std::array<float, 0> emptyStorage{};
+    const Layout emptyLayout(Shape{0, 3}, {1, 1});
+    ComparisonOptions emptyOptions;
+    emptyOptions.computePointwiseStatistics = false;
+    emptyOptions.computeFrobenius = false;
+    emptyOptions.maxReportedMismatches = 0;
+    emptyOptions.selection.indexOrder = ComparisonIndexOrder::FirstDimensionFastest;
+    require(compare(TensorView::fromNative(emptyLayout, std::span<const float>(emptyStorage)),
+                    TensorView::fromNative(emptyLayout, std::span<const float>(emptyStorage)),
+                    emptyOptions)
+                    .compared == 0,
+            "Runtime fast comparison rejected an empty tensor.");
+    require(compare(TypedTensorView<float>(emptyLayout, std::span<const float>(emptyStorage)),
+                    TypedTensorView<float>(emptyLayout, std::span<const float>(emptyStorage)),
+                    emptyOptions)
+                    .compared == 0,
+            "Typed fast comparison rejected an empty tensor.");
+
+    const std::array<double, 3> reversedStorage{1.0, 2.0, 3.0};
+    const Layout reversedLayout(Shape{3}, {-1}, 2);
+    ComparisonOptions reversedMetrics;
+    reversedMetrics.pointwise = false;
+    reversedMetrics.computePointwiseStatistics = false;
+    reversedMetrics.computeFrobenius = true;
+    reversedMetrics.maxReportedMismatches = 0;
+    const auto reversedRuntimeResult =
+        compare(TensorView::fromNative(reversedLayout, std::span<const double>(reversedStorage)),
+                TensorView::fromNative(reversedLayout, std::span<const double>(reversedStorage)),
+                reversedMetrics);
+    const auto reversedTypedResult =
+        compare(TypedTensorView<double>(reversedLayout, std::span<const double>(reversedStorage)),
+                TypedTensorView<double>(reversedLayout, std::span<const double>(reversedStorage)),
+                reversedMetrics);
+    require(reversedTypedResult.compared == reversedRuntimeResult.compared &&
+                reversedTypedResult.frobeniusDifference == 0.0,
+            "Negative-stride typed comparison chunks diverged from runtime comparison.");
+
     const std::array<float, 8> expectedStorage{1.0f, 2.0f, -99.0f, 3.0f, 4.0f, -99.0f, 5.0f, 6.0f};
     auto observedStorage = expectedStorage;
     observedStorage[4] += 0.5f;
@@ -855,6 +894,7 @@ void testComparisonProgram() {
     ComparisonOptions selected;
     selected.selection.indexOrder = ComparisonIndexOrder::FirstDimensionFastest;
     selected.selection.stride = 2;
+    selected.computeFrobenius = false;
     const auto selectedResult =
         compare(TensorView::fromNative(layout, std::span<const float>(observedStorage)),
                 TensorView::fromNative(layout, std::span<const float>(expectedStorage)), selected);
@@ -864,6 +904,37 @@ void testComparisonProgram() {
                 selectedResult.reportedMismatches[0].coordinates == std::vector<size_t>({0, 2}) &&
                 selectedResult.reportedMismatches[0].observedOffset == 6,
             "Selected comparison reported the wrong logical location.");
+    const auto typedSelectedResult =
+        compare(TypedTensorView<float>(layout, std::span<const float>(observedStorage)),
+                TypedTensorView<float>(layout, std::span<const float>(expectedStorage)), selected);
+    require(typedSelectedResult.compared == selectedResult.compared &&
+                typedSelectedResult.mismatches == selectedResult.mismatches &&
+                typedSelectedResult.reportedMismatches.size() ==
+                    selectedResult.reportedMismatches.size() &&
+                typedSelectedResult.reportedMismatches[0].index ==
+                    selectedResult.reportedMismatches[0].index &&
+                typedSelectedResult.reportedMismatches[0].observedOffset ==
+                    selectedResult.reportedMismatches[0].observedOffset &&
+                typedSelectedResult.reportedMismatches[0].matched ==
+                    selectedResult.reportedMismatches[0].matched,
+            "Runtime and typed selected comparison evidence diverged.");
+
+    ComparisonOptions paddedMetrics;
+    paddedMetrics.pointwise = false;
+    paddedMetrics.computePointwiseStatistics = false;
+    paddedMetrics.computeFrobenius = true;
+    paddedMetrics.maxReportedMismatches = 0;
+    paddedMetrics.selection.indexOrder = ComparisonIndexOrder::FirstDimensionFastest;
+    const auto paddedMetricResult = compare(
+        TensorView::fromNative(layout, std::span<const float>(observedStorage)),
+        TensorView::fromNative(layout, std::span<const float>(expectedStorage)), paddedMetrics);
+    const auto typedPaddedMetricResult = compare(
+        TypedTensorView<float>(layout, std::span<const float>(observedStorage)),
+        TypedTensorView<float>(layout, std::span<const float>(expectedStorage)), paddedMetrics);
+    require(
+        typedPaddedMetricResult.compared == paddedMetricResult.compared &&
+            typedPaddedMetricResult.frobeniusDifference == paddedMetricResult.frobeniusDifference,
+        "Regular strided typed comparison chunks diverged from runtime comparison.");
 
     const std::array<CallerDefinedFloat, 3> customObserved{
         CallerDefinedFloat{1.0f}, CallerDefinedFloat{2.0f}, CallerDefinedFloat{3.0f}};
@@ -875,6 +946,58 @@ void testComparisonProgram() {
                         std::span<const CallerDefinedFloat>(customExpected)))
                 .passed(),
             "Typed tensor comparison rejected a caller-defined scalar type.");
+
+    const std::array<uint64_t, 1> wideIntegerObserved{uint64_t{1} << 53};
+    const std::array<uint64_t, 1> wideIntegerExpected{(uint64_t{1} << 53) + 1};
+    ComparisonOptions fastIntegerOptions;
+    fastIntegerOptions.computePointwiseStatistics = false;
+    fastIntegerOptions.computeFrobenius = false;
+    fastIntegerOptions.maxReportedMismatches = 0;
+    const auto fastIntegerComparison =
+        compare(TypedTensorView<uint64_t>(std::span<const uint64_t>(wideIntegerObserved)),
+                TypedTensorView<uint64_t>(std::span<const uint64_t>(wideIntegerExpected)),
+                fastIntegerOptions);
+    require(!fastIntegerComparison.passed() && fastIntegerComparison.mismatches == 1,
+            "Typed fast comparison rounded distinct wide integers together.");
+
+    fastIntegerOptions.maxReportedMismatches = 1;
+    const auto reportedIntegerComparison =
+        compare(TypedTensorView<uint64_t>(std::span<const uint64_t>(wideIntegerObserved)),
+                TypedTensorView<uint64_t>(std::span<const uint64_t>(wideIntegerExpected)),
+                fastIntegerOptions);
+    require(!reportedIntegerComparison.passed() && reportedIntegerComparison.mismatches == 1 &&
+                reportedIntegerComparison.reportedMismatches.size() == 1 &&
+                !reportedIntegerComparison.reportedMismatches[0].matched,
+            "Typed detailed comparison changed the wide-integer pointwise decision.");
+
+    const auto runtimeIntegerComparison =
+        compare(TensorView::fromNative(std::span<const uint64_t>(wideIntegerObserved)),
+                TensorView::fromNative(std::span<const uint64_t>(wideIntegerExpected)));
+    require(!runtimeIntegerComparison.passed() && runtimeIntegerComparison.mismatches == 1,
+            "Runtime detailed comparison rounded distinct wide integers together.");
+
+    ComparisonOptions subUnitIntegerTolerance;
+    subUnitIntegerTolerance.absoluteTolerance = 0.5;
+    subUnitIntegerTolerance.computePointwiseStatistics = false;
+    subUnitIntegerTolerance.computeFrobenius = false;
+    subUnitIntegerTolerance.maxReportedMismatches = 0;
+    require(!compare(TypedTensorView<uint64_t>(std::span<const uint64_t>(wideIntegerObserved)),
+                     TypedTensorView<uint64_t>(std::span<const uint64_t>(wideIntegerExpected)),
+                     subUnitIntegerTolerance)
+                 .passed(),
+            "Typed comparison lost a sub-unit tolerance at the uint64 precision boundary.");
+    require(!compare(TensorView::fromNative(std::span<const uint64_t>(wideIntegerObserved)),
+                     TensorView::fromNative(std::span<const uint64_t>(wideIntegerExpected)),
+                     subUnitIntegerTolerance)
+                 .passed(),
+            "Runtime comparison lost a sub-unit tolerance at the uint64 precision boundary.");
+
+    const std::array<int64_t, 1> signedIntegerObserved{std::numeric_limits<int64_t>::lowest()};
+    const std::array<int64_t, 1> signedIntegerExpected{std::numeric_limits<int64_t>::max()};
+    require(!compare(TensorView::fromNative(std::span<const int64_t>(signedIntegerObserved)),
+                     TensorView::fromNative(std::span<const int64_t>(signedIntegerExpected)))
+                 .passed(),
+            "Runtime comparison overflowed the signed-integer decision.");
 
     const std::array<double, 3> expected{3.0, 4.0, 0.0};
     const std::array<double, 3> observed{0.0, 4.0, 3.0};
@@ -892,6 +1015,29 @@ void testComparisonProgram() {
                 std::abs(metricResult.relativeFrobeniusError - std::sqrt(18.0) / 5.0) < 1e-12 &&
                 metricResult.frobeniusPassed,
             "Comparison Frobenius evidence is incorrect.");
+    const auto typedMetricResult =
+        compare(TypedTensorView<double>(std::span<const double>(observed)),
+                TypedTensorView<double>(std::span<const double>(expected)), metrics);
+    require(typedMetricResult.frobeniusExpected == metricResult.frobeniusExpected &&
+                typedMetricResult.frobeniusObserved == metricResult.frobeniusObserved &&
+                typedMetricResult.frobeniusDifference == metricResult.frobeniusDifference &&
+                typedMetricResult.relativeFrobeniusError == metricResult.relativeFrobeniusError,
+            "Runtime and typed Frobenius evidence diverged.");
+
+    ComparisonOptions sampledMetrics = metrics;
+    sampledMetrics.selection.first = 1;
+    sampledMetrics.selection.stride = 2;
+    const auto sampledMetricResult =
+        compare(TensorView::fromNative(std::span<const double>(observed)),
+                TensorView::fromNative(std::span<const double>(expected)), sampledMetrics);
+    const auto typedSampledMetricResult =
+        compare(TypedTensorView<double>(std::span<const double>(observed)),
+                TypedTensorView<double>(std::span<const double>(expected)), sampledMetrics);
+    require(typedSampledMetricResult.compared == sampledMetricResult.compared &&
+                typedSampledMetricResult.frobeniusDifference ==
+                    sampledMetricResult.frobeniusDifference &&
+                typedSampledMetricResult.maximumUlp == sampledMetricResult.maximumUlp,
+            "Irregular typed comparison fallback diverged from runtime comparison.");
 
     const double oneUlp = std::ldexp(1.0, -52);
     const std::array<double, 1> ulpObserved{1.0 + oneUlp};
@@ -905,6 +1051,13 @@ void testComparisonProgram() {
                 TensorView::fromNative(std::span<const double>(ulpExpected)), ulp);
     require(ulpResult.maximumUlp == 1.0 && ulpResult.averageUlp == 1.0 && ulpResult.ulpPassed,
             "Comparison ULP evidence is incorrect.");
+    const auto typedUlpResult =
+        compare(TypedTensorView<double>(std::span<const double>(ulpObserved)),
+                TypedTensorView<double>(std::span<const double>(ulpExpected)), ulp);
+    require(typedUlpResult.maximumUlp == ulpResult.maximumUlp &&
+                typedUlpResult.averageUlp == ulpResult.averageUlp &&
+                typedUlpResult.ulpPassed == ulpResult.ulpPassed,
+            "Runtime and typed ULP evidence diverged.");
     require(encodedUlpDistance(0.0, static_cast<double>(std::numeric_limits<float>::denorm_min()),
                                ScalarType::Float32) == 1.0,
             "Encoded ULP distance mishandled the F32 zero/subnormal boundary.");
@@ -923,6 +1076,16 @@ void testComparisonProgram() {
     require(nonFiniteResult.passed() && nonFiniteResult.matchedInfinities == 1 &&
                 nonFiniteResult.matchedNaNs == 1,
             "Complex non-finite comparison policy is incorrect.");
+    const auto typedNonFiniteResult =
+        compare(TypedTensorView<std::complex<double>>(
+                    std::span<const std::complex<double>>(complexObserved)),
+                TypedTensorView<std::complex<double>>(
+                    std::span<const std::complex<double>>(complexExpected)),
+                nonFinite);
+    require(typedNonFiniteResult.passed() &&
+                typedNonFiniteResult.matchedInfinities == nonFiniteResult.matchedInfinities &&
+                typedNonFiniteResult.matchedNaNs == nonFiniteResult.matchedNaNs,
+            "Runtime and typed complex non-finite comparison evidence diverged.");
 
     const std::array<double, 4> absoluteCandidates{1e-6, 1e-5, 1e-4, 1e-3};
     const std::array<double, 1> relativeCandidates{0.0};

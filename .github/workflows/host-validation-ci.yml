@@ -48,6 +48,7 @@ jobs:
             -DHOST_VALIDATION_BUILD_PYTHON=ON \
             -DHOST_VALIDATION_BUILD_BLAS_BACKEND=ON \
             -DHOST_VALIDATION_BUILD_MX_BACKEND=ON \
+            -DHOST_VALIDATION_BUILD_BENCHMARKS=ON \
             -DCMAKE_BUILD_TYPE=Release
 
       - name: Build and test
@@ -80,6 +81,12 @@ jobs:
             "${RUNNER_TEMP}/host-validation-install/include/roc/host_validation/detail/tensor_views.hpp"
           test ! -e \
             "${RUNNER_TEMP}/host-validation-install/include/roc/host_validation/detail/comparison.hpp"
+          test ! -e \
+            "${RUNNER_TEMP}/host-validation-install/include/roc/host_validation/detail/comparison_impl.hpp"
+          test ! -d \
+            "${RUNNER_TEMP}/host-validation-install/include/roc/host_validation/detail"
+          test -e \
+            "${RUNNER_TEMP}/host-validation-install/include/roc/host_validation/typed_comparison.hpp"
           cmake -S shared/host-validation/tests/package \
             -B "${RUNNER_TEMP}/host-validation-package-test" \
             -G Ninja \
@@ -87,6 +94,8 @@ jobs:
           cmake --build "${RUNNER_TEMP}/host-validation-package-test" --parallel 2
           "${RUNNER_TEMP}/host-validation-package-test/host-validation-package-test"
           "${RUNNER_TEMP}/host-validation-package-test/host-validation-operations-package-test"
+          "${RUNNER_TEMP}/host-validation-package-test/host-validation-comparison-package-test"
+          "${RUNNER_TEMP}/host-validation-package-test/host-validation-typed-comparison-package-test"
           "${RUNNER_TEMP}/host-validation-package-test/host-validation-tiled-package-test"
           "${RUNNER_TEMP}/host-validation-package-test/host-validation-blas-package-test"
           "${RUNNER_TEMP}/host-validation-package-test/host-validation-mx-package-test"

@@ -9,6 +9,7 @@
 #include <iostream>
 #include <limits>
 #include <roc/host_validation/comparison.hpp>
+#include <roc/host_validation/typed_comparison.hpp>
 #include <span>
 #include <vector>
 
@@ -70,33 +71,32 @@ int main(int argc, char** argv) {
         bestSeconds([&] { typedReport = compare(typedObservedView, typedExpectedView, options); });
     if (!typedReport.passed() || typedReport.compared != elements) return 1;
 
-    size_t offsetTraversalMismatches = 0;
-    const double offsetTraversalSeconds = bestSeconds([&] {
-        size_t mismatches = 0;
-        detail::forEachSelectedOffsetPair(
-            layout, layout, options.selection,
-            [&](size_t, ptrdiff_t observedOffset, ptrdiff_t expectedOffset) {
-                mismatches += observed[observedOffset] != expected[expectedOffset];
-            });
-        offsetTraversalMismatches = mismatches;
-    });
-    if (offsetTraversalMismatches != 0) return 1;
+    ComparisonOptions statisticsOptions = defaultComparisonOptions(ScalarType::Float32);
+    statisticsOptions.computeFrobenius = false;
+    statisticsOptions.selection.indexOrder = ComparisonIndexOrder::FirstDimensionFastest;
+    ComparisonResult statisticsReport;
+    const double statisticsComponentSeconds = bestSeconds(
+        [&] { statisticsReport = compare(observedView, expectedView, statisticsOptions); });
+    if (!statisticsReport.passed() || statisticsReport.compared != elements) return 1;
 
-    size_t decodeTraversalMismatches = 0;
-    const double decodeTraversalSeconds = bestSeconds([&] {
-        size_t mismatches = 0;
-        detail::forEachSelectedOffsetPair(
-            layout, layout, options.selection,
-            [&](size_t, ptrdiff_t observedOffset, ptrdiff_t expectedOffset) {
-                const auto a = detail::loadComparisonValueKnown<detail::Float32Tag>(
-                    observedView.storage(), observedOffset);
-                const auto b = detail::loadComparisonValueKnown<detail::Float32Tag>(
-                    expectedView.storage(), expectedOffset);
-                mismatches += a.real != b.real;
-            });
-        decodeTraversalMismatches = mismatches;
+    ComparisonResult typedStatisticsReport;
+    const double typedStatisticsComponentSeconds = bestSeconds([&] {
+        typedStatisticsReport = compare(typedObservedView, typedExpectedView, statisticsOptions);
     });
-    if (decodeTraversalMismatches != 0) return 1;
+    if (!typedStatisticsReport.passed() || typedStatisticsReport.compared != elements) return 1;
+
+    ComparisonOptions detailedOptions = defaultComparisonOptions(ScalarType::Float32);
+    detailedOptions.selection.indexOrder = ComparisonIndexOrder::FirstDimensionFastest;
+    ComparisonResult detailedReport;
+    const double detailedComponentSeconds =
+        bestSeconds([&] { detailedReport = compare(observedView, expectedView, detailedOptions); });
+    if (!detailedReport.passed() || detailedReport.compared != elements) return 1;
+
+    ComparisonResult typedDetailedReport;
+    const double typedDetailedComponentSeconds = bestSeconds([&] {
+        typedDetailedReport = compare(typedObservedView, typedExpectedView, detailedOptions);
+    });
+    if (!typedDetailedReport.passed() || typedDetailedReport.compared != elements) return 1;
 
     size_t baselineMismatches = 0;
     const double tolerance = defaultSymmetricRelativeTolerance(ScalarType::Float32);
@@ -124,7 +124,13 @@ int main(int argc, char** argv) {
               << " component_over_baseline=" << componentSeconds / baselineSeconds
               << " typed_component_seconds=" << typedComponentSeconds
               << " typed_component_over_baseline=" << typedComponentSeconds / baselineSeconds
-              << " offset_traversal_seconds=" << offsetTraversalSeconds
-              << " decode_traversal_seconds=" << decodeTraversalSeconds << std::endl;
+              << " statistics_component_seconds=" << statisticsComponentSeconds
+              << " typed_statistics_component_seconds=" << typedStatisticsComponentSeconds
+              << " typed_statistics_over_runtime="
+              << typedStatisticsComponentSeconds / statisticsComponentSeconds
+              << " detailed_component_seconds=" << detailedComponentSeconds
+              << " typed_detailed_component_seconds=" << typedDetailedComponentSeconds
+              << " typed_detailed_over_runtime="
+              << typedDetailedComponentSeconds / detailedComponentSeconds << std::endl;
     return 0;
 }
