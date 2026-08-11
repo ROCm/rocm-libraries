@@ -12,6 +12,9 @@ import numpy as np
 
 import roc_host_validation as hv
 
+MX_DATA_RANDOM_DOMAIN = 0x3F84D5B5B5470917
+MX_BOUNDED_SCALE_RANDOM_DOMAIN = 0xA24BAED4963EE407
+
 
 def counter_random(seed, stream, index):
     mask = (1 << 64) - 1
@@ -24,6 +27,142 @@ def counter_random(seed, stream, index):
     value = ((value ^ (value >> 30)) * 0xBF58476D1CE4E5B9) & mask
     value = ((value ^ (value >> 27)) * 0x94D049BB133111EB) & mask
     return (value ^ (value >> 31)) & mask
+
+
+def indexed_uniform_unit(seed, domain, index):
+    mantissa = counter_random(seed, domain, index) >> 11
+    return (mantissa + 0.5) / (1 << 53)
+
+
+def encode_fp4_e2m1(value):
+    value = np.float32(value)
+    sign = 0x8 if np.signbit(value) else 0
+    magnitude = abs(float(value))
+    positive_values = (0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0)
+    if math.isnan(magnitude) or magnitude >= positive_values[-1]:
+        return sign | 0x7
+    upper = next(
+        index for index, candidate in enumerate(positive_values) if candidate >= magnitude
+    )
+    if upper == 0:
+        return sign
+    lower = upper - 1
+    lower_distance = magnitude - positive_values[lower]
+    upper_distance = positive_values[upper] - magnitude
+    if lower_distance < upper_distance:
+        selected = lower
+    elif upper_distance < lower_distance:
+        selected = upper
+    else:
+        selected = lower if lower % 2 == 0 else upper
+    return sign | selected
+
+
+def decode_e8m0(raw):
+    return math.nan if raw == 0xFF else math.ldexp(1.0, raw - 127)
+
+
+def constrain_fp4_to_interval(raw, scale, minimum, maximum):
+    fp4_values = (
+        0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0,
+        -0.0, -0.5, -1.0, -1.5, -2.0, -3.0, -4.0, -6.0,
+    )
+    sign = raw & 0x8
+    magnitude = raw & 0x7
+    for _ in range(8):
+        represented = fp4_values[sign | magnitude] * scale
+        if minimum <= represented <= maximum:
+            return sign | magnitude
+        negative = bool(sign)
+        increase_magnitude = represented < minimum if not negative else represented > maximum
+        if increase_magnitude:
+            if magnitude == 0x7:
+                break
+            magnitude += 1
+        else:
+            if magnitude == 0:
+                break
+            magnitude -= 1
+    raise ValueError("bounded interval has no representable FP4 value")
+
+
+def bounded_mx_fp4_oracle(
+    dimensions,
+    leading_dimension,
+    block_axis,
+    block_size,
+    seed,
+    minimum,
+    maximum,
+):
+    rows, columns = dimensions
+    blocked_extent = dimensions[block_axis]
+    free_extent = dimensions[1 - block_axis]
+    block_count = (blocked_extent + block_size - 1) // block_size
+    scale_count = block_count * free_extent
+    source = np.empty(dimensions, dtype=np.float64)
+    for column in range(columns):
+        for row in range(rows):
+            logical_index = row + column * rows
+            unit = indexed_uniform_unit(seed, MX_DATA_RANDOM_DOMAIN, logical_index)
+            source[row, column] = minimum + (maximum - minimum) * unit
+
+    physical_raw = [0] * (leading_dimension * columns)
+    scale_raw = bytearray(scale_count)
+    scale_indices = np.empty(dimensions, dtype=np.uint32)
+    reference = np.empty(dimensions, dtype=np.float32)
+    fp4_values = np.asarray(
+        [0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0,
+         -0.0, -0.5, -1.0, -1.5, -2.0, -3.0, -4.0, -6.0],
+        dtype=np.float32,
+    )
+
+    for scale_index in range(scale_count):
+        if block_axis == 0:
+            block = scale_index % block_count
+            free_coordinate = scale_index // block_count
+        else:
+            block = scale_index // free_extent
+            free_coordinate = scale_index % free_extent
+        block_element_count = min(
+            block_size, blocked_extent - block * block_size
+        )
+        coordinates = []
+        for offset in range(block_element_count):
+            if block_axis == 0:
+                coordinates.append((block * block_size + offset, free_coordinate))
+            else:
+                coordinates.append((free_coordinate, block * block_size + offset))
+
+        maximum_magnitude = max(abs(source[row, column]) for row, column in coordinates)
+        requested_scale = maximum_magnitude / 6.0
+        selected_scale_raw = next(
+            raw for raw in range(0xFF) if decode_e8m0(raw) >= requested_scale
+        )
+        if (
+            selected_scale_raw < 0xFE
+            and counter_random(seed, MX_BOUNDED_SCALE_RANDOM_DOMAIN, scale_index) & 1
+        ):
+            selected_scale_raw += 1
+        scale_raw[scale_index] = selected_scale_raw
+        scale_value = decode_e8m0(selected_scale_raw)
+
+        for row, column in coordinates:
+            logical_index = row + column * rows
+            data_raw = encode_fp4_e2m1(source[row, column] / scale_value)
+            data_raw = constrain_fp4_to_interval(
+                data_raw, scale_value, minimum, maximum
+            )
+            physical_raw[row + column * leading_dimension] = data_raw
+            scale_indices[row, column] = scale_index
+            reference[row, column] = np.float32(fp4_values[data_raw] * scale_value)
+
+    return (
+        pack_bits(physical_raw, 4),
+        bytes(scale_raw),
+        scale_indices,
+        reference,
+    )
 
 
 def cxx_remainder(value, divisor):
@@ -78,6 +217,7 @@ FORMATS = {
     hv.ScalarType.Float8E4M3Fnuz: (8, 4, 3, 8, "fnuz"),
     hv.ScalarType.Float8E5M2Fnuz: (8, 5, 2, 16, "fnuz"),
     hv.ScalarType.E5M3: (8, 5, 3, 15, "e5m3_scale"),
+    hv.ScalarType.E4M3: (8, 4, 3, 7, "e4m3_scale"),
 }
 
 
@@ -93,6 +233,18 @@ def expected_value(scalar_type, raw):
         return math.nan
     if kind == "e5m3_scale" and raw == 0xFF:
         return math.nan
+    if kind == "e4m3_scale":
+        raw &= 0x7F
+        if raw == 0x7F:
+            return math.nan
+        return decode_binary(
+            raw,
+            exponent_bits,
+            mantissa_bits,
+            bias,
+            7,
+            signed=False,
+        )
     return decode_binary(
         raw,
         exponent_bits,
@@ -192,8 +344,11 @@ class CodecTests(unittest.TestCase):
                 encodable = ~np.isnan(expected)
                 encoded = hv.from_numpy(expected[encodable], scalar_type)
                 round_trip = unpack_bits(encoded.storage, int(encodable.sum()), bits)
+                expected_raw = np.asarray(raw, dtype=np.uint32)
+                if scalar_type == hv.ScalarType.E4M3:
+                    expected_raw &= 0x7F
                 np.testing.assert_array_equal(
-                    round_trip, np.asarray(raw, dtype=np.uint32)[encodable]
+                    round_trip, expected_raw[encodable]
                 )
 
     def test_exhaustive_float16_decode(self):
@@ -1259,6 +1414,81 @@ class TensorAndGemmTests(unittest.TestCase):
                         scale_index = scale_indices[row, column]
                         expected[row, column] = data[row, column] * scales[scale_index]
                 np.testing.assert_array_equal(reference, expected)
+
+    def test_bounded_mx_generation_matches_independent_python_oracle(self):
+        for dimensions, leading_dimension, block_axis, minimum, maximum in (
+            ((9, 5), 12, 0, -1.0, 1.0),
+            ((5, 9), 8, 1, -1.0, 1.0),
+            ((9, 5), 12, 0, 0.0, 0.9),
+        ):
+            with self.subTest(
+                dimensions=dimensions,
+                block_axis=block_axis,
+                minimum=minimum,
+                maximum=maximum,
+            ):
+                problem = hv.MxGenerationProblem()
+                problem.data_type = hv.ScalarType.Float4E2M1
+                problem.scale_type = hv.ScalarType.E8M0
+                problem.shape = hv.Shape(list(dimensions))
+                problem.leading_dimension = leading_dimension
+                problem.block_axis = block_axis
+                problem.block_size = 4
+                problem.seed = 12345
+                recipe = hv.MxGenerationRecipe()
+                recipe.mode = hv.MxGenerationMode.Bounded
+                recipe.parameter0 = minimum
+                recipe.parameter1 = maximum
+                problem.data = recipe
+
+                observed = hv.generate_mx(problem)
+                expected_data, expected_scales, expected_indices, expected_reference = (
+                    bounded_mx_fp4_oracle(
+                        dimensions,
+                        leading_dimension,
+                        block_axis,
+                        problem.block_size,
+                        problem.seed,
+                        minimum,
+                        maximum,
+                    )
+                )
+                self.assertEqual(observed.data.storage, expected_data)
+                self.assertEqual(observed.scales.storage, expected_scales)
+                np.testing.assert_array_equal(
+                    hv.to_numpy(observed.scale_indices, np.uint32),
+                    expected_indices,
+                )
+                np.testing.assert_array_equal(
+                    hv.to_numpy(observed.reference, np.float32),
+                    expected_reference,
+                )
+                self.assertTrue(
+                    np.all(
+                        (hv.to_numpy(observed.reference) >= minimum)
+                        & (hv.to_numpy(observed.reference) <= maximum)
+                    )
+                )
+
+    def test_mx_rejects_unsupported_independent_scale_recipe(self):
+        problem = hv.MxGenerationProblem()
+        problem.data_type = hv.ScalarType.Float4E2M1
+        problem.scale_type = hv.ScalarType.E8M0
+        problem.shape = hv.Shape([8, 8])
+        problem.block_axis = 0
+        problem.block_size = 4
+        data_recipe = hv.MxGenerationRecipe()
+        data_recipe.mode = hv.MxGenerationMode.Bounded
+        data_recipe.parameter0 = -1.0
+        data_recipe.parameter1 = 1.0
+        scale_recipe = hv.MxGenerationRecipe()
+        scale_recipe.mode = hv.MxGenerationMode.Normal
+        scale_recipe.parameter0 = 0.0
+        scale_recipe.parameter1 = 1.0
+        problem.data = data_recipe
+        problem.scale = scale_recipe
+        with self.assertRaises(ValueError):
+            hv.generate_mx(problem)
 
     def test_gemm_object_api_retains_owned_inputs_and_scaling(self):
         a_values = np.asarray([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)

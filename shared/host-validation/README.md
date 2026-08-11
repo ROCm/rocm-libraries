@@ -23,6 +23,9 @@ comparison used by ROCm library clients and tests.
 - `roc::host-validation-blas`
   - Optional compiled CBLAS implementation of `GemmBackend::Blas`.
   - Built with `HOST_VALIDATION_BUILD_BLAS_BACKEND=ON`.
+  - Leaves provider-global threading to the selected BLAS implementation.
+    Reproducible runs should set `OPENBLAS_NUM_THREADS`, `BLIS_NUM_THREADS`,
+    or `OMP_NUM_THREADS` as appropriate for that provider.
 - `roc::host-validation-tiled`
   - GPU-independent tiled implementation of `GemmBackend::Tiled`.
   - Supports dense F32/F64 accumulation, runtime input/output types,
@@ -31,8 +34,9 @@ comparison used by ROCm library clients and tests.
 - `roc::host-validation-mx`
   - Optional compiled block-scaled tensor data-generation implementation.
   - Built with `HOST_VALIDATION_BUILD_MX_BACKEND=ON`.
-  - Uses the product-independent `mxDataGenerator` backend and exports only
-    component-owned scalar, tensor, block-axis, and recipe types.
+  - Uses native coordinate-based generation with optional OpenMP parallelism
+    and exports only component-owned scalar, tensor, block-axis, and recipe
+    types.
 
 ## Component dependency contract
 
@@ -447,9 +451,14 @@ The operation is GEMM- and architecture-agnostic. A product adapter identifies
 which tensor axis is block-scaled and may subsequently transform the natural
 scale bytes for an architecture-specific upload layout. GFX950/GFX1250
 selection and swizzling are intentionally outside this target. The
-`scaleIndices` tensor makes the storage contract explicit, including legacy
-flat-buffer tail behavior, and lets NumPy independently verify
+`scaleIndices` tensor makes the blocked-axis mapping explicit and lets NumPy
+independently verify
 `reference == data * scales[scaleIndices]`.
+
+When OpenMP is available, MX generation uses at most eight threads by default
+and scales down for small tensors. An explicit `OMP_NUM_THREADS` overrides that
+default cap. Calls made from an existing OpenMP parallel region execute
+serially rather than creating a nested pool.
 
 ## Runtime reference epilogue
 
@@ -538,8 +547,9 @@ The operation supports:
 A slice is one logical combination of all coordinates except the sparsity
 axis. Product adapters may partition slices with OpenMP or another host
 executor without moving pruning, compression, random selection, or metadata
-arithmetic back into the product. The component itself has no OpenMP, HIP, or
-AMDGPU dependency.
+arithmetic back into the product. The sparsity operation itself has no OpenMP,
+HIP, or AMDGPU dependency; optional MX generation uses the bounded OpenMP
+policy described above.
 
 `encodeTwoOfFourMetadata` remains available when retained indices already
 exist and metadata must be produced as a separate operation.
@@ -613,8 +623,9 @@ The `roc_host_validation` package currently provides:
 
 The NumPy suite independently checks:
 
-- every raw FP4, FP6, OCP/FNUZ FP8, and E5M3 encoding;
+- every raw FP4, FP6, OCP/FNUZ FP8, E4M3-scale, and E5M3-scale encoding;
 - all 65,536 FP16 and BF16 decodings;
+- differential raw decoding against matching `ml_dtypes` formats;
 - finite low-precision round trips;
 - the OCP E8M0 no-zero contract;
 - affine layout decoding;
@@ -637,8 +648,8 @@ The NumPy suite independently checks:
 `TensorView.from_numpy` borrows exact native NumPy bool, integer,
 FP16/FP32/FP64, and complex64/complex128 storage without copying. It retains
 the ndarray owner and normalizes signed strides into the component layout.
-Packed and decoded-only formats such as BF16, FP8, FP6, FP4, E8M0, and E5M3
-continue through the explicit owning/copying conversion path. Mutable
+Packed and decoded-only formats such as BF16, FP8, FP6, FP4, E8M0, E4M3, and
+E5M3 continue through the explicit owning/copying conversion path. Mutable
 NumPy-backed views are intentionally not exposed yet.
 
 ## Standalone tests
