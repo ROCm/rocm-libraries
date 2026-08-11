@@ -30,6 +30,15 @@ using hipdnn_tests::toVec;
 namespace
 {
 
+// Selects which dweight properties buildGraph() supplies, so the remainder are left for
+// infer_properties_node() to derive during lowering.
+enum class DweightSetup
+{
+    ALL_SET,
+    STRIDE_INFERRED,
+    DIMS_AND_STRIDE_INFERRED,
+};
+
 // Lifts a frontend graph via build_operation_graph(handle), then
 // reconstructs it with fromBackendDescriptor() for verification.
 class IntegrationMoeGroupedMatmulBwdDescriptorLifting : public IntegrationTestFixture
@@ -49,7 +58,8 @@ protected:
     }
 
     static std::shared_ptr<TestableGraphLifting> buildGraph(MoeGroupedMatmulBwdAttributes attrs,
-                                                            bool setDweightStride = true)
+                                                            DweightSetup dweightSetup
+                                                            = DweightSetup::ALL_SET)
     {
         auto graph = std::make_shared<TestableGraphLifting>();
         graph->set_name("MoeGroupedMatmulBwdLiftingTestGraph")
@@ -83,8 +93,11 @@ protected:
         dweight->set_uid(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_UID)
             .set_output(true)
             .set_name("dweight");
-        dweight->set_dim(toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_DIMS));
-        if(setDweightStride)
+        if(dweightSetup != DweightSetup::DIMS_AND_STRIDE_INFERRED)
+        {
+            dweight->set_dim(toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_DIMS));
+        }
+        if(dweightSetup == DweightSetup::ALL_SET)
         {
             dweight->set_stride(toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_STRIDES));
         }
@@ -413,10 +426,10 @@ TEST_F(IntegrationMoeGroupedMatmulBwdDescriptorLifting, AutoAssignedUidsPreserve
 
 // Builds a MoeGroupedMatmulBwd graph with dweight strides left unset so the full
 // lowering pipeline exercises infer_properties_node()'s stride-inference branch, then
-// verifies the row-major strides survive the lifting round-trip.
+// verifies the column-major strides survive the lifting round-trip.
 TEST_F(IntegrationMoeGroupedMatmulBwdDescriptorLifting, InferredDweightStridesSurviveRoundTrip)
 {
-    auto originalGraph = buildGraph(createAttributes(), false);
+    auto originalGraph = buildGraph(createAttributes(), DweightSetup::STRIDE_INFERRED);
 
     auto liftedGraph = liftGraph(*originalGraph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
@@ -432,6 +445,34 @@ TEST_F(IntegrationMoeGroupedMatmulBwdDescriptorLifting, InferredDweightStridesSu
     ASSERT_EQ(subNodes.size(), 1u);
     auto* opNode = dynamic_cast<MoeGroupedMatmulBwdNode*>(subNodes[0].get());
     ASSERT_NE(opNode, nullptr);
+    EXPECT_EQ(opNode->attributes.get_dweight()->get_stride(),
+              toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_STRIDES));
+}
+
+// Builds a MoeGroupedMatmulBwd graph with dweight dims and strides both left unset, so the
+// full lowering pipeline derives dweight's shape from the input tensors as well as its
+// strides, then verifies both survive the lifting round-trip.
+TEST_F(IntegrationMoeGroupedMatmulBwdDescriptorLifting,
+       InferredDweightDimsAndStridesSurviveRoundTrip)
+{
+    auto originalGraph = buildGraph(createAttributes(), DweightSetup::DIMS_AND_STRIDE_INFERRED);
+
+    auto liftedGraph = liftGraph(*originalGraph, _handle);
+    ASSERT_NE(liftedGraph, nullptr);
+
+    auto tensorMap = liftedGraph->getTensorsByUid();
+    ASSERT_NE(tensorMap.count(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_UID), 0u);
+    EXPECT_EQ(tensorMap[K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_UID]->get_dim(),
+              toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_DIMS));
+    EXPECT_EQ(tensorMap[K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_UID]->get_stride(),
+              toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_STRIDES));
+
+    auto& subNodes = liftedGraph->getSubNodes();
+    ASSERT_EQ(subNodes.size(), 1u);
+    auto* opNode = dynamic_cast<MoeGroupedMatmulBwdNode*>(subNodes[0].get());
+    ASSERT_NE(opNode, nullptr);
+    EXPECT_EQ(opNode->attributes.get_dweight()->get_dim(),
+              toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_DIMS));
     EXPECT_EQ(opNode->attributes.get_dweight()->get_stride(),
               toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_STRIDES));
 }
