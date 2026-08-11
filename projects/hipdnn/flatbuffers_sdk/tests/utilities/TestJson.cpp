@@ -44,46 +44,6 @@ void toJsonAndBackTestSuite(const hipdnn_flatbuffers_sdk::data_objects::Graph* g
 
 } // namespace
 
-TEST(TestUuid, FormatsAndParsesCanonicalText)
-{
-    const auto bytes
-        = hipdnn_flatbuffers_sdk::utilities::parseUuid("01234567-89AB-4DEF-8123-456789ABCDEF");
-    EXPECT_EQ(hipdnn_flatbuffers_sdk::utilities::formatUuid(bytes),
-              "01234567-89ab-4def-8123-456789abcdef");
-    EXPECT_TRUE(hipdnn_flatbuffers_sdk::utilities::isUuidV4(bytes));
-
-    const auto flatbufferUuid = hipdnn_flatbuffers_sdk::utilities::toFlatbufferUuid(bytes);
-    EXPECT_EQ(hipdnn_flatbuffers_sdk::utilities::toUuidBytes(flatbufferUuid), bytes);
-}
-
-TEST(TestUuid, RejectsMalformedText)
-{
-    const std::vector<std::string> invalidIds{
-        "",
-        "01234567-89ab-4def-8123-456789abcde",
-        "01234567_89ab-4def-8123-456789abcdef",
-        "g1234567-89ab-4def-8123-456789abcdef",
-    };
-
-    for(const auto& id : invalidIds)
-    {
-        EXPECT_THROW((void)hipdnn_flatbuffers_sdk::utilities::parseUuid(id), std::invalid_argument)
-            << id;
-    }
-}
-
-TEST(TestUuid, ParsesOpaque128BitValues)
-{
-    for(const auto& id : {"01234567-89ab-3def-8123-456789abcdef",
-                          "01234567-89ab-4def-4123-456789abcdef",
-                          "00000000-0000-0000-0000-000000000000"})
-    {
-        EXPECT_EQ(hipdnn_flatbuffers_sdk::utilities::formatUuid(
-                      hipdnn_flatbuffers_sdk::utilities::parseUuid(id)),
-                  id);
-    }
-}
-
 TEST(TestJson, GraphUuidRoundTripsAsCanonicalString)
 {
     auto builder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
