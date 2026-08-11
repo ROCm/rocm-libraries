@@ -69,4 +69,4 @@ When ``PRIMBENCH_NO_TEST`` is defined, ``state.test()`` lambdas are not executed
 
 If your kernel modifies its input data in place, subsequent kernel calls during timed iterations operate on already-mutated data, which can produce incorrect results. Use ``state.run_before_every_iteration()`` to register a lambda that restores the input before each kernel call.
 
-This registration is independent of correctness testing — it keeps every timed iteration deterministic regardless of whether ``state.test()`` is used.
+This registration is independent of correctness testing. It keeps every timed iteration deterministic regardless of whether ``state.test()`` is used.
