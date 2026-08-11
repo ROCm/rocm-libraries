@@ -167,6 +167,23 @@ struct EngineDescriptor
     /// KMD field names this engine exposes for the caller to control. A name no KMD
     /// field matches is a load error.
     std::vector<std::string> knobs;
+    /// Advisory execution behavior this engine's kernels exhibit, as
+    /// `hipdnnBackendBehaviorNote_t` values (BehaviorNote.h). Reported to the caller
+    /// through EngineDetails like any other engine's, so a descriptor-backed engine is
+    /// not silently noteless: the transport already carries these and every hand-written
+    /// engine populates them.
+    ///
+    /// Held as int32 rather than a typed enum because the transport is deliberately
+    /// int32, so a newer descriptor can carry a note value an older backend does not
+    /// know without truncating it.
+    std::vector<int32_t> behaviorNotes;
+    /// Numerical behavior this engine's kernels exhibit, from the same vocabulary RFC
+    /// 0017 §4 gives the UED (`tensor_core`, `reduced_precision_reduction`, and so on).
+    ///
+    /// Carried here but not yet reported: EngineDetails has no numerical-notes field, so
+    /// unlike behaviorNotes there is nothing to transport these through. Recorded so a
+    /// descriptor can state them and the gap is in the schema rather than in this type.
+    std::vector<int32_t> numericalNotes;
 };
 
 /// Which inputs a matcher reads, which decides how often it runs and what its failure

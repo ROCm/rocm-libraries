@@ -78,10 +78,31 @@ bool countingFloatKernels(const MatchContext& context, const KernelDefinition& k
 }
 
 /// Every kernel scores the same, so ranking falls through to the tie-break.
+constexpr const char* CONSTANT_SCORE_SYMBOL = "hipdnn.kernel_ingestor.test.constant_score";
+
 double scoreConstant(const KernelDefinition& /*kernel*/, const MatchContext& /*context*/)
 {
     return 1.0;
 }
+
+/// Registers the constant scorer for a test's duration. The heuristic resolves its
+/// symbol on first use, so the registration has to outlive the ranking call.
+class ScopedConstantScore
+{
+public:
+    ScopedConstantScore()
+    {
+        ScoreRegistry::registerSymbol(CONSTANT_SCORE_SYMBOL, &scoreConstant);
+    }
+
+    ~ScopedConstantScore()
+    {
+        ScoreRegistry::unregisterSymbol(CONSTANT_SCORE_SYMBOL);
+    }
+
+    ScopedConstantScore(const ScopedConstantScore&) = delete;
+    ScopedConstantScore& operator=(const ScopedConstantScore&) = delete;
+};
 
 MetadataSchema makeSchema()
 {
@@ -154,6 +175,9 @@ public:
     {
         GraphMatcherRegistry::registerSymbol(_graphSymbol, graphFn);
         KernelMatcherRegistry::registerSymbol(_kernelSymbol, kernelFn);
+        // The heuristic resolves its symbol on the first call that needs an order, not
+        // at construction, so ranking tests need it registered for their duration too.
+        ScoreRegistry::registerSymbol(SCORE_SYMBOL, &scoreByBlockSize);
         counters().reset();
     }
 
@@ -161,6 +185,7 @@ public:
     {
         GraphMatcherRegistry::unregisterSymbol(_graphSymbol);
         KernelMatcherRegistry::unregisterSymbol(_kernelSymbol);
+        ScoreRegistry::unregisterSymbol(SCORE_SYMBOL);
     }
 
     ScopedSymbols(const ScopedSymbols&) = delete;
@@ -174,7 +199,7 @@ private:
 using TestHandle = int;
 using StateManager = KernelIngestorStateManager<TestHandle>;
 
-std::unique_ptr<StateManager> makeStateManager(ScoreFn scoreFn = scoreByBlockSize,
+std::unique_ptr<StateManager> makeStateManager(const std::string& scoreSymbol = SCORE_SYMBOL,
                                                size_t cacheCapacity
                                                = StateManager::DEFAULT_CATALOG_CACHE_CAPACITY)
 {
@@ -188,7 +213,7 @@ std::unique_ptr<StateManager> makeStateManager(ScoreFn scoreFn = scoreByBlockSiz
         std::move(matchers),
         std::move(dispatches),
         std::vector<KernelDescriptorPack>{makePack({GRAPH_MATCHER_ID, KERNEL_MATCHER_ID})},
-        std::make_shared<NativeKernelHeuristic>(scoreFn),
+        std::make_shared<NativeKernelHeuristic>(scoreSymbol),
         cacheCapacity);
 }
 
@@ -298,8 +323,26 @@ TEST(TestIngestorNativeRegistry, FailsClosedOnUnknownSymbol)
 // IKernelHeuristic
 // ---------------------------------------------------------------------------
 
+TEST(TestIngestorHeuristic, ResolvesItsSymbolOnFirstUseRatherThanAtConstruction)
+{
+    // RFC 0017 section 8.1 admits the heuristic at applicability only as a name, and
+    // section 3 generalizes it: a heuristic model is not read until something needs the
+    // catalog ranked. An engine whose matchers reject a graph must never pay for its
+    // selector, so constructing one against a symbol that is not registered yet has to
+    // be legal, and only scoring may fail.
+    const NativeKernelHeuristic heuristic("hipdnn.kernel_ingestor.test.not_yet_registered");
+
+    const TestGraph graph;
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+    const auto kernel = makeDefinition(testId(0x01), 64);
+
+    EXPECT_THROW(heuristic.score(kernel, context), std::runtime_error);
+}
+
 TEST(TestIngestorHeuristic, RanksHigherScoringKernelsFirst)
 {
+    const ScopedTestSymbols symbols;
     const TestGraph graph;
     const auto properties = testDeviceProperties();
     const MatchContext context{graph, 0, properties};
@@ -309,7 +352,7 @@ TEST(TestIngestorHeuristic, RanksHigherScoringKernelsFirst)
     const auto highId = testId(0x02);
     catalog.entries = {makeDefinition(lowId, 64), makeDefinition(highId, 256)};
 
-    const NativeKernelHeuristic heuristic(scoreByBlockSize);
+    const NativeKernelHeuristic heuristic(SCORE_SYMBOL);
     const auto ranked = heuristic.rank(catalog, context);
 
     ASSERT_EQ(ranked.size(), 2U);
@@ -318,6 +361,7 @@ TEST(TestIngestorHeuristic, RanksHigherScoringKernelsFirst)
 
 TEST(TestIngestorHeuristic, BreaksScoreTiesOnPriority)
 {
+    const ScopedConstantScore constantScore;
     const TestGraph graph;
     const auto properties = testDeviceProperties();
     const MatchContext context{graph, 0, properties};
@@ -327,7 +371,7 @@ TEST(TestIngestorHeuristic, BreaksScoreTiesOnPriority)
     const auto highPriorityId = testId(0x02);
     catalog.entries = {makeDefinition(lowPriorityId, 64, 1), makeDefinition(highPriorityId, 64, 5)};
 
-    const NativeKernelHeuristic heuristic(scoreConstant);
+    const NativeKernelHeuristic heuristic(CONSTANT_SCORE_SYMBOL);
     const auto ranked = heuristic.rank(catalog, context);
 
     ASSERT_EQ(ranked.size(), 2U);
@@ -336,6 +380,7 @@ TEST(TestIngestorHeuristic, BreaksScoreTiesOnPriority)
 
 TEST(TestIngestorHeuristic, BreaksRemainingTiesOnKernelIdForStabilityAcrossRuns)
 {
+    const ScopedConstantScore constantScore;
     const TestGraph graph;
     const auto properties = testDeviceProperties();
     const MatchContext context{graph, 0, properties};
@@ -347,7 +392,7 @@ TEST(TestIngestorHeuristic, BreaksRemainingTiesOnKernelIdForStabilityAcrossRuns)
     const auto higherId = testId(0x02);
     catalog.entries = {makeDefinition(higherId, 64), makeDefinition(lowerId, 64)};
 
-    const NativeKernelHeuristic heuristic(scoreConstant);
+    const NativeKernelHeuristic heuristic(CONSTANT_SCORE_SYMBOL);
     const auto ranked = heuristic.rank(catalog, context);
 
     ASSERT_EQ(ranked.size(), 2U);
@@ -427,7 +472,7 @@ TEST(TestIngestorStateManager, EvaluatesASharedGraphMatcherOncePerGraphNotOncePe
                                makeTestMatchers(),
                                makeTestDispatches(),
                                {first, second},
-                               std::make_shared<NativeKernelHeuristic>(scoreByBlockSize));
+                               std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
 
     const TestGraph graph(makeGraphId(20));
     const auto properties = testDeviceProperties();
@@ -452,7 +497,7 @@ TEST(TestIngestorStateManager, ASharedGraphMatcherFailurePrunesEveryPackListingI
                                makeTestMatchers(),
                                makeTestDispatches(),
                                {first, second},
-                               std::make_shared<NativeKernelHeuristic>(scoreByBlockSize));
+                               std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
 
     const TestGraph graph(makeGraphId(21));
     const auto properties = testDeviceProperties();
@@ -500,7 +545,7 @@ TEST(TestIngestorStateManager, RematchesEveryCallWhenTheGraphHasNoIdentity)
 TEST(TestIngestorStateManager, RematchesAfterCacheEviction)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
-    const auto manager = makeStateManager(scoreByBlockSize, 1);
+    const auto manager = makeStateManager(SCORE_SYMBOL, 1);
     const auto properties = testDeviceProperties();
     const TestGraph first(makeGraphId(5));
     const TestGraph second(makeGraphId(6));
@@ -578,7 +623,7 @@ TEST(TestIngestorStateManager, CompletesAnOmittedFieldFromItsSchemaDefault)
                                makeTestMatchers(),
                                makeTestDispatches(),
                                {pack},
-                               std::make_shared<NativeKernelHeuristic>(scoreByBlockSize));
+                               std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
 
     const TestGraph graph(makeGraphId(10));
     const auto properties = testDeviceProperties();
@@ -608,7 +653,7 @@ TEST(TestIngestorStateManager, RejectsAKernelOmittingAFieldWithNoDefault)
                               makeTestMatchers(),
                               makeTestDispatches(),
                               {pack},
-                              std::make_shared<NativeKernelHeuristic>(scoreByBlockSize)),
+                              std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL)),
                  std::invalid_argument);
 }
 
@@ -633,7 +678,7 @@ TEST(TestIngestorStateManager, RejectsAKernelSupplyingAFieldTheSchemaDoesNotDecl
                               makeTestMatchers(),
                               makeTestDispatches(),
                               {pack},
-                              std::make_shared<NativeKernelHeuristic>(scoreByBlockSize)),
+                              std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL)),
                  std::invalid_argument);
 }
 
@@ -655,7 +700,7 @@ TEST(TestIngestorStateManager, RejectsAKernelSupplyingAFieldOfTheWrongType)
                               makeTestMatchers(),
                               makeTestDispatches(),
                               {pack},
-                              std::make_shared<NativeKernelHeuristic>(scoreByBlockSize)),
+                              std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL)),
                  std::invalid_argument);
 }
 
@@ -667,7 +712,7 @@ TEST(TestIngestorStateManager, RejectsAPackNamingAnUnknownMatcher)
                               {},
                               makeTestDispatches(),
                               {makePack({testId(0xFF)})},
-                              std::make_shared<NativeKernelHeuristic>(scoreByBlockSize)),
+                              std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL)),
                  std::invalid_argument);
 }
 
@@ -677,7 +722,7 @@ TEST(TestIngestorStateManager, RejectsAPackNamingAnUnknownDispatchDescriptor)
                               makeTestMatchers(),
                               {},
                               {makePack({GRAPH_MATCHER_ID})},
-                              std::make_shared<NativeKernelHeuristic>(scoreByBlockSize)),
+                              std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL)),
                  std::invalid_argument);
 }
 
@@ -692,7 +737,7 @@ TEST(TestIngestorStateManager, RejectsTwoKernelsSharingAMetadataTuple)
                               makeTestMatchers(),
                               makeTestDispatches(),
                               {pack},
-                              std::make_shared<NativeKernelHeuristic>(scoreByBlockSize)),
+                              std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL)),
                  std::invalid_argument);
 }
 
@@ -787,7 +832,7 @@ std::unique_ptr<KernelIngestorStateManager<StubHandle>> makeStubStateManager()
         std::vector<DispatchDescriptor>{
             {DISPATCH_ID, "test dispatch", "hipdnn.kernel_ingestor.test.dispatch"}},
         std::vector<KernelDescriptorPack>{std::move(pack)},
-        std::make_shared<NativeKernelHeuristic>(&scoreByBlockSize));
+        std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
 }
 
 EngineDescriptor makeEngineWithKnobs(std::vector<std::string> knobs)
