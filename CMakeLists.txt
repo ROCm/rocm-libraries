@@ -44,7 +44,10 @@ set(DEFAULT_COMPONENTS
     # projects
     hipblas-common
     hipblaslt
+    rocblas
     rocprim
+    rocsolver
+    hipblas
     rocrand
 )
 
@@ -65,16 +68,13 @@ set(UNSUPPORTED_COMPONENTS
     tensile
     # projects
     composablekernel
-    hipblas
     hipcub
     hipfft
     hiprand
     hipsolver
     hipsparse
     hipsparselt
-    rocblas
     rocfft
-    rocsolver
     rocsparse
     rocthrust
     hipthreads
@@ -184,11 +184,38 @@ if("hipblaslt" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
     )
 endif()
 
+# Must come after hipblaslt, whose roc::hipblaslt target rocBLAS links.
+if("rocblas" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
+    add_subdirectory_with_message(
+        COMPONENT rocblas
+        PREFIX_PATH projects
+        EXPECT_TARGET roc::rocblas
+    )
+endif()
+
 if("rocprim" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
     add_subdirectory_with_message(
         COMPONENT rocprim
         PREFIX_PATH projects
         EXPECT_TARGET rocprim
+    )
+endif()
+
+# Must come after rocblas and rocprim, whose targets it links.
+if("rocsolver" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
+    add_subdirectory_with_message(
+        COMPONENT rocsolver
+        PREFIX_PATH projects
+        EXPECT_TARGET roc::rocsolver
+    )
+endif()
+
+# Must come after rocblas, rocsolver and hipblas-common, whose targets it links.
+if("hipblas" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
+    add_subdirectory_with_message(
+        COMPONENT hipblas
+        PREFIX_PATH projects
+        EXPECT_TARGET roc::hipblas
     )
 endif()
 
@@ -300,24 +327,12 @@ if("hiprand" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
     message(FATAL_ERROR "hiprand is not yet supported in the superbuild")
 endif()
 
-if("hipblas" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
-    message(FATAL_ERROR "hipblas is not yet supported in the superbuild")
-endif()
-
 if("hipsolver" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
     message(FATAL_ERROR "hipsolver is not yet supported in the superbuild")
 endif()
 
 if("hipsparselt" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
     message(FATAL_ERROR "hipsparselt is not yet supported in the superbuild")
-endif()
-
-if("rocblas" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
-    message(FATAL_ERROR "rocblas is not yet supported in the superbuild")
-endif()
-
-if("rocsolver" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
-    message(FATAL_ERROR "rocsolver is not yet supported in the superbuild")
 endif()
 
 if("rocthrust" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)

@@ -167,9 +167,11 @@ elseif( NOT BUILD_WITH_TENSILE )
 endif()
 
 if(BUILD_WITH_HIPBLASLT)
-  # don't wait until after Tensile to find hipblaslt if enabled; needed for clients-only build too
-  find_package( hipblaslt ${HIPBLASLT_VERSION} REQUIRED CONFIG PATHS ${hipblaslt_path} ${ROCM_PATH})
-  message(STATUS "FOUND hipBLASLt, INCLUDE_DIR: ${HIPBLASLT_INCLUDE_DIR}")
+  if(NOT TARGET roc::hipblaslt)
+    # don't wait until after Tensile to find hipblaslt if enabled; needed for clients-only build too
+    find_package( hipblaslt ${HIPBLASLT_VERSION} REQUIRED CONFIG PATHS ${hipblaslt_path} ${ROCM_PATH})
+    message(STATUS "FOUND hipBLASLt, INCLUDE_DIR: ${HIPBLASLT_INCLUDE_DIR}")
+  endif()
 endif()
 
 function(list_replace list old new)
