@@ -253,6 +253,28 @@ if(UNIX AND NOT APPLE)
     COMMAND abi06_data_test $<TARGET_FILE:abi06_data_rb6>)
 endif()
 
+if(UNIX AND NOT APPLE)
+  include(CheckCXXSourceCompiles)
+  set(CMAKE_REQUIRED_FLAGS -fsanitize=address)
+  set(CMAKE_REQUIRED_LINK_OPTIONS -fsanitize=address)
+  check_cxx_source_compiles("int main(){return 0;}" ROCM_INTERFACES_HAVE_ASAN)
+  unset(CMAKE_REQUIRED_FLAGS)
+  unset(CMAKE_REQUIRED_LINK_OPTIONS)
+
+  if(ROCM_INTERFACES_HAVE_ASAN)
+    add_test(NAME rocm_interfaces.abi04_asan_version_node_survives
+      COMMAND ${CMAKE_COMMAND}
+        -DCXX=${CMAKE_CXX_COMPILER}
+        -DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/abi03_fixture_rocblas.cpp
+        -DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/abi04-asan
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/check_asan_version_node.cmake)
+  else()
+    message(STATUS
+      "abi04 asan: -fsanitize=address unavailable with the configured compiler, "
+      "asan version-node test not registered")
+  endif()
+endif()
+
 set(_lto_guard_module ${CMAKE_SOURCE_DIR}/cmake/rocm_interfaces_lto_linker_guard.cmake)
 set(_lto_guard_driver ${CMAKE_CURRENT_SOURCE_DIR}/check_lto_linker_guard.cmake)
 
