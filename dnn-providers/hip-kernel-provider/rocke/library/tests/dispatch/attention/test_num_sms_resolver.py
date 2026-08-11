@@ -110,14 +110,22 @@ def test_gfx950_fallback_off_box():
 
 
 def test_non_autoresolve_archs_keep_legacy_120():
-    """Archs outside the auto-resolve set keep the legacy 120, even on-box."""
+    """Archs outside the auto-resolve set keep the legacy 120 AND never touch the
+    device CU query (the arch gate short-circuits before _device_num_cus)."""
     p = _Patch()
+    calls = {"n": 0}
+
+    def _spy():
+        calls["n"] += 1
+        return 256  # a value that must never be used for a non-auto arch
+
     try:
         p.attr(hipm, "get_device_arch", lambda *a, **k: "gfx90a")
-        p.attr(AC, "_device_num_cus", lambda: 256)  # must NOT be consulted
+        p.attr(AC, "_device_num_cus", _spy)
         assert _resolve_num_cus(_req(num_sms=0, arch="gfx90a")) == 120
         assert _resolve_num_cus(_req(num_sms=0, arch="gfx1250")) == 120
         assert _resolve_num_cus(_req(num_sms=0, arch="gfxZZZ")) == 120
+        assert calls["n"] == 0, "device CU query consulted for a non-auto-resolve arch"
     finally:
         p.restore()
 

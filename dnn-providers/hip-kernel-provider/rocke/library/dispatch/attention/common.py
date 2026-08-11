@@ -182,9 +182,11 @@ def _device_num_cus() -> "int | None":
 
 
 # Arches whose CU count is auto-resolved from the live device when the request
-# runs on-box. Every other arch keeps the legacy 120. Adding an arch here is the
-# only change needed to extend device-resolution to it (routing + the 3D segment
-# clamp read the resolved value through the shared _effective_target_ctas seam).
+# runs on-box; every other arch keeps the legacy 120. This set governs
+# device-resolution ONLY. The split-KV over-split guard is a separate per-arch
+# branch in kernels/common/attention_unified.py::_num_segments -- adding an arch
+# here does NOT give it a segment clamp; add a matching branch there too (both
+# read the resolved value through the shared _effective_target_ctas seam).
 _AUTO_RESOLVE_ARCHS = frozenset({"gfx942", "gfx950"})
 
 
