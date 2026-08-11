@@ -55,20 +55,34 @@ def test_gsu2_split_raises_typeerror(make_state):
 
 
 def test_grouped_gemm_masked_in_kernel_name(make_state):
-    # ignoreInternalArgs=True forces ProblemType.GroupedGemm to False before the
+    # The GroupedGemm mask is gated on SupportUserArgs. With it off,
+    # ignoreInternalArgs forces ProblemType.GroupedGemm to False before the
     # ProblemType string is built, so the name is identical whether GroupedGemm
     # starts True or False. Kills the mutants that assign the mask to a bogus
     # key (leaving GroupedGemm True -> a stray "GG" tag).
     s_true = make_state()
+    s_true["ProblemType"]["SupportUserArgs"] = False
     s_true["ProblemType"]["GroupedGemm"] = True
     name_true = N.getKernelNameMin(s_true, splitGSU=False)
 
     s_false = make_state()
+    s_false["ProblemType"]["SupportUserArgs"] = False
     s_false["ProblemType"]["GroupedGemm"] = False
     name_false = N.getKernelNameMin(s_false, splitGSU=False)
 
     assert name_true == name_false
     assert "GG" not in name_true
+
+    # With SupportUserArgs on the mask is skipped: the GroupedGemm=True name
+    # carries a "GG" tag the GroupedGemm=False name lacks. Pins the guard.
+    g_true = make_state()
+    g_true["ProblemType"]["SupportUserArgs"] = True
+    g_true["ProblemType"]["GroupedGemm"] = True
+    g_false = make_state()
+    g_false["ProblemType"]["SupportUserArgs"] = True
+    g_false["ProblemType"]["GroupedGemm"] = False
+    assert N.getKernelNameMin(g_true, splitGSU=False) != N.getKernelNameMin(g_false, splitGSU=False)
+    assert "GG" in N.getKernelNameMin(g_true, splitGSU=False)
 
 
 def test_grouped_gemm_restored_after_kernel_name(make_state):
