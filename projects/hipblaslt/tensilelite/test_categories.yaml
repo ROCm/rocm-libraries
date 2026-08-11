@@ -111,7 +111,7 @@ test_categories:
   # AMDGPU_TARGETS env var, falling back to AMDGPU_FAMILIES).
   # Kernel devs opt tests in by adding `emu_fast` to
   # TestParameters.marks in individual YAML files.
-  emu-quick:
+  emu-fast:
     description: "Common GEMM tests for emulation pre-submits"
     test_paths:
       - "Tensile/Tests/common"
@@ -123,7 +123,7 @@ test_categories:
       - "--global-parameters=LibraryFormat='msgpack'"
       - "--tensile-options=--cxx-compiler,{ROCM_PATH}/bin/amdclang++,--gpu-targets,{AMDGPU_TARGETS}"
     labels:
-      - "emu-quick"
+      - "emu-fast"
 
   # Arch-agnostic emulation nightly — runs ALL tests for the target arch.
   emu-full:
@@ -155,5 +155,5 @@ execution_settings:
     comprehensive: 25200  # 7 hours
     full: 28800           # 8 hours
     ffm-quick: 2700       # 45 minutes
-    emu-quick: 2400       # 40 minutes
+    emu-fast: 2400        # 40 minutes
     emu-full: 28800       # 8 hours
