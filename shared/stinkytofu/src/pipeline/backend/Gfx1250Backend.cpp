@@ -122,6 +122,8 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
     const bool runScheduler = optLevel != OptLevel::O0;
     auto debugStreams = createDebugOutputStreams(moduleOptions);
 
+    configureModuleInstrumentations(mpm, moduleOptions, "module", debugStreams, &module);
+
     if (runScheduler || moduleOptions.EnableESM2) {
         // strip delay_alu before scheduling (whole-kernel: entry + callable functions,
         // so stale delay_alu does not survive into the emitted stream)

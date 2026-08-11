@@ -22,7 +22,10 @@
 namespace stinkytofu {
 void ModulePassManager::run(StinkyAsmModule& M) {
     for (const auto& pass : passes) {
+        const std::string passName = pass->getName();
+        for (auto& inst : instrumentations) inst->beforeModulePass(passName, M, passCtx);
         PreservedAnalyses PA = pass->run(M, passCtx, moduleAnalysisManager);
+        for (auto& inst : instrumentations) inst->afterModulePass(passName, M, passCtx);
         moduleAnalysisManager.invalidate(M, PA);
     }
 }

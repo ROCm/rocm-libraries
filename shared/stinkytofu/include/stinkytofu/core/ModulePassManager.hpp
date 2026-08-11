@@ -108,10 +108,17 @@ class STINKYTOFU_EXPORT ModulePassManager {
         return moduleAnalysisManager;
     }
 
+    /// Register an observer fired around each ModulePass (before/after IR dump,
+    /// verify). Same PassInstrumentation used by PassManager.
+    void addInstrumentation(std::shared_ptr<PassInstrumentation> inst) {
+        instrumentations.push_back(std::move(inst));
+    }
+
    protected:
     PassContext passCtx;
     ModuleAnalysisManager moduleAnalysisManager;
 
     std::vector<std::unique_ptr<ModulePass>> passes;
+    std::vector<std::shared_ptr<PassInstrumentation>> instrumentations;
 };
 }  // namespace stinkytofu

@@ -23,6 +23,7 @@
 #pragma once
 
 #include <memory>
+#include <string>
 #include <utility>
 
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
@@ -38,11 +39,14 @@ namespace stinkytofu {
 // Runs the inner PassManager on every function (entry + callables), in isolation.
 class FunctionToModuleAdaptor : public ModulePass {
    public:
-    explicit FunctionToModuleAdaptor(PassManager pm, bool propagatePassFeatureConfig = false)
-        : innerPM(std::move(pm)), propagatePassFeatureConfig(propagatePassFeatureConfig) {}
+    explicit FunctionToModuleAdaptor(PassManager pm, bool propagatePassFeatureConfig = false,
+                                     std::string name = "FunctionToModuleAdaptor")
+        : innerPM(std::move(pm)),
+          propagatePassFeatureConfig(propagatePassFeatureConfig),
+          name(std::move(name)) {}
 
     const char* getName() const override {
-        return "FunctionToModuleAdaptor";
+        return name.c_str();
     }
 
     PreservedAnalyses run(StinkyAsmModule& M, PassContext& outerCtx,
@@ -65,16 +69,20 @@ class FunctionToModuleAdaptor : public ModulePass {
 
     PassManager innerPM;
     bool propagatePassFeatureConfig;
+    std::string name;
 };
 
 // Runs the inner PassManager on only the entry function.
 class MainOnlyAdaptor : public ModulePass {
    public:
-    explicit MainOnlyAdaptor(PassManager pm, bool propagatePassFeatureConfig = false)
-        : innerPM(std::move(pm)), propagatePassFeatureConfig(propagatePassFeatureConfig) {}
+    explicit MainOnlyAdaptor(PassManager pm, bool propagatePassFeatureConfig = false,
+                             std::string name = "MainOnlyAdaptor")
+        : innerPM(std::move(pm)),
+          propagatePassFeatureConfig(propagatePassFeatureConfig),
+          name(std::move(name)) {}
 
     const char* getName() const override {
-        return "MainOnlyAdaptor";
+        return name.c_str();
     }
 
     PreservedAnalyses run(StinkyAsmModule& M, PassContext& outerCtx,
@@ -95,6 +103,7 @@ class MainOnlyAdaptor : public ModulePass {
 
     PassManager innerPM;
     bool propagatePassFeatureConfig;
+    std::string name;
 };
 
 inline std::unique_ptr<ModulePass> createFunctionToModuleAdaptor(
@@ -104,12 +113,15 @@ inline std::unique_ptr<ModulePass> createFunctionToModuleAdaptor(
 
 /// Convenience: wrap a single function pass in an inner PassManager and adapt it
 /// to run on entry + every callable function.
+/// The adaptor reports the wrapped pass's name so debug dumps identify it.
 inline std::unique_ptr<ModulePass> createFunctionToModuleAdaptor(
     std::unique_ptr<Pass> pass, bool propagatePassFeatureConfig = false) {
+    std::string name = pass->getName();
     PassManager pm;
     registerAllAnalyses(pm.getAnalysisManager());
     pm.addPass(std::move(pass));
-    return std::make_unique<FunctionToModuleAdaptor>(std::move(pm), propagatePassFeatureConfig);
+    return std::make_unique<FunctionToModuleAdaptor>(std::move(pm), propagatePassFeatureConfig,
+                                                     std::move(name));
 }
 
 inline std::unique_ptr<ModulePass> createMainOnlyAdaptor(PassManager pm,
@@ -119,12 +131,15 @@ inline std::unique_ptr<ModulePass> createMainOnlyAdaptor(PassManager pm,
 
 /// Convenience: wrap a single function pass in an inner PassManager and adapt it
 /// to run on the entry only.
+/// The adaptor reports the wrapped pass's name so debug dumps identify it.
 inline std::unique_ptr<ModulePass> createMainOnlyAdaptor(std::unique_ptr<Pass> pass,
                                                          bool propagatePassFeatureConfig = false) {
+    std::string name = pass->getName();
     PassManager pm;
     registerAllAnalyses(pm.getAnalysisManager());
     pm.addPass(std::move(pass));
-    return std::make_unique<MainOnlyAdaptor>(std::move(pm), propagatePassFeatureConfig);
+    return std::make_unique<MainOnlyAdaptor>(std::move(pm), propagatePassFeatureConfig,
+                                             std::move(name));
 }
 
 }  // namespace stinkytofu
