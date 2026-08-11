@@ -1,12 +1,10 @@
 @PACKAGE_INIT@
 
-include(CMakeFindDependencyMacro)
-
 if(@HOST_VALIDATION_PACKAGE_HAS_BLAS@)
-    find_dependency(BLAS)
+    find_package(BLAS QUIET)
 endif()
-if(@HOST_VALIDATION_PACKAGE_HAS_MX@)
-    find_dependency(mxDataGenerator CONFIG)
+if(@HOST_VALIDATION_PACKAGE_HAS_OPENMP@)
+    find_package(OpenMP QUIET COMPONENTS CXX)
 endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/ROCHostValidationTargets.cmake")

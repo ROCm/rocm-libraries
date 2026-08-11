@@ -6,6 +6,7 @@
 #include <mxDataGen.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <set>
@@ -568,6 +569,71 @@ TEST(MXScaleRestride, ExpandsKFastRowsInPlace)
     EXPECT_EQ(scale[11], 8);
     EXPECT_EQ(scale[12], 0);
     EXPECT_EQ(scale[15], 0);
+}
+
+TEST(MXGfx1250ScaleBuffer, PartialBlockedAxesStayWithinPaddedCapacity)
+{
+    struct TestCase
+    {
+        uint64_t rows;
+        uint64_t columns;
+        int      blockRows;
+        int      blockColumns;
+    };
+    constexpr std::array cases{
+        TestCase{33, 17, 32, 1},
+        TestCase{17, 33, 1, 32},
+        TestCase{130, 385, 1, 32},
+    };
+
+    for(auto const& test : cases)
+    {
+        size_t const blockSize
+            = static_cast<size_t>(test.blockRows * test.blockColumns);
+        size_t const blockedExtent
+            = test.blockColumns > 1 ? static_cast<size_t>(test.columns)
+                                    : static_cast<size_t>(test.rows);
+        size_t const freeExtent
+            = test.blockColumns > 1 ? static_cast<size_t>(test.rows)
+                                    : static_cast<size_t>(test.columns);
+        size_t const blockCount
+            = blockedExtent / blockSize + static_cast<size_t>(blockedExtent % blockSize != 0);
+        size_t const fastExtent = test.blockColumns > 1 ? freeExtent : blockCount;
+        size_t const slowExtent = test.blockColumns > 1 ? blockCount : freeExtent;
+        size_t const dimk       = 128 / blockSize;
+        size_t const paddedFast
+            = (fastExtent + dimk - 1) / dimk * dimk;
+        size_t const scaleBytes = slowExtent * paddedFast;
+
+        size_t const physicalElements
+            = static_cast<size_t>(test.rows * test.columns);
+        std::vector<uint8_t> data((physicalElements + 1) / 2, 0);
+        constexpr size_t guardBytes = 64;
+        std::vector<uint8_t> scales(scaleBytes + guardBytes, 0xa5);
+
+        auto reference = generateMXInput((hipDataType)HIP_R_4F_E2M1,
+                                         HIP_R_8F_UE8M0,
+                                         data.data(),
+                                         scales.data(),
+                                         test.rows,
+                                         test.columns,
+                                         test.rows,
+                                         /*isTranspose=*/false,
+                                         test.blockRows,
+                                         test.blockColumns,
+                                         /*isMatrixA=*/true,
+                                         MXScaleLayout::GFX1250,
+                                         "Bounded",
+                                         -1.0f,
+                                         1.0f);
+
+        EXPECT_EQ(reference.size(), physicalElements);
+        EXPECT_TRUE(std::all_of(scales.begin() + scaleBytes,
+                                scales.end(),
+                                [](uint8_t value) { return value == 0xa5; }))
+            << "GFX1250 scale generation wrote beyond the padded output for "
+            << test.rows << "x" << test.columns;
+    }
 }
 
 TEST(MXScaleLayoutFormat, MapsScalingFormatToLayout)

@@ -183,21 +183,8 @@ function(roc_host_validation_enable_mx_backend)
         return()
     endif()
 
-    if(NOT TARGET roc::mxDataGenerator)
-        set(_host_validation_mx_source_dir
-            "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../mxdatagenerator"
-        )
-        if(EXISTS "${_host_validation_mx_source_dir}/CMakeLists.txt")
-            add_subdirectory(
-                "${_host_validation_mx_source_dir}"
-                "${CMAKE_CURRENT_BINARY_DIR}/mxdatagenerator"
-            )
-        else()
-            find_package(mxDataGenerator REQUIRED CONFIG)
-        endif()
-    endif()
-
     set(_host_validation_source_dir "${CMAKE_CURRENT_FUNCTION_LIST_DIR}")
+    find_package(OpenMP QUIET COMPONENTS CXX)
     add_library(host-validation-mx STATIC
         "${_host_validation_source_dir}/src/mx.cpp"
     )
@@ -206,9 +193,14 @@ function(roc_host_validation_enable_mx_backend)
     target_link_libraries(host-validation-mx
         PUBLIC
             roc::host-validation-core
-        PRIVATE
-            roc::mxDataGenerator
     )
+    if(OpenMP_CXX_FOUND)
+        target_link_libraries(host-validation-mx PRIVATE OpenMP::OpenMP_CXX)
+        set_property(
+            TARGET host-validation-mx
+            PROPERTY ROC_HOST_VALIDATION_USES_OPENMP ON
+        )
+    endif()
     target_sources(host-validation-mx
         PUBLIC
             FILE_SET HEADERS
@@ -305,9 +297,16 @@ function(roc_host_validation_finalize_package)
     if(TARGET host-validation-blas)
         set(HOST_VALIDATION_PACKAGE_HAS_BLAS ON)
     endif()
-    set(HOST_VALIDATION_PACKAGE_HAS_MX OFF)
+    set(HOST_VALIDATION_PACKAGE_HAS_OPENMP OFF)
     if(TARGET host-validation-mx)
-        set(HOST_VALIDATION_PACKAGE_HAS_MX ON)
+        get_target_property(
+            _host_validation_mx_uses_openmp
+            host-validation-mx
+            ROC_HOST_VALIDATION_USES_OPENMP
+        )
+        if(_host_validation_mx_uses_openmp)
+            set(HOST_VALIDATION_PACKAGE_HAS_OPENMP ON)
+        endif()
     endif()
 
     configure_package_config_file(

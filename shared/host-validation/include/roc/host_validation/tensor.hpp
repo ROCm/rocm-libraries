@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <cmath>
@@ -662,6 +663,60 @@ inline float decodeFiniteBinaryFloatMagnitude(uint32_t raw, const BinaryFloatFor
                       static_cast<int>(exponent) - format.exponentBias);
 }
 
+inline std::vector<float> makePositiveFiniteBinaryFloatValues(ScalarType type) {
+    const BinaryFloatFormat format = binaryFloatFormat(type);
+    std::vector<float> values(format.maximumPositiveFiniteRaw + 1U);
+    for (uint32_t raw = 0; raw <= format.maximumPositiveFiniteRaw; ++raw)
+        values[raw] = decodeFiniteBinaryFloatMagnitude(raw, format);
+    return values;
+}
+
+inline const std::vector<float>& positiveFiniteBinaryFloatValues(ScalarType type) {
+    switch (type) {
+        case ScalarType::Float4E2M1: {
+            static const auto values = makePositiveFiniteBinaryFloatValues(ScalarType::Float4E2M1);
+            return values;
+        }
+        case ScalarType::Float6E2M3: {
+            static const auto values = makePositiveFiniteBinaryFloatValues(ScalarType::Float6E2M3);
+            return values;
+        }
+        case ScalarType::Float6E3M2: {
+            static const auto values = makePositiveFiniteBinaryFloatValues(ScalarType::Float6E3M2);
+            return values;
+        }
+        case ScalarType::Float8E4M3: {
+            static const auto values = makePositiveFiniteBinaryFloatValues(ScalarType::Float8E4M3);
+            return values;
+        }
+        case ScalarType::Float8E5M2: {
+            static const auto values = makePositiveFiniteBinaryFloatValues(ScalarType::Float8E5M2);
+            return values;
+        }
+        case ScalarType::Float8E4M3Fnuz: {
+            static const auto values =
+                makePositiveFiniteBinaryFloatValues(ScalarType::Float8E4M3Fnuz);
+            return values;
+        }
+        case ScalarType::Float8E5M2Fnuz: {
+            static const auto values =
+                makePositiveFiniteBinaryFloatValues(ScalarType::Float8E5M2Fnuz);
+            return values;
+        }
+        case ScalarType::E5M3: {
+            static const auto values = makePositiveFiniteBinaryFloatValues(ScalarType::E5M3);
+            return values;
+        }
+        case ScalarType::E4M3: {
+            static const auto values = makePositiveFiniteBinaryFloatValues(ScalarType::E4M3);
+            return values;
+        }
+        default:
+            throw std::invalid_argument(
+                "ScalarType is not a supported binary floating-point format.");
+    }
+}
+
 inline float decodeBinaryFloat(ScalarType type, uint32_t raw) {
     const auto format = binaryFloatFormat(type);
     if (isBinaryFloatNaN(type, raw)) return std::numeric_limits<float>::quiet_NaN();
@@ -673,25 +728,22 @@ inline float decodeBinaryFloat(ScalarType type, uint32_t raw) {
                         : std::numeric_limits<float>::infinity();
 
     const uint32_t payloadMask = (1U << format.totalBits) - 1U;
-    const uint32_t magnitude =
-        format.hasSign ? raw & (signMask - 1U) : raw & payloadMask;
+    const uint32_t magnitude = format.hasSign ? raw & (signMask - 1U) : raw & payloadMask;
     const float value = decodeFiniteBinaryFloatMagnitude(magnitude, format);
     return negative ? -value : value;
 }
 
-inline uint32_t nearestPositiveBinaryFloatRaw(float value, const BinaryFloatFormat& format) {
-    uint32_t lower = 0;
-    uint32_t upper = format.maximumPositiveFiniteRaw;
-    while (lower + 1 < upper) {
-        const uint32_t middle = lower + (upper - lower) / 2;
-        if (decodeFiniteBinaryFloatMagnitude(middle, format) < value)
-            lower = middle;
-        else
-            upper = middle;
-    }
+inline uint32_t nearestPositiveBinaryFloatRaw(ScalarType type, float value,
+                                              const BinaryFloatFormat& format) {
+    const std::vector<float>& values = positiveFiniteBinaryFloatValues(type);
+    const auto upperIterator = std::lower_bound(values.begin(), values.end(), value);
+    if (upperIterator == values.begin()) return 0;
+    if (upperIterator == values.end()) return format.maximumPositiveFiniteRaw;
 
-    const double lowerValue = static_cast<double>(decodeFiniteBinaryFloatMagnitude(lower, format));
-    const double upperValue = static_cast<double>(decodeFiniteBinaryFloatMagnitude(upper, format));
+    const uint32_t upper = static_cast<uint32_t>(std::distance(values.begin(), upperIterator));
+    const uint32_t lower = upper - 1U;
+    const double lowerValue = static_cast<double>(values[lower]);
+    const double upperValue = static_cast<double>(values[upper]);
     const double lowerDistance = static_cast<double>(value) - lowerValue;
     const double upperDistance = upperValue - static_cast<double>(value);
     if (lowerDistance < upperDistance) return lower;
@@ -729,7 +781,7 @@ inline uint32_t encodeBinaryFloat(ScalarType type, float value) {
         decodeFiniteBinaryFloatMagnitude(format.maximumPositiveFiniteRaw, format);
     if (value >= maximumValue) return sign | format.maximumPositiveFiniteRaw;
 
-    const uint32_t magnitude = nearestPositiveBinaryFloatRaw(value, format);
+    const uint32_t magnitude = nearestPositiveBinaryFloatRaw(type, value, format);
     if (magnitude == 0 && !format.hasSignedZero) return 0;
     return sign | magnitude;
 }
