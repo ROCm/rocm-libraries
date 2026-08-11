@@ -1037,12 +1037,8 @@ class LraTileAssignmentMFMA(LraTileAssignment):
                     and kernel["LDSSegInterleaveOffsets"].get("footprintPacked") and segILActive
                 _segWavesPerComp = (num1DWaves // (kernel["NumWaves"] // 2)) if _segPacked else 1
                 if _segPacked and _segWavesPerComp > 1:
-                    # [4,1]/[1,4]: _segWavesPerComp waves share each of the 2 comps. Split wtid0 into
-                    # segment id (segment jump, post-pad) + within-comp wave offset (normal stride, pre-pad).
-                    # Baseline puts the segment jump on the component axis (wtid0 // wavesPerComp).
-                    # portSplit puts it on the read-port axis (wtid0 & 1) instead, so the two LDS read
-                    # ports (port = WaveIdx & 1) land in different segments; the within-comp offset then
-                    # rides wtid0 // 2. Requires wavesPerComp == 2 (numComp == numWaves // 2 == 2).
+                    # [4,1]/[1,4]: wtid0 = segment jump + within-comp offset. portSplit jumps on the
+                    # read port (wtid0 & 1), otherwise on the component (wtid0 // 2). wavesPerComp == 2.
                     _portSplit = (tc == "A" and _segOff.get("portSplitA", False)) or \
                                  (tc == "B" and _segOff.get("portSplitB", False))
                     compReg = writer.vgprPool.checkOut(1, tag="segCompId")

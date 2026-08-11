@@ -65,13 +65,17 @@ def _coarse(state, tc):
     mi_threads = min(state["MatrixInstM"], state["MatrixInstN"])
     return W > 0 and mi_threads * vw >= mt // W
 
-def _port_split_a(state):
-    # Fine A (VWA==WaveTileA/2, not coarse): split along the port axis instead of the component axis.
-    # Only VWA==WaveTileA/2 (2 vIdx per port) works, and only with TDMSplit; finer VWA can't.
-    if _coarse(state, "A") or not state.get("TDMSplit"):
+def _port_split(state, tc):
+    # Fine active: VW==WaveTile/2 (2 vIdx per port) with TDMSplit. Finer VW would need a >2-way split.
+    if _coarse(state, tc) or not state.get("TDMSplit"):
         return False
-    vwa = state["VectorWidthA"]
-    return vwa > 0 and state["MIWaveTile"][0] % vwa == 0 and state["MIWaveTile"][0] // vwa == 2
+    idx = 0 if tc == "A" else 1
+    vw = state["VectorWidthA"] if tc == "A" else state["VectorWidthB"]
+    wt = state["MIWaveTile"][idx]
+    return vw > 0 and wt % vw == 0 and wt // vw == 2
+
+def _port_split_a(state):
+    return _port_split(state, "A")
 
 def _b_readable(state):
     # True if B can be split across segments and still read correctly: either B covers a full
@@ -130,30 +134,28 @@ def _evaluate_asymmetric(state):
         return o
 
     if state.get("TDMSplit"):
-        # Only coarse active is supported so far (fine active is a follow-up).
-        if not _coarse(state, activeTC):
-            return _no("TDMSplit asymmetric: fine active not yet supported")
-        # port-axis: active tensor's two comps split across LDS segments by the read-port axis
-        # (locked model: [active.port0][shared][active.port1] is conflict-free). Shared stays
-        # whole/baseline in the gap. Tight when the shared block already pushes port1 into a new
-        # segment; otherwise pad the port-axis stride up to the boundary (grows LDS, PGR2 + force).
-        portKey = "portSplitA" if activeTC == "A" else "portSplitB"
-        strideAct = fAct + 2 * fSh              # port0 -> port1 gap
-        c0end = (base + fActData - 1) // SEG    # last segment port0's data touches
+        if not (_coarse(state, activeTC) or _port_split(state, activeTC)):
+            return _no("TDMSplit asymmetric: active VW must be WaveTile or WaveTile/2")
+        # Coarse splits by read port; fine can't (needs >2-way) so it splits by component instead.
+        isFine = _port_split(state, activeTC) and not _coarse(state, activeTC)
+        splitKey = "tdmSplitCompAxis" if isFine else ("portSplitA" if activeTC == "A" else "portSplitB")
+        strideAct = fAct + 2 * fSh
+        c0end = (base + fActData - 1) // SEG
         c1 = (base + strideAct) // SEG
         if c1 > c0end:
             # shared block already separates the two ports into different segments; free.
             o = _build_offsets(strideAct)
-            o[portKey] = True
+            o[splitKey] = True
             return {"applicable": True, "aligned": False, "offsets": o,
-                    "blockSpan": 0, "reason": "portaxis-asym",
-                    "segmentMap": "PORTAXIS active=%s port0->seg%d port1->seg1" % (activeTC, base // SEG)}
+                    "blockSpan": 0, "reason": "compaxis-asym" if isFine else "portaxis-asym",
+                    "segmentMap": "%s active=%s seg%d/seg%d" % ("COMPAXIS" if isFine else "PORTAXIS",
+                                  activeTC, base // SEG, (base + strideAct) // SEG)}
         # port1 still shares port0's segment: pad it to the next segment boundary. Grows LDS.
         if state.get("PrefetchGlobalRead") != 2:        return _no("portaxis-asym small: PGR!=2")
         if state.get("LDSSegmentInterleave", -1) == -1: return _no("auto: skip aligned (LDS growth)")
         pre = _ceil_seg(base + strideAct) - base
         o = _build_offsets(pre)
-        o[portKey] = True
+        o[splitKey] = True
         blockSpan = base + pre + fAct
         bMXSA, bMXSB, mxEnd = _mx_scale_bases(state, blockSpan)
         if bMXSA is not None: o["ldsBaseMXSA"] = bMXSA
@@ -218,6 +220,9 @@ def evaluate(state):
         return _no("LocalSplitU>1")
     if not state.get("UnrollMajorLDSA") or not state.get("UnrollMajorLDSB"):
         return _no("not unrollMajor")
+    # DirectToVgpr operands are not in LDS, so segment placement does not apply.
+    if state.get("DirectToVgprA") or state.get("DirectToVgprB"):
+        return _no("DirectToVgpr operand not LDS-resident")
     # numComp==2 (NumWaves==4) restricts MIWaveGroup to {[2,2],[4,1],[1,4]}, all with even waves
     # per active dim. [2,2] interleaves both tensors; [4,1]/[1,4] have one active + one shared
     # tensor and are handled by _evaluate_asymmetric below.

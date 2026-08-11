@@ -1659,12 +1659,23 @@ class LocalReadMFMA(LocalRead):
                                               and ((tc == "A" and kernel["LDSSegInterleaveOffsets"].get("portSplitA", False))
                                                 or (tc == "B" and kernel["LDSSegInterleaveOffsets"].get("portSplitB", False)))
                                               and numVectorsPerTile > 1)
+                                _segOff = kernel["LDSSegInterleaveOffsets"] if kernel.get("LDSSegmentInterleave") == 1 else {}
+                                _compAxis = (_segOff.get("tdmSplitCompAxis", False)
+                                             and _segOff.get("activeTC") == tc
+                                             and numVectorsPerTile > 1)
                                 if _portSplit:
                                     # Fine: drop the wave-group factor from the per-vIdx column stride so
                                     # the two vIdx stay within this port's segment; the A0->A1 segment jump
                                     # is on the wave stride, not here.
                                     _shape = MIWaveGroupShape[tile01] // kernel["MIWaveGroup"][tile01]
                                     vCols = (vIdx * numOffsets + oIdx) * _shape
+                                elif _compAxis:
+                                    # Divide the per-vIdx stride by wavesPerComp to match the write
+                                    # boundary (tdmSplitLdsBoundary); the match needs numOffsets==1, bpeGR==bpeDS.
+                                    assert numOffsets == 1
+                                    assert tP["bpeGR"] == tP["bpeDS"]
+                                    _wavesPerComp = max(1, kernel["MIWaveGroup"][tile01] // (kernel["NumWaves"] // 2))
+                                    vCols = (vIdx * numOffsets + oIdx) * (MIWaveGroupShape[tile01] // _wavesPerComp)
                                 else:
                                     vCols = (vIdx * numOffsets + oIdx) * MIWaveGroupShape[tile01]
                                     _segActiveLR = (kernel.get("LDSSegmentInterleave") == 1

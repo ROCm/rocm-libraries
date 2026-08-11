@@ -19222,14 +19222,15 @@ class KernelWriterAssembly(KernelWriter):
       _segOff = kernel["LDSSegInterleaveOffsets"]
       _portSplit = (tc == "A" and _segOff.get("portSplitA", False)) or \
                    (tc == "B" and _segOff.get("portSplitB", False))
-      if _portSplit:
+      # compAxis (fine): ldsSplit is the per-vIdx step within the segment; the component jump
+      # rides the wave base (initTDMDescriptorWaveSeparatedImpl), not ldsSplit.
+      _compAxis = _segOff.get("tdmSplitCompAxis", False) and _segOff.get("activeTC") == tc
+      if _portSplit or _compAxis:
         vw = kernel["VectorWidthA"] if tc == "A" else kernel["VectorWidthB"]
         numVec = kernel["MIWaveTile"][ti] // vw
         numComp = kernel["NumWaves"] // 2
-        # One load-wave fills one component (its two TDMSplit halves L1/L2 stay in the same
-        # segment). Coarse (numVec==1): L2 lands one within-comp wave stride after L1, i.e. the
-        # per-wave footprint = per-component data / dim1Divisor. Fine (numVec>1): the same footprint
-        # falls out of the per-vIdx split, so both use mt*du*bpe / dim1Divisor / max(numVec, numComp).
+        # L1/L2 stay in one segment. Boundary = per-vIdx footprint: mt*du*bpe/dim1Divisor divided
+        # by numVec (fine) or numComp (coarse, numVec==1).
         splitDiv = numVec if numVec > 1 else numComp
         halfFootprint = round(mt * du * bpe // dim1Divisor // splitDiv)
         halfPad = halfFootprint // ldsBlockSizePerPad * ldsPadSize if ldsBlockSizePerPad != 0 and ldsPadSize != 0 else 0
@@ -19537,7 +19538,10 @@ class KernelWriterAssembly(KernelWriter):
           (tc == "B" and not _segOffAB.get("bBaseline", False)))
       _segPortSplit = _segAB and ((tc == "A" and _segOffAB.get("portSplitA", False)) or
                                   (tc == "B" and _segOffAB.get("portSplitB", False)))
-      _segWaveJump = (_segAB and not kernel["TDMSplit"]) or _segPortSplit
+      # compAxis: the wave base carries the component segment jump (wId * writeStrideBytes);
+      # the per-vIdx split stays within the segment.
+      _segCompAxis = _segAB and _segOffAB.get("tdmSplitCompAxis", False) and _segOffAB.get("activeTC") == tc
+      _segWaveJump = (_segAB and not kernel["TDMSplit"]) or _segPortSplit or _segCompAxis
       _segFootprint = _segWaveJump and kernel["LDSSegInterleaveOffsets"].get("footprintPacked", False)
       if _segWaveJump:
           dataBytes = kernel["LDSSegInterleaveOffsets"]["writeStrideBytes"]

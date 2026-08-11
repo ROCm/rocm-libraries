@@ -247,12 +247,20 @@ def test_miwg_1x4_large_tile_interleaves_not_baseline():
     assert r["applicable"] is True
     assert r["offsets"]["aBaseline"] is True
 
-def test_miwg_asym_tdmsplit_not_supported():
-    # TDMSplit + asymmetric MIWaveGroup ([4,1]/[1,4]) with a FINE active tensor is not supported
-    # yet -> reject (coarse active + TDMSplit is covered by the port-axis tests below).
-    for miwg in ([4, 1], [1, 4]):
-        r = evaluate(_vw8_state(MIWaveGroup=miwg, TDMSplit=1, VectorWidthA=4, VectorWidthB=4))
-        assert r["applicable"] is False and "TDMSplit" in r["reason"], miwg
+def test_asym_fine_tdmsplit_comp_axis():
+    # TDMSplit + asymmetric MIWaveGroup ([4,1]/[1,4]) with a FINE active tensor (VW==WaveTile/2)
+    # uses the component axis (wave-pair): each load-wave's L1/L2 halves land in different segments,
+    # HALVING conflict with the same load count. Marked tdmSplitCompAxis (not portSplitA/B).
+    r = evaluate(_vw8_state(MIWaveGroup=[4, 1], TDMSplit=1, VectorWidthA=4))
+    assert r["applicable"] is True and r["reason"] == "compaxis-asym"
+    assert r["offsets"].get("tdmSplitCompAxis") is True
+    assert r["offsets"].get("activeTC") == "A" and r["offsets"].get("bBaseline") is True
+    assert "portSplitA" not in r["offsets"]
+    r = evaluate(_vw8_state(MIWaveGroup=[1, 4], TDMSplit=1, VectorWidthB=4))
+    assert r["applicable"] is True and r["reason"] == "compaxis-asym"
+    assert r["offsets"].get("tdmSplitCompAxis") is True
+    assert r["offsets"].get("activeTC") == "B" and r["offsets"].get("aBaseline") is True
+    assert "portSplitB" not in r["offsets"]
 
 def test_asym_4x1_coarse_tdmsplit_port_axis():
     # Coarse A ([4,1], default VWA=8 == WaveTileA=8) + TDMSplit -> port-axis layout:
@@ -318,11 +326,18 @@ def test_asym_tdmsplit_nontight_mirror_1x4_aligned():
     assert o.get("portSplitB") is True and o.get("aBaseline") is True
     assert o["ldsBaseA"] == 33024 and o["writeStrideBytes"] == SEG
 
-def test_asym_fine_tdmsplit_still_rejected():
-    # Fine A (VWA=2 < WaveTileA=8, not coarse) + TDMSplit: port-axis is coarse-only for now.
+def test_asym_finer_than_half_tdmsplit_rejected():
+    # VWA=2 with WaveTileA=8 -> numVec=4 (finer than WaveTile/2): a port/comp would need >2 pieces,
+    # but TDMSplit gives only a 2-way split. Only VW==WaveTile/2 (comp-axis) is supported.
     st = _vw8_state(MIWaveGroup=[4, 1], TDMSplit=1, VectorWidthA=2)
     r = evaluate(st)
     assert r["applicable"] is False and "TDMSplit" in r["reason"]
+
+def test_directtovgpr_operand_rejected():
+    # DirectToVgpr operands bypass LDS -> operand LDS placement is inapplicable; must reject.
+    for kw in (dict(DirectToVgprA=True), dict(DirectToVgprB=True)):
+        r = evaluate(_vw8_state(**kw))
+        assert r["applicable"] is False and "DirectToVgpr" in r["reason"], kw
 
 def test_miwg_4x1_nonzero_base_no_false_baseline_shortcut():
     # fp8/fp4 LDS-transpose kernels use a half-wave shift (LdsOffsetA=4). With fActData==SEG the

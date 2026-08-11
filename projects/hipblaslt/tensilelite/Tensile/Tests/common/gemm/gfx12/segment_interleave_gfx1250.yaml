@@ -1,29 +1,23 @@
 TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201]
 
-# End-to-end functional test for the gfx1250 LDS segment-conflict interleave.
-# Every problem runs as baseline and interleaved, validated against the CPU reference.
-# Both oracle branches: tight (fA+fB >= 64KiB) and aligned (< 64KiB, grows LDS).
-#
-# MatrixInstruction: [M, N, K, B, _, MIWT0, MIWT1, MIWG0, MIWG1]
-#
-# Problem groups (bf16 / mxf8 / mxf4). Each forks TDMSplit [False,True]:
-#   False -> bcontig-asym ([4,1]/[1,4] comp-axis); True + coarse [4,1]/[1,4] -> port-axis.
-#   Auto VectorWidth resolves to WaveTile (coarse) for these MIs, so no explicit VW is needed.
+# Functional test for the gfx1250 LDS segment-conflict interleave. Each problem runs baseline
+# (LDSSegmentInterleave=0) and interleaved (=1) vs the CPU reference; both oracle branches are
+# covered (tight fA+fB>=64KiB, aligned <64KiB). bf16=[2,2] no-scale; mxf8=asym+MX scales; mxf4=fp4+fine.
 
 GlobalParameters:
   PrintSolutionRejectionReason: True
   SyncsPerBenchmark: 0
-  NumElementsToValidate: -1        # full validation: interleave must match reference
+  NumElementsToValidate: -1
   KernelTime: False
   BoundsCheck: 0
   ValidationMaxToPrint: 16
   ValidationPrintValids: False
   PruneSparseMode: 0
-  DataInitTypeA: 3                 # serial -> deterministic, exposes address bugs
+  DataInitTypeA: 3
   DataInitTypeB: 3
   DataInitTypeD: 2
-  DataInitTypeMXSA: 3              # used by the mxf8 problem group; ignored by non-MX groups
+  DataInitTypeMXSA: 3
   DataInitTypeMXSB: 3
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 0
@@ -37,6 +31,7 @@ GlobalParameters:
   CodeObjectVersion: "4"
 
 BenchmarkProblems:
+  # bf16 (no scales): [2,2] tight + aligned, B unrestricted (VWB coarse+fine).
   -
     - # ProblemType, TN
       OperationType: GEMM
@@ -59,22 +54,16 @@ BenchmarkProblems:
         - UseSgprForGRO: [0]
         - ForceDisableShadowInit: [True]
         - MatrixInstruction:
-          - [16, 16, 32, 1,  1,  8, 8,  2, 2]   # MT256x256 (tight)
-          - [16, 16, 32, 1,  1,  8, 4,  2, 2]   # MT256x128 (aligned, non-square)
-          - [16, 16, 32, 1,  1,  4, 4,  2, 2]   # MT128x128 (aligned)
-          - [16, 16, 32, 1,  1,  2, 4,  2, 2]   # MT64x128  (aligned)
-          # MIWaveGroup [4,1] (A active / B shared) and [1,4] (B active / A shared):
-          # bcontig-asym read/write core path (no scales). Large-tile + MX-scale relocation
-          # coverage lives in the mxf8 group below.
-          - [16, 16, 32, 1,  1,  4, 8,  4, 1]   # MT256x128 [4,1] -> bcontig-asym (B whole as gap)
-          - [16, 16, 32, 1,  1,  8, 4,  1, 4]   # MT128x256 [1,4] -> bcontig-asym mirror (A whole as gap)
+          - [16, 16, 32, 1,  1,  8, 8,  2, 2]   # [2,2] tight
+          - [16, 16, 32, 1,  1,  8, 4,  2, 2]   # [2,2] aligned
+          - [16, 16, 32, 1,  1,  4, 4,  2, 2]   # [2,2] aligned
         - DepthU: [128]
         - TDMIterateMode: [-1]
         - TDMInst: [3]
         - HalfPLR: [1]
-        - TDMSplit: [False, True]      # False=bcontig-asym; True+coarse [4,1]/[1,4]=port-axis
-        - LDSSegmentInterleave: [-1, 0, 1]      # auto / baseline / force-on, all validated
-        - PrefetchGlobalRead: [1, 2]            # PGR!=2 tight interleave coverage
+        - TDMSplit: [False, True]
+        - LDSSegmentInterleave: [-1, 0, 1]      # auto / off / on
+        - PrefetchGlobalRead: [1, 2]            # 2 enables the aligned branch
         - TransposeLDS: [-1]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
@@ -90,7 +79,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
         - VectorWidthA: [-1]
-        - VectorWidthB: [-1, 2]
+        - VectorWidthB: [-1, 2]                 # B coarse + fine
         - LocalReadVectorWidth: [-1]
         - 1LDSBuffer: [0]
         - SourceSwap: [True]
@@ -103,10 +92,11 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
+          - Exact: [1032, 1032, 1, 576]
           - Exact: [1024, 1024, 1, 512]
         - ActivationArgs:
           - [Enum: none]
-  # 2) mxf8 (MXFP8 TN, block-32 e8): MT256x256 tight, MT256x128 aligned.
+  # mxf8 (block-32 e8): [4,1]/[1,4] + [2,2] with MX-scale relocation; B unrestricted (VWB coarse+fine).
   -
     - # ProblemType, TN - MXF8SS Block32, E8
       OperationType: GEMM
@@ -134,20 +124,17 @@ BenchmarkProblems:
         - UseSgprForGRO: [0]
         - ForceDisableShadowInit: [true]
         - MatrixInstruction:
-          - [16, 16, 128, 1,  1,  8, 8,  2, 2]   # MT256x256 (tight)
-          - [16, 16, 128, 1,  1,  8, 4,  2, 2]   # MT256x128 (aligned)
-          # MIWaveGroup [4,1]/[1,4] with MX scales: exercises asymmetric bcontig-asym AND the
-          # MX-scale relocation (ldsBaseMXSA/MXSB) that the bf16 group cannot reach.
-          - [16, 16, 128, 1,  1,  8, 4,  4, 1]   # MT512x64  [4,1] (A active / B shared)
-          - [16, 16, 128, 1,  1,  4, 8,  4, 1]   # MT256x128 [4,1] smaller tile
-          - [16, 16, 128, 1,  1,  4, 8,  1, 4]   # MT64x512  [1,4] (B active / A shared)
-          - [16, 16, 128, 1,  1,  8, 4,  1, 4]   # MT128x256 [1,4] smaller tile
+          - [16, 16, 128, 1,  1,  8, 8,  2, 2]   # [2,2] tight
+          - [16, 16, 128, 1,  1,  8, 4,  2, 2]   # [2,2] aligned
+          - [16, 16, 128, 1,  1,  8, 4,  4, 1]   # [4,1]
+          - [16, 16, 128, 1,  1,  4, 8,  1, 4]   # [1,4]
+          - [16, 16, 128, 1,  1,  8, 4,  1, 4]   # [1,4]
         - DepthU: [256]
         - TDMIterateMode: [-1]
         - TDMInst: [3]
         - HalfPLR: [3]
-        - TDMSplit: [False, True]      # False=bcontig-asym; True+coarse [4,1]/[1,4]=port-axis
-        - LDSSegmentInterleave: [-1,0,1]
+        - TDMSplit: [False, True]
+        - LDSSegmentInterleave: [-1, 0, 1]
         - PrefetchGL2: [2]
         - TransposeLDS: [-1]
         - LdsPadA: [-1]
@@ -165,7 +152,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
         - VectorWidthA: [-1]
-        - VectorWidthB: [-1, 4]
+        - VectorWidthB: [-1, 4]                  # B coarse + fine; [1,4] fine via WaveTileB=8 tile
         - LocalReadVectorWidth: [-1]
         - 1LDSBuffer: [0]
         - SourceSwap: [True]
@@ -180,10 +167,11 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
+          - Exact: [1032, 1032, 1, 1056]
           - Exact: [1024, 1024, 1, 1024]
         - ActivationArgs:
           - [Enum: none]
- # 3) mxf4
+  # mxf4: fp4 pad ([8,7]) + [2,2]/[4,1] fine (VWA=WaveTile/2); extreme asym tiles.
   -
     - # ProblemType, TN
       OperationType: GEMM
@@ -211,12 +199,11 @@ BenchmarkProblems:
         - UseSgprForGRO: [0]
         - ForceDisableShadowInit: [true]
         - MatrixInstruction:
-          - [16, 16, 128, 1,  1,  8, 8,  2, 2]
-          - [16, 16, 128, 1,  1,  8, 4,  2, 2]
-          - [16, 16, 128, 1,  1,  8, 7,  2, 2]
-          # [4,1]/[1,4] coarse (auto VW resolves to WaveTile): TDMSplit=True -> port-axis.
-          - [16, 16, 128, 1,  1,  4, 8,  4, 1]   # MT256x128 [4,1] A active
-          - [16, 16, 128, 1,  1,  8, 4,  1, 4]   # MT128x256 [1,4] B active
+          - [16, 16, 128, 1,  1,  8, 8,  2, 2]   # [2,2] tight (fine via VWA=4)
+          - [16, 16, 128, 1,  1,  8, 4,  2, 2]   # [2,2] aligned
+          - [16, 16, 128, 1,  1,  8, 7,  2, 2]   # [2,2] odd WaveTileB: bcontig + fp4 pad
+          - [16, 16, 128, 1,  1,  8, 1,  4, 1]   # [4,1] extreme (WaveTileA=8, N=16)
+          - [16, 16, 128, 1,  1,  1, 8,  1, 4]   # [1,4] extreme (M=16, WaveTileB=8)
         - DepthU: [512]
         - TDMIterateMode: [-1]
         - TDMInst: [3]
@@ -239,7 +226,7 @@ BenchmarkProblems:
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
-        - VectorWidthA: [-1, 4]
+        - VectorWidthA: [-1, 4]                  # coarse + fine (WaveTile/2): [4,1] comp-axis, [2,2] portSplitA
         - VectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
         - 1LDSBuffer: [0]
@@ -255,6 +242,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [256, 256, 1, 3072]
+          - Exact: [1026, 1026, 1, 2592]
+          - Exact: [1024, 1024, 1, 2560]
         - ActivationArgs:
           - [Enum: none]
