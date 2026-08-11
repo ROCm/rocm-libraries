@@ -169,7 +169,6 @@ Non-attention platform code is otherwise unchanged.
   artifacts) is a follow-up, now tracked under AICK-1704 (migration into
   `hip-kernel-provider`, off POC / PR #9533).
 - Optional later: rename `platform/Python` to `platform/python`, `Cpp` to `cpp`.
-```
 
 ---
 
