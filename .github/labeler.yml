@@ -24,12 +24,19 @@
 - changed-files:
   - any-glob-to-any-file: 'dnn-providers/hip-kernel-provider/**/*'
 
+# These labels help distinguish which subteams are responsible for reviews for changes made in rocKE
+
 "rocke-lib: attention":
 - changed-files:
   - any-glob-to-any-file: 'dnn-providers/hip-kernel-provider/rocke/library/**/*attention*'
   - any-glob-to-any-file: 'dnn-providers/hip-kernel-provider/rocke/library/**/*fmha*'
   - any-glob-to-any-file: 'dnn-providers/hip-kernel-provider/rocke/library/**/*sdpa*'
   - any-glob-to-any-file: 'dnn-providers/hip-kernel-provider/rocke/library/builders/**/attention/**/*'
+
+# This label serves to distiguish work being done in RocKE platform, for the reviewing team and internal tools
+"rocke: platform":
+- changed-files:
+  - any-glob-to-any-file: 'dnn-providers/hip-kernel-provider/rocke/platform/**/*'
 
 "project: hipdnn-integration-tests":
 - changed-files:

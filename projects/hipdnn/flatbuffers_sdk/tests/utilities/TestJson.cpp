@@ -157,9 +157,18 @@ TEST(TestJson, GraphToJsonAndBack)
             context = "(valid reduction graph)";
             break;
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ResampleFwdAttributes:
-            graphBuilder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph();
+            graphBuilder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph(true);
             graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
             context = "(valid resample fwd graph)";
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ResampleBwdAttributes:
+            graphBuilder = hipdnn_test_sdk::utilities::createValidResampleBwdGraph(true);
+            graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+            context = "(valid resample bwd graph)";
+        case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::MoeGroupedMatmulAttributes:
+            graphBuilder = hipdnn_test_sdk::utilities::createValidMoeGroupedMatmulGraph();
+            graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+            context = "(valid MoE grouped matmul graph)";
             break;
         default:
             FAIL() << "Unhandled NodeAttributes enum value";
@@ -239,6 +248,23 @@ TEST(TestJson, GraphWithoutVersionRoundTripsWithVersionAbsent)
 
     const nlohmann::json roundTrippedJson = *graph;
     EXPECT_FALSE(roundTrippedJson.contains("min_required_engine_api_version"));
+}
+TEST(TestJson, MoeGroupedMatmulDefaultsRoundTrip)
+{
+    auto graphBuilder
+        = hipdnn_test_sdk::utilities::createValidMoeGroupedMatmulGraph(MoeGroupedMatmulMode::NONE);
+    const auto* graph = GetGraph(graphBuilder.GetBufferPointer());
+    const nlohmann::json graphJson = *graph;
+    const auto& nodeJson = graphJson.at("nodes").at(0);
+    const auto& inputs = nodeJson.at("inputs");
+
+    EXPECT_EQ(nodeJson.at("type").get<std::string>(), "MoeGroupedMatmulAttributes");
+    EXPECT_EQ(nodeJson.at("mode").get<std::string>(), "none");
+    EXPECT_EQ(nodeJson.at("top_k").get<int32_t>(), 0);
+    EXPECT_FALSE(inputs.contains("token_index_tensor_uid"));
+    EXPECT_FALSE(inputs.contains("token_ks_tensor_uid"));
+
+    toJsonAndBackTestSuite(graph, "(MoE grouped matmul defaults)");
 }
 
 namespace
