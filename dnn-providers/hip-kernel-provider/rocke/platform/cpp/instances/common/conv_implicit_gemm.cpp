@@ -124,18 +124,6 @@ int rocke_conv_problem_m(const rocke_conv_problem_t* p)
     return p->is_3d ? base * rocke_conv_problem_do(p) : base;
 }
 
-/* C / groups  (input channels per group; == C when groups == 1) */
-int rocke_conv_problem_cpg(const rocke_conv_problem_t* p)
-{
-    return (p->groups > 1) ? p->C / p->groups : p->C;
-}
-
-/* K / groups  (output channels per group; == K when groups == 1) */
-int rocke_conv_problem_kpg(const rocke_conv_problem_t* p)
-{
-    return (p->groups > 1) ? p->K / p->groups : p->K;
-}
-
 /* K / groups  (= kpg; per-group output channels) */
 int rocke_conv_problem_n_gemm(const rocke_conv_problem_t* p)
 {

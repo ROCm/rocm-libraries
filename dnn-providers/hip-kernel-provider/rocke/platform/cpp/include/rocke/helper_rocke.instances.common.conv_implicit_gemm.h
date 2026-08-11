@@ -166,12 +166,6 @@ int rocke_conv_problem_wo(const rocke_conv_problem_t* p);
 /* ConvProblem.M property:  N * Ho * Wo  (* Do for 3-D) */
 int rocke_conv_problem_m(const rocke_conv_problem_t* p);
 
-/* ConvProblem.cpg property:  C / groups  (input channels per group) */
-int rocke_conv_problem_cpg(const rocke_conv_problem_t* p);
-
-/* ConvProblem.kpg property:  K / groups  (output channels per group) */
-int rocke_conv_problem_kpg(const rocke_conv_problem_t* p);
-
 /* ConvProblem.N_gemm property:  K / groups  (= kpg; per-group output channels) */
 int rocke_conv_problem_n_gemm(const rocke_conv_problem_t* p);
 

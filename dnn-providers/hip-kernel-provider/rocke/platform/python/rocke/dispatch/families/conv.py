@@ -297,19 +297,24 @@ def _spec_rdna_wmma(req: ConvRequest, name: str) -> ImplicitGemmConvSpec:
 
 
 def _spec_gfx1250_wmma(req: ConvRequest, name: str) -> ImplicitGemmConvSpec:
-    """gfx1250: the RDNA WMMA shape, retargeted to the atom gfx1250 actually has.
+    """gfx1250 WMMA spec: wave32 + the 16x16x32 (K=32) f16/bf16 op.
 
-    gfx1250's f16 WMMA is 16x16x**32**, where gfx12's is 16x16x16, so
-    ``warp_tile_k`` doubles and ``tile_k`` with it. Tiles stay at 32x32 rather
-    than following the CDNA candidates to 64x64: these kernels do not pad, so
-    the tile size is also the divisibility gate, and there is no gfx1250 conv
-    tuning data to justify trading coverage for a larger tile.
+    gfx1250 reports ``family == "cdna"`` but ``wave_size == 32``, so the conv
+    MMA-family selector resolves to WMMA. Its hero matrix op is 16x16x32 (K=32),
+    distinct from the RDNA 16x16x16; ``tile_k`` is therefore 32.
+
+    Tile is 64x64 when both M and N_gemm are divisible by 64, otherwise 32x32
+    to cover small/pointwise shapes without a second registry entry.
     """
+    p = _problem(req)
+    use_64 = (p.M % 64 == 0) and (p.N_gemm % 64 == 0)
+    tile = 64 if use_64 else 32
     return ImplicitGemmConvSpec(
-        problem=_problem(req),
+        problem=p,
+        data=_data(req),
         name=name,
-        tile_m=32,
-        tile_n=32,
+        tile_m=tile,
+        tile_n=tile,
         tile_k=32,
         warp_m=2,
         warp_n=2,
@@ -320,31 +325,6 @@ def _spec_gfx1250_wmma(req: ConvRequest, name: str) -> ImplicitGemmConvSpec:
         pipeline="mem",
         epilogue="default",
         vector_size_c=1,
-    )
-
-
-def _spec_gfx1250_wmma(req: ConvRequest, name: str) -> ImplicitGemmConvSpec:
-    """gfx1250 WMMA spec: wave32 + the 16x16x32 (K=32) f16/bf16 op.
-
-    gfx1250 reports ``family == "cdna"`` but ``wave_size == 32``, so the conv
-    MMA-family selector resolves to WMMA. Its hero matrix op is 16x16x32 (K=32),
-    distinct from the RDNA 16x16x16; ``tile_k`` is therefore 32.
-    """
-    return ImplicitGemmConvSpec(
-        problem=_problem(req),
-        data=_data(req),
-        name=name,
-        tile_m=64,
-        tile_n=64,
-        tile_k=32,
-        warp_m=2,
-        warp_n=2,
-        warp_tile_m=16,
-        warp_tile_n=16,
-        warp_tile_k=32,
-        wave_size=ArchTarget.from_gfx(req.arch).wave_size,
-        pipeline="mem",
-        epilogue="default",
     )
 
 
@@ -417,7 +397,7 @@ def _make_candidate(
         spec_id=spec_id,
         abi_version=CONV_ABI_VERSION,
         priority=priority,
-        capability=Capability(arches=arches, dtypes=("f16",), layouts=("NHWC",)),
+        capability=Capability(arches=arches, dtypes=("f16", "bf16"), layouts=("NHWC",)),
         _supports=support,
         select_spec=select,
         signature=lambda _spec: (),
@@ -478,7 +458,7 @@ CONV_REGISTRY.extend(
         ),
         _make_candidate(
             name="conv_igemm_gfx1250_wmma",
-            spec_id="gfx1250_wmma_32x32",
+            spec_id="gfx1250_wmma_64x64",
             priority=10,
             spec_fn=_spec_gfx1250_wmma,
             arches=_GFX1250_WMMA,

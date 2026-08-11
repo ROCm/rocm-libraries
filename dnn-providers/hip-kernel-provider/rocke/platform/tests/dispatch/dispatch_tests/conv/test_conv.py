@@ -108,7 +108,7 @@ class TestConvDispatch(unittest.TestCase):
         req = _conv("gfx1250", C=64, K=64, Hi=16, Wi=16, N=2, dtype="bf16")
         for c in conv_candidates():
             if c.spec_id in ("cdna_cshuffle_64x64", "cdna_mem_64x64"):
-                ok, _why = c.supports(req)
+                ok, _why = c.admits(req)
                 self.assertFalse(ok)
 
     def test_rdna_arch_selects_wmma(self):
