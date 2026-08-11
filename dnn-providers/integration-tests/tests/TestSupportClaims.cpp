@@ -19,9 +19,7 @@ using hipdnn_integration_tests::bundle::loadSupportClaims;
 using hipdnn_integration_tests::bundle::loadSweepSupportClaims;
 using hipdnn_integration_tests::bundle::parseSupportClaimsJson;
 using hipdnn_integration_tests::bundle::parseSweepSupportClaimsJson;
-using hipdnn_integration_tests::bundle::SupportClaims;
 using hipdnn_integration_tests::bundle::supportJsonPath;
-using hipdnn_integration_tests::bundle::SweepSupportClaims;
 using hipdnn_test_sdk::utilities::ScopedDirectory;
 
 // NOLINTBEGIN(readability-identifier-naming)
@@ -51,7 +49,7 @@ ScopedDirectory makeScopedTestDir(const std::string& prefix)
           / (prefix + "_"
              + std::to_string(::testing::UnitTest::GetInstance()->current_test_info()->line()));
     std::filesystem::remove_all(path);
-    return ScopedDirectory(path);
+    return {path};
 }
 
 } // namespace
