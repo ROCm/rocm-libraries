@@ -1,0 +1,22 @@
+{
+  "claims": {
+    "MIOPEN_ENGINE": [
+      {
+        "cases": [
+          "1_16_4_4_fp16_nchw",
+          "1_16_4_4_fp32_nchw",
+          "2_4_8_8_fp16_nchw",
+          "2_4_8_8_fp32_nchw",
+          "4_8_16_16_fp16_nchw",
+          "4_8_16_16_fp32_nchw"
+        ],
+        "support": {
+          "gfx90a": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

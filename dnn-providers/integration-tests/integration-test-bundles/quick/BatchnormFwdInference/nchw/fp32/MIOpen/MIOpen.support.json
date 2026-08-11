@@ -1,0 +1,15 @@
+{
+  "claims": {
+    "HIP_MLOPS_ENGINE": {
+      "gfx90a": [
+        "linux"
+      ]
+    },
+    "MIOPEN_ENGINE": {
+      "gfx90a": [
+        "linux"
+      ]
+    }
+  },
+  "version": 1
+}
