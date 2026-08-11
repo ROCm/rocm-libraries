@@ -30,20 +30,6 @@ bool isEligibleMov(const StinkyInstruction& inst) {
     return true;
 }
 
-bool hasSrcOverlap(const StinkyInstruction& inst, const StinkyRegister& reg) {
-    for (const StinkyRegister& src : inst.getSrcRegs()) {
-        if (src.isOverlap(reg)) return true;
-    }
-    return false;
-}
-
-bool hasDestOverlap(const StinkyInstruction& inst, const StinkyRegister& reg) {
-    for (const StinkyRegister& dst : inst.getDestRegs()) {
-        if (dst.isOverlap(reg)) return true;
-    }
-    return false;
-}
-
 enum class RegClass { Vgpr, Sgpr, Other };
 
 RegClass classifyReg(const StinkyRegister& reg) {
@@ -70,6 +56,41 @@ bool isSamePropagatableClass(const StinkyRegister& dst, const StinkyRegister& sr
     const RegClass dstClass = classifyReg(dst);
     const RegClass srcClass = classifyReg(src);
     return dstClass != RegClass::Other && dstClass == srcClass;
+}
+
+struct RegLaneKey {
+    RegType type;
+    uint32_t idx;
+
+    bool operator==(const RegLaneKey& other) const noexcept {
+        return type == other.type && idx == other.idx;
+    }
+};
+
+struct RegLaneKeyHash {
+    size_t operator()(const RegLaneKey& key) const noexcept {
+        const size_t typeHash = std::hash<int>{}(static_cast<int>(key.type));
+        const size_t idxHash = std::hash<uint32_t>{}(key.idx);
+        return typeHash ^ (idxHash << 1);
+    }
+};
+
+enum class NextEvent { None, Use, Def };
+
+void markRegisterLanes(const StinkyRegister& reg, NextEvent event,
+                       std::unordered_map<RegLaneKey, NextEvent, RegLaneKeyHash>& nextEvents) {
+    if (!reg.isRegister()) return;
+    for (uint32_t lane = 0; lane < reg.reg.num; ++lane) {
+        nextEvents[{reg.reg.type, reg.reg.idx + lane}] = event;
+    }
+}
+
+NextEvent getNextEvent(
+    const StinkyRegister& reg,
+    const std::unordered_map<RegLaneKey, NextEvent, RegLaneKeyHash>& nextEvents) {
+    auto it = nextEvents.find({reg.reg.type, reg.reg.idx});
+    if (it == nextEvents.end()) return NextEvent::None;
+    return it->second;
 }
 
 class AsmMovePropagationPassImpl : public Pass {
@@ -169,37 +190,36 @@ class AsmMovePropagationPassImpl : public Pass {
             if (dst != src && isSamePropagatableClass(dst, src)) moveMap[dst] = src;
         }
 
-        // Phase B - mov cleanup loop.
+        // Phase B - mov cleanup loop (O(N) backward next-event scan).
+        // For each lane, track the first event after current instruction:
+        //   - Use means mov must be kept.
+        //   - Def means mov can be erased.
+        //   - None means keep conservatively (potential live-out).
         std::vector<StinkyInstruction*> toErase;
-        for (size_t i = 0; i < instructions.size(); ++i) {
+        std::unordered_map<RegLaneKey, NextEvent, RegLaneKeyHash> nextEvents;
+        for (size_t i = instructions.size(); i-- > 0;) {
             StinkyInstruction* inst = instructions[i];
-            if (!isEligibleMov(*inst)) continue;
+            if (isEligibleMov(*inst)) {
+                const StinkyRegister& dst = inst->getDestReg(0);
+                const StinkyRegister& src = inst->getSrcReg(0);
 
-            const StinkyRegister& dst = inst->getDestReg(0);
-            const StinkyRegister& src = inst->getSrcReg(0);
-
-            // Identity move has no semantic effect.
-            if (dst == src) {
-                toErase.push_back(inst);
-                continue;
-            }
-
-            bool redefined = false;
-            for (size_t j = i + 1; j < instructions.size(); ++j) {
-                StinkyInstruction* later = instructions[j];
-                if (hasSrcOverlap(*later, dst)) {
-                    break;
-                }
-                if (hasDestOverlap(*later, dst)) {
-                    redefined = true;
-                    break;
+                // Identity move has no semantic effect.
+                if (dst == src) {
+                    toErase.push_back(inst);
+                } else if (getNextEvent(dst, nextEvents) == NextEvent::Def) {
+                    // Erase mov only when dst is redefined before any later use in this BB.
+                    // Otherwise keep it conservatively (it may still be live-out).
+                    toErase.push_back(inst);
                 }
             }
 
-            // Erase mov only when dst is redefined before any later use in this BB.
-            // Otherwise keep it conservatively (it may still be live-out).
-            if (redefined) {
-                toErase.push_back(inst);
+            // For same-instruction read/write, keep "use-before-def" semantics by
+            // applying defs first, then sources overwrite as Use.
+            for (const StinkyRegister& defReg : inst->getDestRegs()) {
+                markRegisterLanes(defReg, NextEvent::Def, nextEvents);
+            }
+            for (const StinkyRegister& useReg : inst->getSrcRegs()) {
+                markRegisterLanes(useReg, NextEvent::Use, nextEvents);
             }
         }
 
