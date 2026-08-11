@@ -1,5 +1,5 @@
 /* ************************************************************************
-* Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -217,6 +217,7 @@
 #include "internal/generic/hipsparse_scatter.h"
 #include "internal/generic/hipsparse_sddmm.h"
 #include "internal/generic/hipsparse_sparse2dense.h"
+#include "internal/generic/hipsparse_spgeam.h"
 #include "internal/generic/hipsparse_spgemm.h"
 #include "internal/generic/hipsparse_spgemm_reuse.h"
 #include "internal/generic/hipsparse_spmm.h"
