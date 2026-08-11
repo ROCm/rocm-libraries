@@ -22,7 +22,7 @@ Prerequisites
 
 .. note::
 
-   AMD SMI isn't available on Window. As a result, GPU temperature monitoring is not available on Windows. Disable GPU monitoring on Windows by adding the following flag when compiling your code:
+   AMD SMI isn't available on Windows. As a result, GPU temperature monitoring is not available on Windows. Disable GPU monitoring on Windows by adding the following flag when compiling your code:
 
    .. code:: shell
 
