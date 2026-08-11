@@ -42,6 +42,16 @@
 #     prefetched-ahead iteration advances every address by `inc` (incrementAddr).
 #     The kernel re-exports all addresses across n_inc+1 stages; stage s must be
 #     the base footprint shifted by (PGR+s)*inc along the summation (K) axis.
+#   - GlobalSplitU: each workgroup prefetches only its own slice of K, so
+#     calculateGSUIterOffset/applyGSUChunk shift the start address by
+#     startIter*inc and widen the per-iteration step to the chunk stride. Both
+#     chunk layouts are covered: interleaved (GSUC=0, group g starts at
+#     iteration g and steps G at a time) and contiguous (GSUC=1, group g starts
+#     after every lower group's run and steps one at a time, with the first
+#     numIter%G groups getting an extra iteration). Each group is verified
+#     against its *own* chunk rather than aggregated, so a group landing on the
+#     wrong K slice fails. The group index is fed from the grid z axis rather
+#     than split out of workgroup y as production does; see build_kernel.
 #   - Non-power-of-2 MacroTile (e.g. 384 for A/B, 192/96 for MX scales): exercises
 #     MT offset, non-POT gl2ncc (vectorStaticDivideAndRemainder), and non-POT
 #     perpendicular/coalesced extents. DepthU remains a multiple of MatrixInstK.
@@ -159,15 +169,44 @@ class GL2Config:
                               # whenever cfg.tensors includes a Metadata (_M) spec.
     depth_u_metadata: int = 0 # _DepthUMetadata: metadata's own (already-compressed)
                               # unroll extent; independent of DepthU/_DepthU{A,B}.
+    gsu: int = 0              # GlobalSplitU group count; 0 leaves the GSU paths off
+                              # entirely (GlobalSplitU=0), 1 exercises them with a
+                              # single group. Production splits the y axis to derive
+                              # the group index; this harness feeds it from z instead
+                              # (see build_kernel for why that is equivalent here), so
+                              # a GSU config cannot also be batched.
+    gsuc: bool = False        # GlobalSplitUCoalesced: False = interleaved chunks
+                              # (group g starts at iteration g, steps G at a time),
+                              # True = contiguous chunks (group g starts after the
+                              # lower groups' runs, steps one at a time).
+    k_iters: int = 8          # unroll iterations in the summation loop; programmed as
+                              # SizesSum = k_iters * DepthU. Only the contiguous
+                              # layout reads it (numIter = SizesSum / DepthU), where
+                              # k_iters % gsu picks how many groups get an extra
+                              # iteration.
 
     @property
     def n_wg(self):
         return self.cluster[0] * self.cluster[1]
 
     @property
+    def gsu_on(self):
+        return self.gsu > 0
+
+    @property
+    def n_groups(self):
+        """GSU groups the launch splits K across (1 when the GSU paths are off)."""
+        return max(1, self.gsu)
+
+    @property
+    def grid_z(self):
+        # batches and GSU groups share the z axis; a config uses at most one.
+        return self.num_batches * self.n_groups
+
+    @property
     def n_regions(self):
-        # distinct output regions = cooperative cluster wgs * batches (grid z)
-        return self.n_wg * self.num_batches
+        # distinct output regions = cooperative cluster wgs * grid z
+        return self.n_wg * self.grid_z
 
 
 def num_cooperative_threads(cfg, subtc):
@@ -226,6 +265,28 @@ def free_dim_size(cfg, subtc):
     if subtc == "A":
         return cfg.size_i if cfg.size_i is not None else cfg.cluster[0] * mt
     return cfg.size_j if cfg.size_j is not None else cfg.cluster[1] * mt
+
+
+def gsu_start_iter(cfg, group):
+    """Unroll iteration where `group`'s K chunk starts, matching
+    GL2Prefetch.calculateGSUIterOffset.
+
+    Interleaved chunks put group g at iteration g. Contiguous chunks put it
+    after every lower group's run: with numIter = q*G + r, the first r groups
+    get q+1 iterations and the rest get q."""
+    if not cfg.gsu_on:
+        return 0
+    if not cfg.gsuc:
+        return group
+    q, r = divmod(cfg.k_iters, cfg.n_groups)
+    return group * q + min(group, r)
+
+
+def gsu_iter_stride(cfg):
+    """Unroll iterations one prefetch increment covers, matching the increment
+    scaling in GL2Prefetch.applyGSUChunk: a whole GSU round for interleaved
+    chunks, a single iteration for contiguous ones (and with GSU off)."""
+    return cfg.n_groups if (cfg.gsu_on and not cfg.gsuc) else 1
 
 
 def mt_tiles(spec, cfg):
@@ -337,6 +398,53 @@ CONFIGS = [
     # DepthUMetadata) -> exercises the per-inst stride-add path on isM ----
     GL2Config("a_sparse_nl2", [_A(True, 256), _B(True, 256), _M("A", True, 256)],
               cluster=(2, 2), num_threads=16, sparse=1, depth_u_metadata=256),
+    # ---- GlobalSplitU. Each group prefetches its own K chunk, so the start
+    # address gains startIter*inc and the per-iteration step widens to the chunk
+    # stride. The group index is the grid z axis and every group is verified
+    # against its own chunk (never aggregated), so a group landing on the wrong
+    # slice of K fails. GSU rides alongside the cluster, so the cooperative
+    # fan-out is exercised at the same time. DepthU stays a power of 2 and the
+    # thread count a whole number of waves (see the asserts in build_kernel). ----
+    # gsu=1: the identity case. The GSU paths are emitted but there is one group,
+    # so startIter==0 and the stride is unscaled -- guards the GSU codegen against
+    # perturbing a single-group launch.
+    GL2Config("gsu1_tlu", [_A(True, 256), _B(True, 256)], cluster=(2, 2), gsu=1),
+    # Interleaved chunks (GSUC=0): group g starts at iteration g and every
+    # increment steps a whole GSU round. Mixed TLU/non-TLU so the chunk offset is
+    # checked against both K-axis layouts (K perpendicular vs K coalesced).
+    GL2Config("gsu4_interleaved", [_A(True, 256), _B(False, 256)], cluster=(2, 2),
+              gsu=4, k_iters=10),
+    # Contiguous chunks (GSUC=1) with an uneven split: 10 iterations over 4 groups
+    # is q=2 r=2, so groups 0/1 own 3 iterations and start at 0/3 while groups 2/3
+    # own 2 and start at 6/8. Exercises the (q+1)*g vs q*g+r select.
+    GL2Config("gsu4_contiguous_rem", [_A(True, 256), _B(False, 256)], cluster=(2, 2),
+              gsu=4, gsuc=True, k_iters=10),
+    # Non-POT group count with remainder 1 (10 = 3*3 + 1): only group 0 gets the
+    # extra iteration, so the select flips for exactly one group. Non-POT MT too.
+    GL2Config("gsu3_contiguous_rem", [_A(True, 384), _B(True, 384)], cluster=(2, 1),
+              gsu=3, gsuc=True, k_iters=10),
+    # Exact split (no remainder, 9 = 3*3) on a non-POT group count: every group
+    # gets q iterations and the select must never take the (q+1) side.
+    GL2Config("gsu3_contiguous_exact", [_A(False, 256), _B(False, 256)], cluster=(1, 3),
+              gsu=3, gsuc=True, k_iters=9),
+    # MX scales under GSU: the chunk offset is startIter * that tensor's own
+    # increment, so MXSA/MXSB must shift by SizeFree*(DepthU/MXBlock) per iteration
+    # while A/B shift by their (much larger) stride. A shared shift would fail here.
+    GL2Config("gsu2_mx", [_A(True, 192), _B(True, 192), _MXSA(192), _MXSB(192)],
+              depth_u=256, mx_block=32, cluster=(2, 2), gsu=2, gsuc=True, k_iters=7),
+    # Sparse metadata under GSU: _DepthUA is halved and _DepthUMetadata differs
+    # from DepthU, so each of the three tensors needs its own chunk offset even
+    # though they all share one start iteration.
+    GL2Config("gsu2_sparse", [_A(True, 256), _B(True, 256), _M("A", False, 256)],
+              cluster=(2, 2), sparse=1, depth_u_metadata=64, gsu=2, k_iters=6),
+    # Edge clamp + GSU: the K-direction chunk shift must stay orthogonal to the
+    # free-dim clamp (it translates the clamped footprint, it does not re-clamp).
+    GL2Config("gsu2_ntlu_edge", [_A(False, 256), _B(False, 256)], cluster=(2, 2),
+              size_i=384, size_j=384, gsu=2, gsuc=True, k_iters=5),
+    # GSU without a cluster: the degenerate single-workgroup fan-out combined with
+    # a 4-way K split, so the chunk offset is the only thing distinguishing the wgs.
+    GL2Config("gsu4_nocluster", [_A(True, 256), _B(True, 256)], cluster=(1, 1),
+              gsu=4, k_iters=12),
 ]
 
 
@@ -393,6 +501,7 @@ def _make_kernel(cfg):
         "PrefetchGlobalRead": cfg.pgr,
         "WavefrontSize": WAVESIZE,
         "PrefetchGL2": cfg.pgl,
+        "GlobalSplitU": cfg.gsu,
     }
     if m_spec is not None:
         kernel["MacroTileMetadata"] = m_spec.mt
@@ -424,7 +533,11 @@ def _make_writer(kernel):
         overflowedResources=0,
         a=SimpleNamespace(), b=SimpleNamespace(),
     )
-    for m in ["strideRef", "allocTmpSgpr", "s_mul_u64_u32"]:
+    # gsuMaskHex/calculateLoopNumIterOffsetGsu back the contiguous-chunk branch of
+    # calculateGSUIterOffset; both come from the real writer so the test cannot
+    # drift from production's chunk arithmetic.
+    for m in ["strideRef", "allocTmpSgpr", "s_mul_u64_u32",
+              "gsuMaskHex", "calculateLoopNumIterOffsetGsu"]:
         setattr(w, m, types.MethodType(getattr(KWA, m), w))
     w.sgprPool.checkOut(6)  # reserve hardware sgprs (s0:1 kernarg ptr, etc.)
     return w
@@ -447,7 +560,7 @@ def build_kernel(cfg):
     (TensorSpec, num_loads, stage, region_start) describing the output partition.
     """
     from rocisa.code import Module, TextBlock
-    from rocisa.container import sgpr
+    from rocisa.container import sgpr, ContinuousRegister
     from rocisa.instruction import SMovB32
     from Tensile.KernelWriterAssembly import GL2PrefetchLoad
 
@@ -455,6 +568,20 @@ def build_kernel(cfg):
     kernel = _make_kernel(cfg)
     w = _make_writer(kernel)
     comp = GL2PrefetchLoad()
+
+    if cfg.gsu_on:
+        # The GSU group index rides the grid z axis, which the batch index also
+        # uses. Not a limitation worth engineering around: the batch offset and the
+        # GSU chunk offset are added to the same base accumulator, so they compose
+        # additively and batching is already covered on its own.
+        assert not cfg.batched, f"{cfg.name}: a GSU config cannot also be batched"
+        # calculateLoopNumIterOffsetGsu's divide resets exec to all lanes, which is
+        # only correct when every wave is full -- as it always is in production.
+        assert cfg.num_threads % WAVESIZE == 0, \
+            f"{cfg.name}: GSU needs full waves (num_threads % {WAVESIZE} == 0)"
+        # the contiguous branch derives numIter with a shift, like computeLoadSrd
+        assert cfg.depth_u & (cfg.depth_u - 1) == 0, \
+            f"{cfg.name}: GSU needs a power-of-2 DepthU, got {cfg.depth_u}"
 
     subtcs = {t.subtc for t in cfg.tensors}
 
@@ -471,8 +598,17 @@ def build_kernel(cfg):
         if t.is_m:                        # StrideMetadata{I,J} + StrideMetadataL
             idxChar = "I" if t.idx == 0 else "J"
             shared += [f"StrideMetadata{idxChar}", "StrideMetadataL"]
+    if cfg.gsu_on:
+        # GSU packs the group count and the GSUC bit; SizesSum feeds numIter in the
+        # contiguous branch.
+        shared += ["GSU", "SizesSum"]
     for n in shared:
         w.sgprs[n] = w.sgprPool.checkOut(1, n, preventOverflow=False)
+    if cfg.gsu_on:
+        # 2 registers: calculateLoopNumIterOffsetGsu uses GSUSumIdx+1 as the
+        # divide's remainder scratch. Allocated before the Address{tc} pairs so the
+        # .set-based sgpr count (which only sees the base index) still covers +1.
+        w.sgprs["GSUSumIdx"] = w.sgprPool.checkOut(2, "GSUSumIdx", preventOverflow=False)
     for t in cfg.tensors:
         w.sgprs[f"Address{t.tc}"] = w.sgprPool.checkOutAligned(2, 2, f"Address{t.tc}", preventOverflow=False)
         w.sgprs[f"GL2PrefetchInc{t.tc}"] = w.sgprPool.checkOut(1, f"GL2PrefetchInc{t.tc}", preventOverflow=False)
@@ -503,12 +639,25 @@ def build_kernel(cfg):
     n_out_per_wg = n_stages * sum(cfg.num_threads * tp["gl2nl"] for _, tp in tps)
 
     # ---- body: setIncrement (all), then calculateStartAddr (each).
-    # calculateStartAddr now folds in the base Address{tc} and the PGR pre-skip
-    # itself (SGPR-accumulated), so there is no separate gsuOffset step. ----
+    # calculateStartAddr folds in the base Address{tc}, the GSU chunk offset and
+    # the PGR pre-skip itself (SGPR-accumulated), so there is no separate
+    # gsuOffset step. Under GSU this mirrors production gl2PrefetchCalcAddr: the
+    # chunk start iteration is tensor independent, so it is derived once and each
+    # tensor scales it by its own per-iteration increment. ----
     body = Module("body")
-    for t, tp in tps:
-        body.add(comp.setIncrement(w, kernel, tp))
-        body.add(comp.calculateStartAddr(w, kernel, tp))
+    if cfg.gsu_on:
+        with w.allocTmpSgpr(3, tag="gl2_gsu") as tmpSgprRes:
+            gsu_iter_sgpr = tmpSgprRes.idx
+            body.add(comp.calculateGSUIterOffset(
+                w, kernel, gsu_iter_sgpr,
+                ContinuousRegister(idx=tmpSgprRes.idx + 1, size=2)))
+            for t, tp in tps:
+                body.add(comp.setIncrement(w, kernel, tp))
+                body.add(comp.calculateStartAddr(w, kernel, tp, gsu_iter_sgpr))
+    else:
+        for t, tp in tps:
+            body.add(comp.setIncrement(w, kernel, tp))
+            body.add(comp.calculateStartAddr(w, kernel, tp))
 
     # ---- prologue ----
     prologue = Module("prologue")
@@ -541,19 +690,36 @@ def build_kernel(cfg):
     consts += [("WorkGroup0", 0), ("WorkGroup1", 0), ("WorkGroup2", 0)]
     if cfg.batched:                              # programmed batch stride Stride{tc}K
         consts += [(f"Stride{t.tc}K", batch_stride_elems(t, cfg)) for t in cfg.tensors]
+    if cfg.gsu_on:
+        # packed GSU kernel argument: group count in the low bits, GSUC in bit 15
+        consts += [("GSU", cfg.n_groups | (0x8000 if cfg.gsuc else 0)),
+                   ("SizesSum", cfg.k_iters * cfg.depth_u)]
     for n, v in consts:
         prologue.add(SMovB32(dst=sgpr(n), src=v))
 
     # gfx1250 carries the workgroup id in ttmp (not s2): wg_x in ttmp9, wg_y in
     # ttmp7[15:0], wg_z in ttmp7[31:16] (matching the production non-cluster
-    # decode). The cooperative cluster drives WorkGroup0/1; the batch dim drives
+    # decode). The cooperative cluster drives WorkGroup0/1; the z axis drives
     # WorkGroup2. Each region's linear id is wg_z*(cx*cy) + wg_y*cx + wg_x.
     cx, cy = cfg.cluster
     if cfg.n_wg > 1:
         prologue.add(TextBlock("  s_mov_b32 s%d, ttmp9\n" % w.sgprs["WorkGroup0"]))
         prologue.add(TextBlock("  s_and_b32 s%d, 0xFFFF, ttmp7\n" % w.sgprs["WorkGroup1"]))
-    if cfg.num_batches > 1:
+    if cfg.grid_z > 1:
         prologue.add(TextBlock("  s_lshr_b32 s%d, ttmp7, 16\n" % w.sgprs["WorkGroup2"]))
+    if cfg.gsu_on:
+        # NB: production does not get the group index from z. GSUOn.graWorkGroup
+        # launches cy*GSU workgroups along *y* and splits them, WorkGroup1 = wg_y /
+        # GSU and GSUSumIdx = wg_y % GSU (or the GSUWGMRR round-robin variant). That
+        # split happens before gl2PrefetchCalcAddr, so by the time the prefetch code
+        # runs, GSUSumIdx and the already-divided WorkGroup1 are simply inputs to it
+        # -- the prefetch never participates in the derivation.
+        # Driving the group index off z instead enumerates exactly the same
+        # (WorkGroup0, WorkGroup1, GSUSumIdx) tuples, without reimplementing the
+        # divide in the harness and without tying the group index to the tile index.
+        # WorkGroup2 holds the raw wg_z and is otherwise unused here (a GSU config is
+        # never batched, so no Stride{tc}K is programmed).
+        prologue.add(SMovB32(dst=sgpr("GSUSumIdx"), src=sgpr("WorkGroup2")))
     if cfg.n_regions > 1:
         # WGOUT = (wg_z*cy + wg_y)*cx + wg_x, then * n_out_per_wg. WorkGroup2 is 0
         # when not batched and WorkGroup0/1 are 0 without a cluster, so this one
@@ -713,14 +879,20 @@ def inc_bytes(spec, cfg):
     return round(data_depth_u(spec, cfg) * bpe)
 
 
-def expected_offsets(spec, cfg, stage=0, batch=0):
+def expected_offsets(spec, cfg, stage=0, batch=0, group=0):
     """Geometric prefetch footprint: the *set* of byte offsets a tensor's
     prefetch must cover, independent of how threads are allocated to addresses.
 
-    `stage` shifts the whole footprint by (PGR + stage) * inc along the K axis:
-    stage 0 is the start address (the calculateStartAddr PGR pre-skip already
-    advanced it by PGR*inc), and each later stage adds one incrementAddr. The
-    shift is orthogonal to the free-dim edge clamp, so it just translates the set.
+    `stage` shifts the whole footprint along the K axis: stage 0 is the start
+    address (the calculateStartAddr PGR pre-skip already advanced it by PGR
+    increments), and each later stage adds one incrementAddr. The shift is
+    orthogonal to the free-dim edge clamp, so it just translates the set.
+
+    `group` is the GSU group, which shifts the footprint onto that group's K
+    chunk. Both the chunk start and the stage stride are whole multiples of the
+    one-DepthU increment, so the K shift is
+        (startIter(group) + (PGR + stage) * iterStride) * inc
+    with GSU off collapsing to the plain (PGR + stage) * inc.
 
     `batch` adds the StridedBatched shift batch * Stride{tc}K * bpe (the
     WorkGroup2 * batchStride term calculateStartAddr folds into the base
@@ -748,7 +920,8 @@ def expected_offsets(spec, cfg, stage=0, batch=0):
         edge = size_free - 1
     coal_to_mt = (spec.is_mx or spec.tlu)    # MT offset & clamp land in coal (else perp)
     gps_elems = round(GPS / bpe)
-    shift = (cfg.pgr + stage) * inc_bytes(spec, cfg)
+    k_iter = gsu_start_iter(cfg, group) + (cfg.pgr + stage) * gsu_iter_stride(cfg)
+    shift = k_iter * inc_bytes(spec, cfg)
     if cfg.batched:
         shift += batch * round(batch_stride_elems(spec, cfg) * bpe)
     out = set()
@@ -764,14 +937,15 @@ def expected_offsets(spec, cfg, stage=0, batch=0):
     return out
 
 
-def verify_tensor(offsets, spec, cfg, stage, batch=0, debug=False):
-    """Compare the union of GPU-computed byte offsets for one (stage, batch)
-    against the geometric prefetch footprint (set-based, edge-clamp aware,
-    shifted by the stage's K increment and the batch's Stride{tc}K offset)."""
-    expected = expected_offsets(spec, cfg, stage, batch)
+def verify_tensor(offsets, spec, cfg, stage, batch=0, group=0, debug=False):
+    """Compare the union of GPU-computed byte offsets for one
+    (stage, batch, GSU group) against the geometric prefetch footprint
+    (set-based, edge-clamp aware, shifted by the group's K chunk, the stage's K
+    increment and the batch's Stride{tc}K offset)."""
+    expected = expected_offsets(spec, cfg, stage, batch, group)
     got = set(offsets)
     errors = []
-    tag = f"{spec.tc}[s{stage}b{batch}]"
+    tag = f"{spec.tc}[s{stage}b{batch}" + (f"g{group}" if cfg.gsu_on else "") + "]"
     missing = sorted(expected - got)
     extra = sorted(got - expected)
     if missing:
@@ -782,7 +956,8 @@ def verify_tensor(offsets, spec, cfg, stage, batch=0, debug=False):
         _, _, ncc, nc = tensor_dims(spec, cfg)
         M = mt_tiles(spec, cfg)
         clamped = "" if free_dim_size(cfg, spec.subtc) == M * spec.mt else " EDGE"
-        print(f"  {tag:9s}: ncc={ncc} nc={nc} mt_tiles={M}{clamped} "
+        gsu = f" startIter={gsu_start_iter(cfg, group)}x{gsu_iter_stride(cfg)}" if cfg.gsu_on else ""
+        print(f"  {tag:12s}: ncc={ncc} nc={nc} mt_tiles={M}{clamped}{gsu} "
               f"inc={inc_bytes(spec, cfg)} expect={len(expected)} unique={len(got)} "
               f"total={len(offsets)} max={max(got) if got else 0}")
     return errors
@@ -805,24 +980,32 @@ def run_config(cfg, tmp_dir, debug=False):
     # lin // (cx*cy); offsets are aggregated per (tensor, stage, batch) and each
     # batch is checked against its own Stride{tc}K-shifted footprint.
     n_wg = cfg.n_wg
+    n_groups = cfg.n_groups
     n_regions = cfg.n_regions
     raw = run_on_gpu(co_path, n_regions * n_out * 4, inputs=(base,),
                      num_threads=cfg.num_threads,
-                     grid=(cfg.cluster[0], cfg.cluster[1], cfg.num_batches))
+                     grid=(cfg.cluster[0], cfg.cluster[1], cfg.grid_z))
     vals = struct.unpack(f"{n_regions * n_out}I", raw)
-    # aggregate each (tensor, stage, batch)'s offsets across all cooperative wgs
-    per = {(t.tc, stage, b): [] for t, _, stage, _ in layout for b in range(cfg.num_batches)}
+    # Aggregate each (tensor, stage, batch, GSU group)'s offsets across the
+    # cooperative cluster wgs -- but *not* across GSU groups: those do not
+    # cooperate, each owns a different K chunk and is checked against it. Batches
+    # and groups share the z axis and a config uses at most one, so divmod picks
+    # out whichever is active.
+    per = {(t.tc, stage, b, g): []
+           for t, _, stage, _ in layout
+           for b in range(cfg.num_batches) for g in range(n_groups)}
     for lin in range(n_regions):
-        b = lin // n_wg
+        b, g = divmod(lin // n_wg, n_groups)
         lin_base = lin * n_out
         for t, num_loads, stage, region in layout:
             start = lin_base + region
-            per[(t.tc, stage, b)].extend(vals[start: start + cfg.num_threads * num_loads])
+            per[(t.tc, stage, b, g)].extend(vals[start: start + cfg.num_threads * num_loads])
 
     errors = []
     for t, _, stage, _ in layout:
         for b in range(cfg.num_batches):
-            errors += verify_tensor(per[(t.tc, stage, b)], t, cfg, stage, b, debug=debug)
+            for g in range(n_groups):
+                errors += verify_tensor(per[(t.tc, stage, b, g)], t, cfg, stage, b, g, debug=debug)
     return errors
 
 
