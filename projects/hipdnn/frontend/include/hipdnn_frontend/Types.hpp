@@ -215,15 +215,14 @@ enum class DataType
     INT64 = 11, ///< 64-bit signed integer
     BOOLEAN = 12, ///< 8-bit boolean
     // cuDNN-compat spelling: no hipDNN backend mapping (see toHipdnnDataType).
-    BYTE_BOOLEAN = 13, ///< 8-bit boolean (cuDNN compatibility)
-    FP8_E4M3 = 14, ///< 8-bit floating point (4 exponent, 3 mantissa bits)
-    FP8_E5M2 = 15, ///< 8-bit floating point (5 exponent, 2 mantissa bits)
-    FAST_FLOAT_FOR_FP8 = 16, ///< Fast floating-point accumulation type for FP8
-    FP8_E8M0 = 17, ///< 8-bit floating point (8 exponent, 0 mantissa bits)
-    FP4_E2M1 = 18, ///< 4-bit floating point (2 exponent, 1 mantissa bit)
-    INT4 = 19, ///< 4-bit signed integer
-    COMPLEX_FP32 = 20, ///< Complex number with 32-bit floating-point components
-    COMPLEX_FP64 = 21, ///< Complex number with 64-bit floating-point components
+    FP8_E4M3 = 13, ///< 8-bit floating point (4 exponent, 3 mantissa bits)
+    FP8_E5M2 = 14, ///< 8-bit floating point (5 exponent, 2 mantissa bits)
+    FAST_FLOAT_FOR_FP8 = 15, ///< Fast floating-point accumulation type for FP8
+    FP8_E8M0 = 16, ///< 8-bit floating point (8 exponent, 0 mantissa bits)
+    FP4_E2M1 = 17, ///< 4-bit floating point (2 exponent, 1 mantissa bit)
+    INT4 = 18, ///< 4-bit signed integer
+    COMPLEX_FP32 = 19, ///< Complex number with 32-bit floating-point components
+    COMPLEX_FP64 = 20, ///< Complex number with 64-bit floating-point components
     // hipDNN-only data types: no cuDNN counterpart, appended after the
     // cuDNN-matching block so the shared spellings keep cuDNN's values.
     FP6_E2M3 = 22, ///< 6-bit floating point (2 exponent, 3 mantissa bits)
@@ -1224,8 +1223,6 @@ inline const char* to_string(const DataType& type)
         return "int64";
     case DataType::BOOLEAN:
         return "boolean";
-    case DataType::BYTE_BOOLEAN:
-        return "byte_boolean";
     case DataType::FP8_E4M3_FNUZ:
         return "fp8_e4m3_fnuz";
     case DataType::FP8_E5M2_FNUZ:

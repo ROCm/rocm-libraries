@@ -175,7 +175,6 @@ TEST(TestTypes, DataTypeCudnnCompatHasNoBackendMapping)
                    DataType::UINT8x4,
                    DataType::INT8x32,
                    DataType::FAST_FLOAT_FOR_FP8,
-                   DataType::BYTE_BOOLEAN,
                    DataType::COMPLEX_FP32,
                    DataType::COMPLEX_FP64})
     {
@@ -354,15 +353,14 @@ TEST(TestTypes, EnumValuesMatchCudnnDataType)
     EXPECT_EQ(static_cast<int>(DataType::BFLOAT16), 10);
     EXPECT_EQ(static_cast<int>(DataType::INT64), 11);
     EXPECT_EQ(static_cast<int>(DataType::BOOLEAN), 12);
-    EXPECT_EQ(static_cast<int>(DataType::BYTE_BOOLEAN), 13);
-    EXPECT_EQ(static_cast<int>(DataType::FP8_E4M3), 14);
-    EXPECT_EQ(static_cast<int>(DataType::FP8_E5M2), 15);
-    EXPECT_EQ(static_cast<int>(DataType::FAST_FLOAT_FOR_FP8), 16);
-    EXPECT_EQ(static_cast<int>(DataType::FP8_E8M0), 17);
-    EXPECT_EQ(static_cast<int>(DataType::FP4_E2M1), 18);
-    EXPECT_EQ(static_cast<int>(DataType::INT4), 19);
-    EXPECT_EQ(static_cast<int>(DataType::COMPLEX_FP32), 20);
-    EXPECT_EQ(static_cast<int>(DataType::COMPLEX_FP64), 21);
+    EXPECT_EQ(static_cast<int>(DataType::FP8_E4M3), 13);
+    EXPECT_EQ(static_cast<int>(DataType::FP8_E5M2), 14);
+    EXPECT_EQ(static_cast<int>(DataType::FAST_FLOAT_FOR_FP8), 15);
+    EXPECT_EQ(static_cast<int>(DataType::FP8_E8M0), 16);
+    EXPECT_EQ(static_cast<int>(DataType::FP4_E2M1), 17);
+    EXPECT_EQ(static_cast<int>(DataType::INT4), 18);
+    EXPECT_EQ(static_cast<int>(DataType::COMPLEX_FP32), 19);
+    EXPECT_EQ(static_cast<int>(DataType::COMPLEX_FP64), 20);
     // hipDNN-only types (no cuDNN counterpart); pinned to hipDNN's own values.
     EXPECT_EQ(static_cast<int>(DataType::FP6_E2M3), 22);
     EXPECT_EQ(static_cast<int>(DataType::FP6_E3M2), 23);
