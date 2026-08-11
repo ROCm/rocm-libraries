@@ -74,5 +74,6 @@ if(NOT HIPBLASLT_ENABLE_HOST)
     generate_export_header(hipblaslt-mxdatagen
         BASE_NAME hipblaslt
         EXPORT_FILE_NAME "${PROJECT_BINARY_DIR}/library/include/hipblaslt/hipblaslt-export.h"
+        CUSTOM_CONTENT_FROM_VARIABLE HIPBLASLT_EXPORT_HEADER_CUSTOM_CONTENT
     )
 endif()

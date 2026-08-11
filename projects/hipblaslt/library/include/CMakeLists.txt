@@ -9,6 +9,7 @@ configure_file(
 generate_export_header(hipblaslt
     EXPORT_FILE_NAME "${CMAKE_CURRENT_BINARY_DIR}/hipblaslt/hipblaslt-export.h"
     BASE_NAME hipblaslt
+    CUSTOM_CONTENT_FROM_VARIABLE HIPBLASLT_EXPORT_HEADER_CUSTOM_CONTENT
 )
 
 target_sources(hipblaslt

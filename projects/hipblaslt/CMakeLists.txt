@@ -71,6 +71,23 @@ include(CMakePackageConfigHelpers)
 include(GenerateExportHeader)
 include(CMakeDependentOption)
 
+# clang's HIP device-side compilation pass (amdgcn-amd-amdhsa target) doesn't
+# support __declspec(dllexport/dllimport); it only ever links against the
+# host-side import library, so applying the attribute there just produces a
+# spurious -Wignored-attributes warning on every declaration. Strip the
+# decoration during device compilation instead of annotating every call site.
+# Consumed by the generate_export_header() calls in library/include and
+# clients/common (both produce hipblaslt-export.h's HIPBLASLT_EXPORT macro).
+set(HIPBLASLT_EXPORT_HEADER_CUSTOM_CONTENT "")
+if(WIN32)
+    set(HIPBLASLT_EXPORT_HEADER_CUSTOM_CONTENT [[
+#if defined(__HIP_DEVICE_COMPILE__)
+#  undef HIPBLASLT_EXPORT
+#  define HIPBLASLT_EXPORT
+#endif
+]])
+endif()
+
 include(fetch_rocm_cmake)
 include(hipblaslt_python)
 include(hipblaslt_target_configure_sanitizers)
