@@ -115,9 +115,9 @@ The engine resolves the catalog root in this order:
 
 1. **`HIPDNN_AOT_CATALOG_DIR`** env var, if set — explicit override, always wins. Point it
    at the dir that contains the `<arch>/` subdirs.
-2. **Beside the loaded plugin `.so`** — `<plugin-dir>/aot_catalog` (the reldir is baked as
-   `HIPDNN_AOT_CATALOG_RELDIR`). Both the build tree and the install tree place the catalog
-   at exactly this offset, so a single relative path serves both. Used **unconditionally**
+2. **Beside the loaded plugin `.so`** — `<plugin-dir>/arch_content/aot_catalog` (the reldir
+   is baked as `HIPDNN_AOT_CATALOG_RELDIR`). Both the build tree and the install tree place
+   the catalog at exactly this offset, so a single relative path serves both. Used **unconditionally**
    when the plugin's own directory can be determined (via `dladdr`), *even if that catalog
    is missing/empty*.
 3. **Baked install path** (`HIPDNN_AOT_CATALOG_DIR` compile def) — only if the plugin's
@@ -135,9 +135,14 @@ top-level `hip-kernel-provider/CMakeLists.txt` (`HIPDNN_AOT_CATALOG_RELDIR` /
 `_BUILD_DIR` / `_INSTALL_DIR`) — the same constants the rocke producer emits into — so
 producer and runtime can never drift.
 
-> The offset is `aot_catalog`, **not** `hip_kernel_provider/aot_catalog`: the frontend
-> loader, given the absolute basename `hip_kernel_provider`, would treat a directory of
-> that name in `engines/` as a plugin dir (find no `.so` inside) and load zero engines.
+> The offset lives under `arch_content/` for two reasons. (1) **Packaging:** TheRock ships
+> this device library's non-`.so` files only via the recursive glob
+> `**/engines/arch_content/**`; content placed elsewhere works in a local dev build but is
+> silently dropped from the installed package (empty catalog). (2) **Loader safety:** the
+> offset must **not** begin with `hip_kernel_provider` — the frontend loader, given the
+> absolute basename `hip_kernel_provider`, would treat a directory of that name in `engines/`
+> as a plugin dir (find no `.so` inside) and load zero engines. `arch_content` satisfies both,
+> so the offset is `arch_content/aot_catalog`.
 
 ### Debugging: "a kernel I expected isn't selected"
 
@@ -254,7 +259,7 @@ or selection over an unbounded shape space.
 | **Kernel families, producers, per-family tests (authoring)** | **`../../../rocke/aot_catalog/<arch>/<family>/` — see its [README](../../../rocke/aot_catalog/README.md)** |
 
 The `.co` kernel binaries are **churning rocke build products**, compiled at build time into
-`<plugin-dir>/aot_catalog/<arch>/<family>/`, never vendored into git.
+`<plugin-dir>/arch_content/aot_catalog/<arch>/<family>/`, never vendored into git.
 
 ---
 

@@ -166,18 +166,28 @@ file(MAKE_DIRECTORY ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR})
 # The catalog (loose <arch>/<family>/{*.co, family.json}) is PRODUCED by the rocke
 # aot_catalog subsystem (rocke/aot_catalog/, when ENABLE_ROCKE + ENABLE_AOT_CATALOG_ENGINE)
 # and LOADED by the AOT catalog engine runtime (src/engines/aot_catalog_engine/).
-# It is placed BESIDE the plugin .so, at <plugin-dir>/${HIPDNN_AOT_CATALOG_RELDIR},
-# in BOTH the build tree and the install tree, so the runtime can self-locate it
-# relative to the loaded plugin binary (see catalog/ModulePath.cpp). A single
-# relative offset therefore works for both layouts. Hoisted here so producer and
-# runtime never drift, and so it is defined before add_subdirectory(rocke) below.
+# It is placed at <plugin-dir>/${HIPDNN_AOT_CATALOG_RELDIR} in BOTH the build tree
+# and the install tree, so the runtime can self-locate it relative to the loaded
+# plugin binary (see catalog/ModulePath.cpp). A single relative offset therefore
+# works for both layouts. Hoisted here so producer and runtime never drift, and so
+# it is defined before add_subdirectory(rocke) below.
 #
-# The offset must NOT begin with a component that collides with a sibling plugin
+# The offset MUST live under an "arch_content/" prefix. TheRock's packaging captures
+# this device library's non-.so files into the shipped artifact via exactly one
+# recursive include glob -- "**/engines/arch_content/**" (see TheRock
+# ml-libs/artifact-hipkernelprovider.toml). Content placed anywhere else (e.g. a bare
+# "aot_catalog/") matches neither that glob nor the default "**/*.so" patterns, so it
+# is silently dropped from the package: the catalog would work in a local dev build
+# (runtime self-locates the build-tree copy) but be EMPTY once installed from a
+# package. Keeping it under arch_content/ is what makes the .co/family.json ship.
+#
+# The offset must ALSO NOT begin with a component that collides with a sibling plugin
 # .so basename in the same engines/ dir: the frontend loader, given the ABSOLUTE
 # basename "hip_kernel_provider", treats a directory of that name as a plugin dir
-# (finds no .so inside) and loads zero engines. So this is "aot_catalog", not
-# "hip_kernel_provider/aot_catalog".
-set(HIPDNN_AOT_CATALOG_RELDIR "aot_catalog")
+# (finds no .so inside) and loads zero engines. "arch_content" collides with no such
+# basename, so it is safe. So this is "arch_content/aot_catalog", not
+# "aot_catalog" or "hip_kernel_provider/aot_catalog".
+set(HIPDNN_AOT_CATALOG_RELDIR "arch_content/aot_catalog")
 set(HIPDNN_AOT_CATALOG_BUILD_DIR
     "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}/${HIPDNN_AOT_CATALOG_RELDIR}")
 set(HIPDNN_AOT_CATALOG_INSTALL_DIR
