@@ -65,8 +65,8 @@ KernelDefinition makeKernel(int64_t blockSize, const std::string& dtype)
     kernel.kernelId = parseUuid("00000000-0000-4000-8000-000000000001");
     kernel.packId = parseUuid("00000000-0000-4000-8000-000000000002");
     kernel.dispatchId = parseUuid("00000000-0000-4000-8000-000000000003");
-    kernel.sourceFile = "PointwiseAdd.cpp";
-    kernel.entryPoint = "PointwiseAdd";
+    kernel.source.sourceFile = "PointwiseAdd.cpp";
+    kernel.source.entryPoint = "PointwiseAdd";
     kernel.metadata
         = {{std::string(BLOCK_SIZE_FIELD), blockSize}, {std::string(DTYPE_FIELD), dtype}};
     return kernel;

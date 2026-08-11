@@ -67,13 +67,20 @@ PointwiseAddDescriptorSet buildPointwiseAddDescriptorSet();
  */
 int64_t pointwiseAddEngineId();
 
-/// @brief Builds the state manager backing this pack.
+/// @brief Builds the state manager backing this pack, from an already-built descriptor
+/// set.
+///
+/// Takes @p set by value rather than building its own, so a caller assembling both the
+/// engine and its state manager calls buildPointwiseAddDescriptorSet() exactly once:
+/// the two used to each build a separate copy, which is wasted work with no correctness
+/// benefit since both copies describe the same pack.
 ///
 /// Carries only what selection needs: the KMD, the matchers and dispatch descriptors the
-/// packs reference, the packs themselves, and the resolved heuristic. The UED is not
-/// among them, because a UED is 1:1 with a hipDNN engine and is owned by the engine.
+/// packs reference, the packs themselves, and the resolved heuristic. @p set's UED is
+/// ignored here, because a UED is 1:1 with a hipDNN engine and is owned by the engine,
+/// not by this state manager.
 std::unique_ptr<hipdnn_plugin_sdk::ingestor::KernelIngestorStateManager<Handle>>
-    makePointwiseAddStateManager();
+    makePointwiseAddStateManager(PointwiseAddDescriptorSet set);
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine
 

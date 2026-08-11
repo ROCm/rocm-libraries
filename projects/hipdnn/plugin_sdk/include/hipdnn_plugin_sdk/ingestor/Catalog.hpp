@@ -33,6 +33,13 @@ struct Catalog
     /// bound token state alongside the catalog, so a plan build reads these rather than
     /// re-running a matcher to recover them.
     ///
+    /// "The packs that survived" is enforced by KernelIngestorStateManager::buildCatalog(),
+    /// which accumulates each pack's bindings in a pack-scoped view and merges it into
+    /// this map only once that pack's own graph-scoped matchers all pass; a pruned
+    /// pack's view is discarded unmerged. A shared matcher's bindings still reach every
+    /// surviving pack that lists it, because the memo each pack merges from is keyed by
+    /// matcher id, not by pack.
+    ///
     /// Merged rather than kept per pack: a token name means the same thing to every pack
     /// in an engine, since they all read one graph through one metadata schema. Two packs
     /// binding one name to different values would be an authoring error the loader should

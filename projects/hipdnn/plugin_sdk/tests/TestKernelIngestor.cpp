@@ -8,11 +8,17 @@
 
 #include <gtest/gtest.h>
 
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Catalog.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GenericEngine.hpp>
+#include <hipdnn_plugin_sdk/ingestor/GenericPlanBuilder.hpp>
+#include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelHeuristic.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
 #include <hipdnn_plugin_sdk/ingestor/LruCache.hpp>
@@ -161,8 +167,7 @@ KernelDefinition makeDefinition(const DescriptorId& id, int64_t blockSize, int64
     return {id,
             PACK_ID,
             DISPATCH_ID,
-            "Test.cpp",
-            "TestKernel",
+            KernelSource{KernelSourceKind::EMBEDDED_SOURCE, "Test.cpp", "TestKernel"},
             {{BLOCK_SIZE, MetadataValue{blockSize}}},
             priority};
 }
@@ -514,6 +519,79 @@ TEST(TestIngestorStateManager, ASharedGraphMatcherFailurePrunesEveryPackListingI
     EXPECT_EQ(counters().kernelCalls, 0);
 }
 
+TEST(TestIngestorStateManager, PrunedPackBindingsAreNotVisibleToSurvivingPackKernels)
+{
+    // Two packs sharing an engine, the normal case since matchers are shared by id.
+    // The pruned pack's own graph-scoped matcher passes and binds a token before a
+    // second matcher in the SAME pack fails and prunes it; the surviving pack lists
+    // neither of those matchers. If the pruned pack's binding reaches catalog.bound
+    // anyway, a kernel in the surviving pack -- which never asked for that token -- can
+    // read it. That is the correctness bug item 5 fixes: the header's claim that
+    // "nothing a failing matcher wrote can be read by a kernel that survives" held only
+    // by accident with one pack, and breaks the moment a second pack shares the engine.
+    constexpr const char* PASS_NO_BIND_SYMBOL = "test.pruned_bound_isolation.pass_no_bind";
+    constexpr const char* LEAK_THEN_PRUNE_SYMBOL = "test.pruned_bound_isolation.leak";
+    constexpr const char* ALWAYS_FAILS_SYMBOL = "test.pruned_bound_isolation.fail";
+
+    // Reused rather than reinvented: acceptAnyGraph (fixtures) passes and binds nothing;
+    // acceptGraph (this file) passes and binds "test.bound_token"; rejectGraph (this
+    // file) always fails. Exactly the three behaviors this test needs.
+    GraphMatcherRegistry::registerSymbol(PASS_NO_BIND_SYMBOL, &acceptAnyGraph);
+    GraphMatcherRegistry::registerSymbol(LEAK_THEN_PRUNE_SYMBOL, &acceptGraph);
+    GraphMatcherRegistry::registerSymbol(ALWAYS_FAILS_SYMBOL, &rejectGraph);
+    counters().reset();
+
+    const auto passNoBindMatcherId = testId(0xA4);
+    const auto leakMatcherId = testId(0xA5);
+    const auto failMatcherId = testId(0xA6);
+
+    KernelDescriptorPack survivingPack;
+    survivingPack.id = testId(0xA0);
+    survivingPack.name = "surviving pack";
+    survivingPack.matcherIds = {passNoBindMatcherId};
+    survivingPack.engineId = ENGINE_ID;
+    survivingPack.dispatchId = DISPATCH_ID;
+    survivingPack.kernels = {makeKernel(testId(0xA1), "surviving_kernel", 64, "FLOAT")};
+
+    KernelDescriptorPack prunedPack;
+    prunedPack.id = testId(0xA2);
+    prunedPack.name = "pruned pack";
+    // Order matters: the leaking matcher must run (and bind) before the failing one
+    // prunes the pack, exactly as graphLevelMatchersPass evaluates them in listed order.
+    prunedPack.matcherIds = {leakMatcherId, failMatcherId};
+    prunedPack.engineId = ENGINE_ID;
+    prunedPack.dispatchId = DISPATCH_ID;
+    prunedPack.kernels = {makeKernel(testId(0xA3), "pruned_kernel", 128, "FLOAT")};
+
+    const StateManager manager(
+        makeSchema(),
+        {{passNoBindMatcherId, "passes, binds nothing", MatchScope::GRAPH, PASS_NO_BIND_SYMBOL},
+         {leakMatcherId, "passes, binds a token", MatchScope::GRAPH, LEAK_THEN_PRUNE_SYMBOL},
+         {failMatcherId, "always fails", MatchScope::GRAPH, ALWAYS_FAILS_SYMBOL}},
+        makeTestDispatches(),
+        {survivingPack, prunedPack},
+        std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
+
+    const TestGraph graph(makeGraphId(50));
+    const auto properties = testDeviceProperties();
+    const auto catalog = manager.unsortedCatalog(MatchContext{graph, 0, properties});
+
+    // The surviving pack's kernel is the only entry: the pruned pack's kernel never
+    // enters the catalog, which was already correct before this fix.
+    ASSERT_EQ(catalog.entries.size(), 1U);
+    EXPECT_EQ(catalog.entries.front().packId, survivingPack.id);
+
+    // What this test actually regresses: the token only the pruned pack's own matcher
+    // bound must not survive into the catalog the surviving pack's kernel reads from,
+    // even though that matcher itself returned true before its pack's second matcher
+    // failed.
+    EXPECT_EQ(catalog.bound.count("test.bound_token"), 0U);
+
+    GraphMatcherRegistry::unregisterSymbol(PASS_NO_BIND_SYMBOL);
+    GraphMatcherRegistry::unregisterSymbol(LEAK_THEN_PRUNE_SYMBOL);
+    GraphMatcherRegistry::unregisterSymbol(ALWAYS_FAILS_SYMBOL);
+}
+
 TEST(TestIngestorStateManager, MatchesSeparatelyPerDevice)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
@@ -814,6 +892,7 @@ private:
 
 struct StubSettings
 {
+    KnobFilter ingestorKnobFilter;
 };
 
 struct StubContext
@@ -914,6 +993,198 @@ TEST(TestIngestorGenericEngine, RejectsAKnobNamingNoMetadataField)
     EXPECT_THROW(
         (StubEngine(makeEngineWithKnobs({"no_such_field"}), makeStubStateManager(), resolver)),
         std::invalid_argument);
+}
+
+// ---------------------------------------------------------------------------
+// GenericPlanBuilder: knob filtering (item 6)
+// ---------------------------------------------------------------------------
+
+/// A no-op dispatch handler, sufficient to let buildPlan() construct a GenericPlan:
+/// these tests assert which kernel selection chose, not how it launches.
+class NoopDispatchHandler : public IKernelDispatchHandler<TestHandle>
+{
+public:
+    size_t workspaceBytes(const MatchContext& /*context*/,
+                          const BoundTokens& /*bound*/,
+                          const KernelDefinition& /*kernel*/) const override
+    {
+        return 0;
+    }
+
+    std::unique_ptr<PreparedDispatch> prepare(const MatchContext& /*context*/,
+                                              const BoundTokens& /*bound*/,
+                                              const KernelDefinition& /*kernel*/) const override
+    {
+        return std::make_unique<PreparedDispatch>();
+    }
+
+    void launch(const TestHandle& /*handle*/,
+                const PreparedDispatch& /*prepared*/,
+                const hipdnnPluginDeviceBuffer_t* /*deviceBuffers*/,
+                uint32_t /*numDeviceBuffers*/,
+                void* /*workspace*/) const override
+    {
+    }
+};
+
+/// Registers the no-op dispatch handler under this test suite's dispatch symbol for a
+/// test's duration.
+class ScopedTestDispatch
+{
+public:
+    ScopedTestDispatch()
+    {
+        DispatchRegistry<TestHandle>::registerSymbol("test.dispatch", &_handler);
+    }
+
+    ~ScopedTestDispatch()
+    {
+        DispatchRegistry<TestHandle>::unregisterSymbol("test.dispatch");
+    }
+
+    ScopedTestDispatch(const ScopedTestDispatch&) = delete;
+    ScopedTestDispatch& operator=(const ScopedTestDispatch&) = delete;
+
+private:
+    NoopDispatchHandler _handler;
+};
+
+struct KnobFilterSettings
+{
+    KnobFilter ingestorKnobFilter;
+};
+
+struct KnobFilterContext
+{
+    void setExecutionSettings(const KnobFilterSettings& /*settings*/) {}
+
+    void setPlan(std::unique_ptr<hipdnn_plugin_sdk::IPlan<TestHandle>> plan)
+    {
+        _plan = std::move(plan);
+    }
+
+    /// Safe without RTTI: GenericPlanBuilder<TestHandle, ...> only ever hands setPlan()
+    /// a GenericPlan<TestHandle>, so the concrete type is known at every call site here.
+    const GenericPlan<TestHandle>& plan() const
+    {
+        return static_cast<const GenericPlan<TestHandle>&>(*_plan);
+    }
+
+private:
+    std::unique_ptr<hipdnn_plugin_sdk::IPlan<TestHandle>> _plan;
+};
+
+using TestPlanBuilder = GenericPlanBuilder<TestHandle, KnobFilterSettings, KnobFilterContext>;
+
+/// An IEngineConfig setting `knobName` to `value`, built the same way
+/// TestEngineConfigWrapper.cpp builds one: a real flatbuffer, not a mock, so these tests
+/// exercise the same parsing path a real caller's setAttribute() eventually produces.
+hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper makeIntKnobEngineConfig(
+    flatbuffers::FlatBufferBuilder& builder, const std::string& knobName, int64_t value)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    std::vector<flatbuffers::Offset<KnobSetting>> knobSettings;
+    knobSettings.push_back(CreateKnobSettingDirect(
+        builder, knobName.c_str(), KnobValue::IntValue, CreateIntValue(builder, value).Union()));
+    auto knobsVector = builder.CreateVector(knobSettings);
+    builder.Finish(CreateEngineConfig(builder, ENGINE_ID.front(), knobsVector));
+
+    return hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+}
+
+TEST(TestIngestorPlanBuilderKnobFilter, HonorsAnExplicitKnobSettingOverTheHeuristicDefault)
+{
+    // The heuristic (scoreByBlockSize) ranks 256 first, so this is the assertion that
+    // proves the knob is honored rather than merely advertised: leaving it alone would
+    // select 256, but setting it must select 64 instead.
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedTestDispatch dispatch;
+    const auto manager = makeStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig = makeIntKnobEngineConfig(fbb, BLOCK_SIZE, 64);
+
+    const TestGraph graph(makeGraphId(30));
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(0, graph, engineConfig, settings);
+
+    KnobFilterContext context;
+    builder.buildPlan(0, graph, engineConfig, context);
+
+    EXPECT_EQ(context.plan().kernel().getIntMetadata(BLOCK_SIZE), 64);
+}
+
+TEST(TestIngestorPlanBuilderKnobFilter, UnsatisfiableKnobValueThrowsInvalidValueNamingItAndTheValue)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedTestDispatch dispatch;
+    const auto manager = makeStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    // No surviving kernel carries block_size 999: the catalog matches (two FLOAT
+    // kernels), but knob filtering excludes both.
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig = makeIntKnobEngineConfig(fbb, BLOCK_SIZE, 999);
+
+    const TestGraph graph(makeGraphId(31));
+    KnobFilterContext context;
+
+    try
+    {
+        builder.buildPlan(0, graph, engineConfig, context);
+        FAIL() << "expected HipdnnPluginException";
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& ex)
+    {
+        EXPECT_EQ(ex.getStatus(), HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
+        EXPECT_NE(ex.getMessage().find(BLOCK_SIZE), std::string::npos);
+        EXPECT_NE(ex.getMessage().find("999"), std::string::npos);
+    }
+}
+
+TEST(TestIngestorPlanBuilderKnobFilter,
+     EmptyCatalogBeforeFilteringStillThrowsInternalErrorWithItsOriginalMessage)
+{
+    // The pre-existing, unrelated failure: applicability accepted a graph this engine
+    // cannot serve at all (matching itself found nothing), independent of any knob.
+    // Item 6 must not collapse this into the same status or message as the
+    // knob-filtering case above -- a caller needs to tell "your knobs excluded
+    // everything" apart from "this engine cannot serve this graph regardless of knobs".
+    const ScopedSymbols symbols("test.graph", rejectGraph, "test.kernel", countingFloatKernels);
+    const ScopedTestDispatch dispatch;
+    const auto manager = makeStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    flatbuffers::FlatBufferBuilder fbb;
+    // No knob set: an empty engine config is as close to "no request" as this helper
+    // allows, and the point under test is the no-kernels-at-all path, not filtering.
+    fbb.Finish(hipdnn_flatbuffers_sdk::data_objects::CreateEngineConfig(fbb, ENGINE_ID.front()));
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper engineConfig(
+        fbb.GetBufferPointer(), fbb.GetSize());
+
+    const TestGraph graph(makeGraphId(32));
+    KnobFilterContext context;
+
+    try
+    {
+        builder.buildPlan(0, graph, engineConfig, context);
+        FAIL() << "expected HipdnnPluginException";
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& ex)
+    {
+        EXPECT_EQ(ex.getStatus(), HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
+        EXPECT_EQ(ex.getMessage(),
+                  "engine '" + engine.name + "' accepted this graph but has no applicable kernel");
+    }
 }
 
 } // namespace

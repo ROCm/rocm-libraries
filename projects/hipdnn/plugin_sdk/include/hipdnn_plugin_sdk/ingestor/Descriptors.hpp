@@ -78,23 +78,30 @@ struct DescriptorIdHash
     }
 };
 
-/// A value a kernel supplies for a KMD-declared field.
+/// A value a kernel supplies for a KMD-declared field, and also the value type
+/// `$graph.*` binds (see MatchContext.hpp's BoundTokens): RFC 0017's criteria language
+/// puts one on each side of a single operator (`divisible($q.head_size,
+/// $kernel.tile_m)`), so an interpreter needs one value type spanning both namespaces
+/// or its first act is a refactor. Splitting them was cheap only as long as nothing
+/// compared across the split.
 ///
-/// Spans the primitive types a descriptor field can hold. `int64_t` and `double` are the
-/// widest signed integer and floating-point forms, so a narrower authored value converts
-/// into one without loss; `bool` is distinct because a flag compares and prints
-/// differently from the integer 1.
-using MetadataValue = std::variant<bool, int64_t, double, std::string>;
+/// Spans the primitive types a descriptor field or a bound graph fact can hold.
+/// `int64_t` and `double` are the widest signed integer and floating-point forms, so a
+/// narrower authored value converts into one without loss; `bool` is distinct because a
+/// flag compares and prints differently from the integer 1. `std::vector<int64_t>` is
+/// for list-valued facts like `stride_order` that no scalar alternative can hold.
+using MetadataValue = std::variant<bool, int64_t, double, std::string, std::vector<int64_t>>;
 
-/// The type a KMD field holds. Kept as an explicit enum, and ordered to match
-/// MetadataValue's alternatives, so a field can declare its type without also having to
-/// supply a value of it.
+/// The type a KMD field holds, or a bound graph fact's type. Kept as an explicit enum,
+/// and ordered to match MetadataValue's alternatives, so a field can declare its type
+/// without also having to supply a value of it.
 enum class MetadataType
 {
     BOOL,
     INT,
     FLOAT,
     STRING,
+    INT_LIST,
 };
 
 /// @brief The type of a value, for checking one against its field's declaration.
@@ -139,6 +146,22 @@ struct MetadataSchema
     std::vector<MetadataField> fields;
 };
 
+/// Which adapter builds an engine's IKernelHeuristic from a UHD's `payload`. The kind
+/// is the adapter dispatch point (RFC 0017 §9.1), the same role KernelSourceKind plays
+/// for a UKD below: a UHD is reachable as data now instead of being the one descriptor
+/// that is constructed and then stepped around in favor of a hand-built native
+/// heuristic.
+enum class HeuristicKind
+{
+    /// `payload` is a NativeRegistry score symbol, resolved into a NativeKernelHeuristic
+    /// (see IKernelHeuristic.hpp's makeKernelHeuristic()). The only kind with an adapter
+    /// today.
+    NATIVE,
+    /// A trained model artifact plus its feature signature (the UHD follow-up RFC). No
+    /// adapter yet.
+    MODEL,
+};
+
 /// UHD: the kernel-selection model for one engine.
 ///
 /// One level below hipDNN's engine-selection heuristic: this chooses *which kernel
@@ -147,9 +170,11 @@ struct HeuristicDescriptor
 {
     DescriptorId id;
     std::string name;
-    /// Resolved through NativeRegistry to a per-kernel scorer. The data-driven form
-    /// (a model artifact plus its feature signature) is the UHD follow-up RFC.
-    std::string scoreSymbol;
+    HeuristicKind kind = HeuristicKind::NATIVE;
+    /// `kind`'s payload: a NativeRegistry score symbol (kind == NATIVE), or, for a kind
+    /// with no adapter yet, that kind's analogous single identifier (a model artifact
+    /// path).
+    std::string payload;
 };
 
 /// UED: the engine itself, carrying no logic of its own.
@@ -230,6 +255,46 @@ struct DispatchDescriptor
     std::string dispatchSymbol;
 };
 
+/// Which adapter loads and prepares one kernel's code, given its source's payload. The
+/// adapter dispatch point RFC 0017 §9.1 describes: a kpack-symbol lookup, an hsaco file
+/// load, and a rocke-builder invocation are structurally different operations, not
+/// three interpretations shoehorned into the same two strings.
+enum class KernelSourceKind
+{
+    /// A named source file plus an entry point, compiled at plan-build time. What the
+    /// embedded-source path this engine's dispatch handler currently compiles through
+    /// needs, and the only kind this POC implements.
+    EMBEDDED_SOURCE,
+    /// A prebuilt kpack library plus the symbol to resolve inside it. Every shipped AOT
+    /// kernel converges on this kind at install time. No adapter yet.
+    KPACK_SYMBOL,
+    /// A standalone `.hsaco` code-object file. No adapter yet.
+    HSACO_FILE,
+    /// A rocke builder name plus its build values. No adapter yet.
+    ROCKE_BUILDER,
+};
+
+/// UKD's source: where a kernel's code comes from, as a tagged union over RFC 0017
+/// §7's source kinds rather than two bare strings. Shipped as two strings, the first
+/// loader to need a second kind would have had to invent its own discriminator and then
+/// migrate every existing descriptor to use it; the discriminator exists from the start
+/// instead.
+///
+/// Only `EMBEDDED_SOURCE` is implemented; the others exist as enum values with a
+/// comment because a descriptor states which kind it carries independently of whether
+/// this provider can load that kind yet.
+struct KernelSource
+{
+    KernelSourceKind kind = KernelSourceKind::EMBEDDED_SOURCE;
+    /// `EMBEDDED_SOURCE`: the source file name. Unused, and left empty, by every other
+    /// kind until each grows its own payload shape (a kpack library plus symbol, an
+    /// hsaco path, a builder name plus build values).
+    std::string sourceFile;
+    /// `EMBEDDED_SOURCE`: the entry point within `sourceFile`. Unused by every other
+    /// kind, for the same reason as `sourceFile` above.
+    std::string entryPoint;
+};
+
 /// UKD: one launchable kernel — a source plus concrete values for the fields its
 /// engine's KMD declares. Its matchers, engine, and dispatch are all its pack's, and
 /// its heuristic and metadata schema are that engine's, so it names none of them.
@@ -237,21 +302,9 @@ struct KernelDescriptor
 {
     DescriptorId id;
     std::string name;
-    /// Where this kernel's code comes from.
-    ///
-    /// A named source file plus an entry point, which is what the embedded-source path
-    /// this engine currently compiles through needs. The real form is a tagged union
-    /// over the source kinds of RFC 0017 §7, one alternative per supported kind, so a
-    /// descriptor states which kind it carries rather than every kind sharing two
-    /// strings.
-    ///
-    /// Shipped AOT kernels converge on one of those kinds: they are always packed into
-    /// a kpack and loaded dynamically from it, so the field these two become is a kpack
-    /// library plus the symbol to resolve inside it. The other kinds (`hsaco`, `hip`,
-    /// `rocke`) describe how a kernel is *built*, and the build-time packaging step
-    /// lowers each of them to that same kpack form before install.
-    std::string sourceFile;
-    std::string entryPoint;
+    /// Where this kernel's code comes from and how to load it. See KernelSource for why
+    /// this is a tagged union rather than two bare strings.
+    KernelSource source;
     /// This kernel's values for the KMD's fields. Omitted fields take the KMD default;
     /// the completed tuple is this kernel's catalog key and must be unique engine-wide.
     MetadataValues metadata;

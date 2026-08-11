@@ -4,8 +4,9 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <algorithm>
-#include <array>
+#include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -14,28 +15,43 @@
 
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
-#include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
-#include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
-#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
-#include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
-#include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
+#include <hipdnn_frontend/Graph.hpp>
+#include <hipdnn_frontend/Utilities.hpp>
+#include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
+#include <hipdnn_frontend/attributes/TensorAttributes.hpp>
+#include <hipdnn_frontend/knob/Knob.hpp>
+#include <hipdnn_frontend/knob/KnobConstraint.hpp>
 #include <hipdnn_plugin_sdk/EnginePluginApi.h>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
-#include <stdexcept>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/GraphTensorBundle.hpp>
+
+#include "../IntegrationGraphVerificationHarness.hpp"
+
+using namespace hipdnn_frontend;
+using namespace hipdnn_frontend::graph;
+using namespace hipdnn_data_sdk::utilities;
+using namespace hipdnn_test_sdk::utilities;
+using namespace hip_kernel_provider::test_utilities;
 
 /**
  * @file IntegrationGpuKernelIngestor.cpp
- * @brief The kernel ingestor, end to end across the plugin ABI.
+ * @brief The kernel ingestor pack, end to end through the hipDNN frontend API.
  *
- * Loads the real built plugin and drives every call hipDNN makes, in the order it makes
- * them: applicability, engine details, workspace, execution context, execute. Nothing
- * here links the provider's internals — the only surface used is the C ABI a host would
- * use — so this is what proves the descriptor set, the matchers, the heuristic, the
- * dispatch handler, and the engine registration actually compose.
+ * Every sibling engine test drives `hipdnn_frontend::graph::Graph` through the harness;
+ * this one used to hand-roll the plugin C ABI instead (dlopen, flatbuffer graph
+ * builders, raw device buffers). That duplicated machinery the frontend already owns
+ * and tested a door hipDNN itself never walks through in production. This file drives
+ * the same door every other engine's E2E test does -- Graph::pointwise(),
+ * get_ranked_engine_ids(), get_knobs_for_engine(), get_workspace_size(), execute() --
+ * so it proves the descriptor set, the matchers, the heuristic, and the dispatch
+ * handler compose the way a real caller reaches them.
  *
- * The unit tests cover each of those pieces in isolation. What they cannot show is that
- * the pieces agree with one another through the ABI, which is the whole claim of a
- * data-driven ingestor.
+ * One exception: `hipdnnEnginePluginGetAllEngineIds` enumerates every engine a plugin
+ * exports, independent of any graph. The frontend has no equivalent -- it only ever
+ * ranks engines applicable to a graph that was actually built -- so that one assertion
+ * still crosses the raw ABI via a minimal dlopen helper.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::integration
 {
@@ -43,359 +59,222 @@ namespace hip_kernel_provider::kernel_ingestor_engine::integration
 namespace
 {
 
-namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
-
-constexpr int64_t INPUT_A_UID = 1;
-constexpr int64_t INPUT_B_UID = 2;
-constexpr int64_t OUTPUT_UID = 3;
 constexpr const char* ENGINE_NAME = "hipkernel:PointwiseAdd";
 constexpr const char* BLOCK_SIZE_KNOB = "block_size";
 
 /// Workspace the pack's larger-block kernel declares, which the engine reports as the
 /// maximum across its surviving kernels.
-constexpr size_t EXPECTED_WORKSPACE_BYTES = 1024;
+constexpr int64_t EXPECTED_WORKSPACE_BYTES = 1024;
 
-/// A serialized single-node pointwise-ADD graph over 1-element 4-D FLOAT tensors: the
-/// one shape this pack accepts.
-flatbuffers::DetachedBuffer buildPointwiseAddGraph(bool withIdentity = true)
+std::shared_ptr<TensorAttributes> makeScalarTensor(int64_t uid, const std::string& name)
 {
-    flatbuffers::FlatBufferBuilder builder;
-    const std::vector<int64_t> dims = {1, 1, 1, 1};
-    const std::vector<int64_t> strides = {1, 1, 1, 1};
+    auto tensor = std::make_shared<TensorAttributes>();
+    tensor->set_uid(uid)
+        .set_name(name)
+        .set_dim({1, 1, 1, 1})
+        .set_stride({1, 1, 1, 1})
+        .set_data_type(DataType::FLOAT);
+    return tensor;
+}
 
-    std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensors;
-    for(const auto uid : {INPUT_A_UID, INPUT_B_UID, OUTPUT_UID})
-    {
-        tensors.push_back(data_objects::CreateTensorAttributesDirect(
-            builder, uid, nullptr, data_objects::DataType::FLOAT, &strides, &dims, false));
-    }
+/// A single pointwise-ADD node over 1-element FLOAT tensors: the one shape this pack
+/// accepts. Each call returns a fresh graph so tests never share build/plan state.
+std::shared_ptr<Graph> buildPointwiseAddGraph()
+{
+    auto graph = std::make_shared<Graph>();
+    graph->set_name("pointwise_add")
+        .set_io_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT);
 
-    data_objects::PointwiseAttributesBuilder attributesBuilder(builder);
-    attributesBuilder.add_operation(data_objects::PointwiseMode::ADD);
-    attributesBuilder.add_in_0_tensor_uid(INPUT_A_UID);
-    attributesBuilder.add_in_1_tensor_uid(INPUT_B_UID);
-    attributesBuilder.add_out_0_tensor_uid(OUTPUT_UID);
-    auto attributes = attributesBuilder.Finish();
+    auto a = makeScalarTensor(1, "A");
+    auto b = makeScalarTensor(2, "B");
 
-    std::vector<flatbuffers::Offset<data_objects::Node>> nodes;
-    nodes.push_back(
-        data_objects::CreateNodeDirect(builder,
-                                       "pointwise_add",
-                                       data_objects::DataType::FLOAT,
-                                       data_objects::NodeAttributes::PointwiseAttributes,
-                                       attributes.Union()));
+    PointwiseAttributes attrs;
+    attrs.set_name("pointwise_add").set_mode(PointwiseMode::ADD);
+    auto c = graph->pointwise(a, b, attrs);
+    c->set_uid(3).set_name("C").set_output(true).set_data_type(DataType::FLOAT);
 
-    auto name = builder.CreateString("pointwise_add");
-    auto tensorsVector = builder.CreateVector(tensors);
-    auto nodesVector = builder.CreateVector(nodes);
-
-    // A finalized graph carries an identity, which is what the provider keys its
-    // catalog cache on. A graph without one still matches, just uncached.
-    hipdnn_flatbuffers_sdk::utilities::UuidBytes idBytes{};
-    idBytes.fill(0x42);
-    const auto uuid = hipdnn_flatbuffers_sdk::utilities::toFlatbufferUuid(idBytes);
-
-    data_objects::GraphBuilder graphBuilder(builder);
-    graphBuilder.add_name(name);
-    graphBuilder.add_tensors(tensorsVector);
-    graphBuilder.add_nodes(nodesVector);
-    if(withIdentity)
-    {
-        graphBuilder.add_id(&uuid);
-    }
-    builder.Finish(graphBuilder.Finish());
-
-    return builder.Release();
+    return graph;
 }
 
 /// A graph this pack must decline: two nodes, so no single prebuilt kernel serves it.
-flatbuffers::DetachedBuffer buildUnsupportedGraph()
+std::shared_ptr<Graph> buildUnsupportedGraph()
 {
-    flatbuffers::FlatBufferBuilder builder;
-    const std::vector<int64_t> dims = {1, 1, 1, 1};
-    const std::vector<int64_t> strides = {1, 1, 1, 1};
-    constexpr int64_t INTERMEDIATE_UID = 4;
+    auto graph = std::make_shared<Graph>();
+    graph->set_name("two_node_pointwise")
+        .set_io_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT);
 
-    std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensors;
-    for(const auto uid : {INPUT_A_UID, INPUT_B_UID, OUTPUT_UID, INTERMEDIATE_UID})
-    {
-        tensors.push_back(data_objects::CreateTensorAttributesDirect(builder,
-                                                                     uid,
-                                                                     nullptr,
-                                                                     data_objects::DataType::FLOAT,
-                                                                     &strides,
-                                                                     &dims,
-                                                                     uid == INTERMEDIATE_UID));
-    }
+    auto a = makeScalarTensor(1, "A");
+    auto b = makeScalarTensor(2, "B");
 
-    std::vector<flatbuffers::Offset<data_objects::Node>> nodes;
-    for(const auto& uids :
-        std::vector<std::array<int64_t, 3>>{{INPUT_A_UID, INPUT_B_UID, INTERMEDIATE_UID},
-                                            {INTERMEDIATE_UID, INPUT_B_UID, OUTPUT_UID}})
-    {
-        data_objects::PointwiseAttributesBuilder attributesBuilder(builder);
-        attributesBuilder.add_operation(data_objects::PointwiseMode::ADD);
-        attributesBuilder.add_in_0_tensor_uid(uids[0]);
-        attributesBuilder.add_in_1_tensor_uid(uids[1]);
-        attributesBuilder.add_out_0_tensor_uid(uids[2]);
-        auto attributes = attributesBuilder.Finish();
+    PointwiseAttributes attrs1;
+    attrs1.set_name("add_1").set_mode(PointwiseMode::ADD);
+    auto intermediate = graph->pointwise(a, b, attrs1);
+    intermediate->set_uid(4).set_name("Intermediate").set_data_type(DataType::FLOAT);
 
-        nodes.push_back(
-            data_objects::CreateNodeDirect(builder,
-                                           "pointwise_add",
-                                           data_objects::DataType::FLOAT,
-                                           data_objects::NodeAttributes::PointwiseAttributes,
-                                           attributes.Union()));
-    }
+    PointwiseAttributes attrs2;
+    attrs2.set_name("add_2").set_mode(PointwiseMode::ADD);
+    auto c = graph->pointwise(intermediate, b, attrs2);
+    c->set_uid(3).set_name("C").set_output(true).set_data_type(DataType::FLOAT);
 
-    builder.Finish(data_objects::CreateGraphDirect(builder,
-                                                   "two_node_pointwise",
-                                                   data_objects::DataType::FLOAT,
-                                                   data_objects::DataType::FLOAT,
-                                                   data_objects::DataType::FLOAT,
-                                                   &tensors,
-                                                   &nodes));
-
-    return builder.Release();
+    return graph;
 }
 
-/// An engine config naming this engine, with no knob settings.
-flatbuffers::DetachedBuffer buildEngineConfig(int64_t engineId)
+/// One case per execute() shape: a single call, and several reusing the same built
+/// plan. Both must produce numerically correct results; only the second proves reuse.
+struct ExecuteCase
 {
-    flatbuffers::FlatBufferBuilder builder;
-    data_objects::EngineConfigBuilder configBuilder(builder);
-    configBuilder.add_engine_id(engineId);
-    builder.Finish(configBuilder.Finish());
-    return builder.Release();
-}
-
-hipdnnPluginConstData_t asConstData(const flatbuffers::DetachedBuffer& buffer)
-{
-    return {buffer.data(), buffer.size()};
-}
-
-/// Device buffers for one 1-element add, freed on scope exit.
-class AddBuffers
-{
-public:
-    AddBuffers(float a, float b)
-    {
-        EXPECT_EQ(hipMalloc(&_a, sizeof(float)), hipSuccess);
-        EXPECT_EQ(hipMalloc(&_b, sizeof(float)), hipSuccess);
-        EXPECT_EQ(hipMalloc(&_c, sizeof(float)), hipSuccess);
-        EXPECT_EQ(hipMemcpy(_a, &a, sizeof(float), hipMemcpyHostToDevice), hipSuccess);
-        EXPECT_EQ(hipMemcpy(_b, &b, sizeof(float), hipMemcpyHostToDevice), hipSuccess);
-    }
-
-    ~AddBuffers()
-    {
-        static_cast<void>(hipFree(_a));
-        static_cast<void>(hipFree(_b));
-        static_cast<void>(hipFree(_c));
-    }
-
-    AddBuffers(const AddBuffers&) = delete;
-    AddBuffers& operator=(const AddBuffers&) = delete;
-
-    std::array<hipdnnPluginDeviceBuffer_t, 3> descriptors() const
-    {
-        return {hipdnnPluginDeviceBuffer_t{INPUT_A_UID, _a},
-                hipdnnPluginDeviceBuffer_t{INPUT_B_UID, _b},
-                hipdnnPluginDeviceBuffer_t{OUTPUT_UID, _c}};
-    }
-
-    float readResult() const
-    {
-        float result = 0.0f;
-        EXPECT_EQ(hipMemcpy(&result, _c, sizeof(float), hipMemcpyDeviceToHost), hipSuccess);
-        return result;
-    }
-
-private:
-    void* _a = nullptr;
-    void* _b = nullptr;
-    void* _c = nullptr;
+    std::string name;
+    int iterations;
 };
 
-/**
- * @brief The plugin's exported C API, resolved from the built shared object.
- *
- * The provider exports these symbols for hipDNN to load at run time; nothing links
- * against them. Resolving them the same way is what makes this test cross the real ABI
- * boundary rather than reaching into the provider's internals.
- */
-class PluginApi
-{
-public:
-    PluginApi()
-    {
-        // PLUGIN_PATH names the CMake target, so the platform's library prefix and
-        // extension have to be applied to reach the file on disk.
-        const std::filesystem::path pluginTarget(PLUGIN_PATH);
-        const auto pluginFile = hipdnn_data_sdk::utilities::LIB_PREFIX
-                                + pluginTarget.filename().string()
-                                + hipdnn_data_sdk::utilities::SHARED_LIB_EXT;
-        const auto pluginPath = std::filesystem::weakly_canonical(
-            hipdnn_data_sdk::utilities::getCurrentExecutableDirectory() / pluginTarget.parent_path()
-            / pluginFile);
-        _library = hipdnn_data_sdk::utilities::openLibrary(pluginPath);
+} // namespace
 
-        create = resolve<decltype(&hipdnnEnginePluginCreate)>("hipdnnEnginePluginCreate");
-        destroy = resolve<decltype(&hipdnnEnginePluginDestroy)>("hipdnnEnginePluginDestroy");
-        setStream = resolve<decltype(&hipdnnEnginePluginSetStream)>("hipdnnEnginePluginSetStream");
-        getAllEngineIds = resolve<decltype(&hipdnnEnginePluginGetAllEngineIds)>(
-            "hipdnnEnginePluginGetAllEngineIds");
-        getApplicableEngineIds = resolve<decltype(&hipdnnEnginePluginGetApplicableEngineIds)>(
-            "hipdnnEnginePluginGetApplicableEngineIds");
-        getEngineDetails = resolve<decltype(&hipdnnEnginePluginGetEngineDetails)>(
-            "hipdnnEnginePluginGetEngineDetails");
-        destroyEngineDetails = resolve<decltype(&hipdnnEnginePluginDestroyEngineDetails)>(
-            "hipdnnEnginePluginDestroyEngineDetails");
-        getWorkspaceSize = resolve<decltype(&hipdnnEnginePluginGetWorkspaceSize)>(
-            "hipdnnEnginePluginGetWorkspaceSize");
-        createExecutionContext = resolve<decltype(&hipdnnEnginePluginCreateExecutionContext)>(
-            "hipdnnEnginePluginCreateExecutionContext");
-        destroyExecutionContext = resolve<decltype(&hipdnnEnginePluginDestroyExecutionContext)>(
-            "hipdnnEnginePluginDestroyExecutionContext");
-        getWorkspaceSizeFromExecutionContext
-            = resolve<decltype(&hipdnnEnginePluginGetWorkspaceSizeFromExecutionContext)>(
-                "hipdnnEnginePluginGetWorkspaceSizeFromExecutionContext");
-        executeOpGraph = resolve<decltype(&hipdnnEnginePluginExecuteOpGraph)>(
-            "hipdnnEnginePluginExecuteOpGraph");
-    }
-
-    decltype(&hipdnnEnginePluginCreate) create = nullptr;
-    decltype(&hipdnnEnginePluginDestroy) destroy = nullptr;
-    decltype(&hipdnnEnginePluginSetStream) setStream = nullptr;
-    decltype(&hipdnnEnginePluginGetAllEngineIds) getAllEngineIds = nullptr;
-    decltype(&hipdnnEnginePluginGetApplicableEngineIds) getApplicableEngineIds = nullptr;
-    decltype(&hipdnnEnginePluginGetEngineDetails) getEngineDetails = nullptr;
-    decltype(&hipdnnEnginePluginDestroyEngineDetails) destroyEngineDetails = nullptr;
-    decltype(&hipdnnEnginePluginGetWorkspaceSize) getWorkspaceSize = nullptr;
-    decltype(&hipdnnEnginePluginCreateExecutionContext) createExecutionContext = nullptr;
-    decltype(&hipdnnEnginePluginDestroyExecutionContext) destroyExecutionContext = nullptr;
-    decltype(&hipdnnEnginePluginGetWorkspaceSizeFromExecutionContext)
-        getWorkspaceSizeFromExecutionContext
-        = nullptr;
-    decltype(&hipdnnEnginePluginExecuteOpGraph) executeOpGraph = nullptr;
-
-private:
-    template <typename T>
-    T resolve(const char* name) const
-    {
-        auto* symbol = hipdnn_data_sdk::utilities::getSymbol(_library, name);
-        if(symbol == nullptr)
-        {
-            throw std::runtime_error("plugin does not export " + std::string(name));
-        }
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
-        return reinterpret_cast<T>(symbol);
-    }
-
-    hipdnn_data_sdk::utilities::SharedLibraryHandle _library = nullptr;
-};
-
-/// One process-wide load, since a plugin is loaded once and shared by every handle.
-const PluginApi& pluginApi()
-{
-    static const PluginApi s_api;
-    return s_api;
-}
-
-class IntegrationGpuKernelIngestor : public ::testing::Test
+class IntegrationGpuKernelIngestor
+    : public hip_kernel_provider::test_utilities::IntegrationGraphVerificationHarness<float,
+                                                                                      ExecuteCase>
 {
 protected:
-    void SetUp() override
+    static int64_t engineId()
     {
-        SKIP_IF_NO_DEVICES();
-
-        ASSERT_EQ(pluginApi().create(&_handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
-        ASSERT_EQ(hipStreamCreate(&_stream), hipSuccess);
-        ASSERT_EQ(pluginApi().setStream(_handle, _stream), HIPDNN_PLUGIN_STATUS_SUCCESS);
-
-        _engineId = hipdnn_data_sdk::utilities::engineNameToId(ENGINE_NAME);
+        return hipdnn_data_sdk::utilities::engineNameToId(ENGINE_NAME);
     }
 
-    void TearDown() override
+    /// Builds `graph`, pins this pack via set_preferred_engine_id_ext() before plan
+    /// creation (the precedent at IntegrationGraphEngineFiltering.cpp:159), and
+    /// compiles a plan with default knobs. Returns once the plan is ready to execute.
+    void buildAndCompile(Graph& graph)
     {
-        if(_handle != nullptr)
+        graph.set_preferred_engine_id_ext(engineId());
+
+        auto result = graph.build_operation_graph(_handle);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+        result = graph.create_execution_plans();
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+        result = graph.check_support();
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+        result = graph.build_plans();
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    }
+
+    /// Builds fresh CPU/GPU tensor bundles for `graph`, executes it once on GPU with
+    /// `workspace`, and verifies the result against CpuReferenceGraphExecutor. `seed`
+    /// varies the input values so repeated calls never compare against stale buffers.
+    void executeAndVerify(Graph& graph, void* workspace, unsigned int seed)
+    {
+        GraphTensorBundle gpuBundle;
+        GraphTensorBundle cpuBundle;
+        graph.visit([&](const INode& node) {
+            for(const auto& tensorAttr : node.getNodeOutputTensorAttributes())
+            {
+                gpuBundle.addTensor(*tensorAttr, createTensorFromAttribute(*tensorAttr));
+                cpuBundle.addTensor(*tensorAttr, createTensorFromAttribute(*tensorAttr));
+            }
+            for(const auto& tensorAttr : node.getNodeInputTensorAttributes())
+            {
+                if(gpuBundle.tensors.find(tensorAttr->get_uid()) == gpuBundle.tensors.end())
+                {
+                    gpuBundle.addTensor(*tensorAttr, createTensorFromAttribute(*tensorAttr));
+                    cpuBundle.addTensor(*tensorAttr, createTensorFromAttribute(*tensorAttr));
+                }
+            }
+        });
+        for(auto& [uid, tensor] : gpuBundle.tensors)
         {
-            EXPECT_EQ(pluginApi().destroy(_handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
+            gpuBundle.randomizeTensor(uid, -4.0f, 4.0f, seed);
+            cpuBundle.randomizeTensor(uid, -4.0f, 4.0f, seed);
         }
-        if(_stream != nullptr)
-        {
-            EXPECT_EQ(hipStreamDestroy(_stream), hipSuccess);
-        }
+
+        auto deviceVariantPack = gpuBundle.toDeviceVariantPack();
+        auto result = graph.execute(_handle, deviceVariantPack, workspace);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        ASSERT_EQ(hipStreamSynchronize(_stream), hipSuccess);
+
+        auto [serializedGraph, serErr] = graph.to_binary();
+        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+        CpuReferenceGraphExecutor().execute(
+            serializedGraph.data(), serializedGraph.size(), cpuBundle.toHostVariantPack());
+
+        auto& gpuOut = gpuBundle.getTensor(3);
+        auto& cpuOut = cpuBundle.getTensor(3);
+        gpuOut.markDeviceModified();
+        // The whole chain, end to end: the matchers admitted this graph, the heuristic
+        // ranked the catalog, the dispatch descriptor's handler compiled and launched
+        // the winner, and its arguments were resolved by tensor uid.
+        EXPECT_TRUE(CpuFpReferenceValidation<float>().allClose(cpuOut, gpuOut));
     }
-
-    std::vector<int64_t> applicableEngines(const hipdnnPluginConstData_t& graph) const
-    {
-        uint32_t count = 0;
-        EXPECT_EQ(pluginApi().getApplicableEngineIds(_handle, &graph, nullptr, 0, &count),
-                  HIPDNN_PLUGIN_STATUS_SUCCESS);
-
-        std::vector<int64_t> engines(count);
-        if(count > 0)
-        {
-            EXPECT_EQ(
-                pluginApi().getApplicableEngineIds(_handle, &graph, engines.data(), count, &count),
-                HIPDNN_PLUGIN_STATUS_SUCCESS);
-        }
-        return engines;
-    }
-
-    bool isApplicable(const hipdnnPluginConstData_t& graph) const
-    {
-        const auto engines = applicableEngines(graph);
-        return std::find(engines.begin(), engines.end(), _engineId) != engines.end();
-    }
-
-    hipdnnEnginePluginHandle_t _handle = nullptr;
-    hipStream_t _stream = nullptr;
-    int64_t _engineId = 0;
 };
+
+// ---------------------------------------------------------------------------
+// Direct ABI: load-time self-registration
+// ---------------------------------------------------------------------------
+
+// The only assertion with no frontend equivalent: the frontend never lists "every
+// engine this plugin exports", only engines ranked for a graph that was built. Proving
+// the pack self-registers at load time, independent of any graph, still needs the raw
+// C ABI -- kept minimal rather than reusing the deleted PluginApi wrapper.
+TEST(IntegrationGpuKernelIngestorDirectAbi, SelfRegistersAllEngineIds)
+{
+    const std::filesystem::path pluginTarget(PLUGIN_PATH);
+    const auto pluginFile = hipdnn_data_sdk::utilities::LIB_PREFIX
+                            + pluginTarget.filename().string()
+                            + hipdnn_data_sdk::utilities::SHARED_LIB_EXT;
+    const auto pluginPath = std::filesystem::weakly_canonical(
+        hipdnn_data_sdk::utilities::getCurrentExecutableDirectory() / pluginTarget.parent_path()
+        / pluginFile);
+    auto* library = hipdnn_data_sdk::utilities::openLibrary(pluginPath);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+    auto* getAllEngineIds = reinterpret_cast<decltype(&hipdnnEnginePluginGetAllEngineIds)>(
+        hipdnn_data_sdk::utilities::getSymbol(library, "hipdnnEnginePluginGetAllEngineIds"));
+    ASSERT_NE(getAllEngineIds, nullptr);
+
+    uint32_t count = 0;
+    ASSERT_EQ(getAllEngineIds(nullptr, 0, &count), HIPDNN_PLUGIN_STATUS_SUCCESS);
+    std::vector<int64_t> engines(count);
+    ASSERT_EQ(getAllEngineIds(engines.data(), count, &count), HIPDNN_PLUGIN_STATUS_SUCCESS);
+
+    EXPECT_NE(std::find(engines.begin(), engines.end(), engineNameToId(ENGINE_NAME)),
+              engines.end());
+}
 
 // ---------------------------------------------------------------------------
 // Applicability
 // ---------------------------------------------------------------------------
 
-TEST_F(IntegrationGpuKernelIngestor, ExposesTheDescriptorBackedEngineToTheHost)
-{
-    // The engine's id is its descriptor name hashed into hipDNN's id space, registered
-    // when the engine was constructed rather than by a compile-time macro.
-    uint32_t count = 0;
-    ASSERT_EQ(pluginApi().getAllEngineIds(nullptr, 0, &count), HIPDNN_PLUGIN_STATUS_SUCCESS);
-
-    std::vector<int64_t> engines(count);
-    ASSERT_EQ(pluginApi().getAllEngineIds(engines.data(), count, &count),
-              HIPDNN_PLUGIN_STATUS_SUCCESS);
-
-    EXPECT_NE(std::find(engines.begin(), engines.end(), _engineId), engines.end());
-}
-
 TEST_F(IntegrationGpuKernelIngestor, AcceptsTheGraphItsDescriptorsDescribe)
 {
-    const auto graph = buildPointwiseAddGraph();
+    auto graph = buildPointwiseAddGraph();
 
-    EXPECT_TRUE(isApplicable(asConstData(graph)));
+    auto result = graph->build_operation_graph(_handle);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    std::vector<int64_t> rankedEngineIds;
+    result = graph->get_ranked_engine_ids(rankedEngineIds);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    EXPECT_NE(std::find(rankedEngineIds.begin(), rankedEngineIds.end(), engineId()),
+              rankedEngineIds.end());
 }
 
-TEST_F(IntegrationGpuKernelIngestor, DeclinesAGraphNoKernelInTheCatalogServes)
+TEST_F(IntegrationGpuKernelIngestor, DeclinesATwoNodeGraph)
 {
-    // Declining is free: an empty catalog answers false and hipDNN moves on. Getting
-    // this wrong is what turns a cheap decline into a failed plan build.
-    const auto graph = buildUnsupportedGraph();
+    // Declining is free: no engine config comes back and hipDNN moves on. Getting this
+    // wrong is what turns a cheap decline into a failed plan build.
+    auto graph = buildUnsupportedGraph();
 
-    EXPECT_FALSE(isApplicable(asConstData(graph)));
-}
+    auto result = graph->build_operation_graph(_handle);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
-TEST_F(IntegrationGpuKernelIngestor, AcceptsAGraphCarryingNoIdentity)
-{
-    // Without a graph id the catalog cannot be cached, but matching is unaffected: the
-    // answer must be the same, only recomputed.
-    const auto graph = buildPointwiseAddGraph(/*withIdentity=*/false);
-
-    EXPECT_TRUE(isApplicable(asConstData(graph)));
+    std::vector<int64_t> rankedEngineIds;
+    result = graph->get_ranked_engine_ids(rankedEngineIds);
+    EXPECT_EQ(result.code, ErrorCode::GRAPH_NOT_SUPPORTED);
+    EXPECT_TRUE(rankedEngineIds.empty());
 }
 
 // ---------------------------------------------------------------------------
@@ -404,40 +283,30 @@ TEST_F(IntegrationGpuKernelIngestor, AcceptsAGraphCarryingNoIdentity)
 
 TEST_F(IntegrationGpuKernelIngestor, ReportsAKnobWhoseValuesComeFromTheCatalog)
 {
-    const auto graph = buildPointwiseAddGraph();
-    const auto graphData = asConstData(graph);
+    auto graph = buildPointwiseAddGraph();
 
-    hipdnnPluginConstData_t details{};
-    ASSERT_EQ(pluginApi().getEngineDetails(_handle, _engineId, &graphData, &details),
-              HIPDNN_PLUGIN_STATUS_SUCCESS);
+    auto result = graph->build_operation_graph(_handle);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
-    const auto* engineDetails = flatbuffers::GetRoot<data_objects::EngineDetails>(details.ptr);
-    ASSERT_NE(engineDetails, nullptr);
-    ASSERT_NE(engineDetails->knobs(), nullptr);
-    ASSERT_EQ(engineDetails->knobs()->size(), 1U);
-
-    const auto* knob = engineDetails->knobs()->Get(0);
-    ASSERT_NE(knob->knob_id(), nullptr);
-    EXPECT_EQ(knob->knob_id()->str(), BLOCK_SIZE_KNOB);
+    std::vector<Knob> knobs;
+    result = graph->get_knobs_for_engine(engineId(), knobs);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    ASSERT_EQ(knobs.size(), 1U);
+    EXPECT_EQ(knobs[0].knobId(), BLOCK_SIZE_KNOB);
 
     // The pack ships three kernels, but the HALF one is pruned for this FLOAT graph, so
     // the knob offers exactly the two block sizes the surviving kernels implement --
     // never the schema's theoretical range.
-    const auto* constraint = knob->constraint_as_IntConstraint();
+    const auto* constraint = dynamic_cast<const IntConstraint*>(knobs[0].constraint());
     ASSERT_NE(constraint, nullptr);
-    ASSERT_NE(constraint->valid_values(), nullptr);
-    std::vector<int64_t> values(constraint->valid_values()->begin(),
-                                constraint->valid_values()->end());
-    std::sort(values.begin(), values.end());
-    EXPECT_EQ(values, (std::vector<int64_t>{64, 256}));
+    const auto& validValues = constraint->getValidValues();
+    EXPECT_EQ(validValues, (std::unordered_set<int64_t>{64, 256}));
 
     // The default is whatever the heuristic ranked first, so leaving the knob alone
     // reproduces the out-of-the-box selection.
-    const auto* defaultValue = knob->default_value_as_IntValue();
+    const auto* defaultValue = std::get_if<int64_t>(&knobs[0].defaultValue());
     ASSERT_NE(defaultValue, nullptr);
-    EXPECT_EQ(defaultValue->value(), 256);
-
-    EXPECT_EQ(pluginApi().destroyEngineDetails(_handle, &details), HIPDNN_PLUGIN_STATUS_SUCCESS);
+    EXPECT_EQ(*defaultValue, 256);
 }
 
 // ---------------------------------------------------------------------------
@@ -446,17 +315,14 @@ TEST_F(IntegrationGpuKernelIngestor, ReportsAKnobWhoseValuesComeFromTheCatalog)
 
 TEST_F(IntegrationGpuKernelIngestor, ReportsTheMaximumWorkspaceAcrossSurvivingKernels)
 {
-    const auto graph = buildPointwiseAddGraph();
-    const auto config = buildEngineConfig(_engineId);
-    const auto graphData = asConstData(graph);
-    const auto configData = asConstData(config);
-
-    size_t workspaceSize = 0;
-    ASSERT_EQ(pluginApi().getWorkspaceSize(_handle, &configData, &graphData, &workspaceSize),
-              HIPDNN_PLUGIN_STATUS_SUCCESS);
+    auto graph = buildPointwiseAddGraph();
+    buildAndCompile(*graph);
 
     // One surviving kernel declares 0 bytes and the other 1024, so this answer proves
     // the query aggregates across the catalog rather than reporting one kernel's value.
+    int64_t workspaceSize = 0;
+    auto result = graph->get_workspace_size(workspaceSize);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
     EXPECT_EQ(workspaceSize, EXPECTED_WORKSPACE_BYTES);
 }
 
@@ -464,131 +330,58 @@ TEST_F(IntegrationGpuKernelIngestor, ReportsTheMaximumWorkspaceAcrossSurvivingKe
 // Plan build and execute
 // ---------------------------------------------------------------------------
 
-TEST_F(IntegrationGpuKernelIngestor, ExecutesTheSelectedKernelOnDevice)
+// Collapses ExecutesTheSelectedKernelOnDevice and ReusesOnePlanAcrossExecutions from
+// the original file: one case executes once, the other executes the same compiled
+// plan repeatedly with fresh buffers each time. Every decision the plan makes happens
+// at build, so execution must never depend on the previous call.
+TEST_P(IntegrationGpuKernelIngestor, ExecutesTheSelectedKernelOnDevice)
 {
-    const auto graph = buildPointwiseAddGraph();
-    const auto config = buildEngineConfig(_engineId);
-    const auto graphData = asConstData(graph);
-    const auto configData = asConstData(config);
+    const auto& testCase = GetParam();
 
-    hipdnnEnginePluginExecutionContext_t context = nullptr;
-    ASSERT_EQ(pluginApi().createExecutionContext(_handle, &configData, &graphData, &context),
-              HIPDNN_PLUGIN_STATUS_SUCCESS);
-    ASSERT_NE(context, nullptr);
+    auto graph = buildPointwiseAddGraph();
+    buildAndCompile(*graph);
 
-    size_t workspaceSize = 0;
-    ASSERT_EQ(pluginApi().getWorkspaceSizeFromExecutionContext(_handle, context, &workspaceSize),
-              HIPDNN_PLUGIN_STATUS_SUCCESS);
+    int64_t workspaceSize = 0;
+    ASSERT_EQ(graph->get_workspace_size(workspaceSize).code, ErrorCode::OK);
+    const hipdnn_data_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
 
-    void* workspace = nullptr;
-    if(workspaceSize > 0)
+    for(int iteration = 0; iteration < testCase.iterations; ++iteration)
     {
-        ASSERT_EQ(hipMalloc(&workspace, workspaceSize), hipSuccess);
-    }
-
-    const AddBuffers buffers(3.0f, 4.0f);
-    const auto descriptors = buffers.descriptors();
-
-    ASSERT_EQ(pluginApi().executeOpGraph(
-                  _handle, context, workspace, descriptors.data(), descriptors.size()),
-              HIPDNN_PLUGIN_STATUS_SUCCESS);
-    ASSERT_EQ(hipStreamSynchronize(_stream), hipSuccess);
-
-    // The whole chain, end to end: the matchers admitted this graph, the heuristic
-    // ranked the catalog, the dispatch descriptor's handler compiled and launched the
-    // winner, and its arguments were resolved by tensor uid.
-    EXPECT_FLOAT_EQ(buffers.readResult(), 7.0f);
-
-    EXPECT_EQ(pluginApi().destroyExecutionContext(_handle, context), HIPDNN_PLUGIN_STATUS_SUCCESS);
-    if(workspace != nullptr)
-    {
-        EXPECT_EQ(hipFree(workspace), hipSuccess);
+        executeAndVerify(*graph, workspace.get(), static_cast<unsigned int>(iteration));
     }
 }
 
-TEST_F(IntegrationGpuKernelIngestor, ReusesOnePlanAcrossExecutions)
+// hipDNN never exposes a caller-settable graph identity through the frontend:
+// GraphDescriptor::finalize() always synthesizes a fresh UUID, so every graph built
+// through Graph::pointwise() is a guaranteed catalog miss relative to every other one.
+// This is the frontend-reachable form of the original file's uncacheable-graph
+// coverage: two independently built graphs, each compiled and executed in the same
+// test body, both must still match the reference executor -- proving the recompute
+// path is correct rather than accidentally relying on state left by a prior graph.
+TEST_F(IntegrationGpuKernelIngestor, ExecutesTwoIndependentlyBuiltGraphsCorrectly)
 {
-    const auto graph = buildPointwiseAddGraph();
-    const auto config = buildEngineConfig(_engineId);
-    const auto graphData = asConstData(graph);
-    const auto configData = asConstData(config);
+    auto graphA = buildPointwiseAddGraph();
+    buildAndCompile(*graphA);
+    int64_t workspaceSizeA = 0;
+    ASSERT_EQ(graphA->get_workspace_size(workspaceSizeA).code, ErrorCode::OK);
+    const hipdnn_data_sdk::utilities::Workspace workspaceA(static_cast<size_t>(workspaceSizeA));
+    executeAndVerify(*graphA, workspaceA.get(), 0);
 
-    hipdnnEnginePluginExecutionContext_t context = nullptr;
-    ASSERT_EQ(pluginApi().createExecutionContext(_handle, &configData, &graphData, &context),
-              HIPDNN_PLUGIN_STATUS_SUCCESS);
-
-    size_t workspaceSize = 0;
-    ASSERT_EQ(pluginApi().getWorkspaceSizeFromExecutionContext(_handle, context, &workspaceSize),
-              HIPDNN_PLUGIN_STATUS_SUCCESS);
-    void* workspace = nullptr;
-    if(workspaceSize > 0)
-    {
-        ASSERT_EQ(hipMalloc(&workspace, workspaceSize), hipSuccess);
-    }
-
-    // A plan is built once and executed many times with different buffers; every
-    // decision was made at build, so execution must not depend on the previous one.
-    for(const auto& values : std::vector<std::array<float, 3>>{
-            {1.0f, 2.0f, 3.0f}, {-5.0f, 2.5f, -2.5f}, {0.125f, 0.375f, 0.5f}})
-    {
-        const AddBuffers buffers(values[0], values[1]);
-        const auto descriptors = buffers.descriptors();
-
-        ASSERT_EQ(pluginApi().executeOpGraph(
-                      _handle, context, workspace, descriptors.data(), descriptors.size()),
-                  HIPDNN_PLUGIN_STATUS_SUCCESS);
-        ASSERT_EQ(hipStreamSynchronize(_stream), hipSuccess);
-
-        EXPECT_FLOAT_EQ(buffers.readResult(), values[2]);
-    }
-
-    EXPECT_EQ(pluginApi().destroyExecutionContext(_handle, context), HIPDNN_PLUGIN_STATUS_SUCCESS);
-    if(workspace != nullptr)
-    {
-        EXPECT_EQ(hipFree(workspace), hipSuccess);
-    }
+    auto graphB = buildPointwiseAddGraph();
+    buildAndCompile(*graphB);
+    int64_t workspaceSizeB = 0;
+    ASSERT_EQ(graphB->get_workspace_size(workspaceSizeB).code, ErrorCode::OK);
+    const hipdnn_data_sdk::utilities::Workspace workspaceB(static_cast<size_t>(workspaceSizeB));
+    executeAndVerify(*graphB, workspaceB.get(), 1);
 }
 
-TEST_F(IntegrationGpuKernelIngestor, ExecutesAGraphThatCannotBeCached)
-{
-    // Same result through the uncached path: a graph with no identity is rematched on
-    // every query, which costs time and never correctness.
-    const auto graph = buildPointwiseAddGraph(/*withIdentity=*/false);
-    const auto config = buildEngineConfig(_engineId);
-    const auto graphData = asConstData(graph);
-    const auto configData = asConstData(config);
-
-    hipdnnEnginePluginExecutionContext_t context = nullptr;
-    ASSERT_EQ(pluginApi().createExecutionContext(_handle, &configData, &graphData, &context),
-              HIPDNN_PLUGIN_STATUS_SUCCESS);
-
-    size_t workspaceSize = 0;
-    ASSERT_EQ(pluginApi().getWorkspaceSizeFromExecutionContext(_handle, context, &workspaceSize),
-              HIPDNN_PLUGIN_STATUS_SUCCESS);
-    void* workspace = nullptr;
-    if(workspaceSize > 0)
-    {
-        ASSERT_EQ(hipMalloc(&workspace, workspaceSize), hipSuccess);
-    }
-
-    const AddBuffers buffers(2.5f, 6.5f);
-    const auto descriptors = buffers.descriptors();
-
-    ASSERT_EQ(pluginApi().executeOpGraph(
-                  _handle, context, workspace, descriptors.data(), descriptors.size()),
-              HIPDNN_PLUGIN_STATUS_SUCCESS);
-    ASSERT_EQ(hipStreamSynchronize(_stream), hipSuccess);
-
-    EXPECT_FLOAT_EQ(buffers.readResult(), 9.0f);
-
-    EXPECT_EQ(pluginApi().destroyExecutionContext(_handle, context), HIPDNN_PLUGIN_STATUS_SUCCESS);
-    if(workspace != nullptr)
-    {
-        EXPECT_EQ(hipFree(workspace), hipSuccess);
-    }
-}
-
-} // namespace
+INSTANTIATE_TEST_SUITE_P(,
+                         IntegrationGpuKernelIngestor,
+                         ::testing::Values(ExecuteCase{"SingleExecute", 1},
+                                           ExecuteCase{"RepeatedExecute", 3}),
+                         [](const ::testing::TestParamInfo<ExecuteCase>& info) {
+                             return info.param.name;
+                         });
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::integration
 
