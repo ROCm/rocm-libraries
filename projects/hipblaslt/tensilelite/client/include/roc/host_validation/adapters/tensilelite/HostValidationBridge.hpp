@@ -130,10 +130,10 @@ namespace TensileLite::Client
                                 const roc::host_validation::ComparisonOptions& options)
     {
         return roc::host_validation::compare(
-            std::span<const T>(static_cast<const T*>(observed), storageElements),
-            layout,
-            std::span<const T>(static_cast<const T*>(expected), storageElements),
-            layout,
+            roc::host_validation::TypedTensorView<T>(
+                layout, std::span<const T>(static_cast<const T*>(observed), storageElements)),
+            roc::host_validation::TypedTensorView<T>(
+                layout, std::span<const T>(static_cast<const T*>(expected), storageElements)),
             options);
     }
 

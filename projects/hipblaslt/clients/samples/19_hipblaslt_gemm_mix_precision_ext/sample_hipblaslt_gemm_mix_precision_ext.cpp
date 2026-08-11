@@ -94,11 +94,10 @@ int validate(const Runner<TypeA, TypeB, TypeCD, AlphaType, BetaType>& runner)
     CHECK_HIP_ERROR(hipMemcpyDtoH(
         gpuResult.data(), runner.d_d, runner.batch_count * runner.m * runner.n * sizeof(TypeCD)));
 
-    const auto comparison
-        = roc::host_validation::compare(std::span<const TypeCD>(gpuResult),
-                                        std::span<const TypeCD>(reference),
-                                        {.absoluteTolerance = 1e-5,
-                                         .maxReportedMismatches = 10});
+    const auto comparison = roc::host_validation::compare(
+        roc::host_validation::TypedTensorView<TypeCD>(std::span<const TypeCD>(gpuResult)),
+        roc::host_validation::TypedTensorView<TypeCD>(std::span<const TypeCD>(reference)),
+        {.absoluteTolerance = 1e-5, .maxReportedMismatches = 10});
     for(const auto& mismatch : comparison.reportedMismatches)
     {
         std::cout << mismatch.expected << " vs " << mismatch.observed << '\n';

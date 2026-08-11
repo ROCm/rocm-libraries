@@ -595,7 +595,7 @@ void forEachSelectedOffsetPair(const Layout& observedLayout, const Layout& expec
     }
 }
 
-inline ComparisonValue loadComparisonValue(TensorView view, ptrdiff_t logicalOffset) {
+inline ComparisonValue loadComparisonValue(const TensorView& view, ptrdiff_t logicalOffset) {
     const auto storage = view.storage();
     if (scalarTypeInfo(view.type()).category == ScalarCategory::Complex)
         return comparisonValue(
@@ -774,7 +774,7 @@ inline bool valuesCloseFast(Observed observed, Expected expected,
 }
 
 template <typename Tag>
-ComparisonResult comparePointwiseOnlyKnown(TensorView observed, TensorView expected,
+ComparisonResult comparePointwiseOnlyKnown(const TensorView& observed, const TensorView& expected,
                                            const ComparisonOptions& options) {
     const auto run = [&]<typename Predicate>(Predicate predicate) {
         ComparisonResult result;
@@ -837,11 +837,13 @@ auto fastTypedComparisonValue(const Value& value) {
 }
 
 template <typename Observed, typename Expected>
-ComparisonResult comparePointwiseOnlyTyped(std::span<const Observed> observedStorage,
-                                           const Layout& observedLayout,
-                                           std::span<const Expected> expectedStorage,
-                                           const Layout& expectedLayout,
+ComparisonResult comparePointwiseOnlyTyped(const TypedTensorView<Observed>& observed,
+                                           const TypedTensorView<Expected>& expected,
                                            const ComparisonOptions& options) {
+    const Layout& observedLayout = observed.layout();
+    const Layout& expectedLayout = expected.layout();
+    const auto observedStorage = observed.storage();
+    const auto expectedStorage = expected.storage();
     const auto run = [&]<typename Predicate>(Predicate predicate) {
         ComparisonResult result;
         if (options.selection.first == 0 && options.selection.stride == 1 &&
@@ -966,37 +968,30 @@ bool valuesClose(const Observed& observed, const Expected& expected,
 }
 
 template <typename Observed, typename Expected>
-ComparisonResult compare(std::span<const Observed> observedStorage, const Layout& observedLayout,
-                         std::span<const Expected> expectedStorage, const Layout& expectedLayout,
+ComparisonResult compare(const TypedTensorView<Observed>& observed,
+                         const TypedTensorView<Expected>& expected,
                          const ComparisonOptions& options) {
-    if (observedLayout.shape() != expectedLayout.shape())
+    if (observed.shape() != expected.shape())
         throw std::invalid_argument("Host validation comparison shape mismatch.");
-
-    const auto [observedLower, observedUpper] = detail::elementBounds(observedLayout);
-    const auto [expectedLower, expectedUpper] = detail::elementBounds(expectedLayout);
-    if (observedLower < 0 || expectedLower < 0 ||
-        (observedUpper >= 0 && static_cast<size_t>(observedUpper) >= observedStorage.size()) ||
-        (expectedUpper >= 0 && static_cast<size_t>(expectedUpper) >= expectedStorage.size()))
-        throw std::invalid_argument(
-            "Host validation comparison storage is too small for its layout.");
 
     if (options.pointwise && !options.computePointwiseStatistics && !options.computeFrobenius &&
         !options.computeUlp && !options.relativeFrobeniusTolerance &&
         !options.maximumUlpTolerance) {
-        ComparisonResult result = detail::comparePointwiseOnlyTyped(
-            observedStorage, observedLayout, expectedStorage, expectedLayout, options);
+        ComparisonResult result = detail::comparePointwiseOnlyTyped(observed, expected, options);
         const bool needsSamples = options.maxReportedMismatches != 0 &&
                                   (options.reportMatchingElements || result.mismatches != 0);
         if (!needsSamples) return result;
 
         ComparisonOptions detailed = options;
         detailed.computePointwiseStatistics = true;
-        return compare(observedStorage, observedLayout, expectedStorage, expectedLayout, detailed);
+        return compare(observed, expected, detailed);
     }
 
-    detail::ComparisonAccumulator accumulator(options, observedLayout.shape());
+    detail::ComparisonAccumulator accumulator(options, observed.shape());
+    const auto observedStorage = observed.storage();
+    const auto expectedStorage = expected.storage();
     detail::forEachSelectedOffsetPair(
-        observedLayout, expectedLayout, options.selection,
+        observed.layout(), expected.layout(), options.selection,
         [&](size_t logicalIndex, ptrdiff_t observedOffset, ptrdiff_t expectedOffset) {
             accumulator.observe(logicalIndex, observedOffset, expectedOffset,
                                 detail::comparisonValue(observedStorage[observedOffset]),
@@ -1005,37 +1000,7 @@ ComparisonResult compare(std::span<const Observed> observedStorage, const Layout
     return accumulator.finish();
 }
 
-template <typename Observed, typename Expected>
-ComparisonResult compare(std::span<const Observed> observed, std::span<const Expected> expected,
-                         const ComparisonOptions& options) {
-    return compare(observed, Layout::contiguous(Shape{observed.size()}), expected,
-                   Layout::contiguous(Shape{expected.size()}), options);
-}
-
-template <typename Observed, typename Expected>
-ComparisonResult compare(ConstMatrixView<Observed> observed, ConstMatrixView<Expected> expected,
-                         const ComparisonOptions& options) {
-    if (observed.rows() != expected.rows() || observed.columns() != expected.columns())
-        throw std::invalid_argument("Host validation matrix comparison shape mismatch.");
-
-    const Shape shape{observed.rows(), observed.columns()};
-    ComparisonOptions matrixOptions = options;
-    matrixOptions.selection.indexOrder = ComparisonIndexOrder::FirstDimensionFastest;
-    detail::ComparisonAccumulator accumulator(matrixOptions, shape);
-    detail::forEachSelectedIndex(shape, matrixOptions.selection,
-                                 [&](size_t logicalIndex, std::span<const size_t> coordinates) {
-                                     const size_t row = coordinates[0];
-                                     const size_t column = coordinates[1];
-                                     accumulator.observe(
-                                         logicalIndex, static_cast<ptrdiff_t>(logicalIndex),
-                                         static_cast<ptrdiff_t>(logicalIndex),
-                                         detail::comparisonValue(observed(row, column)),
-                                         detail::comparisonValue(expected(row, column)));
-                                 });
-    return accumulator.finish();
-}
-
-inline ComparisonResult compare(TensorView observed, TensorView expected,
+inline ComparisonResult compare(const TensorView& observed, const TensorView& expected,
                                 const ComparisonOptions& options) {
     if (observed.shape() != expected.shape())
         throw std::invalid_argument("Host validation tensor comparison shape mismatch.");
@@ -1091,10 +1056,8 @@ inline ComparisonResult compare(TensorView observed, TensorView expected,
 }
 
 template <typename Observed, typename Expected>
-std::optional<ComparisonTolerance> findAllCloseTolerance(std::span<const Observed> observedStorage,
-                                                         const Layout& observedLayout,
-                                                         std::span<const Expected> expectedStorage,
-                                                         const Layout& expectedLayout,
+std::optional<ComparisonTolerance> findAllCloseTolerance(const TypedTensorView<Observed>& observed,
+                                                         const TypedTensorView<Expected>& expected,
                                                          std::span<const double> absoluteCandidates,
                                                          std::span<const double> relativeCandidates,
                                                          ComparisonOptions options) {
@@ -1103,8 +1066,7 @@ std::optional<ComparisonTolerance> findAllCloseTolerance(std::span<const Observe
             options.absoluteTolerance = absolute;
             options.relativeTolerance = relative;
             options.symmetricRelativeTolerance = 0.0;
-            if (compare(observedStorage, observedLayout, expectedStorage, expectedLayout, options)
-                    .passed())
+            if (compare(observed, expected, options).passed())
                 return ComparisonTolerance{absolute, relative};
         }
     }
@@ -1112,8 +1074,9 @@ std::optional<ComparisonTolerance> findAllCloseTolerance(std::span<const Observe
 }
 
 inline std::optional<ComparisonTolerance> findAllCloseTolerance(
-    TensorView observed, TensorView expected, std::span<const double> absoluteCandidates,
-    std::span<const double> relativeCandidates, ComparisonOptions options) {
+    const TensorView& observed, const TensorView& expected,
+    std::span<const double> absoluteCandidates, std::span<const double> relativeCandidates,
+    ComparisonOptions options) {
     for (const double absolute : absoluteCandidates) {
         for (const double relative : relativeCandidates) {
             options.absoluteTolerance = absolute;
@@ -1156,8 +1119,8 @@ inline SentinelResult checkUnwrittenSentinel(ScalarType type, std::span<const st
     return result;
 }
 
-inline SentinelResult checkUnusedTensorStorage(TensorView logicalTensor, size_t allocatedElements,
-                                               SentinelRegion region,
+inline SentinelResult checkUnusedTensorStorage(const TensorView& logicalTensor,
+                                               size_t allocatedElements, SentinelRegion region,
                                                size_t maxReportedMismatches) {
     const auto& layout = logicalTensor.layout();
     std::vector<bool> used(allocatedElements, false);

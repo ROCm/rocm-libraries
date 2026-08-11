@@ -85,7 +85,16 @@ if(EXISTS
 )
     message(
         FATAL_ERROR
-        "Typed matrix views must remain in the public matrix_view.hpp header."
+        "Legacy rank-specific tensor views must not reappear inside detail."
+    )
+endif()
+
+if(EXISTS
+   "${HOST_VALIDATION_SOURCE_DIR}/include/roc/host_validation/matrix_view.hpp"
+)
+    message(
+        FATAL_ERROR
+        "Legacy rank-specific matrix views must not duplicate the tensor-view API."
     )
 endif()
 
