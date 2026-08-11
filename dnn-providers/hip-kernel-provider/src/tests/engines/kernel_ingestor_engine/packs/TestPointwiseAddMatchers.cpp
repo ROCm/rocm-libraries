@@ -3,11 +3,12 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <optional>
 #include <string>
+#include <vector>
 
 #include <gtest/gtest.h>
 
-#include <hip/hip_runtime_api.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
@@ -18,7 +19,7 @@
 #include "tests/engines/kernel_ingestor_engine/packs/PointwiseAddTestGraphs.hpp"
 
 /**
- * @file TestNativeMatchers.cpp
+ * @file TestPointwiseAddMatchers.cpp
  * @brief The pack's two matcher shapes: what each accepts, and what each refuses.
  *
  * The refusals matter more than the acceptances here. An under-specified decline accepts
@@ -30,9 +31,7 @@ namespace
 
 using namespace hip_kernel_provider::kernel_ingestor_engine;
 using namespace hip_kernel_provider::kernel_ingestor_engine::testing;
-using hipdnn_flatbuffers_sdk::utilities::parseUuid;
 using hipdnn_plugin_sdk::ingestor::BoundTokens;
-using hipdnn_plugin_sdk::ingestor::KernelDefinition;
 using hipdnn_plugin_sdk::ingestor::MatchContext;
 namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 
@@ -44,50 +43,8 @@ bool matches(const MatchContext& context)
     return pointwiseAddGraphMatches(context, bound);
 }
 
-hipDeviceProp_t testDeviceProperties()
-{
-    hipDeviceProp_t properties{};
-    properties.warpSize = 64;
-    return properties;
-}
-
-KernelDefinition makeKernel(int64_t blockSize, const std::string& dtype)
-{
-    KernelDefinition kernel;
-    kernel.kernelId = parseUuid("00000000-0000-4000-8000-000000000001");
-    kernel.packId = parseUuid("00000000-0000-4000-8000-000000000002");
-    kernel.dispatchId = parseUuid("00000000-0000-4000-8000-000000000003");
-    kernel.source.sourceFile = "PointwiseAdd.cpp";
-    kernel.source.entryPoint = "PointwiseAdd";
-    kernel.metadata
-        = {{std::string(BLOCK_SIZE_FIELD), blockSize}, {std::string(DTYPE_FIELD), dtype}};
-    return kernel;
-}
-
-/// Wraps a built graph buffer so a test reads it the way an engine does.
-class GraphFixture
-{
-public:
-    explicit GraphFixture(flatbuffers::FlatBufferBuilder builder)
-        : _builder(std::move(builder))
-        , _graph(_builder.GetBufferPointer(), _builder.GetSize())
-        , _properties(testDeviceProperties())
-    {
-    }
-
-    MatchContext context() const
-    {
-        return MatchContext{_graph, 0, _properties};
-    }
-
-private:
-    flatbuffers::FlatBufferBuilder _builder;
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper _graph;
-    hipDeviceProp_t _properties;
-};
-
 // ---------------------------------------------------------------------------
-// Graph-scoped matcher
+// Graph-scoped matcher: acceptances
 // ---------------------------------------------------------------------------
 
 TEST(TestPointwiseAddGraphMatcher, AcceptsASingleElementFloatAdd)
@@ -107,35 +64,6 @@ TEST(TestPointwiseAddGraphMatcher, AcceptsAHalfPrecisionAdd)
     EXPECT_TRUE(matches(fixture.context()));
 }
 
-TEST(TestPointwiseAddGraphMatcher, RefusesAnotherPointwiseOperation)
-{
-    const GraphFixture fixture(buildPointwiseGraph(data_objects::PointwiseMode::MUL));
-
-    EXPECT_FALSE(matches(fixture.context()));
-}
-
-TEST(TestPointwiseAddGraphMatcher, RefusesMultiElementTensors)
-{
-    // The kernel writes element 0 and nothing else, so anything larger would silently
-    // leave most of the output untouched.
-    const GraphFixture fixture(buildPointwiseGraph(
-        data_objects::PointwiseMode::ADD, data_objects::DataType::FLOAT, {1, 1, 2, 2}));
-
-    EXPECT_FALSE(matches(fixture.context()));
-}
-
-TEST(TestPointwiseAddGraphMatcher, RefusesARankTheDispatchPathCannotServe)
-{
-    // A 1-element 1-D tensor suits the kernel, which indexes element 0, but the
-    // provider's compile options derive layout from the tensor and reject anything
-    // below rank 4. Accepting it would trade a free decline at applicability for a
-    // failed plan build, which the caller pays for.
-    const GraphFixture fixture(
-        buildPointwiseGraph(data_objects::PointwiseMode::ADD, data_objects::DataType::FLOAT, {1}));
-
-    EXPECT_FALSE(matches(fixture.context()));
-}
-
 TEST(TestPointwiseAddGraphMatcher, AcceptsTheUpperSupportedRank)
 {
     const GraphFixture fixture(buildPointwiseGraph(
@@ -144,43 +72,131 @@ TEST(TestPointwiseAddGraphMatcher, AcceptsTheUpperSupportedRank)
     EXPECT_TRUE(matches(fixture.context()));
 }
 
-TEST(TestPointwiseAddGraphMatcher, RefusesAStrideOrderTheDispatchPathCannotClassify)
+// ---------------------------------------------------------------------------
+// Graph-scoped matcher: refusals
+//
+// Collapsed into one TEST_P: each case differs only in which graph it hands the
+// matcher, and every one asserts the identical verdict. Nine cases in total -- the six
+// original shape refusals, plus the three this pack's matcher previously left
+// unreachable from the builder (cross-operand dtype mismatch, a third operand, and a
+// dangling tensor uid).
+// ---------------------------------------------------------------------------
+
+/// One graph the matcher must refuse, plus a readable name for a failing run. The
+/// builder is a captureless-lambda-convertible function pointer rather than a
+/// std::function, because flatbuffers::FlatBufferBuilder is move-only and every case
+/// here needs only a zero-argument factory.
+struct GraphMatcherRefusalCase
 {
-    // Same class as the rank refusal above, and the same root cause: the provider's
-    // compile options derive a layout from the tensor's strides and throw on any 4D
-    // order that is neither NCHW nor NHWC. A 1-element tensor viewing into a larger
-    // buffer can carry such an order, so without this the matcher accepts a graph the
-    // plan build then fails on, which RFC 0017 section 8.6 forbids.
-    const GraphFixture fixture(
-        buildPointwiseGraph(data_objects::PointwiseMode::ADD,
-                            data_objects::DataType::FLOAT,
-                            {1, 1, 1, 1},
-                            std::nullopt,
-                            /*binary=*/true,
-                            /*explicitStrides=*/std::vector<int64_t>{8, 2, 4, 1}));
+    std::string name;
+    flatbuffers::FlatBufferBuilder (*buildGraph)();
+};
+
+class TestPointwiseAddGraphMatcherRefusal : public ::testing::TestWithParam<GraphMatcherRefusalCase>
+{
+};
+
+TEST_P(TestPointwiseAddGraphMatcherRefusal, Refuses)
+{
+    const GraphFixture fixture(GetParam().buildGraph());
 
     EXPECT_FALSE(matches(fixture.context()));
 }
 
-TEST(TestPointwiseAddGraphMatcher, RefusesAUnaryPointwise)
-{
-    const GraphFixture fixture(buildPointwiseGraph(data_objects::PointwiseMode::ADD,
-                                                   data_objects::DataType::FLOAT,
-                                                   {1, 1, 1, 1},
-                                                   std::nullopt,
-                                                   /*binary=*/false));
-
-    EXPECT_FALSE(matches(fixture.context()));
-}
-
-TEST(TestPointwiseAddGraphMatcher, RefusesAMultiNodeGraph)
-{
-    // A prebuilt kernel serves one complete graph, so a larger graph is a different
-    // problem even though it contains this one.
-    const GraphFixture fixture(buildTwoNodePointwiseGraph());
-
-    EXPECT_FALSE(matches(fixture.context()));
-}
+INSTANTIATE_TEST_SUITE_P(
+    ,
+    TestPointwiseAddGraphMatcherRefusal,
+    ::testing::ValuesIn(std::vector<GraphMatcherRefusalCase>{
+        {"AnotherPointwiseOperation",
+         []() { return buildPointwiseGraph(data_objects::PointwiseMode::MUL); }},
+        {"MultiElementTensors",
+         // The kernel writes element 0 and nothing else, so anything larger would
+         // silently leave most of the output untouched.
+         []() {
+             return buildPointwiseGraph(
+                 data_objects::PointwiseMode::ADD, data_objects::DataType::FLOAT, {1, 1, 2, 2});
+         }},
+        {"ARankTheDispatchPathCannotServe",
+         // A 1-element 1-D tensor suits the kernel, which indexes element 0, but the
+         // provider's compile options derive layout from the tensor and reject anything
+         // below rank 4. Accepting it would trade a free decline at applicability for a
+         // failed plan build, which the caller pays for.
+         []() {
+             return buildPointwiseGraph(
+                 data_objects::PointwiseMode::ADD, data_objects::DataType::FLOAT, {1});
+         }},
+        {"AStrideOrderTheDispatchPathCannotClassify",
+         // Same class as the rank refusal above, and the same root cause: the
+         // provider's compile options derive a layout from the tensor's strides and
+         // throw on any 4D order that is neither NCHW nor NHWC. A 1-element tensor
+         // viewing into a larger buffer can carry such an order, so without this the
+         // matcher accepts a graph the plan build then fails on, which RFC 0017 section
+         // 8.6 forbids.
+         []() {
+             return buildPointwiseGraph(data_objects::PointwiseMode::ADD,
+                                        data_objects::DataType::FLOAT,
+                                        {1, 1, 1, 1},
+                                        std::nullopt,
+                                        /*binary=*/true,
+                                        /*explicitStrides=*/std::vector<int64_t>{8, 2, 4, 1});
+         }},
+        {"AUnaryPointwise",
+         []() {
+             return buildPointwiseGraph(data_objects::PointwiseMode::ADD,
+                                        data_objects::DataType::FLOAT,
+                                        {1, 1, 1, 1},
+                                        std::nullopt,
+                                        /*binary=*/false);
+         }},
+        {"AMultiNodeGraph",
+         // A prebuilt kernel serves one complete graph, so a larger graph is a
+         // different problem even though it contains this one.
+         []() { return buildTwoNodePointwiseGraph(); }},
+        {"CrossOperandDtypeMismatch",
+         // PointwiseAddMatchers.cpp:165-168. The highest-value refusal here: this pack's
+         // kernel reads one dtype for every operand, so a binary add whose inputs
+         // disagree is not merely unoptimized, it is unreadable. Unreachable from the
+         // pre-extension builder, which forced every tensor to share one dtype.
+         []() {
+             return buildPointwiseGraph(data_objects::PointwiseMode::ADD,
+                                        data_objects::DataType::FLOAT,
+                                        {1, 1, 1, 1},
+                                        std::nullopt,
+                                        /*binary=*/true,
+                                        /*explicitStrides=*/std::nullopt,
+                                        /*inputBDataType=*/data_objects::DataType::HALF);
+         }},
+        {"AThirdOperand",
+         // PointwiseAddMatchers.cpp:144, the in_2_tensor_uid().has_value() half. A third
+         // operand is a different operation from this pack's binary add, not a larger
+         // instance of the same one.
+         []() {
+             return buildPointwiseGraph(data_objects::PointwiseMode::ADD,
+                                        data_objects::DataType::FLOAT,
+                                        {1, 1, 1, 1},
+                                        std::nullopt,
+                                        /*binary=*/true,
+                                        /*explicitStrides=*/std::nullopt,
+                                        /*inputBDataType=*/std::nullopt,
+                                        /*includeThirdOperand=*/true);
+         }},
+        {"ADanglingTensorUid",
+         // PointwiseAddMatchers.cpp:152-155. in_1_tensor_uid names a uid absent from
+         // the graph's tensor map -- a node the matcher cannot even read, as distinct
+         // from one it reads and declines.
+         []() {
+             return buildPointwiseGraph(data_objects::PointwiseMode::ADD,
+                                        data_objects::DataType::FLOAT,
+                                        {1, 1, 1, 1},
+                                        std::nullopt,
+                                        /*binary=*/true,
+                                        /*explicitStrides=*/std::nullopt,
+                                        /*inputBDataType=*/std::nullopt,
+                                        /*includeThirdOperand=*/false,
+                                        /*danglingInputBUid=*/DEFAULT_DANGLING_UID);
+         }},
+    }),
+    [](const ::testing::TestParamInfo<GraphMatcherRefusalCase>& info) { return info.param.name; });
 
 // ---------------------------------------------------------------------------
 // Kernel-scoped matcher

@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <algorithm>
 #include <array>
 
 #include <gtest/gtest.h>
@@ -13,6 +14,11 @@
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+#include "engines/kernel_ingestor_engine/packs/PointwiseAddPack.hpp"
+#include "tests/engines/kernel_ingestor_engine/packs/PointwiseAddTestGraphs.hpp"
+#endif
 
 using namespace hip_kernel_provider;
 using namespace hip_kernel_provider::core;
@@ -117,6 +123,27 @@ TEST(TestContainer, GetApplicableEngineIdsSdpaGraph)
     EXPECT_TRUE(applicableEngines.empty());
 #endif
 }
+
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+TEST(TestContainer, GetApplicableEngineIdsPointwiseAddGraph)
+{
+    using namespace hip_kernel_provider::kernel_ingestor_engine;
+    using namespace hip_kernel_provider::kernel_ingestor_engine::testing;
+
+    Handle handle;
+    Container container;
+    auto& engineManager = container.getEngineManager();
+
+    const auto graph = buildPointwiseGraph();
+    const auto graphWrapper = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        graph.GetBufferPointer(), graph.GetSize());
+
+    auto applicableEngines = engineManager.getApplicableEngineIds(handle, graphWrapper);
+
+    EXPECT_NE(std::find(applicableEngines.begin(), applicableEngines.end(), pointwiseAddEngineId()),
+              applicableEngines.end());
+}
+#endif
 
 TEST(TestContainer, GetAllEngineIds)
 {
