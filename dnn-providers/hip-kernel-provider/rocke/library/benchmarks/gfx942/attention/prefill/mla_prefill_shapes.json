@@ -1,6 +1,8 @@
 {
-  "_comment": "MLA prefill shapes for gfx942. seqlen_q = seqlen_k (full causal prefill). Covers DeepSeek V2/V3/V3.1/R1 (Hq=128), GLM-5 (Hq=TBD — confirm-config before bench), and Kimi-K2 (Hq=64). Canonical MLA geometry: qk_nope=128, qk_rope=64, v_head_dim=128, kv_lora_rank=512, q_lora_rank=1536, Hkv=1. block_size=16. bf16 only on gfx942 (fp8 is gfx950+ only, see S18).",
+  "_comment": "MLA prefill shapes for gfx942. seqlen_q = seqlen_k (full causal prefill). Covers DeepSeek V2/V3/V3.1/R1 (Hq=128), GLM-5 (Hq=TBD — confirm-config before bench), and Kimi-K2 (Hq=64). Canonical MLA geometry: qk_nope=128, qk_rope=64, v_head_dim=128, kv_lora_rank=512, q_lora_rank=1536, Hkv=1. block_size=16. bf16 only on gfx942 (fp8 is gfx950+ only; see DESIGN.md S6 dtype plan).",
   "_status": "GLM-5 Hq is pending confirmation (confirm-config task). Update num_query_heads before benchmarking.",
+  "_dtype_note": "bf16 only. fp8 is gfx950+ Phase 2 (see DESIGN.md S6 dtype plan) and is excluded from gfx942 entirely.",
+  "_harness_note": "These shapes are a specification for a future MLA runner, not runnable input for the current one. The existing prefill harness loads ndjson UAShape records via _ua_shape_utils.load_shapes, not this nested-object JSON, so it parses zero shapes from this file and does so silently (undecodable lines are skipped). It also requires a per-shape 'head_size', which MLA has no single value for: d_nope+d_rope=192 for the score, d_V=128 for the output. Wiring MLA shapes into a runner is part of the kernel deliverable (DESIGN.md S9).",
   "mla_geometry": {
     "qk_nope_dim": 128,
     "qk_rope_dim": 64,
