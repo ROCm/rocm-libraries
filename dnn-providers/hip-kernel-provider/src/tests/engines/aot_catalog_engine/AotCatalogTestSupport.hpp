@@ -31,20 +31,20 @@
 // Both FAIL() and GTEST_SKIP() return from the calling TEST body, so this ends
 // the test exactly as the bare GTEST_SKIP it replaces did.
 #define AOT_SKIP_OR_FAIL_ON_EMPTY_CATALOG(catalog_dir)                              \
-    do                                                                             \
-    {                                                                             \
-        if(AOT_ROCKE_FAMILIES_EXPECTED)                                            \
-        {                                                                         \
-            FAIL() << "empty AOT catalog at " << (catalog_dir)                     \
-                   << ": rocKE-AOT families were configured for this build "       \
-                      "(AOT_ROCKE_FAMILIES_EXPECTED=1) but no kernels loaded -- a "\
-                      "producer or the catalog loader dropped the whole family; "  \
-                      "refusing to skip.";                                         \
-        }                                                                         \
-        else                                                                      \
-        {                                                                         \
-            GTEST_SKIP() << "empty AOT catalog at " << (catalog_dir)               \
-                         << " (rocKE-AOT families not built for this arch; build " \
-                            "with -DROCKE_PYTHON_DIR to populate it)";             \
-        }                                                                         \
+    do                                                                              \
+    {                                                                               \
+        if(AOT_ROCKE_FAMILIES_EXPECTED)                                             \
+        {                                                                           \
+            FAIL() << "empty AOT catalog at " << (catalog_dir)                      \
+                   << ": rocKE-AOT families were configured for this build "        \
+                      "(AOT_ROCKE_FAMILIES_EXPECTED=1) but no kernels loaded -- a " \
+                      "producer or the catalog loader dropped the whole family; "   \
+                      "refusing to skip.";                                          \
+        }                                                                           \
+        else                                                                        \
+        {                                                                           \
+            GTEST_SKIP() << "empty AOT catalog at " << (catalog_dir)                \
+                         << " (rocKE-AOT families not built for this arch; build "  \
+                            "with -DROCKE_PYTHON_DIR to populate it)";              \
+        }                                                                           \
     } while(0)

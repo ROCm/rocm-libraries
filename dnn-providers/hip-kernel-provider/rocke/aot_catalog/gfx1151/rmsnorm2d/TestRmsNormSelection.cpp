@@ -27,10 +27,10 @@
 #include <vector>
 
 #include "catalog/Catalog.hpp"
-#include "engines/aot_catalog_engine/AotCatalogTestSupport.hpp"
 #include "catalog/CatalogTypes.hpp"
 #include "catalog/TuneCache.hpp"
 #include "core/Handle.hpp"
+#include "engines/aot_catalog_engine/AotCatalogTestSupport.hpp"
 #include "launch/LaunchAbi.hpp"
 #include "launch/ModuleLoader.hpp"
 #include "plans/CatalogPlan.hpp"

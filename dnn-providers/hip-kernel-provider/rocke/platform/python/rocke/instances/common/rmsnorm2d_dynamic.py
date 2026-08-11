@@ -100,9 +100,7 @@ class RMSNorm2DDynamicSpec:
         )
 
 
-def is_valid_spec(
-    spec: RMSNorm2DDynamicSpec, arch: str = "gfx950"
-) -> Tuple[bool, str]:
+def is_valid_spec(spec: RMSNorm2DDynamicSpec, arch: str = "gfx950") -> Tuple[bool, str]:
     """Return ``(ok, reason)`` for one runtime-N RMSNorm2D config on ``arch``.
 
     N-divisibility and the per-thread VGPR (``elems_per_thread``) cap that

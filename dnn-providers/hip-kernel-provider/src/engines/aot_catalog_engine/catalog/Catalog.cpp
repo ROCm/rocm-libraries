@@ -67,7 +67,8 @@ std::string getRequiredString(const json& obj, const std::string& key)
 // of its op kind, and "mutiple_of" inside a rule silently drops that divisibility
 // check. There is no schema validator in the load path, so this is the only place
 // that guarantee is enforced -- fail loudly on any key we do not recognize.
-void rejectUnknownKeys(const json& obj, const char* context,
+void rejectUnknownKeys(const json& obj,
+                       const char* context,
                        std::initializer_list<const char*> allowed)
 {
     if(!obj.is_object())
@@ -127,8 +128,8 @@ ConstraintRule parseRule(const json& obj)
     {
         fail("constraint rule must be an object");
     }
-    rejectUnknownKeys(obj, "constraint rule",
-                      {"equals", "not_equals", "one_of", "min", "max", "multiple_of"});
+    rejectUnknownKeys(
+        obj, "constraint rule", {"equals", "not_equals", "one_of", "min", "max", "multiple_of"});
 
     ConstraintRule rule;
     if(obj.contains("equals"))
@@ -369,9 +370,16 @@ LaunchMetadata parseLaunch(const json& obj)
 
 KernelEntry parseKernel(const json& obj, const fs::path& familyDir)
 {
-    rejectUnknownKeys(obj, "kernel entry",
-                      {"symbol", "co_file", "constraints", "workspace_bytes", "shared_mem_bytes",
-                       "grid", "block", "args_signature"});
+    rejectUnknownKeys(obj,
+                      "kernel entry",
+                      {"symbol",
+                       "co_file",
+                       "constraints",
+                       "workspace_bytes",
+                       "shared_mem_bytes",
+                       "grid",
+                       "block",
+                       "args_signature"});
 
     KernelEntry entry;
     entry.symbol = getRequiredString(obj, "symbol");
