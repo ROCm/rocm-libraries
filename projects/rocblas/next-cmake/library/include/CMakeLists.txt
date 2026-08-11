@@ -7,10 +7,9 @@ configure_file(
   "${_CMAKE_CURRENT_SOURCE_DIR}/internal/rocblas-version.h.in"
   "${CMAKE_CURRENT_BINARY_DIR}/rocblas/internal/rocblas-version.h" @ONLY)
 
-generate_export_header(
-  rocblas EXPORT_FILE_NAME
-  "${CMAKE_CURRENT_BINARY_DIR}/rocblas/internal/rocblas-export.h" BASE_NAME
-  rocblas)
+generate_export_header(rocblas
+        EXPORT_FILE_NAME "${CMAKE_CURRENT_BINARY_DIR}/rocblas/internal/rocblas-export.h"
+        CUSTOM_CONTENT_FROM_VARIABLE ROCBLAS_EXPORT_HEADER_CUSTOM_CONTENT)
 
 target_sources(
   rocblas-helper

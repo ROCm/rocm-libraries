@@ -746,7 +746,9 @@ endif()
 # The export header generation is now done in parent CMakeLists.txt
 # Package that helps me set visibility for function names exported from shared library
 include( GenerateExportHeader )
-generate_export_header( rocblas EXPORT_FILE_NAME ${PROJECT_BINARY_DIR}/include/rocblas/internal/rocblas-export.h )
+generate_export_header( rocblas
+        EXPORT_FILE_NAME ${PROJECT_BINARY_DIR}/include/rocblas/internal/rocblas-export.h
+        CUSTOM_CONTENT_FROM_VARIABLE ROCBLAS_EXPORT_HEADER_CUSTOM_CONTENT)
 
 # generate header with prototypes for export reuse
 file( GLOB rocblas_prototype_inputs

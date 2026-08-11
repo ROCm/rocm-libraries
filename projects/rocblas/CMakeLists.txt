@@ -31,12 +31,62 @@ endif()
 # ROCM_BUILD_ID is added to the package name by rocm-cmake ROCMSetupVersion
 unset(ENV{ROCM_BUILD_ID})
 
-project( rocblas LANGUAGES CXX )
+project( rocblas LANGUAGES C CXX )
 
 # ROCm libraries root (for shared/ctest and other shared resources)
 # Only set default when not already defined (e.g. by superproject / rocm-libraries).
 if(NOT DEFINED ROCM_LIBRARIES_ROOT)
   set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+endif()
+
+set(ROCBLAS_EXPORT_HEADER_CUSTOM_CONTENT "")
+
+if(WIN32)
+  add_compile_definitions("$<$<COMPILE_LANGUAGE:C,CXX>:_CRT_SECURE_NO_WARNINGS;NOMINMAX;WIN32;_WIN32>")
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_C_COMPILER_ID STREQUAL "Clang" )
+    add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:-Wno-format;-Wno-c++17-extensions;-fms-extensions;-fms-compatibility>")
+  endif()
+
+  option(ROCBLAS_USE_BINSKIM_COMPLIANT_COMPILE_FLAGS "Prepare rocBLAS for BinSkim Binary Analyzer" OFF)
+  option(ROCBLAS_USE_SPECTRE_MITIGATED_LIBRARIES "Use Spectre-mitigated libraries" OFF)
+
+  if(MSVC AND MSVC_VERSION GREATER_EQUAL 1900)
+    if(ROCBLAS_USE_BINSKIM_COMPLIANT_COMPILE_FLAGS)
+      message(STATUS "Control Flow Guard enabled")
+      add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:/guard:cf>)
+      add_link_options(/guard:cf /DYNAMICBASE)
+    endif()
+    if(ROCBLAS_USE_SPECTRE_MITIGATED_LIBRARIES)
+      message(STATUS "Using Spectre-mitigated libraries")
+      add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:/Qspectre>)
+    endif()
+  elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    if(ROCBLAS_USE_BINSKIM_COMPLIANT_COMPILE_FLAGS)
+      message(STATUS "Control Flow Guard enabled (Clang)")
+      add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:SHELL:-Xclang -cfguard>")
+      add_link_options(-Wl,-guard:cf)
+    endif()
+    if(ROCBLAS_USE_SPECTRE_MITIGATED_LIBRARIES)
+      message(WARNING "Spectre mitigated libraries are not yet available for Clang in this project.")
+    endif()
+  endif()
+
+  option(ROCBLAS_USE_MSVC_STATIC_RUNTIME "Link MSVC runtime library statically" OFF)
+
+  if(NOT ROCBLAS_USE_MSVC_STATIC_RUNTIME)
+    set(ROCBLAS_MSVC_RUNTIME_SUFFIX "DLL")
+  endif()
+  if(NOT CMAKE_MSVC_RUNTIME_LIBRARY)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>${ROCBLAS_MSVC_RUNTIME_SUFFIX}")
+  endif()
+
+# clang's HIP device-side compilation pass doesn't support __declspec(dllexport/dllimport);
+set(ROCBLAS_EXPORT_HEADER_CUSTOM_CONTENT [[
+#if defined(__HIP_DEVICE_COMPILE__)
+#  undef ROCBLAS_EXPORT
+#  define ROCBLAS_EXPORT
+#endif
+]])
 endif()
 
 # Append our library helper cmake path and the cmake path for hip (for convenience)
@@ -137,17 +187,26 @@ set_property(CACHE GPU_TARGETS PROPERTY STRINGS
   all
   ${SUPPORTED_TARGETS})
 
-# Detect if target ID syntax if supported for default all GPU_TARGETS list
-# Sets the GPU_TARGETS with backward compatibility
-if (GPU_TARGETS STREQUAL "all")
-  rocm_check_target_ids(target_list TARGETS "${SUPPORTED_TARGETS}")
+if(WIN32)
+  # Workaround for missing amdhip64.lib - do not check for supported targets, assume they exist
+  if(GPU_TARGETS STREQUAL "all")
+    set(target_list "${SUPPORTED_TARGETS}")
+  else()
+    set(target_list "${GPU_TARGETS}")
+  endif()
 else()
-  rocm_check_target_ids(target_list TARGETS "${GPU_TARGETS}")
-endif()
+  # Detect if target ID syntax if supported for default all GPU_TARGETS list
+  # Sets the GPU_TARGETS with backward compatibility
+  if (GPU_TARGETS STREQUAL "all")
+    rocm_check_target_ids(target_list TARGETS "${SUPPORTED_TARGETS}")
+  else()
+    rocm_check_target_ids(target_list TARGETS "${GPU_TARGETS}")
+  endif()
 
-# if 'target_list' is empty, then compile does not support the gpu arch passed as an argument.
-if(target_list STREQUAL "")
-  message(FATAL_ERROR "Unsupported target ${GPU_TARGETS} by compiler, List of supported targets: ${SUPPORTED_TARGETS}")
+  # if 'target_list' is empty, then compile does not support the gpu arch passed as an argument.
+  if(target_list STREQUAL "")
+    message(FATAL_ERROR "Unsupported target ${GPU_TARGETS} by compiler, List of supported targets: ${SUPPORTED_TARGETS}")
+  endif()
 endif()
 
 # set GPU_TARGETS and AMDGPU_TARGETS before any find_package( hip ...), via tensile or in this file
