@@ -2841,10 +2841,14 @@ namespace TensileLite
                 }
             }
 
+            // Parallel reduction is undefined at a splitting factor of 1, which the grid
+            // selection above can still produce because it is the only step that sees the
+            // workspace size. Degrade to the same DP mode used when workspace is short
+            // rather than failing the launch.
             if(sk.reduction == origami::reduction_t::parallel && sk.grid / tiles < 2)
             {
-                throw std::runtime_error("hipblasLT Error: Cannot use Parallel reduction with "
-                                         "StreamK kernel with splitting factor < 2\n");
+                sk.reduction = origami::reduction_t::tree;
+                sk.grid      = tiles;
             }
         }
 
