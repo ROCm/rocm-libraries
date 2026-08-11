@@ -813,7 +813,9 @@ class _TiledRoute:
 
     cohort: str  # e.g. "gfx942_d256_causal" | "gfx942_d128_swa"
     builder: Callable  # e.g. build_gfx942_4warp_gqa
-    disc: Dict[str, int]  # cache-key discriminator knobs (num_warps/tile_size/block_m_per_warp)
+    disc: Dict[
+        str, int
+    ]  # cache-key discriminator knobs (num_warps/tile_size/block_m_per_warp)
     block_m: int  # REAL launch BLOCK_M (grid derivation stays in _get_2d_launch_meta)
     block_dim: Tuple[int, int, int]  # REAL launch block dims
 

@@ -265,7 +265,9 @@ class TestGfx942D128SwRouting(unittest.TestCase):
                 self.assertIs(route.builder, build_gfx942_4warp_gqa, msg=tag)
                 # Discriminator knobs + real geometry pinned to concrete values.
                 self.assertEqual(route.disc["num_warps"], 1, msg=tag)
-                self.assertEqual(route.disc["tile_size"], max(32, p.block_size), msg=tag)
+                self.assertEqual(
+                    route.disc["tile_size"], max(32, p.block_size), msg=tag
+                )
                 self.assertEqual(route.disc["block_m_per_warp"], 32, msg=tag)
                 self.assertEqual(route.block_m, 128, msg=tag)
                 self.assertEqual(route.block_dim, (256, 1, 1), msg=tag)
