@@ -16,8 +16,10 @@ comparison used by ROCm library clients and tests.
     `structured_sparsity.hpp`, and the convenience umbrella `validation.hpp`.
   - Exposes runtime-typed generation, tensor AXPBY, reference GEMM, reference
     epilogues, LayerNorm, reductions, softmax, structured sparsity, and comparison.
-  - Implementation headers live under `roc/host_validation/detail/`; consumers
-    include the operation header they need or `validation.hpp`.
+  - Numerical implementations are compiled into the library. Consumers include
+    the operation header they need or `validation.hpp`.
+  - `typed_comparison.hpp` is an explicit opt-in extension for caller-defined
+    scalar wrappers and the measured pointwise fast path.
 - `roc::host-validation-blas`
   - Optional compiled CBLAS implementation of `GemmBackend::Blas`.
   - Built with `HOST_VALIDATION_BUILD_BLAS_BACKEND=ON`.
@@ -52,8 +54,9 @@ tree for forbidden product dependencies.
 ```text
 include/roc/host_validation/
   tensor.hpp
+  comparison.hpp
+  typed_comparison.hpp
   validation.hpp
-  detail/
 
 src/
 python/
@@ -274,10 +277,17 @@ One plan can select logical elements and collect:
 - candidate-grid allclose tolerance search; and
 - unwritten-sentinel checks before, inside, and after logical tensor storage.
 
+Comparison policy is intentionally entered through tensor views. The former
+scalar `valuesClose` helper and typed allclose-tolerance search were removed;
+one-element values use ordinary tensors, while tolerance search remains on the
+canonical runtime-typed API.
+
 The same API accepts runtime `TensorView` objects or typed caller-owned
 storage through `TypedTensorView<T>`:
 
 ```cpp
+#include <roc/host_validation/typed_comparison.hpp>
+
 TypedTensorView<ExternalHalf> observed(layout, observedStorage);
 TypedTensorView<ExternalHalf> expected(layout, expectedStorage);
 ComparisonResult report = compare(observed, expected, options);
@@ -285,9 +295,15 @@ ComparisonResult report = compare(observed, expected, options);
 
 The typed adapter is useful for product scalar wrappers and preserves a
 vectorizable hot path without placing numerical comparison code in the
-product. It is not a second rank-specific tensor hierarchy. hipBLASLt and
-TensileLite now retain only descriptor/type translation, host readback, option
-selection, and formatting/reporting.
+product. Pointwise-only comparison and pointwise special-value statistics stay
+caller-specialized because those full-output loops are performance-sensitive.
+Frobenius, ULP, and the remaining detailed programs enter the compiled engine
+through one pair loader. Caller-precision acceptance remains separate from
+double-normalized printable/statistical evidence, so requesting a report cannot
+change pass/fail. The typed adapter is not a second rank-specific tensor
+hierarchy, and it is deliberately not included by `validation.hpp`. hipBLASLt
+and TensileLite now retain only descriptor/type translation, host readback,
+option selection, and formatting/reporting.
 
 This ownership deliberately excludes hipBLASLt's runtime device
 `check_numerics_matrix` facility. That HIP kernel scans device memory for

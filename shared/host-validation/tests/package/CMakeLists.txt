@@ -12,6 +12,12 @@ target_link_libraries(host-validation-package-test PRIVATE roc::host-validation-
 add_executable(host-validation-operations-package-test validation.cpp)
 target_link_libraries(host-validation-operations-package-test PRIVATE roc::host-validation)
 
+add_executable(host-validation-comparison-package-test comparison.cpp)
+target_link_libraries(host-validation-comparison-package-test PRIVATE roc::host-validation)
+
+add_executable(host-validation-typed-comparison-package-test typed_comparison.cpp)
+target_link_libraries(host-validation-typed-comparison-package-test PRIVATE roc::host-validation)
+
 add_executable(host-validation-tiled-package-test tiled.cpp)
 target_link_libraries(host-validation-tiled-package-test PRIVATE roc::host-validation-tiled)
 
