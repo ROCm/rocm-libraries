@@ -172,6 +172,65 @@ INSTANTIATE_TEST_SUITE_P(
     )
 );
 
+class MXDataGenSeedTest : public ::testing::Test
+{
+protected:
+    struct Output
+    {
+        std::vector<uint8_t> data;
+        std::vector<uint8_t> scales;
+        std::vector<float>   reference;
+    };
+
+    static Output generate(uint32_t seed)
+    {
+        constexpr uint64_t rows    = 256;
+        constexpr uint64_t cols    = 256;
+        constexpr int      mxBlock = 32;
+
+        Output output;
+        output.data.resize((rows * cols + 1) / 2);
+        output.scales.resize((rows / mxBlock) * cols);
+        output.reference = generateMXInput((hipDataType)HIP_R_4F_E2M1,
+                                           HIP_R_8F_UE8M0,
+                                           output.data.data(),
+                                           output.scales.data(),
+                                           rows,
+                                           cols,
+                                           rows,
+                                           /*isTranspose=*/true,
+                                           mxBlock,
+                                           1,
+                                           /*isMatrixA=*/true,
+                                           MXScaleLayout::None,
+                                           "rand_int",
+                                           -1.0f,
+                                           1.0f,
+                                           "",
+                                           seed);
+        return output;
+    }
+};
+
+TEST_F(MXDataGenSeedTest, SameSeedRepeatsRandomOutput)
+{
+    auto first  = generate(12345U);
+    auto second = generate(12345U);
+
+    EXPECT_EQ(first.data, second.data);
+    EXPECT_EQ(first.scales, second.scales);
+    EXPECT_EQ(first.reference, second.reference);
+}
+
+TEST_F(MXDataGenSeedTest, DifferentSeedsChangeRandomOutput)
+{
+    auto first  = generate(12345U);
+    auto second = generate(67890U);
+
+    EXPECT_NE(first.data, second.data);
+    EXPECT_NE(first.reference, second.reference);
+}
+
 // ============================================================================
 // PreSwizzle scale tests
 //
