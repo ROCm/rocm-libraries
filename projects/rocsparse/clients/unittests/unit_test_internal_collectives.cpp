@@ -58,6 +58,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <numeric>
+#include <random>
 #include <vector>
 
 using rocsparse_ut::device_vector;
@@ -296,15 +297,16 @@ namespace
         expect_close(to_host(d_out)[0], ref);
     }
 
-    // Build a 256-element well-conditioned integer-valued vector.
+    // Build a 256-element well-conditioned integer-valued vector: a deterministic
+    // shuffle of 0..255 (distinct, all exact in every supported type) rather than
+    // a modulo pattern, so max/min land on interior lanes, not lane 0 / the last.
     template <typename T>
     std::vector<T> perm256()
     {
         std::vector<T> v(256);
-        for(int i = 0; i < 256; ++i)
-        {
-            v[i] = static_cast<T>((i * 131 + 7) % 251); // distinct-ish, all exact
-        }
+        std::iota(v.begin(), v.end(), T(0));
+        std::mt19937 rng(0x9E3779B9u);
+        std::shuffle(v.begin(), v.end(), rng);
         return v;
     }
 } // namespace
@@ -479,12 +481,21 @@ namespace
         for(uint32_t l = 0; l < wf; ++l)
             expect_close(h[l], ref);
     }
-    // Distinct, non-monotone exact values across the wavefront (a permutation-ish
-    // fill) so max/min are interior lanes, not simply lane 0 or the last lane.
+    // Distinct, non-monotone exact values across the wavefront so max/min land on
+    // interior lanes, not simply lane 0 or the last lane. Backed by a deterministic
+    // shuffle of 0..63 (covers both 32- and 64-wide wavefronts) instead of a
+    // modulo pattern; lane l reads entry l (l < wavefront size <= 64).
     template <typename T>
     T perm_wf_value(uint32_t l)
     {
-        return static_cast<T>((l * 13 + 5) % 61);
+        static const std::vector<T> tbl = [] {
+            std::vector<T> v(64);
+            std::iota(v.begin(), v.end(), T(0));
+            std::mt19937 rng(0x1234567u);
+            std::shuffle(v.begin(), v.end(), rng);
+            return v;
+        }();
+        return tbl[l];
     }
 } // namespace
 
