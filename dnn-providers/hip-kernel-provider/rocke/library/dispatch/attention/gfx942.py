@@ -41,7 +41,7 @@ from .common import (
 # (see AttentionDenseSpec.block_n).
 _DENSE_BLOCK_N = 64
 
-# Persistent-grid CTA count for gfx942 (AICK-1664 P4). The shared
+# Persistent-grid CTA count for gfx942 (the P4 persistent lever). The shared
 # ``AttentionRequest.dense_num_persistent`` default is 256, which is a gfx950 CU
 # count; gfx942's largest part has 304. Applied only when the caller left the
 # field at that shared default, so an explicit request value is still respected.
@@ -138,13 +138,21 @@ def _dense_spec(req: OperatorRequest):
       than the shared 256. It drives BOTH the auto persistent decision and the grid
       size, so it is resolved before the mode branch.
     * ``waves_per_eu`` comes from the kernel's own per-config policy
-      (``_tuned_waves_per_eu``), so the ``kernel_name`` tag and the emitted binary
-      cannot disagree.
-
+      (``_tuned_waves_per_eu``) rather than being pinned here. That is the general
+      rule this factory follows, not a one-off: any value the kernel bakes into its
+      ``kernel_name`` must be resolved by the kernel's policy, or the name tag and
+      the compiled binary can disagree and the name-keyed launcher cache serves the
+      wrong HSACO.
     The D64 K row-group pad is deliberately NOT set here: it is the shared
     ``lds_k_group_pad`` field, whose default (8) is already the value gfx942 wants,
     and which the gfx942 builder reads directly. Restating it would reintroduce the
     per-arch duplicate that collapsing the two fields removed.
+
+    Nothing here touches ``Gfx942DenseTuning``: every gfx942-private codegen knob
+    (block_m, the two LDS pads, cfvst / exp2_fast forcing, iglp) stays at its shipped
+    default, so those knobs are sweep-visible and dispatch-invisible. Wiring one of
+    them into this factory would make it a production path and would need its own
+    measured verdict first.
 
     The spec dataclass itself is REUSED from the gfx950 kernel module (as the gfx942
     kernel body reuses it); it is arch-neutral, only its tuned values differ.
@@ -201,13 +209,15 @@ def dense_spec_for_request(req: AttentionRequest):
 
     Import it from THIS module, not from the ``dispatch.attention`` package: the
     package-level re-export of that name is gfx950's, and it would silently hand a
-    gfx942 request the untuned spec (256 CTAs, no kpad, no waves-per-eu bump).
+    gfx942 request the untuned spec (256 CTAs, no waves-per-eu bump). The K row-group
+    pad is NOT in that list: it is the shared field's default, so both factories
+    produce it.
     """
     return _dense_spec(req)
 
 
 def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
-    """Dense flash-attn prefill on gfx942 (bf16/fp16, causal/full) — AICK-1664.
+    """Dense flash-attn prefill on gfx942 (bf16/fp16, causal/full).
 
     OPT-IN ONLY (mirrors the gfx950 sibling): matches solely when the request names
     ``algorithm="attention_dense"`` / ``spec_id="gfx942_attention_dense"``, so it
@@ -216,7 +226,7 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
     shape -- and at priority 3 it is the only thing keeping this candidate off the
     default path.
 
-    Carries the AICK-1664 P1-P5 levers: the 32x32x8 atom with K-loop doubling,
+    Carries the port's P1-P5 levers: the 32x32x8 atom with K-loop doubling,
     conflict-free V (D128 fp16), exp2_fast + fused softmax rescale, per-config
     waves-per-eu and the D64 K-bank-conflict pad, and the persistent grid-stride
     variant (``dense_persistent='auto'`` turns it on once there is enough work to

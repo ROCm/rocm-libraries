@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Golden LLVM-IR byte-stability test for the gfx942 dense flash-attn kernel (AICK-1664).
+"""Golden LLVM-IR byte-stability test for the gfx942 dense flash-attn kernel.
 
 Hashes the Python-lowered LLVM IR (SHA256) of representative gfx942 ``attention_dense``
 specs and compares against a checked-in per-flavor golden fixture, catching any
@@ -22,14 +22,14 @@ Both D64 K-LDS layouts are pinned so drift on either is caught:
     re-blessing stays a one-command operation across the kernel's evolution.
 
 There is NO cpp/python byte-identity companion test: ``library/kernels/`` has no C++
-engine mirror (AICK-1664 plan §5 Q3), so the dual-engine parity gate does not apply to
-this kernel. The Python lowering IS the ground truth here.
+engine mirror (settled when the port was scoped), so the dual-engine parity gate does
+not apply to this kernel. The Python lowering IS the ground truth here.
 
 COLLECTION: this is a CPU lane (pure text lowering), collected by the library
 runner ``library/tests/run_all.py`` (default, non-``gpu`` lane) -- NOT by
 ``platform/tests/run_all.py``, which cannot reach the library tree (the one-way
 library -> platform dependency rule). The actual CI pipeline invoking that runner
-is a CI-team registration step (see AICK-1664 plan Section 6.2). Run it and
+is a CI-team registration step, tracked as a follow-up. Run it and
 re-bless manually:
 
     cd rocke/library

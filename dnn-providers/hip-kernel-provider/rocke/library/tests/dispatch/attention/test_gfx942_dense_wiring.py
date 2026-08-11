@@ -1,6 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Unit tests for the gfx942 ``attention_dense`` dispatcher wiring (AICK-1664).
+"""Unit tests for the gfx942 ``attention_dense`` dispatcher wiring.
 
 Required by ``library/dispatch/AGENTS.md`` step 4. Covers:
   - the candidate is registered and discoverable, with the right spec_id/algorithm

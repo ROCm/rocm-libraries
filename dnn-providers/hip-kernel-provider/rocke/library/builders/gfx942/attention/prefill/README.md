@@ -1,6 +1,6 @@
-# gfx942 dense flash-attention prefill (`attention_dense`) — AICK-1664
+# gfx942 dense flash-attention prefill (`attention_dense`)
 
-Port of the gfx950 dense prefill kernel (PR #9480 / AICK-1663) to **gfx942 (CDNA3)**.
+Port of the gfx950 dense prefill kernel (PR #9480) to **gfx942 (CDNA3)**.
 This folder mirrors the gfx950 layout (`builders/gfx950/attention/prefill/`): the
 kernel body lives in `kernels/gfx942/attention_dense.py`; this builder owns the host
 path (spec → compile → launch → SDPA parity + benchmark).
@@ -15,12 +15,25 @@ fp32 SDPA reference across the in-scope cohort on **both** gfx942 parts (228-CU 
 304-CU), 0 register spill within the VGPR/LDS budget.
 
 The tuning is **per (head_size, dtype)**, not global — see the lever table below for
-which config gets which lever and why. Levers default OFF at module scope
-(`_P0_D64_KPAD`, `_IGLP`), so a non-dispatch build is byte-identical and the
-gfx950 golden is untouched by construction.
+which config gets which lever and why. The levers do **not** all default off, and the
+split matters when you build a spec by hand:
+
+- The D64 K-bank-conflict pad is **ON by default**. It is the shared
+  `AttentionDenseSpec.lds_k_group_pad`, whose default is 8, so a directly-built D64
+  spec already carries it — the `kpad8` token in the kernel name is what says so. Set
+  the field to `0` to get the unpadded layout; that is also how the lever is A/B'd.
+- The gfx942-private knobs in `Gfx942DenseTuning` (`block_m`, the two LDS pads,
+  the `use_cfvst` / `use_exp2_fast` overrides, `iglp`) all default to their shipped
+  values, and the tri-state ones default to `None` = "ask the policy". A build that
+  never mentions the struct therefore emits byte-identical IR under a byte-identical
+  kernel name.
+
+The gfx950 golden is untouched either way: this is a separate kernel module emitting
+its own symbol against its own fixture, not an arch branch in the gfx950 file.
 
 Still rejected with a structured reason by `supports_attention_dense`: varlen, ragged,
-sliding-window. See the AICK-1664 plan for the deferred-findings backlog.
+sliding-window. The deferred-findings backlog lives in the optimization plan for this
+port, which is kept outside the repo.
 
 ### Gain over the unified-attention baseline
 
@@ -69,7 +82,8 @@ named follow-up, now as upside rather than as a fix for a deficit.
 
 gfx942 only · forward-inference prefill · dense causal (no paging / bias / SWA / sinks)
 · bf16 + fp16 · head dims **D64 & D128** · MHA + GQA incl. non-power-of-2 (40/8, 28/4)
-· default **and** persistent grids. D256 is out of scope (AICK-1495/1496).
+· default **and** persistent grids. D256 is out of scope — it is served by its own
+wide-atom candidates.
 
 `block_n` must divide the 256-row query tile, `block_n` over the 8 waves must give a
 whole number of DMA row-groups, and `K_lds + V_lds` must fit the 64 KB gfx942 LDS —
@@ -113,8 +127,8 @@ this port:
 The dominant remaining lever is therefore **occupancy** — getting a second workgroup
 resident at D128, which needs an LDS cut and a register-floor cut *together* — plus
 grid shape at small sequence lengths. Per `AGENTS.md`, measured counters, utilisation
-and per-lever deltas are recorded outside the repo: see the AICK-1664 plan and the
-protected results page.
+and per-lever deltas are recorded outside the repo: see the optimization plan for this
+port and the protected results page.
 
 ## Lever record (gfx950 dense → gfx942, plus gfx942-only experiments)
 
@@ -143,12 +157,12 @@ magnitudes live outside the repo per `AGENTS.md`.
 | `waves_per_eu=3` at **fp16 D64** | reaches 2 WG/CU but loses more ILP than the second workgroup buys |
 | Drop K/V LDS pads to reach 2 WG/CU at D128 | D128 stays 1 WG/CU even unpadded (register floor co-limits), so it only reintroduces bank conflicts — **catastrophic** |
 | `block_n=32` (all configs) | halving the KV tile doubles the tile/grid count; the extra loop and barrier overhead outweighs the LDS relief. Marginally positive on **bf16 D128** but **part-dependent**, so not wired — it would need a CU-count-aware policy |
-| `iglp_opt` (`_IGLP`) | resource- and performance-neutral cross-part: the canned GEMM interleave does not match this loop, which is barrier-rendezvous-bound. Kept as a default-off knob |
+| `iglp_opt` (`Gfx942DenseTuning.iglp`) | resource- and performance-neutral cross-part: the canned GEMM interleave does not match this loop, which is barrier-rendezvous-bound. Kept as a default-off knob |
 | Smaller `BLOCK_M` | a *fully filled* grid at `BLOCK_M=64` measured **slower** than a one-third-filled one at 256 — 2 waves/CTA leaves half the CU's matrix cores unreachable at 1 CTA/CU. `BLOCK_M=128` is a small win on two configs only; not promoted |
 | cfvst load/store chunking | does not bound register pressure: the later chunks' loads carry no dependency on the earlier ones, so LLVM hoists them above the intervening full `s_waitcnt(vmcnt=0)`, which then covers them anyway |
 | PV-only `s_setprio` | **proven-negative** on gfx942 `attention_tiled_2d`. Note this is one lever in one placement — it is *not* a verdict on the scheduling-intrinsic family, and hand-written `sched_group_barrier` remains open |
 | Diagonal two-phase causal peel | **proven-negative** on gfx942 `attention_tiled_2d`; gated on the bound shifting to compute, which it has not |
-| partial-vmcnt software prefetch | N/A — a double-buffering lever, and NBUF=2 does not fit 64 KB LDS at D128 |
+| partial-vmcnt software prefetch | N/A — it is a double-buffering lever and this kernel is single-buffered (NBUF=1), so there is no prefetch to partially overlap. The older "NBUF=2 does not fit 64 KB LDS at D128" reason is **retired**: it only holds at the shipped `block_n=64` (a K-only double buffer, or `block_n=32`, does fit), so what actually closes the door is the measured `block_n=32` verdict in the row above, not the LDS arithmetic |
 
 ## Bench
 
