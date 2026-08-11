@@ -11,7 +11,7 @@ import numpy as np
 
 from .helpers import (
     call_attribute_methods,
-    build_all_plans_or_skip,
+    build_all_plans,
     create_float_graph,
     execute_zeros,
 )
@@ -32,14 +32,14 @@ class TestBlockScaleDequantize:
             hipdnn.BlockScaleDequantizeAttributes().set_block_size([32]),
         )
 
-        build_all_plans_or_skip(graph)
+        build_all_plans(graph)
 
 
 @pytest.mark.gpu
 class TestBlockScaleQuantize:
     """Tests for block-scale quantization operation-graph construction."""
 
-    def test_builds_operation_graph(self):
+    def test_execution_succeeds(self):
         graph = create_float_graph()
         x = hipdnn.Tensor.create([2, 64, 32, 32], hipdnn.DataType.FLOAT)
         outputs = graph.block_scale_quantize(
@@ -52,7 +52,7 @@ class TestBlockScaleQuantize:
             output.set_output(True)
             output.set_data_type(hipdnn.DataType.FLOAT)
 
-        handle = build_all_plans_or_skip(graph)
+        handle = build_all_plans(graph)
         execute_zeros(
             graph,
             [(x, np.float32)] + [(output, np.float32) for output in outputs],

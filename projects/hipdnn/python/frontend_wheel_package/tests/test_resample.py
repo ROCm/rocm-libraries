@@ -11,7 +11,7 @@ import numpy as np
 
 from .helpers import (
     call_attribute_methods,
-    build_all_plans_or_skip,
+    build_all_plans,
     create_float_graph,
     execute_zeros,
 )
@@ -45,7 +45,7 @@ def _resample_bwd_attributes():
 class TestResample:
     """Tests for resample operation-graph construction."""
 
-    def test_builds_operation_graph(self):
+    def test_execution_succeeds(self):
         graph = create_float_graph()
         x = hipdnn.Tensor.create([1, 3, 4, 4], hipdnn.DataType.FLOAT)
         outputs = graph.resample(x, _resample_fwd_attributes())
@@ -55,7 +55,7 @@ class TestResample:
         assert index is None  # requires set_generate_index(True), not requested here
         y.set_output(True)
 
-        handle = build_all_plans_or_skip(graph)
+        handle = build_all_plans(graph)
         execute_zeros(graph, [(x, np.float32), (y, np.float32)], handle)
 
 
@@ -63,14 +63,14 @@ class TestResample:
 class TestResampleFwd:
     """Tests for resample forward operation-graph construction."""
 
-    def test_builds_operation_graph(self):
+    def test_execution_succeeds(self):
         graph = create_float_graph()
         x = hipdnn.Tensor.create([1, 3, 4, 4], hipdnn.DataType.FLOAT)
         y = graph.resample_fwd(x, _resample_fwd_attributes())
         y.set_output(True)
         y.set_data_type(hipdnn.DataType.FLOAT)
 
-        handle = build_all_plans_or_skip(graph)
+        handle = build_all_plans(graph)
         execute_zeros(graph, [(x, np.float32), (y, np.float32)], handle)
 
 
@@ -78,14 +78,14 @@ class TestResampleFwd:
 class TestResampleBwd:
     """Tests for resample backward operation-graph construction."""
 
-    def test_builds_operation_graph(self):
+    def test_execution_succeeds(self):
         graph = create_float_graph()
         dy = hipdnn.Tensor.create([1, 3, 16, 16], hipdnn.DataType.FLOAT)
         dx = graph.resample_bwd(dy, _resample_bwd_attributes())
         dx.set_output(True)
         dx.set_data_type(hipdnn.DataType.FLOAT)
 
-        handle = build_all_plans_or_skip(graph)
+        handle = build_all_plans(graph)
         execute_zeros(graph, [(dy, np.float32), (dx, np.float32)], handle)
 
     def test_builds_operation_graph_with_maxpool_index(self):
@@ -106,7 +106,7 @@ class TestResampleBwd:
         dx.set_output(True)
         dx.set_data_type(hipdnn.DataType.FLOAT)
 
-        handle = build_all_plans_or_skip(graph)
+        handle = build_all_plans(graph)
         execute_zeros(
             graph,
             [(dy, np.float32), (index, np.int32), (dx, np.float32)],

@@ -11,7 +11,7 @@ import numpy as np
 
 from .helpers import (
     call_attribute_methods,
-    build_all_plans_or_skip,
+    build_all_plans,
     create_float_graph,
     execute_zeros,
 )
@@ -41,19 +41,13 @@ def build_pointwise_add_graph(n=16, c=16, h=16, w=16):
 
 @pytest.mark.gpu
 class TestPointwiseAdd:
-    """Tests for pointwise add plan-building and stubbed execution (no real provider engine yet)."""
+    """Tests for pointwise add plan-building and stubbed execution."""
 
-    def test_builds_operation_graph(self):
-        """Pointwise add graph validates and lowers to a backend operation graph.
-
-        No hipDNN provider in the python wheel test environment supplies an
-        engine for a standalone pointwise op (miopen only exposes fused
-        pointwise support), so this stops at whatever engine is loaded;
-        skips instead of asserting if none is applicable.
-        """
+    def test_execution_succeeds(self):
+        """Pointwise add builds plans and executes against the stub engine without erroring."""
         graph, a, b, out = build_pointwise_add_graph()
 
-        handle = build_all_plans_or_skip(graph)
+        handle = build_all_plans(graph)
         execute_zeros(
             graph,
             [(a, np.float32), (b, np.float32), (out, np.float32)],

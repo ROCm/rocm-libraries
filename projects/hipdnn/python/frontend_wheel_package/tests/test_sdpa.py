@@ -12,7 +12,7 @@ import numpy as np
 from .helpers import (
     access_attribute_properties,
     call_attribute_methods,
-    build_all_plans_or_skip,
+    build_all_plans,
     create_float_graph,
     execute_zeros,
 )
@@ -26,7 +26,7 @@ def test_methods_follow_the_build_feature_gate():
 class TestSdpa:
     """Tests for SDPA operation-graph construction."""
 
-    def test_builds_operation_graph_when_enabled(self):
+    def test_execution_succeeds_when_enabled(self):
         if not hasattr(hipdnn.Graph, "sdpa"):
             pytest.skip("SDPA disabled")
 
@@ -40,7 +40,7 @@ class TestSdpa:
         o = outputs[0]
         o.set_output(True)
 
-        handle = build_all_plans_or_skip(graph)
+        handle = build_all_plans(graph)
         execute_zeros(
             graph,
             [(q, np.float32), (k, np.float32), (v, np.float32), (o, np.float32)],
@@ -52,7 +52,7 @@ class TestSdpa:
 class TestSdpaBackward:
     """Tests for SDPA backward operation-graph construction."""
 
-    def test_builds_operation_graph_when_enabled(self):
+    def test_execution_succeeds_when_enabled(self):
         if not hasattr(hipdnn.Graph, "sdpa_backward"):
             pytest.skip("SDPA disabled")
 
@@ -71,7 +71,7 @@ class TestSdpaBackward:
         for output in outputs:
             output.set_output(True)
 
-        handle = build_all_plans_or_skip(graph)
+        handle = build_all_plans(graph)
         execute_zeros(
             graph,
             [

@@ -11,7 +11,7 @@ import numpy as np
 
 from .helpers import (
     call_attribute_methods,
-    build_all_plans_or_skip,
+    build_all_plans,
     create_float_graph,
     execute_zeros,
 )
@@ -21,7 +21,7 @@ from .helpers import (
 class TestMoeGroupedMatmul:
     """Tests for MoE grouped matmul operation-graph construction."""
 
-    def test_builds_operation_graph(self):
+    def test_execution_succeeds(self):
         graph = create_float_graph()
         token = hipdnn.Tensor.create([1, 8, 16], hipdnn.DataType.FLOAT)
         weight = hipdnn.Tensor.create([2, 16, 32], hipdnn.DataType.FLOAT)
@@ -41,7 +41,7 @@ class TestMoeGroupedMatmul:
         output.set_output(True)
         output.set_data_type(hipdnn.DataType.FLOAT)
 
-        handle = build_all_plans_or_skip(graph)
+        handle = build_all_plans(graph)
         execute_zeros(
             graph,
             [

@@ -11,7 +11,7 @@ import numpy as np
 
 from .helpers import (
     call_attribute_methods,
-    build_all_plans_or_skip,
+    build_all_plans,
     create_float_graph,
     execute_zeros,
 )
@@ -27,7 +27,7 @@ def _scalar():
 class TestRMSNorm:
     """Tests for RMS normalization operation-graph construction."""
 
-    def test_builds_operation_graph(self):
+    def test_execution_succeeds(self):
         graph = create_float_graph()
         x = hipdnn.Tensor.create([2, 64, 32, 32], hipdnn.DataType.FLOAT)
         scale = hipdnn.Tensor.create([1, 64, 32, 32], hipdnn.DataType.FLOAT)
@@ -43,7 +43,7 @@ class TestRMSNorm:
         for output in outputs:
             output.set_output(True)
 
-        handle = build_all_plans_or_skip(graph)
+        handle = build_all_plans(graph)
         execute_zeros(
             graph,
             [(x, np.float32), (scale, np.float32)]
@@ -56,7 +56,7 @@ class TestRMSNorm:
 class TestRMSNormBackward:
     """Tests for RMS normalization backward operation-graph construction."""
 
-    def test_builds_operation_graph(self):
+    def test_execution_succeeds(self):
         graph = create_float_graph()
         dy = hipdnn.Tensor.create([1, 64, 32, 32], hipdnn.DataType.FLOAT)
         x = hipdnn.Tensor.create([1, 64, 32, 32], hipdnn.DataType.FLOAT)
@@ -72,7 +72,7 @@ class TestRMSNormBackward:
         dx.set_output(True)
         dscale.set_output(True)
 
-        handle = build_all_plans_or_skip(graph)
+        handle = build_all_plans(graph)
         execute_zeros(
             graph,
             [

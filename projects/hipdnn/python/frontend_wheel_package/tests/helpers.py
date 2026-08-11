@@ -4,7 +4,6 @@
 """Shared helper functions for hipDNN Python binding tests."""
 
 import numpy as np
-import pytest
 
 import hipdnn_frontend as hipdnn
 
@@ -45,29 +44,6 @@ def build_all_plans(graph, handle=None):
     assert graph.build_operation_graph(handle).is_good()
     assert graph.create_execution_plans().is_good()
     assert graph.check_support().is_good()
-    assert graph.build_plans().is_good()
-    return handle
-
-
-def build_all_plans_or_skip(graph, handle=None):
-    """Validate, build the operation graph, and build execution plans; skip if unsupported.
-
-    Same pipeline as build_all_plans(), but pytest.skip()s instead of
-    asserting when no loaded engine plugin is applicable to this graph (e.g.
-    HIPDNN_TEST_GOOD_PLUGIN_PATH is unset and no provider engine covers this
-    operation). Creates a handle if one is not supplied and returns it for
-    reuse.
-    """
-    if handle is None:
-        handle = hipdnn.create_handle()
-    assert graph.validate().is_good()
-    assert graph.build_operation_graph(handle).is_good()
-    plans = graph.create_execution_plans()
-    if plans.is_bad():
-        pytest.skip(f"No compatible engine: {plans.get_message()}")
-    support = graph.check_support()
-    if support.is_bad():
-        pytest.skip(f"No supported execution plan: {support.get_message()}")
     assert graph.build_plans().is_good()
     return handle
 

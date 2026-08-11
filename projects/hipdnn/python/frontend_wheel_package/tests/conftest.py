@@ -34,7 +34,7 @@ def _gpu_available():
 
 
 def _load_test_good_plugin():
-    """Load the test-only "good" engine plugin, if configured, in ABSOLUTE mode.
+    """Load the "good" engine plugin, in ABSOLUTE mode, for the whole session.
 
     The plugin (``test_good_plugin`` CMake target) is a software-only stub:
     it claims applicability to any graph unconditionally and its execute()
@@ -45,13 +45,18 @@ def _load_test_good_plugin():
     triggers a real intermittent GPU memory fault in MIOpen/ROCr (confirmed
     via AMD_LOG_LEVEL=3 tracing) -- not fixable from this repo.
 
-    Consequence: with this set, tests needing a real provider (conv,
-    batchnorm, ...) get zero output from the stub and fail their
-    correctness assertions. Only use this for the ops with no real
-    coverage yet (build_all_plans_or_skip() tests), never for a full run.
+    Consequence: this test suite verifies that the Python<->C++ binding
+    layer wires through and executes without erroring; it does not verify
+    real numeric correctness against a real provider engine (that is
+    covered by the C++ backend's CpuReferenceGraphExecutor-based tests, run
+    separately via ctest). test_good_plugin is built and installed
+    unconditionally by the superbuild, and CI always sets
+    HIPDNN_TEST_GOOD_PLUGIN_PATH to its installed path -- a missing/unset
+    path here means required test infrastructure is missing, so tests fail
+    hard rather than silently skipping.
 
     Must run before any handle is created (pytest_configure, not a
-    fixture). No-op if HIPDNN_TEST_GOOD_PLUGIN_PATH is unset/missing.
+    fixture).
     """
     plugin_path = os.environ.get("HIPDNN_TEST_GOOD_PLUGIN_PATH")
     if not plugin_path or not os.path.isfile(plugin_path):

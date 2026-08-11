@@ -11,7 +11,7 @@ import numpy as np
 
 from .helpers import (
     call_attribute_methods,
-    build_all_plans_or_skip,
+    build_all_plans,
     create_float_graph,
     execute_zeros,
 )
@@ -40,18 +40,13 @@ def build_matmul_graph(m=4, k=3, n=5):
 
 @pytest.mark.gpu
 class TestMatmul:
-    """Tests for matmul plan-building and stubbed execution (no real provider engine yet)."""
+    """Tests for matmul plan-building and stubbed execution."""
 
-    def test_builds_operation_graph(self):
-        """Matmul graph validates and lowers to a backend operation graph.
-
-        No hipDNN provider in the python wheel test environment supplies an
-        engine for matmul (requires hipblaslt), so this stops at whatever
-        engine is loaded; skips instead of asserting if none is applicable.
-        """
+    def test_execution_succeeds(self):
+        """Matmul builds plans and executes against the stub engine without erroring."""
         graph, a, b, c = build_matmul_graph()
 
-        handle = build_all_plans_or_skip(graph)
+        handle = build_all_plans(graph)
         execute_zeros(
             graph,
             [(a, np.float32), (b, np.float32), (c, np.float32)],

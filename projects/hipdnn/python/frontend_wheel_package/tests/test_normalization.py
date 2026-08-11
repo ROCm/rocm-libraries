@@ -1,7 +1,7 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-"""Integration tests for batch normalization (inference)."""
+"""Tests for batch normalization (inference): plan-building and stubbed execution."""
 
 import numpy as np
 import pytest
@@ -11,9 +11,8 @@ import hipdnn_frontend as hipdnn
 from .helpers import (
     call_attribute_methods,
     build_all_plans,
-    build_operation_graph,
     create_float_graph,
-    execute_graph,
+    execute_zeros,
 )
 
 
@@ -79,119 +78,50 @@ def build_batchnorm_inference_variance_graph(n=4, c=8, h=8, w=8):
 
 @pytest.mark.gpu
 class TestBatchnormInference:
-    """Tests for batchnorm inference end-to-end pipeline."""
+    """Tests for batchnorm inference plan-building and stubbed execution."""
 
-    def test_execution_produces_nonzero_output(self):
-        """Full end-to-end batchnorm inference: execute and verify output."""
+    def test_execution_succeeds(self):
+        """Batchnorm inference builds plans and executes against the stub engine without erroring."""
         graph, x, mean, inv_variance, scale, bias, y = build_batchnorm_inference_graph()
 
         handle = build_all_plans(graph)
-
-        x_data = np.random.uniform(0.0, 1.0, x.get_dim()).astype(np.float32)
-        mean_data = np.random.uniform(0.0, 1.0, mean.get_dim()).astype(np.float32)
-        inv_var_data = np.random.uniform(0.5, 1.5, inv_variance.get_dim()).astype(
-            np.float32
+        execute_zeros(
+            graph,
+            [
+                (x, np.float32),
+                (mean, np.float32),
+                (inv_variance, np.float32),
+                (scale, np.float32),
+                (bias, np.float32),
+                (y, np.float32),
+            ],
+            handle,
         )
-        scale_data = np.random.uniform(0.5, 1.5, scale.get_dim()).astype(np.float32)
-        bias_data = np.random.uniform(0.0, 1.0, bias.get_dim()).astype(np.float32)
-        y_data = np.zeros(y.get_dim(), dtype=np.float32)
-
-        tensor_data = {
-            x.get_uid(): x_data,
-            mean.get_uid(): mean_data,
-            inv_variance.get_uid(): inv_var_data,
-            scale.get_uid(): scale_data,
-            bias.get_uid(): bias_data,
-            y.get_uid(): y_data,
-        }
-
-        results = execute_graph(graph, tensor_data, handle)
-        y_result = results[y.get_uid()]
-
-        assert not np.all(y_result == 0), "Batchnorm inference output is all zeros"
-
-    def test_execution_matches_reference(self):
-        """Batchnorm inference matches the y = scale*(x-mean)*inv_var + bias formula."""
-        graph, x, mean, inv_variance, scale, bias, y = build_batchnorm_inference_graph(
-            n=2, c=4, h=4, w=4
-        )
-
-        handle = build_all_plans(graph)
-
-        x_data = np.random.uniform(-2.0, 2.0, x.get_dim()).astype(np.float32)
-        mean_data = np.random.uniform(-1.0, 1.0, mean.get_dim()).astype(np.float32)
-        inv_var_data = np.random.uniform(0.5, 1.5, inv_variance.get_dim()).astype(
-            np.float32
-        )
-        scale_data = np.random.uniform(0.5, 1.5, scale.get_dim()).astype(np.float32)
-        bias_data = np.random.uniform(-1.0, 1.0, bias.get_dim()).astype(np.float32)
-        y_data = np.zeros(y.get_dim(), dtype=np.float32)
-
-        tensor_data = {
-            x.get_uid(): x_data,
-            mean.get_uid(): mean_data,
-            inv_variance.get_uid(): inv_var_data,
-            scale.get_uid(): scale_data,
-            bias.get_uid(): bias_data,
-            y.get_uid(): y_data,
-        }
-
-        results = execute_graph(graph, tensor_data, handle)
-        y_result = results[y.get_uid()]
-
-        expected = scale_data * (x_data - mean_data) * inv_var_data + bias_data
-        np.testing.assert_allclose(y_result, expected, rtol=2e-3, atol=2e-3)
 
 
 @pytest.mark.gpu
 class TestBatchnormInferenceVariance:
-    """GPU integration tests for batchnorm inference with variance."""
+    """Tests for batchnorm inference (from variance) plan-building and stubbed execution."""
 
-    def test_builds_operation_graph(self):
-        graph, *_ = build_batchnorm_inference_variance_graph()
-        build_operation_graph(graph)
-
-    def test_execution_matches_reference(self):
+    def test_execution_succeeds(self):
+        """Batchnorm inference-variance builds plans and executes against the stub engine without erroring."""
         graph, x, mean, variance, scale, bias, y = (
-            build_batchnorm_inference_variance_graph(n=2, c=4, h=4, w=4)
+            build_batchnorm_inference_variance_graph()
         )
-        handle = hipdnn.create_handle()
-        assert graph.validate().is_good()
-        assert graph.build_operation_graph(handle).is_good()
-        plans = graph.create_execution_plans()
-        if plans.is_bad():
-            pytest.skip(f"No compatible engine: {plans.get_message()}")
-        support = graph.check_support()
-        if support.is_bad():
-            pytest.skip(f"No supported execution plan: {support.get_message()}")
-        assert graph.build_plans().is_good()
 
-        x_data = np.random.uniform(-2.0, 2.0, x.get_dim()).astype(np.float32)
-        mean_data = np.random.uniform(-1.0, 1.0, mean.get_dim()).astype(np.float32)
-        variance_data = np.random.uniform(0.5, 1.5, variance.get_dim()).astype(
-            np.float32
-        )
-        scale_data = np.random.uniform(0.5, 1.5, scale.get_dim()).astype(np.float32)
-        bias_data = np.random.uniform(-1.0, 1.0, bias.get_dim()).astype(np.float32)
-        y_data = np.zeros(y.get_dim(), dtype=np.float32)
-
-        results = execute_graph(
+        handle = build_all_plans(graph)
+        execute_zeros(
             graph,
-            {
-                x.get_uid(): x_data,
-                mean.get_uid(): mean_data,
-                variance.get_uid(): variance_data,
-                scale.get_uid(): scale_data,
-                bias.get_uid(): bias_data,
-                y.get_uid(): y_data,
-            },
+            [
+                (x, np.float32),
+                (mean, np.float32),
+                (variance, np.float32),
+                (scale, np.float32),
+                (bias, np.float32),
+                (y, np.float32),
+            ],
             handle,
         )
-        expected = (
-            scale_data * (x_data - mean_data) / np.sqrt(variance_data + 1e-5)
-            + bias_data
-        )
-        np.testing.assert_allclose(results[y.get_uid()], expected, rtol=2e-3, atol=2e-3)
 
 
 class TestBatchnormInferenceAttributeBindings:

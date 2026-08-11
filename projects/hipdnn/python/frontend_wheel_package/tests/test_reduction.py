@@ -11,7 +11,7 @@ import numpy as np
 
 from .helpers import (
     call_attribute_methods,
-    build_all_plans_or_skip,
+    build_all_plans,
     create_float_graph,
     execute_zeros,
 )
@@ -30,7 +30,7 @@ class TestReduction:
         )
         output.set_dim([1, 8]).set_stride([8, 1]).set_output(True)
 
-        handle = build_all_plans_or_skip(graph)
+        handle = build_all_plans(graph)
         execute_zeros(
             graph,
             [(x, np.float32), (output, np.float32)],
@@ -51,7 +51,7 @@ class TestReduction:
             is output
         )
 
-        handle = build_all_plans_or_skip(graph)
+        handle = build_all_plans(graph)
         execute_zeros(
             graph,
             [(x, np.float32), (output, np.float32)],

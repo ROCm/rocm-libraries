@@ -11,7 +11,7 @@ import numpy as np
 
 from .helpers import (
     call_attribute_methods,
-    build_all_plans_or_skip,
+    build_all_plans,
     create_float_graph,
     execute_zeros,
 )
@@ -21,7 +21,7 @@ from .helpers import (
 class TestCustomOp:
     """Tests for custom operation-graph construction."""
 
-    def test_builds_operation_graph(self):
+    def test_execution_succeeds(self):
         graph = create_float_graph()
         a = hipdnn.Tensor.create([4, 8], hipdnn.DataType.FLOAT)
         b = hipdnn.Tensor.create([4, 8], hipdnn.DataType.FLOAT)
@@ -34,7 +34,7 @@ class TestCustomOp:
             output.set_dim([4, 8]).set_stride([8, 1]).set_output(True)
             output.set_data_type(hipdnn.DataType.FLOAT)
 
-        handle = build_all_plans_or_skip(graph)
+        handle = build_all_plans(graph)
         execute_zeros(
             graph,
             [(a, np.float32), (b, np.float32)]

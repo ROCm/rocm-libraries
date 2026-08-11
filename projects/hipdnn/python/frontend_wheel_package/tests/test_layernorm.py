@@ -11,7 +11,7 @@ import numpy as np
 
 from .helpers import (
     call_attribute_methods,
-    build_all_plans_or_skip,
+    build_all_plans,
     create_float_graph,
     execute_zeros,
 )
@@ -27,7 +27,7 @@ def _scalar():
 class TestLayernorm:
     """Tests for layer normalization operation-graph construction."""
 
-    def test_builds_operation_graph(self):
+    def test_execution_succeeds(self):
         graph = create_float_graph()
         x = hipdnn.Tensor.create([2, 6, 4], hipdnn.DataType.FLOAT)
         scale = hipdnn.Tensor.create([6, 4], hipdnn.DataType.FLOAT)
@@ -46,7 +46,7 @@ class TestLayernorm:
         y = outputs[0]
         y.set_output(True)
 
-        handle = build_all_plans_or_skip(graph)
+        handle = build_all_plans(graph)
         execute_zeros(
             graph,
             [(x, np.float32), (scale, np.float32), (bias, np.float32), (y, np.float32)],
@@ -58,7 +58,7 @@ class TestLayernorm:
 class TestLayernormBackward:
     """Tests for layer normalization backward operation-graph construction."""
 
-    def test_builds_operation_graph(self):
+    def test_execution_succeeds(self):
         graph = create_float_graph()
         dy = hipdnn.Tensor.create([16, 64, 32, 32], hipdnn.DataType.FLOAT)
         x = hipdnn.Tensor.create([16, 64, 32, 32], hipdnn.DataType.FLOAT)
@@ -79,7 +79,7 @@ class TestLayernormBackward:
         for output in outputs:
             output.set_output(True)
 
-        handle = build_all_plans_or_skip(graph)
+        handle = build_all_plans(graph)
         execute_zeros(
             graph,
             [(dy, np.float32), (x, np.float32), (scale, np.float32)]
