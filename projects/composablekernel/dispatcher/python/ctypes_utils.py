@@ -46,7 +46,7 @@ _detected_arch: Optional[str] = None
 
 def detect_gpu_arch(fallback: str = "gfx942") -> str:
     """
-    Auto-detect the GPU architecture, preferring amd-smi (JIRA ROCM-28734).
+    Auto-detect the GPU architecture, preferring amd-smi.
 
     Tries the shared amd-smi-first ``smi_utils`` wrapper (via dispatcher_common),
     then rocminfo, then ``fallback``. Caches the result after the first call.

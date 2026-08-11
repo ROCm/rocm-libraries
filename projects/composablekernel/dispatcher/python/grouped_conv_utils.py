@@ -1937,7 +1937,7 @@ def setup_multiple_grouped_conv_dispatchers(
 
 
 def detect_gpu_arch() -> str:
-    """Detect GPU architecture, preferring amd-smi (JIRA ROCM-28734).
+    """Detect GPU architecture, preferring amd-smi.
 
     Tries the shared amd-smi-first ``smi_utils`` wrapper (via dispatcher_common),
     then rocminfo, then the ``gfx942`` default.
