@@ -1,15 +1,25 @@
 from ..Component import GL2Prefetch
 from ..Common import INDEX_CHARS
-from typing import Mapping
-from rocisa.code import Module
+from typing import Mapping, Optional
+from rocisa.code import Module, Label
 from rocisa.instruction import SMulI32, SAddU64, VMovB32, VAddU32, VAddCOU32, \
     VAddCCOU32, VAddNCU64, VLShiftRightB32, VMulLOU32, VMulHIU32, GlobalPrefetchB8, \
-    VCmpGtU32, VCndMaskB32, SSubI32, SMovB32, SAddU32, SAddCU32
+    VCmpGtU32, VCndMaskB32, SSubI32, SMovB32, SAddU32, SAddCU32, SAndB32, SBranch, \
+    SCBranchSCC1, SCMovB32, SLShiftRightB32
 from rocisa.container import sgpr, vgpr, RegisterContainer, VCC, GLOBALModifiers, ContinuousRegister
 from rocisa.functions import vectorMultiply64Bpe, scalarMultiplyBpe, vectorStaticDivideAndRemainder, \
     scalarStaticRemainder
 from rocisa.enum import TemporalHint, CacheScope
 from math import log2, ceil
+
+# Bit 15 of the packed GSU kernel argument selects how the summation loop is cut
+# up between the GSU groups, and the two layouts need different start offsets and
+# strides:
+#   GSUC == 0: the groups interleave every DepthU, so group g starts at iteration
+#              g and then steps GSU iterations at a time.
+#   GSUC == 1: each group owns a contiguous run, so group g starts after every
+#              lower group's run and then steps one iteration at a time.
+GSUC_BIT = 0x8000
 
 class GL2PrefetchLoad(GL2Prefetch):
     asmCaps = {"HasGlobalPrefetch": True}
@@ -55,7 +65,81 @@ class GL2PrefetchLoad(GL2Prefetch):
         tp["gl2nc"] = tp["gl2ncp"] * tp["gl2ncc"]
         tp["gl2nl"] = max(1, ceil(tp["gl2nc"] / numCooperativeThreads))
 
+    def isGSUEnabled(self, kernel: Mapping) -> bool:
+        """True when the kernel emits the GSUOn paths, so GSU/GSUSumIdx are live."""
+        return kernel["GlobalSplitU"] > 0 or kernel["GlobalSplitU"] == -1
+
+    def calculateGSUIterOffset(self, writer: "KernelWriterAssembly", kernel: Mapping, \
+                               dstSgprIdx: int, tmpSgprRes: ContinuousRegister) -> Module:
+        """Unroll iteration at which this workgroup's GSU chunk starts.
+
+        One unroll iteration is one DepthU step for every tensor, so the result is
+        tensor independent and callers scale it by each tensor's own per-iteration
+        byte increment. That keeps the chunk-layout math in one place instead of
+        repeating it per tensor and per TLU/MX/metadata layout.
+
+        Clobbers GSUSumIdx+1, which the GSU component also uses as scratch;
+        computeLoadSrd and calculateLoopNumIterGsu both recompute it later.
+        """
+        mod = Module("gl2 prefetch GSU start iteration")
+        depthU: int = kernel["DepthU"]
+        gsucLabel = Label(writer.labels.getNameInc("GL2PrefetchGSUC"), "")
+        gsucLabelEnd = Label(writer.labels.getNameInc("GL2PrefetchGSUC_End"), "")
+
+        mod.addComment("gl2 prefetch GSU start iteration")
+        mod.add(SAndB32(dst=sgpr(dstSgprIdx), src0=sgpr("GSU"), src1=hex(GSUC_BIT), \
+            comment="SCC = (GSUC == 1) ?"))
+        mod.add(SCBranchSCC1(labelName=gsucLabel.getLabelName(), comment="branch if GSUC == 1"))
+        mod.add(SMovB32(dst=sgpr(dstSgprIdx), src=sgpr("GSUSumIdx"), \
+            comment="interleaved chunks: startIter = GSUSumIdx"))
+        mod.add(SBranch(gsucLabelEnd.getLabelName()))
+        mod.add(gsucLabel)
+        mod.add(SLShiftRightB32(dst=sgpr(dstSgprIdx), shiftHex=int(log2(depthU)), src=sgpr("SizesSum"), \
+            comment="numIter = SizesSum / DepthU(%u)" % depthU))
+        mod.add(writer.calculateLoopNumIterOffsetGsu(kernel, dstSgprIdx, tmpSgprRes))
+        mod.add(SMovB32(dst=sgpr(dstSgprIdx), src=sgpr(tmpSgprRes.idx), \
+            comment="contiguous chunks: startIter = accumulated iters of lower groups"))
+        mod.add(gsucLabelEnd)
+        return mod
+
+    def applyGSUChunk(self, writer: "KernelWriterAssembly", kernel: Mapping, tp: Mapping, \
+                      gsuIterSgpr: int, baseSgprIdx: int, tmpSgprIdx: int, tmpVgprIdx: int) -> Module:
+        """Move the prefetch base onto this workgroup's GSU chunk and widen the step.
+
+        Both are multiples of the one-DepthU increment setIncrement produced, so
+        the layout only has to be decoded once (calculateGSUIterOffset). The start
+        offset must consume the unscaled increment, so the scaling happens after
+        it and before the PGR pre-skip, which already steps by whole chunks.
+        """
+        mod = Module("gl2 prefetch GSU chunk offset")
+        tc: str = tp["tensorChar"]
+        incName: str = f"GL2PrefetchInc{tc}"
+
+        mod.addComment(f"gl2 prefetch GSU chunk offset of {tc}")
+        mod.addModuleAsFlatItems(writer.s_mul_u64_u32(
+            sgpr(tmpSgprIdx), sgpr(tmpSgprIdx + 1),
+            sgpr(gsuIterSgpr), sgpr(incName),
+            tmpVgprIdx, comment="gsuOffset = startIter * inc"))
+        mod.add(SAddU64(sgpr(baseSgprIdx, 2), sgpr(baseSgprIdx, 2), sgpr(tmpSgprIdx, 2), \
+            comment="skip to this WG's GSU chunk"))
+        # Widen the step to the chunk stride. Kept 32-bit to mirror GlobalReadIncs
+        # on the real load path (GSU.graIncrements), which the prefetch has to
+        # track: a stride that overflows 32 bits is already broken there.
+        mod.add(SAndB32(dst=sgpr(tmpSgprIdx), src0=sgpr("GSU"), src1=writer.gsuMaskHex(kernel), \
+            comment="Restore GSU"))
+        mod.add(SAndB32(dst=sgpr(tmpSgprIdx + 1), src0=sgpr("GSU"), src1=hex(GSUC_BIT), \
+            comment="SCC = (GSUC == 1) ?"))
+        mod.add(SCMovB32(dst=sgpr(tmpSgprIdx), src=1, comment="stride stays DepthU if GSUC == 1"))
+        mod.add(SMulI32(sgpr(incName), sgpr(incName), sgpr(tmpSgprIdx), \
+            comment="addr increment *= GSU chunk stride"))
+        return mod
+
     def setIncrement(self, writer: "KernelWriterAssembly", kernel: Mapping, tp: Mapping) -> Module:
+        """Bytes the prefetch address advances for one DepthU step along K.
+
+        This is the *unscaled* step. Under GSU, applyGSUChunk widens it to the
+        workgroup's chunk stride once the start offset has consumed it.
+        """
         mod = Module()
         tc: str = tp["tensorChar"]
         tIdx: int = tp['idx']
@@ -73,7 +157,13 @@ class GL2PrefetchLoad(GL2Prefetch):
             mod.add(SMovB32(dst=sgpr(f"GL2PrefetchInc{tc}"), src=round(du * bpe), comment="addr increment"))
         return mod
 
-    def calculateStartAddr(self, writer: "KernelWriterAssembly", kernel: Mapping, tp: Mapping) -> Module:
+    def calculateStartAddr(self, writer: "KernelWriterAssembly", kernel: Mapping, tp: Mapping, \
+                           gsuIterSgpr: Optional[int] = None) -> Module:
+        """Compute this workgroup's prefetch start addresses.
+
+        gsuIterSgpr holds the shared GSU chunk start iteration from
+        calculateGSUIterOffset, or None when the kernel has no GSU paths.
+        """
         mod = Module()
         globalPrefetchSize: int = writer.states.regCaps["GlobalPrefetchSize"]
         tc: str = tp["tensorChar"]
@@ -223,6 +313,13 @@ class GL2PrefetchLoad(GL2Prefetch):
                         sgpr("WorkGroup2"), sgpr(tmpSgprIdx2),
                         tmpVgprIdx, comment="batch offset * wg2"))
                     mod.add(SAddU64(sgpr(tmpSgprIdx0, 2), sgpr(tmpSgprIdx0, 2), sgpr(tmpSgprIdx2, 2)))
+            # GSU chunk offset. Must precede the PGR pre-skip: it consumes the
+            # unscaled increment and leaves behind the chunk-strided one that the
+            # pre-skip and every in-loop increment then use.
+            if gsuIterSgpr is not None:
+                mod.add(self.applyGSUChunk(writer, kernel, tp, gsuIterSgpr, \
+                    tmpSgprIdx0, tmpSgprIdx2, tmpVgprIdx))
+
             # skip PGR loads (uses GSU-adjusted increment)
             if kernel["PrefetchGlobalRead"] > 0:
                 if kernel["PrefetchGlobalRead"] > 1:
