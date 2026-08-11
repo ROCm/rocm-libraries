@@ -689,8 +689,9 @@ add_library( roc::rocblas ALIAS rocblas )
 
 rocblas_library_settings( rocblas )
 
-target_link_libraries( rocblas PRIVATE "-Xlinker --exclude-libs=ALL" ) # HIDE symbols
-
+if(NOT WIN32)
+  target_link_libraries( rocblas PRIVATE "-Xlinker --exclude-libs=ALL" ) # HIDE symbols
+endif()
 
 if( BUILD_WITH_TENSILE )
 
