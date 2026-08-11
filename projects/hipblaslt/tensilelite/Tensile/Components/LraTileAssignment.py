@@ -880,7 +880,7 @@ class LraTileAssignmentMFMA(LraTileAssignment):
         # stride. A narrower VW straddles components; then LocalRead applies the jump instead, so
         # keep the baseline wave stride. A/B only: MX scales keep their own stride (relocated, not split).
         segILWaveSpansComp = False
-        # Active tensor only: the shared/baseline tensor keeps its baseline wave stride.
+        # Active tensor only: the baseline tensor keeps its normal wave stride.
         # [2,2] interleaves both; bcontig ([4,1]) sets bBaseline on B; the [1,4] mirror sets aBaseline on A.
         _segOff = kernel["LDSSegInterleaveOffsets"] if kernel.get("LDSSegmentInterleave") == 1 else {}
         segILActive = kernel.get("LDSSegmentInterleave") == 1 and (
@@ -889,7 +889,7 @@ class LraTileAssignmentMFMA(LraTileAssignment):
         if segILActive:
             _compCols  = kernel["MacroTile%u" % tile01] // (kernel["NumWaves"] // 2)
             segILWaveSpansComp = min(kernel["MatrixInstM"], kernel["MatrixInstN"]) * vectorWidth >= _compCols
-            # portSplitA (fine A): the A0->A1 segment jump is carried on the wave stride, so force it on.
+            # portSplitA (VWA==WaveTileA/2): the A0->A1 segment jump is carried on the wave stride, so force it on.
             if tc == "A" and _segOff.get("portSplitA", False):
                 segILWaveSpansComp = True
 

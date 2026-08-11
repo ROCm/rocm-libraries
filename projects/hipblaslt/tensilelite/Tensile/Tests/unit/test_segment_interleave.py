@@ -47,7 +47,7 @@ def test_vw8_applies_with_handedit_values():
     assert r["offsets"] == {"ldsBaseB": 33024, "writeStrideBytes": 66048,
                             "footprintPacked": True}
 
-def test_vw4_fine_uses_port_split():
+def test_vw4_halfvw_uses_port_split():
     # VWA=4 == WaveTileA/2 + TDMSplit -> port-split; same tight footprint as coarse.
     r = evaluate(_vw8_state(VectorWidthA=4, TDMSplit=1))
     assert r["applicable"] is True
@@ -65,8 +65,8 @@ def test_non_gfx1250_skips():
         r = evaluate(_vw8_state(ISA=isa))
         assert r["applicable"] is False and "gfx1250" in r["reason"]
 
-def test_vwb_fine_aligned_applies():
-    # Fine VWB is OK when each VW-group (vIdx) stays within one component, i.e. the
+def test_vwb_halfvw_aligned_applies():
+    # VWB=WaveTileB/2 is OK when each VW-group (vIdx) stays within one component, i.e. the
     # component column span is a whole multiple of one vIdx's column advance. For
     # MT256x256 (compCols=128), VWB in {1,2,4} all divide cleanly -> apply. LocalRead
     # (calcGfx1250LdsOffset) adds the per-vIdx component jump. GPU-validated 8/4/2/1.
@@ -74,7 +74,7 @@ def test_vwb_fine_aligned_applies():
         r = evaluate(_vw8_state(VectorWidthB=vwb))
         assert r["applicable"] is True, f"VWB={vwb} should apply"
 
-def test_vwb_fine_unaligned_uses_bcontig():
+def test_vwb_halfvw_unaligned_uses_bcontig():
     # When a single vIdx would straddle a component (component span not a multiple of the vIdx
     # column advance), B cannot be split -> fall back to the bcontig layout [A0][B0][B1][A1]:
     # B stays whole (baseline reads, WaveTileB unrestricted), only A moves to a separate segment. MT*x224
@@ -110,8 +110,8 @@ def test_bcontig_small_mt_needs_pgr2():
                             PrefetchGlobalRead=1, LDSSegmentInterleave=1))
     assert r["applicable"] is False and "PGR" in r["reason"]
 
-def test_vwa_finer_than_half_skips():
-    # VWA=2 (numVec=4) is finer than WaveTileA/2 -> TDMSplit's 2-way split can't place it -> reject.
+def test_vwa_smaller_than_half_skips():
+    # VWA=2 (numVec=4) is smaller than WaveTileA/2 -> TDMSplit's 2-way split can't place it -> reject.
     r = evaluate(_vw8_state(VectorWidthA=2, TDMSplit=1))
     assert r["applicable"] is False and "WaveTileA/2" in r["reason"]
 
@@ -145,8 +145,8 @@ def test_aligned_applies_small_mt():
     assert _aligned_tiles_disjoint(r, 16512, 16512)
     assert "ALIGNED" in r["segmentMap"]
 
-def test_aligned_fine_vwb_applies():
-    # Fine-VWB is supported on the aligned branch too (per-vIdx component jump + enough
+def test_aligned_halfvw_vwb_applies():
+    # VWB=WaveTileB/2 is supported on the aligned branch too (per-vIdx component jump + enough
     # LocalReadAddr +64K registers, see KernelWriter numVgprLocalReadAddr). DepthU=64 VWB2.
     r = evaluate(_vw8_state(DepthU=64, PrefetchGlobalRead=2,
                             LDSSegmentInterleave=1, VectorWidthB=2))
@@ -247,23 +247,35 @@ def test_miwg_1x4_large_tile_interleaves_not_baseline():
     assert r["applicable"] is True
     assert r["offsets"]["aBaseline"] is True
 
-def test_asym_fine_tdmsplit_comp_axis():
-    # TDMSplit + asymmetric MIWaveGroup ([4,1]/[1,4]) with a FINE active tensor (VW==WaveTile/2)
-    # uses the component axis (wave-pair): each load-wave's L1/L2 halves land in different segments,
-    # HALVING conflict with the same load count. Marked tdmSplitCompAxis (not portSplitA/B).
+def test_asym_componentsplit_tdmsplit():
+    # TDMSplit + asymmetric MIWaveGroup ([4,1]/[1,4]) with a VW==WaveTile/2 active tensor
+    # component axis: the two components go to different segments, each wave's two load-halves stay
+    # together -- halves conflict at the same load count. Marked componentSplit (not portSplitA/B).
     r = evaluate(_vw8_state(MIWaveGroup=[4, 1], TDMSplit=1, VectorWidthA=4))
     assert r["applicable"] is True and r["reason"] == "compaxis-asym"
-    assert r["offsets"].get("tdmSplitCompAxis") is True
+    assert r["offsets"].get("componentSplit") is True
     assert r["offsets"].get("activeTC") == "A" and r["offsets"].get("bBaseline") is True
     assert "portSplitA" not in r["offsets"]
     r = evaluate(_vw8_state(MIWaveGroup=[1, 4], TDMSplit=1, VectorWidthB=4))
     assert r["applicable"] is True and r["reason"] == "compaxis-asym"
-    assert r["offsets"].get("tdmSplitCompAxis") is True
+    assert r["offsets"].get("componentSplit") is True
     assert r["offsets"].get("activeTC") == "B" and r["offsets"].get("aBaseline") is True
     assert "portSplitB" not in r["offsets"]
 
+def test_asym_componentsplit_aligned_labels_compaxis():
+    # componentSplit that falls into the aligned branch (small DepthU -> both components fit one
+    # segment) must report compaxis, not portaxis, in reason/segmentMap and in the PGR reject.
+    r = evaluate(_vw8_state(MIWaveGroup=[4, 1], TDMSplit=1, VectorWidthA=4, DepthU=64,
+                            PrefetchGlobalRead=2, LDSSegmentInterleave=1))
+    assert r["applicable"] is True and r["aligned"] is True
+    assert r["reason"] == "compaxis-asym-aligned" and "COMPAXIS-ALIGNED" in r["segmentMap"]
+    assert r["offsets"].get("componentSplit") is True
+    r = evaluate(_vw8_state(MIWaveGroup=[4, 1], TDMSplit=1, VectorWidthA=4, DepthU=64,
+                            PrefetchGlobalRead=1, LDSSegmentInterleave=1))
+    assert r["applicable"] is False and r["reason"].startswith("compaxis-asym")
+
 def test_asym_4x1_coarse_tdmsplit_port_axis():
-    # Coarse A ([4,1], default VWA=8 == WaveTileA=8) + TDMSplit -> port-axis layout:
+    # Coarse A ([4,1], default VWA=8 == WaveTileA=8) + TDMSplit -> portSplit layout:
     # [active.port0][shared][active.port1], shared (B) stays whole/baseline.
     st = _vw8_state(MIWaveGroup=[4, 1], TDMSplit=1)
     r = evaluate(st)
@@ -276,7 +288,7 @@ def test_asym_4x1_coarse_tdmsplit_port_axis():
     assert r["blockSpan"] == 0
 
 def test_asym_1x4_coarse_tdmsplit_port_axis():
-    # Mirror: coarse B ([1,4], default VWB=8 == WaveTileB=8) + TDMSplit -> port-axis, A shared.
+    # Mirror: coarse B ([1,4], default VWB=8 == WaveTileB=8) + TDMSplit -> portSplit, A shared.
     st = _vw8_state(MIWaveGroup=[1, 4], TDMSplit=1)
     r = evaluate(st)
     assert r["applicable"] and r["offsets"]["portSplitB"] is True
@@ -287,7 +299,7 @@ def test_asym_1x4_coarse_tdmsplit_port_axis():
 
 def test_asym_tdmsplit_tight_reason():
     # Coarse [4,1]+TDMSplit at DepthU=128: the shared B block already pushes port1 into the next
-    # segment (base+strideAct crosses base+fActData's segment) -> tight port-axis, no extra LDS.
+    # segment (base+strideAct crosses base+fActData's segment) -> tight portSplit, no extra LDS.
     r = evaluate(_vw8_state(MIWaveGroup=[4, 1], TDMSplit=1))
     assert r["applicable"] is True and r["reason"] == "portaxis-asym"
     assert r["aligned"] is False and r["blockSpan"] == 0
@@ -295,7 +307,7 @@ def test_asym_tdmsplit_tight_reason():
 
 def test_asym_tdmsplit_nontight_uses_aligned():
     # Coarse [4,1]+TDMSplit, DepthU=64: fAct+2*fSh stays inside comp0's segment, so port1 does NOT
-    # cross on its own -> aligned fallback pads the port-axis stride to the next segment (grows LDS).
+    # cross on its own -> aligned fallback pads the portSplit stride to the next segment (grows LDS).
     r = evaluate(_vw8_state(MIWaveGroup=[4, 1], TDMSplit=1, DepthU=64,
                             PrefetchGlobalRead=2, LDSSegmentInterleave=1))
     assert r["applicable"] is True and r["reason"] == "portaxis-asym-aligned"
@@ -307,12 +319,12 @@ def test_asym_tdmsplit_nontight_uses_aligned():
     assert r["blockSpan"] == SEG + 33024               # base + pre + fAct
 
 def test_asym_tdmsplit_nontight_auto_skips():
-    # Auto (-1) refuses the LDS-growing aligned fallback for the port-axis asym branch.
+    # Auto (-1) refuses the LDS-growing aligned fallback for the portSplit asym branch.
     r = evaluate(_vw8_state(MIWaveGroup=[4, 1], TDMSplit=1, DepthU=64, PrefetchGlobalRead=2))
     assert r["applicable"] is False and "auto" in r["reason"]
 
 def test_asym_tdmsplit_nontight_needs_pgr2():
-    # The port-axis aligned fallback double-buffers -> requires PGR2.
+    # The portSplit aligned fallback double-buffers -> requires PGR2.
     r = evaluate(_vw8_state(MIWaveGroup=[4, 1], TDMSplit=1, DepthU=64,
                             PrefetchGlobalRead=1, LDSSegmentInterleave=1))
     assert r["applicable"] is False and "PGR" in r["reason"]
@@ -326,9 +338,9 @@ def test_asym_tdmsplit_nontight_mirror_1x4_aligned():
     assert o.get("portSplitB") is True and o.get("aBaseline") is True
     assert o["ldsBaseA"] == 33024 and o["writeStrideBytes"] == SEG
 
-def test_asym_finer_than_half_tdmsplit_rejected():
-    # VWA=2 with WaveTileA=8 -> numVec=4 (finer than WaveTile/2): a port/comp would need >2 pieces,
-    # but TDMSplit gives only a 2-way split. Only VW==WaveTile/2 (comp-axis) is supported.
+def test_asym_smaller_than_half_tdmsplit_rejected():
+    # VWA=2 with WaveTileA=8 -> numVec=4 (smaller than WaveTile/2): a port/comp would need >2 pieces,
+    # but TDMSplit gives only a 2-way split. Only VW==WaveTile/2 (componentSplit) is supported.
     st = _vw8_state(MIWaveGroup=[4, 1], TDMSplit=1, VectorWidthA=2)
     r = evaluate(st)
     assert r["applicable"] is False and "TDMSplit" in r["reason"]

@@ -3,16 +3,42 @@
 
 """gfx1250 LDS segment-conflict interleave oracle.
 
-Pure function of `state` that decides whether a wave-separated TDM kernel should put
-operand A's two halves in different LDS segments (so A's two MFMA read ports stop
-conflicting), and returns the byte offsets the emit sites consume.
+Pure function of `state`: decides how to place an operand's components across LDS segments, and
+returns the byte offsets the code generator uses to lay the data into LDS and read it back.
 
-Only A is separated this way (B is not). Baseline packs each operand's halves adjacently
-([A0][A1][B0][B1]); this picks one of two layouts by whether B can be split cleanly:
-  split   [A0][B0][A1][B1]: B's halves move too, but its ports can still hit one B segment.
-  bcontig [A0][B0][B1][A1]: for odd WaveTileB (a split B read would cross a component),
-          B is kept whole with baseline addressing and only A moves.
-Each layout is tight (no extra LDS) or aligned (padded to a segment boundary; more LDS, PGR2).
+Background: LDS is partitioned into 5 x 64KiB segments, read through two ports (one per SIMD pair).
+Two ports reading the same segment in a cycle is a segment conflict.
+Each operand is loaded into LDS in two parts called components; putting the two components in
+different segments keeps the ports apart and avoids the conflict. Baseline instead
+packs each operand's two components adjacently ([A0][A1][B0][B1]); this oracle repacks them, and how
+depends on MIWaveGroup.
+
+[2,2] (both operands span two waves): separate A across the two segments so its two read ports read
+different segments; B is repacked to match.
+  Without TDMSplit (VWA == WaveTileA only): A's two components go to different segments
+      ([A0][B0][A1][B1]).
+  With TDMSplit, the vector width picks the placement:
+    VWA == WaveTileA:   the same layout, A's two components in different segments.
+    VWA == WaveTileA/2: portSplitA; each component is two halves, split by half instead (half 0 of
+                        both components in one segment, half 1 in the other).
+  For an odd WaveTileB a split B read would cross a component, so B is kept whole ([A0][B0][B1][A1],
+  bcontig).
+
+[4,1]/[1,4] (only one operand spans the four waves, the "active" one; the other is "shared"): put
+only the active operand's two components in different segments; the shared operand keeps its baseline
+layout.
+  Without TDMSplit (VW == WaveTile only): the two components are split by wave-pair, which halves the
+      conflict.
+  With TDMSplit, the vector width picks the placement:
+    VW == WaveTile:   portSplitA/portSplitB puts even waves in one segment and odd in the other, so
+                      the two read ports never share a segment (conflict removed).
+    VW == WaveTile/2: componentSplit puts wave-pair {W0,W1} in one segment and {W2,W3} in the other;
+                      each segment still holds one even and one odd wave, so the conflict is only
+                      halved, but with no extra loads (splitting by port here would cost a second
+                      load).
+
+Every layout is either tight (no extra LDS) or aligned (padded to a segment boundary, which uses more
+LDS and needs PrefetchGlobalRead=2).
 """
 
 # gfx1250 LDS segment size (5 x 64 KiB segments).
@@ -66,7 +92,7 @@ def _coarse(state, tc):
     return W > 0 and mi_threads * vw >= mt // W
 
 def _port_split(state, tc):
-    # Fine active: VW==WaveTile/2 (2 vIdx per port) with TDMSplit. Finer VW would need a >2-way split.
+    # VW==WaveTile/2 (2 vIdx per port) with TDMSplit. A smaller VW would need a >2-way split.
     if _coarse(state, tc) or not state.get("TDMSplit"):
         return False
     idx = 0 if tc == "A" else 1
@@ -136,9 +162,9 @@ def _evaluate_asymmetric(state):
     if state.get("TDMSplit"):
         if not (_coarse(state, activeTC) or _port_split(state, activeTC)):
             return _no("TDMSplit asymmetric: active VW must be WaveTile or WaveTile/2")
-        # Coarse splits by read port; fine can't (needs >2-way) so it splits by component instead.
-        isFine = _port_split(state, activeTC) and not _coarse(state, activeTC)
-        splitKey = "tdmSplitCompAxis" if isFine else ("portSplitA" if activeTC == "A" else "portSplitB")
+        # VW==WaveTile splits by read port; VW==WaveTile/2 can't (needs >2-way) so it splits by component.
+        useCompAxis = _port_split(state, activeTC) and not _coarse(state, activeTC)
+        splitKey = "componentSplit" if useCompAxis else ("portSplitA" if activeTC == "A" else "portSplitB")
         strideAct = fAct + 2 * fSh
         c0end = (base + fActData - 1) // SEG
         c1 = (base + strideAct) // SEG
@@ -147,11 +173,11 @@ def _evaluate_asymmetric(state):
             o = _build_offsets(strideAct)
             o[splitKey] = True
             return {"applicable": True, "aligned": False, "offsets": o,
-                    "blockSpan": 0, "reason": "compaxis-asym" if isFine else "portaxis-asym",
-                    "segmentMap": "%s active=%s seg%d/seg%d" % ("COMPAXIS" if isFine else "PORTAXIS",
+                    "blockSpan": 0, "reason": "compaxis-asym" if useCompAxis else "portaxis-asym",
+                    "segmentMap": "%s active=%s seg%d/seg%d" % ("COMPAXIS" if useCompAxis else "PORTAXIS",
                                   activeTC, base // SEG, (base + strideAct) // SEG)}
         # port1 still shares port0's segment: pad it to the next segment boundary. Grows LDS.
-        if state.get("PrefetchGlobalRead") != 2:        return _no("portaxis-asym small: PGR!=2")
+        if state.get("PrefetchGlobalRead") != 2:        return _no(("compaxis-asym" if useCompAxis else "portaxis-asym") + ": both components fit one segment, aligned layout (LDS grows) needs PGR=2")
         if state.get("LDSSegmentInterleave", -1) == -1: return _no("auto: skip aligned (LDS growth)")
         pre = _ceil_seg(base + strideAct) - base
         o = _build_offsets(pre)
@@ -162,9 +188,10 @@ def _evaluate_asymmetric(state):
         if bMXSB is not None: o["ldsBaseMXSB"] = bMXSB
         blockSpan = max(blockSpan, mxEnd)
         return {"applicable": True, "aligned": True, "offsets": o,
-                "blockSpan": blockSpan, "reason": "portaxis-asym-aligned",
-                "segmentMap": "PORTAXIS-ALIGNED active=%s seg%d/seg%d"
-                              % (activeTC, base // SEG, (base + pre) // SEG)}
+                "blockSpan": blockSpan,
+                "reason": "compaxis-asym-aligned" if useCompAxis else "portaxis-asym-aligned",
+                "segmentMap": "%s-ALIGNED active=%s seg%d/seg%d"
+                              % ("COMPAXIS" if useCompAxis else "PORTAXIS", activeTC, base // SEG, (base + pre) // SEG)}
 
     # active must be coarse (VW == WaveTile).
     if not _coarse(state, activeTC):
@@ -192,7 +219,7 @@ def _evaluate_asymmetric(state):
                 "segmentMap": "BCONTIG-ASYM active=%s seg%d={c0,shared} seg%d={c1}" % (activeTC, c0, c1)}
 
     # smaller: pad comp1 to the next segment. grows LDS -> PGR2 + force only.
-    if state.get("PrefetchGlobalRead") != 2:   return _no("small asym: PGR!=2")
+    if state.get("PrefetchGlobalRead") != 2:   return _no("bcontig-asym: both components fit one segment, aligned layout (LDS grows) needs PGR=2")
     if state.get("LDSSegmentInterleave", -1) == -1: return _no("auto: skip aligned (LDS growth)")
     pre = _ceil_seg(base + strideAct) - base
     offsets = _build_offsets(pre)
@@ -280,8 +307,8 @@ def evaluate(state):
 
         # Small tile: A0+B0+B1 all fit in one segment, so A1 would stay with A0. Pad the A0 -> A1
         # distance up to the next segment boundary so A1 lands in a different segment. Uses more LDS
-        # (checked in Solution.py) and needs PrefetchGlobalRead=2 -- same idea as the split branch below.
-        if state.get("PrefetchGlobalRead") != 2:   return _no("small MT: PGR!=2")
+        # (checked in Solution.py) and needs PGR=2 -- same idea as the split branch below.
+        if state.get("PrefetchGlobalRead") != 2:   return _no("bcontig: A0+B0+B1 fit one segment, aligned layout (LDS grows) needs PGR=2")
         if mode == -1:                             return _no("auto: skip aligned (LDS growth)")
         pre = _ceil_seg(base + strideA) - base      # round A0 -> A1 distance up to a segment boundary
         offsets = {
@@ -305,7 +332,7 @@ def evaluate(state):
     if (base % SEG) + fA + fB < SEG:
         # Small MacroTile: A0,B0 fit one segment, so push component 1 to the next segment boundary
         # with a segment-aligned stride. Grows LDS (Solution.py budget-checks); PGR2 double-buffer only.
-        if state.get("PrefetchGlobalRead") != 2:        return _no("small MT: PGR!=2")
+        if state.get("PrefetchGlobalRead") != 2:        return _no("aligned: A0+B0 fit one segment, aligned layout (LDS grows) needs PGR=2")
         if mode == -1:                                  return _no("auto: skip aligned (LDS growth)")
         pre = _ceil_seg(base + fA + fB) - base          # segment-aligned stride (== SEG for base<SEG)
         offsets = {

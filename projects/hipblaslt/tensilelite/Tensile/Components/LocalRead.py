@@ -1651,25 +1651,25 @@ class LocalReadMFMA(LocalRead):
                                 # boundary. Split it into within-component (vCols) + component jump
                                 # (segCompByteOff, added post-pad below).
                                 segCompByteOff = 0
-                                # Fine port-split (VW==WaveTile/2): the per-vIdx column stride carries the
-                                # within-port offset. Coarse port-split (numVectorsPerTile==1) puts the
-                                # whole segment jump on the wave axis (LraTileAssignment), so it takes the
+                                # port-split with VW==WaveTile/2: the per-vIdx column stride carries the
+                                # within-port offset. With VW==WaveTile (numVectorsPerTile==1) the whole
+                                # segment jump is on the wave axis (LraTileAssignment), so it takes the
                                 # normal per-vIdx path below (its segCompByteOff stays 0 within a wave).
                                 _portSplit = (kernel.get("LDSSegmentInterleave") == 1
                                               and ((tc == "A" and kernel["LDSSegInterleaveOffsets"].get("portSplitA", False))
                                                 or (tc == "B" and kernel["LDSSegInterleaveOffsets"].get("portSplitB", False)))
                                               and numVectorsPerTile > 1)
                                 _segOff = kernel["LDSSegInterleaveOffsets"] if kernel.get("LDSSegmentInterleave") == 1 else {}
-                                _compAxis = (_segOff.get("tdmSplitCompAxis", False)
+                                _componentSplit = (_segOff.get("componentSplit", False)
                                              and _segOff.get("activeTC") == tc
                                              and numVectorsPerTile > 1)
                                 if _portSplit:
-                                    # Fine: drop the wave-group factor from the per-vIdx column stride so
-                                    # the two vIdx stay within this port's segment; the A0->A1 segment jump
+                                    # Drop the wave-group factor from the per-vIdx column stride so the
+                                    # two vIdx stay within this port's segment; the A0->A1 segment jump
                                     # is on the wave stride, not here.
                                     _shape = MIWaveGroupShape[tile01] // kernel["MIWaveGroup"][tile01]
                                     vCols = (vIdx * numOffsets + oIdx) * _shape
-                                elif _compAxis:
+                                elif _componentSplit:
                                     # Divide the per-vIdx stride by wavesPerComp to match the write
                                     # boundary (tdmSplitLdsBoundary); the match needs numOffsets==1, bpeGR==bpeDS.
                                     assert numOffsets == 1

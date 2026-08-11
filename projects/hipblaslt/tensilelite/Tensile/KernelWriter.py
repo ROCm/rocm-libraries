@@ -8282,8 +8282,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
         # nor B needs a forced extra register there -- the baseline reach reservation already covers it.
         if kernel.get("LDSSegmentInterleave") == 1 and not kernel["LDSSegInterleaveOffsets"].get("bBaseline", False):
           numComp = kernel["NumWaves"] // 2
-          # [1,4]: >1 wave per comp -> B's segment jump lives in the base-register value (like bcontig A),
-          # so no extra reg is needed; only the [2,2] fine-B case (1 wave/comp) reaches comp1 via a reg.
+          # Only [2,2] VWB=WaveTileB/2 (1 wave/comp) needs an extra LocalReadAddr reg: it reaches comp1 via the
+          # read offset, which must span the far segment. [1,4] puts the jump in the address reg instead.
           wavesPerCompB = kernel["MIWaveGroup"][1] // numComp
           compColsB = kernel["MacroTile1"] // numComp
           segILWaveSpansCompB = min(kernel["MatrixInstM"], kernel["MatrixInstN"]) * kernel["VectorWidthB"] >= compColsB

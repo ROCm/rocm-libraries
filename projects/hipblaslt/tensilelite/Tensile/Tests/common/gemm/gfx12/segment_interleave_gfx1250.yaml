@@ -3,7 +3,7 @@ TestParameters:
 
 # Functional test for the gfx1250 LDS segment-conflict interleave. Each problem runs baseline
 # (LDSSegmentInterleave=0) and interleaved (=1) vs the CPU reference; both oracle branches are
-# covered (tight fA+fB>=64KiB, aligned <64KiB). bf16=[2,2] no-scale; mxf8=asym+MX scales; mxf4=fp4+fine.
+# covered (tight fA+fB>=64KiB, aligned <64KiB). bf16=[2,2] no-scale; mxf8=asym+MX scales; mxf4=fp4 + VWA=WaveTileA/2.
 
 GlobalParameters:
   PrintSolutionRejectionReason: True
@@ -31,7 +31,7 @@ GlobalParameters:
   CodeObjectVersion: "4"
 
 BenchmarkProblems:
-  # bf16 (no scales): [2,2] tight + aligned, B unrestricted (VWB coarse+fine).
+  # bf16 (no scales): [2,2] tight + aligned, B unrestricted (VWB = WaveTileB and WaveTileB/2).
   -
     - # ProblemType, TN
       OperationType: GEMM
@@ -79,7 +79,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
         - VectorWidthA: [-1]
-        - VectorWidthB: [-1, 2]                 # B coarse + fine
+        - VectorWidthB: [-1, 2]                 # VWB = WaveTileB, WaveTileB/2
         - LocalReadVectorWidth: [-1]
         - 1LDSBuffer: [0]
         - SourceSwap: [True]
@@ -96,7 +96,7 @@ BenchmarkProblems:
           - Exact: [1024, 1024, 1, 512]
         - ActivationArgs:
           - [Enum: none]
-  # mxf8 (block-32 e8): [4,1]/[1,4] + [2,2] with MX-scale relocation; B unrestricted (VWB coarse+fine).
+  # mxf8 (block-32 e8): [4,1]/[1,4] + [2,2] with MX-scale relocation; B unrestricted (VWB = WaveTileB and WaveTileB/2).
   -
     - # ProblemType, TN - MXF8SS Block32, E8
       OperationType: GEMM
@@ -152,7 +152,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
         - VectorWidthA: [-1]
-        - VectorWidthB: [-1, 4]                  # B coarse + fine; [1,4] fine via WaveTileB=8 tile
+        - VectorWidthB: [-1, 4]                  # VWB = WaveTileB, WaveTileB/2; [1,4] uses the WaveTileB=8 tile
         - LocalReadVectorWidth: [-1]
         - 1LDSBuffer: [0]
         - SourceSwap: [True]
@@ -171,7 +171,7 @@ BenchmarkProblems:
           - Exact: [1024, 1024, 1, 1024]
         - ActivationArgs:
           - [Enum: none]
-  # mxf4: fp4 pad ([8,7]) + [2,2]/[4,1] fine (VWA=WaveTile/2); extreme asym tiles.
+  # mxf4: fp4 pad ([8,7]) + [2,2]/[4,1] with VWA=WaveTileA/2; extreme asym tiles.
   -
     - # ProblemType, TN
       OperationType: GEMM
@@ -199,7 +199,7 @@ BenchmarkProblems:
         - UseSgprForGRO: [0]
         - ForceDisableShadowInit: [true]
         - MatrixInstruction:
-          - [16, 16, 128, 1,  1,  8, 8,  2, 2]   # [2,2] tight (fine via VWA=4)
+          - [16, 16, 128, 1,  1,  8, 8,  2, 2]   # [2,2] tight (VWA=4 = WaveTileA/2)
           - [16, 16, 128, 1,  1,  8, 4,  2, 2]   # [2,2] aligned
           - [16, 16, 128, 1,  1,  8, 7,  2, 2]   # [2,2] odd WaveTileB: bcontig + fp4 pad
           - [16, 16, 128, 1,  1,  8, 1,  4, 1]   # [4,1] extreme (WaveTileA=8, N=16)
@@ -226,7 +226,7 @@ BenchmarkProblems:
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
-        - VectorWidthA: [-1, 4]                  # coarse + fine (WaveTile/2): [4,1] comp-axis, [2,2] portSplitA
+        - VectorWidthA: [-1, 4]                  # VWA = WaveTileA, WaveTileA/2: [4,1] componentSplit, [2,2] portSplitA
         - VectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
         - 1LDSBuffer: [0]

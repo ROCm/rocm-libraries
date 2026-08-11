@@ -6068,7 +6068,7 @@ class KernelWriterAssembly(KernelWriter):
           (tc in ("MXSA", "MXSB") or
            kernel["LDSSegInterleaveOffsets"].get("ldsBase" + tc) is not None)):
       _segOff = kernel["LDSSegInterleaveOffsets"] if kernel.get("LDSSegmentInterleave") == 1 else {}
-      # ldsBase<tc> covers A/B (interleaved or shared-baseline) and relocated MX scales; falls back
+      # ldsBase<tc> covers A/B (interleaved or baseline) and relocated MX scales; falls back
       # to the plain LdsOffset when this tensor has no segment-interleave base.
       _ldsBase = _segOff.get("ldsBase" + tc, kernel["LdsOffset%s"%tc])
       module.add(VAddCOU32(dst=vgpr("LocalReadAddr%s+0"%tc), dst1=VCC(),
@@ -19222,23 +19222,21 @@ class KernelWriterAssembly(KernelWriter):
       _segOff = kernel["LDSSegInterleaveOffsets"]
       _portSplit = (tc == "A" and _segOff.get("portSplitA", False)) or \
                    (tc == "B" and _segOff.get("portSplitB", False))
-      # compAxis (fine): ldsSplit is the per-vIdx step within the segment; the component jump
+      # componentSplit: ldsSplit is the per-vIdx step within the segment; the component jump
       # rides the wave base (initTDMDescriptorWaveSeparatedImpl), not ldsSplit.
-      _compAxis = _segOff.get("tdmSplitCompAxis", False) and _segOff.get("activeTC") == tc
-      if _portSplit or _compAxis:
+      _componentSplit = _segOff.get("componentSplit", False) and _segOff.get("activeTC") == tc
+      if _portSplit or _componentSplit:
         vw = kernel["VectorWidthA"] if tc == "A" else kernel["VectorWidthB"]
         numVec = kernel["MIWaveTile"][ti] // vw
         numComp = kernel["NumWaves"] // 2
-        # L1/L2 stay in one segment. Boundary = per-vIdx footprint: mt*du*bpe/dim1Divisor divided
-        # by numVec (fine) or numComp (coarse, numVec==1).
+        # Both halves stay in one segment, so the boundary is the per-vIdx footprint, not a segment
+        # jump. splitDiv = numVec (VW==WaveTile/2) or numComp (VW==WaveTile).
         splitDiv = numVec if numVec > 1 else numComp
         halfFootprint = round(mt * du * bpe // dim1Divisor // splitDiv)
         halfPad = halfFootprint // ldsBlockSizePerPad * ldsPadSize if ldsBlockSizePerPad != 0 and ldsPadSize != 0 else 0
         return halfFootprint + halfPad
-      # Coarse active / non-bcontig baseline: component jump. Symmetric [2,2] sets neither
-      # aBaseline nor bBaseline, so both A and B fall through to the jump here; [4,1]/[1,4]
-      # mark the non-active tensor baseline (aBaseline for [1,4], bBaseline for [4,1]) and it
-      # takes the plain default footprint below instead.
+      # Otherwise the boundary is a segment jump (writeStrideBytes): the second half lands in the next
+      # segment. A baseline tensor (aBaseline/bBaseline) is skipped and uses the default footprint below.
       if (tc == "A" and not _segOff.get("aBaseline", False)) or \
          (tc == "B" and not _segOff.get("bBaseline", False)):
         return _segOff["writeStrideBytes"]
@@ -19532,16 +19530,16 @@ class KernelWriterAssembly(KernelWriter):
       mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), 1, sgpr(waveIdxSgpr), "wId=WaveIdx // 2 (each component covers 2 waves: numComp = numWaves // 2)"))
       dataBytes = mt // numComp * du * int(bpe * 4) // (4 * dim1Divisor)
       _segOffAB = kernel["LDSSegInterleaveOffsets"] if kernel.get("LDSSegmentInterleave") == 1 else {}
-      # Active tensor only gets the component wave jump; the shared side (aBaseline/bBaseline) is baseline.
+      # Active tensor only gets the component wave jump; the baseline tensor (aBaseline/bBaseline) is untouched.
       _segAB = bool(kernel.get("LDSSegmentInterleave") == 1) and (
           (tc == "A" and not _segOffAB.get("aBaseline", False)) or
           (tc == "B" and not _segOffAB.get("bBaseline", False)))
       _segPortSplit = _segAB and ((tc == "A" and _segOffAB.get("portSplitA", False)) or
                                   (tc == "B" and _segOffAB.get("portSplitB", False)))
-      # compAxis: the wave base carries the component segment jump (wId * writeStrideBytes);
+      # componentSplit: the wave base carries the component segment jump (wId * writeStrideBytes);
       # the per-vIdx split stays within the segment.
-      _segCompAxis = _segAB and _segOffAB.get("tdmSplitCompAxis", False) and _segOffAB.get("activeTC") == tc
-      _segWaveJump = (_segAB and not kernel["TDMSplit"]) or _segPortSplit or _segCompAxis
+      _segComponentSplit = _segAB and _segOffAB.get("componentSplit", False) and _segOffAB.get("activeTC") == tc
+      _segWaveJump = (_segAB and not kernel["TDMSplit"]) or _segPortSplit or _segComponentSplit
       _segFootprint = _segWaveJump and kernel["LDSSegInterleaveOffsets"].get("footprintPacked", False)
       if _segWaveJump:
           dataBytes = kernel["LDSSegInterleaveOffsets"]["writeStrideBytes"]
