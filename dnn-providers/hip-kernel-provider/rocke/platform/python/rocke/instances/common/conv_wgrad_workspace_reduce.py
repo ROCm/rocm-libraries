@@ -20,8 +20,8 @@ Kernel signature::
     wg_M    : i32   — number of output-channel tiles (GEMM M dimension)
     wg_N    : i32   — filter-spatial × input-channel dimension (GEMM N)
     split_k : i32   — number of K partitions written by Stage 1
-    ws_bytes: i32   — workspace buffer byte size (for bounds checking)
-    dw_bytes: i32   — dW buffer byte size
+    ws_bytes: i32   — workspace buffer byte size (ABI placeholder; not used for bounds checking)
+    dw_bytes: i32   — dW buffer byte size (ABI placeholder; not used for bounds checking)
 
 Grid: ``(ceil(wg_N / tile_n), ceil(wg_M / tile_m), 1)``
 Block: ``(block_size, 1, 1)`` where ``block_size = tile_m * tile_n`` (flat)

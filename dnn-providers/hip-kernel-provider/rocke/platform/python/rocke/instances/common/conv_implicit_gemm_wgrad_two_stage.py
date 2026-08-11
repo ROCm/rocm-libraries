@@ -68,11 +68,23 @@ def _wgrad_stage1_signature(spec: WgradConvSpec) -> list:
 
     Extends the standard conv ABI (A/B/D + byte sizes) with two extra
     parameters for the workspace: ``ws_ptr`` and ``ws_bytes``.
-    """
-    from ...helpers.manifest import conv_args_signature
 
-    base = conv_args_signature(spec.data.dtype_a)
-    return base + [
+    A (dY) uses ``dtype_a``, B (X) uses ``dtype_b``, D (dW) uses ``dtype_d``.
+    All three are passed explicitly so the signature is accurate when dtypes differ.
+    """
+    _dtype_map = {"fp16": "f16", "bf16": "bf16", "fp32": "f32"}
+
+    def _ptr(dtype: str) -> str:
+        ir = _dtype_map.get(dtype, dtype)
+        return f"ptr<{ir}, global>"
+
+    return [
+        {"name": "A", "type": _ptr(spec.data.dtype_a), "size_bytes": 8},
+        {"name": "B", "type": _ptr(spec.data.dtype_b), "size_bytes": 8},
+        {"name": "D", "type": _ptr(spec.data.dtype_d), "size_bytes": 8},
+        {"name": "A_bytes", "type": "i32", "size_bytes": 4},
+        {"name": "B_bytes", "type": "i32", "size_bytes": 4},
+        {"name": "D_bytes", "type": "i32", "size_bytes": 4},
         {"name": "ws_ptr", "type": "ptr<f32, global>", "size_bytes": 8},
         {"name": "ws_bytes", "type": "i32", "size_bytes": 4},
     ]

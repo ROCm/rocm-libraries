@@ -206,7 +206,28 @@ def compute_wgrad_workspace_spec(
     """Compute workspace requirements without allocating anything.
 
     This is a pure function: no HIP calls, no side effects.
+
+    ``split_k`` must be a resolved value (≥ 1).  Pass ``split_k=1`` to represent
+    the no-workspace single-pass path; ``preferred_bytes`` will be 0 and
+    ``workspace_fits`` will be True.  Unresolved auto (``split_k=-1``) and
+    invalid (``split_k=0`` or ``split_k<-1``) values are rejected.
     """
+    if split_k < 1:
+        raise ValueError(
+            f"compute_wgrad_workspace_spec requires a resolved split_k >= 1; "
+            f"got split_k={split_k}. Resolve split_k=-1 (auto) before calling."
+        )
+    if split_k == 1:
+        # Single-pass path: no workspace needed.
+        return ConvWgradWorkspaceSpec(
+            preferred_bytes=0,
+            minimum_bytes=0,
+            preferred_split_k=1,
+            fallback_split_k=1,
+            workspace_fits=True,
+            hard_cap=hard_cap,
+            fallback_reason="",
+        )
     p = _problem(req)
     wg_m = _wg_M(p)
     wg_n = _wg_N(p)
