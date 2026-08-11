@@ -1,13 +1,20 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-"""Integration tests for elementwise pointwise operations."""
+"""Tests for elementwise pointwise operations: plan-building and stubbed execution."""
 
 import pytest
 
 import hipdnn_frontend as hipdnn
 
-from .helpers import build_operation_graph, create_float_graph
+import numpy as np
+
+from .helpers import (
+    call_attribute_methods,
+    build_all_plans_or_skip,
+    create_float_graph,
+    execute_zeros,
+)
 
 
 def build_pointwise_add_graph(n=16, c=16, h=16, w=16):
@@ -34,31 +41,65 @@ def build_pointwise_add_graph(n=16, c=16, h=16, w=16):
 
 @pytest.mark.gpu
 class TestPointwiseAdd:
-    """Tests for pointwise add end-to-end pipeline."""
+    """Tests for pointwise add plan-building and stubbed execution (no real provider engine yet)."""
 
     def test_builds_operation_graph(self):
         """Pointwise add graph validates and lowers to a backend operation graph.
 
-        Execution is not exercised here: no provider in the python wheel test
-        environment supplies an engine for a standalone pointwise op (the
-        miopen provider only exposes fused pointwise support).
+        No hipDNN provider in the python wheel test environment supplies an
+        engine for a standalone pointwise op (miopen only exposes fused
+        pointwise support), so this stops at whatever engine is loaded;
+        skips instead of asserting if none is applicable.
         """
         graph, a, b, out = build_pointwise_add_graph()
 
-        build_operation_graph(graph)
+        handle = build_all_plans_or_skip(graph)
+        execute_zeros(
+            graph,
+            [(a, np.float32), (b, np.float32), (out, np.float32)],
+            handle,
+        )
 
 
-class TestPointwiseAttributes:
-    """Round-trip tests for PointwiseAttributes accessors (no GPU required)."""
+class TestPointwiseAttributeBindings:
+    """Every pointwise attribute binding round-trips through its getter (no GPU required)."""
 
-    def test_name_round_trip(self):
-        """set_name()/get_name() round-trip."""
-        attrs = hipdnn.PointwiseAttributes()
-        attrs.set_name("relu")
-        assert attrs.get_name() == "relu"
-
-    def test_mode_round_trip(self):
-        """set_mode()/get_mode() round-trip."""
-        attrs = hipdnn.PointwiseAttributes()
-        attrs.set_mode(hipdnn.PointwiseMode.RELU_FWD)
-        assert attrs.get_mode() == hipdnn.PointwiseMode.RELU_FWD
+    def test_methods_are_callable(self):
+        in0 = hipdnn.Tensor.create([1], hipdnn.DataType.FLOAT)
+        in1 = hipdnn.Tensor.create([1], hipdnn.DataType.FLOAT)
+        in2 = hipdnn.Tensor.create([1], hipdnn.DataType.FLOAT)
+        out0 = hipdnn.Tensor.create([1], hipdnn.DataType.FLOAT)
+        call_attribute_methods(
+            hipdnn.PointwiseAttributes(),
+            (
+                ("set_name", ("pointwise",), "get_name", "pointwise"),
+                (
+                    "set_compute_data_type",
+                    (hipdnn.DataType.FLOAT,),
+                    "get_compute_data_type",
+                    hipdnn.DataType.FLOAT,
+                ),
+                (
+                    "set_mode",
+                    (hipdnn.PointwiseMode.ADD,),
+                    "get_mode",
+                    hipdnn.PointwiseMode.ADD,
+                ),
+                ("set_relu_lower_clip", (0.0,), "get_relu_lower_clip", 0.0),
+                ("set_relu_upper_clip", (1.0,), "get_relu_upper_clip", 1.0),
+                (
+                    "set_relu_lower_clip_slope",
+                    (0.25,),
+                    "get_relu_lower_clip_slope",
+                    0.25,
+                ),
+                ("set_swish_beta", (0.5,), "get_swish_beta", 0.5),
+                ("set_elu_alpha", (2.0,), "get_elu_alpha", 2.0),
+                ("set_softplus_beta", (4.0,), "get_softplus_beta", 4.0),
+                ("set_axis", (0,), "get_axis", 0),
+                ("set_input_0", (in0,), "get_input_0", in0),
+                ("set_input_1", (in1,), "get_input_1", in1),
+                ("set_input_2", (in2,), "get_input_2", in2),
+                ("set_output_0", (out0,), "get_output_0", out0),
+            ),
+        )

@@ -60,3 +60,14 @@ class TestNonFloatDataTypes:
         """A conv graph with a non-FLOAT data type lowers to an operation graph."""
         graph = build_typed_conv_graph(data_type)
         build_operation_graph(graph)
+
+
+def test_operation_configuration_enums_are_importable():
+    """Operation attribute enums expose their public values to Python."""
+    assert hipdnn.ReductionMode.ADD.name == "ADD"
+    assert hipdnn.ResampleMode.MAXPOOL.name == "MAXPOOL"
+    assert hipdnn.PaddingMode.ZERO_PAD.name == "ZERO_PAD"
+    assert hipdnn.NormFwdPhase.TRAINING.name == "TRAINING"
+    assert hipdnn.DiagonalAlignment.BOTTOM_RIGHT.name == "BOTTOM_RIGHT"
+    assert hipdnn.AttentionImplementation.UNIFIED.name == "UNIFIED"
+    assert hipdnn.MoeGroupedMatmulMode.SCATTER.name == "SCATTER"

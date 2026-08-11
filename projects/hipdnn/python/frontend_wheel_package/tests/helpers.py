@@ -4,6 +4,7 @@
 """Shared helper functions for hipDNN Python binding tests."""
 
 import numpy as np
+import pytest
 
 import hipdnn_frontend as hipdnn
 
@@ -48,6 +49,29 @@ def build_all_plans(graph, handle=None):
     return handle
 
 
+def build_all_plans_or_skip(graph, handle=None):
+    """Validate, build the operation graph, and build execution plans; skip if unsupported.
+
+    Same pipeline as build_all_plans(), but pytest.skip()s instead of
+    asserting when no loaded engine plugin is applicable to this graph (e.g.
+    HIPDNN_TEST_GOOD_PLUGIN_PATH is unset and no provider engine covers this
+    operation). Creates a handle if one is not supplied and returns it for
+    reuse.
+    """
+    if handle is None:
+        handle = hipdnn.create_handle()
+    assert graph.validate().is_good()
+    assert graph.build_operation_graph(handle).is_good()
+    plans = graph.create_execution_plans()
+    if plans.is_bad():
+        pytest.skip(f"No compatible engine: {plans.get_message()}")
+    support = graph.check_support()
+    if support.is_bad():
+        pytest.skip(f"No supported execution plan: {support.get_message()}")
+    assert graph.build_plans().is_good()
+    return handle
+
+
 def execute_graph(graph, tensor_uid_to_data, handle=None):
     """Execute a graph with the given tensor data.
 
@@ -86,3 +110,57 @@ def execute_graph(graph, tensor_uid_to_data, handle=None):
         results[uid] = np.frombuffer(host_bytes, dtype=dtype).reshape(shape)
 
     return results
+
+
+def execute_zeros(graph, tensor_dtypes, handle):
+    """Execute a built graph with zero buffers; checks only that execute() succeeds.
+
+    tensor_dtypes: (tensor, numpy_dtype) pairs for every non-virtual tensor
+    (inputs plus outputs marked set_output(True)) the variant pack needs.
+
+    No numeric assertion is possible when the built plan is GoodPlugin's
+    no-op stub -- this only proves the plan/execute pipeline runs end to
+    end against a real device.
+    """
+    tensor_data = {
+        tensor.get_uid(): np.zeros(tensor.get_dim(), dtype=dtype)
+        for tensor, dtype in tensor_dtypes
+    }
+    execute_graph(graph, tensor_data, handle)
+
+
+def call_attribute_methods(value, calls):
+    """Call each attribute setter and assert its value round-trips through its getter.
+
+    ``calls`` is an iterable of ``(setter, args, getter, expected)`` tuples:
+      - ``setter``/``args``: method name and positional arguments for the setter call.
+      - ``getter``: paired getter method name, or ``None`` when the field has no getter
+        method (e.g. an SDPA scalar exposed only via a ``def_rw`` property; use
+        ``access_attribute_properties`` for those).
+      - ``expected``: value compared against the getter's return with ``==``. Tensor
+        fields compare equal only to the exact object passed to the setter (no
+        ``__eq__`` override), so use a distinct tensor per field to catch a setter
+        wired to the wrong underlying member.
+
+    Every hipDNN attribute setter returns ``self`` (nanobind ``reference_internal``);
+    this is asserted for every call.
+    """
+    for setter, args, getter, expected in calls:
+        result = getattr(value, setter)(*args)
+        assert result is value, f"{setter}() did not return self"
+        if getter is None:
+            continue
+        actual = getattr(value, getter)()
+        assert (
+            actual == expected
+        ), f"{getter}() returned {actual!r}, expected {expected!r}"
+
+
+def access_attribute_properties(value, assignments):
+    """Set each attribute property and assert it reads back the assigned value."""
+    for name, assignment in assignments:
+        setattr(value, name, assignment)
+        actual = getattr(value, name)
+        assert (
+            actual == assignment
+        ), f"{name} returned {actual!r}, expected {assignment!r}"

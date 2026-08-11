@@ -8,7 +8,12 @@ import pytest
 
 import hipdnn_frontend as hipdnn
 
-from .helpers import build_all_plans, create_float_graph, execute_graph
+from .helpers import (
+    call_attribute_methods,
+    build_all_plans,
+    create_float_graph,
+    execute_graph,
+)
 
 
 def build_conv_wgrad_graph(
@@ -100,22 +105,41 @@ class TestConvWgrad:
         np.testing.assert_allclose(dw_result, expected, rtol=2e-3, atol=2e-3)
 
 
-class TestConvWgradAttributes:
-    """Attribute accessors and aliases for ConvWgrad (no GPU required)."""
+class TestConvWgradAttributeBindings:
+    """Every weight-gradient convolution attribute binding round-trips through its getter (no GPU required)."""
 
     def test_alias_identity(self):
         """ConvWgradAttributes is the same class as ConvolutionWgradAttributes."""
         assert hipdnn.ConvWgradAttributes is hipdnn.ConvolutionWgradAttributes
 
-    def test_pre_post_padding_chain(self):
-        """ConvWgrad pre/post padding setters chain and store the name."""
-        attrs = hipdnn.ConvWgradAttributes()
-        result = (
-            attrs.set_name("wgrad")
-            .set_pre_padding([1, 1])
-            .set_post_padding([1, 1])
-            .set_stride([1, 1])
-            .set_dilation([1, 1])
+    def test_methods_are_callable(self):
+        x = hipdnn.Tensor.create([1], hipdnn.DataType.FLOAT)
+        dy = hipdnn.Tensor.create([1], hipdnn.DataType.FLOAT)
+        dw = hipdnn.Tensor.create([1], hipdnn.DataType.FLOAT)
+        call_attribute_methods(
+            hipdnn.ConvWgradAttributes(),
+            (
+                ("set_name", ("conv_wgrad",), "get_name", "conv_wgrad"),
+                (
+                    "set_compute_data_type",
+                    (hipdnn.DataType.FLOAT,),
+                    "get_compute_data_type",
+                    hipdnn.DataType.FLOAT,
+                ),
+                ("set_x", (x,), "get_x", x),
+                ("set_dy", (dy,), "get_dy", dy),
+                ("set_dw", (dw,), "get_dw", dw),
+                ("set_padding", ([9],), "get_pre_padding", [9]),
+                ("set_padding", ([9],), "get_post_padding", [9]),
+                ("set_pre_padding", ([1],), "get_pre_padding", [1]),
+                ("set_post_padding", ([2],), "get_post_padding", [2]),
+                ("set_stride", ([3],), "get_stride", [3]),
+                ("set_dilation", ([4],), "get_dilation", [4]),
+                (
+                    "set_convolution_mode",
+                    (hipdnn.ConvolutionMode.CONVOLUTION,),
+                    "get_convolution_mode",
+                    hipdnn.ConvolutionMode.CONVOLUTION,
+                ),
+            ),
         )
-        assert result is attrs
-        assert attrs.get_name() == "wgrad"

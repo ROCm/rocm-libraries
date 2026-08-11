@@ -8,7 +8,12 @@ import pytest
 
 import hipdnn_frontend as hipdnn
 
-from .helpers import build_all_plans, create_float_graph, execute_graph
+from .helpers import (
+    call_attribute_methods,
+    build_all_plans,
+    create_float_graph,
+    execute_graph,
+)
 
 
 def build_conv_fprop_graph(
@@ -93,21 +98,41 @@ class TestConvFprop:
         np.testing.assert_allclose(y_result, expected, rtol=2e-3, atol=2e-3)
 
 
-class TestConvFpropAttributes:
-    """Attribute accessors and aliases for ConvFprop (no GPU required)."""
+class TestConvFpropAttributeBindings:
+    """Every forward-convolution attribute binding round-trips through its getter (no GPU required)."""
 
     def test_alias_identity(self):
         """ConvFpropAttributes is the same class as ConvolutionFpropAttributes."""
         assert hipdnn.ConvFpropAttributes is hipdnn.ConvolutionFpropAttributes
 
-    def test_setters_chain(self):
-        """ConvFprop setters return self for chaining and store the name."""
-        attrs = hipdnn.ConvFpropAttributes()
-        result = (
-            attrs.set_name("conv")
-            .set_padding([1, 1])
-            .set_stride([2, 2])
-            .set_dilation([1, 1])
+    def test_methods_are_callable(self):
+        x = hipdnn.Tensor.create([1], hipdnn.DataType.FLOAT)
+        w = hipdnn.Tensor.create([1], hipdnn.DataType.FLOAT)
+        y = hipdnn.Tensor.create([1], hipdnn.DataType.FLOAT)
+        call_attribute_methods(
+            hipdnn.ConvFpropAttributes(),
+            (
+                ("set_name", ("conv_fprop",), "get_name", "conv_fprop"),
+                (
+                    "set_compute_data_type",
+                    (hipdnn.DataType.FLOAT,),
+                    "get_compute_data_type",
+                    hipdnn.DataType.FLOAT,
+                ),
+                ("set_x", (x,), "get_x", x),
+                ("set_w", (w,), "get_w", w),
+                ("set_y", (y,), "get_y", y),
+                ("set_padding", ([9],), "get_pre_padding", [9]),
+                ("set_padding", ([9],), "get_post_padding", [9]),
+                ("set_pre_padding", ([1],), "get_pre_padding", [1]),
+                ("set_post_padding", ([2],), "get_post_padding", [2]),
+                ("set_stride", ([3],), "get_stride", [3]),
+                ("set_dilation", ([4],), "get_dilation", [4]),
+                (
+                    "set_convolution_mode",
+                    (hipdnn.ConvolutionMode.CONVOLUTION,),
+                    "get_convolution_mode",
+                    hipdnn.ConvolutionMode.CONVOLUTION,
+                ),
+            ),
         )
-        assert result is attrs
-        assert attrs.get_name() == "conv"
