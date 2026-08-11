@@ -114,6 +114,17 @@ Container::Container()
 {
     HIPDNN_PLUGIN_LOG_INFO("Creating Container");
 
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+    // Every ingestor pack's native matchers, scorers, and dispatch handlers must be
+    // registered before any descriptor-backed engine below can resolve the symbols its
+    // UMDs, UHDs, and UDDs name -- including a UED loaded from a file that shares this
+    // pack's symbols with no compile-time link to this translation unit. Safe to call
+    // on every Container construction: it registers exactly once for the process, no
+    // matter how many containers SharedContainerManager builds and tears down over the
+    // plugin's lifetime.
+    kernel_ingestor_engine::registerNativeIngestorSymbols();
+#endif
+
     _engineManager
         = std::make_unique<hipdnn_plugin_sdk::EngineManager<Handle, Settings, Context>>();
 

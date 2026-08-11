@@ -111,6 +111,18 @@ public:
      *
      * @note May be called concurrently from several threads with different device
      *       buffers, so it must not mutate @p prepared or the handler.
+     *
+     * Deliberately one call, one kernel: multi-launch UDDs (a UDD whose dispatch is
+     * several kernels rather than one) are out of scope for this interface and are
+     * correctly deferred, per RFC 0017's own follow-up. When that lands, the direction
+     * this interface takes is a handler invoked once per launch that internally issues
+     * N kernel launches on @p handle's stream -- not the SDK calling launch() N times --
+     * because grid/block/argument formulas for launch i in a multi-kernel dispatch can
+     * depend on what launch i-1 produced (a two-pass reduction's second kernel sizes
+     * itself from the first's output), which only the handler that owns the whole
+     * dispatch can resolve. Recording the direction now, rather than only the
+     * deferral, is what keeps this a decision instead of an open question the next
+     * implementer has to re-litigate.
      */
     // NOLINTNEXTLINE(portability-template-virtual-member-function)
     virtual void launch(const THandle& handle,

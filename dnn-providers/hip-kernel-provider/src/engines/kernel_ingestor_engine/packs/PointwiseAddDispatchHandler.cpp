@@ -121,8 +121,10 @@ std::unique_ptr<PreparedDispatch> PointwiseAddDispatchHandler::prepare(
     options.add("HIP_PLUGIN_POINTWISE_ADD_TYPE", elementTypeFor(kernel));
     options.add("HIP_PLUGIN_POINTWISE_ADD_BLOCK_SIZE", blockSize);
 
-    auto program = _kernelCompiler.compile(kernel.sourceFile, options);
-    auto runnableKernel = program->getKernel(kernel.entryPoint);
+    // The only KernelSourceKind this dispatch handler knows how to load; see
+    // KernelSource's doc for the kinds a future adapter will add.
+    auto program = _kernelCompiler.compile(kernel.source.sourceFile, options);
+    auto runnableKernel = program->getKernel(kernel.source.entryPoint);
 
     // One element, so one workgroup; the block size comes from kernel metadata, which is
     // how a per-kernel launch quantity reaches a dispatch descriptor shared by the pack.

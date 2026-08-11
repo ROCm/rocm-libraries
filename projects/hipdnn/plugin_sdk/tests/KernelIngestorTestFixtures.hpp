@@ -217,8 +217,8 @@ inline KernelDescriptor makeTestKernel(const DescriptorId& id,
     KernelDescriptor kernel;
     kernel.id = id;
     kernel.name = name;
-    kernel.sourceFile = "Test.cpp";
-    kernel.entryPoint = "TestKernel";
+    kernel.source.sourceFile = "Test.cpp";
+    kernel.source.entryPoint = "TestKernel";
     kernel.metadata = {{BLOCK_SIZE, MetadataValue{blockSize}}, {DTYPE, MetadataValue{dtype}}};
     return kernel;
 }

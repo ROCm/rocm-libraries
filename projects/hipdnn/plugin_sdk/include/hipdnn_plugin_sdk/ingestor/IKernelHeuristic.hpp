@@ -6,12 +6,15 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <algorithm>
+#include <memory>
 #include <mutex>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include <hipdnn_plugin_sdk/ingestor/Catalog.hpp>
+#include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
@@ -137,6 +140,33 @@ private:
     mutable std::once_flag _resolved;
     mutable ScoreFn _scoreFn = nullptr;
 };
+
+/**
+ * @brief Builds the IKernelHeuristic a UHD names, keyed on its kind.
+ *
+ * The same shape DispatchRegistry's symbol-to-handler resolution has, applied to the
+ * one descriptor RFC 0017 constructs and then steps around: before this, a UHD's
+ * `scoreSymbol` had no path from the descriptor to a live heuristic except a provider
+ * hand-building a NativeKernelHeuristic itself. With this factory, "add file loading and
+ * it works" is true for a UHD exactly as it already is for a UMD or a UDD.
+ *
+ * @throws std::invalid_argument if @p descriptor names a kind with no adapter yet
+ *         (HeuristicKind::MODEL). Fails at descriptor-assembly time rather than at the
+ *         first rank(), for the same reason KernelIngestorStateManager's other
+ *         cross-reference checks run eagerly: a kind nothing can load is a load error,
+ *         not a runtime surprise on the first graph that needs ranking.
+ */
+inline std::shared_ptr<IKernelHeuristic> makeKernelHeuristic(const HeuristicDescriptor& descriptor)
+{
+    switch(descriptor.kind)
+    {
+    case HeuristicKind::NATIVE:
+        return std::make_shared<NativeKernelHeuristic>(descriptor.payload);
+    default:
+        throw std::invalid_argument("heuristic '" + toString(descriptor.id)
+                                    + "' names a kind with no adapter yet");
+    }
+}
 
 } // namespace hipdnn_plugin_sdk::ingestor
 

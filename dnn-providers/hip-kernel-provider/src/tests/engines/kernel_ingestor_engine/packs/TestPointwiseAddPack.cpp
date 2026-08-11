@@ -51,8 +51,10 @@ TEST(TestPointwiseAddPack, EveryKernelNamesTheEmbeddedSource)
 
     for(const auto& kernel : set.packs.front().kernels)
     {
-        EXPECT_EQ(kernel.sourceFile, "PointwiseAdd.cpp");
-        EXPECT_EQ(kernel.entryPoint, "PointwiseAdd");
+        EXPECT_EQ(kernel.source.kind,
+                  hipdnn_plugin_sdk::ingestor::KernelSourceKind::EMBEDDED_SOURCE);
+        EXPECT_EQ(kernel.source.sourceFile, "PointwiseAdd.cpp");
+        EXPECT_EQ(kernel.source.entryPoint, "PointwiseAdd");
     }
 }
 

@@ -9,6 +9,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 
@@ -34,8 +35,9 @@ struct KernelDefinition
     /// The dispatch descriptor id, denormalized from the pack so a caller holding only a
     /// KernelDefinition can reach its dispatch without walking the pack list again.
     DescriptorId dispatchId;
-    std::string sourceFile;
-    std::string entryPoint;
+    /// Where this kernel's code comes from and how to load it. See KernelSource for why
+    /// this is a tagged union rather than two bare strings.
+    KernelSource source;
     /// Complete: every KMD field, with defaults filled in for fields the UKD omitted.
     MetadataValues metadata;
     int64_t priority = 0;
@@ -90,6 +92,25 @@ struct KernelDefinition
         {
             throw std::invalid_argument("metadata field '" + field + "' of kernel '"
                                         + toString(kernelId) + "' is not a string");
+        }
+        return *value;
+    }
+
+    /// @brief The int-list value of a KMD field (e.g. `stride_order`). Throws on the
+    /// same terms as getIntMetadata.
+    const std::vector<int64_t>& getIntListMetadata(const std::string& field) const
+    {
+        auto it = metadata.find(field);
+        if(it == metadata.end())
+        {
+            throw std::out_of_range("kernel '" + toString(kernelId) + "' has no metadata field '"
+                                    + field + "'");
+        }
+        const auto* value = std::get_if<std::vector<int64_t>>(&it->second);
+        if(value == nullptr)
+        {
+            throw std::invalid_argument("metadata field '" + field + "' of kernel '"
+                                        + toString(kernelId) + "' is not an int list");
         }
         return *value;
     }

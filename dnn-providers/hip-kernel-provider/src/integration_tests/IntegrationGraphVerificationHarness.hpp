@@ -164,6 +164,13 @@ protected:
         return _stream;
     }
 
+    // Exposed to subclasses that need to drive Graph staging calls
+    // (build_operation_graph/create_execution_plans/get_ranked_engine_ids/etc.)
+    // directly rather than solely through verifyGraph().
+    hipdnnHandle_t _handle = nullptr;
+    hipStream_t _stream = nullptr;
+    int _deviceId = 0;
+
 private:
     void executeGpuGraph(hipdnnHandle_t handle,
                          hipdnn_frontend::graph::Graph& graph,
@@ -212,9 +219,6 @@ private:
         return true;
     }
 
-    hipdnnHandle_t _handle = nullptr;
-    hipStream_t _stream = nullptr;
-    int _deviceId = 0;
     std::unordered_map<int64_t, std::string> _tensorIdToNameMap;
     std::unordered_map<int64_t, std::unique_ptr<hipdnn_test_sdk::utilities::IReferenceValidation>>
         _tensorIdToValidatorMap;

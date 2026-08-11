@@ -85,6 +85,21 @@ public:
      *         validation failures in the real system: a dangling cross-reference cannot
      *         be evaluated, and duplicate catalog keys leave selection with two
      *         indistinguishable candidates and no basis to prefer either.
+     *
+     * **This constructor eagerly walks and validates every pack and kernel, via
+     * validateAndIndexPacks(), at plugin load -- a conscious amendment of RFC 0017 §3
+     * and §8's "nothing is parsed until a graph needs it".** What stays lazy is the
+     * expensive part: a kernel source is not compiled and a heuristic model is not read
+     * until a graph actually needs that kernel or that ranking (see
+     * NativeKernelHeuristic's doc for the latter). Descriptor *parsing* -- walking the
+     * KMD/UMD/UDD/UKD structures this constructor is handed and checking their
+     * cross-references and metadata tuples -- is cheap relative to those, and doing it
+     * once at load time is what lets every later match, rank, and dispatch assume the
+     * descriptor set is internally consistent rather than re-checking it per graph. The
+     * cost this trades away is startup latency proportional to descriptor count, which
+     * for an in-process pack like this one is negligible; a loader reading many packs
+     * from disk is where that cost becomes visible, and if it ever needs to be paid
+     * lazily instead, this is the constructor that amendment would have to change.
      */
     KernelIngestorStateManager(MetadataSchema schema,
                                std::vector<MatchDescriptor> matchers,
@@ -373,13 +388,24 @@ private:
         return catalog;
     }
 
-    /// A graph-scoped matcher's verdict for one (graph, device), keyed by matcher id.
+    /// One graph-scoped matcher's verdict for one (graph, device), keyed by matcher id.
     ///
     /// Matchers are shared by id across packs, so the same check would otherwise be
     /// re-run once per pack that lists it. The memo covers what the matcher *bound* as
     /// well as whether it passed, since re-running it to recover its bindings would
     /// defeat the memo entirely.
-    using GraphMatcherMemo = std::unordered_map<DescriptorId, bool, DescriptorIdHash>;
+    ///
+    /// `bound` holds only what THIS matcher wrote, isolated from every other matcher's
+    /// writes. That isolation is what makes it safe to merge into a per-pack scoped
+    /// view one matcher at a time: a pack merges in exactly the matchers it lists, never
+    /// a sibling pack's unrelated contribution to some other matcher's memo entry.
+    struct GraphMatcherVerdict
+    {
+        bool passed = false;
+        BoundTokens bound;
+    };
+    using GraphMatcherMemo
+        = std::unordered_map<DescriptorId, GraphMatcherVerdict, DescriptorIdHash>;
 
     /**
      * @brief Runs every pack's matchers over @p context, cheapest and broadest first.
@@ -392,6 +418,16 @@ private:
      * That ordering, and that sharing, are the point of splitting matchers by scope: the
      * broadly shared checks are what prune the candidate set fast, so an engine whose
      * packs do not apply pays for each distinct check once rather than once per pack.
+     *
+     * Each pack's graph-scoped bindings are accumulated in a scope-local view and merged
+     * into the catalog's shared bound state only when the whole pack survives (see
+     * graphLevelMatchersPass()). Bindings a pruned pack's matchers wrote along the way
+     * are discarded with that pack's local view rather than leaking into the state a
+     * surviving pack's kernel later reads: with one pack this was invisible, because a
+     * pruned pack's catalog is empty and nothing reads its bound state, but two packs
+     * sharing an engine is the normal case (matchers are shared by id), and the moment a
+     * second pack survives, a bare shared `bound` map would hand its kernels tokens that
+     * describe a graph shape only the pruned pack's own matcher resolved.
      */
     Catalog buildCatalog(const MatchContext& context) const
     {
@@ -400,18 +436,26 @@ private:
 
         for(const auto& pack : _packs)
         {
-            if(!graphLevelMatchersPass(pack, context, graphVerdicts, catalog.bound))
+            // Scoped to this pack. Merged into catalog.bound below only if every one of
+            // this pack's graph-scoped matchers passes; discarded with this pack's
+            // failure otherwise. See buildCatalog()'s doc for why that scoping is the
+            // fix rather than an optimization.
+            BoundTokens packBound;
+            if(!graphLevelMatchersPass(pack, context, graphVerdicts, packBound))
             {
                 continue;
             }
+
+            // Merged rather than kept per pack: Catalog::bound's own doc explains why a
+            // token name means the same thing to every pack in an engine.
+            catalog.bound.insert(packBound.begin(), packBound.end());
 
             for(const auto& kernel : pack.kernels)
             {
                 KernelDefinition definition{kernel.id,
                                             pack.id,
                                             pack.dispatchId,
-                                            kernel.sourceFile,
-                                            kernel.entryPoint,
+                                            kernel.source,
                                             completeMetadata(kernel),
                                             kernel.priority};
 
@@ -425,14 +469,18 @@ private:
         return catalog;
     }
 
-    /// @param bound Accumulates what the matchers resolved, for the catalog to keep.
-    ///        Written straight into the catalog's map: a matcher that passes contributes
-    ///        its bindings, and one that fails prunes its pack, so nothing it wrote can
-    ///        be read by a kernel that survives.
+    /**
+     * @param packBound Accumulates what THIS pack's own graph-scoped matchers resolved,
+     *        isolated from every other pack's contribution (see GraphMatcherVerdict).
+     *        The caller merges it into the catalog's shared bound state only when this
+     *        function returns true; a pack this function prunes leaves @p packBound to
+     *        be discarded unmerged, which is what stops its matchers' bindings from
+     *        reaching a kernel in a pack that survives.
+     */
     bool graphLevelMatchersPass(const KernelDescriptorPack& pack,
                                 const MatchContext& context,
                                 GraphMatcherMemo& graphVerdicts,
-                                BoundTokens& bound) const
+                                BoundTokens& packBound) const
     {
         for(const auto& matcherId : pack.matcherIds)
         {
@@ -445,18 +493,27 @@ private:
             auto memo = graphVerdicts.find(matcherId);
             if(memo == graphVerdicts.end())
             {
-                // Binds on the first evaluation only. A later pack listing this same
-                // matcher reuses both the verdict and the bindings it already wrote,
-                // which is the whole point of memoizing across packs.
-                const bool passed
-                    = GraphMatcherRegistry::resolve(matcher.matchSymbol)(context, bound);
-                memo = graphVerdicts.emplace(matcherId, passed).first;
+                // Evaluated on the first pack that lists this matcher only. A later pack
+                // listing the same matcher reuses both the verdict and the bindings it
+                // already wrote from this memo entry, which is the whole point of
+                // memoizing across packs -- the native function itself runs once no
+                // matter how many packs share the matcher.
+                GraphMatcherVerdict verdict;
+                verdict.passed
+                    = GraphMatcherRegistry::resolve(matcher.matchSymbol)(context, verdict.bound);
+                memo = graphVerdicts.emplace(matcherId, std::move(verdict)).first;
             }
 
-            if(!memo->second)
+            if(!memo->second.passed)
             {
                 return false;
             }
+
+            // Merges only THIS matcher's own bindings into the pack's scoped view. A
+            // pack that does not list this matcher never merges them; a pack that
+            // shares it with another pack that failed elsewhere still merges exactly
+            // what this matcher wrote, reused from the memo rather than recomputed.
+            packBound.insert(memo->second.bound.begin(), memo->second.bound.end());
         }
         return true;
     }

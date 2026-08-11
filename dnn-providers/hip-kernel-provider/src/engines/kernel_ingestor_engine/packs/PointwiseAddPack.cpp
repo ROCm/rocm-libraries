@@ -47,8 +47,10 @@ KernelDescriptor makeKernel(const DescriptorId& id,
     KernelDescriptor kernel;
     kernel.id = id;
     kernel.name = "pointwise_add." + variant;
-    kernel.sourceFile = "PointwiseAdd.cpp";
-    kernel.entryPoint = "PointwiseAdd";
+    // The only KernelSourceKind this POC implements; see KernelSource's doc for what
+    // the other kinds converge on once a loader ships them.
+    kernel.source.sourceFile = "PointwiseAdd.cpp";
+    kernel.source.entryPoint = "PointwiseAdd";
     kernel.metadata = {{std::string(BLOCK_SIZE_FIELD), MetadataValue{blockSize}},
                        {std::string(DTYPE_FIELD), MetadataValue{dtype}}};
     kernel.priority = priority;
@@ -70,7 +72,7 @@ PointwiseAddDescriptorSet buildPointwiseAddDescriptorSet()
 
     set.heuristic.id = HEURISTIC_ID;
     set.heuristic.name = "pointwise add selector";
-    set.heuristic.scoreSymbol = SCORE_SYMBOL;
+    set.heuristic.payload = SCORE_SYMBOL;
 
     set.engine.id = ENGINE_ID;
     set.engine.name = ENGINE_NAME;
@@ -129,16 +131,14 @@ int64_t pointwiseAddEngineId()
     return hipdnn_data_sdk::utilities::engineNameToId(ENGINE_NAME);
 }
 
-std::unique_ptr<KernelIngestorStateManager<Handle>> makePointwiseAddStateManager()
+std::unique_ptr<KernelIngestorStateManager<Handle>>
+    makePointwiseAddStateManager(PointwiseAddDescriptorSet set)
 {
-    auto set = buildPointwiseAddDescriptorSet();
-
-    return std::make_unique<KernelIngestorStateManager<Handle>>(
-        std::move(set.schema),
-        std::move(set.matchers),
-        std::move(set.dispatches),
-        std::move(set.packs),
-        std::make_shared<NativeKernelHeuristic>(std::string(SCORE_SYMBOL)));
+    return std::make_unique<KernelIngestorStateManager<Handle>>(std::move(set.schema),
+                                                                std::move(set.matchers),
+                                                                std::move(set.dispatches),
+                                                                std::move(set.packs),
+                                                                makeKernelHeuristic(set.heuristic));
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine

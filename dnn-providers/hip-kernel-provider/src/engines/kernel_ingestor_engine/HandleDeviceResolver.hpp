@@ -28,6 +28,19 @@ namespace hip_kernel_provider::kernel_ingestor_engine
  * never change for a given device. The cache hands out references that stay valid for
  * this resolver's lifetime, so entries are never erased or rehashed away: node handles
  * in std::unordered_map keep referenced values pinned across growth.
+ *
+ * Instantiated once, at process lifetime (see KernelIngestorEngine.cpp's deviceResolver()),
+ * rather than once per engine or once per Container. This class carries no engine state
+ * -- only device properties, which are a fact about the machine, not about which engine
+ * or container is asking -- so nothing about it needs to be reconstructed when a
+ * container is destroyed and rebuilt (SharedContainerManager's weak_ptr does exactly
+ * that across handle churn). A per-engine instance would duplicate the same cache once
+ * per engine and lose its warm entries every time a container cycled, for no isolation
+ * benefit: two engines resolving the same physical device must agree on that device's
+ * properties by construction, so a shared cache is the correct scope, not merely a
+ * convenient one. That is also why the cache the class holds is never invalidated
+ * ("references stay valid for this resolver's lifetime" above is a promise this
+ * lifetime choice keeps easy to honor).
  */
 class HandleDeviceResolver : public hipdnn_plugin_sdk::ingestor::IDeviceResolver<Handle>
 {
