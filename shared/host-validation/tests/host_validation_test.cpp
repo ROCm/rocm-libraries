@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <complex>
 #include <cstdint>
@@ -175,6 +176,44 @@ void testRuntimeMixedAndBlockScaledGemm() {
     referenceGemm(blockScaled);
     require(blockD.view().loadAs<float>({0, 0}) == 2 * 2 * 8 + 2 * 4 * 16,
             "Runtime block-scaled GEMM result mismatch.");
+}
+
+void testExactIntegerGemm() {
+    using namespace roc::host_validation;
+
+    const std::array<int32_t, 1> a{std::numeric_limits<int32_t>::max()};
+    const std::array<int32_t, 1> b{2};
+    const std::array<int32_t, 1> c{std::numeric_limits<int32_t>::max()};
+    std::array<int32_t, 1> d{};
+    GemmRequest problem(
+        GemmOperand(
+            TensorView::fromNative(Layout::contiguous(Shape{1, 1}), std::span<const int32_t>(a))),
+        GemmOperand(
+            TensorView::fromNative(Layout::contiguous(Shape{1, 1}), std::span<const int32_t>(b))),
+        TensorView::fromNative(Layout::contiguous(Shape{1, 1}), std::span<const int32_t>(c)),
+        MutableTensorView::fromNative(Layout::contiguous(Shape{1, 1}), std::span<int32_t>(d)),
+        ScalarType::Int32);
+    problem.epilogue.beta = 2.0;
+    referenceGemm(problem);
+
+    const auto wrapMultiply = [](int32_t left, int32_t right) {
+        return std::bit_cast<int32_t>(static_cast<uint32_t>(left) * static_cast<uint32_t>(right));
+    };
+    const auto wrapAdd = [](int32_t left, int32_t right) {
+        return std::bit_cast<int32_t>(static_cast<uint32_t>(left) + static_cast<uint32_t>(right));
+    };
+    const int32_t expected = wrapAdd(wrapMultiply(a[0], b[0]), wrapMultiply(int32_t{2}, c[0]));
+    require(d[0] == expected, "Int32 GEMM did not use defined wrapping arithmetic.");
+
+    problem.epilogue.alpha = 0.5;
+    bool rejectedFractionalIntegerScalar = false;
+    try {
+        referenceGemm(problem);
+    } catch (const std::invalid_argument&) {
+        rejectedFractionalIntegerScalar = true;
+    }
+    require(rejectedFractionalIntegerScalar,
+            "Int32 GEMM accepted a fractional floating-point scalar proxy.");
 }
 
 void testRuntimeComplexAndExplicitAxisGemm() {
@@ -1118,6 +1157,7 @@ int main() {
     testRuntimeReferenceGemm();
     testZeroGemmScalarsSuppressNonFiniteOperands();
     testRuntimeMixedAndBlockScaledGemm();
+    testExactIntegerGemm();
     testRuntimeComplexAndExplicitAxisGemm();
     testOutputSelection();
     testReferenceEpilogue();

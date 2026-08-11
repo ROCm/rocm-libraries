@@ -12,6 +12,7 @@
 #include <complex>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <roc/host_validation/operation_types.hpp>
 #include <span>
@@ -28,6 +29,38 @@ struct IsComplex : std::false_type {};
 
 template <typename T>
 struct IsComplex<std::complex<T>> : std::true_type {};
+
+template <typename T>
+T wrappingAdd(T left, T right) {
+    if constexpr (std::is_integral_v<T> && std::is_signed_v<T>) {
+        using Unsigned = std::make_unsigned_t<T>;
+        const Unsigned result = static_cast<Unsigned>(left) + static_cast<Unsigned>(right);
+        return std::bit_cast<T>(result);
+    } else {
+        return left + right;
+    }
+}
+
+template <typename T>
+T wrappingMultiply(T left, T right) {
+    if constexpr (std::is_integral_v<T> && std::is_signed_v<T>) {
+        using Unsigned = std::make_unsigned_t<T>;
+        const Unsigned result = static_cast<Unsigned>(left) * static_cast<Unsigned>(right);
+        return std::bit_cast<T>(result);
+    } else {
+        return left * right;
+    }
+}
+
+template <typename T>
+T wrappingNegate(T value) {
+    if constexpr (std::is_integral_v<T> && std::is_signed_v<T>) {
+        using Unsigned = std::make_unsigned_t<T>;
+        return std::bit_cast<T>(Unsigned{0} - static_cast<Unsigned>(value));
+    } else {
+        return -value;
+    }
+}
 
 template <typename T>
 T conjugateIfNeeded(const T& value, bool conjugate) {
@@ -50,7 +83,7 @@ Accumulator applyActivation(Activation activation, Accumulator value, Accumulato
             case Activation::None:
                 return value;
             case Activation::Absolute:
-                return value >= Accumulator(0) ? value : -value;
+                return value >= Accumulator(0) ? value : wrappingNegate(value);
             case Activation::ClippedRelu:
                 return value > parameter0 ? std::min(value, parameter1)
                                           : std::min(Accumulator(0), parameter1);
@@ -82,7 +115,7 @@ Accumulator applyActivation(Activation activation, Accumulator value, Accumulato
                 return applyActivation(Activation::Gelu, value, parameter0, parameter1) *
                        parameter0;
             case Activation::LeakyRelu:
-                return value > Accumulator(0) ? value : value * parameter0;
+                return value > Accumulator(0) ? value : wrappingMultiply(value, parameter0);
             case Activation::ReluDerivative:
                 return value > Accumulator(0) ? Accumulator(1) : Accumulator(0);
             case Activation::Sigmoid: {
@@ -212,6 +245,10 @@ class RuntimeMatrixOutputWriter {
         if constexpr (IsComplex<Accumulator>::value) {
             throw std::invalid_argument(
                 "Saturating output conversion does not accept complex values.");
+        } else if constexpr (std::is_integral_v<Accumulator>) {
+            const Accumulator clamped =
+                std::clamp(value, static_cast<Accumulator>(-128), static_cast<Accumulator>(127));
+            m_output.storeFrom({row, column}, static_cast<int8_t>(clamped));
         } else {
             const long double rounded = std::nearbyint(static_cast<long double>(value));
             const long double clamped =
@@ -341,7 +378,17 @@ Accumulator runtimeScalar(std::complex<double> value, const char* name) {
         if (value.imag() != 0.0)
             throw std::invalid_argument(std::string("Real reference accumulator has complex ") +
                                         name + ".");
-        return static_cast<Accumulator>(value.real());
+        if constexpr (std::is_integral_v<Accumulator>) {
+            const double real = value.real();
+            if (!std::isfinite(real) || std::trunc(real) != real ||
+                real < static_cast<double>(std::numeric_limits<Accumulator>::lowest()) ||
+                real > static_cast<double>(std::numeric_limits<Accumulator>::max()))
+                throw std::invalid_argument(
+                    std::string("Integer reference accumulator has invalid ") + name + ".");
+            return static_cast<Accumulator>(real);
+        } else {
+            return static_cast<Accumulator>(value.real());
+        }
     }
 }
 
