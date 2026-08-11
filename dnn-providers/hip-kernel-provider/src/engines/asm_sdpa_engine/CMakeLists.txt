@@ -122,6 +122,24 @@ if(NOT EXISTS "${_KPACK_PYTHON_DIR}/rocm_kpack/kpack.py")
         "Set -DKPACK_PYTHON_DIR=<rocm-systems>/shared/kpack/python")
 endif()
 
+# --- Ensure zstandard is available (required by rocm_kpack) ---
+execute_process(
+    COMMAND ${Python3_EXECUTABLE} -c "import zstandard"
+    RESULT_VARIABLE _zstd_check
+    OUTPUT_QUIET ERROR_QUIET
+)
+if(NOT _zstd_check EQUAL 0)
+    message(STATUS "Installing Python 'zstandard' package (required by rocm_kpack)...")
+    execute_process(
+        COMMAND ${Python3_EXECUTABLE} -m pip install "zstandard>=0.20.0"
+        RESULT_VARIABLE _pip_result
+    )
+    if(NOT _pip_result EQUAL 0)
+        message(FATAL_ERROR "Failed to install 'zstandard' Python package. "
+            "Install manually via: pip install zstandard>=0.20.0")
+    endif()
+endif()
+
 # --- Per-arch kpack packing custom commands ---
 set(ASM_KPACK_PACK_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/asm/asm_kernels/pack.py")
 set(ASM_KPACK_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/.kpack")
