@@ -3,83 +3,40 @@ Copyright © Advanced Micro Devices, Inc., or its affiliates.
 SPDX-License-Identifier: MIT
 -->
 
-# The AOT catalog engine — kernel-author guide
+# The AOT catalog engine — runtime / loader
 
-This is the hands-on guide for the **AOT (ahead-of-time) catalog engine** in the HIP
-kernel provider. It is written for the rocKE kernel-authoring team so you can bring
-your own gfx1151 (and beyond) kernels into hipDNN and do end-to-end testing **without
-writing or rebuilding any C++** — you drop a compiled code object (`.co`) and edit a
-JSON file.
+This is the **AOT (ahead-of-time) catalog engine** in the HIP kernel provider: a
+deliberately thin, **throwaway** bring-up path that loads loose, rocke-authored code
+objects (`.co` / HSACO) described by data-only `family.json` files, and launches them for
+matmul / rmsnorm / sdpa graphs. It exists so kernels can be brought into hipDNN **as data**
+— no C++ edit per kernel — for end-to-end experimentation on gfx1151 (and beyond).
 
-The engine is a deliberately thin, throwaway bring-up path. Its whole point is that a
-kernel author owns kernels *as data*: an ahead-of-time-compiled code object (`.co` /
-HSACO) plus a `family.json` describing how to **select** and **launch** it. The C++
-side is a small set of fixed, reviewed *adapters* (one per op kind) that map a hipDNN
-op graph to a launch ABI. You extend coverage and tuning **data-only**; you touch C++
-only when the *ABI itself* changes or you teach the engine a genuinely new op.
+This README covers the **engine's runtime behavior only**: what it loads, how it resolves
+and validates the catalog, how it declines, its capability/limits, and how it is built.
+**Kernel authoring lives elsewhere** — the families, producers, `family.json` schema, and
+per-op ABIs are owned by the KA teams in the rocke subsystem. See
+**[`rocke/aot_catalog/README.md`](../../../rocke/aot_catalog/README.md)** for the
+authoring guide.
 
-Three op families ship today, each proven end-to-end on gfx1151 (AMD Radeon 8060S /
-Strix Halo, RDNA3.5):
+> **This engine is ON by default** (`ENABLE_AOT_CATALOG_ENGINE=ON`) but is **inert until a
+> catalog is present** — with nothing dropped beside the plugin it loads zero kernels and
+> declines every graph. It is compiled in by default precisely so a catalog that appears
+> later (kernels dropped locally, or the rocke families enabled in TheRock) is picked up with
+> **no provider rebuild**. Building the *kernels* is the separate opt-in (see [§6](#6-how-it-is-built)).
 
-| op kind    | adapter          | shipped families                                   | §  |
-|------------|------------------|----------------------------------------------------|----|
-| `matmul`   | `GemmAdapter`    | `gemm_wmma_gfx1151`, `gemm_wmma_universal_gfx1151`  | [§6](#6-gemm--matmul) |
-| `rmsnorm`  | `RmsNormAdapter` | `rmsnorm2d_gfx1151`                                 | [§7](#7-rmsnorm) |
-| `sdpa`     | `SdpaAdapter`    | `fmha_wmma_fwd_gfx1151`                             | [§8](#8-sdpa-flash-attention-forward--the-universal-forward-adapter) |
-
-A **family is one algorithm**, not one dtype: every family carries its f16 *and* bf16
-kernels in a single flat `kernels[]` list, each kernel naming its own `dtype`
-constraint (§3). All kernels in a family share the algorithm's tunable knobs — those
-knobs are baked into each `.co` at produce time, and their consequences surface as each
-kernel's per-kernel `constraints`.
-
-**Core vocabulary** — a one-line gloss of the nouns used throughout; each is
-expanded where it first matters.
-
-| term | what it is |
-|------|------------|
-| **op kind** | the operation class an adapter handles: `matmul`, `rmsnorm`, or `sdpa`. |
-| **adapter** | the fixed, reviewed C++ for one op kind; maps a hipDNN op graph to a launch (decode → problem → bindings → grid). One per op kind. |
-| **family** | one algorithm for one op kind on one arch, in `library/<arch>/<family>/`; carries all its dtypes' kernels together. |
-| **kernel** | one compiled variant: a `.co` plus a `kernels[]` entry (its `symbol`, ABI, grid, and `constraints`). |
-| **`.co`** | the ahead-of-time-compiled code object (HSACO) a kernel launches — a build product, never in git. |
-| **`family.json`** | a family's spec: its `kernels[]` list plus identity (name, op kind, arch). |
-| **producer** | the co-located `produce_<family>_co.py` that compiles the family's `.co`(s) at build time (calls rocKE as an external tool). |
-| **problem** (shape / key) | what an adapter's `decode` extracts from a graph — dtype, dims, capability facts; the keys that are legal in `constraints` and `grid`. |
-| **constraint** | a per-kernel rule (`equals` / `multiple_of`) on a problem key; **fail-closed** — all must hold or the kernel is skipped. |
-| **candidate** | a kernel whose constraints all hold for the current problem; when several apply, they are timed against each other. |
-| **catalog** | the on-disk tree of families the engine loads at runtime (`<arch>/<family>/`). |
-| **tune cache** | the remembered fastest candidate per problem, so later executes skip re-measuring. |
-| **decline** | when no kernel applies, the engine returns "not applicable" and another hipDNN engine serves the graph — never a wrong answer. |
-
-> **Design principle — a family folder is a self-contained unit.** Each
-> `library/<arch>/<family>/` folder owns *everything* about one family and only
-> that family — its `family.json`, its `CMakeLists.txt`, its co-located producer,
-> and its tests — so adding a family is dropping in a folder and deleting one is
-> `rm -rf`, with nothing left dangling anywhere else. The testing contract that
-> makes this isolation hold (a family's tests depend only on that family) is
-> spelled out in [§9](#9-how-to-test).
-
-**New here? Jump to [§2 Quick start](#2-quick-start-the-self-serve-recipe)** — the 30-second
-recipe plus a top-to-bottom KA checklist.
-Sections [§1](#1-the-big-picture-what-happens-at-runtime)–[§5](#5-measure-and-cache-tuning)
-are the engine mechanics that apply to **every** op. Sections §6–§8 are the per-op
-specifics (ABI, gotchas, decline boundary). [§9](#9-how-to-test)–[§11](#11-file-map)
-cover testing, adding a brand-new op, and the file map.
-[§12](#12-capabilities-and-limits-and-the-walls-beyond-gfx1151) is the honest
-capability map: what this design does well, and exactly where it stops — read it before
-scoping SDPA/conv work on gfx942/gfx950/gfx1250.
-[§13](#13-authoring-a-forward-sdpa-family-on-a-new-arch-gfx942gfx950) is the step-by-step
-handoff kit for authoring a **forward SDPA family on a new arch** as data (vocabulary
-table, capability-key contract, copy-paste `family.json` template).
+**Key property — the runtime has ZERO dependency on rocke.** The engine only *reads* the
+catalog at runtime; it does not build kernels and does not link or import anything from
+rocke. Adding or removing a kernel family is entirely a rocke-side change — this engine
+never moves. The only contract between the two is the on-disk catalog layout and the
+`family.json` format described below.
 
 ---
 
-## 1. The big picture: what happens at runtime
+## 1. What happens at runtime
 
 ```
 torch op  (F.linear / F.rms_norm / F.scaled_dot_product_attention / …)
-        │  (optional) a torch-functional monkeypatch that routes to AOT (§9)
+        │  (optional) a torch-functional monkeypatch that routes to AOT
         ▼
 hipDNN frontend  ──►  single-node op graph  (Matmul / RmsNorm / Sdpa attributes)
         ▼
@@ -95,954 +52,240 @@ CatalogPlan  (first execute: measure each candidate, cache the fastest by proble
         ▼
 LaunchAbi  packs the arg list by name, evaluates grid + block, sharedMemBytes, workspace
         ▼
-hipModuleLaunchKernel  →  your .co
+hipModuleLaunchKernel  →  the .co
 ```
 
-Adding a kernel = adding a `kernels[]` entry (and its `.co`) that `candidatesFor` can
-select. Everything downstream is already wired. If `decode` declines, another hipDNN
-engine serves the graph and **the model never miscomputes** — a missing/inapplicable
-kernel is a fallback, never a wrong answer.
+Three op adapters ship (`GemmAdapter`, `RmsNormAdapter`, `SdpaAdapter`), each mapping one
+op kind to a launch. If no adapter decodes the graph, or no kernel's constraints match, the
+engine **declines** and another hipDNN engine serves the graph — a missing or inapplicable
+kernel is always a fallback, **never a wrong answer**.
+
+**Selection is measure-and-cache.** Constraints prune the family to the candidates that
+*can* run a problem; `CatalogPlan` then times every survivor on the real hardware and caches
+the fastest, keyed on `family + canonical problem` (cache file: env `HIPDNN_AOT_TUNE_CACHE`,
+else a temp file). There is no heuristic or cost model. See
+[§4](#4-capabilities-and-limits) for what this does and doesn't scale to.
 
 ---
 
-## 2. Quick start (the self-serve recipe)
+## 2. What it loads — the catalog
 
-**The 30-second version** — bring a kernel into hipDNN as data:
+The engine reads a catalog tree of the form:
 
-1. Compile your kernel to a code object for the target arch with the **exact ABI** for
-   its op kind (§6–§8). For a rocKE-AOT family the family's co-located producer script
-   does this at build time (§9); for a prebuilt family you check the `.co` into the
-   folder yourself.
-2. Add a `kernels[]` entry to the family's `family.json` (schema in §3) pointing at the
-   `.co` by name, with the `dtype` (and other) constraints your kernel requires and the
-   grid it launches with. One folder per algorithm — `library/<arch>/<family>/`, e.g.
-   `library/gfx1151/gemm_wmma/` — holds every dtype's kernels flat.
-3. Build the provider (rocKE-AOT families run their producer → emit `.co` + stage
-   `family.json` into the build tree; see §9), **or** for a quick data-only iteration
-   point `HIPDNN_AOT_CATALOG_DIR` at a populated `<arch>/<family>/` tree directly.
-4. Verify with the substrate parity test (§9); real-model E2E additionally needs the
-   hipDNN→PyTorch injection layer (a separate PR; §9).
-
-To add a **tuning candidate** for a shape you already serve, you only do step 1+3:
-append another `kernels[]` entry with overlapping constraints. `CatalogPlan` measures
-all applicable candidates on the first execute and caches the fastest per problem (§5).
-
-### KA checklist (the thorough version)
-
-Work top to bottom; each rung says *why* and where it is spelled out.
-
-- [ ] **Confirm an adapter already handles your op** — `matmul` / `rmsnorm` / `sdpa`
-      (§6–§8). If not, you have a **genuinely new op**: that needs a small reviewed C++
-      adapter first (§10) and is **not** data-only.
-- [ ] **Compile the `.co` for the exact target arch, with the op's exact ABI** — arg
-      names, types, and order (§6–§8). A rocKE-AOT family's co-located producer does this
-      at build time (§9).
-- [ ] **Write / extend `family.json`** (§3): one `kernels[]` entry per `.co`, pointing at
-      it by `co_file`, with `grid` / `block` / `args_signature` and a constraint for every
-      problem key your kernel handles.
-- [ ] **Constrain fail-closed** (⚠️ the one way this engine returns a *wrong* answer — see
-      the warning in §3). For each key you left *unconstrained*, ask: *will my kernel be
-      correct for every value this key can take?* If not, add the constraint. When in
-      doubt, over-constrain — a too-narrow kernel simply isn't picked (safe fallback, §1);
-      a too-broad one miscomputes.
-- [ ] **Build the provider** (producer emits `.co`, stages `family.json`; §9) — or point
-      `HIPDNN_AOT_CATALOG_DIR` at a populated tree for a data-only iteration.
-- [ ] **Verify correctness** — the substrate parity test is the required, hermetic gate
-      (§9); real-model E2E is the fuller check but needs the hipDNN→PyTorch injection
-      layer (a separate PR; §9).
-- [ ] **If your kernel isn't selected**, set `HIPDNN_AOT_DEBUG=1` and read the resolution
-      / load / decline trace (§9 "Debugging").
-- [ ] **Know when you have left data-only and need reviewed C++**: a changed ABI, a new
-      capability to *decode*, or a grid the DSL can't express (§4); or a brand-new op
-      (§10). These require an adapter edit + rebuild + review — data alone won't do it.
-
----
-
-## 3. `family.json` schema (shared by all ops)
-
-One file per family directory. The top-level fields identify the family; `kernels[]`
-holds one entry per compiled variant.
-
-```json
-{
-    "family": "gemm_wmma_gfx1151",       // unique family name (algorithm, not dtype)
-    "op_kind": "matmul",                  // "matmul" | "rmsnorm" | "sdpa"
-    "arch":    "gfx1151",
-    "dtype":   ["f16", "bf16"],           // dtypes this family covers (documentation;
-                                          //   the per-kernel dtype constraint is what
-                                          //   actually gates selection)
-    "kernels": [ { …f16 variant… }, { …bf16 variant… }, … ]
-}
+```
+<catalog-root>/<arch>/<family>/
+    family.json      # the spec: kernels[] + constraints + ABI/grid + identity
+    <symbol>.co      # one or more compiled code objects (HSACO)
 ```
 
-The `kernels[]` list is **flat and dtype-mixed**: one family folder holds every dtype's
-kernels (f16 + bf16 today; fp8/fp32 the same way), each entry carrying its own
-`{"dtype": {"equals": …}}` constraint. The per-dtype sets may be **disjoint** (e.g.
-`rmsnorm2d`'s 10 f16 vs 8 bf16 specializations). There is no `sections` grouping and no
-`{dtype}` token — selection is per-kernel via the `dtype` constraint.
+`family.json` is the runtime source of truth: each `kernels[]` entry names its `.co`
+(`co_file`), its exported `symbol`, its `constraints` (the applicability predicate), its
+`grid`/`block`, and its `args_signature` (the by-name launch ABI). The full schema and the
+per-op ABIs are in the [authoring guide](../../../rocke/aot_catalog/README.md#3-familyjson-schema-shared-by-all-ops).
 
-Each `kernels[]` entry:
+### Loader is fail-closed and fail-loud
 
-| field             | meaning |
-|-------------------|---------|
-| `symbol`          | the kernel's exported symbol *inside* the `.co` (for `hipModuleGetFunction`); also the tune-cache key. **Unique per candidate.** |
-| `co_file`         | `.co` filename, relative to the family dir. |
-| `constraints`     | map `problem_key → rule`. **Required and non-empty** — a kernel that constrains nothing asserts it handles *every* problem shape (see the ⚠️ note below), so an omitted or empty map is a load-time error, not a wildcard. Rules (integer keys unless noted): `{"equals": v}` (int/string/bool), `{"not_equals": v}`, `{"one_of": [..]}`, `{"min": n}` / `{"max": n}` (inclusive bounds), and `{"multiple_of": n}`. **Fail-closed:** every constrained key must be present in the decoded problem *and* every rule must hold, or the candidate is skipped. This is how the `dtype` constraint selects the f16 vs bf16 kernels within one family. **Zero-extent guard:** `multiple_of` alone admits `0` (since `0 % n == 0`), which would select a kernel for a degenerate `M/N/K==0` (or `seqlen==0`) problem and launch a zero/garbage grid — so every `multiple_of` dim also carries `"min": 1` to reject non-positive extents. |
-| `grid`            | per-axis `x`/`y`/`z`. A value is a constant, a problem-key string (`"M"`, `"H"`, `"B"`), or `{"ceil_div": ["<key>", n]}`. Evaluated from that op's `gridSymbols`. |
-| `block`           | `[x,y,z]` constant workgroup size. |
-| `shared_mem_bytes`| omit for static-LDS kernels (defaults to 0). |
-| `workspace_bytes` | this kernel's scratch need (0 for all shipped reference kernels). |
-| `args_signature`  | the launch ABI as an ordered list of `{name,type}` (`ptr`/`i32`/`f32`). **Must match the op's ABI order exactly** (§6–§8); `LaunchAbi` packs by name in this order. |
+The loader enforces, at load time:
 
-The set of legal `constraints`/`grid` keys is exactly the **problem keys the adapter
-emits** for that op — listed per op in §6–§8.
+- **Unknown fields are rejected, not ignored** — a misspelled field name (`"constraint"`,
+  `"mutiple_of"`) fails the file rather than silently dropping the predicate it carried.
+  (Comment keys must be `_`-prefixed, e.g. `_comment`.)
+- **Constraints are required, non-empty, and fail-closed** — a kernel with no constraints
+  would claim it serves every problem shape, so an empty/omitted map is a load error. At
+  match time every constrained key must be *present in the decoded problem* **and** satisfy
+  its rule, or the candidate is skipped.
+- **`arch` must match the directory** it lives under (`<arch>/<family>/`) — a file copied
+  into the wrong arch folder (kernels built for the wrong GPU) is a load error.
+- **A missing or empty `.co`** named by `co_file` skips that family with a named error
+  rather than being catalogued as valid and failing later at `hipModuleLoad`.
 
-> ⚠️ **Unknown fields are rejected, not ignored.** The loader fails the file on any
-> unrecognized key in a family, kernel, constraint rule, or `args_signature` entry. This
-> closes a *fail-open* footgun: a misspelled **field name** (`"constraint"` for
-> `"constraints"`, `"mutiple_of"` for `"multiple_of"`) would otherwise be silently dropped,
-> quietly discarding the predicate it was meant to carry — the opposite failure mode from a
-> typo *inside* a constraints map, which fails closed. To annotate a file, use the
-> **`_`-prefixed comment convention** (any key starting with `_`, e.g. `_comment`) — those
-> are the only non-schema keys accepted. Note also that a family's `arch` field (if present)
-> must match the arch directory it lives under (`library/<arch>/<family>/`); a mismatch is a
-> load error, since a file copied into the wrong arch folder would load kernels built for the
-> wrong GPU.
-
-> ⚠️ **Under-constraining is the one way this engine returns a wrong answer.** Constraints
-> are the *only* thing standing between a kernel and a problem it cannot actually serve. A
-> key you leave unconstrained is an implicit claim that your kernel is correct for *every*
-> value that key can take. Forget the `dtype` constraint and a bf16 problem can select your
-> f16 kernel; forget a static kernel's `N` and it matches *every* `N` and computes garbage;
-> for SDPA, omit a capability key (`causal`, `gqa_ratio`, a mask fact — §8) and a graph with
-> that feature selects a kernel that silently ignores it. The adapters guarantee only
-> **memory safety** (rank / dtype / shape agreement); **correctness of *applicability* is
-> entirely your `family.json`.** When in doubt, over-constrain: a too-narrow kernel just
-> isn't picked (a safe fallback that another engine serves, §1); a too-broad one
-> miscomputes. Every shipped family constrains its keys explicitly — copy that discipline.
+The single way this design can return a *wrong* answer is an **under-constrained**
+`family.json` (a kernel claiming applicability it doesn't have). The adapters guarantee
+memory safety (rank / dtype / shape agreement); correctness of *applicability* is the
+family author's responsibility. That risk lives entirely on the authoring side — see the
+⚠️ warnings in the [authoring guide](../../../rocke/aot_catalog/README.md#3-familyjson-schema-shared-by-all-ops).
 
 ---
 
-## 4. When you need a C++ change (vs data-only)
-
-The self-serve path (data only) covers:
-
-- **new kernels** for a shape the adapter already decodes;
-- **new dtypes** — add more `kernels[]` entries to the same family, each with its own
-  `dtype` constraint (proven: bf16 GEMM and bf16 RMSNorm were each added with *zero*
-  C++ change);
-- **tuning candidates** — more `kernels[]` entries with overlapping constraints (§5).
-
-You must edit the adapter (`ops/<Op>Adapter.{hpp,cpp}`) and re-review/rebuild only when
-the **contract** changes:
-
-- a **different ABI** (arg added/removed/reordered, or a different scalar convention) —
-  `buildBindings` and the `args_signature` must agree;
-- a **new capability to decode** (e.g. SDPA causal masking, GQA `H_kv != H`, a runtime
-  scale tensor) — `decode` must stop declining it and emit any new problem keys;
-- a **grid/launch shape** the grid DSL can't express.
-
-For a genuinely new op, see §10. For how these boundaries compound when you take SDPA and
-conv to gfx942/gfx950/gfx1250 — and which of them are data, which are adapter C++, and
-which need a new substrate capability — see §12.
-
----
-
-## 5. Measure-and-cache tuning
-
-Multiple `kernels[]` entries whose constraints all hold for the same problem are all
-**applicable candidates**. On the first execute for a given problem key, `CatalogPlan`
-times each candidate (1 warmup + median of several `hipEvent`-timed launches, skipping
-any that error) and caches the fastest, keyed on `family + canonicalized problem`.
-Subsequent executes of that shape reuse the winner from the tune cache.
-
-- Cache location: env `HIPDNN_AOT_TUNE_CACHE`, else a temp file. Delete it to re-measure.
-- A single applicable candidate → launched directly (nothing to measure; the cache
-  read-back shows `[None]`, which is expected and not an error).
-- There is currently **no silent cap** on candidates — every applicable one is
-  measured, so keep the per-problem candidate set small (a handful) to keep
-  first-execute tuning cheap.
-
-The winner is launched *last* during tuning, and every candidate produces the same
-correct output, so timing on the real output buffer is safe.
-
----
-
-## 6. GEMM / matmul
-
-**op_kind `"matmul"` · adapter `GemmAdapter` · families `gemm_wmma_gfx1151`
-(reference) + `gemm_wmma_universal_gfx1151` (tiled), each carrying its f16 + bf16
-kernels.**
-
-### The kernels
-- **Reference** (`gemm_wmma_*`): rocKE `wmma_gemm`, one wave32 per 16×16 output tile,
-  no LDS staging — correctness-first, launch-overhead-cheap (wins on tiny shapes).
-- **Tiled** (`gemm_wmma_universal_*`): rocKE `build_universal_gemm`, LDS-staged,
-  register-blocked (tile 64×64×32, warp 2×2, wt 16×16×16). 3–7× faster than the
-  reference at large shapes; the tune cache picks per shape.
-
-### Layout — RCR only (`y = x @ Wᵀ`, i.e. `nn.Linear`)
-hipDNN `MatmulAttributes` carries only a/b/c UIDs and **no transpose flag** — the
-transpose is expressed by **strides**. `GemmAdapter::decode` reads logical dims and
-**gates on RCR strides**: A `[M,K]` row-major, B logical `[K,N]` with strides `{1,K}`
-(physical `[N,K]` weight), C `[M,N]` row-major. Anything else declines. This is exactly
-`nn.Linear`'s `x @ weightᵀ`. The kernel has **no epilogue** — bias/activation are the
-caller's job (a model override adds bias natively post-matmul).
-
-### ABI (6 args, exact order)
-
-| # | name | type | meaning |
-|---|------|------|---------|
-| 0 | `A` | ptr | activations `[M,K]` row-major |
-| 1 | `B` | ptr | weight, physical `[N,K]` (logical `[K,N]` RCR) |
-| 2 | `C` | ptr | output `[M,N]` row-major |
-| 3 | `M` | i32 | rows |
-| 4 | `N` | i32 | output cols (weight rows) |
-| 5 | `K` | i32 | inner / reduction dim |
-
-### ⚠️ Grid-order gotcha — reference vs tiled are INVERTED
-- Reference: `grid.x = ceil_div(M,16)`, `grid.y = ceil_div(N,16)`.
-- Tiled universal: **`grid.x = ceil_div(N,64)`, `grid.y = ceil_div(M,64)`** (NM order).
-
-Copy the grid block from the matching family; do not assume M-then-N.
-
-### Problem keys (`decode` emits) — legal in `constraints`/`grid`
-| key | type | source |
-|-----|------|--------|
-| `dtype` | string | `"f16"` / `"bf16"` |
-| `M` | int | rows of A / C |
-| `N` | int | cols of C |
-| `K` | int | inner dim |
-
-Constraints are `multiple_of` (16 for the reference; M/N `multiple_of 64`, K
-`multiple_of 32` for the tiled path — sub-tile shapes correctly fall back).
-
-### Files
-Adapter `ops/GemmAdapter.{hpp,cpp}`; data + co-located producers + per-family parity tests
-`library/gfx1151/gemm_wmma/{family.json, produce_gemm_wmma_co.py, TestGemmWmmaNumericParity.cpp}`,
-`library/gfx1151/gemm_wmma_universal/{family.json, produce_gemm_universal_co.py, TestGemmUniversalNumericParity.cpp}`.
-Real-model E2E additionally needs the hipDNN→PyTorch injection layer (separate PR; §9).
-
----
-
-## 7. RMSNorm
-
-**op_kind `"rmsnorm"` · adapter `RmsNormAdapter` · family `rmsnorm2d_gfx1151` (f16 +
-bf16 kernels flat).**
-
-### The kernels
-rocKE CK-Tile `10_rmsnorm2d`: per-row RMS over the last dim of a 2D `[M,N]` tensor with
-a per-column weight `Gamma[N]` (Llama/Mistral RMSNorm). Two body shapes exist —
-single-pass VGPR-cached vs two-pass streaming — selected by `elems_per_thread =
-N/block_size`; both are perf-only (identical correct output), so they're tuning
-candidates (§5). Higher-dimensional inputs are flattened to `[M,N]` by the override.
-
-- **Static variants** bake `N` → constraint `{"N": {"equals": <n>}}` (exact-match
-  shape tiers, e.g. N=2048/4096).
-- **Runtime-N variants** (symbol suffix `_dyn_`, rocKE `rmsnorm2d_dynamic.py`) read `N`
-  as the runtime i32 arg → constraint `{"N": {"multiple_of": <vec>}}`, matching any
-  vec-aligned N (e.g. Flux 3072, SD3.5 2432). Two binaries cover every real ComfyUI
-  hidden size (all multiples of 8).
-
-### ⚠️ Gotcha — `wave_size = 32` at compile time
-The producer **must** set `wave_size=32`. The default 64 miscompiles the wave32
-cross-lane reduction on gfx1151 → silent wrong results. (This is the single most
-common way to get a plausible-but-wrong RMSNorm kernel.)
-
-### ⚠️ Gotcha — epsilon is a baked scalar *tensor*
-In hipDNN, `epsilon` arrives as a scalar **tensor** operand (not a node attribute). The
-adapter bakes it at plan-build via `makeScalarOperand`/`toDouble` and packs it as the
-f32 ABI arg. It therefore **fails closed on a pure runtime user-supplied epsilon** —
-the value must be knowable at plan build (it always is in practice).
-
-### ABI (6 args, exact order)
-
-| # | name | type | meaning |
-|---|------|------|---------|
-| 0 | `X` | ptr | input `[M,N]` |
-| 1 | `Gamma` | ptr | per-column weight `[N]` |
-| 2 | `Y` | ptr | output `[M,N]` |
-| 3 | `M` | i32 | rows |
-| 4 | `N` | i32 | normalized dim |
-| 5 | `eps` | f32 | epsilon (baked) |
-
-Grid `(M,1,1)`; block `[256,1,1]` (or the variant's block). `Gamma` maps from the
-graph's `scale_tensor_uid`. Weightless norms (LTX's `common_dit.rms_norm(x)`) are
-served by the override synthesizing a cached ones-weight.
-
-### Problem keys (`decode` emits)
-| key | type | source |
-|-----|------|--------|
-| `dtype` | string | `"f16"` / `"bf16"` |
-| `M` | int | rows |
-| `N` | int | normalized dim |
-
-### Files
-Adapter `ops/RmsNormAdapter.{hpp,cpp}`; data + co-located producer + per-family tests
-`library/gfx1151/rmsnorm2d/{family.json, produce_rmsnorm2d_co.py, TestRmsNormNumericParity.cpp, TestRmsNormSelection.cpp}`;
-rocKE runtime-N instance `instances/common/rmsnorm2d_dynamic.py`.
-Real-model E2E additionally needs the hipDNN→PyTorch injection layer (separate PR; §9).
-
----
-
-## 8. SDPA (flash-attention forward) — the universal forward adapter
-
-**op_kind `"sdpa"` · adapter `SdpaAdapter` (universal forward) · family
-`fmha_wmma_fwd_gfx1151` (f16 + bf16 kernels flat).**
-
-`SdpaAdapter` is **one universal *forward* adapter**, not a gfx1151-shaped one. It decodes
-a single-node `SdpaAttributes` graph arch-neutrally, publishes the full **capability
-vocabulary** as problem-shape facts, and lets each kernel's `family.json` constraints
-decide applicability. It marshals a **superset** of by-name arguments, so a forward
-kernel's ABI on *any* arch is selected as data (its `args_signature` picks the subset it
-takes). The gfx1151 WMMA kernel below is the first family it serves; a gfx942/gfx950
-forward family is authored as data against the same adapter — see the handoff kit in
-[§13](#13-authoring-a-forward-sdpa-family-on-a-new-arch-gfx942gfx950).
-
-Only **universal, memory-safety invariants** remain hard C++ declines (single
-`SdpaAttributes` node; rank-4 BHSD Q/K/V/O; K/V agree on `H_kv`/`S_kv`/`D`; O mirrors Q;
-one supported dtype across Q/K/V/O; integer `gqa_ratio`). Every **feature** decision
-(causal, GQA, masks, fp8, …) moved from an `if` in the adapter to a *where* in data.
-
-### The kernel (the shipped reference)
-rocKE's `build_wmma_fmha_fwd` (gfx1151 WMMA flash-attention forward), a thin adapter
-over the unified `mfma_attention_fwd_inner_body`:
-
-- **`head_size` (D) and head counts (H, H_kv) are compile-time; seqlen is runtime.** So
-  **one binary per dtype** serves both LTX self-attn (S_q = S_kv = 4096) and cross-attn
-  (S_q = 4096, S_kv = 128). D and H are *exact-match* constraints; S_q/S_kv only need to
-  be tile multiples.
-- **Native bf16, no cast.** bf16 shares the f16 16×16×16 WMMA fragment layout on
-  gfx1151, so the same inner body lowers to `wmma.f32.16x16x16.bf16` for bf16. f16 and
-  bf16 are separate `.co`s within the one family, selected by the `dtype` constraint.
-- **`mask_mode="none"`, non-causal, MHA (H_kv == H), contiguous-D, batch-foldable.** These
-  are now expressed as **capability constraints in `family.json`** (`causal {equals
-  false}`, `gqa_ratio {equals 1}`, `d_contiguous {equals true}`, `batch_foldable {equals
-  true}`, and all the `has_* {equals false}`), not as adapter declines. A graph the kernel
-  can't serve fails the constraints → no candidate → the engine declines (aggregate
-  fail-closed), and another engine serves it.
-- **Grid** `(ceil_div(S_q,16), H, B)`, **block** `(32,1,1)` — one wave32 per CTA, each
-  CTA owns a 16-row Q tile of one (head, batch). **Static LDS** → `sharedMemBytes = 0`;
-  **no workspace**.
-
-This is a correctness-first reference (single wave per tile, no LDS K/V staging). It is
-numerically correct at LTX shapes; on gfx1151 it also *beats* stock PyTorch SDPA, but
-only because PyTorch has no fused flash backend there and falls to an unfused O(S²) math
-path — so treat that as "not the bottleneck," not a win over a tuned flash kernel.
-Tuning (LDS staging, multi-tile, larger Q tiles) grows data-only via §5.
-
-### This kernel's ABI (15 args, exact order — a subset of the adapter vocabulary)
-
-| # | name | type | meaning |
-|---|------|------|---------|
-| 0 | `Q` | ptr | query `[B,H,S_q,D]` |
-| 1 | `K` | ptr | key `[B,H,S_kv,D]` |
-| 2 | `V` | ptr | value `[B,H,S_kv,D]` |
-| 3 | `O` | ptr | output `[B,H,S_q,D]` |
-| 4 | `scale_log2` | f32 | **`attn_scale * log2(e)`** — see gotcha #1 |
-| 5 | `seqlen_q` | i32 | S_q |
-| 6 | `seqlen_k` | i32 | S_kv |
-| 7 | `stride_q_token` | i32 | `q.stride(2)` (S axis) |
-| 8 | `stride_q_head` | i32 | `q.stride(1)` (H axis) |
-| 9 | `stride_k_token` | i32 | `k.stride(2)` |
-|10 | `stride_k_head` | i32 | `k.stride(1)` |
-|11 | `stride_v_token` | i32 | `v.stride(2)` |
-|12 | `stride_v_head` | i32 | `v.stride(1)` |
-|13 | `stride_o_token` | i32 | `o.stride(2)` |
-|14 | `stride_o_head` | i32 | `o.stride(1)` |
-
-These 15 names are the subset this kernel's `args_signature` selects from the adapter's
-**full argument vocabulary** — the complete emitted set (byte-stride variants, batch
-strides, raw scale, head/dim scalars, optional mask/stats pointers) is the arg-vocabulary
-reference table in [§13](#arg-vocabulary-reference). A different forward kernel picks a
-different subset; a name it needs that isn't emitted yet is one added line in
-`buildBindings` (reviewed C++, §13).
-
-#### ⚠️ Gotcha #1 — `scale_log2`, not the raw scale
-The softmax is computed **base-2** (`exp2`), so the kernel takes
-`scale_log2 = attn_scale * log2(e)` where `log2(e) = 1.4426950408889634`. The adapter
-emits **both** `scale_log2` (already multiplied, from `attn_scale_value`, defaulting to
-`1/sqrt(D)`) **and** `scale_raw` (unmultiplied); a kernel that wants the raw scale simply
-names `scale_raw` in its `args_signature` — no C++ change.
-
-#### ⚠️ Gotcha #2 — BHSD stride mapping; batch-stride is available but this kernel folds
-Tensors are `[B,H,S,D]`: token stride is `stride(2)` (S axis), head stride is
-`stride(1)` (H axis). This kernel takes **no batch-stride argument** — it folds batch into
-grid `z` assuming `batch_stride == seqlen * stride_token` (trivially true for `B == 1`,
-LTX). It therefore constrains `batch_foldable {equals true}`. The adapter *does* emit
-`stride_{q,k,v,o}_batch` (element and byte), so a kernel with a real batch-stride arg on
-another arch accepts the non-folded `B > 1` case as data.
-
-### Problem keys (`decode` publishes — the capability vocabulary)
-Numeric shape:
-
-| key | type | source |
-|-----|------|--------|
-| `dtype` | string | `"f16"`/`"bf16"`/`"f8"`/`"bf8"`/`"f8fnuz"`/`"bf8fnuz"` |
-| `B` | int | `q.dim(0)` |
-| `H` | int | `q.dim(1)` (query heads) |
-| `H_kv` | int | `k.dim(1)` (kv heads) |
-| `S_q` | int | `q.dim(2)` |
-| `S_kv` | int | `k.dim(2)` |
-| `D` | int | `q.dim(3)` (head dim) |
-| `gqa_ratio` | int | `H / H_kv` (1 = MHA, H = MQA) |
-
-Capability facts (bool unless noted) — a kernel opts in/out via a constraint; see the
-[capability-key reference](#capability-key-reference) in §13 for the fail-closed warning:
-
-| key | true when |
-|-----|-----------|
-| `d_contiguous` | innermost (D) axis is unit-stride on Q/K/V/O |
-| `batch_foldable` | `B == 1`, or batch stride packs as `seqlen * stride_token` on all operands |
-| `causal` | mask resolves to top-left causal (deprecated `causal_mask`, or the `left_bound`/`right_bound`/`diagonal_alignment` trio) |
-| `causal_bottom_right` | mask resolves to bottom-right causal (deprecated `causal_mask_bottom_right`, or the trio with `diagonal_alignment = BOTTOM_RIGHT`) |
-| `has_diagonal_band` | mask resolves to a sliding window (a bounded `left_bound`/`right_bound` that is not plain causal) |
-| `has_mma_core_mode` | `mma_core_mode` is set to a non-default (non-`UNSET`) compute dtype |
-| `has_alibi` | `alibi_mask` set |
-| `has_padding_mask` | `padding_mask` set |
-| `has_attn_mask` | an `attn_mask` tensor is present |
-| `has_block_mask` | a `block_mask` tensor is present |
-| `has_sink` | a `sink_token` tensor is present |
-| `has_dropout` | dropout prob ≠ 0, or any dropout-plumbing tensor |
-| `paged` | a page-table (K or V) tensor is present |
-| `varlen` | a `seq_len_q`/`seq_len_kv` (group-mode) tensor is present |
-| `gen_stats` | `generate_stats` set, or a stats tensor is present |
-| `fp8` | an fp8 element dtype, or any fp8 (de)scale tensor |
-| `runtime_scale` | a runtime `scale` tensor is present (vs. baked `attn_scale_value`) |
-
-### Decline boundary (now: universal safety only)
-`SdpaAdapter::decode` returns "not applicable" (→ another engine serves it) **only** for
-the memory-safety invariants above: not a single `SdpaAttributes` node; any of Q/K/V/O
-not rank-4 (dims or strides); K/V disagreeing on `H_kv`/`S_kv`/`D`; O not mirroring
-`[B,H,S_q,D]`; an unsupported or mismatched dtype across Q/K/V/O; a non-integer
-`gqa_ratio` (`H_kv` that doesn't divide `H`). **Everything else decodes** — causal, GQA,
-masks, fp8, varlen, paged — and applicability is decided by each kernel's `family.json`
-constraints. Serving a new feature is therefore, in the common case, **new data** (a
-family that constrains the fact appropriately), not adapter C++; it is only C++ if the
-kernel needs an argument the vocabulary doesn't yet emit or a grid the DSL can't express
-(§13, §12.3).
-
-### Files
-Adapter `ops/SdpaAdapter.{hpp,cpp}`; data + co-located producer + per-family parity test
-`library/gfx1151/fmha_wmma_fwd/{family.json, produce_fmha_fwd_co.py, TestSdpaNumericParity.cpp}`;
-engine-level decode/bindings unit test `src/tests/engines/aot_catalog_engine/TestSdpaDecode.cpp`
-(host-only, no GPU, arch-neutral — not tied to this family).
-Real-model E2E additionally needs the hipDNN→PyTorch injection layer (separate PR; §9).
-Authoring a new-arch
-forward family: [§13](#13-authoring-a-forward-sdpa-family-on-a-new-arch-gfx942gfx950).
-
----
-
-## 9. How to test
-
-Verification has three rungs. Rungs 1–2 live here and are what you run to land a family;
-rung 3 (real-model E2E) is provided by the separate hipDNN→PyTorch injection layer:
-
-**1. Producer (build-time codegen)** — each rocKE-AOT family owns a co-located
-`produce_<family>_co.py` that emits **every** kernel (all dtypes) the `family.json`
-lists. ck_dsl is used as a *library* (no rocKE edit, except RMSNorm's/SDPA's small
-upstreamable instances). The build runs it automatically when `ROCKE_PYTHON_DIR` is
-set (points at `<rocKE>/projects/composablekernel/python`; comgr via `ROCKE_COMGR_LIB`
-or `/opt/rocm`) — the `.co` are **built products, never checked into git**; the
-family's `library/CMakeLists.txt` compiles them into the build/install tree
-(`${AOT_CATALOG_BUILD_DIR}/<arch>/<family>/`). With `ROCKE_PYTHON_DIR` unset the family
-is skipped (empty catalog → engine declines, parity tests skip — see §9.2). Conversely,
-when `ROCKE_PYTHON_DIR` **is** set the producer *must* succeed: it exits non-zero on any
-skipped/empty kernel so a partial family fails the build rather than silently shipping an
-incomplete catalog. To run one by hand:
-```
-PYTHONPATH=<rocKE>/projects/composablekernel/python \
-    python3 library/gfx1151/fmha_wmma_fwd/produce_fmha_fwd_co.py /tmp/out
-# /tmp/out now holds the family's <symbol>.co (pair with the checked-in family.json)
-```
-
-> **Multi-arch builds (TheRock).** A family compiles **only when its arch is in the
-> build's `GPU_TARGETS`** (`AMDGPU_TARGETS` is honored as the legacy alias) — so a
-> gfx942 build never compiles the gfx1151 kernels, and vice versa. The family arch and
-> each target are matched on their `gfxNNN` base (feature suffixes like `:xnack-` are
-> dropped), mirroring the runtime device match. If **neither** variable is set (a
-> standalone dev build that never named targets) **all** families build. A requested
-> arch with no family folder is simply absent at runtime (the engine declines) — never
-> an error. This gate lives in `_aot_arch_requested()` in `library/CMakeLists.txt`;
-> future family adders should call it too.
-
-> **Build flags — rocKE is a build-time *tool*, not part of this engine.** Two
-> independent axes control what gets built; do not conflate them:
-> - **Axis A — the AOT engine + its kernel library.** `ENABLE_AOT_CATALOG_ENGINE`
->   (default **OFF** — this is a throwaway POC and must not ship in a normal build)
->   compiles the engine into `libhip_kernel_provider.so` and pulls in `library/`. It is
->   opted into by a **dedicated build lane** (see below) that configures
->   `-DENABLE_AOT_CATALOG_ENGINE=ON`; that lane is what keeps the engine compiling and its
->   tests running now that it is off the default path. Whether any `.co` are actually
->   produced is gated **only** on `ROCKE_PYTHON_DIR` (+ comgr) and `GPU_TARGETS` — *not* on
->   any "enable rocKE" switch. Here rocKE is used purely as an **external compiler the
->   producer calls**, resolved by path. This is the relationship that outlives rocKE's
->   current location.
->
->   **Paired build lane.** Because the default is now OFF, an explicit lane must configure
->   the engine ON or it will bitrot. The lane configures
->   `-DENABLE_AOT_CATALOG_ENGINE=ON -DROCKE_PYTHON_DIR=<rocKE python> -DGPU_TARGETS=gfx1151`,
->   builds `hip_kernel_provider_tests` (the AOT GTests compile into that shared binary), and
->   runs `ctest`. With `ROCKE_PYTHON_DIR` set the producer *must* succeed (families are
->   expected → an empty catalog is a hard test failure, per `AOT_ROCKE_FAMILIES_EXPECTED`
->   below); without it the engine still builds but the parity tests skip on the empty
->   catalog. TheRock's default lanes leave the engine OFF and are unaffected.
-> - **Axis B — the rocKE engine itself** (a *temporary tenant* that happens to live in
->   `hip-kernel-provider/rocke/` today). `HIPKERNELPROVIDER_ENABLE_ROCKE` (default
->   **OFF**) does `add_subdirectory(rocke)` to build that engine and its Python/smoke/CI
->   tests. It has **zero** references anywhere under `aot_catalog_engine/` and does **not**
->   affect `.co` production. When rocKE moves to its own home, Axis B goes away entirely
->   and Axis A is unchanged — you just point `ROCKE_PYTHON_DIR` at wherever rocKE then
->   lives, and it becomes a true external pre-dependency of the AOT compiles.
-
-**2. C++ substrate parity test** — drives the engine substrate directly and compares to
-a CPU reference (`C=A@Bᵀ`, RMS over rows, or `softmax(scale·QKᵀ)·V`):
-```
-# configure with -DENABLE_AOT_CATALOG_ENGINE=ON, build hip_kernel_provider_tests
-ctest -R GemmNumericParity      # or RmsNorm* / SdpaNumericParity
-```
-
-**Empty-catalog behavior is deliberately asymmetric.** When rocKE was unavailable at
-configure time (no `ROCKE_PYTHON_DIR`), no families were built and these tests **skip** on
-the empty catalog — the expected state on TheRock CI today, which never has rocKE. But when
-the build *did* configure rocKE-AOT families for its arch (the `AOT_CATALOG_FAMILY_TARGETS`
-global is non-empty), CMake compiles the tests with `AOT_ROCKE_FAMILIES_EXPECTED=1` and an
-empty catalog becomes a **hard failure** instead of a skip (see
-`AOT_SKIP_OR_FAIL_ON_EMPTY_CATALOG` in `src/tests/engines/aot_catalog_engine/AotCatalogTestSupport.hpp`).
-This closes the gap where a producer or loader that silently dropped every kernel would
-otherwise leave CI green over a total failure.
-
-These parity/selection tests are **co-located in the family folder they test**
-(`library/<arch>/<family>/Test*.cpp`), not under `src/tests/` — the family folder is a
-self-contained unit (spec + build + tests), so removing a family removes its tests with
-it and touches no other family (see the design-principle callout near the top of this
-README). Each family's `CMakeLists.txt` registers its own test sources with
-`aot_add_family_test(ARCH … SOURCES …)`, which compiles them into
-`hip_kernel_provider_tests` **only when that arch is in the build's `GPU_TARGETS`** —
-the same gate the kernel build uses. The contract is that **a family's tests reference
-only that family's kernels**: e.g. the reference (`gemm_wmma`) and tiled
-(`gemm_wmma_universal`) GEMM families both match the same mult-of-16 shapes, so each of
-their tests selects its own kernel *by symbol* (`wmma_gemm` vs `ugemm`) rather than
-taking `candidates.front()`, and neither depends on the other existing. Tests that
-belong to **no single family** — the tune-cache and SDPA-decode engine-substrate unit
-tests — stay at the engine test level (`src/tests/engines/aot_catalog_engine/`).
-
-**3. Real-model E2E — the hipDNN→PyTorch injection layer (a separate PR).** The hermetic
-substrate parity test above proves a family's kernels are correct *in isolation*. Proving
-the op is correct **and** actually selected inside a real PyTorch model needs a **second
-piece**: a way to inject hipDNN into PyTorch. That is a thin layer which monkeypatches the
-torch functionals (`F.linear` / `F.rms_norm` / `F.scaled_dot_product_attention`) so
-supported calls route through a hard-pinned AOT graph (with a native fallback otherwise),
-keeps an intercept census (AOT hits vs native fallbacks per shape/dtype), and A/Bs
-`allclose` + timing against stock PyTorch — end to end, up to running a real model.
-
-This injection layer is **general-purpose** — it is how you drive *any* hipDNN engine from
-PyTorch, not specific to this throwaway catalog engine — so it will land as **its own PR
-in the hipDNN project** (a reusable "inject hipDNN into PyTorch" example) rather than being
-checked in here. Treat it as the second half of the E2E story: this engine + its families
-(rungs 1–2) make the kernels selectable; the injection layer makes a real model exercise
-them.
-
-> **Honest-baseline caveat for SDPA A/Bs.** On gfx1151, vanilla
-> `F.scaled_dot_product_attention` silently falls back to the **unfused math path**
-> (~9× slower), which flatters any AOT comparison. A fair A/B must set
-> `TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1` **before** importing torch and force each
-> real fused backend (FLASH_ATTENTION / EFFICIENT_ATTENTION) explicitly.
-
-### Debugging: "my kernel isn't being selected"
-
-A missing/inapplicable kernel is a **silent fallback by design** — the engine declines
-and another engine serves the graph, so the model never miscomputes (§1). The flip side
-is that a kernel you *expected* to run just quietly doesn't, with no error. Worse, the
-engine's own `INFO`/`WARN`/`ERROR` breadcrumbs are invisible by default: `HIPDNN_LOG_LEVEL`
-defaults to `off`. Two env vars make the "why" visible:
+## 3. Catalog resolution and debugging
+
+### Resolution order
+
+The engine resolves the catalog root in this order:
+
+1. **`HIPDNN_AOT_CATALOG_DIR`** env var, if set — explicit override, always wins. Point it
+   at the dir that contains the `<arch>/` subdirs.
+2. **Beside the loaded plugin `.so`** — `<plugin-dir>/aot_catalog` (the reldir is baked as
+   `HIPDNN_AOT_CATALOG_RELDIR`). Both the build tree and the install tree place the catalog
+   at exactly this offset, so a single relative path serves both. Used **unconditionally**
+   when the plugin's own directory can be determined (via `dladdr`), *even if that catalog
+   is missing/empty*.
+3. **Baked install path** (`HIPDNN_AOT_CATALOG_DIR` compile def) — only if the plugin's
+   directory can't be resolved at all.
+
+Step 2 is deliberate: a **locally-built or force-loaded plugin reads its OWN build-tree
+catalog** and never silently crosses over to a system install's catalog (or vice-versa). If
+you `LD_LIBRARY_PATH`-force your local `hip_kernel_provider.so` while a real hipDNN is
+installed, you get *your* kernels. (The AITER ASM engine does **not** yet self-locate — it
+resolves `HIPDNN_AITER_ASM_DIR` env → baked install path — so it has the same
+cross-contamination footgun; the same fix could apply there if it becomes a problem.)
+
+The location contract (the reldir and both tree offsets) is defined **once** in the
+top-level `hip-kernel-provider/CMakeLists.txt` (`HIPDNN_AOT_CATALOG_RELDIR` /
+`_BUILD_DIR` / `_INSTALL_DIR`) — the same constants the rocke producer emits into — so
+producer and runtime can never drift.
+
+> The offset is `aot_catalog`, **not** `hip_kernel_provider/aot_catalog`: the frontend
+> loader, given the absolute basename `hip_kernel_provider`, would treat a directory of
+> that name in `engines/` as a plugin dir (find no `.so` inside) and load zero engines.
+
+### Debugging: "a kernel I expected isn't selected"
+
+A missing/inapplicable kernel is a **silent fallback by design** (§1). To see *why*, two
+env vars make the engine's reasoning visible (the engine's own `INFO`/`WARN`/`ERROR`
+breadcrumbs are off by default — `HIPDNN_LOG_LEVEL` defaults to `off`):
 
 ```
 HIPDNN_AOT_DEBUG=1     # always-on stderr trace of catalog resolution + load + per-graph decline
 HIPDNN_LOG_LEVEL=info  # the plugin-wide log level (also surfaces other engines' logs)
 ```
 
-`HIPDNN_AOT_DEBUG=1` is the fast path — it prints, independent of the log level:
+`HIPDNN_AOT_DEBUG=1` prints, independent of the log level:
 
 - **Resolution:** the catalog root it chose and **how** (`env` / `self-located beside
   plugin .so` / `baked install path`).
 - **Load:** the arch dir it scanned, each family loaded (name, op_kind, kernel count), and
-  each family **skipped** with the parse/`co_file` error — so a malformed `family.json` or a
-  missing `.co` is named, not swallowed.
+  each family **skipped** with the parse/`co_file` error — so a malformed `family.json` or
+  a missing `.co` is named, not swallowed.
 - **Decline:** which stage bailed — arch dir missing, catalog empty, no adapter decoded the
   op, or an op decoded but **no kernel matched**. For the last it lists every kernel of that
   op_kind and the first constraint that filtered it, including the common trap of a
-  **constraint key absent from the decoded problem shape** (a typo, or a key the adapter
-  doesn't publish — fail-closed, §3).
+  constraint key **absent from the decoded problem shape** (a typo, or a key the adapter
+  doesn't publish — fail-closed).
 
-Checklist when a kernel isn't picked:
-
-1. Is the catalog where the engine looked? Read the resolution line. By default the engine
-   **self-locates** the catalog beside the loaded plugin `.so` (see below) — if you built
-   locally but the line shows an install path, you loaded the installed plugin, not yours.
-2. Did the family load, or was it skipped? A skip line names the JSON/`.co` error.
-3. Did your op decode and your kernel's constraints hold? The decline dump names the failing
-   constraint key. Remember constraints are **fail-closed**: every constrained key must be
-   present in the decoded problem *and* satisfied (§3).
-4. Override the root explicitly if needed: `HIPDNN_AOT_CATALOG_DIR=/path/to/<catalog>` (the
-   dir that contains the `<arch>/` subdirs) always wins over self-location.
-
-#### Catalog resolution: self-location beside the plugin
-
-The engine resolves the catalog root in this order:
-
-1. **`HIPDNN_AOT_CATALOG_DIR`** env var, if set — explicit override, always wins.
-2. **Beside the loaded plugin `.so`** — `<plugin-dir>/aot_catalog`.
-   Both the build tree and the install tree place the catalog at exactly this offset, so a
-   single relative path serves both. This is used **unconditionally** when the plugin's own
-   directory can be determined, *even if that catalog is missing/empty*.
-3. **Baked install path** — only if the plugin's directory can't be resolved at all.
-
-Step 2 is deliberate: it means a **locally-built or force-loaded plugin reads its OWN
-build-tree catalog** and never silently crosses over to a system install's catalog (and
-vice-versa). If you `LD_LIBRARY_PATH`-force your local `hip_kernel_provider.so` while a real
-hipDNN is installed, you get *your* kernels, not the install's — the `HIPDNN_AOT_DEBUG`
-resolution line will read `self-located beside plugin .so`. (The AITER ASM engine does
-**not** yet self-locate — it resolves `HIPDNN_AITER_ASM_DIR` env → baked install path — so
-it has the same cross-contamination footgun; the same fix could be applied there if it
-becomes a problem.)
-
-#### Gotcha — stale `.co` after editing kernel internals
-
-The build re-runs a family's producer only when its `produce_<family>_co.py` or `family.json`
-changes (the `add_custom_command` DEPENDS on exactly those). Editing rocKE kernel *internals*
-that the producer pulls in — without touching the producer script or the JSON — will **not**
-re-trigger the `.co` rebuild, so you keep running the stale binary. Touch the producer (or
-delete the built `.co`) to force a rebuild. `HIPDNN_AOT_DEBUG=1` shows the `.co` path and load
-line so you can confirm which binary actually loaded.
-
-> **Future:** if these footguns recur often, a small `catalog-doctor` tool could formalize
-> this — dump the resolved root, validate every `family.json`, list families/kernels, and dry-
-> run a given problem shape against the constraints — instead of relying on the `HIPDNN_AOT_DEBUG`
-> trace. Not built yet; the env-var diagnostics above are the current "essentials."
+> **Future:** if these footguns recur, a small `catalog-doctor` tool could formalize this —
+> dump the resolved root, validate every `family.json`, list families/kernels, and dry-run
+> a problem shape against the constraints — instead of relying on the `HIPDNN_AOT_DEBUG`
+> trace. Not built yet.
 
 ---
 
-## 10. Adding a brand-new op
+## 4. Capabilities and limits
 
-For an op that isn't matmul/rmsnorm/sdpa, the pattern (mirror any existing adapter):
+This is the honest map of what the design does well and where it stops. None of the limits
+are bugs — they are the deliberate edges of a thin bring-up engine. (Which specific SDPA and
+conv extensions on gfx942/gfx950/gfx1250 are *data*, which are *adapter C++*, and which need
+a *new substrate capability* is enumerated in the authoring guide's SDPA new-arch kit.)
 
-1. New `ops/<Op>Adapter.{hpp,cpp}` implementing `IOpAdapter`: `opKind()`,
-   `decode(graph) → optional<ProblemShape>` (gate on the FlatBuffers attributes union
-   discriminant; fail closed on unsupported features), `buildBindings(graph, problem,
-   kernel) → LaunchBindings`, `gridSymbols(problem, kernel) → SymbolTable`.
-2. One `push_back` in `CatalogEngine.cpp`.
-3. One source line in this engine's `CMakeLists.txt`.
-4. A self-contained family dir `library/<arch>/<family>/` holding `family.json`, its
-   `CMakeLists.txt` (producer + `aot_add_family_test`), the producer, and the parity
-   test(s) — following §9.
-
-No changes to `LaunchAbi`, the `Catalog` loader, `Selection`, `CatalogTypes`,
-`CatalogPlan`, or the other adapters are needed — the substrate is op-agnostic.
-
----
-
-## 11. File map
-
-| Thing | Path |
-|-------|------|
-| Engine + registration | `CatalogEngine.{hpp,cpp}` (one `push_back` per adapter) |
-| Adapter interface | `ops/IOpAdapter.hpp` |
-| Adapters | `ops/{Gemm,RmsNorm,Sdpa}Adapter.{hpp,cpp}` |
-| Catalog loader / selection / launch / tuning | `catalog/`, `plans/`, `launch/` |
-| Family library (discovery) | `library/CMakeLists.txt` (auto-discovers `<arch>/<family>/`) |
-| Per-family unit — self-contained (edit these) | `library/<arch>/<family>/{family.json, CMakeLists.txt, produce_<family>_co.py, Test*.cpp}` |
-| Built `.co` (not in git) | `${AOT_CATALOG_BUILD_DIR}/<arch>/<family>/*.co` (emitted by the producer at build time) |
-| Per-family parity/selection tests | `library/<arch>/<family>/Test*.cpp` (registered via `aot_add_family_test`; deleted with the family) |
-| Engine-substrate tests (not family-specific) | `src/tests/engines/aot_catalog_engine/{TestTuneCache,TestSdpaDecode}.cpp` |
-| Real-model E2E (hipDNN→PyTorch injection) | separate PR in the hipDNN project (not checked in here; §9) |
-
-(`src/tests/` paths are relative to the repo root; the rest are relative to
-this engine directory. The `.co` kernel binaries are **churning rocKE build products**
-and are compiled at build time, not vendored into git.)
-
----
-
-## 12. Capabilities and limits (and the walls beyond gfx1151)
-
-This section is the honest map of what the design does well and where it stops. §4 tells
-you *when* a change is data vs C++; this tells you *how far the current shape carries* and
-what a rocKE author will hit taking SDPA and conv to **gfx942 / gfx950 / gfx1250**. None
-of the limits below are bugs — they are the deliberate edges of a thin bring-up engine.
-
-### 12.1 Selection is "measure them all, cache the winner" — and nothing else
+### 4.1 Selection is "measure them all, cache the winner" — and nothing else
 
 There is **no heuristic, no analytic cost model, and no shape-bucketed tuning database.**
-Selection is exactly two steps: `constraints` prune the family to the candidates that
-*can* run this problem (§3, §5), then `CatalogPlan` **times every survivor on the real
-hardware** and caches the fastest, keyed on `family + canonical problem` (§5). The winner
-is the measured winner — correct by construction, with no model that can be wrong, and the
-kernel author ships candidates instead of hand-writing a selector. That is the core new
-power (§12.2).
+Selection is exactly two steps: `constraints` prune the family to the candidates that *can*
+run this problem, then `CatalogPlan` **times every survivor on the real hardware** and
+caches the fastest. The winner is the measured winner — correct by construction, with no
+model that can be wrong, and the kernel author ships candidates instead of hand-writing a
+selector. That is the core new power (§4.2).
 
 The cost of that simplicity is three structural scaling limits:
 
 | # | Limit | Consequence | Bites hardest on |
 |---|-------|-------------|------------------|
-| 1 | **First-execute tax ∝ candidate count.** There is no pre-filter before timing — every candidate the constraints didn't prune is module-loaded and timed on the first execute of a shape. | Keep the per-problem candidate set to a handful (§5 says so for a reason). A family with a *large* flat kernel list (e.g. AITER's 290-entry `fmha_fwd.csv`) would time every survivor a shape leaves. | Large prebuilt/ASM families. |
-| 2 | **The cache only amortizes when the problem-key space is small and repeated.** Every *new* key re-tunes from scratch. | Great for LLM decode and fixed model shapes (tune once, reuse forever). **Conv is the antithesis:** its key space `(N,C,H,W,K,R,S,stride,pad,dilation,dtype)` is effectively unbounded per model, so the cache thrashes and the tuning tax never amortizes. This is where "time them all" is *least* appropriate. | **Conv**, dynamic-shape workloads. |
-| 3 | **`constraints` are the only pruning lever.** Rules are `equals` / `multiple_of` (§3). | Real selection intelligence lives entirely in how sharply the author writes constraints. Genuinely useful pruning that *isn't* a per-key equality/divisibility test — "pick the tile by M:N aspect ratio," "prefer split-K past this K" — cannot be expressed as a constraint at all. | Ops with many tile/algorithm variants. |
+| 1 | **First-execute tax ∝ candidate count.** No pre-filter before timing — every candidate the constraints didn't prune is module-loaded and timed on the first execute of a shape. | Keep the per-problem candidate set to a handful. A family with a *large* flat kernel list (e.g. AITER's 290-entry `fmha_fwd.csv`) would time every survivor a shape leaves. | Large prebuilt/ASM families. |
+| 2 | **The cache only amortizes when the problem-key space is small and repeated.** Every *new* key re-tunes from scratch. | Great for LLM decode and fixed model shapes (tune once, reuse forever). **Conv is the antithesis:** its key space `(N,C,H,W,K,R,S,stride,pad,dilation,dtype)` is effectively unbounded per model, so the cache thrashes and the tuning tax never amortizes. | **Conv**, dynamic-shape workloads. |
+| 3 | **`constraints` are the only pruning lever.** Rules are `equals` / `multiple_of` / bounds. | Real selection intelligence lives entirely in how sharply the author writes constraints. Pruning that *isn't* a per-key equality/divisibility/bound — "pick the tile by M:N aspect ratio," "prefer split-K past this K" — cannot be expressed as a constraint at all. | Ops with many tile/algorithm variants. |
 
-**Crossing this wall is a substrate change, not a data addition.** Making conv (or a
-big ASM family) viable would need what we deliberately don't have: an analytic
-pre-selector, or a shipped tuning DB keyed on shape buckets, to cut the candidate set
-*before* timing. That is a departure from the measure-everything philosophy — plan for it
-explicitly rather than discovering it as cache thrash.
+**Crossing this wall is a substrate change, not a data addition.** Making conv (or a big
+ASM family) viable would need what we deliberately don't have: an analytic pre-selector, or
+a shipped tuning DB keyed on shape buckets, to cut the candidate set *before* timing.
 
-### 12.2 What a rocKE author can do today with zero C++
+### 4.2 What grows as pure data (zero C++)
 
-Along the axes the design was built for, coverage grows as pure data (§4):
+Along the axes the design was built for, coverage grows as data:
 
 - **Ship N candidate kernels for one problem and get automatic best-pick** — no
-  hand-written selector, no heuristic table to maintain (§5). This is the genuine new
-  capability; every prior engine baked its own selection logic.
+  hand-written selector, no heuristic table. This is the genuine new capability.
 - **Add a dtype / tile / shape-tier variant as data** — bf16 GEMM and bf16 RMSNorm each
-  landed with *zero* C++ change, as `kernels[]` entries carrying a `dtype` constraint
-  (§3, §4). New WMMA tiles and static-N tiers are the same story.
+  landed with *zero* C++ change, as `kernels[]` entries carrying a `dtype` constraint.
 - **Add a whole arch as a folder** — the C++ loads `.co` by arch string and never learns
-  the arch name; drop `library/gfx950/<family>/` and the loader picks it up.
-- **Mix build backends in one catalog** — rocKE-compiled and prebuilt-`.co` (AITER ASM)
+  the arch name; drop `<arch>/<family>/` and the loader picks it up.
+- **Mix build backends in one catalog** — rocke-compiled and prebuilt-`.co` (AITER ASM)
   families coexist; the per-family `CMakeLists.txt` is the variation point.
+- **SDPA forward across arches and features** (GQA, causal, masks, fp8, varlen) is now data
+  too, gated by `family.json` against the universal forward adapter's fixed by-name
+  vocabulary — once a kernel that serves the case exists.
 
-The load-bearing precondition on *all* of that: **it is only data-free when the op already
-has an adapter and the kernel fits that adapter's fixed ABI.** The rest of §12 is where
-that precondition fails.
+The load-bearing precondition on all of that: **it is only data-free when the op already
+has an adapter and the kernel fits that adapter's fixed ABI.**
 
-### 12.3 The ABI is per-adapter — SDPA forward now selects its ABI from data
+### 4.3 The walls that need C++ or a new substrate capability
 
-`family.json` carries an `args_signature` (§3), and `LaunchAbi` packs by name from it. The
-adapter is what *produces* the by-name values; the signature selects and orders which of
-them a kernel takes. For **SDPA forward** this is now genuinely data-driven:
-`SdpaAdapter::buildBindings` emits a **superset vocabulary** — pointers Q/K/V/O plus
-optional mask/stats; `scale_log2` **and** `scale_raw`; `seqlen_q/k`; per-tensor token/
-head/**batch** strides in **element and byte** units; `H`/`H_kv`/`D`/`B`/`gqa_ratio`
-scalars (full table in §13). A forward kernel on gfx942/gfx950 that wants a real
-batch-stride arg, byte strides, a GQA-ratio arg, or the raw scale **names it in
-`args_signature`** — new JSON, not new C++. "Add an arch as a folder" (§12.2) now holds
-for SDPA forward too. Remaining C++-only cases:
+- **A forward SDPA argument the vocabulary doesn't emit yet**, or a heuristic grid
+  transform the DSL can't express — one reviewed line in the adapter / launch layer.
+- **The 16-byte SGPR-slot kernarg padding** hand-written AITER ASM kernels need — a
+  `packArgs` change in `LaunchAbi` (natural alignment today), deferred until a real ASM
+  forward kernel lands.
+- **SDPA backward** — breaks the model outright: `CatalogPlan` assumes one candidate = one
+  module = one launch. Backward is a 3-stage pipeline (odo → dqdkdv → dq_convert) with a
+  shape-derived workspace and an `accumulator_type` knob that drives both selection and
+  workspace size. **New substrate capability** (multi-kernel plan).
+- **Conv2d/Conv3d** — no `ConvAdapter` exists yet (a new op); even once written,
+  measure-and-cache degrades on conv's unbounded shape space (§4.1 #2). Largest lift:
+  a new adapter **plus** a selection strategy beyond measure-all.
 
-- **A quantity the vocabulary doesn't emit yet** (a novel launch scalar, a `tuneOpt`) is
-  one added emission in `buildBindings` — reviewed C++, but a single explicit extension
-  point, not a rewrite (§13).
-- **The 16-byte SGPR-slot kernarg padding** the hand-written AITER ASM kernels need is a
-  `packArgs` change in `LaunchAbi` (natural alignment today), deliberately deferred until
-  a real ASM forward kernel lands (§12.4).
-- **SDPA backward** is still fully C++/substrate work — it isn't a forward ABI at all (it
-  breaks one-candidate = one-launch; §12.4).
-
-### 12.4 The walls for SDPA and conv on gfx942 / gfx950 / gfx1250
-
-Grouped by what each actually requires — data, adapter C++, or a new substrate capability:
-
-| Wall | What it needs | Class |
-|------|---------------|-------|
-| **New arch `.co` (CDNA MFMA, gfx1250)** | The C++ is arch-transparent, so the *catalog* side is data — **but** a producer must exist. gfx1151 producers `import ck_dsl.instances.gfx1151.*`; gfx942/gfx950 use MFMA (not WMMA) and need their own rocKE instances (different tile/occupancy), pinned to a churning `ck_dsl` API. | rocKE kernel work + data |
-| **GQA / MQA** (`H_kv != H`) — *forward* | `decode` now publishes `gqa_ratio`; a forward kernel that handles grouped KV constrains it and names `H_kv`/`gqa_ratio` from the vocabulary. **Data, once a kernel exists.** | rocKE kernel work + **data** |
-| **Causal / additive / padding masks** — *forward* | `decode` now publishes `causal`, `has_attn_mask`, … A forward kernel with the mask/bias input constrains the fact and (for additive masks) names the `attn_mask` pointer. This is the **76%-of-device-time prize** (causal SDPA). **Data, once a kernel exists.** | rocKE kernel work + **data** |
-| **D=128, any-H** — *forward* | A new `D equals 128` (and `H equals …`) variant, *iff* the kernel compiles without VGPR spill on the single-wave body — the one place D may force a kernel change. | **data** (with a kernel caveat) |
-| **varlen / paged-KV / FP8 descale** — *forward* | `decode` now publishes `varlen`/`paged`/`fp8`; a forward kernel constrains the fact and names the relevant pointers/scales. FP8 has distinct dtype tokens per encoding (`f8`/`bf8`/`f8fnuz`/`bf8fnuz`). **Data, once a kernel exists.** | rocKE kernel work + **data** |
-| **A forward arg the vocabulary doesn't emit** | A novel launch scalar / `tuneOpt` a future forward kernel needs is one added emission in `buildBindings` (§13) — the single explicit extension point. | adapter C++ (one line) |
-| **SGPR-slot kernarg padding (hand-written ASM)** | `packArgs` uses natural alignment; AITER-style ASM forward kernels need 16-byte SGPR-slot padding. Deferred until a real ASM forward kernel lands. | launch-layer C++ |
-| **Heuristic grid transforms** | The grid DSL does `ceil_div`/constants (§3). ASM kernels want conditional transforms (mask-halving, hd192 axis-swap), a launch-time `tuneOpt` scalar, sub-arch selection (MI300 vs MI308), a uint32 stride gate. `gridSymbols` already emits the full symbol set; the transform logic is the deferred `evalGrid` piece. | launch-layer C++ |
-| **SDPA backward** | Breaks the model outright: `CatalogPlan` assumes **one candidate = one module = one launch**. Backward is a 3-stage pipeline (odo → dqdkdv → dq_convert) with a shape-derived workspace and an `accumulator_type` knob that drives *both* selection and workspace size. | **new substrate capability** (multi-kernel plan) |
-| **Conv2d/Conv3d** | No `ConvAdapter` exists yet (a new op, §10). Even once written, measure-and-cache degrades on conv's shape space (§12.1 #2) — the selection model, not just the adapter, is the limiter. Largest lift of all. | new adapter **+** a selection strategy beyond measure-all |
-
-**The one-line version.** This is a correct, data-extensible best-pick engine that excels
-when the op's ABI is fixed and the shape space is small and repeated — GEMM, norms,
-attention. It extends for free along dtype / tile / arch-as-folder, and — after the
-universal forward adapter — **SDPA forward across arches and features (GQA, causal, masks,
-fp8, varlen) is now data**, gated by `family.json` against a fixed by-name vocabulary,
-once a kernel that serves the case exists (§8, §13). It still hits real walls the moment
-work needs (a) a forward argument the vocabulary doesn't emit or a heuristic grid
-transform (a line of adapter/launch C++, §12.3), (b) a multi-kernel plan such as SDPA
-backward (new substrate capability), or (c) selection over an unbounded shape space where
-timing-everything stops amortizing (conv, §12.1). Those are the deliberate edges — and
-they are essentially the Phase 4/5 roadmap.
+**One line:** a correct, data-extensible best-pick engine that excels when the op's ABI is
+fixed and the shape space is small and repeated — GEMM, norms, attention. It extends for
+free along dtype / tile / arch-as-folder and (for SDPA forward) feature-as-data; it hits
+real walls the moment work needs a novel launch arg / grid transform, a multi-kernel plan,
+or selection over an unbounded shape space.
 
 ---
 
-## 13. Authoring a forward SDPA family on a new arch (gfx942/gfx950)
+## 5. Runtime file map
 
-The universal forward adapter (§8) means bringing SDPA *forward* to gfx942/gfx950 is
-**mostly data**: produce a `.co`, map its ABI to the by-name vocabulary below, write a
-`family.json` whose capability constraints match exactly what the kernel handles, and copy
-the parity test. You touch C++ only if the kernel needs an argument the vocabulary doesn't
-emit yet (one reviewed line, see the arg table) or a grid the DSL can't express (§12.4).
+| Thing | Path (relative to this engine dir) |
+|-------|------|
+| Engine + adapter registration | `CatalogEngine.{hpp,cpp}` (one `push_back` per adapter) |
+| Adapter interface | `ops/IOpAdapter.hpp` |
+| Adapters | `ops/{Gemm,RmsNorm,Sdpa}Adapter.{hpp,cpp}` |
+| Catalog loader / selection | `catalog/{Catalog,Selection,CatalogTypes,ModulePath,AotDebug,TuneCache}.*` |
+| Launch ABI (arg packing, grid/block eval) | `launch/` |
+| Plan (measure-and-cache) | `plans/CatalogPlan.*` |
+| Engine-substrate tests (not family-specific) | `../../tests/engines/aot_catalog_engine/{TestTuneCache,TestSdpaDecode}.cpp` |
+| **Kernel families, producers, per-family tests (authoring)** | **`../../../rocke/aot_catalog/<arch>/<family>/` — see its [README](../../../rocke/aot_catalog/README.md)** |
 
-### Step checklist
+The `.co` kernel binaries are **churning rocke build products**, compiled at build time into
+`<plugin-dir>/aot_catalog/<arch>/<family>/`, never vendored into git.
 
-1. **Produce the `.co`.** Instantiate the forward kernel from rocKE's gfx942/gfx950
-   `ck_dsl` MFMA attention instances (not the gfx1151 WMMA ones — different tile/occupancy)
-   in a co-located `produce_<family>_co.py`, mirroring
-   `library/gfx1151/fmha_wmma_fwd/produce_fmha_fwd_co.py`. Pin the rocKE ref you build
-   against (the `ck_dsl` API churns).
-2. **Read the kernel's kernarg ABI and map each arg to a canonical vocabulary name**
-   (table below). If a quantity the kernel needs isn't emitted, add one emission in
-   `SdpaAdapter::buildBindings` — reviewed C++, the single explicit extension point.
-3. **Author `family.json`** (schema §3): `op_kind: "sdpa"`, `arch: "gfx942"`, one
-   `kernels[]` entry per variant with (a) numeric-shape constraints (`dtype`, `D`, `H`,
-   `H_kv`, `S_q`/`S_kv` `{ "min": 1, "multiple_of": … }` — the `min: 1` rejects a
-   zero-extent seqlen that `multiple_of` alone would admit), (b) **a capability constraint for every fact
-   the kernel does *not* universally handle** (see the warning below), (c) `grid`/`block`,
-   and (d) `args_signature` = the kernel's real ABI **in order**, drawn from the vocabulary.
-4. **Drop it under `library/gfx942/<family>/`** with a producer `CMakeLists.txt`
-   (auto-discovered by `library/CMakeLists.txt`; mirror the gfx1151 family's). It compiles
-   only when `gfx942` is in the build's `GPU_TARGETS` (see §9); a gfx1151-only build skips it.
-5. **Copy the parity test into the new family folder.** `cp` the gfx1151 family's
-   `TestSdpaNumericParity.cpp` → `library/gfx942/<family>/`, change `kArch`, geometry
-   (D/H/S), the dtype token, and the hand-built `LaunchBindings` to match the new
-   `args_signature`. The CPU reference softmax and tolerances carry over. Register it from
-   the family's own `CMakeLists.txt` with `aot_add_family_test(ARCH gfx942 SOURCES …)` — the
-   test lives with the family, not under `src/tests/`. (`TestSdpaDecode.cpp` is arch-neutral,
-   family-independent, and stays at the engine test level — no per-arch copy needed.)
+---
 
-### Arg-vocabulary reference
+## 6. How it is built
 
-Every canonical name `buildBindings` emits. Pick the subset your kernel takes into
-`args_signature` (in ABI order); `LaunchAbi::bindArgs` resolves by name and **fails closed
-on a name the adapter didn't emit**. All strides follow the BHSD mapping (token = S axis =
-`stride(2)`, head = H axis = `stride(1)`, batch = B axis = `stride(0)`).
+Two independent CMake options separate *loading* the catalog from *producing* it — do not
+conflate them:
 
-Names in the **Optional pointers** block are bound **only when the graph carries that
-tensor** — each pairs with a capability fact `decode` publishes (constrain the fact, then
-name the pointer). Naming an optional pointer whose tensor is absent fails closed, so a
-kernel and its `family.json` constraints must agree.
+- **`ENABLE_AOT_CATALOG_ENGINE`** (default **ON**) compiles this engine into
+  `libhip_kernel_provider.so`. It is safe to default ON because the engine is **inert without
+  a catalog** — an unpopulated engine loads zero kernels and declines every graph, so it can
+  ship in every build and pick up a catalog that appears later with no provider rebuild.
+- **`HIPKERNELPROVIDER_ENABLE_ROCKE`** (default **OFF**) builds the rocke subsystem — and,
+  when `ENABLE_AOT_CATALOG_ENGINE` is *also* ON, the `rocke/aot_catalog/` families that
+  produce this engine's `.co`. This is the real opt-in: producing kernels. rocke is a
+  build-time **tool**; this engine has **no** build- or link-time reference to it.
 
-| name | type | meaning / derivation |
-|------|------|----------------------|
-| **Always emitted** | | |
-| `Q` `K` `V` `O` | ptr | the four operands, by tensor uid |
-| `scale_log2` | f32 | `attn_scale * log2(e)` (base-2 softmax; gotcha #1 §8) |
-| `scale_raw` | f32 | the un-multiplied `attn_scale` (default `1/sqrt(D)`) |
-| `seqlen_q` `seqlen_k` | i32/i64 | S_q, S_kv (fixed-length scalar values) |
-| `stride_{q,k,v,o}_token` | i32/i64 | S-axis stride, **elements** |
-| `stride_{q,k,v,o}_head` | i32/i64 | H-axis stride, **elements** |
-| `stride_{q,k,v,o}_batch` | i32/i64 | B-axis stride, **elements** |
-| `stride_{q,k,v,o}_token_bytes` | i32/i64 | S-axis stride × element size (for byte-stride ABIs) |
-| `stride_{q,k,v,o}_head_bytes` | i32/i64 | H-axis stride × element size |
-| `stride_{q,k,v,o}_batch_bytes` | i32/i64 | B-axis stride × element size |
-| `H` `H_kv` `D` `B` | i32/i64 | head count, kv-head count, head dim, batch |
-| `gqa_ratio` | i32/i64 | `H / H_kv` |
-| **Optional pointers** (bound only when the tensor is present) | | pairs with fact |
-| `attn_mask` | ptr | additive mask tensor — `has_attn_mask` |
-| `block_mask` | ptr | block-sparse mask table — `has_block_mask` |
-| `sink` | ptr | attention-sink token tensor — `has_sink` |
-| `scale_tensor` | ptr | runtime scale tensor — `runtime_scale` |
-| `seqlen_q_ptr` `seqlen_kv_ptr` | ptr | varlen cumulative-seqlen tables — `varlen` |
-| `page_table_k` `page_table_v` | ptr | paged-KV block tables — `paged` |
-| `dropout_mask` `dropout_scale` `dropout_seed` `dropout_offset` | ptr | dropout plumbing — `has_dropout` |
-| `rng_dump` | ptr | optional RNG debug dump output — independently settable, does not gate `has_dropout` |
-| `descale_q` `descale_k` `descale_v` `descale_s` | ptr | fp8 input/intermediate descales — `fp8` |
-| `scale_s` `scale_o` | ptr | fp8 output scales — `fp8` |
-| `amax_s` `amax_o` | ptr | fp8 output amax accumulators — `fp8` |
-| `stats` / `lse` | ptr | log-sum-exp output — aliases — `gen_stats` |
-| `max` `sum_exp` | ptr | split-form softmax stats outputs — `gen_stats` |
+The four combinations:
 
-`type` in `args_signature` (`i32`/`i64`/`f32`) selects how the value is narrowed/packed
-(§3); the same emitted quantity can be taken as `i32` or `i64`. A quantity not in this
-table = one added `bindings.scalars.emplace(...)` (scalar) or `bindOptionalPtr(...)`
-(pointer) in `buildBindings` (reviewed).
+| `ENABLE_AOT_CATALOG_ENGINE` | `HIPKERNELPROVIDER_ENABLE_ROCKE` | result |
+|---|---|---|
+| ON *(default)* | OFF *(default)* | engine built, **empty catalog** → inert, declines every graph, GPU parity tests skip. This is the normal TheRock build. |
+| ON | ON | engine built **and** families produced → full catalog, parity tests run |
+| OFF | any | engine not built at all (opt out entirely) |
+| OFF | ON | rocke built, but `aot_catalog/` not configured (gated on the engine option) |
 
-### Capability-key reference
+The lane that produces the kernels + runs the family parity tests configures
+`-DHIPKERNELPROVIDER_ENABLE_ROCKE=ON -DENABLE_AOT_CATALOG_ENGINE=ON -DGPU_TARGETS=gfx1151
+-DROCKE_COMGR_LIB=<path/to/libamd_comgr.so>` and builds `hip_kernel_provider_tests`. The
+family build, arch gating, producer invocation, and empty-catalog test semantics are all
+documented in the [authoring guide](../../../rocke/aot_catalog/README.md#9-how-to-test).
 
-Every fact `decode` publishes (full list with "true when" in §8). A kernel **opts in or
-out via a constraint** in `family.json`:
-
-- `{"causal": {"equals": false}}` — the kernel handles only the non-causal case.
-- `{"gqa_ratio": {"equals": 1}}` — MHA only. Use `{"min": 1}` or omit-with-care for a
-  GQA-capable kernel that reads `H_kv`/`gqa_ratio`.
-- `{"d_contiguous": {"equals": true}}`, `{"batch_foldable": {"equals": true}}` — structural
-  requirements of a kernel with no D-stride / no batch-stride arg.
-- `{"D": {"equals": 128}}`, `{"S_q": {"multiple_of": 64}}` — numeric-shape tiers.
-
-> ⚠️ **Omitting a capability constraint asserts the kernel handles that case.** This is the
-> deliberate tradeoff of data-gated selection: the adapter no longer declines features in
-> C++, so *a missing constraint is a claim*, not a safe default. If a kernel only does
-> non-causal MHA, it **must** carry `causal {equals false}`, `has_attn_mask {equals
-> false}`, `gqa_ratio {equals 1}`, etc. — otherwise a causal or GQA or masked graph will
-> **select it and compute a wrong answer**. Fail-closed for features now lives in your
-> `family.json`, not the adapter. (The universal memory-safety gates — rank-4, dtype match,
-> integer gqa_ratio — remain in C++ and always hold; §8 decline boundary.) The shipped
-> gfx1151 family constrains *every* capability key explicitly; copy that discipline.
-
-### Copy-paste `family.json` template
-
-Fill in `<arch>`, symbols/co_files, `D`/`H`/`H_kv`, the `multiple_of` tile sizes, and the
-`args_signature` your kernel actually uses. Constrain **every** capability key the kernel
-does not handle (the block below is the safe, fully-explicit default: non-causal MHA,
-contiguous-D, batch-foldable, no masks/dropout/paged/varlen/stats/fp8/runtime-scale — the
-same posture as the gfx1151 reference).
-
-```json
-{
-    "family": "fmha_<algo>_fwd_<arch>",
-    "op_kind": "sdpa",
-    "arch": "<arch>",
-    "dtype": ["f16", "bf16"],
-    "kernels": [
-        {
-            "symbol": "<exported_symbol_in_co>",
-            "co_file": "<symbol>.co",
-            "constraints": {
-                "dtype": { "equals": "f16" },
-                "D":     { "equals": 128 },
-                "H":     { "equals": 32 },
-                "H_kv":  { "equals": 32 },
-                "S_q":   { "min": 1, "multiple_of": 64 },
-                "S_kv":  { "min": 1, "multiple_of": 64 },
-                "gqa_ratio":           { "equals": 1 },
-                "d_contiguous":        { "equals": true },
-                "batch_foldable":      { "equals": true },
-                "causal":              { "equals": false },
-                "causal_bottom_right": { "equals": false },
-                "has_diagonal_band":   { "equals": false },
-                "has_mma_core_mode":   { "equals": false },
-                "has_alibi":           { "equals": false },
-                "has_padding_mask":    { "equals": false },
-                "has_attn_mask":       { "equals": false },
-                "has_block_mask":      { "equals": false },
-                "has_sink":            { "equals": false },
-                "has_dropout":         { "equals": false },
-                "paged":               { "equals": false },
-                "varlen":              { "equals": false },
-                "gen_stats":           { "equals": false },
-                "fp8":                 { "equals": false },
-                "runtime_scale":       { "equals": false }
-            },
-            "grid": { "x": { "ceil_div": ["S_q", 64] }, "y": "H", "z": "B" },
-            "block": [256, 1, 1],
-            "args_signature": [
-                { "name": "Q", "type": "ptr" },
-                { "name": "K", "type": "ptr" },
-                { "name": "V", "type": "ptr" },
-                { "name": "O", "type": "ptr" },
-                { "name": "scale_log2", "type": "f32" },
-                { "name": "seqlen_q", "type": "i32" },
-                { "name": "seqlen_k", "type": "i32" },
-                { "name": "stride_q_token", "type": "i32" },
-                { "name": "stride_q_head",  "type": "i32" },
-                { "name": "stride_q_batch", "type": "i32" },
-                { "name": "stride_k_token", "type": "i32" },
-                { "name": "stride_k_head",  "type": "i32" },
-                { "name": "stride_k_batch", "type": "i32" },
-                { "name": "stride_v_token", "type": "i32" },
-                { "name": "stride_v_head",  "type": "i32" },
-                { "name": "stride_v_batch", "type": "i32" },
-                { "name": "stride_o_token", "type": "i32" },
-                { "name": "stride_o_head",  "type": "i32" },
-                { "name": "stride_o_batch", "type": "i32" }
-            ],
-            "workspace_bytes": 0
-        }
-    ]
-}
-```
-
-(The `args_signature` above shows a batch-stride-carrying ABI — a natural gfx942/gfx950
-shape that accepts `B > 1` non-folded — as a contrast to the gfx1151 kernel's 15-arg,
-no-batch-stride signature in §8. Take only the args your kernel really has.)
+When rocke eventually moves out of `hip-kernel-provider/rocke/` to its own home, this engine
+is unchanged — only the rocke-side producer path moves.

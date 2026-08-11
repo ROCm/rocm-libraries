@@ -7,9 +7,10 @@
 # CMakeLists runs this at build time to drop the .co next to the checked-in
 # family.json (family.json is the source of truth; this script emits .co ONLY).
 #
-# Run standalone from rocKE's python dir with PYTHONPATH=. e.g.:
-#   cd /home/brpepers/rocKE/projects/composablekernel/python
-#   PYTHONPATH=. python3 produce_gemm_wmma_co.py <out_dir>
+# Normally run by this family's CMakeLists via the rocke build interpreter
+# (${ROCKE_PYENV_PYTHON}); the editable pyenv puts `rocke` on the path with no
+# PYTHONPATH surgery. To run standalone, use that interpreter, e.g.:
+#   <build>/rocke-pyenv/bin/python produce_gemm_wmma_co.py <out_dir>
 #
 # TWO DTYPES, TWO SOURCES:
 #   * f16  -- built from rocKE's real instance

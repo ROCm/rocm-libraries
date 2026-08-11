@@ -7,9 +7,10 @@
 # CMakeLists runs this at build time to drop the .co next to the checked-in
 # family.json (family.json is the source of truth; this script emits .co ONLY).
 #
-# Run standalone from rocKE's python dir with PYTHONPATH=. e.g.:
-#   cd /home/brpepers/rocKE/projects/composablekernel/python
-#   PYTHONPATH=. python3 produce_fmha_fwd_co.py <out_dir>
+# Normally run by this family's CMakeLists via the rocke build interpreter
+# (${ROCKE_PYENV_PYTHON}); the editable pyenv puts `rocke` on the path with no
+# PYTHONPATH surgery. To run standalone, use that interpreter, e.g.:
+#   <build>/rocke-pyenv/bin/python produce_fmha_fwd_co.py <out_dir>
 # The kernel symbols are auto-derived and MUST match the co_file names in
 # family.json (rocke_wmma_fmha_fwd_wmma16x16x16_H64_HQ32_HK32_{f16,bf16}_none_vgather).
 #

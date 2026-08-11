@@ -74,11 +74,14 @@ if(ENABLE_AOT_CATALOG_ENGINE)
     # one kernel family: TestTuneCache is pure host CPU-key/persistence logic, and
     # TestSdpaDecode exercises the SDPA adapter's decode vocabulary (host-only).
     # Every FAMILY-specific test (numeric parity / per-family selection) instead
-    # lives IN its family folder (library/<arch>/<family>/) and is contributed via
-    # the AOT_CATALOG_FAMILY_TEST_SOURCES global property below -- so deleting a
-    # family folder removes its kernels, its family.json AND its tests together,
-    # with no impact on any other family. See the engine README §9 and
-    # aot_add_family_test() in library/CMakeLists.txt.
+    # lives IN its family folder in the rocke aot_catalog subsystem
+    # (rocke/aot_catalog/<arch>/<family>/) and is contributed via the
+    # AOT_CATALOG_FAMILY_TEST_SOURCES global property below -- so deleting a family
+    # folder removes its kernels, its family.json AND its tests together, with no
+    # impact on any other family. Those tests #include this engine's private headers,
+    # so this target (not rocke) owns their compile, keeping rocke free of any
+    # build-graph dependency on the throwaway engine. See rocke/aot_catalog/README.md
+    # and rocke_add_aot_family_test() in rocke/aot_catalog/CMakeLists.txt.
     target_sources(hip_kernel_provider_tests PRIVATE
         engines/aot_catalog_engine/TestSdpaDecode.cpp
         engines/aot_catalog_engine/TestTuneCache.cpp
@@ -96,11 +99,11 @@ if(ENABLE_AOT_CATALOG_ENGINE)
         ${CMAKE_CURRENT_SOURCE_DIR}/../engines/aot_catalog_engine
     )
     # Point the test at the build-tree copy of the catalog (family.json + .co).
-    # Must match AOT_CATALOG_BUILD_DIR in aot_catalog_engine/CMakeLists.txt, which now
-    # places the catalog beside the plugin (${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}) so the
-    # runtime can self-locate it; the tests load it directly via this path.
+    # HIPDNN_AOT_CATALOG_BUILD_DIR is the shared path set by the top-level CMakeLists
+    # (the same root the rocke producer emits into and the runtime self-locates), so
+    # the tests load exactly what was built.
     target_compile_definitions(hip_kernel_provider_tests PRIVATE
-        AOT_CATALOG_TEST_DIR="${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}/aot_catalog"
+        AOT_CATALOG_TEST_DIR="${HIPDNN_AOT_CATALOG_BUILD_DIR}"
     )
     # Build the rocKE-AOT kernel families before the tests so an isolated
     # `ninja hip_kernel_provider_tests` populates the build-tree catalog rather than

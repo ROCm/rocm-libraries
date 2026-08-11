@@ -5,8 +5,9 @@
 # AOT catalog engine
 # ============================================================================
 # Throwaway path that loads loose rocKE-authored .co/HSACO kernels described by
-# data-only family.json files. Kernel authors add kernels by dropping a .co plus
-# editing JSON. See docs/CATALOG_FORMAT.md.
+# data-only family.json files. This engine only LOADS the catalog at runtime; see
+# README.md for the runtime/loader contract. Kernel authoring (families, producers,
+# the family.json schema) lives in rocke/aot_catalog/ -- see its README.md.
 
 target_sources(hip_kernel_provider_impl PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/CatalogEngine.cpp
@@ -32,40 +33,26 @@ target_compile_definitions(hip_kernel_provider_impl PUBLIC HIPDNN_ENGINE_AOT_CAT
 
 # Where the runtime looks for <arch>/<family>/family.json + .co files.
 #
-# The catalog is placed BESIDE the plugin .so, at <plugin-dir>/${_AOT_CATALOG_RELDIR},
-# in BOTH the build tree and the install tree, so the runtime can self-locate it
-# relative to the loaded plugin binary (see catalog/ModulePath.cpp + defaultCatalogDir):
-#   * build:   ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}/aot_catalog
-#   * install: <prefix>/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/aot_catalog
-# A single relative offset (${_AOT_CATALOG_RELDIR}) therefore works for both layouts.
-# This is what lets a locally-built / force-loaded plugin read its OWN build-tree
-# catalog instead of silently picking up a system install's. Override at runtime with
-# the HIPDNN_AOT_CATALOG_DIR environment variable.
-#
-# The offset must NOT begin with a component that collides with a sibling plugin
-# .so basename in the same engines/ dir: the frontend loader, given the ABSOLUTE
-# basename "hip_kernel_provider", treats a directory of that name as a plugin dir
-# (finds no .so inside) and loads zero engines. So this is "aot_catalog", not
-# "hip_kernel_provider/aot_catalog".
-set(_AOT_CATALOG_RELDIR "aot_catalog")
-set(AOT_CATALOG_BUILD_DIR "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}/${_AOT_CATALOG_RELDIR}")
+# The catalog is placed BESIDE the plugin .so so the runtime can self-locate it
+# relative to the loaded plugin binary (see catalog/ModulePath.cpp + defaultCatalogDir).
+# The path is defined ONCE in the top-level CMakeLists (HIPDNN_AOT_CATALOG_RELDIR /
+# _INSTALL_DIR) -- the same constants the rocke aot_catalog PRODUCER uses to emit and
+# install the catalog -- so producer and runtime can never drift. This engine only
+# READS the catalog; it does NOT build kernels and has NO dependency on rocke.
+# Override the catalog location at runtime with HIPDNN_AOT_CATALOG_DIR.
 target_compile_definitions(hip_kernel_provider_impl PRIVATE
     # Relative offset from the loaded plugin dir to the catalog (self-location).
-    HIPDNN_AOT_CATALOG_RELDIR="${_AOT_CATALOG_RELDIR}"
+    HIPDNN_AOT_CATALOG_RELDIR="${HIPDNN_AOT_CATALOG_RELDIR}"
     # Absolute install path -- last-resort fallback only, when self-location fails.
-    HIPDNN_AOT_CATALOG_DIR="${CMAKE_INSTALL_PREFIX}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${_AOT_CATALOG_RELDIR}"
+    HIPDNN_AOT_CATALOG_DIR="${CMAKE_INSTALL_PREFIX}/${HIPDNN_AOT_CATALOG_INSTALL_DIR}"
 )
 
 # dladdr (Linux) needs libdl on older glibc; ${CMAKE_DL_LIBS} is empty where it is
 # already folded into libc, and on Windows. Propagate from the object lib to the plugin.
 target_link_libraries(hip_kernel_provider_impl PUBLIC ${CMAKE_DL_LIBS})
 
-# The family library: each library/<arch>/<family>/ is a self-contained unit
-# (family.json + CMakeLists.txt [+ co-located producer]). rocKE-AOT families
-# COMPILE their .co at build time into ${AOT_CATALOG_BUILD_DIR}/<arch>/<family>/;
-# prebuilt families would stage checked-in .co. rocKE is an OPTIONAL per-family
-# dependency (see library/CMakeLists.txt): with no rocKE the families skip, the
-# catalog is empty, and the engine declines every graph (GPU parity tests skip).
-if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/library/CMakeLists.txt)
-    add_subdirectory(library)
-endif()
+# NOTE: kernel authoring + the family build now live in rocke/aot_catalog/ (owned by
+# the KA teams), NOT here. The families COMPILE their .co at build time into
+# ${HIPDNN_AOT_CATALOG_BUILD_DIR}/<arch>/<family>/ and install beside the plugin;
+# this engine loads whatever is there. With rocke off (or no families for the arch)
+# the catalog is empty, the engine declines every graph, and GPU parity tests skip.

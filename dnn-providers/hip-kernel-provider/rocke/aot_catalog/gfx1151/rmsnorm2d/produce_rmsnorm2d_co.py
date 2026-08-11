@@ -5,9 +5,10 @@
 # for the AOT catalog engine. Runtime never touches rocKE -- this is run by hand
 # by a kernel author to drop a .co beside its family.json.
 #
-# Run from rocKE's python dir with PYTHONPATH=. e.g.:
-#   cd /home/brpepers/rocKE/projects/composablekernel/python
-#   PYTHONPATH=. python3 <this-file> <out_dir>
+# Normally run by this family's CMakeLists via the rocke build interpreter
+# (${ROCKE_PYENV_PYTHON}); the editable pyenv puts `rocke` on the path with no
+# PYTHONPATH surgery. To run standalone, use that interpreter, e.g.:
+#   <build>/rocke-pyenv/bin/python produce_rmsnorm2d_co.py <out_dir>
 #
 # CRITICAL gfx1151 gotcha: wave_size MUST be 32. The default 64 emits an invalid
 # lane-mask-32 shuffle on wave32 hardware and silently returns wrong results.
