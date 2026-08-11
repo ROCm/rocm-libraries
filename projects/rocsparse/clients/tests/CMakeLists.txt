@@ -208,11 +208,6 @@ set(ROCSPARSE_TEST_SOURCES
   test_spmm_batched_csc.cpp
   test_spmm_batched_coo.cpp
   test_spmm_batched_bell.cpp
-  test_sddmm_batched_ell.cpp
-  test_sddmm_batched_coo.cpp
-  test_sddmm_batched_coo_aos.cpp
-  test_sddmm_batched_csr.cpp
-  test_sddmm_batched_csc.cpp
   test_spvv.cpp
   test_sparse_to_dense_coo.cpp
   test_sparse_to_dense_csr.cpp
@@ -258,6 +253,15 @@ endif()
 
 if(ROCSPARSE_ENABLE_SPMAT_SCALE)
   list(APPEND ROCSPARSE_TEST_SOURCES test_spmat_scale.cpp)
+endif()
+
+if(ROCSPARSE_ENABLE_SDDMM_BATCHED)
+  list(APPEND ROCSPARSE_TEST_SOURCES
+    test_sddmm_batched_ell.cpp
+    test_sddmm_batched_coo.cpp
+    test_sddmm_batched_coo_aos.cpp
+    test_sddmm_batched_csr.cpp
+    test_sddmm_batched_csc.cpp)
 endif()
 
 set(ROCSPARSE_CLIENTS_TESTINGS
@@ -382,11 +386,6 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_spmm_batched_csc.cpp
 ../testings/testing_spmm_batched_coo.cpp
 ../testings/testing_spmm_batched_bell.cpp
-../testings/testing_sddmm_batched_ell.cpp
-../testings/testing_sddmm_batched_coo.cpp
-../testings/testing_sddmm_batched_coo_aos.cpp
-../testings/testing_sddmm_batched_csr.cpp
-../testings/testing_sddmm_batched_csc.cpp
 ../testings/testing_spvv.cpp
 ../testings/testing_sparse_to_dense_coo.cpp
 ../testings/testing_sparse_to_dense_csr.cpp
@@ -427,6 +426,15 @@ endif()
 
 if(ROCSPARSE_ENABLE_SPMAT_SCALE)
   list(APPEND ROCSPARSE_CLIENTS_TESTINGS ../testings/testing_spmat_scale.cpp)
+endif()
+
+if(ROCSPARSE_ENABLE_SDDMM_BATCHED)
+  list(APPEND ROCSPARSE_CLIENTS_TESTINGS
+    ../testings/testing_sddmm_batched_ell.cpp
+    ../testings/testing_sddmm_batched_coo.cpp
+    ../testings/testing_sddmm_batched_coo_aos.cpp
+    ../testings/testing_sddmm_batched_csr.cpp
+    ../testings/testing_sddmm_batched_csc.cpp)
 endif()
 
 
