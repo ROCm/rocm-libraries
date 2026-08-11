@@ -227,7 +227,7 @@ namespace TensileLite
         using Problem             = ContractionProblemGemm;
         using Inputs              = ContractionInputs;
         using GroupedInputs       = ContractionGroupedInputs;
-        using WGMParamsCache      = CacheMap<std::tuple<int32_t, size_t, size_t>, Problem>;
+        using WGMParamsCache      = CacheMap<std::tuple<int32_t, size_t, size_t, size_t>, Problem>;
         using StaggerUParamsCache = CacheMap<std::tuple<size_t, size_t, size_t>, Problem>;
 
         /**
@@ -493,6 +493,7 @@ namespace TensileLite
                         int32_t                             autoWGM,
                         size_t                              autoWGMXCC,
                         size_t                              autoWGMXCCCHUNK,
+                        size_t                              autoWGMXCCSPLITK,
                         size_t                              autoStaggerUMapping,
                         size_t                              autoStaggerU,
                         size_t                              autoStaggerUStrideShift,
@@ -538,7 +539,7 @@ namespace TensileLite
                                       KA&                      args,
                                       StreamKSettings const&   sk,
                                       uint32_t                 autoGsuVal,
-                                      uint32_t                 additionalPaddingPerBatchGeneralBatch=0) const;                                      
+                                      uint32_t                 additionalPaddingPerBatchGeneralBatch=0) const;
 
         template <typename KA>
         inline void calculateConversionCallWorkGroupItems(
@@ -668,7 +669,7 @@ namespace TensileLite
         bool                         kernelArgsLog   = false;
         mutable int                  isFallbackCUSol = -1; // -1:unset, 0:false, 1:true
         mutable WGMParamsCache       wgmParamsCache
-            = WGMParamsCache(std::make_tuple(INT32_MAX, SIZE_MAX, SIZE_MAX));
+            = WGMParamsCache(std::make_tuple(INT32_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX));
         mutable StaggerUParamsCache staggerUParamsCache
             = StaggerUParamsCache(std::make_tuple(SIZE_MAX, SIZE_MAX, SIZE_MAX));
 
@@ -700,9 +701,9 @@ namespace TensileLite
         uint32_t magicNumber(int magicDivAlg, uint32_t x, uint32_t* magicShift) const;
         uint32_t smallMagicNumber(uint32_t x) const;
 
-        std::tuple<int32_t, size_t, size_t> calculateAutoWGM(Problem const&  problem,
-                                                             Hardware const* hardware,
-                                                             uint32_t        skgrid) const;
+        std::tuple<int32_t, size_t, size_t, size_t> calculateAutoWGM(Problem const&  problem,
+                                                                     Hardware const* hardware,
+                                                                     uint32_t        skgrid) const;
         std::tuple<size_t, size_t, size_t>  calculateAutoStaggerU(Problem const&  problem,
                                                                   Hardware const* hardware,
                                                                   uint32_t        skgrid,
