@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright 2019-2026 Advanced Micro Devices, Inc.
+# Copyright 2019-2025 Advanced Micro Devices, Inc.
 # ########################################################################
 
 cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
@@ -31,8 +31,8 @@ if(NOT DEFINED ROCPRIM_ROOT)
   set(ROCPRIM_ROOT "${CMAKE_CURRENT_BINARY_DIR}/rocprim" CACHE PATH "")
   download_project(
     PROJ                rocprim
-    GIT_REPOSITORY      https://github.com/ROCm/rocm-libraries.git
-    GIT_TAG             rocm-7.2.4
+    GIT_REPOSITORY      https://github.com/ROCmSoftwarePlatform/rocPRIM.git
+    GIT_TAG             master
     INSTALL_DIR         ${ROCPRIM_ROOT}
     CMAKE_ARGS          -DBUILD_TEST=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>
     LOG_DOWNLOAD        TRUE

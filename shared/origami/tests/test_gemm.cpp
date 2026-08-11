@@ -488,7 +488,7 @@ TEST_CASE("GEMM: wgm_to_grid unit test", "[gemm]") {
   // Test 1: Simple 2x4 grid, wgm=4 (single slab covers all N)
   {
     origami::dim4_t grid{1, 2, 4, 1};
-    origami::workgroup_mapping_t wgm{0, 0, 4};
+    origami::workgroup_mapping_t wgm{0, 0, 0, 4};
     // slab_width=4, tiles_per_slab=2*4=8. All 8 tiles in one slab.
     // offset 0: m=0,n=0  offset 1: m=0,n=1  offset 2: m=0,n=2  offset 3: m=0,n=3
     // offset 4: m=1,n=0  offset 5: m=1,n=1  offset 6: m=1,n=2  offset 7: m=1,n=3
@@ -511,7 +511,7 @@ TEST_CASE("GEMM: wgm_to_grid unit test", "[gemm]") {
   // Test 2: Two slabs — 4x6 grid, wgm=3
   {
     origami::dim4_t grid{1, 4, 6, 1};
-    origami::workgroup_mapping_t wgm{0, 0, 3};
+    origami::workgroup_mapping_t wgm{0, 0, 0, 3};
     // slab0 (cols 0-2): 4*3=12 tiles, slab1 (cols 3-5): 12 tiles
     auto t0 = origami::gemm::wgm_to_grid(grid, wgm, 0);
     REQUIRE(t0.m == 0);
@@ -537,7 +537,7 @@ TEST_CASE("GEMM: wgm_to_grid unit test", "[gemm]") {
   // Test 3: K-splits — each MN tile has k splits
   {
     origami::dim4_t grid{4, 2, 3, 1};  // k=4, m=2, n=3, b=1
-    origami::workgroup_mapping_t wgm{0, 0, 3};
+    origami::workgroup_mapping_t wgm{0, 0, 0, 3};
     // First MN tile (m=0,n=0) has ids 0..3 (k=0..3)
     auto t0 = origami::gemm::wgm_to_grid(grid, wgm, 0);
     REQUIRE(t0.m == 0);
@@ -557,7 +557,7 @@ TEST_CASE("GEMM: wgm_to_grid unit test", "[gemm]") {
   // Test 4: Batch dimension
   {
     origami::dim4_t grid{1, 2, 2, 3};  // k=1, m=2, n=2, b=3
-    origami::workgroup_mapping_t wgm{0, 0, 2};
+    origami::workgroup_mapping_t wgm{0, 0, 0, 2};
     // 4 tiles per batch. batch 0: ids 0-3, batch 1: ids 4-7, batch 2: ids 8-11
     auto t0 = origami::gemm::wgm_to_grid(grid, wgm, 0);
     REQUIRE(t0.b == 0);
@@ -576,8 +576,8 @@ TEST_CASE("GEMM: wgm_to_grid unit test", "[gemm]") {
   // Test 5: WGMXCC interleaving
   {
     origami::dim4_t grid{1, 4, 4, 1};               // 16 tiles total
-    origami::workgroup_mapping_t wgm_xcc{0, 8, 4};  // wgmxcc=8
-    origami::workgroup_mapping_t wgm_no{0, 0, 4};   // no xcc
+    origami::workgroup_mapping_t wgm_xcc{0, 0, 8, 4};
+    origami::workgroup_mapping_t wgm_no{0, 0, 0, 4};
 
     // With WGMXCC, consecutive IDs should map to different XCD groups.
     // ID 0 and ID 1 should land in different XCD regions.
@@ -597,7 +597,7 @@ TEST_CASE("GEMM: wgm_to_grid unit test", "[gemm]") {
   // Test 6: wgm=1 — each slab is one column, M varies fastest
   {
     origami::dim4_t grid{1, 4, 3, 1};
-    origami::workgroup_mapping_t wgm{0, 0, 1};
+    origami::workgroup_mapping_t wgm{0, 0, 0, 1};
     // slab_width=1, tiles_per_slab=4. Col 0: ids 0-3, col 1: ids 4-7, col 2: ids 8-11
     auto t0 = origami::gemm::wgm_to_grid(grid, wgm, 0);
     REQUIRE(t0.m == 0);
@@ -613,7 +613,7 @@ TEST_CASE("GEMM: wgm_to_grid unit test", "[gemm]") {
   // Test 7: Remainder slab — grid.n not divisible by wgm
   {
     origami::dim4_t grid{1, 3, 5, 1};  // 5 cols, wgm=2 -> 2 full slabs + remainder of 1
-    origami::workgroup_mapping_t wgm{0, 0, 2};
+    origami::workgroup_mapping_t wgm{0, 0, 0, 2};
     // slab0: cols 0,1 (6 tiles), slab1: cols 2,3 (6 tiles), remainder: col 4 (3 tiles)
     auto t12 = origami::gemm::wgm_to_grid(grid, wgm, 12);
     REQUIRE(t12.m == 0);
@@ -626,7 +626,7 @@ TEST_CASE("GEMM: wgm_to_grid unit test", "[gemm]") {
   // Test 8: Brute-force 'bijection' test — every id maps to a unique (m,n,k,b) and back
   {
     origami::dim4_t grid{2, 3, 4, 2};
-    origami::workgroup_mapping_t wgm{0, 0, 2};
+    origami::workgroup_mapping_t wgm{0, 0, 0, 2};
     size_t total = grid.total();
 
     std::set<std::tuple<size_t, size_t, size_t, size_t>> seen;
@@ -1102,7 +1102,7 @@ TEST_CASE("GEMM: count_unique_tiles unit test", "[gemm]") {
   SECTION("grid_b=64, grid_k=1, wgmxcc=1 — round-robin strided across batches") {
     // Grid: 2×2×1×64, wgm=1, wgmxcc=1 (no wgmxcc)
     // stride=8, mnk=4, each strided tile lands in a different batch
-    auto u = origami::gemm::count_unique_tiles({1, 2, 2, 64}, {0, 1, 1}, N_CU, num_xcd, 0, 0);
+    auto u = origami::gemm::count_unique_tiles({1, 2, 2, 64}, {0, 0, 1, 1}, N_CU, num_xcd, 0, 0);
     CHECK(u.k == 1);
     CHECK(u.m == 1);
     CHECK(u.n == 1);
@@ -1112,7 +1112,7 @@ TEST_CASE("GEMM: count_unique_tiles unit test", "[gemm]") {
   SECTION("grid_b=64, grid_k=1, wgmxcc=8 — contiguous block spans all mn per batch") {
     // Grid: 2×2×1×64, wgm=1, wgmxcc=8
     // Each XCD gets 32 contiguous tiles -> 4 mn × 8 batches
-    auto u = origami::gemm::count_unique_tiles({1, 2, 2, 64}, {0, 8, 1}, N_CU, num_xcd, 0, 0);
+    auto u = origami::gemm::count_unique_tiles({1, 2, 2, 64}, {0, 0, 8, 1}, N_CU, num_xcd, 0, 0);
     CHECK(u.k == 1);
     CHECK(u.m == 2);
     CHECK(u.n == 2);
@@ -1122,7 +1122,7 @@ TEST_CASE("GEMM: count_unique_tiles unit test", "[gemm]") {
   SECTION("grid_k=64, grid_b=1, wgmxcc=1 — round-robin strided across k-splits") {
     // Grid: 2×2×64×1, wgm=1, wgmxcc=1
     // stride=8 cycles through k: unique_k = 64/gcd(8,64) = 8
-    auto u = origami::gemm::count_unique_tiles({64, 2, 2, 1}, {0, 1, 1}, N_CU, num_xcd, 0, 0);
+    auto u = origami::gemm::count_unique_tiles({64, 2, 2, 1}, {0, 0, 1, 1}, N_CU, num_xcd, 0, 0);
     CHECK(u.k == 8);
     CHECK(u.m == 2);
     CHECK(u.n == 2);
@@ -1132,7 +1132,7 @@ TEST_CASE("GEMM: count_unique_tiles unit test", "[gemm]") {
   SECTION("grid_k=64, grid_b=1, wgmxcc=8 — contiguous block within one mn tile") {
     // Grid: 2×2×64×1, wgm=1, wgmxcc=8
     // Each XCD gets 32 contiguous tiles -> 32 k-splits in mn_id=0
-    auto u = origami::gemm::count_unique_tiles({64, 2, 2, 1}, {0, 8, 1}, N_CU, num_xcd, 0, 0);
+    auto u = origami::gemm::count_unique_tiles({64, 2, 2, 1}, {0, 0, 8, 1}, N_CU, num_xcd, 0, 0);
     CHECK(u.k == 32);
     CHECK(u.m == 1);
     CHECK(u.n == 1);
@@ -1142,7 +1142,7 @@ TEST_CASE("GEMM: count_unique_tiles unit test", "[gemm]") {
   SECTION("16×16 grid, wgmxcc=8, wgm=4 — contiguous block in first WGM slab") {
     // Grid: 16×16×1×1, wgm=4, wgmxcc=8
     // 32 contiguous tiles → 8 m-rows × 4 n-columns (one slab)
-    auto u = origami::gemm::count_unique_tiles({1, 16, 16, 1}, {0, 8, 4}, N_CU, num_xcd, 0, 0);
+    auto u = origami::gemm::count_unique_tiles({1, 16, 16, 1}, {0, 0, 8, 4}, N_CU, num_xcd, 0, 0);
     CHECK(u.k == 1);
     CHECK(u.m == 8);
     CHECK(u.n == 4);
@@ -1152,7 +1152,7 @@ TEST_CASE("GEMM: count_unique_tiles unit test", "[gemm]") {
   SECTION("8×8 grid with k=4, wgmxcc=8, wgm=2 — mixed k and mn") {
     // Grid: 8×8×4×1, wgm=2, wgmxcc=8
     // 32 contiguous tiles → 4 k-splits × 4 m-rows × 2 n-columns
-    auto u = origami::gemm::count_unique_tiles({4, 8, 8, 1}, {0, 8, 2}, N_CU, num_xcd, 0, 0);
+    auto u = origami::gemm::count_unique_tiles({4, 8, 8, 1}, {0, 0, 8, 2}, N_CU, num_xcd, 0, 0);
     CHECK(u.k == 4);
     CHECK(u.m == 4);
     CHECK(u.n == 2);
@@ -1162,7 +1162,7 @@ TEST_CASE("GEMM: count_unique_tiles unit test", "[gemm]") {
   SECTION("All XCDs report the same unique counts") {
     // With wgmxcc=8, all XCDs should see the same tile structure
     for (size_t xcd = 0; xcd < num_xcd; ++xcd) {
-      auto u = origami::gemm::count_unique_tiles({1, 16, 16, 1}, {0, 8, 4}, N_CU, num_xcd, xcd, 0);
+      auto u = origami::gemm::count_unique_tiles({1, 16, 16, 1}, {0, 0, 8, 4}, N_CU, num_xcd, xcd, 0);
       CHECK(u.k == 1);
       CHECK(u.m == 8);
       CHECK(u.n == 4);
@@ -1171,16 +1171,16 @@ TEST_CASE("GEMM: count_unique_tiles unit test", "[gemm]") {
   }
 
   SECTION("Zero/degenerate inputs return zeros") {
-    CHECK(origami::gemm::count_unique_tiles({1, 4, 4, 1}, {0, 8, 4}, 0, 8, 0, 0).m == 0);
-    CHECK(origami::gemm::count_unique_tiles({1, 4, 4, 1}, {0, 8, 4}, 256, 0, 0, 0).m == 0);
-    CHECK(origami::gemm::count_unique_tiles({1, 0, 4, 1}, {0, 8, 4}, 256, 8, 0, 0).m == 0);
-    CHECK(origami::gemm::count_unique_tiles({0, 4, 4, 1}, {0, 8, 4}, 256, 8, 0, 0).k == 0);
+    CHECK(origami::gemm::count_unique_tiles({1, 4, 4, 1}, {0, 0, 8, 4}, 0, 8, 0, 0).m == 0);
+    CHECK(origami::gemm::count_unique_tiles({1, 4, 4, 1}, {0, 0, 8, 4}, 256, 0, 0, 0).m == 0);
+    CHECK(origami::gemm::count_unique_tiles({1, 0, 4, 1}, {0, 0, 8, 4}, 256, 8, 0, 0).m == 0);
+    CHECK(origami::gemm::count_unique_tiles({0, 4, 4, 1}, {0, 0, 8, 4}, 256, 8, 0, 0).k == 0);
   }
 
   SECTION("Timestep beyond available tiles returns zeros") {
     // 16 tiles total, 256 CUs -> 1 timestep. Timestep 1 should be empty.
     origami::dim4_t grid{1, 4, 4, 1};
-    auto u = origami::gemm::count_unique_tiles(grid, {0, 1, 4}, N_CU, num_xcd, 0, 1);
+    auto u = origami::gemm::count_unique_tiles(grid, {0, 0, 1, 4}, N_CU, num_xcd, 0, 1);
     CHECK(u.m == 0);
     CHECK(u.n == 0);
     CHECK(u.k == 0);
@@ -1189,13 +1189,13 @@ TEST_CASE("GEMM: count_unique_tiles unit test", "[gemm]") {
 
   SECTION("Single tile grid — all XCDs see at most 1 tile") {
     origami::dim4_t grid{1, 1, 1, 1};
-    auto u0 = origami::gemm::count_unique_tiles(grid, {0, 1, 1}, N_CU, num_xcd, 0, 0);
+    auto u0 = origami::gemm::count_unique_tiles(grid, {0, 0, 1, 1}, N_CU, num_xcd, 0, 0);
     CHECK(u0.m == 1);
     CHECK(u0.n == 1);
     CHECK(u0.k == 1);
     CHECK(u0.b == 1);
     // XCD 1 should get nothing (only 1 tile, XCD 0 gets it)
-    auto u1 = origami::gemm::count_unique_tiles(grid, {0, 1, 1}, N_CU, num_xcd, 1, 0);
+    auto u1 = origami::gemm::count_unique_tiles(grid, {0, 0, 1, 1}, N_CU, num_xcd, 1, 0);
     CHECK(u1.m == 0);
   }
 
@@ -1203,7 +1203,7 @@ TEST_CASE("GEMM: count_unique_tiles unit test", "[gemm]") {
     // 32x32 grid = 1024 tiles, 256 CUs, 8 XCDs -> 32 tiles/XCD.
     // stride=8 across 1024 MN tiles -> each XCD sees many M and N values.
     origami::dim4_t grid{1, 32, 32, 1};
-    auto u = origami::gemm::count_unique_tiles(grid, {0, 1, 4}, N_CU, num_xcd, 0, 0);
+    auto u = origami::gemm::count_unique_tiles(grid, {0, 0, 1, 4}, N_CU, num_xcd, 0, 0);
     CHECK(u.k == 1);
     CHECK(u.m >= 1);
     CHECK(u.m <= 32);
@@ -1216,7 +1216,7 @@ TEST_CASE("GEMM: count_unique_tiles unit test", "[gemm]") {
     // grid.k=8, stride=8 -> gcd=8, unique_k = 8/8 = 1.
     // Each XCD sees a single K-split but many MN tiles.
     origami::dim4_t grid{8, 4, 4, 1};
-    auto u = origami::gemm::count_unique_tiles(grid, {0, 1, 4}, N_CU, num_xcd, 0, 0);
+    auto u = origami::gemm::count_unique_tiles(grid, {0, 0, 1, 4}, N_CU, num_xcd, 0, 0);
     CHECK(u.k == 1);
     CHECK(u.m >= 1);
     CHECK(u.n >= 1);
@@ -1225,15 +1225,15 @@ TEST_CASE("GEMM: count_unique_tiles unit test", "[gemm]") {
   SECTION("Round-robin: stride coprime with grid.k") {
     // grid.k=3, stride=8 -> gcd(8,3)=1, unique_k = 3/1 = 3 (all K-splits).
     origami::dim4_t grid{3, 4, 4, 1};
-    auto u = origami::gemm::count_unique_tiles(grid, {0, 1, 4}, N_CU, num_xcd, 0, 0);
+    auto u = origami::gemm::count_unique_tiles(grid, {0, 0, 1, 4}, N_CU, num_xcd, 0, 0);
     CHECK(u.k == 3);
   }
 
   SECTION("WGMXCC: last XCD gets correct tiles") {
     // 256 tiles, 8 XCDs -> 32 per XCD. Last XCD starts at 7*32=224.
     origami::dim4_t grid{1, 16, 16, 1};
-    auto u_first = origami::gemm::count_unique_tiles(grid, {0, 8, 4}, N_CU, num_xcd, 0, 0);
-    auto u_last  = origami::gemm::count_unique_tiles(grid, {0, 8, 4}, N_CU, num_xcd, 7, 0);
+    auto u_first = origami::gemm::count_unique_tiles(grid, {0, 0, 8, 4}, N_CU, num_xcd, 0, 0);
+    auto u_last  = origami::gemm::count_unique_tiles(grid, {0, 0, 8, 4}, N_CU, num_xcd, 7, 0);
     // Both should get same structure with symmetric grid
     CHECK(u_first.k == u_last.k);
     CHECK(u_first.b == u_last.b);
@@ -1254,7 +1254,7 @@ TEST_CASE("GEMM: count_unique_tiles unit test", "[gemm]") {
                                                       {1, 16, 16, 1},
                                                       {2, 8, 8, 3}};
     std::vector<origami::workgroup_mapping_t> wgms = {
-        {0, 8, 1}, {0, 8, 4}, {0, 8, 8}, {0, 1, 1}, {0, 0, 6}};
+        {0, 0, 8, 1}, {0, 0, 8, 4}, {0, 0, 8, 8}, {0, 0, 1, 1}, {0, 0, 0, 6}};
     for (auto& g : grids) {
       for (auto& w : wgms) {
         for (size_t xcd = 0; xcd < num_xcd; ++xcd) {
@@ -1990,4 +1990,113 @@ TEST_CASE("GEMM: compute_epilogue_latency", "[gemm]") {
       REQUIRE(latency == 0.0);
     }
   }
+}
+
+namespace {
+
+// 22x22 = 484 tiles of 128x128, just over MIN_TILES_FOR_DYNAMIC (480), so the
+// tile-count gate in select_hybrid_mode() lets the other gates decide.
+inline origami::problem_t make_problem_above_dynamic_tile_gate() {
+  return make_problem(/*m=*/128 * 22, /*n=*/128 * 22, /*k=*/4096);
+}
+
+}  // namespace
+
+TEST_CASE("GEMM: context_t::tile_schedule records the StreamK sub-path", "[gemm][hybrid]") {
+  // gfx950 with a cotenant holding CUs away, a grid above the tile gate and low
+  // occupancy is the case the SK4 work-queue path exists for.
+  auto hardware = make_hardware(950);
+  auto config   = make_config(128, 128, 64, 32, 32, 8, false, 1, /*occupancy=*/1);
+
+  SECTION("cotenant present on gfx950 selects the dynamic work queue") {
+    auto problem     = make_problem_above_dynamic_tile_gate();
+    problem.num_cus  = hardware.N_CU / 2;
+    origami::gemm::context_t ctx(problem, hardware, config);
+    REQUIRE(ctx.tile_schedule == origami::hybrid_mode_t::dynamic);
+  }
+
+  SECTION("no CU budget means no cotenant to rebalance against, so static") {
+    auto problem    = make_problem_above_dynamic_tile_gate();
+    problem.num_cus = 0;
+    origami::gemm::context_t ctx(problem, hardware, config);
+    REQUIRE(ctx.tile_schedule == origami::hybrid_mode_t::static_);
+  }
+
+  SECTION("grid at or below the tile gate stays static even with a cotenant") {
+    auto problem    = make_problem(128, 128, 4096);
+    problem.num_cus = hardware.N_CU / 2;
+    origami::gemm::context_t ctx(problem, hardware, config);
+    REQUIRE(ctx.tile_schedule == origami::hybrid_mode_t::static_);
+  }
+
+  SECTION("grid selection is a separate axis and does not move the sub-path") {
+    // select_hybrid_mode() never reads config.grid_selection, and hipBLASLt
+    // settles the sub-path before grid sizing consumes it: in
+    // ContractionSolution the streamK5EffectiveDynamic() result is computed
+    // first, and skDynamicGrid (which is cast straight to grid_selection_t) is
+    // only honoured on the static branch. A data-parallel grid therefore has to
+    // leave the answer alone.
+    auto problem    = make_problem_above_dynamic_tile_gate();
+    problem.num_cus = hardware.N_CU / 2;
+    origami::gemm::context_t ctx_k_split(problem, hardware, config);
+
+    auto dp_config           = config;
+    dp_config.grid_selection = origami::grid_selection_t::data_parallel;
+    origami::gemm::context_t ctx_dp(problem, hardware, dp_config);
+
+    REQUIRE(ctx_dp.tile_schedule == ctx_k_split.tile_schedule);
+    // Pinned so the comparison above cannot pass by both sides degrading.
+    REQUIRE(ctx_dp.tile_schedule == origami::hybrid_mode_t::dynamic);
+  }
+
+  SECTION("agrees with select_hybrid_mode fed problem.num_cus as sm_count_target") {
+    // Pins the source of truth: hipBLASLt's streamK5EffectiveDynamic() passes
+    // smCountTarget() both as problem.num_cus and as sm_count_target, so the
+    // context must not diverge from the heuristic it delegates to.
+    for (size_t num_cus : {size_t{0}, hardware.N_CU / 4, hardware.N_CU / 2, hardware.N_CU}) {
+      DYNAMIC_SECTION("num_cus=" << num_cus) {
+        auto problem    = make_problem_above_dynamic_tile_gate();
+        problem.num_cus = num_cus;
+        origami::gemm::context_t ctx(problem, hardware, config);
+        REQUIRE(ctx.tile_schedule
+                == origami::streamk::select_hybrid_mode(problem, hardware, config, num_cus));
+      }
+    }
+  }
+}
+
+TEST_CASE("GEMM: context_t::tile_schedule reports static on untuned architectures",
+          "[gemm][hybrid]") {
+  // select_hybrid_mode() is only fit on gfx950 and answers static_ elsewhere,
+  // which is what those kernels really launch: streamK5EffectiveDynamic() feeds
+  // that same return value straight into its effective-dynamic decision. The
+  // context reports it verbatim rather than downgrading it to none, so that when
+  // another architecture is tuned the real answer flows through unchanged.
+  for (int gpu_arch : {942, 1250}) {
+    DYNAMIC_SECTION("gfx" << gpu_arch) {
+      auto hardware   = make_hardware(gpu_arch);
+      auto config     = make_config(128, 128, 64, 32, 32, 8, false, 1, /*occupancy=*/1);
+      auto problem    = make_problem_above_dynamic_tile_gate();
+      problem.num_cus = hardware.N_CU / 2;
+
+      origami::gemm::context_t ctx(problem, hardware, config);
+      REQUIRE(ctx.tile_schedule == origami::hybrid_mode_t::static_);
+      REQUIRE(ctx.tile_schedule
+              == origami::streamk::select_hybrid_mode(
+                     problem, hardware, config, problem.num_cus));
+    }
+  }
+}
+
+TEST_CASE("GEMM: context_t::tile_schedule is none only before construction", "[gemm][hybrid]") {
+  // A constructed context always carries the heuristic's answer, so none is left
+  // to mean "no problem examined yet".
+  origami::gemm::context_t ctx;
+  REQUIRE(ctx.tile_schedule == origami::hybrid_mode_t::none);
+}
+
+TEST_CASE("GEMM: hybrid_mode_to_string", "[gemm][hybrid]") {
+  REQUIRE(origami::hybrid_mode_to_string(origami::hybrid_mode_t::static_) == "static");
+  REQUIRE(origami::hybrid_mode_to_string(origami::hybrid_mode_t::dynamic) == "dynamic");
+  REQUIRE(origami::hybrid_mode_to_string(origami::hybrid_mode_t::none) == "none");
 }

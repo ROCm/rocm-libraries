@@ -36,6 +36,9 @@
 
 /* Build-time feature flags baked in at compile time. */
 
+/* rocSPARSE 5.1 */
+#cmakedefine ROCSPARSE_WITH_SPMAT_SCALE
+
 /* rocSPARSE 5.0 */
 #cmakedefine ROCSPARSE_WITH_HANDLE_CREATE
 #cmakedefine ROCSPARSE_WITH_U16_REMOVED
