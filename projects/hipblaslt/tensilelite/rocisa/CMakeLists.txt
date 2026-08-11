@@ -92,6 +92,7 @@ block()
     endif()
     list(APPEND CMAKE_PREFIX_PATH /opt/rocm/hip /opt/rocm)
     find_package(hip REQUIRED)
+    find_package(amd_comgr REQUIRED)
 
     if(ROCISA_STANDALONE)
         # The standalone wheel owns a private static Origami copy. Nested
