@@ -85,6 +85,28 @@ if(_AOT_ROCKE_OK)
             set(_aot_comgr "${_AOT_COMGR_LIB}")
         endif()
     endif()
+
+    # Windows: the producer loads comgr via ctypes.CDLL, which needs the RUNTIME
+    # amd_comgr.dll -- but the resolution above (find_library especially) yields the
+    # IMPORT library amd_comgr.lib, which ctypes cannot load. The hermetic TheRock
+    # build failed exactly here ("cannot load amd_comgr.dll ...; tried
+    # [.../stage/lib/amd_comgr.lib]") because we forwarded the .lib as the override.
+    # Swap a resolved .lib for the sibling DLL: ROCm/TheRock stage the DLL in a bin/
+    # dir beside the lib/ dir. If no loadable DLL turns up, drop to the skip path
+    # below rather than fail mid-producer.
+    if(WIN32 AND _aot_comgr MATCHES "\\.lib$")
+        get_filename_component(_comgr_libdir "${_aot_comgr}" DIRECTORY)
+        find_file(_AOT_COMGR_DLL NAMES amd_comgr.dll
+            HINTS "${_comgr_libdir}" "${_comgr_libdir}/../bin"
+                  "${_comgr_libdir}/../../dist/bin"
+                  "$ENV{ROCM_PATH}/bin" "$ENV{HIP_PATH}/bin")
+        if(_AOT_COMGR_DLL)
+            set(_aot_comgr "${_AOT_COMGR_DLL}")
+        else()
+            set(_aot_comgr "")
+        endif()
+    endif()
+
     if(NOT _aot_comgr)
         set(_AOT_ROCKE_OK FALSE)
         message(WARNING
