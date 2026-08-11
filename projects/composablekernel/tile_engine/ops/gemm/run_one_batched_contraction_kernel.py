@@ -51,6 +51,13 @@ def main() -> int:
         out["kernel_name"] = runner.kernel_name
         if expect_name is not None:
             out["name_match"] = (runner.kernel_name == expect_name)
+            # The name-parity anchor guarantees we benchmarked exactly the
+            # requested config. A mismatch means a stale/wrong .so, so fail the
+            # job instead of silently counting it as a pass.
+            if not out["name_match"]:
+                out["status"] = "name_mismatch"
+                print(json.dumps(out))
+                return 1
 
         rng = np.random.default_rng(0)
         npd = runner.np_dtype

@@ -144,6 +144,17 @@ def _validate_arch(arch: str) -> str:
     return arch
 
 
+def _dtype_from_kernel_name(name: str) -> str:
+    """Extract the dtype token from a batched-contraction kernel name.
+
+    Name format is ``batched_contraction_<dtype>_<layout>_...`` (see
+    make_batched_contraction_kernel_name), so the dtype is the token after the
+    ``batched_contraction`` prefix. Mirrors gemm_utils._dtype_from_kernel_name."""
+    parts = name.split("_")
+    # prefix is two tokens ("batched", "contraction"); dtype follows.
+    return parts[2] if len(parts) > 2 else "fp16"
+
+
 def _np_dtype(dtype: str):
     if dtype == "bf16":
         try:
@@ -422,8 +433,19 @@ class GpuBatchedContractionRunner:
         elementwise: str = "PassThrough",
     ):
         self._lib = BatchedContractionDispatcherLib(so_path)
-        self.dtype = dtype
-        self.np_dtype = _np_dtype(dtype)
+        # The compiled .so is the source of truth for the element dtype: the C++
+        # bridge sizes its host<->device copies from sizeof(ADataType). Trusting a
+        # mismatched caller dtype (e.g. dtype='fp16' on an fp32 .so) would allocate
+        # host buffers of the wrong byte-width and cause OOB reads/writes. Derive
+        # the compiled dtype from the exported kernel name and reject a mismatch.
+        compiled_dtype = _dtype_from_kernel_name(self._lib.kernel_name())
+        if compiled_dtype in _NP_DTYPE and dtype != compiled_dtype:
+            raise ValueError(
+                f"dtype mismatch: caller requested {dtype!r} but the compiled "
+                f".so is {compiled_dtype!r} (kernel {self._lib.kernel_name()!r})"
+            )
+        self.dtype = compiled_dtype if compiled_dtype in _NP_DTYPE else dtype
+        self.np_dtype = _np_dtype(self.dtype)
         # num_d / elementwise describe the D-tensor epilogue the compiled .so wired in.
         # We trust the .so's compiled-in count first (it is the source of truth), then
         # fall back to the caller-provided value.
@@ -654,6 +676,12 @@ def expand_sweep(config: dict, dtype: str = "fp16", layout: str = "rcr") -> List
                 num_dim_g=config.get("num_dim_g", 1), num_dim_m=config.get("num_dim_m", 1),
                 num_dim_n=config.get("num_dim_n", 1), num_dim_k=config.get("num_dim_k", 1),
                 num_d_tensors=config.get("num_d_tensors", 0),
+                # Project elementwise alongside the D count: with num_d>0 the default
+                # PassThrough would fail is_valid(), so a MultiD* sweep needs its op.
+                elementwise=config.get(
+                    "elementwise",
+                    "PassThrough" if config.get("num_d_tensors", 0) == 0 else "MultiDAdd",
+                ),
                 k_block_per_cu=config.get("k_block_per_cu", 1),
             )
             if not cfg.is_valid():

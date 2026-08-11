@@ -13,7 +13,11 @@ find_package(Python3 COMPONENTS Interpreter REQUIRED)
 # Bridge on-device GPU correctness test (SKIPs cleanly without a GPU/built lib).
 add_test(
     NAME dispatcher_test_batched_gemm_gpu_correctness
-    COMMAND ${Python3_EXECUTABLE} -m unittest discover -s ${CMAKE_CURRENT_SOURCE_DIR} -p test_batched_gemm_gpu_correctness.py -v
+    # Run the script directly: this module is script-style (a parameterized
+    # function + main() guard), not unittest.TestCase, so `unittest discover`
+    # would collect 0 tests and pass vacuously. main() skips (exit 0) without a
+    # GPU/built lib and returns nonzero only on a real correctness failure.
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_batched_gemm_gpu_correctness.py
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
 set_tests_properties(dispatcher_test_batched_gemm_gpu_correctness PROPERTIES
@@ -25,7 +29,11 @@ set_tests_properties(dispatcher_test_batched_gemm_gpu_correctness PROPERTIES
 # Bridge on-device GPU correctness test (SKIPs cleanly without a GPU/built lib).
 add_test(
     NAME dispatcher_test_batched_contraction_gpu_correctness
-    COMMAND ${Python3_EXECUTABLE} -m unittest discover -s ${CMAKE_CURRENT_SOURCE_DIR} -p test_batched_contraction_gpu_correctness.py -v
+    # Run the script directly: this module is script-style (a parameterized
+    # function + main() guard), not unittest.TestCase, so `unittest discover`
+    # would collect 0 tests and pass vacuously. main() skips (exit 0) without a
+    # GPU/built lib and returns nonzero only on a real correctness failure.
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_batched_contraction_gpu_correctness.py
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
 set_tests_properties(dispatcher_test_batched_contraction_gpu_correctness PROPERTIES

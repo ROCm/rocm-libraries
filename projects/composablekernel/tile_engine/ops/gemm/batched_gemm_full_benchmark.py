@@ -241,7 +241,10 @@ def main():
         nargs="*",
         help="TE sweep config JSON files (default: batched_gemm/configs/default_ci_config.json)",
     )
-    parser.add_argument("--arch", default="gfx942")
+    # Default None so the bridge utilities auto-detect the actual GPU arch via
+    # rocminfo (_resolve_arch); never hardcode gfx942 -- that would build an
+    # incompatible kernel on gfx90a/gfx950 and launch it on the visible device.
+    parser.add_argument("--arch", default=None)
     parser.add_argument(
         "--dtype",
         default="fp16",

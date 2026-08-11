@@ -43,7 +43,9 @@ def main() -> int:
                     default=_HERE.parent / "batched_contraction" / "configs" / "bridge_default_ci_config.json")
     ap.add_argument("--dtype", default="fp16", choices=["fp16", "bf16", "fp32"])
     ap.add_argument("--layout", default="rcr")
-    ap.add_argument("--arch", default="gfx942")
+    # Leave arch unset by default so setup resolves the visible GPU architecture
+    # via rocminfo; hardcoding gfx942 would compile the wrong ISA on gfx950.
+    ap.add_argument("--arch", default=None)
     ap.add_argument("--output-dir", type=Path, default=Path("/tmp/bc_bridge_bench"))
     ap.add_argument("--g", type=int, default=8)
     ap.add_argument("--m", type=int, default=1024)

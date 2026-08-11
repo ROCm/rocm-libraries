@@ -373,6 +373,26 @@ class GpuBatchedGemmRunner:
         """
         batch, M, N, K = problem.batch_count, problem.M, problem.N, problem.K
 
+        # E: validate the logical tensor shapes BEFORE any layout transform. The
+        # C bridge copies batch*M*K (A) and batch*K*N (B) elements verbatim from
+        # the host pointers regardless of the actual NumPy allocation, so a
+        # smaller same-rank input would trigger an out-of-bounds host read. A/B
+        # are always passed in logical (batch, M, K) / (batch, K, N) order (the
+        # column-major transpose below happens after this check), so validate
+        # against those shapes up front.
+        expected_A = (batch, M, K)
+        expected_B = (batch, K, N)
+        if A.shape != expected_A:
+            raise ValueError(
+                f"A has shape {A.shape}, expected logical (batch, M, K) "
+                f"{expected_A} for problem batch={batch} M={M} K={K}"
+            )
+        if B.shape != expected_B:
+            raise ValueError(
+                f"B has shape {B.shape}, expected logical (batch, K, N) "
+                f"{expected_B} for problem batch={batch} K={K} N={N}"
+            )
+
         dtype = _gu._dtype_from_kernel_name(self._kernel_name)
         la, lb, lc = _gu._layout_from_kernel_name(self._kernel_name)
 
