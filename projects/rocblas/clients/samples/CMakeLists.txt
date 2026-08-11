@@ -137,4 +137,5 @@ endforeach( )
 
 foreach( exe ${sample_list_hip_device} )
   target_link_libraries( ${exe} PRIVATE hip::device )
+  rocblas_workaround_amdhip64_missing( ${exe} )
 endforeach( )
