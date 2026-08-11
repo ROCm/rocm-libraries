@@ -1,7 +1,7 @@
 # ADR 0002: Pin the split-GSU naming crash
 
 Status:  Accepted
-Defect:  AIHPBLAS-XXXX (to file)
+Defect:  AIHPBLAS-4297
 
 ## Context
 Mutation-validating `SolutionStructs/Naming.py` confirmed a characterized crash in `getKernelNameMin`: with `splitGSU=True`, `GlobalSplitU > 1` or `-1` was first rewritten to the string `"M"` and then evaluated by `"M" > 0`, raising `TypeError`. This prevents canonical names from being built for valid split/automatic GSU solutions.
