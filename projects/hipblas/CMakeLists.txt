@@ -24,6 +24,8 @@ cmake_minimum_required( VERSION 3.5 )
 
 # We use C++14 features, this will add compile option: -std=c++14
 set( CMAKE_CXX_STANDARD 17 )
+set( CMAKE_CXX_STANDARD_REQUIRED ON )
+set( CMAKE_CXX_EXTENSIONS OFF )
 
 # Build documentation
 option(BUILD_DOCS "Build documentation" OFF)
@@ -58,6 +60,46 @@ list( APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake  ${ROCM_PATH}/l
 
 # NOTE:  workaround until hip cmake modules fixes symlink logic in their config files; remove when fixed
 list( APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/lib/cmake/hip /opt/rocm /opt/rocm/llvm /opt/rocm/hip )
+
+if(WIN32)
+  add_compile_definitions("$<$<COMPILE_LANGUAGE:C,CXX>:_CRT_SECURE_NO_WARNINGS;NOMINMAX>")
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_C_COMPILER_ID STREQUAL "Clang" )
+    add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:-fms-extensions;-fms-compatibility;-fdelayed-template-parsing>")
+  endif()
+
+  option(HIPBLAS_USE_BINSKIM_COMPLIANT_COMPILE_FLAGS "Prepare hipBLAS for BinSkim Binary Analyzer" OFF)
+  option(HIPBLAS_USE_SPECTRE_MITIGATED_LIBRARIES "Use Spectre-mitigated libraries" OFF)
+
+  if(MSVC AND MSVC_VERSION GREATER_EQUAL 1900)
+    if(HIPBLAS_USE_BINSKIM_COMPLIANT_COMPILE_FLAGS)
+      message(STATUS "Control Flow Guard enabled")
+      add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:/guard:cf>)
+      add_link_options(/guard:cf /DYNAMICBASE)
+    endif()
+    if(HIPBLAS_USE_SPECTRE_MITIGATED_LIBRARIES)
+      message(STATUS "Using Spectre-mitigated libraries")
+      add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:/Qspectre>)
+    endif()
+  elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    if(HIPBLAS_USE_BINSKIM_COMPLIANT_COMPILE_FLAGS)
+      message(STATUS "Control Flow Guard enabled (Clang)")
+      add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:SHELL:-Xclang -cfguard>")
+      add_link_options(-Wl,-guard:cf)
+    endif()
+    if(HIPBLAS_USE_SPECTRE_MITIGATED_LIBRARIES)
+      message(WARNING "Spectre mitigated libraries are not yet available for Clang in this project.")
+    endif()
+  endif()
+
+  option(HIPBLAS_USE_MSVC_STATIC_RUNTIME "Link MSVC runtime library statically" OFF)
+
+  if(NOT HIPBLAS_USE_MSVC_STATIC_RUNTIME)
+    set(HIPBLAS_MSVC_RUNTIME_SUFFIX "DLL")
+  endif()
+  if(NOT CMAKE_MSVC_RUNTIME_LIBRARY)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>${HIPBLAS_MSVC_RUNTIME_SUFFIX}")
+  endif()
+endif()
 
 # This finds the rocm-cmake project, and installs it if not found
 # rocm-cmake contains common cmake code for rocm projects to help setup and install
