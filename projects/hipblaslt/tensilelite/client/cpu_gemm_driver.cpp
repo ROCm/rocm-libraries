@@ -862,11 +862,14 @@ int runGemm(size_t             m,
             return 0.05;
         }();
 
-        const auto comparison = roc::host_validation::compare(std::span<const AccumulateT>(d),
-                                                              std::span<const AccumulateT>(dRef),
-                                                              {.absoluteTolerance     = tolerance,
-                                                               .relativeTolerance     = 0.0,
-                                                               .maxReportedMismatches = 10});
+        const auto comparison = roc::host_validation::compare(
+            roc::host_validation::TypedTensorView<AccumulateT>(
+                std::span<const AccumulateT>(d)),
+            roc::host_validation::TypedTensorView<AccumulateT>(
+                std::span<const AccumulateT>(dRef)),
+            {.absoluteTolerance     = tolerance,
+             .relativeTolerance     = 0.0,
+             .maxReportedMismatches = 10});
 
         for(const auto& mismatch : comparison.reportedMismatches)
         {

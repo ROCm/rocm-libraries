@@ -141,10 +141,10 @@ TEST(ReferenceMXFastPath, MatchesSlowPathForScaledFP8Gemm)
     SolveGemmCPU(problem, inputsSlow, /*elementsToValidate=*/-1, /*tryFastPath=*/false);
     ASSERT_TRUE(tryRuntimeTiledGemm(problem, inputsFast, /*elementsToValidate=*/-1));
 
-    const auto comparison
-        = roc::host_validation::compare(std::span<const float>(dFast),
-                                        std::span<const float>(dSlow),
-                                        roc::host_validation::nearComparisonOptions(1e-3));
+    const auto comparison = roc::host_validation::compare(
+        roc::host_validation::TensorView::fromNative(std::span<const float>(dFast)),
+        roc::host_validation::TensorView::fromNative(std::span<const float>(dSlow)),
+        roc::host_validation::nearComparisonOptions(1e-3));
     EXPECT_TRUE(comparison.passed())
         << "mismatches=" << comparison.mismatches
         << " max_absolute_difference=" << comparison.maxAbsoluteDifference;
@@ -204,10 +204,10 @@ TEST(ReferenceMXFastPath, MatchesSlowPathWithBetaAndBias)
     SolveGemmCPU(problem, inputsSlow, /*elementsToValidate=*/-1, /*tryFastPath=*/false);
     ASSERT_TRUE(tryRuntimeTiledGemm(problem, inputsFast, /*elementsToValidate=*/-1));
 
-    const auto comparison
-        = roc::host_validation::compare(std::span<const float>(dFast),
-                                        std::span<const float>(dSlow),
-                                        roc::host_validation::nearComparisonOptions(1e-3));
+    const auto comparison = roc::host_validation::compare(
+        roc::host_validation::TensorView::fromNative(std::span<const float>(dFast)),
+        roc::host_validation::TensorView::fromNative(std::span<const float>(dSlow)),
+        roc::host_validation::nearComparisonOptions(1e-3));
     EXPECT_TRUE(comparison.passed())
         << "mismatches=" << comparison.mismatches
         << " max_absolute_difference=" << comparison.maxAbsoluteDifference;
