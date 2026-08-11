@@ -16,7 +16,7 @@
 #include <hipdnn_plugin_sdk/ingestor/LruCache.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
 
-#include "KernelIngestorTestFixtures.hpp"
+#include "ingestor/KernelIngestorTestFixtures.hpp"
 
 /**
  * @file TestKernelIngestorConcurrency.cpp
