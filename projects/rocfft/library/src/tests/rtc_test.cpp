@@ -20,6 +20,7 @@
 
 #include "../../../shared/environment.h"
 #include "rtc_cache.h"
+#include "rtc_kernel.h"
 #include <gtest/gtest.h>
 
 #if __has_include(<filesystem>)
@@ -72,4 +73,46 @@ TEST(rocfft_internal, rtc_helper_crash)
 
     // we should get compiled code back
     ASSERT_FALSE(code.empty());
+}
+
+// Trivial kernel that throws on construction
+struct RTCKernelModuleLoadFailure : public RTCKernel
+{
+    static constexpr auto KERNEL_NAME = "rtc_module_load_failure_kernel";
+
+    RTCKernelModuleLoadFailure(std::shared_future<hipModule_wrapper_t>& module)
+        : RTCKernel(KERNEL_NAME, module, {}, {})
+    {
+    }
+
+    static std::shared_future<std::unique_ptr<RTCKernel>> compile()
+    {
+        RTCGenerator generator;
+        generator.generate_name = []() { return std::string(KERNEL_NAME); };
+        generator.generate_src  = [](const std::string& kernel_name) {
+            return std::string("extern \"C\" __global__ void ") + kernel_name + "(){}";
+        };
+        generator.construct_rtckernel = [](const std::string&,
+                                           std::shared_future<hipModule_wrapper_t>&,
+                                           dim3,
+                                           dim3) -> std::unique_ptr<RTCKernel> {
+            // Simulate a module load failure by throwing a runtime error on construction.
+            throw hip_runtime_error("simulated module load failure", hipErrorNoBinaryForGpu);
+        };
+
+        std::string kernel_name;
+        return runtime_compile(generator, "gfx90a", kernel_name);
+    }
+};
+
+TEST(rocfft_internal, rtc_module_load_failure)
+{
+    auto kernel_future = RTCKernelModuleLoadFailure::compile();
+
+    ASSERT_TRUE(kernel_future.valid());
+    // Resolve the future, should get a graceful exception back.  If
+    // the exception was not handled inside runtime_compile, we'd
+    // expect std::terminate to be called and the whole test process
+    // would die.
+    ASSERT_THROW(kernel_future.get(), hip_runtime_error);
 }
