@@ -141,7 +141,12 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   # unit_test_internal_primitives_host_extras.cpp additionally needs the
   # segmented-radix-sort / radix-sort-pairs primitive TUs compiled in (appended
   # to ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES below) so this leaf links standalone.
-  unit_test_internal_collective_extras.cpp
+  unit_test_internal_collective_extras_wfreduce.cpp
+  unit_test_internal_collective_extras_atomics.cpp
+  unit_test_internal_collective_extras_elementwise.cpp
+  unit_test_internal_collective_extras_nontemporal.cpp
+  unit_test_internal_collective_extras_lower_bound.cpp
+  unit_test_internal_collective_extras_insert.cpp
   unit_test_internal_primitives_host_extras.cpp
 )
 
