@@ -47,6 +47,7 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake
 
 option(HIPKERNELPROVIDER_ENABLE_TESTS "Build tests" ON)
 option(HIPKERNELPROVIDER_ENABLE_ROCKE "Build rocKE engine and smoke tests" OFF)
+option(HIPDNN_ENABLE_KERNEL_INGESTOR "Enable the generic kernel ingestor" OFF)
 option(ENABLE_ASM_SDPA_ENGINE "Build the ASM SDPA engine" ON)
 option(ENABLE_HIP_MLOPS_ENGINE "Build the HIP kernel engine" ON)
 
@@ -193,6 +194,28 @@ if(HIPKERNELPROVIDER_ENABLE_ROCKE)
     # bin/hip_kernel_provider/CTestTestfile.cmake.
     set(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR "hip_kernel_provider")
     set(ROCKE_INSTALL_STANDALONE_CTEST OFF)
+
+    # TEMPORARY: do not install the rocKE Python CI tests (rocke_python_import_smoke,
+    # rocke_golden_static, rocke_pytest) in provider mode.
+    #
+    # These three CTest entries import the `rocke` package from the test artifact.
+    # ROCm/TheRock#6849 removed the "bin/hip_kernel_provider/rocke/**" artifact
+    # include on the assumption that the staged rocKE wheels replaced it, but the
+    # wheels are never staged (see below), so neither import source survives and
+    # every rocKE Python entry fails with `ModuleNotFoundError: No module named
+    # 'rocke'`. rocm-libraries builds this component with
+    # HIPKERNELPROVIDER_ENABLE_ROCKE=ON, so the breakage lands on every
+    # hipkernelprovider PR here while TheRock's own CI (flag defaults OFF) stays green.
+    #
+    # This matches what the ROCKE_INSTALL_PYTHON_TESTS option already documents for
+    # provider mode; nothing was actually setting it. The C++ rocKE smoke tests are
+    # unaffected and keep running.
+    #
+    # Revert this line once ROCm/TheRock#7145 has landed and the wheel-staging order
+    # bug in rocke/CMakeLists.txt is fixed (ROCKE_BUILD_PYENV / ROCKE_WHEEL_DIR are
+    # declared after add_subdirectory(platform), so the wheel install() never
+    # registers). Tracked by ROCm/rocm-libraries#10497.
+    set(ROCKE_INSTALL_PYTHON_TESTS OFF)
 
     add_subdirectory(rocke)
 else()
