@@ -13,12 +13,30 @@ optional CSV) report plus a per-mode geomean.
 
 This is the gfx942 NUMERIC + PERF gate (same role the bench plays on gfx950: numeric
 correctness lives here, not in a CI pytest — see the gfx950 precedent). It doubles as
-the perf harness for the P1-P4 optimization phases.
+the perf harness for the optimization phases.
 
-**P0 scope** (AICK-1664): default grid, dense self-attention (uniform batch via the
-``[B, S, H, d]`` grid), causal + full, bf16/fp16, D64/D128, MHA + GQA (incl.
-non-pow-2). Sliding-window / varlen / persistent are follow-ups (P1/P4) — their modes
-are accepted but skipped with a note until the kernel supports them.
+IT MEASURES THE SHIPPED KERNEL
+------------------------------
+The spec under test is **resolved through the dispatch factory**
+(``dispatch.attention.gfx942.dense_spec_for_request``), not hand-built from CLI
+defaults. That is the difference between a gate and a decoration: the tuning that
+ships (per-config ``waves_per_eu``, the 304-CTA persistent grid and its auto-on
+rule, the ragged path) lives in dispatch, so a hardcoded CLI default here would
+freeze a config nobody runs. Every tuning flag defaults to ``None`` = "whatever
+dispatch ships", and an explicitly-passed flag becomes a ``dataclasses.replace``
+override on top of the resolved spec, reported as such. The CLI plumbing is
+imported from the builder harness so there is exactly ONE resolver
+(``builders/gfx942/attention/prefill/attention_dense_prefill.py``), which also
+carries the raise-on-drift guard.
+
+Concretely: at the default ``--dtype bf16 --d 64`` the shipped ``waves_per_eu`` is
+4 (not 2), and the whole S=2048/4096/8192 causal sweep ships the persistent grid
+(``..._persist304_...``) — neither of which this bench could reach before.
+
+Scope: dense self-attention (uniform batch via the ``[B, S, H, d]`` grid), causal +
+full, bf16/fp16, D64/D128, MHA + GQA (incl. non-pow-2), default AND persistent grid.
+Sliding-window / varlen are still follow-ups: their ``--mode`` values exit with the
+distinct skip code 3 (never 0 — a gate must not report success for no work).
 
 Run as a library module::
 
@@ -31,6 +49,9 @@ or directly with a ROCm-torch venv python::
     ~/.venv/bin/python \\
         rocke/library/benchmarks/gfx942/attention/prefill/benchmark_dense_prefill_live.py \\
         --mode causal --iterations 5 --warmup 2
+
+``--dry-run`` resolves and prints the spec for every shape without a GPU, which is
+how you check WHAT the gate is about to measure.
 """
 from __future__ import annotations
 
@@ -48,6 +69,16 @@ sys.path.insert(0, _RK + "/library")
 
 import torch  # noqa: E402
 
+# Single copy of the CLI -> AttentionRequest -> dispatch-resolved spec plumbing,
+# including the raise-on-drift guard. Duplicating it here is what let the two
+# harnesses drift apart from dispatch in the first place.
+from builders.gfx942.attention.prefill.attention_dense_prefill import (  # noqa: E402
+    add_dense_tuning_args,
+    dense_request,
+    dense_spec_overrides,
+    describe_dense_spec,
+    resolve_dense_spec,
+)
 from kernels.gfx942.attention_dense import (  # noqa: E402
     AttentionDenseSpec,
     attention_dense_block,
@@ -68,9 +99,21 @@ from rocke.runtime import (  # noqa: E402
 _ARCH = "gfx942"
 _TORCH_DT = {"bf16": torch.bfloat16, "fp16": torch.float16}
 _TOL = 2e-2
-# CLI modes with no P0 spec to construct. This is a UX shortcut only -- the
+
+# Exit codes. 0 = every shape passed, 1 = no GPU, 2 = at least one shape failed,
+# 3 = the requested mode is a documented follow-up and NOTHING was measured. 3 is
+# deliberately non-zero: a mode that ran no work must never be reported as a green
+# gate. (``persistent`` used to live here and does not any more -- the persistent
+# grid ships, dispatch turns it on automatically for the large-Sq causal sweep,
+# and ``--mode persistent`` now FORCES it on for that cohort.)
+_EXIT_OK = 0
+_EXIT_NO_GPU = 1
+_EXIT_FAIL = 2
+_EXIT_SKIP = 3
+
+# CLI modes the kernel genuinely cannot run yet. This is a UX shortcut only -- the
 # authoritative rejection is supports_attention_dense (ValueError from build).
-_DEFERRED_MODES = {"swa": "P1+", "varlen": "P1+", "persistent": "P4"}
+_DEFERRED_MODES = {"swa": "P1+ (sliding window)", "varlen": "P1+ (packed varlen)"}
 
 
 # --------------------------------------------------------------------------- #
@@ -106,9 +149,8 @@ _LAUNCHER_CACHE: dict = {}
 
 
 def _dense_launcher(spec: AttentionDenseSpec) -> KernelLauncher:
-    key = gfx942_kernel_name(
-        spec
-    )  # batch-unique (kernel bakes batch into buffer extents)
+    # batch-unique (the kernel bakes batch into the buffer extents)
+    key = gfx942_kernel_name(spec)
     lch = _LAUNCHER_CACHE.get(key)
     if lch is not None:
         return lch
@@ -133,24 +175,17 @@ def _dense_launcher(spec: AttentionDenseSpec) -> KernelLauncher:
 # --------------------------------------------------------------------------- #
 # one benchmark point: build inputs, check parity vs SDPA, time it
 # --------------------------------------------------------------------------- #
-def bench_dense(
-    S: int,
-    B: int,
-    Hq: int,
-    Hkv: int,
-    D: int,
-    *,
-    causal: bool,
-    dtype: str,
-    block_n: int,
-    waves_per_eu: int,
-    warmup: int,
-    iters: int,
-    seed: int,
-):
-    """Returns (dense_ms, tflops, max_abs, kernel_name). Uniform dense [B,S,H,D]."""
+def bench_dense(spec: AttentionDenseSpec, *, warmup: int, iters: int, seed: int):
+    """Returns (dense_ms, tflops, max_abs, kernel_name) for a RESOLVED spec.
+
+    The spec is the dispatch-resolved one (see :func:`resolve_dense_spec`); this
+    function never invents tuning values.
+    """
     dev = "cuda"
-    dt = _TORCH_DT[dtype]
+    dt = _TORCH_DT[spec.dtype]
+    B, S = spec.batch, spec.seqlen_q
+    Hq, Hkv, D = spec.num_query_heads, spec.num_kv_heads, spec.head_size
+    causal = spec.causal
     scale = 1.0 / math.sqrt(D)
     stream = _bench_stream_handle()
     torch.manual_seed(seed)
@@ -160,18 +195,6 @@ def bench_dense(
     v = (torch.randn(B, S, Hkv, D, dtype=dt, device=dev) * 0.2).contiguous()
     out = torch.zeros(B, S, Hq, D, dtype=dt, device=dev)
 
-    spec = AttentionDenseSpec(
-        batch=B,
-        seqlen_q=S,
-        seqlen_kv=S,
-        num_query_heads=Hq,
-        num_kv_heads=Hkv,
-        head_size=D,
-        causal=causal,
-        dtype=dtype,
-        block_n=block_n,
-        waves_per_eu=waves_per_eu,
-    )
     lch = _dense_launcher(spec)
     cfg = LaunchConfig(
         grid=attention_dense_grid(spec),
@@ -206,7 +229,7 @@ def bench_dense(
 
 
 # --------------------------------------------------------------------------- #
-# shape sweeps (P0-supported cohort)
+# shape sweeps
 # --------------------------------------------------------------------------- #
 def _configs(mode: str, Hq: int, Hkv: int, D: int):
     """Yield (mode, variant, label, S, B, Hq, Hkv, causal) configs."""
@@ -228,10 +251,32 @@ def _configs(mode: str, Hq: int, Hkv: int, D: int):
     if mode in ("full", "all"):
         for S in (2048, 4096):
             cfgs.append(("full", "non_causal", f"S={S}", S, 1, Hq, Hkv, False))
+    if mode == "persistent":
+        # The causal cohort with the persistent grid FORCED on (main() pins
+        # dense_persistent="on" unless the user said otherwise). Under "all" the
+        # same shapes already run persistent via dispatch's auto rule; this mode
+        # exists so the grid can be measured deliberately, incl. the small-work
+        # shapes auto would leave on the default grid.
+        for S in (2048, 4096, 8192):
+            cfgs.append(
+                ("persistent", "gqa_causal_persist", f"S={S}", S, 1, Hq, Hkv, True)
+            )
+        cfgs.append(
+            (
+                "persistent",
+                "gqa_causal_persist_b4",
+                "S=2048 B=4",
+                2048,
+                4,
+                Hq,
+                Hkv,
+                True,
+            )
+        )
     return cfgs
 
 
-def _record(mode, variant, label, S, B, Hq, Hkv, D, causal, res, err_note=None):
+def _record(mode, variant, label, S, B, Hq, Hkv, D, causal, spec, res, err_note=None):
     base = {
         "label": label,
         "mode": mode,
@@ -242,6 +287,14 @@ def _record(mode, variant, label, S, B, Hq, Hkv, D, causal, res, err_note=None):
         "Hkv": Hkv,
         "D": D,
         "causal": causal,
+        # The tuning actually built, so a report can never be read as if it
+        # described a different config than the one that was timed.
+        "block_n": None if spec is None else spec.block_n,
+        "waves_per_eu": None if spec is None else spec.waves_per_eu,
+        "persistent": None if spec is None else spec.persistent,
+        "num_persistent": None if spec is None else spec.num_persistent,
+        "persist_decode": None if spec is None else spec.persist_decode,
+        "lds_k_group_pad": None if spec is None else spec.lds_k_group_pad,
     }
     if res is None:
         return {
@@ -250,7 +303,7 @@ def _record(mode, variant, label, S, B, Hq, Hkv, D, causal, res, err_note=None):
             "tflops": None,
             "max_abs": None,
             "ok": False,
-            "kernel_name": None,
+            "kernel_name": None if spec is None else gfx942_kernel_name(spec),
             "error": err_note,
         }
     ms, tf, err, kname = res
@@ -275,73 +328,125 @@ def main() -> int:
     ap.add_argument("--hq", type=int, default=128, help="query heads (causal/gqa)")
     ap.add_argument("--hkv", type=int, default=8, help="kv heads (causal/gqa)")
     ap.add_argument("--d", type=int, default=128, help="head size (64 or 128)")
-    ap.add_argument("--bn", type=int, default=64, help="block_n (KV tile)")
-    ap.add_argument("--waves-per-eu", type=int, default=2, help="occupancy hint")
     ap.add_argument("--iterations", type=int, default=50)
     ap.add_argument("--warmup", type=int, default=10)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="resolve + print the spec for every shape, build nothing (no GPU needed)",
+    )
+    ap.add_argument(
         "--output-json", type=str, default="/tmp/dense_prefill_live_gfx942.json"
     )
     ap.add_argument("--output-csv", type=str, default=None)
+    # --bn / --wpe / --persistent / --np / --persist-decode / --interleave /
+    # --kpad / --sw, all defaulting to None = "whatever dispatch ships".
+    add_dense_tuning_args(ap)
     args = ap.parse_args()
-
-    if not torch.cuda.is_available():
-        print("no GPU", file=sys.stderr)
-        return 1
 
     if args.mode in _DEFERRED_MODES:
         print(
-            f"mode '{args.mode}' is not implemented in the P0 gfx942 dense kernel "
-            f"(follow-up: {_DEFERRED_MODES[args.mode]}). Nothing to run.",
+            f"mode '{args.mode}' is not implemented in the gfx942 dense kernel "
+            f"(follow-up: {_DEFERRED_MODES[args.mode]}). Nothing was measured -- "
+            f"exiting {_EXIT_SKIP} (skip), not 0.",
             file=sys.stderr,
         )
-        return 0
+        return _EXIT_SKIP
 
-    print(f"device: {torch.cuda.get_device_name(0)}")
+    # --mode persistent means "measure the persistent grid", so pin it on unless
+    # the user asked for something else explicitly.
+    if args.mode == "persistent" and args.persistent is None:
+        args.persistent = "on"
+
+    if not args.dry_run and not torch.cuda.is_available():
+        print("no GPU", file=sys.stderr)
+        return _EXIT_NO_GPU
+
+    overrides = dense_spec_overrides(args)
+    if not args.dry_run:
+        print(f"device: {torch.cuda.get_device_name(0)}")
     print(
         f"mode={args.mode} dtype={args.dtype} Hq={args.hq} Hkv={args.hkv} D={args.d} "
-        f"bn={args.bn} wpe={args.waves_per_eu} warmup={args.warmup} iters={args.iterations}"
+        f"warmup={args.warmup} iters={args.iterations}"
+    )
+    print(
+        "spec source: dispatch.attention.gfx942.dense_spec_for_request"
+        + (
+            f"  (+ explicit overrides: {overrides})"
+            if overrides
+            else "  (no CLI overrides -- measuring exactly what ships)"
+        )
     )
 
     cfgs = _configs(args.mode, args.hq, args.hkv, args.d)
     results = []
     for mode, variant, label, S, B, Hq, Hkv, causal in cfgs:
         tag = f"[{mode}/{variant}] {label} Hq={Hq} Hkv={Hkv} D={args.d}"
-        try:
-            res = bench_dense(
+        spec = None
+
+        def rec_for(res, err_note=None):
+            # reads `spec` at call time, so it carries whatever was resolved
+            return _record(
+                mode,
+                variant,
+                label,
                 S,
                 B,
                 Hq,
                 Hkv,
                 args.d,
+                causal,
+                spec,
+                res,
+                err_note,
+            )
+
+        try:
+            req = dense_request(
+                args,
+                batch=B,
+                seqlen_q=S,
+                seqlen_kv=S,
+                num_query_heads=Hq,
+                num_kv_heads=Hkv,
+                head_size=args.d,
                 causal=causal,
                 dtype=args.dtype,
-                block_n=args.bn,
-                waves_per_eu=args.waves_per_eu,
-                warmup=args.warmup,
-                iters=args.iterations,
-                seed=args.seed,
+            )
+            spec = resolve_dense_spec(req, overrides)
+            if args.dry_run:
+                print(f"{tag}  -> {describe_dense_spec(spec, overrides)}")
+                results.append(rec_for(None, "dry-run (not measured)"))
+                continue
+            res = bench_dense(
+                spec, warmup=args.warmup, iters=args.iterations, seed=args.seed
             )
         except Exception as exc:  # noqa: BLE001 - per-shape failures never abort
             import traceback
 
             traceback.print_exc()
-            results.append(
-                _record(
-                    mode, variant, label, S, B, Hq, Hkv, args.d, causal, None, repr(exc)
-                )
-            )
+            results.append(rec_for(None, repr(exc)))
             print(f"{tag}  FAILED ({exc!r})")
             continue
 
-        rec = _record(mode, variant, label, S, B, Hq, Hkv, args.d, causal, res)
+        rec = rec_for(res)
         results.append(rec)
         status = "PASS" if rec["ok"] else "FAIL"
+        # Label every row with gfx942_kernel_name: it is the only identity that
+        # distinguishes B=1 from B=4, wpe=2 from wpe=4, and persistent from not.
         print(
             f"{tag}  {rec['dense_ms']:8.4f} ms  {rec['tflops']:8.1f} TFLOPS  "
-            f"max_abs={rec['max_abs']:.2e}  {status}"
+            f"max_abs={rec['max_abs']:.2e}  {status}  {rec['kernel_name']}"
         )
+
+    if args.dry_run:
+        # _EXIT_SKIP, not _EXIT_OK, for the same reason --mode swa/varlen exit 3:
+        # nothing was measured, so nothing may report a green gate. The user asked
+        # for this one, but a CI job that grows a stray --dry-run must go yellow
+        # rather than silently pass having timed no kernel.
+        print(f"\ndry run: resolved {len(results)} shapes, measured none.")
+        return _EXIT_SKIP
 
     out_json = args.output_json
     os.makedirs(os.path.dirname(os.path.abspath(out_json)), exist_ok=True)
@@ -373,7 +478,7 @@ def main() -> int:
         )
     total_pass = sum(1 for r in results if r["ok"])
     print(f"\nTOTAL PASS {total_pass}/{len(results)}")
-    return 0 if total_pass == len(results) else 2
+    return _EXIT_OK if total_pass == len(results) else _EXIT_FAIL
 
 
 if __name__ == "__main__":
