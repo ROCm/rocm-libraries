@@ -19,6 +19,7 @@ target_sources(stinkytofu_objs PRIVATE
     LegalizationUtils.cpp
     ExecMaskGrouping.cpp
     StinkyDAGSchedulerPass.cpp
+    StinkyMergeBarrierPass.cpp
     SetMatrixReusePass.cpp
     StinkyWaitCntInsertionPass.cpp
     Gfx1250HazardPass.cpp

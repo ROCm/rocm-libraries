@@ -181,6 +181,7 @@ std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
                 arg.starts_with("--ds-read-per-wmma=") ||
                 arg.starts_with("--global-read-queue-depth=") ||
                 arg.starts_with("--global-read-drain-latency=") ||
+                arg.starts_with("--merge-barrier-threshold=") ||
                 arg.starts_with("--vgpr-msb-mode=") || arg == "--from-label" ||
                 arg == "--to-label" || isKernelConfigArg(arg))
                 continue;
@@ -507,6 +508,8 @@ int main(int argc, char** argv) {
             passFeatureConfig.dagFeatures.globalReadQueueDepth = std::stoi(a.substr(26));
         } else if (a.starts_with("--global-read-drain-latency=")) {
             passFeatureConfig.dagFeatures.globalReadDrainLatency = std::stoi(a.substr(28));
+        } else if (a.starts_with("--merge-barrier-threshold=")) {
+            passFeatureConfig.dagFeatures.mergeBarrierThreshold = std::stoi(a.substr(26));
         }
     }
 
