@@ -112,6 +112,13 @@ namespace TensileLite
         private:
             hipError_t getKernel(hipFunction_t& rv, std::string const& name);
 
+            hipError_t launchKernelWithAttributes(KernelInvocation const&         kernel,
+                                                  hipFunction_t                   function,
+                                                  hipStream_t                     stream,
+                                                  void**                          extra,
+                                                  const hipLaunchAttribute* const attributes,
+                                                  uint32_t                        numAttrs);
+
             std::mutex m_access;
 
             std::vector<hipModule_t>                       m_modules;

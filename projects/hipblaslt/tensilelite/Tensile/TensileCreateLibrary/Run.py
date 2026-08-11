@@ -322,6 +322,7 @@ def passPostKernelInfoToLibrary(results, kernels, masterLibraries, splitGSU: boo
                 try:
                     result = resultDict["%s"%kName]
                     sol.sizeMapping.CUOccupancy = result.cuoccupancy
+                    sol.sizeMapping.HintFrequency = sol.originalSolution._state['HintFrequency']
                     sol.sizeMapping.MathClocksUnrolledLoop = result.mathclk
                     sol.sizeMapping.PrefetchGlobalRead = sol.originalSolution._state['PrefetchGlobalRead']
                     sol.sizeMapping.NonTemporalA = sol.originalSolution._state['NonTemporalA']
@@ -352,6 +353,7 @@ def passPostKernelInfoToLibrary(results, kernels, masterLibraries, splitGSU: boo
                     try:
                         result = resultDict["%s"%kName]
                         sol.sizeMapping.CUOccupancy = result.cuoccupancy
+                        sol.sizeMapping.HintFrequency = sol.originalSolution._state['HintFrequency']
                         sol.sizeMapping.MathClocksUnrolledLoop = result.mathclk
                         sol.sizeMapping.PrefetchGlobalRead = sol.originalSolution._state['PrefetchGlobalRead']
                         sol.sizeMapping.NonTemporalA = sol.originalSolution._state['NonTemporalA']

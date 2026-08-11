@@ -27,6 +27,10 @@
 #include <hip/hip_ext.h>
 #include <hip/hip_runtime.h>
 
+#ifdef HIP_HAS_FREQUENCY_CONTROL_HINT
+#include <hip/hip_frequency_control.h>
+#endif
+
 #include <cstddef>
 
 #include <Tensile/Debug.hpp>
@@ -519,6 +523,37 @@ namespace TensileLite
             return launchKernel(kernel, nullptr, nullptr, nullptr);
         }
 
+        hipError_t SolutionAdapter::launchKernelWithAttributes(KernelInvocation const&         kernel,
+                                                        hipFunction_t                   function,
+                                                        hipStream_t                     stream,
+                                                        void**                          extra,
+                                                        const hipLaunchAttribute* const attributes,
+                                                        uint32_t                        numAttrs)
+        {
+            HIP_LAUNCH_CONFIG config = {0};
+            config.gridDimX          = kernel.numWorkGroups.x;
+            config.gridDimY          = kernel.numWorkGroups.y;
+            config.gridDimZ          = kernel.numWorkGroups.z;
+            config.blockDimX         = kernel.workGroupSize.x;
+            config.blockDimY         = kernel.workGroupSize.y;
+            config.blockDimZ         = kernel.workGroupSize.z;
+            config.sharedMemBytes    = kernel.sharedMemBytes;
+            config.hStream           = stream;
+            config.attrs             = const_cast<hipLaunchAttribute*>(attributes);
+            config.numAttrs          = numAttrs;
+
+            HIP_CHECK_RETURN_WITH_LOG(
+                hipDrvLaunchKernelEx(&config, function, nullptr, extra),
+                [&](hipError_t error) {
+                    std::cerr << "hipDrvLaunchKernelEx failed: " << kernel.kernelName << std::endl
+                              << " with workgroup size: " << kernel.workGroupSize << std::endl
+                              << " with numWorkGroups : " << kernel.numWorkGroups << std::endl
+                              << " with numWorkItems : " << kernel.numWorkItems << std::endl
+                              << " error: " << hipGetErrorString(error) << std::endl;
+                });
+            return hipSuccess;
+        }
+
         hipError_t SolutionAdapter::launchKernel(KernelInvocation const& kernel,
                                                  hipStream_t             stream,
                                                  hipEvent_t              startEvent,
@@ -570,9 +605,9 @@ namespace TensileLite
             if(startEvent != nullptr)
                 HIP_CHECK_RETURN(hipEventRecord(startEvent, stream));
 
+
 #ifdef HIP_HAS_CLUSTER_LAUNCH
-            bool enableCluster = (kernel.clusterDim.x > 1 || kernel.clusterDim.y > 1);
-            if(enableCluster)
+            if(kernel.clusterDim.x > 1 || kernel.clusterDim.y > 1)
             {
                 if(kernel.clusterDim.x == 0 || kernel.clusterDim.y == 0)
                 {
@@ -582,40 +617,29 @@ namespace TensileLite
                     return hipErrorInvalidValue;
                 }
 
-                HIP_LAUNCH_CONFIG config = {0};
-                // The grid dimension is not affected by cluster launch, and is still enumerated
-                // using number of blocks.
-                // The grid dimension should be a multiple of cluster size.
-                config.gridDimX = kernel.numWorkGroups.x;
-                config.gridDimY = kernel.numWorkGroups.y;
-                config.gridDimZ = kernel.numWorkGroups.z;
-                config.blockDimX = kernel.workGroupSize.x;
-                config.blockDimY = kernel.workGroupSize.y;
-                config.blockDimZ = kernel.workGroupSize.z;
+                hipLaunchAttribute attribute;
+                attribute.id               = hipLaunchAttributeClusterDimension;
+                attribute.val.clusterDim.x = kernel.clusterDim.x;
+                attribute.val.clusterDim.y = kernel.clusterDim.y;
+                attribute.val.clusterDim.z = 1;
 
-                hipLaunchAttribute attribute[1];
-                attribute[0].id                 = hipLaunchAttributeClusterDimension;
-                attribute[0].val.clusterDim.x = kernel.clusterDim.x;
-                attribute[0].val.clusterDim.y = kernel.clusterDim.y;
-                attribute[0].val.clusterDim.z = 1;
-                config.attrs = attribute;
-                config.numAttrs = 1;
-                config.sharedMemBytes = kernel.sharedMemBytes;
-                config.hStream = stream;
+                HIP_CHECK_RETURN(launchKernelWithAttributes(
+                    kernel, function, stream, (void**)&hipLaunchParams, &attribute, 1));
+            }
+            else
+#endif
+#ifdef HIP_HAS_FREQUENCY_CONTROL_HINT
+            if(kernel.HintFrequency > HIP_AMD_FREQUENCY_CONTROL_HINT_OFF
+               && kernel.HintFrequency <= HIP_AMD_FREQUENCY_CONTROL_HINT_MAXIMUM)
+            {
+                hipLaunchAttribute attribute;
+                attribute.id = static_cast<hipLaunchAttributeID>(
+                    hipLaunchAttributeExtFrequencyControlHint);
+                reinterpret_cast<hipLaunchAttributeValueExt&>(attribute.val).freq_hint
+                    = static_cast<hip_amd_frequency_control_hint_t>(kernel.HintFrequency);
 
-                const HIP_LAUNCH_CONFIG *pConfig = &config;
-                HIP_CHECK_RETURN_WITH_LOG(hipDrvLaunchKernelEx(pConfig,
-                                                               function,
-                                                               nullptr,
-                                                               (void**)&hipLaunchParams),
-                    [&](hipError_t error) {
-                        std::cerr << "hipDrvLaunchKernelEx failed: " << kernel.kernelName << std::endl
-                                  << " with workgroup size: " << kernel.workGroupSize << std::endl
-                                  << " with numWorkGroups : " << kernel.numWorkGroups << std::endl
-                                  << " with numWorkItems : " << kernel.numWorkItems << std::endl
-                                  << " error: " << hipGetErrorString(error) << std::endl;
-                    }
-                );
+                HIP_CHECK_RETURN(launchKernelWithAttributes(
+                    kernel, function, stream, (void**)&hipLaunchParams, &attribute, 1));
             }
             else
 #endif

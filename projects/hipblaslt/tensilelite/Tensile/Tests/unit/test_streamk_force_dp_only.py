@@ -39,6 +39,7 @@ def minimal_size_mapping_state():
         "AdaptiveGemmGSUA": 0,
         "ClusterDim": [1, 1],
         "CUOccupancy": 1,
+        "HintFrequency": -1,
         "CustomKernelName": "",
         "DepthU": 64,
         "DirectToLdsA": False,

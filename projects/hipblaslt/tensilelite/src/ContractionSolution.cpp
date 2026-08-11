@@ -1907,6 +1907,8 @@ namespace TensileLite
 
         rv.kernelName = kernelName;
 
+        rv.HintFrequency = sizeMapping.HintFrequency;
+
         calculateGrid(rv.workGroupSize, rv.numWorkGroups, problem);
 
         dim3 problemNumGroupTiles = rv.numWorkGroups;

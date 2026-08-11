@@ -161,6 +161,7 @@ VALID_LIBLOGIC_FILE_CONTENT = """
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: true
+    HintFrequency: -1
     ISA: [9, 5, 0]
     InnerUnroll: 1
     InterleaveAlpha: 0
