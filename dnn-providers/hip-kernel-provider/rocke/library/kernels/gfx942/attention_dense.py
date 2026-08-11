@@ -481,6 +481,11 @@ def supports_attention_dense(
     """
     if arch != "gfx942":
         return False, f"kernels.gfx942.attention_dense is gfx942-only (got {arch})"
+    # Type FIRST: every check below dereferences an attribute, so a non-spec
+    # argument would raise AttributeError out of a function whose whole contract is
+    # that it returns a structured (False, reason) instead of raising.
+    if not isinstance(spec, AttentionDenseSpec):
+        return False, f"spec must be an AttentionDenseSpec, got {type(spec).__name__}"
     if spec.dtype not in _SUPPORTED_DTYPES:
         return (
             False,
@@ -491,8 +496,6 @@ def supports_attention_dense(
             f"gfx942 attention_dense scope is D{list(_SUPPORTED_HEAD_SIZES)} "
             f"(D256 is AICK-1495/1496), got D{spec.head_size}"
         )
-    if not isinstance(spec, AttentionDenseSpec):
-        return False, f"spec must be an AttentionDenseSpec, got {type(spec).__name__}"
     # Re-run the dataclass validators (shape multiples, GQA divisibility, knob
     # ranges) so a hand-built spec is rejected with a structured reason. Iterate the
     # CLASS fields (a subclass' extra field would be a TypeError here), and catch
