@@ -54,6 +54,7 @@ function(add_benchmark benchmark_src)
     target_link_libraries(${BENCHMARK_TARGET} PRIVATE ${CUDA_curand_LIBRARY})
   else()
     target_link_libraries(${BENCHMARK_TARGET} PRIVATE rocrand hip::device)
+    rocrand_workaround_amdhip64_missing(${BENCHMARK_TARGET})
   endif()
 
   target_include_directories(${BENCHMARK_TARGET} PRIVATE
