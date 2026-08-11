@@ -909,6 +909,62 @@ class TensorAndGemmTests(unittest.TestCase):
             hv.compare(boundary_observed, boundary_expected, exact_boundary).passed
         )
 
+    def test_default_relative_policy_scales_at_large_magnitudes(self):
+        cases = [
+            (
+                np.float32,
+                hv.ScalarType.Float32,
+                np.float32(1.0e6),
+                np.float32(100.0),
+                np.float32(500.0),
+            ),
+            (
+                np.float64,
+                hv.ScalarType.Float64,
+                np.float64(1.0e12),
+                np.float64(1.0),
+                np.float64(5.0),
+            ),
+        ]
+        for dtype, scalar_type, base, accepted_delta, rejected_delta in cases:
+            with self.subTest(scalar_type=scalar_type):
+                options = hv.default_comparison_options(scalar_type)
+                options.compute_frobenius = False
+                accepted = hv.compare(
+                    hv.from_numpy(np.asarray([base], dtype=dtype)),
+                    hv.from_numpy(np.asarray([base + accepted_delta], dtype=dtype)),
+                    options,
+                )
+                rejected = hv.compare(
+                    hv.from_numpy(np.asarray([base], dtype=dtype)),
+                    hv.from_numpy(np.asarray([base + rejected_delta], dtype=dtype)),
+                    options,
+                )
+                self.assertTrue(accepted.passed)
+                self.assertFalse(rejected.passed)
+
+    def test_default_float32_policy_rejects_opposite_signs_near_zero(self):
+        observed = hv.from_numpy(
+            np.asarray([-0.0001, -0.0002], dtype=np.float32)
+        )
+        expected = hv.from_numpy(np.asarray([0.0001, 0.0002], dtype=np.float32))
+        options = hv.default_comparison_options(hv.ScalarType.Float32)
+        options.compute_frobenius = False
+        report = hv.compare(observed, expected, options)
+        self.assertFalse(report.passed)
+        self.assertEqual(report.mismatches, 1)
+
+    def test_signed_zero_policy_is_explicit(self):
+        observed = hv.from_numpy(np.asarray([0.0, -0.0], dtype=np.float64))
+        expected = hv.from_numpy(np.asarray([-0.0, 0.0], dtype=np.float64))
+        options = hv.ComparisonOptions()
+        options.compute_frobenius = False
+        self.assertTrue(hv.compare(observed, expected, options).passed)
+        options.equal_signed_zero = False
+        report = hv.compare(observed, expected, options)
+        self.assertFalse(report.passed)
+        self.assertEqual(report.signed_zero_mismatches, 2)
+
     def test_indexed_generation_matches_numpy(self):
         options = hv.GenerationOptions()
         options.real.pattern = hv.GenerationPattern.SerialIndex
