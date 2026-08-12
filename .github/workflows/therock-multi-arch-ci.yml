@@ -26,11 +26,11 @@ name: TheRock Multi-Arch CI
 # deliberately separate from the build-source `ref:` inputs.
 
 on:
-  pull_request:
-    types:
-      - opened
-      - synchronize
-      - reopened
+  # pull_request:
+  #   types:
+  #     - opened
+  #     - synchronize
+  #     - reopened
   workflow_dispatch:
     inputs:
       linux_amdgpu_families:
