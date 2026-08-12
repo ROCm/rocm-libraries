@@ -1022,6 +1022,7 @@ namespace rocalution
                 case rocsparseio_type_complex32:
                 {
                     copy_mixed_arrays(nnz, val[0], (const std::complex<float>*)tmp_val);
+                    break;
                 }
 
                 case rocsparseio_type_complex64:
@@ -1330,6 +1331,7 @@ namespace rocalution
                 case rocsparseio_type_complex32:
                 {
                     copy_mixed_arrays(nnz, val[0], (const std::complex<float>*)tmp_val);
+                    break;
                 }
 
                 case rocsparseio_type_complex64:
@@ -1681,6 +1683,7 @@ namespace rocalution
                 case rocsparseio_type_complex32:
                 {
                     copy_mixed_arrays(nnz, val[0], (const std::complex<float>*)tmp_val);
+                    break;
                 }
 
                 case rocsparseio_type_complex64:
@@ -1967,6 +1970,7 @@ namespace rocalution
                 case rocsparseio_type_complex32:
                 {
                     copy_mixed_arrays(nnz, val[0], (const std::complex<float>*)tmp_val);
+                    break;
                 }
 
                 case rocsparseio_type_complex64:
@@ -2231,6 +2235,7 @@ namespace rocalution
                 case rocsparseio_type_complex32:
                 {
                     copy_mixed_arrays(nnz, val[0], (const std::complex<float>*)tmp_val);
+                    break;
                 }
 
                 case rocsparseio_type_complex64:
@@ -2488,6 +2493,7 @@ namespace rocalution
                 case rocsparseio_type_complex32:
                 {
                     copy_mixed_arrays(nnz, val[0], (const std::complex<float>*)tmp_val);
+                    break;
                 }
 
                 case rocsparseio_type_complex64:
@@ -2858,6 +2864,7 @@ namespace rocalution
                 case rocsparseio_type_complex32:
                 {
                     copy_mixed_arrays(coo_nnz, coo_val[0], (const std::complex<float>*)tmp_coo_val);
+                    break;
                 }
 
                 case rocsparseio_type_complex64:
@@ -2931,6 +2938,7 @@ namespace rocalution
                 case rocsparseio_type_complex32:
                 {
                     copy_mixed_arrays(ell_nnz, ell_val[0], (const std::complex<float>*)tmp_ell_val);
+                    break;
                 }
 
                 case rocsparseio_type_complex64:
@@ -3123,6 +3131,7 @@ namespace rocalution
                 case rocsparseio_type_complex32:
                 {
                     copy_mixed_arrays(nrow * ncol, val[0], (const std::complex<float>*)tmp_val);
+                    break;
                 }
 
                 case rocsparseio_type_complex64:
