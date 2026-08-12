@@ -3748,6 +3748,46 @@ MAP2CF_D64(rocblas_gemm_batched, rocblas_half, rocblas_hgemm_batched);
 MAP2CF_D64(rocblas_gemm_batched, rocblas_float_complex, rocblas_cgemm_batched);
 MAP2CF_D64(rocblas_gemm_batched, rocblas_double_complex, rocblas_zgemm_batched);
 
+// gemm_grouped_batched
+template <typename T, bool FORTRAN = false>
+inline rocblas_status (*rocblas_gemm_grouped_batched)(rocblas_handle           handle,
+                                                      const rocblas_operation* transa_array,
+                                                      const rocblas_operation* transb_array,
+                                                      const rocblas_int*       m_array,
+                                                      const rocblas_int*       n_array,
+                                                      const rocblas_int*       k_array,
+                                                      const T*                 alpha_array,
+                                                      const T* const           Aarray[],
+                                                      const rocblas_int*       lda_array,
+                                                      const T* const           Barray[],
+                                                      const rocblas_int*       ldb_array,
+                                                      const T*                 beta_array,
+                                                      T* const                 Carray[],
+                                                      const rocblas_int*       ldc_array,
+                                                      rocblas_int              group_count,
+                                                      const rocblas_int*       group_size);
+
+template <typename T, bool FORTRAN = false>
+inline rocblas_status (*rocblas_gemm_grouped_batched_64)(rocblas_handle           handle,
+                                                         const rocblas_operation* transa_array,
+                                                         const rocblas_operation* transb_array,
+                                                         const int64_t*           m_array,
+                                                         const int64_t*           n_array,
+                                                         const int64_t*           k_array,
+                                                         const T*                 alpha_array,
+                                                         const T* const           Aarray[],
+                                                         const int64_t*           lda_array,
+                                                         const T* const           Barray[],
+                                                         const int64_t*           ldb_array,
+                                                         const T*                 beta_array,
+                                                         T* const                 Carray[],
+                                                         const int64_t*           ldc_array,
+                                                         int64_t                  group_count,
+                                                         const int64_t*           group_size);
+
+MAP2CF_D64(rocblas_gemm_grouped_batched, float, rocblas_sgemm_grouped_batched);
+MAP2CF_D64(rocblas_gemm_grouped_batched, double, rocblas_dgemm_grouped_batched);
+
 // gemm_strided_batched
 template <typename T, bool FORTRAN = false>
 inline rocblas_status (*rocblas_gemm_strided_batched)(rocblas_handle    handle,
