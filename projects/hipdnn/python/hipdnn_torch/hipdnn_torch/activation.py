@@ -85,7 +85,9 @@ class _ActivationOverride(OpOverride):
         try:
             x1d = input.reshape(-1).contiguous()
             entry = self._cached_graph(
-                (numel, int(mode), dtype),
+                # str(mode), not int(mode): the bound PointwiseMode enum isn't
+                # int-convertible, and its repr is a stable per-value key.
+                (numel, str(mode), dtype),
                 lambda: self._graph(numel, mode, dtype),
                 f"[{numel}] {dtype}",
             )
