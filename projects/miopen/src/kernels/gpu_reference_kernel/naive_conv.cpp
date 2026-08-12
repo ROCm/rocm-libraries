@@ -572,7 +572,7 @@ inline __device__ void naive_conv_wrw_nchw(const src_data_t* __restrict__ p_in,
     }
 }
 
-// design block_size 256
+// work loops stride by blockDim.x, so any block size is valid
 
 template <bool ASSUME_PACKED,
           typename src_data_t,
@@ -1059,7 +1059,7 @@ inline __device__ void naive_conv_wrw_ncdhw(const src_data_t* __restrict__ p_in,
 }
 
 /***************************** nhwc *****************************/
-// design block_size 256
+// work loops stride by blockDim.x, so any block size is valid
 
 template <bool ASSUME_PACKED,
           typename src_data_t,
@@ -1491,7 +1491,7 @@ inline __device__ void naive_conv_wrw_nhwc(const src_data_t* __restrict__ p_in,
     }
 }
 
-// design block_size 256
+// work loops stride by blockDim.x, so any block size is valid
 
 template <bool ASSUME_PACKED,
           typename src_data_t,
