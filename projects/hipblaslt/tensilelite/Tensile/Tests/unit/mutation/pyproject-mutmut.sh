@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# pyproject-mutmut.sh — Issue 3: back up / rewrite / restore / gate the
+# pyproject-mutmut.sh — back up / rewrite / restore / gate the
 # [tool.mutmut] slice config in projects/hipblaslt/tensilelite/pyproject.toml.
 #
 # pyproject.toml is a TRACKED file. Each slice rewrites `only_mutate` and
-# `pytest_add_cli_args_test_selection`; the plan's done-criteria require the tree
-# to end clean (no dirty config) unless a new allowlist is DELIBERATELY committed.
+# `pytest_add_cli_args_test_selection`; the safety contract requires the tree to
+# end clean (no dirty config) unless a new allowlist is deliberately committed.
 # This helper is the single serial config actor: never run it concurrently with
 # `mutmut run`.
 #
@@ -16,7 +16,7 @@
 #
 # Host TOML note: this host's python is 3.8 (no tomllib/tomlkit/tomli_w), so `set`
 # uses explicit, selftested stdlib line-based rewriting scoped to the
-# [tool.mutmut] table (see tests/pyproject-mutmut-selftest.sh).
+# [tool.mutmut] table while preserving all unrelated bytes.
 #
 # Commands:
 #   backup                     snapshot pyproject.toml -> backup location

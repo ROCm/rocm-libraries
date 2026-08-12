@@ -1,14 +1,12 @@
 #!/usr/bin/env bash
 # mutmut-verify.sh — GENERIC, manifest-driven, STRICTLY SERIAL survivor kill-proof.
 #
-# Replaces the hardcoded p7-survivor-kill.sh (which pinned two mutants/files and
-# applied search/replace strings). This runner is generic over ANY mutmut survivor:
+# This runner is generic over ANY mutmut survivor:
 # it materializes each mutant either via `mutmut apply <id>` or by applying a
 # normalized unified diff, runs ONE pytest node clean then mutated, and proves the
 # KILL (test PASSES clean, FAILS mutated), reverting the source after each.
 #
-# It is the single serial actor for mutation APPLICATION (see PLAN concurrency
-# rule): never run two of these, and never apply mutants concurrently — apply/run/
+# Run only one instance at a time and never apply mutants concurrently: apply/run/
 # revert touches the shared worktree. A trap reverts every target file on exit.
 #
 # Usage:
@@ -30,7 +28,7 @@
 #     revert_assert            : true|false (assert file clean after revert)
 #
 # Output: <out>/kill_matrix.tsv  (one row per manifest row) + <out>/verify-report.txt
-# Verdict KILLED iff (STRICT, Issue 1): base_rc == expect_clean_rc AND revert == ok
+# Verdict KILLED iff base_rc == expect_clean_rc AND revert == ok
 #   AND (when expect_mutant_rc_nonzero=true) the mutant node fails with rc==1.
 #   rc==0 => not killed (survived). rc in {2,3,4,5,...} => INCONCLUSIVE
 #   (collection/usage/internal/interrupt error), NOT a kill. Any non-KILLED row
@@ -39,8 +37,7 @@
 set -u
 
 # ----------------------------------------------------------------- pure classify
-# classify_verdict — STRICT kill semantics (Issue 1). Pure/side-effect-free so it
-# can be unit-tested without docker (see tests/verify-selftest-strict.sh).
+# classify_verdict — strict, pure, side-effect-free kill classification.
 #   args: base_rc exp_clean mut_rc want_fail(true|false) revert(ok|LEAK)
 #   echoes: "<verdict>\t<detail>"  where verdict in {KILLED, BAD, INCONCLUSIVE}
 # KILLED requires the mutant node to FAIL with pytest ASSERTION-FAILURE rc==1
