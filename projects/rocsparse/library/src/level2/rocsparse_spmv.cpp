@@ -425,9 +425,9 @@ namespace rocsparse
                 // Run the analysis only if it has not been performed yet,
                 // detected via the cached coomv info object, instead of relying
                 // on the descriptor-wide mat->analysed flag.
-                if(mat->info->get_coomv_info() == nullptr)
+                rocsparse_coomv_info coomv_info = mat->info->get_coomv_info();
+                if(coomv_info == nullptr)
                 {
-                    rocsparse_coomv_info coomv_info = mat->info->get_coomv_info();
                     RETURN_IF_ROCSPARSE_ERROR((rocsparse::coomv_analysis(handle,
                                                                          trans,
                                                                          coomv_alg,
@@ -534,9 +534,9 @@ namespace rocsparse
                 // Run the analysis only if it has not been performed yet,
                 // detected via the cached info object, instead of relying on the
                 // descriptor-wide mat->analysed flag.
-                if(mat->info->get_bsrmv_info() == nullptr)
+                rocsparse_bsrmv_info bsrmv_info = mat->info->get_bsrmv_info();
+                if(bsrmv_info == nullptr)
                 {
-                    rocsparse_bsrmv_info bsrmv_info;
                     RETURN_IF_ROCSPARSE_ERROR((rocsparse::bsrmv_analysis(handle,
                                                                          mat->block_dir,
                                                                          trans,
@@ -609,9 +609,9 @@ namespace rocsparse
                 // Run the analysis only if it has not been performed yet,
                 // detected via the cached info object, instead of relying on the
                 // descriptor-wide mat->analysed flag.
-                if(mat->info->get_csrmv_info() == nullptr)
+                rocsparse_csrmv_info csrmv_info = mat->info->get_csrmv_info();
+                if(csrmv_info == nullptr)
                 {
-                    rocsparse_csrmv_info csrmv_info{};
                     RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrmv_analysis(handle,
                                                                          trans,
                                                                          alg_csrmv,
@@ -688,9 +688,9 @@ namespace rocsparse
                 // detected via the cached info object (CSC reuses the csrmv_info
                 // slot), instead of relying on the descriptor-wide mat->analysed
                 // flag.
-                if(mat->info->get_csrmv_info() == nullptr)
+                rocsparse_csrmv_info csrmv_info = mat->info->get_csrmv_info();
+                if(csrmv_info == nullptr)
                 {
-                    rocsparse_csrmv_info csrmv_info{};
                     RETURN_IF_ROCSPARSE_ERROR((rocsparse::cscmv_analysis(handle,
                                                                          trans,
                                                                          alg_csrmv,

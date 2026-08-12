@@ -659,9 +659,9 @@ namespace rocsparse
                 // Run the analysis only if it has not been performed yet,
                 // detected via the cached coomv info object, instead of relying
                 // on the descriptor-wide mat->analysed flag.
-                if(mat->info->get_coomv_info() == nullptr)
+                rocsparse_coomv_info coomv_info = mat->info->get_coomv_info();
+                if(coomv_info == nullptr)
                 {
-                    rocsparse_coomv_info coomv_info = mat->info->get_coomv_info();
                     RETURN_IF_ROCSPARSE_ERROR((rocsparse::coomv_analysis(handle,
                                                                          operation,
                                                                          coomv_alg,
