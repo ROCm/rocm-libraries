@@ -399,3 +399,9 @@ if(UNIX AND NOT APPLE AND ROCM_INTERFACES_SANITIZE STREQUAL "thread")
   set_tests_properties(rocm_interfaces.ops04_concurrency PROPERTIES
     ENVIRONMENT "TSAN_OPTIONS=halt_on_error=0:exitcode=66")
 endif()
+
+if(ROCM_INTERFACES_CHECK_API_DRIFT AND TARGET rocm-interfaces-check-api-snapshots)
+  add_test(NAME rocm_interfaces.api_snapshot_drift
+    COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR}
+      --target rocm-interfaces-check-api-snapshots --config $<CONFIG>)
+endif()

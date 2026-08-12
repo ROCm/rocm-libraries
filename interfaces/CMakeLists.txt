@@ -12,6 +12,9 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(ROCM_INTERFACES_BUILD_TOOLS "Build Clang-based API extraction tools" ON)
 option(ROCM_INTERFACES_BUILD_EXAMPLES "Build recording providers and shadow loaders" ON)
+option(ROCM_INTERFACES_CHECK_API_DRIFT
+  "Register the API-snapshot drift check as a ctest gate (only sound when the build's \
+ROCm headers match the frozen api/snapshots baseline)" OFF)
 set(ROCM_INTERFACES_SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." CACHE PATH
     "Path to the rocm-libraries source tree")
 find_package(hip CONFIG REQUIRED)
