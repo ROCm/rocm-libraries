@@ -157,13 +157,14 @@ major indirects through edge allocation.
 
 During rollout, header drift is caught by the `rocm-interfaces-check-api-snapshots` build
 target, which extracts the current source headers and byte-compares them with the draft
-snapshots. This is an opt-in maintainer step today, not an automated gate: the target is
-not part of the default build (ALL), CTest, or any wired presubmit, so a maintainer must
-run it as a required manual step (`cmake --build <build> --target
-rocm-interfaces-check-api-snapshots`). Wiring it, and `check_api_policy.py` (which
-currently has no build or test invocation), into an automated presubmit gate is tracked as
-ASPIRATIONAL API-process evolution in
-[07-status-and-roadmap.md](07-status-and-roadmap.md). A drift failure is resolved by
+snapshots. It is wired into CTest as an opt-in gate (`rocm_interfaces.api_snapshot_drift`,
+behind `ROCM_INTERFACES_CHECK_API_DRIFT`, default OFF) and can still be run directly
+(`cmake --build <build> --target rocm-interfaces-check-api-snapshots`). It is not on by
+default because the frozen `api/snapshots/rocblas.json` is also a codegen input, so a sound
+default-on gate requires the build's ROCm headers to match that baseline; promoting it to a
+default hard gate is tracked as COMMITTED-NEXT in
+[07-status-and-roadmap.md](07-status-and-roadmap.md), and wiring `check_api_policy.py` (which
+still has no build or test invocation) remains ASPIRATIONAL. A drift failure is resolved by
 updating both the current-major mapping and any already-created compatibility major.
 Immediately before cutover, regenerate against the exact release branch, audit exports from
 the built binaries, and archive those snapshots as the immutable baseline for that major.

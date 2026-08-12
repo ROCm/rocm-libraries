@@ -33,15 +33,25 @@ ctests (`rocm_interfaces.unit`, `rocm_interfaces.rocblas_shadow`, `rocm_interfac
 and the install-consumer path by `rocm_interfaces.install_consumer`. The 1,213-row
 categorization ledger is a checked-in data artifact, not a test. The Clang-LibTooling API
 extraction and the snapshot/policy tooling exist as build targets
-(`rocm-interfaces-api-snapshots`, `rocm-interfaces-check-api-snapshots`) but are not yet run
-under `ctest`; wiring the drift check into the test suite is listed under COMMITTED-NEXT.
+(`rocm-interfaces-api-snapshots`, `rocm-interfaces-check-api-snapshots`). The drift check is
+wired into `ctest` as an opt-in gate (`rocm_interfaces.api_snapshot_drift`, behind
+`ROCM_INTERFACES_CHECK_API_DRIFT`, default OFF); it is not on the default test path because a
+sound default-on gate requires the build's ROCm headers to match the frozen `api/snapshots`
+baseline (see COMMITTED-NEXT). The `check_api_policy.py` policy check is still unwired.
 
 ## COMMITTED-NEXT (the immediate plan)
 
 - Push and merge mechanics (rebase, merge-tree re-verify, attaching to PR #10272) are tracked
   in the PR/handoff, not here.
-- Wire the API snapshot drift check (`rocm-interfaces-check-api-snapshots`) into `ctest` so
-  header drift is caught by the test suite rather than only by a manual target.
+- **API snapshot drift gate: default-on hardening.** The drift check is now wired into
+  `ctest` as an opt-in gate (`rocm_interfaces.api_snapshot_drift`, `ROCM_INTERFACES_CHECK_API_DRIFT`,
+  default OFF; commit `9af1e47`). Promoting it to a default-on hard gate is deferred: the frozen
+  `api/snapshots/rocblas.json` is also a codegen input (consumed by `generate_rocblas_bridge`,
+  `generate_rocblas_narrow_v2`, `categorize_rocblas_api`), so it cannot simply be regenerated to
+  a newer image without changing codegen and breaking the build, and a frozen baseline is red
+  against any image whose rocBLAS is newer. A sound default gate needs the build's ROCm pinned to
+  the frozen snapshot (a reconciliation that ripples through the generators) - see
+  [05-extending.md](05-extending.md).
 - **Table-ABI prefix negotiation.** Today only the response `dispatch_table_size` floor is
   checked. Reading the dispatch table's own `abi_header`, honoring `abi_minor`, distinguishing
   a required prefix from an optional appended tail, and a non-vacuous ctest proving a larger
