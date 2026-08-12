@@ -276,7 +276,12 @@ if(ROCROLLER_EMBED_ARCH_DEF)
     target_compile_definitions(rocroller PRIVATE ROCROLLER_EMBED_ARCH_DEF)
 endif()
 
-if(ROCROLLER_ENABLE_CLIENT AND NOT TARGET roc::host-validation)
+set(_rocroller_needs_host_numerics OFF)
+if(ROCROLLER_ENABLE_CLIENT OR ROCROLLER_BUILD_TESTING)
+    set(_rocroller_needs_host_numerics ON)
+endif()
+
+if(_rocroller_needs_host_numerics AND NOT TARGET roc::host-validation)
     set(_rocroller_host_validation_source
         "${CMAKE_CURRENT_SOURCE_DIR}/../host-validation"
     )
@@ -297,20 +302,35 @@ if(ROCROLLER_ENABLE_CLIENT AND NOT TARGET roc::host-validation)
     endif()
     if(NOT TARGET roc::host-validation)
         message(FATAL_ERROR
-            "rocRoller clients require the ROCHostValidation component. "
+            "rocRoller host numerics require the ROCHostValidation component. "
             "Include shared/host-validation in the checkout or install its package."
         )
     endif()
 endif()
 
-if(ROCROLLER_ENABLE_CLIENT AND NOT TARGET roc::host-validation-mx)
+if(_rocroller_needs_host_numerics AND NOT TARGET roc::host-validation-mx)
     if(COMMAND roc_host_validation_enable_mx_backend)
         roc_host_validation_enable_mx_backend()
     else()
         message(FATAL_ERROR
-            "rocRoller clients require the optional roc::host-validation-mx target."
+            "rocRoller host numerics require the optional roc::host-validation-mx target."
         )
     endif()
+endif()
+
+if(_rocroller_needs_host_numerics AND NOT TARGET roc::host-validation-blas)
+    if(COMMAND roc_host_validation_enable_blas_backend)
+        roc_host_validation_enable_blas_backend()
+    else()
+        message(FATAL_ERROR
+            "rocRoller host numerics require the optional roc::host-validation-blas target. "
+            "Install ROCHostValidation with its BLAS backend or include shared/host-validation."
+        )
+    endif()
+endif()
+
+if(_rocroller_needs_host_numerics)
+    add_subdirectory(host)
 endif()
 
 if(ROCROLLER_ENABLE_CLIENT AND NOT TARGET roc::mxDataGenerator)
