@@ -354,14 +354,13 @@ WorkspaceExpr parseWorkspaceExpr(const json& value)
     }
     if(spec->exactArity != 0 && operands.size() != spec->exactArity)
     {
-        fail("workspace operator '" + opKey + "' takes exactly "
-             + std::to_string(spec->exactArity) + " operands, got "
-             + std::to_string(operands.size()));
+        fail("workspace operator '" + opKey + "' takes exactly " + std::to_string(spec->exactArity)
+             + " operands, got " + std::to_string(operands.size()));
     }
     if(operands.size() < spec->minArity)
     {
-        fail("workspace operator '" + opKey + "' needs at least "
-             + std::to_string(spec->minArity) + " operand(s)");
+        fail("workspace operator '" + opKey + "' needs at least " + std::to_string(spec->minArity)
+             + " operand(s)");
     }
 
     expr.op = spec->op;

@@ -208,11 +208,10 @@ TEST(TestAotCatalogLayerNormNumericParity, LayerNorm2dF16MatchesReference)
                         hostGamma.size() * sizeof(_Float16),
                         hipMemcpyHostToDevice),
               hipSuccess);
-    ASSERT_EQ(hipMemcpy(deviceBeta,
-                        hostBeta.data(),
-                        hostBeta.size() * sizeof(_Float16),
-                        hipMemcpyHostToDevice),
-              hipSuccess);
+    ASSERT_EQ(
+        hipMemcpy(
+            deviceBeta, hostBeta.data(), hostBeta.size() * sizeof(_Float16), hipMemcpyHostToDevice),
+        hipSuccess);
     ASSERT_EQ(hipMemset(deviceY, 0, hostY.size() * sizeof(_Float16)), hipSuccess);
 
     hipStream_t stream = nullptr;

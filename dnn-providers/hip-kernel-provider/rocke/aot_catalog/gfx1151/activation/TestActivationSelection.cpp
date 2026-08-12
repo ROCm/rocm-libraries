@@ -199,8 +199,8 @@ ShapeOutcome runAndCheck(const std::string& activation, size_t numel, const std:
         {
             if(mismatches == 0)
             {
-                firstMismatch = std::to_string(i) + " got=" + std::to_string(got) + " want="
-                                + std::to_string(want);
+                firstMismatch = std::to_string(i) + " got=" + std::to_string(got)
+                                + " want=" + std::to_string(want);
             }
             ++mismatches;
         }

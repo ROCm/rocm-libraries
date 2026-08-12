@@ -170,8 +170,8 @@ void runActivationParity(const std::string& activation, const std::function<floa
         const auto got = static_cast<float>(hostC[i]);
         const float want = reference[i];
         const float tol = std::max(2e-2f, 3e-2f * std::fabs(want));
-        ASSERT_NEAR(got, want, tol) << activation << " mismatch at " << i
-                                    << " (x=" << static_cast<float>(hostA[i]) << ")";
+        ASSERT_NEAR(got, want, tol)
+            << activation << " mismatch at " << i << " (x=" << static_cast<float>(hostA[i]) << ")";
     }
 
     (void)hipFree(deviceA);

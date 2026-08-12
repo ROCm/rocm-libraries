@@ -139,8 +139,7 @@ std::optional<catalog::ProblemShape> LayerNormAdapter::decode(const IGraph& grap
         const auto scaleDims = scale.dims();
         const auto biasDims = bias.dims();
         const auto yDims = y.dims();
-        if(xDims.size() != 2 || scaleDims.size() != 2 || biasDims.size() != 2
-           || yDims.size() != 2)
+        if(xDims.size() != 2 || scaleDims.size() != 2 || biasDims.size() != 2 || yDims.size() != 2)
         {
             return std::nullopt;
         }
@@ -175,8 +174,8 @@ std::optional<catalog::ProblemShape> LayerNormAdapter::decode(const IGraph& grap
         // providerDtype() already declines anything else; we only require the
         // four operands agree so the baked ABI dtype token is unambiguous.
         const auto dtype = providerDtype(x.dataType());
-        if(!dtype.has_value() || scale.dataType() != x.dataType()
-           || bias.dataType() != x.dataType() || y.dataType() != x.dataType())
+        if(!dtype.has_value() || scale.dataType() != x.dataType() || bias.dataType() != x.dataType()
+           || y.dataType() != x.dataType())
         {
             return std::nullopt;
         }
