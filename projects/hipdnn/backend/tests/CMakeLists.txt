@@ -128,6 +128,7 @@ add_executable(
     heuristics/TestTreeDataAdapter.cpp
     heuristics/TestUhdBuiltIn.cpp
     heuristics/TestUhdSelectionFlow.cpp
+    heuristics/uhd/TestUhdLoader.cpp
     TestUserLoggingApis.cpp
     TestPlatformUtils.cpp
     TestEnginePluginOverride.cpp

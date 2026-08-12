@@ -67,6 +67,7 @@ add_library(
     heuristics/uhd/FeatureExtractor.cpp
     heuristics/uhd/SelectionEngine.cpp
     heuristics/uhd/UhdBuiltIn.cpp
+    heuristics/uhd/UhdLoader.cpp
     heuristics/uhd/adapters/TreeDataAdapter.cpp
     plugin/EnginePlugin.cpp
     plugin/EnginePluginResourceManager.cpp
