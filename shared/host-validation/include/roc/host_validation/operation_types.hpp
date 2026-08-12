@@ -73,6 +73,8 @@ class OutputSelection {
     static OutputSelection explicitIndices(std::vector<size_t> indices) {
         OutputSelection result;
         result.m_kind = OutputSelectionKind::Explicit;
+        std::sort(indices.begin(), indices.end());
+        indices.erase(std::unique(indices.begin(), indices.end()), indices.end());
         result.m_indices = std::move(indices);
         return result;
     }
