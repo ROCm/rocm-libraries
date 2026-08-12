@@ -22,6 +22,8 @@
  * ************************************************************************ */
 #include <gtest/gtest.h>
 
+#include <cstdlib>
+#include <iostream>
 #include <sstream>
 
 #include "TestHelpers.hpp"
@@ -253,7 +255,20 @@ class DAGSchedulerPassTest : public ::testing::Test {
         pfc.dagFeatures.distributeGlobalRead = true;
         pfc.dagFeatures.clusterBarrier = clusterBarrier;
         ctx.setPassFeatureConfig(pfc);
+        if (testDumpEnabled()) {
+            std::cerr << "\n=== INPUT (clusterBarrier=" << (clusterBarrier ? "on" : "off")
+                      << "):" << scheduleOrder(*bb) << "\n";
+        }
         pass->run(*func, ctx, am);
+        if (testDumpEnabled()) {
+            std::cerr << "\n=== OUTPUT (clusterBarrier=" << (clusterBarrier ? "on" : "off")
+                      << "):" << scheduleOrder(*bb) << "\n";
+        }
+    }
+
+    static bool testDumpEnabled() {
+        static const bool enabled = std::getenv("STINKY_TEST_DUMP") != nullptr;
+        return enabled;
     }
 
     // An `s_barrier_signal -1` / `s_barrier_wait -1` pair carrying LDS pseudo-regs, so
