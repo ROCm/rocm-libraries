@@ -76,6 +76,65 @@ void testTransformingBlockScale(roc::host_validation::ScalarType accumulatorType
     require(transformingD == canonicalD,
             "Transforming BLAS block-scale result differs from canonical reference.");
 }
+
+void testPartialOutputSelection() {
+    using namespace roc::host_validation;
+
+    const std::array<float, 6> a{1, 4, 2, 5, 3, 6};
+    const std::array<float, 6> b{7, 9, 11, 8, 10, 12};
+    constexpr std::array<float, 4> untouched{-99, -99, -99, -99};
+    std::array<float, 4> d = untouched;
+    BlasGemmBackend backend;
+
+    GemmRequest problem(
+        GemmOperand(
+            TensorView::fromNative<float>(Layout(Shape{2, 3}, {1, 2}), std::span<const float>(a))),
+        GemmOperand(
+            TensorView::fromNative<float>(Layout(Shape{3, 2}, {1, 3}), std::span<const float>(b))),
+        TensorView::fromNative<float>(Layout(Shape{2, 2}, {1, 2}), std::span<const float>(d)),
+        MutableTensorView::fromNative<float>(Layout(Shape{2, 2}, {1, 2}), std::span<float>(d)),
+        ScalarType::Float32);
+    problem.outputSelection = OutputSelection::explicitIndices({0, 3});
+
+    const GemmSupportInfo support =
+        queryGemmSupport(problem,
+                         {
+                             .backend = GemmBackend::Blas,
+                             .requireRequestedBackend = true,
+                         },
+                         &backend);
+    require(!support.supported &&
+                support.reason == "BLAS backend requires complete output selection.",
+            "BLAS backend support query accepted partial output selection.");
+
+    bool rejectedRequiredBackend = false;
+    try {
+        referenceGemm(problem,
+                      {
+                          .backend = GemmBackend::Blas,
+                          .requireRequestedBackend = true,
+                      },
+                      &backend);
+    } catch (const std::invalid_argument& error) {
+        rejectedRequiredBackend = support.reason == error.what();
+    }
+    require(rejectedRequiredBackend, "Required BLAS execution accepted partial output selection.");
+    require(d == untouched, "Rejected BLAS execution modified output.");
+
+    const GemmResult fallback =
+        referenceGemm(problem,
+                      {
+                          .backend = GemmBackend::Blas,
+                          .requireRequestedBackend = false,
+                      },
+                      &backend);
+    require(fallback.runInfo.backendUsed == GemmBackend::Canonical &&
+                fallback.runInfo.fallbackReason == support.reason &&
+                fallback.runInfo.outputElementsComputed == 2,
+            "Partial-output BLAS request did not report canonical fallback.");
+    require(d == std::array<float, 4>{58, -99, -99, 154},
+            "Canonical BLAS fallback did not preserve unselected outputs.");
+}
 }  // namespace
 
 int main() {
@@ -128,6 +187,8 @@ int main() {
                 d == std::array<float, 4>{119, 281, 131, 311},
             "Automatic runtime backend fallback mismatch.");
     problem.epilogue.activation = Activation::None;
+
+    testPartialOutputSelection();
 
     const std::array<std::complex<float>, 1> complexA{std::complex<float>(1, 2)};
     const std::array<std::complex<float>, 1> complexB{std::complex<float>(3, 4)};
