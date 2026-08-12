@@ -137,19 +137,60 @@ class TestRegisterPassAtExtensionPoint:
         assert st.getPluginDataI64("testKey") == 123
 
 
-class TestHelloWorldPassIntegration:
-    """End-to-end test: dynamically load HelloWorldPass plugin, set
-    plugin data, run pipeline, verify the pass executed."""
+class TestHelloWorldPassIntegrationDynamic:
+    """End-to-end test: dynamically load HelloWorldPass plugin (dlopen), set
+    plugin data, run pipeline, verify the pass executed.
+
+    Requires stinkytofu built shared with STINKYTOFU_BUILD_EXAMPLES=ON, so the
+    plugin exists as a dlopen'able module. See TestHelloWorldPassIntegrationStatic
+    for the compiled-in counterpart, which works regardless of how stinkytofu
+    itself was built."""
 
     @pytest.fixture(autouse=True)
     def _load_plugin(self):
         # Ask stinkytofu where its own example plugin is; it resolves the path
         # relative to the loaded libstinkytofu. Empty means it was built with
-        # STINKYTOFU_BUILD_EXAMPLES=OFF (e.g. a production ROCm package).
+        # STINKYTOFU_BUILD_EXAMPLES=OFF, or stinkytofu is static (no dlopen'able
+        # module exists in that case — see PassBuilder::examplePluginPath()).
         path = rocisa.stinkytofuExamplePluginPath()
         if not path:
-            pytest.skip("StinkyTofu example plugin not built (STINKYTOFU_BUILD_EXAMPLES=OFF)")
+            pytest.skip("StinkyTofu example plugin not built as a dlopen'able module")
         rocisa.loadPlugin(path)
+
+    def test_hello_world_pass_executes(self):
+        st = _make_stinky_module()
+        st.setPluginDataStr("greeting", "Hello from rocisa test!")
+        st.registerPassAtExtensionPoint(
+            rocisa.PipelineExtensionPoint.AfterRegionPasses, "HelloWorldPass"
+        )
+        st.runOptimizationPipeline()
+        assert st.getPluginDataI64("pass_executed") == 1
+        assert st.getPluginDataStr("greeting_result") == "executed: Hello from rocisa test!"
+
+    def test_hello_world_pass_default_greeting(self):
+        st = _make_stinky_module()
+        st.registerPassAtExtensionPoint(
+            rocisa.PipelineExtensionPoint.AfterRegionPasses, "HelloWorldPass"
+        )
+        st.runOptimizationPipeline()
+        assert st.getPluginDataI64("pass_executed") == 1
+        assert st.getPluginDataStr("greeting_result") == "executed: Hello from plugin!"
+
+
+class TestHelloWorldPassIntegrationStatic:
+    """Same end-to-end test as the dynamic version above, but via the
+    LLVM-style static-plugin path: HelloWorldPass.cpp is compiled directly
+    into _rocisa and registered with an explicit call instead of dlopen.
+
+    Requires rocisa built with ROCISA_BUILD_STINKYTOFU_EXAMPLES=ON. Unlike
+    the dynamic path, this works whether stinkytofu itself is static or
+    shared."""
+
+    @pytest.fixture(autouse=True)
+    def _register_plugin(self):
+        if not hasattr(rocisa, "registerExamplePlugin"):
+            pytest.skip("rocisa built without ROCISA_BUILD_STINKYTOFU_EXAMPLES")
+        rocisa.registerExamplePlugin()
 
     def test_hello_world_pass_executes(self):
         st = _make_stinky_module()

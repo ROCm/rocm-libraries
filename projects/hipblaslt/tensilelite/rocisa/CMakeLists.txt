@@ -20,6 +20,16 @@ option(ROCISA_USE_STABLE_ABI
 
 option(ROCISA_ENABLE_COVERAGE "Enable code coverage instrumentation for rocisa" OFF)
 
+# Compiles StinkyTofu's example HelloWorldPass plugin directly into _rocisa (LLVM-style
+# static-plugin pattern: object code linked into the host, registered via an explicit
+# call rather than dlopen). This is independent of whether stinkytofu itself was built
+# shared or static, and of whether it was found via find_package or add_subdirectory —
+# see the rocisa.registerExamplePlugin() binding below. Used to exercise the compiled-in
+# plugin path from test_pass_plugin.py regardless of stinkytofu's own build config.
+option(ROCISA_BUILD_STINKYTOFU_EXAMPLES
+    "Compile StinkyTofu's example HelloWorldPass plugin directly into rocisa (for testing static stinkytofu builds)"
+    OFF)
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -174,6 +184,21 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
         "${_stinkytofu_src_dir}/src/conversion/rocisa/AllHwMappings.cpp"
         "${_stinkytofu_src_dir}/src/conversion/rocisa/ToStinkyTofuUtils.cpp"
     )
+
+    # Compile StinkyTofu's example HelloWorldPass plugin straight into _rocisa, same
+    # rationale as the conversion glue above: this bypasses whatever CMake target
+    # topology stinkytofu itself used (static/shared, find_package/add_subdirectory),
+    # so rocisa.registerExamplePlugin() (bound in ToStinkyTofuUtils.cpp) is available
+    # uniformly. Separate from stinkytofu's own STINKYTOFU_BUILD_EXAMPLES option.
+    if(ROCISA_BUILD_STINKYTOFU_EXAMPLES)
+        target_sources(_rocisa PRIVATE
+            "${_stinkytofu_src_dir}/examples/plugins/HelloWorldPass.cpp"
+        )
+        target_include_directories(_rocisa PRIVATE
+            "${_stinkytofu_src_dir}/examples/plugins"
+        )
+        target_compile_definitions(_rocisa PRIVATE STINKYTOFU_BUILD_EXAMPLES)
+    endif()
 
     if(_stinkytofu_from_subdirectory)
         # Source-built stinkytofu via add_subdirectory: generated headers are in
