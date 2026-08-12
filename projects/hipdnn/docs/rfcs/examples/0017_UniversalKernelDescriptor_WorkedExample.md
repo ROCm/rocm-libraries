@@ -2,18 +2,18 @@
 
 This document is the long-form companion to
 [RFC 0017: Universal Kernel Descriptors](../0017_UniversalKernelDescriptor.md). It carries the
-full worked example the main RFC summarises: the complete matcher for a real SDPA forward
-kernel, the mask-mode classifier encoded as criteria data, one accept and two declines traced
-end to end, the dispatch geometry for both performance cohorts, and the engine, metadata
-schema, and two kernel packs that bind them.
+full worked example the main RFC summarises: the engine's pattern and the criteria that constrain
+it for a real SDPA forward kernel, the mask-mode classifier encoded as criteria data, one accept
+and two declines traced end to end, the dispatch geometry for both performance cohorts, and the
+engine, metadata schema, and two kernel packs that bind them.
 
 Descriptor semantics, the criteria operator vocabulary, and the expression language are defined
 in the main RFC; this document only uses them.
 
 ## Table of Contents
 
-1. [One Matcher, Evaluated Per Candidate Kernel](#1-one-matcher-evaluated-per-candidate-kernel)
-2. [The Matcher](#2-the-matcher)
+1. [One Pattern, Criteria Per Candidate Kernel](#1-one-pattern-criteria-per-candidate-kernel)
+2. [The Criteria](#2-the-criteria)
 3. [Encoding the Mask Classifier](#3-encoding-the-mask-classifier)
 4. [One Accept, Two Declines](#4-one-accept-two-declines)
 5. [Dispatch Geometry from `$kernel.*`](#5-dispatch-geometry-from-kernel)
@@ -44,72 +44,44 @@ validates the spec itself, or in the dispatch candidate's `support` function, wh
 whether a request reaches this kernel at all. Showing *decline* correctly matters more than
 showing *accept*, so this document walks through one accept and two distinct declines.
 
-## 1. One Matcher, Evaluated Per Candidate Kernel
+## 1. One Pattern, Criteria Per Candidate Kernel
 
 This family's real dispatch is one function: it checks the request's arch, dtype, and feature
 flags, then calls `supports_attention_dense`, which validates the full spec. There is no separate
-catalog-matching stage. Section 5's `conv.tile_fit` already shows the mechanism: a matcher's
-criteria can reference `$kernel.*` fields directly
-(`divisible($y.n*$y.ho*$y.wo, $kernel.MPerBlock)`), so the same matcher, evaluated once per UKD in
-a KDP's kernel vector, does the work a hand-written per-kernel selection function would otherwise
-do. A graph either satisfies some UKD's instantiation of the matcher or it does not; there is no
-second phase.
+catalog-matching stage. The descriptors split that function along the seam the graph already has.
+The engine's pattern (§6) runs first and once per graph: it matches the single `sdpa_fwd` node,
+binds Q/K/V/O and the node's attributes, and a graph whose shape it does not match declines the
+engine outright, before either pack's criteria are touched. The criteria (§2) run second, over the
+symbols that binding published.
 
-## 2. The Matcher
+Only the second stage repeats. Section 5's `conv.tile_fit` already shows the mechanism: criteria
+can reference `$kernel.*` fields directly (`divisible($y.n*$y.ho*$y.wo, $kernel.MPerBlock)`), so
+the same criteria, evaluated once per UKD in a KDP's kernel vector, do the work a hand-written
+per-kernel selection function would otherwise do. A graph either satisfies some UKD's
+instantiation of the criteria or it does not; there is no third phase.
+
+## 2. The Criteria
 
 Grounded in `AttentionDenseSpec.__post_init__` and the dispatch candidate's `support` function,
 this pack targets the aligned (non-ragged, non-varlen) dense causal path. Ragged and varlen
 inputs are real, separately gated modes of the same kernel file, called out as an extension point
 in §7.
 
+Every `$`-token below reaches a symbol §6's engine pattern bound: the four tensors `$q`, `$k`,
+`$v`, `$o`, the twenty-four optional operands the pattern declares with a `?`, and the `sdpa_fwd`
+node's scalar attributes; this descriptor carries the constraints over them.
+
 ```jsonc
 {
   "schema": "hipdnn.umd/v1",
   "id":   "9c2a9e2e-8a2a-4a52-9d1a-9d9e6e5d9f11",
-  "name": "SDPA forward (attention_dense family, gfx950) match",
-  "nodes": [
-    {"kind": "op", "id": "sdpa_fwd", "op": "sdpa_fwd",
-     "operands": {
-       // Required operands, named as `sdpa_attributes.fbs` names them, minus the `_tensor_uid`
-       // suffix: a pattern binds the tensor, not its uid.
-       "q": "$q", "k": "$k", "v": "$v",
-
-       // Every optional tensor the schema declares, bound here and declined below. The set is
-       // generic hipDNN SDPA vocabulary; none of it appears in AttentionDenseSpec.
-       "attn_mask":     "$attn_mask?",
-       "scale":         "$scale?",           // the scale-tensor form; accepted, see the scale gate
-       "seq_len_q":     "$seq_len_q?",       // varlen: a real AttentionDenseSpec.varlen mode, not
-       "seq_len_kv":    "$seq_len_kv?",      // wired into this candidate; see Section 7.
-       "seed":          "$seed?",
-       "offset":        "$offset?",
-       "dropout_mask":  "$dropout_mask?",
-       "dropout_scale": "$dropout_scale?",
-       "page_table_k":  "$page_table_k?",
-       "page_table_v":  "$page_table_v?",
-       "block_mask":    "$block_mask?",
-       "sink_token":    "$sink_token?",
-       "descale_q":     "$descale_q?",
-       "descale_k":     "$descale_k?",
-       "descale_v":     "$descale_v?",
-       "descale_s":     "$descale_s?",
-       "scale_s":       "$scale_s?",
-       "scale_o":       "$scale_o?",
-       "stats":         "$stats?",
-       "max":           "$max?",
-       "sum_exp":       "$sum_exp?",
-       "rng_dump":      "$rng_dump?",
-       "amax_s":        "$amax_s?",
-       "amax_o":        "$amax_o?"
-     },
-     "results": {"o": "$o"}}
-  ],
+  "name": "SDPA forward (attention_dense family, gfx950) criteria",
   "criteria": {"and": [
     // --- graph-level: a prebuilt kernel serves one fixed compile-time shape ---
     {"!": ["$graph.is_override_shape_enabled"]},
     {"==": ["$graph.node_count", 1]},
-
-    // --- 23 of the 24 optional tensors are refused outright. The 24th, the scale tensor, is
-    //     served, and its gate is further down. ---
+    // --- 23 of the 24 optional tensors the engine's pattern binds are refused outright. The
+    //     24th, the scale tensor, is served, and its gate is further down. ---
     {"not_present": ["$attn_mask", "$seq_len_q", "$seq_len_kv", "$seed", "$offset",
                      "$dropout_mask", "$dropout_scale", "$page_table_k", "$page_table_v",
                      "$block_mask", "$sink_token", "$descale_q", "$descale_k", "$descale_v",
@@ -265,7 +237,7 @@ use `value_or_default` to normalize an absent bound to `-1` first and then compa
 spellings are equivalent; this one is legible.
 
 ```jsonc
-// The contradiction check and the classifier, derived below and spliced into §2's matcher as
+// The contradiction check and the classifier, derived below and spliced into §2's criteria as
 // one conjunct. Pasting only the inner `or` would make the contradiction check a disjunct
 // instead, so a graph with both deprecated causal booleans set could pass by satisfying
 // another arm.
@@ -326,17 +298,20 @@ They differ only in the field named.
 >= num_persistent` in `"auto"` mode) would itself pick the non-persistent cohort for this exact
 shape. Applicable.
 
-**Case B: matcher decline.** Same graph plus an additive attention bias, so `$attn_mask` is
-bound. The `not_present` list fails the moment that operand is bound, before mask mode, dtype, or
-layout are considered. Any of the other 22 refused-outright operands declines the same way, and
-so does `$graph.is_override_shape_enabled`, which rejects before any tensor is bound because this
-kernel bakes its shape at compile time and cannot serve a runtime-overridden one.
+**Case B: criteria decline.** Same graph plus an additive attention bias, so the engine's pattern
+binds `$attn_mask`. The pattern still matches — an optional operand the graph supplies is exactly
+what a `?` binding is for — so the decline lands one stage later: the `not_present` list is the
+first conjunct evaluated over that binding, and it fails before mask mode, dtype, or layout are
+considered. Any of the other 22 refused-outright operands declines the same way. An
+override-shape graph declines for a different reason: `{"!": ["$graph.is_override_shape_enabled"]}`
+rejects it because this kernel bakes its shape at compile time and cannot serve a
+runtime-overridden one.
 
 **Case C: catalog decline.** Same graph, but `causal_mask=false` and both bounds unbounded
 (`left_bound=-1, right_bound=-1`), so `mask_mode` resolves to `none`. Every other gate still
 passes, but neither of §6's two UKDs declares `mask_mode="none"`; both are built with
 `causal=True`. No kernel in this pack's vector covers a full (non-causal) graph, so the engine is
-not applicable to it, per §1's matcher-plus-`$kernel.*` mechanism. The gap is easy to fix: the
+not applicable to it, per §1's criteria-plus-`$kernel.*` mechanism. The gap is easy to fix: the
 kernel builds a `causal=False` kernel today (`AttentionDenseSpec(causal=False, ...)` is a valid,
 buildable spec), so adding a `mask_mode="none"` UKD to this pack needs one more
 `kernelDescriptors` entry and no matcher change.
@@ -382,9 +357,9 @@ The persistent UDD, the measured ~940-970 TFLOPS path (PR #9480):
 This is the real, complete 5-argument ABI (`attention_dense_signature`), with no stride or seqlen
 scalars, because every shape quantity is a Python-level compile-time constant baked into the IR
 rather than a runtime argument. This is the tradeoff "a prebuilt match is exact" argues for
-([RFC 0017 §5](../0017_UniversalKernelDescriptor.md#5-matching-and-the-umd)): the kernel author's own docstring for
-`AttentionDenseSpec` confirms it in the same words, that the functional fields "are baked into the
-kernel as constants, this is a dense, statically-sized ABI".
+([RFC 0017 §5](../0017_UniversalKernelDescriptor.md#5-matching-the-ueds-pattern-and-the-umds-criteria)):
+the kernel author's own docstring for `AttentionDenseSpec` confirms it in the same words, that the
+functional fields "are baked into the kernel as constants, this is a dense, statically-sized ABI".
 
 The non-persistent UDD, referenced from a second KDP, differs only in the `grid` field (a formula
 over graph dims instead of a `$kernel.*` constant) and shares the identical `args_signature`:
@@ -427,11 +402,13 @@ stated is a choice this pack makes, not a language limit.
 
 ## 6. The Engine, Metadata, and Two Kernel Packs
 
-One matcher (§2), one engine, one KMD, shared across two KDPs because the two cohorts need
-different UDDs (§5). The KMD carries `persistent` as a field so the two UKDs' metadata values
-are distinct, not just their `id`s, satisfying the RFC's own KMD-uniqueness rule (§4: "every
-kernel in the engine must produce a distinct key"). Each UKD's `kernel_source` is a rocKE adapter
-invocation: the builder, plus the exact build values for that instance.
+One engine, one KMD, one criteria set (§2), shared across two KDPs because the two cohorts need
+different UDDs (§5). The pattern sits on the engine, so both packs inherit the same graph contract
+and the same bound symbols; that is why one criteria UMD serves both, and why neither pack
+restates the shape it serves. The KMD carries `persistent` as a field so the two UKDs' metadata
+values are distinct, not just their `id`s, satisfying the RFC's own KMD-uniqueness rule (§4:
+"every kernel in the engine must produce a distinct key"). Each UKD's `kernel_source` is a rocKE
+adapter invocation: the builder, plus the exact build values for that instance.
 
 ```jsonc
 // --- KMD: the engine-wide metadata schema, shared by both KDPs below ---
@@ -487,13 +464,53 @@ invocation: the builder, plus the exact build values for that instance.
   "objective": "max"
 }
 
-// --- UED: the engine, referenced by both KDPs below ---
+// --- UED: the engine, referenced by both KDPs below. It carries the pattern, so the graph shape
+//     and every symbol §2's criteria, §5's two UDDs, and the UHD above read are published here,
+//     once, by the engine that owns all three. ---
 {
-  "schema":    "hipdnn.ued/v1",
-  "id":        "7d4c2a9e-3b6f-4e1a-8c5d-9a2f7b0e6c14",
-  "name":      "attention_dense forward engine",
-  "heuristic": "2b7a4e1c-6f3d-4a8e-9c2b-5d1f0a7e8b93",
-  "metadata":  "9c53b6b0-9a1e-4b1d-8b5c-7e2d9a6f3c40"
+  "schema":      "hipdnn.ued/v1",
+  "id":          "7d4c2a9e-3b6f-4e1a-8c5d-9a2f7b0e6c14",
+  "name":        "attention_dense forward engine",
+  "sdk_version": "1.0",   // the hipDNN graph schema version this pattern was authored against
+  "heuristic":   "2b7a4e1c-6f3d-4a8e-9c2b-5d1f0a7e8b93",
+  "metadata":    "9c53b6b0-9a1e-4b1d-8b5c-7e2d9a6f3c40",
+  "nodes": [
+    {"kind": "op", "id": "sdpa_fwd", "op": "sdpa_fwd",
+     "operands": {
+       // Required operands, named as `sdpa_attributes.fbs` names them, minus the `_tensor_uid`
+       // suffix: a pattern binds the tensor, not its uid.
+       "q": "$q", "k": "$k", "v": "$v",
+
+       // Every optional tensor the schema declares, bound here and declined by §2's criteria.
+       // The set is generic hipDNN SDPA vocabulary; none of it appears in AttentionDenseSpec.
+       "attn_mask":     "$attn_mask?",
+       "scale":         "$scale?",           // the scale-tensor form; §2's scale gate accepts it
+       "seq_len_q":     "$seq_len_q?",       // varlen: a real AttentionDenseSpec.varlen mode, not
+       "seq_len_kv":    "$seq_len_kv?",      // wired into this candidate; see Section 7.
+       "seed":          "$seed?",
+       "offset":        "$offset?",
+       "dropout_mask":  "$dropout_mask?",
+       "dropout_scale": "$dropout_scale?",
+       "page_table_k":  "$page_table_k?",
+       "page_table_v":  "$page_table_v?",
+       "block_mask":    "$block_mask?",
+       "sink_token":    "$sink_token?",
+       "descale_q":     "$descale_q?",
+       "descale_k":     "$descale_k?",
+       "descale_v":     "$descale_v?",
+       "descale_s":     "$descale_s?",
+       "scale_s":       "$scale_s?",
+       "scale_o":       "$scale_o?",
+       "stats":         "$stats?",
+       "max":           "$max?",
+       "sum_exp":       "$sum_exp?",
+       "rng_dump":      "$rng_dump?",
+       "amax_s":        "$amax_s?",
+       "amax_o":        "$amax_o?"
+     },
+     "results": {"o": "$o"}}
+  ],
+  // A prebuilt kernel serves one fixed compile-time shape, so the pattern is the entire graph and
 }
 
 // --- KDP 1: default grid ---
@@ -502,7 +519,7 @@ invocation: the builder, plus the exact build values for that instance.
   "id":        "e3a1b7c4-5d92-4f06-8b3e-6c0d2a9f14b8",
   "name":      "attention_dense fwd d128 bf16 (default grid, gfx950)",
   "arch":      ["gfx950"],
-  "matchers":  ["9c2a9e2e-8a2a-4a52-9d1a-9d9e6e5d9f11"],   // §2's matcher
+  "matchers":  ["9c2a9e2e-8a2a-4a52-9d1a-9d9e6e5d9f11"],   // §2's criteria
   "engine":    "7d4c2a9e-3b6f-4e1a-8c5d-9a2f7b0e6c14",
   "dispatch":  "d5e6c9a4-1f2a-4e3a-9a3b-2f7d0f6c4b21",     // §5's default-grid UDD
   "kernelDescriptors": [
@@ -536,7 +553,7 @@ invocation: the builder, plus the exact build values for that instance.
   "id":        "f70c8d25-4b16-4a3d-9e82-1a5b6f0c7d93",
   "name":      "attention_dense fwd d128 bf16 (persistent grid-stride, gfx950)",
   "arch":      ["gfx950"],
-  "matchers":  ["9c2a9e2e-8a2a-4a52-9d1a-9d9e6e5d9f11"],   // the SAME matcher as KDP 1
+  "matchers":  ["9c2a9e2e-8a2a-4a52-9d1a-9d9e6e5d9f11"],   // the SAME criteria as KDP 1
   "engine":    "7d4c2a9e-3b6f-4e1a-8c5d-9a2f7b0e6c14",     // the SAME engine as KDP 1
   "dispatch":  "6a0f2d0e-2b6b-4a2b-8c9d-8b8b6f6e9a10",     // §5's persistent UDD
   "kernelDescriptors": [
@@ -576,9 +593,15 @@ Neither UKD names an artifact file, because neither author chooses one: the adap
 code object from the `build` values and owns its name. The two `kernelDescriptors` vectors above
 *are* the AOT build list for this pack, so what gets compiled matches what is catalogued.
 
+**The heuristic reads a tensor the engine itself binds.** The UHD is engine-owned and ranks the
+whole catalog, and its `features_signature` reaches `$q.seqlen_q`, `$q.num_heads`, and `$q.batch`
+— dims of `$q`, a tensor this engine's own pattern binds rather than one only a pack's matcher
+introduced. One publisher, three consumers: those feature tokens, §2's criteria, and §5's two UDDs
+all resolve against the symbol set the engine published, and are checked against it at load.
+
 The generic launcher runs either KDP's kernel with no SDPA-specific code, and decline is handled
-the same way whether it lands on the matcher's graph-only clauses or its `$kernel.*`-referencing
-clauses.
+the same way whether it lands on the engine's pattern, the criteria's graph-only clauses, or their
+`$kernel.*`-referencing clauses.
 
 ## 7. What an Author Actually Writes
 
@@ -606,9 +629,11 @@ kernel to an **existing** engine, the common case, is a single UKD:
 The two shipped modes this family supports today that are not in this pack, `ragged=True`
 (on-chip padding for non-256-multiple sequence lengths) and `varlen=True` (packed
 variable-length batches via `cu_seqlens_q`/`cu_seqlens_kv`, a real, already-built 7-argument ABI
-variant of the same kernel), each need a new UMD (different graph shape or different
-optional-operand binding) plus a new UDD (a different `args_signature`), not a change to this
-pack. `sliding_window`, gated off by the dispatch candidate today even though
-`AttentionDenseSpec` itself supports it, needs only a KMD value and a UKD once that gate is
-lifted, with no schema change. Both cases inherit the same dormancy rule as any other new UKD:
-cataloguing is not selection.
+variant of the same kernel), each need a new UED — a new engine — plus a new UDD (a different
+`args_signature`), not a change to this pack. What separates them from this pack is a different
+graph shape or a different optional-operand binding, and both of those are the pattern, which the
+engine owns; a new pattern is a new engine, carrying its own criteria and its own catalog.
+`sliding_window`, gated off by the dispatch candidate today even though `AttentionDenseSpec`
+itself supports it, needs only a KMD value and a UKD once that gate is lifted, with no schema
+change. Both cases inherit the same dormancy rule as any other new UKD: cataloguing is not
+selection.

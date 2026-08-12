@@ -7,7 +7,7 @@
   </defs>
 
   <text x="135" y="40" text-anchor="middle" font-weight="600">Live graph</text>
-  <text x="470" y="40" text-anchor="middle" font-weight="600">UMD constraints (declarative)</text>
+  <text x="470" y="40" text-anchor="middle" font-weight="600">UED pattern, then UMD criteria</text>
   <text x="800" y="40" text-anchor="middle" font-weight="600">Declared / bound / used</text>
 
   <!-- STAGE 1: live graph -->
@@ -30,20 +30,21 @@
   <line x1="255" y1="200" x2="325" y2="200" stroke="#444" stroke-width="1.5" marker-end="url(#arrowSB)"/>
   <text x="290" y="192" text-anchor="middle" font-weight="600">match</text>
 
-  <!-- STAGE 2: constraints -->
+  <!-- STAGE 2: the engine's pattern, then the pack's criteria -->
   <rect x="330" y="55" width="315" height="290" rx="8" fill="#fef7e0" stroke="#c99a2e" stroke-width="1.5"/>
-  <text x="345" y="82" font-family="Consolas, monospace" font-size="11">op: sdpa_fwd</text>
-  <text x="345" y="102" font-family="Consolas, monospace" font-size="11">operands {q:$q, k:$k, v:$v}</text>
-  <text x="345" y="122" font-family="Consolas, monospace" font-size="11">results  {o:$o}</text>
-  <text x="345" y="148" font-family="Consolas, monospace" font-size="11">{"in": ["$q.dtype", ["BFLOAT16","FP8_E4M3"]]}</text>
-  <text x="345" y="168" font-family="Consolas, monospace" font-size="11">{"==": ["$k.dtype", "$q.dtype"]}</text>
-  <text x="345" y="188" font-family="Consolas, monospace" font-size="11">{"shape": ["$q", [b, h, sq, head_size]]}</text>
-  <text x="345" y="208" font-family="Consolas, monospace" font-size="11">{"shape": ["$k", [b, kvh, sk, head_size]]}</text>
-  <text x="345" y="228" font-family="Consolas, monospace" font-size="11">{"==": ["$q.head_size", 128]}</text>
-  <text x="345" y="248" font-family="Consolas, monospace" font-size="11">{"==": ["$q.stride_order", [3,2,1,0]]}</text>
-  <text x="345" y="268" font-family="Consolas, monospace" font-size="11">{"not_present": ["$attn_mask"]}</text>
-  <text x="345" y="292" font-family="Consolas, monospace" font-size="11" fill="#a05a00">{"hipdnn.strides_fit_u32": [...]}</text>
-  <text x="345" y="312" font-family="Consolas, monospace" font-size="11" fill="#a05a00">{"hipdnn.sdpa_mask_consistent": [...]}</text>
+  <text x="345" y="76" font-size="10" fill="#4a72c4" font-weight="600">UED nodes &#183; the engine's pattern</text>
+  <rect x="340" y="82" width="295" height="64" rx="6" fill="#e8f0fe" stroke="#4a72c4" stroke-width="1.2"/>
+  <text x="352" y="101" font-family="Consolas, monospace" font-size="11">op: sdpa_fwd</text>
+  <text x="352" y="119" font-family="Consolas, monospace" font-size="11">operands {q:$q, k:$k, v:$v}</text>
+  <text x="352" y="137" font-family="Consolas, monospace" font-size="11">results  {o:$o}</text>
+  <text x="345" y="168" font-size="10" fill="#8a6d1f" font-weight="600">UMD criteria &#183; over the symbols it bound</text>
+  <text x="345" y="188" font-family="Consolas, monospace" font-size="11">{"in": ["$q.dtype", ["BFLOAT16","FP8_E4M3"]]}</text>
+  <text x="345" y="208" font-family="Consolas, monospace" font-size="11">{"==": ["$k.dtype", "$q.dtype"]}</text>
+  <text x="345" y="228" font-family="Consolas, monospace" font-size="11">{"shape": ["$q", [b, h, sq, head_size]]}</text>
+  <text x="345" y="248" font-family="Consolas, monospace" font-size="11">{"shape": ["$k", [b, kvh, sk, head_size]]}</text>
+  <text x="345" y="268" font-family="Consolas, monospace" font-size="11">{"==": ["$q.head_size", 128]}</text>
+  <text x="345" y="288" font-family="Consolas, monospace" font-size="11">{"==": ["$q.stride_order", [3,2,1,0]]}</text>
+  <text x="345" y="308" font-family="Consolas, monospace" font-size="11">{"not_present": ["$attn_mask"]}</text>
 
   <line x1="650" y1="200" x2="700" y2="200" stroke="#444" stroke-width="1.5" marker-end="url(#arrowSB)"/>
   <text x="675" y="192" text-anchor="middle" font-weight="600">bind</text>
@@ -59,8 +60,9 @@
   <text x="720" y="218" font-family="Consolas, monospace" font-size="11">$q.head_size, $k.head_size</text>
   <text x="720" y="252" font-family="Consolas, monospace" font-size="11">$sdpa_fwd.causal_mask</text>
   <text x="720" y="272" font-family="Consolas, monospace" font-size="11">$sdpa_fwd.dropout_..</text>
-  <text x="720" y="308" font-family="Consolas, monospace" font-size="10" fill="#666">used by the UDD's</text>
-  <text x="720" y="326" font-family="Consolas, monospace" font-size="10" fill="#666">grid / arg formulas</text>
+  <text x="720" y="308" font-family="Consolas, monospace" font-size="10" fill="#666">read by the criteria and</text>
+  <text x="720" y="326" font-family="Consolas, monospace" font-size="10" fill="#666">the UDD's grid / arg formulas</text>
 
-  <text x="460" y="395" text-anchor="middle" font-style="italic" fill="#444">The match auto-binds every tensor, dim, stride, and attribute; dim names are per-tensor, so a cross-tensor relation is an explicit criterion.</text>
+  <text x="460" y="388" text-anchor="middle" font-style="italic" fill="#444">The engine's pattern auto-binds every tensor, dim, stride, and attribute; dim names are per-tensor, so a cross-tensor relation is an explicit criterion.</text>
+  <text x="460" y="406" text-anchor="middle" font-style="italic" fill="#444">A native matcher, when a pack lists one, is named beside these criteria, not inside them.</text>
 </svg>
