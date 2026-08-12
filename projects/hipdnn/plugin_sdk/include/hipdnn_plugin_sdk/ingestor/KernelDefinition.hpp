@@ -19,13 +19,13 @@ namespace hipdnn_plugin_sdk::ingestor
 /**
  * @brief One catalog entry: a kernel that passed every matcher for a graph.
  *
- * This is the POD that leaves KernelIngestorStateManager. It is copied out rather than
+ * This is the POD that leaves KernelIngestorStateManager. Copied out rather than
  * handed out by reference so a caller holds a stable snapshot while the cache it came
  * from is concurrently evicted or refilled.
  *
- * It carries the kernel's completed metadata tuple (its catalog key), enough source
- * detail to load it, and the ids needed to find the dispatch descriptor that launches
- * it — but no pointer back into the descriptor set.
+ * Carries the kernel's completed metadata tuple (its catalog key), enough source
+ * detail to load it, and the ids needed to find its dispatch descriptor — but no
+ * pointer back into the descriptor set.
  */
 struct KernelDefinition
 {
@@ -59,8 +59,7 @@ struct KernelDefinition
     /// @brief The integer value of a KMD field.
     /// @throws std::out_of_range if the field is absent, std::invalid_argument if it
     ///         holds a different alternative. Both are author errors a validating
-    ///         loader would have caught, so they throw rather than returning a default
-    ///         that would silently mis-rank or mis-launch a kernel.
+    ///         loader would have caught.
     int64_t getIntMetadata(const std::string& field) const
     {
         auto it = metadata.find(field);

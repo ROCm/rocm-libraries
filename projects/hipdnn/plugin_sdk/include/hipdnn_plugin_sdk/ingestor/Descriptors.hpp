@@ -18,8 +18,7 @@
  * @file Descriptors.hpp
  * @brief The universal descriptor set from RFC 0017, as parsed in-memory data.
  *
- * Each descriptor kind maps 1:1 onto a concept hipDNN already has, expressed as data
- * rather than hand-written C++:
+ * Each descriptor kind maps 1:1 onto a concept hipDNN already has:
  *
  * | Descriptor | Describes                                                    |
  * |------------|--------------------------------------------------------------|
@@ -34,11 +33,9 @@
  * Descriptors reference each other by `id` only, never by pointer or index, so a pack
  * authored independently can name a matcher or an engine it does not own.
  *
- * These types are the *parsed* form. Nothing here parses, loads, or validates a file:
- * an ingestor built on this header is handed already-constructed descriptors. The
- * loader that produces them from disk is ALMIOPEN-2401 and its follow-ups; the
- * expression language that replaces the native symbol fields below is the UMD/UDD
- * follow-up RFC.
+ * These are the *parsed* form; nothing here parses, loads, or validates a file. The
+ * loader that produces them from disk is ALMIOPEN-2401; the expression language that
+ * replaces the native symbol fields below is the UMD/UDD follow-up RFC.
  */
 namespace hipdnn_plugin_sdk::ingestor
 {
@@ -46,11 +43,10 @@ namespace hipdnn_plugin_sdk::ingestor
 /// A descriptor cross-reference: the stable, globally unique id every descriptor
 /// carries, and the only way descriptors name one another.
 ///
-/// A 128-bit UUID rather than a string, matching the graph identity hipDNN mints at
-/// finalization, so the two id spaces in this system are one type. RFC 0017 §4 chooses
-/// GUIDs so any author can mint an id locally that never collides with another's, with
-/// no central allocation authority; `parseUuid` and `formatUuid` in the same header
-/// convert to and from the text form descriptor files carry.
+/// A 128-bit UUID, matching the graph identity hipDNN mints at finalization, so the
+/// two id spaces in this system are one type (RFC 0017 §4). `parseUuid` and
+/// `formatUuid` in the same header convert to and from the text form descriptor files
+/// carry.
 using DescriptorId = hipdnn_flatbuffers_sdk::utilities::UuidBytes;
 
 /// @brief A descriptor id in its canonical text form, for diagnostics.
@@ -59,9 +55,8 @@ inline std::string toString(const DescriptorId& id)
     return hipdnn_flatbuffers_sdk::utilities::formatUuid(id);
 }
 
-/// Hash for keying maps on a descriptor id. std::array has no std::hash, and a
-/// specialization for it cannot be added without opening namespace std over a standard
-/// type, so this is passed explicitly to the containers that need it.
+/// Hash for keying maps on a descriptor id. std::array has no std::hash, so this is
+/// passed explicitly to the containers that need it.
 struct DescriptorIdHash
 {
     size_t operator()(const DescriptorId& id) const noexcept
@@ -79,22 +74,18 @@ struct DescriptorIdHash
 };
 
 /// A value a kernel supplies for a KMD-declared field, and also the value type
-/// `$graph.*` binds (see MatchContext.hpp's BoundTokens): RFC 0017's criteria language
-/// puts one on each side of a single operator (`divisible($q.head_size,
-/// $kernel.tile_m)`), so an interpreter needs one value type spanning both namespaces
-/// or its first act is a refactor. Splitting them was cheap only as long as nothing
-/// compared across the split.
+/// `$graph.*` binds (see MatchContext.hpp's BoundTokens): both sides of a criteria
+/// comparison need one shared value type.
 ///
-/// Spans the primitive types a descriptor field or a bound graph fact can hold.
 /// `int64_t` and `double` are the widest signed integer and floating-point forms, so a
 /// narrower authored value converts into one without loss; `bool` is distinct because a
 /// flag compares and prints differently from the integer 1. `std::vector<int64_t>` is
-/// for list-valued facts like `stride_order` that no scalar alternative can hold.
+/// for list-valued facts like `stride_order`.
 using MetadataValue = std::variant<bool, int64_t, double, std::string, std::vector<int64_t>>;
 
-/// The type a KMD field holds, or a bound graph fact's type. Kept as an explicit enum,
-/// and ordered to match MetadataValue's alternatives, so a field can declare its type
-/// without also having to supply a value of it.
+/// The type a KMD field holds, or a bound graph fact's type. Ordered to match
+/// MetadataValue's alternatives, so a field can declare its type without also having to
+/// supply a value of it.
 enum class MetadataType
 {
     BOOL,
@@ -111,7 +102,7 @@ inline MetadataType metadataTypeOf(const MetadataValue& value)
 }
 
 /// A kernel's complete metadata tuple: every KMD field name mapped to this kernel's
-/// value for it. RFC 0017 §4 makes this tuple the kernel's identity to the catalog, so
+/// value for it. This tuple is the kernel's identity to the catalog (RFC 0017 §4), so
 /// it must be unique across every kernel in an engine. Ordered, so two kernels with the
 /// same fields compare and hash identically regardless of insertion order.
 using MetadataValues = std::map<std::string, MetadataValue>;
@@ -120,17 +111,11 @@ using MetadataValues = std::map<std::string, MetadataValue>;
 struct MetadataField
 {
     std::string name;
-    /// What this field holds. Declared separately from the default because a field need
-    /// not have one, and a kernel supplying the wrong alternative is a load error the
-    /// validating loader reports against this.
+    /// What this field holds.
     MetadataType type = MetadataType::INT;
-    /// The value a kernel that omits this field is taken to have supplied.
-    ///
-    /// Optional, because a field can be mandatory. RFC 0017 §4's KMD example carries
-    /// `optional` and `default` as separate attributes on the field; those collapse here,
-    /// since a field that is mandatory has no default to fall back on. A kernel omitting
-    /// such a field is a load error rather than a silent fallback to a catalog key its
-    /// author never wrote.
+    /// The value a kernel that omits this field is taken to have supplied. Optional,
+    /// because a field can be mandatory; a kernel omitting a mandatory field is a load
+    /// error rather than a silent fallback.
     std::optional<MetadataValue> defaultValue;
 };
 
@@ -146,11 +131,8 @@ struct MetadataSchema
     std::vector<MetadataField> fields;
 };
 
-/// Which adapter builds an engine's IKernelHeuristic from a UHD's `payload`. The kind
-/// is the adapter dispatch point (RFC 0017 §9.1), the same role KernelSourceKind plays
-/// for a UKD below: a UHD is reachable as data now instead of being the one descriptor
-/// that is constructed and then stepped around in favor of a hand-built native
-/// heuristic.
+/// Which adapter builds an engine's IKernelHeuristic from a UHD's `payload` (RFC 0017
+/// §9.1's adapter dispatch point).
 enum class HeuristicKind
 {
     /// `payload` is a NativeRegistry score symbol, resolved into a NativeKernelHeuristic
@@ -193,26 +175,21 @@ struct EngineDescriptor
     /// field matches is a load error.
     std::vector<std::string> knobs;
     /// Advisory execution behavior this engine's kernels exhibit, as
-    /// `hipdnnBackendBehaviorNote_t` values (BehaviorNote.h). Reported to the caller
-    /// through EngineDetails like any other engine's, so a descriptor-backed engine is
-    /// not silently noteless: the transport already carries these and every hand-written
-    /// engine populates them.
+    /// `hipdnnBackendBehaviorNote_t` values (BehaviorNote.h), reported through
+    /// EngineDetails like any other engine's.
     ///
-    /// Held as int32 rather than a typed enum because the transport is deliberately
-    /// int32, so a newer descriptor can carry a note value an older backend does not
-    /// know without truncating it.
+    /// Held as int32 rather than a typed enum because the transport is int32, so a
+    /// newer descriptor can carry a note value an older backend does not know without
+    /// truncating it.
     std::vector<int32_t> behaviorNotes;
 };
 
 /// Which inputs a matcher reads, which decides how often it runs and what its failure
-/// prunes (RFC 0017 §5, "applicability is a cheap, shared-matcher pass").
+/// prunes (RFC 0017 §5).
 ///
-/// Authored per matcher here, which is provisional. RFC 0017 §5 puts the split inside a
-/// single matcher's criteria tree rather than across matchers: `conv.tile_fit` mixes
-/// graph-bound dims and `$kernel.*` in one `and`, and the `$kernel.*` clauses are the
-/// ones re-evaluated per candidate. Once the criteria language lands this becomes a
-/// derived property, computed from whether a matcher's expression references `$kernel.*`,
-/// and a matcher with mixed clauses is evaluated per clause rather than classified whole.
+/// Authored per matcher here, which is provisional: once the criteria language lands
+/// this becomes a derived property, computed from whether a matcher's expression
+/// references `$kernel.*`.
 enum class MatchScope
 {
     /// Reads only graph and device facts, so it runs once per (graph, device) and its
@@ -248,18 +225,14 @@ struct DispatchDescriptor
     std::string dispatchSymbol;
 };
 
-/// Which adapter loads and prepares one kernel's code, given its source's payload. The
-/// adapter dispatch point RFC 0017 §9.1 describes: a kpack-symbol lookup, an hsaco file
-/// load, and a rocke-builder invocation are structurally different operations, not
-/// three interpretations shoehorned into the same two strings.
+/// Which adapter loads and prepares one kernel's code, given its source's payload (RFC
+/// 0017 §9.1's adapter dispatch point).
 enum class KernelSourceKind
 {
-    /// A named source file plus an entry point, compiled at plan-build time. What the
-    /// embedded-source path this engine's dispatch handler currently compiles through
-    /// needs, and the only kind this POC implements.
+    /// A named source file plus an entry point, compiled at plan-build time. The only
+    /// kind this POC implements.
     EMBEDDED_SOURCE,
-    /// A prebuilt kpack library plus the symbol to resolve inside it. Every shipped AOT
-    /// kernel converges on this kind at install time. No adapter yet.
+    /// A prebuilt kpack library plus the symbol to resolve inside it. No adapter yet.
     KPACK_SYMBOL,
     /// A standalone `.hsaco` code-object file. No adapter yet.
     HSACO_FILE,
@@ -268,20 +241,14 @@ enum class KernelSourceKind
 };
 
 /// UKD's source: where a kernel's code comes from, as a tagged union over RFC 0017
-/// §7's source kinds rather than two bare strings. Shipped as two strings, the first
-/// loader to need a second kind would have had to invent its own discriminator and then
-/// migrate every existing descriptor to use it; the discriminator exists from the start
-/// instead.
-///
-/// Only `EMBEDDED_SOURCE` is implemented; the others exist as enum values with a
-/// comment because a descriptor states which kind it carries independently of whether
+/// §7's source kinds. Only `EMBEDDED_SOURCE` is implemented; the others exist as enum
+/// values, since a descriptor states which kind it carries independently of whether
 /// this provider can load that kind yet.
 struct KernelSource
 {
     KernelSourceKind kind = KernelSourceKind::EMBEDDED_SOURCE;
     /// `EMBEDDED_SOURCE`: the source file name. Unused, and left empty, by every other
-    /// kind until each grows its own payload shape (a kpack library plus symbol, an
-    /// hsaco path, a builder name plus build values).
+    /// kind until each grows its own payload shape.
     std::string sourceFile;
     /// `EMBEDDED_SOURCE`: the entry point within `sourceFile`. Unused by every other
     /// kind, for the same reason as `sourceFile` above.

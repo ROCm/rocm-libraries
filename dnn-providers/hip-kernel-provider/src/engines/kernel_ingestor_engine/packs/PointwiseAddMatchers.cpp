@@ -34,22 +34,18 @@ const data_objects::TensorAttributes* findTensor(const MatchContext& context, in
     return it == tensors.end() ? nullptr : it->second;
 }
 
-/// The tensor ranks this pack accepts. Not a property of the kernel, which indexes one
-/// element and is indifferent to rank, but of the dispatch path: the provider's compile
-/// options derive layout from the tensor and reject anything outside this range.
-///
-/// Matching has to respect that. Accepting a graph commits the engine to producing a
-/// launchable kernel for it, so a matcher that admits a rank dispatch cannot serve turns
-/// a free decline into a failed plan build the caller pays for.
+/// The tensor ranks this pack accepts. Not a kernel property (it indexes one element
+/// regardless of rank) but a dispatch-path one: compile options derive layout from the
+/// tensor and reject anything outside this range, so a matcher that admits a rank
+/// dispatch cannot serve turns a free decline into a failed plan build.
 constexpr uint32_t MIN_SUPPORTED_RANK = 4;
 constexpr uint32_t MAX_SUPPORTED_RANK = 5;
 
 /// True when the tensor's stride order is one the dispatch path can classify.
 ///
-/// The same constraint as the rank bound above, from the same function: compile options
-/// derive a layout from the strides and throw on any order that is neither channel-first
-/// nor channel-last. A one-element tensor can still carry an unclassifiable order when it
-/// views into a larger buffer, so element count does not imply a usable layout.
+/// Compile options derive a layout from the strides and throw on any order that is
+/// neither channel-first nor channel-last; a one-element tensor viewing into a larger
+/// buffer can still carry an unclassifiable order.
 bool hasSupportedLayout(const data_objects::TensorAttributes& tensor)
 {
     try
@@ -60,8 +56,7 @@ bool hasSupportedLayout(const data_objects::TensorAttributes& tensor)
     catch(const hipdnn_plugin_sdk::HipdnnPluginException&)
     {
         // Asking the classifier directly keeps this gate and the dispatch path on one
-        // definition of "supported layout"; restating its rules here would let the two
-        // drift, which is exactly how the rank half of this constraint got missed.
+        // definition of "supported layout" rather than two that can drift.
         return false;
     }
 }
@@ -89,8 +84,8 @@ bool isSingleElement(const data_objects::TensorAttributes& tensor)
     return hasSupportedLayout(tensor);
 }
 
-/// The graph's element type, taken from the first input. The matcher below requires
-/// every operand to agree, so any of them would answer the same.
+/// The graph's element type, from the first input; the matcher below requires every
+/// operand to agree, so any of them would answer the same.
 std::optional<data_objects::DataType> graphDataType(const MatchContext& context)
 {
     if(context.graph.nodeCount() != 1)

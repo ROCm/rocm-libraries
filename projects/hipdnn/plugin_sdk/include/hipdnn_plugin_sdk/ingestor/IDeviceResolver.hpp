@@ -14,20 +14,12 @@ namespace hipdnn_plugin_sdk::ingestor
 /**
  * @brief Answers which device a call is for, from the handle that carries it.
  *
- * An engine is shared by every handle in the process, and a handle can be bound to any
- * device, so the device a query concerns is a property of the call rather than of the
- * engine. Resolving it per call is what lets one cache serve many handles correctly:
- * two handles on one device share a catalog entry, and one handle rebound to another
- * device does not.
+ * An engine is shared by every handle in the process, and a handle can be rebound to a
+ * different device between calls, so the device a query concerns is resolved per call
+ * rather than captured once at engine construction.
  *
- * Capturing the device once when the engine is built would be wrong in exactly the case
- * this system is meant to handle. The catalog is keyed on (graph, device) because
- * applicability genuinely differs per device; keying every entry to whichever device
- * happened to be current at construction would let one device's catalog answer for
- * another. That is a wrong answer, not merely a missed cache hit.
- *
- * How a handle names its device is provider-specific, which is why this is an interface
- * rather than a call the SDK makes directly.
+ * How a handle names its device is provider-specific, which is why this is an
+ * interface rather than a call the SDK makes directly.
  */
 template <typename THandle>
 class IDeviceResolver

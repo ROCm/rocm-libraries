@@ -74,8 +74,7 @@ std::string elementTypeFor(const KernelDefinition& kernel)
         return "_Float16";
     }
 
-    // Unreachable via matching, which admits only dtypes this pack declares. Reported
-    // rather than defaulted: a silent fallback would compile the wrong kernel.
+    // Unreachable via matching, which admits only dtypes this pack declares.
     throw hipdnn_plugin_sdk::HipdnnPluginException(
         HIPDNN_PLUGIN_STATUS_BAD_PARAM,
         "kernel '" + toString(kernel.kernelId) + "' declares unsupported dtype '" + dtype + "'");
@@ -121,8 +120,7 @@ std::unique_ptr<PreparedDispatch> PointwiseAddDispatchHandler::prepare(
     options.add("HIP_PLUGIN_POINTWISE_ADD_TYPE", elementTypeFor(kernel));
     options.add("HIP_PLUGIN_POINTWISE_ADD_BLOCK_SIZE", blockSize);
 
-    // The only KernelSourceKind this dispatch handler knows how to load; see
-    // KernelSource's doc for the kinds a future adapter will add.
+    // The only KernelSourceKind this dispatch handler knows how to load.
     auto program = _kernelCompiler.compile(kernel.source.sourceFile, options);
     auto runnableKernel = program->getKernel(kernel.source.entryPoint);
 

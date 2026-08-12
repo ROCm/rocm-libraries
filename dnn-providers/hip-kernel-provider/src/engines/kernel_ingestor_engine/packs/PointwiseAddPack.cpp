@@ -23,13 +23,10 @@ using hipdnn_flatbuffers_sdk::utilities::parseUuid;
 namespace
 {
 
-// Descriptor ids. Real descriptors carry GUIDs so any author can mint one locally
-// without colliding with another's; readable names serve the same role for a pack that
-// is built in memory and never shared.
 // Descriptor ids are stable GUIDs, minted once for this pack and never regenerated:
-// they are how other descriptors name these, so changing one silently breaks a
-// cross-reference. Authored descriptors will carry the same values as text and reach
-// this form through parseUuid().
+// other descriptors name these by id, so changing one silently breaks a cross-reference.
+// Authored descriptors will carry the same values as text and reach this form through
+// parseUuid().
 const DescriptorId ENGINE_ID = parseUuid("8f1a6c30-7d24-4a0e-9b51-2c6d84f0a911");
 const DescriptorId SCHEMA_ID = parseUuid("b27e4d15-3f89-4c62-8a07-51de93b4c7a2");
 const DescriptorId HEURISTIC_ID = parseUuid("4c9b0e72-16a5-4d38-b6f4-8e20a7c15d63");
@@ -47,8 +44,7 @@ KernelDescriptor makeKernel(const DescriptorId& id,
     KernelDescriptor kernel;
     kernel.id = id;
     kernel.name = "pointwise_add." + variant;
-    // The only KernelSourceKind this POC implements; see KernelSource's doc for what
-    // the other kinds converge on once a loader ships them.
+    // The only KernelSourceKind this POC implements; see KernelSource's doc for the others.
     kernel.source.sourceFile = "PointwiseAdd.cpp";
     kernel.source.entryPoint = "PointwiseAdd";
     kernel.metadata = {{std::string(BLOCK_SIZE_FIELD), MetadataValue{blockSize}},
@@ -65,8 +61,8 @@ PointwiseAddDescriptorSet buildPointwiseAddDescriptorSet()
 
     set.schema.id = SCHEMA_ID;
     set.schema.name = "pointwise add variant fields";
-    // block_size defaults, so a kernel may omit it. dtype does not: every kernel bakes
-    // one, and a kernel that failed to state it would silently inherit another's.
+    // block_size defaults, so a kernel may omit it; dtype does not, since a kernel that
+    // omits it would silently inherit another's.
     set.schema.fields = {{std::string(BLOCK_SIZE_FIELD), MetadataType::INT, int64_t{64}},
                          {std::string(DTYPE_FIELD), MetadataType::STRING, std::nullopt}};
 
@@ -78,12 +74,11 @@ PointwiseAddDescriptorSet buildPointwiseAddDescriptorSet()
     set.engine.name = ENGINE_NAME;
     set.engine.heuristicId = HEURISTIC_ID;
     set.engine.metadataSchemaId = SCHEMA_ID;
-    // block_size is exposed to the caller; dtype is not, because it is pinned by the
-    // graph rather than chosen. Exposing it would offer a choice nothing can serve.
+    // block_size is exposed to the caller; dtype is not, since it is pinned by the
+    // graph rather than chosen.
     set.engine.knobs = {std::string(BLOCK_SIZE_FIELD)};
-    // True of this engine today: the dispatch handler compiles its kernel through hiprtc
-    // when the plan is built. A pack whose kernels ship prebuilt in a kpack would not
-    // declare this, so it is a property of the pack rather than of the ingestor.
+    // True of this engine today: its dispatch handler compiles through hiprtc at plan
+    // build. A pack shipping prebuilt kernels would not declare this.
     set.engine.behaviorNotes = {HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION};
 
     set.matchers = {
@@ -107,9 +102,9 @@ PointwiseAddDescriptorSet buildPointwiseAddDescriptorSet()
     pack.matcherIds = {GRAPH_MATCHER_ID, KERNEL_MATCHER_ID};
     pack.engineId = ENGINE_ID;
     pack.dispatchId = DISPATCH_ID;
-    // Three kernels, each earning its place: the two FLOAT entries differ only in block
-    // size, so ranking has an order to produce and the block_size knob has a real value
-    // set; the HALF entry is what the kernel-scoped matcher prunes on a FLOAT graph.
+    // Three kernels: the two FLOAT entries differ only in block size, giving ranking an
+    // order and the block_size knob a real value set; the HALF entry is what the
+    // kernel-scoped matcher prunes on a FLOAT graph.
     pack.kernels
         = {makeKernel(
                parseUuid("2f8c17d6-4a90-4b53-9e18-c05a63b782d4"), "f32_block64", 64, "FLOAT", 0),

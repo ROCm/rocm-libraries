@@ -37,29 +37,13 @@ inline constexpr DeviceId NO_DEVICE = -1;
 /// across serialization round trips.
 using GraphId = hipdnn_flatbuffers_sdk::utilities::UuidBytes;
 
-/// The catalog cache key. Deliberately excludes the handle: a handle is a caller-side
-/// object that can be swapped, rebound, or destroyed while a plan built through it is
-/// still live, so keying on it would tie cached work to a lifetime unrelated to that
-/// work's validity. Two handles on one device share an entry; one handle rebound to
-/// another device does not.
+/// The catalog cache key. Excludes the handle: a handle can be swapped, rebound, or
+/// destroyed while a plan built through it is still live, so keying on it would tie
+/// cached work to a lifetime unrelated to that work's validity.
 ///
-/// RFC 0017 §8.1 keys this on (engine id, graph id, device id) and §8.6 folds in a
-/// descriptor-inventory generation. Neither appears here, for different reasons:
-///
-/// - The engine id is constant within any one cache, because GenericEngine owns its
-///   state manager outright (std::unique_ptr, not shared) and the state manager owns
-///   this cache. One engine, one UED, one catalog: an entry cannot be reached from an
-///   engine other than the one that wrote it, so storing the id would only repeat a
-///   value every entry already agrees on. This is enforced by the ownership, not by
-///   convention -- a second engine cannot be handed this manager.
-/// - The generation retires cached verdicts when a discovery scan changes the pack
-///   inventory. Nothing is loaded from a file yet, so the inventory is fixed at compile
-///   time and the generation would be a constant.
-///
-/// The generation becomes a real key component once packs can be dropped in; the engine
-/// id stays out for as long as the ownership above holds. This is a struct rather than a
-/// std::pair so adding a member then does not change how the key is spelled at its use
-/// sites.
+/// RFC 0017 §8.1 also keys this on engine id and folds in a descriptor-inventory
+/// generation (§8.6); both are constant today (one engine owns one manager, and the
+/// pack set is fixed at compile time) so they are omitted until that changes.
 struct CatalogKey
 {
     GraphId graphId;
@@ -76,9 +60,8 @@ struct CatalogKeyHash
 {
     size_t operator()(const CatalogKey& key) const noexcept
     {
-        // The graph id is already a well-distributed 128-bit value (a UUID v4), so
-        // folding its bytes and mixing the device ordinal in is sufficient here; this
-        // keys an in-process cache and is never persisted or exposed.
+        // The graph id is already a well-distributed UUID v4; folding its bytes and
+        // mixing in the device ordinal is enough for an in-process cache.
         size_t hash = 1469598103934665603ULL;
         for(const uint8_t byte : key.graphId)
         {
@@ -93,28 +76,15 @@ struct CatalogKeyHash
 /**
  * @brief What matching resolved about one graph, carried forward to dispatch.
  *
- * RFC 0017 §8.5: "Matching does double duty: it decides the kernel applies, and it binds
- * the fields the launch will use", and §8.1 keeps that state alongside the catalog so
- * "nothing is re-matched" once a graph has been matched. A dispatch formula reading
- * `$q.uid` is reading a value the matcher already resolved, not re-deriving it from the
- * graph with a second notion of what the graph looks like.
- *
- * Keyed by the token name a descriptor would write. Values are MetadataValue, the same
- * type a KMD field holds: RFC 0017's criteria language puts a graph fact and a kernel
- * fact on either side of one operator (`divisible($q.head_size, $kernel.tile_m)`), so
- * an interpreter needs one value type spanning both namespaces or its first act is a
- * refactor. That is also why the list alternative matters on this side and not only on
- * the kernel side: `stride_order`, the worked example for INT_LIST, is a graph fact.
+ * Keyed by the token name a descriptor would write; values are MetadataValue, the same
+ * type a KMD field holds, so a criteria expression can compare a graph fact and a kernel
+ * fact with one operator (RFC 0017 §8.5, §8.1).
  */
 using BoundTokens = std::unordered_map<std::string, MetadataValue>;
 
-/// Reads @p token from @p bound as an integer.
-///
-/// Bound tokens are frequently tensor uids and dimensions, so the int64 read is the
-/// common one and is worth naming rather than open-coding a std::get_if at every call
-/// site. Returns nullopt when the token is absent OR holds a non-integer alternative:
-/// a caller that asked for an integer cannot use a list, and conflating "not bound"
-/// with "bound to something else" would let a type confusion read as a missing token.
+/// Reads @p token from @p bound as an integer. Returns nullopt when absent or bound to
+/// a non-integer value: conflating "not bound" with "bound to something else" would let
+/// a type confusion read as a missing token.
 inline std::optional<int64_t> tryGetBoundInt(const BoundTokens& bound, std::string_view token)
 {
     const auto it = bound.find(std::string(token));
@@ -131,16 +101,12 @@ inline std::optional<int64_t> tryGetBoundInt(const BoundTokens& bound, std::stri
 }
 
 /**
- * @brief The bound token state a matcher, scorer, or dispatch formula reads.
+ * @brief The bound token state a matcher, scorer, or dispatch formula reads: `$graph.*`
+ *        and `$device.*`. `$kernel.*` arrives separately as a KernelDefinition, evaluated
+ *        per candidate rather than once per (graph, device).
  *
- * RFC 0017 names five expression namespaces; this binds the two that do not
- * require a matcher to have run first — `$graph.*` (and the tensor and node fields
- * reached through it) and `$device.*`. The third, `$kernel.*`, arrives separately as a
- * KernelDefinition, because a kernel-scoped check is evaluated once per candidate while
- * this context is bound once per (graph, device).
- *
- * Holds references, not copies: it is built on the stack for the duration of one
- * matching pass and never outlives the graph it names.
+ * Holds references, not copies: built on the stack for one matching pass, and must not
+ * outlive the graph it names.
  */
 struct MatchContext
 {
@@ -151,14 +117,11 @@ struct MatchContext
 
 /// @brief The graph's stable identity, or nullopt when it has none.
 ///
-/// Absent on legacy graphs and on locally constructed graphs that were never finalized.
-/// Callers must treat that as "cannot cache", never as an error: matching a graph with
-/// no id still produces the right answer, it just cannot be memoized (there is no key to
-/// memoize it under, and inventing one would alias unrelated graphs).
+/// Absent on legacy or never-finalized graphs. Callers must treat that as "cannot
+/// cache", not an error: matching still produces the right answer, just unmemoized.
 ///
-/// A present field is not enough: a nil or non-v4 id (real ids are always v4) is not
-/// guaranteed unique, so it reads as "no identity" too. Cache-key uniqueness therefore
-/// depends on isUuidV4()'s exact predicate; loosening it reopens this aliasing.
+/// A present but non-v4 id also reads as "no identity" — uniqueness is not otherwise
+/// guaranteed, so cache-key correctness depends on isUuidV4()'s exact predicate.
 inline std::optional<GraphId>
     tryGetGraphId(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph)
 {
