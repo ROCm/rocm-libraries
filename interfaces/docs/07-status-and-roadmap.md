@@ -15,12 +15,14 @@ which optional linkers and sanitizers are present, so cite names rather than a c
 | --- | --- | --- |
 | Provider single-symbol export; no libstdc++ leak | `exports` | `a929517` |
 | Named ELF version nodes on loader + provider | `exports` | `ba093ad` |
+| `exports` node-aware check extended to the narrow loader shadow (`rocblas_narrow_loader_shadow`) | `exports` | `a741064` |
+| `exports` provider list auto-derived from a global registry, so a provider added via `add_recording_provider` cannot silently escape the check | `exports` | `61f8dc9` |
 | Versioned-provider co-residency (each handle resolves its own version node, cross-version lookup nil) and the bare-lookup interposition hazard reproduced when the version node is removed | `abi03_coresidency`, `abi03_interpose_hazard` | `8832c9a` |
 | Core versioned-symbol invariants (ordering, `-Bsymbolic` genuineness via a `DT_FLAGS` `DF_SYMBOLIC` assertion against a plain-DSO control, dup-def guard (linker-observed; strengthening tracked), ldconfig stub) | `abi04_three_line_order`, `abi04_bsymbolic_inert`, `abi04_multiple_default_def_rejected`, `abi04_ldconfig_stub_preserved` | `897293e`, `-Bsymbolic` discrimination `215ede4` |
 | Same-node negative control for the ordering proof: three DSOs on the shared `ROCBLAS_ABI_6` node with `ABI_5`/`ABI_7` lookups nil everywhere | `abi04_same_node_negative` (+ `_lld`) | `215ede4` |
-| Same invariants under lld | the four `abi04_*_lld` | `01c14eb` |
+| Same invariants under lld | the `abi04_*_lld` mirrors | `01c14eb` |
 | Real `sobol32` data-object versioning | `abi06_data_version_node` | `04ade2b` |
-| Version node survives an ASan build | `abi04_asan_version_node_survives` | `0081ba5` |
+| Version node survives an ASan build, asserted per-symbol (`rocblas_sgemm@@ROCBLAS_ABI_6`) with a genuine-ASan nodeless negative control | `abi04_asan_version_node_survives` | `0081ba5`, tightened `c5031f0` |
 | C++ mangled + RTTI versioning | `abi05_cpp_mangled_version_node` (+ `_lld`) | `769f4aa`, tightened `f681132` |
 | GCC-LTO-plus-lld build refused at configure | `lto_linker_guard_rejects_gnu_lld` + 3 accepts | `3e56e73` |
 | Loader/registry concurrency under TSan | `ops04_concurrency` | `df8512b` |
@@ -45,22 +47,11 @@ under `ctest`; wiring the drift check into the test suite is listed under COMMIT
   (`tests/check_multiple_default_def.cmake`), so it observes the linker rather than forcing a
   genuine two-`@@` DSO to be rejected. Construct a real two-default-definition input and assert
   the FATAL fires.
-- **Tighten the ASan node test.** `abi04_asan_version_node_survives` currently only
-  substring-matches `ROCBLAS_ABI_6` (satisfied by the absolute `ROCBLAS_ABI_6@@ROCBLAS_ABI_6`
-  node symbol); change it to assert `rocblas_sgemm@@ROCBLAS_ABI_6` and add a nodeless negative
-  control, matching 6a/6c/6e.
-- **Extend the `exports` node-aware check to `rocblas_narrow_loader_shadow`.** The static
-  11-symbol `loader/rocblas_loader.map` target is currently covered only by the behavioral
-  `rocm_interfaces.rocblas_narrow_shadow` test, not by the `exports` version-node assertion.
 - **Table-ABI prefix negotiation.** Today only the response `dispatch_table_size` floor is
   checked. Reading the dispatch table's own `abi_header`, honoring `abi_minor`, distinguishing
   a required prefix from an optional appended tail, and a non-vacuous ctest proving a larger
   table's prefix is accepted while an old provider missing a newly required entry is rejected,
   are not yet implemented.
-- **Auto-derive the exports-test provider list.** Today `tests/CMakeLists.txt` and
-  `tests/check_exports.cmake` carry a duplicated hard-coded list of provider DSOs; a provider
-  added via `add_recording_provider` is unchecked until both are edited by hand. Generate the
-  list so every registered provider is inspected automatically.
 
 ## ASPIRATIONAL (direction, not commitment)
 

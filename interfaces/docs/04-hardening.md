@@ -148,8 +148,7 @@ The nodes work for ordinary function symbols (steps 2-3). The remaining risk is 
 quietly fail on some *other* shape of symbol. This is the ABI-01/02 proof suite. Each test
 follows the non-vacuity recipe in
 [03-abi-and-versioning-contract.md](03-abi-and-versioning-contract.md): positive, negative
-control, genuineness, except the ASan case (6d), whose node assertion is a substring match
-with no negative control (see 6d).
+control, genuineness.
 
 ### 6a. The core invariants (commit `897293e`)
 
@@ -205,20 +204,17 @@ fallback. The registered `abi04_*_lld` tests are gated on the configure-time
 `dlsym`/`dlvsym` reach the exact node and that the first element is `0x80000000`; the
 wrong-node lookup returns null.
 
-### 6d. A build under AddressSanitizer (commit `0081ba5`)
+### 6d. A build under AddressSanitizer (commit `0081ba5`, tightened in `c5031f0`)
 
 **Threat.** ASan rewrites the binary; the node could be lost in the process.
-**Proof (partial - node definition, not per-symbol binding).**
-`rocm_interfaces.abi04_asan_version_node_survives` builds an `-fsanitize=address` DSO (via
-`ROCM_INTERFACES_SANITIZE=address`), asserts the DSO carries `__asan_` symbols (genuineness, so
-a no-ASan fallback cannot pass it), and asserts the string `ROCBLAS_ABI_6` appears in
-`nm -D --with-symbol-versions` output. That second assertion is a loose substring match: the
-linker emits an absolute node symbol `ROCBLAS_ABI_6@@ROCBLAS_ABI_6` whenever the version node
-is defined, so the match passes on the node metadata alone and does not prove the `@@` default
-binding on `rocblas_sgemm` the way 6a/6c/6e do, nor distinguish `@@` (default) from `@`
-(non-default). Unlike the other node tests it has no negative control. Tightening it to assert
-`rocblas_sgemm@@ROCBLAS_ABI_6` explicitly is tracked in
-[07-status-and-roadmap.md](07-status-and-roadmap.md).
+**Proof.** `rocm_interfaces.abi04_asan_version_node_survives` builds an `-fsanitize=address` DSO
+(via `ROCM_INTERFACES_SANITIZE=address`), asserts the DSO carries `__asan_` symbols
+(genuineness, so a no-ASan fallback cannot pass it), and asserts `rocblas_sgemm@@ROCBLAS_ABI_6`
+appears in `nm -D --with-symbol-versions` output - the per-symbol `@@` default binding, not the
+looser substring on the absolute node symbol. Its negative control is a second genuine ASan
+build (also carrying `__asan_` and exporting `rocblas_sgemm`) linked with a nodeless version
+script; the test fails if that control shows any `ROCBLAS_ABI_6` node, so the positive
+assertion is discriminating in the same way as 6a/6c/6e.
 
 ### 6e. C++ mangled names and RTTI (commit `769f4aa`, tightened in `f681132`)
 
@@ -258,7 +254,7 @@ is stricter.
 | 6a core | node fails on ordering / same-node control / `-Bsymbolic` genuineness / dup-def / ldconfig | `abi04_three_line_order`, `abi04_same_node_negative`, `abi04_bsymbolic_inert`, `abi04_multiple_default_def_rejected`, `abi04_ldconfig_stub_preserved` |
 | 6b lld | node fails under the other linker | the five `abi04_*_lld` |
 | 6c data | node fails on a data object | `abi06_data_version_node` |
-| 6d ASan | node lost under ASan | `abi04_asan_version_node_survives` (node-definition + `__asan_` only; see 6d) |
+| 6d ASan | node lost under ASan | `abi04_asan_version_node_survives` (`rocblas_sgemm@@ROCBLAS_ABI_6` + `__asan_` + nodeless negative control) |
 | 6e C++/RTTI | node misses mangled + RTTI symbols | `abi05_cpp_mangled_version_node` (+ `_lld`) |
 
 To add a new proof of your own, follow the recipe in [05-extending.md](05-extending.md).
