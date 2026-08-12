@@ -8,6 +8,27 @@ import numpy as np
 import hipdnn_frontend as hipdnn
 
 
+_stub_engine_active = False
+
+
+def set_stub_engine_active(value):
+    """Record whether conftest loaded the ABSOLUTE-mode test stub.
+
+    The flag lives here rather than in ``conftest.py`` because a conftest is not
+    reliably a single module object: under ``--import-mode=importlib`` or a
+    different rootdir, ``from .conftest import ...`` can hand a test module a
+    second copy whose flag is still False, silently un-skipping tests that need
+    a real engine. Every test module already imports this one.
+    """
+    global _stub_engine_active
+    _stub_engine_active = value
+
+
+def stub_engine_active():
+    """Return True once the ABSOLUTE-mode test stub has replaced engine discovery."""
+    return _stub_engine_active
+
+
 def create_float_graph():
     """Create a hipDNN Graph configured with FLOAT data types."""
     graph = hipdnn.Graph()

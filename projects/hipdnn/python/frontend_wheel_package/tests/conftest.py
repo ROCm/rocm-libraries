@@ -15,6 +15,8 @@ import pytest
 
 import hipdnn_frontend as hipdnn
 
+from . import helpers
+
 
 @functools.lru_cache(maxsize=1)
 def _gpu_available():
@@ -33,7 +35,6 @@ def _gpu_available():
     return True
 
 
-_stub_active = False
 _attempted_plugin_path = None
 
 
@@ -61,28 +62,32 @@ def _load_test_good_plugin():
     The stub claims every graph and its execute() is a no-op, giving stubbed
     execution for every op; numeric correctness is the C++ tests' job. ABSOLUTE
     mode ensures it is the only engine loaded, so no test silently runs against
-    a real provider -- the few that need one check ``stub_engine_active()`` and
-    skip themselves.
+    a real provider -- the few that need one check
+    ``helpers.stub_engine_active()`` and skip themselves.
 
-    The path is resolved from the ROCm SDK; HIPDNN_TEST_GOOD_PLUGIN_PATH
-    overrides it for out-of-tree builds. Must run before any handle is created,
-    hence pytest_configure rather than a fixture.
+    An explicitly configured HIPDNN_TEST_GOOD_PLUGIN_PATH that does not exist is
+    a hard error: the caller asked for a specific plugin and did not get it, and
+    everything downstream would fail in confusing ways. A missing plugin at the
+    derived default is not fatal here, because the no-GPU tier needs no engine
+    at all; ``_require_stub_engine`` fails the gpu tier instead.
+
+    Must run before any handle is created, hence pytest_configure not a fixture.
     """
-    global _stub_active, _attempted_plugin_path
-    _attempted_plugin_path = (
-        os.environ.get("HIPDNN_TEST_GOOD_PLUGIN_PATH") or _default_plugin_path()
-    )
+    global _attempted_plugin_path
+    override = os.environ.get("HIPDNN_TEST_GOOD_PLUGIN_PATH")
+    _attempted_plugin_path = override or _default_plugin_path()
+    if override and not os.path.isfile(override):
+        raise pytest.UsageError(
+            f"HIPDNN_TEST_GOOD_PLUGIN_PATH={override!r} is not a file. Point it "
+            "at the superbuild's installed test_good_plugin, or unset it to "
+            "resolve the plugin from ROCM_PATH."
+        )
     if not _attempted_plugin_path or not os.path.isfile(_attempted_plugin_path):
         return
     hipdnn.set_engine_plugin_paths(
         [_attempted_plugin_path], hipdnn.PluginLoadingMode.ABSOLUTE
     )
-    _stub_active = True
-
-
-def stub_engine_active() -> bool:
-    """Return True once the ABSOLUTE-mode test stub has replaced real engine discovery."""
-    return _stub_active
+    helpers.set_stub_engine_active(True)
 
 
 @pytest.fixture(autouse=True)
@@ -94,7 +99,7 @@ def _require_stub_engine(request):
     confusing "no compatible engine" deep inside build_all_plans, or silently
     runs the suite against whatever real provider happens to be installed.
     """
-    if "gpu" in request.keywords and not _stub_active:
+    if "gpu" in request.keywords and not helpers.stub_engine_active():
         pytest.fail(
             f"test_good_plugin was not loaded (looked at {_attempted_plugin_path!r}). "
             "The gpu tier needs the superbuild's stub engine: build and "
