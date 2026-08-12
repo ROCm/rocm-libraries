@@ -47,6 +47,51 @@ import gemm_utils as _gu
 
 
 # ============================================================================
+# Old-TE IsSupportedArgument parity: reject odd-per-wave-repeat / 32-wide warp
+# ============================================================================
+#
+# The batched_gemm default_config sweeps tile_m/tile_n = 64/128/192/256 across
+# BOTH the ``cshuffle`` and ``default`` epilogues. The odd (>1) per-wave repeat
+# paired with a 32-wide warp tile in that dimension -- e.g. tile=192 / wave=2 /
+# warp_tile=32 => repeat = 192/(2*32) = 3 -- mis-maps the C accumulator and
+# returns garbage (issue #9684). Old Tile-Engine's batched kernel refuses these
+# configs at launch ("Arguments not supported" from IsSupportedArgument), so it
+# never runs them; the bridge, however, would silently codegen and ship them.
+#
+# gemm_utils.expand_sweep already drops this signature for the ``cshuffle``
+# epilogue via ``_cshuffle_store_ok`` -- but it exempts the ``default`` epilogue.
+# In the batched sweep the SAME garbage occurs with the ``default`` epilogue
+# (~420 distinct geometry stems survive), so we re-apply the identical
+# odd-repeat/wt32 predicate here, epilogue-agnostically, before any .so is
+# generated. This mirrors Old-TE's reject set EXACTLY (even repeats such as 2/4
+# and MRepeat=3 with a 16-wide warp tile remain valid, so 64/128/256 tiles and
+# the non-32 warp tiles are NOT over-pruned).
+def _repeat_ok(
+    tile_m: int,
+    tile_n: int,
+    wave_m: int,
+    wave_n: int,
+    warp_tile_m: int,
+    warp_tile_n: int,
+) -> bool:
+    """Return False when either the M or N dimension has an odd per-wave repeat
+    (>1) with a 32-wide warp tile -- the batched garbage signature Old-TE rejects
+    (independent of epilogue). Returns True (allowed) for every other geometry."""
+
+    def _dim_bad(tile: int, wave: int, warp_tile: int) -> bool:
+        div = wave * warp_tile
+        if div <= 0 or tile % div != 0:
+            # Uneven split is already dropped upstream; treat as "not this bug".
+            return False
+        repeat = tile // div
+        return repeat > 1 and repeat % 2 == 1 and warp_tile == 32
+
+    return not (
+        _dim_bad(tile_m, wave_m, warp_tile_m) or _dim_bad(tile_n, wave_n, warp_tile_n)
+    )
+
+
+# ============================================================================
 # GPU architecture resolution (never default to gfx942)
 # ============================================================================
 
@@ -754,6 +799,21 @@ def expand_sweep(
     out: List[BatchedGemmKernelConfig] = []
     seen: set = set()
     for b in base_configs:
+        # Old-TE IsSupportedArgument parity gate (issue #9684): drop the
+        # odd-per-wave-repeat / 32-wide-warp-tile signature (e.g. tile=192 /
+        # wave=2 / warp_tile=32 => repeat=3) that returns garbage. gemm_utils
+        # only gates this for the cshuffle epilogue; the batched sweep also
+        # emits it with the default epilogue, so re-apply it here regardless of
+        # epilogue -- before any .so is generated. See _repeat_ok for scope.
+        if not _repeat_ok(
+            b.tile_m,
+            b.tile_n,
+            b.wave_m,
+            b.wave_n,
+            b.warp_tile_m,
+            b.warp_tile_n,
+        ):
+            continue
         c = BatchedGemmKernelConfig(
             dtype_a=b.dtype_a,
             dtype_b=b.dtype_b,

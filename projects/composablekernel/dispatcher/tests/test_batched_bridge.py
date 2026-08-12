@@ -40,6 +40,7 @@ from batched_gemm_utils import (  # noqa: E402
     BatchedGemmProblem,
     _C_SIZEOF,
     _get_arch,
+    _repeat_ok,
     _resolve_arch,
     expand_sweep,
 )
@@ -351,6 +352,59 @@ class TestBatchedCDtypeSizeMap(unittest.TestCase):
                 np.dtype(_C_NP[out_dtype]).itemsize, nbytes,
                 f"{out_dtype}: numpy itemsize != declared sizeof(CDataType)",
             )
+
+
+class TestBatchedRepeatGate(unittest.TestCase):
+    """Old-TE IsSupportedArgument parity: reject the odd-per-wave-repeat /
+    32-wide-warp-tile signature (issue #9684).
+
+    The batched default_config sweeps tile dims 64/128/192/256 across BOTH the
+    cshuffle and default epilogues. A 192 tile with wave=2 / warp_tile=32 gives
+    an odd MRepeat = 192/(2*32) = 3, which the ck_tile batched kernel mis-stores
+    and returns garbage. Old-TE's batched kernel refuses these at launch
+    ("Arguments not supported"); gemm_utils only gates them for the cshuffle
+    epilogue, so the batched bridge re-applies the identical rule here regardless
+    of epilogue. The gate must drop the 192/wt32 case while leaving 128/256 tiles
+    -- and the valid 192 geometries (even repeat, or a 16-wide warp tile) --
+    untouched, so it must not over-prune.
+    """
+
+    def test_rejects_192_odd_repeat_wt32_in_m(self):
+        # tile_m=192 / wave_m=2 / warp_tile_m=32 => MRepeat=3 (odd, >1) + wt32.
+        self.assertFalse(
+            _repeat_ok(192, 128, 2, 2, 32, 32),
+            "192/wave2/wt32 (MRepeat=3) must be rejected (Old-TE reject set)",
+        )
+
+    def test_rejects_192_odd_repeat_wt32_in_n(self):
+        self.assertFalse(
+            _repeat_ok(128, 192, 2, 2, 32, 32),
+            "N-dim 192/wave2/wt32 (NRepeat=3) must be rejected",
+        )
+
+    def test_accepts_128_tile(self):
+        # tile=128 / wave=2 / wt=32 => repeat=2 (even) -- valid on both dims.
+        self.assertTrue(_repeat_ok(128, 128, 2, 2, 32, 32))
+
+    def test_accepts_256_tile(self):
+        # tile=256 / wave=2 / wt=32 => repeat=4 (even) -- valid.
+        self.assertTrue(_repeat_ok(256, 256, 2, 2, 32, 32))
+
+    def test_accepts_192_with_16_wide_warp_tile(self):
+        # 192 / wave=4 / wt=16 => repeat=3 (odd) but wt!=32 -> GPU-verified OK.
+        self.assertTrue(
+            _repeat_ok(192, 192, 4, 4, 16, 16),
+            "odd repeat with a 16-wide warp tile is valid; must not be pruned",
+        )
+
+    def test_accepts_192_even_repeat(self):
+        # 192 / wave=1 / wt=32 => repeat=6 (even) -- valid.
+        self.assertTrue(_repeat_ok(192, 192, 1, 1, 32, 32))
+
+    def test_uneven_split_is_not_flagged_here(self):
+        # tile % (wave*wt) != 0 is dropped by the upstream tile/CShuffle gate;
+        # this predicate treats it as "not this bug" (returns True).
+        self.assertTrue(_repeat_ok(192, 192, 4, 4, 32, 32))
 
 
 if __name__ == "__main__":
