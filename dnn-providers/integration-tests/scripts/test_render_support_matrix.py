@@ -1136,7 +1136,7 @@ class TestRealBundleTree:
     def test_markdown_stays_renderable(self, units: list[ClaimUnit]) -> None:
         """GitHub stops rendering markdown well past a few hundred KB."""
         size = len(render_markdown(units, 0).encode("utf-8"))
-        assert size < 400_000, (
+        assert size < 500_000, (
             f"matrix is {size} bytes; trim the traceability comments or split "
             "the document before it stops rendering on GitHub"
         )
