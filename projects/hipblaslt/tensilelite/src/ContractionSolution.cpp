@@ -868,47 +868,52 @@ namespace TensileLite
                 idx++;
             }
         }
-        bool singleWSD = false;
-        if(resolvedGlobalAccumulation == 1
-           && (problemType.computeType != problemType.dType
-               || problemType.activationType != ActivationType::None))
-            singleWSD = true;
-        // Additional check for General Batched GEMM until GSU and StreamK are supported
-        // in General Batched GEMM
-        if(gsu > 1 && sizeMapping.streamK == 0
-           && ((singleWSD || resolvedGlobalAccumulation == 2)
-               || (resolvedGlobalAccumulation == 3)))
+
+        if(internalArgsSupport.version < 3)
         {
-            args.template append<void const*>("ws_d", (uint8_t*)inputs.ws + workspaceOffsetInByte);
-            if(resolvedGlobalAccumulation == 3)
-            {
-                args.template append<void const*>("c", inputs.c);
-            }
-            else
-            {
-                args.template append<void const*>("ws_c",
-                                                  (uint8_t*)inputs.ws + workspaceOffsetInByte);
-            }
-        }
-        else if(problemType.stridedBatched)
-        {
-            if(sizeMapping.streamK > 0 && sk.reduction == origami::reduction_t::parallel)
+            bool singleWSD = false;
+            if(resolvedGlobalAccumulation == 1
+               && (problemType.computeType != problemType.dType
+                   || problemType.activationType != ActivationType::None))
+                singleWSD = true;
+            // Additional check for General Batched GEMM until GSU and StreamK are supported
+            // in General Batched GEMM
+            if(gsu > 1 && sizeMapping.streamK == 0
+               && ((singleWSD || resolvedGlobalAccumulation == 2)
+                   || (resolvedGlobalAccumulation == 3)))
             {
                 args.template append<void const*>("ws_d",
                                                   (uint8_t*)inputs.ws + workspaceOffsetInByte);
-                args.template append<void const*>("ws_c",
-                                                  (uint8_t*)inputs.ws + workspaceOffsetInByte);
+                if(resolvedGlobalAccumulation == 3)
+                {
+                    args.template append<void const*>("c", inputs.c);
+                }
+                else
+                {
+                    args.template append<void const*>("ws_c",
+                                                      (uint8_t*)inputs.ws + workspaceOffsetInByte);
+                }
+            }
+            else if(problemType.stridedBatched)
+            {
+                if(sizeMapping.streamK > 0 && sk.reduction == origami::reduction_t::parallel)
+                {
+                    args.template append<void const*>("ws_d",
+                                                      (uint8_t*)inputs.ws + workspaceOffsetInByte);
+                    args.template append<void const*>("ws_c",
+                                                      (uint8_t*)inputs.ws + workspaceOffsetInByte);
+                }
+                else
+                {
+                    args.template append<void const*>("d", inputs.d);
+                    args.template append<void const*>("c", inputs.c);
+                }
             }
             else
             {
-                args.template append<void const*>("d", inputs.d);
-                args.template append<void const*>("c", inputs.c);
+                args.template append<void const* const*>("batchD", inputs.batchD);
+                args.template append<void const* const*>("batchC", inputs.batchC);
             }
-        }
-        else
-        {
-            args.template append<void const* const*>("batchD", inputs.batchD);
-            args.template append<void const* const*>("batchC", inputs.batchC);
         }
 
         if(problemType.stridedBatched)
@@ -928,71 +933,80 @@ namespace TensileLite
             args.template append<void const* const*>("batchB", inputs.batchB);
         }
 
-        if(problemType.sparse)
-            args.template append<unsigned char const*>("metadata", inputs.metadata);
-
-        // Additional check for General Batched GEMM until GSU and StreamK are supported
-        // in General Batched GEMM
-        //
-        // StreamKForceDPOnly (SK3 DP-first, gfx1250) always reduces via the tree path
-        // (getSKReduction returns tree, Flags == Synchronizer, never parallel) and never
-        // touches the workspace partials/fixup path, so AddressWS/AddressFlags are dead.
-        // The device kernel drops them from the SGPR define and .kd metadata, so we must
-        // not append ws/Flags here or the positional kernarg layout would corrupt the
-        // downstream (StridesD/Alpha/...) offsets. Keep appending for every other
-        // streamK>0 && atomic==0 kernel (layout unchanged).
-        if(sizeMapping.streamK > 0 && sizeMapping.streamKAtomic == 0
-           && sizeMapping.streamKForceDPOnly == 0)
+        if(internalArgsSupport.version < 3)
         {
-            // Assert hardware is not null
-            // For now grouped gemm is not supported and passes nullptr
-            TENSILE_ASSERT_EXC(hardware != nullptr);
+            if(problemType.sparse)
+                args.template append<unsigned char const*>("metadata", inputs.metadata);
 
-            // StreamK workspace + flags. Synchronizer has already been pointed
-            // at the per-stream Stream-K region by the host for this solution,
-            // which is what keeps two concurrent Stream-K kernels from clearing
-            // each other's flags.
-            args.template append<void const*>("ws", inputs.ws);
-            if(sk.reduction == origami::reduction_t::parallel)
-                args.template append<void*>("Flags", nullptr);
-            else
-                args.template append<void*>("Flags", inputs.Synchronizer);
+            // Additional check for General Batched GEMM until GSU and StreamK are supported
+            // in General Batched GEMM
+            //
+            // StreamKForceDPOnly (SK3 DP-first, gfx1250) always reduces via the tree path
+            // (getSKReduction returns tree, Flags == Synchronizer, never parallel) and never
+            // touches the workspace partials/fixup path, so AddressWS/AddressFlags are dead.
+            // The device kernel drops them from the SGPR define and .kd metadata, so we must
+            // not append ws/Flags here or the positional kernarg layout would corrupt the
+            // downstream (StridesD/Alpha/...) offsets. Keep appending for every other
+            // streamK>0 && atomic==0 kernel (layout unchanged).
+            if(sizeMapping.streamK > 0 && sizeMapping.streamKAtomic == 0
+                && sizeMapping.streamKForceDPOnly == 0)
+            {
+                // Assert hardware is not null
+                // For now grouped gemm is not supported and passes nullptr
+                TENSILE_ASSERT_EXC(hardware != nullptr);
+
+                // StreamK workspace + flags. Synchronizer has already been pointed
+                // at the per-stream Stream-K region by the host for this solution,
+                // which is what keeps two concurrent Stream-K kernels from clearing
+                // each other's flags.
+                args.template append<void const*>("ws", inputs.ws);
+                if(sk.reduction == origami::reduction_t::parallel)
+                    args.template append<void*>("Flags", nullptr);
+                else
+                    args.template append<void*>("Flags", inputs.Synchronizer);
+            }
         }
 
-        size_t startStrideCD = problemType.useInitialStridesCD ? 0 : 1;
         size_t startStrideAB = problemType.useInitialStridesAB ? 0 : 1;
+        size_t startStrideCD = problemType.useInitialStridesCD ? 0 : 1;
 
-        // Pass wsStride if it's not in MBSK mode
-        bool gsuWSStride
-            = gsu > 1 && resolvedGlobalAccumulation != 3 && sizeMapping.streamK == 0;
-        bool skWSStride = sizeMapping.streamK > 0 && sk.reduction == origami::reduction_t::parallel;
-        // Additional check for General Batched GEMM until GSU and StreamK are supported
-        // in General Batched GEMM
-        if(gsuWSStride || skWSStride)
+        if(internalArgsSupport.version < 3)
         {
-            size_t wsStride = startStrideCD ? d.sizes()[0] : 1;
-            for(size_t i = startStrideCD; i < d.dimensions(); i++)
+            // Pass wsStride if it's not in MBSK mode
+            bool gsuWSStride
+                = gsu > 1 && resolvedGlobalAccumulation != 3 && sizeMapping.streamK == 0;
+            bool skWSStride
+                = sizeMapping.streamK > 0 && sk.reduction == origami::reduction_t::parallel;
+            // Additional check for General Batched GEMM until GSU and StreamK are supported
+            // in General Batched GEMM
+            if(gsuWSStride || skWSStride)
             {
-                args.template append<uint32_t>(concatenate_if<T_Debug>("strideW_D", i), wsStride);
-                wsStride *= d.sizes()[i];
-            }
+                size_t wsStride = startStrideCD ? d.sizes()[0] : 1;
+                for(size_t i = startStrideCD; i < d.dimensions(); i++)
+                {
+                    args.template append<uint32_t>(concatenate_if<T_Debug>("strideW_D", i),
+                                                   wsStride);
+                    wsStride *= d.sizes()[i];
+                }
 
-            wsStride = startStrideCD ? d.sizes()[0] : 1;
-            for(size_t i = startStrideCD; i < c.dimensions(); i++)
+                wsStride = startStrideCD ? d.sizes()[0] : 1;
+                for(size_t i = startStrideCD; i < c.dimensions(); i++)
+                {
+                    args.template append<uint32_t>(concatenate_if<T_Debug>("strideW_C", i),
+                                                   wsStride);
+                    wsStride *= d.sizes()[i];
+                }
+            }
+            else
             {
-                args.template append<uint32_t>(concatenate_if<T_Debug>("strideW_C", i), wsStride);
-                wsStride *= d.sizes()[i];
-            }
-        }
-        else
-        {
-            for(size_t i = startStrideCD; i < d.dimensions(); i++)
-                args.template append<uint32_t>(concatenate_if<T_Debug>("strideD", i),
-                                               d.strides()[i]);
+                for(size_t i = startStrideCD; i < d.dimensions(); i++)
+                    args.template append<uint32_t>(concatenate_if<T_Debug>("strideD", i),
+                                                   d.strides()[i]);
 
-            for(size_t i = startStrideCD; i < c.dimensions(); i++)
-                args.template append<uint32_t>(concatenate_if<T_Debug>("strideC", i),
-                                               c.strides()[i]);
+                for(size_t i = startStrideCD; i < c.dimensions(); i++)
+                    args.template append<uint32_t>(concatenate_if<T_Debug>("strideC", i),
+                                                   c.strides()[i]);
+            }
         }
 
         for(size_t i = startStrideAB; i < a.dimensions(); i++)
@@ -1022,33 +1036,58 @@ namespace TensileLite
                                                metadata.strides()[i]);
         }
 
-        args.append("alpha", inputs.alpha, problem.alphaType());
-
-        if(problem.alphaType() == rocisa::DataType::Half)
-            args.append("alpha_2", inputs.alpha, problem.alphaType());
-
-        if(problemType.useBeta)
+        if(internalArgsSupport.version >= 3)
         {
-            args.append("beta", inputs.beta, problem.betaType());
-            
-            if(problem.betaType() == rocisa::DataType::Half)
-                args.append("beta_2", inputs.beta, problem.betaType());
+            if(problemType.sparse)
+                args.template append<unsigned char const*>("metadata", inputs.metadata);
+
+            // See the version < 3 branch above for why streamKForceDPOnly must not
+            // append ws/Flags. In ver3 only Flags stays here; ws is appended after
+            // alpha/beta.
+            if(sizeMapping.streamK > 0 && sizeMapping.streamKAtomic == 0
+                && sizeMapping.streamKForceDPOnly == 0)
+            {
+                // Assert hardware is not null
+                // For now grouped gemm is not supported and passes nullptr
+                TENSILE_ASSERT_EXC(hardware != nullptr);
+
+                if(sk.reduction == origami::reduction_t::parallel)
+                    args.template append<void*>("Flags", nullptr);
+                else
+                    args.template append<void*>("Flags", inputs.Synchronizer);
+            }
         }
 
-        if(sizeMapping.expertSchedulingMode > 0)
+        if(internalArgsSupport.version < 3)
         {
-            hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(hardware);
-            if(hipAMDGPU
-               && (hipAMDGPU->processor == AMDGPU::Processor::gfx1200
-                   || hipAMDGPU->processor == AMDGPU::Processor::gfx1201))
+            args.append("alpha", inputs.alpha, problem.alphaType());
+
+            if(problem.alphaType() == rocisa::DataType::Half)
+                args.append("alpha_2", inputs.alpha, problem.alphaType());
+
+            if(problemType.useBeta)
             {
-                int32_t esmRuntimeSupported = 0;
+                args.append("beta", inputs.beta, problem.betaType());
+
+                if(problem.betaType() == rocisa::DataType::Half)
+                    args.append("beta_2", inputs.beta, problem.betaType());
+            }
+
+            if(sizeMapping.expertSchedulingMode > 0)
+            {
+                hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(hardware);
+                if(hipAMDGPU
+                   && (hipAMDGPU->processor == AMDGPU::Processor::gfx1200
+                       || hipAMDGPU->processor == AMDGPU::Processor::gfx1201))
+                {
+                    int32_t esmRuntimeSupported = 0;
 #if HIP_VERSION >= 70353390
-                HIP_CHECK_EXC(hipDeviceGetAttribute(&esmRuntimeSupported,
-                                                    hipDeviceAttributeExpertSchedMode,
-                                                    hipAMDGPU->deviceId));
+                    HIP_CHECK_EXC(hipDeviceGetAttribute(&esmRuntimeSupported,
+                                                        hipDeviceAttributeExpertSchedMode,
+                                                        hipAMDGPU->deviceId));
 #endif
-                args.template append<int32_t>("ESMRuntimeSupported", esmRuntimeSupported);
+                    args.template append<int32_t>("ESMRuntimeSupported", esmRuntimeSupported);
+                }
             }
         }
 
@@ -1243,6 +1282,137 @@ namespace TensileLite
                     args.template append<uint32_t>("SKItersPerWG", split.skItersPerWG);
                     args.template append<uint32_t>("skGrid", sk.grid);
                     args.template append<uint32_t>("skTiles", split.skTiles);
+                }
+            }
+        }
+
+        if(internalArgsSupport.version >= 3)
+        {
+            args.append("alpha", inputs.alpha, problem.alphaType());
+
+            if(problem.alphaType() == rocisa::DataType::Half)
+                args.append("alpha_2", inputs.alpha, problem.alphaType());
+
+            // The beta slot is always emitted so the layout does not depend on UseBeta;
+            // the kernel gates the beta math separately. Keep the "beta" name: append()
+            // promotes small types to 32-bit only for names "alpha"/"beta", so a
+            // differently named pad would be written at the wrong size.
+            if(problemType.useBeta)
+            {
+                args.append("beta", inputs.beta, problem.betaType());
+
+                if(problem.betaType() == rocisa::DataType::Half)
+                    args.append("beta_2", inputs.beta, problem.betaType());
+            }
+            else
+            {
+                args.append("beta", 0.0f, problem.betaType());
+
+                if(problem.betaType() == rocisa::DataType::Half)
+                    args.append("beta_2", 0.0f, problem.betaType());
+            }
+
+            // ver3 places AddressWS after alpha/beta, see the StreamK block above.
+            if(sizeMapping.streamK > 0 && sizeMapping.streamKAtomic == 0
+                && sizeMapping.streamKForceDPOnly == 0)
+            {
+                args.template append<void const*>("ws", inputs.ws);
+            }
+
+            bool singleWSD = false;
+            if(resolvedGlobalAccumulation == 1
+               && (problemType.computeType != problemType.dType
+                   || problemType.activationType != ActivationType::None))
+                singleWSD = true;
+            // Additional check for General Batched GEMM until GSU and StreamK are supported
+            // in General Batched GEMM
+            if(gsu > 1 && sizeMapping.streamK == 0
+               && ((singleWSD || resolvedGlobalAccumulation == 2)
+                   || (resolvedGlobalAccumulation == 3)))
+            {
+                args.template append<void const*>("ws_d",
+                                                  (uint8_t*)inputs.ws + workspaceOffsetInByte);
+                if(resolvedGlobalAccumulation == 3)
+                {
+                    args.template append<void const*>("c", inputs.c);
+                }
+                else
+                {
+                    args.template append<void const*>("ws_c",
+                                                      (uint8_t*)inputs.ws + workspaceOffsetInByte);
+                }
+            }
+            else if(problemType.stridedBatched)
+            {
+                if(sizeMapping.streamK > 0 && sk.reduction == origami::reduction_t::parallel)
+                {
+                    args.template append<void const*>("ws_d",
+                                                      (uint8_t*)inputs.ws + workspaceOffsetInByte);
+                    args.template append<void const*>("ws_c",
+                                                      (uint8_t*)inputs.ws + workspaceOffsetInByte);
+                }
+                else
+                {
+                    args.template append<void const*>("d", inputs.d);
+                    args.template append<void const*>("c", inputs.c);
+                }
+            }
+            else
+            {
+                args.template append<void const* const*>("batchD", inputs.batchD);
+                args.template append<void const* const*>("batchC", inputs.batchC);
+            }
+
+            // Pass wsStride if it's not in MBSK mode
+            bool gsuWSStride
+                = gsu > 1 && resolvedGlobalAccumulation != 3 && sizeMapping.streamK == 0;
+            bool skWSStride
+                = sizeMapping.streamK > 0 && sk.reduction == origami::reduction_t::parallel;
+            // Additional check for General Batched GEMM until GSU and StreamK are supported
+            // in General Batched GEMM
+            if(gsuWSStride || skWSStride)
+            {
+                size_t wsStride = startStrideCD ? d.sizes()[0] : 1;
+                for(size_t i = startStrideCD; i < d.dimensions(); i++)
+                {
+                    args.template append<uint32_t>(concatenate_if<T_Debug>("strideW_D", i),
+                                                   wsStride);
+                    wsStride *= d.sizes()[i];
+                }
+
+                wsStride = startStrideCD ? d.sizes()[0] : 1;
+                for(size_t i = startStrideCD; i < c.dimensions(); i++)
+                {
+                    args.template append<uint32_t>(concatenate_if<T_Debug>("strideW_C", i),
+                                                   wsStride);
+                    wsStride *= d.sizes()[i];
+                }
+            }
+            else
+            {
+                for(size_t i = startStrideCD; i < d.dimensions(); i++)
+                    args.template append<uint32_t>(concatenate_if<T_Debug>("strideD", i),
+                                                   d.strides()[i]);
+
+                for(size_t i = startStrideCD; i < c.dimensions(); i++)
+                    args.template append<uint32_t>(concatenate_if<T_Debug>("strideC", i),
+                                                   c.strides()[i]);
+            }
+
+            if(sizeMapping.expertSchedulingMode > 0)
+            {
+                hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(hardware);
+                if(hipAMDGPU
+                   && (hipAMDGPU->processor == AMDGPU::Processor::gfx1200
+                       || hipAMDGPU->processor == AMDGPU::Processor::gfx1201))
+                {
+                    int32_t esmRuntimeSupported = 0;
+#if HIP_VERSION >= 70353390
+                    HIP_CHECK_EXC(hipDeviceGetAttribute(&esmRuntimeSupported,
+                                                        hipDeviceAttributeExpertSchedMode,
+                                                        hipAMDGPU->deviceId));
+#endif
+                    args.template append<int32_t>("ESMRuntimeSupported", esmRuntimeSupported);
                 }
             }
         }

@@ -9367,7 +9367,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # would not less than 1 reg,
     # since even if ComputeType = H, we still pass the arg as a 32-bit (concate two 16-bit)
     numSgprAlpha = max(1,int(self.states.bpeCinternal/4))
-    numSgprBeta  = max(1,int(self.states.bpeCinternal/4)) if kernel["ProblemType"]["UseBeta"] else 0
+    # Reserved even when UseBeta is False, so the layout does not depend on UseBeta.
+    numSgprBeta  = max(1,int(self.states.bpeCinternal/4)) if kernel["ProblemType"]["UseBeta"] else max(1,int(self.states.bpeCinternal/4))
     self.states.e.numSgprStrides = kernel["ProblemType"]["NumIndicesC"]
     self.states.d.numSgprStrides = kernel["ProblemType"]["NumIndicesC"]
     self.states.c.numSgprStrides = kernel["ProblemType"]["NumIndicesC"]
@@ -9568,9 +9569,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.states.preloadGuard = []
     self.states.numSgprPreload = 0
     if kernel["PreloadKernArgs"]:
-      # kernel argument buffer address needs 2 sgprs
-      # Workgroup ID x, y, z need 3 sgprs
-      self.states.numSgprPreload = self.states.archCaps["MaxSgprPreload"] - self.states.rpga - kernel["ProblemType"]["NumIndicesC"]
+      # kernel argument buffer address needs 2 sgprs, and the workgroup ids need
+      # NumIndicesC sgprs past the preload window unless they come from ttmp
+      # registers. Must match the restore in KernelWriterAssembly.defineAndResources.
+      self.states.numSgprPreload = self.states.archCaps["MaxSgprPreload"] - self.states.rpga
+      if not self.states.archCaps["WorkGroupIdFromTTM"]:
+        self.states.numSgprPreload -= kernel["ProblemType"]["NumIndicesC"]
 
       # Safe guard for preload arguments
       while(1):
@@ -9596,16 +9600,29 @@ class KernelWriter(metaclass=abc.ABCMeta):
         break
       SgprSlot.append(tempSgpr)
     self.defineSgpr("SizesSum", self.states.numSgprSizesSum)
-    self.defineSgpr("AddressD", numSgprAddressD)
-    self.defineSgpr("AddressC", numSgprAddressC)
+    # A/B input buffers
     self.defineSgpr("AddressA", numSgprAddressA)
     if kernel["ProblemType"]["MXBlockA"]:
       self.defineSgpr("AddressMXSA", numSgprAddressMXSA)
     self.defineSgpr("AddressB", numSgprAddressB)
     if kernel["ProblemType"]["MXBlockB"]:
       self.defineSgpr("AddressMXSB", numSgprAddressMXSB)
+
+    #asm input interface depen
+    # A/B strides
+    self.defineSgpr("StridesA", self.states.a.numSgprStrides)
+    if kernel["ProblemType"]["MXBlockA"]:
+      self.defineSgpr("StridesMXSA", self.states.mxsa.numSgprStrides)
+    self.defineSgpr("StridesB", self.states.b.numSgprStrides)
+    if kernel["ProblemType"]["MXBlockB"]:
+      self.defineSgpr("StridesMXSB", self.states.mxsb.numSgprStrides)
+    if kernel["ProblemType"]["Sparse"]:
+      self.defineSgpr("StridesMetadata", self.states.m.numSgprStrides)
+
+    # metadata buffer
     if kernel["ProblemType"]["Sparse"]:
       self.defineSgpr("AddressMetadata", numSgprAddressMetadata)
+
     # AddressWS/AddressFlags are the StreamK workspace + synchronizer-flag kernarg
     # pointers. Under StreamKForceDPOnly (SK3 DP-first, gfx1250) the reduction is
     # always the single-kernel tree path and the workspace partials/fixup path is
@@ -9616,42 +9633,17 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # (ContractionSolution.cpp singleCallArgs) are gated identically so the positional
     # layout stays consistent host<->device.
     if kernel["StreamK"] > 0 and kernel["StreamKAtomic"] == 0 and not kernel["StreamKForceDPOnly"]:
-      self.defineSgpr("AddressWS", numSgprAddressWS)
-      self.defineSgpr("AddressFlags", numSgprAddressFlags)
-      self.states.numSgprStreamK += numSgprAddressWS + numSgprAddressFlags
+      if kernel["InternalSupportParams"]["KernArgsVersion"] < 3:
+        self.defineSgpr("AddressWS", numSgprAddressWS)
+        self.defineSgpr("AddressFlags", numSgprAddressFlags)
+        self.states.numSgprStreamK += numSgprAddressWS + numSgprAddressFlags
+      else:
+        # ver3 keeps Flags here but moves WS to after alpha/beta, so the pre-Alpha
+        # SGPR count stays 4-aligned.
+        self.defineSgpr("AddressFlags", numSgprAddressFlags)
+        self.states.numSgprStreamK += numSgprAddressFlags
 
-    #asm input interface depen
-    self.defineSgpr("StridesD", self.states.d.numSgprStrides)
-    self.defineSgpr("StridesC", self.states.c.numSgprStrides)
-    self.defineSgpr("StridesA", self.states.a.numSgprStrides)
-    if kernel["ProblemType"]["MXBlockA"]:
-      self.defineSgpr("StridesMXSA", self.states.mxsa.numSgprStrides)
-    self.defineSgpr("StridesB", self.states.b.numSgprStrides)
-    if kernel["ProblemType"]["MXBlockB"]:
-      self.defineSgpr("StridesMXSB", self.states.mxsb.numSgprStrides)
-    if kernel["ProblemType"]["Sparse"]:
-      self.defineSgpr("StridesMetadata", self.states.m.numSgprStrides)
-
-    # Batch offset support for general batched GEMM (pointer array mode)
-    # Offsets are loaded on-demand from kernel arguments to avoid using persistent SGPRs
-    # No SGPR allocation here - offsets loaded directly when applying to addresses
-
-    # for packed batches without stride restrictions need to do something different here
-    assert sorted(kernel["PackedC0IdxChars"]+kernel["PackedC1IdxChars"]) == \
-           sorted(set(kernel["PackedC0IdxChars"]+kernel["PackedC1IdxChars"]))
-    for idxChar in kernel["PackedC0IdxChars"][:-1]:
-      self.defineSgpr("MagicNumberSize%s"%idxChar, 1)
-      self.defineSgpr("MagicShiftSize%s"%idxChar, 1)
-    for idxChar in kernel["PackedC1IdxChars"][:-1]:
-      self.defineSgpr("MagicNumberSize%s"%idxChar, 1)
-      self.defineSgpr("MagicShiftSize%s"%idxChar, 1)
-
-    self.defineSgpr("Alpha", numSgprAlpha, numSgprAlpha)
-    self.states.numSgprAlpha = numSgprAlpha
-    if kernel["ProblemType"]["UseBeta"]:
-      self.defineSgpr("Beta", numSgprBeta, numSgprBeta)
-      self.states.numSgprBeta = numSgprBeta
-
+    # StreamK args
     if kernel["StreamK"] == 4:
       self.defineSgpr("ItersPerTile", 1)
       self.defineSgpr("TotalItems", 1)
@@ -9686,6 +9678,39 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.defineSgpr("skGrid", 1)
       self.defineSgpr("skTiles", 1)
       self.states.numSgprStreamK += 6
+
+    self.defineSgpr("Alpha", numSgprAlpha, numSgprAlpha)
+    self.states.numSgprAlpha = numSgprAlpha
+    self.defineSgpr("Beta" if kernel["ProblemType"]["UseBeta"] else "Betapad", numSgprBeta, numSgprBeta)
+    self.states.numSgprBeta = numSgprBeta
+
+    # ver3 places AddressWS after alpha/beta, see the StreamK block above.
+    if kernel["StreamK"] > 0 and kernel["StreamKAtomic"] == 0 and not kernel["StreamKForceDPOnly"] \
+       and kernel["InternalSupportParams"]["KernArgsVersion"] >= 3:
+      self.defineSgpr("AddressWS", numSgprAddressWS)
+      self.states.numSgprStreamK += numSgprAddressWS
+
+    # D/C output buffers
+    self.defineSgpr("AddressD", numSgprAddressD)
+    self.defineSgpr("AddressC", numSgprAddressC)
+
+    # C/D strides
+    self.defineSgpr("StridesD", self.states.d.numSgprStrides)
+    self.defineSgpr("StridesC", self.states.c.numSgprStrides)
+
+    # Batch offset support for general batched GEMM (pointer array mode)
+    # Offsets are loaded on-demand from kernel arguments to avoid using persistent SGPRs
+    # No SGPR allocation here - offsets loaded directly when applying to addresses
+
+    # for packed batches without stride restrictions need to do something different here
+    assert sorted(kernel["PackedC0IdxChars"]+kernel["PackedC1IdxChars"]) == \
+           sorted(set(kernel["PackedC0IdxChars"]+kernel["PackedC1IdxChars"]))
+    for idxChar in kernel["PackedC0IdxChars"][:-1]:
+      self.defineSgpr("MagicNumberSize%s"%idxChar, 1)
+      self.defineSgpr("MagicShiftSize%s"%idxChar, 1)
+    for idxChar in kernel["PackedC1IdxChars"][:-1]:
+      self.defineSgpr("MagicNumberSize%s"%idxChar, 1)
+      self.defineSgpr("MagicShiftSize%s"%idxChar, 1)
 
     if not kernel["UseSubtileImpl"]:
       if kernel["LocalWriteUseSgprA"]:
@@ -9938,7 +9963,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       numSgprAddressD + numSgprAddressC + numSgprAddressA + numSgprAddressB + numSgprAlpha + numSgprAddressMetadata + \
       (numSgprAddressMXSA if kernel["ProblemType"]["MXBlockA"] else 0) + \
       (numSgprAddressMXSB if kernel["ProblemType"]["MXBlockB"] else 0) + \
-      (numSgprBeta if kernel["ProblemType"]["UseBeta"] else 0) + \
+      numSgprBeta + \
       self.states.d.numSgprStrides + self.states.c.numSgprStrides + self.states.a.numSgprStrides + self.states.b.numSgprStrides + self.states.m.numSgprStrides + \
       (self.states.mxsa.numSgprStrides if kernel["ProblemType"]["MXBlockA"] else 0) + \
       (self.states.mxsb.numSgprStrides if kernel["ProblemType"]["MXBlockB"] else 0) + \
