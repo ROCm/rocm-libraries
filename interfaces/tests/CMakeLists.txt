@@ -211,7 +211,6 @@ if(UNIX AND NOT APPLE)
   add_test(NAME rocm_interfaces.abi04_multiple_default_def_rejected
     COMMAND ${CMAKE_COMMAND}
       -DCXX=${CMAKE_CXX_COMPILER}
-      -DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/abi03_fixture_rocblas.cpp
       -DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/abi04-dupdef
       -P ${CMAKE_CURRENT_SOURCE_DIR}/check_multiple_default_def.cmake)
 
@@ -261,7 +260,6 @@ if(UNIX AND NOT APPLE)
       COMMAND ${CMAKE_COMMAND}
         -DCXX=${CMAKE_CXX_COMPILER}
         -DLINKER=lld
-        -DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/abi03_fixture_rocblas.cpp
         -DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/abi04-dupdef-lld
         -P ${CMAKE_CURRENT_SOURCE_DIR}/check_multiple_default_def.cmake)
 
