@@ -541,11 +541,7 @@ struct DeviceSegmentedReduce
                       num_segments,
                       d_begin_offsets,
                       d_end_offsets,
-#if _HIPCUB_HAS_DEVICE_SYSTEM_STD
                       _HIPCUB_LIBCXX::minimum<>{},
-#else
-                      [] (auto a, auto b) { return a > b ? b : a;},
-#endif
                       _HIPCUB_STD::numeric_limits<input_type>::max(),
                       stream);
     }
@@ -591,11 +587,7 @@ struct DeviceSegmentedReduce
                       d_out,
                       num_segments,
                       segment_size,
-#if _HIPCUB_HAS_DEVICE_SYSTEM_STD
                       _HIPCUB_LIBCXX::minimum<>{},
-#else
-                      [] (auto a, auto b) { return a > b ? b : a;},
-#endif
                       _HIPCUB_STD::numeric_limits<input_type>::max(),
                       stream);
     }
@@ -774,11 +766,7 @@ struct DeviceSegmentedReduce
                       num_segments,
                       d_begin_offsets,
                       d_end_offsets,
-#if _HIPCUB_HAS_DEVICE_SYSTEM_STD
                       _HIPCUB_LIBCXX::maximum<>{},
-#else
-                      [] (auto a, auto b) { return a > b ? a : b;},
-#endif
                       _HIPCUB_STD::numeric_limits<input_type>::lowest(),
                       stream);
     }
@@ -824,11 +812,7 @@ struct DeviceSegmentedReduce
                       d_out,
                       num_segments,
                       segment_size,
-#if _HIPCUB_HAS_DEVICE_SYSTEM_STD
                       _HIPCUB_LIBCXX::maximum<>{},
-#else
-                      [] (auto a, auto b) { return a > b ? a : b;},
-#endif
                       _HIPCUB_STD::numeric_limits<input_type>::lowest(),
                       stream);
     }
