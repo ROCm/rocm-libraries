@@ -1,36 +1,36 @@
 # RFC 0019: Universal Heuristic Descriptor (UHD): Data-Driven Kernel Selection
 
-- Contributors: (draft — jascampb)
+- Contributors: (draft — jascampb, cderb)
 - Status: First draft, for discussion
 - Parent: [RFC 0017 Universal Kernel Descriptor](0017_UniversalKernelDescriptor.md) (this is the "UHD + kernel selection" follow-up named in [RFC 0017 §12.2](0017_UniversalKernelDescriptor.md#122-follow-up-rfcs))
-- Sibling: **RFC 0018 Universal Match Descriptor (UMD) and the Graph Matcher** — the matcher follow-up from the same series. It pins the **JsonLogic** expression language and the `$`-token namespaces (`$q.*`, `$kernel.*`, `$device.*`) that this RFC's `features_signature` consumes ([Section 7](#7-feature-extraction)).
-- Related: [RFC 0007 Engine Selection and Heuristics Framework](0007_EngineSelectionHeuristicsFramework.md), [RFC 0013 Autotune](0013_Autotune.md) (the benchmarking substrate for heuristic generation, [Section 14](#14-model-generation-pipeline))
+- Sibling: **RFC 0018 Universal Match Descriptor (UMD) and the Graph Matcher** ([PR #10341](https://github.com/ROCm/rocm-libraries/pull/10341)) — the matcher follow-up from the same series, with a working implementation. It pins the **JsonLogic** expression language and the `$`-token namespaces (`$q.*`, `$kernel.*`, `$device.*`) that this RFC's `features_signature` consumes ([Section 6](#6-feature-extraction)). Its `JsonLogic.hpp` — a compile-once / evaluate-many implementation with the `$`-sigil convention and the operator set below — is the concrete evaluator this RFC's feature extractor reuses.
+- Related: [RFC 0007 Engine Selection and Heuristics Framework](0007_EngineSelectionHeuristicsFramework.md), [RFC 0013 Autotune](0013_Autotune.md) (the benchmarking substrate for heuristic generation, [Section 13](#13-model-generation-pipeline))
 
-> **Numbering note.** The UMD follow-up also drafted as "RFC 0018"; that number is taken by the matcher
-> RFC, so this document is **0019**. Both are follow-ups of the same [RFC 0017 §12.2](0017_UniversalKernelDescriptor.md#122-follow-up-rfcs) series.
+> **Numbering note.** This document is **0019** in the [RFC 0017 §12.2](0017_UniversalKernelDescriptor.md#122-follow-up-rfcs)
+> follow-up series: **0018** is the UMD / graph matcher, **0019** is this (UHD + kernel selection), and
+> **0020** is the UED + engine registry ([PR #10603](https://github.com/ROCm/rocm-libraries/pull/10603)).
 
 > **Draft note.** This is a first pass to frame the design and drive discussion, not a finished
 > spec. Sections marked **OPEN** carry decisions we still need to make. It is grounded in the existing
 > heuristic-generation tooling — a training-and-export pipeline any package author can run to produce a
-> heuristic for their own kernels — and rocKE's current selection path, both summarized in
-> [Section 3](#3-prior-art).
+> heuristic for their own kernels — and rocKE's current selection path.
 
 ## Table of Contents
 
 1. [Overview](#1-overview)
 2. [Scope](#2-scope)
-3. [Prior Art](#3-prior-art)
-4. [Ownership Model](#4-ownership-model)
-5. [UHD Schema](#5-uhd-schema)
-6. [Selection Flow](#6-selection-flow)
-7. [Feature Extraction](#7-feature-extraction)
-8. [Model Adapters](#8-model-adapters)
-9. [Versioning and Compatibility](#9-versioning-and-compatibility)
-10. [Performance](#10-performance)
-11. [Applicability Flow](#11-applicability-flow)
-12. [Engine Selection Integration](#12-engine-selection-integration)
-13. [Observability](#13-observability)
-14. [Model Generation Pipeline](#14-model-generation-pipeline)
+3. [Ownership Model](#3-ownership-model)
+4. [UHD Schema](#4-uhd-schema)
+5. [Selection Flow](#5-selection-flow)
+6. [Feature Extraction](#6-feature-extraction)
+7. [Model Adapters](#7-model-adapters)
+8. [Versioning and Compatibility](#8-versioning-and-compatibility)
+9. [Performance](#9-performance)
+10. [Applicability Flow](#10-applicability-flow)
+11. [Engine Selection Integration](#11-engine-selection-integration)
+12. [Observability](#12-observability)
+13. [Model Generation Pipeline](#13-model-generation-pipeline)
+14. [Package-Creation-Time Selection: Knobs and AOT Kernels](#14-package-creation-time-selection-knobs-and-aot-kernels)
 15. [Phased Delivery](#15-phased-delivery)
 16. [Risks](#16-risks)
 17. [Open Questions](#17-open-questions)
@@ -50,19 +50,19 @@ KDPs may name the same engine, and thus share its one UHD. The UED also owns the
 Descriptor)** — the explicit declaration of compilation knobs (tile size, block size, split-K, dtype,
 and the like, each with a type and optional default) that distinguish kernel variants. The KMD *is* the
 feature space the UHD ranks over, so the two are coupled — though only a *breaking* KMD change forces a
-retrain; additive changes and dispatch-only fields do not ([Section 4.3](#43-coupling-rules)).
+retrain; additive changes and dispatch-only fields do not ([Section 3.3](#33-coupling-rules)).
 
 This RFC defines:
 
-1. **UHD schema** — how a selection model is described as data ([Section 5](#5-uhd-schema))
-2. **Ownership model** — UED owns one UHD and one KMD; KDPs join the engine ([Section 4](#4-ownership-model))
-3. **Selection flow** — how a UHD ranks matched kernels ([Section 6](#6-selection-flow))
+1. **UHD schema** — how a selection model is described as data ([Section 4](#4-uhd-schema))
+2. **Ownership model** — UED owns one UHD and one KMD; KDPs join the engine ([Section 3](#3-ownership-model))
+3. **Selection flow** — how a UHD ranks matched kernels ([Section 5](#5-selection-flow))
 4. **Engine integration** — applicability bubbles up before engines are ranked; the tooling produces
    two heuristics (a cheap engine estimate and the fine-grained config UHD); two policies (quick vs.
-   thorough) consume them, with a rank-ordering fallback ([Section 11–12](#11-applicability-flow)).
+   thorough) consume them, with a rank-ordering fallback ([Section 10–11](#10-applicability-flow)).
    The policy changes stay a [RFC 0007](0007_EngineSelectionHeuristicsFramework.md) follow-up; this
    RFC supplies the heuristics and keeps the schema from foreclosing cross-engine comparison.
-5. **Generation pipeline** — automated benchmarking and model export ([Section 14](#14-model-generation-pipeline))
+5. **Generation pipeline** — automated benchmarking and model export ([Section 13](#13-model-generation-pipeline))
 
 ---
 
@@ -77,7 +77,7 @@ A UHD is the kernel-selection heuristic. It is part of the generic provider that
 [RFC 0017](0017_UniversalKernelDescriptor.md) introduces — not a new host interface, not a policy
 plugin. The two levels are not cleanly one-after-the-other: applicability bubbles up before engine
 selection ranks anything, and UHD predictions can feed engine selection to rank by predicted
-performance ([Section 11–12](#11-applicability-flow)).
+performance ([Section 10–11](#10-applicability-flow)).
 
 - **Applicability bubbles up first.** Before engine selection can rank anything, it must know which
   engines even apply. For a descriptor engine, "do I apply?" is the **matcher (UMD) pass** at the
@@ -86,7 +86,7 @@ performance ([Section 11–12](#11-applicability-flow)).
   *ahead of* engine selection, not strictly after it.
 - **The UHD's predictions feed engine selection.** The generation tooling produces a cheap engine-level
   **expected-performance** estimate and the fine-grained config UHD; engine-selection policies consume
-  those to rank engines *by predicted performance* ([Section 11](#11-applicability-flow)).
+  those to rank engines *by predicted performance* ([Section 10](#10-applicability-flow)).
   The policies themselves remain [RFC 0007](0007_EngineSelectionHeuristicsFramework.md)'s territory; this
   RFC provides the heuristics they consult.
 
@@ -101,56 +101,9 @@ matcher and launch machinery ([RFC 0017 §5–6](0017_UniversalKernelDescriptor.
 
 ---
 
-## 3. Prior Art
+## 3. Ownership Model
 
-Two concrete systems anchor this design: the existing heuristic-generation tooling and rocKE's
-selection path. The UHD generalizes what that tooling already produces onto the descriptor model,
-so that any package author can generate a heuristic for their own pack with the same tools.
-
-### 3.1 Existing heuristic-generation tooling
-
-An end-to-end pipeline for turning benchmarks into a LightGBM kernel-selection model already exists
-as reusable tooling (training scripts, exporters, and a dispatcher path), first exercised on
-SDPA/FMHA forward:
-
-- **Offline training.** A sweep step produces a training dataset (problem × kernel × measured TFLOPS);
-  a training step fits a LightGBM regressor on `log1p(tflops)` with grouped cross-validation.
-- **Original inference.** AOT-compiled to plain C (an exporter lowers a trained booster to a
-  dependency-free C scoring function, statically linked into the provider). This gave zero runtime
-  dependency but is not drop-in — adding a model meant recompiling. This RFC replaces that shipping
-  path with model-as-data ([Section 8](#8-model-adapters)).
-- **Model registry** keyed by `(op, arch, dtype)`, generated from the trained models, mapping a problem
-  to its scoring function.
-- **Feature contract.** A fixed feature vector (problem dims, dtypes, tile and warp constants,
-  hardware props) is generated from one feature specification so the Python training features and the
-  C++ inference features are identical; a round-trip test gates drift.
-- **Selection.** Featurize the problem, look up the model, score every satisfying candidate, argmax,
-  stable-order tie-break, and fall back to first-match if there is no model or the feature count disagrees.
-
-Two lessons carry directly into the UHD design: **(a)** shipping the model as data (not linked into
-the provider) is what makes a heuristic drop-in — the compiled-C path gave zero dependency but forced
-a recompile per model; **(b)** the feature vector is the fragile contract, and generating it from one
-specification is what keeps training and inference honest.
-
-### 3.2 rocKE selection today
-
-rocKE (`dnn-providers/hip-kernel-provider/rocke/`) is a hipDNN engine plugin. Its selection path is
-deterministic and catalog-driven: `AotCatalog::candidatesFor(op, arch)` → `satisfies(instance, problem,
-attrs)` exact-match filter → **first match wins**, with an explicit `TODO(heuristics): tie-break with
-trained per-arch FMHA model when >1 instances match`. That TODO is exactly the seam a UHD fills.
-
-The normalized `SdpaProblem` (shape, dtype, layout, mask/dropout/alibi attributes, arch) is the feature
-source already present at the selection point, and each `AotInstance` carries the `CompileSpec`
-(tile/block/dtype/layout constants) that becomes a UKD's `metadata`. rocKE's selection is internal to
-the engine and orthogonal to [RFC 0007](0007_EngineSelectionHeuristicsFramework.md): the UHD ranks
-*within* rocKE, after the catalog match — in [RFC 0017](0017_UniversalKernelDescriptor.md) terms,
-after a pack's matcher set passes, the engine's UHD ranks its surviving child kernels.
-
----
-
-## 4. Ownership Model
-
-### 4.1 Descriptor Relationships
+### 3.1 Descriptor Relationships
 
 ```
 UED (engine)
@@ -178,7 +131,7 @@ In JSON form:
   "id":        "efc9eae4-…",        // engine identity
   "heuristic": "ae896b07-…",        // UHD: the selector for this engine's kernels   <-- membership
   "metadata":  "9ae0b215-…",        // KMD: the variant-field schema this engine's kernels fill
-  "knobs":     ["split_k", "tile_m"] // names of KMD fields this engine exposes to the user (Section 6.1)
+  "knobs":     ["split_k", "tile_m"] // names of KMD fields this engine exposes to the user (Section 3.2)
 }
 
 {
@@ -195,7 +148,7 @@ In JSON form:
 }
 ```
 
-### 4.2 KMD fields, and knobs as a view onto them
+### 3.2 KMD fields, and knobs as a view onto them
 
 There is **one** space of variant fields, not two. The reworked
 [RFC 0017](0017_UniversalKernelDescriptor.md) settles this: the **KMD declares the engine's variant
@@ -216,12 +169,12 @@ Three consequences from [RFC 0017](0017_UniversalKernelDescriptor.md) that matte
 - **A knob's default is the UHD's choice.** Whatever the heuristic ranks first is the reported default, so
   leaving knobs alone reproduces the out-of-the-box selection. **This couples the UHD to knob reporting:**
   answering a knob query means ranking that engine's catalog — see
-  [Section 10](#10-performance).
+  [Section 9](#9-performance).
 
 Filtering and ranking **commute**: setting `split_k = 4` keeps only kernels whose `split_k` is 4 and the
 UHD ranks those. That holds only because **a UHD scores each kernel on its own metadata and the problem,
 never relative to the rest of the catalog** — a hard requirement on any UHD adapter
-([Section 6](#6-selection-flow)), not an assumption. A scorer that normalizes across the candidate set
+([Section 5](#5-selection-flow)), not an assumption. A scorer that normalizes across the candidate set
 is out of scope.
 
 This supersedes an earlier draft of this RFC that split "UED runtime knobs" from "KMD compilation knobs"
@@ -229,7 +182,7 @@ as two disjoint categories. They are not disjoint: `split_k` is a KMD field that
 expose as a knob. The real distinction that survives is **who sets the value** — the kernel's build (every
 KMD field, as `metadata`) versus the user (the exposed subset) — not two different kinds of parameter.
 
-### 4.3 Coupling Rules
+### 3.3 Coupling Rules
 
 **The KMD is the schema for `$kernel.*`, and the UED owns both it and the UHD.** The UED references one
 KMD and one UHD, and every child UKD's `metadata` fills the KMD's fields, validated at load. Putting both
@@ -254,7 +207,7 @@ This gives the UHD a firm, checkable contract:
   and the kernel vector); the **UHD and KMD belong to the UED (engine)**, shared by every pack that joins
   it. `arch` is a KDP property, so one engine — and its one UHD/KMD — spans arches.
 - **The UHD's `features_signature` `$kernel.*` references must be a subset of the KMD fields** — a
-  load-time check ([Section 7.3](#73-contract-enforcement)). The KMD is the authority on *what fields
+  load-time check ([Section 6.3](#63-contract-enforcement)). The KMD is the authority on *what fields
   exist*; the `features_signature` picks *which subset* it ranks on (the rest may serve the UDD), and how
   it derives from them.
 
@@ -267,7 +220,7 @@ the arches its engine serves. **OPEN:** See [Open Question 2](#schema-and-traini
 
 ---
 
-## 5. UHD Schema
+## 4. UHD Schema
 
 A UHD is a small, reusable scoring recipe. It names an `adapter` (ranking mechanism), a
 `features_signature` (model inputs), an objective, and — for model adapters — a model artifact.
@@ -282,9 +235,9 @@ the arches its engine serves — not one model per arch.
   "schema":  "hipdnn.uhd/v1",
   "id":      "ae896b07-80cd-473c-b3f4-6a8892998519",   // GUID; referenced by the UED (one per engine)
   "name":    "rocKE FMHA fwd selector",                // per-engine, arch-aware — not per-arch
-  "adapter": "tree_data",                              // the ranking mechanism (Section 8)
+  "adapter": "tree_data",                              // the ranking mechanism (Section 7)
 
-  // ordered model inputs; order + form must match training (Section 7)
+  // ordered model inputs; order + form must match training (Section 6)
   "features_signature": [
     "$device.cu_count", "$device.lds_size",            // device props → arch-aware
     "$kernel.tile_m", "$kernel.split_k",               // KMD fields (compilation knobs)
@@ -303,7 +256,7 @@ the arches its engine serves — not one model per arch.
 Other adapters keep the same head and vary the body:
 
 ```jsonc
-// onnx — same shape, different adapter; dependency-gated (Section 8)
+// onnx — same shape, different adapter; dependency-gated (Section 7)
 { …, "adapter": "onnx", "model": {"artifact": "fmha_fwd/model.onnx"} }
 
 // static_order — no features, no model, no hash
@@ -316,7 +269,7 @@ Other adapters keep the same head and vary the body:
   "model": {"symbol": "vendor.fmha_scorer", "config": { … }} }   // symbol + typed config, never inline code
 ```
 
-### 5.1 Adapter Summary
+### 4.1 Adapter Summary
 
 `adapter` is a **single discriminant** — it subsumes [RFC 0017](0017_UniversalKernelDescriptor.md)'s
 illustrative `kind` + `model.framework` into one field (`tree_data` ≈ `kind:model, framework:lightgbm`
@@ -331,7 +284,7 @@ new model family) is one more `adapter` value — the single discriminant is wha
 | `onnx` | An ONNX graph via a gated runtime | Score each candidate, argmax | with engine |
 | `custom_library` | A registry-resolved native scorer behind a small C API (escape hatch) | Whatever the library returns | with engine |
 
-See [Section 8](#8-model-adapters) for adapter details.
+See [Section 7](#7-model-adapters) for adapter details.
 
 **The model ships as data with the engine, not linked into the provider.** For every model adapter,
 `model.artifact` is a path resolved relative to the engine's descriptor set (the UED + its UHD + KMD +
@@ -341,51 +294,89 @@ no `(arch,dtype)→artifact` table — the single arch-aware model serves every 
 **OPEN — regressor vs. ranker.** The tooling trains a *regressor* on TFLOPS and argmaxes. A
 learning-to-rank objective (LambdaRank/NDCG) optimizes ordering directly and may pick better *within*
 an engine without needing calibrated absolute values. But a calibrated TFLOPS regressor is what makes
-the **absolute, cross-comparable metric** of [Section 12.3](#123-cross-engine-comparison) possible; a
+the **absolute, cross-comparable metric** of [Section 11.3](#113-cross-engine-comparison) possible; a
 pure ranker forecloses that and leaves only the rank-ordering fallback. We likely want the regressor to
 preserve the absolute option, keeping ranking as the fallback rather than the only mode. Decide per-UHD
 via `objective` / `score`, or standardize. See [Open Question 1](#schema-and-training).
 
+### 4.2 Future: a list of UHDs, when there is no catalog to rank
+
+Everything above assumes a **finite, enumerable catalog** — the engine's AOT-compiled kernels that pass
+the matchers. One UHD scores those candidates and picks a winner. That holds for every AOT case and is
+what this RFC specifies.
+
+**JIT breaks the assumption.** When kernels are generated rather than pre-compiled, the candidate space
+is the *combinatorial product of the knobs* — tile sizes × warp layout × pipeline × padding × … — which
+can be far too large to enumerate, let alone score one candidate at a time. In that regime there may be
+**no catalog to rank at all**, so a single "score every candidate and argmax" heuristic has nothing to
+iterate over.
+
+The natural extension is for a UED to carry an **ordered list of UHDs** rather than one: a first
+heuristic reduces the intractable knob space to a small, plausible candidate set — generating or
+bounding it rather than filtering an existing list — and a second does the usual predicted-TFLOPS
+ranking over that set. The two stages reuse everything in this RFC (adapters, `features_signature`,
+`derived`, the contract checks); only the *number* of heuristics and the first stage's output contract
+differ.
+
+This is **not designed here.** It is recorded so the single-UHD schema is not mistaken for a permanent
+constraint, and so the JIT work has a named place to land. Two things it would need, neither settled:
+
+- **A UED that can name more than one heuristic.** [RFC 0017](0017_UniversalKernelDescriptor.md) and
+  [RFC 0020](0020_UniversalEngineDescriptor.md) both specify a single `heuristic` id, so a list is a
+  schema change for whoever picks this up — additive if the existing field stays the terminal ranking
+  stage.
+- **An output contract for the first stage.** Emitting candidate configurations that do not yet exist is
+  not ranking; it produces new KMD tuples and feeds the build path, which is closer to catalog
+  *synthesis* ([Section 14](#14-package-creation-time-selection-knobs-and-aot-kernels)) than to
+  selection. Whether that belongs in a UHD at all is the open question.
+
 ---
 
-## 6. Selection Flow
+## 5. Selection Flow
 
-The generic engine produces applicable candidates as follows: a KDP's shared matcher set passes for
-the graph ([RFC 0017 §5](0017_UniversalKernelDescriptor.md#5-matching-and-the-umd)), and its child
-UKDs are the candidates, each carrying its build `metadata`. The pack joins an engine (UED), and that
-engine owns the one UHD, so the candidate set and its selector arrive together.
+The generic engine first builds the **catalog**: the set of the engine's kernels that pass every matcher
+for this graph ([RFC 0017 §5](0017_UniversalKernelDescriptor.md#5-matching-and-the-umd)), each carrying
+its build `metadata`. The catalog is *engine*-scoped — the union across every KDP that joins the engine —
+and the engine owns the UHD that ranks it, so the candidates and their selector arrive together.
 
-All child UKDs joining one engine should be mutually substitutable for the graphs they co-match (same
-op family), because the model is trained to rank exactly that catalog. Kernel selection then:
+All kernels joining one engine should be mutually substitutable for the graphs they co-match (same op
+family), because the model is trained to rank exactly that catalog. Kernel selection then:
 
-1. **Take the pack's candidate set.** The matched pack yields its child UKDs, and its engine yields
-   the one UHD. If two different packs match the same graph, see [Open Question 5](#structural).
-2. **Extract features once.** Build the feature vector for the problem from the bound match variables
-   and device properties ([Section 7](#7-feature-extraction)). Per-candidate features come from each
-   UKD's `metadata` (its compile-time build config); problem/device features are shared across the set.
-3. **Score each candidate.** Invoke the UHD's scorer per candidate. For a model adapter this is one
-   inference call per candidate over its feature row.
+1. **Start from the catalog.** The applicable kernels for this graph are the candidate set.
+2. **Extract the shared features once.** Problem and device features are identical for every candidate,
+   so they are computed once per graph ([Section 6](#6-feature-extraction)); only each candidate's
+   `$kernel.*` metadata varies.
+3. **Score each candidate.** Invoke the UHD's scorer per candidate — for a model adapter, one inference
+   call per candidate over its feature row.
 4. **Choose by objective.** `max` (or `min`) over the scores; the winner is the selected kernel.
-5. **Tie-break deterministically.** On equal scores (or when the UHD declines / is absent), fall
-   through to explicit UKD `priority`, then stable `id` — the same deterministic arbitration
+5. **Tie-break deterministically.** On equal scores (or when the UHD declines), fall through to explicit
+   UKD `priority`, then stable `id` — the same deterministic arbitration
    [RFC 0017 §5](0017_UniversalKernelDescriptor.md#5-matching-and-the-umd) defines. Declaration order
    is never used.
-6. **Fail open to a safe default.** If no model loads, the feature contract mismatches, or the scorer
-   errors, selection degrades to `static_order` (priority + id). This mirrors the tooling's first-match
-   fallback and keeps a bad/absent model from breaking execution.
+6. **Degrade by failure class.** Two different failures get two different answers, split on whether the
+   model's scores are *absent* or *actively wrong* ([Section 6.3](#63-contract-enforcement)):
+   - **No information → fail open.** No model is declared, the artifact is missing, or the scorer errors
+     at evaluation. Selection degrades to `static_order` (priority + id). Nothing is known to be wrong,
+     priority order remains a valid answer, and a missing model must not break execution.
+   - **Broken contract → fail closed.** The feature contract mismatches — `features_hash` disagrees, a
+     `$kernel.*` reference is dangling, or the KMD pairing is incompatible. Here the model would score a
+     feature vector it was never trained on, so it ranks *confidently and wrongly* — worse than no model
+     at all. The UHD does not load and the engine **withdraws its catalog for this graph**, dropping out
+     of engine selection with a diagnostic. This is a mis-built package; it should be loud rather than
+     silently mis-ranking.
 
-The winner is a single UKD, which then dispatches through the pack's one UDD
-([RFC 0017 §6](0017_UniversalKernelDescriptor.md#6-dispatch-and-workspace)). A UHD only ranks; it
-never launches, mutates the graph, or touches device memory.
+The winner is a single UKD, which then dispatches through its pack's UDD
+([RFC 0017 §6](0017_UniversalKernelDescriptor.md#6-dispatch-and-workspace)). A UHD only ranks; it never
+launches, mutates the graph, or touches device memory.
 
 ---
 
-## 7. Feature Extraction
+## 6. Feature Extraction
 
 The feature vector is the contract between training and inference, and the fragile part of the whole
 system. Generalizing it is the core hard problem of this RFC.
 
-### 7.1 Feature Sources
+### 6.1 Feature Sources
 
 A feature row is assembled from three sources, all already available at plan time, and all drawn from
 the same field namespaces the [RFC 0017 §5](0017_UniversalKernelDescriptor.md#5-matching-and-the-umd)
@@ -398,6 +389,7 @@ launch, and selection share one binding:
 | **Problem** | `$q.*`, `$<node>.*` | `$q.seqlen_q`, `$sdpa_fwd.head_size` | Shared across candidates |
 | **Device** | `$device.*` | `$device.cu_count`, `$device.lds_size` | Shared across candidates |
 | **Kernel** | `$kernel.*` | `$kernel.tile_m`, `$kernel.split_k` | Per-candidate (from UKD `metadata`) |
+| **Derived** | `$derived.*` | `$derived.num_tiles_m`, `$derived.arithmetic_intensity` | Computed from the above by the UHD's `derived` block ([Section 6.4](#64-derived-values-the-uhd-derived-block)) |
 
 Problem features are dims, dtypes, stride order, and op attributes bound by the matcher set.
 
@@ -409,7 +401,7 @@ Problem features are dims, dtypes, stride order, and op attributes bound by the 
 > match variables.
 
 Device features come from the same device-facts path [RFC 0007 §6](0007_EngineSelectionHeuristicsFramework.md#6-device-properties)
-defines. Kernel features are the compilation knobs the pack's KMD declares ([Section 4.2](#42-kmd-fields-and-knobs-as-a-view-onto-them)) —
+defines. Kernel features are the compilation knobs the pack's KMD declares ([Section 3.2](#32-kmd-fields-and-knobs-as-a-view-onto-them)) —
 these distinguish candidates within a pack and are what make argmax meaningful.
 
 > **Implementation note — `$device.*` fields.** The device namespace exposes what rocminfo (or
@@ -419,7 +411,7 @@ these distinguish candidates within a pack and are what make argmax meaningful.
 > be finalized against rocKE's existing device-feature vocabulary and extended as real sweeps reveal
 > additional predictive properties.
 
-### 7.2 The `features_signature`
+### 6.2 The `features_signature`
 
 The feature contract is the UHD's inline `features_signature` — an ordered list of model inputs, bound
 the same way a UDD's `args_signature` binds kernel arguments. Each entry is either a direct field (a
@@ -462,13 +454,27 @@ So the derived features — log-scale sizes, aspect ratios, tile/wave quantizati
 expressible today with no extension request. Evaluation is the same safe, bounded interpreter: it fails
 closed on an unknown symbol, a type error, or an invalid operation, and uses checked-width integers.
 Anything beyond this closed set (e.g. a bespoke occupancy model) uses the `custom_library` escape hatch
-([Section 8](#8-model-adapters)) rather than growing the interpreter unbounded.
+([Section 7](#7-model-adapters)) rather than growing the interpreter unbounded.
+
+**Implementation status (from the UMD PoC, [PR #10341](https://github.com/ROCm/rocm-libraries/pull/10341)).**
+The shared `JsonLogic.hpp` already implements the arithmetic and comparison operators this RFC's features
+need (`+ - * /`, `min`, `max`, `ceil_div`, `abs`, `pow`, `log2`, `rsqrt`, `value_or_default`, `if`) as a
+compile-once / evaluate-many `Expression<DataT>` over any `getData(path) → Value` source — which is
+exactly the shape the feature extractor wants ([Section 9](#9-performance)). Two caveats carry into
+this RFC:
+
+- **`shape` is a compiler short-hand, not a JsonLogic op** — the UMD compiler lowers it at
+  compile-time. A feature spec should treat `shape`/`rank`-style helpers as lowered forms, not runtime
+  operators.
+- **The custom-operation (native-predicate) hook is deferred** in the PoC. Until it lands, a UHD that
+  needs a computation outside the closed operator set has no in-language path; that is the boundary at
+  which [Section 7](#7-model-adapters)'s `custom_library` adapter (a compiled scorer) takes over.
 
 **Answering the UMD RFC's open question on the feature source.** RFC 0018 (UMD) asks whether "the UMD's
 bindings should be the canonical feature source for kernel selection," noting the bound symbol table
 overlaps the feature vector a UHD consumes. **This RFC's answer is yes**: the `features_signature` draws
 its problem features from exactly the symbols the matcher bound, plus `$device.*` and the candidate's
-`$kernel.*` ([Section 7.1](#71-feature-sources)). One binding pass feeds matching, dispatch, *and*
+`$kernel.*` ([Section 6.1](#61-feature-sources)). One binding pass feeds matching, dispatch, *and*
 selection — no parallel feature-extraction path, and by construction a feature can only reference values
 the match actually produced.
 
@@ -484,7 +490,7 @@ the match actually produced.
 
 **OPEN:** See [Open Question 4](#schema-and-training) (derived feature set).
 
-### 7.3 Contract Enforcement
+### 6.3 Contract Enforcement
 
 The tooling code-generates the C++ featurizer to guarantee training and inference vectors are identical.
 We keep that principle but make the `features_signature` the single source of truth for both sides:
@@ -499,7 +505,7 @@ A three-part, model-agnostic contract check replaces the tooling's bare feature-
 generalizes to any ranker (LightGBM, ONNX, a custom scorer):
 
 1. **Signature → KMD.** Every `$kernel.*` field the `features_signature` references must be declared
-   in the engine's KMD ([Section 4.2](#42-kmd-fields-and-knobs-as-a-view-onto-them)). Both the KMD and
+   in the engine's KMD ([Section 3.2](#32-kmd-fields-and-knobs-as-a-view-onto-them)). Both the KMD and
    the UHD are owned by the UED, so this is an intra-engine check the pipeline enforces when it emits
    the engine and the loader can re-check — a feature can never read a compilation knob the kernels
    don't carry.
@@ -510,17 +516,149 @@ generalizes to any ranker (LightGBM, ONNX, a custom scorer):
 3. **Vector → input.** Each adapter verifies its artifact accepts the resolved vector: `tree_data`
    checks feature count, `onnx` checks input arity/shape.
 
-Fail-closed on any mismatch. `features_hash` is optional for feature-less adapters (`static_order`)
-and advisory for `custom_library` that self-features.
+**All three checks fail closed** — a contract violation means the model's inputs are not the ones it was
+trained on, so its output is wrong rather than merely unavailable, and the engine withdraws its catalog
+rather than mis-rank it ([Section 5](#5-selection-flow) step 6). This is deliberately *not* the same
+response as a missing or erroring model, which fails open to `static_order`: the distinction is whether
+the scores are absent or actively misleading. `features_hash` is optional for feature-less adapters
+(`static_order`) and advisory for a `custom_library` that self-features.
 
 **Feature-vector portability.** Do we standardize one graph/device feature extractor so models are
 portable across UHDs, or keep it per-model via the spec? Recommendation: **per-model spec, shared source
 vocabulary**. The spec is per-model (models differ), but every spec draws from one fixed, versioned
 source vocabulary and one extractor, so there is exactly one implementation to trust.
 
+### 6.4 Derived Values: the UHD `derived` block
+
+Many of the features a model actually ranks on are not raw fields but **computed** ones: tile/wave
+quantization (`num_tiles_m = ceil_div($q.seqlen_q, $kernel.tile_m0)`), aspect ratios, arithmetic
+intensity, occupancy proxies. These are expressible today as inline `features_signature` entries
+([Section 6.2](#62-the-features_signature)), but they **layer** — `total_tiles = num_tiles_m *
+num_tiles_k`, `overall_tile_efficiency` builds on both — so repeating subexpressions inline is
+error-prone. A named, reusable `derived` block fixes that.
+
+**The `derived` block lives on the UHD.** The UHD carries a named, ordered set of derived values, each a
+JsonLogic expression over `$q.*` / `$device.*` / `$kernel.*` (and earlier `$derived.*` entries). They
+form a new `$derived.*` namespace the same UHD's `features_signature` references by name, exactly like a
+raw field:
+
+```jsonc
+// on the UHD, alongside its features_signature and model artifact
+"derived": {
+  "num_tiles_m":  {"ceil_div": ["$q.seqlen_q", "$kernel.tile_m0"]},
+  "num_tiles_k":  {"ceil_div": ["$k.seqlen_k", "$kernel.tile_n0"]},
+  "total_tiles":  {"*": ["$derived.num_tiles_m", "$derived.num_tiles_k"]},
+  "tile_eff_sq":  {"/": ["$q.seqlen_q", {"*": ["$derived.num_tiles_m", "$kernel.tile_m0"]}]},
+  "tile_volume":  {"*": ["$kernel.tile_m0", "$kernel.tile_n0", "$kernel.tile_k0"]},
+  "arithmetic_intensity": {"/": ["$sdpa_fwd.umd_flops", "$sdpa_fwd.umd_bytes"]}
+},
+"features_signature": ["$q.seqlen_q", "$kernel.tile_m0",
+                       "$derived.num_tiles_m", "$derived.overall_tile_efficiency",
+                       "$derived.arithmetic_intensity"]
+```
+
+Why the UHD:
+
+- **Self-contained, drop-in.** A UHD ships with *everything it needs to featurize* — the block and the
+  signature that names it, next to the model artifact. Dropping in a regenerated UHD "just works" with no
+  dependency on a separately-versioned engine descriptor already declaring the right derived fields.
+- **The tooling owns one artifact.** The generation pipeline emits the UHD anyway
+  ([Section 13](#13-model-generation-pipeline)); if a new model version references a new derived feature,
+  the tool adds it to the same UHD it regenerates — no second descriptor to edit in lockstep, no
+  cross-descriptor contract to keep valid.
+- **One evaluator, compile-once.** The block is a dependency-ordered DAG of the same JsonLogic the
+  matcher and dispatch use; it lowers to a compiled expression at load and evaluates in order
+  ([Section 9.3](#93-efficient-evaluation-expressive-spec-fast-hot-path)). Values referencing only
+  `$kernel.*` are graph-independent and can be cached per kernel; values referencing `$q.*`/`$device.*`
+  are per-graph. The evaluator classifies each automatically — the author need not partition them.
+- **The KMD stays a flat value schema.** Correspondences and computed values live in the UHD `derived`
+  block, not the KMD.
+- **Not the custom-operation hatch.** Quantization/intensity are closed-form JsonLogic, so they belong
+  in `derived`, not behind a native predicate. The `custom_library` / native-predicate escape hatch
+  ([Section 7](#7-model-adapters)) stays reserved for genuinely non-closed-form computations.
+
+The dim↔tile correspondence is engine-specific (tile field *names* are the engine's), so it does not
+belong on the shared op schema; only the FLOP/byte formulas (`umd_flops`/`umd_bytes`) are truly
+op-intrinsic and stay there ([Section 13.6](#136-auto-deriving-a-first-pass-features_signature)).
+
+### 6.5 Example: mapping the current rocKE SDPA features
+
+> **Illustrative.** This maps the **existing** rocKE FMHA-forward feature engine
+> (`FmhaFeatureEngine`, 69 features) onto this RFC's namespaces, to show the model in practice and to
+> validate that a real, in-use feature set decomposes cleanly. It documents how rocKE sources each
+> feature *today*; it does not prescribe the final set.
+
+rocKE's featurizer takes two dicts — a **`problem`** (the graph/problem) and a **`kernel`** (the
+compiled variant's config) — and emits a fixed 69-`double` row. Those two dicts map directly onto the
+RFC's two per-plan sources: `problem` → `$q.* / $<node>.*`, `kernel` → `$kernel.*` (the KMD fields).
+Everything else is either `$device.*` (hardware) or a `$derived.*` computation. The full decomposition:
+
+**Problem — `$q.*` / `$<node>.*` (from the `problem` dict) — 8 raw + 7 log + 4 derived-shape**
+
+| rocKE feature | RFC mapping |
+|---|---|
+| `batch, seqlen_q, seqlen_k, nhead_q, nhead_k, hdim_q, hdim_v` | `$q.batch`, `$q.seqlen_q`, `$k.seqlen_k`, `$q.nhead_q`, `$k.nhead_k`, `$q.hdim_q`, `$v.hdim_v` |
+| `dtype_enc` | `$q.dtype` (encoded) |
+| `log2_batch … log2_hdim_v` (7) | `$derived.*` = `{"log2": ["$q.<dim>"]}` |
+| `gqa_ratio` = nhead_q/nhead_k | `$derived.gqa_ratio` = `{"/": ["$q.nhead_q", "$k.nhead_k"]}` |
+| `aspect_sq_sk` = seqlen_q/seqlen_k | `$derived.aspect_sq_sk` |
+| `log2_ops` | `$derived.log2_ops` (from the FLOP count below) |
+| `decode_flag` = (seqlen_q ≤ 1) | `$derived.decode_flag` = `{"<=": ["$q.seqlen_q", 1]}` |
+
+**Kernel — `$kernel.*` (from the `kernel` dict = KMD fields) — 20**
+
+| rocKE feature | RFC mapping |
+|---|---|
+| `pipeline_code` | `$kernel.pipeline` (encoded) |
+| `tile_m0, tile_n0, tile_k0, tile_n1, tile_k1, tile_k0max` | `$kernel.tile_m0 …` — the tiling of attention's two GEMMs |
+| `pad_s, pad_sk, pad_d, pad_dv` | `$kernel.pad_*` |
+| `num_warps` | `$kernel.num_warps` |
+| `mask, bias, lse, dropout, logits, sink, skip, qscale, paged` | `$kernel.*` — **kernel capability flags** (whether the compiled variant supports that feature); note these are sourced from the `kernel` dict, i.e. they are build config, not problem attributes |
+
+**Derived — `$derived.*` (computed) — the quantization / fit / occupancy families**
+
+| rocKE feature | RFC `$derived.*` expression (schematic) |
+|---|---|
+| `arithmetic_intensity` | `ops / mem`, where `ops = 2·batch·nhead_q·seqlen_q·seqlen_k·(hdim_q+hdim_v)` and `mem` sums Q/K/V/O bytes — the `{"/": ["$sdpa_fwd.umd_flops", "$sdpa_fwd.umd_bytes"]}` of [Section 13.6](#136-auto-deriving-a-first-pass-features_signature) |
+| `num_tiles_m` = ⌈seqlen_q/tile_m0⌉ | `{"ceil_div": ["$q.seqlen_q", "$kernel.tile_m0"]}` |
+| `num_tiles_k` = ⌈seqlen_k/tile_n0⌉ | `{"ceil_div": ["$k.seqlen_k", "$kernel.tile_n0"]}` |
+| `total_tiles` = batch·nhead_q·num_tiles_m·num_tiles_k | product of the above with `$q.*` |
+| `tile_eff_sq, tile_eff_sk, overall_tile_efficiency` | remainder-based tile-efficiency ratios |
+| `cu_utilization` = total_tiles/num_cus | `{"/": ["$derived.total_tiles", "$device.num_cus"]}` — spans `$derived` × `$device` |
+| `tile_volume, tile_area` | products of `$kernel.tile_*` (graph-independent — cacheable per kernel) |
+| `lds_usage_estimate` | `(tile_m0·tile_k0 + tile_n0·tile_k0)·dtype_bytes` |
+| `lds_usage_ratio` | `{"/": ["$derived.lds_usage_estimate", "$device.lds_capacity"]}` |
+| `ratio_d_to_tk0, ratio_dv_to_tn1` | `$kernel` ratios (hdim vs. tile) |
+| `sq_le_tm0, sk_le_tn0, d_eq_dv, gqa_flag` | boolean fit/shape flags |
+| `total_q_elems, total_kv_elems` | element-count products |
+
+**Device — `$device.*` — 8**
+
+`hw_num_cus, hw_simds_per_cu, hw_total_simds, hw_shader_engines, hw_max_clock_mhz, hw_wavefront_size,
+hw_lds_capacity, hw_num_xcd` → `$device.num_cus`, `$device.simds_per_cu`, … (from the device-facts path
+of [Section 6.1](#61-feature-sources)).
+
+*(`feature_count` is a bookkeeping constant, not a real feature.)*
+
+**What this validates:**
+
+- The 69 features partition exactly into the four namespaces — **no feature falls outside**
+  `$q.* / $kernel.* / $device.* / $derived.*`. The RFC vocabulary is sufficient for a real model.
+- The split is roughly **~20 problem, ~20 kernel, ~20 derived, ~8 device** — the `$derived.*` block
+  carries ~30% of the vector, confirming the [Section 6.4](#64-derived-values-the-uhd-derived-block)
+  block earns its place.
+- One subtlety worth carrying forward: rocKE's `mask/bias/lse/…` are **kernel capability flags** sourced
+  from the kernel config, so they are `$kernel.*` (KMD fields), *not* problem attributes — even though
+  the *problem* also has a mask. The KMD field records "does this compiled variant support masking,"
+  which is what the model ranks on; problem-side mask presence is a matcher concern.
+- `arithmetic_intensity` here is the **problem/ideal** intensity (identical across all candidates for a
+  graph) — a shared-prefix context feature, not a per-candidate discriminator; the algorithm-level
+  differences are carried by the `$kernel.*` tile fields and the quantization derivations, exactly as
+  [Section 13.6](#136-auto-deriving-a-first-pass-features_signature) describes.
+
 ---
 
-## 8. Model Adapters
+## 7. Model Adapters
 
 The question "LightGBM, CSV, or a separate library?" is really about how model content reaches the
 scorer, and it maps onto [RFC 0017 §8](0017_UniversalKernelDescriptor.md#8-adapters-and-extensibility)'s
@@ -545,7 +683,7 @@ it just has to ship as a loadable artifact, not bake in.)
 The **two-tier resolution** mirrors [RFC 0017](0017_UniversalKernelDescriptor.md)'s data → escape-hatch
 → native ladder:
 
-### 8.1 Default: `tree_data`
+### 7.1 Default: `tree_data`
 
 The provider ships one small, generic GBDT tree-walker; the engine ships the model as a data artifact
 (tree table: feature indices, thresholds, leaf values) that the walker reads. GBDT trees are trivial
@@ -557,7 +695,7 @@ runtime dependency, fully standalone, verifier-gated. This is the hsaco-equivale
 `Verifier`-gated, additive evolution. Alternative: parse LightGBM `model.txt` at load (lower author
 friction but a bespoke parser to harden). **OPEN:** See [Open Question 3](#schema-and-training).
 
-### 8.2 Escape hatch: `custom_library`
+### 7.2 Escape hatch: `custom_library`
 
 For a model the in-tree walker doesn't cover, the engine ships its own compiled scorer `.so`, `dlopen`'d
 through a tiny C ABI (`score(const double* feats, ...) -> double`). Treelite generates such a `.so` from
@@ -570,9 +708,9 @@ provider builds. A model can still be compiled (Treelite `.so`), as long as it s
 artifact *alongside* the engine's descriptor set, not statically linked into `libhipdnn_provider.so`.
 `custom_library` mirrors [RFC 0017](0017_UniversalKernelDescriptor.md)'s native-predicate / custom-plan
 escape hatches — same "author ships a `.so`, provider `dlopen`s it" pattern.
-**OPEN:** See [Open Question 10](#operational) (dependency + trust audit).
+**OPEN:** See [Open Question 11](#operational) (dependency + trust audit).
 
-### 8.3 Initial Support
+### 7.3 Initial Support
 
 `static_order` (trivial, always available) + `tree_data` (default shipping path) + `custom_library`
 (escape hatch). CSV `table` is a cheap add for coarse bucketed heuristics. `onnx` is added when a
@@ -580,13 +718,13 @@ concrete need appears.
 
 ---
 
-## 9. Versioning and Compatibility
+## 8. Versioning and Compatibility
 
-### 9.1 KMD ↔ UHD Coupling
+### 8.1 KMD ↔ UHD Coupling
 
 Because the UED co-owns the KMD and UHD, a KMD change *may* invalidate the trained model — but the
 obligation is **conditional**, matching [RFC 0017](0017_UniversalKernelDescriptor.md) (see
-[Section 4.3](#43-coupling-rules)):
+[Section 3.3](#33-coupling-rules)):
 
 - **Additive change (new field, or new legal values on a field):** **no retrain required until the
   change is exposed to selection.** The old feature space is still valid, so the existing model keeps
@@ -604,7 +742,7 @@ on an incompatible pairing and on any `features_signature` reference to a field 
 declares. The trace surfaces a training-coverage warning when the catalog spans a field value outside
 what the model was trained on.
 
-### 9.2 Model Updates
+### 8.2 Model Updates
 
 Models ship as data artifacts. Update path:
 
@@ -614,7 +752,7 @@ Models ship as data artifacts. Update path:
 
 No provider recompile required.
 
-### 9.3 Unknown Architecture Handling
+### 8.3 Unknown Architecture Handling
 
 When a device's `$device.*` values fall outside the training distribution (e.g., a new GPU
 architecture appears that the model never saw):
@@ -630,16 +768,16 @@ architecture appears that the model never saw):
 
 ---
 
-## 10. Performance
+## 9. Performance
 
 Selection runs on the plan-build path, so its cost must be small and paid at most once per distinct need.
 
-### 10.1 Dependencies
+### 9.1 Dependencies
 
 - **Zero new runtime dependency for the default path.** The `tree_data` adapter's evaluator is in-tree,
   so the default shipping path adds no runtime library. The provider cannot grow a hard `liblightgbm` link.
 - **Build-time LightGBM is acceptable.** Training and tree-table conversion run offline in the pipeline
-  ([Section 14](#14-model-generation-pipeline)), never in the shipped runtime.
+  ([Section 13](#13-model-generation-pipeline)), never in the shipped runtime.
 - **A `custom_library` scorer `.so` carries its own inference** — no provider dependency; the engine
   owns whatever it linked (e.g. a Treelite-generated evaluator).
 - **`liblightgbm` at runtime is opt-in only**, behind a `lightgbm_native` adapter, for environments
@@ -647,19 +785,49 @@ Selection runs on the plan-build path, so its cost must be small and paid at mos
 - **FlatBuffers / data-SDK are already in-tree** and are the natural carrier for the `features_signature`
   and any serialized model-table.
 
-### 10.2 Loading and Caching
+### 9.2 Loading and Caching
 
-- **Lazy load.** An engine's UHD model is loaded/parsed only when a graph actually reaches kernel
-  selection for that engine, not at provider startup or descriptor discovery. A provider that never
-  hits FMHA never parses the FMHA tree table.
-- **Model cache.** After first load, the parsed model / tree table / native handle is cached for the
-  process (or per `hipdnnHandle`, matching the session-handle lifetime of
-  [RFC 0007 §8.3](0007_EngineSelectionHeuristicsFramework.md#83-plugin-handle-session-object)).
-- **Result cache.** Selection is a pure function of (feature vector, candidate set). A small plan cache
-  keyed by problem fingerprint + candidate-set fingerprint can skip re-inference for repeated graphs.
-  **OPEN:** See [Open Question 8](#operational) (caching scope).
+- **Lazy load, triggered by *ranking* not winning.** An engine's UHD model is loaded/parsed on first
+  use, not at provider startup or descriptor discovery. But per merged RFC 0017, "first use" is **any
+  request that ranks the engine's catalog — including one it goes on to lose**: answering a knob query
+  reports the UHD's top-ranked value as the default ([Section 3.2](#32-kmd-fields-and-knobs-as-a-view-onto-them)),
+  so the model must be cheap to load and cheap to rank with, not merely rare to touch. A provider that
+  never sees FMHA still never parses the FMHA model; one that *enumerates* FMHA engines does.
+- **Model cache — process-scoped, not on the handle.** After first load the parsed model / tree table /
+  native handle is cached for the **process**. RFC 0017 moved caching off the handle deliberately: a
+  handle can be swapped between calls, rebound to another device, or destroyed while a plan built
+  through it is still in use, so handle lifetime says nothing about cache validity.
+- **Result cache on the descriptor cache key.** Selection is a pure function of (feature vector,
+  candidate set). Reuse RFC 0017's applicability cache key — **`(engine id, graph id, device id)` plus
+  the inventory generation counter** — rather than a bespoke fingerprint. "Engine id" here is the
+  **64-bit id** hipDNN keys on (the FNV-1a hash of the UED `name`), not the descriptor GUID;
+  [RFC 0020 §3](0020_UniversalEngineDescriptor.md) keeps those two id spaces distinct. The engine id because the
+  catalog is per-engine, the device id because it is what `$device.*` resolved against, and the
+  generation counter so a newly dropped-in pack invalidates. **OPEN:** in-process only vs. a persistent
+  cross-run cache — see [Open Question 9](#operational).
 
-### 10.3 Latency Target
+### 9.3 Efficient evaluation (expressive spec, fast hot path)
+
+Extensibility lives in the data contract; efficiency lives in a compiled core. The seam is the adapter,
+and the extensibility cost is paid once per candidate (one indirect call), not per feature:
+
+- **Lower the `features_signature` at load, never walk JsonLogic per candidate.** The UMD PoC's
+  `JsonLogic.hpp` already compiles a rule to an `Expression<DataT>` once
+  ([Section 6](#6-feature-extraction), [PR #10341](https://github.com/ROCm/rocm-libraries/pull/10341));
+  the feature extractor reuses that so per-candidate scoring is a tight loop over a compiled expression
+  and a flat tree table — no strings, no JSON, no map lookups.
+- **Split the row into a shared prefix + per-candidate suffix.** Problem and device features
+  (`$q.*`, `$device.*`) are identical across every candidate in the engine; only `$kernel.*` differs.
+  Compute the invariant prefix **once per graph** and fill only the kernel-metadata slots per candidate,
+  turning O(N × full-featurize) into O(full-featurize + N × small) for N candidates.
+- **Reuse the matcher's bound symbols — don't re-extract.** The UMD matcher already bound `$q.*` /
+  `$device.*` deciding applicability; selection reads that table rather than re-featurizing. (This is
+  the mechanism behind the [Section 6](#6-feature-extraction) answer that the matcher bindings *are* the
+  feature source.)
+- **Single-candidate short-circuit.** If only one UKD survives matching, skip the model and return it —
+  common, and it makes the load-on-ranking case above nearly free.
+
+### 9.4 Latency Target
 
 The compiled-C path is the performance floor (near-zero inference cost). The `tree_data` walker is
 expected to be close — a flat tree table over a preallocated feature row is a few hundred comparisons
@@ -668,7 +836,7 @@ per candidate. Target: overhead within 2× of the compiled-C baseline. Validated
 
 ---
 
-## 11. Applicability Flow
+## 10. Applicability Flow
 
 The two selection levels ([Section 2](#2-scope)) are **not** cleanly one-after-the-other, and this is
 a correction to intuition:
@@ -678,38 +846,16 @@ the **matcher (UMD) pass** at the descriptor layer; that result **bubbles up** s
 are ruled out *before* the first plugin-policy layer ranks the survivors. So the descriptor/UHD layer
 runs (at least for applicability) *ahead of* engine selection, not strictly after it.
 
-- **Lazy load — but the trigger is *ranking*, not winning.** An engine's UHD model is loaded/parsed on
-  first use rather than at provider startup or descriptor discovery (the UED itself loads eagerly per
-  [RFC 0017 §3](0017_UniversalKernelDescriptor.md#3-how-it-works); its model artifact stays lazy). But
-  "first use" is **any request that ranks the engine's catalog — including one the engine goes on to
-  lose**: a caller enumerating its options queries knobs for every ranked engine, and answering a knob
-  query means reporting the UHD's top-ranked value as the default
-  ([Section 4.2](#42-kmd-fields-and-knobs-as-a-view-onto-them)). So the model must be cheap to load and
-  cheap to rank with, not merely rare to touch. A provider that never sees FMHA still never parses the
-  FMHA model; a provider that *enumerates* FMHA engines does.
-- **Cache the loaded model — not on the handle.** After first load the parsed model / tree table /
-  native handle is cached for the **process**, not per `hipdnnHandle`.
-  [RFC 0017](0017_UniversalKernelDescriptor.md) moved caching off the handle deliberately: a handle can
-  be swapped between calls, rebound to another device, or destroyed while a plan built through it is
-  still in use, so handle lifetime has nothing to do with whether cached work is still valid.
-- **Cache results where the problem repeats,** using the descriptor system's cache key rather than a
-  bespoke one. [RFC 0017](0017_UniversalKernelDescriptor.md)'s applicability cache is keyed on
-  **`(engine id, graph id, device id)`** plus an **inventory generation counter**: the engine id because
-  the catalog is per-engine (without it one engine's catalog can answer for another in the same
-  provider), the device id because it is what `$device.*` resolved against, and the generation counter so
-  a newly dropped-in pack invalidates. Selection results should ride the same key — selection is a pure
-  function of (feature vector, candidate set), and that key already identifies both. **OPEN**: is the
-  in-process cache enough, or do we want a persistent cross-run cache (interacts with a future
-  [RFC 0007](0007_EngineSelectionHeuristicsFramework.md) "cache selector" policy)?
-- **Minimize init overhead.** Feature extraction is a fixed walk over the spec; inference is a handful
-  of tree evaluations per candidate. Keep the feature row and any scratch preallocated per session, as
-  [RFC 0017 §6](0017_UniversalKernelDescriptor.md#6-dispatch-and-workspace) does for launch. Overhead
-  is validated against the compiled-C baseline in
-  [RFC 0017 §12.1](0017_UniversalKernelDescriptor.md#121-testing-and-performance).
-
 ```
 Graph → Matcher pass (per engine) → Applicable engines → Policy ranking → Winner → Kernel selection
 ```
+
+This ordering is what makes the load-timing rule in [Section 9.2](#92-loading-and-caching) bite. Because
+applicability bubbles up before policy ranking, an engine's descriptor layer is touched for **every graph
+it might serve, including the ones it goes on to lose** — so "lazy" cannot mean "rare." The lazy-load
+trigger, the process-scoped model cache, and the shared
+`(engine id, graph id, device id)` + generation-counter result key are specified once in
+[Section 9.2](#92-loading-and-caching) and are not restated here.
 
 Additionally, the UHD's predictions can feed engine selection: the same layer that gates applicability
 can also report a *predicted performance*, so the policy can order engines by merit instead of a
@@ -718,15 +864,15 @@ return a score.
 
 ---
 
-## 12. Engine Selection Integration
+## 11. Engine Selection Integration
 
 This section describes how kernel-level heuristics feed engine-level selection. The policies themselves
 are [RFC 0007](0007_EngineSelectionHeuristicsFramework.md)'s territory; this RFC supplies the heuristics
 they consult.
 
-### 12.1 Two Heuristics
+### 11.1 Two Heuristics
 
-Per engine, the generation tooling ([Section 14](#14-model-generation-pipeline)) emits two models, both
+Per engine, the generation tooling ([Section 13](#13-model-generation-pipeline)) emits two models, both
 predicting absolute performance so they are comparable across engines:
 
 | Model | Signature | Cost | Role |
@@ -746,11 +892,11 @@ must evaluate B to get A. The tradeoff is selection-time cost vs. training/maint
 > **Suggestion:** The two-policy design implicitly requires A to be distinct. The quick policy's value
 > is that only the winning engine runs B — losers never enumerate candidates. If A is derived from B,
 > every engine must run B to produce A, collapsing quick and thorough into the same operation. The
-> "cheap (no config enumeration)" property of A ([Section 12.1](#121-two-heuristics) table) depends on
+> "cheap (no config enumeration)" property of A ([Section 11.1](#111-two-heuristics) table) depends on
 > A being a separate model trained on `f(graph)` alone, not `f(graph, candidates)`. See
 > [Open Question 6](#structural).
 
-### 12.2 Two Engine-Selection Policies (RFC 0007)
+### 11.2 Two Engine-Selection Policies (RFC 0007)
 
 - **Quick policy.** Rank applicable engines by A (expected performance); pick the winner; if the winner
   has a config UHD (B), run it to pick the kernel. Only the winner drills down, so losers are never
@@ -766,7 +912,7 @@ Quick:     applicable → rank by A → winner → (B? kernel : own selection) �
 Thorough:  applicable → run B (or A) for each → compare perf → best (engine, config) → dispatch
 ```
 
-### 12.3 Cross-Engine Comparison
+### 11.3 Cross-Engine Comparison
 
 **OPEN:** See [Open Question 1](#schema-and-training) (regressor vs. ranker).
 
@@ -779,10 +925,10 @@ existing mechanisms: **explicit selection** of an engine, **policy configuration
 of heuristic-policy plugins supplying the ranked engine list, where a policy may itself be a heuristic),
 and **auto-tuning**, which measures engines and picks the winner outright
 ([RFC 0013](0013_Autotune.md)). The two policies of
-[Section 12.2](#122-two-engine-selection-policies-rfc-0007) are *policy configuration*
+[Section 11.2](#112-two-engine-selection-policies-rfc-0007) are *policy configuration*
 — new policies in that existing slot, not a new arbitration surface. Auto-tuning remains the ground
 truth these heuristics approximate (and the substrate that trains them,
-[Section 14](#14-model-generation-pipeline)).
+[Section 13](#13-model-generation-pipeline)).
 
 **The idea: an absolute, cross-comparable figure of merit.** The ambition is to score candidates
 **cardinally** — an absolute metric (calibrated TFLOPS) rather than a within-group rank. If a UHD is a
@@ -806,7 +952,7 @@ absolute score. The design does not bet everything on calibration succeeding —
 defined safe backstop.
 
 **What this RFC commits to:** The UHD schema declares `score` (`units`/`calibrated`/`transform`,
-[Section 5](#5-uhd-schema)) so a consumer can invert the training transform and recover real TFLOPS,
+[Section 4](#4-uhd-schema)) so a consumer can invert the training transform and recover real TFLOPS,
 and supports a score-only evaluation mode (rank/return best score without selecting-for-launch).
 
 **What is deferred:** Delivering cross-engine comparison requires changes outside the UHD:
@@ -816,7 +962,7 @@ and supports a score-only evaluation mode (rank/return best score without select
    This is an engine-plugin ABI addition, owned by the plugin SDK, not this RFC; it must also let a
    non-descriptor engine (MIOpen) report an A-level estimate through the same surface, or the policy
    falls back to today's static ordering for it.
-2. **The two engine-selection policies** that consume it ([Section 12.2](#122-two-engine-selection-policies-rfc-0007)) —
+2. **The two engine-selection policies** that consume it ([Section 11.2](#112-two-engine-selection-policies-rfc-0007)) —
    the quick policy (rank by A, drill into the winner's B) and the thorough policy (run every B, compare
    across engines). Both are squarely [RFC 0007](0007_EngineSelectionHeuristicsFramework.md)'s territory.
 3. **Cross-engine calibration.** Comparing estimates across engines only works if the units are
@@ -828,7 +974,7 @@ This is a dedicated follow-up co-owned with [RFC 0007](0007_EngineSelectionHeuri
 
 ---
 
-## 13. Observability
+## 12. Observability
 
 Because selection is data-driven, it must be inspectable — consistent with
 [RFC 0017 §9](0017_UniversalKernelDescriptor.md#9-observability-and-diagnostics) and
@@ -840,12 +986,12 @@ Because selection is data-driven, it must be inspectable — consistent with
 
 ---
 
-## 14. Model Generation Pipeline
+## 13. Model Generation Pipeline
 
 The UHD is only useful if producing one is automated — by tooling any package author can run, not a
 provider-specific service.
 
-### 14.1 Two-Stage Workflow
+### 13.1 Two-Stage Workflow
 
 1. **Ship a working pack with a trivial heuristic.** The pack's UED names a `static_order` UHD (rank
    by `priority`/`id`). The pack is fully functional and model-free from day one; no benchmarking or
@@ -854,14 +1000,14 @@ provider-specific service.
    times its kernels across a corpus of problem shapes, trains a model, and emits an updated UED/UHD —
    same descriptor kind, now `adapter: tree_data` pointing at an exported model. Dropping that updated
    engine descriptor set back in upgrades the pack from trivial ordering to a trained heuristic in place.
-   **OPEN:** See [Open Question 9](#operational) (shape corpus location).
+   **OPEN:** See [Open Question 10](#operational) (shape corpus location).
 
 Because the shipped and generated heuristics are the same descriptor kind differing only in `adapter`
 and fields, the tool only rewrites data; it never introduces a new interface. The tool runs over
 hipDNN's public API — it adds no code to hipDNN and touches no provider internals — so it works for
 any provider's pack.
 
-### 14.2 Benchmarking via hipDNN Autotune
+### 13.2 Benchmarking via hipDNN Autotune
 
 The timing substrate is hipDNN's own autotune ([RFC 0013](0013_Autotune.md)), not a bespoke sweep.
 Autotune is provider-agnostic: it times whatever engine/kernel actually runs, so it exercises a rocKE
@@ -877,7 +1023,7 @@ Because the pack already contains its variant kernels as UKDs, the tool times th
 it does not re-enumerate or re-build a variant grid. The pack is the authority on which variants exist;
 autotune is the authority on how fast each one runs.
 
-### 14.3 The principle: one source of truth, translate once
+### 13.3 The principle: one source of truth, translate once
 
 The tool must guarantee the runtime contract matches what was benchmarked. It emits the pack's
 descriptors (updated UED/UHD, and the KMD/`features_signature` if not already present) from the same run
@@ -886,11 +1032,11 @@ by construction.
 
 "Translate once" is really **two contracts** the tool freezes and emits:
 
-1. **Feature contract.** Emit the UHD's `features_signature` ([Section 7.2](#72-the-features_signature))
+1. **Feature contract.** Emit the UHD's `features_signature` ([Section 6.2](#62-the-features_signature))
    from the same feature definition training used (expressions over `$q.* / $kernel.* / $device.*`).
    Then **one generic extractor runs it on both sides** — offline for training, the in-tree evaluator
    for inference — both reading the *same* signature. No reimplementation, so no drift. (Caveat: the
-   expression op set must cover the derived features — [Section 7.2](#72-the-features_signature)'s
+   expression op set must cover the derived features — [Section 6.2](#62-the-features_signature)'s
    `log2`/`/`/`min`/`max` extension. Anything gnarlier needs the `custom_library` featurizer escape
    hatch.)
 2. **Kernel-identity contract.** The candidate autotune timed (its `engineId`/config, i.e. a specific
@@ -899,25 +1045,25 @@ by construction.
    reports the config per result, so the tool keys the dataset on the UKD it enrolled — the quieter
    drift risk, made explicit.
 
-### 14.4 New stage: package (Stage P)
+### 13.4 New stage: package (Stage P)
 
-From one timing run ([§14.2](#142-benchmarking-via-hipdnn-autotune)) the tool trains **two** models
-([Section 12.1](#121-two-heuristics)): the fine-grained **config UHD (B)** and the cheap **engine
+From one timing run ([§13.2](#132-benchmarking-via-hipdnn-autotune)) the tool trains **two** models
+([Section 11.1](#111-two-heuristics)): the fine-grained **config UHD (B)** and the cheap **engine
 performance estimate (A)**. A **package stage** then emits (or updates) the engine's descriptor set:
 
 - the **config UHD (B)** — rewritten from the shipped `static_order` to `adapter: tree_data`, carrying
   the `features_signature` (referencing `$kernel.*` KMD fields + `$device.*` for arch-awareness),
-  `features_hash`, `objective`/`score`, and `model.artifact` ([Section 5](#5-uhd-schema)); one per
+  `features_hash`, `objective`/`score`, and `model.artifact` ([Section 4](#4-uhd-schema)); one per
   engine, arch-aware, so no artifact table;
 - the **engine performance estimate (A)** — the coarse `f(graph) → expected perf` model the quick policy
-  ranks engines by ([Section 12.2](#122-two-engine-selection-policies-rfc-0007)), also emitted as data on the UED (whether A is
-  its own model or derived from B is the OPEN in [Section 12.1](#121-two-heuristics));
+  ranks engines by ([Section 11.2](#112-two-engine-selection-policies-rfc-0007)), also emitted as data on the UED (whether A is
+  its own model or derived from B is the OPEN in [Section 11.1](#111-two-heuristics));
 - the **model files as data** — the trained boosters exported to their model files (the `tree_data`
-  format, read by the in-tree walker; [Section 8](#8-model-adapters)), each embedding the `features_hash`
+  format, read by the in-tree walker; [Section 7](#7-model-adapters)), each embedding the `features_hash`
   it was trained against; shipped with the engine descriptors, *not* compiled in;
 - the **KMD** — the compilation-knob schema (`fields`: `tile_m`, `warp_n`, `split_k`, `dtype`, …), if
   the pack does not already carry one; its fields are exactly the `$kernel.*` metadata the UKDs already
-  fill ([Section 4.2](#42-kmd-fields-and-knobs-as-a-view-onto-them)) — **one KMD per engine, owned by the UED**;
+  fill ([Section 3.2](#32-kmd-fields-and-knobs-as-a-view-onto-them)) — **one KMD per engine, owned by the UED**;
 - the **UED** — updated to reference the new UHD and the A model; its user runtime `knobs` are distinct
   from the KMD compilation knobs and untouched by generation.
 
@@ -925,21 +1071,211 @@ The UMDs, UDD, and the child UKDs (kernels) are **not** regenerated — only the
 That is the whole point of the two-stage design: the expensive artifacts (compiled kernels) ship once;
 both heuristics are layered on afterward as data.
 
-### 14.5 Sweep space: grid vs. constraint
+### 13.5 Sweep space: grid vs. constraint
 
 The generation tool sweeps two things: the **problem-shape corpus** (batch, seqlen, heads, … — supplied
 by the author as representative shapes, or a per-op default) and optionally the **exposed knobs** (the
 KMD fields the engine lets a user set, via `add_engine_variants` knob settings). Note a knob setting only
-*filters* the catalog ([Section 4.2](#42-kmd-fields-and-knobs-as-a-view-onto-them)), so sweeping knobs
+*filters* the catalog ([Section 3.2](#32-kmd-fields-and-knobs-as-a-view-onto-them)), so sweeping knobs
 explores user-visible restrictions, not new kernels. The **variant space itself is fixed** — it is the pack's
 existing child UKDs, so the tool does not enumerate or build variants; it enrolls the shipped ones and
-times them ([Section 14.2](#142-benchmarking-via-hipdnn-autotune)).
+times them ([Section 13.2](#132-benchmarking-via-hipdnn-autotune)). That holds *within this pipeline*;
+deciding which variants exist in the first place — and pruning them once a heuristic exists — is the
+upstream, package-creation-time stage of
+[Section 14](#14-package-creation-time-selection-knobs-and-aot-kernels).
 
 One subtlety for anything that *drives* a sweep from a descriptor: a validity *constraint*
 (`min:1, max:8`) expresses which values are **legal**, not which to **sample**, so a swept axis needs an
 explicit `sweep_values` / grid hint, not an inferred range. **OPEN**: standardize where the shape corpus
 and any runtime-knob grid live (a tool-side config vs. a descriptor field), so a heuristic can be
 regenerated reproducibly without out-of-band inputs.
+
+### 13.6 Auto-deriving a first-pass `features_signature`
+
+Most of a `features_signature` can be **derived from what a package already carries**, so the tool can
+propose a first pass rather than requiring an author to hand-write the feature list. The key is that
+"map the graph to features" spans **two layers**, and only the first is shared/derivable:
+
+- **Layer 1 — op-intrinsic vocabulary (per op, shared).** The fields that *exist and are bindable*:
+  tensor/dim bindings (`$q.seqlen_q`), node attributes (`$sdpa_fwd.head_size`), device properties
+  (`$device.*`). These are facts about the op, identical for every engine that implements it, and the
+  UMD op-schema registry already emits them by reflection from the `.fbs` annotations
+  ([Section 6](#6-feature-extraction), [PR #10341](https://github.com/ROCm/rocm-libraries/pull/10341)).
+- **Layer 2 — the `features_signature` (per package/UHD, not shared).** *Which* of those fields a given
+  model consumes, plus derived transforms. This is per-UHD: two packages of the same op may rank on
+  different subsets.
+
+The tool auto-derives Layer 1 and proposes a Layer-2 first pass from it, in three tiers:
+
+| Tier | Feature kind | Derivable from | Author input needed |
+|---|---|---|---|
+| 1 | Raw fields (`$kernel.*` = KMD fields; `$q.*`/attrs = UMD bindings; `$device.*`) | KMD schema + UMD op-schema registry + device vocab | **none** |
+| 2 | Generic transforms (logs, ratios) and **tile/wave quantization** | Tier 1 + a UHD `derived` block that pairs problem dims with `$kernel.*` tile axes | the UHD's **`derived` block** ([Section 6.4](#64-derived-values-the-uhd-derived-block)) |
+| 3 | **Physics** — arithmetic intensity, roofline bound | the op's FLOP and byte formulas, consumed by a `derived` entry | **`umd_flops` / `umd_bytes`** op annotations (below) |
+
+The tile/wave quantization (Tier 2) is not auto-inferable — the tool cannot guess that `seqlen_q` pairs
+with `tile_m0` — but it is not homeless either: it lives in the UHD's **`derived` block**
+([Section 6.4](#64-derived-values-the-uhd-derived-block)). The tool can emit a **stub `derived` block**
+(the raw fields plus placeholders for the correspondences) for the author to complete, then reference
+the results from the proposed `features_signature` — and, being on the UHD, both are regenerated together.
+
+**Arithmetic intensity, and what authors provide for it.** Intensity is
+`total_FLOPs / total_bytes_moved` (FLOP/byte) — the roofline x-axis that separates compute-bound from
+memory-bound problems, which is exactly the split that decides which kernel wins. Both terms are
+closed-form over the bound dims and dtype sizes, but the *formulas* are op-specific and cannot be
+inferred from the KMD field list. So they are authored **once per op, at Layer 1**, as two table-level
+attributes on the op's `.fbs` schema — the same annotation channel and codegen as `umd_opcode`:
+
+```fbs
+// data_types.fbs — declare once, alongside the existing umd_* attributes
+attribute "umd_flops";   // JsonLogic expr over bound dims -> FLOP count
+attribute "umd_bytes";   // JsonLogic expr over bound dims + per-tensor dtype size -> bytes moved
+
+// sdpa_attributes.fbs — applied table-level, next to umd_opcode
+table SdpaAttributes (
+    umd_opcode: "sdpa_fwd",
+    umd_flops:  "{\"*\":[4,\"$q.batch\",\"$q.num_heads\",\"$q.seqlen_q\",\"$k.seqlen_k\",\"$q.head_size\"]}",
+    umd_bytes:  "..."   // sum of per-tensor (element_count * dtype_bytes) for Q, K, V, O
+) { /* ... */ }
+```
+
+Because these are **op-intrinsic** (SDPA does `4·B·H·Sq·Sk·D` FLOPs regardless of engine or package),
+they live at Layer 1 and are shared by every package of that op — one annotation per op-family, authored
+once. The codegen then promotes intensity into the bindable vocabulary as a derived field (e.g.
+`$sdpa_fwd.arithmetic_intensity`), which a `features_signature` references *identically* to a raw dim
+like `$q.seqlen_q`. The Tier-3 "physics" distinction thus disappears at the point of use.
+
+Caveats:
+
+- **Only the two `.fbs` attributes are a new author ask.** The FLOP/byte formulas are the sole required
+  input; everything else (Tier 1, and Tier 2 given the correspondence hint) is derived. `dtype`→byte
+  size is already a known schema mapping, not a new ask.
+- **Mixed-dtype ops** (e.g. fp8 in / fp16 accumulate, or differing I/O dtypes) make `umd_bytes` a sum
+  over *per-tensor* dtype sizes, not one global `dtype_bytes`. The single expression still handles it,
+  but it must reference each tensor's own dtype — a single-dtype shortcut is wrong for quantized kernels.
+- **A native-predicate fallback** covers ops whose FLOP/byte count is not a clean closed form (ragged,
+  data-dependent masking): a registered function resolved by name instead of an inline formula, via the
+  custom-operation escape hatch ([Section 7](#7-model-adapters)).
+- **Auto-derivation yields a *superset*.** Deriving every raw field and generic transform produces a
+  bloated, noisy vector that can hurt a small-data model; the sweep's feature-importance (or a curated
+  per-op template) prunes it. Auto-derivation proposes; data or a template trims.
+
+**A data-free structural first pass.** Tiers 1–2 alone (no benchmarking) already support a real
+model-free heuristic better than `static_order`: prefer the kernel whose tile best divides the problem
+(minimize quantization waste), tie-break on an occupancy proxy. That is a legitimate `table`/rule UHD
+computable from KMD + matcher bindings + device facts, and it is the zero-benchmark starting point before
+the autotune-trained `tree_data` model replaces it.
+
+---
+
+## 14. Package-Creation-Time Selection: Knobs and AOT Kernels
+
+Everything above concerns *runtime* selection (which kernel wins for a graph) and *model* generation
+(training a UHD for a fixed pack). This section covers the stage upstream of both: deciding **which knobs
+a package exposes** and **which kernels it compiles AOT** — that is, generating the UED and the UKD set
+itself, at **package creation time**.
+
+It is a distinct heuristics area, and it closes a loop with
+[Section 13](#13-model-generation-pipeline): a generated heuristic is one of the inputs used to prune
+knobs, and the pruned knob set then changes which kernels are worth compiling.
+
+> **First pass.** This captures the intended shape of the work. The algorithms — prioritization
+> objective, search-space refinement, pruning thresholds — are deliberately left open below.
+
+### 14.1 AOT selection depends on whether the engine can JIT
+
+The goal of AOT differs sharply between two regimes.
+
+**Engine can JIT in hipDNN — AOT is a cost optimization.** AOT exists to cut compile cost for the
+kernels that actually get used. Coverage is *not* the objective, because the JIT path already covers the
+space; AOT only needs the most-used, most-performant subset. All knobs are available, and compiling a
+subset trades package size and build time against runtime compile latency.
+**Goal: select the best kernels for a representative set of data.**
+
+**Engine cannot JIT in hipDNN — AOT is the entire functional surface.** Here the compiled kernels are
+everything the engine can do, so the set needs *both* good coverage and good performance. This is the
+case when JIT has not been built (rocKE today), is never planned, or the kernel generator is not
+JIT-able (CK). In this regime hipDNN **cannot inform** AOT selection — it can only **filter** an
+already-generated set to reduce package size and runtime load. That filtering can feed back into knob
+generation, but it **cannot reduce the up-front cost of variant explosion**, which happens in the
+engine's own generator before hipDNN sees anything.
+**Goal: filter the worst kernels to reduce size, without losing coverage.**
+
+| | Engine can JIT | Engine cannot JIT |
+|---|---|---|
+| Role of AOT | compile-cost optimization | the entire functional surface |
+| Coverage requirement | low — JIT is the fallback | high — nothing else fills the gap |
+| Objective | **select the best** for the data | **filter the worst** to reduce size |
+| hipDNN's leverage | can inform *what to build* | can only filter *what was already built* |
+
+### 14.2 Pipeline: AOT selection
+
+1. **Generate an unoptimized KDP** that exposes all possible knobs (for JIT or AOT), through tooling
+   plus user generation.
+2. **Benchmark that KDP through hipDNN** using the exposed knobs, over an *algorithmically refined*
+   search space rather than the full cross-product — and, where relevant, over **targeted datasets for
+   specific clients**.
+3. **Post-hoc algorithmic evaluation** to prioritize the candidate list: frequency of kernel use, the
+   time cost of a poor selection, and similar signals.
+4. **Modify the KDP** to include the AOT kernels selected (or newly created) by that evaluation, on
+   coverage / frequency / performance.
+
+Step 2 uses the same autotune substrate as [Section 13.2](#132-benchmarking-via-hipdnn-autotune); what
+differs is *what varies* (the variant space itself, not just the shape corpus) and *what the output
+drives* (the pack's kernel set, not a model).
+
+### 14.3 Knob selection: static vs. empirical
+
+**Static analysis.** Largely package/project dependent, driven by the kernel author — increasingly with
+LLM assistance — and limited tooling. This is likely **not** an area the heuristics team owns directly.
+It answers two questions from the code: which knobs indicate that a **separate engine** is warranted
+rather than one super-engine, and which knobs are **dead or low-impact** for performance.
+
+**Empirical.** Requires a generation-and-execution loop. That loop can live **inside hipDNN** when the
+engine supports both JIT and AOT; otherwise it must live **in the engine's own codebase**, wherever the
+generation/execution loop can actually run.
+
+### 14.4 Pipeline: knob reduction (hipDNN JIT case)
+
+1. **Generate an unoptimized KDP** exposing all possible knobs for JIT.
+2. **Benchmark through hipDNN** over an algorithmically refined search space.
+3. **Generate heuristics** from the results ([Section 13](#13-model-generation-pipeline)).
+4. **Backwards-evaluate the heuristics** to find the weakest knobs — the axes the trained model barely
+   uses.
+5. **Regenerate the UED** with the reduced knob set.
+6. **Regenerate the AOT kernels** from the reduced knobs, or run the AOT-selection pipeline
+   ([Section 14.2](#142-pipeline-aot-selection)).
+
+Step 4 is the same signal as the feature-importance pruning noted in
+[Section 13.6](#136-auto-deriving-a-first-pass-features_signature) — there it trims a bloated
+`features_signature`; here it trims the **knob space itself**. A knob the model never splits on is a knob
+whose variants are not earning their package size.
+
+Steps 5–6 are why this closes a loop: a smaller knob set shrinks the `$kernel.*` space
+([Section 3.2](#32-kmd-fields-and-knobs-as-a-view-onto-them)), which shrinks both the variant explosion
+and the feature vector, which changes what the next model needs.
+
+### 14.5 Relationship to the model-generation pipeline
+
+[Section 13.5](#135-sweep-space-grid-vs-constraint) states that the variant space is *fixed* for model
+generation — the tool enrolls the pack's existing UKDs and times them. That holds **within** that
+pipeline. This section is the stage where the variant space is actually **decided**, and where a
+generated heuristic feeds back to change it. The two run in sequence and iterate:
+
+```
+pack (all knobs) → benchmark → heuristic → prune knobs → regenerate pack → benchmark → heuristic → …
+```
+
+**OPEN items for this area:**
+
+- The **prioritization objective** for AOT selection (step 3): how to weigh frequency of use against the
+  time cost of a poor selection, and how client-specific targeted datasets factor in.
+- How the **search-space refinement** algorithm works, and whether it is shared with the shape-corpus
+  sweep of [Section 13.5](#135-sweep-space-grid-vs-constraint).
+- The **pruning threshold** for a "weak" knob, and whether pruning is automatic or a proposal for author
+  review.
+- For the **non-JIT** case, whether anything can feed back into the *engine's own generator* to reduce
+  variant explosion at the source, rather than only filtering after the fact.
 
 ---
 
@@ -952,11 +1288,13 @@ using the parity and overhead checks of [RFC 0017 §12.1](0017_UniversalKernelDe
 |-------|-------------|-------|
 | 1 | `static_order` baseline | UHD schema + KDP membership + deterministic ranking. Every pack gets a working, model-free selector. Proves UED→UHD→child-UKD wiring end to end. |
 | 2 | `features_signature` + generic extractor | Inline signature, single extractor over shared namespaces, training↔runtime parity test, expression-op extension. |
-| 3 | `tree_data` + in-tree walker | Default shipping path. LightGBM model exported to data, evaluated by in-tree GBDT walker (reusing MIOpen's `LgbmForest`-style parser). Lands the real FMHA-fwd model. Adds lazy load + model cache. |
+| 3 | `tree_data` + in-tree walker | Default shipping path. LightGBM model exported to data, evaluated by a **new in-tree GBDT walker written for this work** — a bounded tree-table parser and evaluator with no external dependency. Lands the real FMHA-fwd model. Adds lazy load + model cache. |
 | 4 | Generation tool | Standalone tool that drives autotune across a shape corpus, trains a model, emits updated UED/UHD. |
 | 5 | `table` / CSV | Cheap bucketed heuristics for ops that don't warrant a model. |
 | 6 | `custom_library` | Compiled scorer `.so` for models the in-tree walker doesn't cover. Dependency + trust audit gated. |
 | 7 | Engine-selection integration | Score-only mode, plugin-query surface, engine-selection policy. Co-owned with [RFC 0007](0007_EngineSelectionHeuristicsFramework.md). |
+| 8 | AOT selection ([Section 14.2](#142-pipeline-aot-selection)) | Benchmark an all-knobs KDP, prioritize by frequency / cost-of-poor-selection, emit the AOT kernel set. Needed first for **non-JIT** engines (rocKE today, CK), where it is filtering rather than selection. Depends on phase 4. |
+| 9 | Knob reduction loop ([Section 14.4](#144-pipeline-knob-reduction-hipdnn-jit-case)) | Backwards-evaluate a generated heuristic for weak knobs, regenerate the UED with a reduced knob set, then regenerate AOT kernels. Requires an engine that can **JIT in hipDNN**; depends on phases 4 and 8. |
 
 `lgbm_to_c` (build-time, in-tree perf optimization only) and `lightgbm_native` are dependency-gated and
 land only when a concrete need appears.
@@ -967,9 +1305,9 @@ land only when a concrete need appears.
 
 | Risk | Description | Mitigation |
 |------|-------------|------------|
-| **Feature-contract drift** | Training and inference feature vectors diverge | Single `features_signature` drives both sides via one generic extractor; three-part load-time check ([Section 7.3](#73-contract-enforcement)); fail-closed on mismatch |
+| **Feature-contract drift** | Training and inference feature vectors diverge | Single `features_signature` drives both sides via one generic extractor; three-part load-time check ([Section 6.3](#63-contract-enforcement)); fail-closed on mismatch |
 | **Kernel-identity drift** | Timed candidate doesn't match emitted UKD | Tool keys dataset on UKD identity (`engineId`/config → `metadata`); load-time validation |
-| **KMD↔UHD coupling** | a *breaking* KMD change (removed/reinterpreted field) invalidates the trained model; a training-coverage gap degrades ranking silently | KMD-version check at load, fail closed on incompatible pairing or dangling `features_signature` ref; additive changes need no retrain until exposed ([§4.3](#43-coupling-rules)); training-coverage warning in the trace |
+| **KMD↔UHD coupling** | a *breaking* KMD change (removed/reinterpreted field) invalidates the trained model; a training-coverage gap degrades ranking silently | KMD-version check at load, fail closed on incompatible pairing or dangling `features_signature` ref; additive changes need no retrain until exposed ([§3.3](#33-coupling-rules)); training-coverage warning in the trace |
 | **Dependency creep** | Pressure to link `liblightgbm` at runtime | In-tree `tree_data` default; runtime deps stay opt-in only |
 | **Bad/stale model** | Model picks worse than first-match | Fail-open to `static_order`; generic-vs-baseline parity gate; model provenance in trace |
 | **Miscalibrated cross-engine scores** | Absolute score misleads engine selection | Train calibratable TFLOPS from start; fall back to rank-ordering at policy level if calibration unreliable |
@@ -985,10 +1323,10 @@ land only when a concrete need appears.
 1. **Regressor vs. ranker.** The tooling trains a *regressor* on TFLOPS and argmaxes. A
    learning-to-rank objective (LambdaRank/NDCG) optimizes ordering directly and may pick better
    *within* an engine without needing calibrated absolute values. But a calibrated TFLOPS *regressor*
-   is what makes the absolute, cross-comparable metric of [Section 12.3](#123-cross-engine-comparison)
+   is what makes the absolute, cross-comparable metric of [Section 11.3](#113-cross-engine-comparison)
    possible; a pure ranker forecloses that and leaves only the rank-ordering path. Recommendation:
    regressor, preserving the absolute option, with ranking as the fallback rather than the only mode.
-   *(Impacts [Section 5](#5-uhd-schema), [Section 12.3](#123-cross-engine-comparison).)*
+   *(Impacts [Section 4](#4-uhd-schema), [Section 11.3](#113-cross-engine-comparison).)*
 
 2. **Arch-aware model scope.** The UHD is one per engine, and the engine spans arches (`arch` is a KDP
    property), so the model is arch-aware via `$device.*` features — one model generalizing across the
@@ -996,13 +1334,13 @@ land only when a concrete need appears.
    model per engine assumes device features capture the cross-arch differences well enough. If they
    don't, an engine can be scoped more narrowly (a UED per arch/dtype) so its single UHD stays within
    one arch. Decide against real cross-arch accuracy data.
-   *(Impacts [Section 4](#4-ownership-model).)*
+   *(Impacts [Section 3](#3-ownership-model).)*
 
 3. **`tree_data` artifact format.** A data-SDK FlatBuffer tree schema (recommended) — consistent with
    graph/device-props serialization, `Verifier`-gated, additive evolution, needs a convert step at
    build. Alternative: parse LightGBM `model.txt` at load — lowest author friction (no conversion) but
    a bespoke parser to write and harden against hostile input.
-   *(Impacts [Section 8.1](#81-default-tree_data).)*
+   *(Impacts [Section 7.1](#71-default-tree_data).)*
 
 4. **Derived feature set.** Arithmetic intensity, tile quantization, aspect ratios, occupancy,
    padding-fit — are there others? Candidates: memory-footprint / working-set vs. cache and HBM
@@ -1010,58 +1348,81 @@ land only when a concrete need appears.
    wave-quantization *tail* (last-wave occupancy); K-splitting overhead for split-K variants.
    Enumerate the final set against real per-op sweeps before freezing.
    *(The expression-op question is resolved — the UMD RFC's JsonLogic operator set already covers the
-   derived features.)* *(Impacts [Section 7.2](#72-the-features_signature).)*
+   derived features.)* *(Impacts [Section 6.2](#62-the-features_signature).)*
+   **Auto-derivation dependency:** the physics features (arithmetic intensity, roofline bound) need
+   per-op **`umd_flops` / `umd_bytes`** `.fbs` annotations to be derivable ([Section 13.6](#136-auto-deriving-a-first-pass-features_signature)).
+   Open: settle the two attributes (declaration + per-op application) and the mixed-dtype byte-formula
+   convention. Tier-2 quantization (the dim↔tile correspondence) lives in the UHD's **`derived` block**
+   ([Section 6.4](#64-derived-values-the-uhd-derived-block)).
 
 ### Structural
 
-5. **Overlapping packs.** Under the KDP model, two *packs* can match one graph. Their child kernels
-   are ranked by *different* UHDs whose scores are not comparable. Options: (a) forbid overlapping
-   packs for one engine — extend the deterministic-arbitration duplicate-match check in
-   [RFC 0017 §5](0017_UniversalKernelDescriptor.md#5-matching-and-the-umd) to overlapping-but-not-identical;
-   (b) rank each pack's group by its own UHD, then compare winners by `priority` only; (c) require
-   comparable `score.units` to compare across packs. Recommendation: (a) for v1 — packs for one engine
-   should partition the graph space, not overlap.
-   *(Impacts [Section 6](#6-selection-flow).)*
+5. **Independently-authored packs joining one engine.** The catalog is engine-scoped and one UHD ranks
+   the union across packs ([Section 5](#5-selection-flow)), so overlapping packs do *not* produce
+   incomparable scores — but they do produce a catalog the model may never have seen. A UHD trained on
+   pack A's kernels is asked to rank A ∪ B when B is dropped in later, and nothing in the load-time
+   contract check catches it: the `features_signature` still resolves, because B's kernels fill the same
+   KMD fields. The model silently extrapolates. Options: (a) adding a pack to an engine requires
+   republishing that engine's UHD, retrained over the union — safe, but couples pack authors to the
+   engine owner; (b) accept extrapolation, on the theory that a model over `$kernel.*` metadata
+   generalizes to unseen kernels with in-distribution metadata, and add a training-coverage warning to
+   the trace when a scored candidate falls outside the trained range; (c) restrict v1 to a single
+   authoring owner per engine. Recommendation: (a) for v1, with (b)'s coverage warning as the detection
+   mechanism — it is the only option that keeps drop-in packs honest about what the model actually knows.
+   *(Impacts [Section 5](#5-selection-flow), [Section 8.2](#82-model-updates), [Section 16](#16-risks).)*
 
 6. **Engine estimate (A) vs. config UHD (B).** Is A a distinct trained model, or derived from B as
    max predicted score over candidates? Distinct is cheaper for the quick policy (skips enumeration);
    derived is one fewer model to train.
-   *(Impacts [Section 12.1](#121-two-heuristics).)*
+   *(Impacts [Section 11.1](#111-two-heuristics).)*
 
 7. **Non-descriptor engine estimates.** How does a non-descriptor engine (e.g. MIOpen) report an
    A-level estimate through the plugin-query surface? If it cannot, the quick policy falls back to
    static ordering for it — acceptable for v1, but limits performance-based engine ranking.
-   *(Impacts [Section 12.2](#122-two-engine-selection-policies-rfc-0007).)*
+   *(Impacts [Section 11.2](#112-two-engine-selection-policies-rfc-0007).)*
+
+8. **JIT and a multi-UHD engine.** When the candidate space is combinatorial rather than an enumerable
+   catalog ([Section 4.2](#42-future-a-list-of-uhds-when-there-is-no-catalog-to-rank)), selection needs a
+   stage that *produces* a tractable candidate set before anything can be ranked. Does that stage belong
+   in a UHD — making a UED name an ordered list of them — or is it catalog synthesis that belongs with
+   the JIT / package-creation work ([Section 14](#14-package-creation-time-selection-knobs-and-aot-kernels))?
+   Its output contract (new KMD tuples, feeding the build path) differs from ranking, which argues for
+   the latter. Deferred until the JIT path is real.
 
 ### Operational
 
-8. **Caching scope.** The in-process cache keyed on `(engine id, graph id, device id)` + inventory
+9. **Caching scope.** The in-process cache keyed on `(engine id, graph id, device id)` + inventory
    generation counter is sufficient for repeated graphs within a session. Persistent cross-run caching
    interacts with a future [RFC 0007](0007_EngineSelectionHeuristicsFramework.md) "cache selector"
    policy — defer until that policy is designed.
-   *(Impacts [Section 10.2](#102-loading-and-caching).)*
+   *(Impacts [Section 9.2](#92-loading-and-caching).)*
 
-9. **Shape corpus location.** The variant space is fixed (the pack's UKDs, timed via autotune), but
+10. **Shape corpus location.** The variant space is fixed (the pack's UKDs, timed via autotune), but
    the **shape corpus** and any **runtime-knob grid** need a home. A validity *constraint*
    (`min:1, max:8`) expresses which values are *legal*, not which to *sample*, so a swept axis needs
    an explicit `sweep_values` / grid hint, not an inferred range. Standardize: tool-side config (less
    coupled, easier to iterate) or descriptor field (reproducible from pack alone)?
-   *(Impacts [Section 14.5](#145-sweep-space-grid-vs-constraint).)*
+   *(Impacts [Section 13.5](#135-sweep-space-grid-vs-constraint).)*
 
-10. **Dependency + trust audit.** Needs deeper investigation: the exact allowed dependency surface
+11. **Dependency + trust audit.** Needs deeper investigation: the exact allowed dependency surface
     for a shipped provider (license, distro packaging, ROCm image contents), and for `custom_library`
     the trust/signing rules for dropping in author-compiled native code. The former decides whether
     the in-tree tree-walker must be fully first-party or may vendor a third-party evaluator; the
     latter gates the `custom_library` drop-in path.
-    *(Impacts [Section 8](#8-model-adapters), [Section 10.1](#101-dependencies).)*
+    *(Impacts [Section 7](#7-model-adapters), [Section 9.1](#91-dependencies).)*
 
 ---
 
 ## 18. Glossary
 
 - **UHD (Universal Heuristic Descriptor):** One kernel-selection model, owned by the UED (one per
-  engine), that ranks the applicable child UKDs of every pack joining its engine and picks one.
-  Per-engine and arch-aware (takes `$device.*`).
+  engine), that ranks the engine's catalog for a graph and picks a winner. Per-engine and arch-aware
+  (takes `$device.*`).
+
+
+- **Catalog:** The set of an engine's kernels that pass every matcher for one graph — engine-scoped, the
+  union across every KDP joining that engine ([RFC 0017](0017_UniversalKernelDescriptor.md)). The
+  pipeline's initial candidate set.
 
 - **KDP (Kernel Descriptor Pack):** The pack that joins an engine and adds kernels; names one matcher
   set, one UED (which carries the UHD and KMD), and one UDD over a vector of child UKDs. The selection
@@ -1072,23 +1433,28 @@ land only when a concrete need appears.
   `dtype`, …) every kernel carries, each with a type and optional default. **One KMD per engine, owned
   by the UED**; each UKD's `metadata` fills it. It is the authoritative schema for the `$kernel.*` fields
   the UHD ranks on and the `features_signature` references
-  ([Section 4.2](#42-kmd-fields-and-knobs-as-a-view-onto-them)).
+  ([Section 3.2](#32-kmd-fields-and-knobs-as-a-view-onto-them)).
 
 - **UED (Universal Engine Descriptor):** The UED names one UHD and one KMD. They are coupled — the KMD
   is the feature space the UHD ranks over — so the engine owns both; a *breaking* KMD change requires
   retraining the UHD, while additive changes and dispatch-only fields do not
-  ([Section 4.3](#43-coupling-rules)).
+  ([Section 3.3](#33-coupling-rules)).
+
+- **`global.` knobs:** hipDNN's reserved knob namespace ([RFC 0004](0004_EngineConfigKnobs.md)), which a
+  descriptor-backed engine implements like any other engine. Per
+  [RFC 0020 §5](0020_UniversalEngineDescriptor.md) it is **separate from** the UED's `knobs` list and the
+  two do not overlap — so `global.` knobs are not KMD fields and are not part of the UHD's feature space.
 
 - **Knob:** A **KMD field the engine chooses to expose** to the user — a name in the UED's `knobs`, and
   nothing more (the KMD already declares the field's type and default). Only KMD fields can be knobs; a
   knob's legal values come from the *catalog* for this graph, and its **default is whatever the UHD ranks
   first**. Knobs *filter* the catalog; the UHD then ranks what survives
-  ([Section 4.2](#42-kmd-fields-and-knobs-as-a-view-onto-them)).
+  ([Section 3.2](#32-kmd-fields-and-knobs-as-a-view-onto-them)).
 
 - **KMD field space:** The engine's variant axes (`tile_m`, `warp_n`, `split_k`), filled per-kernel in
   UKD `metadata` — the space the UHD ranks over, read as `$kernel.*`. Each UKD is one point in it (and
   its unique catalog key); the KDP is the collection. Knobs are a user-facing *subset* of these fields,
-  not a separate category ([Section 4.2](#42-kmd-fields-and-knobs-as-a-view-onto-them)).
+  not a separate category ([Section 3.2](#32-kmd-fields-and-knobs-as-a-view-onto-them)).
 
 - **Kernel-selection heuristic vs. engine-selection heuristic:** The two levels; the UHD is the former
   (which kernel within an engine), [RFC 0007](0007_EngineSelectionHeuristicsFramework.md) owns the
@@ -1108,16 +1474,24 @@ land only when a concrete need appears.
   through an adapter in build-and-runtime (default) or build-only delivery classes, mirroring
   [RFC 0017 §8](0017_UniversalKernelDescriptor.md#8-adapters-and-extensibility).
 
+- **The tooling:** The existing heuristic-generation pipeline this RFC builds on — a sweep step that
+  produces a training dataset (problem × kernel × measured TFLOPS), a training step that fits a
+  LightGBM regressor on `log1p(tflops)`, an exporter, and a dispatcher path, first exercised on
+  SDPA/FMHA forward and reusable by any package author
+  ([Section 13](#13-model-generation-pipeline)). Two of its lessons shape this design: shipping the
+  model **as data** is what makes a heuristic drop-in, and the **feature vector is the fragile
+  contract**, so generating it from one specification is what keeps training and inference honest.
+
 - **`lgbm_to_c`:** The tooling's build-only path that lowers a LightGBM booster to C linked into the
   provider. Kept only as an optional build-time perf optimization for in-tree AOT models — **not** a
-  drop-in shipping mechanism ([Section 3.1](#31-existing-heuristic-generation-tooling)).
+  drop-in shipping mechanism.
 
 - **Score-only mode:** Running a UHD to obtain the best predicted score without selecting for launch;
   the hook for surfacing estimated TFLOPS to engine selection.
 
 - **Stage P (package):** The pipeline stage that emits the engine descriptor set (UED/UHD/KMD +
   tree-table) from the same sweep that trained the model, enforcing the feature and kernel-identity
-  contracts ([Section 14](#14-model-generation-pipeline)).
+  contracts ([Section 13](#13-model-generation-pipeline)).
 
 - **Engine estimate (A):** Cheap `f(graph) → expected performance` model for quick policy engine ranking.
 
