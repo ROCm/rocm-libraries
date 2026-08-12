@@ -18,7 +18,7 @@
 5. [Constraint Vocabulary](#5-constraint-vocabulary)
 6. [The Shared Expression Language](#6-the-shared-expression-language)
 7. [Layout and Stride-Order Constraints](#7-layout-and-stride-order-constraints)
-8. [Native-Predicate Escape Hatch](#8-native-predicate-escape-hatch)
+8. [The Native-Matcher Escape Hatch](#8-the-native-matcher-escape-hatch)
 9. [Composite Constraints](#9-composite-constraints)
 10. [The Matcher: Compilation, Indexing, and Caching](#10-the-matcher-compilation-indexing-and-caching)
 11. [Static Matcher (Sketch)](#11-static-matcher-sketch)
@@ -60,7 +60,7 @@ A UMD has two parts, unchanged in intent from
 This document turns that frame into a concrete format and a concrete matcher. It specifies the pattern
 and criteria schema, the standard formula that auto-binds every tensor and attribute of a matched op,
 JsonLogic as the shared expression language (boolean criteria here, dispatch formulas in the UDD),
-the layout representation as a stride-order index array, the custom-operation escape hatch,
+the layout representation as a stride-order index array, the native-matcher escape hatch,
 deterministic arbitration, and the compile-once matcher with its indexing and caching. The static
 (compile-time) matcher is sketched as options, not fully designed, in this iteration.
 
@@ -73,7 +73,7 @@ deterministic arbitration, and the compile-once matcher with its indexing and ca
 | Criteria as one JsonLogic expression: opcode, dtype (exact/set/relation), shape/rank, divisibility, stride order, packed, attribute, graph-structure (`node_count`, `virtual`), cross-tensor relation, optional operand, device property | Yes ([§5](#5-constraint-vocabulary)) | None |
 | JsonLogic as the shared expression language (UMD boolean + UDD value), `$`-variable convention | Yes ([§6](#6-the-shared-expression-language)) | New operators as needed |
 | Layout as a stride-order index array, with named aliases | Yes ([§7](#7-layout-and-stride-order-constraints)) | None |
-| Custom-operation (native-predicate) escape hatch, registry-resolved | Yes ([§8](#8-native-predicate-escape-hatch)) | None |
+| Escape hatch for checks needing C++, beside the descriptor rather than inside the expression language | Yes ([§8](#8-the-native-matcher-escape-hatch)) | None |
 | Composite criteria: `(A AND B) OR C` as one criteria expression, via JsonLogic `and`/`or`/`!`/`if` | Yes ([§9](#9-composite-constraints)) | None |
 | Compile-once matcher, root-opcode index, applicability-time match cache | Yes ([§10](#10-the-matcher-compilation-indexing-and-caching)) | None |
 | Static (compile-time / AOT-lowered) matcher | Options sketched ([§11](#11-static-matcher-sketch)) | Full design |
@@ -278,7 +278,7 @@ as a single typed token — present only when the tensor carries a compile-time 
 criterion over it declines on a tensor that does not. A precomputed field is declared in the hipDNN
 schema like any other field and versioned with it, so adding one is an additive schema change rather
 than a per-pack extension point. Precomputed fields sit between the built-in operators and the
-native-predicate escape hatch ([§8](#8-native-predicate-escape-hatch)): reach for one when a check
+native-matcher escape hatch ([§8](#8-the-native-matcher-escape-hatch)): reach for one when a check
 needs a derived fact, and for the hatch only when it needs real C++.
 
 **A `$` marks a reference.** Every reference to a bound field carries a leading `$`: tensors and
@@ -287,14 +287,14 @@ their fields (`$q`, `$q.uid`, `$q.dims[2]`, `$q.rank`, `$q.seqlen_q`), a node's 
 and `$device.lds_size`. Tokens without a `$` are literals: numbers, enum values (`"BFLOAT16"`,
 `"gfx942"`), opcodes, and layout aliases. This is the JsonLogic variable rule of
 [§6](#6-the-shared-expression-language): a `$`-string is a variable, everything else a literal, so no
-`var` wrapper is needed and the same token reads identically in a criteria expression or a
-custom-operation argument.
+`var` wrapper is needed and the same token reads identically wherever a criteria expression names a
+bound field.
 
 **Named dims via the `shape` short-hand.** `shape` is a criteria short-hand that names a tensor's dims
 and pins its rank to the list length: `{"shape": ["$q", ["batch", "num_heads", "seqlen_q", "head_size"]]}`
 makes those dims readable as `$q.batch` … `$q.head_size` and requires `$q` to be rank 4. Names are
 per-tensor, so a cross-tensor relation (same head dim across q/k) is an explicit criterion,
-`{"==": ["$k.head_size", "$q.head_size"]}`, or a custom operation. A dim position may be left anonymous
+`{"==": ["$k.head_size", "$q.head_size"]}`. A dim position may be left anonymous
 with `"_"`. When rank varies (NCHW vs NCDHW), name the fixed dims and capture the variable run as one
 vector, `["n", "c", "$spatial"]`, so one matcher accepts both ranks and still reaches those dims through
 `all` or a product; the exact `shape` grammar is specified in [Appendix A.5](#a5-the-shape-short-hand).
@@ -310,10 +310,9 @@ The `criteria` field is a **single JsonLogic boolean expression** evaluated over
 normally an `and` of the individual tests, and reaches for `or` / `!` / `if` wherever a real
 disjunction is needed ([§9](#9-composite-constraints)). The table below is not a set of criterion
 *kinds* (there are none); it is the set of hand-written checks and the
-JsonLogic sub-expression that expresses each, so no check needs code a JsonLogic expression cannot
-state. The one residue is a **custom operation** (native predicate), itself a JsonLogic operation
-resolved from the provider registry ([§8](#8-native-predicate-escape-hatch)), so it composes inside the
-same expression as any built-in operator.
+JsonLogic sub-expression that expresses each. The residue — the handful of checks that need real C++
+— is not an operator at all: it is a **native matcher** the pack lists beside the descriptor
+([§8](#8-the-native-matcher-escape-hatch)), so the expression language itself stays closed.
 
 | Hand-written check | JsonLogic criterion | Lowers from |
 |---|---|---|
@@ -332,7 +331,7 @@ same expression as any built-in operator.
 | **Graph structure (exact / fusion)** | `{"==": ["$graph.node_count", 3]}`, and each intermediate `"$conv_out.virtual"` | node-count gate, fusion legality |
 | **Cross-tensor / arithmetic** | `{"==": ["$q.dims[1]", "$k.dims[2]"]}`, `{"<": ["$q.head_size", 129]}`, `{"==": [{"%": ["$q.num_heads", "$k.kv_heads"]}, 0]}` | arithmetic and comparison gates |
 | **Device property** | `{"<=": ["$kernel.lds_per_block", "$device.lds_size"]}` (arch is a pack property, not a criterion) | LDS/occupancy budgets; `getDeviceString` arch → pack `arch` |
-| **Custom operation** | `{"hipdnn.strides_fit_u32": ["$q", "$k", "$v", "$o"]}` ([§8](#8-native-predicate-escape-hatch)) | overflow guards, table lookups, derived-shape relations |
+| **Needs real C++** | not a criterion; a native matcher listed beside the descriptor ([§8](#8-the-native-matcher-escape-hatch)) | overflow guards, contradiction checks, derived-shape relations |
 
 Architecture gates *applicability* at pack selection via the KDP `arch` property and the per-arch
 `kpack` manifest ([RFC 0017 §5](0017_UniversalKernelDescriptor.md#5-matching-and-the-umd),
@@ -400,10 +399,11 @@ the per-element `all`; arithmetic `+`, `-`, `*`, `/`, `%`; the presence predicat
 a possibly-absent optional operand with a fallback); the conditional `if`; and the value-core
 arithmetic the UDD needs (`ceil_div`, `min`, `max`, `abs`, `pow`, `log2`, `rsqrt`). The full table
 with arities and types is [A.7](#a7-operator-reference); naming an operator outside it fails load
-validation. Anything the built-ins cannot express is a **custom operation**
-([§8](#8-native-predicate-escape-hatch)). Adding an operator is additive
-([§13](#13-serialization-and-versioning)); it never introduces a new criterion *kind*, since the whole
-`criteria` field is one JsonLogic expression.
+validation, and the set is closed — there is no registry or namespace by which a descriptor
+introduces one ([A.9](#a9-the-operator-set-is-closed)). Anything the built-ins cannot express is a
+**native matcher** beside the descriptor ([§8](#8-the-native-matcher-escape-hatch)). Adding a built-in
+operator is additive ([§13](#13-serialization-and-versioning)); it never introduces a new criterion
+*kind*, since the whole `criteria` field is one JsonLogic expression.
 
 **Operators nest, and either side of a comparison may be computed.** A leaf is a literal or a
 `$`-prefixed reference, but either operand of a comparison can itself be an expression, so a check
@@ -480,53 +480,80 @@ dimension stored at physical position `i`, so the array reads as the layout it d
 
 ---
 
-## 8. Native-Predicate Escape Hatch
+## 8. The Native-Matcher Escape Hatch
 
-Some checks cannot be stated with the built-in operators: they need real C++. The UMD exposes them as a
-**custom operation** (a native predicate) — a JsonLogic operation resolved from a provider-internal
-registry and invoked by its registered (namespaced) name as the operator key, so it nests inside the
-`criteria` expression exactly like a built-in operator and negates with `!`:
+Some checks cannot be stated with the built-in operators: they need real C++. **The expression
+language has no extension point for them.** There is no custom operation, no namespaced operator key,
+and no predicate registry the criteria tree resolves against; an operation key outside
+[A.7](#a7-operator-reference) is simply unrecognized and refused at compile time
+([Appendix A.10](#a10-compile-time-validation-normative)).
+
+Instead, such a check is a **native matcher**: an ordinary `GraphMatcherFn` registered in the
+provider's `NativeRegistry` and named by a `MatchDescriptor`'s `matchSymbol`
+([RFC 0017 §5](0017_UniversalKernelDescriptor.md#5-matching-and-the-umd)). A pack lists it alongside
+the descriptor-backed matcher, and the ingestor conjoins their verdicts: a pack's graph-scoped
+matchers all run and all must pass, so "this UMD's criteria **and** this C++ predicate" is expressed
+by listing two matcher ids, not by nesting one inside the other.
 
 ```jsonc
-{"hipdnn.strides_fit_u32": ["$q", "$k", "$v", "$o"]}         // a registered boolean operation
-{"!": {"hipdnn.sdpa_mask_consistent": ["$sdpa_fwd"]}}        // negated inside the same tree
+// pack.matcherIds: [ <the UMD above>, <"hipdnn.sdpa.strides_fit_u32">, ... ]
 ```
 
-The descriptor carries only the operation name and a typed argument list drawn from bound variables,
-never inline code. Custom operations take explicit arguments, not the whole graph, so they stay auditable and
-reusable. Both the build-time and drop-in paths resolve predicates from the same registry: a file that
-names only shipped predicates loads identically either way, and a file naming a predicate the running
-provider does not ship fails to resolve on the drop-in path. The registry a provider ships is therefore
-part of its published contract.
+**Why the hatch sits beside the expression language rather than inside it.** An escape hatch that
+nests inside `criteria` has to be resolved by the compiler, which means the criteria language grows a
+registry, a signature table, and a per-argument type contract — a second extension mechanism running
+parallel to the one RFC 0017 already defines, differing only in grain. One hatch, at the matcher
+level, keeps the expression language closed: every operator in [A.7](#a7-operator-reference) is
+total, statically typed against the op-schema registry, and means the same thing in every provider
+that ships a UMD. A descriptor is then fully interpretable from the schema alone, which is what makes
+the drop-in path and the static-matcher lowering of [§11](#11-static-matcher-sketch) tractable.
 
-The grounded cases that need this hatch:
+**What this costs, and the follow-up it implies.** A nested custom operation would have received
+*bound variables* (`["$q", "$k", "$v", "$o"]`); a `GraphMatcherFn` receives `MatchContext` — the raw
+graph and a device id — and must locate those tensors itself, repeating the structural search the UMD
+already performed, in hand-written code that can drift from the registry-driven binding. Nor can the
+existing plumbing hand them over: `BoundTokens` is `string -> int64_t`, which carries a dim but not a
+tensor. Closing this gap — letting a pack's native matcher read the bindings a descriptor-backed
+matcher in the same pack already published — is the natural follow-up, and it is a change to how
+matchers are invoked, not a change to the expression language.
+
+The grounded cases that take this path:
 
 - **Integer-overflow guards.** `wouldFwdByteStridesFitUint32` / `byteStrideFitsU32`
   (`SdpaFwdPlanBuilder.cpp:294`, `SdpaPlanUtils.hpp:159`): the kernarg struct stores byte strides as
-  `uint32`, so the check must be exact and fail closed. A predicate `hipdnn.strides_fit_u32`.
+  `uint32`, so the check must be exact and fail closed.
 - **Derived-quantity relations.** NumPy-broadcast affine-shape compatibility
   (`BatchnormApplicabilityChecks.cpp:169`), layernorm normalized-dim reconciliation
   (`LayernormApplicabilityChecks.cpp:68`), and RMSnorm `inv_rms` derived shape
   (`RMSnormApplicabilityChecks.cpp:106`) each compute a shape and compare it, beyond the constraint
   vocabulary.
 - **Contradiction checks.** `getMaskType` throws when mask attributes contradict
-  (`SdpaFwdPlanBuilder.cpp:276`); a predicate encodes "the mask attributes are self-consistent".
-- **GQA divisibility.** `nhead_q % nhead_k == 0 && nhead_k != 0` (`SdpaBwdPlanBuilder.cpp:548`) is
-  expressible with `%` in [§6](#6-the-shared-expression-language), but a native predicate is an option
-  if the zero-guard and fail-closed semantics are better centralized.
+  (`SdpaFwdPlanBuilder.cpp:276`); a matcher encodes "the mask attributes are self-consistent".
 
-**Kernel-table lookups are a migration artifact, not a lasting predicate.** The
+**GQA divisibility is not one of them.** `nhead_q % nhead_k == 0 && nhead_k != 0`
+(`SdpaBwdPlanBuilder.cpp:548`) is expressible with `%` in
+[§6](#6-the-shared-expression-language), and with no hatch inside the language there is no longer a
+"centralize the zero-guard as a predicate" alternative to weigh: it stays declarative, and the
+unknown-propagation rule of [A.7](#a7-operator-reference) supplies the fail-closed behavior.
+
+**Kernel-table lookups are a migration artifact, not a lasting matcher.** The
 `getKernelNameKey` / CSV-registry lookups (`SdpaFwdPlanBuilder.cpp:287`, three in
 `SdpaBwdPlanBuilder.cpp:660`) exist because today the builder resolves which prebuilt code object serves
 a shape. Under the UKD model the KDP names the code object directly and the heuristic ranks candidates,
 so these lookups mostly dissolve into ordinary constraints plus the Launch's kernel source. Where a
 residual "is there a row for this exact combination" gate remains during coexistence, it is a native
-predicate.
+matcher.
+
+**The registry a provider ships is part of its published contract**, unchanged from
+[RFC 0017 §5](0017_UniversalKernelDescriptor.md#5-matching-and-the-umd): a pack naming a `matchSymbol`
+the running provider does not ship fails to resolve, and fails closed. What changes is that this is
+the *only* place a name resolves to C++, so the drop-in story is simple — **a UMD file is pure data
+and always loads identically; a pack that needs C++ is not a drop-in.**
 
 Together with the UDD's custom-plan hatch
 ([RFC 0017 §6](0017_UniversalKernelDescriptor.md#6-dispatch-and-workspace)), these form the graded
-ladder: fully declarative constraints, then a named predicate for one step that needs C++, then a full
-provider.
+ladder: fully declarative constraints, then a native matcher beside the descriptor for one gate that
+needs C++, then a full provider.
 
 ---
 
@@ -543,8 +570,8 @@ natively, so `(A AND B) OR C` is stated directly in the one tree with no extra m
   ]}
 ```
 
-`and`, `or`, `!`, and `if` compose the same comparison, membership, and custom-operation
-([§8](#8-native-predicate-escape-hatch)) tests used everywhere else, so the deferral and reserved-shape
+`and`, `or`, `!`, and `if` compose the same comparison and membership tests used everywhere else, so
+the deferral and reserved-shape
 workaround of earlier drafts is gone: composition is day-one. A UMD whose tests all conjoin simply makes
 the top-level expression an `and`, the common case. General N-ary commutative matching and unbounded
 chains remain deferred to the JIT follow-up, as in RFC 0017 §5.
@@ -581,8 +608,8 @@ so the memoization key costs nothing extra. Results are cached across queries.
 short-circuiting: an `and` stops at its first false sub-expression, an `or` at its first true one, so a
 non-match is rejected as early as the author's structure allows. The author orders the tree; the
 compiler may hoist a cheap, highly selective sub-expression (a scalar attribute or dtype read) ahead of
-an expensive one (a native predicate) as an internal optimization, but this never changes the result,
-only when a decision is reached.
+an expensive one (a `shape`-wide relation) as an internal optimization, but this never changes the
+result, only when a decision is reached.
 
 **Matching runs during applicability, and the provider owns the cache.** The order and the cache are
 specified by [RFC 0017 §8](0017_UniversalKernelDescriptor.md#8-end-to-end-flow), which this RFC
@@ -701,7 +728,7 @@ hazard.
   tensors ([RFC 0016](0016_RuntimePassByValueTensors.md)) to `1.2`. The matcher reads that field
   rather than deriving a second floor of its own. A graph carrying no stamp reads as the `1.0`
   baseline.
-- **Additive evolution.** New JsonLogic operators, native predicates, and layout aliases are additive
+- **Additive evolution.** New JsonLogic operators and layout aliases are additive
   within `v1` where they do not change the meaning of an existing descriptor; anything that would
   reinterpret existing fields bumps the version.
 - **Identity.** A UMD `id` is a **UUID**: globally unique with no central allocator, so descriptors
@@ -723,9 +750,9 @@ untrusted or simply malformed, so they must be bounded and fail closed rather th
   provider.
 - **Checked arithmetic.** Shape, stride, and workspace arithmetic uses checked-width integers and fails
   closed on overflow rather than under-allocating or wrapping. This is the same class of bug the
-  `strides_fit_u32` predicate guards ([§8](#8-native-predicate-escape-hatch)).
-- **Fail-closed evaluation.** An unknown symbol, unresolved native predicate, out-of-range axis, or
-  type error declines the match; it never matches by default.
+  `strides_fit_u32` native matcher guards ([§8](#8-the-native-matcher-escape-hatch)).
+- **Fail-closed evaluation.** An unknown symbol, an unrecognized operator key, an out-of-range axis,
+  or a type error declines the match; it never matches by default.
 - **Quarantine, not cascade.** A bad descriptor is quarantined on load with a diagnostic; the rest load
   ([RFC 0017 §12](0017_UniversalKernelDescriptor.md#12-packaging-and-delivery)).
 - **Fuzzing.** A seed corpus of UMDs and graphs plus a fuzzer over the loader, matcher, and interpreter
@@ -801,21 +828,23 @@ on the graphs that engine covers, at which point the hand-written code is retire
 
 The **SDPA-forward** `isApplicable` (`SdpaFwdPlanBuilder.cpp:167`) is the first conversion, because it
 exercises nearly the whole vocabulary (opcode, attribute gates, optional-operand absence, rank, dtype
-relations, cross-tensor dim relations, and two custom operations) in one node. Its match-equivalence
+relations, and cross-tensor dim relations) in one node, with its two non-declarative gates in the
+paired native matcher. Its match-equivalence
 test ([§16](#16-testing-and-performance)) gates the cutover. The mlops builders follow, reusing the
 `IValidator` primitives (`dnn-providers/hip-kernel-provider/src/engines/hip_mlops_engine/plans/ApplicabilityChecks.cpp`) as the reference for their criteria
 lowering. The kernel-table lookups dissolve into the KDP as described in
-[§8](#8-native-predicate-escape-hatch).
+[§8](#8-the-native-matcher-escape-hatch).
 
 ---
 
 ## 18. Worked Example: SDPA Forward
 
-The SDPA-forward check collapses into one UMD. Compared to the hand-written builder
-(`SdpaFwdPlanBuilder.cpp:167-296`), each C++ gate becomes a sub-expression, and only the two genuinely
-non-declarative gates (uint32 stride fit, mask self-consistency) remain as custom operations. Note
-`$q.head_size` is bound from `$q`'s dim, not read as an attribute
-([§2](#2-the-matchers-input-hipdnns-graph-model)).
+The SDPA-forward check collapses into one UMD plus one native matcher. Compared to the hand-written
+builder (`SdpaFwdPlanBuilder.cpp:167-296`), each C++ gate becomes a sub-expression, and only the two
+genuinely non-declarative gates (uint32 stride fit, mask self-consistency) stay in C++ — as a native
+matcher the pack lists beside this descriptor, not as criteria
+([§8](#8-the-native-matcher-escape-hatch)). Note `$q.head_size` is bound from `$q`'s dim, not read as
+an attribute ([§2](#2-the-matchers-input-hipdnns-graph-model)).
 
 This example is grounded on the asm-SDPA builder because that builder is this RFC's first migration
 target ([§17](#17-migration)), so the mapping table below doubles as the cutover checklist. It is
@@ -852,11 +881,11 @@ the context of a full UKD, this one shows one hand-written `isApplicable` becomi
     {"or": [{"!": "$sdpa_fwd.generate_stats.present"}, {"==": ["$sdpa_fwd.generate_stats", false]}]},
     // unsupported optional operands declined together; `not_present` always evaluates,
     // unlike a field read on an absent operand
-    {"not_present": ["$attn_mask", "$page_table_k", "$page_table_v"]},
-    {"hipdnn.sdpa_mask_consistent": ["$sdpa_fwd"]},                // custom operation (needs C++)
-    {"hipdnn.strides_fit_u32":      ["$q", "$k", "$v", "$o"]}      // custom operation (needs C++)
+    {"not_present": ["$attn_mask", "$page_table_k", "$page_table_v"]}
   ]}
   // arch is a pack property (KDP.arch), not a match criterion
+  // uint32 stride fit and mask self-consistency are a native matcher the pack lists
+  // alongside this descriptor (§8), conjoined with these criteria by the ingestor
 }
 ```
 
@@ -873,9 +902,9 @@ Mapping to the hand-written code:
 | `q == k == v` dtype (:244) | `{"==": ["$k.dtype", "$q.dtype"]}` |
 | `k.dims[1] == v.dims[1]` head count (:251) | shared `kv_heads` name in `$k`/`$v` `shape` |
 | head dim == 128 | `{"==": ["$q.head_size", 128]}` |
-| `getMaskType` throw-on-contradiction (:276) | `hipdnn.sdpa_mask_consistent` custom operation |
-| `wouldFwdByteStridesFitUint32` (:294) | `hipdnn.strides_fit_u32` custom operation |
-| `getKernelNameKey` table lookup (:287) | dissolves into the KDP's Launch ([§8](#8-native-predicate-escape-hatch)) |
+| `getMaskType` throw-on-contradiction (:276) | native matcher ([§8](#8-the-native-matcher-escape-hatch)) |
+| `wouldFwdByteStridesFitUint32` (:294) | native matcher ([§8](#8-the-native-matcher-escape-hatch)) |
+| `getKernelNameKey` table lookup (:287) | dissolves into the KDP's Launch ([§8](#8-the-native-matcher-escape-hatch)) |
 
 The bound symbols (`$q..$o`, the named dims `$q.batch`, `$q.num_heads`, `$k.kv_heads`, `$q.seqlen_q`,
 `$k.seqlen_k`, `$q.head_size`, and every auto-bound dim/stride) are exactly what the paired UDD's grid
@@ -896,9 +925,10 @@ and argument formulas reference ([RFC 0017 §6](0017_UniversalKernelDescriptor.m
   A change made for one subsystem can affect the other. Mitigation: one parser/validator/interpreter,
   a shared conformance suite, and a clear split (criteria are boolean JsonLogic, dispatch formulas
   are value JsonLogic).
-- **Predicate registry as contract.** Native predicates are part of the published provider contract
-  ([§8](#8-native-predicate-escape-hatch)); a drop-in naming an unshipped predicate fails to resolve.
-  Mitigation: version and document the shipped predicate set; fail closed with a clear diagnostic.
+- **Native-matcher symbols as contract.** A pack's `matchSymbol` names C++ the provider must ship
+  ([§8](#8-the-native-matcher-escape-hatch)); a drop-in pack naming an unshipped symbol fails to
+  resolve. Mitigation: version and document the shipped symbol set, fail closed with a clear
+  diagnostic, and keep pure-UMD packs free of symbols so they remain true drop-ins.
 - **Match overhead.** Per-candidate evaluation of the criteria expression is unbounded by the
   root-opcode index ([§10](#10-the-matcher-compilation-indexing-and-caching)). Mitigation: short-circuit
   evaluation, applicability-time caching, and the overhead test of [§16](#16-testing-and-performance).
@@ -913,9 +943,9 @@ and argument formulas reference ([RFC 0017 §6](0017_UniversalKernelDescriptor.m
 1. **Expression language home.** This RFC pins JsonLogic as the shared expression language and defines
    it here because the UMD needs it first; the UDD follow-up references this section. Confirm the split
    rather than each subsystem defining its own, and decide where the shared conformance suite lives.
-2. **GQA divisibility.** Express `nhead_q % nhead_k == 0` with the `%` operator
-   ([§6](#6-the-shared-expression-language)) or centralize it as a native predicate for uniform
-   fail-closed zero-guarding ([§8](#8-native-predicate-escape-hatch))?
+2. **Native-matcher bindings.** A native matcher gets `MatchContext`, not the bindings its pack's UMD
+   already published ([§8](#8-the-native-matcher-escape-hatch)), so it re-locates tensors by hand.
+   Extend the matcher-invocation contract to pass the published bindings, or accept the duplication?
 3. **Static-matcher form.** Which of the [§11](#11-static-matcher-sketch) options becomes the AOT fast
    path, and does it also serve drop-in via a serialized bytecode?
 4. **Feature-vector overlap.** The bound symbol table overlaps the feature vector a UHD consumes
@@ -967,9 +997,10 @@ The design borrows established ideas; none is a dependency. These informed the U
   ([§6](#6-the-shared-expression-language)).
 - **Stride-order layout:** layout represented as an ordered list of logical dimension indices,
   outermost first, since tensors carry no layout enum ([§7](#7-layout-and-stride-order-constraints)).
-- **Custom operation (native predicate):** the escape hatch; a registry-resolved JsonLogic operation a
-  UMD invokes by its namespaced name for logic the built-in operators cannot state, carried as an
-  operation name and typed arguments, never inline code ([§8](#8-native-predicate-escape-hatch)).
+- **Native matcher:** the escape hatch; a `GraphMatcherFn` named by a `MatchDescriptor`'s
+  `matchSymbol` and conjoined with a UMD's criteria by the ingestor, for logic the built-in operators
+  cannot state. It lives beside the expression language, never inside it
+  ([§8](#8-the-native-matcher-escape-hatch)).
 - **Composite criteria:** any boolean combination of tests within the one `criteria` expression,
   written directly with JsonLogic `and` / `or` / `!` / `if` ([§9](#9-composite-constraints)).
 - **Arbitration:** the deterministic resolution when several UKDs match: heuristic (UHD) score, then
@@ -1177,7 +1208,6 @@ All integer arithmetic uses checked-width integers and fails closed on overflow
 | `present`, `not_present` | n-ary | `Ref…` | `Bool` | Was this supplied? `present` is `true` iff every referenced operand/field is bound; `not_present` iff every one is absent. Unlike a field read, these **always evaluate** rather than declining on an absent reference, so one call declines a list of unsupported optional operands |
 | `if` | 3 or 2n+1 | `Bool, Value [, Bool, Value]… , Value` | `Value` | `if`/`elif`/`else` chain; branch results MUST share a type |
 | `shape` | 2 | `Tensor, EntryList` | `Bool` | A.5 |
-| `<ns>.<name>` | per registry | per registry | `Bool` or `Value` | Custom operation, A.9 |
 
 **Every operator except `present`, `not_present`, and `value_or_default` propagates an unknown**
 (an unresolved reference) rather than coercing it, so an absent optional operand can never satisfy a
@@ -1213,14 +1243,19 @@ An array MUST be a permutation of `0 .. rank-1` listing logical dimension indice
 (A.5); a fixed-rank alias compared against a differently-pinned tensor is refused at compile rather
 than declining silently at match time.
 
-### A.9 Custom operations
+### A.9 The operator set is closed
 
-A custom operation is a JsonLogic operation whose key is a namespaced name (`hipdnn.strides_fit_u32`)
-resolved from the provider-internal registry ([§8](#8-native-predicate-escape-hatch)). It nests and
-negates like any built-in. The descriptor carries only the name and an argument list of `expr`s (bound
-variables or literals) whose types MUST match the predicate's registered signature; it never carries
-inline code. A name the running provider does not ship fails to resolve and declines the match
-([§8](#8-native-predicate-escape-hatch), [§14](#14-security-and-hostile-input)).
+A.7 is exhaustive. An operation key that is not listed there is refused at compile time, and there is
+no registry, namespace, or provider hook by which a descriptor can introduce one
+([§8](#8-the-native-matcher-escape-hatch)).
+
+A **namespaced (dotted) key** such as `{"hipdnn.strides_fit_u32": [...]}` is the form a custom
+operation would have taken, and gets no special treatment: it is simply not in A.7, so it is refused
+as an unrecognized operator. The check it expresses belongs in a native matcher listed beside this
+descriptor in the pack, not inside `criteria`. Adding a built-in operator to A.7 is additive
+([§13](#13-serialization-and-versioning)); adding one out-of-band is not possible, which is what
+makes a UMD interpretable from the schema alone
+([§14](#14-security-and-hostile-input)).
 
 ### A.10 Compile-time validation (normative)
 
@@ -1242,7 +1277,8 @@ quarantines) the descriptor with a diagnostic ([§10](#10-the-matcher-compilatio
    reserved `tensor-field`.
 8. Every `$`-reference resolves to a bound symbol (the build and drop-in bound-symbol check of
    [§4](#4-symbol-binding-and-the-auto-binding-formula)).
-9. Every operation's arity and argument types satisfy A.7; every layout alias resolves.
+9. Every operation key appears in A.7 (A.9), every operation's arity and argument types satisfy A.7,
+   and every layout alias resolves.
 10. `criteria` has static type `Bool`.
 
 ---

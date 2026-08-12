@@ -1187,13 +1187,6 @@ private:
         {
             return inferIf(args);
         }
-        if(op.find('.') != std::string::npos)
-        {
-            // Custom operations (native predicates) are out of scope for this
-            // PoC: no predicate registry ships, so the name fails to resolve
-            // (RFC 0018 §8 / A.9: fail closed).
-            throw UmdCompileError("custom operation not supported in PoC: " + op);
-        }
         throw UmdCompileError("unrecognized operator: " + op);
     }
 

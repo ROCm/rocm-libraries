@@ -3,7 +3,7 @@
 //
 // RFC 0018 Phase 1: proves the bindings + UMD compiler + matcher end to end.
 //   - Compiler: A.10 validation (accept the SDPA descriptor; reject bad schema,
-//     mismatched `?`, unknown name, type errors, custom ops).
+//     mismatched `?`, unknown name, type errors, unknown operators).
 //   - Lowering: `shape` -> rank check with named dims; layout alias -> array.
 //   - Matcher: structural match + criteria evaluation over a live graph, with
 //     fail-closed rejection on the declarative gates.
@@ -38,9 +38,11 @@ using json = nlohmann::json;
 namespace
 {
 
-// The RFC §18 SDPA-forward descriptor, with the two custom-operation gates
-// (strides_fit_u32, sdpa_mask_consistent) removed -- the custom-op hook is out
-// of scope for this PoC. Name keys are the lowercase op-schema registry names.
+// The RFC §18 SDPA-forward descriptor. The two gates that need real C++
+// (strides_fit_u32, sdpa_mask_consistent) are not criteria: the expression
+// language has no custom-operation hatch, so they live in a native matcher
+// beside this UMD (RFC 0018 §8). Name keys are the lowercase op-schema
+// registry names.
 json sdpaDescriptor()
 {
     return json::parse(R"JSON({
@@ -204,8 +206,11 @@ TEST(TestUmdCompiler, RejectsNonBooleanCriteria)
     EXPECT_THROW(umd::UmdCompiler::compile(d), umd::UmdCompileError);
 }
 
-TEST(TestUmdCompiler, RejectsCustomOperation)
+TEST(TestUmdCompiler, RejectsUnknownOperator)
 {
+    // A.7 is exhaustive and there is no registry a descriptor can extend it
+    // through, so a namespaced key -- the form a custom operation would have
+    // taken -- is refused as an unrecognized operator like any other.
     json d = sdpaDescriptor();
     d["criteria"]["and"].push_back(json::parse(R"({"hipdnn.strides_fit_u32": ["$q"]})"));
     EXPECT_THROW(umd::UmdCompiler::compile(d), umd::UmdCompileError);

@@ -23,8 +23,8 @@ Source RFC: `projects/hipdnn/docs/rfcs/0018_UniversalMatchDescriptor.md`.
   arithmetic/`min`/`max`/`ceil_div`/`abs`/`pow`/`log2`/`rsqrt`/`value_or_default`/`if`, and
   `compile<DataT>(rule)` → `Expression<DataT>` over any `getData(path)->Value` data source.
   Tests already include a `Umd0018ConstraintShapes` case (`src/tests/core/TestJsonLogic.cpp`).
-  **Gap: no `shape` short-hand (lowered by the UMD compiler, Phase 1). The custom-operation
-  (native-predicate) hook is out of scope for this PoC — see Scope decisions.**
+  **Gap: no `shape` short-hand (lowered by the UMD compiler, Phase 1). The operator set is closed —
+  there is no custom-operation hook to add; see Scope decisions.**
 - **UMD annotations already in the schema** — the table-level `umd_opcode` shorthand (e.g.
   `SdpaAttributes (umd_opcode: "sdpa_fwd")`) and the field-level `umd_input_tensor` / `umd_output_tensor` /
   `umd_name` are declared once (`flatbuffers_sdk/schemas/data_types.fbs`) and applied on the SDPA
@@ -173,9 +173,10 @@ nlohmann_json + plan_utils; add dep on the generated registry).
 
 - **Graph fixtures:** both paths — manual (`createValidSdpaFwdGraph(...)`, head_size=128, bf16) and
   JSON (`json::to<Graph>` from an inline JSON fixture) → `GraphWrapper`.
-- **UMD fixture:** the §18 SDPA-forward descriptor JSON (head_size 128, bf16/fp8), **with the two
-  custom-operation gates (`strides_fit_u32`, `sdpa_mask_consistent`) removed** — the custom-op hook
-  is out of scope, so those gates are held constant in the graph battery, not expressed as criteria.
+- **UMD fixture:** the §18 SDPA-forward descriptor JSON (head_size 128, bf16/fp8). The two gates that
+  need real C++ (`strides_fit_u32`, `sdpa_mask_consistent`) are not criteria at all — under RFC 0018
+  §8 they belong to a native matcher beside the descriptor — so they are held constant in the graph
+  battery. Their native matcher is not written for this PoC, which is unplumbed.
 - **Match-equivalence (RFC §16 primary):** battery of accepting/rejecting graphs through both
   `SdpaFwdPlanBuilder::isApplicable` and the matcher; assert identical accept/reject on the
   declarative gates. Hold device=gfx942, a valid kernel key, and the two non-declarative gates
@@ -212,15 +213,19 @@ nlohmann_json + plan_utils; add dep on the generated registry).
 - **JsonLogic core changes are limited to the presence predicates.** `present` / `not_present` are
   added because RFC 0017 §5 lists them in the closed operator vocabulary and they are the only way to
   write "absent, or present and constrained" — a bare field read on an absent operand declines rather
-  than answering. The custom-operation (native-predicate) hook is still skipped for this
-  PoC; the two SDPA gates that need it (uint32 stride fit, mask self-consistency) are held constant
-  in the test battery rather than expressed as criteria. `all` / `rank`-op / `divisible` are
-  unused by SDPA fwd — deferred (add if broader §A.7 coverage is wanted).
+  than answering. `all` / `rank`-op / `divisible` are unused by SDPA fwd — deferred (add if broader
+  §A.7 coverage is wanted).
+- **The operator set is closed, permanently.** RFC 0018 §8 puts the C++ escape hatch in a native
+  matcher named by a `MatchDescriptor`'s `matchSymbol`, conjoined with the UMD's criteria by the
+  ingestor, rather than in a custom operation nested inside `criteria`. So a namespaced (dotted)
+  operator key needs no special handling: it is refused as an unrecognized operator like any other
+  (`TestUmdCompiler.RejectsUnknownOperator`) — that is the finished behavior, not a PoC stub awaiting
+  a predicate registry.
 - **Not plumbed as a provider engine** — matcher is exercised directly by tests.
-- **Deferred (RFC-acknowledged):** custom-operation (native-predicate) hook and predicate registry
-  (§8), static/bytecode matcher (§11), fuzzing (§14), arbitration across multiple UKDs (§12), UDD
-  dispatch formulas, multi-node fusion patterns, and the whole applicability-time catalog and cache
-  (RFC 0017 §8) — the PoC matcher answers one UMD against one graph and holds no catalog.
+- **Deferred (RFC-acknowledged):** static/bytecode matcher (§11), fuzzing (§14), arbitration across
+  multiple UKDs (§12), UDD dispatch formulas, multi-node fusion patterns, and the whole
+  applicability-time catalog and cache (RFC 0017 §8) — the PoC matcher answers one UMD against one
+  graph and holds no catalog.
 - **Deferred pack-level checks.** Two rules RFC 0018 §5 states are enforced by a KDP/KMD loader, not
   by a single descriptor's compile: that every quantity a kernel bakes is a KMD field pinned by a
   `$kernel.*` criterion, and that every pack carries an umbrella matcher checking the full graph
@@ -230,9 +235,13 @@ nlohmann_json + plan_utils; add dep on the generated registry).
 - **Version floors are structural only.** `version` and `sdk_version` parse and gate against a
   compiled-in floor, but nothing yet publishes a real graph-schema version to compare against, so
   the floor is a constant rather than a negotiated value.
-- **Two non-declarative gates out of the UMD.** `strides_fit_u32` and `sdpa_mask_consistent`
-  (RFC §8 custom operations) are excluded with the hook; match-equivalence covers the declarative
-  subset with those two gates held constant, exactly as arch/kernel-table are.
+- **Two non-declarative gates out of the UMD.** `strides_fit_u32` and `sdpa_mask_consistent` are a
+  native matcher's job (RFC §8), not a descriptor's; match-equivalence covers the declarative subset
+  with those two gates held constant, exactly as arch/kernel-table are.
+- **Open follow-up: native-matcher bindings.** A `GraphMatcherFn` receives `MatchContext`, not the
+  bindings its pack's UMD published, and `BoundTokens` (`string -> int64_t`) cannot carry a tensor —
+  so a native matcher re-locates q/k/v/o by hand. Recorded as RFC 0018 §20 open question 2; it is a
+  change to the matcher-invocation contract, outside this PoC.
 
 ## Primary risks
 
