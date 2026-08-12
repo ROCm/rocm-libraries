@@ -51,6 +51,13 @@ _CTYPES_SRC = (
     _DISP / "bindings" / "ctypes" / "gemm_bquant_ctypes_lib.cpp"
 ).read_text()
 
+# Shared host-load primitives (load_host_tensor / permute_i4_inplace) live here
+# after the common-layer refactor: the size-bounded packed copy and the pk_int4
+# permute helper (+ its include) moved out of the per-op .cpp into this header.
+_SHUFFLE_SRC = (
+    _DISP / "bindings" / "ctypes" / "quant_bridge_shuffle.hpp"
+).read_text()
+
 # The Python runner source (checked for the epilogue-dependent C de-permute).
 _UTILS_SRC = (_DISP / "python" / "gemm_bquant_utils.py").read_text()
 
@@ -318,11 +325,13 @@ class TestPkInt4Permute(unittest.TestCase):
     broken in all phases (NaN on random, all-zeros on constant)."""
 
     def test_ctypes_lib_permutes_pk_int4_b(self):
-        self.assertIn("permute_vectors_i4x4_b", _CTYPES_SRC)
+        # The permute primitive + its include live in the shared shuffle header;
+        # the per-op .cpp invokes it via permute_i4_inplace, gated on pk_int4 B.
+        self.assertIn("permute_vectors_i4x4_b", _SHUFFLE_SRC)
+        self.assertIn("ck_tile/host/permute_pk_int4.hpp", _SHUFFLE_SRC)
+        self.assertIn("permute_i4_inplace", _CTYPES_SRC)
         # Applied for pk_int4 B specifically.
         self.assertIn("std::is_same_v<BDataType, ck_tile::pk_int4_t>", _CTYPES_SRC)
-        # The permute helper header must be included.
-        self.assertIn("ck_tile/host/permute_pk_int4.hpp", _CTYPES_SRC)
 
     def test_i4_variants_use_pk_int4_bdatatype(self):
         for ctor in (default_fp8i4_config, default_bf8i4_config,
@@ -367,14 +376,16 @@ class TestPackedBCopyCount(unittest.TestCase):
     def test_packed_b_copy_uses_destination_size(self):
         # The overflowing copy (B_host + K * N into b_k_n) must be gone.
         self.assertNotIn("B_host + K * N", _CTYPES_SRC)
-        # The copy must be bounded by the destination tensor's own size.
-        self.assertIn("std::copy(B_host, B_host + b_k_n.size(), b_k_n.begin())",
-                      _CTYPES_SRC)
+        # The size-bounded copy now lives in load_host_tensor (shared header):
+        # it must copy the destination tensor's own size, not rows*cols.
+        self.assertIn("std::copy(src, src + t.size(), t.begin())", _SHUFFLE_SRC)
 
     def test_packed_pk_int4_permute_still_runs(self):
         # The pk_int4 permute must still be present (it only runs once the copy
-        # no longer corrupts the heap).
-        self.assertIn("permute_vectors_i4x4_b", _CTYPES_SRC)
+        # no longer corrupts the heap). Primitive in the shared header; invoked
+        # from the per-op .cpp gated on pk_int4 B.
+        self.assertIn("permute_vectors_i4x4_b", _SHUFFLE_SRC)
+        self.assertIn("permute_i4_inplace", _CTYPES_SRC)
         self.assertIn("std::is_same_v<BDataType, ck_tile::pk_int4_t>", _CTYPES_SRC)
 
 

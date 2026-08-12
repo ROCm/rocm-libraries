@@ -30,6 +30,7 @@ Run:
     python3 test_tensor_quant_gpu_correctness.py          # standalone
 """
 
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -100,6 +101,11 @@ def _have_ml_dtypes() -> bool:
 
 
 def _have_gpu() -> bool:
+    # Require BOTH a ROCm GPU (rocminfo) and hipcc: this test builds a kernel .so
+    # at runtime via hipcc, so on GPU-but-no-hipcc nodes it must skip cleanly
+    # rather than run and then fail at build time.
+    if shutil.which("hipcc") is None:
+        return False
     try:
         out = subprocess.run(["rocminfo"], capture_output=True, text=True, timeout=30)
         return "gfx" in out.stdout

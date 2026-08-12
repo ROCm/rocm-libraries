@@ -37,6 +37,7 @@ Run:
 """
 
 import math
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -108,6 +109,11 @@ def _have_ml_dtypes() -> bool:
 
 
 def _have_gpu() -> bool:
+    # Require BOTH a ROCm GPU (rocminfo) and hipcc: this test builds a kernel .so
+    # at runtime via hipcc, so on GPU-but-no-hipcc nodes it must skip cleanly
+    # rather than run and then fail at build time.
+    if shutil.which("hipcc") is None:
+        return False
     try:
         out = subprocess.run(["rocminfo"], capture_output=True, text=True, timeout=30)
         return "gfx" in out.stdout
@@ -159,8 +165,8 @@ def _run_case(dtype: str, M: int, N: int, K: int, gK: int, out_dir: Path):
     B_f = rng.uniform(-1.0, 1.0, (K, N)).astype(np.float32)   # logical [K, N]
     AQ_f = rng.uniform(0.5, 1.5, (M, QK_A)).astype(np.float32)
 
-    A_raw = _encode(A_f, dtype, arch)                 # [M, K] row-major fp8 bytes
-    B_raw = _encode(B_f.T.copy(), dtype, arch)        # [N, K] C-contig == [K, N] col-major
+    A_raw = _encode(A_f, dtype, arch)                 # logical [M, K] fp8 bytes
+    B_raw = _encode(B_f, dtype, arch)                 # logical [K, N]; runner materializes rcr col-major
     A_dec = _qdq(A_f, dtype, arch)
     B_dec = _qdq(B_f, dtype, arch)
 

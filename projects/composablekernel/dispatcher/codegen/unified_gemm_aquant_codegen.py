@@ -41,7 +41,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from codegen_common import make_aquant_kernel_name, aquant_effective_epilogue
+from codegen_common import make_gemm_aquant_kernel_name, gemm_aquant_effective_epilogue
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
@@ -187,7 +187,7 @@ class AQuantKernelSpec:
     @property
     def name(self) -> str:
         t = self.tile
-        return make_aquant_kernel_name(
+        return make_gemm_aquant_kernel_name(
             variant_key=self.variant_key,
             layout=self.layout,
             pipeline=self.pipeline_key,
@@ -241,11 +241,11 @@ class AQuantKernelHeaderGenerator:
         preshuffle_aquant = str(spec.preshuffle_aquant).lower()
         double_smem_buffer = str(spec.double_smem_buffer).lower()
 
-        # AQuant configs never enable TiledMMAPermuteN (see aquant_effective_epilogue),
+        # AQuant configs never enable TiledMMAPermuteN (see gemm_aquant_effective_epilogue),
         # so the epilogue is always CShuffle. Kept as a computed value for parity with
         # the bquant codegen and to fail loudly if the assumption ever changes.
         use_permute_n_epilogue = (
-            aquant_effective_epilogue(t.tile_n, t.warp_n, t.warp_tile_n, spec.quant_group_n)
+            gemm_aquant_effective_epilogue(t.tile_n, t.warp_n, t.warp_tile_n, spec.quant_group_n)
             == "permute_n"
         )
         assert not use_permute_n_epilogue, "AQuant does not support PermuteN epilogue"

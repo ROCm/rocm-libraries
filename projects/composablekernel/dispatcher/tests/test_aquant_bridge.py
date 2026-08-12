@@ -38,7 +38,7 @@ from gemm_aquant_utils import (  # noqa: E402
     default_fp8i4_preshufflequant_config,
     default_bf8i4_preshufflequant_config,
 )
-from codegen_common import make_aquant_kernel_name  # noqa: E402
+from codegen_common import make_gemm_aquant_kernel_name  # noqa: E402
 
 _DECODE = [
     ("fp8", default_fp8_config),
@@ -66,7 +66,7 @@ class TestConfigName(unittest.TestCase):
 
 class TestNameContract(unittest.TestCase):
     def _assert_contract(self, cfg):
-        expected = make_aquant_kernel_name(
+        expected = make_gemm_aquant_kernel_name(
             variant_key=cfg.variant_key,
             layout=cfg.layout,
             pipeline=cfg.pipeline_key,

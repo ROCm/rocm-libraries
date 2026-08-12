@@ -654,11 +654,16 @@ def make_abquant_kernel_name(
     return "_".join(parts)
 
 
-# AQuant kernel name construction
+# Non-grouped gemm_aquant kernel name construction
 # ============================================================================
+# NOTE: distinct from the grouped_gemm_aquant helpers above. Both families used
+# to share the name make_aquant_kernel_name / aquant_effective_epilogue in this
+# module; because Python keeps only the last def, the grouped consumers silently
+# picked up the non-grouped versions (different signature -> TypeError). These
+# are renamed with a gemm_ prefix so each family binds its own helper.
 
 
-def aquant_effective_epilogue(
+def gemm_aquant_effective_epilogue(
     tile_n: int,
     warp_n: int,
     warp_tile_n: int,
@@ -680,11 +685,11 @@ def aquant_effective_epilogue(
     return "cshuffle"
 
 
-def make_aquant_kernel_name(
+def make_gemm_aquant_kernel_name(
     variant_key: str,
     layout: str,
     pipeline: str,
-    epilogue: str,  # ignored — actual epilogue computed via aquant_effective_epilogue
+    epilogue: str,  # ignored — actual epilogue computed via gemm_aquant_effective_epilogue
     scheduler: str,
     tile_m: int, tile_n: int, tile_k: int,
     warp_m: int, warp_n: int, warp_k: int,
@@ -706,7 +711,7 @@ def make_aquant_kernel_name(
 
     The ``epilogue`` parameter is accepted for call-site compatibility but not used.
     """
-    effective_epilogue = aquant_effective_epilogue(tile_n, warp_n, warp_tile_n, quant_group_n)
+    effective_epilogue = gemm_aquant_effective_epilogue(tile_n, warp_n, warp_tile_n, quant_group_n)
     parts = [
         "gemm_aquant",
         variant_key,
@@ -727,11 +732,15 @@ def make_aquant_kernel_name(
 # ============================================================================
 
 
-# ABQuant kernel name construction
+# Non-grouped gemm_abquant kernel name construction
 # ============================================================================
+# NOTE: distinct from the grouped_gemm_abquant helper above (which takes
+# aquant_group_m/n/k + bquant_group_m/n/k + transpose_c). Renamed with a gemm_
+# prefix so the grouped and non-grouped families no longer collide on the shared
+# name make_abquant_kernel_name in this module.
 
 
-def make_abquant_kernel_name(
+def make_gemm_abquant_kernel_name(
     variant_key: str,
     layout: str,
     pipeline: str,

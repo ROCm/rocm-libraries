@@ -52,8 +52,17 @@ endfunction()
 # GEMM ctypes Library
 # =============================================================================
 
-# Find a generated GEMM kernel header for the library
+# Find a generated GEMM kernel header for the library.
+# NOTE: this glob also matches the block-scale quant kernel headers
+# (gemm_tensor_quant_*, gemm_rowcolquant_*, gemm_aquant_*, gemm_abquant_*,
+# gemm_bquant_*), which define a QuantGemm SelectedKernel with an API that is
+# incompatible with the regular GEMM ctypes lib. Because list(GET .. 0) takes the
+# first entry and "gemm_abquant_*" sorts ahead of the regular "gemm_<variant>_*"
+# names, an unfiltered glob would force-include a QuantGemm kernel into
+# dispatcher_gemm_lib / gpu_helper and fail the build. Exclude the quant families.
 file(GLOB GEMM_KERNEL_HEADERS "${CMAKE_BINARY_DIR}/generated_kernels/gemm_*.hpp")
+list(FILTER GEMM_KERNEL_HEADERS EXCLUDE REGEX
+     "/gemm_(tensor_quant|rowcolquant|aquant|abquant|bquant)_")
 if(GEMM_KERNEL_HEADERS)
     list(GET GEMM_KERNEL_HEADERS 0 GEMM_KERNEL_HEADER)
     message(STATUS "Found GEMM kernel for ctypes lib: ${GEMM_KERNEL_HEADER}")

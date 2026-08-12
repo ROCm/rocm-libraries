@@ -10,7 +10,7 @@ On-device GPU correctness test for the RowColQuant GEMM dispatcher bridge
 Mirrors test_bquant_gpu_correctness.py: build the op's block-scale dispatcher
 .so, run it on the GPU via RowColQuantGpuGemmRunner, and compare against a
 NumPy fp32 reference. RowColQuant applies a per-row scale to A and a per-col
-scale to C:
+scale to B (equivalently, a per-column scale of the output):
 
     C[m, n] = AQ[m] * BQ[n] * sum_k A[m, k] * B[k, n]
 
@@ -29,6 +29,7 @@ Run:
     python3 test_rowcolquant_gpu_correctness.py          # standalone
 """
 
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -70,6 +71,11 @@ def _have_ml_dtypes() -> bool:
 
 
 def _have_gpu() -> bool:
+    # Require BOTH a ROCm GPU (rocminfo) and hipcc: this test builds a kernel .so
+    # at runtime via hipcc, so on GPU-but-no-hipcc nodes it must skip cleanly
+    # rather than run and then fail at build time.
+    if shutil.which("hipcc") is None:
+        return False
     try:
         out = subprocess.run(["rocminfo"], capture_output=True, text=True, timeout=30)
         return "gfx" in out.stdout

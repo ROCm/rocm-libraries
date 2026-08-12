@@ -49,7 +49,7 @@ _CTYPES_LIB_SRC = Path(__file__).parent.parent / "bindings" / "ctypes" / "gemm_a
 _codegen_dir = str(Path(__file__).parent.parent / "codegen")
 if _codegen_dir not in sys.path:
     sys.path.insert(0, _codegen_dir)
-from codegen_common import make_aquant_kernel_name  # noqa: E402
+from codegen_common import make_gemm_aquant_kernel_name  # noqa: E402
 
 # NEVER default to gfx942 -- arch must be detected or explicitly supplied.
 _DEFAULT_HIPCC = "hipcc"
@@ -144,8 +144,8 @@ class AQuantKernelConfig:
 
     @property
     def name(self) -> str:
-        """Byte-exact match to codegen KERNEL_NAME (delegates to make_aquant_kernel_name)."""
-        return make_aquant_kernel_name(
+        """Byte-exact match to codegen KERNEL_NAME (delegates to make_gemm_aquant_kernel_name)."""
+        return make_gemm_aquant_kernel_name(
             variant_key=self.variant_key,
             layout=self.layout,
             pipeline=self.pipeline_key,
@@ -373,15 +373,18 @@ class AQuantGpuGemmRunner:
         """
         Run AQuantGrouped GEMM.
 
-        A       shape: (M, K)             dtype: fp8/bf8/pk_int4
-        AQ      shape: (M, QK_A)          dtype: float/fp8/bf8
-        B       shape: (K, N)             dtype: fp8/bf8
+        Operands are supplied in LOGICAL shape regardless of layout tag:
+        A       logical shape: (M, K)      dtype: fp8/bf8/pk_int4
+        AQ      logical shape: (M, QK_A)   dtype: float/fp8/bf8
+        B       logical shape: (K, N)      dtype: fp8/bf8
         c_dtype numpy dtype for the output C buffer.  Defaults to np.float16
                 (correct for all supported aquant variants, whose CDataType is half).
         Returns AQuantGemmResult with C shape (M, N).
 
-        Stride conventions follow the compiled kernel's compile-time A/B layouts,
-        which are encoded in the layout tag (A, B, C).  C is always RowMajor.
+        Stride conventions follow the compiled kernel's compile-time A/B/AQ
+        layouts, encoded in the layout tag (A, B, C; C is always RowMajor). The
+        runner materializes each operand into the layout the kernel expects, so
+        callers always pass logical arrays and never pre-transpose.
         """
         import numpy as np
 
@@ -402,8 +405,16 @@ class AQuantGpuGemmRunner:
         stride_B  = N if b_char == "r" else K   # B row-major -> N, col-major -> K
         stride_C  = N                             # C is row-major [M, N]
 
+        # Materialize each LOGICAL operand into the byte layout the kernel reads.
+        # The low-level ctypes wrapper copies C-contiguously, so a column-major
+        # operand is produced by passing a transposed view (ascontiguousarray of
+        # X.T reproduces X's column-major bytes). Row-major operands pass through.
+        A_arg  = A if a_char == "r" else np.asarray(A).T
+        B_arg  = B if b_char == "r" else np.asarray(B).T
+        AQ_arg = np.asarray(AQ).T if self._layout in _LAYOUTS_AQ_COLMAJOR else AQ
+
         rc, time_ms = self._lib.run(
-            A=A, AQ=AQ, B=B, C=C,
+            A=A_arg, AQ=AQ_arg, B=B_arg, C=C,
             M=M, N=N, K=K,
             stride_A=stride_A,
             stride_AQ=stride_AQ,

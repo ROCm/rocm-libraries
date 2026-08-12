@@ -42,7 +42,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from codegen_common import make_abquant_kernel_name, bquant_effective_epilogue
+from codegen_common import make_gemm_abquant_kernel_name, bquant_effective_epilogue
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
@@ -174,7 +174,7 @@ class ABQuantKernelSpec:
     @property
     def name(self) -> str:
         t = self.tile
-        return make_abquant_kernel_name(
+        return make_gemm_abquant_kernel_name(
             variant_key=self.variant_key,
             layout=self.layout,
             pipeline=self.pipeline,
@@ -257,7 +257,7 @@ class ABQuantKernelHeaderGenerator:
         # configs inherit TiledMMAPermuteN=false from GemmConfigBase, so they always
         # use CShuffle. PermuteN is further disabled when BQuantGroupSize::kN > 1
         # (mirrors run_gemm_quant_example.inc:208-209). Keep this in lockstep with
-        # make_abquant_kernel_name so the emitted name matches the emitted epilogue.
+        # make_gemm_abquant_kernel_name so the emitted name matches the emitted epilogue.
         use_permute_n_epilogue = (spec.preshuffle_b and not spec.eight_waves) and (
             bquant_effective_epilogue(
                 t.tile_n, t.warp_n, t.warp_tile_n, spec.bquant_group_n

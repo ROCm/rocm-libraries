@@ -32,7 +32,7 @@ from gemm_abquant_utils import (  # noqa: E402
     default_fp8_preshuffleb_preshufflequant_config,
     _generate_abquant_kernel,
 )
-from codegen_common import make_abquant_kernel_name  # noqa: E402
+from codegen_common import make_gemm_abquant_kernel_name  # noqa: E402
 
 # The ctypes lib source (checked for the B-matrix shuffle step, no GPU needed).
 _CTYPES_SRC = (_DISP / "bindings" / "ctypes" / "gemm_abquant_ctypes_lib.cpp").read_text()
@@ -64,7 +64,7 @@ class TestConfigName(unittest.TestCase):
 
 class TestNameContract(unittest.TestCase):
     def _assert_contract(self, cfg):
-        expected = make_abquant_kernel_name(
+        expected = make_gemm_abquant_kernel_name(
             variant_key=cfg.variant_key,
             layout=cfg.layout,
             pipeline=cfg.pipeline,
