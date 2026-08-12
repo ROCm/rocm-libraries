@@ -306,3 +306,10 @@ TensileLite::ContractionProblemGemm* ExtractProblemGemm(std::shared_ptr<void>);
 void applyStreamKTileSchedulingMode(std::shared_ptr<void>  gemmData,
                                 rocblaslt::RocGemmType gemmType,
                                 int32_t                mode);
+
+// Push the GemmPreference-supplied uniform-summation-order request onto every
+// contraction problem currently carried by gemmData. Defined in
+// tensile_host.cpp for the same reason as applyStreamKTileSchedulingMode.
+void applyUniformSummationOrder(std::shared_ptr<void>  gemmData,
+                                rocblaslt::RocGemmType gemmType,
+                                bool                   value);

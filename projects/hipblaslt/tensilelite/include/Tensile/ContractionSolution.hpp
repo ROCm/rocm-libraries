@@ -30,6 +30,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -214,6 +215,23 @@ namespace TensileLite
     {
         size_t globalAccumulation = 0;
     };
+
+    /**
+     * Thrown when a launch requests uniform summation order (see
+     * ContractionProblemParameters::uniformSummationOrder) but the resolved
+     * kernel configuration is not on the known row-uniform whitelist. This is a
+     * distinct type so the rocblaslt host layer can map it to
+     * rocblaslt_status_invalid_value rather than to a generic internal error.
+     */
+    class UniformSummationOrderError : public std::runtime_error
+    {
+    public:
+        explicit UniformSummationOrderError(const std::string& what)
+            : std::runtime_error(what)
+        {
+        }
+    };
+
     /**
      * Represents a single kernel or set of kernels that can perform a single
      * tensor contraction.
@@ -393,6 +411,19 @@ namespace TensileLite
         // true. Wired into softwarePredicate() (SolutionLibrary.hpp).
         bool                 streamKDynamicQueueSupported(Problem const&  problem,
                                                           Hardware const& hardware) const;
+        // Selection-time predicate for uniform summation order. Returns true
+        // when the mode is off, and otherwise false for solutions that can
+        // never produce row-uniform output regardless of how the launch
+        // resolves. Only statically-knowable facts are tested here: the
+        // resolved StreamK grid/reduction and the Synchronizer pointer do not
+        // exist until solve(), so this predicate is deliberately PERMISSIVE
+        // about them and the fail-closed launch gate
+        // (checkUniformSummationOrder) remains authoritative. Reject-and-
+        // continue, like streamKDynamicQueueSupported(): selection simply falls
+        // through to another solution. Wired into softwarePredicate()
+        // (SolutionLibrary.hpp).
+        bool                 uniformSummationOrderSupported(Problem const&  problem,
+                                                            Hardware const& hardware) const;
         size_t               partialTileSize(size_t skGrid) const;
 
         static float computeGranularity(float x);
@@ -717,6 +748,39 @@ namespace TensileLite
         origami::data_type_t getOrigamiDatatype(Problem const&  problem) const;
         AdaptiveGemmNTAB calculateAdaptiveGemmNTAB(Problem const&  problem,
                                                    Hardware const* hardware) const;
+
+    private:
+        /**
+         * Authoritative fail-closed launch gate for uniform summation order.
+         * No-op unless problem.getParams().uniformSummationOrder() is set;
+         * otherwise it validates the fully-resolved launch configuration
+         * against a whitelist of empirically row-uniform values and throws
+         * UniformSummationOrderError naming the offending condition. New
+         * reduction modes or scheduling variants are therefore REJECTED by
+         * default instead of being silently accepted.
+         *
+         * Must be called only once every value it inspects is final: in
+         * particular after all mutation of @p sk (the workspace-shortfall
+         * fallback in solve() rewrites both grid and reduction) and after
+         * @p resolvedGlobalAccumulation has been produced by
+         * ContractionProblemGemm::getAccumulation(), which is the value the
+         * kernel actually sees.
+         *
+         * @param gsu          The effective GSU for this launch (the user
+         *                     override when set, otherwise calculateAutoGSU()).
+         *                     GlobalAccumulation 0 and 1 only accumulate
+         *                     atomically when this exceeds 1.
+         * @param synchronizer The Synchronizer/Flags pointer that will be
+         *                     packed for this launch. The device reads a null
+         *                     AddressFlags as a request for the parallel
+         *                     reduction path.
+         */
+        void checkUniformSummationOrder(Problem const&         problem,
+                                        Hardware const&        hardware,
+                                        StreamKSettings const& sk,
+                                        size_t                 resolvedGlobalAccumulation,
+                                        uint32_t               gsu,
+                                        void const*            synchronizer) const;
     };
 
     template <typename TAct>

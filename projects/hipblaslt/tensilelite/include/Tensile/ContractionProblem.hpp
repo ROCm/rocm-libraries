@@ -141,6 +141,9 @@ namespace TensileLite
 
         void resetInternalArgs()
         {
+            // m_uniformSummationOrder is deliberately NOT reset here: it is a
+            // correctness request from the user, not a tuning override, and must
+            // survive internal-argument resets.
             m_gsu = 0;
         }
 
@@ -172,6 +175,22 @@ namespace TensileLite
             return m_streamKTileSchedulingMode;
         }
 
+        // Uniform summation order request, mirroring
+        // HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT. When set, every row
+        // of D must be reduced in an identical summation order, so that an A
+        // whose rows are all the same vector produces a bitwise-identical D row
+        // for every M index. Enforced by clamping StaggerU to 0 and by a
+        // fail-closed whitelist check on the resolved launch configuration.
+        void setUniformSummationOrder(bool uniformSummationOrder)
+        {
+            m_uniformSummationOrder = uniformSummationOrder;
+        }
+
+        bool uniformSummationOrder() const
+        {
+            return m_uniformSummationOrder;
+        }
+
         void setSmCountTarget(int smCountTarget)
         {
             m_smCountTarget = smCountTarget;
@@ -201,6 +220,7 @@ namespace TensileLite
         bool             m_fallbackStatus = false; // default value
         int              m_streamKTileSchedulingMode = 0; // SK5 hybrid mode tri-state (OFF default)
         int              m_smCountTarget = 0;
+        bool             m_uniformSummationOrder = false; // default value
     };
 
     /**

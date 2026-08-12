@@ -219,6 +219,14 @@ struct _rocblaslt_matmul_desc
     // 1 = ON (force SK4 dynamic), 2 = AUTO (heuristic picks per launch).
     int32_t streamk_tile_scheduling_ext = 0;
 
+    // Uniform summation order request (HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT).
+    // 0 = off (default), 1 = on. When on, every row of D is reduced in an
+    // identical summation order, so an A whose rows are all the same vector
+    // yields a bitwise-identical D row for every M index. This is uniformity
+    // across M within one run, not run-to-run determinism. Values outside
+    // {0, 1} are rejected by the setter.
+    int32_t uniform_summation_order = 0;
+
     // Added this new bias_stride parameter to capture the stride in bias vector to get unique bias vector for each batch in strided batch case. 
     // Default value is 0 which means same bias vector will be used across all batches (broadcast).
     int32_t bias_stride = 0;
@@ -254,6 +262,7 @@ struct _rocblaslt_matmul_desc
         this->act1                    = src.act1;
         this->sm_count_target         = src.sm_count_target;
         this->streamk_tile_scheduling_ext = src.streamk_tile_scheduling_ext;
+        this->uniform_summation_order = src.uniform_summation_order;
         this->bias_stride             = src.bias_stride;
     }
 };

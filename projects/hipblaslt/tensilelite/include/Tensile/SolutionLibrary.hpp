@@ -85,8 +85,16 @@ namespace TensileLite
             // devices whose XCD count is not a power of two, warning the user
             // once. This is reject-and-continue: selection falls through to
             // another (SK3-static / non-StreamK) solution for the GEMM.
+            //
+            // uniformSummationOrderSupported() likewise excludes solutions that
+            // can never produce row-uniform output once the caller has opted
+            // into uniform summation order, so the incompatibility surfaces at
+            // heuristic-query time instead of at the matmul call. It tests only
+            // statically-knowable facts; the fail-closed gate in
+            // ContractionSolution::solve() stays authoritative.
             return (*solutions.problemPredicate)(problem) && (*solutions.taskPredicate)(task)
-                   && solutions.streamKDynamicQueueSupported(problem, hardware);
+                   && solutions.streamKDynamicQueueSupported(problem, hardware)
+                   && solutions.uniformSummationOrderSupported(problem, hardware);
             break;
         case SolutionLibrarySearchType::GEMM_TYPE_ONLY:
             return isGemmTypeSame(solutions, problem);
