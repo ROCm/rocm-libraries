@@ -12,6 +12,10 @@
 #include <roc/host_validation/validation.hpp>
 #include <stdexcept>
 
+#ifdef HOST_VALIDATION_TEST_OPENMP
+#include <omp.h>
+#endif
+
 namespace {
 void require(bool condition, const char* message) {
     if (!condition) throw std::runtime_error(message);
@@ -601,6 +605,40 @@ void testIndexedGeneration() {
     require(affine.view().loadAs<float>({0, 0, 0}) == -1.0f &&
                 affine.view().loadAs<float>({1, 2, 1}) == 0.0f,
             "Affine-index remainder generation mismatch.");
+
+#ifdef HOST_VALIDATION_TEST_OPENMP
+    const int originalDynamic = omp_get_dynamic();
+    const int originalThreadCount = omp_get_max_threads();
+    omp_set_dynamic(0);
+
+    const Layout paddedLayout(Shape{128, 96}, {1, 137});
+    Tensor oneThread(ScalarType::Float32, paddedLayout);
+    Tensor fourThreads(ScalarType::Float32, paddedLayout);
+    GenerationOptions parallelOptions;
+    parallelOptions.seed = 0x1020304050607080ULL;
+    parallelOptions.real.pattern = GenerationPattern::UniformReal;
+    parallelOptions.real.parameter0 = -3.0;
+    parallelOptions.real.parameter1 = 7.0;
+    omp_set_num_threads(1);
+    generate(oneThread.mutableView(), parallelOptions);
+    omp_set_num_threads(4);
+    generate(fourThreads.mutableView(), parallelOptions);
+    require(std::equal(oneThread.storage().begin(), oneThread.storage().end(),
+                       fourThreads.storage().begin(), fourThreads.storage().end()),
+            "Ordinary generation changed with OpenMP thread count.");
+
+    std::array<float, 1> aliasedStorage{};
+    MutableTensorView aliased = MutableTensorView::fromNative<float>(
+        Layout(Shape{8192}, {0}), std::span<float>(aliasedStorage));
+    GenerationOptions aliasedOptions;
+    aliasedOptions.real.pattern = GenerationPattern::SerialIndex;
+    generate(aliased, aliasedOptions);
+    require(aliasedStorage[0] == 8191.0f,
+            "Aliased generation did not preserve deterministic traversal order.");
+
+    omp_set_num_threads(originalThreadCount);
+    omp_set_dynamic(originalDynamic);
+#endif
 }
 
 void testReferenceAxpby() {
