@@ -36,12 +36,15 @@
 #include <cmath>
 #include <cstdint>
 #include <map>
+#include <tuple>
 #include <vector>
 
 #include "InFlightQueue.hpp"
 #include "ReadyQueue.hpp"
 #include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
+#include "stinkytofu/transforms/asm/dag/HazardRules.hpp"
 
 namespace {
 using namespace stinkytofu;
@@ -56,36 +59,10 @@ enum NonWmmaKind { kGlobalRead = 0, kLocalRead, kOther, kValu };
 // CDNA5ReadyQueue::hazardGates_) is unconditional regardless of scheduling order;
 // producer-side hoisting (CDNA5ReadyQueue::decidePromote(), via DAGNode::hazardDeadline)
 // is a throughput heuristic layered on top, never required for correctness.
+//
+// HazardRule itself, and the family-wide kCdna5HazardRules table, live in HazardRules.hpp
+// (included above) so HazardGapAnalysisPass can share them without duplicating this logic.
 // -------------------------------------------------------------------------
-struct HazardRule {
-    const char* name;
-    bool (*isProducer)(const StinkyInstruction&);
-    bool (*isConsumer)(const StinkyInstruction&);
-    RegType regType;
-    int cycles;
-};
-
-// SALU sgpr -> any SMEM/tensor_load/VMEM address (s_load, tensor_load, global_read...).
-// isGlobalMemLoad already covers SMemLoad + MUBUF/FLAT/GLOBAL loads; tensor_load is a
-// separate flag (IF_TENSORLoadToLds). Tensor_load and SMEM addresses are sgpr-only;
-// VMEM addresses can also carry a vgpr offset, covered separately below.
-static inline bool isSaluHazardConsumer(const StinkyInstruction& inst) {
-    return isGlobalMemLoad(inst) || isTensorLoad(inst);
-}
-
-// VMEM vgpr-address consumers: buffer/flat/global loads plus global_prefetch_b8, whose
-// vaddr is a vgpr. The prefetch is not a load (no dest, not IF_GLOBALLoad), so it is
-// listed explicitly rather than folded into isBufferMemLoad.
-static inline bool isVmemAddrHazardConsumer(const StinkyInstruction& inst) {
-    return isBufferMemLoad(inst) || isGlobalPrefetch(inst);
-}
-
-static constexpr HazardRule kGfx1250HazardRules[] = {
-    {"SaluSgprToMemAddr", isScalarALU, isSaluHazardConsumer, RegType::S, 8},
-    // VALU vgpr -> VMEM address (global_read/MUBUF/FLAT/GLOBAL). Excludes SMEM/tensor_load:
-    // those addresses are sgpr-only, never vgpr.
-    {"ValuVgprToVmemAddr", isVectorALU, isVmemAddrHazardConsumer, RegType::V, 32},
-};
 
 // -------------------------------------------------------------------------
 // Per-arch CDNA5 scheduling config. CDNA5.hpp is the CDNA5 *family* ready queue: both
@@ -117,9 +94,8 @@ constexpr CDNA5Config kGfx1250Config = {
     /*dsReadThrottleLatency=*/72,
     /*dsReadPerWmma=*/3,
     /*globalReadPerWmma=*/1,
-    /*hazardRules=*/kGfx1250HazardRules,
-    /*numHazardRules=*/
-    static_cast<int>(sizeof(kGfx1250HazardRules) / sizeof(kGfx1250HazardRules[0])),
+    /*hazardRules=*/kCdna5HazardRules,
+    /*numHazardRules=*/kNumCdna5HazardRules,
 };
 
 // gfx1250v0: starts from the gfx1250 values. TODO(tuning): fill in gfx1250v0's real queue
@@ -253,6 +229,38 @@ static bool srcVGPRsOverlap(const StinkyInstruction& inst,
             if (vgprs.count(src.reg.idx + off)) return true;
         }
     }
+    return false;
+}
+
+static inline int popcount16(uint16_t v) {
+    return __builtin_popcount(static_cast<unsigned>(v));
+}
+
+// Prev WMMA's D feeds next WMMA's A/B (or SWMMAC index).
+static bool wmmaToWmmaCoexecOverlap(const StinkyInstruction& prod, const StinkyInstruction& cons) {
+    if (prod.getDestRegs().empty()) return false;
+    const StinkyRegister& d = prod.getDestRegs()[0];
+    const auto& srcs = cons.getSrcRegs();
+    if (srcs.size() > 0 && d.isOverlap(srcs[0])) return true;                   // A
+    if (srcs.size() > 1 && d.isOverlap(srcs[1])) return true;                   // B
+    if (isSWMMA(cons) && srcs.size() > 2 && d.isOverlap(srcs[2])) return true;  // index
+    return false;
+}
+
+// WMMA D vs a co-executable VALU consumer: RAW (D->src), WAW (D->dst), WAR (prod A/B or
+// SWMMAC index -> cons dst).
+static bool wmmaToValuCoexecOverlap(const StinkyInstruction& prod, const StinkyInstruction& cons) {
+    if (prod.getDestRegs().empty()) return false;
+    const StinkyRegister& d = prod.getDestRegs()[0];
+    for (const StinkyRegister& s : cons.getSrcRegs())
+        if (d.isOverlap(s)) return true;  // RAW
+    for (const StinkyRegister& cd : cons.getDestRegs())
+        if (d.isOverlap(cd)) return true;  // WAW
+    const auto& psrc = prod.getSrcRegs();
+    const size_t nWar = isSWMMA(prod) ? 3 : 2;
+    for (size_t i = 0; i < psrc.size() && i < nWar; ++i)
+        for (const StinkyRegister& cd : cons.getDestRegs())
+            if (psrc[i].isOverlap(cd)) return true;  // WAR
     return false;
 }
 
@@ -401,6 +409,14 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // activeWmmaLatency_). Used to detect ds_load dest / WMMA src VGPR overlap hazards.
     DAGNode* activeWmmaNode_ = nullptr;
 
+    // Non-WMMA fills since the active WMMA opened its window. A dependent next WMMA is held
+    // in Phase B until this reaches popcount(coIssueWindow)+1 (WMMA->WMMA coexec slots + 1).
+    int nonWmmaFillsSinceActiveWmma_ = 0;
+
+    // Filler v_nops to emit before the next pickOne() result (drained by scheduleInDAG).
+    // Set at a dependent WMMA's issue point when no independent VALU remained to fill the gap.
+    int pendingFillerVNops_ = 0;
+
     // VGPR-MSB bank currently in effect (mirrors InsertVgprMsbPass); updated on issue,
     // reset per region. pickFreeBest prefers a free candidate matching it. -1 = unknown.
     int currentMsb_ = -1;
@@ -538,6 +554,21 @@ class CDNA5ReadyQueue : public ReadyQueue {
     void push(DAGNode* node) override;
     bool empty() const override;
 
+    // Build the coexec filler v_nops counted during the last pickOne() as detached insts.
+    std::vector<StinkyInstruction*> takePendingFillerInsts() override {
+        std::vector<StinkyInstruction*> fillers;
+        if (pendingFillerVNops_ > 0) {
+            const auto& arch = getPassContext().getGemmTileConfig().arch;
+            const GfxArchID archId = getGfxArchID(arch[0], arch[1], arch[2]);
+            const HwInstDesc* vnopDesc = getMCIDByUOp(GFX::v_nop, archId);
+            fillers.reserve(pendingFillerVNops_);
+            for (int i = 0; i < pendingFillerVNops_; ++i)
+                fillers.push_back(IRBase::createIR<StinkyInstruction>(vnopDesc));
+        }
+        pendingFillerVNops_ = 0;
+        return fillers;
+    }
+
     void onInit(IRList::iterator regionStart, IRList::iterator regionEnd) override;
 
     void onInitRegion(IRList::iterator regionStart, IRList::iterator regionEnd,
@@ -628,6 +659,21 @@ DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
         assert(pickKind == kValu);
         valuQueue.erase(node);
     }
+    // WMMA->VALU: if this VALU depends on the active WMMA's D and fewer than slots fills
+    // landed (no independent VALU left to space it), emit the shortfall as v_nops before it.
+    if (pickKind == kValu && activeWmmaNode_ != nullptr &&
+        wmmaToValuCoexecOverlap(*activeWmmaNode_->inst, *node->inst)) {
+        const int slots = popcount16(activeWmmaNode_->inst->coIssueWindow);
+        const int shortfall = slots - nonWmmaFillsSinceActiveWmma_;
+        if (shortfall > 0) {
+            pendingFillerVNops_ = shortfall;
+            // Credit fillers as slot fills so a later dependent VALU in this window is not
+            // re-padded.
+            nonWmmaFillsSinceActiveWmma_ += shortfall;
+        }
+    }
+    // Only VALU-pipe ops fill a coexec slot.
+    if (pickKind == kValu) nonWmmaFillsSinceActiveWmma_++;
     // (A) RAW: stamp this producer's dest data-ready latency (e.g. ds_load).
     // (B) elapse: record the timeline touch for all operands (dst + src).
     touchOperands(*node->inst);
@@ -758,6 +804,20 @@ int CDNA5ReadyQueue::nodeElapseKey(DAGNode* node) const {
     return minElapse;
 }
 
+// Updates (best, bestKey) to (cand, key) if key sorts before bestKey (lexicographic
+// std::tuple compare) or best is not yet set. Shared by the "min by (metric, id)"
+// candidate pickers below; each caller supplies its own key shape.
+template <typename Key>
+static bool considerBest(DAGNode* cand, Key key, DAGNode*& best, Key& bestKey) {
+    if (!cand) return false;
+    if (best == nullptr || key < bestKey) {
+        best = cand;
+        bestKey = key;
+        return true;
+    }
+    return false;
+}
+
 // Best issuable node in \p queue: RAW/hazard-free nodes are preferred; when none is
 // free and \p allowHiddenStall is set, a node whose remaining wait (RAW data-ready or
 // hazard-gate, whichever is larger) still fits under the active WMMA's latency shadow
@@ -813,15 +873,11 @@ DAGNode* CDNA5ReadyQueue::pickFreeBest(const ReadySetByDAGid& queue, int* outWai
 // Returns the node and its latency. Ties broken by DAG id (program order).
 std::pair<DAGNode*, int> CDNA5ReadyQueue::findMostReadyWMMA() {
     DAGNode* best = nullptr;
-    int bestLatency = INT_MAX;
+    std::tuple<int, int> bestKey{INT_MAX, 0};
     for (DAGNode* n : wmmaQueue) {
-        int lat = getMaxSrcDataWait(n);
-        if (lat < bestLatency || (lat == bestLatency && (!best || n->id < best->id))) {
-            best = n;
-            bestLatency = lat;
-        }
+        considerBest(n, std::make_tuple(getMaxSrcDataWait(n), (int)n->id), best, bestKey);
     }
-    return {best, bestLatency};
+    return {best, std::get<0>(bestKey)};
 }
 
 // Pick a WMMA: start a new co-issue timeline from its coIssueWindow,
@@ -837,6 +893,14 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
         wmmaQueue.pop();
     }
 
+    // Dependent b2b WMMA with too few fills: emit the shortfall as v_nops.
+    if (activeWmmaNode_ != nullptr &&
+        wmmaToWmmaCoexecOverlap(*activeWmmaNode_->inst, *node->inst)) {
+        const int slotsPlusOne = popcount16(activeWmmaNode_->inst->coIssueWindow) + 1;
+        const int shortfall = slotsPlusOne - nonWmmaFillsSinceActiveWmma_;
+        if (shortfall > 0) pendingFillerVNops_ = shortfall;
+    }
+
     // consume the time that is not used by the WMMA
     if (coIssueCyclePos_ < activeWmmaLatency_) advanceTime(activeWmmaLatency_ - coIssueCyclePos_);
 
@@ -844,6 +908,7 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
     coIssueCyclePos_ = 0;
     activeWmmaLatency_ = node->inst->latencyCycles;
     activeWmmaNode_ = node;
+    nonWmmaFillsSinceActiveWmma_ = 0;  // new window: restart WMMA->WMMA fill count
     // Advance by WMMA issue cycles after opening a new timeline window.
     // This keeps coIssueCyclePos_ aligned with elapsed cycles right after WMMA issue.
     advanceTime(node->inst->issueCycles);
@@ -881,6 +946,7 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     DAGNode* best = nullptr;
     int kind = -1;
     int bestWait = 0;
+    std::tuple<bool, int> bestKey{};
 
     // Ordering, highest key first: (1) free work beats a hidden-stall candidate;
     // (2) smallest id. Producer-side hazard hoisting is handled separately by
@@ -888,17 +954,7 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     // everything else unless/until decidePromote() forces it.
     auto consider = [&](DAGNode* cand, int candKind, int candWait) {
         if (!cand) return;
-        const bool candHazard = candWait > 0;
-        const bool curHazard = bestWait > 0;
-        bool take;
-        if (best == nullptr)
-            take = true;
-        else if (candHazard != curHazard)
-            take = !candHazard;
-        else
-            take = cand->id < best->id;
-        if (take) {
-            best = cand;
+        if (considerBest(cand, std::make_tuple(candWait > 0, (int)cand->id), best, bestKey)) {
             kind = candKind;
             bestWait = candWait;
         }
@@ -959,16 +1015,13 @@ bool CDNA5ReadyQueue::findOldestFallbackNonWmma(DAGNode* pickedDS, DAGNode** out
     if (outWait) *outWait = 0;
     DAGNode* best = nullptr;
     int kind = -1;
-    int bestWait = 0;
+    std::tuple<int, int> bestKey{};
 
     auto consider = [&](DAGNode* cand, int candKind) {
         if (cand == nullptr) return;
         const int wait = std::max(getMaxSrcDataWait(cand), getHazardWait(cand));
-        if (best == nullptr || wait < bestWait || (wait == bestWait && cand->id < best->id)) {
-            best = cand;
+        if (considerBest(cand, std::make_tuple(wait, (int)cand->id), best, bestKey))
             kind = candKind;
-            bestWait = wait;
-        }
     };
 
     if (!globalReadQueue.empty()) consider(globalReadQueue.top(), kGlobalRead);
@@ -979,7 +1032,7 @@ bool CDNA5ReadyQueue::findOldestFallbackNonWmma(DAGNode* pickedDS, DAGNode** out
     if (best == nullptr) return false;
     *outNode = best;
     *kindOut = kind;
-    if (outWait) *outWait = bestWait;
+    if (outWait) *outWait = std::get<0>(bestKey);
     return true;
 }
 
@@ -1488,18 +1541,27 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
             blockWmmaForAtLeastOneNonWmmaInterleaving =
                 hasPickableNonWmma && isMatrixInstruction(*lastPickedNode_->inst);
         }
+        // Hold a dependent bestWMMA while non-WMMA work remains; else emit shortfall as v_nops.
+        bool blockWmmaForCoexecSpacing = false;
+        if (activeWmmaNode_ != nullptr && hasPickableNonWmma &&
+            wmmaToWmmaCoexecOverlap(*activeWmmaNode_->inst, *bestWMMA->inst)) {
+            const int slotsPlusOne = popcount16(activeWmmaNode_->inst->coIssueWindow) + 1;
+            blockWmmaForCoexecSpacing = nonWmmaFillsSinceActiveWmma_ < slotsPlusOne;
+        }
         PASS_DEBUG(std::cerr << "[CDNA5 pickOne] Phase B candidate wmmaId=" << bestWMMA->id
                              << " bestLatency=" << bestLatency
                              << " blockLoopHead=" << blockWmmaForLoopHeadBalance
                              << " blockActiveWindow=" << blockWmmaForActiveWindow
                              << " blockAtLeastOneNonWmmaInterleaving="
                              << blockWmmaForAtLeastOneNonWmmaInterleaving
+                             << " blockCoexecSpacing=" << blockWmmaForCoexecSpacing
+                             << " fills=" << nonWmmaFillsSinceActiveWmma_
                              << " localReadQ=" << localReadQueue.size() << " nonWmmaMinId="
                              << (smallestPickable ? std::to_string(smallestPickable->id)
                                                   : std::string("none"))
                              << "\n");
         if (bestLatency <= 0 && !blockWmmaForLoopHeadBalance && !blockWmmaForActiveWindow &&
-            !blockWmmaForAtLeastOneNonWmmaInterleaving) {
+            !blockWmmaForAtLeastOneNonWmmaInterleaving && !blockWmmaForCoexecSpacing) {
             DAGNode* node = pickOneFromWMMA(bestWMMA);
             PASS_DEBUG(std::cerr << "[CDNA5 pickOne] Phase B picked WMMA dagId=" << node->id
                                  << "\n");
@@ -1647,6 +1709,7 @@ void CDNA5ReadyQueue::onInit(IRList::iterator regionStart, IRList::iterator regi
     coIssueCyclePos_ = 0;
     activeWmmaLatency_ = 0;
     activeWmmaNode_ = nullptr;
+    nonWmmaFillsSinceActiveWmma_ = 0;
     globalReadInflight_ = InFlightQueue(globalReadQueueDepth());
     dsReadInflight_ = InFlightQueue(dsReadQueueDepth());
     const int dsDepth = dsReadQueueDepth();
@@ -1739,6 +1802,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     currentMsb_ = -1;
     // Clear per-region node ptr; it dangles into the previous region's freed DAGNodeList.
     activeWmmaNode_ = nullptr;
+    nonWmmaFillsSinceActiveWmma_ = 0;
     // Hazard state is per-region: hazardHoistCandidates_ holds DAGNode* into the prior
     // region's freed DAGNodeList, and any in-flight gate window is already locked into
     // the prior region's fixed instruction order (region boundaries are side-effect

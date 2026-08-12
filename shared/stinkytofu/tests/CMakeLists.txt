@@ -83,7 +83,10 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/StinkyRemoveWaitCntPassTest.cpp
     unit/asm/StinkyWmmaVgprReorderPassTest.cpp
     unit/asm/RemoveInstructionPassTest.cpp
+    unit/asm/RemoveDscntPassTest.cpp
     unit/asm/FlattenCalleesPassTest.cpp
+    unit/asm/Gfx1250HazardPassTest.cpp
+    unit/asm/Gfx1250HazardProfileTest.cpp
     unit/asm/BasicBlockTest.cpp
     unit/asm/DumpStinkyModulePassTest.cpp
     unit/asm/StinkySignatureTest.cpp
