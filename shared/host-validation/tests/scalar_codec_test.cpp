@@ -122,8 +122,7 @@ float expectedBinaryDecode(ScalarType type, uint32_t raw) {
                         : std::numeric_limits<float>::infinity();
 
     const uint32_t payloadMask = (1U << format.totalBits) - 1U;
-    const uint32_t magnitude =
-        format.hasSign ? raw & (signMask - 1U) : raw & payloadMask;
+    const uint32_t magnitude = format.hasSign ? raw & (signMask - 1U) : raw & payloadMask;
     const uint32_t exponentMask = (1U << format.exponentBits) - 1U;
     const uint32_t mantissaMask = (1U << format.mantissaBits) - 1U;
     const uint32_t exponent = (magnitude >> format.mantissaBits) & exponentMask;
@@ -149,8 +148,7 @@ void testExhaustiveBinaryFormat(ScalarType type) {
             require(observed == expected, "Binary format infinity decode mismatch.");
         } else {
             require(observed == expected, "Binary format finite decode mismatch.");
-            const uint32_t canonicalRaw =
-                type == ScalarType::E4M3 ? raw & 0x7fU : raw;
+            const uint32_t canonicalRaw = type == ScalarType::E4M3 ? raw & 0x7fU : raw;
             require(encodeRaw(type, observed) == canonicalRaw,
                     "Binary format finite round-trip mismatch.");
         }
@@ -263,11 +261,10 @@ int main() {
             "E5M3 scale encoding mismatch.");
     require(encodeRaw(ScalarType::E4M3, 1.0f) == 0x38 && encodeRaw(ScalarType::E4M3, 2.0f) == 0x40,
             "E4M3 scale encoding mismatch.");
-    require(
-        encodeRaw(ScalarType::E5M3, -0.0f) == 0x00 &&
-            encodeRaw(ScalarType::E4M3, -0.0f) == 0x00 &&
-            encodeRaw(ScalarType::E8M0, -0.0f) == 0x00,
-        "Unsigned scale negative-zero encoding mismatch.");
+    require(encodeRaw(ScalarType::E5M3, -0.0f) == 0x00 &&
+                encodeRaw(ScalarType::E4M3, -0.0f) == 0x00 &&
+                encodeRaw(ScalarType::E8M0, -0.0f) == 0x00,
+            "Unsigned scale negative-zero encoding mismatch.");
 
     for (const ScalarType scaleType : {ScalarType::E5M3, ScalarType::E4M3}) {
         bool negativeScaleThrew = false;

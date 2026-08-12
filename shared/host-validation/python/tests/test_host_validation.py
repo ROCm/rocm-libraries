@@ -42,7 +42,9 @@ def encode_fp4_e2m1(value):
     if math.isnan(magnitude) or magnitude >= positive_values[-1]:
         return sign | 0x7
     upper = next(
-        index for index, candidate in enumerate(positive_values) if candidate >= magnitude
+        index
+        for index, candidate in enumerate(positive_values)
+        if candidate >= magnitude
     )
     if upper == 0:
         return sign
@@ -64,8 +66,22 @@ def decode_e8m0(raw):
 
 def constrain_fp4_to_interval(raw, scale, minimum, maximum):
     fp4_values = (
-        0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0,
-        -0.0, -0.5, -1.0, -1.5, -2.0, -3.0, -4.0, -6.0,
+        0.0,
+        0.5,
+        1.0,
+        1.5,
+        2.0,
+        3.0,
+        4.0,
+        6.0,
+        -0.0,
+        -0.5,
+        -1.0,
+        -1.5,
+        -2.0,
+        -3.0,
+        -4.0,
+        -6.0,
     )
     sign = raw & 0x8
     magnitude = raw & 0x7
@@ -74,7 +90,9 @@ def constrain_fp4_to_interval(raw, scale, minimum, maximum):
         if minimum <= represented <= maximum:
             return sign | magnitude
         negative = bool(sign)
-        increase_magnitude = represented < minimum if not negative else represented > maximum
+        increase_magnitude = (
+            represented < minimum if not negative else represented > maximum
+        )
         if increase_magnitude:
             if magnitude == 0x7:
                 break
@@ -112,8 +130,24 @@ def bounded_mx_fp4_oracle(
     scale_indices = np.empty(dimensions, dtype=np.uint32)
     reference = np.empty(dimensions, dtype=np.float32)
     fp4_values = np.asarray(
-        [0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0,
-         -0.0, -0.5, -1.0, -1.5, -2.0, -3.0, -4.0, -6.0],
+        [
+            0.0,
+            0.5,
+            1.0,
+            1.5,
+            2.0,
+            3.0,
+            4.0,
+            6.0,
+            -0.0,
+            -0.5,
+            -1.0,
+            -1.5,
+            -2.0,
+            -3.0,
+            -4.0,
+            -6.0,
+        ],
         dtype=np.float32,
     )
 
@@ -124,9 +158,7 @@ def bounded_mx_fp4_oracle(
         else:
             block = scale_index // free_extent
             free_coordinate = scale_index % free_extent
-        block_element_count = min(
-            block_size, blocked_extent - block * block_size
-        )
+        block_element_count = min(block_size, blocked_extent - block * block_size)
         coordinates = []
         for offset in range(block_element_count):
             if block_axis == 0:
@@ -347,9 +379,7 @@ class CodecTests(unittest.TestCase):
                 expected_raw = np.asarray(raw, dtype=np.uint32)
                 if scalar_type == hv.ScalarType.E4M3:
                     expected_raw &= 0x7F
-                np.testing.assert_array_equal(
-                    round_trip, expected_raw[encodable]
-                )
+                np.testing.assert_array_equal(round_trip, expected_raw[encodable])
 
     def test_exhaustive_float16_decode(self):
         raw = np.arange(1 << 16, dtype="<u2")
