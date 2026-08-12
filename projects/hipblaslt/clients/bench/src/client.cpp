@@ -710,6 +710,16 @@ try
          "Accepts off|0, on|1, auto|2 (case-insensitive). When omitted the bench "
          "leaves the attribute unset so the library default (auto) applies.")
 
+        ("uniform_summation_order",
+         value<std::string>(&hipblaslt_bench_options::uniform_summation_order_str())->default_value(""),
+         "Request a uniform summation order across the M dimension via the "
+         "HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT extension attribute. "
+         "When on, identical rows of A produce bitwise identical rows of D within a "
+         "single run; this is not run-to-run determinism and it can cost performance. "
+         "The matmul fails with HIPBLAS_STATUS_INVALID_VALUE if no uniform-safe "
+         "configuration exists for the problem. Accepts off|0, on|1 (case-insensitive). "
+         "When omitted the bench leaves the attribute unset so the library default (off) applies.")
+
         ("help,h", "produces this help message")
 
         ("version", "Prints the version number");
@@ -902,6 +912,29 @@ try
             return 1;
         }
         hipblaslt_bench_options::streamk_tile_scheduling_mode() = resolved;
+    }
+
+    // Resolve --uniform_summation_order (off|0, on|1) into the value forwarded to
+    // HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT. A negative result means
+    // "unset": leave the attribute untouched so the library default applies.
+    {
+        std::string mode = hipblaslt_bench_options::uniform_summation_order_str();
+        std::transform(mode.begin(), mode.end(), mode.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        int32_t resolved = -1;
+        if(mode.empty())
+            resolved = -1;
+        else if(mode == "off" || mode == "0")
+            resolved = 0;
+        else if(mode == "on" || mode == "1")
+            resolved = 1;
+        else
+        {
+            hipblaslt_cerr << "uniform_summation_order must be one of off|0, on|1." << std::endl;
+            return 1;
+        }
+        hipblaslt_bench_options::uniform_summation_order() = resolved;
     }
 
     // transfer local variable state

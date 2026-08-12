@@ -236,7 +236,8 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
                                         batch_mode,
                                         matmul_descr->bias_stride,
                                         matmul_descr->streamk_tile_scheduling_ext,
-                                        effective_sm_count_target(handle, matmul_descr, nullptr)};
+                                        effective_sm_count_target(handle, matmul_descr, nullptr),
+                                        matmul_descr->uniform_summation_order};
 
     rocblaslt_status st = runContractionProblem(handle, algo, problem, gemmData);
 
@@ -432,7 +433,8 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl(const rocblaslt_handle          
                                         batch_mode,
                                         matmul_descr->bias_stride,
                                         matmul_descr->streamk_tile_scheduling_ext,
-                                        effective_sm_count_target(handle, matmul_descr, nullptr)};
+                                        effective_sm_count_target(handle, matmul_descr, nullptr),
+                                        matmul_descr->uniform_summation_order};
     return gemmCreate(problem, gemmData, gemmCount);
 }
 
@@ -730,7 +732,8 @@ rocblaslt_status
                                         hipblasLtBatchMode_t::HIPBLASLT_BATCH_MODE_STRIDED,
                                         matmul_descr[i]->bias_stride,
                                         matmul_descr[i]->streamk_tile_scheduling_ext,
-                                        effective_sm_count_target(handle, matmul_descr[i], nullptr)});
+                                        effective_sm_count_target(handle, matmul_descr[i], nullptr),
+                                        matmul_descr[i]->uniform_summation_order});
     }
     return groupedGemmCreate(problems, gemmData, gemmCount);
 }

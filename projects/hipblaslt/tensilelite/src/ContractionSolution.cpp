@@ -1686,6 +1686,26 @@ namespace TensileLite
         if(pAMDGPU->fixedStaggerUStrideShift != std::numeric_limits<size_t>::max())
             defaultStaggerUStrideShift = pAMDGPU->fixedStaggerUStrideShift;
 
+        // Uniform summation order requires StaggerU == 0. Clamping only the
+        // mapping is NOT sufficient: mappings 1/2/4 are row-uniform while each
+        // workgroup owns exactly one tile, but as soon as a StreamK workgroup
+        // handles more than one tile every mapping breaks uniformity. Only
+        // StaggerU == 0 is unconditionally safe.
+        //
+        // The placement of this clamp is load-bearing. It must sit AFTER every
+        // producer of the triple -- the sizeMapping defaults, the origami
+        // prediction, the prediction-cache read, and the TENSILE_FIXED_STAGGERU*
+        // overrides directly above -- or an env override would reintroduce a
+        // non-zero stagger. It must equally stay BELOW the staggerUParamsCache
+        // write above, so the cache keeps holding the real origami prediction
+        // rather than this mode's zeros.
+        if(problem.getParams().uniformSummationOrder())
+        {
+            defaultStaggerUMapping     = 0;
+            defaultStaggerU            = 0;
+            defaultStaggerUStrideShift = 0;
+        }
+
         // Mapping should be in this range: [0, 1, 2, 3, 4]
         assert(defaultStaggerUMapping < 5);
         // StaggerU should be power of 2 and less than 65: [0, 2, 4, 8, 16, 32, 64]
@@ -2007,7 +2027,10 @@ namespace TensileLite
         if(internalArgsSupport.staggerU)
         {
             constexpr size_t staggerMask1 = 0x1F00;
-            size_t           sum          = staggerUMapping << 13;
+            // Mapping owns the 3-bit field [15:13]. Mask it: the range assert in
+            // calculateAutoStaggerU() compiles out under NDEBUG, so an
+            // out-of-range value would otherwise spill into neighbouring bits.
+            size_t           sum          = (staggerUMapping & 0x7) << 13;
             size_t           sus          = staggerMask1 & (staggerUStrideShift << 8);
             size_t           su           = mask8 & staggerU;
             if(Debug::Instance().disableStaggerU())
@@ -4435,6 +4458,14 @@ namespace TensileLite
         GSUSettings gsuSettings;
         gsuSettings.globalAccumulation = problem.getAccumulation(hardware, sizeMapping, gsu);
 
+        // Evaluated here, immediately before dispatch, because this is the first
+        // point at which every value the kernel will see is final: the StreamK
+        // block above can still rewrite sk.grid and sk.reduction (the
+        // workspace-shortfall fallback rewrites both), and globalAccumulation is
+        // only resolved on the line above.
+        checkUniformSummationOrder(
+            problem, hardware, sk, gsuSettings.globalAccumulation, gsu, inputs.Synchronizer);
+
         // Temporary gating: only genuine handwritten/external custom kernels use
         // the generic generateCustomCall path (they have no other path). All
         // Tensile-generated kernels — including newer features like subtile,
@@ -4520,6 +4551,9 @@ namespace TensileLite
 
         bool debug = Debug::Instance().printKernelArguments() || this->kernelArgsLog;
 
+        auto autoGsuVal = calculateAutoGSU(problems[0], &hardware);
+        auto gsu = problems[0].getParams().gsu() > 0 ? problems[0].getParams().gsu() : autoGsuVal;
+
         // Check for nullptrs if alpha is non-zero.
         for(int idx = 0; idx < problems.size(); idx++)
         {
@@ -4566,6 +4600,20 @@ namespace TensileLite
             if(problems[idx].cEqualsD() && inputs.grouped[idx].c != inputs.grouped[idx].d)
                 throw std::runtime_error(
                     "ContractionProblem has cEqualsD set, but pointers for c and d are not equal");
+
+            // The grouped path never resolves StreamK: generateSingleCallGroupedGemm()
+            // packs args with skGrid == 0 and reads sizeMapping.globalAccumulation
+            // directly rather than through getAccumulation(), so the gate is fed
+            // those values. A StreamK solution reaching here is rejected by the grid
+            // divisibility check, which is what a default-constructed
+            // StreamKSettings (grid == 0) means. Applied per GEMM because the
+            // uniform-summation-order flag is a per-problem parameter.
+            checkUniformSummationOrder(problems[idx],
+                                       hardware,
+                                       StreamKSettings{},
+                                       sizeMapping.globalAccumulation,
+                                       gsu,
+                                       inputs.grouped[idx].Synchronizer);
         }
 
         std::vector<KernelInvocation> rv;
@@ -4575,9 +4623,6 @@ namespace TensileLite
             h_args.useExternalPointer(hipHostMemory, hipHostMemorySize);
         }
         h_args.reserve(32768, 8192);
-
-        auto autoGsuVal = calculateAutoGSU(problems[0], &hardware);
-        auto gsu = problems[0].getParams().gsu() > 0 ? problems[0].getParams().gsu() : autoGsuVal;
 
         // if((sizeMapping.globalSplitU > 1 || sizeMapping.globalSplitU == -1) && sizeMapping.globalAccumulation != 2)
         // {
@@ -4636,6 +4681,21 @@ namespace TensileLite
         {
             throw std::runtime_error("Currently this solution does not support user args.");
         }
+
+        auto gsu = problems[0].getParams().gsu() > 0 ? problems[0].getParams().gsu()
+                                                     : calculateAutoGSU(problems[0], &hardware);
+
+        // Same reasoning as solveGroupedGemm(): this path shares
+        // generateSingleCallGroupedGemm(), so it resolves no StreamK settings and
+        // reads sizeMapping.globalAccumulation directly.
+        for(size_t idx = 0; idx < problems.size(); idx++)
+            checkUniformSummationOrder(problems[idx],
+                                       hardware,
+                                       StreamKSettings{},
+                                       sizeMapping.globalAccumulation,
+                                       gsu,
+                                       inputs.grouped[idx].Synchronizer);
+
         std::vector<KernelInvocation> rv;
 
         bool debug = Debug::Instance().printKernelArguments() || this->kernelArgsLog;
@@ -4648,9 +4708,6 @@ namespace TensileLite
         else
             rv.push_back(
                 generateSingleCallGroupedGemm<false>(problems, inputs, hardware, h_args, dUA));
-
-        auto gsu = problems[0].getParams().gsu() > 0 ? problems[0].getParams().gsu()
-                                                     : calculateAutoGSU(problems[0], &hardware);
 
         if((sizeMapping.globalAccumulation && gsu > 1) && (sizeMapping.globalAccumulation != 3))
         {
@@ -5262,6 +5319,145 @@ namespace TensileLite
         // non-StreamK) remain available to serve the GEMM.
         warnStreamKDynamicQueueUnsupportedOnce(hardware);
         return false;
+    }
+
+    bool ContractionSolution::uniformSummationOrderSupported(Problem const&  problem,
+                                                             Hardware const& hardware) const
+    {
+        if(!problem.getParams().uniformSummationOrder())
+            return true;
+
+        // Only statically-knowable facts are tested here; see the declaration
+        // for why the launch-dependent ones are deliberately left permissive.
+
+        // Atomic fixup of partial tiles accumulates in arrival order.
+        if(sizeMapping.streamK != 0 && sizeMapping.streamKAtomic != 0)
+            return false;
+
+        // getAccumulation() may adapt this upward to 2 (MultipleBuffer) when
+        // AdaptiveGemmGSUA is enabled, so sizeMapping is only conclusive when it
+        // cannot: rejecting an adaptive solution here could discard one the
+        // launch gate would have accepted. 0 (none) and 1 (SingleBuffer) are
+        // allowed at an effective GSU of 1, mirroring the launch gate: without
+        // a K split they write D directly rather than accumulating atomically.
+        if(sizeMapping.adaptiveGemmGSUA == 0 && sizeMapping.globalAccumulation != 2
+           && sizeMapping.globalAccumulation != 3 && sizeMapping.globalAccumulation != 4)
+        {
+            const uint32_t autoGsuVal = calculateAutoGSU(problem, &hardware);
+            const uint32_t gsu
+                = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : autoGsuVal;
+            if(gsu > 1
+               || (sizeMapping.globalAccumulation != 0 && sizeMapping.globalAccumulation != 1))
+                return false;
+        }
+
+        // A kernel with no runtime StaggerU field never sees the clamp in
+        // calculateAutoStaggerU() and would stagger with its compiled-in value.
+        // The converse is safe: when the host packs no StaggerU the kernel reads
+        // 0, so only a solution that would otherwise stagger is rejected.
+        if(!internalArgsSupport.staggerU && sizeMapping.staggerU != 0)
+            return false;
+
+        return true;
+    }
+
+    void ContractionSolution::checkUniformSummationOrder(Problem const&         problem,
+                                                         Hardware const&        hardware,
+                                                         StreamKSettings const& sk,
+                                                         size_t      resolvedGlobalAccumulation,
+                                                         uint32_t    gsu,
+                                                         void const* synchronizer) const
+    {
+        if(!problem.getParams().uniformSummationOrder())
+            return;
+
+        auto reject = [this](std::string const& reason) {
+            throw UniformSummationOrderError(
+                "hipBLASLt Error: uniform summation order was requested, but solution '"
+                + this->kernelName + "' cannot guarantee it for this launch: " + reason
+                + ". Disable uniform summation order or select a different solution.");
+        };
+
+        if(sizeMapping.streamK != 0)
+        {
+            // Atomic fixup accumulates partial tiles in arrival order.
+            if(sizeMapping.streamKAtomic != 0)
+                reject("StreamKAtomic=1 reduces partial tiles with atomics, in arrival order");
+
+            // Batch-inclusive tile count for StreamK, matching the value the
+            // StreamK resolution and the kernel-arg packing both use.
+            const size_t tiles = problem.getNumTiles(sizeMapping, 1);
+            if(sk.grid == 0 || tiles % sk.grid != 0)
+                reject("the resolved StreamK grid (" + std::to_string(sk.grid)
+                       + ") does not divide the tile count (" + std::to_string(tiles)
+                       + "), so some output tiles would have their K range split across "
+                         "workgroups and reduced by fixup while others would not");
+
+            // The parallel path reinterprets the same kernel arguments and
+            // splits K across workgroups.
+            if(sk.reduction != origami::reduction_t::tree)
+                reject("the resolved StreamK reduction is parallel, not tree");
+
+            // Mirrors the arg-packing condition: the ws/Flags pair is only
+            // appended for these kernels, and the device reads AddressFlags == 0
+            // as a request for the parallel reduction path.
+            if(sizeMapping.streamKAtomic == 0 && sizeMapping.streamKForceDPOnly == 0
+               && synchronizer == nullptr)
+                reject("the StreamK Synchronizer/Flags pointer is null, which the kernel treats "
+                       "as a request for the parallel reduction path");
+
+            // The dynamic-queue variants are row-uniform only while every output
+            // tile stays data-parallel, i.e. the packed SKTiles is 0.
+            const bool effectiveDynamic = (sizeMapping.streamK == 5)
+                                              ? streamK5EffectiveDynamic(problem, hardware)
+                                              : false;
+            if(sizeMapping.streamK == 4 || effectiveDynamic)
+            {
+                AMDGPU const*  pAMDGPU       = dynamic_cast<AMDGPU const*>(&hardware);
+                const int      overrideTiles = pAMDGPU != nullptr ? pAMDGPU->skTiles : -1;
+                const uint32_t skTiles
+                    = overrideTiles > -1 ? static_cast<uint32_t>(overrideTiles) : 0u;
+                if(skTiles != 0)
+                    reject("the dynamic-queue StreamK path is packing SKTiles="
+                           + std::to_string(skTiles)
+                           + " (debug override); it is only row-uniform when every output tile "
+                             "stays data-parallel (SKTiles == 0)");
+            }
+        }
+
+        // Resolved value, which can differ from sizeMapping.globalAccumulation
+        // when AdaptiveGemmGSUA is enabled; this is the one the kernel sees.
+        // 2 (MultipleBuffer), 3 (MultipleBufferSingleKernel) and 4
+        // (PartialsBuffer) are always row-uniform. 0 (none) and 1
+        // (SingleBuffer) only accumulate atomically once the effective GSU
+        // splits K, which is the same combination that routes through
+        // generateBetaOnlyCall(); at GSU 1 they are a plain write to D. An
+        // allow-list rather than a blacklist so a future enum value is
+        // rejected by default.
+        const bool accumulationRowUniform
+            = resolvedGlobalAccumulation == 2 || resolvedGlobalAccumulation == 3
+              || resolvedGlobalAccumulation == 4
+              || ((resolvedGlobalAccumulation == 0 || resolvedGlobalAccumulation == 1) && gsu <= 1);
+        if(!accumulationRowUniform)
+            reject("resolved GlobalAccumulation=" + std::to_string(resolvedGlobalAccumulation)
+                   + " with GSU=" + std::to_string(gsu)
+                   + " is not row-uniform; 2 (MultipleBuffer), 3 "
+                     "(MultipleBufferSingleKernel) and 4 (PartialsBuffer) always are, and 0 (none) "
+                     "and 1 (SingleBuffer) only when GSU is 1");
+
+        // Recomputes exactly what generateSingleCall() packs. The clamp in
+        // calculateAutoStaggerU() should already have forced this to 0; checking
+        // it anyway is what catches a future path that bypasses the clamp.
+        const int32_t autoWGM = std::get<0>(calculateAutoWGM(problem, &hardware, sk.grid));
+        const size_t  resolvedStaggerU
+            = std::get<1>(calculateAutoStaggerU(problem, &hardware, sk.grid, autoWGM));
+        if(resolvedStaggerU != 0)
+            reject("the resolved StaggerU is " + std::to_string(resolvedStaggerU)
+                   + " rather than 0, so the K-loop start offset varies per tile");
+
+        if(!internalArgsSupport.staggerU && sizeMapping.staggerU != 0)
+            reject("this kernel does not accept a runtime StaggerU, so its compiled-in StaggerU="
+                   + std::to_string(sizeMapping.staggerU) + " cannot be clamped to 0");
     }
 
     namespace

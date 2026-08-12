@@ -108,6 +108,28 @@ namespace hipblaslt_ext
         HIPBLASLT_EXPORT void setStreamKTileSchedulingMode(hipblasLtStreamKTileSchedulingMode_t mode);
 
         /*! \ingroup library_module
+         *  \brief Request a uniform summation order across the M dimension.
+         *
+         *  \details
+         *  The ``hipblaslt_ext`` equivalent of
+         *  ``HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT``. When enabled,
+         *  hipBLASLt guarantees that if every row of matrix A is the identical
+         *  vector, then every row of the output matrix D is bitwise identical.
+         *  This is uniformity across the M dimension within a single run; it is
+         *  **not** run-to-run determinism and must not be relied upon as such.
+         *
+         *  Defaults to ``false``. Enabling the mode restricts kernel selection
+         *  and the launch configuration, so it can reduce performance; if no
+         *  uniform-safe configuration exists for the resolved launch, ``run()``
+         *  returns ``HIPBLAS_STATUS_INVALID_VALUE`` rather than silently
+         *  producing a non-uniform result.
+         *
+         *  @param[in]
+         *  value  ``true`` to enable the mode, ``false`` (default) to disable it.
+         */
+        HIPBLASLT_EXPORT void setUniformSummationOrder(bool value);
+
+        /*! \ingroup library_module
          *  \brief This function returns the maximum workspace size that was set.
          *
          *  \retval size_t Returns the set max workspace size.
@@ -120,6 +142,12 @@ namespace hipblaslt_ext
          *  ``HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF``.
          */
         HIPBLASLT_EXPORT hipblasLtStreamKTileSchedulingMode_t getStreamKTileSchedulingMode() const;
+
+        /*! \ingroup library_module
+         *  \brief Return the uniform-summation-order request set via
+         *  ``setUniformSummationOrder``. Defaults to ``false``.
+         */
+        HIPBLASLT_EXPORT bool getUniformSummationOrder() const;
 
     private:
         friend GemmInstance;
@@ -596,6 +624,7 @@ namespace hipblaslt_ext
 
         size_t  m_workspace_bytes        = 0;
         int32_t m_streamk_tile_scheduling_mode = HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF;
+        bool    m_uniform_summation_order = false;
     };
 
     /*! \ingroup types_module
