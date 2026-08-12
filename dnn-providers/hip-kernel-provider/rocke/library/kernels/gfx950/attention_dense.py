@@ -307,6 +307,13 @@ class AttentionDenseSpec:
             # --- Hard layout / hardware invariants (permanent contract) ---
             if self.block_size <= 0:
                 raise ValueError("paged=True requires block_size > 0")
+            if self.block_size & (self.block_size - 1) != 0:
+                raise ValueError(
+                    f"paged block_size ({self.block_size}) must be a power of two so "
+                    "the per-page div/mod lower to shift/mask (production page sizes "
+                    "are 16/32); non-power-of-two is correct but pays magic-number "
+                    "address math"
+                )
             if self.block_n % self.block_size != 0:
                 raise ValueError(
                     f"block_n ({self.block_n}) must be a multiple of page "
@@ -703,6 +710,16 @@ def build_attention_dense(
                     align=4,
                 )
                 _wphys_base = b.mul(_wphys, b.const_i32(spec.block_size))
+                # NOTE: _wphys (the physical block id) is used raw -- intentionally
+                # NOT range-checked here. The K/V read goes through a bounds-checked
+                # CDNA buffer SRD (buffer_rsrc word3 0x00027000, num_records = whole
+                # cache = _kv_cache_elems), so an out-of-range id yields a voff beyond
+                # num_records and raw.ptr.buffer.load.lds drops it / fills 0 rather
+                # than reading OOB (contained, but SILENT wrong output on a malformed
+                # table). This backstop holds ONLY while the whole offset stays in the
+                # i32 voffset; the deferred i64 path folds physical_block into a
+                # 64-bit base (bypassing num_records) and MUST add an explicit id
+                # guard there.
             for r in range(ROWS_PER_WAVE):
                 row = b.add(b.mul(wave, b.const_i32(ROWS_PER_WAVE)), b.const_i32(r))
                 row_lds_off = b.add(
@@ -1859,6 +1876,7 @@ def run_attention_dense_torch(
     cu_seqlens_kv=None,
     block_tables=None,
     kv_lens=None,
+    validate_paged: bool = True,
 ):
     """High-level framework entry: compile (cached) + launch the dense prefill
     kernel on torch tensors. ``q``/``k``/``v``/``out`` are dense contiguous
@@ -1885,7 +1903,11 @@ def run_attention_dense_torch(
     ``ValueError`` is raised if either is missing (or is supplied when
     ``spec.paged`` is False). ``q``/``out`` stay dense/contiguous. Single-sequence
     only in this revision (``batch == 1``); ``spec.block_size`` is the cache page
-    size and ``spec.num_kv_blocks`` MUST equal ``k.shape[0]``."""
+    size and ``spec.num_kv_blocks`` MUST equal ``k.shape[0]``. ``validate_paged``
+    (default True) host-checks the used ``block_tables`` entries lie in
+    ``[0, num_kv_blocks)`` (a device->host sync); pass False on the hot /
+    graph-captured path to rely on the bounds-checked cache SRD (an out-of-range
+    id then reads 0 rather than OOB)."""
     ok, why = supports_attention_dense(spec, arch=arch)
     if not ok:
         raise NotImplementedError(f"attention_dense unsupported for spec: {why}")
@@ -1900,6 +1922,55 @@ def run_attention_dense_torch(
         raise ValueError("paged=True requires block_tables and kv_lens")
     if not spec.paged and (block_tables is not None or kv_lens is not None):
         raise ValueError("block_tables/kv_lens provided but spec.paged is False")
+    if spec.paged:
+        # Paged K/V shape guard: the paged buffer-resource bound is sized from the
+        # SPEC (num_kv_blocks*block_size*num_kv_heads*head_size -- see
+        # ``_kv_cache_elems`` in build_attention_dense), NOT from the tensor.
+        # If the passed cache is smaller than the spec claims, that bound
+        # over-reaches the real allocation, so the hardware bounds-check no longer
+        # guards it and a block-table entry can drive an out-of-bounds paged-cache
+        # read. Validate the cache shape against the spec that sizes the bound,
+        # before any compile/launch, so a mismatch fails loudly instead of reading
+        # OOB. (block_tables/kv_lens presence is already checked above.)
+        want = (
+            spec.num_kv_blocks,
+            spec.block_size,
+            spec.num_kv_heads,
+            spec.head_size,
+        )
+        for name, t in (("k", k), ("v", v)):
+            got = tuple(t.shape)
+            if got != want:
+                raise ValueError(
+                    f"paged {name} cache shape {got} != spec-derived "
+                    f"[num_kv_blocks, block_size, num_kv_heads, head_size]={want}; "
+                    "a mismatch mis-sizes the buffer-resource bound and can read OOB"
+                )
+        if validate_paged:
+            # Physical block-id bounds (a CONTENTS check, unlike the metadata checks
+            # above). An entry outside [0, num_kv_blocks) addresses a page outside the
+            # cache; the bounds-checked SRD (see _async_load) drops it to 0 rather
+            # than reading OOB, but that is silently WRONG output on a malformed
+            # table -- so reject it loudly. This reads the tensors (a device->host
+            # sync): pass validate_paged=False to skip on the hot/graph-captured path.
+            # Only the entries the kernel dereferences are checked -- pages
+            # [0, ceil(kv_len/block_size)) per seq; the rest are masked on device.
+            _kvl = kv_lens.tolist() if hasattr(kv_lens, "tolist") else list(kv_lens)
+            for _i in range(spec.batch):
+                _npages = (int(_kvl[_i]) + spec.block_size - 1) // spec.block_size
+                if _npages <= 0:
+                    continue
+                _used = block_tables[_i][:_npages]
+                _used = _used.tolist() if hasattr(_used, "tolist") else list(_used)
+                for _phys in _used:
+                    _p = int(_phys)
+                    if _p < 0 or _p >= spec.num_kv_blocks:
+                        raise ValueError(
+                            f"paged block_tables[{_i}] physical block id {_p} "
+                            f"outside [0, num_kv_blocks={spec.num_kv_blocks}); a "
+                            "malformed entry reads 0 via the bounds-checked cache "
+                            "SRD -> silently wrong output"
+                        )
     from rocke.helpers.compile import compile_kernel
     from rocke.runtime import KernelLauncher, LaunchConfig
 
