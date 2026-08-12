@@ -328,6 +328,12 @@ inline std::vector<VoxelConfig> make_voxel_configs(const std::vector<DType>& dty
     return configs;
 }
 
+// GTest name generator for voxel ops with no scalar parameters (the voxel counterpart of
+// config_param_name).
+inline std::string voxel_config_param_name(const ::testing::TestParamInfo<VoxelConfig>& info) {
+    return voxel_config_name(info.param);
+}
+
 // The voxel counterpart of WithParams. P must provide std::string name() const.
 template <typename P>
 struct VoxelWithParams {
