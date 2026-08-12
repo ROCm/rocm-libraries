@@ -1,6 +1,7 @@
 # hipDNN JIT integration: spec validity, recipe keys, and catalog pruning
 
-Status: **the narrow path (§3) is implemented**; the broader path (§5 onward)
+Status: **the narrow path (§3) is implemented**, and a no-CPython caller can now
+take a shipped bundle all the way to a launch; the broader path (§5 onward)
 remains a proposal. Written against the portable-IR record-and-replay work on
 `users/yraparti/rocke-jit-compilation-prototype`, whose byte-identity gates now
 run in CI (see `dsl_docs/architecture/portable_ir_production_readiness.md`).
@@ -12,15 +13,31 @@ What shipped, and where it lives:
 | Guard derivation, oracle, gate adapters | `src/guard.py` |
 | Guard evaluation (Python mirror) + enforcement in `expand_recipe` | `utils/recipe_expand.py` |
 | Guard evaluation in C + enforcement in the VM | `cpp/portable_ir/recipe_vm.cpp` |
-| **C API for hipDNN** | `cpp/include/rocke/recipe_guard.h` |
+| **C API for hipDNN: admission** | `cpp/include/rocke/recipe_guard.h` |
+| **C API for hipDNN: launch (name, args, grid)** | `cpp/include/rocke/recipe_launch.h` |
+| **Version compatibility, both engines** | `cpp/include/rocke/abi.h`, `src/abi.py` |
+| Launch geometry authoring + Python mirror | `src/launch.py` |
 | ctypes surface for the C API | `src/online.py` |
-| Tests, including Python/C evaluator parity | `tests/test_guard.py` |
-| Worked example over real families | `drivers/derive_guards.py` |
+| Tests: guard, ABI, launch, incl. Python/C parity | `tests/test_{guard,abi,launch}.py` |
+| Worked examples over real families | `drivers/derive_guards.py`, `drivers/launch_from_bundle.py` |
 
 Measured on the five gfx950 attention families, guards derive in under 10ms
 each, occupy under 1KiB of CBOR, and agree with the family's own gate on every
 sampled point — no unsound admissions and, on four of the five, no lost
-coverage either. §3.5 records the numbers and the one case that needed work.
+coverage either. §3.3b records the numbers and the one case that needed work.
+
+Three things landed after the guard work, each closing a gap that only shows up
+once a bundle is actually shipped rather than replayed in the tree:
+
+- **§3.3c — launch metadata.** The pure-C path used to stop at `.ll`. The grid
+  was never in the bundle; it lived in host Python, so the last step of the
+  chain was the one step that needed an interpreter. Geometry is now carried as
+  intexprs over the spec axes and read back through `recipe_launch.h`.
+- **§3.3d — version skew.** A bundle outlives the engine that wrote it, in both
+  directions. Two numbers now govern that, and they are deliberately not one.
+- **§9 — what is still missing.** `.ll` → HSACO and HSACO → launch exist only as
+  Python ctypes wrappers. That may be fine, since hipDNN links comgr and HIP for
+  itself, but it should be a decision rather than a surprise.
 
 This document answers a specific set of questions from the hipDNN side: how a
 non-Python JIT path decides whether a kernel instance is valid, how it finds out
@@ -60,7 +77,9 @@ refusal messages are written in; below is only what this document leans on.
 | **replay** / **the recipe VM** | Re-running a recipe in C to rebuild the instruction list, then lowering it. The VM is family-agnostic: it replays whatever was recorded, so it needs no C++ port of the kernel's builder. |
 | **CBOR** | A binary format with JSON's data model (maps, arrays, ints, strings). The shipping form of a recipe: same content as the JSON shown in examples, smaller and faster to parse. |
 | **bundle** | One CBOR blob holding many recipes, looked up by `(key, arch)`, so a runtime opens one file instead of hundreds. |
-| **guard** | *Proposed here, does not exist yet.* A small predicate carried by a recipe, checked before replay, that rejects an invalid binding of its free values. |
+| **guard** | A small predicate carried by a recipe, checked before replay, that rejects an invalid binding of its free values. Proposed in §3 of this document; now implemented. |
+| **kernarg** | The flat buffer of kernel arguments handed to the GPU at launch. Each argument sits at a fixed byte offset; getting one offset wrong corrupts every argument after it. |
+| **launch plan** | What a caller needs once it holds a compiled kernel: the mangled kernel name, the kernarg offsets, and the grid/block/LDS to launch with. §3.3c. |
 | **arch** | The GPU target, e.g. `gfx950` (CDNA4), `gfx942` (CDNA3). Gates are arch-aware because the legal MMA instructions and LDS capacity differ. |
 
 ### What an `intexpr` is
@@ -156,7 +175,9 @@ roll where rolling succeeds, derive each recipe's guard, and write the bundle.
 | Does a pruned bundle remove the need for a C++ `is_valid_spec`? | **Largely, yes.** If invalid combinations were never recorded, an invalid instance simply has no recipe and the existence check drops it. Invalid and not-shipped become the same outcome: skip the candidate. This takes the [broader migration](#5-the-broader-path-validity-as-data-in-the-language-the-vm-already-speaks) off the critical path. |
 | Anything needed from the `rocke/library` kernels?               | **Nothing strictly, but four things are worth fixing** before a generated catalog trusts them: a uniform admission entry point, declared axes and candidate domains, closing known holes in the gates, and hoisting builder-deep assertions. See [§4](#4-what-the-library-kernels-need-for-this-to-work).                                            |
 | Do we still need a check at replay time?                        | **Yes** — the guard is exactly that check. Constraints coupling free and baked parameters can only be evaluated once the problem shape is known. See [§7](#7-validity-at-replay-time).                                                                                                                                                               |
-| Can we ask "is there a recipe for this key?"                    | **Not today.** The only bundle entry point runs a recipe; there is no existence query, and the key is a kernel-name string rather than a structured non-free parameter tuple. Tracked as gap 8.                                                                                                                                                      |
+| Can we ask "is there a recipe for this key?"                    | **Partly.** `rocke_bundle_contains` answers existence without lowering, so the query is no longer "run it and see". But the key is still a kernel-name string rather than a structured non-free parameter tuple, and there is no parse-once index. Tracked as gap 8 / item 4.                                                                        |
+| Once we have a HSACO, do we know what to launch it with?        | **Yes, now.** The recipe carries grid/block/LDS as expressions over its spec axes, and `recipe_launch.h` returns those plus the kernel name and the kernarg offsets. Previously this was the one step that still needed Python. See [§3.3c](#33c-launch-metadata-what-the-caller-needs-after-the-guard-says-yes).                                    |
+| What happens when the engine and the bundle disagree in age?    | Two numbers, checked separately: a binary ABI verified once at load, and a per-artifact `min_reader` that lets an old bundle keep working on a new engine. A too-new bundle is an error, not a guard refusal. See [§3.3d](#33d-version-skew-between-the-two-engines).                                                                               |
 | How big is the non-free parameter space?                        | Not answerable as a single number, and the product of per-axis domains badly overstates it because axes are coupled. Build-time cost is driven by **roller refusals**, not by the size of the valid space.                                                                                                                                           |
 
 
@@ -337,6 +358,13 @@ Both **run** a recipe. There is no "does a key exist", no way to enumerate keys,
 no index, and no structured key. For a virtual catalog of a few hundred
 candidates against a bundle of a few thousand entries, a linear scan of CBOR per
 candidate is the wrong shape even before correctness is considered.
+
+> This section describes the state that motivated the design, and the surface
+> has since grown: `rocke_bundle_contains` answers existence without running
+> anything (§3.3a), and guard and launch queries were added alongside it
+> (§3.3a, §3.3c). What has *not* changed is the part that matters here — the key
+> is still an opaque string and lookup is still a linear scan over a freshly
+> parsed bundle. That is item 4, and §3.3's cost note is the argument for it.
 
 ### 2.3 Catalog pruning already exists — in Python
 
@@ -808,6 +836,158 @@ bundle, and ask the C API. `num_kv_heads=32` lowers to 1135 lines of LLVM IR;
 `num_kv_heads=17` is refused, by the standalone check and by the VM, with
 `num_kv_heads must be one of {16, 32, 64}`.
 
+### 3.3c Launch metadata: what the caller needs after the guard says yes
+
+The guard answers *may I compile this*. A JIT caller then has to answer *what do
+I launch*, and until recently the bundle could not help it.
+
+The gap was narrow and total. A client could take a CBOR bundle to a correct
+`.ll` with no Python in the process, hand that to comgr, get a HSACO — and then
+be stuck holding a compiled kernel with no idea what grid to launch it with. The
+grid was never in the bundle. It lived in host Python, as expressions like
+`(n + tile_n - 1) // tile_n` inside a dispatch function, alongside a
+hand-written argument signature. So the final step of the chain was the one step
+that could not be taken without an interpreter, which is a strange place for the
+"can run without Python" path to end.
+
+A grid is a function of the shape, and the recipe language already exists to say
+exactly that. Geometry is therefore carried as intexprs over the spec axes and
+evaluated by the same `rv_int` that computes every loop bound the recipe emits:
+
+```json
+"launch": {
+  "grid":  [{"div": [{"add": [{"spec": "N"}, 2047]}, 2048]}, 1, 1],
+  "block": [256, 1, 1],
+  "lds_bytes": 0
+}
+```
+
+Nothing has to be kept in sync by hand, because there is only one copy: the
+geometry ships in the same artifact as the kernel it launches, is derived from
+the same axes, and is covered by the same guard and ABI checks. The argument
+signature is *not* carried, because it does not need to be — the recipe's own
+`param` instructions already declare it in order, so the plan reports what the
+recipe actually declared and cannot disagree with the kernel built from it.
+
+```c
+rocke_status_t rocke_bundle_plan_launch_cbor(
+    const unsigned char* data, size_t len,
+    const char* key, const char* arch,
+    const rocke_recipe_spec_int_t* ints, int n_ints,
+    const rocke_recipe_spec_str_t* strs, int n_strs,
+    rocke_launch_plan_t** out_plan, char* err, size_t err_cap);
+
+const char* rocke_launch_plan_kernel_name(const rocke_launch_plan_t*);
+bool        rocke_launch_plan_geometry(const rocke_launch_plan_t*,
+                                       rocke_launch_dims_t* grid,
+                                       rocke_launch_dims_t* block,
+                                       unsigned* lds_bytes);
+int         rocke_launch_plan_num_args(const rocke_launch_plan_t*);
+const rocke_arg_desc_t* rocke_launch_plan_arg(const rocke_launch_plan_t*, int i);
+unsigned    rocke_launch_plan_kernarg_size(const rocke_launch_plan_t*);
+```
+
+Choices worth calling out, in the same spirit as §3.3a:
+
+**Absence is reported, not defaulted.** A recipe with no `launch` block returns
+`false` from `..._geometry` rather than a 1×1×1 grid. A recipe recorded before
+geometry existed is not the same as a kernel that wants one workgroup, and
+defaulting would convert missing metadata into a silently wrong launch at the
+point where it is hardest to notice. Same reasoning as `ROCKE_GUARD_ABSENT`.
+
+**A refused shape cannot be planned.** Building the plan replays the recipe, so
+the guard applies; planning a launch for a shape the kernel will not serve is
+not a meaningful question to answer.
+
+**Kernarg offsets follow natural alignment, and the size deliberately does
+not round up.** Each argument sits at an offset aligned to its own size — 8 for
+pointers and `i64`, 4 for `i32` and `f32`. This is invisible until a signature
+mixes widths and then wrong for everything after the mix: `(ptr, i32, ptr)` puts
+its trailing pointer at 16, not 12. The *total*, though, is the end of the last
+argument and is **not** rounded up to the widest alignment, even though the
+AMDGPU metadata's kernarg segment size is. That matches `runtime/packing.py`,
+which packs a GEMM's `(ptr,ptr,ptr,i32,i32,i32)` as 36 bytes rather than 40 and
+has been running that way. Reporting 40 would have C callers size their buffer
+differently from every Python caller for the same kernel — the kind of
+divergence that surfaces as an intermittent fault rather than a test failure. If
+the convention ever changes it has to change in both engines together.
+
+**Cost.** Building a plan replays the recipe, which is the same work as lowering
+it. A caller wanting both the `.ll` and the plan pays that twice — roughly 1ms,
+against a JIT compile that costs far more and is cached afterwards. Keeping the
+two calls independent was judged worth the millisecond.
+
+`drivers/launch_from_bundle.py` closes the loop on real hardware, and is
+deliberately forbidden from importing anything from the kernel family that
+authored the recipe — no `elementwise_grid`, no `elementwise_signature`. If the
+bundle did not carry enough to launch, it could not run:
+
+```text
+elems_per_block=2048   (grid must be ceil(N/2048))
+N=2049     grid=(2, 1, 1) block=(256, 1, 1) kernarg=28B  OK
+N=100000   grid=(49, 1, 1) block=(256, 1, 1) kernarg=28B  OK
+```
+
+The sizes are deliberately not multiples of the slab, so a grid that failed to
+round up would leave a tail unwritten and the comparison against numpy would
+catch it. `OK` means the output matched elementwise. The 28 bytes are
+`(ptr,ptr,ptr,i32)` — three 8-byte pointers and an `i32` at offset 24, all of it
+reported by the C engine rather than known in advance by the driver.
+
+### 3.3d Version skew between the two engines
+
+A bundle is a persisted artifact. It is written by Python at build time and read
+by C inside hipDNN, which may have been built earlier or later. Compatibility is
+therefore a property of the artifact, decided per artifact, not a property of
+the process — and until this landed the two engines did not even agree on what
+they would accept: the C VM checked the recipe `schema` and the Python expander
+checked nothing, so the oracle would happily replay a recipe the engine it
+mirrors refuses.
+
+Two things can be mismatched, for different reasons, so they get two numbers
+(`cpp/include/rocke/abi.h`). Folding them into one would mean a new recipe
+instruction invalidates every hipDNN binary, and a struct change invalidates
+every bundle on disk; neither is true.
+
+| Number | Question it answers | Checked |
+|---|---|---|
+| `ROCKE_ABI_VERSION` | Does this header match this `.so`? Structs, enums, signatures. | Once at load |
+| `ROCKE_RECIPE_ABI` | Can this engine read this CBOR artifact? | Per artifact, both readers |
+
+The wire check is **not** "artifact version equals mine". Each artifact declares
+the *oldest reader that can read it correctly*, and a reader refuses exactly
+when `min_reader` exceeds its own level:
+
+```json
+"abi": {"min_reader": 1, "writer": 1, "engine": "1.0.0+20260812", "build_id": "6bc59f33fd11"}
+```
+
+`writer`, `engine` and `build_id` are provenance for tracing a bad artifact;
+nothing compares them. A monotonic version compared for equality would reject
+newer artifacts wholesale whether or not they use anything new, turning a
+generator upgrade into a flag day for every deployed engine over recipes it has
+always been able to read. A **missing** block means level 1, so bundles recorded
+before this existed still replay — the same additive rule guards follow.
+
+`min_reader` is *derived* from what the recipe uses, never hand-set: a declared
+requirement is a second copy of the truth and drifts the first time someone
+forgets, which is §1.3's problem in a new place.
+
+Two limits worth stating plainly, because they bound what the number is worth.
+Both VMs already fail loudly on an unknown instruction op, opcode or intexpr
+node, so a genuinely new construct is self-policing and the stamp mostly
+improves the error message; the bump exists for changes an old engine would
+*accept and get wrong*. And attribute **values** are passed through to the
+builder uninterpreted, so their meaning is the lowerer's contract — a lowerer
+silently ignoring an attribute it does not know is not something this can catch.
+
+For the guard API specifically: a bundle too new for the engine returns
+`ROCKE_ERR_VALUE`, **not** `ROCKE_GUARD_REFUSED`. A refusal means route
+elsewhere and carry on; this means the deployed engine and the shipped artifacts
+do not match, which no amount of falling back will fix. Reporting it as a
+refusal would file a deployment fault under "unsupported shape", where it shows
+up as a quiet loss of coverage that nobody investigates.
+
 ### 3.4 Pruning at generation time
 
 The pruning half of the question is the easier half, with one missing piece.
@@ -1259,10 +1439,15 @@ Your pipeline, with today's status and cost per stage:
 ```
 BUILD TIME (Python, authoritative gates available)
   declared axes -> enumerate -> prune with kernel gate      [NEEDS: generator driver]
-    -> record -> roll -> derive guard -> CBOR bundle        [NEEDS: guard derivation]
+    -> record -> roll -> derive guard -> attach geometry    [EXISTS: guard + launch]
+    -> stamp abi -> CBOR bundle                             [EXISTS: min_reader derived]
        every pruned combination is a recording not taken
 
 RUNTIME (hipDNN, no CPython)
+  load librocke                                             [EXISTS]
+  |     assert rocke_abi_version() == ROCKE_ABI_VERSION       once per process
+  |     a mismatch here is UB, not a wrong answer
+  |
   heuristics -> virtual catalog of instances                [hipDNN, exists]
   |
   |-- key = canon(family, arch, non-free params)            [NEEDS: structured key]
@@ -1274,14 +1459,19 @@ RUNTIME (hipDNN, no CPython)
   |-- heuristic TFLOP estimate over survivors               [hipDNN, exists]
   |     pick winner
   |
-  |-- check_guard(winner, free params from problem)         [NEEDS: `guard` field + check]
+  |-- check_guard(winner, free params from problem)         [EXISTS: recipe_guard.h]
   |     rejects couplings only visible once the problem is    ~ns per candidate
   |     known; no IR built, no allocation
+  |     too-new bundle -> ERR_VALUE, not REFUSED (§3.3d)
   |
-  |-- replay -> .ll -> comgr -> HSACO                       [EXISTS, gated byte-identical]
-  |     2.1 ms (GEMM) .. 9.0 ms (attention dense)
+  |-- replay -> .ll -> comgr -> HSACO                       [.ll EXISTS, gated
+  |     2.1 ms (GEMM) .. 9.0 ms (attention dense)            byte-identical;
+  |                                                          comgr: see below]
   |
-  `-> launch
+  |-- plan_launch(winner) -> name, args, grid, block, lds   [EXISTS: recipe_launch.h]
+  |     pack kernargs at the reported offsets
+  |
+  `-> hipModuleGetFunction + hipModuleLaunchKernel          [hipDNN, exists]
 ```
 
 Note what is *absent* from the runtime column: a general `is_valid_spec`. The
@@ -1301,6 +1491,27 @@ remaining cost. Second, "no recipe shipped" is a signal worth recording: if
 hipDNN's heuristics repeatedly select instances with no recipe, that is direct
 feedback on what the build-time generator should record next.
 
+### 9.1 The two links rocke does not provide in C
+
+Everything rocke owns in that column now exists in C: admission, replay to `.ll`,
+and the launch plan. Two links do not, and both sit at the boundary where rocke
+stops being about IR:
+
+- **`.ll` → HSACO.** Only a Python ctypes wrapper around `libamd_comgr`
+  (`runtime/compile.py`). There is no C++ wrapper in this tree — a
+  `rocke::Compiler` appears in `tests/instances/jit_demo.cpp` but no such class
+  is defined anywhere, so that file does not build.
+- **HSACO → launch.** Likewise `runtime/launcher.py` over `hipModule*`.
+
+This is plausibly the right boundary rather than a gap: hipDNN already links
+comgr and HIP and has its own module cache, and a rocke-shaped wrapper would be
+a second one to keep in step. But the Python wrappers are the only executable
+statement of what the compile flags and the code-object bundling must be, so a
+C++ caller reimplementing them is copying from a script rather than calling an
+API. Worth an explicit decision (§11, question 7) — and `jit_demo.cpp` should
+either get its class or be deleted, because a non-building example is worse than
+no example.
+
 ---
 
 ## 10. Work items
@@ -1319,6 +1530,9 @@ stays optional.
 | 3   | VM enforces `guard` before replay; standalone check for the no-lowering query                  | **done** | `rocke_bundle_check_guard_cbor` + `rocke_recipe_check_guard_cbor` (§3.3a); mirrored in `recipe_expand.py`, parity-tested |
 | 4   | Bundle open/find/run-handle C API with a key index                                             | partial | `rocke_bundle_contains` answers existence without lowering; the parse-once handle is still open, and §3.3's cost note is the argument for it |
 | 5   | Enumerating generator: declared axes → prune with the kernel gate → record → roll → emit guard | open | `drivers/derive_guards.py --roll` does this for one family; generalizing it still replaces `record_concrete_bundle`'s hand-written case list |
+| 5b  | Recipe `launch` block + C API for kernel name, kernarg layout and geometry (§3.3c)             | **done** | `recipe_launch.h`; geometry as intexpr over spec axes, so no host-side grid function survives. Verified on GPU by `drivers/launch_from_bundle.py` |
+| 5c  | Two-number version compatibility, wire and binary (§3.3d)                                      | **done** | `abi.h` + `src/abi.py`. `min_reader` derived from recipe content, checked by both engines; binary ABI checked once at load |
+| 5d  | Decide the `.ll` → HSACO → launch boundary in C++ (§9.1)                                       | open | Python ctypes wrappers are the only executable spec today. Either wrap them for C++ or state that hipDNN owns those links — and fix or delete `jit_demo.cpp` either way |
 
 
 **Kernel-side prerequisites (§4).**
@@ -1328,7 +1542,7 @@ stays optional.
 | --- | ------------------------------------------------------------------------------------------------- | ---------- | -------------------------------------------------------------------------------------- |
 | 6   | Uniform `supports(spec, *, arch) -> (ok, reason)` per family, existing functions kept as wrappers | —          | Removes the per-family adapters the sweep writes by hand                               |
 | 7   | Kernels declare tunable axes + candidate domains                                                  | 6          | Moves `CANDIDATES` out of the sweep driver so a new axis cannot be silently unexplored |
-| 8   | Close known gate holes, starting with `num_kv_heads | num_query_heads`; audit others              | —          | A generated catalog trusts these gates; today one of them is known wrong               |
+| 8   | Close known gate holes, starting with `num_kv_heads \| num_query_heads`; audit others             | —          | A generated catalog trusts these gates; today one of them is known wrong               |
 | 9   | Hoist builder-deep assertions into the gate where possible                                        | 6          | Makes pruning cheap (no build probe) and the derived guard complete                    |
 | 10  | Declare launch-time constraints on runtime args (`K % split_k`, `ks % tile_k`)                    | —          | Today a comment in `gemm_universal`; no recipe guard can see these                     |
 
@@ -1348,12 +1562,18 @@ Items 1, 6 and 11 are independent and can start in parallel. Item 11 tests
 something that is shipping today and unverified, so it earns its place whatever
 is decided about the rest.
 
-With 1–3 done, the remaining narrow-path work is item 5 — the generator that
-applies this to a whole catalog rather than one family at a time — and item 8,
-which is what decides whether the guards are worth trusting at all. Item 8 is
-now the highest-value one on the list: §3.3b shows the derivation reproducing a
-kernel's known gate hole faithfully, because that is what a sound derivation
-does with a dishonest gate.
+With 1–3 and 5b–5c done, a caller with no CPython can open a bundle, be told
+whether a shape is admissible, lower it, and learn what to launch. The remaining
+narrow-path work is item 5 — the generator that applies this to a whole catalog
+rather than one family at a time — and item 8, which is what decides whether the
+guards are worth trusting at all. Item 8 is now the highest-value one on the
+list: §3.3b shows the derivation reproducing a kernel's known gate hole
+faithfully, because that is what a sound derivation does with a dishonest gate.
+
+Item 5 also grew a second output. The generator now has to attach geometry as
+well as a guard, which means the axes a family declares (item 7) are the axes
+both are written over — one more reason those declarations belong on the kernel
+rather than in a sweep driver.
 
 ---
 
@@ -1382,3 +1602,13 @@ does with a dishonest gate.
 6. **Do you need the rejection reason**, or only the boolean? Reasons cost
   nothing to carry in the recipe, but reason *parity* with Python is a stronger
    contract than verdict parity, and it is worth deciding whether to promise it.
+7. **Where should the compile-and-load boundary be?** §9.1: rocke stops at `.ll`
+  plus a launch plan, and you already link comgr and HIP. If you want to own
+   those links, the Python wrappers should be treated as the reference for the
+   flags and code-object handling. If you would rather call rocke for them, that
+   is item 5d and worth knowing now rather than after you have written it.
+8. **How do you want a too-new bundle surfaced?** Today it is `ROCKE_ERR_VALUE`
+  from the guard API, distinct from a refusal, on the argument in §3.3d that a
+   version mismatch is a deployment fault rather than a routing decision. If
+   your dispatch treats every non-OK status as "skip this candidate", that
+   distinction is lost and the failure looks like missing coverage.
