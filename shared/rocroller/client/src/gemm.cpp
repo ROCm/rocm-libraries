@@ -17,6 +17,8 @@
 
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CommandSolution.hpp>
+#include <rocRoller/HostNumerics/HostDataGeneration.hpp>
+#include <rocRoller/HostNumerics/HostReference.hpp>
 #include <rocRoller/KernelOptions_detail.hpp>
 #include <rocRoller/Operations/CommandArgument_fwd.hpp>
 #include <rocRoller/Operations/OperationTag.hpp>
@@ -31,8 +33,6 @@
 #include "client/DataParallelGEMMSolution.hpp"
 #include "client/GEMMParameters.hpp"
 #include "client/GEMMParameters_serialization.hpp"
-#include "client/HostDataGeneration.hpp"
-#include "client/HostReference.hpp"
 #include "client/RotatingBuffer.hpp"
 #include "client/StreamKGEMMSolution.hpp"
 
@@ -94,6 +94,8 @@ namespace
 
 namespace rocRoller::Client::GEMMClient
 {
+    using namespace HostNumerics;
+
     using GEMMSolutionPtr = std::shared_ptr<Client::GEMMClient::GEMMSolution>;
 
     template <typename A, typename B, typename D>

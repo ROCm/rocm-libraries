@@ -8,6 +8,7 @@
 
 #include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/GPUArchitecture/GPUArchitectureTarget.hpp>
+#include <rocRoller/HostNumerics/HostDataGeneration.hpp>
 #include <rocRoller/Operations/BlockScale_fwd.hpp>
 #include <rocRoller/Parameters/Solution/LDSBankSwizzleMode.hpp>
 #include <rocRoller/Parameters/Solution/LoadOption.hpp>
@@ -61,27 +62,7 @@ namespace rocRoller
                 std::string shortName;
             };
 
-            enum class DataInitializationMode
-            {
-                Bounded,
-                BoundedAlternatingSign,
-                Unbounded,
-                Identity,
-                Ones,
-                Zeros,
-                TrigonometricFromFloat,
-                NormalFromFloat,
-            };
-
-            struct DataInitialization
-            {
-                DataInitializationMode mode = DataInitializationMode::Bounded;
-                double normalMean = 0.0;
-                double normalStandardDeviation = 1.0;
-            };
-
             std::string toString(TransposeType trans);
-            std::string toString(DataInitialization const& initialization);
 
             struct TypeParameters
             {
@@ -138,7 +119,7 @@ namespace rocRoller
                 // When scaleA/B is ScaleMode::SingleScale
                 float scaleValueA, scaleValueB;
 
-                DataInitialization initModeA{}, initModeB{}, initModeC{};
+                HostNumerics::DataInitialization initModeA{}, initModeB{}, initModeC{};
 
                 int workgroupMappingDim;
             };
@@ -228,7 +209,7 @@ namespace rocRoller
             std::ostream& operator<<(std::ostream& s, MNKBTuple const& x);
             std::ostream& operator<<(std::ostream& s, MKNLTuple const& x);
             std::ostream& operator<<(std::ostream& s, TransposeType const& x);
-            std::ostream& operator<<(std::ostream& s, DataInitialization const& x);
+            std::ostream& operator<<(std::ostream& s, HostNumerics::DataInitialization const& x);
             std::ostream& operator<<(std::ostream& s, TypeParameters const& x);
             std::ostream& operator<<(std::ostream& s, ProblemParameters const& x);
             std::ostream& operator<<(std::ostream& s, SolutionParameters const& x);
@@ -279,5 +260,5 @@ namespace rocRoller::Client::GEMMClient::CLI
      *
      * Asserts that argument is well-formed.
      */
-    bool ParseInitMode(const std::string& arg, DataInitialization& result);
+    bool ParseInitMode(const std::string& arg, HostNumerics::DataInitialization& result);
 }

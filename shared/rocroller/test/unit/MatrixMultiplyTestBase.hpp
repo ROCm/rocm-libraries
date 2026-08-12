@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: MIT
 
 #include <rocRoller/CommandSolution.hpp>
+#include <rocRoller/HostNumerics/HostDataGeneration.hpp>
+#include <rocRoller/HostNumerics/HostReference.hpp>
 #include <rocRoller/Operations/Command.hpp>
 #include <rocRoller/Parameters/Solution/LoadOption.hpp>
 #include <rocRoller/TensorDescriptor.hpp>
-
-#include <common/mxDataGen.hpp>
 
 #include "GPUContextFixture.hpp"
 
@@ -85,9 +85,7 @@ namespace MatrixMultiplyTest
         template <typename TA,
                   typename TB,
                   typename TD,
-                  typename ACC = float,
-                  DataType STA = DataType::None,
-                  DataType STB = DataType::None>
+                  typename ACC = float>
         void matrixMultiplyMacroTile(int                            wave_m,
                                      int                            wave_n,
                                      int                            wave_k,
@@ -344,15 +342,23 @@ namespace MatrixMultiplyTest
 
                 uint32_t seed = 9861u;
 
-                auto       blockScalingA = (scaleA) ? scaleBlockSize : 1;
-                auto       blockScalingB = (scaleB) ? scaleBlockSize : 1;
-                const auto dgenA
-                    = getDataGenerator<TA, STA>(descA, -rangeA, rangeA, seed, blockScalingA);
-                const auto dgenB
-                    = getDataGenerator<TB, STB>(descB, -rangeB, rangeB, seed, blockScalingB);
+                std::optional<HostNumerics::BlockScaleGeneration> scaleGenerationA;
+                std::optional<HostNumerics::BlockScaleGeneration> scaleGenerationB;
+                if(scaleA)
+                    scaleGenerationA
+                        = HostNumerics::BlockScaleGeneration{scaleTypeA, 1, scaleBlockSize};
+                if(scaleB)
+                    scaleGenerationB
+                        = HostNumerics::BlockScaleGeneration{scaleTypeB, 0, scaleBlockSize};
 
-                auto A = getRandomVector<TA, STA>(dgenA, scaleA);
-                auto B = getRandomVector<TB, STB>(dgenB, scaleB);
+                auto generatedA = HostNumerics::generateHostTensor(
+                    descA, {}, scaleGenerationA, -rangeA, rangeA, seed);
+                auto generatedB = HostNumerics::generateHostTensor(
+                    descB, {}, scaleGenerationB, -rangeB, rangeB, seed);
+                using PackedTypeA = typename PackedTypeOf<TA>::type;
+                using PackedTypeB = typename PackedTypeOf<TB>::type;
+                auto A            = HostNumerics::copyTensorStorage<PackedTypeA>(generatedA.data);
+                auto B            = HostNumerics::copyTensorStorage<PackedTypeB>(generatedB.data);
 
                 std::vector<uint8_t> hostScaleA, hostScaleB;
 
@@ -364,12 +370,14 @@ namespace MatrixMultiplyTest
 
                 if(scaleA)
                 {
-                    hostScaleA = dgenA.getScaleBytes();
+                    ASSERT_TRUE(generatedA.scales);
+                    hostScaleA = HostNumerics::copyTensorStorage<uint8_t>(*generatedA.scales);
                     d_scaleA   = make_shared_device(hostScaleA);
                 }
                 if(scaleB)
                 {
-                    hostScaleB = dgenB.getScaleBytes();
+                    ASSERT_TRUE(generatedB.scales);
+                    hostScaleB = HostNumerics::copyTensorStorage<uint8_t>(*generatedB.scales);
                     d_scaleB   = make_shared_device(hostScaleB);
                 }
 
@@ -409,37 +417,38 @@ namespace MatrixMultiplyTest
                                       hipMemcpyDefault),
                             HasHipSuccess(0));
 
-                std::vector<TD> c_D(descD.totalAllocatedElements(), TD{});
                 std::vector<TD> c_C(descD.totalAllocatedElements(), TD{});
 
                 float alpha = 1.0f;
 
+                HostNumerics::HostReferenceProblem referenceProblem(
+                    HostNumerics::hostTensorView(
+                        descA,
+                        A,
+                        scaleA ? HostNumerics::DataTypeInterpretation::BlockScaled
+                               : HostNumerics::DataTypeInterpretation::Unscaled),
+                    HostNumerics::hostTensorView(
+                        descB,
+                        B,
+                        scaleB ? HostNumerics::DataTypeInterpretation::BlockScaled
+                               : HostNumerics::DataTypeInterpretation::Unscaled),
+                    HostNumerics::hostTensorView(descD, c_C));
                 if(scaleA)
                 {
                     ASSERT_TRUE(scaleB);
-
-                    rocRoller::ScaledCPUMM(c_D,
-                                           c_C,
-                                           A,
-                                           B,
-                                           hostScaleA,
-                                           hostScaleB,
-                                           M,
-                                           N,
-                                           K,
-                                           alpha,
-                                           0.0,
-                                           transA == "T",
-                                           transB == "T",
-                                           scaleBlockSize,
-                                           scaleTypeA,
-                                           scaleTypeB);
+                    referenceProblem.scaleA = HostNumerics::hostScaleTensorView(
+                        scaleTypeA, hostScaleA, descA, 1, scaleBlockSize);
+                    referenceProblem.scaleB = HostNumerics::hostScaleTensorView(
+                        scaleTypeB, hostScaleB, descB, 0, scaleBlockSize);
+                    referenceProblem.scaleBlockSize = scaleBlockSize;
                 }
                 else
                 {
                     ASSERT_FALSE(scaleB);
-                    CPUMM(c_D, c_C, A, B, M, N, K, alpha, 0.0, transA == "T", transB == "T");
                 }
+                referenceProblem.alpha = alpha;
+                auto c_D               = HostNumerics::convertHostReference<TD>(
+                    HostNumerics::computeHostReference(referenceProblem).view());
 
                 auto tol = gemmAcceptableError<TA, TB, TD>(
                     M, N, K, m_context->targetArchitecture().target());
@@ -448,32 +457,6 @@ namespace MatrixMultiplyTest
                 Log::info("RNorm is {}", res.relativeNormL2);
                 ASSERT_TRUE(res.ok) << res.message();
             }
-        }
-
-        template <typename TA, typename TB, DataType STA>
-        void matrixMultiplyMacroTileMixed(int               m,
-                                          int               n,
-                                          int               k,
-                                          int               b,
-                                          bool              useLDSB     = true,
-                                          std::string       transA      = "N",
-                                          std::string       transB      = "N",
-                                          const ScaleParams scaleParams = {})
-        {
-            if(isE8M0(scaleParams.scaleTypeB))
-                matrixMultiplyMacroTile<TA, TB, float, float, STA, DataType::E8M0>(
-                    m, n, k, b, useLDSB, transA, transB, scaleParams);
-            else if(isE5M3(scaleParams.scaleTypeB))
-                matrixMultiplyMacroTile<TA, TB, float, float, STA, DataType::E5M3>(
-                    m, n, k, b, useLDSB, transA, transB, scaleParams);
-            else if(isE4M3(scaleParams.scaleTypeB))
-                matrixMultiplyMacroTile<TA, TB, float, float, STA, DataType::E4M3>(
-                    m, n, k, b, useLDSB, transA, transB, scaleParams);
-            else if(scaleParams.scaleTypeB == DataType::None)
-                matrixMultiplyMacroTile<TA, TB, float, float, STA, DataType::None>(
-                    m, n, k, b, useLDSB, transA, transB, scaleParams);
-            else
-                Throw<FatalError>("Invalid type.");
         }
 
         template <typename TA, typename TB>
@@ -486,20 +469,8 @@ namespace MatrixMultiplyTest
                                           std::string       transB      = "N",
                                           const ScaleParams scaleParams = {})
         {
-            if(isE8M0(scaleParams.scaleTypeA))
-                matrixMultiplyMacroTileMixed<TA, TB, DataType::E8M0>(
-                    m, n, k, b, useLDSB, transA, transB, scaleParams);
-            else if(isE5M3(scaleParams.scaleTypeA))
-                matrixMultiplyMacroTileMixed<TA, TB, DataType::E5M3>(
-                    m, n, k, b, useLDSB, transA, transB, scaleParams);
-            else if(isE4M3(scaleParams.scaleTypeA))
-                matrixMultiplyMacroTileMixed<TA, TB, DataType::E4M3>(
-                    m, n, k, b, useLDSB, transA, transB, scaleParams);
-            else if(scaleParams.scaleTypeA == DataType::None)
-                matrixMultiplyMacroTileMixed<TA, TB, DataType::None>(
-                    m, n, k, b, useLDSB, transA, transB, scaleParams);
-            else
-                Throw<FatalError>("Invalid type.");
+            matrixMultiplyMacroTile<TA, TB, float, float>(
+                m, n, k, b, useLDSB, transA, transB, scaleParams);
         }
 
         template <typename TA>
@@ -632,9 +603,15 @@ namespace MatrixMultiplyTest
             TensorDescriptor descB(dataTypeB, {K, N}, transB ? "T" : "N");
             TensorDescriptor descD(dataTypeD, {M, N}, {1u, M});
 
-            auto seed = 9861u;
-            auto A    = DGenVector<TA>(descA, -1.f, 1.f, seed + 1);
-            auto B    = DGenVector<TB>(descB, -1.f, 1.f, seed + 2);
+            auto const seed = 9861u;
+            auto       generatedA
+                = HostNumerics::generateHostTensor(descA, {}, std::nullopt, -1.0f, 1.0f, seed + 1);
+            auto generatedB
+                = HostNumerics::generateHostTensor(descB, {}, std::nullopt, -1.0f, 1.0f, seed + 2);
+            using PackedTypeA = typename PackedTypeOf<TA>::type;
+            using PackedTypeB = typename PackedTypeOf<TB>::type;
+            auto A            = HostNumerics::copyTensorStorage<PackedTypeA>(generatedA.data);
+            auto B            = HostNumerics::copyTensorStorage<PackedTypeB>(generatedB.data);
 
             auto d_A = make_shared_device(A);
             auto d_B = make_shared_device(B);
@@ -701,10 +678,14 @@ namespace MatrixMultiplyTest
                 ASSERT_THAT(hipMemcpy(D.data(), d_D.get(), M * N * sizeof(TD), hipMemcpyDefault),
                             HasHipSuccess(0));
 
-                std::vector<TD> c_D(M * N, TD{});
                 std::vector<TD> c_C(M * N, TD{});
 
-                CPUMM(c_D, c_C, A, B, M, N, K, 1.0f, 0.0, transA, transB);
+                HostNumerics::HostReferenceProblem referenceProblem(
+                    HostNumerics::hostTensorView(descA, A),
+                    HostNumerics::hostTensorView(descB, B),
+                    HostNumerics::hostTensorView(descD, c_C));
+                auto c_D = HostNumerics::convertHostReference<TD>(
+                    HostNumerics::computeHostReference(referenceProblem).view());
 
                 auto tol = gemmAcceptableError<TA, TB, TD>(
                     M, N, K, m_context->targetArchitecture().target());
@@ -761,11 +742,18 @@ namespace MatrixMultiplyTest
             TensorDescriptor descC(dataType, {M, N}, {1u, M});
             TensorDescriptor descD(dataType, {M, N}, {1u, M});
 
-            auto seed = 9861u;
+            auto const seed = 9861u;
 
-            auto A = DGenVector<T>(descA, -1.f, 1.f, seed + 1);
-            auto B = DGenVector<T>(descB, -1.f, 1.f, seed + 2);
-            auto C = DGenVector<T>(descC, -1.f, 1.f, seed + 3);
+            auto generatedA
+                = HostNumerics::generateHostTensor(descA, {}, std::nullopt, -1.0f, 1.0f, seed + 1);
+            auto generatedB
+                = HostNumerics::generateHostTensor(descB, {}, std::nullopt, -1.0f, 1.0f, seed + 2);
+            auto generatedC
+                = HostNumerics::generateHostTensor(descC, {}, std::nullopt, -1.0f, 1.0f, seed + 3);
+            using PackedType = typename PackedTypeOf<T>::type;
+            auto A           = HostNumerics::copyTensorStorage<PackedType>(generatedA.data);
+            auto B           = HostNumerics::copyTensorStorage<PackedType>(generatedB.data);
+            auto C           = HostNumerics::copyTensorStorage<T>(generatedC.data);
 
             auto d_A = make_shared_device(A);
             auto d_B = make_shared_device(B);
@@ -842,8 +830,13 @@ namespace MatrixMultiplyTest
                 ASSERT_THAT(hipMemcpy(D.data(), d_D.get(), M * N * sizeof(T), hipMemcpyDefault),
                             HasHipSuccess(0));
 
-                std::vector<T> c_D(M * N, T{});
-                CPUMM(c_D, C, A, B, M, N, K, 1.0, 1.0, false, false);
+                HostNumerics::HostReferenceProblem referenceProblem(
+                    HostNumerics::hostTensorView(descA, A),
+                    HostNumerics::hostTensorView(descB, B),
+                    HostNumerics::hostTensorView(descC, C));
+                referenceProblem.beta = 1.0f;
+                auto c_D              = HostNumerics::convertHostReference<T>(
+                    HostNumerics::computeHostReference(referenceProblem).view());
 
                 auto tol = gemmAcceptableError<T, T, T>(
                     M, N, K, m_context->targetArchitecture().target());
