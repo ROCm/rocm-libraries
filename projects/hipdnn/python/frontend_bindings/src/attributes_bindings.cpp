@@ -9,6 +9,7 @@
 #include <hipdnn_frontend/attributes/ConvolutionDgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp>
+#include <hipdnn_frontend/attributes/LayernormAttributes.hpp>
 #include <hipdnn_frontend/attributes/MatmulAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <hipdnn_frontend/attributes/RMSNormAttributes.hpp>
@@ -244,4 +245,25 @@ void attributesBindings(nb::module_& m)
              &graph::SdpaAttributes::set_dropout_probability,
              nb::rv_policy::reference_internal);
 #endif
+
+    // LayernormAttributes
+    nb::class_<graph::LayernormAttributes>(m, "LayernormAttributes")
+        .def(nb::init<>())
+        .def("set_name", &graph::LayernormAttributes::set_name, nb::rv_policy::reference_internal)
+        .def("get_name", &graph::LayernormAttributes::get_name)
+        .def("set_compute_data_type",
+             &graph::LayernormAttributes::set_compute_data_type,
+             nb::rv_policy::reference_internal)
+        .def("get_compute_data_type", &graph::LayernormAttributes::get_compute_data_type)
+        .def(
+            "set_epsilon",
+            [](graph::LayernormAttributes& self,
+               const std::shared_ptr<graph::TensorAttributes>& epsilon)
+                -> graph::LayernormAttributes& { return self.set_epsilon(epsilon); },
+            nb::rv_policy::reference_internal)
+        .def("get_epsilon", &graph::LayernormAttributes::get_epsilon)
+        .def("set_forward_phase",
+             &graph::LayernormAttributes::set_forward_phase,
+             nb::rv_policy::reference_internal)
+        .def("get_forward_phase", &graph::LayernormAttributes::get_forward_phase);
 }

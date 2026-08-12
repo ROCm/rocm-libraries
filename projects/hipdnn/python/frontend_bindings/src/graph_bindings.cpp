@@ -10,6 +10,7 @@
 #include <hipdnn_frontend/attributes/ConvolutionDgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp>
+#include <hipdnn_frontend/attributes/LayernormAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <hipdnn_frontend/attributes/RMSNormAttributes.hpp>
 #include <hipdnn_frontend/attributes/SdpaAttributes.hpp>
@@ -202,6 +203,24 @@ void graphBindings(nb::module_& m)
             nb::arg("attributes"),
             "Add RMSNorm forward node. Returns [y, inv_rms] (inv_rms is null in "
             "INFERENCE mode).")
+        .def(
+            "layernorm",
+            [](graph::Graph& g,
+               std::shared_ptr<graph::TensorAttributes> x,
+               std::shared_ptr<graph::TensorAttributes> scale,
+               std::shared_ptr<graph::TensorAttributes> bias,
+               graph::LayernormAttributes attributes) {
+                auto out = g.layernorm(
+                    std::move(x), std::move(scale), std::move(bias), std::move(attributes));
+                return std::vector<std::shared_ptr<graph::TensorAttributes>>(out.begin(),
+                                                                             out.end());
+            },
+            nb::arg("x"),
+            nb::arg("scale"),
+            nb::arg("bias"),
+            nb::arg("attributes"),
+            "Add LayerNorm forward node. Returns [y, mean, inv_variance] "
+            "(mean/inv_variance are null in INFERENCE mode).")
 #ifdef HIPDNN_ENABLE_SDPA
         .def(
             "sdpa",
