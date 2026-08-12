@@ -135,7 +135,13 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
         if(NOT stinkytofu_FOUND)
             set(_stinkytofu_sibling "${CMAKE_CURRENT_SOURCE_DIR}/../../../../shared/stinkytofu")
             if(IS_DIRECTORY "${_stinkytofu_sibling}")
-                set(STINKYTOFU_ENABLE_WERROR ON)
+                # WERROR OFF: newer toolchains (amdclang 23 / gcc 13+) raise a
+                # false-positive -Wmaybe-uninitialized on StinkyRegister.hpp's
+                # tagged unnamed union (the default ctor initializes the active
+                # member; comparisons read only the tagged member). Do not fail the
+                # build on a spurious diagnostic when rocisa is built as a sibling
+                # subdirectory. Warnings still print; only the -Werror gate is off.
+                set(STINKYTOFU_ENABLE_WERROR OFF)
                 add_subdirectory("${_stinkytofu_sibling}" stinkytofu EXCLUDE_FROM_ALL)
                 set(_stinkytofu_from_subdirectory TRUE)
             else()
