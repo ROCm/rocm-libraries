@@ -641,13 +641,13 @@ int main(int argc, char** argv) {
         std::string origFuncName = parsed.functions[0]->funcName;
         auto originalInsts = std::move(parsed.functions[0]->blocks[0]->instructions);
 
-        // Find from-label and to-label positions
+        // Find from-label and to-label positions (first occurrence, in case a
+        // label name repeats elsewhere in the file).
         int fromIdx = -1, toIdx = -1;
         for (int idx = 0; idx < (int)originalInsts.size(); ++idx) {
-            if (originalInsts[idx]->isLabel && originalInsts[idx]->opcodeStr == fromLabel)
-                fromIdx = idx;
-            if (originalInsts[idx]->isLabel && originalInsts[idx]->opcodeStr == toLabel)
-                toIdx = idx;
+            if (!originalInsts[idx]->isLabel) continue;
+            if (fromIdx < 0 && originalInsts[idx]->opcodeStr == fromLabel) fromIdx = idx;
+            if (toIdx < 0 && originalInsts[idx]->opcodeStr == toLabel) toIdx = idx;
         }
         if (fromIdx < 0) {
             std::cerr << "Error: --from-label '" << fromLabel << "' not found in assembly\n";
