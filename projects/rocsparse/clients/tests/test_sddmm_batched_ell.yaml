@@ -105,7 +105,9 @@ Tests:
   category: quick
   function: sddmm_batched_ell
   indextype: *i32
-  precision: *float16_float16_float32_float32_abct_precision
+  precision: [*float16_float16_float32_float32_abct_precision, 
+              *bfloat16_bfloat16_float32_float32_abct_precision, 
+              *bfloat16_bfloat16_bfloat16_float32_abct_precision]
   M: [88]
   N: [103]
   K: [72]
