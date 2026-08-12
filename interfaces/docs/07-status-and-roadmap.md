@@ -26,6 +26,7 @@ which optional linkers and sanitizers are present, so cite names rather than a c
 | C++ mangled + RTTI versioning | `abi05_cpp_mangled_version_node` (+ `_lld`) | `769f4aa`, tightened `f681132` |
 | GCC-LTO-plus-lld build refused at configure | `lto_linker_guard_rejects_gnu_lld` + 3 accepts | `3e56e73` |
 | Loader/registry concurrency under TSan | `ops04_concurrency` | `df8512b` |
+| Table-ABI negotiation: `abi_minor` floor (provider older than the runtime minor rejected) on top of the `dispatch_table_size` prefix floor, with a larger-table/newer-minor (optional tail) accept and one-field-at-a-time discrimination | `table_abi_negotiation` | `fcb7ac7` |
 
 Foundational, from the POC base (`9bd0d26`): the loader/runtime/protocols architecture, the
 recording providers and rocBLAS bridge, and the narrow-v2 facade are each exercised by named
@@ -52,11 +53,6 @@ baseline (see COMMITTED-NEXT). The `check_api_policy.py` policy check is still u
   against any image whose rocBLAS is newer. A sound default gate needs the build's ROCm pinned to
   the frozen snapshot (a reconciliation that ripples through the generators) - see
   [05-extending.md](05-extending.md).
-- **Table-ABI prefix negotiation.** Today only the response `dispatch_table_size` floor is
-  checked. Reading the dispatch table's own `abi_header`, honoring `abi_minor`, distinguishing
-  a required prefix from an optional appended tail, and a non-vacuous ctest proving a larger
-  table's prefix is accepted while an old provider missing a newly required entry is rejected,
-  are not yet implemented.
 
 ## ASPIRATIONAL (direction, not commitment)
 
