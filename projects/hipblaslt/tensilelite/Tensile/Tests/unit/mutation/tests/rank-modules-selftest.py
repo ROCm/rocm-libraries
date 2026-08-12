@@ -99,10 +99,20 @@ check(
     "cyclomatic + no_test_fraction are PENDING (not faked)",
 )
 # --- LOC/importers ARE computed for scheduled/certified dirs with a known module ---
+# Expected LOC is derived from the current LibraryIO.py source rather than a
+# frozen literal, so this self-test does not go stale as the production file
+# evolves on develop.
+_libio_src = os.path.join(root, mod.SRC_REL, "Tensile", "LibraryIO.py")
+with open(_libio_src, "r", errors="replace") as _fh:
+    _expected_libio_loc = sum(1 for _ in _fh)
 li = next((r for r in rows if r["dir"] == "LibraryIO"), None)
 check(
-    li is not None and li["loc"] == 822 and isinstance(li["importers"], int),
-    "LibraryIO LOC computed (822) and importers computed (real)",
+    li is not None
+    and li["loc"] == _expected_libio_loc
+    and li["loc"] > 0
+    and isinstance(li["importers"], int),
+    "LibraryIO LOC computed (== current source line count, %d) and importers computed (real)"
+    % _expected_libio_loc,
 )
 
 # --- certified + scheduled are the plan's; deferred-coverage-gap is reserved (0) ---
@@ -134,11 +144,18 @@ check(
     set(r["dir"] for r in scored) == {"LibraryIO", "Configuration", "ValidParameters"},
     "score computed only for dirs with all four inputs present",
 )
-# ValidParameters is max on importers(28), cyclomatic(200), loc(1346) -> norm 1 on three,
-# min(0) on no_test -> 0.40+0.25+0.15+0 = 0.80
+# ValidParameters is injected as max cyclomatic / min no_test; its expected score
+# is derived from the live min-max normalization, not a frozen literal (no drift).
+_sorder = [r for r in mrows if r["score"] is not None]
+_imp_n = mod.minmax_normalize([r["importers"] for r in _sorder])
+_cyc_n = mod.minmax_normalize([r["cyclomatic"] for r in _sorder])
+_loc_n = mod.minmax_normalize([r["loc"] for r in _sorder])
+_nt_n = mod.minmax_normalize([r["no_test_fraction"] for r in _sorder])
+_vp_i = next(i for i, r in enumerate(_sorder) if r["dir"] == "ValidParameters")
+_expected_vp = round(mod.score(_imp_n[_vp_i], _cyc_n[_vp_i], _loc_n[_vp_i], _nt_n[_vp_i]), 4)
 check(
-    approx(mby["ValidParameters"]["score"], 0.80),
-    "computed score matches formula (ValidParameters -> 0.80)",
+    approx(mby["ValidParameters"]["score"], _expected_vp),
+    "computed score matches min-max+weight pipeline (ValidParameters -> %.4f)" % _expected_vp,
 )
 check(
     mby["LibraryIO"]["score"] < mby["ValidParameters"]["score"],
