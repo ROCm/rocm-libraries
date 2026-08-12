@@ -1,8 +1,6 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-find_package(BLAS REQUIRED)
-
 find_package(CLI11 QUIET)
 if(NOT CLI11_FOUND)
     if(ROCROLLER_ENABLE_FETCH)
@@ -14,6 +12,17 @@ if(NOT CLI11_FOUND)
         FetchContent_MakeAvailable(CLI11)
     else()
         message(FATAL_ERROR "Failed to find CLI11")
+    endif()
+endif()
+
+if(NOT TARGET roc::host-validation-blas)
+    if(COMMAND roc_host_validation_enable_blas_backend)
+        roc_host_validation_enable_blas_backend()
+    else()
+        message(FATAL_ERROR
+            "rocRoller clients require the optional roc::host-validation-blas target. "
+            "Install ROCHostValidation with its BLAS backend or include shared/host-validation."
+        )
     endif()
 endif()
 
@@ -43,6 +52,31 @@ if(ROCROLLER_ENABLE_ASAN)
     )
 endif()
 
+add_library(rocroller-client-host-reference STATIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/HostReference.cpp"
+)
+target_sources(rocroller-client-host-reference
+    PUBLIC
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/client/HostReference.hpp"
+)
+target_link_libraries(rocroller-client-host-reference
+    PUBLIC
+        roc::rocroller-interface
+        roc::host-validation
+    PRIVATE
+        roc::host-validation-blas
+)
+target_include_directories(rocroller-client-host-reference
+    PUBLIC
+        "${CMAKE_CURRENT_SOURCE_DIR}/include"
+)
+if(ROCROLLER_ENABLE_ASAN)
+    rocroller_target_configure_sanitizers(
+        rocroller-client-host-reference
+        PRIVATE
+    )
+endif()
+
 add_executable(rocroller-gemm
     "${CMAKE_CURRENT_SOURCE_DIR}/src/gemm.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/GEMMParameters.cpp"
@@ -66,11 +100,10 @@ target_link_libraries(rocroller-gemm
     PRIVATE
         roc::rocroller-interface
         rocroller-client-host-data-generation
-        rocroller::common-test-utilities
+        rocroller-client-host-reference
         # rocroller-gemm retains mxDataGenerator only for physical pre-swizzles.
         roc::mxDataGenerator
         CLI11::CLI11
-        ${BLAS_LIBRARIES}
 )
 target_include_directories(rocroller-gemm PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
@@ -108,9 +141,27 @@ if(ROCROLLER_BUILD_TESTING OR BUILD_TESTING)
         NAME rocroller-client-host-data-generation-tests
         COMMAND rocroller-client-host-data-generation-tests
     )
+
+    add_executable(rocroller-client-host-reference-tests
+        "${CMAKE_CURRENT_SOURCE_DIR}/test/HostReferenceTest.cpp"
+    )
+    target_link_libraries(rocroller-client-host-reference-tests
+        PRIVATE
+            rocroller-client-host-data-generation
+            rocroller-client-host-reference
+    )
+    add_test(
+        NAME rocroller-client-host-reference-tests
+        COMMAND rocroller-client-host-reference-tests
+    )
+
     if(ROCROLLER_ENABLE_ASAN)
         rocroller_target_configure_sanitizers(
             rocroller-client-host-data-generation-tests
+            PRIVATE
+        )
+        rocroller_target_configure_sanitizers(
+            rocroller-client-host-reference-tests
             PRIVATE
         )
     endif()

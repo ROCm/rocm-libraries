@@ -209,8 +209,6 @@ void validateTransforming(const GemmRequest& problem) {
             throw std::invalid_argument(
                 "Transforming BLAS backend supports F32, F64, C64, and C128 accumulation.");
     }
-    if (problem.a.blockScale || problem.b.blockScale)
-        throw std::invalid_argument("Transforming BLAS backend does not support block scaling.");
     if (problem.epilogue.bias || problem.epilogue.scaleAlpha || problem.epilogue.scaleA ||
         problem.epilogue.scaleB || problem.epilogue.activation != Activation::None)
         throw std::invalid_argument(
@@ -231,8 +229,14 @@ void validateTransforming(const GemmRequest& problem) {
         throw std::invalid_argument("Transforming BLAS backend dimensions exceed int.");
 }
 
+enum class GemmOperandPosition {
+    A,
+    B,
+};
+
 template <typename Accumulator>
-Tensor materializeOperand(const GemmOperand& operand, MathMode mathMode) {
+Tensor materializeOperand(const GemmOperand& operand, MathMode mathMode,
+                          GemmOperandPosition position) {
     using namespace detail;
     Tensor output(nativeScalarType<Accumulator>, columnMajorLayout(operand.values.shape()));
     const RuntimeMatrixReader<Accumulator> input(operand.values);
@@ -243,6 +247,8 @@ Tensor materializeOperand(const GemmOperand& operand, MathMode mathMode) {
     scaleReaders.reserve(operand.preQuantizationScales.size());
     for (const VectorBinding& binding : operand.preQuantizationScales)
         scaleReaders.emplace_back(binding.values);
+    std::optional<RuntimeMatrixReader<Accumulator>> blockScale;
+    if (operand.blockScale) blockScale.emplace(operand.blockScale->values);
 
     const size_t rows = operand.values.shape()[0];
     const size_t columns = operand.values.shape()[1];
@@ -256,7 +262,15 @@ Tensor materializeOperand(const GemmOperand& operand, MathMode mathMode) {
                                          : (binding.axis == MatrixAxis::Row ? row : column);
                 value *= scaleReaders[scaleIndex][index];
             }
-            writer.store(row, column, operandMath(quantize(value)));
+            value = operandMath(quantize(value));
+            if (blockScale) {
+                const size_t freeCoordinate = position == GemmOperandPosition::A ? row : column;
+                const size_t reductionCoordinate =
+                    position == GemmOperandPosition::A ? column : row;
+                value *= (*blockScale)(freeCoordinate,
+                                       reductionCoordinate / operand.blockScale->blockSize);
+            }
+            writer.store(row, column, value);
         }
     }
     return output;
@@ -277,8 +291,10 @@ Tensor materializeMatrix(TensorView input) {
 template <typename Accumulator>
 GemmRunInfo runTransforming(const GemmRequest& problem) {
     using namespace detail;
-    Tensor stagedA = materializeOperand<Accumulator>(problem.a, problem.mathMode);
-    Tensor stagedB = materializeOperand<Accumulator>(problem.b, problem.mathMode);
+    Tensor stagedA =
+        materializeOperand<Accumulator>(problem.a, problem.mathMode, GemmOperandPosition::A);
+    Tensor stagedB =
+        materializeOperand<Accumulator>(problem.b, problem.mathMode, GemmOperandPosition::B);
     Tensor stagedC = materializeMatrix<Accumulator>(problem.c);
 
     GemmRequest stagedProblem(GemmOperand(stagedA.view()), GemmOperand(stagedB.view()),
