@@ -49,9 +49,13 @@ if(ENABLE_ASM_SDPA_ENGINE)
             ${CMAKE_CURRENT_SOURCE_DIR}/../tests/engines/asm_sdpa_engine/AsmSdpaConfigHelpers.cpp
             asm_sdpa_engine/IntegrationGpuSdpaForward.cpp
         )
-        # Add include path for codegen-generated headers (e.g., asm_fmha_v3_fwd_configs.hpp)
-        # and the shared test helpers (AsmSdpaConfigHelpers.hpp)
+        # AsmSdpaConfigHelpers.cpp above is shared with hip_kernel_provider_tests and
+        # spells its provider includes from the src root, which that target inherits from
+        # hip_kernel_provider_private. This target links only the SDKs, so it has to name
+        # the root itself. The other two entries are the codegen-generated headers (e.g.
+        # asm_fmha_v3_fwd_configs.hpp) and the shared test helpers (AsmSdpaConfigHelpers.hpp).
         target_include_directories(hip_kernel_provider_integration_tests PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/..
             ${CMAKE_CURRENT_BINARY_DIR}/../engines/asm_sdpa_engine/generated
             ${CMAKE_CURRENT_SOURCE_DIR}/../tests/engines/asm_sdpa_engine
         )

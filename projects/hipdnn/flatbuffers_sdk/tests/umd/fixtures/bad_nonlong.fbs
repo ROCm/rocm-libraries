@@ -1,0 +1,22 @@
+// RFC 0018 B.3 negative fixture: a umd_input_tensor on a non-`long` field must
+// fail registry generation (fail closed), not emit a wrong binding. Consumed by
+// the umd_registry_gen_rejects_bad_schema CTest, which expects a non-zero exit.
+namespace hipdnn_flatbuffers_sdk.data_objects;
+
+attribute "umd_input_tensor";
+attribute "umd_output_tensor";
+attribute "umd_name";
+
+table BadAttributes {
+  x: int (umd_input_tensor, umd_name: "X"); // violation: input tensor UID must be `long`
+}
+
+union NodeAttributes {
+  BadAttributes
+}
+
+table Node {
+  attributes: NodeAttributes;
+}
+
+root_type Node;
