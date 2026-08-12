@@ -72,6 +72,17 @@ inline const std::string& testHashedNamePluginPath()
 }
 #endif
 
+// Guarded by the define so only the one target that needs this plugin can reach
+// it; see TestMismatchedNamePlugin.cpp for why it must stay single-consumer.
+#ifdef TEST_MISMATCHED_NAME_PLUGIN_NAME
+inline const std::string& testMismatchedNamePluginPath()
+{
+    static const std::string s_testMismatchedNamePluginPath
+        = getTestCustomFilepathForPlugin(TEST_MISMATCHED_NAME_PLUGIN_NAME);
+    return s_testMismatchedNamePluginPath;
+}
+#endif
+
 inline const std::string& testNoApplicableEnginesAPluginPath()
 {
     static const std::string s_testNoApplicableEnginesPluginPath

@@ -15,8 +15,6 @@
 
 #include <cstdint>
 #include <memory>
-#include <sstream>
-#include <stdexcept>
 #include <string>
 #include <unordered_map>
 
@@ -46,31 +44,18 @@ inline Error tensorLookupToVariantPack(
     return {ErrorCode::OK, ""};
 }
 
-/// Resolve a backend engine ID to its human-readable name.
-/// Falls back to the canonical zero-padded hexadecimal rendering of the ID
-/// (e.g., "0x0000000000001A2B") for unknown engines, matching what the backend
-/// produces for the same engine.
-/// This overload only sees engines built into the frontend's static registry;
-/// prefer the descriptor-aware overload below whenever an engine descriptor is
-/// available, because that one also names engines supplied by a plugin.
+/// Resolve a backend engine ID to its human-readable name, using only the
+/// engines in the static registry. Prefer the descriptor-aware overload below
+/// whenever an engine descriptor is available, because that one also names
+/// engines supplied by a plugin.
 inline std::string resolveEngineName(int64_t engineId)
 {
-    try
-    {
-        return std::string(hipdnn_data_sdk::utilities::getEngineNameFromId(engineId));
-    }
-    catch(const std::out_of_range&)
-    {
-        return hipdnn_data_sdk::utilities::formatEngineIdHex(engineId);
-    }
+    return hipdnn_data_sdk::utilities::engineNameOrHex(engineId);
 }
 
-/// Resolve a finalized engine descriptor to its human-readable name.
-/// The backend owns the name and reports it through HIPDNN_ATTR_ENGINE_NAME_EXT,
-/// which covers plugin-supplied engines that the frontend's static registry
-/// cannot see. Falls back to the ID-only overload when the backend reports no
-/// name — including against an older backend that does not know the attribute,
-/// which getDescriptorAttrString() reports as an empty value rather than an error.
+/// Resolve a finalized engine descriptor to its human-readable name, read from
+/// HIPDNN_ATTR_ENGINE_NAME_EXT. Falls back to the ID-only overload when the
+/// backend reports no name.
 inline std::string resolveEngineName(hipdnnBackendDescriptor_t engineDesc, int64_t engineId)
 {
     if(engineDesc != nullptr)

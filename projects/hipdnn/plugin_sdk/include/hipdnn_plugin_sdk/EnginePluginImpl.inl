@@ -84,6 +84,7 @@
 
 #include <memory>
 #include <mutex>
+#include <string>
 
 #include <hip/hip_runtime.h>
 
@@ -273,15 +274,11 @@ hipdnnPluginStatus_t hipdnnEnginePluginGetEngineName(int64_t engineId, const cha
 
     hipdnnPluginStatus_t containerStatus = HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE;
 
-    const auto status = hipdnn_plugin_sdk::tryCatch([&, apiName = __func__]() {
+    const auto status = hipdnn_plugin_sdk::tryCatch([&]() {
         hipdnn_plugin_sdk::throwIfNull(name);
 
         containerStatus
             = invokeContainerGetEngineName<HIPDNN_PLUGIN_CONTAINER_TYPE>(engineId, name);
-
-        LOG_API_SUCCESS(apiName,
-                        "engineId=" << engineId
-                                     << " status=" << static_cast<int>(containerStatus));
     });
 
     if(status != HIPDNN_PLUGIN_STATUS_SUCCESS)
@@ -289,7 +286,27 @@ hipdnnPluginStatus_t hipdnnEnginePluginGetEngineName(int64_t engineId, const cha
         return status;
     }
 
-    return containerStatus;
+    if(containerStatus == HIPDNN_PLUGIN_STATUS_SUCCESS)
+    {
+        LOG_API_SUCCESS(__func__, "engineId=" << engineId);
+        return containerStatus;
+    }
+
+    // NOT_APPLICABLE is the ordinary answer for a container that supplies no name for this engine,
+    // including every container that does not implement getEngineName at all. The host falls back
+    // to its own naming, so this is neither an error nor a success worth reporting as one.
+    if(containerStatus == HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE)
+    {
+        HIPDNN_PLUGIN_LOG_INFO("API not applicable: [" << __func__ << "] engineId=" << engineId);
+        return containerStatus;
+    }
+
+    // A container that reports failure by returning a status rather than throwing never reaches
+    // tryCatch's catch blocks, so route it through setLastError here. Otherwise
+    // hipdnnPluginGetLastErrorString would serve a stale message from an unrelated earlier failure.
+    return hipdnn_plugin_sdk::PluginLastErrorManager::setLastError(
+        containerStatus,
+        "getEngineName failed for engine ID " + std::to_string(engineId));
 }
 
 hipdnnPluginStatus_t hipdnnEnginePluginCreate(hipdnnEnginePluginHandle_t* handle)

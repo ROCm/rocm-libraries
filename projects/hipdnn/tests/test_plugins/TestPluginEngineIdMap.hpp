@@ -71,6 +71,17 @@ HIPDNN_MAP_TO_ID(AutotunePluginEngineWorkspaceGrows, -23);
 // the identity assert it at runtime against engineNameToId().
 HIPDNN_MAP_TO_ID(HashedNamePlugin, static_cast<int64_t>(0xD134891277747B22ULL));
 
+// Lying-engine-name fake. Each id selects one malformed answer from the
+// optional `hipdnnEnginePluginGetEngineName` entry point; only the first names
+// an engine the plugin actually publishes. See TestLyingEngineNamePlugin.cpp.
+HIPDNN_MAP_TO_ID(LyingEngineNamePlugin, -26);
+HIPDNN_MAP_TO_ID(LyingEngineNamePluginEmptyName, -27);
+HIPDNN_MAP_TO_ID(LyingEngineNamePluginErrorStatus, -28);
+
+// Mismatched-name fake: a well-formed engine name that does not hash back to
+// this id. See TestMismatchedNamePlugin.cpp.
+HIPDNN_MAP_TO_ID(MismatchedNamePlugin, -29);
+
 namespace hipdnn_tests::plugin_constants
 {
 // Engine names reported by the named test plugins, both through the optional
@@ -78,13 +89,20 @@ namespace hipdnn_tests::plugin_constants
 // All of these names are plugin-supplied and deliberately absent from the
 // data_sdk engine-name registry.
 //
-// The good-default and execute-fails plugins keep hardcoded engine ids that
-// their names do not hash back to, which is what makes them fixtures for
-// name/id disagreement. The hashed-name plugin is the opposite fixture: its id
-// is exactly engineNameToId() of its name, so filters that resolve a name by
+// The good-default, execute-fails and mismatched-name plugins keep hardcoded
+// engine ids that their names do not hash back to, so all three carry a name/id
+// disagreement. The hashed-name plugin is the opposite fixture: its id is
+// exactly engineNameToId() of its name, so filters that resolve a name by
 // hashing it -- deselect_engines(names), set_preferred_engine_id_ext -- reach
 // its engine.
 inline constexpr const char* K_GOOD_DEFAULT_PLUGIN_ENGINE_NAME = "TEST_GOOD_DEFAULT_ENGINE";
 inline constexpr const char* K_EXECUTE_FAILS_PLUGIN_ENGINE_NAME = "TEST_EXECUTE_FAILS_ENGINE";
 inline constexpr const char* K_HASHED_NAME_PLUGIN_ENGINE_NAME = "TEST_HASHED_NAME_ENGINE";
+inline constexpr const char* K_MISMATCHED_NAME_PLUGIN_ENGINE_NAME = "TEST_MISMATCHED_NAME_ENGINE";
+
+// Handed out by the lying-engine-name fake alongside a failure status. The host
+// must ignore any name that arrives with a non-success status, so this string
+// must never reach an engine info; tests assert its absence.
+inline constexpr const char* K_LYING_ENGINE_NAME_UNUSABLE_NAME
+    = "TEST_LYING_ENGINE_NAME_MUST_BE_IGNORED";
 } // namespace hipdnn_tests::plugin_constants

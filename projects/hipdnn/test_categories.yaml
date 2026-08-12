@@ -52,3 +52,4 @@ test_categories:
       - "hipdnn_public_backend_tests"
       - "hipdnn_backend_logging_shutdown_tests"
       - "hipdnn_public_frontend_tests"
+      - "hipdnn_list_engines_smoke"

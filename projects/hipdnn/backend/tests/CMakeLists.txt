@@ -155,6 +155,7 @@ target_compile_definitions(
             TEST_EMPTY_NAME_HEURISTIC_PLUGIN_NAME="${TEST_EMPTY_NAME_HEURISTIC_PLUGIN_NAME}"
             TEST_DUPLICATE_POLICY_ID_A_PLUGIN_NAME="${TEST_DUPLICATE_POLICY_ID_A_PLUGIN_NAME}"
             TEST_DUPLICATE_POLICY_ID_B_PLUGIN_NAME="${TEST_DUPLICATE_POLICY_ID_B_PLUGIN_NAME}"
+            TEST_LYING_ENGINE_NAME_PLUGIN_NAME="${TEST_LYING_ENGINE_NAME_PLUGIN_NAME}"
 )
 target_compile_options(hipdnn_backend_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS} ${HIPDNN_NO_RTTI_OPTIONS})
 clang_tidy_check(hipdnn_backend_tests)
@@ -267,7 +268,7 @@ install(TARGETS ${TEST_ENGINE_PLUGIN1_NAME} LIBRARY DESTINATION ${CODEGEN_FIXTUR
         RUNTIME DESTINATION ${CODEGEN_FIXTURE_INSTALL_DIR}
 )
 
-# Add dependencies on heuristic test plugins (built in tests/test_plugins/)
+# Add dependencies on test plugins built in tests/test_plugins/
 # Note: These targets are forward references - they will be created when tests/test_plugins/
 # is processed later. CMake resolves these dependencies at build time.
 add_dependencies(hipdnn_backend_tests
@@ -278,6 +279,7 @@ add_dependencies(hipdnn_backend_tests
     ${TEST_EMPTY_NAME_HEURISTIC_PLUGIN_NAME}
     ${TEST_DUPLICATE_POLICY_ID_A_PLUGIN_NAME}
     ${TEST_DUPLICATE_POLICY_ID_B_PLUGIN_NAME}
+    ${TEST_LYING_ENGINE_NAME_PLUGIN_NAME}
 )
 
 add_hipdnn_test(hipdnn_backend_tests ${CMAKE_CURRENT_BINARY_DIR})

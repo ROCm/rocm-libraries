@@ -121,7 +121,7 @@ The Data SDK contains shared types and utilities used across hipDNN.
 
   - Logging utilities and type helpers (for example, ``half`` and ``bfloat16``).
   - Tensor and memory utilities.
-  - Engine name registry (``EngineNames.hpp``). The registry covers engines built into the hipDNN tree and provides the name-to-ID hash. It's a fallback for display names rather than the source of truth: a plugin reports the names of the engines it provides, and the backend consults the registry only when the plugin doesn't. See :ref:`engine-names`.
+  - Engine name registry (``EngineNames.hpp``), which supplies the name-to-ID hash and names the engines built into hipDNN.
 
 .. _flatbuffers-sdk:
 

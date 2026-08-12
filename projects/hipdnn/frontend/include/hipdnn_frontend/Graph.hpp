@@ -68,6 +68,8 @@
 #include <algorithm>
 #include <array>
 #include <iterator>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <sstream>
 #include <unordered_map>
@@ -207,10 +209,19 @@ private:
     // Engine ID -> display name, memoised for the lifetime of _graphDesc.
     // Resolving a name asks the backend through a throwaway engine descriptor whose
     // finalization polls every loaded plugin, and the same engine is named many
-    // times over an autotune run, so the answer is cached. Keyed only by engine ID
-    // because every entry is resolved against the current _graphDesc, which means
-    // the cache must be dropped whenever that descriptor is replaced.
+    // times over an autotune run. Entries are resolved against the current
+    // _graphDesc, so the cache is dropped whenever that descriptor is replaced.
+    // Written by const accessors, so every access goes through
+    // _engineNameCacheMutex and a shared const reference stays safe to use from
+    // several threads.
     mutable std::unordered_map<int64_t, std::string> _engineNameCache;
+
+    // Held only across the map operations themselves, never across the descriptor
+    // build that resolves a name. Indirected through a pointer so that Graph keeps
+    // its defaulted move operations, which a std::mutex member would delete; a
+    // moved-from Graph has no mutex and, like any moved-from object, must not be
+    // used again.
+    mutable std::unique_ptr<std::mutex> _engineNameCacheMutex = std::make_unique<std::mutex>();
 
 protected:
     // A compiled execution plan containing both the engine config and execution
@@ -758,7 +769,7 @@ private:
     {
         _graphDesc = std::move(desc);
         _graphDescFinalized = finalized;
-        _engineNameCache.clear();
+        clearEngineNameCache();
     }
 
     /// Clear the graph descriptor and finalization state
@@ -766,6 +777,14 @@ private:
     {
         _graphDesc.reset();
         _graphDescFinalized = false;
+        clearEngineNameCache();
+    }
+
+    /// Drop every memoised name, because they were resolved against a graph
+    /// descriptor that is no longer the current one.
+    void clearEngineNameCache()
+    {
+        const std::lock_guard<std::mutex> guard(*_engineNameCacheMutex);
         _engineNameCache.clear();
     }
 
@@ -809,50 +828,85 @@ private:
         return hasValidGraphDesc() && _graphDescFinalized;
     }
 
-    /// Resolve an engine ID to the display name to report for it.
+    /// The name the backend reports for an engine descriptor built against this
+    /// graph, or nullopt when no such descriptor can be built right now.
     ///
-    /// Prefers the name the backend reports for an engine descriptor built against
-    /// this graph, because that is the only way to name an engine supplied by an
-    /// engine plugin; falls back to the built-in engine name registry and then to
-    /// a hex rendering of the ID. Results are memoised in _engineNameCache.
-    ///
-    /// Before the graph is built there is no descriptor to ask, so the answer is
-    /// the registry/hex one and is deliberately not cached — it would otherwise
-    /// mask the backend name once the graph does get built.
-    std::string engineNameFor(int64_t engineId) const
+    /// This is the only way to name an engine supplied by an engine plugin, so it
+    /// is preferred over the static registry wherever it is available. Building the
+    /// descriptor polls every loaded plugin, so a call that misses the cache is not
+    /// cheap.
+    std::optional<std::string> backendEngineName(int64_t engineId) const
     {
         if(!hasReadyGraphDesc())
+        {
+            return std::nullopt;
+        }
+
+        detail::ScopedHipdnnBackendDescriptor engineDesc;
+        if(!hipdnn_frontend::detail::createEngineDescriptorForGraph(
+                engineDesc, _graphDesc->get(), engineId)
+                .is_good())
+        {
+            return std::nullopt;
+        }
+
+        return detail::resolveEngineName(engineDesc.get(), engineId);
+    }
+
+    /// Look up @p engineId in the name cache, if it is there.
+    std::optional<std::string> cachedEngineName(int64_t engineId) const
+    {
+        const std::lock_guard<std::mutex> guard(*_engineNameCacheMutex);
+
+        const auto cached = _engineNameCache.find(engineId);
+        if(cached == _engineNameCache.end())
+        {
+            return std::nullopt;
+        }
+        return cached->second;
+    }
+
+    /// Resolve an engine ID to the display name to report for it, memoising the
+    /// backend's answer for the lifetime of _graphDesc.
+    ///
+    /// Only the backend's answer is memoised. The registry/hex fallback is the best
+    /// available while the graph is unbuilt or the engine has no descriptor, but
+    /// caching it would short-circuit a later call that could reach the backend into
+    /// repeating the fallback forever.
+    ///
+    /// Resolution runs outside the cache lock, so two threads racing on the same
+    /// unseen engine may both ask the backend. Both resolve against the same graph
+    /// descriptor and so arrive at the same name, making the duplicated work wasted
+    /// rather than incorrect. Holding the lock across the descriptor build would
+    /// serialize every caller behind a plugin poll to avoid only that waste.
+    std::string engineNameFor(int64_t engineId) const
+    {
+        if(auto cached = cachedEngineName(engineId))
+        {
+            return std::move(*cached);
+        }
+
+        auto backendName = backendEngineName(engineId);
+        if(!backendName.has_value())
         {
             return detail::resolveEngineName(engineId);
         }
 
-        const auto cached = _engineNameCache.find(engineId);
-        if(cached != _engineNameCache.end())
-        {
-            return cached->second;
-        }
-
-        detail::ScopedHipdnnBackendDescriptor engineDesc;
-        const bool haveEngineDesc = hipdnn_frontend::detail::createEngineDescriptorForGraph(
-                                        engineDesc, _graphDesc->get(), engineId)
-                                        .is_good();
-
-        std::string engineName = haveEngineDesc
-                                     ? detail::resolveEngineName(engineDesc.get(), engineId)
-                                     : detail::resolveEngineName(engineId);
-
-        _engineNameCache.emplace(engineId, engineName);
-        return engineName;
+        cacheEngineName(engineId, *backendName);
+        return std::move(*backendName);
     }
 
     /// Record a name already resolved from an engine descriptor built elsewhere,
     /// so engineNameFor() does not rebuild a descriptor for the same engine.
     void cacheEngineName(int64_t engineId, const std::string& engineName) const
     {
-        if(hasReadyGraphDesc())
+        if(!hasReadyGraphDesc())
         {
-            _engineNameCache.insert_or_assign(engineId, engineName);
+            return;
         }
+
+        const std::lock_guard<std::mutex> guard(*_engineNameCacheMutex);
+        _engineNameCache.insert_or_assign(engineId, engineName);
     }
 
     void assignUnsetTensorUids()
@@ -3375,10 +3429,17 @@ public:
 
             // Ask the backend for the engine name, which covers plugin-supplied
             // engines; registry and hex fallbacks apply for anything unnamed.
-            info.engineName = engineDescErr.is_good()
-                                  ? detail::resolveEngineName(engineDesc.get(), engineIds[i])
-                                  : detail::resolveEngineName(engineIds[i]);
-            cacheEngineName(engineIds[i], info.engineName);
+            // Only a backend-derived name is cached — seeding the cache with a fallback computed
+            // after a failed describe would poison get_plan_name_at_index() for that engine.
+            if(engineDescErr.is_good())
+            {
+                info.engineName = detail::resolveEngineName(engineDesc.get(), engineIds[i]);
+                cacheEngineName(engineIds[i], info.engineName);
+            }
+            else
+            {
+                info.engineName = detail::resolveEngineName(engineIds[i]);
+            }
 
             // Knobs for this engine (failure is non-fatal; info.knobs stays empty)
             if(engineDescErr.is_good())
@@ -4102,9 +4163,16 @@ public:
      *
      * Constructs a human-readable name from the plan's engine ID.
      *
+     * The resolved name is memoised per engine ID, so this method mutates
+     * internal state despite being const and is not safe to call concurrently
+     * on a shared Graph instance. A cache miss builds and finalizes a backend
+     * engine descriptor, which polls every loaded plugin, so the first call for
+     * a given engine is not cheap.
+     *
      * @param plan_index Zero-based index into the compiled plan vector
      * @param[out] name Output parameter for the plan name (resolved backend engine
-     *             name, or hex fallback such as "0x1A2B" for unknown engines)
+     *             name, or hex fallback such as "0x0000000000001A2B" for unknown
+     *             engines)
      * @return ErrorCode::OK on success, ErrorCode::INVALID_VALUE if plan_index
      *         is out of bounds
      */
@@ -4226,10 +4294,15 @@ public:
      * during @c build_plans() and @c autotuneImpl(). Accumulates across
      * calls (set union).
      *
-     * Names are hashed to engine IDs without consulting the built-in engine
-     * name registry, so engines supplied by a plugin can be deselected by name
-     * too. A name that matches no engine simply bars nothing; the info-level
-     * log of each name-to-ID mapping is what makes a typo diagnosable.
+     * Names are hashed to engine IDs without consulting the built-in registry,
+     * so plugin-supplied engines can be deselected by name too. Hashing is the
+     * whole of the matching, though, so this reaches an engine only when its ID
+     * is the hash of its name. A plugin that reports a name
+     * unrelated to its engine ID is not deselectable by that name, even though
+     * that name is what tool and autotune output display for it.
+     *
+     * A name that matches no engine bars nothing, and nothing at call time
+     * distinguishes that from a typo.
      *
      * @param engine_names Engine names to deselect (e.g. {"MIOPEN_ENGINE"})
      * @return Reference to @c *this for method chaining

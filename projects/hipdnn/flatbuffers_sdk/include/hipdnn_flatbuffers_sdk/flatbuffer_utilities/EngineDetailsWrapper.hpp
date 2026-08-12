@@ -23,7 +23,6 @@ public:
     virtual const hipdnn_flatbuffers_sdk::data_objects::EngineDetails& getEngineDetails() const = 0;
     virtual bool isValid() const = 0;
     virtual int64_t engineId() const = 0;
-    virtual std::string name() const = 0;
 
     virtual uint32_t knobCount() const = 0;
     virtual std::vector<int32_t> behaviorNotes() const = 0;
@@ -33,6 +32,13 @@ public:
     virtual const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IKnob&
         getKnobByName(const std::string& knobName) const
         = 0;
+
+    /// An empty string means the engine details carry no name, which leaves the
+    /// caller to fall back to the engine ID.
+    virtual std::string name() const
+    {
+        return {};
+    }
 };
 
 class EngineDetailsWrapper : public IEngineDetails

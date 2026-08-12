@@ -37,6 +37,14 @@ set(TEST_INCOMPATIBLE_VERSION_PLUGIN_NAME "test_incompatible_version_plugin")
 # name-hashing filters such as deselect_engines(names) reach its engine.
 set(TEST_HASHED_NAME_PLUGIN_NAME "test_hashed_name_plugin")
 
+# Lying-engine-name fake: answers the optional engine-name entry point with
+# malformed results that the host must reject, one per engine id.
+set(TEST_LYING_ENGINE_NAME_PLUGIN_NAME "test_lying_engine_name_plugin")
+
+# Mismatched-name fake: names its engine well but hardcodes an id the name does
+# not hash back to.
+set(TEST_MISMATCHED_NAME_PLUGIN_NAME "test_mismatched_name_plugin")
+
 # Override-execute fake plugin names
 set(HIPDNN_TEST_OVERRIDE_IMPLEMENTING_PLUGIN_TARGET "test_override_implementing_plugin")
 set(HIPDNN_TEST_OVERRIDE_OMITTING_PLUGIN_TARGET "test_override_omitting_plugin")

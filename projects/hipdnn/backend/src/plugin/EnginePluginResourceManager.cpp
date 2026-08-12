@@ -11,8 +11,12 @@
 #include <limits>
 #include <mutex>
 #include <numeric>
+#include <set>
+#include <string>
 #include <string_view>
+#include <tuple>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "EnginePlugin.hpp"
@@ -85,18 +89,41 @@ bool readIsOverrideShapeEnabled(const GraphDescriptor& graphDesc)
     return flag;
 }
 
+/// Records the (plugin, engine ID) pairs already warned about by
+/// warnOnEngineNameIdMismatch, with its own mutex because name resolution runs
+/// on every EngineDescriptor::finalize() and those can be concurrent. The lock
+/// is held only across the set lookup, never across logging.
+std::mutex gEngineNameWarningMutex;
+std::set<std::pair<std::string, int64_t>> gWarnedEngineNameMismatches;
+
+/// Reports whether this is the first mismatch seen for the pair, recording it.
+bool shouldWarnOnEngineNameIdMismatch(std::string_view pluginName, int64_t engineId)
+{
+    const std::lock_guard<std::mutex> lock(gEngineNameWarningMutex);
+    return gWarnedEngineNameMismatches.emplace(std::string(pluginName), engineId).second;
+}
+
 /// Checks a plugin-supplied engine name against the RFC 0003 name-to-ID hash.
 ///
 /// Log-and-continue by design: the plugin-reported ID stays canonical because
 /// routing, `preferred_engine_id`, and serialized graphs all key on it, while
 /// the reported name is still used for display. A cosmetic naming defect in a
 /// third-party engine pack must not make that vendor's kernels unavailable.
+///
+/// The warning fires once per (plugin, engine ID). The defect is static for the
+/// lifetime of the process, while resolution repeats on every engine descriptor
+/// finalize, so repeating it would bury every other diagnostic in the log.
 void warnOnEngineNameIdMismatch(std::string_view pluginName,
                                 int64_t engineId,
                                 std::string_view engineName)
 {
     const auto hashedId = hipdnn_data_sdk::utilities::engineNameToId(engineName);
     if(hashedId == engineId)
+    {
+        return;
+    }
+
+    if(!shouldWarnOnEngineNameIdMismatch(pluginName, engineId))
     {
         return;
     }
@@ -186,8 +213,14 @@ std::vector<EngineInfo> EnginePluginResourceManager::getEngineInfos() const
         }
     }
 
+    // Alphabetical by resolved name is the documented contract. Engine names are
+    // display labels and need not be unique, and neither are engine IDs across
+    // plugins, so the ID and the owning plugin's name break ties: without them
+    // the comparator is only a partial order and std::sort leaves the relative
+    // order of equal-named rows unspecified from run to run.
     std::sort(infos.begin(), infos.end(), [](const EngineInfo& a, const EngineInfo& b) {
-        return a.engineName < b.engineName;
+        return std::tie(a.engineName, a.engineId, a.pluginName)
+               < std::tie(b.engineName, b.engineId, b.pluginName);
     });
 
     _cachedEngineInfos = infos;
@@ -258,16 +291,7 @@ std::string EnginePluginResourceManager::resolveEngineName(
         return std::string(*detailsName);
     }
 
-    // Tier 3: the in-tree static engine name registry.
-    try
-    {
-        return std::string(hipdnn_data_sdk::utilities::getEngineNameFromId(engineId));
-    }
-    catch(const std::out_of_range&)
-    {
-        // Tier 4: a hexadecimal rendering of the ID, always available.
-        return hipdnn_data_sdk::utilities::formatEngineIdHex(engineId);
-    }
+    return hipdnn_data_sdk::utilities::engineNameOrHex(engineId);
 }
 
 std::shared_ptr<EnginePluginResourceManager> EnginePluginResourceManager::create()

@@ -8589,6 +8589,76 @@ TEST_F(TestGraph, PlanNameAtIndexResolvesEachEngineOnlyOnce)
     EXPECT_EQ(secondName, firstName);
 }
 
+// Sets up the two-call HIPDNN_ATTR_ENGINE_NAME_EXT read to answer with a
+// different name on each successive resolution, so a served-from-cache answer
+// is distinguishable from a fresh one. The count query reports the longest
+// name's byte count; the frontend zero-fills its buffer, so a shorter name
+// still arrives null-terminated.
+static void expectEngineNameQuerySequence(::testing::NiceMock<Mock_hipdnn_backend>& mockBackend,
+                                          const std::vector<std::string>& engineNames)
+{
+    size_t longest = 0;
+    for(const auto& engineName : engineNames)
+    {
+        longest = std::max(longest, engineName.size());
+    }
+    const auto byteCount = static_cast<int64_t>(longest + 1);
+    const auto callCount = static_cast<int>(engineNames.size());
+
+    EXPECT_CALL(
+        mockBackend,
+        backendGetAttribute(_, HIPDNN_ATTR_ENGINE_NAME_EXT, HIPDNN_TYPE_CHAR, 0, _, nullptr))
+        .Times(callCount)
+        .WillRepeatedly(DoAll(SetArgPointee<4>(byteCount), Return(HIPDNN_STATUS_SUCCESS)));
+
+    // One WillOnce per name, consumed in order, so successive resolutions of the
+    // same engine see different answers.
+    auto& dataQuery
+        = EXPECT_CALL(mockBackend,
+                      backendGetAttribute(
+                          _, HIPDNN_ATTR_ENGINE_NAME_EXT, HIPDNN_TYPE_CHAR, Ne(0), _, Ne(nullptr)));
+    for(const auto& engineName : engineNames)
+    {
+        dataQuery.WillOnce(
+            DoAll(SetArgPointee<4>(byteCount),
+                  Invoke([engineName](hipdnnBackendDescriptor_t,
+                                      hipdnnBackendAttributeName_t,
+                                      hipdnnBackendAttributeType_t,
+                                      int64_t,
+                                      int64_t*,
+                                      void* arrayOfElements) {
+                      std::memcpy(arrayOfElements, engineName.c_str(), engineName.size() + 1);
+                  }),
+                  Return(HIPDNN_STATUS_SUCCESS)));
+    }
+}
+
+TEST_F(TestGraph, PlanNameAtIndexReresolvesAfterGraphDescriptorIsReplaced)
+{
+    // Every cached name was resolved against the graph descriptor current at the
+    // time, so replacing that descriptor must drop the cache. The mock reports a
+    // different name on the second resolution: a stale cache would return the
+    // first name again.
+    hipdnn_frontend::GraphTestUtils graph;
+    buildGraphAndMockEngine(_mockBackend, graph, _handle, /*engineDescTimes=*/2);
+    expectEngineNameQuerySequence(*_mockBackend,
+                                  {"PLUGIN_ENGINE_NAME_ONE", "PLUGIN_ENGINE_NAME_TWO"});
+    graph.injectCompiledPlan(ENGINE_ID_WITHOUT_REGISTRY_NAME, /*workspaceSize=*/0);
+
+    std::string firstName;
+    ASSERT_TRUE(graph.get_plan_name_at_index(0, firstName).is_good());
+    EXPECT_EQ(firstName, "PLUGIN_ENGINE_NAME_ONE");
+
+    // Re-lowering replaces the graph descriptor and clears the compiled plans.
+    ASSERT_TRUE(graph.build_operation_graph(_handle).is_good());
+    ASSERT_EQ(graph.getCompiledPlansCount(), 0u);
+    graph.injectCompiledPlan(ENGINE_ID_WITHOUT_REGISTRY_NAME, /*workspaceSize=*/0);
+
+    std::string secondName;
+    ASSERT_TRUE(graph.get_plan_name_at_index(0, secondName).is_good());
+    EXPECT_EQ(secondName, "PLUGIN_ENGINE_NAME_TWO");
+}
+
 TEST_F(TestGraph, PlanNameAtIndexWithoutBuiltGraphSkipsBackend)
 {
     // No graph descriptor exists yet, so there is nothing to build an engine

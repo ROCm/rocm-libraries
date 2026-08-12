@@ -14,8 +14,8 @@ install(TARGETS hipdnn_list_engines RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 # Discovery is pointed at ${HIPDNN_TEST_PLUGIN_DIR}/default via HIPDNN_PLUGIN_DIR. The /default
 # suffix is required: plugin discovery is non-recursive, the flat test-plugin directory and its
 # custom/ subdirectory both hold deliberate load-rejection fixtures, and default/ holds exactly one
-# plugin, test_good_default_plugin, which reports the engine name asserted below.
-if(NOT HIPDNN_SKIP_TESTS AND TARGET test_good_default_plugin)
+# plugin, ${TEST_GOOD_DEFAULT_PLUGIN_NAME}, which reports the engine name asserted below.
+if(NOT HIPDNN_SKIP_TESTS AND TARGET ${TEST_GOOD_DEFAULT_PLUGIN_NAME})
     # Mirrors K_GOOD_DEFAULT_PLUGIN_ENGINE_NAME in tests/test_plugins/TestPluginEngineIdMap.hpp and
     # the engine ID mapped to GoodDefaultPlugin in the same header, rendered by ListEngines.cpp as a
     # zero-padded uppercase 64-bit hexadecimal value.
@@ -68,6 +68,27 @@ endif()
             "${CMAKE_CURRENT_BINARY_DIR}/ListEnginesSmokeTest.cmake"
     )
 
+    # add_hipdnn_test() assumes a gtest executable registered as the test command; this test runs a
+    # CMake driver script instead, so its two run-time prerequisites -- the tool binary and the
+    # plugin it discovers -- are appended to CHECK_DEPENDS_GLOBAL by hand.
+    #
+    # CHECK_EXECUTABLE_PATHS_GLOBAL is deliberately not touched: it feeds
+    # cmake/scripts/test_name_validator.py, which drives --gtest_list_tests, and neither the tool
+    # nor the plugin answers that. HIPDNN_TEST_TARGETS is likewise skipped, since
+    # install_hipdnn_ctest_files() would emit `add_test(<name> "../<name>")` for it, which is not
+    # how this test is invoked.
+    set(CHECK_DEPENDS_GLOBAL ${CHECK_DEPENDS_GLOBAL} hipdnn_list_engines
+                             ${TEST_GOOD_DEFAULT_PLUGIN_NAME}
+        CACHE INTERNAL "Accumulated global dependencies for test name validation" FORCE
+    )
+
+    # On Windows, stage the shadowed ROCm DLLs before the tool is built so a partial build plus a
+    # manual ctest doesn't load the stale System32 amd_comgr.dll. add_hipdnn_test() does this for
+    # gtest binaries; mirror it here.
+    if(TARGET stage_shadowed_rocm_dlls)
+        add_dependencies(hipdnn_list_engines stage_shadowed_rocm_dlls)
+    endif()
+
     # The tool discovers plugins from HIPDNN_PLUGIN_DIR and, unlike the backend test binaries,
     # inherits no default for it.
     set(HIPDNN_LIST_ENGINES_SMOKE_ENVIRONMENT "HIPDNN_PLUGIN_DIR=${HIPDNN_TEST_PLUGIN_DIR}/default")
@@ -87,7 +108,14 @@ endif()
         )
     endif()
 
-    _apply_hipdnn_test_category_labels(hipdnn_list_engines_smoke)
+    # Require the build-local MIOpen cache to be cleared before this test runs (ASAN builds only;
+    # HIPDNN_TEST_MIOPEN_CACHE_DIR is unset otherwise). See the hipdnn_clear_miopen_test_cache
+    # fixture in cmake/Tests.cmake.
+    if(DEFINED HIPDNN_TEST_MIOPEN_CACHE_DIR)
+        set_tests_properties(
+            hipdnn_list_engines_smoke PROPERTIES FIXTURES_REQUIRED hipdnn_clear_miopen_test_cache
+        )
+    endif()
 
-    add_dependencies(hipdnn_list_engines test_good_default_plugin)
+    _apply_hipdnn_test_category_labels(hipdnn_list_engines_smoke)
 endif()

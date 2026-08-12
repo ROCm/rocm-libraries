@@ -571,8 +571,10 @@ TEST_F(IntegrationPluginLoading, PluginWithoutEngineNameEntryPointFallsBackToHex
                                                         << describeReportedEngines(engines);
 }
 
-// test_good_default_plugin carries a hardcoded engine id that its name deliberately does not hash
-// back to, so name resolution reports the disagreement while keeping the plugin-reported id.
+// test_mismatched_name_plugin carries a hardcoded engine id that its name deliberately does not
+// hash back to, so name resolution reports the disagreement while keeping the plugin-reported id.
+// The warning is raised once per (plugin, engine id) per process, which is why this is the only
+// test that loads that plugin.
 TEST_F(IntegrationPluginLoading, PluginSuppliedEngineNameNotMatchingIdLogsWarning)
 {
     // The recorder is constructed first so that it saves, and on destruction restores, the log
@@ -586,7 +588,7 @@ TEST_F(IntegrationPluginLoading, PluginSuppliedEngineNameNotMatchingIdLogsWarnin
         HIPDNN_SEV_WARN,
         this);
 
-    const std::string pluginPath = hipdnn_tests::plugin_constants::testDefaultGoodPluginPath();
+    const std::string& pluginPath = hipdnn_tests::plugin_constants::testMismatchedNamePluginPath();
     ASSERT_NO_FATAL_FAILURE(setSingleEnginePluginPath(pluginPath));
 
     ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
@@ -596,9 +598,10 @@ TEST_F(IntegrationPluginLoading, PluginSuppliedEngineNameNotMatchingIdLogsWarnin
 
     const std::string expectedFragment
         = std::string("reports engine name '")
-          + hipdnn_tests::plugin_constants::K_GOOD_DEFAULT_PLUGIN_ENGINE_NAME + "' for engine ID "
+          + hipdnn_tests::plugin_constants::K_MISMATCHED_NAME_PLUGIN_ENGINE_NAME
+          + "' for engine ID "
           + hipdnn_data_sdk::utilities::formatEngineIdHex(
-              hipdnn_tests::plugin_constants::engineId<GoodDefaultPlugin>());
+              hipdnn_tests::plugin_constants::engineId<MismatchedNamePlugin>());
 
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, expectedFragment))
         << "Expected a name/id disagreement warning. Captured logs:\n"

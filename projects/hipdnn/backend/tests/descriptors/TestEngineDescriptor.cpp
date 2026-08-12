@@ -89,12 +89,12 @@ public:
     {
         expectFinalizeCalls(ENGINE_ID);
         // The mock resolves to the hexadecimal rendering of the engine ID by
-        // default, matching the resolver's last-resort tier.
+        // default, matching the resolver's last-resort answer.
         EXPECT_CALL(*_mockEnginePluginResourceManager, resolveEngineName(_, _));
         ASSERT_NO_THROW(getEngineDescriptor()->finalize());
     }
 
-    /// Captures the tier-2 candidate the descriptor hands to the resolver and
+    /// Captures the candidate name the descriptor hands to the resolver and
     /// pins the name it answers with. A disengaged @p resolvedName keeps the
     /// resolver's hexadecimal fallback.
     void expectResolveEngineName(int64_t engineId, const std::optional<std::string>& resolvedName)
@@ -191,7 +191,7 @@ protected:
     static constexpr int64_t UNREGISTERED_ENGINE_ID = 0x0123456789ABCDEF;
     flatbuffers::DetachedBuffer _engineDetailsBuffer;
     hipdnnPluginConstData_t _serializedEngineDetails;
-    /// Tier-2 candidate observed by the resolver: disengaged when the engine has
+    /// Candidate name observed by the resolver: disengaged when the engine has
     /// no details, engaged and empty when the details carry no name.
     std::optional<std::string> _capturedDetailsName;
     bool _resolverCalled = false;
@@ -612,18 +612,10 @@ TEST_F(TestEngineDescriptor, GetEngineIdReturnsValueIfFinalized)
 
 // HIPDNN_ATTR_ENGINE_NAME_EXT cases.
 //
-// The four-tier resolution chain itself lives in
-// EnginePluginResourceManager::resolveEngineName(), which is mocked here. What
-// these cases pin is the descriptor's half of the contract, and only that: the
-// tier-2 candidate it derives from the engine details and hands over, and its
-// publishing of whatever name comes back. The descriptor holds no opinion about
-// which tier answered, so a stubbed answer is the whole of what it can observe.
-//
-// Consequently the tier a stubbed answer stands for is a matter of the case's
-// intent rather than anything the code decides here, and no case below settles
-// precedence between tiers -- only that the descriptor defers to the resolver
-// over the name it read for itself. Precedence, and tier 3, which no mocked
-// resolver can reach, are covered against the real chain in
+// EnginePluginResourceManager::resolveEngineName() is mocked here. What these
+// cases pin is the descriptor's half of the contract: the candidate name it
+// derives from the engine details and hands over, and its publishing of
+// whatever name comes back. Resolution itself is covered in
 // TestEnginePluginResourceManager.cpp.
 
 TEST_F(TestEngineDescriptor, GetEngineNameFromEngineDetails)
@@ -635,8 +627,8 @@ TEST_F(TestEngineDescriptor, GetEngineNameFromEngineDetails)
     ASSERT_NO_THROW(getEngineDescriptor()->finalize());
 
     // The engine details supplied a name, so the descriptor offers it as the
-    // tier-2 candidate. Handing it over intact is the assertion; that the
-    // resolver then answers with it is a stub, not a finding.
+    // candidate. Handing it over intact is the assertion; that the resolver
+    // then answers with it is a stub, not a finding.
     EXPECT_TRUE(_resolverCalled);
     ASSERT_TRUE(_capturedDetailsName.has_value());
     EXPECT_EQ(*_capturedDetailsName, "EXAMPLE_PROVIDER_RELU_ENGINE");
@@ -673,7 +665,7 @@ TEST_F(TestEngineDescriptor, GetEngineNameWithoutNameInEngineDetails)
 {
     // The default fixture buffer carries an engine ID and nothing else, so the
     // candidate the descriptor derives is present but empty. The stub stands in
-    // for a resolver that found nothing in any tier.
+    // for a resolver that found no name anywhere.
     expectFinalizeCalls(ENGINE_ID);
     expectResolveEngineName(ENGINE_ID, std::nullopt);
     ASSERT_NO_THROW(getEngineDescriptor()->finalize());
@@ -720,7 +712,7 @@ TEST_F(TestEngineDescriptor, GetEngineNameEmptyNameInEngineDetails)
 TEST_F(TestEngineDescriptor, FinalizeFailsBeforeNameResolutionWhenEngineDetailsMissing)
 {
     // The plugin answers with no engine details at all. finalize() declares a
-    // disengaged tier-2 candidate for exactly this case, but the candidate is
+    // disengaged candidate for exactly this case, but the candidate is
     // unreachable today: EngineDetailsWrapper refuses to construct around an
     // empty buffer, so finalize() fails before the resolver is consulted.
     setGraph();

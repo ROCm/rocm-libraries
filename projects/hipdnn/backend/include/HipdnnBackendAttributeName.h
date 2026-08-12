@@ -408,11 +408,16 @@ typedef enum
     /**
      * @brief Human-readable name of this engine (HIPDNN_TYPE_CHAR, extension).
      *
-     * Read-only. The name is supplied by the backend: it is resolved from the
-     * owning plugin when available, then from the engine details payload, then
-     * from the built-in engine name registry, and finally from a hexadecimal
-     * rendering of the engine ID. The value is therefore never empty for a
-     * finalized engine descriptor.
+     * Read-only and supplied by the backend. Never empty for a finalized engine
+     * descriptor.
+     *
+     * This is the graph-resolved name, so the backend draws it from four sources in
+     * order: the plugin's `hipdnnEnginePluginGetEngineName` entry point; the `name`
+     * field of the engine's `EngineDetails` payload; the built-in static registry
+     * keyed by engine ID; and finally a zero-padded uppercase hexadecimal rendering
+     * of the engine ID, such as `0x000000000000001A`. The second source is
+     * reachable only here: `hipdnnGetEngineInfo_ext` enumerates without a graph,
+     * so it cannot see `EngineDetails.name`.
      */
     HIPDNN_ATTR_ENGINE_NAME_EXT = 1008,
 
