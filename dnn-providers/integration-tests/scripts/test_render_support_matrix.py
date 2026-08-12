@@ -674,10 +674,12 @@ class TestMarkdown:
         assert document.index(f"`{FULL}`") < document.index("### Overview")
 
     def test_reading_guide_follows_the_last_target(self, document: str) -> None:
-        assert document.index("Reading guide</h2>") > document.rindex("### Overview")
+        assert document.index("Reading guide</b></big>") > document.rindex(
+            "### Overview"
+        )
 
     def test_reading_guide_defines_every_cell_form(self, document: str) -> None:
-        guide = document.split("Reading guide</h2>", 1)[1]
+        guide = document.split("Reading guide</b></big>", 1)[1]
         for token in (FULL, PARTIAL, NONE, NO_LAYOUT):
             assert f"`{token}" in guide, f"reading guide does not explain {token!r}"
 
@@ -685,7 +687,7 @@ class TestMarkdown:
         self, document: str
     ) -> None:
         """The one reading that would invert the document's meaning."""
-        guide = document.split("Reading guide</h2>", 1)[1]
+        guide = document.split("Reading guide</b></big>", 1)[1]
         assert "*unclaimed*" in guide
         assert "not the same as *known unsupported*" in guide
 
@@ -696,7 +698,7 @@ class TestMarkdown:
     def test_unknown_arch_renders_bare(self) -> None:
         """A new gfx target must not have to wait on the name table."""
         unit = _unit("NCHW", {"E": {("gfx1337", "linux")}})
-        assert "gfx1337 / linux</h2>" in render_markdown([unit], 0)
+        assert "gfx1337 / linux</b></big>" in render_markdown([unit], 0)
 
     def test_engine_columns_are_alphabetical(self, document: str) -> None:
         header = next(
@@ -1074,7 +1076,7 @@ def _family_blocks(document: str) -> list[tuple[list[int], str, str]]:
 
         for chunk in target_section.split("<summary>📂 <b>")[1:]:
             name = chunk.split("</b>")[0]
-            body = chunk.split("\n", 1)[1].split("</details>\n\n</details>")[0]
+            body = chunk.split("\n", 1)[1].split("</details>\n</details>")[0]
             variants, _, detail = body.partition("<summary>🔎")
             blocks.append((overview_rows.get(name, []), variants, detail))
     return blocks

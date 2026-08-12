@@ -956,7 +956,6 @@ def render_family(
     lines.append(f"_Dtypes observed: {', '.join(dtypes)}_")
     lines.append("")
     render_detail(lines, units, family, engines, arch, platform)
-    lines.append("")
     lines.append("</details>")
     lines.append("")
 
@@ -1016,7 +1015,9 @@ def render_markdown(units: list[ClaimUnit], max_case_ids: int) -> str:
         marketing = ARCH_MARKETING_NAMES.get(arch)
         suffix = f" — {marketing}" if marketing else ""
         lines.append("<details>")
-        lines.append(f"<summary><h2>{arch} / {platform}{suffix}</h2></summary>")
+        lines.append(
+            f"<summary><big><b>{arch} / {platform}{suffix}</b></big></summary>"
+        )
         lines.append("")
         lines.append("### Overview")
         lines.append("")
@@ -1035,10 +1036,11 @@ def render_markdown(units: list[ClaimUnit], max_case_ids: int) -> str:
         if lines and lines[-1] == "":
             lines.pop()
         lines.append("</details>")
+        lines.append("<br>")
 
-    lines.append("")
     lines.append("<details>")
-    lines.append("<summary><h2>Reading guide</h2></summary>")
+    lines.append("<summary><big><b>Reading guide</b></big></summary>")
+    lines.append('<a id="reading-guide"></a>')
     lines.append("")
     lines.extend(READING_GUIDE[2:])
     render_traceability(lines, units, max_case_ids)
