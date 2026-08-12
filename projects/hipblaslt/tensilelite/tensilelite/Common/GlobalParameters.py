@@ -30,7 +30,7 @@ from collections import OrderedDict
 from copy import deepcopy
 from typing import Dict
 
-from Tensile import __version__
+from tensilelite import __version__
 
 from .Architectures import isaToGfx
 from .Types import IsaVersion, IsaInfo
@@ -402,7 +402,7 @@ globalParameters["StinkyTofuCostOutputDir"] = ""
 
 globalParameters["DisableSTWaitCnt"] = True
 
-# Internal plumbing for the --cpu-only CLI switch (see Tensile.py addCommonArguments).
+# Internal plumbing for the --cpu-only CLI switch (see tensilelite.py addCommonArguments).
 # When True, the benchmark flow runs GPU-less: ISA is spoofed, the GPU clock-frequency
 # probe is skipped, and the client device-launch is stubbed with a synthetic results CSV.
 # This is undocumented plumbing only: it is NOT exposed via --global-parameters help and
@@ -637,7 +637,6 @@ for paramDict in defaultBenchmarkCommonParameters:
 # other non-benchmark options for solutions
 
 
-
 defaultProblemSizes = [{"Range": [[2880], 0, 0]}]
 defaultBenchmarkFinalProblemSizes = [{"Range": [[64, 64, 64, 512], 0, 0]}]
 defaultBatchedProblemSizes = [{"Range": [[2880], 0, [1], 0]}]
@@ -682,7 +681,7 @@ def restoreDefaultGlobalParameters():
     global globalParameters
     global defaultGlobalParameters
     # Can't just assign globalParameters = deepcopy(defaultGlobalParameters) because that would
-    # result in dangling references, specifically in Tensile.Tensile().
+    # result in dangling references, specifically in tensilelite.Tensile().
     globalParameters.clear()
     for key, value in deepcopy(defaultGlobalParameters).items():
         globalParameters[key] = value
@@ -757,7 +756,7 @@ def _assertOverrideTableCovers(defaults_dict, override_dict):
             "globalParameterTypeOverrides is missing entries for the "
             f"following None-defaulted globalParameters: {missing!r}. "
             "Add type annotations for each to "
-            "Tensile/Common/GlobalParameters.py."
+            "tensilelite/Common/GlobalParameters.py."
         )
 
 
@@ -813,9 +812,9 @@ _GLOBAL_PARAMETER_IGNORE_KEYS = [
     # --- CLI / TensileCreateLibrary-level config consumed outside the
     #     globalParameters registry (each has its own argparse dest or
     #     direct arguments[...] reader) ---
-    "Architecture",       # build-arch list, read directly in Tensile.py
+    "Architecture",       # build-arch list, read directly in tensilelite.py
     "PrintLevel",         # verbosity, read by setVerbosity in TensileCreateLibrary/Run.py
-    "Device",             # device id, read from config in Tensile.py
+    "Device",             # device id, read from config in tensilelite.py
     "UseCompression",     # code-object compression toggle, set in ParseArguments / read in Run.py
     "CxxCompiler",        # --cxx-compiler arg, resolved in Toolchain layer, not a registry value
     "CCompiler",          # --c-compiler arg, resolved in Toolchain layer, not a registry value
@@ -823,12 +822,12 @@ _GLOBAL_PARAMETER_IGNORE_KEYS = [
     "Assembler",          # --assembler arg, resolved in Toolchain layer
     "LogicPath",          # library-logic dir, read by TensileCreateLibrary/Run.py
     "LogicFilter",        # logic-file glob, read by TensileCreateLibrary/Run.py
-    "OutputPath",         # positional output dir arg in Tensile.py / RetuneLibrary
+    "OutputPath",         # positional output dir arg in tensilelite.py / RetuneLibrary
     "Experimental",       # --experimental logic-dir toggle in ParseArguments
     "GenSolTable",        # --gen-sol-table toggle in ParseArguments
     # Keys with a sanctioned opt-out from the strict gate:
     #   - Live but read via DebugConfig (makeDebugConfig in
-    #     Tensile/Common/Types.py) directly from the raw config dict
+    #     tensilelite/Common/Types.py) directly from the raw config dict
     #     after assignGlobalParameters, bypassing the globalParameters
     #     registry:
     "ForceGenerateKernel",        # DebugConfig.forceGenerateKernel, read by makeDebugConfig

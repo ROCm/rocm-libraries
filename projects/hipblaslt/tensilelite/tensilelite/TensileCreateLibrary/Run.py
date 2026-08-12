@@ -37,52 +37,17 @@ from timeit import default_timer as timer
 from typing import Collection, List, NamedTuple, Optional, Union
 
 from Tensile.Common import (
-    CHeader,
-    DebugConfig,
-    ensurePath,
-    HR,
-    IsaVersion,
-    ParallelMap2,
-    print1,
-    print2,
-    printWarning,
-    printExit,
-    printWarning,
-    state,
-    tqdm,
-    setVerbosity,
-    getVerbosity,
 )
 from Tensile.Common.Architectures import ARCH_COMPILER_TARGET, baseArchName, gfxToIsa, isaToGfx, SUPPORTED_GFX, splitArchsFromPredicates, filterLogicFilesByPredicates, expandAllArchitectures, gfxToCompilerTarget
 from Tensile.Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
-from Tensile.Common.GlobalParameters import assignGlobalParameters, globalParameters
-from Tensile.Common.TimingInstrumentation import timing_context
-from Tensile.SolutionStructs.Naming import getKernelFileBase, getKeyNoInternalArgs, getKernelNameMin
 
 from Tensile.CustomYamlLoader import load_logic_gfx_arch, archMatch
-from Tensile.KernelHelperNaming import kernelObjectNameCallables, initHelperKernelObjects
-from Tensile.KernelWriterAssembly import KernelWriterAssembly
 from Tensile.KernelWriterBase import (
-    KERNEL_HELPER_FILENAME_CPP,
-    KERNEL_HELPER_FILENAME_H,
 )
-from Tensile.SolutionLibrary import MasterSolutionLibrary, PlaceholderLibrary
-from Tensile.SolutionStructs import Solution
 from Tensile.SolutionStructs.Solution import (
-    raiseIfTypeMismatches,
-    mergeTypeMismatchCollector,
-    resetTypeMismatchCollector,
 )
-from Tensile.verify_stinky_comment_vs_elf_text import verify_stinky_paths
-from Tensile.Toolchain.Assembly import makeAssemblyToolchain, buildAssemblyCodeObjectFiles
-from Tensile.Toolchain.Source import makeSourceToolchain, buildSourceCodeObjectFiles
 from Tensile.Toolchain.Validators import (
-    ToolchainDefaults,
-    validateToolchain,
 )
-from Tensile.Toolchain.Component import Assembler
-from Tensile.Utilities.Decorators.Profile import profile
-from Tensile.Utilities.Decorators.Timing import timing
 
 from .ParseArguments import parseArguments
 
@@ -110,7 +75,6 @@ from .ParseArguments import parseArguments
 ################################################################################
 
 
-from Tensile import LibraryIO
 from ..resources import copy_static_headers
 
 ################################################################################
@@ -155,6 +119,56 @@ from ..resources import copy_static_headers
 # SOFTWARE.
 #
 ################################################################################
+
+
+from tensilelite import LibraryIO
+from tensilelite.Common import (
+    CHeader,
+    DebugConfig,
+    ensurePath,
+    HR,
+    IsaVersion,
+    ParallelMap2,
+    print1,
+    print2,
+    printWarning,
+    printExit,
+    printWarning,
+    state,
+    tqdm,
+    setVerbosity,
+    getVerbosity,
+)
+from tensilelite.Common.Architectures import gfxToIsa, isaToGfx, SUPPORTED_GFX, splitArchsFromPredicates, filterLogicFilesByPredicates
+from tensilelite.Common.Capabilities import makeIsaInfoMap
+from tensilelite.Common.GlobalParameters import assignGlobalParameters, globalParameters
+from tensilelite.Common.TimingInstrumentation import timing_context
+from tensilelite.SolutionStructs.Naming import getKernelFileBase, getKeyNoInternalArgs, getKernelNameMin
+from tensilelite.CustomYamlLoader import load_logic_gfx_arch
+from tensilelite.KernelHelperNaming import kernelObjectNameCallables, initHelperKernelObjects
+from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+from tensilelite.KernelWriterBase import (
+    KERNEL_HELPER_FILENAME_CPP,
+    KERNEL_HELPER_FILENAME_H,
+)
+from tensilelite.SolutionLibrary import MasterSolutionLibrary, PlaceholderLibrary
+from tensilelite.SolutionStructs import Solution
+from tensilelite.SolutionStructs.Solution import (
+    raiseIfTypeMismatches,
+    mergeTypeMismatchCollector,
+    resetTypeMismatchCollector,
+)
+from tensilelite.verify_stinky_comment_vs_elf_text import verify_stinky_paths
+from tensilelite.Toolchain.Assembly import makeAssemblyToolchain, buildAssemblyCodeObjectFiles
+from tensilelite.Toolchain.Source import makeSourceToolchain, buildSourceCodeObjectFiles
+from tensilelite.Toolchain.Validators import (
+    ToolchainDefaults,
+    validateToolchain,
+)
+from tensilelite.Toolchain.Component import Assembler
+from tensilelite.Utilities.Decorators.Profile import profile
+from tensilelite.Utilities.Decorators.Timing import timing
+from ..Resources import copy_static_headers
 
 
 def libraryRoot(outputPath: Union[str, Path]) -> Path:

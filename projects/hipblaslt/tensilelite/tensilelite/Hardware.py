@@ -25,7 +25,7 @@
 from typing import List, Optional
 
 from . import Properties
-from Tensile.Common.Architectures import \
+from tensilelite.Common.Architectures import \
     SUPPORTED_CHIP_ID_FALLBACKS, SUPPORTED_BUILD_CHIP_IDS, GFX_CHIP_IDS, \
     isaToGfx, supportsChipIdPredicate, print1
 

@@ -30,7 +30,7 @@ from enum import Enum, auto
 from typing import ClassVar, Optional
 
 from rocisa.instruction import SWaitCnt, SBarrier
-from Tensile.Common.Utilities import printWarning
+from tensilelite.Common.Utilities import printWarning
 
 
 @functools.total_ordering

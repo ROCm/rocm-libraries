@@ -31,8 +31,8 @@ Example: ( wg0 x wg1 x LocalSplitU )
 
 from pathlib import Path
 
-from Tensile.Common import elineno
-from Tensile.SolutionStructs.Validators.WorkGroup import validateWorkGroup
+from tensilelite.Common import elineno
+from tensilelite.SolutionStructs.Validators.WorkGroup import validateWorkGroup
 
 
 def _validateWorkGroup(solution: dict, filepath: Path):

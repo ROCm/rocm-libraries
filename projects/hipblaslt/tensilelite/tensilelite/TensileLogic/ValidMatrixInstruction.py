@@ -54,8 +54,8 @@ Notes:
 from typing import Dict
 from pathlib import Path
 
-from Tensile.Common import IsaVersion, IsaInfo, elineno
-from Tensile.SolutionStructs.Validators.MatrixInstruction import validateMIParameters
+from tensilelite.Common import IsaVersion, IsaInfo, elineno
+from tensilelite.SolutionStructs.Validators.MatrixInstruction import validateMIParameters
 
 
 def _validateMatrixInstruction(

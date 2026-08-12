@@ -114,7 +114,7 @@ class EmbeddedDataFile:
         #include <Tensile/EmbeddedData.hpp>
 
         #include <Tensile/Contractions.hpp>
-        #include <Tensile/Tensile.hpp>
+        #include <Tensile/tensilelite.hpp>
     """
 
     def get_lines(self, item):
