@@ -1526,6 +1526,40 @@ TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_PinsLiveOutSccDefBelowLastBar
            "cluster-barrier handshake cannot clobber SCC inside its live range";
 }
 
+// A live-out def written between two barriers. Following the barrier above it is not
+// enough: its reader is the region terminator, so the range runs to the end of the region
+// and the barrier below would fall inside it. The def has to be pushed under that one as
+// well, which is an edge pointing back up the program order.
+TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_PushesLiveOutSccDefBelowTheBarrierAfterIt) {
+    BasicBlock* body = bb;
+    body->addSuccessor(body);
+
+    createWmmaF32_16x16x16_bf16_in(body, /*destStart=*/200, /*src0Start=*/204);
+    for (int i = 0; i < 6; i++)
+        createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i, /*ldsToken=*/i + 10);
+
+    createMovableWorkgroupBarrier(body, /*ldsToken=*/1);
+    createMovableTensorLoad(body, /*s0=*/40, /*s1=*/48, /*ldsToken=*/1);
+
+    StinkyInstruction* sccDef = createSCmpWritingScc(body, /*srcSgpr=*/90);
+
+    createMovableWorkgroupBarrier(body, /*ldsToken=*/2);
+    createSCbranchReadingScc(body);
+
+    const int beforeCount = countStinkyInstructions(*body);
+    runPassWithClusterBarrier(/*clusterBarrier=*/true);
+    ASSERT_EQ(countStinkyInstructions(*body), beforeCount)
+        << "the SCC rule must not drop instructions";
+
+    const int lastWaitPos = lastBarrierWaitPosition(*body);
+    const int sccDefPos = positionOf(*body, sccDef);
+    ASSERT_GE(lastWaitPos, 0);
+    ASSERT_GE(sccDefPos, 0);
+    EXPECT_GT(sccDefPos, lastWaitPos)
+        << "the live-out def must end up below every barrier in the region:"
+        << scheduleOrder(*body);
+}
+
 // Same IR with the rule off: the compare is free to drift above the barrier. This is
 // what makes the assertion above meaningful — it isolates the rule as the cause.
 TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_DisabledLeavesSccDefFree) {
@@ -1697,9 +1731,10 @@ TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_ChainBehindBarrierHoistsWhole
         << "the barrier must still guard the tensor_load:" << order;
 }
 
-// Same chain, same barrier, but nothing to guard: InsertClusterBarrierPass plants no
-// handshake, so the chain must keep its full freedom to straddle the barrier.
-TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_ChainMayStraddleNonGuardingBarrier) {
+// Same chain, same barrier, but nothing behind the barrier to guard. The handshake anchor
+// is picked by a cycle-lead climb and can come to rest on any workgroup barrier, so having
+// nothing to guard buys this one no exemption: the chain must still be kept whole.
+TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_BarrierWithNothingToGuardKeepsChainWhole) {
     BasicBlock* body = bb;
     body->addSuccessor(body);
 
@@ -1707,19 +1742,19 @@ TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_ChainMayStraddleNonGuardingBa
     for (int i = 0; i < 6; i++)
         createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i, /*ldsToken=*/i + 10);
 
-    createSCmpWritingScc(body, /*srcSgpr=*/90);
+    StinkyInstruction* sccDef = createSCmpWritingScc(body, /*srcSgpr=*/90);
     StinkyInstruction* reader1 = createSCselectReadingScc(body, /*destSgpr=*/91, /*srcSgpr=*/92);
     StinkyInstruction* reader2 = createSCselectReadingScc(body, /*destSgpr=*/93, /*srcSgpr=*/94);
 
     createMovableWorkgroupBarrier(body, /*ldsToken=*/1);
 
+    const int beforeCount = countStinkyInstructions(*body);
     runPassWithClusterBarrier(/*clusterBarrier=*/true);
+    ASSERT_EQ(countStinkyInstructions(*body), beforeCount);
 
-    const int signalPos = firstBarrierSignalPosition(*body);
-    ASSERT_GE(signalPos, 0);
-    const int lastReaderPos = std::max(positionOf(*body, reader1), positionOf(*body, reader2));
-    EXPECT_GT(lastReaderPos, signalPos)
-        << "with no tensor_load behind it the barrier anchors nothing, so the chain is free";
+    EXPECT_FALSE(barrierSplitsChain(*body, {sccDef, reader1, reader2}))
+        << "a barrier with nothing to guard is still a place the handshake may land:"
+        << scheduleOrder(*body);
 }
 
 // The loop counter decrement writes SCC as a carry-out that the compare right after it
@@ -1758,9 +1793,9 @@ TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_DeadSccCarryOutStaysFree) {
         << "the decrement's SCC is dead, so nothing stops it from being hoisted";
 }
 
-// No tensor_load means InsertClusterBarrierPass plants nothing here, so the rule must
-// not bind and cost scheduling freedom.
-TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_NoTensorLoadLeavesSccDefFree) {
+// The same pin with no tensor_load in the region: the live-out def belongs below the
+// barrier either way, since what it has to stay clear of is the handshake, not the load.
+TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_PinsLiveOutSccDefBelowBarePlainBarrier) {
     BasicBlock* body = bb;
     body->addSuccessor(body);
 
@@ -1780,8 +1815,9 @@ TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_NoTensorLoadLeavesSccDefFree)
     const int sccDefPos = positionOf(*body, sccDef);
     ASSERT_GE(barrierPos, 0);
     ASSERT_GE(sccDefPos, 0);
-    EXPECT_LT(sccDefPos, barrierPos)
-        << "with no tensor_load behind the barrier the rule must not bind";
+    EXPECT_GT(sccDefPos, barrierPos)
+        << "the handshake can land on any workgroup barrier, so the live-out def has to "
+           "follow this one too";
 }
 
 // An SCC chain that is born and dies inside the region, sitting ahead of the barrier that

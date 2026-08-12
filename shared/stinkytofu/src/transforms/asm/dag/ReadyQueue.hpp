@@ -91,13 +91,13 @@ struct DAGNode {
     // wait that has no matching instruction.
     int hazardDeadline = INT_MAX;
     // --- Cluster-barrier SCC protection (ClusterBarrier kernels only) ---
-    // Filled by applyClusterBarrierSccRule. A guarding barrier is one
-    // InsertClusterBarrierPass will anchor an SCC-clobbering handshake on, so it must
-    // not issue while an SCC def-use chain is open (see CDNA5ReadyQueue::openSccChain_).
-    bool guardingBarrier = false;
+    // Filled by applyClusterBarrierSccRule. A workgroup barrier, which is somewhere
+    // InsertClusterBarrierPass may anchor an SCC-clobbering handshake, so it must not
+    // issue while an SCC def-use chain is open (see CDNA5ReadyQueue::openSccChain_).
+    bool handshakeBarrier = false;
     // Non-zero when this node belongs to a chain the ready queue keeps whole. Issuing
     // the def opens the chain and the chain closes once all of its readers have issued;
-    // between those two points no guarding barrier may be picked, which is what stops
+    // between those two points no workgroup barrier may be picked, which is what stops
     // the handshake from landing inside the chain's live range. The chain stays free to
     // schedule on either side of the barrier -- only splitting it is forbidden.
     unsigned sccChainId = 0;

@@ -509,7 +509,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
 
     // A barrier that must wait for the open chain to close.
     bool sccChainBlocks(const DAGNode* node) const {
-        return openSccChain_ != 0 && node->guardingBarrier;
+        return openSccChain_ != 0 && node->handshakeBarrier;
     }
 
     void noteSccChainIssue(DAGNode* node);
@@ -1064,7 +1064,7 @@ bool CDNA5ReadyQueue::findOldestFallbackNonWmma(DAGNode* pickedDS, DAGNode** out
 // the gap instead of after. Add further forcing rules here as new PromotePhase cases
 // (or new decisions within an existing phase, as below).
 // Open the chain on its def, close it on its last reader. Between those two picks
-// sccChainBlocks() holds back every guarding barrier.
+// sccChainBlocks() holds back every workgroup barrier.
 void CDNA5ReadyQueue::noteSccChainIssue(DAGNode* node) {
     if (node->sccChainId == 0) return;
 
@@ -1715,13 +1715,13 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         return rememberPick(popNonWmma(fallback, fallbackKind));
     }
 
-    // Only guarding barriers are left and an SCC chain is still holding them back.
+    // Only barriers are left and an SCC chain is still holding them back.
     // applyClusterBarrierSccRule only locks chains whose readers can all issue without
     // the barrier going first, so a locked chain always has a reader to make progress
     // on and this should be unreachable; release rather than stall if that ever breaks.
     if (openSccChain_ != 0 && !barrierQueue.empty()) {
         PASS_DEBUG(std::cerr << "[CDNA5 pickOne] SCC chain " << openSccChain_
-                             << " open but only guarding barriers are ready; releasing the lock"
+                             << " open but only barriers are ready; releasing the lock"
                                 " to keep the schedule progressing\n");
         openSccChain_ = 0;
         sccReadersLeft_ = 0;
