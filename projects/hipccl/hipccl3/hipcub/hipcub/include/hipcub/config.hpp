@@ -39,9 +39,7 @@
 #include "libcxx.hpp" // IWYU pragma: export
 
 // For _CCCL_IMPLICIT_SYSTEM_HEADER
-#if _HIPCUB_HAS_DEVICE_SYSTEM_STD
-    #include _HIPCUB_LIBCXX_INCLUDE(__cccl_config) // IWYU pragma: export
-#endif
+#include _HIPCUB_LIBCXX_INCLUDE(__cccl_config) // IWYU pragma: export
 
 #define HIPCUB_NAMESPACE hipcub
 
