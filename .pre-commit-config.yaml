@@ -155,6 +155,18 @@ repos:
         pass_filenames: false
         always_run: true
 
+      # SUPPORT_MATRIX.md is generated, not committed (see
+      # dnn-providers/integration-tests/.gitignore for why), so there is no
+      # committed copy to check for staleness. What is still worth catching is a
+      # sidecar that the renderer cannot resolve at all: render and discard, and
+      # fail if that errors.
+      - id: render-support-matrix
+        name: Support matrix renders from the sidecars (RFC 0015)
+        entry: python dnn-providers/integration-tests/scripts/render_support_matrix.py --output /dev/null
+        language: python
+        pass_filenames: false
+        always_run: true
+
       - id: gtest-format-miopen
         name: GTest naming conventions (MIOpen)
         entry: python projects/miopen/test/utils/gtest_formating_checks.py
