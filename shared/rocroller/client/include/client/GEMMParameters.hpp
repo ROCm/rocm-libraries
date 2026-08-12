@@ -17,7 +17,6 @@
 #include <rocRoller/Utilities/Utils.hpp>
 
 #include "client/BenchmarkSolution.hpp"
-#include <mxDataGenerator/DataGenerator.hpp>
 
 namespace rocRoller
 {
@@ -62,7 +61,27 @@ namespace rocRoller
                 std::string shortName;
             };
 
+            enum class DataInitializationMode
+            {
+                Bounded,
+                BoundedAlternatingSign,
+                Unbounded,
+                Identity,
+                Ones,
+                Zeros,
+                TrigonometricFromFloat,
+                NormalFromFloat,
+            };
+
+            struct DataInitialization
+            {
+                DataInitializationMode mode = DataInitializationMode::Bounded;
+                double normalMean = 0.0;
+                double normalStandardDeviation = 1.0;
+            };
+
             std::string toString(TransposeType trans);
+            std::string toString(DataInitialization const& initialization);
 
             struct TypeParameters
             {
@@ -119,7 +138,7 @@ namespace rocRoller
                 // When scaleA/B is ScaleMode::SingleScale
                 float scaleValueA, scaleValueB;
 
-                DGen::DataInitMode initModeA, initModeB, initModeC;
+                DataInitialization initModeA{}, initModeB{}, initModeC{};
 
                 int workgroupMappingDim;
             };
@@ -209,6 +228,7 @@ namespace rocRoller
             std::ostream& operator<<(std::ostream& s, MNKBTuple const& x);
             std::ostream& operator<<(std::ostream& s, MKNLTuple const& x);
             std::ostream& operator<<(std::ostream& s, TransposeType const& x);
+            std::ostream& operator<<(std::ostream& s, DataInitialization const& x);
             std::ostream& operator<<(std::ostream& s, TypeParameters const& x);
             std::ostream& operator<<(std::ostream& s, ProblemParameters const& x);
             std::ostream& operator<<(std::ostream& s, SolutionParameters const& x);
@@ -259,5 +279,5 @@ namespace rocRoller::Client::GEMMClient::CLI
      *
      * Asserts that argument is well-formed.
      */
-    bool ParseInitMode(const std::string& arg, DGen::DataInitMode& result);
+    bool ParseInitMode(const std::string& arg, DataInitialization& result);
 }
