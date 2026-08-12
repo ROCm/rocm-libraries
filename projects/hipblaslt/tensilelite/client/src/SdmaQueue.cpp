@@ -63,8 +63,8 @@ namespace TensileLite
 
             // HSA + KFD are process-global; initialize once. GPU agents are
             // captured in HIP-device order via the iterate-agents callback.
-            std::once_flag                gHsaInitFlag;
-            std::vector<hsa_agent_t>      gGpuAgents;
+            std::once_flag           gHsaInitFlag;
+            std::vector<hsa_agent_t> gGpuAgents;
 
             hsa_status_t gpuAgentCb(hsa_agent_t agent, void* data)
             {
@@ -94,9 +94,9 @@ namespace TensileLite
         {
             ensureHsaKfd();
             if(hipDeviceId < 0 || hipDeviceId >= (int)gGpuAgents.size())
-                throw std::runtime_error("sdmaNodeIdForDevice: HIP device " + std::to_string(hipDeviceId)
-                                         + " out of range (" + std::to_string(gGpuAgents.size())
-                                         + " GPU agents)");
+                throw std::runtime_error("sdmaNodeIdForDevice: HIP device "
+                                         + std::to_string(hipDeviceId) + " out of range ("
+                                         + std::to_string(gGpuAgents.size()) + " GPU agents)");
             uint32_t node = 0;
             CHK_HSA(hsa_agent_get_info(gGpuAgents[hipDeviceId], HSA_AGENT_INFO_NODE, &node));
             return node;
@@ -136,15 +136,12 @@ namespace TensileLite
             return 0; // fall back to a general engine if KFD reports no mask
         }
 
-        // -------------------------------------------------------------------
-        // SdmaQueue
-        // -------------------------------------------------------------------
         // Pimpl: holds the hsakmt types kept out of the header (the KFD queue
         // resource + the ring pointer). All KFD resource lifetime lives here.
         struct SdmaQueue::Impl
         {
             void*            queueBuffer = nullptr; // ring (Uncached)
-            HsaQueueResource queue{};               // KFD queue resource
+            HsaQueueResource queue{}; // KFD queue resource
         };
 
         SdmaQueue::SdmaQueue(uint32_t localNode, uint32_t engineId)
@@ -162,15 +159,12 @@ namespace TensileLite
             memFlags.ui32.ExecuteAccess = 1;
             memFlags.ui32.Uncached      = 1;
 
-            // Any failure after the first resource is acquired must release
-            // everything acquired so far: this object is not yet fully
-            // constructed, so ~SdmaQueue() will NOT run. Acquire inside a try,
-            // and on any throw run the same teardown the destructor would, then
-            // rethrow.
+            // ~SdmaQueue() will not run on a throw here, so run the same
+            // teardown on any exception before rethrowing.
             try
             {
-                CHK_KMT(hsaKmtAllocMemory(
-                    localNode, SDMA_QUEUE_SIZE, memFlags, &impl_->queueBuffer));
+                CHK_KMT(
+                    hsaKmtAllocMemory(localNode, SDMA_QUEUE_SIZE, memFlags, &impl_->queueBuffer));
                 CHK_KMT(hsaKmtMapMemoryToGPU(impl_->queueBuffer, SDMA_QUEUE_SIZE, nullptr));
 
                 std::memset(&impl_->queue, 0, sizeof(HsaQueueResource));
@@ -194,8 +188,8 @@ namespace TensileLite
                 // Seed the cursors to the current HARDWARE write pointer so the
                 // first reserved index is contiguous with whatever the queue was
                 // created at (MORI does exactly this).
-                const uint64_t hwWptr = (uint64_t)*(impl_->queue.Queue_write_ptr_aql);
-                const uint64_t hwRptr = (uint64_t)*(impl_->queue.Queue_read_ptr_aql);
+                const uint64_t hwWptr = (uint64_t) * (impl_->queue.Queue_write_ptr_aql);
+                const uint64_t hwRptr = (uint64_t) * (impl_->queue.Queue_read_ptr_aql);
                 hostWptr_             = hwWptr;
 
                 hostHandle_ = SdmaQueueDeviceHandle{
@@ -205,8 +199,7 @@ namespace TensileLite
                     /*doorbell*/ (uint64_t*)impl_->queue.Queue_DoorBell_aql,
                     /*cachedWptr*/ cachedWptr_,
                     /*committedWptr*/ committedWptr_,
-                    // Per-producer private cache SEED (= hw read ptr). Not shared;
-                    // see the long note in SdmaQueue.hpp.
+                    // Per-producer private cache seed, see SdmaQueue.hpp.
                     /*cachedHwReadIndex*/ hwRptr,
                 };
 
@@ -227,9 +220,8 @@ namespace TensileLite
 
         void SdmaQueue::teardown() noexcept
         {
-            // Best-effort resource release, shared by the destructor and the
-            // ctor's failure path. Every step is null/zero guarded so it is safe
-            // to call after a partial construction, and never throws.
+            // Best-effort release, shared by the destructor and the ctor's
+            // failure path; safe to call after a partial construction.
             if(impl_ && impl_->queue.QueueId)
             {
                 (void)hsaKmtDestroyQueue(impl_->queue.QueueId);
@@ -270,23 +262,18 @@ namespace TensileLite
             if(bytes > SDMA_QUEUE_SIZE)
                 throw std::runtime_error("submitPacketHost: packet larger than ring");
 
-            // Byte offset into the ring for the current write cursor. The smoke
-            // path enqueues small packets from an (effectively empty) ring and
-            // never approaches wrap; wrap/NOP-pad handling belongs to the device
-            // producer, so assert no-wrap here rather than silently splitting.
+            // Byte offset into the ring for the current write cursor.
             const uint64_t offset = hostWptr_ % SDMA_QUEUE_SIZE;
             if(offset + bytes > SDMA_QUEUE_SIZE)
                 throw std::runtime_error("submitPacketHost: packet would wrap the ring "
                                          "(host smoke path does not implement wrap)");
 
-            // Ring is uncached -> a plain memcpy is visible to the engine with
-            // no flush. queueBuffer is HostAccess so the CPU can write it.
+            // Ring is Uncached, so this is visible to the engine with no flush.
             std::memcpy(static_cast<uint8_t*>(impl_->queueBuffer) + offset, pkt, bytes);
 
             hostWptr_ += bytes;
 
-            // Publish the new write pointer, then ring the doorbell. Both are
-            // monotonically increasing byte counts.
+            // Publish the new write pointer, then ring the doorbell.
             *(impl_->queue.Queue_write_ptr_aql) = hostWptr_;
             // Ensure the wptr store lands before the doorbell store.
             __atomic_thread_fence(__ATOMIC_SEQ_CST);
@@ -300,16 +287,13 @@ namespace TensileLite
             for(uint64_t i = 0; i < timeoutSpins; ++i)
             {
                 const uint64_t rp
-                    = (uint64_t)*(volatile HSAuint64*)(impl_->queue.Queue_read_ptr_aql);
+                    = (uint64_t) * (volatile HSAuint64*)(impl_->queue.Queue_read_ptr_aql);
                 if(rp >= hostWptr_)
                     return true;
             }
             return false;
         }
 
-        // -------------------------------------------------------------------
-        // SdmaQueueSet
-        // -------------------------------------------------------------------
         SdmaQueueSet::SdmaQueueSet(uint32_t localNode, const std::vector<uint32_t>& targetNodes)
         {
             ensureHsaKfd();
@@ -325,17 +309,14 @@ namespace TensileLite
 
             const size_t bytes = handles.size() * sizeof(SdmaQueueDeviceHandle);
 
-            // Keep the allocation in a local owner until the copy has succeeded.
-            // CHK_HIP throws, and a throw here leaves the constructor incomplete, so
-            // ~SdmaQueueSet never runs: assigning straight into dHandles_ would leak
-            // the device allocation if the copy failed. queues_ is unaffected -- its
-            // unique_ptr elements are destroyed as fully-constructed members.
-            // Ownership transfers to the member only once nothing else can throw.
+            // Hold the allocation in a local owner until the copy succeeds, so a
+            // failing hipMemcpy doesn't leak it (CHK_HIP throws, and a throw here
+            // means ~SdmaQueueSet never runs).
             SdmaQueueDeviceHandle* raw = nullptr;
             CHK_HIP(hipMalloc(&raw, bytes));
             auto hipFreeDeleter = [](SdmaQueueDeviceHandle* p) { (void)hipFree(p); };
-            std::unique_ptr<SdmaQueueDeviceHandle, decltype(hipFreeDeleter)> owned(
-                raw, hipFreeDeleter);
+            std::unique_ptr<SdmaQueueDeviceHandle, decltype(hipFreeDeleter)> owned(raw,
+                                                                                   hipFreeDeleter);
             CHK_HIP(hipMemcpy(owned.get(), handles.data(), bytes, hipMemcpyHostToDevice));
             dHandles_ = owned.release();
         }

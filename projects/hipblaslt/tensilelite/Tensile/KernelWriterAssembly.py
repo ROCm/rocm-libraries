@@ -3426,7 +3426,7 @@ class KernelWriterAssembly(KernelWriter):
     else:
       module.add(DefaultWGM(self, kernel, sgprWGM))
 
-    # Lift the PUSH segment to the front of the dispatch order (D15 Step 2), then
+    # Lift the PUSH segment to the front of the dispatch order, then
     # latch the grid-wide WG count before anything can borrow NumWorkGroups0/1, and
     # resolve &counter3 here so the per-work-group tally in the epilogue is a bare
     # atomic on a register pair rather than a kernarg load it has to wait on.

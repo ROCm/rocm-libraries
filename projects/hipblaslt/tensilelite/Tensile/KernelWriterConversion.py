@@ -243,8 +243,7 @@ class KernelWriterConversion(KernelWriterBase):
       # field so the beta-clear / GSU-conversion reads/writes D and C with the
       # caller-supplied row-major stride instead of assuming M is contiguous.
       # The internal workspace W is always contiguous (strideW0 == 1), so it keeps
-      # the hard-coded 1 like the non-UISD path. (Previously this branch asserted;
-      # scheme D / ROCM-27524 needs the conversion helper to honor initial strides.)
+      # the hard-coded 1 like the non-UISD path.
       lastStrideC = 0
       kStr += "/* UseInitialStridesCD: index-0 stride from kernarg */%s" % self.endLine
       idx0 = self.indexChars[0]

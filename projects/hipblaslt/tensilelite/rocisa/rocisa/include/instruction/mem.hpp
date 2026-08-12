@@ -2231,9 +2231,8 @@ namespace rocisa
     // global_atomic_add dst, vaddr, data, saddr sc0  — 32-bit integer atomic add
     // with return-of-pre-op-value on gfx950 (CDNA4). Return semantics come from
     // the sc0 bit (GLOBALModifiers glc=True), NOT th:TH_ATOMIC_RETURN (which is
-    // gfx1250 syntax). sc1 (slc) selects scope: 0=device, 1=system. For the
-    // fused-A2A counter election we want device scope (slc=False) + return
-    // (glc=True). dst receives the pre-op value.
+    // gfx1250 syntax). sc1 (slc) selects scope: 0=device, 1=system. dst receives
+    // the pre-op value.
     struct GlobalAtomicAddU32 : public GlobalWriteInstruction
     {
         std::shared_ptr<Container>     vaddr;
@@ -2292,11 +2291,10 @@ namespace rocisa
     };
 
     // global_atomic_cmpswap_x2 dst, vaddr, data, saddr sc0  — 64-bit compare-and-
-    // swap with return-of-pre-op-value on gfx950 (CDNA4). Used by the SDMA ring
-    // producer to reserve queue space (ReserveQueueSpace CAS on cachedWptr).
-    // `data` is a 4-dword VGPR: [0:1] = swap value (new), [2:3] = compare value
-    // (expected cur); the pre-op memory value is returned in [0:1], success iff
-    // it equals the compare value.
+    // swap with return-of-pre-op-value on gfx950 (CDNA4). `data` is a 4-dword
+    // VGPR: [0:1] = swap value (new), [2:3] = compare value (expected cur); the
+    // pre-op memory value is returned in [0:1], success iff it equals the
+    // compare value.
     //
     // The type suffix is chosen HERE (isa[0] < 11 ? "_x2" : "_b64"), NOT via the
     // ReadWriteInstruction generic type table: on gfx9 the atomic mnemonic is

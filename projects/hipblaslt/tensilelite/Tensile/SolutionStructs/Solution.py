@@ -1737,8 +1737,8 @@ class Solution(collections.abc.Mapping):
       # The batch dim multiplies the population the same way, but is NOT rejected
       # here: compile time can only see that a batch index is DECLARED, and every
       # fused config declares one (Batched: True -> NumIndicesBatch == 1) while
-      # running extent 1. Rejecting on the declaration produced zero kernels. The
-      # extent is checked host-side instead, in client/src/FusedA2AClient.cpp.
+      # running extent 1. The extent is instead checked host-side, in
+      # client/src/FusedA2AClient.cpp.
       # GSU=-1 defers the factor to calculateAutoGSU at runtime, so a compile-time
       # latch cannot fold it in at all; only GSU=1 makes the product exact.
       if state["GlobalSplitU"] != 1:

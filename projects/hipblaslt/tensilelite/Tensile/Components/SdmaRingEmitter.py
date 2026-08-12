@@ -1,43 +1,34 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 ################################################################################
-# SDMA ring-buffer producer emitter (ROCM-27524, SDMA offload codegen Task 4).
+# SDMA ring-buffer producer emitter.
 #
 # Packet-INDEPENDENT rocisa translation of MORI's anvil device ring skeleton
-# (mori/include/mori/core/transport/sdma/anvil_device.hpp:121-234, the
-# WrapIntoRing / CanWriteUpto / ReserveQueueSpace / placePacket / submitPacket
-# five). It generates the assembly a GPU producer runs to reserve space in a
-# host-created SDMA ring, place already-built packet dwords, and ring the
-# doorbell -- WITHOUT knowing what the packet is. Task 5 builds the COPY_SUBWIN
-# + ATOMIC packet dwords and calls placePacket; Tasks 6/7 wire the whole thing
-# into the GEMM epilogue store path. Those tasks have LANDED: this emitter is
-# live in a real kernel. The caller is GlobalWriteBatch._emitFusedA2ASdmaIssue
-# (the fused-A2A SDMA path), which invokes emitReserveQueueSpace, then
-# emitPlacePacket twice (COPY then ATOMIC), then emitSubmitPacket. Grep for that
-# function name rather than a line number -- earlier revisions of this comment
-# carried line numbers that rotted, which is worse than useless here: the whole
-# point of this paragraph is to stop a triage engineer concluding the emitter is
-# dead, and a stale number lands them somewhere with no call in sight.
-# It is additionally verified out-of-kernel by rendering each method's Module
-# to assembly text and asserting on the instruction sequence + scope bits
+# (mori/include/mori/core/transport/sdma/anvil_device.hpp:121-234): the assembly
+# a GPU producer runs to reserve space in a host-created SDMA ring, place
+# already-built packet dwords, and ring the doorbell -- WITHOUT knowing what the
+# packet is. SdmaPacketEmitter builds the packet dwords and calls placePacket.
+# The caller is GlobalWriteBatch._emitFusedA2ASdmaIssue, which invokes
+# emitReserveQueueSpace, then emitPlacePacket twice (COPY then ATOMIC), then
+# emitSubmitPacket. Verified out-of-kernel by rendering each method's Module to
+# assembly text and asserting on the instruction sequence + scope bits
 # (Tensile/Tests/unit/test_sdma_ring_emitter.py).
 #
 # The device handle it consumes is the W-element SdmaQueueDeviceHandle array
-# produced by Task 2 (client/src/SdmaQueue.hpp) and passed in via the
-# FusedSdmaQueues kernarg (Task 3, intra-segment offset 160). The 7x8-byte
-# field layout below is the cross-task byte contract locked by the
-# static_asserts in that header; do not reorder.
+# (client/src/SdmaQueue.hpp) passed in via the FusedSdmaQueues kernarg
+# (intra-segment offset 160). The 7x8-byte field layout below is the byte
+# contract locked by the static_asserts in that header; do not reorder.
 #
 # gfx950 (CDNA4) scope -> instruction-bit mapping (SC[1:0]+NT, NOT gfx1250
-# scope:/th:). Verified three ways: rocm-ref cache-policies / multi-gpu-
-# communication (SC1=1 => device, SC1=SC0=1 => system), the in-repo fused-A2A
-# handshake (GlobalWriteBatch._emitFusedA2AHandshake), and a live host render
-# (gfx950 asmCaps HasSC0Modifier=1). Encoded through GLOBALModifiers(glc,slc):
+# scope:/th:). Verified three ways: SC1=1 => device, SC1=SC0=1 => system scope
+# semantics, the in-repo fused-A2A handshake (GlobalWriteBatch._emitFusedA2AHandshake),
+# and a live host render (gfx950 asmCaps HasSC0Modifier=1). Encoded through
+# GLOBALModifiers(glc,slc):
 #   AGENT  (ring/wptr/cachedWptr/committedWptr): glc=False slc=True  -> "sc1"
 #   SYSTEM (doorbell store, rptr load)         : glc=True  slc=True  -> "sc0 sc1"
 #   CAS    (cachedWptr reserve, device+return) : glc=True  slc=False -> "sc0"
-# The A2A-local stores also carry sc1 to bypass L2 (Global Constraint 1: gfx950
-# L2 is XCD-local only), which the AGENT mapping already provides.
+# The A2A-local stores also carry sc1 to bypass L2 (gfx950 L2 is XCD-local
+# only), which the AGENT mapping already provides.
 ################################################################################
 
 from rocisa.container import vgpr, sgpr, VCC, GLOBALModifiers
@@ -76,7 +67,7 @@ class SdmaRingEmitter:
     """Packet-independent SDMA ring producer, emitted as rocisa Modules.
 
     One instance is stateless; every method takes the registers it operates on
-    (the caller -- Task 6/7's KernelWriterAssembly -- owns the pools) plus a
+    (the caller -- KernelWriterAssembly -- owns the pools) plus a
     `w` context exposing `.sgprPool` / `.vgprPool` / `.labels`, mirroring the
     GL2PrefetchLoad component. Persistent per-producer state lives in caller-
     owned SGPRs:
@@ -170,10 +161,9 @@ class SdmaRingEmitter:
         `cachedHwReadIdxS` and `tmpPairS`. `resultS` is defaulted to 0 as the very
         first emitted instruction -- before the first READ of those inputs -- so an
         aliasing caller would have its input clobbered rather than merely its output
-        overwritten late. (Before the default was added, every resultS write followed
-        every input read, so aliasing was harmless; this requirement is new.) Both
-        current call sites satisfy it: emitReserveQueueSpace passes three independent
-        sgprPool checkouts plus the caller-persistent cachedHwReadIdx pair.
+        overwritten late. Both current call sites satisfy it: emitReserveQueueSpace
+        passes three independent sgprPool checkouts plus the caller-persistent
+        cachedHwReadIdx pair.
         """
         canLabel  = Label(w.labels.getNameInc("sdma_canwrite_ok"),  "CanWriteUpto: room in ring")
         fullLabel = Label(w.labels.getNameInc("sdma_canwrite_full"), "CanWriteUpto: cache says full -> read rptr")
@@ -368,7 +358,7 @@ class SdmaRingEmitter:
         zero-padding (NOPs) then `numDwords` packet dwords into the ring, all at
         AGENT scope (sc1). Advances pendingWptrS (2 SGPRs) by offset then by the
         packet size. `packetDwordsV` is the base VGPR of the already-built packet
-        (Task 5 fills it); `numDwords` is compile-time.
+        (SdmaPacketEmitter fills it); `numDwords` is compile-time.
 
         Ring addressing is per-dword: base_dword = WrapIntoRing(pending)/4, and
         each store targets queueBuf[base_dword + i]. queueBuf is a uint32_t*, so
@@ -464,7 +454,7 @@ class SdmaRingEmitter:
 
         (1) spin until committedWptr == base (this producer's turn; earlier
             reservations commit in order). Read committedWptr at AGENT scope.
-        (2) Global Constraint 4 publish sequence (any bit wrong => timing hang):
+        (2) Publish sequence (any bit wrong => timing hang):
               store wptr = pending        AGENT  (sc1)
               s_waitcnt vmcnt(0)
               store doorbell = pending    SYSTEM (sc0 sc1)   <-- rings the engine
@@ -475,9 +465,9 @@ class SdmaRingEmitter:
             told to read up to it.
 
         baseS / pendingWptrS are 2-SGPR byte indices from the reserve+place pair.
-        Emitted by a single elected lane (Task 7 gates it), so NO s_barrier here
-        -- MORI's wave_barrier is a C++ compiler fence; in single-lane assembly
-        the s_waitcnt already orders memory and an s_barrier would deadlock.
+        Emitted by a single elected lane, so NO s_barrier here -- MORI's
+        wave_barrier is a C++ compiler fence; in single-lane assembly the
+        s_waitcnt already orders memory and an s_barrier would deadlock.
 
         "A single elected lane" means exactly one, never zero: the spin predicate
         reaches SGPRs through v_readfirstlane_b32, which ignores EXEC. An election
@@ -529,7 +519,7 @@ class SdmaRingEmitter:
             comment="store wptr = pending (AGENT scope, sc1)"))
         w.sgprPool.checkIn(wptrPtrS)
 
-        # --- vmcnt(0): order the wptr store before the doorbell (Global Constraint 4) ---
+        # --- vmcnt(0): order the wptr store before the doorbell ---
         module.add(SWaitCnt(vscnt=0, comment="s_waitcnt vmcnt(0): wptr store visible before doorbell"))
 
         # --- (2b) store doorbell = pending  (SYSTEM, sc0 sc1) -> rings the engine ---

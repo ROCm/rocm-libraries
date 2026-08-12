@@ -1143,7 +1143,7 @@ def fusedA2AWgRemapIndex(wg0, wg1, n0, n1, amTiles):
     return amTiles + u % L, u // L                # local segment
 
 def FusedA2AWgRemap(writer, kernel):
-    """Emit the segment-first workgroup remap (design D15 Step 2).
+    """Emit the segment-first workgroup remap.
 
     Straight-line lowering of fusedA2AWgRemapIndex above; see that docstring for
     the mapping, its bijectivity and its precondition.  Placed in graWorkGroup
