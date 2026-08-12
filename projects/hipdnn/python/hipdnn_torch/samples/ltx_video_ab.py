@@ -43,8 +43,11 @@ import hipdnn_torch  # noqa: E402
 def _add_comfyui_to_path():
     comfy = os.environ.get("COMFYUI_PATH")
     if not comfy:
-        print("COMFYUI_PATH is not set -- point it at a ComfyUI checkout "
-              "(the source of comfy.*).", file=sys.stderr)
+        print(
+            "COMFYUI_PATH is not set -- point it at a ComfyUI checkout "
+            "(the source of comfy.*).",
+            file=sys.stderr,
+        )
         return False
     comfy = os.path.expanduser(comfy)
     if not os.path.isdir(comfy):
@@ -60,7 +63,7 @@ def build_model(comfy_ops, LTXVModel, torch, num_layers, dtype, device):
         in_channels=128,
         cross_attention_dim=2048,
         attention_head_dim=64,
-        num_attention_heads=32,   # inner_dim = 32 * 64 = 2048
+        num_attention_heads=32,  # inner_dim = 32 * 64 = 2048
         caption_channels=4096,
         num_layers=num_layers,
         dtype=dtype,
@@ -73,8 +76,10 @@ def build_model(comfy_ops, LTXVModel, torch, num_layers, dtype, device):
         gen = torch.Generator(device="cpu").manual_seed(1234)
         for p in model.parameters():
             if p.is_floating_point():
-                p.copy_(torch.randn(p.shape, generator=gen, dtype=torch.float32)
-                        .to(p.dtype) * 0.02)
+                p.copy_(
+                    torch.randn(p.shape, generator=gen, dtype=torch.float32).to(p.dtype)
+                    * 0.02
+                )
         for b in model.buffers():
             if b.is_floating_point():
                 b.zero_()
@@ -85,10 +90,12 @@ def build_inputs(torch, frames, hh, ww, ctx_len, dtype, device):
     gen = torch.Generator(device="cpu").manual_seed(7)
 
     def rnd(*shape):
-        return torch.randn(*shape, generator=gen, dtype=torch.float32).to(dtype).to(device)
+        return (
+            torch.randn(*shape, generator=gen, dtype=torch.float32).to(dtype).to(device)
+        )
 
-    x = rnd(1, 128, frames, hh, ww)      # latent video [B,C,F,H,W]
-    context = rnd(1, ctx_len, 4096)      # text embeddings
+    x = rnd(1, 128, frames, hh, ww)  # latent video [B,C,F,H,W]
+    context = rnd(1, ctx_len, 4096)  # text embeddings
     timestep = torch.full((1,), 0.5, dtype=torch.float32, device=device)
     return x, timestep, context
 
@@ -115,7 +122,10 @@ def device_time_census(torch, model, x, timestep, context) -> str:
     F = torch.nn.functional
     reals = {
         "linear (GEMM)": ("linear", F.linear),
-        "attention (SDPA)": ("scaled_dot_product_attention", F.scaled_dot_product_attention),
+        "attention (SDPA)": (
+            "scaled_dot_product_attention",
+            F.scaled_dot_product_attention,
+        ),
         "rms_norm": ("rms_norm", F.rms_norm),
         "layer_norm": ("layer_norm", F.layer_norm),
         "gelu": ("gelu", F.gelu),
@@ -132,6 +142,7 @@ def device_time_census(torch, model, x, timestep, context) -> str:
             e.record()
             events.append((cat, s, e))
             return out
+
         return wrapper
 
     with torch.no_grad():
@@ -153,23 +164,35 @@ def device_time_census(torch, model, x, timestep, context) -> str:
     grand = sum(totals.values()) or 1.0
     lines = ["  category            calls   dev_ms   share"]
     for cat in sorted(totals, key=lambda k: -totals[k]):
-        lines.append(f"  {cat:18s}  {calls[cat]:5d}  {totals[cat]:7.3f}  "
-                     f"{100 * totals[cat] / grand:5.1f}%")
-    lines.append(f"  {'(sum of wrapped)':18s}  {sum(calls.values()):5d}  {grand:7.3f}  100.0%")
+        lines.append(
+            f"  {cat:18s}  {calls[cat]:5d}  {totals[cat]:7.3f}  "
+            f"{100 * totals[cat] / grand:5.1f}%"
+        )
+    lines.append(
+        f"  {'(sum of wrapped)':18s}  {sum(calls.values()):5d}  {grand:7.3f}  100.0%"
+    )
     return "\n".join(lines)
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--ops", default="linear,rmsnorm,sdpa",
-                    help="comma-separated subset of linear,rmsnorm,sdpa to route")
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    ap.add_argument(
+        "--ops",
+        default="linear,rmsnorm,sdpa,layernorm,silu,gelu,conv2d",
+        help="comma-separated subset of "
+        "linear,rmsnorm,sdpa,layernorm,silu,gelu,conv2d to route",
+    )
     args = ap.parse_args()
     ops = [o.strip() for o in args.ops.split(",") if o.strip()]
 
     if not hipdnn_torch.provider_ready():
-        print("provider/torch not ready -- set HIPDNN_TORCH_PROVIDER_SO (see "
-              "../README.md).", file=sys.stderr)
+        print(
+            "provider/torch not ready -- set HIPDNN_TORCH_PROVIDER_SO (see "
+            "../README.md).",
+            file=sys.stderr,
+        )
         return 1
     if not _add_comfyui_to_path():
         return 1
@@ -189,8 +212,10 @@ def main() -> int:
     iters = int(os.environ.get("LTX_ITERS", "10"))
 
     print(f"device  = {torch.cuda.get_device_name(0)}")
-    print(f"config  = layers={num_layers} tokens={frames*hh*ww} (F{frames}xH{hh}xW{ww}) "
-          f"heads=32 head_dim=64 ctx_len={ctx_len} dtype={dtype}")
+    print(
+        f"config  = layers={num_layers} tokens={frames*hh*ww} (F{frames}xH{hh}xW{ww}) "
+        f"heads=32 head_dim=64 ctx_len={ctx_len} dtype={dtype}"
+    )
     print(f"routing = {ops}")
     print()
 
@@ -210,8 +235,10 @@ def main() -> int:
     max_err = float((y_native - y_over).abs().max().item())
     denom = float(y_native.abs().max().item()) or 1.0
     rel = max_err / denom
-    print(f"correctness native-vs-injected: {'OK ' if rel < 8e-2 else 'BAD'} "
-          f"max_abs_err={max_err:.5f} rel={rel:.4f} (out|max|={denom:.4f})")
+    print(
+        f"correctness native-vs-injected: {'OK ' if rel < 8e-2 else 'BAD'} "
+        f"max_abs_err={max_err:.5f} rel={rel:.4f} (out|max|={denom:.4f})"
+    )
     print()
     print(hipdnn_torch.report(ops))
     print()
@@ -226,8 +253,10 @@ def main() -> int:
     print(f"A/B full-forward wall-clock (warmup={warmup} iters={iters}):")
     print(f"  native   = {native_ms:8.3f} ms/forward")
     print(f"  injected = {over_ms:8.3f} ms/forward   speedup={speedup:5.3f}x")
-    print("  (reference kernels are correctness-first; a full-forward speedup is "
-          "NOT expected yet)")
+    print(
+        "  (reference kernels are correctness-first; a full-forward speedup is "
+        "NOT expected yet)"
+    )
     print()
 
     # ---- device-time census ---------------------------------------------------
