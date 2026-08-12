@@ -415,7 +415,7 @@ TYPED_TEST(TestGpuSdpaFwdPlain, CausalTopLeft)
 namespace
 {
 
-struct SdpaMaskCartesianParams
+struct SdpaMaskParams
 {
     bool topLeftAlignment;
     bool skvSmaller; // Skv < Sq when true, Skv > Sq when false.
@@ -425,7 +425,7 @@ struct SdpaMaskCartesianParams
 };
 
 template <typename T>
-void runMaskCartesianCase(const SdpaMaskCartesianParams& params)
+void runMaskCartesianCase(const SdpaMaskParams& params)
 {
     const int64_t batch = 1;
     const int64_t numHeads = 2;
@@ -452,9 +452,9 @@ void runMaskCartesianCase(const SdpaMaskCartesianParams& params)
                                        params.topLeftAlignment);
 }
 
-const std::vector<SdpaMaskCartesianParams>& maskCartesianCases()
+const std::vector<SdpaMaskParams>& maskCartesianCases()
 {
-    static const std::vector<SdpaMaskCartesianParams> s_cases = {
+    static const std::vector<SdpaMaskParams> s_cases = {
         {/*topLeft=*/true, /*skvSmaller=*/true, -1, 0, "CausalTopLeftSmallerSkv"},
         {/*topLeft=*/true, /*skvSmaller=*/false, -1, 0, "CausalTopLeftLargerSkv"},
         {/*topLeft=*/false, /*skvSmaller=*/true, -1, 0, "CausalBottomRightSmallerSkv"},
@@ -467,7 +467,7 @@ const std::vector<SdpaMaskCartesianParams>& maskCartesianCases()
     return s_cases;
 }
 
-std::string maskCartesianName(const ::testing::TestParamInfo<SdpaMaskCartesianParams>& info)
+std::string maskCartesianName(const ::testing::TestParamInfo<SdpaMaskParams>& info)
 {
     return info.param.name;
 }
@@ -475,7 +475,7 @@ std::string maskCartesianName(const ::testing::TestParamInfo<SdpaMaskCartesianPa
 } // namespace
 
 template <typename T>
-class TestGpuSdpaFwdMaskCartesianBase : public ::testing::TestWithParam<SdpaMaskCartesianParams>
+class TestGpuSdpaFwdMaskCartesianBase : public ::testing::TestWithParam<SdpaMaskParams>
 {
 };
 
