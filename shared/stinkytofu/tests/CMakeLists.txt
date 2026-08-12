@@ -53,6 +53,7 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/RedundantMovEliminationPassTest.cpp
     unit/asm/OptimizationPipelineTest.cpp
     unit/asm/ScopeAdaptorTest.cpp
+    unit/asm/ModuleAdaptorsTest.cpp
     unit/asm/PeepholeOptimizationPassTest.cpp
     unit/asm/AccumulateInstructionSizePassTest.cpp
     unit/asm/SwInstructionPrefetchRelStaticPassTest.cpp
