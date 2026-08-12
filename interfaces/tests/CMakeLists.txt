@@ -162,6 +162,28 @@ if(UNIX AND NOT APPLE)
     COMMAND abi03_interpose_test positive)
   add_test(NAME rocm_interfaces.abi03_interpose_hazard
     COMMAND abi03_interpose_test negative)
+
+  # Linked-consumer interposition proof: a consumer whose relocation carries a
+  # versioned undefined reference (rocblas_sgemm@ROCBLAS_ABI_7) binds to the
+  # matching major even though an ABI_6 provider is NEEDED first and therefore
+  # earlier in the search scope. The plain control shares the identical link
+  # line and differs only by the single .symver directive: it is interposed by
+  # the first-NEEDED ABI_6 provider. One directive flips the bound major 7<->6,
+  # so the pair is discriminating, not vacuous.
+  add_executable(abi03_linked_consumer_versioned
+    abi03_linked_consumer_versioned.cpp)
+  target_link_libraries(abi03_linked_consumer_versioned
+    PRIVATE abi03_provA abi03_provB)
+
+  add_executable(abi03_linked_consumer_plain
+    abi03_linked_consumer_plain.cpp)
+  target_link_libraries(abi03_linked_consumer_plain
+    PRIVATE abi03_provA abi03_provB)
+
+  add_test(NAME rocm_interfaces.abi03_linked_consumer_versioned_binds
+    COMMAND abi03_linked_consumer_versioned)
+  add_test(NAME rocm_interfaces.abi03_linked_consumer_plain_interposed
+    COMMAND abi03_linked_consumer_plain)
 endif()
 
 if(UNIX AND NOT APPLE)
