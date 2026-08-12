@@ -35,6 +35,8 @@ cmake --install <build_dir> --component tests
 | Kernel selection or data types | `ctest -L '^standard$'` | `<prefix>/bin/hiptensor` | Yes |
 | Performance-sensitive path | `ctest -L '^bench$' -V -O bench.log` | `<prefix>/bin/hiptensor` | Yes |
 
+> **Run in parallel:** add `-j$(nproc)` (or `-j <N>`) to any validation run — e.g. `ctest -L '^standard$' -j$(nproc)` — to run test binaries concurrently. Do **not** parallelize the `bench` tier: concurrent runs contend for the GPU and corrupt timing measurements.
+
 **3. Add the right kind of test.** See [Choosing the Right Test Type](#choosing-the-right-test-type).
 
 **4. Open the PR** targeting `develop`. Standard-tier tests (`-L '^standard$'`) are the integration merge gate.
@@ -47,7 +49,7 @@ cmake --install <build_dir> --component tests
 
 **Purpose:** Validate hardware-independent logic without dispatching a GPU kernel.
 
-Unit tests live in `test/00_unit/` and are built with the `add_hiptensor_unit_test()` CMake function, which links against `hiptensor::hiptensor` and GoogleTest but does **not** require a configured GPU to run the tests themselves. Five test binaries are currently built:
+Unit tests live in `test/00_unit/` and are built with the `add_hiptensor_unit_test()` CMake function, which links against `hiptensor::hiptensor` and GoogleTest. Most do **not** require a configured GPU to run (the exception is `plan_lifetime_test`, noted below). The test binaries are:
 
 | Binary | What it tests |
 |---|---|
@@ -56,7 +58,7 @@ Unit tests live in `test/00_unit/` and are built with the `add_hiptensor_unit_te
 | `elementwise_op_test` | CPU-side elementwise operator type traits and identity/scale op correctness |
 | `util_test` | Utility helpers (type conversion, index math, stride calculation) |
 | `hiptensor_options_test` | CLI/env option parsing (`--hot_runs`, `--cold_runs`, `-y`, `HIPTENSOR_*` env vars) |
-| `plan_lifetime_test` | Plan object lifetime: using a permutation plan after its descriptor or preference object is destroyed (requires HIP device init but no kernel launch) |
+| `plan_lifetime_test` | Plan object lifetime: using a permutation plan after its descriptor or preference object is destroyed. Despite living in `00_unit/`, it allocates device memory and launches a real permute kernel, so it **requires a GPU** and is registered as a device tier test |
 
 > `interface_test` exists in the source tree but is commented out in `test/00_unit/CMakeLists.txt` — it is not currently built.
 
@@ -69,6 +71,7 @@ Unit tests live in `test/00_unit/` and are built with the `add_hiptensor_unit_te
 ```bash
 # From the build tree (no install needed):
 ctest                          # runs all tests including unit tests
+ctest -j$(nproc)               # same, running test binaries in parallel
 ./bin/logger_test              # run one unit test directly
 ./bin/hiptensor_options_test
 ...
@@ -103,20 +106,21 @@ Integration tests are device tests. They require a physical AMD GPU matching the
 | Contraction — complex bilinear/scale | `complex_{bilinear,scale}_contraction_test_m{1-6}...` | CF32, CF64 |
 | Contraction — trinary | `trinary_bilinear_contraction_test`, `trinary_scale_contraction_test` | Three-tensor contractions |
 | Contraction — unary ops | `bilinear_contraction_with_unary_ops_test`, `scale_contraction_with_unary_ops_test` | Fused unary activation ops |
-| Plan cache | `plan_cache_contraction_test` | Cache write/read round-trip on device |
+| Plan cache | `plan_cache_test` | Cache write/read round-trip on device |
+| Plan lifetime | `plan_lifetime_test` | Permute plan reuse after descriptor/preference destruction (launches a kernel) |
 | Contraction mode | `contraction_mode_test` | CPU-side mode validation (host test) |
 | Elementwise — permute | `rank{2-6}_elementwise_permute_test` | All rank/type combinations |
 | Elementwise — binary op | `rank{2-6}_elementwise_binary_op_test` | Binary elementwise ops |
 | Elementwise — trinary op | `rank{2-6}_elementwise_trinary_op_test` | Trinary elementwise ops |
-| Elementwise — CPU impl | `elementwise_cpu_test`, `elementwise_{binary,trinary}_cpu_impl_test` | CPU reference validation (host tests) |
+| Elementwise — CPU impl | `elementwise_cpu_test` | CPU reference validation (host test; compiles the `elementwise_cpu_impl`, `elementwise_binary_cpu_impl`, and `elementwise_trinary_cpu_impl` sources into one binary) |
 | Reduction | `rank{1-6}_reduction_test` | All rank/type combinations |
 | Reduction — CPU impl | `reduction_cpu_impl_test` | CPU reference validation (host test) |
 
 All device tests compare GPU results against a CPU reference implementation using a per-type tolerance.
 
-**GPU-required tests:** All `bilinear_contraction_test_*`, `scale_contraction_test_*`, `complex_*`, `trinary_*`, `*_unary_ops_test`, `rank*_elementwise_*`, `rank*_reduction_test`, `plan_cache_contraction_test`.
+**GPU-required tests:** All `bilinear_contraction_test_*`, `scale_contraction_test_*`, `complex_*`, `trinary_*`, `*_unary_ops_test`, `rank*_elementwise_*`, `rank*_reduction_test`, `plan_cache_test`, `plan_lifetime_test`.
 
-**CPU-only (host) tests:** `contraction_mode_test`, `elementwise_cpu_test`, `elementwise_binary_cpu_impl_test`, `elementwise_trinary_cpu_impl_test`, `reduction_cpu_impl_test`.
+**CPU-only (host) tests:** `contraction_mode_test`, `elementwise_cpu_test`, `reduction_cpu_impl_test`, and the `00_unit/` binaries (`logger_test`, `yaml_test`, `elementwise_op_test`, `util_test`, `hiptensor_options_test`).
 
 **Test tiers (CTest labels):**
 
@@ -135,6 +139,8 @@ Tiers are applied to the installed tree only (`<prefix>/bin/hiptensor/CTestTestf
 > See [test_categories.yaml](test_categories.yaml) for the specific timeouts on each category.
 
 > **Anchored label selection:** Use `-L '^quick$'` not `-L 'quick'` — an unanchored regex matches `ffm-quick` as well.
+
+> **Parallel runs:** append `-j$(nproc)` to any tier command to run test binaries concurrently, e.g. `ctest -L '^standard$' -j$(nproc)`. The `bench` tier is the exception — run it serially so concurrent binaries do not contend for the GPU and skew timings.
 
 **Test shape scale:** The `quick` tier runs a minimal representative shape per rank (e.g., one small tensor shape). The `standard` tier adds more data-type coverage. `comprehensive` and `full` expand both type coverage and tensor shapes. Bench configs use larger, production-representative shapes (e.g., `[256,20,128,128]`) with 5 hot runs and 1 cold run for stable timing.
 
@@ -208,7 +214,7 @@ Tiers are applied to the installed tree only (`<prefix>/bin/hiptensor/CTestTestf
 | `elementwise_op_test` | Trusted gate | CPU-only, reliable |
 | `util_test` | Trusted gate | CPU-only, reliable |
 | `hiptensor_options_test` | Trusted gate | CPU-only, reliable |
-| `plan_lifetime_test` | Trusted gate | Requires HIP init but no kernel |
+| `plan_lifetime_test` | Trusted gate | Device test (launches a permute kernel); runs on GPU runners |
 | `*standard*` device tests | Trusted gate | Run on dedicated GPU runners |
 | `*comprehensive*` / `*full*` | Informational | Nightly only; not PR gates |
 | `*ffm-quick*` | Trusted gate | On FFM-equipped queues |
