@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (c) 2021-2022 Advanced Micro Devices, Inc.
+ * Copyright (c) 2021-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -60,4 +60,8 @@
 
 /*! \defgroup types_module SPARSELt Types
  *  \brief This module holds all sparselt types.
+ */
+
+/*! \defgroup aux_module SPARSELt Auxiliary functions
+ *  \brief Initializes hipSPARSELt for the current HIP device.
  */

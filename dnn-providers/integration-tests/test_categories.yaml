@@ -42,6 +42,12 @@ test_categories:
       - "Standard*"
     exclude:
       - "*DISABLED*"
+      # Standard/TestGpuRMSNormFwdRef{4D,5D}Bfp16.MatchesCpuRef fail on gfx950
+      # with bf16 output rounding exceeding absolute tolerance for several
+      # large 4D/5D shapes (NCHW/NHWC/NDHWC). Tracked in
+      # https://github.com/ROCm/rocm-libraries/issues/10560.
+      - "Standard/TestGpuRMSNormFwdRef4DBfp16.MatchesCpuRef*"
+      - "Standard/TestGpuRMSNormFwdRef5DBfp16.MatchesCpuRef*"
     labels:
       - "standard"
       # - "comprehensive"  # disabled: see header comment
