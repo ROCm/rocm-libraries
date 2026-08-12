@@ -238,7 +238,7 @@ jobs:
       therock_ref: ${{ inputs.test_therock_ref }}
       projects_to_test: ${{ inputs.projects_to_test }}
       amdgpu_families: ${{ inputs.amdgpu_families }}
-      test_runs_on: codecov-poc
+      test_runs_on: ${{ inputs.test_runs_on }}
       platform: "linux"
       test_type: ${{ inputs.test_type }}
       coverage_enabled: true
