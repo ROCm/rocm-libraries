@@ -12,7 +12,7 @@ import types
 
 import pytest
 
-import Tensile.BenchmarkProblems as BP
+import tensilelite.BenchmarkProblems as BP
 
 pytestmark = pytest.mark.unit
 
@@ -246,7 +246,7 @@ class TestGenerateSingleSolution:
 
 class TestGenerateGaSolutions:
     def test_valid_solutions_appended(self, monkeypatch):
-        import Tensile.backends.ductile_backend as dbmod
+        import tensilelite.backends.ductile_backend as dbmod
 
         monkeypatch.setattr(
             dbmod,
@@ -268,7 +268,7 @@ class TestGenerateGaSolutions:
         assert all(r is not None for r in result)
 
     def test_invalid_candidates_become_none(self, monkeypatch):
-        import Tensile.backends.ductile_backend as dbmod
+        import tensilelite.backends.ductile_backend as dbmod
 
         monkeypatch.setattr(
             dbmod,
@@ -288,7 +288,7 @@ class TestGenerateGaSolutions:
         assert result == [None, None]
 
     def test_duplicate_solutions_become_none(self, monkeypatch):
-        import Tensile.backends.ductile_backend as dbmod
+        import tensilelite.backends.ductile_backend as dbmod
 
         shared_sol = _ValidSolution()
         call_count = [0]
@@ -314,7 +314,7 @@ class TestGenerateGaSolutions:
         assert result[1] is None
 
     def test_empty_individuals_returns_empty_list(self, monkeypatch):
-        import Tensile.backends.ductile_backend as dbmod
+        import tensilelite.backends.ductile_backend as dbmod
 
         result = dbmod._generate_ga_solutions(
             types.SimpleNamespace(state={}),
@@ -512,7 +512,7 @@ def test_main_invalid_backend_type_exits(monkeypatch, tmp_path):
     # Monkeypatch printExit in both BP and backends.config modules
     exit_func = lambda msg: (_ for _ in ()).throw(RuntimeError(msg))
     monkeypatch.setattr(BP, "printExit", exit_func)
-    from Tensile.backends import config as backend_config_module
+    from tensilelite.backends import config as backend_config_module
     monkeypatch.setattr(backend_config_module, "printExit", exit_func)
 
     with pytest.raises(RuntimeError, match="'Backend' must be a dictionary"):
@@ -570,7 +570,7 @@ def test_main_backend_config_invalid_type_exits(monkeypatch, tmp_path):
     # Monkeypatch printExit in both BP and backends.config modules
     exit_func = lambda msg: (_ for _ in ()).throw(RuntimeError(msg))
     monkeypatch.setattr(BP, "printExit", exit_func)
-    from Tensile.backends import config as backend_config_module
+    from tensilelite.backends import config as backend_config_module
     monkeypatch.setattr(backend_config_module, "printExit", exit_func)
 
     with pytest.raises(RuntimeError, match="'Backend.Config' must be a dictionary"):

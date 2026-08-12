@@ -4,7 +4,7 @@
 ################################################################################
 
 """Mutation-targeted characterization tests for
-``Tensile.Common.Utilities.locateExe``.
+``tensilelite.Common.Utilities.locateExe``.
 
 These tests pin the current behavior of the PATH lookup separator and the
 "not found" error message, distinguishing the original implementation from
@@ -16,7 +16,7 @@ import os
 
 import pytest
 
-U = importlib.import_module("Tensile.Common.Utilities")
+U = importlib.import_module("tensilelite.Common.Utilities")
 
 pytestmark = pytest.mark.unit
 

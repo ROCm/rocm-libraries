@@ -4,7 +4,7 @@
 ################################################################################
 
 """Mutation-targeted characterization tests for
-``Tensile.Common.Utilities.state_key_ordering``.
+``tensilelite.Common.Utilities.state_key_ordering``.
 
 ``state_key_ordering`` is a class decorator that installs ``__lt__`` and
 ``__eq__`` based on a tuple of the attributes named in ``cls.StateKeys`` and
@@ -19,7 +19,7 @@ import importlib
 
 import pytest
 
-U = importlib.import_module("Tensile.Common.Utilities")
+U = importlib.import_module("tensilelite.Common.Utilities")
 state_key_ordering = U.state_key_ordering
 
 pytestmark = pytest.mark.unit

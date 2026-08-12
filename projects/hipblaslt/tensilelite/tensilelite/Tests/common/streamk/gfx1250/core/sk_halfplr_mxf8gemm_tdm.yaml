@@ -5,7 +5,7 @@
 # (StinkyTofu) on gfx1250, MX-F8 (F8SS, MXBlock32) TN GEMM with TDM.
 #
 # This mirrors the non-StreamK HalfPLR MX-F8 coverage
-# (Tensile/Tests/common/gemm/gfx12/mxf8_gfx1250.yaml and tdm_split_gfx1250.yaml,
+# (tensilelite/Tests/common/gemm/gfx12/mxf8_gfx1250.yaml and tdm_split_gfx1250.yaml,
 # both HalfPLR + TDMInst=3 + MXF8 Block32) onto StreamK=3, intersected with the
 # StreamK+TDM+HalfPLR constraints: SIA=4 (required for HalfPLR on StreamK),
 # PrefetchAcrossPersistent=0, UseSubtileImpl=0, TDMInst=3, PGR in (1,2), PLR=1,

@@ -1,11 +1,11 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Mutation-targeted tests for ``Tensile.Common.Utilities.isSubtileMultiDU``."""
+"""Mutation-targeted tests for ``tensilelite.Common.Utilities.isSubtileMultiDU``."""
 
 import pytest
 
-from Tensile.Common.Utilities import isSubtileMultiDU
+from tensilelite.Common.Utilities import isSubtileMultiDU
 
 pytestmark = pytest.mark.unit
 

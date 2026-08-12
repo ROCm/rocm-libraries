@@ -4,7 +4,7 @@
 ################################################################################
 
 """Mutation-targeted characterization tests for
-``Tensile.Common.Utilities.SpinnyThing.finish``.
+``tensilelite.Common.Utilities.SpinnyThing.finish``.
 
 ``finish`` writes exactly ``"\\b*\\n"`` to stdout (then flushes): a backspace to
 erase the last spinner char, a ``*`` to mark completion, and a newline. These
@@ -16,7 +16,7 @@ import importlib
 
 import pytest
 
-U = importlib.import_module("Tensile.Common.Utilities")
+U = importlib.import_module("tensilelite.Common.Utilities")
 
 pytestmark = pytest.mark.unit
 

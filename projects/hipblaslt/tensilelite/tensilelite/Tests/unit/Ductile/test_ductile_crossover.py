@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Extended tests for Tensile.ductile.core.crossover — targeting uncovered paths.
+"""Extended tests for tensilelite.ductile.core.crossover — targeting uncovered paths.
 
 Covers: HalfUniform (hux), SinglePoint (spx), TwoPoint (tpx) operators; pairing
 modes diverse / fitness / rank; prob=0 (skip crossover, identical parents); identical
@@ -12,8 +12,8 @@ __repr__; Crossover.get() registry.
 import numpy as np
 import pytest
 
-from Tensile.ductile.core import Crossover
-from Tensile.ductile.core.population import Individual, Population
+from tensilelite.ductile.core import Crossover
+from tensilelite.ductile.core.population import Individual, Population
 
 pytestmark = pytest.mark.unit
 
@@ -195,7 +195,7 @@ class TestCrossoverRegistry:
 
 class TestCrossoverContracts:
     def test_selection_and_crossover_emit_expected_sizes_and_schema(self):
-        from Tensile.ductile.core import Selection
+        from tensilelite.ductile.core import Selection
 
         pop = Population(
             [

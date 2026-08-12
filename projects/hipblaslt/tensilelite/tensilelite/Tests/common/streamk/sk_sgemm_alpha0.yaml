@@ -101,7 +101,7 @@ BenchmarkProblems:
         # - NonTemporalC: [0, 3]
         # - NonTemporalD: [0, 3]
         # - TransposeLDS: [0, 1]
-        # - VgprForLocalReadPacking: [False, True] # Diff from Tensile
+        # - VgprForLocalReadPacking: [False, True] # Diff from tensilelite
         # - ClusterLocalRead: [False, True]
         # - VectorAtomicWidth: [2]
         #- OptPreLoopVmcnt: [False, True]

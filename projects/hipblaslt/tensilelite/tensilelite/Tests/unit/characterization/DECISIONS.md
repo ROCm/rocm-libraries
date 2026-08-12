@@ -94,10 +94,10 @@ out-of-scope codegen set.
 ## D5 — recurring submodule-shadowing gotcha
 **Observation (not a fork, but recorded):** several `Tensile` packages re-export
 a class that shadows a same-named submodule attribute, so
-`import Tensile.X.Foo as F` binds the *class*, not the module. Hit for
+`import tensilelite.X.Foo as F` binds the *class*, not the module. Hit for
 `SolutionStructs.Solution`, `Component` (LocalRead), and `Common.Parallel`
 (joblib `Parallel`). **Standard fix applied everywhere:**
-`F = importlib.import_module("Tensile.X.Foo")`.
+`F = importlib.import_module("tensilelite.X.Foo")`.
 
 ## D6 — `KernelHelperNaming.py`: cover the naming half, accept <95%
 **Decision:** Characterize the pure naming/orchestration surface
@@ -272,7 +272,7 @@ wrong on the conclusion; this records the corrected reasoning and the outcome.
 
 **What was removed:**
 - `Tensile/TensileClientConfig.py` (the module)
-- `Tensile/bin/TensileClientConfig` (the launcher)
+- `tensilelite/bin/TensileClientConfig` (the launcher)
 - the `"TensileClientConfig"` entry in `cmake/tensilelite_auto_build.cmake`
   `VALID_BINS`
 
@@ -280,7 +280,7 @@ wrong on the conclusion; this records the corrected reasoning and the outcome.
 - *No in-tree caller.* Following `invoke` / the build / QuickTune / the tuning
   docs, the client-config writing done during tuning goes through
   `ClientWriter.writeClientConfig` / `writeClientConfigIni` (driven by
-  `bin/Tensile` → `Tensile.py` → `BenchmarkProblems.py`). Nothing calls the
+  `bin/Tensile` → `tensilelite.py` → `BenchmarkProblems.py`). Nothing calls the
   standalone `TensileClientConfig.main()` / `bin/TensileClientConfig`. The two
   share the "ClientConfig" name but are different code paths — the source of the
   earlier "it's used in tuning" confusion.
@@ -288,17 +288,17 @@ wrong on the conclusion; this records the corrected reasoning and the outcome.
   `bin/TensileCreateLibrary`; `[project.scripts]` registers only `Tensile`.
 - *Unimportable anyway.* `TensileClientConfig.py:29` still did
   `from .Common import ... assignGlobalParameters, restoreDefaultGlobalParameters`,
-  the pre-refactor flat path. After `Tensile.Common` became a package those
+  the pre-refactor flat path. After `tensilelite.Common` became a package those
   funcs live in `Common/GlobalParameters.py` and are not re-exported by
   `Common/__init__.py` (which only star-imports Constants/Parallel/Types/
   Utilities), so the import raised `ImportError`. (Sibling entrypoints —
-  `Tensile.py`, `GenerateSummations`, `TensileUpdateLibrary`,
+  `tensilelite.py`, `GenerateSummations`, `TensileUpdateLibrary`,
   `TensileRetuneLibrary` — were migrated to `.Common.GlobalParameters`; this one
   was missed.) A second latent break existed too: `:176` called
   `assignGlobalParameters(globalParams)` with one arg against the current
   two-arg `(config, isaInfoMap)` signature.
 
-**Validation:** full `-m unit` (`Tensile/Tests/unit`, in `tensilelite-char:repro`)
+**Validation:** full `-m unit` (`tensilelite/Tests/unit`, in `tensilelite-char:repro`)
 = **2466 passed / 201 skipped both before and after** the removal — no
 regression. This is a real source deletion (departs from the ADD-ONLY rule of
 the characterization pass) committed separately as a cleanup, at the user's
@@ -346,26 +346,26 @@ characterization assertion can distinguish mutant from original:
 
 **M2 — accepted `# pragma: no mutate` (expanded mutation run).** These
 equivalent source forms are fenced so mutmut does not keep reporting them:
-- `Tensile.Common.ValidParameters.checkSpaceFillAlgoIsValid` — the
+- `tensilelite.Common.ValidParameters.checkSpaceFillAlgoIsValid` — the
   `range(0, maxOrderID + 1)` membership check carries `# pragma: no mutate`
   because `range(0, n)` and `range(n)` produce the same values; the explicit
   lower bound documents the valid OrderID interval.
-- `Tensile.Common.ValidParameters.checkSpaceFillAlgoWGMIsValid` — the
+- `tensilelite.Common.ValidParameters.checkSpaceFillAlgoWGMIsValid` — the
   `range(0, 256)` membership check carries `# pragma: no mutate` because
   `range(0, n)` and `range(n)` produce the same values; the explicit lower bound
   documents the half-open GridDim interval `[0, 256)`.
 
 **M3 — accepted equivalent mutants (expanded mutation run).** These survivors
 are behaviorally equivalent on the specific public surface under test:
-- `Tensile.TensileLogic.ValidWorkGroupMappingXCC.x__cu_count_from_path__mutmut_9` —
+- `tensilelite.TensileLogic.ValidWorkGroupMappingXCC.x__cu_count_from_path__mutmut_9` —
   changing `cu` to `CU` inside the regex literal is equivalent because the search
   uses `re.IGNORECASE`.
 
 Two former survivors are intentionally no longer accepted equivalents:
-`Tensile.TensileLogic.ValidWorkGroupMappingXCC.x__validateWorkGroupMappingXCC__mutmut_14`
+`tensilelite.TensileLogic.ValidWorkGroupMappingXCC.x__validateWorkGroupMappingXCC__mutmut_14`
 is avoided by making the missing-key / `-1` sentinel branch explicit before
 reading the fixed `WorkGroupMappingXCC` value, and
-`Tensile.Common.Utilities.xǁSpinnyThingǁincrement__mutmut_1` is killable because
+`tensilelite.Common.Utilities.xǁSpinnyThingǁincrement__mutmut_1` is killable because
 `SpinnyThing.increment` now uses its `value` parameter to advance by caller
 selected steps.
 
@@ -374,10 +374,10 @@ extended past the original five files to add `Common/DataType.py`,
 `Common/Types.py`, `Common/ValidParameters.py`, `SolutionStructs/Naming.py`, and
 `SolutionStructs/Utilities.py`, with matching characterization directories added
 to `pytest_add_cli_args_test_selection`. Source-path mapping for the widened slice:
-DataType → `Tensile/Common/DataType.py`; CommonTypes → `Tensile/Common/Types.py`;
-ValidParameters → `Tensile/Common/ValidParameters.py`; Naming →
-`Tensile/SolutionStructs/Naming.py`; SolutionStructsUtils →
-`Tensile/SolutionStructs/Utilities.py`.
+DataType → `tensilelite/Common/DataType.py`; CommonTypes → `tensilelite/Common/Types.py`;
+ValidParameters → `tensilelite/Common/ValidParameters.py`; Naming →
+`tensilelite/SolutionStructs/Naming.py`; SolutionStructsUtils →
+`tensilelite/SolutionStructs/Utilities.py`.
 
 **M5 — SolutionStructs Naming/Utilities mutation outcome.** `Naming.py`: 455
 generated, 453 killed, 2 accepted equivalents, 0 no-test mutants → 100% covered
@@ -388,7 +388,7 @@ mutmut enumerates every source-line mutation; these scores exclude only the
 explicit no-test entries and accepted equivalents.
 
 **Pinned equivalent (Naming).**
-`Tensile.SolutionStructs.Naming.x__getName__mutmut_{70,71}` changes the masked
+`tensilelite.SolutionStructs.Naming.x__getName__mutmut_{70,71}` changes the masked
 `state["GlobalSplitU"] = "M"` expression at `Naming.py:172`; every string form
 reaches the same pinned string-versus-integer `TypeError` before it can affect a
 name. [`AIHPBLAS-4297`](https://amd-hub.atlassian.net/browse/AIHPBLAS-4297)

@@ -1,5 +1,5 @@
 ################################################################################
-# Characterization tests for Tensile.GenerateSummations — summation model fitting.
+# Characterization tests for tensilelite.GenerateSummations — summation model fitting.
 #
 # ADD-ONLY. GenerateSummations.py exports createLibraryForBenchmark (lines 47–63),
 # a subprocess wrapper, and GenerateSummations (lines 65–188), a high-level
@@ -24,7 +24,7 @@ pytestmark = pytest.mark.unit
 
 # Attempt to import the module; if pandas is missing, we'll skip main tests
 try:
-    M = importlib.import_module("Tensile.GenerateSummations")
+    M = importlib.import_module("tensilelite.GenerateSummations")
     _PANDAS_AVAILABLE = True
 except ImportError as e:
     if "pandas" in str(e) or "numpy" in str(e):
@@ -98,7 +98,7 @@ def test_create_library_for_benchmark_error_handling():
 
             # The function should call printExit on error, which exits
             # We'll just verify the exception is handled without raising
-            with patch("Tensile.Common.printExit") as mock_exit:
+            with patch("tensilelite.Common.printExit") as mock_exit:
                 try:
                     M.createLibraryForBenchmark(logic_path, lib_path, current_path)
                 except SystemExit:
@@ -109,7 +109,7 @@ def test_create_library_for_benchmark_error_handling():
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = OSError("File not found")
 
-            with patch("Tensile.Common.printExit") as mock_exit:
+            with patch("tensilelite.Common.printExit") as mock_exit:
                 try:
                     M.createLibraryForBenchmark(logic_path, lib_path, current_path)
                 except SystemExit:

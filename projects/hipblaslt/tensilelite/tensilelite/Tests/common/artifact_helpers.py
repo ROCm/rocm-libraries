@@ -38,7 +38,7 @@ _TESTS_ROOT_DIR = os.path.dirname(os.path.dirname(__file__))
 def artifact_name_for_config(config_path):
     """Derive a deterministic artifact name from a YAML config path.
 
-    Stable across machines because the relative path under Tensile/Tests/
+    Stable across machines because the relative path under tensilelite/Tests/
     is identical in every checkout. E.g. common/gemm/fp16_tn.yaml ->
     common__gemm__fp16_tn.
     """
