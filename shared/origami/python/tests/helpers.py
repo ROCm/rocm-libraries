@@ -23,8 +23,18 @@ HARDWARE = {
     "gfx1200": origami.get_hardware_for_arch(
         origami.architecture_t.gfx1200, 32, 128 * 1024, 512 * 1024, 4 * 1024 * 1024, 2700000
     ),
+    # Corrected against get_hardware_for_device(0) on a Radeon AI PRO R9700
+    # (Navi48). Every one of the five numbers was wrong: 60 CU, 128 KB LDS,
+    # 512 KB RF, 6 MB L2, 2500 MHz -> 64 / 64 KB / 768 KB / 8 MB / 2350 MHz.
+    # Note the CU count is CUs, not WGPs: HIP reports 32 multiprocessors for
+    # this part and origami multiplies by cus_per_multiProcessorCount() == 2.
+    # With these arguments the object is bit-identical to the runtime
+    # descriptor hipBLASLt actually serves EXCEPT mem2/mem3_perf_ratio, which
+    # come out a uniform 1.2454x low because gfx1201's mem_clock_ratio derives
+    # the memory clock from the compute clock. No argument can correct that;
+    # it needs the ratios set directly.
     "gfx1201": origami.get_hardware_for_arch(
-        origami.architecture_t.gfx1201, 60, 128 * 1024, 512 * 1024, 6 * 1024 * 1024, 2500000
+        origami.architecture_t.gfx1201, 64, 64 * 1024, 768 * 1024, 8 * 1024 * 1024, 2350000
     ),
 }
 
