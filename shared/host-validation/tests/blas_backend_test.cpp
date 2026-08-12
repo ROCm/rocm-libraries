@@ -13,6 +13,69 @@ namespace {
 void require(bool condition, const char* message) {
     if (!condition) throw std::runtime_error(message);
 }
+
+template <typename T>
+void testTransformingBlockScale(roc::host_validation::ScalarType accumulatorType) {
+    using namespace roc::host_validation;
+
+    const std::array<T, 8> a{1, 1, 1, 1, 1, 1, 1, 1};
+    const std::array<T, 8> b{1, 1, 1, 1, 1, 1, 1, 1};
+    const std::array<T, 4> c{};
+    std::array<T, 4> canonicalD{};
+    std::array<T, 4> transformingD{};
+    const std::array<uint8_t, 4> scaleA{128, 129, 130, 131};
+    const std::array<uint8_t, 4> scaleB{127, 128, 129, 130};
+    const Layout layoutA(Shape{2, 4}, {1, 2});
+    const Layout layoutB(Shape{4, 2}, {1, 4});
+    const Layout layoutD(Shape{2, 2}, {1, 2});
+    const Layout scaleLayout = Layout::contiguous(Shape{2, 2});
+
+    auto makeOperandA = [&]() {
+        GemmOperand operand(TensorView::fromNative<T>(layoutA, std::span<const T>(a)));
+        operand.blockScale = BlockScaleBinding{
+            TensorView(ScalarType::E8M0, scaleLayout, std::as_bytes(std::span(scaleA))),
+            2,
+        };
+        return operand;
+    };
+    auto makeOperandB = [&]() {
+        GemmOperand operand(TensorView::fromNative<T>(layoutB, std::span<const T>(b)));
+        operand.blockScale = BlockScaleBinding{
+            TensorView(ScalarType::E8M0, scaleLayout, std::as_bytes(std::span(scaleB))),
+            2,
+        };
+        return operand;
+    };
+
+    GemmRequest canonicalProblem(
+        makeOperandA(), makeOperandB(), TensorView::fromNative<T>(layoutD, std::span<const T>(c)),
+        MutableTensorView::fromNative<T>(layoutD, std::span<T>(canonicalD)), accumulatorType);
+    referenceGemm(canonicalProblem);
+
+    GemmRequest transformingProblem(
+        makeOperandA(), makeOperandB(), TensorView::fromNative<T>(layoutD, std::span<const T>(c)),
+        MutableTensorView::fromNative<T>(layoutD, std::span<T>(transformingD)), accumulatorType);
+    TransformingBlasGemmBackend backend;
+    require(queryGemmSupport(transformingProblem,
+                             {
+                                 .backend = GemmBackend::Blas,
+                                 .requireRequestedBackend = true,
+                             },
+                             &backend)
+                .supported,
+            "Transforming BLAS unexpectedly rejected block scaling.");
+    referenceGemm(transformingProblem,
+                  {
+                      .backend = GemmBackend::Blas,
+                      .requireRequestedBackend = true,
+                  },
+                  &backend);
+
+    const std::array<T, 4> expected{20, 80, 80, 320};
+    require(canonicalD == expected, "Canonical block-scale reference mismatch.");
+    require(transformingD == canonicalD,
+            "Transforming BLAS block-scale result differs from canonical reference.");
+}
 }  // namespace
 
 int main() {
@@ -150,6 +213,9 @@ int main() {
                   },
                   &transformingBackend);
     require(saturatingD[0] == 127, "Transforming BLAS saturating output mismatch.");
+
+    testTransformingBlockScale<float>(ScalarType::Float32);
+    testTransformingBlockScale<double>(ScalarType::Float64);
 
     return 0;
 }
