@@ -59,9 +59,17 @@ class SdpaOverride(OpOverride):
         b, h, _, d = query.shape
         if b != 1:
             return False, f"B={b} (only B==1; batch folds into grid z)"
-        if h != BAKED_HEADS or int(key.shape[1]) != BAKED_HEADS or int(value.shape[1]) != BAKED_HEADS:
+        if (
+            h != BAKED_HEADS
+            or int(key.shape[1]) != BAKED_HEADS
+            or int(value.shape[1]) != BAKED_HEADS
+        ):
             return False, f"H!={BAKED_HEADS} (kernel bakes H={BAKED_HEADS})"
-        if d != BAKED_HEAD_DIM or int(key.shape[-1]) != BAKED_HEAD_DIM or int(value.shape[-1]) != BAKED_HEAD_DIM:
+        if (
+            d != BAKED_HEAD_DIM
+            or int(key.shape[-1]) != BAKED_HEAD_DIM
+            or int(value.shape[-1]) != BAKED_HEAD_DIM
+        ):
             return False, f"D!={BAKED_HEAD_DIM} (kernel bakes D={BAKED_HEAD_DIM})"
         sq = int(query.shape[-2])
         skv = int(key.shape[-2])
@@ -81,8 +89,12 @@ class SdpaOverride(OpOverride):
 
         def _bhsd(name, s, uid):
             return g.tensor(
-                hipdnn.Tensor().set_name(name).set_dim([b, h, s, d])
-                .set_stride([h * s * d, s * d, d, 1]).set_data_type(hf).set_uid(uid)
+                hipdnn.Tensor()
+                .set_name(name)
+                .set_dim([b, h, s, d])
+                .set_stride([h * s * d, s * d, d, 1])
+                .set_data_type(hf)
+                .set_uid(uid)
             )
 
         q_t = _bhsd("Q", sq, _Q_UID)
@@ -90,7 +102,7 @@ class SdpaOverride(OpOverride):
         v_t = _bhsd("V", skv, _V_UID)
 
         attrs = hipdnn.SdpaAttributes()
-        attrs.set_attn_scale_value(float(scale))
+        attrs.set_attn_scale(float(scale))
         # Non-causal, no mask -- leave every other feature unset (mask=none).
 
         o_t = g.sdpa(q_t, k_t, v_t, attrs)[0]  # [o, stats]; stats is None
@@ -100,11 +112,29 @@ class SdpaOverride(OpOverride):
         o_t.set_uid(_O_UID)
         return g
 
-    def _call(self, real, query, key, value, attn_mask=None, dropout_p=0.0,
-              is_causal=False, scale=None, enable_gqa=False):
+    def _call(
+        self,
+        real,
+        query,
+        key,
+        value,
+        attn_mask=None,
+        dropout_p=0.0,
+        is_causal=False,
+        scale=None,
+        enable_gqa=False,
+    ):
         def _native():
-            return real(query, key, value, attn_mask=attn_mask, dropout_p=dropout_p,
-                        is_causal=is_causal, scale=scale, enable_gqa=enable_gqa)
+            return real(
+                query,
+                key,
+                value,
+                attn_mask=attn_mask,
+                dropout_p=dropout_p,
+                is_causal=is_causal,
+                scale=scale,
+                enable_gqa=enable_gqa,
+            )
 
         torch = self.state.torch
         # Census dims are best-effort; guard the shape reads for exotic call sites.
@@ -115,13 +145,16 @@ class SdpaOverride(OpOverride):
             return _native()
         census_key = f"Sq={sq},Skv={skv},dtype={self._tok(query.dtype)}"
 
-        ok, reason = self._gate(query, key, value, attn_mask, dropout_p, is_causal,
-                                enable_gqa)
+        ok, reason = self._gate(
+            query, key, value, attn_mask, dropout_p, is_causal, enable_gqa
+        )
         if not ok:
             self.note_native(census_key, reason)
             return _native()
 
-        eff_scale = float(scale) if scale is not None else 1.0 / math.sqrt(BAKED_HEAD_DIM)
+        eff_scale = (
+            float(scale) if scale is not None else 1.0 / math.sqrt(BAKED_HEAD_DIM)
+        )
         try:
             # Contiguous BHSD so the baked graph strides (token=D, head=S*D) hold.
             q = query.contiguous()
@@ -134,16 +167,27 @@ class SdpaOverride(OpOverride):
                 f"[B={b},H={h},Sq={sq},Skv={skv},D={d}] {q.dtype}",
             )
             o = torch.empty(b, h, sq, d, dtype=q.dtype, device=q.device)
-            self._execute(entry, {
-                _Q_UID: q.data_ptr(), _K_UID: k.data_ptr(),
-                _V_UID: v.data_ptr(), _O_UID: o.data_ptr(),
-            }, q.device)
+            self._execute(
+                entry,
+                {
+                    _Q_UID: q.data_ptr(),
+                    _K_UID: k.data_ptr(),
+                    _V_UID: v.data_ptr(),
+                    _O_UID: o.data_ptr(),
+                },
+                q.device,
+            )
             self.note_aot(census_key)
             return o
         except NotApplicable as na:  # engine can't serve this shape -> native
             self.note_native(census_key, str(na))
             return _native()
-        except Exception as ex:  # noqa: BLE001 -- any failure -> native, never break the model
-            self.note_native(census_key, f"exception: {type(ex).__name__}: {ex}",
-                             level=logging.WARNING)
+        except (
+            Exception
+        ) as ex:  # noqa: BLE001 -- any failure -> native, never break the model
+            self.note_native(
+                census_key,
+                f"exception: {type(ex).__name__}: {ex}",
+                level=logging.WARNING,
+            )
             return _native()

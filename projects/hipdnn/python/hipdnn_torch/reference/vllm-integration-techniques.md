@@ -327,7 +327,7 @@ class HipDNNAttentionImpl(AttentionImpl):
             v_t = graph.tensor(...)  # [B, H_kv, S_kv, D]
 
             attrs = hipdnn.SdpaAttributes()
-            attrs.set_attn_scale_value(self._scale)
+            attrs.set_attn_scale(self._scale)
             attrs.set_causal_mask(attn_metadata.is_causal)
 
             outputs = graph.sdpa(q_t, k_t, v_t, attrs)
@@ -363,7 +363,7 @@ class HipDNNAttentionImpl(AttentionImpl):
             # ... setup tensors ...
 
             attrs = hipdnn.SdpaAttributes()
-            attrs.set_attn_scale_value(self._scale)
+            attrs.set_attn_scale(self._scale)
             attrs.set_causal_mask(True)
             # PAGED ATTENTION: pass block tables directly
             attrs.set_paged_attention_k_table(k_page_table_tensor)

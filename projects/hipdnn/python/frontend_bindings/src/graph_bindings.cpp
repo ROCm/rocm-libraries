@@ -10,10 +10,7 @@
 #include <hipdnn_frontend/attributes/ConvolutionDgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp>
-#include <hipdnn_frontend/attributes/LayernormAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
-#include <hipdnn_frontend/attributes/RMSNormAttributes.hpp>
-#include <hipdnn_frontend/attributes/SdpaAttributes.hpp>
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/array.h>
 #include <nanobind/stl/optional.h>
@@ -188,58 +185,6 @@ void graphBindings(nb::module_& m)
                                graph::PointwiseAttributes>(&graph::Graph::pointwise))
         .def("conv_fprop", &graph::Graph::conv_fprop)
         .def("matmul", &graph::Graph::matmul)
-        .def(
-            "rmsnorm",
-            [](graph::Graph& g,
-               std::shared_ptr<graph::TensorAttributes> x,
-               std::shared_ptr<graph::TensorAttributes> scale,
-               graph::RMSNormAttributes attributes) {
-                auto out = g.rmsnorm(std::move(x), std::move(scale), std::move(attributes));
-                return std::vector<std::shared_ptr<graph::TensorAttributes>>(out.begin(),
-                                                                             out.end());
-            },
-            nb::arg("x"),
-            nb::arg("scale"),
-            nb::arg("attributes"),
-            "Add RMSNorm forward node. Returns [y, inv_rms] (inv_rms is null in "
-            "INFERENCE mode).")
-        .def(
-            "layernorm",
-            [](graph::Graph& g,
-               std::shared_ptr<graph::TensorAttributes> x,
-               std::shared_ptr<graph::TensorAttributes> scale,
-               std::shared_ptr<graph::TensorAttributes> bias,
-               graph::LayernormAttributes attributes) {
-                auto out = g.layernorm(
-                    std::move(x), std::move(scale), std::move(bias), std::move(attributes));
-                return std::vector<std::shared_ptr<graph::TensorAttributes>>(out.begin(),
-                                                                             out.end());
-            },
-            nb::arg("x"),
-            nb::arg("scale"),
-            nb::arg("bias"),
-            nb::arg("attributes"),
-            "Add LayerNorm forward node. Returns [y, mean, inv_variance] "
-            "(mean/inv_variance are null in INFERENCE mode).")
-#ifdef HIPDNN_ENABLE_SDPA
-        .def(
-            "sdpa",
-            [](graph::Graph& g,
-               std::shared_ptr<graph::TensorAttributes> q,
-               std::shared_ptr<graph::TensorAttributes> k,
-               std::shared_ptr<graph::TensorAttributes> v,
-               graph::SdpaAttributes attributes) {
-                auto out = g.sdpa(std::move(q), std::move(k), std::move(v), std::move(attributes));
-                return std::vector<std::shared_ptr<graph::TensorAttributes>>(out.begin(),
-                                                                             out.end());
-            },
-            nb::arg("q"),
-            nb::arg("k"),
-            nb::arg("v"),
-            nb::arg("attributes"),
-            "Add SDPA forward node. Returns [output, stats] (stats is null unless "
-            "generate_stats set).")
-#endif
         .def("conv_dgrad", &graph::Graph::conv_dgrad)
         .def("conv_wgrad", &graph::Graph::conv_wgrad)
         .def("set_preferred_engine_id_ext",

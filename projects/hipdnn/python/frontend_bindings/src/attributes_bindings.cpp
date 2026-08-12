@@ -9,11 +9,8 @@
 #include <hipdnn_frontend/attributes/ConvolutionDgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp>
-#include <hipdnn_frontend/attributes/LayernormAttributes.hpp>
 #include <hipdnn_frontend/attributes/MatmulAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
-#include <hipdnn_frontend/attributes/RMSNormAttributes.hpp>
-#include <hipdnn_frontend/attributes/SdpaAttributes.hpp>
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/shared_ptr.h>
 #include <nanobind/stl/string.h>
@@ -207,63 +204,4 @@ void attributesBindings(nb::module_& m)
         .def("set_mode", &graph::PointwiseAttributes::set_mode, nb::rv_policy::reference_internal)
         .def("get_name", &graph::PointwiseAttributes::get_name)
         .def("get_mode", &graph::PointwiseAttributes::get_mode);
-
-    // RMSNormAttributes
-    nb::class_<graph::RMSNormAttributes>(m, "RMSNormAttributes")
-        .def(nb::init<>())
-        .def("set_name", &graph::RMSNormAttributes::set_name, nb::rv_policy::reference_internal)
-        .def("get_name", &graph::RMSNormAttributes::get_name)
-        .def("set_compute_data_type",
-             &graph::RMSNormAttributes::set_compute_data_type,
-             nb::rv_policy::reference_internal)
-        .def("get_compute_data_type", &graph::RMSNormAttributes::get_compute_data_type)
-        .def(
-            "set_epsilon",
-            [](graph::RMSNormAttributes& self,
-               const std::shared_ptr<graph::TensorAttributes>& epsilon)
-                -> graph::RMSNormAttributes& { return self.set_epsilon(epsilon); },
-            nb::rv_policy::reference_internal)
-        .def("get_epsilon", &graph::RMSNormAttributes::get_epsilon)
-        .def("set_forward_phase",
-             &graph::RMSNormAttributes::set_forward_phase,
-             nb::rv_policy::reference_internal)
-        .def("get_forward_phase", &graph::RMSNormAttributes::get_forward_phase);
-
-#ifdef HIPDNN_ENABLE_SDPA
-    // SdpaAttributes
-    nb::class_<graph::SdpaAttributes>(m, "SdpaAttributes")
-        .def(nb::init<>())
-        .def("set_name", &graph::SdpaAttributes::set_name, nb::rv_policy::reference_internal)
-        .def("get_name", &graph::SdpaAttributes::get_name)
-        .def("set_attn_scale_value",
-             nb::overload_cast<float>(&graph::SdpaAttributes::set_attn_scale),
-             nb::rv_policy::reference_internal)
-        .def("set_causal_mask",
-             &graph::SdpaAttributes::set_causal_mask,
-             nb::rv_policy::reference_internal)
-        .def("set_dropout_probability",
-             &graph::SdpaAttributes::set_dropout_probability,
-             nb::rv_policy::reference_internal);
-#endif
-
-    // LayernormAttributes
-    nb::class_<graph::LayernormAttributes>(m, "LayernormAttributes")
-        .def(nb::init<>())
-        .def("set_name", &graph::LayernormAttributes::set_name, nb::rv_policy::reference_internal)
-        .def("get_name", &graph::LayernormAttributes::get_name)
-        .def("set_compute_data_type",
-             &graph::LayernormAttributes::set_compute_data_type,
-             nb::rv_policy::reference_internal)
-        .def("get_compute_data_type", &graph::LayernormAttributes::get_compute_data_type)
-        .def(
-            "set_epsilon",
-            [](graph::LayernormAttributes& self,
-               const std::shared_ptr<graph::TensorAttributes>& epsilon)
-                -> graph::LayernormAttributes& { return self.set_epsilon(epsilon); },
-            nb::rv_policy::reference_internal)
-        .def("get_epsilon", &graph::LayernormAttributes::get_epsilon)
-        .def("set_forward_phase",
-             &graph::LayernormAttributes::set_forward_phase,
-             nb::rv_policy::reference_internal)
-        .def("get_forward_phase", &graph::LayernormAttributes::get_forward_phase);
 }

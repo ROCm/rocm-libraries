@@ -93,12 +93,6 @@ void typesBindings(nb::module_& m)
         .value("TANH_BWD", PointwiseMode::TANH_BWD)
         .value("TANH_FWD", PointwiseMode::TANH_FWD);
 
-    // Bind NormFwdPhase enum
-    nb::enum_<NormFwdPhase>(m, "NormFwdPhase")
-        .value("NOT_SET", NormFwdPhase::NOT_SET)
-        .value("INFERENCE", NormFwdPhase::INFERENCE)
-        .value("TRAINING", NormFwdPhase::TRAINING);
-
     // Bind HeuristicMode enum
     nb::enum_<HeuristicMode>(m, "HeuristicMode").value("FALLBACK", HeuristicMode::FALLBACK);
 
