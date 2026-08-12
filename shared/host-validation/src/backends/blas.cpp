@@ -111,6 +111,8 @@ void validateCommon(const GemmRequest& problem) {
         problem.epilogue.outputScale != std::complex<double>(1.0, 0.0) ||
         problem.epilogue.outputConversion != OutputConversion::Default)
         throw std::invalid_argument("BLAS backend does not support a fused epilogue.");
+    if (!problem.outputSelection.selectsAll())
+        throw std::invalid_argument("BLAS backend requires complete output selection.");
     if (problem.c.layout() != problem.d.layout() ||
         adjustedStorage(problem.c) != adjustedStorage(problem.d))
         throw std::invalid_argument("BLAS backend currently requires C and D to alias.");
