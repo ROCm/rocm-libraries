@@ -10,6 +10,9 @@ Documentation for rocSPARSE is available at
 * Added the `rocsparse_dnvec_descr_create_scalar` auxiliary routine, which creates a size-one dense vector descriptor for a host or device scalar.
 * Added batched support to the SpMM algorithm `rocsparse_spmm_alg_csr_nnz_split`.
 
+### Optimized
+* Architecture-aware launch-configuration tuning (launch-only, with no numerical or algorithmic changes) improves performance and performance-portability across RDNA (wave32) and CDNA (wave64) GPUs for several sparse level 2 and level 3 routines, including sparse matrix-vector multiplication (`rocsparse_spmv`) for the CSR LRB algorithm, the COO (SoA and AoS) formats, and the ELL format (`rocsparse_Xellmv`); the block-sparse `rocsparse_Xbsrmv` and `rocsparse_Xbsrxmv` routines; the `rocsparse_Xgemvi` and `rocsparse_Xgemmi` routines; and sparse matrix-matrix multiplication (`rocsparse_spmm`) for the COO and blocked-ELL formats.
+
 ### Resolved issues
 * Fixed `rocsparse_spmm` with the segmented COO, atomic COO, segmented-atomic COO, and row-split CSR algorithms, which failed with `hipErrorInvalidConfiguration` for batch counts exceeding 65535 because the batch dimension of the kernel launch grid exceeded the maximum supported grid dimension.
 * Fixed an issue with `rocsparse_spmm` when using the nnz-split algorithm with the CSR or CSC format. The operation produced incorrect results because the segmented-block-reduction helper had shared-memory pointer parameters marked `__restrict__`, while threads in the block must read values written by other threads. The `__restrict__` attribute has now been removed.
