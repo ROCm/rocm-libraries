@@ -1,18 +1,111 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include <algorithm>
 #include <array>
+#include <cstddef>
 #include <roc/host_validation/backends/tiled.hpp>
 #include <span>
 #include <stdexcept>
+#include <vector>
 
 namespace {
+using roc::host_validation::GemmRequest;
+using roc::host_validation::GemmRunInfo;
+using roc::host_validation::OutputSelection;
+using roc::host_validation::TiledGemmBackend;
+
+constexpr float untouchedValue = -12345.0f;
+
 void require(bool condition, const char* message) {
     if (!condition) throw std::runtime_error(message);
 }
-}  // namespace
 
-int main() {
+std::vector<float> makeValues(size_t rows, size_t columns, size_t seed) {
+    std::vector<float> values(rows * columns);
+    for (size_t row = 0; row < rows; ++row) {
+        for (size_t column = 0; column < columns; ++column) {
+            const int encoded = static_cast<int>((row * 11 + column * 7 + seed * 5) % 17) - 8;
+            values[row * columns + column] = static_cast<float>(encoded) * 0.25f;
+        }
+    }
+    return values;
+}
+
+GemmRequest makeProblem(const std::vector<float>& a, const std::vector<float>& b,
+                        const std::vector<float>& c, std::vector<float>& d, size_t rows,
+                        size_t reductionElements, size_t columns) {
+    using namespace roc::host_validation;
+
+    return GemmRequest(
+        GemmOperand(TensorView::fromNative<float>(
+            Layout::contiguous(Shape{rows, reductionElements}), std::span<const float>(a))),
+        GemmOperand(TensorView::fromNative<float>(
+            Layout::contiguous(Shape{reductionElements, columns}), std::span<const float>(b))),
+        TensorView::fromNative<float>(Layout::contiguous(Shape{rows, columns}),
+                                      std::span<const float>(c)),
+        MutableTensorView::fromNative<float>(Layout::contiguous(Shape{rows, columns}),
+                                             std::span<float>(d)),
+        ScalarType::Float32);
+}
+
+void configureFinalizer(GemmRequest& problem, const std::vector<float>& columnBias) {
+    using namespace roc::host_validation;
+
+    problem.epilogue.alpha = 1.25;
+    problem.epilogue.beta = -0.5;
+    problem.epilogue.bias = VectorBinding{
+        TensorView::fromNative<float>(Layout::contiguous(Shape{columnBias.size()}),
+                                      std::span<const float>(columnBias)),
+        MatrixAxis::Column,
+    };
+    problem.epilogue.activation = Activation::Relu;
+}
+
+struct ParityRunInfo {
+    GemmRunInfo canonical;
+    GemmRunInfo tiled;
+};
+
+ParityRunInfo runParity(GemmRequest& canonicalProblem, GemmRequest& tiledProblem,
+                        const std::vector<float>& canonicalOutput,
+                        const std::vector<float>& tiledOutput, const char* mismatchMessage) {
+    using namespace roc::host_validation;
+
+    TiledGemmBackend backend;
+    const GemmResult canonical =
+        referenceGemm(canonicalProblem, {
+                                            .backend = GemmBackend::Canonical,
+                                            .requireRequestedBackend = true,
+                                        });
+    const GemmResult tiled = referenceGemm(tiledProblem,
+                                           {
+                                               .backend = GemmBackend::Tiled,
+                                               .requireRequestedBackend = true,
+                                           },
+                                           &backend);
+    require(tiled.runInfo.backendUsed == GemmBackend::Tiled,
+            "Tiled backend run information mismatch.");
+    require(tiledOutput == canonicalOutput, mismatchMessage);
+    return {
+        .canonical = canonical.runInfo,
+        .tiled = tiled.runInfo,
+    };
+}
+
+void requireOnlySelectedOutputsStored(const std::vector<float>& output,
+                                      const OutputSelection& selection) {
+    std::vector<size_t> selected = selection.indices(output.size());
+    std::sort(selected.begin(), selected.end());
+    selected.erase(std::unique(selected.begin(), selected.end()), selected.end());
+    for (size_t index = 0; index < output.size(); ++index) {
+        if (!std::binary_search(selected.begin(), selected.end(), index))
+            require(output[index] == untouchedValue,
+                    "Tiled backend modified an unselected output element.");
+    }
+}
+
+void testFinalizerAndSmallEdgeTile() {
     using namespace roc::host_validation;
 
     const std::array<float, 6> a{1, 4, 2, 5, 3, 6};
@@ -46,60 +139,202 @@ int main() {
                              &backend)
                 .supported,
             "Tiled backend unexpectedly rejected the test GEMM.");
-    const GemmResult result = referenceGemm(problem,
-                                            {
-                                                .backend = GemmBackend::Tiled,
-                                                .requireRequestedBackend = true,
-                                            },
-                                            &backend);
-    require(result.runInfo.backendUsed == GemmBackend::Tiled,
-            "Tiled backend run information mismatch.");
+    const GemmResult full = referenceGemm(problem,
+                                          {
+                                              .backend = GemmBackend::Tiled,
+                                              .requireRequestedBackend = true,
+                                          },
+                                          &backend);
+    require(full.runInfo.outputElementsComputed == 4,
+            "Full tiled GEMM reported the wrong computed output count.");
     require(d == std::array<float, 4>{120, 0, 132, 0}, "Tiled backend result mismatch.");
 
-    d.fill(-99);
+    d.fill(untouchedValue);
     problem.outputSelection = OutputSelection::explicitIndices({0});
-    referenceGemm(problem,
-                  {
-                      .backend = GemmBackend::Tiled,
-                      .requireRequestedBackend = true,
-                  },
-                  &backend);
-    require(d == std::array<float, 4>{120, -99, -99, -99},
+    const GemmResult selected = referenceGemm(problem,
+                                              {
+                                                  .backend = GemmBackend::Tiled,
+                                                  .requireRequestedBackend = true,
+                                              },
+                                              &backend);
+    require(selected.runInfo.outputElementsComputed == 4,
+            "Selected tiled GEMM did not report the clipped tile area.");
+    require(d == std::array<float, 4>{120, untouchedValue, untouchedValue, untouchedValue},
             "Tiled backend partial output selection mismatch.");
 
-    const std::array<float, 16> ones{
-        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-    };
-    const std::array<float, 1> zero{0};
-    const std::array<float, 2> blockScaleA{2, 4};
-    const std::array<float, 2> blockScaleB{8, 16};
-    std::array<float, 1> blockOutput{};
-    GemmOperand blockA(TensorView::fromNative<float>(Layout::contiguous(Shape{1, 16}),
-                                                     std::span<const float>(ones)));
-    GemmOperand blockB(TensorView::fromNative<float>(Layout::contiguous(Shape{16, 1}),
-                                                     std::span<const float>(ones)));
-    blockA.blockScale = BlockScaleBinding{
-        TensorView::fromNative<float>(Layout::contiguous(Shape{1, 2}),
-                                      std::span<const float>(blockScaleA)),
+    d.fill(untouchedValue);
+    problem.outputSelection = OutputSelection::explicitIndices({});
+    const GemmResult empty = referenceGemm(problem,
+                                           {
+                                               .backend = GemmBackend::Tiled,
+                                               .requireRequestedBackend = true,
+                                           },
+                                           &backend);
+    require(empty.runInfo.outputElementsComputed == 0,
+            "Empty tiled output selection reported computed accumulators.");
+    require(
+        d == std::array<float, 4>{untouchedValue, untouchedValue, untouchedValue, untouchedValue},
+        "Empty tiled output selection modified output.");
+}
+
+void testExplicitSelectionTilePlan() {
+    constexpr size_t rows = 45;
+    constexpr size_t reductionElements = 16;
+    constexpr size_t columns = 70;
+
+    const std::vector<float> a = makeValues(rows, reductionElements, 1);
+    const std::vector<float> b = makeValues(reductionElements, columns, 2);
+    const std::vector<float> c = makeValues(rows, columns, 3);
+    const std::vector<float> bias = makeValues(1, columns, 4);
+    std::vector<float> canonicalOutput(rows * columns, untouchedValue);
+    std::vector<float> tiledOutput(rows * columns, untouchedValue);
+    const OutputSelection selection = OutputSelection::explicitIndices({
+        44 * columns + 69,
+        2 * columns + 3,
+        10 * columns + 15,
+        40 * columns + 5,
+        2 * columns + 3,
+    });
+
+    GemmRequest canonicalProblem =
+        makeProblem(a, b, c, canonicalOutput, rows, reductionElements, columns);
+    GemmRequest tiledProblem = makeProblem(a, b, c, tiledOutput, rows, reductionElements, columns);
+    canonicalProblem.outputSelection = selection;
+    tiledProblem.outputSelection = selection;
+    configureFinalizer(canonicalProblem, bias);
+    configureFinalizer(tiledProblem, bias);
+
+    const ParityRunInfo run =
+        runParity(canonicalProblem, tiledProblem, canonicalOutput, tiledOutput,
+                  "Explicit tiled selection differs from the canonical reference.");
+    require(run.canonical.outputElementsComputed == 4,
+            "Canonical explicit selection count changed unexpectedly.");
+    require(run.tiled.outputElementsComputed == 1518,
+            "Explicit tiled selection did not count each unique edge-aware tile once.");
+    requireOnlySelectedOutputsStored(tiledOutput, selection);
+}
+
+void testStridedSelectionTilePlan() {
+    constexpr size_t rows = 39;
+    constexpr size_t reductionElements = 11;
+    constexpr size_t columns = 67;
+
+    const std::vector<float> a = makeValues(rows, reductionElements, 5);
+    const std::vector<float> b = makeValues(reductionElements, columns, 6);
+    const std::vector<float> c = makeValues(rows, columns, 7);
+    const std::vector<float> bias = makeValues(1, columns, 8);
+    std::vector<float> canonicalOutput(rows * columns, untouchedValue);
+    std::vector<float> tiledOutput(rows * columns, untouchedValue);
+    const OutputSelection selection = OutputSelection::strided(3, 509);
+
+    GemmRequest canonicalProblem =
+        makeProblem(a, b, c, canonicalOutput, rows, reductionElements, columns);
+    GemmRequest tiledProblem = makeProblem(a, b, c, tiledOutput, rows, reductionElements, columns);
+    canonicalProblem.outputSelection = selection;
+    tiledProblem.outputSelection = selection;
+    configureFinalizer(canonicalProblem, bias);
+    configureFinalizer(tiledProblem, bias);
+
+    const ParityRunInfo run =
+        runParity(canonicalProblem, tiledProblem, canonicalOutput, tiledOutput,
+                  "Strided tiled selection differs from the canonical reference.");
+    require(run.canonical.outputElementsComputed == 6,
+            "Canonical strided selection count changed unexpectedly.");
+    require(run.tiled.outputElementsComputed == 2272,
+            "Strided tiled selection reported the wrong executed tile area.");
+    requireOnlySelectedOutputsStored(tiledOutput, selection);
+}
+
+void testBlockScaledSelectionTilePlan() {
+    using namespace roc::host_validation;
+
+    constexpr size_t rows = 33;
+    constexpr size_t reductionElements = 16;
+    constexpr size_t columns = 35;
+    constexpr size_t scaleBlocks = 2;
+
+    const std::vector<float> a = makeValues(rows, reductionElements, 9);
+    const std::vector<float> b = makeValues(reductionElements, columns, 10);
+    const std::vector<float> c(rows * columns, 0.0f);
+    std::vector<float> scaleA(rows * scaleBlocks);
+    std::vector<float> scaleB(columns * scaleBlocks);
+    for (size_t row = 0; row < rows; ++row) {
+        scaleA[row * scaleBlocks] = row % 2 == 0 ? 1.0f : 2.0f;
+        scaleA[row * scaleBlocks + 1] = row % 3 == 0 ? 0.5f : 1.0f;
+    }
+    for (size_t column = 0; column < columns; ++column) {
+        scaleB[column * scaleBlocks] = column % 2 == 0 ? 2.0f : 0.5f;
+        scaleB[column * scaleBlocks + 1] = column % 3 == 0 ? 1.0f : 4.0f;
+    }
+
+    std::vector<float> canonicalOutput(rows * columns, untouchedValue);
+    std::vector<float> tiledOutput(rows * columns, untouchedValue);
+    const OutputSelection selection =
+        OutputSelection::explicitIndices({0, 32 * columns + 32, 32 * columns + 34});
+
+    GemmRequest canonicalProblem =
+        makeProblem(a, b, c, canonicalOutput, rows, reductionElements, columns);
+    GemmRequest tiledProblem = makeProblem(a, b, c, tiledOutput, rows, reductionElements, columns);
+    const BlockScaleBinding blockScaleA{
+        TensorView::fromNative<float>(Layout::contiguous(Shape{rows, scaleBlocks}),
+                                      std::span<const float>(scaleA)),
         8,
     };
-    blockB.blockScale = BlockScaleBinding{
-        TensorView::fromNative<float>(Layout::contiguous(Shape{1, 2}),
-                                      std::span<const float>(blockScaleB)),
+    const BlockScaleBinding blockScaleB{
+        TensorView::fromNative<float>(Layout::contiguous(Shape{columns, scaleBlocks}),
+                                      std::span<const float>(scaleB)),
         8,
     };
-    GemmRequest blockProblem(std::move(blockA), std::move(blockB),
-                             TensorView::fromNative<float>(Layout::contiguous(Shape{1, 1}),
-                                                           std::span<const float>(zero)),
-                             MutableTensorView::fromNative<float>(Layout::contiguous(Shape{1, 1}),
-                                                                  std::span<float>(blockOutput)),
-                             ScalarType::Float32);
-    referenceGemm(blockProblem,
-                  {
-                      .backend = GemmBackend::Tiled,
-                      .requireRequestedBackend = true,
-                  },
-                  &backend);
-    require(blockOutput[0] == 640, "Tiled backend block scaling mismatch.");
+    canonicalProblem.a.blockScale = blockScaleA;
+    canonicalProblem.b.blockScale = blockScaleB;
+    tiledProblem.a.blockScale = blockScaleA;
+    tiledProblem.b.blockScale = blockScaleB;
+    canonicalProblem.outputSelection = selection;
+    tiledProblem.outputSelection = selection;
+
+    const ParityRunInfo run =
+        runParity(canonicalProblem, tiledProblem, canonicalOutput, tiledOutput,
+                  "Block-scaled tiled selection differs from the canonical reference.");
+    require(run.canonical.outputElementsComputed == 3,
+            "Canonical block-scaled selection count changed unexpectedly.");
+    require(run.tiled.outputElementsComputed == 1027,
+            "Block-scaled tiled selection reported the wrong executed tile area.");
+    requireOnlySelectedOutputsStored(tiledOutput, selection);
+}
+
+void testFullSelectionParity() {
+    constexpr size_t rows = 35;
+    constexpr size_t reductionElements = 17;
+    constexpr size_t columns = 34;
+
+    const std::vector<float> a = makeValues(rows, reductionElements, 11);
+    const std::vector<float> b = makeValues(reductionElements, columns, 12);
+    const std::vector<float> c = makeValues(rows, columns, 13);
+    const std::vector<float> bias = makeValues(1, columns, 14);
+    std::vector<float> canonicalOutput(rows * columns, untouchedValue);
+    std::vector<float> tiledOutput(rows * columns, untouchedValue);
+
+    GemmRequest canonicalProblem =
+        makeProblem(a, b, c, canonicalOutput, rows, reductionElements, columns);
+    GemmRequest tiledProblem = makeProblem(a, b, c, tiledOutput, rows, reductionElements, columns);
+    configureFinalizer(canonicalProblem, bias);
+    configureFinalizer(tiledProblem, bias);
+
+    const ParityRunInfo run =
+        runParity(canonicalProblem, tiledProblem, canonicalOutput, tiledOutput,
+                  "Full tiled selection differs from the canonical reference.");
+    require(run.canonical.outputElementsComputed == rows * columns,
+            "Canonical full selection count changed unexpectedly.");
+    require(run.tiled.outputElementsComputed == rows * columns,
+            "Full tiled selection did not preserve complete-output accounting.");
+}
+}  // namespace
+
+int main() {
+    testFinalizerAndSmallEdgeTile();
+    testExplicitSelectionTilePlan();
+    testStridedSelectionTilePlan();
+    testBlockScaledSelectionTilePlan();
+    testFullSelectionParity();
     return 0;
 }
