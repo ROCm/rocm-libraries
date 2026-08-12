@@ -45,6 +45,7 @@
 #include <cstdint>
 #include <cstring>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -223,6 +224,15 @@ int dispatcher_run_batched_contraction_multi_abd(const void** as_hosts,
     if(kNumD > 0 && (!ds_hosts || !d_strides_flat || elem_d <= 0))
         return -1;
 
+    // split-K is not forwarded to the inner kernel (HostArgs has no k_batch field).
+    // Reject non-default values so the caller never silently gets k_batch=1 behavior.
+    if(k_batch != 1)
+    {
+        std::cerr << "dispatcher_run_batched_contraction_multi_abd: split-K (k_batch="
+                  << k_batch << ") is not supported; only k_batch=1 is accepted.\n";
+        return -2;
+    }
+
     // Compute total element counts
     int64_t G_total = 1, M_total = 1, N_total = 1, K_total = 1;
     for(int i = 0; i < num_dim_g; ++i)
@@ -245,6 +255,42 @@ int dispatcher_run_batched_contraction_multi_abd(const void** as_hosts,
                            static_cast<size_t>(N_total) * static_cast<size_t>(elem_d);
     const size_t e_bytes = static_cast<size_t>(G_total) * static_cast<size_t>(M_total) *
                            static_cast<size_t>(N_total) * static_cast<size_t>(elem_e);
+
+    // Guard: every dimension and stride must fit in int32 (ck_tile::index_t).
+    // Check all flat arrays before any allocation or cast to avoid silent truncation.
+    {
+        auto check_range = [](const int64_t* arr, int len, const char* name) -> bool {
+            constexpr int64_t kMaxIdx = static_cast<int64_t>(std::numeric_limits<ck_tile::index_t>::max());
+            for(int i = 0; i < len; ++i)
+            {
+                if(arr[i] < 0 || arr[i] > kMaxIdx)
+                {
+                    std::cerr << "dispatcher_run_batched_contraction_multi_abd: "
+                              << name << "[" << i << "]=" << arr[i]
+                              << " overflows ck_tile::index_t (int32).\n";
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        if(!check_range(g_dims, num_dim_g, "g_dims") ||
+           !check_range(m_dims, num_dim_m, "m_dims") ||
+           !check_range(n_dims, num_dim_n, "n_dims") ||
+           !check_range(k_dims, num_dim_k, "k_dims"))
+            return -1;
+
+        if(!check_range(a_strides_flat, num_a * static_cast<int>(kADimSize), "a_strides_flat") ||
+           !check_range(b_strides_flat, num_b * static_cast<int>(kBDimSize), "b_strides_flat") ||
+           !check_range(e_strides,      static_cast<int>(kEDimSize),          "e_strides"))
+            return -1;
+
+        if(kNumD > 0 && d_strides_flat)
+        {
+            if(!check_range(d_strides_flat, num_d * static_cast<int>(kEDimSize), "d_strides_flat"))
+                return -1;
+        }
+    }
 
     std::vector<void*> a_dev(kNumA, nullptr);
     std::vector<void*> b_dev(kNumB, nullptr);

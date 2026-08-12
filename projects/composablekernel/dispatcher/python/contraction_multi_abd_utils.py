@@ -557,6 +557,17 @@ class ContractionMultiABDRunner:
 
         if e_dtype is None:
             e_dtype = As[0].dtype
+        else:
+            e_dtype = np.dtype(e_dtype)
+            # The compiled kernel has a fixed EDataType (same element width as A/B).
+            # A mismatched e_dtype would silently produce garbage output.
+            if e_dtype.itemsize != As[0].dtype.itemsize:
+                raise ValueError(
+                    f"e_dtype={e_dtype} (itemsize={e_dtype.itemsize}) does not match "
+                    f"the kernel's compiled output element size "
+                    f"(As[0].dtype={As[0].dtype}, itemsize={As[0].dtype.itemsize}). "
+                    "Use e_dtype=None to let the runner pick the correct dtype automatically."
+                )
 
         e_shape = tuple(problem.g_dims + problem.m_dims + problem.n_dims)
         E = np.zeros(e_shape, dtype=e_dtype)
