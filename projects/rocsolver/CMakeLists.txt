@@ -170,7 +170,11 @@ cmake_dependent_option(USE_HIPCXX "Use CMake HIP language support" OFF CMAKE_HIP
 if(USE_HIPCXX)
   enable_language(HIP)
 else()
-  if(NOT DEFINED AMDGPU_TARGETS)
+  if(AMDGPU_TARGETS AND NOT GPU_TARGETS)
+    message(DEPRECATION "AMDGPU_TARGETS use is deprecated. Use GPU_TARGETS.")
+    set(GPU_TARGETS "${AMDGPU_TARGETS}" CACHE STRING "GPU architectures to build for")
+  endif()
+  if(NOT DEFINED GPU_TARGETS)
     set(XNACK_PLUS_TARGETS
       gfx90a:xnack+
       gfx908:xnack+
@@ -205,13 +209,13 @@ else()
       )
     endif()
     # Query for compiler support of GPU archs
-    rocm_check_target_ids(OPTIONAL_AMDGPU_TARGETS TARGETS ${OPTIONAL_TARGETS_QUERY})
-    set(AMDGPU_TARGETS_INIT ${OPTIONAL_AMDGPU_TARGETS} ${DEFAULT_TARGETS})
+    rocm_check_target_ids(OPTIONAL_GPU_TARGETS TARGETS ${OPTIONAL_TARGETS_QUERY})
+    set(GPU_TARGETS_INIT ${OPTIONAL_GPU_TARGETS} ${DEFAULT_TARGETS})
   endif()
 
   # Set this before finding hip so that hip::device has the required arch flags
   # added as usage requirements on its interface
-  set(AMDGPU_TARGETS "${AMDGPU_TARGETS_INIT}"
+  set(GPU_TARGETS "${GPU_TARGETS_INIT}"
     CACHE STRING "List of specific machine types for library to target")
 endif()
 
