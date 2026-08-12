@@ -22,7 +22,7 @@
 
 include_guard()
 
-macro(rocblas_workaround_amdhip64_missing TARGET_NAME)
+macro(miopen_workaround_amdhip64_missing TARGET_NAME)
     if(WIN32 AND TARGET hip::amdhip64)
         set(_rocblas_hip_compat_dir "${CMAKE_CURRENT_BINARY_DIR}/hip_compat")
         add_custom_command(TARGET ${TARGET_NAME} PRE_LINK

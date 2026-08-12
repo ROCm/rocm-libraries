@@ -961,6 +961,7 @@ endif()
 
 if(MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP")
     target_link_libraries( MIOpen PRIVATE hip::device )
+    miopen_workaorund_amdhip64_missing( MIOpen )
     target_link_libraries( MIOpen INTERFACE hip::host )
     if(MIOPEN_USE_HIPRTC)
         if(WIN32)
@@ -975,6 +976,7 @@ if(MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP")
     endif()
     # This is helpful for the tests
     target_link_libraries( MIOpen INTERFACE $<BUILD_INTERFACE:hip::device> )
+    miopen_workaround_amdhip64_missing( MIOpen )
     list(APPEND PACKAGE_DEPENDS PACKAGE hip)
 endif()
 
