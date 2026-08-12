@@ -69,20 +69,54 @@ add_test(NAME rocm_interfaces.blas_narrow_c_header
   COMMAND rocm_blas_narrow_c_header_test)
 
 if(UNIX AND NOT APPLE)
+  get_property(_exports_providers GLOBAL PROPERTY ROCM_INTERFACES_RECORDING_PROVIDERS)
+  set(_exports_provider_args)
+  set(_exports_provider_n 0)
+  foreach(_prov IN LISTS _exports_providers)
+    list(APPEND _exports_provider_args
+      "-DPROVIDER_LABEL_${_exports_provider_n}=${_prov}"
+      "-DPROVIDER_FILE_${_exports_provider_n}=$<TARGET_FILE:${_prov}>")
+    math(EXPR _exports_provider_n "${_exports_provider_n} + 1")
+  endforeach()
+
   add_test(NAME rocm_interfaces.exports
     COMMAND ${CMAKE_COMMAND}
       -DLOADER=$<TARGET_FILE:rocblas_loader_shadow>
       -DNARROW_V2_LOADER=$<TARGET_FILE:rocblas_narrow_v2_loader_shadow>
       -DNARROW_LOADER=$<TARGET_FILE:rocblas_narrow_loader_shadow>
       -DEXPECTED_LOADER_EXPORTS=${ROCM_INTERFACES_ROCBLAS_GENERATED_DIR}/rocblas_bridge.exports
-      -DBLAS_PROVIDER=$<TARGET_FILE:rocm_blas_classic_provider_recording>
-      -DCOMBINED_BLAS_PROVIDER=$<TARGET_FILE:rocm_blas_provider_recording>
-      -DBLASLT_PROVIDER=$<TARGET_FILE:rocm_blaslt_provider_recording>
-      -DSOLVER_PROVIDER=$<TARGET_FILE:rocm_solver_provider_recording>
-      -DRAND_PROVIDER=$<TARGET_FILE:rocm_rand_provider_recording>
-      -DROCBLAS_BRIDGE_PROVIDER=$<TARGET_FILE:rocm_rocblas_bridge_provider_recording>
-      -DBLAS_NARROW_V2_PROVIDER=$<TARGET_FILE:rocm_blas_narrow_v2_provider_recording>
+      -DPROVIDER_COUNT=${_exports_provider_n}
+      ${_exports_provider_args}
       -P ${CMAKE_CURRENT_SOURCE_DIR}/check_exports.cmake)
+
+  # Completeness cross-check: the auto-derived provider list (the registration-site
+  # GLOBAL property) must equal an independent buildsystem enumeration of the MODULE
+  # libraries under providers/recording, so a provider added via
+  # add_recording_provider cannot silently escape the exports check.
+  get_directory_property(_prov_targets
+    DIRECTORY ${CMAKE_SOURCE_DIR}/providers/recording BUILDSYSTEM_TARGETS)
+  set(_prov_modules)
+  foreach(_t IN LISTS _prov_targets)
+    get_target_property(_ttype ${_t} TYPE)
+    if(_ttype STREQUAL "MODULE_LIBRARY")
+      list(APPEND _prov_modules ${_t})
+    endif()
+  endforeach()
+  list(SORT _prov_modules)
+  set(_derived_sorted ${_exports_providers})
+  list(SORT _derived_sorted)
+  string(REPLACE ";" "\n" _prov_modules_txt "${_prov_modules}")
+  string(REPLACE ";" "\n" _derived_txt "${_derived_sorted}")
+  file(GENERATE
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/exports_provider_groundtruth.txt
+    CONTENT "${_prov_modules_txt}\n")
+  file(GENERATE
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/exports_provider_derived.txt
+    CONTENT "${_derived_txt}\n")
+  add_test(NAME rocm_interfaces.exports_provider_list_complete
+    COMMAND ${CMAKE_COMMAND} -E compare_files
+      ${CMAKE_CURRENT_BINARY_DIR}/exports_provider_groundtruth.txt
+      ${CMAKE_CURRENT_BINARY_DIR}/exports_provider_derived.txt)
 endif()
 
 add_test(NAME rocm_interfaces.install_consumer

@@ -16,6 +16,7 @@ function(add_recording_provider target source output_name)
   )
   target_link_options(${target} PRIVATE
     "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/recording_provider.map")
+  set_property(GLOBAL APPEND PROPERTY ROCM_INTERFACES_RECORDING_PROVIDERS ${target})
 endfunction()
 
 add_recording_provider(rocm_blas_provider_recording blas_provider.cpp
@@ -50,3 +51,5 @@ set_target_properties(rocm_rocblas_bridge_provider_recording PROPERTIES
   PREFIX "lib")
 target_link_options(rocm_rocblas_bridge_provider_recording PRIVATE
   "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/recording_provider.map")
+set_property(GLOBAL APPEND PROPERTY ROCM_INTERFACES_RECORDING_PROVIDERS
+  rocm_rocblas_bridge_provider_recording)
