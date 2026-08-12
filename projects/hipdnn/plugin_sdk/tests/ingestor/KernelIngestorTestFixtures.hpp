@@ -61,9 +61,21 @@ class TestGraph : public hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph
 {
 public:
     /// @param graphId Identity to carry, or nullopt for a legacy/unfinalized graph.
-    explicit TestGraph(std::optional<GraphId> graphId = std::nullopt)
+    /// @param schemaFloor Graph schema version this graph's contents require
+    ///        (min_required_engine_api_version), or nullopt to leave it unstamped as a
+    ///        writer that never populated the field would.
+    explicit TestGraph(std::optional<GraphId> graphId = std::nullopt,
+                       std::optional<hipdnn_data_sdk::utilities::Version> schemaFloor
+                       = std::nullopt)
     {
         flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Graph> graph;
+        hipdnn_flatbuffers_sdk::data_objects::EngineApiVersion version{};
+        if(schemaFloor.has_value())
+        {
+            version = hipdnn_plugin_sdk::toEngineApiVersion(*schemaFloor);
+        }
+        const auto* versionPtr = schemaFloor.has_value() ? &version : nullptr;
+
         if(graphId.has_value())
         {
             const auto uuid = hipdnn_flatbuffers_sdk::utilities::toFlatbufferUuid(*graphId);
@@ -71,11 +83,16 @@ public:
             hipdnn_flatbuffers_sdk::data_objects::GraphBuilder graphBuilder(_builder);
             graphBuilder.add_name(name);
             graphBuilder.add_id(&uuid);
+            graphBuilder.add_min_required_engine_api_version(versionPtr);
             graph = graphBuilder.Finish();
         }
         else
         {
-            graph = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(_builder, "test_graph");
+            auto name = _builder.CreateString("test_graph");
+            hipdnn_flatbuffers_sdk::data_objects::GraphBuilder graphBuilder(_builder);
+            graphBuilder.add_name(name);
+            graphBuilder.add_min_required_engine_api_version(versionPtr);
+            graph = graphBuilder.Finish();
         }
         _builder.Finish(graph);
     }
@@ -459,13 +476,26 @@ private:
 using TestHandle = int;
 using StateManager = KernelIngestorStateManager<TestHandle>;
 
-inline std::unique_ptr<StateManager>
-    makeStateManager(const std::string& scoreSymbol = SCORE_SYMBOL,
-                     size_t cacheCapacity = StateManager::DEFAULT_CATALOG_CACHE_CAPACITY)
+/// @param graphMatcherSdkVersion Graph schema version the graph-scoped matcher declares;
+///        nullopt leaves MatchDescriptor's baseline default in place.
+/// @param kernelMatcherSdkVersion Same, for the kernel-scoped matcher.
+inline std::unique_ptr<StateManager> makeStateManager(
+    const std::string& scoreSymbol = SCORE_SYMBOL,
+    size_t cacheCapacity = StateManager::DEFAULT_CATALOG_CACHE_CAPACITY,
+    std::optional<hipdnn_data_sdk::utilities::Version> graphMatcherSdkVersion = std::nullopt,
+    std::optional<hipdnn_data_sdk::utilities::Version> kernelMatcherSdkVersion = std::nullopt)
 {
     std::vector<MatchDescriptor> matchers{
         {GRAPH_MATCHER_ID, "graph scoped", MatchScope::GRAPH, "test.graph"},
         {KERNEL_MATCHER_ID, "kernel scoped", MatchScope::KERNEL, "test.kernel"}};
+    if(graphMatcherSdkVersion.has_value())
+    {
+        matchers[0].sdkVersion = *graphMatcherSdkVersion;
+    }
+    if(kernelMatcherSdkVersion.has_value())
+    {
+        matchers[1].sdkVersion = *kernelMatcherSdkVersion;
+    }
     std::vector<DispatchDescriptor> dispatches{{DISPATCH_ID, "test dispatch", "test.dispatch"}};
 
     return std::make_unique<StateManager>(

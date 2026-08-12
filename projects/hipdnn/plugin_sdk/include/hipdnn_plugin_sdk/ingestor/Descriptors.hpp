@@ -12,7 +12,9 @@
 #include <variant>
 #include <vector>
 
+#include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
+#include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
 
 /**
  * @file Descriptors.hpp
@@ -170,6 +172,27 @@ struct MatchDescriptor
     /// Resolved through NativeRegistry; a data-driven form (structural node pattern plus
     /// declarative criteria) is the UMD follow-up RFC.
     std::string matchSymbol;
+    /**
+     * @brief The hipDNN graph schema version this matcher was authored against
+     *        (RFC 0017 §4's UMD `sdk_version`).
+     *
+     * A matcher is the only descriptor that reads graph fields, so besides its own
+     * format version it declares the schema it understands. A graph reports the
+     * version its own contents require via `min_required_engine_api_version`
+     * (graph.fbs), computed from the optional fields it sets; a matcher declaring
+     * less than that floor is declined before it runs rather than asked, since it
+     * would otherwise match on the fields it knows and silently ignore one that
+     * changes what the graph means.
+     *
+     * Defaults to the baseline, which every graph's floor is at least equal to, so
+     * a matcher that sets nothing behaves exactly as before.
+     *
+     * This is a match-time gate, not a load-time one: the floor is a property of
+     * each graph, not of the runtime, so it cannot be resolved when the descriptor
+     * is read. The per-file-type `major.minor` of RFC 0017 §4's version table is a
+     * separate, load-time check and belongs to the loader (ALMIOPEN-2401).
+     */
+    hipdnn_data_sdk::utilities::Version sdkVersion{K_ENGINE_PLUGIN_API_VERSION_BASELINE};
 };
 
 /// UDD: how to invoke a kernel — the dispatch ABI, shared by every kernel in a pack.

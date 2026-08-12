@@ -17,6 +17,7 @@
 #include <hip/hip_runtime_api.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
+#include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 
 namespace hipdnn_plugin_sdk::ingestor
@@ -115,6 +116,23 @@ inline std::optional<GraphId>
         return std::nullopt;
     }
     return bytes;
+}
+
+/**
+ * @brief The graph schema version @p graph's own contents require (RFC 0017 §4).
+ *
+ * Reads `min_required_engine_api_version`, which hipDNN stamps from the optional
+ * features the graph uses (PluginVersionConstants.hpp's
+ * computeMinimumEnginePluginApiVersion). A matcher whose `sdkVersion` is below this
+ * floor is declined before it runs.
+ *
+ * An unstamped graph reads as the baseline, matching how the plugin-version filter
+ * already treats one.
+ */
+inline hipdnn_data_sdk::utilities::Version
+    graphSchemaFloor(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph)
+{
+    return fromEngineApiVersion(graph.getGraph().min_required_engine_api_version());
 }
 
 } // namespace hipdnn_plugin_sdk::ingestor

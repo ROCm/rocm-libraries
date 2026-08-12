@@ -669,6 +669,91 @@ INSTANTIATE_TEST_SUITE_P(
         return info.param.name;
     });
 
+// ---------------------------------------------------------------------------
+// RFC 0017 §4: UMD sdk_version — a matcher authored against an older graph
+// schema is declined before it runs, not asked.
+// ---------------------------------------------------------------------------
+
+/// The graph schema floor a matcher declaring the baseline cannot serve.
+const hipdnn_data_sdk::utilities::Version NEWER_THAN_BASELINE{
+    hipdnn_plugin_sdk::K_PASS_BY_VALUE_MIN_API_VERSION};
+const hipdnn_data_sdk::utilities::Version BASELINE{
+    hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE};
+
+TEST(TestKernelIngestorStateManager, MatcherDeclaringAnOlderGraphSchemaIsNotAsked)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager
+        = makeStateManager(SCORE_SYMBOL, StateManager::DEFAULT_CATALOG_CACHE_CAPACITY, BASELINE);
+    const TestGraph graph(makeGraphId(90), NEWER_THAN_BASELINE);
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    EXPECT_TRUE(manager->unsortedDefinitions(context).empty());
+    // Declined before it runs: the matcher is never invoked, which is the whole
+    // point -- it would otherwise match on the fields it knows and ignore the one
+    // that changes what the graph means.
+    EXPECT_EQ(counters().graphCalls, 0);
+    EXPECT_EQ(counters().kernelCalls, 0);
+}
+
+TEST(TestKernelIngestorStateManager, MatcherDeclaringTheGraphsSchemaServesNormally)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager(SCORE_SYMBOL,
+                                          StateManager::DEFAULT_CATALOG_CACHE_CAPACITY,
+                                          NEWER_THAN_BASELINE,
+                                          NEWER_THAN_BASELINE);
+    const TestGraph graph(makeGraphId(91), NEWER_THAN_BASELINE);
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    // Equal to the floor is understood: the rule rejects below, not at.
+    EXPECT_EQ(manager->unsortedDefinitions(context).size(), 2U);
+    EXPECT_EQ(counters().graphCalls, 1);
+}
+
+TEST(TestKernelIngestorStateManager, MatcherNewerThanTheGraphNeedsServesNormally)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager(SCORE_SYMBOL,
+                                          StateManager::DEFAULT_CATALOG_CACHE_CAPACITY,
+                                          NEWER_THAN_BASELINE,
+                                          NEWER_THAN_BASELINE);
+    const TestGraph graph(makeGraphId(92), BASELINE);
+    const auto properties = testDeviceProperties();
+
+    // A graph that leaves the newer field unset still requires only the baseline, so
+    // a matcher that understands more runs as before.
+    EXPECT_EQ(manager->unsortedDefinitions(MatchContext{graph, 0, properties}).size(), 2U);
+}
+
+TEST(TestKernelIngestorStateManager, AnUnstampedGraphReadsAsTheBaselineAndMatchesNormally)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    // No schema floor: a writer that never populated the field.
+    const TestGraph graph(makeGraphId(93));
+    const auto properties = testDeviceProperties();
+
+    EXPECT_EQ(manager->unsortedDefinitions(MatchContext{graph, 0, properties}).size(), 2U);
+}
+
+TEST(TestKernelIngestorStateManager, AStaleKernelScopedMatcherAlsoDeclinesThePack)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    // Graph-scoped understands the graph; kernel-scoped does not. A kernel-scoped
+    // matcher reads graph fields too, so the pack still cannot claim it applies.
+    const auto manager = makeStateManager(
+        SCORE_SYMBOL, StateManager::DEFAULT_CATALOG_CACHE_CAPACITY, NEWER_THAN_BASELINE, BASELINE);
+    const TestGraph graph(makeGraphId(94), NEWER_THAN_BASELINE);
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    EXPECT_TRUE(manager->unsortedDefinitions(context).empty());
+    EXPECT_EQ(counters().graphCalls, 0);
+}
+
 } // namespace
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR
