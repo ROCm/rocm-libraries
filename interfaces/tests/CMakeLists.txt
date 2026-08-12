@@ -400,8 +400,17 @@ if(UNIX AND NOT APPLE AND ROCM_INTERFACES_SANITIZE STREQUAL "thread")
     ENVIRONMENT "TSAN_OPTIONS=halt_on_error=0:exitcode=66")
 endif()
 
-if(ROCM_INTERFACES_CHECK_API_DRIFT AND TARGET rocm-interfaces-check-api-snapshots)
-  add_test(NAME rocm_interfaces.api_snapshot_drift
-    COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR}
-      --target rocm-interfaces-check-api-snapshots --config $<CONFIG>)
+if(ROCM_INTERFACES_CHECK_API_DRIFT)
+  if(TARGET rocm-interfaces-check-api-snapshots)
+    add_test(NAME rocm_interfaces.api_snapshot_drift
+      COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR}
+        --target rocm-interfaces-check-api-snapshots --config $<CONFIG>)
+  else()
+    message(FATAL_ERROR
+      "ROCM_INTERFACES_CHECK_API_DRIFT=ON but target "
+      "rocm-interfaces-check-api-snapshots does not exist. It requires "
+      "ROCM_INTERFACES_BUILD_TOOLS=ON and a usable Clang (rocm-api-extract). "
+      "Enable the tools or turn the drift gate off; the gate refuses to "
+      "register as a silent no-op.")
+  endif()
 endif()
