@@ -7,6 +7,18 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 ### Added
 
 * Introduced a new API: hipBLASLt-ext::isSolutionSupported(). This API is used by new hipBLASLt integration from rocBLAS to check if a given solution is supported for a certain GPU and Problem Type. 
+* `HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT` matmul-descriptor attribute
+  and matching ext API (`GemmPreference::setUniformSummationOrder()` /
+  `getUniformSummationOrder()`) opt into a uniform summation order across the
+  `M` dimension: when every row of `A` is the identical vector, every row of `D`
+  is bitwise identical within that run. This is uniformity across `M` in a single
+  run, not run-to-run determinism, and it can reduce performance. The `int32_t`
+  attribute accepts `0` (off, default) and `1` (on); other values are rejected
+  with `HIPBLAS_STATUS_INVALID_VALUE`, and the matmul itself returns
+  `HIPBLAS_STATUS_INVALID_VALUE` when no configuration that honors the guarantee
+  exists for the problem instead of silently producing non-uniform output.
+  `hipblaslt-bench` `--uniform_summation_order` (`off|0`, `on|1`) forwards into
+  the matmul descriptor (see `clients/bench/README.md`).
 
 ## hipBLASLt 1.4.0
 

@@ -33,6 +33,8 @@ subtrees:
     title: Use logging and heuristics
   - file: how-to/how-to-use-streamk
     title: Use Stream-K with hipBLASLt
+  - file: how-to/how-to-use-uniform-summation-order
+    title: Use uniform summation order
   - file: how-to/how-to-detect-nan
     title: Detect NaN in GEMM output
 
@@ -45,6 +47,7 @@ subtrees:
       - file: samples/client_extop_softmax
       - file: samples/sample_hipblaslt_ext_op_layernorm
       - file: samples/sample_hipblaslt_ext_op_amax
+      - file: samples/sample_hipblaslt_gemm_uniform_summation_order
   - url: https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipblaslt/clients/samples
     title: hipBLASLt client examples
 
