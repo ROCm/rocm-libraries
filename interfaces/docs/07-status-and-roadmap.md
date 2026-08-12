@@ -18,7 +18,7 @@ which optional linkers and sanitizers are present, so cite names rather than a c
 | `exports` node-aware check extended to the narrow loader shadow (`rocblas_narrow_loader_shadow`) | `exports` | `a741064` |
 | `exports` provider list auto-derived from a global registry, so a provider added via `add_recording_provider` cannot silently escape the check | `exports` | `61f8dc9` |
 | Versioned-provider co-residency (each handle resolves its own version node, cross-version lookup nil) and the bare-lookup interposition hazard reproduced when the version node is removed | `abi03_coresidency`, `abi03_interpose_hazard` | `8832c9a` |
-| Core versioned-symbol invariants (ordering, `-Bsymbolic` genuineness via a `DT_FLAGS` `DF_SYMBOLIC` assertion against a plain-DSO control, dup-def guard (linker-observed; strengthening tracked), ldconfig stub) | `abi04_three_line_order`, `abi04_bsymbolic_inert`, `abi04_multiple_default_def_rejected`, `abi04_ldconfig_stub_preserved` | `897293e`, `-Bsymbolic` discrimination `215ede4` |
+| Core versioned-symbol invariants (ordering, `-Bsymbolic` genuineness via a `DT_FLAGS` `DF_SYMBOLIC` assertion against a plain-DSO control, genuine two-default-definition (`@@`) DSO rejected with a single-`@` accept control, ldconfig stub) | `abi04_three_line_order`, `abi04_bsymbolic_inert`, `abi04_multiple_default_def_rejected`, `abi04_ldconfig_stub_preserved` | `897293e`, `-Bsymbolic` discrimination `215ede4`, dup-def strengthening `b7f3f89` |
 | Same-node negative control for the ordering proof: three DSOs on the shared `ROCBLAS_ABI_6` node with `ABI_5`/`ABI_7` lookups nil everywhere | `abi04_same_node_negative` (+ `_lld`) | `215ede4` |
 | Same invariants under lld | the `abi04_*_lld` mirrors | `01c14eb` |
 | Real `sobol32` data-object versioning | `abi06_data_version_node` | `04ade2b` |
@@ -42,11 +42,6 @@ under `ctest`; wiring the drift check into the test suite is listed under COMMIT
   in the PR/handoff, not here.
 - Wire the API snapshot drift check (`rocm-interfaces-check-api-snapshots`) into `ctest` so
   header drift is caught by the test suite rather than only by a manual target.
-- **Strengthen the multiple-default-definition check.** `abi04_multiple_default_def_rejected`
-  currently passes on any link failure and on a zero- or one-`@@` result
-  (`tests/check_multiple_default_def.cmake`), so it observes the linker rather than forcing a
-  genuine two-`@@` DSO to be rejected. Construct a real two-default-definition input and assert
-  the FATAL fires.
 - **Table-ABI prefix negotiation.** Today only the response `dispatch_table_size` floor is
   checked. Reading the dispatch table's own `abi_header`, honoring `abi_minor`, distinguishing
   a required prefix from an optional appended tail, and a non-vacuous ctest proving a larger

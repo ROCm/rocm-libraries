@@ -173,15 +173,16 @@ maps, producing `librocblas.so.{5,6,7}` and `-Bsymbolic` variants:
   is expected (the run fails). It inspects the ELF flag directly rather than adding an internal
   interposable call to the fixture; the conclusion is that versioning, not `-Bsymbolic`, is the
   co-residency mechanism.
-- `rocm_interfaces.abi04_multiple_default_def_rejected` - links a version script that names
-  `rocblas_sgemm` as a default (`global`) symbol in two nodes (`ROCBLAS_ABI_6` and
-  `ROCBLAS_ABI_7`) and observes the toolchain's response. It passes on any link failure (read
-  as the linker rejecting the duplicate default definition) and, when the link succeeds, fails
-  only if `nm` reports more than one `rocblas_sgemm@@` definition; a zero- or one-`@@` result
-  also passes. It does not synthesize a genuine two-`@@` DSO, so today it confirms the linker's
-  own behavior rather than independently proving a two-default-definition DSO is rejected.
-  Forcing a real two-`@@` input is COMMITTED-NEXT (see
-  [07-status-and-roadmap.md](07-status-and-roadmap.md)).
+- `rocm_interfaces.abi04_multiple_default_def_rejected` (strengthened in commit `b7f3f89`) -
+  synthesizes a genuine two-default-definition DSO and proves it is rejected. Two objects each
+  carry a default `.symver` alias of the same base name (`rocblas_sgemm@@ROCBLAS_ABI_6` and
+  `rocblas_sgemm@@ROCBLAS_ABI_7`); the test asserts the link fails **and** that the diagnostic
+  is specifically a duplicate/multiple-definition of `rocblas_sgemm`, so an unrelated link
+  failure no longer passes. It is made discriminating by a single-`@` (non-default) control
+  built from the same objects: changing one `@@` to `@` must flip the result to a clean link
+  with exactly one `@@` and one `@`. Earlier the check compiled a single `rocblas_sgemm` and
+  named it in two nodes, which can only ever yield 0 or 1 `@@` (the linker warns and assigns
+  to the first node), so it observed the toolchain rather than forcing a two-`@@` rejection.
 - `rocm_interfaces.abi04_ldconfig_stub_preserved` - `ldconfig -n` leaves the
   `librocblas.so -> librocblas.so.6` stub intact and the `ROCBLAS_ABI_6` node survives.
 
