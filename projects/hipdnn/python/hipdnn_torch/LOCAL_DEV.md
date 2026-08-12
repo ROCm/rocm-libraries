@@ -1,0 +1,356 @@
+# LOCAL_DEV — build every moving part from scratch and run `hipdnn_torch` locally
+
+> [!NOTE]
+> [`README.md`](README.md) explains how to *use* the package once the runtime is wired.
+> **This file is the from-scratch developer runbook**: how to build the three pieces the
+> package sits on top of, wire them together on a dev box, and prove that ops actually
+> route through hipDNN (and track the ones that don't). It was written and validated on a
+> gfx1151 laptop under WSL2; the caveats below are the ones that actually bit during that
+> bring-up, not hypotheticals.
+
+If you just want to run against artifacts someone already built for you, skip to
+[§5 Wire the environment](#5-wire-the-environment) and [§6 Verify + prove it's
+hipDNN](#6-verify--prove-its-hipdnn).
+
+## 1. What you are assembling
+
+`hipdnn_torch` is pure Python glue. To make a single `F.linear` land on a hipDNN kernel,
+**four** independently-built things have to agree at runtime:
+
+| Piece | Where it comes from | Built how |
+|-------|--------------------|-----------|
+| **PyTorch + ROCm SDK base** | a TheRock ROCm nightly `pip` wheel set (torch + bundled `_rocm_sdk_libraries_gfx1151`) | `pip install` into a venv |
+| **Engine plugin** (`libhip_kernel_provider.so` + the AOT `.co`/`family.json` catalog) | `hip-kernel-provider`, on the **catalog branch** | superbuild preset |
+| **Frontend bindings** (`hipdnn_frontend_python.abi3.so`) | `projects/hipdnn/python/frontend_bindings`, on the **injection branch** | standalone CMake |
+| **Injection package** (`hipdnn_torch/`) | this directory, on the **injection branch** | run in place (no build) |
+
+The two branches stay **separate on purpose** and are combined only at runtime through
+`HIPDNN_TORCH_PROVIDER_SO`:
+
+- `users/brpepers/aot-catalog-engine` — the provider/engine + catalog. Never merged into
+  the injection branch.
+- `users/brpepers/hipdnn-torch-injection` — the frontend-binding commits **and** this
+  Python package. (The `frontend_bindings/` commits are kept disjoint from the
+  package commits so they can lift into a standalone frontend PR later.)
+
+> [!IMPORTANT]
+> The single hardest lesson of this bring-up: **the frontend binds to exactly one
+> `libhipdnn_backend.so`, and PyTorch auto-loads its own bundled copy on CUDA init.** If
+> your frontend/provider need a *newer* backend ABI than the one torch bundles, you get
+> silent `HIPDNN_ATTR_UNKNOWN` errors or missing symbols. See
+> [§4 The one-backend rule](#4-the-one-backend-abi-rule) — read it before you build the
+> frontend, not after.
+
+## 2. Prerequisites
+
+- A supported GPU visible to ROCm. Validated on **gfx1151** (Radeon 8060S / Strix Halo).
+- A ROCm build toolchain: `cmake >= 3.26`, `ninja`, a ROCm/clang compiler that targets
+  your arch (the TheRock SDK ships one).
+- Python 3.12 (the bindings are built `STABLE_ABI` against 3.12).
+- A venv with a **TheRock ROCm nightly** torch. This runbook was validated against:
+  - `torch 2.10.0+rocm7.13.0a20260513`
+  - the paired `_rocm_sdk_libraries_gfx1151` wheel (installed automatically as a dep)
+  ```bash
+  python3.12 -m venv ~/aot-ab-venv
+  . ~/aot-ab-venv/bin/activate
+  # Install the ROCm nightly torch for your arch per TheRock's instructions. The key is
+  # that it pulls in a matching _rocm_sdk_libraries_<arch> wheel; that is the SDK the
+  # provider and frontend must be built against, and whose libhipdnn_backend.so torch
+  # loads at CUDA-init.
+  python -c "import torch, glob, site; \
+    print(torch.__version__); \
+    print(glob.glob(site.getsitepackages()[0] + '/_rocm_sdk_libraries_*'))"
+  ```
+
+Pick your two worktrees/checkouts and export their roots — the rest of this doc uses these:
+
+```bash
+export CAT=/path/to/worktree/aot-catalog-engine        # provider/catalog branch
+export INJ=/path/to/worktree/hipdnn-torch-injection    # frontend + injection branch
+export VENV=~/aot-ab-venv
+export SDKLIB=$(python -c "import glob,site; print(glob.glob(site.getsitepackages()[0]+'/_rocm_sdk_libraries_gfx1151/lib')[0])")
+```
+
+## 3. Build the pieces
+
+### 3a. Engine plugin + catalog (on `$CAT`)
+
+From the **repo root** of the catalog worktree, build the provider with the superbuild
+preset (this is the only way to get `hip-kernel-provider`; it is not in the default
+build — see the README's "Getting a provider" section):
+
+```bash
+cd "$CAT"
+cmake --preset hip-kernel-provider   # or add hip-kernel-provider to ROCM_LIBS_ENABLE_COMPONENTS
+cmake --build build
+```
+
+Products you care about:
+
+```
+$CAT/build/lib/hipdnn_plugins/engines/libhip_kernel_provider.so        # the plugin
+$CAT/build/lib/hipdnn_plugins/engines/arch_content/aot_catalog/gfx1151 # the 7-family catalog
+```
+
+> [!WARNING]
+> **Two catalog trees exist under `engines/`, and only one is complete.** The build lays
+> down both `engines/aot_catalog/` (the original 4 families: `fmha_wmma_fwd`,
+> `gemm_wmma`, `gemm_wmma_universal`, `rmsnorm2d`) **and**
+> `engines/arch_content/aot_catalog/` (all **7**: the four above plus `activation`,
+> `conv2d_fprop`, `layernorm2d`). If `HIPDNN_AOT_CATALOG_DIR` points at the 4-family tree
+> (or you let a default win), then layernorm / silu / gelu / conv2d **silently fall back
+> to native** — `provider_ready()` is still `True` and the model still runs, so this is
+> easy to miss. Always point at the `arch_content/aot_catalog` tree (see §5).
+
+> [!NOTE]
+> **A stale `.so` won't have new adapters.** If you add or change an op adapter in the
+> provider, a plain incremental `ninja`/`cmake --build build` relinks it — but if you're
+> reusing a `.so` from an earlier checkout, confirm the adapters are present before
+> chasing a "didn't route" ghost:
+> ```bash
+> nm -C "$CAT/build/lib/hipdnn_plugins/engines/libhip_kernel_provider.so" | grep -iE 'layernorm|conv|pointwise|matmul|rmsnorm|sdpa' | head
+> ```
+
+### 3b. Frontend bindings (on `$INJ`)
+
+The committed bindings (`recover rmsnorm/sdpa`, `add layernorm`) reference frontend
+surface — `BehaviorNote`, the RFC-0016 `is_override_shape_enabled` graph attribute — that
+is **newer than what a several-months-old nightly's header-only frontend provides**.
+Building against too old a prefix fails at compile (`isKnownBehaviorNote` /
+`BehaviorNote` not declared). So build the extension against a **recent hipDNN source /
+build tree**, not the pip nightly's stale artifact:
+
+```bash
+cd "$INJ/projects/hipdnn/python/frontend_bindings"
+cmake -S . -B build -GNinja \
+  -DHIPDNN_BINDINGS_ENABLE_SDPA=ON \
+  -DCMAKE_PREFIX_PATH="$CAT/build;$VENV/lib/python3.12/site-packages/_rocm_sdk_libraries_gfx1151" \
+  -DPython_EXECUTABLE="$VENV/bin/python"
+cmake --build build
+# product: build/hipdnn_frontend_python.abi3.so
+```
+
+Two flags that cost hours if you get them wrong:
+
+- **`-DHIPDNN_BINDINGS_ENABLE_SDPA=ON`** (note the `BINDINGS_` prefix). The `g.sdpa` /
+  `SdpaAttributes` surface is `#ifdef HIPDNN_ENABLE_SDPA`-guarded. You **cannot** flip it
+  with `-DHIPDNN_ENABLE_SDPA=ON`, because `hipdnn_frontendConfig.cmake` does
+  `set(HIPDNN_ENABLE_SDPA OFF)` and shadows a same-named option. The CMakeLists exposes a
+  distinct `HIPDNN_BINDINGS_ENABLE_SDPA` option that maps to the define — use that.
+- **`CMAKE_PREFIX_PATH` ordering.** Put the fresh hipDNN build tree (`$CAT/build`, which
+  exports `hipdnn_frontendConfig.cmake` / `hipdnn_backendConfig.cmake` for the just-built
+  headers) **before** the pip SDK prefix (which supplies `hipConfig.cmake`). First match
+  wins; if the stale SDK's frontend config is found first, the build fails on the missing
+  new surface.
+
+### 3c. Injection package (on `$INJ`)
+
+Nothing to build — it's run in place. `samples/*` do `sys.path.insert` to import the
+package, and `tests/` import it directly. You only need the env from §5.
+
+## 4. The one-backend ABI rule
+
+The frontend `.so` links `libhipdnn_backend.so`. **PyTorch also loads its own bundled
+backend** during CUDA init. Under `RTLD_GLOBAL`, first-loaded wins symbol resolution, so
+if the two disagree on ABI you get one of:
+
+- `undefined symbol: hipdnnBackendGetSerializedBinaryGraphAndPlan_ext` — torch's bundled
+  backend is **older** than the frontend expects.
+- `HIPDNN_ATTR_UNKNOWN` on `is_override_shape_enabled` (layernorm/rmsnorm) — the develop
+  frontend sets an RFC-0016 attribute unconditionally, and torch's **older** bundled
+  backend rejects it.
+
+`bootstrap.py` deliberately `dlopen`s **torch's own** backend first, which is correct
+*when torch's bundle is new enough*. When it isn't, you have two options:
+
+1. **Preferred — use a torch nightly whose bundled backend is post-RFC-0016.** Then
+   nothing special is needed; the bootstrap's dlopen of torch's backend just works.
+2. **Fallback — swap torch's bundled backend for the one you built.** Back it up first,
+   then overwrite:
+   ```bash
+   cp "$SDKLIB/libhipdnn_backend.so" "$SDKLIB/libhipdnn_backend.so.orig"   # once
+   cp "$CAT/build/lib/libhipdnn_backend.so" "$SDKLIB/libhipdnn_backend.so"
+   ```
+   This is what the validated WSL config uses (backup lives at
+   `$SDKLIB/libhipdnn_backend.so.orig`). To undo it, copy `.orig` back.
+
+> [!CAUTION]
+> `LD_PRELOAD`-ing a newer backend instead of swapping does **not** work here — it drags
+> in a second statically-linked LLVM and dies with
+> `spirv-expand-step ... registered more than once`. Swap the file (option 2) or match
+> the nightly (option 1); don't preload.
+
+## 5. Wire the environment
+
+Everything below is what a validated run exports. `HIPDNN_TORCH_PROVIDER_SO` is the only
+*required* variable; the rest pin the pieces you built above and the catalog tree.
+
+```bash
+BUILD="$CAT/build"
+PROV="$BUILD/lib/hipdnn_plugins/engines/libhip_kernel_provider.so"
+
+export HIPDNN_TORCH_PROVIDER_SO="$PROV"
+# Pin the rocKE catalog engine. This runbook FORCES rocKE on purpose -- we're validating
+# rocKE kernels, so we want every routed op served by rocKE, not "whatever hipDNN picks."
+# For real-model perf later you'd NOT pin this (see §8). See also reference on engine selection.
+export HIPDNN_TORCH_ENGINE=AOT_CATALOG_ENGINE
+export HIPDNN_TORCH_FRONTEND_DIR="$INJ/projects/hipdnn/python/frontend_bindings/build"
+# Point at torch's bundled backend (swapped-in develop backend per §4, or a new-enough nightly):
+export HIPDNN_TORCH_BACKEND_GLOB="$SDKLIB/libhipdnn_backend.so"
+
+# The 7-family tree (NOT the 4-family engines/aot_catalog) -- see §3a warning:
+export HIPDNN_AOT_CATALOG_DIR="$BUILD/lib/hipdnn_plugins/engines/arch_content/aot_catalog"
+
+# WSL2 only: the GPU shim must be discoverable before torch inits CUDA (see §9).
+export LD_LIBRARY_PATH="$VENV/wsl-shim:$(dirname "$PROV"):$BUILD/lib:$LD_LIBRARY_PATH"
+```
+
+Notes:
+- `HIPDNN_TORCH_FRONTEND_DIR` is the raw `frontend_bindings/build` dir; it's used only if
+  the `hipdnn-frontend` wheel isn't importable. If you `pip install` the frontend wheel
+  instead, you can drop this.
+- `HIPDNN_AOT_CATALOG_DIR` is an **engine** variable, not a `hipdnn_torch` one — the
+  package doesn't set or clear engine env (by design). The engine reads it; the AOT
+  catalog resolver logs which root it chose (see §6).
+
+## 6. Verify + prove it's hipDNN
+
+Three layers of proof, cheapest first. Together they establish "the op ran on hipDNN"
+and enumerate every native fallback with a reason.
+
+**(a) It's wired at all — no model:**
+```bash
+python -c "import hipdnn_torch; print(hipdnn_torch.provider_ready())"   # -> True
+```
+
+**(b) Parity + routing, per op — the pytest suite:**
+```bash
+cd "$INJ/projects/hipdnn/python/hipdnn_torch"
+python -m pytest tests/ -q
+```
+`tests/test_gates.py` runs on CPU (no GPU/provider needed) and asserts each override
+*declines* what it can't serve (f32, grouped conv, erf-gelu, multi-axis norm).
+`tests/test_parity.py` (auto-skipped unless `provider_ready()`) asserts, for every op,
+that the census shows **`aot>0`** (it routed, not fell back) *and* the result matches
+native within the dtype tolerance. Validated: **41 passed** on gfx1151.
+
+**(c) The census is the proof-of-hipDNN + the fallback ledger.** Every routed call
+increments an `aot` counter keyed by shape; every fallback increments `native` **with a
+reason**. `native=0` across the board means nothing silently reverted to PyTorch:
+```bash
+python samples/minimal_block.py     # prints per-op "aot=N native=0" + parity OK
+python samples/microbench_ab.py     # per-op A/B: parity, timing, routed-or-fell-back
+```
+Expect one *deliberate* fallback in the mix — exact-erf `F.gelu` has no catalog builder
+and is counted as `erf-gelu unsupported`. That's the ledger working, not a bug.
+
+**(d) Engine-level trace — irrefutable proof the catalog served the op.** Set
+`HIPDNN_AOT_DEBUG=1` and the AOT catalog engine narrates catalog resolution, family
+loads, and per-graph accept/decline:
+```bash
+HIPDNN_AOT_DEBUG=1 python samples/minimal_block.py 2>&1 | grep aot-catalog
+```
+A healthy run shows the resolver picking your `HIPDNN_AOT_CATALOG_DIR` and loading all
+seven families, e.g.:
+```
+[hipdnn aot-catalog] resolving catalog for arch gfx1151: root=.../arch_content/aot_catalog (env HIPDNN_AOT_CATALOG_DIR)
+[hipdnn aot-catalog] loaded family 'fmha_wmma_fwd_gfx1151'      op_kind='sdpa'        (2 kernels)
+[hipdnn aot-catalog] loaded family 'activation_gfx1151'         op_kind='pointwise'   (12 kernels)
+[hipdnn aot-catalog] loaded family 'gemm_wmma_universal_gfx1151' op_kind='matmul'     (12 kernels)
+[hipdnn aot-catalog] loaded family 'layernorm2d_gfx1151'        op_kind='layernorm'   (18 kernels)
+[hipdnn aot-catalog] loaded family 'conv2d_fprop_gfx1151'       op_kind='conv_fprop'  (6 kernels)
+[hipdnn aot-catalog] loaded family 'rmsnorm2d_gfx1151'          op_kind='rmsnorm'     (18 kernels)
+[hipdnn aot-catalog] loaded family 'gemm_wmma_gfx1151'          op_kind='matmul'      (2 kernels)
+[hipdnn aot-catalog] loaded 7 family(ies) for arch gfx1151
+```
+If you see `loaded 4 family(ies)` you're pointed at the wrong catalog tree (§3a). If you
+see the resolver pick a `root=` you didn't set, `HIPDNN_AOT_CATALOG_DIR` isn't taking —
+it must be exported before the process starts.
+
+> **Tracking native fallbacks generally.** For any real model, call
+> `hipdnn_torch.enable_logging()` to print each fallback as it happens, and
+> `print(hipdnn_torch.report())` at the end for the ranked reason list — that list *is*
+> the "what hipDNN still needs" backlog. `census()` returns the same counters
+> programmatically for CI assertions like "no unexpected fallbacks."
+
+## 7. Running a real model (ComfyUI / LTX-Video)
+
+`samples/ltx_video_ab.py` drives a real LTX-Video diffusion transformer through the
+injection with a per-op **device-time** census (needs a ComfyUI checkout via
+`COMFYUI_PATH`). One caveat worth stating up front:
+
+> [!NOTE]
+> **Empty / random-weight checkpoints only exercise part of the graph.** With no real
+> `.safetensors` checkpoint, the transformer stack may not run end-to-end, but the
+> **VAE** path (conv2d + activations) does — which is enough to prove conv/activation
+> routing on real tensor shapes. Full-model perf numbers need a real checkpoint; op
+> *routing* can be verified on the VAE path alone.
+
+## 8. Engine selection: force rocKE now, pick-best later
+
+hipDNN does **not** yet have automatic engine-selection heuristics. Which engine serves a
+problem comes from a **static ordering plus rules files** — not a cost model. It also has
+an **auto-tuning mode**: it runs every engine that claims it can do the work, measures
+them, and emits rules capturing the winners, which you can replay to enforce the same
+selection later without re-tuning.
+
+That gives two very different intents, and this runbook is squarely in the first:
+
+- **Validating rocKE kernels (what this runbook does).** We *force* rocKE by pinning
+  `HIPDNN_TORCH_ENGINE=AOT_CATALOG_ENGINE` (+ `HIPDNN_AOT_CATALOG_DIR`). Every routed op is
+  then served by rocKE, which is exactly what we want when the goal is to exercise and
+  prove those kernels. Read the census accordingly: **`aot>0` / `native=0` means "rocKE
+  served it, didn't fall back to native PyTorch" — it is NOT a claim that rocKE is the
+  fastest hipDNN engine for that shape.** The microbench speedups in §6 are rocKE-vs-native
+  under a forced engine, not a cross-engine best.
+
+- **Real-workload model perf (later).** Do **not** pin the engine. Let hipDNN pick the best
+  engine it has for each problem — rocKE will increasingly compete with the HIP kernel
+  provider, MIOpen, and the AITER ASM SDPA kernels. Use auto-tuning to generate rules for
+  the target box, then run with those rules; the endgame is selection heuristics that get
+  close to auto-tuned results automatically. On this axis the interesting number is
+  best-engine-vs-native (and rocKE-vs-best-other-engine), not forced-rocKE-vs-native.
+
+Practically: keep the pin for the validation/parity work here; drop it (and lean on
+auto-tuned rules) when you move to honest full-model performance comparisons.
+
+## 9. Platform notes
+
+### WSL2 (validated — this is the config all §s above describe)
+- **The `librocdxg` GPU shim must be on `LD_LIBRARY_PATH` before torch inits CUDA**, or
+  device enumeration fails. Stage it in a dir (this runbook uses `$VENV/wsl-shim/`
+  holding `librocdxg.so` + `librocdxg.so.1`) and prepend that dir to `LD_LIBRARY_PATH`
+  (§5). Native Linux and Windows do **not** need this.
+- The one-backend swap (§4 option 2) was used here because the `2026-05-13` nightly's
+  bundled backend predates the RFC-0016 attribute the develop frontend sets.
+
+### Native Linux
+- No `librocdxg` shim needed; drop it from `LD_LIBRARY_PATH`.
+- Everything else (build steps, the one-backend rule, the catalog-tree gotcha) applies
+  unchanged.
+
+### Native Windows
+> [!NOTE]
+> **Placeholder — not yet validated.** Windows bring-up is planned; notes will be added
+> here as it's worked through. Expected deltas from the WSL/Linux runbook, to confirm:
+> - Use `scripts/windows/wheel_build_setup.ps1` for the ROCm SDK/toolchain (see
+>   `projects/hipdnn/CLAUDE.md`), and the `CMAKE_PREFIX_PATH`/`CMAKE_PROGRAM_PATH` it prints.
+> - The backend is a `.dll` on `PATH`, not a `.so` on `LD_LIBRARY_PATH`; the one-backend
+>   rule (§4) still applies but the swap/preload mechanics differ (DLL search order).
+> - No `librocdxg` shim (that's WSL-specific).
+> - Confirm the `STABLE_ABI` extension name/loader behavior and whether the frontend
+>   wheel install path resolves the sibling backend DLL via `$ORIGIN`-equivalent RPATH.
+
+## 10. Quick caveat index
+
+| Symptom | Cause | Fix | § |
+|---------|-------|-----|---|
+| `provider_ready()==True` but layernorm/silu/gelu/conv2d never route | pointed at the 4-family `engines/aot_catalog` tree | set `HIPDNN_AOT_CATALOG_DIR` to `arch_content/aot_catalog` | 3a, 5 |
+| SDPA surface missing after rebuild | used `-DHIPDNN_ENABLE_SDPA` (shadowed) | use `-DHIPDNN_BINDINGS_ENABLE_SDPA=ON` | 3b |
+| Frontend build fails on `BehaviorNote`/`isKnownBehaviorNote` | frontend prefix too old | put `$CAT/build` first on `CMAKE_PREFIX_PATH` | 3b |
+| `undefined symbol: hipdnnBackend...GraphAndPlan_ext` | torch's bundled backend too old | new-enough nightly, or swap backend | 4 |
+| `HIPDNN_ATTR_UNKNOWN` (is_override_shape_enabled) | two backends, old torch one wins | swap torch's bundled backend | 4 |
+| `spirv-expand-step registered more than once` | tried to `LD_PRELOAD` a 2nd backend | swap the file instead | 4 |
+| new adapter added but op still falls back | reusing a stale provider `.so` | relink; verify with `nm -C` | 3a |
+| device enumeration fails on WSL | `librocdxg` shim not on `LD_LIBRARY_PATH` | prepend the shim dir | 9 |
+| `erf-gelu unsupported` fallback | expected — no catalog builder for exact GELU | use `approximate="tanh"`, or accept the fallback | 6 |
