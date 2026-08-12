@@ -194,41 +194,46 @@ int dispatcher_run_abquant_gemm(const void* A,
 
     // Host-side BQ prep (run_gemm_quant_example.inc:799-825): three cases as in
     // bquant -- bq_permuteN (+ optional shuffle_bq), shuffle_bq only, or plain.
+    // Only build a host tensor when a permute/shuffle is applied; the plain case
+    // copies raw BQ straight to device.
     constexpr bool bq_use_permute_n =
         SelectedKernel::PreshuffleB && SelectedKernel::TiledMMAPermuteN && (BGroupSizeN == 1);
     {
-        auto bq_h = load_host_tensor<false>(
-            BQ_host, static_cast<int>(QK_B), static_cast<int>(QN_B), static_cast<int>(QK_B));
         const std::size_t bq_bytes = elements_to_bytes<QDataType>(QK_B * QN_B);
-        if constexpr(bq_use_permute_n)
-        {
-            auto bq_permuted = ck_tile::bq_permuteN<typename SelectedKernel::BShuffleConfig>(
-                bq_h, static_cast<ck_tile::index_t>(BGroupSizeN));
-            if constexpr(SelectedKernel::BPreshuffleQuant)
-            {
-                const int block_bq_k =
-                    static_cast<int>(SelectedKernel::TileK) / static_cast<int>(BQuantGroupSize::kK);
-                auto bq_shuffled = ck_tile::shuffle_bq(&bq_permuted, block_bq_k);
-                BRIDGE_HIP_CHECK(
-                    kFn, hipMemcpy(BQ_dev, bq_shuffled.data(), bq_bytes, hipMemcpyHostToDevice));
-            }
-            else
-            {
-                BRIDGE_HIP_CHECK(
-                    kFn, hipMemcpy(BQ_dev, bq_permuted.data(), bq_bytes, hipMemcpyHostToDevice));
-            }
-        }
-        else if constexpr(SelectedKernel::BPreshuffleQuant)
+        if constexpr(bq_use_permute_n || SelectedKernel::BPreshuffleQuant)
         {
             const int block_bq_k =
                 static_cast<int>(SelectedKernel::TileK) / static_cast<int>(BQuantGroupSize::kK);
-            auto bq_shuffled = ck_tile::shuffle_bq(&bq_h, block_bq_k);
-            BRIDGE_HIP_CHECK(
-                kFn, hipMemcpy(BQ_dev, bq_shuffled.data(), bq_bytes, hipMemcpyHostToDevice));
+            auto bq_h = load_host_tensor<false>(
+                BQ_host, static_cast<int>(QK_B), static_cast<int>(QN_B), static_cast<int>(QK_B));
+            if constexpr(bq_use_permute_n)
+            {
+                auto bq_permuted = ck_tile::bq_permuteN<typename SelectedKernel::BShuffleConfig>(
+                    bq_h, static_cast<ck_tile::index_t>(BGroupSizeN));
+                if constexpr(SelectedKernel::BPreshuffleQuant)
+                {
+                    auto bq_shuffled = ck_tile::shuffle_bq(&bq_permuted, block_bq_k);
+                    BRIDGE_HIP_CHECK(
+                        kFn,
+                        hipMemcpy(BQ_dev, bq_shuffled.data(), bq_bytes, hipMemcpyHostToDevice));
+                }
+                else
+                {
+                    BRIDGE_HIP_CHECK(
+                        kFn,
+                        hipMemcpy(BQ_dev, bq_permuted.data(), bq_bytes, hipMemcpyHostToDevice));
+                }
+            }
+            else // BPreshuffleQuant only
+            {
+                auto bq_shuffled = ck_tile::shuffle_bq(&bq_h, block_bq_k);
+                BRIDGE_HIP_CHECK(
+                    kFn, hipMemcpy(BQ_dev, bq_shuffled.data(), bq_bytes, hipMemcpyHostToDevice));
+            }
         }
         else
         {
-            BRIDGE_HIP_CHECK(kFn, hipMemcpy(BQ_dev, bq_h.data(), bq_bytes, hipMemcpyHostToDevice));
+            BRIDGE_HIP_CHECK(kFn, hipMemcpy(BQ_dev, BQ, bq_bytes, hipMemcpyHostToDevice));
         }
     }
     BRIDGE_HIP_CHECK(kFn, hipMemset(C_dev, 0, elements_to_bytes<CDataType>(M * N)));
