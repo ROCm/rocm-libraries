@@ -1,7 +1,8 @@
 # Why a stable, versioned boundary
 
 Status: proposed design, prototype-backed. The failures below are real and reproducible;
-the fixes are in this tree, each proven by a named test.
+each fix is in this tree and names the CTest that locks it, except where the text marks a
+claim as an intended contract or still-future proof.
 
 Most of the time, a ROCm math library and its callers get along fine. The trouble starts
 on the day you want to change something. This chapter is about that day - the ways the
@@ -46,7 +47,8 @@ wrong at runtime, intermittently, depending on load order.
 
 The fix is an explicit export allowlist - a version script that names the one symbol a
 provider may expose and hides everything else. Proven by `rocm_interfaces.exports`, which
-builds every provider DSO and asserts each exports exactly one symbol, not 176.
+builds a fixed, manually maintained list of provider DSOs and asserts each exports exactly
+one symbol, not 176.
 
 ## Failure 3: two library majors in one process interpose each other
 
@@ -58,20 +60,28 @@ it is silent.
 
 The fix is named ELF version nodes. `rocblas_sgemm@@ROCBLAS_ABI_5` and
 `rocblas_sgemm@@ROCBLAS_ABI_6` are distinct symbols to the loader even though the C name is
-identical, so each caller binds to the major it was built against. Proven by
-`rocm_interfaces.abi03_coresidency` (both resolve to their own node) and
-`rocm_interfaces.abi03_interpose_hazard` (without the nodes, the interposition reproduces).
+identical, so each caller binds to the major it was built against. Two tests lock this:
+`rocm_interfaces.abi03_coresidency` (each handle resolves its own node, cross-version
+lookup nil) and `rocm_interfaces.abi03_interpose_hazard` (remove the node and a bare global
+lookup reproduces the hazard). The causal linked-consumer proof is still future work (see
+[07-status-and-roadmap.md](07-status-and-roadmap.md#aspirational-direction-not-commitment)).
 
 ## Failure 4: the versioning silently stops working
 
 The whole scheme rests on the linker actually stamping those version nodes. Several ordinary
 build choices can break that stamping without any error:
 
-- **A toolchain mismatch.** GCC link-time optimization with the LLVM linker (lld) drops the
-  version-script assignments on the floor - lld carries no GCC LTO plugin. Your symbols come
-  out unversioned and you do not find out until interposition strikes in the field. Guarded
-  at configure time by `rocm_interfaces_assert_lto_linker_supported()`; proven by
-  `rocm_interfaces.lto_linker_guard_rejects_gnu_lld` and the three `..._accepts_...` cases.
+- **A toolchain mismatch.** GCC link-time optimization with the LLVM linker (lld) cannot
+  resolve the version-script assignments out of GCC LTO IR - lld carries no GCC LTO plugin.
+  In the observed RES-03 spike this pairing failed hard: ld.lld errored "version script
+  assignment of ROCBLAS_ABI_5 to symbol rocblas_sgemm failed: symbol not defined" for every
+  versioned symbol and produced no DSO. That raw error is confusing deep in a build, and a
+  future lld that resolved the symbols instead of erroring could silently emit unversioned
+  exports - so the combination is refused at configure time by
+  `rocm_interfaces_assert_lto_linker_supported()`; proven by
+  `rocm_interfaces.lto_linker_guard_rejects_gnu_lld` and the three `..._accepts_...` cases
+  (see
+  [04-hardening.md](04-hardening.md#4-refuse-a-toolchain-that-cannot-stamp-version-nodes-res-03)).
 - **A different symbol shape.** A data object, a C++ mangled method, an RTTI vtable, or a
   build under AddressSanitizer are each a chance for the node to fail to attach. Proven to
   survive by `rocm_interfaces.abi06_data_version_node`,
@@ -92,11 +102,12 @@ Regression-locked under ThreadSanitizer by `rocm_interfaces.ops04_concurrency`.
 | Locked to one provider | Cannot replace the whole implementation or swap providers without relinking | Loader/provider seam; selection frozen at context creation | `abi03_coresidency`, architecture design |
 | C++ symbol leakage | Two libraries share `std::` symbols; wrong code runs | Version-script allowlist: export one symbol, hide the rest | `exports` |
 | Interposition across majors | New library calls old library's implementation | Named ELF version nodes per major | `abi03_interpose_hazard`, `abi03_coresidency` |
-| Toolchain drops versioning | Symbols emitted unversioned, silently | Configure-time GCC-LTO-plus-lld guard | `lto_linker_guard_rejects_gnu_lld` |
+| Toolchain cannot stamp versioning | GCC-LTO + lld link fails hard and produces no DSO (and a future lld could instead emit unversioned symbols) | Configure-time GCC-LTO-plus-lld guard that fails the build with a named RES-03 error | `lto_linker_guard_rejects_gnu_lld` |
 | Node fails on odd symbol shapes | Data / mangled / RTTI / ASan symbols unversioned | Proof suite exercises each shape | `abi06_data_version_node`, `abi05_cpp_mangled_version_node`, `abi04_asan_version_node_survives` |
 | Loader data race | Dispatch corruption under concurrent use | TSan regression lock on registry + loader | `ops04_concurrency` |
 
-Each `Proven by` name is a `ctest`. Run `ctest --test-dir <build> -R <name>` to see it for
-yourself. The mechanisms are described in [01-architecture.md](01-architecture.md), the
+Most `Proven by` entries name a `ctest` you can run
+(`ctest --test-dir <build> -R <name>`); where a row cites "architecture design" instead,
+the guarantee is structural, not a single executable test. The mechanisms are described in [01-architecture.md](01-architecture.md), the
 contract that governs them in [03-abi-and-versioning-contract.md](03-abi-and-versioning-contract.md),
 and the story behind each proof in [04-hardening.md](04-hardening.md).

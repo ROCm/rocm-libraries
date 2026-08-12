@@ -41,7 +41,9 @@ Old callers keep working because the prefix they read is byte-for-byte the same.
 same discipline the response struct's `dispatch_table_size` enforces at selection time: a
 provider that reports a table too small for the required entries is skipped.
 
-Implementation status (prototype). Only the size-floor half of the boxed rule runs today, and
+### Implementation status (prototype)
+
+Only the size-floor half of the boxed rule runs today, and
 it is keyed on the provider response, not on the dispatch table's own header. At selection
 (runtime/src/provider_registry.cpp, ProviderRegistry::query_entry) the runtime validates the
 response header's abi_major against ROCM_INTERFACES_ABI_MAJOR and skips any provider whose
@@ -155,9 +157,13 @@ step-by-step recipe lives in [05-extending.md](05-extending.md).)
 ## The non-vacuity proof recipe
 
 A test that asserts "the symbol carries version node X" is worthless if it would also pass
-when the versioning is broken. Every ABI proof in this tree is built to fail when the thing
-it checks is absent. When you add a proof (see [05-extending.md](05-extending.md)), make it
-non-vacuous the same way:
+when the versioning is broken. Every ABI proof in this tree is designed to fail when the thing
+it checks is absent - that is the non-vacuity discipline below. Most carry an explicit discrete
+negative-control build; a few (for example `abi04_three_line_order`) currently get their
+discrimination only from an internal cross-node-nil assertion, with the dedicated same-node
+negative build still COMMITTED-NEXT (see [04-hardening.md](04-hardening.md) and
+[07-status-and-roadmap.md](07-status-and-roadmap.md#committed-next-the-immediate-plan)). When
+you add a proof (see [05-extending.md](05-extending.md)), make it non-vacuous the same way:
 
 1. **Positive.** Build the DSO the correct way. Assert the exact node is present on the
    exact symbols - `nm -D` shows `sym@@NODE`, and the node name is the one you expect.
@@ -169,6 +175,9 @@ non-vacuous the same way:
    build carries `__tsan_` symbols. This catches a silent fallback that would make the test
    pass for the wrong reason.
 
-The worked examples are in [04-hardening.md](04-hardening.md); `abi04_three_line_order`
-(positive plus a same-node negative) and `abi05_cpp_mangled_version_node` (positive plus
-node-dropped, RTTI-removed, and no-ODR-use negatives) are the templates to copy.
+The worked examples are in [04-hardening.md](04-hardening.md).
+`abi05_cpp_mangled_version_node` (positive plus node-dropped, RTTI-removed, and no-ODR-use
+negatives) is the fully worked template to copy. `abi04_three_line_order` shows the positive
+plus an internal cross-node-nil check; its dedicated same-node negative build is still future
+work (COMMITTED-NEXT), so copy its structure but add the discrete negative control this
+recipe requires.

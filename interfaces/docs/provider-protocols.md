@@ -1,12 +1,23 @@
 # Provider protocol specification
 
+Status: proposed target contract; partially implemented. This spec states the destination
+provider protocol, not current prototype behavior. Where the two differ, the
+implementation-status note in
+[03-abi-and-versioning-contract.md](03-abi-and-versioning-contract.md#implementation-status-prototype)
+is authoritative, and [07-status-and-roadmap.md](07-status-and-roadmap.md) records what is
+DONE, COMMITTED-NEXT, and ASPIRATIONAL.
+
 ## Contract shared by all domains
 
 Provider protocols are implementation contracts, not public client APIs. They are C ABI
-tables with a single exported bootstrap symbol. All tables and extensible records start
-with `struct_size`, `abi_major`, and `abi_minor`. A consumer accepts a larger table with a
-compatible major and ignores its tail; a required entry outside the supplied size is an
-incompatible provider.
+tables with a single exported bootstrap symbol. Every table and extensible record starts
+with `struct_size`, `abi_major`, and `abi_minor`. The target contract is that a consumer
+accepts a larger table with a compatible major and ignores its tail, rejecting a provider
+whose required entry falls outside the supplied size. In the current prototype only the size
+floor is enforced: loaders request the full current table size (`sizeof` the whole table)
+and reject any provider reporting a smaller `dispatch_table_size`. Embedded-header reading,
+`abi_minor`, and optional-tail negotiation are not yet implemented (see
+[03-abi-and-versioning-contract.md](03-abi-and-versioning-contract.md#implementation-status-prototype)).
 
 Modules are opened with local symbol scope and remain pinned while any dispatch table,
 context, token, or loader object refers to them. Provider selection happens once at the
@@ -15,8 +26,15 @@ library-specific context boundary. An operation cannot select a different provid
 Manifests are strict JSON documents. Module paths are relative to the manifest and cannot
 escape its directory. Entries name a provider, compatibility cohort, domain, query symbol,
 priority, and numeric gfx list; zero is the wildcard. An exact gfx match outranks a wildcard
-before priority is considered. A provider response is rejected if its identity, ABI, table
-size, required entries, or requested domain do not agree.
+before priority is considered. A provider response is validated in two stages, not one. At
+selection the runtime checks the response's `abi_major` against `ROCM_INTERFACES_ABI_MAJOR`,
+that the requested domain and cohort match, and that `dispatch_table_size` is at least the
+required table size; a provider failing any of these is skipped. The individual required
+entry points are null-checked by the domain loader after selection returns (for example
+`BlasContext::create`), which throws if a required pointer is null -- they are not inspected
+during selection. See the implementation-status note in
+[03-abi-and-versioning-contract.md](03-abi-and-versioning-contract.md#implementation-status-prototype)
+and [01-architecture.md](01-architecture.md#how-a-provider-gets-picked).
 
 Host services provide allocation, deallocation, and structured tracing. Providers must not
 retain pointers to request records after a call. Device pointers and asynchronous workspace

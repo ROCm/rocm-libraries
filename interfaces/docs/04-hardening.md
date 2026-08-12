@@ -1,7 +1,9 @@
 # Hardening: what each proof exists to stop
 
-Status: proposed design, prototype-backed. Every capability below is real code, and every
-claim names the `ctest` that proves it. Run one with
+Status: proposed design, prototype-backed. Each hardening step below is real code.
+Executable capabilities name the `ctest` that proves them; where a proof is partial or a
+control is still future work, the step says so and cites
+[07-status-and-roadmap.md](07-status-and-roadmap.md). Run one with
 `ctest --test-dir <build> -R <name> --output-on-failure`.
 
 The [architecture](01-architecture.md) describes a versioned boundary. A boundary is only
@@ -10,10 +12,10 @@ attach where they should, and the loader survives being hammered by threads. Thi
 walks each hardening step in the order it was built. For each: the threat first, then the
 fix, then the test that would fail if the fix regressed.
 
-The whole suite runs green. `tests/CMakeLists.txt` defines 28 tests (grep `add_test`); how
-many register depends on which optional linkers and sanitizers your toolchain offers. As last
-verified on 2026-08-11, a canonical amdclang++/ld.lld build registered 26, all passing.
-Names, not counts, are what you should cite - they do not drift.
+`tests/CMakeLists.txt` defines the suite (grep `add_test`); how many register depends on
+which optional linkers and sanitizers your toolchain offers. Cite test names, not counts -
+names do not drift. A canonical amdclang++/ld.lld build registers the full applicable set
+green; the exact number is a moving target and deliberately not pinned here.
 
 Platform scope. Every proof in this chapter is Linux/ELF-specific. The export, version-node,
 co-residency, ldconfig, and linker-guard tests are registered only under UNIX AND NOT APPLE in
@@ -36,11 +38,16 @@ the single symbol a provider may expose and sends everything else to `local: *`.
 `providers/recording/CMakeLists.txt`, so it covers all recording providers and the rocBLAS
 bridge target uniformly.
 
-**Proof.** `rocm_interfaces.exports` builds every provider DSO and asserts each exports
-exactly one defined, non-absolute dynamic symbol (`rocm_interfaces_provider_query_v1`) - the
-checker runs `nm -D --defined-only --with-symbol-versions` and ignores the absolute
-version-node entry, so it is one callable export, not 176. Landed in commit `a929517`
-(`fix(interfaces): stop recording providers leaking libstdc++ symbols`).
+**Proof.** `rocm_interfaces.exports` builds the provider DSOs on a fixed, manually
+maintained list (the `-D<NAME>_PROVIDER=` arguments in `tests/CMakeLists.txt` and the
+matching `foreach` in `tests/check_exports.cmake`) and asserts each exports exactly one
+defined, non-absolute dynamic symbol (`rocm_interfaces_provider_query_v1`) - the checker
+runs `nm -D --defined-only --with-symbol-versions` and ignores the absolute version-node
+entry, so it is one callable export, not 176. A provider not on that list is not inspected
+until it is added in both places (auto-derivation is COMMITTED-NEXT; see
+[07-status-and-roadmap.md](07-status-and-roadmap.md#committed-next-the-immediate-plan)).
+Landed in commit `a929517` (`fix(interfaces): stop recording providers leaking libstdc++
+symbols`).
 
 ## 2. Give the exports names, so majors can coexist (ABI-03, named nodes)
 
@@ -64,10 +71,11 @@ by the exports check (NEXT, tracked in
 [07-status-and-roadmap.md](07-status-and-roadmap.md)). Landed in commit `ba093ad`
 (`feat(interfaces): assign named version nodes to loader and provider exports`).
 
-## 3. Prove the nodes actually defeat interposition (ABI-03, co-residency)
+## 3. Show the nodes hold across co-resident majors (ABI-03, co-residency)
 
-**Threat.** A named node is only worth having if it does what it claims. Assert nothing and
-you are trusting the linker on faith.
+**Threat.** A named node is only worth having if co-resident majors actually resolve their
+own definition and the nodeless case is genuinely worse. Assert nothing and you are
+trusting the linker on faith.
 
 **Fix and proof.** Two runtime tests, built from `abi03_fixture_rocblas.cpp` with three
 maps - `abi03_provA.map` (`ROCBLAS_ABI_6`), `abi03_provB.map` (`ROCBLAS_ABI_7`), and

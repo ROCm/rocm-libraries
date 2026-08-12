@@ -1,9 +1,11 @@
 # The ROCm interfaces layer
 
 Status: proposed design, prototype-backed. This tree builds standalone
-(`cmake -S interfaces`) and is not yet wired into the root ROCm build. Every capability
-described here is real code in this tree, and every claim below is backed by a named test
-you can run.
+(`cmake -S interfaces`) and is not yet wired into the root ROCm build. Executable
+capabilities here name the CTest that proves them; intended contracts and planned work are
+marked as such and cite the implementation-status note in
+[03-abi-and-versioning-contract.md](03-abi-and-versioning-contract.md#implementation-status-prototype)
+or [07-status-and-roadmap.md](07-status-and-roadmap.md).
 
 This is the documentation set for the interfaces layer: a thin, versioned boundary that
 lets a ROCm math library change how it is implemented without breaking the callers linked
@@ -12,8 +14,9 @@ against it.
 ## Start here
 
 If you read one page, read [02-why-a-stable-boundary.md](02-why-a-stable-boundary.md). It
-shows the two failures this layer exists to prevent - a caller welded to your internals,
-and a provider `.so` leaking 170 libstdc++ symbols into the process - and why a versioned
+shows the two failures this layer exists to prevent - a caller locked to a single provider
+it cannot replace without relinking (one implementation welded to one package), and a
+provider `.so` leaking 170 libstdc++ symbols into the process - and why a versioned
 boundary is the fix.
 
 Then read the chapters in order (02 is also step 2 below):
@@ -23,7 +26,7 @@ Then read the chapters in order (02 is also step 2 below):
 | 1 | [01-architecture.md](01-architecture.md) | The three layers (loader / runtime / protocols), how one call flows, why tables grow but never break. |
 | 2 | [02-why-a-stable-boundary.md](02-why-a-stable-boundary.md) | The threat model. What breaks without a versioned boundary, shown failing-case first. |
 | 3 | [03-abi-and-versioning-contract.md](03-abi-and-versioning-contract.md) | The normative contract: version-node registry, symbol-map idioms, SONAME rules, the reusable non-vacuity proof recipe. |
-| 4 | [04-hardening.md](04-hardening.md) | Each hardening step, threat before fix, every claim citing the ctest that proves it. |
+| 4 | [04-hardening.md](04-hardening.md) | Each hardening step, threat before fix, with evidence matched to each claim's status. |
 | 5 | [05-extending.md](05-extending.md) | How-to recipes: add a provider, add a version node, add an ABI proof, change a public API. |
 | 6 | [provider-protocols.md](provider-protocols.md) | The provider protocol specification (the C ABI tables, per domain). This is the conceptual chapter 06; it keeps its original unnumbered filename, which is why the numbered chapters jump from 05 to 07. |
 | 7 | [07-status-and-roadmap.md](07-status-and-roadmap.md) | What is done, what is committed next, what is aspirational. |
@@ -55,10 +58,14 @@ them here.
   has been absorbed into [03](03-abi-and-versioning-contract.md) and
   [05](05-extending.md), and the stub remains so existing links do not break.
 
-The provider protocol specification (provider-protocols.md) is the one genuinely normative
-reference; it now appears as chapter 06 in the reading order above.
+The provider protocol specification (provider-protocols.md) states the proposed target
+provider contract and is only partially implemented; it now appears as chapter 06 in the
+reading order above. Where that spec and the current prototype differ, the
+implementation-status note in
+[03-abi-and-versioning-contract.md](03-abi-and-versioning-contract.md#implementation-status-prototype)
+is authoritative (see the status banner at the top of that spec).
 
 ## Writing these docs
 
-The house style is in [STYLE.md](STYLE.md): threat-first, example-first, every claim cites
-a test. Follow it when you add or edit a chapter.
+The house style is in [STYLE.md](STYLE.md): threat-first, example-first, evidence matched
+to each claim's status (see rule 3 in STYLE). Follow it when you add or edit a chapter.

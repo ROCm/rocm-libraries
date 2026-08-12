@@ -42,20 +42,37 @@ the old one.
 
 1. Write a version script that names the exported symbols under the new node with an
    explicit allowlist, one symbol per line, following `loader/rocblas_loader.map` (which
-   lists each symbol by name), e.g. `ROCBLAS_ABI_8 { global: rocblas_create_handle;
-   rocblas_sgemm; /* ...each symbol... */ local: *; };`. Do NOT use a wildcard such as
+   lists each symbol by name) - list every exported symbol, for example:
+
+   ```
+   ROCBLAS_ABI_8 {
+     global:
+       rocblas_create_handle;
+       rocblas_sgemm;
+     local:
+       *;
+   };
+   ```
+
+   Do NOT use a wildcard such as
    `global: rocblas_*`: a glob is not a frozen allowlist - once the node ages into the old
    major, any future symbol whose name matches is silently admitted into the supposedly
    frozen ABI. Use an explicit or generated symbol list (the `exports` test already pins
    the loader to the generated `rocblas_bridge.exports` allowlist). For C++ symbols use
    mangled-name globs (`_ZN<len><ns><len><class>*`, plus `_ZTVN..`/`_ZTIN..`/`_ZTSN..` for
-   RTTI), not source spellings.
+   RTTI), not source spellings. Caveat: a class- or namespace-wide mangled glob
+   (`_ZN11rocrand_cpp5error*`) has the same aging hazard as `rocblas_*` - once the node is
+   the frozen old major, a method added to that class later is silently admitted into the
+   frozen ABI. Scope the glob as narrowly as the class allows, and once a class is frozen
+   prefer pinning the exact mangled member names (or a generated allowlist) over an open `*`.
 2. Apply it with `target_link_options(<tgt> PRIVATE
    "LINKER:--version-script=<file>")`, following the idiom in
    `loader/rocblas_loader.map`'s target.
 3. Keep the old major's map, metadata, and generated loader in place. Do not edit the old
    node's symbol set. Adapt the old public call forward at the loader edge.
-4. Give the new major its own SONAME major.
+4. Give the new major its own SONAME. The ELF version-node step above is Linux/ELF-only;
+   the Windows/PE DLL-versioning path is unproven and out of scope (see
+   [07-status-and-roadmap.md](07-status-and-roadmap.md#what-is-deliberately-not-claimed)).
 
 **Lock it.** Add a co-residency assertion in the shape of
 `rocm_interfaces.abi03_coresidency`: load old and new majors together and assert each
@@ -76,8 +93,13 @@ control, genuineness.
 3. **Genuineness.** Assert the DSO is what it claims (lld `.comment` stamp, `__asan_` or
    `__tsan_` symbols) so a silent fallback cannot pass for the wrong reason.
 4. Write the check as a `cmake -P` driver (for build/link-shape checks) or a runtime test
-   (for `dlvsym` resolution), matching whichever sibling is closest. `abi04_three_line_order`
-   and `abi05_cpp_mangled_version_node` are the two templates.
+   (for `dlvsym` resolution), matching whichever sibling is closest.
+   `abi05_cpp_mangled_version_node` is the complete template (positive plus three negative
+   controls). `abi04_three_line_order` is a partial template - its same-node negative control
+   is still COMMITTED-NEXT (see
+   [07-status-and-roadmap.md](07-status-and-roadmap.md#committed-next-the-immediate-plan)) - so
+   when you copy it, add the discrete negative build this recipe requires rather than relying
+   on the internal cross-node-nil check alone.
 5. Register it in `tests/CMakeLists.txt`. Gate it on a configure-time probe if it needs a
    linker or header the base toolchain may lack (see `ROCM_INTERFACES_HAVE_LLD` and
    `ROCM_INTERFACES_HAVE_ROCRAND_CPP`), so it never breaks a bare configure.
@@ -99,9 +121,16 @@ whether the public call ABI can stay identical.
    rocm-interfaces-api-snapshots`) and review the semantic diff.
 4. Classify every new declaration and assign each callable to a provider cluster or facade
    target (see [rocblas-provider-clusters.md](rocblas-provider-clusters.md)).
-5. Add the loader adapter, append a provider-table tail entry if one is needed (never touch
-   the existing prefix; guard the new entry by `struct_size` and bump `abi_minor`), and add
-   a recording-provider test.
+5. Add the loader adapter and a recording-provider test. If the table must grow, append the
+   new function pointer to the end (never touch the existing prefix), bump `abi_minor`, and
+   raise the loader's required table size. Note: today loaders request the full current
+   table size, so adding a required entry rejects every older provider - the optional-tail
+   negotiation that would let an older provider's prefix still be accepted is not
+   implemented (COMMITTED-NEXT; see
+   [07-status-and-roadmap.md](07-status-and-roadmap.md#committed-next-the-immediate-plan)
+   and the implementation-status note in
+   [03](03-abi-and-versioning-contract.md#implementation-status-prototype)). Do not mark an
+   appended entry "optional" until tail negotiation lands.
 6. Run the policy, enum-invariant, export, DSO, and package-consumer tests.
 
 Adding a public function never changes an existing provider-table prefix. That is the whole
@@ -113,8 +142,11 @@ reason old callers keep working (Mechanism 1 in
 1. Do not edit or remove the old declaration in place.
 2. Add the current API spelling; retain the old major's metadata and generated loader.
 3. Adapt the old call forward at the loader edge.
-4. Cut a new public SONAME/DLL major (the call ABI cannot remain identical), and give it a
-   new version node per the "add a version node" recipe.
+4. Cut a new public SONAME major on ELF and give it a new ELF version node per the "add a
+   version node" recipe. The Windows/PE DLL-major equivalent is not proven by this contract
+   (Linux/ELF only; see
+   [07-status-and-roadmap.md](07-status-and-roadmap.md#what-is-deliberately-not-claimed)) -
+   do not assume the version-node step transfers to PE.
 
 Existing enum names, values, and underlying types are never changed. Existing record fields
 are never reordered. A caller-sized record may consume documented reserved storage only

@@ -7,9 +7,9 @@ not a promise.
 
 ## DONE (code exists, a test proves it)
 
-Each row cites the `ctest` that locks it and the commit that landed it. As last verified on
-2026-08-11, a canonical amdclang++/ld.lld build registered 26 of the 28 tests defined in
-`tests/CMakeLists.txt`, all passing.
+Each row cites the `ctest` that locks it and the commit that landed it. On a canonical
+amdclang++/ld.lld build the applicable rows register and pass; the exact count depends on
+which optional linkers and sanitizers are present, so cite names rather than a count.
 
 | Capability | Proven by (ctest) | Commit |
 | --- | --- | --- |

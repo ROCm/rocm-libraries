@@ -12,9 +12,21 @@ these rules when you add or edit a chapter.
 2. **Example before abstraction.** Show the concrete case first - a real symbol, a real
    `.map`, a real `nm -D` line - then generalize. `rocblas_sgemm@@ROCBLAS_ABI_5` teaches
    more than "a versioned symbol."
-3. **Every claim cites a test.** If you assert the layer does X, name the `ctest` that would
-   fail if it stopped doing X. Cite the test **name**, not a count - names do not drift,
-   counts do. "26 tests pass" rots; `abi03_interpose_hazard` does not.
+3. **Back every claim with the right kind of evidence, and name it.** Not every claim can
+   cite a CTest; match the evidence to the claim's status:
+   - **Executable capability** (the layer does X today) -> name the `ctest` that would fail
+     if it stopped, by name not count (`abi03_interpose_hazard`, not "26 tests pass").
+   - **Intended contract** (a rule a provider or loader must obey, not yet fully enforced)
+     -> cite the implementation-status note in `03` or the roadmap entry in `07`, and say
+     which half runs today.
+   - **One-time observation** (a measurement, not an asserted invariant) -> give the dated
+     evidence and say it is not enforced by CTest (for example the local `__tsan_` symbol
+     count).
+   - **Design direction** (proposed, not built) -> label it ASPIRATIONAL and link to `07`;
+     never let it read as a fact.
+   A threat-model "Proven by" cell may therefore name a CTest, a `03`/`07` citation, or
+   "architecture design" - but the surrounding prose must not then claim every entry is a
+   CTest.
 4. **Separate the proven from the proposed.** The layer is a proposed design, not adopted
    code. Say so. Keep DONE, COMMITTED-NEXT, and ASPIRATIONAL visibly apart (see `07`). Never
    let a plan read as a fact.
@@ -26,9 +38,9 @@ these rules when you add or edit a chapter.
 - Second person, active voice, present tense. "You call it once. It hands you back a table."
 - Short sentences carry the argument; tables carry the exactness. Use prose for the *why*, a
   table for a registry, a contract, or a symbol map.
-- Spec-register (dense, normative) is correct in `03` and in the reference layer
-  (`provider-protocols.md`, `rocblas-provider-clusters.md`). Everywhere else, prefer the
-  example-first register.
+- Spec-register (dense, normative) is correct in `03` and in `provider-protocols.md` (the
+  proposed target provider contract). `rocblas-provider-clusters.md` is directional input,
+  not an adopted ABI - keep its dense register but do not treat it as normative.
 - ASCII only. No smart quotes, em dashes, or Unicode symbols - use `-`, `->`, and plain
   quotes.
 
@@ -41,16 +53,18 @@ these rules when you add or edit a chapter.
 - Do not add comments to code samples. The surrounding prose is the explanation; in these
   docs a code comment is a smell. (This is a house rule for the doc samples, not a
   repository-wide policy - the tree's own C/C++ sources carry substantive comments.)
-- Keep the reference layer as reference. Do not rewrite `provider-protocols.md` or
-  `rocblas-provider-clusters.md` into this voice - they are normative and already precise.
-  Link to them.
+- Keep the reference layer as reference. Do not rewrite `provider-protocols.md` (proposed
+  target contract, partially implemented) or `rocblas-provider-clusters.md` (directional
+  input, not an adopted ABI) into this voice - link to them.
 
 ## Review checklist
 
 Before you land a doc change, confirm:
 
 - [ ] Every hardening/capability section opens with the threat, not the mechanism.
-- [ ] Every capability claim names a real `ctest` (verified against `tests/CMakeLists.txt`).
+- [ ] Every executable-capability claim names a real `ctest` (verified against
+      `tests/CMakeLists.txt`); intended-contract, observation, and design-direction claims
+      instead cite `03`/`07` or are labeled accordingly (see rule 3).
 - [ ] No brittle counts stand in for names.
 - [ ] Proposed vs proven is unambiguous; the Status line is present.
 - [ ] Out-of-scope items are stated.

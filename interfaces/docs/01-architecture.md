@@ -29,7 +29,7 @@ behind a provider protocol. Neither can see the other's symbols by accident.
 
 ## The one rule that makes it work
 
-Every implementation is a shared object that exports exactly one symbol:
+A provider is normally a shared object that exports exactly one symbol:
 
 ```
 rocm_interfaces_provider_query_v1
@@ -37,6 +37,10 @@ rocm_interfaces_provider_query_v1
 
 That is the whole public surface of a provider. You call it once. It hands you back a
 dispatch table - a C struct full of function pointers - and everything else stays hidden.
+The usual case is a `.so` loaded with `add_module`; a provider can also be registered
+in-process with `add_builtin` (no `.so`, no `dlopen`; see
+[How a provider gets picked](#how-a-provider-gets-picked)). Either way its whole public
+surface is that one query function.
 
 You can see it in `protocols/include/rocm/interfaces/common.h`:
 
@@ -151,6 +155,13 @@ So you add capability by appending to the end of a table and bumping `abi_minor`
 reorder, never insert in the middle, never change a field's meaning. Old callers keep
 working because the prefix they read is byte-for-byte the same.
 
+That is the intended contract for how tables grow. In the prototype today only the
+size-floor half runs, and it is keyed on the provider's response `dispatch_table_size`, not
+on the table's own header: loaders request the full current table size and reject any
+provider smaller than that, so an appended entry is not yet treated as optional and
+`abi_minor` is not read anywhere. See the implementation-status note in
+[03-abi-and-versioning-contract.md](03-abi-and-versioning-contract.md#implementation-status-prototype).
+
 ## How a provider gets picked
 
 `ProviderRegistry::select` takes a domain, a `gfx_arch`, a required table size, and an
@@ -217,18 +228,22 @@ this tree proves:
 
 - The version script that exports one symbol and hides the leak
   (`providers/recording/recording_provider.map`) is proven by the `exports` test.
-- Named ELF version nodes - the `ROCBLAS_ABI_5` node in `loader/rocblas_loader.map`, and
-  `ROCBLAS_ABI_6` on the rocRAND fixtures - are proven to defeat symbol interposition by
-  `abi03_interpose_hazard` and `abi03_coresidency`.
+- Named ELF version nodes give each major a distinct symbol, so co-resident majors resolve
+  their own definition. What the tests lock today: `abi03_coresidency` asserts each handle's
+  `dlvsym`/`dlsym` resolves to its own version node with cross-version lookups nil, and
+  `abi03_interpose_hazard` shows that with the node removed a bare global lookup reproduces
+  the interposition hazard. Together they prove node presence, handle-scoped resolution, and
+  the bare-lookup hazard. The causal proof that version nodes alone defeat interposition for
+  a linked consumer or an equal-scope (`RTLD_DEFAULT`) lookup is not yet in CTest - it is
+  ASPIRATIONAL (see
+  [07-status-and-roadmap.md](07-status-and-roadmap.md#aspirational-direction-not-commitment)).
 - That those version nodes survive real linkers, an ASan build, data objects, and C++
   mangled names with RTTI is proven by the `abi04_*`, `abi05_*`, and `abi06_*` tests.
 - The loader/registry survive concurrent use under ThreadSanitizer: `ops04_concurrency`.
 
-Each of those is a `ctest` you can run. `tests/CMakeLists.txt` defines 28 named tests; the
+Each of those is a `ctest` you can run. `tests/CMakeLists.txt` defines the named suite; the
 exact set that registers depends on which optional linkers and sanitizers your toolchain
-offers. As last verified on 2026-08-11, a canonical amdclang++/ld.lld build registered 26,
-all passing. If you want to
-know *why* each one exists and what breaks without it, read
+offers. If you want to know *why* each one exists and what breaks without it, read
 [04-hardening.md](04-hardening.md).
 
 ## The tree, at a glance
