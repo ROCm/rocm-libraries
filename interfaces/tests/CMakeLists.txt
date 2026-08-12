@@ -15,6 +15,10 @@ add_dependencies(rocm_interfaces_tests
   rocm_rand_provider_recording)
 add_test(NAME rocm_interfaces.unit COMMAND rocm_interfaces_tests)
 
+add_executable(table_abi_negotiation_test table_abi_negotiation_test.cpp)
+target_link_libraries(table_abi_negotiation_test PRIVATE rocm_interfaces_loader)
+add_test(NAME rocm_interfaces.table_abi_negotiation COMMAND table_abi_negotiation_test)
+
 add_executable(rocblas_shadow_test rocblas_shadow_test.cpp)
 target_link_libraries(rocblas_shadow_test PRIVATE rocblas_loader_shadow)
 target_compile_definitions(rocblas_shadow_test PRIVATE

@@ -129,6 +129,7 @@ std::shared_ptr<const ProviderLease> ProviderRegistry::query_entry(Entry& entry,
     rocm_interfaces_status status = entry.query(&request, &lease->response_);
     if (status != ROCM_INTERFACES_STATUS_SUCCESS) return nullptr;
     if (lease->response_.header.abi_major != ROCM_INTERFACES_ABI_MAJOR ||
+        lease->response_.header.abi_minor < ROCM_INTERFACES_ABI_MINOR ||
         lease->response_.header.struct_size < sizeof(rocm_interfaces_provider_response) ||
         !lease->response_.dispatch_table ||
         lease->response_.dispatch_table_size < required_table_size ||

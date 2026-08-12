@@ -19,7 +19,7 @@ extern "C" {
 #endif
 
 #define ROCM_INTERFACES_ABI_MAJOR 1u
-#define ROCM_INTERFACES_ABI_MINOR 0u
+#define ROCM_INTERFACES_ABI_MINOR 1u
 #define ROCM_INTERFACES_PROVIDER_QUERY_SYMBOL "rocm_interfaces_provider_query_v1"
 
 typedef enum rocm_interfaces_status {
