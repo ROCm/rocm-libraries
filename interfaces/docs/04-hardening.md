@@ -88,8 +88,23 @@ maps - `abi03_provA.map` (`ROCBLAS_ABI_6`), `abi03_provB.map` (`ROCBLAS_ABI_7`),
   test would not be able to show the hazard, so its passing proves the nodes are what
   prevent it.
 
-Landed in commit `8832c9a` (`test(interfaces): prove ABI version-node co-residency defeats
-interposition`).
+The two tests above use `dlvsym`/`dlsym` on explicit handles, which resolve each handle's
+own symbol whether or not a node is present - so they prove co-residency and the nodeless
+hazard, but not that a node defeats interposition for a *linked* caller. A third pair closes
+that gap with a real linked relocation:
+
+- `rocm_interfaces.abi03_linked_consumer_versioned_binds` links a consumer against both
+  providers with `libprovA.so.6` (`ABI_6`) `NEEDED` first, and pins its `rocblas_sgemm`
+  reference to `ROCBLAS_ABI_7` with a `.symver` directive. The relocation binds to `ABI_7`
+  (`-> 7`) despite the `ABI_6` provider being earlier in scope - `readelf -V` confirms the
+  binary carries a `Verneed` requirement for `ROCBLAS_ABI_7` on `libprovB.so.7`.
+- `rocm_interfaces.abi03_linked_consumer_plain_interposed` is the discriminating control:
+  the identical link line with the `.symver` removed leaves an unversioned reference, which
+  is interposed by the first-`NEEDED` `ABI_6` provider (`-> 6`, `Verneed` on
+  `libprovA.so.6`). One directive flips the bound major, so the pair is not vacuous.
+
+Landed in commits `8832c9a` (`test(interfaces): prove ABI version-node co-residency defeats
+interposition`) and `3396f66` (linked-consumer relocation proof).
 
 ## 4. Refuse a toolchain that cannot stamp version nodes (RES-03)
 
@@ -249,7 +264,7 @@ is stricter.
 | --- | --- | --- |
 | 1 RES-02 | 170 leaked libstdc++ symbols | `exports` |
 | 2 named nodes | bare symbols interpose across majors | `exports` |
-| 3 co-residency | is the node mechanism real | `abi03_coresidency`, `abi03_interpose_hazard` |
+| 3 co-residency | is the node mechanism real; does it defeat interposition for a linked caller | `abi03_coresidency`, `abi03_interpose_hazard`, `abi03_linked_consumer_versioned_binds`, `abi03_linked_consumer_plain_interposed` |
 | 4 RES-03 guard | g++ LTO + lld cannot stamp version nodes | `lto_linker_guard_rejects_gnu_lld` + 3 accepts |
 | 5 OPS-04 | loader/registry data race | `ops04_concurrency` |
 | 6a core | node fails on ordering / same-node control / `-Bsymbolic` genuineness / dup-def / ldconfig | `abi04_three_line_order`, `abi04_same_node_negative`, `abi04_bsymbolic_inert`, `abi04_multiple_default_def_rejected`, `abi04_ldconfig_stub_preserved` |

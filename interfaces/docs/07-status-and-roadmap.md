@@ -27,6 +27,7 @@ which optional linkers and sanitizers are present, so cite names rather than a c
 | GCC-LTO-plus-lld build refused at configure | `lto_linker_guard_rejects_gnu_lld` + 3 accepts | `3e56e73` |
 | Loader/registry concurrency under TSan | `ops04_concurrency` | `df8512b` |
 | Table-ABI negotiation: `abi_minor` floor (provider older than the runtime minor rejected) on top of the `dispatch_table_size` prefix floor, with a larger-table/newer-minor (optional tail) accept and one-field-at-a-time discrimination | `table_abi_negotiation` | `fcb7ac7` |
+| Linked-consumer interposition proof: a consumer whose relocation carries a versioned undefined reference (`rocblas_sgemm@ROCBLAS_ABI_7`, recorded as a `Verneed` on `libprovB.so.7`) binds to that major even though an ABI_6 provider is `NEEDED` first and earlier in scope; the plain control shares the identical link line and differs only by the single `.symver` directive, and is interposed to ABI_6 - so one directive flips the bound major 7/6 | `abi03_linked_consumer_versioned_binds`, `abi03_linked_consumer_plain_interposed` | `3396f66` |
 
 Foundational, from the POC base (`9bd0d26`): the loader/runtime/protocols architecture, the
 recording providers and rocBLAS bridge, and the narrow-v2 facade are each exercised by named
@@ -64,7 +65,7 @@ baseline (see COMMITTED-NEXT). The `check_api_policy.py` policy check is still u
   until every exported declaration is classified, all adapters exist, package-config parity
   is demonstrated, and coexistence tests cover the published majors.
 - **A broader proof suite.** More symbol shapes and toolchains as they become relevant.
-- **Linked-consumer interposition proof.** The abi03 positive case only exercises handle-scoped dlvsym/dlsym, which resolve each provider's own symbol regardless of version nodes; the causal proof that version nodes alone defeat interposition under a bare RTLD_DEFAULT lookup or a linked-consumer relocation (a consumer needing rocblas_sgemm@ROCBLAS_ABI_x loaded alongside a provider offering a different major) is not yet ported into CTest.
+- **More interposition shapes.** The linked-consumer relocation case is now proven (see DONE). What remains is the bare `dlsym(RTLD_DEFAULT, ...)` shape: an unversioned global lookup takes the first-loaded definition even when version nodes are present (this is the hazard `abi03_interpose_hazard` already reproduces), so version nodes do not rescue it - the defense is scoped to versioned relocations and `dlvsym`. A worked demonstration that a bare `RTLD_DEFAULT` lookup remains hazardous *even against versioned providers* would document that boundary explicitly, but it is a caveat to state, not a defense to prove.
 - **API-process evolution.** Promoting the manual doc-quality checklist
   ([STYLE.md](STYLE.md)) to a CI gate if the docs start to drift.
 
