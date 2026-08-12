@@ -267,6 +267,9 @@ struct ExecutionContext
 
     fs::path GetPerfDbPath(std::string_view prefix = "") const
     {
+        // An empty system path disables the system perf-db; the user perf-db is unaffected.
+        if(IsSystemDbDisabled())
+            return "";
 #if MIOPEN_EMBED_DB
         return GetPerfDbPathEmbed(prefix);
 #else

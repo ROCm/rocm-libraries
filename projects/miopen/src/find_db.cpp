@@ -26,6 +26,7 @@
 
 #include <miopen/find_db.hpp>
 
+#include <miopen/db_path.hpp>
 #include <miopen/handle.hpp>
 #include <miopen/logger.hpp>
 #include <miopen/perf_field.hpp>
@@ -205,6 +206,12 @@ template <class TDb>
 fs::path FindDbRecord_t<TDb>::GetInstalledPath(const Handle& handle, const std::string& path_suffix)
 {
 #if !MIOPEN_DISABLE_SYSDB
+    // An empty installed path disables the system find-db; the user find-db is unaffected.
+    if(IsSystemDbDisabled())
+    {
+        MIOPEN_LOG_I2("System find-db is disabled");
+        return "";
+    }
 #if MIOPEN_EMBED_DB
     return GetInstalledPathEmbed(handle, path_suffix);
 #else

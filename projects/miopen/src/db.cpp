@@ -34,7 +34,7 @@ PlainTextDb::PlainTextDb(DbKinds db_kind_, const fs::path& filename_, bool is_sy
                      "class instead.");
     }
 
-    if(!DisableUserDbFileIO)
+    if(!IsUserDbDisabled())
     {
         fs::path directory = filename.has_parent_path() ? filename.parent_path() : "";
         if(!fs::exists(directory))
@@ -61,7 +61,7 @@ using shared_lock    = std::shared_lock<LockFile>;
 
 std::optional<DbRecord> PlainTextDb::FindRecord(const std::string& key)
 {
-    if(DisableUserDbFileIO)
+    if(IsUserDbDisabled())
         return {};
     const auto lock = shared_lock(lock_file, GetLockTimeout());
     MIOPEN_VALIDATE_LOCK(lock);
@@ -70,7 +70,7 @@ std::optional<DbRecord> PlainTextDb::FindRecord(const std::string& key)
 
 bool PlainTextDb::StoreRecord(const DbRecord& record)
 {
-    if(DisableUserDbFileIO)
+    if(IsUserDbDisabled())
         return true;
     const auto lock = exclusive_lock(lock_file, GetLockTimeout());
     MIOPEN_VALIDATE_LOCK(lock);
@@ -79,7 +79,7 @@ bool PlainTextDb::StoreRecord(const DbRecord& record)
 
 bool PlainTextDb::UpdateRecord(DbRecord& record)
 {
-    if(DisableUserDbFileIO)
+    if(IsUserDbDisabled())
         return true;
     const auto lock = exclusive_lock(lock_file, GetLockTimeout());
     MIOPEN_VALIDATE_LOCK(lock);
@@ -88,7 +88,7 @@ bool PlainTextDb::UpdateRecord(DbRecord& record)
 
 bool PlainTextDb::RemoveRecord(const std::string& key)
 {
-    if(DisableUserDbFileIO)
+    if(IsUserDbDisabled())
         return true;
     const auto lock = exclusive_lock(lock_file, GetLockTimeout());
     MIOPEN_VALIDATE_LOCK(lock);
@@ -97,7 +97,7 @@ bool PlainTextDb::RemoveRecord(const std::string& key)
 
 bool PlainTextDb::Remove(const std::string& key, const std::string& id)
 {
-    if(DisableUserDbFileIO)
+    if(IsUserDbDisabled())
         return true;
     const auto lock = exclusive_lock(lock_file, GetLockTimeout());
     MIOPEN_VALIDATE_LOCK(lock);

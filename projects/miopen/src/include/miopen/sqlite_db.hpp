@@ -185,7 +185,7 @@ public:
     SQLiteBase(DbKinds, const fs::path& filename_, bool is_system_)
         : filename(filename_), is_system(is_system_)
     {
-        if(DisableUserDbFileIO && !is_system)
+        if(IsUserDbDisabled() && !is_system)
             return;
 
         MIOPEN_LOG_I2("Initializing " << (InMemDb ? "In Memory " : "")
@@ -292,7 +292,7 @@ public:
     inline auto FindRecord(U&... args)
     {
         using Ret = decltype(reinterpret_cast<Derived*>(this)->FindRecordUnsafe(args...));
-        if(!is_system && DisableUserDbFileIO)
+        if(!is_system && IsUserDbDisabled())
             return Ret{};
         return reinterpret_cast<Derived*>(this)->FindRecordUnsafe(args...);
     }
@@ -300,7 +300,7 @@ public:
     template <typename... U>
     inline auto RemoveRecord(U&... args)
     {
-        if(!is_system && DisableUserDbFileIO)
+        if(!is_system && IsUserDbDisabled())
             return true;
         return reinterpret_cast<Derived*>(this)->RemoveRecordUnsafe(args...);
     }
@@ -308,7 +308,7 @@ public:
     template <typename... U>
     inline auto StoreRecord(U&... args)
     {
-        if(!is_system && DisableUserDbFileIO)
+        if(!is_system && IsUserDbDisabled())
             return true;
         return reinterpret_cast<Derived*>(this)->StoreRecordUnsafe(args...);
     }
@@ -316,7 +316,7 @@ public:
     template <typename... U>
     inline auto Remove(const U&... args)
     {
-        if(!is_system && DisableUserDbFileIO)
+        if(!is_system && IsUserDbDisabled())
             return true;
         return reinterpret_cast<Derived*>(this)->RemoveUnsafe(args...);
     }
@@ -325,7 +325,7 @@ public:
     inline auto Update(const U&... args)
     {
         using Ret = decltype(reinterpret_cast<Derived*>(this)->UpdateUnsafe(args...));
-        if(!is_system && DisableUserDbFileIO)
+        if(!is_system && IsUserDbDisabled())
             return Ret{};
         return reinterpret_cast<Derived*>(this)->UpdateUnsafe(args...);
     }
@@ -333,7 +333,7 @@ public:
     template <typename... U>
     inline bool Load(U&&... args)
     {
-        if(!is_system && DisableUserDbFileIO)
+        if(!is_system && IsUserDbDisabled())
             return false;
         return reinterpret_cast<Derived*>(this)->LoadUnsafe(args...);
     }

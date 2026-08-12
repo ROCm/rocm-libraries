@@ -1552,7 +1552,7 @@ protected:
 
     void MultiFileDbTests()
     {
-        if(!DisableUserDbFileIO)
+        if(!IsUserDbDisabled())
         {
             DbMultiFileReadTest<true>{temp_file}.Run();
             DbMultiFileReadTest<false>{temp_file}.Run();
