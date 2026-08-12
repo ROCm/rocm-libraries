@@ -152,6 +152,9 @@ void IntegrationBundleVerificationHarness::runComparison()
     case VerificationMode::AUTO:
         runAutoMode();
         return;
+    case VerificationMode::GOLDEN_CHECK:
+        runGoldenCheckMode();
+        return;
     default:
         FAIL() << "Unknown verification mode";
         return;
@@ -290,6 +293,37 @@ void IntegrationBundleVerificationHarness::runAutoMode()
             FAIL() << "Unknown RefStatus";
             return;
         }
+    }
+}
+
+void IntegrationBundleVerificationHarness::runGoldenCheckMode()
+{
+    if(!_bundle->hasGoldenOutputs)
+    {
+        skipUnverifiable("no golden data (verification-mode=golden-check)");
+        return;
+    }
+
+    OutputTensors cpuOutputs;
+    const RefRunResult result
+        = runReferenceCapturingOutputs(ReferenceExecutorType::CPU, cpuOutputs);
+    switch(result.status)
+    {
+    case RefStatus::CAPABILITY_MISS:
+        skipUnverifiable("CPU ref cannot run this op (golden-check): " + result.message);
+        return;
+    case RefStatus::RUNTIME_ERROR:
+        recordRefError("CPU ref errored (golden-check): " + result.message);
+        FAIL() << "CPU ref errored (golden-check): " << result.message;
+        return;
+    case RefStatus::RAN:
+        compareEach(cpuOutputs, [&](int64_t uid) -> hipdnn_data_sdk::utilities::ITensor& {
+            return *_bundle->tensors->at(uid);
+        });
+        return;
+    default:
+        FAIL() << "Unknown RefStatus";
+        return;
     }
 }
 

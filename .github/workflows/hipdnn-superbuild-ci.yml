@@ -291,10 +291,10 @@ jobs:
       - name: Run tests
         run: ctest --test-dir build --output-on-failure
 
-      - name: Run CPU ref verification (nightly)
+      - name: Validate golden data against CPU ref (nightly)
         if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         env:
-          HIPDNN_TEST_VERIFICATION_MODE: cpu
+          HIPDNN_TEST_VERIFICATION_MODE: golden-check
         run: ctest --test-dir build --output-on-failure -L external_integration_test
 
       - name: Patch ROCm SDK with superbuild outputs

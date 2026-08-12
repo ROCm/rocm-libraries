@@ -7,10 +7,4 @@
 include("${CMAKE_CURRENT_LIST_DIR}/hipdnn_integration_testsTargets.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/HipdnnIntegrationTestHelpers.cmake")
 
-if(NOT DEFINED HIPDNN_INTEGRATION_TEST_BUNDLE_DIR)
-    set(HIPDNN_INTEGRATION_TEST_BUNDLE_DIR
-        "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_LIBDIR@/integration-test-bundles"
-        CACHE INTERNAL "Path to integration test bundle data (install tree)")
-endif()
-
 check_required_components(hipdnn_integration_tests)

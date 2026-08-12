@@ -180,6 +180,7 @@ private:
     void runGoldenMode();
     void runExplicitRefMode(ReferenceExecutorType type);
     void runAutoMode();
+    void runGoldenCheckMode();
 
     // ── inputs ──────────────────────────────────────────────────────────
     bool ensureInputsAvailable();
