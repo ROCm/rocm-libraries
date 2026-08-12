@@ -1,0 +1,17 @@
+{
+  "srcRoot": ".",
+  "testDirBase": "Tensile/Tests/unit/characterization/_generated",
+  "defaultCharDir": "Tensile/Tests/unit/characterization/Sample",
+  "charDirMap": {
+    "sample_mod::parse_all": ["Tensile/Tests/unit/characterization/Sample", "Tensile/Tests/unit/characterization/SampleExtra"]
+  },
+  "survivors": [
+    { "module": "sample_mod", "mutant_id": "sample_mod.parse__mutmut_1", "file": "sample_mod.py", "line": 10, "status": "survived" },
+    { "module": "sample_mod", "mutant_id": "sample_mod.parse__mutmut_2", "file": "sample_mod.py", "line": 13, "status": "survived" },
+    { "module": "sample_mod", "mutant_id": "sample_mod.parse_all__mutmut_1", "file": "sample_mod.py", "line": 19, "status": "survived" },
+    { "module": "sample_mod", "mutant_id": "sample_mod.Reader.parse__mutmut_1", "file": "sample_mod.py", "line": 26, "status": "survived" },
+    { "module": "sample_mod", "mutant_id": "sample_mod.module__mutmut_1", "file": "sample_mod.py", "line": 33, "status": "survived" },
+    { "module": "sample_mod", "mutant_id": "sample_mod.cached_double__mutmut_deco", "file": "sample_mod.py", "line": 39, "status": "survived" },
+    { "module": "sample_mod", "mutant_id": "sample_mod.read__mutmut_notest", "file": "sample_mod.py", "line": 30, "status": "no-test" }
+  ]
+}

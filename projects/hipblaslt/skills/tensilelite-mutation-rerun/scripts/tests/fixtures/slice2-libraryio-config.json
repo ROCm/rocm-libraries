@@ -1,0 +1,11 @@
+{
+  "slice_id": 2,
+  "src_commit": "5d6478a6d80b93a32373ad637bc4a1a6b96d1690",
+  "only_mutate": ["Tensile/LibraryIO.py"],
+  "test_selection": ["Tensile/Tests/unit/characterization/LibraryIO"],
+  "out": "work/mutation/slices/2-libraryio",
+  "group_by": "module_function",
+  "test_file_owner": "one_file_per_function",
+  "src_rel": "projects/hipblaslt/tensilelite",
+  "container": "tl-mut"
+}
