@@ -577,11 +577,7 @@ try
     ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_POINTER(0, handle);
-#ifdef ROCSPARSE_WITH_HANDLE_CREATE
-    *handle = new _rocsparse_handle(static_cast<hipStream_t>(0));
-#else
     *handle = new _rocsparse_handle();
-#endif
     rocsparse::log_trace(*handle, "rocsparse_create_handle");
     return rocsparse_status_success;
     // LCOV_EXCL_START
