@@ -69,6 +69,33 @@ def test_parallel_for_wiring(monkeypatch):
     assert out == [2, 4, 6]
 
 
+def test_parallel_for_empty_sequence_returns_early(monkeypatch):
+    called = {"n": 0}
+    monkeypatch.setattr(cutils.joblib, "Parallel", lambda **_k: (_ for _ in ()).throw(AssertionError("should not be called")))
+    out = cutils.parallel_for(lambda x: x, [])
+    assert out == []
+    assert called["n"] == 0
+
+
+def test_parallel_for_clamps_workers_to_sequence_length(monkeypatch):
+    seen = {}
+
+    class _Parallel:
+        def __init__(self, n_jobs):
+            seen["n_jobs"] = n_jobs
+
+        def __call__(self, tasks):
+            return [task() for task in tasks]
+
+    monkeypatch.setattr(cutils.joblib, "Parallel", _Parallel)
+    monkeypatch.setattr(cutils.joblib, "delayed", lambda fn: lambda el: (lambda: fn(el)))
+    monkeypatch.setattr(cutils.os, "cpu_count", lambda: 32)
+
+    # n_jobs=64 and cpu_count=32 but only 2 items: workers must clamp to 2
+    cutils.parallel_for(lambda x: x, [1, 2], n_jobs=64)
+    assert seen["n_jobs"] == 2
+
+
 def test_terminate_process_tree_windows_timeout_fallback(monkeypatch):
     proc = _Proc(wait_raises=[subprocess.TimeoutExpired("cmd", 1), None])
     called = {}

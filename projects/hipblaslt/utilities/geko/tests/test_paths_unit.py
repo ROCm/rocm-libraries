@@ -63,7 +63,7 @@ def test_resolve_errors_and_require_built(monkeypatch: pytest.MonkeyPatch, tmp_p
 
     monkeypatch.delenv(paths.HIPBLASLT_PATH_ENV_VAR, raising=False)
     with pytest.raises(SystemExit):
-        paths.resolve_hipblaslt_path(anchor=None)
+        paths.resolve_hipblaslt_path(anchor=tmp_path / "none/x.py")
 
     not_built = tmp_path / "nb"
     not_built.mkdir()
