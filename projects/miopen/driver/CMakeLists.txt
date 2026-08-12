@@ -85,7 +85,7 @@ if(NOT MIOPEN_EMBED_DB STREQUAL "")
     target_link_libraries(MIOpenDriver PRIVATE $<BUILD_INTERFACE:miopen_data> )
 endif()
 if(MIOPEN_ENABLE_SQLITE)
-    target_link_libraries(MIOpenDriver PRIVATE SQLite3::SQLite3)
+    target_link_libraries(MIOpenDriver PRIVATE SQLite::SQLite3)
 endif()
 
 # Cmake does not add flags correctly for gcc
