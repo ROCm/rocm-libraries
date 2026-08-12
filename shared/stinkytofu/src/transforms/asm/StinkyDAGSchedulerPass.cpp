@@ -71,10 +71,10 @@ static bool readsScc(const StinkyInstruction& inst) {
     return false;
 }
 
-// A workgroup barrier that guards a tensor_load, i.e. one InsertClusterBarrierPass
-// will pick as a handshake anchor. `signal` and `wait` are the same node for a legacy
-// single-instruction s_barrier.
-struct GuardingBarrier {
+// A workgroup barrier, i.e. a place InsertClusterBarrierPass may expand an SCC-clobbering
+// handshake. `signal` and `wait` are the same node for a legacy single-instruction
+// s_barrier, and for a half pair whose other end lies in another region.
+struct HandshakeBarrier {
     DAGNode* signal = nullptr;
     DAGNode* wait = nullptr;
 };
@@ -89,33 +89,35 @@ struct SccChain {
     bool liveOut = false;
 };
 
-// Mirrors InsertClusterBarrierPass::findPrecedingWorkgroupBarrierSignalInSegment: a
-// tensor_load anchors on the nearest preceding workgroup barrier signal. Segment
-// boundaries (labels, branches, calls) have side effects, so they already end the
-// region -- scanning within the region is the same scan.
-static std::vector<GuardingBarrier> collectGuardingBarriers(DAGNodeList& dagNodes) {
-    std::vector<GuardingBarrier> guarding;
-    GuardingBarrier pending;
-    bool recorded = false;
+// Every workgroup barrier in the region, paired up. Segment boundaries (labels, branches,
+// calls) have side effects and so already end the region, which is why a scan of the
+// region is the same scan InsertClusterBarrierPass makes of the segment.
+static std::vector<HandshakeBarrier> collectHandshakeBarriers(DAGNodeList& dagNodes) {
+    std::vector<HandshakeBarrier> barriers;
+    DAGNode* pendingSignal = nullptr;
 
     for (DAGNode& node : dagNodes) {
         const StinkyInstruction& inst = *node.inst;
-        if (isWorkgroupBarrier(inst)) {
-            if (isBarrierWait(inst)) {
-                if (pending.signal != nullptr) pending.wait = &node;
-            } else {
-                // A signal (or a legacy s_barrier, which is its own wait) opens a pair.
-                pending.signal = &node;
-                pending.wait = isBarrierSignal(inst) ? nullptr : &node;
-                recorded = false;
-            }
+        if (!isWorkgroupBarrier(inst)) continue;
+        if (isBarrierWait(inst) && pendingSignal != nullptr) {
+            barriers.push_back({pendingSignal, &node});
+            pendingSignal = nullptr;
             continue;
         }
-        if (recorded || pending.signal == nullptr || !isTensorLoad(inst)) continue;
-        guarding.push_back({pending.signal, pending.wait ? pending.wait : pending.signal});
-        recorded = true;
+        // Anything else closes whatever was open, and a signal left without its wait still
+        // stands for itself: the pair closes in another region, and the spot a handshake
+        // may be planted at is here either way.
+        if (pendingSignal != nullptr) {
+            barriers.push_back({pendingSignal, pendingSignal});
+            pendingSignal = nullptr;
+        }
+        if (isBarrierSignal(inst))
+            pendingSignal = &node;
+        else
+            barriers.push_back({&node, &node});
     }
-    return guarding;
+    if (pendingSignal != nullptr) barriers.push_back({pendingSignal, pendingSignal});
+    return barriers;
 }
 
 static std::vector<SccChain> collectSccChains(
@@ -173,9 +175,8 @@ static std::vector<char> reachableFrom(unsigned start,
 
 // --- Special rule: cluster-barrier SCC protection (ClusterBarrier kernels only) ---
 //
-// InsertClusterBarrierPass runs at kernel scope AFTER this pass. For every tensor_load
-// it finds the nearest preceding `s_barrier_signal -1` in the same segment and expands
-// a handshake at or before it:
+// InsertClusterBarrierPass runs at kernel scope AFTER this pass. It expands a handshake
+// ahead of each of its cluster waits:
 //
 //     s_cmp_eq_u32   sgprWaveIdx, 0
 //     s_cbranch_scc0 label_skipCBPreSignal_<hash>
@@ -187,38 +188,41 @@ static std::vector<char> reachableFrom(unsigned start,
 // not cross (a cluster wait, a segment edge, a prior handshake's barrier). Keeping the
 // chain off the barrier here is what leaves it that room.
 //
-// So no def..last-reader range may contain a guarding barrier. Note what that does and
+// Which barrier, though, is not something this pass can know: the anchor is picked by a
+// cycle-lead climb over the whole segment and comes to rest wherever the lead runs out,
+// and where it stops on a barrier it may be any of them -- the pass reads a workgroup
+// barrier as a place a signal may be posted, not as a thing to be counted. So every
+// workgroup barrier is treated as a handshake site here.
+//
+// So no def..last-reader range may contain a barrier. Note what that does and
 // does not forbid: the chain may still schedule wholly before or wholly after the
 // barrier, and may still move as a whole in either direction. Only splitting it is
 // illegal. That is a disjunction, which a DAG edge cannot express -- an edge would fix
 // one side at graph-build time and cost the freedom to hoist. So the common case is
 // enforced dynamically instead: the nodes are tagged here and CDNA5ReadyQueue refuses
-// to issue a guarding barrier while a chain is open.
+// to issue a barrier while a chain is open.
 //
 // A lock can only work when every reader is free to issue without the barrier going
-// first, so a chain with a reader that depends on a guarding barrier is pinned after it
-// with an ordinary edge instead. Those edges, and the live-out ones below, always run
-// from a lower to a higher program-order id, as does every other edge in the region
-// (the RAW/WAR/WAW loop above only ever links an earlier node to the node it is
-// visiting), so program order stays a valid topological order and the graph stays
-// acyclic.
-//
-// Barriers that do not guard a tensor_load are left alone: the pass plants nothing
-// there, so SCC chains may straddle them at no cost.
+// first, so a chain with a reader that depends on a barrier is pinned after it with an
+// ordinary edge instead. Those edges always run from a lower to a higher program-order
+// id, as does every other edge in the region (the RAW/WAR/WAW loop above only ever links
+// an earlier node to the node it is visiting), so program order stays a valid topological
+// order and the graph stays acyclic. The live-out edges below are the one exception, and
+// they say why they are safe.
 static void applyClusterBarrierSccRule(DAGNodeList& dagNodes,
                                        const std::unordered_map<StinkyInstruction*, unsigned>& instToId,
                                        std::vector<std::unordered_set<unsigned>>& dagGraph) {
-    const std::vector<GuardingBarrier> guarding = collectGuardingBarriers(dagNodes);
-    if (guarding.empty()) return;
+    const std::vector<HandshakeBarrier> barriers = collectHandshakeBarriers(dagNodes);
+    if (barriers.empty()) return;
 
-    for (const GuardingBarrier& barrier : guarding) {
-        barrier.signal->guardingBarrier = true;
-        barrier.wait->guardingBarrier = true;
+    for (const HandshakeBarrier& barrier : barriers) {
+        barrier.signal->handshakeBarrier = true;
+        barrier.wait->handshakeBarrier = true;
     }
 
     std::vector<std::vector<char>> reach;
-    reach.reserve(guarding.size());
-    for (const GuardingBarrier& barrier : guarding)
+    reach.reserve(barriers.size());
+    for (const HandshakeBarrier& barrier : barriers)
         reach.push_back(reachableFrom(barrier.signal->id, dagGraph));
 
     unsigned nextChainId = 0;
@@ -233,10 +237,18 @@ static void applyClusterBarrierSccRule(DAGNodeList& dagNodes,
         // A live-out value is read past the end of the region (the loop terminator, a
         // later region, a successor), so there is no reader here for the queue to close
         // the chain on, and no freedom to preserve either -- that reader is fixed at the
-        // region end. Pin the def after every guarding barrier it already follows.
+        // region end. The range therefore reaches from the def to the end of the region,
+        // and the only way for no barrier to fall inside it is for the def to follow every
+        // barrier in the region -- including the ones it currently comes before.
+        //
+        // Those are edges that point back up the program order, so they are the one place
+        // a cycle could be introduced. Skipping the barriers the def can reach is what
+        // rules that out, and the skip costs little: a barrier takes no register operands,
+        // so the only way to reach one is through an edge this rule itself added.
         if (chain.liveOut) {
-            for (const GuardingBarrier& barrier : guarding) {
-                if (barrier.wait->id >= first->id) continue;
+            const std::vector<char> fromDef = reachableFrom(first->id, dagGraph);
+            for (const HandshakeBarrier& barrier : barriers) {
+                if (fromDef[barrier.wait->id]) continue;
                 addEdgeById(barrier.wait, first, dagGraph);
                 PASS_DEBUG(std::cerr << "[DAG schedule] cluster-barrier SCC rule: pinned live-out"
                                      << " chain (dagId=" << first->id << ") after barrier wait"
@@ -247,9 +259,9 @@ static void applyClusterBarrierSccRule(DAGNodeList& dagNodes,
 
         bool alreadySplit = false;
         bool needsLock = false;
-        std::vector<const GuardingBarrier*> pinAfter;
-        for (size_t i = 0; i < guarding.size(); ++i) {
-            const GuardingBarrier& barrier = guarding[i];
+        std::vector<const HandshakeBarrier*> pinAfter;
+        for (size_t i = 0; i < barriers.size(); ++i) {
+            const HandshakeBarrier& barrier = barriers[i];
             if (barrier.signal->id > first->id && barrier.signal->id < last->id) {
                 alreadySplit = true;
                 break;
@@ -275,12 +287,12 @@ static void applyClusterBarrierSccRule(DAGNodeList& dagNodes,
             // broke it and no ordering it can pick will put it back together.
             PASS_DEBUG(std::cerr << "[DAG schedule] cluster-barrier SCC rule: chain ["
                                  << first->id << ".." << last->id
-                                 << "] already spans a guarding barrier; leaving it to the"
+                                 << "] already spans a barrier; leaving it to the"
                                     " barrier pass\n");
             continue;
         }
 
-        for (const GuardingBarrier* barrier : pinAfter) {
+        for (const HandshakeBarrier* barrier : pinAfter) {
             if (barrier->wait->id >= first->id) continue;
             addEdgeById(barrier->wait, first, dagGraph);
             PASS_DEBUG(std::cerr << "[DAG schedule] cluster-barrier SCC rule: chain [" << first->id
