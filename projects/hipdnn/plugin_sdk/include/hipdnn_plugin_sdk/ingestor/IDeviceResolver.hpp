@@ -14,12 +14,8 @@ namespace hipdnn_plugin_sdk::ingestor
 /**
  * @brief Answers which device a call is for, from the handle that carries it.
  *
- * An engine is shared by every handle in the process, and a handle can be rebound to a
- * different device between calls, so the device a query concerns is resolved per call
- * rather than captured once at engine construction.
- *
- * How a handle names its device is provider-specific, which is why this is an
- * interface rather than a call the SDK makes directly.
+ * Resolved per call, not at engine construction: an engine is shared across every
+ * handle in the process, and a handle can rebind to a different device between calls.
  */
 template <typename THandle>
 class IDeviceResolver
@@ -34,10 +30,8 @@ public:
     /**
      * @brief Properties of @p deviceId, for the `$device.*` expression namespace.
      *
-     * Returns a reference that stays valid for the resolver's lifetime, because a
-     * MatchContext binds it rather than copying it. Implementations are expected to
-     * cache: this is asked on the applicability path, which runs once per engine per
-     * graph.
+     * Returns a reference valid for the resolver's lifetime; a MatchContext binds it
+     * rather than copying. Implementations should cache.
      */
     // NOLINTNEXTLINE(portability-template-virtual-member-function)
     virtual const hipDeviceProp_t& deviceProperties(DeviceId deviceId) const = 0;

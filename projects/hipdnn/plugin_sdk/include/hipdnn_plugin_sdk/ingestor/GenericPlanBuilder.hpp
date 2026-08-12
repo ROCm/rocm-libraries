@@ -28,7 +28,7 @@ namespace hipdnn_plugin_sdk::ingestor
 /// field) name. Only integer-valued fields are expressible as knobs today.
 ///
 /// A `TSettings` used with GenericPlanBuilder must carry one of these named
-/// `ingestorKnobFilter`, populated by initializeExecutionSettings() and read back by
+/// `ingestorKnobFilter`, populated by initializeExecutionSettings() and read by
 /// getMaxWorkspaceSize() and buildPlan().
 using KnobFilter = std::map<std::string, int64_t>;
 
@@ -38,12 +38,9 @@ using KnobFilter = std::map<std::string, int64_t>;
  * One builder regardless of catalog size: a catalog entry is a candidate, and this
  * builds a plan for whichever candidate selection chose.
  *
- * Every method here reads state the state manager already computed and cached;
- * nothing rebuilds.
- *
  * @tparam TSettings Must carry a `KnobFilter ingestorKnobFilter` member, populated by
- *         initializeExecutionSettings() so getMaxWorkspaceSize() can apply the same
- *         filter buildPlan() reads directly from IEngineConfig.
+ *         initializeExecutionSettings() and read by getMaxWorkspaceSize() and
+ *         buildPlan().
  */
 template <typename THandle, typename TSettings, typename TContext>
 class GenericPlanBuilder : public IPlanBuilder<THandle, TSettings, TContext>
@@ -52,11 +49,9 @@ public:
     using IGraph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph;
     using IEngineConfig = hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig;
 
-    /// @param engine The UED whose knobs this builder reports and whose name its
-    ///        diagnostics carry. Held by reference; owned by the engine, which
-    ///        outlives its builder.
-    /// @param stateManager The descriptor state to select over. Shared, not owned, so
-    ///        the engine and its builder read one catalog cache.
+    /// @param engine The UED whose knobs this builder reports. Held by reference;
+    ///        owned by the engine, which outlives its builder.
+    /// @param stateManager The descriptor state to select over. Shared, not owned.
     /// @param deviceResolver Answers which device each call is for. Held by reference;
     ///        owned by the engine, which outlives its builder.
     GenericPlanBuilder(const EngineDescriptor& engine,
@@ -68,8 +63,7 @@ public:
     {
     }
 
-    /// Applicable exactly when some kernel survived matching. Deliberately does not
-    /// rank: a membership test needs no order.
+    /// Applicable exactly when some kernel survived matching; does not rank.
     bool isApplicable(const THandle& handle, const IGraph& opGraph) const override
     {
         return !_stateManager.unsortedDefinitions(contextFor(handle, opGraph)).empty();
@@ -91,27 +85,25 @@ public:
                                const TSettings& executionSettings) const override
     {
         const auto context = contextFor(handle, opGraph);
-        // Unsorted: one lookup for the entries and the bound state together.
+        // One lookup for the entries and the bound state together.
         const auto catalog = _stateManager.unsortedCatalog(context);
         if(catalog.entries.empty())
         {
             throwNoApplicableKernel();
         }
 
-        // Filtered before the max is taken: knob settings request a catalog subset,
-        // same contract as buildPlan().
+        // Knob settings request a catalog subset, same contract as buildPlan().
         const auto filtered
             = applyKnobFilter(catalog.entries, executionSettings.ingestorKnobFilter);
         if(filtered.empty())
         {
-            // Same failure buildPlan() reports, for the same reason.
+            // Same failure buildPlan() reports.
             throwUnsatisfiableKnobFilter(executionSettings.ingestorKnobFilter,
                                          catalog.entries.size());
         }
 
         size_t maxBytes = 0;
-        // Unsorted deliberately: the maximum is order-independent, and ranking here
-        // would load every candidate engine's heuristic for a number that doesn't need it.
+        // Unsorted deliberately: order-independent, so no ranking heuristic needed.
         for(const auto& kernel : filtered)
         {
             const auto dispatcher = _stateManager.getDispatchDetails(kernel);
@@ -124,9 +116,8 @@ public:
     /**
      * @brief Reads the caller's knob settings from @p engineConfig into TSettings.
      *
-     * Populates `executionSettings.ingestorKnobFilter` so getMaxWorkspaceSize() --
-     * which receives only TSettings, not an IEngineConfig -- reads the same filter
-     * buildPlan() reads directly from @p engineConfig.
+     * Populates `executionSettings.ingestorKnobFilter`, read the same way by
+     * getMaxWorkspaceSize() and buildPlan().
      */
     void initializeExecutionSettings(const THandle& /*handle*/,
                                      const IGraph& /*opGraph*/,
@@ -158,9 +149,7 @@ public:
             throwNoApplicableKernel();
         }
 
-        // Filtered after ranking: filtering and ranking commute (see this class's
-        // tparam doc), yielding the same kernel filter-then-rank would without a
-        // second heuristic pass.
+        // Filtering after ranking commutes with filter-then-rank (see tparam doc).
         const auto filter = readKnobFilter(engineConfig);
         const auto filtered = applyKnobFilter(catalog.entries, filter);
         if(filtered.empty())
@@ -168,8 +157,7 @@ public:
             throwUnsatisfiableKnobFilter(filter, catalog.entries.size());
         }
 
-        // Logs the selected kernel (RFC 0017 §10); the only place the choice is
-        // observable without a debugger.
+        // Logs the selected kernel (RFC 0017 §10) for debugging without a debugger.
         HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '" << _engine.name << "' selected kernel "
                                                     << toString(filtered.front().kernelId)
                                                     << " from " << filtered.size()
@@ -183,9 +171,8 @@ public:
     /**
      * @brief One knob per KMD field the engine exposes.
      *
-     * A knob's legal values are what the catalog implements for this graph. Its
-     * default is whatever the heuristic ranked first, so leaving every knob alone
-     * reproduces the out-of-the-box selection.
+     * A knob's legal values are what the catalog implements for this graph; its
+     * default is the top-ranked kernel's value.
      */
     std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT>
         getCustomKnobs(const THandle& handle, const IGraph& opGraph) const override
@@ -207,8 +194,7 @@ public:
             choices.reserve(values.size());
             for(const auto& value : values)
             {
-                // Only integer-valued fields are expressible as knobs today; a
-                // string-valued field is skipped rather than stringified.
+                // Only integer-valued fields are expressible as knobs today.
                 if(const auto* intValue = std::get_if<int64_t>(&value))
                 {
                     choices.push_back(*intValue);
@@ -225,8 +211,7 @@ public:
                 = "Kernel metadata field '" + knobName + "' of engine '" + _engine.name + "'";
 
             IntValueT defaultValue;
-            // First entry is the top-ranked kernel's value, so leaving the knob alone
-            // reproduces the out-of-the-box selection.
+            // First entry is the top-ranked kernel's value.
             defaultValue.value = choices.front();
             knob.default_value.Set(defaultValue);
 
@@ -244,8 +229,7 @@ public:
     }
 
 private:
-    /// Binds the graph and the device this call is for. Resolving the device here, once
-    /// per call, is what keeps the cache key and the matchers reading the same one.
+    /// Binds the graph and the device this call is for.
     MatchContext contextFor(const THandle& handle, const IGraph& opGraph) const
     {
         const auto deviceId = _deviceResolver.deviceId(handle);
@@ -253,8 +237,6 @@ private:
     }
 
     /// Reads @p engineConfig's settings for this engine's own knobs into a KnobFilter.
-    /// Only engine-exposed knobs are read: a setting for a knob this engine never
-    /// advertised cannot mean anything to it.
     KnobFilter readKnobFilter(const IEngineConfig& engineConfig) const
     {
         using namespace hipdnn_flatbuffers_sdk::data_objects;
@@ -275,8 +257,7 @@ private:
             const auto& setting = engineConfig.getKnobSettingByName(knobName);
             if(setting.valueType() != KnobValue::IntValue)
             {
-                // Only integer-valued fields are expressible as knobs today (see
-                // getCustomKnobs()); a setting of another type is a caller error.
+                // Only integer-valued fields are expressible as knobs today.
                 throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
                                             "engine '" + _engine.name + "' knob '" + knobName
                                                 + "' must be set to an integer value");
@@ -286,8 +267,7 @@ private:
         return filter;
     }
 
-    /// The catalog entries matching every SET knob in @p filter. An entry with no
-    /// value for a filtered field never matches: no value means no choice offered.
+    /// The catalog entries matching every SET knob in @p filter.
     std::vector<KernelDefinition> applyKnobFilter(const std::vector<KernelDefinition>& catalog,
                                                   const KnobFilter& filter) const
     {
@@ -315,10 +295,7 @@ private:
         return filtered;
     }
 
-    /**
-     * @brief Reports an empty catalog: shared by getMaxWorkspaceSize() and buildPlan(),
-     *        since both run only after isApplicable() already accepted this graph.
-     */
+    /// Reports an empty catalog; shared by getMaxWorkspaceSize() and buildPlan().
     [[noreturn]] void throwNoApplicableKernel() const
     {
         throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
@@ -328,9 +305,6 @@ private:
 
     /**
      * @brief Reports a knob combination no kernel in the catalog implements.
-     *
-     * HIPDNN_PLUGIN_STATUS_INVALID_VALUE, not INTERNAL_ERROR: a bad caller input, not
-     * a matcher/applicability disagreement like buildPlan()'s empty-catalog case.
      *
      * Names every set knob and value, and how many kernels survived matching before
      * knob filtering.

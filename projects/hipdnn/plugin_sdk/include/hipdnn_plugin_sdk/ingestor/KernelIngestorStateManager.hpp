@@ -29,15 +29,14 @@
 namespace hipdnn_plugin_sdk::ingestor
 {
 
-/// What a caller needs to size and launch one selected kernel: the kernel plus the
-/// dispatch handler its pack's UDD resolved to. Copied out, so holding one does not
-/// pin the state manager's internals.
+/// What a caller needs to size and launch one selected kernel. Copied out, so
+/// holding one does not pin the state manager's internals.
 template <typename THandle>
 struct KernelDispatcher
 {
     KernelDefinition kernel;
-    /// Non-owning. Points at a provider-owned handler that must outlive any plan built
-    /// from this dispatcher (see NativeRegistry's DispatchRegistry note).
+    /// Non-owning; must outlive any plan built from this dispatcher (see
+    /// NativeRegistry's DispatchRegistry).
     const IKernelDispatchHandler<THandle>* handler = nullptr;
 };
 
@@ -55,20 +54,18 @@ struct KernelDispatcher
  * | getMaxWorkspaceSize          | getDispatchDetails() per survivor, then max    |
  * | initializeExecutionContext   | sortedDefinitions().front(), getDispatchDetails() |
  *
- * Work is done as late as possible and kept: applicability only matches, ranking
- * happens on first need and is cached alongside the catalog, both keyed on
- * (graph, device) rather than the handle.
+ * Ranking is cached alongside the catalog, keyed on (graph, device) rather than the
+ * handle.
  *
- * Thread-safe: the cache is internally synchronized, and matcher and scorer calls are
- * made outside the lock, so one thread matching a graph never blocks another.
+ * Thread-safe: the cache is internally synchronized; matcher and scorer calls run
+ * outside the lock.
  */
 template <typename THandle>
 class KernelIngestorStateManager
 {
 public:
-    /// How many (graph, device) catalogs to retain. Entries hold ids and metadata values,
-    /// not kernels or graphs, so this is generous by design; eviction costs a rematch,
-    /// never a wrong answer.
+    /// How many (graph, device) catalogs to retain. Entries hold ids and metadata
+    /// values, not kernels or graphs; eviction costs a rematch, never a wrong answer.
     static constexpr size_t DEFAULT_CATALOG_CACHE_CAPACITY = 256;
 
     /**
@@ -79,15 +76,13 @@ public:
      * @param packs      The KDPs naming this engine.
      * @param heuristic  That engine's UHD, resolved to a scorer.
      *
-     * @throws std::invalid_argument if a pack names a matcher or dispatch descriptor not
-     *         supplied, or if two kernels share a metadata tuple: a dangling
-     *         cross-reference cannot be evaluated, and duplicate catalog keys leave
-     *         selection with two indistinguishable candidates.
+     * @throws std::invalid_argument if a pack names an unknown matcher or dispatch
+     *         descriptor, or if two kernels share a metadata tuple (the catalog key
+     *         must be unique).
      *
-     * Eagerly walks and validates every pack and kernel at plugin load, via
-     * validateAndIndexPacks() -- an amendment of RFC 0017 §3/§8's "nothing is parsed
-     * until a graph needs it". What stays lazy is the expensive part: a kernel source
-     * is not compiled and a heuristic model is not read until a graph needs it.
+     * Eagerly validates every pack and kernel at plugin load (validateAndIndexPacks());
+     * kernel source compilation and heuristic model loading stay lazy until a graph
+     * needs them.
      */
     KernelIngestorStateManager(MetadataSchema schema,
                                std::vector<MatchDescriptor> matchers,
@@ -110,8 +105,8 @@ public:
             const auto id = matcher.id;
             if(const auto [it, inserted] = _matchers.emplace(id, std::move(matcher)); !inserted)
             {
-                // Same defect NativeRegistry.hpp rejects for a duplicate symbol: a pack
-                // naming this id would silently run whichever matcher loaded first.
+                // A pack naming this id would otherwise silently run whichever
+                // matcher loaded first.
                 throw std::invalid_argument("duplicate match descriptor id '" + toString(id)
                                             + "' collides with '" + it->second.name + "'");
             }
@@ -138,12 +133,8 @@ public:
      * @brief Every kernel that applies to the graph and device @p context names, in no
      *        particular order.
      *
-     * On a cache hit, returns the cached catalog. Otherwise runs the matchers in pruning
-     * order — each pack's graph-scoped matchers first, then the kernel-scoped matchers
-     * over whatever survived — and caches the result.
-     *
-     * A graph carrying no identity cannot be cached, so it is matched fresh every call.
-     * That costs time, never correctness.
+     * Runs pack matchers in pruning order (graph-scoped, then kernel-scoped) and
+     * caches the result. A graph with no identity is matched fresh every call.
      */
     std::vector<KernelDefinition> unsortedDefinitions(const MatchContext& context) const
     {
@@ -153,14 +144,9 @@ public:
     /**
      * @brief The unranked catalog and the state matching bound, from one lookup.
      *
-     * RFC 0017 §8.1 keeps the bound token state alongside the catalog so a dispatch
-     * handler sizing a workspace reads values the matcher already resolved rather than
-     * walking the graph again. Returned together with the entries so a caller needing
-     * both does not match twice for a graph with no identity to cache under.
-     *
-     * `bound` is empty when no graph-scoped matcher bound anything, which is legal: a
-     * pack whose launch geometry is fully determined by kernel metadata has nothing to
-     * bind.
+     * Returned together so a caller needing both does not match twice for a graph
+     * with no identity to cache under (RFC 0017 §8.1). `bound` is empty when no
+     * graph-scoped matcher bound anything.
      */
     Catalog unsortedCatalog(const MatchContext& context) const
     {
@@ -171,8 +157,8 @@ public:
      * @brief Every kernel that applies to the graph and device @p context names, best
      *        first.
      *
-     * Returns the cached order if there is one; otherwise ranks the catalog and caches
-     * that order. If the catalog itself is missing, it is built first.
+     * Uses the cached order if present; otherwise ranks and caches it, building the
+     * catalog first if needed.
      */
     std::vector<KernelDefinition> sortedDefinitions(const MatchContext& context) const
     {
@@ -182,8 +168,7 @@ public:
     /**
      * @brief The ranked catalog and the state matching bound, from one lookup.
      *
-     * A plan build needs both; returning them together avoids matching twice for a
-     * graph with no identity to cache under.
+     * Avoids matching twice for a graph with no identity to cache under.
      */
     Catalog sortedCatalog(const MatchContext& context) const
     {
@@ -206,10 +191,9 @@ public:
 
     /**
      * @brief Resolves how to size and launch @p kernel.
-     * @throws std::runtime_error if the kernel's pack is unknown or its UDD names a
-     *         symbol the provider does not ship. Both fail closed: after applicability
-     *         accepted a graph, hipDNN has already chosen this engine on that promise, so
-     *         a missing dispatch is a hard error rather than a silent decline.
+     * @throws std::runtime_error if the kernel's dispatch descriptor is unknown or
+     *         names a symbol the provider does not ship; fails hard rather than
+     *         declining silently.
      */
     KernelDispatcher<THandle> getDispatchDetails(const KernelDefinition& kernel) const
     {
@@ -226,9 +210,7 @@ public:
 
     /// @brief The distinct values @p field takes across @p kernels, in ranked-first order.
     ///
-    /// A knob offers what the catalog actually implements, never the KMD field's
-    /// theoretical range: offering a value no surviving kernel carries would produce a
-    /// request nothing can serve.
+    /// Reflects what the catalog implements, not the KMD field's theoretical range.
     static std::vector<MetadataValue> knobValues(const std::vector<KernelDefinition>& kernels,
                                                  const std::string& field)
     {
@@ -286,12 +268,8 @@ private:
         }
     }
 
-    /// A kernel's declared values for the fields its engine's KMD declares, with the
-    /// KMD's defaults filled in for the ones it omitted. This completed tuple, not the
-    /// descriptor id, is what identifies the kernel to matching and ranking: a value the
-    /// schema never declared is unreadable to a matcher or a scorer, so admitting one
-    /// into the key would let two kernels that selection cannot tell apart both enter
-    /// the catalog.
+    /// A kernel's declared metadata values, with the KMD's defaults filled in for
+    /// omitted fields. This completed tuple, not the descriptor id, is the catalog key.
     MetadataValues completeMetadata(const KernelDescriptor& kernel) const
     {
         MetadataValues complete;
@@ -302,9 +280,8 @@ private:
 
             if(it == kernel.metadata.end())
             {
-                // A field with no default is one every kernel must state for itself, so
-                // an omission is an authoring error rather than a silent fallback: it
-                // would otherwise produce a catalog key the author never wrote.
+                // A field with no default must be set by every kernel; omission is
+                // an authoring error.
                 if(!field.defaultValue.has_value())
                 {
                     throw std::invalid_argument("kernel '" + toString(kernel.id)
@@ -315,9 +292,8 @@ private:
                 continue;
             }
 
-            // The KMD declares each field's type, so a value of the wrong one is caught
-            // here rather than surfacing as a bad_variant_access from a matcher or a
-            // scorer, far from the descriptor that caused it.
+            // Caught here rather than surfacing as a bad_variant_access far from the
+            // descriptor that caused it.
             if(metadataTypeOf(it->second) != field.type)
             {
                 throw std::invalid_argument("kernel '" + toString(kernel.id)
@@ -327,9 +303,8 @@ private:
             complete.emplace(field.name, it->second);
         }
 
-        // A value the schema does not declare cannot be read by anything downstream, so
-        // it is almost always a misspelled field name. Left in place it would be doubly
-        // silent: the real field takes its default, and the stray value joins the key.
+        // Rejects fields the schema doesn't declare (usually a misspelled name);
+        // otherwise silently ignored while joining the key.
         for(const auto& [name, value] : kernel.metadata)
         {
             if(complete.find(name) == complete.end())
@@ -344,9 +319,8 @@ private:
         return complete;
     }
 
-    /// The device comes from the context rather than a separate argument: taking it
-    /// twice would let a caller cache one device's catalog under another device's key,
-    /// which is a wrong answer rather than a missed hit.
+    /// Device comes from the context, not a separate argument, to avoid caching one
+    /// device's catalog under another device's key.
     std::optional<CatalogKey> cacheKey(const MatchContext& context) const
     {
         const auto graphId = tryGetGraphId(context.graph);
@@ -387,9 +361,7 @@ private:
     }
 
     /// One graph-scoped matcher's verdict for one (graph, device), keyed by matcher id.
-    /// Matchers are shared by id across packs, so this memoizes both the verdict and
-    /// what it bound, isolated per matcher so a pack merges in exactly the matchers it
-    /// lists and never a sibling pack's contribution to another matcher's entry.
+    /// Memoizes per matcher so a pack merges only the matchers it lists.
     struct GraphMatcherVerdict
     {
         bool passed = false;
@@ -401,15 +373,9 @@ private:
     /**
      * @brief Runs every pack's matchers over @p context, cheapest and broadest first.
      *
-     * Graph-scoped matchers read only graph and device facts, so each runs once per
-     * (graph, device) no matter how many packs list it; one failure disqualifies the
-     * whole pack before any kernel-scoped work. Kernel-scoped matchers then run once per
-     * surviving kernel.
-     *
-     * Each pack's graph-scoped bindings accumulate in a scope-local view and merge into
-     * the catalog's shared bound state only when the whole pack survives
-     * (graphLevelMatchersPass()); a pruned pack's bindings are discarded with its local
-     * view rather than leaking into a surviving pack's kernel.
+     * Graph-scoped matchers run once per (graph, device) regardless of how many packs
+     * list them; a failure disqualifies the pack before kernel-scoped matching runs.
+     * A pruned pack's graph-scoped bindings are discarded, never merged.
      */
     Catalog buildCatalog(const MatchContext& context) const
     {
@@ -418,20 +384,16 @@ private:
 
         for(const auto& pack : _packs)
         {
-            // Scoped to this pack; merged into catalog.bound below only if the pack
-            // survives (see buildCatalog()'s doc).
+            // Merged into catalog.bound below only if the pack survives.
             BoundTokens packBound;
             if(!graphLevelMatchersPass(pack, context, graphVerdicts, packBound))
             {
-                // RFC 0017 §10: an operator must be able to see why a kernel was not
-                // selected. A pack pruned at the graph level is the coarsest, most
-                // common reason.
+                // RFC 0017 §10: surfaces the pack decline reason for operators.
                 HIPDNN_PLUGIN_LOG_INFO("ingestor: pack " << toString(pack.id)
                                                          << " declined at a graph-scoped matcher");
                 continue;
             }
 
-            // Merged rather than kept per pack (Catalog::bound's doc).
             mergeBound(catalog.bound, packBound, pack.id);
 
             size_t admitted = 0;
@@ -456,16 +418,16 @@ private:
                                                      << " kernel(s) after kernel-scoped matching");
         }
 
-        // Without this, an empty catalog's only observable is a missing engine id.
+        // Logged unconditionally so an empty catalog is distinguishable from a
+        // missing engine id.
         HIPDNN_PLUGIN_LOG_INFO("ingestor: catalog for device "
                                << context.deviceId << " holds " << catalog.entries.size()
                                << " kernel(s) from " << _packs.size() << " pack(s)");
         return catalog;
     }
 
-    /// Folds @p packBound into @p bound. Two packs writing DIFFERENT values under one
-    /// token name is an authoring error, detectable only here since it needs a runtime
-    /// match.
+    /// Folds @p packBound into @p bound. Throws if two packs bind the same token to
+    /// different values.
     static void
         mergeBound(BoundTokens& bound, const BoundTokens& packBound, const DescriptorId& packId)
     {
@@ -483,9 +445,8 @@ private:
     }
 
     /**
-     * @param packBound Accumulates THIS pack's own graph-scoped matcher bindings. The
-     *        caller merges it into the shared bound state only when this returns true;
-     *        a pack this function prunes leaves it to be discarded unmerged.
+     * @param packBound Accumulates this pack's graph-scoped bindings; merged by the
+     *        caller only if this returns true.
      */
     bool graphLevelMatchersPass(const KernelDescriptorPack& pack,
                                 const MatchContext& context,
@@ -503,8 +464,7 @@ private:
             auto memo = graphVerdicts.find(matcherId);
             if(memo == graphVerdicts.end())
             {
-                // Evaluated once, on the first pack that lists this matcher; later
-                // packs reuse the verdict and bindings from the memo.
+                // Evaluated once per matcher; later packs reuse the memoized verdict.
                 GraphMatcherVerdict verdict;
                 verdict.passed
                     = GraphMatcherRegistry::resolve(matcher.matchSymbol)(context, verdict.bound);
@@ -516,7 +476,7 @@ private:
                 return false;
             }
 
-            // Merges only THIS matcher's bindings into the pack's scoped view.
+            // Merges this matcher's bindings into the pack's scoped view.
             packBound.insert(memo->second.bound.begin(), memo->second.bound.end());
         }
         return true;

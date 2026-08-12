@@ -28,17 +28,11 @@
 
 /**
  * @file TestKernelIngestorEngine.cpp
- * @brief What now exists in place of the deleted PointwiseAddEngine forwarding wrapper:
- *        registerNativeIngestorSymbols() and makePointwiseAddEngine().
- *
- * There is no engine class left to test directly -- GenericEngine<Handle, Settings,
- * Context> already satisfies IEngine end to end, and it is the SDK's own type, covered
- * by the SDK's own suite. What is this provider's to test is that the factory wires it
- * up correctly: the resulting engine answers every IEngine method for a graph this
- * pack's matchers accept, and declines one they do not. Reached through Container and
- * EngineManager rather than constructed piecemeal, since makePointwiseAddEngine() itself
- * takes no seams a test could inject through -- the device resolver and dispatch
- * handler it wires up are process-lifetime statics (see KernelIngestorEngine.cpp).
+ * @brief Tests registerNativeIngestorSymbols() and makePointwiseAddEngine(), which
+ *        replace the deleted PointwiseAddEngine forwarding wrapper. GenericEngine
+ *        itself is the SDK's type and covered by the SDK's suite; this file only
+ *        verifies the factory wires it up correctly, reached through Container and
+ *        EngineManager since makePointwiseAddEngine() takes no injectable seams.
  */
 namespace
 {
@@ -56,9 +50,8 @@ GraphWrapper wrap(const flatbuffers::FlatBufferBuilder& builder)
     return GraphWrapper(builder.GetBufferPointer(), builder.GetSize());
 }
 
-/// Stubs a config naming this pack's engine and setting no knobs -- the shape
-/// getMaxWorkspaceSize() and initializeExecutionContext() both key their engine lookup
-/// on, per EngineManager::getEngine(engineConfig.engineId()).
+/// Stubs a config naming this pack's engine, keyed the way getMaxWorkspaceSize() and
+/// initializeExecutionContext() both look it up: EngineManager::getEngine(engineId()).
 void stubAsThisEnginesConfig(MockEngineConfig& config)
 {
     EXPECT_CALL(config, isValid()).WillRepeatedly(::testing::Return(false));
@@ -71,11 +64,8 @@ void stubAsThisEnginesConfig(MockEngineConfig& config)
 
 TEST(TestKernelIngestorEngine, RegisterNativeIngestorSymbolsIsIdempotentAcrossRepeatedCalls)
 {
-    // once_flag-guarded (see its own doc): Container's constructor calls this on every
-    // Container built over the process's life (SharedContainerManager's weak_ptr means
-    // that can be many times), so a second call must be a silent no-op rather than a
-    // throw on the duplicate registration NativeRegistry::registerSymbol() would
-    // otherwise report.
+    // once_flag-guarded; Container's constructor calls this on every Container built
+    // (may be many, via SharedContainerManager's weak_ptr), so repeats must be a no-op.
     EXPECT_NO_THROW(registerNativeIngestorSymbols());
     EXPECT_NO_THROW(registerNativeIngestorSymbols());
     EXPECT_NO_THROW(registerNativeIngestorSymbols());
@@ -85,9 +75,8 @@ TEST(TestKernelIngestorEngine, RegistrationFailureReportsTheSameCauseOnRetryAfte
 {
     using hipdnn_plugin_sdk::ingestor::DispatchRegistry;
 
-    // Container's constructor already ran registration once for the process;
-    // unregister to drive controlled attempts, and always restore -- every other test
-    // resolves matching and dispatch through these symbols.
+    // Unregisters to drive controlled attempts; every other test relies on these
+    // symbols for matching and dispatch, so always restore.
     unregisterPointwiseAddMatchers();
     DispatchRegistry<Handle>::unregisterSymbol(std::string(DISPATCH_SYMBOL));
     struct RestoreGuard
@@ -98,9 +87,8 @@ TEST(TestKernelIngestorEngine, RegistrationFailureReportsTheSameCauseOnRetryAfte
         }
     } const restoreGuard;
 
-    // Occupies the dispatch symbol, so registerNativeIngestorSymbolsOnce() succeeds on
-    // every matcher and fails only on dispatch -- the partial-failure shape the
-    // rollback exists for.
+    // Occupies the dispatch symbol so registration succeeds on every matcher and fails
+    // only on dispatch -- the partial-failure shape rollback exists for.
     DispatchRegistry<Handle>::registerSymbol(std::string(DISPATCH_SYMBOL), nullptr);
 
     const auto attempt = [] {
@@ -120,7 +108,7 @@ TEST(TestKernelIngestorEngine, RegistrationFailureReportsTheSameCauseOnRetryAfte
     const auto secondMessage = attempt();
 
     // Without rollback, the first attempt's matcher symbols stay registered and the
-    // second attempt fails on one of those instead -- a different, misleading cause.
+    // second attempt fails on a different, misleading cause.
     EXPECT_EQ(firstMessage, secondMessage);
 
     DispatchRegistry<Handle>::unregisterSymbol(std::string(DISPATCH_SYMBOL));
@@ -135,9 +123,8 @@ TEST(TestKernelIngestorEngine, MakePointwiseAddEngineIsReachableWithTheDescripto
     Container container;
     auto& engineManager = container.getEngineManager();
 
-    // The engine table keys this entry on pointwiseAddEngineId(), which registers the
-    // engine's name on first call; getAllEngineIds() proves the factory above actually
-    // installed an engine under that id rather than merely compiling.
+    // pointwiseAddEngineId() registers the engine's name on first call;
+    // getAllEngineIds() proves the factory installed it, not just compiled.
     const auto allEngineIds = engineManager.getAllEngineIds();
     EXPECT_NE(std::find(allEngineIds.begin(), allEngineIds.end(), pointwiseAddEngineId()),
               allEngineIds.end());
@@ -145,9 +132,8 @@ TEST(TestKernelIngestorEngine, MakePointwiseAddEngineIsReachableWithTheDescripto
 
 TEST(TestKernelIngestorEngine, IsApplicableAcceptsAGraphThisPacksMatchersAccept)
 {
-    // Applicability resolves the call's device and matches on its properties, and the
-    // matchers decline outright when no device can be named -- so an accept is only
-    // meaningful where there is a device to accept for.
+    // Matchers decline outright with no device resolved, so an accept is only
+    // meaningful where there is one.
     SKIP_IF_NO_DEVICES();
 
     Container container;
@@ -163,8 +149,7 @@ TEST(TestKernelIngestorEngine, IsApplicableAcceptsAGraphThisPacksMatchersAccept)
 
 TEST(TestKernelIngestorEngine, GetEngineDetailsReportsTheBlockSizeKnob)
 {
-    // The reported knob's value set comes from the catalog this graph matched, which is
-    // empty without a device (see the applicability test above).
+    // The reported knob set comes from the matched catalog, empty without a device.
     SKIP_IF_NO_DEVICES();
 
     Container container;
@@ -194,19 +179,16 @@ TEST(TestKernelIngestorEngine, GetMaxWorkspaceSizeReportsTheLargerBlocksRequirem
     MockEngineConfig engineConfig;
     stubAsThisEnginesConfig(engineConfig);
 
-    // The catalog's two surviving FLOAT kernels report 0 and 1024 bytes; the engine's
-    // answer is a maximum across whichever kernels the graph admits, not a fixed value,
-    // so this also proves the workspace query reaches the real catalog rather than a
-    // stub.
+    // The catalog's two surviving FLOAT kernels report 0 and 1024 bytes; the answer is
+    // a max across admitted kernels, proving the query reaches the real catalog.
     const auto workspaceSize = engineManager.getMaxWorkspaceSize(handle, wrap(graph), engineConfig);
     EXPECT_EQ(workspaceSize, 1024U);
 }
 
 TEST(TestKernelIngestorEngine, InitializeExecutionContextBuildsAPlanForTheTopRankedKernel)
 {
-    // Builds a plan, which compiles the selected kernel through hiprtc -- so unlike the
-    // applicability and knob-reporting tests above, this one needs a device. Every
-    // device-touching test in this engine's suite guards the same way.
+    // Builds a plan by compiling the selected kernel through hiprtc, so unlike the
+    // tests above this needs a device.
     SKIP_IF_NO_DEVICES();
 
     Container container;
@@ -222,10 +204,8 @@ TEST(TestKernelIngestorEngine, InitializeExecutionContextBuildsAPlanForTheTopRan
         engineManager.initializeExecutionContext(handle, wrap(graph), engineConfig, context));
     ASSERT_TRUE(context.hasValidPlan());
 
-    // Which kernel, not merely that there is one: pointwiseAddScore ranks on block size
-    // and the graph admits both FLOAT kernels, so the 256 entry is the defined winner.
-    // Asserting only hasValidPlan() would pass just as well if selection handed back the
-    // 64 kernel, which is the property this test is named for.
+    // pointwiseAddScore ranks on block size and both FLOAT kernels are admitted, so 256
+    // is the defined winner -- hasValidPlan() alone would not catch a wrong selection.
     const auto& plan
         = dynamic_cast<const hipdnn_plugin_sdk::ingestor::GenericPlan<Handle>&>(context.plan());
     EXPECT_EQ(plan.kernel().getIntMetadata(std::string(BLOCK_SIZE_FIELD)), 256);
@@ -241,9 +221,8 @@ TEST(TestKernelIngestorEngine, DeclinesAGraphThisPacksMatchersRefuse)
     auto& engineManager = container.getEngineManager();
     Handle handle;
 
-    // A multiplication, not this pack's add: refused at the graph-scoped matcher, the
-    // same refusal TestPointwiseAddGraphMatcherRefusal covers directly, exercised here
-    // through the full engine rather than the bare matcher function.
+    // A multiplication is refused at the graph-scoped matcher (also covered directly by
+    // TestPointwiseAddGraphMatcherRefusal), exercised here through the full engine.
     const auto graph
         = buildPointwiseGraph(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::MUL);
     const auto applicable = engineManager.getApplicableEngineIds(handle, wrap(graph));

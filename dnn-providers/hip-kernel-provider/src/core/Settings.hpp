@@ -25,11 +25,8 @@ struct Settings
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
     /// The kernel ingestor's per-call knob filter (RFC 0017 §4's catalog -> filter ->
-    /// rank ordering). See GenericPlanBuilder.hpp's KnobFilter doc for why this lives
-    /// here rather than being threaded through some other channel:
-    /// getMaxWorkspaceSize() receives only this Settings object, not an IEngineConfig,
-    /// so a knob setting reaches it only via a field initializeExecutionSettings()
-    /// populated first.
+    /// rank ordering). Populated by initializeExecutionSettings(); getMaxWorkspaceSize()
+    /// reads it from here since it receives only this Settings object.
     hipdnn_plugin_sdk::ingestor::KnobFilter ingestorKnobFilter;
 #endif
 };

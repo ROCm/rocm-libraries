@@ -21,18 +21,13 @@ namespace hip_kernel_provider::kernel_ingestor_engine
 /**
  * @brief Resolves a call's device from the stream its handle carries.
  *
- * A handle can be rebound between calls, so the device is read per call. Reading it from
- * the handle's stream rather than the calling thread's current device is what keeps the
- * answer right when several threads drive different handles.
+ * A handle can be rebound between calls, so the device is read per call from the
+ * handle's stream rather than the calling thread's current device.
  *
- * Device properties are cached and the cache is never invalidated, so the references it
- * hands out stay valid for this resolver's lifetime. Only successful queries are cached:
- * a zeroed hipDeviceProp_t is not an answer, and this resolver is process-lifetime, so
- * caching one failure would answer wrongly for every later caller.
+ * Device properties are cached for this resolver's lifetime; the cache is never
+ * invalidated. Only successful queries are cached.
  *
- * One instance per process (see KernelIngestorEngine.cpp's deviceResolver()). It holds no
- * engine state, and two engines asking about one device must agree, so a shared cache is
- * the correct scope rather than a convenient one.
+ * One instance per process (see KernelIngestorEngine.cpp's deviceResolver()).
  */
 class HandleDeviceResolver : public hipdnn_plugin_sdk::ingestor::IDeviceResolver<Handle>
 {
@@ -52,10 +47,8 @@ public:
 
         if(hipGetDevice(&deviceId) != hipSuccess)
         {
-            // Neither 0 nor a throw: 0 is a real ordinal this call never asked about,
-            // and deviceId() runs under isApplicable(), which EngineManager walks with
-            // no try/catch -- throwing would deny sibling engines their answer. Matchers
-            // decline on NO_DEVICE, so the engine simply does not apply.
+            // Neither 0 nor a throw: deviceId() runs under isApplicable(), which
+            // EngineManager walks with no try/catch. Matchers decline on NO_DEVICE.
             return hipdnn_plugin_sdk::ingestor::NO_DEVICE;
         }
         return deviceId;
@@ -64,8 +57,8 @@ public:
     const hipDeviceProp_t&
         deviceProperties(hipdnn_plugin_sdk::ingestor::DeviceId deviceId) const override
     {
-        // Reached whenever deviceId() could not name a device, because MatchContext binds
-        // properties before any matcher runs. Inert values, since no kernel survives.
+        // Inert values for a call with no resolvable device; MatchContext binds
+        // properties before any matcher runs, so the caller receives this regardless.
         if(deviceId == hipdnn_plugin_sdk::ingestor::NO_DEVICE)
         {
             static const hipDeviceProp_t s_noDevice{};
@@ -94,11 +87,9 @@ public:
     }
 
 protected:
-    /// Seam for tests that need to grow the cache without that many real devices. The
-    /// production path is the HIP call; overriding it lets a test supply successful
-    /// answers for ids this machine does not have, which is the only way to exercise
-    /// the reference-stability-across-growth invariant now that failures are refused
-    /// rather than cached.
+    /// Seam for tests that need to grow the cache without that many real devices;
+    /// overriding it lets a test supply successful answers for ids this machine
+    /// does not have.
     virtual hipError_t queryDeviceProperties(hipDeviceProp_t* properties,
                                              hipdnn_plugin_sdk::ingestor::DeviceId deviceId) const
     {

@@ -108,8 +108,7 @@ size_t PointwiseAddDispatchHandler::workspaceBytes(const MatchContext& /*context
 std::unique_ptr<PreparedDispatch> PointwiseAddDispatchHandler::prepare(
     const MatchContext& context, const BoundTokens& bound, const KernelDefinition& kernel) const
 {
-    // Reads the operand uids the matcher bound, rather than re-deriving them here with a
-    // second notion of what this graph looks like.
+    // Reads the operand uids the matcher bound rather than re-deriving them.
     const auto binding = pointwiseAddBinding(bound);
 
     const auto blockSize
@@ -124,8 +123,7 @@ std::unique_ptr<PreparedDispatch> PointwiseAddDispatchHandler::prepare(
     auto program = _kernelCompiler.compile(kernel.source.sourceFile, options);
     auto runnableKernel = program->getKernel(kernel.source.entryPoint);
 
-    // One element, so one workgroup; the block size comes from kernel metadata, which is
-    // how a per-kernel launch quantity reaches a dispatch descriptor shared by the pack.
+    // One element, so one workgroup; block size comes from kernel metadata.
     runnableKernel->setBlockSize(blockSize, 1, 1);
     runnableKernel->setGridSize(1, 1, 1);
 

@@ -19,45 +19,32 @@
  * @brief Symbol name to native function, the escape hatch descriptors resolve through.
  *
  * A descriptor names a custom predicate or plan by symbol rather than carrying inline
- * code (RFC 0017); the provider resolves it here. Lookup fails closed: a symbol the
- * provider does not ship throws rather than being silently skipped.
+ * code (RFC 0017); the provider resolves it here. Lookup fails closed.
  */
 namespace hipdnn_plugin_sdk::ingestor
 {
 
-/// A graph-scoped applicability check: reads only graph and device facts, so it runs
-/// once per (graph, device) and its failure prunes every kernel in the pack.
-///
-/// On success, writes what it resolved into @p bound (RFC 0017 §8.5), which the catalog
-/// keeps and dispatch reads back instead of re-deriving it. A matcher that binds
-/// nothing leaves @p bound alone. Kernel-scoped matchers never bind: their result is
-/// per-kernel, with nowhere in the catalog to live.
-///
-/// Must be thread-safe: the registry may call it concurrently, same contract as
-/// `IKernelDispatchHandler::launch`.
+/// Graph-scoped applicability check: reads only graph/device facts, so it runs once per
+/// (graph, device); failure prunes every kernel in the pack. On success, writes resolved
+/// values into @p bound (RFC 0017 §8.5). Must be thread-safe.
 using GraphMatcherFn = bool (*)(const MatchContext&, BoundTokens& bound);
 
-/// A kernel-scoped applicability check: also reads the candidate's metadata, so it runs
+/// Kernel-scoped applicability check: also reads the candidate's metadata, so it runs
 /// once per surviving kernel and disqualifies that kernel alone. Must be thread-safe.
 using KernelMatcherFn = bool (*)(const MatchContext&, const KernelDefinition&);
 
-/// Scores one kernel for one problem. Higher is better.
-///
-/// Deliberately never handed the catalog: see IKernelHeuristic for why that constraint
-/// is what keeps a knob-filtered query consistent with the default it reported. Must be
-/// thread-safe.
+/// Scores one kernel for one problem. Higher is better. Never handed the catalog (see
+/// IKernelHeuristic). Must be thread-safe.
 using ScoreFn = double (*)(const KernelDefinition&, const MatchContext&);
 
 /**
  * @brief The provider's registry of native implementations, keyed by symbol name.
  *
- * One instance per registered type per loaded image, not per process: isolation
- * between two loaded copies depends on the provider building with
- * `CXX_VISIBILITY_PRESET hidden` and `--exclude-libs=ALL` (`src/CMakeLists.txt`) — an
- * exported symbol would let two copies share one registry and the second
- * `registerSymbol()` throw.
+ * One instance per registered type per loaded image: requires `CXX_VISIBILITY_PRESET
+ * hidden` and `--exclude-libs=ALL` (`src/CMakeLists.txt`) so two loaded copies do not
+ * share a registry.
  *
- * Guarded by a mutex: registration and lookup can race across threads.
+ * Thread-safe: registration and lookup are mutex-guarded.
  *
  * @tparam T The registered callable or interface pointer type.
  */
@@ -66,11 +53,10 @@ class NativeRegistry
 {
 public:
     /**
- * @brief Registers @p implementation under @p symbol.
- * @throws std::runtime_error if @p symbol is already registered — always an author
- *         bug, since which implementation would silently win depends on static-init
- *         order.
- */
+     * @brief Registers @p implementation under @p symbol.
+     * @throws std::runtime_error if @p symbol is already registered (which wins would
+     *         depend on static-init order).
+     */
     static void registerSymbol(const std::string& symbol, T implementation)
     {
         auto& self = instance();
@@ -100,9 +86,8 @@ public:
         return it->second;
     }
 
-    /// @brief Removes @p symbol if present. Exists so a test can install a counting or
-    /// failing implementation and restore the original afterwards; production code
-    /// registers once at static-init time and never unregisters.
+    /// @brief Removes @p symbol if present. Used by tests to swap in a temporary
+    /// implementation and restore the original; production code never unregisters.
     static void unregisterSymbol(const std::string& symbol)
     {
         auto& self = instance();
@@ -113,8 +98,7 @@ public:
 private:
     static NativeRegistry& instance()
     {
-        // Function-local static: initialized on first use, immune to the unspecified
-        // init order of the namespace-scope registrations that populate it.
+        // Function-local static: avoids depending on unspecified namespace-scope init order.
         static NativeRegistry s_instance;
         return s_instance;
     }
@@ -127,9 +111,8 @@ using GraphMatcherRegistry = NativeRegistry<GraphMatcherFn>;
 using KernelMatcherRegistry = NativeRegistry<KernelMatcherFn>;
 using ScoreRegistry = NativeRegistry<ScoreFn>;
 
-/// Registered as non-owning pointers: a handler holds provider state (a compiler,
-/// a module cache) whose lifetime is the provider's. The provider must keep the
-/// handler alive for as long as any plan built from it can execute.
+/// Non-owning: the provider owns each handler and must keep it alive for as long as
+/// any plan built from it can execute.
 template <typename THandle>
 using DispatchRegistry = NativeRegistry<const IKernelDispatchHandler<THandle>*>;
 

@@ -69,8 +69,7 @@ TEST(TestIngestorMatchContext, CatalogKeyHashIsConsistentForEqualKeys)
     const CatalogKey second{makeGraphId(3), 2};
     const CatalogKeyHash hash;
 
-    // A hash function must agree with operator== on which keys are "the same": unequal
-    // hashes for equal keys would break the LruCache's unordered_map lookup silently.
+    // Equal keys must hash equal, or LruCache's unordered_map lookup breaks silently.
     EXPECT_EQ(hash(first), hash(second));
 }
 
@@ -80,9 +79,8 @@ TEST(TestIngestorMatchContext, CatalogKeyHashDistinguishesDifferentDeviceIds)
     const CatalogKey onDeviceZero{makeGraphId(4), 0};
     const CatalogKey onDeviceOne{makeGraphId(4), 1};
 
-    // Not a correctness requirement (collisions are legal), but this hash's own doc
-    // claims it folds the device ordinal in, and a hash that silently ignored deviceId
-    // would still "work" via bucket collision while quietly regressing lookup cost.
+    // Collisions are legal, but this hash folds in deviceId; ignoring it would regress
+    // lookup cost while still "working" via collision.
     EXPECT_NE(hash(onDeviceZero), hash(onDeviceOne));
 }
 
@@ -102,8 +100,7 @@ TEST(TestIngestorMatchContext, TryGetGraphIdReturnsTheGraphsIdentity)
 
 TEST(TestIngestorMatchContext, TryGetGraphIdReturnsNulloptForAGraphWithNoIdentity)
 {
-    // A legacy or unfinalized graph: there is no key to memoize under, and callers must
-    // treat this as "cannot cache", not as an error.
+    // No key to memoize under; callers must treat this as "cannot cache", not an error.
     const TestGraph graph;
 
     EXPECT_EQ(tryGetGraphId(graph), std::nullopt);

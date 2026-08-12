@@ -13,10 +13,8 @@
 
 /**
  * @file TestLruCache.cpp
- * @brief Unit tests for the bounded, thread-safe LRU cache LruCache.hpp declares.
- *
- * Concurrent access is covered separately by TestKernelIngestorConcurrency.cpp; these
- * tests are single-threaded and pin the eviction and recency contract itself.
+ * @brief Tests for the bounded, thread-safe LRU cache LruCache.hpp declares.
+ *        Concurrent access is covered separately by TestKernelIngestorConcurrency.cpp.
  */
 namespace
 {
@@ -43,22 +41,17 @@ TEST(TestIngestorLruCache, ReportsMissForAbsentKey)
 
 TEST(TestIngestorLruCache, RejectsZeroCapacity)
 {
-    // A zero-capacity cache would evict every entry as it was inserted, which is always
-    // a caller bug rather than a way to disable caching.
+    // Zero capacity would evict every entry on insert; always a caller bug.
     using IntCache = LruCache<int, int>;
     EXPECT_THROW(IntCache(0), std::invalid_argument);
 }
 
-// ---------------------------------------------------------------------------
-// Eviction order: which entry a capacity-crossing insert evicts depends on recency,
-// not on insertion order, and a get() counts as a touch just as a put() does.
-// ---------------------------------------------------------------------------
+// Eviction order: depends on recency, not insertion order; get() counts as a touch.
 
 struct LruEvictionCase
 {
     std::string name;
-    /// Populates the cache and touches whatever entries the case needs, leaving it one
-    /// insert away from a capacity-2 overflow.
+    /// Populates the cache, leaving it one insert away from a capacity-2 overflow.
     std::function<void(LruCache<int, std::string>&)> setup;
     int expectedEvicted;
     int expectedSurvivor;
@@ -74,8 +67,7 @@ TEST_P(TestIngestorLruCacheEvictionOrder, EvictsByRecencyNotInsertionOrder)
     LruCache<int, std::string> cache(2);
     testCase.setup(cache);
 
-    // The insert that crosses capacity: key 3 must always survive, since it is always
-    // the most recently used entry regardless of which case set it up this way.
+    // Key 3 is always most-recently-used and must survive the crossing insert.
     cache.put(3, "three");
 
     EXPECT_FALSE(cache.get(testCase.expectedEvicted).has_value());
@@ -97,7 +89,7 @@ INSTANTIATE_TEST_SUITE_P(EvictionOrder,
                                                            [](LruCache<int, std::string>& cache) {
                                                                cache.put(1, "one");
                                                                cache.put(2, "two");
-                                                               // Touching 1 makes 2 the least recently used.
+                                                               // Touching 1 makes 2 LRU.
                                                                ASSERT_TRUE(
                                                                    cache.get(1).has_value());
                                                            },
@@ -107,7 +99,7 @@ INSTANTIATE_TEST_SUITE_P(EvictionOrder,
                                                            [](LruCache<int, std::string>& cache) {
                                                                cache.put(1, "one");
                                                                cache.put(2, "two");
-                                                               // Overwriting 1 marks it most-recently-used, same as a get().
+                                                               // Overwrite counts as a touch.
                                                                cache.put(1, "uno");
                                                            },
                                                            /*expectedEvicted=*/2,

@@ -32,11 +32,8 @@
 
 /**
  * @file TestGenericPlanBuilder.cpp
- * @brief Unit tests for GenericPlanBuilder.hpp: applicability, the workspace query's
- *        max-across-survivors, buildPlan's two distinct empty-catalog failure modes,
- *        getCustomKnobs' int-only reporting, the knob-filtering contract item 6 added
- *        (a set knob actually selects a kernel, an unsatisfiable one throws), and
- *        contextFor()'s per-handle device resolution.
+ * @brief Unit tests for GenericPlanBuilder.hpp: applicability, workspace sizing, plan
+ *        building, knob filtering, and per-handle device resolution.
  */
 namespace
 {
@@ -49,13 +46,12 @@ using ::testing::Return;
 using ::testing::ReturnRef;
 
 // ---------------------------------------------------------------------------
-// isApplicable / getMaxWorkspaceSize / buildPlan / getCustomKnobs, using the
-// TestHandle = int fixture shape already wired for a two-survivor catalog.
+// isApplicable / getMaxWorkspaceSize / buildPlan / getCustomKnobs, using a
+// two-survivor catalog (TestHandle = int).
 // ---------------------------------------------------------------------------
 
-/// A dispatch handler whose workspace requirement equals the kernel's block_size, so a
-/// getMaxWorkspaceSize test can assert on a real max rather than a constant every kernel
-/// shares.
+/// Workspace requirement equals the kernel's block_size, so getMaxWorkspaceSize can assert
+/// a real max instead of a shared constant.
 class WorkspaceEqualsBlockSizeHandler : public IKernelDispatchHandler<TestHandle>
 {
 public:
@@ -96,8 +92,7 @@ struct KnobFilterContext
         _plan = std::move(plan);
     }
 
-    /// Safe without RTTI: GenericPlanBuilder<TestHandle, ...> only ever hands setPlan()
-    /// a GenericPlan<TestHandle>, so the concrete type is known at every call site here.
+    /// Safe without RTTI: setPlan() only ever receives a GenericPlan<TestHandle> here.
     const GenericPlan<TestHandle>& plan() const
     {
         return static_cast<const GenericPlan<TestHandle>&>(*_plan);
@@ -155,18 +150,14 @@ TEST(TestIngestorGenericPlanBuilder, GetMaxWorkspaceSizeTakesTheMaxAcrossSurvivo
     const TestPlanBuilder builder(engine, *manager, resolver);
 
     const TestGraph graph(makeGraphId(0x92));
-    // Two FLOAT survivors, block_size 64 and 256: the max must be 256, not the first
-    // entry or an unweighted sum.
+    // Two survivors (block_size 64, 256): expects the max, not the first entry or a sum.
     EXPECT_EQ(builder.getMaxWorkspaceSize(0, graph, KnobFilterSettings{}), 256U);
 }
 
 TEST(TestIngestorGenericPlanBuilder, BuildPlanThrowsInternalErrorOnAnEmptyRankedCatalog)
 {
-    // The pre-existing, unrelated failure: applicability accepted a graph this engine
-    // cannot serve at all (matching itself found nothing), independent of any knob.
-    // Item 6 must not collapse this into the same status or message as the
-    // knob-filtering case below -- a caller needs to tell "your knobs excluded
-    // everything" apart from "this engine cannot serve this graph regardless of knobs".
+    // Applicability accepted a graph with no matching kernel at all (not a knob issue);
+    // this must carry a different status/message than the knob-filtering case below.
     const ScopedSymbols symbols("test.graph", rejectGraph, "test.kernel", countingFloatKernels);
     const auto manager = makeStateManager();
     const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
@@ -241,9 +232,8 @@ TEST(TestIngestorGenericPlanBuilder, GetCustomKnobsReportsMinMaxStepAndRankedDef
 
 TEST(TestIngestorGenericPlanBuilder, GetCustomKnobsSkipsFieldsWithNoIntegerValues)
 {
-    // dtype is a declared, engine-exposed knob but every value it takes is a string, so
-    // it can never be expressed as an integer knob and must be silently skipped rather
-    // than stringified into a number that would mean nothing to a caller.
+    // dtype takes only string values, so it can never become an integer knob and must be
+    // skipped.
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const auto manager = makeStateManager();
     const auto engine = makeEngineWithKnobs({BLOCK_SIZE, DTYPE});
@@ -258,14 +248,12 @@ TEST(TestIngestorGenericPlanBuilder, GetCustomKnobsSkipsFieldsWithNoIntegerValue
 }
 
 // ---------------------------------------------------------------------------
-// Knob filtering (item 6): relocated unchanged from Phase 1's regression tests.
+// Knob filtering: setting a knob must actually restrict kernel selection.
 // ---------------------------------------------------------------------------
 
 TEST(TestIngestorGenericPlanBuilder, HonorsAnExplicitKnobSettingOverTheHeuristicDefault)
 {
-    // The heuristic (scoreByBlockSize) ranks 256 first, so this is the assertion that
-    // proves the knob is honored rather than merely advertised: leaving it alone would
-    // select 256, but setting it must select 64 instead.
+    // The heuristic would pick 256 by default; setting block_size=64 must override it.
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const WorkspaceEqualsBlockSizeHandler handler;
     const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
@@ -315,8 +303,7 @@ TEST(TestIngestorGenericPlanBuilder, UnsatisfiableKnobValueThrowsInvalidValueNam
         EXPECT_EQ(ex.getStatus(), HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
         EXPECT_NE(ex.getMessage().find(BLOCK_SIZE), std::string::npos);
         EXPECT_NE(ex.getMessage().find("999"), std::string::npos);
-        // Survivor count is the caller's only way to tell "graph matched nothing"
-        // apart from "graph matched, knobs excluded everything".
+        // Survivor count distinguishes "knobs excluded everything" from "graph matched nothing".
         EXPECT_NE(ex.getMessage().find("2 kernel(s) matched the graph before knob filtering"),
                   std::string::npos);
     }
@@ -324,9 +311,8 @@ TEST(TestIngestorGenericPlanBuilder, UnsatisfiableKnobValueThrowsInvalidValueNam
 
 TEST(TestIngestorGenericPlanBuilder, GetMaxWorkspaceSizeHonorsTheSameKnobFilterAsBuildPlan)
 {
-    // A workspace query and a plan build must not disagree about which kernels a knob
-    // combination admits: setting block_size=64 must restrict the max to the 64
-    // kernel's requirement, not the unfiltered catalog's 256.
+    // getMaxWorkspaceSize and buildPlan must apply the same knob filter: block_size=64
+    // caps the max at 64, not the unfiltered catalog's 256.
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const WorkspaceEqualsBlockSizeHandler handler;
     const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
@@ -379,8 +365,7 @@ TEST(TestIngestorGenericPlanBuilder,
     const TestPlanBuilder builder(engine, *manager, resolver);
 
     flatbuffers::FlatBufferBuilder fbb;
-    // No knob set: an empty engine config is as close to "no request" as this helper
-    // allows, and the point under test is the no-kernels-at-all path, not filtering.
+    // An empty engine config exercises the no-kernels-at-all path, not knob filtering.
     const auto engineConfig = makeEmptyEngineConfig(fbb);
 
     const TestGraph graph(makeGraphId(32));
@@ -458,9 +443,8 @@ TEST(TestIngestorGenericPlanBuilder, InitializeExecutionSettingsRejectsAStringVa
 }
 
 // ---------------------------------------------------------------------------
-// contextFor(): a mocked device resolver proves per-handle device resolution folds
-// into the MatchContext that reaches the matchers, using StubHandle/StubSettings/
-// StubContext so the mock's handle type matches IngestorMocks.hpp's.
+// contextFor(): a mocked device resolver proves per-handle device resolution folds into
+// the MatchContext (uses StubHandle/StubSettings/StubContext to match IngestorMocks.hpp).
 // ---------------------------------------------------------------------------
 
 constexpr DeviceId DEVICE_FOR_HANDLE_A = 42;
@@ -515,9 +499,8 @@ TEST(TestIngestorGenericPlanBuilder, ContextForFoldsPerHandleDeviceResolutionInt
         engine, manager, resolver);
     const TestGraph graph(makeGraphId(0x98));
 
-    // Same builder, same graph, two handles: only the resolved device differs, and only
-    // handleA's device satisfies the matcher. isApplicable can differ only if
-    // contextFor() actually asked the resolver per handle rather than resolving once.
+    // Same builder and graph, two handles differing only in resolved device: isApplicable
+    // can differ only if contextFor() asks the resolver per handle.
     EXPECT_TRUE(builder.isApplicable(handleA, graph));
     EXPECT_FALSE(builder.isApplicable(handleB, graph));
 

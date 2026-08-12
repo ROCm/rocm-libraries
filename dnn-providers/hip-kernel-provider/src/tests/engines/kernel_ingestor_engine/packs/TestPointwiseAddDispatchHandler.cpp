@@ -37,12 +37,8 @@
  * @brief The pack's dispatch: workspace sizing, prepare's compile options, and a real
  *        compile-and-launch.
  *
- * The launch tests run on device deliberately. A recorded no-op would exercise neither
- * the runtime compile nor the uid-to-pointer resolution, which are the two parts most
- * likely to be wrong when real kernels arrive. Everything that fails before either of
- * those -- an unbound dispatch, an unsupported dtype, the exact options handed to the
- * compiler -- is asserted CPU-only, so a decline is cheap to verify and does not need a
- * device to run in CI.
+ * The launch tests run on device to exercise the runtime compile and uid-to-pointer
+ * resolution. Everything that fails before those is asserted CPU-only.
  */
 namespace
 {
@@ -53,9 +49,8 @@ using namespace hip_kernel_provider::kernel_ingestor_engine::testing;
 using hipdnn_plugin_sdk::ingestor::BoundTokens;
 using hipdnn_plugin_sdk::ingestor::MatchContext;
 
-/// The bindings a real plan build would hand the handler, produced the way the state
-/// manager produces them: by running the graph matcher. Building them by hand instead
-/// would let these tests pass against a matcher that binds the wrong uids.
+/// The bindings a real plan build would hand the handler, produced by running the graph
+/// matcher rather than built by hand.
 BoundTokens bindingsFor(const MatchContext& context)
 {
     BoundTokens bound;
@@ -67,8 +62,7 @@ BoundTokens bindingsFor(const MatchContext& context)
 }
 
 /// Device buffers for one 1-element add, freed on scope exit. Templated on the element
-/// type so the same buffer plumbing serves every dtype this pack's dispatch handler
-/// compiles for, rather than one copy per type that could quietly drift apart.
+/// type to serve every dtype this pack's dispatch handler compiles for.
 template <typename T>
 class AddBuffers
 {
@@ -114,10 +108,6 @@ private:
 
 // ---------------------------------------------------------------------------
 // Workspace
-//
-// Collapses two block-size cases -- the 256-block kernel's non-zero requirement is what
-// makes the engine's "maximum across survivors" answer observably a maximum rather than
-// a constant zero -- into one TEST_P over the (block size, expected bytes) pairs.
 // ---------------------------------------------------------------------------
 
 struct WorkspaceCase
@@ -156,8 +146,7 @@ TEST(TestPointwiseAddDispatch, ReportsWorkspaceWithoutSeeingTheRestOfTheCatalog)
     const PointwiseAddDispatchHandler handler(compiler);
 
     // The query is answered per kernel, before selection and before any plan exists, so
-    // the answer must not depend on which other kernels are in the catalog. Asking twice
-    // for the same kernel, either side of a different one, gives the same number.
+    // the answer must not depend on which other kernels are in the catalog.
     const auto first = handler.workspaceBytes(
         fixture.context(), bindingsFor(fixture.context()), makeKernel(256, "FLOAT"));
     static_cast<void>(handler.workspaceBytes(
@@ -169,15 +158,13 @@ TEST(TestPointwiseAddDispatch, ReportsWorkspaceWithoutSeeingTheRestOfTheCatalog)
 }
 
 // ---------------------------------------------------------------------------
-// Prepare: compile options and unhappy paths -- all CPU-only, since everything here
-// either never reaches the compiler or replaces it with a mock.
+// Prepare: compile options and unhappy paths -- all CPU-only, since nothing here
+// reaches a real compiler.
 // ---------------------------------------------------------------------------
 
 TEST(TestPointwiseAddDispatch, PreparePassesTheKernelsTypeAndBlockSizeToTheCompiler)
 {
-    // Mirrors TestRMSnormBwdPlan.cpp's captured-options pattern: a mock compiler in
-    // place of a real one proves exactly what prepare() sends it, without depending on
-    // hiprtc or a device.
+    // A mock compiler proves exactly what prepare() sends it, without hiprtc or a device.
     const GraphFixture fixture(buildPointwiseGraph());
     const MockKernelCompiler compiler;
     std::vector<std::string> capturedOptions;
@@ -212,10 +199,8 @@ TEST(TestPointwiseAddDispatch, PreparePassesTheKernelsTypeAndBlockSizeToTheCompi
 TEST(TestPointwiseAddDispatch, PrepareRejectsAKernelDeclaringAnUnsupportedDtype)
 {
     // elementTypeFor's dtype switch is unreachable via matching, which admits only the
-    // dtypes this pack declares (FLOAT, HALF); reached directly here to prove the
-    // fallback reports rather than silently compiling the wrong kernel. Never reaches
-    // the compiler -- elementTypeFor throws before prepare() calls it -- so this needs
-    // no device and no mock beyond a real, unused compiler.
+    // dtypes this pack declares (FLOAT, HALF). Never reaches the compiler --
+    // elementTypeFor throws before prepare() calls it.
     const GraphFixture fixture(buildPointwiseGraph());
     const HipMlopsKernelCompiler compiler;
     const PointwiseAddDispatchHandler handler(compiler);
@@ -227,15 +212,13 @@ TEST(TestPointwiseAddDispatch, PrepareRejectsAKernelDeclaringAnUnsupportedDtype)
 
 TEST(TestPointwiseAddDispatch, RefusesToPrepareWithoutTheMatcherSBindings)
 {
-    // Not gated: pointwiseAddBinding() throws on a missing token before prepare() reads
-    // context.deviceProperties or does anything HIP-touching, so this needs no device.
+    // pointwiseAddBinding() throws on a missing token before prepare() touches HIP.
     const GraphFixture fixture(buildPointwiseGraph());
     const HipMlopsKernelCompiler compiler;
     const PointwiseAddDispatchHandler handler(compiler);
 
-    // Preparation reads the operand uids the matcher bound rather than re-deriving them,
-    // so bindings that never came from this pack's matcher are a wiring error. It must
-    // fail loudly instead of guessing which tensor is which operand.
+    // Preparation reads the operand uids the matcher bound rather than re-deriving them;
+    // bindings not produced by this pack's matcher are a wiring error.
     EXPECT_THROW(handler.prepare(fixture.context(), BoundTokens{}, makeKernel(64, "FLOAT")),
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
@@ -244,8 +227,7 @@ TEST(TestPointwiseAddDispatch, RefusesToPrepareWithoutTheMatcherSBindings)
 // Prepare and launch on device
 // ---------------------------------------------------------------------------
 
-// Runs over every dtype the pack ships a kernel for, so a broken HALF compile path
-// fails a real launch rather than only the matcher tests, which never reach hiprtc.
+// Runs over every dtype the pack ships a kernel for.
 struct RealLaunchCase
 {
     std::string name;
@@ -311,8 +293,8 @@ TEST(TestPointwiseAddDispatch, LaunchesTheSameResultForEitherBlockSize)
     const HipMlopsKernelCompiler compiler;
     const PointwiseAddDispatchHandler handler(compiler);
 
-    // block_size reaches the compiler and the launch geometry, so both kernels are
-    // genuinely different builds; a one-element add must still agree.
+    // block_size reaches the compiler and the launch geometry; a one-element add must
+    // still agree across both kernels.
     for(const int64_t blockSize : {64, 256})
     {
         const auto prepared = handler.prepare(
@@ -336,8 +318,8 @@ TEST(TestPointwiseAddDispatch, PreparedLaunchIsReusableAcrossExecutions)
     const HipMlopsKernelCompiler compiler;
     const PointwiseAddDispatchHandler handler(compiler);
 
-    // A plan is built once and may execute many times with different buffers, so
-    // preparation must hold nothing tied to one execution.
+    // A plan is built once and executes many times, so preparation must hold nothing
+    // tied to one execution.
     const auto prepared = handler.prepare(
         fixture.context(), bindingsFor(fixture.context()), makeKernel(64, "FLOAT"));
     const Handle handle;
@@ -359,18 +341,10 @@ TEST(TestPointwiseAddDispatch, DispatchStaysResolvableAcrossContainerLifetimes)
 {
     SKIP_IF_NO_DEVICES();
 
-    // A container is destroyed when its last handle closes, and a process that opens
-    // handles again builds a new one. This pack's implementations are registered once in
-    // a process-wide registry, so anything registered there must outlive every container
-    // -- a handler owned by a container's engine would be freed while the registration
-    // still pointed at it.
-    //
-    // This asserts the invariant holds: after a container is destroyed and rebuilt, the
-    // registered dispatch still resolves and still runs. It does NOT by itself prove the
-    // absence of a use-after-free, because a freed handler carrying no per-instance state
-    // usually keeps answering. What catches that is the integration binary's exit status:
-    // owning the handler on the engine makes hip_kernel_provider_integration_tests abort
-    // at process teardown while every test still reports as passing.
+    // Registered dispatch implementations live in a process-wide registry and must
+    // outlive every container. This asserts a rebuilt container still resolves and runs
+    // the registration; a use-after-free is instead caught by the integration binary's
+    // exit status at process teardown.
     {
         const core::Container first;
     }

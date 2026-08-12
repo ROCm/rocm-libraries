@@ -15,12 +15,8 @@
 
 /**
  * @file TestDescriptors.cpp
- * @brief Unit tests for Descriptors.hpp: id formatting and hashing, the unified
- *        MetadataValue/MetadataType pairing over vector<int64_t>, and the KernelSource
- *        tagged union.
- *
- * makeKernelHeuristic() is declared in IKernelHeuristic.hpp, not here, so its tests live
- * in TestKernelHeuristic.cpp; this file covers HeuristicDescriptor purely as data.
+ * @brief Tests for Descriptors.hpp: id formatting/hashing, the MetadataValue/MetadataType
+ *        pairing, and the KernelSource tagged union.
  */
 namespace
 {
@@ -60,8 +56,7 @@ TEST(TestIngestorDescriptors, DescriptorIdHashDistinguishesDifferentIds)
 }
 
 // ---------------------------------------------------------------------------
-// metadataTypeOf: MetadataType must track MetadataValue's variant order exactly, one
-// alternative at a time, so a mismatch here means the enum and the variant have drifted.
+// metadataTypeOf: MetadataType must track MetadataValue's variant order exactly.
 // ---------------------------------------------------------------------------
 
 struct MetadataTypeCase
@@ -93,13 +88,12 @@ INSTANTIATE_TEST_SUITE_P(
     [](const ::testing::TestParamInfo<MetadataTypeCase>& info) { return info.param.name; });
 
 // ---------------------------------------------------------------------------
-// KernelSourceKind / KernelSource: the tagged union over RFC 0017 §7's source kinds.
+// KernelSourceKind / KernelSource: tagged union over RFC 0017 §7's source kinds.
 // ---------------------------------------------------------------------------
 
 TEST(TestIngestorDescriptors, KernelSourceDefaultsToEmbeddedSource)
 {
-    // The only kind this POC implements, and the kind every existing fixture kernel
-    // relies on defaulting to.
+    // Only kind this POC implements.
     const KernelSource source{};
 
     EXPECT_EQ(source.kind, KernelSourceKind::EMBEDDED_SOURCE);
@@ -119,8 +113,7 @@ TEST(TestIngestorDescriptors, KernelSourceCarriesEmbeddedSourceFileAndEntryPoint
 }
 
 // ---------------------------------------------------------------------------
-// HeuristicDescriptor: HeuristicKind as data. The adapter dispatch on it is
-// makeKernelHeuristic()'s behavior, tested in TestKernelHeuristic.cpp.
+// HeuristicDescriptor: HeuristicKind as data; dispatch is tested in TestKernelHeuristic.cpp.
 // ---------------------------------------------------------------------------
 
 TEST(TestIngestorDescriptors, HeuristicDescriptorDefaultsToNativeKind)

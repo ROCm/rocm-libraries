@@ -22,12 +22,11 @@ namespace hipdnn_plugin_sdk::ingestor
 /**
  * @brief An executable plan for one descriptor-selected kernel.
  *
- * Holds the kernel the heuristic chose, the handler that launches it, and the launch
- * detail that handler resolved from the graph at build time: execute() resolves and
- * re-matches nothing.
+ * Holds the selected kernel, its dispatch handler, and launch details resolved from
+ * the graph at construction; execute() re-matches nothing.
  *
- * Immutable after construction, as IPlan requires: the same plan may execute
- * concurrently from several threads with different device buffers.
+ * Immutable after construction: the same plan may execute concurrently from multiple
+ * threads with different device buffers.
  */
 template <typename THandle>
 class GenericPlan : public IPlan<THandle>
@@ -35,11 +34,9 @@ class GenericPlan : public IPlan<THandle>
 public:
     /**
      * @param dispatcher The selected kernel and its resolved dispatch handler.
-     * @param context    Bound graph and device state. Read during construction to
-     *                   prepare the launch; not retained, because a plan outlives the
-     *                   graph reference this carries.
-     * @param bound      What matching resolved about the graph, from the catalog that
-     *                   selected this kernel.
+     * @param context    Bound graph and device state, read during construction only;
+     *                   not retained.
+     * @param bound      What matching resolved about the graph.
      */
     GenericPlan(KernelDispatcher<THandle> dispatcher,
                 const MatchContext& context,
@@ -80,8 +77,7 @@ public:
         _dispatcher.handler->launch(handle, *_prepared, deviceBuffers, numDeviceBuffers, workspace);
     }
 
-    /// The kernel this plan launches. Exposed for the resolved-plan diagnostics
-    /// (RFC 0017 §10) and for tests asserting which kernel selection chose.
+    /// The kernel this plan launches (used by resolved-plan diagnostics, RFC 0017 §10).
     const KernelDefinition& kernel() const
     {
         return _dispatcher.kernel;

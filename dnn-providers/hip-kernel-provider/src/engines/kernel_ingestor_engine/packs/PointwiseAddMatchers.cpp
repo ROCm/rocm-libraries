@@ -34,18 +34,13 @@ const data_objects::TensorAttributes* findTensor(const MatchContext& context, in
     return it == tensors.end() ? nullptr : it->second;
 }
 
-/// The tensor ranks this pack accepts. Not a kernel property (it indexes one element
-/// regardless of rank) but a dispatch-path one: compile options derive layout from the
-/// tensor and reject anything outside this range, so a matcher that admits a rank
-/// dispatch cannot serve turns a free decline into a failed plan build.
+/// The tensor ranks this pack accepts; compile options derive layout from the tensor
+/// and reject anything outside this range.
 constexpr uint32_t MIN_SUPPORTED_RANK = 4;
 constexpr uint32_t MAX_SUPPORTED_RANK = 5;
 
-/// True when the tensor's stride order is one the dispatch path can classify.
-///
-/// Compile options derive a layout from the strides and throw on any order that is
-/// neither channel-first nor channel-last; a one-element tensor viewing into a larger
-/// buffer can still carry an unclassifiable order.
+/// True when the tensor's stride order is channel-first or channel-last, the only
+/// orders the dispatch path's compile options can classify.
 bool hasSupportedLayout(const data_objects::TensorAttributes& tensor)
 {
     try
@@ -55,14 +50,11 @@ bool hasSupportedLayout(const data_objects::TensorAttributes& tensor)
     }
     catch(const hipdnn_plugin_sdk::HipdnnPluginException&)
     {
-        // Asking the classifier directly keeps this gate and the dispatch path on one
-        // definition of "supported layout" rather than two that can drift.
         return false;
     }
 }
 
-/// True when the tensor is a supported rank and layout holding exactly one element --
-/// the whole of this pack's supported problem space.
+/// True when the tensor is a supported rank and layout holding exactly one element.
 bool isSingleElement(const data_objects::TensorAttributes& tensor)
 {
     const auto* dims = tensor.dims();
@@ -117,19 +109,14 @@ std::string dataTypeName(data_objects::DataType dataType)
 
 bool pointwiseAddGraphMatches(const MatchContext& context, BoundTokens& bound)
 {
-    // No device, no launch. The resolver reports NO_DEVICE when it cannot name the
-    // device this call is for, and every fact below that a kernel would be selected on
-    // -- including the device properties the compile is configured from -- is
-    // meaningless without one. Declining here is what keeps that failure a clean "this
-    // engine does not apply" rather than a property lookup for a device that does not
-    // exist.
+    // No device, no launch: every fact this matcher would select on -- including the
+    // device properties the compile is configured from -- is meaningless without one.
     if(context.deviceId == hipdnn_plugin_sdk::ingestor::NO_DEVICE)
     {
         return false;
     }
 
-    // Exactly one node: a prebuilt kernel serves one complete graph, so anything larger
-    // is a different problem even if it contains this one.
+    // Exactly one node: this pack's kernel serves one complete graph.
     if(context.graph.nodeCount() != 1)
     {
         return false;
@@ -167,8 +154,7 @@ bool pointwiseAddGraphMatches(const MatchContext& context, BoundTokens& bound)
         return false;
     }
 
-    // A virtual tensor never materializes into a device buffer, so it is absent from
-    // the variant pack findDeviceBuffer resolves at launch.
+    // A virtual tensor has no device buffer for findDeviceBuffer to resolve at launch.
     if(inputA->virtual_() || inputB->virtual_() || output->virtual_())
     {
         return false;
@@ -183,18 +169,14 @@ bool pointwiseAddGraphMatches(const MatchContext& context, BoundTokens& bound)
         return false;
     }
 
-    // Uniform dtype across operands. Mixed-precision add is a different kernel, and
-    // accepting it here would hand one binary operands it cannot read.
+    // Uniform dtype across operands; mixed precision is a different kernel.
     if(inputA->data_type() != inputB->data_type() || inputA->data_type() != output->data_type())
     {
         return false;
     }
 
-    // Bind what the launch needs, now that the walk that found it has succeeded. The
-    // dispatch handler reads these back instead of re-walking the graph, so there is one
-    // notion of which tensor is which operand rather than two that can drift apart.
-    // The uid type is already int64_t; what matters is that these land in the
-    // MetadataValue's integer alternative, which is the one the dispatch side reads.
+    // Binds operand uids for the dispatch handler to read back rather than re-deriving
+    // them from the graph.
     bound[std::string(INPUT_A_TOKEN)] = attributes.in_0_tensor_uid();
     bound[std::string(INPUT_B_TOKEN)] = attributes.in_1_tensor_uid().value();
     bound[std::string(OUTPUT_TOKEN)] = attributes.out_0_tensor_uid();
@@ -209,26 +191,21 @@ bool pointwiseAddKernelMatches(const MatchContext& context, const KernelDefiniti
         return false;
     }
 
-    // Pins the kernel's baked element type against the graph's. Without this, the
-    // graph-level gate would accept an f32 graph and selection could hand it to the
-    // f16 kernel, which returns wrong numbers rather than failing.
+    // Pins the kernel's baked dtype against the graph's, so an f32 graph cannot reach
+    // an f16 kernel and get wrong numbers back.
     return kernel.getStringMetadata(std::string(DTYPE_FIELD)) == dataTypeName(*dataType);
 }
 
 double pointwiseAddScore(const KernelDefinition& kernel, const MatchContext& /*context*/)
 {
-    // A stand-in for a trained model: prefer the larger block size. It gives ranking a
-    // defined, inspectable winner without pretending to be a performance judgement —
-    // for a one-element add, no block size is actually better.
+    // A stand-in for a trained model: prefers the larger block size.
     return static_cast<double>(kernel.getIntMetadata(std::string(BLOCK_SIZE_FIELD)));
 }
 
 PointwiseAddBinding pointwiseAddBinding(const BoundTokens& bound)
 {
-    // Every token was written by the graph matcher that admitted this graph, so a missing
-    // one -- or one holding something other than the uid this expects -- means the
-    // catalog was built by a matcher other than ours: a wiring error, not a graph this
-    // pack should decline.
+    // Every token was written by the graph matcher that admitted this graph; a missing
+    // one means the catalog was built by a matcher other than ours.
     const auto read = [&bound](std::string_view token) {
         const auto value = hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, token);
         if(!value.has_value())

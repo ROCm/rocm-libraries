@@ -27,16 +27,13 @@ namespace hip_kernel_provider::kernel_ingestor_engine::testing
 constexpr int64_t INPUT_A_UID = 1;
 constexpr int64_t INPUT_B_UID = 2;
 constexpr int64_t OUTPUT_UID = 3;
-/// The third operand buildPointwiseGraph() adds when `includeThirdOperand` is set: a
-/// real tensor, distinct from the dangling-uid case below, which never appears here.
+/// A real third operand, added when `includeThirdOperand` is set.
 constexpr int64_t INPUT_C_UID = 4;
-/// Names in_1_tensor_uid when `danglingInputBUid` is not overridden -- distinct from
-/// every uid this file inserts into a graph's tensor list, so a test opting into the
-/// dangling case gets a uid guaranteed absent from getTensorMap().
+/// Uid named by `in_1_tensor_uid` when `danglingInputBUid` is not overridden; guaranteed
+/// absent from every graph this file builds.
 constexpr int64_t DEFAULT_DANGLING_UID = 999;
 
-/// A fixed, warp-64 device: enough for the CPU-only matcher tests, which never compile
-/// or launch anything and so never need the actual current device's properties.
+/// A fixed, warp-64 device, for CPU-only matcher tests that never compile or launch.
 inline hipDeviceProp_t testDeviceProperties()
 {
     hipDeviceProp_t properties{};
@@ -44,8 +41,7 @@ inline hipDeviceProp_t testDeviceProperties()
     return properties;
 }
 
-/// The real current device's properties, queried once. Left zeroed if no device is
-/// current, which is fine for a test that immediately SKIP_IF_NO_DEVICES()s.
+/// The real current device's properties, queried once; zeroed if no device is current.
 inline hipDeviceProp_t currentDeviceProperties()
 {
     hipDeviceProp_t properties{};
@@ -58,29 +54,17 @@ inline hipDeviceProp_t currentDeviceProperties()
 }
 
 /**
- * @brief Builds a single-node pointwise graph, for driving this pack's matchers.
+ * @brief Builds a single-node binary-pointwise-add graph, parameterized on everything
+ *        this pack's matchers gate: operation, dtype (uniform and per-operand), shape,
+ *        arity, and operand validity.
  *
- * Parameterized on everything the matchers gate, so a test can vary exactly one thing
- * and assert the effect: the operation, the element type (uniformly and per-operand),
- * the tensor shape, whether the graph carries an identity, arity (binary, ternary, or
- * unary), and whether an operand's uid resolves to a real tensor.
- *
- * @param inputBDataType Overrides input B's dtype away from @p dataType, which stays
- *        input A's and the output's. Exists solely to build the cross-operand dtype
- *        mismatch the graph matcher must refuse: this pack's kernel reads one dtype for
- *        every operand, so a binary op that disagrees is unreadable, not merely
- *        unoptimized.
+ * @param inputBDataType Overrides input B's dtype away from @p dataType.
  * @param includeThirdOperand Adds a real third tensor (`INPUT_C_UID`) and sets
- *        `in_2_tensor_uid`, producing the ternary shape the graph matcher must refuse:
- *        this pack's kernel is binary add, and a third operand is a different operation
- *        entirely.
+ *        `in_2_tensor_uid`, producing a ternary op.
  * @param danglingInputBUid When set, `in_1_tensor_uid` names this value instead of
- *        `INPUT_B_UID`, and no tensor is inserted for it -- the graph carries a node
- *        whose operand uid resolves to nothing in getTensorMap(). Exercises the matcher
- *        refusing a graph it cannot even read, as opposed to one it reads and declines.
- * @param inputAVirtual Marks input A virtual, which the graph matcher must refuse.
- * @param inputAIsRuntimePassByValue Marks input A runtime-pass-by-value, which the
- *        graph matcher must refuse.
+ *        `INPUT_B_UID`, and no tensor is inserted for it.
+ * @param inputAVirtual Marks input A virtual.
+ * @param inputAIsRuntimePassByValue Marks input A runtime-pass-by-value.
  */
 inline flatbuffers::FlatBufferBuilder buildPointwiseGraph(
     hipdnn_flatbuffers_sdk::data_objects::PointwiseMode operation
@@ -100,8 +84,7 @@ inline flatbuffers::FlatBufferBuilder buildPointwiseGraph(
     namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 
     flatbuffers::FlatBufferBuilder builder;
-    // Packed strides by default; an explicit set lets a test describe a view into a
-    // larger buffer, whose stride order the layout classifier may not accept.
+    // Packed strides by default; an explicit set describes a view into a larger buffer.
     const std::vector<int64_t> strides
         = explicitStrides.has_value() ? *explicitStrides : std::vector<int64_t>(dims.size(), 1);
     const auto resolvedInputBDataType = inputBDataType.value_or(dataType);
@@ -233,13 +216,9 @@ inline hipdnn_flatbuffers_sdk::utilities::UuidBytes makeGraphId(uint8_t seed)
 /**
  * @brief Wraps a built graph buffer so a test reads it the way an engine does.
  *
- * Parameterized on the device-properties source rather than hardcoding one, because the
- * pack's two consumers need different ones: the matcher tests never compile or launch
- * anything, so a fixed testDeviceProperties() is enough and keeps them CPU-only; the
- * dispatch-handler tests actually compile through hiprtc, so they must pass
- * currentDeviceProperties() to build for the device they will launch on. Was
- * copy-pasted near-verbatim into TestPointwiseAddMatchers.cpp and
- * TestPointwiseAddDispatchHandler.cpp with only that one difference before this move.
+ * Parameterized on the device-properties source: the matcher tests are CPU-only and use
+ * a fixed testDeviceProperties(), while the dispatch-handler tests compile through
+ * hiprtc and need currentDeviceProperties() for the device they launch on.
  */
 class GraphFixture
 {
@@ -269,7 +248,7 @@ private:
 };
 
 /// @brief A KernelDefinition for this pack's kernel, for tests that never need a real
-/// descriptor set. Also copy-pasted near-verbatim in both test files before this move.
+/// descriptor set.
 inline hipdnn_plugin_sdk::ingestor::KernelDefinition makeKernel(int64_t blockSize,
                                                                 const std::string& dtype)
 {
