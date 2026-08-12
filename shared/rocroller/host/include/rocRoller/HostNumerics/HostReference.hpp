@@ -21,9 +21,9 @@
 #include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/GPUArchitecture/GPUArchitectureTarget.hpp>
 
-#include "client/HostDataGeneration.hpp"
+#include <rocRoller/HostNumerics/HostDataGeneration.hpp>
 
-namespace rocRoller::Client::GEMMClient
+namespace rocRoller::HostNumerics
 {
     struct HostReferenceProblem
     {
@@ -75,6 +75,13 @@ namespace rocRoller::Client::GEMMClient
                                                          size_t                   reductionExtent,
                                                          size_t                   blockSize);
 
+    roc::host_validation::TensorView
+        hostScaleTensorView(DataType                 type,
+                            std::span<const uint8_t> values,
+                            TensorDescriptor const&  dataDescriptor,
+                            size_t                   blockedDimension,
+                            size_t                   blockSize);
+
     HostReferenceProblem
         makeHostReferenceProblem(GeneratedGEMMInputs const&                      inputs,
                                  std::optional<roc::host_validation::TensorView> runtimeScaleA,
@@ -115,9 +122,13 @@ namespace rocRoller::Client::GEMMClient
     roc::host_validation::TensorView
         hostOutputTensorView(std::span<const T> values, size_t rows, size_t columns)
     {
+        if(columns != 0 && rows > std::numeric_limits<size_t>::max() / columns)
+            throw std::overflow_error("rocRoller output matrix element count overflow.");
+        if(rows > static_cast<size_t>(std::numeric_limits<ptrdiff_t>::max()))
+            throw std::overflow_error("rocRoller output matrix stride exceeds ptrdiff_t.");
         if(values.size() != rows * columns)
             throw std::invalid_argument(
-                "rocroller-gemm output storage does not match the matrix dimensions.");
+                "rocRoller output storage does not match the matrix dimensions.");
         return roc::host_validation::TensorView(
             HostReferenceDetail::outputScalarType<T>(),
             roc::host_validation::Layout(roc::host_validation::Shape{rows, columns},
@@ -134,10 +145,12 @@ namespace rocRoller::Client::GEMMClient
         using namespace roc::host_validation;
         if(floatOutput.type() != ScalarType::Float32 || floatOutput.shape().rank() != 2)
             throw std::invalid_argument(
-                "rocroller-gemm output conversion requires a rank-two F32 tensor.");
+                "rocRoller output conversion requires a rank-two F32 tensor.");
 
         const size_t        rows    = floatOutput.shape()[0];
         const size_t        columns = floatOutput.shape()[1];
+        if(columns != 0 && rows > std::numeric_limits<size_t>::max() / columns)
+            throw std::overflow_error("rocRoller output conversion element count overflow.");
         std::vector<Output> result(rows * columns);
         for(size_t column = 0; column < columns; ++column)
         {

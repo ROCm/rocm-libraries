@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #include <rocRoller/DataTypes/DataTypes.hpp>
+#include <rocRoller/HostNumerics/HostDataGeneration.hpp>
+#include <rocRoller/HostNumerics/HostReference.hpp>
 #include <rocRoller/KernelOptions_detail.hpp>
 #include <rocRoller/Operations/BlockScale.hpp>
 #include <rocRoller/Operations/Command.hpp>
@@ -11,7 +13,6 @@
 #include "GPUContextFixture.hpp"
 
 #include <common/GEMMProblem.hpp>
-#include <common/mxDataGen.hpp>
 #include <mxDataGenerator/PreSwizzle.hpp>
 
 namespace GEMMTests
@@ -235,17 +236,21 @@ namespace GEMMTests
 
             TensorDescriptor descA(dataTypeA, {size_t(M), size_t(K)}, gemm.transA);
             TensorDescriptor descB(dataTypeB, {size_t(K), size_t(N)}, gemm.transB);
-            TensorDescriptor descC(dataTypeD, {size_t(M), size_t(N)}, "N");
+            TensorDescriptor descC(dataTypeC, {size_t(M), size_t(N)}, "N");
             TensorDescriptor descD(dataTypeD, {size_t(M), size_t(N)}, "N");
 
-            auto seed = 31415u;
+            auto const seed           = 31415u;
+            auto const bounded        = HostNumerics::DataInitialization{};
+            auto       scaleTypeA     = DataType::None;
+            auto       scaleTypeB     = DataType::None;
+            size_t     scaleBlockSize = 1;
             if(gemm.scaleAMode == Operations::ScaleMode::Separate
                || gemm.scaleBMode == Operations::ScaleMode::Separate)
             {
                 auto const& arch = m_context->targetArchitecture();
 
-                auto scaleBlockSize = gemm.scaleBlockSize;
-                AssertFatal(scaleBlockSize > 0, "scaleBlockSize must be set to scale A or B.");
+                AssertFatal(gemm.scaleBlockSize > 0, "scaleBlockSize must be set to scale A or B.");
+                scaleBlockSize = static_cast<size_t>(gemm.scaleBlockSize);
                 AssertFatal(
                     arch.isSupportedScaleBlockSize(scaleBlockSize),
                     fmt::format("Architecture {} does not support block scaling (size: {}).",
@@ -255,25 +260,31 @@ namespace GEMMTests
                             fmt::format("K: {} must be a multiple of the scale block size: {}",
                                         gemm.k,
                                         scaleBlockSize));
-                DGenInput(seed,
-                          hostA,
-                          descA,
-                          hostB,
-                          descB,
-                          hostC,
-                          descC,
-                          hostScaleA,
-                          hostScaleB,
-                          gemm.scaleTypeA,
-                          gemm.scaleTypeB,
-                          -1.f,
-                          1.f,
-                          static_cast<uint>(scaleBlockSize));
+                if(gemm.scaleAMode == Operations::ScaleMode::Separate)
+                    scaleTypeA = gemm.scaleTypeA;
+                if(gemm.scaleBMode == Operations::ScaleMode::Separate)
+                    scaleTypeB = gemm.scaleTypeB;
             }
-            else
-            {
-                DGenInput(seed, hostA, descA, hostB, descB, hostC, descC);
-            }
+
+            auto generatedInputs = HostNumerics::generateGEMMInputs(descA,
+                                                                    descB,
+                                                                    descC,
+                                                                    bounded,
+                                                                    bounded,
+                                                                    bounded,
+                                                                    scaleTypeA,
+                                                                    scaleTypeB,
+                                                                    scaleBlockSize,
+                                                                    -1.0f,
+                                                                    1.0f,
+                                                                    seed);
+            hostA                = HostNumerics::copyTensorStorage<PackedTypeA>(generatedInputs.a);
+            hostB                = HostNumerics::copyTensorStorage<PackedTypeB>(generatedInputs.b);
+            hostC                = HostNumerics::copyTensorStorage<TC>(generatedInputs.c);
+            if(generatedInputs.scaleA)
+                hostScaleA = HostNumerics::copyTensorStorage<uint8_t>(*generatedInputs.scaleA);
+            if(generatedInputs.scaleB)
+                hostScaleB = HostNumerics::copyTensorStorage<uint8_t>(*generatedInputs.scaleB);
 
             if(setIdentity)
             {
@@ -923,56 +934,46 @@ namespace GEMMTests
             }
 
             // Host result
-            std::vector<TD> h_result(M * N, TD{});
-            if(gemm.scaleAMode != Operations::ScaleMode::None
-               || gemm.scaleBMode != Operations::ScaleMode::None)
+            auto const referenceScaleBlockSize = gemm.scaleBlockSize > 0
+                                                     ? static_cast<size_t>(gemm.scaleBlockSize)
+                                                     : static_cast<size_t>(K);
+            HostNumerics::HostReferenceProblem referenceProblem(
+                HostNumerics::hostTensorView(descA,
+                                             hostA,
+                                             gemm.scaleAMode == Operations::ScaleMode::Separate
+                                                 ? HostNumerics::DataTypeInterpretation::BlockScaled
+                                                 : HostNumerics::DataTypeInterpretation::Unscaled),
+                HostNumerics::hostTensorView(descB,
+                                             hostB,
+                                             gemm.scaleBMode == Operations::ScaleMode::Separate
+                                                 ? HostNumerics::DataTypeInterpretation::BlockScaled
+                                                 : HostNumerics::DataTypeInterpretation::Unscaled),
+                HostNumerics::hostTensorView(descC, hostC));
+            if(gemm.scaleAMode != Operations::ScaleMode::None)
             {
-                rocRoller::ScaledCPUMM(h_result,
-                                       hostC,
-                                       hostA,
-                                       hostB,
-                                       hostScaleA,
-                                       hostScaleB,
-                                       M,
-                                       N,
-                                       K,
-                                       alpha,
-                                       beta,
-                                       gemm.transA == "T",
-                                       gemm.transB == "T",
-                                       gemm.scaleBlockSize,
-                                       gemm.scaleTypeA,
-                                       gemm.scaleTypeB);
+                referenceProblem.scaleA = HostNumerics::hostScaleTensorView(
+                    gemm.scaleTypeA, hostScaleA, descA, 1, referenceScaleBlockSize);
             }
-            else if constexpr(std::is_same_v<TC, TD>)
+            if(gemm.scaleBMode != Operations::ScaleMode::None)
             {
-                rocRoller::CPUMM(h_result,
-                                 hostC,
-                                 hostA,
-                                 hostB,
-                                 M,
-                                 N,
-                                 K,
-                                 alpha,
-                                 beta,
-                                 gemm.transA == "T",
-                                 gemm.transB == "T");
+                referenceProblem.scaleB = HostNumerics::hostScaleTensorView(
+                    gemm.scaleTypeB, hostScaleB, descB, 0, referenceScaleBlockSize);
+            }
+            referenceProblem.scaleBlockSize = referenceScaleBlockSize;
+            referenceProblem.alpha          = alpha;
+            referenceProblem.beta           = beta;
+            auto floatReference             = HostNumerics::computeHostReference(referenceProblem);
+
+            std::vector<TD> h_result;
+            if constexpr(std::is_same_v<TC, TD>)
+            {
+                h_result = HostNumerics::convertHostReference<TD>(floatReference.view());
             }
             else
             {
-                std::vector<TC> hostD(M * N, TC{});
-                rocRoller::CPUMM(hostD,
-                                 hostC,
-                                 hostA,
-                                 hostB,
-                                 M,
-                                 N,
-                                 K,
-                                 alpha,
-                                 beta,
-                                 gemm.transA == "T",
-                                 gemm.transB == "T");
-                ASSERT_EQ(hostD.size(), h_result.size());
+                auto hostD = HostNumerics::convertHostReference<TC>(floatReference.view());
+                ASSERT_EQ(hostD.size(), static_cast<size_t>(M) * static_cast<size_t>(N));
+                h_result.resize(hostD.size());
                 bool const isSRConversion = srCvtSeed.has_value();
                 for(size_t i = 0; i < hostD.size(); i++)
                 {

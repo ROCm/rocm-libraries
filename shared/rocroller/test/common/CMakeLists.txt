@@ -7,10 +7,9 @@ add_library(rocroller::common-test-utilities ALIAS common-test-utilities)
 target_link_libraries(common-test-utilities
     PUBLIC
         roc::rocroller-interface
-        roc::mxDataGenerator
+        rocroller::host-numerics
         hip::host
         OpenMP::OpenMP_CXX
-        ${CBLAS_LIBRARIES}
 )
 
 if(ROCROLLER_ENABLE_ASAN)

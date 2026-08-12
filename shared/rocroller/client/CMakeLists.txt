@@ -15,68 +15,6 @@ if(NOT CLI11_FOUND)
     endif()
 endif()
 
-if(NOT TARGET roc::host-validation-blas)
-    if(COMMAND roc_host_validation_enable_blas_backend)
-        roc_host_validation_enable_blas_backend()
-    else()
-        message(FATAL_ERROR
-            "rocRoller clients require the optional roc::host-validation-blas target. "
-            "Install ROCHostValidation with its BLAS backend or include shared/host-validation."
-        )
-    endif()
-endif()
-
-add_library(rocroller-client-host-data-generation STATIC
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/HostDataGeneration.cpp"
-)
-target_sources(rocroller-client-host-data-generation
-    PUBLIC
-        "${CMAKE_CURRENT_SOURCE_DIR}/include/client/HostDataGeneration.hpp"
-)
-target_link_libraries(rocroller-client-host-data-generation
-    PUBLIC
-        roc::rocroller-interface
-        roc::host-validation-core
-    PRIVATE
-        roc::host-validation
-        roc::host-validation-mx
-)
-target_include_directories(rocroller-client-host-data-generation
-    PUBLIC
-        "${CMAKE_CURRENT_SOURCE_DIR}/include"
-)
-if(ROCROLLER_ENABLE_ASAN)
-    rocroller_target_configure_sanitizers(
-        rocroller-client-host-data-generation
-        PRIVATE
-    )
-endif()
-
-add_library(rocroller-client-host-reference STATIC
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/HostReference.cpp"
-)
-target_sources(rocroller-client-host-reference
-    PUBLIC
-        "${CMAKE_CURRENT_SOURCE_DIR}/include/client/HostReference.hpp"
-)
-target_link_libraries(rocroller-client-host-reference
-    PUBLIC
-        roc::rocroller-interface
-        roc::host-validation
-    PRIVATE
-        roc::host-validation-blas
-)
-target_include_directories(rocroller-client-host-reference
-    PUBLIC
-        "${CMAKE_CURRENT_SOURCE_DIR}/include"
-)
-if(ROCROLLER_ENABLE_ASAN)
-    rocroller_target_configure_sanitizers(
-        rocroller-client-host-reference
-        PRIVATE
-    )
-endif()
-
 add_executable(rocroller-gemm
     "${CMAKE_CURRENT_SOURCE_DIR}/src/gemm.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/GEMMParameters.cpp"
@@ -99,8 +37,7 @@ target_sources(rocroller-gemm
 target_link_libraries(rocroller-gemm
     PRIVATE
         roc::rocroller-interface
-        rocroller-client-host-data-generation
-        rocroller-client-host-reference
+        rocroller::host-numerics
         # rocroller-gemm retains mxDataGenerator only for physical pre-swizzles.
         roc::mxDataGenerator
         CLI11::CLI11
@@ -127,44 +64,6 @@ endif()
 
 if(ROCROLLER_ENABLE_ASAN)
     rocroller_target_configure_sanitizers(rocroller-codegen-stress PRIVATE)
-endif()
-
-if(ROCROLLER_BUILD_TESTING OR BUILD_TESTING)
-    add_executable(rocroller-client-host-data-generation-tests
-        "${CMAKE_CURRENT_SOURCE_DIR}/test/HostDataGenerationTest.cpp"
-    )
-    target_link_libraries(rocroller-client-host-data-generation-tests
-        PRIVATE
-            rocroller-client-host-data-generation
-    )
-    add_test(
-        NAME rocroller-client-host-data-generation-tests
-        COMMAND rocroller-client-host-data-generation-tests
-    )
-
-    add_executable(rocroller-client-host-reference-tests
-        "${CMAKE_CURRENT_SOURCE_DIR}/test/HostReferenceTest.cpp"
-    )
-    target_link_libraries(rocroller-client-host-reference-tests
-        PRIVATE
-            rocroller-client-host-data-generation
-            rocroller-client-host-reference
-    )
-    add_test(
-        NAME rocroller-client-host-reference-tests
-        COMMAND rocroller-client-host-reference-tests
-    )
-
-    if(ROCROLLER_ENABLE_ASAN)
-        rocroller_target_configure_sanitizers(
-            rocroller-client-host-data-generation-tests
-            PRIVATE
-        )
-        rocroller_target_configure_sanitizers(
-            rocroller-client-host-reference-tests
-            PRIVATE
-        )
-    endif()
 endif()
 
 add_custom_target(all_clients)

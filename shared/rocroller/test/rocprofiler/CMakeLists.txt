@@ -39,7 +39,6 @@ target_link_libraries(rocroller-tests-rocprofiler
         rocprofiler-sdk-roctx::rocprofiler-sdk-roctx
         amd_comgr
         libdw::libdw
-        ${BLAS_LIBRARIES}
         rocroller::common-test-utilities
 )
 

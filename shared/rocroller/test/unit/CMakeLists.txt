@@ -21,14 +21,14 @@ target_link_libraries(
             rocroller::isa-spec-manager
             GTest::gtest_main
             GTest::gmock
-            ${BLAS_LIBRARIES}
 )
 
 
 target_link_libraries(rocroller-tests
     PRIVATE
         rocroller::common-test-utilities
-        ${BLAS_LIBRARIES}
+        # Unit GEMM fixtures retain mxDataGenerator only for physical pre-swizzles.
+        roc::mxDataGenerator
         GTest::gtest_main
         GTest::gmock
         libdivide::libdivide
