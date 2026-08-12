@@ -230,8 +230,8 @@ int dispatcher_run_batched_contraction_multi_abd(const void** as_hosts,
     // Reject non-default values so the caller never silently gets k_batch=1 behavior.
     if(k_batch != 1)
     {
-        std::cerr << "dispatcher_run_batched_contraction_multi_abd: split-K (k_batch="
-                  << k_batch << ") is not supported; only k_batch=1 is accepted.\n";
+        std::cerr << "dispatcher_run_batched_contraction_multi_abd: split-K (k_batch=" << k_batch
+                  << ") is not supported; only k_batch=1 is accepted.\n";
         return -2;
     }
 
@@ -255,9 +255,9 @@ int dispatcher_run_batched_contraction_multi_abd(const void** as_hosts,
                            static_cast<size_t>(K_total) * static_cast<size_t>(elem_b);
     // d_bytes is only used when kNumD > 0; guard so elem_d=0 does not produce size_t overflow.
     const size_t d_bytes = (kNumD > 0)
-        ? (static_cast<size_t>(G_total) * static_cast<size_t>(M_total) *
-           static_cast<size_t>(N_total) * static_cast<size_t>(elem_d))
-        : 0u;
+                               ? (static_cast<size_t>(G_total) * static_cast<size_t>(M_total) *
+                                  static_cast<size_t>(N_total) * static_cast<size_t>(elem_d))
+                               : 0u;
     const size_t e_bytes = static_cast<size_t>(G_total) * static_cast<size_t>(M_total) *
                            static_cast<size_t>(N_total) * static_cast<size_t>(elem_e);
 
@@ -265,29 +265,27 @@ int dispatcher_run_batched_contraction_multi_abd(const void** as_hosts,
     // Check all flat arrays before any allocation or cast to avoid silent truncation.
     {
         auto check_range = [](const int64_t* arr, int len, const char* name) -> bool {
-            constexpr int64_t kMaxIdx = static_cast<int64_t>(std::numeric_limits<ck_tile::index_t>::max());
+            constexpr int64_t kMaxIdx =
+                static_cast<int64_t>(std::numeric_limits<ck_tile::index_t>::max());
             for(int i = 0; i < len; ++i)
             {
                 if(arr[i] < 0 || arr[i] > kMaxIdx)
                 {
-                    std::cerr << "dispatcher_run_batched_contraction_multi_abd: "
-                              << name << "[" << i << "]=" << arr[i]
-                              << " overflows ck_tile::index_t (int32).\n";
+                    std::cerr << "dispatcher_run_batched_contraction_multi_abd: " << name << "["
+                              << i << "]=" << arr[i] << " overflows ck_tile::index_t (int32).\n";
                     return false;
                 }
             }
             return true;
         };
 
-        if(!check_range(g_dims, num_dim_g, "g_dims") ||
-           !check_range(m_dims, num_dim_m, "m_dims") ||
-           !check_range(n_dims, num_dim_n, "n_dims") ||
-           !check_range(k_dims, num_dim_k, "k_dims"))
+        if(!check_range(g_dims, num_dim_g, "g_dims") || !check_range(m_dims, num_dim_m, "m_dims") ||
+           !check_range(n_dims, num_dim_n, "n_dims") || !check_range(k_dims, num_dim_k, "k_dims"))
             return -1;
 
         if(!check_range(a_strides_flat, num_a * static_cast<int>(kADimSize), "a_strides_flat") ||
            !check_range(b_strides_flat, num_b * static_cast<int>(kBDimSize), "b_strides_flat") ||
-           !check_range(e_strides,      static_cast<int>(kEDimSize),          "e_strides"))
+           !check_range(e_strides, static_cast<int>(kEDimSize), "e_strides"))
             return -1;
 
         if(kNumD > 0 && d_strides_flat)

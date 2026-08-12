@@ -294,13 +294,13 @@ inline void run_contraction_multi_abd_benchmark(const ContractionMultiABDProblem
         bool pass = true;
         for(int i = 0; i < G * M * N; ++i)
         {
-            const float got = static_cast<float>(he[i]);
-            const float ref = static_cast<float>(he_ref[i]);
+            const float got  = static_cast<float>(he[i]);
+            const float ref  = static_cast<float>(he_ref[i]);
             const float diff = std::abs(got - ref);
             if(diff > 1e-3f * std::abs(ref) + 1e-5f)
             {
-                std::cerr << "verify FAILED at index " << i
-                          << ": got=" << got << " ref=" << ref << "\n";
+                std::cerr << "verify FAILED at index " << i << ": got=" << got << " ref=" << ref
+                          << "\n";
                 pass = false;
                 break;
             }

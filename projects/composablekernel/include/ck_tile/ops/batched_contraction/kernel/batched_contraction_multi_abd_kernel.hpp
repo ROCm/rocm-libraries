@@ -77,19 +77,18 @@ struct BatchedContractionMultiABDHostArgs
     using EDims = std::array<index_t, kEDimSize>;
 
     CK_TILE_HOST
-    BatchedContractionMultiABDHostArgs(
-        const std::array<const void*, NumATensor>& as_ptr_,
-        const std::array<const void*, NumBTensor>& bs_ptr_,
-        const std::array<const void*, NumDTensor>& ds_ptr_,
-        void* e_ptr_,
-        const std::array<ADims, NumATensor>& as_dims_,
-        const std::array<BDims, NumBTensor>& bs_dims_,
-        const std::array<EDims, NumDTensor>& ds_dims_,
-        const EDims& e_dims_,
-        const std::array<ADims, NumATensor>& as_strides_,
-        const std::array<BDims, NumBTensor>& bs_strides_,
-        const std::array<EDims, NumDTensor>& ds_strides_,
-        const EDims& e_strides_)
+    BatchedContractionMultiABDHostArgs(const std::array<const void*, NumATensor>& as_ptr_,
+                                       const std::array<const void*, NumBTensor>& bs_ptr_,
+                                       const std::array<const void*, NumDTensor>& ds_ptr_,
+                                       void* e_ptr_,
+                                       const std::array<ADims, NumATensor>& as_dims_,
+                                       const std::array<BDims, NumBTensor>& bs_dims_,
+                                       const std::array<EDims, NumDTensor>& ds_dims_,
+                                       const EDims& e_dims_,
+                                       const std::array<ADims, NumATensor>& as_strides_,
+                                       const std::array<BDims, NumBTensor>& bs_strides_,
+                                       const std::array<EDims, NumDTensor>& ds_strides_,
+                                       const EDims& e_strides_)
         : as_ptr(as_ptr_),
           bs_ptr(bs_ptr_),
           ds_ptr(ds_ptr_),
@@ -185,7 +184,7 @@ struct BatchedContractionMultiABDKernel
     using BDims = typename HostArgs::BDims;
     using EDims = typename HostArgs::EDims;
 
-    using InnerHostArgs = BatchedContractionHostArgs<NumDTensor>;
+    using InnerHostArgs   = BatchedContractionHostArgs<NumDTensor>;
     using InnerKernelArgs = typename InnerKernel::KernelArgs;
 
     static constexpr index_t kBlockSize = InnerKernel::kBlockSize;
@@ -213,15 +212,15 @@ struct BatchedContractionMultiABDKernel
             return std::vector<index_t>(arr.begin(), arr.end());
         };
 
-        const ADims& a_dims     = args.as_dims[ia];
-        const ADims& a_strides  = args.as_strides[ia];
-        const BDims& b_dims     = args.bs_dims[ib];
-        const BDims& b_strides  = args.bs_strides[ib];
+        const ADims& a_dims    = args.as_dims[ia];
+        const ADims& a_strides = args.as_strides[ia];
+        const BDims& b_dims    = args.bs_dims[ib];
+        const BDims& b_strides = args.bs_strides[ib];
 
-        auto A_dims_vec     = arr_to_vec(a_dims);
-        auto A_strides_vec  = arr_to_vec(a_strides);
-        auto B_dims_vec     = arr_to_vec(b_dims);
-        auto B_strides_vec  = arr_to_vec(b_strides);
+        auto A_dims_vec    = arr_to_vec(a_dims);
+        auto A_strides_vec = arr_to_vec(a_strides);
+        auto B_dims_vec    = arr_to_vec(b_dims);
+        auto B_strides_vec = arr_to_vec(b_strides);
 
         std::array<std::vector<index_t>, NumDTensor> Ds_dims_vecs;
         std::array<std::vector<index_t>, NumDTensor> Ds_strides_vecs;
@@ -268,8 +267,8 @@ struct BatchedContractionMultiABDKernel
         {
             for(index_t ib = 0; ib < NumBTensor; ++ib)
             {
-                auto inner_args  = MakeInnerHostArgs(args, ia, ib);
-                auto kargs       = InnerKernel::MakeKernelArgs(inner_args);
+                auto inner_args = MakeInnerHostArgs(args, ia, ib);
+                auto kargs      = InnerKernel::MakeKernelArgs(inner_args);
 
                 if(!InnerKernel::IsSupportedArguments(kargs))
                     return -1.0f;
@@ -278,9 +277,8 @@ struct BatchedContractionMultiABDKernel
                 const dim3 blocks = InnerKernel::GetBlockSize();
 
                 constexpr int kBlockPerCu = 1;
-                float t = launch_kernel(
-                    stream,
-                    make_kernel<kBlockPerCu>(InnerKernel{}, grids, blocks, 0, kargs));
+                float t                   = launch_kernel(
+                    stream, make_kernel<kBlockPerCu>(InnerKernel{}, grids, blocks, 0, kargs));
                 if(t < 0.0f)
                     return -1.0f;
                 total_time += t;
