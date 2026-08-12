@@ -347,30 +347,18 @@ class InstructionEmitter:
     def emit_gl2_prefetch_inc(self):
         """Emit GL2 prefetch address increment with end-of-K guard.
 
-        Mirrors the SIA path: when LoopCounterL <= PGR + PrefetchGL2,
-        zero the increment SGPRs so prefetch stops advancing past K.
-        Then advance all GL2 prefetch addresses by the (possibly zeroed) increment.
+        Mirrors the SIA path: gl2PrefetchIncrementAddr stops the stream once
+        LoopCounterL <= PGR + PrefetchGL2, then advances every prefetch address
+        by the (possibly zeroed) increment. Subtile forces staggerUCode off, so
+        this always takes the unrotated stop.
         """
         writer = self.writer
         kernel = self.kernel
         tPA = self.tensorParametersMap['A']
         tPB = self.tensorParametersMap['B']
-        from rocisa.code import Module
-        from rocisa.instruction import SCmpLeU32, SCMovB32
-        from rocisa.container import sgpr
-        mod = Module("GL2 Prefetch Increment")
-        loopCounter = writer.loopCounter(kernel, writer.states.unrollIdx)
-        pgl = kernel["PrefetchGL2"]
-        pgr = kernel["PrefetchGlobalRead"]
-        mod.add(SCmpLeU32(src0=loopCounter, src1=pgr + pgl,
-                          comment=f"counterL <= PGR({pgr})+PGL({pgl})?"))
-        mod.add(SCMovB32(dst=sgpr("GL2PrefetchIncA"), src=0))
-        mod.add(SCMovB32(dst=sgpr("GL2PrefetchIncB"), src=0))
-        if kernel["ProblemType"].get("MXBlockA", 0):
-            mod.add(SCMovB32(dst=sgpr("GL2PrefetchIncMXSA"), src=0))
-        if kernel["ProblemType"].get("MXBlockB", 0):
-            mod.add(SCMovB32(dst=sgpr("GL2PrefetchIncMXSB"), src=0))
-        mod.add(writer.gl2PrefetchIncrementAddr(kernel, tPA, tPB))
+        mod = writer.gl2PrefetchIncrementAddr(
+            kernel, tPA, tPB,
+            freezeIter=kernel["PrefetchGlobalRead"] + kernel["PrefetchGL2"])
         return list(mod.flatitems())
 
     def emit_skip(self, source):
