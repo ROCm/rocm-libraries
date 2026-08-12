@@ -9,6 +9,25 @@ These scripts provide the safety-critical foundation for a serial mutmut run:
 - `mutmut-verify.sh` proves individual kills by running one pytest node against
   clean and mutated source, then restoring the source file.
 
+Mutmut itself runs without these wrappers. The wrappers preserve the
+TensileLite-specific campaign contract across reruns:
+
+- record the exact source, container image, and mutmut version used;
+- change per-slice pyproject selections without leaving tracked changes;
+- preserve the rocisa-compatible mutmut configuration;
+- bound worker contention so healthy mutants are not misclassified as timeouts;
+- distinguish pytest assertion failures from collection, usage, and internal
+  errors; and
+- prove that every applied mutant was reverted.
+
+## Platform support
+
+The supported campaign environment is Linux or WSL, normally using the mutation
+Docker container. Mutmut 3.6 does not support native Windows: it exits with a
+request to use WSL and relies on `fork`, Unix resource limits, and Unix signals.
+These Bash helpers therefore do not reduce the supported platform set for the
+actual mutation run. Native PowerShell execution is not supported.
+
 Run all examples from the `rocm-libraries` repository root. The examples assume
 an already-created container named `tl-mut` with the repository mounted at
 `/work`. Replace that name when using a different container.
@@ -71,25 +90,48 @@ pyproject-mutmut: set rewrote only_mutate, pytest_add_cli_args_test_selection
 pyproject-mutmut: set OK in projects/hipblaslt/tensilelite/pyproject.toml
 ```
 
-After the mutation run, restore the byte-exact backup and verify that the file
-matches `HEAD`:
+Do not restore the backup yet. Run and inspect the slice first.
+
+## 3. Run mutmut
+
+Run the configured slice in the container. Always bound worker count; the
+committed timeout multiplier assumes no more than 32 concurrent children.
 
 ```bash
-bash projects/hipblaslt/tensilelite/Tensile/Tests/unit/mutation/pyproject-mutmut.sh \
-  restore --src projects/hipblaslt/tensilelite
-
-bash projects/hipblaslt/tensilelite/Tensile/Tests/unit/mutation/pyproject-mutmut.sh \
-  assert-clean --src projects/hipblaslt/tensilelite
+docker exec \
+  -w /work/projects/hipblaslt/tensilelite \
+  tl-mut \
+  mutmut run --max-children 32
 ```
 
-Expected output:
+`mutmut run` renders interactive progress while it collects tests, generates
+mutants, and executes them. After completion, print all non-killed results:
+
+```bash
+docker exec \
+  -w /work/projects/hipblaslt/tensilelite \
+  tl-mut \
+  mutmut results
+```
+
+Representative output (mutant names and statuses vary):
 
 ```text
-pyproject-mutmut: restore work/mutation/pyproject.toml.bak -> projects/hipblaslt/tensilelite/pyproject.toml
-pyproject-mutmut: assert-clean OK (pyproject.toml == HEAD)
+    Tensile.Common.Utilities.x__mutmut_1: survived
+    Tensile.Common.Utilities.x__mutmut_2: no tests
+    Tensile.Common.Utilities.x__mutmut_3: timeout
 ```
 
-## 3. Verify survivor-killing tests
+Rerun one mutant after adding a focused test with:
+
+```bash
+docker exec \
+  -w /work/projects/hipblaslt/tensilelite \
+  tl-mut \
+  mutmut run Tensile.Common.Utilities.x__mutmut_1 --max-children 1
+```
+
+## 4. Verify survivor-killing tests
 
 `mutmut-verify.sh` changes tracked source while each mutant is active. Run only
 one verifier at a time. The exit trap restores every manifest target, including
@@ -138,3 +180,23 @@ Verdict rules are intentionally strict:
   non-assertion error occurred. Infrastructure errors are never counted as kills.
 
 Any `BAD` or `INCONCLUSIVE` row makes the verifier exit non-zero.
+
+## 5. Restore the mutation configuration
+
+After the run and survivor verification, restore the byte-exact backup and
+verify that `pyproject.toml` matches `HEAD`:
+
+```bash
+bash projects/hipblaslt/tensilelite/Tensile/Tests/unit/mutation/pyproject-mutmut.sh \
+  restore --src projects/hipblaslt/tensilelite
+
+bash projects/hipblaslt/tensilelite/Tensile/Tests/unit/mutation/pyproject-mutmut.sh \
+  assert-clean --src projects/hipblaslt/tensilelite
+```
+
+Expected output:
+
+```text
+pyproject-mutmut: restore work/mutation/pyproject.toml.bak -> projects/hipblaslt/tensilelite/pyproject.toml
+pyproject-mutmut: assert-clean OK (pyproject.toml == HEAD)
+```
