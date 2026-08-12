@@ -249,31 +249,48 @@ endif()
 # -----------------------------------------------------------------------------
 # BZip2
 # -----------------------------------------------------------------------------
-find_package(BZip2 QUIET)
+find_file(__bz2_hdr bzlib.h REQUIRED)
+cmake_path(GET __bz2_hdr PARENT_PATH __bz2_include)
+
+find_library(__bz2_lib bz2_static REQUIRED)
+
+set(BZIP2_FOUND TRUE)
+set(BZIP2_INCLUDE_DIR "${__bz2_include}")
+set(BZIP2_INCLUDE_DIRS "${__bz2_include}")
+set(BZIP2_VERSION_STRING "1.1.0")
+
+add_library(miopen_bz2 INTERFACE IMPORTED GLOBAL)
+target_link_libraries(miopen_bz2 INTERFACE ${__bz2_lib})
+target_link_directories(miopen_bz2 INTERFACE ${__bz2_include})
+
+add_library(BZip2::BZip2 ALIAS miopen_bz2)
+set(BZIP2_LIBRARIES BZip2::BZip2)
+
+#find_package(BZip2 QUIET)
 _miopen_report_dep(BZip2 "${BZIP2_FOUND}" "${BZIP2_VERSION_STRING}")
-if(NOT BZIP2_FOUND)
-    FetchContent_Declare(BZip2
-        URL      https://sourceware.org/pub/bzip2/bzip2-1.0.8.tar.gz
-        URL_HASH SHA256=ab5a03176ee106d3f0fa90e381da478ddae405918153cca248e682cd0c4a2269
-        SYSTEM
-        OVERRIDE_FIND_PACKAGE)
-    FetchContent_MakeAvailable(BZip2)
-    # Upstream tarball has no CMakeLists.txt; build from the vendored wrapper,
-    # which creates the BZip2::BZip2 alias and installs miopen_bz2 in the
-    # miopen-targets export set. SYSTEM marks the wrapper's targets so their
-    # PUBLIC include dirs (the bzip2 headers) reach consumers via -isystem.
-    set(BZIP2_UPSTREAM_SOURCE_DIR "${bzip2_SOURCE_DIR}")
-    add_subdirectory(
-        "${CMAKE_CURRENT_LIST_DIR}/thirdparty/bzip2"
-        "${bzip2_BINARY_DIR}-wrapper"
-        SYSTEM
-    )
-    if(MSVC)
-        target_compile_options(miopen_bz2 PRIVATE /W0)
-    else()
-        target_compile_options(miopen_bz2 PRIVATE -w)
-    endif()
-endif()
+#if(NOT __bz2)
+#    FetchContent_Declare(BZip2
+#        URL      https://sourceware.org/pub/bzip2/bzip2-1.0.8.tar.gz
+#        URL_HASH SHA256=ab5a03176ee106d3f0fa90e381da478ddae405918153cca248e682cd0c4a2269
+#        SYSTEM
+#        OVERRIDE_FIND_PACKAGE)
+#    FetchContent_MakeAvailable(BZip2)
+#    # Upstream tarball has no CMakeLists.txt; build from the vendored wrapper,
+#    # which creates the BZip2::BZip2 alias and installs miopen_bz2 in the
+#    # miopen-targets export set. SYSTEM marks the wrapper's targets so their
+#    # PUBLIC include dirs (the bzip2 headers) reach consumers via -isystem.
+#    set(BZIP2_UPSTREAM_SOURCE_DIR "${bzip2_SOURCE_DIR}")
+#    add_subdirectory(
+#        "${CMAKE_CURRENT_LIST_DIR}/thirdparty/bzip2"
+#        "${bzip2_BINARY_DIR}-wrapper"
+#        SYSTEM
+#    )
+#    if(MSVC)
+#        target_compile_options(miopen_bz2 PRIVATE /W0)
+#    else()
+#        target_compile_options(miopen_bz2 PRIVATE -w)
+#    endif()
+#endif()
 
 # -----------------------------------------------------------------------------
 # SQLite3
