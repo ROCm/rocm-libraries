@@ -74,6 +74,14 @@ target_link_libraries(host-validation
     PUBLIC
         roc::host-validation-core
 )
+find_package(OpenMP QUIET COMPONENTS CXX)
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(host-validation PRIVATE OpenMP::OpenMP_CXX)
+    set_property(
+        TARGET host-validation
+        PROPERTY ROC_HOST_VALIDATION_USES_OPENMP ON
+    )
+endif()
 
 target_sources(host-validation
     PUBLIC
@@ -298,6 +306,14 @@ function(roc_host_validation_finalize_package)
         set(HOST_VALIDATION_PACKAGE_HAS_BLAS ON)
     endif()
     set(HOST_VALIDATION_PACKAGE_HAS_OPENMP OFF)
+    get_target_property(
+        _host_validation_uses_openmp
+        host-validation
+        ROC_HOST_VALIDATION_USES_OPENMP
+    )
+    if(_host_validation_uses_openmp)
+        set(HOST_VALIDATION_PACKAGE_HAS_OPENMP ON)
+    endif()
     if(TARGET host-validation-mx)
         get_target_property(
             _host_validation_mx_uses_openmp
