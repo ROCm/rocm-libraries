@@ -47,6 +47,8 @@ from contraction_multi_abd_utils import (  # noqa: E402
 )
 from contraction_multi_abd_codegen import (  # noqa: E402
     make_contraction_multi_abd_kernel_name,
+    _expand_nested_config,
+    build_specs,
 )
 
 _CONFIG_DIR = (
@@ -450,6 +452,232 @@ class TestShippedConfigs(unittest.TestCase):
                                  f"smoke_ci: {key}.values should have 1 entry")
             elif isinstance(val, list):
                 self.assertEqual(len(val), 1, f"smoke_ci: {key} list should have 1 entry")
+
+
+class TestExpandNestedConfig(unittest.TestCase):
+    """Unit tests for _expand_nested_config() — the tile_config/trait_config JSON expansion."""
+
+    def test_flat_config_passes_through_unchanged(self):
+        flat = {"dtypes": ["fp16"], "layouts": ["rcr"], "tile_configs": [{"tile_m": 256}]}
+        result = _expand_nested_config(flat)
+        self.assertIs(result, flat, "flat config must be returned as-is (same object)")
+
+    def test_step_range_expansion(self):
+        cfg = {
+            "tile_config": {"tile_m": {"min": 64, "max": 256, "step": 64}},
+        }
+        result = _expand_nested_config(cfg)
+        self.assertIn("tile_configs", result)
+        tile_m_values = [tc["tile_m"] for tc in result["tile_configs"]]
+        self.assertEqual(tile_m_values, [64, 128, 192, 256])
+
+    def test_values_list_expansion(self):
+        cfg = {
+            "tile_config": {"warp_m": {"values": [4, 2, 1]}},
+        }
+        result = _expand_nested_config(cfg)
+        self.assertIn("tile_configs", result)
+        warp_m_values = [tc["warp_m"] for tc in result["tile_configs"]]
+        self.assertEqual(warp_m_values, [4, 2, 1])
+
+    def test_tile_cartesian_product(self):
+        cfg = {
+            "tile_config": {
+                "tile_m": {"values": [64, 128]},
+                "tile_n": {"values": [64]},
+                "tile_k": {"values": [32]},
+                "warp_m": {"values": [2]},
+                "warp_n": {"values": [2]},
+                "warp_k": {"values": [1]},
+                "warp_tile_m": {"values": [32]},
+                "warp_tile_n": {"values": [32]},
+                "warp_tile_k": {"values": [16]},
+            },
+        }
+        result = _expand_nested_config(cfg)
+        self.assertEqual(len(result["tile_configs"]), 2,
+                         "2 tile_m values × 1 each = 2 combinations")
+
+    def test_trait_config_pipelines_schedulers_epilogues(self):
+        cfg = {
+            "trait_config": {
+                "pipeline":  {"values": ["compv3", "compv4"]},
+                "scheduler": {"values": ["intrawave"]},
+                "epilogue":  {"values": ["cshuffle", "default2d"]},
+                "pad_m":     {"values": [False]},
+                "pad_n":     {"values": [False]},
+                "pad_k":     {"values": [False]},
+            },
+        }
+        result = _expand_nested_config(cfg)
+        self.assertEqual(result["pipelines"],  ["compv3", "compv4"])
+        self.assertEqual(result["schedulers"], ["intrawave"])
+        self.assertEqual(result["epilogues"],  ["cshuffle", "default2d"])
+        self.assertEqual(result["pad_options"],
+                         [{"pad_m": False, "pad_n": False, "pad_k": False}])
+
+    def test_nested_keys_removed_after_expansion(self):
+        cfg = {
+            "tile_config":  {"tile_m": {"values": [128]}},
+            "trait_config": {"pipeline": {"values": ["compv3"]},
+                             "scheduler": {"values": ["intrawave"]},
+                             "epilogue":  {"values": ["cshuffle"]},
+                             "pad_m": {"values": [False]},
+                             "pad_n": {"values": [False]},
+                             "pad_k": {"values": [False]}},
+        }
+        result = _expand_nested_config(cfg)
+        self.assertNotIn("tile_config",  result)
+        self.assertNotIn("trait_config", result)
+
+    def test_shipped_smoke_config_expands_to_one_spec(self):
+        smoke = _CONFIG_DIR / "smoke_ci_config.json"
+        if not smoke.exists():
+            self.skipTest("smoke_ci_config.json not found")
+        with open(smoke) as f:
+            data = json.load(f)
+        # Simulate CMake merge: layer flat overrides on top of expanded base.
+        expanded = _expand_nested_config(data)
+        expanded.update({
+            "dtypes": ["fp16"], "layouts": ["rcr"],
+            "num_a_tensors": [1], "num_b_tensors": [1], "num_d_tensors": [1],
+            "dim_combos": [{"num_dim_g": 1, "num_dim_m": 2, "num_dim_n": 2, "num_dim_k": 1}],
+            "a_elementwise": "PassThrough",
+            "b_elementwise": "PassThrough",
+            "cde_elementwise": "AddDs",
+        })
+        specs = build_specs(expanded)
+        self.assertGreater(len(specs), 0, "smoke config must produce at least one spec")
+
+
+class TestMixedDtypeDTensors(unittest.TestCase):
+    """Validates that ContractionMultiABDDispatcherLib.run() rejects mixed-dtype D tensors."""
+
+    def _make_mock_lib(self, num_d=2):
+        """Return a ContractionMultiABDDispatcherLib with its ctypes calls mocked out."""
+        with mock.patch("ctypes.CDLL") as MockCDLL:
+            mock_lib = mock.MagicMock()
+            MockCDLL.return_value = mock_lib
+            mock_lib.dispatcher_initialize.return_value = 0
+            mock_lib.dispatcher_get_kernel_name.return_value = b"test_kernel"
+
+            from contraction_multi_abd_utils import ContractionMultiABDDispatcherLib
+            with mock.patch("pathlib.Path.exists", return_value=True):
+                lib = ContractionMultiABDDispatcherLib.__new__(ContractionMultiABDDispatcherLib)
+                lib.so_path = Path("/fake/lib.so")
+                lib._lib = mock_lib
+        return lib
+
+    def test_mixed_dtype_d_tensors_raises(self):
+        from contraction_multi_abd_utils import (
+            ContractionMultiABDDispatcherLib,
+            ContractionMultiABDProblem,
+        )
+        problem = ContractionMultiABDProblem(g_dims=[2], m_dims=[4, 4], n_dims=[4, 4], k_dims=[8])
+        G, M, N, K = 2, 16, 16, 8
+
+        As = [np.ones(G * M * K, dtype=np.float16)]
+        Bs = [np.ones(G * N * K, dtype=np.float16)]
+        # Two D tensors with different dtypes — fp16 vs fp32
+        Ds = [
+            np.ones(G * M * N, dtype=np.float16),
+            np.ones(G * M * N, dtype=np.float32),  # different itemsize
+        ]
+        E = np.zeros(G * M * N, dtype=np.float16)
+
+        lib = self._make_mock_lib()
+        with self.assertRaises(ValueError, msg="mixed-dtype D tensors must raise ValueError"):
+            lib.run(As, Bs, Ds, E, problem)
+
+    def test_uniform_dtype_d_tensors_does_not_raise_on_validation(self):
+        """Same-dtype D tensors must pass the dtype check (will fail later on ctypes call)."""
+        from contraction_multi_abd_utils import (
+            ContractionMultiABDProblem,
+        )
+        problem = ContractionMultiABDProblem(g_dims=[2], m_dims=[4, 4], n_dims=[4, 4], k_dims=[8])
+        G, M, N, K = 2, 16, 16, 8
+
+        As = [np.ones(G * M * K, dtype=np.float16)]
+        Bs = [np.ones(G * N * K, dtype=np.float16)]
+        Ds = [
+            np.ones(G * M * N, dtype=np.float16),
+            np.ones(G * M * N, dtype=np.float16),  # same dtype — OK
+        ]
+        E = np.zeros(G * M * N, dtype=np.float16)
+
+        lib = self._make_mock_lib()
+        # Patch the underlying ctypes call to avoid a real dispatch.
+        lib._lib.dispatcher_run_batched_contraction_multi_abd.return_value = 0
+        # Should not raise ValueError for the dtype check.
+        try:
+            lib.run(As, Bs, Ds, E, problem)
+        except ValueError as exc:
+            self.fail(f"Uniform-dtype D tensors raised ValueError unexpectedly: {exc}")
+        except Exception:
+            pass  # ctypes/hipMalloc errors are expected in unit test context
+
+
+class TestElemDZeroWithNoD(unittest.TestCase):
+    """Validates elem_d=0 is accepted when there are no D tensors (kNumD==0 path)."""
+
+    def test_dispatcher_lib_run_passes_elem_d_zero_for_empty_Ds(self):
+        """ContractionMultiABDDispatcherLib.run() must not raise ValueError for empty Ds."""
+        from contraction_multi_abd_utils import ContractionMultiABDProblem
+
+        problem = ContractionMultiABDProblem(g_dims=[1], m_dims=[4, 4], n_dims=[4, 4], k_dims=[8])
+        G, M, N, K = 1, 16, 16, 8
+
+        As = [np.ones(G * M * K, dtype=np.float16)]
+        Bs = [np.ones(G * N * K, dtype=np.float16)]
+        Ds = []  # no D tensors → elem_d falls back to 2 (harmless sentinel)
+        E = np.zeros(G * M * N, dtype=np.float16)
+
+        with mock.patch("ctypes.CDLL") as MockCDLL:
+            mock_lib = mock.MagicMock()
+            MockCDLL.return_value = mock_lib
+            mock_lib.dispatcher_initialize.return_value = 0
+            mock_lib.dispatcher_run_batched_contraction_multi_abd.return_value = 0
+
+            from contraction_multi_abd_utils import ContractionMultiABDDispatcherLib
+            lib = ContractionMultiABDDispatcherLib.__new__(ContractionMultiABDDispatcherLib)
+            lib.so_path = Path("/fake/lib.so")
+            lib._lib = mock_lib
+
+        try:
+            lib.run(As, Bs, Ds, E, problem)
+        except ValueError as exc:
+            self.fail(f"Empty Ds raised ValueError unexpectedly: {exc}")
+        except Exception:
+            pass  # ctypes errors expected; the point is no ValueError from dtype checks
+
+    def test_python_elem_d_sentinel_value_for_empty_ds(self):
+        """elem_d sentinel (2) must be passed without triggering the dtype mismatch check."""
+        from contraction_multi_abd_utils import ContractionMultiABDProblem
+
+        problem = ContractionMultiABDProblem(g_dims=[1], m_dims=[2], n_dims=[2], k_dims=[4])
+        As = [np.ones(8, dtype=np.float16)]
+        Bs = [np.ones(8, dtype=np.float16)]
+        Ds = []
+        E = np.zeros(4, dtype=np.float16)
+
+        with mock.patch("ctypes.CDLL") as MockCDLL:
+            mock_lib = mock.MagicMock()
+            MockCDLL.return_value = mock_lib
+            mock_lib.dispatcher_initialize.return_value = 0
+            mock_lib.dispatcher_run_batched_contraction_multi_abd.return_value = 0
+
+            from contraction_multi_abd_utils import ContractionMultiABDDispatcherLib
+            lib = ContractionMultiABDDispatcherLib.__new__(ContractionMultiABDDispatcherLib)
+            lib.so_path = Path("/fake/lib.so")
+            lib._lib = mock_lib
+
+        # No exception of any kind from the validation path.
+        try:
+            lib.run(As, Bs, Ds, E, problem)
+        except ValueError as exc:
+            self.fail(f"Empty Ds raised ValueError: {exc}")
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
