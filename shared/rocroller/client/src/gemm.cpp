@@ -50,6 +50,37 @@ enum ReturnCodes : int
     SolutionNotSupportedOnArch = 3
 };
 
+namespace
+{
+    // Delete when rocroller-gemm input generation stops delegating to test/common.
+    DGen::DataInitMode toMxDataGeneratorInitMode(
+        rocRoller::Client::GEMMClient::DataInitialization const& initialization)
+    {
+        using Mode = rocRoller::Client::GEMMClient::DataInitializationMode;
+        switch(initialization.mode)
+        {
+        case Mode::Bounded:
+            return DGen::Bounded{};
+        case Mode::BoundedAlternatingSign:
+            return DGen::BoundedAlternatingSign{};
+        case Mode::Unbounded:
+            return DGen::Unbounded{};
+        case Mode::Identity:
+            return DGen::Identity{};
+        case Mode::Ones:
+            return DGen::Ones{};
+        case Mode::Zeros:
+            return DGen::Zeros{};
+        case Mode::TrigonometricFromFloat:
+            return DGen::TrigonometricFromFloat{};
+        case Mode::NormalFromFloat:
+            return DGen::NormalFromFloat{initialization.normalMean,
+                                         initialization.normalStandardDeviation};
+        }
+        Throw<FatalError>("Unsupported data initialization mode.");
+    }
+}
+
 namespace rocRoller::Client::GEMMClient
 {
     using GEMMSolutionPtr = std::shared_ptr<Client::GEMMClient::GEMMSolution>;
@@ -184,9 +215,9 @@ namespace rocRoller::Client::GEMMClient
                       -1.f,
                       1.f,
                       static_cast<uint>(scaleBlockSize),
-                      problemParams.initModeA,
-                      problemParams.initModeB,
-                      problemParams.initModeC);
+                      toMxDataGeneratorInitMode(problemParams.initModeA),
+                      toMxDataGeneratorInitMode(problemParams.initModeB),
+                      toMxDataGeneratorInitMode(problemParams.initModeC));
         }
         else
         {
@@ -199,9 +230,9 @@ namespace rocRoller::Client::GEMMClient
                       descC,
                       -1.f,
                       1.f,
-                      problemParams.initModeA,
-                      problemParams.initModeB,
-                      problemParams.initModeC);
+                      toMxDataGeneratorInitMode(problemParams.initModeA),
+                      toMxDataGeneratorInitMode(problemParams.initModeB),
+                      toMxDataGeneratorInitMode(problemParams.initModeC));
         }
 
         // Pre-tile B on the host when pretileB is set (kernel expects pre-tiled layout)
@@ -1564,10 +1595,6 @@ int main(int argc, const char* argv[])
 
         .scaleValueA = 1.0f,
         .scaleValueB = 1.0f,
-
-        .initModeA = DataInitMode(Bounded{}),
-        .initModeB = DataInitMode(Bounded{}),
-        .initModeC = DataInitMode(Bounded{}),
     };
 
     rocRoller::Client::GEMMClient::TypeParameters types;
