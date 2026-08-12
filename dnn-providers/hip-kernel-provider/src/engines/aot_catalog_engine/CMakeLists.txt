@@ -22,6 +22,7 @@ target_sources(hip_kernel_provider_impl PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/ops/LayerNormAdapter.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ops/ActivationAdapter.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ops/SdpaAdapter.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/ops/ConvFpropAdapter.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/CatalogPlan.cpp
 )
 

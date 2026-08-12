@@ -20,6 +20,7 @@
 #include "launch/ModuleLoader.hpp"
 #include "launch/PluginError.hpp"
 #include "ops/ActivationAdapter.hpp"
+#include "ops/ConvFpropAdapter.hpp"
 #include "ops/GemmAdapter.hpp"
 #include "ops/LayerNormAdapter.hpp"
 #include "ops/RmsNormAdapter.hpp"
@@ -87,13 +88,14 @@ launch::SymbolTable workspaceSymbols(const ops::IOpAdapter& adapter,
 
 CatalogEngine::CatalogEngine()
 {
-    // Register the op adapters this engine understands. Adding a new op kind
-    // (sdpa, conv) is one push_back here plus a new adapter class.
+    // Register the op adapters this engine understands. Adding a new op kind is
+    // one push_back here plus a new adapter class.
     _adapters.push_back(std::make_unique<ops::GemmAdapter>());
     _adapters.push_back(std::make_unique<ops::RmsNormAdapter>());
     _adapters.push_back(std::make_unique<ops::LayerNormAdapter>());
     _adapters.push_back(std::make_unique<ops::ActivationAdapter>());
     _adapters.push_back(std::make_unique<ops::SdpaAdapter>());
+    _adapters.push_back(std::make_unique<ops::ConvFpropAdapter>());
 }
 
 int64_t CatalogEngine::staticId()

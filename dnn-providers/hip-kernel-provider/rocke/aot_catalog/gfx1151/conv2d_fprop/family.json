@@ -1,0 +1,732 @@
+{
+    "family": "conv2d_fprop_gfx1151",
+    "op_kind": "conv_fprop",
+    "arch": "gfx1151",
+    "dtype": [
+        "f16",
+        "bf16"
+    ],
+    "_comment": "Runtime-generic 2-D forward-convolution (implicit-GEMM) family for gfx1151 (WMMA, wave32, groups==1). Every kernel is FULLY dynamic: one .co per tile config serves ANY conv shape via partial-tile boundary masking (parity with rmsnorm2d_dynamic/layernorm2d_dynamic, applied to conv). The ConvFpropAdapter publishes dtype/groups/C/K plus the raw geometry + derived M/N_gemm/K_gemm; each kernel gates on dtype+groups+C/K-alignment only. Grid = ceil_div(N_gemm,tile_n) x ceil_div(M,tile_m). ABI = A,B,D + A_bytes,B_bytes,D_bytes + N,C,K,Hi,Wi,R,S,sH,sW,pH,pW,dH,dW (all i32). A CDNA arch ships its own .co + family.json entry with matching constraints -- zero C++ change.",
+    "kernels": [
+        {
+            "symbol": "conv_igemm_fprop_dyn_fp16_t64x64x64_w2x2_a16x16x16_mem_default",
+            "co_file": "conv_igemm_fprop_dyn_fp16_t64x64x64_w2x2_a16x16x16_mem_default.co",
+            "_comment": "Fully runtime-generic forward conv: ALL geometry (N,C,K,Hi,Wi,R,S,stride,pad,dilation) is read from i32 args; only the tile config is baked. No shape 'equals'/'multiple_of' on spatial dims -- partial tiles are masked. C/K are constrained multiple_of vec for the channel-contiguous vectorized loads. Serves any 2-D fprop shape; the tuner picks the winning tile config per problem.",
+            "constraints": {
+                "dtype": {
+                    "equals": "f16"
+                },
+                "groups": {
+                    "equals": 1
+                },
+                "C": {
+                    "min": 1,
+                    "multiple_of": 8
+                },
+                "K": {
+                    "min": 1,
+                    "multiple_of": 8
+                }
+            },
+            "grid": {
+                "x": {
+                    "ceil_div": [
+                        "N_gemm",
+                        64
+                    ]
+                },
+                "y": {
+                    "ceil_div": [
+                        "M",
+                        64
+                    ]
+                },
+                "z": 1
+            },
+            "block": [
+                128,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "A",
+                    "type": "ptr"
+                },
+                {
+                    "name": "B",
+                    "type": "ptr"
+                },
+                {
+                    "name": "D",
+                    "type": "ptr"
+                },
+                {
+                    "name": "A_bytes",
+                    "type": "i32"
+                },
+                {
+                    "name": "B_bytes",
+                    "type": "i32"
+                },
+                {
+                    "name": "D_bytes",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "C",
+                    "type": "i32"
+                },
+                {
+                    "name": "K",
+                    "type": "i32"
+                },
+                {
+                    "name": "Hi",
+                    "type": "i32"
+                },
+                {
+                    "name": "Wi",
+                    "type": "i32"
+                },
+                {
+                    "name": "R",
+                    "type": "i32"
+                },
+                {
+                    "name": "S",
+                    "type": "i32"
+                },
+                {
+                    "name": "sH",
+                    "type": "i32"
+                },
+                {
+                    "name": "sW",
+                    "type": "i32"
+                },
+                {
+                    "name": "pH",
+                    "type": "i32"
+                },
+                {
+                    "name": "pW",
+                    "type": "i32"
+                },
+                {
+                    "name": "dH",
+                    "type": "i32"
+                },
+                {
+                    "name": "dW",
+                    "type": "i32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "conv_igemm_fprop_dyn_fp16_t64x64x32_w2x2_a16x16x16_mem_default",
+            "co_file": "conv_igemm_fprop_dyn_fp16_t64x64x32_w2x2_a16x16x16_mem_default.co",
+            "_comment": "Fully runtime-generic forward conv: ALL geometry (N,C,K,Hi,Wi,R,S,stride,pad,dilation) is read from i32 args; only the tile config is baked. No shape 'equals'/'multiple_of' on spatial dims -- partial tiles are masked. C/K are constrained multiple_of vec for the channel-contiguous vectorized loads. Serves any 2-D fprop shape; the tuner picks the winning tile config per problem.",
+            "constraints": {
+                "dtype": {
+                    "equals": "f16"
+                },
+                "groups": {
+                    "equals": 1
+                },
+                "C": {
+                    "min": 1,
+                    "multiple_of": 8
+                },
+                "K": {
+                    "min": 1,
+                    "multiple_of": 8
+                }
+            },
+            "grid": {
+                "x": {
+                    "ceil_div": [
+                        "N_gemm",
+                        64
+                    ]
+                },
+                "y": {
+                    "ceil_div": [
+                        "M",
+                        64
+                    ]
+                },
+                "z": 1
+            },
+            "block": [
+                128,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "A",
+                    "type": "ptr"
+                },
+                {
+                    "name": "B",
+                    "type": "ptr"
+                },
+                {
+                    "name": "D",
+                    "type": "ptr"
+                },
+                {
+                    "name": "A_bytes",
+                    "type": "i32"
+                },
+                {
+                    "name": "B_bytes",
+                    "type": "i32"
+                },
+                {
+                    "name": "D_bytes",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "C",
+                    "type": "i32"
+                },
+                {
+                    "name": "K",
+                    "type": "i32"
+                },
+                {
+                    "name": "Hi",
+                    "type": "i32"
+                },
+                {
+                    "name": "Wi",
+                    "type": "i32"
+                },
+                {
+                    "name": "R",
+                    "type": "i32"
+                },
+                {
+                    "name": "S",
+                    "type": "i32"
+                },
+                {
+                    "name": "sH",
+                    "type": "i32"
+                },
+                {
+                    "name": "sW",
+                    "type": "i32"
+                },
+                {
+                    "name": "pH",
+                    "type": "i32"
+                },
+                {
+                    "name": "pW",
+                    "type": "i32"
+                },
+                {
+                    "name": "dH",
+                    "type": "i32"
+                },
+                {
+                    "name": "dW",
+                    "type": "i32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "conv_igemm_fprop_dyn_fp16_t128x64x32_w2x2_a16x16x16_mem_default",
+            "co_file": "conv_igemm_fprop_dyn_fp16_t128x64x32_w2x2_a16x16x16_mem_default.co",
+            "_comment": "Fully runtime-generic forward conv: ALL geometry (N,C,K,Hi,Wi,R,S,stride,pad,dilation) is read from i32 args; only the tile config is baked. No shape 'equals'/'multiple_of' on spatial dims -- partial tiles are masked. C/K are constrained multiple_of vec for the channel-contiguous vectorized loads. Serves any 2-D fprop shape; the tuner picks the winning tile config per problem.",
+            "constraints": {
+                "dtype": {
+                    "equals": "f16"
+                },
+                "groups": {
+                    "equals": 1
+                },
+                "C": {
+                    "min": 1,
+                    "multiple_of": 8
+                },
+                "K": {
+                    "min": 1,
+                    "multiple_of": 8
+                }
+            },
+            "grid": {
+                "x": {
+                    "ceil_div": [
+                        "N_gemm",
+                        64
+                    ]
+                },
+                "y": {
+                    "ceil_div": [
+                        "M",
+                        128
+                    ]
+                },
+                "z": 1
+            },
+            "block": [
+                128,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "A",
+                    "type": "ptr"
+                },
+                {
+                    "name": "B",
+                    "type": "ptr"
+                },
+                {
+                    "name": "D",
+                    "type": "ptr"
+                },
+                {
+                    "name": "A_bytes",
+                    "type": "i32"
+                },
+                {
+                    "name": "B_bytes",
+                    "type": "i32"
+                },
+                {
+                    "name": "D_bytes",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "C",
+                    "type": "i32"
+                },
+                {
+                    "name": "K",
+                    "type": "i32"
+                },
+                {
+                    "name": "Hi",
+                    "type": "i32"
+                },
+                {
+                    "name": "Wi",
+                    "type": "i32"
+                },
+                {
+                    "name": "R",
+                    "type": "i32"
+                },
+                {
+                    "name": "S",
+                    "type": "i32"
+                },
+                {
+                    "name": "sH",
+                    "type": "i32"
+                },
+                {
+                    "name": "sW",
+                    "type": "i32"
+                },
+                {
+                    "name": "pH",
+                    "type": "i32"
+                },
+                {
+                    "name": "pW",
+                    "type": "i32"
+                },
+                {
+                    "name": "dH",
+                    "type": "i32"
+                },
+                {
+                    "name": "dW",
+                    "type": "i32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "conv_igemm_fprop_dyn_bf16_t64x64x64_w2x2_a16x16x16_mem_default",
+            "co_file": "conv_igemm_fprop_dyn_bf16_t64x64x64_w2x2_a16x16x16_mem_default.co",
+            "_comment": "Fully runtime-generic forward conv: ALL geometry (N,C,K,Hi,Wi,R,S,stride,pad,dilation) is read from i32 args; only the tile config is baked. No shape 'equals'/'multiple_of' on spatial dims -- partial tiles are masked. C/K are constrained multiple_of vec for the channel-contiguous vectorized loads. Serves any 2-D fprop shape; the tuner picks the winning tile config per problem.",
+            "constraints": {
+                "dtype": {
+                    "equals": "bf16"
+                },
+                "groups": {
+                    "equals": 1
+                },
+                "C": {
+                    "min": 1,
+                    "multiple_of": 8
+                },
+                "K": {
+                    "min": 1,
+                    "multiple_of": 8
+                }
+            },
+            "grid": {
+                "x": {
+                    "ceil_div": [
+                        "N_gemm",
+                        64
+                    ]
+                },
+                "y": {
+                    "ceil_div": [
+                        "M",
+                        64
+                    ]
+                },
+                "z": 1
+            },
+            "block": [
+                128,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "A",
+                    "type": "ptr"
+                },
+                {
+                    "name": "B",
+                    "type": "ptr"
+                },
+                {
+                    "name": "D",
+                    "type": "ptr"
+                },
+                {
+                    "name": "A_bytes",
+                    "type": "i32"
+                },
+                {
+                    "name": "B_bytes",
+                    "type": "i32"
+                },
+                {
+                    "name": "D_bytes",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "C",
+                    "type": "i32"
+                },
+                {
+                    "name": "K",
+                    "type": "i32"
+                },
+                {
+                    "name": "Hi",
+                    "type": "i32"
+                },
+                {
+                    "name": "Wi",
+                    "type": "i32"
+                },
+                {
+                    "name": "R",
+                    "type": "i32"
+                },
+                {
+                    "name": "S",
+                    "type": "i32"
+                },
+                {
+                    "name": "sH",
+                    "type": "i32"
+                },
+                {
+                    "name": "sW",
+                    "type": "i32"
+                },
+                {
+                    "name": "pH",
+                    "type": "i32"
+                },
+                {
+                    "name": "pW",
+                    "type": "i32"
+                },
+                {
+                    "name": "dH",
+                    "type": "i32"
+                },
+                {
+                    "name": "dW",
+                    "type": "i32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "conv_igemm_fprop_dyn_bf16_t64x64x32_w2x2_a16x16x16_mem_default",
+            "co_file": "conv_igemm_fprop_dyn_bf16_t64x64x32_w2x2_a16x16x16_mem_default.co",
+            "_comment": "Fully runtime-generic forward conv: ALL geometry (N,C,K,Hi,Wi,R,S,stride,pad,dilation) is read from i32 args; only the tile config is baked. No shape 'equals'/'multiple_of' on spatial dims -- partial tiles are masked. C/K are constrained multiple_of vec for the channel-contiguous vectorized loads. Serves any 2-D fprop shape; the tuner picks the winning tile config per problem.",
+            "constraints": {
+                "dtype": {
+                    "equals": "bf16"
+                },
+                "groups": {
+                    "equals": 1
+                },
+                "C": {
+                    "min": 1,
+                    "multiple_of": 8
+                },
+                "K": {
+                    "min": 1,
+                    "multiple_of": 8
+                }
+            },
+            "grid": {
+                "x": {
+                    "ceil_div": [
+                        "N_gemm",
+                        64
+                    ]
+                },
+                "y": {
+                    "ceil_div": [
+                        "M",
+                        64
+                    ]
+                },
+                "z": 1
+            },
+            "block": [
+                128,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "A",
+                    "type": "ptr"
+                },
+                {
+                    "name": "B",
+                    "type": "ptr"
+                },
+                {
+                    "name": "D",
+                    "type": "ptr"
+                },
+                {
+                    "name": "A_bytes",
+                    "type": "i32"
+                },
+                {
+                    "name": "B_bytes",
+                    "type": "i32"
+                },
+                {
+                    "name": "D_bytes",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "C",
+                    "type": "i32"
+                },
+                {
+                    "name": "K",
+                    "type": "i32"
+                },
+                {
+                    "name": "Hi",
+                    "type": "i32"
+                },
+                {
+                    "name": "Wi",
+                    "type": "i32"
+                },
+                {
+                    "name": "R",
+                    "type": "i32"
+                },
+                {
+                    "name": "S",
+                    "type": "i32"
+                },
+                {
+                    "name": "sH",
+                    "type": "i32"
+                },
+                {
+                    "name": "sW",
+                    "type": "i32"
+                },
+                {
+                    "name": "pH",
+                    "type": "i32"
+                },
+                {
+                    "name": "pW",
+                    "type": "i32"
+                },
+                {
+                    "name": "dH",
+                    "type": "i32"
+                },
+                {
+                    "name": "dW",
+                    "type": "i32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "conv_igemm_fprop_dyn_bf16_t128x64x32_w2x2_a16x16x16_mem_default",
+            "co_file": "conv_igemm_fprop_dyn_bf16_t128x64x32_w2x2_a16x16x16_mem_default.co",
+            "_comment": "Fully runtime-generic forward conv: ALL geometry (N,C,K,Hi,Wi,R,S,stride,pad,dilation) is read from i32 args; only the tile config is baked. No shape 'equals'/'multiple_of' on spatial dims -- partial tiles are masked. C/K are constrained multiple_of vec for the channel-contiguous vectorized loads. Serves any 2-D fprop shape; the tuner picks the winning tile config per problem.",
+            "constraints": {
+                "dtype": {
+                    "equals": "bf16"
+                },
+                "groups": {
+                    "equals": 1
+                },
+                "C": {
+                    "min": 1,
+                    "multiple_of": 8
+                },
+                "K": {
+                    "min": 1,
+                    "multiple_of": 8
+                }
+            },
+            "grid": {
+                "x": {
+                    "ceil_div": [
+                        "N_gemm",
+                        64
+                    ]
+                },
+                "y": {
+                    "ceil_div": [
+                        "M",
+                        128
+                    ]
+                },
+                "z": 1
+            },
+            "block": [
+                128,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "A",
+                    "type": "ptr"
+                },
+                {
+                    "name": "B",
+                    "type": "ptr"
+                },
+                {
+                    "name": "D",
+                    "type": "ptr"
+                },
+                {
+                    "name": "A_bytes",
+                    "type": "i32"
+                },
+                {
+                    "name": "B_bytes",
+                    "type": "i32"
+                },
+                {
+                    "name": "D_bytes",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "C",
+                    "type": "i32"
+                },
+                {
+                    "name": "K",
+                    "type": "i32"
+                },
+                {
+                    "name": "Hi",
+                    "type": "i32"
+                },
+                {
+                    "name": "Wi",
+                    "type": "i32"
+                },
+                {
+                    "name": "R",
+                    "type": "i32"
+                },
+                {
+                    "name": "S",
+                    "type": "i32"
+                },
+                {
+                    "name": "sH",
+                    "type": "i32"
+                },
+                {
+                    "name": "sW",
+                    "type": "i32"
+                },
+                {
+                    "name": "pH",
+                    "type": "i32"
+                },
+                {
+                    "name": "pW",
+                    "type": "i32"
+                },
+                {
+                    "name": "dH",
+                    "type": "i32"
+                },
+                {
+                    "name": "dW",
+                    "type": "i32"
+                }
+            ],
+            "workspace_bytes": 0
+        }
+    ]
+}
