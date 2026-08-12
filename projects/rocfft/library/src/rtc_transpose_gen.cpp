@@ -112,16 +112,17 @@ std::string transpose_rtc(const std::string& kernel_name, const TransposeSpecs& 
     Variable gridX{"gridX", "const " + std::string(rtc_index_type(IndexType::_32BIT))};
     Variable gridY{"gridY", "const " + std::string(rtc_index_type(IndexType::_32BIT))};
     Variable gridZ{"gridZ", "const " + std::string(rtc_index_type(IndexType::_32BIT))};
-    Variable lengths_var{"lengths", "const size_t", true, true};
+    Variable lengths_var{
+        "lengths", "const " + std::string(rtc_index_type(IndexType::_32BIT)), true, true};
     Variable stride_in0_var{"stride_in0", "index_type"};
     Variable stride_in1_var{"stride_in1", "index_type"};
     Variable stride_in2_var{"stride_in2", "index_type"};
-    Variable stride_in_var{"stride_in", "const size_t", true, true};
+    Variable stride_in_var{"stride_in", "const index_type", true, true};
     Variable idist_var{"idist", "index_type"};
     Variable stride_out0_var{"stride_out0", "index_type"};
     Variable stride_out1_var{"stride_out1", "index_type"};
     Variable stride_out2_var{"stride_out2", "index_type"};
-    Variable stride_out_var{"stride_out", "const size_t", true, true};
+    Variable stride_out_var{"stride_out", "const index_type", true, true};
     Variable odist_var{"odist", "index_type"};
 
     Function func(kernel_name);

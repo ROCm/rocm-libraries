@@ -40,6 +40,8 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
     std::optional<StockhamGeneratorSpecs> specs2d;
     StockhamPartialPassParams             pp_params;
 
+    IndexType itype = node.GetKernelIndexType();
+
     // SBRC variants look in the function pool for plain BLOCK_RC to
     // learn the block width, then decide on the transpose type once
     // that's known.
@@ -76,7 +78,8 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
         std::copy(kernel->factors.begin(), kernel->factors.end(), std::back_inserter(factors));
         auto precision = static_cast<unsigned int>(node.precision);
 
-        specs.emplace(factors,
+        specs.emplace(itype,
+                      factors,
                       std::vector<unsigned int>(),
                       precision,
                       get_curr_gcn_arch_name(),
@@ -125,7 +128,8 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
             }
         }
 
-        specs.emplace(factors1d,
+        specs.emplace(itype,
+                      factors1d,
                       factors2d,
                       precision,
                       get_curr_gcn_arch_name(),
@@ -135,7 +139,8 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
         specs->half_lds              = kernel->half_lds;
         specs->ebtype                = node.ebtype;
 
-        specs2d.emplace(factors2d,
+        specs2d.emplace(itype,
+                        factors2d,
                         factors1d,
                         precision,
                         get_curr_gcn_arch_name(),
@@ -229,11 +234,11 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
                             node.storeOps);
     };
 
-    generator.construct_rtckernel = [](const std::string&                       kernel_name,
-                                       std::shared_future<hipModule_wrapper_t>& module,
-                                       dim3,
-                                       dim3) {
-        return std::unique_ptr<RTCKernel>(new RTCKernelStockham(kernel_name, module));
+    generator.construct_rtckernel = [=](const std::string&                       kernel_name,
+                                        std::shared_future<hipModule_wrapper_t>& module,
+                                        dim3,
+                                        dim3) {
+        return std::unique_ptr<RTCKernel>(new RTCKernelStockham(kernel_name, itype, module));
     };
     return generator;
 }
@@ -241,7 +246,7 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
 RTCKernelArgs RTCKernelStockham::get_launch_args(DeviceCallIn& data)
 {
     // construct arguments to pass to the kernel
-    RTCKernelArgs kargs;
+    RTCKernelArgs kargs(itype);
 
     // twiddles
     if(data.node->scheme == CS_KERNEL_STOCKHAM_PP)
@@ -255,15 +260,15 @@ RTCKernelArgs RTCKernelStockham::get_launch_args(DeviceCallIn& data)
        || data.node->scheme == CS_KERNEL_STOCKHAM_PP_BLOCK_CC)
         kargs.append_ptr(data.node->twiddles_large);
     if(!hardcoded_dim)
-        kargs.append_size_t(data.node->length.size());
+        kargs.append_index(data.node->length.size(), IndexType::_32BIT);
     // lengths
-    kargs.append_ptr(kargs_lengths(data.node->devKernArg));
+    kargs.append_ptr(data.node->devKernArg.lengths());
     // stride in/out
-    kargs.append_ptr(kargs_stride_in(data.node->devKernArg));
+    kargs.append_ptr(data.node->devKernArg.stride_in());
     if(data.node->placement == rocfft_placement_notinplace)
-        kargs.append_ptr(kargs_stride_out(data.node->devKernArg));
+        kargs.append_ptr(data.node->devKernArg.stride_out());
     // nbatch
-    kargs.append_size_t(data.node->batch);
+    kargs.append_index(data.node->batch);
     // callback params
     kargs.append_ptr(data.callbacks.load_cb_fn);
     kargs.append_ptr(data.callbacks.load_cb_data);

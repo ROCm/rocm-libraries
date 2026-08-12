@@ -26,12 +26,14 @@
 struct RTCKernelStockham : public RTCKernel
 {
     RTCKernelStockham(const std::string&                       kernel_name,
+                      IndexType                                itype,
                       std::shared_future<hipModule_wrapper_t>& module)
         : RTCKernel(kernel_name, module)
+        , itype(itype)
         , hardcoded_dim(kernel_name.find("_dim") != std::string::npos)
     {
     }
-
+    IndexType                      itype;
     static RTCKernel::RTCGenerator generate_from_node(const LeafNode&    node,
                                                       const std::string& gpu_arch,
                                                       bool               enable_callbacks);

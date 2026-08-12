@@ -122,6 +122,7 @@ std::string stockham_rtc_kernel_name(const StockhamGeneratorSpecs&    specs,
         kernel_name += std::to_string(specs.static_dim);
     }
 
+    kernel_name += rtc_index_name(specs.itype);
     kernel_name += rtc_precision_name(precision);
 
     if(placement == rocfft_placement_inplace)
@@ -498,6 +499,7 @@ std::string stockham_rtc(const StockhamGeneratorSpecs&    specs,
 
     // make_rtc removes templates from global function - add typedefs
     // and constants to replace them
+    src += rtc_index_type_decl(specs.itype);
     src += rtc_precision_type_decl(precision);
     if(unit_stride)
         src += "static const StrideBin sb = SB_UNIT;\n";

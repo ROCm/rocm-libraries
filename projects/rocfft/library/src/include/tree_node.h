@@ -666,7 +666,7 @@ public:
     size_t           twiddles_pp_size      = 0;
     void*            chirp                 = nullptr;
     size_t           chirp_size            = 0;
-    gpubuf_t<size_t> devKernArg;
+    KernelArgsBuffer devKernArg;
 
     // callback parameters
     UserCallbacks callbacks;
@@ -1040,6 +1040,9 @@ public:
     void         SetupGridParam(GridParam& gp) override;
     FMKey        GetKernelKey() const override;
     bool         KernelNeeds64BitIndexing() const;
+    // Index type for both this node's kernel and its devKernArg
+    // buffer; the two must agree on the width of the stride arrays.
+    IndexType GetKernelIndexType() const;
     virtual void GetKernelFactors();
     virtual void GetKernelPartialPassFactors();
 };

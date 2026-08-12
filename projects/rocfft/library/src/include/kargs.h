@@ -25,35 +25,72 @@
 #define KARGS_H
 
 #include "../../../shared/gpubuf.h"
+#include "rtc_generator.h"
 #include <cstddef>
 #include <vector>
 
 #define KERN_ARGS_ARRAY_WIDTH 16
 
-gpubuf_t<size_t> kargs_create(std::vector<size_t> length,
-                              std::vector<size_t> inStride,
-                              std::vector<size_t> outStride,
-                              size_t              iDist,
-                              size_t              oDist);
-
-// data->node->devKernArg : points to the internal length device pointer
-// data->node->devKernArg + 1*KERN_ARGS_ARRAY_WIDTH : points to the internal in
-// stride device pointer
-// data->node->devKernArg + 2*KERN_ARGS_ARRAY_WIDTH : points to the internal out
-// stride device pointer, only used in out-of-place kernels
-static size_t* kargs_lengths(const gpubuf_t<size_t>& devKernArg)
+// Device buffer holding the lengths and strides that a node's kernel
+// needs, as three fixed-width arrays of KERN_ARGS_ARRAY_WIDTH
+// elements: lengths, input strides, output strides.  The dist follows
+// the last stride in each stride array, i.e. stride_in[dim] is the
+// batch stride.
+//
+// Lengths are always 32-bit, since kernels only ever index and divide
+// by them.  Strides and dists are as wide as the index_type of the
+// kernel that reads the buffer, so the layout - and therefore the
+// offset of each array - depends on the IndexType this was created
+// with.  The kernel's index_type must be decided the same way, or it
+// will read the arrays at the wrong width.
+class KernelArgsBuffer
 {
-    return devKernArg.data();
-}
+public:
+    bool create(const std::vector<size_t>& length,
+                const std::vector<size_t>& inStride,
+                const std::vector<size_t>& outStride,
+                size_t                     iDist,
+                size_t                     oDist,
+                IndexType                  itype);
 
-static size_t* kargs_stride_in(const gpubuf_t<size_t>& devKernArg)
-{
-    return devKernArg.data() + 1 * KERN_ARGS_ARRAY_WIDTH;
-}
+    void* lengths() const
+    {
+        return buf.data_offset(0);
+    }
 
-static size_t* kargs_stride_out(const gpubuf_t<size_t>& devKernArg)
-{
-    return devKernArg.data() + 2 * KERN_ARGS_ARRAY_WIDTH;
-}
+    void* stride_in() const
+    {
+        return buf.data_offset(lengths_bytes());
+    }
+
+    void* stride_out() const
+    {
+        return buf.data_offset(lengths_bytes() + strides_bytes());
+    }
+
+    IndexType index_type() const
+    {
+        return itype;
+    }
+
+    operator bool() const
+    {
+        return static_cast<bool>(buf);
+    }
+
+private:
+    static size_t lengths_bytes()
+    {
+        return KERN_ARGS_ARRAY_WIDTH * sizeof(unsigned int);
+    }
+
+    size_t strides_bytes() const
+    {
+        return KERN_ARGS_ARRAY_WIDTH * rtc_index_type_size(itype);
+    }
+
+    gpubuf    buf;
+    IndexType itype = IndexType::_32BIT;
+};
 
 #endif // defined( KARGS_H )

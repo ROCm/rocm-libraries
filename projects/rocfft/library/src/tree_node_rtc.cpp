@@ -49,3 +49,8 @@ bool LeafNode::KernelNeeds64BitIndexing() const
 
     return false;
 }
+
+IndexType LeafNode::GetKernelIndexType() const
+{
+    return KernelNeeds64BitIndexing() ? IndexType::_64BIT : IndexType::_32BIT;
+}

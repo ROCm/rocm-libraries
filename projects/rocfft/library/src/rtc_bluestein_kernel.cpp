@@ -53,7 +53,8 @@ RTCKernel::RTCGenerator RTCKernelBluesteinSingle::generate_from_node(const LeafN
     generator.gridDim        = {DivRoundingUp(batch_accum, bwd)};
     generator.blockDim       = config.workgroup_size;
 
-    BluesteinSingleSpecs specs{static_cast<unsigned int>(node.length[0]),
+    BluesteinSingleSpecs specs{node.GetKernelIndexType(),
+                               static_cast<unsigned int>(node.length[0]),
                                static_cast<unsigned int>(node.length.size()),
                                factors,
                                static_cast<unsigned int>(config.threads_per_transform[0])
@@ -89,11 +90,11 @@ RTCKernelArgs RTCKernelBluesteinSingle::get_launch_args(DeviceCallIn& data)
     RTCKernelArgs kargs;
     kargs.append_ptr(data.bufTemp);
     kargs.append_ptr(data.node->twiddles);
-    kargs.append_ptr(kargs_lengths(data.node->devKernArg));
-    kargs.append_ptr(kargs_stride_in(data.node->devKernArg));
+    kargs.append_ptr(data.node->devKernArg.lengths());
+    kargs.append_ptr(data.node->devKernArg.stride_in());
     if(data.node->placement == rocfft_placement_notinplace)
     {
-        kargs.append_ptr(kargs_stride_out(data.node->devKernArg));
+        kargs.append_ptr(data.node->devKernArg.stride_out());
     }
     kargs.append_size_t(data.node->batch);
     kargs.append_ptr(data.bufIn[0]);
@@ -166,7 +167,8 @@ RTCKernel::RTCGenerator RTCKernelBluesteinMulti::generate_from_node(const LeafNo
         generator.blockDim = {LAUNCH_BOUNDS_BLUESTEIN_MULTI_KERNEL};
     }
 
-    BluesteinMultiSpecs specs{scheme,
+    BluesteinMultiSpecs specs{node.GetKernelIndexType(),
+                              scheme,
                               node.precision,
                               node.inArrayType,
                               node.outArrayType,
@@ -247,9 +249,9 @@ RTCKernelArgs RTCKernelBluesteinMulti::get_launch_args(DeviceCallIn& data)
         if(array_type_is_planar(data.node->outArrayType))
             kargs.append_ptr(bufOut1);
         kargs.append_size_t(data.node->length.size());
-        kargs.append_ptr(kargs_lengths(data.node->devKernArg));
-        kargs.append_ptr(kargs_stride_in(data.node->devKernArg));
-        kargs.append_ptr(kargs_stride_out(data.node->devKernArg));
+        kargs.append_ptr(data.node->devKernArg.lengths());
+        kargs.append_ptr(data.node->devKernArg.stride_in());
+        kargs.append_ptr(data.node->devKernArg.stride_out());
         // callback params
         kargs.append_ptr(data.callbacks.load_cb_fn);
         kargs.append_ptr(data.callbacks.load_cb_data);

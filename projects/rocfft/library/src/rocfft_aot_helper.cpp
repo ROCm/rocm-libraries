@@ -243,7 +243,8 @@ void build_stockham_function_pool(CompileQueue& queue)
         std::vector<unsigned int> factors;
         std::copy(i.second.factors.begin(), i.second.factors.end(), std::back_inserter(factors));
 
-        StockhamGeneratorSpecs specs{factors,
+        StockhamGeneratorSpecs specs{IndexType::_32BIT,
+                                     factors,
                                      {},
                                      static_cast<unsigned int>(precision),
                                      get_curr_gcn_arch_name(),
@@ -405,7 +406,8 @@ void build_realcomplex(CompileQueue& queue)
                                                          outArrayType,
                                                          CallbackType::NONE,
                                                          {},
-                                                         {}}};
+                                                         {}},
+                                                        IndexType::_32BIT};
                     auto kernel_name = realcomplex_even_transpose_rtc_kernel_name(specs);
                     std::function<std::string(const std::string&)> generate_src
                         = [=](const std::string& kernel_name) -> std::string {
@@ -676,7 +678,8 @@ void build_solution_kernels(CompileQueue& queue)
                         return;
                 }
 
-                StockhamGeneratorSpecs specs{factors,
+                StockhamGeneratorSpecs specs{IndexType::_32BIT,
+                                             factors,
                                              {},
                                              static_cast<unsigned int>(precision),
                                              get_curr_gcn_arch_name(),

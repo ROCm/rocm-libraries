@@ -56,10 +56,13 @@ struct RealComplexEvenSpecs : public RealComplexSpecs
 
 struct RealComplexEvenTransposeSpecs : public RealComplexSpecs
 {
-    RealComplexEvenTransposeSpecs(RealComplexSpecs&& baseSpecs)
+    RealComplexEvenTransposeSpecs(RealComplexSpecs&& baseSpecs, IndexType itype)
         : RealComplexSpecs(baseSpecs)
+        , itype(itype)
     {
     }
+
+    IndexType itype;
 
     static unsigned int TileX(ComputeScheme scheme)
     {

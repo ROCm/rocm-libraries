@@ -610,6 +610,7 @@ std::string realcomplex_even_transpose_rtc_kernel_name(const RealComplexEvenTran
     kernel_name += "_dim" + std::to_string(specs.dim) + "_lensz" + std::to_string(specs.lensz);
     kernel_name += "_tile" + std::to_string(specs.TileX()) + "x" + std::to_string(specs.TileY());
 
+    kernel_name += rtc_index_name(specs.itype);
     kernel_name += rtc_precision_name(specs.precision);
     kernel_name += rtc_array_type_name(specs.inArrayType);
     kernel_name += rtc_array_type_name(specs.outArrayType);
@@ -638,6 +639,7 @@ std::string realcomplex_even_transpose_rtc(const std::string&                   
     src += device_enum_h;
     src += callback_h;
 
+    src += rtc_index_type_decl(specs.itype);
     src += rtc_precision_type_decl(specs.precision);
 
     src += rtc_const_cbtype_decl(specs.cbtype);
@@ -649,9 +651,9 @@ std::string realcomplex_even_transpose_rtc(const std::string&                   
     Variable output{"output", "scalar_type", true, true};
     Variable odist{"odist", "size_t"};
     Variable twiddles{"twiddles", "scalar_type", true, true};
-    Variable lengths{"lengths", "size_t", true, true};
-    Variable inStride{"inStride", "size_t", true, true};
-    Variable outStride{"outStride", "size_t", true, true};
+    Variable lengths{"lengths", rtc_index_type(IndexType::_32BIT), true, true};
+    Variable inStride{"inStride", "index_type", true, true};
+    Variable outStride{"outStride", "index_type", true, true};
     Variable gridY{"gridY", "const unsigned int"};
     Variable gridZ{"gridZ", "const unsigned int"};
 
@@ -662,10 +664,10 @@ std::string realcomplex_even_transpose_rtc(const std::string&                   
         // this helper doesn't need to have its AST transformed or
         // anything, so just add it to source as a string
         src += R"(
-	    __device__ size_t output_row_base(size_t        dim,
-	                                      size_t        output_batch_start,
-	                                      const size_t* outStride,
-	                                      const size_t  col)
+	    __device__ size_t output_row_base(size_t            dim,
+	                                      size_t            output_batch_start,
+	                                      const index_type* outStride,
+	                                      const size_t      col)
 	    {
 	        if(dim == 2)
 	            return output_batch_start + outStride[1] * col;

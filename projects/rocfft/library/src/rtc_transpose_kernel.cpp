@@ -90,10 +90,9 @@ RTCKernel::RTCGenerator RTCKernelTranspose::generate_from_node(const LeafNode&  
 
     bool tileAligned = node.length[0] % tileX == 0 && node.length[1] % tileX == 0;
 
-    // Determine index type based on whether the kernel needs 64-bit indexing.
     // This runs after buffer assignment, fusion and padding, so the node's
     // lengths and strides are final.
-    IndexType itype = node.KernelNeeds64BitIndexing() ? IndexType::_64BIT : IndexType::_32BIT;
+    IndexType itype = node.GetKernelIndexType();
 
     TransposeSpecs specs{itype,
                          tileX,
@@ -146,18 +145,18 @@ RTCKernelArgs RTCKernelTranspose::get_launch_args(DeviceCallIn& data)
     kargs.append_index(data.node->length[0], IndexType::_32BIT);
     kargs.append_index(data.node->length[1], IndexType::_32BIT);
     kargs.append_index(num_lengths > 2 ? data.node->length[2] : 1, IndexType::_32BIT);
-    kargs.append_ptr(kargs_lengths(data.node->devKernArg));
+    kargs.append_ptr(data.node->devKernArg.lengths());
 
     kargs.append_index(data.node->inStride[0]);
     kargs.append_index(data.node->inStride[1]);
     kargs.append_index(num_lengths > 2 ? data.node->inStride[2] : 0);
-    kargs.append_ptr(kargs_stride_in(data.node->devKernArg));
+    kargs.append_ptr(data.node->devKernArg.stride_in());
     kargs.append_index(data.node->iDist);
 
     kargs.append_index(data.node->outStride[0]);
     kargs.append_index(data.node->outStride[1]);
     kargs.append_index(num_lengths > 2 ? data.node->outStride[2] : 0);
-    kargs.append_ptr(kargs_stride_out(data.node->devKernArg));
+    kargs.append_ptr(data.node->devKernArg.stride_out());
     kargs.append_index(data.node->oDist);
 
     // pass gridX, gridY and gridZ to restore a 3-D GPU grid, if needed for large grids

@@ -101,6 +101,7 @@ struct StockhamKernel : public StockhamGeneratorSpecs
     //
     // templates
     //
+    Variable index_type{"index_type", "typename"};
     Variable scalar_type{"scalar_type", "typename"};
     Variable callback_type{"cbtype", "CallbackType"};
     Variable stride_type{"sb", "StrideBin"};
@@ -116,16 +117,17 @@ struct StockhamKernel : public StockhamGeneratorSpecs
     Variable twiddles{"twiddles", "const scalar_type", true, true};
 
     // rank/dimension of transform
-    Variable dim{"dim", "const size_t"};
+    Variable dim{"dim", "const " + std::string(rtc_index_type(IndexType::_32BIT))};
 
     // transform lengths
-    Variable lengths{"lengths", "const size_t", true, true};
+    Variable lengths{
+        "lengths", "const " + std::string(rtc_index_type(IndexType::_32BIT)), true, true};
 
     // input/output array strides
-    Variable stride{"stride", "const size_t", true, true};
+    Variable stride{"stride", "const index_type", true, true};
 
     // number of transforms/batches
-    Variable nbatch{"nbatch", "const size_t"};
+    Variable nbatch{"nbatch", "const index_type"};
 
     // should the device function write to lds?
     // only used for 2D
@@ -151,62 +153,59 @@ struct StockhamKernel : public StockhamGeneratorSpecs
     Variable lds_row_padding{"lds_row_padding", "unsigned int"};
 
     // hip thread grid dim
-    Variable grid_dim{"gridDim.x", "unsigned int"};
+    Variable grid_dim{"gridDim.x", rtc_index_type(IndexType::_32BIT)};
 
     // hip thread block id
-    Variable block_id{"blockIdx.x", "unsigned int"};
+    Variable block_id{"blockIdx.x", rtc_index_type(IndexType::_32BIT)};
 
     // hip thread id
-    Variable thread_id{"threadIdx.x", "unsigned int"};
+    Variable thread_id{"threadIdx.x", rtc_index_type(IndexType::_32BIT)};
 
-    // thread within transform
-    // Variable thread{"thread", "size_t"};
-    Variable thread{"thread", "unsigned int"};
+    // thread within transform, bounded by the workgroup size
+    Variable thread{"thread", rtc_index_type(IndexType::_32BIT)};
 
     // The "pre-cal" thread that we're passing into device function,
     // Since it is calculated either mod or div (depends on linear/nonlinear)
     // So we'd like to do that expensive mod or div once and for all
-    // Variable thread_in_device{"thread_in_device", "size_t"};
-    Variable thread_in_device{"thread_in_device", "unsigned int"};
-    Variable thread_in_device_pp{"thread_in_device_pp", "unsigned int"};
-    Variable thread_in_device_pp_twiddles{"thread_in_device_pp_twiddles", "unsigned int"};
+    Variable thread_in_device{"thread_in_device", rtc_index_type(IndexType::_32BIT)};
+    Variable thread_in_device_pp{"thread_in_device_pp", rtc_index_type(IndexType::_32BIT)};
+    Variable thread_in_device_pp_twiddles{"thread_in_device_pp_twiddles",
+                                          rtc_index_type(IndexType::_32BIT)};
 
     // global input/output buffer offset to current transform
-    Variable offset{"offset", "size_t"};
+    Variable offset{"offset", "index_type"};
 
-    // lds buffer offset to current transform
-    Variable offset_lds{"offset_lds", "unsigned int"};
+    // lds buffer offset to current transform, bounded by the LDS size
+    Variable offset_lds{"offset_lds", rtc_index_type(IndexType::_32BIT)};
 
     // current batch
-    Variable batch{"batch", "size_t"};
+    Variable batch{"batch", "index_type"};
 
     // current transform index in a batch
-    Variable transform{"transform", "size_t"};
+    Variable transform{"transform", "index_type"};
 
     // data index and offsets (for contiguous read/write)
-    Variable global_data_id{"global_data_id", "size_t"};
-    Variable global_load_data_offset{"global_load_data_offset", "size_t"};
-    Variable global_store_data_offset{"global_store_data_offset", "size_t"};
+    Variable global_data_id{"global_data_id", "index_type"};
+    Variable global_load_data_offset{"global_load_data_offset", "index_type"};
+    Variable global_store_data_offset{"global_store_data_offset", "index_type"};
 
     // transform index and offsets
-    Variable global_transf_id{"global_transf_id", "size_t"};
-    Variable global_load_transf_offset{"global_load_transf_offset", "size_t"};
-    Variable global_store_transf_offset{"global_store_transf_offset", "size_t"};
+    Variable global_transf_id{"global_transf_id", "index_type"};
+    Variable global_load_transf_offset{"global_load_transf_offset", "index_type"};
+    Variable global_store_transf_offset{"global_store_transf_offset", "index_type"};
 
     // stride between consecutive indexes
-    Variable stride0{"stride0", "const size_t"};
+    Variable stride0{"stride0", "const index_type"};
 
     // stride between consecutive indexes in lds
-    // Variable stride_lds{"stride_lds", "size_t"};
-    Variable stride_lds{"stride_lds", "unsigned int"};
+    Variable stride_lds{"stride_lds", rtc_index_type(IndexType::_32BIT)};
 
-    // usually in device: const size_t lstride = (sb == SB_UNIT) ? 1 : stride_lds;
+    // usually in device: const index_type lstride = (sb == SB_UNIT) ? 1 : stride_lds;
     // with this definition, the compiler knows that "index * lstride" is trivial under SB_UNIT
-    // Variable lstride{"lstride", "const size_t"};
-    Variable lstride{"lstride", "const unsigned int"};
+    Variable lstride{"lstride", "const " + std::string(rtc_index_type(IndexType::_32BIT))};
 
     // local temp variable in device function
-    Variable l_offset{"l_offset", "unsigned int"};
+    Variable l_offset{"l_offset", rtc_index_type(IndexType::_32BIT)};
 
     // twiddle value during twiddle application
     Variable W{"W", "scalar_type"};
@@ -242,6 +241,7 @@ struct StockhamKernel : public StockhamGeneratorSpecs
     virtual TemplateList device_lds_reg_inout_templates()
     {
         TemplateList tpls;
+        tpls.append(index_type);
         tpls.append(scalar_type);
         tpls.append(stride_type);
         tpls.append(lds_reg_sync);
@@ -251,6 +251,7 @@ struct StockhamKernel : public StockhamGeneratorSpecs
     virtual TemplateList device_templates()
     {
         TemplateList tpls;
+        tpls.append(index_type);
         tpls.append(scalar_type);
         tpls.append(lds_is_real);
         tpls.append(stride_type);
@@ -261,7 +262,7 @@ struct StockhamKernel : public StockhamGeneratorSpecs
 
     virtual TemplateList global_templates()
     {
-        return {scalar_type, stride_type, callback_type, directReg_type};
+        return {index_type, scalar_type, stride_type, callback_type, directReg_type};
     }
 
     virtual ArgumentList device_lds_reg_inout_arguments()
@@ -925,7 +926,7 @@ struct StockhamKernel : public StockhamGeneratorSpecs
     virtual TemplateList device_lds_reg_inout_device_call_templates(bool syncthreads = true)
     {
         Variable sync_var{syncthreads ? "true" : "false", "bool"};
-        return {scalar_type, stride_type, sync_var};
+        return {index_type, scalar_type, stride_type, sync_var};
     }
 
     virtual std::vector<Expression> device_lds_reg_inout_device_call_arguments()
@@ -935,7 +936,7 @@ struct StockhamKernel : public StockhamGeneratorSpecs
 
     virtual TemplateList device_call_templates()
     {
-        return {scalar_type, lds_is_real, stride_type, lds_linear, direct_load_to_reg};
+        return {index_type, scalar_type, lds_is_real, stride_type, lds_linear, direct_load_to_reg};
     }
 
     virtual std::vector<Expression> device_call_arguments(unsigned int call_iter)
@@ -981,6 +982,8 @@ struct StockhamKernel : public StockhamGeneratorSpecs
         StatementList tmp;
         for(unsigned int i = 0; i < r2c_calls_per_transform; ++i)
         {
+            // the pre/post process functions work on lds, so they take
+            // plain size_t indices instead of an index_type template arg
             TemplateList tpls;
             tpls.append(scalar_type);
             tpls.append(Ndiv4);

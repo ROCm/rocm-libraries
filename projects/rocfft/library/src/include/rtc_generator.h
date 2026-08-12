@@ -21,17 +21,43 @@
 #ifndef ROCFFT_RTC_GENERATOR_H
 #define ROCFFT_RTC_GENERATOR_H
 
+#include <cstddef>
 #include <functional>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <vector>
+
+// Width of the integer type used for index/offset arithmetic inside
+// generated kernels. Kernels declare such arguments as "index_type".
+enum class IndexType
+{
+    _32BIT,
+    _64BIT,
+};
+
+// Size of one "index_type" element, for packing arrays that kernels
+// read through an index_type pointer.
+static inline size_t rtc_index_type_size(IndexType itype)
+{
+    switch(itype)
+    {
+    case IndexType::_32BIT:
+        return sizeof(unsigned int);
+    case IndexType::_64BIT:
+        return sizeof(unsigned long long);
+    }
+
+    throw std::runtime_error("Invalid index type");
+}
 
 // runtime_compile dispatches to subclasses, those subclasses
 // return callables to do the code generation, so that the
 // compilation and caching can live in the cached_compile method.
 //
 // function to generate the name of a kernel, given no arguments
-using kernel_name_gen_t = std::function<std::string()>;
+using kernel_name_gen_t  = std::function<std::string()>;
+using kernel_itype_gen_t = std::function<IndexType()>;
 // functor to generate the source code of a kernel, given the
 // kernel name.  but remember the source in case we're asked to
 // generate it again.

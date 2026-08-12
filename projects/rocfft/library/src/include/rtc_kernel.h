@@ -42,14 +42,6 @@ class TreeNode;
 class LeafNode;
 struct GridParam;
 
-// Width of the integer type used for index/offset arithmetic inside
-// generated kernels. Kernels declare such arguments as "index_type".
-enum class IndexType
-{
-    _32BIT,
-    _64BIT,
-};
-
 // Helper class that handles alignment of kernel arguments
 class RTCKernelArgs
 {

@@ -1064,8 +1064,8 @@ struct StockhamTransform
 
     Variable dim{"dim", "unsigned int"};
     Variable nbatch{"nbatch", "size_t"};
-    Variable lengths{"lengths", "size_t", true, true};
-    Variable stride{"stride", "size_t", true, true};
+    Variable lengths{"lengths", "unsigned int", true, true};
+    Variable stride{"stride", "index_type", true, true};
     Variable offset{"offset", "size_t"};
 
     Variable write{"write", "bool"};
@@ -1162,8 +1162,8 @@ struct BluesteinTransform
 
     Variable dim{"dim", "unsigned int"};
     Variable nbatch{"nbatch", "size_t"};
-    Variable lengths{"lengths", "size_t", true, true};
-    Variable stride{"stride", "size_t", true, true};
+    Variable lengths{"lengths", "unsigned int", true, true};
+    Variable stride{"stride", "index_type", true, true};
     Variable offset{"offset", "size_t"};
 
     Variable write{"write", "bool"};

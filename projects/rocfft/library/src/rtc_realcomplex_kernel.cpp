@@ -299,7 +299,8 @@ RTCKernel::RTCGenerator RTCKernelRealComplexEvenTranspose::generate_from_node(
                                          node.GetCallbackType(enable_callbacks),
                                          node.loadOps,
                                          node.storeOps,
-                                         grid3D}};
+                                         grid3D},
+                                        node.GetKernelIndexType()};
 
     generator.generate_name = [=]() { return realcomplex_even_transpose_rtc_kernel_name(specs); };
 
@@ -332,9 +333,9 @@ RTCKernelArgs RTCKernelRealComplexEvenTranspose::get_launch_args(DeviceCallIn& d
         kargs.append_ptr(data.bufOut[1]);
     kargs.append_size_t(data.node->oDist);
     kargs.append_ptr(data.node->twiddles);
-    kargs.append_ptr(kargs_lengths(data.node->devKernArg));
-    kargs.append_ptr(kargs_stride_in(data.node->devKernArg));
-    kargs.append_ptr(kargs_stride_out(data.node->devKernArg));
+    kargs.append_ptr(data.node->devKernArg.lengths());
+    kargs.append_ptr(data.node->devKernArg.stride_in());
+    kargs.append_ptr(data.node->devKernArg.stride_out());
     // callback params
     kargs.append_ptr(data.callbacks.load_cb_fn);
     kargs.append_ptr(data.callbacks.load_cb_data);
