@@ -3,6 +3,14 @@
 
 add_executable(host-validation-tests host_validation_test.cpp)
 target_link_libraries(host-validation-tests PRIVATE roc::host-validation)
+if(TARGET OpenMP::OpenMP_CXX)
+    target_link_libraries(host-validation-tests PRIVATE OpenMP::OpenMP_CXX)
+    target_compile_definitions(
+        host-validation-tests
+        PRIVATE
+            HOST_VALIDATION_TEST_OPENMP=1
+    )
+endif()
 add_test(NAME host-validation-tests COMMAND host-validation-tests)
 
 add_executable(host-validation-tiled-tests tiled_backend_test.cpp)

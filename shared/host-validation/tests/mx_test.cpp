@@ -219,6 +219,20 @@ int main() {
                 "MX explicit unity-scale generation mismatch.");
     checkReference(explicitScale, explicitlyScaled);
 
+    MxGenerationProblem impossibleInterval = explicitScale;
+    impossibleInterval.shape = Shape{8192, 1};
+    impossibleInterval.leadingDimension = 8192;
+    impossibleInterval.data.parameter0 = 0.1;
+    impossibleInterval.data.parameter1 = 0.2;
+    bool rejectedImpossibleInterval = false;
+    try {
+        (void)generateMx(impossibleInterval);
+    } catch (const std::invalid_argument&) {
+        rejectedImpossibleInterval = true;
+    }
+    require(rejectedImpossibleInterval,
+            "MX parallel generation did not reject an unrepresentable bounded interval.");
+
     const std::array stochasticModes{
         MxGenerationMode::Bounded,   MxGenerationMode::BoundedAlternatingSign,
         MxGenerationMode::Unbounded, MxGenerationMode::Trigonometric,
