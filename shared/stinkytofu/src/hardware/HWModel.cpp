@@ -27,12 +27,6 @@ constexpr HWModel kGfx1250Model = {
             .signalToWaitLatency = 11,
             .jumpOverheadCycles = 6,
         },
-    .aluScoreboard =
-        {
-            .valuMax = 5,
-            .transMax = 4,
-            .saluCyclesMax = 4,
-        },
     .coexec =
         {
             .transToNonCoreSide = 1,

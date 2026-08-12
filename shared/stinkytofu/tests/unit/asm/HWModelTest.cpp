@@ -48,10 +48,6 @@ TEST(HWModel, Gfx1250KnownDefaults) {
     EXPECT_EQ(hw.barrier.signalToWaitLatency, 11);
     EXPECT_EQ(hw.barrier.jumpOverheadCycles, 6);
 
-    EXPECT_EQ(hw.aluScoreboard.valuMax, 5u);
-    EXPECT_EQ(hw.aluScoreboard.transMax, 4u);
-    EXPECT_EQ(hw.aluScoreboard.saluCyclesMax, 4u);
-
     EXPECT_EQ(hw.coexec.transToNonCoreSide, 1);
     EXPECT_TRUE(hw.coexec.hwHandlesTransToCoreSide);
     EXPECT_EQ(hw.coexec.maxSlotBudget, 18);

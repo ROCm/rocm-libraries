@@ -49,18 +49,6 @@ struct HWModel {
         int jumpOverheadCycles;
     };
 
-    /// s_delay_alu scoreboard depths. Named after the HW register fields these
-    /// bound: DEP_1..4 (VALU), DEP_1..3 (TRANS), SALU_CYCLE_1..3.
-    ///
-    /// `unsigned` matches the types these values feed in InsertDelayAluPass —
-    /// they initialize uint8_t members and are compared against unsigned cycle
-    /// counts. Do not narrow to int; it changes the signedness of those comparisons.
-    struct AluScoreboard {
-        unsigned valuMax;
-        unsigned transMax;
-        unsigned saluCyclesMax;
-    };
-
     /// Co-execution hazard spacing. The per-producer V_NOP counts come from each
     /// instruction's HwInstDesc::coIssueWindow bitmask at runtime; only the
     /// arch-level rules live here.
@@ -81,10 +69,16 @@ struct HWModel {
 
     Lds lds;
     Barrier barrier;
-    AluScoreboard aluScoreboard;
     Coexec coexec;
     Hazards hazards;
 };
+
+// Deliberately NOT here: InsertDelayAluPass's s_delay_alu scoreboard depths
+// (VALU_MAX / TRANS_MAX / SALU_CYCLES_MAX). They describe the instruction's
+// encoding - how many DEP_1..4 and SALU_CYCLE_1..3 fields it has - rather than a
+// timing the scheduler can be retuned against, and they are compile-time constants
+// in that pass (default member initializers of a map value type). See the note in
+// InsertDelayAluPass.cpp.
 
 /// Look up the hardware model for \p arch (the {major, minor, stepping} triple
 /// from GemmTileConfig).
