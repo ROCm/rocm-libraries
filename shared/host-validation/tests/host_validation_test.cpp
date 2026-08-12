@@ -182,6 +182,63 @@ void testRuntimeMixedAndBlockScaledGemm() {
             "Runtime block-scaled GEMM result mismatch.");
 }
 
+void testPointwiseCompatibilityRoutes() {
+    using namespace roc::host_validation;
+
+    const std::array<float, 7> a{1, 1, 1, 1, 1, 1, 1};
+    const std::array<float, 14> b{1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
+    const std::array<float, 2> c{};
+    const std::array<float, 3> scaleA{2, 3, 5};
+    const std::array<float, 4> scaleB{1, 1, 7, 11};
+
+    auto makeProblem = [&](std::array<float, 2>& output) {
+        GemmOperand operandA(TensorView::fromNative<float>(Layout::contiguous(Shape{1, 7}),
+                                                           std::span<const float>(a)));
+        GemmOperand operandB(TensorView::fromNative<float>(Layout::contiguous(Shape{7, 2}),
+                                                           std::span<const float>(b)));
+        operandA.blockScale = BlockScaleBinding{
+            TensorView::fromNative<float>(Layout::contiguous(Shape{1, 3}),
+                                          std::span<const float>(scaleA)),
+            3,
+        };
+        operandB.blockScale = BlockScaleBinding{
+            TensorView::fromNative<float>(Layout::contiguous(Shape{2, 2}),
+                                          std::span<const float>(scaleB)),
+            4,
+        };
+        GemmRequest problem(std::move(operandA), std::move(operandB),
+                            TensorView::fromNative<float>(Layout::contiguous(Shape{1, 2}),
+                                                          std::span<const float>(c)),
+                            MutableTensorView::fromNative<float>(Layout::contiguous(Shape{1, 2}),
+                                                                 std::span<float>(output)),
+                            ScalarType::Float32);
+        problem.outputSelection = OutputSelection::explicitIndices({1});
+        return problem;
+    };
+
+    std::array<float, 2> automaticOutput{-99, -99};
+    GemmRequest automaticProblem = makeProblem(automaticOutput);
+    const GemmResult automatic = referenceGemm(automaticProblem);
+
+    std::array<float, 2> canonicalOutput{-99, -99};
+    GemmRequest canonicalProblem = makeProblem(canonicalOutput);
+    const GemmResult canonical =
+        referenceGemm(canonicalProblem, {
+                                            .backend = GemmBackend::Canonical,
+                                            .requireRequestedBackend = true,
+                                        });
+
+    constexpr std::array<float, 2> expected{-99, 184};
+    require(automaticOutput == expected && canonicalOutput == expected,
+            "Automatic and Canonical pointwise compatibility routes diverged.");
+    require(automatic.runInfo.backendUsed == GemmBackend::Canonical &&
+                canonical.runInfo.backendUsed == GemmBackend::Canonical &&
+                automatic.runInfo.outputElementsComputed == 1 &&
+                canonical.runInfo.outputElementsComputed == 1 &&
+                !automatic.runInfo.fallbackReason && !canonical.runInfo.fallbackReason,
+            "Pointwise compatibility route information changed.");
+}
+
 void testExactIntegerGemm() {
     using namespace roc::host_validation;
 
@@ -1197,6 +1254,7 @@ int main() {
     testRuntimeReferenceGemm();
     testZeroGemmScalarsSuppressNonFiniteOperands();
     testRuntimeMixedAndBlockScaledGemm();
+    testPointwiseCompatibilityRoutes();
     testExactIntegerGemm();
     testRuntimeComplexAndExplicitAxisGemm();
     testOutputSelection();

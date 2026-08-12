@@ -1,7 +1,6 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include <complex>
 #include <optional>
 #include <stdexcept>
 #include <utility>
@@ -50,12 +49,8 @@ GemmResult referenceGemm(const GemmRequest& request, const GemmExecution& execut
     std::optional<std::string> fallbackReason;
     if (backend == GemmBackend::Automatic) {
         if (backendImplementation != nullptr) {
-            const GemmExecution implementationExecution{
-                .backend = backendImplementation->backend(),
-                .requireRequestedBackend = true,
-            };
-            const GemmSupportInfo implementationSupport =
-                queryGemmSupport(request, implementationExecution, backendImplementation);
+            const GemmSupportInfo implementationSupport = queryGemmSupport(
+                request, {.backend = backendImplementation->backend()}, backendImplementation);
             if (implementationSupport)
                 return {
                     .output = request.d.asConst(),
@@ -66,12 +61,8 @@ GemmResult referenceGemm(const GemmRequest& request, const GemmExecution& execut
         backend = GemmBackend::Canonical;
     }
 
-    const GemmExecution requestedExecution{
-        .backend = backend,
-        .requireRequestedBackend = execution.requireRequestedBackend,
-    };
     const GemmSupportInfo requestedSupport =
-        queryGemmSupport(request, requestedExecution, backendImplementation);
+        queryGemmSupport(request, {.backend = backend}, backendImplementation);
     if (!requestedSupport) {
         if (execution.requireRequestedBackend) throw std::invalid_argument(requestedSupport.reason);
         if (backend == GemmBackend::Canonical) throw std::invalid_argument(requestedSupport.reason);
@@ -84,35 +75,11 @@ GemmResult referenceGemm(const GemmRequest& request, const GemmExecution& execut
         };
     }
 
-    const GemmSupportInfo canonicalSupport =
-        queryGemmSupport(request, {
-                                      .backend = GemmBackend::Canonical,
-                                      .requireRequestedBackend = true,
-                                  });
-    if (!canonicalSupport) throw std::invalid_argument(canonicalSupport.reason);
+    const GemmSupportInfo pointwiseSupport =
+        queryGemmSupport(request, {.backend = GemmBackend::Canonical});
+    if (!pointwiseSupport) throw std::invalid_argument(pointwiseSupport.reason);
 
-    GemmRunInfo runInfo;
-    switch (request.accumulatorType) {
-        case ScalarType::Float16:
-        case ScalarType::BFloat16:
-        case ScalarType::Float32:
-            runInfo = detail::referenceRuntimeCanonical<float>(request);
-            break;
-        case ScalarType::Float64:
-            runInfo = detail::referenceRuntimeCanonical<double>(request);
-            break;
-        case ScalarType::Int32:
-            runInfo = detail::referenceRuntimeCanonical<int32_t>(request);
-            break;
-        case ScalarType::ComplexFloat32:
-            runInfo = detail::referenceRuntimeCanonical<std::complex<float>>(request);
-            break;
-        case ScalarType::ComplexFloat64:
-            runInfo = detail::referenceRuntimeCanonical<std::complex<double>>(request);
-            break;
-        default:
-            throw std::invalid_argument("Unsupported runtime reference GEMM accumulator type.");
-    }
+    GemmRunInfo runInfo = detail::runPointwiseGemm(request);
     runInfo.fallbackReason = std::move(fallbackReason);
     return {
         .output = request.d.asConst(),

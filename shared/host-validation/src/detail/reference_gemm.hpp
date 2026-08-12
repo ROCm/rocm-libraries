@@ -4,19 +4,12 @@
 #pragma once
 
 #include <algorithm>
-#include <array>
-#include <bit>
-#include <cmath>
 #include <complex>
 #include <cstddef>
-#include <cstdint>
-#include <limits>
 #include <optional>
 #include <roc/host_validation/gemm.hpp>
-#include <span>
 #include <stdexcept>
 #include <string>
-#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -272,7 +265,7 @@ class RuntimeGemmFinalizer {
 };
 
 template <typename Accumulator>
-GemmRunInfo referenceRuntimeCanonical(const GemmRequest& problem) {
+GemmRunInfo runPointwiseGemmTyped(const GemmRequest& problem) {
     const RuntimeMatrixReader<Accumulator> a(problem.a.values);
     const RuntimeMatrixReader<Accumulator> b(problem.b.values);
     const RuntimeQuantizer<Accumulator> quantizeA(problem.a.computeType);
@@ -404,6 +397,28 @@ GemmRunInfo referenceRuntimeCanonical(const GemmRequest& problem) {
         .fallbackReason = std::nullopt,
         .outputElementsComputed = computedElements,
     };
+}
+
+// Internal exact selected-output strategy. GemmBackend::Canonical remains the
+// public compatibility request and run-info value until consumer migration is
+// complete.
+inline GemmRunInfo runPointwiseGemm(const GemmRequest& problem) {
+    switch (problem.accumulatorType) {
+        case ScalarType::Float16:
+        case ScalarType::BFloat16:
+        case ScalarType::Float32:
+            return runPointwiseGemmTyped<float>(problem);
+        case ScalarType::Float64:
+            return runPointwiseGemmTyped<double>(problem);
+        case ScalarType::Int32:
+            return runPointwiseGemmTyped<int32_t>(problem);
+        case ScalarType::ComplexFloat32:
+            return runPointwiseGemmTyped<std::complex<float>>(problem);
+        case ScalarType::ComplexFloat64:
+            return runPointwiseGemmTyped<std::complex<double>>(problem);
+        default:
+            throw std::invalid_argument("Unsupported runtime reference GEMM accumulator type.");
+    }
 }
 }  // namespace detail
 }  // namespace roc::host_validation
