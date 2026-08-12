@@ -51,7 +51,7 @@ inline std::optional<int64_t> elementSizeBytes(const ProblemShape& problem)
     {
         return std::nullopt;
     }
-    const std::string& token = std::get<std::string>(it->second);
+    const auto& token = std::get<std::string>(it->second);
     if(token == "f16" || token == "bf16")
     {
         return 2;
