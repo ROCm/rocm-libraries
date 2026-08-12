@@ -21,8 +21,13 @@ using namespace TensileLite::Client;
 
 namespace
 {
-    ContractionProblemGemm makeMXProblem(
-        rocisa::DataType typeA, rocisa::DataType typeB, size_t M, size_t N, size_t K, int mxBlock)
+    ContractionProblemGemm makeMXProblem(rocisa::DataType typeA,
+                                         rocisa::DataType typeB,
+                                         size_t           M,
+                                         size_t           N,
+                                         size_t           K,
+                                         int              mxBlock,
+                                         rocisa::DataType scaleType = rocisa::DataType::E8)
     {
         auto problem = ContractionProblemGemm::GEMM_Strides(false,
                                                             false,
@@ -44,8 +49,8 @@ namespace
                                                             M * N,
                                                             0.0);
 
-        problem.setMXScaleA(rocisa::DataType::E8, mxBlock, {}, /*padScaleTensor=*/false);
-        problem.setMXScaleB(rocisa::DataType::E8, mxBlock, {}, /*padScaleTensor=*/false);
+        problem.setMXScaleA(scaleType, mxBlock, {}, /*padScaleTensor=*/false);
+        problem.setMXScaleB(scaleType, mxBlock, {}, /*padScaleTensor=*/false);
         problem.setComputeInputTypeA(typeA);
         problem.setComputeInputTypeB(typeB);
         problem.setAlphaType(rocisa::DataType::Float);
@@ -72,35 +77,72 @@ namespace
                                    std::as_writable_bytes(std::span<T>(values))),
                  options);
     }
+
+#ifdef TENSILE_USE_FP8_BF8
+    template <typename Scale>
+    void expectTiledNonE8MXScale(rocisa::DataType scaleType)
+    {
+        const size_t M       = 2;
+        const size_t N       = 2;
+        const size_t K       = 16;
+        const int    mxBlock = 8;
+        auto         problem = makeMXProblem(
+            rocisa::DataType::Float8, rocisa::DataType::Float8, M, N, K, mxBlock, scaleType);
+
+        std::vector<Float8> a(M * K, Float8(1.0f));
+        std::vector<Float8> b(K * N, Float8(1.0f));
+        std::vector<float>  c(M * N, 0.0f);
+        std::vector<float>  d(M * N, -99.0f);
+        std::vector<Scale>  mxsa(problem.mxsa().totalAllocatedElements(), Scale(2.0f));
+        std::vector<Scale>  mxsb(problem.mxsb().totalAllocatedElements(), Scale(4.0f));
+
+        ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
+        inputs.mxsa = mxsa.data();
+        inputs.mxsb = mxsb.data();
+
+        ASSERT_TRUE(tryRuntimeTiledGemm(problem, inputs, /*elementsToValidate=*/-1));
+        EXPECT_EQ(d, (std::vector<float>{128, 128, 128, 128}));
+    }
+#endif
 } // namespace
 
 #ifndef _WIN32
 
-TEST(ReferenceMXFastPath, RejectsMixedInputTypesWithMXFP4)
+TEST(ReferenceMXFastPath, SupportsMixedInputTypesWithMXFP4)
 {
-    const size_t M       = 64;
-    const size_t N       = 64;
-    const size_t K       = 128;
-    const int    mxBlock = 32;
+    const size_t M       = 1;
+    const size_t N       = 1;
+    const size_t K       = 8;
+    const int    mxBlock = 8;
 
-    auto problemA
+    auto problem
         = makeMXProblem(rocisa::DataType::Float4, rocisa::DataType::Float, M, N, K, mxBlock);
-    EXPECT_FALSE(isFastPathEligible(problemA));
+    std::vector<Float4x2> a(K / 2, Float4x2(1.0f, 1.0f));
+    std::vector<float>    b(K, 1.0f);
+    std::vector<float>    c(1, 0.0f);
+    std::vector<float>    d(1, -99.0f);
+    std::vector<E8>       mxsa(problem.mxsa().totalAllocatedElements(), E8(2.0f));
+    std::vector<E8>       mxsb(problem.mxsb().totalAllocatedElements(), E8(4.0f));
 
-    auto problemB
-        = makeMXProblem(rocisa::DataType::Float, rocisa::DataType::Float4, M, N, K, mxBlock);
-    EXPECT_FALSE(isFastPathEligible(problemB));
+    ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
+    inputs.mxsa = mxsa.data();
+    inputs.mxsb = mxsb.data();
 
-    auto problemBoth
-        = makeMXProblem(rocisa::DataType::Float4, rocisa::DataType::Float4, M, N, K, mxBlock);
-    EXPECT_TRUE(isFastPathEligible(problemBoth));
+    ASSERT_TRUE(tryRuntimeTiledGemm(problem, inputs, /*elementsToValidate=*/-1));
+    EXPECT_EQ(d[0], 64);
 }
 
 #endif
 
 #ifdef TENSILE_USE_FP8_BF8
 
-TEST(ReferenceMXFastPath, MatchesSlowPathForScaledFP8Gemm)
+TEST(ReferenceMXFastPath, SupportsNonE8ScaleStorage)
+{
+    expectTiledNonE8MXScale<E5M3>(rocisa::DataType::E5M3);
+    expectTiledNonE8MXScale<Float8>(rocisa::DataType::Float8);
+}
+
+TEST(ReferenceMXFastPath, MatchesCanonicalForScaledFP8Gemm)
 {
     const size_t M       = 64;
     const size_t N       = 64;
@@ -109,13 +151,12 @@ TEST(ReferenceMXFastPath, MatchesSlowPathForScaledFP8Gemm)
 
     auto problem
         = makeMXProblem(rocisa::DataType::Float8, rocisa::DataType::Float8, M, N, K, mxBlock);
-    ASSERT_TRUE(isFastPathEligible(problem));
 
     std::vector<Float8> a(M * K);
     std::vector<Float8> b(K * N);
     std::vector<float>  c(M * N, 0.0f);
-    std::vector<float>  dSlow(M * N, 0.0f);
-    std::vector<float>  dFast(M * N, 0.0f);
+    std::vector<float>  dCanonical(M * N, 0.0f);
+    std::vector<float>  dTiled(M * N, 0.0f);
     std::vector<E8>     mxsa(problem.mxsa().totalAllocatedElements());
     std::vector<E8>     mxsb(problem.mxsb().totalAllocatedElements());
 
@@ -130,27 +171,27 @@ TEST(ReferenceMXFastPath, MatchesSlowPathForScaledFP8Gemm)
     generateValues(mxsa, roc::host_validation::ScalarType::E8M0, scale, 12345, 2);
     generateValues(mxsb, roc::host_validation::ScalarType::E8M0, scale, 12345, 3);
 
-    ContractionInputs inputsSlow(a.data(), b.data(), c.data(), dSlow.data(), 1.0f, 0.0f);
-    inputsSlow.mxsa = mxsa.data();
-    inputsSlow.mxsb = mxsb.data();
+    ContractionInputs inputsCanonical(a.data(), b.data(), c.data(), dCanonical.data(), 1.0f, 0.0f);
+    inputsCanonical.mxsa = mxsa.data();
+    inputsCanonical.mxsb = mxsb.data();
 
-    ContractionInputs inputsFast(a.data(), b.data(), c.data(), dFast.data(), 1.0f, 0.0f);
-    inputsFast.mxsa = mxsa.data();
-    inputsFast.mxsb = mxsb.data();
+    ContractionInputs inputsTiled(a.data(), b.data(), c.data(), dTiled.data(), 1.0f, 0.0f);
+    inputsTiled.mxsa = mxsa.data();
+    inputsTiled.mxsb = mxsb.data();
 
-    SolveGemmCPU(problem, inputsSlow, /*elementsToValidate=*/-1, /*tryFastPath=*/false);
-    ASSERT_TRUE(tryRuntimeTiledGemm(problem, inputsFast, /*elementsToValidate=*/-1));
+    ASSERT_TRUE(tryRuntimeCanonicalGemm(problem, inputsCanonical, /*elementsToValidate=*/-1));
+    ASSERT_TRUE(tryRuntimeTiledGemm(problem, inputsTiled, /*elementsToValidate=*/-1));
 
     const auto comparison = roc::host_validation::compare(
-        roc::host_validation::TensorView::fromNative(std::span<const float>(dFast)),
-        roc::host_validation::TensorView::fromNative(std::span<const float>(dSlow)),
+        roc::host_validation::TensorView::fromNative(std::span<const float>(dTiled)),
+        roc::host_validation::TensorView::fromNative(std::span<const float>(dCanonical)),
         roc::host_validation::nearComparisonOptions(1e-3));
     EXPECT_TRUE(comparison.passed())
         << "mismatches=" << comparison.mismatches
         << " max_absolute_difference=" << comparison.maxAbsoluteDifference;
 }
 
-TEST(ReferenceMXFastPath, MatchesSlowPathWithBetaAndBias)
+TEST(ReferenceMXFastPath, MatchesCanonicalWithBetaAndBias)
 {
     const size_t M       = 48;
     const size_t N       = 32;
@@ -161,13 +202,12 @@ TEST(ReferenceMXFastPath, MatchesSlowPathWithBetaAndBias)
         = makeMXProblem(rocisa::DataType::Float8, rocisa::DataType::Float8, M, N, K, mxBlock);
     problem.setUseBias(1);
     problem.setBias(rocisa::DataType::Float, M, M);
-    ASSERT_TRUE(isFastPathEligible(problem));
 
     std::vector<Float8> a(M * K);
     std::vector<Float8> b(K * N);
     std::vector<float>  c(M * N);
-    std::vector<float>  dSlow(M * N, 0.0f);
-    std::vector<float>  dFast(M * N, 0.0f);
+    std::vector<float>  dCanonical(M * N, 0.0f);
+    std::vector<float>  dTiled(M * N, 0.0f);
     std::vector<float>  bias(M);
     std::vector<E8>     mxsa(problem.mxsa().totalAllocatedElements());
     std::vector<E8>     mxsb(problem.mxsb().totalAllocatedElements());
@@ -191,22 +231,22 @@ TEST(ReferenceMXFastPath, MatchesSlowPathWithBetaAndBias)
     generateValues(c, roc::host_validation::ScalarType::Float32, cPattern, 54321, 4);
     generateValues(bias, roc::host_validation::ScalarType::Float32, biasPattern, 54321, 5);
 
-    ContractionInputs inputsSlow(a.data(), b.data(), c.data(), dSlow.data(), 1.0f, 0.5f);
-    inputsSlow.mxsa = mxsa.data();
-    inputsSlow.mxsb = mxsb.data();
-    inputsSlow.bias = bias.data();
+    ContractionInputs inputsCanonical(a.data(), b.data(), c.data(), dCanonical.data(), 1.0f, 0.5f);
+    inputsCanonical.mxsa = mxsa.data();
+    inputsCanonical.mxsb = mxsb.data();
+    inputsCanonical.bias = bias.data();
 
-    ContractionInputs inputsFast(a.data(), b.data(), c.data(), dFast.data(), 1.0f, 0.5f);
-    inputsFast.mxsa = mxsa.data();
-    inputsFast.mxsb = mxsb.data();
-    inputsFast.bias = bias.data();
+    ContractionInputs inputsTiled(a.data(), b.data(), c.data(), dTiled.data(), 1.0f, 0.5f);
+    inputsTiled.mxsa = mxsa.data();
+    inputsTiled.mxsb = mxsb.data();
+    inputsTiled.bias = bias.data();
 
-    SolveGemmCPU(problem, inputsSlow, /*elementsToValidate=*/-1, /*tryFastPath=*/false);
-    ASSERT_TRUE(tryRuntimeTiledGemm(problem, inputsFast, /*elementsToValidate=*/-1));
+    ASSERT_TRUE(tryRuntimeCanonicalGemm(problem, inputsCanonical, /*elementsToValidate=*/-1));
+    ASSERT_TRUE(tryRuntimeTiledGemm(problem, inputsTiled, /*elementsToValidate=*/-1));
 
     const auto comparison = roc::host_validation::compare(
-        roc::host_validation::TensorView::fromNative(std::span<const float>(dFast)),
-        roc::host_validation::TensorView::fromNative(std::span<const float>(dSlow)),
+        roc::host_validation::TensorView::fromNative(std::span<const float>(dTiled)),
+        roc::host_validation::TensorView::fromNative(std::span<const float>(dCanonical)),
         roc::host_validation::nearComparisonOptions(1e-3));
     EXPECT_TRUE(comparison.passed())
         << "mismatches=" << comparison.mismatches
