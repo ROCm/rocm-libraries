@@ -15,6 +15,8 @@
 #include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/ExpressionTransformations.hpp>
+#include <rocRoller/HostNumerics/HostDataGeneration.hpp>
+#include <rocRoller/HostNumerics/HostReference.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelOptions.hpp>
 #include <rocRoller/Operations/Command.hpp>
@@ -29,7 +31,6 @@
 #include "SourceMatcher.hpp"
 #include "Utilities.hpp"
 #include <common/GEMMProblem.hpp>
-#include <common/mxDataGen.hpp>
 
 namespace GEMMDriverTest
 {
@@ -121,8 +122,22 @@ namespace GEMMDriverTest
             TensorDescriptor descC(dataType, {size_t(M), size_t(N)}, "N");
             TensorDescriptor descRelu(dataType, {size_t(M), size_t(N)}, "N");
 
-            auto seed = 31415u;
-            DGenInput(seed, hostA, descA, hostB, descB, hostC, descC);
+            auto const bounded         = HostNumerics::DataInitialization{};
+            auto       generatedInputs = HostNumerics::generateGEMMInputs(descA,
+                                                                          descB,
+                                                                          descC,
+                                                                          bounded,
+                                                                          bounded,
+                                                                          bounded,
+                                                                          DataType::None,
+                                                                          DataType::None,
+                                                                          1,
+                                                                          -1.0f,
+                                                                          1.0f,
+                                                                          31415u);
+            hostA                      = HostNumerics::copyTensorStorage<T>(generatedInputs.a);
+            hostB                      = HostNumerics::copyTensorStorage<T>(generatedInputs.b);
+            hostC                      = HostNumerics::copyTensorStorage<T>(generatedInputs.c);
 
             if(setIdentity)
             {
@@ -340,18 +355,14 @@ namespace GEMMDriverTest
             }
 
             // Host result
-            std::vector<T> h_result(M * N, 0.0);
-            rocRoller::CPUMM(h_result,
-                             hostC,
-                             hostA,
-                             hostB,
-                             M,
-                             N,
-                             K,
-                             alpha,
-                             beta,
-                             gemm.transA == "T",
-                             gemm.transB == "T");
+            HostNumerics::HostReferenceProblem referenceProblem(
+                HostNumerics::hostTensorView(descA, hostA),
+                HostNumerics::hostTensorView(descB, hostB),
+                HostNumerics::hostTensorView(descC, hostC));
+            referenceProblem.alpha = alpha;
+            referenceProblem.beta  = beta;
+            auto h_result          = HostNumerics::convertHostReference<T>(
+                HostNumerics::computeHostReference(referenceProblem).view());
             // Host leaky relu
             for(size_t i = 0; i < M; i++)
             {

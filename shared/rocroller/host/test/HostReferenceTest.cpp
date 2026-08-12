@@ -1,7 +1,7 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include "client/HostReference.hpp"
+#include <rocRoller/HostNumerics/HostReference.hpp>
 
 #include <array>
 #include <bit>
@@ -18,7 +18,7 @@
 namespace
 {
     using namespace rocRoller;
-    using namespace rocRoller::Client::GEMMClient;
+    using namespace rocRoller::HostNumerics;
     using roc::host_validation::Layout;
     using roc::host_validation::ScalarType;
     using roc::host_validation::Shape;

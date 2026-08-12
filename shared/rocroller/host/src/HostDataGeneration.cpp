@@ -1,13 +1,14 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include "client/HostDataGeneration.hpp"
+#include <rocRoller/HostNumerics/HostDataGeneration.hpp>
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
 #include <limits>
+#include <string_view>
 #include <utility>
 
 #include <roc/host_validation/generation.hpp>
@@ -16,7 +17,7 @@
 #include <rocRoller/DataTypes/DataTypes_FP8.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
 
-namespace rocRoller::Client::GEMMClient
+namespace rocRoller::HostNumerics
 {
     namespace
     {
@@ -32,12 +33,6 @@ namespace rocRoller::Client::GEMMClient
         using roc::host_validation::Shape;
         using roc::host_validation::Tensor;
 
-        struct GeneratedOperand
-        {
-            Tensor                data;
-            std::optional<Tensor> scales;
-        };
-
         ptrdiff_t checkedPtrdiff(size_t value, char const* description)
         {
             if(value > static_cast<size_t>(std::numeric_limits<ptrdiff_t>::max()))
@@ -45,7 +40,7 @@ namespace rocRoller::Client::GEMMClient
             return static_cast<ptrdiff_t>(value);
         }
 
-        Layout tensorLayout(TensorDescriptor const& descriptor)
+        Layout makeTensorLayout(TensorDescriptor const& descriptor)
         {
             std::vector<ptrdiff_t> strides;
             strides.reserve(descriptor.strides().size());
@@ -73,7 +68,7 @@ namespace rocRoller::Client::GEMMClient
             }
         }
 
-        ScalarType dataScalarType(DataType type, bool scaled)
+        ScalarType makeHostScalarType(DataType type, DataTypeInterpretation interpretation)
         {
             switch(type)
             {
@@ -84,24 +79,19 @@ namespace rocRoller::Client::GEMMClient
             case DataType::BFloat16:
                 return ScalarType::BFloat16;
             case DataType::FP8:
-                return scaled ? ScalarType::Float8E4M3 : unscaledF8ScalarType(type);
+                return interpretation == DataTypeInterpretation::BlockScaled
+                           ? ScalarType::Float8E4M3
+                           : unscaledF8ScalarType(type);
             case DataType::BF8:
-                return scaled ? ScalarType::Float8E5M2 : unscaledF8ScalarType(type);
+                return interpretation == DataTypeInterpretation::BlockScaled
+                           ? ScalarType::Float8E5M2
+                           : unscaledF8ScalarType(type);
             case DataType::FP6:
                 return ScalarType::Float6E2M3;
             case DataType::BF6:
                 return ScalarType::Float6E3M2;
             case DataType::FP4:
                 return ScalarType::Float4E2M1;
-            default:
-                throw std::invalid_argument("Unsupported rocRoller host-generation data type.");
-            }
-        }
-
-        ScalarType scaleScalarType(DataType type)
-        {
-            switch(type)
-            {
             case DataType::E8M0:
                 return ScalarType::E8M0;
             case DataType::E5M3:
@@ -109,7 +99,7 @@ namespace rocRoller::Client::GEMMClient
             case DataType::E4M3:
                 return ScalarType::E4M3;
             default:
-                throw std::invalid_argument("Unsupported rocRoller host-generation scale type.");
+                throw std::invalid_argument("Unsupported rocRoller host-numerics data type.");
             }
         }
 
@@ -270,7 +260,7 @@ namespace rocRoller::Client::GEMMClient
                                   float                     maximum,
                                   uint32_t                  seed)
         {
-            auto const layout = tensorLayout(descriptor);
+            auto const layout = hostTensorLayout(descriptor);
             Tensor     source(ScalarType::Float32, layout);
             roc::host_validation::generate(
                 source.mutableView(),
@@ -297,35 +287,43 @@ namespace rocRoller::Client::GEMMClient
             return Tensor::fromStorage(type, layout, std::move(storage));
         }
 
-        GeneratedOperand generateUnscaled(TensorDescriptor const&   descriptor,
-                                          DataInitialization const& initialization,
-                                          float                     minimum,
-                                          float                     maximum,
-                                          uint32_t                  seed)
+        GeneratedTensor generateUnscaled(TensorDescriptor const&   descriptor,
+                                         DataInitialization const& initialization,
+                                         float                     minimum,
+                                         float                     maximum,
+                                         uint32_t                  seed,
+                                         bool                      includeReference)
         {
-            auto const type = dataScalarType(descriptor.dataType(), false);
+            auto const type = hostScalarType(descriptor.dataType());
             if(descriptor.dataType() == DataType::FP8 || descriptor.dataType() == DataType::BF8)
             {
-                return {
-                    generateUnscaledF8(descriptor, initialization, type, minimum, maximum, seed),
-                    std::nullopt};
+                auto data
+                    = generateUnscaledF8(descriptor, initialization, type, minimum, maximum, seed);
+                std::optional<Tensor> reference;
+                if(includeReference)
+                    reference = data.view().to(ScalarType::Float32);
+                return {std::move(data), std::nullopt, std::move(reference)};
             }
 
-            Tensor data(type, tensorLayout(descriptor));
+            Tensor data(type, hostTensorLayout(descriptor));
             roc::host_validation::generate(
                 data.mutableView(),
                 generationOptions(descriptor, initialization, type, minimum, maximum, seed));
-            return {std::move(data), std::nullopt};
+            std::optional<Tensor> reference;
+            if(includeReference)
+                reference = data.view().to(ScalarType::Float32);
+            return {std::move(data), std::nullopt, std::move(reference)};
         }
 
-        GeneratedOperand generateScaled(TensorDescriptor const&   descriptor,
-                                        DataInitialization const& initialization,
-                                        DataType                  scaleType,
-                                        size_t                    blockedDimension,
-                                        size_t                    scaleBlockSize,
-                                        float                     minimum,
-                                        float                     maximum,
-                                        uint32_t                  seed)
+        GeneratedTensor generateScaled(TensorDescriptor const&   descriptor,
+                                       DataInitialization const& initialization,
+                                       DataType                  scaleType,
+                                       size_t                    blockedDimension,
+                                       size_t                    scaleBlockSize,
+                                       float                     minimum,
+                                       float                     maximum,
+                                       uint32_t                  seed,
+                                       bool                      includeReference)
         {
             if(descriptor.dimensions() != 2)
                 throw std::invalid_argument("rocRoller MX generation requires rank-two tensors.");
@@ -334,6 +332,8 @@ namespace rocRoller::Client::GEMMClient
             if(blockedDimension >= descriptor.dimensions())
                 throw std::invalid_argument(
                     "rocRoller MX blocked dimension exceeds the tensor rank.");
+            if(scaleBlockSize == 0)
+                throw std::invalid_argument("rocRoller MX scale block size must be nonzero.");
 
             std::array<size_t, 2> dimensions{0, 1};
             std::ranges::sort(dimensions, [&](size_t first, size_t second) {
@@ -346,8 +346,9 @@ namespace rocRoller::Client::GEMMClient
                     "rocRoller MX generation requires a stride-one matrix dimension.");
 
             MxGenerationProblem problem;
-            problem.dataType  = dataScalarType(descriptor.dataType(), true);
-            problem.scaleType = scaleScalarType(scaleType);
+            problem.dataType
+                = hostScalarType(descriptor.dataType(), DataTypeInterpretation::BlockScaled);
+            problem.scaleType = hostScalarType(scaleType);
             problem.shape
                 = Shape{descriptor.size(contiguousDimension), descriptor.size(freeDimension)};
             problem.leadingDimension
@@ -362,50 +363,131 @@ namespace rocRoller::Client::GEMMClient
             auto   dataStorage = std::vector<std::byte>(result.data.storage().begin(),
                                                         result.data.storage().end());
             Tensor data        = Tensor::fromStorage(
-                result.data.type(), tensorLayout(descriptor), std::move(dataStorage));
+                result.data.type(), hostTensorLayout(descriptor), std::move(dataStorage));
 
-            auto const logicalFreeDimension = size_t{1} - blockedDimension;
-            auto const logicalFreeExtent    = descriptor.size(logicalFreeDimension);
-            auto const blockCount
-                = descriptor.size(blockedDimension) / scaleBlockSize
-                  + static_cast<size_t>(descriptor.size(blockedDimension) % scaleBlockSize != 0);
-            auto const scaleLayout
-                = blockedDimension == contiguousDimension
-                      ? Layout(Shape{logicalFreeExtent, blockCount},
-                               {checkedPtrdiff(blockCount,
-                                               "rocRoller MX scale stride exceeds ptrdiff_t."),
-                                1})
-                      : Layout(Shape{logicalFreeExtent, blockCount},
-                               {1,
-                                checkedPtrdiff(logicalFreeExtent,
-                                               "rocRoller MX scale stride exceeds ptrdiff_t.")});
-            auto   scaleStorage = std::vector<std::byte>(result.scales.storage().begin(),
-                                                         result.scales.storage().end());
-            Tensor scales
+            auto const scaleLayout  = hostScaleLayout(descriptor, blockedDimension, scaleBlockSize);
+            auto       scaleStorage = std::vector<std::byte>(result.scales.storage().begin(),
+                                                             result.scales.storage().end());
+            Tensor     scales
                 = Tensor::fromStorage(result.scales.type(), scaleLayout, std::move(scaleStorage));
-            return {std::move(data), std::move(scales)};
+            std::optional<Tensor> reference;
+            if(includeReference)
+            {
+                auto referenceStorage = std::vector<std::byte>(result.reference.storage().begin(),
+                                                               result.reference.storage().end());
+                reference             = Tensor::fromStorage(result.reference.type(),
+                                                            hostTensorLayout(descriptor),
+                                                            std::move(referenceStorage));
+            }
+            return {std::move(data), std::move(scales), std::move(reference)};
         }
+    }
 
-        GeneratedOperand generateOperand(TensorDescriptor const&   descriptor,
-                                         DataInitialization const& initialization,
-                                         DataType                  scaleType,
-                                         size_t                    blockedDimension,
-                                         size_t                    scaleBlockSize,
-                                         float                     minimum,
-                                         float                     maximum,
-                                         uint32_t                  seed)
+    roc::host_validation::ScalarType hostScalarType(DataType               type,
+                                                    DataTypeInterpretation interpretation)
+    {
+        return makeHostScalarType(type, interpretation);
+    }
+
+    std::string toString(DataInitialization const& initialization)
+    {
+        auto modeName = [](DataInitializationMode mode) -> std::string_view {
+            switch(mode)
+            {
+            case DataInitializationMode::Bounded:
+                return "Bounded";
+            case DataInitializationMode::BoundedAlternatingSign:
+                return "BoundedAlternatingSign";
+            case DataInitializationMode::Unbounded:
+                return "Unbounded";
+            case DataInitializationMode::Identity:
+                return "Identity";
+            case DataInitializationMode::Ones:
+                return "Ones";
+            case DataInitializationMode::Zeros:
+                return "Zeros";
+            case DataInitializationMode::TrigonometricFromFloat:
+                return "TrigonometricFromFloat";
+            case DataInitializationMode::NormalFromFloat:
+                return "NormalFromFloat";
+            }
+            throw std::invalid_argument("Unknown rocRoller data initialization mode.");
+        };
+
+        auto description = std::string(modeName(initialization.mode));
+        if(initialization.mode == DataInitializationMode::NormalFromFloat)
         {
-            if(scaleType == DataType::None)
-                return generateUnscaled(descriptor, initialization, minimum, maximum, seed);
-            return generateScaled(descriptor,
-                                  initialization,
-                                  scaleType,
-                                  blockedDimension,
-                                  scaleBlockSize,
-                                  minimum,
-                                  maximum,
-                                  seed);
+            description += "(" + std::to_string(initialization.normalMean) + ", "
+                           + std::to_string(initialization.normalStandardDeviation) + ")";
         }
+        return "DataInitMode(" + description + ")";
+    }
+
+    roc::host_validation::Layout hostTensorLayout(TensorDescriptor const& descriptor)
+    {
+        return makeTensorLayout(descriptor);
+    }
+
+    roc::host_validation::Layout hostScaleLayout(TensorDescriptor const& descriptor,
+                                                 size_t                  blockedDimension,
+                                                 size_t                  blockSize)
+    {
+        if(descriptor.dimensions() != 2)
+            throw std::invalid_argument("rocRoller block scales require a rank-two tensor.");
+        if(blockedDimension >= descriptor.dimensions())
+            throw std::invalid_argument("rocRoller block-scale dimension exceeds the tensor rank.");
+        if(blockSize == 0)
+            throw std::invalid_argument("rocRoller block-scale size must be nonzero.");
+
+        std::array<size_t, 2> dimensions{0, 1};
+        std::ranges::sort(dimensions, [&](size_t first, size_t second) {
+            return descriptor.stride(first) < descriptor.stride(second);
+        });
+        auto const contiguousDimension = dimensions[0];
+        if(descriptor.stride(contiguousDimension) != 1)
+            throw std::invalid_argument(
+                "rocRoller block scales require a stride-one matrix dimension.");
+
+        auto const freeDimension = size_t{1} - blockedDimension;
+        auto const freeExtent    = descriptor.size(freeDimension);
+        auto const blockCount
+            = descriptor.size(blockedDimension) / blockSize
+              + static_cast<size_t>(descriptor.size(blockedDimension) % blockSize != 0);
+
+        if(blockedDimension == contiguousDimension)
+        {
+            return Layout(
+                Shape{freeExtent, blockCount},
+                {checkedPtrdiff(blockCount, "rocRoller block-scale stride exceeds ptrdiff_t."), 1});
+        }
+        return Layout(
+            Shape{freeExtent, blockCount},
+            {1, checkedPtrdiff(freeExtent, "rocRoller block-scale stride exceeds ptrdiff_t.")});
+    }
+
+    GeneratedTensor generateHostTensor(TensorDescriptor const&             descriptor,
+                                       DataInitialization const&           initialization,
+                                       std::optional<BlockScaleGeneration> blockScale,
+                                       float                               minimum,
+                                       float                               maximum,
+                                       uint32_t                            seed,
+                                       bool                                includeReference)
+    {
+        if(!blockScale)
+            return generateUnscaled(
+                descriptor, initialization, minimum, maximum, seed, includeReference);
+        if(blockScale->type == DataType::None)
+            throw std::invalid_argument(
+                "rocRoller block-scale generation requires a scale data type.");
+        return generateScaled(descriptor,
+                              initialization,
+                              blockScale->type,
+                              blockScale->blockedDimension,
+                              blockScale->blockSize,
+                              minimum,
+                              maximum,
+                              seed,
+                              includeReference);
     }
 
     GeneratedGEMMInputs generateGEMMInputs(TensorDescriptor const&   descriptorA,
@@ -421,24 +503,26 @@ namespace rocRoller::Client::GEMMClient
                                            float                     maximum,
                                            uint32_t                  seed)
     {
-        auto generatedA = generateOperand(descriptorA,
-                                          initializationA,
-                                          scaleTypeA,
-                                          1,
-                                          scaleBlockSize,
-                                          minimum,
-                                          maximum,
-                                          seed + 1);
-        auto generatedB = generateOperand(descriptorB,
-                                          initializationB,
-                                          scaleTypeB,
-                                          0,
-                                          scaleBlockSize,
-                                          minimum,
-                                          maximum,
-                                          seed + 2);
-        auto generatedC = generateOperand(
-            descriptorC, initializationC, DataType::None, 0, 1, minimum, maximum, seed);
+        auto generatedA = generateHostTensor(
+            descriptorA,
+            initializationA,
+            scaleTypeA == DataType::None ? std::nullopt
+                                         : std::optional<BlockScaleGeneration>{BlockScaleGeneration{
+                                               scaleTypeA, 1, scaleBlockSize}},
+            minimum,
+            maximum,
+            seed + 1);
+        auto generatedB = generateHostTensor(
+            descriptorB,
+            initializationB,
+            scaleTypeB == DataType::None ? std::nullopt
+                                         : std::optional<BlockScaleGeneration>{BlockScaleGeneration{
+                                               scaleTypeB, 0, scaleBlockSize}},
+            minimum,
+            maximum,
+            seed + 2);
+        auto generatedC = generateHostTensor(
+            descriptorC, initializationC, std::nullopt, minimum, maximum, seed);
 
         return {std::move(generatedA.data),
                 std::move(generatedB.data),
