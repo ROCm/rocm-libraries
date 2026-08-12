@@ -93,20 +93,20 @@ constexpr CDNA5Config kGfx1250Config = {
 // gfx1250v0: starts from the gfx1250 values. TODO(tuning): fill in gfx1250v0's real
 // per-WMMA ratios. Kept as its own case so those numbers can be changed here without
 // touching gfx1250. Its physical facts are likewise a separate HWModel entry.
-// TODO: arch encoding {12,5,1} is a placeholder stepping value pending
-// https://github.com/ROCm/rocm-libraries/pull/10273 landing the real gfx1250v0 ArchInfo.
 constexpr CDNA5Config kGfx1250v0Config = kGfx1250Config;
 
 // Select the CDNA5-family policy for \p arch. Private to the ready queue / scheduler
 // (not shared infrastructure): each CDNA5 arch's knobs live next to the family model
 // that consumes them. gfx1250 is the default for any unlisted arch (the pipeline only
 // runs the CDNA5 ready queue on CDNA5-family archs).
+//
+// Keyed off the shared kArchKey* constants (HWModel.hpp) so this policy table and the
+// HWModel fact table cannot be restepped independently.
 inline const CDNA5Config& cdna5ConfigForArch(const std::array<int, 3>& arch) {
-    const int key = arch[0] * 10000 + arch[1] * 100 + arch[2];
-    switch (key) {
-        case 12 * 10000 + 5 * 100 + 1:  // gfx1250v0
+    switch (archKey(arch)) {
+        case kArchKeyGfx1250v0:
             return kGfx1250v0Config;
-        case 12 * 10000 + 5 * 100 + 0:  // gfx1250
+        case kArchKeyGfx1250:
         default:
             return kGfx1250Config;
     }
@@ -1116,7 +1116,10 @@ DAGNode* CDNA5ReadyQueue::extractForcedBarrier() {
 int CDNA5ReadyQueue::computeWmmaWindowsNeeded(int dsLoadCount) const {
     const int maxDsPerWmmaWindow = dsReadPerWmma();
     int wmmaWindowsNeeded = (dsLoadCount + maxDsPerWmmaWindow - 1) / maxDsPerWmmaWindow;
-    if (dsLoadCount > dsReadQueueDepth()) {
+    // Depth 0 means the arch has no modeled LDS return queue, so there is no drain
+    // to account for. Guarding here matches onInit(), which already skips the same
+    // ratio when the depth is zero.
+    if (dsReadQueueDepth() > 0 && dsLoadCount > dsReadQueueDepth()) {
         const float cyclePerDs = (float)dsReadThrottleLatency() / (float)dsReadQueueDepth();
         const float cyclesNeeded = cyclePerDs * (dsLoadCount - dsReadQueueDepth());
         const float baseWindows =

@@ -49,7 +49,6 @@ TEST(HWModel, Gfx1250KnownDefaults) {
     EXPECT_EQ(hw.barrier.jumpOverheadCycles, 6);
 
     EXPECT_EQ(hw.coexec.transToNonCoreSide, 1);
-    EXPECT_TRUE(hw.coexec.hwHandlesTransToCoreSide);
     EXPECT_EQ(hw.coexec.maxSlotBudget, 18);
 }
 

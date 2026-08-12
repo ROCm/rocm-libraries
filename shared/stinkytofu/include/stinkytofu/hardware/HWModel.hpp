@@ -53,9 +53,12 @@ struct HWModel {
     /// instruction's HwInstDesc::coIssueWindow bitmask at runtime; only the
     /// arch-level rules live here.
     struct Coexec {
-        /// TRANS -> TRANS and TRANS -> XDL WMMA spacing.
+        /// TRANS -> TRANS and TRANS -> XDL WMMA spacing. Only the non-core-side
+        /// direction is modeled: on every arch here the hardware interlocks the
+        /// core-side one. An arch that needs software spacing there has to add
+        /// both the field and the code in InsertCoexecHazardPass that reads it -
+        /// carrying a flag no pass consults would only look like coverage.
         int transToNonCoreSide;
-        bool hwHandlesTransToCoreSide;
         /// Bounds the backward scan for co-exec hazards.
         int maxSlotBudget;
     };
@@ -80,13 +83,30 @@ struct HWModel {
 // in that pass (default member initializers of a map value type). See the note in
 // InsertDelayAluPass.cpp.
 
-/// Look up the hardware model for \p arch (the {major, minor, stepping} triple
-/// from GemmTileConfig).
+/// Collapse a {major, minor, stepping} arch triple to a switchable key.
 ///
-/// Keyed on the arch triple rather than GfxArchID because the triple covers archs
-/// that are tuned separately but not registered in Config/Archs.def (gfx1250v0,
-/// {12,5,1}); getGfxArchID() cannot round-trip those. gfx1250 is the fallback for
-/// any unlisted arch.
+/// Keyed on the triple rather than GfxArchID because the triple covers archs that
+/// are tuned separately but not registered in Config/Archs.def (gfx1250v0);
+/// getGfxArchID() cannot round-trip those.
+///
+/// This helper and the kArchKey* constants below are the single definition of the
+/// encoding. CDNA5.hpp's cdna5ConfigForArch() selects per-arch scheduling *policy*
+/// off the same keys that hwModelForArch() selects hardware *facts* off, and the
+/// two must stay paired: both fall back to gfx1250 for an unlisted arch, so a
+/// mismatch would silently combine one arch's policy with another's facts rather
+/// than failing. Adding or restepping an arch is therefore a one-line change here.
+constexpr int archKey(const std::array<int, 3>& arch) {
+    return arch[0] * 10000 + arch[1] * 100 + arch[2];
+}
+
+constexpr int kArchKeyGfx1250 = archKey({12, 5, 0});
+// TODO: stepping 1 is a placeholder pending
+// https://github.com/ROCm/rocm-libraries/pull/10273 landing the real gfx1250v0
+// ArchInfo. Changing it here retargets both the HWModel and the CDNA5 policy table.
+constexpr int kArchKeyGfx1250v0 = archKey({12, 5, 1});
+
+/// Look up the hardware model for \p arch (the {major, minor, stepping} triple
+/// from GemmTileConfig). gfx1250 is the fallback for any unlisted arch.
 STINKYTOFU_EXPORT const HWModel& hwModelForArch(const std::array<int, 3>& arch);
 
 }  // namespace stinkytofu

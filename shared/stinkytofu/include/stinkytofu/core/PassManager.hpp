@@ -144,10 +144,12 @@ class STINKYTOFU_EXPORT PassContext {
     /// HWModel.hpp, which would pull the asm IR into every PassManager consumer.
     ///
     /// Safe to call on a PassContext that never had setGemmTileConfig() called:
-    /// many unit tests construct a bare `PassContext ctx;`, and
-    /// EstimateAsmCyclesPass builds one internally. Those get the default model
-    /// rather than a null dereference, matching how getWavefrontSize() returns 0
-    /// instead of failing.
+    /// many unit tests construct a bare `PassContext ctx;` and then run a pass
+    /// against it. Those get the default model rather than a null dereference,
+    /// matching how getWavefrontSize() returns 0 instead of failing. Contexts the
+    /// pipeline builds are always configured first - setGemmTileConfig() is what
+    /// caches the pointer, and it aborts outright on an arch it cannot read - so
+    /// the fallback exists for those bare test contexts, not for production paths.
     const HWModel& getHWModel() const;
 
     void setPassFeatureConfig(const PassFeatureConfig& config) {

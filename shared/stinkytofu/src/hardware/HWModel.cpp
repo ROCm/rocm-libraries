@@ -30,7 +30,6 @@ constexpr HWModel kGfx1250Model = {
     .coexec =
         {
             .transToNonCoreSide = 1,
-            .hwHandlesTransToCoreSide = true,
             .maxSlotBudget = 18,
         },
     .hazards =
@@ -49,11 +48,10 @@ constexpr HWModel kGfx1250v0Model = kGfx1250Model;
 }  // namespace
 
 const HWModel& hwModelForArch(const std::array<int, 3>& arch) {
-    const int key = arch[0] * 10000 + arch[1] * 100 + arch[2];
-    switch (key) {
-        case 12 * 10000 + 5 * 100 + 1:  // gfx1250v0
+    switch (archKey(arch)) {
+        case kArchKeyGfx1250v0:
             return kGfx1250v0Model;
-        case 12 * 10000 + 5 * 100 + 0:  // gfx1250
+        case kArchKeyGfx1250:
         default:
             return kGfx1250Model;
     }
