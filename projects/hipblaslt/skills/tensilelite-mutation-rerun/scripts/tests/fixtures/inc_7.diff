@@ -1,0 +1,13 @@
+diff --git a/projects/hipblaslt/tensilelite/Tensile/Common/Utilities.py b/projects/hipblaslt/tensilelite/Tensile/Common/Utilities.py
+index 685ce17c5e5..b9eb22740c3 100644
+--- a/projects/hipblaslt/tensilelite/Tensile/Common/Utilities.py
++++ b/projects/hipblaslt/tensilelite/Tensile/Common/Utilities.py
+@@ -218,7 +218,7 @@ class SpinnyThing:
+     def increment(self, value=1):
+         sys.stdout.write("\b" + self.chars[self.index])
+         sys.stdout.flush()
+-        self.index = (self.index + 1) % len(self.chars)
++        self.index = (self.index - 1) % len(self.chars)
+ 
+     def finish(self):
+         sys.stdout.write("\b*\n")
