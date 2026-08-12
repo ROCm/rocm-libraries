@@ -320,6 +320,8 @@ class ORIGAMI_EXPORT heuristics_database_t {
    * Writes directly to the fast lookup map. Intended for initialization only.
    */
   void add_hand_optimized_efficiency(hand_optimized_kernel_key_t key, double main_loop_efficiency);
+
+  /**
    * @brief Overwrite the base default parameter set used as the starting point
    * for every lookup. Intended for offline tuning (e.g. a GA driving the
    * Python bindings): set params, rank configs, repeat. NOT thread-safe; call
