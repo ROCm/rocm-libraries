@@ -21,17 +21,21 @@ hipDNN](#6-verify--prove-its-hipdnn).
 |-------|--------------------|-----------|
 | **PyTorch + ROCm SDK base** | a TheRock ROCm nightly `pip` wheel set (torch + bundled `_rocm_sdk_libraries_gfx1151`) | `pip install` into a venv |
 | **Engine plugin** (`libhip_kernel_provider.so` + the AOT `.co`/`family.json` catalog) | `hip-kernel-provider`, on the **catalog branch** | superbuild preset |
-| **Frontend bindings** (`hipdnn_frontend_python.abi3.so`) | `projects/hipdnn/python/frontend_bindings`, on the **injection branch** | standalone CMake |
+| **Frontend bindings** (`hipdnn_frontend_python.abi3.so`) | `projects/hipdnn/python/frontend_bindings`, on **PR #10600's branch** (`users/sareeder/hipdnn-python-graph-bindings`) | standalone CMake, against an SDPA-ON frontend |
 | **Injection package** (`hipdnn_torch/`) | this directory, on the **injection branch** | run in place (no build) |
 
-The two branches stay **separate on purpose** and are combined only at runtime through
-`HIPDNN_TORCH_PROVIDER_SO`:
+The three checkouts stay **separate on purpose** and are combined only at runtime through
+`HIPDNN_TORCH_PROVIDER_SO` + the frontend on `PYTHONPATH`:
 
 - `users/brpepers/aot-catalog-engine` — the provider/engine + catalog. Never merged into
   the injection branch.
-- `users/brpepers/hipdnn-torch-injection` — the frontend-binding commits **and** this
-  Python package. (The `frontend_bindings/` commits are kept disjoint from the
-  package commits so they can lift into a standalone frontend PR later.)
+- `users/sareeder/hipdnn-python-graph-bindings` (**PR #10600**) — the canonical Python
+  graph bindings (rmsnorm / layernorm / sdpa / `NormFwdPhase`). This injection branch used
+  to carry its own copies of those bindings; they were **dropped** in favor of #10600, so
+  check that branch out for the `frontend_bindings/` you build in §3b.
+- `users/brpepers/hipdnn-torch-injection` — **only** this Python package now (no
+  frontend-binding commits). It calls the standard binding API #10600 exposes (e.g.
+  `SdpaAttributes.set_attn_scale(float)`, not a custom `set_attn_scale_value`).
 
 > [!IMPORTANT]
 > The single hardest lesson of this bring-up: **the frontend binds to exactly one
@@ -65,8 +69,9 @@ The two branches stay **separate on purpose** and are combined only at runtime t
 Pick your two worktrees/checkouts and export their roots — the rest of this doc uses these:
 
 ```bash
-export CAT=/path/to/worktree/aot-catalog-engine        # provider/catalog branch
-export INJ=/path/to/worktree/hipdnn-torch-injection    # frontend + injection branch
+export CAT=/path/to/worktree/aot-catalog-engine        # provider/catalog branch (also the SDPA-ON frontend)
+export INJ=/path/to/worktree/hipdnn-torch-injection    # this Python injection package
+export FE=/path/to/worktree/hipdnn-python-graph-bindings # PR #10600 (users/sareeder/...) -- the bindings
 export VENV=~/aot-ab-venv
 export SDKLIB=$(python -c "import glob,site; print(glob.glob(site.getsitepackages()[0]+'/_rocm_sdk_libraries_gfx1151/lib')[0])")
 ```
@@ -81,9 +86,21 @@ build — see the README's "Getting a provider" section):
 
 ```bash
 cd "$CAT"
-cmake --preset hip-kernel-provider   # or add hip-kernel-provider to ROCM_LIBS_ENABLE_COMPONENTS
+cmake --preset hip-kernel-provider -DHIPDNN_ENABLE_SDPA=ON   # SDPA ON here -- required, see note
 cmake --build build
 ```
+
+> [!NOTE]
+> **This same configure also builds the hipDNN frontend the bindings later link, so SDPA
+> must be turned on here.** `HIPDNN_ENABLE_SDPA` is the one project-wide feature flag
+> (`projects/hipdnn/CMakeLists.txt`, default **OFF**) and **no CMake preset forwards it** —
+> pass `-DHIPDNN_ENABLE_SDPA=ON` explicitly at *this* configure, before building the
+> bindings (§3b), so the exported `hipdnn_frontendConfig.cmake` carries
+> `set(HIPDNN_ENABLE_SDPA ON)` and the bindings inherit it. Skip it and the bindings
+> silently compile `g.sdpa` / `SdpaAttributes` out. Verify it took:
+> ```bash
+> grep -r HIPDNN_ENABLE_SDPA "$CAT"/build/**/hipdnn_frontendConfig.cmake   # expect: set(HIPDNN_ENABLE_SDPA ON)
+> ```
 
 Products you care about:
 
@@ -111,37 +128,39 @@ $CAT/build/lib/hipdnn_plugins/engines/arch_content/aot_catalog/gfx1151 # the 7-f
 > nm -C "$CAT/build/lib/hipdnn_plugins/engines/libhip_kernel_provider.so" | grep -iE 'layernorm|conv|pointwise|matmul|rmsnorm|sdpa' | head
 > ```
 
-### 3b. Frontend bindings (on `$INJ`)
+### 3b. Frontend bindings (on `$FE` — PR #10600)
 
-The committed bindings (`recover rmsnorm/sdpa`, `add layernorm`) reference frontend
-surface — `BehaviorNote`, the RFC-0016 `is_override_shape_enabled` graph attribute — that
-is **newer than what a several-months-old nightly's header-only frontend provides**.
-Building against too old a prefix fails at compile (`isKnownBehaviorNote` /
-`BehaviorNote` not declared). So build the extension against a **recent hipDNN source /
-build tree**, not the pip nightly's stale artifact:
+The Python graph bindings come from **PR #10600**
+(`users/sareeder/hipdnn-python-graph-bindings`), *not* this injection branch — the
+injection branch dropped its own copies in favor of #10600. Check that branch out at `$FE`
+and build its `frontend_bindings/`. It references recent frontend surface — `BehaviorNote`,
+the RFC-0016 `is_override_shape_enabled` graph attribute — that is **newer than what a
+several-months-old nightly's header-only frontend provides**, so build against the
+**SDPA-ON hipDNN build tree from §3a** (`$CAT/build`), not the pip nightly's stale
+artifact:
 
 ```bash
-cd "$INJ/projects/hipdnn/python/frontend_bindings"
+cd "$FE/projects/hipdnn/python/frontend_bindings"
 cmake -S . -B build -GNinja \
-  -DHIPDNN_BINDINGS_ENABLE_SDPA=ON \
   -DCMAKE_PREFIX_PATH="$CAT/build;$VENV/lib/python3.12/site-packages/_rocm_sdk_libraries_gfx1151" \
   -DPython_EXECUTABLE="$VENV/bin/python"
 cmake --build build
 # product: build/hipdnn_frontend_python.abi3.so
 ```
 
-Two flags that cost hours if you get them wrong:
+Two things that cost hours if you get them wrong:
 
-- **`-DHIPDNN_BINDINGS_ENABLE_SDPA=ON`** (note the `BINDINGS_` prefix). The `g.sdpa` /
-  `SdpaAttributes` surface is `#ifdef HIPDNN_ENABLE_SDPA`-guarded. You **cannot** flip it
-  with `-DHIPDNN_ENABLE_SDPA=ON`, because `hipdnn_frontendConfig.cmake` does
-  `set(HIPDNN_ENABLE_SDPA OFF)` and shadows a same-named option. The CMakeLists exposes a
-  distinct `HIPDNN_BINDINGS_ENABLE_SDPA` option that maps to the define — use that.
+- **SDPA is inherited from the frontend, not a bindings flag.** The `g.sdpa` /
+  `SdpaAttributes` surface is `#ifdef HIPDNN_ENABLE_SDPA`-guarded. #10600's bindings expose
+  **no** SDPA option of their own — they pick it up automatically because §3a built the
+  frontend with `-DHIPDNN_ENABLE_SDPA=ON`, which propagates through the linked
+  `hipdnn_frontend` target and its exported `hipdnn_frontendConfig.cmake`. If `g.sdpa` is
+  missing after a rebuild, you skipped the flag in §3a — fix it there, not here.
 - **`CMAKE_PREFIX_PATH` ordering.** Put the fresh hipDNN build tree (`$CAT/build`, which
   exports `hipdnn_frontendConfig.cmake` / `hipdnn_backendConfig.cmake` for the just-built
-  headers) **before** the pip SDK prefix (which supplies `hipConfig.cmake`). First match
-  wins; if the stale SDK's frontend config is found first, the build fails on the missing
-  new surface.
+  headers *with SDPA ON*) **before** the pip SDK prefix (which supplies `hipConfig.cmake`).
+  First match wins; if the stale SDK's frontend config is found first, the build fails on
+  the missing new surface **and** you lose the SDPA define.
 
 ### 3c. Injection package (on `$INJ`)
 
@@ -194,7 +213,7 @@ export HIPDNN_TORCH_PROVIDER_SO="$PROV"
 # rocKE kernels, so we want every routed op served by rocKE, not "whatever hipDNN picks."
 # For real-model perf later you'd NOT pin this (see §8). See also reference on engine selection.
 export HIPDNN_TORCH_ENGINE=AOT_CATALOG_ENGINE
-export HIPDNN_TORCH_FRONTEND_DIR="$INJ/projects/hipdnn/python/frontend_bindings/build"
+export HIPDNN_TORCH_FRONTEND_DIR="$FE/projects/hipdnn/python/frontend_bindings/build"
 # Point at torch's bundled backend (swapped-in develop backend per §4, or a new-enough nightly):
 export HIPDNN_TORCH_BACKEND_GLOB="$SDKLIB/libhipdnn_backend.so"
 
@@ -346,7 +365,7 @@ auto-tuned rules) when you move to honest full-model performance comparisons.
 | Symptom | Cause | Fix | § |
 |---------|-------|-----|---|
 | `provider_ready()==True` but layernorm/silu/gelu/conv2d never route | pointed at the 4-family `engines/aot_catalog` tree | set `HIPDNN_AOT_CATALOG_DIR` to `arch_content/aot_catalog` | 3a, 5 |
-| SDPA surface missing after rebuild | used `-DHIPDNN_ENABLE_SDPA` (shadowed) | use `-DHIPDNN_BINDINGS_ENABLE_SDPA=ON` | 3b |
+| SDPA surface (`g.sdpa`/`SdpaAttributes`) missing after rebuild | frontend built SDPA-OFF, so #10600's bindings compile it out | build the frontend with `-DHIPDNN_ENABLE_SDPA=ON` in §3a; it propagates to the bindings via the exported config | 3a, 3b |
 | Frontend build fails on `BehaviorNote`/`isKnownBehaviorNote` | frontend prefix too old | put `$CAT/build` first on `CMAKE_PREFIX_PATH` | 3b |
 | `undefined symbol: hipdnnBackend...GraphAndPlan_ext` | torch's bundled backend too old | new-enough nightly, or swap backend | 4 |
 | `HIPDNN_ATTR_UNKNOWN` (is_override_shape_enabled) | two backends, old torch one wins | swap torch's bundled backend | 4 |
