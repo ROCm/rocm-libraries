@@ -921,6 +921,7 @@ if(WIN32)
 endif()
 
 target_include_directories(MIOpen SYSTEM PUBLIC $<BUILD_INTERFACE:${HALF_INCLUDE_DIR}>)
+
 # Workaround : change in rocm-cmake was causing linking error so had to add ${CMAKE_DL_LIBS}
 #               We can remove ${CMAKE_DL_LIBS} once root cause is identified.
 target_link_libraries(MIOpen PRIVATE ${CMAKE_DL_LIBS} Threads::Threads BZip2::BZip2)
@@ -1023,8 +1024,8 @@ endif()
 #######################################
 if(MIOPEN_ENABLE_SQLITE)
     # MIOpen depends on SQLite
-    target_link_libraries(MIOpen PRIVATE SQLite::SQLite3)
-    target_link_libraries(MIOpen INTERFACE  $<BUILD_INTERFACE:SQLite::SQLite3>)
+    target_link_libraries(MIOpen PRIVATE SQLite3::SQLite3)
+    target_link_libraries(MIOpen INTERFACE  $<BUILD_INTERFACE:SQLite3::SQLite3>)
 endif()
 ############################################################
 

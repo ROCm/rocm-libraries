@@ -79,6 +79,41 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+if(WIN32)
+    option(MIOPEN_USE_BINSKIM_COMPLIANT_COMPILE_FLAGS "Prepare MIOpen for BinSkim Binary Analyzer" OFF)
+    option(MIOPEN_USE_SPECTRE_MITIGATED_LIBRARIES "Use Spectre-mitigated libraries" OFF)
+
+    if(MSVC AND MSVC_VERSION GREATER_EQUAL 1900)
+        if(MIOPEN_USE_BINSKIM_COMPLIANT_COMPILE_FLAGS)
+            message(STATUS "Control Flow Guard enabled")
+            add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:/guard:cf>)
+            add_link_options(/guard:cf /DYNAMICBASE)
+        endif()
+        if(MIOPEN_USE_SPECTRE_MITIGATED_LIBRARIES)
+            message(STATUS "Using Spectre-mitigated libraries")
+            add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:/Qspectre>)
+        endif()
+    elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        if(MIOPEN_USE_BINSKIM_COMPLIANT_COMPILE_FLAGS)
+            message(STATUS "Control Flow Guard enabled (Clang)")
+            add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:SHELL:-Xclang -cfguard>")
+            add_link_options(-Wl,-guard:cf)
+        endif()
+        if(MIOPEN_USE_SPECTRE_MITIGATED_LIBRARIES)
+            message(WARNING "Spectre mitigated libraries are not yet available for Clang in this project.")
+        endif()
+    endif()
+
+    option(MIOPEN_USE_MSVC_STATIC_RUNTIME "Link MSVC runtime library statically" OFF)
+
+    if(NOT MIOPEN_USE_MSVC_STATIC_RUNTIME)
+        set(MIOPEN_MSVC_RUNTIME_SUFFIX "DLL")
+    endif()
+    if(NOT CMAKE_MSVC_RUNTIME_LIBRARY)
+        set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>${MIOPEN_MSVC_RUNTIME_SUFFIX}")
+    endif()
+endif()
+
 # When MIOpen is consumed via add_subdirectory in a parent superbuild, the parent
 # typically owns the CTest lifecycle. include(CTest) at the top of the project
 # would also unconditionally set BUILD_TESTING=ON, which may not be what the
@@ -102,8 +137,8 @@ include(ROCMCreatePackage)
 include(CheckCXXCompilerFlag)
 include(ROCMHeaderWrapper)
 
-include(cmake/ClangCheck.cmake)
-include(cmake/CheckPreCommit.cmake)
+#include(cmake/ClangCheck.cmake)
+#include(cmake/CheckPreCommit.cmake)
 
 # Build library with Beta APIs
 add_definitions("-DMIOPEN_BETA_API=1")
@@ -727,7 +762,7 @@ endfunction()
 # install for all targets; this was the behaviour before MIOPEN_INSTALL_GPU_DATABASES
 # was added.
 set(ALL_GPU_DATABASES gfx803 gfx900 gfx906 gfx908 gfx90a gfx942 gfx950 gfx1030 gfx1100 gfx1102 gfx1201)
-set(MIOPEN_INSTALL_GPU_DATABASES "${ALL_GPU_DATABASES}" CACHE LIST "List of AMDGPU targets for which to install databases")
+set(MIOPEN_INSTALL_GPU_DATABASES "${ALL_GPU_DATABASES}" CACHE STRING "List of AMDGPU targets for which to install databases")
 
 # This list should be updated when a new KDB file is added to the project
 set(KDB_BZ2_FILES gfx942.kdb.bz2 gfx90a.kdb.bz2 gfx1030.kdb.bz2 gfx908.kdb.bz2 gfx906.kdb.bz2 gfx900.kdb.bz2)

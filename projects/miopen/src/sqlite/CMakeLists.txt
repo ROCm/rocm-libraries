@@ -34,7 +34,7 @@ target_compile_options(sqlite_memvfs PRIVATE
         $<$<CXX_COMPILER_ID:Clang>:-Wno-everything>
         $<$<CXX_COMPILER_ID:GNU>:-w>)
 
-target_link_libraries(sqlite_memvfs PRIVATE SQLite::SQLite3)
+target_link_libraries(sqlite_memvfs PRIVATE SQLite3::SQLite3)
 # set_target_properties(
 #     sqlite_memvfs
 #     PROPERTIES
