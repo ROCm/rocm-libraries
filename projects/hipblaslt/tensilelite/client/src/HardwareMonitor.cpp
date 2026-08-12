@@ -405,46 +405,17 @@ namespace TensileLite
                     // multi_XCD
                     auto status = amdsmi_get_gpu_metrics_info(m_processorHandles[m_smiDeviceIndex],
                                                               &gpuMetrics);
-                    bool anyGfxclkValid = false;
                     if(status == AMDSMI_STATUS_SUCCESS)
                     {
                         uint64_t sysclkSum = 0;
                         for(uint32_t xcd = 0; xcd < m_XCDCount; xcd++)
                         {
-                            // UINT16_MAX means the metric isn't populated on this part
-                            // (e.g. single-XCD APUs like gfx1151).
-                            if(gpuMetrics.current_gfxclks[xcd] == UINT16_MAX)
-                            {
-                                continue;
-                            }
-                            anyGfxclkValid = true;
                             m_SYSCLK_sum[xcd] += gpuMetrics.current_gfxclks[xcd] * cMhzToHz;
                             m_SYSCLK_array[xcd].push_back(gpuMetrics.current_gfxclks[xcd]
                                                           * cMhzToHz);
                             sysclkSum += gpuMetrics.current_gfxclks[xcd] * cMhzToHz;
                         }
-                        if(anyGfxclkValid)
-                        {
-                            m_clockValues[i] += sysclkSum;
-                        }
-                    }
-                    if(status != AMDSMI_STATUS_SUCCESS || !anyGfxclkValid)
-                    {
-                        // Fall back to amdsmi_get_clk_freq() when gpu_metrics doesn't
-                        // report a usable value, so single-XCD parts still get a real
-                        // clock-sys reading instead of a constant sentinel.
-                        auto freqStatus = amdsmi_get_clk_freq(
-                            m_processorHandles[m_smiDeviceIndex], m_clockMetrics[i], &freq);
-                        uint64_t clockFreq = getValidatedFrequency(freq);
-                        if(freqStatus != AMDSMI_STATUS_SUCCESS
-                          || clockFreq == std::numeric_limits<uint64_t>::max())
-                        {
-                            m_clockValues[i] = std::numeric_limits<uint64_t>::max();
-                        }
-                        else
-                        {
-                            m_clockValues[i] += clockFreq;
-                        }
+                        m_clockValues[i] += sysclkSum;
                     }
 #else
                     // XCD0
