@@ -37,6 +37,11 @@ def supportsUserSgprKernargPreload(rocmVersion):
 
     The directive is supported from ROCm 6 build 32650 onwards, and by every
     later major release regardless of its build number.
+
+    The 6.x arm still keys off the build number, so a locally built ROCm 6.x
+    toolchain reporting a low build (for example, 6.4.0) is treated as
+    unsupported. From the version alone, that is indistinguishable from a
+    genuine pre-32650 toolchain.
     """
     return rocmVersion.major > 6 or (
         rocmVersion.major == 6 and rocmVersion.patch >= 32650

@@ -24,6 +24,9 @@ def _rocm_version(major, patch):
     [
         (5, 99999, False),
         (6, 32649, False),
+        # A locally built ROCm 6.x reporting a low build remains unsupported;
+        # see supportsUserSgprKernargPreload's docstring for why.
+        (6, 0, False),
         (6, 32650, True),
         (6, 40000, True),
         # ROCm 7+ always supports the directive, including builds whose patch
