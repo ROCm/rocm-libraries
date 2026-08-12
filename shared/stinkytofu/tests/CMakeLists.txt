@@ -205,6 +205,9 @@ if(BUILD_SHARED_LIBS)
     add_executable(api_tests
         ${TEST_MAIN}
         ${CMAKE_CURRENT_SOURCE_DIR}/api/ApiExportTest.cpp
+        # Address identity of the per-arch HWModel objects. Meaningful only against
+        # the shared lib; the unit_tests copy links statically and cannot fail.
+        ${CMAKE_CURRENT_SOURCE_DIR}/api/HWModelIdentityTest.cpp
     )
     target_link_libraries(api_tests PRIVATE stinkytofu-warnings)
     target_link_libraries(api_tests PUBLIC
