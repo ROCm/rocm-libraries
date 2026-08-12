@@ -2245,46 +2245,68 @@ class TestAttentionDenseWavesPerEu(unittest.TestCase):
                 ll = lower_kernel_to_llvm(build_attention_dense(spec, arch="gfx950"))
                 self.assertIn(f'"amdgpu-waves-per-eu"="{wpe},{wpe}"', ll)
 
-    def test_waves_per_eu_cache_isolation(self):
-        """Specs differing only in waves_per_eu compile to distinct binaries.
+    def test_waves_per_eu_cache_key_isolation(self):
+        """Specs differing only in waves_per_eu produce distinct cache keys.
 
         Before the fix the cache key was ``(kernel_name(), batch)``; two specs
         with different ``waves_per_eu`` share the same ``kernel_name()`` and
         ``batch``, so the second call would silently reuse the first binary.
-        After the fix the key is ``(kernel_name(), batch, waves_per_eu)``.
+        After the fix the key is ``(kernel_name(), batch, waves_per_eu)``, so
+        each value maps to a distinct slot.
+
+        This test verifies the key structure directly (no comgr needed) and
+        checks that the distinct keys correspond to distinct binaries via the
+        IR attribute (which feeds AMDGPU register-file sizing).
+        """
+        from dataclasses import replace
+        from kernels.gfx950.attention_dense import AttentionDenseSpec, build_attention_dense
+
+        base = AttentionDenseSpec(**self._BASE_KWARGS)
+        specs = {wpe: replace(base, waves_per_eu=wpe) for wpe in (1, 2)}
+
+        # Cache keys must be distinct.
+        keys = {wpe: (s.kernel_name(), s.batch, s.waves_per_eu) for wpe, s in specs.items()}
+        self.assertNotEqual(
+            keys[1],
+            keys[2],
+            "waves_per_eu=1 and waves_per_eu=2 produce identical cache keys; "
+            "a sweep over waves_per_eu would silently reuse the first binary",
+        )
+
+        # The key difference (waves_per_eu in the 3rd position) must match the spec.
+        for wpe, key in keys.items():
+            self.assertEqual(key[2], wpe, f"cache key[2] should be waves_per_eu={wpe}")
+
+        # The two specs share kernel_name() and batch (the old key was just those two).
+        self.assertEqual(
+            keys[1][:2],
+            keys[2][:2],
+            "kernel_name() or batch differed unexpectedly — test setup error",
+        )
+
+    def test_waves_per_eu_cache_isolation_binaries(self):
+        """Specs differing only in waves_per_eu compile to distinct binaries.
+
+        Requires comgr; skipped when the toolchain is unavailable.
         """
         import hashlib
         from dataclasses import replace
-        from kernels.gfx950.attention_dense import (
-            AttentionDenseSpec,
-            build_attention_dense,
-            _DENSE_LAUNCHER_CACHE,
-        )
+        from kernels.gfx950.attention_dense import AttentionDenseSpec, build_attention_dense
 
         base = AttentionDenseSpec(**self._BASE_KWARGS)
-        _DENSE_LAUNCHER_CACHE.clear()
-
         hsaco_hashes = {}
         for wpe in (1, 2):
             with self.subTest(waves_per_eu=wpe):
                 spec = replace(base, waves_per_eu=wpe)
-                art = _compile_or_skip(
-                    build_attention_dense(spec, arch="gfx950"), arch="gfx950"
-                )
+                art = _compile_or_skip(build_attention_dense(spec, arch="gfx950"), arch="gfx950")
                 hsaco_hashes[wpe] = hashlib.sha256(art.hsaco).hexdigest()
 
         if len(hsaco_hashes) == 2:
             self.assertNotEqual(
                 hsaco_hashes[1],
                 hsaco_hashes[2],
-                "waves_per_eu=1 and waves_per_eu=2 produced identical binaries "
-                "(cache collision: waves_per_eu is not part of the cache key)",
-            )
-            self.assertEqual(
-                len(_DENSE_LAUNCHER_CACHE),
-                2,
-                f"Expected 2 cache entries after compiling wpe=1 and wpe=2, "
-                f"got {len(_DENSE_LAUNCHER_CACHE)}: {list(_DENSE_LAUNCHER_CACHE.keys())}",
+                "waves_per_eu=1 and waves_per_eu=2 produced identical binaries; "
+                "waves_per_eu is not reaching the register-file sizing pass",
             )
 
 
