@@ -8,7 +8,7 @@ Public API::
 
     import hipdnn_torch
     hipdnn_torch.enable_logging()          # optional: see each native fallback
-    hipdnn_torch.install()                 # patch F.linear / F.rms_norm / F.sdpa
+    hipdnn_torch.install()                 # patch linear/rmsnorm/sdpa/layernorm/silu/gelu/conv2d
     ...                                    # run your model
     print(hipdnn_torch.report())           # per-shape census + why calls fell back
     hipdnn_torch.uninstall()
@@ -24,7 +24,10 @@ misconfigured environment surfaces a clear :class:`~hipdnn_torch.bootstrap.Boots
 
 import logging
 
+from .activation import GeluOverride, SiluOverride
 from .bootstrap import BootstrapError, bootstrap, is_bootstrapped
+from .conv import Conv2dFpropOverride
+from .layernorm import LayerNormOverride
 from .linear import LinearOverride
 from .rmsnorm import RmsNormOverride
 from .sdpa import SdpaOverride
@@ -37,14 +40,26 @@ _OVERRIDES = {
     "linear": LinearOverride(),
     "rmsnorm": RmsNormOverride(),
     "sdpa": SdpaOverride(),
+    "layernorm": LayerNormOverride(),
+    "silu": SiluOverride(),
+    "gelu": GeluOverride(),
+    "conv2d": Conv2dFpropOverride(),
 }
 
 _ALL = tuple(_OVERRIDES)
 
 __all__ = [
-    "install", "uninstall", "reset", "report", "census",
-    "enable_logging", "provider_ready", "overrides",
-    "BootstrapError", "bootstrap", "is_bootstrapped",
+    "install",
+    "uninstall",
+    "reset",
+    "report",
+    "census",
+    "enable_logging",
+    "provider_ready",
+    "overrides",
+    "BootstrapError",
+    "bootstrap",
+    "is_bootstrapped",
 ]
 
 
@@ -59,8 +74,9 @@ def _selected(ops):
 
 def install(ops=_ALL) -> None:
     """Patch the selected functionals (default: all of ``linear``, ``rmsnorm``,
-    ``sdpa``). Triggers the one-time bootstrap; raises :class:`BootstrapError` if
-    the provider/backend/frontend cannot be discovered."""
+    ``sdpa``, ``layernorm``, ``silu``, ``gelu``, ``conv2d``). Triggers the one-time
+    bootstrap; raises :class:`BootstrapError` if the provider/backend/frontend
+    cannot be discovered."""
     for name in _selected(ops):
         _OVERRIDES[name].install()
 
