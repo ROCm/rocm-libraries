@@ -45,6 +45,16 @@ namespace TensileLite
         * clock domain is power-gated). Exposed for unit testing. */
         uint64_t getValidatedFrequency(const amdsmi_frequencies_t& freq);
 
+#if AMDSMI_LIB_VERSION_MAJOR >= 25
+        /** Fills perXCDHz with gpu_metrics' per-XCD gfx clocks, converted to Hz.
+        * Returns false if the device does not populate them (UINT16_MAX sentinel,
+        * as on single-XCD APUs), in which case the caller must fall back to
+        * amdsmi_get_clk_freq(). Exposed for unit testing. */
+        bool getValidatedGfxClocks(const amdsmi_gpu_metrics_t& metrics,
+                                   uint16_t                    xcdCount,
+                                   std::vector<uint64_t>&      perXCDHz);
+#endif
+
         /**
         * Monitors properties of a particular GPU in a separate thread.
         *

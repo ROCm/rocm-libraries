@@ -64,6 +64,35 @@ namespace TensileLite
             return freq.frequency[freq.current];
         }
 
+#if AMDSMI_LIB_VERSION_MAJOR >= 25
+        bool getValidatedGfxClocks(const amdsmi_gpu_metrics_t& metrics,
+                                   uint16_t                    xcdCount,
+                                   std::vector<uint64_t>&      perXCDHz)
+        {
+            const uint64_t cMhzToHz = 1000000;
+
+            if(xcdCount == 0 || xcdCount > AMDSMI_MAX_NUM_GFX_CLKS)
+            {
+                return false;
+            }
+
+            perXCDHz.clear();
+            for(uint16_t xcd = 0; xcd < xcdCount; xcd++)
+            {
+                // amd_smi pre-fills every unset gpu_metrics field with the max value
+                // of its type. current_gfxclks[] is the v1.4+ per-XCD view, which the
+                // APU metrics tables never write, so it reads back as 65535 MHz there.
+                if(metrics.current_gfxclks[xcd] == std::numeric_limits<uint16_t>::max())
+                {
+                    perXCDHz.clear();
+                    return false;
+                }
+                perXCDHz.push_back(metrics.current_gfxclks[xcd] * cMhzToHz);
+            }
+            return true;
+        }
+#endif
+
         uint32_t HardwareMonitor::GetAMDSMIIndex(int hipDeviceIndex)
         {
             InitAMDSMI();
@@ -396,59 +425,59 @@ namespace TensileLite
                     continue;
                 }
 
-                amdsmi_frequencies_t freq{};
-
+#if AMDSMI_LIB_VERSION_MAJOR >= 25
                 if(m_clockMetrics[i] == AMDSMI_CLK_TYPE_SYS)
                 {
-#if AMDSMI_LIB_VERSION_MAJOR >= 25
-                    amdsmi_gpu_metrics_t gpuMetrics;
-                    // multi_XCD
+                    // multi_XCD: per-XCD gfx clocks.
+                    amdsmi_gpu_metrics_t  gpuMetrics{};
+                    std::vector<uint64_t> perXCDHz;
                     auto status = amdsmi_get_gpu_metrics_info(m_processorHandles[m_smiDeviceIndex],
                                                               &gpuMetrics);
-                    if(status == AMDSMI_STATUS_SUCCESS)
+                    if(status == AMDSMI_STATUS_SUCCESS
+                       && getValidatedGfxClocks(gpuMetrics, m_XCDCount, perXCDHz))
                     {
                         uint64_t sysclkSum = 0;
                         for(uint32_t xcd = 0; xcd < m_XCDCount; xcd++)
                         {
-                            m_SYSCLK_sum[xcd] += gpuMetrics.current_gfxclks[xcd] * cMhzToHz;
-                            m_SYSCLK_array[xcd].push_back(gpuMetrics.current_gfxclks[xcd]
-                                                          * cMhzToHz);
-                            sysclkSum += gpuMetrics.current_gfxclks[xcd] * cMhzToHz;
+                            m_SYSCLK_sum[xcd] += perXCDHz[xcd];
+                            m_SYSCLK_array[xcd].push_back(perXCDHz[xcd]);
+                            sysclkSum += perXCDHz[xcd];
                         }
                         m_clockValues[i] += sysclkSum;
+                        continue;
                     }
-#else
-                    // XCD0
-                    auto status = amdsmi_get_clk_freq(
-                        m_processorHandles[m_smiDeviceIndex], m_clockMetrics[i], &freq);
-                    uint64_t clockFreq = getValidatedFrequency(freq);
-                    if(status != AMDSMI_STATUS_SUCCESS
-                      || clockFreq == std::numeric_limits<uint64_t>::max())
-                    {
-                        m_clockValues[i] = std::numeric_limits<uint64_t>::max();
-                    }
-                    else
-                    {
-                        m_clockValues[i] += clockFreq;
-                    }
+                    // gpu_metrics has no per-XCD reading; fall through to
+                    // amdsmi_get_clk_freq() below.
+                }
 #endif
-                }
-                else
-                {
-                    auto status = amdsmi_get_clk_freq(
-                        m_processorHandles[m_smiDeviceIndex], m_clockMetrics[i], &freq);
-                    uint64_t clockFreq = getValidatedFrequency(freq);
 
-                    if(status != AMDSMI_STATUS_SUCCESS
-                      || clockFreq == std::numeric_limits<uint64_t>::max())
-                    {
-                        m_clockValues[i] = std::numeric_limits<uint64_t>::max();
-                    }
-                    else
-                    {
-                        m_clockValues[i] += clockFreq;
-                    }
+                amdsmi_frequencies_t freq{};
+                auto                 status = amdsmi_get_clk_freq(
+                    m_processorHandles[m_smiDeviceIndex], m_clockMetrics[i], &freq);
+                uint64_t clockFreq = (status == AMDSMI_STATUS_SUCCESS)
+                                         ? getValidatedFrequency(freq)
+                                         : std::numeric_limits<uint64_t>::max();
+
+                if(clockFreq == std::numeric_limits<uint64_t>::max())
+                {
+                    m_clockValues[i] = std::numeric_limits<uint64_t>::max();
+                    continue;
                 }
+
+                if(m_clockMetrics[i] == AMDSMI_CLK_TYPE_SYS)
+                {
+                    // A single device-wide reading with no per-XCD breakdown.
+                    // getAverageClock() divides SYS by m_XCDCount, so record it
+                    // once per XCD.
+                    for(uint32_t xcd = 0; xcd < m_XCDCount; xcd++)
+                    {
+                        m_SYSCLK_sum[xcd] += clockFreq;
+                        m_SYSCLK_array[xcd].push_back(clockFreq);
+                    }
+                    clockFreq *= m_XCDCount;
+                }
+
+                m_clockValues[i] += clockFreq;
             }
 
             for(int i = 0; i < m_fanMetrics.size(); i++)
