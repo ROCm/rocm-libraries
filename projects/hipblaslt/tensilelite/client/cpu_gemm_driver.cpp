@@ -38,11 +38,11 @@
 #include <utility>
 #include <vector>
 
-#include <roc/host_validation/adapters/tensilelite/HostValidationBridge.hpp>
 #include "ProgramOptions.hpp"
 #include "Reference.hpp"
 #include "rocisa/include/enum.hpp"
 #include <Tensile/Activation.hpp>
+#include <roc/host_validation/adapters/tensilelite/HostValidationBridge.hpp>
 #include <roc/host_validation/typed_comparison.hpp>
 #include <roc/host_validation/validation.hpp>
 
@@ -434,8 +434,7 @@ int runGemm(size_t             m,
         roc::host_validation::GenerationPatternSpec fp4Pattern;
         fp4Pattern.pattern = roc::host_validation::GenerationPattern::CandidateSet;
         fp4Pattern.candidates
-            = {-6.0, -4.0, -3.0, -2.0, -1.5, -1.0, -0.5, 0.0,
-               0.5,  1.0,  1.5,  2.0,  3.0,  4.0,  6.0};
+            = {-6.0, -4.0, -3.0, -2.0, -1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0};
         // Pack 2 logical FP4 values per byte (Float4x2). When the logical
         // element count is odd, the second slot of the last byte has no
         // element behind it — it's padding. We must still initialize that
@@ -466,39 +465,38 @@ int runGemm(size_t             m,
     else
 #endif
     {
-        auto initOperand = [&](auto&                vec,
-                               bool                 quantizes,
-                               InitializationStream initializationStream) {
-            using T = typename std::decay_t<decltype(vec)>::value_type;
+        auto initOperand
+            = [&](auto& vec, bool quantizes, InitializationStream initializationStream) {
+                  using T = typename std::decay_t<decltype(vec)>::value_type;
 #ifndef _WIN32
-            if constexpr(std::is_same_v<T, Float4x2>)
-            {
-                // FP4 mixed-input init unsupported in this branch; the FP4-only
-                // path above handles the pure FP4 case. Mixed FP4/non-FP4
-                // dispatch is rejected at the dispatcher level.
-                throw std::runtime_error("Mixed FP4 / non-FP4 input is not supported.");
-            }
-            else
+                  if constexpr(std::is_same_v<T, Float4x2>)
+                  {
+                      // FP4 mixed-input init unsupported in this branch; the FP4-only
+                      // path above handles the pure FP4 case. Mixed FP4/non-FP4
+                      // dispatch is rejected at the dispatcher level.
+                      throw std::runtime_error("Mixed FP4 / non-FP4 input is not supported.");
+                  }
+                  else
 #endif
-            if(quantizes)
-            {
-                // Values representable in storage but not on the compute-input grid -
-                // for storage=Half/compute=F8N, values like 0.7 that Half holds
-                // exactly but F8N rounds to 0.625 or 0.75.
-                roc::host_validation::GenerationPatternSpec pattern;
-                pattern.pattern    = roc::host_validation::GenerationPattern::UniformReal;
-                pattern.parameter0 = -1.0;
-                pattern.parameter1 = 1.0;
-                generateValues(vec, std::move(pattern), initializationStream);
-            }
-            else
-            {
-                roc::host_validation::GenerationPatternSpec pattern;
-                pattern.pattern    = roc::host_validation::GenerationPattern::CandidateSet;
-                pattern.candidates = {-1.0, 1.0};
-                generateValues(vec, std::move(pattern), initializationStream);
-            }
-        };
+                      if(quantizes)
+                  {
+                      // Values representable in storage but not on the compute-input grid -
+                      // for storage=Half/compute=F8N, values like 0.7 that Half holds
+                      // exactly but F8N rounds to 0.625 or 0.75.
+                      roc::host_validation::GenerationPatternSpec pattern;
+                      pattern.pattern    = roc::host_validation::GenerationPattern::UniformReal;
+                      pattern.parameter0 = -1.0;
+                      pattern.parameter1 = 1.0;
+                      generateValues(vec, std::move(pattern), initializationStream);
+                  }
+                  else
+                  {
+                      roc::host_validation::GenerationPatternSpec pattern;
+                      pattern.pattern    = roc::host_validation::GenerationPattern::CandidateSet;
+                      pattern.candidates = {-1.0, 1.0};
+                      generateValues(vec, std::move(pattern), initializationStream);
+                  }
+              };
 
         bool quantizesA = (sizeof(InputAT) > 1) && (computeInputA != dtypeEnumA);
         bool quantizesB = (sizeof(InputBT) > 1) && (computeInputB != dtypeEnumB);
@@ -606,20 +604,17 @@ int runGemm(size_t             m,
 
             // Distinct exponents in [0..7] so wrong indexing breaks validation.
             auto fillScale = [](std::vector<E8>& values, uint64_t stream) {
-                roc::host_validation::Tensor generated(
-                    roc::host_validation::ScalarType::E8M0,
-                    roc::host_validation::Shape{values.size()});
+                roc::host_validation::Tensor generated(roc::host_validation::ScalarType::E8M0,
+                                                       roc::host_validation::Shape{values.size()});
                 roc::host_validation::GenerationOptions options;
-                options.seed            = 42;
+                options.seed = 42;
                 options.real.pattern
                     = roc::host_validation::GenerationPattern::RandomEncodedExponent;
                 options.real.parameter0 = 0;
                 options.real.parameter1 = 7;
                 options.real.stream     = stream;
                 roc::host_validation::generate(generated.mutableView(), options);
-                std::memcpy(values.data(),
-                            generated.storage().data(),
-                            generated.storage().size());
+                std::memcpy(values.data(), generated.storage().data(), generated.storage().size());
             };
             fillScale(mxsa, 0);
             fillScale(mxsb, 1);
@@ -648,17 +643,21 @@ int runGemm(size_t             m,
 
     auto start = std::chrono::high_resolution_clock::now();
 
-    if(tryFastPath && !TensileLite::Client::isFastPathEligible(contraction))
+    constexpr int elementsToValidate = -1;
+    const bool    executed
+        = tryFastPath
+              ? TensileLite::Client::tryRuntimeTiledGemm(contraction, inputs, elementsToValidate)
+              : TensileLite::Client::tryRuntimeCanonicalGemm(
+                    contraction, inputs, elementsToValidate);
+    if(!executed)
     {
-        throw std::runtime_error("--tryFastPath was requested but the problem is not eligible "
-                                 "for the fast CPU GEMM path.");
+        if(tryFastPath)
+            throw std::runtime_error(
+                "--tryFastPath requires execution by the tiled CPU GEMM backend, "
+                "but the normalized request is unsupported.");
+        throw std::runtime_error("The normalized request is unsupported by the "
+                                 "canonical CPU GEMM backend.");
     }
-
-    // Execute the 'device under test'.
-    // passing -1 for elementsToValidate ensures that the 'fast path' which we
-    // currently want to test is maybe taken.
-    int elementsToValidate = -1;
-    TensileLite::Client::SolveGemmCPU(contraction, inputs, elementsToValidate, tryFastPath);
 
     auto                                      end      = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double, std::milli> duration = end - start;
@@ -864,10 +863,8 @@ int runGemm(size_t             m,
         }();
 
         const auto comparison = roc::host_validation::compare(
-            roc::host_validation::TypedTensorView<AccumulateT>(
-                std::span<const AccumulateT>(d)),
-            roc::host_validation::TypedTensorView<AccumulateT>(
-                std::span<const AccumulateT>(dRef)),
+            roc::host_validation::TypedTensorView<AccumulateT>(std::span<const AccumulateT>(d)),
+            roc::host_validation::TypedTensorView<AccumulateT>(std::span<const AccumulateT>(dRef)),
             {.absoluteTolerance     = tolerance,
              .relativeTolerance     = 0.0,
              .maxReportedMismatches = 10});
@@ -907,21 +904,46 @@ int main(int argc, char* argv[])
         "transB", po::value<bool>()->default_value(false), "Transpose B")(
         "alpha", po::value<float>()->default_value(1.0f), "Alpha scalar")(
         "beta", po::value<float>()->default_value(0.0f), "Beta scalar")(
-        "type", po::value<std::string>()->default_value("f32"), "Data type for A and B (f32, f64, tf32, f16, bf16, f8, bf8, f8fnuz, bf8fnuz, f4)")(
-        "typeA", po::value<std::string>()->default_value(""), "Override A storage type (defaults to --type)")(
-        "typeB", po::value<std::string>()->default_value(""), "Override B storage type (defaults to --type)")(
-        "computeInputA", po::value<std::string>()->default_value(""), "Override A compute-input type for MAC (defaults to --typeA). Set smaller than storage to mimic kernels that quantize A.")(
-        "computeInputB", po::value<std::string>()->default_value(""), "Override B compute-input type for MAC (defaults to --typeB). Set smaller than storage to mimic kernels that quantize B.")(
+        "type",
+        po::value<std::string>()->default_value("f32"),
+        "Data type for A and B (f32, f64, tf32, f16, bf16, f8, bf8, f8fnuz, bf8fnuz, f4)")(
+        "typeA",
+        po::value<std::string>()->default_value(""),
+        "Override A storage type (defaults to --type)")(
+        "typeB",
+        po::value<std::string>()->default_value(""),
+        "Override B storage type (defaults to --type)")(
+        "computeInputA",
+        po::value<std::string>()->default_value(""),
+        "Override A compute-input type for MAC (defaults to --typeA). Set smaller than storage to "
+        "mimic kernels that quantize A.")(
+        "computeInputB",
+        po::value<std::string>()->default_value(""),
+        "Override B compute-input type for MAC (defaults to --typeB). Set smaller than storage to "
+        "mimic kernels that quantize B.")(
         "validate", po::value<bool>()->default_value(true), "Run validation against ref")(
-        "injectValidationFailure", po::value<bool>()->default_value(false), "Perturb D before validation (negative-test hook)")(
-        "tryFastPath", po::value<bool>()->default_value(false), "Use optimized path")(
+        "injectValidationFailure",
+        po::value<bool>()->default_value(false),
+        "Perturb D before validation (negative-test hook)")("tryFastPath",
+                                                            po::value<bool>()->default_value(false),
+                                                            "Require tiled reference execution")(
         "bias", po::value<bool>()->default_value(false), "Enable bias vector")(
         "activation", po::value<std::string>()->default_value("none"), "Activation (none, relu)")(
         "scaleAlphaVec", po::value<bool>()->default_value(false), "Enable per-row alpha scaling")(
-        "factorDim", po::value<int>()->default_value(0), "ScaleAlphaVec dimension: 0=row(M), 1=col(N)")(
-        "useScaleAB", po::value<std::string>()->default_value("none"), "ScaleAB mode (none, Scalar, Vector)")(
-        "mxBlockA", po::value<int>()->default_value(0), "MX block size for the A side (FP4 only, must be power of 2; both --mxBlockA and --mxBlockB must be set together)")(
-        "mxBlockB", po::value<int>()->default_value(0), "MX block size for the B side (FP4 only, must be power of 2; both --mxBlockA and --mxBlockB must be set together)")(
+        "factorDim",
+        po::value<int>()->default_value(0),
+        "ScaleAlphaVec dimension: 0=row(M), 1=col(N)")(
+        "useScaleAB",
+        po::value<std::string>()->default_value("none"),
+        "ScaleAB mode (none, Scalar, Vector)")(
+        "mxBlockA",
+        po::value<int>()->default_value(0),
+        "MX block size for the A side (FP4 only, must be power of 2; both --mxBlockA and "
+        "--mxBlockB must be set together)")(
+        "mxBlockB",
+        po::value<int>()->default_value(0),
+        "MX block size for the B side (FP4 only, must be power of 2; both --mxBlockA and "
+        "--mxBlockB must be set together)")(
         "batchCount", po::value<size_t>()->default_value(1), "Batch count (default 1)");
 
     po::variables_map vm;
@@ -942,70 +964,116 @@ int main(int argc, char* argv[])
         return 0;
     }
 
-    size_t      m                = vm["M"].as<size_t>();
-    size_t      n                = vm["N"].as<size_t>();
-    size_t      k                = vm["K"].as<size_t>();
-    bool        transA           = vm["transA"].as<bool>();
-    bool        transB           = vm["transB"].as<bool>();
-    float       alpha            = vm["alpha"].as<float>();
-    float       beta             = vm["beta"].as<float>();
-    std::string typeStr          = vm["type"].as<std::string>();
-    std::string typeAStr         = vm["typeA"].as<std::string>();
-    std::string typeBStr         = vm["typeB"].as<std::string>();
-    if(typeAStr.empty()) typeAStr = typeStr;
-    if(typeBStr.empty()) typeBStr = typeStr;
+    size_t      m        = vm["M"].as<size_t>();
+    size_t      n        = vm["N"].as<size_t>();
+    size_t      k        = vm["K"].as<size_t>();
+    bool        transA   = vm["transA"].as<bool>();
+    bool        transB   = vm["transB"].as<bool>();
+    float       alpha    = vm["alpha"].as<float>();
+    float       beta     = vm["beta"].as<float>();
+    std::string typeStr  = vm["type"].as<std::string>();
+    std::string typeAStr = vm["typeA"].as<std::string>();
+    std::string typeBStr = vm["typeB"].as<std::string>();
+    if(typeAStr.empty())
+        typeAStr = typeStr;
+    if(typeBStr.empty())
+        typeBStr = typeStr;
     std::string computeInputAStr = vm["computeInputA"].as<std::string>();
     std::string computeInputBStr = vm["computeInputB"].as<std::string>();
-    if(computeInputAStr.empty()) computeInputAStr = typeAStr;
-    if(computeInputBStr.empty()) computeInputBStr = typeBStr;
+    if(computeInputAStr.empty())
+        computeInputAStr = typeAStr;
+    if(computeInputBStr.empty())
+        computeInputBStr = typeBStr;
 
     auto strToDataType = [](const std::string& s, rocisa::DataType& out) -> bool {
-        if(s == "f32")            { out = rocisa::DataType::Float;        return true; }
-        if(s == "f64")            { out = rocisa::DataType::Double;       return true; }
-        if(s == "tf32")           { out = rocisa::DataType::Float;        return true; }
-        if(s == "f16")            { out = rocisa::DataType::Half;         return true; }
-        if(s == "bf16")           { out = rocisa::DataType::BFloat16;     return true; }
+        if(s == "f32")
+        {
+            out = rocisa::DataType::Float;
+            return true;
+        }
+        if(s == "f64")
+        {
+            out = rocisa::DataType::Double;
+            return true;
+        }
+        if(s == "tf32")
+        {
+            out = rocisa::DataType::Float;
+            return true;
+        }
+        if(s == "f16")
+        {
+            out = rocisa::DataType::Half;
+            return true;
+        }
+        if(s == "bf16")
+        {
+            out = rocisa::DataType::BFloat16;
+            return true;
+        }
 #ifdef TENSILE_USE_FP8_BF8
-        if(s == "f8")             { out = rocisa::DataType::Float8;       return true; }
-        if(s == "bf8")            { out = rocisa::DataType::BFloat8;      return true; }
-        if(s == "f8fnuz")         { out = rocisa::DataType::Float8_fnuz;  return true; }
-        if(s == "bf8fnuz")        { out = rocisa::DataType::BFloat8_fnuz; return true; }
+        if(s == "f8")
+        {
+            out = rocisa::DataType::Float8;
+            return true;
+        }
+        if(s == "bf8")
+        {
+            out = rocisa::DataType::BFloat8;
+            return true;
+        }
+        if(s == "f8fnuz")
+        {
+            out = rocisa::DataType::Float8_fnuz;
+            return true;
+        }
+        if(s == "bf8fnuz")
+        {
+            out = rocisa::DataType::BFloat8_fnuz;
+            return true;
+        }
 #endif
 #ifndef _WIN32
-        if(s == "f4")             { out = rocisa::DataType::Float4;       return true; }
+        if(s == "f4")
+        {
+            out = rocisa::DataType::Float4;
+            return true;
+        }
 #endif
         return false;
     };
 
     rocisa::DataType computeInputA, computeInputB;
-    if(!strToDataType(computeInputAStr, computeInputA)) {
+    if(!strToDataType(computeInputAStr, computeInputA))
+    {
         std::cerr << "Unknown computeInputA: " << computeInputAStr << std::endl;
         return 1;
     }
-    if(!strToDataType(computeInputBStr, computeInputB)) {
+    if(!strToDataType(computeInputBStr, computeInputB))
+    {
         std::cerr << "Unknown computeInputB: " << computeInputBStr << std::endl;
         return 1;
     }
-    bool        validate                 = vm["validate"].as<bool>();
-    bool        injectValidationFailure  = vm["injectValidationFailure"].as<bool>();
-    bool        tryFastPath              = vm["tryFastPath"].as<bool>();
-    bool        useBias                  = vm["bias"].as<bool>();
-    std::string activationStr            = vm["activation"].as<std::string>();
-    bool        useScaleAlphaVec         = vm["scaleAlphaVec"].as<bool>();
-    int         factorDim                = vm["factorDim"].as<int>();
-    std::string useScaleAB               = vm["useScaleAB"].as<std::string>();
-    int         mxBlockA                 = vm["mxBlockA"].as<int>();
-    int         mxBlockB                 = vm["mxBlockB"].as<int>();
-    size_t      batchCount               = vm["batchCount"].as<size_t>();
-    const bool  typeAIsTF32              = (typeAStr == "tf32");
-    const bool  typeBIsTF32              = (typeBStr == "tf32");
-    const bool  isTF32                   = typeAIsTF32 && typeBIsTF32;
+    bool        validate                = vm["validate"].as<bool>();
+    bool        injectValidationFailure = vm["injectValidationFailure"].as<bool>();
+    bool        tryFastPath             = vm["tryFastPath"].as<bool>();
+    bool        useBias                 = vm["bias"].as<bool>();
+    std::string activationStr           = vm["activation"].as<std::string>();
+    bool        useScaleAlphaVec        = vm["scaleAlphaVec"].as<bool>();
+    int         factorDim               = vm["factorDim"].as<int>();
+    std::string useScaleAB              = vm["useScaleAB"].as<std::string>();
+    int         mxBlockA                = vm["mxBlockA"].as<int>();
+    int         mxBlockB                = vm["mxBlockB"].as<int>();
+    size_t      batchCount              = vm["batchCount"].as<size_t>();
+    const bool  typeAIsTF32             = (typeAStr == "tf32");
+    const bool  typeBIsTF32             = (typeBStr == "tf32");
+    const bool  isTF32                  = typeAIsTF32 && typeBIsTF32;
 
     if(typeAIsTF32 != typeBIsTF32)
     {
         std::cerr << "Error: tf32 is an F32 math-op mode and must be used for both "
-                  << "inputs or neither (typeA=" << typeAStr << ", typeB=" << typeBStr
-                  << ")" << std::endl;
+                  << "inputs or neither (typeA=" << typeAStr << ", typeB=" << typeBStr << ")"
+                  << std::endl;
         return 1;
     }
 
@@ -1025,15 +1093,14 @@ int main(int argc, char* argv[])
     if((mxBlockA > 0) != (mxBlockB > 0))
     {
         std::cerr << "Error: --mxBlockA and --mxBlockB must both be > 0 "
-                  << "(mxBlockA=" << mxBlockA << ", mxBlockB=" << mxBlockB << ")"
-                  << std::endl;
+                  << "(mxBlockA=" << mxBlockA << ", mxBlockB=" << mxBlockB << ")" << std::endl;
         return 1;
     }
 
     if((mxBlockA > 0 || mxBlockB > 0) && typeStr != "f4")
     {
-        std::cerr << "Error: mxBlockA/mxBlockB is only supported for type f4, not "
-                  << typeStr << std::endl;
+        std::cerr << "Error: mxBlockA/mxBlockB is only supported for type f4, not " << typeStr
+                  << std::endl;
         return 1;
     }
 
@@ -1066,10 +1133,9 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    std::cout << "Running GEMM with: M=" << m << " N=" << n << " K=" << k
-              << " TypeA=" << typeAStr << " TypeB=" << typeBStr
-              << " ComputeInA=" << computeInputAStr << " ComputeInB=" << computeInputBStr
-              << " FastPath=" << tryFastPath;
+    std::cout << "Running GEMM with: M=" << m << " N=" << n << " K=" << k << " TypeA=" << typeAStr
+              << " TypeB=" << typeBStr << " ComputeInA=" << computeInputAStr
+              << " ComputeInB=" << computeInputBStr << " FastPath=" << tryFastPath;
     if(isTF32)
         std::cout << " MathOp=XFloat32";
     std::cout << std::endl;
@@ -1079,49 +1145,76 @@ int main(int argc, char* argv[])
     // bugs in the fast-path validator (e.g. F8N x Half).
     // tf32 = float storage + XFloat32 math-op. Dispatched as float with isTF32 flag.
     auto resolveAccumStorage = [](std::string& s) {
-        if(s == "tf32") s = "f32";
+        if(s == "tf32")
+            s = "f32";
     };
     resolveAccumStorage(typeAStr);
     resolveAccumStorage(typeBStr);
 
     auto dispatchB = [&](auto aTag) -> int {
-        using AT = decltype(aTag);
+        using AT   = decltype(aTag);
         auto callB = [&](auto bTag) -> int {
             using BT = decltype(bTag);
 #ifndef _WIN32
-            constexpr bool isMixedFP4 = std::is_same_v<AT, Float4x2>
-                                        != std::is_same_v<BT, Float4x2>;
+            constexpr bool isMixedFP4
+                = std::is_same_v<AT, Float4x2> != std::is_same_v<BT, Float4x2>;
             if constexpr(isMixedFP4)
             {
-                std::cerr << "Error: mixed FP4 / non-FP4 input is not supported."
-                          << std::endl;
+                std::cerr << "Error: mixed FP4 / non-FP4 input is not supported." << std::endl;
                 return 1;
             }
             else
 #endif
             {
                 // Promote AccumulateT to double when both A and B storage are double (f64).
-                using AccT = std::conditional_t<
-                    std::is_same_v<AT, double> && std::is_same_v<BT, double>, double, float>;
-                return runGemm<AT, BT, AccT>(
-                    m, n, k, transA, transB, alpha, beta,
-                    validate, injectValidationFailure, tryFastPath,
-                    useBias, activation, useScaleAlphaVec, useScaleAB, factorDim,
-                    computeInputA, computeInputB, mxBlockA, mxBlockB, batchCount, isTF32);
+                using AccT
+                    = std::conditional_t<std::is_same_v<AT, double> && std::is_same_v<BT, double>,
+                                         double,
+                                         float>;
+                return runGemm<AT, BT, AccT>(m,
+                                             n,
+                                             k,
+                                             transA,
+                                             transB,
+                                             alpha,
+                                             beta,
+                                             validate,
+                                             injectValidationFailure,
+                                             tryFastPath,
+                                             useBias,
+                                             activation,
+                                             useScaleAlphaVec,
+                                             useScaleAB,
+                                             factorDim,
+                                             computeInputA,
+                                             computeInputB,
+                                             mxBlockA,
+                                             mxBlockB,
+                                             batchCount,
+                                             isTF32);
             }
         };
-        if(typeBStr == "f32")        return callB(float{});
-        if(typeBStr == "f64")        return callB(double{});
-        if(typeBStr == "f16")        return callB(Half{});
-        if(typeBStr == "bf16")       return callB(BFloat16{});
+        if(typeBStr == "f32")
+            return callB(float{});
+        if(typeBStr == "f64")
+            return callB(double{});
+        if(typeBStr == "f16")
+            return callB(Half{});
+        if(typeBStr == "bf16")
+            return callB(BFloat16{});
 #ifdef TENSILE_USE_FP8_BF8
-        if(typeBStr == "f8")         return callB(Float8{});
-        if(typeBStr == "bf8")        return callB(BFloat8{});
-        if(typeBStr == "f8fnuz")     return callB(Float8_fnuz{});
-        if(typeBStr == "bf8fnuz")    return callB(BFloat8_fnuz{});
+        if(typeBStr == "f8")
+            return callB(Float8{});
+        if(typeBStr == "bf8")
+            return callB(BFloat8{});
+        if(typeBStr == "f8fnuz")
+            return callB(Float8_fnuz{});
+        if(typeBStr == "bf8fnuz")
+            return callB(BFloat8_fnuz{});
 #endif
 #ifndef _WIN32
-        if(typeBStr == "f4")         return callB(Float4x2{});
+        if(typeBStr == "f4")
+            return callB(Float4x2{});
 #endif
         std::cerr << "Unknown typeB: " << typeBStr << std::endl;
         return 1;
@@ -1129,18 +1222,27 @@ int main(int argc, char* argv[])
 
     try
     {
-        if(typeAStr == "f32")        return dispatchB(float{});
-        if(typeAStr == "f64")        return dispatchB(double{});
-        if(typeAStr == "f16")        return dispatchB(Half{});
-        if(typeAStr == "bf16")       return dispatchB(BFloat16{});
+        if(typeAStr == "f32")
+            return dispatchB(float{});
+        if(typeAStr == "f64")
+            return dispatchB(double{});
+        if(typeAStr == "f16")
+            return dispatchB(Half{});
+        if(typeAStr == "bf16")
+            return dispatchB(BFloat16{});
 #ifdef TENSILE_USE_FP8_BF8
-        if(typeAStr == "f8")         return dispatchB(Float8{});
-        if(typeAStr == "bf8")        return dispatchB(BFloat8{});
-        if(typeAStr == "f8fnuz")     return dispatchB(Float8_fnuz{});
-        if(typeAStr == "bf8fnuz")    return dispatchB(BFloat8_fnuz{});
+        if(typeAStr == "f8")
+            return dispatchB(Float8{});
+        if(typeAStr == "bf8")
+            return dispatchB(BFloat8{});
+        if(typeAStr == "f8fnuz")
+            return dispatchB(Float8_fnuz{});
+        if(typeAStr == "bf8fnuz")
+            return dispatchB(BFloat8_fnuz{});
 #endif
 #ifndef _WIN32
-        if(typeAStr == "f4")         return dispatchB(Float4x2{});
+        if(typeAStr == "f4")
+            return dispatchB(Float4x2{});
 #endif
         std::cerr << "Unknown typeA: " << typeAStr << std::endl;
         return 1;

@@ -33,6 +33,7 @@
 #include <Tensile/ContractionProblem.hpp>
 
 #include <Tensile/DataTypes.hpp>
+#include <roc/host_validation/gemm.hpp>
 
 namespace TensileLite
 {
@@ -42,13 +43,12 @@ namespace TensileLite
                       ProblemInputs const*      inputs,
                       size_t                    elementsToValidate);
 
-        // Specialized solver for ungrouped GEMM problems. The tiled backend is
-        // attempted for eligible dense work; all supported descriptors then
-        // use the canonical runtime-typed component implementation.
-        void SolveGemmCPU(ContractionProblemGemm const& problem,
-                          ContractionInputs const&      inputs,
-                          size_t                        elementsToValidate,
-                          bool                          tryFastPath = true);
+        // Specialized solver for ungrouped GEMM problems. Requests prefer the
+        // tiled backend and fall back to the canonical implementation when
+        // required numerical semantics are not yet supported.
+        roc::host_validation::GemmRunInfo SolveGemmCPU(ContractionProblemGemm const& problem,
+                                                       ContractionInputs const&      inputs,
+                                                       size_t elementsToValidate);
 
         // Product-private descriptor adapters. Returns false without modifying
         // outputs when a descriptor is not representable.
@@ -58,11 +58,6 @@ namespace TensileLite
         bool tryRuntimeTiledGemm(ContractionProblemGemm const& problem,
                                  ContractionInputs const&      inputs,
                                  size_t                        elementsToValidate);
-
-        // Check whether a given contraction problem is eligible for the fast CPU GEMM path.
-        // This inspects problem geometry, data types, and feature flags but does not
-        // look at runtime input buffers.
-        bool isFastPathEligible(ContractionProblemGemm const& problem);
 
     } // namespace Client
 } // namespace TensileLite
