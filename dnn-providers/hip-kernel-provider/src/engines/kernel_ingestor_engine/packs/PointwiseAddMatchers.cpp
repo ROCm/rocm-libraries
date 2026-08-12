@@ -121,6 +121,17 @@ std::string dataTypeName(data_objects::DataType dataType)
 
 bool pointwiseAddGraphMatches(const MatchContext& context, BoundTokens& bound)
 {
+    // No device, no launch. The resolver reports NO_DEVICE when it cannot name the
+    // device this call is for, and every fact below that a kernel would be selected on
+    // -- including the device properties the compile is configured from -- is
+    // meaningless without one. Declining here is what keeps that failure a clean "this
+    // engine does not apply" rather than a property lookup for a device that does not
+    // exist.
+    if(context.deviceId == hipdnn_plugin_sdk::ingestor::NO_DEVICE)
+    {
+        return false;
+    }
+
     // Exactly one node: a prebuilt kernel serves one complete graph, so anything larger
     // is a different problem even if it contains this one.
     if(context.graph.nodeCount() != 1)

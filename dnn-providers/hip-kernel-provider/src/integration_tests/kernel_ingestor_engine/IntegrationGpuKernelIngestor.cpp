@@ -187,8 +187,16 @@ protected:
         });
         for(auto& [uid, tensor] : gpuBundle.tensors)
         {
-            gpuBundle.randomizeTensor(uid, -4.0f, 4.0f, seed);
-            cpuBundle.randomizeTensor(uid, -4.0f, 4.0f, seed);
+            // Per-uid, not one seed for every tensor: randomizeTensor builds a fresh
+            // mt19937 from the seed it is handed, so a shared seed makes every operand
+            // byte-identical and allClose() below is then satisfied by a+a or b+b just
+            // as well as by a+b -- it would no longer witness that the handler resolved
+            // its arguments by tensor uid, which is the property this harness exists to
+            // check. Offsetting by the uid is what PointwiseTensorBundles.hpp does
+            // (seed, seed + 1) for the same reason.
+            const auto tensorSeed = seed + static_cast<unsigned int>(uid);
+            gpuBundle.randomizeTensor(uid, -4.0f, 4.0f, tensorSeed);
+            cpuBundle.randomizeTensor(uid, -4.0f, 4.0f, tensorSeed);
         }
 
         auto deviceVariantPack = gpuBundle.toDeviceVariantPack();

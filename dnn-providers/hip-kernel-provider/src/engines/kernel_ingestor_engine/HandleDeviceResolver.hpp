@@ -6,9 +6,11 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <mutex>
+#include <string>
 #include <unordered_map>
 
 #include <hip/hip_runtime_api.h>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IDeviceResolver.hpp>
 
 #include "core/Handle.hpp"
@@ -29,6 +31,18 @@ namespace hip_kernel_provider::kernel_ingestor_engine
  * this resolver's lifetime, so entries are never erased or rehashed away: node handles
  * in std::unordered_map keep referenced values pinned across growth.
  *
+ * Only successful queries are cached. A failed hipGetDeviceProperties throws rather
+ * than caching the zeroed struct it left behind: this cache is process-lifetime and is
+ * never invalidated, so one transient failure would otherwise pin unusable properties
+ * for every later caller asking about that device -- and those zeroed values do not
+ * fail loudly, they reach KernelCompileOptions as an empty --offload-arch and surface
+ * as an hiprtc error naming neither the device nor the property query. Before this
+ * class became process-lifetime a container cycle cleared such an entry; now nothing
+ * does, which is exactly why the failure has to be refused rather than remembered.
+ * The provider's own convention for this call is the same (see
+ * CurrentDevicePropertyProvider), as is the module cache's refusal to cache a failed
+ * load.
+ *
  * Instantiated once, at process lifetime (see KernelIngestorEngine.cpp's deviceResolver()),
  * rather than once per engine or once per Container. This class carries no engine state
  * -- only device properties, which are a fact about the machine, not about which engine
@@ -38,9 +52,7 @@ namespace hip_kernel_provider::kernel_ingestor_engine
  * per engine and lose its warm entries every time a container cycled, for no isolation
  * benefit: two engines resolving the same physical device must agree on that device's
  * properties by construction, so a shared cache is the correct scope, not merely a
- * convenient one. That is also why the cache the class holds is never invalidated
- * ("references stay valid for this resolver's lifetime" above is a promise this
- * lifetime choice keeps easy to honor).
+ * convenient one.
  */
 class HandleDeviceResolver : public hipdnn_plugin_sdk::ingestor::IDeviceResolver<Handle>
 {
@@ -61,10 +73,21 @@ public:
         if(hipGetDevice(&deviceId) != hipSuccess)
         {
             // Only reachable with no usable HIP context, where nothing can be matched
-            // or launched anyway. Device 0 keys the cache consistently so the failure
-            // surfaces at compile or launch, with a message about the real problem,
-            // rather than here as a cache-key error.
-            return 0;
+            // or launched anyway.
+            //
+            // Not device 0, and not a throw. Not 0 because 0 is a valid ordinal other
+            // healthy calls resolve, so answering it would key this call's catalog and
+            // property cache to a real device nobody asked about -- and those entries
+            // outlive the container, so one failure would answer for every later
+            // caller. Not a throw because deviceId() is reached from isApplicable(),
+            // and EngineManager::getApplicableEngineIds() walks every engine with no
+            // try/catch: an exception here would deny a healthy sibling engine its
+            // answer rather than just declining for this one.
+            //
+            // NO_DEVICE is a key nothing matches and nothing caches against, so the
+            // engine simply finds no applicable kernel and declines, which is the
+            // correct outcome when there is no device to launch on.
+            return hipdnn_plugin_sdk::ingestor::NO_DEVICE;
         }
         return deviceId;
     }
@@ -72,6 +95,18 @@ public:
     const hipDeviceProp_t&
         deviceProperties(hipdnn_plugin_sdk::ingestor::DeviceId deviceId) const override
     {
+        // NO_DEVICE is not a device to query: MatchContext binds properties eagerly,
+        // before any matcher runs, so this is reached whenever deviceId() could not
+        // name a device. Answering with an inert zeroed struct lets matching proceed to
+        // the matchers, which decline on NO_DEVICE -- throwing here instead would deny
+        // every sibling engine its applicability answer (EngineManager walks them with
+        // no try/catch). Nothing reads these values, because no kernel survives.
+        if(deviceId == hipdnn_plugin_sdk::ingestor::NO_DEVICE)
+        {
+            static const hipDeviceProp_t s_noDevice{};
+            return s_noDevice;
+        }
+
         const std::lock_guard<std::mutex> lock(_mutex);
 
         auto it = _properties.find(deviceId);
@@ -81,8 +116,30 @@ public:
         }
 
         hipDeviceProp_t properties{};
-        static_cast<void>(hipGetDeviceProperties(&properties, deviceId));
+        const auto status = queryDeviceProperties(&properties, deviceId);
+        if(status != hipSuccess)
+        {
+            // Not cached: see the class doc. A zeroed hipDeviceProp_t is not a usable
+            // answer, and this cache is never invalidated, so remembering one failure
+            // would answer wrongly for the life of the process.
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                "hipGetDeviceProperties failed for device " + std::to_string(deviceId) + ": "
+                    + hipGetErrorString(status));
+        }
         return _properties.emplace(deviceId, properties).first->second;
+    }
+
+protected:
+    /// Seam for tests that need to grow the cache without that many real devices. The
+    /// production path is the HIP call; overriding it lets a test supply successful
+    /// answers for ids this machine does not have, which is the only way to exercise
+    /// the reference-stability-across-growth invariant now that failures are refused
+    /// rather than cached.
+    virtual hipError_t queryDeviceProperties(hipDeviceProp_t* properties,
+                                             hipdnn_plugin_sdk::ingestor::DeviceId deviceId) const
+    {
+        return hipGetDeviceProperties(properties, deviceId);
     }
 
 private:
