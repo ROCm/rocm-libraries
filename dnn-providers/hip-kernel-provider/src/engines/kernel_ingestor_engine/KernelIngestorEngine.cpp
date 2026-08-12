@@ -64,16 +64,30 @@ const HandleDeviceResolver& deviceResolver()
 
 } // namespace
 
+/// The body registerNativeIngestorSymbols() runs at most once per process. Broken out
+/// so a test can drive it directly and observe rollback on a forced conflict, which the
+/// once_flag wrapper below would otherwise make unreachable a second time.
+void registerNativeIngestorSymbolsOnce()
+{
+    registerPointwiseAddMatchers();
+    try
+    {
+        registerPointwiseAddDispatch(dispatchHandler());
+    }
+    catch(...)
+    {
+        unregisterPointwiseAddMatchers();
+        throw;
+    }
+}
+
 void registerNativeIngestorSymbols()
 {
-    // Idempotent across repeated Container construction (see SharedContainerManager):
-    // the process-wide NativeRegistry this populates must be populated exactly once, and
-    // a second registerSymbol() call under the same name would throw on the duplicate.
+    // call_once leaves the flag unset on a throw, so a retry re-runs the body -- which
+    // must roll back what it installed, or the retry fails on ITS OWN partial state
+    // instead of the original conflict.
     static std::once_flag s_registered;
-    std::call_once(s_registered, []() {
-        registerPointwiseAddMatchers();
-        registerPointwiseAddDispatch(dispatchHandler());
-    });
+    std::call_once(s_registered, registerNativeIngestorSymbolsOnce);
 }
 
 std::unique_ptr<hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>> makePointwiseAddEngine()

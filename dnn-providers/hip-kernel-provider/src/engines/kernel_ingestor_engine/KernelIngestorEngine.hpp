@@ -35,6 +35,11 @@ namespace hip_kernel_provider::kernel_ingestor_engine
  */
 void registerNativeIngestorSymbols();
 
+/// @brief The once_flag-guarded body of registerNativeIngestorSymbols(), callable
+/// directly so a test can force and observe a partial-failure/rollback cycle a second
+/// time -- something the flag makes unreachable through the wrapper itself.
+void registerNativeIngestorSymbolsOnce();
+
 /**
  * @brief Builds the descriptor-backed pointwise-add engine.
  *

@@ -120,11 +120,23 @@ public:
 
         for(auto& matcher : matchers)
         {
-            _matchers.emplace(matcher.id, std::move(matcher));
+            const auto id = matcher.id;
+            if(const auto [it, inserted] = _matchers.emplace(id, std::move(matcher)); !inserted)
+            {
+                // Same defect NativeRegistry.hpp rejects for a duplicate symbol: a pack
+                // naming this id would silently run whichever matcher loaded first.
+                throw std::invalid_argument("duplicate match descriptor id '" + toString(id)
+                                            + "' collides with '" + it->second.name + "'");
+            }
         }
         for(auto& dispatch : dispatches)
         {
-            _dispatches.emplace(dispatch.id, std::move(dispatch));
+            const auto id = dispatch.id;
+            if(const auto [it, inserted] = _dispatches.emplace(id, std::move(dispatch)); !inserted)
+            {
+                throw std::invalid_argument("duplicate dispatch descriptor id '" + toString(id)
+                                            + "' collides with '" + it->second.name + "'");
+            }
         }
 
         validateAndIndexPacks();
@@ -464,9 +476,9 @@ private:
                 continue;
             }
 
-            // Merged rather than kept per pack: Catalog::bound's own doc explains why a
-            // token name means the same thing to every pack in an engine.
-            catalog.bound.insert(packBound.begin(), packBound.end());
+            // Merged rather than kept per pack: a token name means the same thing to
+            // every pack in an engine (Catalog::bound's doc).
+            mergeBound(catalog.bound, packBound, pack.id);
 
             size_t admitted = 0;
             for(const auto& kernel : pack.kernels)
@@ -497,6 +509,25 @@ private:
                                << context.deviceId << " holds " << catalog.entries.size()
                                << " kernel(s) from " << _packs.size() << " pack(s)");
         return catalog;
+    }
+
+    /// Folds @p packBound into @p bound. Two packs agreeing on a token's value are just
+    /// sharing a matcher by id; two packs writing DIFFERENT values under one name is an
+    /// authoring error, only detectable here since it depends on a runtime match.
+    static void
+        mergeBound(BoundTokens& bound, const BoundTokens& packBound, const DescriptorId& packId)
+    {
+        for(const auto& [token, value] : packBound)
+        {
+            const auto [it, inserted] = bound.emplace(token, value);
+            if(!inserted && !(it->second == value))
+            {
+                throw std::runtime_error(
+                    "pack '" + toString(packId) + "' binds token '" + token
+                    + "' to a value that disagrees with another pack's binding of the "
+                      "same token; one token name must mean one thing across an engine");
+            }
+        }
     }
 
     /**

@@ -63,7 +63,13 @@ PointwiseAddBinding pointwiseAddBinding(const hipdnn_plugin_sdk::ingestor::Bound
 ///
 /// Called once, from the pack's translation unit, rather than at static-init time: an
 /// engine that is never constructed should not have mutated process-wide registries.
+/// Atomic: if one symbol is already taken, whichever of the others this call already
+/// installed is unregistered before it rethrows.
 void registerPointwiseAddMatchers();
+
+/// @brief Undoes registerPointwiseAddMatchers(), for a caller that must roll this pack
+/// back after a later registration step of its own fails.
+void unregisterPointwiseAddMatchers();
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine
 

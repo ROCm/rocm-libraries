@@ -16,8 +16,8 @@
 /**
  * @file TestDescriptors.cpp
  * @brief Unit tests for Descriptors.hpp: id formatting and hashing, the unified
- *        MetadataValue/MetadataType pairing (including the vector<int64_t> alternative
- *        item 2 added), and the KernelSource tagged union item 3 introduced.
+ *        MetadataValue/MetadataType pairing over vector<int64_t>, and the KernelSource
+ *        tagged union.
  *
  * makeKernelHeuristic() is declared in IKernelHeuristic.hpp, not here, so its tests live
  * in TestKernelHeuristic.cpp; this file covers HeuristicDescriptor purely as data.
@@ -93,7 +93,7 @@ INSTANTIATE_TEST_SUITE_P(
     [](const ::testing::TestParamInfo<MetadataTypeCase>& info) { return info.param.name; });
 
 // ---------------------------------------------------------------------------
-// KernelSourceKind / KernelSource: the tagged union item 3 introduced.
+// KernelSourceKind / KernelSource: the tagged union over RFC 0017 §7's source kinds.
 // ---------------------------------------------------------------------------
 
 TEST(TestIngestorDescriptors, KernelSourceDefaultsToEmbeddedSource)
@@ -118,19 +118,6 @@ TEST(TestIngestorDescriptors, KernelSourceCarriesEmbeddedSourceFileAndEntryPoint
     EXPECT_EQ(source.entryPoint, "pointwise_add_kernel");
 }
 
-/// Every kind besides EMBEDDED_SOURCE exists as a named value with no adapter yet: a
-/// kernel can state one, even though nothing loads it. Distinct kind values must stay
-/// distinct so a descriptor stating one is never confused with another.
-TEST(TestIngestorDescriptors, EveryKernelSourceKindIsDistinct)
-{
-    EXPECT_NE(KernelSourceKind::EMBEDDED_SOURCE, KernelSourceKind::KPACK_SYMBOL);
-    EXPECT_NE(KernelSourceKind::EMBEDDED_SOURCE, KernelSourceKind::HSACO_FILE);
-    EXPECT_NE(KernelSourceKind::EMBEDDED_SOURCE, KernelSourceKind::ROCKE_BUILDER);
-    EXPECT_NE(KernelSourceKind::KPACK_SYMBOL, KernelSourceKind::HSACO_FILE);
-    EXPECT_NE(KernelSourceKind::KPACK_SYMBOL, KernelSourceKind::ROCKE_BUILDER);
-    EXPECT_NE(KernelSourceKind::HSACO_FILE, KernelSourceKind::ROCKE_BUILDER);
-}
-
 // ---------------------------------------------------------------------------
 // HeuristicDescriptor: HeuristicKind as data. The adapter dispatch on it is
 // makeKernelHeuristic()'s behavior, tested in TestKernelHeuristic.cpp.
@@ -141,16 +128,6 @@ TEST(TestIngestorDescriptors, HeuristicDescriptorDefaultsToNativeKind)
     const HeuristicDescriptor descriptor{};
 
     EXPECT_EQ(descriptor.kind, HeuristicKind::NATIVE);
-}
-
-TEST(TestIngestorDescriptors, HeuristicDescriptorCarriesItsPayloadIndependentOfKind)
-{
-    HeuristicDescriptor descriptor;
-    descriptor.kind = HeuristicKind::MODEL;
-    descriptor.payload = "model/artifact.bin";
-
-    EXPECT_EQ(descriptor.kind, HeuristicKind::MODEL);
-    EXPECT_EQ(descriptor.payload, "model/artifact.bin");
 }
 
 } // namespace

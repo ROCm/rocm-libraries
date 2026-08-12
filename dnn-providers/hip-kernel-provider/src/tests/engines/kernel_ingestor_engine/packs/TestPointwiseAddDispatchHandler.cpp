@@ -12,6 +12,7 @@
 #include <gtest/gtest.h>
 
 #include <hip/hip_runtime_api.h>
+#include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
@@ -65,17 +66,20 @@ BoundTokens bindingsFor(const MatchContext& context)
     return bound;
 }
 
-/// Device buffers for one 1-element add, freed on scope exit.
+/// Device buffers for one 1-element add, freed on scope exit. Templated on the element
+/// type so the same buffer plumbing serves every dtype this pack's dispatch handler
+/// compiles for, rather than one copy per type that could quietly drift apart.
+template <typename T>
 class AddBuffers
 {
 public:
-    AddBuffers(float a, float b)
+    AddBuffers(T a, T b)
     {
-        EXPECT_EQ(hipSuccess, hipMalloc(&_a, sizeof(float)));
-        EXPECT_EQ(hipSuccess, hipMalloc(&_b, sizeof(float)));
-        EXPECT_EQ(hipSuccess, hipMalloc(&_c, sizeof(float)));
-        EXPECT_EQ(hipSuccess, hipMemcpy(_a, &a, sizeof(float), hipMemcpyHostToDevice));
-        EXPECT_EQ(hipSuccess, hipMemcpy(_b, &b, sizeof(float), hipMemcpyHostToDevice));
+        EXPECT_EQ(hipSuccess, hipMalloc(&_a, sizeof(T)));
+        EXPECT_EQ(hipSuccess, hipMalloc(&_b, sizeof(T)));
+        EXPECT_EQ(hipSuccess, hipMalloc(&_c, sizeof(T)));
+        EXPECT_EQ(hipSuccess, hipMemcpy(_a, &a, sizeof(T), hipMemcpyHostToDevice));
+        EXPECT_EQ(hipSuccess, hipMemcpy(_b, &b, sizeof(T), hipMemcpyHostToDevice));
     }
 
     ~AddBuffers()
@@ -95,10 +99,10 @@ public:
                 hipdnnPluginDeviceBuffer_t{OUTPUT_UID, _c}};
     }
 
-    float readResult() const
+    T readResult() const
     {
-        float result = 0.0f;
-        EXPECT_EQ(hipSuccess, hipMemcpy(&result, _c, sizeof(float), hipMemcpyDeviceToHost));
+        T result{};
+        EXPECT_EQ(hipSuccess, hipMemcpy(&result, _c, sizeof(T), hipMemcpyDeviceToHost));
         return result;
     }
 
@@ -240,27 +244,64 @@ TEST(TestPointwiseAddDispatch, RefusesToPrepareWithoutTheMatcherSBindings)
 // Prepare and launch on device
 // ---------------------------------------------------------------------------
 
-TEST(TestPointwiseAddDispatch, LaunchesARealAddOnDevice)
+// Runs over every dtype the pack ships a kernel for, so a broken HALF compile path
+// fails a real launch rather than only the matcher tests, which never reach hiprtc.
+struct RealLaunchCase
+{
+    std::string name;
+    hipdnn_flatbuffers_sdk::data_objects::DataType dataType;
+    std::string kernelDtype;
+};
+
+class TestPointwiseAddDispatchRealLaunch : public ::testing::TestWithParam<RealLaunchCase>
+{
+};
+
+TEST_P(TestPointwiseAddDispatchRealLaunch, LaunchesARealAddOnDevice)
 {
     SKIP_IF_NO_DEVICES();
 
-    const GraphFixture fixture(buildPointwiseGraph(), currentDeviceProperties());
+    const auto& param = GetParam();
+    const GraphFixture fixture(
+        buildPointwiseGraph(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ADD,
+                            param.dataType),
+        currentDeviceProperties());
     const HipMlopsKernelCompiler compiler;
     const PointwiseAddDispatchHandler handler(compiler);
 
     const auto prepared = handler.prepare(
-        fixture.context(), bindingsFor(fixture.context()), makeKernel(64, "FLOAT"));
+        fixture.context(), bindingsFor(fixture.context()), makeKernel(64, param.kernelDtype));
     ASSERT_NE(prepared, nullptr);
 
-    const AddBuffers buffers(3.0f, 4.0f);
-    const auto descriptors = buffers.descriptors();
     const Handle handle;
+    if(param.dataType == hipdnn_flatbuffers_sdk::data_objects::DataType::HALF)
+    {
+        const AddBuffers<hipdnn_data_sdk::types::half> buffers(hipdnn_data_sdk::types::half(3.0f),
+                                                               hipdnn_data_sdk::types::half(4.0f));
+        const auto descriptors = buffers.descriptors();
 
-    handler.launch(handle, *prepared, descriptors.data(), descriptors.size(), nullptr);
-    ASSERT_EQ(hipSuccess, hipDeviceSynchronize());
+        handler.launch(handle, *prepared, descriptors.data(), descriptors.size(), nullptr);
+        ASSERT_EQ(hipSuccess, hipDeviceSynchronize());
+        EXPECT_NEAR(static_cast<float>(buffers.readResult()), 7.0f, 1e-2f);
+    }
+    else
+    {
+        const AddBuffers<float> buffers(3.0f, 4.0f);
+        const auto descriptors = buffers.descriptors();
 
-    EXPECT_FLOAT_EQ(buffers.readResult(), 7.0f);
+        handler.launch(handle, *prepared, descriptors.data(), descriptors.size(), nullptr);
+        ASSERT_EQ(hipSuccess, hipDeviceSynchronize());
+        EXPECT_FLOAT_EQ(buffers.readResult(), 7.0f);
+    }
 }
+
+INSTANTIATE_TEST_SUITE_P(
+    ,
+    TestPointwiseAddDispatchRealLaunch,
+    ::testing::Values(
+        RealLaunchCase{"Float", hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, "FLOAT"},
+        RealLaunchCase{"Half", hipdnn_flatbuffers_sdk::data_objects::DataType::HALF, "HALF"}),
+    [](const ::testing::TestParamInfo<RealLaunchCase>& info) { return info.param.name; });
 
 TEST(TestPointwiseAddDispatch, LaunchesTheSameResultForEitherBlockSize)
 {

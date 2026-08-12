@@ -155,6 +155,10 @@ struct MatchContext
 /// Callers must treat that as "cannot cache", never as an error: matching a graph with
 /// no id still produces the right answer, it just cannot be memoized (there is no key to
 /// memoize it under, and inventing one would alias unrelated graphs).
+///
+/// A present field is not enough: a nil or non-v4 id (real ids are always v4) is not
+/// guaranteed unique, so it reads as "no identity" too. Cache-key uniqueness therefore
+/// depends on isUuidV4()'s exact predicate; loosening it reopens this aliasing.
 inline std::optional<GraphId>
     tryGetGraphId(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph)
 {
@@ -163,7 +167,12 @@ inline std::optional<GraphId>
     {
         return std::nullopt;
     }
-    return hipdnn_flatbuffers_sdk::utilities::toUuidBytes(*id);
+    const auto bytes = hipdnn_flatbuffers_sdk::utilities::toUuidBytes(*id);
+    if(!hipdnn_flatbuffers_sdk::utilities::isUuidV4(bytes))
+    {
+        return std::nullopt;
+    }
+    return bytes;
 }
 
 } // namespace hipdnn_plugin_sdk::ingestor

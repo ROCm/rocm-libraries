@@ -19,10 +19,10 @@
  * @file IngestorMocks.hpp
  * @brief gmock doubles for the ingestor's two pure interfaces.
  *
- * IKernelDispatchHandler and IDeviceResolver have no test of their own (see the Phase 2
- * plan): they are asserted only through the generic code that consumes them --
- * GenericPlan/GenericPlanBuilder for the dispatch handler, GenericPlanBuilder::contextFor
- * for the device resolver. These mocks are what those tests set expectations against.
+ * IKernelDispatchHandler and IDeviceResolver have no test of their own: they are
+ * asserted only through the generic code that consumes them -- GenericPlan/
+ * GenericPlanBuilder for the dispatch handler, GenericPlanBuilder::contextFor for the
+ * device resolver. These mocks are what those tests set expectations against.
  */
 namespace hipdnn_plugin_sdk::ingestor::testing
 {

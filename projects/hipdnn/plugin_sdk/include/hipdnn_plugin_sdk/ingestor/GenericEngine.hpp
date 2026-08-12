@@ -89,6 +89,13 @@ public:
         }
     }
 
+    /// Not relocatable: _planBuilder holds references into _engine and *_stateManager,
+    /// so a move or copy would leave it referring into the source object.
+    GenericEngine(const GenericEngine&) = delete;
+    GenericEngine& operator=(const GenericEngine&) = delete;
+    GenericEngine(GenericEngine&&) = delete;
+    GenericEngine& operator=(GenericEngine&&) = delete;
+
     /// The descriptor this engine was built from, for diagnostics and for a caller that
     /// needs the engine's declared knobs or notes.
     const EngineDescriptor& descriptor() const

@@ -137,11 +137,31 @@ private:
         _tensors;
 };
 
+/// A test graph id distinct per seed, shaped as a valid v4 UUID (tryGetGraphId() now
+/// rejects non-v4 ids as "no identity").
 inline GraphId makeGraphId(uint8_t seed)
 {
     GraphId id{};
     id.fill(seed);
+    id[6] = static_cast<uint8_t>((id[6] & 0x0fU) | 0x40U);
+    id[8] = static_cast<uint8_t>((id[8] & 0x3fU) | 0x80U);
     return id;
+}
+
+/// A distinct-per-seed id shaped to fail the v4 check, for tests needing a non-nil
+/// "no identity" id.
+inline GraphId makeNonV4GraphId(uint8_t seed)
+{
+    GraphId id{};
+    id.fill(seed);
+    id[6] = static_cast<uint8_t>(id[6] & 0x0fU);
+    return id;
+}
+
+/// The nil UUID: all-zero bytes, the id a default-constructed field reads as.
+inline GraphId makeNilGraphId()
+{
+    return GraphId{};
 }
 
 inline hipDeviceProp_t testDeviceProperties()
@@ -239,19 +259,6 @@ inline KernelDescriptor makeTestKernel(const DescriptorId& id,
     kernel.source.entryPoint = "TestKernel";
     kernel.metadata = {{BLOCK_SIZE, MetadataValue{blockSize}}, {DTYPE, MetadataValue{dtype}}};
     return kernel;
-}
-
-/// The UED the fixture engine is built from. Separate from the state manager, which
-/// holds only what selection reads.
-inline EngineDescriptor makeTestEngine()
-{
-    EngineDescriptor engine;
-    engine.id = ENGINE_ID;
-    engine.name = "test:engine";
-    engine.heuristicId = HEURISTIC_ID;
-    engine.metadataSchemaId = SCHEMA_ID;
-    engine.knobs = {BLOCK_SIZE};
-    return engine;
 }
 
 /// Two FLOAT kernels differing only in block size, plus a HALF kernel the kernel-scoped
@@ -542,11 +549,6 @@ struct StubContext
         _plan = std::move(plan);
     }
 
-    bool hasPlan() const
-    {
-        return _plan != nullptr;
-    }
-
 private:
     std::unique_ptr<hipdnn_plugin_sdk::IPlan<StubHandle>> _plan;
 };
@@ -622,6 +624,44 @@ inline hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper makeInt
     std::vector<flatbuffers::Offset<KnobSetting>> knobSettings;
     knobSettings.push_back(CreateKnobSettingDirect(
         builder, knobName.c_str(), KnobValue::IntValue, CreateIntValue(builder, value).Union()));
+    auto knobsVector = builder.CreateVector(knobSettings);
+    builder.Finish(CreateEngineConfig(builder, ENGINE_ID.front(), knobsVector));
+
+    return hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+}
+
+/// A FloatValue knob setting, so a test can reach readKnobFilter()'s type-rejection
+/// branch -- every other builder here only produces IntValue.
+inline hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper makeFloatKnobEngineConfig(
+    flatbuffers::FlatBufferBuilder& builder, const std::string& knobName, double value)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    std::vector<flatbuffers::Offset<KnobSetting>> knobSettings;
+    knobSettings.push_back(CreateKnobSettingDirect(builder,
+                                                   knobName.c_str(),
+                                                   KnobValue::FloatValue,
+                                                   CreateFloatValue(builder, value).Union()));
+    auto knobsVector = builder.CreateVector(knobSettings);
+    builder.Finish(CreateEngineConfig(builder, ENGINE_ID.front(), knobsVector));
+
+    return hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+}
+
+/// StringValue counterpart of makeFloatKnobEngineConfig().
+inline hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper makeStringKnobEngineConfig(
+    flatbuffers::FlatBufferBuilder& builder, const std::string& knobName, const std::string& value)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    std::vector<flatbuffers::Offset<KnobSetting>> knobSettings;
+    knobSettings.push_back(
+        CreateKnobSettingDirect(builder,
+                                knobName.c_str(),
+                                KnobValue::StringValue,
+                                CreateStringValueDirect(builder, value.c_str()).Union()));
     auto knobsVector = builder.CreateVector(knobSettings);
     builder.Finish(CreateEngineConfig(builder, ENGINE_ID.front(), knobsVector));
 

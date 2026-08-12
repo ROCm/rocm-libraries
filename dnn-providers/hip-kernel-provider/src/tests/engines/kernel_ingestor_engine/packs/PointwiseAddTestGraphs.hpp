@@ -78,6 +78,9 @@ inline hipDeviceProp_t currentDeviceProperties()
  *        `INPUT_B_UID`, and no tensor is inserted for it -- the graph carries a node
  *        whose operand uid resolves to nothing in getTensorMap(). Exercises the matcher
  *        refusing a graph it cannot even read, as opposed to one it reads and declines.
+ * @param inputAVirtual Marks input A virtual, which the graph matcher must refuse.
+ * @param inputAIsRuntimePassByValue Marks input A runtime-pass-by-value, which the
+ *        graph matcher must refuse.
  */
 inline flatbuffers::FlatBufferBuilder buildPointwiseGraph(
     hipdnn_flatbuffers_sdk::data_objects::PointwiseMode operation
@@ -90,7 +93,9 @@ inline flatbuffers::FlatBufferBuilder buildPointwiseGraph(
     const std::optional<std::vector<int64_t>>& explicitStrides = std::nullopt,
     std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType> inputBDataType = std::nullopt,
     bool includeThirdOperand = false,
-    std::optional<int64_t> danglingInputBUid = std::nullopt)
+    std::optional<int64_t> danglingInputBUid = std::nullopt,
+    bool inputAVirtual = false,
+    bool inputAIsRuntimePassByValue = false)
 {
     namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 
@@ -102,8 +107,16 @@ inline flatbuffers::FlatBufferBuilder buildPointwiseGraph(
     const auto resolvedInputBDataType = inputBDataType.value_or(dataType);
 
     std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensors;
-    tensors.push_back(data_objects::CreateTensorAttributesDirect(
-        builder, INPUT_A_UID, nullptr, dataType, &strides, &dims, false));
+    tensors.push_back(data_objects::CreateTensorAttributesDirect(builder,
+                                                                 INPUT_A_UID,
+                                                                 nullptr,
+                                                                 dataType,
+                                                                 &strides,
+                                                                 &dims,
+                                                                 inputAVirtual,
+                                                                 data_objects::TensorValue::NONE,
+                                                                 0,
+                                                                 inputAIsRuntimePassByValue));
     tensors.push_back(data_objects::CreateTensorAttributesDirect(
         builder, INPUT_B_UID, nullptr, resolvedInputBDataType, &strides, &dims, false));
     tensors.push_back(data_objects::CreateTensorAttributesDirect(
