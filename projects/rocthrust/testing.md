@@ -121,7 +121,12 @@ rocThrust performance testing is getting reworked to use `Primbench` instead of 
 | --- | --- |
 | Trusted gate | The full test suite is ran on multiple GPU architectures. |
 | Informational | codecov |
-| Unstable / flaky |  |
+| Unstable / flaky | None formally tagged today (see Flaky Test Policy) |
+
+### Flaky Test Policy
+* Flaky tests should be tagged clearly (e.g. `UNSTABLE`) and excluded from blocking runs until fixed.
+* Every flaky test should have an owner and a tracking bug.
+* A flaky test is not an accepted final state. rocThrust does not currently maintain a tagged flaky list — establishing one is a gap.
 
 ## Coverage
 * **Tooling:** `CODE_COVERAGE=ON` (clang only) compiles with `-O0 -fprofile-instr-generate -fcoverage-mapping`. Codecov configuration lives at the `rocm-libraries` monorepo level (`codecov.yml`), not per-component. No `gcovr`/`lcov` report target is wired into rocThrust today.

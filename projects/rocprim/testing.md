@@ -57,7 +57,7 @@ Because the type × block-size × items-per-thread × algorithm matrix is huge, 
 
 ### Coverage expectation
 * Long-term goal across ROCm components is **> 95%** line coverage; not mandated initially and pursued in phases.
-* Realistic near-term target for rocThrust: **≥ 80% of hardware-independent paths where practical.**
+* Realistic near-term target for rocPRIM: **≥ 80% of hardware-independent paths where practical.**
 * **Current state:** CI reports roughly **40%** line coverage because coverage instrumentation currently captures host-side code only, while most of rocPRIM is device code. This is the single largest coverage gap. An initiative to adopt LLVM device-code coverage is expected to close it.
 
 ## Integration Testing Strategy
@@ -120,13 +120,12 @@ Because the type × block-size × items-per-thread × algorithm matrix is huge, 
 | --- | --- |
 | Trusted gate | The full test suite is ran on multiple GPU architectures. |
 | Informational | codecov |
-| Unstable / flaky |  |
+| Unstable / flaky | None formally tagged today (see Flaky Test Policy) |
 
 ### Flaky Test Policy
 * Flaky tests should be tagged clearly (e.g. `UNSTABLE`) and excluded from blocking runs until fixed.
 * Every flaky test should have an owner and a tracking bug.
-* A flaky test is not an accepted final state. rocPRIM does not currently maintain a tagged flaky list — establishing one is a gap. (Note: per-architecture Windows exclusions in `test_categories.yaml` are deliberate skips, not flaky tags.)
-
+* A flaky test is not an accepted final state. rocPRIM does not currently maintain a tagged flaky list — establishing one is a gap. 
 
 ## Coverage
 * **Tooling:** `BUILD_CODE_COVERAGE=ON` (clang) compiles with `-fprofile-instr-generate -fcoverage-mapping`; `llvm-profdata` + `llvm-cov` (from `${ROCM_PATH}/llvm/bin`) produce HTML/LCOV reports via the `coverage_analysis` and `coverage` build targets. Test files are excluded (`--ignore-filename-regex="test_*"`). Codecov config lives at the `rocm-libraries` monorepo level.

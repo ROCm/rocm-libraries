@@ -116,7 +116,12 @@ Because engines and distributions are decoupled, `test/internal/` includes libra
 | --- | --- |
 | Trusted gate | The full test suite is ran on multiple GPU architectures. |
 | Informational | codecov |
-| Unstable / flaky |  |
+| Unstable / flaky | None formally tagged today (see Flaky Test Policy) |
+
+### Flaky Test Policy
+* Flaky tests should be tagged clearly (e.g. `UNSTABLE`) and excluded from blocking runs until fixed.
+* Every flaky test should have an owner and a tracking bug.
+* A flaky test is not an accepted final state. rocRAND does not currently maintain a tagged flaky list — establishing one is a gap.
 
 
 ## Coverage
