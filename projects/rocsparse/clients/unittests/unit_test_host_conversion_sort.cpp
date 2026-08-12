@@ -867,4 +867,3 @@ TEST_F(ConversionDense, coo2dense_dense2coo)
     check_coo2dense_dense2coo<rocsparse_float_complex>(handle);
     check_coo2dense_dense2coo<rocsparse_double_complex>(handle);
 }
-
