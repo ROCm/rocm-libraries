@@ -321,6 +321,7 @@ namespace rocRoller::Client::GEMMClient
         GeneratedOperand generateScaled(TensorDescriptor const&   descriptor,
                                         DataInitialization const& initialization,
                                         DataType                  scaleType,
+                                        size_t                    blockedDimension,
                                         size_t                    scaleBlockSize,
                                         float                     minimum,
                                         float                     maximum,
@@ -330,6 +331,9 @@ namespace rocRoller::Client::GEMMClient
                 throw std::invalid_argument("rocRoller MX generation requires rank-two tensors.");
             if(descriptor.offset() != 0)
                 throw std::invalid_argument("rocRoller MX generation does not support offsets.");
+            if(blockedDimension >= descriptor.dimensions())
+                throw std::invalid_argument(
+                    "rocRoller MX blocked dimension exceeds the tensor rank.");
 
             std::array<size_t, 2> dimensions{0, 1};
             std::ranges::sort(dimensions, [&](size_t first, size_t second) {
@@ -349,7 +353,7 @@ namespace rocRoller::Client::GEMMClient
             problem.leadingDimension
                 = checkedPtrdiff(descriptor.stride(freeDimension),
                                  "rocRoller MX leading dimension exceeds ptrdiff_t.");
-            problem.blockAxis = 0;
+            problem.blockAxis = blockedDimension == contiguousDimension ? 0 : 1;
             problem.blockSize = scaleBlockSize;
             problem.data      = mxGenerationRecipe(initialization, minimum, maximum);
             problem.seed      = seed;
@@ -359,12 +363,33 @@ namespace rocRoller::Client::GEMMClient
                                                         result.data.storage().end());
             Tensor data        = Tensor::fromStorage(
                 result.data.type(), tensorLayout(descriptor), std::move(dataStorage));
-            return {std::move(data), std::move(result.scales)};
+
+            auto const logicalFreeDimension = size_t{1} - blockedDimension;
+            auto const logicalFreeExtent    = descriptor.size(logicalFreeDimension);
+            auto const blockCount
+                = descriptor.size(blockedDimension) / scaleBlockSize
+                  + static_cast<size_t>(descriptor.size(blockedDimension) % scaleBlockSize != 0);
+            auto const scaleLayout
+                = blockedDimension == contiguousDimension
+                      ? Layout(Shape{logicalFreeExtent, blockCount},
+                               {checkedPtrdiff(blockCount,
+                                               "rocRoller MX scale stride exceeds ptrdiff_t."),
+                                1})
+                      : Layout(Shape{logicalFreeExtent, blockCount},
+                               {1,
+                                checkedPtrdiff(logicalFreeExtent,
+                                               "rocRoller MX scale stride exceeds ptrdiff_t.")});
+            auto   scaleStorage = std::vector<std::byte>(result.scales.storage().begin(),
+                                                         result.scales.storage().end());
+            Tensor scales
+                = Tensor::fromStorage(result.scales.type(), scaleLayout, std::move(scaleStorage));
+            return {std::move(data), std::move(scales)};
         }
 
         GeneratedOperand generateOperand(TensorDescriptor const&   descriptor,
                                          DataInitialization const& initialization,
                                          DataType                  scaleType,
+                                         size_t                    blockedDimension,
                                          size_t                    scaleBlockSize,
                                          float                     minimum,
                                          float                     maximum,
@@ -372,8 +397,14 @@ namespace rocRoller::Client::GEMMClient
         {
             if(scaleType == DataType::None)
                 return generateUnscaled(descriptor, initialization, minimum, maximum, seed);
-            return generateScaled(
-                descriptor, initialization, scaleType, scaleBlockSize, minimum, maximum, seed);
+            return generateScaled(descriptor,
+                                  initialization,
+                                  scaleType,
+                                  blockedDimension,
+                                  scaleBlockSize,
+                                  minimum,
+                                  maximum,
+                                  seed);
         }
     }
 
@@ -390,12 +421,24 @@ namespace rocRoller::Client::GEMMClient
                                            float                     maximum,
                                            uint32_t                  seed)
     {
-        auto generatedA = generateOperand(
-            descriptorA, initializationA, scaleTypeA, scaleBlockSize, minimum, maximum, seed + 1);
-        auto generatedB = generateOperand(
-            descriptorB, initializationB, scaleTypeB, scaleBlockSize, minimum, maximum, seed + 2);
+        auto generatedA = generateOperand(descriptorA,
+                                          initializationA,
+                                          scaleTypeA,
+                                          1,
+                                          scaleBlockSize,
+                                          minimum,
+                                          maximum,
+                                          seed + 1);
+        auto generatedB = generateOperand(descriptorB,
+                                          initializationB,
+                                          scaleTypeB,
+                                          0,
+                                          scaleBlockSize,
+                                          minimum,
+                                          maximum,
+                                          seed + 2);
         auto generatedC = generateOperand(
-            descriptorC, initializationC, DataType::None, 1, minimum, maximum, seed);
+            descriptorC, initializationC, DataType::None, 0, 1, minimum, maximum, seed);
 
         return {std::move(generatedA.data),
                 std::move(generatedB.data),

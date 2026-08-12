@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <roc/host_validation/mx.hpp>
@@ -261,14 +262,19 @@ namespace
             "Padded ordinary storage values mismatch.");
     }
 
-    MxGenerationProblem expectedMxProblem(ScalarType dataType, ScalarType scaleType, uint32_t seed)
+    MxGenerationProblem expectedMxProblem(ScalarType dataType,
+                                          ScalarType scaleType,
+                                          Shape      shape,
+                                          ptrdiff_t  leadingDimension,
+                                          size_t     blockAxis,
+                                          uint32_t   seed)
     {
         MxGenerationProblem problem;
         problem.dataType         = dataType;
         problem.scaleType        = scaleType;
-        problem.shape            = Shape{8, 3};
-        problem.leadingDimension = 8;
-        problem.blockAxis        = 0;
+        problem.shape            = std::move(shape);
+        problem.leadingDimension = leadingDimension;
+        problem.blockAxis        = blockAxis;
         problem.blockSize        = 4;
         problem.data.mode        = MxGenerationMode::Unbounded;
         problem.seed             = seed;
@@ -277,28 +283,30 @@ namespace
 
     void testScaledTypeBlockAndNaturalOrder()
     {
-        TensorDescriptor descriptor(DataType::FP4, {3, 8}, "T");
-        TensorDescriptor descriptorC(DataType::Float, {3, 8}, "T");
+        TensorDescriptor descriptorA(DataType::FP4, {3, 8}, "T");
+        TensorDescriptor descriptorB(DataType::FP4, {8, 5}, "N");
+        TensorDescriptor descriptorC(DataType::Float, {3, 5}, "N");
         auto const       unbounded = DataInitialization{DataInitializationMode::Unbounded};
         auto             generated = generate(
-            descriptor, descriptor, descriptorC, unbounded, DataType::E4M3, DataType::E5M3, 4);
+            descriptorA, descriptorB, descriptorC, unbounded, DataType::E4M3, DataType::E5M3, 4);
 
         require(generated.a.layout() == Layout(Shape{3, 8}, {8, 1}),
                 "Scaled A descriptor layout was not preserved.");
-        require(generated.b.layout() == Layout(Shape{3, 8}, {8, 1}),
+        require(generated.b.layout() == Layout(Shape{8, 5}, {1, 8}),
                 "Scaled B descriptor layout was not preserved.");
         require(generated.scaleA && generated.scaleB,
                 "Scaled generation did not return scale tensors.");
         require(generated.scaleA->type() == ScalarType::E4M3
                     && generated.scaleB->type() == ScalarType::E5M3,
                 "Scale type translation mismatch.");
-        require(generated.scaleA->shape() == Shape{6} && generated.scaleB->shape() == Shape{6},
-                "Scale block count mismatch.");
+        require(generated.scaleA->layout() == Layout(Shape{3, 2}, {2, 1})
+                    && generated.scaleB->layout() == Layout(Shape{5, 2}, {2, 1}),
+                "K-contiguous canonical scale layout mismatch.");
 
         auto expectedA = roc::host_validation::generateMx(
-            expectedMxProblem(ScalarType::Float4E2M1, ScalarType::E4M3, 31416u));
+            expectedMxProblem(ScalarType::Float4E2M1, ScalarType::E4M3, Shape{8, 3}, 8, 0, 31416u));
         auto expectedB = roc::host_validation::generateMx(
-            expectedMxProblem(ScalarType::Float4E2M1, ScalarType::E5M3, 31417u));
+            expectedMxProblem(ScalarType::Float4E2M1, ScalarType::E5M3, Shape{8, 5}, 8, 0, 31417u));
         require(bytes(generated.a) == bytes(expectedA.data)
                     && bytes(*generated.scaleA) == bytes(expectedA.scales),
                 "A data or natural scale order differs from generateMx.");
@@ -306,11 +314,38 @@ namespace
                     && bytes(*generated.scaleB) == bytes(expectedB.scales),
                 "B data or natural scale order differs from generateMx.");
 
-        TensorDescriptor fp6Descriptor(DataType::FP6, {8, 2}, "N");
-        TensorDescriptor floatDescriptor(DataType::Float, {8, 2}, "N");
-        auto             fp6 = generate(fp6Descriptor,
-                                        fp6Descriptor,
-                                        floatDescriptor,
+        TensorDescriptor noncontiguousA(DataType::FP4, {3, 8}, "N");
+        TensorDescriptor noncontiguousB(DataType::FP4, {8, 5}, "T");
+        auto             noncontiguous = generate(noncontiguousA,
+                                                  noncontiguousB,
+                                                  descriptorC,
+                                                  unbounded,
+                                                  DataType::E4M3,
+                                                  DataType::E5M3,
+                                                  4);
+        require(noncontiguous.scaleA && noncontiguous.scaleB,
+                "K-strided scaled generation did not return scale tensors.");
+        require(noncontiguous.scaleA->layout() == Layout(Shape{3, 2}, {1, 3})
+                    && noncontiguous.scaleB->layout() == Layout(Shape{5, 2}, {1, 5}),
+                "K-strided canonical scale layout mismatch.");
+
+        auto expectedNoncontiguousA = roc::host_validation::generateMx(
+            expectedMxProblem(ScalarType::Float4E2M1, ScalarType::E4M3, Shape{3, 8}, 3, 1, 31416u));
+        auto expectedNoncontiguousB = roc::host_validation::generateMx(
+            expectedMxProblem(ScalarType::Float4E2M1, ScalarType::E5M3, Shape{5, 8}, 5, 1, 31417u));
+        require(bytes(noncontiguous.a) == bytes(expectedNoncontiguousA.data)
+                    && bytes(*noncontiguous.scaleA) == bytes(expectedNoncontiguousA.scales),
+                "K-strided A generation did not use logical K blocks.");
+        require(bytes(noncontiguous.b) == bytes(expectedNoncontiguousB.data)
+                    && bytes(*noncontiguous.scaleB) == bytes(expectedNoncontiguousB.scales),
+                "K-strided B generation did not use logical K blocks.");
+
+        TensorDescriptor fp6A(DataType::FP6, {8, 4}, "N");
+        TensorDescriptor fp6B(DataType::FP6, {4, 2}, "N");
+        TensorDescriptor fp6C(DataType::Float, {8, 2}, "N");
+        auto             fp6 = generate(fp6A,
+                                        fp6B,
+                                        fp6C,
                                         DataInitialization{DataInitializationMode::Ones},
                                         DataType::E8M0,
                                         DataType::E8M0,
@@ -350,15 +385,11 @@ namespace
                     && bytes(bf8Fnuz) == std::vector<uint8_t>{0x40},
                 "Unscaled BF8 did not use rocRoller NaNoo semantics.");
 
-        TensorDescriptor scaledFp8Descriptor(DataType::FP8, {4, 1}, "N");
-        TensorDescriptor cDescriptor(DataType::Float, {4, 1}, "N");
-        auto             scaled = generate(scaledFp8Descriptor,
-                                           scaledFp8Descriptor,
-                                           cDescriptor,
-                                           ones,
-                                           DataType::E8M0,
-                                           DataType::E8M0,
-                                           4);
+        TensorDescriptor scaledFp8A(DataType::FP8, {1, 4}, "N");
+        TensorDescriptor scaledFp8B(DataType::FP8, {4, 1}, "N");
+        TensorDescriptor cDescriptor(DataType::Float, {1, 1}, "N");
+        auto             scaled = generate(
+            scaledFp8A, scaledFp8B, cDescriptor, ones, DataType::E8M0, DataType::E8M0, 4);
         require(scaled.a.type() == ScalarType::Float8E4M3
                     && bytes(scaled.a) == std::vector<uint8_t>({0x38, 0x38, 0x38, 0x38}),
                 "Scaled FP8 did not retain the OCP MX encoding.");
