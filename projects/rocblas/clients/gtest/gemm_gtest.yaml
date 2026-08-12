@@ -3744,8 +3744,9 @@ Tests:
     - gemm: *single_double_precisions
   arguments:
     - { transA: N, transB: N, M: 3, N: 2097153, K: 15, lda: 3, ldb: 15, ldc: 3, ldd: 3 }
+    - { transA: N, transB: T, M: 3, N: 2097153, K: 15, lda: 3, ldb: 2097153, ldc: 3, ldd: 3 }
   alpha: 1
-  beta: 0
+  beta: 2
   api: [ C ]
   os_flags: LINUX
 ...

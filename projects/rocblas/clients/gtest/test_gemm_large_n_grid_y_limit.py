@@ -13,10 +13,14 @@ uninitialized (silently wrong / NaN results, non-deterministic across runs).
 already done on the source-GEMM and ``_64`` paths.
 
 The equivalent gtest case is ``gemm_large_n_grid_y_limit`` in
-``gemm_gtest.yaml`` (``M=3, N=2097153, K=15``, ``single``/``double``); this
-Python version is a dependency-light reproducer that maps the same tall/skinny
-problem through PyTorch (row-major ``A @ B`` becomes a column-major gemm whose
-free dimension is the large one, i.e. ``N`` just over ``65536 * 32 == 2^21``).
+``gemm_gtest.yaml`` (``M=3, N=2097153, K=15``); this Python version is a
+dependency-light reproducer that maps a tall/skinny problem through PyTorch
+(row-major ``A @ B`` becomes a column-major gemm whose free dimension is the
+large one). It deliberately uses a *different* shape from the gtest case: each
+precision is run just past its own measured boundary (``2^21`` for fp64,
+``2^22`` for fp32, the factor of two coming from the macro-tile size) with
+different ``M``/``K``, so the two tests cover different Tensile solutions and
+a different number of chunks.
 
 It is skipped unless a ROCm PyTorch build and a GPU are available.
 """
@@ -25,10 +29,15 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-# N just past the fp64 grid.y boundary (65536 * 32 == 2^21 == 2097152).
-N = 2097153
-K = 15
-M = 3
+M = 5
+K = 7
+
+# N just past the grid.y boundary measured for each precision:
+# fp64 macro-tile N=32 -> 65536 * 32 == 2^21; fp32 macro-tile N=64 -> 2^22.
+BOUNDARY_N = {
+    torch.float64: 2097152 + 3,  # 2^21 + 3
+    torch.float32: 4194304 + 3,  # 2^22 + 3
+}
 
 
 @pytest.mark.parametrize("dtype", [torch.float64, torch.float32])
@@ -36,6 +45,7 @@ def test_gemm_large_n_grid_y_limit(dtype):
     if not torch.cuda.is_available():
         pytest.skip("no GPU / ROCm device available")
 
+    N = BOUNDARY_N[dtype]
     device = "cuda"
     # Row-major A @ B: rocBLAS computes it as a column-major gemm whose free
     # (N) dimension is the large leading dimension of A -> exercises grid.y.
