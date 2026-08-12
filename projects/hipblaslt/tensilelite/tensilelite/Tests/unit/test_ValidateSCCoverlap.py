@@ -25,7 +25,7 @@
 from typing import Any, Optional
 from rocisa.instruction import SWaitCnt
 
-from Tensile.Components.CMSValidator import verify_scc_overlap
+from tensilelite.Components.CMSValidator import verify_scc_overlap
 from cms_validation_base import CMSValidationTestBase
 
 class TestValidateSCCOverlap(CMSValidationTestBase):

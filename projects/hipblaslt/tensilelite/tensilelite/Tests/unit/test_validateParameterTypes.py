@@ -22,9 +22,9 @@
 
 import pytest
 
-from Tensile.Common.TypeValidationErrors import ConfigTypeError
-from Tensile.Common.ValidParameters import validParameters
-from Tensile.SolutionStructs.Solution import (
+from tensilelite.Common.TypeValidationErrors import ConfigTypeError
+from tensilelite.Common.ValidParameters import validParameters
+from tensilelite.SolutionStructs.Solution import (
     validateParameterTypes,
     mergeMismatchRecords,
     _getExpectedTypes,
@@ -34,7 +34,7 @@ from Tensile.SolutionStructs.Solution import (
     resetTypeMismatchCollector,
     raiseIfTypeMismatches,
 )
-from Tensile.SolutionStructs.Problem import (
+from tensilelite.SolutionStructs.Problem import (
     ProblemType,
     validateProblemTypeParameterTypes,
     _expectedProblemTypeParamTypes,
@@ -599,7 +599,7 @@ class TestWorkerPassthroughBackstop:
         stand up a full Solution-construction stack. The point is the
         typed-except in _generate_single_solution.
         """
-        from Tensile import BenchmarkProblems
+        from tensilelite import BenchmarkProblems
 
         perm, ptype, cfg, isaInfoMap = self._make_minimal_fixtures()
 
@@ -625,7 +625,7 @@ class TestWorkerPassthroughBackstop:
 
     def test_worker_swallows_generic_exception(self, capsys):
         """A non-ConfigTypeError still gets swallowed (legacy behaviour)."""
-        from Tensile import BenchmarkProblems
+        from tensilelite import BenchmarkProblems
 
         perm, ptype, cfg, isaInfoMap = self._make_minimal_fixtures()
 

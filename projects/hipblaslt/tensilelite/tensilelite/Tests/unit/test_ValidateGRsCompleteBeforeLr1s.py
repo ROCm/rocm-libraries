@@ -24,7 +24,7 @@
 ################################################################################
 from rocisa.instruction import SWaitCnt, SBarrier
 
-from Tensile.Components.CMSValidator import add_gr_finish_before_lr_constraints
+from tensilelite.Components.CMSValidator import add_gr_finish_before_lr_constraints
 from cms_validation_base import CMSValidationTestBase
 
 class TestValidateGRsCompleteBeforeLr1s(CMSValidationTestBase):

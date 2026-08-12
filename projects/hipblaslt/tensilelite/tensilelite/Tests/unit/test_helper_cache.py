@@ -58,7 +58,7 @@ def _write_test_files(tmp_path, cpp_content="void f(){}", h_content="#pragma onc
 
 class TestComputeCacheKey:
     def test_deterministic(self, tmp_path):
-        from Tensile.Toolchain.HelperKernelCache import _computeCacheKey
+        from tensilelite.Toolchain.HelperKernelCache import _computeCacheKey
         kernel_path = _write_test_files(tmp_path)
         compiler = MockCompiler()
         k1 = _computeCacheKey(kernel_path, tmp_path, ["gfx942"], compiler)
@@ -67,7 +67,7 @@ class TestComputeCacheKey:
         assert len(k1) == 64  # sha256 hex digest
 
     def test_different_source_different_key(self, tmp_path):
-        from Tensile.Toolchain.HelperKernelCache import _computeCacheKey
+        from tensilelite.Toolchain.HelperKernelCache import _computeCacheKey
         kernel_path = _write_test_files(tmp_path, cpp_content="void f(){}")
         compiler = MockCompiler()
         k1 = _computeCacheKey(kernel_path, tmp_path, ["gfx942"], compiler)
@@ -76,7 +76,7 @@ class TestComputeCacheKey:
         assert k1 != k2
 
     def test_different_arch_different_key(self, tmp_path):
-        from Tensile.Toolchain.HelperKernelCache import _computeCacheKey
+        from tensilelite.Toolchain.HelperKernelCache import _computeCacheKey
         kernel_path = _write_test_files(tmp_path)
         compiler = MockCompiler()
         k1 = _computeCacheKey(kernel_path, tmp_path, ["gfx942"], compiler)
@@ -84,7 +84,7 @@ class TestComputeCacheKey:
         assert k1 != k2
 
     def test_arch_order_irrelevant(self, tmp_path):
-        from Tensile.Toolchain.HelperKernelCache import _computeCacheKey
+        from tensilelite.Toolchain.HelperKernelCache import _computeCacheKey
         kernel_path = _write_test_files(tmp_path)
         compiler = MockCompiler()
         k1 = _computeCacheKey(kernel_path, tmp_path, ["gfx942", "gfx1100"], compiler)
@@ -92,28 +92,28 @@ class TestComputeCacheKey:
         assert k1 == k2
 
     def test_different_compiler_version_different_key(self, tmp_path):
-        from Tensile.Toolchain.HelperKernelCache import _computeCacheKey
+        from tensilelite.Toolchain.HelperKernelCache import _computeCacheKey
         kernel_path = _write_test_files(tmp_path)
         k1 = _computeCacheKey(kernel_path, tmp_path, ["gfx942"], MockCompiler(version=(6, 0, 0)))
         k2 = _computeCacheKey(kernel_path, tmp_path, ["gfx942"], MockCompiler(version=(6, 1, 0)))
         assert k1 != k2
 
     def test_different_rocm_version_different_key(self, tmp_path):
-        from Tensile.Toolchain.HelperKernelCache import _computeCacheKey
+        from tensilelite.Toolchain.HelperKernelCache import _computeCacheKey
         kernel_path = _write_test_files(tmp_path)
         k1 = _computeCacheKey(kernel_path, tmp_path, ["gfx942"], MockCompiler(rocm_version=(6, 0, 0)))
         k2 = _computeCacheKey(kernel_path, tmp_path, ["gfx942"], MockCompiler(rocm_version=(6, 1, 0)))
         assert k1 != k2
 
     def test_asan_changes_key(self, tmp_path):
-        from Tensile.Toolchain.HelperKernelCache import _computeCacheKey
+        from tensilelite.Toolchain.HelperKernelCache import _computeCacheKey
         kernel_path = _write_test_files(tmp_path)
         k1 = _computeCacheKey(kernel_path, tmp_path, ["gfx942"], MockCompiler(asan=False))
         k2 = _computeCacheKey(kernel_path, tmp_path, ["gfx942"], MockCompiler(asan=True))
         assert k1 != k2
 
     def test_static_header_change_changes_key(self, tmp_path):
-        from Tensile.Toolchain.HelperKernelCache import _computeCacheKey
+        from tensilelite.Toolchain.HelperKernelCache import _computeCacheKey
         kernel_path = _write_test_files(tmp_path)
         compiler = MockCompiler()
         k1 = _computeCacheKey(kernel_path, tmp_path, ["gfx942"], compiler)
@@ -124,23 +124,23 @@ class TestComputeCacheKey:
 
 class TestCheckCache:
     def test_returns_none_when_dir_missing(self, tmp_path):
-        from Tensile.Toolchain.HelperKernelCache import _checkCache
+        from tensilelite.Toolchain.HelperKernelCache import _checkCache
         assert _checkCache(tmp_path, "nonexistent_hash") is None
 
     def test_returns_none_when_dir_empty(self, tmp_path):
-        from Tensile.Toolchain.HelperKernelCache import _checkCache
+        from tensilelite.Toolchain.HelperKernelCache import _checkCache
         (tmp_path / "some_hash").mkdir()
         assert _checkCache(tmp_path, "some_hash") is None
 
     def test_returns_none_when_file_zero_size(self, tmp_path):
-        from Tensile.Toolchain.HelperKernelCache import _checkCache
+        from tensilelite.Toolchain.HelperKernelCache import _checkCache
         entry = tmp_path / "some_hash" / "gfx942"
         entry.mkdir(parents=True)
         (entry / "Kernels.so-000-gfx942.hsaco").write_bytes(b"")
         assert _checkCache(tmp_path, "some_hash") is None
 
     def test_returns_files_on_valid_entry(self, tmp_path):
-        from Tensile.Toolchain.HelperKernelCache import _checkCache
+        from tensilelite.Toolchain.HelperKernelCache import _checkCache
         entry = tmp_path / "some_hash" / "gfx942"
         entry.mkdir(parents=True)
         (entry / "Kernels.so-000-gfx942.hsaco").write_bytes(b"\x7fELF")
@@ -151,7 +151,7 @@ class TestCheckCache:
         assert all(f.suffix == ".hsaco" for f in result)
 
     def test_ignores_non_hsaco_files(self, tmp_path):
-        from Tensile.Toolchain.HelperKernelCache import _checkCache
+        from tensilelite.Toolchain.HelperKernelCache import _checkCache
         entry = tmp_path / "some_hash" / "gfx942"
         entry.mkdir(parents=True)
         (entry / "Kernels.so-000-gfx942.hsaco").write_bytes(b"\x7fELF")
@@ -162,7 +162,7 @@ class TestCheckCache:
 
 class TestPopulateCache:
     def test_populates_empty_cache(self, tmp_path):
-        from Tensile.Toolchain.HelperKernelCache import _populateCache
+        from tensilelite.Toolchain.HelperKernelCache import _populateCache
         cache_dir = tmp_path / "cache"
         cache_dir.mkdir()
         # Source hsacoFiles live under <root>/<base-arch>/; _populateCache mirrors
@@ -177,7 +177,7 @@ class TestPopulateCache:
         assert cached.read_bytes() == b"\x7fELF_data_1"
 
     def test_skips_when_entry_exists(self, tmp_path):
-        from Tensile.Toolchain.HelperKernelCache import _populateCache
+        from tensilelite.Toolchain.HelperKernelCache import _populateCache
         cache_dir = tmp_path / "cache"
         entry = cache_dir / "abc123" / "gfx942"
         entry.mkdir(parents=True)
@@ -190,7 +190,7 @@ class TestPopulateCache:
         assert (entry / "Kernels.so-000-gfx942.hsaco").read_bytes() == b"original"
 
     def test_cleans_up_tmp_on_race(self, tmp_path):
-        from Tensile.Toolchain.HelperKernelCache import _populateCache
+        from tensilelite.Toolchain.HelperKernelCache import _populateCache
         cache_dir = tmp_path / "cache"
         cache_dir.mkdir()
         # Pre-create the final dir to simulate a race
@@ -206,7 +206,7 @@ class TestPopulateCache:
         assert len(tmp_dirs) == 0
 
     def test_creates_cache_dir_if_missing(self, tmp_path):
-        from Tensile.Toolchain.HelperKernelCache import _populateCache
+        from tensilelite.Toolchain.HelperKernelCache import _populateCache
         cache_dir = tmp_path / "cache" / "subdir"
         src_dir = tmp_path / "src" / "gfx942"
         src_dir.mkdir(parents=True)
@@ -219,7 +219,7 @@ class TestPopulateCache:
 class TestEvictStale:
     def test_removes_old_entries(self, tmp_path):
         import time
-        from Tensile.Toolchain.HelperKernelCache import _evictStale
+        from tensilelite.Toolchain.HelperKernelCache import _evictStale
         cache_dir = tmp_path / "cache"
         old_entry = cache_dir / "old_hash"
         old_entry.mkdir(parents=True)
@@ -232,7 +232,7 @@ class TestEvictStale:
         assert not old_entry.exists()
 
     def test_keeps_recent_entries(self, tmp_path):
-        from Tensile.Toolchain.HelperKernelCache import _evictStale
+        from tensilelite.Toolchain.HelperKernelCache import _evictStale
         cache_dir = tmp_path / "cache"
         recent = cache_dir / "recent_hash"
         recent.mkdir(parents=True)
@@ -244,7 +244,7 @@ class TestEvictStale:
 
     def test_skips_tmp_dirs(self, tmp_path):
         import time
-        from Tensile.Toolchain.HelperKernelCache import _evictStale
+        from tensilelite.Toolchain.HelperKernelCache import _evictStale
         cache_dir = tmp_path / "cache"
         tmp_dir = cache_dir / ".tmp_abc_1234"
         tmp_dir.mkdir(parents=True)
@@ -255,13 +255,13 @@ class TestEvictStale:
         assert tmp_dir.exists()
 
     def test_noop_when_cache_dir_missing(self, tmp_path):
-        from Tensile.Toolchain.HelperKernelCache import _evictStale
+        from tensilelite.Toolchain.HelperKernelCache import _evictStale
         # Should not raise
         _evictStale(tmp_path / "nonexistent", 30)
 
     def test_mixed_old_and_recent(self, tmp_path):
         import time
-        from Tensile.Toolchain.HelperKernelCache import _evictStale
+        from tensilelite.Toolchain.HelperKernelCache import _evictStale
         cache_dir = tmp_path / "cache"
         old = cache_dir / "old_hash"
         old.mkdir(parents=True)
@@ -282,7 +282,7 @@ class TestRestoreRobustness:
     def test_restore_updates_mtime(self, tmp_path, monkeypatch):
         """Cache hit should touch mtime so the entry is not evicted."""
         import time
-        from Tensile.Toolchain.HelperKernelCache import HelperKernelCache, _computeCacheKey
+        from tensilelite.Toolchain.HelperKernelCache import HelperKernelCache, _computeCacheKey
         cache_dir = tmp_path / "cache"
         monkeypatch.setenv("TENSILE_HELPER_CACHE_DIR", str(cache_dir))
         monkeypatch.delenv("TENSILE_DISABLE_HELPER_CACHE", raising=False)
@@ -308,7 +308,7 @@ class TestRestoreRobustness:
 
     def test_restore_recovers_from_deleted_entry(self, tmp_path, monkeypatch):
         """If cache entry is deleted mid-copy, restore returns a miss."""
-        from Tensile.Toolchain.HelperKernelCache import HelperKernelCache, _computeCacheKey, _checkCache
+        from tensilelite.Toolchain.HelperKernelCache import HelperKernelCache, _computeCacheKey, _checkCache
         cache_dir = tmp_path / "cache"
         monkeypatch.setenv("TENSILE_HELPER_CACHE_DIR", str(cache_dir))
         monkeypatch.delenv("TENSILE_DISABLE_HELPER_CACHE", raising=False)
@@ -338,7 +338,7 @@ class TestRestoreRobustness:
 
     def test_restore_cleans_partial_copies(self, tmp_path, monkeypatch):
         """If copy fails mid-loop, already-copied files are cleaned up."""
-        from Tensile.Toolchain.HelperKernelCache import HelperKernelCache, _computeCacheKey
+        from tensilelite.Toolchain.HelperKernelCache import HelperKernelCache, _computeCacheKey
         cache_dir = tmp_path / "cache"
         monkeypatch.setenv("TENSILE_HELPER_CACHE_DIR", str(cache_dir))
         monkeypatch.delenv("TENSILE_DISABLE_HELPER_CACHE", raising=False)
@@ -379,7 +379,7 @@ class TestBuildSourceCodeObjectFilesCache:
 
     def test_cache_miss_creates_entry(self, tmp_path, monkeypatch):
         """On cache miss, after compilation, cache dir should be populated."""
-        from Tensile.Toolchain.HelperKernelCache import _computeCacheKey, _checkCache
+        from tensilelite.Toolchain.HelperKernelCache import _computeCacheKey, _checkCache
         cache_dir = tmp_path / "cache"
         monkeypatch.setenv("TENSILE_HELPER_CACHE_DIR", str(cache_dir))
         monkeypatch.delenv("TENSILE_DISABLE_HELPER_CACHE", raising=False)
@@ -405,7 +405,7 @@ class TestBuildSourceCodeObjectFilesCache:
 
     def test_cache_hit_copies_files(self, tmp_path):
         """Pre-populate cache, verify _checkCache finds it."""
-        from Tensile.Toolchain.HelperKernelCache import _checkCache
+        from tensilelite.Toolchain.HelperKernelCache import _checkCache
         cache_dir = tmp_path / "cache"
         entry = cache_dir / "test_key" / "gfx942"
         entry.mkdir(parents=True)

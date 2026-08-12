@@ -39,8 +39,8 @@ if TENSILE_ROOT not in sys.path:
 
 from gpu_test_helpers import init_rocisa  # noqa: E402
 
-from Tensile.Common.Architectures import gfxToIsa  # noqa: E402
-from Tensile.Common.DataType import DataType  # noqa: E402
+from tensilelite.Common.Architectures import gfxToIsa  # noqa: E402
+from tensilelite.Common.DataType import DataType  # noqa: E402
 
 import AMaxGenerator  # noqa: E402
 

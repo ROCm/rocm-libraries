@@ -22,7 +22,7 @@
 
 from rocisa.instruction import SWaitCnt, SBarrier
 
-from Tensile.Components.CMSValidator import (
+from tensilelite.Components.CMSValidator import (
     add_local_read_constraints, add_gr_finish_before_lr_constraints,
 )
 from cms_validation_base import CMSValidationTestBase

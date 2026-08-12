@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Unit tests for Tensile.RocisaStatus._rocisa_install_status (the three-way
+"""Unit tests for tensilelite.RocisaStatus._rocisa_install_status (the three-way
 rocisa detection that drives auto-enabling HIPBLASLT_BUNDLE_PYTHON_DEPS in
 tasks.build_client)."""
 
@@ -13,7 +13,7 @@ import pytest
 # same way in the source tree and in the installed test artifacts (the Tests
 # conftest puts the tensilelite root on sys.path). Importing it here avoids the
 # `invoke` dependency that loading tasks.py by path used to pull in.
-from Tensile.RocisaStatus import _rocisa_install_status
+from tensilelite.RocisaStatus import _rocisa_install_status
 
 pytestmark = pytest.mark.unit
 

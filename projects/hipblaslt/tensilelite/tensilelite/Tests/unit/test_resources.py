@@ -9,8 +9,8 @@ from zipfile import Path as ZipPath, ZipFile
 import pytest
 import yaml
 
-from Tensile import resources
-from Tensile.TensileCreateLibrary import copyStaticFiles
+from tensilelite import resources
+from tensilelite.TensileCreateLibrary import copyStaticFiles
 
 
 pytestmark = pytest.mark.unit

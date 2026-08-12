@@ -1,5 +1,5 @@
 import pytest
-from Tensile.SolutionStructs.segment_interleave import evaluate, aligned_budget_ok, SEG
+from tensilelite.SolutionStructs.segment_interleave import evaluate, aligned_budget_ok, SEG
 
 pytestmark = pytest.mark.unit
 

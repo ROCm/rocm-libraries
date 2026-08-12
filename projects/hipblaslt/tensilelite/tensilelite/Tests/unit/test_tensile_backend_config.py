@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Extended tests for Tensile.py backend configuration parsing (patch coverage).
+"""Extended tests for tensilelite.py backend configuration parsing (patch coverage).
 
 Targets uncovered lines reported by codecov:
 - Backend dict without 'Name' key → printExit
@@ -19,7 +19,7 @@ import types
 import pytest
 import yaml
 
-from Tensile import Tensile as TensileModule
+from tensilelite import tensilelite as TensileModule
 
 pytestmark = pytest.mark.unit
 
@@ -85,7 +85,7 @@ def _make_exit(monkeypatch):
     exit_func = lambda msg: (_ for _ in ()).throw(RuntimeError(msg))
     monkeypatch.setattr(TensileModule, "printExit", exit_func)
     # Also patch in the backends.config module since parse_backend_config imports it there
-    from Tensile.backends import config as backend_config_module
+    from tensilelite.backends import config as backend_config_module
     monkeypatch.setattr(backend_config_module, "printExit", exit_func)
 
 
@@ -195,11 +195,11 @@ def test_benchmark_problems_backend_cfg_missing_name_exits(monkeypatch, tmp_path
         exited.append(m)
     monkeypatch.setattr(TensileModule, "printExit", collect_exit)
     # Also patch in backends.config module
-    from Tensile.backends import config as backend_config_module
+    from tensilelite.backends import config as backend_config_module
     monkeypatch.setattr(backend_config_module, "printExit", collect_exit)
 
     # Patch BenchmarkProblems.main to capture the backend_cfg passed in
-    import Tensile.BenchmarkProblems as BP
+    import tensilelite.BenchmarkProblems as BP
     monkeypatch.setattr(BP, "main", lambda *a, **kw: None)
 
     config = {
@@ -248,10 +248,10 @@ def test_benchmark_problems_backend_cfg_not_dict_exits(monkeypatch, tmp_path):
         exited.append(m)
     monkeypatch.setattr(TensileModule, "printExit", collect_exit)
     # Also patch in backends.config module
-    from Tensile.backends import config as backend_config_module
+    from tensilelite.backends import config as backend_config_module
     monkeypatch.setattr(backend_config_module, "printExit", collect_exit)
 
-    import Tensile.BenchmarkProblems as BP
+    import tensilelite.BenchmarkProblems as BP
     monkeypatch.setattr(BP, "main", lambda *a, **kw: None)
 
     config = {
@@ -270,7 +270,7 @@ def test_benchmark_problems_backend_cfg_not_dict_exits(monkeypatch, tmp_path):
 def test_execute_steps_normalizes_default_backend_cfg(monkeypatch, tmp_path):
     captured = {}
 
-    import Tensile.BenchmarkProblems as BP
+    import tensilelite.BenchmarkProblems as BP
 
     monkeypatch.setattr(
         BP,
@@ -305,7 +305,7 @@ def test_execute_steps_normalizes_default_backend_cfg(monkeypatch, tmp_path):
 def test_execute_steps_normalizes_missing_name_and_none_config(monkeypatch, tmp_path):
     captured = {}
 
-    import Tensile.BenchmarkProblems as BP
+    import tensilelite.BenchmarkProblems as BP
 
     monkeypatch.setattr(
         BP,

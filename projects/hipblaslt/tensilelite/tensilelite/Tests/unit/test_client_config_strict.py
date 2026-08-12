@@ -34,7 +34,7 @@ asserts that ``libraryFile`` is supplied; this test pins that contract.
 
 import pytest
 
-from Tensile.ClientWriter import writeClientConfigIni
+from tensilelite.ClientWriter import writeClientConfigIni
 
 pytestmark = pytest.mark.unit
 
