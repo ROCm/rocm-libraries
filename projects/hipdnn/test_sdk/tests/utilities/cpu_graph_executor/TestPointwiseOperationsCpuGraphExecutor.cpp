@@ -453,7 +453,7 @@ TYPED_TEST(ReluPointwiseOperationsCpuGraphExecutor, ReluBackwardUpperBoundOnlyAb
     PointwiseReluTestHelper::runReluBwdTest<TypeParam>(params);
 }
 
-TEST(PointwiseOperationsCpuGraphExecutor, PreluForwardBackwardComposedGraph)
+TEST(TestPointwiseOperationsCpuGraphExecutor, PreluForwardBackwardComposedGraph)
 {
     const std::vector<int64_t> tensorDims = {1, 2, 2, 2};
     const std::vector<int64_t> alphaDims = {1, 2, 1, 1};

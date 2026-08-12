@@ -723,17 +723,10 @@ TEST(TestPointwisePlanBuilder, PlanBuilderThrowsIfSoftPlusBetaValueSet)
     EXPECT_THROW(planBuilder.buildNodePlan(graphWrap, graphWrap.getNode(0)), std::runtime_error);
 }
 
-template <class T>
-class TernaryPointwisePlan : public ::testing::Test
+template <typename T>
+static void executeTernaryBinarySelectBroadcast()
 {
-};
-
-using TernaryPointwiseTypes = ::testing::Types<float, half, bfloat16>;
-TYPED_TEST_SUITE(TernaryPointwisePlan, TernaryPointwiseTypes, );
-
-TYPED_TEST(TernaryPointwisePlan, BinarySelectBroadcast)
-{
-    constexpr auto DATA_TYPE = nativeTypeToDataType<TypeParam>();
+    constexpr auto DATA_TYPE = nativeTypeToDataType<T>();
     const std::vector<int64_t> input0Dims = {1, 2, 1, 1};
     const std::vector<int64_t> input1Dims = {2, 1, 1, 3};
     const std::vector<int64_t> maskDims = {2, 1, 1, 3};
@@ -756,30 +749,27 @@ TYPED_TEST(TernaryPointwisePlan, BinarySelectBroadcast)
     const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
     const auto& attributes = graphWrapper.getNodeWrapper(0).attributesAs<PointwiseAttributes>();
 
-    auto* input0
-        = static_cast<Tensor<TypeParam>*>(&tensorBundle.getTensor(attributes.in_0_tensor_uid()));
-    auto* input1 = static_cast<Tensor<TypeParam>*>(
-        &tensorBundle.getTensor(attributes.in_1_tensor_uid().value()));
+    auto* input0 = static_cast<Tensor<T>*>(&tensorBundle.getTensor(attributes.in_0_tensor_uid()));
+    auto* input1
+        = static_cast<Tensor<T>*>(&tensorBundle.getTensor(attributes.in_1_tensor_uid().value()));
     auto* mask
         = static_cast<Tensor<bool>*>(&tensorBundle.getTensor(attributes.in_2_tensor_uid().value()));
-    auto* output
-        = static_cast<Tensor<TypeParam>*>(&tensorBundle.getTensor(attributes.out_0_tensor_uid()));
+    auto* output = static_cast<Tensor<T>*>(&tensorBundle.getTensor(attributes.out_0_tensor_uid()));
 
     for(int64_t channel = 0; channel < 2; ++channel)
     {
-        input0->setHostValue(
-            static_cast<TypeParam>(10.0f + static_cast<float>(channel)), 0, channel, 0, 0);
+        input0->setHostValue(static_cast<T>(10.0f + static_cast<float>(channel)), 0, channel, 0, 0);
     }
     for(int64_t batch = 0; batch < 2; ++batch)
     {
         for(int64_t width = 0; width < 3; ++width)
         {
-            input1->setHostValue(static_cast<TypeParam>(-100.0f * static_cast<float>(batch + 1)
-                                                        - static_cast<float>(width)),
-                                 batch,
-                                 0,
-                                 0,
-                                 width);
+            input1->setHostValue(
+                static_cast<T>(-100.0f * static_cast<float>(batch + 1) - static_cast<float>(width)),
+                batch,
+                0,
+                0,
+                width);
             mask->setHostValue((batch + width) % 2 == 0, batch, 0, 0, width);
         }
     }
@@ -805,6 +795,21 @@ TYPED_TEST(TernaryPointwisePlan, BinarySelectBroadcast)
             }
         }
     }
+}
+
+TEST(TestTernaryPointwisePlan, ExecuteFloatBinarySelectBroadcast)
+{
+    executeTernaryBinarySelectBroadcast<float>();
+}
+
+TEST(TestTernaryPointwisePlan, ExecuteHalfBinarySelectBroadcast)
+{
+    executeTernaryBinarySelectBroadcast<half>();
+}
+
+TEST(TestTernaryPointwisePlan, ExecuteBfloat16BinarySelectBroadcast)
+{
+    executeTernaryBinarySelectBroadcast<bfloat16>();
 }
 
 TEST_F(TestPointwisePlan, CompareGreaterProducesBooleanMask)
