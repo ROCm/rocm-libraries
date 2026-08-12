@@ -523,6 +523,34 @@ TEST(aux_ext_test, gemm_preference_streamk_tile_scheduling_mode_round_trip)
     ASSERT_EQ(pref.getStreamKTileSchedulingMode(), HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF);
 }
 
+TEST(aux_ext_test, gemm_preference_uniform_summation_order_default_is_off)
+{
+    hipblaslt_ext::GemmPreference pref;
+    ASSERT_FALSE(pref.getUniformSummationOrder());
+}
+
+TEST(aux_ext_test, gemm_preference_uniform_summation_order_round_trip)
+{
+    hipblaslt_ext::GemmPreference pref;
+
+    pref.setUniformSummationOrder(true);
+    ASSERT_TRUE(pref.getUniformSummationOrder());
+
+    // GemmPreferenceImpl is copied member-wise by the hand-rolled copy
+    // constructor and copy assignment, so both have to carry the new member.
+    hipblaslt_ext::GemmPreference copy_constructed(pref);
+    ASSERT_TRUE(copy_constructed.getUniformSummationOrder());
+
+    hipblaslt_ext::GemmPreference copy_assigned;
+    copy_assigned = pref;
+    ASSERT_TRUE(copy_assigned.getUniformSummationOrder());
+
+    pref.setUniformSummationOrder(false);
+    ASSERT_FALSE(pref.getUniformSummationOrder());
+    ASSERT_TRUE(copy_constructed.getUniformSummationOrder());
+    ASSERT_TRUE(copy_assigned.getUniformSummationOrder());
+}
+
 TEST(aux_attr_test, desc_streamk_tile_scheduling_ext_set_rejects_out_of_range)
 {
     hipblasLtMatmulDesc_t desc = nullptr;
