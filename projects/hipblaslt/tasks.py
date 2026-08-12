@@ -174,7 +174,15 @@ def _rmtree(path: Path):
     def _on_error(func, path, _exc):
         os.chmod(path, 0o666)
         func(path)
-    shutil.rmtree(path, onexc=_on_error)
+    # shutil.rmtree gained `onexc` in 3.12 and deprecated `onerror` there.  The
+    # pinned tensilelite venv is CPython 3.10, where passing `onexc` raises
+    # TypeError -- so `invoke build --clean` failed instantly on every
+    # sub-3.12 interpreter, and the only way to build was to drop --clean,
+    # which silently reuses a stale Tensile device library.
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=_on_error)
+    else:
+        shutil.rmtree(path, onerror=lambda f, p, e: _on_error(f, p, e))
 
 
 def _find_rc_exe() -> str:
