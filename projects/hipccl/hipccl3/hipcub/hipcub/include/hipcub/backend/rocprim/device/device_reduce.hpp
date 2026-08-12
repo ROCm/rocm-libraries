@@ -273,11 +273,7 @@ public:
                       d_in,
                       d_out,
                       num_items,
-#if _HIPCUB_HAS_DEVICE_SYSTEM_STD
                       _HIPCUB_LIBCXX::minimum<>{},
-#else
-                      [] (auto a, auto b) { return a > b ? b : a;},
-#endif
                       detail::get_max_value<T>(),
                       stream);
     }
@@ -394,11 +390,7 @@ public:
                       d_in,
                       d_out,
                       num_items,
-#if _HIPCUB_HAS_DEVICE_SYSTEM_STD
                       _HIPCUB_LIBCXX::maximum<>{},
-#else
-                      [] (auto a, auto b) { return a > b ? a : b;},
-#endif
                       detail::get_lowest_value<T>(),
                       stream);
     }
