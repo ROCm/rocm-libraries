@@ -27,6 +27,7 @@
 // numbers is covered by DAGSchedulerPassTest.cpp and tests/filecheck/dag_*.stir.
 #include <gtest/gtest.h>
 
+#include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/HWModel.hpp"
 #include "stinkytofu/transforms/asm/dag/HazardRules.hpp"
 
@@ -93,4 +94,20 @@ TEST(HWModel, Gfx1250v0MatchesGfx1250ForNow) {
 // callers that cache the reference stay valid.
 TEST(HWModel, UnlistedArchFallsBackToGfx1250) {
     EXPECT_EQ(&hwModelForArch({9, 4, 2}), &hwModelForArch(kGfx1250));
+}
+
+// Many unit tests construct a bare PassContext, and EstimateAsmCyclesPass builds
+// one internally; none of those call setGemmTileConfig. getHWModel() must still
+// answer rather than dereference a null cached pointer.
+TEST(HWModel, BarePassContextReturnsDefaultModel) {
+    PassContext ctx;
+    EXPECT_EQ(&ctx.getHWModel(), &hwModelForArch(kGfx1250));
+}
+
+TEST(HWModel, ConfiguredPassContextCachesMatchingModel) {
+    GemmTileConfig cfg;
+    cfg.arch = kGfx1250;
+    PassContext ctx;
+    ctx.setGemmTileConfig(cfg);
+    EXPECT_EQ(&ctx.getHWModel(), &hwModelForArch(kGfx1250));
 }
