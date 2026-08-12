@@ -28,15 +28,49 @@
  * deviceId() has four paths per its own doc: a null stream falls through to the current
  * device, a non-null stream resolves via hipStreamGetDevice, a stream hipStreamGetDevice
  * cannot resolve falls through the same way a null one does, and a process with no
- * usable HIP context at all falls back to device 0. The first three are driven below;
- * the fourth requires a HIP runtime with no usable context, which is not something a
- * test can put this process into without faking the HIP runtime itself, so it is a
- * defensive branch with no test hook here -- documented, not exercised.
+ * usable HIP context at all is refused rather than defaulted to device 0. The first
+ * three are driven below; the fourth requires a HIP runtime with no usable context,
+ * which is not something a test can put this process into without faking the HIP
+ * runtime itself, so it is a defensive branch with no test hook here -- documented,
+ * not exercised.
+ *
+ * deviceProperties() refuses to cache a failed query, so the growth test below supplies
+ * successful answers through the resolver's own query seam rather than leaning on
+ * invalid device ids, which no longer produce cache entries.
  */
 namespace
 {
 
 using hip_kernel_provider::kernel_ingestor_engine::HandleDeviceResolver;
+
+/// Answers every property query successfully, whatever the device id, so a test can
+/// grow the cache past a rehash without needing that many physical devices. The
+/// production class refuses to cache a failed query, so invalid ids no longer produce
+/// entries at all -- this seam is how the growth invariant stays testable on one GPU.
+class FakeQueryResolver : public HandleDeviceResolver
+{
+public:
+    /// warpSize is set from the id so a caller can tell one faked entry from another.
+    hipError_t queryDeviceProperties(hipDeviceProp_t* properties,
+                                     hipdnn_plugin_sdk::ingestor::DeviceId deviceId) const override
+    {
+        *properties = hipDeviceProp_t{};
+        properties->warpSize = static_cast<int>(deviceId);
+        return hipSuccess;
+    }
+};
+
+/// Fails every property query, to drive the refusal path.
+class FailingQueryResolver : public HandleDeviceResolver
+{
+public:
+    hipError_t
+        queryDeviceProperties(hipDeviceProp_t* /*properties*/,
+                              hipdnn_plugin_sdk::ingestor::DeviceId /*deviceId*/) const override
+    {
+        return hipErrorInvalidDevice;
+    }
+};
 
 // ---------------------------------------------------------------------------
 // deviceId()
@@ -135,12 +169,10 @@ TEST(TestHandleDeviceResolver, ReferencesStayValidAcrossCacheGrowth)
     // node-invalidating flat map) would silently break every caller holding a reference
     // across a later insert.
     //
-    // Invalid device ids are used deliberately: hipGetDeviceProperties() fails for them
-    // and deviceProperties() still caches and returns the (zeroed) result, which is
-    // enough to grow the map without needing that many real devices. CPU-only: no
-    // successful HIP call is required, only that insertion happens and does not move
-    // prior entries.
-    const HandleDeviceResolver resolver;
+    // Faked successful queries rather than invalid device ids: deviceProperties() no
+    // longer caches a failed query, so invalid ids would insert nothing and the map
+    // would never grow. CPU-only -- no real device is touched.
+    const FakeQueryResolver resolver;
 
     const auto& firstInserted = resolver.deviceProperties(1000);
 
@@ -153,9 +185,24 @@ TEST(TestHandleDeviceResolver, ReferencesStayValidAcrossCacheGrowth)
 
     const auto& sameEntryAfterGrowth = resolver.deviceProperties(1000);
     EXPECT_EQ(&firstInserted, &sameEntryAfterGrowth);
+    // The entry still holds what it was inserted with, not a neighbour's value moved
+    // over it: an address that survived a rehash is necessary but not sufficient.
+    EXPECT_EQ(sameEntryAfterGrowth.warpSize, 1000);
+}
 
-    static_cast<void>(hipGetLastError());
-    static_cast<void>(hipExtGetLastError());
+TEST(TestHandleDeviceResolver, RefusesAndDoesNotCacheAFailedPropertyQuery)
+{
+    // A zeroed hipDeviceProp_t is not a usable answer, and this cache is never
+    // invalidated: caching one failure would answer wrongly for every later caller
+    // asking about that device for the life of the process. Before the resolver became
+    // process-lifetime a container cycle cleared such an entry; nothing does now.
+    const FailingQueryResolver resolver;
+
+    EXPECT_THROW(static_cast<void>(resolver.deviceProperties(7)),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+    // Still refused on the second ask -- the failure was not remembered as an answer.
+    EXPECT_THROW(static_cast<void>(resolver.deviceProperties(7)),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestHandleDeviceResolver, ConcurrentDevicePropertyLookupsAreSafe)
@@ -165,7 +212,7 @@ TEST(TestHandleDeviceResolver, ConcurrentDevicePropertyLookupsAreSafe)
     // exercised by incidental test-suite parallelism. Every thread asks about the same
     // small set of device ids so a real race has many chances to corrupt the map if the
     // lock were missing.
-    const HandleDeviceResolver resolver;
+    const FakeQueryResolver resolver;
 
     std::vector<std::thread> threads;
     threads.reserve(8);

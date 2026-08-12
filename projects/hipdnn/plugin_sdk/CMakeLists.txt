@@ -52,7 +52,11 @@ install(TARGETS hipdnn_plugin_sdk EXPORT hipdnn_plugin_sdk_targets COMPONENT Dev
 # feature that uses them is enabled.
 set(HIP_DNN_PLUGIN_SDK_INSTALL_EXCLUDE_PATTERNS "")
 if(NOT HIPDNN_ENABLE_KERNEL_INGESTOR)
-    list(APPEND HIP_DNN_PLUGIN_SDK_INSTALL_EXCLUDE_PATTERNS PATTERN "ingestor/*" EXCLUDE)
+    # PATTERN "ingestor" and not "ingestor/*": under FILES_MATCHING, excluding the
+    # contents still creates the (empty) directory in the install tree, which is itself
+    # a change to a default build's installed artifacts. Matching the directory keeps it
+    # out entirely.
+    list(APPEND HIP_DNN_PLUGIN_SDK_INSTALL_EXCLUDE_PATTERNS PATTERN "ingestor" EXCLUDE)
 endif()
 
 install(

@@ -65,11 +65,13 @@ public:
         }
     }
 
+    // NOLINTNEXTLINE(portability-template-virtual-member-function)
     size_t getWorkspaceSize(const THandle& /*handle*/) const override
     {
         return _workspaceBytes;
     }
 
+    // NOLINTNEXTLINE(portability-template-virtual-member-function)
     void execute(const THandle& handle,
                  const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                  uint32_t numDeviceBuffers,

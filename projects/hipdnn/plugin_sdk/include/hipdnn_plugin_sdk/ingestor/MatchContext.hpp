@@ -23,6 +23,13 @@ namespace hipdnn_plugin_sdk::ingestor
 /// hipGetDevice; hipDNN has no richer device-identity type today.
 using DeviceId = int;
 
+/// The device id meaning "this call has no resolvable device". Negative so it can never
+/// alias a real ordinal: a resolver that cannot answer must not return 0, which is a
+/// device other calls legitimately resolve and would then share a catalog and property
+/// cache entry with. Matchers decline on it, so a call carrying no device finds no
+/// applicable kernel rather than matching against another device's facts.
+inline constexpr DeviceId NO_DEVICE = -1;
+
 /// A finalized graph's stable identity, minted by hipDNN at finalization and preserved
 /// across serialization round trips.
 using GraphId = hipdnn_flatbuffers_sdk::utilities::UuidBytes;

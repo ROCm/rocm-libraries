@@ -4,6 +4,7 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <algorithm>
+#include <string>
 
 #include <gtest/gtest.h>
 
@@ -11,11 +12,16 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+
+#include <hipdnn_plugin_sdk/ingestor/GenericPlan.hpp>
 
 #include "core/Container.hpp"
+#include "core/Context.hpp"
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 #include "engines/kernel_ingestor_engine/packs/PointwiseAddPack.hpp"
+#include "engines/kernel_ingestor_engine/packs/PointwiseAddSymbols.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/PointwiseAddTestGraphs.hpp"
 
 /**
@@ -92,6 +98,11 @@ TEST(TestKernelIngestorEngine, MakePointwiseAddEngineIsReachableWithTheDescripto
 
 TEST(TestKernelIngestorEngine, IsApplicableAcceptsAGraphThisPacksMatchersAccept)
 {
+    // Applicability resolves the call's device and matches on its properties, and the
+    // matchers decline outright when no device can be named -- so an accept is only
+    // meaningful where there is a device to accept for.
+    SKIP_IF_NO_DEVICES();
+
     Container container;
     auto& engineManager = container.getEngineManager();
     Handle handle;
@@ -105,6 +116,10 @@ TEST(TestKernelIngestorEngine, IsApplicableAcceptsAGraphThisPacksMatchersAccept)
 
 TEST(TestKernelIngestorEngine, GetEngineDetailsReportsTheBlockSizeKnob)
 {
+    // The reported knob's value set comes from the catalog this graph matched, which is
+    // empty without a device (see the applicability test above).
+    SKIP_IF_NO_DEVICES();
+
     Container container;
     auto& engineManager = container.getEngineManager();
     Handle handle;
@@ -121,6 +136,9 @@ TEST(TestKernelIngestorEngine, GetEngineDetailsReportsTheBlockSizeKnob)
 
 TEST(TestKernelIngestorEngine, GetMaxWorkspaceSizeReportsTheLargerBlocksRequirement)
 {
+    // Sizes a workspace from the kernels the graph matched -- none, without a device.
+    SKIP_IF_NO_DEVICES();
+
     Container container;
     auto& engineManager = container.getEngineManager();
     const Handle handle;
@@ -139,6 +157,11 @@ TEST(TestKernelIngestorEngine, GetMaxWorkspaceSizeReportsTheLargerBlocksRequirem
 
 TEST(TestKernelIngestorEngine, InitializeExecutionContextBuildsAPlanForTheTopRankedKernel)
 {
+    // Builds a plan, which compiles the selected kernel through hiprtc -- so unlike the
+    // applicability and knob-reporting tests above, this one needs a device. Every
+    // device-touching test in this engine's suite guards the same way.
+    SKIP_IF_NO_DEVICES();
+
     Container container;
     auto& engineManager = container.getEngineManager();
     const Handle handle;
@@ -148,9 +171,17 @@ TEST(TestKernelIngestorEngine, InitializeExecutionContextBuildsAPlanForTheTopRan
     stubAsThisEnginesConfig(engineConfig);
 
     Context context;
-    EXPECT_NO_THROW(
+    ASSERT_NO_THROW(
         engineManager.initializeExecutionContext(handle, wrap(graph), engineConfig, context));
-    EXPECT_TRUE(context.hasValidPlan());
+    ASSERT_TRUE(context.hasValidPlan());
+
+    // Which kernel, not merely that there is one: pointwiseAddScore ranks on block size
+    // and the graph admits both FLOAT kernels, so the 256 entry is the defined winner.
+    // Asserting only hasValidPlan() would pass just as well if selection handed back the
+    // 64 kernel, which is the property this test is named for.
+    const auto& plan
+        = dynamic_cast<const hipdnn_plugin_sdk::ingestor::GenericPlan<Handle>&>(context.plan());
+    EXPECT_EQ(plan.kernel().getIntMetadata(std::string(BLOCK_SIZE_FIELD)), 256);
 }
 
 // ---------------------------------------------------------------------------

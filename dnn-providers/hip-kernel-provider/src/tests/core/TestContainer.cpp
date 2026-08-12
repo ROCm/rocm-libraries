@@ -127,6 +127,11 @@ TEST(TestContainer, GetApplicableEngineIdsSdpaGraph)
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 TEST(TestContainer, GetApplicableEngineIdsPointwiseAddGraph)
 {
+    // Applicability is device-resolved: with no device the matchers decline, so an
+    // accept can only be asserted where there is one. Matches the SDPA applicability
+    // test above.
+    SKIP_IF_NO_DEVICES();
+
     using namespace hip_kernel_provider::kernel_ingestor_engine;
     using namespace hip_kernel_provider::kernel_ingestor_engine::testing;
 
