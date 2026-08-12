@@ -46,21 +46,9 @@ namespace detail
 {
 constexpr auto sum_reduce_op = _HIPCUB_STD::plus<>{};
 
-constexpr auto max_reduce_op =
-#if _HIPCUB_HAS_DEVICE_SYSTEM_STD
-    _HIPCUB_LIBCXX::maximum<>{}
-#else
-    [](auto a, auto b) { return a > b ? a : b; }
-#endif
-;
+constexpr auto max_reduce_op = _HIPCUB_LIBCXX::maximum<>{};
 
-constexpr auto min_reduce_op =
-#if _HIPCUB_HAS_DEVICE_SYSTEM_STD
-    _HIPCUB_LIBCXX::minimum<>{}
-#else
-    [](auto a, auto b) { return a > b ? b : a; }
-#endif
-;
+constexpr auto min_reduce_op = _HIPCUB_LIBCXX::minimum<>{};
 } // namespace detail
 
 template<typename T, int LogicalWarpThreads = HIPCUB_DEVICE_WARP_THREADS>
