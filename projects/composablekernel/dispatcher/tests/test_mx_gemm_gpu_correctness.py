@@ -45,15 +45,23 @@ _TOL = 5e-2  # fp8/fp4 block-scaled precision floor
 
 
 def _detect_arch():
+    # subprocess.run with a timeout (rocminfo can hang on misconfigured ROCm
+    # installs and would otherwise stall test discovery). Validate the parsed
+    # token is a real gfx string before returning it. Mirrors
+    # dispatcher/python/ctypes_utils.py:detect_gpu_arch.
     import subprocess
     try:
-        out = subprocess.check_output(["rocminfo"], text=True,
-                                      stderr=subprocess.DEVNULL)
+        result = subprocess.run(
+            ["rocminfo"], capture_output=True, text=True, timeout=10
+        )
     except Exception:
         return None
-    for line in out.splitlines():
-        if "Name:" in line and "gfx" in line:
-            return line.split()[-1].strip()
+    for line in result.stdout.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("Name:") and "gfx" in stripped:
+            name = stripped.split(":", 1)[1].strip()
+            if name.startswith("gfx") and name[3:].isdigit():
+                return name
     return None
 
 

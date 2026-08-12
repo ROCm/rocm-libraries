@@ -22,6 +22,7 @@ Run:
   python3 tests/test_multi_d_gpu_correctness.py
 """
 
+import shutil
 import sys
 import unittest
 from pathlib import Path
@@ -43,15 +44,23 @@ _TOL = 1e-2  # fp16 GEMM + fp16 D-fuse precision band
 
 
 def _detect_arch():
+    # subprocess.run with a timeout (rocminfo can hang on misconfigured ROCm
+    # installs and would otherwise stall test discovery). Validate the parsed
+    # token is a real gfx string before returning it. Mirrors
+    # dispatcher/python/ctypes_utils.py:detect_gpu_arch.
     import subprocess
     try:
-        out = subprocess.check_output(["rocminfo"], text=True,
-                                      stderr=subprocess.DEVNULL)
+        result = subprocess.run(
+            ["rocminfo"], capture_output=True, text=True, timeout=10
+        )
     except Exception:
         return None
-    for line in out.splitlines():
-        if "Name:" in line and "gfx" in line:
-            return line.split()[-1].strip()
+    for line in result.stdout.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("Name:") and "gfx" in stripped:
+            name = stripped.split(":", 1)[1].strip()
+            if name.startswith("gfx") and name[3:].isdigit():
+                return name
     return None
 
 
@@ -82,6 +91,8 @@ class TestMultiDGemmGpu(unittest.TestCase):
                 "dispatcher static lib (libck_tile_dispatcher.a) not built; "
                 "multi_d is registry-routed and needs it"
             )
+        if shutil.which("hipcc") is None and not Path("/opt/rocm/bin/hipcc").exists():
+            self.skipTest("hipcc not found")
 
     def test_fp16_multid_add(self):
         num_d = 2
