@@ -27,6 +27,15 @@ SOFTWARE.
 
 /* Generic interpolation helper functions */
 
+// Black pixel value for out-of-bounds fill (-128 for I8, 0 for U8/F16/F32)
+template <typename T>
+inline T rpp_generic_interpolation_black_value() {
+    if constexpr (std::is_same<T, Rpp8s>::value)
+        return static_cast<T>(-128);
+    else
+        return static_cast<T>(0);
+}
+
 template <typename T>
 inline void compute_generic_bilinear_srclocs_and_interpolate(T* srcPtrChannel,
                                                              RpptDescPtr srcDescPtr, Rpp32f& srcY,
@@ -226,9 +235,10 @@ inline void compute_generic_bilinear_interpolation_pkd3_to_pln3(Rpp32f srcY, Rpp
     Rpp32s srcYFloor = std::floor(srcY);
     if ((srcXFloor < roiLTRB->ltrbROI.lt.x) || (srcYFloor < roiLTRB->ltrbROI.lt.y) ||
         (srcXFloor > roiLTRB->ltrbROI.rb.x) || (srcYFloor > roiLTRB->ltrbROI.rb.y)) {
-        *dstPtrTempR = 0;
-        *dstPtrTempG = 0;
-        *dstPtrTempB = 0;
+        T fillValue = rpp_generic_interpolation_black_value<T>();
+        *dstPtrTempR = fillValue;
+        *dstPtrTempG = fillValue;
+        *dstPtrTempB = fillValue;
     } else {
         T dst[3];
         compute_generic_bilinear_srclocs_and_interpolate(srcPtrChannel, srcDescPtr, srcY, srcX,
@@ -248,7 +258,8 @@ inline void compute_generic_bilinear_interpolation_pln3pkd3_to_pkd3(Rpp32f srcY,
     Rpp32s srcYFloor = std::floor(srcY);
     if ((srcXFloor < roiLTRB->ltrbROI.lt.x) || (srcYFloor < roiLTRB->ltrbROI.lt.y) ||
         (srcXFloor > roiLTRB->ltrbROI.rb.x) || (srcYFloor > roiLTRB->ltrbROI.rb.y)) {
-        memset(dstPtrTemp, 0, 3 * sizeof(T));
+        T fillValue = rpp_generic_interpolation_black_value<T>();
+        dstPtrTemp[0] = dstPtrTemp[1] = dstPtrTemp[2] = fillValue;
     } else {
         compute_generic_bilinear_srclocs_and_interpolate(srcPtrChannel, srcDescPtr, srcY, srcX,
                                                          roiLTRB, dstPtrTemp);
@@ -265,8 +276,9 @@ inline void compute_generic_bilinear_interpolation_pln_to_pln(Rpp32f srcY, Rpp32
     Rpp32s srcYFloor = std::floor(srcY);
     if ((srcXFloor < roiLTRB->ltrbROI.lt.x) || (srcYFloor < roiLTRB->ltrbROI.lt.y) ||
         (srcXFloor > roiLTRB->ltrbROI.rb.x) || (srcYFloor > roiLTRB->ltrbROI.rb.y)) {
+        T fillValue = rpp_generic_interpolation_black_value<T>();
         for (int c = 0; c < srcDescPtr->c; c++) {
-            *dstPtrTemp = 0;
+            *dstPtrTemp = fillValue;
             dstPtrTemp += dstDescPtr->strides.cStride;
         }
     } else {
@@ -327,9 +339,10 @@ inline void compute_generic_nn_interpolation_pkd3_to_pln3(Rpp32f srcY, Rpp32f sr
     srcX = std::round(srcX);  // Nearest Neighbor X location
     if ((srcX < roiLTRB->ltrbROI.lt.x) || (srcY < roiLTRB->ltrbROI.lt.y) ||
         (srcX > roiLTRB->ltrbROI.rb.x) || (srcY > roiLTRB->ltrbROI.rb.y)) {
-        *dstPtrTempR = 0;
-        *dstPtrTempG = 0;
-        *dstPtrTempB = 0;
+        T fillValue = rpp_generic_interpolation_black_value<T>();
+        *dstPtrTempR = fillValue;
+        *dstPtrTempG = fillValue;
+        *dstPtrTempB = fillValue;
     } else {
         T* srcPtrTemp;
         srcPtrTemp = srcPtrChannel + ((Rpp32s)srcY * srcDescPtr->strides.hStride) +
@@ -349,7 +362,7 @@ inline void compute_generic_nn_interpolation_pkd3_to_pkd3(Rpp32f srcY, Rpp32f sr
     srcX = std::round(srcX);  // Nearest Neighbor X location
     if ((srcX < roiLTRB->ltrbROI.lt.x) || (srcY < roiLTRB->ltrbROI.lt.y) ||
         (srcX > roiLTRB->ltrbROI.rb.x) || (srcY > roiLTRB->ltrbROI.rb.y)) {
-        memset(dstPtrTemp, 0, 3 * sizeof(T));
+        std::fill_n(dstPtrTemp, 3, rpp_generic_interpolation_black_value<T>());
     } else {
         T* srcPtrTemp;
         srcPtrTemp = srcPtrChannel + ((Rpp32s)srcY * srcDescPtr->strides.hStride) +
@@ -367,7 +380,7 @@ inline void compute_generic_nn_interpolation_pln3_to_pkd3(Rpp32f srcY, Rpp32f sr
     srcX = std::round(srcX);  // Nearest Neighbor X location
     if ((srcX < roiLTRB->ltrbROI.lt.x) || (srcY < roiLTRB->ltrbROI.lt.y) ||
         (srcX > roiLTRB->ltrbROI.rb.x) || (srcY > roiLTRB->ltrbROI.rb.y)) {
-        memset(dstPtrTemp, 0, 3 * sizeof(T));
+        std::fill_n(dstPtrTemp, 3, rpp_generic_interpolation_black_value<T>());
     } else {
         T* srcPtrTemp;
         srcPtrTemp = srcPtrChannel + ((Rpp32s)srcY * srcDescPtr->strides.hStride) +
@@ -389,8 +402,9 @@ inline void compute_generic_nn_interpolation_pln_to_pln(Rpp32f srcY, Rpp32f srcX
     srcX = std::round(srcX);  // Nearest Neighbor X location
     if ((srcX < roiLTRB->ltrbROI.lt.x) || (srcY < roiLTRB->ltrbROI.lt.y) ||
         (srcX > roiLTRB->ltrbROI.rb.x) || (srcY > roiLTRB->ltrbROI.rb.y)) {
+        T fillValue = rpp_generic_interpolation_black_value<T>();
         for (int c = 0; c < srcDescPtr->c; c++) {
-            *dstPtrTemp = 0;
+            *dstPtrTemp = fillValue;
             dstPtrTemp += dstDescPtr->strides.cStride;
         }
     } else {
