@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# slice-preflight.sh — Issue 2: per-slice environment / base-pin verification.
+# slice-preflight.sh — per-slice environment / base-pin verification.
 #
 # Records the reproducibility state required BEFORE a mutation slice starts and
 # refuses to proceed if that state is unsafe. It captures, into a per-slice
@@ -17,7 +17,7 @@
 #     are NOT treated as dirty source);
 #   - docker is unavailable, or the named container does not exist.
 #
-# Safety (see PLAN concurrency rule): read-only against source. It never edits
+# Safety: read-only against source. It never edits
 # tracked source, never runs mutmut/tests, and never starts or stops containers.
 # `docker exec` for the mutmut version is best-effort: a stopped container yields
 # a null version, not a failure.
@@ -29,8 +29,8 @@
 # Output artifact (on success only):
 #   work/mutation/slices/<slice>-<slug>/env.json
 #
-# Testability: source with MUTMUT_PREFLIGHT_LIB_ONLY=1 to expose the pure helpers
-# (derive_slug, emit_json) without running main() — see tests/preflight-selftest.sh.
+# Library mode: source with MUTMUT_PREFLIGHT_LIB_ONLY=1 to expose the pure helpers
+# (derive_slug, emit_json) without running main().
 
 set -u
 
