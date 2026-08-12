@@ -1199,32 +1199,32 @@ TEST_F(InsertClusterBarrierPassTest, SignalStaysInLoopWhenThePreheaderHasNoSafeS
     expectClusterTokensBalanceOnEveryPath(/*completeProgram=*/true);
 }
 
-// What the group's arrival bounds is how early the signal may be, not how far the search may
-// look. Only the first workgroup barrier below the cluster wait matters: once it has gathered
-// the group, wave 0 may speak for it, and the barriers further down hold the signal back no
-// further. A preheader with two of them says which reading is in force:
+// This signal says the run-up is finished, so it belongs at the end of the run-up rather than
+// the start of it: the search climbs from the loop head and takes the first workgroup barrier
+// it meets, not the first one below the cluster wait. A preheader with two of them says which
+// reading is in force:
 //
 //     tensor_load_to_lds        <- Rule 2's wait goes in front of this
-//     s_barrier_signal -1
-//     s_barrier_wait -1         <- the first barrier below that wait: the floor
-//     v_wmma x3
-//     s_barrier_signal -1       <- a second barrier, which must not push the signal down
+//     s_barrier_signal -1       <- a barrier the signal climbs past
 //     s_barrier_wait -1
+//     v_wmma x3
+//     s_barrier_signal -1       <- the barrier closest to the loop: the signal goes below its
+//     s_barrier_wait -1            wait
 //     v_wmma x3
 //     label_TestLoop:
 //
-// Stopping at the nearest barrier instead would cost the signal everything above the second
-// pair, for no reason the hardware asks for.
+// Sitting behind the upper pair instead would announce this workgroup ready while the work
+// between the two barriers is still ahead of it.
 // Run with STINKY_TEST_DUMP=1 to print the block before and after the pass.
-TEST_F(InsertClusterBarrierPassTest, PreheaderSignalPassesTheLowerBarrierToSitBehindTheFirst) {
+TEST_F(InsertClusterBarrierPassTest, PreheaderSignalSitsBehindTheBarrierClosestToTheLoop) {
     createLabel(kGSU1LabelName);
     createWMMA(24, 0, 8);
     createTensorLoadInBlock(bb, arch, /*src0Reg=*/60, /*src1Reg=*/64);
     createBarrierSignal(kWorkgroupBarrierId);
-    StinkyInstruction* firstBarrierWait = createBarrierWait(kWorkgroupBarrierId);
-    for (int i = 0; i < 3; ++i) createWMMA(8 + (i % 8) * 8, (i % 8) * 8, ((i + 1) % 8) * 8);
-    StinkyInstruction* secondBarrierSignal = createBarrierSignal(kWorkgroupBarrierId);
     createBarrierWait(kWorkgroupBarrierId);
+    for (int i = 0; i < 3; ++i) createWMMA(8 + (i % 8) * 8, (i % 8) * 8, ((i + 1) % 8) * 8);
+    StinkyInstruction* lowerBarrierSignal = createBarrierSignal(kWorkgroupBarrierId);
+    StinkyInstruction* lowerBarrierWait = createBarrierWait(kWorkgroupBarrierId);
     for (int i = 0; i < 3; ++i) createWMMA(8 + (i % 8) * 8, (i % 8) * 8, ((i + 1) % 8) * 8);
 
     createLabel("label_TestLoop");
@@ -1249,12 +1249,12 @@ TEST_F(InsertClusterBarrierPassTest, PreheaderSignalPassesTheLowerBarrierToSitBe
 
     StinkyInstruction* preSignal = findLastClusterSignalBefore(indexOf(loopHead));
     ASSERT_NE(preSignal, nullptr);
-    EXPECT_GT(indexOf(preSignal), indexOf(firstBarrierWait))
-        << "wave 0 may not announce the group ready before the group has gathered:"
+    EXPECT_GT(indexOf(preSignal), indexOf(lowerBarrierWait))
+        << "the signal belongs at the end of the run-up, behind the barrier closest to the "
+           "loop:"
         << blockListing(*bb);
-    EXPECT_LT(indexOf(preSignal), indexOf(secondBarrierSignal))
-        << "the group has already gathered above, so the second barrier must not push the "
-           "signal any further down:"
+    EXPECT_GT(indexOf(preSignal), indexOf(lowerBarrierSignal))
+        << "wave 0 may not announce the group ready before the group has gathered:"
         << blockListing(*bb);
 
     expectClusterTokensBalanceOnEveryPath(/*completeProgram=*/true);
@@ -1347,6 +1347,80 @@ TEST_F(InsertClusterBarrierPassTest, PreheaderWithNoBarrierBringsOneBelowItsLast
         EXPECT_NE(inst->getSrcRegs()[0].getSymbolicName(), kLoopCounterLSymbol)
             << "the preheader signal must not be gated on the trip count:" << blockListing(*bb);
     }
+
+    expectClusterTokensBalanceOnEveryPath(/*completeProgram=*/true);
+}
+
+// The last shape the preheader can take: no barrier and no label either, so neither of the
+// two spots above is available and the run-up is nothing but its own loads and work:
+//
+//     tensor_load_to_lds        <- Rule 2's wait goes in front of this
+//     v_wmma x3
+//     tensor_load_to_lds        <- the last load of the run-up
+//     v_wmma x3
+//     label_TestLoop:
+//
+// The signal brings its own barrier again, and the pair goes below the last load. Those loads
+// are the work this signal announces as finished, so a signal put over them would be telling
+// the cluster the run-up is done while it is still fetching.
+// Run with STINKY_TEST_DUMP=1 to print the block before and after the pass.
+TEST_F(InsertClusterBarrierPassTest, PreheaderWithNoBarrierAndNoLabelSitsBelowItsLastLoad) {
+    createLabel(kGSU1LabelName);
+    createWMMA(24, 0, 8);
+    createTensorLoadInBlock(bb, arch, /*src0Reg=*/60, /*src1Reg=*/64);
+    for (int i = 0; i < 3; ++i) createWMMA(8 + (i % 8) * 8, (i % 8) * 8, ((i + 1) % 8) * 8);
+    StinkyInstruction* lastLoad =
+        createTensorLoadInBlock(bb, arch, /*src0Reg=*/68, /*src1Reg=*/72);
+    for (int i = 0; i < 3; ++i) createWMMA(8 + (i % 8) * 8, (i % 8) * 8, ((i + 1) % 8) * 8);
+
+    createLabel("label_TestLoop");
+    // Short, so its signal leaves across the back edge and the preheader has to serve the
+    // first trip.
+    appendHandshake(/*loadS0=*/0, /*loadS1=*/4);
+    createGuardedBranch(GFX::s_cbranch_scc1, /*sgpr=*/90, "label_TestLoopEnd");
+    for (int i = 0; i < 70; ++i) createWMMA(8 + (i % 8) * 8, (i % 8) * 8, ((i + 1) % 8) * 8);
+    appendHandshake(/*loadS0=*/48, /*loadS1=*/52);
+    createGuardedBranch(GFX::s_cbranch_scc0, /*sgpr=*/92, "label_TestLoop");
+    createLabel("label_TestLoopEnd");
+    createWMMA(8, 0, 8);
+
+    runPass();
+
+    StinkyInstruction* loopHead = findLabelNamed("label_TestLoop");
+    ASSERT_NE(loopHead, nullptr);
+    EXPECT_EQ(inFlightAt(indexOf(loopHead)), 1)
+        << "the opening segment's signal left across the back edge, so the first trip has to "
+           "be handed a token by the preheader:"
+        << blockListing(*bb);
+
+    StinkyInstruction* preSignal = findLastClusterSignalBefore(indexOf(loopHead));
+    ASSERT_NE(preSignal, nullptr);
+    EXPECT_GT(indexOf(preSignal), indexOf(lastLoad))
+        << "the run-up's own loads are the work the signal announces as finished, so it may "
+           "not be posted above them:"
+        << blockListing(*bb);
+
+    // The barrier the pass brought: the closest workgroup pair above the signal, which the
+    // preheader did not have to begin with.
+    StinkyInstruction* wgWait = nullptr;
+    StinkyInstruction* wgSignal = nullptr;
+    size_t idx = 0;
+    for (const IRBase& ir : *bb) {
+        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+        if (idx >= indexOf(preSignal)) break;
+        auto* inst = const_cast<StinkyInstruction*>(cast<StinkyInstruction>(&ir));
+        if (isWorkgroupBarrierSignalInst(*inst)) wgSignal = inst;
+        if (isWorkgroupBarrierWaitInst(*inst)) wgWait = inst;
+        ++idx;
+    }
+    ASSERT_NE(wgSignal, nullptr) << blockListing(*bb);
+    ASSERT_NE(wgWait, nullptr) << blockListing(*bb);
+    EXPECT_GT(indexOf(wgSignal), indexOf(lastLoad))
+        << "the preheader had no barrier of its own, so the pass must have planted this one "
+           "below the last load:"
+        << blockListing(*bb);
+    EXPECT_LT(indexOf(wgSignal), indexOf(wgWait))
+        << "signal then wait:" << blockListing(*bb);
 
     expectClusterTokensBalanceOnEveryPath(/*completeProgram=*/true);
 }

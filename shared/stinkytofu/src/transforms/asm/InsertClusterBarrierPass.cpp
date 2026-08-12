@@ -49,6 +49,7 @@ constexpr const char* kWaveIdxSymbol = "sgprWaveIdx";
 constexpr const char* kLoopCounterLSymbol = "sgprLoopCounterL";
 constexpr size_t kHashLen = 16;
 constexpr const char* kGSU1LabelName = "label_GSU_1";
+constexpr const char* kOpenLoopLabelName = "label_openLoopL";
 constexpr const char* kTailLoopMarker = "Tail Loop";
 
 /// Estimated cycles the Rule 3 signal is planted ahead of its paired wait.
@@ -398,24 +399,15 @@ bool isFollowedByClusterBarrierHandshakeOrSignal(StinkyInstruction* anchor) {
 
 /// Forward scan from ``wgSignal`` for its paired ``s_barrier_wait -1`` and return
 /// the first real instruction after that wait.
-///
-/// \p limit is the first point the caller may not place at. A barrier that only gathers the
-/// group past it is no floor for a signal that has to go before it, so the scan gives up
-/// there. Landing exactly on \p limit is fine: the signal goes just in front of it.
-IRBase* anchorAfterWorkgroupBarrierPair(StinkyInstruction* wgSignal, IRBase* defaultAnchor,
-                                        IRBase* limit = nullptr) {
+IRBase* anchorAfterWorkgroupBarrierPair(StinkyInstruction* wgSignal, IRBase* defaultAnchor) {
     BasicBlock* parent = wgSignal->getParent();
     if (parent == nullptr) return defaultAnchor;
-    // Stepping node by node rather than instruction by instruction: \p limit is often a
-    // label, and a scan that skips over labels would never see it.
     for (auto it = std::next(BasicBlock::iterator(wgSignal)); it != parent->end(); ++it) {
-        if (it.getNodePtr() == limit) break;
         auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
         if (inst == nullptr || isPseudoInst(inst)) continue;
         if (isWorkgroupBarrierSignal(*inst)) break;
         if (!isWorkgroupBarrierWait(*inst)) continue;
         for (auto after = std::next(it); after != parent->end(); ++after) {
-            if (after.getNodePtr() == limit) return limit;
             auto* next = dyn_cast<StinkyInstruction>(after.getNodePtr());
             if (next == nullptr || isPseudoInst(next)) continue;
             return next;
@@ -427,18 +419,15 @@ IRBase* anchorAfterWorkgroupBarrierPair(StinkyInstruction* wgSignal, IRBase* def
 
 /// Forward scan from ``afterWait`` for the next workgroup barrier handshake
 /// (signal then wait).  Returns the first real instruction after that wait, or
-/// ``defaultAnchor`` when the pair is missing, incomplete, or only closes at or past
-/// \p limit.
-IRBase* anchorAfterWorkgroupBarrierFollowing(StinkyInstruction* afterWait, IRBase* defaultAnchor,
-                                             IRBase* limit = nullptr) {
+/// ``defaultAnchor`` when the pair is missing or incomplete.
+IRBase* anchorAfterWorkgroupBarrierFollowing(StinkyInstruction* afterWait, IRBase* defaultAnchor) {
     BasicBlock* parent = afterWait->getParent();
     if (parent == nullptr) return defaultAnchor;
     for (auto it = std::next(BasicBlock::iterator(afterWait)); it != parent->end(); ++it) {
-        if (it.getNodePtr() == limit) break;
         auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
         if (inst == nullptr || isPseudoInst(inst)) continue;
         if (!isWorkgroupBarrierSignal(*inst)) continue;
-        return anchorAfterWorkgroupBarrierPair(inst, defaultAnchor, limit);
+        return anchorAfterWorkgroupBarrierPair(inst, defaultAnchor);
     }
     return defaultAnchor;
 }
@@ -500,9 +489,75 @@ StinkyInstruction* findEnclosingLoopHead(StinkyInstruction* inst) {
     return nullptr;
 }
 
+/// Whether \p inst is the compare that opens a loop's skip shortcut, i.e.
+/// ``s_cmp_eq_u32 sgprLoopCounterL, <imm>``.
+bool isLoopCounterEqCompare(const StinkyInstruction& inst) {
+    if (inst.getUnifiedOpcode() != GFX::s_cmp_eq_u32) return false;
+    const auto& srcs = inst.getSrcRegs();
+    return !srcs.empty() && srcs[0].getSymbolicName() == kLoopCounterLSymbol;
+}
+
+/// Where the paths rejoin below a loop that is left by falling off its latch.
+///
+/// Such a loop has no escape branch to read a label off, and the label sitting just under the
+/// latch is not the answer either: the run-up carries a shortcut for the trip counts that
+/// never enter the loop at all, and it jumps clean over that label. What every path does
+/// reach is the shortcut's own target.
+///
+/// The shortcut is the first ``s_cmp_eq_u32 sgprLoopCounterL`` below ``label_openLoopL``
+/// together with the branch that reads it. Its target speaks for the whole loop only if two
+/// things hold, and both are checked here: it lies below the latch, so it names a spot
+/// outside the loop rather than one within it; and nothing between the latch and it hands
+/// control elsewhere, so whatever falls off the latch arrives there as well.
+std::string findLoopSkipShortcutLabel(StinkyInstruction* loopHead, StinkyInstruction* latch) {
+    BasicBlock* parent = loopHead->getParent();
+    if (parent == nullptr || latch == nullptr) return {};
+
+    StinkyInstruction* openLabel = nullptr;
+    auto up = BasicBlock::iterator(loopHead);
+    while (up != parent->begin()) {
+        --up;
+        auto* inst = dyn_cast<StinkyInstruction>(up.getNodePtr());
+        if (inst != nullptr && isLabelNamed(*inst, kOpenLoopLabelName)) {
+            openLabel = inst;
+            break;
+        }
+    }
+    if (openLabel == nullptr) return {};
+
+    std::string target;
+    bool sawCompare = false;
+    for (auto it = std::next(BasicBlock::iterator(openLabel));
+         it != parent->end() && it.getNodePtr() != loopHead; ++it) {
+        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (inst == nullptr) continue;
+        if (!sawCompare) {
+            sawCompare = isLoopCounterEqCompare(*inst);
+            continue;
+        }
+        // Whatever drinks what the compare wrote, and nothing past it: a shortcut is that
+        // compare and its own branch, so anything else reading SCC first means there is none.
+        if (!readsScc(*inst)) continue;
+        if (isBranch(*inst)) target = getBranchTarget(*inst);
+        break;
+    }
+    if (target.empty()) return {};
+
+    for (auto it = std::next(BasicBlock::iterator(latch)); it != parent->end(); ++it) {
+        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (inst == nullptr) continue;
+        if (isLabelNamed(*inst, target.c_str())) return target;
+        if (isUnconditionalBranch(*inst) || isCall(*inst)) break;
+    }
+    return {};
+}
+
 /// Label the loop's escape branches jump to, i.e. where control lands when the body is
 /// abandoned. Read before this pass inserts anything, so the only branches between the head
 /// and the latch are the loop's own exits.
+///
+/// A body that holds no such branch is not a loop without a way out; it is one whose way out
+/// is spelled by nothing at all, and the skip shortcut above the head is what names it.
 std::string findLoopExitLabelName(StinkyInstruction* loopHead) {
     BasicBlock* parent = loopHead->getParent();
     StinkyInstruction* latch = findLatchBranchFor(loopHead);
@@ -517,7 +572,7 @@ std::string findLoopExitLabelName(StinkyInstruction* loopHead) {
         }
         if (inst == latch) break;
     }
-    return {};
+    return findLoopSkipShortcutLabel(loopHead, latch);
 }
 
 struct Rule3SignalAnchor {
@@ -688,47 +743,77 @@ struct PreLoopSignalAnchor {
     bool needsWorkgroupBarrier = true;
 };
 
+/// First real instruction below \p behind, or \p limit when nothing but pseudo instructions
+/// stands between the two. Places the signal as close behind \p behind as it can get without
+/// dropping into the loop.
+IRBase* anchorJustBelow(StinkyInstruction* behind, StinkyInstruction* limit) {
+    BasicBlock* parent = behind->getParent();
+    if (parent == nullptr) return limit;
+    for (auto it = std::next(BasicBlock::iterator(behind)); it != parent->end(); ++it) {
+        // Node by node rather than instruction by instruction: \p limit is a label, and a
+        // scan that skipped over labels would never see it.
+        if (it.getNodePtr() == limit) break;
+        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (inst == nullptr || isPseudoInst(inst)) continue;
+        return inst;
+    }
+    return limit;
+}
+
 /// Where the compensating signal goes in the preheader.
 ///
-/// The loop's own handshakes have to earn their lead instruction by instruction, because
-/// each one climbs past work that its own wait is waiting for. This one has nothing above it
-/// to compete with: the whole run-up between the preheader's cluster wait and the loop head
-/// is dead time as far as the cluster is concerned, so the signal simply goes as early as it
-/// is allowed to. No cycle counting is involved -- the earliest legal spot is the best one.
+/// The loop's own handshakes have to earn their lead instruction by instruction, because each
+/// one climbs past work that its own wait is waiting for. This one is the opposite: it says
+/// the run-up is done and the next workgroup may move in, so it belongs at the end of the
+/// run-up rather than the start of it. The search therefore climbs from the loop head and
+/// takes the first thing it can sit behind.
 ///
-/// Two bounds decide where that is. Above, the cluster wait Rule 2 planted before the
-/// function's first tensor load: a signal put over it would be posting a token that this very
-/// wait drinks, and the loop would never see it. That wait is the only one the preheader
-/// ever holds. Below, the loop head. Between the two the signal goes behind the first
-/// workgroup barrier there is, because wave 0 speaks for the whole group and may not announce
-/// this workgroup ready while its other waves are still working -- and behind the *first*
-/// one, since once a barrier has gathered the group the ones below it hold the signal back no
-/// further.
+/// The climb stops at the cluster wait Rule 2 planted before the function's first tensor
+/// load. A signal put over that wait would be posting a token this very wait drinks, and the
+/// loop would never see it. That wait is the only one the preheader ever holds, and it is
+/// what makes the preheader a place a signal may be posted at all -- without it there is
+/// nothing above to have drunk Rule 1's token, and a second one would go in flight.
 ///
-/// A run-up with no barrier in it at all has to be given one. It goes below the last label of
-/// the preheader, so that every path that reaches the loop reaches the barrier as well.
-/// Unlike the Rule 1 signal no trip-count gate goes with it: this one is paired with a wait
-/// below the loop, and both are reached on exactly the same paths.
+/// Three things can carry the signal, in this order:
 ///
-/// Both bounds are floors, so a live SCC range covering the chosen spot can only be escaped
-/// downwards, and the range may well outlast the preheader. Returning nothing then is the
-/// honest answer: there is no spot, and the caller has to give up the crossing that made it
-/// ask.
+///  - A workgroup barrier already in the run-up: the signal goes just below its wait. Wave 0
+///    speaks for the whole group and may not announce this workgroup ready while its other
+///    waves are still working, and a barrier that is already there costs nothing.
+///  - Failing that, the lowest label: the signal brings its own barrier and goes below the
+///    label, because a label is where the run-up's paths rejoin and so is reached however the
+///    preheader was entered.
+///  - Failing that, the last tensor load below the cluster wait: again with its own barrier,
+///    and below the load because the run-up's own loads are the work this signal is
+///    announcing as finished.
+///
+/// Unlike the Rule 1 signal no trip-count gate goes with the planted barrier: this signal is
+/// paired with a wait below the loop, and both are reached on exactly the same paths.
+///
+/// Nothing else is expected to come up. A run-up with no cluster wait, or one that holds
+/// neither barrier nor label nor load, is not a shape this pass built, and the honest answer
+/// is that there is no spot -- the caller then gives up the crossing that made it ask.
+///
+/// The same goes for a live SCC range covering the chosen spot. The bounds above it are
+/// floors, so such a range can only be escaped downwards, and it may well outlast the
+/// preheader.
 PreLoopSignalAnchor findPreLoopSignalAnchor(StinkyInstruction* loopHead) {
     BasicBlock* parent = (loopHead != nullptr) ? loopHead->getParent() : nullptr;
     if (parent == nullptr) return {};
 
-    // Walk up from the loop head for the wait that bounds the search, remembering the lowest
-    // label on the way in case the run-up turns out to hold no barrier.
-    StinkyInstruction* upperBound = nullptr;
+    // One climb from the loop head up to Rule 2's wait, remembering the lowest of each thing
+    // the signal could sit behind. All three are collected in the same pass because the order
+    // they are preferred in is not the order they appear in.
+    StinkyInstruction* workgroupWait = nullptr;
     StinkyInstruction* lastLabel = nullptr;
+    StinkyInstruction* lastTensorLoad = nullptr;
+    bool reachedClusterWait = false;
     auto it = BasicBlock::iterator(loopHead);
     while (it != parent->begin()) {
         --it;
         auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
         if (inst == nullptr) continue;
         if (isClusterBarrierWait(*inst)) {
-            upperBound = inst;
+            reachedClusterWait = true;
             break;
         }
         // Labels are pseudo instructions, so they have to be read before that filter runs.
@@ -737,28 +822,24 @@ PreLoopSignalAnchor findPreLoopSignalAnchor(StinkyInstruction* loopHead) {
             continue;
         }
         if (isPseudoInst(inst)) continue;
+        if (workgroupWait == nullptr && isWorkgroupBarrierWait(*inst)) workgroupWait = inst;
+        if (lastTensorLoad == nullptr && isTensorLoad(*inst)) lastTensorLoad = inst;
     }
+    if (!reachedClusterWait) return {};
 
-    // With no wait above, the run-up starts where the block does.
-    IRBase* searchFrom = (upperBound != nullptr) ? static_cast<IRBase*>(upperBound)
-                                                 : parent->begin().getNodePtr();
-    if (searchFrom == nullptr) return {};
-
-    IRBase* anchor = nullptr;
-    bool needsWorkgroupBarrier = false;
-    if (auto* boundInst = dyn_cast<StinkyInstruction>(searchFrom)) {
-        IRBase* fallback = firstRealInstAfter(boundInst);
-        IRBase* behindBarrier =
-            isWorkgroupBarrierSignal(*boundInst)
-                ? anchorAfterWorkgroupBarrierPair(boundInst, fallback, loopHead)
-                : anchorAfterWorkgroupBarrierFollowing(boundInst, fallback, loopHead);
-        if (behindBarrier != fallback) {
-            anchor = behindBarrier;
-        } else {
-            needsWorkgroupBarrier = true;
-            anchor = (lastLabel != nullptr) ? firstRealInstAfter(lastLabel) : fallback;
-        }
+    StinkyInstruction* behind = nullptr;
+    bool needsWorkgroupBarrier = true;
+    if (workgroupWait != nullptr) {
+        behind = workgroupWait;
+        needsWorkgroupBarrier = false;
+    } else if (lastLabel != nullptr) {
+        behind = lastLabel;
+    } else {
+        behind = lastTensorLoad;
     }
+    if (behind == nullptr) return {};
+
+    IRBase* anchor = anchorJustBelow(behind, loopHead);
     if (anchor == nullptr) anchor = loopHead;
 
     // The signal opens with `s_cmp_eq_u32 sgprWaveIdx, 0`, so it may not land in front of a
