@@ -341,6 +341,9 @@
           "64_4_4_256_fp32_nhwc_normalized_dim_count3_e5a912"
         ],
         "support": {
+          "gfx90a": [
+            "linux"
+          ],
           "gfx942": [
             "linux"
           ]

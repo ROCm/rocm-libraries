@@ -47,6 +47,9 @@
           "8_16_28_28_fp32_nhwc"
         ],
         "support": {
+          "gfx90a": [
+            "linux"
+          ],
           "gfx942": [
             "linux"
           ]
@@ -118,6 +121,9 @@
           "8_16_28_28_fp32_nhwc"
         ],
         "support": {
+          "gfx90a": [
+            "linux"
+          ],
           "gfx942": [
             "linux"
           ]

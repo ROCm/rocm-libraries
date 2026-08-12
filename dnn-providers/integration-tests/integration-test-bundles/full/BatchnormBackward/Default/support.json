@@ -17,6 +17,9 @@
           "5_256_4_14_14_fp32_ndhwc"
         ],
         "support": {
+          "gfx90a": [
+            "linux"
+          ],
           "gfx942": [
             "linux"
           ]
@@ -40,6 +43,9 @@
           "5_256_4_14_14_fp32_ndhwc"
         ],
         "support": {
+          "gfx90a": [
+            "linux"
+          ],
           "gfx942": [
             "linux"
           ]

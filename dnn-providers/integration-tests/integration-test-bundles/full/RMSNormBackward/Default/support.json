@@ -365,6 +365,9 @@
           "32_3_1_14_fp32_nhwc_d67717_4"
         ],
         "support": {
+          "gfx90a": [
+            "linux"
+          ],
           "gfx942": [
             "linux"
           ]

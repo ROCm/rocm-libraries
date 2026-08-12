@@ -41,6 +41,9 @@
           "5_256_14_14_fp32_nhwc_rlo0p1_norslope_rhi0p5"
         ],
         "support": {
+          "gfx90a": [
+            "linux"
+          ],
           "gfx942": [
             "linux"
           ]
@@ -124,6 +127,9 @@
           "8_32_2048_fp32_nlc_rlo0p1_norslope_rhi0p5"
         ],
         "support": {
+          "gfx90a": [
+            "linux"
+          ],
           "gfx942": [
             "linux"
           ]
