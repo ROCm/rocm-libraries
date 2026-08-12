@@ -11,6 +11,15 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 set(NB_USE_SUBMODULE_DEPS OFF)
 
+# The SDPA graph node (Graph::sdpa / SdpaAttributes) is a header-only frontend
+# feature guarded by the HIPDNN_ENABLE_SDPA compile define. The prebuilt frontend
+# artifact's hipdnn_frontendConfig.cmake unconditionally does `set(HIPDNN_ENABLE_SDPA
+# OFF)`, which would shadow a same-named option here -- so this switch uses a distinct
+# name (HIPDNN_BINDINGS_ENABLE_SDPA) and maps to the define below. Configure with
+# -DHIPDNN_BINDINGS_ENABLE_SDPA=ON to emit the `g.sdpa` / `SdpaAttributes` surface.
+option(HIPDNN_BINDINGS_ENABLE_SDPA
+    "Bind the SDPA graph node (needs an SDPA-capable backend)" OFF)
+
 find_package(Python 3.12
     REQUIRED COMPONENTS Interpreter Development.Module Development.SABIModule)
 
@@ -81,6 +90,10 @@ target_link_libraries(
         hipdnn_backend
         hip::host
 )
+
+if(HIPDNN_BINDINGS_ENABLE_SDPA)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE HIPDNN_ENABLE_SDPA)
+endif()
 
 # Keep the compiled extension filename aligned with NB_MODULE(hipdnn_frontend_python).
 # The public import remains `import hipdnn_frontend as hipdnn`; the extension is
