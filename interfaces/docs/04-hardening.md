@@ -28,8 +28,8 @@ scope and unproven; the DLL/PE ABI-versioning mechanism is not addressed by this
 **Threat.** A recording provider is built with `CXX_VISIBILITY_PRESET hidden`, so it looks
 locked down. It is not. Its runtime headers pull `std::filesystem` out-of-line symbols from
 the libstdc++ archive, and those are default-visibility inside the archive - the whole-TU
-`-fvisibility=hidden` flag never touches them. Result: roughly 170 leaked `std::` symbols in
-the provider's `.dynsym`. Two such providers in one process share those symbols through the
+`-fvisibility=hidden` flag never touches them. Result: roughly 174 leaked `std::` symbols in
+the provider's `.dynsym` (176 defined dynamic symbols in all, of which one is the real export). Two such providers in one process share those symbols through the
 dynamic loader, and one silently runs the other's code.
 
 **Fix.** An explicit export allowlist. `providers/recording/recording_provider.map` names
@@ -121,12 +121,17 @@ interposition`), `3396f66` (linked-consumer relocation proof), and `8235b3c` (ba
 
 **Threat.** The version nodes are stamped by the linker. GCC link-time optimization with the
 LLVM linker (lld) cannot resolve the version-script symbol-to-node assignments out of GCC LTO
-IR - lld carries no GCC LTO plugin. The recorded RES-03 spike shows this pairing fails hard at
-link time: ld.lld emits 'version script assignment of ROCBLAS_ABI_5 to symbol rocblas_sgemm
-failed: symbol not defined' for every versioned symbol and produces no DSO (res03/build-lld-fat/err5
-in the exec spike). Without a guard, this surfaces as a confusing raw linker error deep in an
-otherwise ordinary build rather than a named, actionable failure - and any future lld change
-that resolved the symbols instead of erroring would silently emit unversioned exports.
+IR - lld carries no GCC LTO plugin. This pairing breaks the versioning, and the exact failure
+mode is linker-version-dependent. The recorded RES-03 spike (an older lld, `res03/build-lld-fat/err5`
+in the exec spike) failed hard at link time: ld.lld emitted 'version script assignment of
+ROCBLAS_ABI_5 to symbol rocblas_sgemm failed: symbol not defined' for every versioned symbol and
+produced no DSO. On the current shipping toolchain (GCC 13.3.1, AMD LLD 23.0.0) the same pairing
+no longer errors: it exits 0 and produces a DSO, but ld.lld silently drops the versioned symbol
+it cannot read out of the LTO IR - the `ROCBLAS_ABI_5` node is stamped yet carries no symbol, so
+the export simply vanishes (`nm -D` shows no `rocblas_sgemm`). Either way the versioning is
+broken; the silent-drop mode is strictly worse, and a lint keyed on the old error string would
+miss it entirely - which is why the pairing is refused at configure time rather than diagnosed
+after the fact.
 
 **Fix.** Fail the build instead. `rocm_interfaces_assert_lto_linker_supported()` in
 `cmake/rocm_interfaces_lto_linker_guard.cmake` detects LTO (IPO or `-flto` in flags) plus
@@ -273,7 +278,7 @@ is stricter.
 
 | Step | Threat | ctest(s) |
 | --- | --- | --- |
-| 1 RES-02 | 170 leaked libstdc++ symbols | `exports` |
+| 1 RES-02 | ~174 leaked libstdc++ symbols | `exports` |
 | 2 named nodes | bare symbols interpose across majors | `exports` |
 | 3 co-residency | is the node mechanism real; does it defeat interposition for a linked caller; where is its boundary | `abi03_coresidency`, `abi03_interpose_hazard`, `abi03_linked_consumer_versioned_binds`, `abi03_linked_consumer_plain_interposed`, `abi03_versioned_bare_lookup_uncovered` |
 | 4 RES-03 guard | g++ LTO + lld cannot stamp version nodes | `lto_linker_guard_rejects_gnu_lld` + 3 accepts |

@@ -72,10 +72,10 @@ provider protocol, and the two never share symbols by accident. Selection happen
 context creation, and is frozen for the life of the context. You can swap the provider
 behind the loader and the caller never notices.
 
-## Failure 2: the provider `.so` leaks 170 symbols you never wrote
+## Failure 2: the provider `.so` leaks ~174 symbols you never wrote
 
 This one is quiet, and it is the one that bites first. Build a provider `.so` from C++ and
-the linker exports far more than you asked for. Pull in `std::filesystem` and roughly 170
+the linker exports far more than you asked for. Pull in `std::filesystem` and roughly 174
 libstdc++ out-of-line symbols land in your dynamic table with default visibility.
 
 Setting `-fvisibility=hidden` does not save you: those symbols are default-visibility
@@ -115,11 +115,13 @@ build choices can break that stamping without any error:
 
 - **A toolchain mismatch.** GCC link-time optimization with the LLVM linker (lld) cannot
   resolve the version-script assignments out of GCC LTO IR - lld carries no GCC LTO plugin.
-  In the observed RES-03 spike this pairing failed hard: ld.lld errored "version script
-  assignment of ROCBLAS_ABI_5 to symbol rocblas_sgemm failed: symbol not defined" for every
-  versioned symbol and produced no DSO. That raw error is confusing deep in a build, and a
-  future lld that resolved the symbols instead of erroring could silently emit unversioned
-  exports - so the combination is refused at configure time by
+  The failure mode is linker-version-dependent: in the recorded RES-03 spike (an older lld)
+  the pairing failed hard - ld.lld errored "version script assignment of ROCBLAS_ABI_5 to
+  symbol rocblas_sgemm failed: symbol not defined" and produced no DSO - whereas on the
+  current shipping toolchain (GCC 13.3.1, AMD LLD 23.0.0) it exits 0 and produces a DSO but
+  silently drops the versioned symbol (the node is stamped yet empty, the export vanishes).
+  A loud error is confusing deep in a build; the silent-drop mode is worse still - so the
+  combination is refused at configure time by
   `rocm_interfaces_assert_lto_linker_supported()`; proven by
   `rocm_interfaces.lto_linker_guard_rejects_gnu_lld` and the three `..._accepts_...` cases
   (see
@@ -144,7 +146,7 @@ Regression-locked under ThreadSanitizer by `rocm_interfaces.ops04_concurrency`.
 | Locked to one provider | Cannot replace the whole implementation or swap providers without relinking | Loader/provider seam; selection frozen at context creation | `abi03_coresidency`, architecture design |
 | C++ symbol leakage | Two libraries share `std::` symbols; wrong code runs | Version-script allowlist: export one symbol, hide the rest | `exports` |
 | Interposition across majors | New library calls old library's implementation | Named ELF version nodes per major | `abi03_linked_consumer_versioned_binds`, `abi03_interpose_hazard`, `abi03_coresidency` |
-| Toolchain cannot stamp versioning | GCC-LTO + lld link fails hard and produces no DSO (and a future lld could instead emit unversioned symbols) | Configure-time GCC-LTO-plus-lld guard that fails the build with a named RES-03 error | `lto_linker_guard_rejects_gnu_lld` |
+| Toolchain cannot stamp versioning | GCC-LTO + lld cannot read the version-script symbols out of GCC LTO IR: the shipping lld silently drops the versioned export (an older lld errored hard and produced no DSO) | Configure-time GCC-LTO-plus-lld guard that fails the build with a named RES-03 error | `lto_linker_guard_rejects_gnu_lld` |
 | Node fails on odd symbol shapes | Data / mangled / RTTI / ASan symbols unversioned | Proof suite exercises each shape | `abi06_data_version_node`, `abi05_cpp_mangled_version_node`, `abi04_asan_version_node_survives` |
 | Loader data race | Dispatch corruption under concurrent use | TSan regression lock on registry + loader | `ops04_concurrency` |
 

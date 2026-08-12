@@ -18,7 +18,7 @@ provider that build-depends on another (rocBLAS on hipBLASLt) cannot be swapped 
 independently. Every symbol you exported is now a promise you have to keep.
 
 There is a second, quieter failure. When you build a provider `.so` from C++, the linker
-exports more than you asked for. Pull in `std::filesystem` and roughly 170 libstdc++
+exports more than you asked for. Pull in `std::filesystem` and roughly 174 libstdc++
 symbols leak into your dynamic table with default visibility. Now two libraries in the same
 process export the same `std::` symbols, the dynamic loader picks one, and the other
 library silently calls code it never compiled against.

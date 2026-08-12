@@ -16,7 +16,7 @@ against it.
 If you read one page, read [02-why-a-stable-boundary.md](02-why-a-stable-boundary.md). It
 shows the two failures this layer exists to prevent - a caller locked to a single provider
 it cannot replace without relinking (one implementation welded to one package), and a
-provider `.so` leaking 170 libstdc++ symbols into the process - and why a versioned
+provider `.so` leaking roughly 174 libstdc++ symbols into the process - and why a versioned
 boundary is the fix.
 
 Then read the chapters in order (02 is also step 2 below):
