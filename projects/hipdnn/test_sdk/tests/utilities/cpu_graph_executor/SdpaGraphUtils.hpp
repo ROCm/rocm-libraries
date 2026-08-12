@@ -26,17 +26,19 @@ namespace hipdnn_sdk_test_utils
 // must allocate a matching FLOAT buffer and add it to the variant pack themselves.
 template <typename InputType>
 std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<int64_t, void*>>
-    buildSdpaFwdGraph(SdpaFwdTensorBundle<InputType>& tensorBundle,
-                      hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
-                      bool causalMask = false,
-                      bool causalMaskBottomRight = false,
-                      std::optional<int64_t> leftBound = std::nullopt,
-                      std::optional<int64_t> rightBound = std::nullopt,
-                      hipdnn_frontend::DiagonalAlignment diagonalAlignment
-                      = hipdnn_frontend::DiagonalAlignment::TOP_LEFT,
-                      bool alibiMask = false,
-                      bool generateStats = false,
-                      float* runtimeScaleHostPtr = nullptr)
+    buildSdpaFwdGraph(
+        SdpaFwdTensorBundle<InputType>& tensorBundle,
+        hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
+        bool causalMask = false,
+        bool causalMaskBottomRight = false,
+        std::optional<int64_t> leftBound = std::nullopt,
+        std::optional<int64_t> rightBound = std::nullopt,
+        hipdnn_frontend::DiagonalAlignment diagonalAlignment
+        = hipdnn_frontend::DiagonalAlignment::TOP_LEFT,
+        bool alibiMask = false,
+        bool generateStats = false,
+        // NOLINT false positive: const float* does not convert to the void* variant pack.
+        float* runtimeScaleHostPtr = nullptr) // NOLINT(readability-non-const-parameter)
 {
     const auto frontendDataType = hipdnn_test_sdk::utilities::sdkToFrontendDataType(dataType);
 
@@ -135,9 +137,11 @@ std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<in
 
 template <typename InputType>
 std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<int64_t, void*>>
-    buildSdpaBwdGraph(SdpaBwdTensorBundle<InputType>& tensorBundle,
-                      hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
-                      float* runtimeScaleHostPtr = nullptr)
+    buildSdpaBwdGraph(
+        SdpaBwdTensorBundle<InputType>& tensorBundle,
+        hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
+        // NOLINT false positive: const float* does not convert to the void* variant pack.
+        float* runtimeScaleHostPtr = nullptr) // NOLINT(readability-non-const-parameter)
 {
     const auto frontendDataType = hipdnn_test_sdk::utilities::sdkToFrontendDataType(dataType);
 

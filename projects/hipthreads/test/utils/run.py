@@ -23,6 +23,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--execdir", type=str, required=True)
     parser.add_argument("--codesign_identity", type=str, required=False, default=None)
+    parser.add_argument("--dll-dir", type=str, required=False, default=None)
     parser.add_argument("--env", type=str, nargs="*", required=False, default=[])
     parser.add_argument(
         "--prepend_env", type=str, nargs="*", required=False, default=[]
@@ -45,12 +46,26 @@ def main():
             codesign = ["codesign", "-f", "-s", args.codesign_identity, exe]
             subprocess.check_call(codesign, env={})
 
+    # On Windows, put the ROCm runtime dir ahead of System32 in the DLL search
+    # order so the test loads the artifact's HIP runtime and not a driver-installed
+    # amdhip64_7.dll that would otherwise shadow it (System32 is searched before
+    # PATH). SetDllDirectoryW applies to this process and the child we spawn below,
+    # without copying DLLs into the artifact. See TheRock#7132.
+    if args.dll_dir and platform.system() == "Windows":
+        import ctypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.SetDllDirectoryW.argtypes = [ctypes.c_wchar_p]
+        kernel32.SetDllDirectoryW.restype = ctypes.c_bool
+        if not kernel32.SetDllDirectoryW(args.dll_dir):
+            raise ctypes.WinError(ctypes.get_last_error())
+
     # Extract environment variables into a dictionary
     env = {k: v for (k, v) in map(lambda s: s.split("=", 1), args.env)}
 
     # Set environment variables where we prepend the given value to the
     # existing environment variable.
-    for (k, v) in map(lambda s: s.split("=", 1), args.prepend_env):
+    for k, v in map(lambda s: s.split("=", 1), args.prepend_env):
         if k in os.environ:
             v = v + os.pathsep + os.environ[k]
         env[k] = v
