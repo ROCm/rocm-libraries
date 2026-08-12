@@ -50,6 +50,7 @@ Tests:
   orderC: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
   baseA: [HIPSPARSE_INDEX_BASE_ONE]
   spmm_alg: [HIPSPARSE_SPMM_ALG_DEFAULT]
+  call_preprocess: [true, false]
 
 - name: spmm_batched_csc
   category: pre_checkin
@@ -76,3 +77,4 @@ Tests:
              nos5,
              nos6, 
              nos7]
+  call_preprocess: [true]

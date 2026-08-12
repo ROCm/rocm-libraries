@@ -220,7 +220,11 @@ struct STINKYTOFU_EXPORT StinkyRegister {
         : dataType(Type::Register),
           reg{stringToRegType(typeStr), regIdx, regNum, offset, false, false} {}
 
-    StinkyRegister(const std::string& str) : dataType(Type::LiteralString), literalValue(str) {}
+    // reg{} value-initializes the union: this ctor sets no union member, so without it the
+    // implicit copy ctor reads uninitialized bytes (fires -Werror=maybe-uninitialized at -O3
+    // when a LiteralString register is copied, e.g. vector push_back in addSrcReg).
+    StinkyRegister(const std::string& str)
+        : dataType(Type::LiteralString), reg{}, literalValue(str) {}
 
     StinkyRegister(int literalInt) : dataType(Type::LiteralInt), literalInt(literalInt) {}
 

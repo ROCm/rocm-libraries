@@ -289,6 +289,21 @@ def build(
         except subprocess.CalledProcessError:
             pass
 
+        # Point CMake's find_package(amd_comgr CONFIG) at the SDK's cmake configs
+        # (rocm-sdk pip installs don't populate ROCM_PATH/CMAKE_PREFIX_PATH themselves).
+        try:
+            _sdk_cmake_prefix = (
+                subprocess.check_output(
+                    ["rocm-sdk", "path", "--cmake"], stderr=subprocess.DEVNULL
+                )
+                .decode()
+                .strip()
+            )
+            if _sdk_cmake_prefix:
+                cmake_opts.append(f"-DCMAKE_PREFIX_PATH={_sdk_cmake_prefix}")
+        except subprocess.CalledProcessError:
+            pass
+
     compiler_opts = []
 
     if sys.platform == "win32":
