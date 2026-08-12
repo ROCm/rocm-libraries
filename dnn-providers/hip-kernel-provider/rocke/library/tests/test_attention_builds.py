@@ -2186,6 +2186,109 @@ class TestAttentionHelpers(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------
+# AttentionDenseSpec — waves_per_eu validation, IR identity, cache isolation
+# ---------------------------------------------------------------------
+
+
+class TestAttentionDenseWavesPerEu(unittest.TestCase):
+    """Tests for the waves_per_eu fix on AttentionDenseSpec.
+
+    Three properties are verified independently so a single failure is
+    unambiguous:
+
+    1. ``__post_init__`` rejects out-of-range values (0, negative, >8).
+    2. The emitted LLVM IR carries the correct ``amdgpu-waves-per-eu``
+       attribute for each legal value — confirming the attribute reached
+       codegen correctly both before and after the cache-key fix.
+    3. Two specs differing only in ``waves_per_eu`` produce distinct compiled
+       binaries (cache-isolation fix: key now includes ``waves_per_eu``).
+
+    All three run without a GPU; test 3 needs comgr and is skipped when the
+    toolchain is unavailable (matching the pattern in
+    ``test_gfx950_dense_prefill_compiles_and_fits_budget``).
+    """
+
+    _BASE_KWARGS = dict(
+        batch=1,
+        seqlen_q=2048,
+        seqlen_kv=2048,
+        num_query_heads=32,
+        num_kv_heads=8,
+        head_size=128,
+        causal=True,
+        dtype="bf16",
+    )
+
+    def test_waves_per_eu_validation_rejects_out_of_range(self):
+        from kernels.gfx950.attention_dense import AttentionDenseSpec
+
+        for bad in (0, -1, 9, 100):
+            with self.subTest(waves_per_eu=bad):
+                with self.assertRaises(ValueError, msg=f"waves_per_eu={bad} should be rejected"):
+                    AttentionDenseSpec(**self._BASE_KWARGS, waves_per_eu=bad)
+
+        for good in (1, 2, 8):
+            with self.subTest(waves_per_eu=good):
+                # Must not raise
+                AttentionDenseSpec(**self._BASE_KWARGS, waves_per_eu=good)
+
+    def test_waves_per_eu_ir_attribute(self):
+        """Each legal waves_per_eu value appears verbatim in the lowered IR."""
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+        from kernels.gfx950.attention_dense import AttentionDenseSpec, build_attention_dense
+        from dataclasses import replace
+
+        base = AttentionDenseSpec(**self._BASE_KWARGS)
+        for wpe in (1, 2):
+            with self.subTest(waves_per_eu=wpe):
+                spec = replace(base, waves_per_eu=wpe)
+                ll = lower_kernel_to_llvm(build_attention_dense(spec, arch="gfx950"))
+                self.assertIn(f'"amdgpu-waves-per-eu"="{wpe},{wpe}"', ll)
+
+    def test_waves_per_eu_cache_isolation(self):
+        """Specs differing only in waves_per_eu compile to distinct binaries.
+
+        Before the fix the cache key was ``(kernel_name(), batch)``; two specs
+        with different ``waves_per_eu`` share the same ``kernel_name()`` and
+        ``batch``, so the second call would silently reuse the first binary.
+        After the fix the key is ``(kernel_name(), batch, waves_per_eu)``.
+        """
+        import hashlib
+        from dataclasses import replace
+        from kernels.gfx950.attention_dense import (
+            AttentionDenseSpec,
+            build_attention_dense,
+            _DENSE_LAUNCHER_CACHE,
+        )
+
+        base = AttentionDenseSpec(**self._BASE_KWARGS)
+        _DENSE_LAUNCHER_CACHE.clear()
+
+        hsaco_hashes = {}
+        for wpe in (1, 2):
+            with self.subTest(waves_per_eu=wpe):
+                spec = replace(base, waves_per_eu=wpe)
+                art = _compile_or_skip(
+                    build_attention_dense(spec, arch="gfx950"), arch="gfx950"
+                )
+                hsaco_hashes[wpe] = hashlib.sha256(art.hsaco).hexdigest()
+
+        if len(hsaco_hashes) == 2:
+            self.assertNotEqual(
+                hsaco_hashes[1],
+                hsaco_hashes[2],
+                "waves_per_eu=1 and waves_per_eu=2 produced identical binaries "
+                "(cache collision: waves_per_eu is not part of the cache key)",
+            )
+            self.assertEqual(
+                len(_DENSE_LAUNCHER_CACHE),
+                2,
+                f"Expected 2 cache entries after compiling wpe=1 and wpe=2, "
+                f"got {len(_DENSE_LAUNCHER_CACHE)}: {list(_DENSE_LAUNCHER_CACHE.keys())}",
+            )
+
+
+# ---------------------------------------------------------------------
 # CDNA primitives — attention tiled waves-per-EU
 # ---------------------------------------------------------------------
 
