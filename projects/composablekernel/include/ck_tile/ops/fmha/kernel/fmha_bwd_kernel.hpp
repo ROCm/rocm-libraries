@@ -163,9 +163,9 @@ struct FmhaBwdWorkspaceManager
     CK_TILE_HOST_DEVICE static index_t CuStateOutputToLogical(index_t b, index_t num_cus)
     {
         const index_t ids_per_xcd = (num_cus + NUM_XCDS - 1) / NUM_XCDS;
-        const index_t tall_xcds = (num_cus % NUM_XCDS == 0) ? NUM_XCDS : num_cus % NUM_XCDS;
-        const index_t xcd       = b % NUM_XCDS;
-        const index_t local_id  = b / NUM_XCDS;
+        const index_t tall_xcds   = (num_cus % NUM_XCDS == 0) ? NUM_XCDS : num_cus % NUM_XCDS;
+        const index_t xcd         = b % NUM_XCDS;
+        const index_t local_id    = b / NUM_XCDS;
         return (xcd < tall_xcds)
                    ? xcd * ids_per_xcd + local_id
                    : tall_xcds * ids_per_xcd + (xcd - tall_xcds) * (ids_per_xcd - 1) + local_id;
@@ -174,8 +174,8 @@ struct FmhaBwdWorkspaceManager
     CK_TILE_HOST_DEVICE static index_t CuStateLogicalToOutput(index_t logical, index_t num_cus)
     {
         const index_t ids_per_xcd = (num_cus + NUM_XCDS - 1) / NUM_XCDS;
-        const index_t tall_xcds = (num_cus % NUM_XCDS == 0) ? NUM_XCDS : num_cus % NUM_XCDS;
-        const index_t tall_span = tall_xcds * ids_per_xcd;
+        const index_t tall_xcds   = (num_cus % NUM_XCDS == 0) ? NUM_XCDS : num_cus % NUM_XCDS;
+        const index_t tall_span   = tall_xcds * ids_per_xcd;
         index_t xcd, local_id;
         if(logical < tall_span)
         {
@@ -446,7 +446,8 @@ struct FmhaBwdWorkspaceManager
             //     and permuted afterwards. Logical CU order is still monotonically
             //     increasing across the scan, so w_hi (= next CU's w_lo) is patched into
             //     the previously emitted slot as the scan advances.
-            auto* offsets = workspace_ptr<long_index_t>(gpu_ws, GetDqAccOffsetsOffset<false>(batch_size));
+            auto* offsets =
+                workspace_ptr<long_index_t>(gpu_ws, GetDqAccOffsetsOffset<false>(batch_size));
             auto* cu_states_out =
                 workspace_ptr<FmhaBwdGroupPersistentCuState>(gpu_ws, GetCuStateOffset(batch_size));
             auto* batch_states =
@@ -464,8 +465,8 @@ struct FmhaBwdWorkspaceManager
             {
                 for(index_t b = 0; b < batch_size; ++b)
                 {
-                    nsplits[b]     = 1;
-                    offsets[b]     = 0;
+                    nsplits[b]      = 1;
+                    offsets[b]      = 0;
                     batch_states[b] = FmhaBwdBatchState{0, 0, 1};
                 }
                 offsets[batch_size] = 0;
@@ -487,8 +488,8 @@ struct FmhaBwdWorkspaceManager
             // Emit helper: write logical CU `c` into its remapped slot and close out the
             // previous CU's w_hi. prev_out < 0 means nothing emitted yet.
             index_t prev_out = -1;
-            const auto emit   = [&](index_t c, const FmhaBwdGroupPersistentCuState& st) {
-                const index_t out = CuStateLogicalToOutput(c, num_cus);
+            const auto emit  = [&](index_t c, const FmhaBwdGroupPersistentCuState& st) {
+                const index_t out  = CuStateLogicalToOutput(c, num_cus);
                 cu_states_out[out] = st;
                 if(prev_out >= 0)
                     cu_states_out[prev_out].w_hi = st.w_lo;
@@ -709,14 +710,14 @@ struct FmhaBwdPrepareWorkspaceKernel
         if(threadIdx.x != 0 || blockIdx.x != 0)
             return;
         WorkspaceManager::template PrepareWorkspaceDevice<kN0, kM0>(kargs.gpu_ws,
-                                                              kargs.batch_size,
-                                                              kargs.hdim_q,
-                                                              kargs.nhead_q,
-                                                              kargs.seqlen_q,
-                                                              kargs.seqlen_k,
-                                                              kargs.num_cus,
-                                                              kargs.seqstart_qs,
-                                                              kargs.seqstart_ks);
+                                                                    kargs.batch_size,
+                                                                    kargs.hdim_q,
+                                                                    kargs.nhead_q,
+                                                                    kargs.seqlen_q,
+                                                                    kargs.seqlen_k,
+                                                                    kargs.num_cus,
+                                                                    kargs.seqstart_qs,
+                                                                    kargs.seqstart_ks);
     }
 };
 
