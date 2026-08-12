@@ -24,4 +24,10 @@ namespace stinkytofu {
 // macro to detect a different stinkytofu build than the one the caller was
 // compiled against actually being loaded/linked at runtime.
 STINKYTOFU_EXPORT const char* getRuntimeVersion();
+
+// Exact string comparison, no semver-range logic — the whole "cross-version
+// support" contract lives in this one function. Pulled out of loadPlugin()/
+// rocisa's import-time check so both can be unit-tested with two literal
+// strings, without needing to actually build stinkytofu twice.
+STINKYTOFU_EXPORT bool versionsMatch(const char* expected, const char* actual);
 }  // namespace stinkytofu

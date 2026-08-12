@@ -31,7 +31,6 @@
 #include <cassert>
 #include <cctype>
 #include <cstdint>
-#include <cstring>
 #include <functional>
 #include <iostream>
 #include <optional>
@@ -1400,7 +1399,7 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
     // than the one rocisa was compiled against is present at runtime; rocisa
     // does not support running against a different stinkytofu build, so fail
     // loudly at import time rather than risk silent ABI/behavior drift.
-    if (std::strcmp(STINKYTOFU_FULL_VERSION, stinkytofu::getRuntimeVersion()) != 0) {
+    if (!stinkytofu::versionsMatch(STINKYTOFU_FULL_VERSION, stinkytofu::getRuntimeVersion())) {
         throw std::runtime_error(
             std::string("rocisa was built against stinkytofu ") + STINKYTOFU_FULL_VERSION +
             " but " + stinkytofu::getRuntimeVersion() +

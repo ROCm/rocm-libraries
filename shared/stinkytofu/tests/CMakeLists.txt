@@ -117,6 +117,7 @@ set(UNIT_CORE_TEST_FILES
     unit/core/ComgrProbeTest.cpp
     unit/core/PassBuilderTest.cpp
     unit/core/BackendTest.cpp
+    unit/core/VersionTest.cpp
 )
 
 # Common/Shared Tests

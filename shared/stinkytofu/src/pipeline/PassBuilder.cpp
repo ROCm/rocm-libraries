@@ -30,7 +30,6 @@
 #include <dlfcn.h>
 #endif
 
-#include <cstring>
 #include <filesystem>
 #include <iostream>
 
@@ -135,7 +134,7 @@ bool PassBuilder::loadPlugin(const std::string& path) {
         return false;
     }
     const char* pluginVersion = versionFn();
-    if (std::strcmp(pluginVersion, getRuntimeVersion()) != 0) {
+    if (!versionsMatch(pluginVersion, getRuntimeVersion())) {
         std::cerr << "PassBuilder: plugin '" << path << "' was built against stinkytofu "
                   << pluginVersion << " but " << getRuntimeVersion()
                   << " is loaded — StinkyTofu does not support cross-version plugin loading\n";
@@ -175,7 +174,7 @@ bool PassBuilder::loadPlugin(const std::string& path) {
         return false;
     }
     const char* pluginVersion = versionFn();
-    if (std::strcmp(pluginVersion, getRuntimeVersion()) != 0) {
+    if (!versionsMatch(pluginVersion, getRuntimeVersion())) {
         std::cerr << "PassBuilder: plugin '" << path << "' was built against stinkytofu "
                   << pluginVersion << " but " << getRuntimeVersion()
                   << " is loaded — StinkyTofu does not support cross-version plugin loading\n";
