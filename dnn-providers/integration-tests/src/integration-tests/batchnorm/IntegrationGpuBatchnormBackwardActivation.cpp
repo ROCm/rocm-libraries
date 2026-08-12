@@ -183,7 +183,7 @@ public:
 
     BatchnormBackwardActivation()
     {
-        this->synthesis()
+        this->inputFillRecipes()
             .setRange(BatchnormActivationTensorIds::X_UID, -1.0f, 1.0f)
             .setRange(BatchnormActivationTensorIds::DY_UID, -1.0f, 1.0f)
             .setRange(BatchnormActivationTensorIds::SCALE_UID, -0.1f, 0.1f)
@@ -207,7 +207,7 @@ protected:
 
         this->setTestCaseLayout(layout.name);
         this->setTestCaseNote(bnTestCase.note);
-        this->synthesis().setGlobalSeed(bnTestCase.seed);
+        this->inputFillRecipes().setGlobalSeed(bnTestCase.seed);
         this->verifyGraph(graphObj);
     }
 };

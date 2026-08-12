@@ -7,8 +7,8 @@ This is the second GEMM-family case and the worked template for adding more
 dtypes/layouts. It reuses the same machinery as :mod:`fp16_rcr`:
 
 * the dtype-/layout-generic request validation (:func:`rcr_request_errors`),
-* the arch-family gate (:func:`arch_family_supported`) that keeps RDNA/WMMA
-  candidates off CDNA arches and CDNA candidates off RDNA arches,
+* a declared :class:`Capability` per candidate, whose explicit ``arches`` list
+  keeps RDNA/WMMA candidates off CDNA arches and CDNA candidates off RDNA ones,
 * the generic config predicate (:func:`gemm_config_supported`), which is already
   dtype-agnostic (it consults the per-arch MMA catalog).
 
@@ -35,17 +35,20 @@ from ...instances.common.gemm_universal import (
 )
 from ..core import (
     CandidateRegistry,
+    Capability,
     DispatchResult,
     KernelCandidate,
     KernelId,
     OperatorRequest,
     Ranker,
+    ShapeRange,
     stable_json_hash,
 )
+from .binding import gemm_rcr_binding
 from .common import (
+    GEMM_DIM_VOCABULARY,
     GemmRequest,
     apply_split_k,
-    arch_family_supported,
     rcr_request_errors,
     selector_matches,
 )
@@ -201,35 +204,20 @@ def _spec_cdna_decode(req: GemmRequest, name: str) -> UniversalGemmSpec:
     )
 
 
-def _decode_shape_gate(req: GemmRequest) -> Tuple[bool, str]:
-    if req.M > _DECODE_M_MAX:
-        return False, (
-            f"decode candidate targets skinny M (<= {_DECODE_M_MAX}); got M={req.M}"
-        )
-    return True, "ok"
-
-
 def _make_candidate(
     *,
     name: str,
     spec_id: str,
     priority: int,
     spec_fn: Callable[[GemmRequest, str], UniversalGemmSpec],
-    arch_family: str,
-    shape_gate: Callable[[GemmRequest], Tuple[bool, str]] | None = None,
+    arches: Tuple[str, ...],
+    shapes: Tuple[ShapeRange, ...] = (),
 ) -> KernelCandidate:
     def support(req: OperatorRequest) -> Tuple[bool, str]:
         errors = _request_errors(req)
         if errors:
             return False, "; ".join(errors)
         assert isinstance(req, GemmRequest)
-        ok, why = arch_family_supported(req, arch_family)
-        if not ok:
-            return False, why
-        if shape_gate is not None:
-            ok, why = shape_gate(req)
-            if not ok:
-                return False, why
         ok, why = selector_matches(req, candidate)
         if not ok:
             return False, why
@@ -242,7 +230,7 @@ def _make_candidate(
         return request_shape_supported(req, spec)
 
     def select(req: OperatorRequest) -> UniversalGemmSpec:
-        ok, why = support(req)
+        ok, why = candidate.admits(req)
         if not ok:
             raise ValueError(f"{name} does not support request: {why}")
         assert isinstance(req, GemmRequest)
@@ -258,12 +246,17 @@ def _make_candidate(
         spec_id=spec_id,
         abi_version=GEMM_BF16_RCR_ABI_VERSION,
         priority=priority,
-        supports=support,
+        capability=Capability(
+            arches=arches, dtypes=("bf16",), layouts=("RCR",), shapes=shapes
+        ),
+        _supports=support,
         select_spec=select,
         signature=lambda _spec: gemm_args_signature(),
         grid=_grid,
         block=lambda spec: (int(spec.block_size), 1, 1),
-        sweep_space=lambda req: (select(req),) if support(req)[0] else (),
+        sweep_space=lambda req: (select(req),) if candidate.admits(req)[0] else (),
+        build=build_universal_gemm,
+        bind=lambda result, verify: gemm_rcr_binding(result, verify, dtype="bf16"),
     )
     return candidate
 
@@ -276,7 +269,21 @@ def _grid(spec: UniversalGemmSpec, req: OperatorRequest) -> Tuple[int, int, int]
     return ceil_div_grid((req.N, t.tile_n), (req.M, t.tile_m), (spec.trait.split_k, 1))
 
 
-GEMM_BF16_REGISTRY = CandidateRegistry(_FAMILY)
+# Explicit gfx targets rather than a cdna/rdna family label; see fp16_rcr for
+# why family is the wrong gate. bf16's CDNA lists differ from fp16's: gfx90a has
+# the 16x16x16 bf16 atom the cshuffle candidate needs, and the decode candidate's
+# deep-K 16x16x32 bf16 atom exists only on gfx950.
+_CDNA_MFMA_BF16 = ("gfx90a", "gfx942", "gfx950")
+_CDNA_MEM_BF16 = ("gfx942", "gfx950")
+_CDNA_DECODE_BF16 = ("gfx950",)
+_RDNA_WMMA = ("gfx11-generic", "gfx1151", "gfx1201")
+
+GEMM_BF16_REGISTRY = CandidateRegistry(
+    _FAMILY,
+    dim_vocabulary=GEMM_DIM_VOCABULARY,
+    require_build=True,
+    require_binding=True,
+)
 GEMM_BF16_REGISTRY.extend(
     (
         _make_candidate(
@@ -284,36 +291,38 @@ GEMM_BF16_REGISTRY.extend(
             spec_id="cdna_cshuffle_default",
             priority=10,
             spec_fn=_spec_cdna_cshuffle,
-            arch_family="cdna",
+            arches=_CDNA_MFMA_BF16,
         ),
         _make_candidate(
             name="universal_gemm_bf16_rdna_wmma",
             spec_id="rdna_wmma_default",
             priority=10,
             spec_fn=_spec_rdna_wmma,
-            arch_family="rdna",
+            arches=_RDNA_WMMA,
         ),
         _make_candidate(
             name="universal_gemm_bf16_cdna_mem",
             spec_id="cdna_mem_64x128",
             priority=20,
             spec_fn=_spec_cdna_mem,
-            arch_family="cdna",
+            arches=_CDNA_MEM_BF16,
         ),
         _make_candidate(
             name="universal_gemm_bf16_rdna_wmma_small",
             spec_id="rdna_wmma_32x32",
             priority=20,
             spec_fn=_spec_rdna_wmma_small,
-            arch_family="rdna",
+            arches=_RDNA_WMMA,
         ),
         _make_candidate(
             name="universal_gemm_bf16_cdna_decode",
             spec_id="cdna_decode_16x64",
             priority=30,
             spec_fn=_spec_cdna_decode,
-            arch_family="cdna",
-            shape_gate=_decode_shape_gate,
+            arches=_CDNA_DECODE_BF16,
+            # Only compete for skinny (decode/GEMV) M. This was an imperative
+            # shape gate; as data it is visible to a coverage query.
+            shapes=(ShapeRange("M", max=_DECODE_M_MAX),),
         ),
     )
 )
@@ -342,7 +351,12 @@ def _kernel_id(
 
 
 def build_kernel(result: DispatchResult):
-    return build_universal_gemm(result.spec, arch=result.request.arch)
+    """Deprecated in favour of ``result.build()``.
+
+    Kept because benchmark harnesses and examples import it by name; it now
+    delegates so there is one definition of how a selection becomes IR.
+    """
+    return result.build()
 
 
 def gemm_bf16_sweep_space(req: OperatorRequest) -> Sequence[UniversalGemmSpec]:

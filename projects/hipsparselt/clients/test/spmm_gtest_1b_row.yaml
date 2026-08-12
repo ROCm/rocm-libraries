@@ -100,12 +100,11 @@ Tests:
   orderB: [R]
   orderC: [R]
   orderD: [R]  
-  gpu_arch: '942'
 
 - name: spmm_small
   category: quick
   function:
-    spmm: *hpa_e4m3_fp32_precision
+    spmm: *hpa_e4m3_fp32_precision_gate
   matrix_size: *small_matrix_size_range
   transA_transB: *transA_transB_range
   alpha_beta: *alpha_beta_range
@@ -117,8 +116,7 @@ Tests:
   orderA: [R]
   orderB: [R]
   orderC: [R]
-  orderD: [R]  
-  gpu_arch: '950'
+  orderD: [R]
 
 - name: spmm_medium
   category: pre_checkin

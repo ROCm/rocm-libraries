@@ -88,6 +88,16 @@ NB_MODULE(origami, m) {
 
   m.def("int_to_reduction_t", &origami::int_to_reduction_t, "Convert int to reduction_t.");
 
+  nanobind::enum_<origami::hybrid_mode_t>(m, "hybrid_mode_t")
+      .value("static_", origami::hybrid_mode_t::static_)
+      .value("dynamic", origami::hybrid_mode_t::dynamic)
+      .value("none", origami::hybrid_mode_t::none)
+      .export_values();
+
+  m.def("hybrid_mode_to_string",
+        &origami::hybrid_mode_to_string,
+        "Convert hybrid_mode_t to string.");
+
   nanobind::enum_<origami::prediction_modes_t>(m, "prediction_modes_t")
       .value("estimation", origami::prediction_modes_t::estimation)
       .value("simulation", origami::prediction_modes_t::simulation)
@@ -203,6 +213,7 @@ NB_MODULE(origami, m) {
       .def_rw("splitting_factor", &origami::gemm::context_t::splitting_factor)
       .def_rw("num_wgs", &origami::gemm::context_t::num_wgs)
       .def_rw("num_timesteps", &origami::gemm::context_t::num_timesteps)
+      .def_rw("tile_schedule", &origami::gemm::context_t::tile_schedule)
       .def_rw("active_cus", &origami::gemm::context_t::active_cus)
       .def_rw("mem_bw_limited", &origami::gemm::context_t::mem_bw_limited)
       .def_rw("write_mem_bw_limited", &origami::gemm::context_t::write_mem_bw_limited)
