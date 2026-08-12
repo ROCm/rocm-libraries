@@ -30,6 +30,7 @@
 #include "hip_kernel_provider_common/umd/UmdPathParse.hpp"
 
 #include <hipdnn_flatbuffers_sdk/umd/op_schema_registry_generated.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 
 #include <nlohmann/json.hpp>
 
@@ -93,7 +94,9 @@ struct TensorVarSpec
 // lifetime.
 struct CompiledUmd
 {
-    std::string id;
+    // The descriptor's identity (RFC 0018 §13): a UUID, held as the 128-bit
+    // value hipDNN carries every descriptor and graph id in, not as text.
+    hipdnn_flatbuffers_sdk::utilities::UuidBytes id{};
     std::string name;
     // Matcher format version and the hipDNN graph schema version this matcher
     // was authored against; empty when the descriptor declares neither
@@ -296,7 +299,7 @@ private:
     {
         CompiledUmd out;
         validateTopLevel(d);
-        out.id = d.at("id").get<std::string>();
+        out.id = parseId(d.at("id"));
         out.name = d.at("name").get<std::string>();
         // Both version keys are optional. An omitted key means "1.0", the
         // version every descriptor authored against this revision implies
@@ -368,9 +371,9 @@ private:
         {
             throw UmdCompileError("schema must equal \"hipdnn.umd/v1\" (A.10 §1)");
         }
-        if(!d.at("id").is_string() || !isUuid(d.at("id").get<std::string>()))
+        if(!d.at("id").is_string())
         {
-            throw UmdCompileError("id must be a well-formed UUID (A.10 §1)");
+            throw UmdCompileError("id must be a string (A.10 §1)");
         }
         if(!d.at("name").is_string())
         {
@@ -388,27 +391,19 @@ private:
         }
     }
 
-    static bool isUuid(const std::string& s)
+    // A.10 §1: the id must be a well-formed UUID. Parsing it here is the check
+    // -- a malformed id is refused at compile rather than surviving as an
+    // unusable string.
+    static hipdnn_flatbuffers_sdk::utilities::UuidBytes parseId(const nlohmann::json& id)
     {
-        if(s.size() != 36)
+        try
         {
-            return false;
+            return hipdnn_flatbuffers_sdk::utilities::parseUuid(id.get<std::string>());
         }
-        for(std::size_t i = 0; i < s.size(); ++i)
+        catch(const std::invalid_argument&)
         {
-            if(i == 8 || i == 13 || i == 18 || i == 23)
-            {
-                if(s[i] != '-')
-                {
-                    return false;
-                }
-            }
-            else if(std::isxdigit(static_cast<unsigned char>(s[i])) == 0)
-            {
-                return false;
-            }
+            throw UmdCompileError("id must be a well-formed UUID (A.10 §1)");
         }
-        return true;
     }
 
     // Both version keys are optional; when present each must be a

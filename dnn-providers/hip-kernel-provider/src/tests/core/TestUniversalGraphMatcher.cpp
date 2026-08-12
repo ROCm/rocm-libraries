@@ -22,6 +22,7 @@
 #include <vector>
 
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
 #include "hip_kernel_provider_common/umd/BindingContext.hpp"
@@ -122,6 +123,10 @@ umd::UniversalGraphMatcher makeSdpaMatcher()
 
 constexpr umd::DeviceProperties K_DEVICE{/*ldsSize=*/65536, /*warpSize=*/64};
 
+// The sdpaDescriptor() `id`, in the form the compiled descriptor carries it.
+const hipdnn_flatbuffers_sdk::utilities::UuidBytes K_SDPA_UMD_ID
+    = hipdnn_flatbuffers_sdk::utilities::parseUuid("9c3f5b2a-7d41-4e88-b6a0-1f2e3d4c5b6a");
+
 } // namespace
 
 // ---- Compiler validation (A.10) ------------------------------------------
@@ -153,6 +158,22 @@ TEST(TestUmdCompiler, RejectsMalformedUuid)
 {
     json d = sdpaDescriptor();
     d["id"] = "not-a-uuid";
+    EXPECT_THROW(umd::UmdCompiler::compile(d), umd::UmdCompileError);
+}
+
+TEST(TestUmdCompiler, RejectsWellSizedNonHexUuid)
+{
+    // Right shape, wrong alphabet: the id is parsed, not pattern-matched, so a
+    // non-hex digit must still surface as a compile error.
+    json d = sdpaDescriptor();
+    d["id"] = "9c3f5b2a-7d41-4e88-b6a0-1f2e3d4c5bZZ";
+    EXPECT_THROW(umd::UmdCompiler::compile(d), umd::UmdCompileError);
+}
+
+TEST(TestUmdCompiler, RejectsNonStringUuid)
+{
+    json d = sdpaDescriptor();
+    d["id"] = 42;
     EXPECT_THROW(umd::UmdCompiler::compile(d), umd::UmdCompileError);
 }
 
@@ -280,8 +301,8 @@ TEST(TestUniversalGraphMatcher, OwnsSingleDescriptor)
     // A matcher has a 1:1 relationship with its UMD: it exposes that one
     // descriptor's id and compiled form.
     const umd::UniversalGraphMatcher m = makeSdpaMatcher();
-    EXPECT_EQ(m.umdId(), "9c3f5b2a-7d41-4e88-b6a0-1f2e3d4c5b6a");
-    EXPECT_EQ(m.descriptor().id, "9c3f5b2a-7d41-4e88-b6a0-1f2e3d4c5b6a");
+    EXPECT_EQ(m.umdId(), K_SDPA_UMD_ID);
+    EXPECT_EQ(m.descriptor().id, K_SDPA_UMD_ID);
     EXPECT_EQ(m.descriptor().nodes.size(), 1u);
 }
 
@@ -293,7 +314,7 @@ TEST(TestUniversalGraphMatcher, MatchesValidSdpaForward)
 
     const umd::MatchResult r = m.match(K_DEVICE, g);
     ASSERT_TRUE(r.matched);
-    EXPECT_EQ(r.umdId, "9c3f5b2a-7d41-4e88-b6a0-1f2e3d4c5b6a");
+    EXPECT_EQ(r.umdId, K_SDPA_UMD_ID);
 }
 
 TEST(TestUniversalGraphMatcher, DeclinesWrongHeadSize)

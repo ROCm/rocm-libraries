@@ -31,6 +31,7 @@
 #include "hip_kernel_provider_common/umd/UmdCompiler.hpp"
 
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
@@ -58,7 +59,7 @@ struct DeviceProperties
 struct MatchResult
 {
     bool matched = false;
-    std::string umdId;
+    hipdnn_flatbuffers_sdk::utilities::UuidBytes umdId{};
     BindingContext bindings; // valid when matched; queryable post-match
 };
 
@@ -83,7 +84,7 @@ public:
     }
 
     // The id of the descriptor this matcher matches against.
-    const std::string& umdId() const
+    const hipdnn_flatbuffers_sdk::utilities::UuidBytes& umdId() const
     {
         return _umd->id;
     }
@@ -128,7 +129,7 @@ public:
         if(referencesKernelMetadata())
         {
             throw std::logic_error(
-                "UMD '" + _umd->id
+                "UMD '" + hipdnn_flatbuffers_sdk::utilities::formatUuid(_umd->id)
                 + "' references $kernel metadata; call the kernel-metadata match overload");
         }
         return matchImpl(device, graph, nullptr);
