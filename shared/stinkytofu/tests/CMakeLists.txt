@@ -233,6 +233,28 @@ if(BUILD_SHARED_LIBS)
             ${CMAKE_CURRENT_SOURCE_DIR}/../examples/plugins
         )
         add_dependencies(api_tests stinkytofu-plugin-helloworld)
+
+        # Test-only plugin that reports a deliberately wrong stinkytofu version,
+        # to assert loadPlugin() rejects a version mismatch before calling
+        # registerPlugin(). Headers-only, same DT_NEEDED rationale as the
+        # example plugin above (see examples/plugins/CMakeLists.txt).
+        add_library(stinkytofu-plugin-bad-version MODULE
+            ${CMAKE_CURRENT_SOURCE_DIR}/plugins/BadVersionPlugin.cpp
+        )
+        if(WIN32)
+            target_link_libraries(stinkytofu-plugin-bad-version PRIVATE stinkytofu)
+        else()
+            target_include_directories(stinkytofu-plugin-bad-version PRIVATE
+                $<TARGET_PROPERTY:stinkytofu,INTERFACE_INCLUDE_DIRECTORIES>
+            )
+        endif()
+        set_target_properties(stinkytofu-plugin-bad-version PROPERTIES
+            LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/plugins"
+        )
+        target_compile_definitions(api_tests PRIVATE
+            STINKYTOFU_PLUGIN_BAD_VERSION_PATH="$<TARGET_FILE:stinkytofu-plugin-bad-version>"
+        )
+        add_dependencies(api_tests stinkytofu-plugin-bad-version)
     endif()
 
     gtest_discover_tests(api_tests
