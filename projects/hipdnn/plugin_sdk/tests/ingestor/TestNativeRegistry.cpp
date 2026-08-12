@@ -14,11 +14,8 @@
 
 /**
  * @file TestNativeRegistry.cpp
- * @brief Unit tests for the symbol-name-to-native-callable registry.
- *
- * Covers registration, resolution, and the fail-closed contract a descriptor naming an
- * unshipped symbol depends on -- a missing registration must surface as an error at the
- * point of use, never as an engine that silently matches nothing.
+ * @brief Tests for the symbol-name-to-native-callable registry: registration,
+ * resolution, and fail-closed behavior on unresolved symbols.
  */
 namespace
 {
@@ -39,8 +36,7 @@ TEST(TestIngestorNativeRegistry, RejectsDuplicateRegistration)
 {
     GraphMatcherRegistry::registerSymbol("registry.duplicate", acceptGraph);
 
-    // Two implementations behind one name leaves one silently unreachable, and which one
-    // wins would depend on static-init order.
+    // Two implementations behind one name: which wins depends on static-init order.
     EXPECT_THROW(GraphMatcherRegistry::registerSymbol("registry.duplicate", rejectGraph),
                  std::runtime_error);
 
@@ -49,8 +45,7 @@ TEST(TestIngestorNativeRegistry, RejectsDuplicateRegistration)
 
 TEST(TestIngestorNativeRegistry, FailsClosedOnUnknownSymbol)
 {
-    // A descriptor naming a symbol the provider does not ship must surface as an error,
-    // never as an engine that quietly matches nothing.
+    // Unshipped symbol must error, not silently match nothing.
     EXPECT_THROW(GraphMatcherRegistry::resolve("registry.never_registered"), std::runtime_error);
 }
 

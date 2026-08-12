@@ -71,14 +71,14 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
          }},
 #endif
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
-        // The kernel ingestor's engine (RFC 0017). Registered statically here
-        // because engines are still a compile-time table; runtime loading of engine
-        // descriptors replaces this entry with one built per installed UED file.
+        // The kernel ingestor's engine (RFC 0017). Registered statically here; runtime
+        // loading of engine descriptors will replace this entry with one built per
+        // installed UED file.
         {kernel_ingestor_engine::pointwiseAddEngineId(),
          [](const device::IDevicePropertyProvider& /*devicePropertyProvider*/)
              -> std::unique_ptr<hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>> {
-             // Device facts are resolved per call from the handle rather than captured
-             // here, so this engine needs nothing from the construction-time provider.
+             // Device facts are resolved per call from the handle, not from the
+             // construction-time provider.
              return kernel_ingestor_engine::makePointwiseAddEngine();
          }},
 #endif
@@ -117,11 +117,8 @@ Container::Container()
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
     // Every ingestor pack's native matchers, scorers, and dispatch handlers must be
     // registered before any descriptor-backed engine below can resolve the symbols its
-    // UMDs, UHDs, and UDDs name -- including a UED loaded from a file that shares this
-    // pack's symbols with no compile-time link to this translation unit. Safe to call
-    // on every Container construction: it registers exactly once for the process, no
-    // matter how many containers SharedContainerManager builds and tears down over the
-    // plugin's lifetime.
+    // UMDs, UHDs, and UDDs name. Safe to call on every Container construction: it
+    // registers exactly once per process (see SharedContainerManager).
     kernel_ingestor_engine::registerNativeIngestorSymbols();
 #endif
 

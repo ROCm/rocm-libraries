@@ -29,15 +29,12 @@ namespace hipdnn_plugin_sdk::ingestor
 /**
  * @brief One hipDNN engine, defined entirely by a UED and the packs naming it.
  *
- * Satisfies hipDNN's existing IEngine contract using descriptor data; from the host's
- * side this is an ordinary engine.
+ * Satisfies hipDNN's IEngine contract using descriptor data.
  *
- * The engine's id is its UED name hashed into hipDNN's engine-id space, registered when
- * the engine is constructed rather than at build time, so an id collision surfaces here
- * as a failure to create the engine.
+ * The engine's id is its UED name hashed into hipDNN's engine-id space, registered at
+ * construction, so an id collision surfaces as a failure to create the engine.
  *
- * Holds exactly one plan builder: a catalog entry is a candidate, not a builder, so an
- * engine with 150 kernels still has one.
+ * Holds exactly one plan builder: a catalog entry is a candidate, not a builder.
  */
 template <typename THandle, typename TSettings, typename TContext>
 class GenericEngine : public IEngine<THandle, TSettings, TContext>
@@ -47,16 +44,15 @@ public:
     using IEngineConfig = hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig;
 
     /**
-     * @param engine         The UED this engine is; 1:1 with a hipDNN engine, so its
-     *        name is this engine's identity and its knob list is what it exposes.
+     * @param engine         The UED this engine is; its name is this engine's identity
+     *        and its knob list is what it exposes.
      * @param stateManager   The descriptor state this engine selects over, already
      *        validated.
      * @param deviceResolver Answers which device each call is for. Held by reference;
      *        owned by the provider, which must keep it alive for the engine's lifetime.
      *
      * @throws std::invalid_argument if a knob names no field in the engine's metadata
-     *         schema (RFC 0017 §4): a knob is only a name, with the field supplying its
-     *         type, default and legal values.
+     *         schema (RFC 0017 §4).
      */
     GenericEngine(EngineDescriptor engine,
                   std::unique_ptr<KernelIngestorStateManager<THandle>> stateManager,
@@ -106,8 +102,7 @@ public:
     /**
      * @brief Reports this engine's knobs for @p opGraph.
      *
-     * The returned buffer is detached and handed to the caller's handle to own, matching
-     * how every other engine in this provider answers the query.
+     * The returned buffer is detached and handed to the caller's handle to own.
      */
     void getDetails(THandle& handle,
                     const IGraph& opGraph,
@@ -156,9 +151,8 @@ public:
 
 private:
     EngineDescriptor _engine;
-    /// Owned outright: see the constructor for why this must not be shared. Held by
-    /// pointer so the plan builder can bind a reference to it in the member
-    /// initializer list, which needs a stable address.
+    /// Owned outright: held by pointer so the plan builder can bind a reference to it
+    /// in the member initializer list, which needs a stable address.
     std::unique_ptr<KernelIngestorStateManager<THandle>> _stateManager;
     int64_t _id;
     GenericPlanBuilder<THandle, TSettings, TContext> _planBuilder;

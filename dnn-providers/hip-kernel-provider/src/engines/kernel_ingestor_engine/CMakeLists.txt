@@ -15,7 +15,6 @@ target_sources(hip_kernel_provider_impl PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/PointwiseAddPack.cpp
 )
 
-# The sources above are entirely inside `#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR`, so the
-# definition must reach the object library that compiles them, not only the static
-# library the tests link. This mirrors how each other engine sets its own gate.
+# Sources above are entirely inside `#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR`; the
+# definition must reach this object library, not only the static library tests link.
 target_compile_definitions(hip_kernel_provider_impl PUBLIC HIPDNN_ENABLE_KERNEL_INGESTOR=1)

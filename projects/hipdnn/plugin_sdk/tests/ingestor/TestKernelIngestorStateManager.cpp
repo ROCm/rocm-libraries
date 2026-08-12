@@ -22,9 +22,8 @@
 
 /**
  * @file TestKernelIngestorStateManager.cpp
- * @brief Unit tests for KernelIngestorStateManager.hpp: matching, pruning, caching,
- *        ranking-reuse, knob value discovery, metadata completion, and the eager
- *        construction-time validation the constructor's doc calls out.
+ * @brief Unit tests for KernelIngestorStateManager: matching, pruning, caching, ranking,
+ *        knob discovery, metadata completion, and construction-time validation.
  */
 namespace
 {
@@ -77,8 +76,7 @@ TEST(TestKernelIngestorStateManager, GraphLevelMatcherFailurePrunesTheWholePack)
     const MatchContext context{graph, 0, properties};
 
     EXPECT_TRUE(manager->unsortedDefinitions(context).empty());
-    // The whole point of the graph/kernel split: a pack that cannot serve the graph
-    // costs one matcher call, not one per kernel.
+    // A rejected graph costs one matcher call, not one per kernel.
     EXPECT_EQ(counters().graphCalls, 1);
     EXPECT_EQ(counters().kernelCalls, 0);
 }
@@ -104,14 +102,9 @@ TEST(TestKernelIngestorStateManager, EvaluatesASharedGraphMatcherOncePerGraphNot
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
 
-    // Matchers are shared by id across packs, so a shared graph-scoped check runs once,
-    // not once per pack.
-    //
+    // Matchers are shared by id, so the graph-scoped check runs once, not once per pack.
     // The first pack also fails a second, unshared matcher, so only the second pack
-    // survives. That isolates BINDING REUSE from memoization: if both packs survived,
-    // the first pack's own merge could put the token in catalog.bound, hiding a
-    // mutation that only merges a memo entry's bindings on the cache-MISS pack and
-    // skips it on every cache-HIT pack -- exactly the second pack's read here.
+    // survives, isolating binding reuse (read from the memo) from re-evaluation.
     constexpr const char* UNSHARED_FAIL_SYMBOL = "test.cross_pack_binding_reuse.fail";
     GraphMatcherRegistry::registerSymbol(UNSHARED_FAIL_SYMBOL, rejectGraph);
     const auto unsharedFailMatcherId = testId(0x84);
@@ -119,8 +112,7 @@ TEST(TestKernelIngestorStateManager, EvaluatesASharedGraphMatcherOncePerGraphNot
     const KernelDescriptorPack first = makePack({GRAPH_MATCHER_ID, unsharedFailMatcherId});
     KernelDescriptorPack second = makePack({GRAPH_MATCHER_ID, KERNEL_MATCHER_ID});
     second.id = testId(0x80);
-    // A distinct metadata tuple: the uniqueness rule is engine-wide, not per pack, so
-    // the second pack cannot repeat a block size the first already uses.
+    // Distinct metadata tuple: uniqueness is engine-wide, not per pack.
     second.kernels = {makeKernel(testId(0x81), "second_pack_kernel", 512, "FLOAT")};
 
     const StateManager manager(
@@ -136,17 +128,14 @@ TEST(TestKernelIngestorStateManager, EvaluatesASharedGraphMatcherOncePerGraphNot
     const auto properties = testDeviceProperties();
     const auto catalog = manager.unsortedCatalog(MatchContext{graph, 0, properties});
 
-    // Three native calls would mean the shared matcher ran twice; it must not. One call
-    // for GRAPH_MATCHER_ID (shared, evaluated once for both packs) plus one for the
-    // first pack's own unshared, failing matcher is the whole budget.
+    // Two calls: the shared matcher once, plus the first pack's unshared failing matcher.
     EXPECT_EQ(counters().graphCalls, 2);
-    // Only the second pack's kernel: the first pack's graph-scoped matchers did not all
-    // pass, so none of its kernels were ever considered.
+    // Only the second pack's kernel survives; the first pack was pruned before its
+    // kernels ran.
     ASSERT_EQ(catalog.entries.size(), 1U);
     EXPECT_EQ(catalog.entries.front().packId, second.id);
-    // The point of this test: the shared matcher's binding reaches catalog.bound through
-    // the second pack's read of the memo, not through the (pruned) first pack that
-    // actually ran the matcher.
+    // The binding reaches catalog.bound via the second pack's memo read, not the
+    // pruned first pack that actually ran the matcher.
     EXPECT_EQ(catalog.bound.count("test.bound_token"), 1U);
 
     GraphMatcherRegistry::unregisterSymbol(UNSHARED_FAIL_SYMBOL);
@@ -178,21 +167,15 @@ TEST(TestKernelIngestorStateManager, ASharedGraphMatcherFailurePrunesEveryPackLi
 
 TEST(TestKernelIngestorStateManager, PrunedPackBindingsAreNotVisibleToSurvivingPackKernels)
 {
-    // Two packs sharing an engine, the normal case since matchers are shared by id.
-    // The pruned pack's own graph-scoped matcher passes and binds a token before a
-    // second matcher in the SAME pack fails and prunes it; the surviving pack lists
-    // neither of those matchers. If the pruned pack's binding reaches catalog.bound
-    // anyway, a kernel in the surviving pack -- which never asked for that token -- can
-    // read it. That is the correctness bug item 5 fixes: the header's claim that
-    // "nothing a failing matcher wrote can be read by a kernel that survives" held only
-    // by accident with one pack, and breaks the moment a second pack shares the engine.
+    // Two packs share an engine. The pruned pack's own matcher binds a token before a
+    // second matcher in the same pack fails and prunes it; the surviving pack lists
+    // neither matcher, so it must not see that binding.
     constexpr const char* PASS_NO_BIND_SYMBOL = "test.pruned_bound_isolation.pass_no_bind";
     constexpr const char* LEAK_THEN_PRUNE_SYMBOL = "test.pruned_bound_isolation.leak";
     constexpr const char* ALWAYS_FAILS_SYMBOL = "test.pruned_bound_isolation.fail";
 
-    // Reused rather than reinvented: acceptAnyGraph (fixtures) passes and binds nothing;
-    // acceptGraph (this file's fixtures) passes and binds "test.bound_token"; rejectGraph
-    // always fails. Exactly the three behaviors this test needs.
+    // acceptAnyGraph passes and binds nothing; acceptGraph passes and binds
+    // "test.bound_token"; rejectGraph always fails.
     GraphMatcherRegistry::registerSymbol(PASS_NO_BIND_SYMBOL, &acceptAnyGraph);
     GraphMatcherRegistry::registerSymbol(LEAK_THEN_PRUNE_SYMBOL, &acceptGraph);
     GraphMatcherRegistry::registerSymbol(ALWAYS_FAILS_SYMBOL, &rejectGraph);
@@ -213,8 +196,8 @@ TEST(TestKernelIngestorStateManager, PrunedPackBindingsAreNotVisibleToSurvivingP
     KernelDescriptorPack prunedPack;
     prunedPack.id = testId(0xA2);
     prunedPack.name = "pruned pack";
-    // Order matters: the leaking matcher must run (and bind) before the failing one
-    // prunes the pack, exactly as graphLevelMatchersPass evaluates them in listed order.
+    // Order matters: the leaking matcher must run before the failing one prunes the
+    // pack (matchers run in listed order).
     prunedPack.matcherIds = {leakMatcherId, failMatcherId};
     prunedPack.engineId = ENGINE_ID;
     prunedPack.dispatchId = DISPATCH_ID;
@@ -233,15 +216,12 @@ TEST(TestKernelIngestorStateManager, PrunedPackBindingsAreNotVisibleToSurvivingP
     const auto properties = testDeviceProperties();
     const auto catalog = manager.unsortedCatalog(MatchContext{graph, 0, properties});
 
-    // The surviving pack's kernel is the only entry: the pruned pack's kernel never
-    // enters the catalog, which was already correct before this fix.
+    // Only the surviving pack's kernel enters the catalog.
     ASSERT_EQ(catalog.entries.size(), 1U);
     EXPECT_EQ(catalog.entries.front().packId, survivingPack.id);
 
-    // What this test actually regresses: the token only the pruned pack's own matcher
-    // bound must not survive into the catalog the surviving pack's kernel reads from,
-    // even though that matcher itself returned true before its pack's second matcher
-    // failed.
+    // The pruned pack's bound token must not reach the catalog the surviving pack
+    // reads, even though its matcher returned true before the pack was pruned.
     EXPECT_EQ(catalog.bound.count("test.bound_token"), 0U);
 
     GraphMatcherRegistry::unregisterSymbol(PASS_NO_BIND_SYMBOL);
@@ -251,8 +231,8 @@ TEST(TestKernelIngestorStateManager, PrunedPackBindingsAreNotVisibleToSurvivingP
 
 TEST(TestKernelIngestorStateManager, TwoPacksBindingOneTokenToDifferentValuesThrows)
 {
-    // Two packs writing different values under one token name is an authoring error
-    // (Catalog::bound's doc); a silent first-wins merge would hide it.
+    // Conflicting values under one token name is an authoring error; a silent merge
+    // would hide it.
     constexpr const char* CONFLICTING_SYMBOL = "test.bound_conflict.conflicting";
     GraphMatcherRegistry::registerSymbol(CONFLICTING_SYMBOL, &bindConflictingTokenValue);
 
@@ -283,8 +263,7 @@ TEST(TestKernelIngestorStateManager, TwoPacksBindingOneTokenToDifferentValuesThr
 
 TEST(TestKernelIngestorStateManager, TwoPacksBindingOneTokenToTheSameValueMergeCleanly)
 {
-    // Packs agreeing on a token's value (the normal shared-matcher case) must still
-    // merge cleanly.
+    // Packs agreeing on a token's value must still merge cleanly.
     constexpr const char* AGREEING_SYMBOL = "test.bound_conflict.agreeing";
     GraphMatcherRegistry::registerSymbol(AGREEING_SYMBOL, &bindAgreeingTokenValue);
 
@@ -323,8 +302,7 @@ TEST(TestKernelIngestorStateManager, MatchesSeparatelyPerDevice)
     manager->unsortedDefinitions(MatchContext{graph, 0, properties});
     manager->unsortedDefinitions(MatchContext{graph, 1, properties});
 
-    // The same graph on a different device is a different problem: a kernel applicable
-    // on one device need not be applicable on another.
+    // A kernel applicable on one device need not be applicable on another.
     EXPECT_EQ(counters().graphCalls, 2);
 }
 
@@ -332,8 +310,8 @@ TEST(TestKernelIngestorStateManager, RematchesEveryCallWhenTheGraphHasNoIdentity
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const auto manager = makeStateManager();
-    // A legacy or unfinalized graph: there is no key to memoize under, and inventing one
-    // would alias unrelated graphs.
+    // A graph with no identity has no key to memoize under; inventing one would alias
+    // unrelated graphs.
     const TestGraph graph;
     const auto properties = testDeviceProperties();
     const MatchContext context{graph, 0, properties};
@@ -349,8 +327,8 @@ TEST(TestKernelIngestorStateManager, RematchesEveryCallWhenTheGraphHasNoIdentity
 
 TEST(TestKernelIngestorStateManager, DistinctGraphsCarryingANilUuidDoNotShareACatalogEntry)
 {
-    // Two unrelated graphs sharing the nil id must not share a cache entry: a regression
-    // would run the matcher once, not twice, and serve the second graph the first's catalog.
+    // Two graphs sharing the nil id must not share a cache entry, or the second would
+    // get the first's catalog.
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const auto manager = makeStateManager();
     const TestGraph first(makeNilGraphId());
@@ -372,9 +350,8 @@ TEST(TestKernelIngestorStateManager, DistinctGraphsCarryingANilUuidDoNotShareACa
 
 TEST(TestKernelIngestorStateManager, CarriesWhatMatchingBoundThroughToDispatch)
 {
-    // RFC 0017 section 8.5: matching does double duty, deciding a kernel applies and
-    // binding the fields the launch will use. A dispatch handler must read those values
-    // rather than re-deriving them from the graph with a second notion of its shape.
+    // RFC 0017 section 8.5: matching also binds the fields dispatch reads, instead of
+    // re-deriving them from the graph.
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const auto manager = makeStateManager();
     const auto properties = testDeviceProperties();
@@ -384,21 +361,16 @@ TEST(TestKernelIngestorStateManager, CarriesWhatMatchingBoundThroughToDispatch)
     const auto bound = manager->unsortedCatalog(context).bound;
 
     ASSERT_EQ(bound.count("test.bound_token"), 1U);
-    // Compared as the integer alternative rather than against the variant as a whole:
-    // a bare int64 on the right would not convert, and asserting through the accessor
-    // also pins that the matcher bound an integer and not some other alternative.
+    // tryGetBoundInt also pins that the bound value is the integer alternative, not
+    // another.
     EXPECT_EQ(tryGetBoundInt(bound, "test.bound_token"), BOUND_TOKEN_VALUE);
 }
 
 TEST(TestKernelIngestorStateManager, ReadingBoundStateAfterMatchingDoesNotRematch)
 {
-    // Section 8.1 keeps the bound token state alongside the catalog precisely so that
-    // "nothing is re-matched" once a graph has been matched. Recovering these values by
-    // re-running the matcher would be correct and quietly quadratic.
-    //
-    // The graph carries an identity, so there is a cache entry to serve the second and
-    // third reads. A graph without one is matched fresh every call by design; that is why
-    // the entries and the bound state come back from a single call rather than two.
+    // Section 8.1: bound state is cached with the catalog, so recovering it never
+    // re-matches. The graph carries an identity, so a cache entry serves the second
+    // and third reads.
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const auto manager = makeStateManager();
     const auto properties = testDeviceProperties();
@@ -408,10 +380,8 @@ TEST(TestKernelIngestorStateManager, ReadingBoundStateAfterMatchingDoesNotRematc
     static_cast<void>(manager->unsortedCatalog(context));
     const auto afterMatching = counters().graphCalls;
 
-    // The cached reads must still carry the bound state, not merely avoid re-matching.
-    // Asserting only graphCalls would pass against a cache that served an entry with
-    // Catalog::bound emptied -- which destroys the section 8.1 property this test is
-    // named for while leaving its counter untouched.
+    // Asserting only graphCalls would miss a cache that emptied Catalog::bound; the
+    // cached reads must carry it too.
     const auto secondRead = manager->unsortedCatalog(context).bound;
     const auto thirdRead = manager->sortedCatalog(context).bound;
 
@@ -436,8 +406,8 @@ TEST(TestKernelIngestorStateManager, RematchesAfterCacheEviction)
     manager->unsortedDefinitions(MatchContext{second, 0, properties});
     manager->unsortedDefinitions(MatchContext{first, 0, properties});
 
-    // Capacity 1, so the second graph evicted the first and it had to rematch. Eviction
-    // costs work, never a wrong answer.
+    // Capacity 1 evicts the first graph, forcing a rematch; eviction costs work, not
+    // correctness.
     EXPECT_EQ(counters().graphCalls, 3);
 }
 
@@ -486,8 +456,8 @@ TEST(TestKernelIngestorStateManager, KnobValuesComeFromTheCatalogInRankedOrder)
 
     const auto values = StateManager::knobValues(manager->sortedDefinitions(context), BLOCK_SIZE);
 
-    // The pruned HALF kernel also carried block_size 64, but it contributes no value:
-    // a knob offers what the surviving catalog implements, not the schema's range.
+    // The pruned HALF kernel also has block_size 64 but contributes no value; a knob
+    // reflects the surviving catalog, not the schema range.
     ASSERT_EQ(values.size(), 2U);
     EXPECT_EQ(std::get<int64_t>(values[0]), 256);
     EXPECT_EQ(std::get<int64_t>(values[1]), 64);
@@ -499,12 +469,9 @@ TEST(TestKernelIngestorStateManager, KnobValuesComeFromTheCatalogInRankedOrder)
 
 TEST(TestKernelIngestorStateManager, GetDispatchDetailsThrowsOnADanglingDispatchId)
 {
-    // After applicability accepted a graph, hipDNN has already chosen this engine on
-    // that promise, so a missing dispatch is a hard error rather than a silent decline.
-    // Constructed directly rather than through the pack/matcher path: the point here is
-    // a KernelDefinition whose dispatchId the state manager's own descriptor set never
-    // registered, which validateAndIndexPacks() cannot catch because this definition
-    // never went through a pack.
+    // A missing dispatch after a graph was accepted is a hard error, not a silent
+    // decline. Built directly, bypassing pack validation, since validateAndIndexPacks()
+    // cannot see a definition that never went through a pack.
     const auto manager = makeStateManager();
     const auto kernel = makeDefinition(testId(0x01), 64);
 
@@ -543,9 +510,8 @@ TEST(TestKernelIngestorStateManager, CompletesAnOmittedFieldFromItsSchemaDefault
 }
 
 // ---------------------------------------------------------------------------
-// Construction-time validation: every eager check validateAndIndexPacks() and the
-// constructor itself run, TEST_P'd over one shared shape (a pack, invalid in one way,
-// must fail construction with std::invalid_argument).
+// Construction-time validation (TEST_P): each case must fail construction with
+// std::invalid_argument.
 // ---------------------------------------------------------------------------
 
 struct StateManagerConstructionThrowCase
@@ -571,8 +537,7 @@ INSTANTIATE_TEST_SUITE_P(
         StateManagerConstructionThrowCase{
             "RejectsAKernelOmittingAFieldWithNoDefault",
             [] {
-                // dtype declares no default, so every kernel must state it. Omitting it
-                // would otherwise produce a catalog key the author never wrote.
+                // dtype has no schema default, so every kernel must state it explicitly.
                 KernelDescriptorPack pack = makePack({GRAPH_MATCHER_ID, KERNEL_MATCHER_ID});
                 KernelDescriptor missingDtype;
                 missingDtype.id = testId(0x71);
@@ -589,9 +554,8 @@ INSTANTIATE_TEST_SUITE_P(
         StateManagerConstructionThrowCase{
             "RejectsAKernelSupplyingAFieldTheSchemaDoesNotDeclare",
             [] {
-                // A misspelled field name is the common case, and left in place it fails
-                // twice over: the real field silently takes its default, and the stray
-                // value joins the catalog key, where nothing downstream can read it.
+                // An undeclared field (e.g. a misspelling) silently takes its default
+                // while the stray value joins the catalog key unread.
                 KernelDescriptorPack pack = makePack({GRAPH_MATCHER_ID, KERNEL_MATCHER_ID});
                 KernelDescriptor undeclared;
                 undeclared.id = testId(0x74);
@@ -610,8 +574,8 @@ INSTANTIATE_TEST_SUITE_P(
         StateManagerConstructionThrowCase{
             "RejectsAKernelSupplyingAFieldOfTheWrongType",
             [] {
-                // block_size is declared INT. A string here would otherwise surface far
-                // away, as a bad_variant_access inside a matcher or a scorer.
+                // A wrong-typed field would otherwise surface as a bad_variant_access far
+                // away, inside a matcher or scorer.
                 KernelDescriptorPack pack = makePack({GRAPH_MATCHER_ID, KERNEL_MATCHER_ID});
                 KernelDescriptor wrongType;
                 wrongType.id = testId(0x72);
@@ -629,8 +593,8 @@ INSTANTIATE_TEST_SUITE_P(
         StateManagerConstructionThrowCase{
             "RejectsAPackNamingAnUnknownMatcher",
             [] {
-                // A dangling cross-reference cannot be evaluated, so it is caught when
-                // the descriptor set is assembled rather than when a graph first arrives.
+                // A dangling matcher reference is caught at construction, not when a
+                // graph first arrives.
                 return std::make_unique<StateManager>(
                     makeSchema(),
                     std::vector<MatchDescriptor>{},
@@ -665,8 +629,8 @@ INSTANTIATE_TEST_SUITE_P(
         StateManagerConstructionThrowCase{
             "RejectsADuplicateMatchDescriptorId",
             [] {
-                // Two distinct matchers under one id: silent first-wins would let a pack
-                // run whichever matcher loaded first.
+                // Silent first-wins under a duplicate id would run whichever matcher
+                // loaded first.
                 std::vector<MatchDescriptor> matchers = makeTestMatchers();
                 matchers.push_back({GRAPH_MATCHER_ID,
                                     "a different matcher entirely",

@@ -11,12 +11,11 @@ namespace hip_kernel_provider::kernel_ingestor_engine
 {
 
 /**
- * @file NativeSymbolNames.hpp
+ * @file PointwiseAddSymbols.hpp
  * @brief The symbol names this pack's descriptors resolve through.
  *
- * A descriptor names a native implementation by symbol; the provider registers the
- * implementation under the same name. Each constant here is a placeholder for a
- * declarative descriptor field once the follow-up RFCs land.
+ * Each constant is a placeholder for a declarative descriptor field once the
+ * follow-up RFCs land.
  */
 
 /// Graph-scoped applicability: a single-node pointwise ADD over 1-element tensors.
@@ -34,9 +33,8 @@ inline constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.pointwise_add.dis
 /**
  * @brief The engine name, hashed into hipDNN's engine-id space.
  *
- * Scoped with a prefix per RFC 0017's global-uniqueness requirement. Absent from
- * EngineNames.hpp's registry: a descriptor-backed engine registers its name at
- * construction, not at build time.
+ * Prefixed per RFC 0017's global-uniqueness rule. Absent from EngineNames.hpp's
+ * registry: registered at construction, not at build time.
  */
 inline constexpr std::string_view ENGINE_NAME = "hipkernel:PointwiseAdd";
 
@@ -47,7 +45,7 @@ inline constexpr std::string_view DTYPE_FIELD = "dtype";
 /**
  * @brief Tokens the graph matcher binds for the dispatch handler to read.
  *
- * The native stand-in for the `$`-prefixed names a descriptor's dispatch formulas
+ * Native stand-in for the `$`-prefixed names a descriptor's dispatch formulas
  * would reference (RFC 0017 §5).
  */
 inline constexpr std::string_view INPUT_A_TOKEN = "pointwise_add.input_a.uid";

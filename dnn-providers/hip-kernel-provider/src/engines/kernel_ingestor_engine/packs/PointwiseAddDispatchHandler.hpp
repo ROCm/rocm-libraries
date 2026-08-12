@@ -21,8 +21,7 @@ namespace hip_kernel_provider::kernel_ingestor_engine
 /**
  * @brief The native dispatch behind this pack's UDD: sizes and launches a pointwise add.
  *
- * Holds the provider machinery a launch needs -- a kernel compiler and the device
- * properties it compiles against -- which the SDK never names.
+ * Holds the kernel compiler a launch needs.
  *
  * Splits per RFC 0017 §8.5: everything derived from the graph and chosen kernel
  * resolves once at plan build; execute only resolves device pointers by uid and
@@ -35,9 +34,8 @@ class PointwiseAddDispatchHandler
 public:
     /// @param kernelCompiler Owned by the engine, which outlives this handler.
     ///
-    /// Device properties are not held: they arrive per call on the MatchContext, so a
-    /// kernel is always compiled for the device the call is actually for rather than
-    /// for whichever device was current when this handler was built.
+    /// Device properties are not held; they arrive per call on the MatchContext, so a
+    /// kernel is compiled for the device the call is actually for.
     explicit PointwiseAddDispatchHandler(const compilation::IKernelCompiler& kernelCompiler)
         : _kernelCompiler(kernelCompiler)
     {
@@ -47,8 +45,7 @@ public:
      * @brief Scratch this kernel requires.
      *
      * A one-element add needs none. The 256-block kernel reports a non-zero
-     * requirement so the engine's max-across-survivors is observably a maximum
-     * rather than a constant zero.
+     * requirement so the engine's max-across-survivors is observably a maximum.
      */
     size_t
         workspaceBytes(const hipdnn_plugin_sdk::ingestor::MatchContext& context,

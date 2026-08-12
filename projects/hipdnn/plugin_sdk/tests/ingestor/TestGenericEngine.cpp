@@ -21,9 +21,8 @@
 
 /**
  * @file TestGenericEngine.cpp
- * @brief Unit tests for GenericEngine.hpp: engine-level knob validation at construction,
- *        and every IEngine override GenericEngine implements by delegating to its plan
- *        builder and state manager.
+ * @brief Unit tests for GenericEngine.hpp: knob validation at construction and
+ *        IEngine overrides delegating to the plan builder and state manager.
  */
 namespace
 {
@@ -33,8 +32,8 @@ using namespace hipdnn_plugin_sdk::ingestor::testing;
 
 using StubEngine = GenericEngine<StubHandle, StubSettings, StubContext>;
 
-// GenericEngine holds a plan builder bound by reference to its own members (see the
-// class doc); relocating it would dangle those references.
+// GenericEngine holds its plan builder by reference to its own members, so it is
+// non-movable and non-copyable.
 static_assert(!std::is_move_constructible_v<StubEngine>);
 static_assert(!std::is_move_assignable_v<StubEngine>);
 static_assert(!std::is_copy_constructible_v<StubEngine>);
@@ -58,18 +57,14 @@ TEST(TestIngestorGenericEngine, RejectsAKnobNamingNoMetadataField)
     const ScopedTestSymbols symbols;
     const StubDeviceResolver resolver;
 
-    // A knob is only a name: the field it points at supplies the type, the default and
-    // the legal values, so a knob matching no field can never be reported or honoured.
-    // Left unchecked it is silently dropped, which reads to a caller exactly like a knob
-    // the engine chose not to expose.
+    // A knob naming no metadata field would otherwise be silently dropped.
     EXPECT_THROW(
         (StubEngine(makeEngineWithKnobs({"no_such_field"}), makeStubStateManager(), resolver)),
         std::invalid_argument);
 }
 
 // ---------------------------------------------------------------------------
-// IEngine overrides: each one delegates to the plan builder or the state manager, so
-// these tests exercise that delegation end to end rather than re-testing the builder.
+// IEngine overrides: each delegates to the plan builder or the state manager.
 // ---------------------------------------------------------------------------
 
 TEST(TestIngestorGenericEngine, IdHashesTheUedNameIntoHipdnnsEngineIdSpace)
@@ -78,9 +73,7 @@ TEST(TestIngestorGenericEngine, IdHashesTheUedNameIntoHipdnnsEngineIdSpace)
     const StubDeviceResolver resolver;
     const StubEngine engine(makeEngineWithKnobs({BLOCK_SIZE}), makeStubStateManager(), resolver);
 
-    // The id is derived, not stored verbatim, so this only pins that construction
-    // succeeds in producing a stable, non-zero id -- an engine with no id could never
-    // be looked up by the host.
+    // Pins that construction produces a stable, non-zero id.
     EXPECT_NE(engine.id(), 0);
 }
 
@@ -98,8 +91,8 @@ TEST(TestIngestorGenericEngine, IsApplicableTrueWhenTheStateManagerHasASurviving
 
 TEST(TestIngestorGenericEngine, IsApplicableFalseWhenNoMatcherAccepts)
 {
-    // A distinct symbol so this test's registration does not collide with
-    // ScopedTestSymbols' GRAPH_MATCH_SYMBOL running concurrently in another test.
+    // A distinct symbol avoids colliding with ScopedTestSymbols' matcher running
+    // concurrently in another test.
     constexpr const char* REJECT_SYMBOL = "hipdnn.kernel_ingestor.test.generic_engine.reject";
     GraphMatcherRegistry::registerSymbol(REJECT_SYMBOL, &rejectGraph);
     ScoreRegistry::registerSymbol(SCORE_SYMBOL, &scoreByBlockSize);
@@ -162,9 +155,8 @@ TEST(TestIngestorGenericEngine, GetDetailsReportsTheEnginesKnobs)
 
 TEST(TestIngestorGenericEngine, GetMaxWorkspaceSizeDelegatesToThePlanBuilder)
 {
-    // The single-kernel stub state manager has no dispatch symbol registered, so the
-    // plan builder's own workspace query (through getDispatchDetails) throws -- proving
-    // the call actually reached the plan builder rather than returning a stub zero.
+    // No dispatch symbol is registered, so getDispatchDetails() throws -- proving
+    // the call reached the plan builder rather than returning a stub zero.
     const ScopedTestSymbols symbols;
     const StubDeviceResolver resolver;
     const StubEngine engine(makeEngineWithKnobs({BLOCK_SIZE}), makeStubStateManager(), resolver);
@@ -178,10 +170,8 @@ TEST(TestIngestorGenericEngine, GetMaxWorkspaceSizeDelegatesToThePlanBuilder)
 
 TEST(TestIngestorGenericEngine, InitializeExecutionContextDelegatesToThePlanBuilder)
 {
-    // Same reasoning as the workspace test: no dispatch handler is registered for the
-    // stub state manager's dispatch symbol, so buildPlan()'s own lookup throws. That
-    // failure mode is only reachable if initializeExecutionContext() actually calls
-    // through to the plan builder.
+    // No dispatch handler is registered, so buildPlan()'s lookup throws -- proving
+    // this reached the plan builder.
     const ScopedTestSymbols symbols;
     const StubDeviceResolver resolver;
     const StubEngine engine(makeEngineWithKnobs({BLOCK_SIZE}), makeStubStateManager(), resolver);

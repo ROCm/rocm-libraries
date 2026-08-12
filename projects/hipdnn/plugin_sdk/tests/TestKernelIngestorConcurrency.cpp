@@ -20,16 +20,8 @@
 
 /**
  * @file TestKernelIngestorConcurrency.cpp
- * @brief The ingestor's shared state under concurrent use.
- *
- * One engine, and therefore one catalog cache, is shared by every handle in the process,
- * and hipDNN may drive several handles from several threads at once. These tests pin the
- * two properties that arrangement depends on: the shared state stays internally
- * consistent under concurrent access, and the answers it gives do not depend on which
- * thread asked or on what any other thread was doing.
- *
- * They are worth running under thread and address sanitizers, where a data race in the
- * cache would be reported directly rather than inferred from a corrupted result.
+ * @brief Concurrency tests for the ingestor's shared per-process catalog cache: internal
+ *        consistency and thread/order independence under concurrent access.
  */
 namespace
 {
@@ -40,8 +32,7 @@ using namespace hipdnn_plugin_sdk::ingestor::testing;
 constexpr int THREAD_COUNT = 8;
 constexpr int ITERATIONS_PER_THREAD = 200;
 
-/// Runs @p body on several threads at once, releasing them together so their work
-/// genuinely overlaps rather than serializing by startup order.
+/// Runs @p body on threadCount threads, releasing them together so they truly overlap.
 template <typename Body>
 void runConcurrently(int threadCount, Body body)
 {
@@ -73,8 +64,8 @@ void runConcurrently(int threadCount, Body body)
 
 TEST(TestIngestorCacheConcurrency, SurvivesConcurrentReadsAndWrites)
 {
-    // Capacity far below the key range, so eviction runs constantly and readers are
-    // touching entries writers are simultaneously retiring.
+    // Capacity far below the key range: eviction runs constantly, so readers race
+    // evicting writers on the same entries.
     LruCache<int, int> cache(16);
 
     runConcurrently(THREAD_COUNT, [&cache](int thread) {
@@ -83,8 +74,7 @@ TEST(TestIngestorCacheConcurrency, SurvivesConcurrentReadsAndWrites)
             const int key = (thread * ITERATIONS_PER_THREAD + i) % 128;
             cache.put(key, key * 2);
 
-            // A hit must carry the value stored under that key; a miss is legitimate
-            // because another thread may have evicted it in between.
+            // Hit must match; a miss is legal (raced with eviction).
             if(const auto found = cache.get(key); found.has_value())
             {
                 EXPECT_EQ(*found, key * 2);
@@ -106,8 +96,7 @@ TEST(TestIngestorCacheConcurrency, NeverExceedsCapacityUnderContention)
         }
     });
 
-    // The bound is what makes this cache safe to leave running in a long-lived process:
-    // concurrent insertion must not be able to grow it without limit.
+    // Concurrent insertion must not grow the cache past capacity.
     EXPECT_LE(cache.size(), cache.capacity());
 }
 
@@ -122,8 +111,7 @@ TEST(TestIngestorStateManagerConcurrency, ServesOneGraphFromManyThreadsConsisten
     const TestGraph graph(makeGraphId(0x21));
     const auto properties = testDeviceProperties();
 
-    // Every thread asks the same question of the same shared cache, the way several
-    // handles bound to one device would.
+    // Same graph and device from every thread: shared-cache read contention.
     runConcurrently(THREAD_COUNT, [&](int) {
         for(int i = 0; i < ITERATIONS_PER_THREAD; ++i)
         {
@@ -141,8 +129,7 @@ TEST(TestIngestorStateManagerConcurrency, RanksConsistentlyFromManyThreads)
     const TestGraph graph(makeGraphId(0x22));
     const auto properties = testDeviceProperties();
 
-    // Ranking writes the sorted catalog back into the cache, so this is the path where
-    // concurrent readers and a writer meet. Every thread must still see the same winner.
+    // Ranking writes the sorted catalog back: readers and the writer race here.
     runConcurrently(THREAD_COUNT, [&](int) {
         for(int i = 0; i < ITERATIONS_PER_THREAD; ++i)
         {
@@ -161,8 +148,8 @@ TEST(TestIngestorStateManagerConcurrency, KeepsPerDeviceCatalogsDistinct)
     const TestGraph graph(makeGraphId(0x23));
     const auto properties = testDeviceProperties();
 
-    // One graph, several devices, all at once: the catalog is keyed on both, so a
-    // device's answer must never be served from another device's entry.
+    // Same graph, distinct devices concurrently: catalog is keyed on both and must not
+    // cross-serve.
     runConcurrently(THREAD_COUNT, [&](int thread) {
         const DeviceId deviceId = thread % 4;
         for(int i = 0; i < ITERATIONS_PER_THREAD; ++i)
@@ -178,8 +165,8 @@ TEST(TestIngestorStateManagerConcurrency, ServesUncacheableGraphsConcurrently)
 {
     const ScopedTestSymbols symbols;
     const auto manager = makeTestStateManager();
-    // No identity, so every call rematches instead of reading the cache. That path runs
-    // the matchers concurrently rather than serializing behind a cached result.
+    // No graph identity: every call rematches, exercising concurrent matcher execution
+    // instead of the cache.
     const TestGraph graph;
     const auto properties = testDeviceProperties();
 
@@ -195,8 +182,7 @@ TEST(TestIngestorStateManagerConcurrency, ServesUncacheableGraphsConcurrently)
 TEST(TestIngestorStateManagerConcurrency, EvictsUnderConcurrentDistinctGraphs)
 {
     const ScopedTestSymbols symbols;
-    // Capacity 2 against many distinct graphs, so entries are evicted while other
-    // threads are reading and writing them.
+    // Capacity 2 against many distinct graphs: constant eviction races readers/writers.
     const auto manager = makeTestStateManager(2);
     const auto properties = testDeviceProperties();
 
@@ -206,8 +192,7 @@ TEST(TestIngestorStateManagerConcurrency, EvictsUnderConcurrentDistinctGraphs)
             const TestGraph graph(makeGraphId(static_cast<uint8_t>((thread * 7 + i) % 32)));
             const MatchContext context{graph, 0, properties};
 
-            // Eviction costs a rematch and never a wrong answer, so the result is the
-            // same whether this call hit the cache or rebuilt the catalog.
+            // Eviction only costs a rematch, never a wrong answer.
             ASSERT_EQ(manager->unsortedDefinitions(context).size(), 2U);
         }
     });
@@ -221,7 +206,7 @@ TEST(TestIngestorRegistryConcurrency, ResolvesFromManyThreads)
 {
     const ScopedTestSymbols symbols;
 
-    // Resolution happens on the applicability path, which several threads reach at once.
+    // Exercises concurrent resolve() from the applicability path.
     runConcurrently(THREAD_COUNT, [](int) {
         for(int i = 0; i < ITERATIONS_PER_THREAD; ++i)
         {

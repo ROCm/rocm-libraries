@@ -18,9 +18,8 @@
 
 /**
  * @file TestKernelHeuristic.cpp
- * @brief Unit tests for IKernelHeuristic.hpp: NativeKernelHeuristic's lazy symbol
- *        resolution, the ranking/tie-break order every IKernelHeuristic gets for free
- *        from rank(), and the makeKernelHeuristic() factory.
+ * @brief Tests for IKernelHeuristic.hpp: lazy symbol resolution, ranking/tie-break
+ *        order, and the makeKernelHeuristic() factory.
  */
 namespace
 {
@@ -30,11 +29,8 @@ using namespace hipdnn_plugin_sdk::ingestor::testing;
 
 TEST(TestIngestorKernelHeuristic, ResolvesItsSymbolOnFirstUseRatherThanAtConstruction)
 {
-    // RFC 0017 section 8.1 admits the heuristic at applicability only as a name, and
-    // section 3 generalizes it: a heuristic model is not read until something needs the
-    // catalog ranked. An engine whose matchers reject a graph must never pay for its
-    // selector, so constructing one against a symbol that is not registered yet has to
-    // be legal, and only scoring may fail.
+    // RFC 0017 §8.1/§3: constructing against an unregistered symbol must be legal;
+    // only scoring may fail. An engine whose matchers reject a graph never pays for it.
     const NativeKernelHeuristic heuristic("hipdnn.kernel_ingestor.test.not_yet_registered");
 
     const TestGraph graph;
@@ -91,7 +87,7 @@ TEST(TestIngestorKernelHeuristic, BreaksRemainingTiesOnKernelIdForStabilityAcros
     const MatchContext context{graph, 0, properties};
 
     Catalog catalog;
-    // Inserted highest-id first: the result must not depend on load order.
+    // Inserted highest-id first: result must not depend on load order.
     const auto lowerId = testId(0x01);
     const auto higherId = testId(0x02);
     catalog.entries = {makeDefinition(higherId, 64), makeDefinition(lowerId, 64)};
@@ -103,9 +99,7 @@ TEST(TestIngestorKernelHeuristic, BreaksRemainingTiesOnKernelIdForStabilityAcros
     EXPECT_EQ(ranked.front().kernelId, lowerId);
 }
 
-// ---------------------------------------------------------------------------
 // makeKernelHeuristic(): the UHD -> IKernelHeuristic adapter factory.
-// ---------------------------------------------------------------------------
 
 TEST(TestIngestorKernelHeuristic, MakeKernelHeuristicBuildsANativeHeuristicForNativeKind)
 {
@@ -120,8 +114,7 @@ TEST(TestIngestorKernelHeuristic, MakeKernelHeuristicBuildsANativeHeuristicForNa
     const auto heuristic = makeKernelHeuristic(descriptor);
 
     ASSERT_NE(heuristic, nullptr);
-    // Proves the factory actually wired the payload symbol through: scoring against the
-    // registered scorer must succeed and return what it computes.
+    // Confirms the factory wired the payload symbol through.
     const TestGraph graph;
     const auto properties = testDeviceProperties();
     const MatchContext context{graph, 0, properties};
@@ -130,9 +123,8 @@ TEST(TestIngestorKernelHeuristic, MakeKernelHeuristicBuildsANativeHeuristicForNa
 
 TEST(TestIngestorKernelHeuristic, MakeKernelHeuristicThrowsForAKindWithNoAdapter)
 {
-    // HeuristicKind::MODEL has no adapter yet: RFC 0017's UHD follow-up owns it. Failing
-    // at descriptor-assembly time, not at the first rank(), matches the other
-    // cross-reference checks the state manager runs eagerly.
+    // HeuristicKind::MODEL has no adapter yet (RFC 0017's UHD follow-up); fails at
+    // descriptor-assembly time, not at first rank().
     HeuristicDescriptor descriptor;
     descriptor.id = HEURISTIC_ID;
     descriptor.name = "model heuristic";

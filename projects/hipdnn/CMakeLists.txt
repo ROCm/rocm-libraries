@@ -60,10 +60,8 @@ else()
     message(STATUS "hipDNN: SDPA support disabled")
 endif()
 
-# Gates the generic kernel ingestor platform (RFC 0017: Universal Kernel Descriptors).
-# Set by TheRock's THEROCK_FLAG_HIPDNN_ENABLE_KERNEL_INGESTOR, which scopes it to the
-# hipDNN and hipkernelprovider subprojects. With it OFF the ingestor headers compile to
-# nothing and are not installed, so default builds and installed artifacts are unchanged.
+# Gates the generic kernel ingestor (RFC 0017: Universal Kernel Descriptors), set by
+# TheRock's THEROCK_FLAG_HIPDNN_ENABLE_KERNEL_INGESTOR.
 option(HIPDNN_ENABLE_KERNEL_INGESTOR "Enable the generic kernel ingestor (RFC 0017)" OFF)
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     message(STATUS "hipDNN: kernel ingestor enabled")

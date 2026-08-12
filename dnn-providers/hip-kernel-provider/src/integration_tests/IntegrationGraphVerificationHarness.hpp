@@ -164,9 +164,8 @@ protected:
         return _stream;
     }
 
-    // Exposed to subclasses that need to drive Graph staging calls
-    // (build_operation_graph/create_execution_plans/get_ranked_engine_ids/etc.)
-    // directly rather than solely through verifyGraph().
+    // Exposed to subclasses driving Graph staging calls directly (build_operation_graph,
+    // create_execution_plans, get_ranked_engine_ids, etc.), not only via verifyGraph().
     hipdnnHandle_t _handle = nullptr;
     hipStream_t _stream = nullptr;
     int _deviceId = 0;

@@ -19,33 +19,27 @@ namespace hipdnn_plugin_sdk::ingestor
 /**
  * @brief One catalog entry: a kernel that passed every matcher for a graph.
  *
- * This is the POD that leaves KernelIngestorStateManager. Copied out rather than
- * handed out by reference so a caller holds a stable snapshot while the cache it came
- * from is concurrently evicted or refilled.
+ * Copied out of KernelIngestorStateManager rather than referenced, so a caller holds a
+ * stable snapshot while the source cache is concurrently evicted or refilled.
  *
  * Carries the kernel's completed metadata tuple (its catalog key), enough source
- * detail to load it, and the ids needed to find its dispatch descriptor — but no
- * pointer back into the descriptor set.
+ * detail to load it, and the ids needed to find its dispatch descriptor.
  */
 struct KernelDefinition
 {
     DescriptorId kernelId;
-    /// The pack this kernel came from, which owns the matchers and UDD that apply to it.
+    /// The pack this kernel came from; owns the matchers and UDD that apply to it.
     DescriptorId packId;
-    /// The dispatch descriptor id, denormalized from the pack so a caller holding only a
-    /// KernelDefinition can reach its dispatch without walking the pack list again.
+    /// Dispatch descriptor id, denormalized from the pack so a caller holding only a
+    /// KernelDefinition can reach it without walking the pack list.
     DescriptorId dispatchId;
-    /// Where this kernel's code comes from and how to load it. See KernelSource for why
-    /// this is a tagged union rather than two bare strings.
+    /// Where this kernel's code comes from and how to load it.
     KernelSource source;
-    /// Complete: every KMD field, with defaults filled in for fields the UKD omitted.
+    /// Every KMD field, with defaults filled in for fields the UKD omitted.
     MetadataValues metadata;
     int64_t priority = 0;
 
-    /// @brief The value of a KMD field, or nullopt when this kernel has no such field.
-    ///
-    /// Returns nullopt rather than throwing so a matcher or scorer written against a
-    /// newer schema can ask about a field an older kernel predates.
+    /// @brief The value of a KMD field, or nullopt if the kernel has no such field.
     std::optional<MetadataValue> tryGetMetadata(const std::string& field) const
     {
         auto it = metadata.find(field);
@@ -57,9 +51,8 @@ struct KernelDefinition
     }
 
     /// @brief The integer value of a KMD field.
-    /// @throws std::out_of_range if the field is absent, std::invalid_argument if it
-    ///         holds a different alternative. Both are author errors a validating
-    ///         loader would have caught.
+    /// @throws std::out_of_range if absent, std::invalid_argument if a different
+    ///         alternative is held.
     int64_t getIntMetadata(const std::string& field) const
     {
         auto it = metadata.find(field);
@@ -95,8 +88,7 @@ struct KernelDefinition
         return *value;
     }
 
-    /// @brief The int-list value of a KMD field (e.g. `stride_order`). Throws on the
-    /// same terms as getIntMetadata.
+    /// @brief The int-list value of a KMD field (e.g. `stride_order`).
     const std::vector<int64_t>& getIntListMetadata(const std::string& field) const
     {
         auto it = metadata.find(field);

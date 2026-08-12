@@ -31,23 +31,20 @@
 
 /**
  * @file KernelIngestorTestFixtures.hpp
- * @brief Shared fixtures for the ingestor's SDK-level tests, split across
- *        `plugin_sdk/tests/ingestor/`.
+ * @brief Shared fixtures for the ingestor's SDK-level tests under `plugin_sdk/tests/ingestor/`.
  *
  * Everything here is `inline`: this header is included by several translation units in
- * the same test binary, so a plain free function or namespace-scope object would violate
- * the one-definition rule the moment two of those files linked together.
+ * the same test binary.
  *
- * Two catalog shapes recur across the split files and are built here once:
- *  - The `int`-handle shape (`TestHandle`/`StateManager`/`makeStateManager()`): a pack of
- *    two FLOAT kernels differing in block size plus one HALF kernel a kernel-scoped
- *    matcher prunes, wired to counting matchers so a test can assert how often each
- *    scope ran.
- *  - The `int`-handle shape from `makeTestStateManager()`: the same catalog, wired to
- *    fixed (non-counting) matchers, for tests that only need a stable answer.
- *  - The `StubHandle` shape (`StubSettings`/`StubContext`/`makeStubStateManager()`):
- *    minimal stand-ins for the provider types `GenericEngine`/`GenericPlanBuilder` are
- *    parameterized on, for tests that construct those templates directly.
+ * Two catalog shapes recur:
+ *  - `int`-handle (`TestHandle`/`StateManager`/`makeStateManager()`): two FLOAT kernels
+ *    differing in block size plus one HALF kernel a kernel-scoped matcher prunes, wired
+ *    to counting matchers.
+ *  - `int`-handle via `makeTestStateManager()`: same catalog, wired to fixed
+ *    (non-counting) matchers, for tests needing only a stable answer.
+ *  - `StubHandle` (`StubSettings`/`StubContext`/`makeStubStateManager()`): minimal
+ *    stand-ins for the provider types `GenericEngine`/`GenericPlanBuilder` are
+ *    parameterized on.
  */
 namespace hipdnn_plugin_sdk::ingestor::testing
 {
@@ -58,14 +55,12 @@ constexpr const char* GRAPH_MATCH_SYMBOL = "hipdnn.kernel_ingestor.test.graph_ma
 constexpr const char* KERNEL_MATCH_SYMBOL = "hipdnn.kernel_ingestor.test.kernel_match";
 constexpr const char* SCORE_SYMBOL = "hipdnn.kernel_ingestor.test.score";
 
-/// A minimal IGraph. The SDK-side machinery reads only the graph's identity, so the rest
-/// of the interface throws: a test that starts depending on graph contents should fail
-/// loudly rather than silently match against an empty graph.
+/// Minimal IGraph exposing only identity; every other member throws so a test depending
+/// on graph contents fails loudly.
 class TestGraph : public hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph
 {
 public:
-    /// @param graphId The identity to carry, or nullopt to model a legacy or unfinalized
-    ///        graph that has none.
+    /// @param graphId Identity to carry, or nullopt for a legacy/unfinalized graph.
     explicit TestGraph(std::optional<GraphId> graphId = std::nullopt)
     {
         flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Graph> graph;
@@ -137,8 +132,7 @@ private:
         _tensors;
 };
 
-/// A test graph id distinct per seed, shaped as a valid v4 UUID (tryGetGraphId() now
-/// rejects non-v4 ids as "no identity").
+/// Test graph id distinct per seed, shaped as a valid v4 UUID.
 inline GraphId makeGraphId(uint8_t seed)
 {
     GraphId id{};
@@ -148,7 +142,7 @@ inline GraphId makeGraphId(uint8_t seed)
     return id;
 }
 
-/// A distinct-per-seed id shaped to fail the v4 check, for tests needing a non-nil
+/// Distinct-per-seed id shaped to fail the v4 check, for tests needing a non-nil
 /// "no identity" id.
 inline GraphId makeNonV4GraphId(uint8_t seed)
 {
@@ -158,7 +152,7 @@ inline GraphId makeNonV4GraphId(uint8_t seed)
     return id;
 }
 
-/// The nil UUID: all-zero bytes, the id a default-constructed field reads as.
+/// The nil UUID: all-zero bytes.
 inline GraphId makeNilGraphId()
 {
     return GraphId{};
@@ -176,20 +170,20 @@ inline bool acceptAnyGraph(const MatchContext& /*context*/, BoundTokens& /*bound
     return true;
 }
 
-/// Accepts only FLOAT kernels, so a pack carrying a HALF kernel is pruned down.
+/// Accepts only FLOAT kernels; a HALF kernel in the pack is pruned.
 inline bool acceptFloatKernels(const MatchContext& /*context*/, const KernelDefinition& kernel)
 {
     return kernel.getStringMetadata(DTYPE) == "FLOAT";
 }
 
-/// Bigger block size scores higher, so ranking has a defined winner.
+/// Bigger block size scores higher, giving ranking a defined winner.
 inline double scoreByBlockSize(const KernelDefinition& kernel, const MatchContext& /*context*/)
 {
     return static_cast<double>(kernel.getIntMetadata(BLOCK_SIZE));
 }
 
-/// Registers this fixture's symbols for a test's duration, so tests sharing the
-/// process-wide registry stay independent of one another's registrations.
+/// RAII: registers this fixture's symbols for the object's lifetime, so tests sharing
+/// the process-wide registry stay independent.
 class ScopedTestSymbols
 {
 public:
@@ -211,8 +205,7 @@ public:
     ScopedTestSymbols& operator=(const ScopedTestSymbols&) = delete;
 };
 
-/// A device resolver for tests that construct an engine. Reports one fixed device, since
-/// nothing here exercises multi-device behavior.
+/// Device resolver reporting one fixed device; no multi-device behavior is exercised.
 class TestDeviceResolver : public IDeviceResolver<int>
 {
 public:
@@ -230,8 +223,7 @@ private:
     hipDeviceProp_t _properties = testDeviceProperties();
 };
 
-/// A descriptor id from a short seed, so a fixture can name ids readably while the type
-/// stays the real 128-bit one.
+/// Descriptor id built from a short seed, keeping the real 128-bit type readable.
 inline DescriptorId testId(uint8_t seed)
 {
     DescriptorId id{};
@@ -261,8 +253,8 @@ inline KernelDescriptor makeTestKernel(const DescriptorId& id,
     return kernel;
 }
 
-/// Two FLOAT kernels differing only in block size, plus a HALF kernel the kernel-scoped
-/// matcher prunes: a catalog of two survivors with a defined ranking.
+/// Two FLOAT kernels differing in block size, plus a HALF kernel the kernel-scoped
+/// matcher prunes: two survivors with a defined ranking.
 inline std::unique_ptr<KernelIngestorStateManager<int>>
     makeTestStateManager(size_t cacheCapacity
                          = KernelIngestorStateManager<int>::DEFAULT_CATALOG_CACHE_CAPACITY)
@@ -270,7 +262,7 @@ inline std::unique_ptr<KernelIngestorStateManager<int>>
     MetadataSchema schema;
     schema.id = SCHEMA_ID;
     schema.name = "test schema";
-    // block_size defaults; dtype is mandatory, so every kernel below states it.
+    // block_size has a default; dtype is mandatory, so every kernel below sets it.
     schema.fields = {{BLOCK_SIZE, MetadataType::INT, MetadataValue{int64_t{64}}},
                      {DTYPE, MetadataType::STRING, std::nullopt}};
 
@@ -299,14 +291,11 @@ inline std::unique_ptr<KernelIngestorStateManager<int>>
         cacheCapacity);
 }
 
-// ---------------------------------------------------------------------------
-// Counting matchers: the `TestHandle = int` catalog wired to observe how often each
-// matcher scope ran. Shared by TestKernelIngestorStateManager.cpp and
-// TestGenericPlanBuilder.cpp.
-// ---------------------------------------------------------------------------
+// Counting matchers: `TestHandle = int` catalog instrumented to count matcher-scope
+// calls. Shared by TestKernelIngestorStateManager.cpp and TestGenericPlanBuilder.cpp.
 
-/// Counts matcher invocations, so a test can assert that a graph-scoped matcher runs
-/// once per (graph, device) while a kernel-scoped one runs once per surviving kernel.
+/// Counts matcher calls: graph-scoped runs once per (graph, device); kernel-scoped runs
+/// once per surviving kernel.
 struct MatcherCounters
 {
     int graphCalls = 0;
@@ -325,14 +314,13 @@ inline MatcherCounters& counters()
     return s_counters;
 }
 
-/// An arbitrary value acceptGraph binds, so a test can prove it reached dispatch intact.
+/// Value acceptGraph binds, so a test can verify it reaches dispatch intact.
 constexpr int64_t BOUND_TOKEN_VALUE = 4242;
 
 inline bool acceptGraph(const MatchContext& /*context*/, BoundTokens& bound)
 {
     ++counters().graphCalls;
-    // Stands in for the tensor uids and dimensions a real matcher resolves: the point
-    // under test is that whatever matching bound reaches dispatch without a re-match.
+    // Stands in for the tensor uids/dimensions a real matcher would resolve.
     bound["test.bound_token"] = BOUND_TOKEN_VALUE;
     return true;
 }
@@ -357,8 +345,8 @@ inline double scoreConstant(const KernelDefinition& /*kernel*/, const MatchConte
     return 1.0;
 }
 
-/// Registers the constant scorer for a test's duration. The heuristic resolves its
-/// symbol on first use, so the registration has to outlive the ranking call.
+/// RAII: registers the constant scorer. Must outlive the ranking call since the
+/// heuristic resolves its symbol lazily.
 class ScopedConstantScore
 {
 public:
@@ -421,7 +409,7 @@ inline std::vector<DispatchDescriptor> makeTestDispatches()
     return {{DISPATCH_ID, "test dispatch", "test.dispatch"}};
 }
 
-/// A catalog entry, for the ranking and plan tests that build one directly.
+/// A catalog entry built directly by ranking and plan tests.
 inline KernelDefinition
     makeDefinition(const DescriptorId& id, int64_t blockSize, int64_t priority = 0)
 {
@@ -433,8 +421,8 @@ inline KernelDefinition
             priority};
 }
 
-/// Registers counting matchers under this file's own symbol names, so these tests
-/// observe invocation counts without disturbing the shared fixture's registrations.
+/// RAII: registers matchers under caller-supplied symbol names without disturbing the
+/// shared fixture's registrations.
 class ScopedSymbols
 {
 public:
@@ -447,8 +435,8 @@ public:
     {
         GraphMatcherRegistry::registerSymbol(_graphSymbol, graphFn);
         KernelMatcherRegistry::registerSymbol(_kernelSymbol, kernelFn);
-        // The heuristic resolves its symbol on the first call that needs an order, not
-        // at construction, so ranking tests need it registered for their duration too.
+        // Heuristic resolves its symbol lazily, not at construction; ranking tests need
+        // it registered for the duration too.
         ScoreRegistry::registerSymbol(SCORE_SYMBOL, &scoreByBlockSize);
         counters().reset();
     }
@@ -489,8 +477,8 @@ inline std::unique_ptr<StateManager>
         cacheCapacity);
 }
 
-/// Registers @p handler under @p symbol in DispatchRegistry<THandle> for a test's
-/// duration.
+/// Registers @p handler under @p symbol in DispatchRegistry<THandle> for the object's
+/// lifetime.
 template <typename THandle>
 class ScopedDispatchRegistration
 {
@@ -513,12 +501,9 @@ private:
     std::string _symbol;
 };
 
-// ---------------------------------------------------------------------------
-// StubHandle: minimal stand-ins for the provider types GenericEngine/GenericPlanBuilder
-// are parameterized on. Only the members those templates actually touch are present, so
-// a change that starts depending on more of a real handle or context fails here rather
-// than compiling silently.
-// ---------------------------------------------------------------------------
+// StubHandle: minimal stand-ins for the types GenericEngine/GenericPlanBuilder are
+// parameterized on. Only members those templates touch are present, so a template
+// depending on more fails to compile here.
 
 struct StubHandle
 {
@@ -532,9 +517,8 @@ private:
     std::vector<std::unique_ptr<flatbuffers::DetachedBuffer>> _buffers;
 };
 
-/// Every TSettings GenericPlanBuilder is instantiated over must carry this field (see
-/// KnobFilter's doc): initializeExecutionSettings() populates it, getMaxWorkspaceSize()
-/// reads it back.
+/// Every TSettings GenericPlanBuilder is instantiated over must carry this field;
+/// initializeExecutionSettings() populates it, getMaxWorkspaceSize() reads it back.
 struct StubSettings
 {
     KnobFilter ingestorKnobFilter;
@@ -553,9 +537,8 @@ private:
     std::unique_ptr<hipdnn_plugin_sdk::IPlan<StubHandle>> _plan;
 };
 
-/// A device resolver over StubHandle, for the engine-level tests. Reports one fixed
-/// device; tests needing per-handle device resolution use IngestorMocks.hpp's
-/// MockDeviceResolver instead.
+/// Device resolver over StubHandle reporting one fixed device; use IngestorMocks.hpp's
+/// MockDeviceResolver for per-handle resolution.
 class StubDeviceResolver : public IDeviceResolver<StubHandle>
 {
 public:
@@ -573,8 +556,7 @@ private:
     hipDeviceProp_t _properties = testDeviceProperties();
 };
 
-/// A state manager over StubHandle: one FLOAT kernel behind one graph-scoped matcher,
-/// for the GenericEngine-level tests that only need construction to succeed.
+/// State manager over StubHandle: one FLOAT kernel behind one graph-scoped matcher.
 inline std::unique_ptr<KernelIngestorStateManager<StubHandle>> makeStubStateManager()
 {
     MetadataSchema schema;
@@ -612,10 +594,8 @@ inline EngineDescriptor makeEngineWithKnobs(std::vector<std::string> knobs)
     return engine;
 }
 
-/// An IEngineConfig setting `knobName` to `value`, built the same way
-/// TestEngineConfigWrapper.cpp builds one: a real flatbuffer, not a mock, so tests using
-/// this exercise the same parsing path a real caller's setAttribute() eventually
-/// produces.
+/// IEngineConfig setting `knobName` to an int `value`, built as a real flatbuffer (the
+/// same parsing path a real caller's setAttribute() eventually produces).
 inline hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper makeIntKnobEngineConfig(
     flatbuffers::FlatBufferBuilder& builder, const std::string& knobName, int64_t value)
 {
@@ -631,8 +611,8 @@ inline hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper makeInt
         builder.GetBufferPointer(), builder.GetSize());
 }
 
-/// A FloatValue knob setting, so a test can reach readKnobFilter()'s type-rejection
-/// branch -- every other builder here only produces IntValue.
+/// FloatValue knob setting, to reach readKnobFilter()'s type-rejection branch (other
+/// builders here produce IntValue).
 inline hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper makeFloatKnobEngineConfig(
     flatbuffers::FlatBufferBuilder& builder, const std::string& knobName, double value)
 {

@@ -19,9 +19,8 @@
 
 /**
  * @file TestKernelDefinition.cpp
- * @brief Unit tests for KernelDefinition.hpp: tryGetMetadata()'s optional contract, and
- *        the three typed getters (int, string, int-list) over both their happy path and
- *        their two throw branches (absent field, wrong alternative).
+ * @brief Tests for KernelDefinition.hpp: tryGetMetadata()'s optional contract, and the
+ *        typed getters' happy path and throw branches.
  */
 namespace
 {
@@ -55,17 +54,13 @@ TEST(TestIngestorKernelDefinition, TryGetMetadataReturnsTheValueWhenPresent)
 
 TEST(TestIngestorKernelDefinition, TryGetMetadataReturnsNulloptWhenAbsent)
 {
-    // Nullopt rather than throwing, so a matcher or scorer written against a newer
-    // schema can ask about a field an older kernel predates.
+    // Nullopt rather than throwing: lets callers query fields an older kernel predates.
     const auto kernel = makeKernelWithMetadata({});
 
     EXPECT_EQ(kernel.tryGetMetadata(BLOCK_SIZE), std::nullopt);
 }
 
-// ---------------------------------------------------------------------------
-// Typed accessor happy path: one per alternative getIntMetadata / getStringMetadata /
-// getIntListMetadata reads.
-// ---------------------------------------------------------------------------
+// Typed accessor happy path.
 
 TEST(TestIngestorKernelDefinition, GetIntMetadataReturnsTheIntegerValue)
 {
@@ -90,27 +85,18 @@ TEST(TestIngestorKernelDefinition, GetIntListMetadataReturnsTheListValue)
     EXPECT_EQ(kernel.getIntListMetadata(STRIDE_ORDER), (std::vector<int64_t>{3, 1, 2, 0}));
 }
 
-// ---------------------------------------------------------------------------
-// Throw matrix: each of the three typed getters, crossed with "field absent"
-// (out_of_range) and "field holds a different alternative" (invalid_argument). Both are
-// author errors a validating loader would have caught, so they throw rather than
-// returning a default that would silently mis-rank or mis-launch a kernel.
-// ---------------------------------------------------------------------------
+// Throw matrix: each typed getter x "field absent" (out_of_range) / "wrong alternative"
+// (invalid_argument).
 
 struct KernelDefinitionThrowCase
 {
     std::string name;
-    /// Builds the kernel this case exercises. A function rather than a stored
-    /// KernelDefinition so each case can supply metadata shaped for exactly the
-    /// alternative it is testing.
+    /// Builds the kernel this case exercises.
     std::function<KernelDefinition()> makeKernel;
-    /// Invokes the getter under test against the kernel. A function so the matrix can
-    /// share one fixture shape across three differently-typed accessors.
+    /// Invokes the getter under test.
     std::function<void(const KernelDefinition&)> callGetter;
-    /// True when the getter must throw std::out_of_range (field absent); false when it
-    /// must throw std::invalid_argument (wrong alternative). RTTI is disabled in this
-    /// build, so the matrix distinguishes exception types via EXPECT_THROW's static
-    /// type rather than dynamic_cast.
+    /// True for std::out_of_range (field absent); false for std::invalid_argument (wrong
+    /// alternative). RTTI is disabled, so distinguished via EXPECT_THROW's static type.
     bool expectsOutOfRange;
 };
 

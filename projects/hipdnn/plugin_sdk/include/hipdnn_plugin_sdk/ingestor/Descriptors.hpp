@@ -40,13 +40,8 @@
 namespace hipdnn_plugin_sdk::ingestor
 {
 
-/// A descriptor cross-reference: the stable, globally unique id every descriptor
-/// carries, and the only way descriptors name one another.
-///
-/// A 128-bit UUID, matching the graph identity hipDNN mints at finalization, so the
-/// two id spaces in this system are one type (RFC 0017 §4). `parseUuid` and
-/// `formatUuid` in the same header convert to and from the text form descriptor files
-/// carry.
+/// Stable, globally unique id every descriptor carries; descriptors reference each
+/// other only by this id. A 128-bit UUID, matching hipDNN's graph identity (RFC 0017 §4).
 using DescriptorId = hipdnn_flatbuffers_sdk::utilities::UuidBytes;
 
 /// @brief A descriptor id in its canonical text form, for diagnostics.
@@ -55,14 +50,12 @@ inline std::string toString(const DescriptorId& id)
     return hipdnn_flatbuffers_sdk::utilities::formatUuid(id);
 }
 
-/// Hash for keying maps on a descriptor id. std::array has no std::hash, so this is
-/// passed explicitly to the containers that need it.
+/// Hash for keying maps on a descriptor id (std::array has no std::hash).
 struct DescriptorIdHash
 {
     size_t operator()(const DescriptorId& id) const noexcept
     {
-        // The id is a UUID, already well distributed, so an FNV-1a fold over its bytes
-        // is sufficient for an in-process map and is never persisted or exposed.
+        // FNV-1a fold over the UUID bytes; not persisted or exposed outside this process.
         size_t hash = 1469598103934665603ULL;
         for(const uint8_t byte : id)
         {
@@ -73,19 +66,13 @@ struct DescriptorIdHash
     }
 };
 
-/// A value a kernel supplies for a KMD-declared field, and also the value type
-/// `$graph.*` binds (see MatchContext.hpp's BoundTokens): both sides of a criteria
-/// comparison need one shared value type.
-///
-/// `int64_t` and `double` are the widest signed integer and floating-point forms, so a
-/// narrower authored value converts into one without loss; `bool` is distinct because a
-/// flag compares and prints differently from the integer 1. `std::vector<int64_t>` is
-/// for list-valued facts like `stride_order`.
+/// Value type for a KMD field or a bound `$graph.*` fact (MatchContext.hpp's
+/// BoundTokens). `bool` is distinct from `int64_t` so a flag doesn't compare as 1;
+/// `std::vector<int64_t>` covers list-valued facts like `stride_order`.
 using MetadataValue = std::variant<bool, int64_t, double, std::string, std::vector<int64_t>>;
 
-/// The type a KMD field holds, or a bound graph fact's type. Ordered to match
-/// MetadataValue's alternatives, so a field can declare its type without also having to
-/// supply a value of it.
+/// The type a KMD field or bound graph fact holds. Ordered to match MetadataValue's
+/// alternatives.
 enum class MetadataType
 {
     BOOL,
@@ -101,29 +88,22 @@ inline MetadataType metadataTypeOf(const MetadataValue& value)
     return static_cast<MetadataType>(value.index());
 }
 
-/// A kernel's complete metadata tuple: every KMD field name mapped to this kernel's
-/// value for it. This tuple is the kernel's identity to the catalog (RFC 0017 §4), so
-/// it must be unique across every kernel in an engine. Ordered, so two kernels with the
-/// same fields compare and hash identically regardless of insertion order.
+/// A kernel's complete metadata tuple: every KMD field mapped to this kernel's value.
+/// Must be unique per kernel within an engine (RFC 0017 §4); ordered so equal tuples
+/// compare equal regardless of insertion order.
 using MetadataValues = std::map<std::string, MetadataValue>;
 
 /// One field a kernel may vary along, as declared by an engine's KMD.
 struct MetadataField
 {
     std::string name;
-    /// What this field holds.
     MetadataType type = MetadataType::INT;
-    /// The value a kernel that omits this field is taken to have supplied. Optional,
-    /// because a field can be mandatory; a kernel omitting a mandatory field is a load
-    /// error rather than a silent fallback.
+    /// Value used when a kernel omits this field; nullopt means the field is mandatory.
     std::optional<MetadataValue> defaultValue;
 };
 
-/// KMD: the metadata schema, one per engine, shared by every kernel the engine owns.
-///
-/// The field set is the engine's kernel key: the heuristic ranks on these values and
-/// matchers read them as `$kernel.<field>`, so any quantity that distinguishes two
-/// kernels must appear here or the two collide.
+/// KMD: the metadata schema, one per engine, shared by every kernel it owns. The
+/// field set is the engine's kernel key; matchers read fields as `$kernel.<field>`.
 struct MetadataSchema
 {
     DescriptorId id;
@@ -132,71 +112,52 @@ struct MetadataSchema
 };
 
 /// Which adapter builds an engine's IKernelHeuristic from a UHD's `payload` (RFC 0017
-/// §9.1's adapter dispatch point).
+/// §9.1).
 enum class HeuristicKind
 {
-    /// `payload` is a NativeRegistry score symbol, resolved into a NativeKernelHeuristic
-    /// (see IKernelHeuristic.hpp's makeKernelHeuristic()). The only kind with an adapter
-    /// today.
+    /// `payload` is a NativeRegistry score symbol (IKernelHeuristic.hpp's
+    /// makeKernelHeuristic()). Only kind with an adapter today.
     NATIVE,
-    /// A trained model artifact plus its feature signature (the UHD follow-up RFC). No
-    /// adapter yet.
+    /// Trained model artifact plus feature signature (UHD follow-up RFC). No adapter yet.
     MODEL,
 };
 
-/// UHD: the kernel-selection model for one engine.
-///
-/// One level below hipDNN's engine-selection heuristic: this chooses *which kernel
-/// within an engine* to run, given the kernels that fit the graph.
+/// UHD: the kernel-selection model for one engine — chooses which kernel within an
+/// engine to run, given the kernels that fit the graph.
 struct HeuristicDescriptor
 {
     DescriptorId id;
     std::string name;
     HeuristicKind kind = HeuristicKind::NATIVE;
-    /// `kind`'s payload: a NativeRegistry score symbol (kind == NATIVE), or, for a kind
-    /// with no adapter yet, that kind's analogous single identifier (a model artifact
-    /// path).
+    /// `kind`'s payload: a NativeRegistry score symbol when kind == NATIVE.
     std::string payload;
 };
 
-/// UED: the engine itself, carrying no logic of its own.
-///
-/// Names its one heuristic and one metadata schema by id, because a single selector
-/// ranks all of the engine's kernels over one feature space. `name` hashes into
-/// hipDNN's engine-id space (see EngineNames.hpp), so it must be globally unique and
-/// should be scoped, e.g. "rocke:SDPA".
+/// UED: the engine itself, carrying no logic of its own. `name` hashes into hipDNN's
+/// engine-id space (EngineNames.hpp); must be globally unique, e.g. "rocke:SDPA".
 struct EngineDescriptor
 {
     DescriptorId id;
     std::string name;
     DescriptorId heuristicId;
     DescriptorId metadataSchemaId;
-    /// KMD field names this engine exposes for the caller to control. A name no KMD
-    /// field matches is a load error.
+    /// KMD field names this engine exposes to the caller. Unmatched name is a load error.
     std::vector<std::string> knobs;
-    /// Advisory execution behavior this engine's kernels exhibit, as
-    /// `hipdnnBackendBehaviorNote_t` values (BehaviorNote.h), reported through
-    /// EngineDetails like any other engine's.
-    ///
-    /// Held as int32 rather than a typed enum because the transport is int32, so a
-    /// newer descriptor can carry a note value an older backend does not know without
-    /// truncating it.
+    /// `hipdnnBackendBehaviorNote_t` values (BehaviorNote.h), reported via EngineDetails.
+    /// Stored as int32 so an unrecognized newer note value isn't truncated.
     std::vector<int32_t> behaviorNotes;
 };
 
-/// Which inputs a matcher reads, which decides how often it runs and what its failure
-/// prunes (RFC 0017 §5).
-///
-/// Authored per matcher here, which is provisional: once the criteria language lands
-/// this becomes a derived property, computed from whether a matcher's expression
-/// references `$kernel.*`.
+/// Which inputs a matcher reads; determines how often it runs and what its failure
+/// prunes (RFC 0017 §5). Provisional until the criteria language lands, when this
+/// becomes derived from whether the expression references `$kernel.*`.
 enum class MatchScope
 {
-    /// Reads only graph and device facts, so it runs once per (graph, device) and its
-    /// failure disqualifies every kernel in every pack that lists it.
+    /// Runs once per (graph, device); failure disqualifies every kernel in every pack
+    /// that lists it.
     GRAPH,
-    /// Also reads `$kernel.*`, so it is re-evaluated per candidate kernel and
-    /// disqualifies that kernel alone.
+    /// Also reads `$kernel.*`; re-evaluated per candidate kernel, disqualifying only
+    /// that kernel.
     KERNEL,
 };
 
@@ -206,22 +167,21 @@ struct MatchDescriptor
     DescriptorId id;
     std::string name;
     MatchScope scope;
-    /// Resolved through NativeRegistry. The data-driven form (a structural node pattern
-    /// plus a declarative criteria expression) is the UMD follow-up RFC.
+    /// Resolved through NativeRegistry; a data-driven form (structural node pattern plus
+    /// declarative criteria) is the UMD follow-up RFC.
     std::string matchSymbol;
 };
 
 /// UDD: how to invoke a kernel — the dispatch ABI, shared by every kernel in a pack.
-///
-/// A kernel whose argument list or launch-formula shape differs belongs in another pack
-/// with its own UDD (RFC 0017 §6).
+/// A kernel with a different argument list or launch-formula shape belongs in
+/// another pack with its own UDD (RFC 0017 §6).
 struct DispatchDescriptor
 {
     DescriptorId id;
     std::string name;
-    /// Resolved through NativeRegistry to a dispatch handler supplying both the
-    /// workspace requirement and the launch. The data-driven form (symbolic grid, block,
-    /// shared memory, workspace, and argument signature) is the UDD follow-up RFC.
+    /// Resolved through NativeRegistry to a handler supplying workspace and launch. A
+    /// data-driven form (symbolic grid/block/shared-memory/workspace/args) is the UDD
+    /// follow-up RFC.
     std::string dispatchSymbol;
 };
 
@@ -240,33 +200,26 @@ enum class KernelSourceKind
     ROCKE_BUILDER,
 };
 
-/// UKD's source: where a kernel's code comes from, as a tagged union over RFC 0017
-/// §7's source kinds. Only `EMBEDDED_SOURCE` is implemented; the others exist as enum
-/// values, since a descriptor states which kind it carries independently of whether
-/// this provider can load that kind yet.
+/// UKD's source: where a kernel's code comes from, a tagged union over RFC 0017 §7's
+/// source kinds. Only `EMBEDDED_SOURCE` is implemented.
 struct KernelSource
 {
     KernelSourceKind kind = KernelSourceKind::EMBEDDED_SOURCE;
-    /// `EMBEDDED_SOURCE`: the source file name. Unused, and left empty, by every other
-    /// kind until each grows its own payload shape.
+    /// `EMBEDDED_SOURCE`: source file name. Unused by other kinds.
     std::string sourceFile;
-    /// `EMBEDDED_SOURCE`: the entry point within `sourceFile`. Unused by every other
-    /// kind, for the same reason as `sourceFile` above.
+    /// `EMBEDDED_SOURCE`: entry point within `sourceFile`. Unused by other kinds.
     std::string entryPoint;
 };
 
-/// UKD: one launchable kernel — a source plus concrete values for the fields its
-/// engine's KMD declares. Its matchers, engine, and dispatch are all its pack's, and
-/// its heuristic and metadata schema are that engine's, so it names none of them.
+/// UKD: one launchable kernel — a source plus concrete values for its engine KMD's
+/// fields. Matchers, engine, and dispatch are inherited from its pack.
 struct KernelDescriptor
 {
     DescriptorId id;
     std::string name;
-    /// Where this kernel's code comes from and how to load it. See KernelSource for why
-    /// this is a tagged union rather than two bare strings.
     KernelSource source;
-    /// This kernel's values for the KMD's fields. Omitted fields take the KMD default;
-    /// the completed tuple is this kernel's catalog key and must be unique engine-wide.
+    /// This kernel's values for the KMD's fields; omitted fields take the KMD default.
+    /// The completed tuple is this kernel's catalog key, unique engine-wide.
     MetadataValues metadata;
     /// Tie-break when the heuristic is not decisive. Higher wins.
     int64_t priority = 0;
