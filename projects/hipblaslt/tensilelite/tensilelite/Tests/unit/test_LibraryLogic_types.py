@@ -29,8 +29,8 @@ strict gate fires before the path is consulted.
 
 import pytest
 
-from Tensile.LibraryLogic import generateLogic
-from Tensile.Common.TypeValidationErrors import ConfigTypeError
+from tensilelite.LibraryLogic import generateLogic
+from tensilelite.Common.TypeValidationErrors import ConfigTypeError
 
 
 def _call(config, tmp_path):

@@ -22,9 +22,9 @@ from pathlib import Path
 
 def tensile_tree_root() -> Path:
     """Return the directory that contains the installed ``Tensile`` package."""
-    import Tensile
+    import tensilelite
 
-    return Path(Tensile.__file__).resolve().parent.parent
+    return Path(tensilelite.__file__).resolve().parent.parent
 
 
 def resolve_tensile_path(relpath) -> Path:

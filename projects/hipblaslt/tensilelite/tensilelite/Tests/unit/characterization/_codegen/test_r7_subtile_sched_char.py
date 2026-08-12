@@ -4,7 +4,7 @@
 ################################################################################
 """R7 — LogicalScheduler (Subtile) remaining arms characterization (CPU-only).
 
-Targets uncovered clusters in Tensile/Components/Subtile/LogicalScheduler.py
+Targets uncovered clusters in tensilelite/Components/Subtile/LogicalScheduler.py
 (miss=151, 88%):
 
   174           _normalize_partition_sizes: s > total -> return [total]
@@ -44,7 +44,7 @@ pytestmark = pytest.mark.unit
 # Minimal scheduler configs (no rocisa or hardware needed — pure Python)
 # ---------------------------------------------------------------------------
 
-from Tensile.Components.Subtile.LogicalScheduler import (
+from tensilelite.Components.Subtile.LogicalScheduler import (
     LogicalScheduler, SchedulerConfig, ReadGranularity,
     WaitGROp, WaitGRCounts, WaitLROp, LRIncOp, GRIncOp, SyncOp,
     LRPlacement, GRPlacement,
@@ -128,7 +128,7 @@ def test_r7_normalize_partition_sizes_mn_not_divisor():
 
     Line 170-171: when total % mn != 0, the whole dimension is one partition.
     """
-    from Tensile.Components.Subtile.LogicalScheduler import SchedulerConfig
+    from tensilelite.Components.Subtile.LogicalScheduler import SchedulerConfig
 
     # total=5, mn=4: 5%4=1 != 0 -> return [5]
     result = SchedulerConfig._normalize_partition_sizes(spec=2, total=5, dim='M', mn=4)
@@ -141,7 +141,7 @@ def test_r7_normalize_partition_sizes_mn_not_divisor():
 
 def test_r7_normalize_partition_sizes_list_form():
     """_normalize_partition_sizes: explicit list passes through unchanged."""
-    from Tensile.Components.Subtile.LogicalScheduler import SchedulerConfig
+    from tensilelite.Components.Subtile.LogicalScheduler import SchedulerConfig
 
     result = SchedulerConfig._normalize_partition_sizes([2, 2], 4, 'M', mn=2)
     assert result == [2, 2]
@@ -149,7 +149,7 @@ def test_r7_normalize_partition_sizes_list_form():
 
 def test_r7_normalize_partition_sizes_uneven():
     """_normalize_partition_sizes: uneven split places remainder in middle."""
-    from Tensile.Components.Subtile.LogicalScheduler import SchedulerConfig
+    from tensilelite.Components.Subtile.LogicalScheduler import SchedulerConfig
 
     # total=7, spec=3, mn=1: num_full=2, remainder=1, mid=1 -> [3,1,3]
     result = SchedulerConfig._normalize_partition_sizes(spec=3, total=7, dim='M', mn=1)
@@ -161,7 +161,7 @@ def test_r7_normalize_partition_sizes_uneven():
 
 def test_r7_normalize_partition_sizes_two_part_remainder():
     """_normalize_partition_sizes: num_full==1 remainder -> [s, remainder]."""
-    from Tensile.Components.Subtile.LogicalScheduler import SchedulerConfig
+    from tensilelite.Components.Subtile.LogicalScheduler import SchedulerConfig
 
     # total=5, spec=3, mn=1: num_full=1, remainder=2, num_full==1 -> [3, 2]
     result = SchedulerConfig._normalize_partition_sizes(spec=3, total=5, dim='M', mn=1)
@@ -392,7 +392,7 @@ def test_r7_remove_lr_deps_no_sync_slots():
     # This should run cleanly regardless of sync_slots
     sched.remove_unnecessary_lr_deps()
 
-    from Tensile.Components.Subtile.LogicalScheduler import Pass
+    from tensilelite.Components.Subtile.LogicalScheduler import Pass
     assert sched._partitions is not None
 
 
@@ -515,7 +515,7 @@ def test_r7_merge_preops_wait_gr_sync():
     Lines 1600-1602: `if op.has_sync: has_wait_gr_sync = True`.
     Lines 1603-1606: WaitLROp dedup path.
     """
-    from Tensile.Components.Subtile.LogicalScheduler import LogicalScheduler
+    from tensilelite.Components.Subtile.LogicalScheduler import LogicalScheduler
 
     # Build two lists: one with WaitGROp(has_sync=True, counts) and one with WaitLROp
     counts1 = WaitGRCounts(A=2, B=1)
@@ -548,7 +548,7 @@ def test_r7_merge_preops_wait_gr_sync():
 
 def test_r7_merge_preops_adjust_vmcnt_false():
     """_merge_preops: adjust=False when any op has adjustVmcnt=False."""
-    from Tensile.Components.Subtile.LogicalScheduler import LogicalScheduler
+    from tensilelite.Components.Subtile.LogicalScheduler import LogicalScheduler
 
     counts = WaitGRCounts(A=1, B=0)
     preops1 = [WaitGROp(wait_gr_counts=counts, has_sync=False, adjustVmcnt=True)]
@@ -596,7 +596,7 @@ def test_r7_compute_tail_tile_state_multi_partition():
     class _MockWriter:
         vgprPool = _MockPool()
 
-    from Tensile.Components.Subtile.Kernel import TileInfo, AB_B16
+    from tensilelite.Components.Subtile.Kernel import TileInfo, AB_B16
 
     kernel = {
         "MacroTileA": 128, "MacroTileB": 128,
@@ -684,7 +684,7 @@ def test_r7_scale_tensors_all_passes():
 
 def test_r7_get_partition_candidates_n_ge_m():
     """get_partition_candidates: N >= M -> use M as fixed side."""
-    from Tensile.Components.Subtile.Kernel import TileInfo, AB_B16
+    from tensilelite.Components.Subtile.Kernel import TileInfo, AB_B16
 
     class _MockPool:
         def size(self):
@@ -728,7 +728,7 @@ def test_r7_get_partition_candidates_n_ge_m():
 
 def test_r7_get_partition_candidates_m_gt_n():
     """get_partition_candidates: M > N -> use N as fixed side."""
-    from Tensile.Components.Subtile.Kernel import TileInfo, AB_B16
+    from tensilelite.Components.Subtile.Kernel import TileInfo, AB_B16
 
     class _MockPool:
         def size(self):

@@ -105,10 +105,10 @@ def test_r5_abgrtile_tlu1_branch():
     in ABGRTile.__init__.  TileInfo constructs ABGRTile automatically when
     geometry is an ABTilePair with a TLU1-tagged GR config.
     """
-    from Tensile.Components.Subtile.Kernel import (
+    from tensilelite.Components.Subtile.Kernel import (
         TileInfo, AB_B16_TLU1,
     )
-    from Tensile.Components.Subtile.SubtileGeometry import GRTag_TLU1
+    from tensilelite.Components.Subtile.SubtileGeometry import GRTag_TLU1
 
     # Use macroTileA=256 so localMMATileGrid[0] = (256//16)/2 = 8 >= subtileShape[0]=8.
     kernel = _kernel_ab(macroTileA=256, macroTileB=128, depthUA=64, depthUB=64)
@@ -157,10 +157,10 @@ def test_r5_ablrtile_tlu1_branch():
     Covers lines 222-223: the ``if isinstance(config.tag, LRTag_TLU1):`` branch
     in ABLRTile.__init__.
     """
-    from Tensile.Components.Subtile.Kernel import (
+    from tensilelite.Components.Subtile.Kernel import (
         TileInfo, AB_B16_TLU1,
     )
-    from Tensile.Components.Subtile.SubtileGeometry import LRTag_TLU1
+    from tensilelite.Components.Subtile.SubtileGeometry import LRTag_TLU1
 
     # Use macroTileA=256 to ensure valid localSubtileGrid for TLU1 subtileShape=(8,1).
     kernel = _kernel_ab(macroTileA=256, macroTileB=128, depthUA=64, depthUB=64)
@@ -208,7 +208,7 @@ def test_r5_tileinfo_tlu1_grids():
       localMMATileGrid  = (16/2, 2) = (8, 2)
       localSubtileGrid  = [8//8, 2//1] = [1, 2]
     """
-    from Tensile.Components.Subtile.Kernel import TileInfo, AB_B16_TLU1
+    from tensilelite.Components.Subtile.Kernel import TileInfo, AB_B16_TLU1
 
     kernel = _kernel_ab(macroTileA=256, macroTileB=128, depthUA=64, depthUB=64,
                         miwavegroup=(2, 2))
@@ -228,8 +228,8 @@ def test_r5_tileinfo_tlu1_grids():
 
 def test_r5_tileinfo_tlu1_16x1():
     """TileInfo with AB_B16_TLU1_16x1 (256-bit GR along M) hits same TLU1 path."""
-    from Tensile.Components.Subtile.Kernel import TileInfo, AB_B16_TLU1_16x1
-    from Tensile.Components.Subtile.SubtileGeometry import GRTag_TLU1, LRTag_TLU1
+    from tensilelite.Components.Subtile.Kernel import TileInfo, AB_B16_TLU1_16x1
+    from tensilelite.Components.Subtile.SubtileGeometry import GRTag_TLU1, LRTag_TLU1
 
     kernel = _kernel_ab(macroTileA=128, macroTileB=128, depthUA=64, depthUB=64,
                         miwavegroup=(2, 2))
@@ -255,7 +255,7 @@ def test_r5_cdtilegeometry_tileinfo_init():
       522-524   CDTileGeometry loadWidth accessor
       546-551   CDTileGeometry _check_dim consistency
     """
-    from Tensile.Components.Subtile.Kernel import TileInfo, CD_F32
+    from tensilelite.Components.Subtile.Kernel import TileInfo, CD_F32
 
     # CD_F32 has subtileShape=(1,1), mmaLayout=MFMA_16x16_1B_4N_4V
     # macroTile0=128, macroTile1=128, waveGroup=(2,2):
@@ -307,7 +307,7 @@ def test_r5_tileinfo_grid_methods_via_cdtile():
       580-581  getLocalMMATileLinearId
       583-585  getLocalSubtileIdFromMMATile
     """
-    from Tensile.Components.Subtile.Kernel import TileInfo, CD_F32
+    from tensilelite.Components.Subtile.Kernel import TileInfo, CD_F32
 
     kernel = _kernel_cd(macroTile0=128, macroTile1=128, miwavegroup=(2, 2))
     writer = _mock_writer()
@@ -356,7 +356,7 @@ def test_r5_tileinfo_grid_methods_via_abtile():
     Uses the standard TN TilePair (not TLU1) to exercise grid methods.
     Covers same lines as CDTile variant but from a different TileInfo path.
     """
-    from Tensile.Components.Subtile.Kernel import TileInfo, AB_B16
+    from tensilelite.Components.Subtile.Kernel import TileInfo, AB_B16
 
     kernel = _kernel_ab(macroTileA=128, macroTileB=128, depthUA=64, depthUB=64,
                         miwavegroup=(2, 2))

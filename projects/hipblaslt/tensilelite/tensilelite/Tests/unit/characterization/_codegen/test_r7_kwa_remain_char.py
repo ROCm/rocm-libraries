@@ -31,7 +31,7 @@ pytestmark = pytest.mark.unit
 
 # Force full Tensile package init before component imports.
 import rocisa  # noqa: F401
-import Tensile.KernelWriter  # noqa: F401
+import tensilelite.KernelWriter  # noqa: F401
 
 
 # ---------------------------------------------------------------------------
@@ -65,9 +65,9 @@ def _build_kwa_for_global_read_inc(kernel, *, version=(9, 4, 2), bufferLoad=True
     from rocisa.enum import RegisterType
     from rocisa.register import RegisterPool
 
-    from Tensile.Common.Types import DebugConfig
-    from Tensile.KernelWriter import KernelWriter, StateValues
-    from Tensile.KernelWriterAssembly import KernelWriterAssembly, GlobalReadGprRecord
+    from tensilelite.Common.Types import DebugConfig
+    from tensilelite.KernelWriter import KernelWriter, StateValues
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly, GlobalReadGprRecord
 
     ri = _init_rocisa(version)
 
@@ -121,9 +121,9 @@ def _build_kwa_for_packed_coord(*, version=(9, 4, 2)):
     from rocisa.enum import RegisterType
     from rocisa.register import RegisterPool
 
-    from Tensile.Common.Types import DebugConfig
-    from Tensile.KernelWriter import KernelWriter, StateVgprs, StateValues
-    from Tensile.KernelWriterAssembly import KernelWriterAssembly, GlobalReadGprRecord
+    from tensilelite.Common.Types import DebugConfig
+    from tensilelite.KernelWriter import KernelWriter, StateVgprs, StateValues
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly, GlobalReadGprRecord
 
     ri = _init_rocisa(version)
 

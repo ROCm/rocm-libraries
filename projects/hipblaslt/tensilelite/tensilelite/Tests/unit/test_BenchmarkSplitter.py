@@ -26,7 +26,7 @@ import pytest
 import os
 import tempfile
 import yaml
-from Tensile.BenchmarkSplitter import BenchmarkSplitter
+from tensilelite.BenchmarkSplitter import BenchmarkSplitter
 
 
 @pytest.fixture

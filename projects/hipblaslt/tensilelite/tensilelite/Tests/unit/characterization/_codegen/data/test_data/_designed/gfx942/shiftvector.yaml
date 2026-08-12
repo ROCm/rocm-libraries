@@ -4,7 +4,7 @@
 ################################################################################
 # P4-widen ShiftVectorComponents characterization seed for gfx942.
 #
-# Target: Tensile/Components/ShiftVectorComponents.py
+# Target: tensilelite/Components/ShiftVectorComponents.py
 # Missing ranges (methodology-A): 47-200 (ShiftVectorComponentsVALU.__call__),
 # 238 (AllThread dispatch), 438-439 (large-mb branch), 552-784 (AllThread body).
 #

@@ -8,7 +8,7 @@ Drives the P2 designed BenchmarkProblems config
 (``data/_designed/gfx950/subtile.yaml``) through the config-driven emit harness
 and asserts every emitted kernel is real gfx950 AMDGCN assembly with err==0.
 
-Target: Tensile/Components/Subtile/SubtileGREmit.py, uncovered ranges:
+Target: tensilelite/Components/Subtile/SubtileGREmit.py, uncovered ranges:
   359-411  (_emitGR_TLU0 — subtile GR buffer load emit)
   528-639  (_grComputeSubtileOffsets_legacy / _grComputeRowPartition_legacy)
   658-834  (_grComputeAllOffsets_legacy / _grSwizzleColIds_legacy /

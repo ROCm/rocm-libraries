@@ -5,7 +5,7 @@
 """R3 -- gfx1250 StreamK deeper-coverage characterization (CPU-only).
 
 Exercises arch-specific and VGPR-constant paths in
-``Tensile/Components/StreamK.py`` that the earlier gfx942 R2 sweep
+``tensilelite/Components/StreamK.py`` that the earlier gfx942 R2 sweep
 (test_r2_streamk_char.py) could not reach because those branches are gated
 on ISA=(12,5,0) or arch-caps that only exist on gfx1250:
 

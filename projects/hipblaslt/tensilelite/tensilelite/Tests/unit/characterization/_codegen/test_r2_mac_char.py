@@ -7,7 +7,7 @@
 Drives the designed non-MFMA HHS config
 (``data/test_data/_designed/gfx90a/mac.yaml``) through the config-driven emit
 harness on gfx942 to exercise the ``FMA_F16_HPA_DOT2.__call__`` path in
-``Tensile/Components/MAC_F16_HPA.py`` (lines 44-88; 78 lines miss in baseline).
+``tensilelite/Components/MAC_F16_HPA.py`` (lines 44-88; 78 lines miss in baseline).
 
 Architecture selection:
   * The target component ``FMA_F16_HPA_DOT2`` requires ``UseDotInstruction=True``

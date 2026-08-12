@@ -36,8 +36,8 @@ from pathlib import Path
 
 import pytest
 
-from Tensile import SolutionLibrary
-from Tensile.Common.Architectures import supportsChipIdPredicate
+from tensilelite import SolutionLibrary
+from tensilelite.Common.Architectures import supportsChipIdPredicate
 
 
 _LOGIC_ROOT = (

@@ -28,7 +28,7 @@ from io import StringIO
 from pathlib import Path
 from unittest.mock import Mock, patch, mock_open
 
-from Tensile.EmbeddedData import (
+from tensilelite.EmbeddedData import (
     Namespace,
     Indent,
     EmbeddedDataFile,
@@ -204,7 +204,7 @@ class TestEmbeddedDataFile:
 
         assert "#include <Tensile/EmbeddedData.hpp>" in includes
         assert "#include <Tensile/Contractions.hpp>" in includes
-        assert "#include <Tensile/Tensile.hpp>" in includes
+        assert "#include <Tensile/tensilelite.hpp>" in includes
 
     def test_get_lines_from_string(self):
         """get_lines splits string by newlines."""

@@ -24,7 +24,7 @@ from codegen_harness import emit_kernels_from_logic
 
 pytestmark = pytest.mark.unit
 
-# tensilelite/Tensile/Tests/unit/characterization/_codegen/ -> tensilelite -> hipblaslt
+# tensilelite/tensilelite/Tests/unit/characterization/_codegen/ -> tensilelite -> hipblaslt
 _LOGIC_ROOT = os.path.normpath(
     os.path.join(
         os.path.dirname(__file__),
