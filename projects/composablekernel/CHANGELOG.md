@@ -16,6 +16,7 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 
 ### Added
 
+* Added a CI path-length check that rejects newly added or modified files whose repository-relative path exceeds 200 characters, keeping the absolute path under the Windows `MAX_PATH` limit of 260.
 * Added overload of load_tile_transpose that takes reference to output tensor as output parameter
 * Use data type from LDS tensor view when determining tile distribution for transpose in the GEMM pipeline
 * Added eightwarps support for abquant mode in blockscale GEMM.

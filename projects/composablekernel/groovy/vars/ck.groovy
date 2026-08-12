@@ -1322,10 +1322,10 @@ def getFaTestsCmds() {
 }
 
 // All static checks in one container on a single node: clang-format (always),
-// cppcheck (when RUN_CPPCHECK), then the ASCII-only and CRLF checks. Combined
-// into a single buildAndTest, driven by one Jenkinsfile stage, to keep the
-// declarative pipeline's WorkflowScript under the JVM 64KB method-size limit and
-// to avoid per-check checkout/container overhead.
+// cppcheck (when RUN_CPPCHECK), then the ASCII-only, CRLF and path-length
+// checks. Combined into a single buildAndTest, driven by one Jenkinsfile stage,
+// to keep the declarative pipeline's WorkflowScript under the JVM 64KB
+// method-size limit and to avoid per-check checkout/container overhead.
 //
 // Every check runs from projects/composablekernel (cmake_build runs execute_cmd
 // from .../build, so the single leading `cd ..` lands there); no check changes
@@ -1346,6 +1346,24 @@ def runStaticChecks() {
     }
     checks << """${checkFiles} -print0 | xargs -0 -P 8 -n 64 script/check_ascii_only.sh"""
     checks << """${checkFiles} -print0 | xargs -0 -P 8 -n 64 script/check_no_crlf.sh"""
+
+    // Path-length check (ROCM-29381). Bounds the repository-relative path so the
+    // absolute path stays under the Windows MAX_PATH of 260; ninja's Stat() does
+    // not honour LongPathsEnabled, so an over-long source path fails the build.
+    //
+    // Scoped to the files this change adds, modifies or renames rather than the
+    // whole tree: the tree already carries paths over the limit, and unrelated
+    // work must not be blocked by them. New paths are what we need to keep short.
+    // Deletions are excluded (--diff-filter=AMR) so removing a long path passes.
+    //
+    // Pathspec '.' limits the diff to projects/composablekernel; git still emits
+    // repository-relative paths, which is what the checker measures.
+    def changedFiles = """(if [ -n "\$CHANGE_ID" ]; then \
+        git diff -z --name-only --diff-filter=AMR "origin/\$CHANGE_TARGET...HEAD" -- .; \
+    else \
+        git diff -z --name-only --diff-filter=AMR "\$(git merge-base HEAD origin/develop 2>/dev/null || echo HEAD~1)" HEAD -- .; \
+    fi)"""
+    checks << """${changedFiles} | xargs -0 -r script/check_path_length.sh"""
 
     buildAndTest(
         setup_args: "NO_CK_BUILD",
