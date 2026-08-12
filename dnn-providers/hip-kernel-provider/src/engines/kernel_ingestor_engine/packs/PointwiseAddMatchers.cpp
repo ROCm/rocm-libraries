@@ -181,6 +181,8 @@ bool pointwiseAddGraphMatches(const MatchContext& context, BoundTokens& bound)
     // Bind what the launch needs, now that the walk that found it has succeeded. The
     // dispatch handler reads these back instead of re-walking the graph, so there is one
     // notion of which tensor is which operand rather than two that can drift apart.
+    // The uid type is already int64_t; what matters is that these land in the
+    // MetadataValue's integer alternative, which is the one the dispatch side reads.
     bound[std::string(INPUT_A_TOKEN)] = attributes.in_0_tensor_uid();
     bound[std::string(INPUT_B_TOKEN)] = attributes.in_1_tensor_uid().value();
     bound[std::string(OUTPUT_TOKEN)] = attributes.out_0_tensor_uid();
@@ -212,17 +214,19 @@ double pointwiseAddScore(const KernelDefinition& kernel, const MatchContext& /*c
 PointwiseAddBinding pointwiseAddBinding(const BoundTokens& bound)
 {
     // Every token was written by the graph matcher that admitted this graph, so a missing
-    // one means the catalog was built by a matcher other than ours -- a wiring error, not
-    // a graph this pack should decline.
+    // one -- or one holding something other than the uid this expects -- means the
+    // catalog was built by a matcher other than ours: a wiring error, not a graph this
+    // pack should decline.
     const auto read = [&bound](std::string_view token) {
-        const auto it = bound.find(std::string(token));
-        if(it == bound.end())
+        const auto value = hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, token);
+        if(!value.has_value())
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                "pointwise add dispatch is missing bound token '" + std::string(token) + "'");
+                "pointwise add dispatch is missing bound token '" + std::string(token)
+                    + "', or it does not hold a tensor uid");
         }
-        return it->second;
+        return *value;
     };
 
     return {read(INPUT_A_TOKEN), read(INPUT_B_TOKEN), read(OUTPUT_TOKEN)};

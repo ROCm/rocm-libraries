@@ -15,6 +15,7 @@
 
 #include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GenericPlan.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IDeviceResolver.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
@@ -185,6 +186,16 @@ public:
         {
             throwUnsatisfiableKnobFilter(filter, catalog.entries.size());
         }
+
+        // The selection an operator would otherwise have to infer. RFC 0017 §10 asks
+        // that a resolved plan say which kernel it resolved to; with the catalog built
+        // from descriptors rather than a switch statement, this line is the only place
+        // the choice is observable without a debugger.
+        HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '" << _engine.name << "' selected kernel "
+                                                    << toString(filtered.front().kernelId)
+                                                    << " from " << filtered.size()
+                                                    << " candidate(s) (" << catalog.entries.size()
+                                                    << " before knob filtering)");
 
         executionContext.setPlan(std::make_unique<GenericPlan<THandle>>(
             _stateManager.getDispatchDetails(filtered.front()), context, catalog.bound));

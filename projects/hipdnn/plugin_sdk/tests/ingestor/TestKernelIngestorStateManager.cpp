@@ -270,7 +270,10 @@ TEST(TestKernelIngestorStateManager, CarriesWhatMatchingBoundThroughToDispatch)
     const auto bound = manager->unsortedCatalog(context).bound;
 
     ASSERT_EQ(bound.count("test.bound_token"), 1U);
-    EXPECT_EQ(bound.at("test.bound_token"), BOUND_TOKEN_VALUE);
+    // Compared as the integer alternative rather than against the variant as a whole:
+    // a bare int64 on the right would not convert, and asserting through the accessor
+    // also pins that the matcher bound an integer and not some other alternative.
+    EXPECT_EQ(tryGetBoundInt(bound, "test.bound_token"), BOUND_TOKEN_VALUE);
 }
 
 TEST(TestKernelIngestorStateManager, ReadingBoundStateAfterMatchingDoesNotRematch)
@@ -291,10 +294,16 @@ TEST(TestKernelIngestorStateManager, ReadingBoundStateAfterMatchingDoesNotRematc
     static_cast<void>(manager->unsortedCatalog(context));
     const auto afterMatching = counters().graphCalls;
 
-    static_cast<void>(manager->unsortedCatalog(context).bound);
-    static_cast<void>(manager->sortedCatalog(context).bound);
+    // The cached reads must still carry the bound state, not merely avoid re-matching.
+    // Asserting only graphCalls would pass against a cache that served an entry with
+    // Catalog::bound emptied -- which destroys the section 8.1 property this test is
+    // named for while leaving its counter untouched.
+    const auto secondRead = manager->unsortedCatalog(context).bound;
+    const auto thirdRead = manager->sortedCatalog(context).bound;
 
     EXPECT_EQ(counters().graphCalls, afterMatching);
+    EXPECT_EQ(tryGetBoundInt(secondRead, "test.bound_token"), BOUND_TOKEN_VALUE);
+    EXPECT_EQ(tryGetBoundInt(thirdRead, "test.bound_token"), BOUND_TOKEN_VALUE);
 }
 
 // ---------------------------------------------------------------------------

@@ -16,6 +16,7 @@
 #include <utility>
 #include <vector>
 
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Catalog.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
@@ -374,8 +375,18 @@ private:
         {
             if(auto cached = _catalogCache.get(*key); cached.has_value())
             {
+                HIPDNN_PLUGIN_LOG_TRACE("ingestor: catalog cache hit for device "
+                                        << context.deviceId);
                 return *cached;
             }
+        }
+        else
+        {
+            // Worth saying once per call: a graph with no identity is re-matched every
+            // time, so an operator seeing repeated matching for what looks like the same
+            // graph is seeing this rather than a caching bug.
+            HIPDNN_PLUGIN_LOG_TRACE(
+                "ingestor: graph carries no identity, so its catalog cannot be cached");
         }
 
         Catalog catalog = buildCatalog(context);
@@ -443,6 +454,13 @@ private:
             BoundTokens packBound;
             if(!graphLevelMatchersPass(pack, context, graphVerdicts, packBound))
             {
+                // Logged, not silent: "no kernel matched my graph" is the question a
+                // data-driven engine is hardest to answer, because there is no
+                // hand-written switch to read. RFC 0017 §10 asks that an operator be
+                // able to see why a kernel was not selected, and a pack pruned at the
+                // graph level is the coarsest and most common reason.
+                HIPDNN_PLUGIN_LOG_INFO("ingestor: pack " << toString(pack.id)
+                                                         << " declined at a graph-scoped matcher");
                 continue;
             }
 
@@ -450,6 +468,7 @@ private:
             // token name means the same thing to every pack in an engine.
             catalog.bound.insert(packBound.begin(), packBound.end());
 
+            size_t admitted = 0;
             for(const auto& kernel : pack.kernels)
             {
                 KernelDefinition definition{kernel.id,
@@ -462,10 +481,21 @@ private:
                 if(kernelLevelMatchersPass(pack, context, definition))
                 {
                     catalog.entries.push_back(std::move(definition));
+                    ++admitted;
                 }
             }
+
+            HIPDNN_PLUGIN_LOG_INFO("ingestor: pack " << toString(pack.id) << " admitted "
+                                                     << admitted << " of " << pack.kernels.size()
+                                                     << " kernel(s) after kernel-scoped matching");
         }
 
+        // The summary a caller diagnosing an unexpected decline actually needs: an empty
+        // catalog here is what applicability reports as "does not apply", and without
+        // this line the only observable is the absence of an engine id.
+        HIPDNN_PLUGIN_LOG_INFO("ingestor: catalog for device "
+                               << context.deviceId << " holds " << catalog.entries.size()
+                               << " kernel(s) from " << _packs.size() << " pack(s)");
         return catalog;
     }
 
