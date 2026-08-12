@@ -74,10 +74,40 @@ static int run_negative() {
   return hazard_reproduced ? 0 : 1;
 }
 
+static int run_versioned_bare() {
+  // Both providers carry genuine version nodes (A: ROCBLAS_ABI_6 default,
+  // B: ROCBLAS_ABI_7 default), unlike the anonymous negative control. A is
+  // loaded first, so it is earlier in the global scope.
+  void* A = dlopen(PROV_A_PATH, RTLD_NOW | RTLD_GLOBAL);
+  void* B = dlopen(PROV_B_PATH, RTLD_NOW | RTLD_GLOBAL);
+  if (!A || !B) { fprintf(stderr, "dlopen failed: %s\n", dlerror()); return 2; }
+
+  // A bare, unversioned RTLD_DEFAULT lookup does not consult the version nodes:
+  // it takes the first-loaded default definition (ABI_6), not the newer major.
+  fn g = (fn)dlsym(RTLD_DEFAULT, "rocblas_sgemm");
+  int vg = g ? g() : -1;
+
+  // Same two noded DSOs, version-aware lookup: dlvsym still reaches B's node,
+  // proving the nodes are present and functional - only the lookup form differs.
+  fn v7 = (fn)dlvsym(B, "rocblas_sgemm", "ROCBLAS_ABI_7");
+  int v = v7 ? v7() : -1;
+
+  printf("[versioned-bare] bare dlsym(RTLD_DEFAULT,rocblas_sgemm)=%d  "
+         "dlvsym(B,...,ROCBLAS_ABI_7)=%d\n", vg, v);
+  int ok = (vg == 6 && v == 7);
+  printf("[versioned-bare] verdict: %s\n",
+         ok ? "PASS (nodes present - dlvsym reaches ABI_7 - yet the bare lookup "
+              "still takes first-loaded ABI_6; the node defense does not cover "
+              "unversioned RTLD_DEFAULT)"
+            : "FAIL (bare lookup or version-aware lookup did not behave as stated)");
+  return ok ? 0 : 1;
+}
+
 int main(int argc, char** argv) {
   const char* mode = (argc > 1) ? argv[1] : "positive";
   if (!strcmp(mode, "positive")) return run_positive();
   if (!strcmp(mode, "negative")) return run_negative();
-  fprintf(stderr, "usage: %s positive|negative\n", argv[0]);
+  if (!strcmp(mode, "versioned_bare")) return run_versioned_bare();
+  fprintf(stderr, "usage: %s positive|negative|versioned_bare\n", argv[0]);
   return 2;
 }

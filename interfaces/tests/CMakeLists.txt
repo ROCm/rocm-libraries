@@ -162,6 +162,13 @@ if(UNIX AND NOT APPLE)
     COMMAND abi03_interpose_test positive)
   add_test(NAME rocm_interfaces.abi03_interpose_hazard
     COMMAND abi03_interpose_test negative)
+  # Boundary of the node defense: with genuine version nodes present (A ABI_6,
+  # B ABI_7), a version-aware dlvsym still reaches ABI_7, but a bare unversioned
+  # dlsym(RTLD_DEFAULT) still takes the first-loaded ABI_6 - so the defense is
+  # scoped to versioned relocations/dlvsym, not bare global lookups. Discriminates
+  # from abi03_interpose_hazard (which uses nodeless DSOs) on lookup form alone.
+  add_test(NAME rocm_interfaces.abi03_versioned_bare_lookup_uncovered
+    COMMAND abi03_interpose_test versioned_bare)
 
   # Linked-consumer interposition proof: a consumer whose relocation carries a
   # versioned undefined reference (rocblas_sgemm@ROCBLAS_ABI_7) binds to the
