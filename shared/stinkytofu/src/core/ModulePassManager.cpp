@@ -8,9 +8,6 @@
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
  *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -20,21 +17,16 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
-#pragma once
-
-#include <memory>
-
-#include "stinkytofu/Export.hpp"
+#include "stinkytofu/core/ModulePassManager.hpp"
 
 namespace stinkytofu {
-class Pass;
-
-/// Sets matrix_a_reuse / matrix_b_reuse on matrix (WMMA/MFMA) instructions from
-/// consecutive MMA operand equality in final program order (post-scheduler).
-///
-/// Reuse is a per-function microarchitectural promise: the chain never spans a
-/// call site (the callee may clobber the operand-reuse buffer) and never spans
-/// a function boundary.
-STINKYTOFU_EXPORT std::unique_ptr<Pass> createSetMatrixReusePass();
-
+void ModulePassManager::run(StinkyAsmModule& M) {
+    for (const auto& pass : passes) {
+        const std::string passName = pass->getName();
+        for (auto& inst : instrumentations) inst->beforeModulePass(passName, M, passCtx);
+        PreservedAnalyses PA = pass->run(M, passCtx, moduleAnalysisManager);
+        for (auto& inst : instrumentations) inst->afterModulePass(passName, M, passCtx);
+        moduleAnalysisManager.invalidate(M, PA);
+    }
+}
 }  // namespace stinkytofu
