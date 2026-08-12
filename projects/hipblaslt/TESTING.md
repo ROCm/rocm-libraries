@@ -2,7 +2,7 @@
 
 - **Owner:** T.J. Alumbaugh (@talumbau)
 - **Technical Lead:** Tony Davis (@tony-davis)
-- **Last Updated:** 2026-08-07
+- **Last Updated:** 2026-08-11
 
 > **In a hurry?** Start with [The short version](#the-short-version). From there, jump to
 > [Choosing the Right Test Type](#choosing-the-right-test-type) if you are about to write a test, or
@@ -52,18 +52,17 @@ Python unit and characterization suites; a host-side AddressSanitizer build and 
 and `pre-commit`.
 
 **What does not gate, despite appearances.** The coverage floors fail their own lane, but that lane
-is not a required check. Performance is supposed to be measured on every pull request against a
-`develop` reference, and that job has not benchmarked anything in months. The gating job named
-`static-analysis` is a sensitive-word
+is not a required check. Pull requests are not benchmarked, so there is no performance signal on a
+change to gate on. The gating job named `static-analysis` is a sensitive-word
 scan for disclosure rather than a code analyzer, and no static analysis runs on the C++ library on a
 pull request from any source.
 
-**The biggest gap is performance.** hipBLASLt exists for throughput, and no signal about a regression
-reaches the pull request that caused it. Comparison and alerting do exist, on a daily cadence and
-outside this repository, which means a regression is found late and against a range of commits rather
-than against the change responsible. Second is that enforced coverage cannot tell a
-unit test from a characterization golden, so the numbers describe how much code is protected from
-change rather than how much is verified as correct.
+**The biggest gap is performance.** hipBLASLt exists for throughput, and pull requests are not
+benchmarked. What does exist is a nightly lane outside this repository that measures a build of the
+whole monorepo, so a regression surfaces a day later at the earliest, against a range of commits,
+and reaches the lane's owners rather than the change's author. Second is that enforced coverage
+cannot tell a unit test from a characterization golden, so the numbers describe how much code is
+protected from change rather than how much is verified as correct.
 
 **How to use this document.** It is a living artifact, meant for regression analysis (what was
 supposed to catch this?), release-readiness review, onboarding, and planning CI work. The most useful
@@ -611,126 +610,125 @@ assignment is tracked in AIHPBLAS-3575.
 
 ### Performance and Benchmarking Testing
 
-hipBLASLt is a performance library, so this section deserves to be read carefully. The distinction
-that matters: measurement and comparison are automated, but no verdict reaches a pull request.
-Nothing defined in this repository decides that a number is bad and fails a build.
+Performance measurement for hipBLASLt runs in a nightly lane outside this repository. Pull requests
+are not benchmarked. This section describes what that lane covers, how a number is produced, and how
+large the measured sample is. What we would like to add is in the
+[Improvement Roadmap](#improvement-roadmap).
 
 | Item | Detail |
 | --- | --- |
 | Stack layer | Core SDK (math library) |
 | Metrics measured | GFLOP/s, memory bandwidth (GB/s), latency (µs). Optionally clock frequencies, achieved efficiency, and memory read/write bytes |
 | How benchmarks are run | `hipblaslt-bench` for a single problem or a YAML batch; `hipblaslt-perf` to run named suites and aggregate CSV over repeated samples; `hipblaslt-cotenant` to measure under CU contention |
-| Where measurement runs | Math CI, plus an AMD-internal performance lane that lives outside this repository. No GitHub Actions lane defined here benchmarks anything, and `hipblaslt-perf` has no caller in this tree |
-| Automated runs | Two Math CI jobs, `perfci` and `performance` (described below). Neither is a merge gate |
-| Sizes measured | 814 problems over 730 distinct shapes per pull request; 144 over 72 shapes in the gfx950 daily run. See [How many sizes we measure](#how-many-sizes-we-measure) |
-| Reference for comparison | A second build of the merge target (`develop`) produced in the same job, benchmarked on the same machine and tagged `build_reference` against the change's `build_new` |
+| Where measurement runs | A nightly lane defined in an AMD-internal repository named `rocPTS`, owned by the performance tracking team. No lane defined in this repository benchmarks anything, and `hipblaslt-perf` has no caller in this tree |
+| Automated runs | The rocPTS nightly. No other automated benchmarking runs at any cadence |
+| Sizes measured | About 76,800 problems a night on gfx950. See [How many sizes we measure](#how-many-sizes-we-measure) |
+| Reference for comparison | The nightly compares each result against a rolling baseline of recent runs on the same device |
 | Where results are stored | Ingested into rocPTS, AMD's performance tracking service, and viewable from a Kibana dashboard and the PTS web app. Local runs write CSV to the developer's workspace |
-| Regression threshold | **None in either Math CI job.** The ingest step uploads both datasets and fails only if the upload itself fails. A threshold and alerting do exist in the internal lane above, outside this repository and outside pull request feedback. The tuning flow's uplift threshold is a candidate filter, not a regression gate |
-| Gating approach | Human review of the dashboard. Nothing gates a merge at any cadence |
+| Regression threshold | Not defined in this repository. The nightly applies one and reports to its owners. The tuning flow's uplift threshold is a candidate filter rather than a regression gate |
+| Gating approach | No merge gate on performance |
 
-**The two automated jobs.** `perfci` runs on pull requests. It builds the change and a `develop`
-reference, benchmarks both with the `ci_perf_job` suite on gfx950 (specifically an MI350X, pinned by
-device ID because the job requires it), uploads both datasets to rocPTS, and posts a comment on the
-pull request linking the run. It is configured not to report a check to GitHub, so it appears as a
-comment rather than as a check row. `performance` is the broader job: the `all` suite on gfx942 and
-gfx950, throttled to one run per day, reporting a check.
+#### Measurement on pull requests
 
-Note that the `ci_perf_job` suite defined in this repository is invoked by Math CI, not from anything
-in this tree. Searching this repository for callers finds none, which is misleading.
+Pull requests are not benchmarked. No performance number is produced for a change, so there is
+nothing to compare against a baseline and nothing to threshold at review time.
+
+Two files in the tree read as though a per-pull-request lane consumed them.
+`clients/scripts/performance/problems/matmul_probset1_bench.yaml` holds 35 shapes, NN only, with one
+mixed FP8 type, and the `ci_perf_job` suite is defined here as well. Neither has a caller in this
+repository today.
+
+#### The nightly measurement lane
+
+The lane is defined outside this repository, so it is described here for contributors who would
+otherwise have no way to find it. Benchmarking for hipBLASLt runs nightly from `rocPTS`, an
+AMD-internal repository owned by the performance tracking team. Nothing in this repository triggers
+it or reports its results.
+
+What it covers, as of 11 August 2026:
+
+- **Architectures.** hipBLASLt is scheduled on two gfx950 devices, MI350 and MI350P. The MI350P leg
+  has been cancelled before starting on recent nights, so one device is measured in practice. Other
+  architectures the library ships tuning data for are not benchmarked on a cadence.
+- **Sizes.** About 76,800 problems a night, from four suites that are version controlled in that
+  repository and reviewed like code. See [How many sizes we measure](#how-many-sizes-we-measure) for
+  the breakdown.
+- **Comparison.** Each result is compared against a rolling baseline of recent runs on the same
+  device, with a threshold and an alert to the lane's owners. Results are not surfaced on a pull
+  request.
+
+Two properties follow from how the lane is scheduled. It measures a nightly build of the whole
+monorepo rather than an individual commit, so a change is first measured the night after it merges
+and the comparison spans every change that landed in that window; a movement is attributed to a day
+rather than to a pull request. And the alert goes to the lane's owners, so the reader of a result is
+usually not its author.
 
 #### How a number is produced
 
-Worth reading if you are ever asked whether a performance delta is real. No GitHub Actions lane
-defined in this repository benchmarks anything, so a contributor watching the GitHub checks list will
-never see a performance result.
+Useful background for judging whether a performance delta is real. No lane defined in this
+repository produces a performance number, so a contributor watching the GitHub checks list will not
+see one. What follows is how the tools in this tree behave when a developer or a lane runs them.
 
 `hipblaslt-perf` invokes `hipblaslt-bench` once per problem per outer sample, five outer samples by
 default, and reports the mean and the median across those samples along with every raw value. Within
 one invocation, `hipblaslt-bench` runs `cold_iters` untimed launches, then times a batch of `iters`
-launches and divides. Both are set to 1,000 in the CI inputs, so a reported figure is a per-iteration
-average over a thousand back-to-back enqueues rather than a single timing. `rotating: 512` allocates
-as many copies of the problem's buffers as fit in 512 MiB and cycles through them by iteration, so
-the thousand iterations cannot all read a warm cache. The per-PR input additionally sets
-`use_gpu_timer` and `flush`, which the in-repo suites leave at their defaults, so the two lanes do not
-time identically.
+launches and divides, so a reported figure is a per-iteration average over a batch of back-to-back
+enqueues rather than a single timing. `rotating: 512` allocates as many copies of the problem's
+buffers as fit in 512 MiB and cycles through them by iteration, so those iterations cannot all read a
+warm cache. The nightly lane does not use `hipblaslt-perf` at all: it calls `hipblaslt-bench` once per
+problem with an iteration count carried in the dataset, and gets its stability from comparing against
+past nights rather than from repeating within a night. A single night's number for a single shape
+therefore carries less information than its trend.
 
-Two things are missing from that. The harness has an adaptive mode that samples until the relative
-standard error of the mean falls below one percent, or failing that until a robust dispersion measure
-plateaus within five percent, and CI does not use it: `adaptive` defaults to false and no CI input
-turns it on. So iteration counts are fixed by hand rather than chosen by a stability criterion, and
-nothing in the output says whether a given number converged.
+Two caveats apply to any of these numbers. The harness has an adaptive mode that samples until the
+relative standard error of the mean falls below one percent, or failing that until a robust dispersion
+measure plateaus within five percent, and no lane uses it: `adaptive` defaults to false and nothing
+turns it on. Iteration counts are fixed ahead of time rather than chosen by a stability criterion,
+and the output does not report whether a given number converged.
 
-The other is the machine, and this is the weaker half. This repository contains no clock pinning, no
-performance-level setting, no CPU affinity or NUMA pinning, and nothing that keeps another workload
-off the GPU while a measurement runs. The only isolation is that the job selects a dedicated MI350X
-node pool by label. Performance level and clocks are recorded next to the results, and the harness can
-report achieved clocks when an environment variable is set, but CI does not set it, so clock drift
-enters the number as noise rather than being visible as a fact about the run. Whether those nodes are
-quiet in practice is a property of the CI system rather than of this repository, and a reader of this
-repository cannot verify it. Until that is settled, small differences should not be read as signal.
+The second concerns the machine. This repository contains no clock pinning, no performance-level
+setting, no CPU affinity or NUMA pinning, and nothing that keeps another workload off the GPU while
+a measurement runs. The only isolation is that measurement is scheduled onto dedicated benchmark
+nodes. Performance level and clocks are recorded next to the results, and the harness can report
+achieved clocks when an environment variable is set, but no lane sets it, so clock drift enters the
+number as noise rather than being visible as a fact about the run. Whether those nodes are quiet in
+practice is a property of the CI system rather than of this repository, and a reader of this
+repository cannot verify it. Small differences should therefore be interpreted with care.
 
 #### How many sizes we measure
 
-The problem space is effectively unbounded: on one MI350X, counting only shapes whose dimensions are
-multiples of 16 and whose operands fit in memory, the number of distinct FP8 batched GEMM problems is
-on the order of trillions. No suite samples that by enumeration. The useful questions are how the
-sample was chosen and whether anything notices when a number moves.
+The problem space is effectively unbounded: on one gfx950 device, counting only shapes whose
+dimensions are multiples of 16 and whose operands fit in memory, the number of distinct FP8 batched
+GEMM problems is on the order of trillions. No suite samples that by enumeration, so what matters is
+how the sample was chosen and which axes it holds fixed.
 
-- **Per pull request** (`perfci`, one MI350X): 814 problems over 730 distinct shapes. All four
-  transpose combinations, bf16 (686 problems) and fp32 (128), and 60 problems with a batch count
-  above one, the largest being 3,072.
-- **Daily, gfx950** (`performance`): 144 problems over 72 distinct shapes, all TN, each shape measured
-  in both bf16 and FP8, none batched.
-- **Daily, gfx942** (`performance`): 924 problems over 279 distinct shapes drawn from six problem
-  sets, ten of them batched.
+- **Pull requests.** Not benchmarked; see
+  [Measurement on pull requests](#measurement-on-pull-requests).
+- **Nightly, gfx950** (the rocPTS lane): **76,768 problems** from four version-controlled suites. One
+  is a model-shape set of 3,085 problems, mostly bf16 with the rest fp32, spanning all four transpose
+  combinations and holding the only batched problems in the set. The other three are large TN sweeps
+  of a single data type each: 24,629 in bf16, 24,629 in FP8, and 24,425 in TF32. Counted on 7 August
+  2026, with no dataset change since. The set grew roughly fortyfold during July 2026, so the number
+  is a snapshot rather than a fixed fact.
 
-Two axes that sample does not vary. Leading dimensions are always the natural minimum for the layout,
-so no problem is ever measured with a padded stride, even though the per-PR input states leading
-dimensions explicitly and kernel performance is known to depend on them. And the per-PR set contains
-no FP8 at all, while the daily set that does measure FP8 never batches it, so batched FP8 is
-unmeasured on the architecture where it matters most.
+**Two axes the sample holds fixed.** Of the 76,768 nightly problems, 200 have a batch count above
+one, all of them in the model-shape set and all bf16 or fp32, because the three large sweeps are
+non-batched; no batched FP8 problems are measured at any cadence. Leading dimensions are the second
+axis: every problem uses the natural minimum stride for its layout, so measurement does not cover
+padded strides. Kernel performance is known to depend on leading dimensions, and the shipped tuning
+data keys on them for part of its coverage (see
+[Tuning coverage](#tuning-coverage-is-a-different-number-and-it-is-measured-by-hand)). Coverage is
+therefore broad along M, N and K for four data types in TN, and fixed along batch and stride.
 
-One caveat governs the per-PR row: **the per-PR problem list is not in this repository.** `perfci`
-downloads it from the Math CI server at job start and overwrites the checked-in
-`clients/scripts/performance/problems/matmul_probset1_bench.yaml` with it, in both the change build
-and the reference build. The file a contributor reads here (35 shapes, NN only, one mixed FP8 type)
-is therefore not what runs. The list that does run is not version controlled beside the library, and
-it is not in the CI pipeline definitions either; it is an uploaded artifact on the CI server, so a
-change to what we measure per pull request is reviewed nowhere and leaves no history anywhere. Both
-the change build and the reference build fetch the same copy in the same run, so a within-run
-comparison remains valid; what is lost is comparability over time, and the ability to tell whether a
-shift came from the library or from an edit to the problem list. Of everything in this section, that
-is the gap worth closing first, because it makes every other number here unauditable.
-
-**Gating, stated honestly:**
+**Gating summary:**
 
 | Gating level | Status | Notes |
 | --- | --- | --- |
-| PR-level automated measurement | **Configured, but not producing data** | The design benchmarks change and reference side by side into rocPTS. It is currently failing before it benchmarks; see below |
-| PR-level automated gate | **No** | No threshold is defined and the job is not in the gating set. A regression shows up as a number on a dashboard that someone has to look at |
-| Daily automated comparison | **Yes**, via `performance` | Same shape, wider suite, two architectures, once per day |
-| Automated regression alerting | **Yes, but outside this repository** | An internal lane compares daily results against a rolling baseline and alerts its own owners. Nothing about it reaches a pull request or names the change responsible, and it cannot block a merge. That, rather than the absence of measurement, is the real gap |
+| PR-level automated measurement | **No** | Pull requests are not benchmarked |
+| PR-level automated gate | **No** | No per-PR number exists to gate on |
+| Nightly measurement outside this repository | **Yes** | About 76,800 problems on gfx950 in the rocPTS lane, most nights |
+| Automated regression alerting | **Yes, outside this repository** | The nightly compares against a rolling baseline and alerts its owners. Results are not surfaced on a pull request, are not attributed to a single change, and do not block a merge |
 | Release qualification | **No documented gate** | Performance is discussed at release time but there is no in-repo criterion |
-
-**The per-PR job is not currently measuring anything.** Recorded here because it is the difference
-between a suite that exists and a suite that runs. `perfci` builds the change and a `develop`
-reference and benchmarks both, and the reference build has been failing to configure, so the run dies
-before it reaches the benchmark. On the daily `develop` schedule, every retained build between 14 July
-and 5 August 2026 failed that way, and the most recent retained build that actually benchmarked ran on
-23 March 2026. Older logs have been rotated away, so the true start of the outage is no longer
-recoverable, though the configure error it dies on has been reachable since mid-May 2026. The
-underlying fault is mundane: a shared component reaches outside its own directory for a CMake module
-that the reference checkout does not include.
-
-The runs that report success are worse than the ones that fail. They short-circuit before the compile
-stage and never benchmark at all, so a green `perfci` does not mean a measurement happened, and the
-two states are indistinguishable from outside.
-
-Why nobody noticed is structural rather than careless. The job is configured not to report a status
-check, and it posts its pull request comment only after a successful upload. So a broken `perfci`
-produces no check, no comment, and nothing on the pull request at all. A lane that reports nothing on
-success and nothing on failure will eventually stop working without telling anyone, and this one did.
-Restoring the reference build matters less than giving the job a way to say that it failed.
 
 #### Tuning coverage is a different number, and it is measured by hand
 
@@ -746,9 +744,9 @@ That work is manual and campaign-driven rather than continuous. It arrives as hu
 requests, one per data type, layout and device variant, usually carrying a ticket: the gfx950 logic
 alone has taken 217 commits since April 2025, with subjects of the form *Tuning Equality BBS F8BS for
 gfx950_id75a3* and *7 GEMM sizes added for gfx950/75a3 bbs tn*. Nothing schedules it, nothing in this
-repository triggers it, and no job re-measures those points afterward. So the honest summary is that
-roughly nine thousand sizes on this architecture have been measured once each, and a few hundred of
-them are re-measured on a cadence.
+repository triggers it, and no job re-measures those points afterward. In summary, roughly nine
+thousand sizes on this architecture were each measured once, by hand, to choose a kernel. Whether the
+nightly's sweeps re-cover any of them is not tracked anywhere.
 
 Related tooling is sometimes mistaken for regression testing. `utilities/geko/` is a GEMM kernel
 optimizer that searches for better kernels and benchmarks candidates during tuning, and
@@ -757,17 +755,15 @@ performance numbers as part of tuning rather than as a regression signal, and ne
 Similarly, TensileLite's benchmark and library-logic phases generate performance data used to *select*
 kernels.
 
-**Known gaps:** the per-PR job is currently not producing data and cannot report that it failed, which
-is the most urgent of these. Beyond that: no threshold or alert in either Math CI job, no alerting
-anywhere that reaches a pull request, no gate at any cadence, and no gate on library size, kernel
-count, or build time. The per-PR problem list is not version controlled in this repository, which
-makes per-PR coverage unauditable from a clone. Measurement runs
-without clock pinning or any machine-quieting step, and the harness's own stability criteria are
-switched off, so run-to-run noise is neither bounded nor reported. Leading dimensions are never
-varied, and batched FP8 is not measured on gfx950. Architecture coverage is narrower than the library
-ships for: `perfci` measures gfx950 only. A performance regression is caught today by a human reading
-a dashboard, by a daily alert that lands outside this repository and names no commit, or by a
-downstream consumer.
+**Known gaps:** pull requests are not benchmarked, so a movement cannot be attributed to the change
+that produced it; the nightly narrows it to a day of merges. No threshold or gate is applied in this
+repository, and there is no gate on library size, kernel count, or build time. Measurement runs
+without clock pinning or any machine-quieting step, and the harness's stability criteria are not
+enabled, so run-to-run noise is neither bounded nor reported. Leading dimensions are not varied and
+batched FP8 is not measured. Benchmark coverage is gfx950, narrower than the set of architectures the
+library ships tuned kernels for. Today a regression surfaces through the nightly alert, through
+someone reading the dashboard, or through a downstream consumer. What we would like to add is listed
+in the [Improvement Roadmap](#improvement-roadmap).
 
 ## Pre-submit / CI Gates
 
@@ -883,7 +879,7 @@ the C++ build and test.
 | Code-quality static analysis (C++) | No | Unowned | **Nothing runs.** No clang-tidy or cppcheck configuration exists for hipBLASLt, and CodeQL does not cover C++ |
 | Code-quality static analysis (Python) | No | Component team | `tox -e lint` exists but no CI job invokes it, and it is narrowed to pyflakes checks |
 | Client test suite on gfx90a / gfx942 / gfx950 / gfx12 | Yes | Component team | Gating Math CI job (`precheckin`) |
-| Performance | No | Component team | Measured on every PR by `perfci`, but nothing gates on the result (see above) |
+| Performance | No | Component team | Pull requests are not benchmarked. Benchmarking runs nightly, outside this repository (see above) |
 | Shared validation infrastructure | N/A | TheRock team | Provide shared build and test infrastructure |
 | System validation | N/A | QA | Execute system-level and release validation |
 | Release qualification | N/A | Component team + QA + TPM | Confirm readiness, review known risks |
@@ -914,7 +910,6 @@ required-check list, in this repository, is tracked as a gap.
   check
 - The characterization-versus-unit coverage summary card
 - The `tensilelite-unit-codecov` check and the codecov reports
-- The `perfci` benchmark comparison
 
 **Unstable / flaky.** Not tracked as a category; hipBLASLt has no `UNSTABLE` tag. That is a real gap
 rather than a claim that nothing is flaky. What exists instead is a quarantine list, described next.
@@ -1102,8 +1097,9 @@ Beyond PR validation, the following run on a nightly or postsubmit cadence rathe
   230 GPU-guarded tests skip there by design. They do run per PR, on Math CI's `preliminary` job and
   in TheRock's installed-artifact lane, subject to the conditions on each. See
   [Where these tests actually run](#where-these-tests-actually-run).
-- **Broad performance benchmarking.** The Math CI `performance` job runs the full benchmark suite on
-  gfx942 and gfx950 once per day, with results in rocPTS. It measures; it does not judge.
+- **Performance benchmarking.** The lane that benchmarks this library runs nightly, on gfx950,
+  outside this repository. See
+  [Performance and Benchmarking Testing](#performance-and-benchmarking-testing).
 
 ### Supported Configurations
 
@@ -1119,8 +1115,7 @@ the set of architectures the library supports or builds for.
 | Linux, gfx950-dcgpu | Full | Postsubmit and nightly in the TheRock lane, **not PR** there | Runner capacity, ROCm/TheRock#3288. Covered per PR by Math CI |
 | Windows, gfx110X | Partial | PR (quick), nightly | 1 shard |
 | Windows, gfx1151 | Partial | Nightly | Forced to the quick tier regardless of requested tier, for memory reasons |
-| Linux, gfx950 (MI350X) | Benchmarks only | PR, via Math CI `perfci` | Non-gating measurement into rocPTS, and not currently producing data. See [Performance and Benchmarking Testing](#performance-and-benchmarking-testing) |
-| Linux, gfx942 / gfx950 | Benchmarks only | Daily, via Math CI `performance` | Non-gating |
+| Linux, gfx950 (MI350) | Benchmarks only | Nightly, in the rocPTS lane outside this repository | Non-gating, and not surfaced on a pull request. See [Performance and Benchmarking Testing](#performance-and-benchmarking-testing) |
 | Linux, gfx103X / gfx120X | Partial | Nightly | |
 
 **Explicitly not tested**, so that nothing is assumed at release time:
@@ -1264,8 +1259,9 @@ When adding or modifying functionality:
   reproducer quarantined in `known_bugs.yaml` with a removal note, following the existing pattern.
 - **Change to TensileLite behavior.** Update the affected golden on the smallest node id, and explain
   the diff in the PR description.
-- **Performance-sensitive path.** Read the `perfci` comparison for the PR and summarize it in the
-  description. Nothing fails on a regression, so saying what the numbers showed is the control.
+- **Performance-sensitive path.** Benchmark it yourself and put the before-and-after numbers in the
+  description. No lane will do it for you, and nothing fails on a regression, so the description is
+  the only control there is.
 - **New GPU or OS support.** Validation on that configuration, plus an update to the
   [Supported Configurations](#supported-configurations) table.
 - **Packaging or build change.** Install and layout validation; the pre-flight layout check must pass.
@@ -1319,8 +1315,8 @@ leading dimensions). The bf16 overflow entry is instructive: a bit-exact reprodu
 reproducer becomes an enforced gate. That is the pattern worth generalizing.
 
 **The current balance is defensible but lopsided.** Integration testing carries almost all of the
-correctness load; unit testing carries the generator; performance testing carries nothing
-automatically. The first two are appropriate. The third is a genuine weakness for a library whose
+correctness load; unit testing carries the generator; performance testing carries nothing that ever
+reaches a change. The first two are appropriate. The third is a genuine weakness for a library whose
 entire reason for existing is throughput.
 
 ## Key Quality Concerns
@@ -1334,10 +1330,10 @@ datatype and shape space, plus dedicated ULP-level tests. Silent-wrong-answer bu
 the reproducer-then-quarantine pattern in `known_bugs.yaml` is designed to prevent from recurring.
 
 **2. Performance.** Users choose hipBLASLt for throughput; a correctness-preserving change that costs
-20% is a real defect. Pull requests are supposed to be benchmarked against a `develop` reference, and
-that job has not produced a measurement in months. Comparison and alerting do exist on a daily
-cadence outside this repository, so a regression is found late, against a range of commits, by people
-who did not write any of them. It is the largest gap in this document.
+20% is a real defect. Pull requests are not benchmarked, so that cannot be caught before a merge. A
+nightly lane outside this repository measures gfx950 and alerts its owners, so a regression is found
+a day or more later, against a range of commits, and by someone other than the author. It is the
+largest gap in this document.
 
 **3. Kernel selection and generation correctness.** A regression in TensileLite affects every
 consumer at once and can be invisible in a small test set. Validated by the Python unit suite, the
@@ -1375,8 +1371,8 @@ the whole release gate.
 - **Known-gap review.** The quarantine list in `known_bugs.yaml` should be walked before sign-off:
   every entry is a known defect shipping in the release, and each should be a conscious decision
   rather than an accumulated default.
-- **Performance review.** The data exists in rocPTS; the review of it is manual and informal. This is
-  the release step most in need of automation.
+- **Performance review.** Nightly data exists in rocPTS for gfx950, and nothing else is measured. The
+  review of it is manual and informal. This is the release step most in need of automation.
 - **QA handoff.** System-level and release validation are executed by QA outside this repository.
 
 ## Dependencies and Validation Handoffs
@@ -1386,7 +1382,8 @@ Where confidence comes from and where ownership changes hands.
 | Dependency | Owning team | How it is validated | Known gap |
 | --- | --- | --- | --- |
 | TheRock (build and shared test infrastructure) | TheRock team | PR, nightly, and release lanes | Runner capacity limits which architectures run per PR |
-| Math CI (client, TensileLite, coverage and benchmark jobs) | DevOps / Math CI | Per-PR checks on the same PR, plus daily benchmarks | Configuration lives in an AMD-internal repository, so contributors cannot see what runs or which jobs gate |
+| Math CI (client, TensileLite and coverage jobs) | DevOps / Math CI | Per-PR checks on the same PR | Configuration lives in an AMD-internal repository, so contributors cannot see what runs or which jobs gate |
+| Nightly performance measurement (`rocPTS`) | Performance tracking team | Nightly benchmarks of a monorepo build on gfx950 | Lives outside this repository and reports to its own owners, so no result reaches a pull request or names a commit |
 | HIP, ROCr, compiler toolchain | Core ROCm teams | Consumed via TheRock; validated by their own CI | A toolchain regression surfaces here as a hipBLASLt test failure, and triage cost lands on this team |
 | `rocisa` | Component team (in this repository) | Own tox environment and CI lane | |
 | Downstream frameworks | Framework teams | Integration testing outside this repository | No pre-merge signal; regressions are found after the fact |
@@ -1460,11 +1457,26 @@ Ordered by value per unit of effort, not by ambition.
 
 ### Longer term, the real gap
 
-1. **Turn the performance data into a signal on the pull request.** The measurement and the reference
-   comparison already exist in the per-PR job's design, and getting that job running again is the
-   first step. What is missing after that is a threshold, a result that reaches the author of the
-   change, and a named owner. Feedback on the pull request first; gating only if it can be made
-   stable enough not to become the thing everyone reruns.
+1. **Get a performance number onto the change.** Pull requests are not benchmarked today, so this
+   builds something new rather than repairing something. The nightly lane already has the pieces
+   worth reusing: version-controlled datasets, a comparison against a baseline, and a runner pool.
+   What we would like, roughly in order:
+
+   - A measurement tied to one commit, on a small and fast problem set, with the result visible to
+     the author on the pull request. Feedback first; gating only once it is stable enough not to
+     become the thing everyone reruns.
+   - Architecture coverage beyond gfx950, prioritized by where the library ships tuned kernels and
+     where customers run.
+   - Shape coverage along the two axes today's sample holds fixed: batch counts, including batched
+     FP8, and padded leading dimensions.
+   - A stability story before a threshold: enable the harness's adaptive sampling, or pin clocks, or
+     both, so the noise floor is a measured quantity rather than an assumption.
+   - Problem lists version controlled in this repository, so a change to what we measure is reviewed
+     like any other change. This is how the nightly lane manages its datasets and is worth copying.
+   - A lane that reports its own failure. One that says nothing when it works and nothing when it
+     breaks will stop working without anyone noticing.
+   - A named owner for the signal.
+
 2. **Graduate mutation testing** from a report-only pilot to a maintained signal on the modules where
    it has demonstrated value. This is the companion to the migration item above: until a module has
    real unit tests, its mutation score is the only evidence that its goldens would actually catch a
@@ -1479,7 +1491,7 @@ Ordered by value per unit of effort, not by ambition.
 
 ## Known Risks and Gaps
 
-Stated plainly, so none of these are a surprise at release time. Twenty-six gaps, grouped by theme.
+Stated plainly, so none of these are a surprise at release time. Twenty-seven gaps, grouped by theme.
 
 **On the Tracking column.** This table names no owner. Per-gap ownership changes far more often than
 this document does, and a stale name in a repository file is worse than no name because it reads as
@@ -1492,8 +1504,9 @@ this table should drive.
 
 | Gap | Regression risk | Impact | Mitigation today | Tracking |
 | --- | --- | --- | --- | --- |
-| No performance gate at any cadence, and no alert that reaches a pull request | High | High | Daily benchmarks land in rocPTS and an internal lane alerts its own owners, so a human has to read them and the per-PR job is not currently producing data |  |
-| Benchmark coverage is gfx950 only per PR, gfx942 and gfx950 daily | Medium | Medium | Correctness coverage is broader; performance risk elsewhere is carried unmeasured |  |
+| Pull requests are not benchmarked, so a regression cannot be attributed to the change that introduced it | High | High | A nightly lane measures a monorepo build, which narrows a regression to a day of merges rather than to a commit |  |
+| No performance gate, and no result surfaced in this repository | High | High | The nightly compares against a baseline and alerts its owners, so catching a regression depends on someone outside this repository reading it |  |
+| Benchmark coverage is one architecture family, gfx950 | Medium | Medium | Correctness coverage is broader; performance on the other architectures the library tunes for is not measured on a cadence |  |
 
 ### Coverage and verification
 
