@@ -240,6 +240,12 @@ if(HIPBLASLT_ENABLE_ROCROLLER)
         if(HIPBLASLT_ENABLE_THEROCK)
             find_package(rocroller REQUIRED)
         else()
+            if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../shared/rocroller/CMakeLists.txt")
+                message(WARNING
+                    "RocRoller source not found at "
+                    "${CMAKE_CURRENT_SOURCE_DIR}/../../shared/rocroller.\n"
+                    "Re-run with --skip-rocroller ")
+            endif()
             block(SCOPE_FOR VARIABLES)
                 set(ROCROLLER_ENABLE_FETCH ON)
                 set(ROCROLLER_BUILD_TESTING OFF)
