@@ -174,6 +174,14 @@ bool isSccLiveBefore(StinkyInstruction* from) {
 /// it, i.e. the first spot below a live range that the handshake may clobber. Stops at
 /// \p limit (the wait anchor) and returns null when the range stays live that far, since
 /// there is then nowhere below it to go.
+///
+/// A range is held open by its last reader, and in a loop body that reader is the exit
+/// branch that closes the segment -- so the spot being looked for is often the first
+/// instruction on the branch's fall-through side. That one branch is therefore stepped over
+/// rather than treated as a wall; every other boundary still ends the walk, and so does this
+/// one when SCC is not what it reads. Stepping over it is safe because the walk only ever
+/// moves towards \p limit, which is the wait: taking the fall-through keeps the signal on the
+/// path its wait is on.
 StinkyInstruction* findSccDeadPointBelow(StinkyInstruction* from, const IRBase* limit) {
     BasicBlock* parent = from->getParent();
     if (parent == nullptr) return nullptr;
@@ -181,7 +189,11 @@ StinkyInstruction* findSccDeadPointBelow(StinkyInstruction* from, const IRBase* 
         if (it.getNodePtr() == limit) return nullptr;
         auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
         if (inst == nullptr) continue;
-        if (isSegmentBoundary(*inst) || isClusterBarrierWait(*inst)) return nullptr;
+        if (isSegmentBoundary(*inst)) {
+            if (readsScc(*inst) && isConditionalBranch(*inst)) continue;
+            return nullptr;
+        }
+        if (isClusterBarrierWait(*inst)) return nullptr;
         if (isWorkgroupBarrierSignal(*inst) || isWorkgroupBarrierWait(*inst)) continue;
         if (!isSccLiveBefore(inst)) return inst;
     }
@@ -618,11 +630,12 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
     bool targetMet = false;
     StinkyInstruction* leadPoint = nullptr;
 
-    // SCC queries about the anchor scan forward to the end of its own segment. While the
-    // scan is still in the wait's segment that end is the wait itself; past a hop the wait
-    // is above the anchor, so the segment's closing boundary takes over as the limit.
+    // SCC queries about the anchor scan forward towards the wait, so the wait bounds them --
+    // an anchor may not be corrected past the very spot it is leading. Only the back edge
+    // puts the anchor textually below its wait; the segment's closing boundary takes over as
+    // the limit there, since the wait is no longer ahead of the anchor to be found.
     auto sccLimit = [&](StinkyInstruction* anchorInst) -> const IRBase* {
-        if (hops == 0) return referenceAnchor;
+        if (!crossedLoopHead) return referenceAnchor;
         return segmentEndAfter(BasicBlock::iterator(anchorInst), parent->end());
     };
 
@@ -635,6 +648,7 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
     // safe spot at all; the caller's default (co-locating with the wait) is then no worse
     // than anything else this pass could pick.
     auto clearScc = [&](IRBase* anchor) -> IRBase* {
+        if (anchor == defaultAnchor) return anchor;
         auto* anchorInst = dyn_cast<StinkyInstruction>(anchor);
         if (anchorInst == nullptr || !isSccLiveBefore(anchorInst)) return anchor;
         StinkyInstruction* below = findSccDeadPointBelow(anchorInst, sccLimit(anchorInst));
@@ -648,12 +662,23 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
         return (below != nullptr) ? static_cast<IRBase*>(below) : defaultAnchor;
     };
 
+    // Whether the anchor came to rest in the wait's own segment after all. Both corrections
+    // above walk back down, and the boundary they step over on the way is one the climb had
+    // already counted.
+    auto inWaitSegment = [&](IRBase* anchor) -> bool {
+        for (auto it = segBegin; it != BasicBlock::iterator(referenceAnchor); ++it) {
+            if (it.getNodePtr() == anchor) return true;
+        }
+        return false;
+    };
+
     // The hop count is what buys the loop its compensation, so it has to describe the anchor
-    // that comes back rather than the climb that looked for it. Both corrections above can
-    // end at the caller's default, which is the wait's own spot: a scan that climbed over
-    // three edges and then gave up crossed nothing in the end and must not be billed for it.
+    // that comes back rather than the climb that looked for it. A scan that climbed over an
+    // edge and then dropped back below it crossed nothing in the end and must not be billed
+    // for it -- neither when it gave up at the caller's default, which is the wait's own
+    // spot, nor when it settled anywhere else the wait can reach without a branch.
     auto report = [&](IRBase* anchor) -> Rule3SignalAnchor {
-        if (anchor == defaultAnchor) return {anchor, 0, false};
+        if (anchor == defaultAnchor || inWaitSegment(anchor)) return {anchor, 0, false};
         return {anchor, hops, crossedLoopHead};
     };
 
@@ -662,6 +687,13 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
         --it;
         auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
         if (inst == nullptr) continue;
+
+        // live-before(inst) = reads(inst) | (live-after(inst) & !writes(inst)), for every
+        // instruction the climb steps over -- boundaries included. What holds a loop-exit
+        // predicate open is the branch that closes the segment, so a climb that took the
+        // boundaries as read would walk straight into the range it has to stay out of.
+        sccLive = readsScc(*inst) || (sccLive && !writesScc(*inst));
+
         if (isClusterBarrierWait(*inst)) {
             return report(clearScc(anchorAfterWorkgroupBarrierFollowing(inst, defaultAnchor)));
         }
@@ -678,6 +710,9 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
                 StinkyInstruction* latch = findLatchBranchFor(inst);
                 if (latch == nullptr) return report(clearScc(curSegBegin.getNodePtr()));
                 it = BasicBlock::iterator(latch);
+                // The latch is landed on rather than stepped over, so its own read of the
+                // loop condition has to be folded in by hand.
+                sccLive = readsScc(*latch) || (sccLive && !writesScc(*latch));
                 auto latchCycle = cycleMap.find(latch);
                 if (latchCycle != cycleMap.end()) prevCycle = static_cast<int64_t>(latchCycle->second);
                 crossedLoopHead = true;
@@ -689,9 +724,6 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
         if (isWorkgroupBarrierSignal(*inst) && priorWaitAnchors.count(inst) != 0) {
             return report(clearScc(anchorAfterWorkgroupBarrierPair(inst, defaultAnchor)));
         }
-
-        // live-before(inst) = reads(inst) | (live-after(inst) & !writes(inst))
-        sccLive = readsScc(*inst) || (sccLive && !writesScc(*inst));
 
         if (isWorkgroupBarrierSignal(*inst) || isWorkgroupBarrierWait(*inst)) continue;
 
@@ -705,7 +737,10 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
                 targetMet = true;
             }
         }
-        if (targetMet && !sccLive) return report(settle(inst));
+        // clearScc has the last word even here. `sccLive` is carried along the one path the
+        // climb took, while clearScc reads the range off the code below the anchor, so it
+        // also covers a reader the climb never walked past.
+        if (targetMet && !sccLive) return report(clearScc(settle(inst)));
     }
     // Running out of block can leave the anchor inside a range that starts above it.
     return report(clearScc(settle(curSegBegin.getNodePtr())));
