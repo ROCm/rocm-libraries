@@ -361,9 +361,6 @@ foreach( target
     POSITION_INDEPENDENT_CODE ON
   )
   target_compile_options( ${target} PRIVATE ${WARNING_FLAGS} )
-  if( ${CMAKE_BUILD_TYPE} STREQUAL Debug )
-    target_compile_options( ${target} PRIVATE -Og )
-  endif()
   target_link_libraries( ${target} PUBLIC ${ROCFFT_HOST_LINK_LIBS} hiprtc::hiprtc )
   rocfft_add_coverage_flags( ${target} )
   target_link_directories( ${target} PRIVATE ${ROCFFT_HOST_LINK_DIRS} )
@@ -494,9 +491,6 @@ foreach( target rocfft rocfft_offline_tuner rocfft_solmap_convert rocfft_aot_hel
     endif()
 
   target_compile_options( ${target} PRIVATE ${WARNING_FLAGS} )
-  if( ${CMAKE_BUILD_TYPE} STREQUAL Debug )
-    target_compile_options(${target} PRIVATE -Og)
-  endif()
 endforeach()
 
 rocfft_link_internal_lib( rocfft generator )
@@ -576,6 +570,7 @@ if ( ROCFFT_KERNEL_CACHE_ENABLE )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1152 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1153 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1200 )
+  list( REMOVE_ITEM GPU_TARGETS_AOT amdgcnspirv )
 
   # On Windows, to run rocfft_aot_helper we need to be able to find
   # the hiprtc and HIP runtime DLLs.  So add those dirs to the PATH

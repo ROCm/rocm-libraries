@@ -174,8 +174,10 @@ TEST_F(LegalizationUtilsTest, VCmpXExpandsWhenNoCMPXWritesSGPR) {
 
     std::string cmpMnemonic(cmpInst->getHwInstDesc()->mnemonic);
     std::string movMnemonic(movInst->getHwInstDesc()->mnemonic);
-    EXPECT_NE(cmpMnemonic.find("_cmp_"), std::string::npos) << "Expected v_cmp_* got: " << cmpMnemonic;
-    EXPECT_NE(movMnemonic.find("s_mov"), std::string::npos) << "Expected s_mov_* got: " << movMnemonic;
+    EXPECT_NE(cmpMnemonic.find("_cmp_"), std::string::npos)
+        << "Expected v_cmp_* got: " << cmpMnemonic;
+    EXPECT_NE(movMnemonic.find("s_mov"), std::string::npos)
+        << "Expected s_mov_* got: " << movMnemonic;
 
     // Original v_cmpx removed
     EXPECT_EQ(countByMnemonic("v_cmpx_lt_f32"), 0);
@@ -254,8 +256,8 @@ TEST_F(LegalizationUtilsTest, WaitCntKmcntOnlyEmitsKmcnt) {
 
 TEST_F(LegalizationUtilsTest, DSLoadB192SplitsIntoB128AndB64) {
     StinkyInstruction* inst = createInst(GFX::ds_load_b192);
-    inst->addDestReg(StinkyRegister("v", 0, 6));   // v[0:5]
-    inst->addSrcReg(StinkyRegister("v", 40, 1));   // addr
+    inst->addDestReg(StinkyRegister("v", 0, 6));  // v[0:5]
+    inst->addSrcReg(StinkyRegister("v", 40, 1));  // addr
     inst->addModifier<DSModifiers>(DSModifiers(1, /*offset=*/32));
 
     AsmIRBuilder builder(*bb, arch);
@@ -293,8 +295,8 @@ TEST_F(LegalizationUtilsTest, DSLoadB192SplitsIntoB128AndB64) {
 
 TEST_F(LegalizationUtilsTest, DSStoreB192SplitsIntoB128AndB64) {
     StinkyInstruction* inst = createInst(GFX::ds_store_b192);
-    inst->addSrcReg(StinkyRegister("v", 50, 1));   // addr
-    inst->addSrcReg(StinkyRegister("v", 0, 6));    // data v[0:5]
+    inst->addSrcReg(StinkyRegister("v", 50, 1));  // addr
+    inst->addSrcReg(StinkyRegister("v", 0, 6));   // data v[0:5]
     inst->addModifier<DSModifiers>(DSModifiers(1, /*offset=*/0));
 
     AsmIRBuilder builder(*bb, arch);
@@ -328,8 +330,8 @@ TEST_F(LegalizationUtilsTest, DSStoreB256SplitsIntoTwoB128) {
     // ds_store_b256 is not registered as a GFX opcode on gfx1250; use ds_store_b128
     // as a surrogate — legalizeDSStoreB256 only requires 0 dests and 2 srcs.
     StinkyInstruction* inst = createInst(GFX::ds_store_b128);
-    inst->addSrcReg(StinkyRegister("v", 60, 1));   // addr
-    inst->addSrcReg(StinkyRegister("v", 0, 8));    // data v[0:7]
+    inst->addSrcReg(StinkyRegister("v", 60, 1));  // addr
+    inst->addSrcReg(StinkyRegister("v", 0, 8));   // data v[0:7]
     inst->addModifier<DSModifiers>(DSModifiers(1, /*offset=*/0));
 
     AsmIRBuilder builder(*bb, arch);

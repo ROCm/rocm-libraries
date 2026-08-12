@@ -307,16 +307,22 @@ TEST(TestRaggedTensor, LargeOffsetExceedsInt32Max)
 {
     const int64_t largeOffset = static_cast<int64_t>(INT32_MAX) + 1; // 2^31
 
-    // B=1 with seqStride == off[B] so a single sequence row satisfies validation.
-    const std::vector<int64_t> dims = {1, 1, 1, 1};
+    // B=2 so batch 1's base (ragged_offset[1] == 2^31) is an INTERIOR, addressable index:
+    // elementSpace == ragged_offset[B] == 2^32 > 2^31, so getIndex(1) stays in bounds and
+    // exercises the full addressing path (getIndex -> getIndexImpl -> readOffset).
+    const int64_t twoLargeOffsets = largeOffset * 2; // 2^32
+    const std::vector<int64_t> dims = {2, 1, 1, 1};
     const std::vector<int64_t> strides = {largeOffset, largeOffset, 1, 1};
-    auto aux = makeOffsetAux<int64_t>({0, largeOffset});
+    auto aux = makeOffsetAux<int64_t>({0, largeOffset, twoLargeOffsets});
 
-    // Shallow (borrowed) so no buffer is allocated for the ~2^31 element span; only
-    // getIndex is exercised, which reads the offset without touching the backing memory.
+    // Shallow (borrowed) so no buffer is allocated for the ~2^32 element span; only the
+    // addressing math is exercised, without touching the backing memory.
     float backing{};
     const ShallowRaggedTensor<float> tensor(&backing, dims, strides, BSHD_SEQ_AXIS, aux);
 
+    // getIndex(1) bases at ragged_offset[1] == 2^31; the returned index only equals 2^31 if
+    // the int64 offset survived the type-erased read AND the addressing return path without
+    // truncating to int32.
     EXPECT_EQ(tensor.getIndex(1), largeOffset);
     EXPECT_EQ(tensor.getIndex(0), 0);
 }

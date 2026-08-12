@@ -32,7 +32,7 @@ class StinkyAsmModule;
 
 /// Insert V_NOPs for gfx1250 co-execution data hazards HW cannot detect: forward-walk
 /// each consumer, scan back for an overlapping XDL/TRANS producer, and space them by
-/// VALU-pipe slots sized to the DISABLE_XDL_ARB_STALL co-exec mode.
+/// VALU-pipe co-execution slots.
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertCoexecHazardPass(StinkyAsmModule& module);
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertCoexecHazardPass();
 
