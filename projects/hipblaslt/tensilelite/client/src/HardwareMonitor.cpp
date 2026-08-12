@@ -419,7 +419,7 @@ namespace TensileLite
                     }
 #else
                     // XCD0
-                    auto     status    = amdsmi_get_clk_freq(
+                    auto status = amdsmi_get_clk_freq(
                         m_processorHandles[m_smiDeviceIndex], m_clockMetrics[i], &freq);
                     uint64_t clockFreq = getValidatedFrequency(freq);
                     if(status != AMDSMI_STATUS_SUCCESS
@@ -435,7 +435,7 @@ namespace TensileLite
                 }
                 else
                 {
-                    auto     status    = amdsmi_get_clk_freq(
+                    auto status = amdsmi_get_clk_freq(
                         m_processorHandles[m_smiDeviceIndex], m_clockMetrics[i], &freq);
                     uint64_t clockFreq = getValidatedFrequency(freq);
 
