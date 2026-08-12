@@ -103,8 +103,19 @@ that gap with a real linked relocation:
   is interposed by the first-`NEEDED` `ABI_6` provider (`-> 6`, `Verneed` on
   `libprovA.so.6`). One directive flips the bound major, so the pair is not vacuous.
 
+The defense has a boundary, and it too is locked by a test rather than left to prose:
+
+- `rocm_interfaces.abi03_versioned_bare_lookup_uncovered` loads the same noded providers
+  (`ABI_6`, `ABI_7`) both `GLOBAL` with `ABI_6` first, then shows a bare unversioned
+  `dlsym(RTLD_DEFAULT, rocblas_sgemm)` still takes the first-loaded `ABI_6` (`-> 6`) while a
+  version-aware `dlvsym(..., ROCBLAS_ABI_7)` reaches `ABI_7` (`-> 7`). The nodes are present
+  and functional; a bare global lookup simply does not consult them. This discriminates from
+  `abi03_interpose_hazard` (which uses nodeless DSOs) on lookup form alone, and is the reason
+  the boundary routes callers through versioned relocations or `dlvsym`.
+
 Landed in commits `8832c9a` (`test(interfaces): prove ABI version-node co-residency defeats
-interposition`) and `3396f66` (linked-consumer relocation proof).
+interposition`), `3396f66` (linked-consumer relocation proof), and `8235b3c` (bare
+`RTLD_DEFAULT` boundary).
 
 ## 4. Refuse a toolchain that cannot stamp version nodes (RES-03)
 
@@ -264,7 +275,7 @@ is stricter.
 | --- | --- | --- |
 | 1 RES-02 | 170 leaked libstdc++ symbols | `exports` |
 | 2 named nodes | bare symbols interpose across majors | `exports` |
-| 3 co-residency | is the node mechanism real; does it defeat interposition for a linked caller | `abi03_coresidency`, `abi03_interpose_hazard`, `abi03_linked_consumer_versioned_binds`, `abi03_linked_consumer_plain_interposed` |
+| 3 co-residency | is the node mechanism real; does it defeat interposition for a linked caller; where is its boundary | `abi03_coresidency`, `abi03_interpose_hazard`, `abi03_linked_consumer_versioned_binds`, `abi03_linked_consumer_plain_interposed`, `abi03_versioned_bare_lookup_uncovered` |
 | 4 RES-03 guard | g++ LTO + lld cannot stamp version nodes | `lto_linker_guard_rejects_gnu_lld` + 3 accepts |
 | 5 OPS-04 | loader/registry data race | `ops04_concurrency` |
 | 6a core | node fails on ordering / same-node control / `-Bsymbolic` genuineness / dup-def / ldconfig | `abi04_three_line_order`, `abi04_same_node_negative`, `abi04_bsymbolic_inert`, `abi04_multiple_default_def_rejected`, `abi04_ldconfig_stub_preserved` |

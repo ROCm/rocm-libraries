@@ -235,11 +235,11 @@ this tree proves:
   the interposition hazard; and `abi03_linked_consumer_versioned_binds` proves the causal
   case - a linked consumer whose relocation is version-pinned to `ROCBLAS_ABI_7` binds to
   that major even with an `ABI_6` provider `NEEDED` first, while its one-directive control
-  `abi03_linked_consumer_plain_interposed` is interposed to `ABI_6`. The remaining gap is a
-  caveat, not a defense: a bare unversioned `dlsym(RTLD_DEFAULT, ...)` still takes the
-  first-loaded definition even against versioned providers, so the node defense is scoped to
-  versioned relocations and `dlvsym` (see
-  [07-status-and-roadmap.md](07-status-and-roadmap.md#aspirational-direction-not-commitment)).
+  `abi03_linked_consumer_plain_interposed` is interposed to `ABI_6`. That boundary is itself
+  locked by a test rather than left to prose: `abi03_versioned_bare_lookup_uncovered` shows
+  that with the same noded providers a bare unversioned `dlsym(RTLD_DEFAULT, ...)` still takes
+  the first-loaded major even though `dlvsym` reaches the newer one - so the node defense is
+  scoped to versioned relocations and `dlvsym`, not bare global lookups.
 - That those version nodes survive real linkers, an ASan build, data objects, and C++
   mangled names with RTTI is proven by the `abi04_*`, `abi05_*`, and `abi06_*` tests.
 - The loader/registry survive concurrent use under ThreadSanitizer: `ops04_concurrency`.
