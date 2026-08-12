@@ -93,11 +93,6 @@ int main(int argc, char** argv) noexcept
             .default_value(std::string("support_matrix.md"))
             .implicit_value(std::string("support_matrix.md"))
             .help("Generate a markdown support matrix file (default: support_matrix.md).");
-        parser.add_argument("--allow-bundles")
-            .default_value(true)
-            .implicit_value(true)
-            .help("Retained no-op alias (bundles are always enabled by default). "
-                  "Disable with --no-bundles or HIPDNN_TEST_ALLOW_BUNDLES=0.");
         parser.add_argument("--no-bundles")
             .default_value(false)
             .implicit_value(true)
