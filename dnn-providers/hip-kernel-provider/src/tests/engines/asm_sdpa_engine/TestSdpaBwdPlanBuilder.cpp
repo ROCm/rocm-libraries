@@ -48,7 +48,8 @@ auto createSdpaBwdGraph(const std::vector<int64_t>& dims = {4, 8, 256, 128},
                         bool withScale = false,
                         bool alibiMask = false,
                         bool paddingMask = false,
-                        bool causalMask = false)
+                        bool causalMask = false,
+                        bool overrideShapeEnabled = false)
 {
     const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
     return hipdnn_test_sdk::utilities::createValidSdpaBwdGraph(dims,
@@ -63,7 +64,23 @@ auto createSdpaBwdGraph(const std::vector<int64_t>& dims = {4, 8, 256, 128},
                                                                withScale,
                                                                alibiMask,
                                                                paddingMask,
-                                                               causalMask);
+                                                               causalMask,
+                                                               overrideShapeEnabled);
+}
+
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableReturnsFalseForOverrideShapeEnabledGraph)
+{
+    auto builder = createSdpaBwdGraph({4, 8, 256, 128},
+                                      hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                                      false,
+                                      false,
+                                      false,
+                                      false,
+                                      /*overrideShapeEnabled=*/true);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, graphWrapper));
 }
 
 TEST_F(TestSdpaBwdPlanBuilder, IsApplicableSdpaBwdVariations)
@@ -96,11 +113,11 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableSdpaBwdVariations)
         // reference (logs INFO, like bf16 hd128); isApplicable accepts.
         {GraphTest{createSdpaBwdGraph({4, 8, 256, 128}, DataType::HALF), "FP16 tensors"}, true},
 
-        // Causal mask not currently dispatched.
+        // Causal mask dispatched: CSV registry carries mask=1 DQDKDV rows.
         {GraphTest{
              createSdpaBwdGraph({4, 8, 256, 128}, DataType::BFLOAT16, false, false, false, true),
              "causal_mask = true"},
-         false},
+         true},
 
         // Alibi mask not supported.
         {GraphTest{createSdpaBwdGraph({4, 8, 256, 128}, DataType::BFLOAT16, false, true),
@@ -123,6 +140,231 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableSdpaBwdVariations)
         EXPECT_EQ(_planBuilder.isApplicable(_handle, test.graphWrapper()), applicability)
             << test.message;
     }
+}
+
+// =============================================================================
+// Runtime pass-by-value scale tensor (RFC 0016)
+// =============================================================================
+
+// Build a backward SDPA graph with a runtime pass-by-value scale tensor
+// (is_runtime_pass_by_value=true, no baked value).
+flatbuffers::FlatBufferBuilder createSdpaBwdGraphWithRuntimePbvScale()
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensorAttributes;
+
+    const std::vector<int64_t> dims = {4, 8, 256, 128};
+    const std::vector<int64_t> strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+
+    int64_t uid = 1;
+    const auto qUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, qUid, "q", DataType::BFLOAT16, &strides, &dims));
+    const auto kUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, kUid, "k", DataType::BFLOAT16, &strides, &dims));
+    const auto vUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, vUid, "v", DataType::BFLOAT16, &strides, &dims));
+    const auto oUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, oUid, "o", DataType::BFLOAT16, &strides, &dims));
+    const auto doUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, doUid, "do", DataType::BFLOAT16, &strides, &dims));
+
+    const std::vector<int64_t> statsDims = {dims[0], dims[1], dims[2], 1};
+    const std::vector<int64_t> statsStrides = {dims[1] * dims[2], dims[2], 1, 1};
+    const auto statsUid = uid++;
+    tensorAttributes.push_back(CreateTensorAttributesDirect(
+        builder, statsUid, "stats", DataType::FLOAT, &statsStrides, &statsDims));
+
+    const auto dqUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, dqUid, "dq", DataType::BFLOAT16, &strides, &dims));
+    const auto dkUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, dkUid, "dk", DataType::BFLOAT16, &strides, &dims));
+    const auto dvUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, dvUid, "dv", DataType::BFLOAT16, &strides, &dims));
+
+    // Runtime pass-by-value scale tensor: is_runtime_pass_by_value=true, no value
+    const std::vector<int64_t> scaleDims = {1};
+    const auto scaleUid = uid++;
+    tensorAttributes.push_back(CreateTensorAttributesDirect(builder,
+                                                            scaleUid,
+                                                            "scale",
+                                                            DataType::FLOAT,
+                                                            &scaleDims,
+                                                            &scaleDims,
+                                                            false, // virtual
+                                                            TensorValue::NONE, // no baked value
+                                                            0, // value offset
+                                                            true)); // is_runtime_pass_by_value
+
+    const auto sdpaAttributes = CreateSdpaBackwardAttributes(builder,
+                                                             qUid,
+                                                             kUid,
+                                                             vUid,
+                                                             oUid,
+                                                             doUid,
+                                                             statsUid,
+                                                             dqUid,
+                                                             dkUid,
+                                                             dvUid,
+                                                             scaleUid); // scale_tensor_uid
+
+    std::vector<flatbuffers::Offset<Node>> nodes;
+    nodes.push_back(CreateNodeDirect(builder,
+                                     "sdpa_bwd",
+                                     DataType::FLOAT,
+                                     NodeAttributes::SdpaBackwardAttributes,
+                                     sdpaAttributes.Union()));
+
+    const auto graphOffset = CreateGraphDirect(builder,
+                                               "test",
+                                               DataType::FLOAT,
+                                               DataType::HALF,
+                                               DataType::BFLOAT16,
+                                               &tensorAttributes,
+                                               &nodes);
+    builder.Finish(graphOffset);
+    return builder;
+}
+
+// Build a backward SDPA graph with a non-pass-by-value scale tensor.
+flatbuffers::FlatBufferBuilder createSdpaBwdGraphWithNonPbvScaleTensor()
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensorAttributes;
+
+    const std::vector<int64_t> dims = {4, 8, 256, 128};
+    const std::vector<int64_t> strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+
+    int64_t uid = 1;
+    const auto qUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, qUid, "q", DataType::BFLOAT16, &strides, &dims));
+    const auto kUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, kUid, "k", DataType::BFLOAT16, &strides, &dims));
+    const auto vUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, vUid, "v", DataType::BFLOAT16, &strides, &dims));
+    const auto oUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, oUid, "o", DataType::BFLOAT16, &strides, &dims));
+    const auto doUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, doUid, "do", DataType::BFLOAT16, &strides, &dims));
+
+    const std::vector<int64_t> statsDims = {dims[0], dims[1], dims[2], 1};
+    const std::vector<int64_t> statsStrides = {dims[1] * dims[2], dims[2], 1, 1};
+    const auto statsUid = uid++;
+    tensorAttributes.push_back(CreateTensorAttributesDirect(
+        builder, statsUid, "stats", DataType::FLOAT, &statsStrides, &statsDims));
+
+    const auto dqUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, dqUid, "dq", DataType::BFLOAT16, &strides, &dims));
+    const auto dkUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, dkUid, "dk", DataType::BFLOAT16, &strides, &dims));
+    const auto dvUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, dvUid, "dv", DataType::BFLOAT16, &strides, &dims));
+
+    // Regular device tensor — NOT pass-by-value
+    const std::vector<int64_t> scaleDims = {1};
+    const auto scaleUid = uid++;
+    tensorAttributes.push_back(CreateTensorAttributesDirect(
+        builder, scaleUid, "scale", DataType::FLOAT, &scaleDims, &scaleDims));
+
+    const auto sdpaAttributes = CreateSdpaBackwardAttributes(builder,
+                                                             qUid,
+                                                             kUid,
+                                                             vUid,
+                                                             oUid,
+                                                             doUid,
+                                                             statsUid,
+                                                             dqUid,
+                                                             dkUid,
+                                                             dvUid,
+                                                             scaleUid); // scale_tensor_uid
+
+    std::vector<flatbuffers::Offset<Node>> nodes;
+    nodes.push_back(CreateNodeDirect(builder,
+                                     "sdpa_bwd",
+                                     DataType::FLOAT,
+                                     NodeAttributes::SdpaBackwardAttributes,
+                                     sdpaAttributes.Union()));
+
+    const auto graphOffset = CreateGraphDirect(builder,
+                                               "test",
+                                               DataType::FLOAT,
+                                               DataType::HALF,
+                                               DataType::BFLOAT16,
+                                               &tensorAttributes,
+                                               &nodes);
+    builder.Finish(graphOffset);
+    return builder;
+}
+
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableAcceptsRuntimePassByValueScale)
+{
+    SKIP_IF_NO_DEVICES();
+
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    auto builder = createSdpaBwdGraphWithRuntimePbvScale();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_handle, graphWrapper));
+}
+
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsNonPassByValueScaleTensor)
+{
+    SKIP_IF_NO_DEVICES();
+
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    auto builder = createSdpaBwdGraphWithNonPbvScaleTensor();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, graphWrapper));
+}
+
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableAcceptsCompileTimeConstantScaleTensor)
+{
+    // Existing withScale=true path uses a compile-time constant scale tensor.
+    // Verify it still passes after the PBV changes.
+    SKIP_IF_NO_DEVICES();
+
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    auto builder = createSdpaBwdGraph({4, 8, 256, 128},
+                                      hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                                      /*withScale=*/true);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_handle, graphWrapper));
 }
 
 TEST_F(TestSdpaBwdPlanBuilder, BackwardWorkspaceSizeSmallUnaligned)
@@ -173,6 +415,8 @@ namespace
 {
 constexpr int MASK_NONE = 0; // MaskType::NO_MASK
 constexpr int MASK_TOP_LEFT_CAUSAL = 1; // MaskType::TOP_LEFT_CAUSAL
+constexpr int MASK_BOTTOM_RIGHT_CAUSAL = 2; // MaskType::BOTTOM_RIGHT_CAUSAL
+constexpr int MASK_SLIDING_WINDOW = 3; // MaskType::SLIDING_WINDOW
 constexpr int MODE_BATCH = 0; // BatchMode::BATCH
 constexpr int ATOMIC_A32 = 1; // AccumulatorMode::A32
 constexpr int ATOMIC_NONE = 0; // odo / dq_convert use atomic32=0
@@ -186,7 +430,7 @@ using asm_sdpa_engine::bwd_dispatch::BF16_CVT_FP16_SENTINEL;
 
 // POC config: hd128 / bf16 / NO_MASK / BATCH must still resolve across all
 // three pipeline-stage registries.
-TEST(SdpaBwdRegistryLookup, RegistryLookup_Hd128Bf16NoMaskBatch)
+TEST(TestSdpaBwdRegistryLookup, RegistryLookupHd128Bf16NoMaskBatch)
 {
     using namespace bwd_dispatch;
 
@@ -234,7 +478,7 @@ TEST(SdpaBwdRegistryLookup, RegistryLookup_Hd128Bf16NoMaskBatch)
 // registry actually carries for that head-dim. This exercises the lookup for
 // a hd64 entry even though isApplicable's day-one matrix forces pddv=1 and
 // therefore rejects hd64 at dispatch time.
-TEST(SdpaBwdRegistryLookup, RegistryLookup_Hd64Fp16NoMaskBatch)
+TEST(TestSdpaBwdRegistryLookupFp16, RegistryLookupHd64NoMaskBatch)
 {
     using namespace bwd_dispatch;
 
@@ -281,7 +525,7 @@ TEST(SdpaBwdRegistryLookup, RegistryLookup_Hd64Fp16NoMaskBatch)
 
 // hd192 / bf16 / TOP_LEFT_CAUSAL row resolves via the registry. isApplicable
 // rejects causal day-one but the lookup itself must work.
-TEST(SdpaBwdRegistryLookup, RegistryLookup_Hd192Bf16CausalBatch)
+TEST(TestSdpaBwdRegistryLookup, RegistryLookupHd192Bf16CausalBatch)
 {
     using namespace bwd_dispatch;
 
@@ -321,7 +565,7 @@ TEST(SdpaBwdRegistryLookup, RegistryLookup_Hd192Bf16CausalBatch)
 // graph-derived RoundingMode (e.g. RTNE = 0) still resolves the row.
 // isApplicable rejects gfx950 day-one, so we exercise the registry helper
 // directly.
-TEST(SdpaBwdRegistryLookup, RegistryLookup_Gfx950Hd128Bf16NoMaskBatch)
+TEST(TestSdpaBwdRegistryLookup, RegistryLookupGfx950Hd128Bf16NoMaskBatch)
 {
     using namespace bwd_dispatch;
 
@@ -367,7 +611,113 @@ TEST(SdpaBwdRegistryLookup, RegistryLookup_Gfx950Hd128Bf16NoMaskBatch)
     EXPECT_FALSE(odoKey.empty()) << "gfx950 bf16 hd128 odo lookup should resolve";
 }
 
-TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_RejectsHd96)
+// Causal (mask=1) dispatch: DQDKDV uses mask=1 row; ODO and DQ_CONVERT remain
+// mask=0 (mask-agnostic stages).
+TEST(TestSdpaBwdRegistryLookup, RegistryLookupHd128Bf16CausalBatch)
+{
+    using namespace bwd_dispatch;
+
+    auto dqdkdvKey = lookupKernelNameKey(PipelineStage::DQDKDV,
+                                         "gfx942",
+                                         "bf16",
+                                         /*hdimQ=*/128,
+                                         /*hdimV=*/128,
+                                         MASK_TOP_LEFT_CAUSAL,
+                                         ATOMIC_A32,
+                                         PSSK_ON,
+                                         PDDV_ON,
+                                         MODE_BATCH,
+                                         BF16_CVT_RTNE);
+    EXPECT_FALSE(dqdkdvKey.empty()) << "hd128 bf16 causal_tl dqdkdv lookup should resolve";
+
+    // ODO is mask-agnostic (always mask=0).
+    auto odoKey = lookupKernelNameKey(PipelineStage::ODO,
+                                      "gfx942",
+                                      "bf16",
+                                      /*hdimQ=*/128,
+                                      /*hdimV=*/128,
+                                      MASK_NONE,
+                                      ATOMIC_NONE,
+                                      PSSK_OFF,
+                                      PDDV_OFF,
+                                      MODE_BATCH,
+                                      BF16_CVT_FP16_SENTINEL);
+    EXPECT_FALSE(odoKey.empty()) << "hd128 bf16 odo lookup should resolve for causal dispatch";
+
+    // DQ_CONVERT is mask-agnostic (always mask=0).
+    auto dqConvertKey = lookupKernelNameKey(PipelineStage::DQ_CONVERT,
+                                            "gfx942",
+                                            "bf16",
+                                            /*hdimQ=*/128,
+                                            /*hdimV=*/128,
+                                            MASK_NONE,
+                                            ATOMIC_NONE,
+                                            PSSK_OFF,
+                                            PDDV_OFF,
+                                            MODE_BATCH,
+                                            BF16_CVT_RTNE);
+    EXPECT_FALSE(dqConvertKey.empty())
+        << "hd128 bf16 dq_convert lookup should resolve for causal dispatch";
+}
+
+// Bottom-right causal (mask=2) dispatch.
+TEST(TestSdpaBwdRegistryLookup, RegistryLookupHd128Bf16CausalBrBatch)
+{
+    using namespace bwd_dispatch;
+
+    auto dqdkdvKey = lookupKernelNameKey(PipelineStage::DQDKDV,
+                                         "gfx942",
+                                         "bf16",
+                                         /*hdimQ=*/128,
+                                         /*hdimV=*/128,
+                                         MASK_BOTTOM_RIGHT_CAUSAL,
+                                         ATOMIC_A32,
+                                         PSSK_ON,
+                                         PDDV_ON,
+                                         MODE_BATCH,
+                                         BF16_CVT_RTNE);
+    EXPECT_FALSE(dqdkdvKey.empty()) << "hd128 bf16 causal_br dqdkdv lookup should resolve";
+}
+
+// SWA / window (mask=3) dispatch — only hd128 gfx942 has SWA rows in the CSV.
+TEST(TestSdpaBwdRegistryLookup, RegistryLookupHd128Bf16SwaBatch)
+{
+    using namespace bwd_dispatch;
+
+    auto dqdkdvKey = lookupKernelNameKey(PipelineStage::DQDKDV,
+                                         "gfx942",
+                                         "bf16",
+                                         /*hdimQ=*/128,
+                                         /*hdimV=*/128,
+                                         MASK_SLIDING_WINDOW,
+                                         ATOMIC_A32,
+                                         PSSK_ON,
+                                         PDDV_ON,
+                                         MODE_BATCH,
+                                         BF16_CVT_RTNE);
+    EXPECT_FALSE(dqdkdvKey.empty()) << "hd128 bf16 swa dqdkdv lookup should resolve";
+}
+
+// FP16 causal (mask=1) dispatch.
+TEST(TestSdpaBwdRegistryLookupFp16, RegistryLookupHd128CausalBatch)
+{
+    using namespace bwd_dispatch;
+
+    auto dqdkdvKey = lookupKernelNameKey(PipelineStage::DQDKDV,
+                                         "gfx942",
+                                         "fp16",
+                                         /*hdimQ=*/128,
+                                         /*hdimV=*/128,
+                                         MASK_TOP_LEFT_CAUSAL,
+                                         ATOMIC_A32,
+                                         PSSK_ON,
+                                         PDDV_ON,
+                                         MODE_BATCH,
+                                         BF16_CVT_FP16_SENTINEL);
+    EXPECT_FALSE(dqdkdvKey.empty()) << "hd128 fp16 causal_tl dqdkdv lookup should resolve";
+}
+
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsHd96)
 {
     if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
     {
@@ -381,7 +731,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_RejectsHd96)
     EXPECT_FALSE(_planBuilder.isApplicable(_handle, graphWrapper));
 }
 
-TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_RejectsFp8)
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsFp8)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -397,7 +747,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_RejectsFp8)
     EXPECT_FALSE(_planBuilder.isApplicable(_handle, graphWrapper));
 }
 
-TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_RejectsGfx950)
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsGfx950)
 {
     // Cannot synthesise a different device string from the test harness, so
     // this test only meaningfully runs on a non-gfx942 device. On gfx942 it
@@ -415,7 +765,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_RejectsGfx950)
     EXPECT_FALSE(_planBuilder.isApplicable(_handle, graphWrapper));
 }
 
-TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_RejectsFractionalGqaRatio)
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsFractionalGqaRatio)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -448,7 +798,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_RejectsFractionalGqaRatio)
     EXPECT_FALSE(_planBuilder.isApplicable(_handle, graphWrapper));
 }
 
-TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_RejectsAsymmetricHdim)
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsAsymmetricHdim)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -610,7 +960,7 @@ plan_utils::MaskType classifyMask(const flatbuffers::FlatBufferBuilder& builder)
     return plan_utils::getMaskType(attrs);
 }
 
-TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_RejectsCausalMaskAndBottomRightSetTogether)
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsCausalMaskAndBottomRightSetTogether)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -625,7 +975,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_RejectsCausalMaskAndBottomRightSetTo
     EXPECT_THROW(classifyMask(builder), hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
-TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_PrefersCausalMaskOverWindowBounds)
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicablePrefersCausalMaskOverWindowBounds)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -643,7 +993,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_PrefersCausalMaskOverWindowBounds)
     EXPECT_EQ(maskType, plan_utils::MaskType::TOP_LEFT_CAUSAL);
 }
 
-TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_PrefersBottomRightCausalOverTopLeftBounds)
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicablePrefersBottomRightCausalOverTopLeftBounds)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -662,7 +1012,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_PrefersBottomRightCausalOverTopLeftB
     EXPECT_EQ(maskType, plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL);
 }
 
-TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_AcceptsConsistentCausalMaskAndBounds)
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableAcceptsConsistentCausalMaskAndBounds)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -680,13 +1030,13 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_AcceptsConsistentCausalMaskAndBounds
     EXPECT_EQ(maskType, plan_utils::MaskType::TOP_LEFT_CAUSAL);
 }
 
-TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_PrefersBottomRightCausalOverWindowBounds)
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicablePrefersBottomRightCausalOverWindowBounds)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
     // causal_mask_bottom_right=true takes precedence over the bounds trio, even
     // though a symmetric sliding window (left=64, right=64) would derive
-    // WINDOW_GENERIC: result is bottom-right causal.
+    // SLIDING_WINDOW: result is bottom-right causal.
     auto builder = createSdpaBwdGraphWithMask(
         /*causalMask=*/false,
         /*causalMaskBottomRight=*/true,
@@ -703,7 +1053,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_PrefersBottomRightCausalOverWindowBo
 // as unbounded (-1), so a partially specified trio still derives the mask it
 // describes.
 
-TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrio_RightZeroLeftUnsetDerivesTopLeftCausal)
+TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrioRightZeroLeftUnsetDerivesTopLeftCausal)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -721,7 +1071,7 @@ TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrio_RightZeroLeftUnsetDerivesTopLeftCa
     EXPECT_EQ(maskType, plan_utils::MaskType::TOP_LEFT_CAUSAL);
 }
 
-TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrio_RightZeroBottomRightDerivesBottomRightCausal)
+TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrioRightZeroBottomRightDerivesBottomRightCausal)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -738,7 +1088,7 @@ TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrio_RightZeroBottomRightDerivesBottomR
     EXPECT_EQ(maskType, plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL);
 }
 
-TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrio_ExplicitCausalBoundsDeriveTopLeftCausal)
+TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrioExplicitCausalBoundsDeriveTopLeftCausal)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -755,7 +1105,7 @@ TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrio_ExplicitCausalBoundsDeriveTopLeftC
     EXPECT_EQ(maskType, plan_utils::MaskType::TOP_LEFT_CAUSAL);
 }
 
-TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrio_BothUnsetDerivesNoMask)
+TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrioBothUnsetDerivesNoMask)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -766,12 +1116,12 @@ TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrio_BothUnsetDerivesNoMask)
         flatbuffers::nullopt,
         DiagonalAlignment::TOP_LEFT);
 
-    plan_utils::MaskType maskType = plan_utils::MaskType::WINDOW_GENERIC;
+    plan_utils::MaskType maskType = plan_utils::MaskType::SLIDING_WINDOW;
     EXPECT_NO_THROW(maskType = classifyMask(builder));
     EXPECT_EQ(maskType, plan_utils::MaskType::NO_MASK);
 }
 
-TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrio_BothUnboundedDerivesNoMask)
+TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrioBothUnboundedDerivesNoMask)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -782,12 +1132,12 @@ TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrio_BothUnboundedDerivesNoMask)
         flatbuffers::Optional<int64_t>(-1),
         DiagonalAlignment::TOP_LEFT);
 
-    plan_utils::MaskType maskType = plan_utils::MaskType::WINDOW_GENERIC;
+    plan_utils::MaskType maskType = plan_utils::MaskType::SLIDING_WINDOW;
     EXPECT_NO_THROW(maskType = classifyMask(builder));
     EXPECT_EQ(maskType, plan_utils::MaskType::NO_MASK);
 }
 
-TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrio_SymmetricWindowDerivesWindowGeneric)
+TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrioSymmetricWindowDerivesSlidingWindow)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -800,10 +1150,10 @@ TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrio_SymmetricWindowDerivesWindowGeneri
 
     plan_utils::MaskType maskType = plan_utils::MaskType::NO_MASK;
     EXPECT_NO_THROW(maskType = classifyMask(builder));
-    EXPECT_EQ(maskType, plan_utils::MaskType::WINDOW_GENERIC);
+    EXPECT_EQ(maskType, plan_utils::MaskType::SLIDING_WINDOW);
 }
 
-TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrio_LeftOnlyDerivesWindowGeneric)
+TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrioLeftOnlyDerivesSlidingWindow)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -817,14 +1167,69 @@ TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrio_LeftOnlyDerivesWindowGeneric)
 
     plan_utils::MaskType maskType = plan_utils::MaskType::NO_MASK;
     EXPECT_NO_THROW(maskType = classifyMask(builder));
-    EXPECT_EQ(maskType, plan_utils::MaskType::WINDOW_GENERIC);
+    EXPECT_EQ(maskType, plan_utils::MaskType::SLIDING_WINDOW);
+}
+
+// =============================================================================
+// Masked attention dispatch (causal, causal-BR, SWA) — isApplicable tests
+// =============================================================================
+// These tests use createSdpaBwdGraphWithMask (defined above) and require a
+// gfx942 device to exercise the full isApplicable() path.
+
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableAcceptsCausalMaskBottomRight)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    SKIP_IF_NO_DEVICES();
+
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    auto builder = createSdpaBwdGraphWithMask(
+        /*causalMask=*/false,
+        /*causalMaskBottomRight=*/true,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        DiagonalAlignment::BOTTOM_RIGHT);
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_handle, graphWrapper));
+}
+
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableAcceptsWindowMask)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    SKIP_IF_NO_DEVICES();
+
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    // Symmetric sliding window with left=64, right=64
+    auto builder = createSdpaBwdGraphWithMask(
+        /*causalMask=*/false,
+        /*causalMaskBottomRight=*/false,
+        flatbuffers::Optional<int64_t>(64),
+        flatbuffers::Optional<int64_t>(64),
+        DiagonalAlignment::TOP_LEFT);
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_handle, graphWrapper));
 }
 
 // =============================================================================
 // Accumulator-aware workspace sizing tests
 // =============================================================================
 
-TEST(SdpaBwdWorkspaceSize, A32IncludesDqAccBuffer)
+TEST(TestSdpaBwdWorkspaceSize, A32IncludesDqAccBuffer)
 {
     // a32: workspace = D buffer + dq_acc buffer
     constexpr size_t K_B = 2;
@@ -839,7 +1244,7 @@ TEST(SdpaBwdWorkspaceSize, A32IncludesDqAccBuffer)
     EXPECT_GT(a32Size, sdpaBwdDBufferSize(K_B, K_H, K_S));
 }
 
-TEST(SdpaBwdWorkspaceSize, A16IsDBufferOnly)
+TEST(TestSdpaBwdWorkspaceSize, A16IsDBufferOnly)
 {
     // a16: workspace = D buffer only (no dq_acc)
     constexpr size_t K_B = 2;
@@ -851,7 +1256,7 @@ TEST(SdpaBwdWorkspaceSize, A16IsDBufferOnly)
     EXPECT_EQ(a16Size, dBufferOnly);
 }
 
-TEST(SdpaBwdWorkspaceSize, A16SmallerThanA32)
+TEST(TestSdpaBwdWorkspaceSize, A16SmallerThanA32)
 {
     constexpr size_t K_B = 4;
     constexpr size_t K_H = 16;
@@ -864,7 +1269,7 @@ TEST(SdpaBwdWorkspaceSize, A16SmallerThanA32)
     EXPECT_EQ(a32Size - a16Size, sdpaBwdDqAccBufferSize(K_B, K_H, K_S, K_D));
 }
 
-TEST(SdpaBwdWorkspaceSize, A16UnalignedDimensions)
+TEST(TestSdpaBwdWorkspaceSize, A16UnalignedDimensions)
 {
     // B=1, H=3, S=255 — D buffer raw size (3060) is NOT aligned to 64
     constexpr size_t K_B = 1;

@@ -160,6 +160,8 @@ struct test_async_transform_unary
   {
     THRUST_HOST void operator()(std::size_t n)
     {
+      CHECK_ASAN_ENABLEMENT();
+      
       thrust::host_vector<T> h0(unittest::random_integers<T>(n));
 
       thrust::device_vector<T> d0a(h0);
@@ -254,6 +256,8 @@ struct test_async_transform_unary_inplace
   {
     THRUST_HOST void operator()(std::size_t n)
     {
+      CHECK_ASAN_ENABLEMENT();
+      
       thrust::host_vector<T> h0(unittest::random_integers<T>(n));
 
       thrust::device_vector<T> d0a(h0);
@@ -337,6 +341,8 @@ struct test_async_transform_unary_counting_iterator
   {
     THRUST_HOST void operator()()
     {
+      CHECK_ASAN_ENABLEMENT();
+		
       constexpr std::size_t n = 15 * sizeof(T);
 
       ASSERT_LEQUAL(T(n), unittest::truncate_to_max_representable<T>(n));
@@ -401,6 +407,8 @@ struct test_async_transform_using
   {
     THRUST_HOST void operator()(std::size_t n)
     {
+      CHECK_ASAN_ENABLEMENT();
+	  
       thrust::host_vector<T> h0(unittest::random_integers<T>(n));
 
       thrust::device_vector<T> d0a(h0);

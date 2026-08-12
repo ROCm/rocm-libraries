@@ -25,6 +25,8 @@
 #include <iostream>
 #include <optional>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/core/Function.hpp"
@@ -114,7 +116,18 @@ void setMatrixReuseInFunction(Function& func) {
     for (BasicBlock& bb : func) {
         for (auto it = bb.begin(); it != bb.end(); ++it) {
             auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
-            if (!inst || !isMatrixInstruction(*inst)) continue;
+            if (!inst) continue;
+
+            // A call (e.g. s_swappc_b64) transfers to a callee that runs
+            // arbitrary code and returns; the operand-reuse buffer cannot be
+            // assumed to survive it. Break the chain so a matrix op before the
+            // call never claims reuse against one after the call.
+            if (isCall(*inst)) {
+                pending = nullptr;
+                continue;
+            }
+
+            if (!isMatrixInstruction(*inst)) continue;
 
             clearMatrixReuse(*inst);
             if (pending && supportsMatrixReuse(*pending)) applyReuseFromNext(*pending, *inst);

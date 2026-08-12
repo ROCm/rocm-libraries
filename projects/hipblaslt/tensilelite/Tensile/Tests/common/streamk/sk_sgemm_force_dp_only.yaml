@@ -4,7 +4,7 @@ TestParameters:
 GlobalParameters:
   SyncsPerBenchmark: 0
   NumElementsToValidate: -1
-  BoundsCheck: False
+  BoundsCheck: 0
   KernelTime: False
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 1
@@ -31,7 +31,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
-        - PrefetchLocalRead: [True]
+        - PrefetchLocalRead: [1]
       ForkParameters:
         - 1LDSBuffer: [1]
         - DepthU: [16]

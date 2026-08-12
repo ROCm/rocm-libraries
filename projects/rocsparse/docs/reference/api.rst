@@ -92,6 +92,10 @@ Auxiliary functions
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_get_git_rev`                    |
 +-----------------------------------------------------+
+|:cpp:func:`rocsparse_get_status_name`                |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_get_status_description`         |
++-----------------------------------------------------+
 |:cpp:func:`rocsparse_destroy_error`                  |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_error_get_message`              |
@@ -141,6 +145,8 @@ Auxiliary functions
 |:cpp:func:`rocsparse_copy_color_info`                |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_create_spvec_descr`             |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_create_const_spvec_descr`       |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_destroy_spvec_descr`            |
 +-----------------------------------------------------+
@@ -256,11 +262,15 @@ Auxiliary functions
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_csr_get`                        |
 +-----------------------------------------------------+
+|:cpp:func:`rocsparse_csc_get`                        |
++-----------------------------------------------------+
 |:cpp:func:`rocsparse_ell_get`                        |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_bell_get`                       |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_sell_get`                       |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_bsr_get`                        |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_coo_set_pointers`               |
 +-----------------------------------------------------+
@@ -274,9 +284,13 @@ Auxiliary functions
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_bsr_set_pointers`               |
 +-----------------------------------------------------+
+|:cpp:func:`rocsparse_bell_set_pointers`              |
++-----------------------------------------------------+
 |:cpp:func:`rocsparse_spmat_get_size`                 |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_spmat_get_nnz`                  |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_spmat_set_nnz`                  |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_spmat_get_format`               |
 +-----------------------------------------------------+
@@ -304,6 +318,8 @@ Auxiliary functions
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_create_const_dnvec_descr`       |
 +-----------------------------------------------------+
+|:cpp:func:`rocsparse_dnvec_descr_create_scalar`      |
++-----------------------------------------------------+
 |:cpp:func:`rocsparse_destroy_dnvec_descr`            |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_dnvec_get`                      |
@@ -311,6 +327,10 @@ Auxiliary functions
 |:cpp:func:`rocsparse_dnvec_get_values`               |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_dnvec_set_values`               |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_dnvec_get_strided_batch`        |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_dnvec_set_strided_batch`        |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_create_dnmat_descr`             |
 +-----------------------------------------------------+
@@ -443,12 +463,18 @@ Function name                                                                   
 :cpp:func:`rocsparse_Xcsric0_buffer_size() <rocsparse_scsric0_buffer_size>`                                           x      x      x              x
 :cpp:func:`rocsparse_Xcsric0_analysis() <rocsparse_scsric0_analysis>`                                                 x      x      x              x
 :cpp:func:`rocsparse_csric0_zero_pivot`
+:cpp:func:`rocsparse_csric0_singular_pivot`
+:cpp:func:`rocsparse_csric0_set_tolerance`
+:cpp:func:`rocsparse_csric0_get_tolerance`
 :cpp:func:`rocsparse_csric0_clear`
 :cpp:func:`rocsparse_Xcsric0() <rocsparse_scsric0>`                                                                   x      x      x              x
 :cpp:func:`rocsparse_Xcsrilu0_buffer_size() <rocsparse_scsrilu0_buffer_size>`                                         x      x      x              x
 :cpp:func:`rocsparse_Xcsrilu0_numeric_boost() <rocsparse_scsrilu0_numeric_boost>`                                     x      x      x              x
 :cpp:func:`rocsparse_Xcsrilu0_analysis() <rocsparse_scsrilu0_analysis>`                                               x      x      x              x
 :cpp:func:`rocsparse_csrilu0_zero_pivot`
+:cpp:func:`rocsparse_csrilu0_singular_pivot`
+:cpp:func:`rocsparse_csrilu0_set_tolerance`
+:cpp:func:`rocsparse_csrilu0_get_tolerance`
 :cpp:func:`rocsparse_csrilu0_clear`
 :cpp:func:`rocsparse_Xcsrilu0() <rocsparse_scsrilu0>`                                                                 x      x      x              x
 :cpp:func:`rocsparse_csritilu0_buffer_size`
@@ -499,6 +525,7 @@ Function name                                                                   
 :cpp:func:`rocsparse_Xgebsr2gebsr() <rocsparse_sgebsr2gebsr>`                                                             x      x      x              x
 :cpp:func:`rocsparse_Xcsr2csr_compress() <rocsparse_scsr2csr_compress>`                                                   x      x      x              x
 :cpp:func:`rocsparse_create_identity_permutation`
+:cpp:func:`rocsparse_set_identity_permutation`
 :cpp:func:`rocsparse_inverse_permutation`
 :cpp:func:`rocsparse_cscsort_buffer_size`
 :cpp:func:`rocsparse_cscsort`
@@ -625,6 +652,8 @@ documentation for details about the supported data types and compute types.
 |:cpp:func:`rocsparse_spgeam_buffer_size()`           |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_spgeam()`                       |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_spmat_scale()`                  |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_sddmm_buffer_size()`            |
 +-----------------------------------------------------+

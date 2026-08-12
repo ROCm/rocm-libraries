@@ -61,6 +61,11 @@ test_categories:
       - "*tyIntegral/*"
       - "TestHipGraphBasic"
     exclude:
+      - "RocprimDeviceReduceByKey.LargeIndicesReduceByKeyDeterministic"
+      - "RocprimDeviceReduceByKey.LargeIndicesReduceByKeyLargeValueType"
+      - "RocprimDeviceReduceByKey.LargeIndicesReduceByKeyLargeValueTypeWithGraphs"
+      - "RocprimDeviceReduceByKey.LargeSegmentCountReduceByKeyLargeValueType"
+      - "RocprimDeviceSelectTests/CustomHugeType1024Int.*"
     labels:
       - "quick"
 
