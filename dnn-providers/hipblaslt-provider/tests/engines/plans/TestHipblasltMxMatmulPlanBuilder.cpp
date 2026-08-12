@@ -247,6 +247,103 @@ TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableHandlesSwappedDequantOrd
     EXPECT_TRUE(_builder.isApplicable(_handle, graph));
 }
 
+// FP4 (E2M1) inputs, symmetric A/B, across the supported output types.
+TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableMxFp4OutputHalf)
+{
+    auto fb = createValidMxMatmulGraph({32, 128},
+                                       {1, 32},
+                                       {128, 32},
+                                       {32, 1},
+                                       {32, 32},
+                                       {32, 1},
+                                       {32, 4},
+                                       {4, 32},
+                                       DT::FP4_E2M1,
+                                       DT::HALF);
+    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    EXPECT_TRUE(_builder.isApplicable(_handle, graph));
+}
+
+TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableMxFp4OutputBf16)
+{
+    auto fb = createValidMxMatmulGraph({32, 128},
+                                       {1, 32},
+                                       {128, 32},
+                                       {32, 1},
+                                       {32, 32},
+                                       {32, 1},
+                                       {32, 4},
+                                       {4, 32},
+                                       DT::FP4_E2M1,
+                                       DT::BFLOAT16);
+    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    EXPECT_TRUE(_builder.isApplicable(_handle, graph));
+}
+
+TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableMxFp4OutputFp32)
+{
+    auto fb = createValidMxMatmulGraph({32, 128},
+                                       {1, 32},
+                                       {128, 32},
+                                       {32, 1},
+                                       {32, 32},
+                                       {32, 1},
+                                       {32, 4},
+                                       {4, 32},
+                                       DT::FP4_E2M1,
+                                       DT::FLOAT);
+    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    EXPECT_TRUE(_builder.isApplicable(_handle, graph));
+}
+
+// Mixed A/B input types: hipBLASLt supports FP8 OCP + FP4 in either order. Each
+// test sets x_a to one MX type and x_b (the trailing argument) to the other.
+TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableMixedFp8AFp4B)
+{
+    auto fb = createValidMxMatmulGraph({32, 128},
+                                       {1, 32},
+                                       {128, 32},
+                                       {32, 1},
+                                       {32, 32},
+                                       {32, 1},
+                                       {32, 4},
+                                       {4, 32},
+                                       DT::FP8_E4M3,
+                                       DT::HALF,
+                                       DT::FP8_E8M0,
+                                       DT::FP8_E8M0,
+                                       DT::FLOAT,
+                                       32,
+                                       false,
+                                       false,
+                                       DT::FP4_E2M1 /*xTypeB*/);
+    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    EXPECT_TRUE(_builder.isApplicable(_handle, graph));
+}
+
+TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableMixedFp4AFp8B)
+{
+    auto fb = createValidMxMatmulGraph({32, 128},
+                                       {1, 32},
+                                       {128, 32},
+                                       {32, 1},
+                                       {32, 32},
+                                       {32, 1},
+                                       {32, 4},
+                                       {4, 32},
+                                       DT::FP4_E2M1,
+                                       DT::HALF,
+                                       DT::FP8_E8M0,
+                                       DT::FP8_E8M0,
+                                       DT::FLOAT,
+                                       32,
+                                       false,
+                                       false,
+                                       DT::FP8_E4M3 /*xTypeB*/);
+    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    EXPECT_TRUE(_builder.isApplicable(_handle, graph));
+}
+
 // ===========================================================================
 // isApplicable — negative cases (all CPU-safe, no GPU call needed)
 // ===========================================================================
@@ -274,8 +371,8 @@ TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsWrongNodeCount4)
     EXPECT_FALSE(_builder.isApplicable(_handle, mockGraph));
 }
 
-// Non-FP8 input types
-TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsNonFp8Input)
+// Non-MX input types
+TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsNonMxInputHalf)
 {
     auto fb = createValidMxMatmulGraph({32, 128},
                                        {1, 32},
@@ -291,7 +388,7 @@ TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsNonFp8Input)
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
 
-TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsNonFp8InputFloat)
+TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsNonMxInputFloat)
 {
     auto fb = createValidMxMatmulGraph({32, 128},
                                        {1, 32},
