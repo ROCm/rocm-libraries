@@ -80,9 +80,9 @@ def test_cu_set_to_any_numeric_string_predicate_is_false():
 
 
 def _import_getCUCount():
-    """Import getCUCount from Tensile.LibraryIO."""
+    """Import getCUCount from tensilelite.LibraryIO."""
     import importlib
-    M = importlib.import_module("Tensile.LibraryIO")
+    M = importlib.import_module("tensilelite.LibraryIO")
     return M.getCUCount
 
 

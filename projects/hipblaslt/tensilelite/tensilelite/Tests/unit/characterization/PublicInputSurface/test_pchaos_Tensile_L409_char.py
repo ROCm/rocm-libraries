@@ -4,7 +4,7 @@
 ################################################################################
 
 """PublicInputSurface characterization: the ``if runningTuning:`` predicate
-in ``Tensile/Tensile.py`` at line 409, inside ``restore_prob_sol_map``.
+in ``Tensile/tensilelite.py`` at line 409, inside ``restore_prob_sol_map``.
 
 Branch aa18a787b08bf05166d8f981c6cefe39f0e5a016. The predicate is a bare
 boolean local ``runningTuning`` (initialized False at line 388; set to True
@@ -36,7 +36,7 @@ START_HINT = "run,problem-progress,"
 
 
 def _runningTuning_after_line(line: str) -> bool:
-    """Reproduce the exact assignment at Tensile.py:405.
+    """Reproduce the exact assignment at tensilelite.py:405.
 
     runningTuning = line.startswith(startHint)
 
@@ -78,8 +78,8 @@ def test_partial_sentinel_yields_runningTuning_false():
 
 
 def _import_restore():
-    """Import restore_prob_sol_map from Tensile.Tensile."""
-    M = importlib.import_module("Tensile.Tensile")
+    """Import restore_prob_sol_map from tensilelite.tensilelite."""
+    M = importlib.import_module("tensilelite.Tensile")
     return M.restore_prob_sol_map
 
 

@@ -33,9 +33,9 @@ config.
 import pytest
 from rocisa.enum import DataTypeEnum
 
-from Tensile.Activation import ActivationType
-from Tensile.Common.DataType import DataType
-from Tensile.SolutionStructs.Problem import ProblemType
+from tensilelite.Activation import ActivationType
+from tensilelite.Common.DataType import DataType
+from tensilelite.SolutionStructs.Problem import ProblemType
 
 
 def _render(v):

@@ -4,7 +4,7 @@
 ################################################################################
 
 """PublicInputSurface characterization: ``if args.RestoreLog:`` in
-``Tensile/Tensile.py`` at line 534.
+``Tensile/tensilelite.py`` at line 534.
 
 Branch c63babfc10d38c09385da1dacf9fbb9c2c64c067.  The predicate is a Python
 truthiness test on the argparse dest ``RestoreLog`` (``--restore-from-log``,
@@ -33,7 +33,7 @@ pytestmark = pytest.mark.unit
 # ---------------------------------------------------------------------------
 
 def restore_log_enabled(restore_log: Optional[str]) -> bool:
-    """Mirror of Tensile/Tensile.py:534  ``if args.RestoreLog:``.
+    """Mirror of Tensile/tensilelite.py:534  ``if args.RestoreLog:``.
 
     RestoreLog is an argparse str dest with default None. The branch is taken
     iff the value is truthy: a non-None, non-empty string.

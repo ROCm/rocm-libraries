@@ -24,7 +24,7 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-S = importlib.import_module("Tensile.SolutionStructs.Solution")
+S = importlib.import_module("tensilelite.SolutionStructs.Solution")
 Solution = S.Solution
 
 
@@ -34,9 +34,9 @@ Solution = S.Solution
 
 @pytest.fixture(scope="module")
 def gfx942_iim():
-    from Tensile.Common.Architectures import gfxToIsa
-    from Tensile.Common.Capabilities import makeIsaInfoMap
-    from Tensile.Toolchain.Validators import validateToolchain
+    from tensilelite.Common.Architectures import gfxToIsa
+    from tensilelite.Common.Capabilities import makeIsaInfoMap
+    from tensilelite.Toolchain.Validators import validateToolchain
 
     cxx = validateToolchain("amdclang++")
     isa = gfxToIsa("gfx942")
@@ -45,9 +45,9 @@ def gfx942_iim():
 
 @pytest.fixture(scope="module")
 def gfx1250_iim():
-    from Tensile.Common.Architectures import gfxToIsa
-    from Tensile.Common.Capabilities import makeIsaInfoMap
-    from Tensile.Toolchain.Validators import validateToolchain
+    from tensilelite.Common.Architectures import gfxToIsa
+    from tensilelite.Common.Capabilities import makeIsaInfoMap
+    from tensilelite.Toolchain.Validators import validateToolchain
 
     cxx = validateToolchain("amdclang++")
     isa = gfxToIsa("gfx1250")
@@ -59,8 +59,8 @@ def gfx1250_iim():
 
 @pytest.fixture(scope="module")
 def assembler():
-    from Tensile.Toolchain.Assembly import makeAssemblyToolchain
-    from Tensile.Toolchain.Validators import validateToolchain, ToolchainDefaults
+    from tensilelite.Toolchain.Assembly import makeAssemblyToolchain
+    from tensilelite.Toolchain.Validators import validateToolchain, ToolchainDefaults
 
     cxx = validateToolchain("amdclang++")
     bundler = validateToolchain(ToolchainDefaults.OFFLOAD_BUNDLER)
@@ -71,8 +71,8 @@ def assembler():
 def _gp_gfx942(gfx942_iim):
     """Assign global parameters for gfx942; restore after module."""
     import copy
-    from Tensile.Common.GlobalParameters import globalParameters, assignGlobalParameters
-    from Tensile.Common.ValidParameters import validParameters
+    from tensilelite.Common.GlobalParameters import globalParameters, assignGlobalParameters
+    from tensilelite.Common.ValidParameters import validParameters
 
     saved_gp = copy.deepcopy(dict(globalParameters))
     saved_vp = copy.deepcopy(dict(validParameters))
@@ -88,8 +88,8 @@ def _gp_gfx942(gfx942_iim):
 def _gp_gfx1250(gfx1250_iim):
     """Assign global parameters for gfx1250; restore after module."""
     import copy
-    from Tensile.Common.GlobalParameters import globalParameters, assignGlobalParameters
-    from Tensile.Common.ValidParameters import validParameters
+    from tensilelite.Common.GlobalParameters import globalParameters, assignGlobalParameters
+    from tensilelite.Common.ValidParameters import validParameters
 
     saved_gp = copy.deepcopy(dict(globalParameters))
     saved_vp = copy.deepcopy(dict(validParameters))
@@ -107,8 +107,8 @@ def _gp_gfx1250(gfx1250_iim):
 
 def _make_gfx942_hhs_params(iim, **overrides):
     """Minimal gfx942 HHS MI solution params.  Override keys as needed."""
-    from Tensile.Common.Architectures import gfxToIsa
-    from Tensile.BenchmarkProblems import matrixInstructionToMIParameters
+    from tensilelite.Common.Architectures import gfxToIsa
+    from tensilelite.BenchmarkProblems import matrixInstructionToMIParameters
 
     isa = gfxToIsa("gfx942")
     # MI16x16x4 - smallest valid gfx942 MFMA HH shape
@@ -168,8 +168,8 @@ def _make_gfx942_hhs_params(iim, **overrides):
 
 def _make_gfx1250_hhs_params(iim, mi=None, **overrides):
     """Minimal gfx1250 HHS MI solution params with TDM support.  Override as needed."""
-    from Tensile.Common.Architectures import gfxToIsa
-    from Tensile.BenchmarkProblems import matrixInstructionToMIParameters
+    from tensilelite.Common.Architectures import gfxToIsa
+    from tensilelite.BenchmarkProblems import matrixInstructionToMIParameters
 
     isa = gfxToIsa("gfx1250")
     if mi is None:
@@ -374,7 +374,7 @@ def test_halfplr_rejects_inner_unroll_ne_one_on_gfx1250(
 
 def _make_gfx942_dot2_params(iim, **overrides):
     """MAC-only (no MI) gfx942 HHS params that trigger UseDotInstruction=True."""
-    from Tensile.Common.Architectures import gfxToIsa
+    from tensilelite.Common.Architectures import gfxToIsa
 
     isa = gfxToIsa("gfx942")
     pt = overrides.pop("ProblemType", {})
@@ -477,8 +477,8 @@ def test_dot2_num_dot_elements_set(_gp_gfx942, gfx942_iim, assembler):
 
 def _make_gfx942_sparse_lds_params(iim, **overrides):
     """Minimal gfx942 sparse HHS solution with metadata via LDS (not DTVSM)."""
-    from Tensile.Common.Architectures import gfxToIsa
-    from Tensile.BenchmarkProblems import matrixInstructionToMIParameters
+    from tensilelite.Common.Architectures import gfxToIsa
+    from tensilelite.BenchmarkProblems import matrixInstructionToMIParameters
 
     isa = gfxToIsa("gfx942")
     # SMFMA [16,16,32,1] is the valid gfx942 sparse half-half shape.

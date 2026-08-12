@@ -1,5 +1,5 @@
 ################################################################################
-# Characterization tests for Tensile.TensileBenchmarkLibraryClient — stats.
+# Characterization tests for tensilelite.TensileBenchmarkLibraryClient — stats.
 #
 # ADD-ONLY. The client driver (BenchmarkProblemSize subprocess, PrintStats,
 # TensileBenchmarkLibraryClient) is resistance; this pins the pure stats helpers
@@ -11,7 +11,7 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-M = importlib.import_module("Tensile.TensileBenchmarkLibraryClient")
+M = importlib.import_module("tensilelite.TensileBenchmarkLibraryClient")
 
 
 def test_mean():

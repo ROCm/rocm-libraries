@@ -34,7 +34,7 @@ import pytest
 
 # `from ... import Solution` correctly yields the class (the package __init__
 # re-exports it). The module's static methods are reached via the class.
-from Tensile.SolutionStructs.Solution import Solution
+from tensilelite.SolutionStructs.Solution import Solution
 
 pytestmark = pytest.mark.unit
 

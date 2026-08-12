@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-"""Characterization tests for ``Tensile.Toolchain.HelperKernelCache`` — the pure
+"""Characterization tests for ``tensilelite.Toolchain.HelperKernelCache`` — the pure
 filesystem cache helpers (`_computeCacheKey`/`_checkCache`/`_populateCache`/
 `_evictStale`) and the `HelperKernelCache` restore/store surface (cache
 enabled/disabled, hit/miss), driven over tmp dirs with a fake compiler (no real
@@ -16,8 +16,8 @@ from pathlib import Path
 
 import pytest
 
-import Tensile.Toolchain.HelperKernelCache as HKC
-from Tensile.Toolchain.HelperKernelCache import (
+import tensilelite.Toolchain.HelperKernelCache as HKC
+from tensilelite.Toolchain.HelperKernelCache import (
     _computeCacheKey, _checkCache, _populateCache, _evictStale, HelperKernelCache,
     _STATIC_HEADER_FILES,
 )

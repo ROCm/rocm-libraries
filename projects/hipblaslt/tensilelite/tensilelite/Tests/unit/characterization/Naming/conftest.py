@@ -31,7 +31,7 @@ internal-args / tile keys those functions read), overridable per test.
 
 import pytest
 
-from Tensile.SolutionStructs.Problem import ProblemType
+from tensilelite.SolutionStructs.Problem import ProblemType
 
 
 def _base_state():

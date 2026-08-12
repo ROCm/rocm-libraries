@@ -1,5 +1,5 @@
 ################################################################################
-# Characterization tests for Tensile.ParallelExecution
+# Characterization tests for tensilelite.ParallelExecution
 #
 # ADD-ONLY: pins the multi-GPU client orchestration helpers. Subprocess (rocm-smi
 # / hipInfo / client launch), the ClientExecutionLock and globalParameters are
@@ -12,7 +12,7 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-M = importlib.import_module("Tensile.ParallelExecution")
+M = importlib.import_module("tensilelite.ParallelExecution")
 
 
 # ---------------------------------------------------------------------------

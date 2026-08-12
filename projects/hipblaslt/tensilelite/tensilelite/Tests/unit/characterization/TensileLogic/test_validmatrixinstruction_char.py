@@ -52,12 +52,12 @@ from pathlib import Path
 
 import pytest
 
-from Tensile.Common.GlobalParameters import defaultSolution
-from Tensile.Common.Types import IsaVersion
-from Tensile.SolutionStructs.Validators.MatrixInstruction import (
+from tensilelite.Common.GlobalParameters import defaultSolution
+from tensilelite.Common.Types import IsaVersion
+from tensilelite.SolutionStructs.Validators.MatrixInstruction import (
     matrixInstructionToMIParameters,
 )
-from Tensile.TensileLogic.ValidMatrixInstruction import _validateMatrixInstruction
+from tensilelite.TensileLogic.ValidMatrixInstruction import _validateMatrixInstruction
 
 pytestmark = pytest.mark.unit
 

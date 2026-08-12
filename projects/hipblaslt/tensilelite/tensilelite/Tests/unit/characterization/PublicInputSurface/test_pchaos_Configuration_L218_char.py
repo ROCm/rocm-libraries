@@ -4,7 +4,7 @@
 ################################################################################
 
 import pytest
-from Tensile.Configuration import CallableParameter, Parameter
+from tensilelite.Configuration import CallableParameter, Parameter
 
 pytestmark = pytest.mark.unit
 
