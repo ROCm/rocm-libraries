@@ -8,16 +8,18 @@
 > which is the list that drives future kernel work.
 
 `hipdnn_torch` routes a handful of `torch.nn.functional` calls — `F.linear`,
-`F.rms_norm`, and `F.scaled_dot_product_attention` — onto a hipDNN engine, and falls
-back to stock PyTorch (transparently, and logged) for anything the engine can't serve.
-It exists so you can run a **real** model end-to-end on hipDNN kernels, measure them,
-and get a ranked list of the ops/shapes hipDNN still needs.
+`F.rms_norm`, `F.scaled_dot_product_attention`, `F.layer_norm`, `F.silu`, `F.gelu`,
+and `F.conv2d` — onto a hipDNN engine, and falls back to stock PyTorch (transparently,
+and logged) for anything the engine can't serve. It exists so you can run a **real**
+model end-to-end on hipDNN kernels, measure them, and get a ranked list of the
+ops/shapes hipDNN still needs.
 
 ```python
 import hipdnn_torch
 
 hipdnn_torch.enable_logging()   # optional: print each native fallback as it happens
-hipdnn_torch.install()          # patch F.linear / F.rms_norm / F.scaled_dot_product_attention
+hipdnn_torch.install()          # patch F.linear / F.rms_norm / F.scaled_dot_product_attention /
+                                #       F.layer_norm / F.silu / F.gelu / F.conv2d
 
 model(inputs)                   # your unmodified model — matched calls route to hipDNN
 
@@ -26,10 +28,11 @@ hipdnn_torch.uninstall()
 ```
 
 No model code changes. `install()` patches the functional entry points, so every
-`nn.Linear`, `nn.RMSNorm`, and `F.scaled_dot_product_attention` that resolves through
-`torch.nn.functional` at call time is intercepted. Calls that don't meet the engine's
-gate (wrong dtype, unsupported shape, masked/causal attention, …) run on native
-PyTorch exactly as before — nothing breaks, it's just counted and logged.
+`nn.Linear`, `nn.RMSNorm`, `nn.LayerNorm`, `nn.SiLU`/`nn.GELU`, `nn.Conv2d`, and
+`F.scaled_dot_product_attention` that resolves through `torch.nn.functional` at call
+time is intercepted. Calls that don't meet the engine's gate (wrong dtype, unsupported
+shape, masked/causal attention, grouped conv, exact-erf GELU, …) run on native PyTorch
+exactly as before — nothing breaks, it's just counted and logged.
 
 ## Contents
 
@@ -42,12 +45,19 @@ hipdnn_torch/
 │   ├── base.py                # OpOverride: patch, graph cache, execute, census + fallback logging
 │   ├── linear.py              # F.linear            -> hipDNN RCR matmul
 │   ├── rmsnorm.py             # F.rms_norm          -> hipDNN 2-D RMSNorm
-│   └── sdpa.py                # F.scaled_dot_product_attention -> hipDNN fused attention
-└── samples/
-    ├── minimal_block.py       # 5-minute "try it": a self-contained block, no external repo
-    ├── microbench_ab.py       # per-op A/B (hipDNN vs native) over a shape sweep
-    ├── sdpa_backends.py       # SDPA vs the real fused backends (AOTriton / fa-triton / hipDNN)
-    └── ltx_video_ab.py        # ADVANCED: a real diffusion transformer (needs ComfyUI)
+│   ├── sdpa.py                # F.scaled_dot_product_attention -> hipDNN fused attention
+│   ├── layernorm.py           # F.layer_norm        -> hipDNN 2-D LayerNorm
+│   ├── activation.py          # F.silu / F.gelu     -> hipDNN pointwise activation
+│   └── conv.py                # F.conv2d            -> hipDNN WMMA implicit-GEMM conv
+├── samples/
+│   ├── minimal_block.py       # 5-minute "try it": a self-contained block, no external repo
+│   ├── microbench_ab.py       # per-op A/B (hipDNN vs native) over a shape sweep
+│   ├── sdpa_backends.py       # SDPA vs the real fused backends (AOTriton / fa-triton / hipDNN)
+│   └── ltx_video_ab.py        # ADVANCED: a real diffusion transformer (needs ComfyUI)
+└── tests/
+    ├── conftest.py            # gpu marker + auto-skip when provider_ready() is False
+    ├── test_gates.py          # pure-CPU: each override's gate declines what it can't serve
+    └── test_parity.py         # gpu: each op routes (aot>0) and matches native within tol
 ```
 
 ## Quick start
@@ -87,7 +97,7 @@ yourself — the package attaches only a `NullHandler` by default).
 
 | Call | Purpose |
 |------|---------|
-| `install(ops=("linear","rmsnorm","sdpa"))` | Patch the selected functionals. Triggers the one-time bootstrap. |
+| `install(ops=("linear","rmsnorm","sdpa","layernorm","silu","gelu","conv2d"))` | Patch the selected functionals. Triggers the one-time bootstrap. |
 | `uninstall(ops=None)` | Restore the real functionals (default: all installed). |
 | `reset(ops=None)` | Clear the census + fallback tally. |
 | `report(ops=None) -> str` | Per-op census + ranked fallback reasons. |
@@ -200,8 +210,9 @@ engine your build actually registers.
 ## Applicability & known limitations
 
 **This only intercepts calls that go through `torch.nn.functional`.** That covers a lot
-— every `nn.Linear`, `nn.RMSNorm`, most attention written against
-`F.scaled_dot_product_attention` — but there are real ways a model bypasses it:
+— every `nn.Linear`, `nn.RMSNorm`, `nn.LayerNorm`, `nn.SiLU`/`nn.GELU`, `nn.Conv2d`,
+and most attention written against `F.scaled_dot_product_attention` — but there are
+real ways a model bypasses it:
 
 - **`torch.compile` / TorchInductor.** A compiled graph is lowered ahead of time and may
   never re-enter the Python `F.*` functions at run time. Install *before* compiling, and
@@ -223,6 +234,10 @@ back to native and is counted with a reason):
 | `F.linear` | RCR matmul (`y = x @ Wᵀ + b`) | cuda, f16/bf16, weight 2-D, **M, N, K all multiples of 16**. Bias added natively after the matmul (no longer forces a fallback). |
 | `F.rms_norm` | 2-D last-axis RMSNorm | cuda, f16/bf16, single-axis (last-dim) norm. Weightless norms (`weight=None`) are served via a synthesized ones-weight; `eps=None` resolves to `torch.finfo(dtype).eps` to match native exactly. |
 | `F.scaled_dot_product_attention` | Dense, non-causal, unmasked fused attention | cuda, f16/bf16, rank-4 BHSD, `attn_mask=None`, `dropout_p=0`, not causal, no GQA, **B=1**, **H=32**, **D=64**, `S_q`/`S_kv` multiples of 16. |
+| `F.layer_norm` | 2-D last-axis LayerNorm | cuda, f16/bf16, single-axis (last-dim) norm, `normalized_shape` == last dim. Weightless/biasless norms are served via synthesized ones-weight and zeros-bias; `eps` defaults to `1e-5`. |
+| `F.silu` | Pointwise SiLU (Swish, β=1) | cuda, f16/bf16. Flattened to a contiguous `numel` run. |
+| `F.gelu` | Pointwise tanh-GELU | cuda, f16/bf16, **`approximate="tanh"` only** — the default exact-erf GELU has no catalog builder yet and falls back (reason `erf-gelu unsupported`). |
+| `F.conv2d` | WMMA implicit-GEMM forward conv | cuda, f16/bf16, rank-4, **`groups==1`**, integer stride/padding/dilation (`'same'`/`'valid'` strings fall back). Operands are converted to channels-last; bias is added natively after the conv. |
 
 > [!NOTE]
 > The SDPA head count (32), head dim (64), and tile (16) are **baked into the shipped
