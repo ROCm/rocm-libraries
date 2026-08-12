@@ -179,3 +179,48 @@ TEST(Predicates, WorkgroupMappingXCCCheck_StandardCUDevice_304_XCC8_Passes)
                                                  1.0, false, 1);
     EXPECT_TRUE((*pred)(problem)) << "Standard-CU (304) keeps passing XCC=8 (304 % 8 == 0)";
 }
+
+// ----------------------------------------------------------------------------
+// Device-tuned CU libraries (gfx942_80cu, gfx942_152cu, ...) are unaffected.
+//
+// Solutions in a CU-variant logic directory are guaranteed by the build-time
+// ValidWorkGroupMappingXCC check (Tensile/TensileLogic/ValidWorkGroupMappingXCC.py)
+// to carry a WorkGroupMappingXCC that is -1 or a power of two dividing the
+// directory's CU count. Such a solution therefore passes the strict check
+// already, and coercing XCC to 1 cannot change the verdict: the implicit
+// fallback is a no-op for every device-tuned lib.
+// ----------------------------------------------------------------------------
+
+TEST(Predicates, WorkgroupMappingXCCCheck_TunedCULib_UnaffectedByImplicitFallback)
+{
+    using namespace TensileLite;
+    // (cuCount, WorkGroupMappingXCC) pairs taken from the shipped CU-variant
+    // logic dirs: 80cu uses XCC=4/8/16, 152cu uses XCC=4, 228cu uses XCC=1.
+    struct Case
+    {
+        unsigned cuCount;
+        int      xcc;
+    };
+    const Case cases[] = {{80u, 4}, {80u, 8}, {80u, 16}, {152u, 4}, {228u, 1}, {64u, 8}};
+
+    auto problem = ContractionProblemGemm::GEMM(
+        false, false, 1024, 1024, 1024, 1024, 1024, 1024, 1.0, false, 1);
+
+    for(auto const& c : cases)
+    {
+        auto strictPred = std::make_shared<Predicates::Contraction::WorkgroupMappingXCCCheck>(
+            std::array<int, 2>{c.xcc, -1}, c.cuCount);
+        strictPred->isStandardCUDevice = true;
+
+        auto relaxedPred = std::make_shared<Predicates::Contraction::WorkgroupMappingXCCCheck>(
+            std::array<int, 2>{c.xcc, -1}, c.cuCount);
+        relaxedPred->isStandardCUDevice = false;
+
+        EXPECT_EQ((*strictPred)(problem), (*relaxedPred)(problem))
+            << "Implicit fallback must be a no-op for a tuned lib: cuCount=" << c.cuCount
+            << " WGMXCC=" << c.xcc;
+        EXPECT_TRUE((*relaxedPred)(problem))
+            << "Tuned-lib solution must be accepted: cuCount=" << c.cuCount
+            << " WGMXCC=" << c.xcc;
+    }
+}
