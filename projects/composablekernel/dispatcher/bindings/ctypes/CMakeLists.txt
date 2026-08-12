@@ -25,7 +25,6 @@ function(add_ctypes_library TARGET_NAME SOURCE_FILE)
     target_include_directories(${TARGET_NAME} PRIVATE
         ${PROJECT_SOURCE_DIR}/include
         ${PROJECT_SOURCE_DIR}/../include  # CK-tile core headers (ck_tile/core.hpp)
-        ${PROJECT_SOURCE_DIR}/dispatcher/include
     )
     
     target_link_libraries(${TARGET_NAME} PRIVATE
@@ -68,7 +67,6 @@ else()
     target_include_directories(dispatcher_gemm_lib PRIVATE
         ${PROJECT_SOURCE_DIR}/include
         ${PROJECT_SOURCE_DIR}/../include  # CK-tile core headers (ck_tile/core.hpp)
-        ${PROJECT_SOURCE_DIR}/dispatcher/include
     )
     target_link_libraries(dispatcher_gemm_lib PRIVATE hip::device)
 endif()
@@ -88,7 +86,6 @@ add_library(dispatcher_conv_lib SHARED conv_ctypes_lib.cpp)
 target_include_directories(dispatcher_conv_lib PRIVATE
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/../include  # CK-tile core headers (ck_tile/core.hpp)
-    ${PROJECT_SOURCE_DIR}/dispatcher/include
 )
 target_link_libraries(dispatcher_conv_lib PRIVATE hip::device)
 set_target_properties(dispatcher_conv_lib PROPERTIES
@@ -133,7 +130,6 @@ if(CONV_BWDW_KERNEL_HEADERS)
     target_include_directories(dispatcher_conv_bwdw_lib PRIVATE
         ${PROJECT_SOURCE_DIR}/include
         ${PROJECT_SOURCE_DIR}/../include  # CK-tile core headers (ck_tile/core.hpp)
-        ${PROJECT_SOURCE_DIR}/dispatcher/include
     )
     target_link_libraries(dispatcher_conv_bwdw_lib PRIVATE hip::device)
     target_compile_options(dispatcher_conv_bwdw_lib PRIVATE
@@ -150,7 +146,6 @@ else()
     target_include_directories(dispatcher_conv_bwdw_lib PRIVATE
         ${PROJECT_SOURCE_DIR}/include
         ${PROJECT_SOURCE_DIR}/../include  # CK-tile core headers (ck_tile/core.hpp)
-        ${PROJECT_SOURCE_DIR}/dispatcher/include
     )
     target_link_libraries(dispatcher_conv_bwdw_lib PRIVATE hip::device)
     set_target_properties(dispatcher_conv_bwdw_lib PROPERTIES
@@ -169,7 +164,6 @@ if(GEMM_KERNEL_HEADERS)
     target_include_directories(gpu_helper PRIVATE
         ${PROJECT_SOURCE_DIR}/include
         ${PROJECT_SOURCE_DIR}/../include  # CK-tile core headers (ck_tile/core.hpp)
-        ${PROJECT_SOURCE_DIR}/dispatcher/include
     )
     
     target_link_libraries(gpu_helper PRIVATE
