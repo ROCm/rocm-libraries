@@ -312,7 +312,7 @@ class TestValidateGRsCompleteBeforeLr1s(CMSValidationTestBase):
         Passing case where the GlobalRead order is swapped.
         """
         assert self.num_vmfma == 8
-        self.kernel["SwapGlobalReadOrder"] = True
+        self.kernel["SwapGlobalReadOrder"] = 1
 
         optSchedule = {
             "SYNC": [[0, 1, 1, 4, 4, self.num_vmfma-1]],
@@ -340,7 +340,7 @@ class TestValidateGRsCompleteBeforeLr1s(CMSValidationTestBase):
         E.g. Someone forgets that the GRAs actually load B and the GRBs actually load A and scheudles them as normally.
         """
         assert self.num_vmfma == 8
-        self.kernel["SwapGlobalReadOrder"] = True
+        self.kernel["SwapGlobalReadOrder"] = 1
 
         optSchedule = {
             "SYNC": [[0, 1, 1, 4, 4, self.num_vmfma-1]],

@@ -132,28 +132,28 @@ void BatchnormFwdInferencePlan::compile(const IKernelCompiler& kernelCompiler,
     // Check if 4D (NCHW/NHWC) or 5D (NCDHW/NDHWC)
     if(xDims->size() == 4)
     {
-        n = static_cast<int>(xDims->Get(0));
-        c = static_cast<int>(xDims->Get(1));
-        h = static_cast<int>(xDims->Get(2));
-        w = static_cast<int>(xDims->Get(3));
+        n = checkedNarrowToInt(xDims->Get(0), "n");
+        c = checkedNarrowToInt(xDims->Get(1), "c");
+        h = checkedNarrowToInt(xDims->Get(2), "h");
+        w = checkedNarrowToInt(xDims->Get(3), "w");
 
-        nStride = static_cast<int>(xStrides->Get(0));
-        cStride = static_cast<int>(xStrides->Get(1));
-        wStride = static_cast<int>(xStrides->Get(3));
+        nStride = checkedNarrowToInt(xStrides->Get(0), "nStride");
+        cStride = checkedNarrowToInt(xStrides->Get(1), "cStride");
+        wStride = checkedNarrowToInt(xStrides->Get(3), "wStride");
     }
     else if(xDims->size() == 5)
     {
-        n = static_cast<int>(xDims->Get(0));
-        c = static_cast<int>(xDims->Get(1));
-        auto d = static_cast<int>(xDims->Get(2));
-        h = static_cast<int>(xDims->Get(3));
-        w = static_cast<int>(xDims->Get(4));
+        n = checkedNarrowToInt(xDims->Get(0), "n");
+        c = checkedNarrowToInt(xDims->Get(1), "c");
+        auto d = checkedNarrowToInt(xDims->Get(2), "d");
+        h = checkedNarrowToInt(xDims->Get(3), "h");
+        w = checkedNarrowToInt(xDims->Get(4), "w");
         // For 5D, combine D*H*W into spatial dimension
         h = d * h;
 
-        nStride = static_cast<int>(xStrides->Get(0));
-        cStride = static_cast<int>(xStrides->Get(1));
-        wStride = static_cast<int>(xStrides->Get(4));
+        nStride = checkedNarrowToInt(xStrides->Get(0), "nStride");
+        cStride = checkedNarrowToInt(xStrides->Get(1), "cStride");
+        wStride = checkedNarrowToInt(xStrides->Get(4), "wStride");
     }
     else
     {
@@ -267,15 +267,16 @@ void BatchnormFwdInferencePlan::execute(const Handle& handle,
     }
 
     // Get device buffer pointers
-    auto xBuffer = findDeviceBuffer(_inferenceParams.x()->uid(), deviceBuffers, numDeviceBuffers);
-    auto scaleBuffer
-        = findDeviceBuffer(_inferenceParams.scale()->uid(), deviceBuffers, numDeviceBuffers);
-    auto biasBuffer
-        = findDeviceBuffer(_inferenceParams.bias()->uid(), deviceBuffers, numDeviceBuffers);
-    auto estMeanBuffer
-        = findDeviceBuffer(_inferenceParams.estMean()->uid(), deviceBuffers, numDeviceBuffers);
-    auto invVarianceBuffer
-        = findDeviceBuffer(_inferenceParams.invVariance()->uid(), deviceBuffers, numDeviceBuffers);
+    auto xBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+        _inferenceParams.x()->uid(), deviceBuffers, numDeviceBuffers);
+    auto scaleBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+        _inferenceParams.scale()->uid(), deviceBuffers, numDeviceBuffers);
+    auto biasBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+        _inferenceParams.bias()->uid(), deviceBuffers, numDeviceBuffers);
+    auto estMeanBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+        _inferenceParams.estMean()->uid(), deviceBuffers, numDeviceBuffers);
+    auto invVarianceBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+        _inferenceParams.invVariance()->uid(), deviceBuffers, numDeviceBuffers);
 
     float activationAlpha = 0.0f;
     float activationBeta = 0.0f;
@@ -283,7 +284,7 @@ void BatchnormFwdInferencePlan::execute(const Handle& handle,
     // Launch kernel with appropriate output buffer
     if(_inferenceParams.optActivation().has_value() && _inferenceParams.activationOut() != nullptr)
     {
-        auto activationOutBuffer = findDeviceBuffer(
+        auto activationOutBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
             _inferenceParams.activationOut()->uid(), deviceBuffers, numDeviceBuffers);
 
         // Get activation parameters
@@ -309,8 +310,8 @@ void BatchnormFwdInferencePlan::execute(const Handle& handle,
     }
     else
     {
-        auto yBuffer
-            = findDeviceBuffer(_inferenceParams.y()->uid(), deviceBuffers, numDeviceBuffers);
+        auto yBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+            _inferenceParams.y()->uid(), deviceBuffers, numDeviceBuffers);
 
         _runnableKernel->launch(handle.getStream(),
                                 xBuffer.ptr,

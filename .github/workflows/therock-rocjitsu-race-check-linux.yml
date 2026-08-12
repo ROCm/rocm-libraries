@@ -1,0 +1,132 @@
+# This reusable workflow is a narrow post-build instrumentation job for
+# hipBLASLt. It fetches BLAS artifacts from the just-finished TheRock build and
+# runs two small workloads under rocjitsu's race detector. The workloads run
+# entirely under CPU-side emulation, so the workflow uses the CPU build runner
+# instead of consuming GPU test capacity.
+
+name: TheRock rocjitsu race check Linux
+
+on:
+  workflow_call:
+    inputs:
+      therock_ref:
+        type: string
+        required: true
+      build_runs_on:
+        type: string
+        required: true
+      amdgpu_families:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  rocjitsu-race-check-linux:
+    name: rocjitsu race check (${{ inputs.amdgpu_families }})
+    # This job is advisory. Failures remain visible, but continue-on-error keeps
+    # the calling Linux workflow successful. ROCm/rocm-libraries#10072 verifies
+    # this behavior.
+    # TODO(AIHPBLAS-3605): Remove after the check is reliably green.
+    continue-on-error: true
+    runs-on: ${{ inputs.build_runs_on }}
+    timeout-minutes: 90
+    container:
+      # Use a plain Ubuntu image without ROCm preinstalled. The ROCm runtime,
+      # compiler, hipBLASLt, and TensileLite all come from TheRock artifacts
+      # fetched below, so this job tests the PR-produced payload.
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+      options: --ipc host
+        --user 0:0
+        --ulimit memlock=-1:-1
+        --security-opt seccomp=unconfined
+    defaults:
+      run:
+        shell: bash
+    env:
+      VENV_DIR: ${{ github.workspace }}/.venv
+      ARTIFACT_RUN_ID: ${{ github.run_id }}
+      OUTPUT_ARTIFACTS_DIR: ./build
+      ROCM_PATH: ${{ github.workspace }}/build
+      AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
+      ROCJITSU_SOURCE_DIR: ${{ github.workspace }}/rocm-systems/emulation/rocjitsu
+      ROCJITSU_BUILD_DIR: ${{ github.workspace }}/rocjitsu-build
+      RACE_REPORT_DIR: ${{ github.workspace }}/race-reports
+      # The driver uses these values for its two timeout commands. Both are
+      # shorter than the job timeout, so reports can still upload after a
+      # workload timeout.
+      RACE_TIMEOUT_SECONDS: "180"
+      TENSILELITE_TIMEOUT_SECONDS: "420"
+    steps:
+      # The job needs three inputs in one workspace:
+      #   1. TheRock actions/scripts to fetch the exact artifacts from this run.
+      #   2. This rocm-libraries checkout for the race-check driver script.
+      #   3. rocm-systems source for rocjitsu until rocjitsu is packaged as a
+      #      complete runnable artifact.
+      - name: Checkout TheRock repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: "ROCm/TheRock"
+          ref: ${{ inputs.therock_ref }}
+
+      - name: Checkout rocm-libraries repository for scripts
+        timeout-minutes: 30
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          path: rocm-libraries
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: true
+
+      - name: Checkout rocm-systems for rocjitsu
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          repository: ROCm/rocm-systems
+          # Pin the source used by every target in the workflow run.
+          ref: bded72bb7d1fc7e25620dcf35e2cd11eade08b26
+          path: rocm-systems
+          sparse-checkout: |
+            emulation/rocjitsu
+            shared/machine-readable-isa/isa
+          sparse-checkout-cone-mode: true
+
+      # The pinned base image already provides CA certificates, CMake, Git, and
+      # Ninja. Install only the remaining host development files needed for the
+      # local rocjitsu source build. ROCm runtime pieces come from TheRock
+      # artifacts.
+      - name: Install rocjitsu build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            libdrm-dev
+
+      # Pull the BLAS runtime and test payload from the current TheRock build.
+      # This is what keeps the check aligned with the exact hipBLASLt and
+      # TensileLite artifacts produced by the PR, rather than an image-local or
+      # previously installed ROCm tree.
+      - name: Run setup test environment workflow
+        timeout-minutes: 15
+        uses: ./.github/actions/setup_test_environment
+        with:
+          ARTIFACT_RUN_ID: ${{ env.ARTIFACT_RUN_ID }}
+          ARTIFACT_GROUP: ${{ inputs.amdgpu_families }}
+          OUTPUT_ARTIFACTS_DIR: ${{ env.OUTPUT_ARTIFACTS_DIR }}
+          VENV_DIR: ${{ env.VENV_DIR }}
+          FETCH_ARTIFACT_ARGS: --blas --tests
+
+      - name: Run rocjitsu race check
+        timeout-minutes: 75
+        run: bash rocm-libraries/.github/scripts/run_rocjitsu_hipblaslt_race_check.sh
+
+      # Upload even on failure. The report directory contains the per-workload
+      # stdout logs, rocjitsu sink files, race.log files, generated reduced
+      # TensileLite input/output, and timing.tsv; without this artifact a failed
+      # detector run is usually not actionable from the console log alone.
+      - name: Upload race reports
+        if: ${{ always() }}
+        uses: actions/upload-artifact@de65e23aa2b7e23d713bb51fbfcb6d502f8667d8 # v4.6.2
+        with:
+          name: rocjitsu-race-reports-${{ inputs.amdgpu_families }}
+          path: race-reports/
+          if-no-files-found: ignore

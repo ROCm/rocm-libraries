@@ -1,0 +1,61 @@
+{% block includes %}
+// Include utils for {{algo_name}}_config<...>.
+#include "rocprim/device/detail/device_config_helper.hpp" 
+// Include 'rocprim::empty_type'.
+#include "rocprim/types.hpp" 
+// Include main benchmarking logic {{algo_type}}_{{algo_name}}_benchmark.
+#include "benchmark_{{algo_type}}_{{algo_name}}.hpp"
+// Include primbench executor.
+#include "primbench.hpp"
+// Include fixed-width integers for interop with python.
+#include <cstdint>
+{% endblock %}
+
+{% block extern_c_wrapper %}
+extern "C" float {{algo_type}}_{{algo_name}}_wrapper(
+    {% block arguments %}
+    uint64_t bytes_size
+    {% endblock %}
+)
+{
+    // Flush is required for fancy primbench printing due to use
+    // of terminal control characters.
+    std::cout << std::flush;
+
+    using config = {% block config_constructor scoped required %}{% endblock -%};
+
+    {% block type_definitions %}
+    using key_type = {{key_type}};
+    {% if value_type %}
+    using value_type = {{value_type}};
+    {% else %}
+    using value_type = rocprim::empty_type;
+    {% endif %}
+    {% endblock %}
+
+    {% block benchmark_type %}
+    using benchmark_type = {{algo_type}}_{{algo_name}}_benchmark<key_type, value_type, config>;
+    {% endblock %}
+
+    {% block primbench_settings %}
+    auto settings = primbench::settings();
+    settings.json_out = "/dev/null";
+    settings.size = bytes_size;
+    settings.skip_header = true;
+    {% endblock %}
+
+    {% block primbench_args %}
+    char* args[] = { "benchmark-executable" /* primbench requires an executable name for exposing --help */ };
+    {% endblock %}
+    
+    {% block primbench_executor %}
+    auto executor = primbench::executor(1, args, settings);
+    {% endblock %}
+
+    executor.queue<benchmark_type>();
+    executor.run();
+
+    // Return the time as milliseconds per GiB.
+    return (1000 * primbench::GiB) / executor.get_last_bytes_per_second();
+}
+{% endblock %}
