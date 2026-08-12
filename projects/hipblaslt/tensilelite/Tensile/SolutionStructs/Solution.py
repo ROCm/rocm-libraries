@@ -5163,8 +5163,10 @@ class Solution(collections.abc.Mapping):
     if state["TDMPlusLdsBuf"] != 0:
       if not (state["enableTDMA"] and state["enableTDMB"]) or state["PrefetchGlobalRead"] != 2:
         state["TDMPlusLdsBuf"] = 0
-      # StreamK not support yet. Need to take care of tail and PAP LDS bank handling.
-      if state.get("StreamK", 0):
+      # PAP saves and restores the TDM LDS bank through a single bit in
+      # SkPrefetchPrimed, which cannot name three buffers. PAP implies StreamK==3,
+      # so plain StreamK keeps the extra buffer and only PAP falls back to two.
+      if state["PrefetchAcrossPersistent"]:
         state["TDMPlusLdsBuf"] = 0
 
     # Here, 1LDSBuffer == -1 is not resolved yet.

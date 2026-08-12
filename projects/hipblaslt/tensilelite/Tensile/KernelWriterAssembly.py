@@ -19962,39 +19962,37 @@ class KernelWriterAssembly(KernelWriter):
     return mod
 
   def tdmResetTailLdsBuffer(self, kernel: Mapping, ldsAddrSgprName: str) -> Module:
-    # LdsOffsetA_Blk is a byte offset, not necessarily a power of two, so buffer 1
+    # This has to be idempotent: under StreamK both resetTDMDescriptorForTail and the
+    # tail globalReadDo normalize the same descriptor, so it is applied twice. Note
+    # that subtracting LDSBufferWriteInc is not idempotent -- the second application
+    # drops an already normalized descriptor a block below buffer 0, which wraps
+    # unsigned and puts the tail writes outside LDS.
+    # LdsOffsetA_Blk is a byte offset, not necessarily a power of two, so a buffer
     # has to be detected by comparison and removed by subtraction. Using it as an
     # AND mask aliases every descriptor base that shares bits with it (B and the MX
     # scales do), which moves the tail writes into a different tensor's LDS region.
+    # Every descriptor base sits inside block 0, so walking the blocks high to low
+    # normalizes any buffer count in one pass and keeps a descriptor in buffer 2 from
+    # stopping in buffer 1.
+    # The reads this rendezvous with land on buffer 0 too: the tail reset restores
+    # LocalReadAddr from LocalReadAddrOrig with LDSBufferReadInc zeroed. That
+    # requires Orig to have been re-snapshotted after the wider-local-read
+    # recalculation rebuilt the read addresses (see the tail loop in KernelWriter);
+    # without it Orig still holds the wide-read address and the tail reads garbage.
     mod = Module("TDM reset tail LDS buffer")
     blkOffset: int = kernel["LdsOffsetA_Blk"]
     if blkOffset == 0:
       return mod
-    if self.states.IncLdsBufSwitch:
-      # 3+ buffers: LDSBufferWriteInc holds the descriptor's current block offset
-      # exactly (0, blk, 2*blk, ...), so one subtraction normalizes any buffer count,
-      # where the compare-and-subtract below removes a single block and would leave a
-      # descriptor in buffer 2 sitting in buffer 1.
-      # The reads this rendezvous with land on buffer 0 too: the tail reset restores
-      # LocalReadAddr from LocalReadAddrOrig with LDSBufferReadInc zeroed. That
-      # requires Orig to have been re-snapshotted after the wider-local-read
-      # recalculation rebuilt the read addresses (see the tail loop in KernelWriter);
-      # without it Orig still holds the wide-read address and the tail reads garbage.
-      mod.add(SSubU32(dst=sgpr(ldsAddrSgprName), src0=sgpr(ldsAddrSgprName),
-                      src1=sgpr("LDSBufferWriteInc"),
+    for blk in range(self.states.numLDSBlk - 1, 0, -1):
+      inBuffer0 = Label(self.labels.getNameInc("TdmTailDescriptorInBuffer0"), "")
+      cmpComment = "TDM tail descriptor already in buffer 0?" if blk == 1 else \
+                   "TDM tail descriptor below buffer %u?"%blk
+      mod.add(SCmpLtU32(src0=sgpr(ldsAddrSgprName), src1=blkOffset * blk,
+                        comment=cmpComment))
+      mod.add(SCBranchSCC1(labelName=inBuffer0.getLabelName(), comment="skip buffer normalization"))
+      mod.add(SSubU32(dst=sgpr(ldsAddrSgprName), src0=sgpr(ldsAddrSgprName), src1=blkOffset * blk,
                       comment="TDM writes to buffer 0, same half as tail local reads"))
-      return mod
-    # LdsOffsetA_Blk is a byte offset, not necessarily a power of two, so buffer 1
-    # has to be detected by comparison and removed by subtraction. Using it as an
-    # AND mask aliases every descriptor base that shares bits with it (B and the MX
-    # scales do), which moves the tail writes into a different tensor's LDS region.
-    inBuffer0 = Label(self.labels.getNameInc("TdmTailDescriptorInBuffer0"), "")
-    mod.add(SCmpLtU32(src0=sgpr(ldsAddrSgprName), src1=blkOffset,
-                      comment="TDM tail descriptor already in buffer 0?"))
-    mod.add(SCBranchSCC1(labelName=inBuffer0.getLabelName(), comment="skip buffer normalization"))
-    mod.add(SSubU32(dst=sgpr(ldsAddrSgprName), src0=sgpr(ldsAddrSgprName), src1=blkOffset,
-                    comment="TDM writes to buffer 0, same half as tail local reads"))
-    mod.add(inBuffer0)
+      mod.add(inBuffer0)
     return mod
 
   def papTdmShiftTailLdsBank(self, kernel: Mapping, tPA: Mapping, tPB: Mapping) -> Module:
