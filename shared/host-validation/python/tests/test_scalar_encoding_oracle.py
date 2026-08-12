@@ -188,9 +188,7 @@ def unpack_little_endian(storage, count, bits_per_value):
         value = 0
         for bit in range(bits_per_value):
             absolute_bit = bit_offset + bit
-            value |= (
-                (storage[absolute_bit // 8] >> (absolute_bit % 8)) & 1
-            ) << bit
+            value |= ((storage[absolute_bit // 8] >> (absolute_bit % 8)) & 1) << bit
         values.append(value)
     return values
 
@@ -207,7 +205,9 @@ def pack_little_endian(codes, bits_per_value):
 
 
 def encode_codes(format_spec, values):
-    tensor = hv.from_numpy(np.asarray(values, dtype=np.float32), format_spec.scalar_type)
+    tensor = hv.from_numpy(
+        np.asarray(values, dtype=np.float32), format_spec.scalar_type
+    )
     storage = tensor.storage
     if format_spec.storage_bits == 16:
         return [int(value) for value in np.frombuffer(storage, dtype="<u2")]
@@ -303,7 +303,9 @@ class ScalarEncodingOracleTests(unittest.TestCase):
                     lower_raw + 1,
                 ]
             )
-        encoded = hv.from_numpy(np.asarray(values, dtype=np.float32), hv.ScalarType.E8M0)
+        encoded = hv.from_numpy(
+            np.asarray(values, dtype=np.float32), hv.ScalarType.E8M0
+        )
         self.assertEqual(encoded.storage, bytes(expected))
 
     def test_finite_overflow_infinity_and_nan_policies(self):
@@ -319,12 +321,16 @@ class ScalarEncodingOracleTests(unittest.TestCase):
             expected = [
                 format_spec.maximum_finite_raw,
                 format_spec.finite_overflow_raw,
-                format_spec.infinity_raw
-                if format_spec.infinity_raw is not None
-                else format_spec.maximum_finite_raw,
-                format_spec.nan_raw
-                if format_spec.nan_raw is not None
-                else format_spec.maximum_finite_raw,
+                (
+                    format_spec.infinity_raw
+                    if format_spec.infinity_raw is not None
+                    else format_spec.maximum_finite_raw
+                ),
+                (
+                    format_spec.nan_raw
+                    if format_spec.nan_raw is not None
+                    else format_spec.maximum_finite_raw
+                ),
             ]
 
             if format_spec.signed:
