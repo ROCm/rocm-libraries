@@ -17,6 +17,27 @@
 import struct
 from typing import Any, BinaryIO, Dict, List, Optional, Tuple
 
+from rocke.portable_ir.src import abi as _abi
+
+
+def _provenance() -> Tuple[str, str]:
+    """Best-effort (engine version, build id) of the engine on this machine.
+
+    Soft on purpose, but only for the one expected reason: no shared library is
+    built here. These strings are never compared by any reader -- only
+    `min_reader` decides anything -- so building a bundle, a pure data
+    operation, must not come to require a compiled engine merely to record a
+    debugging aid. The catch stays narrow so that a real fault in the bindings
+    surfaces instead of quietly stamping an empty provenance, which is what a
+    bare `except Exception` did here at first."""
+    try:
+        from rocke.portable_ir.src import online
+
+        return online.provenance()
+    except (ImportError, OSError, RuntimeError):
+        return ("", "")
+
+
 BUNDLE_SCHEMA = "rocke.bundle/v1"
 
 
@@ -121,9 +142,33 @@ def cbor_decode(buf: bytes) -> Any:
 # --------------------------------------------------------------------------
 # bundle format
 # --------------------------------------------------------------------------
-def build_bundle(entries: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """entries: list of {"key", "arch", "family"?, "recipe"}."""
-    return {"schema": BUNDLE_SCHEMA, "entries": entries}
+def build_bundle(
+    entries: List[Dict[str, Any]], *, stamp_abi: bool = True
+) -> Dict[str, Any]:
+    """entries: list of {"key", "arch", "family"?, "recipe"}.
+
+    The bundle is stamped with the oldest engine that can read it, derived from
+    what its recipes actually use rather than from this generator's own version
+    -- see src/abi.py for why that distinction is the whole point. The container
+    takes the strictest requirement among its entries, since a reader that
+    cannot handle one recipe cannot be handed the bundle and left to discover
+    that at lookup time.
+
+    `stamp_abi=False` is for tests that need to compare bundle bytes against a
+    fixture recorded before stamping existed."""
+    bundle = {"schema": BUNDLE_SCHEMA, "entries": entries}
+    if not stamp_abi:
+        return bundle
+    need = max(
+        [1]
+        + [
+            _abi.recipe_min_reader(e["recipe"], strict=False)
+            for e in entries
+            if isinstance(e.get("recipe"), dict)
+        ]
+    )
+    engine, build_id = _provenance()
+    return _abi.stamp(bundle, min_reader=need, engine=engine, build_id=build_id)
 
 
 def write_bundle(path: str, entries: List[Dict[str, Any]]) -> int:

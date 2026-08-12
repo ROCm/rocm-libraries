@@ -49,9 +49,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "rocke/abi.h"
 #include "rocke/arena.h"
 #include "rocke/cbor_dom.h"
 #include "rocke/json_dom.h"
+#include "rocke/recipe_guard.h"
+#include "rocke/recipe_launch.h"
 
 /* ------------------------------------------------------------------ state */
 
@@ -411,6 +414,194 @@ static long rv_int(rvm_t* vm, const jd_val_t* e)
     }
     rv_fail(vm, "bad intexpr");
     return 0;
+}
+
+/* ------------------------------------------------------------- wire ABI gate */
+
+/* Can this engine read this artifact? Reads the optional
+ * "abi": {"min_reader": N, ...} block a generator stamps on a recipe or bundle
+ * and refuses when N exceeds what this build understands. See rocke/abi.h.
+ *
+ * Checked BEFORE the schema string, and the ordering is for the error message
+ * rather than for safety. A future artifact will carry both a new schema and a
+ * higher min_reader; reporting "bad/missing schema (want rocke.recipe/v1)"
+ * sends the reader looking for a corrupt file, while "needs a reader >= 2, this
+ * engine is 1" names the actual problem and its fix.
+ *
+ * An ABSENT block means level 1, so every recipe recorded before this existed
+ * still replays. Absence has to mean the floor rather than "unknown": treating
+ * it as unreadable would strand existing bundles for no safety gain, since a
+ * level-1 artifact is exactly what a level-1 engine was written to read. */
+static bool rv_abi_ok(const jd_val_t* node, char* err, size_t err_cap)
+{
+    const jd_val_t* abi = rocke_jget(node, "abi");
+    if(!abi || abi->kind != JD_OBJ)
+        return true;
+    double need;
+    if(!rocke_jnum(rocke_jget(abi, "min_reader"), &need))
+        return true;
+    if((int)need <= ROCKE_RECIPE_ABI)
+        return true;
+    if(err && err_cap)
+    {
+        const char* who = rocke_jstr(rocke_jget(abi, "engine"));
+        ROCKE_ERR_SNPRINTF(err,
+                           err_cap,
+                           "artifact needs a recipe reader >= %d, this engine is %d "
+                           "(written by engine %s)",
+                           (int)need,
+                           ROCKE_RECIPE_ABI,
+                           who ? who : "?");
+    }
+    return false;
+}
+
+/* --------------------------------------------------------- guard evaluation */
+
+/* The admission guard on a rolled recipe (schema "rocke.guard/v1"): a short,
+ * ORDERED list of intexpr predicates over the free axes, derived at generation
+ * time from the family's own Python gate and verified against it out of sample
+ * (python/rocke/portable_ir/src/guard.py). See rocke/recipe_guard.h.
+ *
+ * It reuses rv_int above rather than carrying its own evaluator. That is the
+ * point of expressing guards in the recipe language at all: no second grammar to
+ * implement, and the CI gate that already pins rv_int against
+ * recipe_expand.eval_intexpr covers guards without being extended.
+ *
+ * Rule ORDER is part of the contract, not presentation, and so is stopping at
+ * the first failure. This evaluator and the Python one disagree about `mod` and
+ * `div` with a negative left operand (Python floors, C truncates), which has
+ * never mattered because spec values are sizes -- and a guard is the first thing
+ * to be handed a hostile one. Guards stay clear of it two ways: they only ever
+ * test whether a remainder is ZERO, which is the same question in either
+ * convention, and the generator puts a bounds rule ahead of the divisibility
+ * rule on an axis so a negative is rejected before the `mod` is reached. Do not
+ * reorder rules, and do not evaluate them all to collect every reason. */
+
+/* Bound by the caller, as either an int or a string? */
+static bool rv_bound(rvm_t* vm, const char* name)
+{
+    long tmp;
+    if(!name)
+        return false;
+    return rv_spec_int(vm, name, &tmp) || rv_spec_str(vm, name) != NULL;
+}
+
+/* Does the caller's binding agree with every field of this recorded point? */
+static bool rv_point_matches(rvm_t* vm, const jd_val_t* pt)
+{
+    if(!pt || pt->kind != JD_OBJ)
+        return false;
+    for(int i = 0; i < pt->obj_len; i++)
+    {
+        const char* k = pt->obj[i].key;
+        const jd_val_t* v = pt->obj[i].val;
+        const char* want = rocke_jstr(v);
+        if(want)
+        {
+            const char* have = rv_spec_str(vm, k);
+            if(!have || strcmp(have, want) != 0)
+                return false;
+            continue;
+        }
+        double d;
+        long have;
+        if(!rocke_jnum(v, &d) || !rv_spec_int(vm, k, &have) || have != (long)d)
+            return false;
+    }
+    return true;
+}
+
+/* Evaluate `guard` against the spec bound into `vm`. `vm` needs only its
+ * ints/strs populated -- no builder, no registers -- which is what lets the
+ * public entry points answer without lowering anything. */
+static rocke_guard_verdict_t
+    rv_guard_eval(rvm_t* vm, const jd_val_t* guard, unsigned flags, char* reason, size_t cap)
+{
+    if(reason && cap)
+        reason[0] = '\0';
+    if(!guard || guard->kind != JD_OBJ)
+        return ROCKE_GUARD_ABSENT;
+
+    const char* schema = rocke_jstr(rocke_jget(guard, "schema"));
+    if(!schema || strcmp(schema, "rocke.guard/v1") != 0)
+    {
+        /* An unreadable guard is a refusal, never an accept. This engine is
+         * older than the bundle it was handed, so it cannot know what the newer
+         * guard would have rejected -- and the one thing it must not do is wave
+         * through a configuration on the strength of not understanding it. */
+        if(reason && cap)
+            ROCKE_ERR_SNPRINTF(reason,
+                               cap,
+                               "unsupported guard schema '%s' (this engine knows rocke.guard/v1)",
+                               schema ? schema : "?");
+        return ROCKE_GUARD_REFUSED;
+    }
+
+    const jd_val_t* freev = rocke_jget(guard, "free");
+    if(freev && freev->kind == JD_ARR)
+        for(int i = 0; i < freev->arr_len; i++)
+        {
+            const char* axis = rocke_jstr(freev->arr[i]);
+            if(!rv_bound(vm, axis))
+            {
+                if(reason && cap)
+                    ROCKE_ERR_SNPRINTF(reason, cap, "free axis '%s' not bound", axis ? axis : "?");
+                return ROCKE_GUARD_REFUSED;
+            }
+        }
+
+    const jd_val_t* rules = rocke_jget(guard, "rules");
+    if(rules && rules->kind == JD_ARR)
+        for(int i = 0; i < rules->arr_len; i++)
+        {
+            const jd_val_t* rule = rules->arr[i];
+            const jd_val_t* pred = rocke_jget(rule, "pred");
+            const char* why = rocke_jstr(rocke_jget(rule, "reason"));
+            bool saved = vm->failed;
+            long ok = rv_int(vm, pred);
+            if(vm->failed && !saved)
+            {
+                /* A rule that could not be evaluated decides nothing, so it
+                 * cannot be allowed to pass. Clear the sticky failure: the VM
+                 * has not emitted anything and the caller gets the verdict. */
+                vm->failed = false;
+                if(reason && cap)
+                    ROCKE_ERR_SNPRINTF(
+                        reason, cap, "guard rule %d did not evaluate: %s", i, vm->err);
+                return ROCKE_GUARD_REFUSED;
+            }
+            if(!ok)
+            {
+                if(reason && cap)
+                    ROCKE_ERR_SNPRINTF(reason, cap, "%s", why ? why : "guard rule rejected");
+                return ROCKE_GUARD_REFUSED;
+            }
+        }
+
+    if(flags & ROCKE_GUARD_REQUIRE_VERIFIED)
+    {
+        const jd_val_t* pts = rocke_jget(guard, "verified");
+        if(!pts || pts->kind != JD_ARR || pts->arr_len == 0)
+        {
+            if(reason && cap)
+                ROCKE_ERR_SNPRINTF(
+                    reason,
+                    cap,
+                    "ROCKE_GUARD_REQUIRE_VERIFIED but the guard carries no verified points");
+            return ROCKE_GUARD_REFUSED;
+        }
+        for(int i = 0; i < pts->arr_len; i++)
+            if(rv_point_matches(vm, pts->arr[i]))
+                return ROCKE_GUARD_ADMITTED;
+        if(reason && cap)
+            ROCKE_ERR_SNPRINTF(reason,
+                               cap,
+                               "binding is not one of the %d generator-verified points",
+                               pts->arr_len);
+        return ROCKE_GUARD_REFUSED;
+    }
+    return ROCKE_GUARD_ADMITTED;
 }
 
 /* ----------------------------------------------- format names + rolled lists */
@@ -1087,6 +1278,9 @@ static rocke_status_t rv_run_root(jd_val_t* root,
                                   char* err,
                                   size_t err_cap)
 {
+    if(!rv_abi_ok(root, err, err_cap))
+        return ROCKE_ERR_VALUE;
+
     const char* schema = rocke_jstr(rocke_jget(root, "schema"));
     if(!schema || strcmp(schema, "rocke.recipe/v1") != 0)
     {
@@ -1109,6 +1303,19 @@ static rocke_status_t rv_run_root(jd_val_t* root,
      * iterations, so they must keep fresh names to avoid SSA collisions. */
     const jd_val_t* spec = rocke_jget(root, "spec");
     vm.exact_names = !spec || spec->kind != JD_ARR || spec->arr_len == 0;
+
+    /* Admission, before the builder exists and before a single op is emitted.
+     * Enforcing here rather than only in the standalone check API means the
+     * guard cannot be skipped by a caller who forgot it: every path that
+     * replays a recipe -- online, offline, bundle, standalone -- goes through
+     * this function. A refusal costs nothing and leaves nothing to free. */
+    char gwhy[ROCKE_ERR_MSG_CAP];
+    if(rv_guard_eval(&vm, rocke_jget(root, "guard"), 0u, gwhy, sizeof gwhy) == ROCKE_GUARD_REFUSED)
+    {
+        if(err && err_cap)
+            ROCKE_ERR_SNPRINTF(err, err_cap, "recipe guard refused this spec: %s", gwhy);
+        return ROCKE_ERR_VALUE;
+    }
 
     char kname[256];
     const char* fmt = rocke_jstr(rocke_jget(root, "kernel_name_fmt"));
@@ -1325,6 +1532,16 @@ rocke_status_t rocke_recipe_run_from_bundle_cbor(const unsigned char* data,
         return ROCKE_ERR_VALUE;
     }
 
+    /* The bundle carries its own level as well as each recipe's: a bundle can
+     * gain container-level structure (a key index, say) independently of what
+     * its recipes use, and a reader that cannot navigate the container must not
+     * reach the recipes at all. rv_run_root checks the recipe's own block. */
+    if(!rv_abi_ok(root, err, err_cap))
+    {
+        rocke_arena_destroy(&arena);
+        return ROCKE_ERR_VALUE;
+    }
+
     const char* schema = rocke_jstr(rocke_jget(root, "schema"));
     if(!schema || strcmp(schema, "rocke.bundle/v1") != 0)
     {
@@ -1347,4 +1564,570 @@ rocke_status_t rocke_recipe_run_from_bundle_cbor(const unsigned char* data,
         (jd_val_t*)recipe, ints, n_ints, strs, n_strs, out_builder, out_kernel, err, err_cap);
     rocke_arena_destroy(&arena);
     return st;
+}
+
+/* =============================== LAUNCH API ==============================
+ * Describe how to launch what a recipe builds: name, argument layout, grid.
+ * Contract and rationale: rocke/recipe_launch.h.
+ */
+
+struct rocke_launch_plan
+{
+    char* kernel_name;
+    bool has_geometry;
+    rocke_launch_dims_t grid;
+    rocke_launch_dims_t block;
+    unsigned lds_bytes;
+    rocke_arg_desc_t* args;
+    int n_args;
+    unsigned kernarg_size;
+};
+
+/* Classify a kernel parameter for kernarg packing.
+ *
+ * Refuses anything it cannot describe EXACTLY rather than guessing a width.
+ * A wrong size here does not fail, it silently shifts every following argument
+ * and the kernel reads garbage -- so an unsupported parameter has to stop the
+ * plan, not degrade it. This mirrors runtime/packing.py, which raises on the
+ * same set. */
+static bool rv_arg_classify(const rocke_type_t* t, rocke_arg_kind_t* kind, unsigned* size)
+{
+    if(!t)
+        return false;
+    if(t->kind == ROCKE_TYPE_PTR)
+    {
+        *kind = ROCKE_ARG_POINTER;
+        *size = 8;
+        return true;
+    }
+    if(t->kind != ROCKE_TYPE_SCALAR)
+        return false;
+    switch(t->scalar)
+    {
+    case ROCKE_SCALAR_I32:
+        *kind = ROCKE_ARG_I32, *size = 4;
+        return true;
+    case ROCKE_SCALAR_I64:
+        *kind = ROCKE_ARG_I64, *size = 8;
+        return true;
+    case ROCKE_SCALAR_F32:
+        *kind = ROCKE_ARG_F32, *size = 4;
+        return true;
+    default:
+        return false;
+    }
+}
+
+static char* rv_strdup(const char* s)
+{
+    if(!s)
+        s = "";
+    size_t n = strlen(s) + 1;
+    char* p = (char*)malloc(n);
+    if(p)
+        memcpy(p, s, n);
+    return p;
+}
+
+/* Read the optional "launch" block. Absent leaves has_geometry false; a block
+ * that is present but malformed is an error, because a caller that asked for a
+ * grid and silently got none would launch nothing. */
+static bool rv_plan_geometry(
+    rvm_t* vm, const jd_val_t* root, rocke_launch_plan_t* plan, char* err, size_t cap)
+{
+    const jd_val_t* L = rocke_jget(root, "launch");
+    if(!L)
+        return true;
+    if(L->kind != JD_OBJ)
+    {
+        if(err && cap)
+            ROCKE_ERR_SNPRINTF(err, cap, "recipe 'launch' is not an object");
+        return false;
+    }
+    struct
+    {
+        const char* key;
+        rocke_launch_dims_t* out;
+    } dims[2] = {{"grid", &plan->grid}, {"block", &plan->block}};
+    for(int d = 0; d < 2; d++)
+    {
+        const jd_val_t* a = rocke_jget(L, dims[d].key);
+        if(!a || a->kind != JD_ARR || a->arr_len != 3)
+        {
+            if(err && cap)
+                ROCKE_ERR_SNPRINTF(err, cap, "recipe launch.%s must be 3 intexprs", dims[d].key);
+            return false;
+        }
+        long v[3];
+        for(int i = 0; i < 3; i++)
+        {
+            v[i] = rv_int(vm, a->arr[i]);
+            if(vm->failed)
+            {
+                if(err && cap)
+                    ROCKE_ERR_SNPRINTF(err, cap, "recipe launch.%s: %s", dims[d].key, vm->err);
+                return false;
+            }
+            /* A non-positive extent means the geometry expression disagrees
+             * with the shape it was handed. Launching it would be a no-op or a
+             * HIP error far from the cause, so it is named here instead. */
+            if(v[i] < 1)
+            {
+                if(err && cap)
+                    ROCKE_ERR_SNPRINTF(err,
+                                       cap,
+                                       "recipe launch.%s[%d] evaluates to %ld, must be >= 1",
+                                       dims[d].key,
+                                       i,
+                                       v[i]);
+                return false;
+            }
+        }
+        dims[d].out->x = (unsigned)v[0];
+        dims[d].out->y = (unsigned)v[1];
+        dims[d].out->z = (unsigned)v[2];
+    }
+    const jd_val_t* lds = rocke_jget(L, "lds_bytes");
+    if(lds)
+    {
+        long v = rv_int(vm, lds);
+        if(vm->failed || v < 0)
+        {
+            if(err && cap)
+                ROCKE_ERR_SNPRINTF(
+                    err, cap, "recipe launch.lds_bytes: %s", vm->failed ? vm->err : "negative");
+            return false;
+        }
+        plan->lds_bytes = (unsigned)v;
+    }
+    plan->has_geometry = true;
+    return true;
+}
+
+static rocke_status_t rv_plan_on(jd_val_t* root,
+                                 const rocke_recipe_spec_int_t* ints,
+                                 int n_ints,
+                                 const rocke_recipe_spec_str_t* strs,
+                                 int n_strs,
+                                 rocke_launch_plan_t** out_plan,
+                                 char* err,
+                                 size_t err_cap)
+{
+    *out_plan = NULL;
+
+    /* The signature is whatever the recipe's `param` instructions declared, so
+     * it is read off the built kernel rather than re-derived from the DOM.
+     * Walking the program for `param` would be cheaper but would have to assume
+     * they are all top-level and unconditional; replaying makes no assumption
+     * and cannot disagree with the kernel that gets compiled. This also gets
+     * guard enforcement for free, since rv_run_root applies it. */
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* kernel = NULL;
+    rocke_status_t st = rv_run_root(root, ints, n_ints, strs, n_strs, &b, &kernel, err, err_cap);
+    if(st != ROCKE_OK)
+        return st;
+
+    rocke_launch_plan_t* plan = (rocke_launch_plan_t*)calloc(1, sizeof *plan);
+    if(!plan)
+    {
+        rocke_ir_builder_free(&b);
+        if(err && err_cap)
+            ROCKE_ERR_SNPRINTF(err, err_cap, "out of memory");
+        return ROCKE_ERR_OOM;
+    }
+
+    plan->kernel_name = rv_strdup(kernel ? kernel->name : "");
+    int n = kernel ? kernel->num_params : 0;
+    if(n > 0)
+    {
+        plan->args = (rocke_arg_desc_t*)calloc((size_t)n, sizeof *plan->args);
+        if(!plan->args)
+        {
+            rocke_ir_builder_free(&b);
+            rocke_launch_plan_free(plan);
+            if(err && err_cap)
+                ROCKE_ERR_SNPRINTF(err, err_cap, "out of memory");
+            return ROCKE_ERR_OOM;
+        }
+    }
+    /* Only now, so the failure path above cannot walk an array that was never
+     * allocated while freeing a plan that claims to have n of them. */
+    plan->n_args = n;
+
+    /* Natural alignment: each argument at an offset aligned to its own size.
+     * See the header -- packing back to back is correct only until a signature
+     * mixes widths, and then it is wrong everywhere after the first mix. */
+    unsigned off = 0;
+    for(int i = 0; i < n; i++)
+    {
+        const rocke_param_t* p = kernel->params[i];
+        rocke_arg_kind_t kind;
+        unsigned size;
+        if(!rv_arg_classify(p ? p->type : NULL, &kind, &size))
+        {
+            if(err && err_cap)
+                ROCKE_ERR_SNPRINTF(err,
+                                   err_cap,
+                                   "kernel arg '%s' has type '%s', which has no kernarg "
+                                   "representation here",
+                                   p && p->name ? p->name : "?",
+                                   p && p->type && p->type->name ? p->type->name : "?");
+            rocke_ir_builder_free(&b);
+            rocke_launch_plan_free(plan);
+            return ROCKE_ERR_VALUE;
+        }
+        off = (off + size - 1) / size * size;
+        /* Names are borrowed from the builder's arena, which is freed below. */
+        plan->args[i].name = rv_strdup(p->name);
+        plan->args[i].type_name = rv_strdup(p->type->name);
+        plan->args[i].kind = kind;
+        plan->args[i].size = size;
+        plan->args[i].offset = off;
+        off += size;
+    }
+    /* End of the last argument, deliberately NOT rounded up -- see the header. */
+    plan->kernarg_size = off;
+
+    rvm_t vm;
+    memset(&vm, 0, sizeof vm);
+    vm.ints = ints;
+    vm.n_ints = n_ints;
+    vm.strs = strs;
+    vm.n_strs = n_strs;
+    if(!rv_plan_geometry(&vm, root, plan, err, err_cap))
+    {
+        rocke_ir_builder_free(&b);
+        rocke_launch_plan_free(plan);
+        return ROCKE_ERR_VALUE;
+    }
+
+    rocke_ir_builder_free(&b);
+    *out_plan = plan;
+    return ROCKE_OK;
+}
+
+rocke_status_t rocke_recipe_plan_launch_cbor(const unsigned char* data,
+                                             size_t len,
+                                             const rocke_recipe_spec_int_t* ints,
+                                             int n_ints,
+                                             const rocke_recipe_spec_str_t* strs,
+                                             int n_strs,
+                                             rocke_launch_plan_t** out_plan,
+                                             char* err,
+                                             size_t err_cap)
+{
+    if(!data || !out_plan)
+    {
+        if(err && err_cap)
+            ROCKE_ERR_SNPRINTF(err, err_cap, "null data/out_plan");
+        return ROCKE_ERR_VALUE;
+    }
+    rocke_arena_t arena;
+    if(rocke_arena_init(&arena, 0) != 0)
+    {
+        if(err && err_cap)
+            ROCKE_ERR_SNPRINTF(err, err_cap, "arena init failed");
+        return ROCKE_ERR_OOM;
+    }
+    char perr[256];
+    jd_val_t* root = rocke_cbor_parse(data, len, &arena, perr, sizeof perr);
+    if(!root)
+    {
+        if(err && err_cap)
+            ROCKE_ERR_SNPRINTF(err, err_cap, "parse: %s", perr);
+        rocke_arena_destroy(&arena);
+        return ROCKE_ERR_VALUE;
+    }
+    rocke_status_t st = rv_plan_on(root, ints, n_ints, strs, n_strs, out_plan, err, err_cap);
+    rocke_arena_destroy(&arena);
+    return st;
+}
+
+rocke_status_t rocke_bundle_plan_launch_cbor(const unsigned char* data,
+                                             size_t len,
+                                             const char* key,
+                                             const char* arch,
+                                             const rocke_recipe_spec_int_t* ints,
+                                             int n_ints,
+                                             const rocke_recipe_spec_str_t* strs,
+                                             int n_strs,
+                                             rocke_launch_plan_t** out_plan,
+                                             char* err,
+                                             size_t err_cap)
+{
+    if(!data || !key || !out_plan)
+    {
+        if(err && err_cap)
+            ROCKE_ERR_SNPRINTF(err, err_cap, "null data/key/out_plan");
+        return ROCKE_ERR_VALUE;
+    }
+    rocke_arena_t arena;
+    if(rocke_arena_init(&arena, 0) != 0)
+    {
+        if(err && err_cap)
+            ROCKE_ERR_SNPRINTF(err, err_cap, "arena init failed");
+        return ROCKE_ERR_OOM;
+    }
+    char perr[256];
+    jd_val_t* root = rocke_cbor_parse(data, len, &arena, perr, sizeof perr);
+    if(!root)
+    {
+        if(err && err_cap)
+            ROCKE_ERR_SNPRINTF(err, err_cap, "parse: %s", perr);
+        rocke_arena_destroy(&arena);
+        return ROCKE_ERR_VALUE;
+    }
+    if(!rv_abi_ok(root, err, err_cap))
+    {
+        rocke_arena_destroy(&arena);
+        return ROCKE_ERR_VALUE;
+    }
+    const char* schema = rocke_jstr(rocke_jget(root, "schema"));
+    if(!schema || strcmp(schema, "rocke.bundle/v1") != 0)
+    {
+        if(err && err_cap)
+            ROCKE_ERR_SNPRINTF(err, err_cap, "bad/missing schema (want rocke.bundle/v1)");
+        rocke_arena_destroy(&arena);
+        return ROCKE_ERR_VALUE;
+    }
+    const jd_val_t* recipe = rv_bundle_find(root, key, arch);
+    if(!recipe)
+    {
+        if(err && err_cap)
+            ROCKE_ERR_SNPRINTF(
+                err, err_cap, "recipe '%s' (arch %s) not in bundle", key, arch ? arch : "*");
+        rocke_arena_destroy(&arena);
+        return ROCKE_ERR_KEY;
+    }
+    rocke_status_t st
+        = rv_plan_on((jd_val_t*)recipe, ints, n_ints, strs, n_strs, out_plan, err, err_cap);
+    rocke_arena_destroy(&arena);
+    return st;
+}
+
+const char* rocke_launch_plan_kernel_name(const rocke_launch_plan_t* plan)
+{
+    return plan ? plan->kernel_name : NULL;
+}
+
+bool rocke_launch_plan_geometry(const rocke_launch_plan_t* plan,
+                                rocke_launch_dims_t* out_grid,
+                                rocke_launch_dims_t* out_block,
+                                unsigned* out_lds_bytes)
+{
+    if(!plan || !plan->has_geometry)
+        return false;
+    if(out_grid)
+        *out_grid = plan->grid;
+    if(out_block)
+        *out_block = plan->block;
+    if(out_lds_bytes)
+        *out_lds_bytes = plan->lds_bytes;
+    return true;
+}
+
+int rocke_launch_plan_num_args(const rocke_launch_plan_t* plan)
+{
+    return plan ? plan->n_args : 0;
+}
+
+const rocke_arg_desc_t* rocke_launch_plan_arg(const rocke_launch_plan_t* plan, int i)
+{
+    if(!plan || i < 0 || i >= plan->n_args)
+        return NULL;
+    return &plan->args[i];
+}
+
+unsigned rocke_launch_plan_kernarg_size(const rocke_launch_plan_t* plan)
+{
+    return plan ? plan->kernarg_size : 0u;
+}
+
+void rocke_launch_plan_free(rocke_launch_plan_t* plan)
+{
+    if(!plan)
+        return;
+    for(int i = 0; plan->args && i < plan->n_args; i++)
+    {
+        free((void*)plan->args[i].name);
+        free((void*)plan->args[i].type_name);
+    }
+    free(plan->args);
+    free(plan->kernel_name);
+    free(plan);
+}
+
+/* ================================ GUARD API ==============================
+ * The enforcement surface for a JIT caller (hipDNN): answer "does this recipe
+ * serve this shape" with a CBOR parse and a few integer comparisons, and
+ * without building any IR. Contract and usage: rocke/recipe_guard.h.
+ */
+
+/* Shared tail of both public checks: bind the spec, evaluate, and report. */
+static rocke_status_t rv_check_guard_on(const jd_val_t* recipe,
+                                        const rocke_recipe_spec_int_t* ints,
+                                        int n_ints,
+                                        const rocke_recipe_spec_str_t* strs,
+                                        int n_strs,
+                                        unsigned flags,
+                                        rocke_guard_verdict_t* out_verdict,
+                                        char* reason,
+                                        size_t reason_cap)
+{
+    /* An artifact this engine cannot read is an ERROR, not a guard refusal. A
+     * caller has to be able to tell "this build is too old for this bundle",
+     * fixed by shipping matched artifacts, from "the kernel does not support
+     * this shape", fixed by routing elsewhere. Answering REFUSED here would
+     * send a deployment problem quietly down the fallback path, where it looks
+     * like an unsupported shape and nobody investigates. */
+    if(!rv_abi_ok(recipe, reason, reason_cap))
+        return ROCKE_ERR_VALUE;
+
+    rvm_t vm;
+    memset(&vm, 0, sizeof vm);
+    vm.ints = ints;
+    vm.n_ints = n_ints;
+    vm.strs = strs;
+    vm.n_strs = n_strs;
+
+    char why[ROCKE_ERR_MSG_CAP];
+    rocke_guard_verdict_t v
+        = rv_guard_eval(&vm, rocke_jget(recipe, "guard"), flags, why, sizeof why);
+    if(reason && reason_cap)
+        ROCKE_ERR_SNPRINTF(reason, reason_cap, "%s", why);
+    if(out_verdict)
+    {
+        *out_verdict = v;
+        return ROCKE_OK;
+    }
+    /* No out-param: the caller wants pass/fail, so a refusal has to arrive as a
+     * status or it would read as success. */
+    return v == ROCKE_GUARD_REFUSED ? ROCKE_ERR_VALUE : ROCKE_OK;
+}
+
+rocke_status_t rocke_recipe_check_guard_cbor(const unsigned char* data,
+                                             size_t len,
+                                             const rocke_recipe_spec_int_t* ints,
+                                             int n_ints,
+                                             const rocke_recipe_spec_str_t* strs,
+                                             int n_strs,
+                                             unsigned flags,
+                                             rocke_guard_verdict_t* out_verdict,
+                                             char* reason,
+                                             size_t reason_cap)
+{
+    if(out_verdict)
+        *out_verdict = ROCKE_GUARD_REFUSED;
+    if(!data)
+    {
+        if(reason && reason_cap)
+            ROCKE_ERR_SNPRINTF(reason, reason_cap, "null recipe data");
+        return ROCKE_ERR_VALUE;
+    }
+
+    rocke_arena_t arena;
+    if(rocke_arena_init(&arena, 0) != 0)
+    {
+        if(reason && reason_cap)
+            ROCKE_ERR_SNPRINTF(reason, reason_cap, "arena init failed");
+        return ROCKE_ERR_OOM;
+    }
+
+    char perr[256];
+    jd_val_t* root = rocke_cbor_parse(data, len, &arena, perr, sizeof perr);
+    if(!root || !rocke_jstr(rocke_jget(root, "schema")))
+    {
+        if(reason && reason_cap)
+            ROCKE_ERR_SNPRINTF(reason, reason_cap, "parse: %s", root ? "missing schema" : perr);
+        rocke_arena_destroy(&arena);
+        return ROCKE_ERR_VALUE;
+    }
+
+    rocke_status_t st = rv_check_guard_on(
+        root, ints, n_ints, strs, n_strs, flags, out_verdict, reason, reason_cap);
+    rocke_arena_destroy(&arena);
+    return st;
+}
+
+rocke_status_t rocke_bundle_check_guard_cbor(const unsigned char* data,
+                                             size_t len,
+                                             const char* key,
+                                             const char* arch,
+                                             const rocke_recipe_spec_int_t* ints,
+                                             int n_ints,
+                                             const rocke_recipe_spec_str_t* strs,
+                                             int n_strs,
+                                             unsigned flags,
+                                             rocke_guard_verdict_t* out_verdict,
+                                             char* reason,
+                                             size_t reason_cap)
+{
+    if(out_verdict)
+        *out_verdict = ROCKE_GUARD_REFUSED;
+    if(!data || !key)
+    {
+        if(reason && reason_cap)
+            ROCKE_ERR_SNPRINTF(reason, reason_cap, "null bundle data/key");
+        return ROCKE_ERR_VALUE;
+    }
+
+    rocke_arena_t arena;
+    if(rocke_arena_init(&arena, 0) != 0)
+    {
+        if(reason && reason_cap)
+            ROCKE_ERR_SNPRINTF(reason, reason_cap, "arena init failed");
+        return ROCKE_ERR_OOM;
+    }
+
+    char perr[256];
+    jd_val_t* root = rocke_cbor_parse(data, len, &arena, perr, sizeof perr);
+    if(root && !rv_abi_ok(root, reason, reason_cap))
+    {
+        rocke_arena_destroy(&arena);
+        return ROCKE_ERR_VALUE;
+    }
+
+    const char* schema = root ? rocke_jstr(rocke_jget(root, "schema")) : NULL;
+    if(!root || !schema || strcmp(schema, "rocke.bundle/v1") != 0)
+    {
+        if(reason && reason_cap)
+            ROCKE_ERR_SNPRINTF(
+                reason, reason_cap, "parse: %s", root ? "bad/missing bundle schema" : perr);
+        rocke_arena_destroy(&arena);
+        return ROCKE_ERR_VALUE;
+    }
+
+    const jd_val_t* recipe = rv_bundle_find(root, key, arch);
+    if(!recipe)
+    {
+        /* Distinct from a refusal on purpose. In a pruned bundle absence IS the
+         * rejection for concrete recipes, so a caller can treat ERR_KEY and
+         * REFUSED the same way -- route elsewhere -- while still being able to
+         * tell "we never built this" from "we built it and it will not serve
+         * this shape". */
+        if(reason && reason_cap)
+            ROCKE_ERR_SNPRINTF(
+                reason, reason_cap, "recipe '%s' (arch %s) not in bundle", key, arch ? arch : "*");
+        rocke_arena_destroy(&arena);
+        return ROCKE_ERR_KEY;
+    }
+
+    rocke_status_t st = rv_check_guard_on(
+        recipe, ints, n_ints, strs, n_strs, flags, out_verdict, reason, reason_cap);
+    rocke_arena_destroy(&arena);
+    return st;
+}
+
+bool rocke_bundle_contains(const unsigned char* data, size_t len, const char* key, const char* arch)
+{
+    if(!data || !key)
+        return false;
+    rocke_arena_t arena;
+    if(rocke_arena_init(&arena, 0) != 0)
+        return false;
+    char perr[256];
+    jd_val_t* root = rocke_cbor_parse(data, len, &arena, perr, sizeof perr);
+    bool found = root && rv_bundle_find(root, key, arch) != NULL;
+    rocke_arena_destroy(&arena);
+    return found;
 }

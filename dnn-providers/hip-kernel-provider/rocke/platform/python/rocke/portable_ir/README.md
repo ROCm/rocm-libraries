@@ -9,7 +9,10 @@ New here? Read **[Start here](#start-here-the-problem-and-the-trick)** and
 **[What the artifacts actually look like](#what-the-artifacts-actually-look-like)**
 first; they assume no prior knowledge of this package. The rollout strategy
 (operator tiers, arch families, phasing) lives in
-[`portable_ir_scaling_plan.md`](portable_ir_scaling_plan.md).
+[`portable_ir_scaling_plan.md`](portable_ir_scaling_plan.md). What a non-Python
+caller still needs before it can drive this path — data-driven spec validity,
+structured recipe keys, catalog pruning — is in
+[`hipdnn_jit_integration.md`](hipdnn_jit_integration.md).
 
 ---
 
@@ -144,6 +147,89 @@ Portable IR is a *graph* (what the kernel is). A recipe is a *program that
 rebuilds the graph* (how the kernel was constructed) — which is what makes the
 parametric form possible: you cannot parameterize a finished graph over shape,
 but you can parameterize the builder that produced it.
+
+### Getting from a shipped bundle to a launch
+
+The pure-C path used to stop at `.ll`. A client could take a CBOR bundle to a
+correct kernel with no Python in the process, then be stuck: it had a HSACO and
+no idea what to launch it with, because the grid was never in the bundle. It
+lived in host Python, as expressions like `(n + tile_n - 1) // tile_n` inside a
+dispatch function — so the last step of the chain was the one step that needed
+an interpreter.
+
+A grid is a function of the shape, which is what the recipe language already
+exists to express, so geometry is carried as intexprs over the spec axes and
+evaluated by the same evaluator as every loop bound the recipe emits:
+
+```json
+"launch": {
+  "grid":  [{"div": [{"add": [{"spec": "N"}, 2047]}, 2048]}, 1, 1],
+  "block": [256, 1, 1],
+  "lds_bytes": 0
+}
+```
+
+`rocke/recipe_launch.h` turns that plus the recipe's own `param` declarations
+into everything a launch needs — name, kernarg offsets, grid, block, dynamic
+LDS. Offsets follow the AMDGPU natural-alignment rule, which only becomes
+visible once a signature mixes widths: `(ptr, i32, ptr)` puts its last pointer
+at 16, not 12.
+
+`drivers/launch_from_bundle.py` runs the whole chain on real hardware and is
+deliberately forbidden from importing anything from the kernel family that
+authored the recipe — if the bundle did not carry enough to launch, it could
+not run:
+
+```text
+N=2049     grid=(2, 1, 1) block=(256, 1, 1) kernarg=28B  OK
+N=100000   grid=(49, 1, 1) block=(256, 1, 1) kernarg=28B  OK
+```
+
+Still missing in C, and worth knowing before planning against this: `.ll` →
+HSACO (comgr) and HSACO → launch exist only as the Python ctypes wrappers in
+`rocke/runtime/`. Both are thin bindings over `libamd_comgr` and `libamdhip64`,
+which a C++ JIT client such as hipDNN already links for itself. Note also that
+`tests/instances/jit_demo.cpp` advertises a complete C++ chain but references a
+`rocke::Compiler` that does not exist in this tree and is not built.
+
+### Keeping the two engines compatible
+
+A bundle is written by Python at build time and read by C inside hipDNN, which
+may have been built at some other time in either direction. Two things can be
+mismatched, and they get separate numbers (`cpp/include/rocke/abi.h`,
+`src/abi.py`) because folding them together would mean a new recipe instruction
+invalidates every hipDNN binary, and a struct change invalidates every bundle
+on disk — neither of which is true:
+
+| | Question | Where checked |
+|---|---|---|
+| `ROCKE_ABI_VERSION` | Does this header match this `.so`? Structs, enums, signatures. | Once at load — `online.load()`, and hipDNN's own loader |
+| `ROCKE_RECIPE_ABI` | Can this engine read this CBOR artifact? | Per artifact, in both readers |
+
+The wire check is **not** "artifact version == mine". Each artifact declares the
+*oldest reader that can read it correctly*, and a reader refuses exactly when
+`min_reader` exceeds its own level:
+
+```json
+"abi": {"min_reader": 1, "writer": 1, "engine": "1.0.0+20260812", "build_id": "6bc59f33fd11"}
+```
+
+`writer`, `engine` and `build_id` are provenance for tracing a bad artifact.
+Nothing compares them; only `min_reader` decides. A plain monotonic version
+compared for equality would reject newer artifacts wholesale, whether or not
+they use anything new — turning a generator upgrade into a flag day for every
+deployed engine, over recipes it has always been able to read. A **missing**
+block means level 1, so bundles recorded before this existed still replay.
+
+`min_reader` is *derived* from what the recipe uses, never hand-set: a declared
+requirement is a second copy of the truth and drifts the first time someone
+forgets. Note what that does and does not buy. Both VMs already fail loudly on
+an unknown instruction op, opcode or intexpr node, so a new construct is
+self-policing and the stamp only improves the error message. The bump exists for
+changes an old engine would *accept and get wrong* — a changed default, a
+reinterpreted field. Attribute **values** are passed through to the builder
+uninterpreted, so their meaning is the lowerer's contract and is outside what
+this number can police.
 
 ## What the artifacts actually look like
 
@@ -708,9 +794,13 @@ portable_ir/
 │   ├── roll.py                roll(build_at, axis, …) driver (records + verifies)
 │   ├── roll_nd.py             roll_nd(build_at, axes={…}) — one recipe, N axes
 │   ├── recipe_bundle.py       CBOR codec + bundle (rocke.bundle/v1)
+│   ├── guard.py               derive/verify a rolled recipe's admission guard
+│   ├── abi.py                 wire/binary compatibility contract (mirrors rocke/abi.h)
+│   ├── launch.py              attach/read launch geometry (mirrors rocke/recipe_launch.h)
 │   └── online.py              ctypes binding to the C backend (recipe/IR → .ll)
 ├── utils/
 │   └── recipe_expand.py       pure-Python recipe expander + recipes_equiv (oracle)
+│                              + check_guard (mirror of the C guard evaluator)
 ├── examples/       runnable demo kernels (--emit recipe|ll|name)
 │   ├── recipe_toy.py  mini_attn.py  qk_block.py
 │   ├── export_mha.py  export_gemm_cshuffle.py  recipe_multi_result.py
@@ -723,14 +813,25 @@ portable_ir/
 │   ├── parity_matrix.py           concrete-path .ll parity gate (all kernels × arches)
 │   ├── hsaco_parity.py            concrete-path HSACO byte-identity gate
 │   ├── roll_hsaco_parity.py       rolled-path .ll sha + HSACO gate, incl. held-out
-│   └── roll_nd_coverage.py        multi-axis gate: one recipe per axis cross product
-├── tests/          unittest suites (recorder drift, roller, multi-axis, CBOR/bundle)
+│   ├── roll_nd_coverage.py        multi-axis gate: one recipe per axis cross product
+│   ├── derive_guards.py           guards for real families: derive, verify, bundle
+│   └── launch_from_bundle.py      CBOR -> plan -> HSACO -> verified GPU launch
+├── tests/          unittest suites (recorder drift, roller, multi-axis, CBOR/bundle,
+│                   guards, ABI compatibility, launch plans)
 └── portable_ir_scaling_plan.md
 ```
 
 The C++ side lives in `platform/cpp/portable_ir/` (C++20, part of
 `librocke_core.a`; see that dir's `README.md`):
-- `recipe_vm.cpp` (+ `rocke/recipe_vm.h`) — the recipe VM.
+- `recipe_vm.cpp` (+ `rocke/recipe_vm.h`) — the recipe VM. Also carries the guard
+  evaluator (+ `rocke/recipe_guard.h`), so that guards and recipes share one
+  intexpr evaluator rather than two.
+- `recipe_vm.cpp` also carries the launch planner (+ `rocke/recipe_launch.h`):
+  kernel name, kernarg layout and grid/block/LDS for a shape.
+- `core/rocke_abi.cpp` (+ `rocke/abi.h`) — the two compatibility contracts, and
+  the policy for bumping each. Distinct from `rocke/rocke_build_id.h`, which is
+  provenance: build-ids change every commit, so they cannot gate anything
+  without forcing a lockstep upgrade of the whole stack.
 - `ir_import_json.cpp` (+ `rocke/ir_import.h`) — the portable-IR importer.
 - `cbor_dom.cpp`, `json_dom.cpp` — the two DOM decoders.
 - `online.cpp` (+ `rocke/online.h`) — one-call wrappers (recipe/bundle/IR → `.ll`).

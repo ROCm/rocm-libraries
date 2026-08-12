@@ -25,6 +25,10 @@ from __future__ import annotations
 import copy
 from typing import Any, Dict, List, Optional
 
+from rocke.portable_ir.src import abi as _abi
+
+RECIPE_SCHEMA = "rocke.recipe/v1"
+
 
 # --------------------------------------------------------------------------
 # intexpr evaluation (mirrors rv_int in recipe_vm.c)
@@ -46,6 +50,15 @@ _BIN = {
 
 class ExpandError(RuntimeError):
     pass
+
+
+class GuardRejected(ExpandError):
+    """A binding of a rolled recipe's free axes that the recipe's guard refuses.
+
+    Distinct from ExpandError because it is not a malformed recipe or a bug: it
+    is the expected answer for a configuration the kernel never supported. A JIT
+    caller should treat it as "this recipe does not serve that shape", not as an
+    engine failure."""
 
 
 def magic_division_constants(divisor: int) -> tuple:
@@ -113,6 +126,75 @@ def eval_intexpr(
                     eval_intexpr(b, ivars, spec_int, spec_str),
                 )
     raise ExpandError(f"bad intexpr: {node!r}")
+
+
+# --------------------------------------------------------------------------
+# guard evaluation (mirrors rocke_guard_check in recipe_vm.cpp)
+# --------------------------------------------------------------------------
+GUARD_SCHEMA = "rocke.guard/v1"
+
+
+def check_guard(
+    guard: Optional[Dict[str, Any]],
+    spec_int: Dict[str, int],
+    spec_str: Dict[str, str],
+    *,
+    require_verified: bool = False,
+) -> "tuple[bool, str]":
+    """Is this binding of a rolled recipe's free axes one the kernel supports?
+
+    Returns `(ok, reason)`; `reason` is '' when ok. A recipe with no guard is
+    accepted -- guards are additive, and every recipe recorded before they
+    existed replays exactly as it did before.
+
+    Three checks, in this order, because each one makes the next one safe:
+
+      1. Every axis named in `free` is bound. An unbound axis would otherwise
+         make the rules below raise rather than decide, and "the caller forgot
+         an axis" is a different answer from "this shape is unsupported".
+      2. `rules` in order, first failure wins. The order is load-bearing, not
+         cosmetic -- see below.
+      3. `require_verified` (opt-in) additionally demands an exact match against
+         a point the generator actually built and compared. That is the strict
+         policy: it trades the whole rolled interior for "every accepted point
+         was verified byte-for-byte at generation time".
+
+    On negative inputs: `mod` and `div` do not agree between this evaluator and
+    the C one for a negative left operand (Python floors, C truncates), which
+    has never mattered because spec values are sizes -- and a guard is the first
+    thing to be handed a hostile one. Two properties keep it from mattering
+    here, and a new kind of rule has to preserve both. Guards only ever test
+    `mod(x, k) == 0`, and whether k divides x is the same question in either
+    convention; and the emitter puts a bounds rule ahead of the divisibility
+    rule on an axis, which combined with stopping at the first failure means a
+    negative never reaches the `mod` at all. A rule that used `div`, or compared
+    `mod` against something other than zero, would have neither protection."""
+    if not guard:
+        return True, ""
+    schema = guard.get("schema")
+    if schema != GUARD_SCHEMA:
+        return False, f"unknown guard schema {schema!r} (want {GUARD_SCHEMA})"
+
+    for axis in guard.get("free", []):
+        if axis not in spec_int and axis not in spec_str:
+            return False, f"free axis '{axis}' not bound"
+
+    for rule in guard.get("rules", []):
+        try:
+            ok = eval_intexpr(rule["pred"], {}, spec_int, spec_str)
+        except ExpandError as e:
+            return False, f"guard rule failed to evaluate: {e}"
+        if not ok:
+            return False, rule.get("reason", "guard rule rejected")
+
+    if require_verified:
+        pts = guard.get("verified", [])
+        if not pts:
+            return False, "require_verified set but guard carries no verified points"
+        bound = {**spec_int, **spec_str}
+        if not any(all(bound.get(k) == v for k, v in p.items()) for p in pts):
+            return False, "binding is not one of the generator-verified points"
+    return True, ""
 
 
 # --------------------------------------------------------------------------
@@ -395,17 +477,54 @@ class _Expander:
         raise ExpandError(f"unknown instr op '{op}'")
 
 
-def expand_recipe(recipe: Dict[str, Any], spec: Dict[str, Any]) -> Dict[str, Any]:
+def expand_recipe(
+    recipe: Dict[str, Any],
+    spec: Dict[str, Any],
+    *,
+    enforce_guard: bool = True,
+    require_verified: bool = False,
+) -> Dict[str, Any]:
     """Replay `recipe` at concrete spec values -> a flat concrete recipe.
 
     `spec` maps spec-axis name -> int or str value. Result mirrors what the C VM
-    would build (one shape's portable IR), with freshly generated SSA names."""
+    would build (one shape's portable IR), with freshly generated SSA names.
+
+    If the recipe carries a guard it is checked first, before any op is emitted,
+    and a refused binding raises GuardRejected -- the same decision the C VM
+    makes at the same point, so the two paths agree on which shapes are servable
+    as well as on the IR they produce. `enforce_guard=False` is for the
+    generator, which has to replay candidate points in order to find out what
+    the guard should say.
+
+    `require_verified` narrows acceptance to the points the generator built and
+    compared; see check_guard.
+
+    Admission mirrors the C VM's, in the same order and for the same reasons:
+    the wire ABI level first (so an artifact from a newer generator says so
+    rather than looking corrupt), then the schema, then the guard. Until this
+    was added the two engines disagreed about what they would accept -- the C VM
+    checked the schema and this expander checked nothing, so it would happily
+    replay a recipe the engine it is supposed to mirror would refuse, which is
+    the wrong way round for an oracle."""
+    _abi.check(recipe)
+    schema = recipe.get("schema")
+    if schema != RECIPE_SCHEMA:
+        raise ExpandError(f"bad/missing schema {schema!r} (want {RECIPE_SCHEMA})")
+    if enforce_guard:
+        ok, why = check_guard(
+            recipe.get("guard"),
+            {k: int(v) for k, v in spec.items() if not isinstance(v, str)},
+            {k: v for k, v in spec.items() if isinstance(v, str)},
+            require_verified=require_verified,
+        )
+        if not ok:
+            raise GuardRejected(why)
     spec_int = {k: int(v) for k, v in spec.items() if not isinstance(v, str)}
     spec_str = {k: v for k, v in spec.items() if isinstance(v, str)}
     ex = _Expander(spec_int, spec_str)
     ex.run(recipe["program"])
     return {
-        "schema": "rocke.recipe/v1",
+        "schema": RECIPE_SCHEMA,
         "kernel_name_fmt": recipe.get("kernel_name_fmt", ""),
         "spec": [],
         "attrs": recipe.get("attrs", {}),
