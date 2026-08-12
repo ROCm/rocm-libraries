@@ -25,6 +25,48 @@ on hipBLASLt - cannot be swapped for it independently, and no package boundary s
 the symbol. You get one implementation, welded to one package, that only its own author can
 replace.
 
+Concretely, a minimal reproduction shows what that binding records. A `caller` that calls
+`rocblas_sgemm`, linked against a `librocblas.so.0` that itself build-depends on
+`libhipblaslt.so.0`, records only a bare name plus rocBLAS's SONAME:
+
+```
+$ nm -D caller
+                 U rocblas_sgemm
+$ readelf -d caller | grep NEEDED
+ (NEEDED)  Shared library: [librocblas.so.0]
+```
+
+The import is undefined and unversioned - just a name - and the `NEEDED` entry binds it to
+rocBLAS specifically. So provider replacement is not "put a different `.so` on the path": the
+loader resolves by SONAME, and a caller built against rocBLAS ignores an independent
+`libmyblas.so.0` that exports the very same `rocblas_sgemm`:
+
+```
+$ LD_LIBRARY_PATH=./onlyB ./caller
+./caller: error while loading shared libraries: librocblas.so.0: cannot open shared object file: No such file or directory
+```
+
+The only swap that avoids relinking is impersonation - renaming the other provider to
+`librocblas.so.0` - which lies about identity and silently drops rocBLAS's own dependency
+edge on hipBLASLt:
+
+```
+$ readelf -d librocblas.so.0 | grep NEEDED
+ (NEEDED)  Shared library: [libhipblaslt.so.0]
+```
+
+A clean swap instead relinks the caller against the new provider, after which its `NEEDED`
+reads `libmyblas.so.0`. And because the exported symbol carries no version node at all:
+
+```
+$ readelf --dyn-syms librocblas.so.0 | grep rocblas_sgemm
+     6: 0000000000001119    18 FUNC    GLOBAL DEFAULT   12 rocblas_sgemm
+```
+
+that bare import, once a caller records it, can never be changed or retired, and no new
+contract can ship beside it. Failure 3 and [chapter 03](03-abi-and-versioning-contract.md)
+are about closing that last gap.
+
 The fix is a seam: the caller talks to a stable loader, the implementation lives behind a
 provider protocol, and the two never share symbols by accident. Selection happens once, at
 context creation, and is frozen for the life of the context. You can swap the provider
