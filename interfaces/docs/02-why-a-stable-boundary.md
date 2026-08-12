@@ -143,7 +143,7 @@ Regression-locked under ThreadSanitizer by `rocm_interfaces.ops04_concurrency`.
 | --- | --- | --- | --- |
 | Locked to one provider | Cannot replace the whole implementation or swap providers without relinking | Loader/provider seam; selection frozen at context creation | `abi03_coresidency`, architecture design |
 | C++ symbol leakage | Two libraries share `std::` symbols; wrong code runs | Version-script allowlist: export one symbol, hide the rest | `exports` |
-| Interposition across majors | New library calls old library's implementation | Named ELF version nodes per major | `abi03_interpose_hazard`, `abi03_coresidency` |
+| Interposition across majors | New library calls old library's implementation | Named ELF version nodes per major | `abi03_linked_consumer_versioned_binds`, `abi03_interpose_hazard`, `abi03_coresidency` |
 | Toolchain cannot stamp versioning | GCC-LTO + lld link fails hard and produces no DSO (and a future lld could instead emit unversioned symbols) | Configure-time GCC-LTO-plus-lld guard that fails the build with a named RES-03 error | `lto_linker_guard_rejects_gnu_lld` |
 | Node fails on odd symbol shapes | Data / mangled / RTTI / ASan symbols unversioned | Proof suite exercises each shape | `abi06_data_version_node`, `abi05_cpp_mangled_version_node`, `abi04_asan_version_node_survives` |
 | Loader data race | Dispatch corruption under concurrent use | TSan regression lock on registry + loader | `ops04_concurrency` |

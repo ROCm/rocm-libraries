@@ -230,12 +230,15 @@ this tree proves:
   (`providers/recording/recording_provider.map`) is proven by the `exports` test.
 - Named ELF version nodes give each major a distinct symbol, so co-resident majors resolve
   their own definition. What the tests lock today: `abi03_coresidency` asserts each handle's
-  `dlvsym`/`dlsym` resolves to its own version node with cross-version lookups nil, and
+  `dlvsym`/`dlsym` resolves to its own version node with cross-version lookups nil;
   `abi03_interpose_hazard` shows that with the node removed a bare global lookup reproduces
-  the interposition hazard. Together they prove node presence, handle-scoped resolution, and
-  the bare-lookup hazard. The causal proof that version nodes alone defeat interposition for
-  a linked consumer or an equal-scope (`RTLD_DEFAULT`) lookup is not yet in CTest - it is
-  ASPIRATIONAL (see
+  the interposition hazard; and `abi03_linked_consumer_versioned_binds` proves the causal
+  case - a linked consumer whose relocation is version-pinned to `ROCBLAS_ABI_7` binds to
+  that major even with an `ABI_6` provider `NEEDED` first, while its one-directive control
+  `abi03_linked_consumer_plain_interposed` is interposed to `ABI_6`. The remaining gap is a
+  caveat, not a defense: a bare unversioned `dlsym(RTLD_DEFAULT, ...)` still takes the
+  first-loaded definition even against versioned providers, so the node defense is scoped to
+  versioned relocations and `dlvsym` (see
   [07-status-and-roadmap.md](07-status-and-roadmap.md#aspirational-direction-not-commitment)).
 - That those version nodes survive real linkers, an ASan build, data objects, and C++
   mangled names with RTTI is proven by the `abi04_*`, `abi05_*`, and `abi06_*` tests.

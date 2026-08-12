@@ -16,7 +16,7 @@ which optional linkers and sanitizers are present, so cite names rather than a c
 | Provider single-symbol export; no libstdc++ leak | `exports` | `a929517` |
 | Named ELF version nodes on loader + provider | `exports` | `ba093ad` |
 | `exports` node-aware check extended to the narrow loader shadow (`rocblas_narrow_loader_shadow`) | `exports` | `a741064` |
-| `exports` provider list auto-derived from a global registry, so a provider added via `add_recording_provider` cannot silently escape the check | `exports` | `61f8dc9` |
+| `exports` provider list auto-derived from a global registry, so a provider added via `add_recording_provider` cannot silently escape the check (a dedicated cross-check asserts the derived list equals an independent buildsystem enumeration) | `exports`, `exports_provider_list_complete` | `61f8dc9` |
 | Versioned-provider co-residency (each handle resolves its own version node, cross-version lookup nil) and the bare-lookup interposition hazard reproduced when the version node is removed | `abi03_coresidency`, `abi03_interpose_hazard` | `8832c9a` |
 | Core versioned-symbol invariants (ordering, `-Bsymbolic` genuineness via a `DT_FLAGS` `DF_SYMBOLIC` assertion against a plain-DSO control, genuine two-default-definition (`@@`) DSO rejected with a single-`@` accept control, ldconfig stub) | `abi04_three_line_order`, `abi04_bsymbolic_inert`, `abi04_multiple_default_def_rejected`, `abi04_ldconfig_stub_preserved` | `897293e`, `-Bsymbolic` discrimination `215ede4`, dup-def strengthening `b7f3f89` |
 | Same-node negative control for the ordering proof: three DSOs on the shared `ROCBLAS_ABI_6` node with `ABI_5`/`ABI_7` lookups nil everywhere | `abi04_same_node_negative` (+ `_lld`) | `215ede4` |
