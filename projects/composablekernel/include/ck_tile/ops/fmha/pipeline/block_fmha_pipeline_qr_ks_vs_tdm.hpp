@@ -10,6 +10,22 @@
 
 namespace ck_tile {
 
+// GFX12 Expert Scheduling Mode: let WMMA burst overlap with loads.
+// Set HW_REG_WAVE_SCHED_MODE (hwreg id=26) bit2 (DISABLE_XDL_ARB_STALL) = 1.
+// builtin imm = 26 | (0<<6) | ((32-1)<<11) = 0xf81a.
+// Disable with -DCK_TILE_FMHA_TDM_SCHED_MODE=0 to turn off.
+#ifndef CK_TILE_FMHA_TDM_SCHED_MODE
+#define CK_TILE_FMHA_TDM_SCHED_MODE 1
+#endif
+CK_TILE_DEVICE void fmha_tdm_enable_expert_sched()
+{
+#if CK_TILE_FMHA_TDM_SCHED_MODE
+#if defined(__gfx12__)
+    __builtin_amdgcn_s_setreg(0xf81a, 0x4);
+#endif
+#endif
+}
+
 // This pipeline is qkv all located in LDS, targeting gfx1250
 template <typename Problem_, typename Policy_ = BlockFmhaPipelineQRKSVSTdmDefaultPolicy>
 struct BlockFmhaPipelineQRKSVSTdm
@@ -449,6 +465,7 @@ struct BlockFmhaPipelineQRKSVSTdm
         static_assert(1 <= k0_loops);
         static_assert(1 <= k1_loops);
 
+        fmha_tdm_enable_expert_sched();
         block_sync_lds();
         load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
 
@@ -1069,6 +1086,7 @@ struct BlockFmhaPipelineQRKSVSTdm
 
         static_assert(1 <= k0_loops);
         static_assert(1 <= k1_loops);
+        fmha_tdm_enable_expert_sched();
         block_sync_lds<0>();
         load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
         load_tile_tdm(tdm_config_v, v_lds_write_window, v_dram_window);
