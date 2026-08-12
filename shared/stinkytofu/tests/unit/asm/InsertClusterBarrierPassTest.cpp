@@ -1089,7 +1089,7 @@ TEST_F(InsertClusterBarrierPassTest, ClimbThatGivesUpIsNotBilledForCrossingTheBa
         << "the segment below this exit hoisted across it, so this edge leaves holding a token "
            "and must land on the drain:"
         << blockListing(*bb);
-    const char* kBypassLabel = "label_label_TestLoopEnd_skipCBWait";
+    const char* kBypassLabel = "label_TestLoopEnd_skipCBWait";
     EXPECT_EQ(getBranchTarget(*firstExit), kBypassLabel)
         << "this edge leaves empty-handed and must be routed past the drain:"
         << blockListing(*bb);
@@ -1479,7 +1479,7 @@ TEST_F(InsertClusterBarrierPassTest, SegmentsLongEnoughToHoldTheLeadNeedNoLoopCo
     EXPECT_FALSE(isClusterBarrierWithLiteral(*afterExit, /*wantSignal=*/false))
         << "there is nothing left in flight at the exit, so there is nothing to drain:"
         << blockListing(*bb);
-    EXPECT_EQ(findLabelNamed("label_label_TestLoopEnd_skipCBWait"), nullptr)
+    EXPECT_EQ(findLabelNamed("label_TestLoopEnd_skipCBWait"), nullptr)
         << "a bypass label with no drain to bypass:" << blockListing(*bb);
 
     EXPECT_EQ(getBranchTarget(*firstExit), "label_TestLoopEnd")
@@ -1578,7 +1578,7 @@ TEST_F(InsertClusterBarrierPassTest, ExitBranchSkipsDrainWaitOnlyWithNoTokenInFl
         << "a hoisted loop must open its exit with the wait that drains the carried signal:"
         << blockListing(*bb);
 
-    const char* kBypassLabel = "label_label_TestLoopEnd_skipCBWait";
+    const char* kBypassLabel = "label_TestLoopEnd_skipCBWait";
     StinkyInstruction* bypassLabel = findLabelNamed(kBypassLabel);
     ASSERT_NE(bypassLabel, nullptr) << "no drain-bypass label was emitted:" << blockListing(*bb);
     EXPECT_EQ(indexOf(bypassLabel), indexOf(drainWait) + 1)
@@ -1684,7 +1684,7 @@ TEST_F(InsertClusterBarrierPassTest, ShortTailSegmentDrainsItsExitAndSendsTheFal
     EXPECT_TRUE(isClusterBarrierWithLiteral(*drainWait, /*wantSignal=*/false))
         << "one exit leaves holding a token, so the drain is still needed:" << blockListing(*bb);
 
-    const char* kBypassLabel = "label_label_TestLoopEnd_skipCBWait";
+    const char* kBypassLabel = "label_TestLoopEnd_skipCBWait";
     ASSERT_NE(findLabelNamed(kBypassLabel), nullptr)
         << "no drain-bypass label was emitted:" << blockListing(*bb);
 
@@ -1779,7 +1779,7 @@ TEST_F(InsertClusterBarrierPassTest, PreheaderSignalFollowsOnlyTheSegmentCrossin
         << "the last trip carries a signal out, so the exit must open with the drain:"
         << blockListing(*bb);
 
-    const char* kBypassLabel = "label_label_TestLoopEnd_skipCBWait";
+    const char* kBypassLabel = "label_TestLoopEnd_skipCBWait";
     ASSERT_NE(findLabelNamed(kBypassLabel), nullptr)
         << "no drain-bypass label was emitted:" << blockListing(*bb);
     EXPECT_EQ(getBranchTarget(*exitWithEmptyHand), kBypassLabel)

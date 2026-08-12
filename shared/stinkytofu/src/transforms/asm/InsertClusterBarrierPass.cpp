@@ -43,7 +43,6 @@ constexpr int kClusterBarrierId = -3;
 constexpr int kWorkgroupBarrierId = -1;
 constexpr const char* kSkipLabelPrefix = "label_skipCBPreSignal_";
 constexpr const char* kSkipLabelPrefixLCL = "label_skipCBPreSignal_LCL_";
-constexpr const char* kDrainBypassLabelPrefix = "label_";
 constexpr const char* kDrainBypassLabelSuffix = "_skipCBWait";
 constexpr const char* kWaveIdxSymbol = "sgprWaveIdx";
 constexpr const char* kLoopCounterLSymbol = "sgprLoopCounterL";
@@ -1037,9 +1036,9 @@ bool emitLoopCarriedCompensation(StinkyInstruction* loopHead, const std::string&
                                    archId);
     const bool fallThroughNeedsBypass = fallsThroughToExit && !fallThroughCarriesToken;
     if (!bypassBranches.empty() || fallThroughNeedsBypass) {
-        // Named after the exit it sits just below, so the two read as a pair.
-        const std::string bypassLabel =
-            kDrainBypassLabelPrefix + exitLabelName + kDrainBypassLabelSuffix;
+        // Named after the exit it sits just below, so the two read as a pair. That name
+        // carries the label prefix already.
+        const std::string bypassLabel = exitLabelName + kDrainBypassLabelSuffix;
         static const HwInstDesc labelMCID{
             GFX::LABEL, GFX::LABEL, 0, 0, 0, "LABEL", makeFlagSet({InstFlag::IF_HasSideEffect})};
         StinkyInstruction* bypassLbl = exitBuilder.create(&labelMCID, waitAnchor);
