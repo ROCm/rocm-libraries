@@ -85,23 +85,32 @@ requires_gpu = pytest.mark.skipif(
 # Dtype helpers
 # ---------------------------------------------------------------------------
 
+try:
+    import ml_dtypes as _ml_dtypes
+except ImportError:  # pragma: no cover
+    _ml_dtypes = None
+
+
+def _require_ml_dtypes():
+    if _ml_dtypes is None:
+        pytest.skip(
+            "ml_dtypes is required for valid fp8/bf8 encoding; "
+            "install with: pip install ml-dtypes"
+        )
+
+
 def _encode_fp8(arr: np.ndarray, dtype: str) -> np.ndarray:
-    """Encode float32 → fp8/bf8 bytes (uint8 view)."""
-    try:
-        import ml_dtypes
-        ml_t = ml_dtypes.float8_e4m3fn if dtype == "fp8" else ml_dtypes.float8_e5m2
-        return arr.astype(ml_t).view(np.uint8)
-    except ImportError:
-        return (np.clip(arr, -2.0, 2.0) * 64).astype(np.int8).view(np.uint8)
+    """Encode float32 → fp8/bf8 bytes (uint8 view). Requires ml_dtypes."""
+    _require_ml_dtypes()
+    ml_t = _ml_dtypes.float8_e4m3fn if dtype == "fp8" else _ml_dtypes.float8_e5m2
+    return arr.astype(ml_t).view(np.uint8)
 
 
 def _decode_fp8(arr: np.ndarray, dtype: str) -> np.ndarray:
-    try:
-        import ml_dtypes
-        ml_t = ml_dtypes.float8_e4m3fn if dtype == "fp8" else ml_dtypes.float8_e5m2
-        return arr.view(ml_t).astype(np.float32)
-    except ImportError:
-        return arr.view(np.int8).astype(np.float32) / 64.0
+    """Decode fp8/bf8 bytes (uint8 view) → float32. Requires ml_dtypes."""
+    _require_ml_dtypes()
+    ml_t = _ml_dtypes.float8_e4m3fn if dtype == "fp8" else _ml_dtypes.float8_e5m2
+    return arr.view(ml_t).astype(np.float32)
 
 
 # ---------------------------------------------------------------------------

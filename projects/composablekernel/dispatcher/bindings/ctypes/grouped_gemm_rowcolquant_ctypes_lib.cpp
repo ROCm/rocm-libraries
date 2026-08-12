@@ -59,7 +59,7 @@ static constexpr std::size_t elements_to_bytes(std::size_t n)
         }                                                                                      \
     }
 
-static std::atomic<bool> g_initialized{false};
+static std::atomic<int> g_ref_count{0};
 
 extern "C" {
 
@@ -96,9 +96,10 @@ int dispatcher_initialize()
                   << "'; this .so was compiled for a different device\n";
         return -1;
     }
-    // release: make the device-property query results visible to any thread
-    // that subsequently loads g_initialized with memory_order_acquire.
-    g_initialized.store(true, std::memory_order_release);
+    // Increment the reference count. Use fetch_add with release so the
+    // device-property checks above are visible to any thread that later
+    // reads g_ref_count with acquire ordering.
+    g_ref_count.fetch_add(1, std::memory_order_release);
     return 0;
 }
 
@@ -143,9 +144,9 @@ int dispatcher_run_rowcolquant_gemm(const void* A,
                                     int k_batch,
                                     float* time_ms)
 {
-    // acquire: synchronise with the release store in dispatcher_initialize so
+    // acquire: synchronise with the release fetch_add in dispatcher_initialize so
     // that all device-property checks performed there are visible here.
-    if(!g_initialized.load(std::memory_order_acquire))
+    if(g_ref_count.load(std::memory_order_acquire) <= 0)
     {
         std::cerr << "dispatcher_run_rowcolquant_gemm: not initialized\n";
         return -1;
@@ -334,10 +335,24 @@ const char* dispatcher_get_kernel_name() { return KERNEL_NAME; }
 int dispatcher_get_kernel_count() { return 1; }
 
 /**
- * Reset the initialisation flag so dispatcher_initialize() can be called again.
+ * Decrement the initialisation reference count. When it reaches zero the library
+ * is considered uninitialised and the next call to dispatcher_run_rowcolquant_gemm
+ * will fail until dispatcher_initialize() is called again.
+ *
+ * Using a reference count instead of a boolean allows multiple independent Python
+ * wrappers to share the same loaded .so without one wrapper's destructor
+ * invalidating another live wrapper.
+ *
  * This function does not free any GPU memory or unload the library; those are
  * managed per-call inside dispatcher_run_rowcolquant_gemm.
  */
-void dispatcher_cleanup() { g_initialized.store(false, std::memory_order_release); }
+void dispatcher_cleanup()
+{
+    // Only decrement if already positive to guard against unpaired cleanup calls.
+    int prev = g_ref_count.load(std::memory_order_relaxed);
+    while(prev > 0 && !g_ref_count.compare_exchange_weak(
+                           prev, prev - 1, std::memory_order_release, std::memory_order_relaxed))
+        ; // retry on CAS failure
+}
 
 } // extern "C"
