@@ -103,10 +103,11 @@ def main():
             # pinned (single-project) build.
             entry["projects_to_test"] = project_key
             # Ensure fetch_artifact_args is set so the test downloads the correct artifacts.
-            # Use artifact_stage (e.g., "rand") not project_key (e.g., "hiprand") since
-            # artifacts are named by stage: rand_lib_gfx950-dcgpu, not hiprand_lib_*.
+            # Use artifact_stage with -coverage suffix (e.g., "rand-coverage") since coverage
+            # artifacts are renamed before upload to avoid conflicts with non-coverage artifacts
+            # in the same run. Coverage artifacts: rand-coverage_lib_gfx950-dcgpu.tar.zst
             if "fetch_artifact_args" not in entry or not entry["fetch_artifact_args"]:
-                entry["fetch_artifact_args"] = f"--{artifact_stage} --tests"
+                entry["fetch_artifact_args"] = f"--{artifact_stage}-coverage --tests-coverage"
             coverage_projects.append(entry)
 
     # Output for GitHub Actions

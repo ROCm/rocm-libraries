@@ -213,6 +213,17 @@ jobs:
           aws-region: us-east-2
           role-to-assume: arn:aws:iam::692859939525:role/therock-ci-external
 
+      - name: Rename coverage artifacts to avoid conflicts
+        run: |
+          cd TheRock/build-coverage/artifacts
+          for item in rand_*; do
+            if [ -e "$item" ]; then
+              new_name="${item/rand_/rand-coverage_}"
+              mv "$item" "$new_name"
+              echo "Renamed: $item -> $new_name"
+            fi
+          done
+
       - name: Push artifacts
         run: |
           python TheRock/build_tools/artifact_manager.py push \
