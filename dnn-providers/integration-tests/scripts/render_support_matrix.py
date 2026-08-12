@@ -1032,6 +1032,8 @@ def render_markdown(units: list[ClaimUnit], max_case_ids: int) -> str:
         for family in families:
             render_family(lines, family, by_family[family], engines, arch, platform)
 
+        if lines and lines[-1] == "":
+            lines.pop()
         lines.append("</details>")
 
     lines.append("")
