@@ -126,7 +126,7 @@ namespace rocsparse_ut
             if(hipMalloc(&ptr, n * sizeof(T)) != hipSuccess)
                 ptr = nullptr;
         }
-        device_vector(const device_vector&)            = delete;
+        device_vector(const device_vector&) = delete;
         device_vector& operator=(const device_vector&) = delete;
         ~device_vector()
         {
@@ -206,20 +206,8 @@ namespace rocsparse_ut
     // launch the instantiation matching the active device (see
     // launch_warp_by_size / device_warp_size below).
     //
-    // `warp_size_static` is the wavefront size of the *current device-code
-    // compilation* (__AMDGCN_WAVEFRONT_SIZE__); it is only meaningful in device
-    // code and is handy for shared-memory sizing. It is NOT a substitute for the
-    // runtime size when deciding which templated instantiation to launch.
-    // `device_warp_size()` is the runtime wavefront size of the active device and
-    // is the value tests dispatch on.
-#if defined(__AMDGCN_WAVEFRONT_SIZE__)
-    static constexpr int warp_size_static = __AMDGCN_WAVEFRONT_SIZE__;
-#else
-    // Host-only compilation: no compile-time wavefront size. Use the runtime
-    // accessor device_warp_size() instead; this fallback exists only so the
-    // symbol is visible in host TUs that include this header.
-    static constexpr int warp_size_static = 0;
-#endif
+    // `device_warp_size()` (below) is the runtime wavefront size of the active
+    // device and is the value tests dispatch on.
 
     // Runtime wavefront size of the active HIP device (32 on gfx1201, 64 on
     // wave64 parts). Returns 0 if the device cannot be queried.
