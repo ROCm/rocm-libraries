@@ -382,6 +382,17 @@ class ContractionMultiABDDispatcherLib:
                 )
             if not d.flags["C_CONTIGUOUS"]:
                 raise ValueError(f"Ds[{i}] must be C-contiguous")
+        # All D tensors must share the same element size; a mismatch causes the C shim
+        # to allocate all D device buffers with Ds[0].itemsize and overflow on copy.
+        if Ds:
+            d0_itemsize = Ds[0].itemsize
+            for i, d in enumerate(Ds[1:], start=1):
+                if d.itemsize != d0_itemsize:
+                    raise ValueError(
+                        f"Ds[{i}].dtype ({d.dtype}, itemsize={d.itemsize}) does not match "
+                        f"Ds[0].dtype ({Ds[0].dtype}, itemsize={d0_itemsize}); "
+                        "all D tensors must have the same element size."
+                    )
         if E.size != expected_e_elems:
             raise ValueError(
                 f"E has {E.size} elements but problem requires G*M*N = {expected_e_elems}"

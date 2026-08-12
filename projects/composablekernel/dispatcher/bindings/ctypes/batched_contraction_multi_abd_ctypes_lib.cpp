@@ -203,6 +203,8 @@ int dispatcher_run_batched_contraction_multi_abd(const void** as_hosts,
         return -1;
     if(elem_a <= 0 || elem_b <= 0 || elem_e <= 0)
         return -1;
+    // elem_d is only meaningful when there are D tensors; skip the check otherwise
+    // so callers with kNumD==0 can safely pass elem_d=0 without being incorrectly rejected.
 
     // Tensor/dimension counts must match what's baked into the kernel type.
     if(num_a != static_cast<int>(kNumA) || num_b != static_cast<int>(kNumB) ||
@@ -251,8 +253,11 @@ int dispatcher_run_batched_contraction_multi_abd(const void** as_hosts,
                            static_cast<size_t>(K_total) * static_cast<size_t>(elem_a);
     const size_t b_bytes = static_cast<size_t>(G_total) * static_cast<size_t>(N_total) *
                            static_cast<size_t>(K_total) * static_cast<size_t>(elem_b);
-    const size_t d_bytes = static_cast<size_t>(G_total) * static_cast<size_t>(M_total) *
-                           static_cast<size_t>(N_total) * static_cast<size_t>(elem_d);
+    // d_bytes is only used when kNumD > 0; guard so elem_d=0 does not produce size_t overflow.
+    const size_t d_bytes = (kNumD > 0)
+        ? (static_cast<size_t>(G_total) * static_cast<size_t>(M_total) *
+           static_cast<size_t>(N_total) * static_cast<size_t>(elem_d))
+        : 0u;
     const size_t e_bytes = static_cast<size_t>(G_total) * static_cast<size_t>(M_total) *
                            static_cast<size_t>(N_total) * static_cast<size_t>(elem_e);
 

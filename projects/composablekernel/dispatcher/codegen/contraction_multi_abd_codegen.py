@@ -527,8 +527,64 @@ static constexpr ck_tile::index_t NumDimsK = ns_{kernel_name}::NumDimK;
 # =============================================================================
 
 
+def _expand_nested_config(config: dict) -> dict:
+    """
+    Convert the JSON file format (tile_config / trait_config nested keys) into
+    the flat format that build_specs() reads (pipelines, tile_configs, etc.).
+
+    The JSON files produced by the tile engine ship ranges like:
+        "tile_config": {"tile_m": {"min": 64, "max": 256, "step": 64}, "warp_m": {"values": [4,2,1]}}
+        "trait_config": {"pipeline": {"values": ["compv3"]}, "scheduler": {"values": ["intrawave"]}}
+
+    build_specs() expects flat keys: dtypes, layouts, pipelines, tile_configs, pad_options, etc.
+    If neither nested format is present the dict is returned as-is (already flat).
+    """
+    if "tile_config" not in config and "trait_config" not in config:
+        return config  # already flat (e.g., from to_codegen_config() or inline overrides)
+
+    def _expand_range(spec: dict) -> List[int]:
+        if "values" in spec:
+            return list(spec["values"])
+        mn, mx, st = spec.get("min", 1), spec.get("max", 1), spec.get("step", 1)
+        return list(range(mn, mx + 1, st))
+
+    flat = dict(config)  # shallow copy; keeps flat keys from CMake merge (dtypes, layouts, ...)
+
+    tc = config.get("tile_config", {})
+    if tc:
+        tile_dim_keys = ["tile_m", "tile_n", "tile_k",
+                         "warp_m", "warp_n", "warp_k",
+                         "warp_tile_m", "warp_tile_n", "warp_tile_k"]
+        tile_dim_lists = {k: _expand_range(tc[k]) for k in tile_dim_keys if k in tc}
+        tile_cfgs = [
+            dict(zip(tile_dim_lists.keys(), combo))
+            for combo in itertools.product(*tile_dim_lists.values())
+        ]
+        flat["tile_configs"] = tile_cfgs
+
+    tr = config.get("trait_config", {})
+    if tr:
+        if "pipeline"  in tr: flat["pipelines"]  = list(tr["pipeline"]["values"])
+        if "scheduler" in tr: flat["schedulers"] = list(tr["scheduler"]["values"])
+        if "epilogue"  in tr: flat["epilogues"]  = list(tr["epilogue"]["values"])
+        # pad and persistent options — zip into pad_options list of dicts
+        pad_m_vals       = tr.get("pad_m",       {}).get("values", [False])
+        pad_n_vals       = tr.get("pad_n",       {}).get("values", [False])
+        pad_k_vals       = tr.get("pad_k",       {}).get("values", [False])
+        flat["pad_options"] = [
+            {"pad_m": pm, "pad_n": pn, "pad_k": pk}
+            for pm, pn, pk in itertools.product(pad_m_vals, pad_n_vals, pad_k_vals)
+        ]
+
+    flat.pop("tile_config", None)
+    flat.pop("trait_config", None)
+    return flat
+
+
 def build_specs(config: dict) -> List[ContractionMultiABDKernelSpec]:
     """Enumerate all specs from a config dict."""
+    config = _expand_nested_config(config)
+
     dtypes     = config.get("dtypes",     ["fp16"])
     layouts    = config.get("layouts",    ["rcr"])
     pipelines  = config.get("pipelines",  ["compv3"])
