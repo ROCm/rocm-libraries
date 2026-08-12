@@ -159,20 +159,21 @@ maps, producing `librocblas.so.{5,6,7}` and `-Bsymbolic` variants:
 - `rocm_interfaces.abi04_three_line_order` - the three `dlvsym` lines resolve to `ABI_5/6/7`
   in both load orders, and each handle's cross-node lookup (the wrong node on the same symbol)
   returns null. That cross-node-nil assertion is what makes it discriminating: it is invoked
-  only with the distinct `rb5`/`rb6`/`rb7` DSOs, and the test binary has just `three_line` and
-  `bsymbolic` modes. A dedicated same-node negative build (all three given the `.6` node so the
-  `ABI_5`/`ABI_7` lookups fail) is NEXT, not done - see
-  [07-status-and-roadmap.md](07-status-and-roadmap.md).
-- `rocm_interfaces.abi04_bsymbolic_inert` - loads two `-Bsymbolic` DSOs and asserts each
-  `rocblas_sgemm` resolves to its own node with cross-node nil, the same co-residency check as
-  `abi04_three_line_order`. This is a one-time observation that co-residency resolution still
-  holds for `-Bsymbolic` builds, not a discriminating proof that `-Bsymbolic` is inert: the
-  test does not read `DT_FLAGS SYMBOLIC`, does not compare against a plain DSO in the same run,
-  and the fixture (`abi03_fixture_rocblas.cpp`) has no internal interposable reference for
-  `-Bsymbolic` to bind, so its result would not change if the flag mattered. Tightening it into
-  a discriminating control (assert `DT_FLAGS SYMBOLIC` is present, add a plain-DSO comparison,
-  and give the fixture an internal call) is tracked in
-  [07-status-and-roadmap.md](07-status-and-roadmap.md).
+  only with the distinct `rb5`/`rb6`/`rb7` DSOs. `rocm_interfaces.abi04_same_node_negative`
+  (commit `215ede4`) is the dedicated discrete negative control: three DSOs are built on the
+  shared `ROCBLAS_ABI_6` node (with `ABI_VER` 5/6/7), each resolves its own value on that node,
+  and the `ABI_5`/`ABI_7` lookups are nil everywhere. Fed the distinct-node DSOs instead, the
+  same-node mode fails - so the control is not vacuous.
+- `rocm_interfaces.abi04_bsymbolic_inert` - loads two `-Bsymbolic` DSOs plus a plain comparison
+  DSO and asserts each `rocblas_sgemm` resolves to its own node with cross-node nil (the
+  co-residency check), then reads `DT_FLAGS`/`DT_SYMBOLIC` via `dlinfo(RTLD_DI_LINKMAP)` and
+  requires `DF_SYMBOLIC` present on both `-Bsymbolic` DSOs and absent on the plain one (commit
+  `215ede4`). This is now a discriminating proof: the co-residency outcome is identical with or
+  without `-Bsymbolic`, but the `DF_SYMBOLIC` delta fails if the flag is dropped from a bsym
+  target or wrongly applied to the plain one - confirmed by feeding the plain DSO where a bsym
+  is expected (the run fails). It inspects the ELF flag directly rather than adding an internal
+  interposable call to the fixture; the conclusion is that versioning, not `-Bsymbolic`, is the
+  co-residency mechanism.
 - `rocm_interfaces.abi04_multiple_default_def_rejected` - links a version script that names
   `rocblas_sgemm` as a default (`global`) symbol in two nodes (`ROCBLAS_ABI_6` and
   `ROCBLAS_ABI_7`) and observes the toolchain's response. It passes on any link failure (read
@@ -188,8 +189,8 @@ maps, producing `librocblas.so.{5,6,7}` and `-Bsymbolic` variants:
 ### 6b. The same invariants under the second linker (commit `01c14eb`)
 
 `add_abi04_provider` gained an optional linker argument and a configure-time
-`ROCM_INTERFACES_HAVE_LLD` probe. When lld is present, four lld-built mirrors run:
-`abi04_three_line_order_lld`, `abi04_bsymbolic_inert_lld`,
+`ROCM_INTERFACES_HAVE_LLD` probe. When lld is present, five lld-built mirrors run:
+`abi04_three_line_order_lld`, `abi04_same_node_negative_lld`, `abi04_bsymbolic_inert_lld`,
 `abi04_multiple_default_def_rejected_lld`, `abi04_ldconfig_stub_preserved_lld`.
 Non-vacuity (one-time observation, not asserted by CTest): the lld DSO's `.comment` stamps
 `Linker: AMD LLD`, which a bfd DSO lacks - evidence it is genuinely lld and not a silent bfd
@@ -254,8 +255,8 @@ is stricter.
 | 3 co-residency | is the node mechanism real | `abi03_coresidency`, `abi03_interpose_hazard` |
 | 4 RES-03 guard | g++ LTO + lld cannot stamp version nodes | `lto_linker_guard_rejects_gnu_lld` + 3 accepts |
 | 5 OPS-04 | loader/registry data race | `ops04_concurrency` |
-| 6a core | node fails on ordering / dup-def / ldconfig | `abi04_three_line_order`, `abi04_bsymbolic_inert`, `abi04_multiple_default_def_rejected`, `abi04_ldconfig_stub_preserved` |
-| 6b lld | node fails under the other linker | the four `abi04_*_lld` |
+| 6a core | node fails on ordering / same-node control / `-Bsymbolic` genuineness / dup-def / ldconfig | `abi04_three_line_order`, `abi04_same_node_negative`, `abi04_bsymbolic_inert`, `abi04_multiple_default_def_rejected`, `abi04_ldconfig_stub_preserved` |
+| 6b lld | node fails under the other linker | the five `abi04_*_lld` |
 | 6c data | node fails on a data object | `abi06_data_version_node` |
 | 6d ASan | node lost under ASan | `abi04_asan_version_node_survives` (node-definition + `__asan_` only; see 6d) |
 | 6e C++/RTTI | node misses mangled + RTTI symbols | `abi05_cpp_mangled_version_node` (+ `_lld`) |

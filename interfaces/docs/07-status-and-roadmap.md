@@ -16,7 +16,8 @@ which optional linkers and sanitizers are present, so cite names rather than a c
 | Provider single-symbol export; no libstdc++ leak | `exports` | `a929517` |
 | Named ELF version nodes on loader + provider | `exports` | `ba093ad` |
 | Versioned-provider co-residency (each handle resolves its own version node, cross-version lookup nil) and the bare-lookup interposition hazard reproduced when the version node is removed | `abi03_coresidency`, `abi03_interpose_hazard` | `8832c9a` |
-| Core versioned-symbol invariants (ordering, `-Bsymbolic` co-residency observation (not a discriminating control - see 04-hardening.md 6a), dup-def guard (linker-observed; strengthening tracked), ldconfig stub) | `abi04_three_line_order`, `abi04_bsymbolic_inert`, `abi04_multiple_default_def_rejected`, `abi04_ldconfig_stub_preserved` | `897293e` |
+| Core versioned-symbol invariants (ordering, `-Bsymbolic` genuineness via a `DT_FLAGS` `DF_SYMBOLIC` assertion against a plain-DSO control, dup-def guard (linker-observed; strengthening tracked), ldconfig stub) | `abi04_three_line_order`, `abi04_bsymbolic_inert`, `abi04_multiple_default_def_rejected`, `abi04_ldconfig_stub_preserved` | `897293e`, `-Bsymbolic` discrimination `215ede4` |
+| Same-node negative control for the ordering proof: three DSOs on the shared `ROCBLAS_ABI_6` node with `ABI_5`/`ABI_7` lookups nil everywhere | `abi04_same_node_negative` (+ `_lld`) | `215ede4` |
 | Same invariants under lld | the four `abi04_*_lld` | `01c14eb` |
 | Real `sobol32` data-object versioning | `abi06_data_version_node` | `04ade2b` |
 | Version node survives an ASan build | `abi04_asan_version_node_survives` | `0081ba5` |
@@ -39,19 +40,11 @@ under `ctest`; wiring the drift check into the test suite is listed under COMMIT
   in the PR/handoff, not here.
 - Wire the API snapshot drift check (`rocm-interfaces-check-api-snapshots`) into `ctest` so
   header drift is caught by the test suite rather than only by a manual target.
-- **Same-node negative control for `abi04_three_line_order`.** Register a build that gives all
-  three DSOs the `.6` node and assert the `ABI_5`/`ABI_7` lookups fail, so the ordering proof
-  has an explicit discrete negative control (today its only discrimination is the internal
-  cross-node-nil check).
 - **Strengthen the multiple-default-definition check.** `abi04_multiple_default_def_rejected`
   currently passes on any link failure and on a zero- or one-`@@` result
   (`tests/check_multiple_default_def.cmake`), so it observes the linker rather than forcing a
   genuine two-`@@` DSO to be rejected. Construct a real two-default-definition input and assert
   the FATAL fires.
-- **Make `abi04_bsymbolic_inert` discriminating.** It currently only repeats the
-  own-node/cross-node co-residency check on two `-Bsymbolic` DSOs; add a `DT_FLAGS SYMBOLIC`
-  genuineness assertion, a plain-DSO comparison, and an internal interposable reference in the
-  fixture so the test can actually distinguish whether `-Bsymbolic` changes the behavior.
 - **Tighten the ASan node test.** `abi04_asan_version_node_survives` currently only
   substring-matches `ROCBLAS_ABI_6` (satisfied by the absolute `ROCBLAS_ABI_6@@ROCBLAS_ABI_6`
   node symbol); change it to assert `rocblas_sgemm@@ROCBLAS_ABI_6` and add a nodeless negative
