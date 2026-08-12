@@ -134,7 +134,17 @@ jobs:
 
       - name: Patch ROCm SDK with superbuild outputs
         shell: pwsh
-        run: cmake --install build --prefix $env:ROCM_SDK_PATH
+        run: |
+          cmake --install build --prefix $env:ROCM_SDK_PATH
+          # On Windows, rocm_sdk.initialize_process() preloads "hipdnn" by base
+          # name before the extension module is imported (Windows extension
+          # loading ignores PATH), resolving it via the sibling
+          # _rocm_sdk_libraries package -- not the _rocm_sdk_devel prefix
+          # patched above. Without also patching _rocm_sdk_libraries, that
+          # preload keeps loading the stale nightly-wheel hipdnn_backend.dll
+          # and every superbuild fix here goes untested.
+          $librariesPath = $env:ROCM_SDK_PATH -replace '_rocm_sdk_devel$', '_rocm_sdk_libraries'
+          cmake --install build --prefix $librariesPath
 
       - name: Install Python build dependencies
         shell: pwsh
