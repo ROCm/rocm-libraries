@@ -182,7 +182,7 @@ namespace
 // Writes a minimal single-kernel family.json (plus the dummy .co it references)
 // into a temp arch dir and returns the catalog root. `workspaceJson` is spliced
 // in verbatim as the "workspace_bytes" value (a number, string, or object).
-class WorkspaceFamilyFixture : public ::testing::Test
+class TestAotWorkspaceFamily : public ::testing::Test
 {
 protected:
     void SetUp() override
@@ -238,7 +238,7 @@ const WorkspaceExpr& onlyKernelWorkspace(const Catalog& catalog)
 
 // A bare integer parses as today's static constant (back-compat) and evaluates
 // to itself regardless of the symbol table.
-TEST_F(WorkspaceFamilyFixture, IntegerLiteralBackCompat)
+TEST_F(TestAotWorkspaceFamily, IntegerLiteralBackCompat)
 {
     const Catalog catalog = loadWith("0");
     ASSERT_EQ(catalog.families().size(), 1u);
@@ -250,7 +250,7 @@ TEST_F(WorkspaceFamilyFixture, IntegerLiteralBackCompat)
 }
 
 // A JSON-AST expression parses into a tree that evaluates against grid symbols.
-TEST_F(WorkspaceFamilyFixture, ExpressionParsesAndEvaluates)
+TEST_F(TestAotWorkspaceFamily, ExpressionParsesAndEvaluates)
 {
     const Catalog catalog
         = loadWith(R"({ "align_up": [ { "mul": ["M", "N", "elem_size"] }, 256 ] })");
@@ -260,7 +260,7 @@ TEST_F(WorkspaceFamilyFixture, ExpressionParsesAndEvaluates)
 }
 
 // A bare symbol string is a SYMBOL reference.
-TEST_F(WorkspaceFamilyFixture, SymbolStringParses)
+TEST_F(TestAotWorkspaceFamily, SymbolStringParses)
 {
     const Catalog catalog = loadWith("\"K\"");
     ASSERT_EQ(catalog.families().size(), 1u);
@@ -269,28 +269,28 @@ TEST_F(WorkspaceFamilyFixture, SymbolStringParses)
 
 // Fail-closed: an unknown operator key skips the whole family (no-throw load
 // contract), so the catalog loads empty rather than accepting a bad expression.
-TEST_F(WorkspaceFamilyFixture, UnknownOperatorKeyIsRejected)
+TEST_F(TestAotWorkspaceFamily, UnknownOperatorKeyIsRejected)
 {
     const Catalog catalog = loadWith(R"({ "pow": ["M", 2] })");
     EXPECT_TRUE(catalog.empty());
 }
 
 // Fail-closed: wrong arity (sub needs exactly two operands) is rejected.
-TEST_F(WorkspaceFamilyFixture, WrongArityIsRejected)
+TEST_F(TestAotWorkspaceFamily, WrongArityIsRejected)
 {
     EXPECT_TRUE(loadWith(R"({ "sub": ["M"] })").empty());
     EXPECT_TRUE(loadWith(R"({ "ceil_div": ["M", "N", 1] })").empty());
 }
 
 // Fail-closed: an object with two operator keys is ambiguous and rejected.
-TEST_F(WorkspaceFamilyFixture, MultipleOperatorKeysAreRejected)
+TEST_F(TestAotWorkspaceFamily, MultipleOperatorKeysAreRejected)
 {
     const Catalog catalog = loadWith(R"({ "mul": ["M", 2], "add": ["M", 1] })");
     EXPECT_TRUE(catalog.empty());
 }
 
 // Fail-closed: a negative integer literal is rejected at parse time.
-TEST_F(WorkspaceFamilyFixture, NegativeLiteralIsRejected)
+TEST_F(TestAotWorkspaceFamily, NegativeLiteralIsRejected)
 {
     EXPECT_TRUE(loadWith("-8").empty());
 }
