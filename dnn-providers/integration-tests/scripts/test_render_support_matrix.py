@@ -579,11 +579,11 @@ def _unit(layout: str, engines: dict[str, set]) -> ClaimUnit:
 def _body(document: str) -> str:
     """Everything from the first target section on.
 
-    The legend spells out the cell vocabulary by example, so it contains the
-    same literals the cell tests look for. Asserting against the whole document
-    would pass on the legend alone.
+    The quick key at the top spells out the cell marks by example, so it
+    contains the same literals the cell tests look for. Asserting against the
+    whole document would pass on the key alone.
     """
-    return document.split("\n## gfx", 1)[1]
+    return document.split("### Overview", 1)[1]
 
 
 class TestCells:
@@ -661,8 +661,8 @@ class TestMarkdown:
 
     def test_has_the_expected_skeleton(self, document: str) -> None:
         assert document.startswith("# Combined Engine Support Matrix\n")
-        assert "## gfx90a / linux" in document
-        assert "## gfx942 / linux" in document
+        assert "gfx90a / linux" in document
+        assert "gfx942 / linux" in document
         assert "### Overview" in document
         assert "🔎 per-(variant, dtype) detail" in document
 
@@ -670,30 +670,33 @@ class TestMarkdown:
         assert "scripts/render_support_matrix.py" in document
         assert "Do not hand-edit" in document
 
-    def test_legend_precedes_the_first_target(self, document: str) -> None:
-        assert document.index("## Legend") < document.index("## gfx")
+    def test_quick_key_precedes_the_first_target(self, document: str) -> None:
+        assert document.index(f"`{FULL}`") < document.index("### Overview")
 
-    def test_legend_defines_every_cell_form(self, document: str) -> None:
-        legend = document.split("## gfx", 1)[0]
+    def test_reading_guide_follows_the_last_target(self, document: str) -> None:
+        assert document.index("Reading guide</h2>") > document.rindex("### Overview")
+
+    def test_reading_guide_defines_every_cell_form(self, document: str) -> None:
+        guide = document.split("Reading guide</h2>", 1)[1]
         for token in (FULL, PARTIAL, NONE, NO_LAYOUT):
-            assert f"`{token}" in legend, f"legend does not explain {token!r}"
+            assert f"`{token}" in guide, f"reading guide does not explain {token!r}"
 
-    def test_legend_says_a_dash_is_unclaimed_not_unsupported(
+    def test_reading_guide_says_a_dash_is_unclaimed_not_unsupported(
         self, document: str
     ) -> None:
         """The one reading that would invert the document's meaning."""
-        legend = document.split("## gfx", 1)[0]
-        assert "*unclaimed*" in legend
-        assert "not the same as *known unsupported*" in legend
+        guide = document.split("Reading guide</h2>", 1)[1]
+        assert "*unclaimed*" in guide
+        assert "not the same as *known unsupported*" in guide
 
     def test_arch_headings_carry_the_marketing_name(self, document: str) -> None:
-        assert "## gfx90a / linux — MI200 series (MI210/MI250/MI250X)" in document
-        assert "## gfx942 / linux — MI300 series (MI300A/MI300X/MI325X)" in document
+        assert "gfx90a / linux — MI200 series (MI210/MI250/MI250X)" in document
+        assert "gfx942 / linux — MI300 series (MI300A/MI300X/MI325X)" in document
 
     def test_unknown_arch_renders_bare(self) -> None:
         """A new gfx target must not have to wait on the name table."""
         unit = _unit("NCHW", {"E": {("gfx1337", "linux")}})
-        assert "## gfx1337 / linux\n" in render_markdown([unit], 0)
+        assert "gfx1337 / linux</h2>" in render_markdown([unit], 0)
 
     def test_engine_columns_are_alphabetical(self, document: str) -> None:
         header = next(
@@ -1051,18 +1054,29 @@ def _row_counts(table: str) -> list[list[int]]:
 
 
 def _family_blocks(document: str) -> list[tuple[list[int], str, str]]:
-    """Per family block: the summary counts, the variant table, the detail table.
+    """Per family block: the overview counts, the variant table, the detail table.
 
-    The three are the document's three zoom levels for one family on one
-    target, which is exactly the grouping the sum invariant is stated over.
+    The overview counts come from the pipe-table row that sits just above the
+    ``<details>`` block (e.g. ``| **Batchnorm** | — | 🟡 528/840 | ... |``).
+    The variant and detail tables are the two nested ``<details>`` inside it.
+
+    Splits by target section first so that families with the same name in
+    different ``arch / platform`` sections are paired correctly.
     """
     blocks = []
-    for chunk in document.split("<summary>📂 <b>")[1:]:
-        summary, _, rest = chunk.partition("\n")
-        body = rest.split("</details>\n\n</details>")[0]
-        variants, _, detail = body.partition("<summary>🔎")
-        engine_cells = summary.split("—", 1)[1].split(" · ")
-        blocks.append((_counts(engine_cells), variants, detail))
+    for target_section in document.split("### Overview")[1:]:
+        overview_rows: dict[str, list[int]] = {}
+        for line in target_section.splitlines():
+            if line.startswith("| **") and "** |" in line:
+                cells = line.strip().strip("|").split("|")
+                name = cells[0].strip().strip("*").strip()
+                overview_rows[name] = _counts(cells[1:])
+
+        for chunk in target_section.split("<summary>📂 <b>")[1:]:
+            name = chunk.split("</b>")[0]
+            body = chunk.split("\n", 1)[1].split("</details>\n\n</details>")[0]
+            variants, _, detail = body.partition("<summary>🔎")
+            blocks.append((overview_rows.get(name, []), variants, detail))
     return blocks
 
 

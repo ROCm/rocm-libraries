@@ -102,18 +102,29 @@ ARCH_MARKETING_NAMES = {
 # "unsupported" inside a layout list.
 NO_LAYOUT = "n/a"
 
-# Explains the cell vocabulary at the top of the document. The distinction
-# worth spelling out is the last one: this matrix records *claims*, so a blank
-# cell means nobody claimed the graph, not that the engine was tried and
-# failed. Reading "—" as "known unsupported" would invert its meaning.
+# Short key at the top — just enough to read the tables. The full reference
+# (what a claim means, how variants are tagged, how tiers merge) goes at the
+# end so the reader hits the data first.
 LEGEND = [
-    "_Zoom out: each overview row is one op family. Open a disclosure triangle "
+    f"`{FULL}` = all graphs claimed · "
+    f"`{PARTIAL}` = some claimed · "
+    f"`{NONE}` = unclaimed (not the same as *known unsupported*). "
+    "Expand a row for variant and per-dtype detail. "
+    "Full legend at the [end of the document](#reading-guide).",
+    "",
+]
+
+# The full reference, rendered after the last target section.
+READING_GUIDE = [
+    "## Reading guide",
+    "",
+    "_Each overview row is one op family. Open a disclosure triangle "
     "to expand it into per-variant rows, and the one inside that for full "
     "per-(variant, dtype) rows. Every level counts the same way, so a family's "
     "variant counts sum to its overview count and a variant's dtype counts sum "
     "to the variant._",
     "",
-    "## Legend",
+    "### Cell vocabulary",
     "",
     "| Cell | Meaning |",
     "|------|---------|",
@@ -164,7 +175,7 @@ LEGEND = [
     "",
     "**Tiers are merged.** A row can draw on `quick`, `standard`, and `full` "
     "bundles at once. The tier and bundle paths behind each row are in HTML "
-    "comments in the appendix at the end of the document (view source), "
+    "comments in the appendix below, "
     "recorded once because provenance does not vary by target; "
     "`--format json` emits the same data per case with nothing aggregated "
     "away.",
@@ -926,13 +937,8 @@ def render_family(
     arch: str,
     platform: str,
 ) -> None:
-    parts = []
-    for engine in engines:
-        parts.append(f"{engine} {summary_cell(units, engine, arch, platform)}")
-    summary = " · ".join(parts)
-
     lines.append("<details>")
-    lines.append(f"<summary>📂 <b>{family}</b> — {summary}</summary>")
+    lines.append(f"<summary>📂 <b>{family}</b></summary>")
     lines.append("")
     lines.append("| Variant | " + " | ".join(engines) + " |")
     lines.append("|" + "---|" * (len(engines) + 1))
@@ -1009,7 +1015,8 @@ def render_markdown(units: list[ClaimUnit], max_case_ids: int) -> str:
     for arch, platform in targets:
         marketing = ARCH_MARKETING_NAMES.get(arch)
         suffix = f" — {marketing}" if marketing else ""
-        lines.append(f"## {arch} / {platform}{suffix}")
+        lines.append("<details>")
+        lines.append(f"<summary><h2>{arch} / {platform}{suffix}</h2></summary>")
         lines.append("")
         lines.append("### Overview")
         lines.append("")
@@ -1025,7 +1032,16 @@ def render_markdown(units: list[ClaimUnit], max_case_ids: int) -> str:
         for family in families:
             render_family(lines, family, by_family[family], engines, arch, platform)
 
+        lines.append("</details>")
+
+    lines.append("")
+    lines.append("<details>")
+    lines.append("<summary><h2>Reading guide</h2></summary>")
+    lines.append("")
+    lines.extend(READING_GUIDE[2:])
     render_traceability(lines, units, max_case_ids)
+    lines.append("")
+    lines.append("</details>")
 
     return "\n".join(lines).rstrip("\n") + "\n"
 
