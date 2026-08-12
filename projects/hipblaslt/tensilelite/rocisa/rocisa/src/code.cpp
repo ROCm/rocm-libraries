@@ -367,11 +367,20 @@ void init_code(nb::module_ m)
              nb::arg("totalVgprs") = 0,
              nb::arg("totalSgprs") = 0)
         .def("setGprs", &rocisa::SignatureCodeMeta::setGprs)
+        .def("setKernargSegmentSize", &rocisa::SignatureCodeMeta::setKernargSegmentSize,
+             nb::arg("segmentSize"))
         .def("addArg",
              &rocisa::SignatureCodeMeta::addArg,
              nb::arg("name"),
              nb::arg("kind"),
              nb::arg("type"),
+             nb::arg("addrSpaceQual") = std::nullopt)
+        .def("addArgAtOffset",
+             &rocisa::SignatureCodeMeta::addArgAtOffset,
+             nb::arg("name"),
+             nb::arg("kind"),
+             nb::arg("type"),
+             nb::arg("argOffset"),
              nb::arg("addrSpaceQual") = std::nullopt)
         .def("__str__", &rocisa::SignatureCodeMeta::toString)
         .def("__deepcopy__",
@@ -406,11 +415,20 @@ void init_code(nb::module_ m)
              nb::arg("totalSgprs")      = 0,
              nb::arg("numSgprPreload")  = 0)
         .def("setGprs", &rocisa::SignatureBase::setGprs)
+        .def("setKernargSegmentSize", &rocisa::SignatureBase::setKernargSegmentSize,
+             nb::arg("segmentSize"))
         .def("addArg",
              &rocisa::SignatureBase::addArg,
              nb::arg("name"),
              nb::arg("kind"),
              nb::arg("type"),
+             nb::arg("addrSpaceQual") = std::nullopt)
+        .def("addArgAtOffset",
+             &rocisa::SignatureBase::addArgAtOffset,
+             nb::arg("name"),
+             nb::arg("kind"),
+             nb::arg("type"),
+             nb::arg("argOffset"),
              nb::arg("addrSpaceQual") = std::nullopt)
         .def("addDescriptionTopic", &rocisa::SignatureBase::addDescriptionTopic)
         .def("addDescriptionBlock", &rocisa::SignatureBase::addDescriptionBlock)

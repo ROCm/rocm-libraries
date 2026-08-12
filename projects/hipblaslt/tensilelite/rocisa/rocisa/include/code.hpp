@@ -1486,6 +1486,7 @@ namespace rocisa
         int                            totalVgprs;
         int                            totalSgprs;
         int                            offset;
+        int                            explicitKernargSegmentSize;
         std::vector<SignatureArgument> argList;
 
         SignatureCodeMeta(const std::string& name,
@@ -1503,6 +1504,7 @@ namespace rocisa
             , totalVgprs(totalVgprs)
             , totalSgprs(totalSgprs)
             , offset(0)
+            , explicitKernargSegmentSize(-1)
         {
         }
 
@@ -1510,6 +1512,19 @@ namespace rocisa
         {
             this->totalVgprs = totalVgprs;
             this->totalSgprs = totalSgprs;
+        }
+
+        // Pin the .kernarg_segment_size to a caller-supplied value instead of the
+        // value derived from natural arg packing. Needed for kernels whose body
+        // s_loads args from a non-natural layout (e.g. the fmha DP=0 16-byte slot
+        // ABI, segment 208): the assembler-visible segment MUST match what the body
+        // reads or the loader DMAs too few bytes and dispatch faults. -1 (default)
+        // keeps the natural-packing computation, so existing consumers are unchanged.
+        void setKernargSegmentSize(int segmentSize)
+        {
+            // Any negative value means "unset" (derive from packing); normalize to
+            // the -1 sentinel so the field is always either -1 or a valid (>=0) size.
+            explicitKernargSegmentSize = segmentSize < 0 ? -1 : segmentSize;
         }
 
         std::string toString() const override
@@ -1526,7 +1541,7 @@ namespace rocisa
             {
                 kStr += "  - 1\n";
             }
-            else if(codeObjectVersion == "5")
+            else if(codeObjectVersion == "5" || codeObjectVersion == "6")
             {
                 kStr += "  - 2\n";
             }
@@ -1544,8 +1559,9 @@ namespace rocisa
             }
             kStr += "    .group_segment_fixed_size:   " + std::to_string(groupSegSize) + "\n";
             kStr += "    .kernarg_segment_align:      8\n";
-            kStr += "    .kernarg_segment_size:       " + std::to_string(((offset + 7) / 8) * 8)
-                    + "\n";
+            int kernargSegmentSize = explicitKernargSegmentSize >= 0 ? explicitKernargSegmentSize
+                                                                     : ((offset + 7) / 8) * 8;
+            kStr += "    .kernarg_segment_size:       " + std::to_string(kernargSegmentSize) + "\n";
             kStr += "    .max_flat_workgroup_size:    " + std::to_string(flatWgSize) + "\n";
             kStr += "    .private_segment_fixed_size: 0\n";
             kStr += "    .sgpr_count:                 " + std::to_string(totalSgprs) + "\n";
@@ -1567,6 +1583,30 @@ namespace rocisa
             SignatureArgument sa(offset, name, kind, type, addrSpaceQual.value_or(""));
             argList.push_back(sa);
             offset += sa.size;
+        }
+
+        // Add an arg at a caller-pinned offset instead of the natural-packing
+        // cursor. For kernels whose ABI is not natural-packed (e.g. the fmha DP=0
+        // 16-byte slot layout: O@0x00, Q@0x10, ...). The LLVM assembler honors
+        // explicit .offset values in .amdgpu_metadata (the golden fmha .co was
+        // assembled this way), so this stays within valid AMDGPU code-object ABI.
+        // Pair with setKernargSegmentSize() to pin the segment when the ABI pads
+        // beyond the last arg (e.g. fmha's 208).
+        //
+        // The natural cursor is advanced to the high-water mark (max end over all
+        // args), so the derived .kernarg_segment_size stays correct regardless of
+        // insertion order and mixing addArgAtOffset() with addArg() is well-defined
+        // (a following addArg() packs after the highest explicit arg, never on top
+        // of it).
+        void addArgAtOffset(const std::string&                name,
+                            SignatureValueKind                kind,
+                            const std::string&                type,
+                            int                               argOffset,
+                            const std::optional<std::string>& addrSpaceQual = std::nullopt)
+        {
+            SignatureArgument sa(argOffset, name, kind, type, addrSpaceQual.value_or(""));
+            offset = std::max(offset, sa.offset + sa.size);
+            argList.push_back(sa);
         }
 
         std::string prettyPrint(const std::string& indent = "") const override
@@ -1625,6 +1665,20 @@ namespace rocisa
                     const std::optional<std::string>& addrSpaceQual = std::nullopt)
         {
             codeMeta.addArg(name, kind, type, addrSpaceQual);
+        }
+
+        void addArgAtOffset(const std::string&                name,
+                            SignatureValueKind                kind,
+                            const std::string&                type,
+                            int                               argOffset,
+                            const std::optional<std::string>& addrSpaceQual = std::nullopt)
+        {
+            codeMeta.addArgAtOffset(name, kind, type, argOffset, addrSpaceQual);
+        }
+
+        void setKernargSegmentSize(int segmentSize)
+        {
+            codeMeta.setKernargSegmentSize(segmentSize);
         }
 
         void addDescriptionTopic(const std::string& text)
