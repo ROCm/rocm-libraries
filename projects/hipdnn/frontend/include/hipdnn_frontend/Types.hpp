@@ -53,6 +53,7 @@
 namespace hipdnn_frontend
 {
 using hipdnn_data_sdk::types::bfloat16;
+using hipdnn_data_sdk::types::fp4_e2m1;
 using hipdnn_data_sdk::types::fp8_e4m3;
 using hipdnn_data_sdk::types::fp8_e4m3_fnuz;
 using hipdnn_data_sdk::types::fp8_e5m2;
@@ -400,6 +401,10 @@ DataType getDataTypeEnumFromType()
     else if constexpr(std::is_same_v<T, int8_t>)
     {
         return DataType::INT8;
+    }
+    else if constexpr(std::is_same_v<T, fp4_e2m1>)
+    {
+        return DataType::FP4_E2M1;
     }
     else if constexpr(std::is_same_v<T, fp8_e4m3>)
     {
