@@ -48,7 +48,10 @@ def _intParam():
     for name, types in _expectedParamTypes.items():
         if types == {int} and name not in _skipTypeCheck:
             return name
-    pytest.skip("no int-typed unskipped parameter in registry")
+    pytest.fail(
+        "no int-typed unskipped parameter in registry; the type-mismatch kill "
+        "contract can no longer be enforced -- update this test to the new registry"
+    )
 
 
 def _intISPKey():
@@ -56,7 +59,10 @@ def _intISPKey():
     for key, default in defaultInternalSupportParams.items():
         if type(default) is int:
             return key
-    pytest.skip("no int-typed default InternalSupportParams key")
+    pytest.fail(
+        "no int-typed default InternalSupportParams key; the validation kill "
+        "contract can no longer be enforced -- update this test to the new registry"
+    )
 
 
 class TestGetExpectedTypesEmptyList:
