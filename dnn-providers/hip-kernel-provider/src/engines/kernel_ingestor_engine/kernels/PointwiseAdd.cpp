@@ -1,15 +1,14 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-// The kernel behind the pointwise-add descriptor pack. Deliberately the
-// narrowest useful operation: elementwise add over a single-element tensor.
+// The kernel behind the pointwise-add descriptor pack: elementwise add over a
+// single-element tensor.
 //
-// HIP_PLUGIN_POINTWISE_ADD_TYPE is the element type, supplied per compilation from the
-// kernel descriptor's dtype metadata. HIP_PLUGIN_POINTWISE_ADD_BLOCK_SIZE is the block
-// size the descriptor selected; the kernel does not read it, because one element needs
-// one thread. It exists so the ingestor's ranking, knob reporting, and per-kernel
-// dispatch have a metadata field that genuinely varies between kernels and genuinely
-// reaches the compiler, rather than a field that only tests observe.
+// HIP_PLUGIN_POINTWISE_ADD_TYPE is the element type, from the kernel descriptor's
+// dtype metadata. HIP_PLUGIN_POINTWISE_ADD_BLOCK_SIZE is the descriptor's block size;
+// the kernel itself ignores it (one element needs one thread), but it must still
+// reach the compiler so ranking, knob reporting, and per-kernel dispatch have a
+// metadata field that genuinely varies and isn't just observed by tests.
 
 extern "C" __global__ void PointwiseAdd(const HIP_PLUGIN_POINTWISE_ADD_TYPE* a,
                                         const HIP_PLUGIN_POINTWISE_ADD_TYPE* b,

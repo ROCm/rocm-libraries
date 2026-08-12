@@ -21,15 +21,13 @@ namespace hip_kernel_provider::kernel_ingestor_engine
 /**
  * @brief The native dispatch behind this pack's UDD: sizes and launches a pointwise add.
  *
- * Holds the provider machinery a launch needs — a kernel compiler and the device
- * properties it compiles against — which is exactly why this interface exists: the SDK
- * never names either of them.
+ * Holds the provider machinery a launch needs -- a kernel compiler and the device
+ * properties it compiles against -- which the SDK never names.
  *
- * The work splits the way RFC 0017 §8.5 describes. Everything derived from the graph and
- * the chosen kernel (which uids the arguments bind to, the launch geometry, the compiled
- * kernel itself) resolves once at plan build; execute afterwards only resolves device
- * pointers by uid and launches. A plan may execute concurrently from several threads, so
- * nothing here mutates after preparation.
+ * Splits per RFC 0017 §8.5: everything derived from the graph and chosen kernel
+ * resolves once at plan build; execute only resolves device pointers by uid and
+ * launches. A plan may execute concurrently from several threads, so nothing here
+ * mutates after preparation.
  */
 class PointwiseAddDispatchHandler
     : public hipdnn_plugin_sdk::ingestor::IKernelDispatchHandler<Handle>
@@ -48,10 +46,9 @@ public:
     /**
      * @brief Scratch this kernel requires.
      *
-     * A one-element add needs none. The 256-block kernel nonetheless reports a non-zero
-     * requirement so the engine's "maximum across surviving kernels" is observably a
-     * maximum rather than a constant zero — the workspace path is otherwise
-     * indistinguishable from not being wired up at all.
+     * A one-element add needs none. The 256-block kernel reports a non-zero
+     * requirement so the engine's max-across-survivors is observably a maximum
+     * rather than a constant zero.
      */
     size_t
         workspaceBytes(const hipdnn_plugin_sdk::ingestor::MatchContext& context,

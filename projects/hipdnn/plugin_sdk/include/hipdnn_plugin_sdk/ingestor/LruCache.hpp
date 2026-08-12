@@ -19,11 +19,12 @@ namespace hipdnn_plugin_sdk::ingestor
 /**
  * @brief A bounded, thread-safe least-recently-used cache.
  *
- * Sized by entry count rather than bytes: the ingestor's entries hold descriptor ids and
- * bound field values, not kernels or graphs, so their size is bounded by construction.
+ * Sized by entry count rather than bytes: the ingestor's entries hold descriptor ids
+ * and bound field values, not kernels or graphs, so their size is bounded by
+ * construction.
  *
- * Eviction costs a rematch, never a wrong answer, so the capacity is a memory/latency
- * tradeoff rather than a correctness one.
+ * Eviction costs a rematch, never a wrong answer, so the capacity is a
+ * memory/latency tradeoff rather than a correctness one.
  *
  * @tparam Key   Must be hashable by @p Hash and equality-comparable.
  * @tparam Value Copied in and out; callers hold snapshots, not references into the cache.
@@ -101,8 +102,8 @@ private:
 
     mutable std::mutex _mutex;
     size_t _capacity;
-    /// Most-recently-used first. A list so splicing an entry to the front on a hit does
-    /// not invalidate the iterators held in _index.
+    /// Most-recently-used first. A list so splicing an entry to the front on a hit
+    /// does not invalidate the iterators held in _index.
     std::list<Entry> _order;
     std::unordered_map<Key, typename std::list<Entry>::iterator, Hash> _index;
 };

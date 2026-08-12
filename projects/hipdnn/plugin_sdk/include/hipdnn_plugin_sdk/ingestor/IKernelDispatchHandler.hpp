@@ -19,18 +19,12 @@ namespace hipdnn_plugin_sdk::ingestor
 /**
  * @brief Everything a launch needs that was derived from the graph, resolved once.
  *
- * A provider derives from this to hold whatever its kernels need: argument uids, launch
+ * A provider derives from this to hold what its kernels need: argument uids, launch
  * geometry, a loaded code object, a preallocated argument buffer.
  *
- * It exists because a plan outlives the call that built it. The bound token state a
- * MatchContext carries is references into a graph hipDNN owns for the duration of one
- * plugin call, so a plan cannot keep it. Instead the handler reads that state once, at
- * plan build, and hands back owned values.
- *
- * This is also the shape RFC 0017 §8.5 describes: the plan build evaluates the dispatch
- * descriptor's grid, block, shared-memory and argument formulas over the bound token
- * state, and execute afterwards only resolves device pointers by uid and launches.
- * Nothing is re-matched and nothing is re-derived per execution.
+ * A plan outlives the call that built it, and a MatchContext holds references into a
+ * graph hipDNN owns for one plugin call only, so a plan cannot keep that state. The
+ * handler reads it once at plan build and returns owned values (RFC 0017 §8.5).
  */
 class PreparedDispatch
 {
@@ -41,18 +35,12 @@ public:
 /**
  * @brief The native escape hatch for a UDD: how to size, prepare, and launch a kernel.
  *
- * This is the seam that keeps provider-specific machinery out of the SDK. A provider's
- * implementation holds whatever it needs to run a kernel — a compiler, a module cache, a
- * loaded code object — and the SDK never names any of it. Templating on THandle matches
- * IPlanBuilder and IPlan, which are parameterized the same way for the same reason.
+ * Keeps provider machinery out of the SDK -- an implementation holds its own compiler,
+ * module cache and code objects, none of which the SDK names. Templated on THandle to
+ * match IPlanBuilder and IPlan.
  *
- * RFC 0017 §6 makes workspace part of this interface deliberately: the workspace query
- * arrives before any kernel is chosen and before a plan exists, so anything that can
- * launch must also be able to size its scratch. A handler that can launch but cannot
- * answer the workspace question is incomplete.
- *
- * The data-driven replacement evaluates the UDD's expressions instead of calling native
- * code. That is the UDD follow-up RFC; this interface is what it plugs into.
+ * Workspace belongs here (RFC 0017 §6) because the workspace query arrives before any
+ * kernel is chosen: anything that can launch must also be able to size its scratch.
  */
 template <typename THandle>
 class IKernelDispatchHandler
@@ -64,18 +52,12 @@ public:
      * @brief Global scratch this kernel requires, in bytes.
      *
      * Answered per kernel, before selection, so the engine can report the maximum across
-     * every kernel the caller's knobs leave in the catalog. The answer stays independent
-     * of which other kernels are present: the catalog is never passed in.
+     * the kernels the caller's knobs leave in the catalog. The catalog is never passed
+     * in, so the answer cannot depend on which other kernels are present.
      *
-     * Takes the bound token state as well as the kernel because a workspace requirement
-     * is a formula over graph dimensions as much as over kernel metadata. RFC 0017 §6's
-     * worked example is `batch * num_heads * seqlen_q * 4`, which a signature over the
-     * kernel alone cannot express, and the declarative evaluator that eventually replaces
-     * a native handler has to.
-     *
-     * @param bound What matching already resolved about this graph. Read rather than
-     *        re-derived: RFC 0017 §8.5 gives matching the job of binding the fields the
-     *        launch uses, and §8.1 requires that nothing be re-matched afterwards.
+     * @param bound What matching already resolved about this graph. A workspace size is
+     *        a formula over graph dimensions as much as kernel metadata, so this is read
+     *        rather than re-derived (RFC 0017 §8.1: nothing is re-matched).
      */
     // NOLINTNEXTLINE(portability-template-virtual-member-function)
     virtual size_t workspaceBytes(const MatchContext& context,
@@ -87,11 +69,7 @@ public:
      * @brief Resolves everything @p kernel's launch needs from the bound token state.
      *
      * Called once, at plan build, while @p context is still valid. The returned object is
-     * owned by the plan and must not reference anything in @p context.
-     *
-     * @param bound What matching resolved about this graph, for the same reason
-     *        workspaceBytes() takes it: the values a launch needs were already found once
-     *        and re-finding them here would be a second, divergeable notion of the graph.
+     * owned by the plan and MUST NOT reference anything in @p context or @p bound.
      */
     // NOLINTNEXTLINE(portability-template-virtual-member-function)
     virtual std::unique_ptr<PreparedDispatch> prepare(const MatchContext& context,
@@ -112,17 +90,10 @@ public:
      * @note May be called concurrently from several threads with different device
      *       buffers, so it must not mutate @p prepared or the handler.
      *
-     * Deliberately one call, one kernel: multi-launch UDDs (a UDD whose dispatch is
-     * several kernels rather than one) are out of scope for this interface and are
-     * correctly deferred, per RFC 0017's own follow-up. When that lands, the direction
-     * this interface takes is a handler invoked once per launch that internally issues
-     * N kernel launches on @p handle's stream -- not the SDK calling launch() N times --
-     * because grid/block/argument formulas for launch i in a multi-kernel dispatch can
-     * depend on what launch i-1 produced (a two-pass reduction's second kernel sizes
-     * itself from the first's output), which only the handler that owns the whole
-     * dispatch can resolve. Recording the direction now, rather than only the
-     * deferral, is what keeps this a decision instead of an open question the next
-     * implementer has to re-litigate.
+     * One call, one kernel. When multi-launch UDDs land, the handler should issue the N
+     * launches internally rather than the SDK calling launch() N times: launch i's
+     * geometry can depend on what launch i-1 produced, and only the handler owning the
+     * whole dispatch can resolve that.
      */
     // NOLINTNEXTLINE(portability-template-virtual-member-function)
     virtual void launch(const THandle& handle,

@@ -28,20 +28,12 @@ namespace hipdnn_plugin_sdk::ingestor
  * One level below hipDNN's engine-selection heuristic, which decides *which engine*
  * handles a graph and is untouched by this system.
  *
- * An implementation supplies `score()` and nothing else. It ranks one kernel at a time
- * and never sees the catalog, so a kernel's score cannot depend on which other kernels
- * are present. That is what makes filtering and ranking commute: a knob-filtered subset
- * ranks exactly as it did in the whole catalog, so the kernel a knob setting selects is
- * the kernel the reported default named. The failure it prevents, a reported default
- * that a knob setting then contradicts, is silent and surfaces to a user rather than to
- * the author who caused it.
- *
- * RFC 0017 §9.2 makes that structural rather than advisory: the scorer interface "takes
- * one kernel at a time and is never handed the catalog, so a scorer that ranks relative
- * to its peers cannot be written against it". `rank()` is therefore non-virtual. A
- * selector that must reason over the candidate set as a whole is admitted by the
- * heuristic follow-up RFC, which owns deciding what a knob-filtered query means once
- * ranking is no longer per kernel; re-opening this for override then is additive.
+ * An implementation supplies `score()` and nothing else: it ranks one kernel at a
+ * time and never sees the catalog, so a kernel's score cannot depend on which other
+ * kernels are present. That is what makes filtering and ranking commute (RFC 0017
+ * §9.2), so a knob-filtered subset ranks exactly as it did in the whole catalog.
+ * `rank()` is therefore non-virtual; a selector that must reason over the candidate
+ * set as a whole is the heuristic follow-up RFC's job.
  */
 class IKernelHeuristic
 {
@@ -54,17 +46,13 @@ public:
     /**
      * @brief Orders @p catalog best-first.
      *
-     * Scores each entry independently and sorts descending, breaking ties
-     * deterministically: first on the kernel's explicit `priority`, then on its
-     * descriptor id compared as bytes. That id order carries no meaning — it is chosen
-     * only for being stable across runs, load orders, and machines, so two processes
-     * given the same catalog always choose the same kernel.
+     * Scores each entry independently and sorts descending, breaking ties first on
+     * the kernel's explicit `priority`, then on its descriptor id compared as bytes
+     * (stable across runs, load orders, and machines).
      *
      * Each kernel is scored exactly once, before sorting, rather than inside the
-     * comparator. A scorer is a model evaluation in the data-driven form, so scoring
-     * from the comparator would run inference O(n log n) times for an n-kernel catalog
-     * instead of n, and would also let a scorer that is not perfectly deterministic
-     * produce an inconsistent ordering.
+     * comparator: scoring from the comparator would run inference O(n log n) times
+     * instead of n for an n-kernel catalog.
      */
     std::vector<KernelDefinition> rank(const Catalog& catalog, const MatchContext& context) const
     {
@@ -100,21 +88,14 @@ public:
 /**
  * @brief An IKernelHeuristic whose score() is a native function resolved by symbol.
  *
- * The UHD escape hatch: the descriptor names a symbol, this resolves it. The data-driven
- * form loads a model artifact and assembles its feature vector from the bound token state
- * instead (the UHD follow-up RFC), and slots in here as another IKernelHeuristic.
+ * The UHD escape hatch: the descriptor names a symbol, this resolves it. The
+ * data-driven form loads a model artifact instead (the UHD follow-up RFC), and slots
+ * in here as another IKernelHeuristic.
  *
  * **Constructing a heuristic must stay cheap; whatever it selects with loads on first
- * use.** RFC 0017 §8.1 admits the heuristic at applicability only as a name: "The
- * heuristic is named but **not** loaded; nothing ranks yet", and §3 generalizes it,
- * "a heuristic model is not read until something needs the catalog ranked". An engine
- * whose matchers reject a graph must never pay for its selector.
- *
- * That contract lives here rather than one level up, because only the adapter knows what
- * "loading" costs it. This one holds a symbol name and resolves it on first score(); a
- * LightGBM adapter would hold an artifact path and read the model there. Either way the
- * object is constructible before any graph is seen, which is what lets the engine own it
- * outright instead of threading a factory through the state manager.
+ * use** (RFC 0017 §8.1, §3): an engine whose matchers reject a graph must never pay
+ * for its selector. This one holds a symbol name and resolves it on first score(); a
+ * LightGBM adapter would hold an artifact path and read the model there.
  */
 class NativeKernelHeuristic : public IKernelHeuristic
 {
@@ -144,17 +125,10 @@ private:
 /**
  * @brief Builds the IKernelHeuristic a UHD names, keyed on its kind.
  *
- * The same shape DispatchRegistry's symbol-to-handler resolution has, applied to the
- * one descriptor RFC 0017 constructs and then steps around: before this, a UHD's
- * `scoreSymbol` had no path from the descriptor to a live heuristic except a provider
- * hand-building a NativeKernelHeuristic itself. With this factory, "add file loading and
- * it works" is true for a UHD exactly as it already is for a UMD or a UDD.
- *
  * @throws std::invalid_argument if @p descriptor names a kind with no adapter yet
- *         (HeuristicKind::MODEL). Fails at descriptor-assembly time rather than at the
- *         first rank(), for the same reason KernelIngestorStateManager's other
- *         cross-reference checks run eagerly: a kind nothing can load is a load error,
- *         not a runtime surprise on the first graph that needs ranking.
+ *         (HeuristicKind::MODEL). Fails at descriptor-assembly time, matching
+ *         KernelIngestorStateManager's other cross-reference checks: a kind nothing
+ *         can load is a load error, not a runtime surprise at the first rank().
  */
 inline std::shared_ptr<IKernelHeuristic> makeKernelHeuristic(const HeuristicDescriptor& descriptor)
 {

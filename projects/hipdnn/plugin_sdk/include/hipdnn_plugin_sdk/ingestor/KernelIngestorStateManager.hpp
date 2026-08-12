@@ -29,9 +29,9 @@
 namespace hipdnn_plugin_sdk::ingestor
 {
 
-/// What a caller needs to size and launch one selected kernel: the kernel itself, plus
-/// the dispatch handler its pack's UDD resolved to. Copied out like KernelDefinition, so
-/// holding one does not pin the state manager's internals.
+/// What a caller needs to size and launch one selected kernel: the kernel plus the
+/// dispatch handler its pack's UDD resolved to. Copied out, so holding one does not
+/// pin the state manager's internals.
 template <typename THandle>
 struct KernelDispatcher
 {
@@ -46,7 +46,7 @@ struct KernelDispatcher
  *        and how to launch one.
  *
  * Holds the descriptor state one engine selects over (its KMD and UHD, and the packs
- * naming it) and answers the three questions hipDNN's four host calls reduce to:
+ * naming it) and answers hipDNN's four host calls:
  *
  * | Host call                    | Answered by                                    |
  * |------------------------------|------------------------------------------------|
@@ -55,11 +55,9 @@ struct KernelDispatcher
  * | getMaxWorkspaceSize          | getDispatchDetails() per survivor, then max    |
  * | initializeExecutionContext   | sortedDefinitions().front(), getDispatchDetails() |
  *
- * **Work is done as late as possible and kept.** Applicability only needs to know
- * whether any kernel survived, so it matches but does not rank. Ranking happens on the
- * first call that needs an order, and is cached alongside the catalog it ordered. Both
- * are keyed on (graph, device) — the problem — rather than on the handle, which is a
- * caller-side object whose lifetime says nothing about whether the work is still valid.
+ * Work is done as late as possible and kept: applicability only matches, ranking
+ * happens on first need and is cached alongside the catalog, both keyed on
+ * (graph, device) rather than the handle.
  *
  * Thread-safe: the cache is internally synchronized, and matcher and scorer calls are
  * made outside the lock, so one thread matching a graph never blocks another.
@@ -82,25 +80,14 @@ public:
      * @param heuristic  That engine's UHD, resolved to a scorer.
      *
      * @throws std::invalid_argument if a pack names a matcher or dispatch descriptor not
-     *         supplied, or if two kernels share a metadata tuple. Both are load-time
-     *         validation failures in the real system: a dangling cross-reference cannot
-     *         be evaluated, and duplicate catalog keys leave selection with two
-     *         indistinguishable candidates and no basis to prefer either.
+     *         supplied, or if two kernels share a metadata tuple: a dangling
+     *         cross-reference cannot be evaluated, and duplicate catalog keys leave
+     *         selection with two indistinguishable candidates.
      *
-     * **This constructor eagerly walks and validates every pack and kernel, via
-     * validateAndIndexPacks(), at plugin load -- a conscious amendment of RFC 0017 §3
-     * and §8's "nothing is parsed until a graph needs it".** What stays lazy is the
-     * expensive part: a kernel source is not compiled and a heuristic model is not read
-     * until a graph actually needs that kernel or that ranking (see
-     * NativeKernelHeuristic's doc for the latter). Descriptor *parsing* -- walking the
-     * KMD/UMD/UDD/UKD structures this constructor is handed and checking their
-     * cross-references and metadata tuples -- is cheap relative to those, and doing it
-     * once at load time is what lets every later match, rank, and dispatch assume the
-     * descriptor set is internally consistent rather than re-checking it per graph. The
-     * cost this trades away is startup latency proportional to descriptor count, which
-     * for an in-process pack like this one is negligible; a loader reading many packs
-     * from disk is where that cost becomes visible, and if it ever needs to be paid
-     * lazily instead, this is the constructor that amendment would have to change.
+     * Eagerly walks and validates every pack and kernel at plugin load, via
+     * validateAndIndexPacks() -- an amendment of RFC 0017 §3/§8's "nothing is parsed
+     * until a graph needs it". What stays lazy is the expensive part: a kernel source
+     * is not compiled and a heuristic model is not read until a graph needs it.
      */
     KernelIngestorStateManager(MetadataSchema schema,
                                std::vector<MatchDescriptor> matchers,
@@ -152,13 +139,11 @@ public:
      *        particular order.
      *
      * On a cache hit, returns the cached catalog. Otherwise runs the matchers in pruning
-     * order — each pack's graph-scoped matchers first, since one failure disqualifies the
-     * whole pack, then the kernel-scoped matchers over whatever survived — and caches the
-     * result.
+     * order — each pack's graph-scoped matchers first, then the kernel-scoped matchers
+     * over whatever survived — and caches the result.
      *
-     * A graph carrying no identity cannot be cached (there is no key, and inventing one
-     * would alias unrelated graphs), so it is matched fresh every call. That costs time,
-     * never correctness.
+     * A graph carrying no identity cannot be cached, so it is matched fresh every call.
+     * That costs time, never correctness.
      */
     std::vector<KernelDefinition> unsortedDefinitions(const MatchContext& context) const
     {
@@ -168,14 +153,10 @@ public:
     /**
      * @brief The unranked catalog and the state matching bound, from one lookup.
      *
-     * RFC 0017 §8.1 keeps the bound token state alongside the catalog so that "nothing
-     * is re-matched" after applicability: a dispatch handler sizing a workspace reads the
-     * values the matcher already resolved rather than walking the graph again with a
-     * second notion of what it looks like.
-     *
-     * Returned together with the entries rather than through a separate accessor because
-     * a caller needing both would otherwise match twice for a graph carrying no identity,
-     * which is exactly the case with no cache to absorb the repeat.
+     * RFC 0017 §8.1 keeps the bound token state alongside the catalog so a dispatch
+     * handler sizing a workspace reads values the matcher already resolved rather than
+     * walking the graph again. Returned together with the entries so a caller needing
+     * both does not match twice for a graph with no identity to cache under.
      *
      * `bound` is empty when no graph-scoped matcher bound anything, which is legal: a
      * pack whose launch geometry is fully determined by kernel metadata has nothing to
@@ -201,10 +182,8 @@ public:
     /**
      * @brief The ranked catalog and the state matching bound, from one lookup.
      *
-     * A plan build needs both, and asking for them separately means two calls into the
-     * cache -- or, for a graph carrying no identity and so no cache entry, two full
-     * matching passes. Returning them together makes "match once" hold for the
-     * uncacheable case as well, which is the case that can least afford the second pass.
+     * A plan build needs both; returning them together avoids matching twice for a
+     * graph with no identity to cache under.
      */
     Catalog sortedCatalog(const MatchContext& context) const
     {
@@ -309,12 +288,10 @@ private:
 
     /// A kernel's declared values for the fields its engine's KMD declares, with the
     /// KMD's defaults filled in for the ones it omitted. This completed tuple, not the
-    /// descriptor id, is what identifies the kernel to matching and ranking.
-    ///
-    /// Built from the schema's field list rather than from the kernel's own map, because
-    /// the KMD fields are the only per-kernel input selection has: a value the schema
-    /// never declared is unreadable to a matcher or a scorer, so admitting one into the
-    /// key would let two kernels that selection cannot tell apart both enter the catalog.
+    /// descriptor id, is what identifies the kernel to matching and ranking: a value the
+    /// schema never declared is unreadable to a matcher or a scorer, so admitting one
+    /// into the key would let two kernels that selection cannot tell apart both enter
+    /// the catalog.
     MetadataValues completeMetadata(const KernelDescriptor& kernel) const
     {
         MetadataValues complete;
@@ -394,9 +371,7 @@ private:
         }
         else
         {
-            // Worth saying once per call: a graph with no identity is re-matched every
-            // time, so an operator seeing repeated matching for what looks like the same
-            // graph is seeing this rather than a caching bug.
+            // A graph with no identity is re-matched every call rather than cached.
             HIPDNN_PLUGIN_LOG_TRACE(
                 "ingestor: graph carries no identity, so its catalog cannot be cached");
         }
@@ -412,16 +387,9 @@ private:
     }
 
     /// One graph-scoped matcher's verdict for one (graph, device), keyed by matcher id.
-    ///
-    /// Matchers are shared by id across packs, so the same check would otherwise be
-    /// re-run once per pack that lists it. The memo covers what the matcher *bound* as
-    /// well as whether it passed, since re-running it to recover its bindings would
-    /// defeat the memo entirely.
-    ///
-    /// `bound` holds only what THIS matcher wrote, isolated from every other matcher's
-    /// writes. That isolation is what makes it safe to merge into a per-pack scoped
-    /// view one matcher at a time: a pack merges in exactly the matchers it lists, never
-    /// a sibling pack's unrelated contribution to some other matcher's memo entry.
+    /// Matchers are shared by id across packs, so this memoizes both the verdict and
+    /// what it bound, isolated per matcher so a pack merges in exactly the matchers it
+    /// lists and never a sibling pack's contribution to another matcher's entry.
     struct GraphMatcherVerdict
     {
         bool passed = false;
@@ -433,24 +401,15 @@ private:
     /**
      * @brief Runs every pack's matchers over @p context, cheapest and broadest first.
      *
-     * Graph-scoped matchers read only graph and device facts, so each is evaluated once
-     * per (graph, device) no matter how many packs list it, and one failure disqualifies
-     * every kernel in every pack that lists it without any per-kernel work. Only then do
-     * the kernel-scoped matchers run, once per surviving kernel.
+     * Graph-scoped matchers read only graph and device facts, so each runs once per
+     * (graph, device) no matter how many packs list it; one failure disqualifies the
+     * whole pack before any kernel-scoped work. Kernel-scoped matchers then run once per
+     * surviving kernel.
      *
-     * That ordering, and that sharing, are the point of splitting matchers by scope: the
-     * broadly shared checks are what prune the candidate set fast, so an engine whose
-     * packs do not apply pays for each distinct check once rather than once per pack.
-     *
-     * Each pack's graph-scoped bindings are accumulated in a scope-local view and merged
-     * into the catalog's shared bound state only when the whole pack survives (see
-     * graphLevelMatchersPass()). Bindings a pruned pack's matchers wrote along the way
-     * are discarded with that pack's local view rather than leaking into the state a
-     * surviving pack's kernel later reads: with one pack this was invisible, because a
-     * pruned pack's catalog is empty and nothing reads its bound state, but two packs
-     * sharing an engine is the normal case (matchers are shared by id), and the moment a
-     * second pack survives, a bare shared `bound` map would hand its kernels tokens that
-     * describe a graph shape only the pruned pack's own matcher resolved.
+     * Each pack's graph-scoped bindings accumulate in a scope-local view and merge into
+     * the catalog's shared bound state only when the whole pack survives
+     * (graphLevelMatchersPass()); a pruned pack's bindings are discarded with its local
+     * view rather than leaking into a surviving pack's kernel.
      */
     Catalog buildCatalog(const MatchContext& context) const
     {
@@ -459,25 +418,20 @@ private:
 
         for(const auto& pack : _packs)
         {
-            // Scoped to this pack. Merged into catalog.bound below only if every one of
-            // this pack's graph-scoped matchers passes; discarded with this pack's
-            // failure otherwise. See buildCatalog()'s doc for why that scoping is the
-            // fix rather than an optimization.
+            // Scoped to this pack; merged into catalog.bound below only if the pack
+            // survives (see buildCatalog()'s doc).
             BoundTokens packBound;
             if(!graphLevelMatchersPass(pack, context, graphVerdicts, packBound))
             {
-                // Logged, not silent: "no kernel matched my graph" is the question a
-                // data-driven engine is hardest to answer, because there is no
-                // hand-written switch to read. RFC 0017 §10 asks that an operator be
-                // able to see why a kernel was not selected, and a pack pruned at the
-                // graph level is the coarsest and most common reason.
+                // RFC 0017 §10: an operator must be able to see why a kernel was not
+                // selected. A pack pruned at the graph level is the coarsest, most
+                // common reason.
                 HIPDNN_PLUGIN_LOG_INFO("ingestor: pack " << toString(pack.id)
                                                          << " declined at a graph-scoped matcher");
                 continue;
             }
 
-            // Merged rather than kept per pack: a token name means the same thing to
-            // every pack in an engine (Catalog::bound's doc).
+            // Merged rather than kept per pack (Catalog::bound's doc).
             mergeBound(catalog.bound, packBound, pack.id);
 
             size_t admitted = 0;
@@ -502,18 +456,16 @@ private:
                                                      << " kernel(s) after kernel-scoped matching");
         }
 
-        // The summary a caller diagnosing an unexpected decline actually needs: an empty
-        // catalog here is what applicability reports as "does not apply", and without
-        // this line the only observable is the absence of an engine id.
+        // Without this, an empty catalog's only observable is a missing engine id.
         HIPDNN_PLUGIN_LOG_INFO("ingestor: catalog for device "
                                << context.deviceId << " holds " << catalog.entries.size()
                                << " kernel(s) from " << _packs.size() << " pack(s)");
         return catalog;
     }
 
-    /// Folds @p packBound into @p bound. Two packs agreeing on a token's value are just
-    /// sharing a matcher by id; two packs writing DIFFERENT values under one name is an
-    /// authoring error, only detectable here since it depends on a runtime match.
+    /// Folds @p packBound into @p bound. Two packs writing DIFFERENT values under one
+    /// token name is an authoring error, detectable only here since it needs a runtime
+    /// match.
     static void
         mergeBound(BoundTokens& bound, const BoundTokens& packBound, const DescriptorId& packId)
     {
@@ -531,12 +483,9 @@ private:
     }
 
     /**
-     * @param packBound Accumulates what THIS pack's own graph-scoped matchers resolved,
-     *        isolated from every other pack's contribution (see GraphMatcherVerdict).
-     *        The caller merges it into the catalog's shared bound state only when this
-     *        function returns true; a pack this function prunes leaves @p packBound to
-     *        be discarded unmerged, which is what stops its matchers' bindings from
-     *        reaching a kernel in a pack that survives.
+     * @param packBound Accumulates THIS pack's own graph-scoped matcher bindings. The
+     *        caller merges it into the shared bound state only when this returns true;
+     *        a pack this function prunes leaves it to be discarded unmerged.
      */
     bool graphLevelMatchersPass(const KernelDescriptorPack& pack,
                                 const MatchContext& context,
@@ -554,11 +503,8 @@ private:
             auto memo = graphVerdicts.find(matcherId);
             if(memo == graphVerdicts.end())
             {
-                // Evaluated on the first pack that lists this matcher only. A later pack
-                // listing the same matcher reuses both the verdict and the bindings it
-                // already wrote from this memo entry, which is the whole point of
-                // memoizing across packs -- the native function itself runs once no
-                // matter how many packs share the matcher.
+                // Evaluated once, on the first pack that lists this matcher; later
+                // packs reuse the verdict and bindings from the memo.
                 GraphMatcherVerdict verdict;
                 verdict.passed
                     = GraphMatcherRegistry::resolve(matcher.matchSymbol)(context, verdict.bound);
@@ -570,10 +516,7 @@ private:
                 return false;
             }
 
-            // Merges only THIS matcher's own bindings into the pack's scoped view. A
-            // pack that does not list this matcher never merges them; a pack that
-            // shares it with another pack that failed elsewhere still merges exactly
-            // what this matcher wrote, reused from the memo rather than recomputed.
+            // Merges only THIS matcher's bindings into the pack's scoped view.
             packBound.insert(memo->second.bound.begin(), memo->second.bound.end());
         }
         return true;
@@ -603,9 +546,8 @@ private:
     std::unordered_map<DescriptorId, DispatchDescriptor, DescriptorIdHash> _dispatches;
     std::vector<KernelDescriptorPack> _packs;
     std::shared_ptr<IKernelHeuristic> _heuristic;
-    /// Mutable because the query methods are logically const: they answer questions about
-    /// the descriptor set without changing it, and caching is an optimization invisible
-    /// to the caller. The cache is internally synchronized.
+    /// Mutable because the query methods are logically const; the cache is internally
+    /// synchronized.
     mutable LruCache<CatalogKey, Catalog, CatalogKeyHash> _catalogCache;
 };
 
