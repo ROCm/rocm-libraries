@@ -188,9 +188,21 @@ void run_slice(const NdConfig& cfg, const SliceParams& p) {
 // slice_extents; the rank and layout tokens identify the case).
 class SliceTest : public ::testing::TestWithParam<NdWithParams<SliceParams>> {};
 
+// The planar cases are instantiated but not executed. Both HOST planar branches advance the
+// destination channel pointer by the SOURCE channel stride, so every channel after the first is
+// written at a growing overshoot; whenever the destination plane is smaller than the source plane
+// -- the ordinary case for an in-bounds slice -- the write lands past the end of the destination
+// buffer and aborts the process on a heap error, taking every later suite in the run with it.
+// Skipping rather than dropping them keeps the cases listed and filterable, so the coverage gap is
+// visible and the grid is restored by deleting one branch once the strides are fixed.
+constexpr char kPlanarSkip[] =
+    "slice HOST planar writes past the destination buffer (destination channel pointer advanced by "
+    "the source channel stride) and aborts the test binary";
+
 TEST_P(SliceTest, Correctness) {
     const NdConfig cfg = GetParam().cfg;
     const SliceParams p = GetParam().op;
+    if (p.layout == SliceLayout::Planar) GTEST_SKIP() << kPlanarSkip;
     switch (cfg.dtypeIn) {
         case DType::U8:
             run_slice<Rpp8u>(cfg, p);
@@ -203,10 +215,13 @@ TEST_P(SliceTest, Correctness) {
     }
 }
 
+// Scoped to U8 and F32: the header documents exactly "Support added for f32 -> f32 and u8 -> u8
+// datatypes", so F16/I8 are out of contract and are not instantiated. Rank 2 has no channel axis,
+// so only its planar form is instantiated -- the packed duplicate would be the same call.
 std::vector<NdWithParams<SliceParams>> slice_configs() {
     std::vector<NdWithParams<SliceParams>> out;
     for (const NdConfig& cfg : make_nd_configs({DType::U8, DType::F32}, {2, 3, 4}))
-        for (SliceLayout layout : {SliceLayout::Packed}) {
+        for (SliceLayout layout : {SliceLayout::Planar, SliceLayout::Packed}) {
             if (cfg.nDim == 2 && layout == SliceLayout::Packed) continue;
             for (SliceKind kind : {SliceKind::Inside, SliceKind::Padded})
                 out.push_back({cfg, SliceParams{layout, kind}});
