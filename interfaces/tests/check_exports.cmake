@@ -23,6 +23,20 @@ if(NOT EXPECTED_PROVIDER_VERSION)
   set(EXPECTED_PROVIDER_VERSION ROCM_INTERFACES_PROVIDER_1)
 endif()
 
+set(expected_narrow
+  rocblas_create_handle
+  rocblas_destroy_handle
+  rocblas_get_pointer_mode
+  rocblas_get_stream
+  rocblas_saxpy
+  rocblas_sdot
+  rocblas_set_pointer_mode
+  rocblas_set_stream
+  rocblas_sgemm
+  rocblas_sgemm_64
+  rocblas_sgemm_strided_batched)
+list(SORT expected_narrow)
+
 function(read_exports path names_out versions_out)
   execute_process(
     COMMAND nm -D --defined-only --with-symbol-versions ${path}
@@ -98,6 +112,14 @@ if(NARROW_V2_LOADER)
     message(FATAL_ERROR "narrow v2 loader exports differ\nexpected=${expected_loader}\nactual=${actual_narrow_v2_loader}")
   endif()
   assert_versions("narrow v2 loader" "${narrow_v2_pairs}" "${expected_loader}" "${EXPECTED_LOADER_VERSION}")
+endif()
+
+if(NARROW_LOADER)
+  read_exports("${NARROW_LOADER}" actual_narrow_loader narrow_loader_pairs)
+  if(NOT actual_narrow_loader STREQUAL expected_narrow)
+    message(FATAL_ERROR "narrow loader exports differ\nexpected=${expected_narrow}\nactual=${actual_narrow_loader}")
+  endif()
+  assert_versions("narrow loader" "${narrow_loader_pairs}" "${expected_narrow}" "${EXPECTED_LOADER_VERSION}")
 endif()
 
 foreach(provider IN ITEMS BLAS_PROVIDER COMBINED_BLAS_PROVIDER BLASLT_PROVIDER SOLVER_PROVIDER RAND_PROVIDER ROCBLAS_BRIDGE_PROVIDER BLAS_NARROW_V2_PROVIDER)

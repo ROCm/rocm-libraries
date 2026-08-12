@@ -73,6 +73,7 @@ if(UNIX AND NOT APPLE)
     COMMAND ${CMAKE_COMMAND}
       -DLOADER=$<TARGET_FILE:rocblas_loader_shadow>
       -DNARROW_V2_LOADER=$<TARGET_FILE:rocblas_narrow_v2_loader_shadow>
+      -DNARROW_LOADER=$<TARGET_FILE:rocblas_narrow_loader_shadow>
       -DEXPECTED_LOADER_EXPORTS=${ROCM_INTERFACES_ROCBLAS_GENERATED_DIR}/rocblas_bridge.exports
       -DBLAS_PROVIDER=$<TARGET_FILE:rocm_blas_classic_provider_recording>
       -DCOMBINED_BLAS_PROVIDER=$<TARGET_FILE:rocm_blas_provider_recording>
