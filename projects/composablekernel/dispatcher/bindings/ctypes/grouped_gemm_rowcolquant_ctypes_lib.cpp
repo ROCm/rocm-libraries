@@ -351,7 +351,7 @@ void dispatcher_cleanup()
     // Only decrement if already positive to guard against unpaired cleanup calls.
     int prev = g_ref_count.load(std::memory_order_relaxed);
     while(prev > 0 && !g_ref_count.compare_exchange_weak(
-                           prev, prev - 1, std::memory_order_release, std::memory_order_relaxed))
+                          prev, prev - 1, std::memory_order_release, std::memory_order_relaxed))
         ; // retry on CAS failure
 }
 
