@@ -344,6 +344,12 @@ class Shape {
     std::vector<size_t> m_dimensions;
 };
 
+class Layout;
+
+namespace detail {
+inline std::pair<ptrdiff_t, ptrdiff_t> elementBounds(const Layout& layout);
+}
+
 class Layout {
    public:
     Layout() = default;
@@ -391,7 +397,8 @@ class Layout {
         for (size_t dimension = 0; dimension < indices.size(); ++dimension) {
             if (indices[dimension] >= m_shape[dimension])
                 throw std::out_of_range("Tensor index exceeds shape.");
-            result += static_cast<ptrdiff_t>(indices[dimension]) * m_strides[dimension];
+            const ptrdiff_t delta = checkedMultiply(indices[dimension], m_strides[dimension]);
+            result = checkedAdd(result, delta);
         }
         return result;
     }
@@ -399,6 +406,50 @@ class Layout {
     friend bool operator==(const Layout&, const Layout&) = default;
 
    private:
+    static ptrdiff_t checkedMultiply(size_t value, ptrdiff_t factor) {
+        if (value == 0 || factor == 0) return 0;
+
+        const bool negative = factor < 0;
+        const uintmax_t factorMagnitude =
+            negative ? static_cast<uintmax_t>(-(factor + 1)) + 1 : static_cast<uintmax_t>(factor);
+        const uintmax_t limit =
+            negative ? static_cast<uintmax_t>(std::numeric_limits<ptrdiff_t>::max()) + 1
+                     : static_cast<uintmax_t>(std::numeric_limits<ptrdiff_t>::max());
+        if (static_cast<uintmax_t>(value) > limit / factorMagnitude)
+            throw std::overflow_error("Tensor layout offset multiplication overflow.");
+
+        const uintmax_t magnitude = static_cast<uintmax_t>(value) * factorMagnitude;
+        if (!negative) return static_cast<ptrdiff_t>(magnitude);
+        if (magnitude == limit) return std::numeric_limits<ptrdiff_t>::min();
+        return -static_cast<ptrdiff_t>(magnitude);
+    }
+
+    static ptrdiff_t checkedAdd(ptrdiff_t left, ptrdiff_t right) {
+        if ((right > 0 && left > std::numeric_limits<ptrdiff_t>::max() - right) ||
+            (right < 0 && left < std::numeric_limits<ptrdiff_t>::min() - right))
+            throw std::overflow_error("Tensor layout offset addition overflow.");
+        return left + right;
+    }
+
+    std::pair<ptrdiff_t, ptrdiff_t> checkedElementBounds() const {
+        for (size_t dimension = 0; dimension < m_shape.rank(); ++dimension) {
+            if (m_shape[dimension] == 0) return {0, -1};
+        }
+
+        ptrdiff_t lower = m_offset;
+        ptrdiff_t upper = m_offset;
+        for (size_t dimension = 0; dimension < m_shape.rank(); ++dimension) {
+            const ptrdiff_t delta = checkedMultiply(m_shape[dimension] - 1, m_strides[dimension]);
+            if (delta < 0)
+                lower = checkedAdd(lower, delta);
+            else
+                upper = checkedAdd(upper, delta);
+        }
+        return {lower, upper};
+    }
+
+    friend std::pair<ptrdiff_t, ptrdiff_t> detail::elementBounds(const Layout& layout);
+
     Shape m_shape;
     std::vector<ptrdiff_t> m_strides;
     ptrdiff_t m_offset = 0;
@@ -423,19 +474,7 @@ auto realComponent(const T& value) {
 }
 
 inline std::pair<ptrdiff_t, ptrdiff_t> elementBounds(const Layout& layout) {
-    if (layout.shape().elementCount() == 0) return {0, -1};
-
-    ptrdiff_t lower = layout.offset();
-    ptrdiff_t upper = layout.offset();
-    for (size_t dimension = 0; dimension < layout.shape().rank(); ++dimension) {
-        const ptrdiff_t delta =
-            static_cast<ptrdiff_t>(layout.shape()[dimension] - 1) * layout.strides()[dimension];
-        if (delta < 0)
-            lower += delta;
-        else
-            upper += delta;
-    }
-    return {lower, upper};
+    return layout.checkedElementBounds();
 }
 
 template <typename Function>
@@ -462,7 +501,7 @@ inline size_t storageBytesForLayout(ScalarType type, const Layout& layout) {
     if (elementCount > std::numeric_limits<uint64_t>::max() / bits)
         throw std::overflow_error("Tensor storage size overflow.");
     const uint64_t totalBits = elementCount * bits;
-    const uint64_t bytes = (totalBits + 7) / 8;
+    const uint64_t bytes = totalBits / 8 + static_cast<uint64_t>(totalBits % 8 != 0);
     if (bytes > std::numeric_limits<size_t>::max())
         throw std::overflow_error("Tensor storage byte count overflow.");
     return static_cast<size_t>(bytes);
