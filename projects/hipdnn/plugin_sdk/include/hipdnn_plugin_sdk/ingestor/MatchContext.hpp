@@ -10,11 +10,14 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
+#include <variant>
 
 #include <hip/hip_runtime_api.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
+#include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 
 namespace hipdnn_plugin_sdk::ingestor
 {
@@ -96,11 +99,36 @@ struct CatalogKeyHash
  * `$q.uid` is reading a value the matcher already resolved, not re-deriving it from the
  * graph with a second notion of what the graph looks like.
  *
- * Keyed by the token name a descriptor would write. Values are int64 because every token
- * a matcher binds today is a tensor uid or a dimension; a wider value type is the
- * expression-language follow-up's to choose, and widening it is additive.
+ * Keyed by the token name a descriptor would write. Values are MetadataValue, the same
+ * type a KMD field holds: RFC 0017's criteria language puts a graph fact and a kernel
+ * fact on either side of one operator (`divisible($q.head_size, $kernel.tile_m)`), so
+ * an interpreter needs one value type spanning both namespaces or its first act is a
+ * refactor. That is also why the list alternative matters on this side and not only on
+ * the kernel side: `stride_order`, the worked example for INT_LIST, is a graph fact.
  */
-using BoundTokens = std::unordered_map<std::string, int64_t>;
+using BoundTokens = std::unordered_map<std::string, MetadataValue>;
+
+/// Reads @p token from @p bound as an integer.
+///
+/// Bound tokens are frequently tensor uids and dimensions, so the int64 read is the
+/// common one and is worth naming rather than open-coding a std::get_if at every call
+/// site. Returns nullopt when the token is absent OR holds a non-integer alternative:
+/// a caller that asked for an integer cannot use a list, and conflating "not bound"
+/// with "bound to something else" would let a type confusion read as a missing token.
+inline std::optional<int64_t> tryGetBoundInt(const BoundTokens& bound, std::string_view token)
+{
+    const auto it = bound.find(std::string(token));
+    if(it == bound.end())
+    {
+        return std::nullopt;
+    }
+    const auto* value = std::get_if<int64_t>(&it->second);
+    if(value == nullptr)
+    {
+        return std::nullopt;
+    }
+    return *value;
+}
 
 /**
  * @brief The bound token state a matcher, scorer, or dispatch formula reads.
