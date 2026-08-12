@@ -5,6 +5,8 @@
 #include <array>
 #include <cmath>
 #include <complex>
+#include <cstdint>
+#include <limits>
 #include <roc/host_validation/tensor.hpp>
 #include <span>
 #include <stdexcept>
@@ -18,6 +20,17 @@ void require(bool condition, const char* message) {
 
 void requireNear(float observed, float expected, float tolerance, const char* message) {
     if (std::abs(observed - expected) > tolerance) throw std::runtime_error(message);
+}
+
+template <typename Function>
+void requireOverflow(Function function, const char* message) {
+    bool overflowed = false;
+    try {
+        function();
+    } catch (const std::overflow_error&) {
+        overflowed = true;
+    }
+    require(overflowed, message);
 }
 }  // namespace
 
@@ -94,6 +107,52 @@ int main() {
                 reversedFloat.view().loadAs<float>({0}) == 3.0f &&
                 reversedFloat.view().loadAs<float>({2}) == 1.0f,
             "TensorView conversion did not preserve the logical layout.");
+
+    const ptrdiff_t maximumOffset = std::numeric_limits<ptrdiff_t>::max();
+    const ptrdiff_t minimumOffset = std::numeric_limits<ptrdiff_t>::min();
+    const std::array<size_t, 1> edgeIndex{1};
+    require(Layout(Shape{2}, {maximumOffset}, minimumOffset).elementOffset(edgeIndex) == -1,
+            "Layout rejected an exactly representable positive offset contribution.");
+    require(Layout(Shape{2}, {minimumOffset}, maximumOffset).elementOffset(edgeIndex) == -1,
+            "Layout rejected an exactly representable negative offset contribution.");
+
+    const std::array<size_t, 1> overflowIndex{2};
+    const Layout positiveMultiplyOverflow(Shape{3}, {maximumOffset});
+    requireOverflow([&] { (void)positiveMultiplyOverflow.elementOffset(overflowIndex); },
+                    "Layout element offset accepted positive multiplication overflow.");
+    const Layout negativeMultiplyOverflow(Shape{3}, {minimumOffset});
+    requireOverflow([&] { (void)negativeMultiplyOverflow.elementOffset(overflowIndex); },
+                    "Layout element offset accepted negative multiplication overflow.");
+    const Layout positiveAddOverflow(Shape{2}, {1}, maximumOffset);
+    requireOverflow([&] { (void)positiveAddOverflow.elementOffset(edgeIndex); },
+                    "Layout element offset accepted positive addition overflow.");
+    const Layout negativeAddOverflow(Shape{2}, {-1}, minimumOffset);
+    requireOverflow([&] { (void)negativeAddOverflow.elementOffset(edgeIndex); },
+                    "Layout element offset accepted negative addition overflow.");
+
+    requireOverflow(
+        [&] { (void)storageBytesForLayout(ScalarType::Float32, positiveMultiplyOverflow); },
+        "Tensor layout bounds accepted multiplication overflow.");
+    requireOverflow([&] { (void)storageBytesForLayout(ScalarType::Float32, positiveAddOverflow); },
+                    "Tensor layout bounds accepted addition overflow.");
+
+    if constexpr (std::numeric_limits<size_t>::digits >= 64 &&
+                  std::numeric_limits<ptrdiff_t>::digits >= 63) {
+        constexpr uint64_t storageBits = 4;
+        constexpr uint64_t maximumElements = std::numeric_limits<uint64_t>::max() / storageBits;
+        constexpr uint64_t totalBits = maximumElements * storageBits;
+        constexpr uint64_t expectedBytes =
+            totalBits / 8 + static_cast<uint64_t>(totalBits % 8 != 0);
+        const Layout maximumPackedLayout(Shape{static_cast<size_t>(maximumElements)}, {1});
+        require(storageBytesForLayout(ScalarType::Int4, maximumPackedLayout) ==
+                    static_cast<size_t>(expectedBytes),
+                "Packed tensor storage byte rounding overflowed at its valid boundary.");
+
+        const Layout overflowingPackedLayout(Shape{static_cast<size_t>(maximumElements + 1)}, {1});
+        requireOverflow(
+            [&] { (void)storageBytesForLayout(ScalarType::Int4, overflowingPackedLayout); },
+            "Packed tensor storage accepted a bit-count multiplication overflow.");
+    }
 
     const std::array<float, 2> conversionSource{1.1f, -2.25f};
     const Tensor convertedBFloat16 =
