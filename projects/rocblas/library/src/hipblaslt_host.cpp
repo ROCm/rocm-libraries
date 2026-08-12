@@ -683,6 +683,8 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
                         msg << "rocBLAS warning: hipBLASLt cannot find specified solution index!");
                     throw rocblas_status_invalid_value;
                 }
+                else
+                    throw rocblas_status_invalid_value;
             }
             if(heuristicResults.empty())
             {
@@ -692,6 +694,8 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
                     print_if_verbose(msg << "rocBLAS warning: No hipBLASLt solution found");
                     throw rocblas_status_invalid_value;
                 }
+                else
+                    throw rocblas_status_invalid_value;
             }
             else
             {
