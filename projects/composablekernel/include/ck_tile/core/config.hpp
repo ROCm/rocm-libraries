@@ -3,6 +3,15 @@
 
 #pragma once
 
+#include "hip/hip_version.h"
+#ifndef CK_TILE_DONT_USE_HIP_RUNTIME_HEADERS
+#include "hip/hip_fp16.h"
+#include "hip/hip_runtime.h"
+#endif
+
+#include <cstdint>
+#include <type_traits>
+
 #if defined(__gfx908__) || defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__) || \
     defined(__gfx9_4_generic__)
 #define __gfx9__
@@ -41,12 +50,6 @@
 #define __gfx12__
 #endif
 
-#include "hip/hip_version.h"
-#ifndef CK_TILE_DONT_USE_HIP_RUNTIME_HEADERS
-#include "hip/hip_runtime.h"
-#include "hip/hip_fp16.h"
-#endif
-
 #ifdef __HIPCC__
 #define CK_TILE_HOST inline __host__
 #define CK_TILE_DEVICE inline __device__
@@ -77,6 +80,13 @@
 #endif
 #ifndef CK_TILE_USE_CUSTOM_DATA_TYPE
 #define CK_TILE_USE_CUSTOM_DATA_TYPE 0 // custom data type will generate extra move/bfi code
+#endif
+
+#define CK_TILE_FLOAT_TO_TF32_TRUNC 0
+#define CK_TILE_FLOAT_TO_TF32_RNE 1
+
+#ifndef CK_TILE_FLOAT_TO_TF32_DEFAULT
+#define CK_TILE_FLOAT_TO_TF32_DEFAULT CK_TILE_FLOAT_TO_TF32_TRUNC
 #endif
 
 #define CK_TILE_FLOAT_TO_BFLOAT16_STANDARD 0
@@ -173,12 +183,14 @@
 #endif
 
 // buffer atomic add: floating point
+#ifndef CK_TILE_USE_AMD_BUFFER_ATOMIC_ADD_FLOAT
 #ifndef __HIP_DEVICE_COMPILE__ // for host code
 #define CK_TILE_USE_AMD_BUFFER_ATOMIC_ADD_FLOAT 1
 #elif defined(__gfx9__) || defined(__gfx12__) // for GPU code
 #define CK_TILE_USE_AMD_BUFFER_ATOMIC_ADD_FLOAT 1
 #else // for GPU code
 #define CK_TILE_USE_AMD_BUFFER_ATOMIC_ADD_FLOAT 0
+#endif
 #endif
 
 #if(defined(__gfx90a__) || defined(__gfx94__)) // for GPU code
@@ -249,6 +261,15 @@
 #endif
 #endif
 
+// SPIR-V constexpr handling: variables that depend on compile-time architecture
+// detection cannot be constexpr under SPIR-V since the target is resolved at runtime.
+// Following rocPRIM's ROCPRIM_AMDGCN_CONSTEXPR pattern.
+#if defined(__SPIRV__)
+#define CK_TILE_AMDGCN_CONSTEXPR
+#else
+#define CK_TILE_AMDGCN_CONSTEXPR constexpr
+#endif
+
 // workaround for AMDGPU compiler VGPR aliasing bug in dropout codegen (ROCm >= 7.12)
 // Philox RNG VGPR parameters get aliased under high register pressure (d256 tile).
 // fp16 is affected; bf16 is not (different type conversion codegen path).
@@ -275,6 +296,23 @@
 #define CK_TILE_BUFFER_RESOURCE_3RD_DWORD 0x31004000
 #elif defined(__gfx125__)
 #define CK_TILE_BUFFER_RESOURCE_3RD_DWORD 0x0
+#elif defined(__SPIRV__) // SPIR-V: dynamically select via ZCFS at runtime
+#define CK_TILE_BUFFER_RESOURCE_3RD_DWORD                                                          \
+    ((__builtin_amdgcn_processor_is("gfx1100") || __builtin_amdgcn_processor_is("gfx1101") ||      \
+      __builtin_amdgcn_processor_is("gfx1102") || __builtin_amdgcn_processor_is("gfx1103") ||      \
+      __builtin_amdgcn_processor_is("gfx1150") || __builtin_amdgcn_processor_is("gfx1151") ||      \
+      __builtin_amdgcn_processor_is("gfx1152") || __builtin_amdgcn_processor_is("gfx1153") ||      \
+      __builtin_amdgcn_processor_is("gfx1200") || __builtin_amdgcn_processor_is("gfx1201"))        \
+         ? 0x31004000u                                                                             \
+         : ((__builtin_amdgcn_processor_is("gfx1030") ||                                           \
+             __builtin_amdgcn_processor_is("gfx1031") ||                                           \
+             __builtin_amdgcn_processor_is("gfx1032") ||                                           \
+             __builtin_amdgcn_processor_is("gfx1034") ||                                           \
+             __builtin_amdgcn_processor_is("gfx1035") || __builtin_amdgcn_processor_is("gfx1036")) \
+                ? 0x31014000u                                                                      \
+                : 0x00020000u))
+#else
+#define CK_TILE_BUFFER_RESOURCE_3RD_DWORD 0xffffffff // Unknown device
 #endif
 
 #ifndef CK_TILE_EXPERIMENTAL_BLOCK_SYNC_LDS_WITHOUT_SYNC_VMEM
@@ -348,6 +386,12 @@
 // Will enforce encoding to check Y not pointed to R if set to zero
 #ifndef CK_TILE_ENC_SUPPORT_Y_TO_R
 #define CK_TILE_ENC_SUPPORT_Y_TO_R 0
+#endif
+
+#if defined(_MSC_VER)
+#define CK_TILE_NO_UNIQUE_ADDRESS [[msvc::no_unique_address]]
+#else
+#define CK_TILE_NO_UNIQUE_ADDRESS [[no_unique_address]]
 #endif
 
 // Mark unsupported features with a deprecation warning in debug builds
@@ -578,6 +622,15 @@ struct amdgcn_compiler_target_state
 #else
     static constexpr bool CK_TILE_ARCH_GFX1250 = false;
 #endif // __gfx1250__
+
+    // SPIR-V (target-agnostic, JIT-compiled at runtime)
+    // Guard with __HIP_DEVICE_COMPILE__ because __SPIRV__ is defined during
+    // both host and device passes when compiling for amdgcnspirv.
+#if defined(__SPIRV__) && defined(__HIP_DEVICE_COMPILE__)
+    static constexpr bool CK_TILE_ARCH_SPIRV = true;
+#else
+    static constexpr bool CK_TILE_ARCH_SPIRV = false;
+#endif // __SPIRV__
 };
 
 /**
@@ -591,13 +644,13 @@ struct amdgcn_compiler_target_state
 template <typename T, typename... Ts>
 // TODO: c++20 concept    requires((std::is_convertible<Ts, T>::value && ...) && (sizeof...(Ts) >=
 // 1))
-CK_TILE_HOST_DEVICE static constexpr uint32_t count_values_of(T search, Ts... searchList)
+CK_TILE_HOST_DEVICE static constexpr std::uint32_t count_values_of(T search, Ts... searchList)
 {
     static_assert((std::is_convertible<Ts, T>::value && ...),
                   "All search list values must be convertible to the search value type");
     static_assert(sizeof...(Ts) >= 1, "At least one value must be provided to search in");
 
-    return (static_cast<uint32_t>(search == static_cast<T>(searchList)) + ...);
+    return (static_cast<std::uint32_t>(search == static_cast<T>(searchList)) + ...);
 }
 
 #define CK_TILE_COMPILER_TARGETS_LIST                               \
@@ -633,7 +686,9 @@ CK_TILE_HOST_DEVICE static constexpr uint32_t count_values_of(T search, Ts... se
         amdgcn_compiler_target_state::CK_TILE_ARCH_GFX1250
 
 // Sanity check: make sure only one target architecture is defined during device compile
+// SPIR-V is target-agnostic, so none of the specific arch flags will be set
 static_assert(!amdgcn_compiler_target_state::CK_TILE_DEVICE_COMPILE ||
+                  amdgcn_compiler_target_state::CK_TILE_ARCH_SPIRV ||
                   count_values_of(true, CK_TILE_COMPILER_TARGETS_LIST) == 1u,
               "Only one target architecture can be defined during device compile");
 

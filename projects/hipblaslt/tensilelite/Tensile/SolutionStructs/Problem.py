@@ -172,12 +172,13 @@ class ProblemSizeRange:
 
 class Problem:
   """ Problem sizes, strides, padding and other info"""
-  def __init__(self, sizes=None, stridesA=None, stridesB=None, stridesC=None, stridesD=None, count=None):
+  def __init__(self, sizes=None, stridesA=None, stridesB=None, stridesC=None, stridesD=None, stridesGate=None, count=None):
     self.sizes = tuple(sizes) if sizes else None
     self.stridesA = tuple(stridesA) if stridesA else None
     self.stridesB = tuple(stridesB) if stridesB else None
     self.stridesC = tuple(stridesC) if stridesC else None
     self.stridesD = tuple(stridesD) if stridesD else None
+    self.stridesGate = tuple(stridesGate) if stridesGate else None
 
     self.count = count
 
@@ -191,6 +192,8 @@ class Problem:
       rv += ", stridesC:" + str(list(self.stridesC))
     if self.stridesD:
       rv += ", stridesD:" + str(list(self.stridesD))
+    if self.stridesGate:
+      rv += ", stridesGate:" + str(list(self.stridesGate))
     rv += " }"
     return rv
 
@@ -234,7 +237,7 @@ class ExactList(Problem):
 
 
 class ExactDict(Problem):
-  AllowedFields = [ 'count', 'sizes', 'stridesA', 'stridesB', 'stridesC', 'stridesD' ]
+  AllowedFields = [ 'count', 'sizes', 'stridesA', 'stridesB', 'stridesC', 'stridesD', 'stridesGate' ]
 
   def __init__(self, e, problemType):
     Problem.__init__(self)
@@ -424,6 +427,7 @@ _defaultProblemType = {
     "UseE": False,  # =True use output E to output gemm results before activation
     "Gradient": False,  # =True set globalWriteElements to gradient mode
     "UseBias": 0,  # =1 support bias vector on M direction, =2 support bias vector on N direction, =3 support bias vector on both M,N direction
+    "UseGateResidual": False,  # =True apply gate residual: D = gate * spmm_result + gate
     "BiasSrc": "D",  # This parameter is used in gradient + bias. Support A, B, D.
     "UseScaleAB": "",  # Support "", "Scalar", and "Vector"
     "UseScaleCD": False,  # =True use scaleC, scaleD
@@ -476,6 +480,7 @@ _defaultProblemType = {
     "SetConstStrideA": [],
     "SetConstStrideB": [],
     "SetConstStrideBias": [],
+    "SetConstStrideGate": [],
     # Summation dimension indices
     "MirrorDimsA": [],
     "MirrorDimsMXSA": [],
@@ -729,6 +734,9 @@ def problemTypeToEnum(problemType):
           problemType["ComputeDataType"].value
   problemType["BiasDataTypeList"] = \
           [btype.value for btype in problemType["BiasDataTypeList"]]
+  if "GateResidualDataTypeList" in problemType:
+    problemType["GateResidualDataTypeList"] = \
+            [gtype.value for gtype in problemType["GateResidualDataTypeList"]]
   problemType["ActivationComputeDataType"] = \
           problemType["ActivationComputeDataType"].value
   problemType["ActivationType"] = \
@@ -757,46 +765,62 @@ _expectedProblemTypeParamTypes = {
 }
 
 
-def validateProblemTypeParameterTypes(state, srcFile=""):
+def validateProblemTypeParameterTypes(state, srcFile="", *, raiseOnMismatch: bool = True,
+                                       keyPathPrefix: str = "ProblemType"):
   """Validate that every ProblemType parameter has the correct Python type.
 
-  Similar to validateParameterTypes (in Solution.py), but checks ProblemType
-  parameters against the types implied by ``_defaultProblemType``.  A ``bool``
-  where ``int`` is expected (or vice versa) is the most common error.
+  Checks ProblemType parameters against ``_defaultProblemType``. ``bool``
+  where ``int`` is expected (or vice versa) is the canonical YAML
+  collapse this gate targets; ``type()`` (not ``isinstance``) keeps the
+  two distinct.
 
-  Mismatches are collected into the module-level ``_typeMismatchCollector``
-  dict (shared with Solution validation). Call ``printTypeMismatchSummary()``
-  at the end of the build to emit a consolidated warning.
+  Two consumption modes:
+
+  - ``raiseOnMismatch=True`` (default, input-YAML path): raises a
+    :class:`ConfigTypeError` on the first mistyped key encountered.
+  - ``raiseOnMismatch=False`` (library-logic path): mismatches are only
+    appended to the module-level ``_typeMismatchCollector`` (reported
+    later by the aggregate create-library gate). Never raises here.
 
   Args:
       state: The ProblemType state dict (parameter name -> value).
-      srcFile: The YAML source file path, included in warning messages.
+      srcFile: The YAML source file path, included in messages.
+      raiseOnMismatch: see above. Default True.
+      keyPathPrefix: prefix for the error keypath (default "ProblemType").
   """
-  # Import collector infrastructure from Solution inside the function to avoid
-  # circular dependency (Naming → Problem → Solution → Naming).
-  # The collector is shared between Solution and ProblemType validation.
-  from Tensile.SolutionStructs.Solution import _typeMismatchCollector, _skipTypeCheck
+  # _skipTypeCheck lives in Common/ValidParameters (Common -> Solution
+  # import direction), but the type-mismatch collector still lives in
+  # Solution. Import the collector inside the function to avoid the
+  # historical Naming -> Problem -> Solution -> Naming circular dep.
+  from Tensile.SolutionStructs.Solution import _typeMismatchCollector
+  from Tensile.Common.ValidParameters import _skipTypeCheck
+  from Tensile.Common.TypeValidationErrors import (
+      ConfigTypeError, formatMismatch,
+  )
 
   for key, value in state.items():
     if key not in _expectedProblemTypeParamTypes or key in _skipTypeCheck:
       continue
     expectedTypes = _expectedProblemTypeParamTypes[key]
     actualType = type(value)
-    # Use type() not isinstance() so that bool and int are distinguished
+    # Use type() not isinstance() so bool/int are distinguished.
     if actualType not in expectedTypes:
-      expectedStr = " or ".join(sorted(t.__name__ for t in expectedTypes))
-      collectorKey = (key, actualType.__name__, expectedStr)
-      if collectorKey not in _typeMismatchCollector:
-        _typeMismatchCollector[collectorKey] = {
-          "count": 0,
-          "values": set(),
-          "files": set(),
-        }
-      entry = _typeMismatchCollector[collectorKey]
-      entry["count"] += 1
-      entry["values"].add(repr(value))
-      if srcFile:
-        entry["files"].add(srcFile)
+      if raiseOnMismatch:
+        raise ConfigTypeError(formatMismatch(srcFile, f"{keyPathPrefix}.{key}", value, expectedTypes))
+      else:
+        expectedStr = " or ".join(sorted(t.__name__ for t in expectedTypes))
+        collectorKey = (key, actualType.__name__, expectedStr)
+        if collectorKey not in _typeMismatchCollector:
+          _typeMismatchCollector[collectorKey] = {
+            "count": 0,
+            "values": set(),
+            "files": set(),
+          }
+        entry = _typeMismatchCollector[collectorKey]
+        entry["count"] += 1
+        entry["values"].add(repr(value))
+        if srcFile:
+          entry["files"].add(srcFile)
 
 
 class ProblemType(Mapping):
@@ -806,14 +830,25 @@ class ProblemType(Mapping):
   def FromDefaultConfig(printIndexAssignmentInfo: bool):
     return ProblemType(_defaultProblemType, printIndexAssignmentInfo)
 
-  def __init__(self, config, printIndexAssignmentInfo: bool, srcFile: str = ""):
+  def __init__(
+      self,
+      config,
+      printIndexAssignmentInfo: bool,
+      srcFile: str = "",
+      *,
+      raiseOnTypeMismatch: bool = True,
+  ):
     self.state = {}
 
     for key in _defaultProblemType:
       assignParameterWithDefault(self.state, key, config, _defaultProblemType)
 
     # Validate parameter types against the _defaultProblemType registry
-    validateProblemTypeParameterTypes(self.state, srcFile=srcFile)
+    validateProblemTypeParameterTypes(
+        self.state,
+        srcFile=srcFile,
+        raiseOnMismatch=raiseOnTypeMismatch,
+    )
 
     # adjusting all data types
     if "DataType" in config:
@@ -945,6 +980,16 @@ class ProblemType(Mapping):
     else:
       self["BetaOnlyUseBias"] = False
       self["BiasDataTypeList"] = []
+
+    # Gate Residual
+    if "UseGateResidual" in config and config["UseGateResidual"]:
+      if "GateResidualDataTypeList" in config:
+        self["GateResidualDataTypeList"] = [DataType(gtype) for gtype in config["GateResidualDataTypeList"]]
+        self["GateResidualDataTypeList"].sort() # Make name unique
+      else:
+        self["GateResidualDataTypeList"] = getGateResidualDataTypeListDefault(self)
+    else:
+      self["GateResidualDataTypeList"] = []
 
     # Activation
     # Currently, ActivationType supports only 'all' and 'hipblaslt_all', and is active only when the Activation configuration is set to True.
@@ -1330,6 +1375,10 @@ class ProblemType(Mapping):
       name.append("SABV")
     if self["UseScaleCD"]: name.append("SCD")
     if self["UseScaleAlphaVec"]: name.append("SAV")
+    if self["UseGateResidual"]:
+      name.append("GateRes")
+      if self["GateResidualDataTypeList"] != getGateResidualDataTypeListDefault(self):
+        name.append("".join(i.toChar() for i in self["GateResidualDataTypeList"]))
 
     if self["SupportUserArgs"]: name.append("UserArgs")
 
@@ -1380,3 +1429,17 @@ def getBiasDataTypeListDefault(problem: ProblemType) -> List[DataType]:
   biasDataTypeList = list(set(bList))
   biasDataTypeList.sort() # Make name unique
   return biasDataTypeList
+
+################################################################################
+# Gate Residual Type
+################################################################################
+
+def getGateResidualDataTypeListDefault(problem: ProblemType) -> List[DataType]:
+  gList = []
+  for d in ["DataType", "ComputeDataType"]:
+    dtype = DataType(problem[d])
+    gList.append(dtype)
+
+  gateResidualDataTypeList = list(set(gList))
+  gateResidualDataTypeList.sort() # Make name unique
+  return gateResidualDataTypeList

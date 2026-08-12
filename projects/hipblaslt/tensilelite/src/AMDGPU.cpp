@@ -40,14 +40,14 @@ namespace TensileLite
         return StandardCU_XCC;
     }
 
-    TENSILE_API std::string AMDGPU::type() const
+    TENSILELITEHOST_EXPORT std::string AMDGPU::type() const
     {
         return Type();
     }
 
-    TENSILE_API AMDGPU::AMDGPU() {}
+    TENSILELITEHOST_EXPORT AMDGPU::AMDGPU() {}
 
-    TENSILE_API AMDGPU::AMDGPU(AMDGPU::Processor p, int cus, std::string const& name, std::optional<int> pciChipId)
+    TENSILELITEHOST_EXPORT AMDGPU::AMDGPU(AMDGPU::Processor p, int cus, std::string const& name, std::optional<int> pciChipId)
         : processor(p)
         , computeUnitCount(cus)
         , deviceName(name)
@@ -58,18 +58,21 @@ namespace TensileLite
         , skGridMultiplier(getSKGridMultiplier())
         , skFixedGrid(getSKFixedGrid())
         , skFullTiles(getSKFullTiles())
+        , skTiles(getSKTiles())
+        , skSplit(getSKSplit())
         , fixedWGM(getFixedWGM())
         , fixedWGMXCC(getFixedWGMXCC())
         , fixedWGMXCCCHUNK(getFixedWGMXCCCHUNK())
+        , fixedWGMXCCSPLITK(getFixedWGMXCCSPLITK())
         , fixedStaggerUMapping(getFixedStaggerUMapping())
         , fixedStaggerU(getFixedStaggerU())
         , fixedStaggerUStrideShift(getFixedStaggerUStrideShift())
     {
     }
 
-    TENSILE_API AMDGPU::~AMDGPU() = default;
+    TENSILELITEHOST_EXPORT AMDGPU::~AMDGPU() = default;
 
-    TENSILE_API bool AMDGPU::isStandardCU() const
+    TENSILELITEHOST_EXPORT bool AMDGPU::isStandardCU() const
     {
         // return the result if we already tested it.
         if(isStandardCUs != -1)
@@ -90,7 +93,7 @@ namespace TensileLite
         return (isStandardCUs == 1);
     }
 
-    TENSILE_API bool AMDGPU::runsKernelTargeting(AMDGPU::Processor other) const
+    TENSILELITEHOST_EXPORT bool AMDGPU::runsKernelTargeting(AMDGPU::Processor other) const
     {
         if(other > this->processor)
             return false;
@@ -112,7 +115,7 @@ namespace TensileLite
         return stream;
     }
 
-    TENSILE_API std::string AMDGPU::description() const
+    TENSILELITEHOST_EXPORT std::string AMDGPU::description() const
     {
         std::ostringstream rv;
 
@@ -124,7 +127,7 @@ namespace TensileLite
         return rv.str();
     }
 
-    TENSILE_API std::ostream& operator<<(std::ostream& stream, AMDGPU g)
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream& stream, AMDGPU g)
     {
         return stream << g.description();
     }

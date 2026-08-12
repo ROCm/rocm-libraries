@@ -163,15 +163,25 @@ typedef enum {
    * ``int64_t``
    */
   HIPBLASLT_MATRIX_LAYOUT_LD = 6,
+
   /** Matrix Batch Mode.
    * Batched GEMM can be either:
    * 1. Strided Batch: Single contiguous memory allocation and stride between matrices in
    * the batch is specified in terms of number of elements.
-   * 2. General Batched: This uses pointer array with each pointer storing the base address 
+   * 2. General Batched: This uses pointer array with each pointer storing the base address
    * of the matrices in the batch.
    * See hipblasLtBatchMode_t
    */
-  HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE = 7,   
+  HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE = 7,
+
+  /** Matrix Offset.
+   *
+   * For ``General Batched GEMM``, we can support for users to access a sub-matrix of
+   * the original matrix by adding an ``offset`` value (in elements) from the base address.
+   * Note that for non-batched or Strided Batch GEMM case, we can directly apply
+   * the offset value by using the strided-offset value.
+   */
+  HIPBLASLT_MATRIX_LAYOUT_OFFSET = 8
 } hipblasLtMatrixLayoutAttribute_t;
 
 /*! \ingroup types_module
@@ -202,6 +212,19 @@ typedef enum {
 } hipblasLtMatmulMatrixScale_t;
 
 /*! \ingroup types_module
+ *  \brief Mode values for the ``HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT``
+ *  attribute and the C++ ext ``GemmPreference::setStreamKTileSchedulingMode``.
+ *
+ *  The attribute storage stays ``int32_t``; values outside ``{0, 1, 2}`` are
+ *  rejected by the setter with ``HIPBLAS_STATUS_INVALID_VALUE``.
+ */
+typedef enum {
+  HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF  = 0, /**< SK3 static work-assignment sub-path (default). When ``HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET`` is positive the library heuristic still runs per launch to pick SK4 when appropriate. */
+  HIPBLASLT_STREAMK_TILE_SCHEDULING_ON   = 1, /**< Always request the SK4 dynamic per-XCD work-queue sub-path on StreamK=5 kernels. */
+  HIPBLASLT_STREAMK_TILE_SCHEDULING_AUTO = 2, /**< Always let hipBLASLt's heuristic pick between SK3 and SK4 per launch based on tile/CU geometry. */
+} hipblasLtStreamKTileSchedulingMode_t;
+
+/*! \ingroup types_module
  *  \brief Specifies the attributes that define the specifics of the matrix multiply operation.
  */
 typedef enum {
@@ -224,10 +247,12 @@ typedef enum {
   HIPBLASLT_MATMUL_DESC_BIAS_BATCH_STRIDE = 23,              /**<The batch stride of the bias vector pointer in the device memory. This is only applicable for hipblasltBatchMode_t is 0 (Strided Batched GEMM) and hipblasltEpilogue_t is BIAS enabled. Default value is 0 meaning same bias value broadcast across all batches. Data type: ``int32_t``. */
   HIPBLASLT_MATMUL_DESC_A_SCALE_MODE = 31,                   /**<Scaling mode that defines how the matrix scaling factor for matrix A is interpreted. See ``hipblasLtMatmulMatrixScale_t``. */
   HIPBLASLT_MATMUL_DESC_B_SCALE_MODE = 32,                   /**<Scaling mode that defines how the matrix scaling factor for matrix B is interpreted. See ``hipblasLtMatmulMatrixScale_t``. */
+  HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET = 33,                /**<Target the matmul kernel selection and persistent-grid sizing for this many compute units (CUs). Set to ``0`` (the default) to use all CUs the device exposes. Negative values are rejected with ``HIPBLAS_STATUS_INVALID_VALUE``. This is a hint to the library heuristics; the launched grid is not guaranteed to use exactly this many CUs. Data type: ``int32_t``. */
   HIPBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_A_EXT = 100,     /**<Compute input A types. Defines the data type used for the input A of a matrix multiply. */
   HIPBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_B_EXT,           /**<Compute input B types. Defines the data type used for the input B of a matrix multiply. */
   HIPBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG0_EXT,              /**<First extra argument for the activation function. Data type: ``float``. */
   HIPBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG1_EXT,              /**<Second extra argument for the activation function. Data type: ``float``. */
+  HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT = 104,      /**<Select the hipBLASLt StreamK tile scheduling mode for StreamK=5 hybrid kernels (static SK3 vs dynamic SK4 work-queue sub-paths). Provided as an ``_EXT`` attribute. Accepts values from ``hipblasLtStreamKTileSchedulingMode_t``: ``0`` (``OFF``, default) uses the SK3 static sub-path; when ``HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET`` is set to a positive value the library heuristic still runs per launch to pick SK4 when appropriate; ``1`` (``ON``) always requests the SK4 dynamic work-queue sub-path when the selected kernel supports it; ``2`` (``AUTO``) always lets the library's heuristic pick between static and dynamic per launch. Values outside ``{0, 1, 2}`` are rejected with ``HIPBLAS_STATUS_INVALID_VALUE``. Data type: ``int32_t``. */
   HIPBLASLT_MATMUL_DESC_MAX,
 } hipblasLtMatmulDescAttributes_t;
 
@@ -237,7 +262,8 @@ typedef enum {
 typedef enum {
   HIPBLASLT_MATMUL_PREF_SEARCH_MODE = 0,          /**<Search mode. Data type: ``uint32_t``. */
   HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES = 1,  /**<Maximum allowed workspace memory. Default is 0 (no workspace memory allowed). Data type: ``uint64_t``. */
-  HIPBLASLT_MATMUL_PREF_MAX = 2
+  HIPBLASLT_MATMUL_PREF_SM_COUNT_TARGET = 2,      /**<Bias heuristic algorithm selection toward kernels that perform well at this targeted compute-unit count. ``0`` (default) means no constraint. Negative values are rejected with ``HIPBLAS_STATUS_INVALID_VALUE``. Data type: ``int32_t``. */
+  HIPBLASLT_MATMUL_PREF_MAX = 3
 } hipblasLtMatmulPreferenceAttributes_t;
 
 /*! \ingroup types_module
@@ -490,6 +516,56 @@ hipblasStatus_t hipblasLtCreate(hipblasLtHandle_t* handle);
  */
 HIPBLASLT_EXPORT
 hipblasStatus_t hipblasLtDestroy(const hipblasLtHandle_t handle);
+
+/*! \ingroup library_module
+ *  \brief Set the handle-level target compute-unit (CU / SM) count.
+ *
+ *  \details
+ *  The hipBLASLt analogue of cuBLAS's ``cublasSetSmCountTarget``. The value
+ *  hints how many compute units hipBLASLt should target for kernel selection
+ *  and persistent-grid sizing on subsequent matmul calls that use this handle.
+ *
+ *  ``0`` (the default) means "no override; use all CUs the device exposes".
+ *  Negative values are rejected with ``HIPBLAS_STATUS_INVALID_VALUE``. A
+ *  per-matmul-descriptor (``HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET``) or
+ *  per-preference (``HIPBLASLT_MATMUL_PREF_SM_COUNT_TARGET``) attribute, when
+ *  set to a non-zero value, takes precedence over this handle-level value.
+ *
+ *  The user must ensure thread safety when modifying handle state from
+ *  multiple threads, the same as for any other handle-mutating helper.
+ *
+ *  @param[in]
+ *  handle           hipBLASLt library context.
+ *  @param[in]
+ *  smCountTarget    target CU/SM count; ``0`` for "use all CUs".
+ *
+ *  \retval HIPBLAS_STATUS_SUCCESS         value stored.
+ *  \retval HIPBLAS_STATUS_NOT_INITIALIZED \p handle is null / uninitialized.
+ *  \retval HIPBLAS_STATUS_INVALID_VALUE   \p smCountTarget is negative.
+ */
+HIPBLASLT_EXPORT
+hipblasStatus_t hipblasLtSetSmCountTarget(hipblasLtHandle_t handle,
+                                          int32_t           smCountTarget);
+
+/*! \ingroup library_module
+ *  \brief Return the handle-level target compute-unit (CU / SM) count.
+ *
+ *  \details
+ *  Returns the value previously programmed via ``hipblasLtSetSmCountTarget``.
+ *  Equivalent to cuBLAS's ``cublasGetSmCountTarget``.
+ *
+ *  @param[in]
+ *  handle           hipBLASLt library context.
+ *  @param[out]
+ *  smCountTarget    receives the previously stored value (``0`` if never set).
+ *
+ *  \retval HIPBLAS_STATUS_SUCCESS         value returned.
+ *  \retval HIPBLAS_STATUS_NOT_INITIALIZED \p handle is null / uninitialized.
+ *  \retval HIPBLAS_STATUS_INVALID_VALUE   \p smCountTarget is null.
+ */
+HIPBLASLT_EXPORT
+hipblasStatus_t hipblasLtGetSmCountTarget(hipblasLtHandle_t handle,
+                                          int32_t*          smCountTarget);
 
 /*! \ingroup library_module
  *  \brief Drain the post-GEMM check-numerics flag without destroying the handle.

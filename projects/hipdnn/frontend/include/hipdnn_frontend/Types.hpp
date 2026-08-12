@@ -21,6 +21,8 @@
  *
  * This file also contains conversion utilities between frontend types and
  * the backend C API types (hipdnn_backend.h).
+ *
+ * Portions derived from NVIDIA cuDNN frontend, used under the MIT license.
  */
 
 #pragma once
@@ -31,6 +33,7 @@
 #include <HipdnnConvolutionMode.h>
 #include <HipdnnDataType.h>
 #include <HipdnnDiagonalAlignment.h>
+#include <HipdnnMoeGroupedMatmulMode.h>
 #include <HipdnnNormFwdPhase.h>
 #include <HipdnnPaddingMode.h>
 #include <HipdnnPointwiseMode.h>
@@ -50,6 +53,7 @@
 namespace hipdnn_frontend
 {
 using hipdnn_data_sdk::types::bfloat16;
+using hipdnn_data_sdk::types::fp4_e2m1;
 using hipdnn_data_sdk::types::fp8_e4m3;
 using hipdnn_data_sdk::types::fp8_e4m3_fnuz;
 using hipdnn_data_sdk::types::fp8_e5m2;
@@ -129,7 +133,10 @@ enum class PointwiseMode
     TAN = 45, ///< Tangent function
     TANH_BWD = 46, ///< Tanh backward pass
     TANH_FWD = 47, ///< Tanh forward pass
-    COUNT = 48 ///< Number of pointwise modes (sentinel — not a valid mode)
+    MOD = 48, ///< Modulo: x mod y (binary)
+    POW = 49, ///< Power: x raised to y (binary)
+    COS = 50, ///< Cosine function (unary)
+    COUNT = 51 ///< Number of pointwise modes (sentinel — not a valid mode)
 };
 typedef PointwiseMode PointwiseMode_t; ///< @brief Type alias for PointwiseMode
 
@@ -163,7 +170,9 @@ enum class ResampleMode
     NOT_SET = 0, ///< Resample mode not specified
     MAXPOOL = 1, ///< Maximum pooling
     AVGPOOL_EXCLUDE_PADDING = 2, ///< Average pooling (excludes padding from divisor)
-    AVGPOOL_INCLUDE_PADDING = 3 ///< Average pooling (includes padding in divisor)
+    AVGPOOL_INCLUDE_PADDING = 3, ///< Average pooling (includes padding in divisor)
+    BILINEAR = 4, ///< Bilinear resampling
+    NEAREST = 5 ///< Nearest-neighbor resampling
 };
 typedef ResampleMode ResampleMode_t; ///< @brief Type alias for ResampleMode
 
@@ -175,7 +184,8 @@ enum class PaddingMode
 {
     NOT_SET = 0, ///< Padding mode not specified
     NEG_INF_PAD = 1, ///< Pad with negative infinity
-    ZERO_PAD = 2 ///< Pad with zeros
+    ZERO_PAD = 2, ///< Pad with zeros
+    EDGE_VAL_PAD = 3 ///< Pad with the edge value
 };
 typedef PaddingMode PaddingMode_t; ///< @brief Type alias for PaddingMode
 
@@ -207,6 +217,15 @@ enum class DataType
     BOOLEAN = 16, ///< 8-bit boolean
     FP8_E4M3_FNUZ = 17, ///< 8-bit floating point (4 exponent, 3 mantissa bits, FNUZ)
     FP8_E5M2_FNUZ = 18, ///< 8-bit floating point (5 exponent, 2 mantissa bits, FNUZ)
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    INT8x4 = 19, ///< Four packed 8-bit signed integers (vectorized layout)
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    UINT8x4 = 20, ///< Four packed 8-bit unsigned integers (vectorized layout)
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    INT8x32 = 21, ///< Thirty-two packed 8-bit signed integers (vectorized layout)
+    FAST_FLOAT_FOR_FP8 = 22, ///< Fast floating-point accumulation type for FP8
+    COMPLEX_FP32 = 23, ///< Complex number with 32-bit floating-point components
+    COMPLEX_FP64 = 24, ///< Complex number with 64-bit floating-point components
 };
 typedef DataType DataType_t; ///< @brief Type alias for DataType
 
@@ -251,6 +270,19 @@ typedef AttentionImplementation
     AttentionImplementation_t; ///< @brief Type alias for AttentionImplementation
 
 /**
+ * @enum MoeGroupedMatmulMode
+ * @brief Selects routing behavior for forward MoE grouped matmul
+ */
+enum class MoeGroupedMatmulMode
+{
+    NOT_SET = 0, ///< Mode not specified.
+    NONE = 1, ///< Tokens are already routed.
+    GATHER = 2, ///< Gather source tokens before grouped matmul.
+    SCATTER = 3 ///< Scatter grouped-matmul output to source token order.
+};
+typedef MoeGroupedMatmulMode MoeGroupedMatmulMode_t; ///< @brief MoE routing mode alias
+
+/**
  * @enum HeuristicMode
  * @brief Specifies the heuristic mode for engine selection
  *
@@ -259,6 +291,9 @@ typedef AttentionImplementation
 enum class HeuristicMode
 {
     FALLBACK, ///< Use fallback heuristics for engine selection
+    A, ///< cuDNN heuristic mode A (mapped to fallback for now)
+    B, ///< cuDNN heuristic mode B (mapped to fallback for now)
+    OPENSOURCE, ///< cuDNN open-source heuristic mode (mapped to fallback for now)
 };
 typedef HeuristicMode HeurMode_t; ///< @brief Type alias for HeuristicMode
 
@@ -283,7 +318,7 @@ typedef BehaviorNote BehaviorNote_t; ///< @brief Type alias for BehaviorNote
 enum class BuildPlanPolicy
 {
     HEURISTICS_CHOICE, ///< Use heuristics to select the best plan
-    ALL ///< Build all available plans (currently unused)
+    ALL ///< Build all available plans
 };
 typedef BuildPlanPolicy BuildPlanPolicy_t; ///< @brief Type alias for BuildPlanPolicy
 
@@ -366,6 +401,10 @@ DataType getDataTypeEnumFromType()
     else if constexpr(std::is_same_v<T, int8_t>)
     {
         return DataType::INT8;
+    }
+    else if constexpr(std::is_same_v<T, fp4_e2m1>)
+    {
+        return DataType::FP4_E2M1;
     }
     else if constexpr(std::is_same_v<T, fp8_e4m3>)
     {
@@ -486,6 +525,22 @@ inline hipdnnAttentionImplementation_t
     }
 }
 
+inline std::optional<hipdnnMoeGroupedMatmulMode_t>
+    toBackendMoeGroupedMatmulMode(const MoeGroupedMatmulMode& mode)
+{
+    switch(mode)
+    {
+    case MoeGroupedMatmulMode::NONE:
+        return HIPDNN_MOE_GROUPED_MATMUL_MODE_NONE;
+    case MoeGroupedMatmulMode::GATHER:
+        return HIPDNN_MOE_GROUPED_MATMUL_MODE_GATHER;
+    case MoeGroupedMatmulMode::SCATTER:
+        return HIPDNN_MOE_GROUPED_MATMUL_MODE_SCATTER;
+    default:
+        return std::nullopt;
+    }
+}
+
 /**
  * @brief Convert backend hipdnnDiagonalAlignment_t to frontend DiagonalAlignment
  *
@@ -536,6 +591,25 @@ inline std::pair<AttentionImplementation, Error>
                 {ErrorCode::HIPDNN_BACKEND_ERROR,
                  "Unknown hipdnnAttentionImplementation_t value: "
                      + std::to_string(static_cast<int>(impl))}};
+    }
+}
+
+inline std::pair<MoeGroupedMatmulMode, Error>
+    fromHipdnnMoeGroupedMatmulMode(hipdnnMoeGroupedMatmulMode_t mode)
+{
+    switch(mode)
+    {
+    case HIPDNN_MOE_GROUPED_MATMUL_MODE_NONE:
+        return {MoeGroupedMatmulMode::NONE, {}};
+    case HIPDNN_MOE_GROUPED_MATMUL_MODE_GATHER:
+        return {MoeGroupedMatmulMode::GATHER, {}};
+    case HIPDNN_MOE_GROUPED_MATMUL_MODE_SCATTER:
+        return {MoeGroupedMatmulMode::SCATTER, {}};
+    default:
+        return {MoeGroupedMatmulMode::NOT_SET,
+                {ErrorCode::HIPDNN_BACKEND_ERROR,
+                 "Unknown hipdnnMoeGroupedMatmulMode_t value: "
+                     + std::to_string(static_cast<int>(mode))}};
     }
 }
 
@@ -914,7 +988,11 @@ inline hipdnnBackendHeurMode_t toBackendType(const HeuristicMode& type)
 {
     switch(type)
     {
+    // All cuDNN heuristic modes currently fold to hipDNN fallback.
     case HeuristicMode::FALLBACK:
+    case HeuristicMode::A:
+    case HeuristicMode::B:
+    case HeuristicMode::OPENSOURCE:
     default:
         return hipdnnBackendHeurMode_t::HIPDNN_HEUR_MODE_FALLBACK;
     }
@@ -1055,6 +1133,18 @@ inline const char* to_string(const DataType& type)
         return "fp8_e4m3_fnuz";
     case DataType::FP8_E5M2_FNUZ:
         return "fp8_e5m2_fnuz";
+    case DataType::INT8x4:
+        return "int8x4";
+    case DataType::UINT8x4:
+        return "uint8x4";
+    case DataType::INT8x32:
+        return "int8x32";
+    case DataType::FAST_FLOAT_FOR_FP8:
+        return "fast_float_for_fp8";
+    case DataType::COMPLEX_FP32:
+        return "complex_fp32";
+    case DataType::COMPLEX_FP64:
+        return "complex_fp64";
     default:
         return "unknown";
     }
@@ -1168,6 +1258,12 @@ inline const char* to_string(const PointwiseMode& mode)
         return "TANH_BWD";
     case PointwiseMode::TANH_FWD:
         return "TANH_FWD";
+    case PointwiseMode::MOD:
+        return "MOD";
+    case PointwiseMode::POW:
+        return "POW";
+    case PointwiseMode::COS:
+        return "COS";
     default:
         return "UNKNOWN";
     }
@@ -1208,6 +1304,12 @@ inline const char* to_string(const HeuristicMode& mode)
     {
     case HeuristicMode::FALLBACK:
         return "FALLBACK";
+    case HeuristicMode::A:
+        return "A";
+    case HeuristicMode::B:
+        return "B";
+    case HeuristicMode::OPENSOURCE:
+        return "OPENSOURCE";
     default:
         return "unknown";
     }
@@ -1421,6 +1523,7 @@ inline bool isUnaryPointwiseMode(PointwiseMode mode)
     case PointwiseMode::SWISH_FWD:
     case PointwiseMode::TAN:
     case PointwiseMode::TANH_FWD:
+    case PointwiseMode::COS:
         return true;
     default:
         return false;
@@ -1459,6 +1562,8 @@ inline bool isBinaryPointwiseMode(PointwiseMode mode)
     case PointwiseMode::SUB:
     case PointwiseMode::SWISH_BWD:
     case PointwiseMode::TANH_BWD:
+    case PointwiseMode::MOD:
+    case PointwiseMode::POW:
         return true;
     default:
         return false;
@@ -1520,6 +1625,8 @@ inline std::optional<hipdnnPaddingMode_t> toBackendPaddingMode(const PaddingMode
 {
     switch(type)
     {
+    case PaddingMode::NOT_SET:
+        return HIPDNN_PADDING_NOT_SET;
     case PaddingMode::NEG_INF_PAD:
         return HIPDNN_PADDING_NEG_INF_PAD;
     case PaddingMode::ZERO_PAD:
@@ -1536,6 +1643,8 @@ inline std::pair<PaddingMode, Error> fromHipdnnPaddingMode(hipdnnPaddingMode_t m
 {
     switch(mode)
     {
+    case HIPDNN_PADDING_NOT_SET:
+        return {PaddingMode::NOT_SET, {}};
     case HIPDNN_PADDING_NEG_INF_PAD:
         return {PaddingMode::NEG_INF_PAD, {}};
     case HIPDNN_PADDING_ZERO_PAD:

@@ -262,7 +262,7 @@ AnySolver<miopen::ExecutionContext, miopen::conv::ProblemDescription>::AnySolver
     case 1: SetObject<miopen::solver::conv::ConvAsm3x3U>(); break;
     case 2: SetObject<miopen::solver::conv::ConvAsm1x1U>(); break;
     case 3: SetObject<miopen::solver::conv::ConvAsm1x1UV2>(); break;
-    case 11: SetObject<miopen::solver::conv::ConvOclDirectFwd>(); break;
+    case 11: SetObject<miopen::solver::conv::ConvHipDirectFwd>(); break;
     case 16: SetObject<miopen::solver::conv::ConvAsmBwdWrW3x3>(); break;
     case 17: SetObject<miopen::solver::conv::ConvAsmBwdWrW1x1>(); break;
     case 26: SetObject<miopen::solver::conv::ConvHipImplicitGemmV4R1Fwd>(); break;
@@ -305,6 +305,7 @@ AnySolver<miopen::ExecutionContext, miopen::conv::ProblemDescription>::AnySolver
     case 155: SetObject<miopen::solver::conv::ConvHipImplicitGemmGroupBwdXdlops>(); break;
     case 156: SetObject<miopen::solver::conv::ConvHipImplicitGemmGroupWrwXdlops>(); break;
     case 185: SetObject<miopen::solver::conv::ConvDepthwiseFwd2D>(); break;
+    case 186: SetObject<miopen::solver::conv::ConvDepthwiseBwdData2D>(); break;
     // New tunable solver should be added here
     default:
         MIOPEN_THROW(miopenStatusInternalError, "Unknown solver ID (" + std::to_string(id) + ")");

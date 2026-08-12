@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -23,6 +23,8 @@
  * ************************************************************************ */
 #ifndef HIPSPARSE_GENERIC_TYPES_H
 #define HIPSPARSE_GENERIC_TYPES_H
+
+#include "hipsparse-config.h"
 
 /*! \ingroup types_module
  *  \brief Generic API opaque structure holding information for a sparse vector.
@@ -154,6 +156,22 @@ typedef struct hipsparseSpGEMMDescr* hipsparseSpGEMMDescr_t;
 #endif
 
 /*! \ingroup types_module
+ *  \brief Generic API opaque structure holding information for a SpGEAM calculation.
+ *
+ *  \details
+ *  The hipSPARSE descriptor is an opaque structure holding information that is used in hipsparseSpGEAM_bufferSize(),
+ *  hipsparseSpGEAM_nnz(), and hipsparseSpGEAM(). It must be initialized using hipsparseSpGEAM_createDescr(). It
+ *  should be destroyed at the end using hipsparseSpGEAM_destroyDescr().
+ */
+// clang-format 19 (math-ci) rewrites "#if(" to "#if (", which clang-format
+// 18 (the repo pre-commit hook) reverts; disable so both formatters agree.
+// clang-format off
+#if(defined(HIPSPARSE_WITH_SPGEAM) && (!defined(CUDART_VERSION) || CUDART_VERSION >= 13030))
+// clang-format on
+typedef struct hipsparseSpGEAMDescr* hipsparseSpGEAMDescr_t;
+#endif
+
+/*! \ingroup types_module
  *  \brief Generic API opaque structure holding information for a SpSV calculation.
  *
  *  \details
@@ -194,8 +212,11 @@ typedef enum
     HIPSPARSE_FORMAT_COO         = 3, /**< Coordinate - structure of arrays */
     HIPSPARSE_FORMAT_COO_AOS     = 4, /**< Coordinate - array of structures */
     HIPSPARSE_FORMAT_BLOCKED_ELL = 5, /**< Blocked ELL */
-    HIPSPARSE_FORMAT_SLICED_ELL  = 6, /**< Sliced ELL */
-    HIPSPARSE_FORMAT_BSR         = 7 /**< Block sparse row */
+    HIPSPARSE_FORMAT_SLICED_ELL  = 6 /**< Sliced ELL */
+#ifdef HIPSPARSE_WITH_SPMV_BSR
+    ,
+    HIPSPARSE_FORMAT_BSR = 7 /**< Block sparse row */
+#endif
 } hipsparseFormat_t;
 #else
 #if(CUDART_VERSION >= 12011)
@@ -304,7 +325,11 @@ typedef enum
     HIPSPARSE_SPMV_CSR_ALG2    = 3,
     HIPSPARSE_SPMV_COO_ALG2    = 4,
     HIPSPARSE_SPMV_SELL_ALG1   = 5,
-    HIPSPARSE_SPMV_BSR_ALG1    = 6
+    HIPSPARSE_SPMV_CSR_ALG3    = 7
+#ifdef HIPSPARSE_WITH_SPMV_BSR
+    ,
+    HIPSPARSE_SPMV_BSR_ALG1 = 6
+#endif
 } hipsparseSpMVAlg_t;
 #else
 #if(CUDART_VERSION >= 13001)
@@ -315,8 +340,11 @@ typedef enum
     HIPSPARSE_SPMV_CSR_ALG1    = 2,
     HIPSPARSE_SPMV_CSR_ALG2    = 3,
     HIPSPARSE_SPMV_COO_ALG2    = 4,
-    HIPSPARSE_SPMV_SELL_ALG1   = 5,
-    HIPSPARSE_SPMV_BSR_ALG1    = 6
+    HIPSPARSE_SPMV_SELL_ALG1   = 5
+#ifdef HIPSPARSE_WITH_SPMV_BSR
+    ,
+    HIPSPARSE_SPMV_BSR_ALG1 = 6
+#endif
 } hipsparseSpMVAlg_t;
 #elif(CUDART_VERSION >= 12011 && CUDART_VERSION < 13001)
 typedef enum
@@ -384,10 +412,25 @@ typedef enum
     HIPSPARSE_SPMM_CSR_ALG1         = 4, /**< CSR algorithm 1 */
     HIPSPARSE_SPMM_CSR_ALG2         = 6, /**< CSR algorithm 2 */
     HIPSPARSE_SPMM_CSR_ALG3         = 12, /**< CSR algorithm 3 */
-    HIPSPARSE_SPMM_BLOCKED_ELL_ALG1 = 13 /**< Blocked ELL algorithm 1 */
+    HIPSPARSE_SPMM_BLOCKED_ELL_ALG1 = 13, /**< Blocked ELL algorithm 1 */
+    HIPSPARSE_SPMM_BSR_ALG1         = 14 /**< BSR algorithm 1 */
 } hipsparseSpMMAlg_t;
 #else
-#if(CUDART_VERSION >= 12000)
+#if(CUDART_VERSION >= 12051)
+typedef enum
+{
+    HIPSPARSE_SPMM_ALG_DEFAULT      = 0, /**< Default algorithm */
+    HIPSPARSE_SPMM_COO_ALG1         = 1, /**< COO algorithm 1 */
+    HIPSPARSE_SPMM_COO_ALG2         = 2, /**< COO algorithm 2 */
+    HIPSPARSE_SPMM_COO_ALG3         = 3, /**< COO algorithm 3 */
+    HIPSPARSE_SPMM_COO_ALG4         = 5, /**< COO algorithm 4 */
+    HIPSPARSE_SPMM_CSR_ALG1         = 4, /**< CSR algorithm 1 */
+    HIPSPARSE_SPMM_CSR_ALG2         = 6, /**< CSR algorithm 2 */
+    HIPSPARSE_SPMM_CSR_ALG3         = 12, /**< CSR algorithm 3 */
+    HIPSPARSE_SPMM_BLOCKED_ELL_ALG1 = 13, /**< Blocked ELL algorithm 1 */
+    HIPSPARSE_SPMM_BSR_ALG1         = 14 /**< BSR algorithm 1 */
+} hipsparseSpMMAlg_t;
+#elif(CUDART_VERSION >= 12000 && CUDART_VERSION < 12051)
 typedef enum
 {
     HIPSPARSE_SPMM_ALG_DEFAULT      = 0, /**< Default algorithm */
@@ -573,6 +616,22 @@ typedef enum
     HIPSPARSE_SPGEMM_DEFAULT = 0
 } hipsparseSpGEMMAlg_t;
 #endif
+#endif
+
+/*! \ingroup generic_module
+ *  \brief List of hipSPARSE SpGEAM algorithms.
+ *
+ *  \details
+ *  This is a list of the \ref hipsparseSpGEAMAlg_t types that are used by the hipSPARSE
+ *  library to perform sparse matrix sparse matrix addition.
+ */
+// clang-format off
+#if(defined(HIPSPARSE_WITH_SPGEAM) && (!defined(CUDART_VERSION) || CUDART_VERSION >= 13030))
+// clang-format on
+typedef enum
+{
+    HIPSPARSE_SPGEAM_ALG1 = 0 /**< Default SpGEAM algorithm. */
+} hipsparseSpGEAMAlg_t;
 #endif
 
 #endif /* HIPSPARSE_GENERIC_TYPES_H */

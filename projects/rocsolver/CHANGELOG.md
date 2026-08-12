@@ -15,6 +15,46 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 
 
+## rocSOLVER 3.36.0 for ROCm 10.0.0
+
+### Added
+
+* 64-bit APIs for the symmetric/Hermitian eigensolvers
+    * SYEV_64 and HEEV_64 (with batched and strided\_batched versions)
+    * SYEVD_64 and HEEVD_64 (with batched and strided\_batched versions)
+* Support added for the gfx1250 architecture.
+
+### Changed
+
+* Clarified the `geblttrf_npvt` API documentation to accurately describe the in-place LU block-factorization storage.
+
+### Known issues
+
+* The 64-bit eigensolver APIs (SYEV_64, HEEV_64, SYEVD_64, HEEVD_64) require the matrix
+  dimensions `n` and `lda` to fit within a 32-bit integer, because their internal tridiagonal
+  reduction and back-transformation steps remain 32-bit.
+
+
+
+## rocSOLVER 3.35.0 for ROCm 7.14.0
+
+### Added
+
+* Support added for the gfx1250 architecture.
+
+### Optimized
+
+* Refined `potf2_run_small` dispatch by `BS2` to avoid over-generating specialized kernels while preserving runtime bounds checks on `nb`.
+
+### Resolved issues
+
+* Fixed an out-of-bounds read in `bdsqr_lower2upper`.
+* Fixed an invalid kernel launch in the small-matrix LU factorization (GETF2/GETRF) for large batch counts.
+* Fixed a synchronization issue in GETRI and TRTRI on wave 32 architectures.
+* Fixed rocSOLVER not returning an error when underlying rocBLAS or rocSPARSE calls fail.
+
+
+
 ## rocSOLVER 3.34.0 for ROCm 7.13.0
 
 ### Added
@@ -612,4 +652,3 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Deprecated
 - rocSOLVER types and enumerations
 - hcc compiler support
-

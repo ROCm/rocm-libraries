@@ -18,9 +18,6 @@ set(REGRESSION_TESTS
     test_gemm_splitk
     test_gemm_universal_wmma_fp16
     test_gemm_universal_xdl_fp16
-    test_gemm_universal_streamk_fp16
-    test_gemm_universal_streamk_bf16
-    test_gemm_universal_streamk_fp8
     test_batched_gemm_softmax_gemm_fp16
     test_batched_gemm_softmax_gemm_permute_fp16
     test_batched_gemm_bias_softmax_gemm_permute_fp16
@@ -126,11 +123,11 @@ function(add_test_executable TEST_NAME)
     endforeach()
     if(ARGN)
         if(source_name_list MATCHES "_xdl")
-             list(REMOVE_ITEM TEST_TARGETS gfx900 gfx906 gfx906:xnack- gfx1030 gfx10-3-generic)
+             list(REMOVE_ITEM TEST_TARGETS gfx900 gfx906 gfx906:xnack- gfx1030 gfx10-3-generic amdgcnspirv)
         elseif(source_name_list MATCHES "_wmma")
-             list(REMOVE_ITEM TEST_TARGETS gfx900 gfx906 gfx906:xnack- gfx908:xnack+ gfx908:xnack- gfx90a:xnack+ gfx90a:xnack- gfx908 gfx90a gfx942 gfx1030 gfx950)
+             list(REMOVE_ITEM TEST_TARGETS gfx900 gfx906 gfx906:xnack- gfx908:xnack+ gfx908:xnack- gfx90a:xnack+ gfx90a:xnack- gfx908 gfx90a gfx942 gfx1030 gfx950 amdgcnspirv)
         elseif(source_name_list MATCHES "_smfmac")
-             list(REMOVE_ITEM TEST_TARGETS gfx900 gfx906 gfx906:xnack- gfx1030 gfx1100 gfx1101 gfx1102 gfx1103 gfx1150 gfx1151 gfx1152 gfx1153 gfx908 gfx90a gfx1200 gfx1201 gfx10-3-generic gfx11-generic gfx12-generic gfx1250)
+             list(REMOVE_ITEM TEST_TARGETS gfx900 gfx906 gfx906:xnack- gfx1030 gfx1100 gfx1101 gfx1102 gfx1103 gfx1150 gfx1151 gfx1152 gfx1153 gfx908 gfx90a gfx1200 gfx1201 gfx10-3-generic gfx11-generic gfx12-generic gfx1250 amdgcnspirv)
         endif()
         set_source_files_properties(${ARGN} PROPERTIES LANGUAGE HIP)
         add_executable(${TEST_NAME} ${ARGN})
@@ -228,15 +225,15 @@ function(add_gtest_executable TEST_NAME)
     endforeach()
     if(ARGN)
         if(source_name_list MATCHES "_xdl")
-             list(REMOVE_ITEM TEST_TARGETS gfx900 gfx906 gfx906:xnack- gfx1030 gfx10-3-generic)
+             list(REMOVE_ITEM TEST_TARGETS gfx900 gfx906 gfx906:xnack- gfx1030 gfx10-3-generic amdgcnspirv)
         elseif(source_name_list MATCHES "_wmma")
-             list(REMOVE_ITEM TEST_TARGETS gfx900 gfx906 gfx906:xnack- gfx908:xnack+ gfx908:xnack- gfx90a:xnack+ gfx90a:xnack- gfx908 gfx90a gfx942 gfx1030 gfx950)
+             list(REMOVE_ITEM TEST_TARGETS gfx900 gfx906 gfx906:xnack- gfx908:xnack+ gfx908:xnack- gfx90a:xnack+ gfx90a:xnack- gfx908 gfx90a gfx942 gfx1030 gfx950 amdgcnspirv)
         elseif(source_name_list MATCHES "monitor_mwait" OR source_name_list MATCHES "async_lds_load_store") #only build sync tests for gfx1250+
-             list(REMOVE_ITEM TEST_TARGETS gfx900 gfx906 gfx906:xnack- gfx908:xnack+ gfx908:xnack- gfx90a:xnack+ gfx90a:xnack- gfx908 gfx90a gfx942 gfx1030 gfx950 gfx1200 gfx1201 gfx10-3-generic gfx11-generic gfx12-generic)
+             list(REMOVE_ITEM TEST_TARGETS gfx900 gfx906 gfx906:xnack- gfx908:xnack+ gfx908:xnack- gfx90a:xnack+ gfx90a:xnack- gfx908 gfx90a gfx942 gfx1030 gfx950 gfx1200 gfx1201 gfx10-3-generic gfx11-generic gfx12-generic amdgcnspirv)
         elseif(source_name_list MATCHES "_smfmac")
-             list(REMOVE_ITEM TEST_TARGETS gfx900 gfx906 gfx906:xnack- gfx1030 gfx1100 gfx1101 gfx1102 gfx1103 gfx1150 gfx1151 gfx1152 gfx1153 gfx908 gfx90a gfx1200 gfx1201 gfx10-3-generic gfx11-generic gfx12-generic gfx1250)
+             list(REMOVE_ITEM TEST_TARGETS gfx900 gfx906 gfx906:xnack- gfx1030 gfx1100 gfx1101 gfx1102 gfx1103 gfx1150 gfx1151 gfx1152 gfx1153 gfx908 gfx90a gfx1200 gfx1201 gfx10-3-generic gfx11-generic gfx12-generic gfx1250 amdgcnspirv)
         elseif(source_name_list MATCHES "_mx") #only build mx example for gfx950 and gfx125x
-             list(REMOVE_ITEM TEST_TARGETS gfx900 gfx906 gfx906:xnack- gfx908:xnack+ gfx908:xnack- gfx90a:xnack+ gfx90a:xnack- gfx908 gfx90a gfx942 gfx1030 gfx1100 gfx1101 gfx1102 gfx1103 gfx1150 gfx1151 gfx1152 gfx1153 gfx1200 gfx1201 gfx10-3-generic gfx11-generic gfx12-generic)
+             list(REMOVE_ITEM TEST_TARGETS gfx900 gfx906 gfx906:xnack- gfx908:xnack+ gfx908:xnack- gfx90a:xnack+ gfx90a:xnack- gfx908 gfx90a gfx942 gfx1030 gfx1100 gfx1101 gfx1102 gfx1103 gfx1150 gfx1151 gfx1152 gfx1153 gfx1200 gfx1201 gfx10-3-generic gfx11-generic gfx12-generic amdgcnspirv)
              if(ARGN MATCHES "_pk4scale") #only build pk4scale for gfx1250
                 list(REMOVE_ITEM TEST_TARGETS gfx950)
              endif()
@@ -284,7 +281,6 @@ add_subdirectory(gemm_universal)
 add_subdirectory(gemm_universal_preshuffle)
 add_subdirectory(gemm_ab_scale)
 add_subdirectory(gemm_b_scale)
-add_subdirectory(gemm_universal_streamk)
 add_subdirectory(gemm_reduce)
 add_subdirectory(gemm_universal_reduce)
 add_subdirectory(batched_contraction)
@@ -354,3 +350,4 @@ add_subdirectory(synchronization)
 add_subdirectory(gpu_reference)
 add_subdirectory(util)
 add_subdirectory(gpu_verification)
+add_subdirectory(swiglu_oai_activation)

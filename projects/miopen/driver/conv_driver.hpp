@@ -1447,9 +1447,6 @@ int ConvDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
     }
 
     DEFINE_CONTEXT(ctx);
-#if MIOPEN_BACKEND_OPENCL
-    clGetCommandQueueInfo(q, CL_QUEUE_CONTEXT, sizeof(cl_context), &ctx, nullptr);
-#endif
     ws_sizeof_find_fwd = 0;
     ws_sizeof_find_wrw = 0;
     ws_sizeof_find_bwd = 0;
@@ -2296,9 +2293,6 @@ int ConvDriver<Tgpu, Tref>::RunForwardGpuFind(const bool is_transform)
     std::vector<miopenConvAlgoPerf_t> perf_results(request_algo_count);
 
     DEFINE_CONTEXT(ctx);
-#if MIOPEN_BACKEND_OPENCL
-    clGetCommandQueueInfo(q, CL_QUEUE_CONTEXT, sizeof(cl_context), &ctx, nullptr);
-#endif
 
     auto rc = FindForward(ret_algo_count, request_algo_count, perf_results, ctx);
     if(rc != miopenStatusSuccess)
@@ -2520,9 +2514,6 @@ int ConvDriver<Tgpu, Tref>::RunForwardGpuImmed(const bool is_transform)
         return rc;
 
     DEFINE_CONTEXT(ctx);
-#if MIOPEN_BACKEND_OPENCL
-    clGetCommandQueueInfo(q, CL_QUEUE_CONTEXT, sizeof(cl_context), &ctx, nullptr);
-#endif
 
     auto ws =
         std::unique_ptr<GPUMem>{ws_size > 0 ? new GPUMem{ctx, ws_size, 1, buffer_check} : nullptr};
@@ -2933,9 +2924,6 @@ int ConvDriver<Tgpu, Tref>::RunBackwardDataGpuFind()
     std::vector<miopenConvAlgoPerf_t> perf_results_data(request_algo_count);
 
     DEFINE_CONTEXT(ctx);
-#if MIOPEN_BACKEND_OPENCL
-    clGetCommandQueueInfo(q, CL_QUEUE_CONTEXT, sizeof(cl_context), &ctx, nullptr);
-#endif
 
     auto rc = FindBackwardData(ret_algo_count, request_algo_count, perf_results_data, ctx);
     if(rc != miopenStatusSuccess)
@@ -3280,9 +3268,6 @@ int ConvDriver<Tgpu, Tref>::RunBackwardWrwGpuFind()
     const bool performance_logging_enabled = miopen::IsPerformanceLoggingEnabled();
 
     DEFINE_CONTEXT(ctx);
-#if MIOPEN_BACKEND_OPENCL
-    clGetCommandQueueInfo(q, CL_QUEUE_CONTEXT, sizeof(cl_context), &ctx, nullptr);
-#endif
 
     auto rc = FindBackwardWeights(ret_algo_count, request_algo_count, perf_results_weights, ctx);
     if(rc != miopenStatusSuccess)
@@ -3666,9 +3651,6 @@ int ConvDriver<Tgpu, Tref>::RunBackwardDataGpuImmed()
         return rc;
 
     DEFINE_CONTEXT(ctx);
-#if MIOPEN_BACKEND_OPENCL
-    clGetCommandQueueInfo(q, CL_QUEUE_CONTEXT, sizeof(cl_context), &ctx, nullptr);
-#endif
 
     auto ws =
         std::unique_ptr<GPUMem>{ws_size > 0 ? new GPUMem{ctx, ws_size, 1, buffer_check} : nullptr};
@@ -3840,9 +3822,6 @@ int ConvDriver<Tgpu, Tref>::RunBackwardWrwGpuImmed()
         return rc;
 
     DEFINE_CONTEXT(ctx);
-#if MIOPEN_BACKEND_OPENCL
-    clGetCommandQueueInfo(q, CL_QUEUE_CONTEXT, sizeof(cl_context), &ctx, nullptr);
-#endif
 
     auto ws =
         std::unique_ptr<GPUMem>{ws_size > 0 ? new GPUMem{ctx, ws_size, 1, buffer_check} : nullptr};

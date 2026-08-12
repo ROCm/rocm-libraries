@@ -591,65 +591,40 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
             : BBlockTransferSrcScalarPerVector;
 
     // Use appropriate gridwise gemm
+#define GridwiseGemmV3TemplateParams                                                              \
+    tensor_layout::gemm::RowMajor, tensor_layout::gemm::ColumnMajor, DsLayout,                    \
+        tensor_layout::gemm::RowMajor, ADataType, BDataType, AccDataType, CShuffleDataType,       \
+        DsDataType, EDataType, AElementwiseOperation, BElementwiseOperation,                      \
+        CDEElementwiseOperation, GemmSpec, BlockSize, MPerBlock, NPerBlock, KPerBlock, AK1, BK1,  \
+        MPerXDL_, NPerXDL_, MXdlPerWave_, NXdlPerWave*(NPerXDL / NPerXDL_),                       \
+        ABlockTransferThreadClusterLengths_AK0_M_AK1, ABlockTransferThreadClusterArrangeOrder,    \
+        ABlockTransferSrcAccessOrder, ABlockTransferSrcVectorDim,                                 \
+        DirectLoad ? ABlockTransferSrcScalarPerVectorAligned : ABlockTransferSrcScalarPerVector,  \
+        ABlockTransferDstScalarPerVector_AK1, false, ABlockLdsExtraM,                             \
+        BBlockTransferThreadClusterLengths_BK0_N_BK1, BBlockTransferThreadClusterArrangeOrder,    \
+        BBlockTransferSrcAccessOrder, BBlockTransferSrcVectorDim,                                 \
+        DirectLoad ? BBlockTransferSrcScalarPerVectorAligned : BBlockTransferSrcScalarPerVector,  \
+        BBlockTransferDstScalarPerVector_BK1, false, BBlockLdsExtraN,                             \
+        CShuffleMXdlPerWavePerShuffle, CShuffleNXdlPerWavePerShuffle*(NPerXDL / NPerXDL_),        \
+        CDEBlockTransferClusterLengths_MBlock_MPerBlock_NBlock_NPerBlock,                         \
+        CDEBlockTransferScalarPerVectors, BlkGemmPipeSched, BlkGemmPipelineVer, AComputeDataType, \
+        BComputeDataType, ADataType, BDataType, DoElementwiseBeforeCShuffle, DirectLoad,          \
+        LargeTensors
+
     template <index_t MXdlPerWave_, index_t MPerXDL_, index_t NPerXDL_>
     using GridwiseGemmBase = GridwiseGemmMultiD_xdl_cshuffle_v3<
-        tensor_layout::gemm::RowMajor,
-        tensor_layout::gemm::ColumnMajor,
-        DsLayout,
-        tensor_layout::gemm::RowMajor,
-        ADataType,
-        BDataType,
-        AccDataType,
-        CShuffleDataType,
-        DsDataType,
-        EDataType,
-        AElementwiseOperation,
-        BElementwiseOperation,
-        CDEElementwiseOperation,
-        GemmSpec,
-        BlockSize,
-        MPerBlock,
-        NPerBlock,
-        KPerBlock,
-        AK1,
-        BK1,
-        MPerXDL_,
-        NPerXDL_,
-        MXdlPerWave_,
-        NXdlPerWave*(NPerXDL / NPerXDL_),
-        ABlockTransferThreadClusterLengths_AK0_M_AK1,
-        ABlockTransferThreadClusterArrangeOrder,
-        ABlockTransferSrcAccessOrder,
-        ABlockTransferSrcVectorDim,
-        DirectLoad ? ABlockTransferSrcScalarPerVectorAligned : ABlockTransferSrcScalarPerVector,
-        ABlockTransferDstScalarPerVector_AK1,
-        false,
-        ABlockLdsExtraM,
-        BBlockTransferThreadClusterLengths_BK0_N_BK1,
-        BBlockTransferThreadClusterArrangeOrder,
-        BBlockTransferSrcAccessOrder,
-        BBlockTransferSrcVectorDim,
-        DirectLoad ? BBlockTransferSrcScalarPerVectorAligned : BBlockTransferSrcScalarPerVector,
-        BBlockTransferDstScalarPerVector_BK1,
-        false,
-        BBlockLdsExtraN,
-        CShuffleMXdlPerWavePerShuffle,
-        CShuffleNXdlPerWavePerShuffle*(NPerXDL / NPerXDL_),
-        CDEBlockTransferClusterLengths_MBlock_MPerBlock_NBlock_NPerBlock,
-        CDEBlockTransferScalarPerVectors,
-        BlkGemmPipeSched,
-        BlkGemmPipelineVer,
-        AComputeDataType,
-        BComputeDataType,
-        ADataType,
-        BDataType,
-        DoElementwiseBeforeCShuffle,
-        DirectLoad,
-        LargeTensors>;
+        GridwiseGemmV3TemplateParams,
+        // Skip the logical M*K/N*K/M*N <= 2GB check in GridwiseGemm::CheckValidity for the
+        // convolution path: the implicit-GEMM (im2col) matrix size vastly exceeds the real
+        // tensor footprint, and actual memory is validated separately via
+        // conv_to_gemm_transformer_.AreDescriptorsSmallerThan2GB(). Leaving it on wrongly
+        // rejects the fast int32 instances (incl. the v4 pipeline) for shapes whose real
+        // memory fits int32 (ROCM-27526 perf regression).
+        /*SkipGemmSizeCheck=*/true>;
     using GridwiseGemm64 = GridwiseGemmBase<math::max(MXdlPerWave64, 1), MPerXDL, NPerXDL>;
     using GridwiseGemm32 = GridwiseGemmBase<MXdlPerWave32, Wave32MaxMNPerXDL, Wave32MaxMNPerXDL>;
 
-    // #undef GridwiseGemmV3TemplateParams
+#undef GridwiseGemmV3TemplateParams
 
     using Block2TileMapElementwise =
         BlockToCTileMap_M00_N0_M01Adapt<NPerBlock, NPerBlock, void, IndexType>;
@@ -1008,15 +983,15 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
             constexpr index_t minimum_occupancy =
                 BlkGemmPipeSched == BlockGemmPipelineScheduler::Intrawave ? 1 : 2;
 
-            const index_t GemmM = arg.a_grid_desc_ak0_m_ak1_.GetLength(I1);
-            const index_t GemmN = arg.b_grid_desc_bk0_n_bk1_.GetLength(I1);
-            const index_t GemmK =
+            const IndexType GemmM = arg.a_grid_desc_ak0_m_ak1_.GetLength(I1);
+            const IndexType GemmN = arg.b_grid_desc_bk0_n_bk1_.GetLength(I1);
+            const IndexType GemmK =
                 arg.a_grid_desc_ak0_m_ak1_.GetLength(I0) * arg.a_grid_desc_ak0_m_ak1_.GetLength(I2);
 
             const auto num_workgroups_per_Conv_N =
                 arg.a_g_n_c_wis_lengths_[I1] / arg.conv_N_per_block_;
 
-            index_t gdx, gdy, gdz;
+            IndexType gdx, gdy, gdz;
             // TODO: Do we want to support kbatch ??
             std::tie(gdx, gdy, gdz) =
                 GridwiseGemm::CalculateGridSize(GemmM, GemmN, I1 /*arg.KBatch*/);
@@ -1482,7 +1457,16 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
         if constexpr(!LargeTensors)
         {
             if(arg.stride_overflow)
+            {
+                if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+                {
+                    std::cout
+                        << "Unsupported! stride_overflow is set but LargeTensors is not enabled!"
+                        << " In " << __FILE__ << ":" << __LINE__ << ", in function: " << __func__
+                        << std::endl;
+                }
                 return false;
+            }
         }
 
         namespace ctc = tensor_layout::convolution;
@@ -1494,12 +1478,12 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
         // with Conv Multiple D instances
         if constexpr(isMultiABD)
         {
-            return false;
             if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
             {
                 std::cout << "The MultiABD is not supported!" << " In " << __FILE__ << ":"
                           << __LINE__ << ", in function: " << __func__ << std::endl;
             }
+            return false;
         }
 
         // check device
@@ -1814,16 +1798,19 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
         }
 
         // Gridwise gemm v3 doesn't verify descriptors size
-        if(!arg.conv_to_gemm_transformer_.AreDescriptorsSmallerThan2GB())
+        if(!LargeTensors)
         {
-            if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+            if(!arg.conv_to_gemm_transformer_.AreDescriptorsSmallerThan2GB())
             {
-                std::cout
-                    << "[conv_to_gemm_transformer_] One of the descriptors is bigger than 2GB!"
-                    << " In " << __FILE__ << ":" << __LINE__ << ", in function: " << __func__
-                    << std::endl;
+                if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+                {
+                    std::cout
+                        << "[conv_to_gemm_transformer_] One of the descriptors is bigger than 2GB!"
+                        << " In " << __FILE__ << ":" << __LINE__ << ", in function: " << __func__
+                        << std::endl;
+                }
+                return false;
             }
-            return false;
         }
 
         // check Gridwise GEMM
@@ -2031,11 +2018,13 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
         else
         {
             bool ds_ovf = false;
-            for(index_t d = 0; d < NumDTensor; d++)
-                ds_ovf |= tensor_exceeds_2gb(ds_g_n_k_wos_lengths[d]);
-            const bool stride_ovf = tensor_exceeds_2gb(a_g_n_c_wis_lengths) ||
-                                    tensor_exceeds_2gb(b_g_k_c_xs_lengths) ||
-                                    tensor_exceeds_2gb(e_g_n_k_wos_lengths) || ds_ovf;
+            static_for<0, NumDTensor, 1>{}([&](auto i) {
+                using DDataType = remove_cvref_t<tuple_element_t<i.value, DsDataType>>;
+                ds_ovf |= tensor_exceeds_2gb<DDataType>(ds_g_n_k_wos_lengths[i]);
+            });
+            const bool stride_ovf = tensor_exceeds_2gb<ADataType>(a_g_n_c_wis_lengths) ||
+                                    tensor_exceeds_2gb<BDataType>(b_g_k_c_xs_lengths) ||
+                                    tensor_exceeds_2gb<EDataType>(e_g_n_k_wos_lengths) || ds_ovf;
 
             std::array<index_t, NDimSpatial + 3> a_g_n_c_wis_lengths_i32;
             std::array<index_t, NDimSpatial + 3> a_g_n_c_wis_strides_i32;
@@ -2237,11 +2226,13 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
         else
         {
             bool ds_ovf = false;
-            for(index_t d = 0; d < NumDTensor; d++)
-                ds_ovf |= tensor_exceeds_2gb(ds_g_n_k_wos_lengths[d]);
-            const bool stride_ovf = tensor_exceeds_2gb(a_g_n_c_wis_lengths) ||
-                                    tensor_exceeds_2gb(b_g_k_c_xs_lengths) ||
-                                    tensor_exceeds_2gb(e_g_n_k_wos_lengths) || ds_ovf;
+            static_for<0, NumDTensor, 1>{}([&](auto i) {
+                using DDataType = remove_cvref_t<tuple_element_t<i.value, DsDataType>>;
+                ds_ovf |= tensor_exceeds_2gb<DDataType>(ds_g_n_k_wos_lengths[i]);
+            });
+            const bool stride_ovf = tensor_exceeds_2gb<ADataType>(a_g_n_c_wis_lengths) ||
+                                    tensor_exceeds_2gb<BDataType>(b_g_k_c_xs_lengths) ||
+                                    tensor_exceeds_2gb<EDataType>(e_g_n_k_wos_lengths) || ds_ovf;
 
             std::array<index_t, NDimSpatial + 3> a_g_n_c_wis_lengths_i32;
             std::array<index_t, NDimSpatial + 3> a_g_n_c_wis_strides_i32;

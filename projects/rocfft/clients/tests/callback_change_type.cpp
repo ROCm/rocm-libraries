@@ -1,4 +1,4 @@
-// Copyright (C) 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2023 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -17,6 +17,8 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
+
+#ifndef __SPIRV__
 
 #include "../../shared/hostbuf.h"
 #include "../../shared/params_gen.h"
@@ -84,7 +86,6 @@ INSTANTIATE_TEST_SUITE_P(DISABLED_callback,
                              {{0, 0}},
                              {{0, 0}},
                              {fft_placement_notinplace},
-                             false,
                              false)),
                          accuracy_test::TestName);
 
@@ -92,7 +93,7 @@ INSTANTIATE_TEST_SUITE_P(DISABLED_callback,
 TEST_P(change_type, DISABLED_short_to_float)
 {
     rocfft_params params(GetParam());
-    params.run_callbacks = true;
+    params.run_callbacks = fft_callback_type_funcptr;
 
     ASSERT_EQ(params.create_plan(), fft_status_success);
 
@@ -148,7 +149,7 @@ TEST_P(change_type, DISABLED_short_to_float)
                       hipSuccess);
         }
         std::vector<void*> callback_host_vec{callback_host};
-        ASSERT_EQ(params.set_callbacks(&callback_host_vec, nullptr, nullptr, nullptr),
+        ASSERT_EQ(params.set_funcptr_callbacks(&callback_host_vec, nullptr, nullptr, nullptr),
                   fft_status_success);
 
         // run rocFFT
@@ -232,3 +233,5 @@ TEST_P(change_type, DISABLED_short_to_float)
         GTEST_SKIP() << e.what();
     }
 }
+
+#endif

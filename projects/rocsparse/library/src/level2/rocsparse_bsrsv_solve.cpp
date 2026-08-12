@@ -212,10 +212,10 @@ namespace rocsparse
                             const T* __restrict__ bsr_val,
                             rocsparse_int block_dim,
                             const T* __restrict__ x,
-                            T* __restrict__ y,
+                            T* y,
                             int* __restrict__ done_array,
                             rocsparse_int* __restrict__ map,
-                            rocsparse_int* __restrict__ zero_pivot,
+                            rocsparse_int*       zero_pivot,
                             rocsparse_index_base idx_base,
                             rocsparse_diag_type  diag_type,
                             rocsparse_direction  dir,
@@ -247,10 +247,10 @@ namespace rocsparse
                             const T* __restrict__ bsr_val,
                             rocsparse_int block_dim,
                             const T* __restrict__ x,
-                            T* __restrict__ y,
+                            T* y,
                             int* __restrict__ done_array,
                             rocsparse_int* __restrict__ map,
-                            rocsparse_int* __restrict__ zero_pivot,
+                            rocsparse_int*       zero_pivot,
                             rocsparse_index_base idx_base,
                             rocsparse_diag_type  diag_type,
                             rocsparse_direction  dir,
@@ -282,10 +282,10 @@ namespace rocsparse
                              const T* __restrict__ bsr_val,
                              rocsparse_int block_dim,
                              const T* __restrict__ x,
-                             T* __restrict__ y,
+                             T* y,
                              int* __restrict__ done_array,
                              rocsparse_int* __restrict__ map,
-                             rocsparse_int* __restrict__ zero_pivot,
+                             rocsparse_int*       zero_pivot,
                              rocsparse_index_base idx_base,
                              rocsparse_diag_type  diag_type,
                              rocsparse_direction  dir,
@@ -317,10 +317,10 @@ namespace rocsparse
                              const T* __restrict__ bsr_val,
                              rocsparse_int block_dim,
                              const T* __restrict__ x,
-                             T* __restrict__ y,
+                             T* y,
                              int* __restrict__ done_array,
                              rocsparse_int* __restrict__ map,
-                             rocsparse_int* __restrict__ zero_pivot,
+                             rocsparse_int*       zero_pivot,
                              rocsparse_index_base idx_base,
                              rocsparse_diag_type  diag_type,
                              rocsparse_direction  dir,
@@ -376,7 +376,7 @@ namespace rocsparse
         ptr += ((sizeof(int) * mb - 1) / 256 + 1) * 256;
 
         // Initialize buffers
-        RETURN_IF_HIP_ERROR(hipMemsetAsync(done_array, 0, sizeof(int) * mb, stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(done_array, 0, sizeof(int) * mb, stream));
 
         auto                   bsrsv_info = info->get_bsrsv_info();
         rocsparse::trm_info_t* trm_info   = info->get_bsrsv_info(trans, descr->fill_mode);

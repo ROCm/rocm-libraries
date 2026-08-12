@@ -337,13 +337,14 @@ typedef enum rocblaslt_matrix_layout_attribute_
     ROCBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET
     = 1, /**< stride between consecutive matrices in a batch expressed in terms
             of matrix elements. */
-    ROCBLASLT_MATRIX_LAYOUT_TYPE  = 2,
-    ROCBLASLT_MATRIX_LAYOUT_ORDER = 3,
-    ROCBLASLT_MATRIX_LAYOUT_ROWS  = 4,
-    ROCBLASLT_MATRIX_LAYOUT_COLS  = 5,
-    ROCBLASLT_MATRIX_LAYOUT_LD    = 6,
+    ROCBLASLT_MATRIX_LAYOUT_TYPE       = 2,
+    ROCBLASLT_MATRIX_LAYOUT_ORDER      = 3,
+    ROCBLASLT_MATRIX_LAYOUT_ROWS       = 4,
+    ROCBLASLT_MATRIX_LAYOUT_COLS       = 5,
+    ROCBLASLT_MATRIX_LAYOUT_LD         = 6,
     ROCBLASLT_MATRIX_LAYOUT_BATCH_MODE = 7,
-    ROCBLASLT_MATRIX_LAYOUT_MAX   = 8
+    ROCBLASLT_MATRIX_LAYOUT_OFFSET     = 8,
+    ROCBLASLT_MATRIX_LAYOUT_MAX        = 9
 } rocblaslt_matrix_layout_attribute;
 
 typedef enum
@@ -390,10 +391,12 @@ typedef enum rocblaslt_matmul_desc_attributes_
     ROCBLASLT_MATMUL_DESC_BIAS_BATCH_STRIDE          = 23,
     ROCBLASLT_MATMUL_DESC_A_SCALE_MODE               = 31,
     ROCBLASLT_MATMUL_DESC_B_SCALE_MODE               = 32,
+    ROCBLASLT_MATMUL_DESC_SM_COUNT_TARGET            = 33,
     ROCBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_A_EXT   = 100,
     ROCBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_B_EXT,
     ROCBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG0_EXT,
     ROCBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG1_EXT,
+    ROCBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT    = 104,
     ROCBLASLT_MATMUL_DESC_MAX,
 } rocblaslt_matmul_desc_attributes;
 
@@ -409,7 +412,8 @@ typedef enum rocblaslt_matmul_preference_attributes_
 {
     ROCBLASLT_MATMUL_PREF_SEARCH_MODE         = 0,
     ROCBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES = 1,
-    ROCBLASLT_MATMUL_PREF_MAX                 = 2
+    ROCBLASLT_MATMUL_PREF_SM_COUNT_TARGET     = 2,
+    ROCBLASLT_MATMUL_PREF_MAX                 = 3
 } rocblaslt_matmul_preference_attributes;
 
 /********************************************************************************
@@ -520,6 +524,7 @@ struct RocblasltContractionProblem
     size_t             row_stride_a;
     size_t             col_stride_a;
     size_t             batch_stride_a;
+    int64_t            batch_offset_a;
 
     hipDataType        b_type;
     const void*        B;
@@ -527,6 +532,7 @@ struct RocblasltContractionProblem
     size_t             row_stride_b;
     size_t             col_stride_b;
     size_t             batch_stride_b;
+    int64_t            batch_offset_b;
 
     const void* beta;
 
@@ -536,6 +542,7 @@ struct RocblasltContractionProblem
     size_t             row_stride_c;
     size_t             col_stride_c;
     size_t             batch_stride_c;
+    int64_t            batch_offset_c;
 
     hipDataType  d_type;
     void*        D;
@@ -543,6 +550,7 @@ struct RocblasltContractionProblem
     size_t       row_stride_d;
     size_t       col_stride_d;
     size_t       batch_stride_d;
+    int64_t      batch_offset_d;
 
     void*        E;
     void* const* batch_E;
@@ -583,6 +591,18 @@ struct RocblasltContractionProblem
     bool        swizzleB;
     hipblasLtBatchMode_t batchMode;   
     int32_t bias_stride; 
+    // Mirrors HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT. Forwarded
+    // into ContractionProblemParameters::setStreamKTileSchedulingMode by
+    // tensile_host.cpp so that ContractionSolution::solve can populate
+    // StreamKSettings::streamKTileSchedulingMode. Tri-state:
+    //   0 = OFF  (default; SK3 static unless sm_count_target > 0),
+    //   1 = ON   (SK4 dynamic per-XCD work-queue on SK5 kernels),
+    //   2 = AUTO (always delegate to origami::streamk::select_hybrid_mode).
+    // Ignored for non-StreamK=5 solutions.
+    int32_t streamk_tile_scheduling_ext = 0;
+    // Effective sm_count_target after the (pref > desc > handle)
+    // precedence resolution. 0 = "use all CUs the device exposes".
+    int32_t sm_count_target = 0;
 
     // gemm_ex
     // gemm_strided_batched_ex
@@ -597,22 +617,26 @@ struct RocblasltContractionProblem
                                 const void* const*     batch_A,
                                 int64_t                ld_a,
                                 int64_t                batch_stride_a,
+                                int64_t                batch_offset_a,
                                 hipDataType            b_type,
                                 const void*            B,
                                 const void* const*     batch_B,
                                 int64_t                ld_b,
                                 int64_t                batch_stride_b,
+                                int64_t                batch_offset_b,
                                 const void*            beta,
                                 hipDataType            c_type,
                                 const void*            C,
                                 const void* const*     batch_C,
                                 int64_t                ld_c,
                                 int64_t                batch_stride_c,
+                                int64_t                batch_offset_c,
                                 hipDataType            d_type,
                                 void*                  D,
                                 void* const*           batch_D,
                                 int64_t                ld_d,
                                 int64_t                batch_stride_d,
+                                int64_t                batch_offset_d,
                                 void*                  E,
                                 void* const*           batch_E,
                                 int64_t                ld_e,
@@ -645,7 +669,9 @@ struct RocblasltContractionProblem
                                 bool                   swizzleA,
                                 bool                   swizzleB,
                                 hipblasLtBatchMode_t   batchMode,
-                                int32_t                bias_stride);
+                                int32_t                bias_stride,
+                                int32_t                streamk_tile_scheduling_ext = 0,
+                                int32_t                sm_count_target         = 0);
 };
 
 namespace rocblaslt

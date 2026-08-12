@@ -1,4 +1,4 @@
-// Copyright (C) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -21,7 +21,8 @@
 #ifndef ROCFFT_CLIENT_EXCEPT_H
 #define ROCFFT_CLIENT_EXCEPT_H
 
-#include <hip/hip_runtime_api.h>
+#include <hip/hiprtc.h>
+#include <stdexcept>
 #include <string>
 
 // exception type to throw when we want to skip a problem
@@ -36,19 +37,18 @@ struct ROCFFT_FAIL : public std::runtime_error
     using std::runtime_error::runtime_error;
 };
 
-// exception for hip runtime error(s) specifically
-struct hip_runtime_error : public std::runtime_error
+// errors specifically from hiprtc APIs
+struct hiprtc_runtime_error : public std::runtime_error
 {
-    const hipError_t hip_error;
-    hip_runtime_error(const std::string& info, hipError_t hip_status)
+    const hiprtcResult hiprtc_error;
+    hiprtc_runtime_error(const std::string& info, hiprtcResult hiprtc_status)
         : std::runtime_error::runtime_error(info)
-        , hip_error(hip_status)
+        , hiprtc_error(hiprtc_status)
     {
     }
 };
 
 // catch exceptions that may occur in test cases
-extern int n_hip_failures;
 #define ROCFFT_CATCH_TEST_EXCEPTIONS                                                \
     catch(const std::bad_alloc&)                                                    \
     {                                                                               \
@@ -58,11 +58,14 @@ extern int n_hip_failures;
     }                                                                               \
     catch(const hip_runtime_error& e)                                               \
     {                                                                               \
-        ++n_hip_failures;                                                           \
         if(skip_runtime_fails)                                                      \
             GTEST_SKIP() << e.what() << "\nHIP error code: " << e.hip_error << "."; \
         else                                                                        \
             GTEST_FAIL() << e.what() << "\nHIP error code: " << e.hip_error << "."; \
+    }                                                                               \
+    catch(const hiprtc_runtime_error& e)                                            \
+    {                                                                               \
+        GTEST_FAIL() << e.what() << "\nHIPRTC error: " << e.hiprtc_error << ".";    \
     }                                                                               \
     catch(const HOSTBUF_MEM_USAGE& e)                                               \
     {                                                                               \
@@ -85,6 +88,10 @@ extern int n_hip_failures;
     catch(const fft_params::unimplemented_exception& e)                             \
     {                                                                               \
         GTEST_SKIP() << "Unimplemented exception: " << e.what();                    \
+    }                                                                               \
+    catch(const std::exception& e)                                                  \
+    {                                                                               \
+        GTEST_FAIL() << e.what();                                                   \
     }                                                                               \
     catch(...)                                                                      \
     {                                                                               \

@@ -232,8 +232,10 @@ struct SrdUpperValue125X : public BitfieldUnion {
     std::string desc() const override;
 };
 
-// Factory function to create appropriate SRD value based on ISA version
-std::shared_ptr<BitfieldUnion> createSrdUpperValue(const std::array<int, 3>& isa);
+// Factory function to create appropriate SRD value based on ISA version.
+// Exported for the _stinkytofu.so Python module (libstinkytofu hides all
+// symbols by default; see shared/stinkytofu/CMakeLists.txt).
+STINKYTOFU_EXPORT std::shared_ptr<BitfieldUnion> createSrdUpperValue(const std::array<int, 3>& isa);
 
 /***************************************
  * Signature Argument
@@ -261,6 +263,12 @@ struct SignatureArgument {
 /***************************************
  * Signature Kernel Descriptor
  ***************************************/
+
+/// Function-metadata key (uint64) carrying SignatureKernelDescriptor::totalVgprs
+/// (the value emitted as `.amdhsa_next_free_vgpr`). Signature producers stamp it
+/// onto Function; occupancy-aware passes read it. Absent or 0 means "unknown".
+inline constexpr const char* kSigTotalVgprsMetaKey = "SignatureKernelDescriptor.totalVgprs";
+
 struct SignatureKernelDescriptor {
     std::string kernelName;
     int totalVgprs;
