@@ -125,9 +125,13 @@ def test_conv2d_parity(torch, dtype_name):
     import torch.nn.functional as F
 
     dtype = {"f16": torch.float16, "bf16": torch.bfloat16}[dtype_name]
-    x = torch.randn(1, 32, 28, 28, device="cuda", dtype=dtype)
-    w = torch.randn(64, 32, 3, 3, device="cuda", dtype=dtype)
-    b = torch.randn(64, device="cuda", dtype=dtype)
+    # Scale to an activation-like range (~0.1). Unit-variance randn makes the 3x3x32
+    # reduction (288 terms) reach magnitude ~17, where near-zero cancellation outputs
+    # carry an absolute f16 accumulation error that dwarfs a fixed atol -- not a
+    # correctness signal. 0.1 keeps outputs O(1), matching the sample harnesses.
+    x = torch.randn(1, 32, 28, 28, device="cuda", dtype=dtype) * 0.1
+    w = torch.randn(64, 32, 3, 3, device="cuda", dtype=dtype) * 0.1
+    b = torch.randn(64, device="cuda", dtype=dtype) * 0.1
     want = F.conv2d(x, w, b, stride=1, padding=1)
     got, aot, native = _run_routed(
         "conv2d", lambda: F.conv2d(x, w, b, stride=1, padding=1)
