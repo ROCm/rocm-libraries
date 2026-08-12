@@ -381,25 +381,9 @@ private:
     {
         Catalog catalog;
         GraphMatcherMemo graphVerdicts;
-        const auto schemaFloor = graphSchemaFloor(context.graph);
 
         for(const auto& pack : _packs)
         {
-            // RFC 0017 §4: a matcher authored against an older graph schema is
-            // declined before it runs, not asked. Checked ahead of every matcher so
-            // a pack that cannot understand this graph costs no matcher resolution.
-            const MatchDescriptor* staleMatcher = nullptr;
-            if(!packMatchersUnderstandGraph(pack, schemaFloor, &staleMatcher))
-            {
-                HIPDNN_PLUGIN_LOG_INFO("ingestor: pack "
-                                       << toString(pack.id) << " declined: matcher '"
-                                       << staleMatcher->name << "' (" << toString(staleMatcher->id)
-                                       << ") declares graph schema "
-                                       << staleMatcher->sdkVersion.str()
-                                       << " but this graph requires " << schemaFloor.str());
-                continue;
-            }
-
             // Merged into catalog.bound below only if the pack survives.
             BoundTokens packBound;
             if(!graphLevelMatchersPass(pack, context, graphVerdicts, packBound))
@@ -494,33 +478,6 @@ private:
 
             // Merges this matcher's bindings into the pack's scoped view.
             packBound.insert(memo->second.bound.begin(), memo->second.bound.end());
-        }
-        return true;
-    }
-
-    /**
-     * @brief Whether every matcher @p pack lists understands a graph requiring
-     *        @p schemaFloor (RFC 0017 §4).
-     *
-     * Declines the whole pack rather than the single matcher: the pack lists the
-     * matcher as a requirement, so a matcher that cannot be asked leaves the pack
-     * unable to claim it applies. Applies to both scopes — a kernel-scoped matcher
-     * reads graph fields too.
-     *
-     * @param outDeclined Set to the offending matcher when this returns false.
-     */
-    bool packMatchersUnderstandGraph(const KernelDescriptorPack& pack,
-                                     const hipdnn_data_sdk::utilities::Version& schemaFloor,
-                                     const MatchDescriptor** outDeclined) const
-    {
-        for(const auto& matcherId : pack.matcherIds)
-        {
-            const auto& matcher = _matchers.at(matcherId);
-            if(matcher.sdkVersion < schemaFloor)
-            {
-                *outDeclined = &matcher;
-                return false;
-            }
         }
         return true;
     }

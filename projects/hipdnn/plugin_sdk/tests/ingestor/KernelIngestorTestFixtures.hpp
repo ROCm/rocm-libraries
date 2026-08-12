@@ -476,26 +476,13 @@ private:
 using TestHandle = int;
 using StateManager = KernelIngestorStateManager<TestHandle>;
 
-/// @param graphMatcherSdkVersion Graph schema version the graph-scoped matcher declares;
-///        nullopt leaves MatchDescriptor's baseline default in place.
-/// @param kernelMatcherSdkVersion Same, for the kernel-scoped matcher.
-inline std::unique_ptr<StateManager> makeStateManager(
-    const std::string& scoreSymbol = SCORE_SYMBOL,
-    size_t cacheCapacity = StateManager::DEFAULT_CATALOG_CACHE_CAPACITY,
-    std::optional<hipdnn_data_sdk::utilities::Version> graphMatcherSdkVersion = std::nullopt,
-    std::optional<hipdnn_data_sdk::utilities::Version> kernelMatcherSdkVersion = std::nullopt)
+inline std::unique_ptr<StateManager>
+    makeStateManager(const std::string& scoreSymbol = SCORE_SYMBOL,
+                     size_t cacheCapacity = StateManager::DEFAULT_CATALOG_CACHE_CAPACITY)
 {
     std::vector<MatchDescriptor> matchers{
         {GRAPH_MATCHER_ID, "graph scoped", MatchScope::GRAPH, "test.graph"},
         {KERNEL_MATCHER_ID, "kernel scoped", MatchScope::KERNEL, "test.kernel"}};
-    if(graphMatcherSdkVersion.has_value())
-    {
-        matchers[0].sdkVersion = *graphMatcherSdkVersion;
-    }
-    if(kernelMatcherSdkVersion.has_value())
-    {
-        matchers[1].sdkVersion = *kernelMatcherSdkVersion;
-    }
     std::vector<DispatchDescriptor> dispatches{{DISPATCH_ID, "test dispatch", "test.dispatch"}};
 
     return std::make_unique<StateManager>(
@@ -613,7 +600,12 @@ inline std::unique_ptr<KernelIngestorStateManager<StubHandle>> makeStubStateMana
         std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
 }
 
-inline EngineDescriptor makeEngineWithKnobs(std::vector<std::string> knobs)
+/// @param sdkVersion Graph schema the engine declares; nullopt leaves
+///        EngineDescriptor's baseline default in place.
+inline EngineDescriptor
+    makeEngineWithKnobs(std::vector<std::string> knobs,
+                        std::optional<hipdnn_data_sdk::utilities::Version> sdkVersion
+                        = std::nullopt)
 {
     EngineDescriptor engine;
     engine.id = ENGINE_ID;
@@ -621,6 +613,10 @@ inline EngineDescriptor makeEngineWithKnobs(std::vector<std::string> knobs)
     engine.heuristicId = HEURISTIC_ID;
     engine.metadataSchemaId = SCHEMA_ID;
     engine.knobs = std::move(knobs);
+    if(sdkVersion.has_value())
+    {
+        engine.sdkVersion = *sdkVersion;
+    }
     return engine;
 }
 

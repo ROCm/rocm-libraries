@@ -508,6 +508,80 @@ TEST(TestIngestorGenericPlanBuilder, ContextForFoldsPerHandleDeviceResolutionInt
     ScoreRegistry::unregisterSymbol(SCORE_SYMBOL);
 }
 
+// ---------------------------------------------------------------------------
+// RFC 0017 §4: the UED's sdk_version. Graph-level matching and token binding are
+// the engine's, so the engine declines a graph whose schema it does not
+// understand before any pack, matcher, or kernel is looked at.
+// ---------------------------------------------------------------------------
+
+/// A graph schema floor an engine declaring the baseline cannot serve.
+const hipdnn_data_sdk::utilities::Version NEWER_THAN_BASELINE{
+    hipdnn_plugin_sdk::K_PASS_BY_VALUE_MIN_API_VERSION};
+const hipdnn_data_sdk::utilities::Version BASELINE{
+    hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE};
+
+TEST(TestIngestorGenericPlanBuilder, EngineDecliningTheGraphsSchemaNeverMatches)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE}, BASELINE);
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    const TestGraph graph(makeGraphId(0xA0), NEWER_THAN_BASELINE);
+
+    EXPECT_FALSE(builder.isApplicable(0, graph));
+    // Bailed before the state manager: no matcher ran, so nothing bound tokens from
+    // a graph this engine cannot read.
+    EXPECT_EQ(counters().graphCalls, 0);
+    EXPECT_EQ(counters().kernelCalls, 0);
+}
+
+TEST(TestIngestorGenericPlanBuilder, EngineDeclaringTheGraphsSchemaMatchesNormally)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE}, NEWER_THAN_BASELINE);
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    const TestGraph graph(makeGraphId(0xA1), NEWER_THAN_BASELINE);
+
+    // Equal to the floor is understood: the rule declines below it, not at it.
+    EXPECT_TRUE(builder.isApplicable(0, graph));
+    EXPECT_EQ(counters().graphCalls, 1);
+}
+
+TEST(TestIngestorGenericPlanBuilder, EngineNewerThanTheGraphNeedsMatchesNormally)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE}, NEWER_THAN_BASELINE);
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    // A graph that leaves the newer field unset still requires only the baseline, so
+    // an engine that understands more serves it as before.
+    const TestGraph graph(makeGraphId(0xA2), BASELINE);
+
+    EXPECT_TRUE(builder.isApplicable(0, graph));
+}
+
+TEST(TestIngestorGenericPlanBuilder, AnUnstampedGraphReadsAsTheBaselineAndMatches)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    // The engine leaves sdkVersion at its default, as every pack shipping today does.
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    // No schema floor: a writer that never populated the field.
+    const TestGraph graph(makeGraphId(0xA3));
+
+    EXPECT_TRUE(builder.isApplicable(0, graph));
+}
+
 } // namespace
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

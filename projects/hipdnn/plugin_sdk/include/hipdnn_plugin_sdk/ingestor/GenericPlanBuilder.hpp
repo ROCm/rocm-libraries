@@ -66,7 +66,34 @@ public:
     /// Applicable exactly when some kernel survived matching; does not rank.
     bool isApplicable(const THandle& handle, const IGraph& opGraph) const override
     {
+        if(!understandsGraph(opGraph))
+        {
+            return false;
+        }
         return !_stateManager.unsortedDefinitions(contextFor(handle, opGraph)).empty();
+    }
+
+    /**
+     * @brief Whether this engine understands @p opGraph's schema (RFC 0017 §4).
+     *
+     * Graph-level matching and token binding are the engine's, and every descriptor
+     * under it reads the tokens that binding produces, so the UED carries the one
+     * schema version they all agree on. A graph requiring more is declined before any
+     * pack, matcher, or kernel is looked at: matching it would bind the fields this
+     * engine knows and silently ignore one that changes what the graph means.
+     */
+    bool understandsGraph(const IGraph& opGraph) const
+    {
+        const auto schemaFloor = graphSchemaFloor(opGraph);
+        if(_engine.sdkVersion < schemaFloor)
+        {
+            HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '"
+                                   << _engine.name << "' declined the graph: it understands graph "
+                                   << "schema " << _engine.sdkVersion.str()
+                                   << " but this graph requires " << schemaFloor.str());
+            return false;
+        }
+        return true;
     }
 
     /**
