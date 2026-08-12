@@ -89,6 +89,11 @@ try:
         att_round_elements_to_128B,
         att_compute_mem_bw_from_occupancy,
         att_compute_l2_hit_rate_global,
+        # Heuristic parameter tuning (offline)
+        heuristic_params_t,
+        set_heuristic_defaults,
+        get_heuristic_defaults,
+        clear_heuristic_entries,
     )
 except ImportError as e:
     raise ImportError(
@@ -178,6 +183,11 @@ __all__ = [
     "att_round_elements_to_128B",
     "att_compute_mem_bw_from_occupancy",
     "att_compute_l2_hit_rate_global",
+    # Heuristic parameter tuning (offline)
+    "heuristic_params_t",
+    "set_heuristic_defaults",
+    "get_heuristic_defaults",
+    "clear_heuristic_entries",
 ]
 
 try:

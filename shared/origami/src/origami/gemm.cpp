@@ -1749,6 +1749,29 @@ double compute_tile_latency(const problem_t& problem,
   // Apply final tile total weight
   L_tile_total *= heuristic.weight_tile_total;
 
+  // VGPR / single-wave occupancy penalty.
+  // Estimate accumulator VGPRs per thread for this tile, derive waves/SIMD from
+  // the effective register budget, and penalize tiles that fit < 2 waves (poor
+  // latency hiding). No penalty at >= 2 waves. Inert when weight == 0.
+  if (heuristic.vgpr_penalty_weight > 0.0 && heuristic.vgpr_threads_per_wg > 0.0) {
+    const double accum_vgpr =
+        static_cast<double>(MT_M) * static_cast<double>(MT_N) / heuristic.vgpr_threads_per_wg;
+    // Operand registers (prefetched/double-buffered A+B) scale with MT_K depth,
+    // so deep-K tiles cost more VGPRs than the accumulator-only estimate implies.
+    const double operand_vgpr = heuristic.vgpr_operand_coeff *
+        (static_cast<double>(MT_M) + static_cast<double>(MT_N)) *
+        static_cast<double>(MT_K) / heuristic.vgpr_threads_per_wg;
+    const double vgpr_per_thread = accum_vgpr + operand_vgpr + heuristic.vgpr_overhead;
+    if (vgpr_per_thread > 0.0) {
+      const double waves_per_simd = heuristic.vgpr_per_simd / vgpr_per_thread;
+      if (waves_per_simd < 2.0) {
+        // Linear ramp: full penalty at 1 wave, zero at 2 waves.
+        const double deficit = std::min(std::max(2.0 - waves_per_simd, 0.0), 1.0);
+        L_tile_total *= (1.0 + heuristic.vgpr_penalty_weight * deficit);
+      }
+    }
+  }
+
   if (debug) {
     OLOG_DEBUG("utilization: " << utilization);
     OLOG_DEBUG("effective_tile_penalty: " << effective_tile_penalty);
