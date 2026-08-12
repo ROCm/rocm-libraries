@@ -1,7 +1,7 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include "client/HostReference.hpp"
+#include <rocRoller/HostNumerics/HostReference.hpp>
 
 #include <sstream>
 #include <utility>
@@ -9,25 +9,17 @@
 #include <roc/host_validation/backends/blas.hpp>
 #include <roc/host_validation/gemm.hpp>
 
-namespace rocRoller::Client::GEMMClient
+namespace rocRoller::HostNumerics
 {
     namespace
     {
         using namespace roc::host_validation;
 
-        ScalarType scaleScalarType(DataType type)
+        size_t checkedElementCount(size_t first, size_t second, char const* description)
         {
-            switch(type)
-            {
-            case DataType::E8M0:
-                return ScalarType::E8M0;
-            case DataType::E5M3:
-                return ScalarType::E5M3;
-            case DataType::E4M3:
-                return ScalarType::E4M3;
-            default:
-                throw std::invalid_argument("Unsupported rocRoller host-reference scale type.");
-            }
+            if(second != 0 && first > std::numeric_limits<size_t>::max() / second)
+                throw std::overflow_error(description);
+            return first * second;
         }
 
         BlockScaleBinding normalizeBlockScale(TensorView  values,
@@ -37,12 +29,12 @@ namespace rocRoller::Client::GEMMClient
                                               char const* name)
         {
             if(blockSize == 0)
-                throw std::invalid_argument("rocroller-gemm scale block size must be nonzero.");
+                throw std::invalid_argument("rocRoller scale block size must be nonzero.");
 
             const size_t blockCount = reductionExtent / blockSize
                                       + static_cast<size_t>(reductionExtent % blockSize != 0);
             if(values.shape() != Shape{freeExtent, blockCount})
-                throw std::invalid_argument(std::string("rocroller-gemm ") + name
+                throw std::invalid_argument(std::string("rocRoller ") + name
                                             + " scales must have shape [free extent, K block].");
 
             return {std::move(values), blockSize};
@@ -71,16 +63,39 @@ namespace rocRoller::Client::GEMMClient
                                                          size_t                   blockSize)
     {
         using namespace roc::host_validation;
+        auto const scalarType = hostScalarType(type);
+        if(scalarTypeInfo(scalarType).category != ScalarCategory::Scale)
+            throw std::invalid_argument("rocRoller runtime scale requires a scale data type.");
         if(values.size() != 1)
-            throw std::invalid_argument(
-                "rocroller-gemm runtime scale storage must contain one scalar.");
+            throw std::invalid_argument("rocRoller runtime scale storage must contain one scalar.");
         if(blockSize == 0)
-            throw std::invalid_argument("rocroller-gemm runtime scale block size must be nonzero.");
+            throw std::invalid_argument("rocRoller runtime scale block size must be nonzero.");
         const size_t blockCount
             = reductionExtent / blockSize + static_cast<size_t>(reductionExtent % blockSize != 0);
-        return TensorView(scaleScalarType(type),
-                          Layout(Shape{freeExtent, blockCount}, {0, 0}),
-                          std::as_bytes(values));
+        return TensorView(
+            scalarType, Layout(Shape{freeExtent, blockCount}, {0, 0}), std::as_bytes(values));
+    }
+
+    roc::host_validation::TensorView hostScaleTensorView(DataType                 type,
+                                                         std::span<const uint8_t> values,
+                                                         TensorDescriptor const&  dataDescriptor,
+                                                         size_t                   blockedDimension,
+                                                         size_t                   blockSize)
+    {
+        using namespace roc::host_validation;
+
+        auto const layout     = hostScaleLayout(dataDescriptor, blockedDimension, blockSize);
+        auto const scalarType = hostScalarType(type);
+        if(scalarTypeInfo(scalarType).category != ScalarCategory::Scale)
+            throw std::invalid_argument("rocRoller block scales require a scale data type.");
+        if(values.size() == 1)
+            return TensorView(scalarType, Layout(layout.shape(), {0, 0}), std::as_bytes(values));
+
+        auto const requiredBytes = storageBytesForLayout(scalarType, layout);
+        if(values.size_bytes() != requiredBytes)
+            throw std::invalid_argument(
+                "rocRoller block-scale storage does not match its data descriptor.");
+        return TensorView(scalarType, layout, std::as_bytes(values));
     }
 
     HostReferenceProblem
@@ -114,11 +129,25 @@ namespace rocRoller::Client::GEMMClient
     {
         using namespace roc::host_validation;
 
+        if(problem.a.shape().rank() != 2 || problem.b.shape().rank() != 2
+           || problem.c.shape().rank() != 2)
+            throw std::invalid_argument(
+                "rocRoller host GEMM requires rank-two A, B, and C tensors.");
+
         const size_t rows            = problem.a.shape()[0];
         const size_t reductionExtent = problem.a.shape()[1];
         const size_t columns         = problem.b.shape()[1];
-        Tensor       output(ScalarType::Float32,
-                            Layout(Shape{rows, columns}, {1, static_cast<ptrdiff_t>(rows)}));
+        if(problem.b.shape()[0] != reductionExtent)
+            throw std::invalid_argument(
+                "rocRoller host GEMM A and B reduction extents do not match.");
+        if(problem.c.shape() != Shape{rows, columns})
+            throw std::invalid_argument(
+                "rocRoller host GEMM C shape does not match the output shape.");
+        if(rows > static_cast<size_t>(std::numeric_limits<ptrdiff_t>::max()))
+            throw std::overflow_error("rocRoller host GEMM output stride exceeds ptrdiff_t.");
+
+        Tensor output(ScalarType::Float32,
+                      Layout(Shape{rows, columns}, {1, static_cast<ptrdiff_t>(rows)}));
 
         GemmOperand           operandA(problem.a);
         GemmOperand           operandB(problem.b);
@@ -127,19 +156,25 @@ namespace rocRoller::Client::GEMMClient
         if(problem.scaleA || problem.scaleB)
         {
             if(problem.scaleBlockSize == 0)
-                throw std::invalid_argument("rocroller-gemm scale block size must be nonzero.");
+                throw std::invalid_argument("rocRoller scale block size must be nonzero.");
             const size_t blockCount
                 = reductionExtent / problem.scaleBlockSize
                   + static_cast<size_t>(reductionExtent % problem.scaleBlockSize != 0);
             if(!problem.scaleA)
             {
-                const std::vector<float> values(rows * blockCount, 1.0f);
+                const std::vector<float> values(
+                    checkedElementCount(
+                        rows, blockCount, "rocRoller A scale element count overflow."),
+                    1.0f);
                 unitScaleA = Tensor::fromValues(
                     ScalarType::Float32, Shape{rows, blockCount}, std::span<const float>(values));
             }
             if(!problem.scaleB)
             {
-                const std::vector<float> values(columns * blockCount, 1.0f);
+                const std::vector<float> values(
+                    checkedElementCount(
+                        columns, blockCount, "rocRoller B scale element count overflow."),
+                    1.0f);
                 unitScaleB = Tensor::fromValues(ScalarType::Float32,
                                                 Shape{columns, blockCount},
                                                 std::span<const float>(values));

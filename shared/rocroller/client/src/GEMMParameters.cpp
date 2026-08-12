@@ -14,6 +14,9 @@ namespace rocRoller
     {
         namespace GEMMClient
         {
+            using HostNumerics::DataInitialization;
+            using HostNumerics::DataInitializationMode;
+
             std::string TypeParameters::kernelNamePart() const
             {
                 std::ostringstream rv;
@@ -155,44 +158,6 @@ namespace rocRoller
                 default:
                     rocRoller::Throw<rocRoller::FatalError>("Unknown transpose type");
                 }
-            }
-
-            static std::string_view dataInitializationModeName(DataInitializationMode mode)
-            {
-                switch(mode)
-                {
-                case DataInitializationMode::Bounded:
-                    return "Bounded";
-                case DataInitializationMode::BoundedAlternatingSign:
-                    return "BoundedAlternatingSign";
-                case DataInitializationMode::Unbounded:
-                    return "Unbounded";
-                case DataInitializationMode::Identity:
-                    return "Identity";
-                case DataInitializationMode::Ones:
-                    return "Ones";
-                case DataInitializationMode::Zeros:
-                    return "Zeros";
-                case DataInitializationMode::TrigonometricFromFloat:
-                    return "TrigonometricFromFloat";
-                case DataInitializationMode::NormalFromFloat:
-                    return "NormalFromFloat";
-                default:
-                    rocRoller::Throw<rocRoller::FatalError>(
-                        "Unknown data initialization mode");
-                }
-            }
-
-            std::string toString(DataInitialization const& initialization)
-            {
-                auto description = std::string(dataInitializationModeName(initialization.mode));
-                if(initialization.mode == DataInitializationMode::NormalFromFloat)
-                {
-                    description += "(" + std::to_string(initialization.normalMean) + ", "
-                                   + std::to_string(initialization.normalStandardDeviation) + ")";
-                }
-
-                return "DataInitMode(" + description + ")";
             }
 
             std::ostream& operator<<(std::ostream& s, TransposeType const& x)
@@ -344,6 +309,9 @@ namespace rocRoller
 
 namespace rocRoller::Client::GEMMClient::CLI
 {
+    using HostNumerics::DataInitialization;
+    using HostNumerics::DataInitializationMode;
+
     bool ParseXY(const std::string& arg, XYTuple& x)
     {
         if(arg.empty())
@@ -505,8 +473,7 @@ namespace rocRoller::Client::GEMMClient::CLI
                 std::getline(iss, token, ')');
                 double std_dev = std::stod(token);
 
-                result = DataInitialization{
-                    DataInitializationMode::NormalFromFloat, mean, std_dev};
+                result = DataInitialization{DataInitializationMode::NormalFromFloat, mean, std_dev};
             }
             catch(const std::invalid_argument&)
             {

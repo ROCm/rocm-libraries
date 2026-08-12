@@ -721,8 +721,8 @@ namespace MatrixMultiplyTest
                                   rocRoller::DataType::E5M3,
                                   rocRoller::DataType::E4M3),
                 ::testing::Values(/*scaleBlockSize*/ 16, 32),
-                // TODO: mxDataGenerator does not work when fast-moving dim is not multiple
-                // of scale-block size (the case for non-TN cases).
+                // TODO: Enable non-TN cases after the scaled kernel path supports a
+                // fast-moving dimension that is not a multiple of the scale-block size.
                 ::testing::Values(std::pair<std::string, std::string>("T", "N"))))));
 
     INSTANTIATE_TEST_SUITE_P(
@@ -750,8 +750,8 @@ namespace MatrixMultiplyTest
                                       rocRoller::DataType::E4M3),
                     ::testing::Values(/*waveK*/ 128),
                     ::testing::Values(/*scaleBlockSize*/ 16, 32),
-                    // TODO: mxDataGenerator does not work when fast-moving dim is not multiple
-                    // of scale-block size (the case for non-TN cases).
+                    // TODO: Enable non-TN cases after the scaled kernel path supports a
+                    // fast-moving dimension that is not a multiple of the scale-block size.
                     ::testing::Values(std::pair<std::string, std::string>("T", "N"))))));
 
     INSTANTIATE_TEST_SUITE_P(MatrixMultiplyABCWMMA1250,
