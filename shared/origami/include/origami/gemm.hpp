@@ -49,6 +49,9 @@ struct ORIGAMI_EXPORT context_t {
   size_t num_wgs                 = 0;
   size_t num_timesteps           = 0;
 
+  /// Tile-scheduling mode.
+  hybrid_mode_t tile_schedule = hybrid_mode_t::none;
+
   /// Hardware-derived values.
   /// Number of compute units usable for this problem. Equals hardware.N_CU
   /// unless problem.num_cus caps it lower (@see origami::problem_t::num_cus).
