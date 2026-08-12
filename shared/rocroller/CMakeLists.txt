@@ -276,6 +276,58 @@ if(ROCROLLER_EMBED_ARCH_DEF)
     target_compile_definitions(rocroller PRIVATE ROCROLLER_EMBED_ARCH_DEF)
 endif()
 
+if(ROCROLLER_ENABLE_CLIENT AND NOT TARGET roc::host-validation)
+    set(_rocroller_host_validation_source
+        "${CMAKE_CURRENT_SOURCE_DIR}/../host-validation"
+    )
+    if(NOT EXISTS "${_rocroller_host_validation_source}/CMakeLists.txt")
+        find_package(ROCHostValidation CONFIG QUIET)
+    endif()
+    if(NOT TARGET roc::host-validation
+       AND EXISTS "${_rocroller_host_validation_source}/CMakeLists.txt")
+        block(SCOPE_FOR VARIABLES)
+            set(HOST_VALIDATION_BUILD_TESTING OFF)
+            set(HOST_VALIDATION_BUILD_MX_BACKEND ON)
+            add_subdirectory(
+                "${_rocroller_host_validation_source}"
+                "${CMAKE_CURRENT_BINARY_DIR}/host-validation"
+                EXCLUDE_FROM_ALL
+            )
+        endblock()
+    endif()
+    if(NOT TARGET roc::host-validation)
+        message(FATAL_ERROR
+            "rocRoller clients require the ROCHostValidation component. "
+            "Include shared/host-validation in the checkout or install its package."
+        )
+    endif()
+endif()
+
+if(ROCROLLER_ENABLE_CLIENT AND NOT TARGET roc::host-validation-mx)
+    if(COMMAND roc_host_validation_enable_mx_backend)
+        roc_host_validation_enable_mx_backend()
+    else()
+        message(FATAL_ERROR
+            "rocRoller clients require the optional roc::host-validation-mx target."
+        )
+    endif()
+endif()
+
+if(ROCROLLER_ENABLE_CLIENT AND NOT TARGET roc::mxDataGenerator)
+    set(_rocroller_mx_data_generator_source
+        "${CMAKE_CURRENT_SOURCE_DIR}/../mxdatagenerator"
+    )
+    if(EXISTS "${_rocroller_mx_data_generator_source}/CMakeLists.txt")
+        add_subdirectory(
+            "${_rocroller_mx_data_generator_source}"
+            "${CMAKE_CURRENT_BINARY_DIR}/mxdatagenerator"
+            EXCLUDE_FROM_ALL
+        )
+    else()
+        find_package(mxDataGenerator REQUIRED CONFIG)
+    endif()
+endif()
+
 if(ROCROLLER_BUILD_TESTING)
     add_subdirectory(test)
 endif()
