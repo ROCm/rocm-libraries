@@ -25,6 +25,7 @@ function(add_ctypes_library TARGET_NAME SOURCE_FILE)
     
     target_include_directories(${TARGET_NAME} PRIVATE
         ${PROJECT_SOURCE_DIR}/include
+        ${PROJECT_SOURCE_DIR}/../include
         ${PROJECT_SOURCE_DIR}/dispatcher/include
     )
     
@@ -67,6 +68,7 @@ else()
     add_library(dispatcher_gemm_lib SHARED gemm_ctypes_lib.cpp)
     target_include_directories(dispatcher_gemm_lib PRIVATE
         ${PROJECT_SOURCE_DIR}/include
+        ${PROJECT_SOURCE_DIR}/../include
         ${PROJECT_SOURCE_DIR}/dispatcher/include
     )
     target_link_libraries(dispatcher_gemm_lib PRIVATE hip::device)
@@ -132,6 +134,7 @@ else()
         add_library(dispatcher_mx_gemm_lib SHARED mx_gemm_ctypes_lib.cpp)
         target_include_directories(dispatcher_mx_gemm_lib PRIVATE
             ${PROJECT_SOURCE_DIR}/include
+            ${PROJECT_SOURCE_DIR}/../include
             ${PROJECT_SOURCE_DIR}/dispatcher/include
             ${MX_GEMM_TE_INCLUDE_DIRS}
         )
@@ -161,6 +164,7 @@ file(GLOB CONV_KERNEL_HEADERS "${CMAKE_BINARY_DIR}/generated_kernels/conv_*.hpp"
 add_library(dispatcher_conv_lib SHARED conv_ctypes_lib.cpp)
 target_include_directories(dispatcher_conv_lib PRIVATE
     ${PROJECT_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/../include
     ${PROJECT_SOURCE_DIR}/dispatcher/include
 )
 target_link_libraries(dispatcher_conv_lib PRIVATE hip::device)
@@ -205,6 +209,7 @@ if(CONV_BWDW_KERNEL_HEADERS)
     add_library(dispatcher_conv_bwdw_lib SHARED conv_bwdw_ctypes_lib.cpp)
     target_include_directories(dispatcher_conv_bwdw_lib PRIVATE
         ${PROJECT_SOURCE_DIR}/include
+        ${PROJECT_SOURCE_DIR}/../include
         ${PROJECT_SOURCE_DIR}/dispatcher/include
     )
     target_link_libraries(dispatcher_conv_bwdw_lib PRIVATE hip::device)
@@ -221,6 +226,7 @@ else()
     add_library(dispatcher_conv_bwdw_lib SHARED conv_bwdw_ctypes_lib.cpp)
     target_include_directories(dispatcher_conv_bwdw_lib PRIVATE
         ${PROJECT_SOURCE_DIR}/include
+        ${PROJECT_SOURCE_DIR}/../include
         ${PROJECT_SOURCE_DIR}/dispatcher/include
     )
     target_link_libraries(dispatcher_conv_bwdw_lib PRIVATE hip::device)
@@ -267,6 +273,7 @@ else()
     add_library(dispatcher_grouped_gemm_bquant_lib SHARED grouped_gemm_bquant_ctypes_lib.cpp)
     target_include_directories(dispatcher_grouped_gemm_bquant_lib PRIVATE
         ${PROJECT_SOURCE_DIR}/include
+        ${PROJECT_SOURCE_DIR}/../include
         ${PROJECT_SOURCE_DIR}/dispatcher/include
     )
     target_link_libraries(dispatcher_grouped_gemm_bquant_lib PRIVATE hip::device)
@@ -308,6 +315,7 @@ else()
     add_library(dispatcher_grouped_gemm_aquant_lib SHARED grouped_gemm_aquant_ctypes_lib.cpp)
     target_include_directories(dispatcher_grouped_gemm_aquant_lib PRIVATE
         ${PROJECT_SOURCE_DIR}/include
+        ${PROJECT_SOURCE_DIR}/../include
         ${PROJECT_SOURCE_DIR}/dispatcher/include
     )
     target_link_libraries(dispatcher_grouped_gemm_aquant_lib PRIVATE hip::device)
@@ -349,6 +357,7 @@ else()
     add_library(dispatcher_grouped_gemm_abquant_lib SHARED grouped_gemm_abquant_ctypes_lib.cpp)
     target_include_directories(dispatcher_grouped_gemm_abquant_lib PRIVATE
         ${PROJECT_SOURCE_DIR}/include
+        ${PROJECT_SOURCE_DIR}/../include
         ${PROJECT_SOURCE_DIR}/dispatcher/include
     )
     target_link_libraries(dispatcher_grouped_gemm_abquant_lib PRIVATE hip::device)
@@ -403,6 +412,7 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/batched_gemm_ctypes_lib.cpp)
         add_library(dispatcher_batched_gemm_lib SHARED batched_gemm_ctypes_lib.cpp)
         target_include_directories(dispatcher_batched_gemm_lib PRIVATE
             ${PROJECT_SOURCE_DIR}/include
+            ${PROJECT_SOURCE_DIR}/../include
             ${PROJECT_SOURCE_DIR}/dispatcher/include
         )
         target_link_libraries(dispatcher_batched_gemm_lib PRIVATE hip::device)
@@ -452,6 +462,7 @@ if(GEMM_KERNEL_HEADERS)
     
     target_include_directories(gpu_helper PRIVATE
         ${PROJECT_SOURCE_DIR}/include
+        ${PROJECT_SOURCE_DIR}/../include
         ${PROJECT_SOURCE_DIR}/dispatcher/include
     )
     
@@ -467,4 +478,3 @@ if(GEMM_KERNEL_HEADERS)
         CXX_STANDARD 17
     )
 endif()
-
