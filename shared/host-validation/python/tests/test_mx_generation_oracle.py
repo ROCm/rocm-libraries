@@ -41,15 +41,9 @@ class BinaryFormat:
         return 1 << (self.storage_bits - 1) if self.signed else 0
 
 
-FP4_E2M1 = BinaryFormat(
-    "fp4_e2m1", hv.ScalarType.Float4E2M1, 4, 2, 1, 1, 0x07
-)
-FP6_E2M3 = BinaryFormat(
-    "fp6_e2m3", hv.ScalarType.Float6E2M3, 6, 2, 3, 1, 0x1F
-)
-FP6_E3M2 = BinaryFormat(
-    "fp6_e3m2", hv.ScalarType.Float6E3M2, 6, 3, 2, 3, 0x1F
-)
+FP4_E2M1 = BinaryFormat("fp4_e2m1", hv.ScalarType.Float4E2M1, 4, 2, 1, 1, 0x07)
+FP6_E2M3 = BinaryFormat("fp6_e2m3", hv.ScalarType.Float6E2M3, 6, 2, 3, 1, 0x1F)
+FP6_E3M2 = BinaryFormat("fp6_e3m2", hv.ScalarType.Float6E3M2, 6, 3, 2, 3, 0x1F)
 FP8_E4M3 = BinaryFormat(
     "fp8_e4m3", hv.ScalarType.Float8E4M3, 8, 4, 3, 7, 0x7E, nan_raw=0x7F
 )
@@ -408,9 +402,7 @@ def generated_value(case, row, column, logical_index):
     if mode == hv.MxGenerationMode.DenormalMinimum:
         return finite_binary_value(format_spec, 1)
     if mode == hv.MxGenerationMode.DenormalMaximum:
-        return finite_binary_value(
-            format_spec, (1 << format_spec.mantissa_bits) - 1
-        )
+        return finite_binary_value(format_spec, (1 << format_spec.mantissa_bits) - 1)
     if mode == hv.MxGenerationMode.NaN:
         return math.nan
     if mode == hv.MxGenerationMode.Infinity:
@@ -420,15 +412,11 @@ def generated_value(case, row, column, logical_index):
         return math.cos(TWO_PI * unit)
     if mode == hv.MxGenerationMode.Normal:
         first_index = logical_index * 2
-        first = indexed_uniform_unit(
-            case.seed, MX_NORMAL_RANDOM_DOMAIN, first_index
-        )
+        first = indexed_uniform_unit(case.seed, MX_NORMAL_RANDOM_DOMAIN, first_index)
         second = indexed_uniform_unit(
             case.seed, MX_NORMAL_RANDOM_DOMAIN, first_index + 1
         )
-        standard_normal = math.sqrt(-2.0 * math.log(first)) * math.cos(
-            TWO_PI * second
-        )
+        standard_normal = math.sqrt(-2.0 * math.log(first)) * math.cos(TWO_PI * second)
         return recipe.parameter0 + recipe.parameter1 * standard_normal
     if mode == hv.MxGenerationMode.UniformInteger:
         return indexed_uniform_integer(
@@ -474,7 +462,9 @@ def constrain_raw_to_interval(
             candidates.append(candidate_magnitude)
     if not candidates:
         raise ValueError("bounded interval has no representable value")
-    selected_magnitude = min(candidates, key=lambda candidate: abs(candidate - magnitude))
+    selected_magnitude = min(
+        candidates, key=lambda candidate: abs(candidate - magnitude)
+    )
     return sign | selected_magnitude
 
 
@@ -497,11 +487,12 @@ def expected_mx(case):
     scale_count = block_count * free_extent
     fixed_scale_raw = selected_constant_scale(case)
     scale_candidates = (
-        [] if fixed_scale_raw is not None else finite_nonzero_scale_candidates(case.scale_type)
+        []
+        if fixed_scale_raw is not None
+        else finite_nonzero_scale_candidates(case.scale_type)
     )
     decoded_data = [
-        decode_binary(format_spec, raw)
-        for raw in range(1 << format_spec.storage_bits)
+        decode_binary(format_spec, raw) for raw in range(1 << format_spec.storage_bits)
     ]
     finite_data_candidates = finite_data_raw_candidates(format_spec)
     maximum_data_value = finite_binary_value(
@@ -595,9 +586,7 @@ def expected_mx(case):
                     decoded_data,
                 )
             elif case.data.mode == hv.MxGenerationMode.BoundedAlternatingSign:
-                maximum = max(
-                    abs(case.data.parameter0), abs(case.data.parameter1)
-                )
+                maximum = max(abs(case.data.parameter0), abs(case.data.parameter1))
                 data_raw = constrain_raw_to_interval(
                     format_spec,
                     data_raw,
