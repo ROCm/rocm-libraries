@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,7 +22,7 @@
 
 #include "common_benchmark_header.hpp"
 
-// HIP
+// HIP API
 #include <hipcub/warp/warp_scan.hpp>
 
 #ifndef DEFAULT_N
@@ -56,8 +56,8 @@ struct inclusive_scan
 
         using wscan_t = hipcub::WarpScan<T, WarpSize>;
         __shared__ typename wscan_t::TempStorage storage;
-        auto                                     scan_op = benchmark_utils::plus{};
-        _CCCL_PRAGMA_NOUNROLL()
+        auto                                     scan_op = hipcub::Sum();
+#pragma nounroll
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             wscan_t(storage).InclusiveScan(value, value, scan_op);
@@ -85,8 +85,8 @@ struct exclusive_scan
 
         using wscan_t = hipcub::WarpScan<T, WarpSize>;
         __shared__ typename wscan_t::TempStorage storage;
-        auto                                     scan_op = benchmark_utils::plus{};
-        _CCCL_PRAGMA_NOUNROLL()
+        auto                                     scan_op = hipcub::Sum();
+#pragma nounroll
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             wscan_t(storage).ExclusiveScan(value, value, init, scan_op);
@@ -118,7 +118,7 @@ struct broadcast
 
         using wscan_t = hipcub::WarpScan<T, WarpSize>;
         __shared__ typename wscan_t::TempStorage storage;
-        _CCCL_PRAGMA_NOUNROLL()
+#pragma nounroll
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             value = wscan_t(storage).Broadcast(value, src_lane);
@@ -228,8 +228,9 @@ template<typename Benchmark>
 auto add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
                     const std::string&                            method_name,
                     hipStream_t                                   stream,
-                    size_t size) -> std::enable_if_t<std::is_same_v<Benchmark, inclusive_scan>
-                                                     || std::is_same_v<Benchmark, exclusive_scan>>
+                    size_t                                        size)
+    -> std::enable_if_t<std::is_same<Benchmark, inclusive_scan>::value
+                        || std::is_same<Benchmark, exclusive_scan>::value>
 {
     using custom_double2    = benchmark_utils::custom_type<double, double>;
     using custom_int_double = benchmark_utils::custom_type<int, double>;
@@ -248,7 +249,7 @@ template<typename Benchmark>
 auto add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
                     const std::string&                            method_name,
                     hipStream_t                                   stream,
-                    size_t size) -> std::enable_if_t<std::is_same_v<Benchmark, broadcast>>
+                    size_t size) -> std::enable_if_t<std::is_same<Benchmark, broadcast>::value>
 {
     using custom_double2    = benchmark_utils::custom_type<double, double>;
     using custom_int_double = benchmark_utils::custom_type<int, double>;

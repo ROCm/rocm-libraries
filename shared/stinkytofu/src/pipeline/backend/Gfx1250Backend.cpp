@@ -39,6 +39,7 @@
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
 #include "stinkytofu/transforms/asm/EstimateAsmCyclesPass.hpp"
 #include "stinkytofu/transforms/asm/FlattenCalleesPass.hpp"
+#include "stinkytofu/transforms/asm/Gfx1250HazardPass.hpp"
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
 #include "stinkytofu/transforms/asm/InsertCoexecHazardPass.hpp"
 #include "stinkytofu/transforms/asm/InsertDelayAluPass.hpp"
@@ -50,6 +51,7 @@
 #include "stinkytofu/transforms/asm/RederiveExpertScopePass.hpp"
 #include "stinkytofu/transforms/asm/RegionClonePass.hpp"
 #include "stinkytofu/transforms/asm/RemoveDelayAluPass.hpp"
+#include "stinkytofu/transforms/asm/RemoveDscntPass.hpp"
 #include "stinkytofu/transforms/asm/RemoveInstructionPass.hpp"
 #include "stinkytofu/transforms/asm/RemoveWaitAluPass.hpp"
 #include "stinkytofu/transforms/asm/SetMatrixReusePass.hpp"
@@ -116,6 +118,7 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
         // strip s_wait_alu before scheduling (whole-kernel)
         pm.addPass(createRemoveWaitAluPass(module.getFunctions()));
     }
+    pm.addPass(createStinkyRemoveNopPass(/*vNopOnly=*/true));
     PB.applyExtensionPoint(PipelineExtensionPoint::BeforeRegionPasses, pm, module);
 
     // -- region: loopWithPrefetch + noLoadLoopBody --
@@ -153,6 +156,7 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
             WaitCntInsertionOptions waitCntOptions;
             waitCntOptions.enableLoopCarriedTokenDeps = moduleOptions.EnableLoopCarriedTokenDeps;
             innerPM.addPass(createStinkyWaitCntInsertionPass(waitCntOptions));
+            if (runScheduler) innerPM.addPass(createRemoveDscntPass());
         }
         pm.addPass(createKernelToRegionsPassAdaptor(module, {"loopWithPrefetch", "noLoadLoopBody"},
                                                     std::move(innerPM)));
@@ -199,6 +203,11 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
     // Pass the whole-kernel function list so the pass walks the entry plus callable functions,
     // each in isolation (reuse never chains across a call site or a function boundary).
     pm.addPass(createSetMatrixReusePass(module.getFunctions()));
+
+    // Run after the final CFG build but before flatten/SW-prefetch: this pass
+    // covers final per-function code, while SW-prefetch owns its hints' XCnt waits.
+    constexpr bool kEnableXcntDrainProfile = false;
+    pm.addPass(createGfx1250HazardPass(module.getFunctions(), kEnableXcntDrainProfile));
 
     // Re-merge callable functions into the entry at their ASM placement markers so
     // SwInstructionPrefetchRelStaticPass sees a single linear stream / legacy emission
