@@ -102,7 +102,13 @@ _LAUNCHER_CACHE: dict = {}
 
 
 def _dense_launcher(spec: AttentionDenseSpec) -> KernelLauncher:
-    key = spec.kernel_name()
+    # `batch` and `waves_per_eu` are baked into the kernel -- batch through the
+    # K/V buffer extents, waves_per_eu through the amdgpu-waves-per-eu attribute
+    # -- but neither is part of kernel_name(), so both have to be part of the
+    # cache key. Keying on the name alone collides here in practice: the varlen
+    # sweep runs B=4 and B=6 at the same max_s, which share a name but lower to
+    # different IR, so the second silently reuses the first binary.
+    key = (spec.kernel_name(), spec.batch, spec.waves_per_eu)
     lch = _LAUNCHER_CACHE.get(key)
     if lch is not None:
         return lch
@@ -145,6 +151,7 @@ def bench_dense(
     dtype: str,
     block_n: int,
     waves_per_eu: int,
+    lds_k_group_pad: int,
     num_persistent: int,
     persistent: bool,
     warmup: int,
@@ -182,6 +189,7 @@ def bench_dense(
             dtype=dtype,
             block_n=block_n,
             waves_per_eu=waves_per_eu,
+            lds_k_group_pad=lds_k_group_pad,
             sliding_window=W,
             varlen=True,
         )
@@ -218,6 +226,7 @@ def bench_dense(
             dtype=dtype,
             block_n=block_n,
             waves_per_eu=waves_per_eu,
+            lds_k_group_pad=lds_k_group_pad,
             sliding_window=W,
             persistent=persistent,
             num_persistent=num_persistent,
@@ -323,26 +332,11 @@ def _configs(mode: str, Hq: int, Hkv: int, D: int):
     return cfgs
 
 
-def _record(mode, variant, label, seqlens, Hq, Hkv, D, W, res, err_note=None):
-    if res is None:
-        return {
-            "label": label,
-            "mode": mode,
-            "variant": variant,
-            "seqlens": list(seqlens),
-            "Hq": Hq,
-            "Hkv": Hkv,
-            "D": D,
-            "sliding_window": W,
-            "dense_ms": None,
-            "tflops": None,
-            "max_abs": None,
-            "ok": False,
-            "kernel_name": None,
-            "error": err_note,
-        }
-    ms, tf, err, kname = res
-    return {
+def _record(mode, variant, label, seqlens, Hq, Hkv, D, W, knobs, res, err_note=None):
+    """One sweep row. ``knobs`` carries the tuning values the row was measured at
+    so the report is self-describing: kernel_name() omits some of them, and the
+    ones it does carry are positional rather than labelled."""
+    rec = {
         "label": label,
         "mode": mode,
         "variant": variant,
@@ -351,12 +345,31 @@ def _record(mode, variant, label, seqlens, Hq, Hkv, D, W, res, err_note=None):
         "Hkv": Hkv,
         "D": D,
         "sliding_window": W,
-        "dense_ms": ms,
-        "tflops": tf,
-        "max_abs": err,
-        "ok": bool(err < _TOL),
-        "kernel_name": kname,
+        **knobs,
     }
+    if res is None:
+        rec.update(
+            {
+                "dense_ms": None,
+                "tflops": None,
+                "max_abs": None,
+                "ok": False,
+                "kernel_name": None,
+                "error": err_note,
+            }
+        )
+        return rec
+    ms, tf, err, kname = res
+    rec.update(
+        {
+            "dense_ms": ms,
+            "tflops": tf,
+            "max_abs": err,
+            "ok": bool(err < _TOL),
+            "kernel_name": kname,
+        }
+    )
+    return rec
 
 
 def main() -> int:
@@ -372,6 +385,14 @@ def main() -> int:
     ap.add_argument("--d", type=int, default=128, help="head size")
     ap.add_argument("--bn", type=int, default=64, help="block_n (KV tile)")
     ap.add_argument("--waves-per-eu", type=int, default=2, help="occupancy hint")
+    ap.add_argument(
+        "--lds-k-group-pad",
+        type=int,
+        default=8,
+        help="K LDS pad between DMA row-groups, in elements; live only at D=64 "
+        "(at D=128 one DMA fills one row and the per-row pad applies instead). "
+        "Must be a multiple of 8; 0 reproduces the unpadded layout",
+    )
     ap.add_argument(
         "--num-persistent", type=int, default=256, help="CTAs for persistent variant"
     )
@@ -389,10 +410,16 @@ def main() -> int:
     print(f"device: {torch.cuda.get_device_name(0)}")
     print(
         f"mode={args.mode} dtype={args.dtype} Hq={args.hq} Hkv={args.hkv} D={args.d} "
-        f"bn={args.bn} wpe={args.waves_per_eu} np={args.num_persistent} "
-        f"warmup={args.warmup} iters={args.iterations}"
+        f"bn={args.bn} wpe={args.waves_per_eu} kpad={args.lds_k_group_pad} "
+        f"np={args.num_persistent} warmup={args.warmup} iters={args.iterations}"
     )
 
+    knobs = {
+        "dtype": args.dtype,
+        "block_n": args.bn,
+        "waves_per_eu": args.waves_per_eu,
+        "lds_k_group_pad": args.lds_k_group_pad,
+    }
     cfgs = _configs(args.mode, args.hq, args.hkv, args.d)
     results = []
     for mode, variant, label, seqlens, Hq, Hkv, W, persistent in cfgs:
@@ -407,6 +434,7 @@ def main() -> int:
                 dtype=args.dtype,
                 block_n=args.bn,
                 waves_per_eu=args.waves_per_eu,
+                lds_k_group_pad=args.lds_k_group_pad,
                 num_persistent=args.num_persistent,
                 persistent=persistent,
                 warmup=args.warmup,
@@ -418,13 +446,23 @@ def main() -> int:
 
             traceback.print_exc()
             rec = _record(
-                mode, variant, label, seqlens, Hq, Hkv, args.d, W, None, repr(exc)
+                mode,
+                variant,
+                label,
+                seqlens,
+                Hq,
+                Hkv,
+                args.d,
+                W,
+                knobs,
+                None,
+                repr(exc),
             )
             results.append(rec)
             print(f"{tag}  FAILED ({exc!r})")
             continue
 
-        rec = _record(mode, variant, label, seqlens, Hq, Hkv, args.d, W, res)
+        rec = _record(mode, variant, label, seqlens, Hq, Hkv, args.d, W, knobs, res)
         results.append(rec)
         status = "PASS" if rec["ok"] else "FAIL"
         print(

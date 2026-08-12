@@ -3150,6 +3150,99 @@
         "seed": 1,
         "reference_source": "c++ integration suite: Smoke/IntegrationGpuRMSNormFp32.Correctness_8"
       }
+    },
+    {
+      "id": "runtime_epsilon",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              16,
+              8,
+              8
+            ],
+            "strides": [
+              1024,
+              64,
+              8,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              8,
+              8
+            ],
+            "strides": [
+              1024,
+              64,
+              8,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              16,
+              8,
+              8
+            ],
+            "strides": [
+              1024,
+              64,
+              8,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "tensor_patches": [
+        {
+          "uid": 1,
+          "set": {
+            "is_runtime_pass_by_value": true
+          },
+          "remove": [
+            "value_type",
+            "value"
+          ]
+        }
+      ],
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "generated_at": "2026-07-27T00:00:00Z",
+        "seed": 42,
+        "notes": "Runtime PBV scalars: epsilon (uid=1) promoted to is_runtime_pass_by_value=true, detection value 1.0. The harness supplies the detection value(s) via inputs; both the CPU reference and the provider read from the variantPack. A provider that ignores the runtime tensor and uses any other value produces diverging output.",
+        "inputs": {
+          "1": {
+            "kind": "fixed",
+            "value": 1.0
+          }
+        }
+      }
     }
   ]
 }
