@@ -242,6 +242,25 @@ def _safe_build_corpus():
         return []
 
 
+def _committed_snapshot_ids():
+    """Parse the case-ID set from the committed ``.ambr`` golden file.
+
+    Each syrupy amber entry begins with a ``# name:`` line of the form
+    ``test_derived_state_matches_snapshot[<case_id>]``; the set of those IDs is
+    the contract the reconstructed corpus must reproduce exactly.
+    """
+    amb = Path(__file__).parent / "__snapshots__" / (Path(__file__).stem + ".ambr")
+    ids = set()
+    if not amb.is_file():
+        return ids
+    prefix = "# name: test_derived_state_matches_snapshot["
+    for raw in amb.read_text().splitlines():
+        line = raw.strip()
+        if line.startswith(prefix) and line.endswith("]"):
+            ids.add(line[len(prefix):-1])
+    return ids
+
+
 _CASES = _safe_build_corpus()
 _INPUTS = {c[0]: (c[1], c[2], c[3], c[4]) for c in _CASES}
 _IDS = [c[0] for c in _CASES]
@@ -262,3 +281,28 @@ def test_derived_state_matches_snapshot(case_id, snapshot):
         _S.Solution.assignDerivedParameters(state, splitGSU, True, False, iim, rocm_version)
     sanitized = {k: v for k, v in _sanitize(state).items() if k not in _VOLATILE}
     assert sanitized == snapshot
+
+
+def test_corpus_reproduces_all_committed_snapshots():
+    """Fail closed if the reconstructed corpus does not match the committed golden.
+
+    ``test_derived_state_matches_snapshot`` draws its cases from ``_IDS``, which
+    is rebuilt at collection time. If toolchain breakage, missing test data, or a
+    swallowed exception makes ``_build_corpus`` return an empty or partial list,
+    the parametrized test would silently skip (empty parameter set) or validate
+    only a subset while the committed ``.ambr`` snapshots pass vacuously. This
+    guard converts that fail-open into a hard failure by asserting the generated
+    case-ID set equals the committed snapshot ID set exactly.
+    """
+    if importlib.util.find_spec("syrupy") is None:
+        pytest.skip("syrupy not installed; snapshot characterization tests skipped")
+    expected = _committed_snapshot_ids()
+    assert expected, "committed .ambr golden is missing or contains no snapshots"
+    generated = set(_IDS)
+    missing = expected - generated
+    extra = generated - expected
+    assert not missing and not extra, (
+        "reconstructed corpus does not match committed golden: "
+        "%d missing (e.g. %s), %d extra (e.g. %s)"
+        % (len(missing), sorted(missing)[:5], len(extra), sorted(extra)[:5])
+    )
