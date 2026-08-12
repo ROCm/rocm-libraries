@@ -40,62 +40,17 @@ constexpr size_t TIMING_SCRATCH_SIZE = 4UL * 1024 * 1024;
 
 struct AutotunePluginHandle final : HipdnnEnginePluginHandle
 {
+    ~AutotunePluginHandle() override
+    {
+        if(timingScratch != nullptr)
+        {
+            static_cast<void>(hipFree(timingScratch));
+        }
+    }
+
     void* timingScratch = nullptr;
     hipStream_t stream = nullptr;
 };
-
-hipdnnPluginStatus_t createAutotunePluginHandle(hipdnnEnginePluginHandle_t* handle)
-{
-    LOG_API_ENTRY("handlePtr=" << static_cast<void*>(handle));
-
-    return hipdnn_plugin_sdk::tryCatch([&, apiName = __func__]() {
-        hipdnn_plugin_sdk::throwIfNull(handle);
-
-        auto pluginHandle = std::make_unique<AutotunePluginHandle>();
-        *handle = pluginHandle.release();
-
-        LOG_API_SUCCESS(apiName, "createdHandle=" << static_cast<void*>(*handle));
-    });
-}
-
-hipdnnPluginStatus_t destroyAutotunePluginHandle(hipdnnEnginePluginHandle_t handle)
-{
-    LOG_API_ENTRY("handle=" << static_cast<void*>(handle));
-
-    return hipdnn_plugin_sdk::tryCatch([&, apiName = __func__]() {
-        hipdnn_plugin_sdk::throwIfNull(handle);
-
-        const std::unique_ptr<AutotunePluginHandle> pluginHandle(
-            static_cast<AutotunePluginHandle*>(handle));
-        if(pluginHandle->timingScratch != nullptr)
-        {
-            const auto status = hipFree(pluginHandle->timingScratch);
-            if(status != hipSuccess)
-            {
-                throw hipdnn_plugin_sdk::HipdnnPluginException(
-                    HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                    std::string("AutotunePlugin: timing scratch free failed: ")
-                        + hipGetErrorString(status));
-            }
-        }
-
-        LOG_API_SUCCESS(apiName, "destroyed");
-    });
-}
-
-hipdnnPluginStatus_t setAutotunePluginStream(hipdnnEnginePluginHandle_t handle, hipStream_t stream)
-{
-    LOG_API_ENTRY("handle=" << static_cast<void*>(handle)
-                            << ", streamId=" << static_cast<void*>(stream));
-
-    return hipdnn_plugin_sdk::tryCatch([&, apiName = __func__]() {
-        hipdnn_plugin_sdk::throwIfNull(handle);
-
-        static_cast<AutotunePluginHandle*>(handle)->stream = stream;
-
-        LOG_API_SUCCESS(apiName, "stream set");
-    });
-}
 
 // Keep one scratch allocation per plugin handle. The first execution allocates
 // it outside any timed device work; later warmup and timed executions only
@@ -599,19 +554,33 @@ HIPDNN_TEST_PLUGIN_EXPORT hipdnnPluginStatus_t
 HIPDNN_TEST_PLUGIN_EXPORT hipdnnPluginStatus_t
     hipdnnEnginePluginCreate(hipdnnEnginePluginHandle_t* handle)
 {
-    return createAutotunePluginHandle(handle);
+    LOG_API_ENTRY("handlePtr=" << static_cast<void*>(handle));
+
+    return hipdnn_plugin_sdk::tryCatch([&, apiName = __func__]() {
+        hipdnn_plugin_sdk::throwIfNull(handle);
+
+        auto pluginHandle = std::make_unique<AutotunePluginHandle>();
+        *handle = pluginHandle.release();
+
+        LOG_API_SUCCESS(apiName, "createdHandle=" << static_cast<void*>(*handle));
+    });
 }
 
 HIPDNN_TEST_PLUGIN_EXPORT hipdnnPluginStatus_t
     hipdnnEnginePluginDestroy(hipdnnEnginePluginHandle_t handle)
 {
-    return destroyAutotunePluginHandle(handle);
+    return TestPluginBase::enginePluginDestroy(handle);
 }
 
 HIPDNN_TEST_PLUGIN_EXPORT hipdnnPluginStatus_t
     hipdnnEnginePluginSetStream(hipdnnEnginePluginHandle_t handle, hipStream_t stream)
 {
-    return setAutotunePluginStream(handle, stream);
+    const auto status = TestPluginBase::enginePluginSetStream(handle, stream);
+    if(status == HIPDNN_PLUGIN_STATUS_SUCCESS)
+    {
+        static_cast<AutotunePluginHandle*>(handle)->stream = stream;
+    }
+    return status;
 }
 
 HIPDNN_TEST_PLUGIN_EXPORT hipdnnPluginStatus_t
