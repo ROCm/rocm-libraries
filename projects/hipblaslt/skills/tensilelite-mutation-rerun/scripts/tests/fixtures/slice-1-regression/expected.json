@@ -1,0 +1,77 @@
+{
+  "slice_id": 1,
+  "description": "Certified slice-1 pilot expectations, transcribed from PILOT-BASELINE.md for future real-regression comparison. These are the numbers a real mutmut campaign on this slice-1 config must reproduce to certify no regression.",
+  "source": "work/mutation/PILOT-BASELINE.md",
+  "engine": "mutmut 3.6.0",
+  "mutate_only_covered_lines": false,
+  "only_mutate": [
+    "Tensile/Common/Utilities.py",
+    "Tensile/TensileLogic/ValidChipId.py",
+    "Tensile/TensileLogic/ValidMatrixInstruction.py",
+    "Tensile/TensileLogic/ValidWorkGroup.py",
+    "Tensile/TensileLogic/ValidWorkGroupMappingXCC.py"
+  ],
+  "test_selection": [
+    "Tensile/Tests/unit/characterization/CommonUtilities",
+    "Tensile/Tests/unit/characterization/TensileLogic"
+  ],
+  "baseline": {
+    "total_mutants": 665,
+    "killed": 450,
+    "survived": 131,
+    "no_covering_test": 84,
+    "timeout": 0,
+    "suspicious": 0
+  },
+  "certified": {
+    "pre_triage_survivors": 131,
+    "remaining_survivors": 4,
+    "remaining_all_equivalent": true,
+    "no_test_count": 84,
+    "total_mutants": 654,
+    "killed": 566,
+    "killed_by_new_tests": 118,
+    "removed_by_pragma": 9,
+    "pragmas_applied": 3
+  },
+  "scores_pct": {
+    "covered_before": 77.5,
+    "covered_after": 99.3,
+    "raw_before": 67.7,
+    "raw_after": 86.5
+  },
+  "slice_suite": {
+    "passed": 184,
+    "snapshots": 70,
+    "failed": 0
+  },
+  "real_campaign": {
+    "note": "Supersedes the pilot 'baseline'/'certified' blocks above, which were transcribed from PILOT-BASELINE.md and are inaccurate (pilot undercounted mutants at 665 and mis-attributed the gap as '84 no_covering_test'). This block is the first captured full run. See CERT.md.",
+    "src_commit": "c2592d548f4993816f11ae429469adc1d174b49e",
+    "log": "slices/1-regression/mutmut-round2.log",
+    "source_state": "Utilities.py has the 3 pragmas removed (sanctioned slice-1 exception); all other slice-1 source == HEAD",
+    "total_mutants": 691,
+    "killed": 682,
+    "survived": 9,
+    "no_covering_test": 0,
+    "timeout": 0,
+    "suspicious": 0,
+    "survivors_all_equivalent": true,
+    "equivalent_survivor_keys": [
+      "Tensile.Common.Utilities.xǁSpinnyThingǁincrement__mutmut_1",
+      "Tensile.TensileLogic.ValidChipId.x__validateChipId__mutmut_7",
+      "Tensile.TensileLogic.ValidChipId.x__validateChipId__mutmut_20",
+      "Tensile.TensileLogic.ValidChipId.x__validateChipId__mutmut_21",
+      "Tensile.TensileLogic.ValidChipId.x__validateChipId__mutmut_22",
+      "Tensile.TensileLogic.ValidChipId.x__validateChipId__mutmut_23",
+      "Tensile.TensileLogic.ValidChipId.x__validateChipId__mutmut_24",
+      "Tensile.TensileLogic.ValidWorkGroupMappingXCC.x__cu_count_from_path__mutmut_9",
+      "Tensile.TensileLogic.ValidWorkGroupMappingXCC.x__validateWorkGroupMappingXCC__mutmut_14"
+    ],
+    "slice_suite": {
+      "passed": 231,
+      "snapshots": 70,
+      "failed": 0
+    }
+  }
+}
