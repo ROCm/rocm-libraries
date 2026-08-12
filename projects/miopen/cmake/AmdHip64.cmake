@@ -20,7 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-include_guard()
+include_guard(GLOBAL)
 
 macro(miopen_workaround_amdhip64_missing TARGET_NAME)
     if(WIN32 AND TARGET hip::amdhip64)
