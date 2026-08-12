@@ -605,6 +605,9 @@
           "5_256_14_14_fp32_nhwc_749aff_4"
         ],
         "support": {
+          "gfx1151": [
+            "windows"
+          ],
           "gfx90a": [
             "linux"
           ],

@@ -113,6 +113,9 @@
           "3_16_128_fp32_ncl_operationswish_fwd_norlo_norhi_ed6224"
         ],
         "support": {
+          "gfx1151": [
+            "windows"
+          ],
           "gfx90a": [
             "linux"
           ],

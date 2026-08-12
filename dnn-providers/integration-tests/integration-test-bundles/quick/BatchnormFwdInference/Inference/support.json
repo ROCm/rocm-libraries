@@ -14,6 +14,9 @@
           "tiny_fp32_nchw"
         ],
         "support": {
+          "gfx1151": [
+            "windows"
+          ],
           "gfx90a": [
             "linux"
           ],
@@ -37,6 +40,9 @@
           "tiny_fp32_nchw"
         ],
         "support": {
+          "gfx1151": [
+            "windows"
+          ],
           "gfx90a": [
             "linux"
           ],

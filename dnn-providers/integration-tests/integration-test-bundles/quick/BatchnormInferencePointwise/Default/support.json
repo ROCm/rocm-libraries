@@ -53,6 +53,9 @@
           "32_3_1_14_fp32_nhwc"
         ],
         "support": {
+          "gfx1151": [
+            "windows"
+          ],
           "gfx90a": [
             "linux"
           ],
@@ -139,6 +142,9 @@
           "4_3_1_fp32_nlc"
         ],
         "support": {
+          "gfx1151": [
+            "windows"
+          ],
           "gfx90a": [
             "linux"
           ],
