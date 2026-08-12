@@ -29,6 +29,7 @@ import pandas as pd
 from .features import build_features_signature, compute_features_hash
 from .lgbm_to_flatbuffer import convert
 from .train_uhd import train_model
+from .uhd_to_flatbuffer import convert_uhd
 
 logging.basicConfig(
     level=logging.INFO,
@@ -219,9 +220,13 @@ def main(argv: list[str] | None = None) -> int:
         lgbm_path.unlink()
         logger.info("Removed intermediate %s", lgbm_path)
 
-    uhd = {
+    # Generate UHD identifier
+    uhd_id = str(uuid.uuid4())
+
+    # Write JSON descriptor for human readability
+    uhd_json = {
         "schema": "hipdnn.uhd/v1",
-        "id": str(uuid.uuid4()),
+        "id": uhd_id,
         "name": args.name,
         "adapter": "tree_data",
         "features_signature": features_signature,
@@ -236,10 +241,27 @@ def main(argv: list[str] | None = None) -> int:
         },
         "model": {"artifact": "model.bin"},
     }
-    uhd_path = output_dir / "uhd.json"
-    with open(uhd_path, "w") as f:
-        json.dump(uhd, f, indent=2)
-    logger.info("Generated UHD descriptor: %s", uhd_path)
+    uhd_json_path = output_dir / "uhd.json"
+    with open(uhd_json_path, "w") as f:
+        json.dump(uhd_json, f, indent=2)
+    logger.info("Generated UHD JSON descriptor: %s", uhd_json_path)
+
+    # Write FlatBuffer UHD (RFC 0019 §9.2 descriptor format)
+    uhd_fb_path = output_dir / "uhd.fb"
+    convert_uhd(
+        uhd_id=uhd_id,
+        name=args.name,
+        adapter="tree_data",
+        features_signature=features_signature,
+        features_hash=features_hash,
+        objective=args.objective,
+        score_units=args.score_units or args.target,
+        score_calibrated=args.calibrated,
+        score_transform="log1p",
+        output_path=uhd_fb_path,
+        model_artifact_path="model.bin",
+    )
+    logger.info("Generated UHD FlatBuffer: %s", uhd_fb_path)
 
     manifest = {
         "features": args.features,
@@ -258,7 +280,8 @@ def main(argv: list[str] | None = None) -> int:
     logger.info("Wrote training manifest: %s", manifest_path)
 
     print(f"\nUHD Generation Complete")
-    print(f"  UHD descriptor: {uhd_path}")
+    print(f"  UHD FlatBuffer: {uhd_fb_path}")
+    print(f"  UHD JSON:       {uhd_json_path}")
     print(f"  Model artifact: {fb_path} ({model.num_trees()} trees)")
     print(f"  Features hash:  {features_hash}")
 

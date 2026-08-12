@@ -7,7 +7,8 @@ Train and export heuristic models for hipDNN's Universal Heuristic Descriptor (U
 This tool takes benchmark timing data and produces:
 1. A trained LightGBM model
 2. A FlatBuffer model artifact (`model.bin`) for `TreeDataAdapter`
-3. A UHD descriptor JSON (`uhd.json`)
+3. A UHD FlatBuffer descriptor (`uhd.fb`) for UHD loader (RFC 0019 §9.2)
+4. A human-readable UHD JSON (`uhd.json`)
 
 ## Installation
 
@@ -97,10 +98,13 @@ The tool generates:
 
 ```
 output_dir/
+├── uhd.fb             # FlatBuffer UHD descriptor (RFC 0019 §9.2) - runtime format
+├── uhd.json           # UHD descriptor JSON - human-readable
 ├── model.bin          # FlatBuffer GbdtModel for TreeDataAdapter
-├── uhd.json           # UHD descriptor
 └── train_manifest.json # Training metadata
 ```
+
+**NOTE:** The runtime loads `uhd.fb`, not `uhd.json`. The JSON is for inspection/debugging only.
 
 ### uhd.json
 
@@ -134,9 +138,13 @@ pytest tests/ -v
 
 ## Integration
 
-The output `model.bin` is loaded by `TreeDataAdapter` in hipDNN backend:
+The output files are loaded by hipDNN's UHD system:
 
 ```cpp
-auto adapter = TreeDataAdapter::load("model.bin", expectedFeaturesHash);
+// Load UHD descriptor (RFC 0019 §9.2)
+auto uhd = UhdLoader::load("uhd.fb");
+
+// TreeDataAdapter loads the model artifact
+auto adapter = TreeDataAdapter::load("model.bin", uhd.features_hash);
 double score = adapter->score(featureVector);
 ```
