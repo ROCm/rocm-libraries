@@ -78,9 +78,9 @@ float geluTanhRef(float x)
 }
 const std::function<float(float)>& refFor(const std::string& activation)
 {
-    static const std::function<float(float)> silu = siluRef;
-    static const std::function<float(float)> gelu = geluTanhRef;
-    return activation == "silu" ? silu : gelu;
+    static const std::function<float(float)> s_silu = siluRef;
+    static const std::function<float(float)> s_gelu = geluTanhRef;
+    return activation == "silu" ? s_silu : s_gelu;
 }
 
 // Build the (A,C,N) launch bindings + grid symbols the ActivationAdapter would
@@ -328,7 +328,7 @@ TEST(TestActivationSelection, EachVariantIsCorrect)
         AOT_SKIP_OR_FAIL_ON_EMPTY_CATALOG(CATALOG_DIR);
     }
 
-    constexpr size_t numel = 4099;
+    const size_t numel = 4099;
     for(const char* activation : {"silu", "gelu_tanh"})
     {
         catalog::ProblemShape problem;

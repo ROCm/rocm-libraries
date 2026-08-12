@@ -26,7 +26,6 @@ namespace
 
 using aot_catalog_engine::catalog::Catalog;
 using aot_catalog_engine::catalog::elementSizeBytes;
-using aot_catalog_engine::catalog::Family;
 using aot_catalog_engine::catalog::ProblemShape;
 using aot_catalog_engine::catalog::ShapeValue;
 using aot_catalog_engine::catalog::WorkspaceExpr;
@@ -193,7 +192,7 @@ protected:
                    + std::string(::testing::UnitTest::GetInstance()->current_test_info()->name()));
         std::error_code ec;
         fs::remove_all(_root, ec);
-        _familyDir = _root / kArch / "ws_family";
+        _familyDir = _root / K_ARCH / "ws_family";
         fs::create_directories(_familyDir);
         std::ofstream(_familyDir / "dummy.co") << "x"; // existence is all the loader checks
     }
@@ -222,10 +221,10 @@ protected:
             ]
         })";
         std::ofstream(_familyDir / "family.json") << json;
-        return Catalog::loadForDevice(_root.string(), kArch);
+        return Catalog::loadForDevice(_root.string(), K_ARCH);
     }
 
-    static constexpr const char* kArch = "gfxTEST";
+    static constexpr const char* K_ARCH = "gfxTEST";
     fs::path _root;
     fs::path _familyDir;
 };

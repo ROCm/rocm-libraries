@@ -146,9 +146,9 @@ std::vector<float> reference(const std::vector<_Float16>& hostX,
         const float invStd = 1.0f / std::sqrt(sumSqDev / static_cast<float>(N) + EPS);
         for(size_t n = 0; n < N; ++n)
         {
-            const float x = static_cast<float>(hostX[m * N + n]);
-            const float g = static_cast<float>(hostGamma[n]);
-            const float bt = static_cast<float>(hostBeta[n]);
+            const auto x = static_cast<float>(hostX[m * N + n]);
+            const auto g = static_cast<float>(hostGamma[n]);
+            const auto bt = static_cast<float>(hostBeta[n]);
             ref[m * N + n] = (x - mean) * invStd * g + bt;
         }
     }
@@ -559,9 +559,9 @@ ShapeOutcome runShapeAndCheckF16(size_t cols, const std::string& cachePath)
         const float invStd = 1.0f / std::sqrt(sumSqDev / static_cast<float>(cols) + EPS);
         for(size_t n = 0; n < cols; ++n)
         {
-            const float x = static_cast<float>(hostX[m * cols + n]);
-            const float g = static_cast<float>(hostGamma[n]);
-            const float bt = static_cast<float>(hostBeta[n]);
+            const auto x = static_cast<float>(hostX[m * cols + n]);
+            const auto g = static_cast<float>(hostGamma[n]);
+            const auto bt = static_cast<float>(hostBeta[n]);
             ref[m * cols + n] = (x - mean) * invStd * g + bt;
         }
     }

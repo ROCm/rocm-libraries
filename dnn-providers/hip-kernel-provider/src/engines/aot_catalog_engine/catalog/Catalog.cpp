@@ -313,7 +313,7 @@ WorkspaceExpr parseWorkspaceExpr(const json& value)
     // An operator node is an object with EXACTLY one recognized op key whose
     // value is an array of child expressions. Stricter than grid axes (which
     // allow an 'add' companion key): the JSON-AST discipline is one op per node.
-    static const std::map<std::string, WsOpSpec> kOps = {
+    static const std::map<std::string, WsOpSpec> s_kOps = {
         {"mul", {WsOp::MUL, 0, 1}},
         {"add", {WsOp::ADD, 0, 1}},
         {"min", {WsOp::MIN, 0, 1}},
@@ -328,16 +328,21 @@ WorkspaceExpr parseWorkspaceExpr(const json& value)
     std::string opKey;
     for(const auto& [key, node] : value.items())
     {
-        auto it = kOps.find(key);
-        if(it == kOps.end())
+        auto it = s_kOps.find(key);
+        if(it == s_kOps.end())
         {
             fail("workspace expression has unknown operator key '" + key
                  + "' (expected one of mul|add|sub|min|max|ceil_div|floor_div|align_up)");
         }
         if(spec != nullptr)
         {
-            fail("workspace expression object must hold exactly one operator key, found '" + opKey
-                 + "' and '" + key + "'");
+            std::string message
+                = "workspace expression object must hold exactly one operator key, found '";
+            message += opKey;
+            message += "' and '";
+            message += key;
+            message += "'";
+            fail(message);
         }
         spec = &it->second;
         opKey = key;

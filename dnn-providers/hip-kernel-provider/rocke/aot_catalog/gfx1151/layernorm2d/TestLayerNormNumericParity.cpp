@@ -184,9 +184,9 @@ TEST(TestAotCatalogLayerNormNumericParity, LayerNorm2dF16MatchesReference)
         const float invStd = 1.0f / std::sqrt(sumSqDev / static_cast<float>(N) + EPS);
         for(size_t n = 0; n < N; ++n)
         {
-            const float x = static_cast<float>(hostX[m * N + n]);
-            const float g = static_cast<float>(hostGamma[n]);
-            const float bt = static_cast<float>(hostBeta[n]);
+            const auto x = static_cast<float>(hostX[m * N + n]);
+            const auto g = static_cast<float>(hostGamma[n]);
+            const auto bt = static_cast<float>(hostBeta[n]);
             reference[m * N + n] = (x - mean) * invStd * g + bt;
         }
     }
