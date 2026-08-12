@@ -294,6 +294,8 @@ void testOutputSelection() {
     require(prime == std::vector<size_t>({0, 3, 6, 9}), "Prime-stride output selection mismatch.");
     require(OutputSelection::primeStride(10, 10, 0).selectsAll(),
             "Zero requested elements did not preserve all-output behavior.");
+    require(OutputSelection::explicitIndices({3, 0, 3}).indices(4) == std::vector<size_t>({0, 3}),
+            "Explicit output selection did not normalize to a unique ordered set.");
 }
 
 void testReferenceEpilogue() {
