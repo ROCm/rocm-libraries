@@ -87,6 +87,7 @@ file(GLOB CONV_KERNEL_HEADERS "${CMAKE_BINARY_DIR}/generated_kernels/conv_*.hpp"
 add_library(dispatcher_conv_lib SHARED conv_ctypes_lib.cpp)
 target_include_directories(dispatcher_conv_lib PRIVATE
     ${PROJECT_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/../include  # CK-tile core headers (ck_tile/core.hpp)
     ${PROJECT_SOURCE_DIR}/dispatcher/include
 )
 target_link_libraries(dispatcher_conv_lib PRIVATE hip::device)
