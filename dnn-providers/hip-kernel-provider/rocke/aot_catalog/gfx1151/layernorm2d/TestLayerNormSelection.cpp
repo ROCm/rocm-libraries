@@ -11,8 +11,12 @@
 //   2. a second execute hits the cache and stays correct,
 //   3. every shipped variant is individually numerically correct.
 //
-// Unlike rmsnorm2d, layernorm2d is static-N only (no runtime-N _dyn_ kernels),
-// so every candidate carries an exact N==<n> constraint.
+// Like rmsnorm2d, layernorm2d ships BOTH static-N specializations (exact
+// N==<n> constraint, tuned per shape) AND runtime-N '_dyn_' kernels (N read
+// from the i32 arg, matching any N that is a multiple of vec). So a listed N
+// tier (2048, 4096) draws both static and dynamic candidates, while an
+// unlisted multiple-of-vec N (Flux 3072, SD3.5 2432) is served by the dynamic
+// kernels alone -- the runtime-N parity the RuntimeN tests below assert.
 
 #include <gtest/gtest.h>
 
@@ -494,6 +498,202 @@ ShapeOutcome runShapeAndCheckBf16(size_t cols, const std::string& cachePath)
     return outcome;
 }
 
+// f16 analog of runShapeAndCheckBf16: load the f16 family candidates for one
+// runtime column count, run a multi-candidate tuned plan on real device buffers,
+// and EXPECT numerical correctness. Uses a free arbitrary `cols` (unlike the
+// fixture, which is pinned to N=2048) so it can exercise runtime-N shapes the
+// static specializations don't cover (Flux 3072, SD3.5 2432). Uses only EXPECT_*
+// (a value-returning helper cannot host ASSERT_*).
+ShapeOutcome runShapeAndCheckF16(size_t cols, const std::string& cachePath)
+{
+    ShapeOutcome outcome;
+    const size_t rows = M;
+
+    const catalog::Catalog cat = catalog::Catalog::loadForDevice(CATALOG_DIR, ARCH);
+    EXPECT_FALSE(cat.empty());
+
+    catalog::ProblemShape problem;
+    problem.emplace("dtype", catalog::ShapeValue{std::string("f16")});
+    problem.emplace("M", catalog::ShapeValue{static_cast<int64_t>(rows)});
+    problem.emplace("N", catalog::ShapeValue{static_cast<int64_t>(cols)});
+
+    const std::vector<catalog::Catalog::Candidate> candidates
+        = cat.candidatesFor("layernorm", problem);
+    if(candidates.empty())
+    {
+        return outcome; // caller asserts on the (empty) symbol list
+    }
+
+    std::vector<_Float16> hostX(rows * cols);
+    std::vector<_Float16> hostGamma(cols);
+    std::vector<_Float16> hostBeta(cols);
+    std::vector<_Float16> hostY(rows * cols, static_cast<_Float16>(0.0f));
+    for(size_t n = 0; n < cols; ++n)
+    {
+        hostGamma[n] = static_cast<_Float16>(gammaVal(n));
+        hostBeta[n] = static_cast<_Float16>(betaVal(n));
+    }
+    for(size_t m = 0; m < rows; ++m)
+    {
+        for(size_t n = 0; n < cols; ++n)
+        {
+            hostX[m * cols + n] = static_cast<_Float16>(xVal(m, n));
+        }
+    }
+    // f32 CPU reference (population variance) from the same host values.
+    std::vector<float> ref(rows * cols, 0.0f);
+    for(size_t m = 0; m < rows; ++m)
+    {
+        float sum = 0.0f;
+        for(size_t n = 0; n < cols; ++n)
+        {
+            sum += static_cast<float>(hostX[m * cols + n]);
+        }
+        const float mean = sum / static_cast<float>(cols);
+        float sumSqDev = 0.0f;
+        for(size_t n = 0; n < cols; ++n)
+        {
+            const float d = static_cast<float>(hostX[m * cols + n]) - mean;
+            sumSqDev += d * d;
+        }
+        const float invStd = 1.0f / std::sqrt(sumSqDev / static_cast<float>(cols) + EPS);
+        for(size_t n = 0; n < cols; ++n)
+        {
+            const float x = static_cast<float>(hostX[m * cols + n]);
+            const float g = static_cast<float>(hostGamma[n]);
+            const float bt = static_cast<float>(hostBeta[n]);
+            ref[m * cols + n] = (x - mean) * invStd * g + bt;
+        }
+    }
+
+    std::vector<PlanCandidate> planCandidates;
+    planCandidates.reserve(candidates.size());
+    for(const catalog::Catalog::Candidate& candidate : candidates)
+    {
+        const catalog::KernelEntry& kernel = *candidate.kernel;
+        std::optional<launch::HipModuleGuard> module
+            = launch::loadKernelModule(kernel.coPath, kernel.symbol);
+        if(!module.has_value())
+        {
+            ADD_FAILURE() << "failed to load candidate " << kernel.symbol;
+            return outcome;
+        }
+        catalog::LaunchBindings bindings;
+        bindings.pointerUids.emplace("X", 1);
+        bindings.pointerUids.emplace("Gamma", 2);
+        bindings.pointerUids.emplace("Beta", 3);
+        bindings.pointerUids.emplace("Y", 4);
+        bindings.scalars.emplace("M", catalog::ScalarValue{static_cast<int64_t>(rows)});
+        bindings.scalars.emplace("N", catalog::ScalarValue{static_cast<int64_t>(cols)});
+        bindings.scalars.emplace("eps", catalog::ScalarValue{EPS});
+        launch::SymbolTable gridSymbols;
+        gridSymbols.emplace("M", static_cast<int64_t>(rows));
+        gridSymbols.emplace("N", static_cast<int64_t>(cols));
+        outcome.symbols.push_back(kernel.symbol);
+        const auto workspaceBytes
+            = static_cast<size_t>(launch::evalWorkspace(kernel.workspace, gridSymbols));
+        planCandidates.push_back(PlanCandidate{std::move(*module),
+                                               kernel.launch,
+                                               std::move(bindings),
+                                               std::move(gridSymbols),
+                                               workspaceBytes,
+                                               kernel.symbol});
+    }
+
+    void* deviceX = nullptr;
+    void* deviceGamma = nullptr;
+    void* deviceBeta = nullptr;
+    void* deviceY = nullptr;
+    hipStream_t stream = nullptr;
+    EXPECT_EQ(hipMalloc(&deviceX, rows * cols * sizeof(_Float16)), hipSuccess);
+    EXPECT_EQ(hipMalloc(&deviceGamma, cols * sizeof(_Float16)), hipSuccess);
+    EXPECT_EQ(hipMalloc(&deviceBeta, cols * sizeof(_Float16)), hipSuccess);
+    EXPECT_EQ(hipMalloc(&deviceY, rows * cols * sizeof(_Float16)), hipSuccess);
+    EXPECT_EQ(
+        hipMemcpy(deviceX, hostX.data(), rows * cols * sizeof(_Float16), hipMemcpyHostToDevice),
+        hipSuccess);
+    EXPECT_EQ(
+        hipMemcpy(deviceGamma, hostGamma.data(), cols * sizeof(_Float16), hipMemcpyHostToDevice),
+        hipSuccess);
+    EXPECT_EQ(
+        hipMemcpy(deviceBeta, hostBeta.data(), cols * sizeof(_Float16), hipMemcpyHostToDevice),
+        hipSuccess);
+    EXPECT_EQ(hipStreamCreate(&stream), hipSuccess);
+
+    Handle handle;
+    handle.setStream(stream);
+
+    const std::string key = catalog::problemKey(candidates.front().family->name, problem);
+    catalog::TuneCache cache(cachePath);
+    const CatalogPlan plan(std::move(planCandidates), &cache, key);
+
+    const std::array<hipdnnPluginDeviceBuffer_t, 4> buffers = {{
+        {1, deviceX},
+        {2, deviceGamma},
+        {3, deviceBeta},
+        {4, deviceY},
+    }};
+    EXPECT_EQ(hipMemset(deviceY, 0, rows * cols * sizeof(_Float16)), hipSuccess);
+    EXPECT_NO_THROW(plan.execute(handle, buffers.data(), 4, nullptr));
+    EXPECT_EQ(hipStreamSynchronize(stream), hipSuccess);
+    EXPECT_EQ(
+        hipMemcpy(hostY.data(), deviceY, rows * cols * sizeof(_Float16), hipMemcpyDeviceToHost),
+        hipSuccess);
+
+    size_t mismatches = 0;
+    std::string firstMismatch;
+    for(size_t m = 0; m < rows; ++m)
+    {
+        for(size_t n = 0; n < cols; ++n)
+        {
+            const auto got = static_cast<float>(hostY[m * cols + n]);
+            const float want = ref[m * cols + n];
+            const float tol = std::max(2e-2f, 3e-2f * std::fabs(want));
+            if(std::fabs(got - want) > tol)
+            {
+                if(mismatches == 0)
+                {
+                    firstMismatch = "(" + std::to_string(m) + "," + std::to_string(n) + ") got="
+                                    + std::to_string(got) + " want=" + std::to_string(want);
+                }
+                ++mismatches;
+            }
+        }
+    }
+    EXPECT_EQ(mismatches, 0u) << "f16 N=" << cols << " first mismatch " << firstMismatch;
+
+    const std::optional<std::string> winner = cache.lookup(key);
+    if(winner.has_value())
+    {
+        outcome.winner = *winner;
+    }
+
+    (void)hipFree(deviceX);
+    (void)hipFree(deviceGamma);
+    (void)hipFree(deviceBeta);
+    (void)hipFree(deviceY);
+    (void)hipStreamDestroy(stream);
+    std::error_code ec;
+    fs::remove(cachePath, ec);
+    fs::remove(cachePath + ".tmp", ec);
+
+    return outcome;
+}
+
+bool hasRuntimeN(const std::vector<std::string>& symbols)
+{
+    return std::any_of(symbols.begin(), symbols.end(), [](const std::string& s) {
+        return s.find("_dyn_") != std::string::npos;
+    });
+}
+
+bool allRuntimeN(const std::vector<std::string>& symbols)
+{
+    return std::all_of(symbols.begin(), symbols.end(), [](const std::string& s) {
+        return s.find("_dyn_") != std::string::npos;
+    });
+}
+
 } // namespace
 
 // The N=2048 f16 family exposes multiple perf variants that all match one problem.
@@ -512,8 +712,18 @@ TEST_F(TestLayerNormSelection, MultipleCandidatesForOneProblem)
 
     const std::vector<catalog::Catalog::Candidate> candidates
         = cat.candidatesFor("layernorm", problem);
-    // Four static N=2048 specializations (b256/v4, b512/v4, b128/v8, b64/v8).
+    // Four static N=2048 specializations (b256/v4, b512/v4, b128/v8, b64/v8)
+    // PLUS the two runtime-N _dyn_ kernels (b256/v4, b128/v8) that also match
+    // N=2048 -> at least six candidates for the one problem.
     EXPECT_GE(candidates.size(), 4u) << "expected the N=2048 static specializations";
+    std::vector<std::string> symbols;
+    symbols.reserve(candidates.size());
+    for(const catalog::Catalog::Candidate& candidate : candidates)
+    {
+        symbols.push_back(candidate.kernel->symbol);
+    }
+    EXPECT_TRUE(hasRuntimeN(symbols))
+        << "N=2048 should also draw the runtime-N _dyn_ catch-all kernels";
 }
 
 // First execute tunes (records a winner among the candidates) and is correct;
@@ -624,6 +834,8 @@ TEST(TestLayerNormBf16, N2048CompetesWithSpecializations)
     const ShapeOutcome o = runShapeAndCheckBf16(2048, cachePath);
 
     EXPECT_GE(o.symbols.size(), 4u) << "N=2048 bf16 should offer static specializations";
+    EXPECT_TRUE(hasRuntimeN(o.symbols))
+        << "N=2048 bf16 should also draw the runtime-N _dyn_ catch-all kernels";
     ASSERT_FALSE(o.winner.empty()) << "tuning recorded no winner for N=2048 bf16";
     EXPECT_NE(std::find(o.symbols.begin(), o.symbols.end(), o.winner), o.symbols.end())
         << "winner '" << o.winner << "' is not a candidate";
@@ -645,4 +857,99 @@ TEST(TestLayerNormBf16, N4096CompetesWithSpecializations)
 
     EXPECT_GE(o.symbols.size(), 2u) << "N=4096 bf16 should offer static specializations";
     ASSERT_FALSE(o.winner.empty()) << "tuning recorded no winner for N=4096 bf16";
+}
+
+// --- runtime-N (_dyn_) parity with rmsnorm2d ------------------------------
+//
+// These assert the LayerNorm family now has the same "static specific-shapes-
+// for-perf + runtime-N general catch-all" combo RMSNorm has. On a LISTED N tier
+// (2048) the dynamic kernels compete alongside the static specializations; on an
+// UNLISTED multiple-of-vec N (Flux 3072, SD3.5 2432) the dynamic kernels are the
+// sole match, and must still be selected and numerically correct.
+
+// f16, listed tier: static + dynamic both compete for N=2048.
+TEST(TestLayerNormRuntimeN, N2048CompetesWithSpecializations)
+{
+    if(!gpuIsArch(ARCH))
+    {
+        GTEST_SKIP() << "no " << ARCH << " GPU present";
+    }
+    if(catalog::Catalog::loadForDevice(CATALOG_DIR, ARCH).empty())
+    {
+        AOT_SKIP_OR_FAIL_ON_EMPTY_CATALOG(CATALOG_DIR);
+    }
+    const std::string cachePath
+        = (fs::temp_directory_path() / "hipdnn_aot_layernorm_dyn_2048.json").string();
+    const ShapeOutcome o = runShapeAndCheckF16(2048, cachePath);
+
+    EXPECT_GE(o.symbols.size(), 4u) << "N=2048 should offer static specializations";
+    EXPECT_TRUE(hasRuntimeN(o.symbols))
+        << "N=2048 should also draw the runtime-N _dyn_ catch-all kernels";
+    ASSERT_FALSE(o.winner.empty()) << "tuning recorded no winner for N=2048";
+    EXPECT_NE(std::find(o.symbols.begin(), o.symbols.end(), o.winner), o.symbols.end())
+        << "winner '" << o.winner << "' is not a candidate";
+}
+
+// f16, unlisted tier: only the runtime-N kernels match Flux's N=3072, and the
+// tuned result is correct.
+TEST(TestLayerNormRuntimeN, N3072RuntimeNOnly)
+{
+    if(!gpuIsArch(ARCH))
+    {
+        GTEST_SKIP() << "no " << ARCH << " GPU present";
+    }
+    if(catalog::Catalog::loadForDevice(CATALOG_DIR, ARCH).empty())
+    {
+        AOT_SKIP_OR_FAIL_ON_EMPTY_CATALOG(CATALOG_DIR);
+    }
+    const std::string cachePath
+        = (fs::temp_directory_path() / "hipdnn_aot_layernorm_dyn_3072.json").string();
+    const ShapeOutcome o = runShapeAndCheckF16(3072, cachePath);
+
+    ASSERT_FALSE(o.symbols.empty()) << "N=3072 should be served by the runtime-N kernels";
+    EXPECT_TRUE(allRuntimeN(o.symbols))
+        << "only runtime-N _dyn_ kernels should match the unlisted N=3072";
+    ASSERT_FALSE(o.winner.empty()) << "tuning recorded no winner for N=3072";
+}
+
+// f16, unlisted tier: SD3.5's N=2432 (multiple of 8, not a static tier).
+TEST(TestLayerNormRuntimeN, N2432RuntimeNOnly)
+{
+    if(!gpuIsArch(ARCH))
+    {
+        GTEST_SKIP() << "no " << ARCH << " GPU present";
+    }
+    if(catalog::Catalog::loadForDevice(CATALOG_DIR, ARCH).empty())
+    {
+        AOT_SKIP_OR_FAIL_ON_EMPTY_CATALOG(CATALOG_DIR);
+    }
+    const std::string cachePath
+        = (fs::temp_directory_path() / "hipdnn_aot_layernorm_dyn_2432.json").string();
+    const ShapeOutcome o = runShapeAndCheckF16(2432, cachePath);
+
+    ASSERT_FALSE(o.symbols.empty()) << "N=2432 should be served by the runtime-N kernels";
+    EXPECT_TRUE(allRuntimeN(o.symbols))
+        << "only runtime-N _dyn_ kernels should match the unlisted N=2432";
+    ASSERT_FALSE(o.winner.empty()) << "tuning recorded no winner for N=2432";
+}
+
+// bf16, unlisted tier: the diffusion dtype path through the runtime-N kernels.
+TEST(TestLayerNormBf16RuntimeN, N3072RuntimeNOnly)
+{
+    if(!gpuIsArch(ARCH))
+    {
+        GTEST_SKIP() << "no " << ARCH << " GPU present";
+    }
+    if(catalog::Catalog::loadForDevice(CATALOG_DIR, ARCH).empty())
+    {
+        AOT_SKIP_OR_FAIL_ON_EMPTY_CATALOG(CATALOG_DIR);
+    }
+    const std::string cachePath
+        = (fs::temp_directory_path() / "hipdnn_aot_layernorm_bf16_dyn_3072.json").string();
+    const ShapeOutcome o = runShapeAndCheckBf16(3072, cachePath);
+
+    ASSERT_FALSE(o.symbols.empty()) << "N=3072 bf16 should be served by the runtime-N kernels";
+    EXPECT_TRUE(allRuntimeN(o.symbols))
+        << "only runtime-N _dyn_ kernels should match the unlisted bf16 N=3072";
+    ASSERT_FALSE(o.winner.empty()) << "tuning recorded no winner for bf16 N=3072";
 }

@@ -10,17 +10,21 @@
 # PYTHONPATH surgery. To run standalone, use that interpreter, e.g.:
 #   <build>/rocke-pyenv/bin/python produce_layernorm2d_co.py <out_dir>
 #
-# gfx1151 note: unlike rmsnorm2d, layernorm2d has NO wave64 gotcha. Its block
-# reduction is a pure-LDS stable-Welford tree keyed only on block_size -- there
-# is no cross-lane XOR-butterfly shuffle to miscompile at wave64. The spec's
-# `wave_size` field is currently INERT in the builder body; we still pass 32 for
-# consistency with the other gfx1151 families and to future-proof against a
-# builder that starts honoring it.
+# gfx1151 note: the STATIC layernorm2d has NO wave64 gotcha -- its block
+# reduction is a pure-LDS stable-Welford tree keyed only on block_size, with no
+# cross-lane XOR-butterfly shuffle to miscompile at wave64. The runtime-N
+# DYNAMIC layernorm2d DOES inherit the wave32 requirement (its Welford merge
+# uses a wave prologue, like rmsnorm2d_dynamic), so wave_size=32 is load-bearing
+# there and harmless-but-consistent for the static configs.
 
 import sys
 import os
 
 from rocke.instances.common.layernorm2d import LayerNorm2DSpec, build_layernorm2d
+from rocke.instances.common.layernorm2d_dynamic import (
+    LayerNorm2DDynamicSpec,
+    build_layernorm2d_dynamic,
+)
 from rocke.helpers.compile import compile_kernel
 
 ARCH = "gfx1151"
@@ -32,10 +36,6 @@ ARCH = "gfx1151"
 # spread is genuinely large. Every config must satisfy N % (block_size*vec) == 0
 # and the gfx1151 caps (block_size <= 1024, LDS = 3*block_size*4 bytes for the
 # Welford mean/M2/count triple).
-#
-# There is no layernorm2d_dynamic builder (only rmsnorm has one), so this family
-# is static-N only: one .co per (N, block_size, vec). Runtime-N is a documented
-# follow-up (see family.json _comment).
 #
 # (N, block_size, vec)
 CONFIGS = [
@@ -67,6 +67,23 @@ CONFIGS_BF16 = [
     (4096, 256, 8),
 ]
 
+# Runtime-N variant table (parity with rmsnorm2d_dynamic): N is a runtime kernel
+# argument, so each of these binaries serves EVERY N that is a multiple of `vec`
+# (flat row-major addressing needs vec-aligned row starts -> N % vec == 0;
+# enforced by a `multiple_of` constraint in family.json, not in the kernel).
+# Every real ComfyUI LayerNorm hidden size is a multiple of 8, so this is not a
+# limit in practice. They compete with the static specializations on the listed
+# N tiers and are the sole match for any other multiple-of-vec N (Flux 3072,
+# SD3.5 2432, ...). block_size/vec are the only knobs; wave_size MUST be 32 here
+# because the dynamic kernel's Welford merge uses a wave prologue that
+# miscompiles at wave64 on gfx1151.
+#
+# (block_size, vec)
+DYNAMIC_CONFIGS = [
+    (256, 4),
+    (128, 8),
+]
+
 
 def _emit_static(out_dir, configs, dtype):
     for n_per_block, block_size, vec in configs:
@@ -76,7 +93,7 @@ def _emit_static(out_dir, configs, dtype):
             vec=vec,
             dtype=dtype,
             save_mean_invstd=False,  # forward inference only; no stat outputs
-            wave_size=32,  # inert for layernorm (pure-LDS Welford); set for consistency
+            wave_size=32,  # inert for static layernorm (pure-LDS Welford); consistency
         )
         kernel = build_layernorm2d(spec)
         artifact = compile_kernel(kernel, arch=ARCH)
@@ -96,14 +113,45 @@ def _emit_static(out_dir, configs, dtype):
         )
 
 
+def _emit_dynamic(out_dir, configs, dtype):
+    for block_size, vec in configs:
+        spec = LayerNorm2DDynamicSpec(
+            block_size=block_size,
+            vec=vec,
+            dtype=dtype,
+            save_mean_invstd=False,
+            wave_size=32,  # gfx1151 wave32: the Welford wave prologue miscompiles at 64
+        )
+        kernel = build_layernorm2d_dynamic(spec)
+        artifact = compile_kernel(kernel, arch=ARCH)
+
+        symbol = spec.kernel_name()
+        # A zero-byte .co passes the fs::exists gate at catalog load and is
+        # catalogued as valid, failing only later at hipModuleLoad; fail loudly here.
+        if not artifact.hsaco:
+            raise SystemExit(f"ERROR {symbol}: compiled .co is empty")
+        out_path = os.path.join(out_dir, symbol + ".co")
+        with open(out_path, "wb") as f:
+            f.write(artifact.hsaco)
+
+        print(
+            f"symbol={symbol} N=runtime block_size={block_size} vec={vec} "
+            f"bytes={len(artifact.hsaco)} path={out_path}"
+        )
+
+
 def main() -> int:
     out_dir = sys.argv[1] if len(sys.argv) > 1 else "."
     os.makedirs(out_dir, exist_ok=True)
 
     # f16 kernels (layernorm2d/ family, dtype=f16 constraint per kernel)
     _emit_static(out_dir, CONFIGS, "f16")
-    # bf16 kernels -- diffusion transformers run bf16.
+    _emit_dynamic(out_dir, DYNAMIC_CONFIGS, "f16")
+
+    # bf16 kernels -- diffusion transformers run bf16; the runtime-N dynamic
+    # kernels share the same DYNAMIC_CONFIGS table (dtype is the only difference).
     _emit_static(out_dir, CONFIGS_BF16, "bf16")
+    _emit_dynamic(out_dir, DYNAMIC_CONFIGS, "bf16")
     return 0
 
 
