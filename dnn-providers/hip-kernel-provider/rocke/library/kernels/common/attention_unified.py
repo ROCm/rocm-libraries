@@ -1884,7 +1884,14 @@ def _gfx942_bf16_wide_geometry(problem: UnifiedAttentionProblem) -> Tuple[int, b
         # (C-twin parity GREEN); only the selector routing changes.
         if _enable_gfx942_d128_smalltile_doublek(problem):
             return 2, False
-        return 2, True
+        # K-single requires block_m <= tile_size (Q aliases the lone K slot).
+        # Derive block_m from the nw this branch returns so a later nw bump can't
+        # silently stale the guard (the exact hazard this fix addresses); mw=32 is
+        # the 32x32x8 transposed MFMA's fixed M-per-warp, pinned at the
+        # supports_tiled_2d / _tiled_spec_from_problem call sites.
+        nw = 2
+        block_m = nw * 32
+        return nw, block_m <= _gfx942_bf16_wide_tile_size(problem)
     return 4, False
 
 
