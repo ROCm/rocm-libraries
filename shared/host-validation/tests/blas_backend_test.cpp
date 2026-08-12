@@ -96,16 +96,15 @@ void testPartialOutputSelection() {
         ScalarType::Float32);
     problem.outputSelection = OutputSelection::explicitIndices({0, 3});
 
-    const GemmSupportInfo support =
-        queryGemmSupport(problem,
-                         {
-                             .backend = GemmBackend::Blas,
-                             .requireRequestedBackend = true,
-                         },
-                         &backend);
-    require(!support.supported &&
-                support.reason == "BLAS backend requires complete output selection.",
-            "BLAS backend support query accepted partial output selection.");
+    const GemmSupportInfo support = queryGemmSupport(problem,
+                                                     {
+                                                         .backend = GemmBackend::Blas,
+                                                         .requireRequestedBackend = true,
+                                                     },
+                                                     &backend);
+    require(
+        !support.supported && support.reason == "BLAS backend requires complete output selection.",
+        "BLAS backend support query accepted partial output selection.");
 
     bool rejectedRequiredBackend = false;
     try {
@@ -121,13 +120,12 @@ void testPartialOutputSelection() {
     require(rejectedRequiredBackend, "Required BLAS execution accepted partial output selection.");
     require(d == untouched, "Rejected BLAS execution modified output.");
 
-    const GemmResult fallback =
-        referenceGemm(problem,
-                      {
-                          .backend = GemmBackend::Blas,
-                          .requireRequestedBackend = false,
-                      },
-                      &backend);
+    const GemmResult fallback = referenceGemm(problem,
+                                              {
+                                                  .backend = GemmBackend::Blas,
+                                                  .requireRequestedBackend = false,
+                                              },
+                                              &backend);
     require(fallback.runInfo.backendUsed == GemmBackend::Canonical &&
                 fallback.runInfo.fallbackReason == support.reason &&
                 fallback.runInfo.outputElementsComputed == 2,
