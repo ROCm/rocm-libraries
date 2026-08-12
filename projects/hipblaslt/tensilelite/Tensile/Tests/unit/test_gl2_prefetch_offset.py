@@ -180,10 +180,18 @@ class GL2Config:
                               # True = contiguous chunks (group g starts after the
                               # lower groups' runs, steps one at a time).
     k_iters: int = 8          # unroll iterations in the summation loop; programmed as
-                              # SizesSum = k_iters * DepthU. Only the contiguous
-                              # layout reads it (numIter = SizesSum / DepthU), where
+                              # SizesSum = k_iters * DepthU. The contiguous GSU layout
+                              # reads it (numIter = SizesSum / DepthU), where
                               # k_iters % gsu picks how many groups get an extra
-                              # iteration.
+                              # iteration, and it is the numIter the StaggerU rotation
+                              # wraps at (per group; see num_iters).
+    stagger: int = None       # StaggerUIter, the number of unroll iterations to rotate
+                              # the summation loop by. None leaves the StaggerU paths
+                              # out entirely; an int (0 included) emits them, so 0
+                              # covers "stagger code generated, StaggerU off at
+                              # runtime" -- what every non-cluster GL2 kernel now
+                              # builds. Must be < the smallest group's numIter, which
+                              # declareStaggerParms guarantees in production.
 
     @property
     def n_wg(self):
@@ -192,6 +200,10 @@ class GL2Config:
     @property
     def gsu_on(self):
         return self.gsu > 0
+
+    @property
+    def stagger_on(self):
+        return self.stagger is not None
 
     @property
     def n_groups(self):
@@ -287,6 +299,38 @@ def gsu_iter_stride(cfg):
     scaling in GL2Prefetch.applyGSUChunk: a whole GSU round for interleaved
     chunks, a single iteration for contiguous ones (and with GSU off)."""
     return cfg.n_groups if (cfg.gsu_on and not cfg.gsuc) else 1
+
+
+def num_iters(cfg, group):
+    """Unroll iterations in `group`'s chunk -- the LoopCounterL the kernel runs
+    with, and the modulus the StaggerU rotation wraps at.
+
+    With numIter = q*G + r the first r groups get q+1 iterations and the rest
+    get q, in both chunk layouts: the contiguous one hands out the longer runs
+    first, and the interleaved one leaves the extra iterations with the low
+    groups because they start earlier."""
+    if not cfg.gsu_on:
+        return cfg.k_iters
+    q, r = divmod(cfg.k_iters, cfg.n_groups)
+    return q + (1 if group < r else 0)
+
+
+def stagger_chunk_idx(cfg, stage, group):
+    """Index into `group`'s chunk that stage `stage` prefetches.
+
+    Stage s sits at prefetch position PGR + s of the stream: PGR from the
+    calculateStartAddr pre-skip, plus one incrementAddr per later stage. Two
+    things bend that into a chunk index:
+      - the end-of-K freeze pins the position at the last one in the chunk, and
+      - StaggerU rotates the chunk, so a position lands on
+        (StaggerUIter + position) % numIter rather than on the position itself.
+    Without StaggerU the position is the index and the freeze never engages
+    within the stages a config runs, so this collapses to PGR + stage."""
+    pos = cfg.pgr + stage
+    if not cfg.stagger_on:
+        return pos
+    n = num_iters(cfg, group)
+    return (cfg.stagger + min(pos, n - 1)) % n
 
 
 def mt_tiles(spec, cfg):
@@ -445,6 +489,97 @@ CONFIGS = [
     # a 4-way K split, so the chunk offset is the only thing distinguishing the wgs.
     GL2Config("gsu4_nocluster", [_A(True, 256), _B(True, 256)], cluster=(1, 1),
               gsu=4, k_iters=12),
+
+    # ---- StaggerU. The prefetch has to follow the same rotated K order as the
+    # real load stream, which splits into a start shifted by StaggerUIter and a
+    # one-off wrap back to iteration 0 partway through. Each config below picks
+    # its numIter and rotation so the wrap falls on a stage the kernel actually
+    # exports, since a prefetch that never rolls over is indistinguishable from
+    # a plain shift. Stage s prefetches (StaggerUIter + PGR + s) % numIter, so
+    # the wrap lands on stage numIter - StaggerUIter - PGR. ----
+    # StaggerU off at runtime (StaggerUIter==0) with the rotation code emitted
+    # anyway -- what every non-cluster GL2 kernel now builds, and the case where
+    # a stray rotation or an early wrap would be pure regression.
+    GL2Config("su_off", [_A(True, 256), _B(True, 256)], cluster=(2, 2), stagger=0),
+    # Plain rotation, wrap on stage 3 of 0..4 (8 - 3 - 2), so stages before and
+    # after the roll-over are both checked. Mixed layouts: the wrap is one step
+    # of each tensor's own increment, not a shared byte count.
+    GL2Config("su_wrap", [_A(True, 256), _B(False, 256)], cluster=(2, 2),
+              stagger=3, k_iters=8, n_inc=4),
+    # Wrap on stage 1, which is the prologue increment rather than an in-loop
+    # one: it runs before the loop counter starts stepping and is not guarded by
+    # the end-of-K freeze, so it compares against a different counter value.
+    GL2Config("su_wrap_prologue", [_A(True, 384), _B(True, 384)], cluster=(2, 1),
+              stagger=3, k_iters=6, n_inc=3),
+    # Rotation running into the end-of-K freeze: numIter 6 wraps on stage 3 and
+    # freezes from stage 4 (counter <= PGR+PGL2), so the last stages must all sit
+    # on the final iteration instead of walking off the end of the chunk.
+    GL2Config("su_freeze", [_A(False, 256), _B(False, 256)], cluster=(2, 2),
+              stagger=1, k_iters=6, n_inc=5),
+    # PGR 3: calculateStagger shifts StaggerUIter by PGR instead of 2, and the
+    # start pre-skip grows to match, so both halves have to move together.
+    GL2Config("su_pgr3", [_A(True, 256), _B(True, 256)], cluster=(2, 2),
+              pgr=3, stagger=2, k_iters=8, n_inc=4),
+    # PGR 3 with StaggerU off: from PGR 3 up, calculateStagger skips the rewrite
+    # when the rotation is 0, which parks the wrap-target at a counter value the
+    # freeze has to swallow. Getting this wrong wraps a non-staggered kernel.
+    GL2Config("su_pgr3_off", [_A(True, 256), _B(False, 256)], cluster=(2, 2),
+              pgr=3, stagger=0, k_iters=8, n_inc=4),
+    # ---- PGR 1. calculateStagger still shifts StaggerUIter by 2, so pf no longer
+    # equals the PGR the prefetch stream is actually offset by and the roll-over
+    # sits one counter step off the plain PrefetchGL2 lead (gl2StaggerWrapOffset).
+    # Driving the offset straight off PrefetchGL2, as PGR>=2 can, rolls these over
+    # one stage early. ----
+    # Wrap on stage 3 of 0..4 (8 - 4 - 1), an in-loop increment with stages either
+    # side of it.
+    GL2Config("su_pgr1", [_A(True, 256), _B(False, 256)], cluster=(2, 2),
+              pgr=1, stagger=4, k_iters=8, n_inc=4),
+    # Wrap on stage 1, the prologue increment: its offset is PGR+1-pf, which is 0
+    # at PGR 1 rather than the 1 that PGR>=2 uses.
+    GL2Config("su_pgr1_prologue", [_A(True, 384), _B(True, 384)], cluster=(2, 1),
+              pgr=1, stagger=4, k_iters=6, n_inc=3),
+    # Rotation running into the end-of-K freeze at PGR 1: wrap on stage 4, freeze
+    # from stage 5, so the roll-over and the clamp are both exercised.
+    GL2Config("su_pgr1_freeze", [_A(False, 256), _B(False, 256)], cluster=(2, 2),
+              pgr=1, stagger=1, k_iters=6, n_inc=5),
+    # PGR 1 with StaggerU off. The offset parks the wrap-target exactly on the
+    # freeze boundary (counter PGR+PGL2), so the stages run right onto it and the
+    # freeze has to swallow the roll-over -- otherwise an unrotated stream jumps
+    # back to the start of K. n_inc reaches that counter, which the shorter
+    # StaggerU-off configs above do not.
+    GL2Config("su_pgr1_off", [_A(True, 256), _B(False, 256)], cluster=(2, 2),
+              pgr=1, stagger=0, k_iters=8, n_inc=7),
+
+    # MX scales and sparse metadata under rotation: every tensor rotates by the
+    # same iteration count but wraps by its own increment, so a wrap value shared
+    # across tensors fails here even though the unrotated stages pass.
+    GL2Config("su_mx", [_A(True, 192), _B(True, 192), _MXSA(192), _MXSB(192)],
+              depth_u=256, mx_block=32, cluster=(2, 2), stagger=2, k_iters=7, n_inc=4),
+    GL2Config("su_sparse", [_A(True, 256), _B(True, 256), _M("A", False, 256)],
+              cluster=(2, 2), sparse=1, depth_u_metadata=64, stagger=2, k_iters=7, n_inc=4),
+    # Edge clamp + rotation: the K rotation translates the clamped free-dim
+    # footprint, it does not re-clamp it.
+    GL2Config("su_ntlu_edge", [_A(False, 256), _B(False, 256)], cluster=(2, 2),
+              size_i=384, size_j=384, stagger=2, k_iters=7, n_inc=4),
+
+    # ---- StaggerU x GlobalSplitU. The rotation is per group, wrapping inside
+    # that group's chunk, so numIter (and with it the wrap stage) differs group
+    # to group. Both chunk layouts are covered because the rotation composes
+    # with the chunk stride, which is a GSU round when interleaved and a single
+    # iteration when contiguous. ----
+    # Uneven interleaved split, 13 over 2 groups: group 0 owns 7 iterations and
+    # wraps on stage 3, group 1 owns 6 and wraps on stage 2. A wrap driven off
+    # the total instead of the group's own count fails on one of the two.
+    GL2Config("su_gsu2_interleaved_rem", [_A(True, 256), _B(False, 256)], cluster=(2, 2),
+              gsu=2, stagger=2, k_iters=13, n_inc=4),
+    # Contiguous chunks: the rotation rides on top of the group's start
+    # iteration, so start and rotation have to compose rather than replace.
+    GL2Config("su_gsu3_contiguous", [_A(True, 256), _B(True, 256)], cluster=(2, 1),
+              gsu=3, gsuc=True, stagger=2, k_iters=15, n_inc=4),
+    # Single group: the GSU and StaggerU paths are both emitted but the chunk is
+    # the whole loop, pinning down that neither perturbs the other.
+    GL2Config("su_gsu1", [_A(True, 256), _B(True, 256)], cluster=(2, 2),
+              gsu=1, stagger=2, k_iters=8, n_inc=4),
 ]
 
 
@@ -534,10 +669,12 @@ def _make_writer(kernel):
         a=SimpleNamespace(), b=SimpleNamespace(),
     )
     # gsuMaskHex/calculateLoopNumIterOffsetGsu back the contiguous-chunk branch of
-    # calculateGSUIterOffset; both come from the real writer so the test cannot
-    # drift from production's chunk arithmetic.
-    for m in ["strideRef", "allocTmpSgpr", "s_mul_u64_u32",
-              "gsuMaskHex", "calculateLoopNumIterOffsetGsu"]:
+    # calculateGSUIterOffset; loopChar/loopCounterName/loopCounter resolve the
+    # LoopCounterL the StaggerU rotation reads. All come from the real writer so
+    # the test cannot drift from production's arithmetic.
+    for m in ["strideRef", "allocTmpSgpr", "s_mul_u64_u32", "s_mul_i64_i32",
+              "gsuMaskHex", "calculateLoopNumIterOffsetGsu",
+              "loopChar", "loopCounterName", "loopCounter"]:
         setattr(w, m, types.MethodType(getattr(KWA, m), w))
     w.sgprPool.checkOut(6)  # reserve hardware sgprs (s0:1 kernarg ptr, etc.)
     return w
@@ -561,8 +698,10 @@ def build_kernel(cfg):
     """
     from rocisa.code import Module, TextBlock
     from rocisa.container import sgpr, ContinuousRegister
-    from rocisa.instruction import SMovB32
+    from rocisa.instruction import (SAddU32, SCMovB32, SCmpGtU32, SCmpLtU32, SCSelectB32,
+                                    SMovB32, SSubBU32, SSubU32)
     from Tensile.KernelWriterAssembly import GL2PrefetchLoad
+    from Tensile.KernelWriter import gl2StaggerWrapOffset, staggerPrefetchFactor
 
     init_rocisa(wavesize=WAVESIZE)
     kernel = _make_kernel(cfg)
@@ -583,6 +722,18 @@ def build_kernel(cfg):
         assert cfg.depth_u & (cfg.depth_u - 1) == 0, \
             f"{cfg.name}: GSU needs a power-of-2 DepthU, got {cfg.depth_u}"
 
+    if cfg.stagger_on:
+        smallest = min(num_iters(cfg, g) for g in range(cfg.n_groups))
+        # declareStaggerParms picks the rotation from a mask below the iteration
+        # count, so a rotation that does not fit in the chunk cannot occur.
+        assert cfg.stagger < smallest, \
+            f"{cfg.name}: stagger {cfg.stagger} must be < numIter {smallest}"
+        # Stage 1 goes through the prologue increment, which has no end-of-K
+        # freeze (production branches around it instead), so the chunk has to be
+        # long enough for position PGR+1 to be a real one.
+        assert smallest >= cfg.pgr + 2, \
+            f"{cfg.name}: stagger needs numIter >= PGR+2, got {smallest}"
+
     subtcs = {t.subtc for t in cfg.tensors}
 
     # ---- named sgprs (resolved via .set; values assigned in the prologue) ----
@@ -602,8 +753,21 @@ def build_kernel(cfg):
         # GSU packs the group count and the GSUC bit; SizesSum feeds numIter in the
         # contiguous branch.
         shared += ["GSU", "SizesSum"]
+    if cfg.stagger_on:
+        # StaggerUIter is the rotation; LoopCounterL is this group's numIter, and
+        # doubles as the clock the wrap and freeze compares run off (the epilogue
+        # reprograms it per stage to the value the unroll loop would hold there).
+        # NumIterL is harness-only: it keeps numIter live for that reprogramming.
+        shared += ["StaggerUIter", "LoopCounterL", "NumIterL"]
     for n in shared:
         w.sgprs[n] = w.sgprPool.checkOut(1, n, preventOverflow=False)
+    if cfg.stagger_on:
+        # WrapU{tc} is calculateStagger's roll-over distance, which the prefetch
+        # reuses rather than deriving its own. Production computes it after the
+        # rotation phase; the prologue here programs it directly.
+        for t in cfg.tensors:
+            w.sgprs[f"WrapU{t.tc}"] = w.sgprPool.checkOutAligned(
+                2, 2, f"WrapU{t.tc}", preventOverflow=False)
     if cfg.gsu_on:
         # 2 registers: calculateLoopNumIterOffsetGsu uses GSUSumIdx+1 as the
         # divide's remainder scratch. Allocated before the Address{tc} pairs so the
@@ -658,6 +822,45 @@ def build_kernel(cfg):
         for t, tp in tps:
             body.add(comp.setIncrement(w, kernel, tp))
             body.add(comp.calculateStartAddr(w, kernel, tp))
+
+    # ---- StaggerU rotation, in production's order: gl2PrefetchApplyStagger runs
+    # after declareStaggerParms (StaggerUIter still the plain rotation amount)
+    # and before calculateStagger rewrites StaggerUIter into the loop-counter
+    # value the wrap compares against. The rewrite is replayed here so the two
+    # halves are exercised against the same register the kernel would see. ----
+    if cfg.stagger_on:
+        with w.allocTmpSgpr(4, 2, tag="gl2_stagger") as tmpSgprRes:
+            body.add(comp.staggerStartIterDelta(w, kernel, tmpSgprRes.idx, tmpSgprRes.idx + 1))
+            for t, tp in tps:
+                body.add(comp.applyStaggerStart(w, kernel, tp, tmpSgprRes.idx, tmpSgprRes.idx + 2))
+        # WrapU{tc}, as calculateStagger would leave it. Production derives it
+        # from GlobalReadIncs{tc}; there is no real load stream here, so it comes
+        # off GL2PrefetchInc{tc} instead -- which is the premise that lets the
+        # prefetch share the register in the first place, and is why this is
+        # spelled out rather than called into the component.
+        for t, tp in tps:
+            wrap, inc = f"WrapU{t.tc}", f"GL2PrefetchInc{t.tc}"
+            body.addModuleAsFlatItems(w.s_mul_i64_i32(
+                sgpr(f"{wrap}+0"), sgpr(f"{wrap}+1"),
+                sgpr("LoopCounterL"), sgpr(inc), "bytes accessed by the unroll loop"))
+            body.add(SSubU32(dst=sgpr(f"{wrap}+0"), src0=sgpr(inc), src1=sgpr(f"{wrap}+0"),
+                             comment="remove one iteration"))
+            body.add(SSubBU32(dst=sgpr(f"{wrap}+1"), src0=0, src1=sgpr(f"{wrap}+1"),
+                              comment="remove one iteration"))
+        # calculateStagger converts the rotation S' into the loop-counter value S
+        # the real stream's wrap compares against, S = S' + pf. From PGR 3 up the
+        # rewrite is skipped when StaggerU is off at runtime, which moves where a
+        # StaggerUIter of 0 wraps; below that it is unconditional.
+        pf = staggerPrefetchFactor(kernel)
+        if cfg.pgr >= 3:
+            with w.allocTmpSgpr(1, tag="gl2_stagger_pf") as t:
+                body.add(SAddU32(dst=sgpr(t.idx), src0=sgpr("StaggerUIter"), src1=pf))
+                body.add(SCmpGtU32(src0=sgpr("StaggerUIter"), src1=0, comment="StaggerU > 0?"))
+                body.add(SCMovB32(dst=sgpr("StaggerUIter"), src=sgpr(t.idx),
+                                  comment="calculateStagger: StaggerUIter -> wrap-target iteration"))
+        else:
+            body.add(SAddU32(dst=sgpr("StaggerUIter"), src0=sgpr("StaggerUIter"), src1=pf,
+                             comment="calculateStagger: StaggerUIter -> wrap-target iteration"))
 
     # ---- prologue ----
     prologue = Module("prologue")
@@ -720,6 +923,20 @@ def build_kernel(cfg):
         # WorkGroup2 holds the raw wg_z and is otherwise unused here (a GSU config is
         # never batched, so no Stride{tc}K is programmed).
         prologue.add(SMovB32(dst=sgpr("GSUSumIdx"), src=sgpr("WorkGroup2")))
+    if cfg.stagger_on:
+        prologue.add(SMovB32(dst=sgpr("StaggerUIter"), src=cfg.stagger))
+        # LoopCounterL = this group's numIter. calculateLoopNumIterGsu derives it
+        # in production; here the group index is already in hand, so pick the
+        # longer run directly for the first (k_iters % groups) groups.
+        # NumIterL keeps numIter around after the epilogue starts overwriting
+        # LoopCounterL to walk the stages.
+        q, r = divmod(cfg.k_iters, cfg.n_groups)
+        prologue.add(SMovB32(dst=sgpr("NumIterL"), src=q if cfg.gsu_on else cfg.k_iters))
+        if cfg.gsu_on and r:
+            prologue.add(SCmpLtU32(src0=sgpr("GSUSumIdx"), src1=r, comment="group gets a longer run?"))
+            prologue.add(SCSelectB32(dst=sgpr("NumIterL"), src0=q + 1, src1=q,
+                                     comment="numIter of this group's chunk"))
+        prologue.add(SMovB32(dst=sgpr("LoopCounterL"), src=sgpr("NumIterL")))
     if cfg.n_regions > 1:
         # WGOUT = (wg_z*cy + wg_y)*cx + wg_x, then * n_out_per_wg. WorkGroup2 is 0
         # when not batched and WorkGroup0/1 are 0 without a cluster, so this one
@@ -763,12 +980,45 @@ def build_kernel(cfg):
             epi.add(TextBlock("  flat_store_b32 v[%d:%d], v%d\n" % (a_lo, a_hi, val)))
             k += 1
 
+    def set_loop_counter(stage):
+        """Drive LoopCounterL to the value the unroll loop would hold at `stage`.
+
+        The counter is what the wrap and freeze compares run off, so the stages
+        only mean anything if it steps the way production's does. Anchoring on
+        the real stream: it wraps at LoopCounterL == StaggerUIter, i.e. when its
+        own next position would be numIter, and the prefetch sits PrefetchGL2
+        positions ahead of it. That fixes the counter at prefetch position j to
+        numIter + PGR + PGL2 - j, and stage s prefetches position PGR + s.
+        Stage 1 is the odd one out: it is the prologue increment, which runs
+        before the loop starts stepping the counter at all, so it still sees the
+        initial numIter."""
+        delta = 0 if stage <= 1 else cfg.pgl - stage
+        if delta == 0:
+            epi.add(SMovB32(dst=sgpr("LoopCounterL"), src=sgpr("NumIterL")))
+        elif delta > 0:
+            epi.add(SAddU32(dst=sgpr("LoopCounterL"), src0=sgpr("NumIterL"), src1=delta))
+        else:
+            epi.add(SSubU32(dst=sgpr("LoopCounterL"), src0=sgpr("NumIterL"), src1=-delta))
+
     layout = []
     region = 0
     for stage in range(n_stages):
         if stage > 0:                          # advance every tensor by one inc
-            for t, tp in tps:
-                epi.add(comp.incrementAddr(w, kernel, tp))
+            tpList = [tp for _, tp in tps]
+            if not cfg.stagger_on:
+                epi.add(comp.incrementAddr(w, kernel, tpList))
+            else:
+                set_loop_counter(stage)
+                # Stage 1 replays the PrefetchGL2==2 prologue increment (rolls
+                # over one counter step later than the loop's, and is guarded by
+                # a branch rather than the freeze); later stages replay the
+                # in-loop one.
+                prologueStep = (stage == 1)
+                steps = 1 if prologueStep else cfg.pgl
+                epi.add(comp.incrementAddr(
+                    w, kernel, tpList,
+                    staggerWrapOffset=gl2StaggerWrapOffset(kernel, steps),
+                    freezeIter=None if prologueStep else cfg.pgr + cfg.pgl))
         for t, tp in tps:
             num_loads = tp["gl2nl"]
             export_tensor(t, tp, region)
@@ -891,8 +1141,9 @@ def expected_offsets(spec, cfg, stage=0, batch=0, group=0):
     `group` is the GSU group, which shifts the footprint onto that group's K
     chunk. Both the chunk start and the stage stride are whole multiples of the
     one-DepthU increment, so the K shift is
-        (startIter(group) + (PGR + stage) * iterStride) * inc
-    with GSU off collapsing to the plain (PGR + stage) * inc.
+        (startIter(group) + chunkIdx(stage, group) * iterStride) * inc
+    with GSU off collapsing to the plain chunkIdx * inc. chunkIdx is PGR + stage
+    unless StaggerU rotates the chunk; see stagger_chunk_idx.
 
     `batch` adds the StridedBatched shift batch * Stride{tc}K * bpe (the
     WorkGroup2 * batchStride term calculateStartAddr folds into the base
@@ -920,7 +1171,7 @@ def expected_offsets(spec, cfg, stage=0, batch=0, group=0):
         edge = size_free - 1
     coal_to_mt = (spec.is_mx or spec.tlu)    # MT offset & clamp land in coal (else perp)
     gps_elems = round(GPS / bpe)
-    k_iter = gsu_start_iter(cfg, group) + (cfg.pgr + stage) * gsu_iter_stride(cfg)
+    k_iter = gsu_start_iter(cfg, group) + stagger_chunk_idx(cfg, stage, group) * gsu_iter_stride(cfg)
     shift = k_iter * inc_bytes(spec, cfg)
     if cfg.batched:
         shift += batch * round(batch_stride_elems(spec, cfg) * bpe)

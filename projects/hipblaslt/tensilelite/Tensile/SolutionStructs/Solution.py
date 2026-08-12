@@ -5903,8 +5903,15 @@ class Solution(collections.abc.Mapping):
       if not isaInfoMap[isa].asmCaps["HasGlobalPrefetch"]:
         reject(state, printRejectionReason, "ISA %s does not support global prefetch" % isa)
         return
-      # TODO: support staggerU if needed
-      _disableRuntimeStaggerU(state)
+      # StaggerU rotates the prefetch stream along with the loads (see
+      # Components/GL2Prefetch.py). What it leans on is that the rotation is
+      # applied once per tile, between declareStaggerParms and calculateStagger,
+      # which the persistent-tile handoff does not run for the next tile's
+      # prefetch addresses.
+      # A workgroup cluster already forces StaggerU off (it defeats cross-WG
+      # multicast), so the cluster case never reaches the prefetch rotation.
+      if state["PrefetchAcrossPersistent"]:
+        _disableRuntimeStaggerU(state)
       # GSU is applied to the prefetch stream in Components/GL2Prefetch.py, which
       # offsets each workgroup onto its own K chunk and widens the per-iteration
       # step to the chunk stride. Runtime user override is not wired up yet, so the

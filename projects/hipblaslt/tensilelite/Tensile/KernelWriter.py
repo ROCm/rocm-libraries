@@ -84,6 +84,37 @@ from pprint import pprint
 def _needsPreLoopLocalReadDrain(kernel, numItersPLR, preLoopLocalReadDrainEmitted):
   return bool(numItersPLR and kernel["UseCustomMainLoopSchedule"] and kernel["ForceUnrollSubIter"]
               and not preLoopLocalReadDrainEmitted)
+def staggerPrefetchFactor(kernel) -> int:
+  """Iterations calculateStagger folds into StaggerUIter.
+
+  StaggerU hands the kernel a rotation amount S'; calculateStagger rewrites the
+  register into S' + pf, the loop-counter value the *loads* roll over at. pf is
+  not PrefetchGlobalRead below PGR 3: PGR 1 and PGR 2 split their increments
+  differently between the prologue and the loop but arrive at the roll-over on
+  the same counter, so both use 2.
+  """
+  if kernel["PrefetchGlobalRead"] >= 3:
+    return kernel["PrefetchGlobalRead"]
+  return 2 if kernel["PrefetchGlobalRead"] else 1
+
+
+def gl2StaggerWrapOffset(kernel, steps: int) -> int:
+  """Counter distance from the loads' roll-over to the GL2 prefetch's.
+
+  The prefetch walks the same rotated K order as the loads, only further along
+  it: PrefetchGlobalRead iterations from the calculateStartAddr pre-skip, plus
+  the `steps` increments it has already issued (1 at the prologue step,
+  PrefetchGL2 once the loop is stepping). So it reaches the roll-over at counter
+  S' + PGR + steps, while the compare is written against StaggerUIter = S' + pf.
+
+  That is only `steps` when pf == PrefetchGlobalRead. At PGR 1 pf is 2, so the
+  offset is one lower and the prefetch rolls over one counter step later than
+  the plain lead would suggest. With StaggerU off at runtime (S' == 0) the
+  offset puts the compare exactly on the guard each site already has -- the
+  end-of-K freeze in the loop, the counterL <= PGR+1 branch in the prologue --
+  so the roll-over is swallowed instead of firing on an unrotated stream.
+  """
+  return kernel["PrefetchGlobalRead"] + steps - staggerPrefetchFactor(kernel)
 
 
 # Make const values immutable
@@ -3088,6 +3119,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       if not forceNoTileCode and self.states.staggerUCode:
         module.add(self.declareStaggerParms(kernel))
+        # Rotate the GL2 prefetch stream before calculateStagger rewrites
+        # StaggerUIter from the rotation amount into the wrap-target iteration.
+        if kernel["PrefetchGL2"]:
+          module.add(self.gl2PrefetchApplyStagger(kernel, tensorParametersA, tensorParametersB))
         # Calculate stagger A(MXSA)
         module.add(self.calculateStagger(kernel, tensorParametersA))
         if kernel["ProblemType"]["MXBlockA"]:
@@ -4316,19 +4351,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.codes.gl2PrefetchIncrement = Module()
     self.codes.gl2Prefetch = Module()
     if kernel["PrefetchGL2"]:
-      loopCounter = self.loopCounter(kernel, self.states.unrollIdx)
       self.codes.gl2PrefetchIncrement = Module()
-      self.codes.gl2PrefetchIncrement.add(SCmpLeU32(loopCounter, kernel["PrefetchGlobalRead"] + kernel["PrefetchGL2"], \
-        comment="counterL<=PGR+GL2"))
-      self.codes.gl2PrefetchIncrement.add(SCMovB32(sgpr("GL2PrefetchIncA"), 0))
-      self.codes.gl2PrefetchIncrement.add(SCMovB32(sgpr("GL2PrefetchIncB"), 0))
-      if kernel["ProblemType"]["MXBlockA"]:
-        self.codes.gl2PrefetchIncrement.add(SCMovB32(sgpr("GL2PrefetchIncMXSA"), 0))
-      if kernel["ProblemType"]["MXBlockB"]:
-        self.codes.gl2PrefetchIncrement.add(SCMovB32(sgpr("GL2PrefetchIncMXSB"), 0))
-      if kernel["enableTDMMetadata"]:
-        self.codes.gl2PrefetchIncrement.add(SCMovB32(sgpr("GL2PrefetchIncMetadata"), 0))
-      self.codes.gl2PrefetchIncrement.add(self.gl2PrefetchIncrementAddr(kernel, tensorParametersA, tensorParametersB))
+      self.codes.gl2PrefetchIncrement.add(self.gl2PrefetchIncrementAddr( \
+        kernel, tensorParametersA, tensorParametersB, \
+        staggerWrapOffset=gl2StaggerWrapOffset(kernel, kernel["PrefetchGL2"]) \
+          if self.states.staggerUCode else None, \
+        freezeIter=kernel["PrefetchGlobalRead"] + kernel["PrefetchGL2"]))
       self.codes.gl2Prefetch = Module()
       self.codes.gl2Prefetch.add(self.gl2PrefetchIssueLoad(kernel, tensorParametersA, tensorParametersB))
       
@@ -5853,7 +5881,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if kernel["PrefetchGL2"] == 2:
         module.add(SCmpLeU32(src0=loopCounter, src1=hex(kernel["PrefetchGlobalRead"]+1), comment="counterL<=PGR+1"))
         module.add(SCBranchSCC1(labelName=skipGL2Label.getLabelName(), comment=""))
-        module.add(self.gl2PrefetchIncrementAddr(kernel, tensorParametersA, tensorParametersB))
+        # One increment issued so far, and the loop counter has not started
+        # stepping, so this step's roll-over lands one short of the in-loop
+        # offset. The branch above already covers the end of K, so no freeze here.
+        module.add(self.gl2PrefetchIncrementAddr(kernel, tensorParametersA, tensorParametersB, \
+          staggerWrapOffset=gl2StaggerWrapOffset(kernel, 1) if self.states.staggerUCode else None))
         module.add(self.gl2PrefetchIssueLoad(kernel, tensorParametersA, tensorParametersB))
       module.add(skipGL2Label)
 
@@ -11494,11 +11526,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
     return ""
   
   @abc.abstractmethod
+  def gl2PrefetchApplyStagger(self, kernel, tPA, tPB) -> Module:
+    return ""
+
+  @abc.abstractmethod
   def gl2PrefetchIssueLoad(self, kernel, tPA, tPB) -> Module:
     return ""
   
   @abc.abstractmethod
-  def gl2PrefetchIncrementAddr(self, kernel, tPA, tPB) -> Module:
+  def gl2PrefetchIncrementAddr(self, kernel, tPA, tPB, staggerWrapOffset=None, freezeIter=None) -> Module:
     return ""
 
   def _nextLdsToken(self, idx: int) -> int:
