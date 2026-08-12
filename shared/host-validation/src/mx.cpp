@@ -5,8 +5,8 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <cstdlib>
 #include <cstring>
+#include <exception>
 #include <limits>
 #include <optional>
 #include <roc/host_validation/mx.hpp>
@@ -15,10 +15,7 @@
 #include <vector>
 
 #include "detail/data_generation.hpp"
-
-#ifdef _OPENMP
-#include <omp.h>
-#endif
+#include "detail/threading.hpp"
 
 namespace roc::host_validation {
 namespace {
@@ -28,8 +25,6 @@ constexpr uint64_t boundedScaleRandomDomain = 0xa24baed4963ee407ULL;
 constexpr uint64_t unboundedDataRandomDomain = 0xd1b54a32d192ed03ULL;
 constexpr uint64_t unboundedScaleRandomDomain = 0x94d049bb133111ebULL;
 constexpr double twoPi = 6.28318530717958647692528676655900576;
-constexpr int defaultMaximumThreadCount = 8;
-constexpr size_t minimumElementsPerThread = 4096;
 
 size_t checkedMultiply(size_t first, size_t second, const char* message) {
     if (first != 0 && second > std::numeric_limits<size_t>::max() / first)
@@ -39,23 +34,6 @@ size_t checkedMultiply(size_t first, size_t second, const char* message) {
 
 size_t ceilDivide(size_t value, size_t divisor) {
     return value / divisor + static_cast<size_t>(value % divisor != 0);
-}
-
-int operationThreadCount(size_t elementCount) {
-#ifdef _OPENMP
-    if (omp_in_parallel()) return 1;
-    const int runtimeMaximum = std::max(1, omp_get_max_threads());
-    const char* configuredThreadCount = std::getenv("OMP_NUM_THREADS");
-    const int maximum = configuredThreadCount != nullptr && configuredThreadCount[0] != '\0'
-                            ? runtimeMaximum
-                            : std::min(runtimeMaximum, defaultMaximumThreadCount);
-    const size_t usefulThreadCount =
-        std::max(size_t{1}, ceilDivide(elementCount, minimumElementsPerThread));
-    return static_cast<int>(std::min(usefulThreadCount, static_cast<size_t>(maximum)));
-#else
-    (void)elementCount;
-    return 1;
-#endif
 }
 
 struct ScaleBlocking {
@@ -454,16 +432,10 @@ void generateQuantized(const MxGenerationProblem& problem, const ScaleBlocking& 
     const std::vector<double> dataValues = decodedDataValues(problem.dataType);
     const double maximumDataValue = detail::typeMaximum(problem.dataType);
 
-#ifdef _OPENMP
-#pragma omp parallel num_threads(threadCount)
-#endif
-    {
+    auto generateRange = [&](size_t firstScaleIndex, size_t endScaleIndex) {
         std::vector<double> blockValues(
             fixedScale ? 0 : std::min(blocking.blockSize, blocking.blockedExtent));
-#ifdef _OPENMP
-#pragma omp for schedule(static)
-#endif
-        for (size_t scaleIndex = 0; scaleIndex < blocking.scaleCount; ++scaleIndex) {
+        for (size_t scaleIndex = firstScaleIndex; scaleIndex < endScaleIndex; ++scaleIndex) {
             const auto [block, freeCoordinate] = blocking.blockAndFreeCoordinate(scaleIndex);
             const size_t blockElementCount = blocking.blockElementCount(block);
             uint8_t scaleRaw = fixedScale.value_or(0);
@@ -524,7 +496,36 @@ void generateQuantized(const MxGenerationProblem& problem, const ScaleBlocking& 
                     static_cast<float>(dataValues[dataRaw] * scaleValue);
             }
         }
+    };
+
+    if (threadCount == 1) {
+        generateRange(0, blocking.scaleCount);
+        return;
     }
+
+#ifdef _OPENMP
+    std::exception_ptr error;
+#pragma omp parallel num_threads(threadCount)
+    {
+        try {
+            const size_t threadIndex = static_cast<size_t>(omp_get_thread_num());
+            const size_t actualThreadCount = static_cast<size_t>(omp_get_num_threads());
+            const size_t baseCount = blocking.scaleCount / actualThreadCount;
+            const size_t remainder = blocking.scaleCount % actualThreadCount;
+            const size_t first = threadIndex * baseCount + std::min(threadIndex, remainder);
+            const size_t count = baseCount + static_cast<size_t>(threadIndex < remainder);
+            generateRange(first, first + count);
+        } catch (...) {
+#pragma omp critical(roc_host_validation_mx_generation_error)
+            {
+                if (!error) error = std::current_exception();
+            }
+        }
+    }
+    if (error) std::rethrow_exception(error);
+#else
+    generateRange(0, blocking.scaleCount);
+#endif
 }
 
 void validateRecipe(const MxGenerationProblem& problem) {
@@ -611,7 +612,7 @@ MxGenerationResult generateMx(const MxGenerationProblem& problem) {
     std::vector<uint32_t> scaleIndexValues(logicalElementCount, 0);
     std::vector<float> referenceValues(logicalElementCount, 0.0f);
     const int threadCount =
-        operationThreadCount(std::max(logicalElementCount, physicalElementCount));
+        detail::operationThreadCount(std::max(logicalElementCount, physicalElementCount));
 
     if (problem.data.mode == MxGenerationMode::Unbounded)
         generateUnbounded(problem, blocking, dataRawValues, scaleRawValues, scaleIndexValues,

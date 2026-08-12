@@ -18,6 +18,10 @@ comparison used by ROCm library clients and tests.
     epilogues, LayerNorm, reductions, softmax, structured sparsity, and comparison.
   - Numerical implementations are compiled into the library. Consumers include
     the operation header they need or `validation.hpp`.
+  - Ordinary tensor generation uses optional private OpenMP parallelism with a
+    work-aware default cap of eight threads. `OMP_NUM_THREADS` overrides the
+    cap; small, nested, packed, or potentially aliased generation remains
+    serial.
   - `typed_comparison.hpp` is an explicit opt-in extension for caller-defined
     scalar wrappers and the measured pointwise fast path.
 - `roc::host-validation-blas`
