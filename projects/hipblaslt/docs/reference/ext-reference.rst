@@ -44,6 +44,13 @@ GemmInputs
     :protected-members:
     :private-members:
 
+GemmTuning
+-------------------------------------
+.. doxygenstruct:: hipblaslt_ext::GemmTuning
+    :members:
+    :protected-members:
+    :private-members:
+
 hipBLASLtExt GEMM class reference
 =================================
 
