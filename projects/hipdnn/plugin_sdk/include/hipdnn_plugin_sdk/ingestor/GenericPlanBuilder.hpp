@@ -92,6 +92,11 @@ public:
      * The maximum suffices because the buffer is reused rather than partitioned: kernels
      * launch one at a time on one stream, so a candidate's scratch is live only while it
      * runs. A kernel needing less over-allocates, which is accepted.
+     *
+     * @throws HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR) if the catalog
+     *         is empty. Same failure as buildPlan(), for the same reason (see its doc).
+     * @throws HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INVALID_VALUE) if knob
+     *         filtering empties a non-empty catalog. See throwUnsatisfiableKnobFilter().
      */
     size_t getMaxWorkspaceSize(const THandle& handle,
                                const IGraph& opGraph,
@@ -100,12 +105,17 @@ public:
         const auto context = contextFor(handle, opGraph);
         // Unsorted, but still one lookup for the entries and the bound state together.
         const auto catalog = _stateManager.unsortedCatalog(context);
+        if(catalog.entries.empty())
+        {
+            throwNoApplicableKernel();
+        }
+
         // Filtered before the max is taken, same contract as buildPlan: the caller's
         // knob settings are a request for a subset of the catalog, not a value the
         // survivors are merely ranked by.
         const auto filtered
             = applyKnobFilter(catalog.entries, executionSettings.ingestorKnobFilter);
-        if(!catalog.entries.empty() && filtered.empty())
+        if(filtered.empty())
         {
             // Same failure buildPlan reports for the same reason: a workspace query and
             // a plan build must not disagree about whether a knob combination is legal.
@@ -148,16 +158,10 @@ public:
      *        set.
      *
      * @throws HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR) if the catalog
-     *         is empty before knob filtering. Reaching here with nothing to build means
-     *         applicability accepted a graph this engine cannot serve at all — RFC 0017
-     *         §8.6 makes that a bug, not a legal outcome, so it surfaces as a failed
-     *         plan build rather than a silent decline. Distinct from the case below:
-     *         this is a matcher/applicability disagreement, not a bad caller request.
-     * @throws HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INVALID_VALUE) if the catalog
-     *         is non-empty but knob filtering empties it. See
-     *         throwUnsatisfiableKnobFilter() for why this is the caller's fault rather
-     *         than the engine's: a graph this engine can serve exists, but no kernel
-     *         implements the specific combination of values the caller asked for.
+     *         is empty before knob filtering: a matcher/applicability disagreement, not
+     *         a bad caller request. Same failure getMaxWorkspaceSize() reports.
+     * @throws HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INVALID_VALUE) if knob
+     *         filtering empties a non-empty catalog. See throwUnsatisfiableKnobFilter().
      */
     void buildPlan(const THandle& handle,
                    const IGraph& opGraph,
@@ -170,9 +174,7 @@ public:
         const auto catalog = _stateManager.sortedCatalog(context);
         if(catalog.entries.empty())
         {
-            throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                                        "engine '" + _engine.name
-                                            + "' accepted this graph but has no applicable kernel");
+            throwNoApplicableKernel();
         }
 
         // Filtered after ranking rather than before: filtering and ranking commute (see
@@ -351,6 +353,17 @@ private:
             }
         }
         return filtered;
+    }
+
+    /**
+     * @brief Reports an empty catalog: shared by getMaxWorkspaceSize() and buildPlan(),
+     *        since both run only after isApplicable() already accepted this graph.
+     */
+    [[noreturn]] void throwNoApplicableKernel() const
+    {
+        throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                                    "engine '" + _engine.name
+                                        + "' accepted this graph but has no applicable kernel");
     }
 
     /**

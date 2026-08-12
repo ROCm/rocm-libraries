@@ -191,6 +191,30 @@ TEST(TestIngestorGenericPlanBuilder, BuildPlanThrowsInternalErrorOnAnEmptyRanked
     }
 }
 
+TEST(TestIngestorGenericPlanBuilder, GetMaxWorkspaceSizeThrowsInternalErrorOnAnEmptyCatalog)
+{
+    // Must agree with buildPlan()'s empty-catalog case above, not silently return 0.
+    const ScopedSymbols symbols("test.graph", rejectGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    const TestGraph graph(makeGraphId(0x9A));
+
+    try
+    {
+        builder.getMaxWorkspaceSize(0, graph, KnobFilterSettings{});
+        FAIL() << "expected HipdnnPluginException";
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& ex)
+    {
+        EXPECT_EQ(ex.getStatus(), HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
+        EXPECT_EQ(ex.getMessage(),
+                  "engine '" + engine.name + "' accepted this graph but has no applicable kernel");
+    }
+}
+
 TEST(TestIngestorGenericPlanBuilder, GetCustomKnobsReportsMinMaxStepAndRankedDefault)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
@@ -291,6 +315,10 @@ TEST(TestIngestorGenericPlanBuilder, UnsatisfiableKnobValueThrowsInvalidValueNam
         EXPECT_EQ(ex.getStatus(), HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
         EXPECT_NE(ex.getMessage().find(BLOCK_SIZE), std::string::npos);
         EXPECT_NE(ex.getMessage().find("999"), std::string::npos);
+        // Survivor count is the caller's only way to tell "graph matched nothing"
+        // apart from "graph matched, knobs excluded everything".
+        EXPECT_NE(ex.getMessage().find("2 kernel(s) matched the graph before knob filtering"),
+                  std::string::npos);
     }
 }
 
@@ -368,6 +396,64 @@ TEST(TestIngestorGenericPlanBuilder,
         EXPECT_EQ(ex.getStatus(), HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
         EXPECT_EQ(ex.getMessage(),
                   "engine '" + engine.name + "' accepted this graph but has no applicable kernel");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// readKnobFilter(): rejecting a non-integer setting for an engine-exposed knob.
+// ---------------------------------------------------------------------------
+
+TEST(TestIngestorGenericPlanBuilder, InitializeExecutionSettingsRejectsAFloatValuedKnobSetting)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig = makeFloatKnobEngineConfig(fbb, BLOCK_SIZE, 64.0);
+    const TestGraph graph(makeGraphId(0x9B));
+    KnobFilterSettings settings;
+
+    try
+    {
+        builder.initializeExecutionSettings(0, graph, engineConfig, settings);
+        FAIL() << "expected HipdnnPluginException";
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& ex)
+    {
+        EXPECT_EQ(ex.getStatus(), HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
+        EXPECT_EQ(ex.getMessage(),
+                  "engine '" + engine.name + "' knob '" + BLOCK_SIZE
+                      + "' must be set to an integer value");
+    }
+}
+
+TEST(TestIngestorGenericPlanBuilder, InitializeExecutionSettingsRejectsAStringValuedKnobSetting)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig = makeStringKnobEngineConfig(fbb, BLOCK_SIZE, "fast");
+    const TestGraph graph(makeGraphId(0x9C));
+    KnobFilterSettings settings;
+
+    try
+    {
+        builder.initializeExecutionSettings(0, graph, engineConfig, settings);
+        FAIL() << "expected HipdnnPluginException";
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& ex)
+    {
+        EXPECT_EQ(ex.getStatus(), HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
+        EXPECT_EQ(ex.getMessage(),
+                  "engine '" + engine.name + "' knob '" + BLOCK_SIZE
+                      + "' must be set to an integer value");
     }
 }
 

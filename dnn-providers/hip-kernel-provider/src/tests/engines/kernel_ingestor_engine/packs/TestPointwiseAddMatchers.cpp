@@ -195,6 +195,36 @@ INSTANTIATE_TEST_SUITE_P(
                                         /*includeThirdOperand=*/false,
                                         /*danglingInputBUid=*/DEFAULT_DANGLING_UID);
          }},
+        {"AVirtualOperand",
+         // A virtual tensor never appears in the launch's variant pack.
+         []() {
+             return buildPointwiseGraph(data_objects::PointwiseMode::ADD,
+                                        data_objects::DataType::FLOAT,
+                                        {1, 1, 1, 1},
+                                        std::nullopt,
+                                        /*binary=*/true,
+                                        /*explicitStrides=*/std::nullopt,
+                                        /*inputBDataType=*/std::nullopt,
+                                        /*includeThirdOperand=*/false,
+                                        /*danglingInputBUid=*/std::nullopt,
+                                        /*inputAVirtual=*/true);
+         }},
+        {"ARuntimePassByValueOperand",
+         // This pack's supported shape is indistinguishable from a pass-by-value
+         // scalar, whose variant-pack slot is a host pointer, not a device one.
+         []() {
+             return buildPointwiseGraph(data_objects::PointwiseMode::ADD,
+                                        data_objects::DataType::FLOAT,
+                                        {1, 1, 1, 1},
+                                        std::nullopt,
+                                        /*binary=*/true,
+                                        /*explicitStrides=*/std::nullopt,
+                                        /*inputBDataType=*/std::nullopt,
+                                        /*includeThirdOperand=*/false,
+                                        /*danglingInputBUid=*/std::nullopt,
+                                        /*inputAVirtual=*/false,
+                                        /*inputAIsRuntimePassByValue=*/true);
+         }},
     }),
     [](const ::testing::TestParamInfo<GraphMatcherRefusalCase>& info) { return info.param.name; });
 

@@ -15,11 +15,13 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include <hipdnn_plugin_sdk/ingestor/GenericPlan.hpp>
+#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
 
 #include "core/Container.hpp"
 #include "core/Context.hpp"
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
+#include "engines/kernel_ingestor_engine/packs/PointwiseAddMatchers.hpp"
 #include "engines/kernel_ingestor_engine/packs/PointwiseAddPack.hpp"
 #include "engines/kernel_ingestor_engine/packs/PointwiseAddSymbols.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/PointwiseAddTestGraphs.hpp"
@@ -77,6 +79,51 @@ TEST(TestKernelIngestorEngine, RegisterNativeIngestorSymbolsIsIdempotentAcrossRe
     EXPECT_NO_THROW(registerNativeIngestorSymbols());
     EXPECT_NO_THROW(registerNativeIngestorSymbols());
     EXPECT_NO_THROW(registerNativeIngestorSymbols());
+}
+
+TEST(TestKernelIngestorEngine, RegistrationFailureReportsTheSameCauseOnRetryAfterRollback)
+{
+    using hipdnn_plugin_sdk::ingestor::DispatchRegistry;
+
+    // Container's constructor already ran registration once for the process;
+    // unregister to drive controlled attempts, and always restore -- every other test
+    // resolves matching and dispatch through these symbols.
+    unregisterPointwiseAddMatchers();
+    DispatchRegistry<Handle>::unregisterSymbol(std::string(DISPATCH_SYMBOL));
+    struct RestoreGuard
+    {
+        ~RestoreGuard()
+        {
+            registerNativeIngestorSymbolsOnce();
+        }
+    } const restoreGuard;
+
+    // Occupies the dispatch symbol, so registerNativeIngestorSymbolsOnce() succeeds on
+    // every matcher and fails only on dispatch -- the partial-failure shape the
+    // rollback exists for.
+    DispatchRegistry<Handle>::registerSymbol(std::string(DISPATCH_SYMBOL), nullptr);
+
+    const auto attempt = [] {
+        try
+        {
+            registerNativeIngestorSymbolsOnce();
+        }
+        catch(const std::runtime_error& e)
+        {
+            return std::string(e.what());
+        }
+        ADD_FAILURE() << "expected a duplicate-symbol throw";
+        return std::string();
+    };
+
+    const auto firstMessage = attempt();
+    const auto secondMessage = attempt();
+
+    // Without rollback, the first attempt's matcher symbols stay registered and the
+    // second attempt fails on one of those instead -- a different, misleading cause.
+    EXPECT_EQ(firstMessage, secondMessage);
+
+    DispatchRegistry<Handle>::unregisterSymbol(std::string(DISPATCH_SYMBOL));
 }
 
 // ---------------------------------------------------------------------------

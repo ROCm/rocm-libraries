@@ -6,6 +6,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -31,6 +32,13 @@ using namespace hipdnn_plugin_sdk::ingestor;
 using namespace hipdnn_plugin_sdk::ingestor::testing;
 
 using StubEngine = GenericEngine<StubHandle, StubSettings, StubContext>;
+
+// GenericEngine holds a plan builder bound by reference to its own members (see the
+// class doc); relocating it would dangle those references.
+static_assert(!std::is_move_constructible_v<StubEngine>);
+static_assert(!std::is_move_assignable_v<StubEngine>);
+static_assert(!std::is_copy_constructible_v<StubEngine>);
+static_assert(!std::is_copy_assignable_v<StubEngine>);
 
 // ---------------------------------------------------------------------------
 // Construction: knob validation against the metadata schema.

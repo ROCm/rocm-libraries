@@ -202,13 +202,6 @@ struct EngineDescriptor
     /// int32, so a newer descriptor can carry a note value an older backend does not
     /// know without truncating it.
     std::vector<int32_t> behaviorNotes;
-    /// Numerical behavior this engine's kernels exhibit, from the same vocabulary RFC
-    /// 0017 §4 gives the UED (`tensor_core`, `reduced_precision_reduction`, and so on).
-    ///
-    /// Carried here but not yet reported: EngineDetails has no numerical-notes field, so
-    /// unlike behaviorNotes there is nothing to transport these through. Recorded so a
-    /// descriptor can state them and the gap is in the schema rather than in this type.
-    std::vector<int32_t> numericalNotes;
 };
 
 /// Which inputs a matcher reads, which decides how often it runs and what its failure

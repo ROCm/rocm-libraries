@@ -47,27 +47,38 @@ namespace hipdnn_plugin_sdk::ingestor
 /// Only graph-scoped matchers bind. Kernel-scoped ones run once per candidate, so what
 /// they resolved would be per-kernel state with nowhere in the catalog to live; the
 /// tokens a launch needs describe the problem, not the kernel chosen for it.
+///
+/// Must be thread-safe: the registry may call it concurrently, same contract as
+/// `IKernelDispatchHandler::launch`.
 using GraphMatcherFn = bool (*)(const MatchContext&, BoundTokens& bound);
 
 /// A kernel-scoped applicability check: also reads the candidate's metadata, so it runs
-/// once per surviving kernel and disqualifies that kernel alone.
+/// once per surviving kernel and disqualifies that kernel alone. Must be thread-safe.
 using KernelMatcherFn = bool (*)(const MatchContext&, const KernelDefinition&);
 
 /// Scores one kernel for one problem. Higher is better.
 ///
 /// Deliberately never handed the catalog: see IKernelHeuristic for why that constraint
-/// is what keeps a knob-filtered query consistent with the default it reported.
+/// is what keeps a knob-filtered query consistent with the default it reported. Must be
+/// thread-safe.
 using ScoreFn = double (*)(const KernelDefinition&, const MatchContext&);
 
 /**
  * @brief The provider's registry of native implementations, keyed by symbol name.
  *
- * One instance per registered type per process, reached through the static accessors
- * below. Registration happens at static-init time from the provider's own translation
- * units; lookup happens on the applicability, ranking, and dispatch paths.
+ * One instance per registered type per loaded image (not per process: two plugin
+ * `.so`s each get their own, which is why lookup never crosses providers). Registration
+ * happens at static-init time from the provider's own translation units; lookup happens
+ * on the applicability, ranking, and dispatch paths.
  *
  * Guarded by a mutex because registration and lookup can race: a provider loaded on one
  * thread while another is already matching is unusual but not forbidden.
+ *
+ * Per-image isolation depends on the provider building with `CXX_VISIBILITY_PRESET
+ * hidden` and `--exclude-libs=ALL` (`src/CMakeLists.txt`): if a provider ever exported
+ * this template's symbols, two loaded copies of the same provider would share one
+ * registry and the second `registerSymbol()` would throw out of
+ * `hipdnnEnginePluginCreate`.
  *
  * @tparam T The registered callable or interface pointer type.
  */
@@ -109,13 +120,6 @@ public:
             throw std::runtime_error("unresolved native ingestor symbol: " + symbol);
         }
         return it->second;
-    }
-
-    static bool isRegistered(const std::string& symbol)
-    {
-        auto& self = instance();
-        const std::lock_guard<std::mutex> lock(self._mutex);
-        return self._symbols.find(symbol) != self._symbols.end();
     }
 
     /// @brief Removes @p symbol if present. Exists so a test can install a counting or

@@ -109,6 +109,22 @@ TEST(TestIngestorMatchContext, TryGetGraphIdReturnsNulloptForAGraphWithNoIdentit
     EXPECT_EQ(tryGetGraphId(graph), std::nullopt);
 }
 
+TEST(TestIngestorMatchContext, TryGetGraphIdReturnsNulloptForANilId)
+{
+    // A present-but-nil id must not read as a valid, cacheable key.
+    const TestGraph graph(makeNilGraphId());
+
+    EXPECT_EQ(tryGetGraphId(graph), std::nullopt);
+}
+
+TEST(TestIngestorMatchContext, TryGetGraphIdReturnsNulloptForANonV4Id)
+{
+    // Any non-v4 id is as unable to promise per-graph uniqueness as nil.
+    const TestGraph graph(makeNonV4GraphId(0x55));
+
+    EXPECT_EQ(tryGetGraphId(graph), std::nullopt);
+}
+
 } // namespace
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

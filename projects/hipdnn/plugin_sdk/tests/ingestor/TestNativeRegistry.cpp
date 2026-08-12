@@ -54,17 +54,6 @@ TEST(TestIngestorNativeRegistry, FailsClosedOnUnknownSymbol)
     EXPECT_THROW(GraphMatcherRegistry::resolve("registry.never_registered"), std::runtime_error);
 }
 
-TEST(TestIngestorNativeRegistry, IsRegisteredReflectsCurrentRegistrationState)
-{
-    EXPECT_FALSE(GraphMatcherRegistry::isRegistered("registry.is_registered_probe"));
-
-    GraphMatcherRegistry::registerSymbol("registry.is_registered_probe", acceptGraph);
-    EXPECT_TRUE(GraphMatcherRegistry::isRegistered("registry.is_registered_probe"));
-
-    GraphMatcherRegistry::unregisterSymbol("registry.is_registered_probe");
-    EXPECT_FALSE(GraphMatcherRegistry::isRegistered("registry.is_registered_probe"));
-}
-
 } // namespace
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

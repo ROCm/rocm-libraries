@@ -49,31 +49,6 @@ TEST(TestIngestorLruCache, RejectsZeroCapacity)
     EXPECT_THROW(IntCache(0), std::invalid_argument);
 }
 
-TEST(TestIngestorLruCache, ClearDropsEveryEntry)
-{
-    LruCache<int, std::string> cache(4);
-    cache.put(1, "one");
-    cache.put(2, "two");
-
-    cache.clear();
-
-    EXPECT_EQ(cache.size(), 0U);
-    EXPECT_FALSE(cache.get(1).has_value());
-    EXPECT_FALSE(cache.get(2).has_value());
-}
-
-TEST(TestIngestorLruCache, ClearOnAnAlreadyEmptyCacheIsANoop)
-{
-    LruCache<int, std::string> cache(4);
-
-    cache.clear();
-
-    EXPECT_EQ(cache.size(), 0U);
-    // The cache must still be usable afterwards, not left in some half-cleared state.
-    cache.put(1, "one");
-    EXPECT_TRUE(cache.get(1).has_value());
-}
-
 // ---------------------------------------------------------------------------
 // Eviction order: which entry a capacity-crossing insert evicts depends on recency,
 // not on insertion order, and a get() counts as a touch just as a put() does.

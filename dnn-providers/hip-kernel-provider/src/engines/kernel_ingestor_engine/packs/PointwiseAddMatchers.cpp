@@ -11,6 +11,7 @@
 
 #include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
 
@@ -171,6 +172,22 @@ bool pointwiseAddGraphMatches(const MatchContext& context, BoundTokens& bound)
         return false;
     }
 
+    // A virtual tensor never materializes into a device buffer, so it is absent from
+    // the variant pack findDeviceBuffer resolves at launch.
+    if(inputA->virtual_() || inputB->virtual_() || output->virtual_())
+    {
+        return false;
+    }
+
+    // A 1-element rank-4 tensor is also the shape of a pass-by-value scalar, whose
+    // variant-pack slot holds a host pointer, not a device one.
+    if(hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(inputA)
+       || hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(inputB)
+       || hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(output))
+    {
+        return false;
+    }
+
     // Uniform dtype across operands. Mixed-precision add is a different kernel, and
     // accepting it here would hand one binary operands it cannot read.
     if(inputA->data_type() != inputB->data_type() || inputA->data_type() != output->data_type())
@@ -236,9 +253,33 @@ void registerPointwiseAddMatchers()
 {
     GraphMatcherRegistry::registerSymbol(std::string(GRAPH_MATCHER_SYMBOL),
                                          &pointwiseAddGraphMatches);
-    KernelMatcherRegistry::registerSymbol(std::string(KERNEL_MATCHER_SYMBOL),
-                                          &pointwiseAddKernelMatches);
-    ScoreRegistry::registerSymbol(std::string(SCORE_SYMBOL), &pointwiseAddScore);
+    try
+    {
+        KernelMatcherRegistry::registerSymbol(std::string(KERNEL_MATCHER_SYMBOL),
+                                              &pointwiseAddKernelMatches);
+    }
+    catch(...)
+    {
+        GraphMatcherRegistry::unregisterSymbol(std::string(GRAPH_MATCHER_SYMBOL));
+        throw;
+    }
+    try
+    {
+        ScoreRegistry::registerSymbol(std::string(SCORE_SYMBOL), &pointwiseAddScore);
+    }
+    catch(...)
+    {
+        GraphMatcherRegistry::unregisterSymbol(std::string(GRAPH_MATCHER_SYMBOL));
+        KernelMatcherRegistry::unregisterSymbol(std::string(KERNEL_MATCHER_SYMBOL));
+        throw;
+    }
+}
+
+void unregisterPointwiseAddMatchers()
+{
+    GraphMatcherRegistry::unregisterSymbol(std::string(GRAPH_MATCHER_SYMBOL));
+    KernelMatcherRegistry::unregisterSymbol(std::string(KERNEL_MATCHER_SYMBOL));
+    ScoreRegistry::unregisterSymbol(std::string(SCORE_SYMBOL));
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine

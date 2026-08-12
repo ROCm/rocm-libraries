@@ -85,14 +85,6 @@ public:
         }
     }
 
-    /// @brief Drops every entry. The next query for any key rematches.
-    void clear()
-    {
-        const std::lock_guard<std::mutex> lock(_mutex);
-        _order.clear();
-        _index.clear();
-    }
-
     size_t size() const
     {
         const std::lock_guard<std::mutex> lock(_mutex);

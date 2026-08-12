@@ -25,16 +25,26 @@
  * @brief Unit tests for KernelIngestorStateManager.hpp: matching, pruning, caching,
  *        ranking-reuse, knob value discovery, metadata completion, and the eager
  *        construction-time validation the constructor's doc calls out.
- *
- * The per-pack bound-state isolation regression (item 5) lives here too:
- * PrunedPackBindingsAreNotVisibleToSurvivingPackKernels, unchanged from its Phase 1
- * introduction.
  */
 namespace
 {
 
 using namespace hipdnn_plugin_sdk::ingestor;
 using namespace hipdnn_plugin_sdk::ingestor::testing;
+
+/// Binds "test.bound_token" to a value that disagrees with acceptGraph's.
+inline bool bindConflictingTokenValue(const MatchContext& /*context*/, BoundTokens& bound)
+{
+    bound["test.bound_token"] = BOUND_TOKEN_VALUE + 1;
+    return true;
+}
+
+/// Binds "test.bound_token" to acceptGraph's value, via a different matcher id.
+inline bool bindAgreeingTokenValue(const MatchContext& /*context*/, BoundTokens& bound)
+{
+    bound["test.bound_token"] = BOUND_TOKEN_VALUE;
+    return true;
+}
 
 // ---------------------------------------------------------------------------
 // Matching and pruning
@@ -94,31 +104,52 @@ TEST(TestKernelIngestorStateManager, EvaluatesASharedGraphMatcherOncePerGraphNot
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
 
-    // Matchers are shared by id across packs, so the broadly shared checks are what prune
-    // the candidate set fast. Re-running one per pack that lists it would make the most
-    // shared check the most expensive, inverting the property the graph/kernel split
-    // exists to provide.
-    auto first = makePack({GRAPH_MATCHER_ID, KERNEL_MATCHER_ID});
-    auto second = makePack({GRAPH_MATCHER_ID, KERNEL_MATCHER_ID});
+    // Matchers are shared by id across packs, so a shared graph-scoped check runs once,
+    // not once per pack.
+    //
+    // The first pack also fails a second, unshared matcher, so only the second pack
+    // survives. That isolates BINDING REUSE from memoization: if both packs survived,
+    // the first pack's own merge could put the token in catalog.bound, hiding a
+    // mutation that only merges a memo entry's bindings on the cache-MISS pack and
+    // skips it on every cache-HIT pack -- exactly the second pack's read here.
+    constexpr const char* UNSHARED_FAIL_SYMBOL = "test.cross_pack_binding_reuse.fail";
+    GraphMatcherRegistry::registerSymbol(UNSHARED_FAIL_SYMBOL, rejectGraph);
+    const auto unsharedFailMatcherId = testId(0x84);
+
+    const KernelDescriptorPack first = makePack({GRAPH_MATCHER_ID, unsharedFailMatcherId});
+    KernelDescriptorPack second = makePack({GRAPH_MATCHER_ID, KERNEL_MATCHER_ID});
     second.id = testId(0x80);
     // A distinct metadata tuple: the uniqueness rule is engine-wide, not per pack, so
     // the second pack cannot repeat a block size the first already uses.
     second.kernels = {makeKernel(testId(0x81), "second_pack_kernel", 512, "FLOAT")};
 
-    const StateManager manager(makeSchema(),
-                               makeTestMatchers(),
-                               makeTestDispatches(),
-                               {first, second},
-                               std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
+    const StateManager manager(
+        makeSchema(),
+        {{GRAPH_MATCHER_ID, "graph scoped", MatchScope::GRAPH, "test.graph"},
+         {unsharedFailMatcherId, "always fails", MatchScope::GRAPH, UNSHARED_FAIL_SYMBOL},
+         {KERNEL_MATCHER_ID, "kernel scoped", MatchScope::KERNEL, "test.kernel"}},
+        makeTestDispatches(),
+        {first, second},
+        std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
 
     const TestGraph graph(makeGraphId(20));
     const auto properties = testDeviceProperties();
-    const auto definitions = manager.unsortedDefinitions(MatchContext{graph, 0, properties});
+    const auto catalog = manager.unsortedCatalog(MatchContext{graph, 0, properties});
 
-    // Two packs, one shared graph-scoped matcher: evaluated once.
-    EXPECT_EQ(counters().graphCalls, 1);
-    // Two FLOAT survivors from the first pack plus one from the second.
-    EXPECT_EQ(definitions.size(), 3U);
+    // Three native calls would mean the shared matcher ran twice; it must not. One call
+    // for GRAPH_MATCHER_ID (shared, evaluated once for both packs) plus one for the
+    // first pack's own unshared, failing matcher is the whole budget.
+    EXPECT_EQ(counters().graphCalls, 2);
+    // Only the second pack's kernel: the first pack's graph-scoped matchers did not all
+    // pass, so none of its kernels were ever considered.
+    ASSERT_EQ(catalog.entries.size(), 1U);
+    EXPECT_EQ(catalog.entries.front().packId, second.id);
+    // The point of this test: the shared matcher's binding reaches catalog.bound through
+    // the second pack's read of the memo, not through the (pruned) first pack that
+    // actually ran the matcher.
+    EXPECT_EQ(catalog.bound.count("test.bound_token"), 1U);
+
+    GraphMatcherRegistry::unregisterSymbol(UNSHARED_FAIL_SYMBOL);
 }
 
 TEST(TestKernelIngestorStateManager, ASharedGraphMatcherFailurePrunesEveryPackListingIt)
@@ -218,6 +249,70 @@ TEST(TestKernelIngestorStateManager, PrunedPackBindingsAreNotVisibleToSurvivingP
     GraphMatcherRegistry::unregisterSymbol(ALWAYS_FAILS_SYMBOL);
 }
 
+TEST(TestKernelIngestorStateManager, TwoPacksBindingOneTokenToDifferentValuesThrows)
+{
+    // Two packs writing different values under one token name is an authoring error
+    // (Catalog::bound's doc); a silent first-wins merge would hide it.
+    constexpr const char* CONFLICTING_SYMBOL = "test.bound_conflict.conflicting";
+    GraphMatcherRegistry::registerSymbol(CONFLICTING_SYMBOL, &bindConflictingTokenValue);
+
+    const auto conflictingMatcherId = testId(0xB0);
+    const KernelDescriptorPack first = makePack({GRAPH_MATCHER_ID});
+    KernelDescriptorPack second = makePack({conflictingMatcherId});
+    second.id = testId(0xB1);
+    second.kernels = {makeKernel(testId(0xB2), "second_pack_kernel", 512, "FLOAT")};
+
+    const StateManager manager(makeSchema(),
+                               {{GRAPH_MATCHER_ID, "graph scoped", MatchScope::GRAPH, "test.graph"},
+                                {conflictingMatcherId,
+                                 "binds a conflicting value",
+                                 MatchScope::GRAPH,
+                                 CONFLICTING_SYMBOL}},
+                               makeTestDispatches(),
+                               {first, second},
+                               std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
+
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const TestGraph graph(makeGraphId(51));
+    const auto properties = testDeviceProperties();
+
+    EXPECT_THROW(manager.unsortedCatalog(MatchContext{graph, 0, properties}), std::runtime_error);
+
+    GraphMatcherRegistry::unregisterSymbol(CONFLICTING_SYMBOL);
+}
+
+TEST(TestKernelIngestorStateManager, TwoPacksBindingOneTokenToTheSameValueMergeCleanly)
+{
+    // Packs agreeing on a token's value (the normal shared-matcher case) must still
+    // merge cleanly.
+    constexpr const char* AGREEING_SYMBOL = "test.bound_conflict.agreeing";
+    GraphMatcherRegistry::registerSymbol(AGREEING_SYMBOL, &bindAgreeingTokenValue);
+
+    const auto agreeingMatcherId = testId(0xB3);
+    const KernelDescriptorPack first = makePack({GRAPH_MATCHER_ID});
+    KernelDescriptorPack second = makePack({agreeingMatcherId});
+    second.id = testId(0xB4);
+    second.kernels = {makeKernel(testId(0xB5), "second_pack_kernel", 512, "FLOAT")};
+
+    const StateManager manager(
+        makeSchema(),
+        {{GRAPH_MATCHER_ID, "graph scoped", MatchScope::GRAPH, "test.graph"},
+         {agreeingMatcherId, "binds the same value", MatchScope::GRAPH, AGREEING_SYMBOL}},
+        makeTestDispatches(),
+        {first, second},
+        std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
+
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const TestGraph graph(makeGraphId(52));
+    const auto properties = testDeviceProperties();
+
+    const auto catalog = manager.unsortedCatalog(MatchContext{graph, 0, properties});
+
+    EXPECT_EQ(tryGetBoundInt(catalog.bound, "test.bound_token"), BOUND_TOKEN_VALUE);
+    // Agreement never prunes anything: all 4 kernels across both packs survive.
+    EXPECT_EQ(catalog.entries.size(), 4U);
+}
+
 TEST(TestKernelIngestorStateManager, MatchesSeparatelyPerDevice)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
@@ -250,6 +345,25 @@ TEST(TestKernelIngestorStateManager, RematchesEveryCallWhenTheGraphHasNoIdentity
     EXPECT_EQ(first.size(), 2U);
     EXPECT_EQ(second.size(), 2U);
     EXPECT_EQ(counters().graphCalls, 2);
+}
+
+TEST(TestKernelIngestorStateManager, DistinctGraphsCarryingANilUuidDoNotShareACatalogEntry)
+{
+    // Two unrelated graphs sharing the nil id must not share a cache entry: a regression
+    // would run the matcher once, not twice, and serve the second graph the first's catalog.
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const TestGraph first(makeNilGraphId());
+    const TestGraph second(makeNilGraphId());
+    const auto properties = testDeviceProperties();
+
+    const auto firstDefinitions = manager->unsortedDefinitions(MatchContext{first, 0, properties});
+    const auto secondDefinitions
+        = manager->unsortedDefinitions(MatchContext{second, 0, properties});
+
+    EXPECT_EQ(counters().graphCalls, 2);
+    EXPECT_EQ(firstDefinitions.size(), 2U);
+    EXPECT_EQ(secondDefinitions.size(), 2U);
 }
 
 // ---------------------------------------------------------------------------
@@ -546,6 +660,36 @@ INSTANTIATE_TEST_SUITE_P(
                     makeTestMatchers(),
                     makeTestDispatches(),
                     std::vector<KernelDescriptorPack>{pack},
+                    std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
+            }},
+        StateManagerConstructionThrowCase{
+            "RejectsADuplicateMatchDescriptorId",
+            [] {
+                // Two distinct matchers under one id: silent first-wins would let a pack
+                // run whichever matcher loaded first.
+                std::vector<MatchDescriptor> matchers = makeTestMatchers();
+                matchers.push_back({GRAPH_MATCHER_ID,
+                                    "a different matcher entirely",
+                                    MatchScope::KERNEL,
+                                    "test.kernel"});
+                return std::make_unique<StateManager>(
+                    makeSchema(),
+                    matchers,
+                    makeTestDispatches(),
+                    std::vector<KernelDescriptorPack>{makePack({GRAPH_MATCHER_ID})},
+                    std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
+            }},
+        StateManagerConstructionThrowCase{
+            "RejectsADuplicateDispatchDescriptorId",
+            [] {
+                std::vector<DispatchDescriptor> dispatches = makeTestDispatches();
+                dispatches.push_back(
+                    {DISPATCH_ID, "a different dispatch entirely", "test.dispatch.other"});
+                return std::make_unique<StateManager>(
+                    makeSchema(),
+                    makeTestMatchers(),
+                    dispatches,
+                    std::vector<KernelDescriptorPack>{makePack({GRAPH_MATCHER_ID})},
                     std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
             }},
         StateManagerConstructionThrowCase{"RejectsAMissingHeuristic",

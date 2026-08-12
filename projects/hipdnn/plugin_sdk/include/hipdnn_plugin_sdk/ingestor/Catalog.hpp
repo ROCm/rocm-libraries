@@ -41,9 +41,8 @@ struct Catalog
     /// matcher id, not by pack.
     ///
     /// Merged rather than kept per pack: a token name means the same thing to every pack
-    /// in an engine, since they all read one graph through one metadata schema. Two packs
-    /// binding one name to different values would be an authoring error the loader should
-    /// reject, not a state this needs to represent.
+    /// in an engine. Two packs binding one name to DIFFERENT values is an authoring
+    /// error, rejected at merge time since only a runtime match reveals it.
     BoundTokens bound;
 };
 
