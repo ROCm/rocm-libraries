@@ -24,6 +24,7 @@
 #   python3 -m rocke.portable_ir.drivers.parity_matrix [--verbose]
 import argparse
 import os
+from typing import Tuple
 
 from rocke.core import ir_export
 from rocke.core.lower_llvm import lower_kernel_to_llvm
@@ -31,8 +32,29 @@ from rocke.portable_ir.drivers import record_coverage as rc
 from rocke.portable_ir.src import online, recipe_bundle
 from rocke.portable_ir.src.recording_builder import record_kernel
 
-FLAVOR = os.environ.get("ROCKE_LLVM_FLAVOR", "llvm20")
+# This driver needs no comgr -- it compares .ll text -- but the flavor it pins
+# still has to be the one the shipping path uses, or the precise check (SSA names,
+# which HSACO comparison cannot see) is validating a different LLVM generation
+# from the one that produces the artifact. So: resolve from the installed comgr
+# when there is one, and fall back to the historical default when there is not,
+# which keeps the driver usable on a machine with no ROCm at all.
+_FALLBACK_FLAVOR = "llvm20"
+FLAVOR = os.environ.get("ROCKE_LLVM_FLAVOR", "auto")
 ARCHES = os.environ.get("ARCHES", "gfx942,gfx950").split(",")
+
+
+def _auto_flavor() -> Tuple[str, str]:
+    """-> (flavor, where it came from), the second for the log line."""
+    try:
+        from rocke.core.lower_llvm import _flavor_for_rocm
+        from rocke.runtime.comgr import resolved_lib_rocm_version
+
+        ver = resolved_lib_rocm_version()
+        if ver:
+            return _flavor_for_rocm(*ver), f"ROCm {'.'.join(map(str, ver))} comgr"
+    except Exception:  # noqa: BLE001 - no comgr is a normal state here
+        pass
+    return _FALLBACK_FLAVOR, "default, no comgr found"
 
 
 def _kernels():
@@ -108,13 +130,22 @@ def main() -> int:
     global FLAVOR, ARCHES
     ap = argparse.ArgumentParser()
     ap.add_argument("--verbose", action="store_true")
-    ap.add_argument("--flavor", default=FLAVOR, help="LLVM flavor to pin on every path")
+    ap.add_argument(
+        "--flavor",
+        default=FLAVOR,
+        help="LLVM flavor to pin on every path; 'auto' takes it from the "
+        "installed comgr so this gate and the HSACO gates agree",
+    )
     ap.add_argument(
         "--arches", default=",".join(ARCHES), help="comma-separated target arches"
     )
     args = ap.parse_args()
 
-    FLAVOR = args.flavor
+    origin = "requested"
+    if args.flavor == "auto":
+        FLAVOR, origin = _auto_flavor()
+    else:
+        FLAVOR = args.flavor
     ARCHES = args.arches.split(",")
     # Pin the flavor for the C++ engine too. Python takes it as an argument, but
     # the C side resolves ROCKE_LLVM_FLAVOR_AUTO from the environment / the
@@ -124,7 +155,8 @@ def main() -> int:
 
     online.load()  # builds/loads librocke once up front
     print(
-        f"== backend-path parity matrix (flavor={FLAVOR}, archs={','.join(ARCHES)}) =="
+        f"== backend-path parity matrix (flavor={FLAVOR} [{origin}], "
+        f"archs={','.join(ARCHES)}) =="
     )
     print("   engine = ir_export->C import->C lower (byte-identical .ll)")
     print("   recipe = record->CBOR->C recipe-VM->C lower (byte-identical .ll)\n")

@@ -352,6 +352,14 @@ def main() -> int:
     ap.add_argument("--families", default="", help="comma-separated label substrings")
     ap.add_argument("--no-hsaco", action="store_true", help="stop at .ll (skip comgr)")
     ap.add_argument("--flavor", default="auto")
+    ap.add_argument(
+        "--expect-points",
+        type=int,
+        default=0,
+        help="fail if fewer than N (family, value) points were verified. Pins "
+        "coverage so an axis that quietly stops rolling is a failure and not "
+        "just a smaller table",
+    )
     args = ap.parse_args()
 
     flavor = _flavor() if args.flavor == "auto" else args.flavor
@@ -453,8 +461,28 @@ def main() -> int:
     bad = len(rows) - len(exact)
     if want_hsaco:
         bad += len(rows) - len(good)
-    print("\n" + ("PASS" if (rolled and not bad) else f"INCOMPLETE ({bad} bad points)"))
-    return 1 if bad else 0
+
+    # Verifying nothing is not the same as verifying everything. If the roller
+    # refused every axis there are no bad points, so `bad` alone would let a
+    # total regression through; the same is true of a family list that quietly
+    # got shorter. Both are failures.
+    short = args.expect_points and len(rows) < args.expect_points
+    if short:
+        print(
+            f"\n  COVERAGE SHORTFALL: verified {len(rows)} points, expected at "
+            f"least {args.expect_points}"
+        )
+    if not rolled:
+        print("\n  NOTHING ROLLED: no axis produced a parametric recipe")
+    print(
+        "\n"
+        + (
+            "PASS"
+            if (rolled and not bad and not short)
+            else f"INCOMPLETE ({bad} bad points)"
+        )
+    )
+    return 1 if (bad or short or not rolled) else 0
 
 
 if __name__ == "__main__":

@@ -21,12 +21,21 @@ at shapes the roller never sampled — verified at the HSACO byte level, which i
 the artifact that actually ships. That was the open question, and the answer is
 affirmative for all four kernel families examined.
 
-What is not ready is everything around that core. The shared library the JIT
-path depends on **does not link from a clean tree**, there is **no CI wiring of
-any kind**, and rolling generalizes over input shapes far better than over
-tile/warp geometry — of seven axes that roll across the four families, only one
-is a tile-geometry axis. None of these are design flaws; they are unfinished
+What was not ready was everything around that core: the shared library the JIT
+path depends on did not link from a clean tree, there was no CI wiring of any
+kind, and rolling generalizes over input shapes far better than over tile/warp
+geometry — of seven axes that roll across the four families, only one is a
+tile-geometry axis. None of these are design flaws; they are unfinished
 engineering, and each has a bounded fix.
+
+**Update, after this review.** The first two are closed. The duplicate build-ID
+translation unit is gone, so the `.so` links from a clean configure with no
+linker overrides, and there is a named `rocke_shared` target to build it. All
+three gates — `.ll` parity, HSACO parity, and the rolled path through HSACO —
+now run on every pull request that touches `rocke/**`, in about 90 seconds and
+with no GPU. Each was verified to fail when its subject is broken or absent,
+which matters more than the fact that it passes. The geometry limitation (gap 5)
+is unchanged and remains the substantive technical constraint.
 
 Separately, measuring at the HSACO level exposed something the existing `.ll`
 gate cannot see: on gfx942 only 32 of the 46 "parity-passing" kernels compile to
@@ -35,9 +44,9 @@ pre-existing defects in the kernel set rather than portable-IR regressions, but
 they bound what a parity number means and they constrain how a CI job must be
 built.
 
-Recommendation: proceed to the implementation story, with the four P0 items in
-[Gap analysis](#gap-analysis) treated as entry criteria rather than work items
-inside it.
+Recommendation: proceed to the implementation story. The four P0 entry criteria
+in [Gap analysis](#gap-analysis) are met; what remains there is P1 and can be
+worked inside the story.
 
 ## Method
 
@@ -207,7 +216,18 @@ across four shapes.
 
 ## What does not work
 
-### The shared library does not link from a clean tree — P0
+### The shared library does not link from a clean tree — P0 — CLOSED
+
+*Closed after this assessment.* `cpp/core/build_id.cpp` and its header
+`cpp/include/rocke/build_id.h` are deleted; nothing included that header.
+`librocke.so` now links from a clean configure with no linker overrides, and
+`rocke_build_id` / `rocke_engine_version` are each defined exactly once in the
+resulting library, carrying the injected id rather than the `unknown` fallback.
+The build no longer depends on which definition the linker happened to see
+first. `ROCKE_BUILD_SHARED_ENGINE=ON` builds the `.so` as a named target
+(`rocke_shared`), so the link flags live in the build system instead of in each
+caller. The original diagnosis is kept below because it explains the failure
+mode, which a `GLOB_RECURSE` source list can reintroduce at any time.
 
 Reproduced from scratch in this session. `librocke_core.a` builds cleanly, then
 the `--whole-archive` shared link fails:
@@ -229,19 +249,36 @@ Every measurement in this document required
 `-Wl,--allow-multiple-definition`, which silently picks whichever definition the
 linker sees first. That is acceptable for an assessment and unacceptable to
 ship: build-ID provenance is exactly the thing you do not want resolved
-arbitrarily. The fix is to delete the stale duplicate (`.gitignore` drops
+arbitrarily. The fix was to delete the stale duplicate (`.gitignore` drops
 `build*`, so `rocke_build_id.cpp` is the intended survivor) and its header, then
 drop the workaround flag.
 
-### No CI wiring — P0
+### No CI wiring — P0 — CLOSED
 
-The repository has 41 workflows under `.github/workflows/`. **None reference
-rocke.** Every gate described here is a script somebody has to remember to run.
-Concretely, the byte-identity contract is unenforced: any change to the Python
-lowerer can silently desynchronize the two engines and no automated check will
-notice.
+*Closed after this assessment* by `.github/workflows/rocke-portable-ir-ci.yml`,
+which runs on any pull request touching
+`dnn-providers/hip-kernel-provider/rocke/**`. It builds the shared engine, then
+runs the unit tests and three gates in order: `.ll` byte-identity across both
+C++ paths, HSACO byte-identity for every kernel that compiles, and the rolled
+recipes through HSACO including held-out points. The whole sequence takes about
+90 seconds on this node and needs no GPU, because comgr compiles for the target
+ISA on the host.
 
-This also makes a claim in the scaling plan false today:
+Two properties were worth more than the wiring itself:
+
+* **The gates cannot pass vacuously.** An explicitly named `ROCKE_ONLINE_LIB`
+  that does not exist used to be skipped in favour of a cached `/tmp` build or a
+  fresh compile, so a run could verify an engine it had not built and say
+  nothing. `online.load()` now treats a named library as a demand and fails
+  instead. Confirmed by control: pointed at a missing library, gate 1 exits 1
+  rather than reporting parity.
+* **The gates can fail.** Each was run against a deliberately wrong baseline.
+  Removing a known-broken kernel from the pinned set makes gate 2 exit 1 naming
+  it; inflating the expected coverage makes it exit 1 reporting the shortfall;
+  asking gate 3 for 30 points when 22 exist exits 1. A gate never seen to fail
+  is a gate nobody should trust.
+
+This also made a claim in the scaling plan false at the time of writing:
 
 ```334:336:dnn-providers/hip-kernel-provider/rocke/platform/python/rocke/portable_ir/portable_ir_scaling_plan.md
 - CI runs the parity matrix and the device replay gate
@@ -249,9 +286,12 @@ This also makes a claim in the scaling plan false today:
   kernel change.
 ```
 
-The same section points at a `run_*_demo.sh` set as the HSACO-tier gate; those
-scripts were removed during the port and no longer exist. Both statements should
-be corrected to describe intent rather than status.
+The parity-matrix half of that claim is now true. The device replay gate
+(`drivers/gpu_replay.py`) is still not wired, and deliberately so: it needs a GPU
+runner, while everything the byte-identity contract asserts is checkable without
+one. The same section points at a `run_*_demo.sh` set as the HSACO-tier gate;
+those scripts were removed during the port and no longer exist. Both statements
+are corrected in the scaling plan to separate what runs from what is intended.
 
 ### Rolling generalizes over shapes far better than over geometry — P1
 
@@ -428,13 +468,13 @@ the stable family key and the varying spec values.
 
 | # | Gap | Sev | Evidence | Fix |
 |---|---|---|---|---|
-| 1 | Shared library does not link | P0 | Reproduced this session from a clean build | Delete duplicate `build_id.cpp` + header; drop `--allow-multiple-definition` |
-| 2 | No CI wiring | P0 | 41 workflows, 0 reference rocke | Add parity matrix + roll/HSACO gate to PR CI |
-| 3 | Rolled path ungated | P0 | Was untested before this session | Land `roll_hsaco_parity` as a CI gate |
-| 4 | Docs assert gates that do not run | P0 | Scaling plan lines 334–336; stale `run_*_demo.sh` | Correct to intent, not status |
+| 1 | Shared library does not link | P0 | **Closed**: duplicate `build_id.cpp` + header deleted; `.so` links from a clean configure with no overrides, each provenance symbol defined once | — |
+| 2 | No CI wiring | P0 | **Closed**: `rocke-portable-ir-ci.yml` runs the unit tests and all three gates on any PR touching `rocke/**`, ~90 s, no GPU | — |
+| 3 | Rolled path ungated | P0 | **Closed**: `roll_hsaco_parity` runs as gate 3 with `--expect-points 22`, so an axis that stops rolling fails rather than shortening the table | — |
+| 4 | Docs assert gates that do not run | P0 | **Closed**: the parity claim is now true and the scaling plan separates what runs from what is intended; `gpu_replay` is still ungated, needing a GPU runner | — |
 | 5 | Tile/warp geometry rolls for 1 of 4 families | P1 | 7 rolled axes, 1 geometric; 8 refusals | Extend roller; accept per-geometry recipe families where non-affine |
-| 5b | `.ll` gate hides uncompilable kernels | P1 | gfx942: 46/46 `.ll` but 32 reach HSACO | Carry CI gates through to HSACO |
-| 5c | `moe_fused_mega_fp8` exhausts host memory in LLVM | P1 | Reproduced on the pure Python stack | Pre-existing; cap `RLIMIT_AS` and fork-isolate compiles in CI |
+| 5b | `.ll` gate hides uncompilable kernels | P1 | **Closed as a CI gap**: gates 2 and 3 end at HSACO, and the kernels that cannot compile are pinned by name in `hsaco_baseline.json` with the LLVM error that explains each one, so a new one fails CI. The 14 gfx942 kernel defects themselves are untouched and remain P1 | Fix the kernels: gfx950-only MFMA intrinsics used unguarded |
+| 5c | `moe_fused_mega_fp8` exhausts host memory in LLVM | P1 | **Contained**: each compile runs in a forked child under an `RLIMIT_AS` cap sized to half of physical memory, so this kernel is reported and stepped over. Verified all 45 good kernels still compile under a 4 GiB cap, which also cuts the gfx950 sweep from 65 s to 7 s | Pre-existing kernel defect; containment is in place |
 | 6 | No HSACO cache | P1 | comgr 1.8–3.2 ms per compile, unavoidable today | Cache on `(family, spec, arch)` |
 | 7 | Provider `ArtifactStore` path not integrated | P1 | Marked "pending integration" in the plan | Wire recipe expansion behind a C-JIT flag |
 | 8 | Bundle key hygiene unenforced | P2 | Names embed parametrized spec values | Enforce family key vs spec separation |
@@ -446,16 +486,19 @@ the stable family key and the varying spec values.
 
 ## Success criteria and acceptance test plan
 
-Proposed definition of done for the implementation story. Criteria 1–5 are
-enforceable in CI today given gaps 1–3; 6–7 need the cache and provider work.
+Proposed definition of done for the implementation story. Criteria 1–4 now run on
+every pull request; 6–7 need the cache and provider work.
+
+"Enforced" below means a pull request that breaks the criterion fails CI, not
+merely that the criterion holds today.
 
 | # | Criterion | Gate | Status |
 |---|---|---|---|
-| 1 | Clean-tree build produces a loadable `librocke.so` with no linker overrides | CI build job | **Failing** (gap 1) |
-| 2 | Concrete recipe path byte-identical `.ll` vs Python, all kernels × arches | `parity_matrix` | **Passing** 46/46 × 2 |
-| 2b | Concrete recipe path byte-identical **HSACO**, every kernel that compiles | HSACO sweep | **Passing** 45/45 gfx950, 32/32 gfx942 |
-| 3 | Rolled recipe path byte-identical HSACO, incl. held-out points | `roll_hsaco_parity` | **Passing** 22/22, 8 held-out |
-| 4 | Rolled `.ll` byte-identical to Python | `roll_hsaco_parity` | **Passing** 22/22 |
+| 1 | Clean-tree build produces a loadable `librocke.so` with no linker overrides | CI build job | **Passing, enforced** — `rocke_shared` target, no overrides |
+| 2 | Concrete recipe path byte-identical `.ll` vs Python, all kernels × arches | `parity_matrix` | **Passing, enforced** 46/46 × 2 |
+| 2b | Concrete recipe path byte-identical **HSACO**, every kernel that compiles | HSACO sweep | **Passing, enforced** 45/45 gfx950, 32/32 gfx942 |
+| 3 | Rolled recipe path byte-identical HSACO, incl. held-out points | `roll_hsaco_parity` | **Passing, enforced** 22/22, 8 held-out |
+| 4 | Rolled `.ll` byte-identical to Python | `roll_hsaco_parity` | **Passing, enforced** 22/22 |
 | 5 | Device numerics match the Python-built kernel | `gpu_replay` | Passing previously; not re-run here |
 | 6 | Cold JIT within budget on a cache miss; cache hit avoids comgr | new bench | **Not implemented** (gap 6) |
 | 7 | Provider serves a recipe-backed kernel behind the C-JIT flag | integration test | **Not implemented** (gap 7) |
@@ -475,18 +518,38 @@ tile/warp geometry rolling is required for release or deferred given gap 5.
 
 ## Reproducing
 
+All three gates, the way CI runs them — build the shared engine, then the unit
+tests, `.ll` parity, HSACO parity and the rolled path through HSACO:
+
+```bash
+python dnn-providers/hip-kernel-provider/rocke/platform/tools/run_portable_ir_gates.py
+```
+
+The workflow calls exactly that script, so a local failure and a CI failure mean
+the same thing. The steps individually, when one of them is what you care about:
+
 ```bash
 cd dnn-providers/hip-kernel-provider/rocke/platform
-cmake -S . -B /tmp/rocke_online/core -DCMAKE_BUILD_TYPE=Release -DROCKE_BUILD_PYENV=OFF
-cmake --build /tmp/rocke_online/core --target rocke_core -j"$(nproc)"
-# --allow-multiple-definition is the gap-1 workaround; remove once the duplicate is deleted
-c++ -shared -fPIC -Wl,--allow-multiple-definition \
-    -Wl,--whole-archive /tmp/rocke_online/core/librocke_core.a -Wl,--no-whole-archive \
-    -lm -o /tmp/rocke_online/librocke.so
+cmake -S . -B /tmp/rocke_online/core -DCMAKE_BUILD_TYPE=Release \
+      -DROCKE_BUILD_SHARED_ENGINE=ON
+cmake --build /tmp/rocke_online/core --target rocke_shared -j"$(nproc)"
 
 cd ..
 export PYTHONPATH=platform/python:library
-export ROCKE_ONLINE_LIB=/tmp/rocke_online/librocke.so
-python3 -m rocke.portable_ir.drivers.roll_hsaco_parity     # rolled path, HSACO
-python3 -m rocke.portable_ir.drivers.parity_matrix --flavor llvm22   # concrete path, .ll
+export ROCKE_ONLINE_LIB=/tmp/rocke_online/core/librocke.so
+python3 -m rocke.portable_ir.drivers.parity_matrix        # concrete path, .ll
+python3 -m rocke.portable_ir.drivers.hsaco_parity         # concrete path, HSACO
+python3 -m rocke.portable_ir.drivers.roll_hsaco_parity --expect-points 22
+```
+
+`--flavor` is left off deliberately: each driver derives the LLVM flavor from the
+comgr that will do the compiling, and pinning it by hand to something else makes
+every kernel differ on the datalayout line alone.
+
+If a kernel that used to compile stops compiling, gate 2 fails and names it. When
+that is intended — a kernel removed, or one genuinely fixed — regenerate the
+pinned set and review the diff, which is the record of what CI now excuses:
+
+```bash
+python3 -m rocke.portable_ir.drivers.hsaco_parity --update-baseline
 ```

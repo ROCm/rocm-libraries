@@ -711,11 +711,18 @@ Extend all three drivers over `instances/SUPPORT_MATRIX.md` for the full shape g
   `online.c`).
 - The provider's `ArtifactStore` recipe path (VM expand alongside `.hsaco`/`.ll`,
   gated by a provider-side C-JIT flag) — **pending integration**.
-- CI running the parity matrix, the rolled-recipe HSACO gate, and the device
-  replay gate (`tests/portable_ir/test_portable_ir.py`,
-  `drivers/roll_hsaco_parity.py`, `drivers/gpu_replay.py`) on every kernel
-  change — **not wired yet**; no workflow references rocke. These gates are
-  run by hand today. See
+- CI running the parity matrix and the rolled-recipe HSACO gate on every kernel
+  change — **done** (`.github/workflows/rocke-portable-ir-ci.yml`). Any pull
+  request touching `dnn-providers/hip-kernel-provider/rocke/**` builds the shared
+  engine and runs the unit tests plus three gates: `.ll` byte-identity
+  (`drivers/parity_matrix.py`), HSACO byte-identity for every kernel that
+  compiles (`drivers/hsaco_parity.py`), and the rolled path through HSACO
+  including held-out points (`drivers/roll_hsaco_parity.py`). About 90 seconds,
+  no GPU: comgr compiles for the target ISA on the host.
+- The device replay gate (`drivers/gpu_replay.py`) — **not wired**, and not
+  planned for PR CI: it needs a GPU runner, whereas everything the byte-identity
+  contract asserts is checkable without one. Run by hand, or nightly on a GPU
+  runner if numerics regressions ever justify the cost. See
   [`portable_ir_production_readiness.md`](../../../dsl_docs/architecture/portable_ir_production_readiness.md).
 
 ## Onboarding a new instance — what code (if any) is required?

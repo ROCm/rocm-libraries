@@ -1162,9 +1162,13 @@ export PYTHONPATH="$PWD/python:$PWD/../library${PYTHONPATH:+:$PYTHONPATH}"
 python3 -m unittest discover -s python/rocke/portable_ir/tests
 python3 -m rocke.portable_ir.drivers.record_coverage
 
+# the shared engine the ctypes replay path loads
+cmake -S . -B /tmp/rocke/core -DCMAKE_BUILD_TYPE=Release -DROCKE_BUILD_SHARED_ENGINE=ON
+cmake --build /tmp/rocke/core --target rocke_shared -j"$(nproc)"
+export ROCKE_ONLINE_LIB=/tmp/rocke/core/librocke.so
+
 # concrete path: both replay paths vs the Python lowerer, byte-identical .ll,
 # every kernel x arch. Device-free, needs a shared librocke.
-export ROCKE_ONLINE_LIB=<path>/librocke.so
 python3 -m rocke.portable_ir.drivers.parity_matrix [--arches gfx942,gfx950]
 python3 -m rocke.portable_ir.drivers.hsaco_parity        # ... and their HSACO
 
@@ -1198,6 +1202,36 @@ Under pytest, the same gates run from `tests/portable_ir/`:
 including the standalone-binary lane). Both skip the engine-binary lanes with an
 actionable reason — never a silent pass — when no `librocke.so`, replay CLI, or
 comgr is available.
+
+### Which of these gate a pull request
+
+All of the gating ones, in one command:
+
+```bash
+python3 tools/run_portable_ir_gates.py       # from platform/, as everywhere above
+```
+
+It builds the shared engine, then runs the unit tests, `parity_matrix`,
+`hsaco_parity` and `roll_hsaco_parity --expect-points 22`, and owns the pinned
+expectations so the CI workflow and a local run cannot disagree.
+`.github/workflows/rocke-portable-ir-ci.yml` calls that script on any PR touching
+`rocke/**`; it takes about 90 seconds and needs no GPU. The surveys
+(`roll_gfx950_sweep`, `roll_nd_coverage`) and the device gate (`gpu_replay`) are
+not wired: the first two are exploratory, and the last needs a GPU runner.
+
+Two of those gates carry a pinned expectation, because both can pass while
+measuring nothing:
+
+* `hsaco_parity` reads `drivers/hsaco_baseline.json`, the set of kernels that do
+  not reach HSACO at all, by name and with the LLVM error for each. A **new** one
+  fails CI; the known ones do not, which is what keeps the gate from being red on
+  its first run and switched off. Names rather than counts, so that one kernel
+  fixed and another broken — which leaves every total unchanged — is still
+  caught. Regenerate with `--update-baseline` and read the diff.
+* `roll_hsaco_parity --expect-points N` fails if fewer than N points were
+  verified. Without it, an axis that stops rolling produces a shorter table and a
+  green tick, since a refusal is safe behavior and there is nothing wrong to
+  report. Raise N when coverage grows.
 
 ## When does a new kernel need code here?
 

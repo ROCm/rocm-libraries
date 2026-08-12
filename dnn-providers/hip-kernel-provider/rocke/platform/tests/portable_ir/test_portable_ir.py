@@ -96,9 +96,14 @@ def _run(args, **kw):
 # ---------------------------------------------------------------------
 # Always-on lanes (pure Python, no engine binary)
 # ---------------------------------------------------------------------
-@pytest.mark.parametrize(
-    "mod", ["test_roller", "test_recipe_bundle", "test_recording_builder"]
-)
+_UNIT_TEST_DIR = _PLATFORM / "python" / "rocke" / "portable_ir" / "tests"
+# Discovered rather than listed. A hardcoded list silently stops covering new
+# test modules -- test_roll_nd and test_roll_regimes were both missing from it --
+# and a test that never runs is worse than no test, because it reads as covered.
+_UNIT_MODULES = sorted(p.stem for p in _UNIT_TEST_DIR.glob("test_*.py"))
+
+
+@pytest.mark.parametrize("mod", _UNIT_MODULES)
 def test_unit(mod):
     """The in-package unit tests, which pytest does not otherwise collect
     (they live under python/rocke/, not under tests/)."""

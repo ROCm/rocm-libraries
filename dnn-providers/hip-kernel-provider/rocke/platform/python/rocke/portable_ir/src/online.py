@@ -177,15 +177,32 @@ def load(path: Optional[str] = None) -> ctypes.CDLL:
     global _lib
     if _lib is not None and path is None:
         return _lib
-    candidates = [path] if path else _default_lib_paths()
-    last = None
-    for p in candidates:
+
+    # A named library is a demand, not a hint. Skipping a missing ROCKE_ONLINE_LIB
+    # and quietly loading the next candidate -- a cached /tmp build, or a fresh
+    # compile -- means the caller verifies an engine it did not build, and the
+    # substitution is invisible. That is fatal for a byte-identity gate, whose
+    # entire claim is about the engine at this commit, so say so instead.
+    explicit = path or os.environ.get("ROCKE_ONLINE_LIB")
+    if explicit:
+        if not os.path.exists(explicit):
+            raise FileNotFoundError(
+                f"librocke not found at {explicit!r} (from "
+                f"{'load(path)' if path else 'ROCKE_ONLINE_LIB'}). Refusing to "
+                f"fall back to another library: build it with `cmake --build "
+                f"<dir> --target rocke_shared` or online.build_lib()"
+            )
+        lib = ctypes.CDLL(explicit)
+        _bind(lib)
+        _lib = lib
+        return lib
+
+    for p in _default_lib_paths():
         if p and os.path.exists(p):
             lib = ctypes.CDLL(p)
             _bind(lib)
             _lib = lib
             return lib
-        last = p
     # nothing prebuilt -> compile one
     p = build_lib()
     lib = ctypes.CDLL(p)
