@@ -88,7 +88,22 @@ namespace
             using definition = RocSPARSE_Test<PROXY, PROXY_CALL>;
             static bool type_filter(const Arguments& arg)
             {
-                return dispatch_t::template dispatch<definition::template type_filter_functor>(arg);
+                const bool supported
+                    = dispatch_t::template dispatch<definition::template type_filter_functor>(arg);
+
+                // A data row that explicitly targets this routine but requests a type
+                // combination that is not wired into the dispatch would otherwise be
+                // silently dropped from the test suite. Register it anyway so that it
+                // FAILs loudly at run time (via rocsparse_test_invalid) instead of
+                // disappearing without a trace. Rows that do not name this routine
+                // (e.g. _bad_arg / _extra, or rows meant for other routines) keep the
+                // normal filtering behavior.
+                if(!supported && !strcmp(arg.function, rocsparse_test_enum::to_string(ROUTINE)))
+                {
+                    return true;
+                }
+
+                return supported;
             }
 
             static bool function_filter(const Arguments& arg)
