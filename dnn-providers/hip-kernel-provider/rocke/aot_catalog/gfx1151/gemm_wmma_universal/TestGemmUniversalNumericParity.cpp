@@ -167,11 +167,14 @@ TEST(TestAotCatalogGemmUniversalNumericParity, WmmaUniversalGemmF16MatchesRefere
     gridSymbols.emplace("N", static_cast<int64_t>(N));
     gridSymbols.emplace("K", static_cast<int64_t>(K));
 
+    const auto workspaceBytes
+        = static_cast<size_t>(launch::evalWorkspace(kernel.workspace, gridSymbols));
+
     const CatalogPlan plan(std::move(*module),
                            kernel.launch,
                            std::move(bindings),
                            std::move(gridSymbols),
-                           kernel.workspaceBytes,
+                           workspaceBytes,
                            kernel.symbol);
 
     std::vector<_Float16> hostA(M * K);
@@ -305,11 +308,14 @@ TEST(TestAotCatalogGemmUniversalNumericParity, WmmaUniversalGemmBf16MatchesRefer
     gridSymbols.emplace("N", static_cast<int64_t>(N));
     gridSymbols.emplace("K", static_cast<int64_t>(K));
 
+    const auto workspaceBytes
+        = static_cast<size_t>(launch::evalWorkspace(kernel.workspace, gridSymbols));
+
     const CatalogPlan plan(std::move(*module),
                            kernel.launch,
                            std::move(bindings),
                            std::move(gridSymbols),
-                           kernel.workspaceBytes,
+                           workspaceBytes,
                            kernel.symbol);
 
     std::vector<uint16_t> hostA(M * K);

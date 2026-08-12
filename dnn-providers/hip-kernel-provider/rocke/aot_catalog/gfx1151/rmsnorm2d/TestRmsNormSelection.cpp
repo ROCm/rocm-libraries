@@ -102,11 +102,13 @@ std::optional<PlanCandidate> makeCandidate(const catalog::KernelEntry& kernel)
     gridSymbols.emplace("M", static_cast<int64_t>(M));
     gridSymbols.emplace("N", static_cast<int64_t>(N));
 
+    const auto workspaceBytes
+        = static_cast<size_t>(launch::evalWorkspace(kernel.workspace, gridSymbols));
     return PlanCandidate{std::move(*module),
                          kernel.launch,
                          std::move(bindings),
                          std::move(gridSymbols),
-                         kernel.workspaceBytes,
+                         workspaceBytes,
                          kernel.symbol};
 }
 
@@ -313,11 +315,13 @@ std::optional<PlanCandidate>
     gridSymbols.emplace("M", static_cast<int64_t>(rows));
     gridSymbols.emplace("N", static_cast<int64_t>(cols));
 
+    const auto workspaceBytes
+        = static_cast<size_t>(launch::evalWorkspace(kernel.workspace, gridSymbols));
     return PlanCandidate{std::move(*module),
                          kernel.launch,
                          std::move(bindings),
                          std::move(gridSymbols),
-                         kernel.workspaceBytes,
+                         workspaceBytes,
                          kernel.symbol};
 }
 

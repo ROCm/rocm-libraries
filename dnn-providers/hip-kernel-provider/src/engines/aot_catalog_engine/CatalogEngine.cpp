@@ -19,7 +19,9 @@
 #include "catalog/Selection.hpp"
 #include "launch/ModuleLoader.hpp"
 #include "launch/PluginError.hpp"
+#include "ops/ActivationAdapter.hpp"
 #include "ops/GemmAdapter.hpp"
+#include "ops/LayerNormAdapter.hpp"
 #include "ops/RmsNormAdapter.hpp"
 #include "ops/SdpaAdapter.hpp"
 #include "plans/CatalogPlan.hpp"
@@ -89,6 +91,8 @@ CatalogEngine::CatalogEngine()
     // (sdpa, conv) is one push_back here plus a new adapter class.
     _adapters.push_back(std::make_unique<ops::GemmAdapter>());
     _adapters.push_back(std::make_unique<ops::RmsNormAdapter>());
+    _adapters.push_back(std::make_unique<ops::LayerNormAdapter>());
+    _adapters.push_back(std::make_unique<ops::ActivationAdapter>());
     _adapters.push_back(std::make_unique<ops::SdpaAdapter>());
 }
 

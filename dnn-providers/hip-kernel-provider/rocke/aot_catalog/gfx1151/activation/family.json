@@ -1,0 +1,552 @@
+{
+    "family": "activation_gfx1151",
+    "op_kind": "pointwise",
+    "arch": "gfx1151",
+    "dtype": [
+        "f16",
+        "bf16"
+    ],
+    "_comment": "Unary elementwise-activation family (CK Tile 21_elementwise parity). op_kind is the honest node type 'pointwise'; the ActivationAdapter accepts only the unary-activation subset and encodes which op via the decoded 'activation' token (silu <- SWISH_FWD beta==1; gelu_tanh <- GELU_APPROX_TANH_FWD), so each kernel constrains dtype+activation and every variant serves any numel {min:1} (the kernel's scalar tail handles the ragged remainder, so no multiple_of is needed). block_size/vec are perf-only; the grid is ceil_div(numel, block_size*vec). Exact erf GELU is declined by the adapter (no builder op yet) -- a documented follow-up.",
+    "kernels": [
+        {
+            "symbol": "rocke_elementwise_silu_f16_b256_v8",
+            "co_file": "rocke_elementwise_silu_f16_b256_v8.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "f16"
+                },
+                "activation": {
+                    "equals": "silu"
+                },
+                "numel": {
+                    "min": 1
+                }
+            },
+            "grid": {
+                "x": {
+                    "ceil_div": [
+                        "numel",
+                        2048
+                    ]
+                },
+                "y": 1,
+                "z": 1
+            },
+            "block": [
+                256,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "A",
+                    "type": "ptr"
+                },
+                {
+                    "name": "C",
+                    "type": "ptr"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "rocke_elementwise_silu_f16_b512_v8",
+            "co_file": "rocke_elementwise_silu_f16_b512_v8.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "f16"
+                },
+                "activation": {
+                    "equals": "silu"
+                },
+                "numel": {
+                    "min": 1
+                }
+            },
+            "grid": {
+                "x": {
+                    "ceil_div": [
+                        "numel",
+                        4096
+                    ]
+                },
+                "y": 1,
+                "z": 1
+            },
+            "block": [
+                512,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "A",
+                    "type": "ptr"
+                },
+                {
+                    "name": "C",
+                    "type": "ptr"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "rocke_elementwise_silu_f16_b256_v4",
+            "co_file": "rocke_elementwise_silu_f16_b256_v4.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "f16"
+                },
+                "activation": {
+                    "equals": "silu"
+                },
+                "numel": {
+                    "min": 1
+                }
+            },
+            "grid": {
+                "x": {
+                    "ceil_div": [
+                        "numel",
+                        1024
+                    ]
+                },
+                "y": 1,
+                "z": 1
+            },
+            "block": [
+                256,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "A",
+                    "type": "ptr"
+                },
+                {
+                    "name": "C",
+                    "type": "ptr"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "rocke_elementwise_silu_bf16_b256_v8",
+            "co_file": "rocke_elementwise_silu_bf16_b256_v8.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "bf16"
+                },
+                "activation": {
+                    "equals": "silu"
+                },
+                "numel": {
+                    "min": 1
+                }
+            },
+            "grid": {
+                "x": {
+                    "ceil_div": [
+                        "numel",
+                        2048
+                    ]
+                },
+                "y": 1,
+                "z": 1
+            },
+            "block": [
+                256,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "A",
+                    "type": "ptr"
+                },
+                {
+                    "name": "C",
+                    "type": "ptr"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "rocke_elementwise_silu_bf16_b512_v8",
+            "co_file": "rocke_elementwise_silu_bf16_b512_v8.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "bf16"
+                },
+                "activation": {
+                    "equals": "silu"
+                },
+                "numel": {
+                    "min": 1
+                }
+            },
+            "grid": {
+                "x": {
+                    "ceil_div": [
+                        "numel",
+                        4096
+                    ]
+                },
+                "y": 1,
+                "z": 1
+            },
+            "block": [
+                512,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "A",
+                    "type": "ptr"
+                },
+                {
+                    "name": "C",
+                    "type": "ptr"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "rocke_elementwise_silu_bf16_b256_v4",
+            "co_file": "rocke_elementwise_silu_bf16_b256_v4.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "bf16"
+                },
+                "activation": {
+                    "equals": "silu"
+                },
+                "numel": {
+                    "min": 1
+                }
+            },
+            "grid": {
+                "x": {
+                    "ceil_div": [
+                        "numel",
+                        1024
+                    ]
+                },
+                "y": 1,
+                "z": 1
+            },
+            "block": [
+                256,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "A",
+                    "type": "ptr"
+                },
+                {
+                    "name": "C",
+                    "type": "ptr"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "rocke_elementwise_gelu_tanh_f16_b256_v8",
+            "co_file": "rocke_elementwise_gelu_tanh_f16_b256_v8.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "f16"
+                },
+                "activation": {
+                    "equals": "gelu_tanh"
+                },
+                "numel": {
+                    "min": 1
+                }
+            },
+            "grid": {
+                "x": {
+                    "ceil_div": [
+                        "numel",
+                        2048
+                    ]
+                },
+                "y": 1,
+                "z": 1
+            },
+            "block": [
+                256,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "A",
+                    "type": "ptr"
+                },
+                {
+                    "name": "C",
+                    "type": "ptr"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "rocke_elementwise_gelu_tanh_f16_b512_v8",
+            "co_file": "rocke_elementwise_gelu_tanh_f16_b512_v8.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "f16"
+                },
+                "activation": {
+                    "equals": "gelu_tanh"
+                },
+                "numel": {
+                    "min": 1
+                }
+            },
+            "grid": {
+                "x": {
+                    "ceil_div": [
+                        "numel",
+                        4096
+                    ]
+                },
+                "y": 1,
+                "z": 1
+            },
+            "block": [
+                512,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "A",
+                    "type": "ptr"
+                },
+                {
+                    "name": "C",
+                    "type": "ptr"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "rocke_elementwise_gelu_tanh_f16_b256_v4",
+            "co_file": "rocke_elementwise_gelu_tanh_f16_b256_v4.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "f16"
+                },
+                "activation": {
+                    "equals": "gelu_tanh"
+                },
+                "numel": {
+                    "min": 1
+                }
+            },
+            "grid": {
+                "x": {
+                    "ceil_div": [
+                        "numel",
+                        1024
+                    ]
+                },
+                "y": 1,
+                "z": 1
+            },
+            "block": [
+                256,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "A",
+                    "type": "ptr"
+                },
+                {
+                    "name": "C",
+                    "type": "ptr"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "rocke_elementwise_gelu_tanh_bf16_b256_v8",
+            "co_file": "rocke_elementwise_gelu_tanh_bf16_b256_v8.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "bf16"
+                },
+                "activation": {
+                    "equals": "gelu_tanh"
+                },
+                "numel": {
+                    "min": 1
+                }
+            },
+            "grid": {
+                "x": {
+                    "ceil_div": [
+                        "numel",
+                        2048
+                    ]
+                },
+                "y": 1,
+                "z": 1
+            },
+            "block": [
+                256,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "A",
+                    "type": "ptr"
+                },
+                {
+                    "name": "C",
+                    "type": "ptr"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "rocke_elementwise_gelu_tanh_bf16_b512_v8",
+            "co_file": "rocke_elementwise_gelu_tanh_bf16_b512_v8.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "bf16"
+                },
+                "activation": {
+                    "equals": "gelu_tanh"
+                },
+                "numel": {
+                    "min": 1
+                }
+            },
+            "grid": {
+                "x": {
+                    "ceil_div": [
+                        "numel",
+                        4096
+                    ]
+                },
+                "y": 1,
+                "z": 1
+            },
+            "block": [
+                512,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "A",
+                    "type": "ptr"
+                },
+                {
+                    "name": "C",
+                    "type": "ptr"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "rocke_elementwise_gelu_tanh_bf16_b256_v4",
+            "co_file": "rocke_elementwise_gelu_tanh_bf16_b256_v4.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "bf16"
+                },
+                "activation": {
+                    "equals": "gelu_tanh"
+                },
+                "numel": {
+                    "min": 1
+                }
+            },
+            "grid": {
+                "x": {
+                    "ceil_div": [
+                        "numel",
+                        1024
+                    ]
+                },
+                "y": 1,
+                "z": 1
+            },
+            "block": [
+                256,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "A",
+                    "type": "ptr"
+                },
+                {
+                    "name": "C",
+                    "type": "ptr"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                }
+            ],
+            "workspace_bytes": 0
+        }
+    ]
+}

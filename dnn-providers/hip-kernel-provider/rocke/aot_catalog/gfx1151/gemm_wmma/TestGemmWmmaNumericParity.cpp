@@ -171,11 +171,14 @@ TEST(TestAotCatalogGemmNumericParity, WmmaGemmF16MatchesReference)
     gridSymbols.emplace("N", static_cast<int64_t>(N));
     gridSymbols.emplace("K", static_cast<int64_t>(K));
 
+    const auto workspaceBytes
+        = static_cast<size_t>(launch::evalWorkspace(kernel.workspace, gridSymbols));
+
     const CatalogPlan plan(std::move(*module),
                            kernel.launch,
                            std::move(bindings),
                            std::move(gridSymbols),
-                           kernel.workspaceBytes,
+                           workspaceBytes,
                            kernel.symbol);
 
     // 4. Host inputs: A[M,K], B[N,K] row-major, f16 (== _Float16). Reference is
@@ -316,11 +319,14 @@ TEST(TestAotCatalogGemmNumericParity, WmmaGemmBf16MatchesReference)
     gridSymbols.emplace("N", static_cast<int64_t>(N));
     gridSymbols.emplace("K", static_cast<int64_t>(K));
 
+    const auto workspaceBytes
+        = static_cast<size_t>(launch::evalWorkspace(kernel.workspace, gridSymbols));
+
     const CatalogPlan plan(std::move(*module),
                            kernel.launch,
                            std::move(bindings),
                            std::move(gridSymbols),
-                           kernel.workspaceBytes,
+                           workspaceBytes,
                            kernel.symbol);
 
     // Host inputs as bf16 bit patterns; f32 CPU reference from the same values.

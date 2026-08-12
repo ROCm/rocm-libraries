@@ -285,11 +285,14 @@ void runSdpaParity(const std::string& dtypeTok,
     gridSymbols.emplace("H", NUM_HEADS);
     gridSymbols.emplace("B", static_cast<int64_t>(1));
 
+    const auto workspaceBytes
+        = static_cast<size_t>(launch::evalWorkspace(kernel.workspace, gridSymbols));
+
     const CatalogPlan plan(std::move(*module),
                            kernel.launch,
                            std::move(bindings),
                            std::move(gridSymbols),
-                           kernel.workspaceBytes,
+                           workspaceBytes,
                            kernel.symbol);
 
     const auto qElems = static_cast<size_t>(NUM_HEADS * SEQ_Q * HEAD_DIM);
