@@ -222,7 +222,7 @@ void testing_sddmm_batched_csr(const Arguments& arg)
 
     int64_t batch_stride_A                = (batch_count_A > 1) ? nnz_A_per_batch : 0;
     int64_t batch_stride_B                = (batch_count_B > 1) ? nnz_B_per_batch : 0;
-    int64_t offsets_batch_stride_C        = 0;
+    int64_t offsets_batch_stride_C        = (batch_count_C > 1) ? M + 1 : 0;
     int64_t columns_values_batch_stride_C = (batch_count_C > 1) ? nnz_C_per_batch : 0;
 
     // Allocate/initialize dense A and B matrices (per batch unique).
@@ -239,14 +239,13 @@ void testing_sddmm_batched_csr(const Arguments& arg)
                                arg.rand_gen_min,
                                arg.rand_gen_max);
 
-    // Output sparse matrix C. The row offsets are shared across batches (we use
-    // offsets_batch_stride = 0 so a single row_ptr array is consumed). The
-    // column indices and values are strided, so we replicate the column
-    // indices across batches and initialize independent values per batch.
-    host_vector<I> hcsr_row_ptr(M + 1);
-    for(size_t i = 0; i < static_cast<size_t>(M + 1); ++i)
+    host_vector<I> hcsr_row_ptr(batch_count_C * (M + 1));
+    for(J i = 0; i < batch_count_C; ++i)
     {
-        hcsr_row_ptr[i] = hcsr_row_ptr_temp[i];
+        for(size_t j = 0; j < static_cast<size_t>(M + 1); ++j)
+        {
+            hcsr_row_ptr[(M + 1) * i + j] = hcsr_row_ptr_temp[j];
+        }
     }
 
     host_vector<J> hcsr_col_ind(batch_count_C * nnz_C_per_batch);
@@ -460,5 +459,12 @@ INSTANTIATE_MIXED(int64_t, int64_t, _Float16, _Float16, float, float);
 INSTANTIATE_MIXED(int32_t, int32_t, _Float16, _Float16, _Float16, float);
 INSTANTIATE_MIXED(int64_t, int32_t, _Float16, _Float16, _Float16, float);
 INSTANTIATE_MIXED(int64_t, int64_t, _Float16, _Float16, _Float16, float);
+
+INSTANTIATE_MIXED(int32_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, float, float);
+INSTANTIATE_MIXED(int64_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, float, float);
+INSTANTIATE_MIXED(int64_t, int64_t, rocsparse_bfloat16, rocsparse_bfloat16, float, float);
+INSTANTIATE_MIXED(int32_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16, float);
+INSTANTIATE_MIXED(int64_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16, float);
+INSTANTIATE_MIXED(int64_t, int64_t, rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16, float);
 
 void testing_sddmm_batched_csr_extra(const Arguments& arg) {}
