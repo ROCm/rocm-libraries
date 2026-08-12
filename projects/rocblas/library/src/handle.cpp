@@ -261,7 +261,7 @@ _rocblas_handle::~_rocblas_handle()
     }
 
 #ifdef BUILD_WITH_HIPBLASLT
-    if(hipblasLtHandle.unique())
+    if(hipblasLtHandle.use_count() == 1)
     {
         hipblasStatus_t hipblas_status = hipblasLtDestroy(*hipblasLtHandle);
         if(HIPBLAS_STATUS_SUCCESS != hipblas_status)
