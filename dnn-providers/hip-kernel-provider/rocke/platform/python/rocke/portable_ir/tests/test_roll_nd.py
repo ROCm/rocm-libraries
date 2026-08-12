@@ -12,15 +12,24 @@
 #
 #   python3 -m unittest rocke.portable_ir.tests.test_roll_nd
 
+import json
+import math
 import unittest
 
 from rocke.core.ir import F32, IRBuilder, PtrType
 from rocke.portable_ir.src.recording_builder import record_kernel
 from rocke.portable_ir.src.roll_nd import roll_nd
-from rocke.portable_ir.src.roller import affine_intexpr, affine_solve, merge_intexpr
+from rocke.portable_ir.src.roller import (
+    affine_intexpr,
+    affine_solve,
+    fit_slot,
+    merge_intexpr,
+)
 from rocke.portable_ir.utils.recipe_expand import (
     equiv_reason,
+    eval_intexpr,
     expand_recipe,
+    magic_division_constants,
     recipes_equiv,
 )
 
@@ -51,6 +60,38 @@ def build_cross(S, T):
     tid = b.thread_id_x()
     x = b.global_load_f32(A, b.add(tid, b.const_i32(S * T)), align=4)
     b.global_store(C, tid, x, align=4)
+    b.ret()
+    return b.kernel
+
+
+def build_magic(C):
+    """A kernel that divides by the axis, via the DSL's own strength reduction.
+
+    The emitted constants are a `ceil(log2 C)` shift and a multiplier keyed on
+    C's odd part, so no polynomial in C fits either. Uses the production helper
+    rather than hand-written numbers, so the test tracks the real idiom."""
+    from rocke.helpers.transforms import calculate_magic_numbers, do_magic_division
+
+    b = IRBuilder(f"magic_C{C}")
+    A = b.param("A", PtrType(F32, "global"), readonly=True, align=16)
+    Out = b.param("Out", PtrType(F32, "global"), writeonly=True, align=16)
+    tid = b.thread_id_x()
+    mult, shift = calculate_magic_numbers(C)
+    q = do_magic_division(b, tid, mult, shift)
+    b.global_store(Out, q, b.global_load_f32(A, q, align=4), align=4)
+    b.ret()
+    return b.kernel
+
+
+def build_reciprocal(block):
+    """A block COUNT that is reciprocal in the block SIZE (`512 // block`) --
+    the shape of constant attention emits for its KV loop."""
+    b = IRBuilder(f"recip_b{block}")
+    A = b.param("A", PtrType(F32, "global"), readonly=True, align=16)
+    Out = b.param("Out", PtrType(F32, "global"), writeonly=True, align=16)
+    tid = b.thread_id_x()
+    x = b.global_load_f32(A, b.add(tid, b.const_i32(512 // block)), align=4)
+    b.global_store(Out, b.add(tid, b.const_i32(block)), x, align=4)
     b.ret()
     return b.kernel
 
@@ -223,8 +264,8 @@ class TestRollNdShapeAxes(unittest.TestCase):
     def test_name_carrying_a_derived_quantity_is_refused(self):
         """A name built from a DERIVED quantity (3S+1) cannot be reconstructed by
         substitution, and the program oracle cannot see kernel names at all -- so
-        this must be caught here or a wrong symbol ships. (Single-axis `roll` does
-        NOT catch it; see the scaling plan's pitfalls.)"""
+        this must be caught here or a wrong symbol ships. Single-axis `roll` now
+        inherits the check by delegating here; its own test pins that."""
 
         def build_derived(S):
             b = IRBuilder(f"derived_g{S * 3 + 1}")
@@ -262,6 +303,188 @@ class TestRollNdShapeAxes(unittest.TestCase):
                 holdout_points=[{"S": 32}],
             )
         self.assertIn("missing axes ['T']", str(cm.exception))
+
+
+class TestBinarySearchTripCount(unittest.TestCase):
+    """`ceil(log2(n+1))` -- the trip count of a binary search over `n` items.
+
+    Found by sweeping kernels/gfx950: all three tiled attention kernels size their
+    sequence-lookup loop this way, and `num_seqs` refused for want of the model
+    even though the recipe schema could already express it. `magic_shift` computes
+    `ceil(log2 x)` and both evaluators recurse into its operand, so the fix was to
+    hypothesise the offset, not to add a primitive."""
+
+    def _iters(self, n):
+        return max(1, int(math.ceil(math.log2(n + 1))))
+
+    def test_the_offset_form_is_recognised(self):
+        pts = [(16,), (32,), (48,)]
+        expr = fit_slot(["num_seqs"], pts, [self._iters(p[0]) for p in pts])[0]
+        self.assertEqual(expr, {"magic_shift": {"add": [{"spec": "num_seqs"}, 1]}})
+
+    def test_it_extrapolates_far_past_the_samples(self):
+        """The point of a parameter-free model: fitted on three points, right on
+        values nowhere near them."""
+        pts = [(16,), (32,), (48,)]
+        expr = fit_slot(["num_seqs"], pts, [self._iters(p[0]) for p in pts])[0]
+        for n in (1, 7, 64, 100, 511, 512, 4096, 100000):
+            self.assertEqual(
+                eval_intexpr(expr, {}, {"num_seqs": n}, {}), self._iters(n), f"n={n}"
+            )
+
+    def test_a_plain_shift_is_not_explained_as_an_offset_one(self):
+        """Offset 0 is tried first, so the exact shift keeps the simpler form."""
+        pts = [(24,), (48,), (96,)]
+        vals = [magic_division_constants(p[0])[1] for p in pts]
+        self.assertEqual(fit_slot(["d"], pts, vals)[0], {"magic_shift": {"spec": "d"}})
+
+    def test_an_unrelated_logarithm_is_still_refused(self):
+        """Two offsets is a small hypothesis space on purpose; it must not become a
+        general log fitter that explains anything vaguely logarithmic."""
+        pts = [(16,), (32,), (48,)]
+        expr, why = fit_slot(["n"], pts, [self._iters(p[0]) + 3 for p in pts])
+        self.assertIsNone(expr)
+        self.assertIn("no candidate model", why)
+
+
+class TestCandidateModels(unittest.TestCase):
+    """The non-affine candidates, at the level of `fit_slot` and end to end.
+
+    Affine covers what a kernel computes FROM a shape. These cover constants a
+    code generator CHOSE given a shape, which follow their own generating rule."""
+
+    def test_magic_constants_match_the_dsl_helper(self):
+        """Three implementations have to agree: the DSL emits these, the Python
+        expander regenerates them, and the C VM mirrors the expander. Pin the two
+        Python ones against each other here; the C VM is pinned by
+        `test_recipe_roller.py::test_standalone_cli_regenerates_magic_division_constants`.
+        """
+        from rocke.helpers.transforms import calculate_magic_numbers
+
+        for d in [1, 2, 3, 5, 7, 8, 9, 64, 96, 128, 160, 192, 224, 256, 384, 1000]:
+            mult, shift = calculate_magic_numbers(d)
+            want = (mult - (1 << 32) if mult >= (1 << 31) else mult, shift)
+            self.assertEqual(magic_division_constants(d), want, f"divisor {d}")
+
+    def test_magic_constants_reproduce_the_division(self):
+        """The whole point of the pair: it computes `n // d` exactly."""
+        for d in (3, 64, 96, 160, 224):
+            m, s = magic_division_constants(d)
+            m &= 0xFFFFFFFF  # umul_hi reads the bit pattern as unsigned
+            for n in (1, 7, 100, 1000, 12345, 999983, 2**31):
+                self.assertEqual((((n * m) >> 32) + n) >> s, n // d, f"{n}//{d}")
+
+    def test_fit_slot_prefers_the_simplest_exact_model(self):
+        """Candidates are tried simplest-first, so a slot that IS affine never
+        gets described as something more exotic."""
+        pts = [(64,), (96,), (128,)]
+        expr, why = fit_slot(["C"], pts, [128, 192, 256])
+        self.assertEqual(expr, {"mul": [{"spec": "C"}, 2]}, why)
+
+    def test_fit_slot_finds_magic_operands(self):
+        pts = [(64,), (96,), (128,)]
+        shifts = [magic_division_constants(p[0])[1] for p in pts]
+        mults = [magic_division_constants(p[0])[0] for p in pts]
+        self.assertEqual(
+            fit_slot(["C"], pts, shifts)[0], {"magic_shift": {"spec": "C"}}
+        )
+        self.assertEqual(
+            fit_slot(["C"], pts, mults)[0], {"magic_multiplier": {"spec": "C"}}
+        )
+
+    def test_fit_slot_finds_a_reciprocal(self):
+        pts = [(32,), (64,), (128,)]
+        expr, why = fit_slot(["b"], pts, [16, 8, 4])
+        self.assertEqual(expr, {"div": [512, {"spec": "b"}]}, why)
+
+    def test_unit_fraction_slope_allows_a_non_zero_intercept(self):
+        """`x/d + k` is expressible, so refusing it when `k != 0` cost coverage for
+        nothing. `div` floors either way, so two samples are a guess with or
+        without an intercept, and both are settled by the held-out points."""
+        from rocke.portable_ir.src.roller import _linear_expr
+
+        self.assertEqual(
+            _linear_expr("w", 4, 3, 8, 4),
+            {"add": [{"div": [{"spec": "w"}, 4]}, 2]},
+        )
+
+    def test_fit_slot_still_refuses_the_unexplainable(self):
+        """A candidate library must not become 'fit anything'. A quadratic is not
+        in the hypothesis class, and saying so is the correct answer."""
+        pts = [(2,), (3,), (5,)]
+        expr, why = fit_slot(["N"], pts, [4, 9, 25])
+        self.assertIsNone(expr)
+        self.assertIn("fits no candidate model", why)
+
+    def test_magic_axis_rolls_at_held_out_odd_parts(self):
+        """End to end: the axis that no curve fits. The holdouts have odd parts
+        3, 5 and 7, whose multipliers share no value with any sampled point."""
+        r = roll_nd(
+            build_magic,
+            axes={"C": [64, 96, 128]},
+            holdout_points=[{"C": 192}, {"C": 160}, {"C": 224}, {"C": 384}],
+        )
+        self.assertTrue(r.ok, r.reason)
+        prog = json.dumps(r.recipe["program"])
+        self.assertIn("magic_multiplier", prog)
+        self.assertIn("magic_shift", prog)
+
+    def test_magic_axis_sampled_only_on_powers_of_two_is_refused(self):
+        """The sampling trap, pinned. Every power of two has multiplier 1, so the
+        slot looks INVARIANT and gets frozen -- inference cannot know it is being
+        starved, and only a non-power-of-two holdout exposes it."""
+        r = roll_nd(build_magic, axes={"C": [64, 128]}, holdout_points=[{"C": 96}])
+        self.assertFalse(r.ok)
+        self.assertIn("verify failed", r.reason)
+
+    def test_reciprocal_axis_rolls(self):
+        r = roll_nd(
+            build_reciprocal,
+            axes={"block": [32, 64, 128]},
+            holdout_points=[{"block": 256}, {"block": 512}],
+        )
+        self.assertTrue(r.ok, r.reason)
+        self.assertIn('"div": [512', json.dumps(r.recipe["program"]))
+
+    def test_two_samples_cannot_separate_a_line_from_a_reciprocal(self):
+        """Ambiguity is resolved by ORDER, so ordering can pick the wrong model.
+
+        `512 div b` at b=32,64 gives 16,8 -- and the line `24 - b/4` passes through
+        both. Two samples contain no evidence to prefer either; simplest-first
+        means the line would win whenever it is expressible. Here it is not (a
+        non-unit fraction), so the reciprocal is reached and the roll succeeds --
+        but the general lesson is that a third sample, not a cleverer solver, is
+        what makes this unambiguous."""
+        two = fit_slot(["b"], [(32,), (64,)], [16, 8])[0]
+        self.assertEqual(two, {"div": [512, {"spec": "b"}]})
+        # the line is genuinely exact on those two points
+        self.assertEqual([24 - 32 // 4, 24 - 64 // 4], [16, 8])
+        # a third sample rejects it outright: 24 - 128/4 = -8, not 4
+        self.assertIsNone(affine_solve([(32,), (64,), (128,)], [16, 8, 4]))
+        three = fit_slot(["b"], [(32,), (64,), (128,)], [16, 8, 4])[0]
+        self.assertEqual(three, {"div": [512, {"spec": "b"}]})
+
+    def test_cross_term_fits_once_an_interior_point_is_recorded(self):
+        """The same kernel that must be REFUSED without holdouts (above) rolls
+        once escalation is permitted, and the recipe says `S*T` outright."""
+        r = roll_nd(
+            build_cross,
+            axes={"S": [8, 16], "T": [64, 128]},
+            holdout_points=[{"S": 32, "T": 256}, {"S": 24, "T": 192}],
+        )
+        self.assertTrue(r.ok, r.reason)
+        self.assertIn(
+            '{"mul": [{"spec": "S"}, {"spec": "T"}]}', json.dumps(r.recipe["program"])
+        )
+        # escalation costs one extra recording, not the whole grid
+        self.assertEqual(r.n_recorded, 4)
+
+    def test_cross_term_without_holdouts_says_why(self):
+        """Fitting products consumes grid points that verification relies on, so
+        refuse rather than silently weaken the evidence."""
+        r = roll_nd(build_cross, axes={"S": [8, 16], "T": [64, 128]})
+        self.assertFalse(r.ok)
+        self.assertIn("holdout_points", r.reason)
 
 
 class TestRollNdMixed(unittest.TestCase):

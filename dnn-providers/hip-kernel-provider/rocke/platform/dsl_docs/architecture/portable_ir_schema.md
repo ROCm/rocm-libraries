@@ -162,7 +162,21 @@ leave no trace in the emitted IR. `scf_for` and `scf_if` emit real control flow.
 <intexpr> := number
            | {"spec": NAME} | {"var": NAME} | {"spec_str_eq": [NAME, literal]}
            | {"<OP>": [e, e]}   for OP in add sub mul div mod eq ne lt le gt ge
+           | {"<FN>": e}        for FN in magic_multiplier magic_shift
 ```
+
+Note the arity difference: binary ops take a 2-element array, the unary functions
+take the operand directly.
+
+`magic_multiplier` / `magic_shift` return the two operands of a strength-reduced
+unsigned division — `n // d` compiled as `(umul_hi(n, M) + n) >> s`, which is what
+`helpers/transforms.py::do_magic_division` emits. They exist because those two
+integers are *not* arithmetic on the divisor: the shift is `ceil(log2 d)` and the
+multiplier depends on `d`'s odd part, so a recipe that stays parametric in a
+divisor has to regenerate them rather than carry a formula. The divisor must
+satisfy `1 <= d < 2^31`. Three implementations must agree — the DSL helper that
+emits them, `recipe_expand.py::magic_division_constants`, and `recipe_vm.cpp` —
+and tests pin all three.
 
 These reach constant values, integer attr values, and *type size fields* —
 vector counts and smem shapes — so a recipe can size its LDS from the spec.

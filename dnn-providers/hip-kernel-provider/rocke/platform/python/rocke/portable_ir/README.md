@@ -76,6 +76,28 @@ Terms used throughout, in plain language:
 | **`static_for`** | A **compile-time** loop *in the recipe*. The VM unrolls it while building, so it leaves no trace in the kernel — it is how one recipe emits a different number of instructions per shape. Distinct from `scf.for`, which is a **real loop in the generated kernel**. |
 | **intexpr** | A small integer expression tree (`{"mul": [{"var": "_r0"}, 512]}`) the VM evaluates during replay. How a constant can depend on the spec or the loop variable. |
 
+And the rolling terms, which is the vocabulary the refusal messages are written in:
+
+| Term | What it means here |
+|---|---|
+| **Trace** | One recording of the builder at one point on an axis. Rolling is fundamentally a diff of two traces; everything after that is verification. |
+| **Probe** vs **holdout** | A probe is a point recorded in order to *infer* the model. A holdout is a point the finished model is *checked* at but was never fitted to — so only holdouts can catch a model that merely memorized its inputs. |
+| **Level** | One nesting depth of the instruction list being compared: the top-level program, or the body of one loop inside it. Alignment works a level at a time and descends into each body, which is why refusals say "no run **at level**" — and why they quote `\|la\|` and `\|lb\|`, the lengths of the two op lists *at that level* rather than of the whole kernel. |
+| **Signature** | An op's fingerprint with SSA names and integer *values* stripped out, so two ops match when they do the same thing to differently-named inputs. Runs are found by comparing signatures, which is exactly why a constant that changed between traces does not prevent the match — it gets fitted afterwards. |
+| **Run** | A block of ops repeated several times in a row: the thing that becomes a loop. Found at the point where the two traces first disagree, by looking for a repeating signature pattern around it. |
+| **Period** (`L`) | The length of one copy of a run's block, in ops. A run of period 7 repeated 3 times spans 21 ops. Several periods can fit the same stretch (a coincidental short one, and the true unroll body), so candidates are tried largest-first. |
+| **Trip count** | How many times a run repeats. When it differs between the two traces it becomes a formula in the axis — which is the entire point, since that is what lets one recipe emit a different amount of code per shape. |
+| **Loop carry**, **fan**, **lane** | The values a *real* kernel loop (`scf.for`) hands from each iteration to the next: accumulators, advancing addresses. The roller splits them into individually named **lanes** (collectively a **fan**) because each has to be matched up across the two traces separately. Attention's KV loop carries 10 of them at `block_n = 64` and 14 at 128, which is why that axis does not roll. |
+| **Slot** | A single integer position somewhere in the recipe tree that might depend on the axis — an offset, a size, a shape entry. `fit_slot` takes that slot's recorded values and either returns a formula or refuses. |
+| **Affine** | The straight-line model `c0 + m·x`: a constant plus a fixed step per unit of the axis. It covers most of what a kernel *computes* from a shape, because address arithmetic is affine, and it is the first candidate tried. |
+| **Cross term** | A constant that scales with *two* axes multiplied together (`m·N·K`). Invisible to any probe that moves one axis at a time, so it needs a point where two axes move together. |
+| **Regime** | A stretch of an axis over which the structure stays uniform, so one recipe can cover it. An axis that switches code path past a threshold has two regimes and needs two recipes; `roll_regimes` finds the boundaries by verification rather than being told them. |
+| **Refusal** | Returning "no recipe" plus a reason, instead of a recipe that might be wrong. A refusal is a normal outcome and costs only compression — the caller keeps concrete per-point recipes — so the roller is built to refuse readily. |
+| **Structural roller** vs **constant solver** | The two machines rolling is made of. The constant solver keeps the instruction sequence fixed and turns the integers inside it into formulas; the structural roller changes the sequence itself, folding runs into `static_for` so one recipe emits a different amount of code per shape. `roll` always runs both; `roll_nd` runs the constant solver on every axis and the structural roller only on the axis named by `structural_axis=`. [§3c](#3c-the-structural-roller-and-the-simpler-one-next-to-it) walks through its six steps and its refusals. |
+| **`roll_two`** | The engine under everything: given two concrete traces and their axis values, return one parametric recipe, or `None` with `last_reason` set. `roll` and `roll_nd` are both thin drivers over it. |
+| **Annotate-then-roll** | How `roll_nd` handles several axes: first replace every axis-dependent constant with a formula (**annotate**), then run the structural roller over traces that are already parametric. Doing it in that order keeps the two problems — which numbers moved, and which code repeated — from having to be solved at once. |
+| **Oracle** | The check that decides correctness: expand the parametric recipe at a point and compare it against a fresh recording of the real builder (`recipes_equiv`). Byte-identity, not similarity. |
+
 ### The shape of it
 
 ```
@@ -292,27 +314,211 @@ Replay binds every axis — `--int N=64 --int K=512`, or `spec_int` entries in C
 Nothing in the VM changed to support this: a multi-axis constant is still an
 intexpr over spec values.
 
+### 3c. The structural roller, and the simpler one next to it
+
+The two examples above were produced by two different machines. Knowing which one
+is running explains most of what the roller says, so it is worth separating them.
+
+**The constant solver** leaves the instruction sequence alone. Same ops, in the
+same order, in the same number, at every value of the axis — only the integers
+inside them move, and each one becomes a formula. §3b is entirely this. It is fast,
+it fails cleanly (a constant either matches a candidate model at every recorded
+point or it does not), and it fundamentally cannot describe a kernel that emits
+*more code* at a bigger shape.
+
+**The structural roller** changes the sequence itself. It is what turned a repeated
+block into the `static_for` in §3 — one recipe emitting one copy at `hidden=512`
+and eight at `hidden=4096`. This is the part that makes a recipe a compiler input
+rather than a recording, and it is where nearly all the difficulty lives.
+
+What it does, in order:
+
+1. **Align, one level at a time.** Compare the two traces' instruction lists by
+   *signature* (names and integer values stripped). An identical prefix is copied
+   through; the first disagreement is where the work starts. Each loop body is its
+   own level and is handled the same way, recursively.
+2. **Find a run.** Around the disagreement, look for a block whose signature
+   pattern repeats. Its length in ops is the *period*; count how many copies each
+   trace has. Several periods can fit the same stretch — a short coincidental one
+   and the true unroll body — so candidates are tried largest first.
+3. **Solve the trip count** as a formula in the axis. One copy at 512 and two at
+   1024 gives `hidden/512`.
+4. **Learn what each iteration hands to the next** by diffing copy 0 against copy
+   1: the loop-carried values, and the constants that step per iteration. This is
+   the step that makes two copies the minimum evidence, and it is why a trip count
+   of the form `n-1` is a trap.
+5. **Fan out real loop carries.** If the run contains an `scf.for`, its iter-args
+   are split into individually named *lanes* so each can be matched across the two
+   traces on its own.
+6. **Recurse on the remainder**, so a kernel with ten separately growing regions
+   ends up with ten `static_for`s rather than one confused attempt.
+
+**How to ask for it.** `roll` always runs it — a single-axis roll is structural by
+default. `roll_nd` is the other way round: it runs the constant solver on *every*
+axis and the structural roller only on the one axis you name with
+`structural_axis=`. That asymmetry matters in practice, because it means a
+`not constants-only` refusal has not yet been offered to the structural roller at
+all. Three axes in `kernels/gfx950` were recovered exactly that way (see
+[the sweep](#measured-every-kernel-in-kernelsgfx950)).
+
+**How it declines.** Every message below is a refusal, which is to say a safe
+outcome — the caller keeps concrete per-shape recipes. They are worth telling apart
+because they call for different responses:
+
+| Message | What it means | Usual response |
+|---|---|---|
+| `not constants-only: program: A instructions at base vs B` | The op *count* moved, so the constant solver is the wrong tool | name the axis as `structural_axis=` |
+| `no run at level (\|la\|=… \|lb\|=…)` | The lists diverge but no repeating block was found around the divergence | check the axis really repeats something |
+| `shorter-at-larger-axis (\|la\| > \|lb\|)` | *Fewer* ops recorded at the larger value; rolling looks for more repetition, not less | reorder `sample_points`, or accept that the axis shrinks code and specialize |
+| `no run candidate rolled at level` | Runs were found, but none survived being turned into a loop | usually a loop-carry gap |
+| `unresolved register 'accNNN'` | A value crossing the run boundary was never matched to a loop carry | roller gap |
+| `runtime scf.for iter-arg arity scales with axis (variable loop-carry fan)` | The kernel loop's *carried-value count* itself grows with the axis | needs parametric `scf_for` iter-args in schema + VM |
+
+**What each buys.** The constant solver wins artifact count: one file serves many
+shapes, at the same op count as any one of them. The structural roller wins both —
+it is the only one that shrinks the recipe below the concrete op count, because a
+block stored once stands in for however many copies a shape needs.
+
+### Not every constant is affine
+
+Affine covers what a kernel *computes* from a shape, because address arithmetic is
+affine. It does not cover constants a code generator *chose* given a shape, so the
+solver tries a short ladder of candidates, simplest-first, and takes the first one
+that reproduces every recorded point exactly:
+
+| Candidate | Shape | Where it shows up |
+|---|---|---|
+| affine | `c0 + Σ mⱼ·xⱼ` | almost everything: offsets, strides, sizes |
+| magic-division operand | `magic_shift(x)`, `magic_multiplier(x)` | a kernel dividing by a spec value |
+| reciprocal | `k div x`, `ceil(k/x)` | a block or tile **count** from a block **size** |
+| cross term | `+ m·xⱼ·xₖ` | one constant scaling with two axes at once |
+
+The middle two matter more than they look. Conv's `C` axis makes the kernel divide
+by `C`, and the compiler strength-reduces that into `(umul_hi(n, M) + n) >> s`
+where `s = ceil(log2 C)` and `M` depends on `C`'s odd part — one logarithmic, one
+number-theoretic, so no polynomial of any degree fits either. The recipe carries
+the *generating formula* instead, and the C VM regenerates both at replay.
+
+Cross terms are last because they cost evidence: a product is invisible to
+one-axis probes, so fitting one needs a point where two axes move together.
+`roll_nd` only records those after a verification failure, and refuses to do it at
+all unless you have passed a holdout — otherwise fitting would consume the very
+grid points that verification depends on.
+
 Choosing axes, in order of what actually matters:
 
 - **Leave the reduction axis out.** GEMM `tile_k`, attention `head_size` — these
   drive the hot loop, so they change *structure*, not just constants. If one axis
   does restructure, name it `structural_axis=` and it gets the full structural
   roller while the rest stay constant models.
-- **Put a holdout outside the sampled box.** An interpolated holdout mostly
-  re-tests the fit; extrapolation is where a wrong model shows up.
-- **Read `n_recorded` against `len(points)`.** Inference records
-  `1 + Σ(nⱼ−1)` traces while verification checks the full grid plus holdouts. That
-  gap is the point: a constant scaling with `N*K` fits every one-axis probe exactly
-  and is only caught in the grid's interior.
+- **Put at least one holdout outside the range you sampled.** Your samples span a
+  box: sample `N` at 8 and 16 and `K` at 64 and 128, and the box is that rectangle.
+  A holdout *inside* it — say `N=12, K=96` — is a weak test, because it sits
+  between values the model was already fitted to, and a wrong model has not had
+  room to go far wrong yet. A holdout *outside* it — `N=64, K=512` — is where a
+  wrong model separates from a right one, and it is also the case you actually
+  care about, since the whole point of a parametric recipe is to serve shapes
+  nobody recorded.
+
+- **Compare `n_recorded` against `len(points)`: the gap is the safety margin.**
+  These two numbers answer different questions. `n_recorded` is how many traces
+  were recorded to *build* the model; `len(points)` is how many points the finished
+  model was *checked* at. Verification is deliberately much wider than inference.
+
+  Conv makes the numbers concrete. Sampling `N` at 2 values, `K` at 2 and `C` at 3
+  costs only **5** recordings, because each axis is probed one at a time out from a
+  shared starting point — `1 + (2−1) + (2−1) + (3−1)`. But the recipe is then
+  checked against a fresh recording at all `2×2×3 = 12` combinations plus 3
+  extrapolated holdouts, so **15** points are verified from 5 traces.
+
+  That gap is not an accident, and here is what it buys. Suppose some constant is
+  really `m·N·K`. Probe `N` on its own, with `K` pinned at 64, and it looks exactly
+  like an ordinary slope of `64m` per unit of `N` — a perfect fit. Probe `K` on its
+  own and the same thing happens. Every one-axis probe agrees, so nothing in the
+  fitting stage can possibly notice, and the model comes out as a sum of two
+  independent slopes with no product term. The only place the lie shows up is a
+  point where **both** axes moved at once — an interior point of the grid, which
+  inference never recorded and verification always checks.
+
+- **For a structural axis, pick values where every loop runs at least twice.** To
+  turn a repeated block of code back into a loop, the roller has to work out what
+  each iteration hands to the next — which register the running sum lives in, how
+  an address advances. It learns that by lining the first copy of the block up
+  against the second and looking at what changed between them. So a loop that
+  appears **once** in a trace gives it nothing to compare against, and a loop that
+  appears **zero** times is not in the trace at all. Two copies is the minimum
+  evidence, and whether you have it is decided by the values you sampled, not by
+  how clever the detector is.
+
+  The trap is trip counts of the form `n-1`, which are everywhere, because
+  combining `k` values takes `k-1` steps (adding up four numbers takes three
+  additions). attention's softmax over `block_n` is one of these: the loop runs
+  **zero** times at `block_n = 32` and once at 64. So 32 and 64 — the obvious first
+  pair to reach for — is exactly the pair that cannot work, no matter what the
+  roller does. 64 and 128 give 1 and 3 copies, and those can. When this happens the
+  refusal says so and names values that would work, rather than reporting a
+  detector failure.
+
+- **Pick values that make the axis show its effect.** Two samples can pin down a
+  model with two unknowns and nothing more, and *which* two you pick decides what
+  the roller is able to see at all. If some constant happens to hold the same value
+  at both of your samples, nothing suggests it varies, so the roller freezes it —
+  and the roll then "succeeds" while being wrong at every other value.
+
+  Powers of two are the classic way to walk into this. Dividing by a power of two
+  is just a bit shift, so the magic-division multiplier is `1` for every single one
+  of them. Sample conv `C` at 64 and 128 and that constant reads as invariant;
+  sample 64, 96, 128 and it moves, and the axis rolls.
+
+  Two samples can also be too few to tell apart two models that *both* fit. The KV
+  block count `512 div b` is 16 at `b = 32` and 8 at `b = 64` — and the straight
+  line `24 − b/4` passes through both of those points exactly. Two points, two
+  models, no evidence to choose between them. A third value settles it: the line
+  predicts `24 − 128/4 = −8` at `b = 128`, where the real count is 4.
+
 - **A refusal is a real answer.** `r.reason` names the field and axis, and the
   caller keeps concrete per-point recipes. Some axes are not affine in any
   regime — GEMM `tile_m` re-vectorizes its load path, so re-sampling will not help.
 
+### When one recipe is the wrong goal
+
+Some axes are not uniform, and no better fit will make them so: past a threshold
+the kernel takes a different path and there are simply two programs. That is worth
+recognising because a refusal is expensive — it costs the *whole* axis, dropping
+every value back to its own concrete recipe.
+
+`roll_regimes` covers such an axis with as few recipes as its structure allows:
+
+```python
+from rocke.portable_ir.src.roll_regimes import legal_values, roll_regimes, regime_report
+
+vals = legal_values("block_n", range(16, 1025, 16), make_spec)   # ask the kernel
+r = roll_regimes(build_at, axis="block_n", values=vals)
+print(regime_report(r))
+r.recipe_for(64)
+```
+
+It never guesses where to split. A regime rolls from its first two values, then
+extends one value at a time while the recipe still reproduces the real recording
+byte-for-byte; the first value that does not verify starts the next regime. So a
+threshold moving in the kernel moves the split with no change here, a uniform axis
+still comes back as one recipe, and every regime is verified at every value it
+claims. If structure changes at *every* value (gemm `tile_m`) there is no threshold
+to find and you get concrete recipes — regimes help when the change is piecewise.
+
+**Ask before you roll.** `legal_values` runs candidates through the kernel's own
+spec validation, which keeps the constraint in one place *and* tells you what the
+axis is worth: attention `num_query_heads` has 128 legal values, `seqlen_kv` 32,
+`block_n` 5 (it must divide `seqlen_kv`), `head_size` 2. A recipe saves one
+concrete recipe per legal value, so a two-value axis cannot repay one however
+neatly it might roll. `roll_nd_coverage` prints this table.
+
 The [scaling plan](portable_ir_scaling_plan.md#pitfalls--sharp-edges) collects the
 traps in full, including the one that survives the oracle: `recipes_equiv` compares
 programs and **not** the kernel symbol, so a recipe whose name does not track its
-axes can pass every oracle check and still emit the wrong symbol. `roll_nd` checks
-the name at every point; `roll` does not.
+axes can pass every oracle check and still emit the wrong symbol. Both `roll` and
+`roll_nd` check the name at every point (`roll` is a thin wrapper over `roll_nd`
+with a single axis), but a caller using `recipes_equiv` directly is not covered.
 
 ### 4. CBOR: the shipping form
 
@@ -589,6 +795,362 @@ or reorders ops.
   in the text, and `roll_nd` checks the name at each point directly. Treat the
   oracle as necessary but not sufficient (scaling plan, pitfall 4).
 
+## Measured: every kernel in `kernels/gfx950`
+
+The gates above check axes already known to work. This is the opposite exercise —
+point the roller at all five build entry points in `kernels/gfx950`, every axis
+they expose and every feature flag that changes what they emit, and report what
+happened. Reproduce with `drivers/roll_gfx950_sweep.py`; a refusal there is a
+finding, not a failure.
+
+| Family | Entry point | Axes probed | Rolled | One recipe covers | Traces | Feature settings held |
+|---|---|---|---|---|---|---|
+| attention_dense | `build_attention_dense` | 10 | **7** | 65 pts, 6 axes | 22 | 6/10 |
+| attention_tiled_2d | `build_unified_attention_2d_tiled` | 11 | 3 | 9 pts, 3 axes | 4 | 22/22 |
+| attention_tiled_3d | `build_unified_attention_3d_tiled` | 7 | 3 | 5 pts, 2 axes | 3 | 10/10 |
+| attention_reduce | `build_unified_attention_reduce_tiled` | 4 | 2 | 3 pts, 1 axis | 2 | 2/2 |
+| fastkv_regp | `build_unified_attention_2d_fastkv_register_p` | 6 | 1 | 3 pts, 1 axis | 2 | 3/3 |
+
+**The `roll_nd` payoff, at full resolution.** Those coverage numbers are from the
+2-samples-per-axis default. Raise it to three and `attention_dense` becomes the
+clearest demonstration in the tree: **one recipe covering 730 verified points from
+28 recorded traces**, parametric in six axes at once —
+
+```
+6 axes  batch, seqlen_kv, num_query_heads, seqlen_q, num_persistent, waves_per_eu
+729 grid + 1 held-out points verified from 28 traces  (5913 ops, 171s)
+one recipe = 548.6KiB CBOR vs 390.6MiB for 730 concrete (547.9KiB each)  729x
+holdout: batch=64 seqlen_kv=2048 num_query_heads=512 seqlen_q=4096
+         num_persistent=1024 waves_per_eu=8      -- outside the box on every axis
+```
+
+Note what the 26x is *not*. It is not a storage figure; it is that 28 builds of a
+Python kernel generator answer for 730 shapes, each of which was checked against
+its own independent recording. One recipe per axis would have taken six recipes
+and covered a line through the space rather than the volume.
+
+The byte figure on the third line is the same recipe measured a different way:
+**548.6 KiB of CBOR in place of 390.6 MiB**, at 770 bytes per shape served. It is
+also byte-for-byte the *same* 548.6 KiB the 2-sample run produced for 65 points —
+raising the sample count grew what the recipe is verified to cover by 11x and grew
+the recipe itself by nothing at all, since more samples buy confidence in the
+models rather than more models. [Sizes for every family are
+below](#what-the-rolled-recipes-cost-on-disk).
+
+### Which axes rolled
+
+Constants-only (`roll_nd` with no structural axis) covers most shape parameters:
+
+| Family | Rolls today |
+|---|---|
+| attention_dense | `batch`, `seqlen_q`, `seqlen_kv`, `num_query_heads`, `num_kv_heads`, `waves_per_eu`, `num_persistent` |
+| attention_tiled_2d | `num_seqs`, `num_kv_heads`, `kq_lds_pad_halves` |
+| attention_tiled_3d | `num_query_heads`, `num_kv_heads`, `num_seqs` |
+| attention_reduce | `num_query_heads`, `num_kv_heads` |
+| fastkv_regp | `num_seqs` |
+
+Three more roll once the [structural
+roller](#3c-the-structural-roller-and-the-simpler-one-next-to-it) is pointed at
+them with `structural_axis=`, which the sweep does not do by default: `attention_reduce ::
+num_segments`, `attention_tiled_3d :: num_segments`, and `attention_tiled_2d ::
+sliding_window`. The last one only works when sampled away from zero — `0` means
+*disabled*, a different program rather than a smaller one, so a grid containing it
+is asking one recipe to span two regimes.
+
+### Which axes did not, and why
+
+The refusals sort into five causes, and only two of them are roller gaps.
+
+**1. The axis barely exists.** `head_size` takes 2 legal values, `block_n` 5,
+`kv_ring_depth` 1. `fastkv_regp` pins four of its six axes to a single value each,
+because its support gate admits exactly one shape. Nothing to roll toward; a
+concrete recipe per value is already the right answer.
+
+**2. The axis shrinks the code as it grows.** `attention_tiled_2d :: num_warps`
+emits 1387, 1234 and 1162 ops at 1, 2 and 4 warps, because more warps means less
+work each. The roller reports `shorter-at-larger-axis`, the same class as gemm
+`tile_m`: rolling looks for a block that repeats *more* often at the larger value,
+and here the larger value repeats it less. Specialized recipes fit this better
+than any model would.
+
+**3. Structural roller gaps.** `attention_tiled_2d :: tile_size` gets past name
+reconstruction and then fails inside the roll with an unresolved loop-carried
+register; `attention_tiled_3d :: block_size` finds no repeated run to segment.
+These are genuine mechanism gaps rather than properties of the kernels.
+
+**4. The constant depends on a PRODUCT of axes, structurally.** This is the one
+real finding in `attention_dense`, and it explains all four of its held-back
+feature settings. In persistent mode every axis still rolls *alone*, but any pair
+fails at an interior grid point, and with cross-term fitting allowed the emitted
+*length* diverges (2387 vs 2404 instructions). Persistent mode spreads
+`batch × num_query_heads × q_blocks` tiles over a fixed CTA count, so the work
+decomposition is a reciprocal of a product — structural in two axes at once.
+Cross-term fitting handles constants, not structure, so this is out of reach.
+
+**5. The kernel name drops a token at its default value.** `num_warps=1` yields
+`..._bf16` while `num_warps=2` yields `..._bf16_w2`; `tile_size=32` omits the `_t`
+token that 64 and 128 carry. The format is therefore not reconstructible by
+substitution and the roll is refused — correctly, since the alternative is
+emitting a wrong symbol. Sampling away from the default, or passing `name_fmt=`,
+gets past it.
+
+### Feature flags: rolling survives almost all of them
+
+Flags are not axes. They pick different code at build time, so the question is not
+whether a flag rolls but whether rolling still works with it set. Across 47
+settings that the kernels accept, **43 held**: dtype, sinks, softcap, ALiBi, QQ
+bias, sliding window, FP8 KV cache, FP8 MFMA, V double-buffering, staggered waits,
+LDS padding, 64-bit KV addressing, scheduling barriers, the whole MFMA 32x32 and
+transposed-QK stack, `kv_ring_depth=3`, register-P, softmax interleave, causal off,
+varlen, ragged, and lazy-rescale off. The 4 that did not are the persistent-mode
+group above — one cause, not four.
+
+This is the more reassuring half of the result. The op counts move a lot across
+these settings (`attention_tiled_2d` goes from 1162 to 3514 ops), so the recipes
+are describing genuinely different programs and still rolling in each.
+
+**It holds at three samples too.** That mattered enough to re-run, because a wider
+grid is a stricter test — a third sample is what catches a constant that looked
+invariant across two, the powers-of-two trap especially — so a flag that held at two
+samples and refused at three would mean the count above was optimistic. Re-running
+the full flag pass at `--samples 3` returns the same **43 of 47**, with the same four
+refusals and the same persistent-mode cause. Only the arithmetic in one message
+moves (`affine fit ['-8/5', …]` becomes `['-3/2', …]`), which is the residual of a
+different grid, not a different finding.
+
+### Things the sweep found in the kernels
+
+Two are worth fixing on the kernel side rather than here.
+
+**`num_kv_heads` is not validated against `num_query_heads`** in the tiled 2D, 3D
+and reduce kernels. Neither the spec's `__post_init__` nor `supports_*` rejects a
+`num_kv_heads` that does not divide `num_query_heads` — the admission check bounds
+`num_queries_per_kv`, which is computed with a floor division that swallows the
+remainder — so the kernel builds and bakes in a group size matching no real
+grouping. `attention_dense` rejects the same combination outright. The sweep has to
+filter these points itself to keep its domains honest.
+
+**`UnifiedAttentionReduceTiledSpec` has no validation at all** and no `supports_*`
+function, so its legal domains are the least trustworthy in the table: `head_size`
+appears to accept 4 values only because the build asserts on the rest.
+
+### What it changed here
+
+One roller gap, closed. All three tiled kernels size their sequence-lookup loop as
+`ceil(log2(num_seqs + 1))` — a binary search over the batch — and `num_seqs`
+refused because no candidate model was that shape. It turned out the recipe
+*schema* could already express it: `magic_shift` computes `ceil(log2 x)` and both
+evaluators recurse into its operand, so `magic_shift(num_seqs + 1)` was always
+representable and merely never hypothesised. The candidate ladder now tries the
+magic operands at offset 0 and 1, and `num_seqs` rolls in all three families. Two
+offsets is deliberately a tiny hypothesis space — `TestBinarySearchTripCount` pins
+both that it extrapolates (fitted on 16/32/48, correct at 100000) and that it still
+refuses an unrelated logarithm.
+
+### What the rolled recipes cost on disk
+
+CBOR is the shipping form, so this is the size question answered in the currency
+that actually gets deployed. Sizes below are `len(cbor_encode(recipe))` at the
+sweep's default two samples per axis, so they line up with the coverage table
+above. "All concrete" is the mean concrete recipe times the points covered — what
+shipping them one per shape would cost instead.
+
+Three things get compared throughout this section, and they differ in *what varies
+with the parameter*:
+
+- **Concrete** — one file per shape, every integer baked in, no free variables.
+  Nothing varies inside it; you ship N files for N shapes and pick by name. This is
+  the baseline, not a rolling result.
+- **Rolled, constants-only** — one file replacing those N. The same instruction list
+  as any one of them (5913 ops either way, for `attention_dense`) with intexpr
+  formulas where the integers differed. The numbers vary with the parameter; the
+  instruction sequence does not, so the file is the size of one concrete recipe.
+- **Rolled, structural** — one file that also varies *how many instructions are
+  emitted*, by storing a repeated block once inside a `static_for` with a formula
+  trip count. Its size stops depending on the axis, which is why this is the only
+  one of the three where bytes actually shrink.
+
+The last two are **layers, not alternatives**, and it is worth being clear about it
+because the labels suggest otherwise. Constant fitting is the floor that every roll
+stands on; a structural roll adds instruction-count parameterization on top and in
+doing so asks the constant solver for *more*, not less. One structural axis on gemm
+produces all of this in one recipe:
+
+```
+static_for var=_r0 hi={"div": [{"spec": "tile_n"}, 16]}   <- trip count, a fitted formula
+  arith.constant value={"mul": [{"var": "_r0"}, 16]}      <- per-iteration stepper, fitted
+arith.constant value={"spec": "tile_n"}                   <- an ordinary constants-only fit
+```
+
+A run cannot become a loop unless the constants that step from one iteration to the
+next are modelled first, so "constants-only" means the structural layer found nothing
+to do or was never asked — never that the structural case skips constants. `roll_nd`
+makes the order explicit (annotate-then-roll, in the [vocabulary](#vocabulary)): fit every
+axis-dependent constant across all axes, *then* roll structure over traces that are
+already parametric. A two-axis MoE recipe ends up with `hidden` in a `static_for`
+trip count and `tokens` only in the name format, in the same file.
+
+| Family | Rolled recipe | One concrete | Parametric costs | All concrete (points) | Saved | Rolled per point |
+|---|---|---|---|---|---|---|
+| attention_dense | **548.6 KiB** | 547.9 KiB | +0.1% | 34.8 MiB (65) | **65x** | 8.4 KiB |
+| attention_tiled_2d | **107.3 KiB** | 106.4 KiB | +0.8% | 957.4 KiB (9) | **9x** | 11.9 KiB |
+| attention_tiled_3d | **270.8 KiB** | 264.8 KiB | +2.3% | 1.3 MiB (5) | **5x** | 54.2 KiB |
+| attention_reduce | **12.0 KiB** | 11.9 KiB | +1.0% | 35.6 KiB (3) | **3x** | 4.0 KiB |
+| fastkv_regp | **459.5 KiB** | 459.5 KiB | +0.0% | 1.3 MiB (3) | **3x** | 153.2 KiB |
+
+The saved column is the point count in every row, give or take the rounding, and
+that is the whole finding for a constants-only roll. The recipe holds the same
+instructions as any one concrete recipe, with intexpr trees where plain integers
+used to be, so it costs one recipe's worth of bytes plus a rounding error — the
+"parametric costs" column, +0.1% to +2.3%, never more than a few KiB. Nothing is
+compressed. What changes is how many files exist: one 548 KiB artifact where 65
+stood, and it is *this* recipe rather than a lucky one, since all 65 points were
+verified against their own independent recordings. Read the saved column as a count
+of artifacts rather than bytes on the wire — a long-window compressor closes most of
+that gap on its own, which is measured below.
+
+Because the recipe does not grow, that ratio is bounded only by how much of the
+space you verify. Re-running the whole sweep at three samples per axis produces the
+*byte-identical* recipe in all five families — 548.6, 107.3, 270.8, 12.0 and 459.5
+KiB again — while what each is verified to cover goes up:
+
+| Family | 2 samples | 3 samples | Rolled recipe | Saved at 3 |
+|---|---|---|---|---|
+| attention_dense | 65 pts | **730 pts** | 548.6 KiB (unchanged) | **729x**, 770 B/shape |
+| attention_tiled_2d | 9 pts | 19 pts | 107.3 KiB (unchanged) | 19x |
+| attention_tiled_3d | 5 pts | 10 pts | 270.8 KiB (unchanged) | 10x |
+| attention_reduce | 3 pts | 4 pts | 12.0 KiB (unchanged) | 4x |
+| fastkv_regp | 3 pts | 4 pts | 459.5 KiB (unchanged) | 4x |
+
+That is the cleanest statement of what a sample is for. More samples buy confidence
+in the models already there — a third point is what distinguishes two candidate
+models that agree on two — and no additional models, so coverage rises 11x on
+`attention_dense` for zero extra bytes. The cost is time, not size: the extra points
+are verified against fresh recordings, which is where the 171 seconds go.
+
+**Where bytes really do shrink.** Point the [structural
+roller](#3c-the-structural-roller-and-the-simpler-one-next-to-it) at an axis and
+the picture changes, because the recipe stores a repeated block once instead of
+once per repetition. Its size then stops depending on the axis at all while the
+concrete recipe keeps growing. The two rolls below are *other kernels* — none of the
+five attention families rolls structurally by default, so measuring this at all
+means leaving `kernels/gfx950`:
+
+| Structural roll | Rolled | Concrete at the smallest sampled value | … and at the largest verified |
+|---|---|---|---|
+| `gemm_universal :: tile_n` | **17.6 KiB** | 20.4 KiB at 32 (0.86x) | 80.1 KiB at 256 (**0.22x**) |
+| `fused_moe/gather :: hidden` | **2562 B** | 2385 B at 512 (1.07x) | 12606 B at 8192 (**0.20x**) |
+
+Both rolled recipes are a fixed size — 195 and 21 ops — while the concrete ones go
+from 228 to 886 and from 20 to 125 ops as the axis grows. So the ratio falls with
+the axis, with no bound and no further recording: one 17.6 KiB gemm recipe is
+already smaller than the narrowest concrete recipe it replaces and is 4.6x smaller
+than the widest, while covering all four values. Against per-value concrete recipes
+over just those four, it is 17.6 KiB versus 175.5 KiB, or 10x. The MoE recipe shows
+the crossover instead — 7% *larger* than the concrete recipe at `hidden=512`, where
+the loop runs once and a `static_for` is pure overhead, then ahead everywhere
+above it.
+
+**These are raw CBOR, and compression matters for one of the two claims.** Nothing
+in `cbor_encode` or the C++ loader compresses, so every figure above is the byte
+count of the file as written. That invites the obvious objection — the 65 concrete
+recipes are nearly identical, so would a compressor not find that redundancy by
+itself? For a constants-only roll: yes, completely. Measured on a 16-point
+`attention_dense` grid:
+
+| | Rolled | 16 concrete | Ratio |
+|---|---|---|---|
+| raw CBOR | 548.5 KiB | 8.6 MiB | **16.0x** |
+| gzip -9, per file | 46.3 KiB | 739.0 KiB | **15.9x** |
+| gzip -9, one archive | 46.3 KiB | 734.5 KiB | 15.9x |
+| xz -6, one archive | 26.4 KiB | 27.9 KiB | **1.06x** |
+
+Per-file compression preserves the ratio exactly, and concatenating the 16 before
+gzipping saves 0.6% — not because the redundancy is not there but because gzip's
+32 KiB window cannot see across a 548 KiB recipe. Give a compressor a dictionary
+big enough to hold them all and it finds what rolling found: `xz -6` reduces the 16
+to 27.9 KiB, within 6% of the rolled recipe.
+
+The marginal cost of each extra concrete recipe is what makes that vivid. Under
+`xz -6` the first costs 26.3 KiB and the fifteenth costs **90 bytes** — 2 recipes
+are 26.5 KiB, 4 are 26.7 KiB, 8 are 27.2 KiB, 16 are 27.9 KiB — because copies 2
+onward are encoded as back-references to the first. Read the two forms side by side
+and the symmetry is the point: rolling and `xz` remove *the same* redundancy by
+different means, one semantically and one syntactically. A single concrete recipe
+xz's to 26.3 KiB and the rolled recipe to 26.4 KiB, so a compressor prices them as
+what they both are — one program's worth of information. The extra ~100 bytes is
+what it costs to say how that program varies, which is also roughly what a
+back-reference to a near-identical sibling costs. Neither is compressing better than
+the other; they encode the same fact in different places. So for a constants-only axis the byte
+ratio is **not** a storage claim, and the README's older framing — an artifact-count
+win, not compression — is the correct reading. What `xz` cannot do is produce a
+recipe for a shape nobody built: you have to run the generator 16 times, or 730
+times, before there is anything to compress, and the 731st shape is still missing.
+That, not bytes, is what rolling buys here.
+
+**So should a refused axis just be compressed instead?** For storage, yes, and it is
+worth doing. As a substitute for rolling, no — and the reason is that the 27.9 KiB
+above and independent addressability are mutually exclusive:
+
+| Option | Size | To load one recipe |
+|---|---|---|
+| Per-file `xz`, 16 files | 420.6 KiB | 1.1 ms, independently addressable |
+| Solid `xz` archive | 27.9 KiB | 3.0 ms, inflate all 8.6 MiB |
+| Rolled recipe, `xz`'d | 26.4 KiB | 1.1 ms, and covers 17 points |
+| Rolled recipe, raw CBOR | 548.5 KiB | 0 ms — what the VM loads today |
+
+The archive is small *because of* cross-file back-references, which is exactly what
+makes its members non-independent. Require per-recipe access, as any kernel cache
+does, and compression costs 420.6 KiB — 16x worse than the rolled recipe. It reaches
+parity only in the form where fetching one kernel inflates 8.6 MiB at 3.0 ms, in
+front of a comgr compile that is itself only 1.8–3.2 ms.
+
+Compression is therefore the right answer for the [first refusal
+class](#which-axes-did-not-and-why) — the axis that barely exists, where `head_size`
+has 2 legal values and `block_n` 5, and a parametric recipe would cover only the
+points it recorded — and for shipping a kernel library, where you inflate once at
+install. It is the wrong answer for an axis with range, because it needs every shape
+built first: 730 recipes need 730 generator runs and still cannot answer for the
+731st. Best used *with* rolling rather than instead of it — roll what rolls, compress
+the concrete residue, and compress the rolled recipe too, which also gains 21x.
+Note that nothing in the C++ loader decompresses today, so this is a new dependency
+and a new stage in the load path, and it does not touch the bottleneck that the
+missing HSACO cache does.
+
+Structural rolling is the opposite case, and survives the same test — a different
+kernel, since the attention families have no structural axis rolled here:
+
+| `gemm_universal :: tile_n`, 4 values | Rolled | Concrete | Ratio |
+|---|---|---|---|
+| raw CBOR | 17.6 KiB | 175.5 KiB | 10.0x |
+| gzip -9, one archive | 2.5 KiB | 15.1 KiB | **6.1x** |
+| xz -6, one archive | 2.3 KiB | 8.8 KiB | **3.9x** |
+
+It narrows — a compressor does find some of the repetition that `static_for`
+removes — but it does not close, because the recipe stores one copy of a block where
+the concrete recipes store up to 886 ops of expansions. Even against a *single*
+concrete recipe the rolled one stays smaller after compression: 0.22x of the
+`tile_n=256` recipe raw, 0.34x gzipped, 0.50x xz'd, while also covering the other
+three values. Here the byte figure really is a size win.
+
+**And what `roll_nd` adds over `roll`.** Same axes either way, so the comparison is
+one recipe per axis against one recipe for the cross product:
+
+| Family | One `roll` per axis | Those cover | One `roll_nd` | It covers |
+|---|---|---|---|---|
+| attention_dense | 7 recipes, 3.7 MiB | 15 points | 548.6 KiB | **65 points** |
+| attention_tiled_2d | 3 recipes, 320.0 KiB | 7 points | 107.3 KiB | **9 points** |
+| attention_tiled_3d | 3 recipes, 804.6 KiB | 7 points | 270.8 KiB | **5 points** |
+| attention_reduce | 2 recipes, 23.9 KiB | 5 points | 12.0 KiB | **3 points** |
+| fastkv_regp | 1 recipe, 459.5 KiB | 3 points | 459.5 KiB | 3 points |
+
+Since each single-axis recipe is itself constants-only, seven of them cost seven
+full recipes — 3.7 MiB — and buy fifteen points on a cross of lines through the
+space. One `roll_nd` recipe covers 65 points in the volume for 548.6 KiB: 7x fewer
+bytes for 4x the coverage, or 8.4 KiB per point against 256 KiB, 30x better per
+point served. The last row is the honest floor — `fastkv_regp` has one rollable
+axis, so there is nothing to cross and the two forms are the same recipe.
+
 ## Running things
 
 Everything below runs from `platform/` with the engine importable:
@@ -611,8 +1173,18 @@ python3 -m rocke.portable_ir.drivers.hsaco_parity        # ... and their HSACO
 python3 -m rocke.portable_ir.drivers.roll_hsaco_parity [--no-hsaco]
 
 # multi-axis: ONE recipe per family covering its axis cross product, verified at
-# every grid point + holdout. Pure Python (~1s); --ll adds an .ll sha report.
-python3 -m rocke.portable_ir.drivers.roll_nd_coverage [--ll]
+# every grid point + holdout. Pure Python (~1s); --ll adds an .ll sha report,
+# --slow re-probes the refusals whose structural search costs ~20s each.
+python3 -m rocke.portable_ir.drivers.roll_nd_coverage [--ll] [--slow]
+
+# survey (not a gate): every build entry point in kernels/gfx950, every axis they
+# expose, every feature flag. Reports coverage AND CBOR bytes per rolled recipe.
+# ~2.5 min at the default 2 samples per axis; --samples 3 multiplies the verified
+# grid, so --phase 3 (skip the per-flag re-rolls) is how to afford it: the 730-point
+# attention_dense figure above is one 3.5-min run of
+#   ... --family attention_dense --samples 3 --phase 3
+python3 -m rocke.portable_ir.drivers.roll_gfx950_sweep \
+    [--family F] [--samples N] [--phase 1|2|3|4]
 
 # on-device: record -> CBOR -> C replay -> comgr -> launch -> check numerics
 python3 -m rocke.portable_ir.drivers.gpu_replay --device 0 --verbose

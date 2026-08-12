@@ -267,7 +267,7 @@ probed axes were refused:
 | `gemm_universal` | `tile_k` | verify failed: k-atom constant not affine in `tile_k` |
 | `conv_implicit_gemm` | `tile_n` | no run candidate: trace lengths 59 vs 83 do not segment |
 | `conv_implicit_gemm` | `tile_m` | no run candidate: trace lengths 160 vs 184 do not segment |
-| `conv_implicit_gemm` | `C` | non-affine constant 6 vs 7 (spatial product) |
+| `conv_implicit_gemm` | `C` | non-affine constant 6 vs 7 — the `ceil(log2 C)` shift of a magic-number division, **not** a spatial product. **Since fixed: `C` now rolls** (see below) |
 | `attention_dense` | `head_size` | merge conflict on `tile.smem_alloc` |
 | `attention_dense` | `block_n` | non-affine constant 8 vs 4 |
 | `fused_moe` (gather) | `hidden` at 128 | opcode change: `global_load` vs `global_load_vN` |
@@ -283,8 +283,48 @@ treating `block_n` as a separate recipe family. Likewise `fused_moe :: hidden` a
 `global_load_vN`) — a structural change, not a parametric one, and it rolls
 cleanly once sampling starts at 512 where the width is stable.
 
-`gemm_universal :: tile_m` was later measured properly and is worth separating from
-the rest: it is not merely shrinking but **non-monotonic** (90 → 81 → 114 ops over
+Two of these were later measured properly and both attributions above are wrong in
+an instructive way.
+
+`conv_implicit_gemm :: C` is not a spatial-product problem. Five of the seven
+integers that move with `C` are plainly affine, *including* the spatial products
+(`9 = Y*X`, `3136 = Hi*Wi`). The refusal comes from the two operands of a
+strength-reduced `n // C` — `(umul_hi(n, M) + n) >> s` from
+`helpers/transforms.py::do_magic_division` — where `s = ceil(log2 C)` and `M`
+depends on `C`'s odd part (`1` for powers of two, `0x55555556` for 3, `0x9999999A`
+for 5, `0x24924925` for 7). One constant is logarithmic, the other
+number-theoretic; no polynomial fits either. The tractable fix is not a richer
+curve but the generating formula, exposed as intexpr primitives — which is what
+landed: `magic_multiplier`/`magic_shift` are now evaluated by both VMs and **conv
+rolls all three axes** (`N`, `K`, `C`), 15 points from 5 recordings, verified at
+held-out `C` = 192/160/224 whose multipliers appear at no sampled point.
+
+`attention_dense :: head_size` should be struck from this list rather than fixed:
+the spec accepts only 64 or 128, so the axis has **cardinality 2** and a parametric
+recipe would cover exactly the two points it recorded. Two concrete recipes are
+equivalent and simpler. (Its LDS padding is a discrete choice besides — K goes
+`[2,64,64] -> [2,64,136]` and V `-> [2,64,160]`, a pad of 0, 8 or 32.)
+
+`attention_dense :: block_n` is now purely structural: the reciprocal candidate
+fits its `512 div block_n` block count, and the body is exactly linear in the axis
+(`789 + 967*(block_n/32)` ops at every legal value). Two successive diagnoses of
+the structural failure were wrong. At the sampled pair 32/64 the softmax reduction
+has zero copies then one (its count is `block_n/32 - 1`), which no detector can
+roll — a sample-choice problem, not a detector one. Re-sampled at 64/128 the
+roller reaches the actual blocker: the runtime KV `scf.for` carries 10 iter-args at
+64 and 14 at 128, so the loop signature itself scales with the axis (gap 12).
+
+**It is nonetheless not worth pursuing next**, which only became clear once the
+axis was measured rather than assumed. Running candidates through the kernel's own
+validation (`legal_values`) shows `block_n` accepts **5** values at a fixed
+`seqlen_kv`, because it must divide it — so the entire prize is 5 concrete recipes
+saved, against a schema and VM change for parametric loop-carry fan. By the same
+measure `num_query_heads` has 128 legal values and `seqlen_kv` 32, and both already
+roll. Domain size, not difficulty, is the right way to order this list; the
+coverage gate prints it so the ranking cannot drift back.
+
+`gemm_universal :: tile_m` is worth separating from the rest for a different
+reason: it is not merely shrinking but **non-monotonic** (90 → 81 → 114 ops over
 16/32/64), because `tile.mma` scales cleanly (2 → 4 → 8) while the load path
 re-vectorizes underneath it (`memref.global_load_vN` 3 → 2 → 3, address arithmetic
 33 → 28 → 42). There is therefore no sampling window in which it is affine —
@@ -398,8 +438,10 @@ the stable family key and the varying spec values.
 | 6 | No HSACO cache | P1 | comgr 1.8–3.2 ms per compile, unavoidable today | Cache on `(family, spec, arch)` |
 | 7 | Provider `ArtifactStore` path not integrated | P1 | Marked "pending integration" in the plan | Wire recipe expansion behind a C-JIT flag |
 | 8 | Bundle key hygiene unenforced | P2 | Names embed parametrized spec values | Enforce family key vs spec separation |
-| 9 | Non-linear axes unsupported | P2 | `block_n`, conv `C` refusals | Richer intexpr grammar, or separate families |
-| 10 | Oracle cannot see kernel names | P2 | `roll()` + `recipes_equiv` accepts a recipe emitting a wrong symbol | Compare `kernel_name_fmt` in `recipes_equiv` (`roll_nd` already checks it) |
+| 9 | Non-linear axes unsupported | P2 | **Largely closed**: conv `C` rolls via `magic_multiplier`/`magic_shift`; reciprocal and cross-term candidates added. `block_n`'s remainder is structural, not modelling | Close by finding the 967-op period in run detection (gap 12) |
+| 12 | Runtime `scf.for` iter-arg arity scales with the axis | P3 (was P2) | attention `block_n` sampled at 64/128: the KV loop carries 10 accumulators at 64 and 14 at 128 (`6 + 2*(block_n/32)`). Deprioritized on measured leverage: `block_n` has only 5 legal values, since it must divide `seqlen_kv` | Parametric `scf_for` iter-args (variable loop-carry fan) in schema + VM; `_roll_fan` already exists but declines this loop |
+| 13 | One recipe per axis, even where structure is piecewise | P2 | **Closed** by `roll_regimes`: an axis is covered by as few recipes as its structure allows, with boundaries discovered by verification rather than declared. Helps only when change is piecewise — gemm `tile_m` changes at every value and stays concrete | — |
+| 10 | Oracle cannot see kernel names | P3 (was P2) | **Closed at both entry points**: `roll` now delegates to `roll_nd`, so it inherits the per-point name check it used to skip. Still true of `recipes_equiv` itself, which compares programs only | Compare `kernel_name_fmt` in `recipes_equiv`, for the benefit of direct callers |
 | 11 | Tuning axes need opcode selection, not affine fits | P2 | `tile_m` non-monotonic 90 → 81 → 114 | `static_if` over vector width / opcode (P3 in the scaling plan) |
 
 ## Success criteria and acceptance test plan
@@ -418,7 +460,8 @@ enforceable in CI today given gaps 1–3; 6–7 need the cache and provider work
 | 6 | Cold JIT within budget on a cache miss; cache hit avoids comgr | new bench | **Not implemented** (gap 6) |
 | 7 | Provider serves a recipe-backed kernel behind the C-JIT flag | integration test | **Not implemented** (gap 7) |
 | 8 | Roller never emits an incorrect recipe; refusals degrade to concrete | oracle in `roll()` | **Holding** across all probes, with the kernel-name caveat above (gap 10) |
-| 9 | One recipe covers a family's non-reduction axis **cross product** | `roll_nd_coverage` | **Passing** 4/4 families, every grid point + holdout |
+| 9 | One recipe covers a family's non-reduction axis **cross product** | `roll_nd_coverage` | **Passing** 4/4 families, every grid point + holdout; conv covers 15 points (`N`,`K`,`C`) from 5 recordings |
+| 10 | Constants a *generator chose* replay identically off-Python | `test_standalone_cli_regenerates_magic_division_constants` | **Passing** — the C VM regenerates conv `C`'s division constants at 4 held-out divisors, byte-identical `.ll` |
 
 Two notes on the plan. Criteria 3 and 4 now both hold, so CI can gate the rolled
 path on a `.ll` checksum and treat the HSACO compile as the slower confirming

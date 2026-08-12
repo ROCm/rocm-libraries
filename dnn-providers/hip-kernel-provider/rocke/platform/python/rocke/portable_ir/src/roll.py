@@ -1,29 +1,30 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
-# roll.py -- the productized rolling driver.
+# roll.py -- the single-axis rolling driver.
 #
 #   roll(build_at, axis="D", sample_points=[64,128], holdout_points=[256], ...)
 #
 # It records concrete traces from an UNMODIFIED production builder (via the
 # build-time interception recorder), infers ONE parametric recipe over the given
-# structural axis (roller.roll_two), then VERIFIES the parametric recipe with the
-# recipe_expand oracle against every sample AND held-out point. The held-out
-# points guard against two-point overfitting. On any failure it returns
-# (None, reason) -- the caller keeps the concrete per-shape recipes (graceful
-# degradation; never a wrong roll).
+# structural axis, then VERIFIES it with the recipe_expand oracle against every
+# sample AND held-out point. The held-out points guard against two-point
+# overfitting. On any failure it returns (None, reason) -- the caller keeps the
+# concrete per-shape recipes (graceful degradation; never a wrong roll).
+#
+# This is a THIN WRAPPER over roll_nd with a single axis, kept because a
+# one-axis roll is common and reads better without wrapping every value in a
+# dict. It used to be a parallel implementation, which was a slow leak: the two
+# had drifted into different builder calling conventions, and only this one
+# skipped the kernel-name check, so the more convenient entry point was also the
+# less safe one. Delegating fixes that by construction. Verified byte-identical
+# to the old implementation on all seven gated axes before the switch.
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional
 
-from rocke.portable_ir.utils.recipe_expand import (
-    equiv_reason,
-    expand_recipe,
-    recipes_equiv,
-)
-from rocke.portable_ir.src.recording_builder import kernel_to_recipe, record_kernel
-from rocke.portable_ir.src.roller import roll_two
+from rocke.portable_ir.src.roll_nd import roll_nd
 
 
 class RollResult:
@@ -42,11 +43,6 @@ class RollResult:
         return self.recipe is not None
 
 
-def _record(build_at: Callable[[int], Any], v: int) -> Dict[str, Any]:
-    _, recipe = record_kernel(lambda: build_at(v))
-    return recipe
-
-
 def roll(
     build_at: Callable[[int], Any],
     *,
@@ -61,36 +57,25 @@ def roll(
 
     `build_at(value)` must build and return a KernelDef (it may construct its
     IRBuilder internally; recording is automatic). `extra_spec` supplies any
-    additional spec values (e.g. {"dtype": "fp16"}) needed when expanding."""
+    additional spec values (e.g. {"dtype": "fp16"}) needed when expanding.
+
+    Note the calling convention: `build_at` takes the value POSITIONALLY here,
+    while `roll_nd` passes every axis by keyword."""
     if len(sample_points) < 2:
         raise ValueError("need >= 2 sample_points to infer a roll")
-    holdout_points = holdout_points or []
-    extra_spec = extra_spec or {}
-    spec_decl = spec_decl or [{"name": axis, "kind": "int"}]
-
-    traces: Dict[int, Dict[str, Any]] = {v: _record(build_at, v) for v in sample_points}
-
-    a0, a1 = sample_points[0], sample_points[1]
-    param = roll_two(traces[a0], traces[a1], axis, a0, a1, spec_decl, name_fmt)
-    if param is None:
-        return RollResult(
-            None, f"roll inference failed: {roll_two.last_reason}", traces
-        )
-
-    # Verify: expand the parametric recipe and compare to an independent concrete
-    # recording at every sample AND held-out point.
-    for v in list(sample_points) + list(holdout_points):
-        concrete = traces.get(v) or _record(build_at, v)
-        traces[v] = concrete
-        spec = {axis: v, **extra_spec}
-        exp = expand_recipe(param, spec)
-        if not recipes_equiv(exp, concrete):
-            return RollResult(
-                None,
-                f"verify failed at {axis}={v}: " f"{equiv_reason(exp, concrete)}",
-                traces,
-            )
-    return RollResult(param, "", traces)
+    nd = roll_nd(
+        lambda **point: build_at(point[axis]),
+        axes={axis: list(sample_points)},
+        structural_axis=axis,
+        holdout_points=[{axis: v} for v in (holdout_points or [])],
+        spec_decl=spec_decl,
+        name_fmt=name_fmt,
+        extra_spec=extra_spec,
+    )
+    # roll_nd keys traces by point tuple; a single axis makes those 1-tuples.
+    return RollResult(
+        nd.recipe, nd.reason, {pt[0]: rec for pt, rec in nd.traces.items()}
+    )
 
 
 def roll_report(result: RollResult) -> str:

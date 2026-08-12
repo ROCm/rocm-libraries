@@ -185,7 +185,7 @@ KNOWN_UNROLLABLE = [
         "tile_m",
         "no run candidate: trace lengths 160 vs 184 don't segment",
     ),
-    ("conv_implicit_gemm", "C", "non-affine constant 6 vs 7 (spatial product)"),
+    ("conv_implicit_gemm", "C", "non-affine constant 6 vs 7 (magic-division shift)"),
     ("attention_dense", "head_size", "merge conflict on tile.smem_alloc"),
     (
         "attention_dense",

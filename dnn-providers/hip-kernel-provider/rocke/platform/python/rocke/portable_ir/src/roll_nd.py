@@ -54,7 +54,7 @@ import re
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from rocke.portable_ir.src.recording_builder import record_kernel
-from rocke.portable_ir.src.roller import affine_intexpr, affine_solve, roll_two, _sig
+from rocke.portable_ir.src.roller import fit_slot, roll_two, _sig
 from rocke.portable_ir.utils.recipe_expand import (
     equiv_reason,
     expand_recipe,
@@ -198,10 +198,12 @@ def annotate_axes(
     probe_progs: Sequence[List[Dict[str, Any]]],
     axis_names: List[str],
     points: List[Tuple[int, ...]],
+    allow_cross: bool = False,
 ) -> Tuple[Optional[List[Dict[str, Any]]], str]:
     """Return a copy of `base_prog` with every axis-dependent integer replaced by
-    an affine intexpr. `points[0]` is the base point; the rest line up with
-    `probe_progs`. Returns (None, reason) if any field resists an affine model."""
+    an intexpr. `points[0]` is the base point; the rest line up with
+    `probe_progs`. Returns (None, reason) if any field resists every candidate
+    model (see `roller.fit_slot`)."""
     prog = copy.deepcopy(base_prog)
     progs: List[List[Dict[str, Any]]] = [prog] + list(probe_progs)
     try:
@@ -217,21 +219,10 @@ def annotate_axes(
             vals = [s[si][0] for s in slots]
             if len(set(vals)) == 1:
                 continue
-            sol = affine_solve(points, vals)
-            what = group[0].get("opcode", group[0].get("op"))
-            if sol is None:
-                return None, (
-                    f"{what}: integer {vals} is not affine in {axis_names} over "
-                    f"{points} -- the axis enters non-linearly (a spatial product, "
-                    f"a clamped vector width); needs polynomial inference"
-                )
-            expr = affine_intexpr(axis_names, sol)
+            expr, why = fit_slot(axis_names, points, vals, allow_cross=allow_cross)
             if expr is None:
-                return None, (
-                    f"{what}: affine fit {[str(c) for c in sol]} for {vals} is not "
-                    f"expressible as an intexpr (a non-unit fractional coefficient "
-                    f"would only agree with floor division by luck)"
-                )
+                what = group[0].get("opcode", group[0].get("op"))
+                return None, f"{what}: {why}"
             setter(expr)
     return prog, ""
 
@@ -321,9 +312,14 @@ def _annotated_at(
     const_axes: List[str],
     axis_names: List[str],
     traces: Dict[Tuple[int, ...], Dict[str, Any]],
+    cross: bool = False,
 ) -> _Annotated:
     """Record the base point plus one probe per constant axis per extra sample,
-    then annotate every axis-dependent integer."""
+    then annotate every axis-dependent integer.
+
+    One-axis probes cannot see an interaction between two axes, so `cross=True`
+    additionally records the diagonal point of each axis pair -- the cheapest
+    evidence that distinguishes `m*N + m*K` from `m*N*K`."""
 
     def key(p: Point) -> Tuple[int, ...]:
         return tuple(p[a] for a in axis_names)
@@ -342,8 +338,16 @@ def _annotated_at(
             if axis not in probe_names:
                 probe_names[axis] = r.get("kernel_name_fmt", "")
                 probe_points[axis] = p
+    if cross:
+        for a, b in itertools.combinations(const_axes, 2):
+            p = dict(base, **{a: axes[a][1], b: axes[b][1]})
+            if key(p) in {tuple(x) for x in points}:
+                continue
+            r = traces.setdefault(key(p), _record(build_at, p))
+            probe_progs.append(r["program"])
+            points.append(key(p))
     prog, reason = annotate_axes(
-        base_recipe["program"], probe_progs, axis_names, points
+        base_recipe["program"], probe_progs, axis_names, points, allow_cross=cross
     )
     return _Annotated(
         prog, reason, base_recipe, probe_names, probe_points, 1 + len(probe_progs)
@@ -360,6 +364,7 @@ def roll_nd(
     name_fmt: Optional[str] = None,
     extra_spec: Optional[Dict[str, Any]] = None,
     verify_points: Optional[List[Point]] = None,
+    fit_cross_terms: bool = True,
 ) -> NdRollResult:
     """Roll `build_at` over SEVERAL axes at once into one parametric recipe.
 
@@ -411,7 +416,72 @@ def roll_nd(
     base: Point = {a: axes[a][0] for a in axis_names}
     traces: Dict[Tuple[int, ...], Dict[str, Any]] = {}
 
-    a0 = _annotated_at(build_at, base, axes, const_axes, axis_names, traces)
+    def attempt(cross: bool) -> NdRollResult:
+        return _roll_nd_once(
+            build_at,
+            base=base,
+            axes=axes,
+            const_axes=const_axes,
+            axis_names=axis_names,
+            traces=traces,
+            structural_axis=structural_axis,
+            holdout_points=holdout_points,
+            spec_decl=spec_decl,
+            name_fmt=name_fmt,
+            extra_spec=extra_spec,
+            verify_points=verify_points,
+            cross=cross,
+        )
+
+    res = attempt(cross=False)
+    # A cross term is invisible to one-axis probes -- along any single axis with
+    # the others fixed, a product looks exactly like a straight line -- so it
+    # surfaces at verification, not at inference. Retry with the product basis
+    # only for the two failures it could explain.
+    retryable = "verify failed" in res.reason or "fits no candidate model" in res.reason
+    if not res.ok and fit_cross_terms and len(const_axes) > 1 and retryable:
+        if not holdout_points:
+            # Fitting products consumes grid points that verification relies on,
+            # and a model means nothing on points it was fitted to. Say so rather
+            # than quietly shrinking the evidence.
+            return NdRollResult(
+                None,
+                f"{res.reason}; a cross term would explain this, but fitting one "
+                f"consumes grid points that verification relies on -- pass "
+                f"holdout_points= to enable it",
+                res.points,
+                traces,
+                res.n_recorded,
+            )
+        res2 = attempt(cross=True)
+        if res2.ok:
+            return res2
+        # Report whichever attempt got further, so the reason stays actionable.
+        return res2 if len(res2.points) >= len(res.points) else res
+    return res
+
+
+def _roll_nd_once(
+    build_at: Callable[..., Any],
+    *,
+    base: Point,
+    axes: Dict[str, List[int]],
+    const_axes: List[str],
+    axis_names: List[str],
+    traces: Dict[Tuple[int, ...], Dict[str, Any]],
+    structural_axis: Optional[str],
+    holdout_points: List[Point],
+    spec_decl: List[Dict[str, str]],
+    name_fmt: Optional[str],
+    extra_spec: Dict[str, Any],
+    verify_points: Optional[List[Point]],
+    cross: bool,
+) -> NdRollResult:
+    """One inference+verification pass. `cross` widens the constant model to
+    include pairwise products (and records the extra points that needs)."""
+    a0 = _annotated_at(
+        build_at, base, axes, const_axes, axis_names, traces, cross=cross
+    )
     prog0, rec0 = a0.prog, a0.base_recipe
     n_recorded = a0.n_traces
     if prog0 is None:
@@ -423,7 +493,9 @@ def roll_nd(
     if structural_axis is not None:
         s1 = axes[structural_axis][1]
         base1 = dict(base, **{structural_axis: s1})
-        a1 = _annotated_at(build_at, base1, axes, const_axes, axis_names, traces)
+        a1 = _annotated_at(
+            build_at, base1, axes, const_axes, axis_names, traces, cross=cross
+        )
         n_recorded += a1.n_traces
         if a1.prog is None:
             return NdRollResult(
@@ -443,6 +515,7 @@ def roll_nd(
         )
         if name_fmt is None:
             return NdRollResult(None, nreason, [], traces, n_recorded)
+    assert name_fmt is not None
 
     if structural_axis is None:
         param = {

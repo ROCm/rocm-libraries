@@ -113,6 +113,10 @@ hard-coded to attention head_size (D=64/128, VEC=8).
 - `src/roll_nd.py` — the `roll_nd(build_at, axes={...}, structural_axis=...)`
   driver: the same contract over **several axes at once**, so one recipe covers
   their cross product. See "Multi-axis rolling" below.
+- `roller.fit_slot` — the candidate-model ladder (affine, magic-division operand,
+  reciprocal, cross term), tried simplest-first and required to fit every recorded
+  point exactly. This is what makes conv's `C` axis rollable; see "Candidate
+  models beyond affine" below.
 
 **Multi-run per level (delivered).** A single level can hold several independent
 runs (GEMM pipeline-nest + CShuffle; two unrolled loops). The roller finds the
@@ -159,15 +163,18 @@ the "interleaved fan" hypothesis:
 - The body is dominated by **~687 ops of axis-scaled shared/spatial work** (the
   conv0→conv1→pool spatial-output unroll) that scales with the pool tile
   *independently* of the lane count.
-- The shared prologue contains **non-affine constants** (e.g. `3 → 4` as
-  `pool_tile_w` goes `4 → 8`, slope `1/4`): the pool tile enters address/size
-  math as a **spatial product**, so constants are non-linear in the axis.
+- The shared prologue contains a constant that *looked* non-affine (`3 → 4` as
+  `pool_tile_w` goes `4 → 8`, slope `1/4`) and was read as a spatial product.
+  **It is not**: it is exactly `pool_tile_w/4 + 2`. The two-point fitter had simply
+  refused a fractional slope unless the intercept was zero — a restriction the
+  multi-axis renderer never had. Lifting it (`_linear_only`) makes this constant
+  fit, and the refusal moves on to the next stage.
 
-So `pool_tile_w/h` are **not clean affine axes** for `deep_fused_conv_pool`;
-rolling it would need (a) **multi-axis / polynomial constant inference** and
-(b) rolling the **spatial-output unroll**, not interleaved-fan handling. This is
-the "non-linear constants stay concrete" limit (below) — `deep_fused_conv_pool`
-is a legitimate **concrete-per-shape** kernel under the current affine roller.
+So of the two things `deep_fused_conv_pool` was said to need, only one is real:
+(a) constant inference — **done**, and (b) rolling the **spatial-output unroll**,
+which is where it now stops (run detection over the `tile.mma` nest, `|la|=3`
+vs `|lb|=5`). Not interleaved-fan handling. Until (b) lands it stays a legitimate
+**concrete-per-shape** kernel.
 Interleaved-fan handling remains useful for kernels whose lanes *genuinely*
 interleave (e.g. a GEMM CShuffle `m×n` epilogue) — just not for this one.
 
@@ -216,7 +223,7 @@ roller:
 Verified byte-equivalent at sampled (32/64) and held-out (128/256/96/192)
 `tile_n`. (`test_roller.py::TestRollGemmCShuffle`, `::TestLaneAnalysis`.)
 Coverage is now **T1–T4 rolled on at least one axis each, T5 fallback**
-(conv-pool's non-affine spatial-product constants) — with the caveat recorded in
+(conv-pool's spatial-output unroll; its constants now fit) — with the caveat recorded in
 Step 4 that only T1 `tile_n` and T4 `hidden` compress structurally; T2 and T3 roll
 constants only. Note: `tile_k` is a *separate* GEMM axis that still hits a
 non-affine LDS-sizing case.
@@ -266,6 +273,34 @@ integer coefficient becomes a `mul`, a unit fraction `1/d` becomes a `div` (the
 `count = axis // vec` shape), and any other fractional coefficient is refused
 because `div` floors and a non-unit fraction would only agree by luck.
 
+**Candidate models beyond affine (`roller.fit_slot`).** Affine describes what a
+kernel *computes* from a shape. It does not describe constants a code generator
+*chose* given a shape, and those turned out to be what most refusals were made of.
+`fit_slot` therefore tries a short ladder, simplest-first, taking the first model
+that reproduces every recorded point exactly:
+
+| Candidate | Free params | Unlocks |
+|---|---|---|
+| affine `c0 + Σ mⱼ·xⱼ` | `1 + n` | the common case |
+| `magic_shift(x)` / `magic_multiplier(x)` | **0** | conv `C` — a divisor baked into a strength-reduced division |
+| `k div x`, `ceil(k/x)` | 1 (usually determined) | a block/tile **count** from a block **size** |
+| affine + `mⱼₖ·xⱼ·xₖ` | `1 + n + C(n,2)` | one constant scaling with two axes |
+
+The magic pair is the interesting one because it has **no free parameters**: it
+either reproduces the data or it does not, so it cannot overfit. It exists because
+`n // C` is compiled to `(umul_hi(n, M) + n) >> s`, where `s = ceil(log2 C)` and
+`M` depends on `C`'s odd part — one logarithmic, one number-theoretic. No
+polynomial fits either, but the *generating formula* does, so the recipe carries
+that and regenerates both at replay. `magic_multiplier`/`magic_shift` are now
+intexpr primitives in both VMs; the DSL helper
+(`helpers/transforms.py::calculate_magic_numbers`) stays the single source of
+truth, with `recipe_expand.py` and `recipe_vm.cpp` as tested mirrors.
+
+Ordering is what keeps a candidate library from becoming "fit anything", and it is
+also the one place it can go wrong: when two candidates both fit, the earlier wins
+by fiat rather than by evidence. Two samples of `512 div b` are also fit by the
+line `24 − b/4`, and only a third sample separates them (pitfall 13).
+
 **The probe/verify asymmetry is the safety argument.** Inference reads
 `1 + sum(n_j - 1)` traces; verification checks `prod(n_j)` grid points plus
 holdouts. That gap is deliberate — see the first pitfall below.
@@ -274,18 +309,84 @@ holdouts. That gap is deliberate — see the first pitfall below.
 
 | Family | Axes | Grid | Held out | Traces recorded | `static_for` |
 |---|---|---|---|---|---|
-| conv_implicit_gemm | `N`, `K` | 4 | 3 | **3** | 0 |
+| conv_implicit_gemm | `N`, `K`, `C` | 12 | 3 | **5** | 0 |
 | attention_dense | `seqlen_kv`, `num_query_heads` | 4 | 1 | **3** | 0 |
 | fused_moe/gather | `hidden`*, `tokens` | 4 | 1 | **4** | 1 |
 | gemm_universal | `tile_n`* | 2 | 2 | **2** | 5 |
 
-`*` = also rolled structurally. The **C VM needed no change**: a multi-axis
-constant is still an intexpr over spec values, so `--int N=.. --int K=..` binds
-both, and the standalone CLI replays the two-axis conv recipe to byte-identical
-`.ll` at all 7 points including `N=64, K=512` (8x the base on *both* axes at once).
-Unit tests: `tests/test_roll_nd.py`; CI lanes:
-`tests/portable_ir/test_recipe_roller.py::test_roll_nd_cross_product` and
-`::test_standalone_cli_replays_multi_axis_recipe`.
+`*` = also rolled structurally. Conv covers **15 points from 5 recordings**, each
+with a distinct `.ll`, including held-out `C` = 192/160/224 whose magic multipliers
+appear at no sampled point.
+
+The **C VM needed one change, and only for the magic pair**: a multi-axis constant
+is still an intexpr over spec values, so `--int N=.. --int K=..` binds all of them.
+The standalone CLI replays the two-axis conv recipe to byte-identical `.ll` at
+`N=64, K=512` (8x the base on *both* axes), and separately regenerates conv `C`'s
+division constants at four held-out divisors — the test that would fail if the two
+mirrors of `calculate_magic_numbers` ever drifted apart. Unit tests:
+`tests/test_roll_nd.py` (56 in the suite); CI lanes:
+`test_recipe_roller.py::test_roll_nd_cross_product`,
+`::test_standalone_cli_replays_multi_axis_recipe`, and
+`::test_standalone_cli_regenerates_magic_division_constants`.
+
+### Specialized recipes (delivered) — when one recipe *should not* span an axis
+
+Rolling assumes an axis is uniform: same structure throughout, only constants and
+trip counts moving. Some axes are not, and no amount of better fitting will change
+that — a kernel that takes a different code path past a threshold is not one
+program being stretched, it is two programs. Forcing them together can only fail,
+and the failure is expensive: a refusal costs the *whole* axis, dropping every
+value back to its own concrete recipe.
+
+`src/roll_regimes.py` takes the other option. It covers an axis with as few
+recipes as the structure allows, rather than insisting on one:
+
+```
+roll_regimes(build_at, axis="N", values=[2,3,4,5,6,7,8,9,10])
+  -> N: 9 legal values -> 2 recipe(s), 2 rolled
+       2..7  (6 values) from 2 traces
+       8..10 (3 values) from 2 traces
+```
+
+Boundaries are **discovered, never declared**. A regime starts by rolling from its
+first two values, then extends one value at a time for as long as the recipe still
+reproduces the real recording byte-for-byte; the first value that fails opens the
+next regime. Nothing in the roller knows where a threshold is, which is why moving
+one in the kernel moves the split without any change here
+(`test_a_moved_threshold_moves_the_boundary`). Over-splitting is guarded too: a
+uniform axis still comes back as a single recipe, because extension only stops on
+a real verification failure. Correctness is unchanged — every regime is verified
+at every value it claims, so specializing trades compression for coverage and
+never for safety.
+
+Two honest limits. Where structure changes at *every* value there is no threshold
+to find and the result is per-value concrete recipes (measured: gemm `tile_m`);
+regimes turn a total refusal into a partial win only when the changes are
+piecewise. And a regime needs two values to infer from, so a trailing odd value
+stays concrete.
+
+### Ask the kernel what an axis is worth, before rolling it
+
+The more useful half of this turned out to be cheaper than the mechanism.
+`legal_values(axis, candidates, make_spec)` runs candidates through the kernel's
+*own* `__post_init__` and returns the ones it accepts. Constraints then live in one
+place and stay right when the kernel changes — but it also answers a question this
+plan had never actually asked: how many values does the axis have?
+
+| Family | Axis | Legal values | Rolled? |
+|---|---|---|---|
+| attention_dense | `num_query_heads` | **128** | yes |
+| attention_dense | `seqlen_kv` | **32** | yes |
+| attention_dense | `block_n` | **5** | no |
+| attention_dense | `head_size` | **2** | no |
+| conv_implicit_gemm | `C`, `K`, `N` | **128** each | yes |
+
+A recipe saves one concrete recipe per legal value, so these counts — not the
+difficulty — should order the frontier. `block_n` has five legal values at a fixed
+`seqlen_kv` (it must divide it), which caps the entire prize at 5x and reprices the
+work behind it: parametric `scf.for` iter-arg arity is a real schema and VM change.
+`head_size` has two. The axes already rolled are the ones with 128-value domains.
+The gate prints this table so the ranking cannot silently drift again.
 
 ## Pitfalls & sharp edges
 
@@ -297,8 +398,7 @@ position determine an affine function of two axes, so a constant scaling with
 `N*K` matches the base and both one-axis probes *exactly* and is wrong everywhere
 else. This is why verification sweeps the whole grid instead of trusting the fit,
 and why the interior points matter as much as the extrapolated ones. Pinned by
-`test_cross_term_refused_at_interior_point`; a real instance is conv `C`
-(predicted 9, actual 8).
+`test_cross_term_refused_at_interior_point`.
 
 **2. Holdouts inside the sampled box prove almost nothing.** Two-point inference
 fails by *extrapolating*, so a holdout must sit outside the sampled range to have
@@ -314,12 +414,19 @@ value to the gate.
 **4. The oracle does not check the kernel symbol.** `recipes_equiv` compares
 programs only, so a recipe whose `kernel_name_fmt` does not track the axis passes
 every oracle check while emitting the *wrong symbol*. Reproduced: a kernel named
-after a derived quantity (`g{3N+1}`) rolls "successfully" through `roll()` and
-emits `derived_g10` at every `N`, wrong at `N=2` and `N=9`, with
-`recipes_equiv == True` at all of them. Two things save this in practice — the
-`.ll` SHA gates compare text that contains the symbol, and `roll_nd` verifies the
-name at every point and refuses with a precise reason — but **`roll()` plus the
-oracle alone is not sufficient** to conclude a rolled recipe is shippable. Pinned
+after a derived quantity (`g{3N+1}`) rolled "successfully" and emitted
+`derived_g10` at every `N`, wrong at `N=2` and `N=9`, with `recipes_equiv == True`
+at all of them.
+
+**Closed at the entry points, still true of the oracle.** `roll_nd` verifies the
+name at every point and refuses with a precise reason, and `roll` — which used to
+be a parallel implementation that skipped the check, making the *more convenient*
+API the weaker one — is now a thin wrapper over it and inherits the check
+(`test_roll_refuses_a_name_it_cannot_reconstruct`). The underlying hazard stands
+for anyone calling `recipes_equiv` directly: it is a program comparison, not a
+kernel comparison, so **the oracle alone is not sufficient** to conclude a rolled
+recipe is shippable. The `.ll` SHA gates cover it as well, since the text they
+hash contains the symbol. Pinned
 by `test_name_carrying_a_derived_quantity_is_refused`; teaching `recipes_equiv` to
 compare names is the real fix.
 
@@ -362,6 +469,76 @@ through single-axis `roll`, so it is not multi-axis-specific. Pinned by
 `roll_nd` takes one dict per point; mixing them up (or omitting an axis from a
 point) now raises a message naming the mistake rather than failing deep inside
 verification. Pinned by `test_point_must_be_a_dict_not_a_bare_value`.
+
+**11. Sample values must exercise the axis, not just move it.** Inference can only
+see what the samples expose, and it cannot tell that it is being starved. Every
+power of two has magic multiplier `1`, so sampling conv `C` at 64 and 128 makes
+that constant look **invariant** — it gets frozen at 1, the roll "succeeds"
+through inference, and only a non-power-of-two point catches it. Sampling
+64/96/128 exposes it and the axis rolls. The gate keeps the degenerate sampling as
+a standing probe, because this failure looks like success right up until
+verification. Pinned by `test_magic_axis_sampled_only_on_powers_of_two_is_refused`.
+
+**12. Cross-term fitting spends the evidence that verifies it.** Products are
+invisible to one-axis probes, so fitting one needs an interior point — but those
+points are what verification uses. `roll_nd` therefore escalates only after a
+verification failure, records the minimum (one diagonal per axis pair, not the
+grid), and **refuses to escalate at all without a holdout** rather than quietly
+leaving itself nothing independent to check against.
+
+**13. When two candidates both fit, order decides — not evidence.** The ladder is
+tried simplest-first, which is a reasonable prior and not a proof. `512 div b` at
+`b = 32, 64` gives 16, 8, and the line `24 − b/4` passes through both points
+exactly; whichever is tried first wins. Here the line is unexpressible (a non-unit
+fraction) so the reciprocal is reached, but that is luck, not design. A third
+sample settles it — `24 − 128/4 = −8` against an actual 4 — and the general rule
+is that ambiguity is fixed by sampling, not by a cleverer solver. Pinned by
+`test_two_samples_cannot_separate_a_line_from_a_reciprocal`. Related: an affine fit
+that exists but cannot be *written down* must not end the search, since a later
+candidate may fit the same points and be expressible.
+
+**14. An axis with two legal values is not a rolling target.** attention
+`head_size` only accepts 64 or 128, so a "roll" would cover exactly the points it
+recorded. Check an axis's legal range before treating a refusal as a gap — and
+check the coupling too: `block_n` must divide `seqlen_kv`, so a recipe parametric
+in `block_n` is only replayable at divisors of the recorded `seqlen_kv`.
+
+**15. A run must be sampled at least twice, or no detector can roll it.** The
+structural roller learns a loop's carried values by diffing block 0 against block
+1 of the *same* trace (`_roll_run`). A run with only one copy therefore carries no
+evidence of how one iteration feeds the next, and a run with **zero** copies
+carries none at all — so when a trip count goes `0 -> 1` across the two samples,
+the roll cannot succeed *by any method*. This is a sample-choice problem wearing
+the costume of a detector weakness, which is why the refusal now says so outright
+and names points that would work (`_appearing_block` / `_sample_advice`).
+
+It is easy to hit without noticing, because reduction-shaped counts are naturally
+`n-1`: combining `k` values takes `k-1` steps. attention's softmax over
+`block_n` is exactly this, so at `block_n` = 32 the run has **zero** copies and at
+64 it has one — and the pair 32/64, the obvious choice, is the one pair that
+cannot work. Sampling 64/128 gives 1 and 3. Pinned by
+`test_run_absent_at_the_smaller_sample_is_a_sample_choice_problem` and its
+positive twin.
+
+**16. "Absent at the smaller value" has three different causes, and they need
+three different fixes.** A diff showing a block present at the larger axis value
+and missing at the smaller looks the same in all three cases, so it is worth
+telling them apart before spending anything:
+
+* a **run whose count went `0 -> 1`** — fix the samples (pitfall 15);
+* a **compile-time branch** — different program, so specialize instead of rolling
+  (`roll_regimes`, above), and no better detector will ever merge them;
+* **more copies of a run the alignment already consumed in phase** — not a
+  distinct block at all.
+
+attention's 7-op "block" at `block_n` = 64 turned out to be the third. The ops are
+a contiguous `arith.fmax` chain (the softmax max-reduction), and the level holds
+2 of them at 32 against 9 at 64 — a period-1 run with counts 2 and 9, not a block
+appearing from nothing. It reads as "absent" only because the surplus copies land
+at the head of the level, where the smaller side has none left in phase. The cheap
+discriminator for the branch hypothesis is the opcode set: a real branch emits
+something at one value that does not exist at the other, and here the two sets are
+**identical**, which rules a branch out in one comparison.
 
 ## C recipe VM — parametric surface complete (on-device JIT)
 
@@ -411,8 +588,9 @@ Still to generalize (the survey's remaining patterns):
    as `div`) from `1 + sum(n_j - 1)` traces, verified across the whole axis cross
    product plus held-out points, so one recipe replaces one-per-axis. A
    structural axis composes on top. Non-affine constants are refused, not
-   approximated: conv `C` (spatial product) and GEMM `tile_m` (non-monotonic,
-   re-vectorizing load path) both decline. See P2 under "Phasing & effort".
+   approximated: conv `C` (magic-number division constants) and GEMM `tile_m`
+   (non-monotonic, re-vectorizing load path) both decline. See P2 under
+   "Phasing & effort".
 5. **Runtime-loop conversion (opt-in, NOT byte-identical).** Where a compile-time
    unroll is value- (not structure-) dependent and a looped kernel is acceptable,
    convert to runtime `scf.for`. This changes codegen, so it is a kernel variant,
@@ -455,10 +633,10 @@ difficulty-ordered plan would put it (see Phasing).
 | Tier | Families | Loop profile | Roller needs | Risk | Measured status |
 |---|---|---|---|---|---|
 | **T1: GEMM** | gemm_universal (+batched/grouped/streamk/mfma/mx/block_scale/multi_d) | `k_atoms x mfmas` nests + 1 runtime K-`scf.for`; pipeline + CShuffle | nested roll + peel; helper-expansion macros | medium | **rolls structurally** on `tile_n` (195 vs 322 ops); `tile_m` non-monotonic, `tile_k` refused |
-| **T2: conv** | conv_implicit_gemm, conv_direct, img2col, pooling | implicit-GEMM nests over spatial windows | T1 + non-affine spatial constants | medium | **one recipe covers the `(N,K)` cross product** from 3 traces — constants only, op count flat; `C` non-affine; `tile_m`/`tile_n` refused |
-| **T3: attention** | scalar unified 2d/3d/reduce (DONE for 2d), FMHA fwd/bwd/varlen/paged/splitkv/headgroup/fp8, sage/sparse, tiled gfx942/gfx950 | runtime KV `scf.for` + huge spec-`if` flag forks + compile-time tile nests | full roller + `static_if` flag handling; per-arch | high | **one recipe covers `(seqlen_kv, num_query_heads)`** from 3 traces — constants only; `head_size`/`block_n` refused |
+| **T2: conv** | conv_implicit_gemm, conv_direct, img2col, pooling | implicit-GEMM nests over spatial windows | T1 + magic-division constants | medium | **one recipe covers the `(N,K,C)` cross product** — 15 points from 5 traces, constants only, op count flat; `tile_m`/`tile_n` refused |
+| **T3: attention** | scalar unified 2d/3d/reduce (DONE for 2d), FMHA fwd/bwd/varlen/paged/splitkv/headgroup/fp8, sage/sparse, tiled gfx942/gfx950 | runtime KV `scf.for` + huge spec-`if` flag forks + compile-time tile nests | full roller + `static_if` flag handling; per-arch | high | **one recipe covers `(seqlen_kv, num_query_heads)`** from 3 traces — constants only; `block_n` refused structurally (967-op period); `head_size` has only 2 legal values, so not a target |
 | **T4: MoE** | fused_moe (5), moe_gemm_fused (4), moe_fused_mega(+fp8), moe_sorting (4), moe_smoothquant | GEMM skeleton + phase routing (`static_if`) | T1 + multi-phase | medium | **rolls structurally** on `hidden` (21 vs 27 ops) **and carries `tokens` in the same recipe**; `hidden@128` refused |
-| **T5: deep-fused conv** | deep_fused_conv_pool | conv0→conv1→pool; pool tile enters address math as a spatial product | multi-axis / polynomial constant inference **and** spatial-output unroll rolling | high | refused (diagnosed, see Step 2) |
+| **T5: deep-fused conv** | deep_fused_conv_pool | conv0→conv1→pool; pool tile enters address math | spatial-output unroll rolling | high | refused, but **one step further**: its constant (`3 → 4` over `pool_tile_w` `4 → 8`) is just `w/4 + 2` and now fits; the remaining blocker is run detection over the `tile.mma` nest (`\|la\|=3 \|lb\|=5`) |
 | *(untiered)* small ops | elementwise, reduce, layernorm2d, rmsnorm2d, transpose, permute, topk_softmax, smoothquant | shallow `range(vec)` + reductions | index roll + peel | low | the pattern the roller handles best (probe `qk_block` rolls 78×); not competing for priority |
 
 Two notes on reading that status column.
@@ -583,13 +761,15 @@ failures, across all tiers (see Step 1).
   returns are fine; multi-kernel emitters need one `record_kernel` call per
   returned kernel. (These are the 3 `record_coverage.py` skips — harness plumbing,
   not recorder gaps.)
-- **Non-linear / data-dependent constants.** The multi-axis solver infers *affine*
-  spec-scaled constants only. A non-affine constant makes the whole roll decline
-  (the caller keeps concrete per-point recipes) rather than being approximated —
-  and because verification spans the axis cross product, a constant that looks
-  affine along each axis alone but carries a cross term is caught too. Value- (not
-  structure-) dependent unrolls are only convertible via the opt-in runtime-loop
-  path, which is **not** byte-identical and is never the default.
+- **Non-linear / data-dependent constants.** The solver fits a fixed ladder of
+  candidates (affine, magic-division operand, reciprocal, cross term) and each must
+  reproduce every recorded point exactly. Anything outside that ladder makes the
+  whole roll decline (the caller keeps concrete per-point recipes) rather than
+  being approximated — and because verification spans the axis cross product, a
+  constant that looks affine along each axis alone but carries a cross term is
+  caught too. Value- (not structure-) dependent unrolls are only convertible via
+  the opt-in runtime-loop path, which is **not** byte-identical and is never the
+  default.
 - **Arch SSOT.** New instances inherit arch handling for free *if* the arch is in
   `arch_specs.json` + the backend registry; a genuinely new target must be added
   there first, and recipes carrying `arch` spec fields regenerated. (All targets
@@ -671,10 +851,20 @@ characterized:*
   by `test_rotated_run_boundary_refuses_rather_than_mis_rolls`, and it reproduces
   identically through single-axis `roll`, so it is not multi-axis-specific.
 
-Two axes are refused for reasons worth recording, because neither is fixed by more
-inference:
-- **conv `C`** enters the spatial-product constants non-affinely (predicted 9,
-  actual 8 at a held-out point) — it needs polynomial, not affine, inference.
+**conv `C` now rolls** — and its story is the most useful one here, because the
+first diagnosis was wrong. The refusal was blamed on spatial-product non-affinity;
+measurement disproved that. Of the seven integers that move with `C`, five are
+plainly affine *including* the spatial products (`9 = Y*X`, `3136 = Hi*Wi`). The
+two that resisted are the operands of a strength-reduced `n // C`, emitted by
+`do_magic_division` as `(umul_hi(n, M) + n) >> s`: the shift is `ceil(log2 C)`
+(6, 7, 7, 8, 8, 8, 8, 9 over `C` = 64…384) and the multiplier is `1` for powers of
+two, else the magic constant for `C`'s odd part (`0x55555556` for 3, `0x9999999A`
+for 5, `0x24924925` for 7). Chasing a better *curve* would never have worked; the
+fix was to carry the generating formula. The lesson generalises: when a constant
+resists every model, ask whether it is a value the kernel computed or a decision a
+generator made.
+
+What remains refused, and why none of it is a curve-fitting problem:
 - **GEMM `tile_m`** is **non-monotonic**: over `tile_m` = 16/32/64 the k-loop body
   goes 90 -> 81 -> 114 ops, because `tile.mma` scales cleanly (2 -> 4 -> 8) while
   the load path *re-vectorizes* (`memref.global_load_vN` 3 -> 2 -> 3, address
@@ -682,9 +872,40 @@ inference:
   32/64 or 64/128 instead of 16/32 does not help. Covering the GEMM tuning space
   therefore needs opcode/vector-width selection (P3-style `static_if`), not a
   better constant fit.
+- **attention `block_n`** took two diagnoses to get right, and both wrong turns
+  are worth recording because each looked convincing.
 
-Consequently T1 rolls on `tile_n` but not `tile_m`/`tile_k`; T2 and T3 now cover
-their shape cross products, still with zero `static_for`.
+  Its body is *exactly* linear in the axis — `789 + 967*(block_n/32)` ops at every
+  legal value (32/64/128/256/512), and each of the 10 growing regions doubles
+  precisely when the axis doubles — so a repeated unit certainly exists. The first
+  reading was that run detection simply failed to find it. It did fail, but not
+  for want of searching: at the sampled pair 32/64 the softmax reduction has
+  **zero** copies and then one (its count is `block_n/32 - 1`), and a run seen
+  once carries no evidence of its loop carry. No detector can roll that from those
+  two points; see pitfall 15. **It was a sample-choice problem.**
+
+  Re-sampled at 64/128 (1 and 3 copies) the roller gets much further and stops
+  somewhere else entirely: the runtime KV `scf.for` carries **10 iter-args at
+  `block_n`=64 and 14 at 128**. The loop's own signature scales with the axis
+  (`6 + 2*(block_n/32)` accumulators), so this needs *parametric `scf_for`
+  iter-args* — a variable loop-carry fan in both the recipe schema and the VM, not
+  a detection change. That is the real remaining blocker, and it is a bigger piece
+  of work than the two guesses that preceded it.
+
+  Still the highest-value structural target: `block_n` is any multiple of 32, so
+  the axis has real extrapolation value. Note the measurement cost — a roll
+  attempt at 64/128 takes ~29 minutes, which is itself a reason the cheap
+  synthetic in `test_roller.py` is where this shape should be iterated on.
+- **attention `head_size` is not worth rolling at all.** The spec rejects anything
+  but 64 or 128, so the axis has **cardinality 2**: a parametric recipe could cover
+  exactly the two points it recorded, and buy no held-out value over two concrete
+  recipes. (Its LDS padding is also a discrete choice, not a function — the K
+  buffer goes `[2,64,64] -> [2,64,136]` and V `-> [2,64,160]`, i.e. `head_size`
+  plus a pad of 0, 8 or 32.) Recorded here so it stops being read as a gap.
+
+Consequently T1 rolls on `tile_n` but not `tile_m`/`tile_k`; T2 now covers a
+three-axis cross product; T3 covers its shape cross product, still with zero
+`static_for`.
 
 ### P3 — `static_if` flag/case handling · ❌ NOT STARTED
 

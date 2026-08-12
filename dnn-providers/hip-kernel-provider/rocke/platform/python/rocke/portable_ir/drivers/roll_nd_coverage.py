@@ -35,6 +35,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from rocke.portable_ir.drivers.roll_hsaco_parity import ARCH, _attn, _conv, _gemm, _moe
 from rocke.portable_ir.src.roll_nd import roll_nd
+from rocke.portable_ir.src.roll_regimes import legal_values
 
 # (label, builder, axes, structural_axis, holdouts, extra_spec)
 FAMILIES_ND: List[
@@ -58,9 +59,16 @@ FAMILIES_ND: List[
     (
         "conv_implicit_gemm",
         _conv,
-        {"N": [8, 16], "K": [64, 128]},
+        # C must be sampled off the powers of two: it drives a strength-reduced
+        # `n // C`, whose multiplier is 1 for EVERY power of two. Sampling 64/128
+        # alone makes that constant look invariant, and the model freezes it.
+        {"N": [8, 16], "K": [64, 128], "C": [64, 96, 128]},
         None,
-        [{"N": 32, "K": 256}, {"N": 8, "K": 256}, {"N": 64, "K": 512}],
+        [
+            {"N": 32, "K": 256, "C": 192},
+            {"N": 8, "K": 256, "C": 160},
+            {"N": 64, "K": 512, "C": 224},
+        ],
         {},
     ),
     (
@@ -81,6 +89,53 @@ FAMILIES_ND: List[
     ),
 ]
 
+# How many values each axis actually HAS, according to the kernel's own spec
+# validation. This decides what a recipe is worth: covering an axis with 64 legal
+# values saves 64 recipes, covering one with 2 saves 2. Without it the frontier
+# gets ranked by how hard an axis is to roll rather than by what rolling it buys,
+# which is how block_n came to look like a priority -- it has five legal values.
+#
+# (label, axis, make_spec, candidate values to test for legality)
+DOMAINS: List[Tuple[str, str, Callable[..., Any], List[int]]] = []
+
+
+def _domains() -> List[Tuple[str, str, Callable[..., Any], List[int]]]:
+    if DOMAINS:
+        return DOMAINS
+    from kernels.gfx950.attention_dense import AttentionDenseSpec
+
+    from rocke.instances.common.conv_implicit_gemm import ConvProblem
+
+    attn_base = dict(
+        batch=1,
+        seqlen_q=512,
+        seqlen_kv=512,
+        num_query_heads=128,
+        num_kv_heads=8,
+        head_size=128,
+        causal=True,
+        dtype="bf16",
+        block_n=64,
+        waves_per_eu=2,
+    )
+    conv_base = dict(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3)
+    attn = lambda **kw: AttentionDenseSpec(**{**attn_base, **kw})  # noqa: E731
+    conv = lambda **kw: ConvProblem(**{**conv_base, **kw})  # noqa: E731
+    step16 = list(range(16, 2049, 16))
+    DOMAINS.extend(
+        [
+            ("attention_dense", "num_query_heads", attn, step16),
+            ("attention_dense", "seqlen_kv", attn, step16),
+            ("attention_dense", "block_n", attn, step16),
+            ("attention_dense", "head_size", attn, step16),
+            ("conv_implicit_gemm", "C", conv, step16),
+            ("conv_implicit_gemm", "K", conv, step16),
+            ("conv_implicit_gemm", "N", conv, list(range(1, 129))),
+        ]
+    )
+    return DOMAINS
+
+
 # Axis combinations probed and REFUSED, with the reason kept short. These are the
 # frontier: each is a mechanism the roller still lacks, not a correctness risk.
 REFUSED_ND: List[
@@ -96,10 +151,14 @@ REFUSED_ND: List[
     (
         "conv_implicit_gemm",
         _conv,
+        # The same axes, but with C sampled only on powers of two. The magic
+        # multiplier is 1 at both, so it looks invariant and gets frozen -- caught
+        # at the held-out non-power-of-two. Kept as a probe because the failure is
+        # a SAMPLING mistake that looks like success until verification.
         {"N": [8, 16], "K": [64, 128], "C": [64, 128]},
         None,
-        [{"N": 32, "K": 256, "C": 256}],
-        "C enters the spatial-product constants non-affinely",
+        [{"N": 32, "K": 256, "C": 192}],
+        "C sampled only on powers of two hides the magic multiplier",
     ),
     (
         "gemm_universal",
@@ -108,6 +167,28 @@ REFUSED_ND: List[
         "tile_n",
         [],
         "tile_m is non-monotonic (the load path re-vectorizes)",
+    ),
+]
+
+# Refusals whose probe costs ~20s because the structural roller searches a large
+# level before giving up. Kept out of the default run so the everyday gate stays
+# ~1s; `--slow` includes them.
+REFUSED_ND_SLOW = [
+    (
+        "attention_dense",
+        _attn,
+        # Constants fit now (the reciprocal block count). What is left is
+        # structural, and this sample PAIR cannot show it: the softmax reduction's
+        # count is block_n/32 - 1, so it has zero copies at 32 and one at 64, and a
+        # run seen once carries no loop-carry evidence. Kept at 32/64 on purpose --
+        # it pins the diagnostic for the sampling trap. Re-sampled at 64/128 the
+        # roller reaches the real blocker (the KV scf.for carries 10 iter-args at
+        # 64 and 14 at 128), but that attempt costs ~29 minutes, far too slow to
+        # gate; `test_roller.py` iterates the same shape on a synthetic instead.
+        {"block_n": [32, 64]},
+        "block_n",
+        [{"block_n": 128}],
+        "sample pair cannot see the block_n/32-1 run (real blocker: scf.for arity)",
     ),
 ]
 
@@ -153,6 +234,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         action="store_true",
         help="also lower each point and report the .ll SHA (slower, no comgr)",
     )
+    ap.add_argument(
+        "--slow",
+        action="store_true",
+        help="also re-probe the refusals whose structural search costs ~20s each",
+    )
     args = ap.parse_args(argv)
 
     print(f"multi-axis rolling coverage  (arch={ARCH})\n")
@@ -197,12 +283,23 @@ def main(argv: Optional[List[str]] = None) -> int:
     print(f"families rolled       : {rolled}/{len(FAMILIES_ND)}")
 
     print("\nprobed and refused (the frontier; a refusal keeps concrete recipes):")
-    for label, build, axes, struct, hold, why in REFUSED_ND:
+    probes = list(REFUSED_ND) + (list(REFUSED_ND_SLOW) if args.slow else [])
+    for label, build, axes, struct, hold, why in probes:
         r = roll_nd(build, axes=axes, structural_axis=struct, holdout_points=hold)
         state = "still refused" if not r.ok else "NOW ROLLS (update this list)"
         print(f"  {label:<22}{','.join(axes):<28}{state:<28}{why}")
         if r.ok:
             rolled = -1  # a silent capability gain should still trip the gate
+    if not args.slow:
+        print(f"  ({len(REFUSED_ND_SLOW)} slow probe(s) skipped; --slow includes them)")
+
+    print("\naxis domains, per the kernels' own spec validation (what rolling buys):")
+    for label, axis, make_spec, cands in _domains():
+        ok = legal_values(axis, cands, make_spec)
+        span = f"{ok[0]}..{ok[-1]}" if ok else "none"
+        print(f"  {label:<22}{axis:<20}{len(ok):>4} legal  ({span})")
+    print("  a recipe covering an axis saves one concrete recipe per legal value,")
+    print("  so these counts -- not the difficulty -- should order the frontier.")
     return 0 if rolled == len(FAMILIES_ND) else 1
 
 

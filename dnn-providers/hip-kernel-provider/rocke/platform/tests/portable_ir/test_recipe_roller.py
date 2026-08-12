@@ -212,6 +212,13 @@ _CONV_GRID = (
 )
 _CONV_HOLDOUTS = ({"N": 32, "K": 256}, {"N": 8, "K": 256}, {"N": 64, "K": 512})
 
+# conv C drives a strength-reduced `n // C`, so its constants are a log2 shift and
+# a magic multiplier keyed on C's odd part. The holdouts deliberately cover odd
+# parts 3, 5 and 7 (192, 160, 224) -- values whose multipliers differ from every
+# sampled one, so a recipe that merely froze the sampled constants cannot pass.
+_CONV_C_SAMPLES = [64, 96, 128]
+_CONV_C_HOLDOUTS = [192, 160, 224, 384]
+
 
 def test_roll_nd_cross_product():
     """One recipe covers a family's whole non-reduction axis cross product.
@@ -307,3 +314,140 @@ json.dump(shas, open(out + "/shas.json", "w"))
             f"{pt} ({held}): standalone replay of the multi-axis recipe "
             f"diverged from the Python lowerer"
         )
+
+
+def test_standalone_cli_regenerates_magic_division_constants(tmp_path):
+    """The C VM regenerates magic-division constants it never recorded.
+
+    conv `C` is the axis that no curve fits: the kernel strength-reduces `n // C`
+    into `(umul_hi(n, M) + n) >> s`, where `s` is `ceil(log2 C)` and `M` depends on
+    `C`'s odd part. The recipe carries the generating formula instead
+    (`magic_multiplier` / `magic_shift`), so this test is really asking whether the
+    C VM's arithmetic matches Python's bit for bit at divisors it never saw --
+    including odd parts 3, 5 and 7, whose multipliers share no value with any
+    sampled point.
+    """
+    cli = _replay_cli()
+    if cli is None:
+        pytest.skip(
+            "replay CLI not built; "
+            "`cmake --build <build> --target rocke_portable_ir_replay_cli` "
+            "or point ROCKE_REPLAY_CLI at it"
+        )
+    points = _CONV_C_SAMPLES + _CONV_C_HOLDOUTS
+    author = f"""
+import json, sys
+from rocke.core.lower_llvm import lower_kernel_to_llvm
+from rocke.portable_ir.drivers.roll_hsaco_parity import _conv
+from rocke.portable_ir.src import recipe_bundle
+from rocke.portable_ir.src.roll_nd import roll_nd
+
+out, flavor = sys.argv[1], sys.argv[2]
+r = roll_nd(_conv, axes={{"C": {_CONV_C_SAMPLES}}},
+            holdout_points=[{{"C": c}} for c in {_CONV_C_HOLDOUTS}])
+if not r.ok:
+    raise SystemExit("roll_nd failed: " + str(r.reason))
+prog = json.dumps(r.recipe["program"])
+for fn in ("magic_multiplier", "magic_shift"):
+    if fn not in prog:
+        raise SystemExit("expected " + fn + " in the rolled recipe")
+open(out + "/convc.recipe.cbor", "wb").write(recipe_bundle.cbor_encode(r.recipe))
+shas = {{}}
+for c in {points}:
+    ll = lower_kernel_to_llvm(_conv(C=c), llvm_flavor=flavor, arch="{_ARCH}")
+    shas[str(c)] = __import__("hashlib").sha256(ll.encode()).hexdigest()
+json.dump(shas, open(out + "/shas.json", "w"))
+"""
+    flavor = os.environ.get("ROCKE_LLVM_FLAVOR", "llvm20")
+    r = _run([sys.executable, "-c", author, str(tmp_path), flavor])
+    assert r.returncode == 0, r.stdout[-4000:] + r.stderr[-4000:]
+
+    import json
+
+    want = json.loads((tmp_path / "shas.json").read_text())
+    recipe = tmp_path / "convc.recipe.cbor"
+    seen = set()
+    for c in points:
+        got = subprocess.run(
+            [
+                cli,
+                "--recipe",
+                str(recipe),
+                "--cbor",
+                "--arch",
+                _ARCH,
+                "--flavor",
+                flavor,
+                "--int",
+                f"C={c}",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert got.returncode == 0, f"C={c}: {got.stderr[-2000:]}"
+        sha = hashlib.sha256(got.stdout.encode()).hexdigest()
+        held = "held-out" if c in _CONV_C_HOLDOUTS else "sampled"
+        assert sha == want[str(c)], (
+            f"C={c} ({held}): the C VM's magic-division constants diverged from "
+            f"Python's -- the two mirrors of calculate_magic_numbers disagree"
+        )
+        seen.add(sha)
+    # Negative control: if every C produced the same .ll, the comparison above
+    # would be vacuous.
+    assert len(seen) == len(points), "expected a distinct .ll per C value"
+
+
+def test_regimes_do_not_oversplit_a_uniform_real_axis():
+    """Specializing must stay a last resort, not a default.
+
+    `roll_regimes` splits an axis wherever a recipe stops verifying, which is the
+    right rule but also a quiet way to lose compression: split a uniform axis and
+    you ship four recipes where one would do, with every check still passing. So
+    the lane gates the negative on a real kernel -- gemm `tile_n` rolls as one
+    recipe today and must keep coming back as exactly one regime."""
+    from rocke.portable_ir.drivers.roll_hsaco_parity import _gemm
+    from rocke.portable_ir.src.roll_regimes import roll_regimes
+
+    vals = [32, 64, 128, 256]
+    r = roll_regimes(lambda v: _gemm(tile_n=v), axis="tile_n", values=vals)
+    assert r.n_recipes == 1, f"uniform axis was split into {r.n_recipes} regimes"
+    assert r.regimes[0].values == vals
+    # Two traces inferred it; the other two values were verified, not recorded.
+    assert r.regimes[0].sampled == vals[:2]
+
+
+def test_axis_domains_come_from_the_kernels_own_validation():
+    """What an axis is worth is a property of the kernel, not of a driver table.
+
+    Rolling an axis saves one concrete recipe per value the axis legally takes, so
+    these counts are what should order the work. They are asserted loosely (an
+    order of magnitude, not an exact set) because the point is the ranking: the
+    axes already rolled have large domains, while `block_n` is capped by having to
+    divide `seqlen_kv` and `head_size` accepts two values in total."""
+    from kernels.gfx950.attention_dense import AttentionDenseSpec
+
+    from rocke.portable_ir.src.roll_regimes import legal_values
+
+    base = dict(
+        batch=1,
+        seqlen_q=512,
+        seqlen_kv=512,
+        num_query_heads=128,
+        num_kv_heads=8,
+        head_size=128,
+        causal=True,
+        dtype="bf16",
+        block_n=64,
+        waves_per_eu=2,
+    )
+    make = lambda **kw: AttentionDenseSpec(**{**base, **kw})  # noqa: E731
+    cands = list(range(16, 2049, 16))
+    n = {
+        a: len(legal_values(a, cands, make))
+        for a in ("num_query_heads", "seqlen_kv", "block_n", "head_size")
+    }
+    assert n["head_size"] == 2, f"head_size domain changed: {n['head_size']}"
+    assert n["block_n"] <= 8, f"block_n is bounded by divisors of seqlen_kv: {n}"
+    assert (
+        n["num_query_heads"] >= 10 * n["block_n"]
+    ), f"the rolled axes should dominate the refused ones by domain size: {n}"

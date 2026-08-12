@@ -338,6 +338,35 @@ static long rv_int(rvm_t* vm, const jd_val_t* e)
             const char* lit = rocke_jstr(sse->arr[1]);
             return (sv && lit && strcmp(sv, lit) == 0) ? 1 : 0;
         }
+        /* Unary functions of ONE operand: {"<fn>": e} (no array wrapper).
+           These regenerate constants that a code generator derived from a spec
+           value rather than values the kernel computed from it: the operands of
+           a strength-reduced unsigned division, emitted as
+           (umul_hi(n, M) + n) >> s. The shift is logarithmic in the divisor and
+           the multiplier depends on its odd part, so neither is expressible as
+           arithmetic on the axis -- the recipe has to regenerate them.
+           Mirrors recipe_expand.py::magic_division_constants, and upstream of
+           both, helpers/transforms.py::calculate_magic_numbers. */
+        const jd_val_t* mm = rocke_jget(e, "magic_multiplier");
+        const jd_val_t* ms = rocke_jget(e, "magic_shift");
+        if(mm || ms)
+        {
+            long d = rv_int(vm, mm ? mm : ms);
+            if(d < 1 || d > 0x7fffffffL)
+            {
+                rv_fail(vm, "magic division needs 1 <= divisor < 2^31, got %ld", d);
+                return 0;
+            }
+            int shift = 0;
+            while((1LL << shift) < (long long)d)
+                shift++;
+            if(ms)
+                return shift;
+            long long mult = ((((1LL << shift) - (long long)d) << 32) / (long long)d) + 1;
+            if(mult >= (1LL << 31))
+                mult -= (1LL << 32);
+            return (long)mult;
+        }
         /* Binary arithmetic + comparisons: {"<op>":[e,e]}. */
         static const char* ops[]
             = {"add", "sub", "mul", "div", "mod", "eq", "ne", "lt", "le", "gt", "ge"};

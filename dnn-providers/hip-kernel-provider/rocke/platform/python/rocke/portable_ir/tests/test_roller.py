@@ -18,7 +18,7 @@ from rocke.portable_ir.utils.recipe_expand import (
     expand_recipe,
     recipes_equiv,
 )
-from rocke.portable_ir.src.roll import roll
+from rocke.portable_ir.src.roll import roll, roll_report
 
 
 # --------------------------------------------------------------------------
@@ -42,6 +42,30 @@ def build_multi(N):
         p = b.fmul(p, y)
     r = b.fadd(s, p)
     b.global_store(C, tid, r, align=4)
+    b.ret()
+    return b.kernel
+
+
+def build_appearing(N):
+    """A run whose trip count is `N-1`, so it is ABSENT at the smallest N.
+
+    This is the shape of attention's softmax reduction over `block_n`: combining
+    k values takes k-1 steps, so the run has zero copies at the smallest sample.
+    A second, ordinary run follows it, so the two growing regions sit back to
+    back -- the same layout the real kernel has."""
+    b = IRBuilder(f"appear_{N}")
+    A = b.param("A", PtrType(F32, "global"), readonly=True, align=16)
+    C = b.param("C", PtrType(F32, "global"), writeonly=True, align=16)
+    tid = b.thread_id_x()
+    acc = b.global_load_f32(A, tid, align=4)
+    for i in range(N - 1):
+        acc = b.fmax(acc, b.global_load_f32(A, b.add(tid, b.const_i32(i)), align=4))
+    acc = b.fmul(acc, acc)
+    for i in range(N):
+        acc = b.fadd(
+            acc, b.global_load_f32(A, b.add(tid, b.const_i32(50 + i)), align=4)
+        )
+    b.global_store(C, tid, acc, align=4)
     b.ret()
     return b.kernel
 
@@ -186,6 +210,44 @@ class TestRollGeneralization(unittest.TestCase):
         _, con = record_kernel(lambda: build_phased(7))
         exp = expand_recipe(r.recipe, {"N": 7})
         self.assertTrue(recipes_equiv(exp, con), equiv_reason(exp, con))
+
+    def test_run_absent_at_the_smaller_sample_is_a_sample_choice_problem(self):
+        """A run with trip count `N-1` has ZERO copies at N=1, and a run seen zero
+        or one time carries no evidence of how one iteration feeds the next --
+        `_roll_run` reads the loop-carry by diffing block 0 against block 1. So
+        this is not a detector weakness; it is the samples. The refusal has to say
+        so, because the obvious reading ("the detector missed a pattern") sends you
+        off to improve the wrong thing."""
+        bad = roll(build_appearing, axis="N", sample_points=[1, 2], holdout_points=[4])
+        self.assertFalse(bad.ok)
+        self.assertIn("ABSENT at the smaller axis value", bad.reason)
+        self.assertIn("SAMPLE CHOICE", bad.reason)
+
+    def test_the_same_kernel_rolls_once_the_run_is_sampled_twice(self):
+        """The other half of the pair above: nothing about the kernel changed, only
+        which points were recorded. At N=2,3 the run has 1 and 2 copies, which is
+        the minimum that makes a loop carry visible."""
+        r = roll(
+            build_appearing,
+            axis="N",
+            sample_points=[2, 3],
+            holdout_points=[4, 5, 9, 17],
+        )
+        self.assertTrue(r.ok, r.reason)
+        from rocke.portable_ir.src.recording_builder import record_kernel
+
+        _, con = record_kernel(lambda: build_appearing(12))
+        exp = expand_recipe(r.recipe, {"N": 12})
+        self.assertTrue(recipes_equiv(exp, con), equiv_reason(exp, con))
+
+    def test_advice_names_points_that_actually_work(self):
+        """The suggestion is only worth printing if following it succeeds."""
+        from rocke.portable_ir.src.roller import _sample_advice
+
+        self.assertIn("[2, 3]", _sample_advice(1, 2))
+        self.assertTrue(
+            roll(build_appearing, axis="N", sample_points=[2, 3], holdout_points=[8]).ok
+        )
 
     def test_nonlinear_falls_back(self):
         r = roll(build_quad, axis="N", sample_points=[2, 3], holdout_points=[4, 5])
@@ -472,6 +534,59 @@ class TestRollCoverageTiers(unittest.TestCase):
         # T1 (small op) and T3 (the production unified-attention 2D) must roll.
         self.assertTrue(rows["T1"]["ok"], rows["T1"]["report"])
         self.assertTrue(rows["T3"]["ok"], rows["T3"]["report"])
+
+
+class TestRollDelegatesToRollNd(unittest.TestCase):
+    """`roll` is a thin wrapper over `roll_nd` with one axis.
+
+    Worth pinning because the wrapper is what makes the two entry points agree on
+    safety. When `roll` had its own implementation it skipped the kernel-name
+    check, so the convenient API was the weak one: a recipe whose symbol did not
+    track the axis passed every check `roll` made and shipped the wrong symbol.
+    Re-splitting them would quietly reopen that hole, and nothing else would fail.
+    """
+
+    def _build_derived(self, S):
+        """Named after a DERIVED quantity, so the name cannot be reconstructed by
+        substituting the axis -- `derived_g7` at S=2, `derived_g10` at S=3."""
+        b = IRBuilder(f"derived_g{S * 3 + 1}")
+        A = b.param("A", PtrType(F32, "global"), readonly=True, align=16)
+        C = b.param("C", PtrType(F32, "global"), writeonly=True, align=16)
+        tid = b.thread_id_x()
+        b.global_store(
+            C, tid, b.global_load_f32(A, b.add(tid, b.const_i32(S)), align=4), align=4
+        )
+        b.ret()
+        return b.kernel
+
+    def test_roll_refuses_a_name_it_cannot_reconstruct(self):
+        r = roll(
+            self._build_derived, axis="S", sample_points=[2, 3], holdout_points=[9]
+        )
+        self.assertFalse(r.ok, "roll accepted a recipe that emits the wrong symbol")
+        self.assertIn("derived quantity", r.reason)
+
+    def test_roll_still_returns_traces_keyed_by_axis_value(self):
+        """The wrapper must not leak roll_nd's tuple-keyed points to callers."""
+
+        def build(N):
+            b = IRBuilder(f"uni_{N}")
+            A = b.param("A", PtrType(F32, "global"), readonly=True, align=16)
+            C = b.param("C", PtrType(F32, "global"), writeonly=True, align=16)
+            tid = b.thread_id_x()
+            acc = b.global_load_f32(A, tid, align=4)
+            for i in range(N):
+                acc = b.fadd(
+                    acc, b.global_load_f32(A, b.add(tid, b.const_i32(i)), align=4)
+                )
+            b.global_store(C, tid, acc, align=4)
+            b.ret()
+            return b.kernel
+
+        r = roll(build, axis="N", sample_points=[2, 3], holdout_points=[7])
+        self.assertTrue(r.ok, r.reason)
+        self.assertEqual(sorted(r.traces), [2, 3, 7])
+        self.assertIn("3 shapes", roll_report(r))
 
 
 if __name__ == "__main__":

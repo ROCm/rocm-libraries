@@ -28,6 +28,8 @@ import copy
 from fractions import Fraction
 from typing import Any, Dict, List, Optional, Tuple
 
+from ..utils.recipe_expand import magic_division_constants
+
 
 # --------------------------------------------------------------------------
 # instruction helpers (operate on recipe instr dicts)
@@ -125,7 +127,27 @@ def _linear_expr(
     axis: str, a0: int, v0: int, a1: int, v1: int, var: bool = False
 ) -> Optional[Any]:
     """Return an intexpr in {spec:axis} (or {var:axis} when var=True) that yields
-    v0 at a0 and v1 at a1, or None if not cleanly linear/integer-expressible."""
+    v0 at a0 and v1 at a1.
+
+    Linear first; failing that, the candidate models in `fit_slot` get a look, so
+    the structural roller can also express a block COUNT that is reciprocal in the
+    axis (`512 div block_n`) or an operand of a strength-reduced division. Loop
+    variables (`var=True`) stay linear-only: those are index ladders, where the
+    richer forms have no meaning."""
+    expr = _linear_only(axis, a0, v0, a1, v1, var)
+    if expr is not None or var:
+        return expr
+    for cand in (_fit_parameter_free, _fit_reciprocal):
+        got = cand([axis], [(a0,), (a1,)], [v0, v1])
+        if got is not None:
+            return got
+    return None
+
+
+def _linear_only(
+    axis: str, a0: int, v0: int, a1: int, v1: int, var: bool = False
+) -> Optional[Any]:
+    """The strictly linear core: v = m*axis + k, or None."""
     ref = {"var": axis} if var else {"spec": axis}
     if v0 == v1:
         return v0
@@ -138,9 +160,13 @@ def _linear_expr(
     k = int(k)
     if p.denominator == 1:
         term = {"mul": [ref, int(p)]} if int(p) != 1 else ref
-    elif k == 0:
-        # v = axis / d  (e.g. count = D // 8); only clean when k == 0
-        return {"div": [ref, p.denominator]} if p.numerator == 1 else None
+    elif p.numerator == 1:
+        # v = axis / d + k  (e.g. count = D // 8, or a padded tile origin). `div`
+        # floors, so with two samples this is a guess about what happens between
+        # them either way -- the `k == 0` case is no safer than `k != 0`, and both
+        # stand or fall on the held-out points. The multi-axis renderer has always
+        # allowed a non-zero intercept here; this makes the two agree.
+        term = {"div": [ref, p.denominator]}
     else:
         return None
     if k == 0:
@@ -210,23 +236,29 @@ def affine_solve(
 
 
 def affine_intexpr(axes: List[str], sol: List[Fraction]) -> Optional[Any]:
-    """Render an `affine_solve` result as an intexpr over {spec:axis} terms.
+    """Render an `affine_solve` result as an intexpr over {spec:axis} terms."""
+    return render_affine([{"spec": a} for a in axes], sol)
+
+
+def render_affine(refs: List[Any], sol: List[Fraction]) -> Optional[Any]:
+    """Render `c0 + sum m_j*ref_j` as an intexpr, where each ref is itself an
+    intexpr (a bare `{spec: axis}` for an affine fit, or a product of two for a
+    cross term).
 
     Mirrors `_linear_expr`'s expressibility rules per term: an integer
     coefficient becomes a `mul` (elided at 1), and a unit fraction 1/d becomes a
     `div` -- the shape of constant that shows up as `count = axis // vec`. Any
     other fractional coefficient is refused, because `div` is floor division and
     a non-unit fraction would only agree with the builder by luck."""
-    if len(sol) != len(axes) + 1:
+    if len(sol) != len(refs) + 1:
         return None
     c0, coeffs = sol[0], sol[1:]
     if c0.denominator != 1:
         return None
     terms: List[Any] = []
-    for axis, m in zip(axes, coeffs):
+    for ref, m in zip(refs, coeffs):
         if m == 0:
             continue
-        ref = {"spec": axis}
         if m.denominator == 1:
             terms.append(ref if m == 1 else {"mul": [ref, int(m)]})
         elif m.numerator == 1:
@@ -242,6 +274,165 @@ def affine_intexpr(axes: List[str], sol: List[Fraction]) -> Optional[Any]:
     if k == 0:
         return expr
     return {"add": [expr, k]} if k > 0 else {"sub": [expr, -k]}
+
+
+# --------------------------------------------------------------------------
+# candidate models
+#
+# Affine covers most integers a kernel computes from a shape, because address
+# arithmetic IS affine. The rest of these exist because a few constants are not
+# values the kernel derived from the shape at all -- they are decisions a code
+# generator made (which multiplier strength-reduces this division, how many tiles
+# cover this extent), and those follow their own generating rule.
+#
+# Every candidate must fit EXACTLY at every recorded point, and they are tried
+# simplest-first so the least presumptuous rule that explains the data wins. That
+# ordering matters: searching a wider hypothesis class spends evidence, so the
+# cheap protection is that anything found here still has to survive verification
+# at points it was never fitted on.
+# --------------------------------------------------------------------------
+# Offsets applied to the axis before the magic operands are tried. Kept to two
+# because each one is a hypothesis the fit does not pay for in samples, and the
+# second earns its place: `ceil(log2(n+1))` is `n.bit_length()`, the trip count of
+# a binary search over `n` items, which is how all three tiled attention kernels
+# size their sequence-lookup loop. `0` is tried first so a true shift never gets
+# explained as an offset one.
+_MAGIC_OFFSETS = (0, 1)
+
+
+def _fit_parameter_free(
+    axes: List[str], points: List[Tuple[int, ...]], vals: List[int]
+) -> Optional[Any]:
+    """Functions with NO free parameters, so they cannot overfit: either they
+    reproduce every point or they are out. Today that means the two operands of a
+    strength-reduced division, whose generating formula lives in the DSL, and the
+    logarithm underneath the shift -- which also turns up on its own as a
+    binary-search trip count."""
+    for j, axis in enumerate(axes):
+        for off in _MAGIC_OFFSETS:
+            for name, which in (("magic_multiplier", 0), ("magic_shift", 1)):
+                try:
+                    ok = all(
+                        v == magic_division_constants(p[j] + off)[which]
+                        for p, v in zip(points, vals)
+                    )
+                except Exception:
+                    ok = False
+                if ok:
+                    operand: Any = {"spec": axis}
+                    if off:
+                        operand = {"add": [operand, off]}
+                    return {name: operand}
+    return None
+
+
+def _fit_reciprocal(
+    axes: List[str], points: List[Tuple[int, ...]], vals: List[int]
+) -> Optional[Any]:
+    """`k div x` and `ceil(k/x)` -- how a tile/block COUNT depends on a tile size.
+    Not affine (it is a reciprocal), but long expressible as an intexpr; only the
+    solver had never hypothesised it.
+
+    `k` is pinned exactly when the division comes out even at every sample (the
+    usual case: `k` is the problem extent). Otherwise the flooring leaves an
+    interval of admissible `k`, and the boundary that corresponds to exact
+    division is taken -- underdetermined, hence left to verification to confirm."""
+    for j, axis in enumerate(axes):
+        xs = [p[j] for p in points]
+        if any(x <= 0 for x in xs) or len(set(xs)) < 2:
+            continue
+        ref = {"spec": axis}
+        exact = {v * x for v, x in zip(vals, xs)}
+        if len(exact) == 1:
+            k = exact.pop()
+            if k > 0 and all(v == k // x for v, x in zip(vals, xs)):
+                return {"div": [k, ref]}
+        # floor: v == k div x  ->  k in [v*x, v*x + x - 1]
+        lo = max(v * x for v, x in zip(vals, xs))
+        hi = min(v * x + x - 1 for v, x in zip(vals, xs))
+        if lo <= hi and all(v == lo // x for v, x in zip(vals, xs)):
+            return {"div": [lo, ref]}
+        # ceil: v == (k + x - 1) div x  ->  k in [(v-1)*x + 1, v*x]
+        clo = max((v - 1) * x + 1 for v, x in zip(vals, xs))
+        chi = min(v * x for v, x in zip(vals, xs))
+        if clo <= chi and all(v == (chi + x - 1) // x for v, x in zip(vals, xs)):
+            return {"div": [{"add": [chi, {"sub": [ref, 1]}]}, ref]}
+    return None
+
+
+def _fit_cross(
+    axes: List[str], points: List[Tuple[int, ...]], vals: List[int]
+) -> Optional[Any]:
+    """Affine PLUS pairwise products, for a constant that genuinely scales with
+    two axes at once (`m*N*K`).
+
+    A product is expressible (`mul` of two specs); the reason it is last is that
+    it costs evidence. One-axis probes cannot see it -- along any single axis with
+    the others fixed, a product looks exactly like a straight line -- so fitting it
+    needs a point where two axes move together, which is why `roll_nd` only
+    reaches this after recording extra interior points."""
+    if len(axes) < 2:
+        return None
+    refs: List[Any] = [{"spec": a} for a in axes]
+    idx: List[Tuple[int, ...]] = [(j,) for j in range(len(axes))]
+    for j in range(len(axes)):
+        for k in range(j + 1, len(axes)):
+            refs.append({"mul": [{"spec": axes[j]}, {"spec": axes[k]}]})
+            idx.append((j, k))
+    basis: List[Tuple[int, ...]] = []
+    for p in points:
+        row = []
+        for t in idx:
+            prod = 1
+            for j in t:
+                prod *= p[j]
+            row.append(prod)
+        basis.append(tuple(row))
+    sol = affine_solve(basis, vals)
+    if sol is None:
+        return None
+    return render_affine(refs, sol)
+
+
+def fit_slot(
+    axes: List[str],
+    points: List[Tuple[int, ...]],
+    vals: List[int],
+    allow_cross: bool = False,
+) -> Tuple[Optional[Any], str]:
+    """Fit ONE integer slot as a function of the axes, trying candidate models
+    simplest-first. Returns (intexpr, "") or (None, reason)."""
+    inexpressible = ""
+    sol = affine_solve(points, vals)
+    if sol is not None:
+        expr = affine_intexpr(axes, sol)
+        if expr is not None:
+            return expr, ""
+        # An affine model fits but cannot be written down. That does NOT settle the
+        # slot: a reciprocal can pass through the same points and IS expressible
+        # (two samples of `512 div b` are also fit by `24 - b/4`). Keep the reason
+        # in case nothing else works, and carry on down the ladder.
+        inexpressible = (
+            f"affine fit {[str(c) for c in sol]} is not expressible as an intexpr "
+            f"(a non-unit fractional coefficient would only agree with floor "
+            f"division by luck)"
+        )
+    for cand in (_fit_parameter_free, _fit_reciprocal):
+        expr = cand(axes, points, vals)
+        if expr is not None:
+            return expr, ""
+    if allow_cross:
+        expr = _fit_cross(axes, points, vals)
+        if expr is not None:
+            return expr, ""
+    if inexpressible:
+        return None, inexpressible
+    return None, (
+        f"integer {vals} over {points} fits no candidate model "
+        f"(affine, magic-division operand, reciprocal"
+        + (", cross term" if allow_cross else "")
+        + ")"
+    )
 
 
 def merge_intexpr(ea: Any, eb: Any, axis: str, a0: int, a1: int) -> Optional[Any]:
@@ -529,6 +720,51 @@ def _deep_uses(prog: List[Dict[str, Any]]) -> set:
     return s
 
 
+def _appearing_block(
+    la: List[Dict[str, Any]], lb: List[Dict[str, Any]], window: int = 24
+) -> Optional[int]:
+    """Length of a block present in `lb` but ABSENT from `la` at the divergence,
+    or None. Detected by resynchronisation: deleting L ops from lb makes the two
+    line up again for a decent stretch.
+
+    This is worth naming because it is not a detector weakness that more effort
+    could fix. A run seen ONCE carries no evidence of how one iteration feeds the
+    next, and a run seen ZERO times carries none at all -- `_roll_run` learns the
+    loop-carried values by diffing block 0 against block 1. So a count that goes
+    0 -> 1 across the two samples cannot be rolled from those samples by any
+    method; it needs sample points where the count reaches 2."""
+    sa = [_sig(i) for i in la]
+    sb = [_sig(i) for i in lb]
+    m = min(len(sa), len(sb))
+    f = 0
+    while f < m and sa[f] == sb[f]:
+        f += 1
+    if f >= m:
+        return None
+    # Score each L by how far the two resynchronise. A fixed long window is no
+    # good: the next growing run usually starts a few ops later and breaks the
+    # match again, so take the best L rather than the first that clears a bar.
+    best, best_run = None, 0
+    for L in range(1, len(sb) - len(sa) + 1):
+        lim = min(window, len(sa) - f, len(sb) - f - L)
+        if lim <= 0:
+            break
+        k = 0
+        while k < lim and sa[f + k] == sb[f + L + k]:
+            k += 1
+        if k > best_run:
+            best, best_run = L, k
+    return best if best_run >= 4 else None
+
+
+def _sample_advice(a0: int, a1: int) -> str:
+    """Sample points that would give the absent run >= 1 and >= 2 copies.
+
+    If a block first appears between a0 and a1, the count is 0 at a0 and 1 at a1,
+    so it is linear with step (a1 - a0) and reaches 1 at a1 and 2 at 2*a1 - a0."""
+    return f"try sample_points=[{a1}, {2 * a1 - a0}] (or larger) instead"
+
+
 def _divergence_reason(la: List[Dict[str, Any]], lb: List[Dict[str, Any]]) -> str:
     """A precise reason why no repeated-block run was found at the first
     signature divergence (informs which roller generalization is still needed)."""
@@ -550,6 +786,15 @@ def _divergence_reason(la: List[Dict[str, Any]], lb: List[Dict[str, Any]]) -> st
                 f"({na}->{nb}) -- needs parametric scf_for iter-args "
                 f"(variable loop-carry fan); roller+VM extension"
             )
+    L = _appearing_block(la, lb)
+    if L is not None:
+        return (
+            base + f": a {L}-op block is ABSENT at the smaller axis value and "
+            f"present at the larger, so its iteration count goes 0 -> 1. A run "
+            f"has to appear at least TWICE somewhere for its loop-carried values "
+            f"to be readable (block 0 vs block 1), so no sampling-independent fix "
+            f"exists -- this is a SAMPLE CHOICE problem"
+        )
     if a.get("op") != b.get("op"):
         return base + f": op changes {a.get('op')} -> {b.get('op')} (peeling?)"
     return base + ": non-uniform/peeled blocks (boundary iterations differ?)"
@@ -940,10 +1185,19 @@ class _Roller:
             suffix = copy.deepcopy(suffix)
             _deep_rewrite_uses(suffix, suffix_rewrite)
             return prefix + run_instrs + suffix
+        extra = ""
+        L = _appearing_block(la, lb)
+        if L is not None:
+            extra = (
+                f"; a {L}-op block is absent at {self.axis}={self.a0} and present "
+                f"at {self.a1} (count 0 -> 1), which no detector can roll from "
+                f"these two samples -- {_sample_advice(self.a0, self.a1)}"
+            )
         self._fail(
             f"no run candidate rolled at level: |la|={len(la)} |lb|={len(lb)} "
             f"({len(cands)} candidates tried); first ops="
             + ",".join(i.get("opcode", i["op"]) for i in lb[:4])
+            + extra
         )
         return None
 

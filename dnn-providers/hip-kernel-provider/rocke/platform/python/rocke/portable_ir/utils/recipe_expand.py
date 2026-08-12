@@ -48,6 +48,36 @@ class ExpandError(RuntimeError):
     pass
 
 
+def magic_division_constants(divisor: int) -> tuple:
+    """`(multiplier_i32, shift)` for a strength-reduced unsigned `n // divisor`.
+
+    The canonical mirror of `helpers/transforms.py::calculate_magic_numbers` plus
+    `do_magic_division`'s two's-complement wrap (itself a port of CK Tile's
+    `magic_division32_bit_range`). Kernels bake these two integers in as
+    `const_i32` operands of `(umul_hi(n, M) + n) >> s`, so a recipe that wants to
+    stay parametric in the divisor has to regenerate them rather than fit them --
+    the shift is logarithmic and the multiplier depends on the divisor's odd part.
+
+    `recipe_vm.cpp` implements the same two lines; `roller.py` imports this for
+    recognition. A test pins all three against the DSL helper.
+    """
+    # The upper bound keeps this inside the int64 range the C VM computes in, so
+    # both mirrors agree everywhere they are defined.
+    if divisor < 1 or divisor > 0x7FFFFFFF:
+        raise ExpandError(f"magic division needs 1 <= divisor < 2^31, got {divisor}")
+    shift = 0
+    while (1 << shift) < divisor:
+        shift += 1
+    mult = (((1 << shift) - divisor) << 32) // divisor + 1
+    return (mult - (1 << 32) if mult >= (1 << 31) else mult), shift
+
+
+_UN = {
+    "magic_multiplier": lambda d: magic_division_constants(d)[0],
+    "magic_shift": lambda d: magic_division_constants(d)[1],
+}
+
+
 def eval_intexpr(
     node: Any, ivars: Dict[str, int], spec_int: Dict[str, int], spec_str: Dict[str, str]
 ) -> int:
@@ -71,6 +101,10 @@ def eval_intexpr(
         if "spec_str_eq" in node:
             n, lit = node["spec_str_eq"]
             return int(spec_str.get(n) == lit)
+        # unary functions take the operand directly, not a 2-element array
+        for k, ufn in _UN.items():
+            if k in node:
+                return ufn(eval_intexpr(node[k], ivars, spec_int, spec_str))
         for k, fn in _BIN.items():
             if k in node:
                 a, b = node[k]
