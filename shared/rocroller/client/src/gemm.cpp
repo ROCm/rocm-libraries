@@ -25,12 +25,12 @@
 #include <rocRoller/Serialization/KernelGraph.hpp>
 
 #include <common/Utilities.hpp>
-#include <common/mxDataGen.hpp>
 
 #include "client/CLI_Utils.hpp"
 #include "client/DataParallelGEMMSolution.hpp"
 #include "client/GEMMParameters.hpp"
 #include "client/GEMMParameters_serialization.hpp"
+#include "client/HostDataGeneration.hpp"
 #include "client/RotatingBuffer.hpp"
 #include "client/StreamKGEMMSolution.hpp"
 
@@ -49,37 +49,6 @@ enum ReturnCodes : int
     CorrectnessFailure         = 2,
     SolutionNotSupportedOnArch = 3
 };
-
-namespace
-{
-    // Delete when rocroller-gemm input generation stops delegating to test/common.
-    DGen::DataInitMode toMxDataGeneratorInitMode(
-        rocRoller::Client::GEMMClient::DataInitialization const& initialization)
-    {
-        using Mode = rocRoller::Client::GEMMClient::DataInitializationMode;
-        switch(initialization.mode)
-        {
-        case Mode::Bounded:
-            return DGen::Bounded{};
-        case Mode::BoundedAlternatingSign:
-            return DGen::BoundedAlternatingSign{};
-        case Mode::Unbounded:
-            return DGen::Unbounded{};
-        case Mode::Identity:
-            return DGen::Identity{};
-        case Mode::Ones:
-            return DGen::Ones{};
-        case Mode::Zeros:
-            return DGen::Zeros{};
-        case Mode::TrigonometricFromFloat:
-            return DGen::TrigonometricFromFloat{};
-        case Mode::NormalFromFloat:
-            return DGen::NormalFromFloat{initialization.normalMean,
-                                         initialization.normalStandardDeviation};
-        }
-        Throw<FatalError>("Unsupported data initialization mode.");
-    }
-}
 
 namespace rocRoller::Client::GEMMClient
 {
@@ -187,12 +156,16 @@ namespace rocRoller::Client::GEMMClient
         std::vector<D>           hostD(problemParams.m * problemParams.n, D{});
         std::vector<uint8_t>     hostScaleA, hostScaleB;
 
-        auto seed = 31415u;
+        constexpr auto seed           = 31415u;
+        auto           scaleTypeA     = DataType::None;
+        auto           scaleTypeB     = DataType::None;
+        auto           scaleBlockSize = size_t{1};
         if(problemParams.types.scaleA == Operations::ScaleMode::Separate
            || problemParams.types.scaleB == Operations::ScaleMode::Separate)
         {
-            auto scaleBlockSize = problemParams.types.scaleBlockSize;
-            AssertFatal(scaleBlockSize > 0, "scaleBlockSize must be set to scale A or B.");
+            AssertFatal(problemParams.types.scaleBlockSize > 0,
+                        "scaleBlockSize must be set to scale A or B.");
+            scaleBlockSize = static_cast<size_t>(problemParams.types.scaleBlockSize);
             AssertFatal(arch.isSupportedScaleBlockSize(scaleBlockSize),
                         fmt::format("Architecture {} does not support block scaling (size: {}).",
                                     arch.target().toString(),
@@ -201,39 +174,31 @@ namespace rocRoller::Client::GEMMClient
                         fmt::format("K: {} must be a multiple of the scale block size: {}",
                                     problemParams.k,
                                     scaleBlockSize));
-            DGenInput(seed,
-                      hostA,
-                      descA,
-                      hostB,
-                      descB,
-                      hostC,
-                      descC,
-                      hostScaleA,
-                      hostScaleB,
-                      problemParams.types.scaleTypeA,
-                      problemParams.types.scaleTypeB,
-                      -1.f,
-                      1.f,
-                      static_cast<uint>(scaleBlockSize),
-                      toMxDataGeneratorInitMode(problemParams.initModeA),
-                      toMxDataGeneratorInitMode(problemParams.initModeB),
-                      toMxDataGeneratorInitMode(problemParams.initModeC));
+            if(problemParams.types.scaleA == Operations::ScaleMode::Separate)
+                scaleTypeA = problemParams.types.scaleTypeA;
+            if(problemParams.types.scaleB == Operations::ScaleMode::Separate)
+                scaleTypeB = problemParams.types.scaleTypeB;
         }
-        else
-        {
-            DGenInput(seed,
-                      hostA,
-                      descA,
-                      hostB,
-                      descB,
-                      hostC,
-                      descC,
-                      -1.f,
-                      1.f,
-                      toMxDataGeneratorInitMode(problemParams.initModeA),
-                      toMxDataGeneratorInitMode(problemParams.initModeB),
-                      toMxDataGeneratorInitMode(problemParams.initModeC));
-        }
+
+        auto generatedInputs = generateGEMMInputs(descA,
+                                                  descB,
+                                                  descC,
+                                                  problemParams.initModeA,
+                                                  problemParams.initModeB,
+                                                  problemParams.initModeC,
+                                                  scaleTypeA,
+                                                  scaleTypeB,
+                                                  scaleBlockSize,
+                                                  -1.f,
+                                                  1.f,
+                                                  seed);
+        hostA                = copyTensorStorage<PackedTypeA>(generatedInputs.a);
+        hostB                = copyTensorStorage<PackedTypeB>(generatedInputs.b);
+        hostC                = copyTensorStorage<C>(generatedInputs.c);
+        if(generatedInputs.scaleA)
+            hostScaleA = copyTensorStorage<uint8_t>(*generatedInputs.scaleA);
+        if(generatedInputs.scaleB)
+            hostScaleB = copyTensorStorage<uint8_t>(*generatedInputs.scaleB);
 
         // Pre-tile B on the host when pretileB is set (kernel expects pre-tiled layout)
         std::vector<PackedTypeB> hostBForKernel(hostB);
@@ -1287,7 +1252,7 @@ namespace rocRoller::Client::GEMMClient::CLI
         std::make_pair("--workgroup_cluster_size_z", &SolutionParameters::workgroupClusterSizeZ));
 
     template <typename T, typename U>
-    std::string getSolutionParameterArgumentName(U T::*member_ptr)
+    std::string getSolutionParameterArgumentName(U T::* member_ptr)
     {
         std::optional<std::string> found_name;
 

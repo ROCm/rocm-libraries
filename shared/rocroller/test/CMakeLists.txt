@@ -14,7 +14,7 @@ if(NOT GTest_FOUND)
     endif()
 endif()
 
-if(NOT ROCM_LIBS_SUPERBUILD)
+if(NOT ROCM_LIBS_SUPERBUILD AND NOT TARGET roc::mxDataGenerator)
     if(ROCROLLER_ENABLE_THEROCK)
         find_package(mxDataGenerator REQUIRED)
     else()
