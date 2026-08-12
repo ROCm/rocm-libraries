@@ -150,7 +150,7 @@ flatbuffers::FlatBufferBuilder configToCompatibleGraph(const fmha_v3_fwdConfig& 
         causalMaskBottomRight = true;
         break;
 
-    case MaskType::WINDOW_GENERIC:
+    case MaskType::SLIDING_WINDOW:
         // Sliding window mask - use arbitrary window bounds
         leftBound = flatbuffers::Optional<int64_t>(64); // Arbitrary left window bound
         rightBound = flatbuffers::Optional<int64_t>(64); // Arbitrary right window bound
@@ -203,12 +203,15 @@ flatbuffers::FlatBufferBuilder configToCompatibleGraph(const fmha_v3_fwdConfig& 
                                rightBound,
                                flatbuffers::nullopt, // max_seq_len_kv
                                diagAlignment,
-                               DataType::FLOAT, // mma_core_mode
+                               DataType::UNSET, // mma_core_mode
                                AttentionImplementation::AUTO);
 
     std::vector<flatbuffers::Offset<Node>> nodes;
-    nodes.push_back(CreateNodeDirect(
-        builder, "sdpa_fwd", dataType, NodeAttributes::SdpaAttributes, sdpaAttributes.Union()));
+    nodes.push_back(CreateNodeDirect(builder,
+                                     "sdpa_fwd",
+                                     DataType::FLOAT,
+                                     NodeAttributes::SdpaAttributes,
+                                     sdpaAttributes.Union()));
 
     const auto graphOffset = CreateGraphDirect(builder,
                                                "test",

@@ -93,7 +93,9 @@ set(rocblas_no_tensile_test_source
     blas2/symv_gtest.cpp
     # blas3 may use tensile or source gemm
     blas3/gemm_gtest.cpp
+    blas3/gemm_grouped_batched_gtest.cpp
     blas_ex/gemm_ex_gtest.cpp
+    blas_ex/gemm_grouped_batched_ex_gtest.cpp
     blas3/symm_gtest.cpp
     blas3/hemm_gtest.cpp
     blas3/trsm_gtest.cpp
@@ -143,10 +145,12 @@ target_compile_definitions( rocblas-test PRIVATE ROCM_USE_FLOAT16 ROCBLAS_INTERN
 
 if (CREATE_TEST_APP_LOCAL_DEPLOY AND WIN32)
   # HIP and tooling (OpenBLAS DLLs come from the same install CMake linked when using ILP64).
+  # hipblaslt still requires PATH to be set
   file( GLOB third_party_dlls
     LIST_DIRECTORIES OFF
     CONFIGURE_DEPENDS
     ${HIP_DIR}/bin/amd*.dll
+    ${HIP_DIR}/bin/rocm*.dll
     ${HIP_DIR}/bin/hiprt*.dll
     ${HIP_DIR}/bin/hipinfo.exe
     ${CMAKE_SOURCE_DIR}/rtest.*
@@ -242,7 +246,8 @@ if(ROCBLAS_HAS_CTEST_CATEGORIES)
     rocblas-test
     "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml"
     "${PROJECT_BINARY_DIR}/staging"
-    "${ROCBLAS_CTEST_INSTALL_FILE}"
+    INSTALL_TEST_FILE "${ROCBLAS_CTEST_INSTALL_FILE}"
+    USE_RTEST_DRIVER
   )
 elseif(BUILD_CLIENTS_TESTS AND NOT ROCBLAS_ENABLE_CTEST)
   message(STATUS "rocBLAS: ROCBLAS_ENABLE_CTEST=OFF (CTest category labels not applied)")

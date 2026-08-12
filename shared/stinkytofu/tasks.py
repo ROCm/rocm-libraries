@@ -12,19 +12,48 @@ from invoke import task
 ROOT_PATH = Path(__file__).resolve().parent
 BUILD_DIR = ROOT_PATH / "build"
 
-# Fail early if invoke is running under a different Python than the active
-# venv.  This happens when invoke is installed system-wide (/usr/bin/invoke)
-# but a venv is active — sys.executable will be the system Python, so cmake
-# gets the wrong -DPython_EXECUTABLE and venv packages like pytest won't be
-# found.
-_venv = os.environ.get("VIRTUAL_ENV")
-if _venv and not sys.executable.startswith(_venv):
-    raise SystemExit(
-        f"ERROR: invoke is running under {sys.executable} but VIRTUAL_ENV "
-        f"is set to {_venv}.\n"
-        f"Install invoke in the venv:  pip install invoke\n"
-        f"Then re-run:  invoke build"
-    )
+
+def _check_venv():
+    """Fail early if invoke is running under a different Python than the active venv.
+
+    This happens when invoke is installed system-wide (/usr/bin/invoke) but a
+    venv is active — sys.executable will be the system Python, so cmake gets
+    the wrong -DPython_EXECUTABLE and venv packages like pytest won't be found.
+    Called at the start of build() so importing this module (e.g. by downstream
+    tasks.py files) does not trigger the check as a side effect.
+    """
+    _venv = os.environ.get("VIRTUAL_ENV")
+    if _venv and not sys.executable.startswith(_venv):
+        raise SystemExit(
+            f"ERROR: invoke is running under {sys.executable} but VIRTUAL_ENV "
+            f"is set to {_venv}.\n"
+            f"Install invoke in the venv:  pip install invoke\n"
+            f"Then re-run:  invoke build"
+        )
+
+
+def cmake_build_args(
+    install_prefix=None, tests=True, python=True, examples=True, shared=True
+):
+    """Canonical cmake args for a stinkytofu build.
+
+    Single source of truth for build flags — import this in downstream tasks
+    (e.g. tensilelite/tasks.py) so a new required option only needs to be
+    added here.
+
+    Defaults reflect the full standalone/CI build (tests, python, examples all
+    ON, shared library). Downstream callers that integrate stinkytofu (rocisa)
+    pass tests=False, python=False explicitly.
+    """
+    args = [
+        f"-DBUILD_SHARED_LIBS={'ON' if shared else 'OFF'}",
+        f"-DSTINKYTOFU_BUILD_TESTS={'ON' if tests else 'OFF'}",
+        f"-DSTINKYTOFU_BUILD_PYTHON={'ON' if python else 'OFF'}",
+        f"-DSTINKYTOFU_BUILD_EXAMPLES={'ON' if examples else 'OFF'}",
+    ]
+    if install_prefix is not None:
+        args.append(f"-DCMAKE_INSTALL_PREFIX={install_prefix}")
+    return args
 
 
 def _detect_rocm() -> Path:
@@ -79,6 +108,25 @@ def _detect_rocm() -> Path:
 # ---------------------------------------------------------------------------
 
 
+def _parse_vcvars_env(stdout):
+    """Parse `KEY=VALUE` lines from `vcvarsall.bat ... && set` output.
+
+    Tolerant of stray U+FFFD replacement characters: when the process's active
+    code page can't represent a byte in vcvarsall.bat's banner text (e.g. a
+    JIS/Shift-JIS system locale with an English-language VS install),
+    `_setup_msvc_env()` decodes with errors="replace" rather than crashing, so
+    a banner line may come through full of �. Such lines either fail the
+    "=" check below or produce a garbage key that's harmless to set; the real
+    KEY=VALUE environment lines are plain ASCII and parse normally either way.
+    """
+    env = {}
+    for line in stdout.splitlines():
+        if "=" in line:
+            key, _, value = line.partition("=")
+            env[key] = value
+    return env
+
+
 def _setup_msvc_env():
     """Initialize the full MSVC build environment from vcvarsall.bat."""
     if sys.platform != "win32":
@@ -100,13 +148,11 @@ def _setup_msvc_env():
         capture_output=True,
         text=True,
         encoding="mbcs",
+        errors="replace",
         shell=True,
     )
     original_lib = os.environ.get("LIB", "")
-    for line in result.stdout.splitlines():
-        if "=" in line:
-            key, _, value = line.partition("=")
-            os.environ[key] = value
+    os.environ.update(_parse_vcvars_env(result.stdout))
     # Restore original LIB entries so vcvarsall doesn't drop existing SDK paths
     if original_lib:
         existing = os.environ.get("LIB", "")
@@ -194,6 +240,7 @@ def build(
     coverage=False,
     rocm_path=None,
 ):
+    _check_venv()
     bld = Path(build_dir).resolve() if build_dir else BUILD_DIR
 
     if clean and bld.exists():
@@ -214,12 +261,7 @@ def build(
     cmake_opts = [
         f"-DCMAKE_BUILD_TYPE={build_type}",
         "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
-        f"-DBUILD_SHARED_LIBS={'OFF' if static else 'ON'}",
-        f"-DSTINKYTOFU_BUILD_TESTS={'ON' if tests else 'OFF'}",
-        f"-DSTINKYTOFU_BUILD_PYTHON={'OFF' if no_python else 'ON'}",
-        # Standalone dev build: build the example plugins (demo + exercised by the
-        # unit tests). Default OFF in CMake so integrated/ROCm builds never ship them.
-        "-DSTINKYTOFU_BUILD_EXAMPLES=ON",
+        *cmake_build_args(tests=tests, python=not no_python, shared=not static),
         "-DSTINKYTOFU_ENABLE_WERROR=ON",
         f"-DSTINKYTOFU_CODE_COVERAGE={'ON' if coverage else 'OFF'}",
     ]
@@ -227,7 +269,8 @@ def build(
     if not no_python:
         cmake_opts.append(f"-DPython_EXECUTABLE={sys.executable}")
 
-    # Locate ROCmCMakeBuildTools for version TWEAK (git hash) support.
+    # Locate ROCmCMakeBuildTools (version TWEAK git hash) and the SDK cmake prefix
+    # so find_package(amd_comgr CONFIG) can locate the devel package's config.
     _rocm_sdk = shutil.which("rocm-sdk")
     if _rocm_sdk:
         try:
@@ -244,6 +287,33 @@ def build(
                     cmake_opts.append(
                         f"-DROCmCMakeBuildTools_DIR={_rocm_cmake_dir.as_posix()}"
                     )
+        except subprocess.CalledProcessError:
+            pass
+        try:
+            _sdk_cmake = (
+                subprocess.check_output(
+                    ["rocm-sdk", "path", "--cmake"], stderr=subprocess.DEVNULL
+                )
+                .decode()
+                .strip()
+            )
+            if _sdk_cmake:
+                cmake_opts.append(f"-DCMAKE_PREFIX_PATH={_sdk_cmake}")
+        except subprocess.CalledProcessError:
+            pass
+
+        # Point CMake's find_package(amd_comgr CONFIG) at the SDK's cmake configs
+        # (rocm-sdk pip installs don't populate ROCM_PATH/CMAKE_PREFIX_PATH themselves).
+        try:
+            _sdk_cmake_prefix = (
+                subprocess.check_output(
+                    ["rocm-sdk", "path", "--cmake"], stderr=subprocess.DEVNULL
+                )
+                .decode()
+                .strip()
+            )
+            if _sdk_cmake_prefix:
+                cmake_opts.append(f"-DCMAKE_PREFIX_PATH={_sdk_cmake_prefix}")
         except subprocess.CalledProcessError:
             pass
 
@@ -356,6 +426,27 @@ def tidy(c, build_dir=None):
         f'cmake -B "{bld.as_posix()}" -S "{ROOT_PATH.as_posix()}" -DENABLE_CLANG_TIDY=ON'
     )
     c.run(f'cmake --build "{bld.as_posix()}" --target tidy')
+
+
+@task(
+    help={
+        "build_dir": "Build directory to use (default: build/).",
+        "open_report": "Open the generated HTML docs in a browser when finished.",
+    }
+)
+def docs(c, build_dir=None, open_report=False):
+    """Build the Doxygen + Sphinx documentation site. Requires a prior 'invoke build'."""
+    bld = Path(build_dir).resolve() if build_dir else BUILD_DIR
+    if not bld.exists():
+        print("No build directory found. Run 'invoke build' first.")
+        sys.exit(1)
+    c.run(f'cmake --build "{bld.as_posix()}" --target sphinx_docs')
+    html_index = bld / "docs" / "html" / "index.html"
+    print(f"\nHTML docs: {html_index.as_posix()}")
+    if open_report:
+        import webbrowser
+
+        webbrowser.open(html_index.as_uri())
 
 
 @task(

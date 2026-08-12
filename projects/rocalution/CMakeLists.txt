@@ -107,7 +107,10 @@ else()
     gfx1100
     gfx1101
     gfx1102
+    gfx1150
     gfx1151
+    gfx1152
+    gfx1153
     gfx1200
     gfx1201
   )
@@ -158,7 +161,7 @@ endif()
 
 
 # Setup version
-rocm_setup_version(VERSION "4.1.0")
+rocm_setup_version(VERSION "4.1.1")
 
 if(BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
   set( BUILD_CLIENTS ON )
@@ -197,7 +200,11 @@ set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md")
 if(WIN32)
   set(CPACK_SOURCE_GENERATOR "ZIP")
   set(CPACK_GENERATOR "ZIP")
-  set(CMAKE_INSTALL_PREFIX "C:/hipSDK" CACHE PATH "Install path" FORCE)
+  # Only force the default Windows SDK install path when the caller did not set
+  # one explicitly.
+  if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+    set(CMAKE_INSTALL_PREFIX "C:/hipSDK" CACHE PATH "Install path" FORCE)
+  endif()
   set(INSTALL_PREFIX "C:/hipSDK")
   set(CPACK_SET_DESTDIR OFF)
   set(CPACK_PACKAGE_INSTALL_DIRECTORY "C:/hipSDK")

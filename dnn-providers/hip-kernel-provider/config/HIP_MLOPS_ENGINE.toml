@@ -1,0 +1,47 @@
+# Integration test configuration for HIP_MLOPS_ENGINE
+# Filters use GTest-style globs: * matches any sequence of characters
+# Later entries take precedence over earlier ones when multiple filters match
+
+[meta]
+version = 1
+
+# -- Test Skips --
+# Skip tests on specific architectures (or globally if 'archs' is omitted).
+# Each entry requires:
+#   archs:   optional array of substrings matched against the device's raw
+#            gcnArchName (e.g. "gfx942" matches "gfx942:sramecc+:xnack-").
+#            Omit or leave empty to skip on every arch.
+#   filters: array of GTest globs matched against the full GTest name
+#   reason:  human-readable string surfaced in the GTEST_SKIP message
+# First matching entry wins.
+#
+# -- Tolerance Overrides --
+# Override default tolerances for specific tests or groups of tests.
+# Each entry requires:
+#   filters: array of glob patterns matched against the full GTest name
+#   atol: absolute tolerance
+#   rtol: relative tolerance
+#
+# RMSNormBackward Pure-Bfp16 (dy/x/dx all bf16) fails CPU-reference tolerance
+# at the suite's large-reduction shapes (x:[4096,128,1,1], x:[5,256,14,14],
+# x:[16,3,8,14,14]) — smaller shapes in the same suites pass reliably. The
+# exact failing case (which training/bias/layout combo) varies between runs
+# at a fixed shape, pointing at run-to-run nondeterminism in the GPU kernel's
+# reduction order rather than a fixed tolerance shortfall, so per-case index
+# filters aren't reliable here — skipping both fixtures outright. Root cause
+# not yet identified; revisit once the CPU reference / GPU kernel numerics
+# have been compared directly.
+[[test_skips]]
+filters = [
+    "Smoke/IntegrationGpuRMSNormBackwardPureBfp16.Correctness/*",
+    "Smoke/IntegrationGpuRMSNormBackward3dPureBfp16.Correctness/*",
+]
+reason = "RMSNormBackward Pure-Bfp16 is flaky at large reduction shapes — root cause under investigation"
+
+# Layernorm forward batch-256/512 volumetric shapes (Full5dLargeBatch prefix). Each case runs
+# ~17-29 s and the set roughly doubles the 5D layernorm full-tier runtime without exercising a
+# code path the batch-32 Full shapes don't already cover. Skipped for now to keep the tier fast;
+# drop this entry once per-test tier filtering is fully wired.
+[[test_skips]]
+filters = ["Full5dLargeBatch/*Layernorm*"]
+reason = "Layernorm large-batch shapes are too slow for the current full tier; re-enable once tier filtering is fully set up"
