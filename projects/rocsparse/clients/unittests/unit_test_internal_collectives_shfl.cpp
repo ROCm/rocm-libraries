@@ -38,6 +38,7 @@
 #include <hip/hip_runtime.h>
 
 #include <cstdint>
+#include <numeric>
 #include <vector>
 
 using rocsparse_ut::device_vector;
@@ -67,12 +68,6 @@ namespace
         const int lane = threadIdx.x;
         out[lane]      = rocsparse::shfl_down(in[lane], delta);
     }
-    template <typename T>
-    T lane_value(uint32_t l)
-    {
-        return static_cast<T>(l * 3 + 1);
-    }
-
     // shfl(x, src): every lane reads lane `src`'s value (broadcast). Validated
     // for all lanes of the device's wavefront.
     template <typename T>
@@ -81,8 +76,7 @@ namespace
         const uint32_t wf = require_wavefront_size();
         ASSERT_LT(static_cast<uint32_t>(src), wf);
         std::vector<T> in(wf);
-        for(uint32_t l = 0; l < wf; ++l)
-            in[l] = lane_value<T>(l);
+        std::iota(in.begin(), in.end(), T(0)); // lane l holds value l
         device_vector<T> d_in(in), d_out(size_t{wf});
         ASSERT_NE(d_in.ptr, nullptr);
         ASSERT_NE(d_out.ptr, nullptr);
@@ -97,8 +91,7 @@ namespace
     {
         const uint32_t wf = require_wavefront_size();
         std::vector<T> in(wf);
-        for(uint32_t l = 0; l < wf; ++l)
-            in[l] = lane_value<T>(l);
+        std::iota(in.begin(), in.end(), T(0)); // lane l holds value l
         device_vector<T> d_in(in), d_out(size_t{wf});
         ASSERT_NE(d_in.ptr, nullptr);
         ASSERT_NE(d_out.ptr, nullptr);
@@ -116,8 +109,7 @@ namespace
     {
         const uint32_t wf = require_wavefront_size();
         std::vector<T> in(wf);
-        for(uint32_t l = 0; l < wf; ++l)
-            in[l] = lane_value<T>(l);
+        std::iota(in.begin(), in.end(), T(0)); // lane l holds value l
         device_vector<T> d_in(in), d_out(size_t{wf});
         ASSERT_NE(d_in.ptr, nullptr);
         ASSERT_NE(d_out.ptr, nullptr);

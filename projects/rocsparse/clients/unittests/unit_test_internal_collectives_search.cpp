@@ -37,6 +37,7 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <vector>
 
@@ -64,41 +65,32 @@ namespace
         const int lane = threadIdx.x;
         out[lane]      = rocsparse::popc<WFSZ>(mask, static_cast<uint32_t>(lane));
     }
+    // Host reference for dichotomic_search: for a sorted "row offset" array with
+    // n segments (n+1 entries), the segment index of `val` is the standard
+    // upper_bound lookup (first offset strictly greater than val, minus one).
+    // Values >= max_val fall in no segment and map to 0, matching the device.
     template <typename I, typename J>
-    J host_dichotomic(J left, J right, I val, I max_val, const std::vector<I>& arr)
+    J host_dichotomic(J n, I val, I max_val, const std::vector<I>& arr)
     {
-        if(val < max_val)
-        {
-            while(left < right)
-            {
-                const J mid = (left + right) / 2;
-                if(arr[mid + 1] <= val)
-                    left = mid + 1;
-                else
-                    right = mid;
-            }
-            return left;
-        }
-        return static_cast<J>(0);
+        if(val >= max_val)
+            return static_cast<J>(0);
+        const auto it = std::upper_bound(arr.begin(), arr.begin() + (n + 1), val);
+        return static_cast<J>((it - arr.begin()) - 1);
     }
 
     // dichotomic_search<I,J>: for each query value, the segment index in a sorted
-    // "row offset" array. Host reference computes the same for every query.
+    // "row offset" array `arr` (n = arr.size()-1 segments). The caller supplies
+    // the array and the query values; the host reference is computed per query.
     template <typename I, typename J>
-    void run_dichotomic()
+    void run_dichotomic(const std::vector<I>& arr, const std::vector<I>& vals)
     {
-        // "Row offset" style array: sorted, includes a zero-length segment (7==7).
-        const std::vector<I> arr{0, 3, 3, 7, 12, 20};
-        const J              n       = 5; // number of segments (arr has n+1 entries)
-        const I              max_val = arr[n];
-        std::vector<I>       vals;
-        for(I v = 0; v <= max_val + 1; ++v)
-            vals.push_back(v);
-        const size_t nq = vals.size();
+        const J      n       = static_cast<J>(arr.size()) - 1;
+        const I      max_val = arr[n];
+        const size_t nq      = vals.size();
 
         std::vector<J> ref(nq);
         for(size_t q = 0; q < nq; ++q)
-            ref[q] = host_dichotomic<I, J>(J(0), n, vals[q], max_val, arr);
+            ref[q] = host_dichotomic<I, J>(n, vals[q], max_val, arr);
 
         device_vector<I> d_arr(arr), d_vals(vals);
         device_vector<J> d_out(nq);
@@ -121,10 +113,9 @@ namespace
     // popc<WFSIZE>(mask, lid): number of set bits of `mask` in bit positions
     // [0, lid]. Host reference uses __builtin_popcountll over the same low-bit
     // window; validated for every lane of the device's wavefront.
-    void run_popc()
+    void run_popc(uint64_t mask)
     {
-        const uint32_t wf   = require_wavefront_size();
-        const uint64_t mask = 0xB6D1E4A5F0C3927Bull; // 64-bit pattern (low 32 used on wf32)
+        const uint32_t          wf = require_wavefront_size();
         device_vector<uint32_t> d_out(size_t{wf});
         ASSERT_NE(d_out.ptr, nullptr);
         ASSERT_EQ(launch_warp_by_size(k_popc<32>, k_popc<64>, mask, d_out.ptr), hipSuccess);
@@ -136,17 +127,39 @@ namespace
             expect_close(h[lid], expected);
         }
     }
+
+    // A sorted "row offset" array with a zero-length segment (3==3) and gaps.
+    template <typename I>
+    std::vector<I> offsets()
+    {
+        return std::vector<I>{0, 3, 3, 7, 12, 20};
+    }
+    // Every value in [0, max_val + 1] so both in-range and out-of-range queries
+    // (val == max_val and val > max_val, which map to segment 0) are exercised.
+    template <typename I>
+    std::vector<I> queries(I max_val)
+    {
+        std::vector<I> v;
+        for(I x = 0; x <= max_val + 1; ++x)
+            v.push_back(x);
+        return v;
+    }
 } // namespace
 
 TEST(internal_collectives_dichotomic_search, i32_i32)
 {
-    run_dichotomic<int32_t, int32_t>();
+    run_dichotomic<int32_t, int32_t>(offsets<int32_t>(), queries<int32_t>(20));
 }
 TEST(internal_collectives_dichotomic_search, i64_i64)
 {
-    run_dichotomic<int64_t, int64_t>();
+    run_dichotomic<int64_t, int64_t>(offsets<int64_t>(), queries<int64_t>(20));
 }
-TEST(internal_collectives_popc, inclusive_scan)
+// popc<WFSIZE>(mask, lid): inclusive set-bit count over lanes [0, lid].
+TEST(internal_collectives_popc, mixed_pattern)
 {
-    run_popc();
+    run_popc(0xB6D1E4A5F0C3927Bull); // low 32 bits used on wf32, all 64 on wf64
+}
+TEST(internal_collectives_popc, all_ones)
+{
+    run_popc(~0ull);
 }

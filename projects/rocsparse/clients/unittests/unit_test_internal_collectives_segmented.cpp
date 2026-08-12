@@ -206,3 +206,33 @@ TEST(internal_collectives_segmented_blockreduce, row_i64_val_f64)
         val[t] = static_cast<double>((t % 3) + 1);
     run_segmented_blockreduce<64, int64_t, double>(seg_rows64<int64_t>(), val);
 }
+// Edge case: a single segment (all row keys equal) makes segmented_blockreduce
+// degenerate to a plain block-wide inclusive prefix sum.
+TEST(internal_collectives_segmented_blockreduce, single_segment_all_same)
+{
+    std::vector<int32_t> row(64, 0);
+    std::vector<float>   val(64);
+    for(uint32_t t = 0; t < 64; ++t)
+        val[t] = static_cast<float>((t % 5) + 1);
+    run_segmented_blockreduce<64, int32_t, float>(row, val);
+}
+// Edge case: all-distinct row keys make every element its own segment, so each
+// output must equal its input (no accumulation crosses a segment boundary).
+TEST(internal_collectives_segmented_blockreduce, all_distinct_segments)
+{
+    std::vector<int32_t> row(64);
+    for(uint32_t t = 0; t < 64; ++t)
+        row[t] = static_cast<int32_t>(t);
+    std::vector<double> val(64);
+    for(uint32_t t = 0; t < 64; ++t)
+        val[t] = static_cast<double>((t % 7) + 1);
+    run_segmented_blockreduce<64, int32_t, double>(row, val);
+}
+// wfsegmented_reduce with all-distinct row keys: every lane is its own segment,
+// so the scan result equals the input value on every lane.
+TEST(internal_collectives_wfsegmented_reduce, all_distinct_segments)
+{
+    run_wfsegmented_reduce<int32_t, float>(
+        [](uint32_t l) { return static_cast<int32_t>(l); },
+        [](uint32_t l) { return static_cast<float>((l % 4) + 1); });
+}
