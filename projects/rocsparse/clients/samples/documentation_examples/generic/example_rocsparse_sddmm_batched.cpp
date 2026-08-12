@@ -213,14 +213,13 @@ int main()
     HIP_CHECK(hipMemcpy(hC_values1, dC_values, C_nnz * sizeof(float), hipMemcpyDeviceToHost));
     HIP_CHECK(
         hipMemcpy(hC_values2, dC_values + C_nnz, C_nnz * sizeof(float), hipMemcpyDeviceToHost));
-    int          correct = 1;
-    const float  abs_tol  = 1.0e-4f;
-    const float  rel_tol  = 1.0e-4f;
-    auto         within_tol
-        = [&](float computed, float expected) {
-              const float diff = std::fabs(computed - expected);
-              return diff <= abs_tol + rel_tol * std::fabs(expected);
-          };
+    int         correct    = 1;
+    const float abs_tol    = 1.0e-4f;
+    const float rel_tol    = 1.0e-4f;
+    auto        within_tol = [&](float computed, float expected) {
+        const float diff = std::fabs(computed - expected);
+        return diff <= abs_tol + rel_tol * std::fabs(expected);
+    };
     for(int i = 0; i < C_nnz; i++)
     {
         if(!within_tol(hC_values1[i], hC_result1[i]))

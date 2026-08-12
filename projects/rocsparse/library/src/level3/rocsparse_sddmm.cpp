@@ -514,8 +514,7 @@ try
 #else
     // Batched SDDMM is gated behind the ROCSPARSE_WITH_SDDMM_BATCHED build-time feature flag. When
     // it is disabled, any batch count greater than one is rejected for every format.
-    ROCSPARSE_CHECKARG(
-        7, mat_C, (mat_C->batch_count > 1), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(7, mat_C, (mat_C->batch_count > 1), rocsparse_status_not_implemented);
 #endif
 
     rocsparse::sddmm_buffer_size_template_t sddmm_buffer_size_function;
@@ -991,8 +990,7 @@ try
 #else
     // Batched SDDMM is gated behind the ROCSPARSE_WITH_SDDMM_BATCHED build-time feature flag. When
     // it is disabled, any batch count greater than one is rejected for every format.
-    ROCSPARSE_CHECKARG(
-        7, mat_C, (mat_C->batch_count > 1), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(7, mat_C, (mat_C->batch_count > 1), rocsparse_status_not_implemented);
 #endif
 
     if(mat_C->nnz == 0)
@@ -1472,8 +1470,7 @@ try
 #else
     // Batched SDDMM is gated behind the ROCSPARSE_WITH_SDDMM_BATCHED build-time feature flag. When
     // it is disabled, any batch count greater than one is rejected for every format.
-    ROCSPARSE_CHECKARG(
-        7, mat_C, (mat_C->batch_count > 1), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(7, mat_C, (mat_C->batch_count > 1), rocsparse_status_not_implemented);
 #endif
 
     if(mat_C->nnz == 0)

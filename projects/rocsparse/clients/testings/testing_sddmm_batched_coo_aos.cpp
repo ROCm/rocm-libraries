@@ -232,7 +232,7 @@ void testing_sddmm_batched_coo_aos(const Arguments& arg)
     // interpreted as the per-batch value (nnz) stride. The interleaved index
     // buffer holds two entries per nonzero, so its per-batch stride is twice the
     // value stride.
-    int64_t batch_stride_C     = (batch_count_C > 1) ? nnz_C_per_batch : 0;
+    int64_t batch_stride_C = (batch_count_C > 1) ? nnz_C_per_batch : 0;
 
     // Allocate/initialize dense A and B matrices (per batch unique).
     host_vector<A> hA(batch_count_A * nnz_A_per_batch);
@@ -349,25 +349,25 @@ void testing_sddmm_batched_coo_aos(const Arguments& arg)
         // offsets and column indices at odd offsets.
         for(I i = 0; i < batch_count; ++i)
         {
-            rocsparse_host<T, I, I, A, B, C>::cooaosddmm(
-                trans_A,
-                trans_B,
-                order_A,
-                order_B,
-                M,
-                N,
-                K,
-                nnz_C,
-                &halpha,
-                hA.data() + i * batch_stride_A,
-                lda,
-                hB.data() + i * batch_stride_B,
-                ldb,
-                &hbeta,
-                hcoo_ind.data() + i * 2 * batch_stride_C,
-                hcoo_ind.data() + i * 2 * batch_stride_C + 1,
-                hcoo_val_gold.data() + i * batch_stride_C,
-                base);
+            rocsparse_host<T, I, I, A, B, C>::cooaosddmm(trans_A,
+                                                         trans_B,
+                                                         order_A,
+                                                         order_B,
+                                                         M,
+                                                         N,
+                                                         K,
+                                                         nnz_C,
+                                                         &halpha,
+                                                         hA.data() + i * batch_stride_A,
+                                                         lda,
+                                                         hB.data() + i * batch_stride_B,
+                                                         ldb,
+                                                         &hbeta,
+                                                         hcoo_ind.data() + i * 2 * batch_stride_C,
+                                                         hcoo_ind.data() + i * 2 * batch_stride_C
+                                                             + 1,
+                                                         hcoo_val_gold.data() + i * batch_stride_C,
+                                                         base);
         }
 
         // Check the host-pointer-mode result (still in hcoo_val from above).

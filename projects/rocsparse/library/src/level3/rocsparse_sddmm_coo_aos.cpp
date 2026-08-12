@@ -247,7 +247,7 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_coo_aos, T, I, J, A, B, C>
 
 #define LAUNCH(K_)                                                                       \
     int64_t num_blocks_x = (nnz - 1) / (NB / K_) + 1;                                    \
-    dim3    blocks(num_blocks_x, (uint32_t)std::min<int64_t>(batch_count, 65535));       \
+    dim3    blocks(num_blocks_x, get_batch_grid_size(batch_count));                      \
     dim3    threads(NB);                                                                 \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::sddmm_coox_kernel<NB, K_, true, T>),  \
                                        blocks,                                           \

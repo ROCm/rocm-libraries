@@ -76,16 +76,6 @@ namespace rocsparse
             return;
         }
 
-        // // Offset pointers for the current batch so the rest of the kernel can
-        // // address the batched inputs as though they were single matrices. The
-        // // ELL column indices array is shared across batches (same sparsity
-        // // pattern) while the values array is per batch.
-        // const uint32_t batch = hipBlockIdx_y;
-        // dense_A              = dense_A + batch_stride_A * batch;
-        // dense_B              = dense_B + batch_stride_B * batch;
-        // ind                  = ind + batch_stride_C * batch;
-        // val                  = val + batch_stride_C * batch;
-
         const J i = innz % M;
         const J j = ind[innz] - base;
         if(j < 0)
