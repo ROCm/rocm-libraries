@@ -1034,8 +1034,8 @@ endif()
 #######################################
 if(MIOPEN_ENABLE_SQLITE)
     # MIOpen depends on SQLite
-    target_link_libraries(MIOpen PRIVATE SQLite3::SQLite3)
-    target_link_libraries(MIOpen INTERFACE  $<BUILD_INTERFACE:SQLite3::SQLite3>)
+    target_link_libraries(MIOpen PRIVATE SQLite::SQLite3)
+    target_link_libraries(MIOpen INTERFACE  $<BUILD_INTERFACE:SQLite::SQLite3>)
 endif()
 ############################################################
 
