@@ -43,6 +43,8 @@
 #include "heuristics/SelectionHeuristic.hpp"
 #include "logging/Logging.hpp"
 
+#include <memory>
+
 namespace hipdnn_backend
 {
 
@@ -208,7 +210,7 @@ void DescriptorFactory::destroy(hipdnnBackendDescriptor_t descriptor)
     THROW_IF_NULL(
         descriptor, HIPDNN_STATUS_BAD_PARAM_NULL_POINTER, "hipdnnBackendDescriptor_t is null.");
 
-    delete descriptor;
+    auto owned = std::unique_ptr<HipdnnBackendDescriptor>(descriptor);
 
     HIPDNN_BACKEND_LOG_INFO("Destroyed descriptor: {:p}", static_cast<void*>(descriptor));
 }
