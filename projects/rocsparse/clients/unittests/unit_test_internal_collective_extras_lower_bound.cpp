@@ -58,16 +58,15 @@ namespace
         out[t]      = rocsparse::lower_bound<I, J>(arr, keys[t], low, high);
     }
 
+    // lower_bound<I,J>(arr, key, low, high): index of the first element in the
+    // sorted range [low, high) that is not less than `key` (std::lower_bound
+    // semantics). The caller supplies the sorted array and the query keys; the
+    // host reference is std::lower_bound over the same array.
     template <typename I, typename J>
-    void run_lower_bound()
+    void run_lower_bound(const std::vector<J>& arr, const std::vector<J>& keys)
     {
-        // Sorted, with duplicates and gaps to exercise <-vs-<= boundary logic.
-        const std::vector<J> arr{0, 2, 2, 2, 5, 9, 9, 14};
-        const I              high = static_cast<I>(arr.size());
-        std::vector<J>       keys;
-        for(J k = -1; k <= 16; ++k)
-            keys.push_back(k);
-        const size_t nq = keys.size();
+        const I      high = static_cast<I>(arr.size());
+        const size_t nq   = keys.size();
 
         std::vector<I> ref(nq);
         for(size_t q = 0; q < nq; ++q)
@@ -91,17 +90,45 @@ namespace
         for(size_t q = 0; q < nq; ++q)
             EXPECT_EQ(h[q], ref[q]) << "key=" << keys[q];
     }
+
+    // Query every integer in [lo, hi] so below-range, in-range and above-range
+    // keys are all exercised.
+    template <typename J>
+    std::vector<J> keys_range(J lo, J hi)
+    {
+        std::vector<J> k;
+        for(J v = lo; v <= hi; ++v)
+            k.push_back(v);
+        return k;
+    }
 } // namespace
 
+// Sorted array with duplicates and gaps to exercise the <-vs-<= boundary logic.
 TEST(internal_collective_extras_lower_bound, i32_j32)
 {
-    run_lower_bound<int32_t, int32_t>();
+    const std::vector<int32_t> arr{0, 2, 2, 2, 5, 9, 9, 14};
+    run_lower_bound<int32_t, int32_t>(arr, keys_range<int32_t>(-1, 16));
 }
 TEST(internal_collective_extras_lower_bound, i64_j32)
 {
-    run_lower_bound<int64_t, int32_t>();
+    const std::vector<int32_t> arr{0, 2, 2, 2, 5, 9, 9, 14};
+    run_lower_bound<int64_t, int32_t>(arr, keys_range<int32_t>(-1, 16));
 }
 TEST(internal_collective_extras_lower_bound, i64_j64)
 {
-    run_lower_bound<int64_t, int64_t>();
+    const std::vector<int64_t> arr{0, 2, 2, 2, 5, 9, 9, 14};
+    run_lower_bound<int64_t, int64_t>(arr, keys_range<int64_t>(-1, 16));
+}
+// All-equal array: every key <= the value lands at index 0, every key strictly
+// above lands at size (past the end).
+TEST(internal_collective_extras_lower_bound, all_same_array)
+{
+    const std::vector<int32_t> arr(8, 5);
+    run_lower_bound<int32_t, int32_t>(arr, keys_range<int32_t>(3, 7));
+}
+// Strictly increasing (no duplicates): lower_bound is the exact position.
+TEST(internal_collective_extras_lower_bound, strictly_increasing_array)
+{
+    const std::vector<int32_t> arr{0, 1, 2, 3, 4, 5, 6, 7};
+    run_lower_bound<int32_t, int32_t>(arr, keys_range<int32_t>(-1, 8));
 }
