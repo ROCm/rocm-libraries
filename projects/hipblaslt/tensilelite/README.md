@@ -13,13 +13,13 @@ The standard workflow for running the entire test suite is to use `tox`. This co
 
 ```
 cd rocm-libraries/projects/hipblaslt/tensilelite
-tox -e py3 -- Tensile/Tests -m common
+tox -e py3 -- tensilelite/Tests -m common
 ```
 
 Subsequently, you can run just the Tensile unit tests via:
 
 ```
-tox -e unit -- Tensile/Tests/unit
+tox -e unit -- tensilelite/Tests/unit
 ```
 
 ### Generate coverage report with Tox
@@ -88,7 +88,7 @@ invoke build-client \
   --export-compile-commands
 
 # run an individual test directly — no wrapper script needed
-Tensile/bin/Tensile Tensile/Tests/common/exception/<test>.yaml tensile-out
+tensilelite/bin/Tensile tensilelite/Tests/common/exception/<test>.yaml tensile-out
 ```
 
 ### Rebuilding after C++ changes
@@ -143,7 +143,7 @@ cmake --preset tensilelite -S .. -B my-custom-build
 cmake --build my-custom-build --parallel
 
 # run a test directly
-Tensile/bin/Tensile Tensile/Tests/pre_checkin/<test>.yaml tensile-out \
+tensilelite/bin/Tensile tensilelite/Tests/pre_checkin/<test>.yaml tensile-out \
                            --prebuilt-client=my-custom-build/tensilelite-client/tensilelite-client
 ```
 
@@ -155,10 +155,10 @@ specialized builds (e.g., Debug builds) and setting the architecture.
 ```
 # build the client using tox with custom CMake flags
 cd rocm-libraries/projects/hipblaslt/tensilelite
-TENSILELITE_CLIENT_ARGS="--build-type Debug --gpu-targets gfx90a --clean" tox -e py3 -- Tensile/Tests -m common
+TENSILELITE_CLIENT_ARGS="--build-type Debug --gpu-targets gfx90a --clean" tox -e py3 -- tensilelite/Tests -m common
 
 # run tests with a single pytest worker (useful for debugging)
-TENSILE_NUM_PYTEST_WORKERS=1 tox -e py3 -- Tensile/Tests -m common
+TENSILE_NUM_PYTEST_WORKERS=1 tox -e py3 -- tensilelite/Tests -m common
 ```
 
 `invoke build-client` follows the existing `tensilelite` CMake preset by default.
@@ -193,7 +193,7 @@ and use it as the compiler launcher. No additional configuration is needed.
 
 * `TENSILELITE_ENABLE_HOST`: Enables generation of tensilelite host (default: `ON`)
 * `TENSILELITE_ENABLE_CLIENT`: Enables generation of tensilelite client application (default: `ON`)
-* `TENSILELITE_ENABLE_AUTOBUILD`: Generate wrapper scripts (e.g. `Tensile.sh`) for the cmake build tree. **Deprecated** — run `Tensile/bin/Tensile` directly instead (default: `OFF`)
+* `TENSILELITE_ENABLE_AUTOBUILD`: Generate wrapper scripts (e.g. `Tensile.sh`) for the cmake build tree. **Deprecated** — run `tensilelite/bin/Tensile` directly instead (default: `OFF`)
 * `TENSILELITE_BUILD_TESTING`: Build tensilelite host library tests (default: `OFF`)
 * `GPU_TARGETS:` Semicolon separated list of gfx targets to build
 
@@ -216,16 +216,16 @@ Example:
 The script will be created in the build folder and will be named in Tensile.bat or Tensile.sh depending on the platform. Then you can then run the script under the ``tensile-out`` folder as usual:
 
 > **Deprecated:** `Tensile.sh` / `Tensile.bat` will be removed in a future release.
-> Run `Tensile/bin/Tensile` directly instead.
+> Run `tensilelite/bin/Tensile` directly instead.
 
 ```
-Tensile.sh <abs-path>/Tensile/Tests/gemm/fp16_use_e.yaml tensile-out
+Tensile.sh <abs-path>/tensilelite/Tests/gemm/fp16_use_e.yaml tensile-out
 ```
 
 or
 
 ```
-Tensile.bat <abs-path>/Tensile/Tests/gemm/fp16_use_e.yaml tensile-out
+Tensile.bat <abs-path>/tensilelite/Tests/gemm/fp16_use_e.yaml tensile-out
 ```
 
 **You don't need to rerun CMake unless you delete the ``tensile-out`` folder.**
