@@ -60,7 +60,7 @@ class MockDeviceResolver : public IDeviceResolver<StubHandle>
 {
 public:
     MOCK_METHOD(DeviceId, deviceId, (const StubHandle& handle), (const, override));
-    MOCK_METHOD(const hipDeviceProp_t&, deviceProperties, (DeviceId deviceId), (const, override));
+    MOCK_METHOD(const DeviceProperties&, deviceProperties, (DeviceId deviceId), (const, override));
 };
 
 } // namespace hipdnn_plugin_sdk::ingestor::testing

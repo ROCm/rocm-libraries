@@ -5,7 +5,7 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
-#include <hip/hip_runtime_api.h>
+#include <hipdnn_plugin_sdk/ingestor/DeviceProperties.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 
 namespace hipdnn_plugin_sdk::ingestor
@@ -34,7 +34,7 @@ public:
      * rather than copying. Implementations should cache.
      */
     // NOLINTNEXTLINE(portability-template-virtual-member-function)
-    virtual const hipDeviceProp_t& deviceProperties(DeviceId deviceId) const = 0;
+    virtual const DeviceProperties& deviceProperties(DeviceId deviceId) const = 0;
 };
 
 } // namespace hipdnn_plugin_sdk::ingestor

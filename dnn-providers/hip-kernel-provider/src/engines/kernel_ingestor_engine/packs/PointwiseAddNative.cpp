@@ -413,7 +413,7 @@ public:
             = static_cast<unsigned int>(kernel.getIntMetadata(std::string(BLOCK_SIZE_FIELD)));
 
         compilation::KernelCompileOptions options(&firstInput(context, binding),
-                                                  context.deviceProperties);
+                                                  context.deviceProperties.gcnArchName);
         options.add("HIP_PLUGIN_POINTWISE_ADD_TYPE", elementTypeFor(kernel));
         options.add("HIP_PLUGIN_POINTWISE_ADD_BLOCK_SIZE", blockSize);
 

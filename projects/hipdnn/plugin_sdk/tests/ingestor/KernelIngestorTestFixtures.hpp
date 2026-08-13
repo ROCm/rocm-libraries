@@ -175,9 +175,10 @@ inline GraphId makeNilGraphId()
     return GraphId{};
 }
 
-inline hipDeviceProp_t testDeviceProperties()
+inline DeviceProperties testDeviceProperties()
 {
-    hipDeviceProp_t properties{};
+    DeviceProperties properties;
+    properties.gcnArchName = "gfx000";
     properties.warpSize = 64;
     return properties;
 }
@@ -231,13 +232,13 @@ public:
         return 0;
     }
 
-    const hipDeviceProp_t& deviceProperties(DeviceId /*deviceId*/) const override
+    const DeviceProperties& deviceProperties(DeviceId /*deviceId*/) const override
     {
         return _properties;
     }
 
 private:
-    hipDeviceProp_t _properties = testDeviceProperties();
+    DeviceProperties _properties = testDeviceProperties();
 };
 
 /// Descriptor id built from a short seed, keeping the real 128-bit type readable.
@@ -586,13 +587,13 @@ public:
         return 0;
     }
 
-    const hipDeviceProp_t& deviceProperties(DeviceId /*deviceId*/) const override
+    const DeviceProperties& deviceProperties(DeviceId /*deviceId*/) const override
     {
         return _properties;
     }
 
 private:
-    hipDeviceProp_t _properties = testDeviceProperties();
+    DeviceProperties _properties = testDeviceProperties();
 };
 
 /// State manager over StubHandle: one FLOAT kernel behind one graph-scoped matcher.

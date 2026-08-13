@@ -145,23 +145,30 @@ constexpr int64_t INPUT_C_UID = 4;
 constexpr int64_t DEFAULT_DANGLING_UID = 999;
 
 /// A fixed, warp-64 device, for CPU-only matcher tests that never compile or launch.
-inline hipDeviceProp_t testDeviceProperties()
+inline hipdnn_plugin_sdk::ingestor::DeviceProperties testDeviceProperties()
 {
-    hipDeviceProp_t properties{};
+    hipdnn_plugin_sdk::ingestor::DeviceProperties properties;
+    // Never compiled against, so any arch reads the same; the dispatch tests that do
+    // compile use currentDeviceProperties() below.
+    properties.gcnArchName = "gfx000";
     properties.warpSize = 64;
     return properties;
 }
 
 /// The real current device's properties, queried once; zeroed if no device is current.
-inline hipDeviceProp_t currentDeviceProperties()
+inline hipdnn_plugin_sdk::ingestor::DeviceProperties currentDeviceProperties()
 {
+    hipdnn_plugin_sdk::ingestor::DeviceProperties resolved;
     hipDeviceProp_t properties{};
     int deviceId = 0;
-    if(hipGetDevice(&deviceId) == hipSuccess)
+    if(hipGetDevice(&deviceId) == hipSuccess
+       && hipGetDeviceProperties(&properties, deviceId) == hipSuccess)
     {
-        static_cast<void>(hipGetDeviceProperties(&properties, deviceId));
+        resolved.gcnArchName = properties.gcnArchName;
+        resolved.warpSize = properties.warpSize;
+        resolved.multiProcessorCount = properties.multiProcessorCount;
     }
-    return properties;
+    return resolved;
 }
 
 /**
@@ -335,10 +342,11 @@ class GraphFixture
 {
 public:
     explicit GraphFixture(flatbuffers::FlatBufferBuilder builder,
-                          hipDeviceProp_t properties = testDeviceProperties())
+                          hipdnn_plugin_sdk::ingestor::DeviceProperties properties
+                          = testDeviceProperties())
         : _builder(std::move(builder))
         , _graph(_builder.GetBufferPointer(), _builder.GetSize())
-        , _properties(properties)
+        , _properties(std::move(properties))
     {
     }
 
@@ -347,7 +355,7 @@ public:
         return hipdnn_plugin_sdk::ingestor::MatchContext{_graph, 0, _properties};
     }
 
-    const hipDeviceProp_t& deviceProperties() const
+    const hipdnn_plugin_sdk::ingestor::DeviceProperties& deviceProperties() const
     {
         return _properties;
     }
@@ -355,7 +363,7 @@ public:
 private:
     flatbuffers::FlatBufferBuilder _builder;
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper _graph;
-    hipDeviceProp_t _properties;
+    hipdnn_plugin_sdk::ingestor::DeviceProperties _properties;
 };
 
 /// @brief A KernelDefinition for a reference pack's kernel, for tests that never need

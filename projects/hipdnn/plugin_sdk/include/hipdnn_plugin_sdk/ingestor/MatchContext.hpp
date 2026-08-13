@@ -14,11 +14,11 @@
 #include <unordered_map>
 #include <variant>
 
-#include <hip/hip_runtime_api.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
+#include <hipdnn_plugin_sdk/ingestor/DeviceProperties.hpp>
 
 namespace hipdnn_plugin_sdk::ingestor
 {
@@ -97,7 +97,7 @@ struct MatchContext
 {
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph;
     DeviceId deviceId;
-    const hipDeviceProp_t& deviceProperties;
+    const DeviceProperties& deviceProperties;
 };
 
 /// @brief The graph's stable identity, or nullopt when absent (legacy/unfinalized graphs) or

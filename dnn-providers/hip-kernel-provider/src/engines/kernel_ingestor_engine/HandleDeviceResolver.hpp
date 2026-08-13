@@ -54,14 +54,14 @@ public:
         return deviceId;
     }
 
-    const hipDeviceProp_t&
+    const hipdnn_plugin_sdk::ingestor::DeviceProperties&
         deviceProperties(hipdnn_plugin_sdk::ingestor::DeviceId deviceId) const override
     {
         // Inert values for a call with no resolvable device; MatchContext binds
         // properties before any matcher runs, so the caller receives this regardless.
         if(deviceId == hipdnn_plugin_sdk::ingestor::NO_DEVICE)
         {
-            static const hipDeviceProp_t s_noDevice{};
+            static const hipdnn_plugin_sdk::ingestor::DeviceProperties s_noDevice{};
             return s_noDevice;
         }
 
@@ -83,7 +83,16 @@ public:
                 "hipGetDeviceProperties failed for device " + std::to_string(deviceId) + ": "
                     + hipGetErrorString(status));
         }
-        return _properties.emplace(deviceId, properties).first->second;
+
+        // The translation the SDK type exists for: HIP's fields narrow to the ones the
+        // ingestor's `$device.*` namespace exposes, and this is the one place that
+        // knows both shapes.
+        hipdnn_plugin_sdk::ingestor::DeviceProperties resolved;
+        resolved.gcnArchName = properties.gcnArchName;
+        resolved.warpSize = properties.warpSize;
+        resolved.multiProcessorCount = properties.multiProcessorCount;
+
+        return _properties.emplace(deviceId, std::move(resolved)).first->second;
     }
 
 protected:
@@ -98,7 +107,9 @@ protected:
 
 private:
     mutable std::mutex _mutex;
-    mutable std::unordered_map<hipdnn_plugin_sdk::ingestor::DeviceId, hipDeviceProp_t> _properties;
+    mutable std::unordered_map<hipdnn_plugin_sdk::ingestor::DeviceId,
+                               hipdnn_plugin_sdk::ingestor::DeviceProperties>
+        _properties;
 };
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine
