@@ -97,6 +97,21 @@ EDGE_PREFIXES = (
     ("rocblas_set_", "edge.policy", "edge_local"),
 )
 
+# The v2 matmul request describes one homogeneous problem shape. Grouped GEMM
+# carries an array of shapes, operations, leading dimensions, and scalars, so it
+# cannot be represented by setting the ordinary pointer-array batch flag. Keep
+# these callables in the typed compatibility bridge until the narrow protocol
+# has an audited per-group descriptor. The explicit set makes a future grouped
+# spelling fail classification instead of inheriting this decision silently.
+GROUPED_BATCHED_BRIDGE = {
+    "rocblas_dgemm_grouped_batched",
+    "rocblas_dgemm_grouped_batched_64",
+    "rocblas_gemm_grouped_batched_ex",
+    "rocblas_gemm_grouped_batched_ex_64",
+    "rocblas_sgemm_grouped_batched",
+    "rocblas_sgemm_grouped_batched_64",
+}
+
 
 @dataclass(frozen=True)
 class Row:
@@ -136,7 +151,13 @@ def categorize(declaration: dict[str, object]) -> Row:
             or not isinstance(source_line, int) or not isinstance(parameters, list)):
         raise ValueError("malformed rocBLAS declaration")
     operation = operation_for(name)
-    if operation is not None:
+    if name in GROUPED_BATCHED_BRIDGE:
+        cluster = "matrix.matmul"
+        disposition = "bridge_only"
+        primitive = "compatibility_bridge"
+    elif "grouped_batched" in name:
+        raise ValueError(f"unclassified grouped-batched rocBLAS callable: {name}")
+    elif operation is not None:
         cluster, primitive = OPERATION_CLUSTERS[operation]
         disposition = "normalized_provider"
     elif name in EDGE_RULES:
@@ -156,7 +177,9 @@ def categorize(declaration: dict[str, object]) -> Row:
         index_width = 32
     else:
         index_width = "not_applicable"
-    if "strided_batched" in name:
+    if name in GROUPED_BATCHED_BRIDGE:
+        batch_kind = "grouped"
+    elif "strided_batched" in name:
         batch_kind = "strided"
     elif "batched" in name:
         batch_kind = "pointer_array"

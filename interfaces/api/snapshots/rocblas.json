@@ -19,7 +19,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25360,
+      "line": 25653,
       "linkage_name": "rocblas_abort",
       "name": "rocblas_abort",
       "parameters": [],
@@ -58,7 +58,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 23868,
+      "line": 24161,
       "linkage_name": "rocblas_axpy_batched_ex",
       "name": "rocblas_axpy_batched_ex",
       "parameters": [
@@ -122,7 +122,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 23881,
+      "line": 24174,
       "linkage_name": "rocblas_axpy_batched_ex_64",
       "name": "rocblas_axpy_batched_ex_64",
       "parameters": [
@@ -186,7 +186,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 23783,
+      "line": 24076,
       "linkage_name": "rocblas_axpy_ex",
       "name": "rocblas_axpy_ex",
       "parameters": [
@@ -246,7 +246,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 23795,
+      "line": 24088,
       "linkage_name": "rocblas_axpy_ex_64",
       "name": "rocblas_axpy_ex_64",
       "parameters": [
@@ -306,7 +306,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 23965,
+      "line": 24258,
       "linkage_name": "rocblas_axpy_strided_batched_ex",
       "name": "rocblas_axpy_strided_batched_ex",
       "parameters": [
@@ -378,7 +378,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 23980,
+      "line": 24273,
       "linkage_name": "rocblas_axpy_strided_batched_ex_64",
       "name": "rocblas_axpy_strided_batched_ex_64",
       "parameters": [
@@ -1336,7 +1336,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 20666,
+      "line": 20804,
       "linkage_name": "rocblas_cdgmm",
       "name": "rocblas_cdgmm",
       "parameters": [
@@ -1392,7 +1392,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 20711,
+      "line": 20849,
       "linkage_name": "rocblas_cdgmm_64",
       "name": "rocblas_cdgmm_64",
       "parameters": [
@@ -1448,7 +1448,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 20807,
+      "line": 20945,
       "linkage_name": "rocblas_cdgmm_batched",
       "name": "rocblas_cdgmm_batched",
       "parameters": [
@@ -1508,7 +1508,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 20856,
+      "line": 20994,
       "linkage_name": "rocblas_cdgmm_batched_64",
       "name": "rocblas_cdgmm_batched_64",
       "parameters": [
@@ -1568,7 +1568,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 20969,
+      "line": 21107,
       "linkage_name": "rocblas_cdgmm_strided_batched",
       "name": "rocblas_cdgmm_strided_batched",
       "parameters": [
@@ -1640,7 +1640,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21030,
+      "line": 21168,
       "linkage_name": "rocblas_cdgmm_strided_batched_64",
       "name": "rocblas_cdgmm_strided_batched_64",
       "parameters": [
@@ -2776,7 +2776,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21142,
+      "line": 21280,
       "linkage_name": "rocblas_cgeam",
       "name": "rocblas_cgeam",
       "parameters": [
@@ -2844,7 +2844,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21199,
+      "line": 21337,
       "linkage_name": "rocblas_cgeam_64",
       "name": "rocblas_cgeam_64",
       "parameters": [
@@ -2912,7 +2912,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21319,
+      "line": 21457,
       "linkage_name": "rocblas_cgeam_batched",
       "name": "rocblas_cgeam_batched",
       "parameters": [
@@ -2984,7 +2984,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21380,
+      "line": 21518,
       "linkage_name": "rocblas_cgeam_batched_64",
       "name": "rocblas_cgeam_batched_64",
       "parameters": [
@@ -3056,7 +3056,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21532,
+      "line": 21670,
       "linkage_name": "rocblas_cgeam_strided_batched",
       "name": "rocblas_cgeam_strided_batched",
       "parameters": [
@@ -3140,7 +3140,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21605,
+      "line": 21743,
       "linkage_name": "rocblas_cgeam_strided_batched_64",
       "name": "rocblas_cgeam_strided_batched_64",
       "parameters": [
@@ -3696,7 +3696,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22394,
+      "line": 22687,
       "linkage_name": "rocblas_cgemmt",
       "name": "rocblas_cgemmt",
       "parameters": [
@@ -3768,7 +3768,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22454,
+      "line": 22747,
       "linkage_name": "rocblas_cgemmt_64",
       "name": "rocblas_cgemmt_64",
       "parameters": [
@@ -3840,7 +3840,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22583,
+      "line": 22876,
       "linkage_name": "rocblas_cgemmt_batched",
       "name": "rocblas_cgemmt_batched",
       "parameters": [
@@ -3916,7 +3916,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22647,
+      "line": 22940,
       "linkage_name": "rocblas_cgemmt_batched_64",
       "name": "rocblas_cgemmt_batched_64",
       "parameters": [
@@ -3992,7 +3992,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22794,
+      "line": 23087,
       "linkage_name": "rocblas_cgemmt_strided_batched",
       "name": "rocblas_cgemmt_strided_batched",
       "parameters": [
@@ -4080,7 +4080,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22870,
+      "line": 23163,
       "linkage_name": "rocblas_cgemmt_strided_batched_64",
       "name": "rocblas_cgemmt_strided_batched_64",
       "parameters": [
@@ -18468,7 +18468,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 20655,
+      "line": 20793,
       "linkage_name": "rocblas_ddgmm",
       "name": "rocblas_ddgmm",
       "parameters": [
@@ -18524,7 +18524,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 20700,
+      "line": 20838,
       "linkage_name": "rocblas_ddgmm_64",
       "name": "rocblas_ddgmm_64",
       "parameters": [
@@ -18580,7 +18580,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 20795,
+      "line": 20933,
       "linkage_name": "rocblas_ddgmm_batched",
       "name": "rocblas_ddgmm_batched",
       "parameters": [
@@ -18640,7 +18640,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 20844,
+      "line": 20982,
       "linkage_name": "rocblas_ddgmm_batched_64",
       "name": "rocblas_ddgmm_batched_64",
       "parameters": [
@@ -18700,7 +18700,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 20954,
+      "line": 21092,
       "linkage_name": "rocblas_ddgmm_strided_batched",
       "name": "rocblas_ddgmm_strided_batched",
       "parameters": [
@@ -18772,7 +18772,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21015,
+      "line": 21153,
       "linkage_name": "rocblas_ddgmm_strided_batched_64",
       "name": "rocblas_ddgmm_strided_batched_64",
       "parameters": [
@@ -19160,7 +19160,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25278,
+      "line": 25571,
       "linkage_name": "rocblas_device_malloc_alloc",
       "name": "rocblas_device_malloc_alloc",
       "parameters": [
@@ -19188,7 +19188,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25288,
+      "line": 25581,
       "linkage_name": "rocblas_device_malloc_free",
       "name": "rocblas_device_malloc_free",
       "parameters": [
@@ -19208,7 +19208,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25285,
+      "line": 25578,
       "linkage_name": "rocblas_device_malloc_get",
       "name": "rocblas_device_malloc_get",
       "parameters": [
@@ -19236,7 +19236,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25283,
+      "line": 25576,
       "linkage_name": "rocblas_device_malloc_ptr",
       "name": "rocblas_device_malloc_ptr",
       "parameters": [
@@ -19260,7 +19260,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25289,
+      "line": 25582,
       "linkage_name": "rocblas_device_malloc_set_default_memory_size",
       "name": "rocblas_device_malloc_set_default_memory_size",
       "parameters": [
@@ -19280,7 +19280,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25282,
+      "line": 25575,
       "linkage_name": "rocblas_device_malloc_success",
       "name": "rocblas_device_malloc_success",
       "parameters": [
@@ -19772,7 +19772,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21128,
+      "line": 21266,
       "linkage_name": "rocblas_dgeam",
       "name": "rocblas_dgeam",
       "parameters": [
@@ -19840,7 +19840,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21185,
+      "line": 21323,
       "linkage_name": "rocblas_dgeam_64",
       "name": "rocblas_dgeam_64",
       "parameters": [
@@ -19908,7 +19908,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21304,
+      "line": 21442,
       "linkage_name": "rocblas_dgeam_batched",
       "name": "rocblas_dgeam_batched",
       "parameters": [
@@ -19980,7 +19980,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21365,
+      "line": 21503,
       "linkage_name": "rocblas_dgeam_batched_64",
       "name": "rocblas_dgeam_batched_64",
       "parameters": [
@@ -20052,7 +20052,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21514,
+      "line": 21652,
       "linkage_name": "rocblas_dgeam_strided_batched",
       "name": "rocblas_dgeam_strided_batched",
       "parameters": [
@@ -20136,7 +20136,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21587,
+      "line": 21725,
       "linkage_name": "rocblas_dgeam_strided_batched_64",
       "name": "rocblas_dgeam_strided_batched_64",
       "parameters": [
@@ -20516,6 +20516,166 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
+      "line": 20685,
+      "linkage_name": "rocblas_dgemm_grouped_batched",
+      "name": "rocblas_dgemm_grouped_batched",
+      "parameters": [
+        {
+          "name": "handle",
+          "type": "rocblas_handle"
+        },
+        {
+          "name": "transa_array",
+          "type": "const rocblas_operation *"
+        },
+        {
+          "name": "transb_array",
+          "type": "const rocblas_operation *"
+        },
+        {
+          "name": "m_array",
+          "type": "const rocblas_int *"
+        },
+        {
+          "name": "n_array",
+          "type": "const rocblas_int *"
+        },
+        {
+          "name": "k_array",
+          "type": "const rocblas_int *"
+        },
+        {
+          "name": "alpha_array",
+          "type": "const double *"
+        },
+        {
+          "name": "Aarray",
+          "type": "const double *const *"
+        },
+        {
+          "name": "lda_array",
+          "type": "const rocblas_int *"
+        },
+        {
+          "name": "Barray",
+          "type": "const double *const *"
+        },
+        {
+          "name": "ldb_array",
+          "type": "const rocblas_int *"
+        },
+        {
+          "name": "beta_array",
+          "type": "const double *"
+        },
+        {
+          "name": "Carray",
+          "type": "double *const *"
+        },
+        {
+          "name": "ldc_array",
+          "type": "const rocblas_int *"
+        },
+        {
+          "name": "group_count",
+          "type": "rocblas_int"
+        },
+        {
+          "name": "group_size",
+          "type": "const rocblas_int *"
+        }
+      ],
+      "return_type": "rocblas_status",
+      "templated_kind": 0,
+      "type": "rocblas_status (rocblas_handle, const rocblas_operation *, const rocblas_operation *, const rocblas_int *, const rocblas_int *, const rocblas_int *, const double *, const double *const *, const rocblas_int *, const double *const *, const rocblas_int *, const double *, double *const *, const rocblas_int *, rocblas_int, const rocblas_int *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "internal/rocblas-functions.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 20721,
+      "linkage_name": "rocblas_dgemm_grouped_batched_64",
+      "name": "rocblas_dgemm_grouped_batched_64",
+      "parameters": [
+        {
+          "name": "handle",
+          "type": "rocblas_handle"
+        },
+        {
+          "name": "transa_array",
+          "type": "const rocblas_operation *"
+        },
+        {
+          "name": "transb_array",
+          "type": "const rocblas_operation *"
+        },
+        {
+          "name": "m_array",
+          "type": "const int64_t *"
+        },
+        {
+          "name": "n_array",
+          "type": "const int64_t *"
+        },
+        {
+          "name": "k_array",
+          "type": "const int64_t *"
+        },
+        {
+          "name": "alpha_array",
+          "type": "const double *"
+        },
+        {
+          "name": "Aarray",
+          "type": "const double *const *"
+        },
+        {
+          "name": "lda_array",
+          "type": "const int64_t *"
+        },
+        {
+          "name": "Barray",
+          "type": "const double *const *"
+        },
+        {
+          "name": "ldb_array",
+          "type": "const int64_t *"
+        },
+        {
+          "name": "beta_array",
+          "type": "const double *"
+        },
+        {
+          "name": "Carray",
+          "type": "double *const *"
+        },
+        {
+          "name": "ldc_array",
+          "type": "const int64_t *"
+        },
+        {
+          "name": "group_count",
+          "type": "int64_t"
+        },
+        {
+          "name": "group_size",
+          "type": "const int64_t *"
+        }
+      ],
+      "return_type": "rocblas_status",
+      "templated_kind": 0,
+      "type": "rocblas_status (rocblas_handle, const rocblas_operation *, const rocblas_operation *, const int64_t *, const int64_t *, const int64_t *, const double *, const double *const *, const int64_t *, const double *const *, const int64_t *, const double *, double *const *, const int64_t *, int64_t, const int64_t *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "internal/rocblas-functions.h",
+      "inline_specified": false,
+      "kind": "function",
       "line": 20429,
       "linkage_name": "rocblas_dgemm_strided_batched",
       "name": "rocblas_dgemm_strided_batched",
@@ -20692,7 +20852,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22379,
+      "line": 22672,
       "linkage_name": "rocblas_dgemmt",
       "name": "rocblas_dgemmt",
       "parameters": [
@@ -20764,7 +20924,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22439,
+      "line": 22732,
       "linkage_name": "rocblas_dgemmt_64",
       "name": "rocblas_dgemmt_64",
       "parameters": [
@@ -20836,7 +20996,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22567,
+      "line": 22860,
       "linkage_name": "rocblas_dgemmt_batched",
       "name": "rocblas_dgemmt_batched",
       "parameters": [
@@ -20912,7 +21072,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22631,
+      "line": 22924,
       "linkage_name": "rocblas_dgemmt_batched_64",
       "name": "rocblas_dgemmt_batched_64",
       "parameters": [
@@ -20988,7 +21148,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22775,
+      "line": 23068,
       "linkage_name": "rocblas_dgemmt_strided_batched",
       "name": "rocblas_dgemmt_strided_batched",
       "parameters": [
@@ -21076,7 +21236,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22851,
+      "line": 23144,
       "linkage_name": "rocblas_dgemmt_strided_batched_64",
       "name": "rocblas_dgemmt_strided_batched_64",
       "parameters": [
@@ -22228,7 +22388,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 24174,
+      "line": 24467,
       "linkage_name": "rocblas_dot_batched_ex",
       "name": "rocblas_dot_batched_ex",
       "parameters": [
@@ -22292,7 +22452,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 24200,
+      "line": 24493,
       "linkage_name": "rocblas_dot_batched_ex_64",
       "name": "rocblas_dot_batched_ex_64",
       "parameters": [
@@ -22356,7 +22516,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 24057,
+      "line": 24350,
       "linkage_name": "rocblas_dot_ex",
       "name": "rocblas_dot_ex",
       "parameters": [
@@ -22416,7 +22576,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 24081,
+      "line": 24374,
       "linkage_name": "rocblas_dot_ex_64",
       "name": "rocblas_dot_ex_64",
       "parameters": [
@@ -22476,7 +22636,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 24296,
+      "line": 24589,
       "linkage_name": "rocblas_dot_strided_batched_ex",
       "name": "rocblas_dot_strided_batched_ex",
       "parameters": [
@@ -22548,7 +22708,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 24311,
+      "line": 24604,
       "linkage_name": "rocblas_dot_strided_batched_ex_64",
       "name": "rocblas_dot_strided_batched_ex_64",
       "parameters": [
@@ -22620,7 +22780,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 24187,
+      "line": 24480,
       "linkage_name": "rocblas_dotc_batched_ex",
       "name": "rocblas_dotc_batched_ex",
       "parameters": [
@@ -22684,7 +22844,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 24213,
+      "line": 24506,
       "linkage_name": "rocblas_dotc_batched_ex_64",
       "name": "rocblas_dotc_batched_ex_64",
       "parameters": [
@@ -22748,7 +22908,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 24069,
+      "line": 24362,
       "linkage_name": "rocblas_dotc_ex",
       "name": "rocblas_dotc_ex",
       "parameters": [
@@ -22808,7 +22968,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 24093,
+      "line": 24386,
       "linkage_name": "rocblas_dotc_ex_64",
       "name": "rocblas_dotc_ex_64",
       "parameters": [
@@ -22868,7 +23028,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 24396,
+      "line": 24689,
       "linkage_name": "rocblas_dotc_strided_batched_ex",
       "name": "rocblas_dotc_strided_batched_ex",
       "parameters": [
@@ -22940,7 +23100,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 24411,
+      "line": 24704,
       "linkage_name": "rocblas_dotc_strided_batched_ex_64",
       "name": "rocblas_dotc_strided_batched_ex_64",
       "parameters": [
@@ -32674,7 +32834,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 23006,
+      "line": 23299,
       "linkage_name": "rocblas_geam_ex",
       "name": "rocblas_geam_ex",
       "parameters": [
@@ -32826,7 +32986,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21991,
+      "line": 22129,
       "linkage_name": "rocblas_gemm_batched_ex",
       "name": "rocblas_gemm_batched_ex",
       "parameters": [
@@ -32942,7 +33102,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22018,
+      "line": 22156,
       "linkage_name": "rocblas_gemm_batched_ex_64",
       "name": "rocblas_gemm_batched_ex_64",
       "parameters": [
@@ -33058,7 +33218,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21766,
+      "line": 21904,
       "linkage_name": "rocblas_gemm_ex",
       "name": "rocblas_gemm_ex",
       "parameters": [
@@ -33170,7 +33330,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21792,
+      "line": 21930,
       "linkage_name": "rocblas_gemm_ex_64",
       "name": "rocblas_gemm_ex_64",
       "parameters": [
@@ -33322,7 +33482,239 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22177,
+      "line": 22542,
+      "linkage_name": "rocblas_gemm_grouped_batched_ex",
+      "name": "rocblas_gemm_grouped_batched_ex",
+      "parameters": [
+        {
+          "name": "handle",
+          "type": "rocblas_handle"
+        },
+        {
+          "name": "transa_array",
+          "type": "const rocblas_operation *"
+        },
+        {
+          "name": "transb_array",
+          "type": "const rocblas_operation *"
+        },
+        {
+          "name": "m_array",
+          "type": "const rocblas_int *"
+        },
+        {
+          "name": "n_array",
+          "type": "const rocblas_int *"
+        },
+        {
+          "name": "k_array",
+          "type": "const rocblas_int *"
+        },
+        {
+          "name": "alpha_array",
+          "type": "const void *"
+        },
+        {
+          "name": "Aarray",
+          "type": "const void *const *"
+        },
+        {
+          "name": "a_type",
+          "type": "rocblas_datatype"
+        },
+        {
+          "name": "lda_array",
+          "type": "const rocblas_int *"
+        },
+        {
+          "name": "Barray",
+          "type": "const void *const *"
+        },
+        {
+          "name": "b_type",
+          "type": "rocblas_datatype"
+        },
+        {
+          "name": "ldb_array",
+          "type": "const rocblas_int *"
+        },
+        {
+          "name": "beta_array",
+          "type": "const void *"
+        },
+        {
+          "name": "Carray",
+          "type": "const void *const *"
+        },
+        {
+          "name": "c_type",
+          "type": "rocblas_datatype"
+        },
+        {
+          "name": "ldc_array",
+          "type": "const rocblas_int *"
+        },
+        {
+          "name": "Darray",
+          "type": "void *const *"
+        },
+        {
+          "name": "d_type",
+          "type": "rocblas_datatype"
+        },
+        {
+          "name": "ldd_array",
+          "type": "const rocblas_int *"
+        },
+        {
+          "name": "group_count",
+          "type": "rocblas_int"
+        },
+        {
+          "name": "group_size",
+          "type": "const rocblas_int *"
+        },
+        {
+          "name": "compute_type",
+          "type": "rocblas_datatype"
+        },
+        {
+          "name": "algo",
+          "type": "rocblas_gemm_algo"
+        },
+        {
+          "name": "flags",
+          "type": "uint32_t"
+        }
+      ],
+      "return_type": "rocblas_status",
+      "templated_kind": 0,
+      "type": "rocblas_status (rocblas_handle, const rocblas_operation *, const rocblas_operation *, const rocblas_int *, const rocblas_int *, const rocblas_int *, const void *, const void *const *, rocblas_datatype, const rocblas_int *, const void *const *, rocblas_datatype, const rocblas_int *, const void *, const void *const *, rocblas_datatype, const rocblas_int *, void *const *, rocblas_datatype, const rocblas_int *, rocblas_int, const rocblas_int *, rocblas_datatype, rocblas_gemm_algo, uint32_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "internal/rocblas-functions.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 22569,
+      "linkage_name": "rocblas_gemm_grouped_batched_ex_64",
+      "name": "rocblas_gemm_grouped_batched_ex_64",
+      "parameters": [
+        {
+          "name": "handle",
+          "type": "rocblas_handle"
+        },
+        {
+          "name": "transa_array",
+          "type": "const rocblas_operation *"
+        },
+        {
+          "name": "transb_array",
+          "type": "const rocblas_operation *"
+        },
+        {
+          "name": "m_array",
+          "type": "const int64_t *"
+        },
+        {
+          "name": "n_array",
+          "type": "const int64_t *"
+        },
+        {
+          "name": "k_array",
+          "type": "const int64_t *"
+        },
+        {
+          "name": "alpha_array",
+          "type": "const void *"
+        },
+        {
+          "name": "Aarray",
+          "type": "const void *const *"
+        },
+        {
+          "name": "a_type",
+          "type": "rocblas_datatype"
+        },
+        {
+          "name": "lda_array",
+          "type": "const int64_t *"
+        },
+        {
+          "name": "Barray",
+          "type": "const void *const *"
+        },
+        {
+          "name": "b_type",
+          "type": "rocblas_datatype"
+        },
+        {
+          "name": "ldb_array",
+          "type": "const int64_t *"
+        },
+        {
+          "name": "beta_array",
+          "type": "const void *"
+        },
+        {
+          "name": "Carray",
+          "type": "const void *const *"
+        },
+        {
+          "name": "c_type",
+          "type": "rocblas_datatype"
+        },
+        {
+          "name": "ldc_array",
+          "type": "const int64_t *"
+        },
+        {
+          "name": "Darray",
+          "type": "void *const *"
+        },
+        {
+          "name": "d_type",
+          "type": "rocblas_datatype"
+        },
+        {
+          "name": "ldd_array",
+          "type": "const int64_t *"
+        },
+        {
+          "name": "group_count",
+          "type": "int64_t"
+        },
+        {
+          "name": "group_size",
+          "type": "const int64_t *"
+        },
+        {
+          "name": "compute_type",
+          "type": "rocblas_datatype"
+        },
+        {
+          "name": "algo",
+          "type": "rocblas_gemm_algo"
+        },
+        {
+          "name": "flags",
+          "type": "uint32_t"
+        }
+      ],
+      "return_type": "rocblas_status",
+      "templated_kind": 0,
+      "type": "rocblas_status (rocblas_handle, const rocblas_operation *, const rocblas_operation *, const int64_t *, const int64_t *, const int64_t *, const void *, const void *const *, rocblas_datatype, const int64_t *, const void *const *, rocblas_datatype, const int64_t *, const void *, const void *const *, rocblas_datatype, const int64_t *, void *const *, rocblas_datatype, const int64_t *, int64_t, const int64_t *, rocblas_datatype, rocblas_gemm_algo, uint32_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "internal/rocblas-functions.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 22315,
       "linkage_name": "rocblas_gemm_strided_batched_ex",
       "name": "rocblas_gemm_strided_batched_ex",
       "parameters": [
@@ -33454,7 +33846,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22208,
+      "line": 22346,
       "linkage_name": "rocblas_gemm_strided_batched_ex_64",
       "name": "rocblas_gemm_strided_batched_ex_64",
       "parameters": [
@@ -33658,7 +34050,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25231,
+      "line": 25524,
       "linkage_name": "rocblas_get_commit_hash_string",
       "name": "rocblas_get_commit_hash_string",
       "parameters": [
@@ -33682,7 +34074,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25241,
+      "line": 25534,
       "linkage_name": "rocblas_get_commit_hash_string_size",
       "name": "rocblas_get_commit_hash_string_size",
       "parameters": [
@@ -33702,7 +34094,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25300,
+      "line": 25593,
       "linkage_name": "rocblas_get_device_memory_size",
       "name": "rocblas_get_device_memory_size",
       "parameters": [
@@ -34174,7 +34566,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25208,
+      "line": 25501,
       "linkage_name": "rocblas_get_version_string",
       "name": "rocblas_get_version_string",
       "parameters": [
@@ -34198,7 +34590,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25218,
+      "line": 25511,
       "linkage_name": "rocblas_get_version_string_size",
       "name": "rocblas_get_version_string_size",
       "parameters": [
@@ -34839,7 +35231,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 23711,
+      "line": 24004,
       "linkage_name": "rocblas_herk_ex",
       "name": "rocblas_herk_ex",
       "parameters": [
@@ -36935,7 +37327,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25189,
+      "line": 25482,
       "linkage_name": "rocblas_initialize",
       "name": "rocblas_initialize",
       "parameters": [],
@@ -36957,7 +37349,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25274,
+      "line": 25567,
       "linkage_name": "rocblas_is_device_memory_size_query",
       "name": "rocblas_is_device_memory_size_query",
       "parameters": [
@@ -36977,7 +37369,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25343,
+      "line": 25636,
       "linkage_name": "rocblas_is_managing_device_memory",
       "name": "rocblas_is_managing_device_memory",
       "parameters": [
@@ -36997,7 +37389,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25353,
+      "line": 25646,
       "linkage_name": "rocblas_is_user_managing_device_memory",
       "name": "rocblas_is_user_managing_device_memory",
       "parameters": [
@@ -38037,7 +38429,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 24545,
+      "line": 24838,
       "linkage_name": "rocblas_nrm2_batched_ex",
       "name": "rocblas_nrm2_batched_ex",
       "parameters": [
@@ -38089,7 +38481,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 24555,
+      "line": 24848,
       "linkage_name": "rocblas_nrm2_batched_ex_64",
       "name": "rocblas_nrm2_batched_ex_64",
       "parameters": [
@@ -38141,7 +38533,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 24475,
+      "line": 24768,
       "linkage_name": "rocblas_nrm2_ex",
       "name": "rocblas_nrm2_ex",
       "parameters": [
@@ -38189,7 +38581,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 24484,
+      "line": 24777,
       "linkage_name": "rocblas_nrm2_ex_64",
       "name": "rocblas_nrm2_ex_64",
       "parameters": [
@@ -38237,7 +38629,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 24622,
+      "line": 24915,
       "linkage_name": "rocblas_nrm2_strided_batched_ex",
       "name": "rocblas_nrm2_strided_batched_ex",
       "parameters": [
@@ -38293,7 +38685,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 24633,
+      "line": 24926,
       "linkage_name": "rocblas_nrm2_strided_batched_ex_64",
       "name": "rocblas_nrm2_strided_batched_ex_64",
       "parameters": [
@@ -38449,7 +38841,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 24807,
+      "line": 25100,
       "linkage_name": "rocblas_rot_batched_ex",
       "name": "rocblas_rot_batched_ex",
       "parameters": [
@@ -38517,7 +38909,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 24821,
+      "line": 25114,
       "linkage_name": "rocblas_rot_batched_ex_64",
       "name": "rocblas_rot_batched_ex_64",
       "parameters": [
@@ -38585,7 +38977,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 24711,
+      "line": 25004,
       "linkage_name": "rocblas_rot_ex",
       "name": "rocblas_rot_ex",
       "parameters": [
@@ -38649,7 +39041,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 24724,
+      "line": 25017,
       "linkage_name": "rocblas_rot_ex_64",
       "name": "rocblas_rot_ex_64",
       "parameters": [
@@ -38713,7 +39105,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 24912,
+      "line": 25205,
       "linkage_name": "rocblas_rot_strided_batched_ex",
       "name": "rocblas_rot_strided_batched_ex",
       "parameters": [
@@ -38789,7 +39181,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 24928,
+      "line": 25221,
       "linkage_name": "rocblas_rot_strided_batched_ex_64",
       "name": "rocblas_rot_strided_batched_ex_64",
       "parameters": [
@@ -39401,7 +39793,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25067,
+      "line": 25360,
       "linkage_name": "rocblas_scal_batched_ex",
       "name": "rocblas_scal_batched_ex",
       "parameters": [
@@ -39453,7 +39845,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25077,
+      "line": 25370,
       "linkage_name": "rocblas_scal_batched_ex_64",
       "name": "rocblas_scal_batched_ex_64",
       "parameters": [
@@ -39505,7 +39897,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 24995,
+      "line": 25288,
       "linkage_name": "rocblas_scal_ex",
       "name": "rocblas_scal_ex",
       "parameters": [
@@ -39553,7 +39945,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25004,
+      "line": 25297,
       "linkage_name": "rocblas_scal_ex_64",
       "name": "rocblas_scal_ex_64",
       "parameters": [
@@ -39601,7 +39993,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25148,
+      "line": 25441,
       "linkage_name": "rocblas_scal_strided_batched_ex",
       "name": "rocblas_scal_strided_batched_ex",
       "parameters": [
@@ -39657,7 +40049,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25159,
+      "line": 25452,
       "linkage_name": "rocblas_scal_strided_batched_ex_64",
       "name": "rocblas_scal_strided_batched_ex_64",
       "parameters": [
@@ -40465,7 +40857,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 20644,
+      "line": 20782,
       "linkage_name": "rocblas_sdgmm",
       "name": "rocblas_sdgmm",
       "parameters": [
@@ -40521,7 +40913,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 20689,
+      "line": 20827,
       "linkage_name": "rocblas_sdgmm_64",
       "name": "rocblas_sdgmm_64",
       "parameters": [
@@ -40577,7 +40969,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 20783,
+      "line": 20921,
       "linkage_name": "rocblas_sdgmm_batched",
       "name": "rocblas_sdgmm_batched",
       "parameters": [
@@ -40637,7 +41029,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 20832,
+      "line": 20970,
       "linkage_name": "rocblas_sdgmm_batched_64",
       "name": "rocblas_sdgmm_batched_64",
       "parameters": [
@@ -40697,7 +41089,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 20939,
+      "line": 21077,
       "linkage_name": "rocblas_sdgmm_strided_batched",
       "name": "rocblas_sdgmm_strided_batched",
       "parameters": [
@@ -40769,7 +41161,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21000,
+      "line": 21138,
       "linkage_name": "rocblas_sdgmm_strided_batched_64",
       "name": "rocblas_sdgmm_strided_batched_64",
       "parameters": [
@@ -41209,7 +41601,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25318,
+      "line": 25611,
       "linkage_name": "rocblas_set_device_memory_size",
       "name": "rocblas_set_device_memory_size",
       "parameters": [
@@ -41441,7 +41833,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25275,
+      "line": 25568,
       "linkage_name": "rocblas_set_optimal_device_memory_size_impl",
       "name": "rocblas_set_optimal_device_memory_size_impl",
       "parameters": [
@@ -41757,7 +42149,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25335,
+      "line": 25628,
       "linkage_name": "rocblas_set_workspace",
       "name": "rocblas_set_workspace",
       "parameters": [
@@ -42257,7 +42649,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21114,
+      "line": 21252,
       "linkage_name": "rocblas_sgeam",
       "name": "rocblas_sgeam",
       "parameters": [
@@ -42325,7 +42717,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21171,
+      "line": 21309,
       "linkage_name": "rocblas_sgeam_64",
       "name": "rocblas_sgeam_64",
       "parameters": [
@@ -42393,7 +42785,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21289,
+      "line": 21427,
       "linkage_name": "rocblas_sgeam_batched",
       "name": "rocblas_sgeam_batched",
       "parameters": [
@@ -42465,7 +42857,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21350,
+      "line": 21488,
       "linkage_name": "rocblas_sgeam_batched_64",
       "name": "rocblas_sgeam_batched_64",
       "parameters": [
@@ -42537,7 +42929,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21496,
+      "line": 21634,
       "linkage_name": "rocblas_sgeam_strided_batched",
       "name": "rocblas_sgeam_strided_batched",
       "parameters": [
@@ -42621,7 +43013,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21569,
+      "line": 21707,
       "linkage_name": "rocblas_sgeam_strided_batched_64",
       "name": "rocblas_sgeam_strided_batched_64",
       "parameters": [
@@ -43001,6 +43393,166 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
+      "line": 20668,
+      "linkage_name": "rocblas_sgemm_grouped_batched",
+      "name": "rocblas_sgemm_grouped_batched",
+      "parameters": [
+        {
+          "name": "handle",
+          "type": "rocblas_handle"
+        },
+        {
+          "name": "transa_array",
+          "type": "const rocblas_operation *"
+        },
+        {
+          "name": "transb_array",
+          "type": "const rocblas_operation *"
+        },
+        {
+          "name": "m_array",
+          "type": "const rocblas_int *"
+        },
+        {
+          "name": "n_array",
+          "type": "const rocblas_int *"
+        },
+        {
+          "name": "k_array",
+          "type": "const rocblas_int *"
+        },
+        {
+          "name": "alpha_array",
+          "type": "const float *"
+        },
+        {
+          "name": "Aarray",
+          "type": "const float *const *"
+        },
+        {
+          "name": "lda_array",
+          "type": "const rocblas_int *"
+        },
+        {
+          "name": "Barray",
+          "type": "const float *const *"
+        },
+        {
+          "name": "ldb_array",
+          "type": "const rocblas_int *"
+        },
+        {
+          "name": "beta_array",
+          "type": "const float *"
+        },
+        {
+          "name": "Carray",
+          "type": "float *const *"
+        },
+        {
+          "name": "ldc_array",
+          "type": "const rocblas_int *"
+        },
+        {
+          "name": "group_count",
+          "type": "rocblas_int"
+        },
+        {
+          "name": "group_size",
+          "type": "const rocblas_int *"
+        }
+      ],
+      "return_type": "rocblas_status",
+      "templated_kind": 0,
+      "type": "rocblas_status (rocblas_handle, const rocblas_operation *, const rocblas_operation *, const rocblas_int *, const rocblas_int *, const rocblas_int *, const float *, const float *const *, const rocblas_int *, const float *const *, const rocblas_int *, const float *, float *const *, const rocblas_int *, rocblas_int, const rocblas_int *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "internal/rocblas-functions.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 20703,
+      "linkage_name": "rocblas_sgemm_grouped_batched_64",
+      "name": "rocblas_sgemm_grouped_batched_64",
+      "parameters": [
+        {
+          "name": "handle",
+          "type": "rocblas_handle"
+        },
+        {
+          "name": "transa_array",
+          "type": "const rocblas_operation *"
+        },
+        {
+          "name": "transb_array",
+          "type": "const rocblas_operation *"
+        },
+        {
+          "name": "m_array",
+          "type": "const int64_t *"
+        },
+        {
+          "name": "n_array",
+          "type": "const int64_t *"
+        },
+        {
+          "name": "k_array",
+          "type": "const int64_t *"
+        },
+        {
+          "name": "alpha_array",
+          "type": "const float *"
+        },
+        {
+          "name": "Aarray",
+          "type": "const float *const *"
+        },
+        {
+          "name": "lda_array",
+          "type": "const int64_t *"
+        },
+        {
+          "name": "Barray",
+          "type": "const float *const *"
+        },
+        {
+          "name": "ldb_array",
+          "type": "const int64_t *"
+        },
+        {
+          "name": "beta_array",
+          "type": "const float *"
+        },
+        {
+          "name": "Carray",
+          "type": "float *const *"
+        },
+        {
+          "name": "ldc_array",
+          "type": "const int64_t *"
+        },
+        {
+          "name": "group_count",
+          "type": "int64_t"
+        },
+        {
+          "name": "group_size",
+          "type": "const int64_t *"
+        }
+      ],
+      "return_type": "rocblas_status",
+      "templated_kind": 0,
+      "type": "rocblas_status (rocblas_handle, const rocblas_operation *, const rocblas_operation *, const int64_t *, const int64_t *, const int64_t *, const float *, const float *const *, const int64_t *, const float *const *, const int64_t *, const float *, float *const *, const int64_t *, int64_t, const int64_t *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "internal/rocblas-functions.h",
+      "inline_specified": false,
+      "kind": "function",
       "line": 20410,
       "linkage_name": "rocblas_sgemm_strided_batched",
       "name": "rocblas_sgemm_strided_batched",
@@ -43177,7 +43729,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22364,
+      "line": 22657,
       "linkage_name": "rocblas_sgemmt",
       "name": "rocblas_sgemmt",
       "parameters": [
@@ -43249,7 +43801,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22424,
+      "line": 22717,
       "linkage_name": "rocblas_sgemmt_64",
       "name": "rocblas_sgemmt_64",
       "parameters": [
@@ -43321,7 +43873,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22551,
+      "line": 22844,
       "linkage_name": "rocblas_sgemmt_batched",
       "name": "rocblas_sgemmt_batched",
       "parameters": [
@@ -43397,7 +43949,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22615,
+      "line": 22908,
       "linkage_name": "rocblas_sgemmt_batched_64",
       "name": "rocblas_sgemmt_batched_64",
       "parameters": [
@@ -43473,7 +44025,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22756,
+      "line": 23049,
       "linkage_name": "rocblas_sgemmt_strided_batched",
       "name": "rocblas_sgemmt_strided_batched",
       "parameters": [
@@ -43561,7 +44113,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22832,
+      "line": 23125,
       "linkage_name": "rocblas_sgemmt_strided_batched_64",
       "name": "rocblas_sgemmt_strided_batched_64",
       "parameters": [
@@ -50693,7 +51245,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25258,
+      "line": 25551,
       "linkage_name": "rocblas_start_device_memory_size_query",
       "name": "rocblas_start_device_memory_size_query",
       "parameters": [
@@ -50793,7 +51345,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25180,
+      "line": 25473,
       "linkage_name": "rocblas_status_to_string",
       "name": "rocblas_status_to_string",
       "parameters": [
@@ -51549,7 +52101,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25270,
+      "line": 25563,
       "linkage_name": "rocblas_stop_device_memory_size_query",
       "name": "rocblas_stop_device_memory_size_query",
       "parameters": [
@@ -53956,7 +54508,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 23607,
+      "line": 23900,
       "linkage_name": "rocblas_syrk_ex",
       "name": "rocblas_syrk_ex",
       "parameters": [
@@ -54028,7 +54580,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 23338,
+      "line": 23631,
       "linkage_name": "rocblas_trsm_batched_ex",
       "name": "rocblas_trsm_batched_ex",
       "parameters": [
@@ -54108,7 +54660,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 23157,
+      "line": 23450,
       "linkage_name": "rocblas_trsm_ex",
       "name": "rocblas_trsm_ex",
       "parameters": [
@@ -54184,7 +54736,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 23496,
+      "line": 23789,
       "linkage_name": "rocblas_trsm_strided_batched_ex",
       "name": "rocblas_trsm_strided_batched_ex",
       "parameters": [
@@ -55478,7 +56030,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 20677,
+      "line": 20815,
       "linkage_name": "rocblas_zdgmm",
       "name": "rocblas_zdgmm",
       "parameters": [
@@ -55534,7 +56086,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 20722,
+      "line": 20860,
       "linkage_name": "rocblas_zdgmm_64",
       "name": "rocblas_zdgmm_64",
       "parameters": [
@@ -55590,7 +56142,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 20819,
+      "line": 20957,
       "linkage_name": "rocblas_zdgmm_batched",
       "name": "rocblas_zdgmm_batched",
       "parameters": [
@@ -55650,7 +56202,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 20868,
+      "line": 21006,
       "linkage_name": "rocblas_zdgmm_batched_64",
       "name": "rocblas_zdgmm_batched_64",
       "parameters": [
@@ -55710,7 +56262,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 20984,
+      "line": 21122,
       "linkage_name": "rocblas_zdgmm_strided_batched",
       "name": "rocblas_zdgmm_strided_batched",
       "parameters": [
@@ -55782,7 +56334,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21045,
+      "line": 21183,
       "linkage_name": "rocblas_zdgmm_strided_batched_64",
       "name": "rocblas_zdgmm_strided_batched_64",
       "parameters": [
@@ -57478,7 +58030,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21156,
+      "line": 21294,
       "linkage_name": "rocblas_zgeam",
       "name": "rocblas_zgeam",
       "parameters": [
@@ -57546,7 +58098,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21213,
+      "line": 21351,
       "linkage_name": "rocblas_zgeam_64",
       "name": "rocblas_zgeam_64",
       "parameters": [
@@ -57614,7 +58166,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21334,
+      "line": 21472,
       "linkage_name": "rocblas_zgeam_batched",
       "name": "rocblas_zgeam_batched",
       "parameters": [
@@ -57686,7 +58238,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21395,
+      "line": 21533,
       "linkage_name": "rocblas_zgeam_batched_64",
       "name": "rocblas_zgeam_batched_64",
       "parameters": [
@@ -57758,7 +58310,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21550,
+      "line": 21688,
       "linkage_name": "rocblas_zgeam_strided_batched",
       "name": "rocblas_zgeam_strided_batched",
       "parameters": [
@@ -57842,7 +58394,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21623,
+      "line": 21761,
       "linkage_name": "rocblas_zgeam_strided_batched_64",
       "name": "rocblas_zgeam_strided_batched_64",
       "parameters": [
@@ -58398,7 +58950,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22409,
+      "line": 22702,
       "linkage_name": "rocblas_zgemmt",
       "name": "rocblas_zgemmt",
       "parameters": [
@@ -58470,7 +59022,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22469,
+      "line": 22762,
       "linkage_name": "rocblas_zgemmt_64",
       "name": "rocblas_zgemmt_64",
       "parameters": [
@@ -58542,7 +59094,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22599,
+      "line": 22892,
       "linkage_name": "rocblas_zgemmt_batched",
       "name": "rocblas_zgemmt_batched",
       "parameters": [
@@ -58618,7 +59170,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22663,
+      "line": 22956,
       "linkage_name": "rocblas_zgemmt_batched_64",
       "name": "rocblas_zgemmt_batched_64",
       "parameters": [
@@ -58694,7 +59246,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22813,
+      "line": 23106,
       "linkage_name": "rocblas_zgemmt_strided_batched",
       "name": "rocblas_zgemmt_strided_batched",
       "parameters": [
@@ -58782,7 +59334,7 @@
       "file": "internal/rocblas-functions.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22889,
+      "line": 23182,
       "linkage_name": "rocblas_zgemmt_strided_batched_64",
       "name": "rocblas_zgemmt_strided_batched_64",
       "parameters": [

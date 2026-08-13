@@ -3,21 +3,21 @@
     {
       "file": "rocrand.h",
       "kind": "typedef",
-      "line": 43,
+      "line": 45,
       "name": "__half",
       "underlying_type": "unsigned short"
     },
     {
       "file": "rocrand.h",
       "kind": "typedef",
-      "line": 59,
+      "line": 69,
       "name": "half",
       "underlying_type": "__half"
     },
     {
       "file": "rocrand.h",
       "kind": "typedef",
-      "line": 45,
+      "line": 51,
       "name": "hipStream_t",
       "underlying_type": "struct ihipStream_t *"
     },
@@ -26,7 +26,7 @@
       "file": "rocrand.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 770,
+      "line": 780,
       "linkage_name": "rocrand_create_discrete_distribution",
       "name": "rocrand_create_discrete_distribution",
       "parameters": [
@@ -58,7 +58,7 @@
       "file": "rocrand.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 189,
+      "line": 199,
       "linkage_name": "rocrand_create_generator",
       "name": "rocrand_create_generator",
       "parameters": [
@@ -82,7 +82,7 @@
       "file": "rocrand.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 212,
+      "line": 222,
       "linkage_name": "rocrand_create_generator_host",
       "name": "rocrand_create_generator_host",
       "parameters": [
@@ -106,7 +106,7 @@
       "file": "rocrand.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 220,
+      "line": 230,
       "linkage_name": "rocrand_create_generator_host_blocking",
       "name": "rocrand_create_generator_host_blocking",
       "parameters": [
@@ -130,7 +130,7 @@
       "file": "rocrand.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 748,
+      "line": 758,
       "linkage_name": "rocrand_create_poisson_distribution",
       "name": "rocrand_create_poisson_distribution",
       "parameters": [
@@ -154,7 +154,7 @@
       "file": "rocrand.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 788,
+      "line": 798,
       "linkage_name": "rocrand_destroy_discrete_distribution",
       "name": "rocrand_destroy_discrete_distribution",
       "parameters": [
@@ -174,7 +174,7 @@
       "file": "rocrand.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 234,
+      "line": 244,
       "linkage_name": "rocrand_destroy_generator",
       "name": "rocrand_destroy_generator",
       "parameters": [
@@ -192,7 +192,7 @@
     {
       "file": "rocrand.h",
       "kind": "enum",
-      "line": 143,
+      "line": 153,
       "name": "rocrand_direction_vector_set",
       "underlying_type": "unsigned int",
       "values": [
@@ -217,7 +217,7 @@
     {
       "file": "rocrand.h",
       "kind": "typedef",
-      "line": 151,
+      "line": 161,
       "name": "rocrand_direction_vector_set",
       "underlying_type": "enum rocrand_direction_vector_set"
     },
@@ -264,7 +264,7 @@
       "file": "rocrand.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 256,
+      "line": 266,
       "linkage_name": "rocrand_generate",
       "name": "rocrand_generate",
       "parameters": [
@@ -292,7 +292,7 @@
       "file": "rocrand.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 305,
+      "line": 315,
       "linkage_name": "rocrand_generate_char",
       "name": "rocrand_generate_char",
       "parameters": [
@@ -320,7 +320,7 @@
       "file": "rocrand.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 490,
+      "line": 500,
       "linkage_name": "rocrand_generate_log_normal",
       "name": "rocrand_generate_log_normal",
       "parameters": [
@@ -356,7 +356,7 @@
       "file": "rocrand.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 512,
+      "line": 522,
       "linkage_name": "rocrand_generate_log_normal_double",
       "name": "rocrand_generate_log_normal_double",
       "parameters": [
@@ -392,7 +392,7 @@
       "file": "rocrand.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 534,
+      "line": 544,
       "linkage_name": "rocrand_generate_log_normal_half",
       "name": "rocrand_generate_log_normal_half",
       "parameters": [
@@ -428,7 +428,7 @@
       "file": "rocrand.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 281,
+      "line": 291,
       "linkage_name": "rocrand_generate_long_long",
       "name": "rocrand_generate_long_long",
       "parameters": [
@@ -456,7 +456,7 @@
       "file": "rocrand.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 424,
+      "line": 434,
       "linkage_name": "rocrand_generate_normal",
       "name": "rocrand_generate_normal",
       "parameters": [
@@ -492,7 +492,7 @@
       "file": "rocrand.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 446,
+      "line": 456,
       "linkage_name": "rocrand_generate_normal_double",
       "name": "rocrand_generate_normal_double",
       "parameters": [
@@ -528,7 +528,7 @@
       "file": "rocrand.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 468,
+      "line": 478,
       "linkage_name": "rocrand_generate_normal_half",
       "name": "rocrand_generate_normal_half",
       "parameters": [
@@ -564,7 +564,7 @@
       "file": "rocrand.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 556,
+      "line": 566,
       "linkage_name": "rocrand_generate_poisson",
       "name": "rocrand_generate_poisson",
       "parameters": [
@@ -596,7 +596,7 @@
       "file": "rocrand.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 329,
+      "line": 339,
       "linkage_name": "rocrand_generate_short",
       "name": "rocrand_generate_short",
       "parameters": [
@@ -624,7 +624,7 @@
       "file": "rocrand.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 353,
+      "line": 363,
       "linkage_name": "rocrand_generate_uniform",
       "name": "rocrand_generate_uniform",
       "parameters": [
@@ -652,7 +652,7 @@
       "file": "rocrand.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 377,
+      "line": 387,
       "linkage_name": "rocrand_generate_uniform_double",
       "name": "rocrand_generate_uniform_double",
       "parameters": [
@@ -680,7 +680,7 @@
       "file": "rocrand.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 401,
+      "line": 411,
       "linkage_name": "rocrand_generate_uniform_half",
       "name": "rocrand_generate_uniform_half",
       "parameters": [
@@ -706,7 +706,7 @@
     {
       "file": "rocrand.h",
       "kind": "typedef",
-      "line": 54,
+      "line": 64,
       "name": "rocrand_generator",
       "underlying_type": "struct rocrand_generator_base_type *"
     },
@@ -715,7 +715,7 @@
       "file": "rocrand.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 801,
+      "line": 811,
       "linkage_name": "rocrand_get_direction_vectors32",
       "name": "rocrand_get_direction_vectors32",
       "parameters": [
@@ -739,7 +739,7 @@
       "file": "rocrand.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 815,
+      "line": 825,
       "linkage_name": "rocrand_get_direction_vectors64",
       "name": "rocrand_get_direction_vectors64",
       "parameters": [
@@ -763,7 +763,7 @@
       "file": "rocrand.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 826,
+      "line": 836,
       "linkage_name": "rocrand_get_scramble_constants32",
       "name": "rocrand_get_scramble_constants32",
       "parameters": [
@@ -783,7 +783,7 @@
       "file": "rocrand.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 836,
+      "line": 846,
       "linkage_name": "rocrand_get_scramble_constants64",
       "name": "rocrand_get_scramble_constants64",
       "parameters": [
@@ -803,7 +803,7 @@
       "file": "rocrand.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 732,
+      "line": 742,
       "linkage_name": "rocrand_get_version",
       "name": "rocrand_get_version",
       "parameters": [
@@ -823,7 +823,7 @@
       "file": "rocrand.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 578,
+      "line": 588,
       "linkage_name": "rocrand_initialize_generator",
       "name": "rocrand_initialize_generator",
       "parameters": [
@@ -841,7 +841,7 @@
     {
       "file": "rocrand.h",
       "kind": "enum",
-      "line": 126,
+      "line": 136,
       "name": "rocrand_ordering",
       "underlying_type": "unsigned int",
       "values": [
@@ -874,14 +874,14 @@
     {
       "file": "rocrand.h",
       "kind": "typedef",
-      "line": 137,
+      "line": 147,
       "name": "rocrand_ordering",
       "underlying_type": "enum rocrand_ordering"
     },
     {
       "file": "rocrand.h",
       "kind": "enum",
-      "line": 95,
+      "line": 105,
       "name": "rocrand_rng_type",
       "underlying_type": "unsigned int",
       "values": [
@@ -958,7 +958,7 @@
     {
       "file": "rocrand.h",
       "kind": "typedef",
-      "line": 120,
+      "line": 130,
       "name": "rocrand_rng_type",
       "underlying_type": "enum rocrand_rng_type"
     },
@@ -967,7 +967,7 @@
       "file": "rocrand.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 666,
+      "line": 676,
       "linkage_name": "rocrand_set_offset",
       "name": "rocrand_set_offset",
       "parameters": [
@@ -991,7 +991,7 @@
       "file": "rocrand.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 697,
+      "line": 707,
       "linkage_name": "rocrand_set_ordering",
       "name": "rocrand_set_ordering",
       "parameters": [
@@ -1015,7 +1015,7 @@
       "file": "rocrand.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 717,
+      "line": 727,
       "linkage_name": "rocrand_set_quasi_random_generator_dimensions",
       "name": "rocrand_set_quasi_random_generator_dimensions",
       "parameters": [
@@ -1039,7 +1039,7 @@
       "file": "rocrand.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 620,
+      "line": 630,
       "linkage_name": "rocrand_set_seed",
       "name": "rocrand_set_seed",
       "parameters": [
@@ -1063,7 +1063,7 @@
       "file": "rocrand.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 644,
+      "line": 654,
       "linkage_name": "rocrand_set_seed_uint4",
       "name": "rocrand_set_seed_uint4",
       "parameters": [
@@ -1087,7 +1087,7 @@
       "file": "rocrand.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 593,
+      "line": 603,
       "linkage_name": "rocrand_set_stream",
       "name": "rocrand_set_stream",
       "parameters": [
@@ -1109,7 +1109,7 @@
     {
       "file": "rocrand.h",
       "kind": "enum",
-      "line": 72,
+      "line": 82,
       "name": "rocrand_status",
       "underlying_type": "unsigned int",
       "values": [
@@ -1158,7 +1158,7 @@
     {
       "file": "rocrand.h",
       "kind": "typedef",
-      "line": 89,
+      "line": 99,
       "name": "rocrand_status",
       "underlying_type": "enum rocrand_status"
     },
@@ -1185,14 +1185,14 @@
       "file": "rocrand.h",
       "kind": "record",
       "layout_available": true,
-      "line": 46,
+      "line": 55,
       "name": "uint4",
       "size_bits": 128
     },
     {
       "file": "rocrand.h",
       "kind": "typedef",
-      "line": 49,
+      "line": 58,
       "name": "uint4",
       "underlying_type": "struct uint4"
     }

@@ -438,6 +438,8 @@ if(ROCM_INTERFACES_CHECK_API_DRIFT)
     add_test(NAME rocm_interfaces.api_snapshot_drift
       COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR}
         --target rocm-interfaces-check-api-snapshots --config $<CONFIG>)
+    set_tests_properties(rocm_interfaces.api_snapshot_drift PROPERTIES
+      RUN_SERIAL TRUE TIMEOUT 600)
   else()
     message(FATAL_ERROR
       "ROCM_INTERFACES_CHECK_API_DRIFT=ON but target "

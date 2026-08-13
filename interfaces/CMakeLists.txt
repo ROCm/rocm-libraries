@@ -13,8 +13,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 option(ROCM_INTERFACES_BUILD_TOOLS "Build Clang-based API extraction tools" ON)
 option(ROCM_INTERFACES_BUILD_EXAMPLES "Build recording providers and shadow loaders" ON)
 option(ROCM_INTERFACES_CHECK_API_DRIFT
-  "Register the API-snapshot drift check as a ctest gate (only sound when the build's \
-ROCm headers match the frozen api/snapshots baseline)" OFF)
+  "Register the API-snapshot drift check as a ctest gate" ON)
 set(ROCM_INTERFACES_SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." CACHE PATH
     "Path to the rocm-libraries source tree")
 find_package(hip CONFIG REQUIRED)
@@ -329,8 +328,10 @@ if(ROCM_INTERFACES_BUILD_TOOLS)
         "${CMAKE_CURRENT_SOURCE_DIR}/tools/compare_api_snapshots.py"
         --expected "${CMAKE_CURRENT_SOURCE_DIR}/api/snapshots"
         --actual "${CMAKE_CURRENT_BINARY_DIR}/api-snapshots"
-      DEPENDS rocm-interfaces-api-snapshots
-      COMMENT "Checking checked-in API snapshots for header drift")
+      DEPENDS
+        rocm-interfaces-api-snapshots
+        rocm-interfaces-check-rocblas-categorization
+      COMMENT "Checking checked-in API snapshots and rocBLAS categorization for drift")
   endif()
 endif()
 

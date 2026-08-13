@@ -25,5 +25,20 @@ int main() {
     if (rocblas_strsm(h,rocblas_side_left,rocblas_fill_upper,rocblas_operation_none,
                       rocblas_diagonal_non_unit,4,4,&alpha,a,4,b,4)!=rocblas_status_success) return 9;
     if (rocblas_sgeam(h,rocblas_operation_none,rocblas_operation_none,4,4,&alpha,a,4,&beta,b,4,c,4)!=rocblas_status_success) return 10;
-    return rocblas_destroy_handle(h)==rocblas_status_success ? 0 : 11;
+    // Grouped GEMM carries per-group shape and scalar arrays that the current
+    // narrow request cannot represent. It remains an explicit bridge-only
+    // spelling rather than being misreported as an ordinary pointer batch.
+    const rocblas_operation operations[]{rocblas_operation_none};
+    const rocblas_int dimensions[]{4};
+    const rocblas_int group_sizes[]{1};
+    const float alphas[]{1};
+    const float betas[]{0};
+    const float* a_groups[]{a};
+    const float* b_groups[]{b};
+    float* c_groups[]{c};
+    if (rocblas_sgemm_grouped_batched(h,operations,operations,dimensions,dimensions,
+                                      dimensions,alphas,a_groups,dimensions,b_groups,
+                                      dimensions,betas,c_groups,dimensions,1,group_sizes)
+        != rocblas_status_not_implemented) return 11;
+    return rocblas_destroy_handle(h)==rocblas_status_success ? 0 : 12;
 }

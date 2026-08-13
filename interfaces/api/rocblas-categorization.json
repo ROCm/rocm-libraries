@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "source_snapshot": "api/snapshots/rocblas.json",
-  "callable_count": 1213,
+  "callable_count": 1219,
   "cluster_counts": {
     "edge.diagnostic": 1,
     "edge.lifecycle": 3,
@@ -9,7 +9,7 @@
     "edge.policy": 18,
     "edge.transfer": 16,
     "edge.version": 5,
-    "matrix.matmul": 60,
+    "matrix.matmul": 66,
     "matrix.rank_update": 168,
     "matrix.structured": 146,
     "matrix.transform": 49,
@@ -31,7 +31,7 @@
       "batch_kind": "single",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 25360
+      "source_line": 25653
     },
     {
       "name": "rocblas_axpy_batched_ex",
@@ -43,7 +43,7 @@
       "batch_kind": "pointer_array",
       "explicit_datatypes": true,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 23868
+      "source_line": 24161
     },
     {
       "name": "rocblas_axpy_batched_ex_64",
@@ -55,7 +55,7 @@
       "batch_kind": "pointer_array",
       "explicit_datatypes": true,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 23881
+      "source_line": 24174
     },
     {
       "name": "rocblas_axpy_ex",
@@ -67,7 +67,7 @@
       "batch_kind": "single",
       "explicit_datatypes": true,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 23783
+      "source_line": 24076
     },
     {
       "name": "rocblas_axpy_ex_64",
@@ -79,7 +79,7 @@
       "batch_kind": "single",
       "explicit_datatypes": true,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 23795
+      "source_line": 24088
     },
     {
       "name": "rocblas_axpy_strided_batched_ex",
@@ -91,7 +91,7 @@
       "batch_kind": "strided",
       "explicit_datatypes": true,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 23965
+      "source_line": 24258
     },
     {
       "name": "rocblas_axpy_strided_batched_ex_64",
@@ -103,7 +103,7 @@
       "batch_kind": "strided",
       "explicit_datatypes": true,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 23980
+      "source_line": 24273
     },
     {
       "name": "rocblas_bfdot",
@@ -331,7 +331,7 @@
       "batch_kind": "single",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 20666
+      "source_line": 20804
     },
     {
       "name": "rocblas_cdgmm_64",
@@ -343,7 +343,7 @@
       "batch_kind": "single",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 20711
+      "source_line": 20849
     },
     {
       "name": "rocblas_cdgmm_batched",
@@ -355,7 +355,7 @@
       "batch_kind": "pointer_array",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 20807
+      "source_line": 20945
     },
     {
       "name": "rocblas_cdgmm_batched_64",
@@ -367,7 +367,7 @@
       "batch_kind": "pointer_array",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 20856
+      "source_line": 20994
     },
     {
       "name": "rocblas_cdgmm_strided_batched",
@@ -379,7 +379,7 @@
       "batch_kind": "strided",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 20969
+      "source_line": 21107
     },
     {
       "name": "rocblas_cdgmm_strided_batched_64",
@@ -391,7 +391,7 @@
       "batch_kind": "strided",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 21030
+      "source_line": 21168
     },
     {
       "name": "rocblas_cdotc",
@@ -619,7 +619,7 @@
       "batch_kind": "single",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 21142
+      "source_line": 21280
     },
     {
       "name": "rocblas_cgeam_64",
@@ -631,7 +631,7 @@
       "batch_kind": "single",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 21199
+      "source_line": 21337
     },
     {
       "name": "rocblas_cgeam_batched",
@@ -643,7 +643,7 @@
       "batch_kind": "pointer_array",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 21319
+      "source_line": 21457
     },
     {
       "name": "rocblas_cgeam_batched_64",
@@ -655,7 +655,7 @@
       "batch_kind": "pointer_array",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 21380
+      "source_line": 21518
     },
     {
       "name": "rocblas_cgeam_strided_batched",
@@ -667,7 +667,7 @@
       "batch_kind": "strided",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 21532
+      "source_line": 21670
     },
     {
       "name": "rocblas_cgeam_strided_batched_64",
@@ -679,7 +679,7 @@
       "batch_kind": "strided",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 21605
+      "source_line": 21743
     },
     {
       "name": "rocblas_cgemm",
@@ -763,7 +763,7 @@
       "batch_kind": "single",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 22394
+      "source_line": 22687
     },
     {
       "name": "rocblas_cgemmt_64",
@@ -775,7 +775,7 @@
       "batch_kind": "single",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 22454
+      "source_line": 22747
     },
     {
       "name": "rocblas_cgemmt_batched",
@@ -787,7 +787,7 @@
       "batch_kind": "pointer_array",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 22583
+      "source_line": 22876
     },
     {
       "name": "rocblas_cgemmt_batched_64",
@@ -799,7 +799,7 @@
       "batch_kind": "pointer_array",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 22647
+      "source_line": 22940
     },
     {
       "name": "rocblas_cgemmt_strided_batched",
@@ -811,7 +811,7 @@
       "batch_kind": "strided",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 22794
+      "source_line": 23087
     },
     {
       "name": "rocblas_cgemmt_strided_batched_64",
@@ -823,7 +823,7 @@
       "batch_kind": "strided",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 22870
+      "source_line": 23163
     },
     {
       "name": "rocblas_cgemv",
@@ -3691,7 +3691,7 @@
       "batch_kind": "single",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 20655
+      "source_line": 20793
     },
     {
       "name": "rocblas_ddgmm_64",
@@ -3703,7 +3703,7 @@
       "batch_kind": "single",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 20700
+      "source_line": 20838
     },
     {
       "name": "rocblas_ddgmm_batched",
@@ -3715,7 +3715,7 @@
       "batch_kind": "pointer_array",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 20795
+      "source_line": 20933
     },
     {
       "name": "rocblas_ddgmm_batched_64",
@@ -3727,7 +3727,7 @@
       "batch_kind": "pointer_array",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 20844
+      "source_line": 20982
     },
     {
       "name": "rocblas_ddgmm_strided_batched",
@@ -3739,7 +3739,7 @@
       "batch_kind": "strided",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 20954
+      "source_line": 21092
     },
     {
       "name": "rocblas_ddgmm_strided_batched_64",
@@ -3751,7 +3751,7 @@
       "batch_kind": "strided",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 21015
+      "source_line": 21153
     },
     {
       "name": "rocblas_ddot",
@@ -3847,7 +3847,7 @@
       "batch_kind": "single",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 25278
+      "source_line": 25571
     },
     {
       "name": "rocblas_device_malloc_free",
@@ -3859,7 +3859,7 @@
       "batch_kind": "single",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 25288
+      "source_line": 25581
     },
     {
       "name": "rocblas_device_malloc_get",
@@ -3871,7 +3871,7 @@
       "batch_kind": "single",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 25285
+      "source_line": 25578
     },
     {
       "name": "rocblas_device_malloc_ptr",
@@ -3883,7 +3883,7 @@
       "batch_kind": "single",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 25283
+      "source_line": 25576
     },
     {
       "name": "rocblas_device_malloc_set_default_memory_size",
@@ -3895,7 +3895,7 @@
       "batch_kind": "single",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 25289
+      "source_line": 25582
     },
     {
       "name": "rocblas_device_malloc_success",
@@ -3907,7 +3907,7 @@
       "batch_kind": "single",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 25282
+      "source_line": 25575
     },
     {
       "name": "rocblas_dgbmv",
@@ -3991,7 +3991,7 @@
       "batch_kind": "single",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 21128
+      "source_line": 21266
     },
     {
       "name": "rocblas_dgeam_64",
@@ -4003,7 +4003,7 @@
       "batch_kind": "single",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 21185
+      "source_line": 21323
     },
     {
       "name": "rocblas_dgeam_batched",
@@ -4015,7 +4015,7 @@
       "batch_kind": "pointer_array",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 21304
+      "source_line": 21442
     },
     {
       "name": "rocblas_dgeam_batched_64",
@@ -4027,7 +4027,7 @@
       "batch_kind": "pointer_array",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 21365
+      "source_line": 21503
     },
     {
       "name": "rocblas_dgeam_strided_batched",
@@ -4039,7 +4039,7 @@
       "batch_kind": "strided",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 21514
+      "source_line": 21652
     },
     {
       "name": "rocblas_dgeam_strided_batched_64",
@@ -4051,7 +4051,7 @@
       "batch_kind": "strided",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 21587
+      "source_line": 21725
     },
     {
       "name": "rocblas_dgemm",
@@ -4102,6 +4102,30 @@
       "source_line": 20274
     },
     {
+      "name": "rocblas_dgemm_grouped_batched",
+      "cluster": "matrix.matmul",
+      "disposition": "bridge_only",
+      "narrow_primitive": "compatibility_bridge",
+      "operation": "gemm",
+      "index_width": 32,
+      "batch_kind": "grouped",
+      "explicit_datatypes": false,
+      "source_file": "internal/rocblas-functions.h",
+      "source_line": 20685
+    },
+    {
+      "name": "rocblas_dgemm_grouped_batched_64",
+      "cluster": "matrix.matmul",
+      "disposition": "bridge_only",
+      "narrow_primitive": "compatibility_bridge",
+      "operation": "gemm",
+      "index_width": 64,
+      "batch_kind": "grouped",
+      "explicit_datatypes": false,
+      "source_file": "internal/rocblas-functions.h",
+      "source_line": 20721
+    },
+    {
       "name": "rocblas_dgemm_strided_batched",
       "cluster": "matrix.matmul",
       "disposition": "normalized_provider",
@@ -4135,7 +4159,7 @@
       "batch_kind": "single",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 22379
+      "source_line": 22672
     },
     {
       "name": "rocblas_dgemmt_64",
@@ -4147,7 +4171,7 @@
       "batch_kind": "single",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 22439
+      "source_line": 22732
     },
     {
       "name": "rocblas_dgemmt_batched",
@@ -4159,7 +4183,7 @@
       "batch_kind": "pointer_array",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 22567
+      "source_line": 22860
     },
     {
       "name": "rocblas_dgemmt_batched_64",
@@ -4171,7 +4195,7 @@
       "batch_kind": "pointer_array",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 22631
+      "source_line": 22924
     },
     {
       "name": "rocblas_dgemmt_strided_batched",
@@ -4183,7 +4207,7 @@
       "batch_kind": "strided",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 22775
+      "source_line": 23068
     },
     {
       "name": "rocblas_dgemmt_strided_batched_64",
@@ -4195,7 +4219,7 @@
       "batch_kind": "strided",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 22851
+      "source_line": 23144
     },
     {
       "name": "rocblas_dgemv",
@@ -4423,7 +4447,7 @@
       "batch_kind": "pointer_array",
       "explicit_datatypes": true,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 24174
+      "source_line": 24467
     },
     {
       "name": "rocblas_dot_batched_ex_64",
@@ -4435,7 +4459,7 @@
       "batch_kind": "pointer_array",
       "explicit_datatypes": true,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 24200
+      "source_line": 24493
     },
     {
       "name": "rocblas_dot_ex",
@@ -4447,7 +4471,7 @@
       "batch_kind": "single",
       "explicit_datatypes": true,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 24057
+      "source_line": 24350
     },
     {
       "name": "rocblas_dot_ex_64",
@@ -4459,7 +4483,7 @@
       "batch_kind": "single",
       "explicit_datatypes": true,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 24081
+      "source_line": 24374
     },
     {
       "name": "rocblas_dot_strided_batched_ex",
@@ -4471,7 +4495,7 @@
       "batch_kind": "strided",
       "explicit_datatypes": true,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 24296
+      "source_line": 24589
     },
     {
       "name": "rocblas_dot_strided_batched_ex_64",
@@ -4483,7 +4507,7 @@
       "batch_kind": "strided",
       "explicit_datatypes": true,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 24311
+      "source_line": 24604
     },
     {
       "name": "rocblas_dotc_batched_ex",
@@ -4495,7 +4519,7 @@
       "batch_kind": "pointer_array",
       "explicit_datatypes": true,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 24187
+      "source_line": 24480
     },
     {
       "name": "rocblas_dotc_batched_ex_64",
@@ -4507,7 +4531,7 @@
       "batch_kind": "pointer_array",
       "explicit_datatypes": true,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 24213
+      "source_line": 24506
     },
     {
       "name": "rocblas_dotc_ex",
@@ -4519,7 +4543,7 @@
       "batch_kind": "single",
       "explicit_datatypes": true,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 24069
+      "source_line": 24362
     },
     {
       "name": "rocblas_dotc_ex_64",
@@ -4531,7 +4555,7 @@
       "batch_kind": "single",
       "explicit_datatypes": true,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 24093
+      "source_line": 24386
     },
     {
       "name": "rocblas_dotc_strided_batched_ex",
@@ -4543,7 +4567,7 @@
       "batch_kind": "strided",
       "explicit_datatypes": true,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 24396
+      "source_line": 24689
     },
     {
       "name": "rocblas_dotc_strided_batched_ex_64",
@@ -4555,7 +4579,7 @@
       "batch_kind": "strided",
       "explicit_datatypes": true,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 24411
+      "source_line": 24704
     },
     {
       "name": "rocblas_drot",
@@ -6547,7 +6571,7 @@
       "batch_kind": "single",
       "explicit_datatypes": true,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 23006
+      "source_line": 23299
     },
     {
       "name": "rocblas_gemm_batched_ex",
@@ -6559,7 +6583,7 @@
       "batch_kind": "pointer_array",
       "explicit_datatypes": true,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 21991
+      "source_line": 22129
     },
     {
       "name": "rocblas_gemm_batched_ex_64",
@@ -6571,7 +6595,7 @@
       "batch_kind": "pointer_array",
       "explicit_datatypes": true,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 22018
+      "source_line": 22156
     },
     {
       "name": "rocblas_gemm_ex",
@@ -6583,7 +6607,7 @@
       "batch_kind": "single",
       "explicit_datatypes": true,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 21766
+      "source_line": 21904
     },
     {
       "name": "rocblas_gemm_ex_64",
@@ -6595,7 +6619,31 @@
       "batch_kind": "single",
       "explicit_datatypes": true,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 21792
+      "source_line": 21930
+    },
+    {
+      "name": "rocblas_gemm_grouped_batched_ex",
+      "cluster": "matrix.matmul",
+      "disposition": "bridge_only",
+      "narrow_primitive": "compatibility_bridge",
+      "operation": "gemm",
+      "index_width": 32,
+      "batch_kind": "grouped",
+      "explicit_datatypes": true,
+      "source_file": "internal/rocblas-functions.h",
+      "source_line": 22542
+    },
+    {
+      "name": "rocblas_gemm_grouped_batched_ex_64",
+      "cluster": "matrix.matmul",
+      "disposition": "bridge_only",
+      "narrow_primitive": "compatibility_bridge",
+      "operation": "gemm",
+      "index_width": 64,
+      "batch_kind": "grouped",
+      "explicit_datatypes": true,
+      "source_file": "internal/rocblas-functions.h",
+      "source_line": 22569
     },
     {
       "name": "rocblas_gemm_strided_batched_ex",
@@ -6607,7 +6655,7 @@
       "batch_kind": "strided",
       "explicit_datatypes": true,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 22177
+      "source_line": 22315
     },
     {
       "name": "rocblas_gemm_strided_batched_ex_64",
@@ -6619,7 +6667,7 @@
       "batch_kind": "strided",
       "explicit_datatypes": true,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 22208
+      "source_line": 22346
     },
     {
       "name": "rocblas_get_atomics_mode",
@@ -6667,7 +6715,7 @@
       "batch_kind": "single",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 25231
+      "source_line": 25524
     },
     {
       "name": "rocblas_get_commit_hash_string_size",
@@ -6679,7 +6727,7 @@
       "batch_kind": "single",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 25241
+      "source_line": 25534
     },
     {
       "name": "rocblas_get_device_memory_size",
@@ -6691,7 +6739,7 @@
       "batch_kind": "single",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 25300
+      "source_line": 25593
     },
     {
       "name": "rocblas_get_math_mode",
@@ -6847,7 +6895,7 @@
       "batch_kind": "single",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 25208
+      "source_line": 25501
     },
     {
       "name": "rocblas_get_version_string_size",
@@ -6859,7 +6907,7 @@
       "batch_kind": "single",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 25218
+      "source_line": 25511
     },
     {
       "name": "rocblas_haxpy",
@@ -7015,7 +7063,7 @@
       "batch_kind": "single",
       "explicit_datatypes": true,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 23711
+      "source_line": 24004
     },
     {
       "name": "rocblas_hgemm",
@@ -7483,7 +7531,7 @@
       "batch_kind": "single",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 25189
+      "source_line": 25482
     },
     {
       "name": "rocblas_is_device_memory_size_query",
@@ -7495,7 +7543,7 @@
       "batch_kind": "single",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 25274
+      "source_line": 25567
     },
     {
       "name": "rocblas_is_managing_device_memory",
@@ -7507,7 +7555,7 @@
       "batch_kind": "single",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 25343
+      "source_line": 25636
     },
     {
       "name": "rocblas_is_user_managing_device_memory",
@@ -7519,7 +7567,7 @@
       "batch_kind": "single",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 25353
+      "source_line": 25646
     },
     {
       "name": "rocblas_isamax",
@@ -7819,7 +7867,7 @@
       "batch_kind": "pointer_array",
       "explicit_datatypes": true,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 24545
+      "source_line": 24838
     },
     {
       "name": "rocblas_nrm2_batched_ex_64",
@@ -7831,7 +7879,7 @@
       "batch_kind": "pointer_array",
       "explicit_datatypes": true,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 24555
+      "source_line": 24848
     },
     {
       "name": "rocblas_nrm2_ex",
@@ -7843,7 +7891,7 @@
       "batch_kind": "single",
       "explicit_datatypes": true,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 24475
+      "source_line": 24768
     },
     {
       "name": "rocblas_nrm2_ex_64",
@@ -7855,7 +7903,7 @@
       "batch_kind": "single",
       "explicit_datatypes": true,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 24484
+      "source_line": 24777
     },
     {
       "name": "rocblas_nrm2_strided_batched_ex",
@@ -7867,7 +7915,7 @@
       "batch_kind": "strided",
       "explicit_datatypes": true,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 24622
+      "source_line": 24915
     },
     {
       "name": "rocblas_nrm2_strided_batched_ex_64",
@@ -7879,7 +7927,7 @@
       "batch_kind": "strided",
       "explicit_datatypes": true,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 24633
+      "source_line": 24926
     },
     {
       "name": "rocblas_pointer_to_mode",
@@ -7903,7 +7951,7 @@
       "batch_kind": "pointer_array",
       "explicit_datatypes": true,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 24807
+      "source_line": 25100
     },
     {
       "name": "rocblas_rot_batched_ex_64",
@@ -7915,7 +7963,7 @@
       "batch_kind": "pointer_array",
       "explicit_datatypes": true,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 24821
+      "source_line": 25114
     },
     {
       "name": "rocblas_rot_ex",
@@ -7927,7 +7975,7 @@
       "batch_kind": "single",
       "explicit_datatypes": true,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 24711
+      "source_line": 25004
     },
     {
       "name": "rocblas_rot_ex_64",
@@ -7939,7 +7987,7 @@
       "batch_kind": "single",
       "explicit_datatypes": true,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 24724
+      "source_line": 25017
     },
     {
       "name": "rocblas_rot_strided_batched_ex",
@@ -7951,7 +7999,7 @@
       "batch_kind": "strided",
       "explicit_datatypes": true,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 24912
+      "source_line": 25205
     },
     {
       "name": "rocblas_rot_strided_batched_ex_64",
@@ -7963,7 +8011,7 @@
       "batch_kind": "strided",
       "explicit_datatypes": true,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 24928
+      "source_line": 25221
     },
     {
       "name": "rocblas_sasum",
@@ -8119,7 +8167,7 @@
       "batch_kind": "pointer_array",
       "explicit_datatypes": true,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 25067
+      "source_line": 25360
     },
     {
       "name": "rocblas_scal_batched_ex_64",
@@ -8131,7 +8179,7 @@
       "batch_kind": "pointer_array",
       "explicit_datatypes": true,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 25077
+      "source_line": 25370
     },
     {
       "name": "rocblas_scal_ex",
@@ -8143,7 +8191,7 @@
       "batch_kind": "single",
       "explicit_datatypes": true,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 24995
+      "source_line": 25288
     },
     {
       "name": "rocblas_scal_ex_64",
@@ -8155,7 +8203,7 @@
       "batch_kind": "single",
       "explicit_datatypes": true,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 25004
+      "source_line": 25297
     },
     {
       "name": "rocblas_scal_strided_batched_ex",
@@ -8167,7 +8215,7 @@
       "batch_kind": "strided",
       "explicit_datatypes": true,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 25148
+      "source_line": 25441
     },
     {
       "name": "rocblas_scal_strided_batched_ex_64",
@@ -8179,7 +8227,7 @@
       "batch_kind": "strided",
       "explicit_datatypes": true,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 25159
+      "source_line": 25452
     },
     {
       "name": "rocblas_scasum",
@@ -8407,7 +8455,7 @@
       "batch_kind": "single",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 20644
+      "source_line": 20782
     },
     {
       "name": "rocblas_sdgmm_64",
@@ -8419,7 +8467,7 @@
       "batch_kind": "single",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 20689
+      "source_line": 20827
     },
     {
       "name": "rocblas_sdgmm_batched",
@@ -8431,7 +8479,7 @@
       "batch_kind": "pointer_array",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 20783
+      "source_line": 20921
     },
     {
       "name": "rocblas_sdgmm_batched_64",
@@ -8443,7 +8491,7 @@
       "batch_kind": "pointer_array",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 20832
+      "source_line": 20970
     },
     {
       "name": "rocblas_sdgmm_strided_batched",
@@ -8455,7 +8503,7 @@
       "batch_kind": "strided",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 20939
+      "source_line": 21077
     },
     {
       "name": "rocblas_sdgmm_strided_batched_64",
@@ -8467,7 +8515,7 @@
       "batch_kind": "strided",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 21000
+      "source_line": 21138
     },
     {
       "name": "rocblas_sdot",
@@ -8587,7 +8635,7 @@
       "batch_kind": "single",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 25318
+      "source_line": 25611
     },
     {
       "name": "rocblas_set_math_mode",
@@ -8659,7 +8707,7 @@
       "batch_kind": "single",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 25275
+      "source_line": 25568
     },
     {
       "name": "rocblas_set_performance_metric",
@@ -8779,7 +8827,7 @@
       "batch_kind": "single",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 25335
+      "source_line": 25628
     },
     {
       "name": "rocblas_sgbmv",
@@ -8863,7 +8911,7 @@
       "batch_kind": "single",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 21114
+      "source_line": 21252
     },
     {
       "name": "rocblas_sgeam_64",
@@ -8875,7 +8923,7 @@
       "batch_kind": "single",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 21171
+      "source_line": 21309
     },
     {
       "name": "rocblas_sgeam_batched",
@@ -8887,7 +8935,7 @@
       "batch_kind": "pointer_array",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 21289
+      "source_line": 21427
     },
     {
       "name": "rocblas_sgeam_batched_64",
@@ -8899,7 +8947,7 @@
       "batch_kind": "pointer_array",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 21350
+      "source_line": 21488
     },
     {
       "name": "rocblas_sgeam_strided_batched",
@@ -8911,7 +8959,7 @@
       "batch_kind": "strided",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 21496
+      "source_line": 21634
     },
     {
       "name": "rocblas_sgeam_strided_batched_64",
@@ -8923,7 +8971,7 @@
       "batch_kind": "strided",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 21569
+      "source_line": 21707
     },
     {
       "name": "rocblas_sgemm",
@@ -8974,6 +9022,30 @@
       "source_line": 20258
     },
     {
+      "name": "rocblas_sgemm_grouped_batched",
+      "cluster": "matrix.matmul",
+      "disposition": "bridge_only",
+      "narrow_primitive": "compatibility_bridge",
+      "operation": "gemm",
+      "index_width": 32,
+      "batch_kind": "grouped",
+      "explicit_datatypes": false,
+      "source_file": "internal/rocblas-functions.h",
+      "source_line": 20668
+    },
+    {
+      "name": "rocblas_sgemm_grouped_batched_64",
+      "cluster": "matrix.matmul",
+      "disposition": "bridge_only",
+      "narrow_primitive": "compatibility_bridge",
+      "operation": "gemm",
+      "index_width": 64,
+      "batch_kind": "grouped",
+      "explicit_datatypes": false,
+      "source_file": "internal/rocblas-functions.h",
+      "source_line": 20703
+    },
+    {
       "name": "rocblas_sgemm_strided_batched",
       "cluster": "matrix.matmul",
       "disposition": "normalized_provider",
@@ -9007,7 +9079,7 @@
       "batch_kind": "single",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 22364
+      "source_line": 22657
     },
     {
       "name": "rocblas_sgemmt_64",
@@ -9019,7 +9091,7 @@
       "batch_kind": "single",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 22424
+      "source_line": 22717
     },
     {
       "name": "rocblas_sgemmt_batched",
@@ -9031,7 +9103,7 @@
       "batch_kind": "pointer_array",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 22551
+      "source_line": 22844
     },
     {
       "name": "rocblas_sgemmt_batched_64",
@@ -9043,7 +9115,7 @@
       "batch_kind": "pointer_array",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 22615
+      "source_line": 22908
     },
     {
       "name": "rocblas_sgemmt_strided_batched",
@@ -9055,7 +9127,7 @@
       "batch_kind": "strided",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 22756
+      "source_line": 23049
     },
     {
       "name": "rocblas_sgemmt_strided_batched_64",
@@ -9067,7 +9139,7 @@
       "batch_kind": "strided",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 22832
+      "source_line": 23125
     },
     {
       "name": "rocblas_sgemv",
@@ -10519,7 +10591,7 @@
       "batch_kind": "single",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 25258
+      "source_line": 25551
     },
     {
       "name": "rocblas_status_to_string",
@@ -10531,7 +10603,7 @@
       "batch_kind": "single",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 25180
+      "source_line": 25473
     },
     {
       "name": "rocblas_stbmv",
@@ -10687,7 +10759,7 @@
       "batch_kind": "single",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 25270
+      "source_line": 25563
     },
     {
       "name": "rocblas_stpmv",
@@ -11167,7 +11239,7 @@
       "batch_kind": "single",
       "explicit_datatypes": true,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 23607
+      "source_line": 23900
     },
     {
       "name": "rocblas_trsm_batched_ex",
@@ -11179,7 +11251,7 @@
       "batch_kind": "pointer_array",
       "explicit_datatypes": true,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 23338
+      "source_line": 23631
     },
     {
       "name": "rocblas_trsm_ex",
@@ -11191,7 +11263,7 @@
       "batch_kind": "single",
       "explicit_datatypes": true,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 23157
+      "source_line": 23450
     },
     {
       "name": "rocblas_trsm_strided_batched_ex",
@@ -11203,7 +11275,7 @@
       "batch_kind": "strided",
       "explicit_datatypes": true,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 23496
+      "source_line": 23789
     },
     {
       "name": "rocblas_tssgemv_batched",
@@ -11455,7 +11527,7 @@
       "batch_kind": "single",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 20677
+      "source_line": 20815
     },
     {
       "name": "rocblas_zdgmm_64",
@@ -11467,7 +11539,7 @@
       "batch_kind": "single",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 20722
+      "source_line": 20860
     },
     {
       "name": "rocblas_zdgmm_batched",
@@ -11479,7 +11551,7 @@
       "batch_kind": "pointer_array",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 20819
+      "source_line": 20957
     },
     {
       "name": "rocblas_zdgmm_batched_64",
@@ -11491,7 +11563,7 @@
       "batch_kind": "pointer_array",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 20868
+      "source_line": 21006
     },
     {
       "name": "rocblas_zdgmm_strided_batched",
@@ -11503,7 +11575,7 @@
       "batch_kind": "strided",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 20984
+      "source_line": 21122
     },
     {
       "name": "rocblas_zdgmm_strided_batched_64",
@@ -11515,7 +11587,7 @@
       "batch_kind": "strided",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 21045
+      "source_line": 21183
     },
     {
       "name": "rocblas_zdotc",
@@ -11887,7 +11959,7 @@
       "batch_kind": "single",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 21156
+      "source_line": 21294
     },
     {
       "name": "rocblas_zgeam_64",
@@ -11899,7 +11971,7 @@
       "batch_kind": "single",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 21213
+      "source_line": 21351
     },
     {
       "name": "rocblas_zgeam_batched",
@@ -11911,7 +11983,7 @@
       "batch_kind": "pointer_array",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 21334
+      "source_line": 21472
     },
     {
       "name": "rocblas_zgeam_batched_64",
@@ -11923,7 +11995,7 @@
       "batch_kind": "pointer_array",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 21395
+      "source_line": 21533
     },
     {
       "name": "rocblas_zgeam_strided_batched",
@@ -11935,7 +12007,7 @@
       "batch_kind": "strided",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 21550
+      "source_line": 21688
     },
     {
       "name": "rocblas_zgeam_strided_batched_64",
@@ -11947,7 +12019,7 @@
       "batch_kind": "strided",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 21623
+      "source_line": 21761
     },
     {
       "name": "rocblas_zgemm",
@@ -12031,7 +12103,7 @@
       "batch_kind": "single",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 22409
+      "source_line": 22702
     },
     {
       "name": "rocblas_zgemmt_64",
@@ -12043,7 +12115,7 @@
       "batch_kind": "single",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 22469
+      "source_line": 22762
     },
     {
       "name": "rocblas_zgemmt_batched",
@@ -12055,7 +12127,7 @@
       "batch_kind": "pointer_array",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 22599
+      "source_line": 22892
     },
     {
       "name": "rocblas_zgemmt_batched_64",
@@ -12067,7 +12139,7 @@
       "batch_kind": "pointer_array",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 22663
+      "source_line": 22956
     },
     {
       "name": "rocblas_zgemmt_strided_batched",
@@ -12079,7 +12151,7 @@
       "batch_kind": "strided",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 22813
+      "source_line": 23106
     },
     {
       "name": "rocblas_zgemmt_strided_batched_64",
@@ -12091,7 +12163,7 @@
       "batch_kind": "strided",
       "explicit_datatypes": false,
       "source_file": "internal/rocblas-functions.h",
-      "source_line": 22889
+      "source_line": 23182
     },
     {
       "name": "rocblas_zgemv",
