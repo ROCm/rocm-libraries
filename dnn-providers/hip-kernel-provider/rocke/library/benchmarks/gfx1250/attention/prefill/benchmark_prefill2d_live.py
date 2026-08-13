@@ -274,7 +274,7 @@ def _compare(a, b) -> float:
 # --------------------------------------------------------------------------
 # Platform dispatcher runner
 # --------------------------------------------------------------------------
-def _run_dsl_live(shape, data, num_sms: int, *, warmup: int, iters: int):
+def _run_dsl_live(shape, data, num_cus: int, *, warmup: int, iters: int):
     """Time the platform dispatcher path via dispatch_attention (gfx1250).
 
     Builds an :class:`~dispatch.attention.AttentionRequest` and calls
@@ -302,7 +302,7 @@ def _run_dsl_live(shape, data, num_sms: int, *, warmup: int, iters: int):
         dtype=dtype_str,
         sliding_window=shape.window_size[0] + 1 if shape.window_size[0] >= 0 else 0,
         kv_block_size=shape.block_size,
-        num_sms=num_sms,
+        num_cus=num_cus,
     )
 
     result = dispatch_attention(req)
@@ -328,7 +328,7 @@ def _run_dsl_live(shape, data, num_sms: int, *, warmup: int, iters: int):
         use_alibi=shape.has_alibi,
         use_qq_bias=False,
         use_fp8=is_fp8,
-        num_sms=num_sms,
+        num_cus=num_cus,
     )
 
     hip_stream = _bench_stream_handle()
@@ -367,7 +367,7 @@ def main() -> int:
     ap.add_argument("--warmup", type=int, default=10)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--cap-blocks", type=int, default=65536)
-    ap.add_argument("--num-sms", type=int, default=256)
+    ap.add_argument("--num-cus", type=int, default=256)
     ap.add_argument("--tol", type=float, default=5e-2)
     ap.add_argument(
         "--skip-triton",
@@ -447,7 +447,7 @@ def main() -> int:
 
         try:
             dsl_out, dsl_ms, dsl_kernel = _run_dsl_live(
-                shape, data, args.num_sms, warmup=args.warmup, iters=args.iterations
+                shape, data, args.num_cus, warmup=args.warmup, iters=args.iterations
             )
             if tri_out is not None:
                 dsl_err = _compare(dsl_out, tri_out)

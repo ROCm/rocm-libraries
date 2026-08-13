@@ -1,5 +1,6 @@
+/*! \file */
 /* ************************************************************************
- * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
+ * Copyright (C) 2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -20,23 +21,19 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
-// Sanity-checks for CDNA5 (Gfx1250) scheduler tunable defaults.
-// DAG scheduling behaviour is covered by DAGSchedulerPassTest.cpp and the
-// filecheck suite under tests/filecheck/dag_*.stir.
+
+//
+// rocSPARSE unit-test harness (Phase 0/1 prototype).
+//
+// This is a deliberately minimal, GPU-independent gtest entry point that is
+// completely separate from the YAML/Arguments-driven integration harness in
+// clients/tests. It exists to unit-test individual host-side library
+// components in isolation (fast, CPU-only, no device required).
+//
 #include <gtest/gtest.h>
 
-// Mirror of the kCdna5* constants in CDNA5.hpp (anonymous namespace).
-// If these values change intentionally, update both places.
-static constexpr int kCdna5DsReadQueueDepth = 16;
-static constexpr int kCdna5DsReadDrainLatency = 72;
-static constexpr int kCdna5DsReadThrottleLatency = 72;
-static constexpr int kCdna5DsReadPerWmma = 3;
-static constexpr int kCdna5GlobalReadPerWmma = 1;
-
-TEST(CDNA5Constants, KnownDefaults) {
-    EXPECT_EQ(kCdna5DsReadQueueDepth, 16);
-    EXPECT_EQ(kCdna5DsReadDrainLatency, 72);
-    EXPECT_EQ(kCdna5DsReadThrottleLatency, 72);
-    EXPECT_EQ(kCdna5DsReadPerWmma, 3);
-    EXPECT_EQ(kCdna5GlobalReadPerWmma, 1);
+int main(int argc, char** argv)
+{
+    ::testing::InitGoogleTest(&argc, argv);
+    return RUN_ALL_TESTS();
 }

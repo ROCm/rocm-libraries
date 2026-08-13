@@ -99,7 +99,7 @@ rocke_unified_attention_problem_t rocke_unified_attention_problem_default(void)
     p.use_alibi = false;
     p.use_qq_bias = false;
     p.use_fp8 = false;
-    p.num_sms = 120;
+    p.num_cus = 120;
     p.waves_per_eu = 0;
     p.waves_per_eu_set = false;
     p.compile_backend = NULL;

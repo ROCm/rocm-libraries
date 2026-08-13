@@ -240,7 +240,7 @@ selector so CK DSL and Triton make the same algorithmic choice. The rule, in
 spirit:
 
 - **2D** when the q-block × kv-head grid already saturates the device
-  (`target = num_sms · 4`), or for short context ($S_k \le 512$), or under a
+  (`target = num_cus · 4`), or for short context ($S_k \le 512$), or under a
   sliding window — the split-KV segments would only add launch overhead.
 - **3D split-KV** otherwise — long, full-context sequences where the 2D grid is
   too small to fill the device.
