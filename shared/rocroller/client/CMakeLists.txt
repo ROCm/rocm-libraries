@@ -38,8 +38,7 @@ target_link_libraries(rocroller-gemm
     PRIVATE
         roc::rocroller-interface
         rocroller::host-numerics
-        # rocroller-gemm retains mxDataGenerator only for physical pre-swizzles.
-        roc::mxDataGenerator
+        roc::mx-layout-transforms
         CLI11::CLI11
 )
 target_include_directories(rocroller-gemm PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")

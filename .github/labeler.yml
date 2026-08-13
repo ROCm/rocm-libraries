@@ -130,7 +130,7 @@
 
 "shared: mxdatagenerator":
 - changed-files:
-  - any-glob-to-any-file: 'shared/mxdatagenerator/**/*'
+  - any-glob-to-any-file: 'shared/mx-layout-transforms/**/*'
 
 "shared: host-validation":
 - changed-files:

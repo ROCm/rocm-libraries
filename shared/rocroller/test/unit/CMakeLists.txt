@@ -27,8 +27,7 @@ target_link_libraries(
 target_link_libraries(rocroller-tests
     PRIVATE
         rocroller::common-test-utilities
-        # Unit GEMM fixtures retain mxDataGenerator only for physical pre-swizzles.
-        roc::mxDataGenerator
+        roc::mx-layout-transforms
         GTest::gtest_main
         GTest::gmock
         libdivide::libdivide
