@@ -26,6 +26,7 @@ _CONFIGS = [
     ("Tensile/Tests/common/streamk/gfx1250/core/sk_bgemm_tdm_split.yaml", "gfx1250", True),
     ("Tensile/Tests/common/streamk/gfx950/sk_mxf4gemm_pap.yaml", "gfx950", True),
     ("Tensile/Tests/common/streamk/gfx1250/core/sk_mxf4gemm_pap_prefetchgl2.yaml", "gfx1250", False),
+    ("Tensile/Tests/common/streamk/gfx1250/core/sk_mxf8gemm_tdm_split.yaml", "gfx1250", True),
 ]
 
 _IDS = [c[0].rsplit("/", 1)[-1][:-5] for c in _CONFIGS]

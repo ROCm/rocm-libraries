@@ -123,6 +123,26 @@
     }),
   ])
 # ---
+# name: test_setcover_streamk_emits_golden[sk_mxf8gemm_tdm_split]
+  list([
+    dict({
+      'basename': 'Cijk_Alik_Bljk_F8SS_MXAE8B16_MXBE8B16_BH_UserArgUWLQnhQkBEMsx0_hWr8rSMKrNwxSKVuiMveFaovXBN0=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Alik_Bljk_F8SS_MXAE8B16_MXBE8B16_BH_UserArgcHyf0gv78Q_4RIOTFj62MzUt7m4nlOGpPoHhzamMDlE=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Alik_Bljk_F8SS_MXAE8B16_MXBE8B16_BH_UserArgrP59h3FGH1OKEbqaWTdkD_kff-fKY4MjNPpQCGmQ7fc=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Alik_Bljk_F8SS_MXAE8B16_MXBE8B16_BH_UserArgxVglLKKY0SVl4XE5YTEwO7OmU9XojLx_hc0Y-qtDmDw=',
+      'err': 0,
+    }),
+  ])
+# ---
 # name: test_setcover_streamk_emits_golden[sk_sgemm_pap]
   list([
     dict({

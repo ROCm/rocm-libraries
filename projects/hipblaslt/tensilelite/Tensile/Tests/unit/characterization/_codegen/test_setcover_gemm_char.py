@@ -37,6 +37,15 @@ _CONFIGS = [
     ("Tensile/Tests/common/gemm/gfx950/fp8_mxfp4_bf16_tn_act.yaml", "gfx950", False),
     ("Tensile/Tests/common/gemm/fp8nfp16mix_hhs.yaml", "gfx942", True),
     ("Tensile/Tests/common/gemm/gfx12/f8b8ss_gfx1250.yaml", "gfx1250", True),
+    ("Tensile/Tests/common/gemm/fp32_nt.yaml", "gfx942", True),
+    ("Tensile/Tests/common/gemm/gfx12/bf16_CLS_gfx1250.yaml", "gfx1250", True),
+    ("Tensile/Tests/common/gemm/gfx11/fp16_HH_BHS_bf16mfma_gfx11.yaml", "gfx1100", True),
+    ("Tensile/Tests/common/gemm/lsu_fnuz.yaml", "gfx942", True),
+    ("Tensile/Tests/common/gemm/gfx11/i8_gsu_gfx11.yaml", "gfx1100", True),
+    ("Tensile/Tests/common/gemm/gfx950/f16f8mix_ss_stoch.yaml", "gfx950", False),
+    ("Tensile/Tests/common/gemm/gfx950/subtile_bf16.yaml", "gfx950", True),
+    ("Tensile/Tests/common/gemm/gfx950/ss_bss.yaml", "gfx950", True),
+    ("Tensile/Tests/common/gemm/lsu_i8.yaml", "gfx942", True),
 ]
 
 _IDS = [c[0].rsplit("/", 1)[-1][:-5] for c in _CONFIGS]
