@@ -176,24 +176,24 @@ not comparable across GFX targets.
 | Stack layer | Portability layer above the Core SDK |
 | Metrics measured | Time / GFLOP/s / bandwidth per routine (as forwarded to the backend) |
 | How benchmarks are run | `hipsparse-bench` from `clients/staging/`, e.g. `./hipsparse-bench -f csrmv --bench-x -M 10 20 30 40` |
-| Baseline — stored per architecture | Not stored/aggregated; comparison is manual. Must not be aggregated across GFX |
-| Where results are stored | Benchmark output files; no centralized DB |
-| Regression threshold | Not automated |
-| Gating approach | Manual review |
+| Baseline — stored per architecture | Not stored/aggregated in this repo; comparison is manual. Backend baselines are maintained by internal AMD tooling. Must not be aggregated across GFX |
+| Where results are stored | Benchmark output files; no centralized DB in this repo |
+| Regression threshold | Not automated in this repo; the backend (rocSPARSE) is covered by internal AMD automated regression |
+| Gating approach | Manual in-repo; backend perf gated by internal AMD tooling |
 | GPU profiling | Not integrated |
 
 **Gating:**
 
 | Gating Level | Status | Notes |
 |---|---|---|
-| PR-level automated gate | No | Known gap |
-| Nightly automated comparison | No | Known gap |
-| Manual review | Yes | On request |
-| Release qualification | Partial | Reviewed before release; not an automated sign-off |
+| Public CI (TheRock) automated gate | No | No perf gate in this repo's PR or nightly CI |
+| Internal automated regression | Yes (backend) | The HIP backend (rocSPARSE) is exercised by automated daily multi-arch/multi-matrix perf regression in internal AMD tooling (not part of this public repo) |
+| Manual review (in-repo) | Yes | `hipsparse-bench` on request |
+| Release qualification | Partial | Reviewed before release; not an automated sign-off in this repo |
 
 Because hipSPARSE is a thin marshalling layer, performance is effectively that of the backend;
 component-level perf tracking is intentionally light. Backend performance is owned by rocSPARSE /
-cuSPARSE.
+cuSPARSE, whose kernels are covered by internal AMD automated perf regression.
 
 ---
 
@@ -364,7 +364,7 @@ a build/compile check of the Fortran bindings rather than a correctness test sui
 
 | Gap | Regression risk | Impact | Mitigation today |
 |---|---|---|---|
-| No automated performance regression gate (PR or nightly) | Medium | Medium | Manual `hipsparse-bench` comparison; backend owns perf |
+| No public/TheRock perf regression gate (PR or nightly) in this repo | Low | Low | Backend (rocSPARSE) covered by internal AMD automated daily multi-arch/multi-matrix perf regression; in-repo `hipsparse-bench` for manual checks |
 | CUDA-backend PR lane is narrow (`*checkin*csrmv*`) | Medium | Medium | Broader CUDA coverage only on demand |
 | No tracked quarantine list (owner + ticket + expiry) for `known_bug` cases | Medium | Medium | `*known_bug*` excluded from gating; linkage is ad-hoc |
 | `stress` tier instantiated but empty in YAML | Low | Low | No stress cases today |

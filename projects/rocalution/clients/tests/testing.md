@@ -182,20 +182,20 @@ numbers are not comparable across GFX targets.
 | Metrics measured | Solver iteration/solve time and convergence per solver × preconditioner × format |
 | How benchmarks are run | `rocalution-bench` from `clients/staging/`; single-run by default, batch/sweep mode when `--bench-x` / `--bench-o` / `--bench-n` / `--bench-std` are given |
 | Solvers / preconditioners | selectable via CLI (`--iterative_solver`, `--preconditioner`, `--direct_solver`, `--format`, tolerances, `--ndim`, `--matrix_filename`, …) |
-| Baseline — stored per architecture | Not stored/aggregated; comparison is manual. Must not be aggregated across GFX |
+| Baseline — stored per architecture | In-repo tooling does not store/aggregate baselines (manual comparison); automated per-architecture baselines are maintained by internal AMD tooling outside this repo. Must not be aggregated across GFX |
 | Where results are stored | Benchmark output files (JSON/XML); `scripts/rocalution_bench_gnuplot_helper.py` renders histograms |
-| Regression threshold | Not automated |
-| Gating approach | Manual review |
+| Regression threshold | Not automated in this repo; internal AMD tooling enforces automated thresholds daily |
+| Gating approach | Manual in-repo; automated in internal AMD tooling |
 | GPU profiling | Not integrated |
 
 **Gating:**
 
 | Gating Level | Status | Notes |
 |---|---|---|
-| PR-level automated gate | No | Known gap |
-| Nightly automated comparison | No | Known gap |
-| Manual review | Yes | On request via the bench + gnuplot helper |
-| Release qualification | Partial | Reviewed before release; not an automated sign-off |
+| Public CI (TheRock) automated gate | No | No perf gate in this repo's PR or nightly CI |
+| Internal automated regression | Yes | Automated daily perf-regression runs across multiple architectures and matrices in internal AMD tooling (not part of this public repo) |
+| Manual review (in-repo) | Yes | On request via the bench + gnuplot helper |
+| Release qualification | Partial | Reviewed before release; not an automated sign-off in this repo |
 
 ---
 
@@ -228,11 +228,9 @@ vars: `quick` → `ROCALUTION_EMULATION_SMOKE=1`, `comprehensive` → `ROCALUTIO
 (`test:rocalution`, `test_type:comprehensive` / `test_type:full`); doc-only changes (`*.md`,
 `docs/*`) skip CI.
 
-The rocALUTION Azure DevOps pipeline (`.azuredevops/rocm-ci.yml`) is explicitly **disabled**
-(`trigger: none`, `pr: none`) because it depends on rocSPARSE. Internal AMD **Jenkins** pipelines
-(`.jenkins/`) are legacy, running on older GPUs (gfx900 / gfx906 / gfx908) via cron across three build
-variants — default (`./install.sh -c`, HIP+OpenMP), host (`--host`), and MPI
-(`--host --mpi=on --no-openmp`).
+Internal AMD **Jenkins** pipelines (`.jenkins/`) are legacy, running on older GPUs
+(gfx900 / gfx906 / gfx908) via cron across three build variants — default (`./install.sh -c`,
+HIP+OpenMP), host (`--host`), and MPI (`--host --mpi=on --no-openmp`).
 
 > **Important nuance:** the Jenkins `runTestCommand` GTest filter is commented out, so those legacy
 > lanes run the **full** `rocalution-test` suite (no emulation subset). The intended
@@ -326,9 +324,9 @@ Default GPU targets come from `GPU_TARGETS` in the root `CMakeLists.txt`.
 | gfx103x / gfx110x / gfx1200 / gfx1201 | Partial | Nightly | RDNA |
 | ASAN (gfx908/gfx90a/gfx942 `xnack+`) | Partial | On demand | AddressSanitizer, xnack+ only |
 
-**Explicitly not tested / guaranteed:** the Azure pipeline is disabled; complex-number paths are
-disabled under coverage builds; non-listed gfx targets; Windows coverage; global (MPI) stencil tests
-(`test_global_stencil.cpp` is commented out).
+**Explicitly not tested / guaranteed:** complex-number paths are disabled under coverage builds;
+non-listed gfx targets; Windows coverage; global (MPI) stencil tests (`test_global_stencil.cpp` is
+commented out).
 
 ---
 
@@ -362,11 +360,10 @@ device configurations are not ASAN-covered.
 
 | Gap | Regression risk | Impact | Mitigation today |
 |---|---|---|---|
-| No automated performance regression gate (PR or nightly) | High | High | Manual `rocalution-bench` + gnuplot review |
-| No per-architecture perf baseline in a queryable format | High | High | Output files only; comparison is manual |
+| No public/TheRock perf regression gate (PR or nightly) in this repo | Medium | Medium | Automated daily multi-arch/multi-matrix perf regression runs in internal AMD tooling; in-repo `rocalution-bench` + gnuplot for manual checks |
+| No per-architecture perf baseline reproducible from this repo | Medium | Medium | Baselines maintained by internal AMD tooling; in-repo output files only |
 | Tier not encoded in test names; legacy `*checkin*`/`*nightly*` filters match nothing | Medium | Medium | Tiering works via `ROCALUTION_EMULATION_*`; Jenkins runs full suite |
 | No `known_bugs.yaml` / quarantine mechanism | Medium | Medium | None; flaky tests handled ad-hoc |
-| Azure CI pipeline disabled | Medium | Medium | Jenkins + TheRock provide coverage |
 | Device-code coverage not captured; complex disabled under coverage | Medium | Medium | Host gcov only |
 | MPI/multi-node validation is partial; global stencil test commented out | Medium | Medium | Nightly MPI variant build |
 | No TSAN/UBSAN/MSAN | Low | Medium | ASAN only |
