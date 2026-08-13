@@ -91,11 +91,11 @@ if(TENSILELITE_ENABLE_SDMA AND NOT WIN32)
         PRIVATE TENSILELITE_ENABLE_SDMA)
 endif()
 
-# When mxDataGenerator is enabled, hipblaslt::mxdatagen propagates the
+# When MX data generation is enabled, hipblaslt::mxdatagen propagates the
 # HIPBLASLT_ENABLE_MXDATAGENERATOR macro, the C++20 floor, the include path
 # for `<mxDataGen.hpp>`, hipblaslt::headers (so `<hipblaslt/...>` API headers
-# resolve), and the link to roc::mxDataGenerator. PUBLIC so the executables
-# below pick the macro up too.
+# resolve), and the host-validation MX adapter. PUBLIC so the executables below
+# pick the macro up too.
 if(HIPBLASLT_ENABLE_MXDATAGENERATOR)
     target_link_libraries(tensilelite-client-common PUBLIC hipblaslt::mxdatagen)
 endif()
@@ -134,6 +134,7 @@ endif()
 
 add_library(tensilelite-host-validation-adapter STATIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src/host_validation/DataInitialization.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/host_validation/GemmProblemAdapter.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/host_validation/Reference.cpp"
 )
 add_library(tensilelite::host-validation-adapter ALIAS tensilelite-host-validation-adapter)
