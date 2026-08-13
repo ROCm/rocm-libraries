@@ -816,8 +816,7 @@ struct TransposingSolverGetSolution<Derived, Base, Problem, InvokeParams, Inner,
         // path below pays only the env-var read in production builds.
         const auto wrapper_name =
             IsPerformanceLoggingEnabled() ? this->SolverDbId() : std::string{};
-        const auto wrapper_id =
-            wrapper_name.empty() ? 0 : miopen::solver::Id(wrapper_name).Value();
+        const auto wrapper_id = wrapper_name.empty() ? 0 : miopen::solver::Id(wrapper_name).Value();
         ScopedSolverNameOverride name_override(wrapper_name, wrapper_id);
 
         auto transposed_problem = Derived::Transpose(problem);
@@ -860,8 +859,7 @@ struct TransposingSolverGetSolution<Derived, Base, Problem, InvokeParams, Inner,
         // var: in production builds we pay only the env-var read.
         const auto wrapper_name =
             IsPerformanceLoggingEnabled() ? this->SolverDbId() : std::string{};
-        const auto wrapper_id =
-            wrapper_name.empty() ? 0 : miopen::solver::Id(wrapper_name).Value();
+        const auto wrapper_id = wrapper_name.empty() ? 0 : miopen::solver::Id(wrapper_name).Value();
         ScopedSolverNameOverride name_override(wrapper_name, wrapper_id);
 
         auto transposed_problem = Derived::Transpose(problem);
@@ -874,8 +872,7 @@ struct TransposingSolverGetSolution<Derived, Base, Problem, InvokeParams, Inner,
     {
         const auto wrapper_name =
             IsPerformanceLoggingEnabled() ? this->SolverDbId() : std::string{};
-        const auto wrapper_id =
-            wrapper_name.empty() ? 0 : miopen::solver::Id(wrapper_name).Value();
+        const auto wrapper_id = wrapper_name.empty() ? 0 : miopen::solver::Id(wrapper_name).Value();
         ScopedSolverNameOverride name_override(wrapper_name, wrapper_id);
 
         auto transposed_problem = Derived::Transpose(problem);

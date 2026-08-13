@@ -543,8 +543,7 @@ LogSolutionName(const std::string& solution_name, uint64_t solver_id, size_t wor
         const auto& override_state = GetSolverNameOverride();
         const std::string& effective_name =
             override_state.active ? override_state.solution_name : solution_name;
-        const uint64_t effective_id =
-            override_state.active ? override_state.solver_id : solver_id;
+        const uint64_t effective_id = override_state.active ? override_state.solver_id : solver_id;
 
         auto& last_solution  = GetLastPrintedSolutionName();
         auto& last_solver_id = GetLastPrintedSolverId();
