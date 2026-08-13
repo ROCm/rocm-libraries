@@ -25,6 +25,7 @@
 import os
 import shutil
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -32,17 +33,20 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 TENSILE_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", ".."))
 sys.path.insert(0, TENSILE_ROOT)
 
+from gpu_test_helpers import init_rocisa  # noqa: E402
+
+GFX950 = "gfx950"
 WAVESIZE_64 = 64
 
+pytestmark = pytest.mark.skipif(
+    shutil.which("amdclang++") is None and not os.path.exists("/usr/bin/amdclang++"),
+    reason="amdclang++ not found; cannot init rocisa",
+)
 
-def _init_rocisa_gfx950():
-    from rocisa import rocIsa
-    from Tensile.Common.Architectures import gfxToIsa
-    ri = rocIsa.getInstance()
-    isa = gfxToIsa("gfx950")
-    asmpath = shutil.which("amdclang++") or "/usr/bin/amdclang++"
-    ri.init(isa, asmpath)
-    ri.setKernel(isa, WAVESIZE_64)
+
+@pytest.fixture(scope="module", autouse=True)
+def _rocisa_once():
+    init_rocisa(target=GFX950, wavesize=WAVESIZE_64)
 
 
 def _kernel(*, multi_du, use_subtile=True, sav=0, depth_u=64):
@@ -82,7 +86,6 @@ def _emit_barrier(is_multi_du, needs_drain):
 # ---------------------------------------------------------------------------
 class TestBarrierEmitFork:
     def test_multidu_with_drain_emits_drain_and_barrier(self):
-        _init_rocisa_gfx950()
         mod, emitted = _emit_barrier(is_multi_du=True, needs_drain=True)
         nbar, ndrain = _barrier_counts(mod)
         assert emitted is True
@@ -91,7 +94,6 @@ class TestBarrierEmitFork:
 
     def test_singledu_with_drain_elides_barrier(self):
         # The whole point of the change: single-DU must NOT emit the barrier.
-        _init_rocisa_gfx950()
         mod, emitted = _emit_barrier(is_multi_du=False, needs_drain=True)
         nbar, ndrain = _barrier_counts(mod)
         assert emitted is False
@@ -100,12 +102,105 @@ class TestBarrierEmitFork:
 
     def test_no_drain_never_emits_barrier(self):
         # No bias/SAV staging -> no ordering needed, in either DU mode.
-        _init_rocisa_gfx950()
         for multi in (True, False):
             mod, emitted = _emit_barrier(is_multi_du=multi, needs_drain=False)
             nbar, ndrain = _barrier_counts(mod)
             assert emitted is False
             assert (nbar, ndrain) == (0, 0)
+
+
+# ---------------------------------------------------------------------------
+# The invariant the fork exists to produce: WHERE the pair lands relative to
+# _emitAdd. Counting barriers (above) is not sufficient on its own -- a refactor
+# that moved the multi-DU pair to after _emitAdd would keep every test above
+# green while leaving the bias/SAV reads with nothing to retire them, because
+# UseSubtileImpl drops bias/SAV from the interleaved per-element waitcnt.
+# ---------------------------------------------------------------------------
+def _bpermuteStoreRegion(module):
+    """Stand-in for _emitAdd: the ds_bpermute crossbar the real store region emits."""
+    from rocisa.container import vgpr
+    from rocisa.instruction import DSBPermuteB32
+    module.add(DSBPermuteB32(vgpr(0), vgpr(1), vgpr(2)))
+
+
+def _dsWriteStoreRegion(module):
+    """Stand-in for _emitAdd that writes real LDS -- must trip the single-DU guard."""
+    from rocisa.container import vgpr
+    from rocisa.instruction import DSStoreB32
+    module.add(DSStoreB32(vgpr(0), vgpr(1)))
+
+
+def _writer(*, multi_du, use_bias=True, sav=0, store_region=None):
+    """A GlobalWriteBatchWriter carrying only what emit() touches.
+
+    __init__ takes ~30 collaborators none of which the barrier fork reads, so the
+    instance is built directly and the three sub-emitters are stubbed. The fork
+    itself, both predicates and the LDS-write guard are the real ones.
+    """
+    from Tensile.Common import DataDirection
+    from Tensile.Components.GlobalWriteBatch import GlobalWriteBatchWriter
+
+    w = object.__new__(GlobalWriteBatchWriter)
+    k = _kernel(multi_du=multi_du, sav=sav)
+    k["CompactLoopStore"] = False
+    w.kernel = k
+    w.atomic = False  # drives the moduleName property
+    w.parentWriter = SimpleNamespace(states=SimpleNamespace(
+        useBias=DataDirection.WRITE if use_bias else DataDirection.NONE))
+    w._checkAtomicPreconditions = lambda: True
+    w._prolog = lambda module: None
+    w._epilog = lambda module: None
+    w._emitAdd = store_region or _bpermuteStoreRegion
+    return w
+
+
+def _positions(module):
+    """First index of (drain, barrier, store-region marker); None if absent."""
+    from rocisa.instruction import SBarrier, SWaitCnt
+    items = list(module.flatitems())
+
+    def first(pred):
+        return next((i for i, x in enumerate(items) if pred(x)), None)
+
+    return (first(lambda x: isinstance(x, SWaitCnt) and getattr(x, "dscnt", None) == 0),
+            first(lambda x: isinstance(x, SBarrier)),
+            first(lambda x: "permute" in str(x) or "ds_write" in str(x)))
+
+
+class TestEmitOrderingFork:
+    def test_multidu_pair_precedes_the_store_region(self):
+        drain, barrier, store = _positions(_writer(multi_du=True).emit())
+        assert None not in (drain, barrier, store), \
+            "multi-DU must emit the drain, the barrier and the store region"
+        assert drain < barrier < store, (
+            "multi-DU must emit the drain+barrier BEFORE _emitAdd -- that is what puts "
+            "the s_waitcnt lgkmcnt(0) between the bias/SAV ds_reads and the "
+            "v_pk_mul/v_pk_add that consume them")
+
+    def test_singledu_emits_neither_around_the_store_region(self):
+        drain, barrier, store = _positions(_writer(multi_du=False).emit())
+        assert store is not None, "the store region must still be emitted"
+        assert (drain, barrier) == (None, None), (
+            "single-DU must elide the pair: _emitAdd comes first, so the pair would "
+            "land past its own consumers and retire nothing")
+
+    def test_singledu_lds_write_in_store_region_trips_the_guard(self):
+        w = _writer(multi_du=False, store_region=_dsWriteStoreRegion)
+        with pytest.raises(AssertionError, match="LDS-write-free"):
+            w.emit()
+
+    def test_singledu_bpermute_in_store_region_does_not_trip_the_guard(self):
+        # ds_bpermute is a DSStoreInstruction subclass that writes no LDS memory, so
+        # the real store region must pass the guard.
+        _writer(multi_du=False).emit()
+
+    def test_no_drain_trigger_skips_the_guard_entirely(self):
+        # Without bias or SAV there is no staged vector, so even a real ds_write in
+        # the store region is not this guard's business.
+        w = _writer(multi_du=False, use_bias=False, sav=0,
+                    store_region=_dsWriteStoreRegion)
+        drain, barrier, _ = _positions(w.emit())
+        assert (drain, barrier) == (None, None)
 
 
 # ---------------------------------------------------------------------------
@@ -160,7 +255,6 @@ class TestForkMatrix:
     def test_matrix(self, pgr, use_bias, sav):
         from Tensile.Common import DataDirection, isSubtileMultiDU
         from Tensile.Components.GlobalWriteBatch import GlobalWriteBatchWriter
-        _init_rocisa_gfx950()
         useBias = DataDirection.WRITE if use_bias else DataDirection.NONE
         trigger = use_bias or bool(sav)
         for multi in (True, False):
@@ -187,7 +281,6 @@ class TestIsLdsMemoryWrite:
         from rocisa.container import vgpr
         from rocisa.instruction import DSStoreB32
         from Tensile.Components.GlobalWriteBatch import GlobalWriteBatchWriter
-        _init_rocisa_gfx950()
         store = DSStoreB32(vgpr(0), vgpr(1))
         assert str(store).split()[0].startswith("ds_write")  # sanity: it is a write
         assert GlobalWriteBatchWriter._isLdsMemoryWrite(store) is True
@@ -197,7 +290,6 @@ class TestIsLdsMemoryWrite:
         from rocisa.container import vgpr
         from rocisa.instruction import DSBPermuteB32
         from Tensile.Components.GlobalWriteBatch import GlobalWriteBatchWriter
-        _init_rocisa_gfx950()
         bp = DSBPermuteB32(vgpr(0), vgpr(1), vgpr(2))
         assert "bpermute" in str(bp)
         assert GlobalWriteBatchWriter._isLdsMemoryWrite(bp) is False
@@ -205,7 +297,6 @@ class TestIsLdsMemoryWrite:
     def test_non_ds_instruction_is_not_flagged(self):
         from rocisa.instruction import SBarrier
         from Tensile.Components.GlobalWriteBatch import GlobalWriteBatchWriter
-        _init_rocisa_gfx950()
         assert GlobalWriteBatchWriter._isLdsMemoryWrite(SBarrier(comment="x")) is False
 
 
