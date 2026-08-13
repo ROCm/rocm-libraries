@@ -9,6 +9,10 @@
 #include <string>
 #include <vector>
 
+#ifdef HIPDNN_ENABLE_ONNX
+#include <onnxruntime_cxx_api.h>
+#endif
+
 namespace hipdnn_backend::heuristics::uhd
 {
 
@@ -16,33 +20,31 @@ namespace hipdnn_backend::heuristics::uhd
 ///
 /// The ONNX adapter is an opt-in, dependency-gated adapter that loads ONNX
 /// models via ONNX Runtime. It requires the onnxruntime library to be
-/// available at load time.
+/// available at compile time (HIPDNN_ENABLE_ONNX defined) and link time.
 ///
-/// Current implementation status: DEPENDENCY-GATED STUB
-/// - ONNX Runtime is not available in the current build environment
+/// When HIPDNN_ENABLE_ONNX is not defined:
 /// - load() returns nullptr with a clear log message
 /// - This satisfies the contract gap (ONNX is schema-valid, not silently rejected)
-/// - Will be implemented fully when ONNX Runtime dependency is added
 ///
-/// Design (when implemented):
+/// When HIPDNN_ENABLE_ONNX is defined:
 /// - Load .onnx model file via Ort::Session
-/// - Input: feature vector as 1D tensor
+/// - Input: feature vector as 1D tensor (batch=1, features=N)
 /// - Output: single float score
-/// - Session cached per process (similar to other adapters)
+/// - Session cached per adapter instance
 class OnnxAdapter : public IUhdAdapter
 {
 public:
-    /// @brief Load an ONNX model (stub - returns nullptr until dependency available).
+    /// @brief Load an ONNX model from disk.
+    ///
+    /// Returns nullptr (with error log) if:
+    /// - ONNX Runtime is not available (HIPDNN_ENABLE_ONNX not defined)
+    /// - Model file does not exist
+    /// - Model is not a valid .onnx file
+    /// - Input shape is incompatible (not 2D with batch=1)
     ///
     /// @param modelPath Absolute path to the .onnx file.
-    /// @param expectedFeaturesHash SHA-256 hash of the feature signature.
-    /// @return nullptr (ONNX Runtime not available in current build)
-    ///
-    /// TODO: Implement when ONNX Runtime dependency is added:
-    /// - Link against onnxruntime library
-    /// - Create Ort::Env and Ort::Session
-    /// - Verify input shape matches num_features
-    /// - Cache session for reuse
+    /// @param expectedFeaturesHash SHA-256 hash of the feature signature (informational).
+    /// @return Adapter on success, nullptr on failure.
     static std::unique_ptr<OnnxAdapter> load(const std::string& modelPath,
                                               const std::string& expectedFeaturesHash);
 
@@ -63,9 +65,18 @@ public:
 private:
     OnnxAdapter(size_t numFeatures, std::string featuresHash);
 
+#ifdef HIPDNN_ENABLE_ONNX
+    static Ort::Env& getEnv();
+#endif
+
     size_t _numFeatures;
     std::string _featuresHash;
-    // TODO: Add Ort::Session* _session when ONNX Runtime is available
+
+#ifdef HIPDNN_ENABLE_ONNX
+    std::shared_ptr<Ort::Session> _session;
+    std::string _inputName;
+    std::string _outputName;
+#endif
 };
 
 } // namespace hipdnn_backend::heuristics::uhd
