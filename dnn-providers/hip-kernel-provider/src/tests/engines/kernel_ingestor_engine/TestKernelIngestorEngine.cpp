@@ -23,7 +23,7 @@
 #include "core/Context.hpp"
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
-#include "tests/engines/kernel_ingestor_engine/packs/PointwiseAddTestGraphs.hpp"
+#include "tests/engines/kernel_ingestor_engine/packs/PointwiseTestGraphs.hpp"
 
 /**
  * @file TestKernelIngestorEngine.cpp
@@ -71,7 +71,8 @@ void stubAsThisEnginesConfig(MockEngineConfig& config)
 {
     EXPECT_CALL(config, isValid()).WillRepeatedly(::testing::Return(false));
     EXPECT_CALL(config, engineId())
-        .WillRepeatedly(::testing::Return(hipdnn_data_sdk::utilities::engineNameToId(ENGINE_NAME)));
+        .WillRepeatedly(::testing::Return(
+            hipdnn_data_sdk::utilities::engineNameToId(POINTWISE_ADD.engineName)));
 }
 
 // ---------------------------------------------------------------------------
@@ -152,12 +153,12 @@ TEST(TestKernelIngestorEngine, MakePointwiseAddEngineIsReachableWithTheDescripto
     Container container;
     auto& engineManager = container.getEngineManager();
 
-    // hipdnn_data_sdk::utilities::engineNameToId(ENGINE_NAME) registers the engine's name on first call;
+    // hipdnn_data_sdk::utilities::engineNameToId(POINTWISE_ADD.engineName) registers the engine's name on first call;
     // getAllEngineIds() proves the factory installed it, not just compiled.
     const auto allEngineIds = engineManager.getAllEngineIds();
     EXPECT_NE(std::find(allEngineIds.begin(),
                         allEngineIds.end(),
-                        hipdnn_data_sdk::utilities::engineNameToId(ENGINE_NAME)),
+                        hipdnn_data_sdk::utilities::engineNameToId(POINTWISE_ADD.engineName)),
               allEngineIds.end());
 }
 
@@ -176,7 +177,7 @@ TEST(TestKernelIngestorEngine, IsApplicableAcceptsAGraphThisPacksMatchersAccept)
 
     EXPECT_NE(std::find(applicable.begin(),
                         applicable.end(),
-                        hipdnn_data_sdk::utilities::engineNameToId(ENGINE_NAME)),
+                        hipdnn_data_sdk::utilities::engineNameToId(POINTWISE_ADD.engineName)),
               applicable.end());
 }
 
@@ -192,7 +193,10 @@ TEST(TestKernelIngestorEngine, GetEngineDetailsReportsTheBlockSizeKnob)
     const auto graph = buildPointwiseGraph();
     hipdnnPluginConstData_t details{};
     engineManager.getEngineDetails(
-        handle, wrap(graph), hipdnn_data_sdk::utilities::engineNameToId(ENGINE_NAME), details);
+        handle,
+        wrap(graph),
+        hipdnn_data_sdk::utilities::engineNameToId(POINTWISE_ADD.engineName),
+        details);
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineDetailsWrapper wrapper(details.ptr,
                                                                                      details.size);
@@ -263,7 +267,7 @@ TEST(TestKernelIngestorEngine, DeclinesAGraphThisPacksMatchersRefuse)
 
     EXPECT_EQ(std::find(applicable.begin(),
                         applicable.end(),
-                        hipdnn_data_sdk::utilities::engineNameToId(ENGINE_NAME)),
+                        hipdnn_data_sdk::utilities::engineNameToId(POINTWISE_ADD.engineName)),
               applicable.end());
 }
 

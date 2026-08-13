@@ -55,6 +55,7 @@ namespace
 {
 
 constexpr const char* ENGINE_NAME = "hipkernel:PointwiseAdd";
+constexpr const char* SUB_ENGINE_NAME = "hipkernel:PointwiseSub";
 constexpr const char* BLOCK_SIZE_KNOB = "block_size";
 
 /// Maximum workspace across the pack's surviving kernels for a FLOAT graph.
@@ -71,12 +72,13 @@ std::shared_ptr<TensorAttributes> makeScalarTensor(int64_t uid, const std::strin
     return tensor;
 }
 
-/// A single pointwise-ADD node over 1-element FLOAT tensors: the one shape this pack
-/// accepts. Each call returns a fresh graph, never shared build/plan state.
-std::shared_ptr<Graph> buildPointwiseAddGraph()
+/// A single binary-pointwise node over 1-element FLOAT tensors: the one shape these
+/// packs accept, differing only in operation. Each call returns a fresh graph, never
+/// shared build/plan state.
+std::shared_ptr<Graph> buildPointwiseGraph(PointwiseMode mode)
 {
     auto graph = std::make_shared<Graph>();
-    graph->set_name("pointwise_add")
+    graph->set_name("pointwise")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
@@ -85,11 +87,21 @@ std::shared_ptr<Graph> buildPointwiseAddGraph()
     auto b = makeScalarTensor(2, "B");
 
     PointwiseAttributes attrs;
-    attrs.set_name("pointwise_add").set_mode(PointwiseMode::ADD);
+    attrs.set_name("pointwise").set_mode(mode);
     auto c = graph->pointwise(a, b, attrs);
     c->set_uid(3).set_name("C").set_output(true).set_data_type(DataType::FLOAT);
 
     return graph;
+}
+
+std::shared_ptr<Graph> buildPointwiseAddGraph()
+{
+    return buildPointwiseGraph(PointwiseMode::ADD);
+}
+
+std::shared_ptr<Graph> buildPointwiseSubGraph()
+{
+    return buildPointwiseGraph(PointwiseMode::SUB);
 }
 
 /// A graph this pack must decline: two nodes, so no single prebuilt kernel serves it.
@@ -136,11 +148,16 @@ protected:
         return hipdnn_data_sdk::utilities::engineNameToId(ENGINE_NAME);
     }
 
-    /// Builds `graph`, pins this pack via set_preferred_engine_id_ext() before plan
-    /// creation, and compiles a plan with default knobs.
-    void buildAndCompile(Graph& graph)
+    static int64_t subEngineId()
     {
-        graph.set_preferred_engine_id_ext(engineId());
+        return hipdnn_data_sdk::utilities::engineNameToId(SUB_ENGINE_NAME);
+    }
+
+    /// Builds `graph`, pins @p pinnedEngineId before plan creation, and compiles a plan
+    /// with default knobs.
+    void buildAndCompile(Graph& graph, int64_t pinnedEngineId)
+    {
+        graph.set_preferred_engine_id_ext(pinnedEngineId);
 
         auto result = graph.build_operation_graph(_handle);
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -153,6 +170,13 @@ protected:
 
         result = graph.build_plans();
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    }
+
+    /// Builds and compiles pinned to the add pack, the default for the tests below
+    /// that predate the second engine.
+    void buildAndCompile(Graph& graph)
+    {
+        buildAndCompile(graph, engineId());
     }
 
     /// Builds fresh CPU/GPU tensor bundles for `graph`, executes it once on GPU with
@@ -357,6 +381,76 @@ TEST_F(IntegrationGpuKernelIngestor, ExecutesTwoIndependentlyBuiltGraphsCorrectl
     ASSERT_EQ(graphB->get_workspace_size(workspaceSizeB).code, ErrorCode::OK);
     const hipdnn_data_sdk::utilities::Workspace workspaceB(static_cast<size_t>(workspaceSizeB));
     executeAndVerify(*graphB, workspaceB.get(), 1);
+}
+
+// ---------------------------------------------------------------------------
+// Two packs, one provider: the topology commit 2 exists to prove
+// ---------------------------------------------------------------------------
+
+// The claim the seam makes good on. Two engines are described entirely by data and
+// native symbols resolved by name, and hipDNN routes a graph to the right one with no
+// code above the packs knowing either exists.
+TEST_F(IntegrationGpuKernelIngestor, ResolvesEachOperationToItsOwnEngine)
+{
+    auto addGraph = buildPointwiseAddGraph();
+    ASSERT_EQ(addGraph->build_operation_graph(_handle).code, ErrorCode::OK);
+    std::vector<int64_t> addEngines;
+    ASSERT_EQ(addGraph->get_ranked_engine_ids(addEngines).code, ErrorCode::OK);
+
+    auto subGraph = buildPointwiseSubGraph();
+    ASSERT_EQ(subGraph->build_operation_graph(_handle).code, ErrorCode::OK);
+    std::vector<int64_t> subEngines;
+    ASSERT_EQ(subGraph->get_ranked_engine_ids(subEngines).code, ErrorCode::OK);
+
+    const auto offers = [](const std::vector<int64_t>& engines, int64_t id) {
+        return std::find(engines.begin(), engines.end(), id) != engines.end();
+    };
+
+    // Each engine claims its own operation...
+    EXPECT_TRUE(offers(addEngines, engineId()));
+    EXPECT_TRUE(offers(subEngines, subEngineId()));
+    // ...and declines the other's. Without this the two packs would both match every
+    // pointwise graph and selection between them would be arbitrary.
+    EXPECT_FALSE(offers(addEngines, subEngineId()));
+    EXPECT_FALSE(offers(subEngines, engineId()));
+}
+
+// Numeric proof, not just routing: a-b and b-a are both plausible, so only comparing
+// against the CPU reference catches an operand swap in the second pack's binding.
+TEST_F(IntegrationGpuKernelIngestor, ExecutesASubtractGraphThroughItsOwnPack)
+{
+    auto graph = buildPointwiseSubGraph();
+    buildAndCompile(*graph, subEngineId());
+
+    int64_t workspaceSize = 0;
+    ASSERT_EQ(graph->get_workspace_size(workspaceSize).code, ErrorCode::OK);
+    const hipdnn_data_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
+
+    executeAndVerify(*graph, workspace.get(), 0);
+}
+
+// Both packs' catalogs are cached under (graph, device) keys in per-engine state
+// managers. Executing one after the other proves neither engine's catalog or bound
+// token state reaches the other -- the failure mode that only exists once a provider
+// serves more than one descriptor set.
+TEST_F(IntegrationGpuKernelIngestor, ExecutesBothPacksInOneProcessWithoutInterference)
+{
+    auto addGraph = buildPointwiseAddGraph();
+    buildAndCompile(*addGraph, engineId());
+    int64_t addWorkspaceSize = 0;
+    ASSERT_EQ(addGraph->get_workspace_size(addWorkspaceSize).code, ErrorCode::OK);
+    const hipdnn_data_sdk::utilities::Workspace addWorkspace(static_cast<size_t>(addWorkspaceSize));
+    executeAndVerify(*addGraph, addWorkspace.get(), 0);
+
+    auto subGraph = buildPointwiseSubGraph();
+    buildAndCompile(*subGraph, subEngineId());
+    int64_t subWorkspaceSize = 0;
+    ASSERT_EQ(subGraph->get_workspace_size(subWorkspaceSize).code, ErrorCode::OK);
+    const hipdnn_data_sdk::utilities::Workspace subWorkspace(static_cast<size_t>(subWorkspaceSize));
+    executeAndVerify(*subGraph, subWorkspace.get(), 1);
+
+    // And the add graph still answers correctly after the sub graph ran.
+    executeAndVerify(*addGraph, addWorkspace.get(), 2);
 }
 
 INSTANTIATE_TEST_SUITE_P(,

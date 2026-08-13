@@ -23,7 +23,7 @@
 
 #include "core/Container.hpp"
 #include "core/Handle.hpp"
-#include "tests/engines/kernel_ingestor_engine/packs/PointwiseAddTestGraphs.hpp"
+#include "tests/engines/kernel_ingestor_engine/packs/PointwiseTestGraphs.hpp"
 
 /**
  * @file TestPointwiseAddDispatchHandler.cpp
@@ -51,7 +51,7 @@ using hipdnn_plugin_sdk::ingestor::MatchContext;
 BoundTokens bindingsFor(const MatchContext& context)
 {
     BoundTokens bound;
-    if(!matchesGraph(context, bound))
+    if(!matchesGraph(POINTWISE_ADD, context, bound))
     {
         throw std::logic_error("test graph does not match the pack it is dispatched against");
     }
@@ -120,7 +120,7 @@ class TestPointwiseAddDispatchWorkspace : public ::testing::TestWithParam<Worksp
 TEST_P(TestPointwiseAddDispatchWorkspace, ReportsWorkspaceFromKernelMetadata)
 {
     const GraphFixture fixture(buildPointwiseGraph(), currentDeviceProperties());
-    const auto& handler = dispatchHandler();
+    const auto& handler = dispatchHandler(POINTWISE_ADD);
 
     EXPECT_EQ(handler.workspaceBytes(fixture.context(),
                                      bindingsFor(fixture.context()),
@@ -138,7 +138,7 @@ INSTANTIATE_TEST_SUITE_P(,
 TEST(TestPointwiseAddDispatch, ReportsWorkspaceWithoutSeeingTheRestOfTheCatalog)
 {
     const GraphFixture fixture(buildPointwiseGraph(), currentDeviceProperties());
-    const auto& handler = dispatchHandler();
+    const auto& handler = dispatchHandler(POINTWISE_ADD);
 
     // The query is answered per kernel, before selection and before any plan exists, so
     // the answer must not depend on which other kernels are in the catalog.
@@ -169,7 +169,7 @@ TEST(TestPointwiseAddDispatch, PrepareRejectsAKernelDeclaringAnUnsupportedDtype)
     // dtypes this pack declares (FLOAT, HALF). Never reaches the compiler --
     // elementTypeFor throws before prepare() calls it.
     const GraphFixture fixture(buildPointwiseGraph());
-    const auto& handler = dispatchHandler();
+    const auto& handler = dispatchHandler(POINTWISE_ADD);
 
     EXPECT_THROW(handler.prepare(
                      fixture.context(), bindingsFor(fixture.context()), makeKernel(64, "BFLOAT16")),
@@ -180,7 +180,7 @@ TEST(TestPointwiseAddDispatch, RefusesToPrepareWithoutTheMatcherSBindings)
 {
     // Binding lookup throws on a missing token before prepare() touches HIP.
     const GraphFixture fixture(buildPointwiseGraph());
-    const auto& handler = dispatchHandler();
+    const auto& handler = dispatchHandler(POINTWISE_ADD);
 
     // Preparation reads the operand uids the matcher bound rather than re-deriving them;
     // bindings not produced by this pack's matcher are a wiring error.
@@ -213,7 +213,7 @@ TEST_P(TestPointwiseAddDispatchRealLaunch, LaunchesARealAddOnDevice)
         buildPointwiseGraph(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ADD,
                             param.dataType),
         currentDeviceProperties());
-    const auto& handler = dispatchHandler();
+    const auto& handler = dispatchHandler(POINTWISE_ADD);
 
     const auto prepared = handler.prepare(
         fixture.context(), bindingsFor(fixture.context()), makeKernel(64, param.kernelDtype));
@@ -254,7 +254,7 @@ TEST(TestPointwiseAddDispatch, LaunchesTheSameResultForEitherBlockSize)
     SKIP_IF_NO_DEVICES();
 
     const GraphFixture fixture(buildPointwiseGraph(), currentDeviceProperties());
-    const auto& handler = dispatchHandler();
+    const auto& handler = dispatchHandler(POINTWISE_ADD);
 
     // block_size reaches the compiler and the launch geometry; a one-element add must
     // still agree across both kernels.
@@ -278,7 +278,7 @@ TEST(TestPointwiseAddDispatch, PreparedLaunchIsReusableAcrossExecutions)
     SKIP_IF_NO_DEVICES();
 
     const GraphFixture fixture(buildPointwiseGraph(), currentDeviceProperties());
-    const auto& handler = dispatchHandler();
+    const auto& handler = dispatchHandler(POINTWISE_ADD);
 
     // A plan is built once and executes many times, so preparation must hold nothing
     // tied to one execution.
@@ -314,7 +314,7 @@ TEST(TestPointwiseAddDispatch, DispatchStaysResolvableAcrossContainerLifetimes)
     const core::Container second;
 
     const auto* handler = hipdnn_plugin_sdk::ingestor::DispatchRegistry<Handle>::resolve(
-        std::string(DISPATCH_SYMBOL));
+        std::string(POINTWISE_ADD.dispatch));
     ASSERT_NE(handler, nullptr);
 
     const GraphFixture fixture(buildPointwiseGraph(), currentDeviceProperties());

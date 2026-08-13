@@ -27,80 +27,111 @@
 namespace hip_kernel_provider::kernel_ingestor_engine::testing
 {
 
-// The pack's contract, restated for the test side exactly as PointwiseAddNative.cpp and
-// PointwiseAddDescriptors.cpp each restate it. There is deliberately no shared header:
-// after ALMIOPEN-2401 the descriptors are a data file, so a test asserting the pack's
-// behaviour has to name these strings itself, the same way an operator authoring a
-// descriptor would. A mismatch here fails at resolve() with the descriptor named.
-constexpr std::string_view GRAPH_MATCHER_SYMBOL = "hipkernel.pointwise_add.graph_match";
-constexpr std::string_view KERNEL_MATCHER_SYMBOL = "hipkernel.pointwise_add.kernel_match";
-constexpr std::string_view SCORE_SYMBOL = "hipkernel.pointwise_add.score";
-constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.pointwise_add.dispatch";
-constexpr std::string_view ENGINE_NAME = "hipkernel:PointwiseAdd";
+/**
+ * @brief One pack's contract as the test side sees it: the strings its descriptors
+ *        carry and its native file implements.
+ *
+ * Restated here rather than shared with either half through a header, exactly as those
+ * two halves restate it to each other. After ALMIOPEN-2401 the descriptors are a data
+ * file, so a test asserting a pack's behaviour has to name these strings itself, the
+ * same way an operator authoring a descriptor would. A mismatch fails at resolve()
+ * with the descriptor named.
+ */
+struct PackSymbols
+{
+    std::string_view engineName;
+    std::string_view graphMatcher;
+    std::string_view kernelMatcher;
+    std::string_view score;
+    std::string_view dispatch;
+    std::string_view inputAToken;
+    std::string_view inputBToken;
+    std::string_view outputToken;
+};
+
+inline constexpr PackSymbols POINTWISE_ADD{"hipkernel:PointwiseAdd",
+                                           "hipkernel.pointwise_add.graph_match",
+                                           "hipkernel.pointwise_add.kernel_match",
+                                           "hipkernel.pointwise_add.score",
+                                           "hipkernel.pointwise_add.dispatch",
+                                           "pointwise_add.input_a.uid",
+                                           "pointwise_add.input_b.uid",
+                                           "pointwise_add.output.uid"};
+
+inline constexpr PackSymbols POINTWISE_SUB{"hipkernel:PointwiseSub",
+                                           "hipkernel.pointwise_sub.graph_match",
+                                           "hipkernel.pointwise_sub.kernel_match",
+                                           "hipkernel.pointwise_sub.score",
+                                           "hipkernel.pointwise_sub.dispatch",
+                                           "pointwise_sub.input_a.uid",
+                                           "pointwise_sub.input_b.uid",
+                                           "pointwise_sub.output.uid"};
+
+/// KMD fields both reference packs vary along. Shared because the *schema* shape is
+/// what a pack author copies, unlike the symbol names, which must differ per pack.
 constexpr std::string_view BLOCK_SIZE_FIELD = "block_size";
 constexpr std::string_view DTYPE_FIELD = "dtype";
 
-/// Tokens the graph matcher binds for dispatch to read back.
-constexpr std::string_view INPUT_A_TOKEN = "pointwise_add.input_a.uid";
-constexpr std::string_view INPUT_B_TOKEN = "pointwise_add.input_b.uid";
-constexpr std::string_view OUTPUT_TOKEN = "pointwise_add.output.uid";
-
-/// This pack's native functions, reached the only way anything reaches them now: by
-/// the symbol name its descriptors carry. Each registers the provider's packs first,
-/// which is idempotent and is exactly what Container's constructor does, so a test
-/// needs no fixture and no ordering discipline to reach a matcher.
+/// A pack's native functions, reached the only way anything reaches them now: by the
+/// symbol name its descriptors carry. Each registers the provider's packs first, which
+/// is idempotent and is exactly what Container's constructor does, so a test needs no
+/// fixture and no ordering discipline to reach a matcher.
 ///
-/// Resolving here rather than calling a declared function is also what keeps these
-/// tests honest after ALMIOPEN-2401: a descriptor naming a symbol nothing implements
-/// is the failure mode the string-valued contract introduces, and it surfaces here.
-inline hipdnn_plugin_sdk::ingestor::GraphMatcherFn graphMatcher()
+/// Resolving rather than calling a declared function is also what keeps these tests
+/// honest after ALMIOPEN-2401: a descriptor naming a symbol nothing implements is the
+/// failure mode the string-valued contract introduces, and it surfaces here.
+inline hipdnn_plugin_sdk::ingestor::GraphMatcherFn graphMatcher(const PackSymbols& pack)
 {
     registerNativeIngestorSymbols();
     return hipdnn_plugin_sdk::ingestor::GraphMatcherRegistry::resolve(
-        std::string(GRAPH_MATCHER_SYMBOL));
+        std::string(pack.graphMatcher));
 }
 
-inline hipdnn_plugin_sdk::ingestor::KernelMatcherFn kernelMatcher()
+inline hipdnn_plugin_sdk::ingestor::KernelMatcherFn kernelMatcher(const PackSymbols& pack)
 {
     registerNativeIngestorSymbols();
     return hipdnn_plugin_sdk::ingestor::KernelMatcherRegistry::resolve(
-        std::string(KERNEL_MATCHER_SYMBOL));
+        std::string(pack.kernelMatcher));
 }
 
-inline hipdnn_plugin_sdk::ingestor::ScoreFn scorer()
+inline hipdnn_plugin_sdk::ingestor::ScoreFn scorer(const PackSymbols& pack)
 {
     registerNativeIngestorSymbols();
-    return hipdnn_plugin_sdk::ingestor::ScoreRegistry::resolve(std::string(SCORE_SYMBOL));
+    return hipdnn_plugin_sdk::ingestor::ScoreRegistry::resolve(std::string(pack.score));
 }
 
-/// This pack's dispatch handler, from the registry that owns its process lifetime.
-inline const hipdnn_plugin_sdk::ingestor::IKernelDispatchHandler<Handle>& dispatchHandler()
+/// A pack's dispatch handler, from the registry that owns its process lifetime.
+inline const hipdnn_plugin_sdk::ingestor::IKernelDispatchHandler<Handle>&
+    dispatchHandler(const PackSymbols& pack)
 {
     registerNativeIngestorSymbols();
     const auto* handler = hipdnn_plugin_sdk::ingestor::DispatchRegistry<Handle>::resolve(
-        std::string(DISPATCH_SYMBOL));
+        std::string(pack.dispatch));
     return *handler;
 }
 
-/// Runs this pack's graph matcher, binding into @p bound.
-inline bool matchesGraph(const hipdnn_plugin_sdk::ingestor::MatchContext& context,
+/// Runs a pack's graph matcher, binding into @p bound.
+inline bool matchesGraph(const PackSymbols& pack,
+                         const hipdnn_plugin_sdk::ingestor::MatchContext& context,
                          hipdnn_plugin_sdk::ingestor::BoundTokens& bound)
 {
-    return graphMatcher()(context, bound);
+    return graphMatcher(pack)(context, bound);
 }
 
-/// Runs this pack's kernel-scoped matcher against one candidate.
-inline bool matchesKernel(const hipdnn_plugin_sdk::ingestor::MatchContext& context,
+/// Runs a pack's kernel-scoped matcher against one candidate.
+inline bool matchesKernel(const PackSymbols& pack,
+                          const hipdnn_plugin_sdk::ingestor::MatchContext& context,
                           const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel)
 {
-    return kernelMatcher()(context, kernel);
+    return kernelMatcher(pack)(context, kernel);
 }
 
-/// Scores one candidate with this pack's scorer.
-inline double scoreKernel(const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel,
+/// Scores one candidate with a pack's scorer.
+inline double scoreKernel(const PackSymbols& pack,
+                          const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel,
                           const hipdnn_plugin_sdk::ingestor::MatchContext& context)
 {
-    return scorer()(kernel, context);
+    return scorer(pack)(kernel, context);
 }
 
 /// Tensor uids the builders below use, in argument order.
@@ -327,10 +358,15 @@ private:
     hipDeviceProp_t _properties;
 };
 
-/// @brief A KernelDefinition for this pack's kernel, for tests that never need a real
-/// descriptor set.
+/// @brief A KernelDefinition for a reference pack's kernel, for tests that never need
+/// a real descriptor set.
+///
+/// @param entryPoint The kernel's entry point; its source file is assumed to be
+///        `<entryPoint>.cpp`, which holds for both reference packs.
 inline hipdnn_plugin_sdk::ingestor::KernelDefinition makeKernel(int64_t blockSize,
-                                                                const std::string& dtype)
+                                                                const std::string& dtype,
+                                                                const std::string& entryPoint
+                                                                = "PointwiseAdd")
 {
     hipdnn_plugin_sdk::ingestor::KernelDefinition kernel;
     kernel.kernelId
@@ -339,8 +375,8 @@ inline hipdnn_plugin_sdk::ingestor::KernelDefinition makeKernel(int64_t blockSiz
         = hipdnn_flatbuffers_sdk::utilities::parseUuid("00000000-0000-4000-8000-000000000002");
     kernel.dispatchId
         = hipdnn_flatbuffers_sdk::utilities::parseUuid("00000000-0000-4000-8000-000000000003");
-    kernel.source.sourceFile = "PointwiseAdd.cpp";
-    kernel.source.entryPoint = "PointwiseAdd";
+    kernel.source.sourceFile = entryPoint + ".cpp";
+    kernel.source.entryPoint = entryPoint;
     kernel.metadata
         = {{std::string(BLOCK_SIZE_FIELD), blockSize}, {std::string(DTYPE_FIELD), dtype}};
     return kernel;

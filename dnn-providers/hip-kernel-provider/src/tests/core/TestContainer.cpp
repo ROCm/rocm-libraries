@@ -18,7 +18,7 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
-#include "tests/engines/kernel_ingestor_engine/packs/PointwiseAddTestGraphs.hpp"
+#include "tests/engines/kernel_ingestor_engine/packs/PointwiseTestGraphs.hpp"
 #endif
 
 using namespace hip_kernel_provider;
@@ -178,7 +178,7 @@ TEST(TestContainer, GetApplicableEngineIdsPointwiseAddGraph)
 
     EXPECT_NE(std::find(applicableEngines.begin(),
                         applicableEngines.end(),
-                        hipdnn_data_sdk::utilities::engineNameToId(ENGINE_NAME)),
+                        hipdnn_data_sdk::utilities::engineNameToId(POINTWISE_ADD.engineName)),
               applicableEngines.end());
 }
 #endif

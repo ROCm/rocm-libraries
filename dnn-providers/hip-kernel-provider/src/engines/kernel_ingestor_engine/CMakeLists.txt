@@ -5,7 +5,10 @@
 include("${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/KernelEmbedding.cmake")
 
 add_kernels_for_embedding(
-    TARGET hip_kernel_provider_impl FILES ${CMAKE_CURRENT_SOURCE_DIR}/kernels/PointwiseAdd.cpp
+    TARGET hip_kernel_provider_impl
+    FILES
+        ${CMAKE_CURRENT_SOURCE_DIR}/kernels/PointwiseAdd.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/kernels/PointwiseSub.cpp
 )
 
 target_sources(hip_kernel_provider_impl PRIVATE
@@ -16,6 +19,8 @@ target_sources(hip_kernel_provider_impl PRIVATE
     # CONFIGURE_DEPENDS does not re-run on removal under every generator.
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/PointwiseAddNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/PointwiseAddDescriptors.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/PointwiseSubNative.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/PointwiseSubDescriptors.cpp
 )
 
 # Sources above are entirely inside `#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR`; the

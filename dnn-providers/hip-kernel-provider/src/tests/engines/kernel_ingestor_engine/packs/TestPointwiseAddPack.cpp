@@ -12,7 +12,7 @@
 
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
-#include "tests/engines/kernel_ingestor_engine/packs/PointwiseAddTestGraphs.hpp"
+#include "tests/engines/kernel_ingestor_engine/packs/PointwiseTestGraphs.hpp"
 
 /**
  * @file TestPointwiseAddPack.cpp
@@ -135,16 +135,16 @@ TEST(TestPointwiseAddPack, EngineIdIsTheHashOfItsScopedName)
 {
     // A descriptor-backed engine's id comes from its UED name, so the provider and
     // hipDNN derive the same id without sharing a table.
-    EXPECT_EQ(registerEngineName(std::string(ENGINE_NAME)),
-              hipdnn_data_sdk::utilities::engineNameToId(ENGINE_NAME));
+    EXPECT_EQ(registerEngineName(std::string(POINTWISE_ADD.engineName)),
+              hipdnn_data_sdk::utilities::engineNameToId(POINTWISE_ADD.engineName));
 }
 
 TEST(TestPointwiseAddPack, RegisteringTheEngineNameTwiceIsIdempotent)
 {
     // Called once per discovered set per process, but Containers come and go; a second
     // call must return the same id rather than throwing on a duplicate registration.
-    const auto first = registerEngineName(std::string(ENGINE_NAME));
-    const auto second = registerEngineName(std::string(ENGINE_NAME));
+    const auto first = registerEngineName(std::string(POINTWISE_ADD.engineName));
+    const auto second = registerEngineName(std::string(POINTWISE_ADD.engineName));
 
     EXPECT_EQ(first, second);
 }
@@ -152,9 +152,9 @@ TEST(TestPointwiseAddPack, RegisteringTheEngineNameTwiceIsIdempotent)
 TEST(TestPointwiseAddPack, RegistersTheEngineNameForDiagnostics)
 {
     // Registered at run time so a log line or collision report can name the engine.
-    const auto id = registerEngineName(std::string(ENGINE_NAME));
+    const auto id = registerEngineName(std::string(POINTWISE_ADD.engineName));
 
-    EXPECT_EQ(hipdnn_data_sdk::utilities::getEngineNameFromId(id), ENGINE_NAME);
+    EXPECT_EQ(hipdnn_data_sdk::utilities::getEngineNameFromId(id), POINTWISE_ADD.engineName);
 }
 
 } // namespace

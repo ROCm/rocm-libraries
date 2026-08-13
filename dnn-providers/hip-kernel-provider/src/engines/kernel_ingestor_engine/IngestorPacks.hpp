@@ -80,6 +80,11 @@ void registerPointwiseAddSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle
 /// @see packs/PointwiseAddDescriptors.cpp
 hipdnn_plugin_sdk::ingestor::DescriptorSet buildPointwiseAddDescriptorSet();
 
+/// @see packs/PointwiseSubNative.cpp
+void registerPointwiseSubSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+/// @see packs/PointwiseSubDescriptors.cpp
+hipdnn_plugin_sdk::ingestor::DescriptorSet buildPointwiseSubDescriptorSet();
+
 /** @} */
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine
