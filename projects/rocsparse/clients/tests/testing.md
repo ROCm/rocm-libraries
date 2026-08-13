@@ -49,15 +49,21 @@ CXX=/opt/rocm/bin/amdclang++ cmake -DBUILD_CLIENTS_TESTS=ON -DBUILD_CLIENTS_BENC
 
 Out-of-source builds land in `build/<release|debug|release-debug>/clients/staging/`.
 
-**2. Provision the test matrices** (required by the functional suites that read `.csr` inputs):
+The functional suites that read `.csr` inputs need the SuiteSparse test matrices, but you don't need a separate step to get them: the build above downloads and converts them automatically into `build/<release|debug|release-debug>/clients/matrices`.
 
-```bash
-# download + convert SuiteSparse matrices into <build>/matrices
-./install.sh --matrices-dir-install <path>/rocsparse_matrices
-./install.sh -c -a gfx942 --matrices-dir <path>/rocsparse_matrices
-```
+> **Note:** If you already have the matrices downloaded to a folder, pass `--matrices-dir <path_o_matrix_folder>` to the install script to reuse them and avoid re-downloading on a rebuild:
+>
+> ```bash
+> ./install.sh -c -a gfx942 --matrices-dir <my_matrix_folder>
+> ```
+>
+> To populate such a folder once (e.g. a shared location outside the build tree), use `--matrices-dir-install`:
+>
+> ```bash
+> ./install.sh --matrices-dir-install <my_matrix_folder>
+> ```
 
-**3. Run the tests that match what you touched:**
+**2. Run the tests that match what you touched:**
 
 | You changed | Run this | Needs a GPU |
 |---|---|---|
@@ -75,9 +81,9 @@ HIP_VISIBLE_DEVICES=0 gpu-run ./clients/staging/rocsparse-test --gtest_filter='*
 > rocSPARSE auto-skips large configs with "Insufficient memory" on memory-constrained cards. That is
 > the suite's memory guard, not a failure.
 
-**4. Add the right kind of test** — see [Choosing the Right Test Type](#choosing-the-right-test-type).
+**3. Add the right kind of test** — see [Choosing the Right Test Type](#choosing-the-right-test-type).
 
-**5. Open the PR** targeting `develop`. The pre-checkin GTest run (`*quick*:*pre_checkin*`, excluding
+**4. Open the PR** targeting `develop`. The pre-checkin GTest run (`*quick*:*pre_checkin*`, excluding
 `*known_bug*`) is the merge gate; another rocSPARSE team member reviews and approves.
 
 ---
