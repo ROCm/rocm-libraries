@@ -63,7 +63,6 @@ Tests:
     - gemm_ex_get_solutions: *real_precisions
     - gemm_batched_ex_get_solutions: *real_precisions
     - gemm_strided_batched_ex_get_solutions: *real_precisions
-  precision: *real_precisions
   M: [1, 256, 1024]
   N: [1, 256, 1024]
   K: 256

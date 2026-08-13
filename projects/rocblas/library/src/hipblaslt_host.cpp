@@ -598,6 +598,7 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
             && (HIPBLASLT_VERSION_MINOR > 4                              \
                 || (HIPBLASLT_VERSION_MINOR == 4 && HIPBLASLT_VERSION_PATCH >= 1))))
     hipblasLtHandle_t&          handle     = *(prob.handle->getHipblasLtHandle());
+    int                         batchMode  = prob.strided_batch ? 0 : 1;
     int                         batchCount = prob.batch_count > 0 ? prob.batch_count
                                                                   : 1; // Default to batch count of 1 if not specified
     hipblasLtMatrixLayout_t     matA{}, matB{}, matC{}, matD{};
@@ -617,8 +618,6 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
     const bool explicit_solution = explicit_hipblaslt_solution_index(algo, solution_index);
     try
     {
-        // General Batched GEMM support in hipBLASLt
-        int batchMode = prob.strided_batch ? 0 : 1;
 
         if(prob.trans_a == rocblas_operation_none)
         {
@@ -728,7 +727,7 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
                                                                         &workspaceSize,
                                                                         &returnedAlgoCount));
         }
-        else if(!explicit_solution)
+        else
         {
             THROW_IF_HIPBLASLT_ERROR(hipblasLtMatmulAlgoGetHeuristic(handle,
                                                                      matmulDesc,
@@ -741,10 +740,6 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
                                                                      &heuristicResult,
                                                                      &returnedAlgoCount));
             workspaceSize = heuristicResult.workspaceSize;
-        }
-        else
-        {
-            throw rocblas_status_invalid_value;
         }
 
         CHECK_SOLUTION_FOUND(returnedAlgoCount);
