@@ -24,6 +24,14 @@ configuration, strict kill semantics, and restoration across reruns.
 5. Do not push, edit PRs, or update Jira unless the user explicitly authorizes
    that external operation.
 
+## Choose the next target
+
+When the target is not already specified, read
+[references/prioritization.md](references/prioritization.md). Build a fixed,
+reviewed candidate universe; use measured coverage and mutation evidence; keep
+missing inputs explicitly pending; and record the human rationale for the next
+module. Do not present an arbitrary weighted proxy as an objective ranking.
+
 ## Run one mutation slice
 
 1. **Define and validate the slice.** Read
