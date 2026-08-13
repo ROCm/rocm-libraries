@@ -33,7 +33,6 @@
 #define DEBUG_TYPE "InsertCoexecHazardPass"
 
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
-#include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/PassManager.hpp"
@@ -123,7 +122,7 @@ bool transOverlap(const StinkyInstruction& prod, const StinkyInstruction& cons) 
 class InsertCoexecHazardPass : public StinkyInstPass {
    public:
     static char ID;
-    explicit InsertCoexecHazardPass(StinkyAsmModule* module) : module_(module) {}
+    InsertCoexecHazardPass() = default;
 
     const char* getName() const override {
         return "InsertCoexecHazardPass";
@@ -134,31 +133,20 @@ class InsertCoexecHazardPass : public StinkyInstPass {
     }
 
     PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
-        auto arch = passCtx.getGemmTileConfig().arch;
-        archId_ = getGfxArchID(arch[0], arch[1], arch[2]);
-        hw_ = &passCtx.getHWModel();
-
-        PASS_DEBUG(std::cerr << "[InsertCoexecHazard] run arch=gfx" << arch[0] << arch[1] << arch[2]
-                             << "\n");
-
-        // Whole-kernel: process the entry function, then every callee. The pass
-        // is invoked on the entry function; callees are reached via the module.
-        if (func.getIsCallable()) {
-            if (!func.empty()) processFunction(func);
-            return preserveCFGAnalyses();
-        }
-
+        setupArch(passCtx);
         if (!func.empty()) processFunction(func);
-
-        if (module_) {
-            for (Function* fn : module_->getFunctions())
-                if (fn && fn->getIsCallable() && !fn->empty()) processFunction(*fn);
-        }
-
         return preserveCFGAnalyses();
     }
 
    private:
+    void setupArch(PassContext& passCtx) {
+        auto arch = passCtx.getGemmTileConfig().arch;
+        archId_ = getGfxArchID(arch[0], arch[1], arch[2]);
+        hw_ = &passCtx.getHWModel();
+        PASS_DEBUG(std::cerr << "[InsertCoexecHazard] run arch=gfx" << arch[0] << arch[1] << arch[2]
+                             << "\n");
+    }
+
     // V_NOPs a consumer needs behind a matched producer.
     int required(ProducerKind kind, int slots, bool consumerIsWmma) const {
         if (kind == ProducerKind::TRANS) return hw_->coexec.transToNonCoreSide;
@@ -314,19 +302,16 @@ class InsertCoexecHazardPass : public StinkyInstPass {
         for (int i = 0; i < n; ++i) builder.create(getMCIDByUOp(GFX::v_nop, archId_), insertBefore);
     }
 
-    StinkyAsmModule* module_ = nullptr;
     GfxArchID archId_ = GfxArchID{};
     const HWModel* hw_ = nullptr;
 };
 
 char InsertCoexecHazardPass::ID = 0;
+
 }  // namespace
 
 namespace stinkytofu {
-std::unique_ptr<Pass> createInsertCoexecHazardPass(StinkyAsmModule& module) {
-    return std::make_unique<InsertCoexecHazardPass>(&module);
-}
 std::unique_ptr<Pass> createInsertCoexecHazardPass() {
-    return std::make_unique<InsertCoexecHazardPass>(nullptr);
+    return std::make_unique<InsertCoexecHazardPass>();
 }
 }  // namespace stinkytofu
