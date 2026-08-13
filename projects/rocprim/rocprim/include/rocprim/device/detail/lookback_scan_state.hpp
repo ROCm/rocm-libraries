@@ -53,13 +53,6 @@
     #endif
 #endif // ROCPRIM_DETAIL_LOOKBACK_SCAN_STATE_WITHOUT_SLOW_FENCES
 
-#ifndef ROCPRIM_DETAIL_LOOKBACK_SCAN_STATE_ATOMIC_ALIGNMENT
-    // Align atomics to this number of bytes. Extra caution should be given
-    // when specializing this value per architecture due to potential
-    // host-device mismatch.
-    #define ROCPRIM_DETAIL_LOOKBACK_SCAN_STATE_ATOMIC_ALIGNMENT 128
-#endif // ROCPRIM_DETAIL_LOOKBACK_SCAN_STATE_ATOMIC_ALIGNMENT
-
 extern "C" {
 void __builtin_amdgcn_s_sleep(int);
 }
@@ -124,7 +117,11 @@ constexpr const int MAX_PAYLOAD_SIZE = ROCPRIM_MAX_ATOMIC_SIZE - 1;
 /// \tparam T The accumulator type of the scan operation.
 /// \tparam UseSleep [optional] If true, the execution of a wavefront is paused for a short duration, allowing other threads or processes to execute during idle periods.
 /// \tparam IsSmall [optional] Dependent on the size of `T`. If it's smaller than 16 bytes (8 bytes if 16 byte atomics are possibly not supported), it's by default set to true.
-template<class T, bool UseSleep = false, bool IsSmall = (sizeof(T) <= MAX_PAYLOAD_SIZE)>
+/// \tparam PreferredAlignment [optional] Align the state flags to this number of bytes
+template<class T,
+         bool   UseSleep           = false,
+         bool   IsSmall            = (sizeof(T) <= MAX_PAYLOAD_SIZE),
+         size_t PreferredAlignment = 0>
 struct lookback_scan_state;
 
 /// Reduce lanes `0-valid_items` and return the result in lane 0.
@@ -221,13 +218,13 @@ T lookback_reduce_forward(F scan_op, T prefix, T block_prefix)
 }
 
 // Packed flag and prefix value are loaded/stored in one atomic operation.
-template<class T, bool UseSleep>
-struct lookback_scan_state<T, UseSleep, true>
+template<class T, bool UseSleep, size_t PreferredAlignment>
+struct lookback_scan_state<T, UseSleep, /* IsSmall = */ true, PreferredAlignment>
 {
 public:
     // Type used for flag/flag of block prefix
     using value_type = T;
-    
+
     static constexpr bool use_sleep = UseSleep;
 
 private:
@@ -241,9 +238,7 @@ private:
         lookback_scan_prefix_flag flag;
     };
 
-    static constexpr size_t alignment
-        = max(sizeof(prefix_underlying_type),
-              size_t{ROCPRIM_DETAIL_LOOKBACK_SCAN_STATE_ATOMIC_ALIGNMENT});
+    static constexpr size_t alignment = max(sizeof(prefix_underlying_type), PreferredAlignment);
     /// This type aligns the raw prefix data. This can be used to align
     /// a single atomic per cache line to reduce false sharing.
     struct alignas(alignment) aligned_prefix_type
@@ -520,8 +515,8 @@ private:
 
 // Flag, partial and final prefixes are stored in separate arrays.
 // Consistency ensured by memory fences between flag and prefixes load/store operations.
-template<class T, bool UseSleep>
-struct lookback_scan_state<T, UseSleep, false>
+template<class T, bool UseSleep, size_t PreferredAlignment>
+struct lookback_scan_state<T, UseSleep, /* IsSmall = */ false, PreferredAlignment>
 {
 
 public:
@@ -538,8 +533,7 @@ private:
         unsigned int words[words_no];
     };
 
-    static constexpr size_t alignment
-        = max(sizeof(flag_cast_type), size_t{ROCPRIM_DETAIL_LOOKBACK_SCAN_STATE_ATOMIC_ALIGNMENT});
+    static constexpr size_t alignment = max(sizeof(flag_cast_type), PreferredAlignment);
     /// This type aligns the raw flag data. This can be used to align
     /// a single atomic per cache line to reduce false sharing.
     struct alignas(alignment) aligned_flag_type
