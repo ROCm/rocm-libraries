@@ -1062,8 +1062,6 @@ rocsparse_status rocsparse_mat_descr_are_same(const rocsparse_mat_descr source,
     RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_type_mismatch,
                               source->storage_mode != target->storage_mode);
 
-    RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_type_mismatch,
-                              source->max_nnz_per_row != target->max_nnz_per_row);
     return rocsparse_status_success;
 }
 
