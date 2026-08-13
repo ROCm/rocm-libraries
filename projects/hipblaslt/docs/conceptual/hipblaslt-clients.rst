@@ -131,6 +131,9 @@ For more information, run the command with the ``--help`` option. The output of 
    --splitk <value>                   [Tuning parameter] Set split K for a solution, 0 is use solution's default value. (Only support GEMM + api_method mix or cpp)
    --wgm <value>                      [Tuning parameter] Set workgroup mapping for a solution, 0 is use solution's default value. (Only support GEMM + api_method mix or cpp)
    --flush                            Flush icache, only works for gemm.
+   --sm_count_target <value>          Target compute-unit (CU) count for the matmul kernel selection and persistent-grid sizing. 0 (default) means use all CUs the device exposes. Negative values are rejected by the library.  (Default value is: 0)
+   --streamk_tile_scheduling <value>  Select the StreamK=5 tile scheduling sub-path via the HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT extension attribute. Accepts off|0, on|1, auto|2 (case-insensitive). When omitted the bench leaves the attribute unset so the library default (auto) applies.
+   --uniform_summation_order <value>  Set the HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT extension attribute. Accepts off|0, on|1 (case-insensitive). When on, the matmul returns HIPBLAS_STATUS_INVALID_VALUE if no configuration honoring the guarantee exists. When omitted the bench leaves the attribute unset so the library default (off) applies.
    --help |-h                         Produces this help message
    --version <value>                  Prints the version number
 
