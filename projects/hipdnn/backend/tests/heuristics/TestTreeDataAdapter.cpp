@@ -1100,4 +1100,24 @@ TEST_F(TestTreeDataAdapter, DeepButAcyclicTreeStillEvaluates)
     EXPECT_DOUBLE_EQ(adapter->score({0.0}), 7.0);
 }
 
+// ========== Model Hash Field Tests ==========
+
+TEST_F(TestTreeDataAdapter, ModelHashFieldAccepted)
+{
+    // TODO: Once model hash validation is implemented, this test should verify
+    // that the hash is validated. For now, we just verify that the field is
+    // accepted and doesn't cause load failures.
+    auto buffer = GbdtModelBuilder()
+                      .setNumFeatures(2)
+                      .setFeaturesHash(TEST_HASH)
+                      .addTree(makeLeafTree(5.0))
+                      .build();
+
+    // Load with a hash string (not yet validated)
+    const std::string modelHash = "sha256:placeholder_hash_not_yet_validated";
+    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH, modelHash);
+    ASSERT_NE(adapter, nullptr);
+    EXPECT_DOUBLE_EQ(adapter->score({0.0, 0.0}), 5.0);
+}
+
 } // namespace

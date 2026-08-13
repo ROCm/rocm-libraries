@@ -233,7 +233,7 @@ std::shared_ptr<IUhdAdapter>
         // TreeDataAdapter loads from model file
         if(!cfg.modelArtifactPath.empty())
         {
-            auto adapter = TreeDataAdapter::load(cfg.modelArtifactPath, cfg.featuresHash);
+            auto adapter = TreeDataAdapter::load(cfg.modelArtifactPath, cfg.featuresHash, cfg.modelHash);
             entry->cachedAdapter = std::move(adapter);
         }
     }

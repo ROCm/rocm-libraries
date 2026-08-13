@@ -50,6 +50,7 @@ struct UhdConfig
     // Adapter configuration
     std::string adapterType = "static_order"; // "static_order", "tree_data", etc.
     std::string modelArtifactPath; // for tree_data/onnx/custom_library
+    std::string modelHash; // checksum of model artifact for integrity validation
     std::vector<std::string> staticOrderFields = {"priority", "id"}; // for static_order
 };
 

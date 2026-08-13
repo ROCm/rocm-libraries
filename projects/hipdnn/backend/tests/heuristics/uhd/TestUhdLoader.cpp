@@ -42,7 +42,7 @@ std::vector<uint8_t> buildMinimalUhd(const std::string& uhdId,
     auto uhdOffset = CreateUHD(builder,
                                id,
                                0,
-                               UhdAdapter_STATIC_ORDER,
+                               UhdAdapter::STATIC_ORDER,
                                0,
                                hash,
                                obj,
@@ -82,7 +82,7 @@ std::vector<uint8_t> buildTreeDataUhd(const std::string& uhdId,
     auto uhdOffset = CreateUHD(builder,
                                id,
                                0,
-                               UhdAdapter_TREE_DATA,
+                               UhdAdapter::TREE_DATA,
                                featSig,
                                hash,
                                obj,
@@ -178,7 +178,7 @@ TEST(TestUhdLoader, LoadFromFileRoundTrip)
     {
         std::ofstream file(tempPath, std::ios::binary);
         ASSERT_TRUE(file.is_open());
-        file.write(reinterpret_cast<const char*>(buffer.data()), buffer.size());
+        file.write(reinterpret_cast<const char*>(buffer.data()), static_cast<std::streamsize>(buffer.size()));
     }
 
     // Load from file

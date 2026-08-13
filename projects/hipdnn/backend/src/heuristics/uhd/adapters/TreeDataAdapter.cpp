@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <cmath>
 #include <fstream>
+#include <iomanip>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 
@@ -18,7 +20,8 @@ namespace hipdnn_backend::heuristics::uhd
 namespace fb = hipdnn_flatbuffers_sdk::data_objects;
 
 std::unique_ptr<TreeDataAdapter> TreeDataAdapter::load(const std::string& modelPath,
-                                                       const std::string& expectedFeaturesHash)
+                                                       const std::string& expectedFeaturesHash,
+                                                       const std::string& expectedModelHash)
 {
     std::ifstream file(modelPath, std::ios::binary | std::ios::ate);
     if(!file)
@@ -39,17 +42,24 @@ std::unique_ptr<TreeDataAdapter> TreeDataAdapter::load(const std::string& modelP
         return nullptr;
     }
 
-    return loadFromBuffer(buffer.data(), buffer.size(), expectedFeaturesHash);
+    return loadFromBuffer(buffer.data(), buffer.size(), expectedFeaturesHash, expectedModelHash);
 }
 
-std::unique_ptr<TreeDataAdapter> TreeDataAdapter::loadFromBuffer(
-    const uint8_t* buffer, size_t size, const std::string& expectedFeaturesHash)
+std::unique_ptr<TreeDataAdapter> TreeDataAdapter::loadFromBuffer(const uint8_t* buffer,
+                                                                 size_t size,
+                                                                 const std::string& expectedFeaturesHash,
+                                                                 const std::string& expectedModelHash)
 {
     // Guard against null/empty buffer
     if(buffer == nullptr || size < sizeof(flatbuffers::uoffset_t) + 4)
     {
         return nullptr;
     }
+
+    // TODO: Validate model hash if provided (RFC 0019 §9.2 integrity validation).
+    // Requires SHA-256 implementation or OpenSSL dependency.
+    // For now, the hash is loaded and stored but not validated.
+    (void)expectedModelHash; // Suppress unused parameter warning
 
     // Verify file identifier
     if(!flatbuffers::BufferHasIdentifier(buffer, fb::GbdtModelIdentifier()))

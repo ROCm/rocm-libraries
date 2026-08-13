@@ -29,18 +29,23 @@ public:
     /// Load a GBDT model from a FlatBuffer file.
     /// @param modelPath Path to the .fb model file.
     /// @param expectedFeaturesHash Hash from UHD features_signature.
+    /// @param expectedModelHash Optional checksum of the model file for integrity validation.
     /// @returns Adapter or nullptr if loading/validation fails.
     static std::unique_ptr<TreeDataAdapter> load(const std::string& modelPath,
-                                                 const std::string& expectedFeaturesHash);
+                                                 const std::string& expectedFeaturesHash,
+                                                 const std::string& expectedModelHash = "");
 
     /// Load from an in-memory buffer.
     /// @param buffer FlatBuffer data. Copied into the adapter, so it need not outlive
     ///        this call.
     /// @param size Size of buffer in bytes.
     /// @param expectedFeaturesHash Hash from UHD features_signature.
+    /// @param expectedModelHash Optional checksum of the model file for integrity validation.
     /// @returns Adapter or nullptr if validation fails.
-    static std::unique_ptr<TreeDataAdapter>
-        loadFromBuffer(const uint8_t* buffer, size_t size, const std::string& expectedFeaturesHash);
+    static std::unique_ptr<TreeDataAdapter> loadFromBuffer(const uint8_t* buffer,
+                                                           size_t size,
+                                                           const std::string& expectedFeaturesHash,
+                                                           const std::string& expectedModelHash = "");
 
     ~TreeDataAdapter() override;
 
