@@ -47,8 +47,11 @@ constexpr const char* kEstimateAsmTotalCyclesMetadataKey = "EstimateAsmCyclesPas
 class AsmCycleEstimator {
    public:
     void setLocalReadLatencyByArch(stinkytofu::GfxArchID arch) {
-        if (arch == GfxArchID::Gfx1250) {
-            // FIXME: need to verify
+        // The gfx12.5 branch is intentionally identical to the default for now. It is a
+        // placeholder for future measured gfx12.5 local read/write latencies (the v0 and v1
+        // steppings may differ here), kept as its own branch so those values can land without
+        // reintroducing arch branching. FIXME: populate with measured gfx12.5 values.
+        if (isGfx125(arch)) {
             LocalReadBaseLatencyB128 = 1;
             LocalReadBaseLatencyB64 = 1;
             LocalReadBaseLatencyB32 = 1;
@@ -747,7 +750,7 @@ class EstimateAsmCyclesPassImpl : public Pass {
         AsmCycleEstimator asmCycleEstimator;
         asmCycleEstimator.setLocalReadLatencyByArch(arch_);
 
-        if (arch_ != GfxArchID::Gfx1250) {
+        if (!isGfx125(arch_)) {
             // FIXME: Add support for gfx1201
             return;
         }
@@ -982,7 +985,11 @@ class EstimateAsmCyclesPassImpl : public Pass {
         return static_cast<unsigned>(inst->issueCycles > 0 ? inst->issueCycles : 0);
     }
 
-    GfxArchID arch_ = GfxArchID::Gfx1250;
+    // Placeholder only; overwritten from the tile config in
+    // calculateMathClocksInUnrolledLoop before any use. Index 0 is the single
+    // registered stepping in any build, so this cannot name a specific enumerator
+    // without breaking the build that did not select it.
+    GfxArchID arch_ = static_cast<GfxArchID>(0);
 
     bool annotateComments_ = true;
     std::unordered_map<const StinkyInstruction*, uint32_t> perInstCycles_;
