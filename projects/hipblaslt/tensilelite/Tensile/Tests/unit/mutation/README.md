@@ -9,24 +9,22 @@ These scripts provide the safety-critical foundation for a serial mutmut run:
 - `mutmut-verify.sh` proves individual kills by running one pytest node against
   clean and mutated source, then restoring the source file.
 
-Mutmut itself runs without these wrappers. The wrappers preserve the
-TensileLite-specific campaign contract across reruns:
+For the complete agent-assisted workflow, use the
+[`tensilelite-mutation-rerun`](../../../../../skills/tensilelite-mutation-rerun/SKILL.md)
+project skill:
 
-- record the exact source, container image, and mutmut version used;
-- change per-slice pyproject selections without leaving tracked changes;
-- preserve the rocisa-compatible mutmut configuration;
-- bound worker contention so healthy mutants are not misclassified as timeouts;
-- distinguish pytest assertion failures from collection, usage, and internal
-  errors; and
-- prove that every applied mutant was reverted.
+```text
+Use $tensilelite-mutation-rerun to rerun mutation testing for
+Tensile/Common/Utilities.py.
+```
 
-## Platform support
+The skill is the canonical source for covering-set validation, fail-closed
+decision rules, survivor triage, rerun provenance, and handoff requirements.
+This README remains the human command reference for the core scripts.
 
-The supported campaign environment is Linux or WSL, normally using the mutation
-Docker container. Mutmut 3.6 does not support native Windows: it exits with a
-request to use WSL and relies on `fork`, Unix resource limits, and Unix signals.
-These Bash helpers therefore do not reduce the supported platform set for the
-actual mutation run. Native PowerShell execution is not supported.
+Mutmut itself runs without these wrappers. They preserve reproducibility and
+restoration across TensileLite reruns. The skill owns the detailed platform
+constraints and guardrails; the actual mutation engine requires Linux or WSL.
 
 Run all examples from the `rocm-libraries` repository root. The examples assume
 an already-created container named `tl-mut` with the repository mounted at

@@ -1,0 +1,4 @@
+interface:
+  display_name: "TensileLite Mutation Rerun"
+  short_description: "Run reproducible TensileLite mutation campaigns"
+  default_prompt: "Use $tensilelite-mutation-rerun to plan and execute a fail-closed TensileLite mutation rerun."
